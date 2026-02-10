@@ -82,7 +82,8 @@ class Task(Base):
         "Agent", back_populates="current_task", foreign_keys="Agent.current_task_id"
     )
     activities: Mapped[list["ActivityLog"]] = relationship(
-        "ActivityLog", back_populates="task", order_by="ActivityLog.created_at"
+        "ActivityLog", back_populates="task", order_by="ActivityLog.created_at",
+        cascade="all, delete-orphan", passive_deletes=True
     )
 
 

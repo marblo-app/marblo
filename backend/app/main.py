@@ -155,6 +155,7 @@ async def delete_task(task_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     await db.delete(task)
+    await db.commit()
 
 
 async def _create_activity(
