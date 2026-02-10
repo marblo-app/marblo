@@ -7,9 +7,17 @@ interface TaskCardProps {
   onClick: (task: Task) => void;
 }
 
+function parseUTC(dateStr: string): Date {
+  // Server returns UTC timestamps without Z suffix
+  if (!dateStr.endsWith("Z") && !dateStr.includes("+")) {
+    return new Date(dateStr + "Z");
+  }
+  return new Date(dateStr);
+}
+
 function timeAgo(dateStr: string): string {
   const now = new Date();
-  const date = new Date(dateStr);
+  const date = parseUTC(dateStr);
   const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
   if (seconds < 60) return "just now";

@@ -19,9 +19,17 @@ import {
   addTaskActivity,
 } from "@/lib/api";
 
+function parseUTC(dateStr: string): Date {
+  // Server returns UTC timestamps without Z suffix
+  if (!dateStr.endsWith("Z") && !dateStr.includes("+")) {
+    return new Date(dateStr + "Z");
+  }
+  return new Date(dateStr);
+}
+
 function timeAgo(dateStr: string): string {
   const now = new Date();
-  const date = new Date(dateStr);
+  const date = parseUTC(dateStr);
   const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
   if (seconds < 60) return "just now";
   const minutes = Math.floor(seconds / 60);
@@ -174,7 +182,9 @@ export default function TaskDetailModal({
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "N/A";
-    return new Date(dateStr).toLocaleString();
+    return parseUTC(dateStr).toLocaleString("ko-KR", {
+      timeZone: "Asia/Seoul",
+    });
   };
 
   return (

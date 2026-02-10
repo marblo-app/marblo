@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import select, text, update
@@ -57,7 +57,7 @@ async def claim_task(
         {
             "task_id": str(task_id),
             "agent_id": agent_id,
-            "now": datetime.now(timezone.utc),
+            "now": datetime.utcnow(),
         },
     )
     row = result.mappings().first()
@@ -95,7 +95,7 @@ async def claim_next_task(
     params: dict = {
         "role": role.value,
         "agent_id": agent_id,
-        "now": datetime.now(timezone.utc),
+        "now": datetime.utcnow(),
     }
     if project:
         params["project"] = project
@@ -124,7 +124,7 @@ async def update_task_status(
 
     new_status = validate_transition(task.status, action)
     task.status = new_status
-    task.updated_at = datetime.now(timezone.utc)
+    task.updated_at = datetime.utcnow()
 
     if comment is not None:
         task.comment = comment
@@ -163,7 +163,7 @@ async def submit_for_review(
     new_status = validate_transition(task.status, "submit_review")
     task.status = new_status
     task.pr_url = pr_url
-    task.updated_at = datetime.now(timezone.utc)
+    task.updated_at = datetime.utcnow()
 
     await db.commit()
     stmt = select(Task).where(Task.id == task_id).options(selectinload(Task.activities))
@@ -209,7 +209,7 @@ async def get_task_dependencies(
     # Update depends_on_completed if status changed
     if task.depends_on_completed != all_completed:
         task.depends_on_completed = all_completed
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.utcnow()
         await db.commit()
 
     return {

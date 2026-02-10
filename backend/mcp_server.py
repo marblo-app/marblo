@@ -188,5 +188,72 @@ def create_task(
         )
 
 
+@mcp.tool()
+def create_tasks_bulk(tasks_json: str) -> str:
+    """Create multiple tasks at once. Pass a JSON array string where each item has:
+    title (str), description (str), role (str: backend/frontend/test/devops),
+    priority (int, optional), depends_on (list[str], optional), project (str, optional).
+
+    Example: '[{"title":"Setup DB","description":"Create tables","role":"backend","priority":5,"project":"my-app"}]'
+
+    Returns a summary of all created tasks with their IDs."""
+    import json as _json
+
+    try:
+        task_list = _json.loads(tasks_json)
+    except _json.JSONDecodeError as e:
+        return f"Error: Invalid JSON — {e}"
+
+    if not isinstance(task_list, list):
+        return "Error: tasks_json must be a JSON array."
+
+    results = []
+    with _client() as client:
+        for i, t in enumerate(task_list):
+            body: dict = {
+                "title": t.get("title", ""),
+                "description": t.get("description", ""),
+                "role": t.get("role", "backend"),
+                "priority": t.get("priority", 0),
+            }
+            if t.get("depends_on"):
+                body["depends_on"] = t["depends_on"]
+            if t.get("project"):
+                body["project_id"] = t["project"]
+
+            resp = client.post("/api/tasks", json=body)
+            if resp.status_code in (201, 200):
+                task = resp.json()
+                results.append(f"  [{task['id']}] {task['title']} (role={task['role']}, priority={task['priority']})")
+            else:
+                results.append(f"  [FAILED] {t.get('title', f'task #{i}')} — {resp.status_code}: {resp.text}")
+
+    return f"Created {len(results)} tasks:\n" + "\n".join(results)
+
+
+@mcp.tool()
+def get_all_tasks(project: str = "", role: str = "") -> str:
+    """Get all tasks regardless of status. Useful for seeing the full board.
+    Optionally filter by project and/or role."""
+    with _client() as client:
+        params: dict = {}
+        if project:
+            params["project"] = project
+        if role:
+            params["role"] = role
+        resp = client.get("/api/tasks", params=params)
+        resp.raise_for_status()
+        tasks = resp.json()
+        if not tasks:
+            return "No tasks found."
+        lines = []
+        for t in tasks:
+            claimed = f" → {t['claimed_by']}" if t.get("claimed_by") else ""
+            lines.append(
+                f"- [{t['status']}] {t['title']} (role={t['role']}, id={t['id'][:8]}){claimed}"
+            )
+        return "\n".join(lines)
+
+
 if __name__ == "__main__":
     mcp.run()
