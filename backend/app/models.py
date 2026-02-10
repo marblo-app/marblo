@@ -74,6 +74,8 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
     )
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     pr_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 

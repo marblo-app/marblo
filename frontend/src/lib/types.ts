@@ -37,6 +37,8 @@ export interface Task {
   claimed_at: string | null;
   created_at: string;
   updated_at: string;
+  context: string | null;
+  scope: string[] | null;
   comment: string | null;
   pr_url: string | null;
   activities?: ActivityLog[];
@@ -49,6 +51,8 @@ export interface CreateTaskPayload {
   priority?: number;
   depends_on?: string[];
   project_id?: string;
+  context?: string;
+  scope?: string[];
 }
 
 export interface UpdateTaskPayload {
@@ -61,6 +65,9 @@ export interface UpdateTaskPayload {
   claimed_by?: string;
   comment?: string;
   pr_url?: string;
+  project_id?: string | null;
+  context?: string | null;
+  scope?: string[] | null;
 }
 
 export interface SSEEvent {

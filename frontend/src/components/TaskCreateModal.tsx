@@ -21,6 +21,7 @@ export default function TaskCreateModal({
   const [description, setDescription] = useState("");
   const [role, setRole] = useState<TaskRole>(TaskRole.backend);
   const [priority, setPriority] = useState(0);
+  const [projectId, setProjectId] = useState("");
   const [dependsOn, setDependsOn] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +40,7 @@ export default function TaskCreateModal({
         role,
         priority,
         depends_on: dependsOn.length > 0 ? dependsOn : undefined,
+        project_id: projectId.trim() || undefined,
       });
       onCreated(task);
       // Reset form
@@ -46,6 +48,7 @@ export default function TaskCreateModal({
       setDescription("");
       setRole(TaskRole.backend);
       setPriority(0);
+      setProjectId("");
       setDependsOn([]);
       onClose();
     } catch (err) {
@@ -106,6 +109,19 @@ export default function TaskCreateModal({
                 rows={3}
                 className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 placeholder="Task description..."
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-300">
+                Project
+              </label>
+              <input
+                type="text"
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="e.g. my-app, youtube-insight"
               />
             </div>
 

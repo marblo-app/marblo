@@ -65,6 +65,8 @@ export default function TaskDetailModal({
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [activityComment, setActivityComment] = useState("");
   const [activityLoading, setActivityLoading] = useState(false);
+  const [editingProject, setEditingProject] = useState(false);
+  const [projectValue, setProjectValue] = useState("");
   const activityEndRef = useRef<HTMLDivElement>(null);
 
   // Fetch activities when task changes
@@ -109,6 +111,22 @@ export default function TaskDetailModal({
       // silently fail
     } finally {
       setActivityLoading(false);
+    }
+  };
+
+  const handleSaveProject = async () => {
+    if (!task) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const newVal = projectValue.trim() || null;
+      const updated = await updateTask(task.id, { project_id: newVal });
+      onUpdated(updated);
+      setEditingProject(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update project");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -225,6 +243,52 @@ export default function TaskDetailModal({
             </div>
           )}
 
+          <div className="mb-4">
+            <h3 className="mb-1 text-sm font-medium text-gray-400">
+              Project
+            </h3>
+            {editingProject ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={projectValue}
+                  onChange={(e) => setProjectValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveProject();
+                    if (e.key === "Escape") setEditingProject(false);
+                  }}
+                  className="flex-1 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="e.g. my-app"
+                  autoFocus
+                />
+                <button
+                  onClick={handleSaveProject}
+                  disabled={loading}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setEditingProject(false)}
+                  className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-800"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <p
+                className="cursor-pointer rounded px-1 text-sm text-gray-200 hover:bg-gray-800"
+                onClick={() => {
+                  setProjectValue(task.project_id || "");
+                  setEditingProject(true);
+                }}
+                title="Click to edit"
+              >
+                {task.project_id || <span className="italic text-gray-500">No project — click to set</span>}
+              </p>
+            )}
+          </div>
+
           <div className="mb-4 grid grid-cols-2 gap-4">
             <div>
               <h3 className="mb-1 text-sm font-medium text-gray-400">
@@ -257,6 +321,35 @@ export default function TaskDetailModal({
               </p>
             </div>
           </div>
+
+          {task.context && (
+            <div className="mb-4">
+              <h3 className="mb-1 text-sm font-medium text-gray-400">
+                Context / Constraints
+              </h3>
+              <p className="whitespace-pre-wrap rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3 text-sm text-yellow-200">
+                {task.context}
+              </p>
+            </div>
+          )}
+
+          {task.scope && task.scope.length > 0 && (
+            <div className="mb-4">
+              <h3 className="mb-1 text-sm font-medium text-gray-400">
+                Scope (Files)
+              </h3>
+              <div className="flex flex-wrap gap-1">
+                {task.scope.map((file) => (
+                  <span
+                    key={file}
+                    className="rounded bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-xs font-mono text-blue-300"
+                  >
+                    {file}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {task.depends_on && task.depends_on.length > 0 && (
             <div className="mb-4">
@@ -451,15 +544,13 @@ export default function TaskDetailModal({
             </>
           )}
 
-          {task.status === TaskStatus.TODO && (
-            <button
-              onClick={handleDelete}
-              disabled={loading}
-              className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
-            >
-              Delete
-            </button>
-          )}
+          <button
+            onClick={handleDelete}
+            disabled={loading}
+            className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+          >
+            Delete
+          </button>
 
           {task.status === TaskStatus.BLOCKED && (
             <button

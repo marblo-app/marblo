@@ -13,6 +13,8 @@ class TaskCreate(BaseModel):
     priority: int = 0
     depends_on: list[str] | None = None
     project_id: str | None = None
+    context: str | None = None
+    scope: list[str] | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -23,6 +25,9 @@ class TaskUpdate(BaseModel):
     priority: int | None = None
     depends_on: list[str] | None = None
     comment: str | None = None
+    project_id: str | None = None
+    context: str | None = None
+    scope: list[str] | None = None
 
 
 class TaskClaim(BaseModel):
@@ -66,6 +71,8 @@ class TaskResponse(BaseModel):
     claimed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    context: str | None = None
+    scope: list[str] | None = None
     comment: str | None = None
     pr_url: str | None = None
     activities: list[ActivityLogResponse] = []

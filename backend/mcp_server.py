@@ -54,12 +54,17 @@ def claim_task(task_id: str, agent_id: str) -> str:
             return f"Error: Task {task_id} not found."
         resp.raise_for_status()
         task = resp.json()
-        return (
-            f"Successfully claimed task: {task['title']}\n"
-            f"ID: {task['id']}\n"
-            f"Status: {task['status']}\n"
-            f"Role: {task['role']}"
-        )
+        lines = [
+            f"Successfully claimed task: {task['title']}",
+            f"ID: {task['id']}",
+            f"Status: {task['status']}",
+            f"Role: {task['role']}",
+        ]
+        if task.get("context"):
+            lines.append(f"Context: {task['context']}")
+        if task.get("scope"):
+            lines.append(f"Scope (files): {', '.join(task['scope'])}")
+        return "\n".join(lines)
 
 
 @mcp.tool()
@@ -159,10 +164,14 @@ def create_task(
     priority: int = 0,
     depends_on: list[str] | None = None,
     project: str = "",
+    context: str = "",
+    scope: list[str] | None = None,
 ) -> str:
     """Create a new task. Used by the Team Leader to break down work.
     Role must be one of: backend, frontend, test, devops.
-    Set project to group tasks by project name (e.g. 'hello-api', 'youtube-insight')."""
+    Set project to group tasks by project name (e.g. 'hello-api', 'youtube-insight').
+    Set context to specify environment constraints (e.g. 'Python 3.9, use Optional instead of | None').
+    Set scope to list files this task should modify (e.g. ['src/pipeline.py', 'src/selector.py'])."""
     with _client() as client:
         body: dict = {
             "title": title,
@@ -174,6 +183,10 @@ def create_task(
             body["depends_on"] = depends_on
         if project:
             body["project_id"] = project
+        if context:
+            body["context"] = context
+        if scope:
+            body["scope"] = scope
         resp = client.post("/api/tasks", json=body)
         if resp.status_code == 422:
             return f"Error: Invalid task data. Check role and fields. Details: {resp.text}"
@@ -192,9 +205,10 @@ def create_task(
 def create_tasks_bulk(tasks_json: str) -> str:
     """Create multiple tasks at once. Pass a JSON array string where each item has:
     title (str), description (str), role (str: backend/frontend/test/devops),
-    priority (int, optional), depends_on (list[str], optional), project (str, optional).
+    priority (int, optional), depends_on (list[str], optional), project (str, optional),
+    context (str, optional — environment constraints), scope (list[str], optional — file paths).
 
-    Example: '[{"title":"Setup DB","description":"Create tables","role":"backend","priority":5,"project":"my-app"}]'
+    Example: '[{"title":"Setup DB","description":"Create tables","role":"backend","priority":5,"project":"my-app","context":"Python 3.9","scope":["src/db.py"]}]'
 
     Returns a summary of all created tasks with their IDs."""
     import json as _json
@@ -220,6 +234,10 @@ def create_tasks_bulk(tasks_json: str) -> str:
                 body["depends_on"] = t["depends_on"]
             if t.get("project"):
                 body["project_id"] = t["project"]
+            if t.get("context"):
+                body["context"] = t["context"]
+            if t.get("scope"):
+                body["scope"] = t["scope"]
 
             resp = client.post("/api/tasks", json=body)
             if resp.status_code in (201, 200):

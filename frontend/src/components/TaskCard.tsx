@@ -5,6 +5,7 @@ import { Task, ROLE_COLORS, TaskStatus } from "@/lib/types";
 interface TaskCardProps {
   task: Task;
   onClick: (task: Task) => void;
+  onDelete: (taskId: string) => void;
 }
 
 function parseUTC(dateStr: string): Date {
@@ -39,7 +40,7 @@ function getPriorityIndicator(priority: number): {
   return { label: "Low", color: "text-gray-400" };
 }
 
-export default function TaskCard({ task, onClick }: TaskCardProps) {
+export default function TaskCard({ task, onClick, onDelete }: TaskCardProps) {
   const priority = getPriorityIndicator(task.priority);
   const isBlocked =
     task.status === TaskStatus.BLOCKED ||
@@ -56,9 +57,25 @@ export default function TaskCard({ task, onClick }: TaskCardProps) {
         <h3 className="text-sm font-medium text-gray-100 line-clamp-2">
           {task.title}
         </h3>
-        <span className={`shrink-0 text-xs font-medium ${priority.color}`}>
-          {priority.label}
-        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className={`text-xs font-medium ${priority.color}`}>
+            {priority.label}
+          </span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm(`Delete "${task.title}"?`)) {
+                onDelete(task.id);
+              }
+            }}
+            className="ml-1 hidden rounded p-0.5 text-gray-600 transition-colors hover:bg-red-500/20 hover:text-red-400 group-hover:block"
+            title="Delete task"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div className="mb-2 flex flex-wrap items-center gap-1.5">

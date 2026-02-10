@@ -7,12 +7,14 @@ interface KanbanColumnProps {
   status: TaskStatus;
   tasks: Task[];
   onTaskClick: (task: Task) => void;
+  onTaskDelete: (taskId: string) => void;
 }
 
 export default function KanbanColumn({
   status,
   tasks,
   onTaskClick,
+  onTaskDelete,
 }: KanbanColumnProps) {
   return (
     <div className="flex min-w-[280px] flex-1 flex-col rounded-xl border border-gray-800 bg-gray-900/50">
@@ -32,7 +34,7 @@ export default function KanbanColumn({
           <p className="py-8 text-center text-sm text-gray-600">No tasks</p>
         ) : (
           tasks.map((task) => (
-            <TaskCard key={task.id} task={task} onClick={onTaskClick} />
+            <TaskCard key={task.id} task={task} onClick={onTaskClick} onDelete={onTaskDelete} />
           ))
         )}
       </div>

@@ -104,6 +104,8 @@ async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
         priority=body.priority,
         depends_on=body.depends_on,
         project_id=body.project_id,
+        context=body.context,
+        scope=body.scope,
     )
     db.add(task)
     await db.flush()

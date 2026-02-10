@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { Task, TaskRole, COLUMN_STATUSES } from "@/lib/types";
+import { deleteTask } from "@/lib/api";
 import KanbanColumn from "./KanbanColumn";
 import TaskDetailModal from "./TaskDetailModal";
 
@@ -17,6 +18,15 @@ export default function KanbanBoard({
   onTaskDeleted,
 }: KanbanBoardProps) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
+  const handleQuickDelete = async (taskId: string) => {
+    try {
+      await deleteTask(taskId);
+      onTaskDeleted(taskId);
+    } catch {
+      // silently fail — user can retry via modal
+    }
+  };
   const [roleFilter, setRoleFilter] = useState<TaskRole | "all">("all");
   const [projectFilter, setProjectFilter] = useState<string>("all");
 
@@ -108,6 +118,7 @@ export default function KanbanBoard({
             status={status}
             tasks={tasksByStatus.get(status) || []}
             onTaskClick={setSelectedTask}
+            onTaskDelete={handleQuickDelete}
           />
         ))}
       </div>
