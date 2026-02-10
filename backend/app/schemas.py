@@ -12,6 +12,7 @@ class TaskCreate(BaseModel):
     role: AgentRole
     priority: int = 0
     depends_on: list[str] | None = None
+    project_id: str | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -53,6 +54,7 @@ class ActivityLogResponse(BaseModel):
 
 class TaskResponse(BaseModel):
     id: uuid.UUID
+    project_id: str | None = None
     title: str
     description: str | None = None
     status: TaskStatus

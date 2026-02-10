@@ -69,6 +69,7 @@ app.add_api_route("/api/events", sse_endpoint, methods=["GET"])
 async def list_tasks(
     status: TaskStatus | None = Query(None),
     role: AgentRole | None = Query(None),
+    project: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Task).options(selectinload(Task.activities))
@@ -76,6 +77,8 @@ async def list_tasks(
         stmt = stmt.where(Task.status == status)
     if role is not None:
         stmt = stmt.where(Task.role == role)
+    if project is not None:
+        stmt = stmt.where(Task.project_id == project)
     stmt = stmt.order_by(Task.priority.desc(), Task.created_at.asc())
     result = await db.execute(stmt)
     tasks = result.scalars().all()
@@ -100,6 +103,7 @@ async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
         role=body.role,
         priority=body.priority,
         depends_on=body.depends_on,
+        project_id=body.project_id,
     )
     db.add(task)
     await db.flush()
@@ -272,11 +276,13 @@ async def reject_task_endpoint(
 
 @app.get("/api/mcp/available-tasks", response_model=list[TaskResponse])
 async def mcp_get_available_tasks(
-    role: AgentRole, db: AsyncSession = Depends(get_db)
+    role: AgentRole,
+    project: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
 ):
     from app.mcp_tools import get_available_tasks
 
-    return await get_available_tasks(db, role)
+    return await get_available_tasks(db, role, project)
 
 
 @app.post("/api/mcp/claim", response_model=TaskResponse | None)

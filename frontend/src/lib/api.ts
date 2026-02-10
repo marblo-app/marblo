@@ -38,10 +38,11 @@ async function fetchApi<T>(
   return res.json();
 }
 
-export async function getTasks(status?: string, role?: string): Promise<Task[]> {
+export async function getTasks(status?: string, role?: string, project?: string): Promise<Task[]> {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
   if (role) params.set("role", role);
+  if (project) params.set("project", project);
   const query = params.toString();
   return fetchApi<Task[]>(`/api/tasks${query ? `?${query}` : ""}`);
 }

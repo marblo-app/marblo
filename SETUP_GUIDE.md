@@ -14,14 +14,58 @@ AI 에이전트 팀을 위한 태스크 오케스트레이션 플랫폼 설치 �
 | **Python** | 3.11+ | https://www.python.org/downloads |
 | **Claude Code** | 최신 | `npm install -g @anthropic-ai/claude-code` |
 
-> **Windows 사용자**: Docker Desktop 설치 시 WSL2 백엔드를 활성화하세요.
+### Docker Desktop 설치
 
-### 버전 확인
+**Mac:**
+```bash
+# Homebrew로 설치 (권장)
+brew install --cask docker
+
+# 또는 공식 사이트에서 다운로드:
+# https://www.docker.com/products/docker-desktop
+```
+설치 후 Applications에서 Docker.app을 실행하세요. 메뉴바에 고래 아이콘이 나타나면 준비 완료입니다.
+
+**Windows:**
+1. https://www.docker.com/products/docker-desktop 에서 다운로드
+2. 설치 시 **"Use WSL 2 instead of Hyper-V"** 체크
+3. 설치 후 재부팅
+4. Docker Desktop 실행 → 트레이에 고래 아이콘 확인
+
+**Linux (Ubuntu/Debian):**
+```bash
+# Docker Engine 설치
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+# 로그아웃 후 재로그인
+```
+
+### Python 3.11+ 설치
+
+**Mac:**
+```bash
+brew install python@3.12
+python3.12 --version   # 확인
+```
+
+**Windows:**
+https://www.python.org/downloads 에서 3.12 다운로드 → 설치 시 **"Add to PATH"** 체크
+
+### Claude Code 설치
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude --version   # 확인
+```
+
+> Node.js가 없는 경우: https://nodejs.org 에서 LTS 버전 설치
+
+### 설치 확인
 
 ```bash
 docker --version          # Docker version 24.0+
 docker compose version    # Docker Compose version v2.0+
-python3 --version         # Python 3.11+
+python3.12 --version      # Python 3.12+
 claude --version          # Claude Code
 ```
 

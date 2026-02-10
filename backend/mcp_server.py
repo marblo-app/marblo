@@ -18,11 +18,14 @@ def _client() -> httpx.Client:
 
 
 @mcp.tool()
-def get_available_tasks(role: str) -> str:
+def get_available_tasks(role: str, project: str = "") -> str:
     """Get TODO tasks available for the given role (e.g. 'backend', 'frontend', 'test', 'devops').
-    Returns tasks whose dependencies are satisfied and that are ready to be claimed."""
+    Optionally filter by project name. Returns tasks whose dependencies are satisfied."""
     with _client() as client:
-        resp = client.get("/api/tasks", params={"status": "TODO", "role": role})
+        params: dict = {"status": "TODO", "role": role}
+        if project:
+            params["project"] = project
+        resp = client.get("/api/tasks", params=params)
         resp.raise_for_status()
         tasks = resp.json()
         if not tasks:
@@ -155,9 +158,11 @@ def create_task(
     role: str,
     priority: int = 0,
     depends_on: list[str] | None = None,
+    project: str = "",
 ) -> str:
     """Create a new task. Used by the Team Leader to break down work.
-    Role must be one of: backend, frontend, test, devops."""
+    Role must be one of: backend, frontend, test, devops.
+    Set project to group tasks by project name (e.g. 'hello-api', 'youtube-insight')."""
     with _client() as client:
         body: dict = {
             "title": title,
@@ -167,6 +172,8 @@ def create_task(
         }
         if depends_on:
             body["depends_on"] = depends_on
+        if project:
+            body["project_id"] = project
         resp = client.post("/api/tasks", json=body)
         if resp.status_code == 422:
             return f"Error: Invalid task data. Check role and fields. Details: {resp.text}"

@@ -13,7 +13,7 @@ from app.state_machine import validate_transition
 
 
 async def get_available_tasks(
-    db: AsyncSession, role: AgentRole
+    db: AsyncSession, role: AgentRole, project: str | None = None
 ) -> list[TaskResponse]:
     """Get TODO tasks for a specific role, checking dependency completion."""
     stmt = (
@@ -23,8 +23,10 @@ async def get_available_tasks(
         .where(
             (Task.depends_on.is_(None)) | (Task.depends_on_completed.is_(True))
         )
-        .order_by(Task.priority.desc(), Task.created_at.asc())
     )
+    if project is not None:
+        stmt = stmt.where(Task.project_id == project)
+    stmt = stmt.order_by(Task.priority.desc(), Task.created_at.asc())
     result = await db.execute(stmt)
     tasks = result.scalars().all()
     return [TaskResponse.model_validate(t) for t in tasks]
@@ -68,10 +70,11 @@ async def claim_task(
 
 
 async def claim_next_task(
-    db: AsyncSession, role: AgentRole, agent_id: str
+    db: AsyncSession, role: AgentRole, agent_id: str, project: str | None = None
 ) -> TaskResponse | None:
     """Claim the highest-priority available task for a role."""
-    stmt = text("""
+    project_clause = "AND project_id = :project" if project else ""
+    stmt = text(f"""
         UPDATE tasks
         SET status = 'CLAIMED',
             claimed_by = :agent_id,
@@ -82,20 +85,21 @@ async def claim_next_task(
             WHERE status = 'TODO'
               AND role = :role
               AND (depends_on IS NULL OR depends_on_completed = TRUE)
+              {project_clause}
             ORDER BY priority DESC, created_at ASC
             LIMIT 1
             FOR UPDATE SKIP LOCKED
         )
         RETURNING *
     """)
-    result = await db.execute(
-        stmt,
-        {
-            "role": role.value,
-            "agent_id": agent_id,
-            "now": datetime.now(timezone.utc),
-        },
-    )
+    params: dict = {
+        "role": role.value,
+        "agent_id": agent_id,
+        "now": datetime.now(timezone.utc),
+    }
+    if project:
+        params["project"] = project
+    result = await db.execute(stmt, params)
     row = result.mappings().first()
     if row is None:
         return None
