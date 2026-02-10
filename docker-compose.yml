@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-taskforce}
+      POSTGRES_USER: ${POSTGRES_USER:-taskforce}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taskforce123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taskforce} -d ${POSTGRES_DB:-taskforce}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    ports:
+      - "${BACKEND_PORT:-8001}:${BACKEND_PORT:-8001}"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      TASKFORCE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-taskforce}:${POSTGRES_PASSWORD:-taskforce123}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-taskforce}
+      TASKFORCE_REDIS_URL: redis://redis:${REDIS_PORT:-6379}/0
+      TASKFORCE_SKILLS_DIR: /app/skills
+    volumes:
+      - ./skills:/app/skills:ro
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8001}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8001}
+
+volumes:
+  postgres_data:

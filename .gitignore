@@ -1,0 +1,34 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Node
+node_modules/
+.next/
+frontend/.next/
+frontend/node_modules/
+
+# Docker
+postgres_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+
+# Lecture (private)
+lecture.md
+PRD.MD

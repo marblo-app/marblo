@@ -1,0 +1,75 @@
+"use client";
+
+import { useState } from "react";
+import Header from "@/components/Header";
+import KanbanBoard from "@/components/KanbanBoard";
+import TaskCreateModal from "@/components/TaskCreateModal";
+import { useTasks } from "@/hooks/useTasks";
+import { Task } from "@/lib/types";
+
+export default function BoardPage() {
+  const { tasks, loading, error, sseConnected, setTasks } = useTasks();
+  const [showCreateModal, setShowCreateModal] = useState(false);
+
+  const handleTaskCreated = (task: Task) => {
+    setTasks((prev) => [...prev, task]);
+  };
+
+  const handleTaskUpdated = (updated: Task) => {
+    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+  };
+
+  const handleTaskDeleted = (taskId: string) => {
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-950">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          <p className="text-sm text-gray-400">Loading tasks...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-950">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="text-4xl">!</div>
+          <p className="text-sm text-red-400">Failed to load tasks</p>
+          <p className="text-xs text-gray-500">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-2 rounded-lg bg-gray-800 px-4 py-2 text-sm text-white hover:bg-gray-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col bg-gray-950">
+      <Header
+        tasks={tasks}
+        sseConnected={sseConnected}
+        onNewTask={() => setShowCreateModal(true)}
+      />
+      <KanbanBoard
+        tasks={tasks}
+        onTaskUpdated={handleTaskUpdated}
+        onTaskDeleted={handleTaskDeleted}
+      />
+      <TaskCreateModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={handleTaskCreated}
+        existingTasks={tasks}
+      />
+    </div>
+  );
+}
