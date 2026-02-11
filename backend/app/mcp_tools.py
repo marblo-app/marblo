@@ -144,9 +144,17 @@ async def update_task_status(
 
 def get_agent_skill(role: str) -> str:
     """Read the skill file for a given role."""
-    skill_path = Path(settings.skills_dir) / f"{role}_agent.md"
+    # Prevent path traversal: only allow alphanumeric and underscore
+    safe_role = "".join(c for c in role if c.isalnum() or c == "_")
+    if not safe_role or safe_role != role:
+        raise FileNotFoundError(f"Invalid role name: {role}")
+    skills_dir = Path(settings.skills_dir).resolve()
+    skill_path = (skills_dir / f"{safe_role}_agent.md").resolve()
+    # Ensure resolved path is still inside skills_dir
+    if not str(skill_path).startswith(str(skills_dir)):
+        raise FileNotFoundError(f"Invalid role name: {role}")
     if not skill_path.exists():
-        raise FileNotFoundError(f"Skill file not found: {skill_path}")
+        raise FileNotFoundError(f"Skill file not found for role: {role}")
     return skill_path.read_text()
 
 

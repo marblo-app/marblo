@@ -29,6 +29,7 @@ postgres_data/
 # Logs
 *.log
 
-# Lecture (private)
+# Private docs
 lecture.md
 PRD.MD
+IMPROVEMENTS.md

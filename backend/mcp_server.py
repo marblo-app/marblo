@@ -139,13 +139,18 @@ def get_task_dependencies(task_id: str) -> str:
 def get_agent_skill(role: str) -> str:
     """Get the skill/instruction file content for a given agent role.
     Available roles: backend, frontend, test, devops, merge, team_leader."""
+    # Sanitize role to prevent path traversal
+    safe_role = "".join(c for c in role if c.isalnum() or c == "_")
+    if not safe_role or safe_role != role:
+        return f"Error: Invalid role name '{role}'. Use alphanumeric and underscore only."
+    skills_dir = (PROJECT_ROOT / "skills").resolve()
     # Try reading from the local filesystem first (faster, no API call needed)
-    skill_path = PROJECT_ROOT / "skills" / f"{role}_agent.md"
-    if skill_path.exists():
+    skill_path = (skills_dir / f"{safe_role}_agent.md").resolve()
+    if str(skill_path).startswith(str(skills_dir)) and skill_path.exists():
         return skill_path.read_text()
     # Fall back to team_leader (no _agent suffix)
-    skill_path = PROJECT_ROOT / "skills" / f"{role}.md"
-    if skill_path.exists():
+    skill_path = (skills_dir / f"{safe_role}.md").resolve()
+    if str(skill_path).startswith(str(skills_dir)) and skill_path.exists():
         return skill_path.read_text()
     # Fall back to REST API
     with _client() as client:

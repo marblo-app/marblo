@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://taskforce:taskforce123@db:5432/taskforce"
+    database_url: str = ""
     redis_url: str = "redis://redis:6379/0"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
     skills_dir: str = "skills"
