@@ -421,6 +421,7 @@ export default function TaskDetailModal({
                   <div className="space-y-3">
                     {activities.map((activity) => {
                       const system = isSystemActivity(activity);
+                      const isPmFeedback = activity.agent_id === "pm";
                       const colors = getAgentColor(activity.agent_id);
                       return (
                         <div
@@ -430,7 +431,7 @@ export default function TaskDetailModal({
                           {/* Agent indicator */}
                           <div className="flex flex-col items-center pt-0.5">
                             <div
-                              className={`h-6 w-6 shrink-0 rounded-full ${system ? "bg-gray-700" : colors.bg} flex items-center justify-center`}
+                              className={`h-6 w-6 shrink-0 rounded-full ${system ? "bg-gray-700" : isPmFeedback ? "bg-yellow-500" : colors.bg} flex items-center justify-center`}
                             >
                               {system ? (
                                 <svg className="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -448,14 +449,16 @@ export default function TaskDetailModal({
                             className={`min-w-0 flex-1 rounded-lg px-3 py-2 ${
                               system
                                 ? "bg-transparent"
-                                : `border-l-2 ${colors.border} bg-gray-800/50`
+                                : isPmFeedback
+                                  ? "border-l-2 border-yellow-500 bg-yellow-500/10"
+                                  : `border-l-2 ${colors.border} bg-gray-800/50`
                             }`}
                           >
                             <div className="mb-0.5 flex items-center gap-2">
                               <span
-                                className={`text-xs font-medium ${system ? "text-gray-500" : colors.text}`}
+                                className={`text-xs font-medium ${system ? "text-gray-500" : isPmFeedback ? "text-yellow-400" : colors.text}`}
                               >
-                                {activity.agent_id || "system"}
+                                {isPmFeedback ? "PM Feedback" : activity.agent_id || "system"}
                               </span>
                               <span className="text-xs text-gray-600">
                                 {timeAgo(activity.created_at)}
@@ -474,8 +477,8 @@ export default function TaskDetailModal({
                   </div>
                 )}
               </div>
-              {/* Comment input */}
-              <div className="flex gap-2 border-t border-gray-800 p-3">
+              {/* Feedback input */}
+              <div className="flex gap-2 border-t border-yellow-500/20 bg-yellow-500/5 p-3">
                 <input
                   type="text"
                   value={activityComment}
@@ -486,15 +489,15 @@ export default function TaskDetailModal({
                       handleAddComment();
                     }
                   }}
-                  placeholder="Add a comment as PM..."
-                  className="flex-1 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="Write PM feedback..."
+                  className="flex-1 rounded-lg border border-yellow-500/30 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-yellow-500 focus:outline-none focus:ring-1 focus:ring-yellow-500"
                 />
                 <button
                   onClick={handleAddComment}
                   disabled={activityLoading || !activityComment.trim()}
-                  className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+                  className="shrink-0 rounded-lg bg-yellow-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-yellow-500 disabled:opacity-50"
                 >
-                  Send
+                  Send Feedback
                 </button>
               </div>
             </div>

@@ -69,6 +69,19 @@ Merge Agent와 협력하여 코드 통합을 지원한다:
 - 배포 관련 작업을 활동 로그에 기록
 - `add_activity(task_id, "Docker rebuild completed. All services healthy.")`
 
+## PM 피드백 확인 (필수)
+**작업 시작 전, 작업 중 주기적으로 PM 피드백을 반드시 확인하라.**
+
+1. `check_feedback(role="devops")` → 내 역할에 피드백이 달린 태스크 목록 조회
+2. 피드백이 있으면 `get_task_activities(task_id, pm_only=True)` → PM 피드백 내용 확인
+3. 피드백 내용을 반영하여 작업 수행
+4. 반영 완료 후 `acknowledge_feedback(task_id)` → 피드백 확인 처리 (배지 제거)
+
+**확인 타이밍:**
+- 태스크를 claim한 직후
+- 작업 중간 (긴 작업이면 중간중간)
+- 리뷰 제출 전
+
 ## 모니터링 체크리스트
 - [ ] 모든 컨테이너 정상 실행
 - [ ] 헬스체크 통과

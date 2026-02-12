@@ -41,6 +41,7 @@ export interface Task {
   scope: string[] | null;
   comment: string | null;
   pr_url: string | null;
+  has_pm_feedback: boolean;
   activities?: ActivityLog[];
 }
 

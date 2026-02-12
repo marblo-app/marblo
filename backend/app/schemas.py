@@ -75,6 +75,7 @@ class TaskResponse(BaseModel):
     scope: list[str] | None = None
     comment: str | None = None
     pr_url: str | None = None
+    has_pm_feedback: bool = False
     activities: list[ActivityLogResponse] = []
 
     model_config = {"from_attributes": True}

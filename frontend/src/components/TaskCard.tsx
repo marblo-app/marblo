@@ -89,6 +89,11 @@ export default function TaskCard({ task, onClick, onDelete }: TaskCardProps) {
             Blocked
           </span>
         )}
+        {task.has_pm_feedback && (
+          <span className="inline-flex rounded border border-yellow-500/30 bg-yellow-500/20 px-1.5 py-0.5 text-xs font-medium text-yellow-400">
+            Feedback
+          </span>
+        )}
         {task.pr_url && (
           <span className="inline-flex rounded border border-blue-500/30 bg-blue-500/20 px-1.5 py-0.5 text-xs font-medium text-blue-400">
             PR

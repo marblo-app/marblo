@@ -70,6 +70,7 @@ async def list_tasks(
     status: TaskStatus | None = Query(None),
     role: AgentRole | None = Query(None),
     project: str | None = Query(None),
+    has_feedback: bool | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Task).options(selectinload(Task.activities))
@@ -79,6 +80,8 @@ async def list_tasks(
         stmt = stmt.where(Task.role == role)
     if project is not None:
         stmt = stmt.where(Task.project_id == project)
+    if has_feedback is True:
+        stmt = stmt.where(Task.has_pm_feedback == True)  # noqa: E712
     stmt = stmt.order_by(Task.priority.desc(), Task.created_at.asc())
     result = await db.execute(stmt)
     tasks = result.scalars().all()
@@ -187,12 +190,25 @@ async def create_activity(
     task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    # Auto-set feedback flag when PM adds a comment
+    if body.agent_id == "pm":
+        task.has_pm_feedback = True
+        await db.flush()
+        # Publish updated task so frontend gets the flag change
+        stmt2 = select(Task).where(Task.id == task_id).options(selectinload(Task.activities))
+        result2 = await db.execute(stmt2)
+        updated_task = result2.scalar_one()
+        await publish_event("task_updated", TaskResponse.model_validate(updated_task))
+
     return await _create_activity(db, task_id, body.message, body.agent_id)
 
 
 @app.get("/api/tasks/{task_id}/activities", response_model=list[ActivityLogResponse])
 async def list_activities(
-    task_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    task_id: uuid.UUID,
+    type: str | None = Query(None, description="Filter by agent type, e.g. 'pm'"),
+    db: AsyncSession = Depends(get_db),
 ):
     # Verify task exists
     stmt = select(Task).where(Task.id == task_id).options(selectinload(Task.activities))
@@ -205,6 +221,8 @@ async def list_activities(
         .where(ActivityLog.task_id == task_id)
         .order_by(ActivityLog.created_at.asc())
     )
+    if type is not None:
+        stmt = stmt.where(ActivityLog.agent_id == type)
     result = await db.execute(stmt)
     logs = result.scalars().all()
     return [ActivityLogResponse.model_validate(log) for log in logs]
@@ -272,6 +290,25 @@ async def reject_task_endpoint(
     )
     await publish_event("task_updated", result)
     return result
+
+
+@app.post("/api/tasks/{task_id}/acknowledge-feedback", response_model=TaskResponse)
+async def acknowledge_feedback(
+    task_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+):
+    stmt = select(Task).where(Task.id == task_id).options(selectinload(Task.activities))
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task.has_pm_feedback = False
+    await db.flush()
+    stmt = select(Task).where(Task.id == task_id).options(selectinload(Task.activities))
+    result = await db.execute(stmt)
+    task = result.scalar_one()
+    resp = TaskResponse.model_validate(task)
+    await publish_event("task_updated", resp)
+    return resp
 
 
 # --- MCP Tool Endpoints ---

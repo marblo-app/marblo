@@ -278,5 +278,62 @@ def get_all_tasks(project: str = "", role: str = "") -> str:
         return "\n".join(lines)
 
 
+@mcp.tool()
+def get_task_activities(task_id: str, pm_only: bool = False) -> str:
+    """Get activity log entries for a task. Set pm_only=True to see only PM feedback.
+    Useful for checking what feedback the PM has left on your task."""
+    with _client() as client:
+        params: dict = {}
+        if pm_only:
+            params["type"] = "pm"
+        resp = client.get(f"/api/tasks/{task_id}/activities", params=params)
+        if resp.status_code == 404:
+            return f"Error: Task {task_id} not found."
+        resp.raise_for_status()
+        activities = resp.json()
+        if not activities:
+            return "No activities found." if not pm_only else "No PM feedback found."
+        lines = []
+        for a in activities:
+            ts = a["created_at"]
+            agent = a.get("agent_id") or "system"
+            lines.append(f"[{ts}] {agent}: {a['message']}")
+        return "\n".join(lines)
+
+
+@mcp.tool()
+def check_feedback(role: str, project: str = "") -> str:
+    """Check for tasks that have unread PM feedback. Filter by role (backend/frontend/test/devops)
+    and optionally by project. Use this periodically to stay on top of PM directions."""
+    with _client() as client:
+        params: dict = {"role": role, "has_feedback": "true"}
+        if project:
+            params["project"] = project
+        resp = client.get("/api/tasks", params=params)
+        resp.raise_for_status()
+        tasks = resp.json()
+        if not tasks:
+            return f"No tasks with pending PM feedback for role '{role}'."
+        lines = [f"Tasks with PM feedback ({len(tasks)}):"]
+        for t in tasks:
+            lines.append(
+                f"- [{t['id'][:8]}] {t['title']} (status={t['status']}, priority={t['priority']})"
+            )
+        return "\n".join(lines)
+
+
+@mcp.tool()
+def acknowledge_feedback(task_id: str) -> str:
+    """Mark PM feedback as read/acknowledged for a task. Call this after you have
+    reviewed and acted on the PM's feedback. Clears the feedback badge."""
+    with _client() as client:
+        resp = client.post(f"/api/tasks/{task_id}/acknowledge-feedback")
+        if resp.status_code == 404:
+            return f"Error: Task {task_id} not found."
+        resp.raise_for_status()
+        task = resp.json()
+        return f"Feedback acknowledged for task '{task['title']}'. Badge cleared."
+
+
 if __name__ == "__main__":
     mcp.run()

@@ -78,6 +78,9 @@ class Task(Base):
     scope: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     pr_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    has_pm_feedback: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
 
     # Relationships
     agent: Mapped["Agent | None"] = relationship(
