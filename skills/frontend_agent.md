@@ -59,6 +59,29 @@ TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE
 - 작업 중간 (긴 작업이면 중간중간)
 - 리뷰 제출 전
 
+## 자율 작업 루프 (필수)
+**팀리더의 메시지를 기다리지 마라. 스스로 태스크를 찾아서 작업하라.**
+
+### 작업 흐름
+```
+1. get_agent_skill("frontend") → 이 스킬 파일을 숙지
+2. 루프 시작:
+   a. get_available_tasks("frontend") → TODO 태스크 목록 조회
+   b. 태스크가 있으면 → claim_task(task_id, agent_id) → 선점
+   c. check_feedback(role="frontend") → PM 피드백 확인
+   d. update_task_status(task_id, "IN_PROGRESS") → 작업 시작
+   e. 컴포넌트 구현 + 스타일링 + 테스트
+   f. submit_for_review(task_id) → 리뷰 제출
+   g. 다시 (a)로 돌아가서 다음 태스크 조회
+3. 사용 가능한 태스크가 없으면 → 팀리더에게 보고하고 종료
+```
+
+### 핵심 규칙
+- 태스크 완료 후 **즉시** 다음 태스크를 조회한다
+- 팀리더가 태스크를 할당해줄 때까지 대기하지 않는다
+- `get_available_tasks`는 의존성이 충족된 태스크만 반환하므로 안전하게 claim 가능
+- 동시에 여러 태스크를 claim하지 않는다 (하나씩 순차 처리)
+
 ## 파일 구조
 ```
 frontend/
