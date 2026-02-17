@@ -67,17 +67,46 @@ def claim_task(task_id: str, agent_id: str) -> str:
         return "\n".join(lines)
 
 
+_STATUS_ACTION_MAP: dict[tuple[str, str], str] = {
+    ("CLAIMED", "IN_PROGRESS"): "start_work",
+    ("IN_PROGRESS", "REVIEW"): "submit_review",
+    ("IN_PROGRESS", "BLOCKED"): "blocked",
+    ("IN_PROGRESS", "FAILED"): "failed",
+    ("REVIEW", "DONE"): "approve",
+    ("REVIEW", "TODO"): "reject",
+    ("BLOCKED", "IN_PROGRESS"): "resolve",
+    ("FAILED", "TODO"): "retry",
+}
+
+
 @mcp.tool()
 def update_task_status(task_id: str, status: str, comment: str = "") -> str:
     """Update a task's status. Valid statuses: TODO, CLAIMED, IN_PROGRESS, REVIEW, BLOCKED, FAILED, DONE.
     Optionally include a comment explaining the status change."""
     with _client() as client:
-        body: dict = {"status": status}
+        # Get current status to determine the correct action
+        get_resp = client.get(f"/api/tasks/{task_id}")
+        if get_resp.status_code == 404:
+            return f"Error: Task {task_id} not found."
+        get_resp.raise_for_status()
+        current_status = get_resp.json()["status"]
+
+        action = _STATUS_ACTION_MAP.get((current_status, status))
+        if action is None:
+            return (
+                f"Error: Cannot transition from {current_status} to {status}. "
+                f"Valid targets from {current_status}: "
+                f"{[v for (k, _), v in _STATUS_ACTION_MAP.items() if k == current_status]}"
+            )
+
+        params: dict = {"task_id": task_id, "action": action}
         if comment:
-            body["comment"] = comment
-        resp = client.put(f"/api/tasks/{task_id}", json=body)
+            params["comment"] = comment
+        resp = client.post("/api/mcp/update-status", params=params)
         if resp.status_code == 404:
             return f"Error: Task {task_id} not found."
+        if resp.status_code == 409:
+            return f"Error: {resp.json().get('detail', 'Invalid transition')}"
         resp.raise_for_status()
         task = resp.json()
         return f"Task '{task['title']}' status updated to {task['status']}."
