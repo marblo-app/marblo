@@ -26,10 +26,13 @@
 2. 루프 시작:
    a. get_available_tasks("merge") → TODO 태스크 목록 조회
    b. 태스크가 있으면 → claim_task(task_id, agent_id) → 선점
-   c. update_task_status(task_id, "IN_PROGRESS") → 작업 시작
-   d. 아래 워크플로우에 따라 머지 수행
-   e. submit_for_review(task_id) → 리뷰 제출
-   f. 다시 (a)로 돌아가서 다음 태스크 조회
+   c. add_activity(task_id, "태스크 선점 완료. 머지 작업 시작합니다.")
+   d. update_task_status(task_id, "IN_PROGRESS")
+   e. 충돌 확인 → add_activity(task_id, "충돌 확인: [결과]")
+   f. 머지 수행 → add_activity(task_id, "머지 완료: [상세]")
+   g. 테스트 실행 → add_activity(task_id, "통합 테스트: [결과]")
+   h. submit_for_review(task_id) → add_activity(task_id, "리뷰 제출 완료")
+   i. 다시 (a)로 돌아가서 다음 태스크 조회
 3. 사용 가능한 태스크가 없으면 → 팀리더에게 보고하고 종료
 ```
 
@@ -38,6 +41,7 @@
 - 팀리더가 태스크를 할당해줄 때까지 대기하지 않는다
 - `get_available_tasks`는 의존성이 충족된 태스크만 반환하므로 안전하게 claim 가능
 - 동시에 여러 태스크를 claim하지 않는다 (하나씩 순차 처리)
+- **매 작업 단계마다 반드시 `add_activity`로 진행내역을 기록한다**
 
 ## 워크플로우
 
