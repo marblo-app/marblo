@@ -70,6 +70,7 @@ async def list_tasks(
     status: TaskStatus | None = Query(None),
     role: AgentRole | None = Query(None),
     project: str | None = Query(None),
+    client_id: str | None = Query(None),
     has_feedback: bool | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -80,6 +81,8 @@ async def list_tasks(
         stmt = stmt.where(Task.role == role)
     if project is not None:
         stmt = stmt.where(Task.project_id == project)
+    if client_id is not None:
+        stmt = stmt.where(Task.client_id == client_id)
     if has_feedback is True:
         stmt = stmt.where(Task.has_pm_feedback == True)  # noqa: E712
     stmt = stmt.order_by(Task.priority.desc(), Task.created_at.asc())
@@ -100,6 +103,27 @@ async def get_task(task_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 
 @app.post("/api/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
+    # Validate depends_on: each item must be a valid UUID that exists in DB
+    if body.depends_on:
+        for dep_id in body.depends_on:
+            try:
+                uuid.UUID(dep_id)
+            except (ValueError, AttributeError):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid depends_on ID '{dep_id}': not a valid UUID",
+                )
+        dep_uuids = [uuid.UUID(d) for d in body.depends_on]
+        existing_stmt = select(Task.id).where(Task.id.in_(dep_uuids))
+        existing_result = await db.execute(existing_stmt)
+        existing_ids = {row[0] for row in existing_result.all()}
+        missing = [d for d in dep_uuids if d not in existing_ids]
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=f"depends_on references non-existent task(s): {[str(m) for m in missing]}",
+            )
+
     task = Task(
         title=body.title,
         description=body.description,
@@ -107,6 +131,7 @@ async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
         priority=body.priority,
         depends_on=body.depends_on,
         project_id=body.project_id,
+        client_id=body.client_id,
         context=body.context,
         scope=body.scope,
     )
@@ -329,9 +354,10 @@ async def mcp_get_available_tasks(
 async def mcp_claim_task(
     role: AgentRole,
     agent_id: str,
+    client_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await claim_next_task(db, role, agent_id)
+    result = await claim_next_task(db, role, agent_id, client_id=client_id)
     if result is None:
         raise HTTPException(status_code=404, detail="No tasks available for this role")
     await publish_event("task_claimed", result)

@@ -13,6 +13,7 @@ class TaskCreate(BaseModel):
     priority: int = 0
     depends_on: list[str] | None = None
     project_id: str | None = None
+    client_id: str | None = None
     context: str | None = None
     scope: list[str] | None = None
 
@@ -60,6 +61,7 @@ class ActivityLogResponse(BaseModel):
 class TaskResponse(BaseModel):
     id: uuid.UUID
     project_id: str | None = None
+    client_id: str | None = None
     title: str
     description: str | None = None
     status: TaskStatus

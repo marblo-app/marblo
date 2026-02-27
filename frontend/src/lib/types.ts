@@ -26,6 +26,7 @@ export interface ActivityLog {
 export interface Task {
   id: string;
   project_id: string | null;
+  client_id: string | null;
   title: string;
   description: string | null;
   status: TaskStatus;
@@ -52,6 +53,7 @@ export interface CreateTaskPayload {
   priority?: number;
   depends_on?: string[];
   project_id?: string;
+  client_id?: string;
   context?: string;
   scope?: string[];
 }

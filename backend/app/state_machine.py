@@ -4,6 +4,7 @@ from app.models import TaskStatus
 TRANSITIONS: dict[TaskStatus, dict[str, TaskStatus]] = {
     TaskStatus.TODO: {
         "claim": TaskStatus.CLAIMED,
+        "cancel": TaskStatus.FAILED,
     },
     TaskStatus.CLAIMED: {
         "start_work": TaskStatus.IN_PROGRESS,

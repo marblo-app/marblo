@@ -2,6 +2,7 @@
 """TaskForce.AI MCP Server — thin wrapper around the REST API for Claude Code agents."""
 
 import os
+import re
 from pathlib import Path
 
 import httpx
@@ -10,6 +11,12 @@ from mcp.server.fastmcp import FastMCP
 API_URL = os.environ.get("TASKFORCE_API_URL", "http://localhost:8001")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+DEFAULT_PROJECT: str = os.environ.get("TASKFORCE_PROJECT", "") or os.path.basename(os.getcwd())
+DEFAULT_CLIENT_ID: str = os.environ.get("TASKFORCE_CLIENT_ID", "")
+
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+_TASK_NNN_RE = re.compile(r"^TASK-(\d+)$", re.I)
+
 mcp = FastMCP("TaskForce.AI")
 
 
@@ -17,14 +24,28 @@ def _client() -> httpx.Client:
     return httpx.Client(base_url=API_URL, timeout=30)
 
 
+def _resolve_project(project: str) -> str:
+    """Return explicit project or fall back to DEFAULT_PROJECT."""
+    return project or DEFAULT_PROJECT
+
+
+def _resolve_client_id(client_id: str) -> str:
+    """Return explicit client_id or fall back to DEFAULT_CLIENT_ID."""
+    return client_id or DEFAULT_CLIENT_ID
+
+
 @mcp.tool()
 def get_available_tasks(role: str, project: str = "") -> str:
     """Get TODO tasks available for the given role (e.g. 'backend', 'frontend', 'test', 'devops').
     Optionally filter by project name. Returns tasks whose dependencies are satisfied."""
+    project = _resolve_project(project)
+    client_id = _resolve_client_id("")
     with _client() as client:
         params: dict = {"status": "TODO", "role": role}
         if project:
             params["project"] = project
+        if client_id:
+            params["client_id"] = client_id
         resp = client.get("/api/tasks", params=params)
         resp.raise_for_status()
         tasks = resp.json()
@@ -68,6 +89,8 @@ def claim_task(task_id: str, agent_id: str) -> str:
 
 
 _STATUS_ACTION_MAP: dict[tuple[str, str], str] = {
+    ("TODO", "CLAIMED"): "claim",
+    ("TODO", "FAILED"): "cancel",
     ("CLAIMED", "IN_PROGRESS"): "start_work",
     ("IN_PROGRESS", "REVIEW"): "submit_review",
     ("IN_PROGRESS", "BLOCKED"): "blocked",
@@ -93,10 +116,10 @@ def update_task_status(task_id: str, status: str, comment: str = "") -> str:
 
         action = _STATUS_ACTION_MAP.get((current_status, status))
         if action is None:
+            valid_targets = [s for (k, s) in _STATUS_ACTION_MAP.keys() if k == current_status]
             return (
                 f"Error: Cannot transition from {current_status} to {status}. "
-                f"Valid targets from {current_status}: "
-                f"{[v for (k, _), v in _STATUS_ACTION_MAP.items() if k == current_status]}"
+                f"Valid targets from {current_status}: {valid_targets}"
             )
 
         params: dict = {"task_id": task_id, "action": action}
@@ -206,6 +229,8 @@ def create_task(
     Set project to group tasks by project name (e.g. 'hello-api', 'youtube-insight').
     Set context to specify environment constraints (e.g. 'Python 3.9, use Optional instead of | None').
     Set scope to list files this task should modify (e.g. ['src/pipeline.py', 'src/selector.py'])."""
+    project = _resolve_project(project)
+    client_id = _resolve_client_id("")
     with _client() as client:
         body: dict = {
             "title": title,
@@ -217,6 +242,8 @@ def create_task(
             body["depends_on"] = depends_on
         if project:
             body["project_id"] = project
+        if client_id:
+            body["client_id"] = client_id
         if context:
             body["context"] = context
         if scope:
@@ -242,7 +269,12 @@ def create_tasks_bulk(tasks_json: str) -> str:
     priority (int, optional), depends_on (list[str], optional), project (str, optional),
     context (str, optional — environment constraints), scope (list[str], optional — file paths).
 
-    Example: '[{"title":"Setup DB","description":"Create tables","role":"backend","priority":5,"project":"my-app","context":"Python 3.9","scope":["src/db.py"]}]'
+    depends_on supports three formats:
+    - TASK-NNN: 1-based index referencing other tasks in the same batch (e.g. "TASK-001" = first task)
+    - alias: a custom alias field on another task in the batch (e.g. {"alias": "setup", ...})
+    - UUID: a full UUID string referencing an existing task in the database
+
+    Example: '[{"alias":"setup","title":"Setup DB","description":"Create tables","role":"backend","priority":5},{"title":"Add API","description":"REST endpoints","role":"backend","depends_on":["TASK-001"]}]'
 
     Returns a summary of all created tasks with their IDs."""
     import json as _json
@@ -255,19 +287,88 @@ def create_tasks_bulk(tasks_json: str) -> str:
     if not isinstance(task_list, list):
         return "Error: tasks_json must be a JSON array."
 
-    results = []
+    project = _resolve_project("")
+    client_id = _resolve_client_id("")
+
+    # Phase 1: Build alias map (symbolic name → array index)
+    alias_map: dict[str, int] = {}
+    for i, t in enumerate(task_list):
+        # TASK-NNN pattern (1-based)
+        task_key = f"TASK-{i + 1:03d}"
+        alias_map[task_key.upper()] = i
+        # Custom alias field
+        if t.get("alias"):
+            alias_map[t["alias"]] = i
+
+    # Phase 2: Sequential creation with depends_on resolution
+    index_to_uuid: dict[int, str] = {}
+    results: list[str] = []
+    dep_mappings: list[str] = []
+    success_count = 0
+
     with _client() as client:
         for i, t in enumerate(task_list):
+            # Resolve depends_on references
+            resolved_deps: list[str] | None = None
+            dep_error: str | None = None
+
+            if t.get("depends_on"):
+                resolved_deps = []
+                for dep_ref in t["depends_on"]:
+                    # Already a UUID — pass through
+                    if _UUID_RE.match(dep_ref):
+                        resolved_deps.append(dep_ref)
+                        continue
+
+                    # Try TASK-NNN pattern
+                    task_match = _TASK_NNN_RE.match(dep_ref)
+                    if task_match:
+                        idx = int(task_match.group(1)) - 1  # 1-based → 0-based
+                        if idx in index_to_uuid:
+                            resolved_deps.append(index_to_uuid[idx])
+                            continue
+                        elif 0 <= idx < len(task_list) and idx >= i:
+                            dep_error = f"depends_on '{dep_ref}' references a task that hasn't been created yet (forward reference)"
+                            break
+                        else:
+                            dep_error = f"depends_on '{dep_ref}' — task at index {idx} failed or is out of range"
+                            break
+
+                    # Try alias lookup
+                    if dep_ref in alias_map:
+                        idx = alias_map[dep_ref]
+                        if idx in index_to_uuid:
+                            resolved_deps.append(index_to_uuid[idx])
+                            continue
+                        elif idx >= i:
+                            dep_error = f"depends_on alias '{dep_ref}' references a task that hasn't been created yet"
+                            break
+                        else:
+                            dep_error = f"depends_on alias '{dep_ref}' — referenced task failed to create"
+                            break
+
+                    # Unknown reference
+                    dep_error = f"depends_on '{dep_ref}' is not a valid UUID, TASK-NNN pattern, or known alias"
+                    break
+
+            if dep_error:
+                results.append(f"  [FAILED] {t.get('title', f'task #{i}')} — {dep_error}")
+                continue
+
             body: dict = {
                 "title": t.get("title", ""),
                 "description": t.get("description", ""),
                 "role": t.get("role", "backend"),
                 "priority": t.get("priority", 0),
             }
-            if t.get("depends_on"):
-                body["depends_on"] = t["depends_on"]
-            if t.get("project"):
-                body["project_id"] = t["project"]
+            if resolved_deps:
+                body["depends_on"] = resolved_deps
+            task_project = t.get("project") or project
+            if task_project:
+                body["project_id"] = task_project
+            task_client_id = t.get("client_id") or client_id
+            if task_client_id:
+                body["client_id"] = task_client_id
             if t.get("context"):
                 body["context"] = t["context"]
             if t.get("scope"):
@@ -276,21 +377,37 @@ def create_tasks_bulk(tasks_json: str) -> str:
             resp = client.post("/api/tasks", json=body)
             if resp.status_code in (201, 200):
                 task = resp.json()
-                results.append(f"  [{task['id']}] {task['title']} (role={task['role']}, priority={task['priority']})")
+                task_uuid = task["id"]
+                index_to_uuid[i] = task_uuid
+                short_id = task_uuid[:8]
+                results.append(f"  [{short_id}] {task['title']} (role={task['role']}, priority={task['priority']})")
+                success_count += 1
             else:
                 results.append(f"  [FAILED] {t.get('title', f'task #{i}')} — {resp.status_code}: {resp.text}")
 
-    return f"Created {len(results)} tasks:\n" + "\n".join(results)
+    # Build dependency mapping summary
+    for label, idx in alias_map.items():
+        if idx in index_to_uuid:
+            dep_mappings.append(f"    {label} -> {index_to_uuid[idx][:8]}")
+
+    output = f"Created {success_count}/{len(task_list)} tasks:\n" + "\n".join(results)
+    if dep_mappings:
+        output += "\n\nDependency mappings:\n" + "\n".join(dep_mappings)
+    return output
 
 
 @mcp.tool()
 def get_all_tasks(project: str = "", role: str = "") -> str:
     """Get all tasks regardless of status. Useful for seeing the full board.
     Optionally filter by project and/or role."""
+    project = _resolve_project(project)
+    client_id = _resolve_client_id("")
     with _client() as client:
         params: dict = {}
         if project:
             params["project"] = project
+        if client_id:
+            params["client_id"] = client_id
         if role:
             params["role"] = role
         resp = client.get("/api/tasks", params=params)
@@ -334,10 +451,14 @@ def get_task_activities(task_id: str, pm_only: bool = False) -> str:
 def check_feedback(role: str, project: str = "") -> str:
     """Check for tasks that have unread PM feedback. Filter by role (backend/frontend/test/devops)
     and optionally by project. Use this periodically to stay on top of PM directions."""
+    project = _resolve_project(project)
+    client_id = _resolve_client_id("")
     with _client() as client:
         params: dict = {"role": role, "has_feedback": "true"}
         if project:
             params["project"] = project
+        if client_id:
+            params["client_id"] = client_id
         resp = client.get("/api/tasks", params=params)
         resp.raise_for_status()
         tasks = resp.json()

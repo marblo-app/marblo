@@ -4,7 +4,9 @@
       "command": ".venv/bin/python",
       "args": ["backend/mcp_server.py"],
       "env": {
-        "TASKFORCE_API_URL": "http://localhost:8001"
+        "TASKFORCE_API_URL": "http://localhost:8001",
+        "TASKFORCE_PROJECT": "",
+        "TASKFORCE_CLIENT_ID": ""
       }
     }
   }

@@ -70,10 +70,15 @@ async def claim_task(
 
 
 async def claim_next_task(
-    db: AsyncSession, role: AgentRole, agent_id: str, project: str | None = None
+    db: AsyncSession,
+    role: AgentRole,
+    agent_id: str,
+    project: str | None = None,
+    client_id: str | None = None,
 ) -> TaskResponse | None:
     """Claim the highest-priority available task for a role."""
     project_clause = "AND project_id = :project" if project else ""
+    client_clause = "AND client_id = :client_id" if client_id else ""
     stmt = text(f"""
         UPDATE tasks
         SET status = 'CLAIMED',
@@ -86,6 +91,7 @@ async def claim_next_task(
               AND role = :role
               AND (depends_on IS NULL OR depends_on_completed = TRUE)
               {project_clause}
+              {client_clause}
             ORDER BY priority DESC, created_at ASC
             LIMIT 1
             FOR UPDATE SKIP LOCKED
@@ -99,6 +105,8 @@ async def claim_next_task(
     }
     if project:
         params["project"] = project
+    if client_id:
+        params["client_id"] = client_id
     result = await db.execute(stmt, params)
     row = result.mappings().first()
     if row is None:
@@ -198,19 +206,48 @@ async def get_task_dependencies(
             "details": [],
         }
 
-    dep_ids = [uuid.UUID(dep_id) for dep_id in task.depends_on]
-    dep_stmt = select(Task).where(Task.id.in_(dep_ids))
-    dep_result = await db.execute(dep_stmt)
-    dep_tasks = dep_result.scalars().all()
+    # Separate valid UUIDs from invalid ones
+    valid_dep_ids: list[uuid.UUID] = []
+    invalid_deps: list[str] = []
+    for dep_id in task.depends_on:
+        try:
+            valid_dep_ids.append(uuid.UUID(dep_id))
+        except (ValueError, AttributeError):
+            invalid_deps.append(dep_id)
 
     details = []
-    for dep in dep_tasks:
+
+    # Add entries for invalid UUID strings
+    for inv in invalid_deps:
         details.append({
-            "id": str(dep.id),
-            "title": dep.title,
-            "status": dep.status.value,
-            "completed": dep.status == TaskStatus.DONE,
+            "id": inv,
+            "title": f"[invalid: {inv}]",
+            "status": "UNKNOWN",
+            "completed": False,
         })
+
+    # Query valid UUIDs
+    if valid_dep_ids:
+        dep_stmt = select(Task).where(Task.id.in_(valid_dep_ids))
+        dep_result = await db.execute(dep_stmt)
+        dep_tasks = {t.id: t for t in dep_result.scalars().all()}
+
+        for dep_id in valid_dep_ids:
+            dep = dep_tasks.get(dep_id)
+            if dep is None:
+                details.append({
+                    "id": str(dep_id),
+                    "title": "[task not found]",
+                    "status": "MISSING",
+                    "completed": False,
+                })
+            else:
+                details.append({
+                    "id": str(dep.id),
+                    "title": dep.title,
+                    "status": dep.status.value,
+                    "completed": dep.status == TaskStatus.DONE,
+                })
 
     all_completed = all(d["completed"] for d in details)
 

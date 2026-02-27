@@ -46,6 +46,9 @@ class Task(Base):
     project_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True, index=True
     )
+    client_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[TaskStatus] = mapped_column(
