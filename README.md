@@ -123,7 +123,21 @@ Agent Teams를 사용하려면 `~/.claude/settings.json`에 추가:
 }
 ```
 
-### 5단계: 연동 확인
+### 5단계: Claude Code 자동 설정 (선택)
+
+TaskForce MCP를 자동으로 활용하도록 Claude Code 설정을 추가합니다:
+
+```bash
+./scripts/setup-claude.sh
+```
+
+이 스크립트는:
+- `~/.claude/CLAUDE.md`에 TaskForce MCP 워크플로우 규칙 추가
+- `~/.claude/settings.json`에 매 프롬프트마다 태스크 업데이트 리마인더 훅 추가
+
+> 기존 설정이 있으면 백업(`.bak`) 후 덮어쓰며, 훅이 이미 있으면 건너뜁니다.
+
+### 6단계: 연동 확인
 
 ```bash
 claude
@@ -175,6 +189,7 @@ TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE
 - **프로젝트 분리**: `project_id`로 여러 프로젝트 태스크 격리
 - **환경 컨텍스트**: `context` 필드로 에이전트에게 제약조건 전달 (Python 버전, 라이브러리 등)
 - **파일 스코프**: `scope` 필드로 담당 파일 명시 (에이전트 간 충돌 방지)
+- **프로젝트 병합**: 이름이 다른 동일 프로젝트 태스크를 하나로 합치기 (예: `hello-api` → `hello_api`)
 - **활동 로그**: 에이전트 작업 진행 상황 실시간 기록 + PM 코멘트
 - **스킬 파일**: `skills/` 디렉토리에 에이전트별 코딩 규칙 정의
 - **원자적 Claim**: `SELECT FOR UPDATE SKIP LOCKED`로 동시 선점 방지
@@ -188,6 +203,9 @@ TaskForce.AI/
 ├── docker-compose.yml          # 4개 컨테이너 정의
 ├── .env.example                # 환경변수 템플릿
 ├── requirements.txt            # MCP 서버 Python 패키지
+├── CLAUDE.md                   # 프로젝트별 Claude Code 규칙
+├── config/claude/              # Claude Code 설정 템플릿
+├── scripts/setup-claude.sh     # Claude Code 자동 설정 스크립트
 │
 ├── backend/
 │   ├── app/
