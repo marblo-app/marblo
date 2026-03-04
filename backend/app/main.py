@@ -229,6 +229,47 @@ async def archive_done_tasks(
     return {"archived_count": len(task_ids)}
 
 
+@app.post("/api/tasks/merge-projects")
+async def merge_projects(
+    db: AsyncSession = Depends(get_db),
+    from_project: str = Query(..., alias="from", description="Source project ID"),
+    to_project: str = Query(..., alias="to", description="Target project ID"),
+):
+    if from_project == to_project:
+        raise HTTPException(status_code=400, detail="Source and target projects must differ")
+
+    # Find all tasks in the source project
+    find_stmt = select(Task.id).where(Task.project_id == from_project)
+    result = await db.execute(find_stmt)
+    task_ids = [row[0] for row in result.all()]
+
+    if not task_ids:
+        return {"merged_count": 0}
+
+    # Bulk update project_id
+    update_stmt = (
+        update(Task)
+        .where(Task.id.in_(task_ids))
+        .values(project_id=to_project)
+    )
+    await db.execute(update_stmt)
+    await db.flush()
+
+    # Re-fetch and publish SSE events
+    fetch_stmt = (
+        select(Task)
+        .where(Task.id.in_(task_ids))
+        .options(selectinload(Task.activities))
+    )
+    result = await db.execute(fetch_stmt)
+    updated_tasks = result.scalars().all()
+    for t in updated_tasks:
+        await publish_event("task_updated", TaskResponse.model_validate(t))
+
+    await db.commit()
+    return {"merged_count": len(task_ids)}
+
+
 @app.post("/api/tasks/cleanup-stale")
 async def cleanup_stale_todos(
     hours: int = Query(24, description="Hours threshold for stale TODO tasks"),

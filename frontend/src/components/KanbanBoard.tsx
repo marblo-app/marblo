@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { Task, TaskRole, TaskStatus, COLUMN_STATUSES } from "@/lib/types";
-import { deleteTask, archiveDoneTasks, cleanupStaleTodos } from "@/lib/api";
+import { deleteTask, archiveDoneTasks, cleanupStaleTodos, mergeProjects } from "@/lib/api";
 import KanbanColumn from "./KanbanColumn";
 import TaskDetailModal from "./TaskDetailModal";
 
@@ -33,6 +33,7 @@ export default function KanbanBoard({
   };
   const [roleFilter, setRoleFilter] = useState<TaskRole | "all">("all");
   const [projectFilter, setProjectFilter] = useState<string>("all");
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const projects = useMemo(() => {
     const set = new Set<string>();
@@ -97,6 +98,28 @@ export default function KanbanBoard({
       onToast?.(`${cleaned_count}개 티켓 정리됨`, "success");
     } catch {
       onToast?.("정리 실패", "warning");
+    }
+  };
+
+  const handleMerge = async (targetProject: string) => {
+    setMergeOpen(false);
+    if (projectFilter === "all") {
+      onToast?.("프로젝트를 먼저 선택해주세요", "warning");
+      return;
+    }
+    const sourceCount = tasks.filter((t) => t.project_id === projectFilter).length;
+    if (
+      !confirm(
+        `'${projectFilter}' 프로젝트를 '${targetProject}'로 병합합니다. ${sourceCount}개 태스크가 이동됩니다.`,
+      )
+    )
+      return;
+    try {
+      const { merged_count } = await mergeProjects(projectFilter, targetProject);
+      onToast?.(`${merged_count}개 태스크 병합됨`, "success");
+      setProjectFilter(targetProject);
+    } catch {
+      onToast?.("병합 실패", "warning");
     }
   };
 
@@ -172,6 +195,44 @@ export default function KanbanBoard({
         >
           Cleanup Stale
         </button>
+        {/* Merge Project */}
+        <div className="relative">
+          <button
+            onClick={() => {
+              if (projectFilter === "all") {
+                onToast?.("프로젝트를 먼저 선택해주세요", "warning");
+                return;
+              }
+              setMergeOpen((prev) => !prev);
+            }}
+            className="rounded-lg border border-blue-800/50 bg-blue-900/30 px-3 py-1 text-xs text-blue-400 hover:bg-blue-900/50"
+          >
+            Merge Project
+          </button>
+          {mergeOpen && projectFilter !== "all" && (
+            <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded-lg border border-gray-700 bg-gray-900 py-1 shadow-xl">
+              <div className="px-3 py-1.5 text-xs text-gray-500">
+                Merge &apos;{projectFilter}&apos; into:
+              </div>
+              {projects
+                .filter((p) => p !== projectFilter)
+                .map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => handleMerge(p)}
+                    className="block w-full px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-gray-800"
+                  >
+                    {p}
+                  </button>
+                ))}
+              {projects.filter((p) => p !== projectFilter).length === 0 && (
+                <div className="px-3 py-1.5 text-xs text-gray-600">
+                  No other projects
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         <button
           onClick={handleArchive}
           className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-1 text-xs text-gray-300 hover:bg-gray-700"

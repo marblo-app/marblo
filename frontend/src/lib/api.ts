@@ -135,6 +135,16 @@ export async function archiveDoneTasks(
   );
 }
 
+export async function mergeProjects(
+  from: string,
+  to: string,
+): Promise<{ merged_count: number }> {
+  return fetchApi<{ merged_count: number }>(
+    `/api/tasks/merge-projects?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    { method: "POST" },
+  );
+}
+
 export async function cleanupStaleTodos(
   hours?: number,
   project?: string,
