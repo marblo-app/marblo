@@ -278,7 +278,7 @@ async def cleanup_stale_todos(
 ):
     from datetime import datetime, timedelta, timezone
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
 
     # Find stale TODO tasks
     find_stmt = select(Task.id).where(
