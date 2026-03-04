@@ -4,11 +4,14 @@ import { useState } from "react";
 import Header from "@/components/Header";
 import KanbanBoard from "@/components/KanbanBoard";
 import TaskCreateModal from "@/components/TaskCreateModal";
+import ToastContainer from "@/components/ToastContainer";
 import { useTasks } from "@/hooks/useTasks";
+import { useToast } from "@/hooks/useToast";
 import { Task } from "@/lib/types";
 
 export default function BoardPage() {
-  const { tasks, loading, error, sseConnected, setTasks } = useTasks();
+  const { toasts, addToast, removeToast } = useToast();
+  const { tasks, loading, error, sseConnected, setTasks } = useTasks(addToast);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   const handleTaskCreated = (task: Task) => {
@@ -63,6 +66,7 @@ export default function BoardPage() {
         tasks={tasks}
         onTaskUpdated={handleTaskUpdated}
         onTaskDeleted={handleTaskDeleted}
+        onToast={addToast}
       />
       <TaskCreateModal
         isOpen={showCreateModal}
@@ -70,6 +74,7 @@ export default function BoardPage() {
         onCreated={handleTaskCreated}
         existingTasks={tasks}
       />
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
     </div>
   );
 }

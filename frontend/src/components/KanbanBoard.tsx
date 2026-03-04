@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Task, TaskRole, COLUMN_STATUSES } from "@/lib/types";
-import { deleteTask } from "@/lib/api";
+import { Task, TaskRole, TaskStatus, COLUMN_STATUSES } from "@/lib/types";
+import { deleteTask, archiveDoneTasks, cleanupStaleTodos } from "@/lib/api";
 import KanbanColumn from "./KanbanColumn";
 import TaskDetailModal from "./TaskDetailModal";
 
@@ -10,14 +10,18 @@ interface KanbanBoardProps {
   tasks: Task[];
   onTaskUpdated: (task: Task) => void;
   onTaskDeleted: (taskId: string) => void;
+  onToast?: (message: string, type: "info" | "success" | "warning") => void;
 }
 
 export default function KanbanBoard({
   tasks,
   onTaskUpdated,
   onTaskDeleted,
+  onToast,
 }: KanbanBoardProps) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [doneCollapsed, setDoneCollapsed] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const handleQuickDelete = async (taskId: string) => {
     try {
@@ -35,11 +39,21 @@ export default function KanbanBoard({
     tasks.forEach((t) => {
       if (t.project_id) set.add(t.project_id);
     });
-    return Array.from(set).sort();
+    const all = Array.from(set).sort();
+    if (showArchived) return all;
+    return all.filter((p) => !p.endsWith(":archived"));
+  }, [tasks, showArchived]);
+
+  const hasArchivedProjects = useMemo(() => {
+    return tasks.some((t) => t.project_id?.endsWith(":archived"));
   }, [tasks]);
 
   const filteredTasks = useMemo(() => {
     let result = tasks;
+    // Hide archived projects by default
+    if (!showArchived && projectFilter === "all") {
+      result = result.filter((t) => !t.project_id?.endsWith(":archived"));
+    }
     if (roleFilter !== "all") {
       result = result.filter((t) => t.role === roleFilter);
     }
@@ -47,7 +61,7 @@ export default function KanbanBoard({
       result = result.filter((t) => t.project_id === projectFilter);
     }
     return result;
-  }, [tasks, roleFilter, projectFilter]);
+  }, [tasks, roleFilter, projectFilter, showArchived]);
 
   const tasksByStatus = useMemo(() => {
     const map = new Map<string, Task[]>();
@@ -59,6 +73,32 @@ export default function KanbanBoard({
     }
     return map;
   }, [filteredTasks]);
+
+  const handleArchive = async () => {
+    const target = projectFilter !== "all" ? projectFilter : null;
+    if (!target) {
+      onToast?.("프로젝트를 선택해주세요", "warning");
+      return;
+    }
+    if (!confirm(`"${target}" 프로젝트의 DONE 티켓을 아카이브합니다.`)) return;
+    try {
+      const { archived_count } = await archiveDoneTasks(target);
+      onToast?.(`${archived_count}개 티켓 아카이브됨`, "success");
+    } catch {
+      onToast?.("아카이브 실패", "warning");
+    }
+  };
+
+  const handleCleanupStale = async () => {
+    if (!confirm("24시간 이상 방치된 TODO 티켓을 FAILED 처리합니다.")) return;
+    try {
+      const project = projectFilter !== "all" ? projectFilter : undefined;
+      const { cleaned_count } = await cleanupStaleTodos(24, project);
+      onToast?.(`${cleaned_count}개 티켓 정리됨`, "success");
+    } catch {
+      onToast?.("정리 실패", "warning");
+    }
+  };
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -79,6 +119,19 @@ export default function KanbanBoard({
               ))}
             </select>
           </div>
+        )}
+
+        {/* Show archived toggle */}
+        {hasArchivedProjects && (
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-400">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="rounded border-gray-600"
+            />
+            Show archived
+          </label>
         )}
 
         {/* Role filter */}
@@ -108,6 +161,23 @@ export default function KanbanBoard({
             </button>
           ))}
         </div>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Action buttons */}
+        <button
+          onClick={handleCleanupStale}
+          className="rounded-lg border border-red-800/50 bg-red-900/30 px-3 py-1 text-xs text-red-400 hover:bg-red-900/50"
+        >
+          Cleanup Stale
+        </button>
+        <button
+          onClick={handleArchive}
+          className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-1 text-xs text-gray-300 hover:bg-gray-700"
+        >
+          Archive Done
+        </button>
       </div>
 
       {/* Columns */}
@@ -119,6 +189,13 @@ export default function KanbanBoard({
             tasks={tasksByStatus.get(status) || []}
             onTaskClick={setSelectedTask}
             onTaskDelete={handleQuickDelete}
+            collapsible={status === TaskStatus.DONE}
+            collapsed={status === TaskStatus.DONE ? doneCollapsed : undefined}
+            onToggleCollapse={
+              status === TaskStatus.DONE
+                ? () => setDoneCollapsed((prev) => !prev)
+                : undefined
+            }
           />
         ))}
       </div>

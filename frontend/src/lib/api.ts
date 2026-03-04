@@ -126,4 +126,27 @@ export async function addTaskActivity(
   });
 }
 
+export async function archiveDoneTasks(
+  project: string,
+): Promise<{ archived_count: number }> {
+  return fetchApi<{ archived_count: number }>(
+    `/api/tasks/archive?project=${encodeURIComponent(project)}`,
+    { method: "POST" },
+  );
+}
+
+export async function cleanupStaleTodos(
+  hours?: number,
+  project?: string,
+): Promise<{ cleaned_count: number; task_ids: string[] }> {
+  const params = new URLSearchParams();
+  if (hours !== undefined) params.set("hours", String(hours));
+  if (project) params.set("project", project);
+  const query = params.toString();
+  return fetchApi<{ cleaned_count: number; task_ids: string[] }>(
+    `/api/tasks/cleanup-stale${query ? `?${query}` : ""}`,
+    { method: "POST" },
+  );
+}
+
 export { ApiError };

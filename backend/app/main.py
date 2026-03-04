@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -186,6 +186,97 @@ async def delete_task(task_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Task not found")
     await db.delete(task)
     await db.commit()
+
+
+@app.post("/api/tasks/archive")
+async def archive_done_tasks(
+    project: str = Query(..., description="Project ID to archive DONE tasks for"),
+    db: AsyncSession = Depends(get_db),
+):
+    # Find DONE tasks for this project first (to get IDs for SSE events)
+    find_stmt = (
+        select(Task.id)
+        .where(Task.status == TaskStatus.DONE, Task.project_id == project)
+    )
+    result = await db.execute(find_stmt)
+    task_ids = [row[0] for row in result.all()]
+
+    if not task_ids:
+        return {"archived_count": 0}
+
+    # Bulk update project_id to "{project}:archived"
+    archived_project = f"{project}:archived"
+    update_stmt = (
+        update(Task)
+        .where(Task.id.in_(task_ids))
+        .values(project_id=archived_project)
+    )
+    await db.execute(update_stmt)
+    await db.flush()
+
+    # Re-fetch updated tasks and publish SSE events
+    fetch_stmt = (
+        select(Task)
+        .where(Task.id.in_(task_ids))
+        .options(selectinload(Task.activities))
+    )
+    result = await db.execute(fetch_stmt)
+    updated_tasks = result.scalars().all()
+    for t in updated_tasks:
+        await publish_event("task_updated", TaskResponse.model_validate(t))
+
+    await db.commit()
+    return {"archived_count": len(task_ids)}
+
+
+@app.post("/api/tasks/cleanup-stale")
+async def cleanup_stale_todos(
+    hours: int = Query(24, description="Hours threshold for stale TODO tasks"),
+    project: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    # Find stale TODO tasks
+    find_stmt = select(Task.id).where(
+        Task.status == TaskStatus.TODO,
+        Task.created_at < cutoff,
+    )
+    if project:
+        find_stmt = find_stmt.where(Task.project_id == project)
+    result = await db.execute(find_stmt)
+    task_ids = [row[0] for row in result.all()]
+
+    if not task_ids:
+        return {"cleaned_count": 0, "task_ids": []}
+
+    # Bulk update to FAILED
+    update_stmt = (
+        update(Task)
+        .where(Task.id.in_(task_ids))
+        .values(
+            status=TaskStatus.FAILED,
+            comment=f"Auto-cleaned: stale for {hours}h+",
+        )
+    )
+    await db.execute(update_stmt)
+    await db.flush()
+
+    # Re-fetch and publish SSE events
+    fetch_stmt = (
+        select(Task)
+        .where(Task.id.in_(task_ids))
+        .options(selectinload(Task.activities))
+    )
+    result = await db.execute(fetch_stmt)
+    updated_tasks = result.scalars().all()
+    for t in updated_tasks:
+        await publish_event("task_updated", TaskResponse.model_validate(t))
+
+    await db.commit()
+    return {"cleaned_count": len(task_ids), "task_ids": [str(tid) for tid in task_ids]}
 
 
 async def _create_activity(
