@@ -43,18 +43,14 @@ allowed-tools: Read
 🔁 반복 작업
   /tf-ralph    같은 작업을 N개 대상에 반복 (티켓 단위 추적)
 
-🔛 상시 모드
-  /tf-on       상시 모드 ON — 이후 모든 작업이 자동으로 티켓을 거침
-
 📖 도움말
   /tf-guide    이 가이드 보기
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 💡 일반적인 흐름:
-  /tf-on → /tf-plan → /tf-start → /tf-status → /tf-review → /tf-done
+  /tf-plan → /tf-start → /tf-status → /tf-review → /tf-done
 
 💡 상황별 추천:
-  • 세션 시작          → /tf-on (상시 모드 먼저!)
   • 처음 시작          → /tf-plan
   • 어디까지 했더라    → /tf-resume
   • 현황 파악          → /tf-status
