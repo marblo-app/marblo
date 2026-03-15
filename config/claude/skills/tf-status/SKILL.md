@@ -10,6 +10,13 @@ allowed-tools: Bash, Read
 
 ---
 
+## ⛔ 필수 규칙: TaskForce MCP 전용
+
+> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
+> 태스크 조회는 반드시 **TaskForce MCP의 `get_all_tasks`와 `check_feedback`**을 사용합니다.
+
+---
+
 ## 조회 순서
 
 1. `get_all_tasks`로 전체 태스크 조회 (프로젝트 필터 적용)

@@ -13,6 +13,15 @@ argument-hint: [프로젝트명]
 
 ---
 
+## ⛔ 필수 규칙: TaskForce MCP 전용
+
+> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
+> 태스크 조회/기록/상태변경은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> `get_all_tasks`, `get_available_tasks`, `get_task_activities`, `check_feedback`,
+> `add_activity`, `submit_for_review`, `claim_task`, `update_task_status`
+
+---
+
 ## Step 1: 컨텍스트 복원
 
 1. `get_all_tasks`로 프로젝트 전체 현황을 조회합니다.

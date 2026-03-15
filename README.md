@@ -132,7 +132,7 @@ TaskForce 슬래시 스킬 + 자동 리마인더 훅을 설치합니다:
 ```
 
 이 스크립트가 설치하는 것:
-- **슬래시 스킬 11개** → `~/.claude/skills/` (어디서든 `/tf-plan`, `/tf-start` 등 사용)
+- **슬래시 스킬 12개** → `~/.claude/skills/` (어디서든 `/tf-plan`, `/tf-start` 등 사용)
 - **자동 리마인더 훅** → 매 프롬프트마다 태스크 업데이트 리마인더 주입
 - **CLAUDE.md** → TaskForce MCP 워크플로우 규칙
 
@@ -181,6 +181,12 @@ claude
 | `/tf-review` | PM 코드 리뷰 — 승인/반려 |
 | `/tf-fix` | FAILED/BLOCKED 태스크 진단 + 복구 |
 | `/tf-handoff` | 에이전트 실패 → 직접 이어받기 |
+
+### 동기화
+
+| 스킬 | 설명 |
+|------|------|
+| `/tf-sync` | 코드 상태와 티켓 상태 불일치 감지 + 동기화 |
 
 ### 반복 작업
 
@@ -248,7 +254,7 @@ TaskForce.AI/
 ├── requirements.txt            # MCP 서버 Python 패키지
 ├── CLAUDE.md                   # 프로젝트별 Claude Code 규칙
 ├── config/claude/              # Claude Code 설정 템플릿
-│   └── skills/tf-*/SKILL.md   # TaskForce 슬래시 스킬 11개
+│   └── skills/tf-*/SKILL.md   # TaskForce 슬래시 스킬 12개
 ├── scripts/setup-claude.sh     # Claude Code 자동 설정 스크립트
 │
 ├── backend/

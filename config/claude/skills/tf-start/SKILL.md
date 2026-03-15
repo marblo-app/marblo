@@ -13,6 +13,21 @@ argument-hint: [프로젝트명]
 
 ---
 
+## ⛔ 필수 규칙: TaskForce MCP 전용
+
+> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
+> 반드시 **TaskForce MCP 도구**만 사용합니다:
+> - 태스크 일괄 생성: `create_tasks_bulk` (한 번의 호출로 전체 태스크를 한꺼번에 생성)
+> - 태스크 단건 생성: `create_task`
+> - 태스크 조회: `get_all_tasks`, `get_available_tasks`
+> - 태스크 작업: `claim_task`, `update_task_status`, `add_activity`, `submit_for_review`
+> - 기타: `check_feedback`, `get_task_activities`, `get_agent_skill`, `get_task_dependencies`
+>
+> **Claude Code 내장 TaskCreate로 개별 등록하면 안 됩니다.** TaskForce 대시보드에 표시되지 않습니다.
+> **`create_tasks_bulk`를 사용하면 한 번의 호출로 모든 태스크가 일괄 등록됩니다.**
+
+---
+
 ## Pre-flight 체크
 
 시작 전에 확인합니다:
@@ -40,22 +55,40 @@ argument-hint: [프로젝트명]
 
 ---
 
-## Phase 1: 태스크 생성
+## Phase 1: 프로젝트명 확인 + 태스크 일괄 생성
 
-1. PRD의 태스크 계획을 `create_tasks_bulk` JSON으로 변환합니다.
-2. 각 태스크에 필수 필드를 확인합니다:
+### 1-1. 프로젝트명 확인
+
+PRD에 명시된 프로젝트명을 사용합니다. 없으면 사용자에게 확인합니다.
+**이 프로젝트명이 모든 태스크의 `project` 필드에 일관되게 들어갑니다.**
+
+### 1-2. 태스크 목록 → `create_tasks_bulk` JSON 변환
+
+PRD의 태스크 계획을 **하나의 `create_tasks_bulk` 호출**로 변환합니다.
+
+각 태스크에 필수 필드:
    - `title`: 명확한 제목
    - `description`: 구체적인 작업 내용 + 완료 기준
    - `role`: backend / frontend / test / devops
    - `priority`: 5(긴급) ~ 1(낮음)
    - `depends_on`: 의존성 (TASK-NNN 형식)
    - `scope`: 수정할 파일 경로 (충돌 방지)
-   - `project`: 프로젝트 이름
+   - `project`: **Phase 0에서 확정한 프로젝트명** (모든 태스크 동일)
 
-3. `create_tasks_bulk`를 실행합니다.
-4. 생성 결과를 확인합니다:
-   - 전부 성공했는지
-   - 의존성 매핑이 올바른지
+### 1-3. 일괄 생성 실행
+
+**반드시 TaskForce MCP의 `create_tasks_bulk`를 한 번 호출해서 모든 태스크를 한꺼번에 생성합니다.**
+
+```
+⛔ 잘못된 방법: Claude Code의 TaskCreate를 13번 개별 호출
+✅ 올바른 방법: TaskForce MCP의 create_tasks_bulk를 1번 호출
+```
+
+### 1-4. 생성 결과 확인
+
+- 전부 성공했는지
+- 의존성 매핑이 올바른지
+- `get_all_tasks`로 대시보드에 등록되었는지 확인
 
 ---
 

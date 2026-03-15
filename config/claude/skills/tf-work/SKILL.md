@@ -12,6 +12,15 @@ allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 
 ---
 
+## ⛔ 필수 규칙: TaskForce MCP 전용
+
+> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
+> 태스크 조회/상태변경/기록은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> `get_available_tasks`, `claim_task`, `update_task_status`, `add_activity`,
+> `submit_for_review`, `check_feedback`, `get_task_activities`, `get_agent_skill`
+
+---
+
 ## Step 1: 태스크 선택
 
 1. `get_available_tasks`로 처리 가능한 태스크를 확인합니다.

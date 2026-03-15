@@ -12,6 +12,14 @@ allowed-tools: Bash, Read, Glob, Grep
 
 ---
 
+## ⛔ 필수 규칙: TaskForce MCP 전용
+
+> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
+> 태스크 조회/기록은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> `get_all_tasks`, `get_task_activities`, `check_feedback`, `add_activity`
+
+---
+
 ## Step 1: 현황 스냅샷
 
 `get_all_tasks`로 전체 태스크를 조회하고 상태별로 정리합니다.

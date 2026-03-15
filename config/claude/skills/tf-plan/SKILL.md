@@ -14,6 +14,33 @@ argument-hint: [프로젝트 설명 또는 아이디어]
 
 ---
 
+## ⛔ 필수 규칙: TaskForce MCP 전용
+
+> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
+> 모든 태스크 관련 작업은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> `create_tasks_bulk`, `create_task`, `get_all_tasks`, `get_available_tasks`,
+> `claim_task`, `update_task_status`, `add_activity`, `submit_for_review`,
+> `check_feedback`, `get_task_activities`, `get_agent_skill`, `get_task_dependencies`
+>
+> Claude Code 내장 TaskCreate로 태스크를 만들면 TaskForce 대시보드에 표시되지 않습니다.
+
+---
+
+## Phase 0: 프로젝트명 확정
+
+**`/tf-start`에서 사용할 프로젝트명을 먼저 확정합니다.**
+
+1. 사용자에게 프로젝트명을 제안하거나 물어봅니다:
+   ```
+   📦 프로젝트명을 정해주세요.
+   예: youtube-insight, todo-app, my-saas
+   (영문 소문자 + 하이픈 권장, 모든 태스크 티켓에 이 이름이 사용됩니다)
+   ```
+2. 사용자 승인 후 이 이름을 PRD에 기록합니다.
+3. **이후 모든 태스크 생성 시 이 프로젝트명을 일관되게 사용합니다.**
+
+---
+
 ## Phase 1: 브레인스토밍 (소크라틱 질문법)
 
 사용자의 아이디어를 구체화합니다. 바로 설계하지 말고, 먼저 질문합니다.
@@ -200,3 +227,4 @@ TASK-005: 테스트 (test, priority: 2, depends_on: 002)
    > "계획이 확정되었습니다. `/tf-start`를 실행하면 태스크가 생성되고 에이전트가 작업을 시작합니다."
 
 > **중요**: 이 단계에서 `create_tasks_bulk`를 실행하지 않습니다. 계획만 수립합니다.
+> **중요**: PRD에 프로젝트명이 반드시 포함되어야 합니다. `/tf-start`가 이 이름으로 태스크를 생성합니다.

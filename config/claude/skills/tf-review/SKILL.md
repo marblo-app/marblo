@@ -12,6 +12,14 @@ allowed-tools: Bash, Read, Glob, Grep
 
 ---
 
+## ⛔ 필수 규칙: TaskForce MCP 전용
+
+> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
+> 태스크 조회/상태변경은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> `get_all_tasks`, `update_task_status`, `add_activity`, `get_task_activities`
+
+---
+
 ## Step 1: 리뷰 대기 태스크 조회
 
 `get_all_tasks`에서 REVIEW 상태만 필터링합니다.
