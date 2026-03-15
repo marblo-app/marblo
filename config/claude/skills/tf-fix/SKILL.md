@@ -1,6 +1,6 @@
 ---
 name: tf-fix
-description: FAILED/BLOCKED 태스크를 진단하고 복구합니다
+description: FAILED/BLOCKED 태스크 진단 + 복구, 또는 불필요한 태스크 취소/삭제
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
@@ -41,3 +41,30 @@ allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 - Docker 컨테이너가 꺼져있음
 - 패키지 버전 충돌
 - 에이전트가 scope 밖 파일을 수정하려다 실패
+
+---
+
+## 태스크 취소 / 삭제
+
+사용자가 "이 태스크 필요 없어", "취소해줘" 등 요청하면:
+
+1. `get_all_tasks`로 대상 태스크를 확인합니다.
+2. 사용자에게 확인합니다:
+   ```
+   ❌ 삭제 대상:
+     TASK-007: 결제 연동 (현재: TODO)
+
+     이 태스크에 의존하는 다른 태스크: TASK-010, TASK-011
+     → 이 태스크들도 영향받을 수 있습니다.
+
+     정말 삭제할까요?
+   ```
+3. 승인 시 `curl -X DELETE http://localhost:8001/api/tasks/{id}` 호출
+4. `add_activity`로 관련 태스크에 "TASK-007 삭제됨 — 의존성 확인 필요" 기록
+
+### FAILED → 취소
+
+복구가 어려운 FAILED 태스크는 삭제 처리:
+- 3번 이상 재시도 실패
+- 더 이상 필요 없는 기능
+- scope가 완전히 바뀐 경우

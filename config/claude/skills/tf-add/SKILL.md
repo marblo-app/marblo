@@ -1,12 +1,13 @@
 ---
 name: tf-add
-description: 진행 중인 프로젝트에 새로운 태스크를 추가합니다
+description: 진행 중인 프로젝트에 새 태스크 추가 또는 기존 태스크 수정(우선순위, 설명 등)
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
-# TaskForce 태스크 추가
+# TaskForce 태스크 추가 / 수정
 
-> 진행 중인 프로젝트에 새로운 태스크를 추가합니다.
+> 진행 중인 프로젝트에 새 태스크를 추가하거나, 기존 태스크를 수정합니다.
+> "태스크 추가해줘", "우선순위 바꿔줘", "설명 수정해줘" 등 모두 이 스킬로 처리합니다.
 
 ---
 
@@ -40,8 +41,32 @@ allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 → TASK-001이 이미 DONE이면 → TASK-009 바로 available
 ```
 
+---
+
+## 기존 태스크 수정
+
+사용자가 기존 태스크의 수정을 요청하면 (우선순위, 설명, scope 등):
+
+1. `get_all_tasks`로 현재 태스크 목록을 보여줍니다.
+2. 수정 대상 태스크를 사용자에게 확인합니다.
+3. 수정 내용에 따라 처리:
+   - **우선순위 변경**: `curl -X PATCH` 로 백엔드 API 직접 호출
+   - **설명/scope 변경**: `curl -X PATCH` 로 백엔드 API 직접 호출
+   - **의존성 변경**: 태스크 재생성이 필요할 수 있음 (기존 삭제 → 새로 생성)
+4. `add_activity`로 "수정: [변경 내용]" 기록
+
+```
+예시:
+  사용자: "TASK-003 우선순위를 5로 올려줘"
+  → PATCH /api/tasks/{id} body: {"priority": 5}
+  → add_activity: "우선순위 변경: 3 → 5"
+```
+
+---
+
 ## 주의사항
 
 - 기존 태스크와 scope가 겹치지 않도록 주의
 - 이미 IN_PROGRESS인 태스크에 의존성을 걸면 대기가 길어질 수 있음
 - priority를 적절히 설정해서 기존 작업 흐름에 맞추기
+- 수정 시 `project` 필드는 변경하지 않기 (프로젝트 병합은 대시보드의 Merge 기능 사용)

@@ -132,7 +132,7 @@ TaskForce 슬래시 스킬 + 자동 리마인더 훅을 설치합니다:
 ```
 
 이 스크립트가 설치하는 것:
-- **슬래시 스킬 12개** → `~/.claude/skills/` (어디서든 `/tf-plan`, `/tf-start` 등 사용)
+- **슬래시 스킬 15개** → `~/.claude/skills/` (어디서든 `/tf-plan`, `/tf-start` 등 사용)
 - **자동 리마인더 훅** → 매 프롬프트마다 태스크 업데이트 리마인더 주입
 - **CLAUDE.md** → TaskForce MCP 워크플로우 규칙
 
@@ -165,7 +165,7 @@ claude
 |------|------|
 | `/tf-work` | 태스크 claim → 코딩 + 진행 상황 자동 기록 |
 | `/tf-status` | 전체 태스크 현황 대시보드 요약 |
-| `/tf-add` | 진행 중 프로젝트에 새 태스크 추가 |
+| `/tf-add` | 새 태스크 추가 / 기존 태스크 수정 (우선순위, 설명 등) |
 
 ### 중단 / 재개
 
@@ -179,7 +179,8 @@ claude
 | 스킬 | 설명 |
 |------|------|
 | `/tf-review` | PM 코드 리뷰 — 승인/반려 |
-| `/tf-fix` | FAILED/BLOCKED 태스크 진단 + 복구 |
+| `/tf-feedback` | PM 피드백 확인 + 답변 (양방향 소통) |
+| `/tf-fix` | FAILED/BLOCKED 태스크 진단 + 복구 + 태스크 취소 |
 | `/tf-handoff` | 에이전트 실패 → 직접 이어받기 |
 
 ### 동기화
@@ -188,11 +189,23 @@ claude
 |------|------|
 | `/tf-sync` | 코드 상태와 티켓 상태 불일치 감지 + 동기화 |
 
+### 프로젝트 완료
+
+| 스킬 | 설명 |
+|------|------|
+| `/tf-done` | 프로젝트 완료 — 결과 요약 + 아카이브 + 회고 |
+
 ### 반복 작업
 
 | 스킬 | 설명 |
 |------|------|
 | `/tf-ralph` | 같은 작업을 N개 대상에 반복 (티켓 단위 추적) |
+
+### 도움말
+
+| 스킬 | 설명 |
+|------|------|
+| `/tf-guide` | 전체 슬래시 명령어 가이드 + 상황별 추천 |
 
 ---
 
@@ -254,7 +267,7 @@ TaskForce.AI/
 ├── requirements.txt            # MCP 서버 Python 패키지
 ├── CLAUDE.md                   # 프로젝트별 Claude Code 규칙
 ├── config/claude/              # Claude Code 설정 템플릿
-│   └── skills/tf-*/SKILL.md   # TaskForce 슬래시 스킬 12개
+│   └── skills/tf-*/SKILL.md   # TaskForce 슬래시 스킬 15개
 ├── scripts/setup-claude.sh     # Claude Code 자동 설정 스크립트
 │
 ├── backend/
