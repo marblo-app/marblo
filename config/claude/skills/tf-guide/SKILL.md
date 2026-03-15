@@ -43,22 +43,26 @@ allowed-tools: Read
 🔁 반복 작업
   /tf-ralph    같은 작업을 N개 대상에 반복 (티켓 단위 추적)
 
+🔛 상시 모드
+  /tf-on       상시 모드 ON — 이후 모든 작업이 자동으로 티켓을 거침
+
 📖 도움말
   /tf-guide    이 가이드 보기
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 💡 일반적인 흐름:
-  /tf-plan → /tf-start → /tf-status → /tf-review → /tf-done
+  /tf-on → /tf-plan → /tf-start → /tf-status → /tf-review → /tf-done
 
 💡 상황별 추천:
-  • 처음 시작         → /tf-plan
-  • 어디까지 했더라   → /tf-resume
-  • 현황 파악         → /tf-status
-  • 리뷰가 쌓여있음   → /tf-review
-  • 에이전트가 실패   → /tf-fix
-  • 피드백 남겼는데    → /tf-feedback
-  • 티켓이 안 맞음    → /tf-sync
-  • 반복 작업 일괄    → /tf-ralph
-  • 프로젝트 끝       → /tf-done
-  • 뭘 해야 할지 모름 → /tf-hold (현황 정리 + 다음 행동 제안)
+  • 세션 시작          → /tf-on (상시 모드 먼저!)
+  • 처음 시작          → /tf-plan
+  • 어디까지 했더라    → /tf-resume
+  • 현황 파악          → /tf-status
+  • 리뷰가 쌓여있음    → /tf-review
+  • 에이전트가 실패    → /tf-fix
+  • 피드백 남겼는데     → /tf-feedback
+  • 티켓이 안 맞음     → /tf-sync
+  • 반복 작업 일괄     → /tf-ralph
+  • 프로젝트 끝        → /tf-done
+  • 뭘 해야 할지 모름  → /tf-hold (현황 정리 + 다음 행동 제안)
 ```

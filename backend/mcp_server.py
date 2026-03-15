@@ -379,8 +379,7 @@ def create_tasks_bulk(tasks_json: str) -> str:
                 task = resp.json()
                 task_uuid = task["id"]
                 index_to_uuid[i] = task_uuid
-                short_id = task_uuid[:8]
-                results.append(f"  [{short_id}] {task['title']} (role={task['role']}, priority={task['priority']})")
+                results.append(f"  [{task_uuid}] {task['title']} (role={task['role']}, priority={task['priority']})")
                 success_count += 1
             else:
                 results.append(f"  [FAILED] {t.get('title', f'task #{i}')} — {resp.status_code}: {resp.text}")
@@ -388,11 +387,11 @@ def create_tasks_bulk(tasks_json: str) -> str:
     # Build dependency mapping summary
     for label, idx in alias_map.items():
         if idx in index_to_uuid:
-            dep_mappings.append(f"    {label} -> {index_to_uuid[idx][:8]}")
+            dep_mappings.append(f"    {label} -> {index_to_uuid[idx]}")
 
     output = f"Created {success_count}/{len(task_list)} tasks:\n" + "\n".join(results)
     if dep_mappings:
-        output += "\n\nDependency mappings:\n" + "\n".join(dep_mappings)
+        output += "\n\nDependency ID mappings:\n" + "\n".join(dep_mappings)
     return output
 
 
@@ -419,7 +418,7 @@ def get_all_tasks(project: str = "", role: str = "") -> str:
         for t in tasks:
             claimed = f" → {t['claimed_by']}" if t.get("claimed_by") else ""
             lines.append(
-                f"- [{t['status']}] {t['title']} (role={t['role']}, id={t['id'][:8]}){claimed}"
+                f"- [{t['status']}] {t['title']} (role={t['role']}, id={t['id']}){claimed}"
             )
         return "\n".join(lines)
 
@@ -467,7 +466,7 @@ def check_feedback(role: str, project: str = "") -> str:
         lines = [f"Tasks with PM feedback ({len(tasks)}):"]
         for t in tasks:
             lines.append(
-                f"- [{t['id'][:8]}] {t['title']} (status={t['status']}, priority={t['priority']})"
+                f"- [{t['id']}] {t['title']} (status={t['status']}, priority={t['priority']})"
             )
         return "\n".join(lines)
 
