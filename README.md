@@ -125,7 +125,7 @@ Agent Teams를 사용하려면 `~/.claude/settings.json`에 추가:
 
 ### 5단계: Claude Code 자동 설정 (권장)
 
-TaskForce 슬래시 스킬 + 자동 리마인더 훅을 설치합니다:
+TaskForce 슬래시 스킬 + 상시 강제 Hook을 설치합니다:
 
 ```bash
 ./scripts/setup-claude.sh
@@ -133,7 +133,7 @@ TaskForce 슬래시 스킬 + 자동 리마인더 훅을 설치합니다:
 
 이 스크립트가 설치하는 것:
 - **슬래시 스킬 15개** → `~/.claude/skills/` (어디서든 `/tf-plan`, `/tf-start` 등 사용)
-- **자동 리마인더 훅** → 매 프롬프트마다 태스크 업데이트 리마인더 주입
+- **상시 강제 Hook** → 매 프롬프트마다 "코드 수정 전 티켓 확인" 강제 주입 (모든 프로젝트 자동 적용)
 - **CLAUDE.md** → TaskForce MCP 워크플로우 규칙
 
 > 기존 설정이 있으면 백업(`.bak`) 후 덮어쓰며, 훅이 이미 있으면 건너뜁니다.
