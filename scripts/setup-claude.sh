@@ -20,19 +20,45 @@ fi
 cp "$PROJECT_DIR/config/claude/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
 echo "[OK] ~/.claude/CLAUDE.md 설치 완료"
 
-# 2. settings.json 병합 (hooks 추가)
+# 2. Hook 스크립트 설치 + settings.json 설정
+echo ""
+echo "=== Hook 설치 ==="
+# Hook 스크립트를 ~/.claude/에 복사 (절대경로 안정성)
+cp "$PROJECT_DIR/scripts/taskforce-hook.sh" "$CLAUDE_DIR/taskforce-hook.sh"
+chmod +x "$CLAUDE_DIR/taskforce-hook.sh"
+echo "[OK] ~/.claude/taskforce-hook.sh 설치 완료"
+
 if [ -f "$CLAUDE_DIR/settings.json" ]; then
-  if grep -q "UserPromptSubmit" "$CLAUDE_DIR/settings.json"; then
-    echo "[SKIP] UserPromptSubmit 훅이 이미 설정되어 있습니다"
+  if grep -q "taskforce-hook.sh" "$CLAUDE_DIR/settings.json"; then
+    echo "[SKIP] TaskForce Hook이 이미 설정되어 있습니다"
+  elif grep -q "UserPromptSubmit" "$CLAUDE_DIR/settings.json"; then
+    echo "[WARN] 기존 UserPromptSubmit 훅이 있습니다. 수동으로 업데이트하세요:"
+    echo "  command: \"bash $CLAUDE_DIR/taskforce-hook.sh\""
   else
-    echo "[WARN] ~/.claude/settings.json에 수동으로 UserPromptSubmit 훅을 추가하세요:"
+    echo "[WARN] ~/.claude/settings.json에 수동으로 Hook을 추가하세요:"
     echo ""
     cat "$PROJECT_DIR/config/claude/hooks-snippet.json"
     echo ""
   fi
 else
-  cp "$PROJECT_DIR/config/claude/settings.json" "$CLAUDE_DIR/settings.json"
-  echo "[OK] ~/.claude/settings.json 설치 완료"
+  # 새 settings.json 생성 — 절대경로로 hook 스크립트 참조
+  cat > "$CLAUDE_DIR/settings.json" <<SETTINGS_EOF
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $CLAUDE_DIR/taskforce-hook.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+SETTINGS_EOF
+  echo "[OK] ~/.claude/settings.json 설치 완료 (Hook 포함)"
 fi
 
 # 3. TaskForce 스킬 설치 (글로벌 — 모든 프로젝트에서 /tf-* 사용 가능)
@@ -58,7 +84,7 @@ echo ""
 echo "=== Codex 설정 ==="
 mkdir -p "$CODEX_DIR"
 
-# 3. AGENTS.md 설치 (프로젝트 루트)
+# 4. AGENTS.md 설치 (프로젝트 루트)
 if [ -f "$PROJECT_DIR/AGENTS.md" ]; then
   echo "[SKIP] AGENTS.md가 이미 존재합니다"
 else
@@ -66,7 +92,7 @@ else
   echo "[OK] AGENTS.md 설치 완료 (프로젝트 루트)"
 fi
 
-# 4. Codex config.toml에 TaskForce MCP 추가
+# 5. Codex config.toml에 TaskForce MCP 추가
 CODEX_CONFIG="$CODEX_DIR/config.toml"
 if [ -f "$CODEX_CONFIG" ]; then
   if grep -q "mcp_servers.taskforce" "$CODEX_CONFIG"; then
@@ -85,7 +111,7 @@ fi
 echo ""
 echo "✅ 설정 완료!"
 echo "   - Claude Code: 새 세션에서 적용 (Hook은 즉시 적용)"
-echo "   - TaskForce 스킬: 새 세션에서 / 입력 시 tf-start, tf-status 등 표시"
+echo "   - TaskForce 스킬: 새 세션에서 / 입력 시 tf-* 표시"
 echo "   - Codex: codex 실행 시 적용"
 echo ""
 echo "📌 사용법: 아무 프로젝트에서 claude 실행 후 / 입력"

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '[TaskForce MCP] 관련 태스크가 있으면 상태를 업데이트하고, 새 작업이면 티켓을 생성하세요.'"
+            "command": "bash __SCRIPTS_DIR__/taskforce-hook.sh"
           }
         ]
       }
