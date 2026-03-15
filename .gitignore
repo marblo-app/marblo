@@ -31,6 +31,7 @@ postgres_data/
 
 # Private docs
 lecture.md
+lectures/
 PRD.MD
 IMPROVEMENTS.md
 v2 plan.md

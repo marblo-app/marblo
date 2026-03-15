@@ -35,6 +35,25 @@ else
   echo "[OK] ~/.claude/settings.json 설치 완료"
 fi
 
+# 3. TaskForce 스킬 설치 (글로벌 — 모든 프로젝트에서 /tf-* 사용 가능)
+echo ""
+echo "=== TaskForce 스킬 설치 ==="
+SKILLS_SRC="$PROJECT_DIR/config/claude/skills"
+if [ -d "$SKILLS_SRC" ]; then
+  INSTALLED=0
+  for skill_dir in "$SKILLS_SRC"/tf-*/; do
+    [ -d "$skill_dir" ] || continue
+    skill_name="$(basename "$skill_dir")"
+    mkdir -p "$CLAUDE_DIR/skills/$skill_name"
+    cp "$skill_dir"SKILL.md "$CLAUDE_DIR/skills/$skill_name/SKILL.md"
+    INSTALLED=$((INSTALLED + 1))
+  done
+  echo "[OK] TaskForce 스킬 ${INSTALLED}개 설치 → ~/.claude/skills/"
+  echo "     어디서든 /tf-start, /tf-status 등 바로 사용 가능"
+else
+  echo "[WARN] config/claude/skills/ 디렉토리가 없습니다"
+fi
+
 echo ""
 echo "=== Codex 설정 ==="
 mkdir -p "$CODEX_DIR"
@@ -66,4 +85,15 @@ fi
 echo ""
 echo "✅ 설정 완료!"
 echo "   - Claude Code: 새 세션에서 적용 (Hook은 즉시 적용)"
+echo "   - TaskForce 스킬: 새 세션에서 / 입력 시 tf-start, tf-status 등 표시"
 echo "   - Codex: codex 실행 시 적용"
+echo ""
+echo "📌 사용법: 아무 프로젝트에서 claude 실행 후 / 입력"
+echo "   /tf-start   — 프로젝트 시작 (태스크 분해 + 에이전트 스폰)"
+echo "   /tf-status  — 진행 상태 확인"
+echo "   /tf-work    — 태스크 claim + 코딩"
+echo "   /tf-review  — PM 리뷰 승인/반려"
+echo "   /tf-ralph   — 반복 작업 일괄 처리"
+echo "   /tf-add     — 새 태스크 추가"
+echo "   /tf-fix     — FAILED 태스크 복구"
+echo "   /tf-handoff — 에이전트 실패 → 직접 이어받기"
