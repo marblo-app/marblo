@@ -123,17 +123,18 @@ Agent Teams를 사용하려면 `~/.claude/settings.json`에 추가:
 }
 ```
 
-### 5단계: Claude Code 자동 설정 (선택)
+### 5단계: Claude Code 자동 설정 (권장)
 
-TaskForce MCP를 자동으로 활용하도록 Claude Code 설정을 추가합니다:
+TaskForce 슬래시 스킬 + 자동 리마인더 훅을 설치합니다:
 
 ```bash
 ./scripts/setup-claude.sh
 ```
 
-이 스크립트는:
-- `~/.claude/CLAUDE.md`에 TaskForce MCP 워크플로우 규칙 추가
-- `~/.claude/settings.json`에 매 프롬프트마다 태스크 업데이트 리마인더 훅 추가
+이 스크립트가 설치하는 것:
+- **슬래시 스킬 11개** → `~/.claude/skills/` (어디서든 `/tf-plan`, `/tf-start` 등 사용)
+- **자동 리마인더 훅** → 매 프롬프트마다 태스크 업데이트 리마인더 주입
+- **CLAUDE.md** → TaskForce MCP 워크플로우 규칙
 
 > 기존 설정이 있으면 백업(`.bak`) 후 덮어쓰며, 훅이 이미 있으면 건너뜁니다.
 
@@ -144,6 +145,48 @@ claude
 # Claude Code에서 입력:
 # "taskforce MCP로 backend 역할의 사용 가능한 태스크를 조회해줘"
 ```
+
+---
+
+## 슬래시 스킬 (`/tf-*`)
+
+`./scripts/setup-claude.sh` 실행 후, 아무 프로젝트에서 `claude` 실행 → `/tf` 입력하면 사용 가능합니다.
+
+### 프로젝트 시작
+
+| 스킬 | 설명 |
+|------|------|
+| `/tf-plan` | PRD 작성 + 태스크 분해 계획 (소크라틱 질문 → 구조화) |
+| `/tf-start` | PRD 기반으로 태스크 생성 + 에이전트 스폰 + 작업 시작 |
+
+### 작업 진행
+
+| 스킬 | 설명 |
+|------|------|
+| `/tf-work` | 태스크 claim → 코딩 + 진행 상황 자동 기록 |
+| `/tf-status` | 전체 태스크 현황 대시보드 요약 |
+| `/tf-add` | 진행 중 프로젝트에 새 태스크 추가 |
+
+### 중단 / 재개
+
+| 스킬 | 설명 |
+|------|------|
+| `/tf-hold` | 작업 일시 중단 + 현황 정리 + 다음 행동 제안 |
+| `/tf-resume` | 중단된 작업 이어하기 (컨텍스트 자동 복원) |
+
+### 리뷰 / 문제 해결
+
+| 스킬 | 설명 |
+|------|------|
+| `/tf-review` | PM 코드 리뷰 — 승인/반려 |
+| `/tf-fix` | FAILED/BLOCKED 태스크 진단 + 복구 |
+| `/tf-handoff` | 에이전트 실패 → 직접 이어받기 |
+
+### 반복 작업
+
+| 스킬 | 설명 |
+|------|------|
+| `/tf-ralph` | 같은 작업을 N개 대상에 반복 (티켓 단위 추적) |
 
 ---
 
@@ -205,6 +248,7 @@ TaskForce.AI/
 ├── requirements.txt            # MCP 서버 Python 패키지
 ├── CLAUDE.md                   # 프로젝트별 Claude Code 규칙
 ├── config/claude/              # Claude Code 설정 템플릿
+│   └── skills/tf-*/SKILL.md   # TaskForce 슬래시 스킬 11개
 ├── scripts/setup-claude.sh     # Claude Code 자동 설정 스크립트
 │
 ├── backend/
