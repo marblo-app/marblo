@@ -69,3 +69,15 @@ body {
 .animate-slide-in-right {
   animation: slideInRight 0.3s ease-out;
 }
+
+/* xterm.js terminal overrides */
+.xterm {
+  padding: 4px 8px;
+}
+.xterm-viewport::-webkit-scrollbar {
+  width: 6px;
+}
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 3px;
+}

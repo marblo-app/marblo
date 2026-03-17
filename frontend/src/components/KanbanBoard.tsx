@@ -11,6 +11,7 @@ interface KanbanBoardProps {
   onTaskUpdated: (task: Task) => void;
   onTaskDeleted: (taskId: string) => void;
   onToast?: (message: string, type: "info" | "success" | "warning") => void;
+  style?: React.CSSProperties;
 }
 
 export default function KanbanBoard({
@@ -18,6 +19,7 @@ export default function KanbanBoard({
   onTaskUpdated,
   onTaskDeleted,
   onToast,
+  style,
 }: KanbanBoardProps) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [doneCollapsed, setDoneCollapsed] = useState(false);
@@ -124,7 +126,7 @@ export default function KanbanBoard({
   };
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex flex-1 flex-col overflow-hidden" style={style}>
       {/* Filter bar */}
       <div className="flex items-center gap-4 border-b border-gray-800 bg-gray-950 px-6 py-3">
         {/* Project filter */}

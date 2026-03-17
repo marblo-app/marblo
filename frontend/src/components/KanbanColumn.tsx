@@ -79,7 +79,7 @@ export default function KanbanColumn({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3" style={{ maxHeight: "calc(100vh - 200px)" }}>
+      <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3" style={{ maxHeight: "var(--column-max-height, calc(100vh - 200px))" }}>
         {tasks.length === 0 ? (
           <p className="py-8 text-center text-sm text-gray-600">No tasks</p>
         ) : (

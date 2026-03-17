@@ -2,30 +2,47 @@
 
 AI 에이전트 팀을 위한 태스크 오케스트레이션 플랫폼
 
-PM이 칸반 보드에서 태스크를 만들면, Claude Code Agent Teams가 자율적으로 작업하고 실시간으로 진행 상황을 보고합니다.
+PM이 칸반 보드에서 태스크를 만들면, Claude Code Agent Teams가 자율적으로 작업하고 실시간으로 진행 상황을 보고합니다. 내장 웹 터미널에서 에이전트를 직접 실행하고 모니터링할 수 있습니다.
 
 ---
 
 ## 어떻게 동작하나요?
 
 ```
-브라우저 (PM)
-    │  칸반 보드에서 태스크 생성/모니터링
-    ▼
-Next.js Frontend (:3001)
-    │  REST API + SSE (실시간)
-    ▼
-FastAPI Backend (:8001)  ◄──HTTP──  MCP Server (로컬)  ◄──stdio──  Claude Code
-    │                                  │
-    ├── PostgreSQL (태스크/로그 저장)    └── 에이전트가 MCP 도구로
-    └── Redis (실시간 이벤트)               태스크 조회/선점/상태 업데이트
+┌─────────────────────────────────────────────────────────┐
+│                    Claude Code (CLI)                     │
+│  ┌──────────┐  ┌──────────────┐  ┌───────────────────┐  │
+│  │ Slash     │  │ Hook 시스템   │  │ Agent Teams       │  │
+│  │ Skills    │  │ (자동 강제)   │  │ (병렬 협업)       │  │
+│  └─────┬────┘  └──────┬───────┘  └────────┬──────────┘  │
+│        └──────────────┼────────────────────┘             │
+│                       │ MCP (stdio)                      │
+└───────────────────────┼─────────────────────────────────┘
+                        │
+          ┌─────────────▼──────────────┐
+          │   TaskForce MCP Server     │
+          │   (13 Tools + 4 Prompts)   │
+          └─────────────┬──────────────┘
+                        │ HTTP
+┌───────────────────────▼─────────────────────────────────┐
+│                  Docker Compose                          │
+│  ┌──────────┐  ┌──────────┐  ┌─────┐  ┌─────┐          │
+│  │ FastAPI   │  │ Next.js   │  │ PG  │  │Redis│          │
+│  │ :8001     │  │ :3001     │  │:5432│  │:6379│          │
+│  └──────────┘  └──────────┘  └─────┘  └─────┘          │
+└─────────────────────────────────────────────────────────┘
+         ┌──────────────────────────┐
+         │ Terminal Sidecar (Host)  │
+         │ node-pty + WebSocket     │
+         │ :7681                    │
+         └──────────────────────────┘
 ```
 
 **PM 워크플로우:**
 1. 칸반 보드에서 태스크 카드 생성 (제목, 역할, 우선순위)
-2. Claude Code에서 Agent Teams 실행
+2. 보드 내 터미널에서 Claude Code Agent Teams 실행
 3. 에이전트들이 태스크를 자동으로 선점하고 작업
-4. 칸반 보드에서 실시간으로 카드 이동 + 활동 로그 확인
+4. 칸반 보드에서 실시간으로 카드 이동 + 활동 로그 확인 (SSE)
 5. REVIEW 카드 확인 후 승인/반려
 
 ---
@@ -39,6 +56,7 @@ FastAPI Backend (:8001)  ◄──HTTP──  MCP Server (로컬)  ◄──stdi
 | Database | PostgreSQL 16 | 태스크, 활동 로그 저장 |
 | Cache | Redis 7 | SSE 이벤트 브로드캐스트 |
 | MCP Server | FastMCP (Python) | Claude Code 에이전트 연동 |
+| Terminal | node-pty + xterm.js + WebSocket | 내장 웹 터미널 |
 | Container | Docker Compose | 원커맨드 실행 |
 
 ---
@@ -71,10 +89,22 @@ docker compose up --build -d
 docker compose ps
 ```
 
+### 2.5단계: 터미널 사이드카 실행 (선택)
+
+> 보드 내 웹 터미널 사용 시 필요. 호스트 머신에서 실행해야 합니다.
+
+```bash
+cd terminal-sidecar
+npm install
+npx tsx src/index.ts
+# → Terminal sidecar listening on http://0.0.0.0:7681
+```
+
 | 서비스 | URL |
 |--------|-----|
-| 칸반 대시보드 | http://localhost:3001 |
+| 칸반 대시보드 | http://localhost:3001/board |
 | API 문서 (Swagger) | http://localhost:8001/docs |
+| 터미널 사이드카 | http://localhost:7681/health |
 
 ### 3단계: MCP 서버 설치
 
@@ -213,16 +243,19 @@ claude
 
 | 도구 | 설명 |
 |------|------|
+| `create_task` | 태스크 생성 |
+| `create_tasks_bulk` | 태스크 일괄 생성 (의존성 자동 매핑) |
 | `get_available_tasks` | 역할별 TODO 태스크 조회 |
 | `get_all_tasks` | 전체 태스크 조회 (상태 무관) |
-| `claim_task` | 태스크 선점 |
-| `update_task_status` | 태스크 상태 변경 |
+| `claim_task` | 태스크 선점 (TODO → CLAIMED) |
+| `update_task_status` | 태스크 상태 변경 (상태 머신 검증) |
 | `add_activity` | 작업 진행 로그 기록 |
-| `submit_for_review` | 리뷰 제출 (PR URL 첨부) |
-| `get_task_dependencies` | 의존성 확인 |
-| `get_agent_skill` | 에이전트 스킬 파일 조회 |
-| `create_task` | 태스크 생성 |
-| `create_tasks_bulk` | 태스크 일괄 생성 (한글 지원) |
+| `submit_for_review` | 리뷰 제출 (IN_PROGRESS → REVIEW) |
+| `get_task_dependencies` | 의존성 상태 확인 |
+| `get_task_activities` | 활동 로그 조회 |
+| `check_feedback` | PM 피드백 확인 |
+| `acknowledge_feedback` | PM 피드백 읽음 처리 |
+| `get_agent_skill` | 에이전트 역할 스킬 파일 로드 |
 
 ---
 
@@ -230,8 +263,10 @@ claude
 
 ```
 TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE
-                  ↕ BLOCKED    ↕ FAILED
-                  REVIEW → (reject) → TODO
+  ↓                  ↓           ↓
+FAILED           BLOCKED    CHANGES_REQUESTED
+                                ↓
+                            IN_PROGRESS (재작업)
 ```
 
 | 전환 | 트리거 |
@@ -239,19 +274,26 @@ TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE
 | TODO → CLAIMED | 에이전트가 `claim_task` 호출 |
 | CLAIMED → IN_PROGRESS | `update_task_status(start_work)` |
 | IN_PROGRESS → REVIEW | `submit_for_review` (PR URL 첨부) |
-| REVIEW → DONE | PM/Leader가 승인 |
-| REVIEW → TODO | PM/Leader가 반려 (피드백 포함) |
+| IN_PROGRESS → BLOCKED | 의존성 미충족 시 |
+| REVIEW → DONE | PM/Leader가 `approve` |
+| REVIEW → CHANGES_REQUESTED | PM/Leader가 `reject` (피드백 포함) |
+| CHANGES_REQUESTED → IN_PROGRESS | 에이전트가 재작업 시작 |
+| * → FAILED | 작업 실패 / 자동 정리 |
 
 ---
 
 ## 주요 기능
 
-- **칸반 보드**: 5컬럼 (TODO/CLAIMED/IN_PROGRESS/REVIEW/DONE), 역할별/프로젝트별 필터
-- **실시간 업데이트**: SSE로 카드 이동, 활동 로그 실시간 반영
+- **칸반 보드**: 7컬럼 (TODO/CLAIMED/IN_PROGRESS/REVIEW/CHANGES_REQUESTED/DONE/FAILED), 역할별/프로젝트별 필터
+- **내장 웹 터미널**: 보드 하단 70:30 분할 레이아웃, xterm.js + node-pty로 실제 호스트 쉘 연결
+- **실시간 업데이트**: SSE + Redis Pub/Sub으로 카드 이동, 활동 로그 실시간 반영 + 토스트 알림
+- **슬래시 스킬 15개**: `/tf-start`~`/tf-guide`까지 전체 작업 흐름 커버
+- **상시 강제 Hook**: 슬래시 스킬 없이 작업해도 매 프롬프트마다 티켓 확인 강제
+- **상태 머신**: 7상태 10전이, 잘못된 상태 전환 코드 레벨에서 차단
 - **프로젝트 분리**: `project_id`로 여러 프로젝트 태스크 격리
 - **환경 컨텍스트**: `context` 필드로 에이전트에게 제약조건 전달 (Python 버전, 라이브러리 등)
 - **파일 스코프**: `scope` 필드로 담당 파일 명시 (에이전트 간 충돌 방지)
-- **프로젝트 병합**: 이름이 다른 동일 프로젝트 태스크를 하나로 합치기 (예: `hello-api` → `hello_api`)
+- **프로젝트 병합**: 이름이 다른 동일 프로젝트 태스크를 하나로 합치기
 - **활동 로그**: 에이전트 작업 진행 상황 실시간 기록 + PM 코멘트
 - **스킬 파일**: `skills/` 디렉토리에 에이전트별 코딩 규칙 정의
 - **원자적 Claim**: `SELECT FOR UPDATE SKIP LOCKED`로 동시 선점 방지
@@ -262,8 +304,8 @@ TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE
 
 ```
 TaskForce.AI/
-├── docker-compose.yml          # 4개 컨테이너 정의
-├── .env.example                # 환경변수 템플릿
+├── docker-compose.yml          # 4개 컨테이너 (backend, frontend, db, redis)
+├── .mcp.json                   # MCP 서버 설정
 ├── requirements.txt            # MCP 서버 Python 패키지
 ├── CLAUDE.md                   # 프로젝트별 Claude Code 규칙
 ├── config/claude/              # Claude Code 설정 템플릿
@@ -272,21 +314,42 @@ TaskForce.AI/
 │
 ├── backend/
 │   ├── app/
-│   │   ├── main.py             # FastAPI REST API + SSE
+│   │   ├── main.py             # FastAPI 20개 엔드포인트 + SSE
 │   │   ├── models.py           # Task, ActivityLog, Agent 모델
 │   │   ├── schemas.py          # Pydantic 스키마
-│   │   ├── state_machine.py    # 상태 전환 규칙
-│   │   ├── mcp_tools.py        # 비즈니스 로직
-│   │   ├── events.py           # Redis pub/sub
-│   │   └── sse.py              # SSE 엔드포인트
-│   ├── mcp_server.py           # FastMCP 서버 (Claude Code 연동)
-│   └── alembic/                # DB 마이그레이션
+│   │   ├── state_machine.py    # 7상태 10전이 상태 머신
+│   │   ├── mcp_tools.py        # MCP 비즈니스 로직
+│   │   ├── events.py           # Redis pub/sub 이벤트
+│   │   └── sse.py              # SSE 스트림 엔드포인트
+│   ├── mcp_server.py           # FastMCP 서버 (13 도구, 4 프롬프트)
+│   └── alembic/                # DB 마이그레이션 (6개)
 │
 ├── frontend/
 │   └── src/
-│       ├── components/         # 칸반 보드 UI 컴포넌트
-│       ├── hooks/useTasks.ts   # 데이터 + SSE 훅
-│       └── lib/                # API 클라이언트, 타입
+│       ├── app/board/page.tsx  # 칸반 보드 + 터미널 통합 레이아웃
+│       ├── components/
+│       │   ├── Header.tsx      # 헤더 + 터미널 토글 버튼
+│       │   ├── KanbanBoard.tsx # 칸반 보드 컨테이너
+│       │   ├── KanbanColumn.tsx
+│       │   ├── TaskCard.tsx
+│       │   └── terminal/       # 웹 터미널 컴포넌트
+│       │       ├── TerminalPanel.tsx
+│       │       ├── TerminalToolbar.tsx
+│       │       └── ResizableDivider.tsx
+│       ├── hooks/
+│       │   ├── useTasks.ts     # 태스크 데이터 + SSE 훅
+│       │   ├── useTerminal.ts  # xterm.js + WebSocket 훅
+│       │   └── useLocalStorage.ts
+│       └── lib/
+│           ├── api.ts          # REST API 클라이언트
+│           ├── sse.ts          # SSE 이벤트 핸들러
+│           ├── terminal.ts     # 터미널 상수
+│           └── types.ts        # TypeScript 타입
+│
+├── terminal-sidecar/           # 웹 터미널 백엔드 (호스트에서 실행)
+│   └── src/
+│       ├── index.ts            # Express + WebSocket 서버 (:7681)
+│       └── pty-manager.ts      # node-pty 세션 관리
 │
 └── skills/                     # 에이전트 스킬 파일 (.md)
     ├── team_leader.md
@@ -324,6 +387,8 @@ docker compose up --build -d
 | 포트 충돌 | `.env`에서 `BACKEND_PORT`, `FRONTEND_PORT` 변경 후 `docker compose up --build -d` |
 | MCP 연결 실패 | Docker 실행 중인지 + `curl http://localhost:8001/api/tasks` 응답 확인 |
 | Alembic 에러 | `docker compose down -v && docker compose up --build -d` (DB 초기화) |
+| 터미널 커서만 깜빡임 | `chmod +x terminal-sidecar/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper` |
+| 터미널 연결 안됨 | 사이드카 실행 확인: `curl http://localhost:7681/health` |
 
 ---
 

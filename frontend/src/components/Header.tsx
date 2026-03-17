@@ -6,9 +6,11 @@ interface HeaderProps {
   tasks: Task[];
   sseConnected: boolean;
   onNewTask: () => void;
+  onTerminalToggle?: () => void;
+  isTerminalOpen?: boolean;
 }
 
-export default function Header({ tasks, sseConnected, onNewTask }: HeaderProps) {
+export default function Header({ tasks, sseConnected, onNewTask, onTerminalToggle, isTerminalOpen }: HeaderProps) {
   const totalTasks = tasks.length;
   const doneTasks = tasks.filter((t) => t.status === TaskStatus.DONE).length;
   const inProgressTasks = tasks.filter(
@@ -59,6 +61,19 @@ export default function Header({ tasks, sseConnected, onNewTask }: HeaderProps) 
             </div>
           </div>
 
+          {onTerminalToggle && (
+            <button
+              onClick={onTerminalToggle}
+              className={`rounded-lg px-3 py-2 text-sm font-mono font-medium transition-colors ${
+                isTerminalOpen
+                  ? "bg-gray-700 text-white"
+                  : "text-gray-400 hover:bg-gray-800 hover:text-white"
+              }`}
+              title="Toggle Terminal"
+            >
+              {">_"}
+            </button>
+          )}
           <button
             onClick={onNewTask}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
