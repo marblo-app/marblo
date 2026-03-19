@@ -11,6 +11,7 @@ Sub-agent들을 스폰하고, 태스크 진행을 조율하며, 품질을 관리
 - test: 테스트 코드, QA 검증
 - devops: Docker, 배포, CI/CD
 - merge: 코드 통합, PR 머지, 통합 테스트
+- flutter: Flutter/Dart 크로스플랫폼 앱 (iOS/Android/데스크톱)
 
 ## 에이전트 스폰 규칙
 
