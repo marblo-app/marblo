@@ -4,17 +4,17 @@ description: 진행 중인 프로젝트에 새 태스크 추가 또는 기존 �
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
-# TaskForce 태스크 추가 / 수정
+# Marblo 태스크 추가 / 수정
 
 > 진행 중인 프로젝트에 새 태스크를 추가하거나, 기존 태스크를 수정합니다.
 > "태스크 추가해줘", "우선순위 바꿔줘", "설명 수정해줘" 등 모두 이 스킬로 처리합니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 생성/조회는 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 태스크 생성/조회는 반드시 **Marblo MCP 도구**를 사용합니다:
 > `create_task`, `create_tasks_bulk`, `get_all_tasks`, `get_available_tasks`
 >
 > 새 태스크의 `project` 필드는 기존 태스크와 동일한 프로젝트명을 사용하세요.

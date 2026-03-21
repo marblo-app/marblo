@@ -1,4 +1,4 @@
-# TaskForce.AI 설치 가이드
+# Marblo (마블로) 설치 가이드
 
 AI 에이전트 팀을 위한 태스크 오케스트레이션 플랫폼 설치 가이드입니다.
 
@@ -187,7 +187,7 @@ python backend/mcp_server.py
 
 ### 3-3. 글로벌 MCP 설정 (권장 — 모든 프로젝트에서 사용 가능)
 
-어떤 폴더에서 Claude Code를 실행해도 TaskForce MCP를 사용할 수 있도록 글로벌 설정을 합니다.
+어떤 폴더에서 Claude Code를 실행해도 Marblo MCP를 사용할 수 있도록 글로벌 설정을 합니다.
 
 먼저 본인의 절대 경로를 확인합니다:
 
@@ -285,7 +285,7 @@ Claude Code 안에서 아래처럼 요청해보세요:
 ### Claude Code Agent Teams 실행 예시
 
 ```bash
-claude "TaskForce.AI 칸반 보드에서 backend 역할 태스크를 확인하고 작업해줘.
+claude "Marblo 칸반 보드에서 backend 역할 태스크를 확인하고 작업해줘.
 MCP 도구를 사용해서 태스크를 claim하고, 작업 진행 상황을 activity로 기록해."
 ```
 

@@ -4,16 +4,16 @@ description: 에이전트가 실패한 태스크를 직접 이어받아서 완�
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
-# TaskForce 수동 핸드오프
+# Marblo 수동 핸드오프
 
 > 에이전트가 처리하지 못한 태스크를 내가 직접 이어받아서 완료합니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/상태변경/기록은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 태스크 조회/상태변경/기록은 반드시 **Marblo MCP 도구**를 사용합니다:
 > `get_all_tasks`, `get_task_activities`, `update_task_status`, `claim_task`,
 > `add_activity`, `submit_for_review`, `get_agent_skill`
 

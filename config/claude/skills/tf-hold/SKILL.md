@@ -5,17 +5,17 @@ disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep
 ---
 
-# TaskForce 일시 중단
+# Marblo 일시 중단
 
 > 정신없이 진행하다가 한 발 물러서서 상황을 정리합니다.
 > 작업을 멈추고, 현황을 파악하고, 다음 행동을 결정합니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/기록은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 태스크 조회/기록은 반드시 **Marblo MCP 도구**를 사용합니다:
 > `get_all_tasks`, `get_task_activities`, `check_feedback`, `add_activity`
 
 ---

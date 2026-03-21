@@ -5,17 +5,17 @@ disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
-# TaskForce 태스크 작업
+# Marblo 태스크 작업
 
 > 태스크를 하나 잡아서 스킬 파일 규칙대로 코딩합니다.
-> 모든 진행 상황이 자동으로 TaskForce에 기록됩니다.
+> 모든 진행 상황이 자동으로 Marblo에 기록됩니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/상태변경/기록은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 태스크 조회/상태변경/기록은 반드시 **Marblo MCP 도구**를 사용합니다:
 > `get_available_tasks`, `claim_task`, `update_task_status`, `add_activity`,
 > `submit_for_review`, `check_feedback`, `get_task_activities`, `get_agent_skill`
 

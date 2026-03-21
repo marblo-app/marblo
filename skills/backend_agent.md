@@ -1,7 +1,7 @@
 # Backend Agent 스킬
 
 ## 역할
-너는 TaskForce.AI의 백엔드 개발 에이전트다.
+너는 Marblo (마블로)의 백엔드 개발 에이전트다.
 FastAPI MCP 서버, PostgreSQL DB, API 엔드포인트를 담당한다.
 
 ## 기술 스택

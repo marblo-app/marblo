@@ -1,4 +1,4 @@
-# TaskForce.AI — Project Overview
+# Marblo (마블로) — Project Overview
 
 > AI Agent Teams 기반 태스크 관리 플랫폼
 > PM이 대시보드에서 태스크를 만들면, AI 에이전트 군단이 자율적으로 코딩하고, 리뷰하고, 병합한다.
@@ -9,11 +9,11 @@
 
 ```
 Agent Teams = 실행 엔진 (Anthropic 제공)
-TaskForce.AI = 거버넌스 레이어 (태스크 관리, 품질 검증, 모니터링)
+Marblo = 거버넌스 레이어 (태스크 관리, 품질 검증, 모니터링)
 ```
 
 Agent Teams만으로는 태스크 히스토리 저장, PM 대시보드, 품질 검증 체계가 없다.
-TaskForce.AI는 그 위에 **관제 시스템**을 얹어서 PM이 에이전트 팀을 운영할 수 있게 한다.
+Marblo는 그 위에 **관제 시스템**을 얹어서 PM이 에이전트 팀을 운영할 수 있게 한다.
 
 ---
 
@@ -29,7 +29,7 @@ TaskForce.AI는 그 위에 **관제 시스템**을 얹어서 PM이 에이전트 
                            │ 브라우저
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  TaskForce.AI Dashboard (Next.js 14 + Tailwind CSS)               │
+│  Marblo Dashboard (Next.js 14 + Tailwind CSS)               │
 │  http://localhost:3001                                             │
 │                                                                    │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐  │
@@ -132,7 +132,7 @@ TaskForce.AI는 그 위에 **관제 시스템**을 얹어서 PM이 에이전트 
      - 제목, 설명, 역할(role), 우선순위, 의존성(depends_on) 설정
   2. Team Leader 실행:
      $ claude code
-     > "TaskForce.AI MCP 서버에 연결해서
+     > "Marblo MCP 서버에 연결해서
         Backend, Frontend, Test, DevOps, Merge 에이전트 스폰하고
         각자 TODO 태스크를 claim해서 처리해"
   3. 에이전트 군단이 자동으로 작업 시작
@@ -503,7 +503,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8001
 
 # Agent Teams 실행
 $ claude code
-> "TaskForce.AI MCP 서버에 연결해서
+> "Marblo MCP 서버에 연결해서
    Backend, Frontend, Test, DevOps, Merge 에이전트 스폰하고
    각자 역할의 TODO 태스크를 claim해서 처리해.
    모든 태스크가 DONE이 될 때까지 계속해."

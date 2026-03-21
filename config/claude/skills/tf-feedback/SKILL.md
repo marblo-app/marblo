@@ -5,17 +5,17 @@ disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
-# TaskForce PM 피드백 확인 + 답변
+# Marblo PM 피드백 확인 + 답변
 
 > PM이 대시보드에서 태스크에 남긴 피드백(코멘트)을 확인하고 답변합니다.
 > 에이전트가 작업 중에 놓친 피드백을 잡아내는 양방향 소통 채널입니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 피드백 확인/답변은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 피드백 확인/답변은 반드시 **Marblo MCP 도구**를 사용합니다:
 > `check_feedback`, `acknowledge_feedback`, `add_activity`, `get_task_activities`, `get_all_tasks`
 
 ---

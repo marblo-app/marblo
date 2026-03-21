@@ -1,7 +1,7 @@
 # Team Leader 스킬
 
 ## 역할
-너는 TaskForce.AI 에이전트 팀의 리더다.
+너는 Marblo (마블로) 에이전트 팀의 리더다.
 Sub-agent들을 스폰하고, 태스크 진행을 조율하며, 품질을 관리한다.
 
 ## 팀 구성
@@ -28,7 +28,7 @@ Sub-agent들을 스폰하고, 태스크 진행을 조율하며, 품질을 관리
 ### 에이전트 스폰 시 프롬프트
 에이전트를 스폰할 때 반드시 다음을 포함:
 ```
-너는 TaskForce.AI의 {role} 에이전트다.
+너는 Marblo (마블로)의 {role} 에이전트다.
 1. get_agent_skill("{role}")로 스킬을 로드하고 숙지하라.
 2. get_available_tasks("{role}")로 사용 가능한 태스크를 조회하라.
 3. 태스크가 있으면 claim_task()로 선점하고 작업을 수행하라.

@@ -1,21 +1,21 @@
 ---
 name: tf-sync
-description: 현재 코드 상태와 TaskForce 티켓을 동기화합니다. 누락된 업데이트를 잡아내고 티켓을 최신 상태로 맞춥니다.
+description: 현재 코드 상태와 Marblo 티켓을 동기화합니다. 누락된 업데이트를 잡아내고 티켓을 최신 상태로 맞춥니다.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep
 ---
 
-# TaskForce 티켓 동기화
+# Marblo 티켓 동기화
 
 > 에이전트가 티켓 업데이트 없이 코딩만 진행한 경우,
 > 실제 코드 상태와 티켓 상태를 맞춰줍니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/상태변경/기록은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 태스크 조회/상태변경/기록은 반드시 **Marblo MCP 도구**를 사용합니다:
 > `get_all_tasks`, `update_task_status`, `add_activity`, `submit_for_review`, `claim_task`
 
 ---
@@ -33,7 +33,7 @@ allowed-tools: Bash, Read, Glob, Grep
 
 두 가지를 동시에 확인합니다:
 
-### 1-1. TaskForce 티켓 현황
+### 1-1. Marblo 티켓 현황
 
 `get_all_tasks`로 전체 태스크를 조회합니다.
 각 태스크의 상태, scope(파일 경로), 마지막 activity를 정리합니다.

@@ -4,16 +4,16 @@ description: Ralph 패턴으로 반복 작업을 티켓 단위로 추적하며 �
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
-# TaskForce Ralph — 반복 작업 자동화
+# Marblo Ralph — 반복 작업 자동화
 
-> Ralph 패턴으로 반복 작업을 TaskForce 티켓과 함께 처리합니다.
+> Ralph 패턴으로 반복 작업을 Marblo 티켓과 함께 처리합니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 생성/조회/상태변경/기록은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 태스크 생성/조회/상태변경/기록은 반드시 **Marblo MCP 도구**를 사용합니다:
 > - 일괄 생성: `create_tasks_bulk` (한 번의 호출로 전체 티켓 생성)
 > - 작업: `claim_task`, `update_task_status`, `add_activity`, `submit_for_review`
 > - 조회: `get_all_tasks`, `get_available_tasks`
@@ -25,7 +25,7 @@ allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 사용자에게 다음을 물어보세요:
 1. **대상**: 어떤 파일/컴포넌트/엔드포인트를 반복 처리할 것인지
 2. **작업**: 각 대상에 어떤 작업을 할 것인지 (테스트 추가, 리팩토링, a11y 개선 등)
-3. **프로젝트 이름**: TaskForce 티켓에 사용할 프로젝트명
+3. **프로젝트 이름**: Marblo 티켓에 사용할 프로젝트명
 
 ## 워크플로우
 

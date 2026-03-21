@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TaskForce.AI MCP Server — thin wrapper around the REST API for Claude Code agents."""
+"""Marblo MCP Server — thin wrapper around the REST API for Claude Code agents."""
 
 import os
 import re
@@ -17,7 +17,7 @@ DEFAULT_CLIENT_ID: str = os.environ.get("TASKFORCE_CLIENT_ID", "")
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 _TASK_NNN_RE = re.compile(r"^TASK-(\d+)$", re.I)
 
-mcp = FastMCP("TaskForce.AI")
+mcp = FastMCP("Marblo")
 
 
 def _client() -> httpx.Client:
@@ -491,7 +491,7 @@ def acknowledge_feedback(task_id: str) -> str:
 def agent_teams_start() -> str:
     """Agent Teams 방식으로 프로젝트를 태스크로 분해하고 에이전트를 스폰해서 업무를 진행합니다."""
     return (
-        "TaskForce MCP를 사용해서 Agent Teams 방식으로 프로젝트를 진행합니다.\n\n"
+        "Marblo MCP를 사용해서 Agent Teams 방식으로 프로젝트를 진행합니다.\n\n"
         "1. 사용자에게 프로젝트 이름과 만들고 싶은 것을 물어보세요.\n"
         "2. 요구사항을 분석해서 태스크를 분해합니다:\n"
         "   - 각 태스크는 1~2시간 분량\n"
@@ -509,7 +509,7 @@ def agent_teams_start() -> str:
 def task_status_check() -> str:
     """현재 프로젝트의 태스크 진행 상태를 확인하고 요약합니다."""
     return (
-        "TaskForce MCP에서 태스크 진행 상태를 확인합니다.\n\n"
+        "Marblo MCP에서 태스크 진행 상태를 확인합니다.\n\n"
         "1. get_all_tasks로 전체 현황 조회\n"
         "2. 상태별 정리: TODO / IN_PROGRESS / REVIEW / DONE / FAILED\n"
         "3. REVIEW 태스크가 있으면 활동 로그 보여주기\n"
@@ -523,7 +523,7 @@ def task_status_check() -> str:
 def work_with_tracking() -> str:
     """태스크를 claim하고 진행 상황을 기록하면서 코딩합니다."""
     return (
-        "TaskForce MCP에서 태스크를 가져와 작업하면서 진행 상황을 기록합니다.\n\n"
+        "Marblo MCP에서 태스크를 가져와 작업하면서 진행 상황을 기록합니다.\n\n"
         "1. get_available_tasks로 처리 가능한 태스크 확인\n"
         "2. claim_task로 태스크 claim\n"
         "3. update_task_status로 IN_PROGRESS 변경\n"
@@ -541,7 +541,7 @@ def work_with_tracking() -> str:
 def ralph_batch() -> str:
     """Ralph 패턴으로 반복 작업을 티켓 단위로 추적하며 일괄 처리합니다."""
     return (
-        "Ralph 패턴: 반복 작업을 TaskForce 티켓으로 추적합니다.\n\n"
+        "Ralph 패턴: 반복 작업을 Marblo 티켓으로 추적합니다.\n\n"
         "1. 대상 파일/컴포넌트 분석 → 목록 생성\n"
         "2. create_tasks_bulk로 대상 1개당 티켓 1장 생성\n"
         "3. 순서대로 처리:\n"

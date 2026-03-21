@@ -5,17 +5,17 @@ disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep
 ---
 
-# TaskForce PM 리뷰
+# Marblo PM 리뷰
 
 > 에이전트가 올린 REVIEW 태스크를 검토합니다.
 > 코드 품질을 확인하고 승인(DONE) 또는 반려(TODO로 되돌림) 합니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/상태변경은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 태스크 조회/상태변경은 반드시 **Marblo MCP 도구**를 사용합니다:
 > `get_all_tasks`, `update_task_status`, `add_activity`, `get_task_activities`
 
 ---

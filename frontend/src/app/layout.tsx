@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TaskForce.AI - AI Agent Dashboard",
-  description: "Kanban-style dashboard for managing AI agent tasks",
+  title: "Marblo - AI Agent Workspace",
+  description: "Drop your tasks on the board. Let your agents roll.",
 };
 
 export default function RootLayout({

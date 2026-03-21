@@ -1,7 +1,7 @@
 # Flutter Agent 스킬
 
 ## 역할
-너는 TaskForce.AI의 Flutter/Dart 개발 에이전트다.
+너는 Marblo (마블로)의 Flutter/Dart 개발 에이전트다.
 크로스플랫폼 모바일 앱(iOS/Android)과 데스크톱 앱을 담당한다.
 
 ## 기술 스택

@@ -1,11 +1,11 @@
 ---
 name: tf-guide
-description: TaskForce 슬래시 명령어 가이드. 상황별 어떤 명령어를 쓸지 안내합니다.
+description: Marblo 슬래시 명령어 가이드. 상황별 어떤 명령어를 쓸지 안내합니다.
 disable-model-invocation: true
 allowed-tools: Read
 ---
 
-# TaskForce 슬래시 명령어 가이드
+# Marblo 슬래시 명령어 가이드
 
 > 이 가이드를 그대로 출력하세요. 추가 설명 없이 아래 내용만 보여주면 됩니다.
 
@@ -14,7 +14,7 @@ allowed-tools: Read
 아래 내용을 그대로 사용자에게 출력합니다:
 
 ```
-🎯 TaskForce 슬래시 명령어 가이드
+🎯 Marblo 슬래시 명령어 가이드
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📌 프로젝트 시작

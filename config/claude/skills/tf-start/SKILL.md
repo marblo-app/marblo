@@ -6,24 +6,24 @@ allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 argument-hint: [프로젝트명]
 ---
 
-# TaskForce 프로젝트 킥오프
+# Marblo 프로젝트 킥오프
 
 > `/tf-plan`으로 PRD + 태스크 계획이 확정된 후 실행합니다.
 > PRD가 없으면 먼저 `/tf-plan`을 안내합니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 반드시 **TaskForce MCP 도구**만 사용합니다:
+> 반드시 **Marblo MCP 도구**만 사용합니다:
 > - 태스크 일괄 생성: `create_tasks_bulk` (한 번의 호출로 전체 태스크를 한꺼번에 생성)
 > - 태스크 단건 생성: `create_task`
 > - 태스크 조회: `get_all_tasks`, `get_available_tasks`
 > - 태스크 작업: `claim_task`, `update_task_status`, `add_activity`, `submit_for_review`
 > - 기타: `check_feedback`, `get_task_activities`, `get_agent_skill`, `get_task_dependencies`
 >
-> **Claude Code 내장 TaskCreate로 개별 등록하면 안 됩니다.** TaskForce 대시보드에 표시되지 않습니다.
+> **Claude Code 내장 TaskCreate로 개별 등록하면 안 됩니다.** Marblo 대시보드에 표시되지 않습니다.
 > **`create_tasks_bulk`를 사용하면 한 번의 호출로 모든 태스크가 일괄 등록됩니다.**
 
 ---
@@ -37,7 +37,7 @@ argument-hint: [프로젝트명]
    - 있으면: PRD를 읽고 태스크 목록 추출
 
 2. **환경 확인**:
-   - TaskForce MCP 연결 확인: `get_all_tasks` 호출 테스트
+   - Marblo MCP 연결 확인: `get_all_tasks` 호출 테스트
    - 프로젝트 디렉토리 존재 확인
    - 기존 태스크가 있으면 충돌 여부 확인
 
@@ -77,11 +77,11 @@ PRD의 태스크 계획을 **하나의 `create_tasks_bulk` 호출**로 변환합
 
 ### 1-3. 일괄 생성 실행
 
-**반드시 TaskForce MCP의 `create_tasks_bulk`를 한 번 호출해서 모든 태스크를 한꺼번에 생성합니다.**
+**반드시 Marblo MCP의 `create_tasks_bulk`를 한 번 호출해서 모든 태스크를 한꺼번에 생성합니다.**
 
 ```
 ⛔ 잘못된 방법: Claude Code의 TaskCreate를 13번 개별 호출
-✅ 올바른 방법: TaskForce MCP의 create_tasks_bulk를 1번 호출
+✅ 올바른 방법: Marblo MCP의 create_tasks_bulk를 1번 호출
 ```
 
 ### 1-4. 생성 결과 확인

@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="TaskForce.AI MCP Server",
+    title="Marblo MCP Server",
     description="MCP Server for AI Agent task orchestration",
     version="0.1.0",
     lifespan=lifespan,

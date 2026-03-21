@@ -6,17 +6,17 @@ allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 argument-hint: [프로젝트명]
 ---
 
-# TaskForce 프로젝트 재개
+# Marblo 프로젝트 재개
 
 > 새 세션, 또는 며칠 후 돌아왔을 때 — 프로젝트를 완전히 복원하고 이어서 진행합니다.
 > 티켓 현황 + 활동 로그 + PRD + 코드 상태를 종합해서 "지금 뭘 해야 하는지"를 알려줍니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/기록/상태변경은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 태스크 조회/기록/상태변경은 반드시 **Marblo MCP 도구**를 사용합니다:
 > `get_all_tasks`, `get_available_tasks`, `get_task_activities`, `check_feedback`,
 > `add_activity`, `submit_for_review`, `claim_task`, `update_task_status`,
 > `create_task`, `create_tasks_bulk`
@@ -272,5 +272,5 @@ Claude Code를 새로 열면 이전 대화가 없습니다. 이 스킬이 복원
 | scope 필드 | 어떤 파일을 수정하고 있었는지 |
 | depends_on | 다음에 풀리는 태스크가 뭔지 |
 
-> **TaskForce 태스크 + PRD + 메모리 = 프로젝트의 완전한 기억.**
+> **Marblo 태스크 + PRD + 메모리 = 프로젝트의 완전한 기억.**
 > 대화가 리셋되어도, 세션이 바뀌어도, 이 세 가지가 컨텍스트를 유지합니다.

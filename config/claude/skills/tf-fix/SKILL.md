@@ -4,16 +4,16 @@ description: FAILED/BLOCKED 태스크 진단 + 복구, 또는 불필요한 태�
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
-# TaskForce 태스크 복구
+# Marblo 태스크 복구
 
 > FAILED 또는 BLOCKED 상태의 태스크를 진단하고 복구합니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/상태변경/기록은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 태스크 조회/상태변경/기록은 반드시 **Marblo MCP 도구**를 사용합니다:
 > `get_all_tasks`, `get_task_activities`, `update_task_status`, `add_activity`
 
 ---

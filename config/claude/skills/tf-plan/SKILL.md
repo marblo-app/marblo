@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 argument-hint: [프로젝트 설명 또는 아이디어]
 ---
 
-# TaskForce 프로젝트 플래닝
+# Marblo 프로젝트 플래닝
 
 > 코드를 한 줄도 쓰기 전에, 충분히 생각하고 계획을 세우는 단계입니다.
 > 이 스킬은 태스크를 생성하지 않습니다. 계획만 수립합니다.
@@ -14,15 +14,15 @@ argument-hint: [프로젝트 설명 또는 아이디어]
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 모든 태스크 관련 작업은 반드시 **TaskForce MCP 도구**를 사용합니다:
+> 모든 태스크 관련 작업은 반드시 **Marblo MCP 도구**를 사용합니다:
 > `create_tasks_bulk`, `create_task`, `get_all_tasks`, `get_available_tasks`,
 > `claim_task`, `update_task_status`, `add_activity`, `submit_for_review`,
 > `check_feedback`, `get_task_activities`, `get_agent_skill`, `get_task_dependencies`
 >
-> Claude Code 내장 TaskCreate로 태스크를 만들면 TaskForce 대시보드에 표시되지 않습니다.
+> Claude Code 내장 TaskCreate로 태스크를 만들면 Marblo 대시보드에 표시되지 않습니다.
 
 ---
 
@@ -125,7 +125,7 @@ argument-hint: [프로젝트 설명 또는 아이디어]
 
 ## Phase 3: 태스크 분해
 
-PRD를 기반으로 TaskForce 태스크로 분해합니다.
+PRD를 기반으로 Marblo 태스크로 분해합니다.
 
 ### 분해 원칙
 

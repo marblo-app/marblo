@@ -1,6 +1,8 @@
-# TaskForce.AI
+# Marblo (마블로)
 
-AI 에이전트 팀을 위한 태스크 오케스트레이션 플랫폼
+**Drop your tasks on the board. Let your agents roll.**
+
+태스크를 보드에 올리세요. 목표까지 알아서 도달하는 AI 워크스페이스
 
 PM이 칸반 보드에서 태스크를 만들면, Claude Code Agent Teams가 자율적으로 작업하고 실시간으로 진행 상황을 보고합니다. 내장 웹 터미널에서 에이전트를 직접 실행하고 모니터링할 수 있습니다.
 
@@ -20,7 +22,7 @@ PM이 칸반 보드에서 태스크를 만들면, Claude Code Agent Teams가 자
 └───────────────────────┼─────────────────────────────────┘
                         │
           ┌─────────────▼──────────────┐
-          │   TaskForce MCP Server     │
+          │   Marblo MCP Server     │
           │   (13 Tools + 4 Prompts)   │
           └─────────────┬──────────────┘
                         │ HTTP
@@ -155,7 +157,7 @@ Agent Teams를 사용하려면 `~/.claude/settings.json`에 추가:
 
 ### 5단계: Claude Code 자동 설정 (권장)
 
-TaskForce 슬래시 스킬 + 상시 강제 Hook을 설치합니다:
+Marblo 슬래시 스킬 + 상시 강제 Hook을 설치합니다:
 
 ```bash
 ./scripts/setup-claude.sh
@@ -164,7 +166,7 @@ TaskForce 슬래시 스킬 + 상시 강제 Hook을 설치합니다:
 이 스크립트가 설치하는 것:
 - **슬래시 스킬 15개** → `~/.claude/skills/` (어디서든 `/tf-plan`, `/tf-start` 등 사용)
 - **상시 강제 Hook** → 매 프롬프트마다 "코드 수정 전 티켓 확인" 강제 주입 (모든 프로젝트 자동 적용)
-- **CLAUDE.md** → TaskForce MCP 워크플로우 규칙
+- **CLAUDE.md** → Marblo MCP 워크플로우 규칙
 
 > 기존 설정이 있으면 백업(`.bak`) 후 덮어쓰며, 훅이 이미 있으면 건너뜁니다.
 
@@ -309,7 +311,7 @@ TaskForce.AI/
 ├── requirements.txt            # MCP 서버 Python 패키지
 ├── CLAUDE.md                   # 프로젝트별 Claude Code 규칙
 ├── config/claude/              # Claude Code 설정 템플릿
-│   └── skills/tf-*/SKILL.md   # TaskForce 슬래시 스킬 15개
+│   └── skills/tf-*/SKILL.md   # Marblo 슬래시 스킬 15개
 ├── scripts/setup-claude.sh     # Claude Code 자동 설정 스크립트
 │
 ├── backend/

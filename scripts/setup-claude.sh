@@ -1,5 +1,5 @@
 #!/bin/bash
-# TaskForce.AI - Claude Code + Codex 설정 스크립트
+# Marblo - Claude Code + Codex 설정 스크립트
 # 사용법: ./scripts/setup-claude.sh
 
 set -e
@@ -30,7 +30,7 @@ echo "[OK] ~/.claude/taskforce-hook.sh 설치 완료"
 
 if [ -f "$CLAUDE_DIR/settings.json" ]; then
   if grep -q "taskforce-hook.sh" "$CLAUDE_DIR/settings.json"; then
-    echo "[SKIP] TaskForce Hook이 이미 설정되어 있습니다"
+    echo "[SKIP] Marblo Hook이 이미 설정되어 있습니다"
   elif grep -q "UserPromptSubmit" "$CLAUDE_DIR/settings.json"; then
     echo "[WARN] 기존 UserPromptSubmit 훅이 있습니다. 수동으로 업데이트하세요:"
     echo "  command: \"bash $CLAUDE_DIR/taskforce-hook.sh\""
@@ -61,9 +61,9 @@ SETTINGS_EOF
   echo "[OK] ~/.claude/settings.json 설치 완료 (Hook 포함)"
 fi
 
-# 3. TaskForce 스킬 설치 (글로벌 — 모든 프로젝트에서 /tf-* 사용 가능)
+# 3. Marblo 스킬 설치 (글로벌 — 모든 프로젝트에서 /tf-* 사용 가능)
 echo ""
-echo "=== TaskForce 스킬 설치 ==="
+echo "=== Marblo 스킬 설치 ==="
 SKILLS_SRC="$PROJECT_DIR/config/claude/skills"
 if [ -d "$SKILLS_SRC" ]; then
   INSTALLED=0
@@ -74,7 +74,7 @@ if [ -d "$SKILLS_SRC" ]; then
     cp "$skill_dir"SKILL.md "$CLAUDE_DIR/skills/$skill_name/SKILL.md"
     INSTALLED=$((INSTALLED + 1))
   done
-  echo "[OK] TaskForce 스킬 ${INSTALLED}개 설치 → ~/.claude/skills/"
+  echo "[OK] Marblo 스킬 ${INSTALLED}개 설치 → ~/.claude/skills/"
   echo "     어디서든 /tf-start, /tf-status 등 바로 사용 가능"
 else
   echo "[WARN] config/claude/skills/ 디렉토리가 없습니다"
@@ -92,15 +92,15 @@ else
   echo "[OK] AGENTS.md 설치 완료 (프로젝트 루트)"
 fi
 
-# 5. Codex config.toml에 TaskForce MCP 추가
+# 5. Codex config.toml에 Marblo MCP 추가
 CODEX_CONFIG="$CODEX_DIR/config.toml"
 if [ -f "$CODEX_CONFIG" ]; then
   if grep -q "mcp_servers.taskforce" "$CODEX_CONFIG"; then
-    echo "[SKIP] Codex TaskForce MCP가 이미 설정되어 있습니다"
+    echo "[SKIP] Codex Marblo MCP가 이미 설정되어 있습니다"
   else
     echo "" >> "$CODEX_CONFIG"
     cat "$PROJECT_DIR/config/codex/mcp-snippet.toml" >> "$CODEX_CONFIG"
-    echo "[OK] Codex config.toml에 TaskForce MCP 추가 완료"
+    echo "[OK] Codex config.toml에 Marblo MCP 추가 완료"
   fi
 else
   # Python 경로와 mcp_server.py 경로를 자동 설정
@@ -111,7 +111,7 @@ fi
 echo ""
 echo "✅ 설정 완료!"
 echo "   - Claude Code: 새 세션에서 적용 (Hook은 즉시 적용)"
-echo "   - TaskForce 스킬: 새 세션에서 / 입력 시 tf-* 표시"
+echo "   - Marblo 스킬: 새 세션에서 / 입력 시 tf-* 표시"
 echo "   - Codex: codex 실행 시 적용"
 echo ""
 echo "📌 사용법: 아무 프로젝트에서 claude 실행 후 / 입력"

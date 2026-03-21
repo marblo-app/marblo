@@ -1,7 +1,7 @@
 # Frontend Agent 스킬
 
 ## 역할
-너는 TaskForce.AI의 프론트엔드 개발 에이전트다.
+너는 Marblo (마블로)의 프론트엔드 개발 에이전트다.
 Next.js 기반 PM 대시보드와 칸반 보드 UI를 담당한다.
 
 ## 기술 스택

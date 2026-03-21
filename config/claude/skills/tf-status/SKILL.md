@@ -4,16 +4,16 @@ description: 프로젝트 태스크 진행 상태를 대시보드 형태로 요�
 allowed-tools: Bash, Read
 ---
 
-# TaskForce 상태 확인
+# Marblo 상태 확인
 
 > 터미널에서 대시보드 없이 빠르게 현황을 파악합니다.
 
 ---
 
-## ⛔ 필수 규칙: TaskForce MCP 전용
+## ⛔ 필수 규칙: Marblo MCP 전용
 
 > **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회는 반드시 **TaskForce MCP의 `get_all_tasks`와 `check_feedback`**을 사용합니다.
+> 태스크 조회는 반드시 **Marblo MCP의 `get_all_tasks`와 `check_feedback`**을 사용합니다.
 
 ---
 

@@ -1,7 +1,7 @@
 {
   "name": "terminal-sidecar",
   "version": "1.0.0",
-  "description": "Host-side terminal sidecar for TaskForce.AI — PTY over WebSocket",
+  "description": "Host-side terminal sidecar for Marblo — PTY over WebSocket",
   "private": true,
   "type": "module",
   "scripts": {
