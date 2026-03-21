@@ -1,7 +1,7 @@
-[mcp_servers.taskforce]
+[mcp_servers.marblo]
 command = "__PROJECT_DIR__/.venv/bin/python"
 args = ["__PROJECT_DIR__/backend/mcp_server.py"]
 tool_timeout_sec = 30
 
-[mcp_servers.taskforce.env]
-TASKFORCE_API_URL = "http://localhost:8001"
+[mcp_servers.marblo.env]
+MARBLO_API_URL = "http://localhost:8001"

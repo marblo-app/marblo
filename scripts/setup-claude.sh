@@ -95,7 +95,7 @@ fi
 # 5. Codex config.toml에 Marblo MCP 추가
 CODEX_CONFIG="$CODEX_DIR/config.toml"
 if [ -f "$CODEX_CONFIG" ]; then
-  if grep -q "mcp_servers.taskforce" "$CODEX_CONFIG"; then
+  if grep -q "mcp_servers.marblo" "$CODEX_CONFIG"; then
     echo "[SKIP] Codex Marblo MCP가 이미 설정되어 있습니다"
   else
     echo "" >> "$CODEX_CONFIG"

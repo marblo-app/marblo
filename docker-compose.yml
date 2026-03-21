@@ -3,22 +3,24 @@ version: '3.8'
 services:
   db:
     image: postgres:16-alpine
+    container_name: marblo-db
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-taskforce}
-      POSTGRES_USER: ${POSTGRES_USER:-taskforce}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taskforce123}
+      POSTGRES_DB: ${POSTGRES_DB:-marblo}
+      POSTGRES_USER: ${POSTGRES_USER:-marblo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-marblo123}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taskforce} -d ${POSTGRES_DB:-taskforce}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marblo} -d ${POSTGRES_DB:-marblo}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
+    container_name: marblo-redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
     healthcheck:
@@ -29,6 +31,7 @@ services:
 
   backend:
     build: ./backend
+    container_name: marblo-backend
     ports:
       - "${BACKEND_PORT:-8001}:${BACKEND_PORT:-8001}"
     depends_on:
@@ -38,9 +41,9 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
-      TASKFORCE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-taskforce}:${POSTGRES_PASSWORD:-taskforce123}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-taskforce}
-      TASKFORCE_REDIS_URL: redis://redis:${REDIS_PORT:-6379}/0
-      TASKFORCE_SKILLS_DIR: /app/skills
+      MARBLO_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-marblo}:${POSTGRES_PASSWORD:-marblo123}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-marblo}
+      MARBLO_REDIS_URL: redis://redis:${REDIS_PORT:-6379}/0
+      MARBLO_SKILLS_DIR: /app/skills
     volumes:
       - ./skills:/app/skills:ro
 
@@ -49,6 +52,7 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8001}
+    container_name: marblo-frontend
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:

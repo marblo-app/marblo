@@ -23,7 +23,7 @@ services:
 ```
 
 ### 헬스체크
-- PostgreSQL: `pg_isready -U taskforce`
+- PostgreSQL: `pg_isready -U marblo`
 - Redis: `redis-cli ping`
 - Backend: HTTP GET /health
 - Frontend: HTTP GET /

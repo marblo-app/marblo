@@ -474,9 +474,9 @@ docker compose up --build -d
 ### 환경변수 (.env)
 
 ```
-POSTGRES_DB=taskforce
-POSTGRES_USER=taskforce
-POSTGRES_PASSWORD=taskforce123
+POSTGRES_DB=marblo
+POSTGRES_USER=marblo
+POSTGRES_PASSWORD=marblo123
 POSTGRES_PORT=5432
 REDIS_PORT=6379
 BACKEND_PORT=8001
@@ -491,11 +491,11 @@ NEXT_PUBLIC_API_URL=http://localhost:8001
 # ~/.claude/settings.json
 {
   "mcpServers": {
-    "taskforce": {
+    "marblo": {
       "command": "python",
       "args": ["backend/mcp_server.py"],
       "env": {
-        "TASKFORCE_DATABASE_URL": "postgresql+asyncpg://taskforce:taskforce123@localhost:5432/taskforce"
+        "MARBLO_DATABASE_URL": "postgresql+asyncpg://marblo:marblo123@localhost:5432/marblo"
       }
     }
   }

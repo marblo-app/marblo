@@ -118,10 +118,10 @@ docker compose ps
 
 ```
 NAME                     STATUS
-taskforce_ai-db-1        Up (healthy)
-taskforce_ai-redis-1     Up (healthy)
-taskforce_ai-backend-1   Up
-taskforce_ai-frontend-1  Up
+marblo-db        Up (healthy)
+marblo-redis     Up (healthy)
+marblo-backend   Up
+marblo-frontend  Up
 ```
 
 ### 서비스 접속 확인
@@ -206,11 +206,11 @@ echo "$(pwd)/backend/mcp_server.py"
 ```json
 {
   "mcpServers": {
-    "taskforce": {
+    "marblo": {
       "command": "/여기에_위에서_확인한_python_절대경로",
       "args": ["/여기에_위에서_확인한_mcp_server_절대경로"],
       "env": {
-        "TASKFORCE_API_URL": "http://localhost:8001"
+        "MARBLO_API_URL": "http://localhost:8001"
       }
     }
   }
@@ -221,11 +221,11 @@ echo "$(pwd)/backend/mcp_server.py"
 ```json
 {
   "mcpServers": {
-    "taskforce": {
+    "marblo": {
       "command": "/Users/yourname/projects/TaskForce_AI/.venv/bin/python",
       "args": ["/Users/yourname/projects/TaskForce_AI/backend/mcp_server.py"],
       "env": {
-        "TASKFORCE_API_URL": "http://localhost:8001"
+        "MARBLO_API_URL": "http://localhost:8001"
       }
     }
   }
@@ -236,18 +236,18 @@ echo "$(pwd)/backend/mcp_server.py"
 ```json
 {
   "mcpServers": {
-    "taskforce": {
+    "marblo": {
       "command": "C:/Users/yourname/projects/TaskForce_AI/.venv/Scripts/python.exe",
       "args": ["C:/Users/yourname/projects/TaskForce_AI/backend/mcp_server.py"],
       "env": {
-        "TASKFORCE_API_URL": "http://localhost:8001"
+        "MARBLO_API_URL": "http://localhost:8001"
       }
     }
   }
 }
 ```
 
-> **포트를 변경한 경우**: `TASKFORCE_API_URL`의 포트도 `.env`의 `BACKEND_PORT`와 일치시키세요.
+> **포트를 변경한 경우**: `MARBLO_API_URL`의 포트도 `.env`의 `BACKEND_PORT`와 일치시키세요.
 >
 > **참고**: 프로젝트 루트에도 `.mcp.json`이 포함되어 있어서, TaskForce_AI 폴더에서 실행하면 상대경로로도 동작합니다. 글로벌 설정은 다른 프로젝트 폴더에서 `claude`를 실행할 때 필요합니다.
 
@@ -262,7 +262,7 @@ claude    # TaskForce_AI 폴더가 아니어도 OK
 Claude Code 안에서 아래처럼 요청해보세요:
 
 ```
-"taskforce MCP로 backend 역할의 사용 가능한 태스크를 조회해줘"
+"marblo MCP로 backend 역할의 사용 가능한 태스크를 조회해줘"
 ```
 
 정상이면 현재 TODO 상태의 태스크 목록을 반환합니다.

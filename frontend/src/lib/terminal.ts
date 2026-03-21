@@ -12,4 +12,4 @@ export const MIN_TERMINAL_HEIGHT = 15;
 export const MAX_TERMINAL_HEIGHT = 60;
 
 /** localStorage key for persisting terminal panel height */
-export const TERMINAL_STORAGE_KEY = "taskforce:terminal-height";
+export const TERMINAL_STORAGE_KEY = "marblo:terminal-height";

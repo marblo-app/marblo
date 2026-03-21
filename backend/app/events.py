@@ -8,7 +8,7 @@ from app.schemas import ActivityLogResponse, TaskResponse
 
 logger = logging.getLogger(__name__)
 
-CHANNEL = "taskforce:events"
+CHANNEL = "marblo:events"
 
 _redis: redis.Redis | None = None
 

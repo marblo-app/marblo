@@ -8,11 +8,11 @@ from pathlib import Path
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-API_URL = os.environ.get("TASKFORCE_API_URL", "http://localhost:8001")
+API_URL = os.environ.get("MARBLO_API_URL", "http://localhost:8001")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-DEFAULT_PROJECT: str = os.environ.get("TASKFORCE_PROJECT", "") or os.path.basename(os.getcwd())
-DEFAULT_CLIENT_ID: str = os.environ.get("TASKFORCE_CLIENT_ID", "")
+DEFAULT_PROJECT: str = os.environ.get("MARBLO_PROJECT", "") or os.path.basename(os.getcwd())
+DEFAULT_CLIENT_ID: str = os.environ.get("MARBLO_CLIENT_ID", "")
 
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 _TASK_NNN_RE = re.compile(r"^TASK-(\d+)$", re.I)

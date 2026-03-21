@@ -1,12 +1,12 @@
 {
   "mcpServers": {
-    "taskforce": {
+    "marblo": {
       "command": ".venv/bin/python",
       "args": ["backend/mcp_server.py"],
       "env": {
-        "TASKFORCE_API_URL": "http://localhost:8001",
-        "TASKFORCE_PROJECT": "",
-        "TASKFORCE_CLIENT_ID": ""
+        "MARBLO_API_URL": "http://localhost:8001",
+        "MARBLO_PROJECT": "",
+        "MARBLO_CLIENT_ID": ""
       }
     }
   }

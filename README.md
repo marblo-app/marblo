@@ -134,11 +134,11 @@ echo "$(pwd)/backend/mcp_server.py"
 ```json
 {
   "mcpServers": {
-    "taskforce": {
+    "marblo": {
       "command": "/절대경로/TaskForce.AI/.venv/bin/python",
       "args": ["/절대경로/TaskForce.AI/backend/mcp_server.py"],
       "env": {
-        "TASKFORCE_API_URL": "http://localhost:8001"
+        "MARBLO_API_URL": "http://localhost:8001"
       }
     }
   }
@@ -175,7 +175,7 @@ Marblo 슬래시 스킬 + 상시 강제 Hook을 설치합니다:
 ```bash
 claude
 # Claude Code에서 입력:
-# "taskforce MCP로 backend 역할의 사용 가능한 태스크를 조회해줘"
+# "marblo MCP로 backend 역할의 사용 가능한 태스크를 조회해줘"
 ```
 
 ---

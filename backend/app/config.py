@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     backend_port: int = 8001
     backend_host: str = "0.0.0.0"
 
-    model_config = {"env_prefix": "TASKFORCE_", "env_file": ".env"}
+    model_config = {"env_prefix": "MARBLO_", "env_file": ".env"}
 
 
 settings = Settings()
