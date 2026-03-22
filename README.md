@@ -391,6 +391,26 @@ docker compose up --build -d
 | Alembic 에러 | `docker compose down -v && docker compose up --build -d` (DB 초기화) |
 | 터미널 커서만 깜빡임 | `chmod +x terminal-sidecar/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper` |
 | 터미널 연결 안됨 | 사이드카 실행 확인: `curl http://localhost:7681/health` |
+| 터미널 포트 충돌 (EADDRINUSE :7681) | `lsof -ti:7681 \| xargs kill` 후 사이드카 재시작 |
+| 터미널 내 Claude 버전이 다름/업데이트 안됨 | 아래 "터미널 사이드카 PATH 문제" 참고 |
+
+### 터미널 사이드카 PATH 문제
+
+사이드카 PTY는 **non-login shell**로 실행되어 `~/.zprofile`이 로드되지 않습니다. Homebrew로 설치한 CLI 도구(claude, node 등)의 경로가 `~/.zprofile`에만 있으면 사이드카 터미널에서 찾지 못합니다.
+
+**증상:** 사이드카 터미널에서 `claude --version`이 시스템 버전과 다르거나, `claude update`가 안 먹음
+
+**해결:**
+```bash
+# ~/.zshrc에 Homebrew PATH 추가 (non-login shell에서도 로드됨)
+echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zshrc
+
+# 사이드카 재시작
+lsof -ti:7681 | xargs kill
+cd terminal-sidecar && npm run dev
+```
+
+**원인:** macOS에서 Homebrew는 기본적으로 `~/.zprofile`에 PATH를 추가합니다. 일반 터미널(login shell)은 `.zprofile`을 읽지만, 사이드카 PTY(non-login shell)는 `.zshrc`만 읽어서 PATH가 누락됩니다.
 
 ---
 
