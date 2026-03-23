@@ -36,6 +36,26 @@ const server = http.createServer(app);
 
 const wss = new WebSocketServer({ noServer: true });
 
+// ---------------------------------------------------------------------------
+// Heartbeat — ping every 30s, kill dead connections
+// ---------------------------------------------------------------------------
+const HEARTBEAT_INTERVAL = 30_000;
+const aliveClients = new WeakSet<WebSocket>();
+
+const heartbeat = setInterval(() => {
+  for (const client of wss.clients) {
+    if (!aliveClients.has(client)) {
+      console.log("[ws] Terminating stale connection");
+      client.terminate();
+      continue;
+    }
+    aliveClients.delete(client);
+    client.ping();
+  }
+}, HEARTBEAT_INTERVAL);
+
+wss.on("close", () => clearInterval(heartbeat));
+
 server.on("upgrade", (req, socket, head) => {
   // Origin validation — only allow known localhost origins
   const origin = req.headers.origin;
@@ -65,6 +85,10 @@ server.on("upgrade", (req, socket, head) => {
 wss.on("connection", (ws, req) => {
   const sessionId = crypto.randomUUID();
   console.log(`[ws] New connection — session ${sessionId}`);
+
+  // Mark alive on connect + every pong
+  aliveClients.add(ws);
+  ws.on("pong", () => aliveClients.add(ws));
 
   // Parse initial cols/rows from query string if provided
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
