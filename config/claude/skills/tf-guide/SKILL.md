@@ -17,7 +17,12 @@ allowed-tools: Read
 🎯 Marblo 슬래시 명령어 가이드
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📌 프로젝트 시작
+📌 프로젝트 시작 (단계별)
+  /tf-analyze       요구사항 분석 — 컴포넌트, 역할, 의존성 파악
+  /tf-create-tasks  분석 기반 태스크 일괄 생성 (확인 후 create_tasks_bulk)
+  /tf-spawn-agents  에이전트 라인업 제안 + 스폰
+
+📌 프로젝트 시작 (한번에)
   /tf-plan     PRD 작성 + 태스크 분해 계획 (소크라틱 질문 → 구조화)
   /tf-start    PRD 기반 태스크 일괄 생성 + 에이전트 스폰
 
@@ -48,10 +53,12 @@ allowed-tools: Read
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 💡 일반적인 흐름:
-  /tf-plan → /tf-start → /tf-status → /tf-review → /tf-done
+  단계별: /tf-analyze → /tf-create-tasks → /tf-spawn-agents → /tf-status → /tf-done
+  한번에: /tf-plan → /tf-start → /tf-status → /tf-review → /tf-done
 
 💡 상황별 추천:
-  • 처음 시작          → /tf-plan
+  • 처음 시작 (단계별) → /tf-analyze
+  • 처음 시작 (한번에) → /tf-plan
   • 어디까지 했더라    → /tf-resume
   • 현황 파악          → /tf-status
   • 리뷰가 쌓여있음    → /tf-review
