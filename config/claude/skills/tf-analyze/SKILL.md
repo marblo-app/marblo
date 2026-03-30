@@ -1,9 +1,7 @@
 ---
 name: tf-analyze
-description: 요구사항을 분석하고 컴포넌트, 역할, 의존성을 파악합니다. /create-tasks 전에 사용합니다.
-disable-model-invocation: true
+description: 요구사항을 분석하고 컴포넌트, 역할, 의존성을 파악합니다
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
-argument-hint: [요구사항 또는 프로젝트 설명]
 ---
 
 # Marblo 요구사항 분석

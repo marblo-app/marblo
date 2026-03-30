@@ -1,9 +1,7 @@
 ---
 name: tf-create-tasks
-description: 분석 결과를 기반으로 Marblo MCP에 태스크를 일괄 생성합니다. /tf-analyze 이후에 사용합니다.
-disable-model-invocation: true
+description: 분석 결과를 기반으로 Marblo MCP에 태스크를 일괄 생성합니다
 allowed-tools: Bash, Read, Glob, Grep
-argument-hint: [프로젝트명]
 ---
 
 # Marblo 태스크 생성

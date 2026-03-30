@@ -1,9 +1,7 @@
 ---
 name: tf-spawn-agents
-description: 태스크를 확인하고 적합한 에이전트를 스폰하여 작업을 시작합니다. /tf-create-tasks 이후에 사용합니다.
-disable-model-invocation: true
+description: 태스크를 확인하고 적합한 에이전트를 스폰하여 작업을 시작합니다
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
-argument-hint: [프로젝트명]
 ---
 
 # Marblo 에이전트 스폰
