@@ -1,12 +1,16 @@
 {
   "mcpServers": {
     "marblo": {
-      "command": ".venv/bin/python",
-      "args": ["backend/mcp_server.py"],
+      "command": "node",
+      "args": ["v3/dist-mcp/index.js"],
       "env": {
-        "MARBLO_API_URL": "http://localhost:8001",
-        "MARBLO_PROJECT": "",
-        "MARBLO_CLIENT_ID": ""
+        "FIREBASE_API_KEY": "AIzaSyBFToup69BMTE5x9uSbk_XPO-JCnQ1XMwg",
+        "FIREBASE_AUTH_DOMAIN": "marblo-2253d.firebaseapp.com",
+        "FIREBASE_PROJECT_ID": "marblo-2253d",
+        "FIREBASE_STORAGE_BUCKET": "marblo-2253d.firebasestorage.app",
+        "FIREBASE_MESSAGING_SENDER_ID": "573192234266",
+        "FIREBASE_APP_ID": "1:573192234266:web:ec87300d1626740342f8a3",
+        "MARBLO_PROJECT": ""
       }
     }
   }

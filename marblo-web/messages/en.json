@@ -1,0 +1,269 @@
+{
+  "nav": {
+    "home": "Home",
+    "pricing": "Pricing",
+    "download": "Download",
+    "lectures": "Lectures",
+    "login": "Login",
+    "signup": "Sign Up",
+    "myLectures": "My Lectures"
+  },
+  "hero": {
+    "title": "One developer.\nAn entire team's output.",
+    "subtitle": "Claude, GPT, and Gemini agents code simultaneously.\nYou direct. They execute.",
+    "cta_download": "Free Download",
+    "cta_pricing": "View Pricing",
+    "badge": "AI Agent Orchestration Platform"
+  },
+  "value": {
+    "title": "Not one agent.\nCommand an army.",
+    "subtitle": "Cursor and Copilot give you one agent.\nMarblo runs multiple agents in parallel — delivering 10x faster results.",
+    "stat1_number": "5x",
+    "stat1_label": "Concurrent Agents",
+    "stat2_number": "10x",
+    "stat2_label": "Development Speed",
+    "stat3_number": "3+",
+    "stat3_label": "AI Models at Once"
+  },
+  "features": {
+    "title": "Why Marblo?",
+    "subtitle": "Beyond code autocomplete — manage AI agents like a project manager",
+    "multiagent": {
+      "title": "Multi-Agent Orchestration",
+      "description": "Claude handles backend, GPT handles frontend, Gemini runs tests — all simultaneously. Track each agent's progress in real-time on the kanban board.",
+      "highlight": "Only tool with this capability",
+      "detail": "Marblo's multi-agent system maximizes each AI model's strengths.\n\nClaude handles sophisticated backend logic and architecture design, GPT delivers rapid frontend coding and UI implementation, and Gemini manages test writing and code review.\n\nEach agent runs in its own isolated terminal, and you can monitor progress in real-time on the kanban board. Through the MCP protocol, agents share context with each other, collaborating like a real development team."
+    },
+    "kanban": {
+      "title": "Kanban Board + Agent Integration",
+      "description": "Create tasks and agents automatically pick them up, coding in their own terminals. Todo → In Progress → Done — agents handle the flow.",
+      "highlight": "Project management meets AI",
+      "detail": "Marblo's kanban board manages agent work through a 5-stage state machine: TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE.\n\nWhen you create a task, it's automatically assigned to the right agent based on role (backend/frontend/test/DevOps). Each agent codes independently in its own terminal, with progress reflected on the kanban board in real-time.\n\nSet up task dependencies (depends_on) to automatically queue tasks until prerequisites are completed."
+    },
+    "flow": {
+      "title": "Flow Editor",
+      "description": "Design agent pipelines visually with a node-based editor. Automate workflows from code generation → review → testing → deployment.",
+      "highlight": "No-code agent pipeline design",
+      "detail": "A visual editor for designing agent pipelines with drag and drop.\n\nNode types include agent execution, conditional branching, parallel processing, code review, and test execution. Connect them to build complex automation workflows without writing code.\n\nFor example, create a pipeline like 'Code Generation → Lint Check → Test Execution → Create PR on Pass' with just a few clicks. Save flows for repeated use across projects."
+    },
+    "orchestrator": {
+      "title": "Natural Language Orchestrator",
+      "description": "Say \"Add login to this app\" and it auto-decomposes into tasks, distributing them across agents. Start complex projects with a single sentence.",
+      "highlight": "Natural language → auto task decomposition",
+      "detail": "Give instructions in natural language and AI automatically decomposes tasks and distributes them to the right agents.\n\nType \"Add login to this app\" and it breaks down into: 1) Backend auth API, 2) Frontend login form, 3) JWT token middleware, 4) Integration tests — four tasks assigned to separate agents.\n\nAgents analyze the codebase to write code that fits existing architecture, detecting dependencies to execute in the correct order."
+    },
+    "mcp": {
+      "title": "Native MCP Protocol",
+      "description": "Equip agents with file system access, databases, APIs, and more via Model Context Protocol. Agents work in your real development environment.",
+      "highlight": "Agents with real tool access",
+      "detail": "Model Context Protocol (MCP) is a standard protocol that provides agents with real development tools and context.\n\nMarblo natively supports MCP, allowing agents to read/write files, query databases, call REST APIs, run Git commands, and more — all in your actual development environment.\n\nExtend agent capabilities by adding custom MCP servers. For example, connect the Marblo MCP server to let agents automatically update task progress on the board."
+    },
+    "privacy": {
+      "title": "Local Execution — Your Data Stays on Your Machine",
+      "description": "Your code never leaves your machine. The Electron app runs locally — you only configure your own API keys. Meets enterprise security requirements.",
+      "highlight": "Zero code leakage risk",
+      "detail": "Marblo is an Electron-based desktop app where all code and data is processed exclusively on your local machine.\n\nYour code is never sent to Marblo servers. AI API calls go directly to each model provider (Anthropic, OpenAI, Google) using API keys you configure.\n\nSafe for enterprise environments, with on-premise deployment options for enhanced security. Audit logs and SSO authentication are available on the Enterprise plan."
+    },
+    "deep": {
+      "kanban": {
+        "label": "KANBAN",
+        "title": "Manage AI agents at a glance",
+        "description": "Monitor multiple AI agents working simultaneously on a kanban board in real-time. Visually track each agent's progress, assigned tasks, and completion status.",
+        "bullet1": "Automatic state transitions: TODO → IN_PROGRESS → REVIEW → DONE",
+        "bullet2": "Real-time work logs per agent",
+        "bullet3": "Drag and drop to adjust priorities"
+      },
+      "flow": {
+        "label": "FLOW EDITOR",
+        "title": "Design AI pipelines visually",
+        "description": "Design complex AI workflows with a node-based editor using drag and drop. See the entire pipeline from analysis → task creation → agent spawn → review at a glance.",
+        "bullet1": "Define agent dependencies through node connections",
+        "bullet2": "Conditional branching — auto-route on success/failure",
+        "bullet3": "Automate repetitive work with flow templates"
+      },
+      "terminal": {
+        "label": "TERMINAL",
+        "title": "Summon agents right from the terminal",
+        "description": "Spawn Claude, GPT, and Gemini agents with a single slash command in the built-in terminal. Watch agents write code, run tests, and deploy in real-time.",
+        "bullet1": "One-click agent creation with /tf-spawn",
+        "bullet2": "Real-time agent output streaming",
+        "bullet3": "Multi-tab monitoring for multiple agents"
+      },
+      "orchestration": {
+        "label": "ORCHESTRATION",
+        "title": "Auto-assign the best AI model",
+        "description": "Claude writes code, GPT documents, Gemini tests — tasks are optimally assigned based on each model's strengths. Smart orchestration that maximizes cost-performance.",
+        "bullet1": "Automatic task assignment based on model strengths",
+        "bullet2": "Cost/performance dashboard for optimization",
+        "bullet3": "Run Claude + GPT + Gemini simultaneously in one project"
+      }
+    }
+  },
+  "comparison": {
+    "title": "Marblo vs Competitors",
+    "subtitle": "Same price range, different league",
+    "feature": "Feature",
+    "marblo": "Marblo",
+    "cursor": "Cursor",
+    "copilot": "Copilot",
+    "windsurf": "Windsurf",
+    "rows": {
+      "multiAgent": "Multi-agent simultaneous operation",
+      "kanban": "Kanban board + task management",
+      "flowEditor": "Visual flow editor",
+      "orchestrator": "Natural language task decomposition",
+      "multiModel": "Multi-model (Claude+GPT+Gemini)",
+      "mcp": "MCP protocol support",
+      "local": "Local execution (data protection)",
+      "price": "Price"
+    }
+  },
+  "bundle": {
+    "title": "Lecture + App Bundle",
+    "subtitle": "Purchase the AI agent development course and receive a Pro plan discount coupon",
+    "lecture_title": "Marblo v3: AI Agent Army Workspace",
+    "lecture_desc": "From multi-agent setup to production deployment — learn AI agent orchestration through real-world projects",
+    "lecture_price": "$99",
+    "bundle_benefit": "50% off Pro plan coupon included with course purchase",
+    "cta": "View Course"
+  },
+  "social": {
+    "title": "What Developers Say",
+    "quote1": "3 agents working simultaneously — finished a day's work in 2 hours",
+    "author1": "Full-stack Developer",
+    "quote2": "Managing agent progress on the kanban board is incredibly intuitive",
+    "author2": "Startup CTO",
+    "quote3": "Switched from Cursor — multi-agent is a completely different level",
+    "author3": "Freelance Developer"
+  },
+  "cta_final": {
+    "title": "Start free today",
+    "subtitle": "Try Marblo with the Free plan,\nthen upgrade to Pro to command your agent army",
+    "download": "Free Download",
+    "pricing": "Compare Plans"
+  },
+  "pricing": {
+    "title": "Pricing Plans",
+    "subtitle": "Cheaper than Cursor ($20/mo), with multi-agent orchestration — best value in AI coding",
+    "free": {
+      "name": "Free",
+      "price": "$0",
+      "price_usd": "$0",
+      "period": "forever free",
+      "description": "Individual developers trying Marblo for the first time",
+      "features": ["1 Project", "2 Agents", "Kanban Board", "Terminal + Code Editor", "MCP Integration"]
+    },
+    "pro": {
+      "name": "Pro",
+      "price": "$19",
+      "price_usd": "$19",
+      "period": "/mo",
+      "description": "Solo developers who want to work like a team",
+      "features": ["Unlimited Projects", "Unlimited Agents", "Flow Editor", "Natural Language Orchestrator", "Priority Support", "All Free features included"]
+    },
+    "team": {
+      "name": "Team",
+      "price": "$29",
+      "price_usd": "$29",
+      "period": "/seat/mo",
+      "description": "Teams that develop together with shared workspaces",
+      "features": ["Shared Team Workspace", "Real-time Collaboration", "Role-based Permissions", "Team Analytics Dashboard", "Team Chat (Coming Soon)", "All Pro features included"]
+    },
+    "enterprise": {
+      "name": "Enterprise",
+      "cta": "Contact Sales",
+      "description": "Organizations needing SSO, audit logs, and dedicated support",
+      "features": ["On-premise Deployment", "SSO/SAML Authentication", "Audit Logs", "99.9% SLA", "Dedicated Account Manager"]
+    },
+    "annual_discount": "Save 20% with annual billing",
+    "subscribe": "Subscribe",
+    "current": "Current Plan",
+    "most_popular": "Most Popular"
+  },
+  "download": {
+    "title": "Download Marblo",
+    "subtitle": "Install the AI Agent Army Workspace",
+    "macos": "macOS (Apple Silicon / Intel)",
+    "windows": "Windows (64-bit)",
+    "linux": "Linux (AppImage)",
+    "version": "Version",
+    "releaseNotes": "Release Notes",
+    "recommended": "Recommended"
+  },
+  "auth": {
+    "login": "Login",
+    "signup": "Sign Up",
+    "email": "Email",
+    "password": "Password",
+    "confirmPassword": "Confirm Password",
+    "loginWithGoogle": "Login with Google",
+    "loginWithGithub": "Login with GitHub",
+    "noAccount": "Don't have an account?",
+    "hasAccount": "Already have an account?",
+    "signupLink": "Sign up",
+    "loginLink": "Login"
+  },
+  "checkout": {
+    "title": "Checkout",
+    "plan": "Plan",
+    "amount": "Amount",
+    "coupon": "Coupon Code",
+    "applyCoupon": "Apply",
+    "couponApplied": "Coupon applied successfully",
+    "couponInvalid": "Invalid coupon code",
+    "discount": "Discount",
+    "total": "Total",
+    "pay": "Pay Now",
+    "success": "Payment completed successfully!",
+    "fail": "Payment failed",
+    "retry": "Try Again",
+    "back": "Go Back",
+    "loading": "Preparing payment system...",
+    "processing": "Processing your payment...",
+    "orderSummary": "Order Summary",
+    "monthly": "/mo",
+    "annual": "/year",
+    "lectureTitle": "Lecture",
+    "invalidPlan": "Invalid plan. Please select a plan from the pricing page.",
+    "invalidLecture": "Invalid lecture. Please select a lecture from the lectures page.",
+    "loginRequired": "Please log in to proceed with payment.",
+    "paymentError": "An error occurred during payment. Please try again later.",
+    "sdkLoadError": "Failed to load payment system. Please refresh the page.",
+    "successTitle": "Payment Complete",
+    "successSubscription": "Your subscription is now active",
+    "successLecture": "Lecture purchase complete",
+    "purchasedPlan": "Subscription Plan",
+    "purchasedAmount": "Amount Paid",
+    "goToMyLectures": "Go to My Lectures",
+    "goToDownload": "Download App",
+    "goToDashboard": "Dashboard",
+    "goHome": "Go Home",
+    "failTitle": "Payment Failed",
+    "failDescription": "There was a problem processing your payment.",
+    "errorCode": "Error Code",
+    "errorMessage": "Error Details",
+    "tryAgain": "Try Payment Again",
+    "contactSupport": "Contact Support",
+    "unknownError": "Unknown error"
+  },
+  "lectures": {
+    "title": "Lectures",
+    "subtitle": "Master AI Agent Development",
+    "purchase": "Purchase",
+    "purchased": "Purchased",
+    "subscriberDiscount": "30% off for subscribers",
+    "modules": "Modules",
+    "sections": "Lectures",
+    "duration": "min",
+    "watch": "Watch",
+    "myLectures": "My Purchased Lectures",
+    "noLectures": "No purchased lectures"
+  },
+  "footer": {
+    "company": "Marblo",
+    "description": "AI Agent Army Workspace",
+    "terms": "Terms of Service",
+    "privacy": "Privacy Policy",
+    "contact": "Contact"
+  }
+}

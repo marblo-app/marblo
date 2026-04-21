@@ -1,0 +1,209 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== Helper Functions =====
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    function getProject(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId)).data;
+    }
+
+    function isProjectMember(projectId) {
+      return request.auth.uid in getProject(projectId).members;
+    }
+
+    function isProjectOwner(projectId) {
+      return request.auth.uid == getProject(projectId).ownerId;
+    }
+
+    function getMemberRoleDoc(projectId, userId) {
+      return get(/databases/$(database)/documents/memberRoles/$(projectId + '_' + userId)).data;
+    }
+
+    function memberRoleExists(projectId, userId) {
+      return exists(/databases/$(database)/documents/memberRoles/$(projectId + '_' + userId));
+    }
+
+    function getMemberRole(projectId, userId) {
+      return memberRoleExists(projectId, userId)
+        ? getMemberRoleDoc(projectId, userId).role
+        : 'member';
+    }
+
+    function isAdminOrOwner(projectId) {
+      return isProjectOwner(projectId)
+        || (memberRoleExists(projectId, request.auth.uid)
+            && getMemberRoleDoc(projectId, request.auth.uid).role == 'admin');
+    }
+
+    // ===== Users =====
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isOwner(userId);
+      allow update: if isAuthenticated() && isOwner(userId);
+      allow delete: if false;
+    }
+
+    // ===== Projects =====
+    match /projects/{projectId} {
+      allow read: if isAuthenticated()
+        && request.auth.uid in resource.data.members;
+      allow create: if isAuthenticated()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.auth.uid in request.resource.data.members;
+      allow update: if isAuthenticated() && isProjectMember(projectId);
+      allow delete: if isAuthenticated() && isProjectOwner(projectId);
+    }
+
+    // ===== Tasks =====
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // ===== Agents =====
+    match /agents/{agentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // ===== Activities =====
+    match /activities/{activityId} {
+      // activities reference taskId, need to resolve projectId via task
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ===== Chat Messages =====
+    match /chatMessages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ===== Task Comments =====
+    match /taskComments/{commentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ===== Flows =====
+    match /flows/{flowId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // ===== Cost Logs (Phase 3) =====
+    match /cost_logs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ===== Audit Logs (Phase 4) =====
+    match /audit_logs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ===== Telemetry Events =====
+    match /telemetry_events/{eventId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ===== Invitations =====
+    match /invitations/{invitationId} {
+      // Anyone authenticated can read invitations targeted to their email
+      allow read: if isAuthenticated()
+        && (isProjectMember(resource.data.projectId)
+            || resource.data.invitedEmail == request.auth.token.email);
+
+      // Only admin+ of the project can create invitations
+      allow create: if isAuthenticated()
+        && isAdminOrOwner(request.resource.data.projectId)
+        && request.resource.data.invitedBy == request.auth.uid
+        && request.resource.data.status == 'pending';
+
+      // The invited user can accept/reject, project admin+ can cancel (update status)
+      allow update: if isAuthenticated()
+        && (
+          // Invited user accepting or rejecting
+          (resource.data.invitedEmail == request.auth.token.email
+           && resource.data.status == 'pending'
+           && request.resource.data.status in ['accepted', 'rejected'])
+          ||
+          // Admin/owner updating (e.g., expire)
+          isAdminOrOwner(resource.data.projectId)
+        );
+
+      // Admin+ can delete (cancel) pending invitations
+      allow delete: if isAuthenticated()
+        && isAdminOrOwner(resource.data.projectId);
+    }
+
+    // ===== Member Roles =====
+    // Document ID format: {projectId}_{userId}
+    match /memberRoles/{docId} {
+      allow read: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
+
+      // Only owner/admin can create or update roles
+      allow create: if isAuthenticated()
+        && isAdminOrOwner(request.resource.data.projectId)
+        && request.resource.data.role != 'owner';
+
+      allow update: if isAuthenticated()
+        && isAdminOrOwner(resource.data.projectId)
+        && request.resource.data.role != 'owner';
+
+      allow delete: if isAuthenticated()
+        && isAdminOrOwner(resource.data.projectId);
+    }
+
+    // ===== Subscriptions =====
+    // Document ID = userId
+    match /subscriptions/{userId} {
+      allow read: if isAuthenticated() && isOwner(userId);
+      allow write: if false; // Only Cloud Functions can write
+    }
+
+    // ===== Lectures (marblo-web sales site) =====
+    match /lectures/{lectureId} {
+      allow read: if true; // Public: anyone can browse published lectures
+      allow write: if false; // Only Cloud Functions / admin can write
+    }
+
+    // ===== Lecture Purchases =====
+    match /lecturePurchases/{purchaseId} {
+      allow read: if isAuthenticated()
+        && resource.data.userId == request.auth.uid;
+      allow create: if false; // Only Cloud Functions can create
+      allow update, delete: if false;
+    }
+  }
+}

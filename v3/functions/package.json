@@ -1,0 +1,22 @@
+{
+  "name": "marblo-functions",
+  "version": "1.0.0",
+  "description": "Marblo Cloud Functions (Stripe + TossPayments integration)",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "@google-cloud/bigquery": "^8.1.1",
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

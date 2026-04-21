@@ -1,0 +1,88 @@
+export interface SlashCommand {
+  command: string;
+  label: string;
+  description: string;
+  category: 'project' | 'project-step' | 'agent' | 'work' | 'pause' | 'review' | 'deploy' | 'sync' | 'repeat' | 'util';
+}
+
+export const SLASH_COMMANDS: SlashCommand[] = [
+  // 프로젝트 시작 (빠른)
+  { command: '/tf-plan', label: 'tf-plan', description: '요구사항 분석 + 태스크 계획', category: 'project' },
+  { command: '/tf-start', label: 'tf-start', description: '태스크 일괄 생성 + 에이전트 스폰', category: 'project' },
+
+  // 프로젝트 시작 (단계별)
+  { command: '/tf-analyze', label: 'tf-analyze', description: '요구사항 분석', category: 'project-step' },
+  { command: '/tf-create-tasks', label: 'tf-create-tasks', description: '분석 기반 태스크 생성', category: 'project-step' },
+  { command: '/tf-spawn-agents', label: 'tf-spawn-agents', description: '에이전트 라인업 + 스폰', category: 'project-step' },
+
+  // 에이전트 관리
+  { command: '/tf-spawn', label: 'tf-spawn', description: '물리 에이전트 스폰 (터미널 탭)', category: 'agent' },
+  { command: '/tf-agent', label: 'tf-agent', description: '논리 서브에이전트 (빠른 조사)', category: 'agent' },
+
+  // 작업 진행
+  { command: '/tf-work', label: 'tf-work', description: '태스크 claim + 코딩', category: 'work' },
+  { command: '/tf-status', label: 'tf-status', description: '현황 대시보드', category: 'work' },
+  { command: '/tf-add', label: 'tf-add', description: '태스크 추가/수정', category: 'work' },
+  { command: '/tf-flow', label: 'tf-flow', description: '플로우 파이프라인 설계', category: 'work' },
+
+  // 중단 / 재개
+  { command: '/tf-hold', label: 'tf-hold', description: '작업 중단 + 현황 정리', category: 'pause' },
+  { command: '/tf-resume', label: 'tf-resume', description: '중단된 작업 이어하기', category: 'pause' },
+
+  // 리뷰 / 문제 해결
+  { command: '/tf-review', label: 'tf-review', description: 'PM 코드 리뷰', category: 'review' },
+  { command: '/tf-feedback', label: 'tf-feedback', description: 'PM 피드백 확인 + 답변', category: 'review' },
+  { command: '/tf-fix', label: 'tf-fix', description: 'FAILED/BLOCKED 복구', category: 'review' },
+  { command: '/tf-handoff', label: 'tf-handoff', description: '에이전트 실패 → 직접 이어받기', category: 'review' },
+
+  // 배포
+  { command: '/tf-deploy', label: 'tf-deploy', description: 'GCP Cloud Run 배포', category: 'deploy' },
+
+  // 동기화 / 정리
+  { command: '/tf-sync', label: 'tf-sync', description: '코드 ↔ 티켓 동기화', category: 'sync' },
+  { command: '/tf-done', label: 'tf-done', description: '프로젝트 완료 + 아카이브', category: 'sync' },
+
+  // 반복 작업
+  { command: '/tf-ralph', label: 'tf-ralph', description: '같은 작업 N개 일괄 처리', category: 'repeat' },
+
+  // 유틸
+  { command: '/tf-guide', label: 'tf-guide', description: '명령어 가이드', category: 'util' },
+];
+
+export const SLASH_PROMPTS: Record<string, string> = {
+  '/tf-plan': '요구사항을 분석하고 컴포넌트, 역할, 의존성을 파악해줘. 소크라틱 질문으로 구체화해줘.',
+  '/tf-start': '분석 기반으로 create_tasks_bulk로 태스크 생성해줘. 먼저 확인받고',
+  '/tf-analyze': '요구사항을 분석하고 컴포넌트, 역할, 의존성을 파악해줘.',
+  '/tf-create-tasks': '분석 결과를 기반으로 create_tasks_bulk로 태스크를 생성해줘. 먼저 목록 보여주고 확인받고.',
+  '/tf-spawn-agents': '태스크 확인하고 에이전트 라인업 제안해줘. 확인받고 spawn_agent로 물리 에이전트 스폰.',
+  '/tf-spawn': '태스크 확인하고 에이전트 라인업 제안해줘. 확인받고 spawn_agent로 물리 에이전트 스폰. 절대 TeamCreate/Task 도구 사용 금지.',
+  '/tf-agent': '빠른 조사가 필요합니다. Claude Code 내부 서브에이전트로 처리해줘.',
+  '/tf-work': '가능한 태스크를 확인하고 하나를 골라서 claim해줘. 코딩 시작.',
+  '/tf-status': '전체 태스크 상태 확인하고 요약해줘',
+  '/tf-add': '현재 태스크 목록을 확인하고 새 태스크를 추가하거나 기존 태스크를 수정해줘.',
+  '/tf-flow': '파이프라인 플로우 그래프 설계해줘. 구조 먼저 보여주고',
+  '/tf-hold': '작업을 멈추고 현황을 정리해줘. 다음 행동을 제안해줘.',
+  '/tf-resume': '중단된 프로젝트의 전체 컨텍스트를 복원하고 이어서 진행해줘.',
+  '/tf-review': 'REVIEW 상태 태스크를 확인하고 코드 리뷰해줘',
+  '/tf-feedback': 'PM 피드백을 확인하고 답변/반영해줘.',
+  '/tf-fix': 'FAILED, BLOCKED 태스크를 확인하고 원인 분석 + 복구해줘',
+  '/tf-handoff': '에이전트가 실패한 태스크를 직접 이어받아서 완료해줘.',
+  '/tf-sync': '실제 코드 상태와 티켓 상태의 불일치를 감지하고 동기화해줘.',
+  '/tf-done': '프로젝트를 마무리하고 결과 요약 + 아카이브해줘.',
+  '/tf-ralph': '같은 작업을 여러 대상에 반복 적용해줘. 티켓 단위로 추적.',
+  '/tf-deploy': '현재 프로젝트를 GCP Cloud Run에 배포해줘. gcloud CLI로 Docker 빌드 → Cloud Run 배포 → Scheduler 등록까지.',
+  '/tf-guide': 'Marblo 슬래시 명령어 가이드를 보여줘',
+};
+
+export const CATEGORY_LABELS: Record<string, { label: string; icon: string }> = {
+  project: { label: '프로젝트 시작', icon: '📌' },
+  'project-step': { label: '단계별 시작', icon: '📋' },
+  agent: { label: '에이전트', icon: '🤖' },
+  work: { label: '작업', icon: '🔧' },
+  pause: { label: '중단/재개', icon: '⏸️' },
+  review: { label: '리뷰', icon: '👀' },
+  deploy: { label: '배포', icon: '🚀' },
+  sync: { label: '정리', icon: '🔄' },
+  repeat: { label: '반복', icon: '🔁' },
+  util: { label: '유틸', icon: '📖' },
+};

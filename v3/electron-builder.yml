@@ -1,0 +1,48 @@
+appId: com.marblo.app
+productName: Marblo
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - "dist-electron/**/*"
+  - "dist/**/*"
+  - "skills/**/*"
+  - "package.json"
+
+afterSign: scripts/notarize.js
+
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+  icon: resources/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+
+win:
+  target:
+    - nsis
+  icon: resources/icon.ico
+  signingHashAlgorithms:
+    - sha256
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+  icon: resources/icon.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+
+publish:
+  provider: github
+
+extraMetadata:
+  main: dist-electron/main.js

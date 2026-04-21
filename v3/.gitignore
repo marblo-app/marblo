@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+release/
+.vite/
+*.log
+.env
+.env.local
+.env.production
+
+# Claude Code local settings
+.claude/settings.local.json

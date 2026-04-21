@@ -1,0 +1,269 @@
+{
+  "nav": {
+    "home": "홈",
+    "pricing": "가격",
+    "download": "다운로드",
+    "lectures": "강의",
+    "login": "로그인",
+    "signup": "회원가입",
+    "myLectures": "내 강의"
+  },
+  "hero": {
+    "title": "혼자서 팀 전체의\n성과를 만드세요",
+    "subtitle": "Claude, GPT, Gemini 에이전트 군단이 동시에 코딩합니다.\n당신은 지시하고, 에이전트가 실행합니다.",
+    "cta_download": "무료 다운로드",
+    "cta_pricing": "가격 보기",
+    "badge": "AI 에이전트 오케스트레이션 플랫폼"
+  },
+  "value": {
+    "title": "에이전트 1명이 아니라,\n군단을 운용하세요",
+    "subtitle": "Cursor나 Copilot은 에이전트 1명입니다.\n마블로는 여러 에이전트를 동시에 운용하여 10배 빠른 성과를 만듭니다.",
+    "stat1_number": "5x",
+    "stat1_label": "동시 에이전트 운용",
+    "stat2_number": "10x",
+    "stat2_label": "개발 속도 향상",
+    "stat3_number": "3+",
+    "stat3_label": "AI 모델 동시 활용"
+  },
+  "features": {
+    "title": "왜 마블로인가?",
+    "subtitle": "단순 코드 자동완성을 넘어, AI 에이전트를 프로젝트 매니저처럼 관리하세요",
+    "multiagent": {
+      "title": "멀티 에이전트 오케스트레이션",
+      "description": "Claude가 백엔드를, GPT가 프론트를, Gemini가 테스트를 — 동시에 처리합니다. 칸반 보드에서 각 에이전트의 진행 상황을 실시간으로 확인하세요.",
+      "highlight": "경쟁사 대비 유일한 기능",
+      "detail": "마블로의 멀티 에이전트 시스템은 각 AI 모델의 강점을 극대화합니다.\n\nClaude는 정교한 백엔드 로직과 아키텍처 설계를, GPT는 빠른 프론트엔드 코딩과 UI 구현을, Gemini는 테스트 작성과 코드 리뷰를 담당합니다.\n\n각 에이전트는 독립된 터미널에서 실행되며, 칸반 보드에서 진행 상황을 실시간으로 모니터링할 수 있습니다. MCP 프로토콜을 통해 에이전트 간 컨텍스트를 공유하여, 마치 실제 개발팀처럼 협업합니다."
+    },
+    "kanban": {
+      "title": "칸반 보드 + 에이전트 통합",
+      "description": "태스크를 생성하면 에이전트가 자동으로 할당받아 터미널에서 코딩합니다. Todo → In Progress → Done, 에이전트가 알아서 진행합니다.",
+      "highlight": "프로젝트 관리와 AI를 하나로",
+      "detail": "마블로의 칸반 보드는 TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE 5단계 상태 머신으로 에이전트의 작업을 체계적으로 관리합니다.\n\n태스크를 생성하면 역할(백엔드/프론트엔드/테스트/DevOps)에 따라 적합한 에이전트가 자동으로 할당됩니다. 각 에이전트는 자신의 터미널에서 독립적으로 코딩하며, 진행 상황이 실시간으로 칸반 보드에 반영됩니다.\n\n태스크 간 의존성(depends_on)을 설정하면 선행 태스크가 완료될 때까지 자동으로 대기합니다."
+    },
+    "flow": {
+      "title": "플로우 에디터",
+      "description": "노드 기반 비주얼 에디터로 에이전트 파이프라인을 설계하세요. 코드 생성 → 리뷰 → 테스트 → 배포까지 자동화된 워크플로를 구축합니다.",
+      "highlight": "코딩 없이 에이전트 파이프라인 설계",
+      "detail": "드래그 앤 드롭으로 에이전트 파이프라인을 설계하는 비주얼 에디터입니다.\n\n노드 타입에는 에이전트 실행, 조건 분기, 병렬 처리, 코드 리뷰, 테스트 실행 등이 있으며, 이를 연결하여 복잡한 자동화 워크플로를 코딩 없이 구축할 수 있습니다.\n\n예를 들어 '코드 생성 → 린트 체크 → 테스트 실행 → 통과 시 PR 생성' 같은 파이프라인을 몇 번의 클릭으로 만들 수 있습니다. 한번 만든 플로우는 저장하여 반복 사용할 수 있습니다."
+    },
+    "orchestrator": {
+      "title": "자연어 오케스트레이터",
+      "description": "\"이 앱에 로그인 기능 추가해줘\"라고 말하면, 태스크를 자동 분해하고 여러 에이전트에게 분배합니다. 복잡한 프로젝트도 한 마디로 시작하세요.",
+      "highlight": "자연어 → 태스크 자동 분해",
+      "detail": "자연어로 지시하면 AI가 태스크를 자동으로 분해하고, 적절한 에이전트에게 분배합니다.\n\n\"이 앱에 로그인 기능 추가해줘\"라고 입력하면: 1) 백엔드 인증 API 구현, 2) 프론트엔드 로그인 폼 생성, 3) JWT 토큰 관리 미들웨어, 4) 통합 테스트 작성 — 이렇게 4개의 태스크로 분해되어 각각의 에이전트에게 할당됩니다.\n\n에이전트는 코드베이스를 분석하여 기존 구조에 맞게 코드를 작성하며, 의존성을 파악하여 올바른 순서로 실행합니다."
+    },
+    "mcp": {
+      "title": "MCP 프로토콜 네이티브",
+      "description": "Model Context Protocol로 에이전트에게 파일 시스템, DB, API 등 도구와 컨텍스트를 제공합니다. 에이전트가 실제 개발 환경에서 작업합니다.",
+      "highlight": "실제 도구에 접근하는 에이전트",
+      "detail": "Model Context Protocol(MCP)은 에이전트에게 실제 개발 도구와 컨텍스트를 제공하는 표준 프로토콜입니다.\n\n마블로는 MCP를 네이티브로 지원하여, 에이전트가 파일 시스템 읽기/쓰기, 데이터베이스 쿼리, REST API 호출, Git 명령 실행 등 실제 개발 환경에서 작업할 수 있습니다.\n\n별도의 MCP 서버를 추가하여 에이전트의 도구를 확장할 수 있습니다. 예를 들어 Marblo MCP 서버를 연결하면 태스크 보드와 연동하여 에이전트가 자동으로 진행 상황을 업데이트합니다."
+    },
+    "privacy": {
+      "title": "로컬 실행 — 데이터는 내 PC에",
+      "description": "코드가 외부 서버에 올라가지 않습니다. Electron 앱이 로컬에서 실행되며, API 키만 직접 설정합니다. 기업 보안 요구사항에도 부합합니다.",
+      "highlight": "코드 유출 걱정 제로",
+      "detail": "마블로는 Electron 기반 데스크톱 앱으로, 모든 코드와 데이터가 사용자의 로컬 머신에서만 처리됩니다.\n\n코드가 마블로 서버로 전송되는 일은 없습니다. AI API 호출은 사용자가 직접 설정한 API 키를 통해 각 모델 제공사(Anthropic, OpenAI, Google)로 직접 전송됩니다.\n\n기업 환경에서도 안심하고 사용할 수 있으며, 온프레미스 배포 옵션으로 더욱 강화된 보안을 제공합니다. 감사 로그와 SSO 인증도 Enterprise 플랜에서 지원합니다."
+    },
+    "deep": {
+      "kanban": {
+        "label": "KANBAN",
+        "title": "AI 에이전트를 한눈에 관리",
+        "description": "여러 AI 에이전트가 동시에 작업하는 모습을 칸반 보드에서 실시간으로 확인합니다. 각 에이전트의 진행 상태, 할당된 태스크, 완료 여부를 시각적으로 추적하세요.",
+        "bullet1": "TODO → IN_PROGRESS → REVIEW → DONE 자동 상태 전환",
+        "bullet2": "에이전트별 작업 로그 실시간 확인",
+        "bullet3": "드래그 앤 드롭으로 우선순위 조정"
+      },
+      "flow": {
+        "label": "FLOW EDITOR",
+        "title": "AI 파이프라인을 시각적으로 설계",
+        "description": "복잡한 AI 워크플로우를 노드 기반 에디터에서 드래그앤드롭으로 설계합니다. 분석 → 태스크 생성 → 에이전트 스폰 → 리뷰까지 전체 파이프라인을 한눈에.",
+        "bullet1": "노드 연결로 에이전트 의존성 정의",
+        "bullet2": "조건 분기 — 성공/실패에 따른 자동 분기",
+        "bullet3": "플로우 템플릿으로 반복 작업 자동화"
+      },
+      "terminal": {
+        "label": "TERMINAL",
+        "title": "터미널에서 바로 에이전트를 소환",
+        "description": "내장 터미널에서 슬래시 명령어 한 줄로 Claude, GPT, Gemini 에이전트를 생성합니다. 에이전트가 코드를 작성하고, 테스트하고, 배포하는 모습을 실시간으로 관찰하세요.",
+        "bullet1": "/tf-spawn으로 원클릭 에이전트 생성",
+        "bullet2": "에이전트 출력 실시간 스트리밍",
+        "bullet3": "멀티 탭으로 여러 에이전트 동시 모니터링"
+      },
+      "orchestration": {
+        "label": "ORCHESTRATION",
+        "title": "최적의 AI 모델을 자동 배치",
+        "description": "Claude는 코드 작성, GPT는 문서화, Gemini는 테스트 — 각 모델의 강점에 맞게 태스크를 최적 배치합니다. 비용 대비 성능을 극대화하는 스마트 오케스트레이션.",
+        "bullet1": "모델별 강점 기반 자동 태스크 할당",
+        "bullet2": "비용/성능 대시보드로 최적화",
+        "bullet3": "하나의 프로젝트에서 Claude + GPT + Gemini 동시 운용"
+      }
+    }
+  },
+  "comparison": {
+    "title": "마블로 vs 경쟁사",
+    "subtitle": "같은 가격대, 차원이 다른 기능",
+    "feature": "기능",
+    "marblo": "마블로",
+    "cursor": "Cursor",
+    "copilot": "Copilot",
+    "windsurf": "Windsurf",
+    "rows": {
+      "multiAgent": "멀티 에이전트 동시 운용",
+      "kanban": "칸반 보드 + 태스크 관리",
+      "flowEditor": "비주얼 플로우 에디터",
+      "orchestrator": "자연어 태스크 분해",
+      "multiModel": "멀티 모델 (Claude+GPT+Gemini)",
+      "mcp": "MCP 프로토콜 지원",
+      "local": "로컬 실행 (데이터 보호)",
+      "price": "가격"
+    }
+  },
+  "bundle": {
+    "title": "강의 + 앱 번들",
+    "subtitle": "AI 에이전트 개발 강의를 구매하면 Pro 플랜 할인 쿠폰을 드립니다",
+    "lecture_title": "마블로 v3: AI 에이전트 군단 워크스페이스",
+    "lecture_desc": "멀티 에이전트 세팅부터 프로덕션 배포까지, 실전 프로젝트로 배우는 AI 에이전트 오케스트레이션",
+    "lecture_price": "₩149,000",
+    "bundle_benefit": "강의 구매 시 Pro 플랜 50% 할인 쿠폰 제공",
+    "cta": "강의 보기"
+  },
+  "social": {
+    "title": "개발자들의 반응",
+    "quote1": "에이전트 3개가 동시에 작업하니까 하루 걸릴 일을 2시간 만에 끝냈습니다",
+    "author1": "풀스택 개발자",
+    "quote2": "칸반에서 에이전트 진행률 보면서 관리하는 게 정말 직관적이에요",
+    "author2": "스타트업 CTO",
+    "quote3": "Cursor에서 넘어왔는데, 멀티 에이전트는 차원이 다릅니다",
+    "author3": "프리랜서 개발자"
+  },
+  "cta_final": {
+    "title": "지금 무료로 시작하세요",
+    "subtitle": "Free 플랜으로 마블로를 체험하고,\nPro로 업그레이드하여 에이전트 군단을 운용하세요",
+    "download": "무료 다운로드",
+    "pricing": "플랜 비교하기"
+  },
+  "pricing": {
+    "title": "가격 플랜",
+    "subtitle": "Cursor($20/mo)보다 저렴하고, 멀티 에이전트까지 — 가격 대비 최고의 가치",
+    "free": {
+      "name": "Free",
+      "price": "₩0",
+      "price_usd": "$0",
+      "period": "영구 무료",
+      "description": "마블로를 처음 경험하는 개인 개발자",
+      "features": ["프로젝트 1개", "에이전트 2개", "칸반 보드", "터미널 + 코드 에디터", "MCP 연동"]
+    },
+    "pro": {
+      "name": "Pro",
+      "price": "₩19,000",
+      "price_usd": "$19",
+      "period": "/월",
+      "description": "혼자서 팀처럼 일하는 개인 개발자",
+      "features": ["무제한 프로젝트", "무제한 에이전트", "플로우 에디터", "자연어 오케스트레이터", "우선 기술 지원", "모든 Free 기능 포함"]
+    },
+    "team": {
+      "name": "Team",
+      "price": "₩29,000",
+      "price_usd": "$29",
+      "period": "/인/월",
+      "description": "팀 워크스페이스로 함께 개발하는 조직",
+      "features": ["팀 공유 워크스페이스", "실시간 협업", "역할 기반 권한", "팀 분석 대시보드", "팀 채팅 (예정)", "모든 Pro 기능 포함"]
+    },
+    "enterprise": {
+      "name": "Enterprise",
+      "cta": "문의하기",
+      "description": "SSO, 감사 로그, 전담 매니저가 필요한 기업",
+      "features": ["온프레미스 배포 옵션", "SSO/SAML 인증", "감사 로그", "SLA 99.9%", "전담 매니저"]
+    },
+    "annual_discount": "연간 결제 시 20% 할인",
+    "subscribe": "구독하기",
+    "current": "현재 플랜",
+    "most_popular": "가장 인기"
+  },
+  "download": {
+    "title": "마블로 다운로드",
+    "subtitle": "AI 에이전트 군단 워크스페이스를 설치하세요",
+    "macos": "macOS (Apple Silicon / Intel)",
+    "windows": "Windows (64-bit)",
+    "linux": "Linux (AppImage)",
+    "version": "버전",
+    "releaseNotes": "릴리스 노트",
+    "recommended": "추천"
+  },
+  "auth": {
+    "login": "로그인",
+    "signup": "회원가입",
+    "email": "이메일",
+    "password": "비밀번호",
+    "confirmPassword": "비밀번호 확인",
+    "loginWithGoogle": "Google로 로그인",
+    "loginWithGithub": "GitHub로 로그인",
+    "noAccount": "계정이 없으신가요?",
+    "hasAccount": "이미 계정이 있으신가요?",
+    "signupLink": "회원가입",
+    "loginLink": "로그인"
+  },
+  "checkout": {
+    "title": "결제",
+    "plan": "플랜",
+    "amount": "결제 금액",
+    "coupon": "쿠폰 코드",
+    "applyCoupon": "적용",
+    "couponApplied": "쿠폰이 적용되었습니다",
+    "couponInvalid": "유효하지 않은 쿠폰입니다",
+    "discount": "할인",
+    "total": "총 결제 금액",
+    "pay": "결제하기",
+    "success": "결제가 완료되었습니다!",
+    "fail": "결제에 실패했습니다",
+    "retry": "다시 시도",
+    "back": "뒤로 가기",
+    "loading": "결제 시스템을 준비하고 있습니다...",
+    "processing": "결제를 처리하고 있습니다...",
+    "orderSummary": "주문 요약",
+    "monthly": "/월",
+    "annual": "/년",
+    "lectureTitle": "강의",
+    "invalidPlan": "유효하지 않은 플랜입니다. 가격 페이지에서 플랜을 선택해 주세요.",
+    "invalidLecture": "유효하지 않은 강의입니다. 강의 페이지에서 다시 선택해 주세요.",
+    "loginRequired": "결제를 진행하려면 로그인이 필요합니다.",
+    "paymentError": "결제 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+    "sdkLoadError": "결제 시스템을 불러오는 데 실패했습니다. 페이지를 새로고침해 주세요.",
+    "successTitle": "결제 완료",
+    "successSubscription": "구독이 활성화되었습니다",
+    "successLecture": "강의 구매가 완료되었습니다",
+    "purchasedPlan": "구독 플랜",
+    "purchasedAmount": "결제 금액",
+    "goToMyLectures": "내 강의 보기",
+    "goToDownload": "앱 다운로드",
+    "goToDashboard": "대시보드",
+    "goHome": "홈으로",
+    "failTitle": "결제 실패",
+    "failDescription": "결제 처리 중 문제가 발생했습니다.",
+    "errorCode": "오류 코드",
+    "errorMessage": "오류 내용",
+    "tryAgain": "다시 결제하기",
+    "contactSupport": "고객 지원 문의",
+    "unknownError": "알 수 없는 오류"
+  },
+  "lectures": {
+    "title": "강의",
+    "subtitle": "AI 에이전트 개발을 마스터하세요",
+    "purchase": "구매하기",
+    "purchased": "구매 완료",
+    "subscriberDiscount": "구독자 30% 할인",
+    "modules": "모듈",
+    "sections": "강의",
+    "duration": "분",
+    "watch": "시청하기",
+    "myLectures": "내 구매 강의",
+    "noLectures": "구매한 강의가 없습니다"
+  },
+  "footer": {
+    "company": "마블로",
+    "description": "AI 에이전트 군단 워크스페이스",
+    "terms": "이용약관",
+    "privacy": "개인정보처리방침",
+    "contact": "문의"
+  }
+}

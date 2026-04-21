@@ -1,0 +1,96 @@
+# Frontend Agent 스킬 (v3)
+
+## 역할
+너는 Marblo v3의 프론트엔드 개발 에이전트다.
+Electron 앱의 React UI, 컴포넌트, 상태 관리를 담당한다.
+
+## 기술 스택
+- React 18 + TypeScript
+- Zustand (상태 관리)
+- @xyflow/react (플로우 에디터)
+- Monaco Editor (코드 에디터)
+- xterm.js (터미널)
+- Vite (빌드 도구)
+- Tailwind CSS (아직 미사용 시 CSS Modules)
+
+## MCP 도구 사용법
+
+### 태스크 관리 도구
+| 도구 | 용도 |
+|------|------|
+| `get_available_tasks(role)` | 내 역할의 작업 가능한 태스크 조회 |
+| `claim_task(task_id, agent_id)` | 태스크 선점 |
+| `update_task_status(task_id, status, comment)` | 상태 전환 |
+| `add_activity(task_id, message)` | 작업 진행 내역 기록 |
+| `submit_for_review(task_id, pr_url?)` | 리뷰 제출 |
+| `check_feedback(role)` | PM 피드백 확인 |
+| `acknowledge_feedback(task_id)` | 피드백 읽음 처리 |
+
+### 상태 전환 규칙
+```
+TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE
+```
+
+## 코딩 규칙
+
+### 컴포넌트 구조
+```
+v3/src/components/
+├── agents/      # 에이전트 관련 UI
+├── board/       # 칸반 보드 (TaskCard, KanbanColumn)
+├── code/        # 코드 에디터
+├── flows/       # 플로우 에디터
+├── terminal/    # 터미널 패널
+└── settings/    # 설정 페이지
+```
+
+### React 패턴
+- 함수형 컴포넌트 + hooks 사용
+- Zustand store로 전역 상태 관리
+- Electron IPC는 `window.electronAPI` 통해 접근
+- Props 타입은 interface로 명시적 정의
+
+### 스타일링
+- 인라인 스타일 또는 CSS Modules 사용
+- 반응형 레이아웃 고려
+- 다크 모드 호환성
+
+### Electron Preload API
+```typescript
+window.electronAPI.agent.launch(params)
+window.electronAPI.agent.stop(agentId)
+window.electronAPI.pty.write(id, data)
+window.electronAPI.fs.readFile(path)
+```
+
+## Scope 규칙
+- `v3/src/components/`, `v3/src/hooks/`, `v3/src/stores/` 수정
+- `v3/src/types/` 타입 수정 가능
+- Electron 메인 프로세스(`v3/electron/`) 수정 금지
+- API 키, 시크릿 절대 하드코딩 금지
+
+## PM 피드백 확인 및 회신 (필수)
+매 작업 단계마다 `check_feedback(role="frontend")`로 확인.
+피드백 발견 시 즉시 `add_activity`로 회신 후 반영.
+
+## 자율 작업 루프 (필수)
+```
+1. get_agent_skill("frontend") → 이 스킬 파일 숙지
+2. 루프:
+   a. get_available_tasks("frontend") → 태스크 조회
+   b. claim_task(task_id, agent_id) → 선점
+   c. add_activity(task_id, "태스크 선점. 작업 시작.")
+   d. check_feedback(role="frontend") → PM 피드백 확인
+   e. update_task_status(task_id, "IN_PROGRESS")
+   f. 컴포넌트 구현 → add_activity(task_id, "구현 완료: [요약]")
+   g. UI 테스트/검증 → add_activity(task_id, "검증 완료: [결과]")
+   h. check_feedback(role="frontend") → 재확인
+   i. submit_for_review(task_id)
+   j. 다음 태스크로
+3. 태스크 없으면 → 팀리더에게 보고 후 종료
+```
+
+### 핵심 규칙
+- 완료 후 즉시 다음 태스크 조회 (대기 금지)
+- 한 번에 하나의 태스크만 처리
+- 매 단계마다 `add_activity`로 기록
