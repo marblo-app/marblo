@@ -42,6 +42,7 @@
     "firebase": "^10.14.1",
     "node-pty": "^1.0.0",
     "openai": "^6.32.0",
+    "prettier": "^3.8.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "simple-git": "^3.33.0",

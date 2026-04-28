@@ -198,7 +198,7 @@ export function KanbanBoard() {
       {/* Board columns */}
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
-          <div className="flex gap-4 h-full min-w-max">
+          <div className="flex gap-4 h-full">
             {COLUMN_STATUSES.map((status) => (
               <KanbanColumn
                 key={status}

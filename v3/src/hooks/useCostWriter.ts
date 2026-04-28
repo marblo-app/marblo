@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 
@@ -9,14 +9,10 @@ const logCostBatch = httpsCallable(functions, 'logCostBatch');
  * and sends them to BigQuery via Cloud Function.
  */
 export function useCostWriter() {
-  const registered = useRef(false);
-
   useEffect(() => {
-    if (registered.current) return;
     if (!window.electronAPI?.agent?.onCostUpdate) return;
 
-    registered.current = true;
-
+    window.electronAPI.agent.offCostUpdate?.();
     window.electronAPI.agent.onCostUpdate((data) => {
       logCostBatch({
         entries: [{
@@ -40,5 +36,9 @@ export function useCostWriter() {
         console.error('[CostWriter] Failed to send cost log:', err);
       });
     });
+
+    return () => {
+      window.electronAPI?.agent?.offCostUpdate?.();
+    };
   }, []);
 }

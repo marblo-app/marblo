@@ -33,7 +33,7 @@ export function KanbanColumn({ status, tasks, onTaskClick, isDropTarget }: Kanba
   return (
     <div
       ref={setNodeRef}
-      className={`flex flex-col min-w-[240px] w-[240px] rounded-lg border transition-colors ${
+      className={`flex flex-col flex-1 min-w-[200px] rounded-lg border transition-colors ${
         highlight
           ? 'bg-blue-500/10 border-blue-500/50'
           : invalid

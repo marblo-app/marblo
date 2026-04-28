@@ -27,6 +27,7 @@ export function useFlowExecution(): FlowExecutionResult {
   const runIdRef = useRef<string | null>(null);
   const flowStartTimeRef = useRef<number>(0);
   const nodeStartTimesRef = useRef<Record<string, number>>({});
+  const nodeCountRef = useRef<number>(0);
 
   // Keep ref in sync for use in event handler
   useEffect(() => {
@@ -43,6 +44,7 @@ export function useFlowExecution(): FlowExecutionResult {
         case 'node:start':
           setNodeStatuses((prev) => ({ ...prev, [event.nodeId]: 'running' }));
           nodeStartTimesRef.current[event.nodeId] = Date.now();
+          nodeCountRef.current++;
           break;
 
         case 'node:complete': {
@@ -89,9 +91,8 @@ export function useFlowExecution(): FlowExecutionResult {
           setExecutionState('completed');
           setPendingHumanNodeId(null);
           const completedDuration = Date.now() - flowStartTimeRef.current;
-          const completedNodes = Object.keys(nodeStatuses).length;
           if (runIdRef.current) {
-            telemetry.flowCompleted(runIdRef.current, 'completed', completedDuration, completedNodes);
+            telemetry.flowCompleted(runIdRef.current, 'completed', completedDuration, nodeCountRef.current);
           }
           break;
         }
@@ -100,9 +101,8 @@ export function useFlowExecution(): FlowExecutionResult {
           setExecutionState('failed');
           setPendingHumanNodeId(null);
           const failedDuration = Date.now() - flowStartTimeRef.current;
-          const failedNodes = Object.keys(nodeStatuses).length;
           if (runIdRef.current) {
-            telemetry.flowCompleted(runIdRef.current, 'failed', failedDuration, failedNodes);
+            telemetry.flowCompleted(runIdRef.current, 'failed', failedDuration, nodeCountRef.current);
           }
           break;
         }
@@ -136,6 +136,7 @@ export function useFlowExecution(): FlowExecutionResult {
 
     flowStartTimeRef.current = Date.now();
     nodeStartTimesRef.current = {};
+    nodeCountRef.current = 0;
 
     try {
       const result = await api.run(flow);

@@ -49,7 +49,7 @@ interface FileTreeNodeProps {
 }
 
 function FileTreeNode({ node, depth, gitStatuses }: FileTreeNodeProps) {
-  const [isOpen, setIsOpen] = useState(depth < 1);
+  const [isOpen, setIsOpen] = useState(false);
   const openFile = useEditorStore(s => s.openFile);
   const activeFilePath = useEditorStore(s => s.activeFilePath);
 

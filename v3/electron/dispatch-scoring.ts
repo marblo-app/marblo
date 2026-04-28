@@ -50,6 +50,45 @@ export const MODEL_BASE_SCORE: Record<string, number> = {
   custom: 30,
 };
 
+// ── Model Presets ──────────────────────────────────────────
+
+export type ModelPreset = 'claude-only' | 'recommended' | 'balanced' | 'codex-only' | 'gemini-only';
+
+export const MODEL_PRESETS: Record<ModelPreset, { label: string; models: ModelType[]; description: string }> = {
+  'claude-only': {
+    label: 'Claude 100%',
+    models: ['claude'],
+    description: 'All agents use Claude (highest quality)',
+  },
+  'recommended': {
+    label: 'Marblo Recommended',
+    models: ['claude', 'claude', 'claude', 'gemini', 'gpt'],
+    description: 'Claude 60% + Gemini 20% + Codex 20% (cost-optimized)',
+  },
+  'balanced': {
+    label: 'Balanced',
+    models: ['claude', 'gemini', 'gpt'],
+    description: 'Equal rotation across all models',
+  },
+  'codex-only': {
+    label: 'Codex/GPT 100%',
+    models: ['gpt'],
+    description: 'All agents use OpenAI Codex/GPT',
+  },
+  'gemini-only': {
+    label: 'Gemini 100%',
+    models: ['gemini'],
+    description: 'All agents use Google Gemini',
+  },
+};
+
+export function resolvePreset(preset?: string): ModelType[] {
+  if (preset && preset in MODEL_PRESETS) {
+    return MODEL_PRESETS[preset as ModelPreset].models;
+  }
+  return MODEL_PRESETS['recommended'].models;
+}
+
 // ── Constraints ─────────────────────────────────────────────
 
 export const MAX_AGENTS = 5;
@@ -132,10 +171,14 @@ export function scoreAgents(
 
 // ── Scoring: best model for new spawn ───────────────────────
 
+// Round-robin counter for model selection when tags don't differentiate
+let modelRoundRobin = 0;
+
 export function scoreModels(enabledModels: ModelType[], tags: string[]): ModelType {
   // Default to first enabled model (fallback must be within enabledModels)
   let bestModel: ModelType = enabledModels[0] || 'claude';
   let bestScore = -Infinity;
+  let hasTags = tags.length > 0;
 
   for (const model of enabledModels) {
     // Custom models use base score only (no tag bonuses/penalties)
@@ -145,13 +188,13 @@ export function scoreModels(enabledModels: ModelType[], tags: string[]): ModelTy
       // Apply tag bonuses
       const bonuses = MODEL_TAG_BONUSES[model] || {};
       for (const tag of tags) {
-        if (bonuses[tag]) score += bonuses[tag];
+        if (bonuses[tag]) { score += bonuses[tag]; hasTags = true; }
       }
 
       // Apply tag penalties
       const penalties = MODEL_TAG_PENALTIES[model] || {};
       for (const tag of tags) {
-        if (penalties[tag]) score += penalties[tag]; // penalties are negative
+        if (penalties[tag]) { score += penalties[tag]; hasTags = true; }
       }
     }
 
@@ -159,6 +202,13 @@ export function scoreModels(enabledModels: ModelType[], tags: string[]): ModelTy
       bestScore = score;
       bestModel = model;
     }
+  }
+
+  // When no tags differentiate models, use round-robin for diversity
+  if (!hasTags && enabledModels.length > 1) {
+    const idx = modelRoundRobin % enabledModels.length;
+    modelRoundRobin++;
+    return enabledModels[idx];
   }
 
   return bestModel;

@@ -67,6 +67,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }) => void) => {
       ipcRenderer.on('cost:update', (_event, data) => callback(data));
     },
+    offCostUpdate: () => {
+      ipcRenderer.removeAllListeners('cost:update');
+    },
     reconnect: (agents: Array<{ id: string; name: string; model: string; role: string; command: string }>, rootPath: string, projectId: string) =>
       ipcRenderer.invoke('agent:reconnect', { agents, rootPath, projectId }),
     onSyncStatus: (callback: (data: { agentId: string; agentName: string; status: string; currentTaskId: string | null }) => void) => {
@@ -141,6 +144,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('settings:setApiKey', { provider, key }),
     deleteApiKey: (provider: string) =>
       ipcRenderer.invoke('settings:deleteApiKey', { provider }),
+  },
+  code: {
+    format: (content: string, filePath: string) =>
+      ipcRenderer.invoke('code:format', { content, filePath }) as Promise<{ formatted: string; error: string | null }>,
+  },
+  modelPreset: {
+    get: () => ipcRenderer.invoke('modelPreset:get') as Promise<string>,
+    set: (preset: string) => ipcRenderer.invoke('modelPreset:set', preset) as Promise<{ success: boolean }>,
+  },
+  clipboard: {
+    getImagePath: () => ipcRenderer.invoke('clipboard:getImagePath') as Promise<string | null>,
   },
   bridge: {
     injectMessage: (params: { targetAgent: string; tag: string; message: string; taskId?: string; taskTitle?: string }) =>

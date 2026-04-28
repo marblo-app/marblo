@@ -19,6 +19,7 @@ import { useSessionRestore } from '../hooks/useSessionRestore';
 import { useCostWriter } from '../hooks/useCostWriter';
 import { useTerminalStore } from '../stores/terminalStore';
 import { useProjectStore } from '../stores/projectStore';
+import { useEditorStore } from '../stores/editorStore';
 
 function GatedFlowsTab() {
   return (
@@ -48,7 +49,8 @@ export function Layout() {
   const [showCreateTask, setShowCreateTask] = useState(false);
 
   // Restore last session (rootPath + project) on startup
-  useSessionRestore();
+  const { isNewWindow } = useSessionRestore();
+  const rootPath = useEditorStore((s) => s.rootPath);
 
   // Auto-launch orchestrator when project is selected
   useOrchestratorAutoLaunch();
@@ -58,6 +60,17 @@ export function Layout() {
 
   // Write cost updates from main process to Firestore (using renderer's auth)
   useCostWriter();
+
+  // Listen for terminal:new from menu → create a new terminal tab
+  const createSession = useTerminalStore((s) => s.createSession);
+  useEffect(() => {
+    let counter = 0;
+    window.electronAPI.on('terminal:new', () => {
+      counter++;
+      createSession(`Terminal ${counter}`);
+    });
+    return () => { window.electronAPI.off('terminal:new'); };
+  }, [createSession]);
 
   // Listen for agent:deleted events from bridge server → delete from Firestore
   useEffect(() => {
@@ -92,6 +105,39 @@ export function Layout() {
   }, [attachSession, currentProject]);
 
   const ActiveTabComponent = tabComponents[activeTab];
+  const setRootPath = useEditorStore((s) => s.setRootPath);
+  const findByFolderPath = useProjectStore((s) => s.findByFolderPath);
+  const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
+
+  // New window: show folder picker prompt
+  if (isNewWindow && !rootPath) {
+    const handleSelectFolder = async () => {
+      const dir = await window.electronAPI.fs.selectDirectory();
+      if (!dir) return;
+      setRootPath(dir);
+      const existing = findByFolderPath(dir);
+      if (existing) setCurrentProject(existing);
+    };
+
+    return (
+      <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
+        <Header onNavigateToSettings={() => setActiveTab('settings')} />
+        <div className="flex flex-1 items-center justify-center">
+          <div className="text-center space-y-6">
+            <div className="text-6xl">M</div>
+            <h1 className="text-2xl font-bold text-gray-100">Marblo</h1>
+            <p className="text-gray-400">프로젝트 폴더를 선택하여 시작하세요</p>
+            <button
+              onClick={handleSelectFolder}
+              className="rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+            >
+              Open Folder
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col bg-gray-900 text-gray-100">

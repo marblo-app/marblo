@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSubscriptionStore } from '../../stores/subscriptionStore';
@@ -7,10 +7,11 @@ import { TeamManagement } from './TeamManagement';
 import { PlanGate } from './PlanGate';
 import { APIKeysSettings } from './APIKeysSettings';
 
-type SettingsTab = 'profile' | 'billing' | 'team' | 'apikeys';
+type SettingsTab = 'profile' | 'models' | 'billing' | 'team' | 'apikeys';
 
 const TABS: { id: SettingsTab; label: string; icon?: React.ReactNode }[] = [
   { id: 'profile', label: '프로필' },
+  { id: 'models', label: '에이전트 모델' },
   { id: 'billing', label: '결제' },
   { id: 'team', label: '팀' },
   {
@@ -69,6 +70,7 @@ export function SettingsPage() {
 
         {/* Tab content */}
         {activeTab === 'profile' && <ProfileSection />}
+        {activeTab === 'models' && <ModelPresetSection />}
         {activeTab === 'billing' && <BillingPage />}
         {activeTab === 'team' && (
           currentProject ? (
@@ -126,6 +128,71 @@ function ProfileSection() {
             <label className="block text-xs text-gray-400">UID</label>
             <p className="mt-1 font-mono text-xs text-gray-500">{user?.uid}</p>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const PRESETS = [
+  { id: 'claude-only', label: 'Claude 100%', desc: 'All agents use Claude (highest quality)', icon: '🟣' },
+  { id: 'recommended', label: 'Marblo Recommended', desc: 'Claude 60% + Gemini 20% + Codex 20%', icon: '🎯' },
+  { id: 'balanced', label: 'Balanced', desc: 'Equal rotation across all models', icon: '⚖️' },
+  { id: 'codex-only', label: 'Codex/GPT 100%', desc: 'All agents use OpenAI Codex/GPT', icon: '🟢' },
+  { id: 'gemini-only', label: 'Gemini 100%', desc: 'All agents use Google Gemini', icon: '🔵' },
+];
+
+function ModelPresetSection() {
+  const [current, setCurrent] = useState('recommended');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    window.electronAPI.modelPreset.get().then(setCurrent).catch(() => {});
+  }, []);
+
+  const handleSelect = async (preset: string) => {
+    setSaving(true);
+    try {
+      await window.electronAPI.modelPreset.set(preset);
+      setCurrent(preset);
+    } catch { /* ignore */ }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+        <h3 className="mb-1 text-sm font-medium text-gray-200">Agent Model Preset</h3>
+        <p className="mb-4 text-xs text-gray-500">
+          오케스트레이터가 새 에이전트를 스폰할 때 어떤 모델을 사용할지 결정합니다.
+          태스크에 특정 tags가 있으면 최적 모델이 자동 선택되고, 없으면 프리셋 비율로 배분됩니다.
+        </p>
+        <div className="space-y-2">
+          {PRESETS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => handleSelect(p.id)}
+              disabled={saving}
+              className={`w-full flex items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors ${
+                current === p.id
+                  ? 'border-blue-500 bg-blue-500/10'
+                  : 'border-gray-700 hover:border-gray-600 hover:bg-gray-700/50'
+              }`}
+            >
+              <span className="text-xl">{p.icon}</span>
+              <div className="flex-1">
+                <span className={`text-sm font-medium ${current === p.id ? 'text-blue-400' : 'text-gray-200'}`}>
+                  {p.label}
+                </span>
+                <p className="text-xs text-gray-500">{p.desc}</p>
+              </div>
+              {current === p.id && (
+                <svg className="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+          ))}
         </div>
       </div>
     </div>

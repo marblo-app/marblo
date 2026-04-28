@@ -52,10 +52,15 @@
    → 자동으로 idle 에이전트 재사용 / 멈춘 에이전트 재시작 / 새로 스폰
    ```
 
-3. **이종 모델 활용**:
-   - 복잡한 코딩: `tags=["architecture", "multi-file"]` → Claude 우선
-   - 리서치/분석: `tags=["research", "analysis"]` → Gemini 우선
-   - 단순 수정: `tags=["simple-fix"]` → Codex 우선
+3. **이종 모델 활용 (필수)**:
+   모든 `dispatch_task` 호출 시 태스크 내용에서 tags를 반드시 도출할 것:
+   - 복잡한 코딩/리팩토링: `tags=["architecture", "multi-file", "coding"]` → Claude
+   - 리서치/분석/문서: `tags=["research", "analysis", "documentation"]` → Gemini
+   - 단순 수정/빠른 작업: `tags=["simple-fix", "quick-edit"]` → Codex
+   - 대규모 컨텍스트: `tags=["large-context"]` → Gemini
+   - GitHub 연동: `tags=["github"]` → Codex
+   
+   tags가 없으면 모델이 라운드로빈으로 자동 배정됨. 최적 배정을 위해 tags 명시를 권장.
 
 ### 에이전트 정리 정책
 - 모든 태스크 완료 후 → `cleanup_agents()`로 stopped/error 에이전트 정리

@@ -156,6 +156,24 @@ export default function TerminalView({ sessionId, isActive }: TerminalViewProps)
       window.electronAPI.pty.write(sessionId, data);
     });
 
+    // Handle image paste (Cmd+V with image in clipboard)
+    const handlePaste = async (e: ClipboardEvent) => {
+      if (disposed) return;
+      // Check if clipboard has image (not text)
+      const hasImage = e.clipboardData?.types.includes('image/png')
+        || e.clipboardData?.types.includes('image/jpeg');
+      const hasText = e.clipboardData?.types.includes('text/plain');
+      if (!hasImage || hasText) return; // Let xterm handle text paste
+
+      e.preventDefault();
+      const imagePath = await window.electronAPI.clipboard.getImagePath();
+      if (imagePath) {
+        window.electronAPI.pty.write(sessionId, imagePath);
+        terminal.write(`\x1b[90m[Image pasted: ${imagePath}]\x1b[0m`);
+      }
+    };
+    containerRef.current?.addEventListener('paste', handlePaste);
+
     // Handle PTY exit
     window.electronAPI.pty.onExit(sessionId, (code) => {
       if (disposed) return;
@@ -183,6 +201,7 @@ export default function TerminalView({ sessionId, isActive }: TerminalViewProps)
       window.clearTimeout(replayTimer);
       clearInterval(flushInterval);
       window.removeEventListener('resize', handleResize);
+      containerRef.current?.removeEventListener('paste', handlePaste);
       window.electronAPI.pty.removeListeners(sessionId);
       terminal.dispose();
       if (containerRef.current) {

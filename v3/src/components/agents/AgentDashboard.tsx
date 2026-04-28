@@ -46,17 +46,17 @@ export default function AgentDashboard({
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-100">Agent Dashboard</h2>
         <div className="flex items-center gap-2">
-          {agents.filter(a => a.status === 'stopped' || a.status === 'error').length > 0 && (
+          {agents.filter(a => a.status !== 'working').length > 0 && (
             <button
               className="flex items-center gap-1.5 rounded border border-red-600/30 bg-red-600/10 px-3 py-1.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/20"
               onClick={() => {
-                const stale = agents.filter(a => a.status === 'stopped' || a.status === 'error');
-                if (confirm(`${stale.length}개의 정지된 에이전트를 삭제하시겠습니까?`)) {
-                  stale.forEach(a => onDelete(a.id));
+                const inactive = agents.filter(a => a.status !== 'working');
+                if (confirm(`${inactive.length}개의 비활성 에이전트를 삭제하시겠습니까?\n(working 상태 제외)`)) {
+                  inactive.forEach(a => onDelete(a.id));
                 }
               }}
             >
-              Cleanup ({agents.filter(a => a.status === 'stopped' || a.status === 'error').length})
+              Cleanup ({agents.filter(a => a.status !== 'working').length})
             </button>
           )}
           <button

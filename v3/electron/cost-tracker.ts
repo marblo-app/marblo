@@ -21,6 +21,8 @@ export interface CostEntry {
   // Delta (incremental) values for this poll interval
   deltaInputTokens: number;
   deltaOutputTokens: number;
+  deltaCacheReadTokens: number;
+  deltaCacheWriteTokens: number;
   deltaCost: number;
 }
 
@@ -42,6 +44,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   'claude-3-5-haiku': { inputPer1M: 0.8, outputPer1M: 4 },
   'claude-3-opus': { inputPer1M: 15, outputPer1M: 75 },
   // OpenAI
+  'gpt-5.5': { inputPer1M: 5, outputPer1M: 20 },
   'gpt-4o': { inputPer1M: 2.5, outputPer1M: 10 },
   'gpt-4o-mini': { inputPer1M: 0.15, outputPer1M: 0.6 },
   'gpt-4.1': { inputPer1M: 2, outputPer1M: 8 },
@@ -236,6 +239,8 @@ export class CostTracker {
           timestamp: Date.now(),
           deltaInputTokens: newInput,
           deltaOutputTokens: newOutput,
+          deltaCacheReadTokens: newCacheRead,
+          deltaCacheWriteTokens: newCacheWrite,
           deltaCost,
         });
 
@@ -280,6 +285,8 @@ export class CostTracker {
           timestamp: Date.now(),
           deltaInputTokens: 0,
           deltaOutputTokens: 0,
+          deltaCacheReadTokens: 0,
+          deltaCacheWriteTokens: 0,
           deltaCost: totalCost,
         });
       }
@@ -306,6 +313,8 @@ export class CostTracker {
           timestamp: Date.now(),
           deltaInputTokens: inputTokens,
           deltaOutputTokens: outputTokens,
+          deltaCacheReadTokens: 0,
+          deltaCacheWriteTokens: 0,
           deltaCost: cost,
         });
       }

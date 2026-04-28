@@ -170,8 +170,8 @@ export const telemetry = {
     logTelemetry({ event: 'flow:completed', flowId, status, durationMs, nodeCount, success: status === 'completed' });
   },
 
-  tokenUsage(agentId: string, model: string, tokensInput: number, tokensOutput: number, cost: number) {
-    logTelemetry({ event: 'token:usage', agentId, model, tokensInput, tokensOutput, cost });
+  tokenUsage(agentId: string, model: string, tokensInput: number, tokensOutput: number, cost: number, projectId?: string) {
+    logTelemetry({ event: 'token:usage', agentId, model, tokensInput, tokensOutput, cost, projectId });
   },
 
   sessionStarted(projectId?: string) {

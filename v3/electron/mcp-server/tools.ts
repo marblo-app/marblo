@@ -498,6 +498,19 @@ export function registerTools(server: McpServer): void {
 
       await updateDoc(doc(db, 'tasks', task_id), updates);
 
+      // Signal agent is now free when task leaves active work state
+      const doneStatuses = ['DONE', 'REVIEW', 'BLOCKED', 'FAILED'];
+      if (doneStatuses.includes(newStatus) && MARBLO_AGENT_ID) {
+        const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+        if (bridgePort) {
+          fetch(`http://127.0.0.1:${bridgePort}/set-agent-status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: MARBLO_AGENT_ID, status: 'idle' }),
+          }).catch(() => {});
+        }
+      }
+
       // Notify orchestrator about status change
       const commentNote = comment ? ` — ${comment}` : '';
       notifyOrchestrator(
@@ -608,6 +621,18 @@ export function registerTools(server: McpServer): void {
       }
 
       await updateDoc(doc(db, 'tasks', task_id), updates);
+
+      // Signal agent is now free
+      if (MARBLO_AGENT_ID) {
+        const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+        if (bridgePort) {
+          fetch(`http://127.0.0.1:${bridgePort}/set-agent-status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: MARBLO_AGENT_ID, status: 'idle' }),
+          }).catch(() => {});
+        }
+      }
 
       // Notify orchestrator about review submission
       const prNote = pr_url ? ` PR: ${pr_url}` : '';

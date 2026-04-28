@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, powerMonitor } from 'electron';
+import { app, BrowserWindow, Menu, ipcMain, dialog, powerMonitor, clipboard, nativeImage } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -69,6 +69,7 @@ interface AppState {
   lastProjectId?: string;
   lastRootPath?: string;
   wasOrchestratorRunning?: boolean;
+  modelPreset?: string;
 }
 
 function readAppState(): AppState {
@@ -105,9 +106,7 @@ const fsManager = new FsManager();
 const agentManager = new AgentManager(
   ptyManager,
   (agentId, status) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:statusChanged', { agentId, status });
-    }
+    broadcast('agent:statusChanged', { agentId, status });
   },
   (rootPath, sessionId, label, agentId) => {
     orchestratorManager.saveSessionLabel(rootPath, sessionId, label, agentId);
@@ -118,19 +117,25 @@ const agentManager = new AgentManager(
   },
   // Auto-restart callbacks
   (agentId, attempt, maxAttempts) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:restartAttempt', { agentId, attempt, maxAttempts });
-    }
+    broadcast('agent:restartAttempt', { agentId, attempt, maxAttempts });
   },
   (agentId, exitCode) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:restartFailed', { agentId, exitCode });
-    }
+    broadcast('agent:restartFailed', { agentId, exitCode });
   },
   () => mainWindow,
 );
 
-let mainWindow: BrowserWindow | null = null;
+let mainWindow: BrowserWindow | null = null; // Primary window (for bridge server reference)
+const allWindows = new Set<BrowserWindow>();
+
+/** Broadcast an IPC event to all open windows */
+function broadcast(channel: string, ...args: unknown[]): void {
+  for (const win of allWindows) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(channel, ...args);
+    }
+  }
+}
 
 // --- Bridge Server + Orchestrator Manager ---
 const ptyBuffers = new Map<string, string[]>();
@@ -140,9 +145,7 @@ const orchestratorManager = new OrchestratorManager(
   ptyManager,
   agentManager.getConfigGenerator(),
   (status) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('orchestrator:statusChanged', { status });
-    }
+    broadcast('orchestrator:statusChanged', { status });
   },
 );
 
@@ -181,27 +184,24 @@ const costTracker = new CostTracker((agentId, cost) => {
   const agent = agentManager.getAgent(agentId);
   const projectId = agent?.launchConfig?.env?.MARBLO_PROJECT || '';
   if (!projectId) {
-    console.warn(`[CostTracker:CB] Skipping — no projectId for agent ${agentId}`);
-    return;
+    console.warn(`[CostTracker:CB] No projectId for agent ${agentId} — recording with empty projectId`);
   }
 
   // Send delta (incremental) values to renderer for BigQuery
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('cost:update', {
-      projectId,
-      agentId,
-      model: cost.model,
-      inputTokens: cost.deltaInputTokens,
-      outputTokens: cost.deltaOutputTokens,
-      cacheReadTokens: cost.cacheReadTokens || 0,
-      cacheWriteTokens: cost.cacheWriteTokens || 0,
-      totalCost: cost.deltaCost,
-    });
-    console.log(`[CostTracker] Sent cost:update (delta) — agent=${agentId} in=${cost.deltaInputTokens} out=${cost.deltaOutputTokens} cost=$${cost.deltaCost.toFixed(4)}`);
+  broadcast('cost:update', {
+    projectId,
+    agentId,
+    model: cost.model,
+    inputTokens: cost.deltaInputTokens,
+    outputTokens: cost.deltaOutputTokens,
+    cacheReadTokens: cost.deltaCacheReadTokens || 0,
+    cacheWriteTokens: cost.deltaCacheWriteTokens || 0,
+    totalCost: cost.deltaCost,
+  });
+  console.log(`[CostTracker] Sent cost:update (delta) — agent=${agentId} project=${projectId || '(none)'} in=${cost.deltaInputTokens} out=${cost.deltaOutputTokens} cost=$${cost.deltaCost.toFixed(4)}`);
 
-    // Also send token:usage telemetry event with projectId
-    mainTelemetry.tokenUsage(mainWindow, agentId, cost.model, cost.deltaInputTokens, cost.deltaOutputTokens, cost.deltaCost, projectId);
-  }
+  // Also send token:usage telemetry event with projectId
+  mainTelemetry.tokenUsage(mainWindow, agentId, cost.model, cost.deltaInputTokens, cost.deltaOutputTokens, cost.deltaCost, projectId);
 });
 
 // Load stored API keys and create LLM provider
@@ -214,6 +214,10 @@ let llmProvider = createLLMProvider({
 const flowRunner = new FlowRunner(flowDb, llmProvider);
 const kanbanBridge = new KanbanBridge(flowDb, flowRunner);
 kanbanBridge.attach();
+
+// Restore model preset from app state
+const savedPreset = readAppState().modelPreset;
+if (savedPreset) process.env.MARBLO_MODEL_PRESET = savedPreset;
 
 /** Recreate LLM provider with current stored keys and update FlowRunner */
 function refreshLLMProvider(): void {
@@ -231,9 +235,7 @@ const flowNodeCache = new Map<string, Flow>();
 
 // Forward flow events to renderer
 flowRunner.on('event', (event: FlowEvent) => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('flow:event', event);
-  }
+  broadcast('flow:event', event);
 });
 
 // Handle agent node delegation: spawn new agent or route task to existing PTY
@@ -301,16 +303,14 @@ function handleAgentDelegation(nodeId: string, output: Record<string, unknown>):
       });
 
       // Notify renderer to attach terminal tab
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('agent:spawned', {
-          agentId,
-          name: spawnConfig.name,
-          ptySessionId: instance.ptySessionId,
-          model,
-          role: spawnConfig.role,
-          flowNodeId: nodeId,
-        });
-      }
+      broadcast('agent:spawned', {
+        agentId,
+        name: spawnConfig.name,
+        ptySessionId: instance.ptySessionId,
+        model,
+        role: spawnConfig.role,
+        flowNodeId: nodeId,
+      });
 
       console.log(`[Flow:AgentDelegation] Spawned agent "${spawnConfig.name}" (${agentId}) for node ${nodeId}`);
     } catch (err) {
@@ -341,7 +341,7 @@ process.on('unhandledRejection', (reason) => {
   console.error('[FATAL] Unhandled rejection:', reason);
 });
 
-function createWindow() {
+function createWindow(isNewWindow = false) {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -396,9 +396,24 @@ function createWindow() {
   }
 
   mainWindow = win;
+  allWindows.add(win);
+
+  win.on('closed', () => {
+    allWindows.delete(win);
+    if (mainWindow === win) {
+      // Promote another window as primary, or null
+      mainWindow = allWindows.size > 0 ? (allWindows.values().next().value ?? null) : null;
+      if (mainWindow) bridgeServer.setMainWindow(mainWindow);
+    }
+  });
 
   win.once('ready-to-show', () => {
     win.show();
+
+    // Tell renderer if this is a new window (skip session restore)
+    if (isNewWindow) {
+      win.webContents.send('window:isNew', true);
+    }
 
     // Auto-update check (production only)
     if (!isDev) {
@@ -418,6 +433,18 @@ function createWindow() {
         { role: 'unhide' },
         { type: 'separator' },
         { role: 'quit' },
+      ],
+    },
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'New Window',
+          accelerator: 'CmdOrCtrl+Shift+N',
+          click: () => createWindow(true),
+        },
+        { type: 'separator' },
+        { role: 'close' },
       ],
     },
     {
@@ -447,10 +474,26 @@ function createWindow() {
       ],
     },
     {
+      label: 'Terminal',
+      submenu: [
+        {
+          label: 'New Terminal',
+          accelerator: 'CmdOrCtrl+`',
+          click: () => {
+            const focused = BrowserWindow.getFocusedWindow();
+            if (focused && !focused.isDestroyed()) {
+              focused.webContents.send('terminal:new');
+            }
+          },
+        },
+      ],
+    },
+    {
       label: 'Window',
       submenu: [
         { role: 'minimize' },
         { role: 'zoom' },
+        { type: 'separator' },
         { role: 'close' },
       ],
     },
@@ -507,15 +550,14 @@ ipcMain.handle('fs:gitDiff', async (_event, filePath: string) => {
 
 ipcMain.handle('fs:watch', (_event, rootPath: string) => {
   fsManager.watchDirectory(rootPath, (event, filePath) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('fs:change', event, filePath);
-    }
+    broadcast('fs:change', event, filePath);
   });
 });
 
 ipcMain.handle('fs:selectDirectory', async () => {
-  if (!mainWindow) return null;
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const focusedWin = BrowserWindow.getFocusedWindow() || mainWindow;
+  if (!focusedWin) return null;
+  const result = await dialog.showOpenDialog(focusedWin, {
     properties: ['openDirectory'],
   });
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -552,18 +594,14 @@ function setupPtyForwarding(sid: string): void {
       }
       return; // buffer only — don't send live yet
     }
-    // Live mode: send directly to renderer
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(`pty:data:${sid}`, data);
-    }
+    // Live mode: send directly to all renderers
+    broadcast(`pty:data:${sid}`, data);
   });
 
   ptyManager.onExit(sid, (exitCode) => {
     ptyBuffers.delete(sid);
     replayTimers.delete(sid);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(`pty:exit:${sid}`, exitCode);
-    }
+    broadcast(`pty:exit:${sid}`, exitCode);
   });
 }
 
@@ -623,10 +661,10 @@ ipcMain.handle('pty:replay', (_event, { id }: { id: string }) => {
 
   replayTimers.set(id, setTimeout(() => {
     const buf = ptyBuffers.get(id);
-    if (buf && mainWindow && !mainWindow.isDestroyed()) {
+    if (buf) {
       // Only send data that arrived AFTER the last replay (avoid duplicates)
       for (let i = replayedUpTo; i < buf.length; i++) {
-        mainWindow.webContents.send(`pty:data:${id}`, buf[i]);
+        broadcast(`pty:data:${id}`, buf[i]);
       }
       console.log(`[PTY:REPLAY] Timer flush id=${id}, sent ${buf.length - replayedUpTo} new chunks (skipped ${replayedUpTo} replayed)`);
     }
@@ -646,9 +684,7 @@ ipcMain.handle('agent:restart', (_event, agentId: string) => {
   if (instance) {
     // Re-setup PTY data forwarding
     ptyManager.onData(instance.ptySessionId, (data) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(`pty:data:${instance.ptySessionId}`, data);
-      }
+      broadcast(`pty:data:${instance.ptySessionId}`, data);
     });
   }
   return instance ? {
@@ -882,6 +918,38 @@ ipcMain.handle('settings:getApiKeys', () => {
   };
 });
 
+// --- Code formatting (Prettier) ---
+ipcMain.handle('code:format', async (_event, { content, filePath }: { content: string; filePath: string }) => {
+  try {
+    const prettier = await import('prettier');
+    const ext = path.extname(filePath).toLowerCase();
+    const parserMap: Record<string, string> = {
+      '.ts': 'typescript', '.tsx': 'typescript',
+      '.js': 'babel', '.jsx': 'babel',
+      '.json': 'json', '.md': 'markdown',
+      '.css': 'css', '.scss': 'scss', '.less': 'less',
+      '.html': 'html', '.vue': 'vue',
+      '.yaml': 'yaml', '.yml': 'yaml',
+      '.graphql': 'graphql', '.gql': 'graphql',
+    };
+    const parser = parserMap[ext];
+    if (!parser) return { formatted: content, error: null };
+
+    // Try to find project prettier config
+    const config = await prettier.resolveConfig(filePath) || {};
+    const formatted = await prettier.format(content, {
+      ...config,
+      parser,
+      tabWidth: 2,
+      singleQuote: true,
+      trailingComma: 'all',
+    });
+    return { formatted, error: null };
+  } catch (err) {
+    return { formatted: content, error: err instanceof Error ? err.message : 'Format failed' };
+  }
+});
+
 ipcMain.handle('settings:setApiKey', (_event, { provider, key }: { provider: string; key: string }) => {
   const validProviders = ['anthropic', 'openai', 'google'];
   if (!validProviders.includes(provider)) {
@@ -921,6 +989,31 @@ ipcMain.handle('bridge:injectMessage', async (_event, params: {
   return res.json();
 });
 
+// --- Clipboard image paste support ---
+ipcMain.handle('clipboard:getImagePath', async () => {
+  const img = clipboard.readImage();
+  if (img.isEmpty()) return null;
+
+  const tmpDir = path.join(os.tmpdir(), 'marblo-clipboard');
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+  const filePath = path.join(tmpDir, `paste-${Date.now()}.png`);
+  fs.writeFileSync(filePath, img.toPNG());
+  return filePath;
+});
+
+// --- Model Preset ---
+ipcMain.handle('modelPreset:set', (_event, preset: string) => {
+  process.env.MARBLO_MODEL_PRESET = preset;
+  writeAppState({ modelPreset: preset });
+  console.log(`[Main] Model preset set to: ${preset}`);
+  return { success: true };
+});
+
+ipcMain.handle('modelPreset:get', () => {
+  return process.env.MARBLO_MODEL_PRESET || readAppState().modelPreset || 'recommended';
+});
+
 ipcMain.handle('appState:load', () => readAppState());
 
 ipcMain.handle('appState:save', (_event, state: Partial<AppState>) => {
@@ -942,27 +1035,38 @@ app.whenReady().then(async () => {
   // --- powerMonitor: notify renderer on system wake ---
   powerMonitor.on('resume', () => {
     console.log('[Main] System resumed from sleep — notifying renderer');
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('system:wake');
-    }
+    broadcast('system:wake');
   });
 
-  // Share mainWindow with bridge server
+  // Share windows with bridge server
   if (mainWindow) {
     bridgeServer.setMainWindow(mainWindow);
   }
+  bridgeServer.setAllWindows(allWindows);
 });
 
 app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    // Non-macOS: full cleanup and quit
+    kanbanBridge.detach();
+    orchestratorManager.stop();
+    bridgeServer.stop();
+    agentManager.stopAll();
+    ptyManager.killAll();
+    fsManager.stopWatching();
+    app.quit();
+  }
+  // macOS: keep managers alive so agents/orchestrator persist across window close/reopen
+});
+
+app.on('before-quit', () => {
+  // Full cleanup when actually quitting (Cmd+Q)
   kanbanBridge.detach();
   orchestratorManager.stop();
   bridgeServer.stop();
   agentManager.stopAll();
   ptyManager.killAll();
   fsManager.stopWatching();
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
 });
 
 app.on('activate', () => {

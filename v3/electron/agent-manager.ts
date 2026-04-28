@@ -139,29 +139,33 @@ export class AgentManager {
       };
 
       // Watch PTY output for CLI readiness indicators
+      // Only match patterns that confirm the CLI is actually ready for input
       let outputBuffer = '';
       const readinessPatterns = [
-        /╭/,           // Claude Code prompt box top
-        /\$\s*$/m,     // Shell prompt
-        />\s*$/m,      // Generic prompt
-        /claude/i,     // Claude CLI loaded
+        /╭─+/,                     // Claude Code: box border (specific)
+        /\? for shortcuts/,        // Claude Code: footer help text
+        /Type your message/i,      // Claude/Gemini: input prompt
+        /Loaded \d+ MCP tool/i,    // MCP tools loaded confirmation
+        /Ready to assist/i,        // Generic CLI ready message
+        /What can I help/i,        // Gemini/GPT greeting
       ];
 
       this.ptyManager.onData(ptySessionId, (data) => {
         if (sent) return;
         outputBuffer += data;
-        // Check if any readiness pattern matches
+        // Only keep last 4KB to avoid memory growth
+        if (outputBuffer.length > 4096) outputBuffer = outputBuffer.slice(-4096);
         for (const pattern of readinessPatterns) {
           if (pattern.test(outputBuffer)) {
-            // Small delay to let the CLI fully render its prompt
-            setTimeout(sendPrompt, 500);
+            // Delay to let CLI fully render its prompt
+            setTimeout(sendPrompt, 1500);
             return;
           }
         }
       });
 
-      // Fallback: send after 8 seconds regardless (increased from 3s)
-      setTimeout(sendPrompt, 8000);
+      // Fallback: send after 10 seconds regardless
+      setTimeout(sendPrompt, 10000);
     }
 
     // Detect new Claude session file and save label (5s after launch)
@@ -221,16 +225,17 @@ export class AgentManager {
 
     this.agents.set(params.id, instance);
 
-    // Telemetry: agent spawned
-    mainTelemetry.agentSpawned(this.getMainWindow?.() ?? null, params.id, params.name, params.model || 'claude', params.role || 'backend', params.projectId);
+    // Telemetry: agent spawned — prefer MARBLO_PROJECT from launchConfig (always set by agent-config)
+    const spawnProjectId = instance.launchConfig?.env?.MARBLO_PROJECT || params.projectId || '';
+    mainTelemetry.agentSpawned(this.getMainWindow?.() ?? null, params.id, params.name, params.model || 'claude', params.role || 'backend', spawnProjectId);
 
     // Start heartbeat for anomaly detection (ML-4)
-    const projectId = params.projectId || '';
     instance.heartbeatTimer = setInterval(() => {
       const win = this.getMainWindow?.() ?? null;
       const agent = this.agents.get(params.id);
       if (!agent || agent.stopRequested) return;
-      mainTelemetry.heartbeat(win, params.id, projectId, agent.status, 0, 0);
+      const hbProjectId = agent.launchConfig?.env?.MARBLO_PROJECT || params.projectId || '';
+      mainTelemetry.heartbeat(win, params.id, hbProjectId, agent.status, 0, 0);
     }, HEARTBEAT_INTERVAL_MS);
 
     // Monitor PTY exit — auto-restart on crash

@@ -36,6 +36,6 @@ export const mainTelemetry = {
   },
 
   heartbeat(win: BrowserWindow | null, agentId: string, projectId: string, status: string, tokensAccumulated: number, costAccumulated: number) {
-    sendTelemetry(win, 'agent:heartbeat', { agentId, projectId, status, tokensAccumulated, costAccumulated });
+    sendTelemetry(win, 'agent:heartbeat', { agentId, projectId, status, tokensInput: tokensAccumulated, cost: costAccumulated });
   },
 };

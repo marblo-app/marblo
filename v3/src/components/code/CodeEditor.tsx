@@ -15,23 +15,54 @@ export function CodeEditor({ filePath, content, language, readOnly = false }: Co
   const saveFile = useEditorStore(s => s.saveFile);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
+  const formatAndSave = useCallback(async () => {
+    const ed = editorRef.current;
+    if (!ed || readOnly) return;
+    const currentContent = ed.getValue();
+    const { formatted, error } = await window.electronAPI.code.format(currentContent, filePath);
+    if (!error && formatted !== currentContent) {
+      const pos = ed.getPosition();
+      updateContent(filePath, formatted);
+      ed.setValue(formatted);
+      if (pos) ed.setPosition(pos);
+    }
+    saveFile(filePath);
+  }, [filePath, readOnly, saveFile, updateContent]);
+
+  const formatOnly = useCallback(async () => {
+    const ed = editorRef.current;
+    if (!ed || readOnly) return;
+    const currentContent = ed.getValue();
+    const { formatted, error } = await window.electronAPI.code.format(currentContent, filePath);
+    if (!error && formatted !== currentContent) {
+      const pos = ed.getPosition();
+      updateContent(filePath, formatted);
+      ed.setValue(formatted);
+      if (pos) ed.setPosition(pos);
+    }
+  }, [filePath, readOnly, updateContent]);
+
   const handleMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
 
-    // Cmd+S / Ctrl+S to save
+    // Cmd+S / Ctrl+S — format + save
     editor.addAction({
-      id: 'save-file',
-      label: 'Save File',
+      id: 'format-and-save',
+      label: 'Format and Save',
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
-      run: () => {
-        if (!readOnly) {
-          saveFile(filePath);
-        }
-      },
+      run: () => { formatAndSave(); },
+    });
+
+    // Cmd+Shift+F / Ctrl+Shift+F — format only
+    editor.addAction({
+      id: 'format-code',
+      label: 'Format Code',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF],
+      run: () => { formatOnly(); },
     });
 
     editor.focus();
-  }, [filePath, readOnly, saveFile]);
+  }, [formatAndSave, formatOnly]);
 
   const handleChange = useCallback((value: string | undefined) => {
     if (value !== undefined && !readOnly) {
@@ -49,7 +80,7 @@ export function CodeEditor({ filePath, content, language, readOnly = false }: Co
       onMount={handleMount}
       options={{
         readOnly,
-        minimap: { enabled: false },
+        minimap: { enabled: true, scale: 1, showSlider: 'mouseover' },
         fontSize: 13,
         lineHeight: 20,
         padding: { top: 8 },
@@ -59,6 +90,8 @@ export function CodeEditor({ filePath, content, language, readOnly = false }: Co
         renderWhitespace: 'selection',
         bracketPairColorization: { enabled: true },
         automaticLayout: true,
+        guides: { bracketPairs: true, indentation: true },
+        stickyScroll: { enabled: true },
         scrollbar: {
           verticalScrollbarSize: 10,
           horizontalScrollbarSize: 10,

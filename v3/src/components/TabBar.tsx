@@ -69,10 +69,19 @@ interface TabBarProps {
   onTabChange: (tab: TabId) => void;
 }
 
+// Hidden tabs in production — only shown when VITE_DEV_FEATURES includes the tab id
+const DEV_ONLY_TABS: Set<TabId> = new Set(['flows', 'deploy']);
+const devFeatures = (import.meta.env.VITE_DEV_FEATURES || '').split(',').map((s: string) => s.trim());
+
 export function TabBar({ activeTab, onTabChange }: TabBarProps) {
+  const visibleTabs = tabs.filter((tab) => {
+    if (!DEV_ONLY_TABS.has(tab.id)) return true;
+    return devFeatures.includes(tab.id);
+  });
+
   return (
     <div className="flex border-b border-gray-700 bg-gray-900">
-      {tabs.map((tab) => (
+      {visibleTabs.map((tab) => (
         <button
           key={tab.id}
           onClick={() => onTabChange(tab.id)}

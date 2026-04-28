@@ -7,6 +7,7 @@ import {
   scoreAgents as scoreAgentsFn,
   scoreModels as scoreModelsFn,
   checkSpawnConstraints,
+  resolvePreset,
   MAX_AGENTS,
   MAX_PER_ROLE,
   type AgentInfo,
@@ -81,6 +82,7 @@ export class BridgeServer {
   private ptyManager: PtyManager;
   private orchestratorManager: OrchestratorManager | null = null;
   private mainWindow: BrowserWindow | null = null;
+  private allWindows: Set<BrowserWindow> | null = null;
   private ptyBuffers: Map<string, string[]>;
 
   constructor(
@@ -99,6 +101,23 @@ export class BridgeServer {
 
   setMainWindow(win: BrowserWindow | null): void {
     this.mainWindow = win;
+  }
+
+  setAllWindows(windows: Set<BrowserWindow>): void {
+    this.allWindows = windows;
+  }
+
+  /** Broadcast to all open windows */
+  private broadcast(channel: string, ...args: unknown[]): void {
+    if (this.allWindows) {
+      for (const win of this.allWindows) {
+        if (!win.isDestroyed()) {
+          win.webContents.send(channel, ...args);
+        }
+      }
+    } else if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send(channel, ...args);
+    }
   }
 
   getPort(): number {
@@ -152,6 +171,11 @@ export class BridgeServer {
 
         if (req.method === 'POST' && req.url === '/kill-agent') {
           this.handleKillAgent(req, res);
+          return;
+        }
+
+        if (req.method === 'POST' && req.url === '/set-agent-status') {
+          this.handleSetAgentStatus(req, res);
           return;
         }
 
@@ -308,9 +332,7 @@ export class BridgeServer {
 
         this.agentManager.remove(agent.id);
         // Notify renderer to delete from Firestore too
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send('agent:deleted', { agentId: agent.id, agentName: agent.name });
-        }
+        this.broadcast('agent:deleted', { agentId: agent.id, agentName: agent.name });
         console.log(`[BridgeServer] Removed agent '${params.agentName}' (reason: ${params.reason || 'none'})`);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -503,7 +525,7 @@ export class BridgeServer {
     // Select best model
     const enabledModels = params.enabledModels
       || (process.env.MARBLO_ENABLED_MODELS?.split(',') as ModelType[] | undefined)
-      || ['claude', 'gemini', 'gpt'];
+      || resolvePreset(process.env.MARBLO_MODEL_PRESET);
     const selectedModel = model || this.scoreModels(enabledModels as ModelType[], tags);
     const agentName = params.nameHint || `${role}-${selectedModel}-${Date.now().toString(36).slice(-4)}`;
     const cwd = params.cwd || process.cwd();
@@ -583,16 +605,12 @@ export class BridgeServer {
             this.ptyBuffers.get(sid)!.push(data);
             return; // buffer only — don't send live yet
           }
-          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send(`pty:data:${sid}`, data);
-          }
+          this.broadcast(`pty:data:${sid}`, data);
         });
 
         this.ptyManager.onExit(sid, (exitCode) => {
           this.ptyBuffers.delete(sid);
-          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send(`pty:exit:${sid}`, exitCode);
-          }
+          this.broadcast(`pty:exit:${sid}`, exitCode);
         });
       },
     });
@@ -600,15 +618,13 @@ export class BridgeServer {
     const sid = instance.ptySessionId;
 
     // Notify renderer to attach terminal tab
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('agent:spawned', {
-        agentId,
-        name: params.name,
-        ptySessionId: sid,
-        model: params.model,
-        role: params.role,
-      });
-    }
+    this.broadcast('agent:spawned', {
+      agentId,
+      name: params.name,
+      ptySessionId: sid,
+      model: params.model,
+      role: params.role,
+    });
 
     return {
       success: true,
@@ -620,16 +636,14 @@ export class BridgeServer {
   // ── Sync status to renderer (→ Firestore) ───────────────────
 
   private syncAgentStatus(agentId: string, status: AgentStatus, currentTaskId?: string): void {
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      // Include agentName so the renderer can match by name (Firestore doc ID != AgentManager UUID)
-      const agent = this.agentManager.getAgent(agentId);
-      this.mainWindow.webContents.send('agent:syncStatus', {
-        agentId,
-        agentName: agent?.name || '',
-        status,
-        currentTaskId: currentTaskId || null,
-      });
-    }
+    // Include agentName so the renderer can match by name (Firestore doc ID != AgentManager UUID)
+    const agent = this.agentManager.getAgent(agentId);
+    this.broadcast('agent:syncStatus', {
+      agentId,
+      agentName: agent?.name || '',
+      status,
+      currentTaskId: currentTaskId || null,
+    });
   }
 
   private getDefaultCommand(model: string): string {
@@ -639,6 +653,47 @@ export class BridgeServer {
       case 'gpt': return 'codex';
       default: return 'claude';
     }
+  }
+
+  // ── POST /set-agent-status ──────────────────────────────────
+
+  private handleSetAgentStatus(req: http.IncomingMessage, res: http.ServerResponse): void {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      let params: { agentId?: string; agentName?: string; status: string };
+      try {
+        params = JSON.parse(body);
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid JSON' }));
+        return;
+      }
+
+      let agent = params.agentName
+        ? this.agentManager.getAgentByName(params.agentName)
+        : params.agentId ? this.agentManager.getAgent(params.agentId) : null;
+
+      if (!agent) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Agent not found' }));
+        return;
+      }
+
+      const validStatuses = ['idle', 'working', 'stopped', 'error'];
+      if (!validStatuses.includes(params.status)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: `Invalid status: ${params.status}` }));
+        return;
+      }
+
+      this.agentManager.setStatus(agent.id, params.status as AgentStatus);
+      this.syncAgentStatus(agent.id, params.status as AgentStatus);
+      console.log(`[BridgeServer] Set agent "${agent.name}" status → ${params.status}`);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+    });
   }
 
   // ── POST /inject-message ───────────────────────────────────

@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../stores/editorStore';
 import { useProjectStore } from '../stores/projectStore';
 
 /**
  * Restores the last active rootPath + project on app startup / page reload.
- * Orchestrator auto-connect is handled by useOrchestratorAutoLaunch.
+ * Skips restore for new windows (Cmd+Shift+N) — returns isNewWindow flag
+ * so Layout can show a folder picker.
  */
 export function useSessionRestore() {
   const setRootPath = useEditorStore((s) => s.setRootPath);
@@ -13,6 +14,16 @@ export function useSessionRestore() {
   const currentProject = useProjectStore((s) => s.currentProject);
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
   const restoredRef = useRef(false);
+  const [isNewWindow, setIsNewWindow] = useState(false);
+
+  // Listen for new window flag from main process
+  useEffect(() => {
+    window.electronAPI.on('window:isNew', () => {
+      setIsNewWindow(true);
+      restoredRef.current = true; // Skip restore
+    });
+    return () => { window.electronAPI.off('window:isNew'); };
+  }, []);
 
   // On startup: once projects are loaded from Firestore, restore last state
   useEffect(() => {
@@ -50,4 +61,6 @@ export function useSessionRestore() {
       ...(currentProject ? { lastProjectId: currentProject.id } : {}),
     }).catch(() => {});
   }, [rootPath, currentProject]);
+
+  return { isNewWindow };
 }

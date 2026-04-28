@@ -62,6 +62,7 @@ interface AgentAPI {
     totalCost: number;
     taskId?: string; taskType?: string; sessionId?: string;
   }) => void) => void;
+  offCostUpdate: () => void;
   reconnect: (
     agents: Array<{ id: string; name: string; model: string; role: string; command: string }>,
     rootPath: string,
@@ -141,6 +142,19 @@ interface SettingsAPI {
   deleteApiKey: (provider: string) => Promise<{ success: boolean }>;
 }
 
+interface CodeAPI {
+  format: (content: string, filePath: string) => Promise<{ formatted: string; error: string | null }>;
+}
+
+interface ModelPresetAPI {
+  get: () => Promise<string>;
+  set: (preset: string) => Promise<{ success: boolean }>;
+}
+
+interface ClipboardAPI {
+  getImagePath: () => Promise<string | null>;
+}
+
 interface BridgeAPI {
   injectMessage: (params: {
     targetAgent: string;
@@ -173,6 +187,9 @@ interface ElectronAPI {
   flow: FlowAPI;
   fs: FsAPI;
   settings: SettingsAPI;
+  code: CodeAPI;
+  modelPreset: ModelPresetAPI;
+  clipboard: ClipboardAPI;
   bridge: BridgeAPI;
   appState: AppStateAPI;
   system: SystemAPI;
