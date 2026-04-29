@@ -93,9 +93,16 @@ function writeAppState(state: AppState): void {
 // Disable QUIC protocol — prevents ERR_QUIC_PROTOCOL_ERROR with Firestore in Electron
 app.commandLine.appendSwitch('disable-quic');
 
-// Enable remote debugging in dev mode
+// Rendering optimization
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+
+// Enable remote debugging in dev mode — port 0 lets OS pick a free port
+// (avoids "Address already in use" when restarting before previous instance fully releases)
 if (!app.isPackaged) {
-  app.commandLine.appendSwitch('remote-debugging-port', '9222');
+  app.commandLine.appendSwitch('remote-debugging-port', '0');
   app.commandLine.appendSwitch('remote-allow-origins', '*');
 }
 
@@ -136,6 +143,7 @@ function broadcast(channel: string, ...args: unknown[]): void {
     }
   }
 }
+
 
 // --- Bridge Server + Orchestrator Manager ---
 const ptyBuffers = new Map<string, string[]>();
@@ -358,7 +366,7 @@ function createWindow(isNewWindow = false) {
 
   if (isDev) {
     win.loadURL('http://localhost:5173');
-    win.webContents.openDevTools();
+    // DevTools disabled by default for performance — open manually with Cmd+Option+I
   } else {
     // Serve from localhost so Firebase Auth (signInWithPopup) works
     // file:// protocol causes auth/unauthorized-domain error
@@ -511,7 +519,8 @@ ipcMain.handle('pty:create', (_event, { id, name, command, args, cwd }) => {
   return { id: session.id, name: session.name, shell: session.shell };
 });
 
-ipcMain.handle('pty:write', (_event, { id, data }) => {
+// pty:write uses ipcMain.on (one-way) — keystrokes shouldn't pay invoke's round-trip cost
+ipcMain.on('pty:write', (_event, { id, data }) => {
   ptyManager.write(id, data);
 });
 
@@ -574,34 +583,36 @@ ipcMain.handle('fs:selectDirectory', async () => {
 /**
  * Helper: register PTY data/exit handlers that buffer-then-live.
  * While ptyBuffers has an entry for `sid`, data is ONLY buffered.
- * After pty:replay deletes the entry, data is sent live via IPC.
+ * After pty:replay deletes the entry, data is sent live via direct IPC.
+ *
+ * NOTE: We deliberately do NOT batch via setImmediate or time-windows here.
+ * Tested batching variants both regressed INP — same-tick coalescing added 1
+ * Node tick of latency per chunk and joined chunks made xterm refresh heavier
+ * per frame, which raised the next keystroke's inputDelay.
  */
 function setupPtyForwarding(sid: string): void {
   const buffer: string[] = [];
   ptyBuffers.set(sid, buffer);
-  console.log(`[PTY:FWD] setupPtyForwarding for ${sid}`);
 
   ptyManager.onData(sid, (data) => {
-    // Cost tracking — observe all output (read-only, fire-and-forget)
     if (sid.startsWith('agent-')) {
       costTracker.processOutput(sid.replace('agent-', ''), data);
     }
 
     if (ptyBuffers.has(sid)) {
       ptyBuffers.get(sid)!.push(data);
-      if (ptyBuffers.get(sid)!.length <= 3) {
-        console.log(`[PTY:FWD] Buffering data for ${sid}, buf size=${ptyBuffers.get(sid)!.length}, bytes=${data.length}`);
-      }
-      return; // buffer only — don't send live yet
+      return;
     }
-    // Live mode: send directly to all renderers
-    broadcast(`pty:data:${sid}`, data);
+
+    // Live mode — direct send, lowest latency
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(`pty:data:${sid}`, data);
+    }
   });
 
   ptyManager.onExit(sid, (exitCode) => {
     ptyBuffers.delete(sid);
-    replayTimers.delete(sid);
-    broadcast(`pty:exit:${sid}`, exitCode);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(`pty:exit:${sid}`, exitCode);
   });
 }
 
@@ -636,42 +647,15 @@ ipcMain.handle('agent:launch', (_event, { agent, cwd, initialPrompt, resumeSessi
   };
 });
 
-// Timers for delayed buffer cleanup (survives React StrictMode double-mount)
-const replayTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-// Renderer calls this after TerminalView mounts to get any buffered early output.
-// Returns a COPY of the buffer and schedules delayed cleanup so React StrictMode's
-// second mount can also get the data.
+// Renderer calls this after TerminalView mounts to drain any buffered early output.
+// Switches to live mode immediately — subsequent PTY data is sent live via webContents.send.
+// (StrictMode dev double-mount is handled by the renderer's `disposed` flag + cleared replay timer.)
 ipcMain.handle('pty:replay', (_event, { id }: { id: string }) => {
   const buffer = ptyBuffers.get(id);
-  console.log(`[PTY:REPLAY] id=${id}, hasBuffer=${!!buffer}, bufLen=${buffer?.length ?? 0}`);
-  if (!buffer || buffer.length === 0) {
-    // No data yet — just switch to live mode immediately
-    ptyBuffers.delete(id);
-    return [];
-  }
-
-  // Return a copy (don't drain yet — StrictMode may call again)
+  console.log(`[PTY:REPLAY] id=${id}, drained ${buffer?.length ?? 0} chunks → live mode`);
+  if (!buffer) return [];
   const data = [...buffer];
-  const replayedUpTo = buffer.length; // Track what was returned to avoid duplicates
-
-  // Reschedule cleanup timer (each replay call resets it)
-  const existing = replayTimers.get(id);
-  if (existing) clearTimeout(existing);
-
-  replayTimers.set(id, setTimeout(() => {
-    const buf = ptyBuffers.get(id);
-    if (buf) {
-      // Only send data that arrived AFTER the last replay (avoid duplicates)
-      for (let i = replayedUpTo; i < buf.length; i++) {
-        broadcast(`pty:data:${id}`, buf[i]);
-      }
-      console.log(`[PTY:REPLAY] Timer flush id=${id}, sent ${buf.length - replayedUpTo} new chunks (skipped ${replayedUpTo} replayed)`);
-    }
-    ptyBuffers.delete(id);
-    replayTimers.delete(id);
-  }, 1500));
-
+  ptyBuffers.delete(id);
   return data;
 });
 
@@ -684,7 +668,7 @@ ipcMain.handle('agent:restart', (_event, agentId: string) => {
   if (instance) {
     // Re-setup PTY data forwarding
     ptyManager.onData(instance.ptySessionId, (data) => {
-      broadcast(`pty:data:${instance.ptySessionId}`, data);
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(`pty:data:${instance.ptySessionId}`, data);
     });
   }
   return instance ? {
@@ -989,8 +973,12 @@ ipcMain.handle('bridge:injectMessage', async (_event, params: {
   return res.json();
 });
 
-// --- Clipboard image paste support ---
+// --- Clipboard support ---
 ipcMain.handle('clipboard:getImagePath', async () => {
+  // If clipboard has text, skip image (user is pasting text, not an image)
+  const text = clipboard.readText();
+  if (text && text.length > 0) return null;
+
   const img = clipboard.readImage();
   if (img.isEmpty()) return null;
 
@@ -1000,6 +988,23 @@ ipcMain.handle('clipboard:getImagePath', async () => {
   const filePath = path.join(tmpDir, `paste-${Date.now()}.png`);
   fs.writeFileSync(filePath, img.toPNG());
   return filePath;
+});
+
+ipcMain.handle('clipboard:getFilePaths', () => {
+  if (process.platform === 'darwin') {
+    try {
+      const { execSync } = require('child_process');
+      // Use osascript (AppleScript) — no compilation needed, fast
+      const result = execSync(
+        `osascript -e 'set filePaths to {}' -e 'try' -e 'set theClip to the clipboard as «class furl»' -e 'set end of filePaths to POSIX path of theClip' -e 'end try' -e 'try' -e 'set fileList to the clipboard as list' -e 'repeat with f in fileList' -e 'try' -e 'set end of filePaths to POSIX path of (f as «class furl»)' -e 'end try' -e 'end repeat' -e 'end try' -e 'set text item delimiters to linefeed' -e 'filePaths as text'`,
+        { encoding: 'utf-8', timeout: 2000 },
+      ).trim();
+      if (result) {
+        return result.split('\n').map((p: string) => p.trim()).filter((p: string) => p && fs.existsSync(p));
+      }
+    } catch { /* not file clipboard */ }
+  }
+  return [];
 });
 
 // --- Model Preset ---

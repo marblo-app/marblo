@@ -153,6 +153,7 @@ interface ModelPresetAPI {
 
 interface ClipboardAPI {
   getImagePath: () => Promise<string | null>;
+  getFilePaths: () => Promise<string[]>;
 }
 
 interface BridgeAPI {

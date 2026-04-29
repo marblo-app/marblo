@@ -9,6 +9,67 @@ import { useSubscriptionStore } from './stores/subscriptionStore';
 import { logTelemetry, type TelemetryEvent } from './services/telemetryService';
 import telemetry from './services/telemetryService';
 
+// Performance monitor: log long tasks that block the main thread.
+// `attribution` reveals what was running (script src, container element).
+// `event` entryType (interactionId) helps identify INP spikes specifically.
+if (typeof PerformanceObserver !== 'undefined') {
+  type AttributedEntry = PerformanceEntry & {
+    attribution?: Array<{
+      name?: string;
+      containerType?: string;
+      containerName?: string;
+      containerId?: string;
+      containerSrc?: string;
+    }>;
+  };
+  try {
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries() as AttributedEntry[]) {
+        if (entry.duration <= 50) continue;
+        const a = entry.attribution?.[0];
+        const attr = a
+          ? `type=${a.containerType ?? '?'} name=${a.containerName ?? '?'} id=${a.containerId ?? '?'} src=${a.containerSrc ?? '?'}`
+          : 'no-attribution';
+        console.warn(`[LONGTASK] ${entry.duration.toFixed(0)}ms — ${attr}`);
+      }
+    }).observe({ entryTypes: ['longtask'] });
+  } catch { /* not supported */ }
+
+  // Track slow keystroke INP specifically — log if a key event takes >100ms to next paint.
+  try {
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries() as Array<PerformanceEntry & { interactionId?: number; processingStart?: number; processingEnd?: number; target?: Element | null }>) {
+        if (entry.duration <= 100) continue;
+        if (entry.entryType !== 'event') continue;
+        if (entry.name !== 'keydown' && entry.name !== 'keyup' && entry.name !== 'input') continue;
+        const inputDelay = (entry.processingStart ?? 0) - entry.startTime;
+        const processing = (entry.processingEnd ?? 0) - (entry.processingStart ?? 0);
+        const presentationDelay = entry.duration - inputDelay - processing;
+        const targetTag = entry.target?.tagName ?? '?';
+        const targetClass = (entry.target as HTMLElement | null)?.className ?? '';
+        console.warn(
+          `[INP-SLOW] ${entry.name} ${entry.duration.toFixed(0)}ms = inputDelay ${inputDelay.toFixed(0)} + processing ${processing.toFixed(0)} + presentation ${presentationDelay.toFixed(0)} | target=<${targetTag} class="${targetClass.toString().slice(0, 60)}">`,
+        );
+      }
+    }).observe({ type: 'event', durationThreshold: 100, buffered: true } as PerformanceObserverInit);
+  } catch { /* not supported */ }
+
+  // Main-thread saturation sampler: schedule a 100ms timeout and measure actual drift.
+  // If main thread is idle, drift is ~0ms. If busy, drift reflects accumulated busy work.
+  // Logs drifts >30ms — 30+ in idle state means baseline noise we should hunt down.
+  let lastSched = performance.now();
+  const tick = () => {
+    const now = performance.now();
+    const drift = now - lastSched - 100;
+    if (drift > 30) {
+      console.warn(`[MAIN-BUSY] ${drift.toFixed(0)}ms drift (target 100ms, actual ${(now - lastSched).toFixed(0)}ms)`);
+    }
+    lastSched = now;
+    setTimeout(tick, 100);
+  };
+  setTimeout(tick, 100);
+}
+
 function AppContent() {
   const { user, loading } = useAuth();
   const subscribeToProjects = useProjectStore((s) => s.subscribeToProjects);

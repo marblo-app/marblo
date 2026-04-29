@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState, useEffect } from 'react';
+import { useRef, useCallback, useState, useEffect, memo } from 'react';
 import { useOrchestratorStore } from '../../stores/orchestratorStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
@@ -17,11 +17,18 @@ interface SessionInfo {
   agentId?: string;
 }
 
-export default function OrchestratorPanel() {
+export default memo(function OrchestratorPanel() {
   const currentProject = useProjectStore((s) => s.currentProject);
   const rootPath = useEditorStore((s) => s.rootPath);
-  const { ptySessionId, status, isCollapsed, toggleCollapsed, setSession, setStatus, clear } =
-    useOrchestratorStore();
+  // Granular selectors — destructuring useOrchestratorStore() would re-render on every action;
+  // per-slice subscriptions only re-render when that slice actually changes.
+  const ptySessionId = useOrchestratorStore((s) => s.ptySessionId);
+  const status = useOrchestratorStore((s) => s.status);
+  const isCollapsed = useOrchestratorStore((s) => s.isCollapsed);
+  const toggleCollapsed = useOrchestratorStore((s) => s.toggleCollapsed);
+  const setSession = useOrchestratorStore((s) => s.setSession);
+  const setStatus = useOrchestratorStore((s) => s.setStatus);
+  const clear = useOrchestratorStore((s) => s.clear);
   const [panelHeight, setPanelHeight] = useState(DEFAULT_HEIGHT);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -281,4 +288,4 @@ export default function OrchestratorPanel() {
       )}
     </div>
   );
-}
+});

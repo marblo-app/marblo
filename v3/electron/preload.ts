@@ -14,8 +14,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pty: {
     create: (opts: { id: string; name: string; command?: string; args?: string[]; cwd?: string }) =>
       ipcRenderer.invoke('pty:create', opts),
-    write: (id: string, data: string) =>
-      ipcRenderer.invoke('pty:write', { id, data }),
+    // Fire-and-forget for keystrokes — avoids invoke's Promise round-trip.
+    // Returns Promise<void> for type compatibility with awaiting callers.
+    write: (id: string, data: string): Promise<void> => {
+      ipcRenderer.send('pty:write', { id, data });
+      return Promise.resolve();
+    },
     resize: (id: string, cols: number, rows: number) =>
       ipcRenderer.invoke('pty:resize', { id, cols, rows }),
     kill: (id: string) =>
@@ -155,6 +159,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   clipboard: {
     getImagePath: () => ipcRenderer.invoke('clipboard:getImagePath') as Promise<string | null>,
+    getFilePaths: () => ipcRenderer.invoke('clipboard:getFilePaths') as Promise<string[]>,
   },
   bridge: {
     injectMessage: (params: { targetAgent: string; tag: string; message: string; taskId?: string; taskTitle?: string }) =>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import TerminalTabs from './TerminalTabs';
 import TerminalView from './TerminalView';
 import FeedbackInput from './FeedbackInput';
@@ -6,7 +6,7 @@ import { useTerminalStore } from '../../stores/terminalStore';
 
 let tabCounter = 0;
 
-export default function TerminalPanel() {
+export default memo(function TerminalPanel() {
   const sessions = useTerminalStore((s) => s.sessions);
   const activeSessionId = useTerminalStore((s) => s.activeSessionId);
   const setActiveSessionId = useTerminalStore((s) => s.setActiveSessionId);
@@ -81,4 +81,4 @@ export default function TerminalPanel() {
       )}
     </div>
   );
-}
+});

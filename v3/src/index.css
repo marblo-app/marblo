@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Terminal performance: isolate xterm from page layout/paint */
+.xterm {
+  contain: layout paint;
+  will-change: contents;
+}
+.xterm-screen {
+  contain: layout style;
+}
+
 body {
   margin: 0;
   padding: 0;

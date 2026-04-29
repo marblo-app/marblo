@@ -1,15 +1,16 @@
-import { useEffect, useRef } from 'react';
-import { Terminal } from 'xterm';
+import { useEffect, useRef, memo } from 'react';
+import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import 'xterm/css/xterm.css';
+import { WebglAddon } from '@xterm/addon-webgl';
+import '@xterm/xterm/css/xterm.css';
 
 interface OrchestratorTerminalProps {
   sessionId: string;
   panelHeight?: number;
 }
 
-export default function OrchestratorTerminal({ sessionId, panelHeight }: OrchestratorTerminalProps) {
+export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: OrchestratorTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -23,7 +24,7 @@ export default function OrchestratorTerminal({ sessionId, panelHeight }: Orchest
     let disposed = false;
 
     const terminal = new Terminal({
-      cursorBlink: true,
+      cursorBlink: false, // periodic redraw was contributing to RAF queue saturation
       fontSize: 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: {
@@ -72,6 +73,16 @@ export default function OrchestratorTerminal({ sessionId, panelHeight }: Orchest
       try {
         terminal.open(el);
         termOpened = true;
+        // WebGL renderer (xterm.js recommended). Must be loaded AFTER terminal.open().
+        // Falls back to DOM on failure.
+        try {
+          const webglAddon = new WebglAddon();
+          webglAddon.onContextLoss(() => webglAddon.dispose());
+          terminal.loadAddon(webglAddon);
+          console.log('[OrchestratorTerminal] WebGL renderer active');
+        } catch (err) {
+          console.warn('[OrchestratorTerminal] WebGL renderer unavailable, using DOM fallback:', err);
+        }
         requestAnimationFrame(() => {
           if (disposed) return;
           try { fitAddon.fit(); } catch { /* ignore */ }
@@ -96,20 +107,11 @@ export default function OrchestratorTerminal({ sessionId, panelHeight }: Orchest
     };
     requestAnimationFrame(tryOpen);
 
-    // Track whether user has scrolled up from the bottom
-    let userScrolledUp = false;
-    terminal.onScroll(() => {
-      const buf = terminal.buffer.active;
-      userScrolledUp = buf.viewportY < buf.baseY;
-    });
-
-    // PTY → Terminal
+    // PTY → Terminal — xterm auto-scrolls when viewport is at bottom; no manual tracking needed
     window.electronAPI.pty.onData(sessionId, (data) => {
       if (disposed) return;
       if (termOpened) {
-        const shouldScroll = !userScrolledUp;
         terminal.write(data);
-        if (shouldScroll) terminal.scrollToBottom();
       } else {
         pendingData.push(data);
       }
@@ -186,19 +188,20 @@ export default function OrchestratorTerminal({ sessionId, panelHeight }: Orchest
     };
   }, [sessionId]);
 
-  // Refit when sessionId or panelHeight changes
+  // Refit when sessionId or panelHeight changes — debounced 50ms so fit() doesn't fire
+  // every frame during panel-height drag (would force-resize PTY each frame).
   useEffect(() => {
-    if (fitAddonRef.current && containerRef.current) {
-      requestAnimationFrame(() => {
-        try {
-          if (containerRef.current && containerRef.current.clientWidth > 0) {
-            fitAddonRef.current?.fit();
-            // Prevent scroll jumping to top after resize
-            terminalRef.current?.scrollToBottom();
-          }
-        } catch { /* ignore */ }
-      });
-    }
+    if (!fitAddonRef.current || !containerRef.current) return;
+    const id = window.setTimeout(() => {
+      try {
+        if (containerRef.current && containerRef.current.clientWidth > 0) {
+          fitAddonRef.current?.fit();
+          // Prevent scroll jumping to top after resize
+          terminalRef.current?.scrollToBottom();
+        }
+      } catch { /* ignore */ }
+    }, 50);
+    return () => window.clearTimeout(id);
   }, [sessionId, panelHeight]);
 
   return (
@@ -206,4 +209,4 @@ export default function OrchestratorTerminal({ sessionId, panelHeight }: Orchest
       <div ref={containerRef} className="w-full h-full" />
     </div>
   );
-}
+});

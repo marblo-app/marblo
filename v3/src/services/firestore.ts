@@ -108,6 +108,12 @@ export async function deleteDocument(
 }
 
 // 실시간 리스너 (컬렉션 쿼리)
+// Defer Firestore state updates to idle time — no timeout so it only runs
+// when the main thread is truly idle (not during typing/IME composition)
+const deferUpdate = typeof requestIdleCallback !== 'undefined'
+  ? (fn: () => void) => requestIdleCallback(fn)
+  : (fn: () => void) => setTimeout(fn, 0);
+
 export function subscribeToCollection<T>(
   collectionName: string,
   constraints: QueryConstraint[],
@@ -117,10 +123,9 @@ export function subscribeToCollection<T>(
   const q = query(ref, ...constraints);
   return onSnapshot(q, (snapshot) => {
     const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as T);
-    callback(items);
+    deferUpdate(() => callback(items));
   }, (error) => {
     console.error(`[Firestore] subscribeToCollection(${collectionName}) error:`, error);
-    // 에러 시에도 빈 배열로 콜백 호출하여 loading 해제
     callback([]);
   });
 }
@@ -134,9 +139,10 @@ export function subscribeToDocument<T>(
   const ref = doc(db, collectionName, docId);
   return onSnapshot(ref, (snapshot) => {
     if (!snapshot.exists()) {
-      callback(null);
+      deferUpdate(() => callback(null));
       return;
     }
-    callback({ id: snapshot.id, ...snapshot.data() } as T);
+    const item = { id: snapshot.id, ...snapshot.data() } as T;
+    deferUpdate(() => callback(item));
   });
 }

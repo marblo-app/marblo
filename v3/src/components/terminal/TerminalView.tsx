@@ -1,15 +1,16 @@
-import { useEffect, useRef } from 'react';
-import { Terminal } from 'xterm';
+import { useEffect, useRef, memo } from 'react';
+import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import 'xterm/css/xterm.css';
+import { WebglAddon } from '@xterm/addon-webgl';
+import '@xterm/xterm/css/xterm.css';
 
 interface TerminalViewProps {
   sessionId: string;
   isActive: boolean;
 }
 
-export default function TerminalView({ sessionId, isActive }: TerminalViewProps) {
+export default memo(function TerminalView({ sessionId, isActive }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -23,7 +24,7 @@ export default function TerminalView({ sessionId, isActive }: TerminalViewProps)
     let disposed = false;
 
     const terminal = new Terminal({
-      cursorBlink: true,
+      cursorBlink: false, // periodic redraw was contributing to RAF queue saturation
       fontSize: 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: {
@@ -73,6 +74,15 @@ export default function TerminalView({ sessionId, isActive }: TerminalViewProps)
       try {
         terminal.open(el);
         termOpened = true;
+        // WebGL renderer (xterm.js recommended). Falls back to DOM on failure.
+        try {
+          const webglAddon = new WebglAddon();
+          webglAddon.onContextLoss(() => webglAddon.dispose());
+          terminal.loadAddon(webglAddon);
+          console.log('[TerminalView] WebGL renderer active');
+        } catch (err) {
+          console.warn('[TerminalView] WebGL renderer unavailable, using DOM fallback:', err);
+        }
         requestAnimationFrame(() => {
           if (disposed) return;
           try { fitAddon.fit(); } catch { /* ignore */ }
@@ -97,22 +107,13 @@ export default function TerminalView({ sessionId, isActive }: TerminalViewProps)
     };
     requestAnimationFrame(tryOpen);
 
-    // Track whether user has scrolled up from the bottom
-    let userScrolledUp = false;
-    terminal.onScroll(() => {
-      const buf = terminal.buffer.active;
-      userScrolledUp = buf.viewportY < buf.baseY;
-    });
-
-    // PTY → Terminal (with session detection)
+    // PTY → Terminal — xterm auto-scrolls when viewport is at bottom; no manual tracking needed
     let hasReceivedData = false;
     window.electronAPI.pty.onData(sessionId, (data) => {
       hasReceivedData = true;
       if (disposed) return;
       if (termOpened) {
-        const shouldScroll = !userScrolledUp;
         terminal.write(data);
-        if (shouldScroll) terminal.scrollToBottom();
       } else {
         pendingData.push(data);
       }
@@ -156,24 +157,6 @@ export default function TerminalView({ sessionId, isActive }: TerminalViewProps)
       window.electronAPI.pty.write(sessionId, data);
     });
 
-    // Handle image paste (Cmd+V with image in clipboard)
-    const handlePaste = async (e: ClipboardEvent) => {
-      if (disposed) return;
-      // Check if clipboard has image (not text)
-      const hasImage = e.clipboardData?.types.includes('image/png')
-        || e.clipboardData?.types.includes('image/jpeg');
-      const hasText = e.clipboardData?.types.includes('text/plain');
-      if (!hasImage || hasText) return; // Let xterm handle text paste
-
-      e.preventDefault();
-      const imagePath = await window.electronAPI.clipboard.getImagePath();
-      if (imagePath) {
-        window.electronAPI.pty.write(sessionId, imagePath);
-        terminal.write(`\x1b[90m[Image pasted: ${imagePath}]\x1b[0m`);
-      }
-    };
-    containerRef.current?.addEventListener('paste', handlePaste);
-
     // Handle PTY exit
     window.electronAPI.pty.onExit(sessionId, (code) => {
       if (disposed) return;
@@ -201,7 +184,6 @@ export default function TerminalView({ sessionId, isActive }: TerminalViewProps)
       window.clearTimeout(replayTimer);
       clearInterval(flushInterval);
       window.removeEventListener('resize', handleResize);
-      containerRef.current?.removeEventListener('paste', handlePaste);
       window.electronAPI.pty.removeListeners(sessionId);
       terminal.dispose();
       if (containerRef.current) {
@@ -242,4 +224,4 @@ export default function TerminalView({ sessionId, isActive }: TerminalViewProps)
       style={{ display: isActive ? 'block' : 'none' }}
     />
   );
-}
+});
