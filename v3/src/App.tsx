@@ -68,6 +68,52 @@ if (typeof PerformanceObserver !== 'undefined') {
     setTimeout(tick, 100);
   };
   setTimeout(tick, 100);
+
+  // IPC channel frequency monitor — identifies channels flooding the renderer.
+  // Each broadcasted IPC event is a task on the renderer's main thread; high-frequency
+  // channels accumulate input delay even when individual handlers are fast.
+  // Logs every 1s when total > 5 events/sec.
+  if (window.electronAPI?.on) {
+    const channels = [
+      'fs:change',
+      'cost:update',
+      'agent:syncStatus',
+      'agent:statusChanged',
+      'agent:restartAttempt',
+      'agent:restartFailed',
+      'agent:spawned',
+      'agent:deleted',
+      'telemetry:event',
+      'orchestrator:statusChanged',
+      'flow:event',
+      'system:wake',
+      'terminal:new',
+    ];
+    const counts = new Map<string, number>(channels.map((c) => [c, 0]));
+    let windowStart = performance.now();
+    for (const ch of channels) {
+      window.electronAPI.on(ch, () => {
+        counts.set(ch, (counts.get(ch) ?? 0) + 1);
+      });
+    }
+    setInterval(() => {
+      const now = performance.now();
+      const elapsed = now - windowStart;
+      windowStart = now;
+      const parts: string[] = [];
+      let total = 0;
+      for (const [ch, n] of counts) {
+        if (n > 0) {
+          parts.push(`${ch}=${n}`);
+          total += n;
+        }
+        counts.set(ch, 0);
+      }
+      if (total > 5) {
+        console.warn(`[IPC-FREQ] ${(elapsed / 1000).toFixed(1)}s window | total=${total} | ${parts.join(' ')}`);
+      }
+    }, 1000);
+  }
 }
 
 function AppContent() {
