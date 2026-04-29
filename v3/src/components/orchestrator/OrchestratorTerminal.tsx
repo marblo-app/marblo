@@ -204,8 +204,27 @@ export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: Or
     return () => window.clearTimeout(id);
   }, [sessionId, panelHeight]);
 
+  // Stop keyboard/composition event propagation at the terminal wrapper boundary.
+  // VS Code/Cursor terminals are fast on the same Mac mini hardware, so the gap
+  // is something Marblo-specific. React 17+ delegates events at the root container,
+  // meaning every keystroke on xterm's hidden textarea bubbles up through the entire
+  // React fiber tree for synthetic-event dispatch. Per event the cost is small, but
+  // for fast typing it accumulates as inputDelay. Stopping propagation in bubble
+  // phase at the wrapper lets xterm's own listeners fire normally (they're attached
+  // directly on the textarea), then prevents the event from reaching React's root.
+  useEffect(() => {
+    const wrapper = containerRef.current;
+    if (!wrapper) return;
+    const stop = (e: Event) => e.stopPropagation();
+    const types = ['keydown', 'keyup', 'keypress', 'input', 'compositionstart', 'compositionupdate', 'compositionend'];
+    for (const t of types) wrapper.addEventListener(t, stop);
+    return () => {
+      for (const t of types) wrapper.removeEventListener(t, stop);
+    };
+  }, []);
+
   return (
-    <div className="absolute inset-0 overflow-hidden">
+    <div className="absolute inset-0 overflow-hidden" style={{ contain: 'strict' }}>
       <div ref={containerRef} className="w-full h-full" />
     </div>
   );

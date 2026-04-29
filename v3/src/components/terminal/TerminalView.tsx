@@ -217,11 +217,27 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
     }
   }, [isActive]);
 
+  // Stop keyboard/composition events from bubbling out of the terminal wrapper to
+  // React's root container (where event delegation runs synthetic-event dispatch
+  // through the entire fiber tree). xterm's listeners are attached directly on the
+  // hidden textarea so they fire normally before propagation stops here.
+  // See OrchestratorTerminal for the full rationale.
+  useEffect(() => {
+    const wrapper = containerRef.current;
+    if (!wrapper) return;
+    const stop = (e: Event) => e.stopPropagation();
+    const types = ['keydown', 'keyup', 'keypress', 'input', 'compositionstart', 'compositionupdate', 'compositionend'];
+    for (const t of types) wrapper.addEventListener(t, stop);
+    return () => {
+      for (const t of types) wrapper.removeEventListener(t, stop);
+    };
+  }, []);
+
   return (
     <div
       ref={containerRef}
       className="absolute inset-0"
-      style={{ display: isActive ? 'block' : 'none' }}
+      style={{ display: isActive ? 'block' : 'none', contain: 'strict' }}
     />
   );
 });

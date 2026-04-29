@@ -22,6 +22,17 @@ Core PRD v1.0의 Week 1-4 모노레포 빅뱅 마이그레이션 계획을 솔�
 
 **신규 파일:** `docs/03_marblo_phase0_foundation_prd.md`
 
+### React event delegation 우회 + CSS containment (2026-04-29)
+사용자 핵심 단서: **VS Code와 Cursor 터미널은 같은 Mac mini에서 정상**. 둘 다 xterm.js + Electron인데 우리만 느림 → 하드웨어/Electron/xterm 자체 baseline 아님. **Marblo 고유 코드의 회귀**.
+
+**가설:** 우리만 갖고 있는 것 = Firebase 리스너, React + Zustand 다중 store, **React 17+ root 이벤트 위임**, Tailwind. 이 중 가장 의심스러운 것은 React event delegation. 매 keystroke마다 xterm의 hidden textarea 이벤트가 React root container까지 bubble되어 synthetic event system이 fiber tree를 walk함. event당 비용은 작지만 빠른 타이핑 시 inputDelay로 누적.
+
+**수정:**
+1. `OrchestratorTerminal` / `TerminalView` wrapper에 keyboard·composition 이벤트 `stopPropagation()` 핸들러 추가. xterm 자체 listener는 textarea에 직접 bind되어 있어 정상 동작 (bubble 단계에서 wrapper 도달 후 차단).
+2. wrapper element에 `contain: strict` 추가. 터미널 layout/paint 영역을 격리해서 부모 트리(Sidebar, Header 등)의 invalidation 영향 차단.
+
+**수정 파일:** `v3/src/components/orchestrator/OrchestratorTerminal.tsx`, `v3/src/components/terminal/TerminalView.tsx`
+
 ### PTY data setImmediate batching 롤백 — INP 회귀 제거 (2026-04-29)
 사용자 보고: "처음 최적화했을 때(WebGL + scrollToBottom)보다 지금이 더 느려졌다", 일반 native 터미널은 정상 → 우리 코드의 회귀.
 
