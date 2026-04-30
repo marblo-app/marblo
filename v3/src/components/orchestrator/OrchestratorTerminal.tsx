@@ -74,25 +74,29 @@ export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: Or
         terminal.open(el);
         termOpened = true;
 
-        // Patch xterm's CompositionHelper to skip layout-flushing work when
-        // no IME composition is active. The original updateCompositionElements
-        // calls getBoundingClientRect after multiple style writes (forced layout
-        // flush), runs again via setTimeout(0), and is invoked on every render
-        // via onRender — even when no IME is active. On heavy DOM trees this
-        // costs 30-50ms per call, accumulating to 100-200ms inputDelay during
-        // Korean IME (which also fires its own compositionupdate handler).
-        // Skipping when _isComposing is false eliminates the cost for English
-        // typing entirely and reduces it during Korean typing.
+        // Patch xterm's CompositionHelper to reduce layout-flush cost.
+        // Original updateCompositionElements:
+        //   1. Writes 6+ styles then calls getBoundingClientRect — forced layout flush
+        //   2. Schedules itself via setTimeout(0) — doubles flush count per event
+        //   3. Registered on onRender — fires every refresh even when IME idle
+        // Patch behavior:
+        //   - When NOT composing (English): no-op (skip every onRender flush)
+        //   - When composing (Korean IME): rate-limit to 33Hz max + always pass
+        //     skip=true to orig to suppress the recursive setTimeout(0) trampoline
         try {
           const core = (terminal as unknown as { _core?: { _compositionHelper?: { updateCompositionElements?: (skip?: boolean) => void; _isComposing?: boolean } } })._core;
           const ch = core?._compositionHelper;
           if (ch && typeof ch.updateCompositionElements === 'function') {
             const orig = ch.updateCompositionElements.bind(ch);
-            ch.updateCompositionElements = function (skip?: boolean) {
+            let lastCall = 0;
+            ch.updateCompositionElements = function () {
               if (!ch._isComposing) return;
-              return orig(skip);
+              const now = performance.now();
+              if (now - lastCall < 30) return; // throttle to ~33Hz during composition
+              lastCall = now;
+              return orig(true); // skip the setTimeout(0) self-reschedule
             };
-            console.log('[OrchestratorTerminal] CompositionHelper patched (skip layout flush when idle)');
+            console.log('[OrchestratorTerminal] CompositionHelper patched (idle skip + 33Hz cap + no recursion)');
           }
         } catch (err) {
           console.warn('[OrchestratorTerminal] CompositionHelper patch failed:', err);

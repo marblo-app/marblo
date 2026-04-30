@@ -81,9 +81,13 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
           const ch = core?._compositionHelper;
           if (ch && typeof ch.updateCompositionElements === 'function') {
             const orig = ch.updateCompositionElements.bind(ch);
-            ch.updateCompositionElements = function (skip?: boolean) {
+            let lastCall = 0;
+            ch.updateCompositionElements = function () {
               if (!ch._isComposing) return;
-              return orig(skip);
+              const now = performance.now();
+              if (now - lastCall < 30) return;
+              lastCall = now;
+              return orig(true);
             };
           }
         } catch { /* patch is best-effort */ }
