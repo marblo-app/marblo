@@ -74,29 +74,69 @@ export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: Or
         terminal.open(el);
         termOpened = true;
 
-        // Patch xterm's CompositionHelper to reduce layout-flush cost.
-        // Original updateCompositionElements:
-        //   1. Writes 6+ styles then calls getBoundingClientRect — forced layout flush
-        //   2. Schedules itself via setTimeout(0) — doubles flush count per event
-        //   3. Registered on onRender — fires every refresh even when IME idle
-        // Patch behavior:
-        //   - When NOT composing (English): no-op (skip every onRender flush)
-        //   - When composing (Korean IME): rate-limit to 33Hz max + always pass
-        //     skip=true to orig to suppress the recursive setTimeout(0) trampoline
+        // Patch xterm's CompositionHelper to eliminate the layout-flush cost.
+        // Original updateCompositionElements writes 6+ styles to _compositionView
+        // then calls getBoundingClientRect on it — that read is a forced layout
+        // flush (browser has to apply pending style invalidations before returning
+        // accurate geometry). On a heavy React+Tailwind tree like Marblo's, the
+        // flush is 30-50ms; multiplied across composition events per Korean
+        // syllable plus per-render onRender invocations it produces 100-200ms
+        // inputDelay. VS Code/Cursor have lighter DOM trees so the same code is
+        // cheap there.
+        //
+        // Two-part patch:
+        //   (1) Override _compositionView.getBoundingClientRect with a no-flush
+        //       implementation that computes width/height from the renderer's
+        //       cached cell dimensions and the composition text. xterm only
+        //       reads .width and .height from this rect, so accurate values for
+        //       those are sufficient. Wide-char (CJK) counted as 2 cells.
+        //   (2) Skip updateCompositionElements when not composing (eliminates
+        //       per-render onRender invocations during English typing) and
+        //       suppress the setTimeout(0) self-reschedule (halves call count
+        //       during composition).
         try {
-          const core = (terminal as unknown as { _core?: { _compositionHelper?: { updateCompositionElements?: (skip?: boolean) => void; _isComposing?: boolean } } })._core;
+          type CompositionHelper = {
+            updateCompositionElements?: (skip?: boolean) => void;
+            _isComposing?: boolean;
+            _compositionView?: HTMLElement;
+          };
+          type CoreInternals = {
+            _compositionHelper?: CompositionHelper;
+            _renderService?: { dimensions?: { css?: { cell?: { width: number; height: number } } } };
+          };
+          const core = (terminal as unknown as { _core?: CoreInternals })._core;
           const ch = core?._compositionHelper;
+          const view = ch?._compositionView;
+
+          if (view) {
+            // (1) No-flush getBoundingClientRect for the composition view.
+            const noFlushRect = function (this: HTMLElement): DOMRect {
+              const text = this.textContent || '';
+              const cell = core?._renderService?.dimensions?.css?.cell;
+              let cellCount = 0;
+              for (const c of text) cellCount += c.charCodeAt(0) > 0xFF ? 2 : 1;
+              const w = (cell?.width ?? 9) * Math.max(cellCount, 1);
+              const h = cell?.height ?? 16;
+              const top = parseFloat(this.style.top) || 0;
+              const left = parseFloat(this.style.left) || 0;
+              return {
+                width: w, height: h,
+                top, left, right: left + w, bottom: top + h,
+                x: left, y: top,
+                toJSON() { return { width: w, height: h, top, left, right: left + w, bottom: top + h, x: left, y: top }; },
+              } as DOMRect;
+            };
+            view.getBoundingClientRect = noFlushRect;
+          }
+
           if (ch && typeof ch.updateCompositionElements === 'function') {
+            // (2) Skip when idle + no recursion when composing.
             const orig = ch.updateCompositionElements.bind(ch);
-            let lastCall = 0;
             ch.updateCompositionElements = function () {
               if (!ch._isComposing) return;
-              const now = performance.now();
-              if (now - lastCall < 30) return; // throttle to ~33Hz during composition
-              lastCall = now;
-              return orig(true); // skip the setTimeout(0) self-reschedule
+              return orig(true);
             };
-            console.log('[OrchestratorTerminal] CompositionHelper patched (idle skip + 33Hz cap + no recursion)');
+            console.log('[OrchestratorTerminal] CompositionHelper patched (no-flush rect + idle skip + no recursion)');
           }
         } catch (err) {
           console.warn('[OrchestratorTerminal] CompositionHelper patch failed:', err);

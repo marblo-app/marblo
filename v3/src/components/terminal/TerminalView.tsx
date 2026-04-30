@@ -77,16 +77,36 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
 
         // Patch CompositionHelper — see OrchestratorTerminal for rationale.
         try {
-          const core = (terminal as unknown as { _core?: { _compositionHelper?: { updateCompositionElements?: (skip?: boolean) => void; _isComposing?: boolean } } })._core;
+          type CompositionHelper = {
+            updateCompositionElements?: (skip?: boolean) => void;
+            _isComposing?: boolean;
+            _compositionView?: HTMLElement;
+          };
+          type CoreInternals = {
+            _compositionHelper?: CompositionHelper;
+            _renderService?: { dimensions?: { css?: { cell?: { width: number; height: number } } } };
+          };
+          const core = (terminal as unknown as { _core?: CoreInternals })._core;
           const ch = core?._compositionHelper;
+          const view = ch?._compositionView;
+          if (view) {
+            const noFlushRect = function (this: HTMLElement): DOMRect {
+              const text = this.textContent || '';
+              const cell = core?._renderService?.dimensions?.css?.cell;
+              let cellCount = 0;
+              for (const c of text) cellCount += c.charCodeAt(0) > 0xFF ? 2 : 1;
+              const w = (cell?.width ?? 9) * Math.max(cellCount, 1);
+              const h = cell?.height ?? 16;
+              const top = parseFloat(this.style.top) || 0;
+              const left = parseFloat(this.style.left) || 0;
+              return { width: w, height: h, top, left, right: left + w, bottom: top + h, x: left, y: top, toJSON() { return { width: w, height: h, top, left, right: left + w, bottom: top + h, x: left, y: top }; } } as DOMRect;
+            };
+            view.getBoundingClientRect = noFlushRect;
+          }
           if (ch && typeof ch.updateCompositionElements === 'function') {
             const orig = ch.updateCompositionElements.bind(ch);
-            let lastCall = 0;
             ch.updateCompositionElements = function () {
               if (!ch._isComposing) return;
-              const now = performance.now();
-              if (now - lastCall < 30) return;
-              lastCall = now;
               return orig(true);
             };
           }
