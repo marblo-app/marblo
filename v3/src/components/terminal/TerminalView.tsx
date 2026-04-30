@@ -219,6 +219,20 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
     }
   }, [isActive]);
 
+  // Stop composition events from bubbling to React root — see OrchestratorTerminal
+  // for rationale. Korean/IME typing fires many composition events per character;
+  // React's composition state tracking adds fiber-tree-walk overhead per event.
+  useEffect(() => {
+    const wrapper = containerRef.current;
+    if (!wrapper) return;
+    const stop = (e: Event) => e.stopPropagation();
+    const types = ['compositionstart', 'compositionupdate', 'compositionend'];
+    for (const t of types) wrapper.addEventListener(t, stop);
+    return () => {
+      for (const t of types) wrapper.removeEventListener(t, stop);
+    };
+  }, []);
+
   return (
     <div
       ref={containerRef}

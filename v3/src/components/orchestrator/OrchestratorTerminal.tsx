@@ -208,6 +208,24 @@ export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: Or
     return () => window.clearTimeout(id);
   }, [sessionId, panelHeight]);
 
+  // Korean (and other IME-based) typing fires 3-4 composition events per syllable.
+  // React 17+ intercepts these at its root container to manage composition state for
+  // controlled inputs — adding fiber-tree-walk overhead per event. Per syllable this
+  // accumulates as visible "stuck-then-flush" latency. xterm's own composition
+  // handling is bound directly on the hidden textarea, so we can safely stop
+  // propagation at the wrapper boundary AFTER xterm's listeners have run.
+  // (English/ASCII typing doesn't trigger compositions; this only affects IME paths.)
+  useEffect(() => {
+    const wrapper = containerRef.current;
+    if (!wrapper) return;
+    const stop = (e: Event) => e.stopPropagation();
+    const types = ['compositionstart', 'compositionupdate', 'compositionend'];
+    for (const t of types) wrapper.addEventListener(t, stop);
+    return () => {
+      for (const t of types) wrapper.removeEventListener(t, stop);
+    };
+  }, []);
+
   return (
     <div className="absolute inset-0 overflow-hidden">
       <div ref={containerRef} className="w-full h-full" />
