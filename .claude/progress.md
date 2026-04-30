@@ -42,20 +42,19 @@ Core PRD v1.0의 Week 1-4 모노레포 빅뱅 마이그레이션 계획을 솔�
 
 **수정 파일:** `v3/electron/main.ts`
 
-### Terminal iframe 격리 — 한글 IME inputDelay 근본 해결 (2026-04-30)
-한글 IME 입력 시 100-200ms inputDelay (영어는 정상). 원인: xterm `CompositionHelper.updateCompositionElements()`가 매 IME 이벤트마다 forced layout flush를 트리거 → 우리 React+Tailwind 트리에서 30-50ms × 다수 호출 = 누적 지연. 다양한 monkey-patch 시도 모두 효과 없거나 회귀.
+### Terminal iframe 격리 시도 후 롤백 — 효과 없음 확정 (2026-04-30)
+한글 IME 100-200ms inputDelay 해결을 위해 xterm을 iframe 안으로 격리 시도. iframe 안에 PerformanceObserver 설치해서 직접 측정한 결과:
 
-**해결책:** xterm을 iframe 안으로 격리. iframe은 자체 document를 가져 layout 작업이 작은 iframe DOM에만 한정.
+| 측정 위치 | p50 | avgInputDelay |
+|---|---|---|
+| 부모 직접 마운트 (이전) | 144-160ms | 130-160ms |
+| **iframe 격리 (시도)** | **184-200ms** | **142-171ms** |
 
-**신규 파일:**
-- `v3/src/components/terminal/TerminalIframe.tsx` — 공용 wrapper. iframe 마운트, xterm 초기화 (`documentOverride: iframe.contentDocument`), xterm CSS를 `?inline` import로 iframe head에 inject, ResizeObserver로 부모 size 변화 동기화, PTY IPC는 부모 window의 electronAPI 그대로 사용 (closure로 접근).
-- `docs/04_terminal_iframe_isolation_prd.md` — PRD
+iframe 약간 더 느림 → 격리 효과 없음 확정. 이유: iframe element의 `getBoundingClientRect`는 viewport 좌표 반환을 위해 부모 layout flush까지 강제. iframe 안 element도 동일. 즉 layout 격리 자체가 안 됨.
 
-**수정 파일:**
-- `v3/src/components/orchestrator/OrchestratorTerminal.tsx` — 200+ 줄 → 40줄, 모든 xterm 로직을 TerminalIframe으로 위임. 테마/exitMessage만 props.
-- `v3/src/components/terminal/TerminalView.tsx` — 동일 패턴. isActive에 따라 iframe wrapper의 display 토글 + focusOnActive 전달.
+**롤백:** OrchestratorTerminal.tsx, TerminalView.tsx를 50c45c2 시점으로 복구. TerminalIframe.tsx 삭제. PRD는 결과 기록 위해 보존 (향후 동일 시도 방지).
 
-**검증 기준:** 한글 빠른 타이핑 [INP-5s] p50 50ms 이하 (현재 ~150ms).
+**최종 결론:** 이번 세션에서 한글 IME inputDelay ~150ms는 xterm.js + Marblo의 React/Tailwind 트리에서 fundamental baseline. monkey-patch, iframe 격리, contain CSS, event delegation bypass 모두 효과 없음. 영어 입력은 정상 작동.
 
 ### Canvas2D 렌더러 시도 후 WebGL 복귀 (2026-04-29)
 WebGL → Canvas2D 전환했으나 INP inputDelay 80-260ms로 동일. **렌더러 선택이 병목이 아님**을 확정. Canvas는 사용자 체감상 약간 더 느림. WebGL로 복귀.

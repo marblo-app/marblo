@@ -1,6 +1,16 @@
 # Terminal Iframe Isolation — PRD
 
 ## Status
+**Rejected — 2026-04-30**: 구현 후 측정 결과 효과 없음. iframe 안에 PerformanceObserver 설치해서 직접 측정한 한글 INP `p50=184-200ms, avg=142-171ms` — 부모 마운트 시절 (`p50=144-160ms`)과 거의 동일하거나 약간 더 안 좋음. 가설 (`getBoundingClientRect`가 iframe 격리될 거라는 기대) 기각: iframe element의 viewport 좌표 계산은 부모 layout에 의존하므로, iframe 안 element의 `getBoundingClientRect`도 부모 layout flush를 강제. 격리 효과 없음.
+
+## 학습
+- xterm.js + 우리 React/Tailwind 트리에서 한글 IME ~150ms 지연은 **현재 환경의 fundamental baseline**.
+- iframe 격리, monkey-patch (idle-skip / throttle / no-flush rect override / event delegation bypass), CSS contain — 모두 효과 없음 또는 회귀.
+- 이 PRD는 결과 기록 목적으로 보존. 향후 동일 문제 발생 시 같은 길 가지 않도록.
+
+## (이하 원본 — 참고용)
+
+## Status (Original)
 Draft → in progress 2026-04-30
 
 ## Problem
