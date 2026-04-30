@@ -77,18 +77,18 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
         termOpened = true;
         patchTerminalForFastIME(terminal);
 
-        // WebGL renderer renders the terminal grid on GPU — bypasses DOM
-        // layout/paint cost that dominated typing latency in DOM-renderer mode
-        // (Performance profile showed Layout+Paint+Style ~115ms per typing
-        // burst). Disabled in 358c623 for an IME comparison test, re-enabled
-        // now since IME patches no longer touch the grid.
-        try {
-          const webglAddon = new WebglAddon();
-          webglAddon.onContextLoss(() => webglAddon.dispose());
-          terminal.loadAddon(webglAddon);
-          console.log('[TerminalView] WebGL renderer active');
-        } catch (err) {
-          console.warn('[TerminalView] WebGL init failed, using DOM renderer:', err);
+        // WebGL renderer disabled by default — see OrchestratorTerminal.tsx
+        // for rationale (viewport scroll glitch on MacBook). Opt-in via
+        // VITE_USE_WEBGL=1 if needed.
+        if (import.meta.env.VITE_USE_WEBGL === '1') {
+          try {
+            const webglAddon = new WebglAddon();
+            webglAddon.onContextLoss(() => webglAddon.dispose());
+            terminal.loadAddon(webglAddon);
+            console.log('[TerminalView] WebGL renderer active');
+          } catch (err) {
+            console.warn('[TerminalView] WebGL init failed, using DOM renderer:', err);
+          }
         }
         requestAnimationFrame(() => {
           if (disposed) return;

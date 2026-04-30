@@ -76,17 +76,19 @@ export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: Or
         termOpened = true;
         patchTerminalForFastIME(terminal);
 
-        // WebGL renderer renders the terminal grid on GPU — bypasses DOM
-        // layout/paint that dominated typing latency in DOM-renderer mode
-        // (Performance profile: ~115ms in Layout+Paint+Style+Layerize).
-        // Re-enabled in v4.12 (was disabled in 358c623 for an IME test).
-        try {
-          const webglAddon = new WebglAddon();
-          webglAddon.onContextLoss(() => webglAddon.dispose());
-          terminal.loadAddon(webglAddon);
-          console.log('[OrchestratorTerminal] WebGL renderer active');
-        } catch (err) {
-          console.warn('[OrchestratorTerminal] WebGL init failed, using DOM renderer:', err);
+        // WebGL renderer disabled by default — caused viewport scroll-up
+        // glitch when typing on MacBook (358c623 originally disabled WebGL
+        // for similar reason). DOM renderer is fast enough on modern hardware.
+        // Opt-in via VITE_USE_WEBGL=1 if needed.
+        if (import.meta.env.VITE_USE_WEBGL === '1') {
+          try {
+            const webglAddon = new WebglAddon();
+            webglAddon.onContextLoss(() => webglAddon.dispose());
+            terminal.loadAddon(webglAddon);
+            console.log('[OrchestratorTerminal] WebGL renderer active');
+          } catch (err) {
+            console.warn('[OrchestratorTerminal] WebGL init failed, using DOM renderer:', err);
+          }
         }
         requestAnimationFrame(() => {
           if (disposed) return;
