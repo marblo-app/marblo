@@ -200,6 +200,38 @@ export default memo(function TerminalIframe({
       };
 
       console.log('[TerminalIframe] xterm mounted in iframe for session', sessionId);
+
+      // Install INP measurement INSIDE the iframe context so we capture events
+      // on the iframe's hidden textarea (the parent observer can't see these).
+      try {
+        const ifWin = win as Window & { PerformanceObserver?: typeof PerformanceObserver };
+        if (ifWin.PerformanceObserver) {
+          type InpEntry = { duration: number; inputDelay: number };
+          const buf: InpEntry[] = [];
+          new ifWin.PerformanceObserver((list) => {
+            for (const entry of list.getEntries() as Array<PerformanceEntry & { processingStart?: number; processingEnd?: number }>) {
+              if (entry.duration <= 100) continue;
+              if (entry.entryType !== 'event') continue;
+              if (entry.name !== 'keydown' && entry.name !== 'keyup' && entry.name !== 'input') continue;
+              const inputDelay = (entry.processingStart ?? 0) - entry.startTime;
+              buf.push({ duration: entry.duration, inputDelay });
+            }
+          }).observe({ type: 'event', durationThreshold: 100, buffered: true } as PerformanceObserverInit);
+          win.setInterval(() => {
+            if (buf.length === 0) return;
+            const samples = buf.splice(0, buf.length);
+            const dur = samples.map((s) => s.duration).sort((a, b) => a - b);
+            const inDel = samples.map((s) => s.inputDelay);
+            const p50 = dur[Math.floor(dur.length / 2)];
+            const p95 = dur[Math.floor(dur.length * 0.95)] ?? dur[dur.length - 1];
+            const max = dur[dur.length - 1];
+            const avg = (inDel.reduce((a, b) => a + b, 0) / inDel.length).toFixed(0);
+            console.warn(`[IFRAME-INP-5s] count=${samples.length} p50=${p50?.toFixed(0)}ms p95=${p95?.toFixed(0)}ms max=${max?.toFixed(0)}ms | avgInputDelay=${avg}ms`);
+          }, 5000);
+        }
+      } catch (err) {
+        console.warn('[TerminalIframe] PerformanceObserver in iframe failed:', err);
+      }
     };
 
     const cleanupRef = { current: () => {} };
