@@ -2,7 +2,7 @@ import { useEffect, useRef, memo } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { WebglAddon } from '@xterm/addon-webgl';
+// import { WebglAddon } from '@xterm/addon-webgl'; // disabled — see openTerminal()
 import '@xterm/xterm/css/xterm.css';
 
 interface TerminalViewProps {
@@ -74,15 +74,17 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
       try {
         terminal.open(el);
         termOpened = true;
-        // WebGL renderer (xterm.js recommended). Falls back to DOM on failure.
-        try {
-          const webglAddon = new WebglAddon();
-          webglAddon.onContextLoss(() => webglAddon.dispose());
-          terminal.loadAddon(webglAddon);
-          console.log('[TerminalView] WebGL renderer active');
-        } catch (err) {
-          console.warn('[TerminalView] WebGL renderer unavailable, using DOM fallback:', err);
-        }
+        // EXPERIMENT: WebGL disabled, using xterm's default DOM renderer.
+        // See OrchestratorTerminal for rationale.
+        // try {
+        //   const webglAddon = new WebglAddon();
+        //   webglAddon.onContextLoss(() => webglAddon.dispose());
+        //   terminal.loadAddon(webglAddon);
+        //   console.log('[TerminalView] WebGL renderer active');
+        // } catch (err) {
+        //   console.warn('[TerminalView] WebGL renderer unavailable, using DOM fallback:', err);
+        // }
+        console.log('[TerminalView] DOM renderer active (WebGL disabled for input-latency test)');
         requestAnimationFrame(() => {
           if (disposed) return;
           try { fitAddon.fit(); } catch { /* ignore */ }

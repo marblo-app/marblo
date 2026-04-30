@@ -2,7 +2,7 @@ import { useEffect, useRef, memo } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { WebglAddon } from '@xterm/addon-webgl';
+// import { WebglAddon } from '@xterm/addon-webgl'; // disabled — see openTerminal()
 import '@xterm/xterm/css/xterm.css';
 
 interface OrchestratorTerminalProps {
@@ -73,16 +73,20 @@ export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: Or
       try {
         terminal.open(el);
         termOpened = true;
-        // WebGL renderer (xterm.js recommended). Must be loaded AFTER terminal.open().
-        // Falls back to DOM on failure.
-        try {
-          const webglAddon = new WebglAddon();
-          webglAddon.onContextLoss(() => webglAddon.dispose());
-          terminal.loadAddon(webglAddon);
-          console.log('[OrchestratorTerminal] WebGL renderer active');
-        } catch (err) {
-          console.warn('[OrchestratorTerminal] WebGL renderer unavailable, using DOM fallback:', err);
-        }
+        // EXPERIMENT: WebGL disabled, using xterm's default DOM renderer.
+        // Hypothesis: early-session "fast" baseline had WebGL silently failed →
+        // DOM was active. WebGL's RAF refresh cycle may compete with input events
+        // for main thread, raising inputDelay. Toggle to test.
+        // Re-enable by uncommenting the block below.
+        // try {
+        //   const webglAddon = new WebglAddon();
+        //   webglAddon.onContextLoss(() => webglAddon.dispose());
+        //   terminal.loadAddon(webglAddon);
+        //   console.log('[OrchestratorTerminal] WebGL renderer active');
+        // } catch (err) {
+        //   console.warn('[OrchestratorTerminal] WebGL renderer unavailable, using DOM fallback:', err);
+        // }
+        console.log('[OrchestratorTerminal] DOM renderer active (WebGL disabled for input-latency test)');
         requestAnimationFrame(() => {
           if (disposed) return;
           try { fitAddon.fit(); } catch { /* ignore */ }
