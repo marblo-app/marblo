@@ -6,8 +6,16 @@ import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useProjectStore } from './stores/projectStore';
 import { useSubscriptionStore } from './stores/subscriptionStore';
-import { logTelemetry, type TelemetryEvent } from './services/telemetryService';
+import { logTelemetry, setTelemetryEnabled, type TelemetryEvent } from './services/telemetryService';
 import telemetry from './services/telemetryService';
+
+// DIAGNOSTIC: VITE_DISABLE_TELEMETRY=1 disables all telemetry + cost writes
+// (logTelemetryBatch, logCostBatch, logHeartbeat Cloud Function calls).
+// Tests if Firebase Cloud Function calls during typing cause input delay.
+if (import.meta.env.VITE_DISABLE_TELEMETRY === '1') {
+  setTelemetryEnabled(false);
+  console.warn('[DIAG] Telemetry DISABLED — no logTelemetryBatch/logHeartbeat calls');
+}
 
 // Performance monitor: log long tasks that block the main thread.
 // `attribution` reveals what was running (script src, container element).

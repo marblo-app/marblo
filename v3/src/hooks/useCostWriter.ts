@@ -11,6 +11,13 @@ const logCostBatch = httpsCallable(functions, 'logCostBatch');
 export function useCostWriter() {
   useEffect(() => {
     if (!window.electronAPI?.agent?.onCostUpdate) return;
+    // DIAGNOSTIC: skip cost writes when telemetry disabled. Each cost:update
+    // triggers a Firebase Cloud Function call — during streaming responses
+    // these can pile up on the main thread.
+    if (import.meta.env.VITE_DISABLE_TELEMETRY === '1') {
+      console.warn('[DIAG] useCostWriter DISABLED');
+      return;
+    }
 
     window.electronAPI.agent.offCostUpdate?.();
     window.electronAPI.agent.onCostUpdate((data) => {
