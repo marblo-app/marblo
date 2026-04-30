@@ -73,19 +73,37 @@ export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: Or
       try {
         terminal.open(el);
         termOpened = true;
+
+        // Patch xterm's CompositionHelper to skip layout-flushing work when
+        // no IME composition is active. The original updateCompositionElements
+        // calls getBoundingClientRect after multiple style writes (forced layout
+        // flush), runs again via setTimeout(0), and is invoked on every render
+        // via onRender — even when no IME is active. On heavy DOM trees this
+        // costs 30-50ms per call, accumulating to 100-200ms inputDelay during
+        // Korean IME (which also fires its own compositionupdate handler).
+        // Skipping when _isComposing is false eliminates the cost for English
+        // typing entirely and reduces it during Korean typing.
+        try {
+          const core = (terminal as unknown as { _core?: { _compositionHelper?: { updateCompositionElements?: (skip?: boolean) => void; _isComposing?: boolean } } })._core;
+          const ch = core?._compositionHelper;
+          if (ch && typeof ch.updateCompositionElements === 'function') {
+            const orig = ch.updateCompositionElements.bind(ch);
+            ch.updateCompositionElements = function (skip?: boolean) {
+              if (!ch._isComposing) return;
+              return orig(skip);
+            };
+            console.log('[OrchestratorTerminal] CompositionHelper patched (skip layout flush when idle)');
+          }
+        } catch (err) {
+          console.warn('[OrchestratorTerminal] CompositionHelper patch failed:', err);
+        }
+
         // EXPERIMENT: WebGL disabled, using xterm's default DOM renderer.
-        // Hypothesis: early-session "fast" baseline had WebGL silently failed →
-        // DOM was active. WebGL's RAF refresh cycle may compete with input events
-        // for main thread, raising inputDelay. Toggle to test.
-        // Re-enable by uncommenting the block below.
         // try {
         //   const webglAddon = new WebglAddon();
         //   webglAddon.onContextLoss(() => webglAddon.dispose());
         //   terminal.loadAddon(webglAddon);
-        //   console.log('[OrchestratorTerminal] WebGL renderer active');
-        // } catch (err) {
-        //   console.warn('[OrchestratorTerminal] WebGL renderer unavailable, using DOM fallback:', err);
-        // }
+        // } catch (err) { /* fall back to DOM */ }
         console.log('[OrchestratorTerminal] DOM renderer active (WebGL disabled for input-latency test)');
         requestAnimationFrame(() => {
           if (disposed) return;

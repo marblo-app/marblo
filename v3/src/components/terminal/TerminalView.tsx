@@ -74,16 +74,21 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
       try {
         terminal.open(el);
         termOpened = true;
+
+        // Patch CompositionHelper — see OrchestratorTerminal for rationale.
+        try {
+          const core = (terminal as unknown as { _core?: { _compositionHelper?: { updateCompositionElements?: (skip?: boolean) => void; _isComposing?: boolean } } })._core;
+          const ch = core?._compositionHelper;
+          if (ch && typeof ch.updateCompositionElements === 'function') {
+            const orig = ch.updateCompositionElements.bind(ch);
+            ch.updateCompositionElements = function (skip?: boolean) {
+              if (!ch._isComposing) return;
+              return orig(skip);
+            };
+          }
+        } catch { /* patch is best-effort */ }
+
         // EXPERIMENT: WebGL disabled, using xterm's default DOM renderer.
-        // See OrchestratorTerminal for rationale.
-        // try {
-        //   const webglAddon = new WebglAddon();
-        //   webglAddon.onContextLoss(() => webglAddon.dispose());
-        //   terminal.loadAddon(webglAddon);
-        //   console.log('[TerminalView] WebGL renderer active');
-        // } catch (err) {
-        //   console.warn('[TerminalView] WebGL renderer unavailable, using DOM fallback:', err);
-        // }
         console.log('[TerminalView] DOM renderer active (WebGL disabled for input-latency test)');
         requestAnimationFrame(() => {
           if (disposed) return;
