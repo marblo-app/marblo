@@ -2,8 +2,9 @@ import { useEffect, useRef, memo } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-// import { WebglAddon } from '@xterm/addon-webgl'; // disabled — see openTerminal()
+import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
+import { patchTerminalForFastIME } from '../../lib/xtermIMEPatch';
 
 interface TerminalViewProps {
   sessionId: string;
@@ -74,9 +75,21 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
       try {
         terminal.open(el);
         termOpened = true;
+        patchTerminalForFastIME(terminal);
 
-        // EXPERIMENT: WebGL disabled, using xterm's default DOM renderer.
-        console.log('[TerminalView] DOM renderer active (WebGL disabled for input-latency test)');
+        // WebGL renderer renders the terminal grid on GPU — bypasses DOM
+        // layout/paint cost that dominated typing latency in DOM-renderer mode
+        // (Performance profile showed Layout+Paint+Style ~115ms per typing
+        // burst). Disabled in 358c623 for an IME comparison test, re-enabled
+        // now since IME patches no longer touch the grid.
+        try {
+          const webglAddon = new WebglAddon();
+          webglAddon.onContextLoss(() => webglAddon.dispose());
+          terminal.loadAddon(webglAddon);
+          console.log('[TerminalView] WebGL renderer active');
+        } catch (err) {
+          console.warn('[TerminalView] WebGL init failed, using DOM renderer:', err);
+        }
         requestAnimationFrame(() => {
           if (disposed) return;
           try { fitAddon.fit(); } catch { /* ignore */ }
@@ -211,14 +224,19 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
     }
   }, [isActive]);
 
-  // Stop composition events from bubbling to React root — see OrchestratorTerminal
-  // for rationale. Korean/IME typing fires many composition events per character;
-  // React's composition state tracking adds fiber-tree-walk overhead per event.
+  // Stop composition + key/input events from bubbling to React root.
+  // xterm's listeners are bound directly on the textarea so they fire first;
+  // by the time bubble reaches our wrapper, xterm has already processed the
+  // event. Stopping at wrapper prevents React's synthetic event system from
+  // walking the fiber tree per keystroke (significant overhead during fast
+  // Korean typing where compositionupdate + keydown + input fire 3-4× per
+  // syllable). Marblo's hotkey handlers register on document, not on
+  // ancestors of the terminal wrapper, so they're unaffected.
   useEffect(() => {
     const wrapper = containerRef.current;
     if (!wrapper) return;
     const stop = (e: Event) => e.stopPropagation();
-    const types = ['compositionstart', 'compositionupdate', 'compositionend'];
+    const types = ['compositionstart', 'compositionupdate', 'compositionend', 'keydown', 'keyup', 'input'];
     for (const t of types) wrapper.addEventListener(t, stop);
     return () => {
       for (const t of types) wrapper.removeEventListener(t, stop);
@@ -229,7 +247,13 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
     <div
       ref={containerRef}
       className="absolute inset-0"
-      style={{ display: isActive ? 'block' : 'none' }}
+      style={{
+        display: isActive ? 'block' : 'none',
+        // Isolate terminal layout/paint from the parent React/Tailwind tree.
+        // xterm grid updates trigger DOM layout — without containment that
+        // cascades through Sidebar, Header, etc. (~115ms per typing burst).
+        contain: 'layout style paint',
+      }}
     />
   );
 });

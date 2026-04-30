@@ -139,6 +139,21 @@ export function Layout() {
     );
   }
 
+  // DIAG: VITE_DIAG_MINIMAL=1 renders only OrchestratorPanel (no Sidebar,
+  // Header, TabBar, tab content). Tests if Marblo's React tree complexity
+  // is causing typing input delay. If INP drops dramatically in minimal
+  // mode, the heavy tree is the culprit.
+  if (import.meta.env.VITE_DIAG_MINIMAL === '1') {
+    return (
+      <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
+        <div className="p-2 text-xs text-yellow-400">[DIAG] Minimal Layout — only OrchestratorPanel</div>
+        <div className="flex-1 overflow-hidden">
+          <OrchestratorPanel />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
       {/* Header */}
@@ -167,8 +182,8 @@ export function Layout() {
           {/* Orchestrator panel — between tab content and terminal */}
           <OrchestratorPanel />
 
-          {/* Terminal panel */}
-          <TerminalPanel />
+          {/* Terminal panel — DIAG: toggle via VITE_DISABLE_TERMINAL_PANEL=1 */}
+          {import.meta.env.VITE_DISABLE_TERMINAL_PANEL !== '1' && <TerminalPanel />}
         </div>
       </div>
 

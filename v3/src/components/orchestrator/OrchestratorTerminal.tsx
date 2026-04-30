@@ -2,8 +2,9 @@ import { useEffect, useRef, memo } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-// import { WebglAddon } from '@xterm/addon-webgl'; // disabled — see openTerminal()
+import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
+import { patchTerminalForFastIME } from '../../lib/xtermIMEPatch';
 
 interface OrchestratorTerminalProps {
   sessionId: string;
@@ -73,14 +74,20 @@ export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: Or
       try {
         terminal.open(el);
         termOpened = true;
+        patchTerminalForFastIME(terminal);
 
-        // EXPERIMENT: WebGL disabled, using xterm's default DOM renderer.
-        // try {
-        //   const webglAddon = new WebglAddon();
-        //   webglAddon.onContextLoss(() => webglAddon.dispose());
-        //   terminal.loadAddon(webglAddon);
-        // } catch (err) { /* fall back to DOM */ }
-        console.log('[OrchestratorTerminal] DOM renderer active (WebGL disabled for input-latency test)');
+        // WebGL renderer renders the terminal grid on GPU — bypasses DOM
+        // layout/paint that dominated typing latency in DOM-renderer mode
+        // (Performance profile: ~115ms in Layout+Paint+Style+Layerize).
+        // Re-enabled in v4.12 (was disabled in 358c623 for an IME test).
+        try {
+          const webglAddon = new WebglAddon();
+          webglAddon.onContextLoss(() => webglAddon.dispose());
+          terminal.loadAddon(webglAddon);
+          console.log('[OrchestratorTerminal] WebGL renderer active');
+        } catch (err) {
+          console.warn('[OrchestratorTerminal] WebGL init failed, using DOM renderer:', err);
+        }
         requestAnimationFrame(() => {
           if (disposed) return;
           try { fitAddon.fit(); } catch { /* ignore */ }
@@ -202,18 +209,20 @@ export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: Or
     return () => window.clearTimeout(id);
   }, [sessionId, panelHeight]);
 
-  // Korean (and other IME-based) typing fires 3-4 composition events per syllable.
-  // React 17+ intercepts these at its root container to manage composition state for
-  // controlled inputs — adding fiber-tree-walk overhead per event. Per syllable this
-  // accumulates as visible "stuck-then-flush" latency. xterm's own composition
-  // handling is bound directly on the hidden textarea, so we can safely stop
-  // propagation at the wrapper boundary AFTER xterm's listeners have run.
-  // (English/ASCII typing doesn't trigger compositions; this only affects IME paths.)
+  // Stop composition + key/input events from bubbling to React root.
+  // Korean (and other IME-based) typing fires 3-4 composition events plus
+  // keydown/input per syllable. React 17+ intercepts these at its root
+  // container — adding fiber-tree-walk overhead per event. xterm's handlers
+  // are bound directly on the hidden textarea so they run first; by the time
+  // bubble reaches our wrapper, xterm has processed the event. Stopping here
+  // prevents React's synthetic event system from doing redundant work.
+  // Marblo's hotkey handlers register on document, not on ancestors of the
+  // terminal wrapper, so they're unaffected.
   useEffect(() => {
     const wrapper = containerRef.current;
     if (!wrapper) return;
     const stop = (e: Event) => e.stopPropagation();
-    const types = ['compositionstart', 'compositionupdate', 'compositionend'];
+    const types = ['compositionstart', 'compositionupdate', 'compositionend', 'keydown', 'keyup', 'input'];
     for (const t of types) wrapper.addEventListener(t, stop);
     return () => {
       for (const t of types) wrapper.removeEventListener(t, stop);
@@ -221,7 +230,13 @@ export default memo(function OrchestratorTerminal({ sessionId, panelHeight }: Or
   }, []);
 
   return (
-    <div className="absolute inset-0 overflow-hidden">
+    <div
+      className="absolute inset-0 overflow-hidden"
+      style={{
+        // Isolate terminal layout/paint — see TerminalView.tsx for rationale.
+        contain: 'layout style paint',
+      }}
+    >
       <div ref={containerRef} className="w-full h-full" />
     </div>
   );

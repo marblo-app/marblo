@@ -135,9 +135,16 @@ function AppContent() {
   const subscribeToProjects = useProjectStore((s) => s.subscribeToProjects);
   const subscribeToSubscription = useSubscriptionStore((s) => s.subscribeToSubscription);
 
-  // Initialize Firestore subscriptions after auth
+  // DIAGNOSTIC TEST: Firebase realtime listeners suspected of causing typing
+  // input delay (React reconciliation triggered by snapshot updates competing
+  // with input handlers on main thread). Toggle via env var to compare.
+  const FIREBASE_LISTENERS_ENABLED = import.meta.env.VITE_DISABLE_FB_LISTENERS !== '1';
   useEffect(() => {
     if (!user) return;
+    if (!FIREBASE_LISTENERS_ENABLED) {
+      console.warn('[DIAG] Firebase listeners DISABLED via VITE_DISABLE_FB_LISTENERS=1 — projects/subscription will not sync');
+      return;
+    }
 
     const unsubProjects = subscribeToProjects(user.uid);
     const unsubSubscription = subscribeToSubscription(user.uid);
@@ -146,7 +153,7 @@ function AppContent() {
       unsubProjects();
       unsubSubscription();
     };
-  }, [user?.uid, subscribeToProjects, subscribeToSubscription]);
+  }, [user?.uid, subscribeToProjects, subscribeToSubscription, FIREBASE_LISTENERS_ENABLED]);
 
   // Track session start/end
   useEffect(() => {

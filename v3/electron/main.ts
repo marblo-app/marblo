@@ -106,7 +106,10 @@ if (!app.isPackaged) {
   app.commandLine.appendSwitch('remote-allow-origins', '*');
 }
 
-const isDev = !app.isPackaged;
+// MARBLO_FORCE_PROD=1 lets you run a production-style local server (loads
+// from ./dist instead of Vite dev) without packaging. Used for perf
+// comparison: prod build skips HMR + dev-only React work.
+const isDev = process.env.MARBLO_FORCE_PROD !== '1' && !app.isPackaged;
 const updater = new Updater();
 const ptyManager = new PtyManager();
 const fsManager = new FsManager();
