@@ -35,7 +35,11 @@ if (typeof PerformanceObserver !== 'undefined') {
     }).observe({ entryTypes: ['longtask'] });
   } catch { /* not supported */ }
 
-  // Track slow keystroke INP specifically — log if a key event takes >100ms to next paint.
+  // Track slow keystroke INP — AGGREGATED to avoid Heisenbug (per-event console.warn
+  // with DevTools open is itself slow ~5-15ms, which inflates INP and creates a
+  // feedback loop). Buffer entries and log a 5-second summary instead.
+  type InpEntry = { duration: number; inputDelay: number; processing: number; presentation: number };
+  const inpBuffer: InpEntry[] = [];
   try {
     new PerformanceObserver((list) => {
       for (const entry of list.getEntries() as Array<PerformanceEntry & { interactionId?: number; processingStart?: number; processingEnd?: number; target?: Element | null }>) {
@@ -44,15 +48,25 @@ if (typeof PerformanceObserver !== 'undefined') {
         if (entry.name !== 'keydown' && entry.name !== 'keyup' && entry.name !== 'input') continue;
         const inputDelay = (entry.processingStart ?? 0) - entry.startTime;
         const processing = (entry.processingEnd ?? 0) - (entry.processingStart ?? 0);
-        const presentationDelay = entry.duration - inputDelay - processing;
-        const targetTag = entry.target?.tagName ?? '?';
-        const targetClass = (entry.target as HTMLElement | null)?.className ?? '';
-        console.warn(
-          `[INP-SLOW] ${entry.name} ${entry.duration.toFixed(0)}ms = inputDelay ${inputDelay.toFixed(0)} + processing ${processing.toFixed(0)} + presentation ${presentationDelay.toFixed(0)} | target=<${targetTag} class="${targetClass.toString().slice(0, 60)}">`,
-        );
+        const presentation = entry.duration - inputDelay - processing;
+        inpBuffer.push({ duration: entry.duration, inputDelay, processing, presentation });
       }
     }).observe({ type: 'event', durationThreshold: 100, buffered: true } as PerformanceObserverInit);
   } catch { /* not supported */ }
+
+  setInterval(() => {
+    if (inpBuffer.length === 0) return;
+    const samples = inpBuffer.splice(0, inpBuffer.length);
+    const dur = samples.map((s) => s.duration).sort((a, b) => a - b);
+    const inDel = samples.map((s) => s.inputDelay).sort((a, b) => a - b);
+    const p50 = dur[Math.floor(dur.length / 2)];
+    const p95 = dur[Math.floor(dur.length * 0.95)] ?? dur[dur.length - 1];
+    const max = dur[dur.length - 1];
+    const avgInDel = (inDel.reduce((a, b) => a + b, 0) / inDel.length).toFixed(0);
+    console.warn(
+      `[INP-5s] count=${samples.length} p50=${p50?.toFixed(0)}ms p95=${p95?.toFixed(0)}ms max=${max?.toFixed(0)}ms | avgInputDelay=${avgInDel}ms`,
+    );
+  }, 5000);
 
   // Main-thread saturation sampler: schedule a 100ms timeout and measure actual drift.
   // If main thread is idle, drift is ~0ms. If busy, drift reflects accumulated busy work.
