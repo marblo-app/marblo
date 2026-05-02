@@ -50,7 +50,7 @@ export class OrchestratorManager {
   constructor(
     ptyManager: PtyManager,
     configGenerator: AgentConfigGenerator,
-    onStatusChange?: (status: OrchestratorStatus) => void,
+    onStatusChange?: (status: OrchestratorStatus) => void
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = configGenerator;
@@ -72,7 +72,7 @@ export class OrchestratorManager {
     rootPath: string,
     bridgePort: number,
     onPtyReady?: (ptySessionId: string) => void,
-    resumeSessionId?: string, // specific session ID or 'latest' for --continue
+    resumeSessionId?: string // specific session ID or 'latest' for --continue
   ): OrchestratorSession {
     // Stop existing session if any
     if (this.session) {
@@ -92,7 +92,9 @@ export class OrchestratorManager {
     // Determine resume mode
     const shouldResume = resumeSessionId || this.hasClaudeSession(rootPath);
     console.log(
-      `[Orchestrator] rootPath=${rootPath}, resumeSessionId=${resumeSessionId || "auto"}, shouldResume=${!!shouldResume}`,
+      `[Orchestrator] rootPath=${rootPath}, resumeSessionId=${
+        resumeSessionId || "auto"
+      }, shouldResume=${!!shouldResume}`
     );
 
     // Generate MCP config for orchestrator (always claude)
@@ -103,7 +105,7 @@ export class OrchestratorManager {
         role: "orchestrator",
         command: "claude",
       },
-      rootPath,
+      rootPath
     );
 
     // Add resume flag — always resolve to the actual session ID for the orchestrator
@@ -111,16 +113,16 @@ export class OrchestratorManager {
       const resolvedId = this.resolveSessionId(
         rootPath,
         resumeSessionId,
-        "Orchestrator",
+        "Orchestrator"
       );
       if (resolvedId) {
         launchConfig.args.push("--resume", resolvedId);
         console.log(
-          `[Orchestrator] Resuming session: ${resolvedId} (requested: ${resumeSessionId})`,
+          `[Orchestrator] Resuming session: ${resolvedId} (requested: ${resumeSessionId})`
         );
       } else {
         console.log(
-          `[Orchestrator] No matching orchestrator session found for "${resumeSessionId}", starting new`,
+          `[Orchestrator] No matching orchestrator session found for "${resumeSessionId}", starting new`
         );
       }
     } else if (!resumeSessionId && shouldResume) {
@@ -128,16 +130,16 @@ export class OrchestratorManager {
       const resolvedId = this.resolveSessionId(
         rootPath,
         "latest",
-        "Orchestrator",
+        "Orchestrator"
       );
       if (resolvedId) {
         launchConfig.args.push("--resume", resolvedId);
         console.log(
-          `[Orchestrator] Auto-continuing orchestrator session: ${resolvedId}`,
+          `[Orchestrator] Auto-continuing orchestrator session: ${resolvedId}`
         );
       } else {
         console.log(
-          `[Orchestrator] No orchestrator session found, starting new`,
+          `[Orchestrator] No orchestrator session found, starting new`
         );
       }
     }
@@ -150,7 +152,7 @@ export class OrchestratorManager {
     try {
       const configContent = fs.readFileSync(
         launchConfig.mcpConfigPath,
-        "utf-8",
+        "utf-8"
       );
       const config = JSON.parse(configContent);
       if (config.mcpServers?.marblo?.env) {
@@ -159,7 +161,7 @@ export class OrchestratorManager {
         fs.writeFileSync(
           launchConfig.mcpConfigPath,
           JSON.stringify(config, null, 2),
-          "utf-8",
+          "utf-8"
         );
       }
     } catch {
@@ -182,7 +184,7 @@ export class OrchestratorManager {
       launchConfig.command,
       launchConfig.args,
       rootPath,
-      mergedEnv,
+      mergedEnv
     );
 
     // Notify caller IMMEDIATELY so they can register data listeners
@@ -229,11 +231,14 @@ export class OrchestratorManager {
       };
 
       let outputBuffer = "";
+      // Patterns must match ONLY the actual input prompt — never the trust
+      // folder dialog which also uses ╭─╮ box borders. If we match the
+      // trust dialog and send `\r` 1500ms later, it confirms the default
+      // ("No") and exits Claude Code immediately.
       const readinessPatterns = [
-        /╭─+/, // Claude Code: input box border
-        /\? for shortcuts/, // Claude Code: footer help
-        /Type your message/i, // Generic CLI input prompt
-        /Loaded \d+ MCP tool/i, // MCP tools loaded
+        /\? for shortcuts/, // Claude Code: footer help (only in input prompt)
+        /Type your message/i, // Input prompt placeholder
+        /Loaded \d+ MCP tool/i, // MCP tools loaded — only after trust granted
       ];
       this.ptyManager.onData(ptySessionId, (data) => {
         if (sent) return;
@@ -282,11 +287,11 @@ export class OrchestratorManager {
       if (this.restartCount < ORCH_MAX_RESTARTS && this.lastLaunchArgs) {
         const delay = Math.min(
           ORCH_BACKOFF_BASE_MS * Math.pow(2, this.restartCount),
-          ORCH_BACKOFF_MAX_MS,
+          ORCH_BACKOFF_MAX_MS
         );
         this.restartCount++;
         console.log(
-          `[Orchestrator] Crash (exit ${exitCode}). Restart ${this.restartCount}/${ORCH_MAX_RESTARTS} in ${delay}ms`,
+          `[Orchestrator] Crash (exit ${exitCode}). Restart ${this.restartCount}/${ORCH_MAX_RESTARTS} in ${delay}ms`
         );
 
         this.restartTimer = setTimeout(() => {
@@ -305,7 +310,7 @@ export class OrchestratorManager {
         this.setStatus("error");
         this.configGenerator.cleanup(sessionId);
         console.error(
-          `[Orchestrator] Max restarts (${ORCH_MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
+          `[Orchestrator] Max restarts (${ORCH_MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
         );
       }
     });
@@ -333,7 +338,7 @@ export class OrchestratorManager {
   restart(
     projectId: string,
     rootPath: string,
-    bridgePort: number,
+    bridgePort: number
   ): OrchestratorSession {
     this.stop();
     return this.launch(projectId, rootPath, bridgePort);
@@ -355,7 +360,7 @@ export class OrchestratorManager {
       ".claude",
       "projects",
       encodedPath,
-      "marblo-labels.json",
+      "marblo-labels.json"
     );
   }
 
@@ -371,7 +376,7 @@ export class OrchestratorManager {
     rootPath: string,
     sessionUuid: string,
     label: string,
-    agentId?: string,
+    agentId?: string
   ): void {
     const labels = this.readLabels(rootPath);
     labels[sessionUuid] = { label, agentId, createdAt: Date.now() };
@@ -379,7 +384,7 @@ export class OrchestratorManager {
       fs.writeFileSync(
         this.getLabelsPath(rootPath),
         JSON.stringify(labels, null, 2),
-        "utf-8",
+        "utf-8"
       );
     } catch {
       /* best-effort */
@@ -399,7 +404,7 @@ export class OrchestratorManager {
         os.homedir(),
         ".claude",
         "projects",
-        encodedPath,
+        encodedPath
       );
       if (!fs.existsSync(sessionsDir)) return [];
 
@@ -434,7 +439,7 @@ export class OrchestratorManager {
     rootPath: string,
     requested: string,
     filterLabel?: string,
-    filterAgentId?: string,
+    filterAgentId?: string
   ): string | null {
     if (requested !== "latest") return requested; // specific UUID, return as-is
 
@@ -443,7 +448,7 @@ export class OrchestratorManager {
     const match = sessions.find(
       (s) =>
         (filterAgentId && s.agentId === filterAgentId) ||
-        (filterLabel && s.label === filterLabel),
+        (filterLabel && s.label === filterLabel)
     );
     return match?.id ?? null;
   }

@@ -56,12 +56,12 @@ export class AgentManager {
     rootPath: string,
     sessionId: string,
     label: string,
-    agentId: string,
+    agentId: string
   ) => void;
   private onRestartAttempt?: (
     agentId: string,
     attempt: number,
-    maxAttempts: number,
+    maxAttempts: number
   ) => void;
   private onRestartFailed?: (agentId: string, exitCode: number) => void;
   private getMainWindow?: () => BrowserWindow | null;
@@ -69,7 +69,7 @@ export class AgentManager {
     rootPath: string,
     requested: string,
     filterLabel?: string,
-    filterAgentId?: string,
+    filterAgentId?: string
   ) => string | null;
 
   constructor(
@@ -79,15 +79,15 @@ export class AgentManager {
       rootPath: string,
       sessionId: string,
       label: string,
-      agentId: string,
+      agentId: string
     ) => void,
     onRestartAttempt?: (
       agentId: string,
       attempt: number,
-      maxAttempts: number,
+      maxAttempts: number
     ) => void,
     onRestartFailed?: (agentId: string, exitCode: number) => void,
-    getMainWindow?: () => BrowserWindow | null,
+    getMainWindow?: () => BrowserWindow | null
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = new AgentConfigGenerator();
@@ -104,8 +104,8 @@ export class AgentManager {
       rootPath: string,
       requested: string,
       filterLabel?: string,
-      filterAgentId?: string,
-    ) => string | null,
+      filterAgentId?: string
+    ) => string | null
   ) {
     this.resolveSessionId = resolver;
   }
@@ -123,7 +123,7 @@ export class AgentManager {
       },
       params.cwd,
       params.initialPrompt,
-      params.projectId,
+      params.projectId
     );
 
     // Resume support: add --resume flag
@@ -134,7 +134,9 @@ export class AgentManager {
         this.resolveSessionId(params.cwd, "latest", params.name, params.id) ??
         undefined;
       console.log(
-        `[Agent:${params.id}] Resolved 'latest' → ${resolvedResumeId ?? "none (new session)"}`,
+        `[Agent:${params.id}] Resolved 'latest' → ${
+          resolvedResumeId ?? "none (new session)"
+        }`
       );
     }
     const isResume =
@@ -161,7 +163,7 @@ export class AgentManager {
       launchConfig.command,
       launchConfig.args,
       params.cwd,
-      mergedEnv,
+      mergedEnv
     );
 
     // Notify caller IMMEDIATELY so they can register data listeners
@@ -181,18 +183,21 @@ export class AgentManager {
         // CR inside the message body without submitting).
         this.ptyManager.writeAndSubmit(ptySessionId, prompt);
         console.log(
-          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`,
+          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`
         );
       };
 
       // Watch PTY output for CLI readiness indicators
-      // Only match patterns that confirm the CLI is actually ready for input
+      // Only match patterns that confirm the CLI is actually ready for input.
+      // Do NOT match `╭─+` — it also matches the "Do you trust this folder?"
+      // dialog box border, and our 1500ms-delayed `\r` would confirm the
+      // default ("No") and immediately kill the agent. Match only patterns
+      // that appear in the post-trust input prompt.
       let outputBuffer = "";
       const readinessPatterns = [
-        /╭─+/, // Claude Code: box border (specific)
         /\? for shortcuts/, // Claude Code: footer help text
-        /Type your message/i, // Claude/Gemini: input prompt
-        /Loaded \d+ MCP tool/i, // MCP tools loaded confirmation
+        /Type your message/i, // Claude/Gemini: input prompt placeholder
+        /Loaded \d+ MCP tool/i, // MCP tools loaded — only after trust granted
         /Ready to assist/i, // Generic CLI ready message
         /What can I help/i, // Gemini/GPT greeting
       ];
@@ -229,7 +234,7 @@ export class AgentManager {
           require("os").homedir(),
           ".claude",
           "projects",
-          encodedPath,
+          encodedPath
         );
         const files = require("fs").existsSync(sessionsDir)
           ? require("fs")
@@ -241,7 +246,7 @@ export class AgentManager {
       } catch (err) {
         console.error(
           `[AgentManager] Failed to read existing session files for rootPath="${rootPath}":`,
-          err,
+          err
         );
         existingIds = new Set();
       }
@@ -253,7 +258,7 @@ export class AgentManager {
             require("os").homedir(),
             ".claude",
             "projects",
-            encodedPath,
+            encodedPath
           );
           if (!require("fs").existsSync(sessionsDir)) return;
           const currentFiles = require("fs")
@@ -267,7 +272,7 @@ export class AgentManager {
         } catch (err) {
           console.error(
             `[AgentManager] Failed to detect new session file for agent="${agentId}" rootPath="${rootPath}":`,
-            err,
+            err
           );
         }
       }, 5000);
@@ -302,7 +307,7 @@ export class AgentManager {
       params.name,
       params.model || "claude",
       params.role || "backend",
-      spawnProjectId,
+      spawnProjectId
     );
 
     // Start heartbeat for anomaly detection (ML-4)
@@ -330,7 +335,7 @@ export class AgentManager {
         mainTelemetry.agentStopped(
           this.getMainWindow?.() ?? null,
           params.id,
-          exitCode,
+          exitCode
         );
         return;
       }
@@ -339,17 +344,17 @@ export class AgentManager {
       if (agent.restartCount < MAX_RESTARTS) {
         const delay = Math.min(
           BACKOFF_BASE_MS * Math.pow(2, agent.restartCount),
-          BACKOFF_MAX_MS,
+          BACKOFF_MAX_MS
         );
         agent.restartCount++;
         this.onRestartAttempt?.(agent.id, agent.restartCount, MAX_RESTARTS);
         mainTelemetry.agentRestarted(
           this.getMainWindow?.() ?? null,
           agent.id,
-          agent.restartCount,
+          agent.restartCount
         );
         console.log(
-          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`,
+          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`
         );
 
         agent.restartTimer = setTimeout(() => {
@@ -364,10 +369,10 @@ export class AgentManager {
         mainTelemetry.agentCrashed(
           this.getMainWindow?.() ?? null,
           agent.id,
-          exitCode,
+          exitCode
         );
         console.error(
-          `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
+          `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
         );
       }
     });
@@ -392,7 +397,7 @@ export class AgentManager {
     this.agents.delete(agentId);
 
     console.log(
-      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`,
+      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`
     );
 
     // Re-launch with resume
@@ -403,11 +408,11 @@ export class AgentManager {
         agent.cwd,
         "latest",
         agent.name,
-        agent.id,
+        agent.id
       );
       resolvedSessionId = resolved ?? "new";
       console.log(
-        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`,
+        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`
       );
     }
 
@@ -557,7 +562,7 @@ export class AgentManager {
     };
     this.agents.set(agent.id, instance);
     console.log(
-      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`,
+      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`
     );
   }
 
@@ -573,7 +578,7 @@ export class AgentManager {
   listAgentsByProject(projectId: string | undefined): AgentInstance[] {
     if (!projectId) return this.listAgents();
     return Array.from(this.agents.values()).filter(
-      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId,
+      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId
     );
   }
 
