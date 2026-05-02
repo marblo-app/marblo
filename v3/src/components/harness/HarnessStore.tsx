@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 
 interface HarnessStoreProps {
-  onClose: () => void;
+  /** Pass undefined to render inline as a tab (no modal overlay, no close X). */
+  onClose?: () => void;
 }
 
 type CategoryFilter = "all" | "required" | "recommended" | "mcp";
@@ -83,9 +84,22 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
     }
   };
 
+  const isModal = !!onClose;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="relative flex h-[85vh] w-full max-w-4xl flex-col rounded-lg border border-[#313244] bg-[#1e1e2e] shadow-2xl">
+    <div
+      className={
+        isModal
+          ? "fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          : "h-full w-full bg-[#181825] p-4"
+      }
+    >
+      <div
+        className={
+          isModal
+            ? "relative flex h-[85vh] w-full max-w-4xl flex-col rounded-lg border border-[#313244] bg-[#1e1e2e] shadow-2xl"
+            : "relative flex h-full w-full max-w-5xl mx-auto flex-col rounded-lg border border-[#313244] bg-[#1e1e2e]"
+        }
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[#313244] px-4 py-3">
           <div className="flex items-center gap-2">
@@ -109,24 +123,26 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
               스킬 / MCP 한 번에 설치
             </span>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-[#6c7086] hover:bg-[#313244] hover:text-[#cdd6f4]"
-          >
-            <svg
-              className="h-5 w-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="rounded p-1 text-[#6c7086] hover:bg-[#313244] hover:text-[#cdd6f4]"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Filter */}

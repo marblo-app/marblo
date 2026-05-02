@@ -14,6 +14,7 @@ import { PlanGate } from "./settings/PlanGate";
 import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
 import { TaskCreateModal } from "./board/TaskCreateModal";
 import { HarnessStore } from "./harness/HarnessStore";
+import { GuideTab } from "./guide/GuideTab";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
 import { useAgentReconnect } from "../hooks/useAgentReconnect";
 import { useSessionRestore } from "../hooks/useSessionRestore";
@@ -30,17 +31,24 @@ function GatedFlowsTab() {
   );
 }
 
+function HarnessTabPanel() {
+  // HarnessStore renders inline (without modal overlay) when onClose is undefined.
+  return <HarnessStore />;
+}
+
 const tabComponents: Record<TabId, () => JSX.Element> = {
+  guide: GuideTab,
   board: BoardTab,
   code: CodeTab,
   agents: AgentsTab,
   flows: GatedFlowsTab,
   deploy: DeployTab,
+  harness: HarnessTabPanel,
   settings: SettingsPage,
 };
 
 export function Layout() {
-  const [activeTab, setActiveTab] = useState<TabId>("board");
+  const [activeTab, setActiveTab] = useState<TabId>("guide");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const attachSession = useTerminalStore((s) => s.attachSession);
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -130,13 +138,12 @@ export function Layout() {
       // Send chat notification
       if (currentProject) {
         try {
-          const { notifyAgentSpawned } = await import(
-            "../services/agentNotificationService"
-          );
+          const { notifyAgentSpawned } =
+            await import("../services/agentNotificationService");
           await notifyAgentSpawned(
             currentProject.id,
             data.name,
-            data.role || "agent"
+            data.role || "agent",
           );
         } catch {
           // Chat notification is best-effort

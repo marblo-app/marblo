@@ -1,15 +1,14 @@
 /**
  * Bundle installer — auto-installs Marblo's required harness assets
- * (tf-* slash commands and skills) into the user's `~/.claude/` on app
- * start. Idempotent: writes a version marker and skips re-copy when the
- * marker matches the current bundle version.
+ * (tf-* slash commands, skills, AND the Marblo MCP server) into the
+ * user's `~/.claude/` on app start. Idempotent: writes a version marker
+ * and skips re-copy when the marker matches the current bundle version.
  *
- * Marblo MCP registration in `~/.claude.json` is deferred (the bridge
- * port is dynamic per app launch — needs a separate port-discovery file
- * for an end-user's global Claude Code session to find a running Marblo).
- * For now, Marblo MCP is only auto-injected into agents spawned by
- * Marblo itself (handled in agent-config.ts). See project_status.md
- * Section 7.5b for the deferred MCP work.
+ * Marblo MCP global registration uses a port-discovery file at
+ * `~/.marblo/bridge-port` (written by BridgeServer on every app launch).
+ * The bundled MCP server reads it as a fallback when MARBLO_BRIDGE_PORT
+ * env is not set — so an external Claude Code session that has Marblo
+ * MCP registered globally will reach the running Marblo automatically.
  */
 import fs from "fs";
 import os from "os";
@@ -65,6 +64,52 @@ function copyDirRecursive(src: string, dst: string): number {
     }
   }
   return count;
+}
+
+/** Find the path to the bundled Marblo MCP entry script. */
+function findMarbloMcpEntry(): string | null {
+  const candidates: string[] = [];
+  // Production: electron-builder copies dist-mcp into resources.
+  candidates.push(path.join(process.resourcesPath, "dist-mcp", "index.js"));
+  // Dev: dist-mcp is built next to the source by `npm run build:mcp`.
+  candidates.push(path.join(app.getAppPath(), "dist-mcp", "index.js"));
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+/**
+ * Add (or refresh) the Marblo MCP entry in `~/.claude.json` mcpServers.
+ * Writes atomically and preserves any other user-configured MCP entries.
+ */
+function registerMarbloMcpInClaudeJson(mcpEntryPath: string): void {
+  const claudeJsonPath = path.join(os.homedir(), ".claude.json");
+  let cfg: { mcpServers?: Record<string, unknown> } & Record<string, unknown> =
+    {};
+  if (fs.existsSync(claudeJsonPath)) {
+    try {
+      cfg = JSON.parse(fs.readFileSync(claudeJsonPath, "utf-8"));
+    } catch (err) {
+      // Don't clobber a malformed file — bail out so the user can fix it.
+      throw new Error(
+        `~/.claude.json is not valid JSON (${
+          err instanceof Error ? err.message : err
+        }). Refusing to overwrite.`
+      );
+    }
+  }
+  cfg.mcpServers = (cfg.mcpServers as Record<string, unknown>) ?? {};
+  // The MCP server reads MARBLO_BRIDGE_PORT from the discovery file at
+  // ~/.marblo/bridge-port if env is unset (see mcp-server/index.ts), so
+  // we don't need to inject the port here.
+  (cfg.mcpServers as Record<string, unknown>).marblo = {
+    command: "node",
+    args: [mcpEntryPath],
+  };
+  const tmp = `${claudeJsonPath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), "utf-8");
+  fs.renameSync(tmp, claudeJsonPath);
 }
 
 /**
@@ -140,6 +185,28 @@ export async function installBundledHarness(): Promise<InstallResult> {
     }
   } catch (err) {
     const msg = `Failed to copy skills: ${
+      err instanceof Error ? err.message : err
+    }`;
+    console.warn(`[BundleInstaller] ${msg}`);
+    result.errors.push(msg);
+  }
+
+  // Register Marblo MCP server globally so external Claude Code sessions
+  // can use it. The MCP entry script lives in app resources (production)
+  // or in the dist-mcp build output (dev). At runtime, the MCP reads
+  // ~/.marblo/bridge-port (written by BridgeServer) to find the live app.
+  try {
+    const mcpEntry = findMarbloMcpEntry();
+    if (mcpEntry) {
+      registerMarbloMcpInClaudeJson(mcpEntry);
+      result.installed += 1;
+    } else {
+      console.warn(
+        "[BundleInstaller] Marblo MCP entry not found — skipping global registration"
+      );
+    }
+  } catch (err) {
+    const msg = `Failed to register Marblo MCP: ${
       err instanceof Error ? err.message : err
     }`;
     console.warn(`[BundleInstaller] ${msg}`);

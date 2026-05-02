@@ -277,13 +277,13 @@ cd v3 && npm run dev
 
 **필수 번들 (P0)**:
 
-- [ ] `v3/electron/bundle-installer.ts` — 앱 시작 시 idempotent 설치
-  - tf-\* 18개 commands → `~/.claude/commands/`
-  - tf-\* skills → `~/.claude/skills/`
-  - Marblo MCP 등록 → `~/.claude.json` (또는 사용자 글로벌 mcp 위치)에 머지
-- [ ] 버전 마커 (`~/.claude/.marblo-bundle-version`) — 앱 버전 변경 시에만 덮어씀, 사용자 커스텀 보존
-- [ ] electron-builder `extraResources`에 bundled-harness 디렉터리 포함
-- [ ] 첫 실행 + 매 업데이트 시 자동 검증
+- [x] `v3/electron/bundle-installer.ts` — 앱 시작 시 idempotent 설치
+  - tf-\* 18개 commands → `~/.claude/commands/` ✅
+  - tf-\* skills → `~/.claude/skills/` ✅
+  - Marblo MCP 등록 → `~/.claude.json` mcpServers.marblo ✅ (port-discovery 파일 `~/.marblo/bridge-port` 메커니즘 도입)
+- [x] 버전 마커 (`~/.claude/.marblo-bundle-version`) — 앱 버전 변경 시에만 덮어씀, 사용자 커스텀 보존
+- [ ] electron-builder `extraResources`에 bundled-harness 디렉터리 포함 (production 빌드용 — 차후)
+- [x] 첫 실행 + 매 업데이트 시 자동 검증
 
 **Harness 큐레이팅 카탈로그 (P0/P1 혼합)**:
 
@@ -295,10 +295,11 @@ cd v3 && npm run dev
 
 **Harness UI (P1)**:
 
-- [ ] `v3/src/components/harness/HarnessStore.tsx` — 모달 또는 탭
-- [ ] 카드 그리드 (이름 / 설명 / Install / Installed / Update available)
-- [ ] 진행 상태 표시 (다운로드 / 설치 중)
-- [ ] 진입점: 헤더 / Sidebar 버튼 또는 새 탭 (TabBar 머지 후 정리)
+- [x] `v3/src/components/harness/HarnessStore.tsx` — 모달 + 탭 양쪽 렌더 지원 (`onClose` prop)
+- [x] 카드 그리드 (이름 / 설명 / Install / Installed / Update available)
+- [x] 진행 상태 표시 (다운로드 / 설치 중)
+- [x] 진입점: TabBar `harness` 탭 + 단축키 `Cmd/Ctrl+Shift+H`
+- [x] `GuideTab` — 첫 번째 탭, tf 슬래시 / Marblo MCP / 멀티윈도우 / Harness 사용법 한 페이지
 
 **Custom URL 설치 (P1, 베타 후)**:
 
