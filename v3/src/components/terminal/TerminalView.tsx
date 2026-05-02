@@ -1,17 +1,20 @@
-import { useEffect, useRef, memo } from 'react';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import { WebglAddon } from '@xterm/addon-webgl';
-import '@xterm/xterm/css/xterm.css';
-import { patchTerminalForFastIME } from '../../lib/xtermIMEPatch';
+import { useEffect, useRef, memo } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
+import "@xterm/xterm/css/xterm.css";
+import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 
 interface TerminalViewProps {
   sessionId: string;
   isActive: boolean;
 }
 
-export default memo(function TerminalView({ sessionId, isActive }: TerminalViewProps) {
+export default memo(function TerminalView({
+  sessionId,
+  isActive,
+}: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -29,26 +32,26 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
       fontSize: 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: {
-        background: '#1e1e2e',
-        foreground: '#cdd6f4',
-        cursor: '#f5e0dc',
-        selectionBackground: '#585b7066',
-        black: '#45475a',
-        red: '#f38ba8',
-        green: '#a6e3a1',
-        yellow: '#f9e2af',
-        blue: '#89b4fa',
-        magenta: '#f5c2e7',
-        cyan: '#94e2d5',
-        white: '#bac2de',
-        brightBlack: '#585b70',
-        brightRed: '#f38ba8',
-        brightGreen: '#a6e3a1',
-        brightYellow: '#f9e2af',
-        brightBlue: '#89b4fa',
-        brightMagenta: '#f5c2e7',
-        brightCyan: '#94e2d5',
-        brightWhite: '#a6adc8',
+        background: "#1e1e2e",
+        foreground: "#cdd6f4",
+        cursor: "#f5e0dc",
+        selectionBackground: "#585b7066",
+        black: "#45475a",
+        red: "#f38ba8",
+        green: "#a6e3a1",
+        yellow: "#f9e2af",
+        blue: "#89b4fa",
+        magenta: "#f5c2e7",
+        cyan: "#94e2d5",
+        white: "#bac2de",
+        brightBlack: "#585b70",
+        brightRed: "#f38ba8",
+        brightGreen: "#a6e3a1",
+        brightYellow: "#f9e2af",
+        brightBlue: "#89b4fa",
+        brightMagenta: "#f5c2e7",
+        brightCyan: "#94e2d5",
+        brightWhite: "#a6adc8",
       },
     });
 
@@ -67,7 +70,7 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
 
     // Clear any ghost xterm DOM from StrictMode's previous mount
     if (containerRef.current) {
-      containerRef.current.innerHTML = '';
+      containerRef.current.innerHTML = "";
     }
 
     const openTerminal = (el: HTMLDivElement) => {
@@ -80,22 +83,29 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
         // WebGL renderer disabled by default — see OrchestratorTerminal.tsx
         // for rationale (viewport scroll glitch on MacBook). Opt-in via
         // VITE_USE_WEBGL=1 if needed.
-        if (import.meta.env.VITE_USE_WEBGL === '1') {
+        if (import.meta.env.VITE_USE_WEBGL === "1") {
           try {
             const webglAddon = new WebglAddon();
             webglAddon.onContextLoss(() => webglAddon.dispose());
             terminal.loadAddon(webglAddon);
-            console.log('[TerminalView] WebGL renderer active');
+            console.log("[TerminalView] WebGL renderer active");
           } catch (err) {
-            console.warn('[TerminalView] WebGL init failed, using DOM renderer:', err);
+            console.warn(
+              "[TerminalView] WebGL init failed, using DOM renderer:",
+              err,
+            );
           }
         }
         requestAnimationFrame(() => {
           if (disposed) return;
-          try { fitAddon.fit(); } catch { /* ignore */ }
+          try {
+            fitAddon.fit();
+          } catch {
+            /* ignore */
+          }
         });
       } catch (err) {
-        console.warn('[TerminalView] xterm open failed:', err);
+        console.warn("[TerminalView] xterm open failed:", err);
       }
     };
 
@@ -114,16 +124,44 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
     };
     requestAnimationFrame(tryOpen);
 
-    // PTY → Terminal — xterm auto-scrolls when viewport is at bottom; no manual tracking needed
+    // PTY → Terminal — slash menu / large redraws can reset the xterm DOM
+    // viewport scrollTop because the renderer rebuilds rows wholesale.
+    // We latch a `wantBottom` flag that flips ONLY on user intent (wheel /
+    // PageUp / Home → false; scroll back to baseY → true). Every write
+    // re-sticks to bottom via rAF while wantBottom is true, so renderer
+    // resets are corrected on the very next frame without oscillating.
+    // See OrchestratorTerminal.tsx for the long-form rationale.
+    let wantBottom = true;
+    let userScrollingUntil = 0;
+    const markUserScrolling = () => {
+      userScrollingUntil = Date.now() + 300;
+    };
+    const isUserScrolling = () => Date.now() < userScrollingUntil;
+
     let hasReceivedData = false;
     window.electronAPI.pty.onData(sessionId, (data) => {
       hasReceivedData = true;
       if (disposed) return;
-      if (termOpened) {
-        terminal.write(data);
-      } else {
+      if (!termOpened) {
         pendingData.push(data);
+        return;
       }
+      terminal.write(data);
+      if (wantBottom) {
+        requestAnimationFrame(() => {
+          if (disposed || !wantBottom) return;
+          terminal.scrollToBottom();
+        });
+      }
+    });
+
+    // wantBottom flips only on user-driven scroll changes. isUserScrolling()
+    // is set briefly by wheel/keydown listeners; renderer-induced ydisp
+    // jumps fire onScroll without that flag set, so we don't toggle on them.
+    const onScrollDispose = terminal.onScroll(() => {
+      if (disposed || !isUserScrolling()) return;
+      const buf = terminal.buffer.active;
+      wantBottom = buf.viewportY >= buf.baseY;
     });
 
     const replayTimer = window.setTimeout(() => {
@@ -140,19 +178,29 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
         }
         // If no data after replay, show "session not found" message
         if (!hasReceivedData && termOpened) {
-          terminal.write('\r\n\x1b[33m  ⚠ 세션이 만료되었습니다.\x1b[0m\r\n');
-          terminal.write('\x1b[90m  앱 재시작으로 PTY 세션이 종료되었습니다.\x1b[0m\r\n');
-          terminal.write('\x1b[90m  Agents 탭에서 Restart 버튼으로 재시작하세요.\x1b[0m\r\n\r\n');
+          terminal.write("\r\n\x1b[33m  ⚠ 세션이 만료되었습니다.\x1b[0m\r\n");
+          terminal.write(
+            "\x1b[90m  앱 재시작으로 PTY 세션이 종료되었습니다.\x1b[0m\r\n",
+          );
+          terminal.write(
+            "\x1b[90m  Agents 탭에서 Restart 버튼으로 재시작하세요.\x1b[0m\r\n\r\n",
+          );
         }
+        if (termOpened) terminal.scrollToBottom();
       });
     }, 200);
 
     // Flush pending data once terminal opens
     const flushInterval = setInterval(() => {
-      if (disposed) { clearInterval(flushInterval); return; }
+      if (disposed) {
+        clearInterval(flushInterval);
+        return;
+      }
       if (termOpened && pendingData.length > 0) {
         for (const d of pendingData) terminal.write(d);
         pendingData.length = 0;
+        // Initial flush — user hasn't had a chance to scroll yet.
+        terminal.scrollToBottom();
         clearInterval(flushInterval);
       }
     }, 100);
@@ -167,7 +215,9 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
     // Handle PTY exit
     window.electronAPI.pty.onExit(sessionId, (code) => {
       if (disposed) return;
-      terminal.write(`\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`);
+      terminal.write(
+        `\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`,
+      );
     });
 
     // Resize handler
@@ -179,22 +229,50 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
     const handleResize = () => {
       if (disposed) return;
       try {
-        if (containerRef.current && containerRef.current.clientWidth > 0 && containerRef.current.clientHeight > 0) {
+        if (
+          containerRef.current &&
+          containerRef.current.clientWidth > 0 &&
+          containerRef.current.clientHeight > 0
+        ) {
           fitAddon.fit();
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
-    window.addEventListener('resize', handleResize);
+    window.addEventListener("resize", handleResize);
+
+    // User scroll-intent tracking: any wheel / Page key on the wrapper marks
+    // the user as actively scrolling. The onScroll snap-back guard checks
+    // this so we never override a deliberate scrollback action.
+    const wrapperEl = containerRef.current;
+    const onWheel = () => markUserScrolling();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === "PageUp" ||
+        e.key === "PageDown" ||
+        e.key === "Home" ||
+        e.key === "End" ||
+        (e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown"))
+      ) {
+        markUserScrolling();
+      }
+    };
+    wrapperEl?.addEventListener("wheel", onWheel, { passive: true });
+    wrapperEl?.addEventListener("keydown", onKeyDown);
 
     return () => {
       disposed = true;
       window.clearTimeout(replayTimer);
       clearInterval(flushInterval);
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener("resize", handleResize);
+      wrapperEl?.removeEventListener("wheel", onWheel);
+      wrapperEl?.removeEventListener("keydown", onKeyDown);
+      onScrollDispose.dispose();
       window.electronAPI.pty.removeListeners(sessionId);
       terminal.dispose();
       if (containerRef.current) {
-        containerRef.current.innerHTML = '';
+        containerRef.current.innerHTML = "";
       }
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -210,7 +288,9 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
           if (containerRef.current && containerRef.current.clientWidth > 0) {
             fitAddonRef.current?.fit();
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
         // Delay scrollToBottom to ensure fit has fully rendered
         requestAnimationFrame(() => {
           if (terminalRef.current) {
@@ -236,7 +316,14 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
     const wrapper = containerRef.current;
     if (!wrapper) return;
     const stop = (e: Event) => e.stopPropagation();
-    const types = ['compositionstart', 'compositionupdate', 'compositionend', 'keydown', 'keyup', 'input'];
+    const types = [
+      "compositionstart",
+      "compositionupdate",
+      "compositionend",
+      "keydown",
+      "keyup",
+      "input",
+    ];
     for (const t of types) wrapper.addEventListener(t, stop);
     return () => {
       for (const t of types) wrapper.removeEventListener(t, stop);
@@ -248,11 +335,11 @@ export default memo(function TerminalView({ sessionId, isActive }: TerminalViewP
       ref={containerRef}
       className="absolute inset-0"
       style={{
-        display: isActive ? 'block' : 'none',
+        display: isActive ? "block" : "none",
         // Isolate terminal layout/paint from the parent React/Tailwind tree.
         // xterm grid updates trigger DOM layout — without containment that
         // cascades through Sidebar, Header, etc. (~115ms per typing burst).
-        contain: 'layout style paint',
+        contain: "layout style paint",
       }}
     />
   );

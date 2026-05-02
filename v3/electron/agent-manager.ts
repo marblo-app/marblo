@@ -1,10 +1,10 @@
-import { BrowserWindow } from 'electron';
-import { PtyManager } from './pty-manager';
-import { AgentConfigGenerator, LaunchConfig } from './agent-config';
-import { mainTelemetry } from './telemetry';
+import { BrowserWindow } from "electron";
+import { PtyManager } from "./pty-manager";
+import { AgentConfigGenerator, LaunchConfig } from "./agent-config";
+import { mainTelemetry } from "./telemetry";
 
-export type ModelType = 'claude' | 'gemini' | 'gpt' | 'custom';
-export type AgentStatus = 'idle' | 'working' | 'error' | 'stopped';
+export type ModelType = "claude" | "gemini" | "gpt" | "custom";
+export type AgentStatus = "idle" | "working" | "error" | "stopped";
 
 // --- Auto-restart constants ---
 const MAX_RESTARTS = 5;
@@ -20,7 +20,7 @@ export interface AgentLaunchParams {
   command: string;
   cwd: string;
   initialPrompt?: string;
-  resumeSessionId?: string;  // 'new' | 'latest' | UUID
+  resumeSessionId?: string; // 'new' | 'latest' | UUID
   /** Firestore project document ID — injected as MARBLO_PROJECT env var into MCP */
   projectId?: string;
   /** Called immediately after PTY is created, before any output can be missed */
@@ -52,17 +52,40 @@ export class AgentManager {
   private ptyManager: PtyManager;
   private configGenerator: AgentConfigGenerator;
   private onStatusChange?: (agentId: string, status: AgentStatus) => void;
-  private onSessionDetected?: (rootPath: string, sessionId: string, label: string, agentId: string) => void;
-  private onRestartAttempt?: (agentId: string, attempt: number, maxAttempts: number) => void;
+  private onSessionDetected?: (
+    rootPath: string,
+    sessionId: string,
+    label: string,
+    agentId: string,
+  ) => void;
+  private onRestartAttempt?: (
+    agentId: string,
+    attempt: number,
+    maxAttempts: number,
+  ) => void;
   private onRestartFailed?: (agentId: string, exitCode: number) => void;
   private getMainWindow?: () => BrowserWindow | null;
-  private resolveSessionId?: (rootPath: string, requested: string, filterLabel?: string, filterAgentId?: string) => string | null;
+  private resolveSessionId?: (
+    rootPath: string,
+    requested: string,
+    filterLabel?: string,
+    filterAgentId?: string,
+  ) => string | null;
 
   constructor(
     ptyManager: PtyManager,
     onStatusChange?: (agentId: string, status: AgentStatus) => void,
-    onSessionDetected?: (rootPath: string, sessionId: string, label: string, agentId: string) => void,
-    onRestartAttempt?: (agentId: string, attempt: number, maxAttempts: number) => void,
+    onSessionDetected?: (
+      rootPath: string,
+      sessionId: string,
+      label: string,
+      agentId: string,
+    ) => void,
+    onRestartAttempt?: (
+      agentId: string,
+      attempt: number,
+      maxAttempts: number,
+    ) => void,
     onRestartFailed?: (agentId: string, exitCode: number) => void,
     getMainWindow?: () => BrowserWindow | null,
   ) {
@@ -76,7 +99,14 @@ export class AgentManager {
   }
 
   /** Inject session resolver (from OrchestratorManager) after construction */
-  setSessionResolver(resolver: (rootPath: string, requested: string, filterLabel?: string, filterAgentId?: string) => string | null) {
+  setSessionResolver(
+    resolver: (
+      rootPath: string,
+      requested: string,
+      filterLabel?: string,
+      filterAgentId?: string,
+    ) => string | null,
+  ) {
     this.resolveSessionId = resolver;
   }
 
@@ -85,7 +115,12 @@ export class AgentManager {
 
     // Generate MCP config + skill file for this agent
     const launchConfig = this.configGenerator.getLaunchConfig(
-      { id: params.id, model: params.model, role: params.role, command: params.command },
+      {
+        id: params.id,
+        model: params.model,
+        role: params.role,
+        command: params.command,
+      },
       params.cwd,
       params.initialPrompt,
       params.projectId,
@@ -94,13 +129,20 @@ export class AgentManager {
     // Resume support: add --resume flag
     let resolvedResumeId = params.resumeSessionId;
     // Safety: if 'latest' leaked through, try resolving it here
-    if (resolvedResumeId === 'latest' && this.resolveSessionId && params.cwd) {
-      resolvedResumeId = this.resolveSessionId(params.cwd, 'latest', params.name, params.id) ?? undefined;
-      console.log(`[Agent:${params.id}] Resolved 'latest' → ${resolvedResumeId ?? 'none (new session)'}`);
+    if (resolvedResumeId === "latest" && this.resolveSessionId && params.cwd) {
+      resolvedResumeId =
+        this.resolveSessionId(params.cwd, "latest", params.name, params.id) ??
+        undefined;
+      console.log(
+        `[Agent:${params.id}] Resolved 'latest' → ${resolvedResumeId ?? "none (new session)"}`,
+      );
     }
-    const isResume = resolvedResumeId && resolvedResumeId !== 'new' && resolvedResumeId !== 'latest';
+    const isResume =
+      resolvedResumeId &&
+      resolvedResumeId !== "new" &&
+      resolvedResumeId !== "latest";
     if (isResume) {
-      launchConfig.args.push('--resume', resolvedResumeId!);
+      launchConfig.args.push("--resume", resolvedResumeId!);
       console.log(`[Agent:${params.id}] Resuming session: ${resolvedResumeId}`);
     }
 
@@ -134,27 +176,33 @@ export class AgentManager {
       const sendPrompt = () => {
         if (sent) return;
         sent = true;
-        this.ptyManager.write(ptySessionId, prompt + '\r');
-        console.log(`[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`);
+        // Split text and \r so Claude Code registers Enter as a discrete
+        // keystroke (single-chunk write gets paste-buffered, leaving the
+        // CR inside the message body without submitting).
+        this.ptyManager.writeAndSubmit(ptySessionId, prompt);
+        console.log(
+          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`,
+        );
       };
 
       // Watch PTY output for CLI readiness indicators
       // Only match patterns that confirm the CLI is actually ready for input
-      let outputBuffer = '';
+      let outputBuffer = "";
       const readinessPatterns = [
-        /╭─+/,                     // Claude Code: box border (specific)
-        /\? for shortcuts/,        // Claude Code: footer help text
-        /Type your message/i,      // Claude/Gemini: input prompt
-        /Loaded \d+ MCP tool/i,    // MCP tools loaded confirmation
-        /Ready to assist/i,        // Generic CLI ready message
-        /What can I help/i,        // Gemini/GPT greeting
+        /╭─+/, // Claude Code: box border (specific)
+        /\? for shortcuts/, // Claude Code: footer help text
+        /Type your message/i, // Claude/Gemini: input prompt
+        /Loaded \d+ MCP tool/i, // MCP tools loaded confirmation
+        /Ready to assist/i, // Generic CLI ready message
+        /What can I help/i, // Gemini/GPT greeting
       ];
 
       this.ptyManager.onData(ptySessionId, (data) => {
         if (sent) return;
         outputBuffer += data;
         // Only keep last 4KB to avoid memory growth
-        if (outputBuffer.length > 4096) outputBuffer = outputBuffer.slice(-4096);
+        if (outputBuffer.length > 4096)
+          outputBuffer = outputBuffer.slice(-4096);
         for (const pattern of readinessPatterns) {
           if (pattern.test(outputBuffer)) {
             // Delay to let CLI fully render its prompt
@@ -176,31 +224,51 @@ export class AgentManager {
       // Capture existing sessions before launch
       let existingIds: Set<string>;
       try {
-        const encodedPath = rootPath.replace(/\//g, '-');
-        const sessionsDir = require('path').join(require('os').homedir(), '.claude', 'projects', encodedPath);
-        const files = require('fs').existsSync(sessionsDir)
-          ? require('fs').readdirSync(sessionsDir).filter((f: string) => f.endsWith('.jsonl')).map((f: string) => f.replace('.jsonl', ''))
+        const encodedPath = rootPath.replace(/\//g, "-");
+        const sessionsDir = require("path").join(
+          require("os").homedir(),
+          ".claude",
+          "projects",
+          encodedPath,
+        );
+        const files = require("fs").existsSync(sessionsDir)
+          ? require("fs")
+              .readdirSync(sessionsDir)
+              .filter((f: string) => f.endsWith(".jsonl"))
+              .map((f: string) => f.replace(".jsonl", ""))
           : [];
         existingIds = new Set(files);
       } catch (err) {
-        console.error(`[AgentManager] Failed to read existing session files for rootPath="${rootPath}":`, err);
+        console.error(
+          `[AgentManager] Failed to read existing session files for rootPath="${rootPath}":`,
+          err,
+        );
         existingIds = new Set();
       }
 
       setTimeout(() => {
         try {
-          const encodedPath = rootPath.replace(/\//g, '-');
-          const sessionsDir = require('path').join(require('os').homedir(), '.claude', 'projects', encodedPath);
-          if (!require('fs').existsSync(sessionsDir)) return;
-          const currentFiles = require('fs').readdirSync(sessionsDir)
-            .filter((f: string) => f.endsWith('.jsonl'))
-            .map((f: string) => f.replace('.jsonl', ''));
+          const encodedPath = rootPath.replace(/\//g, "-");
+          const sessionsDir = require("path").join(
+            require("os").homedir(),
+            ".claude",
+            "projects",
+            encodedPath,
+          );
+          if (!require("fs").existsSync(sessionsDir)) return;
+          const currentFiles = require("fs")
+            .readdirSync(sessionsDir)
+            .filter((f: string) => f.endsWith(".jsonl"))
+            .map((f: string) => f.replace(".jsonl", ""));
           const newId = currentFiles.find((id: string) => !existingIds.has(id));
           if (newId) {
             this.onSessionDetected!(rootPath, newId, agentName, agentId);
           }
         } catch (err) {
-          console.error(`[AgentManager] Failed to detect new session file for agent="${agentId}" rootPath="${rootPath}":`, err);
+          console.error(
+            `[AgentManager] Failed to detect new session file for agent="${agentId}" rootPath="${rootPath}":`,
+            err,
+          );
         }
       }, 5000);
     }
@@ -211,7 +279,7 @@ export class AgentManager {
       model: params.model,
       role: params.role,
       ptySessionId,
-      status: 'idle',
+      status: "idle",
       command: params.command,
       cwd: params.cwd,
       launchConfig,
@@ -226,15 +294,24 @@ export class AgentManager {
     this.agents.set(params.id, instance);
 
     // Telemetry: agent spawned — prefer MARBLO_PROJECT from launchConfig (always set by agent-config)
-    const spawnProjectId = instance.launchConfig?.env?.MARBLO_PROJECT || params.projectId || '';
-    mainTelemetry.agentSpawned(this.getMainWindow?.() ?? null, params.id, params.name, params.model || 'claude', params.role || 'backend', spawnProjectId);
+    const spawnProjectId =
+      instance.launchConfig?.env?.MARBLO_PROJECT || params.projectId || "";
+    mainTelemetry.agentSpawned(
+      this.getMainWindow?.() ?? null,
+      params.id,
+      params.name,
+      params.model || "claude",
+      params.role || "backend",
+      spawnProjectId,
+    );
 
     // Start heartbeat for anomaly detection (ML-4)
     instance.heartbeatTimer = setInterval(() => {
       const win = this.getMainWindow?.() ?? null;
       const agent = this.agents.get(params.id);
       if (!agent || agent.stopRequested) return;
-      const hbProjectId = agent.launchConfig?.env?.MARBLO_PROJECT || params.projectId || '';
+      const hbProjectId =
+        agent.launchConfig?.env?.MARBLO_PROJECT || params.projectId || "";
       mainTelemetry.heartbeat(win, params.id, hbProjectId, agent.status, 0, 0);
     }, HEARTBEAT_INTERVAL_MS);
 
@@ -247,32 +324,51 @@ export class AgentManager {
 
       // Intentional stop or clean exit → just mark stopped
       if (agent.stopRequested || exitCode === 0) {
-        agent.status = 'stopped';
+        agent.status = "stopped";
         this.configGenerator.cleanup(params.id);
-        this.onStatusChange?.(params.id, 'stopped');
-        mainTelemetry.agentStopped(this.getMainWindow?.() ?? null, params.id, exitCode);
+        this.onStatusChange?.(params.id, "stopped");
+        mainTelemetry.agentStopped(
+          this.getMainWindow?.() ?? null,
+          params.id,
+          exitCode,
+        );
         return;
       }
 
       // Crash detected — attempt auto-restart with exponential backoff
       if (agent.restartCount < MAX_RESTARTS) {
-        const delay = Math.min(BACKOFF_BASE_MS * Math.pow(2, agent.restartCount), BACKOFF_MAX_MS);
+        const delay = Math.min(
+          BACKOFF_BASE_MS * Math.pow(2, agent.restartCount),
+          BACKOFF_MAX_MS,
+        );
         agent.restartCount++;
         this.onRestartAttempt?.(agent.id, agent.restartCount, MAX_RESTARTS);
-        mainTelemetry.agentRestarted(this.getMainWindow?.() ?? null, agent.id, agent.restartCount);
-        console.log(`[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`);
+        mainTelemetry.agentRestarted(
+          this.getMainWindow?.() ?? null,
+          agent.id,
+          agent.restartCount,
+        );
+        console.log(
+          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`,
+        );
 
         agent.restartTimer = setTimeout(() => {
           this.performAutoRestart(agent.id);
         }, delay);
       } else {
         // Max restarts exceeded → error state
-        agent.status = 'error';
+        agent.status = "error";
         this.configGenerator.cleanup(params.id);
-        this.onStatusChange?.(params.id, 'error');
+        this.onStatusChange?.(params.id, "error");
         this.onRestartFailed?.(agent.id, exitCode);
-        mainTelemetry.agentCrashed(this.getMainWindow?.() ?? null, agent.id, exitCode);
-        console.error(`[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`);
+        mainTelemetry.agentCrashed(
+          this.getMainWindow?.() ?? null,
+          agent.id,
+          exitCode,
+        );
+        console.error(
+          `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
+        );
       }
     });
 
@@ -295,15 +391,24 @@ export class AgentManager {
     this.configGenerator.cleanup(agentId);
     this.agents.delete(agentId);
 
-    console.log(`[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`);
+    console.log(
+      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`,
+    );
 
     // Re-launch with resume
     // Resolve 'latest' to the actual session ID for this agent
-    let resolvedSessionId: string = 'latest';
+    let resolvedSessionId: string = "latest";
     if (this.resolveSessionId && agent.cwd) {
-      const resolved = this.resolveSessionId(agent.cwd, 'latest', agent.name, agent.id);
-      resolvedSessionId = resolved ?? 'new';
-      console.log(`[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`);
+      const resolved = this.resolveSessionId(
+        agent.cwd,
+        "latest",
+        agent.name,
+        agent.id,
+      );
+      resolvedSessionId = resolved ?? "new";
+      console.log(
+        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`,
+      );
     }
 
     const newInstance = this.launch({
@@ -338,9 +443,9 @@ export class AgentManager {
 
     this.ptyManager.kill(agent.ptySessionId);
     this.configGenerator.cleanup(agentId);
-    agent.status = 'stopped';
+    agent.status = "stopped";
     agent.restartCount = 0;
-    this.onStatusChange?.(agentId, 'stopped');
+    this.onStatusChange?.(agentId, "stopped");
     mainTelemetry.agentStopped(this.getMainWindow?.() ?? null, agentId, 0);
   }
 
@@ -377,7 +482,7 @@ export class AgentManager {
 
   getStatus(agentId: string): AgentStatus {
     const agent = this.agents.get(agentId);
-    return agent?.status ?? 'stopped';
+    return agent?.status ?? "stopped";
   }
 
   getAgent(agentId: string): AgentInstance | null {
@@ -415,7 +520,7 @@ export class AgentManager {
     const agent = this.agents.get(agentId);
     if (!agent) return;
     // Stop first if still running
-    if (agent.status !== 'stopped' && agent.status !== 'error') {
+    if (agent.status !== "stopped" && agent.status !== "error") {
       this.stop(agentId);
     }
     this.agents.delete(agentId);
@@ -426,8 +531,13 @@ export class AgentManager {
    * Register a reconnected agent into the in-memory map so dispatch can find it.
    */
   registerReconnected(agent: {
-    id: string; name: string; model: ModelType; role: string;
-    command: string; cwd: string; ptySessionId: string;
+    id: string;
+    name: string;
+    model: ModelType;
+    role: string;
+    command: string;
+    cwd: string;
+    ptySessionId: string;
   }): void {
     if (this.agents.has(agent.id)) return; // Already registered
     const instance: AgentInstance = {
@@ -436,7 +546,7 @@ export class AgentManager {
       model: agent.model,
       role: agent.role,
       ptySessionId: agent.ptySessionId,
-      status: 'idle',
+      status: "idle",
       command: agent.command,
       cwd: agent.cwd,
       restartCount: 0,
@@ -446,11 +556,25 @@ export class AgentManager {
       heartbeatTimer: null,
     };
     this.agents.set(agent.id, instance);
-    console.log(`[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`);
+    console.log(
+      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`,
+    );
   }
 
   listAgents(): AgentInstance[] {
     return Array.from(this.agents.values());
+  }
+
+  /**
+   * List agents whose injected MARBLO_PROJECT env var matches `projectId`.
+   * Used by multi-window mode to scope each window's view to its own project.
+   * If `projectId` is falsy or empty, returns all agents (legacy behavior).
+   */
+  listAgentsByProject(projectId: string | undefined): AgentInstance[] {
+    if (!projectId) return this.listAgents();
+    return Array.from(this.agents.values()).filter(
+      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId,
+    );
   }
 
   stopAll(): void {

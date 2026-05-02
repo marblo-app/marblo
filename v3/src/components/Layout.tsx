@@ -1,25 +1,27 @@
-import { useState, useEffect } from 'react';
-import { Header } from './Header';
-import { TabBar, type TabId } from './TabBar';
-import { Sidebar } from './sidebar/Sidebar';
-import TerminalPanel from './terminal/TerminalPanel';
-import OrchestratorPanel from './orchestrator/OrchestratorPanel';
-import { BoardTab } from './tabs/BoardTab';
-import { CodeTab } from './tabs/CodeTab';
-import { AgentsTab } from './tabs/AgentsTab';
-import { FlowsTab } from './tabs/FlowsTab';
-import { DeployTab } from './tabs/DeployTab';
-import { SettingsPage } from './settings/SettingsPage';
-import { PlanGate } from './settings/PlanGate';
-import { OrchestratorChat } from './orchestrator/OrchestratorChat';
-import { TaskCreateModal } from './board/TaskCreateModal';
-import { useOrchestratorAutoLaunch } from '../hooks/useOrchestratorAutoLaunch';
-import { useAgentReconnect } from '../hooks/useAgentReconnect';
-import { useSessionRestore } from '../hooks/useSessionRestore';
-import { useCostWriter } from '../hooks/useCostWriter';
-import { useTerminalStore } from '../stores/terminalStore';
-import { useProjectStore } from '../stores/projectStore';
-import { useEditorStore } from '../stores/editorStore';
+import { useState, useEffect } from "react";
+import { Header } from "./Header";
+import { TabBar, type TabId } from "./TabBar";
+import { Sidebar } from "./sidebar/Sidebar";
+import TerminalPanel from "./terminal/TerminalPanel";
+import OrchestratorPanel from "./orchestrator/OrchestratorPanel";
+import { BoardTab } from "./tabs/BoardTab";
+import { CodeTab } from "./tabs/CodeTab";
+import { AgentsTab } from "./tabs/AgentsTab";
+import { FlowsTab } from "./tabs/FlowsTab";
+import { DeployTab } from "./tabs/DeployTab";
+import { SettingsPage } from "./settings/SettingsPage";
+import { PlanGate } from "./settings/PlanGate";
+import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
+import { TaskCreateModal } from "./board/TaskCreateModal";
+import { CoupangDashboard } from "./channels/coupang/CoupangDashboard";
+import { SmartStoreDashboard } from "./channels/smartstore/SmartStoreDashboard";
+import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
+import { useAgentReconnect } from "../hooks/useAgentReconnect";
+import { useSessionRestore } from "../hooks/useSessionRestore";
+import { useCostWriter } from "../hooks/useCostWriter";
+import { useTerminalStore } from "../stores/terminalStore";
+import { useProjectStore } from "../stores/projectStore";
+import { useEditorStore } from "../stores/editorStore";
 
 function GatedFlowsTab() {
   return (
@@ -35,14 +37,27 @@ const tabComponents: Record<TabId, () => JSX.Element> = {
   agents: AgentsTab,
   flows: GatedFlowsTab,
   deploy: DeployTab,
+  coupang: CoupangDashboard,
+  smartstore: SmartStoreDashboard,
   settings: SettingsPage,
 };
 
 export function Layout() {
-  const [activeTab, setActiveTab] = useState<TabId>('board');
+  const [activeTab, setActiveTab] = useState<TabId>("board");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const attachSession = useTerminalStore((s) => s.attachSession);
   const currentProject = useProjectStore((s) => s.currentProject);
+
+  // Register this window's current project with main so per-project events
+  // (agent:spawned, agent:statusChanged, etc.) are scoped to this window in
+  // multi-window mode. Empty string clears the registration.
+  useEffect(() => {
+    window.electronAPI.window
+      .registerProject(currentProject?.id ?? "")
+      .catch(() => {
+        /* main may not have the handler in older builds — best-effort */
+      });
+  }, [currentProject?.id]);
 
   // Sidebar → modal state
   const [showOrchestratorChat, setShowOrchestratorChat] = useState(false);
@@ -65,23 +80,27 @@ export function Layout() {
   const createSession = useTerminalStore((s) => s.createSession);
   useEffect(() => {
     let counter = 0;
-    window.electronAPI.on('terminal:new', () => {
+    window.electronAPI.on("terminal:new", () => {
       counter++;
       createSession(`Terminal ${counter}`);
     });
-    return () => { window.electronAPI.off('terminal:new'); };
+    return () => {
+      window.electronAPI.off("terminal:new");
+    };
   }, [createSession]);
 
   // Listen for agent:deleted events from bridge server → delete from Firestore
   useEffect(() => {
-    window.electronAPI.on('agent:deleted', (data: unknown) => {
+    window.electronAPI.on("agent:deleted", (data: unknown) => {
       const { agentId } = data as { agentId: string; agentName: string };
       // Delete from Firestore (stop is already done in main process)
-      import('../services/agentService').then(({ deleteAgent: fsDelete }) => {
+      import("../services/agentService").then(({ deleteAgent: fsDelete }) => {
         fsDelete(agentId).catch(() => {});
       });
     });
-    return () => { window.electronAPI.off('agent:deleted'); };
+    return () => {
+      window.electronAPI.off("agent:deleted");
+    };
   }, []);
 
   // Listen for agent:spawned events from bridge server → auto-attach terminal tab + chat notification
@@ -91,8 +110,13 @@ export function Layout() {
       // Send chat notification
       if (currentProject) {
         try {
-          const { notifyAgentSpawned } = await import('../services/agentNotificationService');
-          await notifyAgentSpawned(currentProject.id, data.name, data.role || 'agent');
+          const { notifyAgentSpawned } =
+            await import("../services/agentNotificationService");
+          await notifyAgentSpawned(
+            currentProject.id,
+            data.name,
+            data.role || "agent",
+          );
         } catch {
           // Chat notification is best-effort
         }
@@ -100,7 +124,7 @@ export function Layout() {
     });
     return () => {
       // Cleanup to prevent duplicate listeners on re-mount
-      window.electronAPI.off('agent:spawned');
+      window.electronAPI.off("agent:spawned");
     };
   }, [attachSession, currentProject]);
 
@@ -121,7 +145,7 @@ export function Layout() {
 
     return (
       <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
-        <Header onNavigateToSettings={() => setActiveTab('settings')} />
+        <Header onNavigateToSettings={() => setActiveTab("settings")} />
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center space-y-6">
             <div className="text-6xl">M</div>
@@ -143,10 +167,12 @@ export function Layout() {
   // Header, TabBar, tab content). Tests if Marblo's React tree complexity
   // is causing typing input delay. If INP drops dramatically in minimal
   // mode, the heavy tree is the culprit.
-  if (import.meta.env.VITE_DIAG_MINIMAL === '1') {
+  if (import.meta.env.VITE_DIAG_MINIMAL === "1") {
     return (
       <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
-        <div className="p-2 text-xs text-yellow-400">[DIAG] Minimal Layout — only OrchestratorPanel</div>
+        <div className="p-2 text-xs text-yellow-400">
+          [DIAG] Minimal Layout — only OrchestratorPanel
+        </div>
         <div className="flex-1 overflow-hidden">
           <OrchestratorPanel />
         </div>
@@ -157,7 +183,7 @@ export function Layout() {
   return (
     <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
       {/* Header */}
-      <Header onNavigateToSettings={() => setActiveTab('settings')} />
+      <Header onNavigateToSettings={() => setActiveTab("settings")} />
 
       {/* Main body */}
       <div className="flex flex-1 overflow-hidden">
@@ -183,7 +209,9 @@ export function Layout() {
           <OrchestratorPanel />
 
           {/* Terminal panel — DIAG: toggle via VITE_DISABLE_TERMINAL_PANEL=1 */}
-          {import.meta.env.VITE_DISABLE_TERMINAL_PANEL !== '1' && <TerminalPanel />}
+          {import.meta.env.VITE_DISABLE_TERMINAL_PANEL !== "1" && (
+            <TerminalPanel />
+          )}
         </div>
       </div>
 
