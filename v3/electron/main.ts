@@ -247,6 +247,9 @@ const orchestrators = new Map<string, OrchestratorManager>();
 // Track which window launched each project's orchestrator (for default
 // stop/status routing when the renderer call doesn't carry projectId).
 const orchestratorOwners = new Map<string, number>(); // projectId → webContents.id
+// Per-project enabledModels for dispatch scoring — replaces the previous
+// global process.env.MARBLO_ENABLED_MODELS that races across windows.
+const projectEnabledModels = new Map<string, string[]>();
 
 function createOrchestratorInstance(projectId: string): OrchestratorManager {
   return new OrchestratorManager(
@@ -305,6 +308,13 @@ function getOrchestratorForSender(
 // MARBLO_PROJECT env.
 bridgeServer.setOrchestratorLookup(
   (projectId: string) => orchestrators.get(projectId) ?? null,
+);
+
+// Per-project enabledModels lookup — replaces the global env var fallback
+// in BridgeServer.dispatchTask so concurrent windows can dispatch with
+// different model presets simultaneously.
+bridgeServer.setEnabledModelsLookup((projectId: string) =>
+  projectEnabledModels.get(projectId),
 );
 
 // When the bridge spawns an agent (via MCP /spawn-agent or /dispatch-task),
@@ -1203,13 +1213,14 @@ ipcMain.handle(
     // Resolve '~' to actual home directory
     const resolvedPath = rootPath === "~" ? require("os").homedir() : rootPath;
 
-    // Inject enabled models into env for Bridge dispatch scoring
+    // Store enabledModels per-project (not as global env var) so two
+    // concurrent windows don't race and overwrite each other's preset.
     if (
       enabledModels &&
       Array.isArray(enabledModels) &&
       enabledModels.length > 0
     ) {
-      process.env.MARBLO_ENABLED_MODELS = enabledModels.join(",");
+      projectEnabledModels.set(projectId, enabledModels);
     }
 
     const senderId = event.sender.id;
@@ -1249,15 +1260,16 @@ ipcMain.handle(
       : getOrchestratorForSender(event.sender.id);
     if (orch) {
       orch.stop();
-      // Forget the owner mapping for this project.
-      for (const [pid, ownerId] of orchestratorOwners) {
-        if (orchestrators.get(pid) === orch || ownerId === event.sender.id) {
+      // Forget the owner + enabledModels mappings for this project. We
+      // intentionally leave OTHER projects' state alone — a previous bug
+      // wiped the global env var and broke the other window's dispatch.
+      for (const [pid, instance] of orchestrators) {
+        if (instance === orch) {
           orchestratorOwners.delete(pid);
+          projectEnabledModels.delete(pid);
         }
       }
     }
-    // Clean up enabledModels env var to prevent stale values in next session
-    delete process.env.MARBLO_ENABLED_MODELS;
   },
 );
 

@@ -1064,10 +1064,15 @@ export function registerTools(server: McpServer): void {
     async ({ project_id }) => {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
 
-      // Try Bridge first — real-time data from AgentManager
+      // Try Bridge first — real-time data from AgentManager. Pass our
+      // project so multi-window mode returns only this project's agents.
       if (bridgePort) {
         try {
-          const response = await fetch(`http://127.0.0.1:${bridgePort}/agents`);
+          const projectId = process.env.MARBLO_PROJECT || "";
+          const url = projectId
+            ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(projectId)}`
+            : `http://127.0.0.1:${bridgePort}/agents`;
+          const response = await fetch(url);
           const data = (await response.json()) as {
             agents: Array<{
               id: string;
@@ -1339,10 +1344,12 @@ export function registerTools(server: McpServer): void {
       }
 
       try {
-        // Get real-time agent list
-        const listResponse = await fetch(
-          `http://127.0.0.1:${bridgePort}/agents`,
-        );
+        // Get real-time agent list scoped to our project (multi-window).
+        const projectId = process.env.MARBLO_PROJECT || "";
+        const listUrl = projectId
+          ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(projectId)}`
+          : `http://127.0.0.1:${bridgePort}/agents`;
+        const listResponse = await fetch(listUrl);
         const data = (await listResponse.json()) as {
           agents: Array<{
             id: string;

@@ -101,6 +101,10 @@ export class BridgeServer {
   private orchestratorLookup: (
     projectId: string,
   ) => OrchestratorManager | null = () => null;
+  // Per-project enabledModels lookup — main wires this so dispatchTask
+  // doesn't read process.env (which races across windows).
+  private enabledModelsLookup: (projectId: string) => string[] | undefined =
+    () => undefined;
   private mainWindow: BrowserWindow | null = null;
   private allWindows: Set<BrowserWindow> | null = null;
   private ptyBuffers: Map<string, string[]>;
@@ -132,6 +136,12 @@ export class BridgeServer {
     hook: (sid: string, projectId: string | undefined, agentId: string) => void,
   ): void {
     this.agentSpawnedHook = hook;
+  }
+
+  setEnabledModelsLookup(
+    lookup: (projectId: string) => string[] | undefined,
+  ): void {
+    this.enabledModelsLookup = lookup;
   }
 
   setMainWindow(win: BrowserWindow | null): void {
@@ -179,8 +189,13 @@ export class BridgeServer {
           return;
         }
 
-        if (req.method === "GET" && req.url === "/agents") {
-          this.handleGetAgents(res);
+        if (req.method === "GET" && req.url?.startsWith("/agents")) {
+          // Optional ?projectId= query param scopes the list to a single
+          // project (multi-window). Without it, returns all agents
+          // (legacy behavior — used by the renderer's debug panel).
+          const url = new URL(req.url, `http://127.0.0.1:${this.port}`);
+          const projectId = url.searchParams.get("projectId") ?? undefined;
+          this.handleGetAgents(res, projectId);
           return;
         }
 
@@ -249,16 +264,18 @@ export class BridgeServer {
 
   // ── GET /agents — real-time agent list ──────────────────────
 
-  private handleGetAgents(res: http.ServerResponse): void {
-    const agents = this.agentManager.listAgents().map((a) => ({
-      id: a.id,
-      name: a.name,
-      model: a.model,
-      role: a.role,
-      status: a.status,
-      ptySessionId: a.ptySessionId,
-      restartCount: a.restartCount,
-    }));
+  private handleGetAgents(res: http.ServerResponse, projectId?: string): void {
+    const agents = this.agentManager
+      .listAgentsByProject(projectId)
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        model: a.model,
+        role: a.role,
+        status: a.status,
+        ptySessionId: a.ptySessionId,
+        restartCount: a.restartCount,
+      }));
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ agents }));
@@ -701,10 +718,15 @@ export class BridgeServer {
       return { success: false, error: constraint.error };
     }
 
-    // Select best model
+    // Select best model. Order:
+    //   1. enabledModels in the request body
+    //   2. per-project lookup (set by main when orchestrator launches)
+    //   3. global MARBLO_MODEL_PRESET as last-resort default
+    // The previous code read process.env.MARBLO_ENABLED_MODELS, which races
+    // across concurrent windows in multi-window mode.
     const enabledModels =
       params.enabledModels ||
-      (process.env.MARBLO_ENABLED_MODELS?.split(",") as
+      (this.enabledModelsLookup(params.projectId ?? "") as
         | ModelType[]
         | undefined) ||
       resolvePreset(process.env.MARBLO_MODEL_PRESET);
