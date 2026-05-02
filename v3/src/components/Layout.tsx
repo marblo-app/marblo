@@ -14,8 +14,6 @@ import { PlanGate } from "./settings/PlanGate";
 import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
 import { TaskCreateModal } from "./board/TaskCreateModal";
 import { HarnessStore } from "./harness/HarnessStore";
-import { CoupangDashboard } from "./channels/coupang/CoupangDashboard";
-import { SmartStoreDashboard } from "./channels/smartstore/SmartStoreDashboard";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
 import { useAgentReconnect } from "../hooks/useAgentReconnect";
 import { useSessionRestore } from "../hooks/useSessionRestore";
@@ -38,8 +36,6 @@ const tabComponents: Record<TabId, () => JSX.Element> = {
   agents: AgentsTab,
   flows: GatedFlowsTab,
   deploy: DeployTab,
-  coupang: CoupangDashboard,
-  smartstore: SmartStoreDashboard,
   settings: SettingsPage,
 };
 
@@ -134,12 +130,13 @@ export function Layout() {
       // Send chat notification
       if (currentProject) {
         try {
-          const { notifyAgentSpawned } =
-            await import("../services/agentNotificationService");
+          const { notifyAgentSpawned } = await import(
+            "../services/agentNotificationService"
+          );
           await notifyAgentSpawned(
             currentProject.id,
             data.name,
-            data.role || "agent",
+            data.role || "agent"
           );
         } catch {
           // Chat notification is best-effort
