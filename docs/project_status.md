@@ -270,6 +270,45 @@ cd v3 && npm run dev
 - [ ] 결제 단계 — Free 시작 / Pro 즉시 업그레이드
 - [ ] _참고: `v3/src/components/onboarding/`에 작업 진행 중 (untracked)_
 
+### 7.5b Harness — 번들 + 스토어 (P0 일부, P1 일부)
+
+> 컨셉: tf-\* 슬래시 + Marblo MCP 같은 "Marblo가 동작하기 위해 필수"인 항목은 앱 설치 시 자동으로 사용자 `~/.claude/`에 복사.
+> 그 외 superpowers / gstack / 차후 외부 패키지는 Harness 탭에서 카드 클릭 한 번으로 설치/제거.
+
+**필수 번들 (P0)**:
+
+- [ ] `v3/electron/bundle-installer.ts` — 앱 시작 시 idempotent 설치
+  - tf-\* 18개 commands → `~/.claude/commands/`
+  - tf-\* skills → `~/.claude/skills/`
+  - Marblo MCP 등록 → `~/.claude.json` (또는 사용자 글로벌 mcp 위치)에 머지
+- [ ] 버전 마커 (`~/.claude/.marblo-bundle-version`) — 앱 버전 변경 시에만 덮어씀, 사용자 커스텀 보존
+- [ ] electron-builder `extraResources`에 bundled-harness 디렉터리 포함
+- [ ] 첫 실행 + 매 업데이트 시 자동 검증
+
+**Harness 큐레이팅 카탈로그 (P0/P1 혼합)**:
+
+- [ ] `v3/electron/harness-catalog.ts` — 큐레이팅된 패키지 목록 (id / name / 설명 / 설치 소스 / type)
+- [ ] 초기 카탈로그: `superpowers` (Anthropic skills), `gstack` (Marblo creator's skill set), 필수 MCP들 (예: filesystem, github, context7)
+- [ ] IPC: `harness:list` / `harness:install(pkgId)` / `harness:uninstall(pkgId)` / `harness:status`
+- [ ] 설치 동작: git clone → `~/.claude/skills/<name>/` 또는 MCP면 `~/.claude.json`에 머지
+- [ ] 제거 동작: 디렉터리 / MCP entry 삭제
+
+**Harness UI (P1)**:
+
+- [ ] `v3/src/components/harness/HarnessStore.tsx` — 모달 또는 탭
+- [ ] 카드 그리드 (이름 / 설명 / Install / Installed / Update available)
+- [ ] 진행 상태 표시 (다운로드 / 설치 중)
+- [ ] 진입점: 헤더 / Sidebar 버튼 또는 새 탭 (TabBar 머지 후 정리)
+
+**Custom URL 설치 (P1, 베타 후)**:
+
+- [ ] GitHub URL 입력 → 신뢰 경고 모달 → git clone
+- [ ] 설치된 외부 패키지 추적
+
+**Enterprise 화이트리스트 (Phase 1, 6월 후)**:
+
+- [ ] 관리자가 허용한 패키지만 노출 (Harness 정책 훅 — Phase 0 PolicyHook 확장)
+
 ### 7.6 배포 인프라 (P0)
 
 - [ ] electron-builder mac/win/linux 빌드 검증

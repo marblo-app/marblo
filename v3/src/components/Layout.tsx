@@ -13,6 +13,7 @@ import { SettingsPage } from "./settings/SettingsPage";
 import { PlanGate } from "./settings/PlanGate";
 import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
 import { TaskCreateModal } from "./board/TaskCreateModal";
+import { HarnessStore } from "./harness/HarnessStore";
 import { CoupangDashboard } from "./channels/coupang/CoupangDashboard";
 import { SmartStoreDashboard } from "./channels/smartstore/SmartStoreDashboard";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
@@ -62,6 +63,29 @@ export function Layout() {
   // Sidebar → modal state
   const [showOrchestratorChat, setShowOrchestratorChat] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
+  const [showHarnessStore, setShowHarnessStore] = useState(false);
+
+  // Open Harness store via global keyboard shortcut (Cmd/Ctrl+Shift+H)
+  // and via custom event so future Sidebar/Header buttons can trigger it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === "h"
+      ) {
+        e.preventDefault();
+        setShowHarnessStore(true);
+      }
+    };
+    const onOpenHarness = () => setShowHarnessStore(true);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("marblo:open-harness", onOpenHarness);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("marblo:open-harness", onOpenHarness);
+    };
+  }, []);
 
   // Restore last session (rootPath + project) on startup
   const { isNewWindow } = useSessionRestore();
@@ -224,6 +248,9 @@ export function Layout() {
           projectId={currentProject.id}
           onClose={() => setShowCreateTask(false)}
         />
+      )}
+      {showHarnessStore && (
+        <HarnessStore onClose={() => setShowHarnessStore(false)} />
       )}
     </div>
   );

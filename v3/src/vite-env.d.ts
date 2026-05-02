@@ -14,7 +14,7 @@ interface FsAPI {
   writeFile: (filePath: string, content: string) => Promise<void>;
   gitStatus: (rootPath: string) => Promise<Record<string, string>>;
   gitDiff: (
-    filePath: string,
+    filePath: string
   ) => Promise<{ original: string; modified: string }>;
   selectDirectory: () => Promise<string | null>;
   watch: (rootPath: string) => Promise<void>;
@@ -52,11 +52,11 @@ interface AgentAPI {
     cwd: string,
     initialPrompt?: string,
     resumeSessionId?: string,
-    projectId?: string,
+    projectId?: string
   ) => Promise<{ id: string; ptySessionId: string; status: string }>;
   stop: (id: string) => Promise<void>;
   restart: (
-    id: string,
+    id: string
   ) => Promise<{ id: string; ptySessionId: string; status: string } | null>;
   status: (id: string) => Promise<string>;
   list: (projectId?: string) => Promise<
@@ -71,7 +71,7 @@ interface AgentAPI {
   >;
   remove: (id: string) => Promise<{ success: boolean }>;
   onStatusChange: (
-    callback: (data: { agentId: string; status: string }) => void,
+    callback: (data: { agentId: string; status: string }) => void
   ) => void;
   healthStatus: (id: string) => Promise<{
     status: string;
@@ -83,10 +83,10 @@ interface AgentAPI {
       agentId: string;
       attempt: number;
       maxAttempts: number;
-    }) => void,
+    }) => void
   ) => void;
   onRestartFailed: (
-    callback: (data: { agentId: string; exitCode: number }) => void,
+    callback: (data: { agentId: string; exitCode: number }) => void
   ) => void;
   onCostUpdate: (
     callback: (data: {
@@ -101,7 +101,7 @@ interface AgentAPI {
       taskId?: string;
       taskType?: string;
       sessionId?: string;
-    }) => void,
+    }) => void
   ) => void;
   offCostUpdate: () => void;
   reconnect: (
@@ -113,7 +113,7 @@ interface AgentAPI {
       command: string;
     }>,
     rootPath: string,
-    projectId: string,
+    projectId: string
   ) => Promise<
     Array<{
       agentId: string;
@@ -127,7 +127,7 @@ interface AgentAPI {
       agentName: string;
       status: string;
       currentTaskId: string | null;
-    }) => void,
+    }) => void
   ) => void;
 }
 
@@ -150,7 +150,7 @@ interface DecompositionResultDTO {
 interface OrchestratorAPI {
   decompose: (text: string) => Promise<DecompositionResultDTO>;
   createTasks: (
-    tasks: DecomposedTaskDTO[],
+    tasks: DecomposedTaskDTO[]
   ) => Promise<{ tasks: DecomposedTaskDTO[]; layers: string[][] }>;
 }
 
@@ -158,7 +158,7 @@ interface OrchestratorSessionAPI {
   launch: (
     projectId: string,
     rootPath: string,
-    resumeSessionId?: string,
+    resumeSessionId?: string
   ) => Promise<{
     sessionId: string;
     ptySessionId: string;
@@ -183,7 +183,7 @@ interface OrchestratorSessionAPI {
       ptySessionId: string;
       model: string;
       role: string;
-    }) => void,
+    }) => void
   ) => void;
 }
 
@@ -200,12 +200,12 @@ type FlowEvent =
 interface FlowAPI {
   run: (
     flow: unknown,
-    inputs?: Record<string, unknown>,
+    inputs?: Record<string, unknown>
   ) => Promise<{ runId: string }>;
   pause: (runId: string) => Promise<void>;
   resume: (
     runId: string,
-    humanInput?: { nodeId: string; approved: boolean; data?: unknown },
+    humanInput?: { nodeId: string; approved: boolean; data?: unknown }
   ) => Promise<void>;
   cancel: (runId: string) => Promise<void>;
   getState: (runId: string) => Promise<unknown>;
@@ -227,7 +227,7 @@ interface SettingsAPI {
 interface CodeAPI {
   format: (
     content: string,
-    filePath: string,
+    filePath: string
   ) => Promise<{ formatted: string; error: string | null }>;
 }
 
@@ -276,9 +276,35 @@ interface WindowAPI {
   registerProject: (projectId: string) => Promise<void>;
 }
 
+interface HarnessPackage {
+  id: string;
+  name: string;
+  description: string;
+  type: "skill" | "mcp" | "plugin";
+  category: "required" | "recommended" | "mcp";
+  install: {
+    kind: "git" | "mcp" | "bundled" | "manual";
+    source?: string;
+    dest?: string;
+    env?: Record<string, string>;
+    args?: string[];
+    instructions?: string;
+  };
+  detect: { path?: string; mcpKey?: string };
+  url?: string;
+  status: "installed" | "not-installed" | "manual-required" | "unknown";
+}
+
+interface HarnessAPI {
+  list: () => Promise<HarnessPackage[]>;
+  install: (id: string) => Promise<{ success: boolean; error?: string }>;
+  uninstall: (id: string) => Promise<{ success: boolean; error?: string }>;
+}
+
 interface ElectronAPI {
   platform: string;
   window: WindowAPI;
+  harness: HarnessAPI;
   send: (channel: string, data: unknown) => void;
   on: (channel: string, callback: (...args: unknown[]) => void) => void;
   off: (channel: string) => void;
