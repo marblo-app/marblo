@@ -679,9 +679,14 @@ export function registerTools(server: McpServer): void {
       const task = await fetchTask(task_id);
       if (!task) return text(`Error: Task ${task_id} not found.`);
 
+      // Fall back to the MARBLO_AGENT_ID env var (injected by Marblo when
+      // the MCP server is spawned for an agent) before "unknown". The
+      // Agents tab Activity feed filters by `agentId in [our agents]`, so
+      // logging "unknown" makes the activity invisible.
+      const resolvedAgentId = agent_id || MARBLO_AGENT_ID;
       await addDoc(collection(db, "activities"), {
         taskId: task_id,
-        agentId: agent_id || "unknown",
+        agentId: resolvedAgentId,
         message,
         createdAt: Timestamp.now(),
       });
