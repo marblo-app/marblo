@@ -31,6 +31,12 @@ export interface SpawnAgentRequest {
   /** Project ID — required in multi-window mode to scope the agent's view
    * to the correct window. MCP server forwards MARBLO_PROJECT here. */
   projectId?: string;
+  /** Parent agent ID (the caller). MCP server forwards MARBLO_AGENT_ID
+   * here so the spawn hook can fall back to the parent's project / owner
+   * when projectId is missing or empty. Critical for resolving owner
+   * window when external Claude Code invokes Marblo MCP without an
+   * explicit project context. */
+  parentAgentId?: string;
 }
 
 interface SpawnAgentResponse {
@@ -62,6 +68,9 @@ interface DispatchTaskRequest {
   /** Project ID — required in multi-window mode. Filters reusable agents
    * to only those owned by this project. MCP forwards MARBLO_PROJECT. */
   projectId?: string;
+  /** Parent agent ID — fallback for owner resolution when projectId is
+   * missing. MCP forwards MARBLO_AGENT_ID. */
+  parentAgentId?: string;
 }
 
 type DispatchAction = "logical" | "reused" | "restarted" | "spawned";
@@ -116,7 +125,12 @@ export class BridgeServer {
   // notification scoped to the agent's project. This avoids bridge having
   // its own PTY routing that bypasses multi-window scoping.
   private agentSpawnedHook:
-    | ((sid: string, projectId: string | undefined, agentId: string) => void)
+    | ((
+        sid: string,
+        projectId: string | undefined,
+        agentId: string,
+        parentAgentId?: string
+      ) => void)
     | null = null;
 
   constructor(
@@ -136,7 +150,12 @@ export class BridgeServer {
   }
 
   setAgentSpawnedHook(
-    hook: (sid: string, projectId: string | undefined, agentId: string) => void
+    hook: (
+      sid: string,
+      projectId: string | undefined,
+      agentId: string,
+      parentAgentId?: string
+    ) => void
   ): void {
     this.agentSpawnedHook = hook;
   }
@@ -779,6 +798,7 @@ export class BridgeServer {
       cwd,
       initialPrompt: instruction,
       projectId: params.projectId,
+      parentAgentId: params.parentAgentId,
     });
 
     if (!spawnResult.success) {
@@ -848,7 +868,12 @@ export class BridgeServer {
       projectId: params.projectId,
       onPtyReady: (sid) => {
         if (this.agentSpawnedHook) {
-          this.agentSpawnedHook(sid, params.projectId, agentId);
+          this.agentSpawnedHook(
+            sid,
+            params.projectId,
+            agentId,
+            params.parentAgentId
+          );
           return;
         }
         // Fallback: bridge-local PTY forwarding

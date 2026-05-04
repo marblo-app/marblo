@@ -942,6 +942,11 @@ export function registerTools(server: McpServer): void {
           // Forward MARBLO_PROJECT so bridge scopes the new agent to the
           // correct window in multi-window mode.
           projectId: process.env.MARBLO_PROJECT || "",
+          // Forward MARBLO_AGENT_ID so bridge can fall back to the parent
+          // agent's project / owner when projectId is empty (e.g., when
+          // an external Claude Code session calls Marblo MCP without a
+          // project context).
+          parentAgentId: process.env.MARBLO_AGENT_ID || "",
         });
 
         const response = await fetch(
@@ -1261,6 +1266,9 @@ export function registerTools(server: McpServer): void {
               cwd,
               tags,
               projectId: process.env.MARBLO_PROJECT || "",
+              // Forward parent agent id for owner fallback when projectId
+              // is empty (external Claude Code → Marblo MCP path).
+              parentAgentId: process.env.MARBLO_AGENT_ID || "",
             }),
           }
         );

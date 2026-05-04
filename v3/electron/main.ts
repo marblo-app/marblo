@@ -7,6 +7,7 @@ import {
   powerMonitor,
   clipboard,
   nativeImage,
+  shell,
 } from "electron";
 import path from "path";
 import fs from "fs";
@@ -326,8 +327,50 @@ bridgeServer.setEnabledModelsLookup((projectId: string) =>
 // When the bridge spawns an agent (via MCP /spawn-agent or /dispatch-task),
 // route its PTY output to the project-owning window and emit agent:spawned
 // scoped to that project. This keeps multi-window spawns isolated.
-bridgeServer.setAgentSpawnedHook((sid, projectId, agentId) => {
-  const ownerId = projectId ? getOwnerForProject(projectId) : undefined;
+//
+// Owner resolution chain (first match wins):
+//   1. explicit projectId in the spawn request → window registered for it
+//   2. parentAgentId.MARBLO_PROJECT (parent agent's launchConfig env)
+//   3. orchestratorOwners lookup if parentAgentId looks like an orchestrator
+//      session id (`orchestrator-*`)
+//   4. mainWindow fallback (legacy / single-window mode)
+function resolveSpawnOwner(
+  projectId: string | undefined,
+  parentAgentId: string | undefined
+): { ownerId: number | undefined; resolvedProjectId: string | undefined } {
+  // 1. explicit projectId
+  if (projectId) {
+    const owner = getOwnerForProject(projectId);
+    if (owner !== undefined)
+      return { ownerId: owner, resolvedProjectId: projectId };
+  }
+  // 2. parent agent's project (look up via agentManager)
+  if (parentAgentId) {
+    const parent = agentManager.getAgent(parentAgentId);
+    const parentProject = parent?.launchConfig?.env?.MARBLO_PROJECT;
+    if (parentProject) {
+      const owner = getOwnerForProject(parentProject);
+      if (owner !== undefined)
+        return { ownerId: owner, resolvedProjectId: parentProject };
+    }
+    // 3. orchestrator parent — find which window owns its project
+    if (parentAgentId.startsWith("orchestrator-")) {
+      // orchestratorOwners is projectId → webContentsId. Any single-project
+      // window that has an orchestrator running matches; if multiple, pick
+      // the first (deterministic enough for fallback).
+      for (const [pid, ownerWin] of orchestratorOwners) {
+        return { ownerId: ownerWin, resolvedProjectId: pid };
+      }
+    }
+  }
+  return { ownerId: undefined, resolvedProjectId: projectId };
+}
+
+bridgeServer.setAgentSpawnedHook((sid, projectId, agentId, parentAgentId) => {
+  const { ownerId, resolvedProjectId } = resolveSpawnOwner(
+    projectId,
+    parentAgentId
+  );
   if (ownerId !== undefined) {
     ptyOwners.set(sid, ownerId);
   }
@@ -341,7 +384,8 @@ bridgeServer.setAgentSpawnedHook((sid, projectId, agentId) => {
     model: agent?.model ?? "claude",
     role: agent?.role ?? "",
   };
-  if (projectId) sendToProject(projectId, "agent:spawned", payload);
+  if (resolvedProjectId)
+    sendToProject(resolvedProjectId, "agent:spawned", payload);
   else broadcast("agent:spawned", payload);
 });
 
@@ -411,8 +455,11 @@ const costTracker = new CostTracker((agentId, cost) => {
     );
   }
 
-  // Send delta (incremental) values to renderer for BigQuery
-  broadcast("cost:update", {
+  // Send delta (incremental) values to renderer for BigQuery + Firestore.
+  // Scope to the owning project's window(s) — `useCostWriter` calls
+  // Firestore `increment()`, so broadcasting would N-count the cost across
+  // every open window.
+  const costPayload = {
     projectId,
     agentId,
     model: cost.model,
@@ -421,7 +468,16 @@ const costTracker = new CostTracker((agentId, cost) => {
     cacheReadTokens: cost.deltaCacheReadTokens || 0,
     cacheWriteTokens: cost.deltaCacheWriteTokens || 0,
     totalCost: cost.deltaCost,
-  });
+  };
+  if (projectId) {
+    sendToProject(projectId, "cost:update", costPayload);
+  } else {
+    // Unknown project (shouldn't happen in normal flow) — fall back to
+    // mainWindow only, never broadcast.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("cost:update", costPayload);
+    }
+  }
   console.log(
     `[CostTracker] Sent cost:update (delta) — agent=${agentId} project=${
       projectId || "(none)"
@@ -472,9 +528,29 @@ function refreshLLMProvider(): void {
 // Cache flows by flowId so the agent delegation handler can resolve node configs
 const flowNodeCache = new Map<string, Flow>();
 
-// Forward flow events to renderer
+// Resolve the owning projectId for a FlowEvent so events from window B's
+// flow run don't appear in window A's Flows tab.
+//   - flow:* events carry runId → look up state via flowRunner, then flow.
+//   - node:* events carry nodeId only → scan flowNodeCache for the parent
+//     flow that owns that node.
+function projectIdForFlowEvent(event: FlowEvent): string | undefined {
+  if ("runId" in event) {
+    const state = flowRunner.getState(event.runId);
+    if (!state) return undefined;
+    const flow = flowNodeCache.get(state.flowId);
+    return flow?.projectId;
+  }
+  for (const [, flow] of flowNodeCache) {
+    if (flow.nodes.some((n) => n.id === event.nodeId)) return flow.projectId;
+  }
+  return undefined;
+}
+
+// Forward flow events to renderer, scoped to the owning project's window(s).
 flowRunner.on("event", (event: FlowEvent) => {
-  broadcast("flow:event", event);
+  const projectId = projectIdForFlowEvent(event);
+  if (projectId) sendToProject(projectId, "flow:event", event);
+  else broadcast("flow:event", event);
 });
 
 // Handle agent node delegation: spawn new agent or route task to existing PTY
@@ -527,12 +603,14 @@ function handleAgentDelegation(
       role: string;
     };
 
-    // Look up cwd from the flow node config
+    // Look up cwd + projectId from the flow node config.
     let cwd = process.cwd();
+    let owningProjectId: string | undefined;
     for (const [, flow] of flowNodeCache) {
       const node = flow.nodes.find((n) => n.id === nodeId);
       if (node) {
         cwd = (node.data.config?.cwd as string) || cwd;
+        owningProjectId = flow.projectId;
         break;
       }
     }
@@ -549,18 +627,33 @@ function handleAgentDelegation(
         command: getDefaultCommand(model),
         cwd,
         initialPrompt: resolvedTask,
-        onPtyReady: (sid) => setupPtyForwarding(sid),
+        onPtyReady: (sid) => {
+          // Tag the PTY's owner so output is routed to the project's window
+          // only — same pattern as the bridge agentSpawnedHook above.
+          if (owningProjectId) {
+            const ownerId = getOwnerForProject(owningProjectId);
+            if (ownerId !== undefined) ptyOwners.set(sid, ownerId);
+          }
+          setupPtyForwarding(sid);
+        },
       });
 
-      // Notify renderer to attach terminal tab
-      broadcast("agent:spawned", {
+      // Notify the project's window(s) to attach the new terminal tab.
+      // Without this scoping, every window's Layout listener would attach a
+      // PTY that doesn't belong to it.
+      const spawnedPayload = {
         agentId,
         name: spawnConfig.name,
         ptySessionId: instance.ptySessionId,
         model,
         role: spawnConfig.role,
         flowNodeId: nodeId,
-      });
+      };
+      if (owningProjectId) {
+        sendToProject(owningProjectId, "agent:spawned", spawnedPayload);
+      } else {
+        broadcast("agent:spawned", spawnedPayload);
+      }
 
       console.log(
         `[Flow:AgentDelegation] Spawned agent "${spawnConfig.name}" (${agentId}) for node ${nodeId}`
@@ -685,6 +778,10 @@ function createWindow(isNewWindow = false) {
         orchestrators.get(pid)?.stop();
       }
     }
+    // Close this window's fs watcher (created in fs:watch handler).
+    fsManager.stopWatching(`win-${closedSenderId}`);
+    // Drop the window→project registration.
+    windowProjects.delete(closedSenderId);
     if (mainWindow === win) {
       // Promote another window as primary, or null
       mainWindow =
@@ -838,9 +935,16 @@ ipcMain.handle("fs:gitDiff", async (_event, filePath: string) => {
   return fsManager.getGitDiff(filePath);
 });
 
-ipcMain.handle("fs:watch", (_event, rootPath: string) => {
-  fsManager.watchDirectory(rootPath, (event, filePath) => {
-    broadcast("fs:change", event, filePath);
+ipcMain.handle("fs:watch", (event, rootPath: string) => {
+  // Each window gets its own watcher keyed by its webContents id, so opening
+  // a folder in window B no longer kills window A's watcher (they used to
+  // share a single FsManager.watchers slot).
+  const senderId = event.sender.id;
+  const token = `win-${senderId}`;
+  fsManager.watchDirectory(token, rootPath, (ev, filePath) => {
+    // Send only to the watching window — irrelevant fs activity in window B
+    // shouldn't trigger reloads in window A.
+    sendToOwner(senderId, "fs:change", ev, filePath);
   });
 });
 
@@ -852,6 +956,82 @@ ipcMain.handle("fs:selectDirectory", async () => {
   });
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
+});
+
+// File mutation operations. All paths must be inside rootPath (path-traversal guard).
+function fsGuard(rootPath: string, ...targets: string[]) {
+  for (const t of targets) {
+    if (!fsManager.isInsideRoot(rootPath, t)) {
+      throw new Error("경로가 프로젝트 폴더를 벗어났습니다");
+    }
+  }
+}
+
+ipcMain.handle(
+  "fs:createFile",
+  (_event, { rootPath, filePath }: { rootPath: string; filePath: string }) => {
+    fsGuard(rootPath, filePath);
+    fsManager.createFile(filePath);
+    return { success: true, path: filePath };
+  }
+);
+
+ipcMain.handle(
+  "fs:createDirectory",
+  (_event, { rootPath, dirPath }: { rootPath: string; dirPath: string }) => {
+    fsGuard(rootPath, dirPath);
+    fsManager.createDirectory(dirPath);
+    return { success: true, path: dirPath };
+  }
+);
+
+ipcMain.handle(
+  "fs:rename",
+  (
+    _event,
+    {
+      rootPath,
+      fromPath,
+      toPath,
+    }: { rootPath: string; fromPath: string; toPath: string }
+  ) => {
+    fsGuard(rootPath, fromPath, toPath);
+    fsManager.rename(fromPath, toPath);
+    return { success: true, fromPath, toPath };
+  }
+);
+
+ipcMain.handle(
+  "fs:remove",
+  (
+    _event,
+    { rootPath, targetPath }: { rootPath: string; targetPath: string }
+  ) => {
+    fsGuard(rootPath, targetPath);
+    fsManager.remove(targetPath);
+    return { success: true, path: targetPath };
+  }
+);
+
+ipcMain.handle(
+  "fs:copy",
+  (
+    _event,
+    {
+      rootPath,
+      fromPath,
+      toPath,
+    }: { rootPath: string; fromPath: string; toPath: string }
+  ) => {
+    fsGuard(rootPath, fromPath, toPath);
+    const finalPath = fsManager.copy(fromPath, toPath);
+    return { success: true, fromPath, toPath: finalPath };
+  }
+);
+
+ipcMain.handle("fs:revealInFinder", (_event, targetPath: string) => {
+  shell.showItemInFolder(targetPath);
+  return { success: true };
 });
 
 // --- Agent IPC Handlers ---
@@ -1612,7 +1792,7 @@ app.on("window-all-closed", () => {
     bridgeServer.stop();
     agentManager.stopAll();
     ptyManager.killAll();
-    fsManager.stopWatching();
+    fsManager.stopAllWatching();
     app.quit();
   }
   // macOS: keep managers alive so agents/orchestrator persist across window close/reopen
@@ -1625,7 +1805,7 @@ app.on("before-quit", () => {
   bridgeServer.stop();
   agentManager.stopAll();
   ptyManager.killAll();
-  fsManager.stopWatching();
+  fsManager.stopAllWatching();
 });
 
 app.on("activate", () => {
