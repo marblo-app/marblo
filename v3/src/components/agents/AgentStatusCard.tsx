@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import type { Agent, ModelType, AgentStatus } from '../../types/agent';
-import type { Task } from '../../types/task';
-import { useTerminalStore } from '../../stores/terminalStore';
-import { useEditorStore } from '../../stores/editorStore';
-import { useCostStore } from '../../stores/costStore';
+import { useState, useEffect, useRef } from "react";
+import type { Agent, ModelType, AgentStatus } from "../../types/agent";
+import type { Task } from "../../types/task";
+import { useTerminalStore } from "../../stores/terminalStore";
+import { useEditorStore } from "../../stores/editorStore";
+import { useCostStore } from "../../stores/costStore";
 
 interface SessionInfo {
   id: string;
@@ -22,25 +22,28 @@ interface AgentStatusCardProps {
 }
 
 const MODEL_ICONS: Record<ModelType, { icon: string; color: string }> = {
-  claude: { icon: '🟣', color: '#a855f7' },
-  gemini: { icon: '🔵', color: '#3b82f6' },
-  gpt: { icon: '🟢', color: '#22c55e' },
-  custom: { icon: '⚪', color: '#6b7280' },
+  claude: { icon: "🟣", color: "#a855f7" },
+  gemini: { icon: "🔵", color: "#3b82f6" },
+  gpt: { icon: "🟢", color: "#22c55e" },
+  custom: { icon: "⚪", color: "#6b7280" },
 };
 
-const STATUS_BADGES: Record<AgentStatus, { label: string; dot: string; textColor: string }> = {
-  idle: { label: 'Idle', dot: '🟡', textColor: 'text-yellow-400' },
-  working: { label: 'Active', dot: '🟢', textColor: 'text-green-400' },
-  error: { label: 'Error', dot: '🔴', textColor: 'text-red-400' },
-  stopped: { label: 'Stopped', dot: '⚫', textColor: 'text-gray-500' },
+const STATUS_BADGES: Record<
+  AgentStatus,
+  { label: string; dot: string; textColor: string }
+> = {
+  idle: { label: "Idle", dot: "🟡", textColor: "text-yellow-400" },
+  working: { label: "Active", dot: "🟢", textColor: "text-green-400" },
+  error: { label: "Error", dot: "🔴", textColor: "text-red-400" },
+  stopped: { label: "Stopped", dot: "⚫", textColor: "text-gray-500" },
 };
 
 function useElapsedTime(startDate: Date | null): string {
-  const [elapsed, setElapsed] = useState('');
+  const [elapsed, setElapsed] = useState("");
 
   useEffect(() => {
     if (!startDate) {
-      setElapsed('');
+      setElapsed("");
       return;
     }
 
@@ -63,10 +66,20 @@ function useElapsedTime(startDate: Date | null): string {
   return elapsed;
 }
 
-export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDelete }: AgentStatusCardProps) {
-  const modelInfo = MODEL_ICONS[agent.model];
-  const statusInfo = STATUS_BADGES[agent.status];
-  const isRunning = agent.status === 'idle' || agent.status === 'working';
+export default function AgentStatusCard({
+  agent,
+  tasks,
+  onStop,
+  onRestart,
+  onDelete,
+}: AgentStatusCardProps) {
+  // Fall back when an agent doc carries an unexpected model / status — e.g.
+  // older docs written with a versioned model id ("claude-opus-4-7") instead
+  // of the ModelType family. Without these fallbacks the .icon / .color
+  // accesses below throw and take the whole Agents tab down.
+  const modelInfo = MODEL_ICONS[agent.model] ?? MODEL_ICONS.custom;
+  const statusInfo = STATUS_BADGES[agent.status] ?? STATUS_BADGES.idle;
+  const isRunning = agent.status === "idle" || agent.status === "working";
   const rootPath = useEditorStore((s) => s.rootPath);
 
   // Health check state
@@ -76,7 +89,11 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
   const agentCost = costSummary?.byAgent[agent.id]?.cost;
 
   useEffect(() => {
-    const handleRestart = (data: { agentId: string; attempt: number; maxAttempts: number }) => {
+    const handleRestart = (data: {
+      agentId: string;
+      attempt: number;
+      maxAttempts: number;
+    }) => {
       if (data.agentId === agent.id) setRestartCount(data.attempt);
     };
     const handleFailed = (data: { agentId: string; exitCode: number }) => {
@@ -85,8 +102,8 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
     window.electronAPI.agent.onRestartAttempt(handleRestart);
     window.electronAPI.agent.onRestartFailed(handleFailed);
     return () => {
-      window.electronAPI.off('agent:restartAttempt');
-      window.electronAPI.off('agent:restartFailed');
+      window.electronAPI.off("agent:restartAttempt");
+      window.electronAPI.off("agent:restartFailed");
     };
   }, [agent.id]);
 
@@ -103,44 +120,65 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
         setShowSessionPicker(false);
       }
     };
-    const timer = setTimeout(() => document.addEventListener('click', handleClick), 0);
+    const timer = setTimeout(
+      () => document.addEventListener("click", handleClick),
+      0,
+    );
     return () => {
       clearTimeout(timer);
-      document.removeEventListener('click', handleClick);
+      document.removeEventListener("click", handleClick);
     };
   }, [showSessionPicker]);
 
   const handleTerminalClick = async () => {
-    const cwd = rootPath || '~';
+    const cwd = rootPath || "~";
     try {
-      const allSessions = await window.electronAPI.orchestratorSession.listSessions(cwd);
+      const allSessions =
+        await window.electronAPI.orchestratorSession.listSessions(cwd);
       // Filter to only sessions belonging to this agent (by agentId or label)
       const mySessions = allSessions.filter(
         (s: SessionInfo) => s.agentId === agent.id || s.label === agent.name,
       );
       setAgentSessions(mySessions);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     // Always show the session picker (user can pick current session, new, or past)
     setShowSessionPicker(true);
   };
 
   const handleSessionSelect = async (resumeSessionId: string) => {
     setShowSessionPicker(false);
-    const cwd = rootPath || '~';
-    console.log('[AgentStatusCard] handleSessionSelect:', { resumeSessionId, cwd, agentId: agent.id });
+    const cwd = rootPath || "~";
+    console.log("[AgentStatusCard] handleSessionSelect:", {
+      resumeSessionId,
+      cwd,
+      agentId: agent.id,
+    });
 
     try {
       const result = await window.electronAPI.agent.launch(
-        { id: agent.id, name: agent.name, model: agent.model, role: agent.role, command: agent.command },
+        {
+          id: agent.id,
+          name: agent.name,
+          model: agent.model,
+          role: agent.role,
+          command: agent.command,
+        },
         cwd,
         undefined,
         resumeSessionId,
       );
       if (result) {
-        useTerminalStore.getState().attachSession(result.ptySessionId, `${modelInfo.icon} ${agent.name}`);
+        useTerminalStore
+          .getState()
+          .attachSession(
+            result.ptySessionId,
+            `${modelInfo.icon} ${agent.name}`,
+          );
       }
     } catch (err) {
-      console.error('[AgentStatusCard] Failed to resume session:', err);
+      console.error("[AgentStatusCard] Failed to resume session:", err);
     }
   };
 
@@ -151,7 +189,7 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
 
   // Completed tasks by this agent
   const completedCount = tasks.filter(
-    (t) => t.claimedBy === agent.id && t.status === 'DONE',
+    (t) => t.claimedBy === agent.id && t.status === "DONE",
   ).length;
 
   // Elapsed time for current task
@@ -170,24 +208,30 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
           <span className="text-xl mt-0.5">{modelInfo.icon}</span>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-gray-100 truncate">{agent.name}</span>
-              <span className={`flex items-center gap-1 text-xs ${statusInfo.textColor}`}>
+              <span className="font-medium text-gray-100 truncate">
+                {agent.name}
+              </span>
+              <span
+                className={`flex items-center gap-1 text-xs ${statusInfo.textColor}`}
+              >
                 <span className="text-[10px]">{statusInfo.dot}</span>
                 {statusInfo.label}
               </span>
-              {restartCount > 0 && agent.status !== 'error' && (
+              {restartCount > 0 && agent.status !== "error" && (
                 <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">
                   Restarted {restartCount}x
                 </span>
               )}
-              {agent.status === 'error' && lastExitCode !== null && (
+              {agent.status === "error" && lastExitCode !== null && (
                 <span className="text-[10px] text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded">
                   Crashed (exit {lastExitCode})
                 </span>
               )}
             </div>
             <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-              <span className="rounded bg-gray-700 px-1.5 py-0.5">{agent.role}</span>
+              <span className="rounded bg-gray-700 px-1.5 py-0.5">
+                {agent.role}
+              </span>
               <span className="font-mono">{agent.command}</span>
             </div>
           </div>
@@ -216,7 +260,12 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
                       onClick={() => {
                         setShowSessionPicker(false);
                         const sessionId = `agent-${agent.id}`;
-                        useTerminalStore.getState().attachSession(sessionId, `${modelInfo.icon} ${agent.name}`);
+                        useTerminalStore
+                          .getState()
+                          .attachSession(
+                            sessionId,
+                            `${modelInfo.icon} ${agent.name}`,
+                          );
                       }}
                       className="w-full text-left px-3 py-2 text-xs text-[#a6e3a1] hover:bg-[#313244]/60 transition-colors flex items-center gap-2"
                     >
@@ -224,7 +273,7 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
                       Current Session
                     </button>
                     <button
-                      onClick={() => handleSessionSelect('new')}
+                      onClick={() => handleSessionSelect("new")}
                       className="w-full text-left px-3 py-2 text-xs text-[#a6e3a1] hover:bg-[#313244]/60 transition-colors flex items-center gap-2"
                     >
                       <span className="text-sm">+</span>
@@ -234,20 +283,28 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
                       <div className="border-t border-[#313244] max-h-48 overflow-y-auto">
                         {agentSessions.slice(0, 10).map((s, i) => {
                           const date = new Date(s.updatedAt);
-                          const timeStr = date.toLocaleString('ko-KR', {
-                            month: 'short', day: 'numeric',
-                            hour: '2-digit', minute: '2-digit',
+                          const timeStr = date.toLocaleString("ko-KR", {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
                           });
                           return (
                             <button
                               key={s.id}
-                              onClick={() => handleSessionSelect(i === 0 ? 'latest' : s.id)}
+                              onClick={() =>
+                                handleSessionSelect(i === 0 ? "latest" : s.id)
+                              }
                               className="w-full text-left px-3 py-2 text-xs hover:bg-[#313244]/60 transition-colors flex items-center justify-between gap-2"
                             >
                               <span className="text-[#cdd6f4] truncate flex items-center gap-1.5">
-                                {i === 0 && <span className="text-[#89b4fa] text-[10px]">latest</span>}
+                                {i === 0 && (
+                                  <span className="text-[#89b4fa] text-[10px]">
+                                    latest
+                                  </span>
+                                )}
                                 <span className="text-[#6c7086] font-mono text-[10px]">
-                                  {s.label || s.id.slice(0, 8) + '\u2026'}
+                                  {s.label || s.id.slice(0, 8) + "\u2026"}
                                 </span>
                               </span>
                               <span className="text-[#6c7086] text-[10px] flex-shrink-0">
@@ -267,14 +324,27 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
               >
                 Stop
               </button>
-              {agent.status === 'idle' && (
+              {agent.status === "idle" && (
                 <button
                   className="rounded border border-gray-600/30 bg-gray-600/20 px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-red-600/20 hover:text-red-400 hover:border-red-600/30"
-                  onClick={() => { if (confirm(`"${agent.name}" 에이전트를 삭제하시겠습니까?`)) onDelete(agent.id); }}
+                  onClick={() => {
+                    if (confirm(`"${agent.name}" 에이전트를 삭제하시겠습니까?`))
+                      onDelete(agent.id);
+                  }}
                   title="에이전트 삭제"
                 >
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
                   </svg>
                 </button>
               )}
@@ -285,14 +355,20 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
                 <button
                   className="rounded border border-green-600/30 bg-green-600/20 px-3 py-1 text-xs font-medium text-green-400 transition-colors hover:bg-green-600/30"
                   onClick={async () => {
-                    const cwd = rootPath || '~';
+                    const cwd = rootPath || "~";
                     try {
-                      const allSessions = await window.electronAPI.orchestratorSession.listSessions(cwd);
+                      const allSessions =
+                        await window.electronAPI.orchestratorSession.listSessions(
+                          cwd,
+                        );
                       const mySessions = allSessions.filter(
-                        (s: SessionInfo) => s.agentId === agent.id || s.label === agent.name,
+                        (s: SessionInfo) =>
+                          s.agentId === agent.id || s.label === agent.name,
                       );
                       setAgentSessions(mySessions);
-                    } catch { /* ignore */ }
+                    } catch {
+                      /* ignore */
+                    }
                     setShowSessionPicker(true);
                   }}
                 >
@@ -320,20 +396,28 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
                       <div className="border-t border-[#313244] max-h-48 overflow-y-auto">
                         {agentSessions.slice(0, 10).map((s, i) => {
                           const date = new Date(s.updatedAt);
-                          const timeStr = date.toLocaleString('ko-KR', {
-                            month: 'short', day: 'numeric',
-                            hour: '2-digit', minute: '2-digit',
+                          const timeStr = date.toLocaleString("ko-KR", {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
                           });
                           return (
                             <button
                               key={s.id}
-                              onClick={() => handleSessionSelect(i === 0 ? 'latest' : s.id)}
+                              onClick={() =>
+                                handleSessionSelect(i === 0 ? "latest" : s.id)
+                              }
                               className="w-full text-left px-3 py-2 text-xs hover:bg-[#313244]/60 transition-colors flex items-center justify-between gap-2"
                             >
                               <span className="text-[#cdd6f4] truncate flex items-center gap-1.5">
-                                {i === 0 && <span className="text-[#89b4fa] text-[10px]">latest</span>}
+                                {i === 0 && (
+                                  <span className="text-[#89b4fa] text-[10px]">
+                                    latest
+                                  </span>
+                                )}
                                 <span className="text-[#6c7086] font-mono text-[10px]">
-                                  {s.label || s.id.slice(0, 8) + '\u2026'}
+                                  {s.label || s.id.slice(0, 8) + "\u2026"}
                                 </span>
                               </span>
                               <span className="text-[#6c7086] text-[10px] flex-shrink-0">
@@ -349,11 +433,24 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
               </div>
               <button
                 className="rounded border border-gray-600/30 bg-gray-600/20 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:bg-red-600/20 hover:text-red-400 hover:border-red-600/30"
-                onClick={() => { if (confirm(`"${agent.name}" 에이전트를 삭제하시겠습니까?`)) onDelete(agent.id); }}
+                onClick={() => {
+                  if (confirm(`"${agent.name}" 에이전트를 삭제하시겠습니까?`))
+                    onDelete(agent.id);
+                }}
                 title="에이전트 삭제"
               >
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
                 </svg>
               </button>
             </>
@@ -367,10 +464,14 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
           <div className="flex items-center justify-between">
             <div className="min-w-0">
               <span className="text-xs text-gray-500">현재 태스크</span>
-              <p className="truncate text-sm text-gray-200">{currentTask.title}</p>
+              <p className="truncate text-sm text-gray-200">
+                {currentTask.title}
+              </p>
             </div>
             {elapsed && (
-              <span className="ml-2 shrink-0 text-xs text-blue-400">{elapsed}</span>
+              <span className="ml-2 shrink-0 text-xs text-blue-400">
+                {elapsed}
+              </span>
             )}
           </div>
         </div>
@@ -384,14 +485,36 @@ export default function AgentStatusCard({ agent, tasks, onStop, onRestart, onDel
       {/* Stats Row */}
       <div className="mt-3 flex items-center gap-4 text-xs text-gray-500">
         <div className="flex items-center gap-1">
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <svg
+            className="h-3.5 w-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
           </svg>
-          <span>완료 <strong className="text-gray-300">{completedCount}</strong></span>
+          <span>
+            완료 <strong className="text-gray-300">{completedCount}</strong>
+          </span>
         </div>
         <div className="flex items-center gap-1">
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <svg
+            className="h-3.5 w-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
           </svg>
           <span>{formatDate(agent.createdAt)}</span>
         </div>
@@ -404,14 +527,18 @@ function CostGauge({ cost }: { cost: number }) {
   // Budget tiers: green < $1, yellow < $5, red >= $5
   const maxBudget = 10;
   const pct = Math.min((cost / maxBudget) * 100, 100);
-  const color = cost < 1 ? 'bg-green-500' : cost < 5 ? 'bg-amber-500' : 'bg-red-500';
-  const textColor = cost < 1 ? 'text-green-400' : cost < 5 ? 'text-amber-400' : 'text-red-400';
+  const color =
+    cost < 1 ? "bg-green-500" : cost < 5 ? "bg-amber-500" : "bg-red-500";
+  const textColor =
+    cost < 1 ? "text-green-400" : cost < 5 ? "text-amber-400" : "text-red-400";
 
   return (
     <div className="mt-2.5 space-y-1">
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-gray-500">Cost</span>
-        <span className={`text-xs font-mono font-medium ${textColor}`}>${cost.toFixed(2)}</span>
+        <span className={`text-xs font-mono font-medium ${textColor}`}>
+          ${cost.toFixed(2)}
+        </span>
       </div>
       <div className="h-1.5 w-full rounded-full bg-gray-700">
         <div
@@ -424,11 +551,11 @@ function CostGauge({ cost }: { cost: number }) {
 }
 
 function formatDate(date: Date): string {
-  if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+  if (!(date instanceof Date) || isNaN(date.getTime())) return "";
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return '방금 전';
+  if (mins < 1) return "방금 전";
   if (mins < 60) return `${mins}분 전`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}시간 전`;

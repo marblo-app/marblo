@@ -1,4 +1,4 @@
-import type { Agent, ModelType, AgentStatus } from '../../types/agent';
+import type { Agent, ModelType, AgentStatus } from "../../types/agent";
 
 interface AgentListProps {
   agents: Agent[];
@@ -9,20 +9,29 @@ interface AgentListProps {
 }
 
 const MODEL_ICONS: Record<ModelType, { icon: string; color: string }> = {
-  claude: { icon: '🟣', color: '#a855f7' },
-  gemini: { icon: '🔵', color: '#3b82f6' },
-  gpt: { icon: '🟢', color: '#22c55e' },
-  custom: { icon: '⚪', color: '#6b7280' },
+  claude: { icon: "🟣", color: "#a855f7" },
+  gemini: { icon: "🔵", color: "#3b82f6" },
+  gpt: { icon: "🟢", color: "#22c55e" },
+  custom: { icon: "⚪", color: "#6b7280" },
 };
 
-const STATUS_BADGES: Record<AgentStatus, { label: string; dot: string; textColor: string }> = {
-  idle: { label: 'Idle', dot: '🟡', textColor: 'text-yellow-400' },
-  working: { label: 'Active', dot: '🟢', textColor: 'text-green-400' },
-  error: { label: 'Error', dot: '🔴', textColor: 'text-red-400' },
-  stopped: { label: 'Stopped', dot: '⚫', textColor: 'text-gray-500' },
+const STATUS_BADGES: Record<
+  AgentStatus,
+  { label: string; dot: string; textColor: string }
+> = {
+  idle: { label: "Idle", dot: "🟡", textColor: "text-yellow-400" },
+  working: { label: "Active", dot: "🟢", textColor: "text-green-400" },
+  error: { label: "Error", dot: "🔴", textColor: "text-red-400" },
+  stopped: { label: "Stopped", dot: "⚫", textColor: "text-gray-500" },
 };
 
-export default function AgentList({ agents, loading, onAddAgent, onStop, onRestart }: AgentListProps) {
+export default function AgentList({
+  agents,
+  loading,
+  onAddAgent,
+  onStop,
+  onRestart,
+}: AgentListProps) {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
@@ -43,7 +52,14 @@ export default function AgentList({ agents, loading, onAddAgent, onStop, onResta
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-500 transition-colors"
           onClick={onAddAgent}
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
             <path d="M7 2v10M2 7h10" />
           </svg>
           Add Agent
@@ -53,8 +69,18 @@ export default function AgentList({ agents, loading, onAddAgent, onStop, onResta
       {/* Agent Cards */}
       {agents.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-          <svg className="h-12 w-12 mb-3 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 00.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-2.47 2.47a2.25 2.25 0 01-1.59.659H9.06a2.25 2.25 0 01-1.591-.659L5 14.5m14 0V7a2 2 0 00-2-2H7a2 2 0 00-2 2v7.5" />
+          <svg
+            className="h-12 w-12 mb-3 text-gray-600"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 00.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-2.47 2.47a2.25 2.25 0 01-1.59.659H9.06a2.25 2.25 0 01-1.591-.659L5 14.5m14 0V7a2 2 0 00-2-2H7a2 2 0 00-2 2v7.5"
+            />
           </svg>
           <p className="text-sm">에이전트가 없습니다</p>
           <button
@@ -67,9 +93,13 @@ export default function AgentList({ agents, loading, onAddAgent, onStop, onResta
       ) : (
         <div className="grid gap-3">
           {agents.map((agent) => {
-            const modelInfo = MODEL_ICONS[agent.model];
-            const statusInfo = STATUS_BADGES[agent.status];
-            const isRunning = agent.status === 'idle' || agent.status === 'working';
+            // Fallback when an agent doc carries an unexpected model /
+            // status — same defensive pattern as AgentStatusCard.
+            const modelInfo = MODEL_ICONS[agent.model] ?? MODEL_ICONS.custom;
+            const statusInfo =
+              STATUS_BADGES[agent.status] ?? STATUS_BADGES.idle;
+            const isRunning =
+              agent.status === "idle" || agent.status === "working";
 
             return (
               <div
@@ -83,14 +113,20 @@ export default function AgentList({ agents, loading, onAddAgent, onStop, onResta
                     <span className="text-xl mt-0.5">{modelInfo.icon}</span>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-gray-100 truncate">{agent.name}</span>
-                        <span className={`flex items-center gap-1 text-xs ${statusInfo.textColor}`}>
+                        <span className="font-medium text-gray-100 truncate">
+                          {agent.name}
+                        </span>
+                        <span
+                          className={`flex items-center gap-1 text-xs ${statusInfo.textColor}`}
+                        >
                           <span className="text-[10px]">{statusInfo.dot}</span>
                           {statusInfo.label}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-                        <span className="px-1.5 py-0.5 rounded bg-gray-700">{agent.role}</span>
+                        <span className="px-1.5 py-0.5 rounded bg-gray-700">
+                          {agent.role}
+                        </span>
                         <span className="font-mono">{agent.command}</span>
                       </div>
                       {agent.currentTaskId && (

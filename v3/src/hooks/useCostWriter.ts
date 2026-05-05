@@ -35,21 +35,30 @@ export function useCostWriter() {
     window.electronAPI.agent.offCostUpdate?.();
     window.electronAPI.agent.onCostUpdate((data) => {
       // 1. Firestore — agents/<id> rolling totals (atomic increment).
+      // Important: do NOT write back agent.model. The cost tracker
+      // detects the precise model id from session metadata (e.g.
+      // "claude-opus-4-7"), but agent.model is the ModelType *family*
+      // ('claude' | 'gemini' | 'gpt' | 'custom') used by UI lookups
+      // (MODEL_ICONS, MODEL_PRICING, etc). Overwriting it with the
+      // versioned id breaks AgentStatusCard / MemberCard which index
+      // those tables by family — they crashed the Agents tab. Stash
+      // the detected id under detectedModelId for analytics instead.
       if (data.agentId) {
         const ref = doc(db, "agents", data.agentId);
-        updateDoc(ref, {
+        const update: Record<string, unknown> = {
           totalCost: increment(data.totalCost || 0),
           totalInputTokens: increment(data.inputTokens || 0),
           totalOutputTokens: increment(data.outputTokens || 0),
           totalCacheReadTokens: increment(data.cacheReadTokens || 0),
           totalCacheWriteTokens: increment(data.cacheWriteTokens || 0),
-          model: data.model || undefined,
           costUpdatedAt: serverTimestamp(),
-        }).catch((err) => {
+        };
+        if (data.model) update.detectedModelId = data.model;
+        updateDoc(ref, update).catch((err) => {
           // Doc may not exist yet (e.g. orchestrator session) — ignore.
           console.warn(
             `[CostWriter] Firestore update skipped for agent=${data.agentId}:`,
-            err?.code || err?.message || err
+            err?.code || err?.message || err,
           );
         });
       }
@@ -76,7 +85,7 @@ export function useCostWriter() {
         .then((result) => {
           const res = result.data as { inserted: number };
           console.log(
-            `[CostWriter] Sent to BigQuery: ${res.inserted} entry for agent=${data.agentId}`
+            `[CostWriter] Sent to BigQuery: ${res.inserted} entry for agent=${data.agentId}`,
           );
         })
         .catch((err) => {
