@@ -366,28 +366,36 @@ function resolveSpawnOwner(
   return { ownerId: undefined, resolvedProjectId: projectId };
 }
 
-bridgeServer.setAgentSpawnedHook((sid, projectId, agentId, parentAgentId) => {
-  const { ownerId, resolvedProjectId } = resolveSpawnOwner(
-    projectId,
-    parentAgentId
-  );
-  if (ownerId !== undefined) {
-    ptyOwners.set(sid, ownerId);
+bridgeServer.setAgentSpawnedHook(
+  ({ sid, projectId, agentId, parentAgentId, name, model, role }) => {
+    const { ownerId, resolvedProjectId } = resolveSpawnOwner(
+      projectId,
+      parentAgentId
+    );
+    if (ownerId !== undefined) {
+      ptyOwners.set(sid, ownerId);
+    }
+    setupPtyForwarding(sid);
+
+    // Build the payload from values passed by the bridge — at this point
+    // agentManager.agents.set hasn't run yet, so getAgent(agentId) returns
+    // undefined. Falling back to that lookup was leaking model="claude"
+    // for every Codex / Gemini agent and corrupting the Firestore doc the
+    // renderer wrote on receipt.
+    const payload = {
+      agentId,
+      name,
+      ptySessionId: sid,
+      model,
+      role,
+    };
+    if (resolvedProjectId) {
+      sendToProject(resolvedProjectId, "agent:spawned", payload);
+    } else {
+      broadcast("agent:spawned", payload);
+    }
   }
-  setupPtyForwarding(sid);
-  // Notify the project's window(s) to attach the new terminal tab.
-  const agent = agentManager.getAgent(agentId);
-  const payload = {
-    agentId,
-    name: agent?.name ?? "",
-    ptySessionId: sid,
-    model: agent?.model ?? "claude",
-    role: agent?.role ?? "",
-  };
-  if (resolvedProjectId)
-    sendToProject(resolvedProjectId, "agent:spawned", payload);
-  else broadcast("agent:spawned", payload);
-});
+);
 
 // Inject session resolver so agent auto-restart resolves 'latest' per-agent.
 // Stateless file-IO — any instance works.

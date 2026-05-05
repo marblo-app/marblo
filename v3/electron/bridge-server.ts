@@ -125,12 +125,19 @@ export class BridgeServer {
   // notification scoped to the agent's project. This avoids bridge having
   // its own PTY routing that bypasses multi-window scoping.
   private agentSpawnedHook:
-    | ((
-        sid: string,
-        projectId: string | undefined,
-        agentId: string,
-        parentAgentId?: string
-      ) => void)
+    | ((info: {
+        sid: string;
+        projectId: string | undefined;
+        agentId: string;
+        parentAgentId?: string;
+        // Pass spawn metadata explicitly — at the moment onPtyReady fires,
+        // agentManager.agents.set hasn't run yet, so a downstream
+        // agentManager.getAgent(id) lookup returns undefined and we lose
+        // model/name/role info. Always carry them through the hook.
+        name: string;
+        model: string;
+        role: string;
+      }) => void)
     | null = null;
 
   constructor(
@@ -150,12 +157,15 @@ export class BridgeServer {
   }
 
   setAgentSpawnedHook(
-    hook: (
-      sid: string,
-      projectId: string | undefined,
-      agentId: string,
-      parentAgentId?: string
-    ) => void
+    hook: (info: {
+      sid: string;
+      projectId: string | undefined;
+      agentId: string;
+      parentAgentId?: string;
+      name: string;
+      model: string;
+      role: string;
+    }) => void
   ): void {
     this.agentSpawnedHook = hook;
   }
@@ -868,12 +878,15 @@ export class BridgeServer {
       projectId: params.projectId,
       onPtyReady: (sid) => {
         if (this.agentSpawnedHook) {
-          this.agentSpawnedHook(
+          this.agentSpawnedHook({
             sid,
-            params.projectId,
+            projectId: params.projectId,
             agentId,
-            params.parentAgentId
-          );
+            parentAgentId: params.parentAgentId,
+            name: params.name,
+            model: params.model,
+            role: params.role,
+          });
           return;
         }
         // Fallback: bridge-local PTY forwarding
