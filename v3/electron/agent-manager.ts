@@ -11,6 +11,13 @@ const MAX_RESTARTS = 5;
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_MAX_MS = 30000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
+// "Fast fail" threshold — if the agent process exits within this window
+// after spawning, treat it as a config / binary-not-found problem rather
+// than a transient crash. Restart up to FAST_FAIL_MAX times then give up,
+// so a misconfigured Codex / Gemini binary doesn't burn 5 restart slots
+// trying the same broken setup.
+const FAST_FAIL_WINDOW_MS = 2_000;
+const FAST_FAIL_MAX = 1;
 
 export interface AgentLaunchParams {
   id: string;
@@ -39,6 +46,13 @@ export interface AgentInstance {
   launchConfig?: LaunchConfig;
   // --- Auto-restart fields ---
   restartCount: number;
+  /** Counter for *immediate* exits (within FAST_FAIL_WINDOW_MS of spawn).
+   * Capped by FAST_FAIL_MAX so misconfiguration can't burn the full
+   * restart budget. */
+  fastFailCount: number;
+  /** epoch-ms timestamp of the most recent spawn (initial or restart).
+   * Used to classify exit-on-startup vs runtime crash. */
+  spawnedAt: number;
   lastExitCode: number | null;
   stopRequested: boolean;
   restartTimer: ReturnType<typeof setTimeout> | null;
@@ -289,6 +303,8 @@ export class AgentManager {
       cwd: params.cwd,
       launchConfig,
       restartCount: 0,
+      fastFailCount: 0,
+      spawnedAt: Date.now(),
       lastExitCode: null,
       stopRequested: false,
       restartTimer: null,
@@ -340,8 +356,24 @@ export class AgentManager {
         return;
       }
 
+      // Classify the exit: fast-fail (likely config / binary issue) vs.
+      // runtime crash (transient, worth retrying).
+      const runtimeMs = Date.now() - agent.spawnedAt;
+      const wasFastFail = runtimeMs < FAST_FAIL_WINDOW_MS;
+      if (wasFastFail) {
+        agent.fastFailCount++;
+        console.warn(
+          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`
+        );
+      }
+
+      // Stop restarting once we've burned the fast-fail budget — it's
+      // almost certainly a missing binary / bad config and another retry
+      // won't help.
+      const fastFailExceeded = agent.fastFailCount > FAST_FAIL_MAX;
+
       // Crash detected — attempt auto-restart with exponential backoff
-      if (agent.restartCount < MAX_RESTARTS) {
+      if (agent.restartCount < MAX_RESTARTS && !fastFailExceeded) {
         const delay = Math.min(
           BACKOFF_BASE_MS * Math.pow(2, agent.restartCount),
           BACKOFF_MAX_MS
@@ -361,7 +393,7 @@ export class AgentManager {
           this.performAutoRestart(agent.id);
         }, delay);
       } else {
-        // Max restarts exceeded → error state
+        // Max restarts exceeded OR fast-fail budget burned → error state
         agent.status = "error";
         this.configGenerator.cleanup(params.id);
         this.onStatusChange?.(params.id, "error");
@@ -371,9 +403,15 @@ export class AgentManager {
           agent.id,
           exitCode
         );
-        console.error(
-          `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
-        );
+        if (fastFailExceeded) {
+          console.error(
+            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`
+          );
+        } else {
+          console.error(
+            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
+          );
+        }
       }
     });
 
@@ -385,6 +423,7 @@ export class AgentManager {
     if (!agent || agent.stopRequested) return;
 
     const restartCount = agent.restartCount;
+    const fastFailCount = agent.fastFailCount;
     const onPtyReady = agent.onPtyReady;
 
     // Cleanup old PTY, config, and heartbeat
@@ -427,8 +466,9 @@ export class AgentManager {
       onPtyReady,
     });
 
-    // Carry over restart count
+    // Carry over restart counters; spawnedAt is freshly set by launch().
     newInstance.restartCount = restartCount;
+    newInstance.fastFailCount = fastFailCount;
   }
 
   stop(agentId: string): void {
@@ -555,6 +595,8 @@ export class AgentManager {
       command: agent.command,
       cwd: agent.cwd,
       restartCount: 0,
+      fastFailCount: 0,
+      spawnedAt: Date.now(),
       lastExitCode: null,
       stopRequested: false,
       restartTimer: null,
