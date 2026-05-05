@@ -266,8 +266,42 @@ export class AgentConfigGenerator {
     agentId: string,
     mcpEntry: MCPServerEntry
   ): string {
-    // Gemini CLI uses settings.json format with mcpServers
+    // Gemini CLI reads MCP config from `~/.gemini/settings.json` with a
+    // top-level `mcpServers` map, same shape as Claude Code. Like Codex,
+    // we need per-agent isolation because the spawned MCP child only
+    // sees the env declared in the config block — process env doesn't
+    // propagate, so each agent has to pin its own MARBLO_AGENT_ID.
+    //
+    // Strategy mirrors generateGPTConfig: write `<isolated-home>/.gemini/
+    // settings.json`, preserve the user's non-MCP settings, and let
+    // buildCLICommand point HOME at <isolated-home> so Gemini reads our
+    // copy. (Gemini follows XDG-ish home conventions; HOME override is
+    // the universal lever.)
+    const geminiHome = path.join(CONFIG_DIR, `gemini-home-${agentId}`);
+    const dotGemini = path.join(geminiHome, ".gemini");
+    fs.mkdirSync(dotGemini, { recursive: true });
+
+    // Preserve user's non-MCP settings so model preferences / theme /
+    // auth pointers survive. Strip any existing mcpServers entries and
+    // replace with ours.
+    const userSettingsPath = path.join(
+      os.homedir(),
+      ".gemini",
+      "settings.json"
+    );
+    let preserved: Record<string, unknown> = {};
+    if (fs.existsSync(userSettingsPath)) {
+      try {
+        const raw = fs.readFileSync(userSettingsPath, "utf-8");
+        preserved = JSON.parse(raw) as Record<string, unknown>;
+        delete (preserved as Record<string, unknown>).mcpServers;
+      } catch {
+        // best-effort
+      }
+    }
+
     const config = {
+      ...preserved,
       mcpServers: {
         marblo: {
           command: mcpEntry.command,
@@ -277,10 +311,32 @@ export class AgentConfigGenerator {
       },
     };
 
-    const configPath = path.join(CONFIG_DIR, `gemini-mcp-${agentId}.json`);
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
-    this.trackFile(agentId, configPath);
-    return configPath;
+    const settingsPath = path.join(dotGemini, "settings.json");
+    fs.writeFileSync(settingsPath, JSON.stringify(config, null, 2), "utf-8");
+
+    // Symlink auth-related files (oauth_creds.json, GEMINI.md, etc.) so
+    // Gemini stays authenticated and inherits any user instructions.
+    const userGeminiDir = path.join(os.homedir(), ".gemini");
+    if (fs.existsSync(userGeminiDir)) {
+      try {
+        for (const entry of fs.readdirSync(userGeminiDir)) {
+          if (entry === "settings.json") continue; // we wrote our own
+          const src = path.join(userGeminiDir, entry);
+          const dst = path.join(dotGemini, entry);
+          if (fs.existsSync(dst)) continue;
+          try {
+            fs.symlinkSync(src, dst);
+          } catch {
+            // Ignore symlink errors (e.g. on Windows without privilege)
+          }
+        }
+      } catch {
+        // best-effort
+      }
+    }
+
+    this.trackFile(agentId, settingsPath);
+    return settingsPath;
   }
 
   private generateGPTConfig(agentId: string, mcpEntry: MCPServerEntry): string {
@@ -404,12 +460,25 @@ export class AgentConfigGenerator {
           env,
         };
 
-      case "gemini":
+      case "gemini": {
+        // Gemini CLI reads `~/.gemini/settings.json`, so point HOME at our
+        // per-agent isolated home (created by generateGeminiConfig) — that
+        // dir already contains a `.gemini/settings.json` with the Marblo
+        // MCP entry plus the user's preserved non-MCP settings and
+        // symlinked auth/config files. Same isolation rationale as Codex
+        // (CODEX_HOME): the MCP child only sees env declared in the
+        // settings block, so each agent needs its own settings file
+        // bearing its own MARBLO_AGENT_ID.
+        //
+        // mcpConfigPath here is `<geminiHome>/.gemini/settings.json`, so
+        // <geminiHome> is two levels up.
+        const geminiHome = path.dirname(path.dirname(mcpConfigPath));
         return {
           command: baseCommand || "gemini",
           args: [],
-          env: { ...env, GEMINI_MCP_CONFIG: mcpConfigPath },
+          env: { ...env, HOME: geminiHome },
         };
+      }
 
       case "gpt":
         // Codex CLI reads its config from $CODEX_HOME/config.toml — point it
