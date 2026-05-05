@@ -42,7 +42,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
   }, [refresh]);
 
   const filtered = packages.filter(
-    (p) => filter === "all" || p.category === filter,
+    (p) => filter === "all" || p.category === filter
   );
 
   const handleInstall = async (pkg: HarnessPackage) => {
@@ -58,7 +58,12 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
       if (!result.success) {
         setError(result.error ?? "설치 실패");
       } else {
-        setInfo(`${pkg.name} 설치 완료.`);
+        const postInstall = pkg.install.postInstall;
+        setInfo(
+          postInstall
+            ? `${pkg.name} 설치 완료. ${postInstall}`
+            : `${pkg.name} 설치 완료.`
+        );
       }
     } finally {
       setBusy(null);
@@ -206,8 +211,8 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                         isInstalled
                           ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
                           : isManual
-                            ? "bg-[#f9e2af]/20 text-[#f9e2af]"
-                            : "bg-[#313244] text-[#6c7086]"
+                          ? "bg-[#f9e2af]/20 text-[#f9e2af]"
+                          : "bg-[#313244] text-[#6c7086]"
                       }`}
                     >
                       {isInstalled ? "설치됨" : isManual ? "수동" : "미설치"}
@@ -226,10 +231,10 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                         {isBusy
                           ? "설치 중..."
                           : isManual
-                            ? "안내 보기"
-                            : isRequired
-                              ? "자동 설치됨"
-                              : STATUS_LABEL[pkg.status]}
+                          ? "안내 보기"
+                          : isRequired
+                          ? "자동 설치됨"
+                          : STATUS_LABEL[pkg.status]}
                       </button>
                     )}
                     {isInstalled && !isRequired && (

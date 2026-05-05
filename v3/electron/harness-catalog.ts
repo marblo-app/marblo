@@ -12,17 +12,20 @@
  * separate Custom Install flow with a trust-warning modal (P1).
  */
 
-export type PackageType = "skill" | "mcp" | "plugin";
+export type PackageType = "skill" | "mcp" | "plugin" | "cli";
 
 export interface InstallStrategy {
   /**
-   * `git` — clone a repo to ~/.claude/skills/<dest>/
-   * `mcp` — add an entry to ~/.claude.json mcpServers
-   * `bundled` — installed automatically by bundle-installer (no-op here)
-   * `manual` — show instructions only (cannot auto-install)
+   * `git`        — clone a repo to ~/.claude/skills/<dest>/
+   * `mcp`        — add an entry to ~/.claude.json mcpServers
+   * `bundled`    — installed automatically by bundle-installer (no-op here)
+   * `manual`     — show instructions only (cannot auto-install)
+   * `npm-global` — `npm install -g <package>` for CLI binaries (e.g.
+   *                Codex, Gemini). Installs into the user's npm global
+   *                prefix; requires Node + npm on PATH.
    */
-  kind: "git" | "mcp" | "bundled" | "manual";
-  /** For kind=git: repo URL; for kind=mcp: command to run */
+  kind: "git" | "mcp" | "bundled" | "manual" | "npm-global";
+  /** For kind=git: repo URL; for kind=mcp: command to run; for npm-global: package name */
   source?: string;
   /** For kind=git: subdirectory under ~/.claude/skills/ */
   dest?: string;
@@ -32,6 +35,8 @@ export interface InstallStrategy {
   args?: string[];
   /** For kind=manual: human-readable instructions */
   instructions?: string;
+  /** For kind=npm-global: post-install message (e.g. auth instructions) */
+  postInstall?: string;
 }
 
 export interface DetectStrategy {
@@ -39,6 +44,8 @@ export interface DetectStrategy {
   path?: string;
   /** mcpServers key in ~/.claude.json that, if present, indicates installed. */
   mcpKey?: string;
+  /** Binary name resolvable via PATH (`which <name>`); used for kind=npm-global. */
+  binary?: string;
 }
 
 export interface HarnessPackage {
@@ -46,7 +53,7 @@ export interface HarnessPackage {
   name: string;
   description: string;
   type: PackageType;
-  category: "required" | "recommended" | "mcp";
+  category: "required" | "recommended" | "mcp" | "cli";
   install: InstallStrategy;
   detect: DetectStrategy;
   /** External docs/source link for the user. */
@@ -74,6 +81,42 @@ export const CATALOG: HarnessPackage[] = [
     category: "required",
     install: { kind: "bundled" },
     detect: { mcpKey: "marblo" },
+  },
+
+  // ── Required CLIs (heterogeneous-agent core) ────────────────────
+  // Codex / Gemini CLI 없이는 dispatch_task(model="gpt"|"gemini") 가
+  // spawn 즉시 fast-fail 됨. npm 글로벌 설치라 사용자 동의 후 1-clic.
+  {
+    id: "cli-codex",
+    name: "OpenAI Codex CLI",
+    description:
+      "Codex (gpt) 에이전트 실행에 필요한 CLI. `npm install -g @openai/codex`. 설치 후 `codex login`으로 인증.",
+    type: "cli",
+    category: "required",
+    install: {
+      kind: "npm-global",
+      source: "@openai/codex",
+      postInstall:
+        "설치 후 터미널에서 `codex login` 실행해서 OpenAI 계정 인증을 완료하세요.",
+    },
+    detect: { binary: "codex" },
+    url: "https://github.com/openai/codex",
+  },
+  {
+    id: "cli-gemini",
+    name: "Google Gemini CLI",
+    description:
+      "Gemini 에이전트 실행에 필요한 CLI. `npm install -g @google/gemini-cli`. 설치 후 `gemini` 첫 실행 시 OAuth 인증.",
+    type: "cli",
+    category: "required",
+    install: {
+      kind: "npm-global",
+      source: "@google/gemini-cli",
+      postInstall:
+        "설치 후 터미널에서 `gemini` 실행하면 첫 사용 시 Google OAuth 인증 페이지가 열립니다.",
+    },
+    detect: { binary: "gemini" },
+    url: "https://github.com/google-gemini/gemini-cli",
   },
 
   // ── Recommended skill packs ────────────────────────────────────

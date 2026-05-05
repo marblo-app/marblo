@@ -2,10 +2,12 @@
  * Harness manager — installs / uninstalls / detects Harness catalog packages.
  *
  * Operates on the user's `~/.claude/` directory:
- *   - skills:    `~/.claude/skills/<name>/` (git clone or copy)
- *   - mcp:       `~/.claude.json` mcpServers entry (atomic merge)
- *   - bundled:   no-op (handled by bundle-installer)
- *   - manual:    no-op (UI shows instructions only)
+ *   - skills:     `~/.claude/skills/<name>/` (git clone or copy)
+ *   - mcp:        `~/.claude.json` mcpServers entry (atomic merge)
+ *   - bundled:    no-op (handled by bundle-installer)
+ *   - manual:     no-op (UI shows instructions only)
+ *   - npm-global: `npm install -g <package>` for CLI binaries (Codex,
+ *                 Gemini, etc.) — detection via PATH `which <binary>`
  */
 import fs from "fs";
 import os from "os";
@@ -54,10 +56,49 @@ function writeClaudeJsonAtomic(data: object): void {
   fs.renameSync(tmp, CLAUDE_JSON);
 }
 
+/** Build a PATH that includes common binary locations Electron may miss. */
+function getEnrichedPathForDetection(): string {
+  const basePath = process.env.PATH || "";
+  const extras = [
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+    path.join(HOME, ".npm-global/bin"),
+    path.join(HOME, ".npm/bin"),
+    path.join(HOME, ".bun/bin"),
+    path.join(HOME, ".local/bin"),
+    path.join(HOME, ".cargo/bin"),
+    path.join(HOME, ".deno/bin"),
+    path.join(HOME, ".volta/bin"),
+  ];
+  return [...new Set([...basePath.split(":"), ...extras])].join(":");
+}
+
+function isBinaryOnPath(binary: string): boolean {
+  const enrichedPath = getEnrichedPathForDetection();
+  for (const dir of enrichedPath.split(":")) {
+    if (!dir) continue;
+    try {
+      const candidate = path.join(dir, binary);
+      // fs.existsSync follows symlinks — good enough for this check.
+      if (fileExists(candidate)) return true;
+    } catch {
+      // ignore
+    }
+  }
+  return false;
+}
+
 export function detectStatus(pkg: HarnessPackage): InstallStatus {
   if (pkg.install.kind === "manual") {
     // Manual installs we can only check via path/mcp markers if provided.
-    if (!pkg.detect.path && !pkg.detect.mcpKey) return "manual-required";
+    if (!pkg.detect.path && !pkg.detect.mcpKey && !pkg.detect.binary) {
+      return "manual-required";
+    }
   }
   if (pkg.detect.path) {
     if (fileExists(path.join(CLAUDE_DIR, pkg.detect.path))) return "installed";
@@ -66,6 +107,9 @@ export function detectStatus(pkg: HarnessPackage): InstallStatus {
     const cfg = readClaudeJson();
     const servers = (cfg.mcpServers ?? {}) as Record<string, unknown>;
     if (pkg.detect.mcpKey in servers) return "installed";
+  }
+  if (pkg.detect.binary) {
+    if (isBinaryOnPath(pkg.detect.binary)) return "installed";
   }
   if (pkg.install.kind === "manual") return "manual-required";
   return "not-installed";
@@ -120,6 +164,56 @@ async function installGit(strategy: InstallStrategy): Promise<void> {
   }
 }
 
+async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
+  if (!strategy.source) {
+    throw new Error("npm-global install requires a package name in source");
+  }
+  // Find npm via the same enriched-PATH search detect uses, since
+  // Electron-spawned children may not inherit the full shell PATH.
+  const enrichedPath = getEnrichedPathForDetection();
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: enrichedPath };
+  // Pre-flight: does npm exist at all?
+  let npmPath = "";
+  for (const dir of enrichedPath.split(":")) {
+    if (!dir) continue;
+    const candidate = path.join(dir, "npm");
+    if (fileExists(candidate)) {
+      npmPath = candidate;
+      break;
+    }
+  }
+  if (!npmPath) {
+    throw new Error(
+      "npm을 찾을 수 없습니다. Node.js / npm 설치 후 다시 시도하세요. (https://nodejs.org)"
+    );
+  }
+  const result = await new Promise<{
+    code: number;
+    stdout: string;
+    stderr: string;
+  }>((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    const child = spawn(npmPath, ["install", "-g", strategy.source!], { env });
+    child.stdout.on("data", (d) => (stdout += d.toString()));
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
+    child.on("error", (err) =>
+      resolve({ code: -1, stdout, stderr: stderr + err.message })
+    );
+  });
+  if (result.code !== 0) {
+    const tail = (result.stderr || result.stdout)
+      .trim()
+      .split("\n")
+      .slice(-5)
+      .join("\n");
+    throw new Error(
+      `npm install -g ${strategy.source} 실패 (exit ${result.code})\n${tail}`
+    );
+  }
+}
+
 async function installMcp(
   pkg: HarnessPackage,
   strategy: InstallStrategy
@@ -159,6 +253,9 @@ export async function installPackage(id: string): Promise<void> {
       return;
     case "mcp":
       await installMcp(pkg, pkg.install);
+      return;
+    case "npm-global":
+      await installNpmGlobal(pkg.install);
       return;
   }
 }

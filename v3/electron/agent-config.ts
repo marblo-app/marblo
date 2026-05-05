@@ -42,9 +42,17 @@ function getEnrichedPath(): string {
     "/usr/sbin",
     "/sbin",
     path.join(os.homedir(), ".nvm/versions/node", process.version, "bin"),
+    // npm global bin locations — covers the default `npm install -g`
+    // prefix as well as common user-customized prefixes (~/.npm-global).
+    // The Harness store installs Codex / Gemini CLI here, so the
+    // spawned agent processes need these on PATH to find them.
     path.join(os.homedir(), ".npm/bin"),
+    path.join(os.homedir(), ".npm-global/bin"),
     path.join(os.homedir(), ".local/bin"),
     path.join(os.homedir(), ".cargo/bin"),
+    path.join(os.homedir(), ".bun/bin"),
+    path.join(os.homedir(), ".deno/bin"),
+    path.join(os.homedir(), ".volta/bin"),
   ];
 
   const pathSet = new Set(basePath.split(":"));

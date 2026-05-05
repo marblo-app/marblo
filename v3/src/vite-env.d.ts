@@ -20,6 +20,29 @@ interface FsAPI {
   watch: (rootPath: string) => Promise<void>;
   onFileChange: (callback: (event: string, filePath: string) => void) => void;
   offFileChange: () => void;
+  createFile: (
+    rootPath: string,
+    filePath: string
+  ) => Promise<{ success: boolean; path: string }>;
+  createDirectory: (
+    rootPath: string,
+    dirPath: string
+  ) => Promise<{ success: boolean; path: string }>;
+  rename: (
+    rootPath: string,
+    fromPath: string,
+    toPath: string
+  ) => Promise<{ success: boolean; fromPath: string; toPath: string }>;
+  remove: (
+    rootPath: string,
+    targetPath: string
+  ) => Promise<{ success: boolean; path: string }>;
+  copy: (
+    rootPath: string,
+    fromPath: string,
+    toPath: string
+  ) => Promise<{ success: boolean; fromPath: string; toPath: string }>;
+  revealInFinder: (targetPath: string) => Promise<{ success: boolean }>;
 }
 
 interface PtyAPI {
@@ -280,17 +303,18 @@ interface HarnessPackage {
   id: string;
   name: string;
   description: string;
-  type: "skill" | "mcp" | "plugin";
-  category: "required" | "recommended" | "mcp";
+  type: "skill" | "mcp" | "plugin" | "cli";
+  category: "required" | "recommended" | "mcp" | "cli";
   install: {
-    kind: "git" | "mcp" | "bundled" | "manual";
+    kind: "git" | "mcp" | "bundled" | "manual" | "npm-global";
     source?: string;
     dest?: string;
     env?: Record<string, string>;
     args?: string[];
     instructions?: string;
+    postInstall?: string;
   };
-  detect: { path?: string; mcpKey?: string };
+  detect: { path?: string; mcpKey?: string; binary?: string };
   url?: string;
   status: "installed" | "not-installed" | "manual-required" | "unknown";
 }
