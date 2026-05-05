@@ -1,8 +1,8 @@
-import { useRef, useCallback, useState, useEffect, memo } from 'react';
-import { useOrchestratorStore } from '../../stores/orchestratorStore';
-import { useProjectStore } from '../../stores/projectStore';
-import { useEditorStore } from '../../stores/editorStore';
-import OrchestratorTerminal from './OrchestratorTerminal';
+import { useRef, useCallback, useState, useEffect, memo } from "react";
+import { useOrchestratorStore } from "../../stores/orchestratorStore";
+import { useProjectStore } from "../../stores/projectStore";
+import { useEditorStore } from "../../stores/editorStore";
+import OrchestratorTerminal from "./OrchestratorTerminal";
 
 const DEFAULT_HEIGHT = 300;
 const MIN_HEIGHT = 80;
@@ -22,6 +22,7 @@ export default memo(function OrchestratorPanel() {
   const rootPath = useEditorStore((s) => s.rootPath);
   // Granular selectors — destructuring useOrchestratorStore() would re-render on every action;
   // per-slice subscriptions only re-render when that slice actually changes.
+  const sessionId = useOrchestratorStore((s) => s.sessionId);
   const ptySessionId = useOrchestratorStore((s) => s.ptySessionId);
   const status = useOrchestratorStore((s) => s.status);
   const isCollapsed = useOrchestratorStore((s) => s.isCollapsed);
@@ -34,48 +35,57 @@ export default memo(function OrchestratorPanel() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const draggingRef = useRef(false);
 
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    draggingRef.current = true;
-    const startY = e.clientY;
-    const startHeight = panelHeight;
+  const handleDragStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      draggingRef.current = true;
+      const startY = e.clientY;
+      const startHeight = panelHeight;
 
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      if (!draggingRef.current) return;
-      const delta = startY - moveEvent.clientY;
-      const newHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, startHeight + delta));
-      setPanelHeight(newHeight);
-    };
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        if (!draggingRef.current) return;
+        const delta = startY - moveEvent.clientY;
+        const newHeight = Math.min(
+          MAX_HEIGHT,
+          Math.max(MIN_HEIGHT, startHeight + delta)
+        );
+        setPanelHeight(newHeight);
+      };
 
-    const onMouseUp = () => {
-      draggingRef.current = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
+      const onMouseUp = () => {
+        draggingRef.current = false;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
 
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
-  }, [panelHeight]);
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "row-resize";
+      document.body.style.userSelect = "none";
+    },
+    [panelHeight]
+  );
 
   // Close session picker when clicking outside
   useEffect(() => {
     if (!showSessionPicker) return;
     const handleClick = () => setShowSessionPicker(false);
-    const timer = setTimeout(() => document.addEventListener('click', handleClick), 0);
+    const timer = setTimeout(
+      () => document.addEventListener("click", handleClick),
+      0
+    );
     return () => {
       clearTimeout(timer);
-      document.removeEventListener('click', handleClick);
+      document.removeEventListener("click", handleClick);
     };
   }, [showSessionPicker]);
 
   // Auto-expand when orchestrator starts running
   const setCollapsed = useOrchestratorStore((s) => s.setCollapsed);
   useEffect(() => {
-    if (status === 'running' && isCollapsed) {
+    if (status === "running" && isCollapsed) {
       setCollapsed(false);
     }
   }, [status, isCollapsed, setCollapsed]);
@@ -83,63 +93,128 @@ export default memo(function OrchestratorPanel() {
   // 프로젝트가 없으면 패널 자체를 숨김
   if (!currentProject) return null;
 
-  const isRunning = status === 'running' || status === 'starting';
+  const isRunning = status === "running" || status === "starting";
   const height = isCollapsed ? COLLAPSED_HEIGHT : panelHeight;
 
   const handleStartWithSession = async (resumeSessionId?: string) => {
     setShowSessionPicker(false);
     if (isRunning) return;
     const projectId = currentProject.id;
-    const cwd = rootPath || '~';
+    const cwd = rootPath || "~";
     try {
-      setStatus('starting');
-      const result = await window.electronAPI.orchestratorSession.launch(projectId, cwd, resumeSessionId);
+      setStatus("starting");
+      const result = await window.electronAPI.orchestratorSession.launch(
+        projectId,
+        cwd,
+        resumeSessionId
+      );
       if (result) {
         setSession(result.sessionId, result.ptySessionId);
-        setStatus('running');
+        setStatus("running");
+
+        // Register the orchestrator as a virtual agent doc in Firestore so
+        // its activities (logged via add_activity with MARBLO_AGENT_ID =
+        // orchestrator-<ts>) actually appear in the Activity feed. Without
+        // this, the feed's `agentId in [agents.map(a=>a.id)]` filter
+        // silently drops everything the orchestrator emits because no
+        // matching agents/* doc exists.
+        try {
+          const [{ doc, setDoc, serverTimestamp }, { db }] = await Promise.all([
+            import("firebase/firestore"),
+            import("../../lib/firebase"),
+          ]);
+          await setDoc(
+            doc(db, "agents", result.sessionId),
+            {
+              projectId,
+              ownerId: "system",
+              name: "Orchestrator",
+              model: "claude",
+              role: "orchestrator",
+              status: "working",
+              currentTaskId: null,
+              command: "claude",
+              skillFile: "",
+              createdAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+        } catch (err) {
+          console.warn("[Orchestrator] virtual agent doc upsert failed:", err);
+        }
       }
     } catch (err) {
-      console.error('[Orchestrator] Manual launch failed:', err);
-      setStatus('error');
+      console.error("[Orchestrator] Manual launch failed:", err);
+      setStatus("error");
     }
   };
 
   const handleManualStart = async () => {
     // Auto-connect to latest Orchestrator-labeled session if available
     if (isRunning) return;
-    const cwd = rootPath || '~';
+    const cwd = rootPath || "~";
     try {
-      const list = await window.electronAPI.orchestratorSession.listSessions(cwd);
+      const list = await window.electronAPI.orchestratorSession.listSessions(
+        cwd
+      );
       if (list.length > 0) {
         // Find the latest session labeled "Orchestrator"
-        const orchSession = list.find((s: SessionInfo) => s.label === 'Orchestrator');
+        const orchSession = list.find(
+          (s: SessionInfo) => s.label === "Orchestrator"
+        );
         if (orchSession) {
           // Auto-connect to the orchestrator session
           handleStartWithSession(orchSession.id);
           return;
         }
       }
-    } catch { /* ignore, just start new */ }
-    handleStartWithSession('new');
+    } catch {
+      /* ignore, just start new */
+    }
+    handleStartWithSession("new");
   };
 
   const handleShowSessionPicker = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isRunning) return;
-    const cwd = rootPath || '~';
+    const cwd = rootPath || "~";
     try {
-      const list = await window.electronAPI.orchestratorSession.listSessions(cwd);
+      const list = await window.electronAPI.orchestratorSession.listSessions(
+        cwd
+      );
       setSessions(list);
-    } catch { setSessions([]); }
+    } catch {
+      setSessions([]);
+    }
     setShowSessionPicker(true);
   };
 
   const handleStop = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    const stoppingId = sessionId;
     try {
       await window.electronAPI.orchestratorSession.stop();
       clear();
-    } catch { /* ignore */ }
+      // Mark the virtual orchestrator agent doc as stopped so the
+      // Agents tab reflects the real state. Best-effort.
+      if (stoppingId) {
+        try {
+          const [{ doc, setDoc, serverTimestamp }, { db }] = await Promise.all([
+            import("firebase/firestore"),
+            import("../../lib/firebase"),
+          ]);
+          await setDoc(
+            doc(db, "agents", stoppingId),
+            { status: "stopped", costUpdatedAt: serverTimestamp() },
+            { merge: true }
+          );
+        } catch {
+          /* best-effort */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
   };
 
   return (
@@ -161,19 +236,19 @@ export default memo(function OrchestratorPanel() {
       <div
         onClick={isRunning ? toggleCollapsed : undefined}
         className={`flex items-center gap-2 px-3 py-1.5 text-xs select-none ${
-          isRunning ? 'cursor-pointer hover:bg-[#313244]/50' : ''
+          isRunning ? "cursor-pointer hover:bg-[#313244]/50" : ""
         } transition-colors`}
       >
         {/* Status indicator */}
         <span
           className={`inline-block h-2 w-2 rounded-full ${
-            status === 'running'
-              ? 'bg-[#a6e3a1]'
-              : status === 'starting'
-                ? 'bg-[#f9e2af] animate-pulse'
-                : status === 'error'
-                  ? 'bg-[#f38ba8]'
-                  : 'bg-[#6c7086]'
+            status === "running"
+              ? "bg-[#a6e3a1]"
+              : status === "starting"
+              ? "bg-[#f9e2af] animate-pulse"
+              : status === "error"
+              ? "bg-[#f38ba8]"
+              : "bg-[#6c7086]"
           }`}
         />
         <span className="text-[#cdd6f4] font-medium">Orchestrator</span>
@@ -181,7 +256,7 @@ export default memo(function OrchestratorPanel() {
         {isRunning ? (
           <>
             <span className="text-[#6c7086]">
-              {status === 'running' ? 'Claude Code' : 'Starting...'}
+              {status === "running" ? "Claude Code" : "Starting..."}
             </span>
             {/* Stop button */}
             <button
@@ -194,19 +269,24 @@ export default memo(function OrchestratorPanel() {
             {/* Collapse chevron */}
             <svg
               className={`ml-auto h-3.5 w-3.5 text-[#6c7086] transition-transform ${
-                isCollapsed ? '' : 'rotate-180'
+                isCollapsed ? "" : "rotate-180"
               }`}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5 15l7-7 7 7"
+              />
             </svg>
           </>
         ) : (
           <>
             <span className="text-[#6c7086]">
-              {status === 'error' ? 'Error' : 'Stopped'}
+              {status === "error" ? "Error" : "Stopped"}
             </span>
             {/* Start button + session picker toggle */}
             <div className="relative ml-2 flex items-center gap-1">
@@ -221,8 +301,18 @@ export default memo(function OrchestratorPanel() {
                 className="rounded bg-[#313244]/50 px-1 py-0.5 text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] transition-colors"
                 title="세션 선택"
               >
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
                 </svg>
               </button>
               {showSessionPicker && (
@@ -234,7 +324,7 @@ export default memo(function OrchestratorPanel() {
                     Select Session
                   </div>
                   <button
-                    onClick={() => handleStartWithSession('new')}
+                    onClick={() => handleStartWithSession("new")}
                     className="w-full text-left px-3 py-2 text-xs text-[#a6e3a1] hover:bg-[#313244]/60 transition-colors flex items-center gap-2"
                   >
                     <span className="text-sm">+</span>
@@ -244,20 +334,28 @@ export default memo(function OrchestratorPanel() {
                     <div className="border-t border-[#313244]">
                       {sessions.slice(0, 8).map((s, i) => {
                         const date = new Date(s.updatedAt);
-                        const timeStr = date.toLocaleString('ko-KR', {
-                          month: 'short', day: 'numeric',
-                          hour: '2-digit', minute: '2-digit',
+                        const timeStr = date.toLocaleString("ko-KR", {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
                         });
                         return (
                           <button
                             key={s.id}
-                            onClick={() => handleStartWithSession(i === 0 ? 'latest' : s.id)}
+                            onClick={() =>
+                              handleStartWithSession(i === 0 ? "latest" : s.id)
+                            }
                             className="w-full text-left px-3 py-2 text-xs hover:bg-[#313244]/60 transition-colors flex items-center justify-between gap-2"
                           >
                             <span className="text-[#cdd6f4] truncate flex items-center gap-1.5">
-                              {i === 0 && <span className="text-[#89b4fa] text-[10px]">latest</span>}
+                              {i === 0 && (
+                                <span className="text-[#89b4fa] text-[10px]">
+                                  latest
+                                </span>
+                              )}
                               <span className="text-[#6c7086] font-mono text-[10px]">
-                                {s.label || s.id.slice(0, 8) + '\u2026'}
+                                {s.label || s.id.slice(0, 8) + "\u2026"}
                               </span>
                             </span>
                             <span className="text-[#6c7086] text-[10px] flex-shrink-0">
@@ -283,7 +381,10 @@ export default memo(function OrchestratorPanel() {
       {/* Terminal content */}
       {!isCollapsed && ptySessionId && isRunning && (
         <div className="flex-1 min-h-0 relative">
-          <OrchestratorTerminal sessionId={ptySessionId} panelHeight={panelHeight} />
+          <OrchestratorTerminal
+            sessionId={ptySessionId}
+            panelHeight={panelHeight}
+          />
         </div>
       )}
     </div>
