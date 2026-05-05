@@ -3,8 +3,8 @@
  * Extracted from BridgeServer for testability.
  */
 
-export type ModelType = 'claude' | 'gemini' | 'gpt' | 'custom';
-export type AgentStatus = 'idle' | 'working' | 'error' | 'stopped';
+export type ModelType = "claude" | "gemini" | "gpt" | "custom";
+export type AgentStatus = "idle" | "working" | "error" | "stopped";
 
 export interface AgentInfo {
   id: string;
@@ -25,60 +25,94 @@ export interface ScoredAgent {
 
 export const MODEL_TAG_BONUSES: Record<string, Record<string, number>> = {
   claude: {
-    architecture: 30, 'multi-file': 30, coding: 30,
-    design: 20, mcp: 20, refactor: 20,
+    // Strong but not crushing — leave room for Codex/Gemini to win on
+    // their own tags. Previously these were 30 across the board which
+    // made Claude essentially always-on for any coding-like task.
+    architecture: 25,
+    "multi-file": 25,
+    coding: 25,
+    design: 20,
+    mcp: 20,
+    refactor: 20,
   },
   gemini: {
-    'large-context': 30, research: 20, analysis: 20,
-    documentation: 15, 'fast-response': 10,
+    "large-context": 30,
+    research: 25,
+    analysis: 20,
+    documentation: 20,
+    "fast-response": 15,
   },
   gpt: {
-    github: 20, 'simple-fix': 15,
-    'quick-edit': 10, 'fast-execution': 10,
+    github: 25,
+    "simple-fix": 25,
+    "quick-edit": 20,
+    "fast-execution": 20,
+    test: 15,
+    boilerplate: 15,
   },
 };
 
 export const MODEL_TAG_PENALTIES: Record<string, Record<string, number>> = {
-  gemini: { 'multi-file': -10, 'complex-edit': -10 },
-  gpt: { architecture: -15, 'large-refactor': -15 },
+  gemini: { "multi-file": -10, "complex-edit": -10 },
+  gpt: { architecture: -10, "large-refactor": -10 },
 };
 
+// Base scores raised for Gemini and GPT so they compete on their own
+// tags instead of being shut out by Claude's larger baseline. The
+// previous 50/40/35 spread meant a "research" task scored gemini 40+20=60
+// vs claude 50+0=50 — a real lead — but a "simple-fix" task scored
+// gpt 35+15=50, tied with claude 50, and the iteration order picked
+// claude every time.
 export const MODEL_BASE_SCORE: Record<string, number> = {
   claude: 50,
-  gemini: 40,
-  gpt: 35,
+  gemini: 45,
+  gpt: 45,
   custom: 30,
 };
 
+// When the top model wins by less than this many points, treat it as
+// effectively tied and round-robin among the close contenders. Keeps
+// the model fleet diverse on borderline tasks instead of always
+// snapping to Claude.
+const TIED_SCORE_BAND = 5;
+
 // ── Model Presets ──────────────────────────────────────────
 
-export type ModelPreset = 'claude-only' | 'recommended' | 'balanced' | 'codex-only' | 'gemini-only';
+export type ModelPreset =
+  | "claude-only"
+  | "recommended"
+  | "balanced"
+  | "codex-only"
+  | "gemini-only";
 
-export const MODEL_PRESETS: Record<ModelPreset, { label: string; models: ModelType[]; description: string }> = {
-  'claude-only': {
-    label: 'Claude 100%',
-    models: ['claude'],
-    description: 'All agents use Claude (highest quality)',
+export const MODEL_PRESETS: Record<
+  ModelPreset,
+  { label: string; models: ModelType[]; description: string }
+> = {
+  "claude-only": {
+    label: "Claude 100%",
+    models: ["claude"],
+    description: "All agents use Claude (highest quality)",
   },
-  'recommended': {
-    label: 'Marblo Recommended',
-    models: ['claude', 'claude', 'claude', 'gemini', 'gpt'],
-    description: 'Claude 60% + Gemini 20% + Codex 20% (cost-optimized)',
+  recommended: {
+    label: "Marblo Recommended",
+    models: ["claude", "claude", "claude", "gemini", "gpt"],
+    description: "Claude 60% + Gemini 20% + Codex 20% (cost-optimized)",
   },
-  'balanced': {
-    label: 'Balanced',
-    models: ['claude', 'gemini', 'gpt'],
-    description: 'Equal rotation across all models',
+  balanced: {
+    label: "Balanced",
+    models: ["claude", "gemini", "gpt"],
+    description: "Equal rotation across all models",
   },
-  'codex-only': {
-    label: 'Codex/GPT 100%',
-    models: ['gpt'],
-    description: 'All agents use OpenAI Codex/GPT',
+  "codex-only": {
+    label: "Codex/GPT 100%",
+    models: ["gpt"],
+    description: "All agents use OpenAI Codex/GPT",
   },
-  'gemini-only': {
-    label: 'Gemini 100%',
-    models: ['gemini'],
-    description: 'All agents use Google Gemini',
+  "gemini-only": {
+    label: "Gemini 100%",
+    models: ["gemini"],
+    description: "All agents use Google Gemini",
   },
 };
 
@@ -86,7 +120,7 @@ export function resolvePreset(preset?: string): ModelType[] {
   if (preset && preset in MODEL_PRESETS) {
     return MODEL_PRESETS[preset as ModelPreset].models;
   }
-  return MODEL_PRESETS['recommended'].models;
+  return MODEL_PRESETS["recommended"].models;
 }
 
 // ── Constraints ─────────────────────────────────────────────
@@ -100,7 +134,7 @@ export function scoreAgents(
   agents: AgentInfo[],
   role: string,
   preferredModel?: ModelType,
-  tags: string[] = [],
+  tags: string[] = []
 ): ScoredAgent[] {
   const results: ScoredAgent[] = [];
 
@@ -113,21 +147,21 @@ export function scoreAgents(
 
     // Status scoring
     switch (agent.status) {
-      case 'idle':
+      case "idle":
         score += 50;
-        reasons.push('idle (+50)');
+        reasons.push("idle (+50)");
         break;
-      case 'working':
+      case "working":
         score += 10;
-        reasons.push('working (+10)');
+        reasons.push("working (+10)");
         break;
-      case 'stopped':
+      case "stopped":
         score += 30;
-        reasons.push('stopped (+30, needs restart)');
+        reasons.push("stopped (+30, needs restart)");
         break;
-      case 'error':
+      case "error":
         score += 5;
-        reasons.push('error (+5, risky)');
+        reasons.push("error (+5, risky)");
         break;
     }
 
@@ -138,7 +172,7 @@ export function scoreAgents(
     }
 
     // Tag matching (extract tags from agent name, e.g. "backend-auth" → ["backend", "auth"])
-    const agentTags = agent.name.split('-').map(t => t.toLowerCase());
+    const agentTags = agent.name.split("-").map((t) => t.toLowerCase());
     let tagMatches = 0;
     for (const tag of tags) {
       if (agentTags.includes(tag.toLowerCase())) {
@@ -160,7 +194,9 @@ export function scoreAgents(
     results.push({
       agent,
       score,
-      reason: `${agent.status} ${agent.model} agent '${agent.name}' (score=${score}: ${reasons.join(', ')})`,
+      reason: `${agent.status} ${agent.model} agent '${
+        agent.name
+      }' (score=${score}: ${reasons.join(", ")})`,
     });
   }
 
@@ -174,53 +210,77 @@ export function scoreAgents(
 // Round-robin counter for model selection when tags don't differentiate
 let modelRoundRobin = 0;
 
-export function scoreModels(enabledModels: ModelType[], tags: string[]): ModelType {
-  // Default to first enabled model (fallback must be within enabledModels)
-  let bestModel: ModelType = enabledModels[0] || 'claude';
-  let bestScore = -Infinity;
+export function scoreModels(
+  enabledModels: ModelType[],
+  tags: string[]
+): ModelType {
+  // Score every enabled model first so we can both pick the winner and
+  // detect ties / near-ties.
+  const scored: { model: ModelType; score: number }[] = [];
   let hasTags = tags.length > 0;
 
   for (const model of enabledModels) {
-    // Custom models use base score only (no tag bonuses/penalties)
     let score = MODEL_BASE_SCORE[model] || 0;
 
-    if (model !== 'custom') {
-      // Apply tag bonuses
+    // Custom models use base score only (no tag bonuses/penalties).
+    if (model !== "custom") {
       const bonuses = MODEL_TAG_BONUSES[model] || {};
       for (const tag of tags) {
-        if (bonuses[tag]) { score += bonuses[tag]; hasTags = true; }
+        if (bonuses[tag]) {
+          score += bonuses[tag];
+          hasTags = true;
+        }
       }
-
-      // Apply tag penalties
       const penalties = MODEL_TAG_PENALTIES[model] || {};
       for (const tag of tags) {
-        if (penalties[tag]) { score += penalties[tag]; hasTags = true; }
+        if (penalties[tag]) {
+          score += penalties[tag];
+          hasTags = true;
+        }
       }
     }
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestModel = model;
-    }
+    scored.push({ model, score });
   }
 
-  // When no tags differentiate models, use round-robin for diversity
+  if (scored.length === 0) {
+    return enabledModels[0] || "claude";
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  const topScore = scored[0].score;
+
+  // No tags at all → pure round-robin across enabled models for diversity.
   if (!hasTags && enabledModels.length > 1) {
     const idx = modelRoundRobin % enabledModels.length;
     modelRoundRobin++;
     return enabledModels[idx];
   }
 
-  return bestModel;
+  // Tied / near-tied at the top → round-robin among the contenders so we
+  // don't always snap to whichever happened to be listed first. Without
+  // this, a `simple-fix` tag that ties Claude and GPT (both at 70 in the
+  // updated bonuses) would always pick Claude due to enabledModels order.
+  const contenders = scored
+    .filter((s) => topScore - s.score <= TIED_SCORE_BAND)
+    .map((s) => s.model);
+  if (contenders.length > 1) {
+    const idx = modelRoundRobin % contenders.length;
+    modelRoundRobin++;
+    return contenders[idx];
+  }
+
+  return scored[0].model;
 }
 
 // ── Dispatch constraint checks ──────────────────────────────
 
 export function checkSpawnConstraints(
   agents: AgentInfo[],
-  role: string,
+  role: string
 ): { allowed: boolean; error?: string } {
-  const activeAgents = agents.filter(a => a.status !== 'stopped' && a.status !== 'error');
+  const activeAgents = agents.filter(
+    (a) => a.status !== "stopped" && a.status !== "error"
+  );
   if (activeAgents.length >= MAX_AGENTS) {
     return {
       allowed: false,
@@ -228,7 +288,7 @@ export function checkSpawnConstraints(
     };
   }
 
-  const roleAgents = activeAgents.filter(a => a.role === role);
+  const roleAgents = activeAgents.filter((a) => a.role === role);
   if (roleAgents.length >= MAX_PER_ROLE) {
     return {
       allowed: false,
