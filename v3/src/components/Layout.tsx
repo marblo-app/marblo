@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Header } from "./Header";
 import { TabBar, type TabId } from "./TabBar";
 import { Sidebar } from "./sidebar/Sidebar";
@@ -63,6 +63,24 @@ export function Layout() {
         /* main may not have the handler in older builds — best-effort */
       });
   }, [currentProject?.id]);
+
+  // When the user switches projects in this window, clean up window-local UI
+  // state that was tied to the previous project. Backend agents and PTYs are
+  // intentionally left alive — other windows or AgentManager may still own
+  // them, and the new window is meant to operate independently.
+  const closeAllFiles = useEditorStore((s) => s.closeAllFiles);
+  const detachAllSessions = useTerminalStore((s) => s.detachAllSessions);
+  const prevProjectIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const newId = currentProject?.id ?? null;
+    const prevId = prevProjectIdRef.current;
+    if (prevId !== null && prevId !== newId) {
+      closeAllFiles();
+      detachAllSessions().catch(() => {});
+      // Orchestrator self-cleans via useOrchestratorAutoLaunch's key change.
+    }
+    prevProjectIdRef.current = newId;
+  }, [currentProject?.id, closeAllFiles, detachAllSessions]);
 
   // Sidebar → modal state
   const [showOrchestratorChat, setShowOrchestratorChat] = useState(false);
@@ -131,22 +149,59 @@ export function Layout() {
     };
   }, []);
 
-  // Listen for agent:spawned events from bridge server → auto-attach terminal tab + chat notification
+  // Listen for agent:spawned events from bridge server → auto-attach terminal tab,
+  // upsert Firestore doc (covers Flow-runner / direct-bridge spawn paths that
+  // bypass MCP-side Firestore writes), and send chat notification.
   useEffect(() => {
     window.electronAPI.orchestratorSession.onAgentSpawned(async (data) => {
       attachSession(data.ptySessionId, `Agent: ${data.name}`);
-      // Send chat notification
+
+      // Idempotent Firestore upsert — converges with MCP-side setDoc on the
+      // same agentId. merge:true so concurrent writers don't overwrite each
+      // other's fields.
       if (currentProject) {
         try {
-          const { notifyAgentSpawned } =
-            await import("../services/agentNotificationService");
+          const { doc, setDoc, serverTimestamp } = await import(
+            "firebase/firestore"
+          );
+          const { db } = await import("../lib/firebase");
+          await setDoc(
+            doc(db, "agents", data.agentId),
+            {
+              projectId: currentProject.id,
+              ownerId: "orchestrator",
+              name: data.name,
+              model: data.model,
+              role: data.role || "agent",
+              status: "working",
+              currentTaskId: null,
+              command: data.model,
+              skillFile: "",
+              createdAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+        } catch (err) {
+          console.warn(
+            "[Layout] Firestore agent upsert failed (non-fatal):",
+            err
+          );
+        }
+      }
+
+      // Chat notification — best-effort.
+      if (currentProject) {
+        try {
+          const { notifyAgentSpawned } = await import(
+            "../services/agentNotificationService"
+          );
           await notifyAgentSpawned(
             currentProject.id,
             data.name,
-            data.role || "agent",
+            data.role || "agent"
           );
         } catch {
-          // Chat notification is best-effort
+          // best-effort
         }
       }
     });

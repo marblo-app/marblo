@@ -6,6 +6,7 @@ import {
   getDoc,
   getDocs,
   addDoc,
+  setDoc,
   updateDoc,
   query,
   where,
@@ -971,21 +972,29 @@ export function registerTools(server: McpServer): void {
           );
         }
 
-        // Write agent document to Firestore so it appears in Agents tab
+        // Write agent document to Firestore so it appears in Agents tab.
+        // Use setDoc(...,{merge:true}) with the bridge's agentId as the
+        // doc id so this write is idempotent — the renderer's
+        // onAgentSpawned listener also writes the same doc, both writers
+        // converge on the same id without creating duplicates.
         const projectId = resolveProject(undefined);
         if (projectId && result.agentId) {
-          await addDoc(collection(db, "agents"), {
-            projectId,
-            ownerId: "orchestrator",
-            name,
-            model,
-            role,
-            status: "idle",
-            currentTaskId: null,
-            command: command || model,
-            skillFile: "",
-            createdAt: Timestamp.now(),
-          });
+          await setDoc(
+            doc(db, "agents", result.agentId),
+            {
+              projectId,
+              ownerId: "orchestrator",
+              name,
+              model,
+              role,
+              status: "idle",
+              currentTaskId: null,
+              command: command || model,
+              skillFile: "",
+              createdAt: Timestamp.now(),
+            },
+            { merge: true }
+          );
         }
 
         return text(
@@ -1291,6 +1300,9 @@ export function registerTools(server: McpServer): void {
         // Persist newly-spawned / restarted agents to Firestore so they
         // appear in the Agents tab and survive across sessions. Reuse-only
         // dispatches don't need a new doc — the existing one is reused.
+        // Idempotent setDoc(..., {merge:true}) with the bridge's agentId
+        // as doc id — the renderer's onAgentSpawned listener also writes
+        // the same doc, both converge on a single record.
         if (
           (result.action === "spawned" || result.action === "restarted") &&
           result.agentId
@@ -1298,18 +1310,22 @@ export function registerTools(server: McpServer): void {
           const projectId = resolveProject(undefined);
           if (projectId) {
             try {
-              await addDoc(collection(db, "agents"), {
-                projectId,
-                ownerId: "orchestrator",
-                name: result.agentName || `${role}-agent`,
-                model: result.model || model || "claude",
-                role,
-                status: "working",
-                currentTaskId: task_id || null,
-                command: result.model || model || "claude",
-                skillFile: "",
-                createdAt: Timestamp.now(),
-              });
+              await setDoc(
+                doc(db, "agents", result.agentId),
+                {
+                  projectId,
+                  ownerId: "orchestrator",
+                  name: result.agentName || `${role}-agent`,
+                  model: result.model || model || "claude",
+                  role,
+                  status: "working",
+                  currentTaskId: task_id || null,
+                  command: result.model || model || "claude",
+                  skillFile: "",
+                  createdAt: Timestamp.now(),
+                },
+                { merge: true }
+              );
             } catch (err) {
               // Non-fatal — agent is already running, Firestore just won't
               // show it. Surface in the response so the user can see why.
