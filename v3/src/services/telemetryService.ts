@@ -1,23 +1,23 @@
-import { httpsCallable } from 'firebase/functions';
-import { auth, functions } from '../lib/firebase';
+import { httpsCallable } from "firebase/functions";
+import { auth, functions } from "../lib/firebase";
 
 export type TelemetryEvent =
-  | 'agent:spawned'
-  | 'agent:stopped'
-  | 'agent:crashed'
-  | 'agent:restarted'
-  | 'agent:heartbeat'
-  | 'task:created'
-  | 'task:status_changed'
-  | 'task:completed'
-  | 'flow:started'
-  | 'flow:node_executed'
-  | 'flow:completed'
-  | 'token:usage'
-  | 'session:started'
-  | 'session:ended'
-  | 'chat:message_sent'
-  | 'chat:active_users';
+  | "agent:spawned"
+  | "agent:stopped"
+  | "agent:crashed"
+  | "agent:restarted"
+  | "agent:heartbeat"
+  | "task:created"
+  | "task:status_changed"
+  | "task:completed"
+  | "flow:started"
+  | "flow:node_executed"
+  | "flow:completed"
+  | "token:usage"
+  | "session:started"
+  | "session:ended"
+  | "chat:message_sent"
+  | "chat:active_users";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -39,6 +39,13 @@ interface TelemetryPayload {
   nodeType?: string;
   nodeCount?: number;
   metadata?: Record<string, unknown>;
+  // ML-ready columns mirrored from BigQuery `events` schema. The IPC bridge
+  // in App.tsx passes these through verbatim, so adding them here keeps
+  // type-safety on the renderer-side helper.
+  promptHash?: string;
+  promptLength?: number;
+  parentAgentId?: string;
+  retryOf?: string;
 }
 
 let telemetryEnabled = true;
@@ -48,8 +55,8 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 const FLUSH_INTERVAL = 10_000;
 const MAX_QUEUE_SIZE = 50;
 
-const logTelemetryBatch = httpsCallable(functions, 'logTelemetryBatch');
-const logHeartbeatFn = httpsCallable(functions, 'logHeartbeat');
+const logTelemetryBatch = httpsCallable(functions, "logTelemetryBatch");
+const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
 export function setTelemetryEnabled(enabled: boolean) {
   telemetryEnabled = enabled;
@@ -63,7 +70,7 @@ export function logTelemetry(payload: TelemetryPayload) {
   if (!telemetryEnabled) return;
 
   // Route heartbeats to separate queue/table
-  if (payload.event === 'agent:heartbeat') {
+  if (payload.event === "agent:heartbeat") {
     heartbeatQueue.push(payload);
     if (heartbeatQueue.length >= 10) {
       flushHeartbeats();
@@ -103,7 +110,7 @@ async function flushHeartbeats() {
       })),
     });
   } catch (error) {
-    console.warn('[Telemetry] Heartbeat flush failed:', error);
+    console.warn("[Telemetry] Heartbeat flush failed:", error);
   }
 }
 
@@ -121,7 +128,7 @@ async function flushTelemetry() {
   try {
     await logTelemetryBatch({ events: batch });
   } catch (error) {
-    console.warn('[Telemetry] Flush failed:', error);
+    console.warn("[Telemetry] Flush failed:", error);
     if (eventQueue.length < MAX_QUEUE_SIZE * 2) {
       eventQueue.unshift(...batch);
     }
@@ -130,64 +137,156 @@ async function flushTelemetry() {
 
 // Convenience functions
 export const telemetry = {
-  agentSpawned(agentId: string, name: string, model: string, role: string, projectId?: string) {
-    logTelemetry({ event: 'agent:spawned', agentId, model, role, projectId, metadata: { name } });
+  agentSpawned(
+    agentId: string,
+    name: string,
+    model: string,
+    role: string,
+    projectId?: string,
+  ) {
+    logTelemetry({
+      event: "agent:spawned",
+      agentId,
+      model,
+      role,
+      projectId,
+      metadata: { name },
+    });
   },
 
   agentStopped(agentId: string, exitCode?: number) {
-    logTelemetry({ event: 'agent:stopped', agentId, exitCode, success: exitCode === 0 });
+    logTelemetry({
+      event: "agent:stopped",
+      agentId,
+      exitCode,
+      success: exitCode === 0,
+    });
   },
 
   agentCrashed(agentId: string, exitCode: number) {
-    logTelemetry({ event: 'agent:crashed', agentId, exitCode, success: false });
+    logTelemetry({ event: "agent:crashed", agentId, exitCode, success: false });
   },
 
   agentRestarted(agentId: string, attempt: number) {
-    logTelemetry({ event: 'agent:restarted', agentId, metadata: { attempt } });
+    logTelemetry({ event: "agent:restarted", agentId, metadata: { attempt } });
   },
 
-  taskCreated(taskId: string, projectId: string, role: string, priority?: number) {
-    logTelemetry({ event: 'task:created', taskId, projectId, role, metadata: { priority } });
+  taskCreated(
+    taskId: string,
+    projectId: string,
+    role: string,
+    priority?: number,
+  ) {
+    logTelemetry({
+      event: "task:created",
+      taskId,
+      projectId,
+      role,
+      metadata: { priority },
+    });
   },
 
-  taskStatusChanged(taskId: string, fromStatus: string, toStatus: string, agentId?: string) {
-    logTelemetry({ event: 'task:status_changed', taskId, fromStatus, toStatus, agentId });
+  taskStatusChanged(
+    taskId: string,
+    fromStatus: string,
+    toStatus: string,
+    agentId?: string,
+  ) {
+    logTelemetry({
+      event: "task:status_changed",
+      taskId,
+      fromStatus,
+      toStatus,
+      agentId,
+    });
   },
 
   taskCompleted(taskId: string, durationMs?: number, agentId?: string) {
-    logTelemetry({ event: 'task:completed', taskId, durationMs, agentId, success: true });
+    logTelemetry({
+      event: "task:completed",
+      taskId,
+      durationMs,
+      agentId,
+      success: true,
+    });
   },
 
   flowStarted(flowId: string, nodeCount: number) {
-    logTelemetry({ event: 'flow:started', flowId, nodeCount });
+    logTelemetry({ event: "flow:started", flowId, nodeCount });
   },
 
-  flowNodeExecuted(flowId: string, nodeType: string, durationMs: number, success: boolean) {
-    logTelemetry({ event: 'flow:node_executed', flowId, nodeType, durationMs, success });
+  flowNodeExecuted(
+    flowId: string,
+    nodeType: string,
+    durationMs: number,
+    success: boolean,
+  ) {
+    logTelemetry({
+      event: "flow:node_executed",
+      flowId,
+      nodeType,
+      durationMs,
+      success,
+    });
   },
 
-  flowCompleted(flowId: string, status: string, durationMs: number, nodeCount: number) {
-    logTelemetry({ event: 'flow:completed', flowId, status, durationMs, nodeCount, success: status === 'completed' });
+  flowCompleted(
+    flowId: string,
+    status: string,
+    durationMs: number,
+    nodeCount: number,
+  ) {
+    logTelemetry({
+      event: "flow:completed",
+      flowId,
+      status,
+      durationMs,
+      nodeCount,
+      success: status === "completed",
+    });
   },
 
-  tokenUsage(agentId: string, model: string, tokensInput: number, tokensOutput: number, cost: number, projectId?: string) {
-    logTelemetry({ event: 'token:usage', agentId, model, tokensInput, tokensOutput, cost, projectId });
+  tokenUsage(
+    agentId: string,
+    model: string,
+    tokensInput: number,
+    tokensOutput: number,
+    cost: number,
+    projectId?: string,
+  ) {
+    logTelemetry({
+      event: "token:usage",
+      agentId,
+      model,
+      tokensInput,
+      tokensOutput,
+      cost,
+      projectId,
+    });
   },
 
   sessionStarted(projectId?: string) {
-    logTelemetry({ event: 'session:started', projectId });
+    logTelemetry({ event: "session:started", projectId });
   },
 
   sessionEnded(durationMs: number) {
-    logTelemetry({ event: 'session:ended', durationMs });
+    logTelemetry({ event: "session:ended", durationMs });
   },
 
   chatMessageSent(projectId: string, type: string, senderId: string) {
-    logTelemetry({ event: 'chat:message_sent', projectId, metadata: { type, senderId } });
+    logTelemetry({
+      event: "chat:message_sent",
+      projectId,
+      metadata: { type, senderId },
+    });
   },
 
   chatActiveUsers(projectId: string, count: number) {
-    logTelemetry({ event: 'chat:active_users', projectId, metadata: { count } });
+    logTelemetry({
+      event: "chat:active_users",
+      projectId,
+      metadata: { count },
+    });
   },
 
   flush: flushTelemetry,

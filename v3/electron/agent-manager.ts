@@ -1,4 +1,5 @@
 import { BrowserWindow } from "electron";
+import crypto from "crypto";
 import { PtyManager } from "./pty-manager";
 import { AgentConfigGenerator, LaunchConfig } from "./agent-config";
 import { mainTelemetry } from "./telemetry";
@@ -70,12 +71,12 @@ export class AgentManager {
     rootPath: string,
     sessionId: string,
     label: string,
-    agentId: string
+    agentId: string,
   ) => void;
   private onRestartAttempt?: (
     agentId: string,
     attempt: number,
-    maxAttempts: number
+    maxAttempts: number,
   ) => void;
   private onRestartFailed?: (agentId: string, exitCode: number) => void;
   private getMainWindow?: () => BrowserWindow | null;
@@ -83,7 +84,7 @@ export class AgentManager {
     rootPath: string,
     requested: string,
     filterLabel?: string,
-    filterAgentId?: string
+    filterAgentId?: string,
   ) => string | null;
 
   constructor(
@@ -93,15 +94,15 @@ export class AgentManager {
       rootPath: string,
       sessionId: string,
       label: string,
-      agentId: string
+      agentId: string,
     ) => void,
     onRestartAttempt?: (
       agentId: string,
       attempt: number,
-      maxAttempts: number
+      maxAttempts: number,
     ) => void,
     onRestartFailed?: (agentId: string, exitCode: number) => void,
-    getMainWindow?: () => BrowserWindow | null
+    getMainWindow?: () => BrowserWindow | null,
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = new AgentConfigGenerator();
@@ -118,8 +119,8 @@ export class AgentManager {
       rootPath: string,
       requested: string,
       filterLabel?: string,
-      filterAgentId?: string
-    ) => string | null
+      filterAgentId?: string,
+    ) => string | null,
   ) {
     this.resolveSessionId = resolver;
   }
@@ -137,7 +138,7 @@ export class AgentManager {
       },
       params.cwd,
       params.initialPrompt,
-      params.projectId
+      params.projectId,
     );
 
     // Resume support: add --resume flag
@@ -150,7 +151,7 @@ export class AgentManager {
       console.log(
         `[Agent:${params.id}] Resolved 'latest' → ${
           resolvedResumeId ?? "none (new session)"
-        }`
+        }`,
       );
     }
     const isResume =
@@ -177,7 +178,7 @@ export class AgentManager {
       launchConfig.command,
       launchConfig.args,
       params.cwd,
-      mergedEnv
+      mergedEnv,
     );
 
     // Notify caller IMMEDIATELY so they can register data listeners
@@ -197,7 +198,7 @@ export class AgentManager {
         // CR inside the message body without submitting).
         this.ptyManager.writeAndSubmit(ptySessionId, prompt);
         console.log(
-          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`
+          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`,
         );
       };
 
@@ -248,7 +249,7 @@ export class AgentManager {
           require("os").homedir(),
           ".claude",
           "projects",
-          encodedPath
+          encodedPath,
         );
         const files = require("fs").existsSync(sessionsDir)
           ? require("fs")
@@ -260,7 +261,7 @@ export class AgentManager {
       } catch (err) {
         console.error(
           `[AgentManager] Failed to read existing session files for rootPath="${rootPath}":`,
-          err
+          err,
         );
         existingIds = new Set();
       }
@@ -272,7 +273,7 @@ export class AgentManager {
             require("os").homedir(),
             ".claude",
             "projects",
-            encodedPath
+            encodedPath,
           );
           if (!require("fs").existsSync(sessionsDir)) return;
           const currentFiles = require("fs")
@@ -286,7 +287,7 @@ export class AgentManager {
         } catch (err) {
           console.error(
             `[AgentManager] Failed to detect new session file for agent="${agentId}" rootPath="${rootPath}":`,
-            err
+            err,
           );
         }
       }, 5000);
@@ -317,13 +318,23 @@ export class AgentManager {
     // Telemetry: agent spawned — prefer MARBLO_PROJECT from launchConfig (always set by agent-config)
     const spawnProjectId =
       instance.launchConfig?.env?.MARBLO_PROJECT || params.projectId || "";
+    // Capture prompt context for moat-data: hash + length only, never the
+    // raw prompt. Hash lets us cluster identical prompts across agents
+    // (cache-hit shape) without leaking content into BigQuery.
+    const initial = params.initialPrompt;
+    const promptHash = initial
+      ? crypto.createHash("sha256").update(initial).digest("hex")
+      : undefined;
+    const promptLength = initial?.length;
     mainTelemetry.agentSpawned(
       this.getMainWindow?.() ?? null,
       params.id,
       params.name,
       params.model || "claude",
       params.role || "backend",
-      spawnProjectId
+      spawnProjectId,
+      promptHash,
+      promptLength,
     );
 
     // Start heartbeat for anomaly detection (ML-4)
@@ -351,7 +362,7 @@ export class AgentManager {
         mainTelemetry.agentStopped(
           this.getMainWindow?.() ?? null,
           params.id,
-          exitCode
+          exitCode,
         );
         return;
       }
@@ -363,7 +374,7 @@ export class AgentManager {
       if (wasFastFail) {
         agent.fastFailCount++;
         console.warn(
-          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`
+          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`,
         );
       }
 
@@ -376,17 +387,17 @@ export class AgentManager {
       if (agent.restartCount < MAX_RESTARTS && !fastFailExceeded) {
         const delay = Math.min(
           BACKOFF_BASE_MS * Math.pow(2, agent.restartCount),
-          BACKOFF_MAX_MS
+          BACKOFF_MAX_MS,
         );
         agent.restartCount++;
         this.onRestartAttempt?.(agent.id, agent.restartCount, MAX_RESTARTS);
         mainTelemetry.agentRestarted(
           this.getMainWindow?.() ?? null,
           agent.id,
-          agent.restartCount
+          agent.restartCount,
         );
         console.log(
-          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`
+          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`,
         );
 
         agent.restartTimer = setTimeout(() => {
@@ -401,15 +412,15 @@ export class AgentManager {
         mainTelemetry.agentCrashed(
           this.getMainWindow?.() ?? null,
           agent.id,
-          exitCode
+          exitCode,
         );
         if (fastFailExceeded) {
           console.error(
-            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`
+            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`,
           );
         } else {
           console.error(
-            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
+            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
           );
         }
       }
@@ -436,7 +447,7 @@ export class AgentManager {
     this.agents.delete(agentId);
 
     console.log(
-      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`
+      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`,
     );
 
     // Re-launch with resume
@@ -447,11 +458,11 @@ export class AgentManager {
         agent.cwd,
         "latest",
         agent.name,
-        agent.id
+        agent.id,
       );
       resolvedSessionId = resolved ?? "new";
       console.log(
-        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`
+        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`,
       );
     }
 
@@ -604,7 +615,7 @@ export class AgentManager {
     };
     this.agents.set(agent.id, instance);
     console.log(
-      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`
+      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`,
     );
   }
 
@@ -620,7 +631,7 @@ export class AgentManager {
   listAgentsByProject(projectId: string | undefined): AgentInstance[] {
     if (!projectId) return this.listAgents();
     return Array.from(this.agents.values()).filter(
-      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId
+      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId,
     );
   }
 

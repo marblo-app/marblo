@@ -1,8 +1,8 @@
-import { where, type Unsubscribe } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import type { Task, TaskStatus } from '../types/task';
-import telemetry from './telemetryService';
-import { functions } from '../lib/firebase';
+import { where, type Unsubscribe } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import type { Task, TaskStatus } from "../types/task";
+import telemetry from "./telemetryService";
+import { functions } from "../lib/firebase";
 import {
   getDocument,
   queryDocuments,
@@ -12,13 +12,22 @@ import {
   subscribeToCollection,
   toTimestamp,
   convertTimestamps,
-} from './firestore';
-import { assertTransition } from './stateMachine';
+} from "./firestore";
+import { assertTransition } from "./stateMachine";
 
-const logTaskOutcomeFn = httpsCallable(functions, 'logTaskOutcome');
+/** Subset of agents/<id> doc we care about for task-outcome enrichment. */
+interface AgentCostSnapshot {
+  model?: string;
+  detectedModelId?: string;
+  totalCost?: number;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+}
 
-const COLLECTION = 'tasks';
-const DATE_FIELDS = ['claimedAt', 'createdAt', 'updatedAt'];
+const logTaskOutcomeFn = httpsCallable(functions, "logTaskOutcome");
+
+const COLLECTION = "tasks";
+const DATE_FIELDS = ["claimedAt", "createdAt", "updatedAt"];
 
 function toTask(raw: Record<string, unknown>): Task {
   return convertTimestamps<Task>(raw, DATE_FIELDS);
@@ -27,7 +36,7 @@ function toTask(raw: Record<string, unknown>): Task {
 export async function getTasks(projectId: string): Promise<Task[]> {
   const docs = await queryDocuments<Record<string, unknown>>(
     COLLECTION,
-    where('projectId', '==', projectId),
+    where("projectId", "==", projectId),
   );
   return docs.map(toTask).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 }
@@ -38,7 +47,7 @@ export async function getTask(taskId: string): Promise<Task | null> {
 }
 
 export async function createTask(
-  data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>,
+  data: Omit<Task, "id" | "createdAt" | "updatedAt">,
 ): Promise<string> {
   const now = new Date();
   const taskId = await createDocument(COLLECTION, {
@@ -48,14 +57,19 @@ export async function createTask(
     updatedAt: toTimestamp(now),
   });
 
-  telemetry.taskCreated(taskId, data.projectId || '', data.role || '', data.priority);
+  telemetry.taskCreated(
+    taskId,
+    data.projectId || "",
+    data.role || "",
+    data.priority,
+  );
 
   return taskId;
 }
 
 export async function updateTask(
   taskId: string,
-  data: Partial<Omit<Task, 'id' | 'createdAt'>>,
+  data: Partial<Omit<Task, "id" | "createdAt">>,
 ): Promise<void> {
   const payload: Record<string, unknown> = {
     ...data,
@@ -77,8 +91,11 @@ export function subscribeToTasks(
 ): Unsubscribe {
   return subscribeToCollection<Record<string, unknown>>(
     COLLECTION,
-    [where('projectId', '==', projectId)],
-    (docs) => callback(docs.map(toTask).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))),
+    [where("projectId", "==", projectId)],
+    (docs) =>
+      callback(
+        docs.map(toTask).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)),
+      ),
   );
 }
 
@@ -88,16 +105,16 @@ export async function claimTask(
 ): Promise<void> {
   const task = await getTask(taskId);
   if (!task) throw new Error(`Task not found: ${taskId}`);
-  assertTransition(task.status, 'CLAIMED');
+  assertTransition(task.status, "CLAIMED");
 
   const previousStatus = task.status;
   await updateTask(taskId, {
-    status: 'CLAIMED',
+    status: "CLAIMED",
     claimedBy: agentId,
     claimedAt: new Date(),
   });
 
-  telemetry.taskStatusChanged(taskId, previousStatus, 'CLAIMED', agentId);
+  telemetry.taskStatusChanged(taskId, previousStatus, "CLAIMED", agentId);
 }
 
 export async function updateTaskStatus(
@@ -111,10 +128,36 @@ export async function updateTaskStatus(
   const currentStatus = task.status;
   await updateTask(taskId, { status });
 
-  telemetry.taskStatusChanged(taskId, currentStatus, status, task.claimedBy ?? undefined);
-  if (status === 'DONE') {
-    const durationMs = task.claimedAt ? Date.now() - new Date(task.claimedAt).getTime() : undefined;
+  telemetry.taskStatusChanged(
+    taskId,
+    currentStatus,
+    status,
+    task.claimedBy ?? undefined,
+  );
+  if (status === "DONE") {
+    const durationMs = task.claimedAt
+      ? Date.now() - new Date(task.claimedAt).getTime()
+      : undefined;
     telemetry.taskCompleted(taskId, durationMs, task.claimedBy ?? undefined);
+
+    // Pull model + cumulative cost from the agent doc so the outcome row
+    // carries actual signal instead of nulls. This is best-effort; if the
+    // agent doc is missing (e.g. orchestrator session) we still log with
+    // nulls so the success / duration row lands.
+    let agentSnap: AgentCostSnapshot | null = null;
+    if (task.claimedBy) {
+      try {
+        agentSnap = await getDocument<AgentCostSnapshot>(
+          "agents",
+          task.claimedBy,
+        );
+      } catch {
+        agentSnap = null;
+      }
+    }
+    // Prefer the cost-tracker-detected versioned id (e.g. "claude-opus-4-7")
+    // over the family enum ("claude") for ML training fidelity.
+    const outcomeModel = agentSnap?.detectedModelId ?? agentSnap?.model ?? null;
 
     // Log task outcome to BigQuery for ML training data
     logTaskOutcomeFn({
@@ -124,27 +167,56 @@ export async function updateTaskStatus(
         taskType: null, // TODO: derive from task metadata when available
         taskComplexity: task.priority, // use priority as proxy for now
         role: task.role,
-        model: null, // filled by agent context when available
+        model: outcomeModel,
         scopeFileCount: task.scope?.length ?? 0,
         success: true,
         durationMs: durationMs ?? null,
+        // Cumulative-at-completion. NOT per-task delta — for that, join
+        // BigQuery cost_logs by taskId. Still useful as a noisy signal
+        // ("agent in this state had spent N total when it finished").
+        totalInputTokens: agentSnap?.totalInputTokens ?? null,
+        totalOutputTokens: agentSnap?.totalOutputTokens ?? null,
+        totalCost: agentSnap?.totalCost ?? null,
         retriesCount: 0,
-        createdAt: task.createdAt instanceof Date ? task.createdAt.toISOString() : new Date().toISOString(),
+        createdAt:
+          task.createdAt instanceof Date
+            ? task.createdAt.toISOString()
+            : new Date().toISOString(),
         completedAt: new Date().toISOString(),
       },
     }).catch((err) => {
-      console.warn('[TaskOutcome] Failed to log outcome:', err);
+      console.warn("[TaskOutcome] Failed to log outcome:", err);
     });
   }
 
   // Send chat notifications for key transitions (best-effort, non-blocking)
-  if ((status === 'REVIEW' || status === 'DONE') && task.claimedBy && task.projectId) {
-    import('./agentNotificationService').then((mod) => {
-      if (status === 'REVIEW') {
-        mod.notifyAgentSubmittedForReview(task.projectId, task.claimedBy!, taskId, task.title).catch(() => {});
-      } else if (status === 'DONE') {
-        mod.notifyAgentTaskCompleted(task.projectId, task.claimedBy!, taskId, task.title).catch(() => {});
-      }
-    }).catch(() => {});
+  if (
+    (status === "REVIEW" || status === "DONE") &&
+    task.claimedBy &&
+    task.projectId
+  ) {
+    import("./agentNotificationService")
+      .then((mod) => {
+        if (status === "REVIEW") {
+          mod
+            .notifyAgentSubmittedForReview(
+              task.projectId,
+              task.claimedBy!,
+              taskId,
+              task.title,
+            )
+            .catch(() => {});
+        } else if (status === "DONE") {
+          mod
+            .notifyAgentTaskCompleted(
+              task.projectId,
+              task.claimedBy!,
+              taskId,
+              task.title,
+            )
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
   }
 }
