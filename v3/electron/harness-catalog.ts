@@ -37,6 +37,12 @@ export interface InstallStrategy {
   instructions?: string;
   /** For kind=npm-global: post-install message (e.g. auth instructions) */
   postInstall?: string;
+  /**
+   * Optional commands to run after a successful install. Best-effort —
+   * failures are logged but don't fail the parent install. Used to enable
+   * feature flags on freshly-installed CLIs (e.g. `codex features enable goals`).
+   */
+  postInstallExec?: Array<{ command: string; args: string[] }>;
 }
 
 export interface DetectStrategy {
@@ -107,14 +113,17 @@ export const CATALOG: HarnessPackage[] = [
     id: "cli-codex",
     name: "OpenAI Codex CLI",
     description:
-      "Codex (gpt) 에이전트 실행에 필요한 CLI. `npm install -g @openai/codex`. 설치 후 `codex login`으로 인증.",
+      "Codex (gpt) 에이전트 실행에 필요한 CLI. `npm install -g @openai/codex`. 설치 후 `codex login`으로 인증. /goal 기능은 설치 시 자동 활성화됩니다.",
     type: "cli",
     category: "required",
     install: {
       kind: "npm-global",
       source: "@openai/codex",
       postInstall:
-        "설치 후 터미널에서 `codex login` 실행해서 OpenAI 계정 인증을 완료하세요.",
+        "설치 후 터미널에서 `codex login` 실행해서 OpenAI 계정 인증을 완료하세요. /goal 기능이 자동 활성화됐으니, 인증 후 Codex 세션에서 `/goal <목표>`로 자율 모드 사용 가능.",
+      postInstallExec: [
+        { command: "codex", args: ["features", "enable", "goals"] },
+      ],
     },
     detect: { binary: "codex" },
     url: "https://github.com/openai/codex",

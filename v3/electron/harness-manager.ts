@@ -164,6 +164,54 @@ async function installGit(strategy: InstallStrategy): Promise<void> {
   }
 }
 
+/**
+ * Run optional post-install hooks (e.g. `codex features enable goals`).
+ * Best-effort: errors are logged to console but never thrown — a feature-flag
+ * failure should not invalidate a successful CLI install.
+ */
+async function runPostInstallExec(
+  strategy: InstallStrategy,
+  enrichedPath: string
+): Promise<void> {
+  if (!strategy.postInstallExec || strategy.postInstallExec.length === 0) {
+    return;
+  }
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: enrichedPath };
+  for (const step of strategy.postInstallExec) {
+    try {
+      const result = await new Promise<{
+        code: number;
+        stdout: string;
+        stderr: string;
+      }>((resolve) => {
+        let stdout = "";
+        let stderr = "";
+        const child = spawn(step.command, step.args, { env });
+        child.stdout.on("data", (d) => (stdout += d.toString()));
+        child.stderr.on("data", (d) => (stderr += d.toString()));
+        child.on("close", (code) =>
+          resolve({ code: code ?? -1, stdout, stderr })
+        );
+        child.on("error", (err) =>
+          resolve({ code: -1, stdout, stderr: stderr + err.message })
+        );
+      });
+      if (result.code !== 0) {
+        console.warn(
+          `[harness] postInstallExec ${step.command} ${step.args.join(
+            " "
+          )} exit ${result.code}: ${(result.stderr || result.stdout).trim()}`
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[harness] postInstallExec ${step.command} threw:`,
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+}
+
 async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
   if (!strategy.source) {
     throw new Error("npm-global install requires a package name in source");
@@ -212,6 +260,8 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
       `npm install -g ${strategy.source} 실패 (exit ${result.code})\n${tail}`
     );
   }
+  // npm install 성공 — feature-flag 같은 후속 작업 (best-effort)
+  await runPostInstallExec(strategy, enrichedPath);
 }
 
 async function installMcp(
