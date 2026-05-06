@@ -21,7 +21,10 @@ interface ActivityStreamState {
  * transient observability tool.
  */
 export const useActivityStreamStore = create<ActivityStreamState>((set) => ({
-  open: false,
+  // Default open — the panel is the canonical "what's happening right now"
+  // surface, paired with the kanban as the macro view. Users who want it
+  // hidden close via header toggle or ⌘⇧A.
+  open: true,
   filter: "all",
   viewMode: "stream",
   toggle: () => set((s) => ({ open: !s.open })),
