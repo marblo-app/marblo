@@ -799,13 +799,15 @@ export class BridgeServer {
     const agentName =
       params.nameHint ||
       `${role}-${selectedModel}-${Date.now().toString(36).slice(-4)}`;
-    const cwd = params.cwd || process.cwd();
-
+    // Don't eagerly fall back to process.cwd() here — let spawnNewAgent's
+    // resolveSpawnCwd run the full chain (parent agent → orchestrator
+    // rootPath → process.cwd()) so dispatch-time spawns inherit the
+    // project folder instead of /.
     const spawnResult = this.spawnNewAgent({
       name: agentName,
       model: selectedModel,
       role,
-      cwd,
+      cwd: params.cwd,
       initialPrompt: instruction,
       projectId: params.projectId,
       parentAgentId: params.parentAgentId,
@@ -857,11 +859,42 @@ export class BridgeServer {
     return scoreModelsFn(enabledModels, tags);
   }
 
+  /**
+   * Pick a working directory for a freshly-spawned agent.
+   *
+   * Priority:
+   *   1. params.cwd  — explicit override from the caller (renderer or MCP)
+   *   2. parent agent's cwd  — when MCP forwards parentAgentId, inherit
+   *      its working dir so child agents stay in the project folder
+   *   3. orchestrator session's rootPath  — same project, derived from
+   *      the OrchestratorManager
+   *   4. process.cwd()  — last-resort fallback (often "/" on macOS Finder
+   *      launches; only used when nothing else can resolve)
+   */
+  private resolveSpawnCwd(params: SpawnAgentRequest): string {
+    if (params.cwd) return params.cwd;
+    if (params.parentAgentId) {
+      const parent = this.agentManager.getAgent(params.parentAgentId);
+      if (parent?.cwd) return parent.cwd;
+    }
+    if (params.projectId) {
+      const orch = this.orchestratorLookup(params.projectId);
+      const root = orch?.getSession()?.rootPath;
+      if (root) return root;
+    }
+    return process.cwd();
+  }
+
   // ── Shared spawn logic ──────────────────────────────────────
 
   private spawnNewAgent(params: SpawnAgentRequest): SpawnAgentResponse {
     const agentId = crypto.randomUUID();
-    const cwd = params.cwd || process.cwd();
+    // cwd resolution chain: explicit → parent agent's cwd → orchestrator
+    // for the same project → process.cwd(). This fixes the "agent opens
+    // in / instead of project folder" issue when the orchestrator omits
+    // cwd in dispatch_task. Electron launched from Finder has process.cwd()
+    // == "/", so the explicit-cwd fallback is what kept it working at all.
+    const cwd = this.resolveSpawnCwd(params);
 
     // PTY forwarding is delegated to the host (main process) via
     // agentSpawnedHook so multi-window owner-routing happens consistently.
