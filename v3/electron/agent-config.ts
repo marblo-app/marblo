@@ -489,14 +489,24 @@ export class AgentConfigGenerator {
       }
 
       case "gpt":
-        // Codex CLI reads its config from $CODEX_HOME/config.toml — point it
-        // at our per-agent dir (created by generateGPTConfig) so the
-        // [mcp_servers.marblo] entry is loaded and Marblo MCP becomes
-        // callable. Without this, Codex only sees the user's global
-        // ~/.codex/config.toml and never finds Marblo's MCP.
+        // Codex CLI (Rust): reads config from $CODEX_HOME/config.toml — point
+        // it at our per-agent dir (created by generateGPTConfig) so the
+        // [mcp_servers.marblo] entry is loaded.
+        //
+        // The legacy `--full-auto` flag was removed in modern Codex; the
+        // current equivalent is two TOML overrides via `-c key=value`:
+        //   approval_policy="never"      — don't prompt for tool approvals
+        //   sandbox_mode="danger-full-access" — let the agent edit anything
+        // Together these mirror Claude Code's --dangerously-skip-permissions
+        // and let Marblo agents run unattended.
         return {
           command: baseCommand || "codex",
-          args: ["--full-auto"],
+          args: [
+            "-c",
+            'approval_policy="never"',
+            "-c",
+            'sandbox_mode="danger-full-access"',
+          ],
           env: { ...env, CODEX_HOME: path.dirname(mcpConfigPath) },
         };
 
