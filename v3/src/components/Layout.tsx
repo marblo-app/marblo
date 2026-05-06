@@ -24,6 +24,7 @@ import { useTerminalStore } from "../stores/terminalStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useActivityStreamStore } from "../stores/activityStreamStore";
+import { useNavigationStore } from "../stores/navigationStore";
 
 function GatedFlowsTab() {
   return (
@@ -94,6 +95,16 @@ export function Layout() {
   //   Cmd/Ctrl+Shift+A — Activity Stream side panel
   // Plus a custom event so future Sidebar/Header buttons can trigger Harness.
   const toggleActivityStream = useActivityStreamStore((s) => s.toggle);
+
+  // When Activity Stream requests a jump (task / agent), switch to the right
+  // tab. The destination tab consumes the latched target on mount via
+  // useNavigationStore.consumeJump() and applies its own selection.
+  const pendingJump = useNavigationStore((s) => s.pendingJump);
+  useEffect(() => {
+    if (!pendingJump) return;
+    if (pendingJump.type === "task") setActiveTab("board");
+    else if (pendingJump.type === "agent") setActiveTab("agents");
+  }, [pendingJump]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;

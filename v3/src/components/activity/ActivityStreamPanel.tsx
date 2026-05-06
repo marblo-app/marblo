@@ -9,8 +9,11 @@ import {
 import {
   useActivityStreamStore,
   type ActivityFilter,
+  type ActivityViewMode,
 } from "../../stores/activityStreamStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useNavigationStore } from "../../stores/navigationStore";
+import { MacroView } from "./MacroView";
 
 const FILTER_ORDER: ActivityFilter[] = [
   "all",
@@ -25,6 +28,11 @@ const FILTER_ORDER: ActivityFilter[] = [
   "error",
 ];
 
+const VIEW_MODES: { id: ActivityViewMode; label: string }[] = [
+  { id: "stream", label: "Stream" },
+  { id: "macro", label: "Macro" },
+];
+
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
   if (seconds < 60) return `${Math.max(1, seconds)}s`;
@@ -36,13 +44,33 @@ function timeAgo(date: Date): string {
   return `${days}d`;
 }
 
-/** One row in the stream. Click to expand inline detail (params + result). */
+/** Best-effort task id extraction from MCP tool params. */
+function extractTaskId(entry: ActivityEntry): string | null {
+  const p = entry.params;
+  if (typeof p.task_id === "string") return p.task_id;
+  if (typeof p.taskId === "string") return p.taskId as string;
+  return null;
+}
+
+/** Latch a navigation request — Layout switches tab, the destination tab
+ *  consumes the target on mount via useNavigationStore.consumeJump(). */
+function jumpTo(target: { type: "task" | "agent"; id: string }) {
+  useNavigationStore.getState().requestJump(target);
+}
+
+/**
+ * One row in the stream. Click to expand inline detail (params + result).
+ * `content-visibility: auto` lets the browser skip painting offscreen rows
+ * — gives most of the benefit of a JS virtualizer with zero deps.
+ */
 function ActivityRow({ entry }: { entry: ActivityEntry }) {
   const [expanded, setExpanded] = useState(false);
   const icon = ACTIVITY_TYPE_ICON[entry.type];
   const label = ACTIVITY_TYPE_LABEL[entry.type];
-  // Pull a useful one-liner from params / result. agentId is more
-  // informative than the doc id in 90% of cases.
+  const taskId = extractTaskId(entry);
+  const agentId =
+    entry.agentId && entry.agentId !== "unknown" ? entry.agentId : null;
+
   const summary =
     entry.toolName === "add_activity" &&
     typeof entry.params.message === "string"
@@ -53,80 +81,116 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
       : entry.toolName === "update_task_status" &&
         typeof entry.params.status === "string"
       ? `→ ${entry.params.status}`
-      : entry.toolName === "claim_task" &&
-        typeof entry.params.task_id === "string"
-      ? `task ${(entry.params.task_id as string).slice(0, 8)}`
+      : entry.toolName === "claim_task" && taskId
+      ? `task ${taskId.slice(0, 8)}`
       : entry.result.slice(0, 80) || entry.toolName;
 
   return (
-    <button
-      type="button"
-      onClick={() => setExpanded((v) => !v)}
-      className={`w-full text-left rounded border border-transparent px-2 py-1.5 hover:bg-[#262640] hover:border-[#313244] transition-colors ${
-        expanded ? "bg-[#262640] border-[#313244]" : ""
+    <div
+      className={`rounded border border-transparent transition-colors ${
+        expanded
+          ? "bg-[#262640] border-[#313244]"
+          : "hover:bg-[#262640] hover:border-[#313244]"
       }`}
+      style={{ contentVisibility: "auto", containIntrinsicSize: "0 56px" }}
     >
-      <div className="flex items-start gap-2">
-        <span
-          className="mt-0.5 text-sm leading-none"
-          aria-label={label}
-          title={label}
-        >
-          {icon}
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-[11px] font-medium text-[#cdd6f4] truncate">
-              {label}
-            </span>
-            <span className="text-[10px] text-[#6c7086] truncate">
-              {entry.agentId.slice(0, 12)}
-            </span>
-            <span className="ml-auto text-[10px] text-[#6c7086] flex-shrink-0">
-              {timeAgo(entry.createdAt)}
-            </span>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full text-left px-2 py-1.5"
+      >
+        <div className="flex items-start gap-2">
+          <span
+            className="mt-0.5 text-sm leading-none"
+            aria-label={label}
+            title={label}
+          >
+            {icon}
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-[11px] font-medium text-[#cdd6f4] truncate">
+                {label}
+              </span>
+              <span className="text-[10px] text-[#6c7086] truncate">
+                {entry.agentId.slice(0, 12)}
+              </span>
+              <span className="ml-auto text-[10px] text-[#6c7086] flex-shrink-0">
+                {timeAgo(entry.createdAt)}
+              </span>
+            </div>
+            <p className="text-[11px] text-[#bac2de] line-clamp-2 break-all">
+              {summary}
+            </p>
           </div>
-          <p className="text-[11px] text-[#bac2de] line-clamp-2 break-all">
-            {summary}
-          </p>
-          {expanded && (
-            <div className="mt-1.5 space-y-1 text-[10px]">
-              <div>
-                <span className="text-[#6c7086]">tool:</span>{" "}
-                <code className="text-[#89b4fa]">{entry.toolName}</code>
-                <span className="text-[#6c7086] ml-2">{entry.duration}ms</span>
-                {!entry.success && (
-                  <span className="ml-2 rounded bg-[#f38ba8]/20 px-1 text-[#f38ba8]">
-                    failed
-                  </span>
-                )}
-              </div>
-              {Object.keys(entry.params).length > 0 && (
-                <div>
-                  <div className="text-[#6c7086]">params:</div>
-                  <pre className="mt-0.5 rounded bg-[#11111b] p-1.5 text-[#cdd6f4] whitespace-pre-wrap break-all max-h-32 overflow-auto">
-                    {JSON.stringify(entry.params, null, 2)}
-                  </pre>
-                </div>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="px-2 pb-2 space-y-1.5 text-[10px]">
+          <div>
+            <span className="text-[#6c7086]">tool:</span>{" "}
+            <code className="text-[#89b4fa]">{entry.toolName}</code>
+            <span className="text-[#6c7086] ml-2">{entry.duration}ms</span>
+            {!entry.success && (
+              <span className="ml-2 rounded bg-[#f38ba8]/20 px-1 text-[#f38ba8]">
+                failed
+              </span>
+            )}
+          </div>
+          {Object.keys(entry.params).length > 0 && (
+            <div>
+              <div className="text-[#6c7086]">params:</div>
+              <pre className="mt-0.5 rounded bg-[#11111b] p-1.5 text-[#cdd6f4] whitespace-pre-wrap break-all max-h-32 overflow-auto">
+                {JSON.stringify(entry.params, null, 2)}
+              </pre>
+            </div>
+          )}
+          {entry.result && (
+            <div>
+              <div className="text-[#6c7086]">result:</div>
+              <pre className="mt-0.5 rounded bg-[#11111b] p-1.5 text-[#cdd6f4] whitespace-pre-wrap break-all max-h-32 overflow-auto">
+                {entry.result}
+              </pre>
+            </div>
+          )}
+          {(taskId || agentId) && (
+            <div className="flex gap-1.5 pt-0.5">
+              {taskId && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    jumpTo({ type: "task", id: taskId });
+                  }}
+                  className="rounded bg-[#89b4fa]/20 px-2 py-1 text-[10px] text-[#89b4fa] hover:bg-[#89b4fa]/30"
+                >
+                  📋 태스크 열기
+                </button>
               )}
-              {entry.result && (
-                <div>
-                  <div className="text-[#6c7086]">result:</div>
-                  <pre className="mt-0.5 rounded bg-[#11111b] p-1.5 text-[#cdd6f4] whitespace-pre-wrap break-all max-h-32 overflow-auto">
-                    {entry.result}
-                  </pre>
-                </div>
+              {agentId && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    jumpTo({ type: "agent", id: agentId });
+                  }}
+                  className="rounded bg-[#cba6f7]/20 px-2 py-1 text-[10px] text-[#cba6f7] hover:bg-[#cba6f7]/30"
+                >
+                  🤖 에이전트 보기
+                </button>
               )}
             </div>
           )}
         </div>
-      </div>
-    </button>
+      )}
+    </div>
   );
 }
 
 export function ActivityStreamPanel() {
-  const { open, filter, setFilter, toggle } = useActivityStreamStore();
+  const { open, filter, setFilter, toggle, viewMode, setViewMode } =
+    useActivityStreamStore();
   const currentProject = useProjectStore((s) => s.currentProject);
   const [entries, setEntries] = useState<ActivityEntry[]>([]);
 
@@ -189,44 +253,74 @@ export function ActivityStreamPanel() {
         </button>
       </div>
 
-      {/* Filter chips */}
-      <div className="flex flex-wrap gap-1 border-b border-[#313244] px-2 py-1.5">
-        {FILTER_ORDER.map((f) => {
-          const active = filter === f;
-          const count = f === "all" ? entries.length : counts[f] ?? 0;
-          const icon = f === "all" ? "•" : ACTIVITY_TYPE_ICON[f];
+      {/* View mode toggle */}
+      <div className="flex border-b border-[#313244]">
+        {VIEW_MODES.map((m) => {
+          const active = viewMode === m.id;
           return (
             <button
-              key={f}
+              key={m.id}
               type="button"
-              onClick={() => setFilter(f)}
-              className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+              onClick={() => setViewMode(m.id)}
+              className={`flex-1 px-3 py-1.5 text-[11px] font-medium transition-colors ${
                 active
-                  ? "bg-[#89b4fa]/20 text-[#89b4fa]"
-                  : "text-[#6c7086] hover:bg-[#313244] hover:text-[#cdd6f4]"
+                  ? "bg-[#262640] text-[#89b4fa] border-b-2 border-[#89b4fa]"
+                  : "text-[#6c7086] hover:bg-[#262640] hover:text-[#cdd6f4]"
               }`}
-              title={f === "all" ? "All" : ACTIVITY_TYPE_LABEL[f]}
             >
-              <span>{icon}</span>
-              <span>{count}</span>
+              {m.label}
             </button>
           );
         })}
       </div>
 
-      {/* Stream */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {filtered.length === 0 && (
-          <p className="px-2 py-6 text-center text-xs text-[#6c7086]">
-            {entries.length === 0
-              ? "활동이 아직 없습니다. 에이전트가 MCP 도구를 호출하면 여기 표시됩니다."
-              : "이 필터에 해당하는 항목이 없습니다."}
-          </p>
-        )}
-        {filtered.map((e) => (
-          <ActivityRow key={e.id} entry={e} />
-        ))}
-      </div>
+      {viewMode === "macro" ? (
+        <MacroView
+          entries={entries}
+          onSelectAgent={(id) => jumpTo({ type: "agent", id })}
+        />
+      ) : (
+        <>
+          {/* Filter chips */}
+          <div className="flex flex-wrap gap-1 border-b border-[#313244] px-2 py-1.5">
+            {FILTER_ORDER.map((f) => {
+              const active = filter === f;
+              const count = f === "all" ? entries.length : counts[f] ?? 0;
+              const icon = f === "all" ? "•" : ACTIVITY_TYPE_ICON[f];
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setFilter(f)}
+                  className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                    active
+                      ? "bg-[#89b4fa]/20 text-[#89b4fa]"
+                      : "text-[#6c7086] hover:bg-[#313244] hover:text-[#cdd6f4]"
+                  }`}
+                  title={f === "all" ? "All" : ACTIVITY_TYPE_LABEL[f]}
+                >
+                  <span>{icon}</span>
+                  <span>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Stream */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {filtered.length === 0 && (
+              <p className="px-2 py-6 text-center text-xs text-[#6c7086]">
+                {entries.length === 0
+                  ? "활동이 아직 없습니다. 에이전트가 MCP 도구를 호출하면 여기 표시됩니다."
+                  : "이 필터에 해당하는 항목이 없습니다."}
+              </p>
+            )}
+            {filtered.map((e) => (
+              <ActivityRow key={e.id} entry={e} />
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Footer */}
       <div className="border-t border-[#313244] px-3 py-1.5 text-[10px] text-[#6c7086]">

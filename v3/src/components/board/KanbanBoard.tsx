@@ -1,25 +1,40 @@
-import { useEffect, useState, useCallback } from 'react';
-import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragStartEvent, type DragEndEvent } from '@dnd-kit/core';
-import type { Task, TaskStatus, AgentRole } from '../../types/task';
-import { useProjectStore } from '../../stores/projectStore';
-import { useTaskStore } from '../../stores/taskStore';
-import { useSubscriptionStore } from '../../stores/subscriptionStore';
-import { KanbanColumn } from './KanbanColumn';
-import { TaskCard } from './TaskCard';
-import { TaskCreateModal } from './TaskCreateModal';
-import { TaskDetailModal } from './TaskDetailModal';
-import { OrchestratorChat } from '../orchestrator/OrchestratorChat';
-import { getNextStatuses, canTransition } from '../../services/stateMachine';
-import { updateTaskStatus } from '../../services/taskService';
+import { useEffect, useState, useCallback } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragStartEvent,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import type { Task, TaskStatus, AgentRole } from "../../types/task";
+import { useProjectStore } from "../../stores/projectStore";
+import { useTaskStore } from "../../stores/taskStore";
+import { useSubscriptionStore } from "../../stores/subscriptionStore";
+import { useNavigationStore } from "../../stores/navigationStore";
+import { KanbanColumn } from "./KanbanColumn";
+import { TaskCard } from "./TaskCard";
+import { TaskCreateModal } from "./TaskCreateModal";
+import { TaskDetailModal } from "./TaskDetailModal";
+import { OrchestratorChat } from "../orchestrator/OrchestratorChat";
+import { getNextStatuses, canTransition } from "../../services/stateMachine";
+import { updateTaskStatus } from "../../services/taskService";
 
-const COLUMN_STATUSES: TaskStatus[] = ['TODO', 'CLAIMED', 'IN_PROGRESS', 'REVIEW', 'DONE'];
+const COLUMN_STATUSES: TaskStatus[] = [
+  "TODO",
+  "CLAIMED",
+  "IN_PROGRESS",
+  "REVIEW",
+  "DONE",
+];
 
 // BLOCKED/FAILED 태스크가 표시될 폴백 컬럼 (직전 상태 기준)
 const FALLBACK_COLUMN: Record<string, TaskStatus> = {
-  BLOCKED: 'IN_PROGRESS',
-  FAILED: 'IN_PROGRESS',
+  BLOCKED: "IN_PROGRESS",
+  FAILED: "IN_PROGRESS",
 };
-const ROLES: AgentRole[] = ['backend', 'frontend', 'test', 'devops'];
+const ROLES: AgentRole[] = ["backend", "frontend", "test", "devops"];
 
 export function KanbanBoard() {
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -36,10 +51,12 @@ export function KanbanBoard() {
 
   // Drag-and-drop state
   const [activeTask, setActiveTask] = useState<Task | null>(null);
-  const [validDropStatuses, setValidDropStatuses] = useState<Set<TaskStatus>>(new Set());
+  const [validDropStatuses, setValidDropStatuses] = useState<Set<TaskStatus>>(
+    new Set()
+  );
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -66,17 +83,20 @@ export function KanbanBoard() {
       await updateTaskStatus(task.id, targetStatus);
       // Notify assigned agent about drag-drop status change
       if (task.claimedBy) {
-        const isCancelled = targetStatus === 'BLOCKED' || targetStatus === 'FAILED';
-        window.electronAPI.bridge.injectMessage({
-          targetAgent: task.claimedBy,
-          tag: isCancelled ? 'Task Cancelled' : 'Task Status Changed',
-          message: `상태 변경: ${task.status} → ${targetStatus}`,
-          taskId: task.id,
-          taskTitle: task.title,
-        }).catch(() => {});
+        const isCancelled =
+          targetStatus === "BLOCKED" || targetStatus === "FAILED";
+        window.electronAPI.bridge
+          .injectMessage({
+            targetAgent: task.claimedBy,
+            tag: isCancelled ? "Task Cancelled" : "Task Status Changed",
+            message: `상태 변경: ${task.status} → ${targetStatus}`,
+            taskId: task.id,
+            taskTitle: task.title,
+          })
+          .catch(() => {});
       }
     } catch (err) {
-      console.error('Failed to update task status:', err);
+      console.error("Failed to update task status:", err);
     }
   }, []);
 
@@ -96,6 +116,23 @@ export function KanbanBoard() {
       }
     }
   }, [tasks]);
+
+  // Consume cross-tab jump targets (e.g. Activity Stream "📋 태스크 열기").
+  // Layout has already switched to the board tab by the time we mount; we
+  // grab the latched target, find the task in store, open the detail modal,
+  // and clear the latch so it doesn't fire again.
+  const pendingJump = useNavigationStore((s) => s.pendingJump);
+  const consumeJump = useNavigationStore((s) => s.consumeJump);
+  useEffect(() => {
+    if (!pendingJump || pendingJump.type !== "task") return;
+    const task = tasks.find((t) => t.id === pendingJump.id);
+    if (task) {
+      setSelectedTask(task);
+      consumeJump();
+    }
+    // If tasks haven't loaded yet, retry on next tasks update — leave the
+    // latch alone for now.
+  }, [pendingJump, tasks, consumeJump]);
 
   const toggleRole = (role: AgentRole) => {
     setRoleFilters((prev) => {
@@ -127,7 +164,9 @@ export function KanbanBoard() {
       <div className="flex h-full items-center justify-center text-gray-400">
         <div className="text-center">
           <p className="text-lg font-medium">No Projects</p>
-          <p className="mt-1 text-sm text-gray-500">Create a project to start using the board.</p>
+          <p className="mt-1 text-sm text-gray-500">
+            Create a project to start using the board.
+          </p>
         </div>
       </div>
     );
@@ -149,12 +188,17 @@ export function KanbanBoard() {
       {/* Toolbar */}
       <div className="flex items-center gap-4 px-4 py-3 border-b border-gray-700/50 flex-shrink-0">
         {/* Project name (read-only, selection now in Header) */}
-        <span className="text-sm font-medium text-gray-300">{currentProject.name}</span>
+        <span className="text-sm font-medium text-gray-300">
+          {currentProject.name}
+        </span>
 
         {/* Role Filters */}
         <div className="flex items-center gap-2">
           {ROLES.map((role) => (
-            <label key={role} className="flex items-center gap-1 cursor-pointer select-none">
+            <label
+              key={role}
+              className="flex items-center gap-1 cursor-pointer select-none"
+            >
               <input
                 type="checkbox"
                 checked={roleFilters.has(role)}
@@ -170,17 +214,27 @@ export function KanbanBoard() {
 
         {/* Task count */}
         <span className="text-xs text-gray-500">
-          {filteredTasks.length} task{filteredTasks.length !== 1 ? 's' : ''}
+          {filteredTasks.length} task{filteredTasks.length !== 1 ? "s" : ""}
         </span>
 
         {/* AI Decompose button */}
-        {canUse('orchestrator') && (
+        {canUse("orchestrator") && (
           <button
             onClick={() => setShowOrchestrator(true)}
             className="flex items-center gap-1.5 rounded border border-purple-500/50 bg-purple-500/10 px-3 py-1.5 text-sm font-medium text-purple-400 hover:bg-purple-500/20"
           >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M13 10V3L4 14h7v7l9-11h-7z"
+              />
             </svg>
             AI 분해
           </button>
@@ -196,7 +250,11 @@ export function KanbanBoard() {
       </div>
 
       {/* Board columns */}
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
         <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
           <div className="flex gap-4 h-full">
             {COLUMN_STATUSES.map((status) => (
