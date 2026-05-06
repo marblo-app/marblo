@@ -1,4 +1,5 @@
-import { create } from 'zustand';
+import { create } from "zustand";
+import { useEditorStore } from "./editorStore";
 
 export interface TerminalSession {
   id: string;
@@ -11,9 +12,22 @@ interface TerminalState {
   sessions: TerminalSession[];
   activeSessionId: string | null;
   setActiveSessionId: (id: string | null) => void;
-  createSession: (name: string, command?: string, args?: string[], cwd?: string) => Promise<string>;
+  createSession: (
+    name: string,
+    command?: string,
+    args?: string[],
+    cwd?: string
+  ) => Promise<string>;
   attachSession: (id: string, name: string) => void;
   closeSession: (id: string) => Promise<void>;
+  /**
+   * Detach every terminal session from THIS window's UI without killing the
+   * backing PTYs. Used when the window switches projects — agent PTYs may be
+   * owned by other windows / live across project switches, so we only drop
+   * UI listeners and clear local state. Non-agent (user-spawned) terminal
+   * sessions are killed since no other window can adopt them.
+   */
+  detachAllSessions: () => Promise<void>;
 }
 
 const terminalStore = create<TerminalState>((set, get) => ({
@@ -24,8 +38,22 @@ const terminalStore = create<TerminalState>((set, get) => ({
 
   createSession: async (name, command, args, cwd) => {
     const id = crypto.randomUUID();
-    const result = await window.electronAPI.pty.create({ id, name, command, args, cwd });
-    const session: TerminalSession = { id: result.id, name, shell: result.shell };
+    // Default cwd to the project's rootPath so user-spawned terminals open
+    // in the project folder instead of the user's home (or "/" when
+    // Electron was launched from Finder). Explicit cwd still wins.
+    const resolvedCwd = cwd ?? useEditorStore.getState().rootPath ?? undefined;
+    const result = await window.electronAPI.pty.create({
+      id,
+      name,
+      command,
+      args,
+      cwd: resolvedCwd,
+    });
+    const session: TerminalSession = {
+      id: result.id,
+      name,
+      shell: result.shell,
+    };
     set((s) => ({ sessions: [...s.sessions, session], activeSessionId: id }));
     return id;
   },
@@ -52,8 +80,27 @@ const terminalStore = create<TerminalState>((set, get) => ({
     const next = sessions.filter((s) => s.id !== id);
     set({
       sessions: next,
-      activeSessionId: activeSessionId === id ? (next.length > 0 ? next[next.length - 1].id : null) : activeSessionId,
+      activeSessionId:
+        activeSessionId === id
+          ? next.length > 0
+            ? next[next.length - 1].id
+            : null
+          : activeSessionId,
     });
+  },
+
+  detachAllSessions: async () => {
+    const { sessions } = get();
+    for (const s of sessions) {
+      window.electronAPI.pty.removeListeners(s.id);
+      // User-spawned terminals (not isAgent) belong to this window only and
+      // would leak if we just dropped them from the UI. Agent PTYs may be
+      // owned by other windows or AgentManager — don't kill them.
+      if (!s.isAgent) {
+        await window.electronAPI.pty.kill(s.id).catch(() => {});
+      }
+    }
+    set({ sessions: [], activeSessionId: null });
   },
 }));
 
