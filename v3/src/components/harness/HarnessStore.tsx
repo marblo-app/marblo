@@ -191,6 +191,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
               const isBusy = busy === pkg.id;
               const isInstalled = pkg.status === "installed";
               const isRequired = pkg.category === "required";
+              const isBundled = pkg.install.kind === "bundled";
               const isManual = pkg.install.kind === "manual";
               return (
                 <div
@@ -225,15 +226,17 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                     {!isInstalled && (
                       <button
                         onClick={() => handleInstall(pkg)}
-                        disabled={isBusy || isRequired}
+                        disabled={isBusy || isBundled}
                         className="rounded bg-[#89b4fa]/20 px-2.5 py-1 text-xs text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/30 disabled:opacity-50"
                       >
                         {isBusy
                           ? "설치 중..."
                           : isManual
                           ? "안내 보기"
-                          : isRequired
+                          : isBundled
                           ? "자동 설치됨"
+                          : isRequired
+                          ? "필수 — 설치"
                           : STATUS_LABEL[pkg.status]}
                       </button>
                     )}
