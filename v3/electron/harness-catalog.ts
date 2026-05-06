@@ -84,8 +84,25 @@ export const CATALOG: HarnessPackage[] = [
   },
 
   // ── Required CLIs (heterogeneous-agent core) ────────────────────
-  // Codex / Gemini CLI 없이는 dispatch_task(model="gpt"|"gemini") 가
-  // spawn 즉시 fast-fail 됨. npm 글로벌 설치라 사용자 동의 후 1-clic.
+  // Marblo 오케스트레이터와 워커 에이전트는 모두 `claude` / `codex` /
+  // `gemini` 바이너리에 의존. 없으면 spawn 즉시 fast-fail. npm 글로벌
+  // 설치라 사용자 동의 후 1-click.
+  {
+    id: "cli-claude-code",
+    name: "Claude Code CLI",
+    description:
+      "오케스트레이터 및 Claude 에이전트 실행에 필요한 CLI. `npm install -g @anthropic-ai/claude-code`. 설치 후 `claude` 첫 실행 시 OAuth 또는 API 키로 인증.",
+    type: "cli",
+    category: "required",
+    install: {
+      kind: "npm-global",
+      source: "@anthropic-ai/claude-code",
+      postInstall:
+        "설치 후 터미널에서 `claude` 한 번 실행해서 Anthropic 계정 OAuth 또는 API 키 인증을 완료하세요. 그 후 Marblo 재시작.",
+    },
+    detect: { binary: "claude" },
+    url: "https://docs.claude.com/en/docs/claude-code",
+  },
   {
     id: "cli-codex",
     name: "OpenAI Codex CLI",
