@@ -15,6 +15,7 @@ import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
 import { TaskCreateModal } from "./board/TaskCreateModal";
 import { HarnessStore } from "./harness/HarnessStore";
 import { GuideTab } from "./guide/GuideTab";
+import { ActivityStreamPanel } from "./activity/ActivityStreamPanel";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
 import { useAgentReconnect } from "../hooks/useAgentReconnect";
 import { useSessionRestore } from "../hooks/useSessionRestore";
@@ -22,6 +23,7 @@ import { useCostWriter } from "../hooks/useCostWriter";
 import { useTerminalStore } from "../stores/terminalStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useEditorStore } from "../stores/editorStore";
+import { useActivityStreamStore } from "../stores/activityStreamStore";
 
 function GatedFlowsTab() {
   return (
@@ -87,17 +89,21 @@ export function Layout() {
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showHarnessStore, setShowHarnessStore] = useState(false);
 
-  // Open Harness store via global keyboard shortcut (Cmd/Ctrl+Shift+H)
-  // and via custom event so future Sidebar/Header buttons can trigger it.
+  // Global keyboard shortcuts:
+  //   Cmd/Ctrl+Shift+H — Harness store
+  //   Cmd/Ctrl+Shift+A — Activity Stream side panel
+  // Plus a custom event so future Sidebar/Header buttons can trigger Harness.
+  const toggleActivityStream = useActivityStreamStore((s) => s.toggle);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        e.key.toLowerCase() === "h"
-      ) {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "h") {
         e.preventDefault();
         setShowHarnessStore(true);
+      } else if (key === "a") {
+        e.preventDefault();
+        toggleActivityStream();
       }
     };
     const onOpenHarness = () => setShowHarnessStore(true);
@@ -107,7 +113,7 @@ export function Layout() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("marblo:open-harness", onOpenHarness);
     };
-  }, []);
+  }, [toggleActivityStream]);
 
   // Restore last session (rootPath + project) on startup
   const { isNewWindow } = useSessionRestore();
@@ -296,6 +302,11 @@ export function Layout() {
             <TerminalPanel />
           )}
         </div>
+
+        {/* Activity Stream — right-side collapsible panel (⌘⇧A toggles).
+            Lives outside the content column so it spans full body height
+            and doesn't squeeze the orchestrator/terminal stacks. */}
+        <ActivityStreamPanel />
       </div>
 
       {/* Modals triggered from CommandPanel */}
