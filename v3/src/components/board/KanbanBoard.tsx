@@ -121,17 +121,19 @@ export function KanbanBoard() {
   // Layout has already switched to the board tab by the time we mount; we
   // grab the latched target, find the task in store, open the detail modal,
   // and clear the latch so it doesn't fire again.
+  //
+  // If tasks haven't arrived yet (subscribe in flight, length 0), we leave
+  // the latch alone and retry on the next snapshot. Once tasks are present
+  // we consume even if the id wasn't found — otherwise a deleted-or-cross-
+  // project target would keep the latch dangling indefinitely.
   const pendingJump = useNavigationStore((s) => s.pendingJump);
   const consumeJump = useNavigationStore((s) => s.consumeJump);
   useEffect(() => {
     if (!pendingJump || pendingJump.type !== "task") return;
+    if (tasks.length === 0) return;
     const task = tasks.find((t) => t.id === pendingJump.id);
-    if (task) {
-      setSelectedTask(task);
-      consumeJump();
-    }
-    // If tasks haven't loaded yet, retry on next tasks update — leave the
-    // latch alone for now.
+    if (task) setSelectedTask(task);
+    consumeJump();
   }, [pendingJump, tasks, consumeJump]);
 
   const toggleRole = (role: AgentRole) => {

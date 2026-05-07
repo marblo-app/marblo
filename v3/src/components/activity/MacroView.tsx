@@ -71,11 +71,13 @@ export function MacroView({ entries, onSelectAgent }: MacroViewProps) {
 
   // Errors / recent counts derived from the audit_logs window. One hour =
   // 3,600,000 ms. The stream is capped at 100 so this is naturally bounded.
-  const oneHourAgo = Date.now() - 3_600_000;
-  const recentEntries = useMemo(
-    () => entries.filter((e) => e.createdAt.getTime() >= oneHourAgo),
-    [entries, oneHourAgo]
-  );
+  // Cutoff is computed inside the memo so Date.now() drift doesn't bust it
+  // on every render — entries change rarely, the 1h window is the same shape
+  // each time, so memoizing on `entries` alone is correct.
+  const recentEntries = useMemo(() => {
+    const cutoff = Date.now() - 3_600_000;
+    return entries.filter((e) => e.createdAt.getTime() >= cutoff);
+  }, [entries]);
   const errorCount = recentEntries.filter((e) => e.type === "error").length;
   const lastError = recentEntries.find((e) => e.type === "error");
 

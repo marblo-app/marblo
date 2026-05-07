@@ -26,6 +26,7 @@ const FILTER_ORDER: ActivityFilter[] = [
   "pm:feedback",
   "activity:note",
   "error",
+  "other",
 ];
 
 const VIEW_MODES: { id: ActivityViewMode; label: string }[] = [
