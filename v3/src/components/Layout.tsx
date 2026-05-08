@@ -16,6 +16,7 @@ import { TaskCreateModal } from "./board/TaskCreateModal";
 import { HarnessStore } from "./harness/HarnessStore";
 import { GuideTab } from "./guide/GuideTab";
 import { ActivityStreamPanel } from "./activity/ActivityStreamPanel";
+import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
 import { useAgentReconnect } from "../hooks/useAgentReconnect";
 import { useSessionRestore } from "../hooks/useSessionRestore";
@@ -319,6 +320,9 @@ export function Layout() {
             and doesn't squeeze the orchestrator/terminal stacks. */}
         <ActivityStreamPanel />
       </div>
+
+      {/* PIPA consent — auto-shows on first launch / policy version bump */}
+      <PrivacyConsentGate />
 
       {/* Modals triggered from CommandPanel */}
       {showOrchestratorChat && (
