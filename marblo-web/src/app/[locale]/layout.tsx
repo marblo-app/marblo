@@ -1,33 +1,59 @@
-import type { Metadata } from 'next';
-import { NextIntlClientProvider } from 'next-intl';
-import { getMessages } from 'next-intl/server';
-import { notFound } from 'next/navigation';
-import { routing } from '@/i18n/routing';
-import Header from '@/components/Header';
-import Footer from '@/components/Footer';
-import '../globals.css';
+import type { Metadata } from "next";
+import { NextIntlClientProvider } from "next-intl";
+import { getMessages } from "next-intl/server";
+import { notFound } from "next/navigation";
+import { routing } from "@/i18n/routing";
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
+import "../globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://marblo.net'),
+  metadataBase: new URL("https://marblo.app"),
   title: {
-    default: 'Marblo - AI Agent Army Workspace',
-    template: '%s | Marblo',
+    default: "Marblo - AI Agent Army Workspace",
+    template: "%s | Marblo",
   },
-  description: 'Manage multiple AI agents on a kanban board. Run Claude, GPT, and Gemini simultaneously with visual flow editor.',
-  keywords: ['AI agent', 'multi-agent', 'kanban', 'Claude', 'GPT', 'Gemini', 'developer tools', 'AI orchestration', 'Marblo'],
-  authors: [{ name: 'Marblo' }],
+  description:
+    "Manage multiple AI agents on a kanban board. Run Claude, GPT, and Gemini simultaneously with visual flow editor.",
+  keywords: [
+    "AI agent",
+    "multi-agent",
+    "kanban",
+    "Claude",
+    "GPT",
+    "Gemini",
+    "developer tools",
+    "AI orchestration",
+    "Marblo",
+  ],
+  authors: [{ name: "Marblo" }],
+  alternates: {
+    languages: {
+      ko: "https://marblo.app/ko",
+      en: "https://marblo.app/en",
+      ja: "https://marblo.app/ja",
+      "x-default": "https://marblo.app",
+    },
+  },
   openGraph: {
-    title: 'Marblo - AI Agent Army Workspace',
-    description: 'Manage multiple AI agents on a kanban board. Run Claude, GPT, and Gemini simultaneously.',
-    type: 'website',
-    siteName: 'Marblo',
-    images: [{ url: '/images/hero-screenshot.png', width: 1920, height: 1080 }],
+    title: "Marblo - AI Agent Army Workspace",
+    description:
+      "Manage multiple AI agents on a kanban board. Run Claude, GPT, and Gemini simultaneously.",
+    type: "website",
+    siteName: "Marblo",
+    url: "https://marblo.app",
+    images: [{ url: "/images/hero-screenshot.png", width: 1920, height: 1080 }],
   },
   twitter: {
-    card: 'summary_large_image',
-    title: 'Marblo - AI Agent Army Workspace',
-    description: 'Manage multiple AI agents on a kanban board.',
-    images: ['/images/hero-screenshot.png'],
+    card: "summary_large_image",
+    title: "Marblo - AI Agent Army Workspace",
+    description: "Manage multiple AI agents on a kanban board.",
+    images: ["/images/hero-screenshot.png"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, "max-image-preview": "large" },
   },
 };
 

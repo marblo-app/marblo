@@ -181,7 +181,7 @@ export default function PricingSection() {
               <div className="mt-8">
                 {isEnterprise ? (
                   <a
-                    href="mailto:contact@marblo.net"
+                    href="mailto:support@marblo.app"
                     className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium"
                   >
                     {t(`${plan}.cta`)}
