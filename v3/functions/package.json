@@ -1,7 +1,7 @@
 {
   "name": "marblo-functions",
   "version": "1.0.0",
-  "description": "Marblo Cloud Functions (Stripe + TossPayments integration)",
+  "description": "Marblo Cloud Functions (TossPayments KR + Paddle global integration)",
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
