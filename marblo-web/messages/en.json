@@ -151,29 +151,71 @@
       "price_usd": "$0",
       "period": "forever free",
       "description": "Individual developers trying Marblo for the first time",
-      "features": ["1 Project", "2 Agents", "Kanban Board", "Terminal + Code Editor", "MCP Integration"]
+      "features": [
+        "1 Project",
+        "2 Agents",
+        "Kanban Board",
+        "Terminal + Code Editor",
+        "MCP Integration"
+      ]
     },
     "pro": {
       "name": "Pro",
-      "price": "$19",
-      "price_usd": "$19",
+      "price": "$15",
+      "price_usd": "$15",
       "period": "/mo",
       "description": "Solo developers who want to work like a team",
-      "features": ["Unlimited Projects", "Unlimited Agents", "Flow Editor", "Natural Language Orchestrator", "Priority Support", "All Free features included"]
+      "features": [
+        "Unlimited Projects",
+        "Unlimited Agents",
+        "Flow Editor",
+        "Natural Language Orchestrator",
+        "Priority Support",
+        "All Free features included"
+      ]
     },
     "team": {
       "name": "Team",
-      "price": "$29",
-      "price_usd": "$29",
+      "price": "$25",
+      "price_usd": "$25",
       "period": "/seat/mo",
       "description": "Teams that develop together with shared workspaces",
-      "features": ["Shared Team Workspace", "Real-time Collaboration", "Role-based Permissions", "Team Analytics Dashboard", "Team Chat (Coming Soon)", "All Pro features included"]
+      "features": [
+        "Shared Team Workspace",
+        "Real-time Collaboration",
+        "Role-based Permissions",
+        "Team Analytics Dashboard",
+        "Team Chat (Coming Soon)",
+        "All Pro features included"
+      ]
+    },
+    "team_plus": {
+      "name": "Team Plus",
+      "price": "$49",
+      "price_usd": "$49",
+      "period": "/seat/mo",
+      "description": "B2B-ready: SSO, audit logs, and priority support",
+      "features": [
+        "SSO (Auth0/Clerk)",
+        "Audit Log Exposure",
+        "Priority Support (Slack channel)",
+        "Quarterly ROI review",
+        "Early access to new features",
+        "All Team features included"
+      ]
     },
     "enterprise": {
       "name": "Enterprise",
       "cta": "Contact Sales",
-      "description": "Organizations needing SSO, audit logs, and dedicated support",
-      "features": ["On-premise Deployment", "SSO/SAML Authentication", "Audit Logs", "99.9% SLA", "Dedicated Account Manager"]
+      "description": "Large orgs needing SAML, on-prem, and a dedicated manager",
+      "features": [
+        "On-premise Deployment",
+        "SAML Authentication",
+        "99.9% SLA",
+        "SOC2 Type 1 (Year 2)",
+        "Dedicated Account Manager",
+        "All Team Plus features included"
+      ]
     },
     "annual_discount": "Save 20% with annual billing",
     "subscribe": "Subscribe",

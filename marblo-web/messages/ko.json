@@ -151,29 +151,71 @@
       "price_usd": "$0",
       "period": "영구 무료",
       "description": "마블로를 처음 경험하는 개인 개발자",
-      "features": ["프로젝트 1개", "에이전트 2개", "칸반 보드", "터미널 + 코드 에디터", "MCP 연동"]
+      "features": [
+        "프로젝트 1개",
+        "에이전트 2개",
+        "칸반 보드",
+        "터미널 + 코드 에디터",
+        "MCP 연동"
+      ]
     },
     "pro": {
       "name": "Pro",
       "price": "₩19,000",
-      "price_usd": "$19",
+      "price_usd": "$15",
       "period": "/월",
       "description": "혼자서 팀처럼 일하는 개인 개발자",
-      "features": ["무제한 프로젝트", "무제한 에이전트", "플로우 에디터", "자연어 오케스트레이터", "우선 기술 지원", "모든 Free 기능 포함"]
+      "features": [
+        "무제한 프로젝트",
+        "무제한 에이전트",
+        "플로우 에디터",
+        "자연어 오케스트레이터",
+        "우선 기술 지원",
+        "모든 Free 기능 포함"
+      ]
     },
     "team": {
       "name": "Team",
       "price": "₩29,000",
-      "price_usd": "$29",
+      "price_usd": "$25",
       "period": "/인/월",
       "description": "팀 워크스페이스로 함께 개발하는 조직",
-      "features": ["팀 공유 워크스페이스", "실시간 협업", "역할 기반 권한", "팀 분석 대시보드", "팀 채팅 (예정)", "모든 Pro 기능 포함"]
+      "features": [
+        "팀 공유 워크스페이스",
+        "실시간 협업",
+        "역할 기반 권한",
+        "팀 분석 대시보드",
+        "팀 채팅 (예정)",
+        "모든 Pro 기능 포함"
+      ]
+    },
+    "team_plus": {
+      "name": "Team Plus",
+      "price": "₩59,000",
+      "price_usd": "$49",
+      "period": "/인/월",
+      "description": "SSO·감사 로그·우선 지원이 필요한 B2B 도입 단계",
+      "features": [
+        "SSO (Auth0/Clerk)",
+        "감사 로그 노출",
+        "우선 지원 (Slack 채널)",
+        "분기 ROI 미팅",
+        "신규 기능 얼리 액세스",
+        "모든 Team 기능 포함"
+      ]
     },
     "enterprise": {
       "name": "Enterprise",
       "cta": "문의하기",
-      "description": "SSO, 감사 로그, 전담 매니저가 필요한 기업",
-      "features": ["온프레미스 배포 옵션", "SSO/SAML 인증", "감사 로그", "SLA 99.9%", "전담 매니저"]
+      "description": "SAML·온프레미스·전담 매니저가 필요한 대기업/공기업",
+      "features": [
+        "온프레미스 배포 옵션",
+        "SAML 인증",
+        "SLA 99.9%",
+        "SOC2 Type 1 (Year 2)",
+        "전담 매니저",
+        "모든 Team Plus 기능 포함"
+      ]
     },
     "annual_discount": "연간 결제 시 20% 할인",
     "subscribe": "구독하기",

@@ -1,36 +1,44 @@
-'use client';
+"use client";
 
-import { useEffect, useState, useCallback } from 'react';
-import { useTranslations, useLocale } from 'next-intl';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { httpsCallable, getFunctions } from 'firebase/functions';
-import { auth } from '@/lib/firebase';
-import app from '@/lib/firebase';
-import CouponInput from '@/components/CouponInput';
-import { lectures } from '@/data/lectures';
-import { ArrowLeft, Loader2, AlertCircle, ShoppingCart } from 'lucide-react';
+import { useEffect, useState, useCallback } from "react";
+import { useTranslations, useLocale } from "next-intl";
+import { useRouter, useSearchParams } from "next/navigation";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { httpsCallable, getFunctions } from "firebase/functions";
+import { auth } from "@/lib/firebase";
+import app from "@/lib/firebase";
+import CouponInput from "@/components/CouponInput";
+import { lectures } from "@/data/lectures";
+import { ArrowLeft, Loader2, AlertCircle, ShoppingCart } from "lucide-react";
 
-const PLAN_PRICES: Record<string, { name: string; monthly: number; annual: number }> = {
-  pro: { name: 'Pro', monthly: 19000, annual: Math.round(19000 * 12 * 0.8) },
-  team: { name: 'Team', monthly: 29000, annual: Math.round(29000 * 12 * 0.8) },
+const PLAN_PRICES: Record<
+  string,
+  { name: string; monthly: number; annual: number }
+> = {
+  pro: { name: "Pro", monthly: 19000, annual: Math.round(19000 * 12 * 0.8) },
+  team: { name: "Team", monthly: 29000, annual: Math.round(29000 * 12 * 0.8) },
+  team_plus: {
+    name: "Team Plus",
+    monthly: 59000,
+    annual: Math.round(59000 * 12 * 0.8),
+  },
 };
 
 export default function CheckoutPage() {
-  const t = useTranslations('checkout');
+  const t = useTranslations("checkout");
   const locale = useLocale();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const plan = searchParams.get('plan');
-  const lectureSlug = searchParams.get('slug');
-  const type = searchParams.get('type') || 'subscription';
-  const billing = searchParams.get('billing') || 'monthly';
+  const plan = searchParams.get("plan");
+  const lectureSlug = searchParams.get("slug");
+  const type = searchParams.get("type") || "subscription";
+  const billing = searchParams.get("billing") || "monthly";
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [sdkReady, setSdkReady] = useState(false);
   const [discount, setDiscount] = useState(0);
-  const [couponCode, setCouponCode] = useState('');
+  const [couponCode, setCouponCode] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   // Resolve plan or lecture info
@@ -39,13 +47,18 @@ export default function CheckoutPage() {
     ? lectures.find((l) => l.slug === lectureSlug)
     : null;
 
-  const isLecture = type === 'lecture' && !!lectureSlug;
+  const isLecture = type === "lecture" && !!lectureSlug;
   const itemName = isLecture
-    ? (locale === 'ko' ? lectureInfo?.title_ko : lectureInfo?.title_en) || lectureSlug
-    : planInfo?.name || '';
+    ? (locale === "ko" ? lectureInfo?.title_ko : lectureInfo?.title_en) ||
+      lectureSlug
+    : planInfo?.name || "";
   const baseAmount = isLecture
-    ? (lectureInfo?.price || 0)
-    : (planInfo ? (billing === 'annual' ? planInfo.annual : planInfo.monthly) : 0);
+    ? lectureInfo?.price || 0
+    : planInfo
+    ? billing === "annual"
+      ? planInfo.annual
+      : planInfo.monthly
+    : 0;
   const finalAmount = Math.max(0, baseAmount - discount);
 
   // Validate query params
@@ -58,7 +71,9 @@ export default function CheckoutPage() {
         const redirectPath = isLecture
           ? `/${locale}/checkout?type=lecture&slug=${lectureSlug}`
           : `/${locale}/checkout?plan=${plan}`;
-        router.push(`/${locale}/auth/login?redirect=${encodeURIComponent(redirectPath)}`);
+        router.push(
+          `/${locale}/auth/login?redirect=${encodeURIComponent(redirectPath)}`
+        );
       } else {
         setUser(u);
       }
@@ -72,24 +87,31 @@ export default function CheckoutPage() {
     let cancelled = false;
     const preload = async () => {
       try {
-        const { loadTossPayments } = await import('@tosspayments/tosspayments-sdk');
-        await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || '');
+        const { loadTossPayments } = await import(
+          "@tosspayments/tosspayments-sdk"
+        );
+        await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "");
         if (!cancelled) setSdkReady(true);
       } catch (err) {
-        console.error('TossPayments SDK preload error:', err);
-        if (!cancelled) setError(t('sdkLoadError'));
+        console.error("TossPayments SDK preload error:", err);
+        if (!cancelled) setError(t("sdkLoadError"));
       }
     };
     preload();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [user, isValid, t]);
 
-  const handleCouponApply = useCallback((result: { discountPercent?: number; code: string }) => {
-    if (result.discountPercent) {
-      setDiscount(Math.round(baseAmount * result.discountPercent / 100));
-    }
-    setCouponCode(result.code);
-  }, [baseAmount]);
+  const handleCouponApply = useCallback(
+    (result: { discountPercent?: number; code: string }) => {
+      if (result.discountPercent) {
+        setDiscount(Math.round((baseAmount * result.discountPercent) / 100));
+      }
+      setCouponCode(result.code);
+    },
+    [baseAmount]
+  );
 
   const handlePayment = async () => {
     if (!user) return;
@@ -97,33 +119,44 @@ export default function CheckoutPage() {
     setError(null);
     try {
       if (isLecture && lectureSlug) {
-        const functions = getFunctions(app, 'us-central1');
-        const createOrder = httpsCallable(functions, 'createLectureOrder');
-        const { data } = await createOrder({ lectureSlug, userId: user.uid }) as { data: { amount: number; orderId: string; orderName: string } };
-        const { loadTossPayments } = await import('@tosspayments/tosspayments-sdk');
-        const toss = await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || '');
+        const functions = getFunctions(app, "us-central1");
+        const createOrder = httpsCallable(functions, "createLectureOrder");
+        const { data } = (await createOrder({
+          lectureSlug,
+          userId: user.uid,
+        })) as { data: { amount: number; orderId: string; orderName: string } };
+        const { loadTossPayments } = await import(
+          "@tosspayments/tosspayments-sdk"
+        );
+        const toss = await loadTossPayments(
+          process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || ""
+        );
         const payment = toss.payment({ customerKey: user.uid });
         await payment.requestPayment({
-          method: 'CARD',
-          amount: { currency: 'KRW', value: data.amount },
+          method: "CARD",
+          amount: { currency: "KRW", value: data.amount },
           orderId: data.orderId,
           orderName: data.orderName,
           successUrl: `${window.location.origin}/${locale}/checkout/success?type=lecture`,
           failUrl: `${window.location.origin}/${locale}/checkout/fail`,
         });
       } else if (plan) {
-        const { loadTossPayments } = await import('@tosspayments/tosspayments-sdk');
-        const toss = await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || '');
+        const { loadTossPayments } = await import(
+          "@tosspayments/tosspayments-sdk"
+        );
+        const toss = await loadTossPayments(
+          process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || ""
+        );
         const payment = toss.payment({ customerKey: user.uid });
         await payment.requestBillingAuth({
-          method: 'CARD',
+          method: "CARD",
           successUrl: `${window.location.origin}/${locale}/checkout/success?plan=${plan}&billing=${billing}&coupon=${couponCode}`,
           failUrl: `${window.location.origin}/${locale}/checkout/fail`,
         });
       }
     } catch (err: unknown) {
-      console.error('Payment error:', err);
-      const message = err instanceof Error ? err.message : t('paymentError');
+      console.error("Payment error:", err);
+      const message = err instanceof Error ? err.message : t("paymentError");
       setError(message);
     } finally {
       setLoading(false);
@@ -148,14 +181,18 @@ export default function CheckoutPage() {
         <div className="max-w-lg mx-auto bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center">
           <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
           <p className="text-zinc-300 mb-6">
-            {isLecture ? t('invalidLecture') : t('invalidPlan')}
+            {isLecture ? t("invalidLecture") : t("invalidPlan")}
           </p>
           <button
-            onClick={() => router.push(isLecture ? `/${locale}/lectures` : `/${locale}/pricing`)}
+            onClick={() =>
+              router.push(
+                isLecture ? `/${locale}/lectures` : `/${locale}/pricing`
+              )
+            }
             className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition"
           >
             <ArrowLeft className="w-4 h-4" />
-            {t('back')}
+            {t("back")}
           </button>
         </div>
       </div>
@@ -171,21 +208,21 @@ export default function CheckoutPage() {
           className="inline-flex items-center gap-2 text-zinc-400 hover:text-white transition mb-6"
         >
           <ArrowLeft className="w-4 h-4" />
-          {t('back')}
+          {t("back")}
         </button>
 
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8">
           {/* Header */}
           <div className="flex items-center gap-3 mb-8">
             <ShoppingCart className="w-6 h-6 text-indigo-400" />
-            <h1 className="text-2xl font-bold">{t('title')}</h1>
+            <h1 className="text-2xl font-bold">{t("title")}</h1>
           </div>
 
           {/* SDK loading indicator */}
           {!sdkReady && !error && (
             <div className="flex items-center gap-3 text-zinc-400 mb-6 p-3 bg-zinc-800/50 rounded-lg">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm">{t('loading')}</span>
+              <span className="text-sm">{t("loading")}</span>
             </div>
           )}
 
@@ -200,23 +237,25 @@ export default function CheckoutPage() {
           {/* Order summary */}
           <div className="space-y-4">
             <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider">
-              {t('orderSummary')}
+              {t("orderSummary")}
             </h2>
 
             {/* Item name */}
             <div className="flex justify-between items-start gap-4">
               <span className="text-zinc-400">
-                {isLecture ? t('lectureTitle') : t('plan')}
+                {isLecture ? t("lectureTitle") : t("plan")}
               </span>
               <span className="font-semibold text-right">{itemName}</span>
             </div>
 
             {/* Price */}
             <div className="flex justify-between">
-              <span className="text-zinc-400">{t('amount')}</span>
+              <span className="text-zinc-400">{t("amount")}</span>
               <span>
-                {'\u20A9'}{baseAmount.toLocaleString()}
-                {!isLecture && (billing === 'annual' ? t('annual') : t('monthly'))}
+                {"\u20A9"}
+                {baseAmount.toLocaleString()}
+                {!isLecture &&
+                  (billing === "annual" ? t("annual") : t("monthly"))}
               </span>
             </div>
 
@@ -228,17 +267,22 @@ export default function CheckoutPage() {
             {/* Discount */}
             {discount > 0 && (
               <div className="flex justify-between text-green-400">
-                <span>{t('discount')}</span>
-                <span>-{'\u20A9'}{discount.toLocaleString()}</span>
+                <span>{t("discount")}</span>
+                <span>
+                  -{"\u20A9"}
+                  {discount.toLocaleString()}
+                </span>
               </div>
             )}
 
             {/* Total */}
             <div className="border-t border-zinc-700 pt-4 flex justify-between text-lg font-bold">
-              <span>{t('total')}</span>
+              <span>{t("total")}</span>
               <span>
-                {'\u20A9'}{finalAmount.toLocaleString()}
-                {!isLecture && (billing === 'annual' ? t('annual') : t('monthly'))}
+                {"\u20A9"}
+                {finalAmount.toLocaleString()}
+                {!isLecture &&
+                  (billing === "annual" ? t("annual") : t("monthly"))}
               </span>
             </div>
 
@@ -251,10 +295,10 @@ export default function CheckoutPage() {
               {loading ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  {t('processing')}
+                  {t("processing")}
                 </>
               ) : (
-                t('pay')
+                t("pay")
               )}
             </button>
           </div>
