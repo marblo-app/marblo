@@ -82,7 +82,7 @@ export const CATALOG: HarnessPackage[] = [
     id: "marblo-mcp",
     name: "Marblo MCP 서버",
     description:
-      "TaskForce / 칸반 / 에이전트 관리 MCP 도구 모음. Marblo 앱이 실행 중일 때만 동작.",
+      "TaskForce / 칸반 / 에이전트 관리 MCP 도구 모음. Marblo 대시보드 내부에서 spawn 된 에이전트(Claude / Codex / Gemini)는 per-agent isolated config 로 자동 연결됩니다. 외부 터미널 CLI 세션에는 등록하지 않습니다 — 그쪽은 사용자의 taskforce MCP 등 별도 설정으로 관리하세요.",
     type: "mcp",
     category: "required",
     install: { kind: "bundled" },
@@ -229,5 +229,20 @@ export const CATALOG: HarnessPackage[] = [
     },
     detect: { mcpKey: "github" },
     url: "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
+  },
+  {
+    id: "mcp-playwright",
+    name: "playwright (브라우저 자동화)",
+    description:
+      "에이전트가 헤드리스 Chromium으로 페이지 열기 / 클릭 / 폼 입력 / 스크린샷 / 콘솔 로그 캡처를 직접 수행. 자체 IDE 임베드 브라우저(P2-10) 미루는 동안 90% 대체.",
+    type: "mcp",
+    category: "mcp",
+    install: {
+      kind: "mcp",
+      source: "npx",
+      args: ["-y", "@playwright/mcp@latest"],
+    },
+    detect: { mcpKey: "playwright" },
+    url: "https://github.com/microsoft/playwright-mcp",
   },
 ];
