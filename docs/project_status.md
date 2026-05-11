@@ -1,5 +1,7 @@
 # Marblo Project Status
 
+> ⚠️ **출시 계획·가격·일정·결제의 단일 진실원은 [v3.1*런칭*마스터플랜.md](./v3.1_런칭_마스터플랜.md) 입니다. 본 status 문서와 충돌 시 마스터플랜이 이깁니다.** P0 현황은 [`p0_status.md`](./p0_status.md) 참조.
+
 세션 일자: 2026-04-30 ~ 2026-05-02
 대상 브랜치: `main` (Marblo / TaskForce.AI 저장소)
 
