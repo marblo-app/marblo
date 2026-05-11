@@ -6,7 +6,9 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useNavigationStore } from "../../stores/navigationStore";
+import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useAuth } from "../../hooks/useAuth";
+import { checkAgentSpawn } from "../../lib/planLimits";
 import type { Agent, ModelType } from "../../types/agent";
 import * as agentService from "../../services/agentService";
 
@@ -68,6 +70,18 @@ export function AgentsTab() {
     assignedTaskId?: string;
   }) => {
     if (!user || !projectId) return;
+    // Plan throttle: gate before creating the Firestore doc. handleLaunch
+    // bypasses agentStore.createAgent (it calls the service directly), so
+    // we re-check here. Source of truth: lib/planLimits.ts.
+    const plan = useSubscriptionStore.getState().getPlan();
+    const check = checkAgentSpawn(plan, agents);
+    if (!check.allowed) {
+      // Inline alert is the simplest blocking UI from a callback. A toast
+      // would be nicer but Marblo doesn't have one yet; the message is
+      // also visible in the agent-store error state for the dashboard.
+      alert(check.reason ?? "에이전트 한도 도달");
+      return;
+    }
     const agentData = {
       projectId,
       ownerId: user.uid,
@@ -105,18 +119,52 @@ export function AgentsTab() {
     }
   };
 
+  // Throttle indicator — visible badge so the user always knows their
+  // remaining slots before they hit "Add Agent". Re-computes on every
+  // agents/subscription change via store subscriptions.
+  const planForBadge = useSubscriptionStore((s) => s.getPlan());
+  const throttle = checkAgentSpawn(planForBadge, agents);
+  const atLimit = !throttle.allowed;
+
   return (
-    <div className="h-full">
-      <AgentDashboard
-        agents={agents}
-        tasks={tasks}
-        projectId={projectId}
-        loading={loading}
-        onAddAgent={() => setShowAddModal(true)}
-        onStop={stopAgent}
-        onRestart={restartAgent}
-        onDelete={deleteAgent}
-      />
+    <div className="h-full flex flex-col">
+      {throttle.limit > 0 && (
+        <div
+          className={`flex items-center justify-between border-b px-4 py-1.5 text-xs ${
+            atLimit
+              ? "border-[#f38ba8]/40 bg-[#f38ba8]/10 text-[#f38ba8]"
+              : "border-[#313244] bg-[#181825] text-[#bac2de]"
+          }`}
+        >
+          <span>
+            활성 에이전트 {throttle.active} / {throttle.limit} ·{" "}
+            <span className="uppercase">{planForBadge}</span> 플랜
+          </span>
+          {atLimit && (
+            <span className="text-[10px]">
+              한도 도달 — 업그레이드 또는 기존 에이전트 정지 필요
+            </span>
+          )}
+        </div>
+      )}
+      <div className="flex-1 min-h-0">
+        <AgentDashboard
+          agents={agents}
+          tasks={tasks}
+          projectId={projectId}
+          loading={loading}
+          onAddAgent={() => {
+            if (atLimit) {
+              alert(throttle.reason ?? "에이전트 한도 도달");
+              return;
+            }
+            setShowAddModal(true);
+          }}
+          onStop={stopAgent}
+          onRestart={restartAgent}
+          onDelete={deleteAgent}
+        />
+      </div>
 
       {showAddModal && user && projectId && (
         <AgentAddModal
