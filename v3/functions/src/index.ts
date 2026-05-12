@@ -7,6 +7,7 @@ import {
   COUPON_RULES_UID,
   COUPON_RULES_IP,
 } from "./rateLimit";
+import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -1183,5 +1184,43 @@ export const logFlowExecution = functions.https.onCall(
       .insert([row]);
 
     return { inserted: 1 };
+  }
+);
+
+// ============================================
+// Scheduled Reconciliation (P0-11)
+// ============================================
+// Daily cron at 04:00 KST (low-traffic window). Picks up payments that
+// succeeded on the PG side but never made it into Firestore due to a
+// dropped webhook. See reconciliation.ts for the decision tree.
+
+export const scheduledReconcileToss = functions.pubsub
+  .schedule("0 4 * * *")
+  .timeZone("Asia/Seoul")
+  .onRun(async () => {
+    const result = await reconcileTossPending();
+    console.log("[Recon Toss]", JSON.stringify(result));
+    return null;
+  });
+
+export const scheduledReconcilePaddle = functions.pubsub
+  .schedule("15 4 * * *")
+  .timeZone("Asia/Seoul")
+  .onRun(async () => {
+    const result = await reconcilePaddlePending();
+    console.log("[Recon Paddle]", JSON.stringify(result));
+    return null;
+  });
+
+// Manual trigger for ad-hoc runs (operator only — guarded by ADMIN_UID).
+export const triggerReconcile = functions.https.onCall(
+  async (data, context) => {
+    const adminUid = process.env.ADMIN_UID;
+    if (!adminUid || context.auth?.uid !== adminUid) {
+      throw new functions.https.HttpsError("permission-denied", "Admin only");
+    }
+    const provider = (data?.provider as string) || "toss";
+    if (provider === "paddle") return reconcilePaddlePending();
+    return reconcileTossPending();
   }
 );
