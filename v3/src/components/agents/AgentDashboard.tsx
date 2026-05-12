@@ -7,6 +7,7 @@ import ActivityFeed from "./ActivityFeed";
 import CostWidget from "./CostWidget";
 import AuditTimeline from "./AuditTimeline";
 import { useCostStore } from "../../stores/costStore";
+import { useTranslation } from "../../lib/i18n";
 
 interface AgentDashboardProps {
   agents: Agent[];
@@ -29,12 +30,13 @@ export default function AgentDashboard({
   onRestart,
   onDelete,
 }: AgentDashboardProps) {
+  const { t } = useTranslation();
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
         <div className="text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
-          <p className="mt-3 text-sm">에이전트 로딩 중...</p>
+          <p className="mt-3 text-sm">{t("agents.dashboard.loading")}</p>
         </div>
       </div>
     );
@@ -44,7 +46,9 @@ export default function AgentDashboard({
     <div className="h-full overflow-y-auto p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-100">Agent Dashboard</h2>
+        <h2 className="text-lg font-semibold text-gray-100">
+          {t("agents.dashboard.title")}
+        </h2>
         <div className="flex items-center gap-2">
           {agents.filter((a) => a.status !== "working").length > 0 && (
             <button
@@ -53,14 +57,17 @@ export default function AgentDashboard({
                 const inactive = agents.filter((a) => a.status !== "working");
                 if (
                   confirm(
-                    `${inactive.length}개의 비활성 에이전트를 삭제하시겠습니까?\n(working 상태 제외)`
+                    t("agents.dashboard.cleanupConfirm", {
+                      count: inactive.length,
+                    })
                   )
                 ) {
                   inactive.forEach((a) => onDelete(a.id));
                 }
               }}
             >
-              Cleanup ({agents.filter((a) => a.status !== "working").length})
+              {t("agents.dashboard.cleanup")} (
+              {agents.filter((a) => a.status !== "working").length})
             </button>
           )}
           <button
@@ -77,7 +84,7 @@ export default function AgentDashboard({
             >
               <path d="M7 2v10M2 7h10" />
             </svg>
-            Add Agent
+            {t("agents.dashboard.addAgent")}
           </button>
         </div>
       </div>

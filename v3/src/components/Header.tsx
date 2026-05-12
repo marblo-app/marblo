@@ -4,6 +4,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useSubscriptionStore } from "../stores/subscriptionStore";
 import { useActivityStreamStore } from "../stores/activityStreamStore";
+import { useTranslation } from "../lib/i18n";
 import { createProject } from "../services/projectService";
 
 interface HeaderProps {
@@ -56,6 +57,7 @@ const PLAN_BADGE_STYLES: Record<string, string> = {
 };
 
 export function Header({ onNavigateToSettings }: HeaderProps) {
+  const { t } = useTranslation();
   const { user, logout } = useAuth();
   const projects = useProjectStore((s) => s.projects);
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -137,7 +139,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
             onClick={() => setShowProjectMenu(!showProjectMenu)}
             className="flex items-center gap-1 rounded px-2 py-1 text-sm text-gray-300 hover:bg-gray-800"
           >
-            <span>{currentProject?.name || "Select Project"}</span>
+            <span>{currentProject?.name || t("header.selectProject")}</span>
             <svg
               className="h-3 w-3"
               fill="none"
@@ -183,7 +185,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                       onKeyDown={(e) =>
                         e.key === "Enter" && handleCreateProject()
                       }
-                      placeholder="프로젝트 이름"
+                      placeholder={t("header.projectName")}
                       className="flex-1 rounded bg-gray-700 border border-gray-600 px-2 py-1 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
                       autoFocus
                     />
@@ -191,7 +193,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                       onClick={handleCreateProject}
                       className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-500"
                     >
-                      추가
+                      {t("header.add")}
                     </button>
                   </div>
                 ) : (
@@ -212,7 +214,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                         d="M12 4v16m8-8H4"
                       />
                     </svg>
-                    New Project
+                    {t("header.newProject")}
                   </button>
                 )}
               </div>
@@ -289,7 +291,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                     d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                   />
                 </svg>
-                설정
+                {t("header.settings")}
               </button>
               <button
                 onClick={logout}
@@ -308,7 +310,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
                     d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
                   />
                 </svg>
-                로그아웃
+                {t("header.logout")}
               </button>
             </div>
           )}
