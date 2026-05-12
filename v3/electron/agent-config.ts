@@ -65,7 +65,7 @@ function getEnrichedPath(): string {
 function getMCPServerEnv(
   projectDir: string,
   marbloProjectId?: string,
-  agentId?: string
+  agentId?: string,
 ): Record<string, string> {
   const env: Record<string, string> = {
     PATH: getEnrichedPath(),
@@ -118,7 +118,7 @@ function getMCPServerEnv(
 function buildMCPServerEntry(
   projectDir: string,
   marbloProjectId?: string,
-  agentId?: string
+  agentId?: string,
 ): MCPServerEntry {
   return {
     command: "node",
@@ -138,7 +138,7 @@ export class AgentConfigGenerator {
     agentId: string,
     model: ModelType,
     projectDir: string,
-    marbloProjectId?: string
+    marbloProjectId?: string,
   ): string {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
@@ -150,7 +150,7 @@ export class AgentConfigGenerator {
       case "gemini":
         return this.generateGeminiConfig(agentId, mcpEntry);
       case "gpt":
-        return this.generateGPTConfig(agentId, mcpEntry);
+        return this.generateGPTConfig(agentId, mcpEntry, projectDir);
       case "custom":
         return this.generateCustomConfig(agentId, mcpEntry);
       default:
@@ -188,13 +188,14 @@ export class AgentConfigGenerator {
     agent: { id: string; model: ModelType; role: string; command: string },
     projectDir: string,
     initialPrompt?: string,
-    marbloProjectId?: string
+    marbloProjectId?: string,
+    resumeSessionId?: string,
   ): LaunchConfig {
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
       agent.model,
       projectDir,
-      marbloProjectId
+      marbloProjectId,
     );
     const skillPath = this.generateSkillFile(agent.id, agent.role, projectDir);
     const skillContent =
@@ -208,7 +209,8 @@ export class AgentConfigGenerator {
       mcpConfigPath,
       projectDir,
       marbloProjectId,
-      agent.id
+      agent.id,
+      resumeSessionId,
     );
 
     return {
@@ -220,6 +222,58 @@ export class AgentConfigGenerator {
       skillContent,
       initialPrompt,
     };
+  }
+
+  /**
+   * Whether the given agent's isolated home contains any saved sessions
+   * for the given CLI. Used by reconnect to decide whether `resume --last`
+   * (or equivalent) is safe to pass — running it against an empty
+   * sessions dir errors out on some CLIs.
+   *
+   * Codex stores at `<CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl`.
+   * Gemini stores at `<HOME>/.gemini/tmp/<projectHash>/checkpoint-*.json`
+   * (but the existence of `.gemini/tmp/` with any subdir is enough signal
+   * for `--resume latest` to find something).
+   */
+  hasSavedSession(agentId: string, model: ModelType): boolean {
+    if (model === "gpt") {
+      const sessionsRoot = path.join(
+        CONFIG_DIR,
+        `codex-home-${agentId}`,
+        "sessions",
+      );
+      return this.hasAnyFileBelow(sessionsRoot, ".jsonl");
+    }
+    if (model === "gemini") {
+      const geminiTmp = path.join(
+        CONFIG_DIR,
+        `gemini-home-${agentId}`,
+        ".gemini",
+        "tmp",
+      );
+      return this.hasAnyFileBelow(geminiTmp, null);
+    }
+    return false;
+  }
+
+  private hasAnyFileBelow(root: string, suffix: string | null): boolean {
+    try {
+      if (!fs.existsSync(root)) return false;
+      const stack = [root];
+      while (stack.length > 0) {
+        const dir = stack.pop()!;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) stack.push(full);
+          else if (entry.isFile()) {
+            if (!suffix || entry.name.endsWith(suffix)) return true;
+          }
+        }
+      }
+    } catch {
+      // best-effort
+    }
+    return false;
   }
 
   /**
@@ -252,7 +306,7 @@ export class AgentConfigGenerator {
 
   private generateClaudeConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry
+    mcpEntry: MCPServerEntry,
   ): string {
     const config = {
       mcpServers: {
@@ -272,7 +326,7 @@ export class AgentConfigGenerator {
 
   private generateGeminiConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry
+    mcpEntry: MCPServerEntry,
   ): string {
     // Gemini CLI reads MCP config from `~/.gemini/settings.json` with a
     // top-level `mcpServers` map, same shape as Claude Code. Like Codex,
@@ -295,7 +349,7 @@ export class AgentConfigGenerator {
     const userSettingsPath = path.join(
       os.homedir(),
       ".gemini",
-      "settings.json"
+      "settings.json",
     );
     let preserved: Record<string, unknown> = {};
     if (fs.existsSync(userSettingsPath)) {
@@ -347,7 +401,11 @@ export class AgentConfigGenerator {
     return settingsPath;
   }
 
-  private generateGPTConfig(agentId: string, mcpEntry: MCPServerEntry): string {
+  private generateGPTConfig(
+    agentId: string,
+    mcpEntry: MCPServerEntry,
+    projectDir: string,
+  ): string {
     // Codex CLI reads config from `$CODEX_HOME/config.toml` (TOML, not JSON)
     // with `[mcp_servers.<name>]` sections. Each agent gets an ISOLATED
     // CODEX_HOME so its config.toml can hardcode the per-agent
@@ -356,8 +414,11 @@ export class AgentConfigGenerator {
     // rely on inherited process env to vary MARBLO_AGENT_ID across agents.
     //
     // We preserve the user's model / reasoning preferences from their
-    // real ~/.codex/config.toml (sans any existing [mcp_servers.*]) and
-    // symlink auth.json so Codex stays authenticated.
+    // real ~/.codex/config.toml (sans any existing [mcp_servers.*] and
+    // any [features] block — the latter so user-enabled experimental
+    // toggles like `goals=true` don't leak into Marblo agents and surface
+    // unstable-feature warnings) and symlink auth.json so Codex stays
+    // authenticated.
     const codexHome = path.join(CONFIG_DIR, `codex-home-${agentId}`);
     fs.mkdirSync(codexHome, { recursive: true });
 
@@ -368,10 +429,11 @@ export class AgentConfigGenerator {
     if (fs.existsSync(userConfigPath)) {
       try {
         const raw = fs.readFileSync(userConfigPath, "utf-8");
-        // Strip existing [mcp_servers.*] sections — naive but effective.
-        // Matches a section header through to (next non-mcp section | EOF).
+        // Strip existing [mcp_servers.*] sections AND the [features]
+        // section. Per-agent config re-adds only what we want.
         preserved = raw
           .replace(/\[mcp_servers\.[\s\S]*?(?=\n\[(?!mcp_servers)|$)/g, "")
+          .replace(/\[features\][\s\S]*?(?=\n\[|$)/g, "")
           .trimEnd();
       } catch {
         // Best-effort — ignore unreadable user config.
@@ -393,6 +455,32 @@ export class AgentConfigGenerator {
       }
     }
 
+    // Auto-trust the agent's working directory so Codex doesn't show its
+    // "Do you trust the contents of this directory?" interactive dialog
+    // on first run. Without this, the dialog blocks the TUI before any
+    // readiness pattern matches → Marblo's 10s prompt-fallback fires
+    // mid-dialog → codex receives the prompt as keystroke noise and
+    // exits cleanly (code 0), leaving an unusable agent.
+    //
+    // We resolve symlinks (`realpath`) because macOS reports `/tmp` to
+    // codex as `/private/tmp`, and the trust check is exact-string.
+    // Wildcard parents (e.g. `/Users/foo` covering everything under it)
+    // don't grant trust to subdirs in current Codex versions — only an
+    // exact match does.
+    const trustEntries: string[] = [];
+    if (projectDir) {
+      const seen = new Set<string>();
+      for (const candidate of [projectDir, this.safeRealpath(projectDir)]) {
+        if (!candidate || seen.has(candidate)) continue;
+        seen.add(candidate);
+        trustEntries.push(
+          `[projects.${JSON.stringify(candidate)}]`,
+          'trust_level = "trusted"',
+          "",
+        );
+      }
+    }
+
     // Build TOML for the Marblo MCP entry. JSON.stringify produces valid
     // TOML for strings / arrays / numbers; we use it to escape values.
     const envEntries = Object.entries(mcpEntry.env || {})
@@ -402,6 +490,7 @@ export class AgentConfigGenerator {
     const tomlSections = [
       preserved,
       "",
+      ...trustEntries,
       "[mcp_servers.marblo]",
       `command = ${JSON.stringify(mcpEntry.command)}`,
       `args = ${JSON.stringify(mcpEntry.args)}`,
@@ -420,9 +509,17 @@ export class AgentConfigGenerator {
     return configPath;
   }
 
+  private safeRealpath(p: string): string | null {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return null;
+    }
+  }
+
   private generateCustomConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry
+    mcpEntry: MCPServerEntry,
   ): string {
     // Generic MCP config — same structure, custom CLI may or may not use it
     const config = {
@@ -449,21 +546,33 @@ export class AgentConfigGenerator {
     mcpConfigPath: string,
     projectDir: string,
     marbloProjectId?: string,
-    agentId?: string
+    agentId?: string,
+    resumeSessionId?: string,
   ): { command: string; args: string[]; env: Record<string, string> } {
     const env = getMCPServerEnv(projectDir, marbloProjectId, agentId);
+    // Normalize resume signals: "new" means force-fresh, "latest" means
+    // "pick the most recent" (CLI-specific syntax), anything else is a
+    // concrete session id.
+    const wantResume = resumeSessionId && resumeSessionId !== "new";
+    const resumeIsLatest = resumeSessionId === "latest";
 
     // NOTE: Initial prompts are NOT passed via CLI flags (e.g. -p) because
     // that runs non-interactively and exits. Instead, prompts are sent via
     // stdin after the CLI starts, keeping the session interactive.
     switch (model) {
       case "claude":
+        // Claude Code accepts `--resume <UUID>` as a flag; "latest" is
+        // resolved to a UUID by the caller via resolveSessionId before we
+        // get here, so we only emit --resume when we have a concrete id.
         return {
           command: baseCommand || "claude",
           args: [
             "--dangerously-skip-permissions",
             "--mcp-config",
             mcpConfigPath,
+            ...(wantResume && !resumeIsLatest
+              ? ["--resume", resumeSessionId!]
+              : []),
           ],
           env,
         };
@@ -481,14 +590,33 @@ export class AgentConfigGenerator {
         // mcpConfigPath here is `<geminiHome>/.gemini/settings.json`, so
         // <geminiHome> is two levels up.
         const geminiHome = path.dirname(path.dirname(mcpConfigPath));
+        // Gemini's `--resume <id>` accepts "latest" as a literal sentinel
+        // (per `gemini --help`: "Use 'latest' for most recent or index
+        // number"), so we can pass our normalized "latest" through unchanged.
+        // For a concrete session id we'd pass the index — but Marblo doesn't
+        // currently track Gemini session indices, so concrete ids fall back
+        // to "latest" too (best the CLI can do without an index map).
+        //
+        // --skip-trust + --yolo: same purpose as the codex per-agent trust
+        // entry + approval_policy="never" / sandbox_mode="danger-full-access"
+        // overrides. Without them gemini shows "Do you trust the files in
+        // this folder?" interactive dialog AND skips loading project agents
+        // (logged: "Skipping project agents due to untrusted folder"), which
+        // breaks the same way codex did before its trust patch — Marblo's
+        // readiness pattern doesn't match the dialog text, the 10s fallback
+        // dumps the prompt mid-dialog, and the agent ends up unusable.
+        const geminiArgs: string[] = ["--skip-trust", "--yolo"];
+        if (wantResume) {
+          geminiArgs.push("--resume", resumeIsLatest ? "latest" : "latest");
+        }
         return {
           command: baseCommand || "gemini",
-          args: [],
+          args: geminiArgs,
           env: { ...env, HOME: geminiHome },
         };
       }
 
-      case "gpt":
+      case "gpt": {
         // Codex CLI (Rust): reads config from $CODEX_HOME/config.toml — point
         // it at our per-agent dir (created by generateGPTConfig) so the
         // [mcp_servers.marblo] entry is loaded.
@@ -499,16 +627,30 @@ export class AgentConfigGenerator {
         //   sandbox_mode="danger-full-access" — let the agent edit anything
         // Together these mirror Claude Code's --dangerously-skip-permissions
         // and let Marblo agents run unattended.
+        //
+        // Resume: `codex resume` is a SUBCOMMAND, not a flag — it must
+        // come BEFORE the global `-c` overrides. `codex resume --last`
+        // continues the most recent session in this CODEX_HOME (which is
+        // per-agent, so "most recent" = "this agent's last session").
+        // A concrete UUID becomes the positional arg `codex resume <UUID>`.
+        const codexArgs: string[] = [];
+        if (wantResume) {
+          codexArgs.push("resume");
+          if (resumeIsLatest) codexArgs.push("--last");
+          else codexArgs.push(resumeSessionId!);
+        }
+        codexArgs.push(
+          "-c",
+          'approval_policy="never"',
+          "-c",
+          'sandbox_mode="danger-full-access"',
+        );
         return {
           command: baseCommand || "codex",
-          args: [
-            "-c",
-            'approval_policy="never"',
-            "-c",
-            'sandbox_mode="danger-full-access"',
-          ],
+          args: codexArgs,
           env: { ...env, CODEX_HOME: path.dirname(mcpConfigPath) },
         };
+      }
 
       case "custom":
         return {

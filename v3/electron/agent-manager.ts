@@ -62,6 +62,40 @@ export interface AgentInstance {
   onPtyReady?: (ptySessionId: string) => void;
 }
 
+/**
+ * Build the prompt that gets typed into the freshly-spawned CLI.
+ *
+ * - Codex / Gemini / custom CLIs have no skill auto-discovery, so we
+ *   prepend the role's skill file (claim/activity/review workflow,
+ *   coding rules, etc.) ahead of the orchestrator's instruction. Claude
+ *   Code already auto-loads `~/.claude/skills/*` so prepending is
+ *   redundant for it.
+ * - Strip the `mcp__marblo__` prefix that Claude Code uses for MCP tool
+ *   names — Codex / Gemini expose the same tools as `claim_task`,
+ *   `submit_for_review`, etc. (no `mcp__server__` prefix). The
+ *   orchestrator (Claude) writes instructions in Claude-style naming;
+ *   without this rewrite, Codex/Gemini agents look for the prefixed
+ *   tool, fail to find it, and stop without ever calling Marblo MCP.
+ */
+export function composeInitialPrompt(
+  model: ModelType,
+  instruction: string,
+  skillContent?: string,
+): string {
+  const isClaude = model === "claude";
+  const sanitized = isClaude
+    ? instruction
+    : instruction.replace(/mcp__marblo__/g, "");
+  if (isClaude || !skillContent) return sanitized;
+  return [
+    "[역할 스킬 — 아래 워크플로우와 도구 사용 규칙을 따르세요]",
+    skillContent.trim(),
+    "",
+    "[작업 지시]",
+    sanitized,
+  ].join("\n");
+}
+
 export class AgentManager {
   private agents: Map<string, AgentInstance> = new Map();
   private ptyManager: PtyManager;
@@ -128,23 +162,18 @@ export class AgentManager {
   launch(params: AgentLaunchParams): AgentInstance {
     const ptySessionId = `agent-${params.id}`;
 
-    // Generate MCP config + skill file for this agent
-    const launchConfig = this.configGenerator.getLaunchConfig(
-      {
-        id: params.id,
-        model: params.model,
-        role: params.role,
-        command: params.command,
-      },
-      params.cwd,
-      params.initialPrompt,
-      params.projectId,
-    );
-
-    // Resume support: add --resume flag
+    // Resume resolution. Claude Code needs a concrete session UUID
+    // (resolveSessionId converts "latest" by scanning ~/.claude/projects/).
+    // Codex / Gemini take "latest" natively (codex resume --last,
+    // gemini --resume latest), so we keep the sentinel and let agent-config
+    // emit the right CLI flags.
     let resolvedResumeId = params.resumeSessionId;
-    // Safety: if 'latest' leaked through, try resolving it here
-    if (resolvedResumeId === "latest" && this.resolveSessionId && params.cwd) {
+    if (
+      params.model === "claude" &&
+      resolvedResumeId === "latest" &&
+      this.resolveSessionId &&
+      params.cwd
+    ) {
       resolvedResumeId =
         this.resolveSessionId(params.cwd, "latest", params.name, params.id) ??
         undefined;
@@ -155,12 +184,34 @@ export class AgentManager {
       );
     }
     const isResume =
-      resolvedResumeId &&
+      !!resolvedResumeId &&
       resolvedResumeId !== "new" &&
-      resolvedResumeId !== "latest";
+      // For Claude we treat unresolved 'latest' as no-resume (the resolve
+      // step above set it to undefined when no session was found). For
+      // codex/gemini 'latest' is a valid CLI sentinel and should resume.
+      !(params.model === "claude" && resolvedResumeId === "latest");
+
+    // Generate MCP config + skill file for this agent. The resume id
+    // (if any) gets injected into the model-specific CLI args by
+    // buildCLICommand — Claude uses --resume <UUID>, Codex uses
+    // `resume --last|<UUID>` subcommand, Gemini uses --resume latest.
+    const launchConfig = this.configGenerator.getLaunchConfig(
+      {
+        id: params.id,
+        model: params.model,
+        role: params.role,
+        command: params.command,
+      },
+      params.cwd,
+      params.initialPrompt,
+      params.projectId,
+      isResume ? resolvedResumeId : undefined,
+    );
+
     if (isResume) {
-      launchConfig.args.push("--resume", resolvedResumeId!);
-      console.log(`[Agent:${params.id}] Resuming session: ${resolvedResumeId}`);
+      console.log(
+        `[Agent:${params.id}] Resuming session: ${resolvedResumeId} (model=${params.model})`,
+      );
     }
 
     // Merge env: process.env + generated MCP env
@@ -188,7 +239,11 @@ export class AgentManager {
     // Send initial prompt via stdin after CLI finishes booting (only for NEW sessions).
     // Uses PTY output detection instead of fixed timer to reliably detect readiness.
     if (!isResume && launchConfig.initialPrompt) {
-      const prompt = launchConfig.initialPrompt;
+      const prompt = composeInitialPrompt(
+        params.model,
+        launchConfig.initialPrompt,
+        launchConfig.skillContent,
+      );
       let sent = false;
       const sendPrompt = () => {
         if (sent) return;
@@ -215,6 +270,16 @@ export class AgentManager {
         /Loaded \d+ MCP tool/i, // MCP tools loaded — only after trust granted
         /Ready to assist/i, // Generic CLI ready message
         /What can I help/i, // Gemini/GPT greeting
+        // Codex TUI: the empty input area shows the example prompt
+        // "Explain this codebase" once init finishes (post plugin-sync,
+        // post trust check, post MCP startup). Verified by capturing
+        // the live PTY output of `codex` 0.128. Without a codex-specific
+        // pattern, Marblo would fall through to the 10s blind fallback
+        // and dump the prompt into whatever dialog/state codex is in,
+        // which historically caused the agent to exit cleanly without
+        // ever processing the instruction.
+        /Explain this codebase/i,
+        /esc to interrupt/i,
       ];
 
       this.ptyManager.onData(ptySessionId, (data) => {
@@ -552,6 +617,17 @@ export class AgentManager {
 
   getConfigGenerator(): AgentConfigGenerator {
     return this.configGenerator;
+  }
+
+  /**
+   * Whether the given agent has any saved CLI session in its isolated
+   * home dir. Used by the reconnect path to decide if `resume --last`
+   * (codex) / `--resume latest` (gemini) is safe to pass — running
+   * those against an empty sessions dir errors out on some CLIs and
+   * would just leave a dead PTY.
+   */
+  hasSavedSession(agentId: string, model: ModelType): boolean {
+    return this.configGenerator.hasSavedSession(agentId, model);
   }
 
   setStatus(agentId: string, status: AgentStatus): void {

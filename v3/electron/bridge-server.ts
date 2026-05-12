@@ -111,7 +111,7 @@ export class BridgeServer {
   // single-instance setter to support per-project orchestrators in
   // multi-window mode.
   private orchestratorLookup: (
-    projectId: string
+    projectId: string,
   ) => OrchestratorManager | null = () => null;
   // Per-project enabledModels lookup — main wires this so dispatchTask
   // doesn't read process.env (which races across windows).
@@ -143,7 +143,7 @@ export class BridgeServer {
   constructor(
     agentManager: AgentManager,
     ptyManager: PtyManager,
-    ptyBuffers: Map<string, string[]>
+    ptyBuffers: Map<string, string[]>,
   ) {
     this.agentManager = agentManager;
     this.ptyManager = ptyManager;
@@ -151,7 +151,7 @@ export class BridgeServer {
   }
 
   setOrchestratorLookup(
-    lookup: (projectId: string) => OrchestratorManager | null
+    lookup: (projectId: string) => OrchestratorManager | null,
   ): void {
     this.orchestratorLookup = lookup;
   }
@@ -165,13 +165,13 @@ export class BridgeServer {
       name: string;
       model: string;
       role: string;
-    }) => void
+    }) => void,
   ): void {
     this.agentSpawnedHook = hook;
   }
 
   setEnabledModelsLookup(
-    lookup: (projectId: string) => string[] | undefined
+    lookup: (projectId: string) => string[] | undefined,
   ): void {
     this.enabledModelsLookup = lookup;
   }
@@ -290,7 +290,7 @@ export class BridgeServer {
         } catch (err) {
           console.warn(
             "[BridgeServer] Failed to write port-discovery file:",
-            err
+            err,
           );
         }
         console.log(`[BridgeServer] Listening on 127.0.0.1:${this.port}`);
@@ -331,7 +331,7 @@ export class BridgeServer {
 
   private handleSpawnAgent(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -349,7 +349,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -361,7 +361,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required fields: name, model, role",
-            })
+            }),
           );
           return;
         }
@@ -385,7 +385,7 @@ export class BridgeServer {
 
   private handleDispatchTask(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -403,7 +403,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -415,7 +415,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required fields: role, instruction",
-            })
+            }),
           );
           return;
         }
@@ -429,7 +429,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: err instanceof Error ? err.message : "Unknown error",
-          })
+          }),
         );
       }
     });
@@ -439,7 +439,7 @@ export class BridgeServer {
 
   private handleKillAgent(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -457,7 +457,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -469,7 +469,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required field: agentName",
-            })
+            }),
           );
           return;
         }
@@ -481,7 +481,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: `Agent '${params.agentName}' not found`,
-            })
+            }),
           );
           return;
         }
@@ -495,7 +495,7 @@ export class BridgeServer {
         console.log(
           `[BridgeServer] Removed agent '${params.agentName}' (reason: ${
             params.reason || "none"
-          })`
+          })`,
         );
 
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -506,7 +506,7 @@ export class BridgeServer {
             reason: `Agent '${params.agentName}' stopped${
               params.reason ? `: ${params.reason}` : ""
             }`,
-          })
+          }),
         );
       } catch (err) {
         res.writeHead(500, { "Content-Type": "application/json" });
@@ -514,7 +514,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: err instanceof Error ? err.message : "Unknown error",
-          })
+          }),
         );
       }
     });
@@ -524,7 +524,7 @@ export class BridgeServer {
 
   private handleNotifyOrchestrator(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -542,7 +542,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -554,7 +554,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required field: message",
-            })
+            }),
           );
           return;
         }
@@ -569,7 +569,7 @@ export class BridgeServer {
               error: params.projectId
                 ? `Orchestrator not running for project ${params.projectId}`
                 : "Orchestrator not running (missing projectId)",
-            })
+            }),
           );
           return;
         }
@@ -581,7 +581,7 @@ export class BridgeServer {
         console.log(
           `[BridgeServer] Notified orchestrator (project=${
             params.projectId
-          }): ${params.message.slice(0, 80)}...`
+          }): ${params.message.slice(0, 80)}...`,
         );
 
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -592,7 +592,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: err instanceof Error ? err.message : "Unknown error",
-          })
+          }),
         );
       }
     });
@@ -602,7 +602,7 @@ export class BridgeServer {
 
   private handleReuseAgent(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -620,7 +620,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -632,7 +632,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required fields: agentName, instruction",
-            })
+            }),
           );
           return;
         }
@@ -645,7 +645,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: `Agent '${params.agentName}' not found`,
-            })
+            }),
           );
           return;
         }
@@ -656,7 +656,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: `Agent '${params.agentName}' is not available (status: ${agent.status})`,
-            })
+            }),
           );
           return;
         }
@@ -666,7 +666,7 @@ export class BridgeServer {
         console.log(
           `[BridgeServer] Reused agent '${
             params.agentName
-          }': ${params.instruction.slice(0, 80)}...`
+          }': ${params.instruction.slice(0, 80)}...`,
         );
 
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -677,7 +677,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: err instanceof Error ? err.message : "Unknown error",
-          })
+          }),
         );
       }
     });
@@ -711,7 +711,7 @@ export class BridgeServer {
     const scored = this.scoreAgents(allAgents, role, model, tags);
     // Only idle agents are safe to reuse — working agents may be mid-task
     const reusable = scored.filter(
-      (s) => s.score >= 100 && s.agent.status === "idle"
+      (s) => s.score >= 100 && s.agent.status === "idle",
     );
 
     // Step 1: Reuse idle agent
@@ -726,7 +726,7 @@ export class BridgeServer {
       this.syncAgentStatus(best.agent.id, "working", params.taskId);
 
       console.log(
-        `[BridgeServer] Dispatch: reused '${best.agent.name}' (score=${best.score})`
+        `[BridgeServer] Dispatch: reused '${best.agent.name}' (score=${best.score})`,
       );
       return {
         success: true,
@@ -741,7 +741,7 @@ export class BridgeServer {
 
     // Step 2: Restart stopped agent
     const restartable = scored.filter(
-      (s) => s.score >= 100 && s.agent.status === "stopped"
+      (s) => s.score >= 100 && s.agent.status === "stopped",
     );
 
     if (restartable.length > 0) {
@@ -753,7 +753,7 @@ export class BridgeServer {
         this.syncAgentStatus(restarted.id, "working", params.taskId);
 
         console.log(
-          `[BridgeServer] Dispatch: restarted '${best.agent.name}' (score=${best.score})`
+          `[BridgeServer] Dispatch: restarted '${best.agent.name}' (score=${best.score})`,
         );
         return {
           success: true,
@@ -823,7 +823,7 @@ export class BridgeServer {
     this.syncAgentStatus(spawnResult.agentId!, "working", params.taskId);
 
     console.log(
-      `[BridgeServer] Dispatch: spawned '${agentName}' (model=${selectedModel})`
+      `[BridgeServer] Dispatch: spawned '${agentName}' (model=${selectedModel})`,
     );
     return {
       success: true,
@@ -842,7 +842,7 @@ export class BridgeServer {
     agents: AgentInstance[],
     role: string,
     preferredModel?: ModelType,
-    tags: string[] = []
+    tags: string[] = [],
   ) {
     const infos: AgentInfo[] = agents.map((a) => ({
       id: a.id,
@@ -965,7 +965,7 @@ export class BridgeServer {
   private syncAgentStatus(
     agentId: string,
     status: AgentStatus,
-    currentTaskId?: string
+    currentTaskId?: string,
   ): void {
     // Include agentName so the renderer can match by name (Firestore doc ID != AgentManager UUID)
     const agent = this.agentManager.getAgent(agentId);
@@ -994,7 +994,7 @@ export class BridgeServer {
 
   private handleSetAgentStatus(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -1013,8 +1013,8 @@ export class BridgeServer {
       let agent = params.agentName
         ? this.agentManager.getAgentByName(params.agentName)
         : params.agentId
-        ? this.agentManager.getAgent(params.agentId)
-        : null;
+          ? this.agentManager.getAgent(params.agentId)
+          : null;
 
       if (!agent) {
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -1029,7 +1029,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: `Invalid status: ${params.status}`,
-          })
+          }),
         );
         return;
       }
@@ -1037,7 +1037,7 @@ export class BridgeServer {
       this.agentManager.setStatus(agent.id, params.status as AgentStatus);
       this.syncAgentStatus(agent.id, params.status as AgentStatus);
       console.log(
-        `[BridgeServer] Set agent "${agent.name}" status → ${params.status}`
+        `[BridgeServer] Set agent "${agent.name}" status → ${params.status}`,
       );
 
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -1046,10 +1046,19 @@ export class BridgeServer {
   }
 
   // ── POST /inject-message ───────────────────────────────────
+  //
+  // Patent 단락 296-297 양방향 동기화 *하향 경로*:
+  //   사용자가 칸반보드(KanbanBoard / TaskDetailModal)에서 코멘트 추가,
+  //   상태 강제 변경, 우선순위 변경, 에이전트 재배정 등을 수행하면
+  //   해당 액션이 PM 신규지시 형태로 담당 에이전트의 PTY 표준입력에
+  //   주입된다 (PtyManager.writeAndSubmit). 에이전트는 실행을 중단하지
+  //   않고 기존 컨텍스트 위에서 신규지시를 반영해 작업을 이어간다.
+  //   상향 경로(에이전트 stdout → 태스크보드 → 칸반)와 합쳐 청구항 5/10
+  //   + 명세서 양방향 실시간 제어 인터페이스 구현 완성.
 
   private handleInjectMessage(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -1074,7 +1083,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -1085,7 +1094,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: "Missing required fields: targetAgent, tag, message",
-          })
+          }),
         );
         return;
       }
@@ -1096,8 +1105,8 @@ export class BridgeServer {
               params.taskId ? ` taskId=${params.taskId}` : ""
             }`
           : params.taskId
-          ? ` taskId=${params.taskId}`
-          : "";
+            ? ` taskId=${params.taskId}`
+            : "";
         const formatted = `[${params.tag}]${taskMeta}\n${params.message}`;
 
         // Try to find the target agent
@@ -1108,7 +1117,7 @@ export class BridgeServer {
           // Agent is online — inject directly (split for discrete Enter)
           this.ptyManager.writeAndSubmit(agent.ptySessionId, formatted);
           console.log(
-            `[BridgeServer] Injected [${params.tag}] → agent "${agent.name}"`
+            `[BridgeServer] Injected [${params.tag}] → agent "${agent.name}"`,
           );
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
@@ -1116,7 +1125,7 @@ export class BridgeServer {
               success: true,
               delivered: "agent",
               agentName: agent.name,
-            })
+            }),
           );
         } else {
           // Agent offline — fallback to orchestrator (route by projectId)
@@ -1126,7 +1135,7 @@ export class BridgeServer {
             const forwarded = `[${params.tag} → Forwarded] agent="${params.targetAgent}"${taskMeta}\n에이전트 오프라인. 원본: ${params.message}`;
             this.ptyManager.writeAndSubmit(session.ptySessionId, forwarded);
             console.log(
-              `[BridgeServer] Forwarded [${params.tag}] → orchestrator (agent "${params.targetAgent}" offline)`
+              `[BridgeServer] Forwarded [${params.tag}] → orchestrator (agent "${params.targetAgent}" offline)`,
             );
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(
@@ -1134,18 +1143,18 @@ export class BridgeServer {
                 success: true,
                 delivered: "orchestrator",
                 reason: `Agent "${params.targetAgent}" offline`,
-              })
+              }),
             );
           } else {
             console.warn(
-              `[BridgeServer] Cannot deliver [${params.tag}]: agent "${params.targetAgent}" offline, orchestrator not running`
+              `[BridgeServer] Cannot deliver [${params.tag}]: agent "${params.targetAgent}" offline, orchestrator not running`,
             );
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(
               JSON.stringify({
                 success: false,
                 error: "Agent offline and orchestrator not running",
-              })
+              }),
             );
           }
         }
@@ -1155,7 +1164,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: err instanceof Error ? err.message : "Unknown error",
-          })
+          }),
         );
       }
     });

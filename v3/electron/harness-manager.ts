@@ -129,7 +129,7 @@ function expandEnv(value: string): string {
 function runCommand(
   cmd: string,
   args: string[],
-  cwd?: string
+  cwd?: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -139,7 +139,7 @@ function runCommand(
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
     child.on("error", (err) =>
-      resolve({ code: -1, stdout, stderr: stderr + err.message })
+      resolve({ code: -1, stdout, stderr: stderr + err.message }),
     );
   });
 }
@@ -171,7 +171,7 @@ async function installGit(strategy: InstallStrategy): Promise<void> {
  */
 async function runPostInstallExec(
   strategy: InstallStrategy,
-  enrichedPath: string
+  enrichedPath: string,
 ): Promise<void> {
   if (!strategy.postInstallExec || strategy.postInstallExec.length === 0) {
     return;
@@ -190,23 +190,23 @@ async function runPostInstallExec(
         child.stdout.on("data", (d) => (stdout += d.toString()));
         child.stderr.on("data", (d) => (stderr += d.toString()));
         child.on("close", (code) =>
-          resolve({ code: code ?? -1, stdout, stderr })
+          resolve({ code: code ?? -1, stdout, stderr }),
         );
         child.on("error", (err) =>
-          resolve({ code: -1, stdout, stderr: stderr + err.message })
+          resolve({ code: -1, stdout, stderr: stderr + err.message }),
         );
       });
       if (result.code !== 0) {
         console.warn(
           `[harness] postInstallExec ${step.command} ${step.args.join(
-            " "
-          )} exit ${result.code}: ${(result.stderr || result.stdout).trim()}`
+            " ",
+          )} exit ${result.code}: ${(result.stderr || result.stdout).trim()}`,
         );
       }
     } catch (err) {
       console.warn(
         `[harness] postInstallExec ${step.command} threw:`,
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
     }
   }
@@ -232,7 +232,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
   }
   if (!npmPath) {
     throw new Error(
-      "npm을 찾을 수 없습니다. Node.js / npm 설치 후 다시 시도하세요. (https://nodejs.org)"
+      "npm을 찾을 수 없습니다. Node.js / npm 설치 후 다시 시도하세요. (https://nodejs.org)",
     );
   }
   const result = await new Promise<{
@@ -247,7 +247,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
     child.on("error", (err) =>
-      resolve({ code: -1, stdout, stderr: stderr + err.message })
+      resolve({ code: -1, stdout, stderr: stderr + err.message }),
     );
   });
   if (result.code !== 0) {
@@ -257,7 +257,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
       .slice(-5)
       .join("\n");
     throw new Error(
-      `npm install -g ${strategy.source} 실패 (exit ${result.code})\n${tail}`
+      `npm install -g ${strategy.source} 실패 (exit ${result.code})\n${tail}`,
     );
   }
   // npm install 성공 — feature-flag 같은 후속 작업 (best-effort)
@@ -266,7 +266,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
 
 async function installMcp(
   pkg: HarnessPackage,
-  strategy: InstallStrategy
+  strategy: InstallStrategy,
 ): Promise<void> {
   if (!strategy.source) {
     throw new Error("mcp install requires source command");
@@ -280,7 +280,7 @@ async function installMcp(
     command: strategy.source,
     args: (strategy.args ?? []).map(expandEnv),
     env: Object.fromEntries(
-      Object.entries(strategy.env ?? {}).map(([k, v]) => [k, expandEnv(v)])
+      Object.entries(strategy.env ?? {}).map(([k, v]) => [k, expandEnv(v)]),
     ),
   };
   cfg.mcpServers = servers;
@@ -296,7 +296,7 @@ export async function installPackage(id: string): Promise<void> {
       return;
     case "manual":
       throw new Error(
-        "이 패키지는 자동 설치를 지원하지 않습니다. instructions 참고."
+        "이 패키지는 자동 설치를 지원하지 않습니다. instructions 참고.",
       );
     case "git":
       await installGit(pkg.install);

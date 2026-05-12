@@ -42,7 +42,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
   }, [refresh]);
 
   const filtered = packages.filter(
-    (p) => filter === "all" || p.category === filter
+    (p) => filter === "all" || p.category === filter,
   );
 
   const handleInstall = async (pkg: HarnessPackage) => {
@@ -62,7 +62,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
         setInfo(
           postInstall
             ? `${pkg.name} 설치 완료. ${postInstall}`
-            : `${pkg.name} 설치 완료.`
+            : `${pkg.name} 설치 완료.`,
         );
       }
     } finally {
@@ -212,8 +212,8 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                         isInstalled
                           ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
                           : isManual
-                          ? "bg-[#f9e2af]/20 text-[#f9e2af]"
-                          : "bg-[#313244] text-[#6c7086]"
+                            ? "bg-[#f9e2af]/20 text-[#f9e2af]"
+                            : "bg-[#313244] text-[#6c7086]"
                       }`}
                     >
                       {isInstalled ? "설치됨" : isManual ? "수동" : "미설치"}
@@ -232,12 +232,12 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                         {isBusy
                           ? "설치 중..."
                           : isManual
-                          ? "안내 보기"
-                          : isBundled
-                          ? "자동 설치됨"
-                          : isRequired
-                          ? "필수 — 설치"
-                          : STATUS_LABEL[pkg.status]}
+                            ? "안내 보기"
+                            : isBundled
+                              ? "자동 설치됨"
+                              : isRequired
+                                ? "필수 — 설치"
+                                : STATUS_LABEL[pkg.status]}
                       </button>
                     )}
                     {isInstalled && !isRequired && (
@@ -272,8 +272,16 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
         </div>
 
         {/* Footer note */}
-        <div className="border-t border-[#313244] px-4 py-2 text-[11px] text-[#6c7086]">
-          외부 GitHub URL 직접 설치는 차후 추가될 예정입니다 (신뢰 검증 후).
+        <div className="space-y-1 border-t border-[#313244] px-4 py-2 text-[11px] text-[#6c7086]">
+          <div>
+            <span className="text-[#89b4fa]">●</span> Marblo MCP는 대시보드
+            내부에서 spawn 된 에이전트에만 자동 연결됩니다 (per-agent isolated
+            config). 외부 터미널 CLI 세션은 사용자의 taskforce MCP 등 별도
+            설정으로 관리하세요.
+          </div>
+          <div>
+            외부 GitHub URL 직접 설치는 차후 추가될 예정입니다 (신뢰 검증 후).
+          </div>
         </div>
       </div>
     </div>
