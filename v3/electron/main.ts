@@ -8,6 +8,7 @@ import {
   clipboard,
   nativeImage,
   shell,
+  safeStorage,
 } from "electron";
 import path from "path";
 import fs from "fs";
@@ -15,6 +16,7 @@ import os from "os";
 import http from "http";
 import dotenv from "dotenv";
 import { PtyManager } from "./pty-manager";
+import { PendingInstructionListener } from "./pending-instruction-listener";
 import { FsManager } from "./fs-manager";
 import { AgentManager } from "./agent-manager";
 import { Updater } from "./updater";
@@ -40,11 +42,26 @@ import { mainTelemetry } from "./telemetry";
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 
 // --- API Key Storage ---
+// BYOK keys are encrypted at rest with Electron's safeStorage API, which
+// uses the OS keychain under the hood (Keychain on macOS, DPAPI on
+// Windows, libsecret on Linux). Plaintext fallback is a hard error per
+// the v3.1 launch master plan P0-4 acceptance ("평문 파일 0개 검증").
+//
+// Two file paths cover the upgrade path:
+//   api-keys.json       (legacy plaintext — auto-migrated on first write)
+//   api-keys.enc.json   (base64-encoded ciphertext per key)
 const API_KEYS_DIR = path.join(os.homedir(), ".marblo");
-const API_KEYS_FILE = path.join(API_KEYS_DIR, "api-keys.json");
+const API_KEYS_FILE_LEGACY = path.join(API_KEYS_DIR, "api-keys.json");
+const API_KEYS_FILE_ENC = path.join(API_KEYS_DIR, "api-keys.enc.json");
 
 interface StoredApiKeys {
   anthropic?: string;
+  openai?: string;
+  google?: string;
+}
+
+interface EncryptedKeyStore {
+  anthropic?: string; // base64 ciphertext
   openai?: string;
   google?: string;
 }
@@ -55,22 +72,100 @@ function ensureApiKeysDir(): void {
   }
 }
 
+/** safeStorage requires app.isReady() before it can be used. */
+function isEncryptionAvailable(): boolean {
+  try {
+    return app.isReady() && safeStorage.isEncryptionAvailable();
+  } catch {
+    return false;
+  }
+}
+
+function decryptField(b64: string | undefined): string | undefined {
+  if (!b64) return undefined;
+  try {
+    return safeStorage.decryptString(Buffer.from(b64, "base64"));
+  } catch (err) {
+    console.warn("[ApiKeys] decrypt failed for one field:", err);
+    return undefined;
+  }
+}
+
+function encryptField(plain: string | undefined): string | undefined {
+  if (!plain) return undefined;
+  return safeStorage.encryptString(plain).toString("base64");
+}
+
 function readApiKeys(): StoredApiKeys {
   try {
     ensureApiKeysDir();
-    if (fs.existsSync(API_KEYS_FILE)) {
-      const raw = fs.readFileSync(API_KEYS_FILE, "utf-8");
-      return JSON.parse(raw) as StoredApiKeys;
+
+    // 1) Prefer encrypted store if it exists AND safeStorage is up.
+    if (fs.existsSync(API_KEYS_FILE_ENC)) {
+      if (!isEncryptionAvailable()) {
+        // Called before app.whenReady() — return empty and rely on the
+        // post-ready refresh hook to load keys later.
+        return {};
+      }
+      const raw = fs.readFileSync(API_KEYS_FILE_ENC, "utf-8");
+      const enc = JSON.parse(raw) as EncryptedKeyStore;
+      return {
+        anthropic: decryptField(enc.anthropic),
+        openai: decryptField(enc.openai),
+        google: decryptField(enc.google),
+      };
     }
-  } catch {
-    // If file is corrupted, return empty
+
+    // 2) Legacy plaintext file — read it so the user doesn't lose keys.
+    //    Migration to encrypted happens lazily on the next writeApiKeys().
+    if (fs.existsSync(API_KEYS_FILE_LEGACY)) {
+      const raw = fs.readFileSync(API_KEYS_FILE_LEGACY, "utf-8");
+      const keys = JSON.parse(raw) as StoredApiKeys;
+      // Opportunistic migration if safeStorage is ready right now.
+      if (isEncryptionAvailable()) {
+        try {
+          writeApiKeys(keys);
+          console.log("[ApiKeys] Migrated legacy plaintext → encrypted store");
+        } catch (err) {
+          console.warn("[ApiKeys] Migration deferred (write failed):", err);
+        }
+      }
+      return keys;
+    }
+  } catch (err) {
+    console.warn("[ApiKeys] read failed:", err);
   }
   return {};
 }
 
 function writeApiKeys(keys: StoredApiKeys): void {
   ensureApiKeysDir();
-  fs.writeFileSync(API_KEYS_FILE, JSON.stringify(keys, null, 2), "utf-8");
+  if (!isEncryptionAvailable()) {
+    // Per P0-4: never write plaintext. If safeStorage is unavailable
+    // (Linux without libsecret, ancient OS) surface the error so the
+    // user knows their keys aren't being saved.
+    throw new Error(
+      "OS keychain encryption unavailable. " +
+        "On Linux install libsecret-1-0 / gnome-keyring and restart Marblo. " +
+        "On macOS or Windows this should not happen — please report to support@marblo.app."
+    );
+  }
+  const enc: EncryptedKeyStore = {
+    anthropic: encryptField(keys.anthropic),
+    openai: encryptField(keys.openai),
+    google: encryptField(keys.google),
+  };
+  fs.writeFileSync(API_KEYS_FILE_ENC, JSON.stringify(enc, null, 2), "utf-8");
+  // Once an encrypted copy exists, drop the legacy plaintext so the
+  // disk never holds the keys in cleartext again.
+  if (fs.existsSync(API_KEYS_FILE_LEGACY)) {
+    try {
+      fs.unlinkSync(API_KEYS_FILE_LEGACY);
+      console.log("[ApiKeys] Removed legacy plaintext file");
+    } catch (err) {
+      console.warn("[ApiKeys] Failed to remove legacy plaintext:", err);
+    }
+  }
 }
 
 function maskKey(key: string): string {
@@ -131,6 +226,9 @@ const isDev = process.env.MARBLO_FORCE_PROD !== "1" && !app.isPackaged;
 const updater = new Updater();
 const ptyManager = new PtyManager();
 const fsManager = new FsManager();
+// Bridges the cross-machine `pendingInstructions` Firestore queue to local
+// PTYs. attach/detach is driven by agent spawn / stop lifecycle below.
+const pendingListener = new PendingInstructionListener(ptyManager);
 // Helper used by AgentManager callbacks to route project-scoped events.
 // Looks up the agent's project from its launchConfig env (set at spawn).
 function projectIdForAgent(agentId: string): string | undefined {
@@ -141,6 +239,11 @@ function projectIdForAgent(agentId: string): string | undefined {
 const agentManager = new AgentManager(
   ptyManager,
   (agentId, status) => {
+    // Free the pending-instruction listener once the agent is fully gone.
+    // "error" is transient (auto-restart may follow), only "stopped" is final.
+    if (status === "stopped") {
+      pendingListener.detach(agentId);
+    }
     const pid = projectIdForAgent(agentId);
     if (pid) sendToProject(pid, "agent:statusChanged", { agentId, status });
     else broadcast("agent:statusChanged", { agentId, status });
@@ -368,6 +471,12 @@ function resolveSpawnOwner(
 
 bridgeServer.setAgentSpawnedHook(
   ({ sid, projectId, agentId, parentAgentId, name, model, role }) => {
+    // (Re-)attach the pending-instruction listener with the current PTY
+    // session. On auto-restart `sid` changes, so detach first to discard
+    // the stale closure, then attach with the fresh sid.
+    pendingListener.detach(agentId);
+    pendingListener.attach(agentId, sid);
+
     const { ownerId, resolvedProjectId } = resolveSpawnOwner(
       projectId,
       parentAgentId
@@ -1259,25 +1368,6 @@ ipcMain.handle(
         continue;
       }
 
-      // Non-Claude agents can't --resume, but register them as idle for dispatch reuse
-      if (agentData.model !== "claude") {
-        agentManager.registerReconnected({
-          id: agentData.id,
-          name: agentData.name,
-          model: agentData.model as "claude" | "gemini" | "gpt" | "custom",
-          role: agentData.role,
-          command: agentData.command,
-          cwd: rootPath,
-          ptySessionId: `agent-${agentData.id}`,
-        });
-        results.push({
-          agentId: agentData.id,
-          reconnected: false,
-          ptySessionId: null,
-        });
-        continue;
-      }
-
       // Skip agents that already have a running PTY session
       const existing = agentManager.getAgent(agentData.id);
       if (
@@ -1293,26 +1383,57 @@ ipcMain.handle(
         continue;
       }
 
-      // Use specific session ID if found; resolve 'latest' per-agent if not.
-      // Stateless file-IO — any orchestrator instance works.
-      let resumeId = candidate.sessionId;
-      if (!resumeId) {
-        resumeId = getAnyOrchestrator().resolveSessionId(
-          rootPath,
-          "latest",
-          agentData.name,
-          agentData.id
-        );
+      // Resolve resume id per model.
+      // - Claude: candidate.sessionId from ~/.claude/projects scan, or
+      //   resolveSessionId('latest') as fallback. Need a concrete UUID.
+      // - Codex / Gemini: their sessions live in our per-agent isolated
+      //   home (created by AgentConfigGenerator), keyed by agentId — same
+      //   home survives across app restarts because tmpdir() is persistent
+      //   on macOS/Linux. We pass "latest" as a sentinel and the CLI's
+      //   own resume logic (`codex resume --last`, `gemini --resume latest`)
+      //   picks that agent's most recent session. Skip when the home is
+      //   empty so we don't error out on a fresh agent that never ran.
+      let resumeId: string | null | undefined = candidate.sessionId;
+      if (agentData.model === "claude") {
+        if (!resumeId) {
+          resumeId = getAnyOrchestrator().resolveSessionId(
+            rootPath,
+            "latest",
+            agentData.name,
+            agentData.id
+          );
+        }
+      } else {
+        const model = agentData.model as "claude" | "gemini" | "gpt" | "custom";
+        if (
+          (model === "gpt" || model === "gemini") &&
+          agentManager.hasSavedSession(agentData.id, model)
+        ) {
+          resumeId = "latest";
+        } else {
+          resumeId = null;
+        }
       }
       if (!resumeId) {
-        // No session found for this agent — skip reconnect
+        // No prior session — register as idle stub (so dispatch can still
+        // route work to it) but don't relaunch a PTY. The agent will boot
+        // fresh on the next dispatch_task / spawn_agent.
+        agentManager.registerReconnected({
+          id: agentData.id,
+          name: agentData.name,
+          model: agentData.model as "claude" | "gemini" | "gpt" | "custom",
+          role: agentData.role,
+          command: agentData.command,
+          cwd: rootPath,
+          ptySessionId: `agent-${agentData.id}`,
+        });
         results.push({
           agentId: agentData.id,
           reconnected: false,
           ptySessionId: null,
         });
         console.log(
-          `[Reconnect] No session found for agent ${agentData.name}, skipping`
+          `[Reconnect] No session found for agent ${agentData.name} (${agentData.model}), registered as idle`
         );
         continue;
       }
@@ -1713,6 +1834,66 @@ ipcMain.handle("modelPreset:get", () => {
   );
 });
 
+// --- Subscription plans (patent claim 8 — 구독제 vs 토큰단위 구분) ---
+//
+// User declares which models are billed under a flat-monthly subscription
+// (Claude Max, ChatGPT Plus, etc.) vs the default per-token rates. The
+// list is stored in ~/.marblo/subscription-plans.json so the cost-tracker
+// running in any process (electron main, per-agent MCP) reads the same
+// view via fs without needing IPC. Subscription matches override the
+// per-token rate table; entries below the optional monthly token
+// allowance contribute zero incremental cost (the flat fee covers them).
+const SUBSCRIPTION_PLANS_FILE = path.join(
+  os.homedir(),
+  ".marblo",
+  "subscription-plans.json"
+);
+
+interface SubscriptionPlanEntry {
+  modelPrefix: string;
+  monthlyFlatUsd: number;
+  monthlyTokenAllowance?: number;
+  overagePerToken?: { inputPer1M: number; outputPer1M: number };
+}
+
+ipcMain.handle("subscriptionPlans:list", () => {
+  try {
+    if (!fs.existsSync(SUBSCRIPTION_PLANS_FILE)) return [];
+    const raw = fs.readFileSync(SUBSCRIPTION_PLANS_FILE, "utf-8");
+    const parsed = JSON.parse(raw) as SubscriptionPlanEntry[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.error("[Main] subscriptionPlans:list failed:", err);
+    return [];
+  }
+});
+
+ipcMain.handle(
+  "subscriptionPlans:save",
+  (_event, plans: SubscriptionPlanEntry[]) => {
+    try {
+      if (!Array.isArray(plans)) {
+        return { success: false, error: "plans must be an array" };
+      }
+      const dir = path.dirname(SUBSCRIPTION_PLANS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const tmp = `${SUBSCRIPTION_PLANS_FILE}.tmp-${process.pid}`;
+      fs.writeFileSync(tmp, JSON.stringify(plans, null, 2), "utf-8");
+      fs.renameSync(tmp, SUBSCRIPTION_PLANS_FILE);
+      console.log(
+        `[Main] subscriptionPlans:save wrote ${plans.length} plan(s)`
+      );
+      return { success: true };
+    } catch (err) {
+      console.error("[Main] subscriptionPlans:save failed:", err);
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+);
+
 ipcMain.handle("appState:load", () => readAppState());
 
 ipcMain.handle("appState:save", (_event, state: Partial<AppState>) => {
@@ -1751,6 +1932,23 @@ ipcMain.handle("harness:uninstall", async (_event, id: string) => {
 });
 
 app.whenReady().then(async () => {
+  // safeStorage only comes online after `ready`. The module-load
+  // `readApiKeys()` returned {} if the user had encrypted keys on disk;
+  // refresh now so the LLM provider picks them up before any flow runs.
+  if (safeStorage.isEncryptionAvailable()) {
+    try {
+      refreshLLMProvider();
+    } catch (err) {
+      console.warn("[Main] Post-ready key load failed (non-fatal):", err);
+    }
+  } else {
+    console.warn(
+      "[ApiKeys] OS keychain encryption unavailable on this system. " +
+        "BYOK keys will not persist across restarts. " +
+        "On Linux, install libsecret-1-0 / gnome-keyring."
+    );
+  }
+
   // Install bundled harness assets (tf-* commands + skills) into ~/.claude/.
   // Idempotent: skips when the version marker already matches the current
   // app version.
@@ -1799,6 +1997,7 @@ app.on("window-all-closed", () => {
     stopAllOrchestrators();
     bridgeServer.stop();
     agentManager.stopAll();
+    pendingListener.detachAll();
     ptyManager.killAll();
     fsManager.stopAllWatching();
     app.quit();
@@ -1812,6 +2011,7 @@ app.on("before-quit", () => {
   stopAllOrchestrators();
   bridgeServer.stop();
   agentManager.stopAll();
+  pendingListener.detachAll();
   ptyManager.killAll();
   fsManager.stopAllWatching();
 });
