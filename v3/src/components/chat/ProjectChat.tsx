@@ -1,13 +1,15 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { useChatStore } from '../../stores/chatStore';
-import { useProjectStore } from '../../stores/projectStore';
-import { useAgentStore } from '../../stores/agentStore';
-import { useAuth } from '../../hooks/useAuth';
-import type { ChatMessage } from '../../types/chat';
+import { useState, useRef, useEffect, useCallback } from "react";
+import { useChatStore } from "../../stores/chatStore";
+import { useProjectStore } from "../../stores/projectStore";
+import { useAgentStore } from "../../stores/agentStore";
+import { useAuth } from "../../hooks/useAuth";
+import { addPendingInstruction } from "../../services/pendingInstructionService";
+import { sendSystemMessage } from "../../services/chatService";
+import type { ChatMessage } from "../../types/chat";
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return 'just now';
+  if (seconds < 60) return "just now";
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
@@ -18,7 +20,7 @@ function timeAgo(date: Date): string {
 
 interface MentionTarget {
   name: string;
-  type: 'orchestrator' | 'agent';
+  type: "orchestrator" | "agent";
 }
 
 function MentionDropdown({
@@ -43,7 +45,9 @@ function MentionDropdown({
           onClick={() => onSelect(t)}
           className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-gray-700"
         >
-          <span className={`h-2 w-2 rounded-full ${t.type === 'orchestrator' ? 'bg-blue-400' : 'bg-green-400'}`} />
+          <span
+            className={`h-2 w-2 rounded-full ${t.type === "orchestrator" ? "bg-blue-400" : "bg-green-400"}`}
+          />
           <span className="text-gray-200">@{t.name}</span>
           <span className="ml-auto text-xs text-gray-500">{t.type}</span>
         </button>
@@ -53,7 +57,7 @@ function MentionDropdown({
 }
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
-  if (msg.type === 'system') {
+  if (msg.type === "system") {
     return (
       <div className="flex items-center justify-center gap-2 py-1">
         <div className="h-px flex-1 bg-gray-700/50" />
@@ -63,11 +67,11 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     );
   }
 
-  const isAgent = msg.type === 'agent';
-  const isMention = msg.content.startsWith('@');
+  const isAgent = msg.type === "agent";
+  const isMention = msg.content.startsWith("@");
 
   return (
-    <div className={`flex gap-2.5 ${isAgent ? 'items-start' : 'items-start'}`}>
+    <div className={`flex gap-2.5 ${isAgent ? "items-start" : "items-start"}`}>
       {/* Avatar */}
       {msg.senderPhotoURL ? (
         <img
@@ -76,27 +80,33 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           className="h-7 w-7 flex-shrink-0 rounded-full"
         />
       ) : (
-        <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-          isAgent ? 'bg-blue-600 text-white' : 'bg-gray-600 text-gray-300'
-        }`}>
+        <div
+          className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+            isAgent ? "bg-blue-600 text-white" : "bg-gray-600 text-gray-300"
+          }`}
+        >
           {msg.senderName.charAt(0).toUpperCase()}
         </div>
       )}
 
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <span className={`text-xs font-semibold ${isAgent ? 'text-blue-400' : 'text-gray-300'}`}>
+          <span
+            className={`text-xs font-semibold ${isAgent ? "text-blue-400" : "text-gray-300"}`}
+          >
             {msg.senderName}
           </span>
-          <span className="text-xs text-gray-600">{timeAgo(msg.createdAt)}</span>
+          <span className="text-xs text-gray-600">
+            {timeAgo(msg.createdAt)}
+          </span>
         </div>
         <div
           className={`mt-0.5 rounded-lg px-3 py-1.5 text-sm ${
             isMention
-              ? 'border-l-2 border-purple-500 bg-purple-500/10 text-gray-200'
+              ? "border-l-2 border-purple-500 bg-purple-500/10 text-gray-200"
               : isAgent
-                ? 'border-l-2 border-blue-500 bg-blue-500/10 text-gray-200'
-                : 'bg-gray-700/50 text-gray-200'
+                ? "border-l-2 border-blue-500 bg-blue-500/10 text-gray-200"
+                : "bg-gray-700/50 text-gray-200"
           }`}
         >
           <p className="whitespace-pre-wrap break-words">{msg.content}</p>
@@ -115,13 +125,14 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 export function ProjectChat() {
   const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
-  const { messages, loading, sendMessage, subscribeToMessages, resetUnread } = useChatStore();
+  const { messages, loading, sendMessage, subscribeToMessages, resetUnread } =
+    useChatStore();
   const agents = useAgentStore((s) => s.agents);
 
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [showMention, setShowMention] = useState(false);
-  const [mentionFilter, setMentionFilter] = useState('');
+  const [mentionFilter, setMentionFilter] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -134,7 +145,7 @@ export function ProjectChat() {
 
   // Auto-scroll
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   // Reset unread when visible
@@ -144,16 +155,18 @@ export function ProjectChat() {
 
   // Build mention targets
   const mentionTargets: MentionTarget[] = [
-    { name: 'orchestrator', type: 'orchestrator' },
+    { name: "orchestrator", type: "orchestrator" },
     ...agents
-      .filter((a) => a.status !== 'stopped')
-      .map((a) => ({ name: a.name, type: 'agent' as const })),
+      .filter((a) => a.status !== "stopped")
+      .map((a) => ({ name: a.name, type: "agent" as const })),
   ];
 
   const handleMentionSelect = useCallback((target: MentionTarget) => {
     setInput((prev) => {
-      const atIdx = prev.lastIndexOf('@');
-      return atIdx >= 0 ? prev.slice(0, atIdx) + `@${target.name} ` : `@${target.name} `;
+      const atIdx = prev.lastIndexOf("@");
+      return atIdx >= 0
+        ? prev.slice(0, atIdx) + `@${target.name} `
+        : `@${target.name} `;
     });
     setShowMention(false);
     inputRef.current?.focus();
@@ -164,10 +177,10 @@ export function ProjectChat() {
     setInput(value);
 
     // Detect @ mention
-    const atIdx = value.lastIndexOf('@');
+    const atIdx = value.lastIndexOf("@");
     if (atIdx >= 0) {
       const afterAt = value.slice(atIdx + 1);
-      if (!afterAt.includes(' ')) {
+      if (!afterAt.includes(" ")) {
         setShowMention(true);
         setMentionFilter(afterAt);
         return;
@@ -179,7 +192,7 @@ export function ProjectChat() {
   const handleSend = async () => {
     if (!input.trim() || !currentProject || !user || sending) return;
     const content = input.trim();
-    setInput('');
+    setInput("");
     setSending(true);
 
     try {
@@ -189,29 +202,98 @@ export function ProjectChat() {
         const target = mentionMatch[1];
         const instruction = mentionMatch[2];
 
-        if (target === 'orchestrator' || target === '오케') {
+        if (target === "orchestrator" || target === "오케") {
+          // Fast path: local orchestrator PTY exists → write directly.
+          // Otherwise enqueue into pendingInstructions with targetAgentId =
+          // `orch-${projectId}`; the machine hosting the orchestrator has
+          // a listener attached at that key (see main.ts orchestratorSession
+          // launch handler) that atomically flips delivery and injects PTY.
+          let injected = false;
           try {
             const ptySessions = await window.electronAPI.pty.list();
-            const orchSession = ptySessions.find((s: { id: string; name: string }) => s.name.toLowerCase().includes('orchestrator'));
+            const orchSession = ptySessions.find(
+              (s: { id: string; name: string }) =>
+                s.name.toLowerCase().includes("orchestrator"),
+            );
             if (orchSession) {
-              await window.electronAPI.pty.write(orchSession.id, instruction + '\r');
-            } else {
-              console.warn('Orchestrator not running');
+              await window.electronAPI.pty.write(
+                orchSession.id,
+                instruction + "\r",
+              );
+              injected = true;
             }
-          } catch {
-            console.warn('Failed to write to orchestrator PTY');
+          } catch (err) {
+            console.warn("Failed local orchestrator PTY write", err);
+          }
+
+          if (!injected) {
+            try {
+              await addPendingInstruction({
+                projectId: currentProject.id,
+                taskId: null,
+                targetAgentId: `orch-${currentProject.id}`,
+                message: instruction,
+                sourceType: "orchestrator",
+                fromUserId: user.uid,
+                fromUserName: user.displayName || "User",
+              });
+            } catch (err) {
+              console.error(
+                "Failed to enqueue orchestrator pending instruction:",
+                err,
+              );
+              await sendSystemMessage(
+                currentProject.id,
+                "⚠️ 오케스트레이터 큐 등록에 실패했습니다.",
+              );
+            }
           }
         } else {
           const agent = agents.find(
             (a) => a.name.toLowerCase() === target.toLowerCase(),
           );
           if (agent) {
-            try {
-              const ptySessionId = `agent-${agent.id}`;
-              await window.electronAPI.pty.write(ptySessionId, instruction + '\r');
-            } catch {
-              console.warn(`Failed to write to agent "${target}" PTY`);
+            // Fast path: agent is hosted on THIS machine — write straight
+            // to the local PTY. Cross-machine agents (agent.ownerId !==
+            // this user) go through the Firestore `pendingInstructions`
+            // queue, where the hosting machine's listener picks it up.
+            const isLocalAgent = !!user && agent.ownerId === user.uid;
+            let injected = false;
+
+            if (isLocalAgent) {
+              try {
+                const ptySessionId = `agent-${agent.id}`;
+                await window.electronAPI.pty.write(
+                  ptySessionId,
+                  instruction + "\r",
+                );
+                injected = true;
+              } catch {
+                console.warn(
+                  `Failed local PTY write to agent "${target}" — falling back to pending queue`,
+                );
+              }
             }
+
+            if (!injected) {
+              try {
+                await addPendingInstruction({
+                  projectId: currentProject.id,
+                  targetAgentId: agent.id,
+                  message: instruction,
+                  sourceType: "chat",
+                  fromUserId: user.uid,
+                  fromUserName: user.displayName || "User",
+                });
+              } catch (err) {
+                console.error(
+                  `Failed to enqueue pending instruction for agent "${target}":`,
+                  err,
+                );
+              }
+            }
+          } else {
+            console.warn(`Agent "${target}" not found in project`);
           }
         }
       }
@@ -220,19 +302,19 @@ export function ProjectChat() {
       await sendMessage(
         currentProject.id,
         user.uid,
-        user.displayName || 'User',
-        user.photoURL || '',
+        user.displayName || "User",
+        user.photoURL || "",
         content,
       );
     } catch (err) {
-      console.error('Failed to send message:', err);
+      console.error("Failed to send message:", err);
     } finally {
       setSending(false);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -296,8 +378,18 @@ export function ProjectChat() {
             disabled={!input.trim() || sending}
             className="rounded-lg bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+              />
             </svg>
           </button>
         </div>

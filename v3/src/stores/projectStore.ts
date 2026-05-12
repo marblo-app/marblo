@@ -1,11 +1,14 @@
-import { create } from 'zustand';
-import { where } from 'firebase/firestore';
-import type { Project } from '../types/project';
-import { subscribeToCollection, convertTimestamps } from '../services/firestore';
-import * as projectService from '../services/projectService';
+import { create } from "zustand";
+import { where } from "firebase/firestore";
+import type { Project } from "../types/project";
+import {
+  subscribeToCollection,
+  convertTimestamps,
+} from "../services/firestore";
+import * as projectService from "../services/projectService";
 
-const COLLECTION = 'projects';
-const DATE_FIELDS = ['createdAt', 'updatedAt'];
+const COLLECTION = "projects";
+const DATE_FIELDS = ["createdAt", "updatedAt"];
 
 function toProject(raw: Record<string, unknown>): Project {
   return convertTimestamps<Project>(raw, DATE_FIELDS);
@@ -19,8 +22,14 @@ interface ProjectState {
 
   setCurrentProject: (project: Project) => void;
   findByFolderPath: (folderPath: string) => Project | undefined;
+  findByPathOrRemote: (
+    folderPath: string,
+    gitRemoteUrl: string | null | undefined,
+  ) => Project | undefined;
   fetchProjects: (userId: string) => Promise<void>;
-  createProject: (data: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
+  createProject: (
+    data: Omit<Project, "id" | "createdAt" | "updatedAt">,
+  ) => Promise<string>;
   updateProject: (id: string, data: Partial<Project>) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   subscribeToProjects: (userId: string) => () => void;
@@ -40,13 +49,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return get().projects.find((p) => p.folderPath === folderPath);
   },
 
+  findByPathOrRemote: (
+    folderPath: string,
+    gitRemoteUrl: string | null | undefined,
+  ) => {
+    const projects = get().projects;
+    const normalized = projectService.normalizeGitRemoteUrl(gitRemoteUrl);
+    if (normalized) {
+      const byRemote = projects.find(
+        (p) =>
+          projectService.normalizeGitRemoteUrl(p.gitRemoteUrl) === normalized,
+      );
+      if (byRemote) return byRemote;
+    }
+    return projects.find((p) => p.folderPath === folderPath);
+  },
+
   fetchProjects: async (userId: string) => {
     set({ loading: true, error: null });
     try {
       const projects = await projectService.getProjects(userId);
       set({ projects, loading: false });
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Failed to fetch projects', loading: false });
+      set({
+        error: err instanceof Error ? err.message : "Failed to fetch projects",
+        loading: false,
+      });
     }
   },
 
@@ -55,7 +83,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const id = await projectService.createProject(data);
       return id;
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Failed to create project' });
+      set({
+        error: err instanceof Error ? err.message : "Failed to create project",
+      });
       throw err;
     }
   },
@@ -64,7 +94,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       await projectService.updateProject(id, data);
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Failed to update project' });
+      set({
+        error: err instanceof Error ? err.message : "Failed to update project",
+      });
       throw err;
     }
   },
@@ -77,7 +109,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         set({ currentProject: null });
       }
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Failed to delete project' });
+      set({
+        error: err instanceof Error ? err.message : "Failed to delete project",
+      });
       throw err;
     }
   },
@@ -86,7 +120,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ loading: true });
     return subscribeToCollection<Record<string, unknown>>(
       COLLECTION,
-      [where('members', 'array-contains', userId)],
+      [where("members", "array-contains", userId)],
       (docs) => {
         const projects = docs.map(toProject);
         const { currentProject } = get();

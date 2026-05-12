@@ -147,7 +147,7 @@ function writeApiKeys(keys: StoredApiKeys): void {
     throw new Error(
       "OS keychain encryption unavailable. " +
         "On Linux install libsecret-1-0 / gnome-keyring and restart Marblo. " +
-        "On macOS or Windows this should not happen — please report to support@marblo.app."
+        "On macOS or Windows this should not happen — please report to support@marblo.app.",
     );
   }
   const enc: EncryptedKeyStore = {
@@ -272,7 +272,7 @@ const agentManager = new AgentManager(
     if (pid) sendToProject(pid, "agent:restartFailed", { agentId, exitCode });
     else broadcast("agent:restartFailed", { agentId, exitCode });
   },
-  () => mainWindow
+  () => mainWindow,
 );
 
 let mainWindow: BrowserWindow | null = null; // First window — fallback for things lacking owner
@@ -375,7 +375,15 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
       } else {
         broadcast("orchestrator:statusChanged", { status });
       }
-    }
+      // Mirror the agent listener policy: detach only on "stopped". "error"
+      // can be transient (orchestrator-manager auto-restarts up to 3 times
+      // with exponential backoff and reattaches via the launch onPtyReady
+      // callback), so we leave the listener up so a pending instruction
+      // queued during the crash window is delivered after recovery.
+      if (status === "stopped" && projectId) {
+        pendingListener.detach(`orch-${projectId}`);
+      }
+    },
   );
 }
 
@@ -405,7 +413,7 @@ function getAnyOrchestrator(): OrchestratorManager {
 
 /** Resolve the orchestrator for a webContents (sender) window. */
 function getOrchestratorForSender(
-  senderId: number
+  senderId: number,
 ): OrchestratorManager | null {
   for (const [projectId, ownerId] of orchestratorOwners) {
     if (ownerId === senderId) return orchestrators.get(projectId) ?? null;
@@ -417,14 +425,14 @@ function getOrchestratorForSender(
 // orchestrator. Bridge selects by projectId from the request body / agent's
 // MARBLO_PROJECT env.
 bridgeServer.setOrchestratorLookup(
-  (projectId: string) => orchestrators.get(projectId) ?? null
+  (projectId: string) => orchestrators.get(projectId) ?? null,
 );
 
 // Per-project enabledModels lookup — replaces the global env var fallback
 // in BridgeServer.dispatchTask so concurrent windows can dispatch with
 // different model presets simultaneously.
 bridgeServer.setEnabledModelsLookup((projectId: string) =>
-  projectEnabledModels.get(projectId)
+  projectEnabledModels.get(projectId),
 );
 
 // When the bridge spawns an agent (via MCP /spawn-agent or /dispatch-task),
@@ -439,7 +447,7 @@ bridgeServer.setEnabledModelsLookup((projectId: string) =>
 //   4. mainWindow fallback (legacy / single-window mode)
 function resolveSpawnOwner(
   projectId: string | undefined,
-  parentAgentId: string | undefined
+  parentAgentId: string | undefined,
 ): { ownerId: number | undefined; resolvedProjectId: string | undefined } {
   // 1. explicit projectId
   if (projectId) {
@@ -479,7 +487,7 @@ bridgeServer.setAgentSpawnedHook(
 
     const { ownerId, resolvedProjectId } = resolveSpawnOwner(
       projectId,
-      parentAgentId
+      parentAgentId,
     );
     if (ownerId !== undefined) {
       ptyOwners.set(sid, ownerId);
@@ -503,7 +511,7 @@ bridgeServer.setAgentSpawnedHook(
     } else {
       broadcast("agent:spawned", payload);
     }
-  }
+  },
 );
 
 // Inject session resolver so agent auto-restart resolves 'latest' per-agent.
@@ -514,8 +522,8 @@ agentManager.setSessionResolver(
       rootPath,
       requested,
       filterLabel,
-      filterAgentId
-    )
+      filterAgentId,
+    ),
 );
 
 // --- Flow Engine Setup ---
@@ -568,7 +576,7 @@ const costTracker = new CostTracker((agentId, cost) => {
   const projectId = agent?.launchConfig?.env?.MARBLO_PROJECT || "";
   if (!projectId) {
     console.warn(
-      `[CostTracker:CB] No projectId for agent ${agentId} — recording with empty projectId`
+      `[CostTracker:CB] No projectId for agent ${agentId} — recording with empty projectId`,
     );
   }
 
@@ -600,7 +608,7 @@ const costTracker = new CostTracker((agentId, cost) => {
       projectId || "(none)"
     } in=${cost.deltaInputTokens} out=${
       cost.deltaOutputTokens
-    } cost=$${cost.deltaCost.toFixed(4)}`
+    } cost=$${cost.deltaCost.toFixed(4)}`,
   );
 
   // Also send token:usage telemetry event with projectId
@@ -611,7 +619,7 @@ const costTracker = new CostTracker((agentId, cost) => {
     cost.deltaInputTokens,
     cost.deltaOutputTokens,
     cost.deltaCost,
-    projectId
+    projectId,
   );
 });
 
@@ -707,7 +715,7 @@ function getDefaultCommand(model: string): string {
  */
 function handleAgentDelegation(
   nodeId: string,
-  output: Record<string, unknown>
+  output: Record<string, unknown>,
 ): void {
   const connectionMode = output.connectionMode as string;
   const resolvedTask = (output.task as string) || "";
@@ -773,12 +781,12 @@ function handleAgentDelegation(
       }
 
       console.log(
-        `[Flow:AgentDelegation] Spawned agent "${spawnConfig.name}" (${agentId}) for node ${nodeId}`
+        `[Flow:AgentDelegation] Spawned agent "${spawnConfig.name}" (${agentId}) for node ${nodeId}`,
       );
     } catch (err) {
       console.error(
         `[Flow:AgentDelegation] Failed to spawn agent for node ${nodeId}:`,
-        err
+        err,
       );
     }
   } else if (connectionMode === "existing" && output.existingAgentId) {
@@ -792,11 +800,11 @@ function handleAgentDelegation(
       // as a discrete keystroke (single-chunk gets paste-buffered).
       ptyManager.writeAndSubmit(agent.ptySessionId, taskMessage);
       console.log(
-        `[Flow:AgentDelegation] Sent task to existing agent "${agent.name}" (${existingAgentId}) for node ${nodeId}`
+        `[Flow:AgentDelegation] Sent task to existing agent "${agent.name}" (${existingAgentId}) for node ${nodeId}`,
       );
     } else {
       console.warn(
-        `[Flow:AgentDelegation] Agent ${existingAgentId} not found or stopped. Cannot route task for node ${nodeId}.`
+        `[Flow:AgentDelegation] Agent ${existingAgentId} not found or stopped. Cannot route task for node ${nodeId}.`,
       );
     }
   }
@@ -837,7 +845,7 @@ function createWindow(isNewWindow = false) {
     const server = http.createServer((req, res) => {
       let filePath = path.join(
         distPath,
-        req.url === "/" ? "index.html" : req.url || "index.html"
+        req.url === "/" ? "index.html" : req.url || "index.html",
       );
       // SPA fallback: if file doesn't exist, serve index.html
       if (!fs.existsSync(filePath)) {
@@ -902,7 +910,7 @@ function createWindow(isNewWindow = false) {
     if (mainWindow === win) {
       // Promote another window as primary, or null
       mainWindow =
-        allWindows.size > 0 ? allWindows.values().next().value ?? null : null;
+        allWindows.size > 0 ? (allWindows.values().next().value ?? null) : null;
       if (mainWindow) bridgeServer.setMainWindow(mainWindow);
     }
   });
@@ -1041,7 +1049,7 @@ ipcMain.handle(
   "fs:writeFile",
   (_event, { filePath, content }: { filePath: string; content: string }) => {
     fsManager.writeFile(filePath, content);
-  }
+  },
 );
 
 ipcMain.handle("fs:gitStatus", async (_event, rootPath: string) => {
@@ -1050,6 +1058,10 @@ ipcMain.handle("fs:gitStatus", async (_event, rootPath: string) => {
 
 ipcMain.handle("fs:gitDiff", async (_event, filePath: string) => {
   return fsManager.getGitDiff(filePath);
+});
+
+ipcMain.handle("fs:gitRemoteUrl", async (_event, rootPath: string) => {
+  return fsManager.getGitRemoteUrl(rootPath);
 });
 
 ipcMain.handle("fs:watch", (event, rootPath: string) => {
@@ -1090,7 +1102,7 @@ ipcMain.handle(
     fsGuard(rootPath, filePath);
     fsManager.createFile(filePath);
     return { success: true, path: filePath };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1099,7 +1111,7 @@ ipcMain.handle(
     fsGuard(rootPath, dirPath);
     fsManager.createDirectory(dirPath);
     return { success: true, path: dirPath };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1110,24 +1122,24 @@ ipcMain.handle(
       rootPath,
       fromPath,
       toPath,
-    }: { rootPath: string; fromPath: string; toPath: string }
+    }: { rootPath: string; fromPath: string; toPath: string },
   ) => {
     fsGuard(rootPath, fromPath, toPath);
     fsManager.rename(fromPath, toPath);
     return { success: true, fromPath, toPath };
-  }
+  },
 );
 
 ipcMain.handle(
   "fs:remove",
   (
     _event,
-    { rootPath, targetPath }: { rootPath: string; targetPath: string }
+    { rootPath, targetPath }: { rootPath: string; targetPath: string },
   ) => {
     fsGuard(rootPath, targetPath);
     fsManager.remove(targetPath);
     return { success: true, path: targetPath };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1138,12 +1150,12 @@ ipcMain.handle(
       rootPath,
       fromPath,
       toPath,
-    }: { rootPath: string; fromPath: string; toPath: string }
+    }: { rootPath: string; fromPath: string; toPath: string },
   ) => {
     fsGuard(rootPath, fromPath, toPath);
     const finalPath = fsManager.copy(fromPath, toPath);
     return { success: true, fromPath, toPath: finalPath };
-  }
+  },
 );
 
 ipcMain.handle("fs:revealInFinder", (_event, targetPath: string) => {
@@ -1207,11 +1219,11 @@ ipcMain.handle(
         cwd,
         "latest",
         agent.name,
-        agent.id
+        agent.id,
       );
       resolvedSessionId = resolved ?? "new";
       console.log(
-        `[agent:launch] Resolved 'latest' for "${agent.name}" → ${resolvedSessionId}`
+        `[agent:launch] Resolved 'latest' for "${agent.name}" → ${resolvedSessionId}`,
       );
     }
 
@@ -1241,7 +1253,7 @@ ipcMain.handle(
       command: instance.command,
       args: instance.launchConfig?.args || [],
     };
-  }
+  },
 );
 
 // Renderer calls this after TerminalView mounts to drain any buffered early output.
@@ -1250,7 +1262,7 @@ ipcMain.handle(
 ipcMain.handle("pty:replay", (_event, { id }: { id: string }) => {
   const buffer = ptyBuffers.get(id);
   console.log(
-    `[PTY:REPLAY] id=${id}, drained ${buffer?.length ?? 0} chunks → live mode`
+    `[PTY:REPLAY] id=${id}, drained ${buffer?.length ?? 0} chunks → live mode`,
   );
   if (!buffer) return [];
   const data = [...buffer];
@@ -1273,7 +1285,7 @@ ipcMain.handle("agent:restart", (event, agentId: string) => {
       sendToOwner(
         ptyOwners.get(instance.ptySessionId),
         `pty:data:${instance.ptySessionId}`,
-        data
+        data,
       );
     });
   }
@@ -1346,13 +1358,13 @@ ipcMain.handle(
       }>;
       rootPath: string;
       projectId: string;
-    }
+    },
   ) => {
     const senderId = event.sender.id;
     // Find session candidates for each agent
     const candidates = findReconnectCandidates(
       agents.map((a) => ({ id: a.id, name: a.name, role: a.role })),
-      rootPath
+      rootPath,
     );
 
     const results = [];
@@ -1400,7 +1412,7 @@ ipcMain.handle(
             rootPath,
             "latest",
             agentData.name,
-            agentData.id
+            agentData.id,
           );
         }
       } else {
@@ -1433,7 +1445,7 @@ ipcMain.handle(
           ptySessionId: null,
         });
         console.log(
-          `[Reconnect] No session found for agent ${agentData.name} (${agentData.model}), registered as idle`
+          `[Reconnect] No session found for agent ${agentData.name} (${agentData.model}), registered as idle`,
         );
         continue;
       }
@@ -1465,7 +1477,7 @@ ipcMain.handle(
             candidate.sessionId
               ? "--resume " + candidate.sessionId
               : "--continue"
-          }`
+          }`,
         );
 
         // Start cost tracking — uses sessionId if known, or finds most recent JSONL
@@ -1473,7 +1485,7 @@ ipcMain.handle(
           agentData.id,
           rootPath,
           candidate.sessionId,
-          agentData.model || "claude"
+          agentData.model || "claude",
         );
       } catch (err) {
         console.error(`[Reconnect] Failed for agent ${agentData.id}:`, err);
@@ -1485,7 +1497,7 @@ ipcMain.handle(
       }
     }
     return results;
-  }
+  },
 );
 
 ipcMain.handle("agent:getSkill", (_event, role: string) => {
@@ -1526,7 +1538,7 @@ ipcMain.handle(
     const decomposer = getDecomposer();
     const layers = decomposer.getExecutionPlan(tasks);
     return { tasks, layers };
-  }
+  },
 );
 
 // --- Orchestrator Session IPC Handlers ---
@@ -1560,8 +1572,13 @@ ipcMain.handle(
         // back only to that window (not broadcast / mainWindow-only).
         ptyOwners.set(sid, senderId);
         setupPtyForwarding(sid);
+        // Cross-machine routing: any teammate who @mentions the orchestrator
+        // from a machine that has no local orch PTY enqueues into
+        // pendingInstructions with targetAgentId = `orch-${projectId}`.
+        // This listener on the hosting machine picks it up and injects.
+        pendingListener.attach(`orch-${projectId}`, sid);
       },
-      resumeSessionId
+      resumeSessionId,
     );
 
     return {
@@ -1569,7 +1586,7 @@ ipcMain.handle(
       ptySessionId: session.ptySessionId,
       status: session.status,
     };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1581,7 +1598,7 @@ ipcMain.handle(
     //   3. otherwise no-op (legacy renderer paths still work after this lands)
     const explicit = payload?.projectId;
     const orch = explicit
-      ? orchestrators.get(explicit) ?? null
+      ? (orchestrators.get(explicit) ?? null)
       : getOrchestratorForSender(event.sender.id);
     if (orch) {
       orch.stop();
@@ -1592,10 +1609,11 @@ ipcMain.handle(
         if (instance === orch) {
           orchestratorOwners.delete(pid);
           projectEnabledModels.delete(pid);
+          pendingListener.detach(`orch-${pid}`);
         }
       }
     }
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1603,10 +1621,10 @@ ipcMain.handle(
   (event, payload?: { projectId?: string }) => {
     const explicit = payload?.projectId;
     const orch = explicit
-      ? orchestrators.get(explicit) ?? null
+      ? (orchestrators.get(explicit) ?? null)
       : getOrchestratorForSender(event.sender.id);
     return orch?.getStatus() ?? "stopped";
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1615,7 +1633,7 @@ ipcMain.handle(
     const resolvedPath = rootPath === "~" ? require("os").homedir() : rootPath;
     // Stateless file-IO — any instance works.
     return getAnyOrchestrator().listSessions(resolvedPath);
-  }
+  },
 );
 
 // --- Flow IPC Handlers ---
@@ -1624,7 +1642,7 @@ ipcMain.handle(
   "flow:run",
   async (
     _event,
-    { flow, inputs }: { flow: Flow; inputs?: Record<string, unknown> }
+    { flow, inputs }: { flow: Flow; inputs?: Record<string, unknown> },
   ) => {
     kanbanBridge.registerFlow(flow);
     flowNodeCache.set(flow.id, flow);
@@ -1632,7 +1650,7 @@ ipcMain.handle(
     // Clean up cache after flow completes
     flowNodeCache.delete(flow.id);
     return state;
-  }
+  },
 );
 
 ipcMain.handle("flow:pause", async (_event, { runId }: { runId: string }) => {
@@ -1643,11 +1661,11 @@ ipcMain.handle(
   "flow:resume",
   async (
     _event,
-    { runId, humanInput }: { runId: string; humanInput?: HumanInput }
+    { runId, humanInput }: { runId: string; humanInput?: HumanInput },
   ) => {
     const state = await flowRunner.resume(runId, humanInput);
     return state;
-  }
+  },
 );
 
 ipcMain.handle("flow:cancel", async (_event, { runId }: { runId: string }) => {
@@ -1680,7 +1698,7 @@ ipcMain.handle(
   "code:format",
   async (
     _event,
-    { content, filePath }: { content: string; filePath: string }
+    { content, filePath }: { content: string; filePath: string },
   ) => {
     try {
       const prettier = await import("prettier");
@@ -1721,7 +1739,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : "Format failed",
       };
     }
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1736,7 +1754,7 @@ ipcMain.handle(
     writeApiKeys(keys);
     refreshLLMProvider();
     return { success: true };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1751,7 +1769,7 @@ ipcMain.handle(
     writeApiKeys(keys);
     refreshLLMProvider();
     return { success: true };
-  }
+  },
 );
 
 // --- App State IPC ---
@@ -1766,7 +1784,7 @@ ipcMain.handle(
       message: string;
       taskId?: string;
       taskTitle?: string;
-    }
+    },
   ) => {
     const port = bridgeServer.getPort();
     if (!port) return { success: false, error: "Bridge server not running" };
@@ -1776,7 +1794,7 @@ ipcMain.handle(
       body: JSON.stringify(params),
     });
     return res.json();
-  }
+  },
 );
 
 // --- Clipboard support ---
@@ -1803,7 +1821,7 @@ ipcMain.handle("clipboard:getFilePaths", () => {
       // Use osascript (AppleScript) — no compilation needed, fast
       const result = execSync(
         `osascript -e 'set filePaths to {}' -e 'try' -e 'set theClip to the clipboard as «class furl»' -e 'set end of filePaths to POSIX path of theClip' -e 'end try' -e 'try' -e 'set fileList to the clipboard as list' -e 'repeat with f in fileList' -e 'try' -e 'set end of filePaths to POSIX path of (f as «class furl»)' -e 'end try' -e 'end repeat' -e 'end try' -e 'set text item delimiters to linefeed' -e 'filePaths as text'`,
-        { encoding: "utf-8", timeout: 2000 }
+        { encoding: "utf-8", timeout: 2000 },
       ).trim();
       if (result) {
         return result
@@ -1846,7 +1864,7 @@ ipcMain.handle("modelPreset:get", () => {
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json"
+  "subscription-plans.json",
 );
 
 interface SubscriptionPlanEntry {
@@ -1881,7 +1899,7 @@ ipcMain.handle(
       fs.writeFileSync(tmp, JSON.stringify(plans, null, 2), "utf-8");
       fs.renameSync(tmp, SUBSCRIPTION_PLANS_FILE);
       console.log(
-        `[Main] subscriptionPlans:save wrote ${plans.length} plan(s)`
+        `[Main] subscriptionPlans:save wrote ${plans.length} plan(s)`,
       );
       return { success: true };
     } catch (err) {
@@ -1891,7 +1909,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : String(err),
       };
     }
-  }
+  },
 );
 
 ipcMain.handle("appState:load", () => readAppState());
@@ -1945,7 +1963,7 @@ app.whenReady().then(async () => {
     console.warn(
       "[ApiKeys] OS keychain encryption unavailable on this system. " +
         "BYOK keys will not persist across restarts. " +
-        "On Linux, install libsecret-1-0 / gnome-keyring."
+        "On Linux, install libsecret-1-0 / gnome-keyring.",
     );
   }
 
@@ -1955,7 +1973,7 @@ app.whenReady().then(async () => {
   try {
     const result = await installBundledHarness();
     console.log(
-      `[Main] Bundle install: ${result.installed} files, ${result.errors.length} errors`
+      `[Main] Bundle install: ${result.installed} files, ${result.errors.length} errors`,
     );
   } catch (err) {
     console.warn("[Main] Bundle install failed (non-fatal):", err);

@@ -1,4 +1,4 @@
-import type { ModelType } from './agent';
+import type { ModelType } from "./agent";
 
 export interface Project {
   id: string;
@@ -6,7 +6,8 @@ export interface Project {
   ownerId: string;
   members: string[];
   folderPath?: string;
-  enabledModels?: ModelType[];  // Active models for dispatch (default: ['claude'])
+  gitRemoteUrl?: string;
+  enabledModels?: ModelType[]; // Active models for dispatch (default: ['claude'])
   createdAt: Date;
   updatedAt: Date;
 }

@@ -88,6 +88,28 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ===== Pending Instructions =====
+    // Queue of instructions targeted at an agent's PTY on a specific machine.
+    // The marblo app on the machine hosting `targetAgentId` listens for
+    // undelivered entries (isDelivered == false) and injects them into the
+    // PTY's stdin, then flips isDelivered to true.
+    match /pendingInstructions/{instId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      // Only the delivery-marking transition is allowed: message and routing
+      // fields must remain immutable. This prevents a malicious client from
+      // rewriting another user's pending instruction in-flight.
+      allow update: if isAuthenticated()
+        && request.resource.data.projectId == resource.data.projectId
+        && request.resource.data.taskId == resource.data.taskId
+        && request.resource.data.targetAgentId == resource.data.targetAgentId
+        && request.resource.data.message == resource.data.message
+        && request.resource.data.fromUserId == resource.data.fromUserId
+        && request.resource.data.sourceType == resource.data.sourceType
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+    }
+
     // ===== Chat Messages =====
     match /chatMessages/{messageId} {
       allow read: if isAuthenticated();
@@ -110,6 +132,21 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow update: if isAuthenticated();
       allow delete: if isAuthenticated();
+    }
+
+    // ===== Missions (Phase 3) =====
+    // Mission 은 프로젝트 단위 상위 컨테이너 (task / agent 보다 민감) → 멤버십 강제.
+    // tasks / agents 룰은 isAuthenticated 만 검사하지만, missions 는 명세 §4 에 따라
+    // 프로젝트 멤버만 read/write. v3.1 hardening 에서 tasks / agents 도 동일 수준으로.
+    match /missions/{missionId} {
+      allow read: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
+      allow create: if isAuthenticated()
+        && isProjectMember(request.resource.data.projectId);
+      allow update: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
+      allow delete: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
     }
 
     // ===== Cost Logs (Phase 3) =====

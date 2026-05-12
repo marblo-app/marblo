@@ -23,6 +23,24 @@
         { "fieldPath": "projectId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "pendingInstructions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetAgentId", "order": "ASCENDING" },
+        { "fieldPath": "isDelivered", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "missions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "lastActivityAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

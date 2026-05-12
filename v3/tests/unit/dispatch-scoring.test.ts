@@ -56,25 +56,28 @@ describe("scoreAgents", () => {
     });
   });
 
+  // Default agent in makeAgent() is claude+idle+restart=0 → cost-eff=3 and
+  // reuseBonus=30 are always added on top of role/load. So baseline for a
+  // default claude agent at status X = 100 + lIdx(X) + 3 + 30.
   describe("status scoring", () => {
-    it("idle agent gets base(100) + idle(50) = 150", () => {
+    it("idle agent gets base(100) + idle(50) + cost-eff(3) + reuse(30) = 183", () => {
       const result = scoreAgents([makeAgent({ status: "idle" })], "backend");
-      expect(result[0].score).toBe(150);
+      expect(result[0].score).toBe(183);
     });
 
-    it("working agent gets base(100) + working(10) = 110", () => {
+    it("working agent gets base(100) + working(10) + cost-eff(3) + reuse(30) = 143", () => {
       const result = scoreAgents([makeAgent({ status: "working" })], "backend");
-      expect(result[0].score).toBe(110);
+      expect(result[0].score).toBe(143);
     });
 
-    it("stopped agent gets base(100) + stopped(30) = 130", () => {
+    it("stopped agent gets base(100) + stopped(30) + cost-eff(3) + reuse(30) = 163", () => {
       const result = scoreAgents([makeAgent({ status: "stopped" })], "backend");
-      expect(result[0].score).toBe(130);
+      expect(result[0].score).toBe(163);
     });
 
-    it("error agent gets base(100) + error(5) = 105", () => {
+    it("error agent gets base(100) + error(5) + cost-eff(3) + reuse(30) = 138", () => {
       const result = scoreAgents([makeAgent({ status: "error" })], "backend");
-      expect(result[0].score).toBe(105);
+      expect(result[0].score).toBe(138);
     });
 
     it("sorts agents by score descending (idle > stopped > working > error)", () => {
@@ -101,8 +104,8 @@ describe("scoreAgents", () => {
         "backend",
         "claude",
       );
-      // 100 (role) + 50 (idle) + 20 (model match) = 170
-      expect(result[0].score).toBe(170);
+      // 100 (role) + 50 (idle) + 3 (claude cost-eff) + 30 (reuse) + 20 (model match) = 203
+      expect(result[0].score).toBe(203);
     });
 
     it("no bonus when preferred model does not match", () => {
@@ -111,8 +114,8 @@ describe("scoreAgents", () => {
         "backend",
         "claude",
       );
-      // 100 (role) + 50 (idle) = 150
-      expect(result[0].score).toBe(150);
+      // 100 (role) + 50 (idle) + 8 (gemini cost-eff) + 30 (reuse) = 188
+      expect(result[0].score).toBe(188);
     });
 
     it("no bonus when no preferred model specified", () => {
@@ -120,7 +123,8 @@ describe("scoreAgents", () => {
         [makeAgent({ model: "claude", status: "idle" })],
         "backend",
       );
-      expect(result[0].score).toBe(150);
+      // 100 + 50 + 3 (claude cost-eff) + 30 (reuse) = 183
+      expect(result[0].score).toBe(183);
     });
   });
 
@@ -133,8 +137,8 @@ describe("scoreAgents", () => {
         undefined,
         ["auth"],
       );
-      // 100 + 50 + 10 (1 tag match) = 160
-      expect(result[0].score).toBe(160);
+      // 100 + 50 + 3 (claude cost-eff, "auth" is neutral) + 30 (reuse) + 10 (1 tag match) = 193
+      expect(result[0].score).toBe(193);
     });
 
     it("matches multiple tags", () => {
@@ -144,8 +148,8 @@ describe("scoreAgents", () => {
         undefined,
         ["auth", "api"],
       );
-      // 100 + 50 + 20 (2 tag matches) = 170
-      expect(result[0].score).toBe(170);
+      // 100 + 50 + 3 (claude cost-eff) + 30 (reuse) + 20 (2 tag matches) = 203
+      expect(result[0].score).toBe(203);
     });
 
     it("tag matching is case-insensitive", () => {
@@ -155,7 +159,8 @@ describe("scoreAgents", () => {
         undefined,
         ["AUTH"],
       );
-      expect(result[0].score).toBe(160);
+      // 100 + 50 + 3 + 30 + 10 = 193
+      expect(result[0].score).toBe(193);
     });
 
     it("no bonus for non-matching tags", () => {
@@ -165,7 +170,8 @@ describe("scoreAgents", () => {
         undefined,
         ["database"],
       );
-      expect(result[0].score).toBe(150);
+      // 100 + 50 + 3 + 30 + 0 = 183
+      expect(result[0].score).toBe(183);
     });
   });
 
@@ -175,8 +181,8 @@ describe("scoreAgents", () => {
         [makeAgent({ status: "idle", restartCount: 2 })],
         "backend",
       );
-      // 100 + 50 - 10 (2 * 5) = 140
-      expect(result[0].score).toBe(140);
+      // 100 + 50 + 3 (claude cost-eff) + 30 (reuse) - 10 (2 * 5) = 173
+      expect(result[0].score).toBe(173);
     });
 
     it("no penalty when restartCount is 0", () => {
@@ -184,7 +190,8 @@ describe("scoreAgents", () => {
         [makeAgent({ status: "idle", restartCount: 0 })],
         "backend",
       );
-      expect(result[0].score).toBe(150);
+      // 100 + 50 + 3 + 30 = 183
+      expect(result[0].score).toBe(183);
     });
 
     it("high restart count significantly reduces score", () => {
@@ -192,8 +199,8 @@ describe("scoreAgents", () => {
         [makeAgent({ status: "idle", restartCount: 5 })],
         "backend",
       );
-      // 100 + 50 - 25 (5 * 5) = 125
-      expect(result[0].score).toBe(125);
+      // 100 + 50 + 3 + 30 - 25 (5 * 5) = 158
+      expect(result[0].score).toBe(158);
     });
   });
 
@@ -227,24 +234,28 @@ describe("scoreAgents", () => {
       ];
       const result = scoreAgents(agents, "backend", "claude");
       expect(result[0].agent.id).toBe("2"); // claude matched
-      expect(result[0].score).toBe(170); // 100 + 50 + 20
-      expect(result[1].score).toBe(150); // 100 + 50
+      // claude: 100 + 50 + 3 (cost-eff) + 30 (reuse) + 20 (model match) = 203
+      expect(result[0].score).toBe(203);
+      // gemini: 100 + 50 + 8 (cost-eff) + 30 (reuse) = 188
+      expect(result[1].score).toBe(188);
     });
 
     it("restart penalty can change ranking order", () => {
       const agents = [
-        makeAgent({ id: "1", name: "be-old", status: "idle", restartCount: 4 }), // 150 - 20 = 130
+        // be-old: 100 + 50 + 3 + 30 - 20 = 163
+        makeAgent({ id: "1", name: "be-old", status: "idle", restartCount: 4 }),
+        // be-new: 100 + 30 + 3 + 30 = 163
         makeAgent({
           id: "2",
           name: "be-new",
           status: "stopped",
           restartCount: 0,
-        }), // 130
+        }),
       ];
       const result = scoreAgents(agents, "backend");
-      // Both score 130, but idle-with-restarts is riskier
-      expect(result[0].score).toBe(130);
-      expect(result[1].score).toBe(130);
+      // Both score 163, but idle-with-restarts is riskier
+      expect(result[0].score).toBe(163);
+      expect(result[1].score).toBe(163);
     });
   });
 
@@ -352,8 +363,12 @@ describe("scoreModels", () => {
 
     it("ignores unknown tags without crashing", () => {
       const result = scoreModels(["claude", "gemini"], ["unknown-tag", "xyz"]);
-      // No bonuses or penalties applied
-      expect(result).toBe("claude"); // wins by base score
+      // Unknown tags apply no MODEL_TAG_BONUSES/PENALTIES, so the only
+      // separator is base + cost-eff: claude(50+3)=53 vs gemini(45+8)=53.
+      // That ties within TIED_SCORE_BAND → round-robin picks one of the
+      // contenders. The intent of this case is "no crash", not a specific
+      // winner; just assert the result stays within enabledModels.
+      expect(["claude", "gemini"]).toContain(result);
     });
   });
 });

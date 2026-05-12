@@ -16,6 +16,7 @@ interface FsAPI {
   gitDiff: (
     filePath: string,
   ) => Promise<{ original: string; modified: string }>;
+  gitRemoteUrl: (rootPath: string) => Promise<string | null>;
   selectDirectory: () => Promise<string | null>;
   watch: (rootPath: string) => Promise<void>;
   onFileChange: (callback: (event: string, filePath: string) => void) => void;
