@@ -223,6 +223,33 @@ contextBridge.exposeInMainWorld("electronAPI", {
         success: boolean;
       }>,
   },
+  // Patent claim 8 (구독제 vs 토큰단위 과금): user declares which models
+  // are on a subscription plan via this IPC. Stored at
+  // ~/.marblo/subscription-plans.json so cost-tracker (which runs in
+  // both electron main and per-agent MCP processes) sees the same view.
+  subscriptionPlans: {
+    list: () =>
+      ipcRenderer.invoke("subscriptionPlans:list") as Promise<
+        Array<{
+          modelPrefix: string;
+          monthlyFlatUsd: number;
+          monthlyTokenAllowance?: number;
+          overagePerToken?: { inputPer1M: number; outputPer1M: number };
+        }>
+      >,
+    save: (
+      plans: Array<{
+        modelPrefix: string;
+        monthlyFlatUsd: number;
+        monthlyTokenAllowance?: number;
+        overagePerToken?: { inputPer1M: number; outputPer1M: number };
+      }>
+    ) =>
+      ipcRenderer.invoke("subscriptionPlans:save", plans) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+  },
   clipboard: {
     getImagePath: () =>
       ipcRenderer.invoke("clipboard:getImagePath") as Promise<string | null>,
@@ -294,6 +321,30 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
     offFileChange: () => {
       ipcRenderer.removeAllListeners("fs:change");
+    },
+    createFile: (rootPath: string, filePath: string) =>
+      ipcRenderer.invoke("fs:createFile", { rootPath, filePath }),
+    createDirectory: (rootPath: string, dirPath: string) =>
+      ipcRenderer.invoke("fs:createDirectory", { rootPath, dirPath }),
+    rename: (rootPath: string, fromPath: string, toPath: string) =>
+      ipcRenderer.invoke("fs:rename", { rootPath, fromPath, toPath }),
+    remove: (rootPath: string, targetPath: string) =>
+      ipcRenderer.invoke("fs:remove", { rootPath, targetPath }),
+    copy: (rootPath: string, fromPath: string, toPath: string) =>
+      ipcRenderer.invoke("fs:copy", { rootPath, fromPath, toPath }),
+    revealInFinder: (targetPath: string) =>
+      ipcRenderer.invoke("fs:revealInFinder", targetPath),
+  },
+  updater: {
+    check: () => ipcRenderer.invoke("updater:check"),
+    download: () => ipcRenderer.invoke("updater:download"),
+    install: () => ipcRenderer.invoke("updater:install"),
+    cancelHotfix: () => ipcRenderer.invoke("updater:cancelHotfix"),
+    onStatus: (callback: (status: unknown) => void) => {
+      ipcRenderer.on("updater:status", (_event, status) => callback(status));
+    },
+    offStatus: () => {
+      ipcRenderer.removeAllListeners("updater:status");
     },
   },
 });

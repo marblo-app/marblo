@@ -17,10 +17,12 @@ import { HarnessStore } from "./harness/HarnessStore";
 import { GuideTab } from "./guide/GuideTab";
 import { ActivityStreamPanel } from "./activity/ActivityStreamPanel";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
+import { UpdateBanner } from "./UpdateBanner";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
 import { useAgentReconnect } from "../hooks/useAgentReconnect";
 import { useSessionRestore } from "../hooks/useSessionRestore";
 import { useCostWriter } from "../hooks/useCostWriter";
+import { usePresenceHeartbeat } from "../hooks/usePresenceHeartbeat";
 import { useTerminalStore } from "../stores/terminalStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useEditorStore } from "../stores/editorStore";
@@ -139,6 +141,11 @@ export function Layout() {
 
   // Write cost updates from main process to Firestore (using renderer's auth)
   useCostWriter();
+
+  // Refresh user presence heartbeat every 30s so teammates can see who is
+  // online. Drives the activity badge on task cards (claimant offline →
+  // instructions queue rather than silently failing).
+  usePresenceHeartbeat();
 
   // Listen for terminal:new from menu → create a new terminal tab
   const createSession = useTerminalStore((s) => s.createSession);
@@ -285,6 +292,11 @@ export function Layout() {
     <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
       {/* Header */}
       <Header onNavigateToSettings={() => setActiveTab("settings")} />
+
+      {/* Auto-update banner — silent when no update; sticky when one
+          is available / downloading / downloaded. Hotfix releases show
+          a forced-restart countdown. */}
+      <UpdateBanner />
 
       {/* Main body */}
       <div className="flex flex-1 overflow-hidden">
