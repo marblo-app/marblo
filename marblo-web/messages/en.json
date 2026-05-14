@@ -41,16 +41,16 @@
       "detail": "Marblo's kanban board manages agent work through a 5-stage state machine: TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE.\n\nWhen you create a task, it's automatically assigned to the right agent based on role (backend/frontend/test/DevOps). Each agent codes independently in its own terminal, with progress reflected on the kanban board in real-time.\n\nSet up task dependencies (depends_on) to automatically queue tasks until prerequisites are completed."
     },
     "flow": {
-      "title": "Flow Editor",
-      "description": "Design agent pipelines visually with a node-based editor. Automate workflows from code generation → review → testing → deployment.",
-      "highlight": "No-code agent pipeline design",
-      "detail": "A visual editor for designing agent pipelines with drag and drop.\n\nNode types include agent execution, conditional branching, parallel processing, code review, and test execution. Connect them to build complex automation workflows without writing code.\n\nFor example, create a pipeline like 'Code Generation → Lint Check → Test Execution → Create PR on Pass' with just a few clicks. Save flows for repeated use across projects."
+      "title": "Mission Editor",
+      "description": "Design Mission pipelines visually with a node-based editor. Automate workflows from code generation → review → testing → deployment. (Successor to the Flow editor.)",
+      "highlight": "No-code Mission pipeline design",
+      "detail": "A visual editor for designing Mission pipelines with drag and drop. Marblo evolved from simple Flow automation to a Mission supervisor — give it a goal, and Marblo breaks down, executes, and tracks progress.\n\nNode types include agent execution, conditional branching, parallel processing, code review, and test execution. Connect them to build complex automation workflows without writing code.\n\nFor example, create a pipeline like 'Code Generation → Lint Check → Test Execution → Create PR on Pass' with just a few clicks. Save Mission templates for repeated use across projects."
     },
     "orchestrator": {
-      "title": "Natural Language Orchestrator",
-      "description": "Say \"Add login to this app\" and it auto-decomposes into tasks, distributing them across agents. Start complex projects with a single sentence.",
-      "highlight": "Natural language → auto task decomposition",
-      "detail": "Give instructions in natural language and AI automatically decomposes tasks and distributes them to the right agents.\n\nType \"Add login to this app\" and it breaks down into: 1) Backend auth API, 2) Frontend login form, 3) JWT token middleware, 4) Integration tests — four tasks assigned to separate agents.\n\nAgents analyze the codebase to write code that fits existing architecture, detecting dependencies to execute in the correct order."
+      "title": "Mission Launch (Natural Language)",
+      "description": "Say \"Add login to this app\" and Marblo auto-decomposes the Mission, distributing tasks across agents. Cursor is one assistant; Marblo is a manager plus a fleet.",
+      "highlight": "Natural language → auto Mission decomposition",
+      "detail": "Give Marblo a goal in natural language and the AI manager decomposes the Mission and distributes tasks to the right agents.\n\nType \"Add login to this app\" and it breaks down into: 1) Backend auth API, 2) Frontend login form, 3) JWT token middleware, 4) Integration tests — four tasks assigned to separate agents.\n\nAgents analyze the codebase to write code that fits existing architecture, detecting dependencies to execute in the correct order."
     },
     "mcp": {
       "title": "Native MCP Protocol",
@@ -74,12 +74,12 @@
         "bullet3": "Drag and drop to adjust priorities"
       },
       "flow": {
-        "label": "FLOW EDITOR",
-        "title": "Design AI pipelines visually",
-        "description": "Design complex AI workflows with a node-based editor using drag and drop. See the entire pipeline from analysis → task creation → agent spawn → review at a glance.",
+        "label": "MISSION EDITOR",
+        "title": "Design Mission pipelines visually",
+        "description": "Design complex Missions with a node-based editor using drag and drop. See the entire pipeline from analysis → task creation → agent spawn → review at a glance. (Successor to the Flow editor.)",
         "bullet1": "Define agent dependencies through node connections",
         "bullet2": "Conditional branching — auto-route on success/failure",
-        "bullet3": "Automate repetitive work with flow templates"
+        "bullet3": "Automate repetitive work with Mission templates"
       },
       "terminal": {
         "label": "TERMINAL",
@@ -110,8 +110,8 @@
     "rows": {
       "multiAgent": "Multi-agent simultaneous operation",
       "kanban": "Kanban board + task management",
-      "flowEditor": "Visual flow editor",
-      "orchestrator": "Natural language task decomposition",
+      "flowEditor": "Visual Mission editor",
+      "orchestrator": "Natural language Mission Launch",
       "multiModel": "Multi-model (Claude+GPT+Gemini)",
       "mcp": "MCP protocol support",
       "local": "Local execution (data protection)",
@@ -167,9 +167,9 @@
       "description": "Solo developers who want to work like a team",
       "features": [
         "Unlimited Projects",
-        "Unlimited Agents",
-        "Flow Editor",
-        "Natural Language Orchestrator",
+        "Unlimited Agents (BYOK — you pay API costs)",
+        "Mission Editor (formerly Flow)",
+        "Mission Launch (Natural Language)",
         "Priority Support",
         "All Free features included"
       ]
