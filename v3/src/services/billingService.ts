@@ -1,16 +1,23 @@
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../lib/firebase';
-import type { PlanType, PlanLimits, Subscription } from '../types/subscription';
-import { subscribeToDocument, getDocument, convertTimestamps } from './firestore';
+import { httpsCallable } from "firebase/functions";
+import { functions } from "../lib/firebase";
+import type { PlanType, PlanLimits, Subscription } from "../types/subscription";
+import {
+  subscribeToDocument,
+  getDocument,
+  convertTimestamps,
+} from "./firestore";
 
-const COLLECTION = 'subscriptions';
-const DATE_FIELDS = ['currentPeriodStart', 'currentPeriodEnd', 'createdAt'];
+const COLLECTION = "subscriptions";
+const DATE_FIELDS = ["currentPeriodStart", "currentPeriodEnd", "createdAt"];
 
 function toSubscription(raw: Record<string, unknown>): Subscription {
   return convertTimestamps<Subscription>(raw, DATE_FIELDS);
 }
 
 // ─── Plan Limits ─────────────────────────────────────────────────
+// 마스터플랜 §2.2 SKU 기능 매트릭스 기준.
+// Pro부터 프로젝트/에이전트 무제한 (개인 무제한 정액).
+// 동시 에이전트 throttle(Free 2 / Pro 5)은 lib/planLimits.ts에서 별도 관리.
 const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
   free: {
     maxProjects: 1,
@@ -21,14 +28,30 @@ const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     hasPrioritySupport: false,
   },
   pro: {
-    maxProjects: 5,
-    maxAgents: 5,
+    maxProjects: Infinity,
+    maxAgents: Infinity,
     hasFlowEditor: true,
     hasTeamCollab: false,
     hasOrchestrator: true,
     hasPrioritySupport: false,
   },
   team: {
+    maxProjects: Infinity,
+    maxAgents: Infinity,
+    hasFlowEditor: true,
+    hasTeamCollab: true,
+    hasOrchestrator: true,
+    hasPrioritySupport: false, // Team Plus부터 우선 지원
+  },
+  team_plus: {
+    maxProjects: Infinity,
+    maxAgents: Infinity,
+    hasFlowEditor: true,
+    hasTeamCollab: true,
+    hasOrchestrator: true,
+    hasPrioritySupport: true,
+  },
+  enterprise: {
     maxProjects: Infinity,
     maxAgents: Infinity,
     hasFlowEditor: true,
@@ -47,17 +70,17 @@ export function canUseFeature(
   subscription: Subscription | null,
   feature: string,
 ): boolean {
-  const plan = subscription?.planType ?? 'free';
+  const plan = subscription?.planType ?? "free";
   const limits = PLAN_LIMITS[plan];
 
   switch (feature) {
-    case 'flowEditor':
+    case "flowEditor":
       return limits.hasFlowEditor;
-    case 'teamCollab':
+    case "teamCollab":
       return limits.hasTeamCollab;
-    case 'orchestrator':
+    case "orchestrator":
       return limits.hasOrchestrator;
-    case 'prioritySupport':
+    case "prioritySupport":
       return limits.hasPrioritySupport;
     default:
       return true;
@@ -65,9 +88,13 @@ export function canUseFeature(
 }
 
 // ─── Plan Pricing (KRW) ─────────────────────────────────────────
-export const PLAN_PRICES_KRW: Record<Exclude<PlanType, 'free'>, number> = {
+// 마스터플랜 §2.1 한국 가격. Pro 정액, Team / Team Plus는 per-seat.
+// Enterprise는 별도 협의 (0 = "Contact Sales" sentinel).
+export const PLAN_PRICES_KRW: Record<Exclude<PlanType, "free">, number> = {
   pro: 19000,
-  team: 49000,
+  team: 29000,
+  team_plus: 59000,
+  enterprise: 0,
 };
 
 // ─── Subscription CRUD ───────────────────────────────────────────
@@ -101,12 +128,12 @@ export function loadPaddleSDK(): Promise<void> {
   }
 
   return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.paddle.com/paddle/v2/paddle.js';
+    const script = document.createElement("script");
+    script.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
     script.onload = () => {
       paddleLoaded = true;
       const clientToken = import.meta.env.VITE_PADDLE_CLIENT_TOKEN;
-      const environment = import.meta.env.VITE_PADDLE_ENVIRONMENT || 'sandbox';
+      const environment = import.meta.env.VITE_PADDLE_ENVIRONMENT || "sandbox";
       if (clientToken) {
         (window as any).Paddle.Initialize({
           token: clientToken,
@@ -115,7 +142,7 @@ export function loadPaddleSDK(): Promise<void> {
       }
       resolve();
     };
-    script.onerror = () => reject(new Error('Paddle SDK 로드 실패'));
+    script.onerror = () => reject(new Error("Paddle SDK 로드 실패"));
     document.head.appendChild(script);
   });
 }
@@ -133,12 +160,12 @@ export async function openPaddleCheckout(
       customData: { userId },
       customer: email ? { email } : undefined,
       settings: {
-        theme: 'dark',
-        locale: 'ko',
+        theme: "dark",
+        locale: "ko",
         successUrl: `${window.location.origin}/settings/billing?paddle_success=true`,
       },
       success: () => resolve(),
-      closed: () => reject(new Error('결제 취소')),
+      closed: () => reject(new Error("결제 취소")),
     });
   });
 }
@@ -146,7 +173,7 @@ export async function openPaddleCheckout(
 export async function cancelPaddleSubscription(userId: string): Promise<void> {
   const fn = httpsCallable<{ userId: string }, { success: boolean }>(
     functions,
-    'cancelPaddleSubscription',
+    "cancelPaddleSubscription",
   );
   await fn({ userId });
 }
@@ -159,7 +186,7 @@ export async function createTossCheckout(
   const fn = httpsCallable<
     { userId: string; planType: PlanType },
     { paymentKey: string; orderId: string; amount: number }
-  >(functions, 'createTossCheckout');
+  >(functions, "createTossCheckout");
 
   const result = await fn({ userId, planType });
   return result.data;
@@ -173,7 +200,7 @@ export async function confirmTossPayment(
   const fn = httpsCallable<
     { orderId: string; paymentKey: string; amount: number },
     { success: boolean }
-  >(functions, 'confirmTossPayment');
+  >(functions, "confirmTossPayment");
 
   await fn({ orderId, paymentKey, amount });
 }
