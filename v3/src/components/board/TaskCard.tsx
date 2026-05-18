@@ -2,7 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "../../types/task";
+import { getPresenceStatus, type PresenceStatus } from "../../types/user";
+import { useAgentStore } from "../../stores/agentStore";
+import { usePresence } from "../../hooks/usePresence";
+import { unclaimTask } from "../../services/taskService";
 import FlowKanbanLink from "../flows/FlowKanbanLink";
+
+const PRESENCE_DOT: Record<PresenceStatus, string> = {
+  online: "bg-green-400",
+  idle: "bg-yellow-400",
+  offline: "bg-gray-500",
+};
+
+const PRESENCE_LABEL: Record<PresenceStatus, string> = {
+  online: "온라인",
+  idle: "유휴",
+  offline: "오프라인",
+};
 
 /**
  * Returns true for `durationMs` after `key` changes (skipping the first
@@ -145,6 +161,20 @@ function TaskCardContent({
     task.updatedAt instanceof Date ? task.updatedAt.getTime() : 0;
   const pulsing = usePulseOnChange(updatedKey);
 
+  // Resolve the claimant agent → owner userId so we can show whose machine
+  // is currently hosting the agent and whether that teammate is online.
+  // When `claimedBy` is unset, all hooks short-circuit (usePresence handles
+  // undefined as "no subscription").
+  const agents = useAgentStore((s) => s.agents);
+  const claimingAgent = task.claimedBy
+    ? agents.find((a) => a.id === task.claimedBy)
+    : undefined;
+  const ownerId = claimingAgent?.ownerId;
+  const lastHeartbeatAt = usePresence(ownerId);
+  const presence: PresenceStatus | null = task.claimedBy
+    ? getPresenceStatus(lastHeartbeatAt)
+    : null;
+
   return (
     <div
       className={`relative cursor-pointer rounded-lg bg-gray-800 p-3 shadow hover:bg-gray-750 transition-colors border border-gray-700/50 hover:border-gray-600 ${statusHighlight} ${
@@ -216,9 +246,46 @@ function TaskCardContent({
       )}
 
       <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-        <span>{task.claimedBy ? `👤 ${task.claimedBy}` : "Unclaimed"}</span>
+        <span className="inline-flex items-center gap-1.5">
+          {task.claimedBy && presence ? (
+            <span
+              aria-label={`담당자 ${PRESENCE_LABEL[presence]}`}
+              title={`담당자 ${PRESENCE_LABEL[presence]}`}
+              className={`inline-block h-2 w-2 rounded-full ${PRESENCE_DOT[presence]}`}
+            />
+          ) : null}
+          <span>
+            {task.claimedBy
+              ? `👤 ${claimingAgent?.name || task.claimedBy}`
+              : "Unclaimed"}
+          </span>
+        </span>
         <span>{timeAgo(task.createdAt)}</span>
       </div>
+
+      {/* DONE 상태 카드는 추가 지시 보낼 일이 없으므로 오프라인 배지/회수 버튼 숨김.
+          FAILED 는 retry 가능성 (PM 이 추가 지시 → TODO 환원) 이 있어 그대로 표시. */}
+      {task.claimedBy && presence === "offline" && task.status !== "DONE" && (
+        <div className="mt-1.5 flex items-center gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs text-amber-300">
+          <span aria-hidden="true">⏸</span>
+          <span className="flex-1">
+            담당자 오프라인 — 새 지시는 큐에 적재되어 복귀 시 전달됩니다
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              unclaimTask(task.id).catch((err) => {
+                console.error("[TaskCard] unclaim failed:", err);
+              });
+            }}
+            className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-200 hover:bg-amber-500/30"
+            title="claim 회수하고 TODO로 돌리기"
+          >
+            회수
+          </button>
+        </div>
+      )}
     </div>
   );
 }

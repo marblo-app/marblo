@@ -117,6 +117,33 @@ export async function claimTask(
   telemetry.taskStatusChanged(taskId, previousStatus, "CLAIMED", agentId);
 }
 
+/**
+ * Revert a CLAIMED task back to TODO and clear the claimant. Used when the
+ * teammate hosting the claiming agent is offline (or otherwise unreachable)
+ * and another member needs to pick the task up. Allowed by the state
+ * machine as CLAIMED → TODO.
+ */
+export async function unclaimTask(taskId: string): Promise<void> {
+  const task = await getTask(taskId);
+  if (!task) throw new Error(`Task not found: ${taskId}`);
+  assertTransition(task.status, "TODO");
+
+  const previousStatus = task.status;
+  const previousClaimant = task.claimedBy;
+  await updateTask(taskId, {
+    status: "TODO",
+    claimedBy: null,
+    claimedAt: null,
+  });
+
+  telemetry.taskStatusChanged(
+    taskId,
+    previousStatus,
+    "TODO",
+    previousClaimant ?? undefined,
+  );
+}
+
 export async function updateTaskStatus(
   taskId: string,
   status: TaskStatus,
