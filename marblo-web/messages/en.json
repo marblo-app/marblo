@@ -11,7 +11,7 @@
   "hero": {
     "title": "One developer.\nAn entire team's output.",
     "subtitle": "Claude, GPT, and Gemini agents code simultaneously.\nYou direct. They execute.",
-    "cta_download": "Free Download",
+    "cta_download": "Coming Soon",
     "cta_pricing": "View Pricing",
     "badge": "AI Agent Orchestration Platform"
   },
@@ -139,7 +139,7 @@
   "cta_final": {
     "title": "Start free today",
     "subtitle": "Try Marblo with the Free plan,\nthen upgrade to Pro to command your agent army",
-    "download": "Free Download",
+    "download": "Coming Soon",
     "pricing": "Compare Plans"
   },
   "pricing": {
@@ -223,8 +223,13 @@
     "most_popular": "Most Popular"
   },
   "download": {
-    "title": "Download Marblo",
-    "subtitle": "Install the AI Agent Army Workspace",
+    "title": "Marblo Desktop — Coming Soon",
+    "subtitle": "The AI Agent Army Workspace is almost ready.\nWe'll email you the moment it ships.",
+    "badge": "Coming Soon",
+    "notify_title": "Get launch notifications",
+    "notify_subtitle": "Sign up and we'll notify you as soon as downloads are live.",
+    "notify_cta": "Sign up for launch alerts",
+    "pricing_cta": "Preview pricing plans",
     "macos": "macOS (Apple Silicon / Intel)",
     "windows": "Windows (64-bit)",
     "linux": "Linux (AppImage)",

@@ -11,7 +11,7 @@
   "hero": {
     "title": "一人で、チーム全体の\n成果を出す",
     "subtitle": "Claude、GPT、Geminiエージェント軍団が同時にコーディング。\nあなたは指示するだけ。エージェントが実行します。",
-    "cta_download": "無料ダウンロード",
+    "cta_download": "近日公開 (Coming Soon)",
     "cta_pricing": "料金を見る",
     "badge": "AIエージェント・オーケストレーション・プラットフォーム"
   },
@@ -139,7 +139,7 @@
   "cta_final": {
     "title": "今すぐ無料で始めましょう",
     "subtitle": "Freeプランでお試しいただき、\nProにアップグレードしてエージェント軍団を運用しましょう",
-    "download": "無料ダウンロード",
+    "download": "近日公開 (Coming Soon)",
     "pricing": "プランを比較する"
   },
   "pricing": {
@@ -223,8 +223,13 @@
     "most_popular": "一番人気"
   },
   "download": {
-    "title": "Marbloをダウンロード",
-    "subtitle": "AIエージェント軍団ワークスペースをインストール",
+    "title": "Marbloデスクトップ — 近日公開",
+    "subtitle": "AIエージェント軍団ワークスペースはまもなく完成します。\nリリース次第、メールでお知らせします。",
+    "badge": "Coming Soon",
+    "notify_title": "リリース通知を受け取る",
+    "notify_subtitle": "ご登録いただくと、ダウンロード開始と同時にお知らせします。",
+    "notify_cta": "登録してリリース通知を受け取る",
+    "pricing_cta": "料金プランをプレビュー",
     "macos": "macOS (Apple Silicon / Intel)",
     "windows": "Windows (64-bit)",
     "linux": "Linux (AppImage)",
