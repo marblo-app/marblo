@@ -19,6 +19,8 @@ export default memo(function TerminalView({
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const initializedRef = useRef(false);
+  // Shared scroll-follow state — user-input-driven (see effect for details).
+  const wantBottomRef = useRef(true);
 
   useEffect(() => {
     if (!containerRef.current || initializedRef.current) return;
@@ -92,7 +94,7 @@ export default memo(function TerminalView({
           } catch (err) {
             console.warn(
               "[TerminalView] WebGL init failed, using DOM renderer:",
-              err,
+              err
             );
           }
         }
@@ -124,19 +126,30 @@ export default memo(function TerminalView({
     };
     requestAnimationFrame(tryOpen);
 
-    // PTY → Terminal — slash menu / large redraws can reset the xterm DOM
-    // viewport scrollTop because the renderer rebuilds rows wholesale.
-    // We latch a `wantBottom` flag that flips ONLY on user intent (wheel /
-    // PageUp / Home → false; scroll back to baseY → true). Every write
-    // re-sticks to bottom via rAF while wantBottom is true, so renderer
-    // resets are corrected on the very next frame without oscillating.
-    // See OrchestratorTerminal.tsx for the long-form rationale.
-    let wantBottom = true;
-    let userScrollingUntil = 0;
-    const markUserScrolling = () => {
-      userScrollingUntil = Date.now() + 300;
+    // ─────────────────────────────────────────────────────────────────────
+    // Scroll-follow state machine — purely user-input-driven (deterministic).
+    //
+    // Previous iterations toggled wantBottom via a post-wheel time window
+    // plus an `onScroll` heuristic (viewportY >= baseY → wantBottom = true).
+    // That heuristic raced renderer-induced ydisp jumps (slash menu redraws,
+    // cursor-position escape sequences from agent CLIs): if a renderer reset
+    // hit within the user-scrolling window, onScroll fired with viewportY
+    // happening to == baseY → wantBottom incorrectly snapped back to true →
+    // next PTY chunk scrolled to bottom, undoing the user's scroll-up. This
+    // was the bug users observed during agent work.
+    //
+    // This iteration: wantBottomRef.current is mutated ONLY by definite user
+    // input handlers (wheel deltaY sign, specific keys, user typing).
+    // xterm's onScroll is NOT consulted — no heuristic can be fooled by
+    // renderer activity. Every PTY chunk does `if (wantBottom) scrollBottom`,
+    // and every other unconditional scrollToBottom callsite is guarded too.
+    // ─────────────────────────────────────────────────────────────────────
+    wantBottomRef.current = true;
+    const checkRejoinBottom = () => {
+      if (disposed) return;
+      const buf = terminal.buffer.active;
+      if (buf.viewportY >= buf.baseY) wantBottomRef.current = true;
     };
-    const isUserScrolling = () => Date.now() < userScrollingUntil;
 
     let hasReceivedData = false;
     window.electronAPI.pty.onData(sessionId, (data) => {
@@ -147,21 +160,12 @@ export default memo(function TerminalView({
         return;
       }
       terminal.write(data);
-      if (wantBottom) {
+      if (wantBottomRef.current) {
         requestAnimationFrame(() => {
-          if (disposed || !wantBottom) return;
+          if (disposed || !wantBottomRef.current) return;
           terminal.scrollToBottom();
         });
       }
-    });
-
-    // wantBottom flips only on user-driven scroll changes. isUserScrolling()
-    // is set briefly by wheel/keydown listeners; renderer-induced ydisp
-    // jumps fire onScroll without that flag set, so we don't toggle on them.
-    const onScrollDispose = terminal.onScroll(() => {
-      if (disposed || !isUserScrolling()) return;
-      const buf = terminal.buffer.active;
-      wantBottom = buf.viewportY >= buf.baseY;
     });
 
     const replayTimer = window.setTimeout(() => {
@@ -180,13 +184,13 @@ export default memo(function TerminalView({
         if (!hasReceivedData && termOpened) {
           terminal.write("\r\n\x1b[33m  ⚠ 세션이 만료되었습니다.\x1b[0m\r\n");
           terminal.write(
-            "\x1b[90m  앱 재시작으로 PTY 세션이 종료되었습니다.\x1b[0m\r\n",
+            "\x1b[90m  앱 재시작으로 PTY 세션이 종료되었습니다.\x1b[0m\r\n"
           );
           terminal.write(
-            "\x1b[90m  Agents 탭에서 Restart 버튼으로 재시작하세요.\x1b[0m\r\n\r\n",
+            "\x1b[90m  Agents 탭에서 Restart 버튼으로 재시작하세요.\x1b[0m\r\n\r\n"
           );
         }
-        if (termOpened) terminal.scrollToBottom();
+        if (termOpened && wantBottomRef.current) terminal.scrollToBottom();
       });
     }, 200);
 
@@ -199,16 +203,18 @@ export default memo(function TerminalView({
       if (termOpened && pendingData.length > 0) {
         for (const d of pendingData) terminal.write(d);
         pendingData.length = 0;
-        // Initial flush — user hasn't had a chance to scroll yet.
-        terminal.scrollToBottom();
+        // Initial flush — user hasn't had a chance to scroll yet, but guard
+        // anyway in case data and a user wheel race at mount.
+        if (wantBottomRef.current) terminal.scrollToBottom();
         clearInterval(flushInterval);
       }
     }, 100);
     setTimeout(() => clearInterval(flushInterval), 10000);
 
-    // Terminal → PTY (stdin)
+    // Terminal → PTY (stdin) — user typing means "rejoin auto-follow"
     terminal.onData((data) => {
       if (disposed) return;
+      wantBottomRef.current = true;
       window.electronAPI.pty.write(sessionId, data);
     });
 
@@ -216,7 +222,7 @@ export default memo(function TerminalView({
     window.electronAPI.pty.onExit(sessionId, (code) => {
       if (disposed) return;
       terminal.write(
-        `\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`,
+        `\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`
       );
     });
 
@@ -242,33 +248,62 @@ export default memo(function TerminalView({
     };
     window.addEventListener("resize", handleResize);
 
-    // User scroll-intent tracking: any wheel / Page key on the wrapper marks
-    // the user as actively scrolling. The onScroll snap-back guard checks
-    // this so we never override a deliberate scrollback action.
+    // User-input → wantBottom transitions (deterministic, no heuristics).
+    // Capture phase ensures we run before xterm's internal handlers, even if
+    // xterm calls stopPropagation. We also re-attach on .xterm-viewport
+    // (created after xterm.open()) as belt-and-suspenders — wrapper-level
+    // capture alone catches every wheel/key path in practice.
     const wrapperEl = containerRef.current;
-    const onWheel = () => markUserScrolling();
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (
-        e.key === "PageUp" ||
-        e.key === "PageDown" ||
-        e.key === "Home" ||
-        e.key === "End" ||
-        (e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown"))
-      ) {
-        markUserScrolling();
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) {
+        wantBottomRef.current = false; // user scrolling up — pin position
+      } else if (e.deltaY > 0) {
+        requestAnimationFrame(checkRejoinBottom); // rejoin if landed at baseY
       }
     };
-    wrapperEl?.addEventListener("wheel", onWheel, { passive: true });
-    wrapperEl?.addEventListener("keydown", onKeyDown);
+    const onKeyDown = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case "PageUp":
+        case "Home":
+          wantBottomRef.current = false;
+          break;
+        case "End":
+          wantBottomRef.current = true;
+          break;
+        case "PageDown":
+          requestAnimationFrame(checkRejoinBottom);
+          break;
+        case "ArrowUp":
+        case "ArrowDown":
+          if (e.shiftKey) {
+            if (e.key === "ArrowUp") wantBottomRef.current = false;
+            else requestAnimationFrame(checkRejoinBottom);
+          }
+          break;
+      }
+    };
+    const wheelOpts: AddEventListenerOptions = { capture: true, passive: true };
+    const keyOpts: AddEventListenerOptions = { capture: true };
+    wrapperEl?.addEventListener("wheel", onWheel, wheelOpts);
+    wrapperEl?.addEventListener("keydown", onKeyDown, keyOpts);
+    // .xterm-viewport is created after xterm.open() — attach next frame.
+    let viewportEl: HTMLElement | null = null;
+    requestAnimationFrame(() => {
+      viewportEl =
+        wrapperEl?.querySelector<HTMLElement>(".xterm-viewport") ?? null;
+      viewportEl?.addEventListener("wheel", onWheel, wheelOpts);
+      viewportEl?.addEventListener("keydown", onKeyDown, keyOpts);
+    });
 
     return () => {
       disposed = true;
       window.clearTimeout(replayTimer);
       clearInterval(flushInterval);
       window.removeEventListener("resize", handleResize);
-      wrapperEl?.removeEventListener("wheel", onWheel);
-      wrapperEl?.removeEventListener("keydown", onKeyDown);
-      onScrollDispose.dispose();
+      wrapperEl?.removeEventListener("wheel", onWheel, wheelOpts);
+      wrapperEl?.removeEventListener("keydown", onKeyDown, keyOpts);
+      viewportEl?.removeEventListener("wheel", onWheel, wheelOpts);
+      viewportEl?.removeEventListener("keydown", onKeyDown, keyOpts);
       window.electronAPI.pty.removeListeners(sessionId);
       terminal.dispose();
       if (containerRef.current) {
@@ -291,9 +326,10 @@ export default memo(function TerminalView({
         } catch {
           /* ignore */
         }
-        // Delay scrollToBottom to ensure fit has fully rendered
+        // Delay scrollToBottom to ensure fit has fully rendered.
+        // Only scroll if user wasn't manually scrolled-up — preserves position.
         requestAnimationFrame(() => {
-          if (terminalRef.current) {
+          if (terminalRef.current && wantBottomRef.current) {
             terminalRef.current.scrollToBottom();
           }
         });
