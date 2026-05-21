@@ -14,7 +14,7 @@ interface FsAPI {
   writeFile: (filePath: string, content: string) => Promise<void>;
   gitStatus: (rootPath: string) => Promise<Record<string, string>>;
   gitDiff: (
-    filePath: string,
+    filePath: string
   ) => Promise<{ original: string; modified: string }>;
   gitRemoteUrl: (rootPath: string) => Promise<string | null>;
   selectDirectory: () => Promise<string | null>;
@@ -23,25 +23,25 @@ interface FsAPI {
   offFileChange: () => void;
   createFile: (
     rootPath: string,
-    filePath: string,
+    filePath: string
   ) => Promise<{ success: boolean; path: string }>;
   createDirectory: (
     rootPath: string,
-    dirPath: string,
+    dirPath: string
   ) => Promise<{ success: boolean; path: string }>;
   rename: (
     rootPath: string,
     fromPath: string,
-    toPath: string,
+    toPath: string
   ) => Promise<{ success: boolean; fromPath: string; toPath: string }>;
   remove: (
     rootPath: string,
-    targetPath: string,
+    targetPath: string
   ) => Promise<{ success: boolean; path: string }>;
   copy: (
     rootPath: string,
     fromPath: string,
-    toPath: string,
+    toPath: string
   ) => Promise<{ success: boolean; fromPath: string; toPath: string }>;
   revealInFinder: (targetPath: string) => Promise<{ success: boolean }>;
 }
@@ -76,11 +76,11 @@ interface AgentAPI {
     cwd: string,
     initialPrompt?: string,
     resumeSessionId?: string,
-    projectId?: string,
+    projectId?: string
   ) => Promise<{ id: string; ptySessionId: string; status: string }>;
   stop: (id: string) => Promise<void>;
   restart: (
-    id: string,
+    id: string
   ) => Promise<{ id: string; ptySessionId: string; status: string } | null>;
   status: (id: string) => Promise<string>;
   list: (projectId?: string) => Promise<
@@ -95,7 +95,7 @@ interface AgentAPI {
   >;
   remove: (id: string) => Promise<{ success: boolean }>;
   onStatusChange: (
-    callback: (data: { agentId: string; status: string }) => void,
+    callback: (data: { agentId: string; status: string }) => void
   ) => void;
   healthStatus: (id: string) => Promise<{
     status: string;
@@ -107,10 +107,10 @@ interface AgentAPI {
       agentId: string;
       attempt: number;
       maxAttempts: number;
-    }) => void,
+    }) => void
   ) => void;
   onRestartFailed: (
-    callback: (data: { agentId: string; exitCode: number }) => void,
+    callback: (data: { agentId: string; exitCode: number }) => void
   ) => void;
   onCostUpdate: (
     callback: (data: {
@@ -125,7 +125,7 @@ interface AgentAPI {
       taskId?: string;
       taskType?: string;
       sessionId?: string;
-    }) => void,
+    }) => void
   ) => void;
   offCostUpdate: () => void;
   reconnect: (
@@ -137,7 +137,7 @@ interface AgentAPI {
       command: string;
     }>,
     rootPath: string,
-    projectId: string,
+    projectId: string
   ) => Promise<
     Array<{
       agentId: string;
@@ -151,7 +151,7 @@ interface AgentAPI {
       agentName: string;
       status: string;
       currentTaskId: string | null;
-    }) => void,
+    }) => void
   ) => void;
 }
 
@@ -174,7 +174,7 @@ interface DecompositionResultDTO {
 interface OrchestratorAPI {
   decompose: (text: string) => Promise<DecompositionResultDTO>;
   createTasks: (
-    tasks: DecomposedTaskDTO[],
+    tasks: DecomposedTaskDTO[]
   ) => Promise<{ tasks: DecomposedTaskDTO[]; layers: string[][] }>;
 }
 
@@ -182,7 +182,7 @@ interface OrchestratorSessionAPI {
   launch: (
     projectId: string,
     rootPath: string,
-    resumeSessionId?: string,
+    resumeSessionId?: string
   ) => Promise<{
     sessionId: string;
     ptySessionId: string;
@@ -207,7 +207,7 @@ interface OrchestratorSessionAPI {
       ptySessionId: string;
       model: string;
       role: string;
-    }) => void,
+    }) => void
   ) => void;
 }
 
@@ -224,12 +224,12 @@ type FlowEvent =
 interface FlowAPI {
   run: (
     flow: unknown,
-    inputs?: Record<string, unknown>,
+    inputs?: Record<string, unknown>
   ) => Promise<{ runId: string }>;
   pause: (runId: string) => Promise<void>;
   resume: (
     runId: string,
-    humanInput?: { nodeId: string; approved: boolean; data?: unknown },
+    humanInput?: { nodeId: string; approved: boolean; data?: unknown }
   ) => Promise<void>;
   cancel: (runId: string) => Promise<void>;
   getState: (runId: string) => Promise<unknown>;
@@ -251,7 +251,7 @@ interface SettingsAPI {
 interface CodeAPI {
   format: (
     content: string,
-    filePath: string,
+    filePath: string
   ) => Promise<{ formatted: string; error: string | null }>;
 }
 
@@ -270,7 +270,7 @@ interface SubscriptionPlanEntry {
 interface SubscriptionPlansAPI {
   list: () => Promise<SubscriptionPlanEntry[]>;
   save: (
-    plans: SubscriptionPlanEntry[],
+    plans: SubscriptionPlanEntry[]
   ) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -334,8 +334,15 @@ interface HarnessPackage {
   status: "installed" | "not-installed" | "manual-required" | "unknown";
 }
 
+interface HarnessVersionInfo {
+  localVersion: string | null;
+  latestVersion: string | null;
+  updateState: "up-to-date" | "outdated" | "unknown";
+}
+
 interface HarnessAPI {
   list: () => Promise<HarnessPackage[]>;
+  versions: () => Promise<Record<string, HarnessVersionInfo>>;
   install: (id: string) => Promise<{ success: boolean; error?: string }>;
   uninstall: (id: string) => Promise<{ success: boolean; error?: string }>;
 }
@@ -363,8 +370,14 @@ interface UpdaterAPI {
   offStatus: () => void;
 }
 
+interface TestModeAPI {
+  /** Main process 가 MARBLO_TEST_BYPASS_AUTH=1 로 launch 됐을 때만 true. */
+  bypassAuth: boolean;
+}
+
 interface ElectronAPI {
   platform: string;
+  testMode: TestModeAPI;
   window: WindowAPI;
   harness: HarnessAPI;
   send: (channel: string, data: unknown) => void;

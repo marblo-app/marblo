@@ -429,11 +429,21 @@ export class AgentConfigGenerator {
     if (fs.existsSync(userConfigPath)) {
       try {
         const raw = fs.readFileSync(userConfigPath, "utf-8");
-        // Strip existing [mcp_servers.*] sections AND the [features]
-        // section. Per-agent config re-adds only what we want.
+        // Strip:
+        //  - [mcp_servers.*]   — per-agent config injects only marblo.
+        //  - [features]        — user-toggled experimental flags must not
+        //                        leak into the agent (unstable-feature warns).
+        //  - [projects.*]      — Marblo re-emits a fresh trust entry for the
+        //                        agent's projectDir below. Keeping the
+        //                        user's entries here risks a TOML duplicate
+        //                        key error when the user has already
+        //                        trusted the same dir from their own CLI
+        //                        use (codex refuses to load the config and
+        //                        the agent dies on spawn).
         preserved = raw
           .replace(/\[mcp_servers\.[\s\S]*?(?=\n\[(?!mcp_servers)|$)/g, "")
           .replace(/\[features\][\s\S]*?(?=\n\[|$)/g, "")
+          .replace(/\[projects\.[\s\S]*?(?=\n\[(?!projects)|$)/g, "")
           .trimEnd();
       } catch {
         // Best-effort — ignore unreadable user config.

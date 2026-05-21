@@ -2,6 +2,14 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("electronAPI", {
   platform: process.platform,
+  // Test hatch — main process 에서 MARBLO_TEST_BYPASS_AUTH=1 로 launch 한
+  // 경우에만 true. Playwright e2e 가 Firebase Auth 게이트를 우회해서 메인
+  // UI 까지 도달하기 위해 AuthProvider 가 이 플래그를 본다. Production
+  // 빌드에서는 env 가 set 되지 않으므로 항상 false → short-circuit. renderer
+  // 코드는 이 값을 임의로 set 할 수 없다 (preload 만 process.env 접근 가능).
+  testMode: {
+    bypassAuth: process.env.MARBLO_TEST_BYPASS_AUTH === "1",
+  },
   // Multi-window: renderer registers its current project so main can scope
   // agent:* and orchestrator:* events to the right window. Pass empty string
   // to clear (e.g., when project is closed).
@@ -61,7 +69,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       cwd: string,
       initialPrompt?: string,
       resumeSessionId?: string,
-      projectId?: string,
+      projectId?: string
     ) =>
       ipcRenderer.invoke("agent:launch", {
         agent,
@@ -76,7 +84,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     list: (projectId?: string) => ipcRenderer.invoke("agent:list", projectId),
     remove: (id: string) => ipcRenderer.invoke("agent:remove", id),
     onStatusChange: (
-      callback: (data: { agentId: string; status: string }) => void,
+      callback: (data: { agentId: string; status: string }) => void
     ) => {
       ipcRenderer.on("agent:statusChanged", (_event, data) => callback(data));
     },
@@ -86,12 +94,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
         agentId: string;
         attempt: number;
         maxAttempts: number;
-      }) => void,
+      }) => void
     ) => {
       ipcRenderer.on("agent:restartAttempt", (_event, data) => callback(data));
     },
     onRestartFailed: (
-      callback: (data: { agentId: string; exitCode: number }) => void,
+      callback: (data: { agentId: string; exitCode: number }) => void
     ) => {
       ipcRenderer.on("agent:restartFailed", (_event, data) => callback(data));
     },
@@ -105,7 +113,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         cacheReadTokens: number;
         cacheWriteTokens: number;
         totalCost: number;
-      }) => void,
+      }) => void
     ) => {
       ipcRenderer.on("cost:update", (_event, data) => callback(data));
     },
@@ -121,7 +129,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         command: string;
       }>,
       rootPath: string,
-      projectId: string,
+      projectId: string
     ) => ipcRenderer.invoke("agent:reconnect", { agents, rootPath, projectId }),
     onSyncStatus: (
       callback: (data: {
@@ -129,7 +137,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         agentName: string;
         status: string;
         currentTaskId: string | null;
-      }) => void,
+      }) => void
     ) => {
       ipcRenderer.on("agent:syncStatus", (_event, data) => callback(data));
     },
@@ -146,7 +154,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         depends_on: string[];
         scope: string[];
         estimatedHours: number;
-      }>,
+      }>
     ) => ipcRenderer.invoke("orchestrator:createTasks", tasks),
   },
   orchestratorSession: {
@@ -162,7 +170,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("orchestratorSession:listSessions", rootPath),
     onStatusChange: (callback: (data: { status: string }) => void) => {
       ipcRenderer.on("orchestrator:statusChanged", (_event, data) =>
-        callback(data),
+        callback(data)
       );
     },
     onAgentSpawned: (
@@ -172,7 +180,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ptySessionId: string;
         model: string;
         role: string;
-      }) => void,
+      }) => void
     ) => {
       ipcRenderer.on("agent:spawned", (_event, data) => callback(data));
     },
@@ -183,7 +191,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     pause: (runId: string) => ipcRenderer.invoke("flow:pause", { runId }),
     resume: (
       runId: string,
-      humanInput?: { nodeId: string; approved: boolean; data?: unknown },
+      humanInput?: { nodeId: string; approved: boolean; data?: unknown }
     ) => ipcRenderer.invoke("flow:resume", { runId, humanInput }),
     cancel: (runId: string) => ipcRenderer.invoke("flow:cancel", { runId }),
     getState: (runId: string) => ipcRenderer.invoke("flow:getState", { runId }),
@@ -243,7 +251,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         monthlyFlatUsd: number;
         monthlyTokenAllowance?: number;
         overagePerToken?: { inputPer1M: number; outputPer1M: number };
-      }>,
+      }>
     ) =>
       ipcRenderer.invoke("subscriptionPlans:save", plans) as Promise<{
         success: boolean;
@@ -293,6 +301,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   harness: {
     list: () => ipcRenderer.invoke("harness:list"),
+    versions: () =>
+      ipcRenderer.invoke("harness:versions") as Promise<
+        Record<
+          string,
+          {
+            localVersion: string | null;
+            latestVersion: string | null;
+            updateState: "up-to-date" | "outdated" | "unknown";
+          }
+        >
+      >,
     install: (id: string) =>
       ipcRenderer.invoke("harness:install", id) as Promise<{
         success: boolean;
@@ -318,7 +337,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     watch: (rootPath: string) => ipcRenderer.invoke("fs:watch", rootPath),
     onFileChange: (callback: (event: string, filePath: string) => void) => {
       ipcRenderer.on("fs:change", (_event, ev, fp) =>
-        callback(ev as string, fp as string),
+        callback(ev as string, fp as string)
       );
     },
     offFileChange: () => {

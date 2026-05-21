@@ -29,6 +29,8 @@ import {
   listCatalog,
   installPackage,
   uninstallPackage,
+  scheduleHarnessUpdates,
+  getCatalogVersions,
 } from "./harness-manager";
 import { FlowRunner } from "./flow-engine/flow-runner";
 import { KanbanBridge } from "./flow-engine/kanban-bridge";
@@ -1972,6 +1974,10 @@ ipcMain.handle("harness:list", () => {
   return listCatalog();
 });
 
+ipcMain.handle("harness:versions", async () => {
+  return getCatalogVersions();
+});
+
 ipcMain.handle("harness:install", async (_event, id: string) => {
   try {
     await installPackage(id);
@@ -2025,6 +2031,17 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.warn("[Main] Bundle install failed (non-fatal):", err);
   }
+
+  // Auto-update npm-global CLIs (claude / codex / gemini). One sweep now,
+  // then every 24h. Keeps the user from being stuck on a codex that shows
+  // a blocking "Update available!" dialog at startup (which would otherwise
+  // deadlock agent spawning — see agent-manager.ts:dismissDialogs).
+  scheduleHarnessUpdates((outcomes) => {
+    const updated = outcomes.filter((o) => o.status === "updated");
+    if (updated.length > 0) {
+      broadcast("harness:updated", { outcomes: updated });
+    }
+  });
 
   // Start HTTP bridge server before creating the window
   try {

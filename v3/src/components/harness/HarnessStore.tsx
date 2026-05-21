@@ -23,6 +23,9 @@ const STATUS_LABEL: Record<HarnessPackage["status"], string> = {
 
 export function HarnessStore({ onClose }: HarnessStoreProps) {
   const [packages, setPackages] = useState<HarnessPackage[]>([]);
+  const [versions, setVersions] = useState<Record<string, HarnessVersionInfo>>(
+    {}
+  );
   const [filter, setFilter] = useState<CategoryFilter>("all");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +38,15 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "불러오기 실패");
     }
+    // Versions are looked up lazily — they require network (npm view) and
+    // can take several seconds. Render the list immediately and patch in
+    // versions when they arrive.
+    try {
+      const v = await window.electronAPI.harness.versions();
+      setVersions(v);
+    } catch {
+      /* non-fatal — versions panel just stays empty */
+    }
   }, []);
 
   useEffect(() => {
@@ -42,7 +54,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
   }, [refresh]);
 
   const filtered = packages.filter(
-    (p) => filter === "all" || p.category === filter,
+    (p) => filter === "all" || p.category === filter
   );
 
   const handleInstall = async (pkg: HarnessPackage) => {
@@ -62,7 +74,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
         setInfo(
           postInstall
             ? `${pkg.name} 설치 완료. ${postInstall}`
-            : `${pkg.name} 설치 완료.`,
+            : `${pkg.name} 설치 완료.`
         );
       }
     } finally {
@@ -193,6 +205,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
               const isRequired = pkg.category === "required";
               const isBundled = pkg.install.kind === "bundled";
               const isManual = pkg.install.kind === "manual";
+              const ver = versions[pkg.id];
               return (
                 <div
                   key={pkg.id}
@@ -212,16 +225,31 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                         isInstalled
                           ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
                           : isManual
-                            ? "bg-[#f9e2af]/20 text-[#f9e2af]"
-                            : "bg-[#313244] text-[#6c7086]"
+                          ? "bg-[#f9e2af]/20 text-[#f9e2af]"
+                          : "bg-[#313244] text-[#6c7086]"
                       }`}
                     >
                       {isInstalled ? "설치됨" : isManual ? "수동" : "미설치"}
                     </span>
                   </div>
-                  <p className="mb-3 text-xs text-[#bac2de]">
+                  <p className="mb-2 text-xs text-[#bac2de]">
                     {pkg.description}
                   </p>
+                  {ver && isInstalled && ver.localVersion && (
+                    <div className="mb-3 flex items-center gap-1.5 text-[10px]">
+                      <span className="text-[#6c7086]">
+                        v{ver.localVersion}
+                      </span>
+                      {ver.updateState === "outdated" && ver.latestVersion && (
+                        <span className="rounded bg-[#f9e2af]/20 px-1.5 py-0.5 text-[#f9e2af]">
+                          → v{ver.latestVersion} 업데이트 대기 중
+                        </span>
+                      )}
+                      {ver.updateState === "up-to-date" && (
+                        <span className="text-[#6c7086]">(최신)</span>
+                      )}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     {!isInstalled && (
                       <button
@@ -232,12 +260,12 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                         {isBusy
                           ? "설치 중..."
                           : isManual
-                            ? "안내 보기"
-                            : isBundled
-                              ? "자동 설치됨"
-                              : isRequired
-                                ? "필수 — 설치"
-                                : STATUS_LABEL[pkg.status]}
+                          ? "안내 보기"
+                          : isBundled
+                          ? "자동 설치됨"
+                          : isRequired
+                          ? "필수 — 설치"
+                          : STATUS_LABEL[pkg.status]}
                       </button>
                     )}
                     {isInstalled && !isRequired && (

@@ -130,17 +130,34 @@ function runCommand(
   cmd: string,
   args: string[],
   cwd?: string,
+  timeoutMs?: number
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
     const child = spawn(cmd, args, { cwd, env: process.env });
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    if (timeoutMs && timeoutMs > 0) {
+      timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+        stderr += `\n[runCommand] timed out after ${timeoutMs}ms`;
+      }, timeoutMs);
+    }
+    const done = (code: number) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    };
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
-    child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
-    child.on("error", (err) =>
-      resolve({ code: -1, stdout, stderr: stderr + err.message }),
-    );
+    child.on("close", (code) => done(code ?? -1));
+    child.on("error", (err) => {
+      stderr += err.message;
+      done(-1);
+    });
   });
 }
 
@@ -171,7 +188,7 @@ async function installGit(strategy: InstallStrategy): Promise<void> {
  */
 async function runPostInstallExec(
   strategy: InstallStrategy,
-  enrichedPath: string,
+  enrichedPath: string
 ): Promise<void> {
   if (!strategy.postInstallExec || strategy.postInstallExec.length === 0) {
     return;
@@ -190,23 +207,23 @@ async function runPostInstallExec(
         child.stdout.on("data", (d) => (stdout += d.toString()));
         child.stderr.on("data", (d) => (stderr += d.toString()));
         child.on("close", (code) =>
-          resolve({ code: code ?? -1, stdout, stderr }),
+          resolve({ code: code ?? -1, stdout, stderr })
         );
         child.on("error", (err) =>
-          resolve({ code: -1, stdout, stderr: stderr + err.message }),
+          resolve({ code: -1, stdout, stderr: stderr + err.message })
         );
       });
       if (result.code !== 0) {
         console.warn(
           `[harness] postInstallExec ${step.command} ${step.args.join(
-            " ",
-          )} exit ${result.code}: ${(result.stderr || result.stdout).trim()}`,
+            " "
+          )} exit ${result.code}: ${(result.stderr || result.stdout).trim()}`
         );
       }
     } catch (err) {
       console.warn(
         `[harness] postInstallExec ${step.command} threw:`,
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
     }
   }
@@ -232,7 +249,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
   }
   if (!npmPath) {
     throw new Error(
-      "npm을 찾을 수 없습니다. Node.js / npm 설치 후 다시 시도하세요. (https://nodejs.org)",
+      "npm을 찾을 수 없습니다. Node.js / npm 설치 후 다시 시도하세요. (https://nodejs.org)"
     );
   }
   const result = await new Promise<{
@@ -247,7 +264,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
     child.on("error", (err) =>
-      resolve({ code: -1, stdout, stderr: stderr + err.message }),
+      resolve({ code: -1, stdout, stderr: stderr + err.message })
     );
   });
   if (result.code !== 0) {
@@ -257,7 +274,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
       .slice(-5)
       .join("\n");
     throw new Error(
-      `npm install -g ${strategy.source} 실패 (exit ${result.code})\n${tail}`,
+      `npm install -g ${strategy.source} 실패 (exit ${result.code})\n${tail}`
     );
   }
   // npm install 성공 — feature-flag 같은 후속 작업 (best-effort)
@@ -266,7 +283,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
 
 async function installMcp(
   pkg: HarnessPackage,
-  strategy: InstallStrategy,
+  strategy: InstallStrategy
 ): Promise<void> {
   if (!strategy.source) {
     throw new Error("mcp install requires source command");
@@ -280,7 +297,7 @@ async function installMcp(
     command: strategy.source,
     args: (strategy.args ?? []).map(expandEnv),
     env: Object.fromEntries(
-      Object.entries(strategy.env ?? {}).map(([k, v]) => [k, expandEnv(v)]),
+      Object.entries(strategy.env ?? {}).map(([k, v]) => [k, expandEnv(v)])
     ),
   };
   cfg.mcpServers = servers;
@@ -296,7 +313,7 @@ export async function installPackage(id: string): Promise<void> {
       return;
     case "manual":
       throw new Error(
-        "이 패키지는 자동 설치를 지원하지 않습니다. instructions 참고.",
+        "이 패키지는 자동 설치를 지원하지 않습니다. instructions 참고."
       );
     case "git":
       await installGit(pkg.install);
@@ -344,4 +361,202 @@ export async function uninstallPackage(id: string): Promise<void> {
       // bundled / manual — no automatic uninstall.
       return;
   }
+}
+
+// ── Auto-update for npm-global CLIs ────────────────────────────────
+//
+// Marblo depends on `claude` / `codex` / `gemini` being current. Old codex
+// builds in particular show an interactive "Update available!" dialog at
+// startup that doesn't match any of agent-manager's readiness patterns —
+// the 10s blind fallback then dumps the initial prompt into the menu and
+// codex exits cleanly, leaving a dead PTY. Auto-upgrading the npm globals
+// in the background keeps that class of issue from happening.
+
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h
+const VERSION_LOOKUP_TIMEOUT_MS = 15_000;
+const inFlightUpdates = new Set<string>();
+let updateSweepTimer: ReturnType<typeof setInterval> | null = null;
+
+export interface UpdateOutcome {
+  id: string;
+  source: string;
+  from: string | null;
+  to: string | null;
+  status: "up-to-date" | "updated" | "skipped" | "error";
+  error?: string;
+}
+
+function findBinaryPath(binary: string): string {
+  const enrichedPath = getEnrichedPathForDetection();
+  for (const dir of enrichedPath.split(":")) {
+    if (!dir) continue;
+    const candidate = path.join(dir, binary);
+    if (fileExists(candidate)) return candidate;
+  }
+  return "";
+}
+
+async function getLocalVersion(binary: string): Promise<string | null> {
+  const binPath = findBinaryPath(binary);
+  if (!binPath) return null;
+  const r = await runCommand(binPath, ["--version"], undefined, 5_000);
+  if (r.code !== 0) return null;
+  // First semver-like token works for "1.2.3", "codex-cli 0.128.0",
+  // "@anthropic-ai/claude-code 1.2.3 (Claude Code)", etc.
+  const m = (r.stdout + r.stderr).match(/\d+\.\d+\.\d+(-[\w.]+)?/);
+  return m ? m[0] : null;
+}
+
+async function getLatestNpmVersion(pkg: string): Promise<string | null> {
+  const npmPath = findBinaryPath("npm");
+  if (!npmPath) return null;
+  const r = await runCommand(
+    npmPath,
+    ["view", pkg, "version"],
+    undefined,
+    VERSION_LOOKUP_TIMEOUT_MS
+  );
+  if (r.code !== 0) return null;
+  const v = r.stdout.trim();
+  return /^\d+\.\d+\.\d+/.test(v) ? v : null;
+}
+
+export type UpdateState = "up-to-date" | "outdated" | "unknown";
+
+export interface VersionInfo {
+  localVersion: string | null;
+  latestVersion: string | null;
+  updateState: UpdateState;
+}
+
+/**
+ * Look up local + npm latest version for every installed npm-global
+ * package in the catalog. Best-effort — packages without binary detection
+ * or with a failed lookup get `updateState: 'unknown'`. Used by the
+ * Harness UI to show "v0.128.0 → v0.132.0" hints.
+ */
+export async function getCatalogVersions(): Promise<
+  Record<string, VersionInfo>
+> {
+  const out: Record<string, VersionInfo> = {};
+  await Promise.all(
+    CATALOG.map(async (pkg) => {
+      if (
+        pkg.install.kind !== "npm-global" ||
+        !pkg.install.source ||
+        !pkg.detect.binary
+      ) {
+        return;
+      }
+      const [localVersion, latestVersion] = await Promise.all([
+        getLocalVersion(pkg.detect.binary),
+        getLatestNpmVersion(pkg.install.source),
+      ]);
+      let updateState: UpdateState = "unknown";
+      if (localVersion && latestVersion) {
+        updateState =
+          localVersion === latestVersion ? "up-to-date" : "outdated";
+      }
+      out[pkg.id] = { localVersion, latestVersion, updateState };
+    })
+  );
+  return out;
+}
+
+/**
+ * Check installed npm-global Harness CLIs and upgrade any that are behind
+ * the latest published version. Best-effort: never throws. Returns an
+ * outcome per checked package so callers can surface a toast / log.
+ */
+export async function checkAndUpdateHarness(): Promise<UpdateOutcome[]> {
+  const outcomes: UpdateOutcome[] = [];
+  for (const pkg of CATALOG) {
+    if (pkg.install.kind !== "npm-global") continue;
+    if (!pkg.install.source || !pkg.detect.binary) continue;
+    if (detectStatus(pkg) !== "installed") continue;
+    if (inFlightUpdates.has(pkg.id)) continue;
+    inFlightUpdates.add(pkg.id);
+    try {
+      const [local, latest] = await Promise.all([
+        getLocalVersion(pkg.detect.binary),
+        getLatestNpmVersion(pkg.install.source),
+      ]);
+      if (!local || !latest) {
+        outcomes.push({
+          id: pkg.id,
+          source: pkg.install.source,
+          from: local,
+          to: latest,
+          status: "skipped",
+          error: !local ? "local version unknown" : "npm view failed",
+        });
+        continue;
+      }
+      if (local === latest) {
+        outcomes.push({
+          id: pkg.id,
+          source: pkg.install.source,
+          from: local,
+          to: latest,
+          status: "up-to-date",
+        });
+        continue;
+      }
+      console.log(
+        `[harness] Updating ${pkg.install.source}: ${local} → ${latest}`
+      );
+      try {
+        await installNpmGlobal(pkg.install);
+        outcomes.push({
+          id: pkg.id,
+          source: pkg.install.source,
+          from: local,
+          to: latest,
+          status: "updated",
+        });
+      } catch (err) {
+        outcomes.push({
+          id: pkg.id,
+          source: pkg.install.source,
+          from: local,
+          to: latest,
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } finally {
+      inFlightUpdates.delete(pkg.id);
+    }
+  }
+  return outcomes;
+}
+
+/**
+ * Kick off auto-update: one sweep immediately, then every 24h. Idempotent —
+ * calling twice is a no-op. `onResult` fires after each sweep so the main
+ * process can broadcast a `harness:updated` event to the renderer for a
+ * toast notification.
+ */
+export function scheduleHarnessUpdates(
+  onResult?: (outcomes: UpdateOutcome[]) => void
+): void {
+  if (updateSweepTimer) return;
+  const run = async () => {
+    try {
+      const outcomes = await checkAndUpdateHarness();
+      onResult?.(outcomes);
+      const updated = outcomes.filter((o) => o.status === "updated");
+      if (updated.length > 0) {
+        console.log(
+          `[harness] Auto-update: ${updated
+            .map((u) => `${u.source} ${u.from}→${u.to}`)
+            .join(", ")}`
+        );
+      }
+    } catch (err) {
+      console.warn("[harness] Auto-update sweep failed:", err);
+    }
+  };
+  void run();
+  updateSweepTimer = setInterval(run, UPDATE_CHECK_INTERVAL_MS);
 }

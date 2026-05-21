@@ -77,10 +77,41 @@ export interface AgentInstance {
  *   without this rewrite, Codex/Gemini agents look for the prefixed
  *   tool, fail to find it, and stop without ever calling Marblo MCP.
  */
+/**
+ * Interactive dialogs that some CLIs show at startup before reaching the
+ * input prompt. None of them match the readiness patterns in launch(), so
+ * without intervention Marblo's 10s blind fallback dumps the initial
+ * prompt into the dialog as keystrokes — typically navigating a menu and
+ * exiting the CLI cleanly (exit 0), which Marblo classifies as "stopped"
+ * with no auto-restart.
+ *
+ * Each entry says: when `pattern` first appears in PTY output for an
+ * agent whose model is in `applies` (or any model when omitted), send
+ * `keys` to dismiss it, reset the readiness buffer, and keep waiting for
+ * the real input prompt. Each entry fires at most once per agent launch.
+ */
+interface StartupDialogMatcher {
+  pattern: RegExp;
+  keys: string;
+  label: string;
+  applies?: ModelType[];
+}
+
+export const STARTUP_DIALOG_MATCHERS: StartupDialogMatcher[] = [
+  {
+    // Codex CLI (e.g. 0.128 → 0.132): "✨ Update available!" prompt.
+    // "3" = "Skip until next version" — least invasive choice.
+    pattern: /Skip until next version/i,
+    keys: "3\r",
+    label: "codex update-available",
+    applies: ["gpt"],
+  },
+];
+
 export function composeInitialPrompt(
   model: ModelType,
   instruction: string,
-  skillContent?: string,
+  skillContent?: string
 ): string {
   const isClaude = model === "claude";
   const sanitized = isClaude
@@ -105,12 +136,12 @@ export class AgentManager {
     rootPath: string,
     sessionId: string,
     label: string,
-    agentId: string,
+    agentId: string
   ) => void;
   private onRestartAttempt?: (
     agentId: string,
     attempt: number,
-    maxAttempts: number,
+    maxAttempts: number
   ) => void;
   private onRestartFailed?: (agentId: string, exitCode: number) => void;
   private getMainWindow?: () => BrowserWindow | null;
@@ -118,7 +149,7 @@ export class AgentManager {
     rootPath: string,
     requested: string,
     filterLabel?: string,
-    filterAgentId?: string,
+    filterAgentId?: string
   ) => string | null;
 
   constructor(
@@ -128,15 +159,15 @@ export class AgentManager {
       rootPath: string,
       sessionId: string,
       label: string,
-      agentId: string,
+      agentId: string
     ) => void,
     onRestartAttempt?: (
       agentId: string,
       attempt: number,
-      maxAttempts: number,
+      maxAttempts: number
     ) => void,
     onRestartFailed?: (agentId: string, exitCode: number) => void,
-    getMainWindow?: () => BrowserWindow | null,
+    getMainWindow?: () => BrowserWindow | null
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = new AgentConfigGenerator();
@@ -153,8 +184,8 @@ export class AgentManager {
       rootPath: string,
       requested: string,
       filterLabel?: string,
-      filterAgentId?: string,
-    ) => string | null,
+      filterAgentId?: string
+    ) => string | null
   ) {
     this.resolveSessionId = resolver;
   }
@@ -180,7 +211,7 @@ export class AgentManager {
       console.log(
         `[Agent:${params.id}] Resolved 'latest' → ${
           resolvedResumeId ?? "none (new session)"
-        }`,
+        }`
       );
     }
     const isResume =
@@ -205,12 +236,12 @@ export class AgentManager {
       params.cwd,
       params.initialPrompt,
       params.projectId,
-      isResume ? resolvedResumeId : undefined,
+      isResume ? resolvedResumeId : undefined
     );
 
     if (isResume) {
       console.log(
-        `[Agent:${params.id}] Resuming session: ${resolvedResumeId} (model=${params.model})`,
+        `[Agent:${params.id}] Resuming session: ${resolvedResumeId} (model=${params.model})`
       );
     }
 
@@ -229,7 +260,7 @@ export class AgentManager {
       launchConfig.command,
       launchConfig.args,
       params.cwd,
-      mergedEnv,
+      mergedEnv
     );
 
     // Notify caller IMMEDIATELY so they can register data listeners
@@ -242,7 +273,7 @@ export class AgentManager {
       const prompt = composeInitialPrompt(
         params.model,
         launchConfig.initialPrompt,
-        launchConfig.skillContent,
+        launchConfig.skillContent
       );
       let sent = false;
       const sendPrompt = () => {
@@ -253,7 +284,7 @@ export class AgentManager {
         // CR inside the message body without submitting).
         this.ptyManager.writeAndSubmit(ptySessionId, prompt);
         console.log(
-          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`,
+          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`
         );
       };
 
@@ -282,12 +313,40 @@ export class AgentManager {
         /esc to interrupt/i,
       ];
 
+      // Per-launch state for STARTUP_DIALOG_MATCHERS — fire each matcher
+      // at most once. Filter by model so e.g. codex's update prompt
+      // doesn't get applied to claude agents (false positive on a chat
+      // message containing the same words).
+      const activeMatchers = STARTUP_DIALOG_MATCHERS.filter(
+        (m) => !m.applies || m.applies.includes(params.model)
+      );
+      const dismissed = new Set<RegExp>();
+
       this.ptyManager.onData(ptySessionId, (data) => {
         if (sent) return;
         outputBuffer += data;
         // Only keep last 4KB to avoid memory growth
         if (outputBuffer.length > 4096)
           outputBuffer = outputBuffer.slice(-4096);
+
+        for (const dlg of activeMatchers) {
+          if (dismissed.has(dlg.pattern)) continue;
+          if (dlg.pattern.test(outputBuffer)) {
+            dismissed.add(dlg.pattern);
+            console.log(
+              `[Agent:${params.id}] Dismissing blocking dialog: ${dlg.label}`
+            );
+            // Small delay so the TUI is in steady state when we type.
+            setTimeout(() => {
+              this.ptyManager.write(ptySessionId, dlg.keys);
+            }, 300);
+            // Reset buffer so the dismissed dialog's text doesn't keep
+            // being re-matched against readiness patterns.
+            outputBuffer = "";
+            return;
+          }
+        }
+
         for (const pattern of readinessPatterns) {
           if (pattern.test(outputBuffer)) {
             // Delay to let CLI fully render its prompt
@@ -314,7 +373,7 @@ export class AgentManager {
           require("os").homedir(),
           ".claude",
           "projects",
-          encodedPath,
+          encodedPath
         );
         const files = require("fs").existsSync(sessionsDir)
           ? require("fs")
@@ -326,7 +385,7 @@ export class AgentManager {
       } catch (err) {
         console.error(
           `[AgentManager] Failed to read existing session files for rootPath="${rootPath}":`,
-          err,
+          err
         );
         existingIds = new Set();
       }
@@ -338,7 +397,7 @@ export class AgentManager {
             require("os").homedir(),
             ".claude",
             "projects",
-            encodedPath,
+            encodedPath
           );
           if (!require("fs").existsSync(sessionsDir)) return;
           const currentFiles = require("fs")
@@ -352,7 +411,7 @@ export class AgentManager {
         } catch (err) {
           console.error(
             `[AgentManager] Failed to detect new session file for agent="${agentId}" rootPath="${rootPath}":`,
-            err,
+            err
           );
         }
       }, 5000);
@@ -399,7 +458,7 @@ export class AgentManager {
       params.role || "backend",
       spawnProjectId,
       promptHash,
-      promptLength,
+      promptLength
     );
 
     // Start heartbeat for anomaly detection (ML-4)
@@ -427,7 +486,7 @@ export class AgentManager {
         mainTelemetry.agentStopped(
           this.getMainWindow?.() ?? null,
           params.id,
-          exitCode,
+          exitCode
         );
         return;
       }
@@ -439,7 +498,7 @@ export class AgentManager {
       if (wasFastFail) {
         agent.fastFailCount++;
         console.warn(
-          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`,
+          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`
         );
       }
 
@@ -452,17 +511,17 @@ export class AgentManager {
       if (agent.restartCount < MAX_RESTARTS && !fastFailExceeded) {
         const delay = Math.min(
           BACKOFF_BASE_MS * Math.pow(2, agent.restartCount),
-          BACKOFF_MAX_MS,
+          BACKOFF_MAX_MS
         );
         agent.restartCount++;
         this.onRestartAttempt?.(agent.id, agent.restartCount, MAX_RESTARTS);
         mainTelemetry.agentRestarted(
           this.getMainWindow?.() ?? null,
           agent.id,
-          agent.restartCount,
+          agent.restartCount
         );
         console.log(
-          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`,
+          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`
         );
 
         agent.restartTimer = setTimeout(() => {
@@ -477,15 +536,15 @@ export class AgentManager {
         mainTelemetry.agentCrashed(
           this.getMainWindow?.() ?? null,
           agent.id,
-          exitCode,
+          exitCode
         );
         if (fastFailExceeded) {
           console.error(
-            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`,
+            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`
           );
         } else {
           console.error(
-            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
+            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
           );
         }
       }
@@ -512,7 +571,7 @@ export class AgentManager {
     this.agents.delete(agentId);
 
     console.log(
-      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`,
+      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`
     );
 
     // Re-launch with resume
@@ -523,11 +582,11 @@ export class AgentManager {
         agent.cwd,
         "latest",
         agent.name,
-        agent.id,
+        agent.id
       );
       resolvedSessionId = resolved ?? "new";
       console.log(
-        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`,
+        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`
       );
     }
 
@@ -691,7 +750,7 @@ export class AgentManager {
     };
     this.agents.set(agent.id, instance);
     console.log(
-      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`,
+      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`
     );
   }
 
@@ -707,7 +766,7 @@ export class AgentManager {
   listAgentsByProject(projectId: string | undefined): AgentInstance[] {
     if (!projectId) return this.listAgents();
     return Array.from(this.agents.values()).filter(
-      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId,
+      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId
     );
   }
 

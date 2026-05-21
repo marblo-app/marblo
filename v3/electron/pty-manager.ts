@@ -17,7 +17,7 @@ export class PtyManager {
     command?: string,
     args?: string[],
     cwd?: string,
-    env?: Record<string, string>,
+    env?: Record<string, string>
   ): PtySession {
     const shell =
       command ||
@@ -37,8 +37,10 @@ export class PtyManager {
       });
     } catch (err) {
       console.error(
-        `[PtyManager] Failed to spawn shell="${shell}" cwd="${cwd || os.homedir()}":`,
-        err,
+        `[PtyManager] Failed to spawn shell="${shell}" cwd="${
+          cwd || os.homedir()
+        }":`,
+        err
       );
       throw err;
     }
@@ -58,15 +60,36 @@ export class PtyManager {
   /**
    * Write text and submit it as a discrete Enter keystroke.
    *
-   * Writing `text + '\r'` in one chunk gets paste-buffered by Claude Code
-   * (and other Ink-based CLIs): the trailing CR is folded into the message
-   * body instead of submitting it. Splitting into two writes with a small
-   * gap makes the CR register as a separate keystroke.
+   * Writing `text + '\r'` in one chunk gets paste-buffered by Ink-based
+   * CLIs (Claude Code, Gemini, Codex): the trailing CR gets folded into
+   * the message body instead of submitting it.
+   *
+   * Two strategies:
+   *   - `bracketedPaste: true` (default) — wrap text in ESC[200~ / ESC[201~
+   *     paste markers so the TUI knows the text is a paste (no execution
+   *     mid-text), then send `\r` after a delay so it registers as a
+   *     separate keystroke that submits. Required for Gemini, which has
+   *     a longer paste-buffer flush than Claude/Codex — without paste
+   *     markers, the 150ms delay isn't enough and the CR gets buffered
+   *     into the multi-line input. Most modern TUIs (Ink, Bubble Tea,
+   *     ratatui) honor bracketed paste.
+   *   - `bracketedPaste: false` — for CLIs that echo the escape bytes
+   *     literally instead of interpreting them. Used for `custom` model
+   *     agents where we can't assume terminal support.
    */
-  writeAndSubmit(id: string, text: string, delayMs = 150): void {
+  writeAndSubmit(
+    id: string,
+    text: string,
+    delayMs = 150,
+    bracketedPaste = true
+  ): void {
     const session = this.sessions.get(id);
     if (!session) return;
-    session.process.write(text);
+    if (bracketedPaste) {
+      session.process.write(`\x1b[200~${text}\x1b[201~`);
+    } else {
+      session.process.write(text);
+    }
     setTimeout(() => {
       const s = this.sessions.get(id);
       if (s) s.process.write("\r");
