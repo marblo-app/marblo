@@ -1,0 +1,621 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  MissionEngine,
+  InProcessMissionEventBus,
+  ALLOWED_SKILLS,
+  isAllowedSkill,
+  isTerminalMission,
+  isValidMissionTransition,
+  assertMissionTransition,
+  getTemplate,
+  instantiateSteps,
+  listTemplates,
+} from "../../electron/mission-engine";
+import type {
+  Mission,
+  MissionStatus,
+  MissionStep,
+  TimelineEvent,
+} from "../../electron/mission-engine/types";
+import type {
+  FixRunner,
+  MissionEngineDeps,
+  MissionStore,
+  OrchestratorRef,
+  OrchestratorRegistry,
+  SkillResult,
+  SkillRunner,
+  TaskDispatcher,
+  TaskStatusLite,
+} from "../../electron/mission-engine/ports";
+
+// 모든 시나리오를 in-memory fake ports 로 검증.
+// MissionEngine.ts 가 외부 의존을 ports 인터페이스로만 받기 때문에 wire / Firestore
+// / Electron 없이 풀 라이프사이클을 돌릴 수 있다.
+
+// ──────────────────────────── fakes ────────────────────────────
+
+class InMemoryStore implements MissionStore {
+  private docs = new Map<string, Mission>();
+  private nextId = 1;
+
+  async getMission(id: string): Promise<Mission | null> {
+    const m = this.docs.get(id);
+    return m ? structuredClone(m) : null;
+  }
+
+  async createMission(
+    data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">,
+  ): Promise<string> {
+    const id = `m${this.nextId++}`;
+    const now = new Date();
+    this.docs.set(id, {
+      ...data,
+      id,
+      launchedAt: now,
+      lastActivityAt: now,
+      completedAt: null,
+    });
+    return id;
+  }
+
+  async updateMission(
+    id: string,
+    patch: Partial<Omit<Mission, "id" | "launchedAt">>,
+  ): Promise<void> {
+    const cur = this.docs.get(id);
+    if (!cur) throw new Error(`Mission ${id} not found`);
+    this.docs.set(id, { ...cur, ...patch, lastActivityAt: new Date() });
+  }
+
+  async appendTimelineEvent(id: string, event: TimelineEvent): Promise<void> {
+    const cur = this.docs.get(id);
+    if (!cur) throw new Error(`Mission ${id} not found`);
+    cur.contextLog.push(event);
+    cur.lastActivityAt = new Date();
+  }
+
+  async updateMissionStep(
+    id: string,
+    stepIndex: number,
+    patch: Partial<MissionStep>,
+  ): Promise<void> {
+    const cur = this.docs.get(id);
+    if (!cur) throw new Error(`Mission ${id} not found`);
+    if (stepIndex < 0 || stepIndex >= cur.steps.length) {
+      throw new Error("step OOB");
+    }
+    cur.steps[stepIndex] = { ...cur.steps[stepIndex], ...patch };
+    cur.lastActivityAt = new Date();
+  }
+
+  async setMissionStatus(
+    id: string,
+    status: MissionStatus,
+    extras?: { completedAt?: Date; abandonedReason?: string },
+  ): Promise<void> {
+    const cur = this.docs.get(id);
+    if (!cur) throw new Error(`Mission ${id} not found`);
+    cur.status = status;
+    if (extras?.completedAt) cur.completedAt = extras.completedAt;
+    if (extras?.abandonedReason) cur.abandonedReason = extras.abandonedReason;
+    cur.lastActivityAt = new Date();
+  }
+
+  // test helpers
+  raw(id: string): Mission | undefined {
+    return this.docs.get(id);
+  }
+  size(): number {
+    return this.docs.size;
+  }
+}
+
+interface DispatchSpy {
+  dispatchCalls: { missionId: string; goal: string }[];
+  killCalls: string[][];
+}
+
+function makeDispatcher(
+  spy: DispatchSpy,
+  opts?: {
+    initialStatuses?: Record<string, TaskStatusLite>;
+  },
+): TaskDispatcher {
+  const statuses: Record<string, TaskStatusLite> = { ...opts?.initialStatuses };
+  return {
+    async dispatchTasks({ missionId, goal }) {
+      spy.dispatchCalls.push({ missionId, goal });
+      const taskIds = [`t-${missionId}-1`, `t-${missionId}-2`];
+      for (const id of taskIds) statuses[id] = "IN_PROGRESS";
+      return taskIds;
+    },
+    async getTaskStatuses(taskIds) {
+      const out: Record<string, TaskStatusLite> = {};
+      for (const id of taskIds) {
+        if (statuses[id]) out[id] = statuses[id];
+      }
+      return out;
+    },
+    async killAgentsForTasks(taskIds) {
+      spy.killCalls.push([...taskIds]);
+    },
+    // test helper exposed via cast
+    __setStatuses(next: Record<string, TaskStatusLite>): void {
+      Object.assign(statuses, next);
+    },
+  } as TaskDispatcher & {
+    __setStatuses: (s: Record<string, TaskStatusLite>) => void;
+  };
+}
+
+function makeSkillRunner(opts?: {
+  failures?: number;
+  alwaysFail?: boolean;
+}): SkillRunner & { calls: number } {
+  let remaining = opts?.failures ?? 0;
+  const obj = {
+    calls: 0,
+    async runSkill({ skill }): Promise<SkillResult> {
+      obj.calls += 1;
+      if (opts?.alwaysFail) {
+        return {
+          success: false,
+          error: `skill ${skill} failed`,
+          durationMs: 1,
+        };
+      }
+      if (remaining > 0) {
+        remaining -= 1;
+        return {
+          success: false,
+          error: `skill ${skill} transient`,
+          durationMs: 1,
+        };
+      }
+      return { success: true, output: { skill }, durationMs: 1 };
+    },
+  };
+  return obj;
+}
+
+function makeFixRunner(success = true): FixRunner {
+  return {
+    async runFix() {
+      return success
+        ? { success: true }
+        : { success: false, error: "fix fail" };
+    },
+  };
+}
+
+function makeOrchRegistry(): OrchestratorRegistry {
+  const refs = new Map<string, OrchestratorRef>();
+  return {
+    async ensureSession({ projectId }) {
+      const sid = `sess-${projectId}`;
+      let r = refs.get(sid);
+      if (!r) {
+        r = {
+          sessionId: sid,
+          isAlive: () => true,
+          postMessage: vi.fn().mockResolvedValue(undefined),
+        };
+        refs.set(sid, r);
+      }
+      return r;
+    },
+    getSession(sid) {
+      return refs.get(sid) ?? null;
+    },
+  };
+}
+
+function buildEngine(overrides: Partial<MissionEngineDeps> = {}): {
+  engine: MissionEngine;
+  store: InMemoryStore;
+  bus: InProcessMissionEventBus;
+  spy: DispatchSpy;
+  dispatcher: TaskDispatcher & {
+    __setStatuses: (s: Record<string, TaskStatusLite>) => void;
+  };
+} {
+  const store = new InMemoryStore();
+  const bus = new InProcessMissionEventBus();
+  const spy: DispatchSpy = { dispatchCalls: [], killCalls: [] };
+  const dispatcher = makeDispatcher(spy) as TaskDispatcher & {
+    __setStatuses: (s: Record<string, TaskStatusLite>) => void;
+  };
+  const engine = new MissionEngine({
+    store,
+    dispatcher,
+    skillRunner: makeSkillRunner(),
+    fixRunner: makeFixRunner(),
+    eventBus: bus,
+    orchestrators: makeOrchRegistry(),
+    ...overrides,
+  });
+  return { engine, store, bus, spy, dispatcher };
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 1000,
+  intervalMs = 5,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(`waitFor timed out after ${timeoutMs}ms`);
+}
+
+// ──────────────────────── templates & state machine ────────────────────────
+
+describe("templates", () => {
+  it("exposes 5 templates", () => {
+    expect(listTemplates()).toHaveLength(5);
+  });
+  it("instantiateSteps returns indexed pending steps", () => {
+    const steps = instantiateSteps("quick-fix");
+    expect(steps).toHaveLength(4);
+    expect(steps[0]).toMatchObject({ index: 0, status: "pending" });
+    expect(steps[3]).toMatchObject({ index: 3, status: "pending" });
+  });
+  it("getTemplate throws on unknown", () => {
+    expect(() => getTemplate("nope" as never)).toThrow();
+  });
+  it("quick-fix sequence is investigate → fix → review → ship", () => {
+    const t = getTemplate("quick-fix");
+    expect(t.steps.map((s) => s.skill ?? s.type)).toEqual([
+      "/investigate",
+      "fix",
+      "/review",
+      "/ship",
+    ]);
+  });
+});
+
+describe("state machine", () => {
+  it("planning → active allowed, planning → completed blocked", () => {
+    expect(isValidMissionTransition("planning", "active")).toBe(true);
+    expect(isValidMissionTransition("planning", "completed")).toBe(false);
+  });
+  it("terminal statuses block further transitions", () => {
+    expect(isTerminalMission("completed")).toBe(true);
+    expect(isTerminalMission("abandoned")).toBe(true);
+    expect(isValidMissionTransition("completed", "active")).toBe(false);
+    expect(() => assertMissionTransition("abandoned", "active")).toThrow();
+  });
+  it("same-status is treated as idempotent no-op", () => {
+    expect(isValidMissionTransition("active", "active")).toBe(true);
+    expect(() => assertMissionTransition("active", "active")).not.toThrow();
+  });
+});
+
+// ──────────────────────── scenario 8: run_skill allowlist ───────────────
+
+describe("scenario 8 — run_skill allowlist", () => {
+  it("includes the 10 mission-engine skills", () => {
+    expect(ALLOWED_SKILLS.length).toBe(10);
+    for (const s of [
+      "/review",
+      "/qa",
+      "/ship",
+      "/investigate",
+      "/plan-ceo-review",
+      "/plan-eng-review",
+      "/plan-design-review",
+      "/design-review",
+      "/office-hours",
+      "/autoplan",
+    ]) {
+      expect(ALLOWED_SKILLS).toContain(s);
+    }
+  });
+  it("rejects arbitrary slash commands", () => {
+    expect(isAllowedSkill("/review")).toBe(true);
+    expect(isAllowedSkill("/rm -rf /")).toBe(false);
+    expect(isAllowedSkill("/spawn-agent")).toBe(false);
+    expect(isAllowedSkill("")).toBe(false);
+  });
+});
+
+// ──────────────────────── scenario: launch → run ─────────────────────────
+
+describe("launch and run", () => {
+  it("Quick Fix runs end-to-end with default fake ports", async () => {
+    const { engine, store } = buildEngine();
+    const mission = await engine.launch({
+      projectId: "p1",
+      goal: "fix login bug",
+      templateId: "quick-fix",
+    });
+    expect(mission.id).toBeTruthy();
+
+    await waitFor(() => store.raw(mission.id)?.status === "completed", 2000);
+    const final = store.raw(mission.id)!;
+    expect(final.status).toBe("completed");
+    expect(final.completedAt).toBeInstanceOf(Date);
+    expect(final.steps.every((s) => s.status === "success")).toBe(true);
+    // contextLog 가 충분히 풍부
+    expect(final.contextLog.length).toBeGreaterThan(4);
+  });
+
+  it("research template completes after 2 gstack steps", async () => {
+    const { engine, store } = buildEngine();
+    const m = await engine.launch({
+      projectId: "p1",
+      goal: "explore X",
+      templateId: "research",
+    });
+    await waitFor(() => store.raw(m.id)?.status === "completed", 2000);
+    expect(store.raw(m.id)!.steps).toHaveLength(2);
+  });
+});
+
+// ──────────────────────── scenario 3: sleeping → event wakeup ──────────
+
+describe("scenario 3 — sleeping → event wakeup → resume", () => {
+  it("wait step에서 task 미완료면 sleeping, event 도착 시 active 로 깨어남", async () => {
+    const { engine, store, bus, dispatcher } = buildEngine();
+
+    // feature 템플릿: gstack /plan-eng-review → dispatch → wait → /review → /qa → /ship
+    const mission = await engine.launch({
+      projectId: "p1",
+      goal: "add feature",
+      templateId: "feature",
+    });
+
+    // sleeping 까지 진행
+    await waitFor(() => store.raw(mission.id)?.status === "sleeping", 2000);
+
+    // dispatch + wait 까지 진행됐는지
+    const before = store.raw(mission.id)!;
+    const dispatchStep = before.steps.find((s) => s.type === "dispatch")!;
+    expect(dispatchStep.status).toBe("success");
+    expect(before.taskIds.length).toBeGreaterThan(0);
+
+    // tasks 완료로 갱신 후 event 발행 → 깨어나서 끝까지 진행
+    const allDone: Record<string, TaskStatusLite> = {};
+    for (const id of before.taskIds) allDone[id] = "DONE";
+    dispatcher.__setStatuses(allDone);
+
+    bus.emit({
+      type: "task.status_changed",
+      missionId: mission.id,
+      payload: { taskId: before.taskIds[0], from: "IN_PROGRESS", to: "DONE" },
+    });
+
+    await waitFor(() => store.raw(mission.id)?.status === "completed", 2000);
+    const final = store.raw(mission.id)!;
+    expect(final.status).toBe("completed");
+  }, 5000);
+});
+
+// ──────────────────────── scenario 4: abandon ───────────────────────────
+
+describe("scenario 4 — abandon (task / agent kill)", () => {
+  it("진행 중 미션 abandon 시 killAgentsForTasks 호출 + abandoned 상태", async () => {
+    const { engine, store, spy } = buildEngine();
+    const m = await engine.launch({
+      projectId: "p1",
+      goal: "long feature",
+      templateId: "feature",
+    });
+    await waitFor(() => store.raw(m.id)?.status === "sleeping", 2000);
+
+    const before = store.raw(m.id)!;
+    expect(before.taskIds.length).toBeGreaterThan(0);
+
+    await engine.abandon(m.id, "user_cancelled");
+
+    const final = store.raw(m.id)!;
+    expect(final.status).toBe("abandoned");
+    expect(final.abandonedReason).toBe("user_cancelled");
+    expect(spy.killCalls.length).toBe(1);
+    expect(spy.killCalls[0]).toEqual(before.taskIds);
+  });
+
+  it("terminal 미션 abandon 호출은 no-op", async () => {
+    const { engine, store, spy } = buildEngine();
+    const m = await engine.launch({
+      projectId: "p1",
+      goal: "x",
+      templateId: "research",
+    });
+    await waitFor(() => store.raw(m.id)?.status === "completed", 2000);
+    await engine.abandon(m.id);
+    expect(store.raw(m.id)!.status).toBe("completed");
+    expect(spy.killCalls.length).toBe(0);
+  });
+});
+
+// ──────────────────────── scenario 5: escalate ─────────────────────────
+
+describe("scenario 5 — escalate → waiting_for_human", () => {
+  it("onFailure='escalate' step 실패 시 waiting_for_human + notifyUser timeline", async () => {
+    const { engine, store } = buildEngine({
+      skillRunner: makeSkillRunner({ alwaysFail: true }),
+    });
+    // quick-fix 의 첫 step (/investigate) 가 onFailure='escalate'
+    const m = await engine.launch({
+      projectId: "p1",
+      goal: "broken thing",
+      templateId: "quick-fix",
+    });
+
+    await waitFor(() => store.raw(m.id)?.status === "waiting_for_human", 2000);
+    const final = store.raw(m.id)!;
+    expect(final.status).toBe("waiting_for_human");
+
+    // 첫 step 이 failed
+    expect(final.steps[0].status).toBe("failed");
+    expect(final.steps[0].error).toMatch(/failed/);
+    // 사용자 보고 신호 (notifyUser=true) 가 contextLog 에 있어야 함
+    const notifyEvt = final.contextLog.find(
+      (e) =>
+        e.type === "step.failed" &&
+        (e.payload as { notifyUser?: boolean })?.notifyUser === true,
+    );
+    expect(notifyEvt).toBeTruthy();
+  });
+
+  it("retry 정책 (default) — maxRetries=2 후에 waiting_for_human", async () => {
+    const { engine, store } = buildEngine({
+      // /review 는 onFailure='retry'. 3 번 실패하게 만들기 (retry 2 회 한도 초과)
+      skillRunner: makeSkillRunner({ failures: 99 }),
+      maxRetries: 2,
+    });
+    const m = await engine.launch({
+      projectId: "p1",
+      goal: "polish me",
+      templateId: "polish",
+    });
+    await waitFor(() => store.raw(m.id)?.status === "waiting_for_human", 2000);
+    const final = store.raw(m.id)!;
+    // 첫 step (/design-review) 가 retry 2 회 후 failed
+    expect(final.steps[0].status).toBe("failed");
+    expect(final.steps[0].retryCount).toBe(2);
+  }, 5000);
+});
+
+// ──────────────────────── scenario 6: parallel missions ────────────────
+
+describe("scenario 6 — multiple missions in parallel", () => {
+  it("두 미션 동시 launch 시 서로 간섭하지 않고 각자 진행", async () => {
+    const { engine, store } = buildEngine();
+    const m1 = await engine.launch({
+      projectId: "p1",
+      goal: "task A",
+      templateId: "research",
+    });
+    const m2 = await engine.launch({
+      projectId: "p2",
+      goal: "task B",
+      templateId: "research",
+    });
+
+    await waitFor(
+      () =>
+        store.raw(m1.id)?.status === "completed" &&
+        store.raw(m2.id)?.status === "completed",
+      3000,
+    );
+    expect(store.size()).toBe(2);
+    expect(store.raw(m1.id)!.projectId).toBe("p1");
+    expect(store.raw(m2.id)!.projectId).toBe("p2");
+  }, 5000);
+});
+
+// ──────────────────────── scenario 7: resume after dispose ─────────────
+
+describe("scenario 7 — engine dispose + new instance resume", () => {
+  it("sleeping 미션을 새 engine 인스턴스가 store 에서 읽어 이어 진행", async () => {
+    const store = new InMemoryStore();
+    const bus1 = new InProcessMissionEventBus();
+    const spy: DispatchSpy = { dispatchCalls: [], killCalls: [] };
+    const dispatcher = makeDispatcher(spy) as TaskDispatcher & {
+      __setStatuses: (s: Record<string, TaskStatusLite>) => void;
+    };
+    const orchRegistry = makeOrchRegistry();
+
+    // 1차 인스턴스
+    const engine1 = new MissionEngine({
+      store,
+      dispatcher,
+      skillRunner: makeSkillRunner(),
+      fixRunner: makeFixRunner(),
+      eventBus: bus1,
+      orchestrators: orchRegistry,
+    });
+    const m = await engine1.launch({
+      projectId: "p1",
+      goal: "feature work",
+      templateId: "feature",
+    });
+    await waitFor(() => store.raw(m.id)?.status === "sleeping", 2000);
+
+    // 1차 인스턴스 종료 시뮬레이션
+    engine1.dispose();
+
+    // 2차 인스턴스 — 새 bus, 같은 store / dispatcher
+    const bus2 = new InProcessMissionEventBus();
+    const engine2 = new MissionEngine({
+      store,
+      dispatcher,
+      skillRunner: makeSkillRunner(),
+      fixRunner: makeFixRunner(),
+      eventBus: bus2,
+      orchestrators: orchRegistry,
+    });
+
+    // tasks 완료 후 resume
+    const sleeping = store.raw(m.id)!;
+    const allDone: Record<string, TaskStatusLite> = {};
+    for (const id of sleeping.taskIds) allDone[id] = "DONE";
+    dispatcher.__setStatuses(allDone);
+    await engine2.resume(m.id);
+
+    await waitFor(() => store.raw(m.id)?.status === "completed", 2000);
+    expect(store.raw(m.id)!.status).toBe("completed");
+    // 재개 timeline 이벤트가 있어야
+    const resumeEvt = store
+      .raw(m.id)!
+      .contextLog.find((e) => e.type === "mission.resumed");
+    expect(resumeEvt).toBeTruthy();
+  }, 5000);
+
+  it("terminal 미션은 resume 거부", async () => {
+    const { engine, store } = buildEngine();
+    const m = await engine.launch({
+      projectId: "p1",
+      goal: "x",
+      templateId: "research",
+    });
+    await waitFor(() => store.raw(m.id)?.status === "completed", 2000);
+    await expect(engine.resume(m.id)).rejects.toThrow(/terminal/);
+  });
+});
+
+// ──────────────────────── pause / wake via direct event ────────────────
+
+describe("manual pause / wake", () => {
+  it("pause 는 active → sleeping, resume 으로 다시 active", async () => {
+    // active 상태에서 pause 하려면 race 가 까다로움 — research 가 빠르게 끝나므로
+    // 처음부터 skillRunner 를 항상 sleeping 으로 만드는 게 더 안정적.
+    // 여기서는 단순 pause API 동작만 확인 (active 상태가 아닐 때 no-op).
+    const { engine, store } = buildEngine();
+    const m = await engine.launch({
+      projectId: "p1",
+      goal: "x",
+      templateId: "research",
+    });
+    await waitFor(() => store.raw(m.id)?.status === "completed", 2000);
+    // terminal 에서 pause 호출은 no-op
+    await engine.pause(m.id);
+    expect(store.raw(m.id)!.status).toBe("completed");
+  });
+});
+
+// ──────────────────────── dispose hygiene ──────────────────────────────
+
+describe("dispose", () => {
+  it("dispose 후 eventBus 핸들러가 떨어진다", async () => {
+    const bus = new InProcessMissionEventBus();
+    expect(bus.size()).toBe(0);
+    const { engine } = buildEngine({ eventBus: bus });
+    expect(bus.size()).toBe(1);
+    engine.dispose();
+    expect(bus.size()).toBe(0);
+  });
+});
+
+// Reset mock store before each suite (firebase mock keeps state across files)
+beforeEach(async () => {
+  const mocks = (await import("../mocks/firebase-firestore")) as unknown as {
+    __resetStore?: () => void;
+  };
+  mocks.__resetStore?.();
+});

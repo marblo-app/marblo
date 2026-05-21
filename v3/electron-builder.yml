@@ -9,6 +9,23 @@ files:
   - "skills/**/*"
   - "package.json"
 
+# Extra resources are copied into Resources/ next to the asar (NOT into the asar).
+# The bundle-installer reads these at runtime via process.resourcesPath to seed
+# ~/.claude/{commands,skills} and register the Marblo MCP entry script.
+extraResources:
+  - from: "../.claude/commands"
+    to: "bundled-harness/commands"
+    filter:
+      - "tf-*.md"
+  - from: "../.claude/skills"
+    to: "bundled-harness/skills"
+    filter:
+      - "tf-*/**/*"
+  - from: "dist-mcp"
+    to: "dist-mcp"
+    filter:
+      - "**/*"
+
 afterSign: scripts/notarize.js
 
 mac:
