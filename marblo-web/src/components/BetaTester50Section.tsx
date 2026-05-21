@@ -172,12 +172,15 @@ export default function BetaTester50Section() {
               </p>
               <div className="flex flex-wrap gap-2">
                 <span className="inline-flex items-center bg-zinc-900/80 border border-zinc-700 text-zinc-200 text-sm px-3 py-1.5 rounded-lg">
-                  {t("ob_review_or_interview")}
+                  {t("ob_review_required")}
                 </span>
-                <span className="inline-flex items-center bg-zinc-900/80 border border-zinc-700 text-zinc-200 text-sm px-3 py-1.5 rounded-lg">
-                  {t("ob_byok")}
+                <span className="inline-flex items-center bg-amber-500/10 border border-amber-500/30 text-amber-100 text-sm px-3 py-1.5 rounded-lg">
+                  {t("ob_interview_optional")}
                 </span>
               </div>
+              <p className="mt-3 text-xs text-zinc-500 leading-relaxed">
+                {t("byok_note")}
+              </p>
               <Link
                 href={`/${locale}/foundation50`}
                 className="inline-flex items-center gap-1 mt-4 text-sm text-indigo-300 hover:text-indigo-200 transition"
