@@ -1,7 +1,11 @@
-import { useEffect, useRef } from 'react';
-import { useProjectStore } from '../stores/projectStore';
-import { useEditorStore } from '../stores/editorStore';
-import { useOrchestratorStore } from '../stores/orchestratorStore';
+import { useEffect, useRef } from "react";
+import { useProjectStore } from "../stores/projectStore";
+import { useEditorStore } from "../stores/editorStore";
+import { useOrchestratorStore } from "../stores/orchestratorStore";
+import {
+  cleanupLegacyOrchestratorDocs,
+  upsertOrchestratorAgentDoc,
+} from "../services/orchestratorAgentDoc";
 
 /**
  * - Stops the orchestrator when project/folder changes or unmounts.
@@ -41,24 +45,43 @@ export function useOrchestratorAutoLaunch() {
     if (autoConnectRef.current || !currentProject?.id || !rootPath) return;
     autoConnectRef.current = true;
 
+    const projectId = currentProject.id;
+
     const tryAutoConnect = async () => {
+      // One-time legacy cleanup: drop the per-launch orchestrator-<timestamp>
+      // docs that accumulated before the stable-ID migration. Best-effort —
+      // a failure here must not block auto-reconnect.
+      cleanupLegacyOrchestratorDocs(projectId).catch(() => undefined);
+
       try {
-        const list = await window.electronAPI.orchestratorSession.listSessions(rootPath);
-        const orchSession = list.find((s: { label?: string }) => s.label === 'Orchestrator');
+        const list = await window.electronAPI.orchestratorSession.listSessions(
+          rootPath
+        );
+        const orchSession = list.find(
+          (s: { label?: string }) => s.label === "Orchestrator"
+        );
         if (!orchSession) return;
 
-        setStatus('starting');
+        setStatus("starting");
         const result = await window.electronAPI.orchestratorSession.launch(
-          currentProject.id, rootPath, orchSession.id,
+          projectId,
+          rootPath,
+          orchSession.id
         );
         if (result) {
           setSession(result.sessionId, result.ptySessionId);
-          setStatus('running');
-          console.log('[Orchestrator] Auto-reconnected:', orchSession.id);
+          setStatus("running");
+          // Mirror the manual-Start path: upsert the canonical orchestrator
+          // agent doc so the Activity feed's agentId filter accepts events
+          // emitted by this auto-reconnected session.
+          upsertOrchestratorAgentDoc(projectId, "working").catch(
+            () => undefined
+          );
+          console.log("[Orchestrator] Auto-reconnected:", orchSession.id);
         }
       } catch {
         // No previous session or launch failed — user starts manually
-        setStatus('stopped');
+        setStatus("stopped");
       }
     };
 

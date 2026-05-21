@@ -31,6 +31,11 @@ export default function AgentDashboard({
   onDelete,
 }: AgentDashboardProps) {
   const { t } = useTranslation();
+  // Orchestrator is rendered in its own bottom panel — hide it from the
+  // Agents tab card grid / summary / cleanup. ActivityFeed still receives
+  // the full list so its `agentId in agents` filter passes orchestrator
+  // events.
+  const visibleAgents = agents.filter((a) => a.role !== "orchestrator");
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
@@ -50,11 +55,13 @@ export default function AgentDashboard({
           {t("agents.dashboard.title")}
         </h2>
         <div className="flex items-center gap-2">
-          {agents.filter((a) => a.status !== "working").length > 0 && (
+          {visibleAgents.filter((a) => a.status !== "working").length > 0 && (
             <button
               className="flex items-center gap-1.5 rounded border border-red-600/30 bg-red-600/10 px-3 py-1.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/20"
               onClick={() => {
-                const inactive = agents.filter((a) => a.status !== "working");
+                const inactive = visibleAgents.filter(
+                  (a) => a.status !== "working"
+                );
                 if (
                   confirm(
                     t("agents.dashboard.cleanupConfirm", {
@@ -67,7 +74,7 @@ export default function AgentDashboard({
               }}
             >
               {t("agents.dashboard.cleanup")} (
-              {agents.filter((a) => a.status !== "working").length})
+              {visibleAgents.filter((a) => a.status !== "working").length})
             </button>
           )}
           <button
@@ -90,14 +97,14 @@ export default function AgentDashboard({
       </div>
 
       {/* Team Summary */}
-      <TeamSummary agents={agents} tasks={tasks} />
+      <TeamSummary agents={visibleAgents} tasks={tasks} />
 
       {/* Agent Cards Grid */}
-      {agents.length === 0 ? (
+      {visibleAgents.length === 0 ? (
         <AgentSetupGuide onAddAgent={onAddAgent} />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
-          {agents.map((agent) => (
+          {visibleAgents.map((agent) => (
             <AgentStatusCard
               key={agent.id}
               agent={agent}
@@ -113,7 +120,8 @@ export default function AgentDashboard({
       {/* Cost Tracking */}
       <CostWidget />
 
-      {/* Activity & Audit Tabs */}
+      {/* Activity & Audit Tabs — ActivityFeed receives the full list so the
+          orchestrator agent doc keeps its events visible. */}
       <ActivityAuditTabs projectId={projectId} agents={agents} />
     </div>
   );

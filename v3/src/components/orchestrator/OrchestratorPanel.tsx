@@ -2,6 +2,7 @@ import { useRef, useCallback, useState, useEffect, memo } from "react";
 import { useOrchestratorStore } from "../../stores/orchestratorStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
+import { upsertOrchestratorAgentDoc } from "../../services/orchestratorAgentDoc";
 import OrchestratorTerminal from "./OrchestratorTerminal";
 
 const DEFAULT_HEIGHT = 300;
@@ -22,7 +23,6 @@ export default memo(function OrchestratorPanel() {
   const rootPath = useEditorStore((s) => s.rootPath);
   // Granular selectors — destructuring useOrchestratorStore() would re-render on every action;
   // per-slice subscriptions only re-render when that slice actually changes.
-  const sessionId = useOrchestratorStore((s) => s.sessionId);
   const ptySessionId = useOrchestratorStore((s) => s.ptySessionId);
   const status = useOrchestratorStore((s) => s.status);
   const isCollapsed = useOrchestratorStore((s) => s.isCollapsed);
@@ -112,33 +112,13 @@ export default memo(function OrchestratorPanel() {
         setSession(result.sessionId, result.ptySessionId);
         setStatus("running");
 
-        // Register the orchestrator as a virtual agent doc in Firestore so
-        // its activities (logged via add_activity with MARBLO_AGENT_ID =
-        // orchestrator-<ts>) actually appear in the Activity feed. Without
-        // this, the feed's `agentId in [agents.map(a=>a.id)]` filter
-        // silently drops everything the orchestrator emits because no
-        // matching agents/* doc exists.
+        // Upsert the single canonical orchestrator agent doc (stable ID
+        // = orchestrator-<projectId>) so the Activity feed's `agentId in
+        // [agents.map(a=>a.id)]` filter passes orchestrator events. Same
+        // helper is called from the auto-reconnect hook so both paths
+        // converge on one row.
         try {
-          const [{ doc, setDoc, serverTimestamp }, { db }] = await Promise.all([
-            import("firebase/firestore"),
-            import("../../lib/firebase"),
-          ]);
-          await setDoc(
-            doc(db, "agents", result.sessionId),
-            {
-              projectId,
-              ownerId: "system",
-              name: "Orchestrator",
-              model: "claude",
-              role: "orchestrator",
-              status: "working",
-              currentTaskId: null,
-              command: "claude",
-              skillFile: "",
-              createdAt: serverTimestamp(),
-            },
-            { merge: true }
-          );
+          await upsertOrchestratorAgentDoc(projectId, "working");
         } catch (err) {
           console.warn("[Orchestrator] virtual agent doc upsert failed:", err);
         }
@@ -191,23 +171,13 @@ export default memo(function OrchestratorPanel() {
 
   const handleStop = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    const stoppingId = sessionId;
+    const pid = currentProject?.id;
     try {
       await window.electronAPI.orchestratorSession.stop();
       clear();
-      // Mark the virtual orchestrator agent doc as stopped so the
-      // Agents tab reflects the real state. Best-effort.
-      if (stoppingId) {
+      if (pid) {
         try {
-          const [{ doc, setDoc, serverTimestamp }, { db }] = await Promise.all([
-            import("firebase/firestore"),
-            import("../../lib/firebase"),
-          ]);
-          await setDoc(
-            doc(db, "agents", stoppingId),
-            { status: "stopped", costUpdatedAt: serverTimestamp() },
-            { merge: true }
-          );
+          await upsertOrchestratorAgentDoc(pid, "stopped");
         } catch {
           /* best-effort */
         }
