@@ -23,9 +23,16 @@ export interface InstallStrategy {
    * `npm-global` — `npm install -g <package>` for CLI binaries (e.g.
    *                Codex, Gemini). Installs into the user's npm global
    *                prefix; requires Node + npm on PATH.
+   * `shell`      — Run a curl-pipe-bash installer script (e.g. Antigravity's
+   *                `curl -fsSL https://antigravity.google/cli/install.sh | bash`).
+   *                URL in `source` must be HTTPS and from a whitelisted host
+   *                (enforced by harness-manager). Same trust level as
+   *                `npm-global` — runs upstream code as the user. Use only
+   *                when upstream doesn't ship an npm package.
    */
-  kind: "git" | "mcp" | "bundled" | "manual" | "npm-global";
-  /** For kind=git: repo URL; for kind=mcp: command to run; for npm-global: package name */
+  kind: "git" | "mcp" | "bundled" | "manual" | "npm-global" | "shell";
+  /** For kind=git: repo URL; for kind=mcp: command to run; for npm-global:
+   *  package name; for shell: HTTPS URL of installer script. */
   source?: string;
   /** For kind=git: subdirectory under ~/.claude/skills/ */
   dest?: string;
@@ -148,13 +155,14 @@ export const CATALOG: HarnessPackage[] = [
     id: "cli-antigravity",
     name: "Google Antigravity (agy) CLI",
     description:
-      "Antigravity 2.0 (Google I/O 2026 발표) 의 agy CLI. Marblo 의 4번째 1st-class 에이전트 모델. npm 이 아니라 curl 인스톨러 사용. 첫 실행 시 OAuth 브라우저 인증.",
+      "Antigravity 2.0 (Google I/O 2026 발표) 의 agy CLI. Marblo 의 4번째 1st-class 에이전트 모델. curl shell 인스톨러로 자동 설치. 첫 실행 시 OAuth 브라우저 인증.",
     type: "cli",
     category: "required",
     install: {
-      kind: "manual",
-      instructions:
-        "터미널에서 다음 명령을 실행하세요:\n\n  curl -fsSL https://antigravity.google/cli/install.sh | bash\n\n바이너리가 `~/.local/bin/agy` 에 설치되고 shell rc 의 PATH 가 업데이트됩니다. 설치 후 `agy` 한 번 실행해서 OAuth 브라우저 인증을 완료하세요. 그 후 Marblo 재시작. 참고: 현재 v1 통합은 standalone 실행만 — Marblo MCP 자동 연결은 Antigravity 의 MCP 설정 경로가 공식 문서화되면 추가 예정.",
+      kind: "shell",
+      source: "https://antigravity.google/cli/install.sh",
+      postInstall:
+        "설치 후 터미널에서 `agy` 한 번 실행해서 OAuth 브라우저 인증을 완료하세요. 바이너리는 `~/.local/bin/agy` 에 설치되고 shell rc 의 PATH 가 업데이트됩니다. 인증 후 Marblo 재시작. 참고: 현재 v1 통합은 standalone 실행만 — Marblo MCP 자동 연결은 Antigravity 의 MCP 설정 경로가 공식 문서화되면 추가 예정.",
     },
     detect: { binary: "agy" },
     url: "https://antigravity.google/docs",
