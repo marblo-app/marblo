@@ -132,17 +132,32 @@ export const CATALOG: HarnessPackage[] = [
     id: "cli-gemini",
     name: "Google Gemini CLI",
     description:
-      "Gemini 에이전트 실행에 필요한 CLI. `npm install -g @google/gemini-cli`. 설치 후 `gemini` 첫 실행 시 OAuth 인증.",
+      "Gemini 에이전트 실행에 필요한 CLI. `npm install -g @google/gemini-cli`. 설치 후 `gemini` 첫 실행 시 OAuth 인증. Workspace 계정에서 'Cloud Code Private API has not been used' 에러가 뜨면 AI Studio API Key 발급 후 `GEMINI_API_KEY` 환경변수로 우회 권장.",
     type: "cli",
     category: "required",
     install: {
       kind: "npm-global",
       source: "@google/gemini-cli",
       postInstall:
-        "설치 후 터미널에서 `gemini` 실행하면 첫 사용 시 Google OAuth 인증 페이지가 열립니다.",
+        "설치 후 터미널에서 `gemini` 실행하면 첫 사용 시 Google OAuth 인증 페이지가 열립니다. 인증 실패 시 https://aistudio.google.com/apikey 에서 API Key 발급 후 `export GEMINI_API_KEY=...` 권장.",
     },
     detect: { binary: "gemini" },
     url: "https://github.com/google-gemini/gemini-cli",
+  },
+  {
+    id: "cli-antigravity",
+    name: "Google Antigravity (agy) CLI",
+    description:
+      "Antigravity 2.0 (Google I/O 2026 발표) 의 agy CLI. Marblo 의 4번째 1st-class 에이전트 모델. npm 이 아니라 curl 인스톨러 사용. 첫 실행 시 OAuth 브라우저 인증.",
+    type: "cli",
+    category: "required",
+    install: {
+      kind: "manual",
+      instructions:
+        "터미널에서 다음 명령을 실행하세요:\n\n  curl -fsSL https://antigravity.google/cli/install.sh | bash\n\n바이너리가 `~/.local/bin/agy` 에 설치되고 shell rc 의 PATH 가 업데이트됩니다. 설치 후 `agy` 한 번 실행해서 OAuth 브라우저 인증을 완료하세요. 그 후 Marblo 재시작. 참고: 현재 v1 통합은 standalone 실행만 — Marblo MCP 자동 연결은 Antigravity 의 MCP 설정 경로가 공식 문서화되면 추가 예정.",
+    },
+    detect: { binary: "agy" },
+    url: "https://antigravity.google/docs",
   },
 
   // ── Recommended skill packs ────────────────────────────────────

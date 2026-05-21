@@ -4,7 +4,7 @@ import { PtyManager } from "./pty-manager";
 import { AgentConfigGenerator, LaunchConfig } from "./agent-config";
 import { mainTelemetry } from "./telemetry";
 
-export type ModelType = "claude" | "gemini" | "gpt" | "custom";
+export type ModelType = "claude" | "gemini" | "gpt" | "antigravity" | "custom";
 export type AgentStatus = "idle" | "working" | "error" | "stopped";
 
 // --- Auto-restart constants ---

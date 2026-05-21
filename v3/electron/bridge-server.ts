@@ -23,7 +23,7 @@ import {
 
 export interface SpawnAgentRequest {
   name: string;
-  model: "claude" | "gemini" | "gpt" | "custom";
+  model: "claude" | "gemini" | "gpt" | "antigravity" | "custom";
   role: string;
   command?: string;
   cwd?: string;
@@ -1013,8 +1013,8 @@ export class BridgeServer {
       let agent = params.agentName
         ? this.agentManager.getAgentByName(params.agentName)
         : params.agentId
-          ? this.agentManager.getAgent(params.agentId)
-          : null;
+        ? this.agentManager.getAgent(params.agentId)
+        : null;
 
       if (!agent) {
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -1105,8 +1105,8 @@ export class BridgeServer {
               params.taskId ? ` taskId=${params.taskId}` : ""
             }`
           : params.taskId
-            ? ` taskId=${params.taskId}`
-            : "";
+          ? ` taskId=${params.taskId}`
+          : "";
         const formatted = `[${params.tag}]${taskMeta}\n${params.message}`;
 
         // Try to find the target agent

@@ -269,7 +269,7 @@ export function registerTools(server: McpServer): void {
       const snap = await getDocs(q);
 
       const tasks = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }) as TaskDoc)
+        .map((d) => ({ id: d.id, ...d.data() } as TaskDoc))
         .filter((t) => t.dependsOnCompleted)
         .sort((a, b) => b.priority - a.priority);
 
@@ -777,7 +777,9 @@ export function registerTools(server: McpServer): void {
           const completed = dep.status === "DONE";
           if (!completed) allCompleted = false;
           details.push(
-            `- [${completed ? "done" : "pending"}] ${dep.title} (${dep.status})`,
+            `- [${completed ? "done" : "pending"}] ${dep.title} (${
+              dep.status
+            })`,
           );
         }
       }
@@ -910,7 +912,7 @@ export function registerTools(server: McpServer): void {
     {
       name: z.string().describe('Agent display name (e.g., "backend-auth")'),
       model: z
-        .enum(["claude", "gemini", "gpt", "custom"])
+        .enum(["claude", "gemini", "gpt", "antigravity", "custom"])
         .describe("AI model to use"),
       role: z.string().describe("Agent role (backend/frontend/test/devops)"),
       command: z
@@ -1234,7 +1236,7 @@ export function registerTools(server: McpServer): void {
       model: z
         .string()
         .optional()
-        .describe("Preferred model hint (claude/gemini/gpt)"),
+        .describe("Preferred model hint (claude/gemini/gpt/antigravity)"),
       name: z.string().optional().describe("Agent name hint"),
       cwd: z.string().optional().describe("Working directory"),
       tags: z
