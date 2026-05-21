@@ -242,5 +242,24 @@ service cloud.firestore {
       allow create: if false; // Only Cloud Functions can create
       allow update, delete: if false;
     }
+
+    // ===== Beta Tester 50 Waitlist (marblo-web public signup) =====
+    // Unauthenticated visitors can sign up via marblo-web homepage form.
+    // - create: strict shape + email regex; no other fields permitted
+    // - list:   allowed so the page can show the live seats-left counter via
+    //           getCountFromServer (aggregation query only)
+    // - get:    blocked so individual emails cannot be enumerated
+    // - update/delete: operators only via console (Admin SDK / IAM bypasses rules)
+    match /betatester50_waitlist/{doc} {
+      allow create: if request.resource.data.keys().hasOnly(['email', 'locale', 'source', 'createdAt'])
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+        && request.resource.data.locale in ['ko', 'en', 'ja']
+        && request.resource.data.source in ['home', 'foundation50_page'];
+      allow list: if true;
+      allow get: if false;
+      allow update, delete: if false;
+    }
   }
 }
