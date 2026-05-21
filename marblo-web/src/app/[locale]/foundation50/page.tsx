@@ -10,11 +10,10 @@ import {
   FileText,
   MessageCircle,
   Key,
-  ArrowRight,
   Calendar,
 } from "lucide-react";
-import { GOOGLE_FORM_URL } from "@/lib/foundation50";
 import BetaTester50PriceBlock from "@/components/BetaTester50PriceBlock";
+import BetaTester50SignupForm from "@/components/BetaTester50SignupForm";
 
 export default function Foundation50Page() {
   const t = useTranslations("foundation50");
@@ -80,16 +79,8 @@ export default function Foundation50Page() {
             <BetaTester50PriceBlock align="center" />
           </div>
 
-          <div className="mt-8">
-            <a
-              href={GOOGLE_FORM_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-7 py-3.5 rounded-lg font-semibold transition shadow-lg shadow-indigo-500/20"
-            >
-              {t("cta_button")}
-              <ArrowRight className="w-4 h-4" />
-            </a>
+          <div className="mt-8 max-w-xl mx-auto text-left">
+            <BetaTester50SignupForm source="foundation50_page" />
           </div>
         </div>
       </section>
@@ -161,15 +152,9 @@ export default function Foundation50Page() {
           <p className="text-zinc-300 mb-7 whitespace-pre-line leading-relaxed">
             {t("cta_body")}
           </p>
-          <a
-            href={GOOGLE_FORM_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-lg font-semibold text-lg transition shadow-xl shadow-indigo-500/30"
-          >
-            {t("cta_button")}
-            <ArrowRight className="w-5 h-5" />
-          </a>
+          <div className="max-w-xl mx-auto text-left">
+            <BetaTester50SignupForm source="foundation50_page" />
+          </div>
           <p className="text-xs text-zinc-500 mt-5 leading-relaxed">
             {t("cta_note")}
           </p>

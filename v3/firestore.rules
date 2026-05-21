@@ -257,12 +257,13 @@ service cloud.firestore {
     // - get:    blocked so individual emails cannot be enumerated
     // - update/delete: operators only via console (Admin SDK / IAM bypasses rules)
     match /betatester50_waitlist/{doc} {
-      allow create: if request.resource.data.keys().hasOnly(['email', 'locale', 'source', 'createdAt'])
+      allow create: if request.resource.data.keys().hasOnly(['email', 'locale', 'source', 'agreed', 'agreedAt', 'createdAt'])
         && request.resource.data.email is string
         && request.resource.data.email.size() <= 254
         && request.resource.data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
         && request.resource.data.locale in ['ko', 'en', 'ja']
-        && request.resource.data.source in ['home', 'foundation50_page'];
+        && request.resource.data.source in ['home', 'promo_bar', 'foundation50_page']
+        && request.resource.data.agreed == true;
       allow list: if true;
       allow get: if false;
       allow update, delete: if false;

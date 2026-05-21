@@ -1,19 +1,12 @@
 "use client";
 
-import { useState, useSyncExternalStore, FormEvent } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
-import { Sparkles, X, ArrowRight } from "lucide-react";
-import {
-  buildPrefillUrl,
-  isPromoBarOpen,
-  PROMO_BAR_DISMISS_KEY,
-} from "@/lib/foundation50";
+import { Sparkles, X } from "lucide-react";
+import { isPromoBarOpen, PROMO_BAR_DISMISS_KEY } from "@/lib/foundation50";
+import BetaTester50SignupForm from "./BetaTester50SignupForm";
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// useSyncExternalStore lets us read localStorage during render without
-// SSR/client hydration mismatch and without a setState-in-effect anti-pattern.
 function subscribeDismissed(callback: () => void) {
   if (typeof window === "undefined") return () => {};
   window.addEventListener("storage", callback);
@@ -30,9 +23,6 @@ function getDismissedSnapshot(): boolean {
 }
 
 function getDismissedServerSnapshot(): boolean {
-  // Hide on the server so SSR markup matches the most likely first-frame
-  // (returning users who already dismissed). The component re-renders with
-  // the real value once the client mounts.
   return true;
 }
 
@@ -48,23 +38,7 @@ export default function PromoBar() {
   const [locallyDismissed, setLocallyDismissed] = useState(false);
   const dismissed = externallyDismissed || locallyDismissed;
 
-  const [email, setEmail] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
   if (!isPromoBarOpen() || dismissed) return null;
-
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!EMAIL_RE.test(email.trim())) {
-      setError(t("email_invalid"));
-      return;
-    }
-    setError(null);
-    const url = buildPrefillUrl(email);
-    if (typeof window !== "undefined") {
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
-  };
 
   const handleDismiss = () => {
     setLocallyDismissed(true);
@@ -84,31 +58,12 @@ export default function PromoBar() {
             <span className="font-medium">{t("message")}</span>
           </div>
 
-          <form
-            onSubmit={handleSubmit}
-            className="flex items-center gap-2 w-full sm:w-auto"
-            noValidate
-          >
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                if (error) setError(null);
-              }}
-              placeholder={t("email_placeholder")}
-              aria-label={t("email_placeholder")}
-              className="bg-zinc-950/60 border border-indigo-400/40 focus:border-indigo-300 focus:outline-none rounded-md px-3 py-1.5 text-sm text-white placeholder-zinc-400 w-full sm:w-56"
+          <div className="w-full sm:w-auto sm:max-w-md">
+            <BetaTester50SignupForm
+              source="promo_bar"
+              layout="inline-compact"
             />
-            <button
-              type="submit"
-              className="inline-flex items-center gap-1 bg-white text-indigo-700 hover:bg-indigo-50 transition px-3 py-1.5 rounded-md text-sm font-semibold shrink-0"
-            >
-              {t("cta")}
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </form>
+          </div>
 
           <Link
             href={`/${locale}/foundation50`}
@@ -126,12 +81,6 @@ export default function PromoBar() {
             <X className="w-4 h-4" />
           </button>
         </div>
-
-        {error && (
-          <p role="alert" className="text-center text-xs text-amber-300 mt-1.5">
-            {error}
-          </p>
-        )}
       </div>
     </div>
   );
