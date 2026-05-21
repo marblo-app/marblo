@@ -14,6 +14,7 @@ import {
   Calendar,
 } from "lucide-react";
 import { GOOGLE_FORM_URL } from "@/lib/foundation50";
+import BetaTester50PriceBlock from "@/components/BetaTester50PriceBlock";
 
 export default function Foundation50Page() {
   const t = useTranslations("foundation50");
@@ -74,6 +75,10 @@ export default function Foundation50Page() {
             {t("subtitle")}
           </p>
           <p className="text-sm text-zinc-500 mt-4">{t("limit_note")}</p>
+
+          <div className="mt-7 flex justify-center">
+            <BetaTester50PriceBlock align="center" />
+          </div>
 
           <div className="mt-8">
             <a

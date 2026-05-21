@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import { Sparkles, ArrowRight, CheckCircle2 } from "lucide-react";
 import { db } from "@/lib/firebase";
+import BetaTester50PriceBlock from "./BetaTester50PriceBlock";
 
 const SEAT_CAP = 50;
 const COLLECTION = "betatester50_waitlist";
@@ -109,6 +110,11 @@ export default function BetaTester50Section() {
             <p className="mt-4 text-lg md:text-xl text-zinc-300 leading-relaxed max-w-2xl">
               {t("subtitle")}
             </p>
+
+            {/* Price block */}
+            <div className="mt-7">
+              <BetaTester50PriceBlock />
+            </div>
 
             {/* Form / success / closed */}
             <div className="mt-8">
