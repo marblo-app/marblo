@@ -662,6 +662,25 @@ export class AgentConfigGenerator {
         };
       }
 
+      case "antigravity": {
+        // Antigravity (agy) CLI — Google I/O 2026 release.
+        // v1 integration: spawn `agy` with no MCP integration. Antigravity's
+        // MCP discovery path is not yet publicly documented as of the v2.0
+        // launch (2026-05-19) — the agent runs standalone, useful for general
+        // TUI work but not yet wired to Marblo TaskForce. MCP_CONFIG_PATH is
+        // exposed via env on a best-effort basis in case future versions
+        // adopt the same convention as `custom`.
+        //
+        // Auth: OAuth browser flow on first run (similar to gemini).
+        // Resume: no `--resume`/`--last` flag documented yet — fresh session
+        // every spawn until Antigravity ships session management.
+        return {
+          command: baseCommand || "agy",
+          args: [],
+          env: { ...env, MCP_CONFIG_PATH: mcpConfigPath },
+        };
+      }
+
       case "custom":
         return {
           command: baseCommand,

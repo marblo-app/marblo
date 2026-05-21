@@ -88,6 +88,7 @@
    - 단순 수정/빠른 작업: `tags=["simple-fix", "quick-edit"]` → Codex
    - 대규모 컨텍스트: `tags=["large-context"]` → Gemini
    - GitHub 연동: `tags=["github"]` → Codex
+   - 에이전트 중심 / 다단계 자율: `tags=["agentic", "multi-agent", "autonomous"]` → Antigravity (agy)
 
    tags가 없으면 모델이 라운드로빈으로 자동 배정됨. 최적 배정을 위해 tags 명시를 권장.
 
@@ -97,6 +98,7 @@
    - 코덱스 / GPT 요청 → `model="gpt"`
    - Gemini 요청 → `model="gemini"`
    - 클로드 요청 → `model="claude"`
+   - Antigravity / agy 요청 → `model="antigravity"` (v1: standalone `agy` 스폰, MCP 자동 연결은 추후 추가)
      `model`이 명시되면 tags 점수 / 라운드로빈 무시하고 해당 모델로 직접 스폰함.
      사용자 의도를 무시하고 다른 모델 쓰지 말 것.
 

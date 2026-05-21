@@ -7,7 +7,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-export type ModelType = "claude" | "gemini" | "gpt" | "custom";
+export type ModelType = "claude" | "gemini" | "gpt" | "antigravity" | "custom";
 export type AgentStatus = "idle" | "working" | "error" | "stopped";
 
 export interface AgentInfo {
@@ -112,6 +112,10 @@ const COST_EFFICIENCY_WEIGHT: Record<ModelType, number> = {
   gemini: 8,
   // Codex/GPT: cheapest mainstream (gpt-4.1-nano ~$0.10, mini ~$0.40)
   gpt: 10,
+  // Antigravity (agy): Gemini 3.5 Flash backed (similar tier to gemini),
+  // free at launch (2026-05-19). Slightly higher cost-efficiency than
+  // gemini due to agentic optimizations + free-tier window.
+  antigravity: 9,
   // Custom: assume mid-tier
   custom: 5,
 };
@@ -224,6 +228,8 @@ function hasSubscriptionPlan(model: ModelType): boolean {
     gpt: "gpt",
     o3: "gpt",
     o4: "gpt",
+    antigravity: "antigravity",
+    agy: "antigravity",
   };
   for (const p of plans) {
     const firstToken = p.modelPrefix.split(/[-_.]/)[0].toLowerCase();
@@ -261,6 +267,17 @@ export const MODEL_TAG_BONUSES: Record<string, Record<string, number>> = {
     test: 15,
     boilerplate: 15,
   },
+  antigravity: {
+    // Antigravity (agy) is purpose-built for multi-step autonomous flows
+    // with sub-agents. Strong on agentic / autonomous tags, secondary on
+    // research/documentation (shared with Gemini, weaker bonus since
+    // Gemini is the established research workhorse).
+    agentic: 30,
+    "multi-agent": 25,
+    autonomous: 25,
+    research: 15,
+    documentation: 15,
+  },
 };
 
 export const MODEL_TAG_PENALTIES: Record<string, Record<string, number>> = {
@@ -278,6 +295,9 @@ export const MODEL_BASE_SCORE: Record<string, number> = {
   claude: 50,
   gemini: 45,
   gpt: 45,
+  // Antigravity: same base as Gemini/GPT — proves itself via tag bonuses
+  // for agentic workloads rather than being shoo-in for everything.
+  antigravity: 45,
   custom: 30,
 };
 
