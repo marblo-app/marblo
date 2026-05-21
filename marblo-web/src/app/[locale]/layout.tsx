@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import PromoBar from "@/components/PromoBar";
 import "../globals.css";
 
 export const metadata: Metadata = {
@@ -65,7 +66,7 @@ export default async function LocaleLayout({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  if (!routing.locales.includes(locale as any)) {
+  if (!(routing.locales as readonly string[]).includes(locale)) {
     notFound();
   }
   const messages = await getMessages();
@@ -74,6 +75,7 @@ export default async function LocaleLayout({
     <html lang={locale} className="dark">
       <body className="bg-zinc-950 text-white min-h-screen flex flex-col">
         <NextIntlClientProvider messages={messages}>
+          <PromoBar />
           <Header />
           <main className="flex-1">{children}</main>
           <Footer />
