@@ -130,7 +130,7 @@ function runCommand(
   cmd: string,
   args: string[],
   cwd?: string,
-  timeoutMs?: number
+  timeoutMs?: number,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -188,7 +188,7 @@ async function installGit(strategy: InstallStrategy): Promise<void> {
  */
 async function runPostInstallExec(
   strategy: InstallStrategy,
-  enrichedPath: string
+  enrichedPath: string,
 ): Promise<void> {
   if (!strategy.postInstallExec || strategy.postInstallExec.length === 0) {
     return;
@@ -207,26 +207,110 @@ async function runPostInstallExec(
         child.stdout.on("data", (d) => (stdout += d.toString()));
         child.stderr.on("data", (d) => (stderr += d.toString()));
         child.on("close", (code) =>
-          resolve({ code: code ?? -1, stdout, stderr })
+          resolve({ code: code ?? -1, stdout, stderr }),
         );
         child.on("error", (err) =>
-          resolve({ code: -1, stdout, stderr: stderr + err.message })
+          resolve({ code: -1, stdout, stderr: stderr + err.message }),
         );
       });
       if (result.code !== 0) {
         console.warn(
           `[harness] postInstallExec ${step.command} ${step.args.join(
-            " "
-          )} exit ${result.code}: ${(result.stderr || result.stdout).trim()}`
+            " ",
+          )} exit ${result.code}: ${(result.stderr || result.stdout).trim()}`,
         );
       }
     } catch (err) {
       console.warn(
         `[harness] postInstallExec ${step.command} threw:`,
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
     }
   }
+}
+
+// Hosts whose curl-pipe-bash installer scripts are trusted to run. Each
+// entry must be the EXACT hostname (no path/scheme). Keep this list small
+// and curated — the user implicitly trusts whatever runs through here.
+const TRUSTED_SHELL_INSTALLER_HOSTS = new Set<string>(["antigravity.google"]);
+
+async function installShell(strategy: InstallStrategy): Promise<void> {
+  if (!strategy.source) {
+    throw new Error("shell install requires installer URL in source");
+  }
+  let url: URL;
+  try {
+    url = new URL(strategy.source);
+  } catch {
+    throw new Error(`Invalid installer URL: ${strategy.source}`);
+  }
+  if (url.protocol !== "https:") {
+    throw new Error(
+      `Shell installer URL must be HTTPS (got ${url.protocol}): ${strategy.source}`,
+    );
+  }
+  if (!TRUSTED_SHELL_INSTALLER_HOSTS.has(url.host)) {
+    throw new Error(
+      `Shell installer host not whitelisted: ${url.host}. ` +
+        `Allowed: ${[...TRUSTED_SHELL_INSTALLER_HOSTS].join(", ")}`,
+    );
+  }
+
+  const enrichedPath = getEnrichedPathForDetection();
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: enrichedPath };
+
+  // Pre-flight: bash + curl on PATH? Both are universal on macOS/Linux
+  // but we still check to give a clean error message rather than a cryptic
+  // ENOENT on spawn.
+  const pathDirs = enrichedPath.split(":").filter(Boolean);
+  const hasBin = (name: string) =>
+    pathDirs.some((dir) => fileExists(path.join(dir, name)));
+  if (!hasBin("bash")) {
+    throw new Error(
+      "bash 를 찾을 수 없습니다. shell 인스톨러를 실행할 수 없습니다.",
+    );
+  }
+  if (!hasBin("curl")) {
+    throw new Error(
+      "curl 을 찾을 수 없습니다. shell 인스톨러를 실행할 수 없습니다.",
+    );
+  }
+
+  // bash -c "curl -fsSL <url> | bash". Single-quoted URL so shell metachars
+  // in the URL (unlikely but defensive) don't expand. Whitelist already
+  // rejected anything not from a known host.
+  const installCmd = `curl -fsSL '${strategy.source}' | bash`;
+  console.log(`[harness] installShell: ${installCmd}`);
+
+  const result = await new Promise<{
+    code: number;
+    stdout: string;
+    stderr: string;
+  }>((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    const child = spawn("bash", ["-c", installCmd], { env });
+    child.stdout.on("data", (d) => (stdout += d.toString()));
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
+    child.on("error", (err) =>
+      resolve({ code: -1, stdout, stderr: stderr + err.message }),
+    );
+  });
+  if (result.code !== 0) {
+    const tail = (result.stderr || result.stdout)
+      .trim()
+      .split("\n")
+      .slice(-10)
+      .join("\n");
+    throw new Error(
+      `Shell installer 실패 (${strategy.source}, exit ${result.code})\n${tail}`,
+    );
+  }
+  // Best-effort post-install hooks (e.g. environment setup). Most shell
+  // installers handle their own post-install, so this is rarely populated
+  // but kept consistent with npm-global for parity.
+  await runPostInstallExec(strategy, enrichedPath);
 }
 
 async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
@@ -249,7 +333,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
   }
   if (!npmPath) {
     throw new Error(
-      "npm을 찾을 수 없습니다. Node.js / npm 설치 후 다시 시도하세요. (https://nodejs.org)"
+      "npm을 찾을 수 없습니다. Node.js / npm 설치 후 다시 시도하세요. (https://nodejs.org)",
     );
   }
   const result = await new Promise<{
@@ -264,7 +348,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
     child.on("error", (err) =>
-      resolve({ code: -1, stdout, stderr: stderr + err.message })
+      resolve({ code: -1, stdout, stderr: stderr + err.message }),
     );
   });
   if (result.code !== 0) {
@@ -274,7 +358,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
       .slice(-5)
       .join("\n");
     throw new Error(
-      `npm install -g ${strategy.source} 실패 (exit ${result.code})\n${tail}`
+      `npm install -g ${strategy.source} 실패 (exit ${result.code})\n${tail}`,
     );
   }
   // npm install 성공 — feature-flag 같은 후속 작업 (best-effort)
@@ -283,7 +367,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
 
 async function installMcp(
   pkg: HarnessPackage,
-  strategy: InstallStrategy
+  strategy: InstallStrategy,
 ): Promise<void> {
   if (!strategy.source) {
     throw new Error("mcp install requires source command");
@@ -297,7 +381,7 @@ async function installMcp(
     command: strategy.source,
     args: (strategy.args ?? []).map(expandEnv),
     env: Object.fromEntries(
-      Object.entries(strategy.env ?? {}).map(([k, v]) => [k, expandEnv(v)])
+      Object.entries(strategy.env ?? {}).map(([k, v]) => [k, expandEnv(v)]),
     ),
   };
   cfg.mcpServers = servers;
@@ -313,7 +397,7 @@ export async function installPackage(id: string): Promise<void> {
       return;
     case "manual":
       throw new Error(
-        "이 패키지는 자동 설치를 지원하지 않습니다. instructions 참고."
+        "이 패키지는 자동 설치를 지원하지 않습니다. instructions 참고.",
       );
     case "git":
       await installGit(pkg.install);
@@ -323,6 +407,9 @@ export async function installPackage(id: string): Promise<void> {
       return;
     case "npm-global":
       await installNpmGlobal(pkg.install);
+      return;
+    case "shell":
+      await installShell(pkg.install);
       return;
   }
 }
@@ -414,7 +501,7 @@ async function getLatestNpmVersion(pkg: string): Promise<string | null> {
     npmPath,
     ["view", pkg, "version"],
     undefined,
-    VERSION_LOOKUP_TIMEOUT_MS
+    VERSION_LOOKUP_TIMEOUT_MS,
   );
   if (r.code !== 0) return null;
   const v = r.stdout.trim();
@@ -458,7 +545,7 @@ export async function getCatalogVersions(): Promise<
           localVersion === latestVersion ? "up-to-date" : "outdated";
       }
       out[pkg.id] = { localVersion, latestVersion, updateState };
-    })
+    }),
   );
   return out;
 }
@@ -503,7 +590,7 @@ export async function checkAndUpdateHarness(): Promise<UpdateOutcome[]> {
         continue;
       }
       console.log(
-        `[harness] Updating ${pkg.install.source}: ${local} → ${latest}`
+        `[harness] Updating ${pkg.install.source}: ${local} → ${latest}`,
       );
       try {
         await installNpmGlobal(pkg.install);
@@ -538,7 +625,7 @@ export async function checkAndUpdateHarness(): Promise<UpdateOutcome[]> {
  * toast notification.
  */
 export function scheduleHarnessUpdates(
-  onResult?: (outcomes: UpdateOutcome[]) => void
+  onResult?: (outcomes: UpdateOutcome[]) => void,
 ): void {
   if (updateSweepTimer) return;
   const run = async () => {
@@ -550,7 +637,7 @@ export function scheduleHarnessUpdates(
         console.log(
           `[harness] Auto-update: ${updated
             .map((u) => `${u.source} ${u.from}→${u.to}`)
-            .join(", ")}`
+            .join(", ")}`,
         );
       }
     } catch (err) {
