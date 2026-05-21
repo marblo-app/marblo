@@ -44,7 +44,10 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
     },
 
     save: async (uid, flags, locale = "ko") => {
-      await saveConsent(uid, flags, locale);
+      // Local state 를 먼저 set — Firestore write 가 실패해도 같은 세션
+      // 동안은 모달이 다시 안 뜨도록 보장 (UX 우선). Write 실패는 catch 후
+      // 그대로 throw — 호출자가 토스트/로그 처리. needsPrompt 가 이미
+      // false 라 다음 mount 에서 모달 재출현 안 함.
       set({
         consent: {
           ...get().consent,
@@ -55,10 +58,11 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
         },
         needsPrompt: false,
       });
+      await saveConsent(uid, flags, locale);
     },
 
     patchLocal: (flags) => {
       set({ consent: { ...get().consent, ...flags } });
     },
-  })
+  }),
 );

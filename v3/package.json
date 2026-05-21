@@ -8,11 +8,11 @@
   },
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"sleep 2 && electron . --remote-debugging-port=9222\"",
+    "dev": "npm run build:mcp && tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"sleep 2 && electron . --remote-debugging-port=9222\"",
     "dev:vite": "vite",
-    "dev:electron": "tsc -p electron/tsconfig.json && electron .",
-    "build": "tsc -p electron/tsconfig.json && vite build",
-    "build:electron": "tsc -p electron/tsconfig.json && vite build",
+    "dev:electron": "npm run build:mcp && tsc -p electron/tsconfig.json && electron .",
+    "build": "npm run build:mcp && tsc -p electron/tsconfig.json && vite build",
+    "build:electron": "npm run build:mcp && tsc -p electron/tsconfig.json && vite build",
     "build:mac": "npm run build:electron && electron-builder --mac",
     "build:win": "npm run build:electron && electron-builder --win",
     "build:linux": "npm run build:electron && electron-builder --linux",
@@ -23,6 +23,11 @@
     "mcp": "node dist-mcp/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e:pw": "playwright test",
+    "test:e2e:pw:ui": "playwright test --ui",
+    "test:e2e:pw:headed": "playwright test --headed",
+    "test:e2e:pw:debug": "PWDEBUG=1 playwright test",
+    "test:e2e:pw:report": "playwright show-report",
     "postinstall": "electron-rebuild"
   },
   "dependencies": {
@@ -48,6 +53,8 @@
     "prettier": "^3.8.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-is": "^19.2.5",
+    "recharts": "^3.8.1",
     "simple-git": "^3.33.0",
     "zod": "^3.25.76",
     "zustand": "^5.0.3"
@@ -55,6 +62,7 @@
   "devDependencies": {
     "@electron/notarize": "^2.5.0",
     "@electron/rebuild": "^3.6.0",
+    "@playwright/test": "^1.60.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
