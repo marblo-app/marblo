@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Agent } from "../../types/agent";
 import type { Task } from "../../types/task";
 import AgentStatusCard from "./AgentStatusCard";
@@ -66,8 +66,14 @@ export default function AgentDashboard({
   // 사용자 spawn 셸 터미널 (isAgent !== true) — 그리드에 에이전트와 함께
   // 표시. useTerminalRestore 가 프로젝트 단위로 재spawn 해 재시작 후에도
   // 같은 탭 구성으로 복구.
-  const shellTerminals = useTerminalStore((s) =>
-    s.sessions.filter((sess) => !sess.isAgent)
+  //
+  // selector 안에서 .filter() 하면 매 render마다 새 array reference 가
+  // 반환돼 useSyncExternalStore 가 "값 바뀜"으로 판단 → 무한 re-render
+  // (Maximum update depth exceeded). sessions 전체를 받아 useMemo 로 안정화.
+  const sessions = useTerminalStore((s) => s.sessions);
+  const shellTerminals = useMemo(
+    () => sessions.filter((sess) => !sess.isAgent),
+    [sessions]
   );
 
   if (loading) {
