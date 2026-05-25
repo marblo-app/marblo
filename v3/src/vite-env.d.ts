@@ -144,6 +144,14 @@ interface AgentAPI {
       agentId: string;
       reconnected: boolean;
       ptySessionId: string | null;
+      /** reconnected=false 일 때 왜 skip 됐는지. 프론트가 Firestore status
+       * 를 "stopped" 로 동기화할지 결정하는 데 사용. "no-session" 만
+       * stopped 로 마킹 (다른 사유는 그대로 둠). */
+      skippedReason?:
+        | "no-session"
+        | "already-running"
+        | "launch-failed"
+        | "unknown";
     }>
   >;
   onSyncStatus: (
