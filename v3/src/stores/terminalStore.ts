@@ -1,5 +1,10 @@
 import { create } from "zustand";
 import { useEditorStore } from "./editorStore";
+import { useProjectStore } from "./projectStore";
+import {
+  addPersistedTerminal,
+  removePersistedTerminal,
+} from "../lib/terminalPersist";
 
 export interface TerminalSession {
   id: string;
@@ -16,7 +21,7 @@ interface TerminalState {
     name: string,
     command?: string,
     args?: string[],
-    cwd?: string,
+    cwd?: string
   ) => Promise<string>;
   attachSession: (id: string, name: string) => void;
   closeSession: (id: string) => Promise<void>;
@@ -61,6 +66,17 @@ const terminalStore = create<TerminalState>((set, get) => ({
       shell: result.shell,
     };
     set((s) => ({ sessions: [...s.sessions, session], activeSessionId: id }));
+    // 영속화: name 기준 dedup 으로 useTerminalRestore 가 재spawn 시 같은
+    // entry 를 다시 push 하지 않음. 프로젝트 단위 키.
+    const projectId = useProjectStore.getState().currentProject?.id;
+    if (projectId) {
+      addPersistedTerminal(projectId, {
+        name,
+        cwd: resolvedCwd,
+        command,
+        args,
+      });
+    }
     return id;
   },
 
@@ -80,7 +96,7 @@ const terminalStore = create<TerminalState>((set, get) => ({
     set({ activeSessionId: id });
     if (typeof window !== "undefined") {
       window.dispatchEvent(
-        new CustomEvent("marblo:focus-terminal", { detail: { sessionId: id } }),
+        new CustomEvent("marblo:focus-terminal", { detail: { sessionId: id } })
       );
     }
   },
@@ -92,6 +108,11 @@ const terminalStore = create<TerminalState>((set, get) => ({
     // Only kill if it's not an agent session (agent manages its own lifecycle)
     if (!session?.isAgent) {
       await window.electronAPI.pty.kill(id);
+      // 영속 entry 도 제거 → 다음 재시작 때 부활하지 않음.
+      const projectId = useProjectStore.getState().currentProject?.id;
+      if (projectId && session?.name) {
+        removePersistedTerminal(projectId, session.name);
+      }
     }
     const next = sessions.filter((s) => s.id !== id);
     set({
