@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Agent } from "../../types/agent";
+import type { TerminalSession } from "../../stores/terminalStore";
 import AgentFleetCell from "./AgentFleetCell";
+import TerminalFleetCell from "./TerminalFleetCell";
 
 const MIN_CELL_WIDTH = 240;
 const GRID_GAP_PX = 10; // gap-2.5 → 0.625rem → ~10px (Tailwind default base 16px)
 
 interface AgentFleetGridProps {
   agents: Agent[];
+  /** 사용자 spawn 셸 터미널 (isAgent=false). 그리드 끝에 에이전트와 같은
+   * 키보드 nav 인덱스 공간에 함께 배치. */
+  terminals?: TerminalSession[];
   /** Agent id → 마지막 activity 메시지 (옵션). 부모가 ActivityFeed 로부터 매핑. */
   activityByAgent?: Record<string, string>;
 }
@@ -16,15 +21,22 @@ interface AgentFleetGridProps {
  * 배치. 컨테이너가 좁아져 셀이 한 줄에 1개만 들어갈 정도라면 카드 뷰로 자동
  * fallback 하는 게 사용성에 좋아서, breakpoint 를 본 컴포넌트가 직접 측정.
  *
- * 키보드: roving tabindex 패턴. ←→↑↓ 으로 셀 간 이동, Enter / Space 또는
- * dblclick 으로 터미널 오픈 (셀이 직접 처리). Home / End 는 첫·끝 셀.
- * 활성 컬럼 수는 ResizeObserver 로 실시간 계산 (auto-fill 의 columnCount
- * 와 동일한 공식: floor((W + gap) / (minCell + gap))).
+ * 셀 종류:
+ *   1. AgentFleetCell — Firestore agents (role !== orchestrator)
+ *   2. TerminalFleetCell — 사용자 spawn 셸 (terminalStore.sessions where !isAgent)
+ *   둘은 같은 cellRefs 인덱스 공간에 평탄화되어 ←→↑↓ 가 자연스럽게 이어짐.
+ *
+ * 키보드: roving tabindex. ←→↑↓ 셀 이동, Enter/Space/dblclick = 셀 자체
+ * 처리 (drill-in to FocusView). Home/End = 첫·끝 셀. 활성 컬럼 수는
+ * ResizeObserver 로 실시간 계산.
  */
 export default function AgentFleetGrid({
   agents,
+  terminals = [],
   activityByAgent,
 }: AgentFleetGridProps) {
+  const totalCount = agents.length + terminals.length;
+
   const [tooNarrow, setTooNarrow] = useState(false);
   const [cols, setCols] = useState(1);
   const [focusedIndex, setFocusedIndex] = useState(0);
@@ -63,28 +75,27 @@ export default function AgentFleetGrid({
     return () => ro.disconnect();
   }, [tooNarrow]);
 
-  // 에이전트가 줄어들 때 focusedIndex 가 범위를 벗어나면 마지막 셀로 clamp.
+  // 셀이 줄어들 때 focusedIndex 가 범위를 벗어나면 마지막 셀로 clamp.
   useEffect(() => {
-    if (focusedIndex >= agents.length && agents.length > 0) {
-      setFocusedIndex(agents.length - 1);
+    if (focusedIndex >= totalCount && totalCount > 0) {
+      setFocusedIndex(totalCount - 1);
     }
-  }, [agents.length, focusedIndex]);
+  }, [totalCount, focusedIndex]);
 
   const moveFocus = useCallback(
     (next: number) => {
-      if (agents.length === 0) return;
-      const clamped = Math.max(0, Math.min(agents.length - 1, next));
+      if (totalCount === 0) return;
+      const clamped = Math.max(0, Math.min(totalCount - 1, next));
       if (clamped === focusedIndex) return;
       setFocusedIndex(clamped);
-      // Imperatively focus so screen readers + visual highlight stay synced.
       cellRefs.current.get(clamped)?.focus();
     },
-    [agents.length, focusedIndex]
+    [totalCount, focusedIndex]
   );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (agents.length === 0) return;
+      if (totalCount === 0) return;
       switch (e.key) {
         case "ArrowRight":
           e.preventDefault();
@@ -108,11 +119,11 @@ export default function AgentFleetGrid({
           break;
         case "End":
           e.preventDefault();
-          moveFocus(agents.length - 1);
+          moveFocus(totalCount - 1);
           break;
       }
     },
-    [agents.length, cols, focusedIndex, moveFocus]
+    [totalCount, cols, focusedIndex, moveFocus]
   );
 
   const registerCell = useCallback(
@@ -123,7 +134,7 @@ export default function AgentFleetGrid({
     []
   );
 
-  if (agents.length === 0) {
+  if (totalCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-[#6c7086]">
         <p className="text-sm">에이전트가 없습니다</p>
@@ -132,9 +143,7 @@ export default function AgentFleetGrid({
     );
   }
 
-  // 좁은 화면에선 단일 열 (=카드 한 줄). 같은 컴포넌트를 1열로 그려도 정보
-  // 손실은 없지만, 진짜 좁다면 부모(Dashboard) 가 List 뷰로 자동 전환하는
-  // 게 더 자연스럽다 — 그리드는 데이터를 1열로만 떨어트린다.
+  // 좁은 화면에선 단일 열.
   const columnStyle = tooNarrow
     ? { gridTemplateColumns: "1fr" }
     : {
@@ -145,7 +154,7 @@ export default function AgentFleetGrid({
     <div
       ref={containerRef}
       role="grid"
-      aria-label="에이전트 그리드 — 화살표로 이동, Enter 로 터미널 열기"
+      aria-label="에이전트 그리드 — 화살표로 이동, Enter 로 상세보기"
       onKeyDown={handleKeyDown}
       className="grid gap-2.5 p-3"
       style={columnStyle}
@@ -160,6 +169,19 @@ export default function AgentFleetGrid({
           onFocus={() => setFocusedIndex(i)}
         />
       ))}
+      {terminals.map((terminal, j) => {
+        const i = agents.length + j;
+        return (
+          <TerminalFleetCell
+            key={terminal.id}
+            ref={registerCell(i)}
+            sessionId={terminal.id}
+            name={terminal.name}
+            isFocused={i === focusedIndex}
+            onFocus={() => setFocusedIndex(i)}
+          />
+        );
+      })}
     </div>
   );
 }

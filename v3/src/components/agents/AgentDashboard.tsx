@@ -8,6 +8,7 @@ import ActivityFeed from "./ActivityFeed";
 import CostWidget from "./CostWidget";
 import AuditTimeline from "./AuditTimeline";
 import { useCostStore } from "../../stores/costStore";
+import { useTerminalStore } from "../../stores/terminalStore";
 import { useTranslation } from "../../lib/i18n";
 
 type ViewMode = "list" | "grid";
@@ -61,6 +62,13 @@ export default function AgentDashboard({
   // the full list so its `agentId in agents` filter passes orchestrator
   // events.
   const visibleAgents = agents.filter((a) => a.role !== "orchestrator");
+
+  // 사용자 spawn 셸 터미널 (isAgent !== true) — 그리드에 에이전트와 함께
+  // 표시. useTerminalRestore 가 프로젝트 단위로 재spawn 해 재시작 후에도
+  // 같은 탭 구성으로 복구.
+  const shellTerminals = useTerminalStore((s) =>
+    s.sessions.filter((sess) => !sess.isAgent)
+  );
 
   if (loading) {
     return (
@@ -160,7 +168,7 @@ export default function AgentDashboard({
       {visibleAgents.length === 0 ? (
         <AgentSetupGuide onAddAgent={onAddAgent} />
       ) : viewMode === "grid" ? (
-        <AgentFleetGrid agents={visibleAgents} />
+        <AgentFleetGrid agents={visibleAgents} terminals={shellTerminals} />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {visibleAgents.map((agent) => (

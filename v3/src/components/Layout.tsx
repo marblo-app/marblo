@@ -22,6 +22,7 @@ import { UpdateBanner } from "./UpdateBanner";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
 import { useAgentReconnect } from "../hooks/useAgentReconnect";
 import { useAgentSessionMapSync } from "../hooks/useAgentSessionMapSync";
+import { useTerminalRestore } from "../hooks/useTerminalRestore";
 import { useSessionRestore } from "../hooks/useSessionRestore";
 import { useCostWriter } from "../hooks/useCostWriter";
 import { usePresenceHeartbeat } from "../hooks/usePresenceHeartbeat";
@@ -147,6 +148,10 @@ export function Layout() {
   // reconnect / spawn / 다른 윈도우 attach 경로 어디서 누락돼도, agent name
   // suffix 매칭으로 자동 등록되어 그리드 MiniTerminal 이 즉시 살아남.
   useAgentSessionMapSync();
+
+  // 사용자 spawn 터미널을 프로젝트 단위로 영속화 → 재시작 시 같은 이름 /
+  // cwd 로 재spawn. 셸 PTY 는 resume 이 없어 히스토리는 손실, 탭 구성만 복원.
+  useTerminalRestore();
 
   // Write cost updates from main process to Firestore (using renderer's auth)
   useCostWriter();
