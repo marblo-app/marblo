@@ -124,6 +124,20 @@ Firebase Console → Authentication → Settings → **Authorized domains**:
 
 > 빠뜨리면 Google/GitHub 로그인 popup이 `auth/unauthorized-domain` 으로 실패.
 
+
+2. Firebase Console 도메인 화이트리스트 추가 (구글 로그인 에러 해결)
+- Firebase Console → 프로젝트 → Authentication → Settings → Authorized domains
+- "Add domain" → Vercel production URL 의 호스트만 입력 (예: marblo-web.vercel.app, https:// 빼고, 경로 빼고)
+- 저장 후 1-2분 → 라이브에서 구글 로그인 재시도
+
+3. (권장) marblo.app 커스텀 도메인 붙이기
+- Vercel → Settings → Domains → marblo.app 추가 → DNS 가이드 따라 Cloudflare 에 CNAME/A 레코드 설정
+- 그 다음 Firebase Authorized domains 에 marblo.app 만 등록하면 깔끔. Vercel 자동 도메인은 프리뷰마다 바뀌어서 일회용.
+
+
+
+
+
 ### 4-5. TossPayments 도메인 등록
 
 https://app.tosspayments.com → 가맹점 콘솔 → 개발 → URL 정보:
