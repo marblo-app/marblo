@@ -94,7 +94,7 @@ export default memo(function TerminalView({
           } catch (err) {
             console.warn(
               "[TerminalView] WebGL init failed, using DOM renderer:",
-              err
+              err,
             );
           }
         }
@@ -226,10 +226,10 @@ export default memo(function TerminalView({
           if (!alive) {
             terminal.write("\r\n\x1b[33m  ⚠ 세션이 만료되었습니다.\x1b[0m\r\n");
             terminal.write(
-              "\x1b[90m  앱 재시작으로 PTY 세션이 종료되었습니다.\x1b[0m\r\n"
+              "\x1b[90m  앱 재시작으로 PTY 세션이 종료되었습니다.\x1b[0m\r\n",
             );
             terminal.write(
-              "\x1b[90m  Agents 탭에서 Restart 버튼으로 재시작하세요.\x1b[0m\r\n\r\n"
+              "\x1b[90m  Agents 탭에서 Restart 버튼으로 재시작하세요.\x1b[0m\r\n\r\n",
             );
           }
         }
@@ -265,7 +265,7 @@ export default memo(function TerminalView({
     window.electronAPI.pty.onExit(sessionId, (code) => {
       if (disposed) return;
       terminal.write(
-        `\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`
+        `\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`,
       );
     });
 
@@ -435,7 +435,14 @@ export default memo(function TerminalView({
       ref={containerRef}
       className="absolute inset-0"
       style={{
-        display: isActive ? "block" : "none",
+        // Use visibility (not display:none) so the element retains
+        // dimensions while hidden — xterm.open() needs clientWidth/Height
+        // to size its grid, and AgentListPanel now keeps a TerminalView
+        // mounted per session across focus card switches / list↔focus
+        // transitions (state persistence like Claude's /agents view).
+        // display:none would zero clientWidth and break the initial open.
+        visibility: isActive ? "visible" : "hidden",
+        pointerEvents: isActive ? "auto" : "none",
         // Isolate terminal layout/paint from the parent React/Tailwind tree.
         // xterm grid updates trigger DOM layout — without containment that
         // cascades through Sidebar, Header, etc. (~115ms per typing burst).

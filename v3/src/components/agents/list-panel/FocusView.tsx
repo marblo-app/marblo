@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { VENDOR_VISUALS, STATUS_PILL, type AgentRowData } from "./types";
-import TerminalView from "../../terminal/TerminalView";
+
+// FocusView renders ONLY the header (← All / name / nav buttons). The
+// terminal body slot lives in AgentListPanel so TerminalView instances
+// can be kept mounted across focus card switches and list↔focus
+// transitions — xterm preserves its alt-screen / scrollback / cursor
+// state in-memory, so just toggling visibility (no re-mount) gives
+// the "same as before" UX that Claude's /agents view has. The empty
+// state for an agent without a PTY also lives in AgentListPanel.
 
 interface Props {
   row: AgentRowData;
@@ -105,7 +112,7 @@ export function FocusView({
     <div
       ref={containerRef}
       tabIndex={-1}
-      className="flex h-full flex-col bg-[#11111b] outline-none"
+      className="flex-shrink-0 outline-none"
     >
       <div className="flex items-center gap-2 border-b border-[#313244] bg-[#181825] px-3 py-2">
         <button
@@ -208,35 +215,6 @@ export function FocusView({
             ›
           </button>
         </div>
-      </div>
-
-      <div className="relative flex-1 min-h-0">
-        {row.ptySessionId ? (
-          <TerminalView sessionId={row.ptySessionId} isActive={true} />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-[11px] text-[#6c7086]">
-            <div>
-              이 에이전트에 연결된 터미널이 없습니다.
-              <br />새 세션을 시작하시겠습니까?
-            </div>
-            {row.isAgent && onStart && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={onStart}
-                  disabled={isStarting}
-                  className="rounded border border-[#cba6f7] bg-[#cba6f7]/10 px-3 py-1 text-[11px] text-[#cba6f7] transition-colors hover:bg-[#cba6f7]/20 disabled:opacity-50"
-                  title="기존 PTY를 죽이고 새 CLI 세션 시작 (resume 안 함)"
-                >
-                  {isStarting ? "Starting…" : "+ New Session"}
-                </button>
-              </div>
-            )}
-            <div className="text-[10px] text-[#585b70]">
-              세션이 안 뜨면 콘솔에서 CLI 설치 여부를 확인하세요 (claude / codex
-              / gemini).
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
