@@ -32,9 +32,11 @@ interface Props {
 export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
   const agents = useAgentStore((s) => s.agents);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
+  const restartAgent = useAgentStore((s) => s.restartAgent);
   const sessions = useTerminalStore((s) => s.sessions);
   const requestJump = useNavigationStore((s) => s.requestJump);
   const projectId = useProjectStore((s) => s.currentProject?.id) ?? "";
+  const [restartingId, setRestartingId] = useState<string | null>(null);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -47,13 +49,18 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
   }, [projectId, subscribeToAgents]);
 
   const rows = useMemo<AgentRowData[]>(() => {
-    // Agent rows: match each agent to its pty session via "Agent: <name>"
-    // (Layout.tsx attachSession label). Without a session, the row still
-    // renders but the expand will show "Terminal not attached".
+    // Agent rows: match each agent to its pty session by name suffix.
+    // attachSession is called from 5+ sites with different label formats:
+    //   "Agent: <name>"   (Layout.tsx initial spawn)
+    //   "🟣 <name>"       (useAgentReconnect / restartAgent / AgentStatusCard)
+    //   "🔵 <name>" / "🟢 <name>" (gemini / gpt+codex)
+    // endsWith covers all of them. Trade-off: if one agent name is a suffix
+    // of another (e.g. "foo-1" vs "x-foo-1") the wrong row matches; agent
+    // names in practice are distinct enough for Phase 1. Long-term fix is
+    // to store the canonical ptySessionId on the Agent Firestore doc.
     const agentRows: AgentRowData[] = agents.map((a) => {
-      const expectedLabel = `Agent: ${a.name}`;
       const matched = sessions.find(
-        (s) => s.isAgent && s.name === expectedLabel
+        (s) => s.isAgent && s.name.endsWith(a.name)
       );
       return {
         id: a.id,
@@ -155,9 +162,33 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
                   </div>
                 )}
                 {expanded && !row.ptySessionId && (
-                  <div className="px-4 py-3 text-[11px] text-[#6c7086] bg-[#11111b] border-b border-[#313244]">
-                    Terminal not attached yet. The agent may be reconnecting —
-                    try again in a moment, or open the Agents tab to restart it.
+                  <div className="flex items-center gap-3 px-4 py-3 text-[11px] text-[#6c7086] bg-[#11111b] border-b border-[#313244]">
+                    <span className="flex-1">
+                      Terminal not attached. The pty may have died after an app
+                      restart, or reconnect hasn&apos;t fired yet.
+                    </span>
+                    {row.isAgent && (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          setRestartingId(row.id);
+                          try {
+                            await restartAgent(row.id);
+                          } catch (err) {
+                            console.error(
+                              "[AgentListPanel] restartAgent failed:",
+                              err
+                            );
+                          } finally {
+                            setRestartingId(null);
+                          }
+                        }}
+                        disabled={restartingId === row.id}
+                        className="rounded border border-[#585b70] px-2 py-1 text-[10px] text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-50"
+                      >
+                        {restartingId === row.id ? "Restarting…" : "Restart"}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
