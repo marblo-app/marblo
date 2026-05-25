@@ -26,8 +26,12 @@ export function PrivacyConsentGate() {
   // Load consent the first time we have a uid.
   useEffect(() => {
     if (!user?.uid) return;
-    load(user.uid).catch(() => {
+    load(user.uid).catch((err) => {
       // Fail open with default OFF — user will see the prompt next launch.
+      // 정확한 진단을 위해 err 는 콘솔에 남긴다 (service 내부 logFirestoreError
+      // 가 이미 자세히 출력하지만, 호출 경로가 load 인지 save 인지 구분 위해
+      // 한 줄 더).
+      console.warn("[PrivacyConsentGate] load failed:", err);
     });
   }, [user?.uid, load]);
 

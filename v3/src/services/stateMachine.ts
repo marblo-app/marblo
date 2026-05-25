@@ -1,12 +1,15 @@
-import type { TaskStatus } from '../types/task';
+import type { TaskStatus } from "../types/task";
 
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  TODO: ['CLAIMED', 'IN_PROGRESS'],
-  CLAIMED: ['IN_PROGRESS', 'REVIEW', 'DONE', 'FAILED'],
-  IN_PROGRESS: ['REVIEW', 'DONE', 'BLOCKED', 'FAILED'],
-  REVIEW: ['DONE', 'TODO', 'IN_PROGRESS'],
-  BLOCKED: ['IN_PROGRESS', 'TODO'],
-  FAILED: ['TODO', 'IN_PROGRESS'],
+  // CLAIMED → TODO is the manual claim-recall path: a teammate's claim
+  // gets reverted because that teammate is offline (or stuck) and another
+  // member wants to pick the task up. See `unclaimTask` in taskService.
+  TODO: ["CLAIMED", "IN_PROGRESS"],
+  CLAIMED: ["IN_PROGRESS", "REVIEW", "DONE", "FAILED", "TODO"],
+  IN_PROGRESS: ["REVIEW", "DONE", "BLOCKED", "FAILED"],
+  REVIEW: ["DONE", "TODO", "IN_PROGRESS"],
+  BLOCKED: ["IN_PROGRESS", "TODO"],
+  FAILED: ["TODO", "IN_PROGRESS"],
   DONE: [],
 };
 

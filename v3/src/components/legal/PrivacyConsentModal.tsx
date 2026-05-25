@@ -84,18 +84,23 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
     const anyOn = flags.sentry || flags.ga4 || flags.mixpanel;
     if (anyOn && !flags.overseasTransfer) {
       setError(
-        "Sentry/GA4/Mixpanel은 미국 호스팅이라 국외 이전 동의가 필수입니다."
+        "Sentry/GA4/Mixpanel은 미국 호스팅이라 국외 이전 동의가 필수입니다.",
       );
       return;
     }
     setSubmitting(true);
     try {
       await save(user.uid, flags, "ko");
-      onComplete?.();
     } catch (err) {
+      // Fail-open: Firestore write 실패해도 모달은 닫는다. store.save 가
+      // local state 까지 안 채웠다면 다음 부팅 때 다시 묻힐 뿐 — 사용자
+      // 진입을 영구 차단하지 않는다. 권한 규칙·네트워크 단절·디플로이 지연
+      // 등 일시적 사유로 onboarding 이 막히는 P1 버그 가드.
+      console.warn("[PrivacyConsent] save failed, closing modal anyway:", err);
       setError(err instanceof Error ? err.message : "저장 실패");
     } finally {
       setSubmitting(false);
+      onComplete?.();
     }
   };
 
@@ -108,11 +113,14 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
       await save(
         user.uid,
         { sentry: false, ga4: false, mixpanel: false, overseasTransfer: false },
-        "ko"
+        "ko",
       );
-      onComplete?.();
+    } catch (err) {
+      // Same fail-open rationale as accept().
+      console.warn("[PrivacyConsent] later save failed, closing anyway:", err);
     } finally {
       setSubmitting(false);
+      onComplete?.();
     }
   };
 

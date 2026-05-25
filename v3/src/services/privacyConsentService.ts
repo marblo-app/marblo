@@ -16,7 +16,30 @@
  * PIPA 제15조 옵트인 정설 — silence is not consent.
  */
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 import { db } from "../lib/firebase";
+
+/**
+ * Firestore 호출 실패 시 정확한 진단을 위한 상세 로그.
+ * FirebaseError 의 code 는 "permission-denied", "unauthenticated", "not-found" 등.
+ * 추가로 auth.currentUser 의 상태와 호출 시점 uid 일치 여부 까지 함께 출력.
+ */
+function logFirestoreError(label: string, err: unknown, uid: string): void {
+  const auth = getAuth();
+  const cur = auth.currentUser;
+  const fbErr = err as { code?: string; name?: string; message?: string };
+  console.error(`[PrivacyConsent:${label}] failed`, {
+    code: fbErr.code,
+    name: fbErr.name,
+    message: fbErr.message,
+    requestedUid: uid,
+    authUid: cur?.uid ?? null,
+    uidMatch: cur?.uid === uid,
+    emailVerified: cur?.emailVerified ?? null,
+    isAnonymous: cur?.isAnonymous ?? null,
+    providerId: cur?.providerData?.[0]?.providerId ?? null,
+  });
+}
 
 /** Bump this string when policy text changes. Existing users will be
  *  re-prompted because their stored version no longer matches. */
@@ -76,10 +99,10 @@ export async function getConsent(uid: string): Promise<PrivacyConsent> {
     const snap = await getDoc(doc(db, "users", uid));
     const data = snap.exists() ? snap.data() : null;
     return toConsent(
-      (data?.privacyConsent as RawConsent | undefined) ?? undefined
+      (data?.privacyConsent as RawConsent | undefined) ?? undefined,
     );
   } catch (err) {
-    console.warn("[PrivacyConsent] read failed:", err);
+    logFirestoreError("getConsent", err, uid);
     return DEFAULT_CONSENT;
   }
 }
@@ -89,20 +112,25 @@ export async function getConsent(uid: string): Promise<PrivacyConsent> {
 export async function saveConsent(
   uid: string,
   flags: ConsentFlags,
-  locale: string = "ko"
+  locale: string = "ko",
 ): Promise<void> {
-  await setDoc(
-    doc(db, "users", uid),
-    {
-      privacyConsent: {
-        ...flags,
-        version: CURRENT_POLICY_VERSION,
-        acceptedAt: serverTimestamp(),
-        locale,
+  try {
+    await setDoc(
+      doc(db, "users", uid),
+      {
+        privacyConsent: {
+          ...flags,
+          version: CURRENT_POLICY_VERSION,
+          acceptedAt: serverTimestamp(),
+          locale,
+        },
       },
-    },
-    { merge: true }
-  );
+      { merge: true },
+    );
+  } catch (err) {
+    logFirestoreError("saveConsent", err, uid);
+    throw err;
+  }
 }
 
 /** True if the user has seen the current policy version. */

@@ -1,0 +1,55 @@
+{
+  "timestamp": "2026-05-02T11:38:02.638798",
+  "platforms": {
+    "google_ads": {
+      "status": "NOT_IMPLEMENTED",
+      "file_exists": false,
+      "client_exists": false,
+      "tests": [],
+      "message": "google_ads_client.py 파일이 존재하지 않음",
+      "required_implementation": [
+        "GoogleAdsAPIClient 클래스 구현",
+        "OAuth2 인증 플로우",
+        "캠페인/광고그룹/광고 CRUD 메소드",
+        "성과 데이터 수집 메소드",
+        "BigQuery 동기화 로직"
+      ]
+    },
+    "meta_ads": {
+      "status": "NOT_IMPLEMENTED",
+      "file_exists": false,
+      "client_exists": false,
+      "tests": [],
+      "message": "meta_ads_client.py 파일이 존재하지 않음",
+      "required_implementation": [
+        "MetaAdsAPIClient 클래스 구현",
+        "Facebook Login OAuth2 인증",
+        "광고 계정 연결 메소드",
+        "캠페인/광고세트/광고 CRUD 메소드",
+        "Insights API 데이터 수집",
+        "BigQuery 동기화 로직"
+      ]
+    },
+    "naver_ads": {
+      "status": "NOT_IMPLEMENTED",
+      "file_exists": false,
+      "client_exists": false,
+      "tests": [],
+      "message": "naver_ads.py 파일이 존재하지 않음",
+      "required_implementation": [
+        "NaverAdsAPIClient 클래스 구현",
+        "API 인증 및 토큰 관리",
+        "캠페인/광고그룹/키워드 CRUD 메소드",
+        "보고서 및 통계 데이터 수집",
+        "BigQuery 동기화 로직"
+      ]
+    }
+  },
+  "bigquery": {
+    "schemas_exist": true,
+    "connection_ready": false,
+    "available_schemas": [
+      "coupang_tables.py"
+    ]
+  }
+}

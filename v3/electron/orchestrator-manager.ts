@@ -84,8 +84,14 @@ export class OrchestratorManager {
     this.lastOnPtyReady = onPtyReady;
     this.stopRequested = false;
 
-    const sessionId = `orchestrator-${Date.now()}`;
-    const ptySessionId = `orch-${sessionId}`;
+    // Stable, project-scoped ID. Used as MARBLO_AGENT_ID, MCP config filename,
+    // and the Firestore agents/* doc key — so the renderer can upsert one
+    // canonical orchestrator doc per project instead of leaking a fresh row
+    // on every relaunch.
+    const sessionId = `orchestrator-${projectId}`;
+    // PTY id stays unique per launch so a stale auto-restart timer can't
+    // attach to a freshly spawned PTY.
+    const ptySessionId = `orch-${sessionId}-${Date.now()}`;
 
     this.setStatus("starting");
 

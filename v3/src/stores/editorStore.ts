@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create } from "zustand";
 
 export interface OpenFile {
   path: string;
@@ -15,54 +15,68 @@ interface EditorState {
   activeFilePath: string | null;
   showDiff: boolean;
 
-  setRootPath: (path: string) => void;
+  setRootPath: (path: string | null) => void;
   openFile: (filePath: string) => Promise<void>;
   closeFile: (filePath: string) => void;
+  closeAllFiles: () => void;
   setActiveFile: (filePath: string) => void;
   updateContent: (filePath: string, content: string) => void;
   saveFile: (filePath: string) => Promise<void>;
   toggleDiff: () => void;
+  // FileTree sync — call after file operations on disk
+  handlePathRenamed: (fromPath: string, toPath: string) => void;
+  handlePathRemoved: (targetPath: string) => void;
 }
 
 function getLanguage(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
   const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript',
-    js: 'javascript', jsx: 'javascript',
-    py: 'python',
-    rs: 'rust',
-    go: 'go',
-    java: 'java',
-    c: 'c', h: 'c',
-    cpp: 'cpp', hpp: 'cpp', cc: 'cpp',
-    cs: 'csharp',
-    rb: 'ruby',
-    php: 'php',
-    swift: 'swift',
-    kt: 'kotlin',
-    scala: 'scala',
-    md: 'markdown',
-    json: 'json',
-    yaml: 'yaml', yml: 'yaml',
-    xml: 'xml',
-    html: 'html', htm: 'html',
-    css: 'css',
-    scss: 'scss', sass: 'scss',
-    less: 'less',
-    sql: 'sql',
-    sh: 'shell', bash: 'shell', zsh: 'shell',
-    dockerfile: 'dockerfile',
-    toml: 'toml',
-    ini: 'ini',
-    env: 'plaintext',
-    txt: 'plaintext',
-    gitignore: 'plaintext',
+    ts: "typescript",
+    tsx: "typescript",
+    js: "javascript",
+    jsx: "javascript",
+    py: "python",
+    rs: "rust",
+    go: "go",
+    java: "java",
+    c: "c",
+    h: "c",
+    cpp: "cpp",
+    hpp: "cpp",
+    cc: "cpp",
+    cs: "csharp",
+    rb: "ruby",
+    php: "php",
+    swift: "swift",
+    kt: "kotlin",
+    scala: "scala",
+    md: "markdown",
+    json: "json",
+    yaml: "yaml",
+    yml: "yaml",
+    xml: "xml",
+    html: "html",
+    htm: "html",
+    css: "css",
+    scss: "scss",
+    sass: "scss",
+    less: "less",
+    sql: "sql",
+    sh: "shell",
+    bash: "shell",
+    zsh: "shell",
+    dockerfile: "dockerfile",
+    toml: "toml",
+    ini: "ini",
+    env: "plaintext",
+    txt: "plaintext",
+    gitignore: "plaintext",
   };
-  return map[ext] || 'plaintext';
+  return map[ext] || "plaintext";
 }
 
 function getFileName(filePath: string): string {
-  return filePath.split('/').pop() || filePath;
+  return filePath.split("/").pop() || filePath;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -71,15 +85,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeFilePath: null,
   showDiff: false,
 
-  setRootPath: (path: string) => {
+  setRootPath: (path: string | null) => {
     set({ rootPath: path });
+  },
+
+  closeAllFiles: () => {
+    set({ openFiles: [], activeFilePath: null, showDiff: false });
   },
 
   openFile: async (filePath: string) => {
     const { openFiles } = get();
 
     // Already open — just activate
-    const existing = openFiles.find(f => f.path === filePath);
+    const existing = openFiles.find((f) => f.path === filePath);
     if (existing) {
       set({ activeFilePath: filePath });
       return;
@@ -91,28 +109,31 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const language = getLanguage(name);
 
       set({
-        openFiles: [...openFiles, {
-          path: filePath,
-          name,
-          content,
-          originalContent: content,
-          language,
-          isModified: false,
-        }],
+        openFiles: [
+          ...openFiles,
+          {
+            path: filePath,
+            name,
+            content,
+            originalContent: content,
+            language,
+            isModified: false,
+          },
+        ],
         activeFilePath: filePath,
       });
     } catch (err) {
-      console.error('Failed to open file:', err);
+      console.error("Failed to open file:", err);
     }
   },
 
   closeFile: (filePath: string) => {
     const { openFiles, activeFilePath } = get();
-    const newFiles = openFiles.filter(f => f.path !== filePath);
+    const newFiles = openFiles.filter((f) => f.path !== filePath);
     let newActive = activeFilePath;
 
     if (activeFilePath === filePath) {
-      const idx = openFiles.findIndex(f => f.path === filePath);
+      const idx = openFiles.findIndex((f) => f.path === filePath);
       if (newFiles.length > 0) {
         newActive = newFiles[Math.min(idx, newFiles.length - 1)].path;
       } else {
@@ -130,34 +151,78 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateContent: (filePath: string, content: string) => {
     const { openFiles } = get();
     set({
-      openFiles: openFiles.map(f =>
+      openFiles: openFiles.map((f) =>
         f.path === filePath
           ? { ...f, content, isModified: content !== f.originalContent }
-          : f
+          : f,
       ),
     });
   },
 
   saveFile: async (filePath: string) => {
     const { openFiles } = get();
-    const file = openFiles.find(f => f.path === filePath);
+    const file = openFiles.find((f) => f.path === filePath);
     if (!file || !file.isModified) return;
 
     try {
       await window.electronAPI.fs.writeFile(filePath, file.content);
       set({
-        openFiles: openFiles.map(f =>
+        openFiles: openFiles.map((f) =>
           f.path === filePath
             ? { ...f, originalContent: f.content, isModified: false }
-            : f
+            : f,
         ),
       });
     } catch (err) {
-      console.error('Failed to save file:', err);
+      console.error("Failed to save file:", err);
     }
   },
 
   toggleDiff: () => {
-    set(s => ({ showDiff: !s.showDiff }));
+    set((s) => ({ showDiff: !s.showDiff }));
+  },
+
+  handlePathRenamed: (fromPath: string, toPath: string) => {
+    const { openFiles, activeFilePath } = get();
+    const updated = openFiles.map((f) => {
+      if (f.path === fromPath) {
+        const newName = getFileName(toPath);
+        return {
+          ...f,
+          path: toPath,
+          name: newName,
+          language: getLanguage(newName),
+        };
+      }
+      // Directory rename: f.path starts with fromPath + '/'
+      if (f.path.startsWith(fromPath + "/")) {
+        const newPath = toPath + f.path.slice(fromPath.length);
+        return { ...f, path: newPath };
+      }
+      return f;
+    });
+    const newActive =
+      activeFilePath === fromPath
+        ? toPath
+        : activeFilePath && activeFilePath.startsWith(fromPath + "/")
+          ? toPath + activeFilePath.slice(fromPath.length)
+          : activeFilePath;
+    set({ openFiles: updated, activeFilePath: newActive });
+  },
+
+  handlePathRemoved: (targetPath: string) => {
+    const { openFiles, activeFilePath } = get();
+    const remaining = openFiles.filter(
+      (f) => f.path !== targetPath && !f.path.startsWith(targetPath + "/"),
+    );
+    let newActive = activeFilePath;
+    const activeWasRemoved =
+      activeFilePath === targetPath ||
+      (activeFilePath !== null && activeFilePath.startsWith(targetPath + "/"));
+    if (activeWasRemoved) {
+      newActive =
+        remaining.length > 0 ? remaining[remaining.length - 1].path : null;
+    }
+    set({ openFiles: remaining, activeFilePath: newActive });
   },
 }));

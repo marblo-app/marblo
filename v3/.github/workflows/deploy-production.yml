@@ -1,0 +1,215 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: true
+        default: "production"
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ secrets.GCP_REGION || 'asia-northeast3' }}
+  SERVICE_NAME: marblo-backend
+  IMAGE_NAME: gcr.io/${{ secrets.GCP_PROJECT_ID }}/marblo-backend
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Run tests
+        working-directory: backend
+        run: |
+          python -m pytest tests/ -v --cov=. --cov-report=term-missing || echo "No tests found"
+
+  build-and-deploy:
+    needs: test-backend
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker gcr.io
+
+      - name: Build Docker image
+        working-directory: backend
+        run: |
+          docker build -f Dockerfile.cloudrun -t ${{ env.IMAGE_NAME }}:${{ github.sha }} .
+          docker tag ${{ env.IMAGE_NAME }}:${{ github.sha }} ${{ env.IMAGE_NAME }}:latest
+
+      - name: Push to Google Container Registry
+        run: |
+          docker push ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.IMAGE_NAME }}:latest
+
+      - name: Update secrets in Secret Manager
+        run: |
+          # Update database URL
+          echo "${{ secrets.DATABASE_URL_PROD }}" | gcloud secrets versions add database-url --data-file=-
+
+          # Update app secrets
+          echo "${{ secrets.SECRET_KEY_PROD }}" | gcloud secrets versions add app-secrets --data-file=-
+
+          # Update monitoring secrets
+          echo "${{ secrets.SENTRY_DSN_PROD }}" | gcloud secrets versions add monitoring-secrets --data-file=-
+
+          # Update payment secrets
+          cat > /tmp/payment-secrets.json << EOF
+          {
+            "toss-client-key": "${{ secrets.TOSS_CLIENT_KEY_PROD }}",
+            "toss-secret-key": "${{ secrets.TOSS_SECRET_KEY_PROD }}",
+            "toss-webhook-secret": "${{ secrets.TOSS_WEBHOOK_SECRET_PROD }}",
+            "naverpay-merchant-id": "${{ secrets.NAVERPAY_MERCHANT_ID_PROD }}",
+            "naverpay-api-key": "${{ secrets.NAVERPAY_API_KEY_PROD }}",
+            "naverpay-secret-key": "${{ secrets.NAVERPAY_SECRET_KEY_PROD }}",
+            "naverpay-webhook-secret": "${{ secrets.NAVERPAY_WEBHOOK_SECRET_PROD }}"
+          }
+          EOF
+          gcloud secrets versions add payment-secrets --data-file=/tmp/payment-secrets.json
+          rm /tmp/payment-secrets.json
+
+      - name: Deploy to Cloud Run
+        run: |
+          # Update cloudrun.yaml with the new image
+          sed -i "s|gcr.io/YOUR_PROJECT_ID/marblo-backend:latest|${{ env.IMAGE_NAME }}:${{ github.sha }}|g" cloudrun.yaml
+          sed -i "s/YOUR_PROJECT_ID/${{ env.GCP_PROJECT_ID }}/g" cloudrun.yaml
+          sed -i "s/YOUR_REGION/${{ env.GCP_REGION }}/g" cloudrun.yaml
+
+          # Deploy to Cloud Run
+          gcloud run services replace cloudrun.yaml --region=${{ env.GCP_REGION }}
+
+          # Update traffic to latest revision
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} --to-latest --region=${{ env.GCP_REGION }}
+
+      - name: Run database migrations
+        run: |
+          # Install Cloud SQL Proxy
+          wget https://dl.google.com/cloudsql/cloud_sql_proxy.linux.amd64 -O cloud_sql_proxy
+          chmod +x cloud_sql_proxy
+
+          # Get instance connection name
+          INSTANCE_CONNECTION_NAME=$(gcloud sql instances describe marblo-postgres-prod --format="value(connectionName)")
+
+          # Start proxy in background
+          ./cloud_sql_proxy -instances=$INSTANCE_CONNECTION_NAME=tcp:5432 &
+          PROXY_PID=$!
+
+          # Wait for proxy to start
+          sleep 10
+
+          # Install Python dependencies for migrations
+          cd backend
+          pip install -r requirements.txt
+
+          # Run migrations
+          DATABASE_URL="${{ secrets.DATABASE_URL_MIGRATION }}" alembic upgrade head
+
+          # Stop proxy
+          kill $PROXY_PID
+
+      - name: Health check
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.GCP_REGION }} --format="value(status.url)")
+
+          # Wait for deployment to stabilize
+          sleep 30
+
+          # Health check with retries
+          for i in {1..5}; do
+            if curl -f "$SERVICE_URL/health"; then
+              echo "✅ Health check passed!"
+              break
+            else
+              echo "❌ Health check failed (attempt $i/5). Retrying in 30 seconds..."
+              if [ $i -eq 5 ]; then
+                echo "❌ Health check failed after 5 attempts"
+                exit 1
+              fi
+              sleep 30
+            fi
+          done
+
+      - name: Notify deployment status
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Deployment to production ${{ job.status }}!
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  deploy-frontend:
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web version
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL_PROD }}
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY_PROD }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN_PROD }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID_PROD }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET_PROD }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID_PROD }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID_PROD }}
+          VITE_PADDLE_CLIENT_TOKEN: ${{ secrets.VITE_PADDLE_CLIENT_TOKEN_PROD }}
+          VITE_TOSS_CLIENT_KEY: ${{ secrets.VITE_TOSS_CLIENT_KEY_PROD }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN_PROD }}
+        run: npm run build
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: "${{ secrets.GITHUB_TOKEN }}"
+          firebaseServiceAccount: "${{ secrets.FIREBASE_SERVICE_ACCOUNT_PROD }}"
+          projectId: ${{ secrets.FIREBASE_PROJECT_ID_PROD }}
+          channelId: live

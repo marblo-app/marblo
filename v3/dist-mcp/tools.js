@@ -3,6 +3,7 @@ import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, whe
 import { db } from "./firebase.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawn } from "node:child_process";
 const VALID_TRANSITIONS = {
     // CLAIMED → TODO is the manual claim-recall path (renderer's
     // `unclaimTask`). Kept in sync with src/services/stateMachine.ts.
@@ -658,7 +659,7 @@ export function registerTools(server) {
     auditedTool("spawn_agent", "Spawn a new agent via the Electron bridge. The agent gets its own PTY session and terminal tab. Requires MARBLO_BRIDGE_PORT env var.", {
         name: z.string().describe('Agent display name (e.g., "backend-auth")'),
         model: z
-            .enum(["claude", "gemini", "gpt", "custom"])
+            .enum(["claude", "gemini", "gpt", "antigravity", "custom"])
             .describe("AI model to use"),
         role: z.string().describe("Agent role (backend/frontend/test/devops)"),
         command: z
@@ -876,7 +877,7 @@ export function registerTools(server) {
         model: z
             .string()
             .optional()
-            .describe("Preferred model hint (claude/gemini/gpt)"),
+            .describe("Preferred model hint (claude/gemini/gpt/antigravity)"),
         name: z.string().optional().describe("Agent name hint"),
         cwd: z.string().optional().describe("Working directory"),
         tags: z
@@ -1304,6 +1305,144 @@ export function registerTools(server) {
             deliveredAt: Timestamp.now(),
         });
         return text(`Instruction ${instruction_id} marked as delivered.`);
+    });
+    // 23. run_skill — Mission engine 용 (명세 §8).
+    //     allowlist 잠금된 gstack 슬래시 명령을 격리된 cc --print subprocess 로
+    //     실행하고 결과를 반환한다.
+    //     보안 락다운:
+    //       - skill: zod enum (allowlist 외 거부)
+    //       - args: shell 메타문자 차단 + 길이 제한
+    //       - cwd: 절대 경로 + 디렉토리 존재 확인
+    //       - timeout: default 10분, max 30분 — 초과 시 SIGTERM/SIGKILL
+    //       - env: 최소 화이트리스트만 전달
+    //     동기화 필요: v3/electron/mission-engine/types.ts 의 ALLOWED_SKILLS,
+    //                v3/src/components/missions/templates.ts 의 skill 들과 동일.
+    const ALLOWED_MISSION_SKILLS = [
+        "/review",
+        "/qa",
+        "/ship",
+        "/investigate",
+        "/plan-ceo-review",
+        "/plan-eng-review",
+        "/plan-design-review",
+        "/design-review",
+        "/office-hours",
+        "/autoplan",
+    ];
+    const SHELL_METACHARS = /[;&|`$<>\\\n\r]/;
+    auditedTool("run_skill", "Run an allowlisted gstack slash command in an isolated `cc --print` subprocess and return the result. Used by MissionEngine. Arbitrary text and non-allowlisted commands are rejected.", {
+        skill: z
+            .enum(ALLOWED_MISSION_SKILLS)
+            .describe("gstack slash command (allowlist)"),
+        args: z
+            .string()
+            .max(2000)
+            .optional()
+            .describe("slash command args (shell metacharacters blocked)"),
+        mission_id: z
+            .string()
+            .optional()
+            .describe("mission ID — surfaced to subprocess as MARBLO_MISSION_ID"),
+        cwd: z
+            .string()
+            .optional()
+            .describe("absolute cwd for the subprocess (default: MARBLO_PROJECT_ROOT or process.cwd())"),
+        timeout_ms: z
+            .number()
+            .int()
+            .min(10_000)
+            .max(1_800_000)
+            .optional()
+            .describe("timeout ms (default 600000 = 10min, max 1800000 = 30min)"),
+    }, async ({ skill, args, mission_id, cwd, timeout_ms }) => {
+        // 1) args sanitization — shell injection 방지
+        if (args && SHELL_METACHARS.test(args)) {
+            return text("Error: run_skill args contains forbidden shell metacharacters (;&|`$<>\\n).");
+        }
+        // 2) cwd 검증 — 절대 경로 + 디렉토리 존재
+        const resolvedCwd = cwd || process.env.MARBLO_PROJECT_ROOT || process.cwd();
+        if (!path.isAbsolute(resolvedCwd)) {
+            return text(`Error: run_skill cwd must be absolute, got "${cwd}".`);
+        }
+        try {
+            const stat = fs.statSync(resolvedCwd);
+            if (!stat.isDirectory()) {
+                return text(`Error: run_skill cwd "${resolvedCwd}" is not a directory.`);
+            }
+        }
+        catch {
+            return text(`Error: run_skill cwd "${resolvedCwd}" does not exist or is not accessible.`);
+        }
+        // 3) subprocess spawn — cc --print, env 최소화
+        const timeoutMs = timeout_ms ?? 600_000;
+        const ccBinary = process.env.MARBLO_CC_BIN || "claude";
+        const prompt = args ? `${skill} ${args}` : skill;
+        const startedAt = Date.now();
+        return await new Promise((resolve) => {
+            let resolved = false;
+            let stdout = "";
+            let stderr = "";
+            const child = spawn(ccBinary, ["--print", prompt], {
+                cwd: resolvedCwd,
+                env: {
+                    PATH: process.env.PATH ?? "",
+                    HOME: process.env.HOME ?? "",
+                    USER: process.env.USER ?? "",
+                    LANG: process.env.LANG ?? "en_US.UTF-8",
+                    MARBLO_PROJECT: process.env.MARBLO_PROJECT ?? "",
+                    MARBLO_AGENT_ID: process.env.MARBLO_AGENT_ID ?? "",
+                    MARBLO_MISSION_ID: mission_id ?? "",
+                },
+                stdio: ["ignore", "pipe", "pipe"],
+            });
+            const timer = setTimeout(() => {
+                try {
+                    child.kill("SIGTERM");
+                }
+                catch {
+                    /* best-effort */
+                }
+                setTimeout(() => {
+                    try {
+                        child.kill("SIGKILL");
+                    }
+                    catch {
+                        /* best-effort */
+                    }
+                }, 5000);
+                finish(false, `timeout after ${timeoutMs}ms`);
+            }, timeoutMs);
+            const finish = (ok, errLine) => {
+                if (resolved)
+                    return;
+                resolved = true;
+                clearTimeout(timer);
+                const durationMs = Date.now() - startedAt;
+                const status = ok ? "✅" : "❌";
+                const outTail = stdout.slice(-8000);
+                const errTail = stderr.slice(-2000);
+                const summary = `${status} run_skill ${skill} (${durationMs}ms)\n` +
+                    (outTail ? `---stdout (last 8KB)---\n${outTail}\n` : "") +
+                    (errTail || errLine
+                        ? `---stderr---\n${[errLine, errTail].filter(Boolean).join("\n")}\n`
+                        : "");
+                resolve(text(summary.trim()));
+            };
+            child.stdout.on("data", (b) => {
+                stdout += b.toString();
+            });
+            child.stderr.on("data", (b) => {
+                stderr += b.toString();
+            });
+            child.on("exit", (code, signal) => {
+                finish(code === 0, code !== 0
+                    ? `exit code=${code} signal=${signal ?? "none"}`
+                    : undefined);
+            });
+            child.on("error", (err) => {
+                finish(false, `spawn error: ${err.message}`);
+            });
+        });
     });
 }
 //# sourceMappingURL=tools.js.map

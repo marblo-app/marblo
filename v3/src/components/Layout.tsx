@@ -2,12 +2,13 @@ import { useState, useEffect, useRef } from "react";
 import { Header } from "./Header";
 import { TabBar, type TabId } from "./TabBar";
 import { Sidebar } from "./sidebar/Sidebar";
-import TerminalPanel from "./terminal/TerminalPanel";
+import { AgentListPanel } from "./agents/list-panel/AgentListPanel";
 import OrchestratorPanel from "./orchestrator/OrchestratorPanel";
 import { BoardTab } from "./tabs/BoardTab";
 import { CodeTab } from "./tabs/CodeTab";
 import { AgentsTab } from "./tabs/AgentsTab";
 import { FlowsTab } from "./tabs/FlowsTab";
+import { MissionsTab } from "./tabs/MissionsTab";
 import { DeployTab } from "./tabs/DeployTab";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PlanGate } from "./settings/PlanGate";
@@ -45,6 +46,7 @@ function HarnessTabPanel() {
 const tabComponents: Record<TabId, () => JSX.Element> = {
   guide: GuideTab,
   board: BoardTab,
+  missions: MissionsTab,
   code: CodeTab,
   agents: AgentsTab,
   flows: GatedFlowsTab,
@@ -54,7 +56,8 @@ const tabComponents: Record<TabId, () => JSX.Element> = {
 };
 
 export function Layout() {
-  const [activeTab, setActiveTab] = useState<TabId>("guide");
+  // Mission tab 을 default 로 승격 (명세 §6) — 미션 진행이 메인 사용 경로.
+  const [activeTab, setActiveTab] = useState<TabId>("missions");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const attachSession = useTerminalStore((s) => s.attachSession);
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -186,9 +189,8 @@ export function Layout() {
       // other's fields.
       if (currentProject) {
         try {
-          const { doc, setDoc, serverTimestamp } = await import(
-            "firebase/firestore"
-          );
+          const { doc, setDoc, serverTimestamp } =
+            await import("firebase/firestore");
           const { db } = await import("../lib/firebase");
           await setDoc(
             doc(db, "agents", data.agentId),
@@ -204,12 +206,12 @@ export function Layout() {
               skillFile: "",
               createdAt: serverTimestamp(),
             },
-            { merge: true }
+            { merge: true },
           );
         } catch (err) {
           console.warn(
             "[Layout] Firestore agent upsert failed (non-fatal):",
-            err
+            err,
           );
         }
       }
@@ -217,13 +219,12 @@ export function Layout() {
       // Chat notification — best-effort.
       if (currentProject) {
         try {
-          const { notifyAgentSpawned } = await import(
-            "../services/agentNotificationService"
-          );
+          const { notifyAgentSpawned } =
+            await import("../services/agentNotificationService");
           await notifyAgentSpawned(
             currentProject.id,
             data.name,
-            data.role || "agent"
+            data.role || "agent",
           );
         } catch {
           // best-effort
@@ -318,12 +319,17 @@ export function Layout() {
             <ActiveTabComponent />
           </div>
 
-          {/* Orchestrator panel — between tab content and terminal */}
+          {/* Orchestrator panel — between tab content and agent list */}
           <OrchestratorPanel />
 
-          {/* Terminal panel — DIAG: toggle via VITE_DISABLE_TERMINAL_PANEL=1 */}
+          {/* Agent List panel — replaces the old TerminalPanel.
+              P3 hybrid rows for ambient monitoring; double-click a row to
+              jump to the full AgentsTab. DIAG: toggle via VITE_DISABLE_TERMINAL_PANEL=1. */}
           {import.meta.env.VITE_DISABLE_TERMINAL_PANEL !== "1" && (
-            <TerminalPanel />
+            <AgentListPanel
+              onJumpToAgent={() => setActiveTab("agents")}
+              onSpawnClick={() => setShowOrchestratorChat(true)}
+            />
           )}
         </div>
 

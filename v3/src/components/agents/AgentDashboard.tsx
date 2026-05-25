@@ -56,6 +56,12 @@ export default function AgentDashboard({
     }
   }, [viewMode]);
 
+  // Orchestrator is rendered in its own bottom panel — hide it from the
+  // Agents tab card grid / summary / cleanup. ActivityFeed still receives
+  // the full list so its `agentId in agents` filter passes orchestrator
+  // events.
+  const visibleAgents = agents.filter((a) => a.role !== "orchestrator");
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
@@ -104,16 +110,18 @@ export default function AgentDashboard({
               ▦ Grid
             </button>
           </div>
-          {agents.filter((a) => a.status !== "working").length > 0 && (
+          {visibleAgents.filter((a) => a.status !== "working").length > 0 && (
             <button
               className="flex items-center gap-1.5 rounded border border-red-600/30 bg-red-600/10 px-3 py-1.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/20"
               onClick={() => {
-                const inactive = agents.filter((a) => a.status !== "working");
+                const inactive = visibleAgents.filter(
+                  (a) => a.status !== "working"
+                );
                 if (
                   confirm(
                     t("agents.dashboard.cleanupConfirm", {
                       count: inactive.length,
-                    }),
+                    })
                   )
                 ) {
                   inactive.forEach((a) => onDelete(a.id));
@@ -121,7 +129,7 @@ export default function AgentDashboard({
               }}
             >
               {t("agents.dashboard.cleanup")} (
-              {agents.filter((a) => a.status !== "working").length})
+              {visibleAgents.filter((a) => a.status !== "working").length})
             </button>
           )}
           <button
@@ -144,17 +152,18 @@ export default function AgentDashboard({
       </div>
 
       {/* Team Summary */}
-      <TeamSummary agents={agents} tasks={tasks} />
+      <TeamSummary agents={visibleAgents} tasks={tasks} />
 
       {/* Agent rendering — view mode toggles between rich list cards and
-          the FleetView grid. Empty state is shared. */}
-      {agents.length === 0 ? (
+          the FleetView grid. Empty state is shared. Orchestrator filtered
+          out of both views (it has its own bottom panel). */}
+      {visibleAgents.length === 0 ? (
         <AgentSetupGuide onAddAgent={onAddAgent} />
       ) : viewMode === "grid" ? (
-        <AgentFleetGrid agents={agents} />
+        <AgentFleetGrid agents={visibleAgents} />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
-          {agents.map((agent) => (
+          {visibleAgents.map((agent) => (
             <AgentStatusCard
               key={agent.id}
               agent={agent}
@@ -170,7 +179,8 @@ export default function AgentDashboard({
       {/* Cost Tracking */}
       <CostWidget />
 
-      {/* Activity & Audit Tabs */}
+      {/* Activity & Audit Tabs — ActivityFeed receives the full list so the
+          orchestrator agent doc keeps its events visible. */}
       <ActivityAuditTabs projectId={projectId} agents={agents} />
     </div>
   );
@@ -318,7 +328,7 @@ function UsageDashboard({ agents }: { agents: Agent[] }) {
             outputTokens: 0,
             cacheRead: 0,
             cacheWrite: 0,
-          },
+          }
         );
         const totalTokens =
           modelTotals.inputTokens +
@@ -442,7 +452,7 @@ function UsageDashboard({ agents }: { agents: Agent[] }) {
                   summary.totalInputTokens +
                     summary.totalOutputTokens +
                     summary.totalCacheReadTokens +
-                    summary.totalCacheWriteTokens,
+                    summary.totalCacheWriteTokens
                 )}{" "}
                 tokens
               </span>
@@ -495,18 +505,18 @@ function ModelUsageGauge({
       totalTokens === 0
         ? "대기"
         : totalTokens < 10_000_000
-          ? "낮음"
-          : totalTokens < 50_000_000
-            ? "보통"
-            : "높음";
+        ? "낮음"
+        : totalTokens < 50_000_000
+        ? "보통"
+        : "높음";
     const levelColor =
       totalTokens === 0
         ? "text-gray-500"
         : totalTokens < 10_000_000
-          ? "text-green-400"
-          : totalTokens < 50_000_000
-            ? "text-purple-400"
-            : "text-amber-400";
+        ? "text-green-400"
+        : totalTokens < 50_000_000
+        ? "text-purple-400"
+        : "text-amber-400";
 
     return (
       <div className="space-y-1">
