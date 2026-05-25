@@ -89,8 +89,10 @@ export default function PrivacyPolicyPage() {
       <ul>
         <li>
           <strong>Google LLC (Firebase)</strong> — 회원 인증(Authentication),
-          데이터 저장(Cloud Firestore). 데이터는 멀티 리전(asia-northeast3 서울
-          우선) 에 암호화 저장됩니다.
+          데이터 저장(Cloud Firestore). 데이터는 Google Cloud Firestore (미국
+          소재 리전) 에 암호화 저장되며, 이용자가 마블로 내에서 생성하는 모든
+          콘텐츠는 실시간으로 이 단일 저장소에 동기화됩니다 (별도의 로컬 DB 없음
+          — 이용약관 제11조 참조).
         </li>
         <li>
           <strong>Vercel Inc.</strong> — 웹사이트 호스팅 및 배포.
