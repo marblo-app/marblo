@@ -146,20 +146,25 @@ export const usePtyMirrorStore = create<PtyMirrorState>((set, get) => {
     },
 
     detach: (sessionId) => {
-      // pty.removeListeners 는 채널 전체를 비우는 destructive 호출이라 여기서
-      // 부르지 않는다 (TerminalView 와의 채널을 공유). attached flag 만 떨군다.
+      // pty.removeListeners 는 채널 전체(TerminalView 포함)를 비우는 destructive
+      // 호출이라 여기서 부르지 않는다. 이미 등록된 ipcRenderer 리스너는 세션이
+      // 살아있는 한 그대로 둔다.
+      //
+      // 따라서 attached 플래그도 클리어하지 않는다 — 그게 "리스너가 등록됐는가"
+      // 의 단일 source of truth이고, 클리어해버리면 다음 attach()가 두 번째
+      // 리스너를 새로 등록해 같은 청크가 N번 미러된다 (MiniTerminal mount /
+      // unmount / remount 시 회귀). 진짜 unsubscribe 는 PTY exit / agent delete
+      // 시점에 별도 release() 로 처리해야 함 — TODO.
+      //
+      // detach 가 정리하는 건 "이 시점에 더 그릴 필요 없는 일시적 상태"뿐:
+      //   - pending 청크 큐 + 예약된 flush timer
+      // buffer 자체는 살려둔다 — 재마운트 시 빈 화면 깜빡임을 피하기 위해.
       const t = flushTimers.get(sessionId);
       if (t) {
         clearTimeout(t);
         flushTimers.delete(sessionId);
       }
       pendingChunks.delete(sessionId);
-      set((s) => {
-        if (!s.attached[sessionId]) return s;
-        const nextAttached = { ...s.attached };
-        delete nextAttached[sessionId];
-        return { attached: nextAttached };
-      });
     },
 
     reset: (sessionId) => {
