@@ -328,42 +328,113 @@ export class AgentConfigGenerator {
     agentId: string,
     mcpEntry: MCPServerEntry,
   ): string {
-    // Gemini CLI reads MCP config from `~/.gemini/settings.json` with a
-    // top-level `mcpServers` map, same shape as Claude Code. Like Codex,
-    // we need per-agent isolation because the spawned MCP child only
-    // sees the env declared in the config block — process env doesn't
-    // propagate, so each agent has to pin its own MARBLO_AGENT_ID.
+    // Per-agent isolation strategy for Gemini CLI (verified against v0.43):
     //
-    // Strategy mirrors generateGPTConfig: write `<isolated-home>/.gemini/
-    // settings.json`, preserve the user's non-MCP settings, and let
-    // buildCLICommand point HOME at <isolated-home> so Gemini reads our
-    // copy. (Gemini follows XDG-ish home conventions; HOME override is
-    // the universal lever.)
+    // 1) `GEMINI_CLI_HOME=<parent>` env redirect (not HOME override).
+    //    gemini's internal homedir() reads GEMINI_CLI_HOME first; everything
+    //    else in the process (~/Library/..., shell completions) stays on
+    //    user's real $HOME. Whole-HOME override broke the auth flow even
+    //    when oauth_creds was hard-copied — gemini's auth handshake never
+    //    completes in a foreign $HOME tree.
+    //
+    // 2) HARD-COPY user's ~/.gemini/* into <parent>/.gemini/ (not symlink).
+    //    Symlinks make gemini's atomic-rename writes orphan the original
+    //    and the spinner never resolves. Plain copy keeps gemini happy and
+    //    keeps token refreshes inside the isolated dir (acceptable — user's
+    //    next native gemini run will refresh independently).
+    //
+    // 3) FORCE settings.security.auth.selectedType = "oauth-personal".
+    //    Empty settings.json triggers the interactive "How would you like
+    //    to authenticate for this project?" dialog, which --yolo can NOT
+    //    auto-dismiss. Result: agent hangs forever on "Waiting for
+    //    authentication..." spinner with no path forward. Pinning the
+    //    auth type makes performInitialAuth use cached creds straight away.
     const geminiHome = path.join(CONFIG_DIR, `gemini-home-${agentId}`);
     const dotGemini = path.join(geminiHome, ".gemini");
     fs.mkdirSync(dotGemini, { recursive: true });
 
-    // Preserve user's non-MCP settings so model preferences / theme /
-    // auth pointers survive. Strip any existing mcpServers entries and
-    // replace with ours.
-    const userSettingsPath = path.join(
-      os.homedir(),
-      ".gemini",
-      "settings.json",
-    );
+    // Hard-copy user's ~/.gemini/* (oauth_creds.json, installation_id,
+    // google_accounts.json, projects.json, state.json, GEMINI.md, etc.)
+    // so cached credentials and global instructions are available.
+    //
+    // Repair pre-existing broken state: older builds of this file created
+    // symlinks here. Symlinks break gemini's auth (atomic-rename writes
+    // orphan the target), so on encountering one we MUST unlink and
+    // hard-copy fresh. Plain files left from a previous successful spawn
+    // are kept — overwriting them would discard runtime state like
+    // refreshed tokens.
+    const userGeminiDir = path.join(os.homedir(), ".gemini");
+    if (fs.existsSync(userGeminiDir)) {
+      const copyRecursive = (src: string, dst: string) => {
+        const stat = fs.lstatSync(src);
+        if (stat.isDirectory()) {
+          fs.mkdirSync(dst, { recursive: true });
+          for (const child of fs.readdirSync(src)) {
+            copyRecursive(path.join(src, child), path.join(dst, child));
+          }
+        } else {
+          // copyFileSync resolves symlinks — good, we want plain copies.
+          fs.copyFileSync(src, dst);
+        }
+      };
+      for (const entry of fs.readdirSync(userGeminiDir)) {
+        if (entry === "settings.json") continue; // we write our own
+        const dst = path.join(dotGemini, entry);
+        if (fs.existsSync(dst)) {
+          let isSymlink = false;
+          try {
+            isSymlink = fs.lstatSync(dst).isSymbolicLink();
+          } catch {
+            // lstat can throw for a dangling symlink — treat as broken.
+            isSymlink = true;
+          }
+          if (!isSymlink) continue; // already a hard copy, leave alone
+          try {
+            fs.unlinkSync(dst);
+          } catch {
+            continue; // can't repair — skip rather than crash
+          }
+        }
+        try {
+          copyRecursive(path.join(userGeminiDir, entry), dst);
+        } catch {
+          // best-effort — some files may be unreadable (e.g. weird perms)
+        }
+      }
+    }
+
+    // Preserve user's non-MCP settings (theme, model defaults, etc.) and
+    // merge with the auth type pin + our MCP entry.
+    const userSettingsPath = path.join(userGeminiDir, "settings.json");
     let preserved: Record<string, unknown> = {};
     if (fs.existsSync(userSettingsPath)) {
       try {
-        const raw = fs.readFileSync(userSettingsPath, "utf-8");
-        preserved = JSON.parse(raw) as Record<string, unknown>;
+        preserved = JSON.parse(
+          fs.readFileSync(userSettingsPath, "utf-8"),
+        ) as Record<string, unknown>;
         delete (preserved as Record<string, unknown>).mcpServers;
       } catch {
         // best-effort
       }
     }
 
+    const preservedSecurity = ((preserved as Record<string, unknown>)
+      .security ?? {}) as Record<string, unknown>;
+    const preservedAuth = (preservedSecurity.auth ?? {}) as Record<
+      string,
+      unknown
+    >;
     const config = {
       ...preserved,
+      security: {
+        ...preservedSecurity,
+        auth: {
+          // Default to Google OAuth; respect user's pin if they set a
+          // different one (e.g. gemini-api-key, vertex-ai).
+          selectedType: preservedAuth.selectedType ?? "oauth-personal",
+          ...preservedAuth,
+        },
+      },
       mcpServers: {
         marblo: {
           command: mcpEntry.command,
@@ -375,27 +446,6 @@ export class AgentConfigGenerator {
 
     const settingsPath = path.join(dotGemini, "settings.json");
     fs.writeFileSync(settingsPath, JSON.stringify(config, null, 2), "utf-8");
-
-    // Symlink auth-related files (oauth_creds.json, GEMINI.md, etc.) so
-    // Gemini stays authenticated and inherits any user instructions.
-    const userGeminiDir = path.join(os.homedir(), ".gemini");
-    if (fs.existsSync(userGeminiDir)) {
-      try {
-        for (const entry of fs.readdirSync(userGeminiDir)) {
-          if (entry === "settings.json") continue; // we wrote our own
-          const src = path.join(userGeminiDir, entry);
-          const dst = path.join(dotGemini, entry);
-          if (fs.existsSync(dst)) continue;
-          try {
-            fs.symlinkSync(src, dst);
-          } catch {
-            // Ignore symlink errors (e.g. on Windows without privilege)
-          }
-        }
-      } catch {
-        // best-effort
-      }
-    }
 
     this.trackFile(agentId, settingsPath);
     return settingsPath;
@@ -588,41 +638,34 @@ export class AgentConfigGenerator {
         };
 
       case "gemini": {
-        // Gemini CLI reads `~/.gemini/settings.json`, so point HOME at our
-        // per-agent isolated home (created by generateGeminiConfig) — that
-        // dir already contains a `.gemini/settings.json` with the Marblo
-        // MCP entry plus the user's preserved non-MCP settings and
-        // symlinked auth/config files. Same isolation rationale as Codex
-        // (CODEX_HOME): the MCP child only sees env declared in the
-        // settings block, so each agent needs its own settings file
-        // bearing its own MARBLO_AGENT_ID.
+        // Per-agent isolation via GEMINI_CLI_HOME (NOT HOME override).
+        // Gemini's internal homedir() reads GEMINI_CLI_HOME and uses it
+        // as the parent of `.gemini`. Whole-HOME override broke gemini's
+        // auth handshake even when oauth_creds was hard-copied — verified
+        // with node-pty repro against gemini-cli v0.43.0.
         //
-        // mcpConfigPath here is `<geminiHome>/.gemini/settings.json`, so
-        // <geminiHome> is two levels up.
+        // mcpConfigPath = `<geminiHome>/.gemini/settings.json`,
+        // so geminiHome (the GEMINI_CLI_HOME value) is two levels up.
         const geminiHome = path.dirname(path.dirname(mcpConfigPath));
-        // Gemini's `--resume <id>` accepts "latest" as a literal sentinel
-        // (per `gemini --help`: "Use 'latest' for most recent or index
-        // number"), so we can pass our normalized "latest" through unchanged.
-        // For a concrete session id we'd pass the index — but Marblo doesn't
-        // currently track Gemini session indices, so concrete ids fall back
-        // to "latest" too (best the CLI can do without an index map).
-        //
-        // --skip-trust + --yolo: same purpose as the codex per-agent trust
-        // entry + approval_policy="never" / sandbox_mode="danger-full-access"
-        // overrides. Without them gemini shows "Do you trust the files in
-        // this folder?" interactive dialog AND skips loading project agents
-        // (logged: "Skipping project agents due to untrusted folder"), which
-        // breaks the same way codex did before its trust patch — Marblo's
-        // readiness pattern doesn't match the dialog text, the 10s fallback
-        // dumps the prompt mid-dialog, and the agent ends up unusable.
-        const geminiArgs: string[] = ["--skip-trust", "--yolo"];
+        // --yolo: auto-approve tool calls. Without it gemini shows
+        // interactive approval prompts mid-session.
+        // GEMINI_CLI_TRUST_WORKSPACE=true: equivalent to the removed
+        // --skip-trust flag (per gemini-cli docs/cli/trusted-folders.md).
+        // settings.security.auth.selectedType is pinned in
+        // generateGeminiConfig so --yolo's "How would you like to
+        // authenticate" dialog never appears.
+        const geminiArgs: string[] = ["--yolo"];
         if (wantResume) {
           geminiArgs.push("--resume", resumeIsLatest ? "latest" : "latest");
         }
         return {
           command: baseCommand || "gemini",
           args: geminiArgs,
-          env: { ...env, HOME: geminiHome },
+          env: {
+            ...env,
+            GEMINI_CLI_HOME: geminiHome,
+            GEMINI_CLI_TRUST_WORKSPACE: "true",
+          },
         };
       }
 
@@ -655,8 +698,15 @@ export class AgentConfigGenerator {
           "-c",
           'sandbox_mode="danger-full-access"',
         );
+        // Reject `baseCommand === "gpt"` — that's the model slug accidentally
+        // saved to the Firestore agent doc by older builds of Layout.tsx, and
+        // it shadows macOS's /usr/sbin/gpt (GUID Partition Table utility)
+        // which exits with "gpt: illegal option -- c" on our flag set. The
+        // user's intent is the Codex CLI; honor that even with stale docs.
+        const codexCommand =
+          !baseCommand || baseCommand === "gpt" ? "codex" : baseCommand;
         return {
-          command: baseCommand || "codex",
+          command: codexCommand,
           args: codexArgs,
           env: { ...env, CODEX_HOME: path.dirname(mcpConfigPath) },
         };
