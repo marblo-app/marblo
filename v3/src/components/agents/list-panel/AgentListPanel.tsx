@@ -60,6 +60,12 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
   // 할 수 있도록 zustand store 로 lift. 상태 단일화 + cross-panel drill-in.
   const focusedId = useAgentFocusStore((s) => s.focusedAgentId);
   const setFocusedId = useAgentFocusStore((s) => s.setFocusedAgent);
+  // Keyboard highlight in the list view. Moved by ↑/↓; Enter / → enters
+  // FocusView for the highlighted row. Persists across focus exits so the
+  // user lands back on the row they just inspected.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const listContainerRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Drag-resizable panel height (persisted). Mirrors OrchestratorPanel's
   // handle right above for muscle-memory consistency.
@@ -204,10 +210,72 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
     }
   }, [focusedId, rows]);
 
+  // Initialize / clamp the keyboard highlight. When list re-mounts (after
+  // returning from FocusView, or rows change), keep the highlight on the
+  // previously focused row if still present; otherwise default to first.
+  useEffect(() => {
+    if (rows.length === 0) {
+      if (highlightedId !== null) setHighlightedId(null);
+      return;
+    }
+    if (!highlightedId || !rows.some((r) => r.id === highlightedId)) {
+      setHighlightedId(focusedId ?? rows[0].id);
+    }
+  }, [rows, highlightedId, focusedId]);
+
+  const handleListKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      // Don't hijack typing in inputs that may be nested (none today, but
+      // future-proof against EmptyState search etc.).
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (rows.length === 0) return;
+      const currentIndex = highlightedId
+        ? rows.findIndex((r) => r.id === highlightedId)
+        : -1;
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        const next = currentIndex < 0 ? 0 : (currentIndex + 1) % rows.length;
+        setHighlightedId(rows[next].id);
+        rowRefs.current[rows[next].id]?.scrollIntoView({
+          block: "nearest",
+        });
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        const next = currentIndex <= 0 ? rows.length - 1 : currentIndex - 1;
+        setHighlightedId(rows[next].id);
+        rowRefs.current[rows[next].id]?.scrollIntoView({
+          block: "nearest",
+        });
+      } else if (
+        e.key === "Enter" ||
+        e.key === "ArrowRight" ||
+        e.code === "Space" ||
+        e.key === " "
+      ) {
+        e.preventDefault();
+        const id =
+          highlightedId ?? (currentIndex >= 0 ? rows[currentIndex].id : null);
+        if (id) setFocusedId(id);
+      }
+    },
+    [rows, highlightedId]
+  );
+
   const focusedIndex = focusedId
     ? rows.findIndex((r) => r.id === focusedId)
     : -1;
   const focusedRow = focusedIndex >= 0 ? rows[focusedIndex] : null;
+
+  // Auto-focus the list container when we're not in FocusView, so ↑/↓ work
+  // without an extra click. Declared after focusedRow to avoid TDZ on its
+  // dep array. preventScroll keeps the page from jumping.
+  useEffect(() => {
+    if (!focusedRow) {
+      listContainerRef.current?.focus({ preventScroll: true });
+    }
+  }, [focusedRow]);
 
   // 외부 store(zustand) 는 함수형 setter 가 없어서 functional update 대신
   // getState() 로 현재 값 직접 읽어서 다음 id 계산.
@@ -322,15 +390,29 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
         ) : rows.length === 0 ? (
           <EmptyState recent={recent} onSpawnClick={onSpawnClick} />
         ) : (
-          <div className="h-full overflow-auto">
+          <div
+            ref={listContainerRef}
+            tabIndex={0}
+            onKeyDown={handleListKeyDown}
+            className="h-full overflow-auto outline-none"
+          >
             {rows.map((row) => (
-              <AgentRow
+              <div
                 key={row.id}
-                row={row}
-                isExpanded={false}
-                onSelect={() => setFocusedId(row.id)}
-                onDoubleClick={() => handleDoubleClick(row)}
-              />
+                ref={(el) => {
+                  rowRefs.current[row.id] = el;
+                }}
+              >
+                <AgentRow
+                  row={row}
+                  isHighlighted={row.id === highlightedId}
+                  onSelect={() => {
+                    setHighlightedId(row.id);
+                    setFocusedId(row.id);
+                  }}
+                  onDoubleClick={() => handleDoubleClick(row)}
+                />
+              </div>
             ))}
           </div>
         )}

@@ -3,41 +3,41 @@ import { VENDOR_VISUALS, STATUS_PILL, type AgentRowData } from "./types";
 
 interface Props {
   row: AgentRowData;
-  isExpanded: boolean;
+  // Whether this row is the keyboard-highlighted item in the list. Different
+  // from "selected/focused" — pressing Enter on the highlighted row enters
+  // the FocusView. We keep the prop name semantic-only; visually it renders
+  // the same background as the previous isExpanded state.
+  isHighlighted: boolean;
   onSelect: () => void;
   onDoubleClick: () => void;
 }
 
-function AgentRowImpl({ row, isExpanded, onSelect, onDoubleClick }: Props) {
+function AgentRowImpl({ row, isHighlighted, onSelect, onDoubleClick }: Props) {
   const vendor = VENDOR_VISUALS[row.vendor];
   const pill = STATUS_PILL[row.status];
 
   return (
     <div
       role="button"
-      tabIndex={0}
+      tabIndex={-1}
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
       onKeyDown={(e) => {
-        // Enter / Space / → → 같은 의미: focus 모드로 진입 (단일 affordance).
-        // 별도 "drill-out" 단축키는 두지 않음 — 더블클릭만으로 충분.
-        if (
-          e.key === "Enter" ||
-          e.key === " " ||
-          e.code === "Space" ||
-          e.key === "ArrowRight"
-        ) {
+        // Per-row fallback when the user has Tab-focused into a specific row.
+        // The list-level handler in AgentListPanel handles ↑/↓/Enter/→ from
+        // the container; this duplicates Enter/Space for accessibility.
+        if (e.key === "Enter" || e.key === " " || e.code === "Space") {
           e.preventDefault();
           onSelect();
         }
       }}
       title={
         row.isAgent
-          ? "Click / Enter / →: focus this agent · Double-click: open Agents tab"
-          : "Click / Enter: open terminal"
+          ? "↑/↓: 이동 · Enter / → / 클릭: 포커스 · 더블클릭: Agents 탭"
+          : "↑/↓: 이동 · Enter: 터미널 포커스"
       }
       className={`relative flex items-center gap-3 px-3 py-2 border-b border-[#313244] cursor-pointer transition-colors ${
-        isExpanded ? "bg-[#313244]" : "hover:bg-[#1e1e2e]/60"
+        isHighlighted ? "bg-[#313244]" : "hover:bg-[#1e1e2e]/60"
       }`}
       style={{ minHeight: 52 }}
     >
@@ -82,9 +82,7 @@ function AgentRowImpl({ row, isExpanded, onSelect, onDoubleClick }: Props) {
 
       <span
         aria-hidden
-        className={`text-[10px] text-[#6c7086] transition-transform duration-150 ${
-          isExpanded ? "rotate-90" : ""
-        }`}
+        className="text-[10px] text-[#6c7086]"
         style={{ width: 12 }}
       >
         ▶

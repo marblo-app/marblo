@@ -21,6 +21,7 @@ import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
 import { UpdateBanner } from "./UpdateBanner";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
 import { useAgentReconnect } from "../hooks/useAgentReconnect";
+import { useAgentSessionMapSync } from "../hooks/useAgentSessionMapSync";
 import { useSessionRestore } from "../hooks/useSessionRestore";
 import { useCostWriter } from "../hooks/useCostWriter";
 import { usePresenceHeartbeat } from "../hooks/usePresenceHeartbeat";
@@ -141,6 +142,11 @@ export function Layout() {
 
   // Auto-reconnect agents on app restart + system wake
   useAgentReconnect();
+
+  // agentSessionMap 을 sessions × agents 에서 reactively 동기화.
+  // reconnect / spawn / 다른 윈도우 attach 경로 어디서 누락돼도, agent name
+  // suffix 매칭으로 자동 등록되어 그리드 MiniTerminal 이 즉시 살아남.
+  useAgentSessionMapSync();
 
   // Write cost updates from main process to Firestore (using renderer's auth)
   useCostWriter();
