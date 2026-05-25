@@ -1,13 +1,27 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Agent } from "../../types/agent";
 import type { Task } from "../../types/task";
 import AgentStatusCard from "./AgentStatusCard";
+import AgentFleetGrid from "./AgentFleetGrid";
 import TeamSummary from "./TeamSummary";
 import ActivityFeed from "./ActivityFeed";
 import CostWidget from "./CostWidget";
 import AuditTimeline from "./AuditTimeline";
 import { useCostStore } from "../../stores/costStore";
 import { useTranslation } from "../../lib/i18n";
+
+type ViewMode = "list" | "grid";
+const VIEW_MODE_KEY = "agentsViewMode";
+
+function readViewMode(): ViewMode {
+  if (typeof window === "undefined") return "list";
+  try {
+    const v = window.localStorage.getItem(VIEW_MODE_KEY);
+    return v === "grid" ? "grid" : "list";
+  } catch {
+    return "list";
+  }
+}
 
 interface AgentDashboardProps {
   agents: Agent[];
@@ -31,11 +45,23 @@ export default function AgentDashboard({
   onDelete,
 }: AgentDashboardProps) {
   const { t } = useTranslation();
+  const [viewMode, setViewMode] = useState<ViewMode>(readViewMode);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, viewMode);
+    } catch {
+      /* quota / disabled — best-effort */
+    }
+  }, [viewMode]);
+
   // Orchestrator is rendered in its own bottom panel — hide it from the
   // Agents tab card grid / summary / cleanup. ActivityFeed still receives
   // the full list so its `agentId in agents` filter passes orchestrator
   // events.
   const visibleAgents = agents.filter((a) => a.role !== "orchestrator");
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
@@ -55,6 +81,35 @@ export default function AgentDashboard({
           {t("agents.dashboard.title")}
         </h2>
         <div className="flex items-center gap-2">
+          {/* View switcher — list (cards) vs grid (FleetView) */}
+          <div className="flex items-center rounded border border-gray-700 bg-gray-800/50 p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              aria-pressed={viewMode === "list"}
+              title="List view"
+              className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                viewMode === "list"
+                  ? "bg-gray-700 text-gray-100"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              ▤ List
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              aria-pressed={viewMode === "grid"}
+              title="Grid view (FleetView)"
+              className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                viewMode === "grid"
+                  ? "bg-gray-700 text-gray-100"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              ▦ Grid
+            </button>
+          </div>
           {visibleAgents.filter((a) => a.status !== "working").length > 0 && (
             <button
               className="flex items-center gap-1.5 rounded border border-red-600/30 bg-red-600/10 px-3 py-1.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/20"
@@ -99,9 +154,13 @@ export default function AgentDashboard({
       {/* Team Summary */}
       <TeamSummary agents={visibleAgents} tasks={tasks} />
 
-      {/* Agent Cards Grid */}
+      {/* Agent rendering — view mode toggles between rich list cards and
+          the FleetView grid. Empty state is shared. Orchestrator filtered
+          out of both views (it has its own bottom panel). */}
       {visibleAgents.length === 0 ? (
         <AgentSetupGuide onAddAgent={onAddAgent} />
+      ) : viewMode === "grid" ? (
+        <AgentFleetGrid agents={visibleAgents} />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {visibleAgents.map((agent) => (

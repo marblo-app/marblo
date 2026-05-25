@@ -16,10 +16,16 @@ interface TerminalState {
     name: string,
     command?: string,
     args?: string[],
-    cwd?: string
+    cwd?: string,
   ) => Promise<string>;
   attachSession: (id: string, name: string) => void;
   closeSession: (id: string) => Promise<void>;
+  /**
+   * 점프 헬퍼: attachSession + setActive + 'marblo:focus-terminal' 이벤트.
+   * Fleet 그리드/Activity 점프 등 여러 surface 에서 같은 흐름을 부르므로
+   * store 에 모았다.
+   */
+  openTerminalForSession: (id: string, name: string) => void;
   /**
    * Detach every terminal session from THIS window's UI without killing the
    * backing PTYs. Used when the window switches projects — agent PTYs may be
@@ -67,6 +73,16 @@ const terminalStore = create<TerminalState>((set, get) => ({
     }
     const session: TerminalSession = { id, name, isAgent: true };
     set((s) => ({ sessions: [...s.sessions, session], activeSessionId: id }));
+  },
+
+  openTerminalForSession: (id, name) => {
+    get().attachSession(id, name);
+    set({ activeSessionId: id });
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("marblo:focus-terminal", { detail: { sessionId: id } }),
+      );
+    }
   },
 
   closeSession: async (id) => {
