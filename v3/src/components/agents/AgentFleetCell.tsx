@@ -1,7 +1,8 @@
-import { forwardRef, memo, useCallback } from "react";
+import { forwardRef, memo, useCallback, useState } from "react";
 import type { Agent, ModelType, AgentStatus } from "../../types/agent";
 import { useAgentSessionMap } from "../../stores/agentSessionMap";
 import { useAgentFocusStore } from "../../stores/agentFocusStore";
+import { useAgentStore } from "../../stores/agentStore";
 import MiniTerminal from "./MiniTerminal";
 import AgentStatusLabel from "./AgentStatusLabel";
 import AttentionBadge from "./AttentionBadge";
@@ -53,6 +54,8 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
     // "agent-${id}" fallback 으로 떨어진다.
     const sessionId = useAgentSessionMap((s) => s.get(agent.id));
 
+    const [pending, setPending] = useState<"start" | "delete" | null>(null);
+
     // 파일 매니저 패턴:
     //   - 단일 click  = select (focus) 만. onFocus 가 부모 그리드의 활성
     //     셀 인덱스를 동기화 → 이어지는 ←→↑↓ 가 자연스럽게 이어짐.
@@ -87,59 +90,130 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
       [drillIn]
     );
 
+    // Cell-level actions — 셀 click/focus 이벤트로 버블 안 되게 stopPropagation.
+    // 직접 store 호출 (prop drilling 회피) — restartAgent / deleteAgent 는
+    // 글로벌 액션이라 어차피 어디서든 같은 결과.
+    const handleStart = useCallback(
+      async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setPending("start");
+        try {
+          await useAgentStore.getState().restartAgent(agent.id);
+        } catch (err) {
+          console.error("[AgentFleetCell] start failed:", err);
+        } finally {
+          setPending(null);
+        }
+      },
+      [agent.id]
+    );
+
+    const handleDelete = useCallback(
+      async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!confirm(`"${agent.name}" 에이전트를 삭제할까요?`)) return;
+        setPending("delete");
+        try {
+          await useAgentStore.getState().deleteAgent(agent.id);
+        } catch (err) {
+          console.error("[AgentFleetCell] delete failed:", err);
+          setPending(null);
+        }
+        // 성공 시 컴포넌트가 unmount 되므로 setPending(null) 생략 (race-safe).
+      },
+      [agent.id, agent.name]
+    );
+
+    // ▶ Start 버튼은 사용자가 의도적으로 깨워야 할 때만 노출 — running 중인
+    // 에이전트에 다시 누르면 cold restart 되어 history 가 끊어진다.
+    const canStart = agent.status === "stopped" || agent.status === "error";
+
     return (
-      <button
-        type="button"
-        ref={ref}
-        role="gridcell"
-        tabIndex={isFocused ? 0 : -1}
-        onClick={handleClick}
-        onDoubleClick={drillIn}
-        onKeyDown={handleKeyDown}
-        onFocus={onFocus}
-        aria-label={`${agent.name} — Enter 또는 더블클릭으로 상세보기`}
-        data-session-id={sessionId}
-        className="group text-left rounded-lg border border-[#313244] bg-[#181825] p-2.5 hover:border-[#585b70] hover:bg-[#1e1e2e] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#cba6f7]"
-        style={{ borderLeftColor: modelInfo.color, borderLeftWidth: 3 }}
-        title={`${agent.name} — 단일 클릭=선택, Enter/더블클릭=하단 상세보기`}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between gap-2 mb-1.5 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-sm">{modelInfo.icon}</span>
-            <span className="text-xs font-medium text-[#cdd6f4] truncate">
-              {agent.name}
-            </span>
-            <span
-              className={`text-[9px] ${statusInfo.textColor} flex-shrink-0`}
-              aria-label={agent.status}
-            >
-              {statusInfo.dot}
-            </span>
+      <div className="relative group">
+        <button
+          type="button"
+          ref={ref}
+          role="gridcell"
+          tabIndex={isFocused ? 0 : -1}
+          onClick={handleClick}
+          onDoubleClick={drillIn}
+          onKeyDown={handleKeyDown}
+          onFocus={onFocus}
+          aria-label={`${agent.name} — Enter 또는 더블클릭으로 상세보기`}
+          data-session-id={sessionId}
+          className="w-full text-left rounded-lg border border-[#313244] bg-[#181825] p-2.5 hover:border-[#585b70] hover:bg-[#1e1e2e] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#cba6f7]"
+          style={{ borderLeftColor: modelInfo.color, borderLeftWidth: 3 }}
+          title={`${agent.name} — 단일 클릭=선택, Enter/더블클릭=하단 상세보기`}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between gap-2 mb-1.5 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-sm">{modelInfo.icon}</span>
+              <span className="text-xs font-medium text-[#cdd6f4] truncate">
+                {agent.name}
+              </span>
+              <span
+                className={`text-[9px] ${statusInfo.textColor} flex-shrink-0`}
+                aria-label={agent.status}
+              >
+                {statusInfo.dot}
+              </span>
+            </div>
+            <AttentionBadge
+              status={agent.status}
+              sessionId={sessionId}
+              restartCount={restartCount}
+              lastExitCode={lastExitCode}
+            />
           </div>
-          <AttentionBadge
-            status={agent.status}
-            sessionId={sessionId}
-            restartCount={restartCount}
-            lastExitCode={lastExitCode}
-          />
-        </div>
 
-        {/* Mini terminal preview */}
-        <MiniTerminal sessionId={sessionId} maxLines={8} />
+          {/* Mini terminal preview */}
+          <MiniTerminal sessionId={sessionId} maxLines={8} />
 
-        {/* Status label */}
-        <div className="mt-1.5 flex items-center gap-1.5">
-          <span className="text-[9px] uppercase tracking-wider text-[#6c7086] flex-shrink-0">
-            {agent.role}
-          </span>
-          <AgentStatusLabel
-            agent={agent}
-            sessionId={sessionId}
-            lastActivityMessage={lastActivityMessage}
-          />
+          {/* Status label */}
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <span className="text-[9px] uppercase tracking-wider text-[#6c7086] flex-shrink-0">
+              {agent.role}
+            </span>
+            <AgentStatusLabel
+              agent={agent}
+              sessionId={sessionId}
+              lastActivityMessage={lastActivityMessage}
+            />
+          </div>
+        </button>
+
+        {/* Hover-/focus-revealed action toolbar — 상시 노출하면 AttentionBadge
+            과 겹쳐서 시각 노이즈가 높아짐. 셀이 hover 또는 키보드로 focus 된
+            상태에서만 표시해 평소엔 깔끔하게 두고 의도 시점에만 노출.
+            absolute 로 카드 위 z-index 위에 띄워 AttentionBadge 자리를 덮음. */}
+        <div className="absolute top-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity z-10">
+          {canStart && (
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={handleStart}
+              disabled={pending !== null}
+              title="세션 시작 (cold restart — 새 PTY 생성)"
+              aria-label={`${agent.name} 세션 시작`}
+              className="rounded border border-[#a6e3a1]/40 bg-[#11111b]/90 px-1.5 py-0.5 text-[10px] text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/15 disabled:opacity-40"
+            >
+              {pending === "start" ? "…" : "▶ Start"}
+            </button>
+          )}
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={handleDelete}
+            disabled={pending !== null}
+            title="에이전트 삭제 (PTY 종료 + Firestore 문서 제거)"
+            aria-label={`${agent.name} 에이전트 삭제`}
+            className="rounded border border-[#f38ba8]/40 bg-[#11111b]/90 px-1.5 py-0.5 text-[10px] text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/15 disabled:opacity-40"
+          >
+            {pending === "delete" ? "…" : "🗑"}
+          </button>
         </div>
-      </button>
+      </div>
     );
   }
 );
