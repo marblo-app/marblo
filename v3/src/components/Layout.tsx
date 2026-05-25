@@ -4,6 +4,7 @@ import { TabBar, type TabId } from "./TabBar";
 import { Sidebar } from "./sidebar/Sidebar";
 import { AgentListPanel } from "./agents/list-panel/AgentListPanel";
 import OrchestratorPanel from "./orchestrator/OrchestratorPanel";
+import { MissionOrchestratorPanel } from "./missions/MissionOrchestratorPanel";
 import { BoardTab } from "./tabs/BoardTab";
 import { CodeTab } from "./tabs/CodeTab";
 import { AgentsTab } from "./tabs/AgentsTab";
@@ -207,9 +208,8 @@ export function Layout() {
       // other's fields.
       if (currentProject) {
         try {
-          const { doc, setDoc, serverTimestamp } = await import(
-            "firebase/firestore"
-          );
+          const { doc, setDoc, serverTimestamp } =
+            await import("firebase/firestore");
           const { db } = await import("../lib/firebase");
           await setDoc(
             doc(db, "agents", data.agentId),
@@ -221,16 +221,27 @@ export function Layout() {
               role: data.role || "agent",
               status: "working",
               currentTaskId: null,
-              command: data.model,
+              // Map model → CLI binary. Historically this stored `data.model`
+              // verbatim, which happens to match the binary for claude/gemini
+              // but collides with macOS /usr/sbin/gpt (GUID Partition Table
+              // utility) for the "gpt" model — the agent process then exits
+              // immediately with "gpt: illegal option -- c". Match the table
+              // in v3/electron/main.ts getDefaultCommand().
+              command:
+                data.model === "gpt"
+                  ? "codex"
+                  : data.model === "antigravity"
+                    ? "agy"
+                    : data.model,
               skillFile: "",
               createdAt: serverTimestamp(),
             },
-            { merge: true }
+            { merge: true },
           );
         } catch (err) {
           console.warn(
             "[Layout] Firestore agent upsert failed (non-fatal):",
-            err
+            err,
           );
         }
       }
@@ -238,13 +249,12 @@ export function Layout() {
       // Chat notification — best-effort.
       if (currentProject) {
         try {
-          const { notifyAgentSpawned } = await import(
-            "../services/agentNotificationService"
-          );
+          const { notifyAgentSpawned } =
+            await import("../services/agentNotificationService");
           await notifyAgentSpawned(
             currentProject.id,
             data.name,
-            data.role || "agent"
+            data.role || "agent",
           );
         } catch {
           // best-effort
@@ -339,8 +349,14 @@ export function Layout() {
             <ActiveTabComponent />
           </div>
 
-          {/* Orchestrator panel — between tab content and agent list */}
-          <OrchestratorPanel />
+          {/* Orchestrator panel — between tab content and agent list.
+              Missions 탭에서는 별도 mission orchestrator PTY 를 노출 (board 와 분리된 세션).
+              나머지 탭은 board orchestrator PTY. */}
+          {activeTab === "missions" ? (
+            <MissionOrchestratorPanel />
+          ) : (
+            <OrchestratorPanel />
+          )}
 
           {/* Agent List panel — replaces the old TerminalPanel.
               P3 hybrid rows for ambient monitoring; double-click a row to
