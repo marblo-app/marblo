@@ -205,6 +205,12 @@ export default function Foundation50Page() {
 
         <div className="flex flex-col sm:flex-row gap-3 justify-center mt-8">
           <Link
+            href={`/${locale}/foundation50/faq`}
+            className="bg-indigo-600/20 border border-indigo-500/50 hover:bg-indigo-600/30 text-indigo-100 px-6 py-3 rounded-lg font-medium transition text-center"
+          >
+            {t("faq_link")}
+          </Link>
+          <Link
             href={`/${locale}/pricing`}
             className="border border-zinc-700 hover:bg-zinc-800 text-zinc-200 px-6 py-3 rounded-lg font-medium transition text-center"
           >

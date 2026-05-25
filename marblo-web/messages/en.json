@@ -281,7 +281,23 @@
     "schedule_kr": "Korea GA: 2026-06-23 (Tue)",
     "schedule_us": "US GA: 2026-07-21 (Tue)",
     "schedule_jp": "Japan GA: 2026-09-15 (Tue)",
-    "schedule_note": "Foundation 50 launches on GA day. No separate closed beta phase."
+    "schedule_note": "Foundation 50 launches on GA day. No separate closed beta phase.",
+    "faq_link": "Frequently Asked Questions (FAQ) →"
+  },
+  "foundation50Faq": {
+    "title": "Foundation Member FAQ",
+    "subtitle": "Answers to the 5 most common questions before signing up. Further questions go in the #questions Discord channel after you join.",
+    "back_link": "← Back to Foundation Member signup",
+    "q1_title": "1. What is Marblo?",
+    "q1_body": "Marblo is a heterogeneous AI agent orchestration desktop app. It lets you run Claude, GPT, Gemini, and local models side by side and direct a fleet of agents through a Kanban board, a Mission editor, and an integrated terminal.\n\nA 1-minute demo video will land here right before GA. Until then, take a look at the 'Mission editor' and 'Orchestration' sections on the home page for screenshots.",
+    "q2_title": "2. How do I set up BYOK?",
+    "q2_body": "On first launch, Marblo opens a settings panel where you register the model keys / subscriptions you want to use. Keys are stored encrypted in your OS keychain and never sent to Marblo servers.\n\n· Claude — issue an API key in the Anthropic console, or sign in with Claude Code Max\n· GPT — issue an API key in the OpenAI platform, or sign in with ChatGPT Plus\n· Gemini — issue an API key in Google AI Studio\n· Local models — point Marblo at your Ollama (or compatible) endpoint URL\n\nRegister only the models you actually plan to use. You do not have to register all of them.",
+    "q3_title": "3. What should the case study write-up look like?",
+    "q3_body": "Publish your real Marblo experience on a public outlet. Please keep these minimum standards:\n\n· At least 500 characters\n· Include at least 1 screenshot of you actually using Marblo\n· Publish on your own blog / X (Twitter) / LinkedIn / Threads / YouTube / SNS — public outlets only (no internal wikis or private Notion docs)\n· After publishing, drop the link into the #usecases channel on the member Discord\n\nTopic, tone, and format are entirely up to you. You do not have to be flattering — we welcome the good, the rough, and the things you wish were different.",
+    "q4_title": "4. How do I get into the Foundation Discord?",
+    "q4_body": "Right before GA, we email you the checkout instructions along with a Discord invite link to the email you signed up with. Channel access is granted within 24 hours of checkout.\n\nThe channel is a private space limited to the 50 members, and your access stays for life even if you cancel Pro later. Inside the channel you get early beta access to new features, a direct line to the developer, and shared workflows from the other members.",
+    "q5_title": "5. What is the refund policy?",
+    "q5_body": "Course (₩99,500) — Under Korean e-commerce law, you may withdraw the purchase unconditionally within 7 days of payment. After 7 days, partial refunds or no refund may apply based on how much of the course you have watched. Exact terms are linked at checkout.\n\nMarblo Pro 6-month free coupon — The coupon itself is issued for free and is not refundable. Once you activate the coupon and start the Pro subscription, no further refund applies.\n\nFoundation member Discord channel — independent of payment and coupon, kept open for life."
   },
   "betatester50": {
     "badge": "🌟 Foundation Members — 50 seats only",
