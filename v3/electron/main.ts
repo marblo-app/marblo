@@ -1430,6 +1430,13 @@ ipcMain.handle(
       rootPath
     );
 
+    // Track Claude session IDs claimed during this reconnect pass — used
+    // by the "any-unclaimed-session" fallback below to avoid attaching the
+    // same JSONL to two different agents.
+    const claimedClaudeSessions = new Set<string>(
+      candidates.map((c) => c.sessionId).filter((s): s is string => Boolean(s))
+    );
+
     const results = [];
 
     for (const candidate of candidates) {
@@ -1477,6 +1484,25 @@ ipcMain.handle(
             agentData.name,
             agentData.id
           );
+        }
+        // Aggressive fallback: agents created in earlier app versions don't
+        // have label entries in marblo-labels.json, so the name/id-filtered
+        // resolveSessionId returns null even when the project has plenty of
+        // resumable JSONLs. Attach the most-recent unclaimed session as a
+        // best-effort. --resume is token-free; worst case the user deletes
+        // the wrong-session agent and re-spawns.
+        if (!resumeId) {
+          const allSessions = getAnyOrchestrator().listSessions(rootPath);
+          const unclaimed = allSessions.find(
+            (s) => !claimedClaudeSessions.has(s.id)
+          );
+          if (unclaimed) {
+            resumeId = unclaimed.id;
+            claimedClaudeSessions.add(unclaimed.id);
+            console.log(
+              `[Reconnect] Claude agent ${agentData.name} → unlabeled-session fallback ${unclaimed.id}`
+            );
+          }
         }
       } else {
         const model = agentData.model as "claude" | "gemini" | "gpt" | "custom";
