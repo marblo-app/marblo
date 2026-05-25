@@ -8,6 +8,7 @@ import { AgentRow } from "./AgentRow";
 import { EmptyState } from "./EmptyState";
 import { FocusView } from "./FocusView";
 import { VENDOR_VISUALS, type AgentRowData, type VendorKind } from "./types";
+import TerminalView from "../../terminal/TerminalView";
 
 // Panel height (drag-resizable, persisted to localStorage). MIN of 180 keeps
 // header (~30) + handle (4) + EmptyState legible; previous 120 clipped it.
@@ -93,7 +94,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
       const delta = startY - moveEvent.clientY;
       const newHeight = Math.min(
         MAX_HEIGHT,
-        Math.max(MIN_HEIGHT, startHeight + delta)
+        Math.max(MIN_HEIGHT, startHeight + delta),
       );
       setPanelHeight(newHeight);
     };
@@ -106,7 +107,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
       try {
         window.localStorage.setItem(
           HEIGHT_STORAGE_KEY,
-          String(panelHeightRef.current)
+          String(panelHeightRef.current),
         );
       } catch {
         // private mode / quota — ignore
@@ -123,7 +124,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
     terminalSpawnCounter++;
     try {
       const id = await createTerminalSession(
-        `Terminal ${terminalSpawnCounter}`
+        `Terminal ${terminalSpawnCounter}`,
       );
       setFocusedId(id);
     } catch (err) {
@@ -144,7 +145,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
   // directly above this one — don't double-render it as just another row.
   const realAgents = useMemo(
     () => agents.filter((a) => a.role !== "orchestrator"),
-    [agents]
+    [agents],
   );
 
   const rows = useMemo<AgentRowData[]>(() => {
@@ -159,7 +160,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
     // to store the canonical ptySessionId on the Agent Firestore doc.
     const agentRows: AgentRowData[] = realAgents.map((a) => {
       const matched = sessions.find(
-        (s) => s.isAgent && s.name.endsWith(a.name)
+        (s) => s.isAgent && s.name.endsWith(a.name),
       );
       return {
         id: a.id,
@@ -189,6 +190,16 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
     return [...agentRows, ...shellRows];
   }, [realAgents, sessions]);
 
+  // Rows with a live PTY session — these get a persistent TerminalView each.
+  // Mounted at the panel body level (below) so xterm instances survive focus
+  // card switches AND list↔focus transitions. xterm keeps its own alt-screen
+  // + scrollback + cursor state in-memory, so toggling visibility (not
+  // unmount) reproduces the "exact same screen" UX of Claude's /agents view.
+  const rowsWithPty = useMemo(
+    () => rows.filter((r) => !!r.ptySessionId),
+    [rows],
+  );
+
   const recent = useMemo(
     () =>
       realAgents
@@ -199,7 +210,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
           vendor: VENDOR_VISUALS[a.model as VendorKind]?.label ?? a.model,
           ageLabel: formatAge(a.costUpdatedAt ?? a.createdAt),
         })),
-    [realAgents]
+    [realAgents],
   );
 
   // When the focused row disappears (agent deleted, terminal closed, etc.)
@@ -260,7 +271,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
         if (id) setFocusedId(id);
       }
     },
-    [rows, highlightedId]
+    [rows, highlightedId],
   );
 
   const focusedIndex = focusedId
@@ -302,7 +313,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
         onJumpToAgent(row.id);
       }
     },
-    [requestJump, onJumpToAgent]
+    [requestJump, onJumpToAgent],
   );
 
   const handleStartFocused = useCallback(
@@ -316,14 +327,14 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
         setStartingId(null);
       }
     },
-    [restartAgent]
+    [restartAgent],
   );
 
   const handleRename = useCallback(
     async (id: string, newName: string) => {
       await updateAgent(id, { name: newName });
     },
-    [updateAgent]
+    [updateAgent],
   );
 
   return (
@@ -370,50 +381,106 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0">
-        {focusedRow ? (
-          <FocusView
-            row={focusedRow}
-            index={focusedIndex}
-            total={rows.length}
-            onPrev={handlePrev}
-            onNext={handleNext}
-            onBack={() => setFocusedId(null)}
-            onRename={(newName) => handleRename(focusedRow.id, newName)}
-            onStart={
-              focusedRow.isAgent
-                ? () => handleStartFocused(focusedRow.id)
-                : undefined
-            }
-            isStarting={startingId === focusedRow.id}
-          />
-        ) : rows.length === 0 ? (
-          <EmptyState recent={recent} onSpawnClick={onSpawnClick} />
-        ) : (
-          <div
-            ref={listContainerRef}
-            tabIndex={0}
-            onKeyDown={handleListKeyDown}
-            className="h-full overflow-auto outline-none"
-          >
-            {rows.map((row) => (
-              <div
-                key={row.id}
-                ref={(el) => {
-                  rowRefs.current[row.id] = el;
-                }}
-              >
-                <AgentRow
-                  row={row}
-                  isHighlighted={row.id === highlightedId}
-                  onSelect={() => {
-                    setHighlightedId(row.id);
-                    setFocusedId(row.id);
-                  }}
-                  onDoubleClick={() => handleDoubleClick(row)}
-                />
-              </div>
+      <div className="flex-1 min-h-0 relative">
+        {/* Persistent terminals layer — every row with a PTY gets its own
+            TerminalView, mounted exactly once and kept across focus card
+            switches AND list↔focus transitions. Only the active one is
+            visible; the rest sit invisible at absolute inset-0, preserving
+            xterm's grid / alt-screen / scrollback in-memory. The layer
+            itself is always rendered (not gated on focusedRow) so xterms
+            keep ingesting live PTY data even when the user is browsing the
+            list view — returning to focus shows the latest screen instantly. */}
+        <div className="absolute inset-0 flex flex-col bg-[#11111b]">
+          {focusedRow && (
+            <FocusView
+              row={focusedRow}
+              index={focusedIndex}
+              total={rows.length}
+              onPrev={handlePrev}
+              onNext={handleNext}
+              onBack={() => setFocusedId(null)}
+              onRename={(newName) => handleRename(focusedRow.id, newName)}
+              onStart={
+                focusedRow.isAgent
+                  ? () => handleStartFocused(focusedRow.id)
+                  : undefined
+              }
+              isStarting={startingId === focusedRow.id}
+            />
+          )}
+          <div className="flex-1 min-h-0 relative">
+            {rowsWithPty.map((r) => (
+              <TerminalView
+                key={r.ptySessionId}
+                sessionId={r.ptySessionId!}
+                isActive={
+                  !!focusedRow && focusedRow.ptySessionId === r.ptySessionId
+                }
+              />
             ))}
+            {/* Focused-but-no-PTY empty state (agent never started yet) */}
+            {focusedRow && !focusedRow.ptySessionId && (
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-[11px] text-[#6c7086]">
+                <div>
+                  이 에이전트에 연결된 터미널이 없습니다.
+                  <br />새 세션을 시작하시겠습니까?
+                </div>
+                {focusedRow.isAgent && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleStartFocused(focusedRow.id)}
+                      disabled={startingId === focusedRow.id}
+                      className="rounded border border-[#cba6f7] bg-[#cba6f7]/10 px-3 py-1 text-[11px] text-[#cba6f7] transition-colors hover:bg-[#cba6f7]/20 disabled:opacity-50"
+                      title="기존 PTY를 죽이고 새 CLI 세션 시작 (resume 안 함)"
+                    >
+                      {startingId === focusedRow.id
+                        ? "Starting…"
+                        : "+ New Session"}
+                    </button>
+                  </div>
+                )}
+                <div className="text-[10px] text-[#585b70]">
+                  세션이 안 뜨면 콘솔에서 CLI 설치 여부를 확인하세요 (claude /
+                  codex / gemini).
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* List view overlay — opaque, covers terminals layer when no focus.
+            Terminals stay mounted underneath so re-entering focus is instant. */}
+        {!focusedRow && (
+          <div className="absolute inset-0 bg-[#181825]">
+            {rows.length === 0 ? (
+              <EmptyState recent={recent} onSpawnClick={onSpawnClick} />
+            ) : (
+              <div
+                ref={listContainerRef}
+                tabIndex={0}
+                onKeyDown={handleListKeyDown}
+                className="h-full overflow-auto outline-none"
+              >
+                {rows.map((row) => (
+                  <div
+                    key={row.id}
+                    ref={(el) => {
+                      rowRefs.current[row.id] = el;
+                    }}
+                  >
+                    <AgentRow
+                      row={row}
+                      isHighlighted={row.id === highlightedId}
+                      onSelect={() => {
+                        setHighlightedId(row.id);
+                        setFocusedId(row.id);
+                      }}
+                      onDoubleClick={() => handleDoubleClick(row)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
