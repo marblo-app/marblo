@@ -67,22 +67,34 @@ export function FocusView({
     }
   }, [draftName, onRename, row.displayName]);
 
-  // Keyboard nav. Scoped to the focus container — if the terminal has
-  // focus, xterm consumes most key events before they reach here (stopped
-  // at the terminal wrapper), so this only fires when the user is in the
-  // header / not actively typing in xterm.
+  // Keyboard nav. Registered on document so a single click into the
+  // terminal area doesn't trap the user — pre-hoist this listener sat on a
+  // container that wrapped both header AND terminal, so it picked up any
+  // focus-state inside. After 7d7c3bd hoisted TerminalView into
+  // AgentListPanel, the FocusView container is just the header; once xterm
+  // grabs focus, a container-scoped listener never fires and ← stops
+  // returning to the list. Document-level catches every header/list/panel
+  // path, while TerminalView's own keydown stopPropagation at the terminal
+  // wrapper still keeps in-terminal arrows local (Claude CLI cursor moves
+  // are not hijacked — they never reach this listener).
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
     const onKey = (e: KeyboardEvent) => {
       if (editing) return;
-      const isInput =
-        document.activeElement?.tagName === "INPUT" ||
-        document.activeElement?.tagName === "TEXTAREA";
-      if (isInput) return;
-      // ← and Esc both return to the list (Claude /agents pattern: ← drills
-      // out of the focused item). Prev/next agent navigation lives on the
-      // header's ‹ / › buttons; → is kept as keyboard "next" for power users.
+      // Another handler upstream already claimed this key — e.g., the
+      // AgentFleetGrid in the top panel preventDefault()'s ← / → for its
+      // own cell-to-cell navigation. Without this guard, our document
+      // listener would still fire and onBack() the user out of focus
+      // mode whenever they moved focus within the top grid.
+      if (e.defaultPrevented) return;
+      const tgt = e.target as HTMLElement | null;
+      if (!tgt) return;
+      // Defensive: even with stopPropagation at the terminal wrapper, an
+      // event listened on document during the capture phase could still
+      // see in-terminal keys. We register in bubble phase so this guard
+      // is belt-and-suspenders.
+      if (tgt.closest(".xterm")) return;
+      const tag = tgt.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
       if (e.key === "Escape" || e.key === "ArrowLeft") {
         e.preventDefault();
         onBack();
@@ -90,16 +102,14 @@ export function FocusView({
         e.preventDefault();
         onNext();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
-        // Only intercept Ctrl/Cmd+R inside this panel — don't break the
-        // browser-level page reload elsewhere.
         if (row.isAgent) {
           e.preventDefault();
           setEditing(true);
         }
       }
     };
-    el.addEventListener("keydown", onKey);
-    return () => el.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [editing, onBack, onNext, row.isAgent]);
 
   // Ensure the container can receive key events without a tab stop hunt —
