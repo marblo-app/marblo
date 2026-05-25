@@ -1,6 +1,7 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { isSummaryOnlyJsonl } from "./orchestrator-manager";
 
 export interface ReconnectCandidate {
   agentId: string;
@@ -27,33 +28,59 @@ export function findReconnectCandidates(
   agents: Array<{ id: string; name: string; role: string }>,
   rootPath: string,
 ): ReconnectCandidate[] {
-  const encodedPath = rootPath.replace(/\//g, '-');
-  const projectDir = path.join(os.homedir(), '.claude', 'projects', encodedPath);
-  const labelsPath = path.join(projectDir, 'marblo-labels.json');
+  const encodedPath = rootPath.replace(/\//g, "-");
+  const projectDir = path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    encodedPath,
+  );
+  const labelsPath = path.join(projectDir, "marblo-labels.json");
 
-  // Load labels
+  // Load labels, then drop entries pointing at summary-only stub JSONLs.
+  // Claude writes those when a session aborts before any real turn (e.g.,
+  // model 404) and `--resume <stub_id>` exits 1 with "No conversation
+  // found". listSessions in orchestrator-manager already filters these
+  // for the orchestrator path; agent reconnect reads the labels file
+  // directly, so we must repeat the filter here. Without it the most
+  // recent label by createdAt — often a stub created right before app
+  // exit — wins over the real session sharing the same agent name.
   let labels: Record<string, LabelEntry> = {};
   try {
-    labels = JSON.parse(fs.readFileSync(labelsPath, 'utf-8'));
-  } catch { /* no labels file */ }
+    const raw = JSON.parse(fs.readFileSync(labelsPath, "utf-8")) as Record<
+      string,
+      LabelEntry
+    >;
+    for (const [sid, info] of Object.entries(raw)) {
+      const jsonlPath = path.join(projectDir, `${sid}.jsonl`);
+      if (!fs.existsSync(jsonlPath)) continue;
+      if (isSummaryOnlyJsonl(jsonlPath)) continue;
+      labels[sid] = info;
+    }
+  } catch {
+    /* no labels file */
+  }
 
   // Collect all Claude session JSONL files
   let sessionFiles: Array<{ id: string; mtime: number }> = [];
   try {
-    const files = fs.readdirSync(projectDir)
-      .filter(f => f.endsWith('.jsonl'))
-      .map(f => {
+    const files = fs
+      .readdirSync(projectDir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .map((f) => {
         const stat = fs.statSync(path.join(projectDir, f));
-        return { id: f.replace('.jsonl', ''), mtime: stat.mtimeMs };
+        return { id: f.replace(".jsonl", ""), mtime: stat.mtimeMs };
       })
       .sort((a, b) => b.mtime - a.mtime); // most recent first
     sessionFiles = files;
-  } catch { /* can't read directory */ }
+  } catch {
+    /* can't read directory */
+  }
 
   // Track which sessions are already claimed
   const claimedSessions = new Set<string>();
 
-  return agents.map(agent => {
+  return agents.map((agent) => {
     // 1. Try label match by agentId
     const labelMatch = Object.entries(labels)
       .filter(([sid]) => !claimedSessions.has(sid))
@@ -86,6 +113,11 @@ export function findReconnectCandidates(
     }
 
     // 3. No match found
-    return { agentId: agent.id, agentName: agent.name, sessionId: null, label: null };
+    return {
+      agentId: agent.id,
+      agentName: agent.name,
+      sessionId: null,
+      label: null,
+    };
   });
 }
