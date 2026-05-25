@@ -160,12 +160,35 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   restartAgent: async (id) => {
     try {
+      const MODEL_ICONS: Record<string, string> = {
+        claude: "🟣",
+        gemini: "🔵",
+        gpt: "🟢",
+        custom: "⚪",
+      };
+
       const result = await window.electronAPI.agent.restart(id);
       if (result) {
         await agentService.updateAgent(id, { status: "idle" as AgentStatus });
-        // Send restart notification to chat
+
+        // Attach the new PTY session to the terminalStore — without this the
+        // expanded row stays "Terminal not attached" even though restart
+        // succeeded in main, because nothing wired the new ptySessionId into
+        // the renderer-side session list.
         const currentAgents = get().agents;
         const restartedAgent = currentAgents.find((a: Agent) => a.id === id);
+        if (restartedAgent) {
+          const { useTerminalStore } = await import("./terminalStore");
+          useTerminalStore
+            .getState()
+            .attachSession(
+              result.ptySessionId,
+              `${MODEL_ICONS[restartedAgent.model] || "⚪"} ${
+                restartedAgent.name
+              }`
+            );
+        }
+
         const projectId = useProjectStore.getState().currentProject?.id;
         if (restartedAgent && projectId) {
           import("../services/agentNotificationService").then(
@@ -184,17 +207,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const agent = agents.find((a: Agent) => a.id === id);
       if (!agent) throw new Error("Agent not found");
 
-      const cwd = "~";
+      // Use the actual project root — not literal "~", which won't expand
+      // inside electron and caused restarts to either fail or spawn in the
+      // wrong directory (running agents stuck "Terminal not attached").
+      const { useEditorStore } = await import("./editorStore");
+      const cwd = useEditorStore.getState().rootPath || ".";
       const launchResult = await window.electronAPI.agent.launch(agent, cwd);
       await agentService.updateAgent(id, { status: "idle" as AgentStatus });
 
-      // Attach terminal session
-      const MODEL_ICONS: Record<string, string> = {
-        claude: "🟣",
-        gemini: "🔵",
-        gpt: "🟢",
-        custom: "⚪",
-      };
       const { useTerminalStore } = await import("./terminalStore");
       useTerminalStore
         .getState()
