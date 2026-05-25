@@ -60,13 +60,19 @@ export function useOrchestratorAutoLaunch() {
         const orchSession = list.find(
           (s: { label?: string }) => s.label === "Orchestrator"
         );
-        if (!orchSession) return;
+        // Mirror handleManualStart: prefer the labeled Orchestrator session,
+        // but fall back to "new" when none is labeled yet (first-ever launch,
+        // or label save race within the 5s auto-label window). Without this
+        // fallback, auto-reconnect silently no-ops and the user has to click
+        // Start manually even though manual Start would have just launched a
+        // fresh session.
+        const resumeId = orchSession?.id ?? "new";
 
         setStatus("starting");
         const result = await window.electronAPI.orchestratorSession.launch(
           projectId,
           rootPath,
-          orchSession.id
+          resumeId
         );
         if (result) {
           setSession(result.sessionId, result.ptySessionId);
@@ -77,7 +83,11 @@ export function useOrchestratorAutoLaunch() {
           upsertOrchestratorAgentDoc(projectId, "working").catch(
             () => undefined
           );
-          console.log("[Orchestrator] Auto-reconnected:", orchSession.id);
+          console.log(
+            orchSession
+              ? `[Orchestrator] Auto-reconnected: ${orchSession.id}`
+              : `[Orchestrator] Auto-started fresh session (no prior label)`
+          );
         }
       } catch {
         // No previous session or launch failed — user starts manually

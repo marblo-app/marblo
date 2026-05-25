@@ -9,11 +9,18 @@ import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 interface TerminalViewProps {
   sessionId: string;
   isActive: boolean;
+  // Mimics Claude `/agents` view: pressing ← with an empty input line
+  // drills out of the focused agent back to the list. We track keystrokes
+  // sent via `terminal.onData` to estimate input length — when it's 0,
+  // ArrowLeft is captured (xterm won't send `\x1b[D` to PTY) and this
+  // callback fires instead.
+  onLeftWhenEmpty?: () => void;
 }
 
 export default memo(function TerminalView({
   sessionId,
   isActive,
+  onLeftWhenEmpty,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -21,6 +28,18 @@ export default memo(function TerminalView({
   const initializedRef = useRef(false);
   // Shared scroll-follow state — user-input-driven (see effect for details).
   const wantBottomRef = useRef(true);
+  // Best-effort estimate of the user's current input line length. Reset to
+  // 0 on Enter / Ctrl-C / Ctrl-U; we don't see Claude's actual input box
+  // state, but the tracker is good enough to gate the "← drills out when
+  // empty" behavior (false positives would be momentary — user types one
+  // char and tracker leaves 0).
+  const inputLenRef = useRef(0);
+  // Keep callback in a ref so a fresh prop reference doesn't tear down
+  // the entire terminal init effect.
+  const onLeftWhenEmptyRef = useRef(onLeftWhenEmpty);
+  useEffect(() => {
+    onLeftWhenEmptyRef.current = onLeftWhenEmpty;
+  }, [onLeftWhenEmpty]);
 
   useEffect(() => {
     if (!containerRef.current || initializedRef.current) return;
@@ -65,6 +84,29 @@ export default memo(function TerminalView({
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+
+    // Drill-out gate: plain ArrowLeft with no modifiers AND an empty
+    // estimated input line fires onLeftWhenEmpty instead of sending
+    // `\x1b[D` to the PTY. Returning false from this handler stops xterm
+    // from emitting the data event for this keystroke. Any modifier
+    // (shift/alt/meta/ctrl) is left to xterm so power-user combos still
+    // reach the CLI (e.g., Claude's word-jump bindings).
+    terminal.attachCustomKeyEventHandler((e) => {
+      if (
+        e.type === "keydown" &&
+        e.key === "ArrowLeft" &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        inputLenRef.current === 0 &&
+        onLeftWhenEmptyRef.current
+      ) {
+        onLeftWhenEmptyRef.current();
+        return false;
+      }
+      return true;
+    });
 
     let openRetries = 0;
     let termOpened = false;
@@ -258,6 +300,28 @@ export default memo(function TerminalView({
     terminal.onData((data) => {
       if (disposed) return;
       wantBottomRef.current = true;
+      // Track input line length so onLeftWhenEmpty can gate the drill-out
+      // shortcut. We never see the CLI's actual prompt buffer, so this is
+      // a heuristic over what was sent on stdin since the last submit /
+      // line-clear. Escape sequences (cursor moves, arrows, function keys)
+      // start with ESC and shouldn't count as typed characters.
+      if (!data.startsWith("\x1b")) {
+        if (data === "\r" || data === "\n") {
+          inputLenRef.current = 0;
+        } else if (data === "\x7f" || data === "\b") {
+          // DEL or BS — single-char backspace
+          inputLenRef.current = Math.max(0, inputLenRef.current - 1);
+        } else if (data === "\x03" || data === "\x15") {
+          // Ctrl-C (SIGINT) or Ctrl-U (kill line) — input cleared
+          inputLenRef.current = 0;
+        } else {
+          // Treat anything else (printable runs, paste, Tab) as typed
+          // input. Tab might insert N completion chars; we approximate by
+          // the data length sent. False-high by a small amount is fine —
+          // the gate only fires when len exactly equals 0.
+          inputLenRef.current += data.length;
+        }
+      }
       window.electronAPI.pty.write(sessionId, data);
     });
 

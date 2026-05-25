@@ -416,6 +416,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
                 isActive={
                   !!focusedRow && focusedRow.ptySessionId === r.ptySessionId
                 }
+                onLeftWhenEmpty={() => setFocusedId(null)}
               />
             ))}
             {/* Focused-but-no-PTY empty state (agent never started yet) */}
