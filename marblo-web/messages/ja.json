@@ -239,9 +239,9 @@
     "recommended": "推奨"
   },
   "promoBar": {
-    "message": "Foundation 50先行募集中 — 講座50%オフ + Pro 6ヶ月無料",
+    "message": "🌟 初期メンバー50名募集中 — 講義50%OFF + Pro 6ヶ月 + 永久Discord",
     "email_placeholder": "メールアドレス",
-    "cta": "先行登録",
+    "cta": "申し込む",
     "details_cta": "詳細を見る",
     "dismiss_aria": "プロモーションバナーを閉じる",
     "email_invalid": "有効なメールアドレスを入力してください"

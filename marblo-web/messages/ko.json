@@ -4,7 +4,7 @@
     "pricing": "가격",
     "download": "다운로드",
     "lectures": "강의",
-    "foundation50": "베타 얼리버드",
+    "foundation50": "초기 멤버 50",
     "login": "로그인",
     "signup": "회원가입",
     "myLectures": "내 강의"
@@ -239,9 +239,9 @@
     "recommended": "추천"
   },
   "promoBar": {
-    "message": "베타 얼리버드 50 사전 모집 중 — 강의 50% + Pro 6개월 무료",
+    "message": "🌟 초기 멤버 50인 모집 중 — 강의 50% + Pro 6개월 + 평생 디스코드",
     "email_placeholder": "이메일 주소",
-    "cta": "사전 등록",
+    "cta": "신청하기",
     "details_cta": "자세히",
     "dismiss_aria": "프로모션 배너 닫기",
     "email_invalid": "올바른 이메일 주소를 입력해 주세요"

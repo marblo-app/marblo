@@ -11,6 +11,12 @@ import BetaTester50SignupForm from "./BetaTester50SignupForm";
 
 const SEAT_CAP = 50;
 const COLLECTION = "betatester50_waitlist";
+// Only reveal the "N seats left" counter once at least this many people
+// have signed up — empty counters read as "nobody's buying." Configurable
+// at build time via NEXT_PUBLIC_SEATS_COUNTER_THRESHOLD.
+const COUNTER_REVEAL_THRESHOLD = Number(
+  process.env.NEXT_PUBLIC_SEATS_COUNTER_THRESHOLD ?? 15
+);
 
 export default function BetaTester50Section() {
   const t = useTranslations("betatester50");
@@ -36,6 +42,11 @@ export default function BetaTester50Section() {
   }, []);
 
   const isClosed = seatsLeft === 0;
+  // Reveal the live counter only after enough seats are taken — until then
+  // show the static "한정 50명" copy so the section never reads as empty.
+  const seatsTaken = seatsLeft === null ? 0 : SEAT_CAP - seatsLeft;
+  const showLiveCounter =
+    seatsLeft !== null && seatsTaken >= COUNTER_REVEAL_THRESHOLD;
 
   return (
     <section className="px-4 pt-4 pb-12 md:pb-16">
@@ -51,9 +62,9 @@ export default function BetaTester50Section() {
                 {t("badge")}
               </span>
               <span className="inline-flex items-center bg-zinc-900/80 border border-zinc-700 text-zinc-200 px-3 py-1 rounded-full text-xs font-medium">
-                {seatsLeft === null
-                  ? t("seats_loading")
-                  : t("seats_left", { n: seatsLeft })}
+                {showLiveCounter
+                  ? t("seats_left", { n: seatsLeft })
+                  : t("seats_loading")}
               </span>
             </div>
 
