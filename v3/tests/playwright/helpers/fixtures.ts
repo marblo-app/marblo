@@ -52,6 +52,20 @@ export interface MarbloHandle {
    * @returns 생성된 ptySessionId
    */
   openMockOrchestrator(): Promise<string>;
+  /**
+   * Tier 2 mock helper — Firestore 없이 taskStore.setState 로 mock 카드들을
+   * 직접 inject + Board 탭으로 전환. KanbanBoard 가 currentProject + tasks 를
+   * 즉시 받아 컬럼/카드 렌더.
+   *
+   * 흐름:
+   *   1. projectStore.setCurrentProject — KanbanBoard 의 "No Projects" 게이트 통과
+   *   2. taskStore.setState({ tasks, loading: false }) — Firestore subscribe 없이
+   *      mock 카드들을 직접 주입 (TODO 2장 + IN_PROGRESS 1장 기본)
+   *   3. Board 탭으로 전환 → KanbanBoard mount → 컬럼 5개 + 카드 visible
+   *
+   * @returns inject 된 mock 카드 id 목록 (시나리오에서 카드 클릭/단언에 사용)
+   */
+  openMockKanban(): Promise<{ todoIds: string[]; inProgressIds: string[] }>;
 }
 
 type Fixtures = {
@@ -78,7 +92,9 @@ export const test = base.extend<Fixtures>({
       async openTab(tabId) {
         // 모달이 뒤늦게 떴을 수 있으니 클릭 직전 한 번 더 확인.
         await dismissFirstRunDialogs(page);
-        const sel = `[data-testid="tab-${tabId}"], button:has-text("${labelOf(tabId)}")`;
+        const sel = `[data-testid="tab-${tabId}"], button:has-text("${labelOf(
+          tabId,
+        )}")`;
         await page.locator(sel).first().click();
       },
       async terminal(kind) {
@@ -86,6 +102,9 @@ export const test = base.extend<Fixtures>({
       },
       async openMockOrchestrator() {
         return openMockOrchestrator(page);
+      },
+      async openMockKanban() {
+        return openMockKanban(page, handle);
       },
     };
 
@@ -219,6 +238,146 @@ async function openMockOrchestrator(page: Page): Promise<string> {
   // PTY 데이터 chunk 가 xterm 에 충분히 적재되어 scroll 가능 상태 보장.
   await page.waitForTimeout(800);
   return ptySessionId;
+}
+
+/**
+ * Mock 칸반 보드 활성화. Firestore subscribe 를 우회하고 taskStore 에 mock
+ * Task 배열을 직접 inject. KanbanBoard.useEffect (subscribeToTasks) 가 fire
+ * 하더라도 그 결과로 set 되는 빈 배열은 our injection 이후 빠르게 덮어쓴다 —
+ * 그래서 inject 는 Board 탭 mount 직후 두 번 (즉시 + 짧은 지연 후) 수행.
+ */
+async function openMockKanban(
+  page: Page,
+  handle: MarbloHandle,
+): Promise<{ todoIds: string[]; inProgressIds: string[] }> {
+  await dismissFirstRunDialogs(page);
+
+  // Mock 카드 id (시나리오에서 클릭 / store 단언에 사용)
+  const todoIds = [
+    `test-task-todo-1-${Date.now()}`,
+    `test-task-todo-2-${Date.now()}`,
+  ];
+  const inProgressIds = [`test-task-inprog-1-${Date.now()}`];
+
+  // 0) Project inject — KanbanBoard 의 "No Projects" 게이트 통과.
+  await page.evaluate(() => {
+    const tw = (
+      window as unknown as {
+        __marbloTest?: {
+          stores: {
+            project: {
+              getState: () => {
+                setCurrentProject: (p: unknown) => void;
+              };
+            };
+          };
+        };
+      }
+    ).__marbloTest;
+    if (!tw) throw new Error("__marbloTest hatch 가 노출되지 않음");
+    tw.stores.project.getState().setCurrentProject({
+      id: "test-mock-project",
+      name: "Mock Project",
+      ownerId: "test-user-bypass",
+      members: ["test-user-bypass"],
+      folderPath: "/tmp/marblo-test",
+      enabledModels: ["claude"],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  });
+
+  // 1) Board 탭으로 전환 — KanbanBoard mount.
+  await handle.openTab("board");
+
+  // 2) taskStore inject — Firestore 없이 mock 카드들을 직접 setState.
+  //    KanbanBoard 의 subscribeToTasks 가 fire 해도 service 가 (mock 환경에서)
+  //    빈 배열을 돌려주거나 throw → 직후 inject 가 덮어씀. 충분히 안정화하기
+  //    위해 mount 직후 + 600ms 후 두 번 inject.
+  const injectFn = async () => {
+    return await page.evaluate(
+      ({ todoIds, inProgressIds }) => {
+        const tw = (
+          window as unknown as {
+            __marbloTest?: {
+              stores: {
+                task: {
+                  getState: () => { tasks: unknown[] };
+                  setState: (s: Record<string, unknown>) => void;
+                };
+              };
+            };
+          }
+        ).__marbloTest;
+        if (!tw) throw new Error("__marbloTest hatch 가 노출되지 않음");
+        const now = new Date();
+        const makeTask = (id: string, status: string, title: string) => ({
+          id,
+          projectId: "test-mock-project",
+          title,
+          description: `Mock task ${id}`,
+          status,
+          role: "backend",
+          priority: 3,
+          dependsOn: [],
+          dependsOnCompleted: true,
+          claimedBy: null,
+          claimedAt: null,
+          scope: [],
+          comment: "",
+          prUrl: "",
+          hasPmFeedback: false,
+          createdAt: now,
+          updatedAt: now,
+        });
+        const tasks = [
+          makeTask(todoIds[0], "TODO", "Mock TODO #1"),
+          makeTask(todoIds[1], "TODO", "Mock TODO #2"),
+          makeTask(inProgressIds[0], "IN_PROGRESS", "Mock IN_PROGRESS #1"),
+        ];
+        tw.stores.task.setState({ tasks, loading: false });
+        return tw.stores.task.getState().tasks.length;
+      },
+      { todoIds, inProgressIds },
+    );
+  };
+
+  // hatch 가 노출될 때까지 대기 (main.tsx 의 useEffect 이후).
+  await page.waitForFunction(
+    () => {
+      const tw = (
+        window as unknown as {
+          __marbloTest?: { stores: { task?: unknown } };
+        }
+      ).__marbloTest;
+      return !!tw?.stores?.task;
+    },
+    null,
+    { timeout: 5000 },
+  );
+
+  let injectedCount = await injectFn();
+  // 짧은 대기 후 재 inject — subscribeToTasks 의 초기 empty snapshot 이
+  // 우리 inject 를 덮어쓰지 않도록.
+  await page.waitForTimeout(600);
+  injectedCount = await injectFn();
+
+  if (injectedCount !== 3) {
+    throw new Error(
+      `taskStore inject 실패: expected 3 tasks, got ${injectedCount}`,
+    );
+  }
+
+  // 3) KanbanBoard 의 컬럼 5개 (TODO/CLAIMED/IN_PROGRESS/REVIEW/DONE) mount 대기.
+  //    컬럼 헤더 텍스트는 KanbanColumn 의 STATUS_CONFIG.label.
+  await page
+    .locator("text=/TODO/i")
+    .first()
+    .waitFor({ state: "visible", timeout: 5000 });
+  // 카드가 실제로 그려질 때까지 한 박자 더.
+  await page.waitForTimeout(300);
+
+  return { todoIds, inProgressIds };
 }
 
 async function dismissFirstRunDialogs(page: Page): Promise<void> {

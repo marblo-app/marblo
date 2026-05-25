@@ -19,12 +19,22 @@ function AgentRowImpl({ row, isExpanded, onSelect, onDoubleClick }: Props) {
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
       onKeyDown={(e) => {
-        if (e.key === "Enter") onSelect();
+        // Enter / Space / → → 같은 의미: focus 모드로 진입 (단일 affordance).
+        // 별도 "drill-out" 단축키는 두지 않음 — 더블클릭만으로 충분.
+        if (
+          e.key === "Enter" ||
+          e.key === " " ||
+          e.code === "Space" ||
+          e.key === "ArrowRight"
+        ) {
+          e.preventDefault();
+          onSelect();
+        }
       }}
       title={
         row.isAgent
-          ? "Click: open terminal · Double-click: jump to Agents tab"
-          : "Click: open terminal"
+          ? "Click / Enter / →: focus this agent · Double-click: open Agents tab"
+          : "Click / Enter: open terminal"
       }
       className={`relative flex items-center gap-3 px-3 py-2 border-b border-[#313244] cursor-pointer transition-colors ${
         isExpanded ? "bg-[#313244]" : "hover:bg-[#1e1e2e]/60"

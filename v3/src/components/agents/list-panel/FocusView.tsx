@@ -73,12 +73,12 @@ export function FocusView({
         document.activeElement?.tagName === "INPUT" ||
         document.activeElement?.tagName === "TEXTAREA";
       if (isInput) return;
-      if (e.key === "Escape") {
+      // ← and Esc both return to the list (Claude /agents pattern: ← drills
+      // out of the focused item). Prev/next agent navigation lives on the
+      // header's ‹ / › buttons; → is kept as keyboard "next" for power users.
+      if (e.key === "Escape" || e.key === "ArrowLeft") {
         e.preventDefault();
         onBack();
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        onPrev();
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
         onNext();
@@ -93,7 +93,7 @@ export function FocusView({
     };
     el.addEventListener("keydown", onKey);
     return () => el.removeEventListener("keydown", onKey);
-  }, [editing, onBack, onPrev, onNext, row.isAgent]);
+  }, [editing, onBack, onNext, row.isAgent]);
 
   // Ensure the container can receive key events without a tab stop hunt —
   // focus it on mount and on row change.
@@ -111,7 +111,7 @@ export function FocusView({
         <button
           onClick={onBack}
           className="rounded px-2 py-0.5 text-[11px] text-[#6c7086] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4]"
-          title="목록으로 (Esc)"
+          title="목록으로 (← / Esc)"
         >
           ← All
         </button>
@@ -176,12 +176,23 @@ export function FocusView({
           {pill.label}
         </span>
 
+        {row.isAgent && onStart && (
+          <button
+            onClick={onStart}
+            disabled={isStarting}
+            className="rounded border border-[#585b70] px-2 py-0.5 text-[10px] text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-50"
+            title="현재 PTY 종료 후 새 CLI 세션 시작"
+          >
+            {isStarting ? "Starting…" : "+ New Session"}
+          </button>
+        )}
+
         <div className="flex items-center gap-1">
           <button
             onClick={onPrev}
             disabled={total <= 1}
             className="rounded px-1.5 py-0.5 text-[11px] text-[#6c7086] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4] disabled:opacity-30"
-            title="이전 에이전트 (←)"
+            title="이전 에이전트"
           >
             ‹
           </button>
@@ -206,18 +217,24 @@ export function FocusView({
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-[11px] text-[#6c7086]">
             <div>
               이 에이전트에 연결된 터미널이 없습니다.
-              <br />
-              Start를 눌러 새 세션을 시작하세요.
+              <br />새 세션을 시작하시겠습니까?
             </div>
             {row.isAgent && onStart && (
-              <button
-                onClick={onStart}
-                disabled={isStarting}
-                className="rounded border border-[#585b70] px-3 py-1 text-[11px] text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-50"
-              >
-                {isStarting ? "Starting…" : "Start"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onStart}
+                  disabled={isStarting}
+                  className="rounded border border-[#cba6f7] bg-[#cba6f7]/10 px-3 py-1 text-[11px] text-[#cba6f7] transition-colors hover:bg-[#cba6f7]/20 disabled:opacity-50"
+                  title="기존 PTY를 죽이고 새 CLI 세션 시작 (resume 안 함)"
+                >
+                  {isStarting ? "Starting…" : "+ New Session"}
+                </button>
+              </div>
             )}
+            <div className="text-[10px] text-[#585b70]">
+              세션이 안 뜨면 콘솔에서 CLI 설치 여부를 확인하세요 (claude / codex
+              / gemini).
+            </div>
           </div>
         )}
       </div>
