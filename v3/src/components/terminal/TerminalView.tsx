@@ -152,21 +152,28 @@ export default memo(function TerminalView({
     };
 
     let hasReceivedData = false;
-    // rAF-level batching for live PTY chunks. Busy TUI apps (Gemini Ink,
-    // Claude Code streaming) emit many small chunks per frame. Each chunk
-    // historically triggered a separate terminal.write() + scrollToBottom
-    // rAF → xterm rendered intermediate states (e.g. cleared screen before
-    // the new frame's content arrived) → visible flicker during operation.
+    // Settle-window batching for live PTY chunks. Busy TUI apps (Gemini Ink,
+    // Claude Code streaming) emit a SINGLE logical redraw (e.g. arrow-key
+    // menu navigation) as several stdout flushes spaced 5-40ms apart. With
+    // pure rAF batching the first flush rendered the "cleared" frame and the
+    // following flush(es) rendered the new content one frame later → user
+    // saw a flash of blank between them on every keypress.
     //
-    // Now: queue chunks within a frame, flush once on rAF as a single write
-    // + single scrollToBottom. Adds up to ~16ms latency to terminal echo,
-    // which is invisible for AI-agent streaming output (the use case here).
-    // If we ever need sub-frame echo for an interactive shell, the join
-    // could be gated by sessionId or a prop.
+    // Strategy: queue chunks and wait SETTLE_MS of silence before flushing.
+    // If silence never comes (continuous stream), force-flush at MAX_DELAY_MS
+    // so terminal echo never exceeds that. Empirically 28ms settle / 80ms cap
+    // eliminates Gemini menu-navigation flicker while keeping echo invisible
+    // for AI-agent streaming.
+    const SETTLE_MS = 28;
+    const MAX_DELAY_MS = 80;
     let liveQueue: string[] = [];
-    let flushScheduled = false;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    let maxTimer: ReturnType<typeof setTimeout> | null = null;
     const flushLive = () => {
-      flushScheduled = false;
+      if (settleTimer) clearTimeout(settleTimer);
+      if (maxTimer) clearTimeout(maxTimer);
+      settleTimer = null;
+      maxTimer = null;
       if (disposed) return;
       if (liveQueue.length === 0) return;
       const joined = liveQueue.join("");
@@ -182,9 +189,14 @@ export default memo(function TerminalView({
         return;
       }
       liveQueue.push(data);
-      if (!flushScheduled) {
-        flushScheduled = true;
-        requestAnimationFrame(flushLive);
+      // Reset settle timer on every new chunk; flush once the stream goes
+      // quiet for SETTLE_MS.
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(flushLive, SETTLE_MS);
+      // Hard cap: even with continuous chunks, flush no later than
+      // MAX_DELAY_MS after the first queued chunk.
+      if (!maxTimer) {
+        maxTimer = setTimeout(flushLive, MAX_DELAY_MS);
       }
     });
 
@@ -348,6 +360,8 @@ export default memo(function TerminalView({
       disposed = true;
       window.clearTimeout(replayTimer);
       clearInterval(flushInterval);
+      if (settleTimer) clearTimeout(settleTimer);
+      if (maxTimer) clearTimeout(maxTimer);
       window.removeEventListener("resize", handleResize);
       resizeObserver?.disconnect();
       wrapperEl?.removeEventListener("wheel", onWheel, wheelOpts);
