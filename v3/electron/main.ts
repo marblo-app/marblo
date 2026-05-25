@@ -169,7 +169,7 @@ function writeApiKeys(keys: StoredApiKeys): void {
     throw new Error(
       "OS keychain encryption unavailable. " +
         "On Linux install libsecret-1-0 / gnome-keyring and restart Marblo. " +
-        "On macOS or Windows this should not happen — please report to support@marblo.app."
+        "On macOS or Windows this should not happen — please report to support@marblo.app.",
     );
   }
   const enc: EncryptedKeyStore = {
@@ -301,7 +301,7 @@ const agentManager = new AgentManager(
     if (pid) sendToProject(pid, "agent:restartFailed", { agentId, exitCode });
     else broadcast("agent:restartFailed", { agentId, exitCode });
   },
-  () => mainWindow
+  () => mainWindow,
 );
 
 let mainWindow: BrowserWindow | null = null; // First window — fallback for things lacking owner
@@ -377,6 +377,22 @@ function sendToProject(
 const ptyBuffers = new Map<string, string[]>();
 // Track which window owns each PTY session so output goes only there.
 const ptyOwners = new Map<string, number>(); // ptySessionId → webContents.id
+// Renderers that have already drained the early-output buffer via pty:replay.
+// On restart we reuse the same sid (agent-${id}) and the existing TerminalView
+// does NOT re-call pty:replay (its useEffect only runs when sessionId changes).
+// If setupPtyForwarding blindly creates a fresh buffer on the second call,
+// every byte from the new PTY ends up trapped in main.ts and never reaches
+// the renderer — the user sees a blank terminal and concludes the agent
+// didn't start. drainedSids lets the second setup skip buffering.
+const drainedSids = new Set<string>();
+// Generation counter per sid — increments on every setupPtyForwarding call.
+// node-pty's onData/onExit are attached to a specific IPty instance, so when
+// kill() + create() reuse the same sid the OLD process still owns the OLD
+// listeners. The OLD onExit closure then fires AFTER the NEW setup, with the
+// shared sid, and trashes ptyOwners/ptyBuffers + sends a phantom pty:exit to
+// the renderer (looks like the new session crashed). Guarding the closures
+// with a captured gen makes the stale OLD callbacks no-op.
+const sidGen = new Map<string, number>();
 const bridgeServer = new BridgeServer(agentManager, ptyManager, ptyBuffers);
 
 // Per-project orchestrator instances. One window per project is the typical
@@ -412,7 +428,7 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
       if (status === "stopped" && projectId) {
         pendingListener.detach(`orch-${projectId}`);
       }
-    }
+    },
   );
 }
 
@@ -442,7 +458,7 @@ function getAnyOrchestrator(): OrchestratorManager {
 
 /** Resolve the orchestrator for a webContents (sender) window. */
 function getOrchestratorForSender(
-  senderId: number
+  senderId: number,
 ): OrchestratorManager | null {
   for (const [projectId, ownerId] of orchestratorOwners) {
     if (ownerId === senderId) return orchestrators.get(projectId) ?? null;
@@ -454,14 +470,14 @@ function getOrchestratorForSender(
 // orchestrator. Bridge selects by projectId from the request body / agent's
 // MARBLO_PROJECT env.
 bridgeServer.setOrchestratorLookup(
-  (projectId: string) => orchestrators.get(projectId) ?? null
+  (projectId: string) => orchestrators.get(projectId) ?? null,
 );
 
 // Per-project enabledModels lookup — replaces the global env var fallback
 // in BridgeServer.dispatchTask so concurrent windows can dispatch with
 // different model presets simultaneously.
 bridgeServer.setEnabledModelsLookup((projectId: string) =>
-  projectEnabledModels.get(projectId)
+  projectEnabledModels.get(projectId),
 );
 
 // When the bridge spawns an agent (via MCP /spawn-agent or /dispatch-task),
@@ -476,7 +492,7 @@ bridgeServer.setEnabledModelsLookup((projectId: string) =>
 //   4. mainWindow fallback (legacy / single-window mode)
 function resolveSpawnOwner(
   projectId: string | undefined,
-  parentAgentId: string | undefined
+  parentAgentId: string | undefined,
 ): { ownerId: number | undefined; resolvedProjectId: string | undefined } {
   // 1. explicit projectId
   if (projectId) {
@@ -516,7 +532,7 @@ bridgeServer.setAgentSpawnedHook(
 
     const { ownerId, resolvedProjectId } = resolveSpawnOwner(
       projectId,
-      parentAgentId
+      parentAgentId,
     );
     if (ownerId !== undefined) {
       ptyOwners.set(sid, ownerId);
@@ -540,7 +556,7 @@ bridgeServer.setAgentSpawnedHook(
     } else {
       broadcast("agent:spawned", payload);
     }
-  }
+  },
 );
 
 // Inject session resolver so agent auto-restart resolves 'latest' per-agent.
@@ -551,8 +567,8 @@ agentManager.setSessionResolver(
       rootPath,
       requested,
       filterLabel,
-      filterAgentId
-    )
+      filterAgentId,
+    ),
 );
 
 // --- Mission Engine Wire (Phase 3, Step 5) ---
@@ -566,11 +582,33 @@ function getDecomposer(): TaskDecomposer {
   return taskDecomposer;
 }
 
+// Mission 전용 orchestrator pool — board 용 `orchestrators` 와 분리.
+// 같은 projectId 라도 board 와 mission 은 각자의 Claude Code 세션을 들고 있다.
+// 컨텍스트 오염 방지 + 동시 사용 가능 + 미션 PTY 가 Missions 탭에 별도 노출.
+const missionOrchestrators = new Map<string, OrchestratorManager>();
+const missionOrchestratorOwners = new Map<string, number>(); // projectId → webContents.id
+function createMissionOrchestratorInstance(
+  projectId: string,
+): OrchestratorManager {
+  return new OrchestratorManager(
+    ptyManager,
+    agentManager.getConfigGenerator(),
+    (status) => {
+      const ownerId = missionOrchestratorOwners.get(projectId);
+      if (ownerId !== undefined) {
+        sendToOwner(ownerId, "missionOrchestrator:statusChanged", { status });
+      } else {
+        broadcast("missionOrchestrator:statusChanged", { status });
+      }
+    },
+  );
+}
+
 missionBundle = buildMissionEngine({
   agentManager,
   taskDecomposer: getDecomposer,
-  orchestrators,
-  createOrchestratorInstance,
+  orchestrators: missionOrchestrators,
+  createOrchestratorInstance: createMissionOrchestratorInstance,
   ptyManager,
   bridgePort: () => bridgeServer.getPort(),
   dispatchOne: (params) => bridgeServer.dispatchTask(params),
@@ -626,7 +664,7 @@ const costTracker = new CostTracker((agentId, cost) => {
   const projectId = agent?.launchConfig?.env?.MARBLO_PROJECT || "";
   if (!projectId) {
     console.warn(
-      `[CostTracker:CB] No projectId for agent ${agentId} — recording with empty projectId`
+      `[CostTracker:CB] No projectId for agent ${agentId} — recording with empty projectId`,
     );
   }
 
@@ -658,7 +696,7 @@ const costTracker = new CostTracker((agentId, cost) => {
       projectId || "(none)"
     } in=${cost.deltaInputTokens} out=${
       cost.deltaOutputTokens
-    } cost=$${cost.deltaCost.toFixed(4)}`
+    } cost=$${cost.deltaCost.toFixed(4)}`,
   );
 
   // Also send token:usage telemetry event with projectId
@@ -669,7 +707,7 @@ const costTracker = new CostTracker((agentId, cost) => {
     cost.deltaInputTokens,
     cost.deltaOutputTokens,
     cost.deltaCost,
-    projectId
+    projectId,
   );
 });
 
@@ -770,7 +808,7 @@ function getDefaultCommand(model: string): string {
  */
 function handleAgentDelegation(
   nodeId: string,
-  output: Record<string, unknown>
+  output: Record<string, unknown>,
 ): void {
   const connectionMode = output.connectionMode as string;
   const resolvedTask = (output.task as string) || "";
@@ -836,12 +874,12 @@ function handleAgentDelegation(
       }
 
       console.log(
-        `[Flow:AgentDelegation] Spawned agent "${spawnConfig.name}" (${agentId}) for node ${nodeId}`
+        `[Flow:AgentDelegation] Spawned agent "${spawnConfig.name}" (${agentId}) for node ${nodeId}`,
       );
     } catch (err) {
       console.error(
         `[Flow:AgentDelegation] Failed to spawn agent for node ${nodeId}:`,
-        err
+        err,
       );
     }
   } else if (connectionMode === "existing" && output.existingAgentId) {
@@ -855,11 +893,11 @@ function handleAgentDelegation(
       // as a discrete keystroke (single-chunk gets paste-buffered).
       ptyManager.writeAndSubmit(agent.ptySessionId, taskMessage);
       console.log(
-        `[Flow:AgentDelegation] Sent task to existing agent "${agent.name}" (${existingAgentId}) for node ${nodeId}`
+        `[Flow:AgentDelegation] Sent task to existing agent "${agent.name}" (${existingAgentId}) for node ${nodeId}`,
       );
     } else {
       console.warn(
-        `[Flow:AgentDelegation] Agent ${existingAgentId} not found or stopped. Cannot route task for node ${nodeId}.`
+        `[Flow:AgentDelegation] Agent ${existingAgentId} not found or stopped. Cannot route task for node ${nodeId}.`,
       );
     }
   }
@@ -900,7 +938,7 @@ function createWindow(isNewWindow = false) {
     const server = http.createServer((req, res) => {
       let filePath = path.join(
         distPath,
-        req.url === "/" ? "index.html" : req.url || "index.html"
+        req.url === "/" ? "index.html" : req.url || "index.html",
       );
       // SPA fallback: if file doesn't exist, serve index.html
       if (!fs.existsSync(filePath)) {
@@ -965,7 +1003,7 @@ function createWindow(isNewWindow = false) {
     if (mainWindow === win) {
       // Promote another window as primary, or null
       mainWindow =
-        allWindows.size > 0 ? allWindows.values().next().value ?? null : null;
+        allWindows.size > 0 ? (allWindows.values().next().value ?? null) : null;
       if (mainWindow) bridgeServer.setMainWindow(mainWindow);
     }
   });
@@ -1096,7 +1134,7 @@ ipcMain.handle("pty:resize", (_event, { id, cols, rows }) => {
   if (buf && buf.length > 0) {
     buf.length = 0;
     console.log(
-      `[PTY:RESIZE] Cleared pre-resize buffer for ${id} (now ${cols}x${rows})`
+      `[PTY:RESIZE] Cleared pre-resize buffer for ${id} (now ${cols}x${rows})`,
     );
   }
   ptyManager.resize(id, cols, rows);
@@ -1131,7 +1169,7 @@ ipcMain.handle(
   "fs:writeFile",
   (_event, { filePath, content }: { filePath: string; content: string }) => {
     fsManager.writeFile(filePath, content);
-  }
+  },
 );
 
 ipcMain.handle("fs:gitStatus", async (_event, rootPath: string) => {
@@ -1184,7 +1222,7 @@ ipcMain.handle(
     fsGuard(rootPath, filePath);
     fsManager.createFile(filePath);
     return { success: true, path: filePath };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1193,7 +1231,7 @@ ipcMain.handle(
     fsGuard(rootPath, dirPath);
     fsManager.createDirectory(dirPath);
     return { success: true, path: dirPath };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1204,24 +1242,24 @@ ipcMain.handle(
       rootPath,
       fromPath,
       toPath,
-    }: { rootPath: string; fromPath: string; toPath: string }
+    }: { rootPath: string; fromPath: string; toPath: string },
   ) => {
     fsGuard(rootPath, fromPath, toPath);
     fsManager.rename(fromPath, toPath);
     return { success: true, fromPath, toPath };
-  }
+  },
 );
 
 ipcMain.handle(
   "fs:remove",
   (
     _event,
-    { rootPath, targetPath }: { rootPath: string; targetPath: string }
+    { rootPath, targetPath }: { rootPath: string; targetPath: string },
   ) => {
     fsGuard(rootPath, targetPath);
     fsManager.remove(targetPath);
     return { success: true, path: targetPath };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1232,12 +1270,12 @@ ipcMain.handle(
       rootPath,
       fromPath,
       toPath,
-    }: { rootPath: string; fromPath: string; toPath: string }
+    }: { rootPath: string; fromPath: string; toPath: string },
   ) => {
     fsGuard(rootPath, fromPath, toPath);
     const finalPath = fsManager.copy(fromPath, toPath);
     return { success: true, fromPath, toPath: finalPath };
-  }
+  },
 );
 
 ipcMain.handle("fs:revealInFinder", (_event, targetPath: string) => {
@@ -1263,8 +1301,15 @@ ipcMain.handle("fs:revealInFinder", (_event, targetPath: string) => {
  * per frame, which raised the next keystroke's inputDelay.
  */
 function setupPtyForwarding(sid: string): void {
-  const buffer: string[] = [];
-  ptyBuffers.set(sid, buffer);
+  // First call for this sid: create the early-output buffer. Subsequent
+  // calls (restart reusing the same sid) skip this — the renderer's
+  // TerminalView is already mounted and listening live; re-buffering would
+  // trap every byte in main.ts.
+  if (!drainedSids.has(sid)) {
+    ptyBuffers.set(sid, []);
+  }
+  const gen = (sidGen.get(sid) ?? 0) + 1;
+  sidGen.set(sid, gen);
 
   ptyManager.onData(sid, (data) => {
     if (sid.startsWith("agent-")) {
@@ -1282,6 +1327,11 @@ function setupPtyForwarding(sid: string): void {
   });
 
   ptyManager.onExit(sid, (exitCode) => {
+    // Stale guard: a newer setupPtyForwarding(sid) replaced us (e.g. via
+    // agent restart). Letting the OLD pty's exit run would nuke the NEW
+    // pty's ptyOwners/ptyBuffers entries and forward a phantom exit to
+    // the renderer mid-restart.
+    if (sidGen.get(sid) !== gen) return;
     const ownerId = ptyOwners.get(sid);
     ptyBuffers.delete(sid);
     sendToOwner(ownerId, `pty:exit:${sid}`, exitCode);
@@ -1301,11 +1351,11 @@ ipcMain.handle(
         cwd,
         "latest",
         agent.name,
-        agent.id
+        agent.id,
       );
       resolvedSessionId = resolved ?? "new";
       console.log(
-        `[agent:launch] Resolved 'latest' for "${agent.name}" → ${resolvedSessionId}`
+        `[agent:launch] Resolved 'latest' for "${agent.name}" → ${resolvedSessionId}`,
       );
     }
 
@@ -1335,7 +1385,7 @@ ipcMain.handle(
       command: instance.command,
       args: instance.launchConfig?.args || [],
     };
-  }
+  },
 );
 
 // Renderer calls this after TerminalView mounts to drain any buffered early output.
@@ -1344,8 +1394,13 @@ ipcMain.handle(
 ipcMain.handle("pty:replay", (_event, { id }: { id: string }) => {
   const buffer = ptyBuffers.get(id);
   console.log(
-    `[PTY:REPLAY] id=${id}, drained ${buffer?.length ?? 0} chunks → live mode`
+    `[PTY:REPLAY] id=${id}, drained ${buffer?.length ?? 0} chunks → live mode`,
   );
+  // Mark live regardless of buffer presence — second replay call for the
+  // same sid (StrictMode dev double-mount, or a stale call) shouldn't undo
+  // the drained flag. Future setupPtyForwarding calls for this sid skip
+  // re-buffering so restart output flows straight through.
+  drainedSids.add(id);
   if (!buffer) return [];
   const data = [...buffer];
   ptyBuffers.delete(id);
@@ -1441,20 +1496,20 @@ ipcMain.handle(
       }>;
       rootPath: string;
       projectId: string;
-    }
+    },
   ) => {
     const senderId = event.sender.id;
     // Find session candidates for each agent
     const candidates = findReconnectCandidates(
       agents.map((a) => ({ id: a.id, name: a.name, role: a.role })),
-      rootPath
+      rootPath,
     );
 
     // Track Claude session IDs claimed during this reconnect pass — used
     // by the "any-unclaimed-session" fallback below to avoid attaching the
     // same JSONL to two different agents.
     const claimedClaudeSessions = new Set<string>(
-      candidates.map((c) => c.sessionId).filter((s): s is string => Boolean(s))
+      candidates.map((c) => c.sessionId).filter((s): s is string => Boolean(s)),
     );
 
     const results = [];
@@ -1504,7 +1559,7 @@ ipcMain.handle(
             rootPath,
             "latest",
             agentData.name,
-            agentData.id
+            agentData.id,
           );
         }
         // Aggressive fallback: agents created in earlier app versions don't
@@ -1516,13 +1571,13 @@ ipcMain.handle(
         if (!resumeId) {
           const allSessions = getAnyOrchestrator().listSessions(rootPath);
           const unclaimed = allSessions.find(
-            (s) => !claimedClaudeSessions.has(s.id)
+            (s) => !claimedClaudeSessions.has(s.id),
           );
           if (unclaimed) {
             resumeId = unclaimed.id;
             claimedClaudeSessions.add(unclaimed.id);
             console.log(
-              `[Reconnect] Claude agent ${agentData.name} → unlabeled-session fallback ${unclaimed.id}`
+              `[Reconnect] Claude agent ${agentData.name} → unlabeled-session fallback ${unclaimed.id}`,
             );
           }
         }
@@ -1545,7 +1600,7 @@ ipcMain.handle(
       // status 를 "stopped" 로 동기화해 UI 에 ▶ Start 가 노출되도록 처리.
       if (!resumeId) {
         console.log(
-          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session → skip (사용자가 ▶ Start 로 수동 기동)`
+          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session → skip (사용자가 ▶ Start 로 수동 기동)`,
         );
         results.push({
           agentId: agentData.id,
@@ -1583,7 +1638,7 @@ ipcMain.handle(
             candidate.sessionId
               ? "--resume " + candidate.sessionId
               : "--continue"
-          }`
+          }`,
         );
 
         // Start cost tracking — uses sessionId if known, or finds most recent JSONL
@@ -1591,7 +1646,7 @@ ipcMain.handle(
           agentData.id,
           rootPath,
           candidate.sessionId,
-          agentData.model || "claude"
+          agentData.model || "claude",
         );
       } catch (err) {
         console.error(`[Reconnect] Failed for agent ${agentData.id}:`, err);
@@ -1604,7 +1659,7 @@ ipcMain.handle(
       }
     }
     return results;
-  }
+  },
 );
 
 ipcMain.handle("agent:getSkill", (_event, role: string) => {
@@ -1621,6 +1676,75 @@ ipcMain.handle("agent:getSkill", (_event, role: string) => {
   }
   return null;
 });
+
+// --- Mission Orchestrator IPC Handlers ---
+// 보드 orchestrator 와 분리된 별도 Claude Code 세션. Missions 탭 하단 PTY 패널이
+// 사용. 한번 launch 되면 missionOrchestrators map 에 영구 보관되어 mission engine
+// 이 ensureSession 호출 시 같은 인스턴스를 reuse.
+ipcMain.handle(
+  "missionOrchestrator:start",
+  async (
+    event,
+    args: { projectId: string; rootPath: string; modelType?: string },
+  ) => {
+    const { projectId, rootPath } = args;
+    if (!projectId || !rootPath) {
+      throw new Error("projectId and rootPath required");
+    }
+    let manager = missionOrchestrators.get(projectId);
+    if (!manager) {
+      manager = createMissionOrchestratorInstance(projectId);
+      missionOrchestrators.set(projectId, manager);
+    }
+    // 소유 윈도우 추적 — status event 라우팅용.
+    missionOrchestratorOwners.set(projectId, event.sender.id);
+    if (!manager.isRunning()) {
+      const session = manager.launch(
+        projectId,
+        rootPath,
+        bridgeServer.getPort(),
+      );
+      return {
+        sessionId: session.sessionId,
+        ptySessionId: session.ptySessionId,
+        status: session.status,
+      };
+    }
+    const session = manager.getSession();
+    return session
+      ? {
+          sessionId: session.sessionId,
+          ptySessionId: session.ptySessionId,
+          status: session.status,
+        }
+      : null;
+  },
+);
+
+ipcMain.handle(
+  "missionOrchestrator:getSession",
+  async (_event, projectId: string) => {
+    const manager = missionOrchestrators.get(projectId);
+    if (!manager) return null;
+    const session = manager.getSession();
+    if (!session) return null;
+    return {
+      sessionId: session.sessionId,
+      ptySessionId: session.ptySessionId,
+      status: session.status,
+    };
+  },
+);
+
+ipcMain.handle(
+  "missionOrchestrator:stop",
+  async (_event, projectId: string) => {
+    const manager = missionOrchestrators.get(projectId);
+    if (manager) {
+      manager.stop();
+    }
+  },
+);
 
 // --- Orchestrator IPC Handlers ---
 // (taskDecomposer / getDecomposer moved to mission-engine wire block above
@@ -1639,7 +1763,7 @@ ipcMain.handle(
     const decomposer = getDecomposer();
     const layers = decomposer.getExecutionPlan(tasks);
     return { tasks, layers };
-  }
+  },
 );
 
 // --- Orchestrator Session IPC Handlers ---
@@ -1679,7 +1803,7 @@ ipcMain.handle(
         // This listener on the hosting machine picks it up and injects.
         pendingListener.attach(`orch-${projectId}`, sid);
       },
-      resumeSessionId
+      resumeSessionId,
     );
 
     return {
@@ -1687,7 +1811,7 @@ ipcMain.handle(
       ptySessionId: session.ptySessionId,
       status: session.status,
     };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1699,7 +1823,7 @@ ipcMain.handle(
     //   3. otherwise no-op (legacy renderer paths still work after this lands)
     const explicit = payload?.projectId;
     const orch = explicit
-      ? orchestrators.get(explicit) ?? null
+      ? (orchestrators.get(explicit) ?? null)
       : getOrchestratorForSender(event.sender.id);
     if (orch) {
       orch.stop();
@@ -1714,7 +1838,7 @@ ipcMain.handle(
         }
       }
     }
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1722,10 +1846,10 @@ ipcMain.handle(
   (event, payload?: { projectId?: string }) => {
     const explicit = payload?.projectId;
     const orch = explicit
-      ? orchestrators.get(explicit) ?? null
+      ? (orchestrators.get(explicit) ?? null)
       : getOrchestratorForSender(event.sender.id);
     return orch?.getStatus() ?? "stopped";
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1734,7 +1858,7 @@ ipcMain.handle(
     const resolvedPath = rootPath === "~" ? require("os").homedir() : rootPath;
     // Stateless file-IO — any instance works.
     return getAnyOrchestrator().listSessions(resolvedPath);
-  }
+  },
 );
 
 // --- Flow IPC Handlers ---
@@ -1743,7 +1867,7 @@ ipcMain.handle(
   "flow:run",
   async (
     _event,
-    { flow, inputs }: { flow: Flow; inputs?: Record<string, unknown> }
+    { flow, inputs }: { flow: Flow; inputs?: Record<string, unknown> },
   ) => {
     kanbanBridge.registerFlow(flow);
     flowNodeCache.set(flow.id, flow);
@@ -1751,7 +1875,7 @@ ipcMain.handle(
     // Clean up cache after flow completes
     flowNodeCache.delete(flow.id);
     return state;
-  }
+  },
 );
 
 ipcMain.handle("flow:pause", async (_event, { runId }: { runId: string }) => {
@@ -1762,11 +1886,11 @@ ipcMain.handle(
   "flow:resume",
   async (
     _event,
-    { runId, humanInput }: { runId: string; humanInput?: HumanInput }
+    { runId, humanInput }: { runId: string; humanInput?: HumanInput },
   ) => {
     const state = await flowRunner.resume(runId, humanInput);
     return state;
-  }
+  },
 );
 
 ipcMain.handle("flow:cancel", async (_event, { runId }: { runId: string }) => {
@@ -1799,7 +1923,7 @@ ipcMain.handle(
   "code:format",
   async (
     _event,
-    { content, filePath }: { content: string; filePath: string }
+    { content, filePath }: { content: string; filePath: string },
   ) => {
     try {
       const prettier = await import("prettier");
@@ -1840,7 +1964,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : "Format failed",
       };
     }
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1855,7 +1979,7 @@ ipcMain.handle(
     writeApiKeys(keys);
     refreshLLMProvider();
     return { success: true };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -1870,7 +1994,7 @@ ipcMain.handle(
     writeApiKeys(keys);
     refreshLLMProvider();
     return { success: true };
-  }
+  },
 );
 
 // --- App State IPC ---
@@ -1885,7 +2009,7 @@ ipcMain.handle(
       message: string;
       taskId?: string;
       taskTitle?: string;
-    }
+    },
   ) => {
     const port = bridgeServer.getPort();
     if (!port) return { success: false, error: "Bridge server not running" };
@@ -1895,7 +2019,7 @@ ipcMain.handle(
       body: JSON.stringify(params),
     });
     return res.json();
-  }
+  },
 );
 
 // --- Clipboard support ---
@@ -1922,7 +2046,7 @@ ipcMain.handle("clipboard:getFilePaths", () => {
       // Use osascript (AppleScript) — no compilation needed, fast
       const result = execSync(
         `osascript -e 'set filePaths to {}' -e 'try' -e 'set theClip to the clipboard as «class furl»' -e 'set end of filePaths to POSIX path of theClip' -e 'end try' -e 'try' -e 'set fileList to the clipboard as list' -e 'repeat with f in fileList' -e 'try' -e 'set end of filePaths to POSIX path of (f as «class furl»)' -e 'end try' -e 'end repeat' -e 'end try' -e 'set text item delimiters to linefeed' -e 'filePaths as text'`,
-        { encoding: "utf-8", timeout: 2000 }
+        { encoding: "utf-8", timeout: 2000 },
       ).trim();
       if (result) {
         return result
@@ -1965,7 +2089,7 @@ ipcMain.handle("modelPreset:get", () => {
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json"
+  "subscription-plans.json",
 );
 
 interface SubscriptionPlanEntry {
@@ -2000,7 +2124,7 @@ ipcMain.handle(
       fs.writeFileSync(tmp, JSON.stringify(plans, null, 2), "utf-8");
       fs.renameSync(tmp, SUBSCRIPTION_PLANS_FILE);
       console.log(
-        `[Main] subscriptionPlans:save wrote ${plans.length} plan(s)`
+        `[Main] subscriptionPlans:save wrote ${plans.length} plan(s)`,
       );
       return { success: true };
     } catch (err) {
@@ -2010,7 +2134,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : String(err),
       };
     }
-  }
+  },
 );
 
 ipcMain.handle("appState:load", () => readAppState());
@@ -2068,7 +2192,7 @@ app.whenReady().then(async () => {
     console.warn(
       "[ApiKeys] OS keychain encryption unavailable on this system. " +
         "BYOK keys will not persist across restarts. " +
-        "On Linux, install libsecret-1-0 / gnome-keyring."
+        "On Linux, install libsecret-1-0 / gnome-keyring.",
     );
   }
 
@@ -2078,7 +2202,7 @@ app.whenReady().then(async () => {
   try {
     const result = await installBundledHarness();
     console.log(
-      `[Main] Bundle install: ${result.installed} files, ${result.errors.length} errors`
+      `[Main] Bundle install: ${result.installed} files, ${result.errors.length} errors`,
     );
   } catch (err) {
     console.warn("[Main] Bundle install failed (non-fatal):", err);
