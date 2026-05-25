@@ -263,21 +263,39 @@ export default memo(function TerminalView({
       window.electronAPI.pty.resize(sessionId, cols, rows);
     });
 
+    let fitScheduled = false;
     const handleResize = () => {
-      if (disposed) return;
-      try {
-        if (
-          containerRef.current &&
-          containerRef.current.clientWidth > 0 &&
-          containerRef.current.clientHeight > 0
-        ) {
-          fitAddon.fit();
+      if (disposed || fitScheduled) return;
+      fitScheduled = true;
+      requestAnimationFrame(() => {
+        fitScheduled = false;
+        if (disposed) return;
+        try {
+          if (
+            containerRef.current &&
+            containerRef.current.clientWidth > 0 &&
+            containerRef.current.clientHeight > 0
+          ) {
+            fitAddon.fit();
+          }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
-      }
+      });
     };
     window.addEventListener("resize", handleResize);
+
+    // ResizeObserver — the bottom panel can be drag-resized and the sidebar
+    // can collapse; both change xterm's container size without firing
+    // window.resize. Without this, xterm.cols/rows go stale and Gemini's
+    // Ink TUI renders into "rows it thinks it has" while the actual display
+    // is larger → previous frames stay visible above the new render
+    // (observed: two stacked copies of the input box + footer).
+    let resizeObserver: ResizeObserver | null = null;
+    if (containerRef.current && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(handleResize);
+      resizeObserver.observe(containerRef.current);
+    }
 
     // User-input → wantBottom transitions (deterministic, no heuristics).
     // Capture phase ensures we run before xterm's internal handlers, even if
@@ -331,6 +349,7 @@ export default memo(function TerminalView({
       window.clearTimeout(replayTimer);
       clearInterval(flushInterval);
       window.removeEventListener("resize", handleResize);
+      resizeObserver?.disconnect();
       wrapperEl?.removeEventListener("wheel", onWheel, wheelOpts);
       wrapperEl?.removeEventListener("keydown", onKeyDown, keyOpts);
       viewportEl?.removeEventListener("wheel", onWheel, wheelOpts);
