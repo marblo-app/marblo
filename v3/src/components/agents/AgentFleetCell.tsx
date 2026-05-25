@@ -12,6 +12,8 @@ const MODEL_ICONS: Record<ModelType, { icon: string; color: string }> = {
   gemini: { icon: "🔵", color: "#3b82f6" },
   gpt: { icon: "🟢", color: "#22c55e" },
   custom: { icon: "⚪", color: "#6b7280" },
+  antigravity: { icon: "🟠", color: "#f97316" },
+  local: { icon: "⚫", color: "#737373" },
 };
 
 const STATUS_DOTS: Record<AgentStatus, { dot: string; textColor: string }> = {
@@ -45,7 +47,7 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
       isFocused = false,
       onFocus,
     },
-    ref
+    ref,
   ) {
     const modelInfo = MODEL_ICONS[agent.model] ?? MODEL_ICONS.custom;
     const statusInfo = STATUS_DOTS[agent.status] ?? STATUS_DOTS.idle;
@@ -87,7 +89,7 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
           drillIn();
         }
       },
-      [drillIn]
+      [drillIn],
     );
 
     // Cell-level actions — 셀 click/focus 이벤트로 버블 안 되게 stopPropagation.
@@ -105,7 +107,7 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
           setPending(null);
         }
       },
-      [agent.id]
+      [agent.id],
     );
 
     const handleDelete = useCallback(
@@ -121,7 +123,7 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
         }
         // 성공 시 컴포넌트가 unmount 되므로 setPending(null) 생략 (race-safe).
       },
-      [agent.id, agent.name]
+      [agent.id, agent.name],
     );
 
     // ▶ Start 버튼은 사용자가 의도적으로 깨워야 할 때만 노출 — running 중인
@@ -215,7 +217,7 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
         </div>
       </div>
     );
-  }
+  },
 );
 
 export const AgentFleetCell = memo(AgentFleetCellImpl);
