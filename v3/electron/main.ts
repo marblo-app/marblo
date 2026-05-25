@@ -1080,6 +1080,25 @@ ipcMain.on("pty:write", (_event, { id, data }) => {
 });
 
 ipcMain.handle("pty:resize", (_event, { id, cols, rows }) => {
+  // Discard any pre-resize buffered output. The PTY was spawned at 80x24
+  // and the TUI (Gemini Ink, Codex/Claude TUI variants) rendered its
+  // initial frame at those dimensions. Once we resize, the CLI receives
+  // SIGWINCH and redraws at the new size — but the OLD frame is still in
+  // ptyBuffers. If we keep it, the next pty:replay writes the 80x24 frame
+  // and the post-resize frame back-to-back into xterm, producing duplicate
+  // text, two input boxes, and visual flicker (most visible in Gemini's
+  // alt-screen TUI).
+  //
+  // We only clear during the initial buffering window (before pty:replay
+  // drains the buffer). After replay, ptyBuffers no longer has the id, so
+  // this is a no-op.
+  const buf = ptyBuffers.get(id);
+  if (buf && buf.length > 0) {
+    buf.length = 0;
+    console.log(
+      `[PTY:RESIZE] Cleared pre-resize buffer for ${id} (now ${cols}x${rows})`
+    );
+  }
   ptyManager.resize(id, cols, rows);
 });
 
