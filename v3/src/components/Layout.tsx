@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Header } from "./Header";
 import { TabBar, type TabId } from "./TabBar";
 import { Sidebar } from "./sidebar/Sidebar";
-import TerminalPanel from "./terminal/TerminalPanel";
+import { AgentListPanel } from "./agents/list-panel/AgentListPanel";
 import OrchestratorPanel from "./orchestrator/OrchestratorPanel";
 import { BoardTab } from "./tabs/BoardTab";
 import { CodeTab } from "./tabs/CodeTab";
@@ -319,12 +319,17 @@ export function Layout() {
             <ActiveTabComponent />
           </div>
 
-          {/* Orchestrator panel — between tab content and terminal */}
+          {/* Orchestrator panel — between tab content and agent list */}
           <OrchestratorPanel />
 
-          {/* Terminal panel — DIAG: toggle via VITE_DISABLE_TERMINAL_PANEL=1 */}
+          {/* Agent List panel — replaces the old TerminalPanel.
+              P3 hybrid rows for ambient monitoring; double-click a row to
+              jump to the full AgentsTab. DIAG: toggle via VITE_DISABLE_TERMINAL_PANEL=1. */}
           {import.meta.env.VITE_DISABLE_TERMINAL_PANEL !== "1" && (
-            <TerminalPanel />
+            <AgentListPanel
+              onJumpToAgent={() => setActiveTab("agents")}
+              onSpawnClick={() => setShowOrchestratorChat(true)}
+            />
           )}
         </div>
 
