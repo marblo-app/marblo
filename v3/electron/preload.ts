@@ -52,6 +52,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
     replay: (id: string): Promise<string[]> =>
       ipcRenderer.invoke("pty:replay", { id }),
+    exists: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke("pty:exists", { id }),
     removeListeners: (id: string) => {
       ipcRenderer.removeAllListeners(`pty:data:${id}`);
       ipcRenderer.removeAllListeners(`pty:exit:${id}`);

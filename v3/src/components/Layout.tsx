@@ -196,8 +196,9 @@ export function Layout() {
       // other's fields.
       if (currentProject) {
         try {
-          const { doc, setDoc, serverTimestamp } =
-            await import("firebase/firestore");
+          const { doc, setDoc, serverTimestamp } = await import(
+            "firebase/firestore"
+          );
           const { db } = await import("../lib/firebase");
           await setDoc(
             doc(db, "agents", data.agentId),
@@ -213,12 +214,12 @@ export function Layout() {
               skillFile: "",
               createdAt: serverTimestamp(),
             },
-            { merge: true },
+            { merge: true }
           );
         } catch (err) {
           console.warn(
             "[Layout] Firestore agent upsert failed (non-fatal):",
-            err,
+            err
           );
         }
       }
@@ -226,12 +227,13 @@ export function Layout() {
       // Chat notification — best-effort.
       if (currentProject) {
         try {
-          const { notifyAgentSpawned } =
-            await import("../services/agentNotificationService");
+          const { notifyAgentSpawned } = await import(
+            "../services/agentNotificationService"
+          );
           await notifyAgentSpawned(
             currentProject.id,
             data.name,
-            data.role || "agent",
+            data.role || "agent"
           );
         } catch {
           // best-effort
@@ -335,7 +337,7 @@ export function Layout() {
           {import.meta.env.VITE_DISABLE_TERMINAL_PANEL !== "1" && (
             <AgentListPanel
               onJumpToAgent={() => setActiveTab("agents")}
-              onSpawnClick={() => setShowOrchestratorChat(true)}
+              onSpawnClick={() => setActiveTab("agents")}
             />
           )}
         </div>

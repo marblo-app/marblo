@@ -170,7 +170,7 @@ export default memo(function TerminalView({
 
     const replayTimer = window.setTimeout(() => {
       if (disposed) return;
-      window.electronAPI.pty.replay(sessionId).then((buffered) => {
+      window.electronAPI.pty.replay(sessionId).then(async (buffered) => {
         if (disposed) return;
         if (buffered.length > 0) hasReceivedData = true;
         for (const chunk of buffered) {
@@ -180,15 +180,26 @@ export default memo(function TerminalView({
             pendingData.push(chunk);
           }
         }
-        // If no data after replay, show "session not found" message
+        // Empty buffer can mean two things:
+        //   (a) PTY is genuinely dead (e.g. after app restart) → warn.
+        //   (b) PTY is alive but this is a re-mount (collapse + reopen in
+        //       AgentListPanel). The buffer was drained on the first mount,
+        //       so re-mounts always see length 0 even though the pty is fine.
+        // Probe pty:exists to disambiguate and only warn for case (a).
         if (!hasReceivedData && termOpened) {
-          terminal.write("\r\n\x1b[33m  ⚠ 세션이 만료되었습니다.\x1b[0m\r\n");
-          terminal.write(
-            "\x1b[90m  앱 재시작으로 PTY 세션이 종료되었습니다.\x1b[0m\r\n"
-          );
-          terminal.write(
-            "\x1b[90m  Agents 탭에서 Restart 버튼으로 재시작하세요.\x1b[0m\r\n\r\n"
-          );
+          const alive = await window.electronAPI.pty
+            .exists(sessionId)
+            .catch(() => false);
+          if (disposed) return;
+          if (!alive) {
+            terminal.write("\r\n\x1b[33m  ⚠ 세션이 만료되었습니다.\x1b[0m\r\n");
+            terminal.write(
+              "\x1b[90m  앱 재시작으로 PTY 세션이 종료되었습니다.\x1b[0m\r\n"
+            );
+            terminal.write(
+              "\x1b[90m  Agents 탭에서 Restart 버튼으로 재시작하세요.\x1b[0m\r\n\r\n"
+            );
+          }
         }
         if (termOpened && wantBottomRef.current) terminal.scrollToBottom();
       });

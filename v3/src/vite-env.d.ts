@@ -61,6 +61,7 @@ interface PtyAPI {
   onData: (id: string, callback: (data: string) => void) => void;
   onExit: (id: string, callback: (code: number) => void) => void;
   replay: (id: string) => Promise<string[]>;
+  exists: (id: string) => Promise<boolean>;
   removeListeners: (id: string) => void;
 }
 

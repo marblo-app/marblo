@@ -1091,6 +1091,14 @@ ipcMain.handle("pty:list", () => {
   return ptyManager.listSessions();
 });
 
+// Cheap existence probe. Used by TerminalView to suppress the misleading
+// "session expired" warning on re-mount (the replay buffer is drained on
+// first mount, so subsequent mounts always see buffered.length === 0 even
+// when the PTY is alive and well).
+ipcMain.handle("pty:exists", (_event, { id }: { id: string }) => {
+  return ptyManager.listSessions().some((s) => s.id === id);
+});
+
 // --- File System IPC Handlers ---
 ipcMain.handle("fs:readTree", (_event, rootPath: string) => {
   return fsManager.readTree(rootPath);

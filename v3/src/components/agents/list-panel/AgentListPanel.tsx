@@ -67,6 +67,13 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
     return subscribeToAgents(projectId);
   }, [projectId, subscribeToAgents]);
 
+  // The Orchestrator has its own dedicated panel (OrchestratorPanel)
+  // directly above this one — don't double-render it as just another row.
+  const realAgents = useMemo(
+    () => agents.filter((a) => a.role !== "orchestrator"),
+    [agents]
+  );
+
   const rows = useMemo<AgentRowData[]>(() => {
     // Agent rows: match each agent to its pty session by name suffix.
     // attachSession is called from 5+ sites with different label formats:
@@ -77,7 +84,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
     // of another (e.g. "foo-1" vs "x-foo-1") the wrong row matches; agent
     // names in practice are distinct enough for Phase 1. Long-term fix is
     // to store the canonical ptySessionId on the Agent Firestore doc.
-    const agentRows: AgentRowData[] = agents.map((a) => {
+    const agentRows: AgentRowData[] = realAgents.map((a) => {
       const matched = sessions.find(
         (s) => s.isAgent && s.name.endsWith(a.name)
       );
@@ -107,11 +114,11 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
       }));
 
     return [...agentRows, ...shellRows];
-  }, [agents, sessions]);
+  }, [realAgents, sessions]);
 
   const recent = useMemo(
     () =>
-      agents
+      realAgents
         .filter((a) => a.status === "stopped")
         .slice(0, 3)
         .map((a) => ({
@@ -119,7 +126,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
           vendor: VENDOR_VISUALS[a.model as VendorKind]?.label ?? a.model,
           ageLabel: formatAge(a.costUpdatedAt ?? a.createdAt),
         })),
-    [agents]
+    [realAgents]
   );
 
   const handleToggleExpand = useCallback((id: string) => {
