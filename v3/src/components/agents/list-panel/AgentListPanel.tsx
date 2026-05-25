@@ -29,16 +29,35 @@ interface Props {
   onSpawnClick: () => void;
 }
 
+// Module-level so re-renders don't reset the count and "Terminal 1" doesn't
+// get spawned twice. Matches the prior TerminalPanel behavior — see also
+// Layout.tsx's terminal:new event listener which has its own counter.
+let terminalSpawnCounter = 0;
+
 export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
   const agents = useAgentStore((s) => s.agents);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
   const restartAgent = useAgentStore((s) => s.restartAgent);
   const sessions = useTerminalStore((s) => s.sessions);
+  const createTerminalSession = useTerminalStore((s) => s.createSession);
   const requestJump = useNavigationStore((s) => s.requestJump);
   const projectId = useProjectStore((s) => s.currentProject?.id) ?? "";
   const [restartingId, setRestartingId] = useState<string | null>(null);
-
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const handleSpawnTerminal = useCallback(async () => {
+    terminalSpawnCounter++;
+    try {
+      const id = await createTerminalSession(
+        `Terminal ${terminalSpawnCounter}`
+      );
+      // Auto-expand the new terminal so the user sees it immediately.
+      setExpandedId(id);
+    } catch (err) {
+      console.error("[AgentListPanel] Failed to spawn terminal:", err);
+      terminalSpawnCounter--;
+    }
+  }, [createTerminalSession]);
 
   // Subscribe to agents independently. Without this, the panel only shows
   // data when another consumer (AgentsTab / TeamDashboard) has activated
@@ -127,13 +146,22 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
           Active Agents{" "}
           <span className="text-[#cdd6f4] font-medium">({rows.length})</span>
         </span>
-        <button
-          onClick={onSpawnClick}
-          className="rounded px-2 py-0.5 text-[10px] text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] transition-colors"
-          title="Open Agents tab to spawn (⌘N in Phase 2)"
-        >
-          + New
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleSpawnTerminal}
+            className="rounded px-2 py-0.5 text-[10px] text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] transition-colors"
+            title="Spawn a shell terminal in the project folder"
+          >
+            + Terminal
+          </button>
+          <button
+            onClick={onSpawnClick}
+            className="rounded px-2 py-0.5 text-[10px] text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] transition-colors"
+            title="Spawn an AI agent — opens Agents tab (⌘N in Phase 2)"
+          >
+            + Agent
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto">
