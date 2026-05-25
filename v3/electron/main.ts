@@ -1515,28 +1515,16 @@ ipcMain.handle(
           resumeId = null;
         }
       }
+      // If no resumable session exists, fresh-launch the agent anyway so
+      // it shows up alive in the panel after app restart (user requirement:
+      // "기존에 에이전트들이 클로드코드 세션처럼 다 연결되서 살아있어야되").
+      // resumeId stays null → agentManager.launch starts a fresh PTY with
+      // no --resume. Token cost is the CLI's idle init (~0 until input).
+      // Worst case the user deletes unused agents from the dashboard.
       if (!resumeId) {
-        // No prior session — register as idle stub (so dispatch can still
-        // route work to it) but don't relaunch a PTY. The agent will boot
-        // fresh on the next dispatch_task / spawn_agent.
-        agentManager.registerReconnected({
-          id: agentData.id,
-          name: agentData.name,
-          model: agentData.model as "claude" | "gemini" | "gpt" | "custom",
-          role: agentData.role,
-          command: agentData.command,
-          cwd: rootPath,
-          ptySessionId: `agent-${agentData.id}`,
-        });
-        results.push({
-          agentId: agentData.id,
-          reconnected: false,
-          ptySessionId: null,
-        });
         console.log(
-          `[Reconnect] No session found for agent ${agentData.name} (${agentData.model}), registered as idle`
+          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session → fresh launch`
         );
-        continue;
       }
 
       try {
@@ -1547,7 +1535,7 @@ ipcMain.handle(
           role: agentData.role,
           command: agentData.command,
           cwd: rootPath,
-          resumeSessionId: resumeId,
+          resumeSessionId: resumeId ?? undefined,
           projectId,
           onPtyReady: (sid) => {
             ptyOwners.set(sid, senderId);
