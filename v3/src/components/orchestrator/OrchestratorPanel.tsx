@@ -5,7 +5,7 @@ import { useEditorStore } from "../../stores/editorStore";
 import { upsertOrchestratorAgentDoc } from "../../services/orchestratorAgentDoc";
 import OrchestratorTerminal from "./OrchestratorTerminal";
 
-const DEFAULT_HEIGHT = 300;
+const DEFAULT_HEIGHT = 140;
 const MIN_HEIGHT = 80;
 const MAX_HEIGHT = 600;
 const COLLAPSED_HEIGHT = 36;
