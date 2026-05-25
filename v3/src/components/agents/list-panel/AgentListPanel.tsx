@@ -3,6 +3,7 @@ import { useAgentStore } from "../../../stores/agentStore";
 import { useTerminalStore } from "../../../stores/terminalStore";
 import { useNavigationStore } from "../../../stores/navigationStore";
 import { useProjectStore } from "../../../stores/projectStore";
+import { useAgentFocusStore } from "../../../stores/agentFocusStore";
 import { AgentRow } from "./AgentRow";
 import { EmptyState } from "./EmptyState";
 import { FocusView } from "./FocusView";
@@ -54,7 +55,11 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
   // Single-select focus model (Claude /agents style). When set, the panel
   // body switches from the row list to a fullscreen-in-panel FocusView for
   // that agent. null = list view.
-  const [focusedId, setFocusedId] = useState<string | null>(null);
+  //
+  // 외부 패널(상단 Fleet 그리드의 Enter / dblclick) 도 같은 focus 를 set
+  // 할 수 있도록 zustand store 로 lift. 상태 단일화 + cross-panel drill-in.
+  const focusedId = useAgentFocusStore((s) => s.focusedAgentId);
+  const setFocusedId = useAgentFocusStore((s) => s.setFocusedAgent);
 
   // Drag-resizable panel height (persisted). Mirrors OrchestratorPanel's
   // handle right above for muscle-memory consistency.
@@ -204,25 +209,23 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
     : -1;
   const focusedRow = focusedIndex >= 0 ? rows[focusedIndex] : null;
 
+  // 외부 store(zustand) 는 함수형 setter 가 없어서 functional update 대신
+  // getState() 로 현재 값 직접 읽어서 다음 id 계산.
   const handlePrev = useCallback(() => {
     if (rows.length === 0) return;
-    setFocusedId((current) => {
-      const i = current ? rows.findIndex((r) => r.id === current) : -1;
-      if (i < 0) return rows[0].id;
-      const next = (i - 1 + rows.length) % rows.length;
-      return rows[next].id;
-    });
-  }, [rows]);
+    const current = useAgentFocusStore.getState().focusedAgentId;
+    const i = current ? rows.findIndex((r) => r.id === current) : -1;
+    const next = i < 0 ? 0 : (i - 1 + rows.length) % rows.length;
+    setFocusedId(rows[next].id);
+  }, [rows, setFocusedId]);
 
   const handleNext = useCallback(() => {
     if (rows.length === 0) return;
-    setFocusedId((current) => {
-      const i = current ? rows.findIndex((r) => r.id === current) : -1;
-      if (i < 0) return rows[0].id;
-      const next = (i + 1) % rows.length;
-      return rows[next].id;
-    });
-  }, [rows]);
+    const current = useAgentFocusStore.getState().focusedAgentId;
+    const i = current ? rows.findIndex((r) => r.id === current) : -1;
+    const next = i < 0 ? 0 : (i + 1) % rows.length;
+    setFocusedId(rows[next].id);
+  }, [rows, setFocusedId]);
 
   const handleDoubleClick = useCallback(
     (row: AgentRowData) => {
