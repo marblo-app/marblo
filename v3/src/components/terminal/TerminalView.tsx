@@ -152,6 +152,28 @@ export default memo(function TerminalView({
     };
 
     let hasReceivedData = false;
+    // rAF-level batching for live PTY chunks. Busy TUI apps (Gemini Ink,
+    // Claude Code streaming) emit many small chunks per frame. Each chunk
+    // historically triggered a separate terminal.write() + scrollToBottom
+    // rAF → xterm rendered intermediate states (e.g. cleared screen before
+    // the new frame's content arrived) → visible flicker during operation.
+    //
+    // Now: queue chunks within a frame, flush once on rAF as a single write
+    // + single scrollToBottom. Adds up to ~16ms latency to terminal echo,
+    // which is invisible for AI-agent streaming output (the use case here).
+    // If we ever need sub-frame echo for an interactive shell, the join
+    // could be gated by sessionId or a prop.
+    let liveQueue: string[] = [];
+    let flushScheduled = false;
+    const flushLive = () => {
+      flushScheduled = false;
+      if (disposed) return;
+      if (liveQueue.length === 0) return;
+      const joined = liveQueue.join("");
+      liveQueue = [];
+      terminal.write(joined);
+      if (wantBottomRef.current) terminal.scrollToBottom();
+    };
     window.electronAPI.pty.onData(sessionId, (data) => {
       hasReceivedData = true;
       if (disposed) return;
@@ -159,12 +181,10 @@ export default memo(function TerminalView({
         pendingData.push(data);
         return;
       }
-      terminal.write(data);
-      if (wantBottomRef.current) {
-        requestAnimationFrame(() => {
-          if (disposed || !wantBottomRef.current) return;
-          terminal.scrollToBottom();
-        });
+      liveQueue.push(data);
+      if (!flushScheduled) {
+        flushScheduled = true;
+        requestAnimationFrame(flushLive);
       }
     });
 
