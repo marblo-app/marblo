@@ -136,4 +136,53 @@ describe("ptyMirrorStore", () => {
   it("getLines on unknown session returns empty array (no throw)", () => {
     expect(usePtyMirrorStore.getState().getLines("nope")).toEqual([]);
   });
+
+  it("attach drains pty.replay() into the buffer (past output on mount)", async () => {
+    // Without this, MiniTerminal stays blank until the next live chunk —
+    // an agent that's currently idle looks "not connected".
+    (
+      window as unknown as {
+        electronAPI?: {
+          pty?: {
+            onData?: (id: string, cb: (data: string) => void) => void;
+            replay?: (id: string) => Promise<string[]>;
+          };
+        };
+      }
+    ).electronAPI = {
+      pty: {
+        onData: () => {
+          /* live listener — no live chunks in this test */
+        },
+        replay: async (id: string) => {
+          if (id !== "s1") return [];
+          return ["past line 1\n", "past line 2\n"];
+        },
+      },
+    };
+
+    usePtyMirrorStore.getState().attach("s1");
+    // Replay is fire-and-forget — wait a microtask for the promise to settle.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(usePtyMirrorStore.getState().getLines("s1")).toEqual([
+      "past line 1",
+      "past line 2",
+    ]);
+  });
+
+  it("attach without pty.replay (legacy preload) still works", async () => {
+    (
+      window as unknown as {
+        electronAPI?: {
+          pty?: { onData?: (id: string, cb: (data: string) => void) => void };
+        };
+      }
+    ).electronAPI = {
+      pty: { onData: () => {} },
+    };
+    usePtyMirrorStore.getState().attach("s1");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(usePtyMirrorStore.getState().getLines("s1")).toEqual([]);
+  });
 });
