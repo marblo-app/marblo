@@ -18,19 +18,16 @@ export class TerminalPage {
   constructor(page: Page, kind: "orchestrator" | "agent") {
     this.page = page;
     this.kind = kind;
-    // OrchestratorTerminal / TerminalView 의 outer wrapper. 두 컴포넌트 모두
-    // .xterm 클래스의 부모를 가지므로 첫 인스턴스를 잡는다. 여러 PTY 띄운
-    // 시나리오는 nth() 로 인덱싱.
-    this.root =
-      kind === "orchestrator"
-        ? page
-            .locator(
-              '[data-testid="orchestrator-terminal"], .orchestrator-terminal',
-            )
-            .first()
-        : page
-            .locator('[data-testid="agent-terminal"], .agent-terminal')
-            .first();
+    // OrchestratorTerminal / TerminalView 둘 다 xterm.js 가 mount 시 자동으로
+    // 부여하는 `.xterm` 클래스의 wrapper 를 가진다. data-testid 가 없어서
+    // 가장 견고한 셀렉터는 `.xterm` 자체. 한 화면에 여러 PTY 가 떠 있는
+    // 시나리오 (Agents 탭의 여러 에이전트) 는 nth() 로 인덱싱.
+    //
+    // 현재 v3 의 단일 패널 mount 순서:
+    //   - 0번 .xterm = OrchestratorTerminal (OrchestratorPanel)
+    //   - 1번 이후  = AgentListPanel 의 각 TerminalView (있을 경우)
+    // kind 가 늘어나면 인덱스 또는 더 정확한 부모 셀렉터로 분기.
+    this.root = page.locator(".xterm").first();
   }
 
   /** xterm-viewport (스크롤 컨테이너) Locator. */
@@ -51,18 +48,26 @@ export class TerminalPage {
     });
   }
 
-  /** wheel 이벤트로 위로 스크롤. capture phase 핸들러까지 트리거. */
+  /**
+   * wheel 이벤트로 위로 스크롤. capture phase 핸들러까지 트리거.
+   * xterm 의 `.xterm-screen` overlay 가 `.xterm-viewport` hover 를 가로채므로
+   * boundingBox 좌표 기반 mouse.move + wheel 로 우회.
+   */
   async wheelUp(deltaY = 200): Promise<void> {
-    const vp = this.viewport();
-    await vp.hover();
+    await this.moveMouseOverViewport();
     await this.page.mouse.wheel(0, -Math.abs(deltaY));
   }
 
   /** wheel 이벤트로 아래로 스크롤. */
   async wheelDown(deltaY = 200): Promise<void> {
-    const vp = this.viewport();
-    await vp.hover();
+    await this.moveMouseOverViewport();
     await this.page.mouse.wheel(0, Math.abs(deltaY));
+  }
+
+  private async moveMouseOverViewport(): Promise<void> {
+    const box = await this.viewport().boundingBox();
+    if (!box) throw new Error(".xterm-viewport boundingBox 를 얻지 못함");
+    await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   }
 
   /** PageUp 키 입력. wrapper 에 focus 필요. */
