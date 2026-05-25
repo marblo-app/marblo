@@ -59,31 +59,23 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
       useTerminalStore.getState().openTerminalForSession(sessionId, label);
     }, [agent.name, modelInfo.icon, sessionId]);
 
-    // 파일 매니저 패턴: 단일 클릭은 select(focus) 만, Enter / Space /
-    // dblclick 이 실제 액션(터미널 오픈). 버튼은 native 로 Enter/Space →
-    // onClick 을 발사하므로 그쪽으로 라우팅하지 않고, 단일 click 은 의도적
-    // 으로 no-op — 브라우저 default focus 만 적용되도록 둔다.
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        e.stopPropagation();
-        openTerminal();
-      }
-    };
-
+    // 단일 click / Enter / Space / dblclick 모두 터미널 오픈. button 의
+    // native 핸들링이 Enter/Space → onClick 으로 합쳐주므로 별도 onKeyDown
+    // 필요 없음 (그리드 컨테이너의 화살표 핸들러를 막지 않도록 stopPropagation
+    // 도 하지 않음).
     return (
       <button
         type="button"
         ref={ref}
         role="gridcell"
         tabIndex={isFocused ? 0 : -1}
-        onFocus={onFocus}
+        onClick={openTerminal}
         onDoubleClick={openTerminal}
-        onKeyDown={handleKeyDown}
-        aria-label={`${agent.name} — Enter 또는 더블클릭으로 터미널 열기`}
+        onFocus={onFocus}
+        aria-label={`${agent.name} — 클릭 / Enter / 더블클릭으로 터미널 열기`}
         className="group text-left rounded-lg border border-[#313244] bg-[#181825] p-2.5 hover:border-[#585b70] hover:bg-[#1e1e2e] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#cba6f7]"
         style={{ borderLeftColor: modelInfo.color, borderLeftWidth: 3 }}
-        title={`${agent.name} — Enter / 더블클릭으로 터미널 열기`}
+        title={`${agent.name} — 클릭 / Enter / 더블클릭으로 터미널 열기`}
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-2 mb-1.5 min-w-0">
