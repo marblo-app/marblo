@@ -23,7 +23,7 @@ import {
 
 export interface SpawnAgentRequest {
   name: string;
-  model: "claude" | "gemini" | "gpt" | "antigravity" | "custom";
+  model: "claude" | "gemini" | "gpt" | "antigravity" | "local" | "custom";
   role: string;
   command?: string;
   cwd?: string;

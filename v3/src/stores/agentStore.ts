@@ -11,7 +11,7 @@ import { useSubscriptionStore } from "./subscriptionStore";
 import { checkAgentSpawn } from "../lib/planLimits";
 
 const COLLECTION = "agents";
-const DATE_FIELDS = ["createdAt", "costUpdatedAt"];
+const DATE_FIELDS = ["createdAt"];
 
 function toAgent(raw: Record<string, unknown>): Agent {
   return convertTimestamps<Agent>(raw, DATE_FIELDS);
@@ -49,7 +49,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       [where("projectId", "==", projectId)],
       (docs) => {
         set({ agents: docs.map(toAgent), loading: false });
-      },
+      }
     );
   },
 
@@ -74,7 +74,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         "",
         undefined,
         undefined,
-        projectId,
+        projectId
       );
       return id;
     } catch (err) {
@@ -129,7 +129,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         cwd,
         undefined,
         undefined,
-        projectId,
+        projectId
       );
     } catch (err) {
       set({
@@ -154,7 +154,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   getAgentByName: (name: string): Agent | undefined => {
     const { agents } = get();
     return agents.find(
-      (a: Agent) => a.name.toLowerCase() === name.toLowerCase(),
+      (a: Agent) => a.name.toLowerCase() === name.toLowerCase()
     );
   },
 
@@ -164,20 +164,34 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         claude: "🟣",
         gemini: "🔵",
         gpt: "🟢",
+        antigravity: "🟠",
+        local: "⚫",
         custom: "⚪",
       };
-
       const result = await window.electronAPI.agent.restart(id);
       if (result) {
         await agentService.updateAgent(id, { status: "idle" as AgentStatus });
-
-        // Attach the new PTY session to the terminalStore — without this the
-        // expanded row stays "Terminal not attached" even though restart
-        // succeeded in main, because nothing wired the new ptySessionId into
-        // the renderer-side session list.
+        // Send restart notification to chat
         const currentAgents = get().agents;
         const restartedAgent = currentAgents.find((a: Agent) => a.id === id);
-        if (restartedAgent) {
+        const projectId = useProjectStore.getState().currentProject?.id;
+        if (restartedAgent && projectId) {
+          import("../services/agentNotificationService").then(
+            ({ notifyAgentRestarted }) => {
+              notifyAgentRestarted(projectId, restartedAgent.name).catch(
+                () => {}
+              );
+            }
+          );
+        }
+        // Re-register the (possibly new) PTY in the renderer's terminalStore.
+        // restart() kills the old PTY and creates a new one with the same
+        // `agent-${id}` ptySessionId; the old terminalStore entry may have
+        // been detached (project switch, window reopen) and never re-attached
+        // — without this, AgentListPanel's row.ptySessionId stays undefined
+        // even though the PTY is alive, and the user keeps seeing the Start
+        // placeholder.
+        if (restartedAgent && result.ptySessionId) {
           const { useTerminalStore } = await import("./terminalStore");
           useTerminalStore
             .getState()
@@ -188,17 +202,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               }`
             );
         }
-
-        const projectId = useProjectStore.getState().currentProject?.id;
-        if (restartedAgent && projectId) {
-          import("../services/agentNotificationService").then(
-            ({ notifyAgentRestarted }) => {
-              notifyAgentRestarted(projectId, restartedAgent.name).catch(
-                () => {},
-              );
-            },
-          );
-        }
         return;
       }
       // Restart returned null — agent not in Electron memory (app was restarted).
@@ -207,25 +210,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const agent = agents.find((a: Agent) => a.id === id);
       if (!agent) throw new Error("Agent not found");
 
-      // Use the actual project root — not literal "~", which won't expand
-      // inside electron and caused restarts to either fail or spawn in the
-      // wrong directory (running agents stuck "Terminal not attached").
+      // Use the project's rootPath as cwd. Previously hardcoded "~" which
+      // meant restarted agents booted in the user's home dir instead of the
+      // project — breaking file access from inside the agent.
       const { useEditorStore } = await import("./editorStore");
-      const cwd = useEditorStore.getState().rootPath || ".";
+      const cwd = useEditorStore.getState().rootPath ?? "~";
       const launchResult = await window.electronAPI.agent.launch(agent, cwd);
       await agentService.updateAgent(id, { status: "idle" as AgentStatus });
 
+      // Attach terminal session (MODEL_ICONS hoisted to top of restartAgent)
       const { useTerminalStore } = await import("./terminalStore");
       useTerminalStore
         .getState()
         .attachSession(
           launchResult.ptySessionId,
-          `${MODEL_ICONS[agent.model] || "⚪"} ${agent.name}`,
+          `${MODEL_ICONS[agent.model] || "⚪"} ${agent.name}`
         );
-      // Fleet 그리드 MiniTerminal 이 새 ptySessionId 로 IPC 채널을 구독할 수
-      // 있도록 매핑 등록. cold restart 는 새 PTY 라 이전 매핑이 stale.
-      const { useAgentSessionMap } = await import("./agentSessionMap");
-      useAgentSessionMap.getState().set(agent.id, launchResult.ptySessionId);
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to restart agent",
@@ -256,16 +256,16 @@ if (typeof window !== "undefined" && window.electronAPI?.agent?.onSyncStatus) {
       // Match by name — AgentManager UUID != Firestore doc ID, but names are shared
       const { agents } = useAgentStore.getState();
       const match = agents.find(
-        (a) => a.name.toLowerCase() === agentName.toLowerCase(),
+        (a) => a.name.toLowerCase() === agentName.toLowerCase()
       );
       if (match) {
         agentService.updateAgent(match.id, updates).catch((err) => {
           console.error(
             "[AgentStore] Failed to sync agent status to Firestore:",
-            err,
+            err
           );
         });
       }
-    },
+    }
   );
 }

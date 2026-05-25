@@ -5,7 +5,6 @@ import { useAgentStore } from "../../stores/agentStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useTerminalStore } from "../../stores/terminalStore";
-import { useAgentSessionMap } from "../../stores/agentSessionMap";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useAuth } from "../../hooks/useAuth";
@@ -107,6 +106,8 @@ export function AgentsTab() {
         claude: "🟣",
         gemini: "🔵",
         gpt: "🟢",
+        antigravity: "🟠",
+        local: "⚫",
         custom: "⚪",
       };
       useTerminalStore
@@ -115,9 +116,6 @@ export function AgentsTab() {
           result.ptySessionId,
           `${MODEL_ICONS[data.model] || "⚪"} ${data.name}`
         );
-      // Fleet 그리드/Activity 점프 등 agentId → ptySessionId 가 필요한 흐름이
-      // launch 결과를 늦게 받지 못하도록 launch 직후 즉시 등록.
-      useAgentSessionMap.getState().set(id, result.ptySessionId);
     } catch (err) {
       console.error("Agent launch failed:", err);
     }

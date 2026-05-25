@@ -4,12 +4,13 @@ import { useProjectStore } from "../stores/projectStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useTerminalStore } from "../stores/terminalStore";
 import { useOrchestratorStore } from "../stores/orchestratorStore";
-import * as agentService from "../services/agentService";
 
 const MODEL_ICONS: Record<string, string> = {
   claude: "🟣",
   gemini: "🔵",
   gpt: "🟢",
+  antigravity: "🟠",
+  local: "⚫",
   custom: "⚪",
 };
 
@@ -40,47 +41,19 @@ export function useAgentReconnect() {
         currentProject.id
       );
 
-      // Lazy import — agentSessionMap is only needed when we actually have
-      // reconnect results, and avoids pulling sessionStorage at module load.
-      const { useAgentSessionMap } = await import("../stores/agentSessionMap");
       for (const result of results) {
         if (result.reconnected && result.ptySessionId) {
           const agent = agents.find((a) => a.id === result.agentId);
           const icon = agent ? MODEL_ICONS[agent.model] || "⚪" : "⚪";
           const label = agent ? `${icon} ${agent.name}` : result.agentId;
           attachSession(result.ptySessionId, label);
-          // Fleet 그리드 MiniTerminal 이 새 ptySessionId 로 IPC 채널 구독할
-          // 수 있도록 매핑 갱신. 앱 재시작 후 첫 진입에서 필수.
-          useAgentSessionMap
-            .getState()
-            .set(result.agentId, result.ptySessionId);
-        } else if (result.skippedReason === "no-session") {
-          // Policy change (PR #9): resumable 세션 없는 에이전트는 fresh-launch
-          // 안 함 → Firestore status 가 stale 한 "working"/"idle" 이면 그리드
-          // 셀에서 ▶ Start 버튼이 안 뜸 (canStart=stopped|error). UI 정합을
-          // 위해 stopped 로 동기화. 이미 stopped/error 면 그대로 두고 굳이
-          // write 트리거 안 함 (Firestore I/O 절감).
-          const agent = agents.find((a) => a.id === result.agentId);
-          if (agent && agent.status !== "stopped" && agent.status !== "error") {
-            agentService
-              .updateAgent(result.agentId, { status: "stopped" })
-              .catch((err) => {
-                console.warn(
-                  "[Reconnect] status→stopped sync failed (non-fatal):",
-                  err
-                );
-              });
-          }
         }
       }
 
       const reconnectedCount = results.filter((r) => r.reconnected).length;
-      const skippedNoSession = results.filter(
-        (r) => r.skippedReason === "no-session"
-      ).length;
-      if (reconnectedCount > 0 || skippedNoSession > 0) {
+      if (reconnectedCount > 0) {
         console.log(
-          `[Reconnect] ${reconnectedCount}/${agents.length} reconnected, ${skippedNoSession} skipped (no resumable session — ▶ Start 수동)`
+          `[Reconnect] ${reconnectedCount}/${agents.length} agents reconnected`
         );
       }
     } catch (err) {

@@ -1,4 +1,10 @@
-export type ModelType = "claude" | "gemini" | "gpt" | "custom";
+export type ModelType =
+  | "claude"
+  | "gemini"
+  | "gpt"
+  | "antigravity"
+  | "local"
+  | "custom";
 export type AgentStatus = "idle" | "working" | "error" | "stopped";
 
 export interface Agent {

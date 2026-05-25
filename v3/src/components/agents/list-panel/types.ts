@@ -12,6 +12,8 @@ export const VENDOR_VISUALS: Record<VendorKind, VendorVisual> = {
   claude: { monogram: "C", label: "Claude", stripeColor: "#cc785c" },
   gemini: { monogram: "G", label: "Gemini", stripeColor: "#4285f4" },
   gpt: { monogram: "Cx", label: "Codex", stripeColor: "#10a37f" },
+  antigravity: { monogram: "Ag", label: "Antigravity", stripeColor: "#f97316" },
+  local: { monogram: "L", label: "Local", stripeColor: "#737373" },
   custom: { monogram: "X", label: "Custom", stripeColor: "#94a3b8" },
   internal: { monogram: "Sh", label: "Terminal", stripeColor: "#64748b" },
 };

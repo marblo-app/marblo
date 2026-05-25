@@ -7,7 +7,13 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-export type ModelType = "claude" | "gemini" | "gpt" | "antigravity" | "custom";
+export type ModelType =
+  | "claude"
+  | "gemini"
+  | "gpt"
+  | "antigravity"
+  | "local"
+  | "custom";
 export type AgentStatus = "idle" | "working" | "error" | "stopped";
 
 export interface AgentInfo {
@@ -116,6 +122,10 @@ const COST_EFFICIENCY_WEIGHT: Record<ModelType, number> = {
   // free at launch (2026-05-19). Slightly higher cost-efficiency than
   // gemini due to agentic optimizations + free-tier window.
   antigravity: 9,
+  // Local (Ollama / LM Studio / llama.cpp etc.): free at point of use, but
+  // capability varies wildly with the loaded weights. Treat as median to
+  // avoid biasing dispatch toward an unknown model.
+  local: 5,
   // Custom: assume mid-tier
   custom: 5,
 };
@@ -183,7 +193,7 @@ interface SubscriptionPlanEntry {
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json",
+  "subscription-plans.json"
 );
 
 let _subPlanCache: SubscriptionPlanEntry[] | null = null;
@@ -298,6 +308,9 @@ export const MODEL_BASE_SCORE: Record<string, number> = {
   // Antigravity: same base as Gemini/GPT — proves itself via tag bonuses
   // for agentic workloads rather than being shoo-in for everything.
   antigravity: 45,
+  // Local: capability varies with the loaded weights, so we anchor below
+  // the hosted-model tier. User can override via custom command + tags.
+  local: 35,
   custom: 30,
 };
 
@@ -365,7 +378,7 @@ export function scoreAgents(
   agents: AgentInfo[],
   role: string,
   preferredModel?: ModelType,
-  tags: string[] = [],
+  tags: string[] = []
 ): ScoredAgent[] {
   const results: ScoredAgent[] = [];
 
@@ -403,7 +416,7 @@ export function scoreAgents(
     if (preferredModel && agent.model === preferredModel) {
       score += WEIGHTS.modelPreference;
       reasons.push(
-        `model=${preferredModel} matched (+${WEIGHTS.modelPreference})`,
+        `model=${preferredModel} matched (+${WEIGHTS.modelPreference})`
       );
     }
 
@@ -418,7 +431,7 @@ export function scoreAgents(
     }
     if (tagMatches > 0) {
       reasons.push(
-        `${tagMatches} tag(s) matched (+${tagMatches * WEIGHTS.tagBonus})`,
+        `${tagMatches} tag(s) matched (+${tagMatches * WEIGHTS.tagBonus})`
       );
     }
 
@@ -450,7 +463,7 @@ let modelRoundRobin = 0;
 
 export function scoreModels(
   enabledModels: ModelType[],
-  tags: string[],
+  tags: string[]
 ): ModelType {
   // Score every enabled model first so we can both pick the winner and
   // detect ties / near-ties.
@@ -519,10 +532,10 @@ export function scoreModels(
 
 export function checkSpawnConstraints(
   agents: AgentInfo[],
-  role: string,
+  role: string
 ): { allowed: boolean; error?: string } {
   const activeAgents = agents.filter(
-    (a) => a.status !== "stopped" && a.status !== "error",
+    (a) => a.status !== "stopped" && a.status !== "error"
   );
   if (activeAgents.length >= MAX_AGENTS) {
     return {

@@ -41,6 +41,8 @@ const modelColors: Record<ModelType, string> = {
   claude: "#a855f7",
   gemini: "#3b82f6",
   gpt: "#22c55e",
+  antigravity: "#f97316",
+  local: "#737373",
   custom: "#6b7280",
 };
 
@@ -48,6 +50,8 @@ const modelEmoji: Record<ModelType, string> = {
   claude: "🟣",
   gemini: "🔵",
   gpt: "🟢",
+  antigravity: "🟠",
+  local: "⚫",
   custom: "⚪",
 };
 
@@ -81,13 +85,13 @@ export default function MemberCard({ agent, tasks }: MemberCardProps) {
   const modelKey: ModelType =
     agent.model in modelColors ? agent.model : "custom";
   const completedTasks = tasks.filter(
-    (t) => t.claimedBy === agent.id && t.status === "DONE",
+    (t) => t.claimedBy === agent.id && t.status === "DONE"
   );
   const currentTask = tasks.find((t) => t.id === agent.currentTaskId);
   const inProgressTasks = tasks.filter(
     (t) =>
       t.claimedBy === agent.id &&
-      (t.status === "IN_PROGRESS" || t.status === "CLAIMED"),
+      (t.status === "IN_PROGRESS" || t.status === "CLAIMED")
   );
 
   return (

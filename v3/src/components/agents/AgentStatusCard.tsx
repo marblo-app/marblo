@@ -25,6 +25,8 @@ const MODEL_ICONS: Record<ModelType, { icon: string; color: string }> = {
   claude: { icon: "🟣", color: "#a855f7" },
   gemini: { icon: "🔵", color: "#3b82f6" },
   gpt: { icon: "🟢", color: "#22c55e" },
+  antigravity: { icon: "🟠", color: "#f97316" },
+  local: { icon: "⚫", color: "#737373" },
   custom: { icon: "⚪", color: "#6b7280" },
 };
 

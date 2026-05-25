@@ -1,47 +1,49 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
-import { Agent, ModelType } from '../../types';
-import { Activity } from '../../types';
-import { subscribeToCollection } from '../../services/firestore';
-import { where, limit } from 'firebase/firestore';
+import { useEffect, useRef, useState, useMemo } from "react";
+import { Agent, ModelType } from "../../types";
+import { Activity } from "../../types";
+import { subscribeToCollection } from "../../services/firestore";
+import { where, limit } from "firebase/firestore";
 
 interface UnifiedActivityFeedProps {
   agents: Agent[];
 }
 
 const memberColors: string[] = [
-  'border-purple-500',
-  'border-blue-500',
-  'border-green-500',
-  'border-yellow-500',
-  'border-pink-500',
-  'border-cyan-500',
-  'border-orange-500',
-  'border-red-500',
+  "border-purple-500",
+  "border-blue-500",
+  "border-green-500",
+  "border-yellow-500",
+  "border-pink-500",
+  "border-cyan-500",
+  "border-orange-500",
+  "border-red-500",
 ];
 
 const memberTextColors: string[] = [
-  'text-purple-400',
-  'text-blue-400',
-  'text-green-400',
-  'text-yellow-400',
-  'text-pink-400',
-  'text-cyan-400',
-  'text-orange-400',
-  'text-red-400',
+  "text-purple-400",
+  "text-blue-400",
+  "text-green-400",
+  "text-yellow-400",
+  "text-pink-400",
+  "text-cyan-400",
+  "text-orange-400",
+  "text-red-400",
 ];
 
 const modelEmoji: Record<ModelType, string> = {
-  claude: '🟣',
-  gemini: '🔵',
-  gpt: '🟢',
-  custom: '⚪',
+  claude: "🟣",
+  gemini: "🔵",
+  gpt: "🟢",
+  antigravity: "🟠",
+  local: "⚫",
+  custom: "⚪",
 };
 
 function formatRelativeTime(date: Date): string {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return '방금';
+  if (diffMin < 1) return "방금";
   if (diffMin < 60) return `${diffMin}분 전`;
   const diffHour = Math.floor(diffMin / 60);
   if (diffHour < 24) return `${diffHour}시간 전`;
@@ -49,11 +51,13 @@ function formatRelativeTime(date: Date): string {
   return `${diffDay}일 전`;
 }
 
-type FilterType = 'all' | string; // 'all' or agentId
+type FilterType = "all" | string; // 'all' or agentId
 
-export default function UnifiedActivityFeed({ agents }: UnifiedActivityFeedProps) {
+export default function UnifiedActivityFeed({
+  agents,
+}: UnifiedActivityFeedProps) {
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [filter, setFilter] = useState<FilterType>('all');
+  const [filter, setFilter] = useState<FilterType>("all");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Map agent IDs to color indices for consistent color coding
@@ -84,8 +88,8 @@ export default function UnifiedActivityFeed({ agents }: UnifiedActivityFeedProps
 
     chunks.forEach((chunk) => {
       const unsub = subscribeToCollection<Activity>(
-        'activities',
-        [where('agentId', 'in', chunk), limit(100)],
+        "activities",
+        [where("agentId", "in", chunk), limit(100)],
         (items) => {
           setActivities((prev) => {
             // Merge and deduplicate
@@ -112,7 +116,7 @@ export default function UnifiedActivityFeed({ agents }: UnifiedActivityFeedProps
   }, [activities.length]);
 
   const filteredActivities = useMemo(() => {
-    if (filter === 'all') return activities;
+    if (filter === "all") return activities;
     return activities.filter((a) => a.agentId === filter);
   }, [activities, filter]);
 
@@ -121,17 +125,19 @@ export default function UnifiedActivityFeed({ agents }: UnifiedActivityFeedProps
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-gray-100">통합 활동 피드</h3>
-        <span className="text-xs text-gray-500">{filteredActivities.length}개 활동</span>
+        <span className="text-xs text-gray-500">
+          {filteredActivities.length}개 활동
+        </span>
       </div>
 
       {/* Filter bar */}
       <div className="flex flex-wrap gap-1.5 mb-3">
         <button
-          onClick={() => setFilter('all')}
+          onClick={() => setFilter("all")}
           className={`rounded-full px-2.5 py-1 text-xs transition-colors ${
-            filter === 'all'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-300'
+            filter === "all"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-300"
           }`}
         >
           전체
@@ -144,8 +150,8 @@ export default function UnifiedActivityFeed({ agents }: UnifiedActivityFeedProps
               onClick={() => setFilter(agent.id)}
               className={`rounded-full px-2.5 py-1 text-xs transition-colors ${
                 isActive
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-300'
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-300"
               }`}
             >
               {modelEmoji[agent.model]} {agent.name}
@@ -169,11 +175,13 @@ export default function UnifiedActivityFeed({ agents }: UnifiedActivityFeedProps
               <div
                 key={activity.id}
                 className={`rounded border-l-2 ${memberColors[colorIdx]} bg-gray-750 px-3 py-2`}
-                style={{ backgroundColor: 'rgb(38, 42, 51)' }}
+                style={{ backgroundColor: "rgb(38, 42, 51)" }}
               >
                 <div className="flex items-center gap-2 mb-0.5">
                   {agent && (
-                    <span className={`text-xs font-medium ${memberTextColors[colorIdx]}`}>
+                    <span
+                      className={`text-xs font-medium ${memberTextColors[colorIdx]}`}
+                    >
                       {modelEmoji[agent.model]} {agent.name}
                     </span>
                   )}
