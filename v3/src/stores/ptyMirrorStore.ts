@@ -76,7 +76,7 @@ const flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function scheduleFlush(
   sessionId: string,
-  apply: (sessionId: string) => void,
+  apply: (sessionId: string) => void
 ): void {
   if (flushTimers.has(sessionId)) return;
   const timer = setTimeout(() => {
@@ -130,6 +130,7 @@ export const usePtyMirrorStore = create<PtyMirrorState>((set, get) => {
                 electronAPI?: {
                   pty?: {
                     onData?: (id: string, cb: (data: string) => void) => void;
+                    replay?: (id: string) => Promise<string[]>;
                   };
                 };
               }
@@ -143,6 +144,22 @@ export const usePtyMirrorStore = create<PtyMirrorState>((set, get) => {
         pendingChunks.set(sessionId, queue);
         scheduleFlush(sessionId, applyFlush);
       });
+
+      // Drain whatever main-process buffered before our listener was up.
+      // Order matters: onData is registered first so we don't miss the live
+      // chunk that fires immediately after replay deletes the buffer.
+      // Fire-and-forget — replay errors mean "no buffer" or "session gone",
+      // both of which leave the live listener as the source of truth.
+      if (api.pty.replay) {
+        api.pty
+          .replay(sessionId)
+          .then((chunks) => {
+            for (const chunk of chunks) get().ingest(sessionId, chunk);
+          })
+          .catch(() => {
+            /* main rejected — TerminalView likely already drained the buffer */
+          });
+      }
     },
 
     detach: (sessionId) => {

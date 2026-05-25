@@ -39,12 +39,20 @@ export function useAgentReconnect() {
         currentProject.id,
       );
 
+      // Lazy import — agentSessionMap is only needed when we actually have
+      // reconnect results, and avoids pulling sessionStorage at module load.
+      const { useAgentSessionMap } = await import("../stores/agentSessionMap");
       for (const result of results) {
         if (result.reconnected && result.ptySessionId) {
           const agent = agents.find((a) => a.id === result.agentId);
           const icon = agent ? MODEL_ICONS[agent.model] || "⚪" : "⚪";
           const label = agent ? `${icon} ${agent.name}` : result.agentId;
           attachSession(result.ptySessionId, label);
+          // Fleet 그리드 MiniTerminal 이 새 ptySessionId 로 IPC 채널 구독할
+          // 수 있도록 매핑 갱신. 앱 재시작 후 첫 진입에서 필수.
+          useAgentSessionMap
+            .getState()
+            .set(result.agentId, result.ptySessionId);
         }
       }
 

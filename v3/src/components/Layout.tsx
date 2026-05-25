@@ -184,6 +184,13 @@ export function Layout() {
     window.electronAPI.orchestratorSession.onAgentSpawned(async (data) => {
       attachSession(data.ptySessionId, `Agent: ${data.name}`);
 
+      // Fleet 그리드 셀이 agentId 만 갖고 PTY 미러를 구독할 수 있도록 매핑
+      // 등록. AgentsTab.handleLaunch 가 직접 띄운 경우는 거기서 set 하지만,
+      // 브릿지/플로우/MCP 경로로 들어온 spawn 은 이 핸들러가 유일한 fan-in
+      // 지점이라 여기서 set 해야 한다.
+      const { useAgentSessionMap } = await import("../stores/agentSessionMap");
+      useAgentSessionMap.getState().set(data.agentId, data.ptySessionId);
+
       // Idempotent Firestore upsert — converges with MCP-side setDoc on the
       // same agentId. merge:true so concurrent writers don't overwrite each
       // other's fields.

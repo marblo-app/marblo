@@ -49,7 +49,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       [where("projectId", "==", projectId)],
       (docs) => {
         set({ agents: docs.map(toAgent), loading: false });
-      }
+      },
     );
   },
 
@@ -74,7 +74,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         "",
         undefined,
         undefined,
-        projectId
+        projectId,
       );
       return id;
     } catch (err) {
@@ -129,7 +129,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         cwd,
         undefined,
         undefined,
-        projectId
+        projectId,
       );
     } catch (err) {
       set({
@@ -154,7 +154,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   getAgentByName: (name: string): Agent | undefined => {
     const { agents } = get();
     return agents.find(
-      (a: Agent) => a.name.toLowerCase() === name.toLowerCase()
+      (a: Agent) => a.name.toLowerCase() === name.toLowerCase(),
     );
   },
 
@@ -171,9 +171,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           import("../services/agentNotificationService").then(
             ({ notifyAgentRestarted }) => {
               notifyAgentRestarted(projectId, restartedAgent.name).catch(
-                () => {}
+                () => {},
               );
-            }
+            },
           );
         }
         return;
@@ -200,8 +200,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         .getState()
         .attachSession(
           launchResult.ptySessionId,
-          `${MODEL_ICONS[agent.model] || "⚪"} ${agent.name}`
+          `${MODEL_ICONS[agent.model] || "⚪"} ${agent.name}`,
         );
+      // Fleet 그리드 MiniTerminal 이 새 ptySessionId 로 IPC 채널을 구독할 수
+      // 있도록 매핑 등록. cold restart 는 새 PTY 라 이전 매핑이 stale.
+      const { useAgentSessionMap } = await import("./agentSessionMap");
+      useAgentSessionMap.getState().set(agent.id, launchResult.ptySessionId);
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to restart agent",
@@ -232,16 +236,16 @@ if (typeof window !== "undefined" && window.electronAPI?.agent?.onSyncStatus) {
       // Match by name — AgentManager UUID != Firestore doc ID, but names are shared
       const { agents } = useAgentStore.getState();
       const match = agents.find(
-        (a) => a.name.toLowerCase() === agentName.toLowerCase()
+        (a) => a.name.toLowerCase() === agentName.toLowerCase(),
       );
       if (match) {
         agentService.updateAgent(match.id, updates).catch((err) => {
           console.error(
             "[AgentStore] Failed to sync agent status to Firestore:",
-            err
+            err,
           );
         });
       }
-    }
+    },
   );
 }
