@@ -406,6 +406,22 @@
     "description": "AIエージェント軍団ワークスペース",
     "terms": "利用規約",
     "privacy": "プライバシーポリシー",
-    "contact": "お問い合わせ"
+    "refund": "返金ポリシー",
+    "business_info": "事業者情報",
+    "contact": "お問い合わせ",
+    "biz_company_name": "株式会社ハイプマーク (HYPEMARC)",
+    "biz_ceo_label": "代表",
+    "biz_ceo_value": "キム・ドンウォン",
+    "biz_reg_no_label": "事業者登録番号",
+    "biz_reg_no_value": "408-88-02189",
+    "biz_tp_no_label": "通信販売業申告番号",
+    "biz_tp_no_value": "申告手続き中",
+    "biz_address_label": "住所",
+    "biz_address_value": "大韓民国ソウル特別市松坡区百済古墳路50ギル16, 2階",
+    "biz_email_label": "メール",
+    "biz_email_value": "support@marblo.app",
+    "biz_phone_label": "電話",
+    "biz_phone_value": "+82-10-3019-7778",
+    "copyright": "© 2026 HYPEMARC. All rights reserved."
   }
 }

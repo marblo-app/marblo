@@ -406,6 +406,22 @@
     "description": "AI 에이전트 군단 워크스페이스",
     "terms": "이용약관",
     "privacy": "개인정보처리방침",
-    "contact": "문의"
+    "refund": "환불정책",
+    "business_info": "사업자정보확인",
+    "contact": "문의",
+    "biz_company_name": "주식회사 하이프마크 (HYPEMARC)",
+    "biz_ceo_label": "대표",
+    "biz_ceo_value": "김동원",
+    "biz_reg_no_label": "사업자등록번호",
+    "biz_reg_no_value": "408-88-02189",
+    "biz_tp_no_label": "통신판매업 신고번호",
+    "biz_tp_no_value": "신고 진행 중",
+    "biz_address_label": "주소",
+    "biz_address_value": "서울특별시 송파구 백제고분로50길 16, 2층",
+    "biz_email_label": "이메일",
+    "biz_email_value": "support@marblo.app",
+    "biz_phone_label": "전화",
+    "biz_phone_value": "010-3019-7778",
+    "copyright": "© 2026 HYPEMARC. All rights reserved."
   }
 }

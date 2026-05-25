@@ -406,6 +406,22 @@
     "description": "AI Agent Army Workspace",
     "terms": "Terms of Service",
     "privacy": "Privacy Policy",
-    "contact": "Contact"
+    "refund": "Refund Policy",
+    "business_info": "Business Information",
+    "contact": "Contact",
+    "biz_company_name": "HYPEMARC Inc.",
+    "biz_ceo_label": "CEO",
+    "biz_ceo_value": "Dongwon Kim",
+    "biz_reg_no_label": "Business Registration No.",
+    "biz_reg_no_value": "408-88-02189",
+    "biz_tp_no_label": "Mail-order Business No.",
+    "biz_tp_no_value": "Filing in progress",
+    "biz_address_label": "Address",
+    "biz_address_value": "2F, 16 Baekjegobun-ro 50-gil, Songpa-gu, Seoul, Republic of Korea",
+    "biz_email_label": "Email",
+    "biz_email_value": "support@marblo.app",
+    "biz_phone_label": "Phone",
+    "biz_phone_value": "+82-10-3019-7778",
+    "copyright": "© 2026 HYPEMARC. All rights reserved."
   }
 }
