@@ -11,7 +11,7 @@ import { useSubscriptionStore } from "./subscriptionStore";
 import { checkAgentSpawn } from "../lib/planLimits";
 
 const COLLECTION = "agents";
-const DATE_FIELDS = ["createdAt"];
+const DATE_FIELDS = ["createdAt", "costUpdatedAt"];
 
 function toAgent(raw: Record<string, unknown>): Agent {
   return convertTimestamps<Agent>(raw, DATE_FIELDS);
