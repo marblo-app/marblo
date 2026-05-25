@@ -48,11 +48,13 @@ export default function Foundation50Page() {
       titleKey: "ob2_title",
       bodyKey: "ob2_body",
     },
-    {
-      icon: Key,
-      titleKey: "ob3_title",
-      bodyKey: "ob3_body",
-    },
+  ] as const;
+
+  const byokItems = [
+    "byok_item_claude",
+    "byok_item_gpt",
+    "byok_item_gemini",
+    "byok_item_local",
   ] as const;
 
   return (
@@ -119,7 +121,7 @@ export default function Foundation50Page() {
           </h2>
           <p className="text-sm text-zinc-400 mb-8">{t("obligations_intro")}</p>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {obligations.map((o) => {
               const Icon = o.icon;
               return (
@@ -140,6 +142,29 @@ export default function Foundation50Page() {
               );
             })}
           </div>
+        </div>
+      </section>
+
+      {/* ===================== BYOK ===================== */}
+      <section className="max-w-5xl mx-auto px-4 py-10">
+        <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-8">
+          <div className="flex items-start gap-3 mb-4">
+            <Key className="w-6 h-6 text-indigo-300 flex-shrink-0 mt-1" />
+            <h2 className="text-xl md:text-2xl font-bold leading-snug">
+              {t("byok_heading")}
+            </h2>
+          </div>
+          <p className="text-sm text-zinc-300 mb-5">{t("byok_intro")}</p>
+          <ul className="space-y-2 text-sm text-zinc-200 mb-5 pl-1">
+            {byokItems.map((key) => (
+              <li key={key} className="leading-relaxed">
+                · {t(key)}
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm text-zinc-400 whitespace-pre-line leading-relaxed border-t border-zinc-800/60 pt-4">
+            {t("byok_outro")}
+          </p>
         </div>
       </section>
 

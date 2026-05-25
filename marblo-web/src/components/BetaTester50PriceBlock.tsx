@@ -35,6 +35,9 @@ export default function BetaTester50PriceBlock({ align = "left" }: Props) {
       <p className="text-sm text-emerald-300/90 font-medium">
         {t("price_bonus")}
       </p>
+      <p className="text-sm text-emerald-300/90 font-medium">
+        {t("price_bonus_secondary")}
+      </p>
       <p className="text-xs text-zinc-500 leading-relaxed">
         {t("price_tier_compare")}
       </p>

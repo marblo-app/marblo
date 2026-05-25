@@ -79,28 +79,38 @@ export default function BetaTester50Section() {
               />
             </div>
 
-            <div className="mt-8 pt-6 border-t border-zinc-800/80">
-              <p className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-3">
-                {t("obligations_heading")}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <span className="inline-flex items-center bg-zinc-900/80 border border-zinc-700 text-zinc-200 text-sm px-3 py-1.5 rounded-lg">
-                  {t("ob_review_required")}
-                </span>
-                <span className="inline-flex items-center bg-amber-500/10 border border-amber-500/30 text-amber-100 text-sm px-3 py-1.5 rounded-lg">
-                  {t("ob_interview_optional")}
-                </span>
+            <div className="mt-8 pt-6 border-t border-zinc-800/80 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <p className="text-sm font-semibold text-indigo-200 mb-3">
+                  {t("receive_heading")}
+                </p>
+                <ul className="space-y-2 text-sm text-zinc-200 leading-relaxed">
+                  <li>{t("receive_item1")}</li>
+                  <li>{t("receive_item2")}</li>
+                  <li>{t("receive_item3")}</li>
+                </ul>
               </div>
-              <p className="mt-3 text-xs text-zinc-500 leading-relaxed">
-                {t("byok_note")}
-              </p>
-              <Link
-                href={`/${locale}/foundation50`}
-                className="inline-flex items-center gap-1 mt-4 text-sm text-indigo-300 hover:text-indigo-200 transition"
-              >
-                {t("details_link")}
-              </Link>
+              <div>
+                <p className="text-sm font-semibold text-indigo-200 mb-3">
+                  {t("role_heading")}
+                </p>
+                <ul className="space-y-2 text-sm text-zinc-200 leading-relaxed">
+                  <li>{t("role_required")}</li>
+                  <li className="text-amber-200/90">{t("role_optional")}</li>
+                </ul>
+              </div>
             </div>
+
+            <p className="mt-6 text-xs text-zinc-500 leading-relaxed">
+              {t("byok_note")}
+            </p>
+
+            <Link
+              href={`/${locale}/foundation50`}
+              className="inline-flex items-center gap-1 mt-4 text-sm text-indigo-300 hover:text-indigo-200 transition"
+            >
+              {t("details_link")}
+            </Link>
           </div>
         </div>
       </div>
