@@ -73,12 +73,12 @@ export function FocusView({
         document.activeElement?.tagName === "INPUT" ||
         document.activeElement?.tagName === "TEXTAREA";
       if (isInput) return;
-      if (e.key === "Escape") {
+      // ← and Esc both return to the list (Claude /agents pattern: ← drills
+      // out of the focused item). Prev/next agent navigation lives on the
+      // header's ‹ / › buttons; → is kept as keyboard "next" for power users.
+      if (e.key === "Escape" || e.key === "ArrowLeft") {
         e.preventDefault();
         onBack();
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        onPrev();
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
         onNext();
@@ -93,7 +93,7 @@ export function FocusView({
     };
     el.addEventListener("keydown", onKey);
     return () => el.removeEventListener("keydown", onKey);
-  }, [editing, onBack, onPrev, onNext, row.isAgent]);
+  }, [editing, onBack, onNext, row.isAgent]);
 
   // Ensure the container can receive key events without a tab stop hunt —
   // focus it on mount and on row change.
@@ -111,7 +111,7 @@ export function FocusView({
         <button
           onClick={onBack}
           className="rounded px-2 py-0.5 text-[11px] text-[#6c7086] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4]"
-          title="목록으로 (Esc)"
+          title="목록으로 (← / Esc)"
         >
           ← All
         </button>
@@ -192,7 +192,7 @@ export function FocusView({
             onClick={onPrev}
             disabled={total <= 1}
             className="rounded px-1.5 py-0.5 text-[11px] text-[#6c7086] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4] disabled:opacity-30"
-            title="이전 에이전트 (←)"
+            title="이전 에이전트"
           >
             ‹
           </button>
