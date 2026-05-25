@@ -1359,17 +1359,18 @@ ipcMain.handle("agent:stop", (_event, agentId: string) => {
 ipcMain.handle("agent:restart", (event, agentId: string) => {
   const instance = agentManager.restart(agentId);
   if (instance) {
-    // Re-setup PTY data forwarding to the requesting window. Owner mapping
-    // ensures restarted agent output goes back to the same window that owned
-    // it, not whichever window happens to be mainWindow.
+    // Update PTY owner mapping to the requesting window. The agent's stored
+    // onPtyReady (called from agentManager.restart → launch) already runs
+    // setupPtyForwarding(sid) which attaches an onData listener and tags
+    // ptyOwners; we just refresh the owner here in case the restart was
+    // triggered from a different window than the initial launch.
+    //
+    // DO NOT call ptyManager.onData again — node-pty's onData is add-only,
+    // so the previous (buggy) code stacked TWO listeners onto the same
+    // fresh PTY. Every chunk fired both listeners → renderer received each
+    // pty:data event twice → terminal.write twice → the whole chat + input
+    // box appeared duplicated. Fixed in <this commit>.
     ptyOwners.set(instance.ptySessionId, event.sender.id);
-    ptyManager.onData(instance.ptySessionId, (data) => {
-      sendToOwner(
-        ptyOwners.get(instance.ptySessionId),
-        `pty:data:${instance.ptySessionId}`,
-        data
-      );
-    });
   }
   return instance
     ? {
@@ -1465,6 +1466,7 @@ ipcMain.handle(
           agentId: candidate.agentId,
           reconnected: false,
           ptySessionId: null,
+          skippedReason: "unknown",
         });
         continue;
       }
@@ -1480,6 +1482,7 @@ ipcMain.handle(
           agentId: agentData.id,
           reconnected: false,
           ptySessionId: null,
+          skippedReason: "already-running",
         });
         continue;
       }
@@ -1534,16 +1537,23 @@ ipcMain.handle(
           resumeId = null;
         }
       }
-      // If no resumable session exists, fresh-launch the agent anyway so
-      // it shows up alive in the panel after app restart (user requirement:
-      // "기존에 에이전트들이 클로드코드 세션처럼 다 연결되서 살아있어야되").
-      // resumeId stays null → agentManager.launch starts a fresh PTY with
-      // no --resume. Token cost is the CLI's idle init (~0 until input).
-      // Worst case the user deletes unused agents from the dashboard.
+      // Policy change (PR #9): resumable 세션이 없으면 fresh-launch 하지 않고
+      // 그대로 skip. 이전 동작은 "다 살려놓기" 였지만 N 개 CLI 프로세스 동시
+      // spawn → RAM / 레이트리밋 / 잊고 둔 에이전트도 다 켜지는 리스크가 큼.
+      // 사용자가 그리드 셀의 ▶ Start 버튼으로 의도 시점에 깨우게 함.
+      // 프론트 useAgentReconnect 가 reconnected:false 결과를 보면 Firestore
+      // status 를 "stopped" 로 동기화해 UI 에 ▶ Start 가 노출되도록 처리.
       if (!resumeId) {
         console.log(
-          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session → fresh launch`
+          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session → skip (사용자가 ▶ Start 로 수동 기동)`
         );
+        results.push({
+          agentId: agentData.id,
+          reconnected: false,
+          ptySessionId: null,
+          skippedReason: "no-session",
+        });
+        continue;
       }
 
       try {
@@ -1589,6 +1599,7 @@ ipcMain.handle(
           agentId: agentData.id,
           reconnected: false,
           ptySessionId: null,
+          skippedReason: "launch-failed",
         });
       }
     }
