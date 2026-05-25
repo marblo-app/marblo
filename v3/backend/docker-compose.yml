@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: marblo-postgres
+    environment:
+      POSTGRES_USER: marblo_user
+      POSTGRES_PASSWORD: marblo_password
+      POSTGRES_DB: marblo_payment
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: marblo-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: marblo-backend
+    ports:
+      - "8001:8001"
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_URL: postgresql://marblo_user:marblo_password@postgres:5432/marblo_payment
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: change-this-secret-key-in-production
+      TOSS_CLIENT_KEY: ${TOSS_CLIENT_KEY}
+      TOSS_SECRET_KEY: ${TOSS_SECRET_KEY}
+      TOSS_WEBHOOK_SECRET: ${TOSS_WEBHOOK_SECRET}
+    volumes:
+      - ./:/app
+
+volumes:
+  postgres_data:
+  redis_data:

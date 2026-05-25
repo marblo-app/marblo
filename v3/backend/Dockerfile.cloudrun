@@ -1,0 +1,48 @@
+# Multi-stage build for Google Cloud Run
+FROM python:3.11-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Production stage
+FROM python:3.11-slim
+
+# Create non-root user
+RUN groupadd -r marblo && useradd -r -g marblo marblo
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy Python dependencies from builder stage
+COPY --from=builder /root/.local /home/marblo/.local
+ENV PATH=/home/marblo/.local/bin:$PATH
+
+# Copy application code
+COPY . .
+
+# Change ownership to non-root user
+RUN chown -R marblo:marblo /app
+
+# Switch to non-root user
+USER marblo
+
+# Cloud Run expects the service to listen on the PORT environment variable
+ENV PORT=8080
+
+EXPOSE 8080
+
+# Production command for Cloud Run
+CMD exec uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
