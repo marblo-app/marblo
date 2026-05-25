@@ -3,12 +3,12 @@ import { VENDOR_VISUALS, STATUS_PILL, type AgentRowData } from "./types";
 
 interface Props {
   row: AgentRowData;
-  isSelected: boolean;
+  isExpanded: boolean;
   onSelect: () => void;
   onDoubleClick: () => void;
 }
 
-function AgentRowImpl({ row, isSelected, onSelect, onDoubleClick }: Props) {
+function AgentRowImpl({ row, isExpanded, onSelect, onDoubleClick }: Props) {
   const vendor = VENDOR_VISUALS[row.vendor];
   const pill = STATUS_PILL[row.status];
 
@@ -21,8 +21,13 @@ function AgentRowImpl({ row, isSelected, onSelect, onDoubleClick }: Props) {
       onKeyDown={(e) => {
         if (e.key === "Enter") onSelect();
       }}
+      title={
+        row.isAgent
+          ? "Click: open terminal · Double-click: jump to Agents tab"
+          : "Click: open terminal"
+      }
       className={`relative flex items-center gap-3 px-3 py-2 border-b border-[#313244] cursor-pointer transition-colors ${
-        isSelected ? "bg-[#313244]" : "hover:bg-[#1e1e2e]/60"
+        isExpanded ? "bg-[#313244]" : "hover:bg-[#1e1e2e]/60"
       }`}
       style={{ minHeight: 52 }}
     >
@@ -63,6 +68,16 @@ function AgentRowImpl({ row, isSelected, onSelect, onDoubleClick }: Props) {
 
       <span className="text-[11px] text-[#6c7086] tabular-nums w-14 text-right">
         {row.lastActivityLabel}
+      </span>
+
+      <span
+        aria-hidden
+        className={`text-[10px] text-[#6c7086] transition-transform duration-150 ${
+          isExpanded ? "rotate-90" : ""
+        }`}
+        style={{ width: 12 }}
+      >
+        ▶
       </span>
     </div>
   );
