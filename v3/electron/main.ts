@@ -1359,17 +1359,18 @@ ipcMain.handle("agent:stop", (_event, agentId: string) => {
 ipcMain.handle("agent:restart", (event, agentId: string) => {
   const instance = agentManager.restart(agentId);
   if (instance) {
-    // Re-setup PTY data forwarding to the requesting window. Owner mapping
-    // ensures restarted agent output goes back to the same window that owned
-    // it, not whichever window happens to be mainWindow.
+    // Update PTY owner mapping to the requesting window. The agent's stored
+    // onPtyReady (called from agentManager.restart → launch) already runs
+    // setupPtyForwarding(sid) which attaches an onData listener and tags
+    // ptyOwners; we just refresh the owner here in case the restart was
+    // triggered from a different window than the initial launch.
+    //
+    // DO NOT call ptyManager.onData again — node-pty's onData is add-only,
+    // so the previous (buggy) code stacked TWO listeners onto the same
+    // fresh PTY. Every chunk fired both listeners → renderer received each
+    // pty:data event twice → terminal.write twice → the whole chat + input
+    // box appeared duplicated. Fixed in <this commit>.
     ptyOwners.set(instance.ptySessionId, event.sender.id);
-    ptyManager.onData(instance.ptySessionId, (data) => {
-      sendToOwner(
-        ptyOwners.get(instance.ptySessionId),
-        `pty:data:${instance.ptySessionId}`,
-        data
-      );
-    });
   }
   return instance
     ? {
