@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.stubGlobal("window", {});
 
@@ -8,6 +8,11 @@ beforeEach(() => {
   // zustand setState with replace=true would wipe actions too — only clear
   // the data fields and keep the action methods bound by create().
   usePtyMirrorStore.setState({ buffers: {}, attached: {} });
+});
+
+afterEach(() => {
+  // Tests that install a fake electronAPI must not leak it into the next test.
+  delete (window as unknown as { electronAPI?: unknown }).electronAPI;
 });
 
 describe("ptyMirrorStore", () => {
@@ -84,12 +89,48 @@ describe("ptyMirrorStore", () => {
     expect(usePtyMirrorStore.getState().attached["s1"]).toBe(true);
   });
 
-  it("detach clears the attached flag but keeps the buffer for reattach", () => {
+  it("detach keeps the attached flag set (IPC listener is intentionally not removed)", () => {
+    // pty.removeListeners is destructive (clears the whole channel — would
+    // also kill TerminalView's listener on the same session). So detach
+    // leaves the IPC subscription alive and MUST leave the attached flag
+    // set, otherwise the next attach() registers a SECOND listener and the
+    // mirror store double-mirrors every chunk.
     usePtyMirrorStore.getState().attach("s1");
     usePtyMirrorStore.getState().ingest("s1", "hi\n");
     usePtyMirrorStore.getState().detach("s1");
-    expect(usePtyMirrorStore.getState().attached["s1"]).toBeUndefined();
+    expect(usePtyMirrorStore.getState().attached["s1"]).toBe(true);
     expect(usePtyMirrorStore.getState().getLines("s1")).toEqual(["hi"]);
+  });
+
+  it("attach after detach does not re-register the IPC listener", () => {
+    // Regression: MiniTerminal mount → unmount → mount cycle would
+    // accumulate pty.onData listeners and double-mirror every chunk.
+    const registrations: Record<string, number> = {};
+    (
+      window as unknown as {
+        electronAPI?: {
+          pty?: {
+            onData?: (id: string, cb: (data: string) => void) => void;
+          };
+        };
+      }
+    ).electronAPI = {
+      pty: {
+        onData: (sessionId: string) => {
+          registrations[sessionId] = (registrations[sessionId] ?? 0) + 1;
+        },
+      },
+    };
+
+    usePtyMirrorStore.getState().attach("s1");
+    expect(registrations["s1"]).toBe(1);
+
+    usePtyMirrorStore.getState().detach("s1");
+    usePtyMirrorStore.getState().attach("s1");
+    usePtyMirrorStore.getState().attach("s1");
+
+    // Three attach calls (separated by a detach) must still register only once.
+    expect(registrations["s1"]).toBe(1);
   });
 
   it("getLines on unknown session returns empty array (no throw)", () => {
