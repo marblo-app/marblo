@@ -481,6 +481,14 @@ export class AgentManager {
     this.ptyManager.onExit(ptySessionId, (exitCode) => {
       const agent = this.agents.get(params.id);
       if (!agent) return;
+      // Stale exit: the agent under this id has already been replaced by
+      // a restart/relaunch. Acting on the old PTY's exit here would clean
+      // up the NEW agent's MCP config file (same path: claude-mcp-<id>.json,
+      // same ptySessionId string `agent-<id>`) and crash the freshly-launched
+      // claude process with "Invalid MCP configuration: file not found".
+      // Use object identity — comparing `agent.ptySessionId !== ptySessionId`
+      // would always be false on restart since the sid is reused verbatim.
+      if (agent !== instance) return;
 
       agent.lastExitCode = exitCode;
 
