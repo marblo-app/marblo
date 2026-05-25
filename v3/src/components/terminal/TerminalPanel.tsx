@@ -1,12 +1,27 @@
-import { useState, memo } from 'react';
-import TerminalTabs from './TerminalTabs';
-import TerminalView from './TerminalView';
-import FeedbackInput from './FeedbackInput';
-import { useTerminalStore } from '../../stores/terminalStore';
+import { useEffect, useRef, useState, memo } from "react";
+import TerminalTabs from "./TerminalTabs";
+import TerminalView from "./TerminalView";
+import FeedbackInput from "./FeedbackInput";
+import { useTerminalStore } from "../../stores/terminalStore";
 
 let tabCounter = 0;
 
 export default memo(function TerminalPanel() {
+  // Fleet 그리드/Activity 점프 흐름이 발행하는 focus 이벤트를 청취해서 패널을
+  // 뷰포트로 스크롤해 사용자가 즉시 출력을 볼 수 있게 한다.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onFocus = () => {
+      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    };
+    window.addEventListener("marblo:focus-terminal", onFocus as EventListener);
+    return () =>
+      window.removeEventListener(
+        "marblo:focus-terminal",
+        onFocus as EventListener,
+      );
+  }, []);
+
   const sessions = useTerminalStore((s) => s.sessions);
   const activeSessionId = useTerminalStore((s) => s.activeSessionId);
   const setActiveSessionId = useTerminalStore((s) => s.setActiveSessionId);
@@ -25,7 +40,11 @@ export default memo(function TerminalPanel() {
   };
 
   return (
-    <div className="flex flex-col flex-shrink-0 bg-[#1e1e2e]" style={{ height: sessions.length > 0 ? 250 : 48 }}>
+    <div
+      ref={rootRef}
+      className="flex flex-col flex-shrink-0 bg-[#1e1e2e]"
+      style={{ height: sessions.length > 0 ? 250 : 48 }}
+    >
       <TerminalTabs
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -39,12 +58,17 @@ export default memo(function TerminalPanel() {
             onClick={() => setShowFeedback(!showFeedback)}
             className={`ml-auto flex items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors ${
               showFeedback
-                ? 'bg-[#89b4fa] text-[#1e1e2e]'
-                : 'text-[#6c7086] hover:text-[#a6adc8]'
+                ? "bg-[#89b4fa] text-[#1e1e2e]"
+                : "text-[#6c7086] hover:text-[#a6adc8]"
             }`}
             title="PM 피드백"
           >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"

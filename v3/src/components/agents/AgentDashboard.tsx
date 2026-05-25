@@ -1,13 +1,27 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Agent } from "../../types/agent";
 import type { Task } from "../../types/task";
 import AgentStatusCard from "./AgentStatusCard";
+import AgentFleetGrid from "./AgentFleetGrid";
 import TeamSummary from "./TeamSummary";
 import ActivityFeed from "./ActivityFeed";
 import CostWidget from "./CostWidget";
 import AuditTimeline from "./AuditTimeline";
 import { useCostStore } from "../../stores/costStore";
 import { useTranslation } from "../../lib/i18n";
+
+type ViewMode = "list" | "grid";
+const VIEW_MODE_KEY = "agentsViewMode";
+
+function readViewMode(): ViewMode {
+  if (typeof window === "undefined") return "list";
+  try {
+    const v = window.localStorage.getItem(VIEW_MODE_KEY);
+    return v === "grid" ? "grid" : "list";
+  } catch {
+    return "list";
+  }
+}
 
 interface AgentDashboardProps {
   agents: Agent[];
@@ -31,6 +45,17 @@ export default function AgentDashboard({
   onDelete,
 }: AgentDashboardProps) {
   const { t } = useTranslation();
+  const [viewMode, setViewMode] = useState<ViewMode>(readViewMode);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, viewMode);
+    } catch {
+      /* quota / disabled — best-effort */
+    }
+  }, [viewMode]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
@@ -50,6 +75,35 @@ export default function AgentDashboard({
           {t("agents.dashboard.title")}
         </h2>
         <div className="flex items-center gap-2">
+          {/* View switcher — list (cards) vs grid (FleetView) */}
+          <div className="flex items-center rounded border border-gray-700 bg-gray-800/50 p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              aria-pressed={viewMode === "list"}
+              title="List view"
+              className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                viewMode === "list"
+                  ? "bg-gray-700 text-gray-100"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              ▤ List
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              aria-pressed={viewMode === "grid"}
+              title="Grid view (FleetView)"
+              className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                viewMode === "grid"
+                  ? "bg-gray-700 text-gray-100"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              ▦ Grid
+            </button>
+          </div>
           {agents.filter((a) => a.status !== "working").length > 0 && (
             <button
               className="flex items-center gap-1.5 rounded border border-red-600/30 bg-red-600/10 px-3 py-1.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/20"
@@ -59,7 +113,7 @@ export default function AgentDashboard({
                   confirm(
                     t("agents.dashboard.cleanupConfirm", {
                       count: inactive.length,
-                    })
+                    }),
                   )
                 ) {
                   inactive.forEach((a) => onDelete(a.id));
@@ -92,9 +146,12 @@ export default function AgentDashboard({
       {/* Team Summary */}
       <TeamSummary agents={agents} tasks={tasks} />
 
-      {/* Agent Cards Grid */}
+      {/* Agent rendering — view mode toggles between rich list cards and
+          the FleetView grid. Empty state is shared. */}
       {agents.length === 0 ? (
         <AgentSetupGuide onAddAgent={onAddAgent} />
+      ) : viewMode === "grid" ? (
+        <AgentFleetGrid agents={agents} />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {agents.map((agent) => (
@@ -261,7 +318,7 @@ function UsageDashboard({ agents }: { agents: Agent[] }) {
             outputTokens: 0,
             cacheRead: 0,
             cacheWrite: 0,
-          }
+          },
         );
         const totalTokens =
           modelTotals.inputTokens +
@@ -385,7 +442,7 @@ function UsageDashboard({ agents }: { agents: Agent[] }) {
                   summary.totalInputTokens +
                     summary.totalOutputTokens +
                     summary.totalCacheReadTokens +
-                    summary.totalCacheWriteTokens
+                    summary.totalCacheWriteTokens,
                 )}{" "}
                 tokens
               </span>
@@ -438,18 +495,18 @@ function ModelUsageGauge({
       totalTokens === 0
         ? "대기"
         : totalTokens < 10_000_000
-        ? "낮음"
-        : totalTokens < 50_000_000
-        ? "보통"
-        : "높음";
+          ? "낮음"
+          : totalTokens < 50_000_000
+            ? "보통"
+            : "높음";
     const levelColor =
       totalTokens === 0
         ? "text-gray-500"
         : totalTokens < 10_000_000
-        ? "text-green-400"
-        : totalTokens < 50_000_000
-        ? "text-purple-400"
-        : "text-amber-400";
+          ? "text-green-400"
+          : totalTokens < 50_000_000
+            ? "text-purple-400"
+            : "text-amber-400";
 
     return (
       <div className="space-y-1">
