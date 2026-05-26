@@ -177,8 +177,16 @@ export function registerTools(server: McpServer): void {
     name: string,
     description: string,
     schema: any,
-    handler: (...args: any[]) => Promise<any>
+    handler: (...args: any[]) => Promise<any>,
+    opts: { userFacing?: boolean } = {}
   ): void {
+    const userFacing = opts.userFacing ?? true;
+    if (!userFacing) {
+      // 사용자 액티비티 스트림에 노출하지 않는 read-only 조회 툴.
+      // 감사 로그 자체를 쓰지 않는다 — 시스템 페이로드(스킬 본문 등) 노이즈 방지.
+      originalTool(name, description, schema, handler);
+      return;
+    }
     originalTool(name, description, schema, async (...args: any[]) => {
       const start = Date.now();
       let success = true;
@@ -247,7 +255,8 @@ export function registerTools(server: McpServer): void {
         return `- [${t.status}] ${t.title} (role=${t.role}, id=${t.id}${proj})${claimed}`;
       });
       return text(lines.join("\n"));
-    }
+    },
+    { userFacing: false }
   );
 
   // 2. get_available_tasks
@@ -284,7 +293,8 @@ export function registerTools(server: McpServer): void {
         return `- [${t.id}] ${t.title} (priority=${t.priority})${deps}`;
       });
       return text(lines.join("\n"));
-    }
+    },
+    { userFacing: false }
   );
 
   // 3. create_task
@@ -784,7 +794,8 @@ export function registerTools(server: McpServer): void {
       }
 
       return text(`All completed: ${allCompleted}\n${details.join("\n")}`);
-    }
+    },
+    { userFacing: false }
   );
 
   // 10. get_agent_skill
@@ -812,7 +823,8 @@ export function registerTools(server: McpServer): void {
       }
 
       return text(`Error: No skill file found for role '${role}'.`);
-    }
+    },
+    { userFacing: false }
   );
 
   // 11. get_task_activities
@@ -847,7 +859,8 @@ export function registerTools(server: McpServer): void {
         return `[${ts}] ${agent}: ${a.message}`;
       });
       return text(lines.join("\n"));
-    }
+    },
+    { userFacing: false }
   );
 
   // 12. check_feedback
@@ -880,7 +893,8 @@ export function registerTools(server: McpServer): void {
         );
       });
       return text(lines.join("\n"));
-    }
+    },
+    { userFacing: false }
   );
 
   // 13. acknowledge_feedback
@@ -1050,7 +1064,8 @@ export function registerTools(server: McpServer): void {
         lines.push(`- [${t.status}] ${t.title} (role=${t.role}, id=${d.id})`);
       });
       return text(lines.join("\n"));
-    }
+    },
+    { userFacing: false }
   );
 
   // 16. get_task — Get single task detail (including description)
@@ -1154,7 +1169,8 @@ export function registerTools(server: McpServer): void {
       return text(
         `Agents (${snap.size}, Firestore fallback):\n${lines.join("\n")}`
       );
-    }
+    },
+    { userFacing: false }
   );
 
   // ── reuse_agent — Send a new instruction to an existing idle agent
@@ -1603,7 +1619,8 @@ export function registerTools(server: McpServer): void {
         return `- [${f.status}] ${f.name} (nodes=${nodeCount}, id=${d.id})`;
       });
       return text(`Flows (${snap.size}):\n${lines.join("\n")}`);
-    }
+    },
+    { userFacing: false }
   );
 
   // 19. update_flow — Update an existing flow
@@ -1783,7 +1800,8 @@ export function registerTools(server: McpServer): void {
         return `- ${d.id} (from=${who}, src=${src})${delivered}: ${d.message}`;
       });
       return text(lines.join("\n"));
-    }
+    },
+    { userFacing: false }
   );
 
   // 22. mark_instruction_delivered — Flip `isDelivered` to true after the
