@@ -114,6 +114,7 @@
 
 3. **이종 모델 활용 (필수)**:
    모든 `dispatch_task` 호출 시 태스크 내용에서 tags를 반드시 도출할 것:
+
    - 복잡한 코딩/리팩토링: `tags=["architecture", "multi-file", "coding"]` → Claude
    - 리서치/분석/문서: `tags=["research", "analysis", "documentation"]` → Gemini
    - 단순 수정/빠른 작업: `tags=["simple-fix", "quick-edit"]` → Codex
@@ -126,12 +127,24 @@
 4. **사용자 모델 지정 우선 (강제)**:
    사용자가 특정 모델로 작업하라고 요청하면 (예: "코덱스 써", "use codex", "Gemini로 해줘"),
    `dispatch_task`의 `model` 파라미터를 명시적으로 지정해서 그 모델을 강제할 것:
+
    - 코덱스 / GPT 요청 → `model="gpt"`
    - Gemini 요청 → `model="gemini"`
    - 클로드 요청 → `model="claude"`
    - Antigravity / agy 요청 → `model="antigravity"` (v1: standalone `agy` 스폰, MCP 자동 연결은 추후 추가)
      `model`이 명시되면 tags 점수 / 라운드로빈 무시하고 해당 모델로 직접 스폰함.
      사용자 의도를 무시하고 다른 모델 쓰지 말 것.
+
+5. **`task_id` 의무화 (자동 완료 보고)**:
+   기존 task 와 연결된 dispatch 는 **반드시** `task_id` 를 같이 넘긴다:
+
+   ```
+   dispatch_task(role="backend", instruction="...", task_id="abc123", tags=[...])
+   ```
+
+   `task_id` 가 있으면 bridge-server 가 instruction 끝에 "[완료 규약]" footer 를 자동 append → 워커가 끝낼 때 `submit_for_review` / `update_task_status` 를 호출하면 marblo MCP 가 내 PTY 로 결과 알림을 자동 주입한다. task_id 를 안 넣으면 footer 가 안 붙고 워커가 텍스트 답변만 뱉은 채 끝나서 결과를 못 받을 수 있다.
+
+   리뷰/감사 같은 일회성 dispatch 도 가능하면 사전에 `create_task` 로 ticket 한 장을 만들고 그 id 를 넘길 것. 예외(정말 일회성 조사) 는 `complexity="simple"` 로 logical 처리.
 
 ### 에이전트 정리 정책
 
@@ -233,6 +246,19 @@ Marblo 슬래시 명령어 가이드를 보여줌.
 3. 첫 번째 태스크를 claim하고 작업 시작
 4. 완료 후 다음 태스크 진행
 ```
+
+특정 task 를 콕 집어 위임할 때는 `dispatch_task(..., task_id="...")` 를 사용 — bridge 가 "[완료 규약]" footer 를 자동 붙여 `submit_for_review` / `update_task_status` 호출 의무를 워커에게 명시한다. 위 일반 템플릿은 워커가 스스로 큐에서 태스크를 꺼내는 경우의 부트스트랩이다.
+
+#### Antigravity 예외 — MCP 워크플로우 위임 불가
+
+`model="antigravity"` 스폰은 v1에서 MCP 자동 연결이 없으므로 위 템플릿(claim_task / submit_for_review 등)을 그대로 전달하면 에이전트가 도구 호출에 실패한다. Antigravity 는 **MCP 없이 standalone 으로 처리 가능한 단일 작업**(예: 코드베이스 조사, 단발성 리팩토링, 분석 리포트 작성)에만 위임할 것:
+
+```
+다음 작업을 수행하고 결과를 텍스트로 보고해줘.
+{단일 작업 지시}
+```
+
+태스크 ID 매핑/상태 업데이트는 오케스트레이터가 결과 텍스트를 받아서 대신 처리한다. MCP 연동 워크플로우가 필요한 태스크는 claude / gpt / gemini 로 배정할 것. 첫 스폰 시 OAuth 브라우저 인증이 뜰 수 있으므로 사용자에게 인증 완료를 안내하고, 두 번째 스폰부터 안정적으로 작업 위임이 가능하다.
 
 ## 제약 사항
 

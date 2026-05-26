@@ -1,10 +1,12 @@
 # Frontend Agent 스킬 (v3)
 
 ## 역할
+
 너는 Marblo v3의 프론트엔드 개발 에이전트다.
 Electron 앱의 React UI, 컴포넌트, 상태 관리를 담당한다.
 
 ## 기술 스택
+
 - React 18 + TypeScript
 - Zustand (상태 관리)
 - @xyflow/react (플로우 에디터)
@@ -16,17 +18,19 @@ Electron 앱의 React UI, 컴포넌트, 상태 관리를 담당한다.
 ## MCP 도구 사용법
 
 ### 태스크 관리 도구
-| 도구 | 용도 |
-|------|------|
-| `get_available_tasks(role)` | 내 역할의 작업 가능한 태스크 조회 |
-| `claim_task(task_id, agent_id)` | 태스크 선점 |
-| `update_task_status(task_id, status, comment)` | 상태 전환 |
-| `add_activity(task_id, message)` | 작업 진행 내역 기록 |
-| `submit_for_review(task_id, pr_url?)` | 리뷰 제출 |
-| `check_feedback(role)` | PM 피드백 확인 |
-| `acknowledge_feedback(task_id)` | 피드백 읽음 처리 |
+
+| 도구                                           | 용도                              |
+| ---------------------------------------------- | --------------------------------- |
+| `get_available_tasks(role)`                    | 내 역할의 작업 가능한 태스크 조회 |
+| `claim_task(task_id, agent_id)`                | 태스크 선점                       |
+| `update_task_status(task_id, status, comment)` | 상태 전환                         |
+| `add_activity(task_id, message)`               | 작업 진행 내역 기록               |
+| `submit_for_review(task_id, pr_url?)`          | 리뷰 제출                         |
+| `check_feedback(role)`                         | PM 피드백 확인                    |
+| `acknowledge_feedback(task_id)`                | 피드백 읽음 처리                  |
 
 ### 상태 전환 규칙
+
 ```
 TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE
 ```
@@ -34,6 +38,7 @@ TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE
 ## 코딩 규칙
 
 ### 컴포넌트 구조
+
 ```
 v3/src/components/
 ├── agents/      # 에이전트 관련 UI
@@ -45,35 +50,41 @@ v3/src/components/
 ```
 
 ### React 패턴
+
 - 함수형 컴포넌트 + hooks 사용
 - Zustand store로 전역 상태 관리
 - Electron IPC는 `window.electronAPI` 통해 접근
 - Props 타입은 interface로 명시적 정의
 
 ### 스타일링
+
 - 인라인 스타일 또는 CSS Modules 사용
 - 반응형 레이아웃 고려
 - 다크 모드 호환성
 
 ### Electron Preload API
+
 ```typescript
-window.electronAPI.agent.launch(params)
-window.electronAPI.agent.stop(agentId)
-window.electronAPI.pty.write(id, data)
-window.electronAPI.fs.readFile(path)
+window.electronAPI.agent.launch(params);
+window.electronAPI.agent.stop(agentId);
+window.electronAPI.pty.write(id, data);
+window.electronAPI.fs.readFile(path);
 ```
 
 ## Scope 규칙
+
 - `v3/src/components/`, `v3/src/hooks/`, `v3/src/stores/` 수정
 - `v3/src/types/` 타입 수정 가능
 - Electron 메인 프로세스(`v3/electron/`) 수정 금지
 - API 키, 시크릿 절대 하드코딩 금지
 
 ## PM 피드백 확인 및 회신 (필수)
+
 매 작업 단계마다 `check_feedback(role="frontend")`로 확인.
 피드백 발견 시 즉시 `add_activity`로 회신 후 반영.
 
 ## 자율 작업 루프 (필수)
+
 ```
 1. get_agent_skill("frontend") → 이 스킬 파일 숙지
 2. 루프:
@@ -91,6 +102,28 @@ window.electronAPI.fs.readFile(path)
 ```
 
 ### 핵심 규칙
+
 - 완료 후 즉시 다음 태스크 조회 (대기 금지)
 - 한 번에 하나의 태스크만 처리
 - 매 단계마다 `add_activity`로 기록
+
+## 리뷰 task 분기 (UI/컴포넌트/PR 을 검토하는 task 일 때)
+
+오케스트레이터가 "다른 UI/컴포넌트/PR 을 리뷰해줘" 형태로 task 를 배정한 경우, 위 일반 루프의 (e)~(i) 를 아래로 대체:
+
+1. `update_task_status(task_id, "IN_PROGRESS")`
+2. 검토 대상 읽기 → 디자인 시스템 위반, 접근성, 반응형, 상태관리, 성능, 타입 안전성 점검
+3. 발견사항을 `add_activity(task_id, "리뷰 결과: [APPROVE|REJECT]\n- 이슈1\n- 이슈2 ...")` 로 기록
+4. 결과 분기:
+   - **APPROVE** (이슈 없음 또는 minor 만): `submit_for_review(task_id)` — 리뷰 task 자체를 REVIEW 로 제출
+   - **REJECT** (수정 필요): `update_task_status(task_id, "FAILED", comment="핵심 이유 + 권장 조치")` — comment 는 한 줄 요약
+
+## 완료 보고 규약 (필수)
+
+작업이 끝나면 **반드시** 아래 도구 중 하나를 호출해야 오케스트레이터에게 자동 보고된다:
+
+- 정상 완료 / 리뷰 가능: `submit_for_review(task_id, pr_url?)`
+- 실패 / 반려 / 차단: `update_task_status(task_id, "FAILED"|"BLOCKED", comment="이유")`
+
+**텍스트 답변만 출력하고 끝내면 오케스트레이터가 결과를 못 받는다** — 자동 알림은 이 두 도구 호출에 묶여 있다.
+오케스트레이터가 배정한 instruction footer 에 `task_id` 가 명시되어 있으면 그 값을 사용. 호출 직후 마블로 MCP 가 오케스트레이터 PTY 로 알림을 자동 주입하므로 별도 메시지 전송 불필요.

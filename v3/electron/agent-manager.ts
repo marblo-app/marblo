@@ -74,8 +74,13 @@ export interface AgentInstance {
  * - Codex / Gemini / custom CLIs have no skill auto-discovery, so we
  *   prepend the role's skill file (claim/activity/review workflow,
  *   coding rules, etc.) ahead of the orchestrator's instruction. Claude
- *   Code already auto-loads `~/.claude/skills/*` so prepending is
- *   redundant for it.
+ *   Code does auto-load `~/.claude/skills/*`, but marblo's role skills
+ *   live in `v3/skills/{role}_agent.md` — they aren't symlinked into
+ *   `~/.claude/skills/`, so Claude workers wouldn't see the
+ *   claim→IN_PROGRESS→submit_for_review workflow either. Prepend for
+ *   Claude too. Skipping this is what caused workers to finish reviews
+ *   in their PTY but never call submit_for_review / update_task_status,
+ *   leaving the orchestrator blind to completion.
  * - Strip the `mcp__marblo__` prefix that Claude Code uses for MCP tool
  *   names — Codex / Gemini expose the same tools as `claim_task`,
  *   `submit_for_review`, etc. (no `mcp__server__` prefix). The
@@ -112,6 +117,18 @@ export const STARTUP_DIALOG_MATCHERS: StartupDialogMatcher[] = [
     label: "codex update-available",
     applies: ["gpt"],
   },
+  {
+    // Antigravity (agy) v1.0.2 trust dialog: blocks input on first visit
+    // to any new cwd. Default highlight is "> Yes, I trust this folder"
+    // (verified via live PTY capture 2026-05-26), so a bare `\r` accepts.
+    // Anchored to the question text — distinctive enough not to false-fire
+    // on arbitrary chat content. Applied to antigravity only so claude /
+    // codex / gemini chats discussing trust don't trigger it.
+    pattern: /Do you trust the contents of this project/i,
+    keys: "\r",
+    label: "antigravity trust-folder",
+    applies: ["antigravity"],
+  },
 ];
 
 export function composeInitialPrompt(
@@ -123,7 +140,13 @@ export function composeInitialPrompt(
   const sanitized = isClaude
     ? instruction
     : instruction.replace(/mcp__marblo__/g, "");
-  if (isClaude || !skillContent) return sanitized;
+  // Antigravity (agy) v1 ships with no MCP integration (see
+  // agent-config.ts antigravity case). The role-skill template tells the
+  // agent to call get_agent_skill / claim_task / submit_for_review — tools
+  // it can't reach — so prepending it would brick the session. Send the
+  // raw instruction and let the orchestrator decide on a standalone task.
+  if (model === "antigravity") return sanitized;
+  if (!skillContent) return sanitized;
   return [
     "[역할 스킬 — 아래 워크플로우와 도구 사용 규칙을 따르세요]",
     skillContent.trim(),
@@ -318,6 +341,10 @@ export class AgentManager {
         /Explain this codebase/i,
         /esc to interrupt/i,
       ];
+      // Antigravity (agy) verified via live PTY capture: the post-trust
+      // input prompt uses the same `? for shortcuts` footer as Claude
+      // Code, so the pattern above already matches once trust is granted.
+      // The blocking gate is the trust dialog itself, handled below.
 
       // Per-launch state for STARTUP_DIALOG_MATCHERS — fire each matcher
       // at most once. Filter by model so e.g. codex's update prompt
@@ -362,8 +389,13 @@ export class AgentManager {
         }
       });
 
-      // Fallback: send after 10 seconds regardless
-      setTimeout(sendPrompt, 10000);
+      // Fallback: send after the model-specific timeout regardless of
+      // readiness patterns. Antigravity gets a longer window because its
+      // first-spawn OAuth browser flow (harness-catalog.ts antigravity)
+      // can easily blow past 10s, and the 10s default would dump the
+      // prompt into the auth dialog.
+      const fallbackMs = params.model === "antigravity" ? 25000 : 10000;
+      setTimeout(sendPrompt, fallbackMs);
     }
 
     // Detect new Claude session file and save label (5s after launch)

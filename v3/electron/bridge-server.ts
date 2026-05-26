@@ -21,6 +21,40 @@ import {
   type AgentInfo,
 } from "./dispatch-scoring";
 
+/**
+ * Append a completion-protocol footer to a dispatched instruction so the
+ * worker knows which MCP calls close the loop back to the orchestrator.
+ *
+ * Background: when an agent calls `submit_for_review` or `update_task_status`
+ * via the marblo MCP, mcp-server/tools.ts auto-posts to /notify-orchestrator
+ * — that's the only mechanism that injects a completion message into the
+ * orchestrator's PTY. If the agent finishes the work but never calls those
+ * tools, the orchestrator stays blind to completion. The dispatch instruction
+ * sent by the orchestrator usually doesn't include the task_id either, so the
+ * worker wouldn't know what to pass even if it remembered the workflow.
+ *
+ * No-op when taskId is missing (one-off dispatches can't be reported through
+ * these tools). The footer is appended, not prepended — keeps the user-facing
+ * instruction at the top of the buffer.
+ */
+export function withCompletionFooter(
+  instruction: string,
+  taskId?: string
+): string {
+  if (!taskId) return instruction;
+  const footer = [
+    "",
+    "",
+    `[완료 규약 — task_id="${taskId}"]`,
+    "이 작업을 마치면 반드시 아래 marblo MCP 도구를 호출해야 오케스트레이터에게 자동 보고된다 (텍스트 답변만으론 오케스트레이터가 결과를 못 본다):",
+    `- 진행 로그: add_activity(task_id="${taskId}", message="...")`,
+    `- 정상 완료 / 리뷰 가능: submit_for_review(task_id="${taskId}", pr_url?)`,
+    `- 실패 / 반려: update_task_status(task_id="${taskId}", status="FAILED", comment="이유")`,
+    "위 도구 호출 직후 오케스트레이터 PTY 로 알림이 자동 주입된다.",
+  ].join("\n");
+  return instruction + footer;
+}
+
 export interface SpawnAgentRequest {
   name: string;
   model: "claude" | "gemini" | "gpt" | "antigravity" | "local" | "custom";
@@ -696,6 +730,18 @@ export class BridgeServer {
       tags = [],
     } = params;
 
+    // Append a completion-protocol footer so the worker knows which MCP
+    // calls close the loop back to the orchestrator. Without this, agents
+    // finish the work in their PTY but never call submit_for_review /
+    // update_task_status — so notifyOrchestrator() (mcp-server/tools.ts)
+    // never fires and the orchestrator stays blind to completion. Only
+    // append when taskId is provided (one-off dispatches without a task
+    // can't be reported via these tools).
+    const effectiveInstruction = withCompletionFooter(
+      instruction,
+      params.taskId
+    );
+
     // Step 0: Logical agent for simple tasks
     if (complexity === "simple") {
       return {
@@ -722,7 +768,10 @@ export class BridgeServer {
       // Resolve full AgentInstance from AgentManager (ScoredAgent.agent is AgentInfo)
       const fullAgent = this.agentManager.getAgent(best.agent.id);
       if (fullAgent) {
-        this.ptyManager.writeAndSubmit(fullAgent.ptySessionId, instruction);
+        this.ptyManager.writeAndSubmit(
+          fullAgent.ptySessionId,
+          effectiveInstruction
+        );
       }
       this.agentManager.setStatus(best.agent.id, "working");
       this.syncAgentStatus(best.agent.id, "working", params.taskId);
@@ -749,7 +798,10 @@ export class BridgeServer {
     if (restartable.length > 0) {
       const best = restartable[0];
       // Pass instruction as initialPrompt so readiness detection handles delivery timing
-      const restarted = this.agentManager.restart(best.agent.id, instruction);
+      const restarted = this.agentManager.restart(
+        best.agent.id,
+        effectiveInstruction
+      );
       if (restarted) {
         this.agentManager.setStatus(restarted.id, "working");
         this.syncAgentStatus(restarted.id, "working", params.taskId);
@@ -810,7 +862,7 @@ export class BridgeServer {
       model: selectedModel,
       role,
       cwd: params.cwd,
-      initialPrompt: instruction,
+      initialPrompt: effectiveInstruction,
       projectId: params.projectId,
       parentAgentId: params.parentAgentId,
     });
@@ -987,7 +1039,12 @@ export class BridgeServer {
         return "gemini";
       case "gpt":
         return "codex";
+      case "antigravity":
+        return "agy";
       default:
+        // local / custom expect an explicit command override from the
+        // caller — the claude fallback here is a "should never happen"
+        // safety net, not a routing decision.
         return "claude";
     }
   }
