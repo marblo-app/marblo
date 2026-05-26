@@ -84,14 +84,18 @@ export default function MemberCard({ agent, tasks }: MemberCardProps) {
   const status = statusConfig[agent.status] ?? statusConfig.idle;
   const modelKey: ModelType =
     agent.model in modelColors ? agent.model : "custom";
+  // claimedBy 는 UI 수동할당(=agent.name)과 MCP claim_task(=agent.id) 두 경로로
+  // 저장된다. 한쪽만 비교하면 다른 경로 케이스가 누락된다.
+  const isClaimant = (claimedBy: string | null) =>
+    claimedBy != null && (claimedBy === agent.id || claimedBy === agent.name);
   const completedTasks = tasks.filter(
-    (t) => t.claimedBy === agent.id && t.status === "DONE"
+    (t) => isClaimant(t.claimedBy) && t.status === "DONE",
   );
   const currentTask = tasks.find((t) => t.id === agent.currentTaskId);
   const inProgressTasks = tasks.filter(
     (t) =>
-      t.claimedBy === agent.id &&
-      (t.status === "IN_PROGRESS" || t.status === "CLAIMED")
+      isClaimant(t.claimedBy) &&
+      (t.status === "IN_PROGRESS" || t.status === "CLAIMED"),
   );
 
   return (

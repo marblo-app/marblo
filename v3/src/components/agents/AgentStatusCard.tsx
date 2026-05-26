@@ -124,7 +124,7 @@ export default function AgentStatusCard({
     };
     const timer = setTimeout(
       () => document.addEventListener("click", handleClick),
-      0
+      0,
     );
     return () => {
       clearTimeout(timer);
@@ -139,7 +139,7 @@ export default function AgentStatusCard({
         await window.electronAPI.orchestratorSession.listSessions(cwd);
       // Filter to only sessions belonging to this agent (by agentId or label)
       const mySessions = allSessions.filter(
-        (s: SessionInfo) => s.agentId === agent.id || s.label === agent.name
+        (s: SessionInfo) => s.agentId === agent.id || s.label === agent.name,
       );
       setAgentSessions(mySessions);
     } catch {
@@ -169,14 +169,14 @@ export default function AgentStatusCard({
         },
         cwd,
         undefined,
-        resumeSessionId
+        resumeSessionId,
       );
       if (result) {
         useTerminalStore
           .getState()
           .attachSession(
             result.ptySessionId,
-            `${modelInfo.icon} ${agent.name}`
+            `${modelInfo.icon} ${agent.name}`,
           );
       }
     } catch (err) {
@@ -190,13 +190,17 @@ export default function AgentStatusCard({
     : null;
 
   // Completed tasks by this agent
+  // claimedBy 는 UI 수동할당(=agent.name)과 MCP claim_task(=agent.id) 두 경로로
+  // 저장된다 — 양쪽 다 매칭해야 카운트가 누락되지 않는다.
   const completedCount = tasks.filter(
-    (t) => t.claimedBy === agent.id && t.status === "DONE"
+    (t) =>
+      (t.claimedBy === agent.id || t.claimedBy === agent.name) &&
+      t.status === "DONE",
   ).length;
 
   // Elapsed time for current task
   const elapsed = useElapsedTime(
-    currentTask?.claimedAt ? new Date(currentTask.claimedAt) : null
+    currentTask?.claimedAt ? new Date(currentTask.claimedAt) : null,
   );
 
   return (
@@ -268,7 +272,7 @@ export default function AgentStatusCard({
                           .getState()
                           .attachSession(
                             sessionId,
-                            `${modelInfo.icon} ${agent.name}`
+                            `${modelInfo.icon} ${agent.name}`,
                           );
                       }}
                       className="w-full text-left px-3 py-2 text-xs text-[#a6e3a1] hover:bg-[#313244]/60 transition-colors flex items-center gap-2"
@@ -363,11 +367,11 @@ export default function AgentStatusCard({
                     try {
                       const allSessions =
                         await window.electronAPI.orchestratorSession.listSessions(
-                          cwd
+                          cwd,
                         );
                       const mySessions = allSessions.filter(
                         (s: SessionInfo) =>
-                          s.agentId === agent.id || s.label === agent.name
+                          s.agentId === agent.id || s.label === agent.name,
                       );
                       setAgentSessions(mySessions);
                     } catch {

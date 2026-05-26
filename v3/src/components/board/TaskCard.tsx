@@ -151,8 +151,8 @@ function TaskCardContent({
   const statusHighlight = isBlocked
     ? "border-l-2 border-l-orange-500"
     : isFailed
-    ? "border-l-2 border-l-red-500"
-    : "";
+      ? "border-l-2 border-l-red-500"
+      : "";
 
   // Pulse the card whenever Firestore reports a change (status, claimedBy,
   // hasPmFeedback, prUrl, etc — they all bump updatedAt). Each card owns its
@@ -166,14 +166,32 @@ function TaskCardContent({
   // When `claimedBy` is unset, all hooks short-circuit (usePresence handles
   // undefined as "no subscription").
   const agents = useAgentStore((s) => s.agents);
+  // claimedBy 는 두 경로로 저장됨: 수동 UI 할당은 agent.name, MCP claim_task 는
+  // agent.id. 매칭은 양쪽을 모두 받아야 한다 (TaskDetailModal 의 AgentAssign 과
+  // 동일). 한쪽만 보면 다른 경로로 들어온 케이스에서 ownerId 가 잡히지 않아
+  // presence 가 무조건 offline 으로 떨어진다.
   const claimingAgent = task.claimedBy
-    ? agents.find((a) => a.id === task.claimedBy)
+    ? agents.find((a) => a.name === task.claimedBy || a.id === task.claimedBy)
     : undefined;
   const ownerId = claimingAgent?.ownerId;
   const lastHeartbeatAt = usePresence(ownerId);
-  const presence: PresenceStatus | null = task.claimedBy
-    ? getPresenceStatus(lastHeartbeatAt)
-    : null;
+  // Presence 1차 판정은 에이전트 프로세스의 직접 시그널(agent.status)을 본다.
+  // - working/idle 이면 inject_message 가 즉시 잡힐 거라 online
+  // - stopped/error 면 오프라인 배너로 회수 권유
+  // - 에이전트 doc 매칭 실패(레거시·미지 status)일 때만 owner 사용자의 in-app
+  //   heartbeat 으로 폴백 → 팀 협업 시 "owner 가 마블로 앱을 닫아둠" 시나리오
+  //   도 그대로 잡힌다.
+  let presence: PresenceStatus | null = null;
+  if (task.claimedBy) {
+    const status = claimingAgent?.status;
+    if (status === "working" || status === "idle") {
+      presence = "online";
+    } else if (status === "stopped" || status === "error") {
+      presence = "offline";
+    } else {
+      presence = getPresenceStatus(lastHeartbeatAt);
+    }
+  }
 
   return (
     <div
