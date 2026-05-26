@@ -14,6 +14,7 @@ import {
 import { useProjectStore } from "../../stores/projectStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { MacroView } from "./MacroView";
+import { formatActivity } from "../../services/activityFormatters";
 
 const FILTER_ORDER: ActivityFilter[] = [
   "all",
@@ -72,19 +73,11 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
   const agentId =
     entry.agentId && entry.agentId !== "unknown" ? entry.agentId : null;
 
-  const summary =
-    entry.toolName === "add_activity" &&
-    typeof entry.params.message === "string"
-      ? (entry.params.message as string)
-      : entry.toolName === "create_task" &&
-        typeof entry.params.title === "string"
-      ? (entry.params.title as string)
-      : entry.toolName === "update_task_status" &&
-        typeof entry.params.status === "string"
-      ? `→ ${entry.params.status}`
-      : entry.toolName === "claim_task" && taskId
-      ? `task ${taskId.slice(0, 8)}`
-      : entry.result.slice(0, 80) || entry.toolName;
+  // 헤드라인은 activityFormatters 의 ActivityType 별 포매터가 담당 —
+  // raw result 노출 방지 + 'Category: action payload' 통일 포맷.
+  // 빈 헤드라인(예: type=other) 이면 toolName 으로 안전망.
+  const { headline } = formatActivity(entry);
+  const summary = headline || entry.toolName;
 
   return (
     <div
