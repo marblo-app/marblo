@@ -4,6 +4,8 @@ import { useProjectStore } from "../stores/projectStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useTerminalStore } from "../stores/terminalStore";
 import { useOrchestratorStore } from "../stores/orchestratorStore";
+import * as agentService from "../services/agentService";
+import type { AgentStatus } from "../types/agent";
 
 const MODEL_ICONS: Record<string, string> = {
   claude: "🟣",
@@ -47,7 +49,37 @@ export function useAgentReconnect() {
           const icon = agent ? MODEL_ICONS[agent.model] || "⚪" : "⚪";
           const label = agent ? `${icon} ${agent.name}` : result.agentId;
           attachSession(result.ptySessionId, label);
+          continue;
         }
+
+        // Reconnect 실패 처리. main 의 agent:reconnect 핸들러는 후보 세션을
+        // 못 찾았을 때 skippedReason: "no-session" 으로 응답한다 (PTY 도 안
+        // 띄움). 이 경우 Firestore 의 status 가 종료 전 값 (idle/working) 인
+        // 채 남아 사용자 입장에서는 "워커가 살아있는 듯 보이는데 사실은 죽음"
+        // 처럼 보였음 → status 를 stopped 로 명시적으로 마킹해서 ▶ Start
+        // 버튼을 누르게 유도.
+        if (result.skippedReason === "no-session") {
+          agentService
+            .updateAgent(result.agentId, {
+              status: "stopped" as AgentStatus,
+            })
+            .catch((err) => {
+              console.warn(
+                "[Reconnect] Failed to mark agent as stopped:",
+                result.agentId,
+                err
+              );
+            });
+          continue;
+        }
+
+        // 그 외 (정의되지 않은 skippedReason / 에러) 는 안전한 디폴트로 status
+        // 를 건드리지 않고 로그만 남긴다.
+        console.warn(
+          "[Reconnect] Agent not reconnected:",
+          result.agentId,
+          result.skippedReason ?? "(unknown)"
+        );
       }
 
       const reconnectedCount = results.filter((r) => r.reconnected).length;

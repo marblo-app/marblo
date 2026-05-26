@@ -65,7 +65,7 @@ function getEnrichedPath(): string {
 function getMCPServerEnv(
   projectDir: string,
   marbloProjectId?: string,
-  agentId?: string,
+  agentId?: string
 ): Record<string, string> {
   const env: Record<string, string> = {
     PATH: getEnrichedPath(),
@@ -118,7 +118,7 @@ function getMCPServerEnv(
 function buildMCPServerEntry(
   projectDir: string,
   marbloProjectId?: string,
-  agentId?: string,
+  agentId?: string
 ): MCPServerEntry {
   return {
     command: "node",
@@ -138,7 +138,7 @@ export class AgentConfigGenerator {
     agentId: string,
     model: ModelType,
     projectDir: string,
-    marbloProjectId?: string,
+    marbloProjectId?: string
   ): string {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
@@ -151,6 +151,8 @@ export class AgentConfigGenerator {
         return this.generateGeminiConfig(agentId, mcpEntry);
       case "gpt":
         return this.generateGPTConfig(agentId, mcpEntry, projectDir);
+      case "antigravity":
+        return this.generateAntigravityConfig(agentId, mcpEntry);
       case "custom":
         return this.generateCustomConfig(agentId, mcpEntry);
       default:
@@ -189,13 +191,13 @@ export class AgentConfigGenerator {
     projectDir: string,
     initialPrompt?: string,
     marbloProjectId?: string,
-    resumeSessionId?: string,
+    resumeSessionId?: string
   ): LaunchConfig {
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
       agent.model,
       projectDir,
-      marbloProjectId,
+      marbloProjectId
     );
     const skillPath = this.generateSkillFile(agent.id, agent.role, projectDir);
     const skillContent =
@@ -210,7 +212,7 @@ export class AgentConfigGenerator {
       projectDir,
       marbloProjectId,
       agent.id,
-      resumeSessionId,
+      resumeSessionId
     );
 
     return {
@@ -240,7 +242,7 @@ export class AgentConfigGenerator {
       const sessionsRoot = path.join(
         CONFIG_DIR,
         `codex-home-${agentId}`,
-        "sessions",
+        "sessions"
       );
       return this.hasAnyFileBelow(sessionsRoot, ".jsonl");
     }
@@ -249,9 +251,22 @@ export class AgentConfigGenerator {
         CONFIG_DIR,
         `gemini-home-${agentId}`,
         ".gemini",
-        "tmp",
+        "tmp"
       );
       return this.hasAnyFileBelow(geminiTmp, null);
+    }
+    if (model === "antigravity") {
+      // agy 는 conversation 을 ${HOME}/.gemini/antigravity-cli/conversations/
+      // <UUID>.pb 형태로 저장 (관찰: 1.0.2). 격리 HOME 안에 적어도 한 개의
+      // .pb 가 있어야 `agy --continue` 가 무언가 잡을 수 있음.
+      const antigravityConversations = path.join(
+        CONFIG_DIR,
+        `antigravity-home-${agentId}`,
+        ".gemini",
+        "antigravity-cli",
+        "conversations"
+      );
+      return this.hasAnyFileBelow(antigravityConversations, ".pb");
     }
     return false;
   }
@@ -306,7 +321,7 @@ export class AgentConfigGenerator {
 
   private generateClaudeConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry,
+    mcpEntry: MCPServerEntry
   ): string {
     const config = {
       mcpServers: {
@@ -326,7 +341,7 @@ export class AgentConfigGenerator {
 
   private generateGeminiConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry,
+    mcpEntry: MCPServerEntry
   ): string {
     // Per-agent isolation strategy for Gemini CLI (verified against v0.43):
     //
@@ -410,7 +425,7 @@ export class AgentConfigGenerator {
     if (fs.existsSync(userSettingsPath)) {
       try {
         preserved = JSON.parse(
-          fs.readFileSync(userSettingsPath, "utf-8"),
+          fs.readFileSync(userSettingsPath, "utf-8")
         ) as Record<string, unknown>;
         delete (preserved as Record<string, unknown>).mcpServers;
       } catch {
@@ -451,10 +466,75 @@ export class AgentConfigGenerator {
     return settingsPath;
   }
 
+  private generateAntigravityConfig(
+    agentId: string,
+    _mcpEntry: MCPServerEntry
+  ): string {
+    // Per-agent isolation for Antigravity (agy) CLI.
+    //
+    // agy 는 GEMINI_CLI_HOME 같은 부분 redirect 환경변수를 노출하지 않아서
+    // 전체 HOME 을 override 하는 방식 외엔 격리 수단이 없다. HOME override
+    // 의 부수효과 (~/Library/Caches 재다운로드 등) 는 받아들이고, 대신:
+    //   1) 격리 HOME 안에 ~/.gemini/* 전체를 hard-copy → OAuth/installation_id
+    //      를 그대로 들고 가서 인증 prompt 없이 spawn
+    //   2) `agy --continue` 는 ${HOME}/.gemini/antigravity-cli/conversations/
+    //      안의 가장 최근 .pb 만 잡으므로 격리 HOME 단위로 워커 간 충돌 방지
+    //
+    // MCP 통합은 v1 에서 미지원이라 settings.json 을 따로 쓰지 않는다.
+    // sentinel 파일 경로를 반환해 buildCLICommand 에서 격리 HOME 을 역산.
+    const antigravityHome = path.join(
+      CONFIG_DIR,
+      `antigravity-home-${agentId}`
+    );
+    const dotGemini = path.join(antigravityHome, ".gemini");
+    fs.mkdirSync(dotGemini, { recursive: true });
+
+    const userGeminiDir = path.join(os.homedir(), ".gemini");
+    if (fs.existsSync(userGeminiDir)) {
+      const copyRecursive = (src: string, dst: string) => {
+        const stat = fs.lstatSync(src);
+        if (stat.isDirectory()) {
+          fs.mkdirSync(dst, { recursive: true });
+          for (const child of fs.readdirSync(src)) {
+            copyRecursive(path.join(src, child), path.join(dst, child));
+          }
+        } else {
+          fs.copyFileSync(src, dst);
+        }
+      };
+      for (const entry of fs.readdirSync(userGeminiDir)) {
+        const dst = path.join(dotGemini, entry);
+        // 기존 hard-copy 는 유지 (refresh token 등 runtime 상태가 그 안에
+        // 누적됨). 첫 spawn 시점에만 native ~/.gemini 에서 복사해온다.
+        if (fs.existsSync(dst)) continue;
+        try {
+          copyRecursive(path.join(userGeminiDir, entry), dst);
+        } catch {
+          // best-effort — 일부 파일이 perms 로 실패해도 spawn 은 계속
+        }
+      }
+    }
+
+    // sentinel: 실제 agy 가 읽진 않지만 buildCLICommand 가 격리 HOME 을
+    // path.dirname(path.dirname(mcpConfigPath)) 로 역산하는 컨벤션을 따른다.
+    const sentinelDir = path.join(dotGemini, "config");
+    fs.mkdirSync(sentinelDir, { recursive: true });
+    const sentinelPath = path.join(sentinelDir, "marblo-sentinel.json");
+    if (!fs.existsSync(sentinelPath)) {
+      fs.writeFileSync(
+        sentinelPath,
+        JSON.stringify({ agentId, createdAt: Date.now() }),
+        "utf-8"
+      );
+    }
+    this.trackFile(agentId, sentinelPath);
+    return sentinelPath;
+  }
+
   private generateGPTConfig(
     agentId: string,
     mcpEntry: MCPServerEntry,
-    projectDir: string,
+    projectDir: string
   ): string {
     // Codex CLI reads config from `$CODEX_HOME/config.toml` (TOML, not JSON)
     // with `[mcp_servers.<name>]` sections. Each agent gets an ISOLATED
@@ -536,7 +616,7 @@ export class AgentConfigGenerator {
         trustEntries.push(
           `[projects.${JSON.stringify(candidate)}]`,
           'trust_level = "trusted"',
-          "",
+          ""
         );
       }
     }
@@ -579,7 +659,7 @@ export class AgentConfigGenerator {
 
   private generateCustomConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry,
+    mcpEntry: MCPServerEntry
   ): string {
     // Generic MCP config — same structure, custom CLI may or may not use it
     const config = {
@@ -607,7 +687,7 @@ export class AgentConfigGenerator {
     projectDir: string,
     marbloProjectId?: string,
     agentId?: string,
-    resumeSessionId?: string,
+    resumeSessionId?: string
   ): { command: string; args: string[]; env: Record<string, string> } {
     const env = getMCPServerEnv(projectDir, marbloProjectId, agentId);
     // Normalize resume signals: "new" means force-fresh, "latest" means
@@ -696,7 +776,7 @@ export class AgentConfigGenerator {
           "-c",
           'approval_policy="never"',
           "-c",
-          'sandbox_mode="danger-full-access"',
+          'sandbox_mode="danger-full-access"'
         );
         // Reject `baseCommand === "gpt"` — that's the model slug accidentally
         // saved to the Firestore agent doc by older builds of Layout.tsx, and
@@ -713,21 +793,39 @@ export class AgentConfigGenerator {
       }
 
       case "antigravity": {
-        // Antigravity (agy) CLI — Google I/O 2026 release.
-        // v1 integration: spawn `agy` with no MCP integration. Antigravity's
-        // MCP discovery path is not yet publicly documented as of the v2.0
-        // launch (2026-05-19) — the agent runs standalone, useful for general
-        // TUI work but not yet wired to Marblo TaskForce. MCP_CONFIG_PATH is
-        // exposed via env on a best-effort basis in case future versions
-        // adopt the same convention as `custom`.
+        // Antigravity (agy) CLI — agy 1.0.2 기준.
         //
-        // Auth: OAuth browser flow on first run (similar to gemini).
-        // Resume: no `--resume`/`--last` flag documented yet — fresh session
-        // every spawn until Antigravity ships session management.
+        // 격리 전략: HOME override. agy 에는 GEMINI_CLI_HOME 같은 부분
+        // redirect env 가 없어서 process HOME 자체를 격리 디렉토리로 향하게
+        // 해야 ${HOME}/.gemini/antigravity-cli/conversations/ 가 워커별로
+        // 분리된다. generateAntigravityConfig 가 격리 HOME 안에 사용자
+        // ~/.gemini/* 를 hard-copy 해두므로 OAuth 도 그대로 이어진다.
+        //
+        // Resume:
+        //   --continue (-c)      → 격리 HOME 안의 가장 최근 conversation
+        //   --conversation <UUID> → 구체적 conversation id
+        // 단, marblo 는 현재 conversation UUID 를 추적하지 않으므로
+        // 'latest' 든 concrete id 든 일단 --continue 로 처리한다. 격리
+        // HOME 단위로 워커가 분리돼 있어 --continue 가 워커 간 conversation
+        // 을 섞을 위험은 없다.
+        //
+        // mcpConfigPath 는 generateAntigravityConfig 가 만든 sentinel
+        // (`<isolatedHome>/.gemini/config/marblo-sentinel.json`) — 격리
+        // HOME 은 그 경로에서 두 단계 위.
+        const antigravityHome = path.dirname(path.dirname(mcpConfigPath));
+        const agyArgs: string[] = [];
+        if (wantResume) {
+          agyArgs.push("--continue");
+        }
         return {
           command: baseCommand || "agy",
-          args: [],
-          env: { ...env, MCP_CONFIG_PATH: mcpConfigPath },
+          args: agyArgs,
+          env: {
+            ...env,
+            HOME: antigravityHome,
+            // best-effort: 미래 버전이 MCP 를 channel 로 받게 되면 활용.
+            MCP_CONFIG_PATH: mcpConfigPath,
+          },
         };
       }
 

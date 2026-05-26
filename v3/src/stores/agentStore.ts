@@ -269,3 +269,35 @@ if (typeof window !== "undefined" && window.electronAPI?.agent?.onSyncStatus) {
     }
   );
 }
+
+// ── Agent PTY status listener ──────────────────────────────
+// AgentManager broadcasts 'agent:statusChanged' when a PTY transitions
+// (launch → idle, exit → stopped, restart-fail → error). On app restart
+// the reconnect path re-spawns the PTY and emits this so the renderer can
+// sync Firestore back to "idle". Without this, agents that auto-reconnected
+// stayed visible as their pre-quit status (often "stopped"/"working") and
+// looked dead even though the PTY was alive.
+//
+// agentId here is the Firestore doc id (same as AgentManager's internal id
+// for agents that were created through the normal UI path), so we update
+// the doc directly instead of name-matching like onSyncStatus does above.
+if (
+  typeof window !== "undefined" &&
+  window.electronAPI?.agent?.onStatusChange
+) {
+  window.electronAPI.agent.onStatusChange(({ agentId, status }) => {
+    if (!agentId) return;
+    agentService
+      .updateAgent(agentId, { status: status as AgentStatus })
+      .catch((err) => {
+        // Non-fatal: doc may not exist yet (race with Firestore subscribe)
+        // or may have been deleted. Log for visibility only.
+        console.warn(
+          "[AgentStore] Failed to sync PTY status to Firestore:",
+          agentId,
+          status,
+          err
+        );
+      });
+  });
+}
