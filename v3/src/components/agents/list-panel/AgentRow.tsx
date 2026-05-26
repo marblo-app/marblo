@@ -13,8 +13,11 @@ interface Props {
 }
 
 function AgentRowImpl({ row, isHighlighted, onSelect, onDoubleClick }: Props) {
-  const vendor = VENDOR_VISUALS[row.vendor];
-  const pill = STATUS_PILL[row.status];
+  // Defense-in-depth: row.vendor/status 는 AgentListPanel 에서 normalize 되지만,
+  // 미래에 다른 호출 경로가 생기거나 신규 vendor/status 등록이 누락되어도
+  // crash 가 아니라 회색 fallback 으로만 표시되도록 진입점에서 가드.
+  const vendor = VENDOR_VISUALS[row.vendor] ?? VENDOR_VISUALS.custom;
+  const pill = STATUS_PILL[row.status] ?? STATUS_PILL.idle;
 
   return (
     <div

@@ -32,8 +32,9 @@ export function FocusView({
   onStart,
   isStarting,
 }: Props) {
-  const vendor = VENDOR_VISUALS[row.vendor];
-  const pill = STATUS_PILL[row.status];
+  // Defense-in-depth: 미지 vendor/status 가 진입하면 crash 대신 회색 fallback.
+  const vendor = VENDOR_VISUALS[row.vendor] ?? VENDOR_VISUALS.custom;
+  const pill = STATUS_PILL[row.status] ?? STATUS_PILL.idle;
 
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(row.displayName);
