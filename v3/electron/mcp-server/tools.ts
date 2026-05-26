@@ -1097,7 +1097,8 @@ export function registerTools(server: McpServer): void {
         `Has PM feedback: ${task.hasPmFeedback}`,
       ];
       return text(lines.join("\n"));
-    }
+    },
+    { userFacing: false }
   );
 
   // 17. get_agents — Real-time agent list (Bridge first, Firestore fallback)
