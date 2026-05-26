@@ -176,4 +176,70 @@ describe("formatActivity", () => {
     );
     expect(out.headline).toBe('PM: feedback on "백엔드 API 작업"');
   });
+
+  // ── 프로덕션 경로: 실제 tool schema 에 title 없을 때 result 에서 추출 ──
+
+  it("task:completed — params 에 title 없으면 update_task_status result 에서 추출", () => {
+    const out = formatActivity(
+      entry({
+        type: "task:completed",
+        toolName: "update_task_status",
+        params: { task_id: "abc12345-0000", status: "DONE" },
+        result: "Task '백엔드 마이그레이션' status updated to DONE.",
+      })
+    );
+    expect(out.headline).toBe('Task: completed "백엔드 마이그레이션"');
+  });
+
+  it("task:claimed — claim_task result 의 'Successfully claimed task:' 패턴 추출", () => {
+    const out = formatActivity(
+      entry({
+        type: "task:claimed",
+        toolName: "claim_task",
+        agentId: "backend-3",
+        params: { task_id: "def67890" },
+        result:
+          "Successfully claimed task: 프론트엔드 리팩터\nID: def67890\nStatus: CLAIMED",
+      })
+    );
+    expect(out.headline).toBe(
+      'Task: claimed by backend-3 — "프론트엔드 리팩터"'
+    );
+  });
+
+  it("task:progress — title 도 result 도 못찾으면 task_id 8자 폴백", () => {
+    const out = formatActivity(
+      entry({
+        type: "task:progress",
+        toolName: "submit_for_review",
+        params: { task_id: "ef0e9f11-816a-4ac1" },
+        result: "(empty/non-matching)",
+      })
+    );
+    expect(out.headline).toBe('Task: progress "task ef0e9f11"');
+  });
+
+  it("activity:note — 빈 message 일 때 trailing dash 안 남기고 '(no message)' 폴백", () => {
+    const out = formatActivity(
+      entry({
+        type: "activity:note",
+        toolName: "add_activity",
+        agentId: "backend-4",
+        params: {},
+      })
+    );
+    expect(out.headline).toBe("Note: backend-4 — (no message)");
+  });
+
+  it("mission:note — 빈 body 폴백", () => {
+    const out = formatActivity(
+      entry({
+        type: "mission:note",
+        toolName: "mission.supervisor.note",
+        agentId: "mission:xyz98765",
+        result: "",
+      })
+    );
+    expect(out.headline).toBe("Mission: mission:xyz98765 note — (no message)");
+  });
 });
