@@ -140,4 +140,40 @@ describe("formatActivity", () => {
     );
     expect(out.headline).toBe(""); // 빈 헤드라인 → 카드 미렌더
   });
+
+  it("task:progress — IN_PROGRESS / submit_for_review 경로", () => {
+    const out = formatActivity(
+      entry({
+        type: "task:progress",
+        toolName: "submit_for_review",
+        params: { title: "API 리팩터" },
+      })
+    );
+    expect(out.headline).toBe('Task: progress "API 리팩터"');
+  });
+
+  it("mission:note — agent 가 supervisor 노트로 남긴 항목", () => {
+    const out = formatActivity(
+      entry({
+        type: "mission:note",
+        toolName: "mission.supervisor.note",
+        agentId: "mission:abc12345",
+        result: "스텝 2 재시도 결정",
+      })
+    );
+    expect(out.headline).toBe(
+      "Mission: mission:abc12345 note — 스텝 2 재시도 결정"
+    );
+  });
+
+  it("pm:feedback — 피드백 카드 헤드라인", () => {
+    const out = formatActivity(
+      entry({
+        type: "pm:feedback",
+        toolName: "acknowledge_feedback",
+        params: { title: "백엔드 API 작업" },
+      })
+    );
+    expect(out.headline).toBe('PM: feedback on "백엔드 API 작업"');
+  });
 });
