@@ -36,7 +36,7 @@ function toTask(raw: Record<string, unknown>): Task {
 export async function getTasks(projectId: string): Promise<Task[]> {
   const docs = await queryDocuments<Record<string, unknown>>(
     COLLECTION,
-    where("projectId", "==", projectId),
+    where("projectId", "==", projectId)
   );
   return docs.map(toTask).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 }
@@ -47,7 +47,7 @@ export async function getTask(taskId: string): Promise<Task | null> {
 }
 
 export async function createTask(
-  data: Omit<Task, "id" | "createdAt" | "updatedAt">,
+  data: Omit<Task, "id" | "createdAt" | "updatedAt">
 ): Promise<string> {
   const now = new Date();
   const taskId = await createDocument(COLLECTION, {
@@ -61,7 +61,7 @@ export async function createTask(
     taskId,
     data.projectId || "",
     data.role || "",
-    data.priority,
+    data.priority
   );
 
   return taskId;
@@ -69,7 +69,7 @@ export async function createTask(
 
 export async function updateTask(
   taskId: string,
-  data: Partial<Omit<Task, "id" | "createdAt">>,
+  data: Partial<Omit<Task, "id" | "createdAt">>
 ): Promise<void> {
   const payload: Record<string, unknown> = {
     ...data,
@@ -87,21 +87,21 @@ export async function deleteTask(taskId: string): Promise<void> {
 
 export function subscribeToTasks(
   projectId: string,
-  callback: (tasks: Task[]) => void,
+  callback: (tasks: Task[]) => void
 ): Unsubscribe {
   return subscribeToCollection<Record<string, unknown>>(
     COLLECTION,
     [where("projectId", "==", projectId)],
     (docs) =>
       callback(
-        docs.map(toTask).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)),
-      ),
+        docs.map(toTask).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+      )
   );
 }
 
 export async function claimTask(
   taskId: string,
-  agentId: string,
+  agentId: string
 ): Promise<void> {
   const task = await getTask(taskId);
   if (!task) throw new Error(`Task not found: ${taskId}`);
@@ -140,13 +140,13 @@ export async function unclaimTask(taskId: string): Promise<void> {
     taskId,
     previousStatus,
     "TODO",
-    previousClaimant ?? undefined,
+    previousClaimant ?? undefined
   );
 }
 
 export async function updateTaskStatus(
   taskId: string,
-  status: TaskStatus,
+  status: TaskStatus
 ): Promise<void> {
   const task = await getTask(taskId);
   if (!task) throw new Error(`Task not found: ${taskId}`);
@@ -159,7 +159,7 @@ export async function updateTaskStatus(
     taskId,
     currentStatus,
     status,
-    task.claimedBy ?? undefined,
+    task.claimedBy ?? undefined
   );
   if (status === "DONE") {
     const durationMs = task.claimedAt
@@ -176,7 +176,7 @@ export async function updateTaskStatus(
       try {
         agentSnap = await getDocument<AgentCostSnapshot>(
           "agents",
-          task.claimedBy,
+          task.claimedBy
         );
       } catch {
         agentSnap = null;
@@ -216,34 +216,7 @@ export async function updateTaskStatus(
     });
   }
 
-  // Send chat notifications for key transitions (best-effort, non-blocking)
-  if (
-    (status === "REVIEW" || status === "DONE") &&
-    task.claimedBy &&
-    task.projectId
-  ) {
-    import("./agentNotificationService")
-      .then((mod) => {
-        if (status === "REVIEW") {
-          mod
-            .notifyAgentSubmittedForReview(
-              task.projectId,
-              task.claimedBy!,
-              taskId,
-              task.title,
-            )
-            .catch(() => {});
-        } else if (status === "DONE") {
-          mod
-            .notifyAgentTaskCompleted(
-              task.projectId,
-              task.claimedBy!,
-              taskId,
-              task.title,
-            )
-            .catch(() => {});
-        }
-      })
-      .catch(() => {});
-  }
+  // 태스크 상태 전이(REVIEW/DONE) 는 audit_logs → 우측 ActivityStreamPanel
+  // 로만 노출한다. 팀 채팅(messages) 컬렉션에는 푸시하지 않는다 — 채팅은
+  // 사람 간 대화 전용.
 }

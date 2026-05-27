@@ -171,19 +171,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const result = await window.electronAPI.agent.restart(id);
       if (result) {
         await agentService.updateAgent(id, { status: "idle" as AgentStatus });
-        // Send restart notification to chat
+        // 재시작 이벤트는 우측 ActivityStreamPanel 에서 audit_logs 로 노출되며,
+        // 팀 채팅(messages) 에는 보내지 않는다 — 채팅은 사람 간 대화 전용.
         const currentAgents = get().agents;
         const restartedAgent = currentAgents.find((a: Agent) => a.id === id);
-        const projectId = useProjectStore.getState().currentProject?.id;
-        if (restartedAgent && projectId) {
-          import("../services/agentNotificationService").then(
-            ({ notifyAgentRestarted }) => {
-              notifyAgentRestarted(projectId, restartedAgent.name).catch(
-                () => {}
-              );
-            }
-          );
-        }
         // Re-register the (possibly new) PTY in the renderer's terminalStore.
         // restart() kills the old PTY and creates a new one with the same
         // `agent-${id}` ptySessionId; the old terminalStore entry may have

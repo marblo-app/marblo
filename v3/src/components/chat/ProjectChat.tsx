@@ -33,7 +33,7 @@ function MentionDropdown({
   onSelect: (target: MentionTarget) => void;
 }) {
   const filtered = targets.filter((t) =>
-    t.name.toLowerCase().includes(filter.toLowerCase()),
+    t.name.toLowerCase().includes(filter.toLowerCase())
   );
   if (filtered.length === 0) return null;
 
@@ -46,7 +46,9 @@ function MentionDropdown({
           className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-gray-700"
         >
           <span
-            className={`h-2 w-2 rounded-full ${t.type === "orchestrator" ? "bg-blue-400" : "bg-green-400"}`}
+            className={`h-2 w-2 rounded-full ${
+              t.type === "orchestrator" ? "bg-blue-400" : "bg-green-400"
+            }`}
           />
           <span className="text-gray-200">@{t.name}</span>
           <span className="ml-auto text-xs text-gray-500">{t.type}</span>
@@ -92,7 +94,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span
-            className={`text-xs font-semibold ${isAgent ? "text-blue-400" : "text-gray-300"}`}
+            className={`text-xs font-semibold ${
+              isAgent ? "text-blue-400" : "text-gray-300"
+            }`}
           >
             {msg.senderName}
           </span>
@@ -105,8 +109,8 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
             isMention
               ? "border-l-2 border-purple-500 bg-purple-500/10 text-gray-200"
               : isAgent
-                ? "border-l-2 border-blue-500 bg-blue-500/10 text-gray-200"
-                : "bg-gray-700/50 text-gray-200"
+              ? "border-l-2 border-blue-500 bg-blue-500/10 text-gray-200"
+              : "bg-gray-700/50 text-gray-200"
           }`}
         >
           <p className="whitespace-pre-wrap break-words">{msg.content}</p>
@@ -213,12 +217,12 @@ export function ProjectChat() {
             const ptySessions = await window.electronAPI.pty.list();
             const orchSession = ptySessions.find(
               (s: { id: string; name: string }) =>
-                s.name.toLowerCase().includes("orchestrator"),
+                s.name.toLowerCase().includes("orchestrator")
             );
             if (orchSession) {
               await window.electronAPI.pty.write(
                 orchSession.id,
-                instruction + "\r",
+                instruction + "\r"
               );
               injected = true;
             }
@@ -240,17 +244,17 @@ export function ProjectChat() {
             } catch (err) {
               console.error(
                 "Failed to enqueue orchestrator pending instruction:",
-                err,
+                err
               );
               await sendSystemMessage(
                 currentProject.id,
-                "⚠️ 오케스트레이터 큐 등록에 실패했습니다.",
+                "⚠️ 오케스트레이터 큐 등록에 실패했습니다."
               );
             }
           }
         } else {
           const agent = agents.find(
-            (a) => a.name.toLowerCase() === target.toLowerCase(),
+            (a) => a.name.toLowerCase() === target.toLowerCase()
           );
           if (agent) {
             // Fast path: agent is hosted on THIS machine — write straight
@@ -265,12 +269,12 @@ export function ProjectChat() {
                 const ptySessionId = `agent-${agent.id}`;
                 await window.electronAPI.pty.write(
                   ptySessionId,
-                  instruction + "\r",
+                  instruction + "\r"
                 );
                 injected = true;
               } catch {
                 console.warn(
-                  `Failed local PTY write to agent "${target}" — falling back to pending queue`,
+                  `Failed local PTY write to agent "${target}" — falling back to pending queue`
                 );
               }
             }
@@ -288,7 +292,7 @@ export function ProjectChat() {
               } catch (err) {
                 console.error(
                   `Failed to enqueue pending instruction for agent "${target}":`,
-                  err,
+                  err
                 );
               }
             }
@@ -304,7 +308,7 @@ export function ProjectChat() {
         user.uid,
         user.displayName || "User",
         user.photoURL || "",
-        content,
+        content
       );
     } catch (err) {
       console.error("Failed to send message:", err);
@@ -347,9 +351,11 @@ export function ProjectChat() {
           </div>
         )}
 
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
-        ))}
+        {messages
+          .filter((msg) => msg.type === "user")
+          .map((msg) => (
+            <MessageBubble key={msg.id} msg={msg} />
+          ))}
         <div ref={messagesEndRef} />
       </div>
 

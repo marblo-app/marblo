@@ -4,7 +4,6 @@ import { TabBar, type TabId } from "./TabBar";
 import { Sidebar } from "./sidebar/Sidebar";
 import { AgentListPanel } from "./agents/list-panel/AgentListPanel";
 import OrchestratorPanel from "./orchestrator/OrchestratorPanel";
-import { MissionOrchestratorPanel } from "./missions/MissionOrchestratorPanel";
 import { BoardTab } from "./tabs/BoardTab";
 import { CodeTab } from "./tabs/CodeTab";
 import { AgentsTab } from "./tabs/AgentsTab";
@@ -208,8 +207,9 @@ export function Layout() {
       // other's fields.
       if (currentProject) {
         try {
-          const { doc, setDoc, serverTimestamp } =
-            await import("firebase/firestore");
+          const { doc, setDoc, serverTimestamp } = await import(
+            "firebase/firestore"
+          );
           const { db } = await import("../lib/firebase");
           await setDoc(
             doc(db, "agents", data.agentId),
@@ -231,35 +231,23 @@ export function Layout() {
                 data.model === "gpt"
                   ? "codex"
                   : data.model === "antigravity"
-                    ? "agy"
-                    : data.model,
+                  ? "agy"
+                  : data.model,
               skillFile: "",
               createdAt: serverTimestamp(),
             },
-            { merge: true },
+            { merge: true }
           );
         } catch (err) {
           console.warn(
             "[Layout] Firestore agent upsert failed (non-fatal):",
-            err,
+            err
           );
         }
       }
 
-      // Chat notification — best-effort.
-      if (currentProject) {
-        try {
-          const { notifyAgentSpawned } =
-            await import("../services/agentNotificationService");
-          await notifyAgentSpawned(
-            currentProject.id,
-            data.name,
-            data.role || "agent",
-          );
-        } catch {
-          // best-effort
-        }
-      }
+      // 에이전트 라이프사이클 이벤트는 우측 ActivityStreamPanel 로만
+      // 전달한다 — 팀 채팅(messages) 은 사람 간 대화용으로 분리.
     });
     return () => {
       // Cleanup to prevent duplicate listeners on re-mount
@@ -349,14 +337,9 @@ export function Layout() {
             <ActiveTabComponent />
           </div>
 
-          {/* Orchestrator panel — between tab content and agent list.
-              Missions 탭에서는 별도 mission orchestrator PTY 를 노출 (board 와 분리된 세션).
-              나머지 탭은 board orchestrator PTY. */}
-          {activeTab === "missions" ? (
-            <MissionOrchestratorPanel />
-          ) : (
-            <OrchestratorPanel />
-          )}
+          {/* Orchestrator panel — board PTY. Mission PTY 는 Missions 탭 안 상단에
+              별도 inline 으로 표시 (Layout 안 건드림). */}
+          <OrchestratorPanel />
 
           {/* Agent List panel — replaces the old TerminalPanel.
               P3 hybrid rows for ambient monitoring; double-click a row to
