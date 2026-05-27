@@ -13,6 +13,7 @@ import {
 } from "../../stores/activityStreamStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useNavigationStore } from "../../stores/navigationStore";
+import { useAgentFocusStore } from "../../stores/agentFocusStore";
 import { MacroView } from "./MacroView";
 import { formatActivity } from "../../services/activityFormatters";
 
@@ -54,9 +55,18 @@ function extractTaskId(entry: ActivityEntry): string | null {
   return null;
 }
 
-/** Latch a navigation request — Layout switches tab, the destination tab
- *  consumes the target on mount via useNavigationStore.consumeJump(). */
+/**
+ * 점프 라우팅:
+ *   - task: Board 탭으로 setActiveTab + 카드 선택 → navigationStore.requestJump
+ *   - agent: 하단 AgentListPanel 은 Layout 에서 항상 마운트되어 있으므로
+ *     agentFocusStore 만 set 하면 즉시 FocusView 로 전환. 탭 전환은 불필요.
+ *     (예전엔 Agents 탭으로 점프했는데 UX 가 어색해서 변경)
+ */
 function jumpTo(target: { type: "task" | "agent"; id: string }) {
+  if (target.type === "agent") {
+    useAgentFocusStore.getState().setFocusedAgent(target.id);
+    return;
+  }
   useNavigationStore.getState().requestJump(target);
 }
 
