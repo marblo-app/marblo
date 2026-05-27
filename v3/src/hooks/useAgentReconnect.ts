@@ -49,11 +49,26 @@ export function useAgentReconnect() {
         const results = await window.electronAPI.agent.reconnect(
           agentData,
           rootPath,
-          currentProject.id
+          currentProject.id,
         );
 
         for (const result of results) {
           if (result.reconnected && result.ptySessionId) {
+            const agent = agents.find((a) => a.id === result.agentId);
+            const icon = agent ? MODEL_ICONS[agent.model] || "⚪" : "⚪";
+            const label = agent ? `${icon} ${agent.name}` : result.agentId;
+            attachSession(result.ptySessionId, label);
+            continue;
+          }
+
+          // main 메모리에 PTY 가 이미 살아있는 경우 (renderer 만 reload 된
+          // 시나리오). reconnected:false 지만 ptySessionId 가 넘어오므로
+          // 기존 터미널에 다시 attach 한다. 이걸 안 하면 워커 셀이 빈 채로
+          // 보여 "끊긴 것처럼" 느껴짐.
+          if (
+            result.skippedReason === "already-running" &&
+            result.ptySessionId
+          ) {
             const agent = agents.find((a) => a.id === result.agentId);
             const icon = agent ? MODEL_ICONS[agent.model] || "⚪" : "⚪";
             const label = agent ? `${icon} ${agent.name}` : result.agentId;
@@ -76,7 +91,7 @@ export function useAgentReconnect() {
                 console.warn(
                   "[Reconnect] Failed to mark agent as stopped:",
                   result.agentId,
-                  err
+                  err,
                 );
               });
             continue;
@@ -87,7 +102,7 @@ export function useAgentReconnect() {
           console.warn(
             "[Reconnect] Agent not reconnected:",
             result.agentId,
-            result.skippedReason ?? "(unknown)"
+            result.skippedReason ?? "(unknown)",
           );
         }
 
@@ -97,14 +112,14 @@ export function useAgentReconnect() {
           // 이걸 써야 partial-snapshot 으로 여러 번 호출돼도 각 호출이 정직히
           // "이번 배치에서 N/M" 형태로 표시된다.
           console.log(
-            `[Reconnect] ${reconnectedCount}/${list.length} agents reconnected`
+            `[Reconnect] ${reconnectedCount}/${list.length} agents reconnected`,
           );
         }
       } catch (err) {
         console.error("[Reconnect] Failed:", err);
       }
     },
-    [agents, currentProject, rootPath, attachSession]
+    [agents, currentProject, rootPath, attachSession],
   );
 
   const reconnectOrchestrator = useCallback(async () => {
@@ -114,11 +129,10 @@ export function useAgentReconnect() {
 
     try {
       setOrchestratorStatus("starting");
-      const list = await window.electronAPI.orchestratorSession.listSessions(
-        rootPath
-      );
+      const list =
+        await window.electronAPI.orchestratorSession.listSessions(rootPath);
       const orchSession = list.find(
-        (s: { label?: string }) => s.label === "Orchestrator"
+        (s: { label?: string }) => s.label === "Orchestrator",
       );
       if (!orchSession) {
         setOrchestratorStatus("stopped");
@@ -127,7 +141,7 @@ export function useAgentReconnect() {
       const result = await window.electronAPI.orchestratorSession.launch(
         currentProject.id,
         rootPath,
-        orchSession.id
+        orchSession.id,
       );
       if (result) {
         setSession(result.sessionId, result.ptySessionId);
@@ -164,7 +178,7 @@ export function useAgentReconnect() {
   useEffect(() => {
     if (!currentProject || !rootPath || agents.length === 0) return;
     const pending = agents.filter(
-      (a) => !attemptedAgentIdsRef.current.has(a.id)
+      (a) => !attemptedAgentIdsRef.current.has(a.id),
     );
     if (pending.length === 0) return;
     for (const a of pending) attemptedAgentIdsRef.current.add(a.id);
