@@ -65,7 +65,7 @@ function getEnrichedPath(): string {
 function getMCPServerEnv(
   projectDir: string,
   marbloProjectId?: string,
-  agentId?: string
+  agentId?: string,
 ): Record<string, string> {
   const env: Record<string, string> = {
     PATH: getEnrichedPath(),
@@ -115,10 +115,76 @@ function getMCPServerEnv(
   return env;
 }
 
+// ─── agy conversation labels (per-agentId UUID 영속화) ────────────────────
+// agy 의 conversations 는 ~/.gemini/antigravity-cli/conversations/<UUID>.pb
+// 에 cwd 무관하게 다 섞여 들어가서 claude 의 saveSessionLabel (cwd 기반
+// labels.json) 로는 매칭 불가. 별도 단일 파일에 agentId → UUID 매핑을 둔다.
+function getAgyLabelsPath(): string {
+  return path.join(
+    os.homedir(),
+    ".gemini",
+    "antigravity-cli",
+    "marblo-agy-labels.json",
+  );
+}
+
+interface AgyLabelEntry {
+  conversationUuid: string;
+  label: string;
+  agentId: string;
+  createdAt: number;
+}
+
+function readAgyLabels(): Record<string, AgyLabelEntry> {
+  try {
+    return JSON.parse(fs.readFileSync(getAgyLabelsPath(), "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+export function saveAgyConversationLabel(
+  agentId: string,
+  conversationUuid: string,
+  label: string,
+): void {
+  const labels = readAgyLabels();
+  labels[agentId] = {
+    conversationUuid,
+    label,
+    agentId,
+    createdAt: Date.now(),
+  };
+  const labelsPath = getAgyLabelsPath();
+  try {
+    fs.mkdirSync(path.dirname(labelsPath), { recursive: true });
+    fs.writeFileSync(labelsPath, JSON.stringify(labels, null, 2), "utf-8");
+  } catch (err) {
+    console.error("[agy-labels] save failed:", err);
+  }
+}
+
+/**
+ * 저장된 agy conversation UUID 를 돌려준다 — 단 실제 .pb 파일이 아직 존재할
+ * 때만 (agy 가 GC 했거나 사용자가 ~/.gemini 청소했으면 stale → null).
+ */
+export function getAgyConversationId(agentId: string): string | null {
+  const entry = readAgyLabels()[agentId];
+  if (!entry) return null;
+  const pbPath = path.join(
+    os.homedir(),
+    ".gemini",
+    "antigravity-cli",
+    "conversations",
+    `${entry.conversationUuid}.pb`,
+  );
+  return fs.existsSync(pbPath) ? entry.conversationUuid : null;
+}
+
 function buildMCPServerEntry(
   projectDir: string,
   marbloProjectId?: string,
-  agentId?: string
+  agentId?: string,
 ): MCPServerEntry {
   return {
     command: "node",
@@ -138,7 +204,7 @@ export class AgentConfigGenerator {
     agentId: string,
     model: ModelType,
     projectDir: string,
-    marbloProjectId?: string
+    marbloProjectId?: string,
   ): string {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
@@ -191,13 +257,13 @@ export class AgentConfigGenerator {
     projectDir: string,
     initialPrompt?: string,
     marbloProjectId?: string,
-    resumeSessionId?: string
+    resumeSessionId?: string,
   ): LaunchConfig {
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
       agent.model,
       projectDir,
-      marbloProjectId
+      marbloProjectId,
     );
     const skillPath = this.generateSkillFile(agent.id, agent.role, projectDir);
     const skillContent =
@@ -212,7 +278,7 @@ export class AgentConfigGenerator {
       projectDir,
       marbloProjectId,
       agent.id,
-      resumeSessionId
+      resumeSessionId,
     );
 
     return {
@@ -242,7 +308,7 @@ export class AgentConfigGenerator {
       const sessionsRoot = path.join(
         CONFIG_DIR,
         `codex-home-${agentId}`,
-        "sessions"
+        "sessions",
       );
       return this.hasAnyFileBelow(sessionsRoot, ".jsonl");
     }
@@ -251,22 +317,17 @@ export class AgentConfigGenerator {
         CONFIG_DIR,
         `gemini-home-${agentId}`,
         ".gemini",
-        "tmp"
+        "tmp",
       );
       return this.hasAnyFileBelow(geminiTmp, null);
     }
     if (model === "antigravity") {
-      // agy 는 conversation 을 ${HOME}/.gemini/antigravity-cli/conversations/
-      // <UUID>.pb 형태로 저장 (관찰: 1.0.2). 격리 HOME 안에 적어도 한 개의
-      // .pb 가 있어야 `agy --continue` 가 무언가 잡을 수 있음.
-      const antigravityConversations = path.join(
-        CONFIG_DIR,
-        `antigravity-home-${agentId}`,
-        ".gemini",
-        "antigravity-cli",
-        "conversations"
-      );
-      return this.hasAnyFileBelow(antigravityConversations, ".pb");
+      // A안 (격리 포기) 적용 후 agy 는 사용자 본인 ~/.gemini/antigravity-cli
+      // 를 그대로 사용. 워커별 conversation UUID 는 saveAgyConversationLabel
+      // 로 별도 매핑 파일(marblo-agy-labels.json)에 영속화된다. 이 파일에
+      // 해당 agentId 엔트리가 있고 + 그 UUID 의 .pb 가 실제 존재해야 resume
+      // 가능 → getAgyConversationId 가 그 둘을 한번에 검증한다.
+      return getAgyConversationId(agentId) !== null;
     }
     return false;
   }
@@ -321,7 +382,7 @@ export class AgentConfigGenerator {
 
   private generateClaudeConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry
+    mcpEntry: MCPServerEntry,
   ): string {
     const config = {
       mcpServers: {
@@ -341,7 +402,7 @@ export class AgentConfigGenerator {
 
   private generateGeminiConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry
+    mcpEntry: MCPServerEntry,
   ): string {
     // Per-agent isolation strategy for Gemini CLI (verified against v0.43):
     //
@@ -425,7 +486,7 @@ export class AgentConfigGenerator {
     if (fs.existsSync(userSettingsPath)) {
       try {
         preserved = JSON.parse(
-          fs.readFileSync(userSettingsPath, "utf-8")
+          fs.readFileSync(userSettingsPath, "utf-8"),
         ) as Record<string, unknown>;
         delete (preserved as Record<string, unknown>).mcpServers;
       } catch {
@@ -468,63 +529,32 @@ export class AgentConfigGenerator {
 
   private generateAntigravityConfig(
     agentId: string,
-    _mcpEntry: MCPServerEntry
+    _mcpEntry: MCPServerEntry,
   ): string {
-    // Per-agent isolation for Antigravity (agy) CLI.
+    // Antigravity (agy) CLI — agy 1.0.2 기준.
     //
-    // agy 는 GEMINI_CLI_HOME 같은 부분 redirect 환경변수를 노출하지 않아서
-    // 전체 HOME 을 override 하는 방식 외엔 격리 수단이 없다. HOME override
-    // 의 부수효과 (~/Library/Caches 재다운로드 등) 는 받아들이고, 대신:
-    //   1) 격리 HOME 안에 ~/.gemini/* 전체를 hard-copy → OAuth/installation_id
-    //      를 그대로 들고 가서 인증 prompt 없이 spawn
-    //   2) `agy --continue` 는 ${HOME}/.gemini/antigravity-cli/conversations/
-    //      안의 가장 최근 .pb 만 잡으므로 격리 HOME 단위로 워커 간 충돌 방지
+    // ★ 격리 포기 결정 (2026-05-27). agy 의 macOS Keychain 엔트리는 HOME
+    //   기준으로 키잉돼 있어서 HOME 또는 --gemini_dir 둘 중 하나라도
+    //   override 하면 keyring lookup 이 실패하고 OAuth 재인증 flow 로
+    //   빠진다 (라이브 검증 완료 — token exchange invalid_grant). 격리
+    //   환경에서 자동 인증을 유지할 방법이 없다.
     //
-    // MCP 통합은 v1 에서 미지원이라 settings.json 을 따로 쓰지 않는다.
-    // sentinel 파일 경로를 반환해 buildCLICommand 에서 격리 HOME 을 역산.
-    const antigravityHome = path.join(
-      CONFIG_DIR,
-      `antigravity-home-${agentId}`
-    );
-    const dotGemini = path.join(antigravityHome, ".gemini");
-    fs.mkdirSync(dotGemini, { recursive: true });
-
-    const userGeminiDir = path.join(os.homedir(), ".gemini");
-    if (fs.existsSync(userGeminiDir)) {
-      const copyRecursive = (src: string, dst: string) => {
-        const stat = fs.lstatSync(src);
-        if (stat.isDirectory()) {
-          fs.mkdirSync(dst, { recursive: true });
-          for (const child of fs.readdirSync(src)) {
-            copyRecursive(path.join(src, child), path.join(dst, child));
-          }
-        } else {
-          fs.copyFileSync(src, dst);
-        }
-      };
-      for (const entry of fs.readdirSync(userGeminiDir)) {
-        const dst = path.join(dotGemini, entry);
-        // 기존 hard-copy 는 유지 (refresh token 등 runtime 상태가 그 안에
-        // 누적됨). 첫 spawn 시점에만 native ~/.gemini 에서 복사해온다.
-        if (fs.existsSync(dst)) continue;
-        try {
-          copyRecursive(path.join(userGeminiDir, entry), dst);
-        } catch {
-          // best-effort — 일부 파일이 perms 로 실패해도 spawn 은 계속
-        }
-      }
-    }
-
-    // sentinel: 실제 agy 가 읽진 않지만 buildCLICommand 가 격리 HOME 을
-    // path.dirname(path.dirname(mcpConfigPath)) 로 역산하는 컨벤션을 따른다.
-    const sentinelDir = path.join(dotGemini, "config");
+    //   결론: 사용자 본인 ~/.gemini 를 그대로 쓰게 둔다. buildCLICommand 도
+    //   HOME override 와 --gemini_dir 를 빼고 그냥 `agy` 를 부른다. 워커 간
+    //   conversation/state 충돌 가능성은 별도 트래킹 (현재 단일 워커 시나리오
+    //   기준 우선).
+    //
+    // 이 함수는 generateMCPConfig switch 에서 호출되므로 sentinel 파일은
+    // 만들어 둔다 — 파일 트래킹 용도 (cleanup 등). 실제 agy 동작에는 영향
+    // 없음.
+    const sentinelDir = path.join(CONFIG_DIR, `antigravity-home-${agentId}`);
     fs.mkdirSync(sentinelDir, { recursive: true });
     const sentinelPath = path.join(sentinelDir, "marblo-sentinel.json");
     if (!fs.existsSync(sentinelPath)) {
       fs.writeFileSync(
         sentinelPath,
         JSON.stringify({ agentId, createdAt: Date.now() }),
-        "utf-8"
+        "utf-8",
       );
     }
     this.trackFile(agentId, sentinelPath);
@@ -534,7 +564,7 @@ export class AgentConfigGenerator {
   private generateGPTConfig(
     agentId: string,
     mcpEntry: MCPServerEntry,
-    projectDir: string
+    projectDir: string,
   ): string {
     // Codex CLI reads config from `$CODEX_HOME/config.toml` (TOML, not JSON)
     // with `[mcp_servers.<name>]` sections. Each agent gets an ISOLATED
@@ -616,7 +646,7 @@ export class AgentConfigGenerator {
         trustEntries.push(
           `[projects.${JSON.stringify(candidate)}]`,
           'trust_level = "trusted"',
-          ""
+          "",
         );
       }
     }
@@ -659,7 +689,7 @@ export class AgentConfigGenerator {
 
   private generateCustomConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry
+    mcpEntry: MCPServerEntry,
   ): string {
     // Generic MCP config — same structure, custom CLI may or may not use it
     const config = {
@@ -687,7 +717,7 @@ export class AgentConfigGenerator {
     projectDir: string,
     marbloProjectId?: string,
     agentId?: string,
-    resumeSessionId?: string
+    resumeSessionId?: string,
   ): { command: string; args: string[]; env: Record<string, string> } {
     const env = getMCPServerEnv(projectDir, marbloProjectId, agentId);
     // Normalize resume signals: "new" means force-fresh, "latest" means
@@ -736,7 +766,11 @@ export class AgentConfigGenerator {
         // authenticate" dialog never appears.
         const geminiArgs: string[] = ["--yolo"];
         if (wantResume) {
-          geminiArgs.push("--resume", resumeIsLatest ? "latest" : "latest");
+          // gemini-cli 의 `--resume` 은 "latest" sentinel 만 의미있게 처리한다
+          // (concrete UUID 는 호출자가 latest 로 normalize 해서 들어옴 —
+          // main.ts reconnect 의 gemini 분기는 hasSavedSession 통과 시
+          // "latest" 로 고정). 양쪽 분기를 명시적으로 "latest" 로 통일.
+          geminiArgs.push("--resume", "latest");
         }
         return {
           command: baseCommand || "gemini",
@@ -776,7 +810,7 @@ export class AgentConfigGenerator {
           "-c",
           'approval_policy="never"',
           "-c",
-          'sandbox_mode="danger-full-access"'
+          'sandbox_mode="danger-full-access"',
         );
         // Reject `baseCommand === "gpt"` — that's the model slug accidentally
         // saved to the Firestore agent doc by older builds of Layout.tsx, and
@@ -795,35 +829,39 @@ export class AgentConfigGenerator {
       case "antigravity": {
         // Antigravity (agy) CLI — agy 1.0.2 기준.
         //
-        // 격리 전략: HOME override. agy 에는 GEMINI_CLI_HOME 같은 부분
-        // redirect env 가 없어서 process HOME 자체를 격리 디렉토리로 향하게
-        // 해야 ${HOME}/.gemini/antigravity-cli/conversations/ 가 워커별로
-        // 분리된다. generateAntigravityConfig 가 격리 HOME 안에 사용자
-        // ~/.gemini/* 를 hard-copy 해두므로 OAuth 도 그대로 이어진다.
+        // ★ 격리 포기 (2026-05-27). agy 의 macOS Keychain 엔트리는 HOME
+        //   기준으로 키잉돼 있어 HOME 또는 --gemini_dir 둘 중 하나라도
+        //   override 하면 keyring lookup 이 실패하고 OAuth 재인증 flow 로
+        //   빠진다. 라이브 검증 — token exchange invalid_grant.
+        //
+        //   결정: 사용자 본인 ~/.gemini 를 그대로 쓰게 한다. 환경/플래그
+        //   override 없이 그냥 `agy` 를 부른다. 워커 간 conversation/state
+        //   충돌은 별도 트래킹.
+        //
+        // MCP: agy v1 은 MCP 미통합. mcpConfigPath 는 generateAntigravityConfig
+        //   의 sentinel 일 뿐, agy 가 읽지 않는다.
         //
         // Resume:
-        //   --continue (-c)      → 격리 HOME 안의 가장 최근 conversation
-        //   --conversation <UUID> → 구체적 conversation id
-        // 단, marblo 는 현재 conversation UUID 를 추적하지 않으므로
-        // 'latest' 든 concrete id 든 일단 --continue 로 처리한다. 격리
-        // HOME 단위로 워커가 분리돼 있어 --continue 가 워커 간 conversation
-        // 을 섞을 위험은 없다.
-        //
-        // mcpConfigPath 는 generateAntigravityConfig 가 만든 sentinel
-        // (`<isolatedHome>/.gemini/config/marblo-sentinel.json`) — 격리
-        // HOME 은 그 경로에서 두 단계 위.
-        const antigravityHome = path.dirname(path.dirname(mcpConfigPath));
+        //   resumeSessionId = concrete UUID → --conversation <UUID> (정확)
+        //   resumeSessionId = 'latest'       → --continue (가장 최근)
+        //   ※ agent-manager 의 antigravity conversation watcher 가 spawn
+        //     35s 후 새 .pb basename 을 캡처해 onSessionDetected 로
+        //     Firestore 에 저장하므로, 다음 reconnect 부터는 UUID 가
+        //     들어와 정확한 resume 가능.
         const agyArgs: string[] = [];
         if (wantResume) {
-          agyArgs.push("--continue");
+          if (resumeIsLatest) {
+            agyArgs.push("--continue");
+          } else {
+            agyArgs.push("--conversation", resumeSessionId!);
+          }
         }
         return {
           command: baseCommand || "agy",
           args: agyArgs,
           env: {
             ...env,
-            HOME: antigravityHome,
-            // best-effort: 미래 버전이 MCP 를 channel 로 받게 되면 활용.
+            // 미래 agy 가 MCP 를 채널로 받게 되면 활용 — 현재는 no-op.
             MCP_CONFIG_PATH: mcpConfigPath,
           },
         };
