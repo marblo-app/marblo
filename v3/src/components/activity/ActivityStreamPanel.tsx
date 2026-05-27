@@ -73,10 +73,10 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
   const agentId =
     entry.agentId && entry.agentId !== "unknown" ? entry.agentId : null;
 
-  // 헤드라인은 activityFormatters 의 ActivityType 별 포매터가 담당 —
-  // raw result 노출 방지 + 'Category: action payload' 통일 포맷.
+  // 헤드라인 + detail 모두 activityFormatters 가 담당 —
+  // raw result/params 노출 방지 + 'Category: action payload' 통일 포맷.
   // 빈 헤드라인(예: type=other) 이면 toolName 으로 안전망.
-  const { headline } = formatActivity(entry);
+  const { headline, details } = formatActivity(entry);
   const summary = headline || entry.toolName;
 
   return (
@@ -132,21 +132,17 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
               </span>
             )}
           </div>
-          {Object.keys(entry.params).length > 0 && (
-            <div>
-              <div className="text-[#6c7086]">params:</div>
-              <pre className="mt-0.5 rounded bg-[#11111b] p-1.5 text-[#cdd6f4] whitespace-pre-wrap break-all max-h-32 overflow-auto">
-                {JSON.stringify(entry.params, null, 2)}
-              </pre>
-            </div>
-          )}
-          {entry.result && (
-            <div>
-              <div className="text-[#6c7086]">result:</div>
-              <pre className="mt-0.5 rounded bg-[#11111b] p-1.5 text-[#cdd6f4] whitespace-pre-wrap break-all max-h-32 overflow-auto">
-                {entry.result}
-              </pre>
-            </div>
+          {details.length > 0 && (
+            <dl className="space-y-1">
+              {details.map((row) => (
+                <div key={row.label}>
+                  <dt className="text-[#6c7086]">{row.label}:</dt>
+                  <dd className="mt-0.5 rounded bg-[#11111b] p-1.5 text-[#cdd6f4] whitespace-pre-wrap break-words max-h-32 overflow-auto">
+                    {row.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
           )}
           {(taskId || agentId) && (
             <div className="flex gap-1.5 pt-0.5">
@@ -279,7 +275,7 @@ export function ActivityStreamPanel() {
           <div className="flex flex-wrap gap-1 border-b border-[#313244] px-2 py-1.5">
             {FILTER_ORDER.map((f) => {
               const active = filter === f;
-              const count = f === "all" ? entries.length : counts[f] ?? 0;
+              const count = f === "all" ? entries.length : (counts[f] ?? 0);
               const icon = f === "all" ? "•" : ACTIVITY_TYPE_ICON[f];
               return (
                 <button

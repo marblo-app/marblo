@@ -64,15 +64,48 @@ describe("formatActivity", () => {
     expect(out.headline).toBe('Task: blocked "Step A" — DB lock');
   });
 
-  it("agent:spawned — role 표시", () => {
+  it("agent:spawned — name + role + initial_prompt 첫줄 → 헤드라인", () => {
     const out = formatActivity(
       entry({
         type: "agent:spawned",
         toolName: "spawn_agent",
-        params: { role: "frontend" },
+        params: {
+          name: "backend-auth",
+          role: "backend",
+          model: "claude",
+          initial_prompt:
+            "JWT 인증 미들웨어 작성\n\n자세한 요구사항: ... (긴 내용 생략)",
+        },
+        result:
+          "Agent spawned successfully!\n  Name: backend-auth\n  Model: claude\n  Role: backend\n  Agent ID: agent-abc123\n  PTY Session: pty-1",
       })
     );
-    expect(out.headline).toBe("Agent: spawned frontend");
+    expect(out.headline).toBe(
+      'Agent: spawned backend-auth (backend) → "JWT 인증 미들웨어 작성"'
+    );
+  });
+
+  it("agent:spawned — initial_prompt 없으면 task 부분 생략", () => {
+    const out = formatActivity(
+      entry({
+        type: "agent:spawned",
+        toolName: "spawn_agent",
+        params: { name: "frontend-1", role: "frontend", model: "gemini" },
+      })
+    );
+    expect(out.headline).toBe("Agent: spawned frontend-1 (frontend)");
+  });
+
+  it("agent:spawned — name 없으면 result 의 Agent ID 로 폴백", () => {
+    const out = formatActivity(
+      entry({
+        type: "agent:spawned",
+        toolName: "spawn_agent",
+        params: { role: "test" },
+        result: "Agent spawned successfully!\n  Agent ID: agent-xyz789",
+      })
+    );
+    expect(out.headline).toBe("Agent: spawned agent-xyz789 (test)");
   });
 
   it("mission:step — result(이미 정제된 한국어) 그대로 사용", () => {
@@ -241,5 +274,99 @@ describe("formatActivity", () => {
       })
     );
     expect(out.headline).toBe("Mission: mission:xyz98765 note — (no message)");
+  });
+
+  // ── details: raw payload 누출 방지 (화이트리스트 KV 만) ──
+
+  it("details — agent:spawned 는 사람친화 필드만 포함, raw JSON 노출 없음", () => {
+    const out = formatActivity(
+      entry({
+        type: "agent:spawned",
+        toolName: "spawn_agent",
+        params: {
+          name: "backend-auth",
+          role: "backend",
+          model: "claude",
+          initial_prompt: "JWT 인증 미들웨어 작성",
+          cwd: "/some/internal/path",
+        },
+        result:
+          "Agent spawned successfully!\n  Name: backend-auth\n  Agent ID: agent-abc",
+      })
+    );
+    const labels = out.details.map((d) => d.label);
+    expect(labels).toEqual(["Name", "Agent ID", "Role", "Model", "Task"]);
+    expect(out.details.find((d) => d.label === "Task")?.value).toBe(
+      "JWT 인증 미들웨어 작성"
+    );
+    // 화이트리스트 외 필드 (cwd) 는 details 에 안 나옴
+    expect(labels).not.toContain("cwd");
+  });
+
+  it("details — activity:note 는 Agent + Message 만, task_id 누출 없음", () => {
+    const out = formatActivity(
+      entry({
+        type: "activity:note",
+        toolName: "add_activity",
+        agentId: "backend-2",
+        params: {
+          task_id: "abc12345-0000",
+          message: "마이그레이션 시작",
+          agent_id: "backend-2",
+        },
+      })
+    );
+    const labels = out.details.map((d) => d.label);
+    expect(labels).toEqual(["Agent", "Message"]);
+  });
+
+  it("details — other 는 빈 배열 → 디테일 영역 미렌더", () => {
+    const out = formatActivity(
+      entry({
+        type: "other",
+        toolName: "get_agent_skill",
+        result: "# Orchestrator skill 본문 ".repeat(50),
+      })
+    );
+    expect(out.details).toEqual([]);
+  });
+
+  it("details — task:created 는 description 있을 때만 포함", () => {
+    const withDesc = formatActivity(
+      entry({
+        type: "task:created",
+        toolName: "create_task",
+        params: { title: "API", role: "backend", description: "OAuth flow" },
+      })
+    );
+    expect(withDesc.details.map((d) => d.label)).toEqual([
+      "Title",
+      "Role",
+      "Description",
+    ]);
+
+    const withoutDesc = formatActivity(
+      entry({
+        type: "task:created",
+        toolName: "create_task",
+        params: { title: "API" },
+      })
+    );
+    expect(withoutDesc.details.map((d) => d.label)).toEqual(["Title"]);
+  });
+
+  it("details — error 는 Tool + Message 만", () => {
+    const out = formatActivity(
+      entry({
+        type: "error",
+        toolName: "create_task",
+        success: false,
+        result: "validation failed: title required",
+      })
+    );
+    expect(out.details).toEqual([
+      { label: "Tool", value: "create_task" },
+      { label: "Message", value: "validation failed: title required" },
+    ]);
   });
 });
