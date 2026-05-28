@@ -14,8 +14,19 @@ import {
 import { useProjectStore } from "../../stores/projectStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { useAgentFocusStore } from "../../stores/agentFocusStore";
+import { useAgentStore } from "../../stores/agentStore";
+import { useTerminalStore } from "../../stores/terminalStore";
 import { MacroView } from "./MacroView";
 import { formatActivity } from "../../services/activityFormatters";
+
+const MODEL_ICONS: Record<string, string> = {
+  claude: "🟣",
+  gemini: "🔵",
+  gpt: "🟢",
+  antigravity: "🟠",
+  local: "⚫",
+  custom: "⚪",
+};
 
 const FILTER_ORDER: ActivityFilter[] = [
   "all",
@@ -61,10 +72,39 @@ function extractTaskId(entry: ActivityEntry): string | null {
  *   - agent: 하단 AgentListPanel 은 Layout 에서 항상 마운트되어 있으므로
  *     agentFocusStore 만 set 하면 즉시 FocusView 로 전환. 탭 전환은 불필요.
  *     (예전엔 Agents 탭으로 점프했는데 UX 가 어색해서 변경)
+ *
+ *   PTY attach 도 함께 — 이 윈도우의 terminalStore 에 세션이 없으면
+ *   FocusView 가 "터미널이 없습니다" empty state 만 보이고 활성 채팅이
+ *   안 떴다. attachSession 으로 row.ptySessionId 가 잡혀야 TerminalView
+ *   가 렌더된다.
  */
 function jumpTo(target: { type: "task" | "agent"; id: string }) {
   if (target.type === "agent") {
-    useAgentFocusStore.getState().setFocusedAgent(target.id);
+    // activity.agentId 는 보통 Firestore agent doc id 와 같지만, 일부
+    // 경로(MARBLO_AGENT_ID env 가 AgentManager UUID 로 들어간 케이스 등)
+    // 에서 doc id 와 다를 수 있다. 그 상태에서 그대로 setFocus 하면
+    // AgentListPanel 의 reconcile effect 가 focusedId 를 즉시 null 로
+    // 되돌리고 FocusView 가 안 뜬다. id → name 순으로 resolve 해서 실제
+    // row.id 로 통일한다.
+    const agents = useAgentStore.getState().agents;
+    const resolved =
+      agents.find((a) => a.id === target.id) ||
+      agents.find((a) => a.name === target.id);
+    if (!resolved) {
+      console.warn(
+        "[ActivityStream] jumpTo agent: id not found in agentStore",
+        target.id,
+      );
+      return;
+    }
+    useAgentFocusStore.getState().setFocusedAgent(resolved.id);
+    const icon = MODEL_ICONS[resolved.model] || "⚪";
+    useTerminalStore
+      .getState()
+      .openTerminalForSession(
+        `agent-${resolved.id}`,
+        `${icon} ${resolved.name}`,
+      );
     return;
   }
   useNavigationStore.getState().requestJump(target);

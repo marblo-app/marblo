@@ -5,7 +5,6 @@ import type { Task } from "../../types/task";
 import { getPresenceStatus, type PresenceStatus } from "../../types/user";
 import { useAgentStore } from "../../stores/agentStore";
 import { usePresence } from "../../hooks/usePresence";
-import { unclaimTask } from "../../services/taskService";
 import FlowKanbanLink from "../flows/FlowKanbanLink";
 
 const PRESENCE_DOT: Record<PresenceStatus, string> = {
@@ -280,30 +279,6 @@ function TaskCardContent({
         </span>
         <span>{timeAgo(task.createdAt)}</span>
       </div>
-
-      {/* DONE 상태 카드는 추가 지시 보낼 일이 없으므로 오프라인 배지/회수 버튼 숨김.
-          FAILED 는 retry 가능성 (PM 이 추가 지시 → TODO 환원) 이 있어 그대로 표시. */}
-      {task.claimedBy && presence === "offline" && task.status !== "DONE" && (
-        <div className="mt-1.5 flex items-center gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs text-amber-300">
-          <span aria-hidden="true">⏸</span>
-          <span className="flex-1">
-            담당자 오프라인 — 새 지시는 큐에 적재되어 복귀 시 전달됩니다
-          </span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              unclaimTask(task.id).catch((err) => {
-                console.error("[TaskCard] unclaim failed:", err);
-              });
-            }}
-            className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-200 hover:bg-amber-500/30"
-            title="claim 회수하고 TODO로 돌리기"
-          >
-            회수
-          </button>
-        </div>
-      )}
     </div>
   );
 }

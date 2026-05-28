@@ -57,9 +57,22 @@ const tabComponents: Record<TabId, () => JSX.Element> = {
   settings: SettingsPage,
 };
 
+const HAS_LAUNCHED_KEY = "marblo.hasLaunched";
+
 export function Layout() {
-  // Mission tab 을 default 로 승격 (명세 §6) — 미션 진행이 메인 사용 경로.
-  const [activeTab, setActiveTab] = useState<TabId>("missions");
+  // 기본 탭: Board. 생애 최초 실행만 Guide 를 띄워 온보딩 유도.
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
+    if (typeof window === "undefined") return "board";
+    try {
+      if (!localStorage.getItem(HAS_LAUNCHED_KEY)) {
+        localStorage.setItem(HAS_LAUNCHED_KEY, "1");
+        return "guide";
+      }
+    } catch {
+      // localStorage 접근 실패(프라이빗 모드 등) — Board 로 안전 폴백
+    }
+    return "board";
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const attachSession = useTerminalStore((s) => s.attachSession);
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -207,9 +220,8 @@ export function Layout() {
       // other's fields.
       if (currentProject) {
         try {
-          const { doc, setDoc, serverTimestamp } = await import(
-            "firebase/firestore"
-          );
+          const { doc, setDoc, serverTimestamp } =
+            await import("firebase/firestore");
           const { db } = await import("../lib/firebase");
           await setDoc(
             doc(db, "agents", data.agentId),
@@ -231,17 +243,17 @@ export function Layout() {
                 data.model === "gpt"
                   ? "codex"
                   : data.model === "antigravity"
-                  ? "agy"
-                  : data.model,
+                    ? "agy"
+                    : data.model,
               skillFile: "",
               createdAt: serverTimestamp(),
             },
-            { merge: true }
+            { merge: true },
           );
         } catch (err) {
           console.warn(
             "[Layout] Firestore agent upsert failed (non-fatal):",
-            err
+            err,
           );
         }
       }

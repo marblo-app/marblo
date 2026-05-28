@@ -14,6 +14,7 @@ import {
 import { addComment, subscribeToComments } from "../../services/commentService";
 import { getNextStatuses } from "../../services/stateMachine";
 import { useAgentStore } from "../../stores/agentStore";
+import { useTaskStore } from "../../stores/taskStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useAuth } from "../../hooks/useAuth";
@@ -84,7 +85,33 @@ function AgentAssign({
   taskId: string;
   claimedBy: string | null;
 }) {
-  const agents = useAgentStore((s) => s.agents);
+  const allAgents = useAgentStore((s) => s.agents);
+  const tasks = useTaskStore((s) => s.tasks);
+  const candidates = allAgents.filter((a) => a.role !== "orchestrator");
+
+  // Show only the most-recently-assigned agent across the board (by
+  // claimedAt). Falls back to the newest agent if no task has been
+  // claimed yet. Keeps the picker as a single chip per user request.
+  let suggested: (typeof candidates)[number] | undefined;
+  const ranked = tasks
+    .filter((t) => t.claimedBy && t.claimedAt)
+    .sort((a, b) => b.claimedAt!.getTime() - a.claimedAt!.getTime());
+  for (const t of ranked) {
+    const found = candidates.find(
+      (a) => a.name === t.claimedBy || a.id === t.claimedBy,
+    );
+    if (found) {
+      suggested = found;
+      break;
+    }
+  }
+  if (!suggested) {
+    suggested = [...candidates].sort(
+      (a, b) =>
+        (b.createdAt?.getTime?.() ?? 0) - (a.createdAt?.getTime?.() ?? 0),
+    )[0];
+  }
+  const agents = suggested ? [suggested] : [];
 
   if (agents.length === 0) return null;
 
@@ -233,7 +260,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(task.title);
   const [editDescription, setEditDescription] = useState(
-    task.description || ""
+    task.description || "",
   );
   const [editPriority, setEditPriority] = useState(task.priority);
   const [deleting, setDeleting] = useState(false);
@@ -292,7 +319,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
           user?.uid || "anonymous",
           user?.displayName || "User",
           user?.photoURL || "",
-          newMessage.trim()
+          newMessage.trim(),
         );
       } else {
         await addActivity(task.id, "pm", newMessage.trim());
@@ -764,8 +791,8 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                         act.agentId === "pm"
                           ? "border-l-2 border-yellow-500 bg-yellow-500/5"
                           : act.agentId === "system"
-                          ? "bg-gray-700/20"
-                          : "border-l-2 border-blue-500/50"
+                            ? "bg-gray-700/20"
+                            : "border-l-2 border-blue-500/50"
                       }`}
                     >
                       <div className="flex items-center justify-between mb-0.5">
