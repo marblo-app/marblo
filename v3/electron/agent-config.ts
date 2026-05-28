@@ -529,34 +529,110 @@ export class AgentConfigGenerator {
 
   private generateAntigravityConfig(
     agentId: string,
-    _mcpEntry: MCPServerEntry,
+    mcpEntry: MCPServerEntry,
   ): string {
-    // Antigravity (agy) CLI — agy 1.0.2 기준.
+    // Antigravity (agy) CLI — agy 1.0.2 / v1.20+ 기준.
     //
-    // ★ 격리 포기 결정 (2026-05-27). agy 의 macOS Keychain 엔트리는 HOME
-    //   기준으로 키잉돼 있어서 HOME 또는 --gemini_dir 둘 중 하나라도
-    //   override 하면 keyring lookup 이 실패하고 OAuth 재인증 flow 로
-    //   빠진다 (라이브 검증 완료 — token exchange invalid_grant). 격리
-    //   환경에서 자동 인증을 유지할 방법이 없다.
+    // ★ 격리 포기 (2026-05-27). agy 의 macOS Keychain 엔트리는 HOME 기준으로
+    //   키잉돼 있어서 HOME / --gemini_dir override 하면 keyring lookup 이
+    //   실패하고 OAuth 재인증 (invalid_grant) 로 빠진다. 사용자 본인
+    //   ~/.gemini 를 그대로 쓰게 두는 게 유일한 안정 경로.
     //
-    //   결론: 사용자 본인 ~/.gemini 를 그대로 쓰게 둔다. buildCLICommand 도
-    //   HOME override 와 --gemini_dir 를 빼고 그냥 `agy` 를 부른다. 워커 간
-    //   conversation/state 충돌 가능성은 별도 트래킹 (현재 단일 워커 시나리오
-    //   기준 우선).
+    // ★ MCP 통합 (2026-05-27 추가). agy 의 공식 MCP 설정 경로:
+    //     ~/.gemini/antigravity-cli/mcp_config.json
+    //   여기에 marblo MCP 항목을 머지한다. 다른 MCP 서버 항목은 그대로 보존.
+    //   per-agent 변수 (MARBLO_AGENT_ID/PROJECT/BRIDGE_PORT/PATH) 는 ${VAR}
+    //   substitution 으로 박아둬서, 동시에 여러 agy PTY 가 떠도 각자 자기
+    //   env 값으로 치환된다 (agy v1.20+ 가 MCP 자식 스폰 시 변환).
     //
-    // 이 함수는 generateMCPConfig switch 에서 호출되므로 sentinel 파일은
-    // 만들어 둔다 — 파일 트래킹 용도 (cleanup 등). 실제 agy 동작에는 영향
-    // 없음.
+    //   제약: 단일 Marblo 인스턴스 가정. 여러 Marblo 윈도우가 같은 글로벌
+    //   파일에 동시 write 하면 마지막 writer 가 이김 (단, marblo entry 자체는
+    //   거의 idempotent 라 실제 충돌은 드묾). 다중 인스턴스 격리는 별도 트랙.
+    const globalConfigDir = path.join(
+      os.homedir(),
+      ".gemini",
+      "antigravity-cli",
+    );
+    fs.mkdirSync(globalConfigDir, { recursive: true });
+    const globalConfigPath = path.join(globalConfigDir, "mcp_config.json");
+
+    // per-agent 로 달라야 하는 변수는 ${VAR} substitution 사용.
+    // 상수성 변수 (Firebase, MARBLO_SKILLS_DIR) 는 literal 로 박는다.
+    const SUBSTITUTE_KEYS = new Set([
+      "PATH",
+      "MARBLO_AGENT_ID",
+      "MARBLO_PROJECT",
+      "MARBLO_BRIDGE_PORT",
+    ]);
+    const marbloEnv: Record<string, string> = {};
+    for (const [key, value] of Object.entries(mcpEntry.env || {})) {
+      marbloEnv[key] = SUBSTITUTE_KEYS.has(key) ? `\${${key}}` : value;
+    }
+
+    let existing: Record<string, unknown> = {};
+    let parseError: unknown = null;
+    if (fs.existsSync(globalConfigPath)) {
+      try {
+        existing = JSON.parse(
+          fs.readFileSync(globalConfigPath, "utf-8"),
+        ) as Record<string, unknown>;
+      } catch (err) {
+        parseError = err;
+      }
+    }
+
+    if (parseError) {
+      // 사용자의 손상된 JSON 을 함부로 덮어쓰지 않는다 — 로그만 남기고
+      // sentinel 만 생성해서 cleanup contract 충족. 사용자가 파일을 손보면
+      // 다음 spawn 부터 정상 머지.
+      console.warn(
+        `[agy] ${globalConfigPath} parse failed (${parseError}); leaving file untouched, MCP disabled for this agent.`,
+      );
+    } else {
+      const existingServers = (existing.mcpServers ?? {}) as Record<
+        string,
+        unknown
+      >;
+      const merged = {
+        ...existing,
+        mcpServers: {
+          ...existingServers,
+          marblo: {
+            command: mcpEntry.command,
+            args: mcpEntry.args,
+            env: marbloEnv,
+          },
+        },
+      };
+      fs.writeFileSync(
+        globalConfigPath,
+        JSON.stringify(merged, null, 2),
+        "utf-8",
+      );
+      // NOTE: do NOT trackFile() globalConfigPath — it's user-shared.
+      // cleanup() would clobber other agents' / other MCP servers' state.
+    }
+
+    // 우리 CONFIG_DIR 의 sentinel 만 트래킹 → cleanup contract 만족.
+    // sentinel 에 globalConfigPath 를 기록해서 디버그 시 어디로 머지했는지
+    // 추적 가능.
     const sentinelDir = path.join(CONFIG_DIR, `antigravity-home-${agentId}`);
     fs.mkdirSync(sentinelDir, { recursive: true });
     const sentinelPath = path.join(sentinelDir, "marblo-sentinel.json");
-    if (!fs.existsSync(sentinelPath)) {
-      fs.writeFileSync(
-        sentinelPath,
-        JSON.stringify({ agentId, createdAt: Date.now() }),
-        "utf-8",
-      );
-    }
+    fs.writeFileSync(
+      sentinelPath,
+      JSON.stringify(
+        {
+          agentId,
+          globalConfigPath,
+          mergeFailed: !!parseError,
+          createdAt: Date.now(),
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
     this.trackFile(agentId, sentinelPath);
     return sentinelPath;
   }
@@ -856,8 +932,15 @@ export class AgentConfigGenerator {
             agyArgs.push("--conversation", resumeSessionId!);
           }
         }
+        // Reject `baseCommand === "antigravity"` — that's the model slug
+        // accidentally saved to the Firestore agent doc by some build paths
+        // (`agent.command = agent.model`). Treat it as "no explicit override"
+        // and fall back to the real CLI binary `agy`. Mirrors the same
+        // defensive logic for gpt → codex below.
+        const agyCommand =
+          !baseCommand || baseCommand === "antigravity" ? "agy" : baseCommand;
         return {
-          command: baseCommand || "agy",
+          command: agyCommand,
           args: agyArgs,
           env: {
             ...env,

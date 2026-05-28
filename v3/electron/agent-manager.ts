@@ -25,6 +25,14 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 // trying the same broken setup.
 const FAST_FAIL_WINDOW_MS = 2_000;
 const FAST_FAIL_MAX = 1;
+// "Graceful completion" threshold — an agent that lived past this window
+// before exiting (even with a nonzero code) almost certainly ran its
+// course rather than crashed on bootstrap. Codex / Claude can exit
+// nonzero after a normal task completion (signal, ctrl-c, plugin shutdown,
+// SIGPIPE on stdin close). Without this distinction those exits get
+// classified as crashes → auto-restart 5x → error, which surfaces in the
+// UI as "rest-and-error" for a worker that actually did its job.
+const GRACEFUL_LIFETIME_MS = 60_000;
 
 export interface AgentLaunchParams {
   id: string;
@@ -66,7 +74,18 @@ export interface AgentInstance {
   heartbeatTimer: ReturnType<typeof setInterval> | null;
   /** Stored so auto-restart can re-register PTY forwarding */
   onPtyReady?: (ptySessionId: string) => void;
+  /** epoch-ms of the most recent PTY output activity. Used to derive
+   * working/idle automatically — bumped on every onData chunk, polled by
+   * the heartbeat to drop back to idle after IDLE_INACTIVITY_MS of silence. */
+  lastPtyActivity: number;
 }
+
+/** Inactivity window after which an "auto-working" agent drops back to
+ * idle. Long enough that agy / claude pausing to think or wait for user
+ * input doesn't flip them to idle (which would make the orchestrator stop
+ * sending follow-up instructions), short enough that genuinely abandoned
+ * sessions don't stay "working" forever. */
+const IDLE_INACTIVITY_MS = 300_000; // 5 min
 
 /**
  * Build the prompt that gets typed into the freshly-spawned CLI.
@@ -134,18 +153,16 @@ export const STARTUP_DIALOG_MATCHERS: StartupDialogMatcher[] = [
 export function composeInitialPrompt(
   model: ModelType,
   instruction: string,
-  skillContent?: string
+  skillContent?: string,
 ): string {
   const isClaude = model === "claude";
   const sanitized = isClaude
     ? instruction
     : instruction.replace(/mcp__marblo__/g, "");
-  // Antigravity (agy) v1 ships with no MCP integration (see
-  // agent-config.ts antigravity case). The role-skill template tells the
-  // agent to call get_agent_skill / claim_task / submit_for_review — tools
-  // it can't reach — so prepending it would brick the session. Send the
-  // raw instruction and let the orchestrator decide on a standalone task.
-  if (model === "antigravity") return sanitized;
+  // agy 도 v1.20+ 부터 MCP 지원 — generateAntigravityConfig 가 글로벌
+  // ~/.gemini/antigravity-cli/mcp_config.json 에 marblo 항목을 머지하므로
+  // role-skill 의 add_activity / claim_task / submit_for_review 호출이
+  // 정상 작동한다. 따라서 다른 비-claude 워커와 동일한 prepend 경로 사용.
   if (!skillContent) return sanitized;
   return [
     "[역할 스킬 — 아래 워크플로우와 도구 사용 규칙을 따르세요]",
@@ -165,12 +182,12 @@ export class AgentManager {
     rootPath: string,
     sessionId: string,
     label: string,
-    agentId: string
+    agentId: string,
   ) => void;
   private onRestartAttempt?: (
     agentId: string,
     attempt: number,
-    maxAttempts: number
+    maxAttempts: number,
   ) => void;
   private onRestartFailed?: (agentId: string, exitCode: number) => void;
   private getMainWindow?: () => BrowserWindow | null;
@@ -178,7 +195,7 @@ export class AgentManager {
     rootPath: string,
     requested: string,
     filterLabel?: string,
-    filterAgentId?: string
+    filterAgentId?: string,
   ) => string | null;
 
   constructor(
@@ -188,15 +205,15 @@ export class AgentManager {
       rootPath: string,
       sessionId: string,
       label: string,
-      agentId: string
+      agentId: string,
     ) => void,
     onRestartAttempt?: (
       agentId: string,
       attempt: number,
-      maxAttempts: number
+      maxAttempts: number,
     ) => void,
     onRestartFailed?: (agentId: string, exitCode: number) => void,
-    getMainWindow?: () => BrowserWindow | null
+    getMainWindow?: () => BrowserWindow | null,
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = new AgentConfigGenerator();
@@ -213,8 +230,8 @@ export class AgentManager {
       rootPath: string,
       requested: string,
       filterLabel?: string,
-      filterAgentId?: string
-    ) => string | null
+      filterAgentId?: string,
+    ) => string | null,
   ) {
     this.resolveSessionId = resolver;
   }
@@ -240,7 +257,7 @@ export class AgentManager {
       console.log(
         `[Agent:${params.id}] Resolved 'latest' → ${
           resolvedResumeId ?? "none (new session)"
-        }`
+        }`,
       );
     }
     const isResume =
@@ -265,12 +282,12 @@ export class AgentManager {
       params.cwd,
       params.initialPrompt,
       params.projectId,
-      isResume ? resolvedResumeId : undefined
+      isResume ? resolvedResumeId : undefined,
     );
 
     if (isResume) {
       console.log(
-        `[Agent:${params.id}] Resuming session: ${resolvedResumeId} (model=${params.model})`
+        `[Agent:${params.id}] Resuming session: ${resolvedResumeId} (model=${params.model})`,
       );
     }
 
@@ -289,7 +306,7 @@ export class AgentManager {
       launchConfig.command,
       launchConfig.args,
       params.cwd,
-      mergedEnv
+      mergedEnv,
     );
 
     // Notify caller IMMEDIATELY so they can register data listeners
@@ -302,7 +319,7 @@ export class AgentManager {
       const prompt = composeInitialPrompt(
         params.model,
         launchConfig.initialPrompt,
-        launchConfig.skillContent
+        launchConfig.skillContent,
       );
       let sent = false;
       const sendPrompt = () => {
@@ -313,7 +330,7 @@ export class AgentManager {
         // CR inside the message body without submitting).
         this.ptyManager.writeAndSubmit(ptySessionId, prompt);
         console.log(
-          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`
+          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`,
         );
       };
 
@@ -351,7 +368,7 @@ export class AgentManager {
       // doesn't get applied to claude agents (false positive on a chat
       // message containing the same words).
       const activeMatchers = STARTUP_DIALOG_MATCHERS.filter(
-        (m) => !m.applies || m.applies.includes(params.model)
+        (m) => !m.applies || m.applies.includes(params.model),
       );
       const dismissed = new Set<RegExp>();
 
@@ -367,7 +384,7 @@ export class AgentManager {
           if (dlg.pattern.test(outputBuffer)) {
             dismissed.add(dlg.pattern);
             console.log(
-              `[Agent:${params.id}] Dismissing blocking dialog: ${dlg.label}`
+              `[Agent:${params.id}] Dismissing blocking dialog: ${dlg.label}`,
             );
             // Small delay so the TUI is in steady state when we type.
             setTimeout(() => {
@@ -411,7 +428,7 @@ export class AgentManager {
           require("os").homedir(),
           ".claude",
           "projects",
-          encodedPath
+          encodedPath,
         );
         const files = require("fs").existsSync(sessionsDir)
           ? require("fs")
@@ -423,7 +440,7 @@ export class AgentManager {
       } catch (err) {
         console.error(
           `[AgentManager] Failed to read existing session files for rootPath="${rootPath}":`,
-          err
+          err,
         );
         existingIds = new Set();
       }
@@ -435,7 +452,7 @@ export class AgentManager {
             require("os").homedir(),
             ".claude",
             "projects",
-            encodedPath
+            encodedPath,
           );
           if (!require("fs").existsSync(sessionsDir)) return;
           const currentFiles = require("fs")
@@ -449,10 +466,92 @@ export class AgentManager {
         } catch (err) {
           console.error(
             `[AgentManager] Failed to detect new session file for agent="${agentId}" rootPath="${rootPath}":`,
-            err
+            err,
           );
         }
       }, 5000);
+    }
+
+    // Antigravity (agy) conversation watcher.
+    //
+    // agy 는 ~/.gemini/antigravity-cli/conversations/<UUID>.pb 에 cwd 무관
+    // 하게 모든 conversation 을 저장하므로 cwd 별 분리 불가. spawn 직전
+    // 스냅샷을 떠두고 일정 시간 후 새로 생긴 .pb basename 을 잡아
+    // onSessionDetected 로 영속화한다.
+    //
+    // 타이밍: agy 는 첫 user message 가 들어가야 .pb 생성 — Marblo 의
+    // initial prompt 가 25s fallback 후 주입되므로 35s 후 스캔.
+    if (
+      params.model === "antigravity" &&
+      this.onSessionDetected &&
+      params.cwd
+    ) {
+      const rootPath = params.cwd;
+      const agentName = params.name;
+      const agentId = params.id;
+      const conversationsDir = require("path").join(
+        require("os").homedir(),
+        ".gemini",
+        "antigravity-cli",
+        "conversations",
+      );
+      let existingIds: Set<string>;
+      try {
+        existingIds = require("fs").existsSync(conversationsDir)
+          ? new Set(
+              require("fs")
+                .readdirSync(conversationsDir)
+                .filter((f: string) => f.endsWith(".pb"))
+                .map((f: string) => f.replace(/\.pb$/, "")),
+            )
+          : new Set();
+      } catch (err) {
+        console.error(
+          `[AgentManager] Failed to snapshot agy conversations for agent="${agentId}":`,
+          err,
+        );
+        existingIds = new Set();
+      }
+
+      setTimeout(() => {
+        try {
+          if (!require("fs").existsSync(conversationsDir)) return;
+          const currentFiles = require("fs")
+            .readdirSync(conversationsDir)
+            .filter((f: string) => f.endsWith(".pb"))
+            .map((f: string) => f.replace(/\.pb$/, ""));
+          const newIds = currentFiles.filter(
+            (id: string) => !existingIds.has(id),
+          );
+          // Race ambiguity: if >1 .pb appeared in the window (parallel
+          // spawn, user's own terminal session), we can't tell which is
+          // ours. Pick the most-recently-modified one as best-effort.
+          if (newIds.length === 0) return;
+          let chosenId = newIds[0];
+          if (newIds.length > 1) {
+            chosenId = newIds
+              .map((id: string) => ({
+                id,
+                mtime: require("fs").statSync(
+                  require("path").join(conversationsDir, `${id}.pb`),
+                ).mtimeMs,
+              }))
+              .sort(
+                (a: { mtime: number }, b: { mtime: number }) =>
+                  b.mtime - a.mtime,
+              )[0].id;
+            console.warn(
+              `[AgentManager] agy: ${newIds.length} new conversations detected during agent="${agentId}" window, picking newest=${chosenId}`,
+            );
+          }
+          this.onSessionDetected!(rootPath, chosenId, agentName, agentId);
+        } catch (err) {
+          console.error(
+            `[AgentManager] Failed to detect agy conversation for agent="${agentId}":`,
+            err,
+          );
+        }
+      }, 35000);
     }
 
     const instance: AgentInstance = {
@@ -473,9 +572,33 @@ export class AgentManager {
       restartTimer: null,
       heartbeatTimer: null,
       onPtyReady: params.onPtyReady,
+      lastPtyActivity: Date.now(),
     };
 
     this.agents.set(params.id, instance);
+
+    // PTY activity → working/idle auto-derivation.
+    //
+    // Status was historically set only via two paths:
+    //   (a) bridge-server dispatch → setStatus("working")
+    //   (b) MCP self-report (submit_for_review / update_task_status DONE etc)
+    //       → setStatus("idle")
+    // Vendors without MCP self-report (notably agy 1.0.2 / direct PTY chat)
+    // never moved off the initial "idle" — orchestrator then treated them as
+    // "free" while they were actually mid-conversation waiting for the next
+    // instruction, so no follow-up was ever sent.
+    //
+    // Hook every PTY output chunk: bump lastPtyActivity, and promote idle→
+    // working on the first byte. The heartbeat below polls inactivity and
+    // demotes working→idle after IDLE_INACTIVITY_MS of silence.
+    this.ptyManager.onData(ptySessionId, () => {
+      const agent = this.agents.get(params.id);
+      if (!agent || agent !== instance) return;
+      agent.lastPtyActivity = Date.now();
+      if (agent.status === "idle" && !agent.stopRequested) {
+        this.setStatus(params.id, "working");
+      }
+    });
 
     // Telemetry: agent spawned — prefer MARBLO_PROJECT from launchConfig (always set by agent-config)
     const spawnProjectId =
@@ -496,7 +619,7 @@ export class AgentManager {
       params.role || "backend",
       spawnProjectId,
       promptHash,
-      promptLength
+      promptLength,
     );
 
     // Start heartbeat for anomaly detection (ML-4)
@@ -504,6 +627,15 @@ export class AgentManager {
       const win = this.getMainWindow?.() ?? null;
       const agent = this.agents.get(params.id);
       if (!agent || agent.stopRequested) return;
+      // Auto-demote working→idle after IDLE_INACTIVITY_MS of PTY silence.
+      // Guard against error/stopped — those are terminal states owned by
+      // exit/explicit-stop and shouldn't be flipped back to idle.
+      if (
+        agent.status === "working" &&
+        Date.now() - agent.lastPtyActivity > IDLE_INACTIVITY_MS
+      ) {
+        this.setStatus(params.id, "idle");
+      }
       const hbProjectId =
         agent.launchConfig?.env?.MARBLO_PROJECT || params.projectId || "";
       mainTelemetry.heartbeat(win, params.id, hbProjectId, agent.status, 0, 0);
@@ -523,28 +655,41 @@ export class AgentManager {
       if (agent !== instance) return;
 
       agent.lastExitCode = exitCode;
+      const runtimeMs = Date.now() - agent.spawnedAt;
 
-      // Intentional stop or clean exit → just mark stopped
-      if (agent.stopRequested || exitCode === 0) {
+      // Intentional stop, clean exit, or graceful completion → mark stopped.
+      // Graceful completion = nonzero exit after the worker has lived past
+      // GRACEFUL_LIFETIME_MS; restarting at this point would just respawn
+      // the CLI without context and waste a slot, and worse, repeated
+      // nonzero exits eventually trigger the error state for a worker that
+      // genuinely finished its task. The user can revive it explicitly via
+      // "+ New Session".
+      const isGracefulCompletion =
+        exitCode !== 0 && runtimeMs >= GRACEFUL_LIFETIME_MS;
+      if (agent.stopRequested || exitCode === 0 || isGracefulCompletion) {
         agent.status = "stopped";
         this.configGenerator.cleanup(params.id);
         this.onStatusChange?.(params.id, "stopped");
         mainTelemetry.agentStopped(
           this.getMainWindow?.() ?? null,
           params.id,
-          exitCode
+          exitCode,
         );
+        if (isGracefulCompletion) {
+          console.log(
+            `[Agent:${agent.id}] Graceful completion (exit ${exitCode} after ${runtimeMs}ms) — marking stopped, not restarting.`,
+          );
+        }
         return;
       }
 
       // Classify the exit: fast-fail (likely config / binary issue) vs.
       // runtime crash (transient, worth retrying).
-      const runtimeMs = Date.now() - agent.spawnedAt;
       const wasFastFail = runtimeMs < FAST_FAIL_WINDOW_MS;
       if (wasFastFail) {
         agent.fastFailCount++;
         console.warn(
-          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`
+          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`,
         );
       }
 
@@ -557,17 +702,17 @@ export class AgentManager {
       if (agent.restartCount < MAX_RESTARTS && !fastFailExceeded) {
         const delay = Math.min(
           BACKOFF_BASE_MS * Math.pow(2, agent.restartCount),
-          BACKOFF_MAX_MS
+          BACKOFF_MAX_MS,
         );
         agent.restartCount++;
         this.onRestartAttempt?.(agent.id, agent.restartCount, MAX_RESTARTS);
         mainTelemetry.agentRestarted(
           this.getMainWindow?.() ?? null,
           agent.id,
-          agent.restartCount
+          agent.restartCount,
         );
         console.log(
-          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`
+          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`,
         );
 
         agent.restartTimer = setTimeout(() => {
@@ -582,15 +727,15 @@ export class AgentManager {
         mainTelemetry.agentCrashed(
           this.getMainWindow?.() ?? null,
           agent.id,
-          exitCode
+          exitCode,
         );
         if (fastFailExceeded) {
           console.error(
-            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`
+            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`,
           );
         } else {
           console.error(
-            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
+            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
           );
         }
       }
@@ -617,7 +762,7 @@ export class AgentManager {
     this.agents.delete(agentId);
 
     console.log(
-      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`
+      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`,
     );
 
     // Re-launch with resume
@@ -628,11 +773,11 @@ export class AgentManager {
         agent.cwd,
         "latest",
         agent.name,
-        agent.id
+        agent.id,
       );
       resolvedSessionId = resolved ?? "new";
       console.log(
-        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`
+        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`,
       );
     }
 
@@ -738,6 +883,11 @@ export class AgentManager {
   setStatus(agentId: string, status: AgentStatus): void {
     const agent = this.agents.get(agentId);
     if (!agent) return;
+    // No-op when status is unchanged. The new PTY-activity hook calls
+    // setStatus("working") on every output chunk; without this guard each
+    // chunk would fire onStatusChange → IPC broadcast → renderer rerender,
+    // which is wasteful and could storm the renderer during heavy streams.
+    if (agent.status === status) return;
     agent.status = status;
     this.onStatusChange?.(agentId, status);
   }
@@ -793,10 +943,21 @@ export class AgentManager {
       stopRequested: false,
       restartTimer: null,
       heartbeatTimer: null,
+      lastPtyActivity: Date.now(),
     };
     this.agents.set(agent.id, instance);
+    // Same PTY-activity hook as launch() — reconnected agents need
+    // working/idle auto-derivation too.
+    this.ptyManager.onData(agent.ptySessionId, () => {
+      const a = this.agents.get(agent.id);
+      if (!a || a !== instance) return;
+      a.lastPtyActivity = Date.now();
+      if (a.status === "idle" && !a.stopRequested) {
+        this.setStatus(agent.id, "working");
+      }
+    });
     console.log(
-      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`
+      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`,
     );
   }
 
@@ -812,7 +973,7 @@ export class AgentManager {
   listAgentsByProject(projectId: string | undefined): AgentInstance[] {
     if (!projectId) return this.listAgents();
     return Array.from(this.agents.values()).filter(
-      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId
+      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId,
     );
   }
 
