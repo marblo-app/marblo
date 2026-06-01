@@ -399,6 +399,9 @@ export function registerTools(server) {
             lastAgentId: agent_id,
             lastActivitySummary: `claimed by ${agent_id}`,
             extraTaskFields: { claimedBy: agent_id, claimedAt: Timestamp.now() },
+            // Re-check inside the transaction — closes the claim race the
+            // outside-the-txn `task.status !== "TODO"` check above can't.
+            validateFrom: (s) => s === "TODO",
         });
         const lines = [
             `Successfully claimed task: ${task.title}`,
@@ -436,6 +439,8 @@ export function registerTools(server) {
             newStatus,
             lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
             lastActivitySummary: comment || `status → ${newStatus}`,
+            // Re-validate the transition inside the txn against the real status.
+            validateFrom: (s) => canTransition(s, newStatus),
         };
         if (comment)
             projMut.extraTaskFields = { comment };
@@ -543,6 +548,10 @@ export function registerTools(server) {
                 ? `submitted for review — ${pr_url}`
                 : "submitted for review",
             appendMilestone: true,
+            // submit auto-claims from any non-terminal state (incl. TODO), so the
+            // guard only blocks an already-DONE task — mirrors the check above,
+            // re-checked inside the txn to close the race.
+            validateFrom: (s) => s !== "DONE",
         };
         const extra = {};
         if (pr_url)

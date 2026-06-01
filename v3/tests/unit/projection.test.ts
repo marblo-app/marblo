@@ -3,11 +3,15 @@
 // 이 projection 을 어떻게 갱신하는지를 pure function 으로 검증.
 // 트랜잭션 wrapper (applyProjection) 의 Firestore 호출 자체는 통합 테스트 영역.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { Timestamp } from "firebase/firestore";
+// `firebase/firestore` is aliased to the in-memory mock (vitest.config), so the
+// same store backs applyProjection and these direct seed/read helpers.
+import { doc, setDoc, getDoc, __resetStore } from "../mocks/firebase-firestore";
 import {
   computeTaskProjection,
   applyMissionStatusDelta,
+  applyProjection,
   type TaskProjection,
 } from "../../electron/mcp-server/projection";
 
@@ -141,9 +145,20 @@ describe("applyMissionStatusDelta — mission statusCounts 점진 갱신", () =>
     expect(next).toEqual({ TODO: 2, CLAIMED: 2, IN_PROGRESS: 2 });
   });
 
-  it("기존 counts 없을 때: old=0(floor), new=1 로 초기화", () => {
+  // Raw pure fallback when neither prior counts nor a seed exist. In practice
+  // applyProjection seeds the full count from sibling tasks before calling this
+  // (see the integration test below), so a multi-task mission never lands here
+  // with a wrong TODO total — that was bug_003.
+  it("counts·seed 둘 다 없을 때 raw fallback: old=0(floor), new=1", () => {
     const next = applyMissionStatusDelta(undefined, "TODO", "CLAIMED");
     expect(next).toEqual({ TODO: 0, CLAIMED: 1 });
+  });
+
+  it("seed 후 delta: 5-task 미션 첫 claim 은 TODO 총원을 보존 (bug_003 계약)", () => {
+    // recomputeMissionCounts 가 만든 권위 카운트(이 task 아직 TODO) 위에서 delta.
+    const seeded = { TODO: 5 };
+    const next = applyMissionStatusDelta(seeded, "TODO", "CLAIMED");
+    expect(next).toEqual({ TODO: 4, CLAIMED: 1 });
   });
 
   it("같은 status (no-op): prev 사본 그대로", () => {
@@ -161,5 +176,93 @@ describe("applyMissionStatusDelta — mission statusCounts 점진 갱신", () =>
     );
     expect(next.CLAIMED).toBe(0);
     expect(next.IN_PROGRESS).toBe(2);
+  });
+});
+
+describe("applyProjection — Firestore 통합 (seed self-heal + TOCTOU 가드)", () => {
+  const db = {} as never;
+  beforeEach(() => __resetStore());
+
+  it("bug_003 seed: mission projection 미초기화 상태에서 첫 claim 시 sibling 전체를 재계산해 TODO 총원을 보존", async () => {
+    await setDoc(doc(db, "missions", "m1"), { goal: "ship it" }); // projection 없음
+    for (const t of ["t1", "t2", "t3", "t4", "t5"]) {
+      await setDoc(doc(db, "tasks", t), { status: "TODO", missionId: "m1" });
+    }
+
+    await applyProjection(db, "t1", {
+      newStatus: "CLAIMED",
+      lastAgentId: "agent-1",
+      lastActivitySummary: "claimed by agent-1",
+      validateFrom: (s) => s === "TODO",
+    });
+
+    const m = (await getDoc(doc(db, "missions", "m1"))).data() as {
+      projection: { statusCounts: Record<string, number> };
+    };
+    // 버그였다면 {CLAIMED:1} (TODO 사라짐). seed 후엔 나머지 4개 TODO 보존.
+    expect(m.projection.statusCounts).toEqual({ TODO: 4, CLAIMED: 1 });
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      status: string;
+    };
+    expect(t1.status).toBe("CLAIMED");
+  });
+
+  it("seed 이후 두 번째 전이는 delta 경로로 정확히 갱신", async () => {
+    await setDoc(doc(db, "missions", "m1"), { goal: "ship it" });
+    for (const t of ["t1", "t2", "t3"]) {
+      await setDoc(doc(db, "tasks", t), { status: "TODO", missionId: "m1" });
+    }
+    await applyProjection(db, "t1", {
+      newStatus: "CLAIMED",
+      lastAgentId: "a",
+      validateFrom: (s) => s === "TODO",
+    });
+    await applyProjection(db, "t2", {
+      newStatus: "CLAIMED",
+      lastAgentId: "a",
+      validateFrom: (s) => s === "TODO",
+    });
+    const m = (await getDoc(doc(db, "missions", "m1"))).data() as {
+      projection: { statusCounts: Record<string, number> };
+    };
+    expect(m.projection.statusCounts).toEqual({ TODO: 1, CLAIMED: 2 });
+  });
+
+  it("bug_005 가드: 이미 CLAIMED 인 task 재claim 은 throw + status/claimedBy 안 덮어씀", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      status: "CLAIMED",
+      claimedBy: "agent-1",
+    });
+
+    await expect(
+      applyProjection(db, "t1", {
+        newStatus: "CLAIMED",
+        lastAgentId: "agent-2",
+        extraTaskFields: { claimedBy: "agent-2" },
+        validateFrom: (s) => s === "TODO",
+      }),
+    ).rejects.toThrow(/cannot transition/);
+
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      status: string;
+      claimedBy: string;
+    };
+    expect(t1.status).toBe("CLAIMED");
+    expect(t1.claimedBy).toBe("agent-1"); // 두 번째 claim 거부 — 그대로
+  });
+
+  it("validateFrom 통과하는 정상 전이는 그대로 진행", async () => {
+    await setDoc(doc(db, "tasks", "t1"), { status: "TODO" });
+    await applyProjection(db, "t1", {
+      newStatus: "CLAIMED",
+      lastAgentId: "agent-1",
+      validateFrom: (s) => s === "TODO",
+    });
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      status: string;
+      projection: { currentStatus: string };
+    };
+    expect(t1.status).toBe("CLAIMED");
+    expect(t1.projection.currentStatus).toBe("CLAIMED");
   });
 });

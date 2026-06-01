@@ -558,6 +558,9 @@ export function registerTools(server: McpServer): void {
         lastAgentId: agent_id,
         lastActivitySummary: `claimed by ${agent_id}`,
         extraTaskFields: { claimedBy: agent_id, claimedAt: Timestamp.now() },
+        // Re-check inside the transaction — closes the claim race the
+        // outside-the-txn `task.status !== "TODO"` check above can't.
+        validateFrom: (s) => s === "TODO",
       });
 
       const lines = [
@@ -608,9 +611,12 @@ export function registerTools(server: McpServer): void {
         newStatus,
         lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
         lastActivitySummary: comment || `status → ${newStatus}`,
+        // Re-validate the transition inside the txn against the real status.
+        validateFrom: (s) => canTransition(s, newStatus),
       };
       if (comment) projMut.extraTaskFields = { comment };
-      if (newStatus === "BLOCKED") projMut.blockerSummary = comment || "blocked";
+      if (newStatus === "BLOCKED")
+        projMut.blockerSummary = comment || "blocked";
       await applyProjection(db, task_id, projMut);
 
       // Signal agent is now free when task leaves active work state
@@ -741,6 +747,10 @@ export function registerTools(server: McpServer): void {
           ? `submitted for review — ${pr_url}`
           : "submitted for review",
         appendMilestone: true,
+        // submit auto-claims from any non-terminal state (incl. TODO), so the
+        // guard only blocks an already-DONE task — mirrors the check above,
+        // re-checked inside the txn to close the race.
+        validateFrom: (s) => s !== "DONE",
       };
       const extra: Record<string, unknown> = {};
       if (pr_url) extra.prUrl = pr_url;
@@ -1125,7 +1135,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Task ID — returns the task projection (and its mission rollup)",
+          "Task ID — returns the task projection (and its mission rollup)"
         ),
       mission_id: z
         .string()
@@ -1159,7 +1169,11 @@ export function registerTools(server: McpServer): void {
         const p = data.projection;
         if (!p) {
           lines.push(
-            `Task ${task_id} ("${data.title ?? ""}") has no projection yet (status=${data.status ?? "?"}); it updates on the next MCP tool call.`,
+            `Task ${task_id} ("${
+              data.title ?? ""
+            }") has no projection yet (status=${
+              data.status ?? "?"
+            }); it updates on the next MCP tool call.`
           );
         } else {
           const when =
@@ -1173,7 +1187,7 @@ export function registerTools(server: McpServer): void {
               p.milestonesPassed?.length
                 ? p.milestonesPassed.join(", ")
                 : "(none)"
-            }`,
+            }`
           );
           if (p.blockerSummary) lines.push(`Blocker: ${p.blockerSummary}`);
         }
@@ -1201,7 +1215,7 @@ export function registerTools(server: McpServer): void {
 
       return text(lines.join("\n"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 17. get_agents — Real-time agent list (Bridge first, Firestore fallback)

@@ -9,7 +9,7 @@
 // 의도적으로 별도 컬렉션 신설 X — 기존 task/mission 문서 안의 nested map field
 // 로 둔다 (spec §16 P1 context: "별도 컬렉션 안 만들고 한 문서로"). 같은
 // 트랜잭션에서 함께 갱신되므로 status 와 projection 이 절대 어긋나지 않는다.
-import { doc, collection, runTransaction, Timestamp, } from "firebase/firestore";
+import { doc, collection, getDoc, getDocs, query, where, runTransaction, Timestamp, } from "firebase/firestore";
 /**
  * Pure — projection 의 다음 값 계산. I/O 없음.
  * 테스트가 직접 호출하고, applyProjection 의 트랜잭션 내부에서도 사용.
@@ -57,6 +57,21 @@ export function applyMissionStatusDelta(prev, oldStatus, newStatus) {
     return next;
 }
 /**
+ * 미션 task 들의 status 를 한 번에 읽어 statusCounts 맵을 만든다.
+ * Firestore client SDK 트랜잭션은 쿼리를 못 돌리므로 (txn.get 은 단일 doc 만),
+ * mission projection 이 아직 seed 되지 않았을 때 1회성 전체 재계산용으로 쓴다.
+ */
+async function recomputeMissionCounts(db, missionId) {
+    const snap = await getDocs(query(collection(db, "tasks"), where("missionId", "==", missionId)));
+    const counts = {};
+    snap.forEach((d) => {
+        const s = d.data().status;
+        if (s)
+            counts[s] = (counts[s] ?? 0) + 1;
+    });
+    return counts;
+}
+/**
  * 트랜잭션 wrapper. tools.ts 의 4개 핸들러가 호출.
  *
  * 효과:
@@ -69,6 +84,25 @@ export async function applyProjection(db, taskId, mut) {
     const activityRef = mut.activityPayload
         ? doc(collection(db, "activities"))
         : null;
+    // bug_003 seed: dispatcher 는 task 생성 시 mission 문서를 안 건드리므로
+    // missions/{mid}.projection.statusCounts 가 처음엔 비어 있다. 그 상태에서 delta
+    // (±1) 만 돌리면 TODO 총원이 복원되지 않아 (Math.max(0,-1)=0) 카운트가 틀어진다.
+    // client SDK 트랜잭션은 쿼리를 못 돌리므로, 미초기화를 감지하면 트랜잭션 진입
+    // '전에' sibling task 전체를 한 번 읽어 권위 있는 카운트를 seed 한다. 1회성이고
+    // 이후 호출은 트랜잭션 내 delta 경로(동시성 안전)를 탄다.
+    let seedCounts;
+    const preTask = await getDoc(taskRef);
+    const preMissionId = preTask.exists()
+        ? preTask.data().missionId
+        : undefined;
+    if (preMissionId) {
+        const preMission = await getDoc(doc(db, "missions", preMissionId));
+        if (preMission.exists() &&
+            preMission.data().projection
+                ?.statusCounts === undefined) {
+            seedCounts = await recomputeMissionCounts(db, preMissionId);
+        }
+    }
     await runTransaction(db, async (txn) => {
         const taskSnap = await txn.get(taskRef);
         if (!taskSnap.exists()) {
@@ -76,6 +110,11 @@ export async function applyProjection(db, taskId, mut) {
         }
         const taskData = taskSnap.data();
         const oldStatus = taskData.status;
+        // bug_005 TOCTOU 가드: 트랜잭션 안에서 다시 읽은 '실제' status 로 전이 가능성을
+        // 재검사. 핸들러가 트랜잭션 밖에서 한 검사는 동시 claim/update race 를 못 막는다.
+        if (mut.newStatus && mut.validateFrom && !mut.validateFrom(oldStatus)) {
+            throw new Error(`Task ${taskId} cannot transition from ${oldStatus} to ${mut.newStatus}`);
+        }
         const missionId = taskData.missionId;
         const missionRef = missionId ? doc(db, "missions", missionId) : null;
         // Firestore 트랜잭션은 모든 read 가 첫 write 이전이어야 함.
@@ -100,9 +139,13 @@ export async function applyProjection(db, taskId, mut) {
         }
         if (missionRef && missionSnap?.exists()) {
             const mData = missionSnap.data();
+            // seed 우선순위: 트랜잭션 내 실제 값 > 진입 전 재계산 seed. seedCounts 는 이
+            // task 가 아직 oldStatus 인 현재 상태를 반영하므로, delta 가 old→new 를 마저
+            // 적용하면 최종 카운트가 맞다.
+            const base = mData.projection?.statusCounts ?? seedCounts;
             const nextCounts = mut.newStatus
-                ? applyMissionStatusDelta(mData.projection?.statusCounts, oldStatus, mut.newStatus)
-                : { ...(mData.projection?.statusCounts ?? {}) };
+                ? applyMissionStatusDelta(base, oldStatus, mut.newStatus)
+                : { ...(base ?? {}) };
             txn.update(missionRef, {
                 "projection.statusCounts": nextCounts,
                 "projection.lastTaskActivityAt": now,
