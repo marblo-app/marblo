@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, Timestamp, } from "firebase/firestore";
 import { db } from "./firebase.js";
+import { applyProjection } from "./projection.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
@@ -100,7 +101,14 @@ function truncateResult(result) {
 export function registerTools(server) {
     // Wrap server.tool to add automatic audit logging
     const originalTool = server.tool.bind(server);
-    function auditedTool(name, description, schema, handler) {
+    function auditedTool(name, description, schema, handler, opts = {}) {
+        const userFacing = opts.userFacing ?? true;
+        if (!userFacing) {
+            // 사용자 액티비티 스트림에 노출하지 않는 read-only 조회 툴.
+            // 감사 로그 자체를 쓰지 않는다 — 시스템 페이로드(스킬 본문 등) 노이즈 방지.
+            originalTool(name, description, schema, handler);
+            return;
+        }
         originalTool(name, description, schema, async (...args) => {
             const start = Date.now();
             let success = true;
@@ -162,7 +170,7 @@ export function registerTools(server) {
             return `- [${t.status}] ${t.title} (role=${t.role}, id=${t.id}${proj})${claimed}`;
         });
         return text(lines.join("\n"));
-    });
+    }, { userFacing: false });
     // 2. get_available_tasks
     auditedTool("get_available_tasks", "Get TODO tasks available for the given role. Returns tasks whose dependencies are satisfied.", {
         role: z.string().describe("Agent role (backend/frontend/test/devops)"),
@@ -190,7 +198,7 @@ export function registerTools(server) {
             return `- [${t.id}] ${t.title} (priority=${t.priority})${deps}`;
         });
         return text(lines.join("\n"));
-    });
+    }, { userFacing: false });
     // 3. create_task
     auditedTool("create_task", "Create a new task. Role: backend/frontend/test/devops. Set project_id to group tasks, context for env constraints, scope for file paths.", {
         title: z.string().describe("Task title"),
@@ -384,11 +392,16 @@ export function registerTools(server) {
         if (!task.dependsOnCompleted) {
             return text("Error: Task dependencies are not yet met.");
         }
-        await updateDoc(doc(db, "tasks", task_id), {
-            status: "CLAIMED",
-            claimedBy: agent_id,
-            claimedAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
+        // Status update + Firestore projection in one transaction (Layer A).
+        // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+        await applyProjection(db, task_id, {
+            newStatus: "CLAIMED",
+            lastAgentId: agent_id,
+            lastActivitySummary: `claimed by ${agent_id}`,
+            extraTaskFields: { claimedBy: agent_id, claimedAt: Timestamp.now() },
+            // Re-check inside the transaction — closes the claim race the
+            // outside-the-txn `task.status !== "TODO"` check above can't.
+            validateFrom: (s) => s === "TODO",
         });
         const lines = [
             `Successfully claimed task: ${task.title}`,
@@ -420,13 +433,20 @@ export function registerTools(server) {
             const validTargets = VALID_TRANSITIONS[task.status] ?? [];
             return text(`Error: Cannot transition from ${task.status} to ${newStatus}. Valid targets: ${validTargets.join(", ")}\nTip: Use force=true to skip validation.`);
         }
-        const updates = {
-            status: newStatus,
-            updatedAt: Timestamp.now(),
+        // Status update + Firestore projection in one transaction (Layer A).
+        // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+        const projMut = {
+            newStatus,
+            lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+            lastActivitySummary: comment || `status → ${newStatus}`,
+            // Re-validate the transition inside the txn against the real status.
+            validateFrom: (s) => canTransition(s, newStatus),
         };
         if (comment)
-            updates.comment = comment;
-        await updateDoc(doc(db, "tasks", task_id), updates);
+            projMut.extraTaskFields = { comment };
+        if (newStatus === "BLOCKED")
+            projMut.blockerSummary = comment || "blocked";
+        await applyProjection(db, task_id, projMut);
         // Signal agent is now free when task leaves active work state
         const doneStatuses = ["DONE", "REVIEW", "BLOCKED", "FAILED"];
         if (doneStatuses.includes(newStatus) && MARBLO_AGENT_ID) {
@@ -498,11 +518,12 @@ export function registerTools(server) {
         // Agents tab Activity feed filters by `agentId in [our agents]`, so
         // logging "unknown" makes the activity invisible.
         const resolvedAgentId = agent_id || MARBLO_AGENT_ID;
-        await addDoc(collection(db, "activities"), {
-            taskId: task_id,
-            agentId: resolvedAgentId,
-            message,
-            createdAt: Timestamp.now(),
+        // Activity doc + Firestore projection (lastActivity*) in one transaction.
+        // No status change. Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+        await applyProjection(db, task_id, {
+            lastAgentId: resolvedAgentId === "unknown" ? "" : resolvedAgentId,
+            lastActivitySummary: message,
+            activityPayload: { agentId: resolvedAgentId, message },
         });
         return text(`Activity logged: ${message}`);
     });
@@ -518,18 +539,31 @@ export function registerTools(server) {
         if (task.status === "DONE") {
             return text(`Task '${task.title}' is already DONE.`);
         }
-        const updates = {
-            status: "REVIEW",
-            updatedAt: Timestamp.now(),
+        // Status → REVIEW + milestone + Firestore projection in one transaction.
+        // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+        const projMut = {
+            newStatus: "REVIEW",
+            lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+            lastActivitySummary: pr_url
+                ? `submitted for review — ${pr_url}`
+                : "submitted for review",
+            appendMilestone: true,
+            // submit auto-claims from any non-terminal state (incl. TODO), so the
+            // guard only blocks an already-DONE task — mirrors the check above,
+            // re-checked inside the txn to close the race.
+            validateFrom: (s) => s !== "DONE",
         };
+        const extra = {};
         if (pr_url)
-            updates.prUrl = pr_url;
+            extra.prUrl = pr_url;
         // Auto-claim if the task was never claimed
         if (!task.claimedBy) {
-            updates.claimedBy = MARBLO_AGENT_ID;
-            updates.claimedAt = Timestamp.now();
+            extra.claimedBy = MARBLO_AGENT_ID;
+            extra.claimedAt = Timestamp.now();
         }
-        await updateDoc(doc(db, "tasks", task_id), updates);
+        if (Object.keys(extra).length)
+            projMut.extraTaskFields = extra;
+        await applyProjection(db, task_id, projMut);
         // Signal agent is now free
         if (MARBLO_AGENT_ID) {
             const bridgePort = process.env.MARBLO_BRIDGE_PORT;
@@ -572,7 +606,7 @@ export function registerTools(server) {
             }
         }
         return text(`All completed: ${allCompleted}\n${details.join("\n")}`);
-    });
+    }, { userFacing: false });
     // 10. get_agent_skill
     auditedTool("get_agent_skill", "Get skill/instruction file for a given agent role. Available: backend, frontend, test, devops, merge, team_leader, flutter.", {
         role: z.string().describe("Agent role name"),
@@ -591,7 +625,7 @@ export function registerTools(server) {
             }
         }
         return text(`Error: No skill file found for role '${role}'.`);
-    });
+    }, { userFacing: false });
     // 11. get_task_activities
     auditedTool("get_task_activities", "Get activity log entries for a task. Set pm_only=true to see only PM feedback.", {
         task_id: z.string().describe("Task ID"),
@@ -618,7 +652,7 @@ export function registerTools(server) {
             return `[${ts}] ${agent}: ${a.message}`;
         });
         return text(lines.join("\n"));
-    });
+    }, { userFacing: false });
     // 12. check_feedback
     auditedTool("check_feedback", "Check for tasks that have unread PM feedback. Filter by role and optionally by project.", {
         role: z.string().describe("Agent role (backend/frontend/test/devops)"),
@@ -641,7 +675,7 @@ export function registerTools(server) {
             lines.push(`- [${d.id}] ${t.title} (status=${t.status}, priority=${t.priority})`);
         });
         return text(lines.join("\n"));
-    });
+    }, { userFacing: false });
     // 13. acknowledge_feedback
     auditedTool("acknowledge_feedback", "Mark PM feedback as read/acknowledged for a task. Clears the feedback badge.", {
         task_id: z.string().describe("Task ID"),
@@ -659,7 +693,7 @@ export function registerTools(server) {
     auditedTool("spawn_agent", "Spawn a new agent via the Electron bridge. The agent gets its own PTY session and terminal tab. Requires MARBLO_BRIDGE_PORT env var.", {
         name: z.string().describe('Agent display name (e.g., "backend-auth")'),
         model: z
-            .enum(["claude", "gemini", "gpt", "antigravity", "custom"])
+            .enum(["claude", "gemini", "gpt", "antigravity", "local", "custom"])
             .describe("AI model to use"),
         role: z.string().describe("Agent role (backend/frontend/test/devops)"),
         command: z
@@ -761,7 +795,7 @@ export function registerTools(server) {
             lines.push(`- [${t.status}] ${t.title} (role=${t.role}, id=${d.id})`);
         });
         return text(lines.join("\n"));
-    });
+    }, { userFacing: false });
     // 16. get_task — Get single task detail (including description)
     auditedTool("get_task", "Get full details of a single task by ID, including description, scope, dependencies, and comments.", {
         task_id: z.string().describe("Task ID"),
@@ -785,7 +819,62 @@ export function registerTools(server) {
             `Has PM feedback: ${task.hasPmFeedback}`,
         ];
         return text(lines.join("\n"));
-    });
+    }, { userFacing: false });
+    // 16b. get_projection — Layer A read path. Lets the orchestrator answer
+    // "what's happening now?" with a single read instead of waking an LLM.
+    // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3, §7
+    auditedTool("get_projection", "Get the live projection snapshot for a task (current status, last agent/activity, milestones passed, blocker) and/or a mission (per-status task counts). Read-only; reflects the latest MCP tool call without waking an LLM.", {
+        task_id: z
+            .string()
+            .optional()
+            .describe("Task ID — returns the task projection (and its mission rollup)"),
+        mission_id: z
+            .string()
+            .optional()
+            .describe("Mission ID — returns the mission's per-status task counts"),
+    }, async ({ task_id, mission_id }) => {
+        if (!task_id && !mission_id) {
+            return text("Error: provide task_id and/or mission_id.");
+        }
+        const lines = [];
+        let missionId = mission_id;
+        if (task_id) {
+            const snap = await getDoc(doc(db, "tasks", task_id));
+            if (!snap.exists())
+                return text(`Error: Task ${task_id} not found.`);
+            const data = snap.data();
+            missionId = missionId || data.missionId;
+            const p = data.projection;
+            if (!p) {
+                lines.push(`Task ${task_id} ("${data.title ?? ""}") has no projection yet (status=${data.status ?? "?"}); it updates on the next MCP tool call.`);
+            }
+            else {
+                const when = p.lastActivityAt?.toDate?.().toISOString?.() ?? "(unknown)";
+                lines.push(`Task: ${data.title ?? task_id} (id=${task_id})`, `Current status: ${p.currentStatus ?? data.status ?? "?"}`, `Last agent: ${p.lastAgentId || "(none)"}`, `Last activity: ${p.lastActivitySummary || "(none)"} @ ${when}`, `Milestones passed: ${p.milestonesPassed?.length
+                    ? p.milestonesPassed.join(", ")
+                    : "(none)"}`);
+                if (p.blockerSummary)
+                    lines.push(`Blocker: ${p.blockerSummary}`);
+            }
+        }
+        if (missionId) {
+            const mSnap = await getDoc(doc(db, "missions", missionId));
+            if (mSnap.exists()) {
+                const mp = mSnap.data().projection;
+                const counts = mp?.statusCounts
+                    ? Object.entries(mp.statusCounts)
+                        .filter(([, n]) => n > 0)
+                        .map(([s, n]) => `${s}=${n}`)
+                        .join(", ")
+                    : "";
+                lines.push(`Mission ${missionId} task counts: ${counts || "(none)"}`);
+            }
+            else {
+                lines.push(`Mission ${missionId} not found.`);
+            }
+        }
+        return text(lines.join("\n"));
+    }, { userFacing: false });
     // 17. get_agents — Real-time agent list (Bridge first, Firestore fallback)
     auditedTool("get_agents", "Get all agents with real-time status from AgentManager. Falls back to Firestore if bridge is unavailable.", {
         project_id: z
@@ -831,7 +920,7 @@ export function registerTools(server) {
             return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${d.id})${task}`;
         });
         return text(`Agents (${snap.size}, Firestore fallback):\n${lines.join("\n")}`);
-    });
+    }, { userFacing: false });
     // ── reuse_agent — Send a new instruction to an existing idle agent
     auditedTool("reuse_agent", "Send a new task instruction to an existing idle agent via its PTY session. Use this BEFORE spawn_agent to check if an idle agent with the matching role already exists. The agent will receive the message in its terminal stdin.", {
         agent_name: z.string().describe("Name of the existing agent to reuse"),
@@ -1137,7 +1226,7 @@ export function registerTools(server) {
             return `- [${f.status}] ${f.name} (nodes=${nodeCount}, id=${d.id})`;
         });
         return text(`Flows (${snap.size}):\n${lines.join("\n")}`);
-    });
+    }, { userFacing: false });
     // 19. update_flow — Update an existing flow
     auditedTool("update_flow", "Update a flow. Can change name, nodes, edges, and status (draft/running/paused/completed/failed).", {
         flow_id: z.string().describe("Flow ID"),
@@ -1284,7 +1373,7 @@ export function registerTools(server) {
             return `- ${d.id} (from=${who}, src=${src})${delivered}: ${d.message}`;
         });
         return text(lines.join("\n"));
-    });
+    }, { userFacing: false });
     // 22. mark_instruction_delivered — Flip `isDelivered` to true after the
     //     marblo app has successfully injected the instruction into the PTY.
     //     This is the only mutation security rules permit on existing
@@ -1424,7 +1513,9 @@ export function registerTools(server) {
                 const summary = `${status} run_skill ${skill} (${durationMs}ms)\n` +
                     (outTail ? `---stdout (last 8KB)---\n${outTail}\n` : "") +
                     (errTail || errLine
-                        ? `---stderr---\n${[errLine, errTail].filter(Boolean).join("\n")}\n`
+                        ? `---stderr---\n${[errLine, errTail]
+                            .filter(Boolean)
+                            .join("\n")}\n`
                         : "");
                 resolve(text(summary.trim()));
             };

@@ -14,6 +14,7 @@ import {
   type QueryConstraint,
 } from "firebase/firestore";
 import { db } from "./firebase.js";
+import { applyProjection, type ApplyProjectionInput } from "./projection.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
@@ -550,11 +551,16 @@ export function registerTools(server: McpServer): void {
         return text("Error: Task dependencies are not yet met.");
       }
 
-      await updateDoc(doc(db, "tasks", task_id), {
-        status: "CLAIMED",
-        claimedBy: agent_id,
-        claimedAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
+      // Status update + Firestore projection in one transaction (Layer A).
+      // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+      await applyProjection(db, task_id, {
+        newStatus: "CLAIMED",
+        lastAgentId: agent_id,
+        lastActivitySummary: `claimed by ${agent_id}`,
+        extraTaskFields: { claimedBy: agent_id, claimedAt: Timestamp.now() },
+        // Re-check inside the transaction — closes the claim race the
+        // outside-the-txn `task.status !== "TODO"` check above can't.
+        validateFrom: (s) => s === "TODO",
       });
 
       const lines = [
@@ -599,13 +605,19 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      const updates: Record<string, unknown> = {
-        status: newStatus,
-        updatedAt: Timestamp.now(),
+      // Status update + Firestore projection in one transaction (Layer A).
+      // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+      const projMut: ApplyProjectionInput = {
+        newStatus,
+        lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+        lastActivitySummary: comment || `status → ${newStatus}`,
+        // Re-validate the transition inside the txn against the real status.
+        validateFrom: (s) => canTransition(s, newStatus),
       };
-      if (comment) updates.comment = comment;
-
-      await updateDoc(doc(db, "tasks", task_id), updates);
+      if (comment) projMut.extraTaskFields = { comment };
+      if (newStatus === "BLOCKED")
+        projMut.blockerSummary = comment || "blocked";
+      await applyProjection(db, task_id, projMut);
 
       // Signal agent is now free when task leaves active work state
       const doneStatuses = ["DONE", "REVIEW", "BLOCKED", "FAILED"];
@@ -698,11 +710,12 @@ export function registerTools(server: McpServer): void {
       // Agents tab Activity feed filters by `agentId in [our agents]`, so
       // logging "unknown" makes the activity invisible.
       const resolvedAgentId = agent_id || MARBLO_AGENT_ID;
-      await addDoc(collection(db, "activities"), {
-        taskId: task_id,
-        agentId: resolvedAgentId,
-        message,
-        createdAt: Timestamp.now(),
+      // Activity doc + Firestore projection (lastActivity*) in one transaction.
+      // No status change. Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+      await applyProjection(db, task_id, {
+        lastAgentId: resolvedAgentId === "unknown" ? "" : resolvedAgentId,
+        lastActivitySummary: message,
+        activityPayload: { agentId: resolvedAgentId, message },
       });
       return text(`Activity logged: ${message}`);
     }
@@ -725,19 +738,29 @@ export function registerTools(server: McpServer): void {
         return text(`Task '${task.title}' is already DONE.`);
       }
 
-      const updates: Record<string, unknown> = {
-        status: "REVIEW",
-        updatedAt: Timestamp.now(),
+      // Status → REVIEW + milestone + Firestore projection in one transaction.
+      // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+      const projMut: ApplyProjectionInput = {
+        newStatus: "REVIEW",
+        lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+        lastActivitySummary: pr_url
+          ? `submitted for review — ${pr_url}`
+          : "submitted for review",
+        appendMilestone: true,
+        // submit auto-claims from any non-terminal state (incl. TODO), so the
+        // guard only blocks an already-DONE task — mirrors the check above,
+        // re-checked inside the txn to close the race.
+        validateFrom: (s) => s !== "DONE",
       };
-      if (pr_url) updates.prUrl = pr_url;
-
+      const extra: Record<string, unknown> = {};
+      if (pr_url) extra.prUrl = pr_url;
       // Auto-claim if the task was never claimed
       if (!task.claimedBy) {
-        updates.claimedBy = MARBLO_AGENT_ID;
-        updates.claimedAt = Timestamp.now();
+        extra.claimedBy = MARBLO_AGENT_ID;
+        extra.claimedAt = Timestamp.now();
       }
-
-      await updateDoc(doc(db, "tasks", task_id), updates);
+      if (Object.keys(extra).length) projMut.extraTaskFields = extra;
+      await applyProjection(db, task_id, projMut);
 
       // Signal agent is now free
       if (MARBLO_AGENT_ID) {
@@ -1096,6 +1119,100 @@ export function registerTools(server: McpServer): void {
         `PR URL: ${task.prUrl || "(none)"}`,
         `Has PM feedback: ${task.hasPmFeedback}`,
       ];
+      return text(lines.join("\n"));
+    },
+    { userFacing: false }
+  );
+
+  // 16b. get_projection — Layer A read path. Lets the orchestrator answer
+  // "what's happening now?" with a single read instead of waking an LLM.
+  // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3, §7
+  auditedTool(
+    "get_projection",
+    "Get the live projection snapshot for a task (current status, last agent/activity, milestones passed, blocker) and/or a mission (per-status task counts). Read-only; reflects the latest MCP tool call without waking an LLM.",
+    {
+      task_id: z
+        .string()
+        .optional()
+        .describe(
+          "Task ID — returns the task projection (and its mission rollup)"
+        ),
+      mission_id: z
+        .string()
+        .optional()
+        .describe("Mission ID — returns the mission's per-status task counts"),
+    },
+    async ({ task_id, mission_id }) => {
+      if (!task_id && !mission_id) {
+        return text("Error: provide task_id and/or mission_id.");
+      }
+      const lines: string[] = [];
+      let missionId = mission_id;
+
+      if (task_id) {
+        const snap = await getDoc(doc(db, "tasks", task_id));
+        if (!snap.exists()) return text(`Error: Task ${task_id} not found.`);
+        const data = snap.data() as {
+          title?: string;
+          status?: string;
+          missionId?: string;
+          projection?: {
+            currentStatus?: string;
+            lastAgentId?: string;
+            lastActivityAt?: Timestamp;
+            lastActivitySummary?: string;
+            milestonesPassed?: string[];
+            blockerSummary?: string;
+          };
+        };
+        missionId = missionId || data.missionId;
+        const p = data.projection;
+        if (!p) {
+          lines.push(
+            `Task ${task_id} ("${
+              data.title ?? ""
+            }") has no projection yet (status=${
+              data.status ?? "?"
+            }); it updates on the next MCP tool call.`
+          );
+        } else {
+          const when =
+            p.lastActivityAt?.toDate?.().toISOString?.() ?? "(unknown)";
+          lines.push(
+            `Task: ${data.title ?? task_id} (id=${task_id})`,
+            `Current status: ${p.currentStatus ?? data.status ?? "?"}`,
+            `Last agent: ${p.lastAgentId || "(none)"}`,
+            `Last activity: ${p.lastActivitySummary || "(none)"} @ ${when}`,
+            `Milestones passed: ${
+              p.milestonesPassed?.length
+                ? p.milestonesPassed.join(", ")
+                : "(none)"
+            }`
+          );
+          if (p.blockerSummary) lines.push(`Blocker: ${p.blockerSummary}`);
+        }
+      }
+
+      if (missionId) {
+        const mSnap = await getDoc(doc(db, "missions", missionId));
+        if (mSnap.exists()) {
+          const mp = (
+            mSnap.data() as {
+              projection?: { statusCounts?: Record<string, number> };
+            }
+          ).projection;
+          const counts = mp?.statusCounts
+            ? Object.entries(mp.statusCounts)
+                .filter(([, n]) => n > 0)
+                .map(([s, n]) => `${s}=${n}`)
+                .join(", ")
+            : "";
+          lines.push(`Mission ${missionId} task counts: ${counts || "(none)"}`);
+        } else {
+          lines.push(`Mission ${missionId} not found.`);
+        }
+      }
+
       return text(lines.join("\n"));
     },
     { userFacing: false }
