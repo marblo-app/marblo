@@ -129,24 +129,23 @@ export function useAgentReconnect() {
 
     try {
       setOrchestratorStatus("starting");
-      const list =
-        await window.electronAPI.orchestratorSession.listSessions(rootPath);
-      const orchSession = list.find(
-        (s: { label?: string }) => s.label === "Orchestrator",
-      );
-      if (!orchSession) {
+      // Resolve via label OR content signature so wake-reconnect works even
+      // without a labels file (the common case).
+      const priorId =
+        await window.electronAPI.orchestratorSession.resolvePrevious(rootPath);
+      if (!priorId) {
         setOrchestratorStatus("stopped");
         return;
       }
       const result = await window.electronAPI.orchestratorSession.launch(
         currentProject.id,
         rootPath,
-        orchSession.id,
+        priorId,
       );
       if (result) {
         setSession(result.sessionId, result.ptySessionId);
         setOrchestratorStatus("running");
-        console.log("[Reconnect] Orchestrator re-attached:", orchSession.id);
+        console.log("[Reconnect] Orchestrator re-attached:", priorId);
       }
     } catch (err) {
       console.error("[Reconnect] Orchestrator reconnect failed:", err);

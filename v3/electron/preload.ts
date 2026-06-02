@@ -71,7 +71,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       cwd: string,
       initialPrompt?: string,
       resumeSessionId?: string,
-      projectId?: string
+      projectId?: string,
     ) =>
       ipcRenderer.invoke("agent:launch", {
         agent,
@@ -86,7 +86,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     list: (projectId?: string) => ipcRenderer.invoke("agent:list", projectId),
     remove: (id: string) => ipcRenderer.invoke("agent:remove", id),
     onStatusChange: (
-      callback: (data: { agentId: string; status: string }) => void
+      callback: (data: { agentId: string; status: string }) => void,
     ) => {
       ipcRenderer.on("agent:statusChanged", (_event, data) => callback(data));
     },
@@ -96,12 +96,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
         agentId: string;
         attempt: number;
         maxAttempts: number;
-      }) => void
+      }) => void,
     ) => {
       ipcRenderer.on("agent:restartAttempt", (_event, data) => callback(data));
     },
     onRestartFailed: (
-      callback: (data: { agentId: string; exitCode: number }) => void
+      callback: (data: { agentId: string; exitCode: number }) => void,
     ) => {
       ipcRenderer.on("agent:restartFailed", (_event, data) => callback(data));
     },
@@ -115,7 +115,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         cacheReadTokens: number;
         cacheWriteTokens: number;
         totalCost: number;
-      }) => void
+      }) => void,
     ) => {
       ipcRenderer.on("cost:update", (_event, data) => callback(data));
     },
@@ -131,7 +131,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         command: string;
       }>,
       rootPath: string,
-      projectId: string
+      projectId: string,
     ) => ipcRenderer.invoke("agent:reconnect", { agents, rootPath, projectId }),
     onSyncStatus: (
       callback: (data: {
@@ -139,9 +139,28 @@ contextBridge.exposeInMainWorld("electronAPI", {
         agentName: string;
         status: string;
         currentTaskId: string | null;
-      }) => void
+      }) => void,
     ) => {
       ipcRenderer.on("agent:syncStatus", (_event, data) => callback(data));
+    },
+  },
+  missionOrchestrator: {
+    start: (args: {
+      projectId: string;
+      rootPath: string;
+      modelType?: string;
+    }) => ipcRenderer.invoke("missionOrchestrator:start", args),
+    getSession: (projectId: string) =>
+      ipcRenderer.invoke("missionOrchestrator:getSession", projectId),
+    stop: (projectId: string) =>
+      ipcRenderer.invoke("missionOrchestrator:stop", projectId),
+    onStatusChange: (callback: (data: { status: string }) => void) => {
+      ipcRenderer.on("missionOrchestrator:statusChanged", (_event, data) =>
+        callback(data),
+      );
+    },
+    removeStatusListener: () => {
+      ipcRenderer.removeAllListeners("missionOrchestrator:statusChanged");
     },
   },
   orchestrator: {
@@ -156,7 +175,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         depends_on: string[];
         scope: string[];
         estimatedHours: number;
-      }>
+      }>,
     ) => ipcRenderer.invoke("orchestrator:createTasks", tasks),
   },
   orchestratorSession: {
@@ -170,9 +189,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     status: () => ipcRenderer.invoke("orchestratorSession:status"),
     listSessions: (rootPath: string) =>
       ipcRenderer.invoke("orchestratorSession:listSessions", rootPath),
+    resolvePrevious: (rootPath: string): Promise<string | null> =>
+      ipcRenderer.invoke("orchestratorSession:resolvePrevious", rootPath),
     onStatusChange: (callback: (data: { status: string }) => void) => {
       ipcRenderer.on("orchestrator:statusChanged", (_event, data) =>
-        callback(data)
+        callback(data),
       );
     },
     onAgentSpawned: (
@@ -182,7 +203,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ptySessionId: string;
         model: string;
         role: string;
-      }) => void
+      }) => void,
     ) => {
       ipcRenderer.on("agent:spawned", (_event, data) => callback(data));
     },
@@ -193,7 +214,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     pause: (runId: string) => ipcRenderer.invoke("flow:pause", { runId }),
     resume: (
       runId: string,
-      humanInput?: { nodeId: string; approved: boolean; data?: unknown }
+      humanInput?: { nodeId: string; approved: boolean; data?: unknown },
     ) => ipcRenderer.invoke("flow:resume", { runId, humanInput }),
     cancel: (runId: string) => ipcRenderer.invoke("flow:cancel", { runId }),
     getState: (runId: string) => ipcRenderer.invoke("flow:getState", { runId }),
@@ -253,7 +274,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         monthlyFlatUsd: number;
         monthlyTokenAllowance?: number;
         overagePerToken?: { inputPer1M: number; outputPer1M: number };
-      }>
+      }>,
     ) =>
       ipcRenderer.invoke("subscriptionPlans:save", plans) as Promise<{
         success: boolean;
@@ -339,7 +360,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     watch: (rootPath: string) => ipcRenderer.invoke("fs:watch", rootPath),
     onFileChange: (callback: (event: string, filePath: string) => void) => {
       ipcRenderer.on("fs:change", (_event, ev, fp) =>
-        callback(ev as string, fp as string)
+        callback(ev as string, fp as string),
       );
     },
     offFileChange: () => {

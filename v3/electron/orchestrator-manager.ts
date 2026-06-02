@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { encodeClaudeProjectDir, claudeProjectDir } from "./claude-paths";
 import { PtyManager } from "./pty-manager";
 import { AgentConfigGenerator, LaunchConfig } from "./agent-config";
 import type { ModelType } from "./agent-manager";
@@ -65,6 +66,76 @@ export function isSummaryOnlyJsonl(filePath: string): boolean {
 }
 
 /**
+ * The orchestrator's Claude session is always seeded with this exact opening
+ * line (see launch()'s initialPrompt). No agent or user session ever starts
+ * with it, so it's a reliable, label-independent fingerprint for "this is the
+ * orchestrator's own session". We use it both to label precisely in a busy
+ * project dir (where agents + background jobs write JSONLs concurrently) and
+ * to recover the prior session when marblo-labels.json is missing — which is
+ * the common case in practice, and exactly why label-only matching failed.
+ */
+export const ORCHESTRATOR_PROMPT_SIGNATURE =
+  "You are the Marblo Orchestrator Agent";
+
+/**
+ * True if one of the first few user-role messages in a session JSONL starts
+ * with `signature`. Reads a bounded prefix — the opening turn sits near the
+ * top even with the newer metadata-prefixed session format. Checks a few
+ * user turns (not just the first) to tolerate a leading synthetic user line.
+ */
+export function firstUserMessageStartsWith(
+  filePath: string,
+  signature: string,
+): boolean {
+  try {
+    const stat = fs.statSync(filePath);
+    const readBytes = Math.min(stat.size, 256 * 1024);
+    const fd = fs.openSync(filePath, "r");
+    const buf = Buffer.alloc(readBytes);
+    fs.readSync(fd, buf, 0, readBytes, 0);
+    fs.closeSync(fd);
+    let userTurnsSeen = 0;
+    for (const line of buf.toString("utf-8").split("\n")) {
+      if (!line.trim()) continue;
+      let j: { type?: string; message?: { content?: unknown } };
+      try {
+        j = JSON.parse(line);
+      } catch {
+        continue; // truncated trailing line — skip
+      }
+      if (j.type !== "user") continue;
+      const content = j.message?.content;
+      let text = "";
+      if (typeof content === "string") text = content;
+      else if (Array.isArray(content))
+        text = content
+          .map((c) =>
+            typeof c === "string" ? c : ((c as { text?: string })?.text ?? ""),
+          )
+          .join(" ");
+      if (text.trimStart().startsWith(signature)) return true;
+      if (++userTurnsSeen >= 3) return false;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True if `sessionId` is an orchestrator session (its opening turn is the
+ * orchestrator prompt). Used by agent reconnect to make sure an agent never
+ * adopts the orchestrator's session via its "most-recent unclaimed" fallback.
+ */
+export function isOrchestratorSession(
+  rootPath: string,
+  sessionId: string,
+): boolean {
+  const p = path.join(claudeProjectDir(rootPath), `${sessionId}.jsonl`);
+  return firstUserMessageStartsWith(p, ORCHESTRATOR_PROMPT_SIGNATURE);
+}
+
+/**
  * Manages the single orchestrator Claude Code session.
  * One orchestrator per app — it supervises agents via MCP tools.
  */
@@ -84,14 +155,22 @@ export class OrchestratorManager {
   } | null = null;
   private lastOnPtyReady?: (ptySessionId: string) => void;
 
+  // kind: 같은 projectId 안에서 여러 orchestrator (board, mission) 를 분리하기 위한
+  // 식별 prefix. 'board' (default) 외에 'mission' 등을 주면 sessionId 가
+  // `orchestrator-${kind}-${projectId}` 가 되어 Firestore 도큐/MCP config/세션
+  // 자동 resume 이 서로 충돌하지 않는다.
+  private readonly kind: string;
+
   constructor(
     ptyManager: PtyManager,
     configGenerator: AgentConfigGenerator,
     onStatusChange?: (status: OrchestratorStatus) => void,
+    kind: string = "board",
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = configGenerator;
     this.onStatusChange = onStatusChange;
+    this.kind = kind;
   }
 
   isRunning(): boolean {
@@ -125,17 +204,27 @@ export class OrchestratorManager {
     // and the Firestore agents/* doc key — so the renderer can upsert one
     // canonical orchestrator doc per project instead of leaking a fresh row
     // on every relaunch.
-    const sessionId = `orchestrator-${projectId}`;
+    // kind 가 'board' (default) 면 기존 호환을 위해 prefix 없이, 그 외 (mission 등)
+    // 는 별도 sessionId 로 board 와 분리.
+    const sessionId =
+      this.kind === "board"
+        ? `orchestrator-${projectId}`
+        : `orchestrator-${this.kind}-${projectId}`;
     // PTY id stays unique per launch so a stale auto-restart timer can't
     // attach to a freshly spawned PTY.
     const ptySessionId = `orch-${sessionId}-${Date.now()}`;
 
     this.setStatus("starting");
 
-    // Determine resume mode
-    const shouldResume = resumeSessionId || this.hasClaudeSession(rootPath);
+    // Determine resume mode.
+    // board (default kind) 는 기존대로 rootPath 에 세션 있으면 auto-resume.
+    // 다른 kind (mission 등) 는 board 와 같은 세션을 동시에 resume 하면 충돌
+    // (PTY 가 비어 보이는 증상) → 명시적 resumeSessionId 가 주어진 경우에만 resume.
+    const allowAutoResume = this.kind === "board";
+    const shouldResume =
+      resumeSessionId || (allowAutoResume && this.hasClaudeSession(rootPath));
     console.log(
-      `[Orchestrator] rootPath=${rootPath}, resumeSessionId=${
+      `[Orchestrator:${this.kind}] rootPath=${rootPath}, resumeSessionId=${
         resumeSessionId || "auto"
       }, shouldResume=${!!shouldResume}`,
     );
@@ -301,19 +390,44 @@ export class OrchestratorManager {
       setTimeout(sendPrompt, 10000);
     }
 
-    // Detect new session and auto-label it
-    const existingIds = new Set(this.listSessions(rootPath).map((s) => s.id));
-    setTimeout(() => {
-      try {
-        const current = this.listSessions(rootPath);
-        const newSession = current.find((s) => !existingIds.has(s.id));
-        if (newSession) {
-          this.saveSessionLabel(rootPath, newSession.id, "Orchestrator");
-        }
-      } catch {
-        /* best-effort */
+    // Detect new session and auto-label it.
+    //
+    // board kind keeps the bare "Orchestrator" label the renderer's
+    // auto-reconnect lookup (s.label === "Orchestrator") matches on; other
+    // kinds get a suffixed label so two orchestrators sharing a rootPath
+    // don't claim each other's session.
+    const labelTarget =
+      this.kind === "board" ? "Orchestrator" : `Orchestrator-${this.kind}`;
+
+    // Resume of a known session id — (re)label it directly so the label
+    // survives even if it was ever lost. Cheap and idempotent.
+    if (
+      resumeSessionId &&
+      resumeSessionId !== "new" &&
+      resumeSessionId !== "latest"
+    ) {
+      const resolvedId = this.resolveSessionId(rootPath, resumeSessionId);
+      if (resolvedId) {
+        this.saveSessionLabel(rootPath, resolvedId, labelTarget);
+        this.saveOrchSessionId(rootPath, resolvedId);
       }
-    }, 5000);
+    }
+
+    // New session — poll for the freshly created jsonl and label it. The
+    // previous single 5s snapshot via listSessions failed ~100% of the
+    // time: orchestrator startup loads the marblo MCP (a node process)
+    // before the initial prompt is sent, so the first real message — and
+    // sometimes the jsonl file itself — lands well after 5s, and
+    // listSessions filters summary-only/empty stubs out entirely. We use
+    // raw readdir (no summary filter, matching the agent detector) and
+    // retry over ~40s so a slow-booting session still gets labeled.
+    const existingRawIds = new Set(this.listRawSessionIds(rootPath));
+    this.detectAndLabelNewSession(
+      rootPath,
+      ptySessionId,
+      existingRawIds,
+      labelTarget,
+    );
 
     // Monitor PTY exit — auto-restart on crash
     this.ptyManager.onExit(ptySessionId, (exitCode) => {
@@ -397,7 +511,7 @@ export class OrchestratorManager {
   // --- Session label helpers ---
 
   private getLabelsPath(rootPath: string): string {
-    const encodedPath = rootPath.replace(/\//g, "-");
+    const encodedPath = encodeClaudeProjectDir(rootPath);
     return path.join(
       os.homedir(),
       ".claude",
@@ -442,7 +556,7 @@ export class OrchestratorManager {
     agentId?: string;
   }[] {
     try {
-      const encodedPath = rootPath.replace(/\//g, "-");
+      const encodedPath = encodeClaudeProjectDir(rootPath);
       const sessionsDir = path.join(
         os.homedir(),
         ".claude",
@@ -499,6 +613,221 @@ export class OrchestratorManager {
 
   private hasClaudeSession(rootPath: string): boolean {
     return this.listSessions(rootPath).length > 0;
+  }
+
+  /**
+   * Raw session ids from the project dir — NO summary-only filter, unlike
+   * listSessions. A just-created session jsonl is often empty or a summary
+   * stub; the filtered list would hide it, which is exactly why orchestrator
+   * labeling used to miss the new session. Mirrors the agent detector.
+   */
+  private listRawSessionIds(rootPath: string): string[] {
+    try {
+      const encodedPath = encodeClaudeProjectDir(rootPath);
+      const sessionsDir = path.join(
+        os.homedir(),
+        ".claude",
+        "projects",
+        encodedPath,
+      );
+      if (!fs.existsSync(sessionsDir)) return [];
+      return fs
+        .readdirSync(sessionsDir)
+        .filter((f) => f.endsWith(".jsonl"))
+        .map((f) => f.replace(".jsonl", ""));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Poll the project dir until a new session id (not in `existingIds`)
+   * appears, then persist `label` for it. Retries over ~40s because the
+   * orchestrator's first jsonl can lag far behind a fixed delay (slow MCP
+   * load + readiness-gated initial prompt). Stops early if the launch was
+   * superseded (relaunch/stop) so a stale timer can't mislabel.
+   */
+  private detectAndLabelNewSession(
+    rootPath: string,
+    ptySessionId: string,
+    existingIds: Set<string>,
+    label: string,
+  ): void {
+    const MAX_ATTEMPTS = 20;
+    const INTERVAL_MS = 2000;
+    let attempts = 0;
+
+    const encodedPath = encodeClaudeProjectDir(rootPath);
+    const dir = path.join(os.homedir(), ".claude", "projects", encodedPath);
+
+    const tick = () => {
+      // Superseded by a newer launch/stop — bail.
+      if (this.session?.ptySessionId !== ptySessionId) return;
+      attempts++;
+
+      // Only label a NEW session whose opening turn is the orchestrator
+      // prompt. Picking "the newest new file" mislabels in shared project
+      // dirs where agents and background jobs stream JSONLs at the same
+      // time; the signature check pins it to the orchestrator's own session.
+      // It also means we just keep polling until the prompt is actually
+      // written (slow MCP boot) instead of labeling an empty stub.
+      const match = this.listRawSessionIds(rootPath)
+        .filter((id) => !existingIds.has(id))
+        .find((id) =>
+          firstUserMessageStartsWith(
+            path.join(dir, `${id}.jsonl`),
+            ORCHESTRATOR_PROMPT_SIGNATURE,
+          ),
+        );
+      if (match) {
+        this.saveSessionLabel(rootPath, match, label);
+        this.saveOrchSessionId(rootPath, match);
+        console.log(
+          `[Orchestrator:${this.kind}] Labeled session ${match} as "${label}" (attempt ${attempts})`,
+        );
+        return;
+      }
+
+      if (attempts < MAX_ATTEMPTS) {
+        setTimeout(tick, INTERVAL_MS);
+      } else {
+        console.warn(
+          `[Orchestrator:${this.kind}] No orchestrator session detected after ${attempts} attempts — left unlabeled (content-scan resolver still recovers it)`,
+        );
+      }
+    };
+
+    setTimeout(tick, INTERVAL_MS);
+  }
+
+  /**
+   * Best previous-orchestrator-session id for `rootPath`, or null.
+   *
+   * Tries the fast label path first, then falls back to a content scan that
+   * fingerprints the orchestrator's own session by its opening prompt. The
+   * fallback is what makes reconnect work when marblo-labels.json is absent
+   * (the usual case) — mirroring how agent reconnect tolerates a missing
+   * labels file. When found by content we (re)write the label so the next
+   * lookup hits the fast path.
+   */
+  resolveOrchestratorResumeId(rootPath: string): string | null {
+    const labelTarget =
+      this.kind === "board" ? "Orchestrator" : `Orchestrator-${this.kind}`;
+
+    // 1) Dedicated stable-id store — the agy-style robust path: a direct
+    //    kind → claude-session-UUID mapping, O(1) and unambiguous, no shared
+    //    dir scan. Validate the session still exists and isn't a summary-only
+    //    stub before trusting it.
+    const stored = this.readOrchStore(rootPath)[this.kind]?.sessionId;
+    if (stored && this.isResumableSession(rootPath, stored)) return stored;
+
+    // 2) Label fast path (legacy + self-written by detection).
+    const byLabel = this.resolveSessionId(rootPath, "latest", labelTarget);
+    if (byLabel && this.isResumableSession(rootPath, byLabel)) {
+      this.saveOrchSessionId(rootPath, byLabel);
+      return byLabel;
+    }
+
+    // 3) Content-signature recovery — the common first-run / post-upgrade
+    //    case where neither store nor label exists yet. Self-heal both.
+    const byContent = this.findOrchestratorSessionByContent(rootPath);
+    if (byContent) {
+      this.saveSessionLabel(rootPath, byContent, labelTarget);
+      this.saveOrchSessionId(rootPath, byContent);
+      console.log(
+        `[Orchestrator:${this.kind}] Recovered prior session ${byContent} by content signature → persisted (store + label)`,
+      );
+    }
+    return byContent;
+  }
+
+  /**
+   * Dedicated orchestrator-session store, keyed by `kind` within the project
+   * dir — the same robustness model the non-Claude agents rely on (a stable
+   * id → concrete session mapping in a private file, not a scan of the shared
+   * session dir). board/mission live under distinct keys.
+   */
+  private getOrchStorePath(rootPath: string): string {
+    const encodedPath = encodeClaudeProjectDir(rootPath);
+    return path.join(
+      os.homedir(),
+      ".claude",
+      "projects",
+      encodedPath,
+      "marblo-orch-sessions.json",
+    );
+  }
+
+  private readOrchStore(
+    rootPath: string,
+  ): Record<string, { sessionId: string; updatedAt: number }> {
+    try {
+      return JSON.parse(
+        fs.readFileSync(this.getOrchStorePath(rootPath), "utf-8"),
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  /** Persist this orchestrator's claude session id under its `kind` key. */
+  saveOrchSessionId(rootPath: string, claudeSessionId: string): void {
+    const store = this.readOrchStore(rootPath);
+    store[this.kind] = { sessionId: claudeSessionId, updatedAt: Date.now() };
+    try {
+      fs.writeFileSync(
+        this.getOrchStorePath(rootPath),
+        JSON.stringify(store, null, 2),
+        "utf-8",
+      );
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /** True if `id` is a real, resumable session (exists, not a summary stub). */
+  private isResumableSession(rootPath: string, id: string): boolean {
+    const encodedPath = encodeClaudeProjectDir(rootPath);
+    const p = path.join(
+      os.homedir(),
+      ".claude",
+      "projects",
+      encodedPath,
+      `${id}.jsonl`,
+    );
+    return fs.existsSync(p) && !isSummaryOnlyJsonl(p);
+  }
+
+  /**
+   * Most-recently-modified session whose opening turn is the orchestrator
+   * prompt. Label-independent, so it survives a missing/stale labels file.
+   */
+  private findOrchestratorSessionByContent(rootPath: string): string | null {
+    try {
+      const encodedPath = encodeClaudeProjectDir(rootPath);
+      const dir = path.join(os.homedir(), ".claude", "projects", encodedPath);
+      if (!fs.existsSync(dir)) return null;
+      const candidates = fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith(".jsonl"))
+        .map((f) => {
+          const p = path.join(dir, f);
+          return {
+            id: f.replace(".jsonl", ""),
+            p,
+            mtime: fs.statSync(p).mtimeMs,
+          };
+        })
+        .sort((a, b) => b.mtime - a.mtime);
+      for (const c of candidates) {
+        if (firstUserMessageStartsWith(c.p, ORCHESTRATOR_PROMPT_SIGNATURE)) {
+          return c.id;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   private setStatus(status: OrchestratorStatus): void {

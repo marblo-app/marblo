@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { isSummaryOnlyJsonl } from "./orchestrator-manager";
+import { encodeClaudeProjectDir } from "./claude-paths";
 
 export interface ReconnectCandidate {
   agentId: string;
@@ -28,7 +29,7 @@ export function findReconnectCandidates(
   agents: Array<{ id: string; name: string; role: string }>,
   rootPath: string,
 ): ReconnectCandidate[] {
-  const encodedPath = rootPath.replace(/\//g, "-");
+  const encodedPath = encodeClaudeProjectDir(rootPath);
   const projectDir = path.join(
     os.homedir(),
     ".claude",
