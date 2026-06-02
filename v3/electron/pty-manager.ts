@@ -8,6 +8,16 @@ export interface PtySession {
   shell: string;
 }
 
+// Output that only appears once an agent CLI has actually accepted a submit
+// (started a turn). Used by writeAndSubmit to confirm the Enter keystroke
+// registered. Kept harness-agnostic but tuned for Claude Code:
+//   - "esc to interrupt" — Claude/Codex/agy busy footer
+//   - spinner glyphs ✻✶✳✽✢ — Claude working animation
+//   - "↓ N tokens" / "tokens)" — streaming token counter
+// Deliberately does NOT include the idle footer (`⏵⏵ auto mode`, `? for
+// shortcuts`) which is present even when nothing was submitted.
+const SUBMIT_SIGNAL = /esc to interrupt|[✻✶✳✽✢]|↓\s*\d+\s*tokens|tokens\)/i;
+
 export class PtyManager {
   private sessions: Map<string, PtySession> = new Map();
 
@@ -17,7 +27,7 @@ export class PtyManager {
     command?: string,
     args?: string[],
     cwd?: string,
-    env?: Record<string, string>
+    env?: Record<string, string>,
   ): PtySession {
     const shell =
       command ||
@@ -40,7 +50,7 @@ export class PtyManager {
         `[PtyManager] Failed to spawn shell="${shell}" cwd="${
           cwd || os.homedir()
         }":`,
-        err
+        err,
       );
       throw err;
     }
@@ -81,7 +91,7 @@ export class PtyManager {
     id: string,
     text: string,
     delayMs = 150,
-    bracketedPaste = true
+    bracketedPaste = true,
   ): void {
     const session = this.sessions.get(id);
     if (!session) return;
@@ -90,10 +100,65 @@ export class PtyManager {
     } else {
       session.process.write(text);
     }
+
+    // The trailing CR must register as a DISCRETE submit keystroke. A single
+    // fixed gap is a timing race: under load (busy Electron main loop, many
+    // agents streaming PTY output) the CR can get folded into the paste
+    // buffer as a newline, leaving the message sitting in the composer
+    // unsubmitted — the user then has to press Enter manually. So instead of
+    // trusting one gap, send the CR, watch the PTY for a submit signal, and
+    // resend the CR if the agent didn't react.
+    setTimeout(() => this.submitWithRetry(id, 0), delayMs);
+  }
+
+  // Max number of CR (Enter) keystrokes to send before giving up.
+  private static readonly SUBMIT_MAX_ATTEMPTS = 3;
+  // How long to watch PTY output for a submit signal after each CR.
+  private static readonly SUBMIT_VERIFY_MS = 600;
+
+  /**
+   * Send a CR to the session, then verify the agent actually started a turn.
+   * Resends (up to SUBMIT_MAX_ATTEMPTS) if no submit signal is observed.
+   * A redundant CR landing on an already-submitted/empty composer is a
+   * no-op for the TUIs we drive, so over-sending is safe.
+   */
+  private submitWithRetry(id: string, attempt: number): void {
+    const session = this.sessions.get(id);
+    if (!session) return;
+
+    let reacted = false;
+    const disposable = session.process.onData((chunk: string) => {
+      if (SUBMIT_SIGNAL.test(chunk)) reacted = true;
+    });
+
+    session.process.write("\r");
+
     setTimeout(() => {
-      const s = this.sessions.get(id);
-      if (s) s.process.write("\r");
-    }, delayMs);
+      disposable.dispose();
+      if (reacted) {
+        if (attempt > 0) {
+          console.log(
+            `[PtyManager] submit confirmed for ${id} after ${attempt} retr${
+              attempt === 1 ? "y" : "ies"
+            }`,
+          );
+        }
+        return;
+      }
+      if (!this.sessions.has(id)) return;
+      if (attempt + 1 < PtyManager.SUBMIT_MAX_ATTEMPTS) {
+        console.warn(
+          `[PtyManager] Enter not registered for ${id} (attempt ${
+            attempt + 1
+          }/${PtyManager.SUBMIT_MAX_ATTEMPTS}) — resending CR`,
+        );
+        this.submitWithRetry(id, attempt + 1);
+      } else {
+        console.error(
+          `[PtyManager] Enter still not registered for ${id} after ${PtyManager.SUBMIT_MAX_ATTEMPTS} attempts — message may be sitting unsubmitted in the composer`,
+        );
+      }
+    }, PtyManager.SUBMIT_VERIFY_MS);
   }
 
   resize(id: string, cols: number, rows: number): void {

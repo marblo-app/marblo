@@ -40,6 +40,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.send("pty:write", { id, data });
       return Promise.resolve();
     },
+    // Inject a message and submit it as a discrete Enter (verify-and-retry
+    // CR). Use for programmatic sends (not raw keystroke passthrough).
+    writeAndSubmit: (
+      id: string,
+      data: string,
+      bracketedPaste?: boolean,
+    ): Promise<void> => {
+      ipcRenderer.send("pty:writeAndSubmit", { id, data, bracketedPaste });
+      return Promise.resolve();
+    },
     resize: (id: string, cols: number, rows: number) =>
       ipcRenderer.invoke("pty:resize", { id, cols, rows }),
     kill: (id: string) => ipcRenderer.invoke("pty:kill", { id }),

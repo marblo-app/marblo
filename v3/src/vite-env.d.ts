@@ -55,6 +55,11 @@ interface PtyAPI {
     cwd?: string;
   }) => Promise<{ id: string; name: string; shell: string }>;
   write: (id: string, data: string) => Promise<void>;
+  writeAndSubmit: (
+    id: string,
+    data: string,
+    bracketedPaste?: boolean,
+  ) => Promise<void>;
   resize: (id: string, cols: number, rows: number) => Promise<void>;
   kill: (id: string) => Promise<void>;
   list: () => Promise<{ id: string; name: string }[]>;

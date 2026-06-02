@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { addActivity } from '../../services/activityService';
+import { useState, useRef, useEffect } from "react";
+import { addActivity } from "../../services/activityService";
 
 interface FeedbackEntry {
   text: string;
@@ -11,8 +11,11 @@ interface FeedbackInputProps {
   taskId?: string;
 }
 
-export default function FeedbackInput({ sessionId, taskId }: FeedbackInputProps) {
-  const [text, setText] = useState('');
+export default function FeedbackInput({
+  sessionId,
+  taskId,
+}: FeedbackInputProps) {
+  const [text, setText] = useState("");
   const [history, setHistory] = useState<FeedbackEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [sending, setSending] = useState(false);
@@ -28,8 +31,10 @@ export default function FeedbackInput({ sessionId, taskId }: FeedbackInputProps)
 
     setSending(true);
     try {
-      // PTY stdin에 텍스트 주입
-      await window.electronAPI.pty.write(sessionId, trimmed + '\n');
+      // PTY stdin에 메시지 주입 + 제출(Enter). plain write+'\n'는 claude
+      // 제출키(\r)가 아니라 composer에 줄바꿈만 남아 제출이 안 됨 →
+      // writeAndSubmit(verify-and-retry CR)로 보낸다.
+      await window.electronAPI.pty.writeAndSubmit(sessionId, trimmed);
 
       // 히스토리에 추가
       const entry: FeedbackEntry = { text: trimmed, sentAt: new Date() };
@@ -37,28 +42,28 @@ export default function FeedbackInput({ sessionId, taskId }: FeedbackInputProps)
 
       // Firestore에 기록
       if (taskId) {
-        await addActivity(taskId, 'pm', `[PM 피드백] ${trimmed}`);
+        await addActivity(taskId, "pm", `[PM 피드백] ${trimmed}`);
       }
 
-      setText('');
+      setText("");
     } catch (err) {
-      console.error('피드백 전송 실패:', err);
+      console.error("피드백 전송 실패:", err);
     } finally {
       setSending(false);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
   const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('ko-KR', {
-      hour: '2-digit',
-      minute: '2-digit',
+    return date.toLocaleTimeString("ko-KR", {
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
@@ -88,7 +93,12 @@ export default function FeedbackInput({ sessionId, taskId }: FeedbackInputProps)
             className="flex-shrink-0 text-[#6c7086] hover:text-[#a6adc8] transition-colors"
             title="피드백 히스토리"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -115,7 +125,7 @@ export default function FeedbackInput({ sessionId, taskId }: FeedbackInputProps)
           disabled={!text.trim() || !sessionId || sending}
           className="flex-shrink-0 rounded bg-[#89b4fa] px-3 py-1.5 text-sm font-medium text-[#1e1e2e] hover:bg-[#74c7ec] disabled:opacity-40 transition-colors"
         >
-          {sending ? '...' : '전송'}
+          {sending ? "..." : "전송"}
         </button>
       </div>
     </div>

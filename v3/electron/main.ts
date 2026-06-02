@@ -1138,6 +1138,24 @@ ipcMain.on("pty:write", (_event, { id, data }) => {
   ptyManager.write(id, data);
 });
 
+// pty:writeAndSubmit — inject a message and submit it as a discrete Enter.
+// Used by programmatic senders (e.g. FeedbackInput) that aren't raw keystroke
+// passthrough: routes through the same verify-and-retry submit logic as
+// orchestrator/agent message injection so the CR actually registers.
+ipcMain.on(
+  "pty:writeAndSubmit",
+  (
+    _event,
+    {
+      id,
+      data,
+      bracketedPaste,
+    }: { id: string; data: string; bracketedPaste?: boolean },
+  ) => {
+    ptyManager.writeAndSubmit(id, data, undefined, bracketedPaste);
+  },
+);
+
 ipcMain.handle("pty:resize", (_event, { id, cols, rows }) => {
   // Discard any pre-resize buffered output. The PTY was spawned at 80x24
   // and the TUI (Gemini Ink, Codex/Claude TUI variants) rendered its
