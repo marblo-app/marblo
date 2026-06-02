@@ -5,10 +5,27 @@ import { useEditorStore } from "../../stores/editorStore";
 import { upsertOrchestratorAgentDoc } from "../../services/orchestratorAgentDoc";
 import OrchestratorTerminal from "./OrchestratorTerminal";
 
-const DEFAULT_HEIGHT = 140;
 const MIN_HEIGHT = 80;
 const MAX_HEIGHT = 600;
 const COLLAPSED_HEIGHT = 36;
+
+// Default panel height scales with the window — ~1/3 of the viewport gives
+// Claude Code's TUI enough rows to render without full-frame redraws, while
+// leaving room for the board above. Clamped so it stays sensible on very
+// short or very tall displays. (The user can still drag-resize freely.)
+const DEFAULT_HEIGHT_RATIO = 0.34;
+const DEFAULT_HEIGHT_MIN = 240;
+const DEFAULT_HEIGHT_MAX = 420;
+function computeDefaultHeight(): number {
+  if (typeof window === "undefined") return DEFAULT_HEIGHT_MIN;
+  return Math.min(
+    DEFAULT_HEIGHT_MAX,
+    Math.max(
+      DEFAULT_HEIGHT_MIN,
+      Math.round(window.innerHeight * DEFAULT_HEIGHT_RATIO),
+    ),
+  );
+}
 
 interface SessionInfo {
   id: string;
@@ -30,7 +47,7 @@ export default memo(function OrchestratorPanel() {
   const setSession = useOrchestratorStore((s) => s.setSession);
   const setStatus = useOrchestratorStore((s) => s.setStatus);
   const clear = useOrchestratorStore((s) => s.clear);
-  const [panelHeight, setPanelHeight] = useState(DEFAULT_HEIGHT);
+  const [panelHeight, setPanelHeight] = useState(computeDefaultHeight);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const draggingRef = useRef(false);
@@ -47,7 +64,7 @@ export default memo(function OrchestratorPanel() {
         const delta = startY - moveEvent.clientY;
         const newHeight = Math.min(
           MAX_HEIGHT,
-          Math.max(MIN_HEIGHT, startHeight + delta)
+          Math.max(MIN_HEIGHT, startHeight + delta),
         );
         setPanelHeight(newHeight);
       };
@@ -65,7 +82,7 @@ export default memo(function OrchestratorPanel() {
       document.body.style.cursor = "row-resize";
       document.body.style.userSelect = "none";
     },
-    [panelHeight]
+    [panelHeight],
   );
 
   // Close session picker when clicking outside
@@ -74,7 +91,7 @@ export default memo(function OrchestratorPanel() {
     const handleClick = () => setShowSessionPicker(false);
     const timer = setTimeout(
       () => document.addEventListener("click", handleClick),
-      0
+      0,
     );
     return () => {
       clearTimeout(timer);
@@ -106,7 +123,7 @@ export default memo(function OrchestratorPanel() {
       const result = await window.electronAPI.orchestratorSession.launch(
         projectId,
         cwd,
-        resumeSessionId
+        resumeSessionId,
       );
       if (result) {
         setSession(result.sessionId, result.ptySessionId);
@@ -130,23 +147,18 @@ export default memo(function OrchestratorPanel() {
   };
 
   const handleManualStart = async () => {
-    // Auto-connect to latest Orchestrator-labeled session if available
+    // Reconnect to the prior orchestrator session if one exists. Resolution
+    // is by label OR content signature (main process), so it works even when
+    // marblo-labels.json is missing — which is why plain label matching kept
+    // starting a fresh session on every off/on.
     if (isRunning) return;
     const cwd = rootPath || "~";
     try {
-      const list = await window.electronAPI.orchestratorSession.listSessions(
-        cwd
-      );
-      if (list.length > 0) {
-        // Find the latest session labeled "Orchestrator"
-        const orchSession = list.find(
-          (s: SessionInfo) => s.label === "Orchestrator"
-        );
-        if (orchSession) {
-          // Auto-connect to the orchestrator session
-          handleStartWithSession(orchSession.id);
-          return;
-        }
+      const priorId =
+        await window.electronAPI.orchestratorSession.resolvePrevious(cwd);
+      if (priorId) {
+        handleStartWithSession(priorId);
+        return;
       }
     } catch {
       /* ignore, just start new */
@@ -159,9 +171,8 @@ export default memo(function OrchestratorPanel() {
     if (isRunning) return;
     const cwd = rootPath || "~";
     try {
-      const list = await window.electronAPI.orchestratorSession.listSessions(
-        cwd
-      );
+      const list =
+        await window.electronAPI.orchestratorSession.listSessions(cwd);
       setSessions(list);
     } catch {
       setSessions([]);
@@ -215,10 +226,10 @@ export default memo(function OrchestratorPanel() {
             status === "running"
               ? "bg-[#a6e3a1]"
               : status === "starting"
-              ? "bg-[#f9e2af] animate-pulse"
-              : status === "error"
-              ? "bg-[#f38ba8]"
-              : "bg-[#6c7086]"
+                ? "bg-[#f9e2af] animate-pulse"
+                : status === "error"
+                  ? "bg-[#f38ba8]"
+                  : "bg-[#6c7086]"
           }`}
         />
         <span className="text-[#cdd6f4] font-medium">Orchestrator</span>

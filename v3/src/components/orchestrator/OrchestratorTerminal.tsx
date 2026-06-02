@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { CanvasAddon } from "@xterm/addon-canvas";
 import "@xterm/xterm/css/xterm.css";
 import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 
@@ -81,21 +82,50 @@ export default memo(function OrchestratorTerminal({
         termOpened = true;
         patchTerminalForFastIME(terminal);
 
-        // WebGL renderer disabled by default — caused viewport scroll-up
-        // glitch when typing on MacBook (358c623 originally disabled WebGL
-        // for similar reason). DOM renderer is fast enough on modern hardware.
-        // Opt-in via VITE_USE_WEBGL=1 if needed.
-        if (import.meta.env.VITE_USE_WEBGL === "1") {
-          try {
-            const webglAddon = new WebglAddon();
-            webglAddon.onContextLoss(() => webglAddon.dispose());
-            terminal.loadAddon(webglAddon);
-            console.log("[OrchestratorTerminal] WebGL renderer active");
-          } catch (err) {
-            console.warn(
-              "[OrchestratorTerminal] WebGL init failed, using DOM renderer:",
-              err
-            );
+        // Renderer selection — fixes the "Welcome to Claude Code!" box
+        // flickering during work, especially at small panel heights.
+        //
+        // Root cause: when the panel is short, Claude Code's Ink TUI can't fit
+        // its frame in the available rows, so it falls back to full-frame
+        // redraws every tick instead of incremental updates. The xterm DOM
+        // renderer rebuilds row <span>s on each full redraw → visible white
+        // flash. The canvas renderer paints the same redraws onto a single 2D
+        // canvas → no flash. (Making the panel bigger also stops it, because
+        // Ink then does incremental updates — but canvas fixes it at any size.)
+        //
+        // Canvas is a distinct renderer from WebGL and does NOT share the
+        // viewport scroll-up-on-type glitch that got WebGL disabled (2d0001d),
+        // so it's the safe default here.
+        //   VITE_USE_WEBGL=1       → opt into WebGL instead of canvas
+        //   VITE_TERM_RENDERER=dom → force the legacy DOM renderer
+        if (import.meta.env.VITE_TERM_RENDERER !== "dom") {
+          if (import.meta.env.VITE_USE_WEBGL === "1") {
+            try {
+              const webglAddon = new WebglAddon();
+              webglAddon.onContextLoss(() => webglAddon.dispose());
+              terminal.loadAddon(webglAddon);
+              console.log("[OrchestratorTerminal] WebGL renderer active");
+            } catch (err) {
+              console.warn(
+                "[OrchestratorTerminal] WebGL init failed, falling back to canvas:",
+                err,
+              );
+              try {
+                terminal.loadAddon(new CanvasAddon());
+              } catch {
+                /* DOM renderer remains active */
+              }
+            }
+          } else {
+            try {
+              terminal.loadAddon(new CanvasAddon());
+              console.log("[OrchestratorTerminal] Canvas renderer active");
+            } catch (err) {
+              console.warn(
+                "[OrchestratorTerminal] Canvas init failed, using DOM renderer:",
+                err,
+              );
+            }
           }
         }
         requestAnimationFrame(() => {
@@ -142,20 +172,44 @@ export default memo(function OrchestratorTerminal({
       if (buf.viewportY >= buf.baseY) wantBottomRef.current = true;
     };
 
+    // Settle-window batching for live PTY chunks — mirrors TerminalView so
+    // the orchestrator terminal behaves identically to the agent terminals.
+    // Claude Code emits a SINGLE logical redraw (e.g. a streamed message
+    // update) as several stdout flushes spaced 5-40ms apart. Writing +
+    // scrolling on every flush makes the viewport lurch up/down between the
+    // partial frames. Instead: queue chunks, flush after SETTLE_MS of silence,
+    // hard-cap at MAX_DELAY_MS so echo never lags on a continuous stream.
+    const SETTLE_MS = 28;
+    const MAX_DELAY_MS = 80;
+    let liveQueue: string[] = [];
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    let maxTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushLive = () => {
+      if (settleTimer) clearTimeout(settleTimer);
+      if (maxTimer) clearTimeout(maxTimer);
+      settleTimer = null;
+      maxTimer = null;
+      if (disposed) return;
+      if (liveQueue.length === 0) return;
+      const joined = liveQueue.join("");
+      liveQueue = [];
+      terminal.write(joined);
+      if (wantBottomRef.current) terminal.scrollToBottom();
+    };
+
     window.electronAPI.pty.onData(sessionId, (data) => {
       if (disposed) return;
       if (!termOpened) {
         pendingData.push(data);
         return;
       }
-      terminal.write(data);
-      if (wantBottomRef.current) {
-        // Defer past xterm's render frame so our scrollToBottom outlives the
-        // renderer's row rebuild for this chunk.
-        requestAnimationFrame(() => {
-          if (disposed || !wantBottomRef.current) return;
-          terminal.scrollToBottom();
-        });
+      liveQueue.push(data);
+      // Reset settle timer on every chunk; flush once the stream goes quiet.
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(flushLive, SETTLE_MS);
+      // Hard cap: flush no later than MAX_DELAY_MS after the first queued chunk.
+      if (!maxTimer) {
+        maxTimer = setTimeout(flushLive, MAX_DELAY_MS);
       }
     });
 
@@ -203,7 +257,7 @@ export default memo(function OrchestratorTerminal({
     window.electronAPI.pty.onExit(sessionId, (code) => {
       if (disposed) return;
       terminal.write(
-        `\r\n\x1b[90m[Orchestrator exited with code ${code}]\x1b[0m\r\n`
+        `\r\n\x1b[90m[Orchestrator exited with code ${code}]\x1b[0m\r\n`,
       );
     });
 
@@ -213,23 +267,40 @@ export default memo(function OrchestratorTerminal({
       window.electronAPI.pty.resize(sessionId, cols, rows);
     });
 
+    let fitScheduled = false;
     const handleResize = () => {
-      if (disposed) return;
-      try {
-        if (
-          containerRef.current &&
-          containerRef.current.clientWidth > 0 &&
-          containerRef.current.clientHeight > 0
-        ) {
-          fitAddon.fit();
-          // Only re-stick to bottom if user wasn't scrolled-up.
-          if (wantBottomRef.current) terminal.scrollToBottom();
+      if (disposed || fitScheduled) return;
+      fitScheduled = true;
+      requestAnimationFrame(() => {
+        fitScheduled = false;
+        if (disposed) return;
+        try {
+          if (
+            containerRef.current &&
+            containerRef.current.clientWidth > 0 &&
+            containerRef.current.clientHeight > 0
+          ) {
+            fitAddon.fit();
+          }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
-      }
+      });
     };
     window.addEventListener("resize", handleResize);
+
+    // ResizeObserver — mirrors TerminalView. The bottom panel can be
+    // drag-resized and the sidebar / activity panel can collapse; all change
+    // xterm's container size WITHOUT firing window.resize. Without this,
+    // xterm.cols/rows go stale and Claude Code's Ink TUI renders into the rows
+    // it *thinks* it has while the actual display is a different size →
+    // previous frames stay visible / the viewport jumps up and down on each
+    // message update (exactly the reported symptom).
+    let resizeObserver: ResizeObserver | null = null;
+    if (containerRef.current && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(handleResize);
+      resizeObserver.observe(containerRef.current);
+    }
 
     // User-input → wantBottom transitions (deterministic). See TerminalView.tsx.
     // Capture phase catches before xterm's internal handlers; .xterm-viewport
@@ -279,7 +350,10 @@ export default memo(function OrchestratorTerminal({
       disposed = true;
       window.clearTimeout(replayTimer);
       clearInterval(flushInterval);
+      if (settleTimer) clearTimeout(settleTimer);
+      if (maxTimer) clearTimeout(maxTimer);
       window.removeEventListener("resize", handleResize);
+      resizeObserver?.disconnect();
       wrapperEl?.removeEventListener("wheel", onWheel, wheelOpts);
       wrapperEl?.removeEventListener("keydown", onKeyDown, keyOpts);
       viewportEl?.removeEventListener("wheel", onWheel, wheelOpts);
