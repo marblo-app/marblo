@@ -356,13 +356,14 @@ interface HarnessPackage {
   type: "skill" | "mcp" | "plugin" | "cli";
   category: "required" | "recommended" | "mcp" | "cli";
   install: {
-    kind: "git" | "mcp" | "bundled" | "manual" | "npm-global";
+    kind: "git" | "mcp" | "bundled" | "manual" | "npm-global" | "shell";
     source?: string;
     dest?: string;
     env?: Record<string, string>;
     args?: string[];
     instructions?: string;
     postInstall?: string;
+    postInstallExec?: Array<{ command: string; args: string[] }>;
   };
   detect: { path?: string; mcpKey?: string; binary?: string };
   url?: string;

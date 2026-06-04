@@ -5,13 +5,14 @@ interface HarnessStoreProps {
   onClose?: () => void;
 }
 
-type CategoryFilter = "all" | "required" | "recommended" | "mcp";
+type CategoryFilter = "all" | "required" | "recommended" | "mcp" | "cli";
 
 const CATEGORY_LABEL: Record<CategoryFilter, string> = {
   all: "전체",
   required: "필수 (자동 설치)",
   recommended: "추천 스킬",
   mcp: "유용한 MCP",
+  cli: "CLI",
 };
 
 const STATUS_LABEL: Record<HarnessPackage["status"], string> = {

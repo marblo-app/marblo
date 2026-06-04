@@ -529,6 +529,7 @@ export async function getCatalogVersions(): Promise<
   await Promise.all(
     CATALOG.map(async (pkg) => {
       if (
+        pkg.deprecated ||
         pkg.install.kind !== "npm-global" ||
         !pkg.install.source ||
         !pkg.detect.binary
@@ -551,19 +552,52 @@ export async function getCatalogVersions(): Promise<
 }
 
 /**
- * Check installed npm-global Harness CLIs and upgrade any that are behind
- * the latest published version. Best-effort: never throws. Returns an
- * outcome per checked package so callers can surface a toast / log.
+ * Check installed Harness CLIs and upgrade any that are behind the latest
+ * published version. npm-global packages are version-compared before install.
+ * Whitelisted shell installers (Antigravity/agy) are re-run idempotently
+ * because their upstream installer owns update detection.
+ *
+ * Best-effort: never throws. Returns an outcome per checked package so callers
+ * can surface a toast / log.
  */
 export async function checkAndUpdateHarness(): Promise<UpdateOutcome[]> {
   const outcomes: UpdateOutcome[] = [];
   for (const pkg of CATALOG) {
-    if (pkg.install.kind !== "npm-global") continue;
+    if (pkg.deprecated) continue;
+    if (pkg.install.kind !== "npm-global" && pkg.install.kind !== "shell")
+      continue;
     if (!pkg.install.source || !pkg.detect.binary) continue;
     if (detectStatus(pkg) !== "installed") continue;
     if (inFlightUpdates.has(pkg.id)) continue;
     inFlightUpdates.add(pkg.id);
     try {
+      if (pkg.install.kind === "shell") {
+        const local = await getLocalVersion(pkg.detect.binary);
+        console.log(
+          `[harness] Refreshing shell CLI ${pkg.id} via ${pkg.install.source}`,
+        );
+        try {
+          await installShell(pkg.install);
+          outcomes.push({
+            id: pkg.id,
+            source: pkg.install.source,
+            from: local,
+            to: null,
+            status: "updated",
+          });
+        } catch (err) {
+          outcomes.push({
+            id: pkg.id,
+            source: pkg.install.source,
+            from: local,
+            to: null,
+            status: "error",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        continue;
+      }
+
       const [local, latest] = await Promise.all([
         getLocalVersion(pkg.detect.binary),
         getLatestNpmVersion(pkg.install.source),

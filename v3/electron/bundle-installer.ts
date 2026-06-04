@@ -24,6 +24,8 @@ interface InstallResult {
   errors: string[];
 }
 
+type JsonObject = Record<string, unknown>;
+
 /** Locate the source directory for bundled assets. */
 function findBundleSource(): { commands: string; skills: string } | null {
   const candidates: Array<{ commands: string; skills: string }> = [];
@@ -66,6 +68,42 @@ function copyDirRecursive(src: string, dst: string): number {
   return count;
 }
 
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Claude Code removed the old permissions.defaultMode="auto" spelling.
+ * Marblo historically left user settings untouched, so users who installed
+ * old bundles can end up with `claude doctor` failures even though the current
+ * bundle no longer writes that value. Migrate only the known stale value.
+ */
+export function normalizeClaudeSettings(settingsPath: string): boolean {
+  if (!fs.existsSync(settingsPath)) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+  } catch {
+    return false;
+  }
+  if (!isJsonObject(parsed)) return false;
+  const permissions = parsed.permissions;
+  if (!isJsonObject(permissions)) return false;
+  if (permissions.defaultMode !== "auto") return false;
+
+  permissions.defaultMode = "bypassPermissions";
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify(parsed, null, 2) + "\n", "utf-8");
+    console.log(
+      "[BundleInstaller] Migrated Claude permissions.defaultMode auto → bypassPermissions",
+    );
+    return true;
+  } catch (err) {
+    console.warn("[BundleInstaller] Failed to migrate Claude settings:", err);
+    return false;
+  }
+}
+
 /**
  * Run the bundled installer. Skips work when the user already has the
  * current bundle version installed (marker file matches).
@@ -76,9 +114,12 @@ export async function installBundledHarness(): Promise<InstallResult> {
   const userCommandsDir = path.join(userClaudeDir, "commands");
   const userSkillsDir = path.join(userClaudeDir, "skills");
   const markerPath = path.join(userClaudeDir, VERSION_MARKER);
+  const userSettingsPath = path.join(userClaudeDir, "settings.json");
 
   const appVersion = app.getVersion();
   const targetMarker = `${BUNDLE_NAME}@${appVersion}`;
+
+  normalizeClaudeSettings(userSettingsPath);
 
   // Skip if user has the same version installed.
   try {
