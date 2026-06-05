@@ -66,6 +66,30 @@ export default memo(function OrchestratorTerminal({
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
+    // Cmd/Ctrl+V — paste explicitly. The native menu paste does not reliably
+    // reach xterm's hidden textarea after an OAuth browser round-trip (typing
+    // works, paste is lost), which broke pasting auth tokens (e.g. Antigravity
+    // `agy` login). Read the clipboard ourselves and inject via
+    // terminal.paste(), which respects bracketed-paste mode.
+    terminal.attachCustomKeyEventHandler((e) => {
+      if (
+        e.type === "keydown" &&
+        (e.key === "v" || e.key === "V") &&
+        (e.metaKey || e.ctrlKey) &&
+        !e.altKey
+      ) {
+        e.preventDefault();
+        void window.electronAPI.clipboard
+          .readText()
+          .then((text) => {
+            if (text) terminal.paste(text);
+          })
+          .catch(() => {});
+        return false;
+      }
+      return true;
+    });
+
     let termOpened = false;
     let openRetries = 0;
     const pendingData: string[] = [];
@@ -172,6 +196,70 @@ export default memo(function OrchestratorTerminal({
       if (buf.viewportY >= buf.baseY) wantBottomRef.current = true;
     };
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Slash-menu viewport hold. Typing `/` on an empty composer opens Claude
+    // Code's command menu. Claude renders the menu as a tall block — the `> /`
+    // input prompt at the top, the (long) command list below it, and the
+    // terminal cursor parked on an empty line at the very bottom. xterm's
+    // auto-follow (BufferService.scroll: `isUserScrolling || ydisp = ybase`)
+    // tracks that bottom cursor, so the viewport lands ~20+ lines below the
+    // prompt — you see the middle of the command list and your `> /` input has
+    // scrolled off the top. That's the "jumps to the bottom of the list" report.
+    //
+    // Fix: while the menu is open, find the prompt line by scanning the buffer
+    // for the active `> ` row and pin the viewport there, so the prompt sits at
+    // the top with the menu below it — like a normal terminal keeping the prompt
+    // in view. We can't capture the line up front: Claude's render pushes new
+    // scrollback, so the prompt's absolute index shifts (≈5 → ≈36 here) between
+    // the keystroke and the menu paint. So we re-scan on every flush; it also
+    // tracks the prompt as the menu grows/shrinks while filtering. scrollToLine
+    // also flips xterm's isUserScrolling flag so the menu's own redraws stop
+    // auto-following. Self-clearing: the hold resets the moment the composer
+    // empties (backspace / Esc / Ctrl-C / submit), so follow can't get stuck off.
+    // inputLen mirrors TerminalView's stdin estimator (we never see Claude's
+    // real input buffer).
+    let inputLen = 0;
+    let slashComposer = false;
+    // Highest-indexed line that looks like Claude's input prompt (`> ` after
+    // optional leading whitespace / box border). The active prompt is always
+    // the last such row above the parked cursor; earlier `> …` rows are
+    // submitted history in scrollback (lower indices), so max-index wins.
+    const PROMPT_RE = /^\s*(?:[│|]\s*)?>\s/;
+    const findPromptLine = (): number | null => {
+      const buf = terminal.buffer.active;
+      const bottom = buf.length - 1;
+      const limit = Math.max(0, bottom - 200);
+      for (let i = bottom; i >= limit; i--) {
+        const s = buf.getLine(i)?.translateToString(true) ?? "";
+        if (PROMPT_RE.test(s)) return i;
+      }
+      return null;
+    };
+    const trackComposer = (data: string) => {
+      if (data.startsWith("\x1b")) {
+        // Bare Esc closes the menu / clears the line; arrow keys (\x1b[A …)
+        // navigate it and must NOT reset the hold.
+        if (data === "\x1b") {
+          inputLen = 0;
+          slashComposer = false;
+        }
+        return;
+      }
+      if (data === "\r" || data === "\n") {
+        inputLen = 0;
+        slashComposer = false;
+      } else if (data === "\x7f" || data === "\b") {
+        inputLen = Math.max(0, inputLen - 1);
+        if (inputLen === 0) slashComposer = false;
+      } else if (data === "\x03" || data === "\x15") {
+        inputLen = 0;
+        slashComposer = false;
+      } else {
+        if (inputLen === 0 && data === "/") slashComposer = true;
+        inputLen += data.length;
+      }
+    };
+
     // Settle-window batching for live PTY chunks — mirrors TerminalView so
     // the orchestrator terminal behaves identically to the agent terminals.
     // Claude Code emits a SINGLE logical redraw (e.g. a streamed message
@@ -193,8 +281,25 @@ export default memo(function OrchestratorTerminal({
       if (liveQueue.length === 0) return;
       const joined = liveQueue.join("");
       liveQueue = [];
-      terminal.write(joined);
-      if (wantBottomRef.current) terminal.scrollToBottom();
+      // Scroll in write()'s completion callback, NOT synchronously after it:
+      // xterm parses writes asynchronously, so right after terminal.write() the
+      // buffer (and the prompt position findPromptLine looks for) is still the
+      // PRE-write state. scrollToBottom tolerated this because xterm auto-follows
+      // once parsing finishes, but a computed scrollToLine would read stale rows
+      // and land wrong. The callback runs after the data is applied.
+      terminal.write(joined, () => {
+        if (disposed) return;
+        if (!wantBottomRef.current) return;
+        // Slash menu open → pin the `> ` prompt to the top so it stays visible
+        // with the command list below it (xterm otherwise follows the parked
+        // cursor to the bottom of the list). Else → follow the bottom normally.
+        const promptLine = slashComposer ? findPromptLine() : null;
+        if (promptLine !== null) {
+          terminal.scrollToLine(promptLine);
+        } else {
+          terminal.scrollToBottom();
+        }
+      });
     };
 
     window.electronAPI.pty.onData(sessionId, (data) => {
@@ -250,6 +355,7 @@ export default memo(function OrchestratorTerminal({
     terminal.onData((data) => {
       if (disposed) return;
       wantBottomRef.current = true;
+      trackComposer(data);
       window.electronAPI.pty.write(sessionId, data);
     });
 
