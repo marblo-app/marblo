@@ -313,6 +313,62 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
   await runPostInstallExec(strategy, enrichedPath);
 }
 
+/**
+ * Pure: is a resolved binary path managed by npm's global prefix?
+ *
+ * Native installers (e.g. Claude Code's `~/.local/bin/claude` →
+ * `~/.local/share/claude/versions/<v>`) live OUTSIDE the npm prefix and
+ * self-update. Running `npm i -g` on them is wrong — it resurrects a stale,
+ * conflicting npm copy which makes Claude Code itself report "Auto-update
+ * failed". Callers compare the binary's realpath against the npm global
+ * prefix to decide whether npm owns this CLI.
+ */
+export function isPathUnderNpmPrefix(
+  binaryRealPath: string,
+  npmGlobalPrefix: string,
+): boolean {
+  if (!binaryRealPath || !npmGlobalPrefix) return false;
+  const strip = (p: string) => p.replace(/[/\\]+$/, "");
+  const prefix = strip(npmGlobalPrefix);
+  const real = strip(binaryRealPath);
+  return real === prefix || real.startsWith(prefix + path.sep);
+}
+
+let npmGlobalPrefixCache: string | null | undefined;
+
+/** Resolve `npm prefix -g` once. Returns null if npm is unavailable. */
+async function getNpmGlobalPrefix(): Promise<string | null> {
+  if (npmGlobalPrefixCache !== undefined) return npmGlobalPrefixCache;
+  const npmPath = findBinaryPath("npm");
+  if (!npmPath) {
+    npmGlobalPrefixCache = null;
+    return null;
+  }
+  const r = await runCommand(npmPath, ["prefix", "-g"], undefined, 5_000);
+  npmGlobalPrefixCache = r.code === 0 ? r.stdout.trim() || null : null;
+  return npmGlobalPrefixCache;
+}
+
+/**
+ * Whether an installed npm-global CLI is actually owned by npm. Falls back to
+ * `true` (assume npm-managed → allow update) when the prefix can't be
+ * determined, preserving prior behavior. Returns `false` for externally
+ * managed installs (native/self-updating) so auto-update skips them.
+ */
+async function isNpmGlobalManaged(binary: string): Promise<boolean> {
+  const binPath = findBinaryPath(binary);
+  if (!binPath) return false;
+  let real = binPath;
+  try {
+    real = fs.realpathSync(binPath);
+  } catch {
+    /* keep unresolved path */
+  }
+  const prefix = await getNpmGlobalPrefix();
+  if (!prefix) return true;
+  return isPathUnderNpmPrefix(real, prefix);
+}
+
 async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
   if (!strategy.source) {
     throw new Error("npm-global install requires a package name in source");
@@ -595,6 +651,25 @@ export async function checkAndUpdateHarness(): Promise<UpdateOutcome[]> {
             error: err instanceof Error ? err.message : String(err),
           });
         }
+        continue;
+      }
+
+      // Skip CLIs that aren't actually owned by npm (e.g. Claude Code's
+      // native install at ~/.local/bin). Forcing `npm i -g` on them
+      // resurrects a conflicting npm copy and breaks their self-updater.
+      if (!(await isNpmGlobalManaged(pkg.detect.binary))) {
+        const local = await getLocalVersion(pkg.detect.binary);
+        console.log(
+          `[harness] ${pkg.id} is externally managed (native/self-updating) — skipping npm update`,
+        );
+        outcomes.push({
+          id: pkg.id,
+          source: pkg.install.source,
+          from: local,
+          to: null,
+          status: "skipped",
+          error: "externally managed (native install) — self-updates",
+        });
         continue;
       }
 
