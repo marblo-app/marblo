@@ -162,3 +162,91 @@ marbloTest(
     ).toHaveCount(0, { timeout: 3000 });
   },
 );
+
+// 옵션 A — 5개 템플릿 각각의 LaunchDialog 흐름 smoke.
+//
+// 카탈로그 카드(h3 label) 클릭 → MissionLaunchDialog mount → 다이얼로그 안에
+// 해당 템플릿의 미리보기(`{description} · {N} step`) 가 보이는지 → 취소로 닫힘.
+//
+// 잡히는 회귀:
+//   - templates.ts 의 라벨/description/step 수 변경 (다이얼로그 미리보기 깨짐)
+//   - 카드 onSelect → setLaunchTemplate → initialTemplateId wiring 깨짐
+//   - LaunchDialog 의 description·step 미리보기 또는 취소 핸들러 깨짐
+//
+// 일부러 src/templates.ts 를 import 하지 않고 기대값을 리터럴로 박는다
+// (블랙박스 가드 — 기존 spec 들과 동일한 컨벤션).
+//
+// 실제 createMission(Firestore write) 는 트리거하지 않는다 — "취소"만 누른다.
+//
+// 주의: "Research only" 라벨은 "Research" 가 아니다. 그리고 "Feature" 카드를
+// exact 매칭하지 않으면 "Full Feature" 와 충돌하므로 heading exact 매칭을 쓴다.
+const LAUNCH_TEMPLATES = [
+  { label: "Quick Fix", preview: "버그 / 소수정 / 핫픽스", steps: 4 },
+  { label: "Polish", preview: "기존 UI 다듬기 · 시각 QA", steps: 3 },
+  { label: "Feature", preview: "이미 기획된 작업 구현", steps: 6 },
+  {
+    label: "Full Feature",
+    preview: "제대로 된 신기능 (강의 데모 60초 hook)",
+    steps: 10,
+  },
+  {
+    label: "Research only",
+    preview: "구현 없이 의사결정만 (디자인 docs 생성)",
+    steps: 2,
+  },
+] as const;
+
+for (const tpl of LAUNCH_TEMPLATES) {
+  marbloTest(
+    `@unit LaunchDialog — "${tpl.label}" 템플릿 열림/미리보기/취소`,
+    async ({ marblo }) => {
+      await injectMockProject(marblo.page);
+      await marblo.openTab("missions");
+
+      // 카탈로그 카드는 button 안에 <h3>{label}</h3>. 라벨은 다이얼로그 내부의
+      // 템플릿 선택 버튼(span)에도 나오므로, heading(role) + exact 로 카탈로그
+      // 카드만 정확히 집는다 ("Feature" vs "Full Feature" 충돌도 회피).
+      const card = marblo.page
+        .getByRole("heading", { name: tpl.label, exact: true })
+        .first();
+      await expect(card, `카탈로그 카드 "${tpl.label}" 가 안 보임`).toBeVisible(
+        { timeout: 8000 },
+      );
+      await card.click();
+
+      // LaunchDialog mount 확인 (정적 헤더 + 오버레이).
+      const dialog = marblo.page.locator("div.fixed.inset-0.z-50").first();
+      await expect(dialog, "LaunchDialog 오버레이가 안 뜸").toBeVisible({
+        timeout: 3000,
+      });
+      // "🚀 Launch Mission" 텍스트는 헤더(h3)와 submit 버튼 둘 다에 있으므로
+      // heading role 로 헤더만 정확히 집는다.
+      await expect(
+        dialog.getByRole("heading", { name: "🚀 Launch Mission" }),
+        "LaunchDialog 헤더가 안 보임",
+      ).toBeVisible();
+
+      // 선택된 템플릿의 미리보기(`{description} · {N} step`)가 다이얼로그 안에
+      // 보여야 한다. description 과 step 수를 각각 단언.
+      await expect(
+        dialog.getByText(tpl.preview),
+        `다이얼로그에 "${tpl.label}" description 미리보기가 안 보임`,
+      ).toBeVisible();
+      await expect(
+        dialog.getByText(`${tpl.steps} step`),
+        `다이얼로그에 "${tpl.label}" step 수(${tpl.steps})가 안 보임`,
+      ).toBeVisible();
+
+      // 취소 → 다이얼로그 닫힘 (createMission 미호출).
+      const cancelBtn = dialog.locator('button:has-text("취소")').first();
+      await expect(cancelBtn, "취소 버튼이 안 보임").toBeVisible({
+        timeout: 3000,
+      });
+      await cancelBtn.click();
+      await expect(
+        marblo.page.locator('button:has-text("취소")'),
+        "취소 클릭 후 LaunchDialog 가 닫히지 않음",
+      ).toHaveCount(0, { timeout: 3000 });
+    },
+  );
+}

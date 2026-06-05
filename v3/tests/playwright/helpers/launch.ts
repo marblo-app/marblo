@@ -48,13 +48,13 @@ async function ensureBuilt(): Promise<void> {
   if (fs.existsSync(DIST_MAIN)) return;
   // Electron tsc + vite build. tests/playwright/README.md 안내.
   throw new Error(
-    `Electron main.js 가 없습니다. 먼저 빌드하세요: cd ${REPO_ROOT} && npm run build`,
+    `Electron main.js 가 없습니다. 먼저 빌드하세요: cd ${REPO_ROOT} && npm run build`
   );
 }
 
 /** 마블로 Electron 앱을 launch. 호출자는 close() 보장 필요. */
 export async function launchMarblo(
-  opts: LaunchOptions = {},
+  opts: LaunchOptions = {}
 ): Promise<LaunchedApp> {
   await ensureBuilt();
 
@@ -63,6 +63,11 @@ export async function launchMarblo(
     ...(process.env as Record<string, string>),
     // Mock 모드 시그널 — main process 에서 의존성 lazy/stub 선택 시 참고.
     MARBLO_TEST_MODE: opts.mock ? "mock" : "prod",
+    // 빌드 산출물(dist-electron/main.js)을 직접 launch 하면 app.isPackaged=false →
+    // main.ts 의 isDev 가 true 로 평가돼 vite dev 서버(localhost:5173)를 로드하려다
+    // 실패한다(테스트 중엔 dev 서버 미실행). FORCE_PROD=1 로 내장 http 정적
+    // 서버(dist/)에서 로드하게 강제 — production build 전략(전략 A)의 전제.
+    MARBLO_FORCE_PROD: "1",
     // Firebase Auth 우회 — preload 가 이 env 를 보고 testMode.bypassAuth 노출.
     ...(bypassAuth ? { MARBLO_TEST_BYPASS_AUTH: "1" } : {}),
     // BYOK 키 없이 부팅 가능하도록 빈 슬롯 보장 (이미 LLM lazy init 패치 적용됨)
