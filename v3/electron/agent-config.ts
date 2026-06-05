@@ -924,7 +924,15 @@ export class AgentConfigGenerator {
         //     35s 후 새 .pb basename 을 캡처해 onSessionDetected 로
         //     Firestore 에 저장하므로, 다음 reconnect 부터는 UUID 가
         //     들어와 정확한 resume 가능.
-        const agyArgs: string[] = [];
+        // --dangerously-skip-permissions: agy 도 Claude 와 동일한 플래그명으로
+        //   모든 tool permission 요청을 자동 승인한다 — agy --help 기준
+        //   "Auto-approve all tool permission requests without prompting".
+        //   이게 없으면 워커가 매 tool 호출마다 대화형 승인 프롬프트를 띄워
+        //   무인(헤드리스 PTY) 실행이 멈춘다. Claude 의
+        //   --dangerously-skip-permissions / Codex 의 approval_policy="never" /
+        //   Gemini 의 --yolo 와 같은 "기본 욜로모드" 역할.
+        //   ※ agy 에는 --yolo 플래그가 없다 (Gemini CLI 와 다름).
+        const agyArgs: string[] = ["--dangerously-skip-permissions"];
         if (wantResume) {
           if (resumeIsLatest) {
             agyArgs.push("--continue");
