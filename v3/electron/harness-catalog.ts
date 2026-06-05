@@ -71,6 +71,13 @@ export interface HarnessPackage {
   detect: DetectStrategy;
   /** External docs/source link for the user. */
   url?: string;
+  /**
+   * Marks a package as deprecated / end-of-life. The Harness UI shows a
+   * warning badge and suppresses the install / required CTAs, and the
+   * auto-updater (`checkAndUpdateHarness`) skips it. `note` should explain
+   * why (incl. EOL date) and what replaces it.
+   */
+  deprecated?: { note: string };
 }
 
 export const CATALOG: HarnessPackage[] = [
