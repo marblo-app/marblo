@@ -17,10 +17,13 @@ function toProject(raw: Record<string, unknown>): Project {
 interface ProjectState {
   currentProject: Project | null;
   projects: Project[];
+  autoSelectFirstProject: boolean;
   loading: boolean;
   error: string | null;
 
   setCurrentProject: (project: Project) => void;
+  clearCurrentProject: () => void;
+  setAutoSelectFirstProject: (enabled: boolean) => void;
   findByFolderPath: (folderPath: string) => Project | undefined;
   findByPathOrRemote: (
     folderPath: string,
@@ -38,11 +41,20 @@ interface ProjectState {
 export const useProjectStore = create<ProjectState>((set, get) => ({
   currentProject: null,
   projects: [],
+  autoSelectFirstProject: true,
   loading: false,
   error: null,
 
   setCurrentProject: (project: Project) => {
     set({ currentProject: project });
+  },
+
+  clearCurrentProject: () => {
+    set({ currentProject: null });
+  },
+
+  setAutoSelectFirstProject: (enabled: boolean) => {
+    set({ autoSelectFirstProject: enabled });
   },
 
   findByFolderPath: (folderPath: string) => {
@@ -123,11 +135,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       [where("members", "array-contains", userId)],
       (docs) => {
         const projects = docs.map(toProject);
-        const { currentProject } = get();
+        const { currentProject, autoSelectFirstProject } = get();
 
         // Auto-select first project if none selected
         let nextCurrent = currentProject;
-        if (!nextCurrent && projects.length > 0) {
+        if (!nextCurrent && autoSelectFirstProject && projects.length > 0) {
           nextCurrent = projects[0];
         } else if (nextCurrent) {
           // Sync current project with latest data

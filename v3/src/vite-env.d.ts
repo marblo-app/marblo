@@ -343,6 +343,8 @@ interface SystemAPI {
 }
 
 interface WindowAPI {
+  /** True for File > New Window / Cmd+Shift+N windows. */
+  isNewWindow: () => boolean;
   /** Register the renderer's current project so main can scope events
    * (agent:spawned, agent:statusChanged, etc.) to this window. Pass empty
    * string to clear the registration when the project is closed. */

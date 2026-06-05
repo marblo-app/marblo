@@ -944,6 +944,9 @@ function createWindow(isNewWindow = false) {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      additionalArguments: [
+        `--marblo-new-window=${isNewWindow ? "1" : "0"}`,
+      ],
     },
     titleBarStyle: "hiddenInset",
     show: false,
@@ -1124,8 +1127,9 @@ function createWindow(isNewWindow = false) {
 }
 
 // --- PTY IPC Handlers ---
-ipcMain.handle("pty:create", (_event, { id, name, command, args, cwd }) => {
+ipcMain.handle("pty:create", (event, { id, name, command, args, cwd }) => {
   const session = ptyManager.create(id, name, command, args, cwd);
+  ptyOwners.set(id, event.sender.id);
 
   // Use same buffer-then-live pattern as agents (survives React StrictMode)
   setupPtyForwarding(id);

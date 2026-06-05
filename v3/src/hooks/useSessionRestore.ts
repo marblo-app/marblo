@@ -13,9 +13,22 @@ export function useSessionRestore() {
   const projects = useProjectStore((s) => s.projects);
   const currentProject = useProjectStore((s) => s.currentProject);
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
+  const clearCurrentProject = useProjectStore((s) => s.clearCurrentProject);
+  const setAutoSelectFirstProject = useProjectStore(
+    (s) => s.setAutoSelectFirstProject,
+  );
   const findByPathOrRemote = useProjectStore((s) => s.findByPathOrRemote);
   const restoredRef = useRef(false);
-  const [isNewWindow, setIsNewWindow] = useState(false);
+  const [isNewWindow, setIsNewWindow] = useState(() =>
+    window.electronAPI.window.isNewWindow(),
+  );
+
+  useEffect(() => {
+    if (!isNewWindow) return;
+    restoredRef.current = true;
+    setAutoSelectFirstProject(false);
+    clearCurrentProject();
+  }, [isNewWindow, clearCurrentProject, setAutoSelectFirstProject]);
 
   // Listen for new window flag from main process
   useEffect(() => {

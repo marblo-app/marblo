@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+const isNewWindow = process.argv.includes("--marblo-new-window=1");
+
 contextBridge.exposeInMainWorld("electronAPI", {
   platform: process.platform,
   // Test hatch — main process 에서 MARBLO_TEST_BYPASS_AUTH=1 로 launch 한
@@ -14,6 +16,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // agent:* and orchestrator:* events to the right window. Pass empty string
   // to clear (e.g., when project is closed).
   window: {
+    isNewWindow: () => isNewWindow,
     registerProject: (projectId: string) =>
       ipcRenderer.invoke("window:registerProject", projectId),
   },
