@@ -79,6 +79,17 @@ describe("WorktreeManager.create", () => {
     );
   });
 
+  it("throws on a taskId with unsafe characters", async () => {
+    await expect(
+      mgr.create({
+        repoRoot,
+        projectId: "p",
+        taskId: "../escape",
+        slug: "x",
+      })
+    ).rejects.toThrow(/invalid taskId/);
+  });
+
   it("throws when the branch already exists", async () => {
     const params = {
       repoRoot,
@@ -203,7 +214,7 @@ describe("WorktreeManager.status — mergeability", () => {
 
     const s = await mgr.status(info.path, "main");
     expect(s.mergeable).toBe(false);
-    expect(s.conflicts).toContain("README.md");
+    expect(s.conflicts).toEqual(["README.md"]);
   });
 });
 

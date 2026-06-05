@@ -92,6 +92,13 @@ export class WorktreeManager {
   }
 
   async create(params: CreateWorktreeParams): Promise<WorktreeInfo> {
+    const idPattern = /^[A-Za-z0-9_-]+$/;
+    if (!idPattern.test(params.projectId)) {
+      throw new Error(`invalid projectId: ${params.projectId}`);
+    }
+    if (!idPattern.test(params.taskId)) {
+      throw new Error(`invalid taskId: ${params.taskId}`);
+    }
     const baseRef =
       params.baseRef ?? (await this.resolveBaseRef(params.repoRoot));
     const branch = this.branchName(params.slug, params.taskId);
@@ -193,20 +200,28 @@ export class WorktreeManager {
       deletions += del === "-" ? 0 : parseInt(del, 10) || 0;
     }
 
-    // mergeable / conflicts — requires git >= 2.38 (--write-tree)
+    // mergeable / conflicts — requires git >= 2.38 (--write-tree).
+    // Output sections: <tree OID> line, conflicted file names, a blank line,
+    // then informational messages. Treat as a real conflict ONLY when exit
+    // code is 1 AND the first line is a tree OID — this distinguishes a true
+    // conflict from "cannot merge / bad ref", which also exits 1 with no OID.
     const mt = await this.runGit(
       ["merge-tree", "--write-tree", "--name-only", baseRef, "HEAD"],
       worktreePath
     );
-    const hasConflicts = mt.code === 1;
+    const mtLines = mt.stdout.split("\n");
+    const firstLine = mtLines[0]?.trim() ?? "";
+    const hasConflicts = mt.code === 1 && /^[0-9a-f]{7,64}$/.test(firstLine);
     let conflicts: string[] = [];
     if (hasConflicts) {
-      // First stdout line is the conflicted tree OID; the rest are file names.
-      const lines = mt.stdout
-        .split("\n")
+      // Cut at the first blank line after the OID — everything before it
+      // (minus the OID line) is the conflicted-file-names section.
+      const blankIdx = mtLines.findIndex((l, i) => i > 0 && l.trim() === "");
+      const fileLines = blankIdx === -1 ? mtLines : mtLines.slice(0, blankIdx);
+      conflicts = fileLines
+        .slice(1)
         .map((l) => l.trim())
         .filter(Boolean);
-      conflicts = lines.slice(1);
     }
 
     return {
@@ -246,7 +261,12 @@ export class WorktreeManager {
     }
 
     if (opts?.deleteBranch && branch) {
-      await this.runGit(["branch", "-D", branch], repoRoot);
+      const del = await this.runGit(["branch", "-D", branch], repoRoot);
+      if (del.code !== 0) {
+        console.warn(
+          `[WorktreeManager] failed to delete branch ${branch}: ${del.stderr.trim()}`
+        );
+      }
     }
   }
 
