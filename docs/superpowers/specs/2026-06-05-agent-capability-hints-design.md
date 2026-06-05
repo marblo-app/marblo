@@ -38,10 +38,15 @@ CLI에 강력한 "특기" 기능들이 등장했다:
 - 변경 범위 최소(역할×모델 곱이 아니라 합), 코스트 추적은 기존 롤업 재사용.
 - fast-lane(사소한 티켓)에서는 특기 넛지를 억제해 토큰 폭주 방지.
 
+**목표 (추가 — C-lite)**
+
+- 특기(Workflow/deep-research/goal)가 도는 동안 **보드 티켓 카드에 진행 마커**를 띄워
+  가시성 보완(서브에이전트 카드화의 가벼운 슬라이스). 3.4 참조.
+
 **비목표 (YAGNI / 후속)**
 
-- Approach C: Workflow를 마블로 네이티브 1급 개념(Flow 노드/임시 에이전트 카드)으로
-  승격해 fan-out을 UI에 가시화. (별도 트랙)
+- Approach C 풀버전: 서브에이전트를 마블로 1급 개념(Flow 노드/개별 에이전트 카드)으로
+  승격. (별도 트랙 — 이번엔 C-lite 마커만)
 - 유료플랜/preview 가용성 자동 감지. (graceful 폴백으로 대체)
 - Antigravity 고유 특기 커맨드 발굴. (현재 없음 — 역할강점만 기술)
 
@@ -108,6 +113,26 @@ Claude-only/Codex-only 가드가 자연 성립. Workflow의 정식 opt-in(=스�
 **코스트:** 특기 서브에이전트·`/goal` 추가턴 토큰은 부모 세션 사용량에 롤업 →
 cost-tracker가 티켓/에이전트 합계로 이미 포착(agy는 agy-usage 추출기). 새 배선 불필요.
 
+### 3.4 특기 진행 마커 — C-lite (보드 카드 배지)
+
+특기가 도는 동안 해당 티켓 카드에 "⏳ Workflow 진행중 / 딥리서치 진행중 / Goal 진행중"
+배지를 띄운다. 서브에이전트 카드화(C 풀버전)는 안 하고, **기존 티켓 카드 1개에 진행
+상태만** 얹는 가벼운 슬라이스.
+
+**마커 규약(텍스트 컨벤션, 추가 스토리지 없음):** capability 스니펫이 특기 시작/종료에
+구조화된 activity를 남긴다.
+
+- 시작: `add_activity(task_id, "[cap:start:workflow] N subagents")`
+- 종료: `add_activity(task_id, "[cap:end:workflow] done")`
+- 종류: `workflow` | `deep-research` | `goal`
+
+**파생:** projection/store가 활동 로그에서 *매칭 end 없는 마지막 start*를 골라
+`Task.activeCapability`(옵셔널)로 노출. `TaskCard`가 이 필드로 배지 렌더(기존
+`MissionStatusBadge` / 펄스 인프라 재사용).
+
+**스테일 방지:** 다음 중 하나면 `activeCapability`를 클리어 — (a) 매칭 `[cap:end:*]`
+도착, (b) 티켓이 종료 상태(DONE/REVIEW/FAILED)로 전이, (c) 소유 에이전트가 idle/offline.
+
 ## 4. 변경 범위
 
 **신규**
@@ -116,6 +141,7 @@ cost-tracker가 티켓/에이전트 합계로 이미 포착(agy는 agy-usage 추
 - `v3/skills/capability_codex.md`
 - `v3/skills/capability_antigravity.md`
 - `v3/tests/unit/capabilityHint.test.ts`
+- `v3/tests/unit/activeCapability.test.ts` — 마커 파생(start/end 매칭·스테일 클리어)
 
 **수정**
 
@@ -124,11 +150,16 @@ cost-tracker가 티켓/에이전트 합계로 이미 포착(agy는 agy-usage 추
 - 디스패치/컨텍스트 빌드부(`electron/mission-engine/dispatcher-impl.ts` 또는 task context
   생성 위치) — 힌트 주입
 - `v3/skills/orchestrator_agent.md` — capabilityHint 규칙 1줄
+- `v3/src/types/task.ts` — `Task.activeCapability?: "workflow" | "deep-research" | "goal" | null`
+- projection/MCP 파생부 — 활동 로그 → `activeCapability` 계산 + 스테일 클리어
+- `v3/src/components/board/TaskCard.tsx` — 진행 마커 배지 렌더
 
 ## 5. 테스트 전략
 
 - `capabilityHint.test.ts`: heavy→workflow, research→deep-research/agy, autonomous→goal,
   fast→`""`, 모델 조건부(claude vs codex vs agy) 매핑 검증.
+- `activeCapability.test.ts`: `[cap:start/end:*]` 파생(매칭 end 없는 마지막 start→active,
+  end/종료상태→clear) 순수함수 검증.
 - 조립 테스트(선택): 모델별로 올바른 `capability_{model}.md`가 붙는지(`agent-config`).
 
 ## 6. 오픈 이슈
@@ -136,3 +167,5 @@ cost-tracker가 티켓/에이전트 합계로 이미 포착(agy는 agy-usage 추
 - Antigravity 고유 특기 커맨드: 현재 없음으로 간주, 역할강점만 기술. 추후 agy가 명령형
   특기를 노출하면 스니펫 보강.
 - 유료플랜/preview 미보유 사용자: graceful 폴백으로 처리(자동 감지는 후속).
+- 마커 파생 위치: projection 레이어(서버측, 권장 — 모든 클라 일관) vs 프론트 store
+  (가벼움)를 플랜 단계에서 확정. 기존 projection 인프라(`get_projection`) 재사용 우선 검토.
