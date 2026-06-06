@@ -84,7 +84,7 @@ type RawTokenRate = { inputPer1M: number; outputPer1M: number };
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json"
+  "subscription-plans.json",
 );
 
 interface SubscriptionPlanEntry {
@@ -116,7 +116,7 @@ function loadSubscriptionPlans(): SubscriptionPlanEntry[] {
   } catch (err) {
     console.error(
       "[CostTracker] Failed to load subscription plans:",
-      err instanceof Error ? err.message : err
+      err instanceof Error ? err.message : err,
     );
     subscriptionPlanCache = [];
     return [];
@@ -295,7 +295,7 @@ export class CostTracker {
     accumulatedInputTokens = 0,
     accumulatedOutputTokens = 0,
     deltaCacheReadTokens = 0,
-    deltaCacheWriteTokens = 0
+    deltaCacheWriteTokens = 0,
   ): number {
     if (pricing.scheme === "per-token") {
       // API-equivalent value INCLUDING cache. Cache rates aren't in the table;
@@ -332,7 +332,7 @@ export class CostTracker {
     // portion above allowance, split proportionally across input/output.
     const overageDelta = Math.min(
       deltaInputTokens + deltaOutputTokens,
-      totalAfter - Math.max(totalBefore, allowance)
+      totalAfter - Math.max(totalBefore, allowance),
     );
     if (overageDelta <= 0) return 0;
     const totalDelta = deltaInputTokens + deltaOutputTokens || 1;
@@ -359,7 +359,7 @@ export class CostTracker {
     agentId: string,
     rootPath: string,
     sessionId: string | null | undefined,
-    model: string
+    model: string,
   ): void {
     // Don't double-track
     if (this.sessions.has(agentId)) {
@@ -386,7 +386,7 @@ export class CostTracker {
       os.homedir(),
       ".claude",
       "projects",
-      encodedPath
+      encodedPath,
     );
 
     let filePath: string;
@@ -409,7 +409,7 @@ export class CostTracker {
         }
         filePath = path.join(projectDir, files[0].name);
         console.log(
-          `[CostTracker] No sessionId — using most recent: ${files[0].name}`
+          `[CostTracker] No sessionId — using most recent: ${files[0].name}`,
         );
       } catch {
         console.warn(`[CostTracker] Cannot read project dir: ${projectDir}`);
@@ -417,9 +417,15 @@ export class CostTracker {
       }
     }
 
+    // The file may not exist yet: a pinned fresh launch (claude --session-id)
+    // wires tracking BEFORE Claude has written the JSONL. Set the tracker up
+    // regardless — pollSessionFile no-ops until the file appears, then folds it
+    // in (the no-sessionId branch above always resolves to an existing file).
+    // Bailing here is exactly what left newly-spawned agents reading 0 tokens.
     if (!fs.existsSync(filePath)) {
-      console.warn(`[CostTracker] Session file not found: ${filePath}`);
-      return;
+      console.log(
+        `[CostTracker] Session file not present yet, will poll until it appears: ${filePath}`,
+      );
     }
 
     const tracker: SessionTracker = {
@@ -432,13 +438,13 @@ export class CostTracker {
       model,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS
+        SESSION_POLL_INTERVAL_MS,
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`
+      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`,
     );
 
     // Do an initial scan right away
@@ -471,13 +477,13 @@ export class CostTracker {
       model: format === "codex" ? "gpt-5.5" : "gemini-2.5-pro",
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS
+        SESSION_POLL_INTERVAL_MS,
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`
+      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`,
     );
 
     // Initial scan (file may not exist yet — poller tolerates that).
@@ -523,7 +529,7 @@ export class CostTracker {
       const { delta, newState } = parseSessionDelta(
         tracker.format,
         lines,
-        tracker.state
+        tracker.state,
       );
       tracker.state = newState;
       if (newState.model) tracker.model = newState.model;
@@ -531,7 +537,7 @@ export class CostTracker {
     } catch (err) {
       console.error(
         `[CostTracker] Error polling session for agent=${agentId}:`,
-        err
+        err,
       );
     }
   }
@@ -542,7 +548,7 @@ export class CostTracker {
   private emit(
     tracker: SessionTracker,
     delta: TokenTotals,
-    rateLimit?: RateLimitInfo | null
+    rateLimit?: RateLimitInfo | null,
   ): void {
     const hasTokens =
       delta.input > 0 ||
@@ -570,7 +576,7 @@ export class CostTracker {
       0,
       0,
       acc.cacheRead,
-      acc.cacheWrite
+      acc.cacheWrite,
     );
     const deltaCost = this.computeIncrementalCost(
       pricing,
@@ -579,7 +585,7 @@ export class CostTracker {
       acc.input - delta.input,
       acc.output - delta.output,
       delta.cacheRead,
-      delta.cacheWrite
+      delta.cacheWrite,
     );
 
     this.onCostDetected?.(tracker.agentId, {
@@ -603,7 +609,7 @@ export class CostTracker {
     console.log(
       `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} ` +
         `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()} ` +
-        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`
+        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`,
     );
   }
 
@@ -666,12 +672,12 @@ export class CostTracker {
       loggedLimited: false,
       timer: setInterval(
         () => this.pollAgySession(agentId),
-        SESSION_POLL_INTERVAL_MS
+        SESSION_POLL_INTERVAL_MS,
       ),
     };
     this.agySessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking antigravity store for agent=${agentId}`
+      `[CostTracker] Tracking antigravity store for agent=${agentId}`,
     );
     this.pollAgySession(agentId);
   }
@@ -698,7 +704,7 @@ export class CostTracker {
           tracker.loggedLimited = true;
           console.warn(
             `[CostTracker] agy agent=${agentId} uses legacy .pb store — ` +
-              `token capture limited (no decode); relying on PTY signals.`
+              `token capture limited (no decode); relying on PTY signals.`,
           );
         }
         return;
@@ -710,7 +716,7 @@ export class CostTracker {
     } catch (err) {
       console.error(
         `[CostTracker] Error polling agy store for agent=${agentId}:`,
-        err
+        err,
       );
     }
   }
@@ -730,14 +736,14 @@ export class CostTracker {
       acc.input,
       acc.output,
       0,
-      0
+      0,
     );
     const deltaCost = this.computeIncrementalCost(
       pricing,
       dInput,
       dOutput,
       acc.input - dInput,
-      acc.output - dOutput
+      acc.output - dOutput,
     );
 
     this.onCostDetected?.(tracker.agentId, {
@@ -757,7 +763,7 @@ export class CostTracker {
 
     console.log(
       `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} (agy) ` +
-        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`
+        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`,
     );
   }
 
@@ -827,7 +833,7 @@ export class CostTracker {
         const cost = this.computeIncrementalCost(
           pricing,
           inputTokens,
-          outputTokens
+          outputTokens,
         );
 
         this.onCostDetected?.(agentId, {

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import crypto from "crypto";
 import { execFileSync } from "child_process";
 import { ModelType } from "./agent-manager";
 
@@ -158,6 +159,60 @@ export interface LaunchConfig {
   mcpConfigPath: string;
   skillContent: string;
   initialPrompt?: string;
+  /**
+   * For Claude only: the session id this launch is PINNED to (via the
+   * `--session-id` flag on a fresh launch, or the `--resume` UUID on a resume).
+   * Lets the caller wire cost tracking deterministically — no racy post-launch
+   * "which new JSONL appeared?" scan. Undefined for non-Claude models, and for
+   * the rare unresolved `--resume latest` claude case (caller falls back to
+   * detection). See claudeSessionArgs.
+   */
+  claudeSessionId?: string;
+}
+
+/**
+ * Decide Claude's session-related CLI args and the resulting session id.
+ *
+ * Per-agent token attribution keys off the Claude session JSONL filename
+ * (`<sessionId>.jsonl`). Rather than racily detecting which file a fresh spawn
+ * created — fragile when several Claude agents share one cwd, which is exactly
+ * when attribution silently collapses onto the orchestrator — we PIN the id up
+ * front and hand it straight to the cost tracker. Claude Code 2.1+ honors
+ * `--session-id <uuid>` and names the JSONL after it (verified empirically).
+ *
+ *   fresh / "new" (pinFreshSession)→ `--session-id <newSessionId>`, id = newSessionId
+ *   fresh / "new" (else)           → no session flag,               id = undefined
+ *   resume concrete UUID           → `--resume <uuid>`,             id = uuid
+ *   resume "latest" (unresolved)   → no session flag,               id = undefined
+ *
+ * `pinFreshSession` is opt-in: the AGENT path turns it on so each spawn's
+ * tokens attribute deterministically. The orchestrator leaves it OFF — it owns
+ * its own session lifecycle (it pushes `--resume` onto the args itself and
+ * detects its session by prompt signature), so injecting `--session-id` there
+ * would both be redundant and collide with its manual `--resume` on resume.
+ *
+ * The "latest" sentinel normally reaches the CLI already resolved to a concrete
+ * UUID (the caller's resolveSessionId); if it didn't, we leave it unpinned so
+ * the legacy post-launch detector can still recover it. We never emit both
+ * `--resume` and `--session-id`.
+ */
+export function claudeSessionArgs(
+  resumeSessionId: string | undefined,
+  newSessionId: string,
+  pinFreshSession: boolean,
+): { args: string[]; sessionId?: string } {
+  const wantResume = !!resumeSessionId && resumeSessionId !== "new";
+  const resumeIsLatest = resumeSessionId === "latest";
+  if (wantResume && !resumeIsLatest) {
+    return { args: ["--resume", resumeSessionId!], sessionId: resumeSessionId };
+  }
+  if (wantResume && resumeIsLatest) {
+    return { args: [], sessionId: undefined };
+  }
+  if (pinFreshSession) {
+    return { args: ["--session-id", newSessionId], sessionId: newSessionId };
+  }
+  return { args: [], sessionId: undefined };
 }
 
 interface MCPServerEntry {
@@ -496,6 +551,11 @@ export class AgentConfigGenerator {
     initialPrompt?: string,
     marbloProjectId?: string,
     resumeSessionId?: string,
+    // Opt-in: pin a fresh Claude launch to a generated --session-id so its
+    // tokens attribute deterministically. The agent path passes true; the
+    // orchestrator leaves it false (manages its own session). See
+    // claudeSessionArgs.
+    pinClaudeSession = false,
   ): LaunchConfig {
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
@@ -509,7 +569,7 @@ export class AgentConfigGenerator {
         ? fs.readFileSync(skillPath, "utf-8")
         : "";
 
-    const { command, args, env } = this.buildCLICommand(
+    const { command, args, env, claudeSessionId } = this.buildCLICommand(
       agent.model,
       agent.command,
       mcpConfigPath,
@@ -517,6 +577,7 @@ export class AgentConfigGenerator {
       marbloProjectId,
       agent.id,
       resumeSessionId,
+      pinClaudeSession,
     );
 
     return {
@@ -527,6 +588,7 @@ export class AgentConfigGenerator {
       mcpConfigPath,
       skillContent,
       initialPrompt,
+      claudeSessionId,
     };
   }
 
@@ -1082,7 +1144,13 @@ export class AgentConfigGenerator {
     marbloProjectId?: string,
     agentId?: string,
     resumeSessionId?: string,
-  ): { command: string; args: string[]; env: Record<string, string> } {
+    pinFreshClaudeSession = false,
+  ): {
+    command: string;
+    args: string[];
+    env: Record<string, string>;
+    claudeSessionId?: string;
+  } {
     const env = getMCPServerEnv(projectDir, marbloProjectId, agentId);
     // Normalize resume signals: "new" means force-fresh, "latest" means
     // "pick the most recent" (CLI-specific syntax), anything else is a
@@ -1094,22 +1162,30 @@ export class AgentConfigGenerator {
     // that runs non-interactively and exits. Instead, prompts are sent via
     // stdin after the CLI starts, keeping the session interactive.
     switch (model) {
-      case "claude":
-        // Claude Code accepts `--resume <UUID>` as a flag; "latest" is
-        // resolved to a UUID by the caller via resolveSessionId before we
-        // get here, so we only emit --resume when we have a concrete id.
+      case "claude": {
+        // Pin the session id up front so cost tracking can attribute tokens
+        // deterministically (see claudeSessionArgs). A fresh launch gets
+        // `--session-id <uuid>` when pinning is opted in (agent path); a
+        // concrete resume gets `--resume <uuid>`; an unresolved "latest" stays
+        // unpinned (caller resolves it before we get here, else the legacy
+        // detector recovers it).
+        const { args: sessionArgs, sessionId } = claudeSessionArgs(
+          resumeSessionId,
+          crypto.randomUUID(),
+          pinFreshClaudeSession,
+        );
         return {
           command: baseCommand || resolveClaudeBinary().command,
           args: [
             "--dangerously-skip-permissions",
             "--mcp-config",
             mcpConfigPath,
-            ...(wantResume && !resumeIsLatest
-              ? ["--resume", resumeSessionId!]
-              : []),
+            ...sessionArgs,
           ],
           env,
+          claudeSessionId: sessionId,
         };
+      }
 
       case "gemini": {
         // Per-agent isolation via GEMINI_CLI_HOME (NOT HOME override).

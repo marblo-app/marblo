@@ -284,6 +284,9 @@ export class AgentManager {
       params.initialPrompt,
       params.projectId,
       isResume ? resolvedResumeId : undefined,
+      // Pin a fresh Claude launch to a generated --session-id so this agent's
+      // tokens attribute to it deterministically (no racy post-launch scan).
+      true,
     );
 
     if (isResume) {
@@ -416,37 +419,41 @@ export class AgentManager {
       setTimeout(sendPrompt, fallbackMs);
     }
 
-    // Detect new Claude session file and save label (5s after launch)
-    if (this.onSessionDetected && params.cwd) {
+    // Wire Claude cost tracking to this agent's session.
+    //
+    // A fresh launch is PINNED to a brand-new session id up front
+    // (--session-id <uuid> — see claudeSessionArgs), so we attribute
+    // deterministically and SKIP the legacy "which new JSONL appeared?" scan.
+    // That scan collides when several Claude agents share one cwd: it grabs an
+    // arbitrary new file (or none, if Claude hasn't written it by the 5s mark),
+    // which silently funnels every agent's tokens onto the orchestrator and
+    // leaves the agents reading 0. The pinned JSONL may not exist yet at this
+    // point; the cost tracker's poller tolerates that and picks it up once
+    // Claude writes it. Gated to claude — codex/gemini/agy have their own
+    // dedicated tracking kickoff below.
+    //
+    // Resume launches are excluded: their session already exists and is wired
+    // for cost tracking via the reconnect path, so re-tracking here would
+    // re-read the whole file and double-count. They fall through to the legacy
+    // detector (a no-op on resume, since the resumed file isn't "new") — i.e.
+    // identical to pre-fix behavior.
+    if (this.onSessionDetected && params.cwd && params.model === "claude") {
       const rootPath = params.cwd;
       const agentName = params.name;
       const agentId = params.id;
-      // Capture existing sessions before launch
-      let existingIds: Set<string>;
-      try {
-        const encodedPath = encodeClaudeProjectDir(rootPath);
-        const sessionsDir = require("path").join(
-          require("os").homedir(),
-          ".claude",
-          "projects",
-          encodedPath,
-        );
-        const files = require("fs").existsSync(sessionsDir)
-          ? require("fs")
-              .readdirSync(sessionsDir)
-              .filter((f: string) => f.endsWith(".jsonl"))
-              .map((f: string) => f.replace(".jsonl", ""))
-          : [];
-        existingIds = new Set(files);
-      } catch (err) {
-        console.error(
-          `[AgentManager] Failed to read existing session files for rootPath="${rootPath}":`,
-          err,
-        );
-        existingIds = new Set();
-      }
 
-      setTimeout(() => {
+      if (launchConfig.claudeSessionId && !isResume) {
+        this.onSessionDetected(
+          rootPath,
+          launchConfig.claudeSessionId,
+          agentName,
+          agentId,
+        );
+      } else {
+        // Fallback for the rare unresolved `--resume latest` (no concrete id to
+        // pin): snapshot existing sessions, then 5s later claim the newly
+        // created one. Best-effort and race-prone, but only this edge needs it.
+        let existingIds: Set<string>;
         try {
           const encodedPath = encodeClaudeProjectDir(rootPath);
           const sessionsDir = require("path").join(
@@ -455,22 +462,49 @@ export class AgentManager {
             "projects",
             encodedPath,
           );
-          if (!require("fs").existsSync(sessionsDir)) return;
-          const currentFiles = require("fs")
-            .readdirSync(sessionsDir)
-            .filter((f: string) => f.endsWith(".jsonl"))
-            .map((f: string) => f.replace(".jsonl", ""));
-          const newId = currentFiles.find((id: string) => !existingIds.has(id));
-          if (newId) {
-            this.onSessionDetected!(rootPath, newId, agentName, agentId);
-          }
+          const files = require("fs").existsSync(sessionsDir)
+            ? require("fs")
+                .readdirSync(sessionsDir)
+                .filter((f: string) => f.endsWith(".jsonl"))
+                .map((f: string) => f.replace(".jsonl", ""))
+            : [];
+          existingIds = new Set(files);
         } catch (err) {
           console.error(
-            `[AgentManager] Failed to detect new session file for agent="${agentId}" rootPath="${rootPath}":`,
+            `[AgentManager] Failed to read existing session files for rootPath="${rootPath}":`,
             err,
           );
+          existingIds = new Set();
         }
-      }, 5000);
+
+        setTimeout(() => {
+          try {
+            const encodedPath = encodeClaudeProjectDir(rootPath);
+            const sessionsDir = require("path").join(
+              require("os").homedir(),
+              ".claude",
+              "projects",
+              encodedPath,
+            );
+            if (!require("fs").existsSync(sessionsDir)) return;
+            const currentFiles = require("fs")
+              .readdirSync(sessionsDir)
+              .filter((f: string) => f.endsWith(".jsonl"))
+              .map((f: string) => f.replace(".jsonl", ""));
+            const newId = currentFiles.find(
+              (id: string) => !existingIds.has(id),
+            );
+            if (newId) {
+              this.onSessionDetected!(rootPath, newId, agentName, agentId);
+            }
+          } catch (err) {
+            console.error(
+              `[AgentManager] Failed to detect new session file for agent="${agentId}" rootPath="${rootPath}":`,
+              err,
+            );
+          }
+        }, 5000);
+      }
     }
 
     // Codex / Gemini cost-tracking kickoff.
