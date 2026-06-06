@@ -5,6 +5,7 @@ import { encodeClaudeProjectDir, claudeProjectDir } from "./claude-paths";
 import { PtyManager } from "./pty-manager";
 import { AgentConfigGenerator, LaunchConfig } from "./agent-config";
 import type { ModelType } from "./agent-manager";
+import { contextForKind } from "./mcp-server/context";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
@@ -290,6 +291,10 @@ export class OrchestratorManager {
       if (config.mcpServers?.marblo?.env) {
         config.mcpServers.marblo.env.MARBLO_BRIDGE_PORT = String(bridgePort);
         config.mcpServers.marblo.env.MARBLO_PROJECT = projectId;
+        const context = contextForKind(this.kind);
+        if (context) {
+          config.mcpServers.marblo.env.MARBLO_CONTEXT = context;
+        }
         fs.writeFileSync(
           launchConfig.mcpConfigPath,
           JSON.stringify(config, null, 2),

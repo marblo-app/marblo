@@ -19,9 +19,12 @@
  *   node /tmp/.../dynamic-spawn.test.js
  */
 
+import * as os from "os";
+import * as path from "path";
 import {
   scoreAgents,
   checkSpawnConstraints,
+  isWorktreeIsolated,
   MAX_AGENTS,
   MAX_PER_ROLE,
   type AgentInfo,
@@ -119,6 +122,54 @@ test("dispatch with only stopped role-matched agent → spawn new (restart not r
   assert(
     wouldSpawnNew(agents, "backend"),
     "stopped agents not reusable; restart/spawn path triggers",
+  );
+});
+
+// ── Worktree isolation gate (FU1: dispatch reuse must not break isolation) ──
+//
+// Full reuse decision as bridge-server.dispatchTask runs it: an idle, role/
+// model-matched agent is only reused when it's ALSO sitting in the task's
+// target worktree. Otherwise dispatch falls through to a fresh coordinator-
+// routed spawn. cwd is carried separately here because AgentInfo has none.
+function wouldReuseInWorktree(
+  agentCwd: string | undefined,
+  projectId: string | undefined,
+  taskId: string | undefined,
+  role = "backend",
+): boolean {
+  const agents = [makeAgent({ status: "idle", role })];
+  const scored = scoreAgents(agents, role, undefined, []);
+  const reusable = scored.filter(
+    (s) =>
+      s.score >= 100 &&
+      s.agent.status === "idle" &&
+      isWorktreeIsolated(agentCwd, projectId, taskId),
+  );
+  return reusable.length > 0;
+}
+
+const PROJ = "GFB8JnJrrX6AgahqmGB3";
+const TASK = "x2AaMaMUpUagHyuI5kRb";
+const targetWt = path.join(os.homedir(), ".marblo", "worktrees", PROJ, TASK);
+
+test("reuse: projectId set + agent in MAIN checkout → NOT reused (spawn fresh)", () => {
+  assert(
+    !wouldReuseInWorktree("/Users/dev/marblo/v3", PROJ, TASK),
+    "idle agent parked in main checkout must not be reused for an isolated task",
+  );
+});
+
+test("reuse: projectId set + agent already in target worktree → reused", () => {
+  assert(
+    wouldReuseInWorktree(targetWt, PROJ, TASK),
+    "idle agent already in the task's worktree is safe to reuse",
+  );
+});
+
+test("reuse: no projectId (isolation not required) → reuse retained", () => {
+  assert(
+    wouldReuseInWorktree("/anywhere/at/all", undefined, TASK),
+    "non-isolated dispatch must keep reusing idle agents regardless of cwd",
   );
 });
 

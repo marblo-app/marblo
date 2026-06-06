@@ -8,6 +8,7 @@ import {
   firstUserMessageStartsWith,
   isOrchestratorSession,
 } from "../../electron/orchestrator-manager";
+import type { LaunchConfig } from "../../electron/agent-config";
 
 /**
  * Regression tests for orchestrator session auto-reconnect.
@@ -139,6 +140,86 @@ describe("OrchestratorManager session reconnect", () => {
           ORCHESTRATOR_PROMPT_SIGNATURE,
         ),
       ).toBe(false);
+    });
+  });
+
+  describe("launch MCP env context", () => {
+    function writeMcpConfig(filePath: string): void {
+      fs.writeFileSync(
+        filePath,
+        JSON.stringify({ mcpServers: { marblo: { env: {} } } }),
+        "utf-8",
+      );
+    }
+
+    function makeLaunchManager(
+      kind: string,
+      mcpConfigPath: string,
+    ): OrchestratorManager {
+      const ptyManager = {
+        create: vi.fn(),
+        onData: vi.fn(),
+        onExit: vi.fn(),
+        writeAndSubmit: vi.fn(),
+        kill: vi.fn(),
+      };
+      const launchConfig: LaunchConfig = {
+        model: "claude",
+        command: "claude",
+        args: [],
+        env: {},
+        mcpConfigPath,
+        skillContent: "",
+      };
+      const configGenerator = {
+        getLaunchConfig: vi.fn(() => launchConfig),
+        cleanup: vi.fn(),
+      };
+      return new OrchestratorManager(
+        ptyManager as unknown as ConstructorParameters<
+          typeof OrchestratorManager
+        >[0],
+        configGenerator as unknown as ConstructorParameters<
+          typeof OrchestratorManager
+        >[1],
+        undefined,
+        kind,
+      );
+    }
+
+    function readMcpEnv(filePath: string): Record<string, string | undefined> {
+      const config = JSON.parse(fs.readFileSync(filePath, "utf-8")) as {
+        mcpServers: { marblo: { env: Record<string, string | undefined> } };
+      };
+      return config.mcpServers.marblo.env;
+    }
+
+    it("injects MARBLO_CONTEXT=board for board orchestrators", () => {
+      const mcpConfigPath = path.join(tmpHome, "board-mcp.json");
+      writeMcpConfig(mcpConfigPath);
+      const mgr = makeLaunchManager("board", mcpConfigPath);
+
+      mgr.launch("project-1", rootPath, 12345, undefined, "new");
+
+      expect(readMcpEnv(mcpConfigPath)).toMatchObject({
+        MARBLO_BRIDGE_PORT: "12345",
+        MARBLO_PROJECT: "project-1",
+        MARBLO_CONTEXT: "board",
+      });
+    });
+
+    it("leaves MARBLO_CONTEXT unset for non-board orchestrators", () => {
+      const mcpConfigPath = path.join(tmpHome, "mission-mcp.json");
+      writeMcpConfig(mcpConfigPath);
+      const mgr = makeLaunchManager("mission", mcpConfigPath);
+
+      mgr.launch("project-1", rootPath, 12345, undefined, "new");
+
+      expect(readMcpEnv(mcpConfigPath)).toMatchObject({
+        MARBLO_BRIDGE_PORT: "12345",
+        MARBLO_PROJECT: "project-1",
+      });
+      expect(readMcpEnv(mcpConfigPath).MARBLO_CONTEXT).toBeUndefined();
     });
   });
 

@@ -108,6 +108,13 @@ const STALE_MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_IDLE_DAYS = 14;
 
 /**
+ * Timeout for the pre-create `git fetch origin` (WORKTREE-SPEC §3 최신 base).
+ * A short cap so an offline/auth-wedged fetch can't hang worktree creation —
+ * on timeout we fall back to the last-known local origin ref.
+ */
+const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
+
+/**
  * Relative node_modules locations to provision into a fresh worktree, in the
  * order they are linked. Monorepo-aware: node_modules can live at the repo root
  * and/or under the `v3/` package, so we link whichever sources actually exist.
@@ -174,23 +181,53 @@ export class WorktreeManager {
       opts?.worktreesRoot ?? path.join(os.homedir(), ".marblo", "worktrees");
   }
 
-  /** Single choke-point for git. Never rejects — always resolves a GitResult. */
-  private runGit(args: string[], cwd: string): Promise<GitResult> {
+  /**
+   * Single choke-point for git. Never rejects — always resolves a GitResult.
+   * With `opts.timeoutMs`, a hung process is SIGKILLed and resolved as a
+   * non-zero failure (stderr notes the timeout) so callers never hang.
+   */
+  private runGit(
+    args: string[],
+    cwd: string,
+    opts?: { timeoutMs?: number },
+  ): Promise<GitResult> {
     return new Promise((resolve) => {
       let stdout = "";
       let stderr = "";
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (r: GitResult) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve(r);
+      };
       try {
         const proc = spawn("git", args, { cwd });
+        if (opts?.timeoutMs && opts.timeoutMs > 0) {
+          timer = setTimeout(() => {
+            try {
+              proc.kill("SIGKILL");
+            } catch {
+              /* process already gone — ignore */
+            }
+            finish({
+              code: 1,
+              stdout,
+              stderr:
+                stderr ||
+                `git ${args[0] ?? ""} timed out after ${opts.timeoutMs}ms`,
+            });
+          }, opts.timeoutMs);
+          // Don't let a pending timeout keep the event loop alive.
+          timer.unref?.();
+        }
         proc.stdout.on("data", (d) => (stdout += d.toString()));
         proc.stderr.on("data", (d) => (stderr += d.toString()));
-        proc.on("close", (code) =>
-          resolve({ code: code ?? 1, stdout, stderr }),
-        );
-        proc.on("error", (e) =>
-          resolve({ code: 1, stdout, stderr: String(e) }),
-        );
+        proc.on("close", (code) => finish({ code: code ?? 1, stdout, stderr }));
+        proc.on("error", (e) => finish({ code: 1, stdout, stderr: String(e) }));
       } catch (e) {
-        resolve({ code: 1, stdout, stderr: String(e) });
+        finish({ code: 1, stdout, stderr: String(e) });
       }
     });
   }
@@ -208,6 +245,38 @@ export class WorktreeManager {
     );
     if (cur.code === 0 && cur.stdout.trim()) return cur.stdout.trim();
     return "HEAD";
+  }
+
+  /**
+   * Refresh `origin` so a new worktree branches off the LATEST upstream base,
+   * not a stale local tracking ref (WORKTREE-SPEC §3 최신 base 보장). Without
+   * this, resolveBaseRef() reads `refs/remotes/origin/HEAD`, which is only as
+   * fresh as the last fetch — main can have advanced since.
+   *
+   * Best-effort and NEVER throws (create() is a never-throw path): on offline /
+   * auth failure / timeout it logs a VISIBLE warning and returns false so the
+   * caller falls back to the last-known local origin ref. A short timeout
+   * (default 15s) keeps a wedged fetch from hanging worktree creation.
+   *
+   * Returns true when the fetch succeeded (refs are fresh), false otherwise.
+   */
+  async fetchOrigin(
+    repoRoot: string,
+    timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
+  ): Promise<boolean> {
+    const res = await this.runGit(["fetch", "origin"], repoRoot, {
+      timeoutMs,
+    });
+    if (res.code !== 0) {
+      console.warn(
+        `[WorktreeManager] git fetch origin failed — branching the worktree ` +
+          `off the last-known local origin ref (may be stale): ${
+            res.stderr.trim() || `exit ${res.code}`
+          }`,
+      );
+      return false;
+    }
+    return true;
   }
 
   /** marblo/<sanitized-slug>-<first 8 of taskId> */
@@ -228,6 +297,13 @@ export class WorktreeManager {
     }
     if (!idPattern.test(params.taskId)) {
       throw new Error(`invalid taskId: ${params.taskId}`);
+    }
+    // Refresh origin BEFORE resolving the base so the worktree forks off the
+    // latest upstream main — UNLESS the caller pinned an explicit baseRef, in
+    // which case we respect their intent and skip the fetch. fetchOrigin()
+    // never throws; a fetch failure only warns and falls back to the local ref.
+    if (params.baseRef === undefined) {
+      await this.fetchOrigin(params.repoRoot);
     }
     const baseRef =
       params.baseRef ?? (await this.resolveBaseRef(params.repoRoot));

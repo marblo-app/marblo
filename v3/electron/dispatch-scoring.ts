@@ -562,6 +562,36 @@ export function scoreModels(
   return scored[0].model;
 }
 
+// ── Worktree isolation gate (dispatch reuse / restart) ──────
+//
+// Reuse (idle agent) and restart (stopped agent) both re-use an EXISTING PTY
+// in its current cwd — neither path routes through WorktreeCoordinator.prepare()
+// the way a fresh spawn does. So when a dispatch targets an isolated worktree
+// (~/.marblo/worktrees/<projectId>/<taskId>) but the candidate agent is sitting
+// elsewhere — the main checkout, or another task's worktree — re-using it runs
+// the work in the WRONG tree and pollutes it (proven: a stale wt reuse risked
+// polluting the main checkout). dispatchTask uses this to drop such candidates
+// so it falls through to a coordinator-routed fresh spawn, which lands in the
+// correct worktree.
+//
+// Returns true when the candidate is SAFE to reuse for this target:
+//   - no projectId OR no taskId → no concrete worktree to isolate against, so
+//     reuse stays unrestricted (preserves non-isolated dispatch — no regression).
+//   - otherwise → only when the agent's cwd IS the target worktree, i.e. its
+//     path ends with <projectId>/<taskId> (same suffix the WorktreeCoordinator
+//     uses to identify an existing worktree). Unknown cwd → treated as a
+//     mismatch so we err toward a fresh, correctly-isolated spawn.
+export function isWorktreeIsolated(
+  agentCwd: string | undefined,
+  projectId: string | undefined,
+  taskId: string | undefined,
+): boolean {
+  if (!projectId || !taskId) return true;
+  if (!agentCwd) return false;
+  const suffix = path.sep + path.join(projectId, taskId);
+  return agentCwd.endsWith(suffix);
+}
+
 // ── Dispatch constraint checks ──────────────────────────────
 
 export function checkSpawnConstraints(

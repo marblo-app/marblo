@@ -10,6 +10,7 @@ import {
   roleMatchIndex,
   loadBalanceIndex,
   normalizeModel,
+  isWorktreeIsolated,
   WEIGHTS,
   MAX_AGENTS,
   MAX_PER_ROLE,
@@ -701,5 +702,67 @@ describe("normalizeModel", () => {
   it("is case/whitespace tolerant", () => {
     expect(normalizeModel("  Codex  ")).toBe("gpt");
     expect(normalizeModel(" AGY ")).toBe("antigravity");
+  });
+});
+
+// ── isWorktreeIsolated (dispatch reuse/restart isolation gate) ──
+//
+// Guards the gap where dispatchTask reuses an idle agent (or restarts a stopped
+// one) WITHOUT routing through WorktreeCoordinator.prepare() — the reused PTY
+// keeps its old cwd, so reusing an agent parked outside the task's worktree
+// would pollute the wrong tree (e.g. the main checkout).
+describe("isWorktreeIsolated", () => {
+  const PROJECT = "proj123";
+  const TASK = "taskABC";
+  // The worktree the coordinator would land this dispatch in.
+  const target = path.join(os.homedir(), ".marblo", "worktrees", PROJECT, TASK);
+
+  it("allows reuse when the agent already sits in the target worktree", () => {
+    expect(isWorktreeIsolated(target, PROJECT, TASK)).toBe(true);
+  });
+
+  it("blocks reuse of an agent parked in the MAIN checkout (isolation break)", () => {
+    const mainCheckout = "/Users/dev/Documents/programming/marblo/v3";
+    expect(isWorktreeIsolated(mainCheckout, PROJECT, TASK)).toBe(false);
+  });
+
+  it("blocks reuse of an agent sitting in ANOTHER task's worktree", () => {
+    const otherWorktree = path.join(
+      os.homedir(),
+      ".marblo",
+      "worktrees",
+      PROJECT,
+      "someOtherTask",
+    );
+    expect(isWorktreeIsolated(otherWorktree, PROJECT, TASK)).toBe(false);
+  });
+
+  it("blocks reuse when the agent's cwd is unknown (err toward fresh spawn)", () => {
+    expect(isWorktreeIsolated(undefined, PROJECT, TASK)).toBe(false);
+    expect(isWorktreeIsolated("", PROJECT, TASK)).toBe(false);
+  });
+
+  it("keeps reuse unrestricted when no projectId (isolation not required)", () => {
+    // Non-isolated dispatch must NOT regress — any cwd (even unknown) is fine.
+    expect(isWorktreeIsolated("/anywhere", undefined, TASK)).toBe(true);
+    expect(isWorktreeIsolated(undefined, undefined, TASK)).toBe(true);
+    expect(isWorktreeIsolated("/anywhere", "", TASK)).toBe(true);
+  });
+
+  it("keeps reuse unrestricted when no taskId (no concrete worktree target)", () => {
+    expect(isWorktreeIsolated("/anywhere", PROJECT, undefined)).toBe(true);
+    expect(isWorktreeIsolated("/anywhere", PROJECT, "")).toBe(true);
+  });
+
+  it("matches only on the exact <projectId>/<taskId> suffix, not a partial", () => {
+    // A sibling task whose id shares a prefix must NOT count as the target.
+    const lookalike = path.join(
+      os.homedir(),
+      ".marblo",
+      "worktrees",
+      PROJECT,
+      TASK + "-extra",
+    );
+    expect(isWorktreeIsolated(lookalike, PROJECT, TASK)).toBe(false);
   });
 });
