@@ -118,7 +118,9 @@ QuickLane {
   - mission 오케 세션 → `MARBLO_CONTEXT=<missionId>`
   - 빠른 레인 에이전트 세션 → `MARBLO_CONTEXT=lane:<laneId>`
 - `get_all_tasks`(`tools.ts:239`)에 `all_contexts?: boolean` 추가, 기본 필터에 `where("contextId","==", resolveContext())` 한 줄 추가. `all_projects`와 동일한 escape-hatch 형태.
-- **주입 지점**(코드 확인 완료): MARBLO_PROJECT를 넣는 **환경변수 생성기와 동일 위치** — 에이전트 `agent-config.ts:287–289`(`resolvedProject` 옆) + Codex `${VAR}` allowlist `agent-config.ts:~801`, 오케 `orchestrator-manager.ts:292·307`. MCP는 `tools.ts:55·77`에서 `process.env.MARBLO_CONTEXT` 읽기만(`|| "board"`). MCP 등록 시점 아님.
+- **주입 지점**(코드 확인 완료): MARBLO_PROJECT를 넣는 **환경변수 생성기와 동일 위치** — 에이전트 `agent-config.ts:287–289`(`resolvedProject` 옆) + Codex `${VAR}` allowlist `agent-config.ts:~801`, 오케 `orchestrator-manager.ts:292·307`. MCP는 `tools.ts`에서 `process.env.MARBLO_CONTEXT` 읽기만. MCP 등록 시점 아님.
+- **읽기/쓰기 비대칭**(구현 정제 — 코드가 정답, 스펙 갱신): 쓰기 `resolveContextForWrite() = process.env.MARBLO_CONTEXT || "board"`(모든 태스크가 라벨됨), 읽기 `resolveContext() = process.env.MARBLO_CONTEXT || ""`(env가 **명시적으로 set일 때만** 필터). → MARBLO_CONTEXT 미설정 호출자(미션 오케·일반 에이전트·외부 CLI)는 unscoped 유지 = **회귀 0**. 보드 오케에만 `"board"`를 박아야 스코핑이 켜진다.
+- **활성화 보류(Plan 1)**: 위 보드 오케 주입(`contextForKind`→`MARBLO_CONTEXT="board"`)은 **Plan 1에서 미적용**. 레인이 생기는 Plan 2에서 백필 자동화와 함께 켠다. Plan 1은 `MARBLO_CONTEXT`를 아무 데서도 set 안 함 → 인프라 **dormant(동작 무변경)**.
 
 ## 6. UI
 
@@ -168,3 +170,16 @@ QuickLane {
    - MCP: `tools.ts:55·77` 패턴대로 `resolveContext()` = `process.env.MARBLO_CONTEXT || "board"`(읽기만).
    - 근거: MARBLO_PROJECT/MARBLO_AGENT_ID가 이미 이 생성기에서 세션별 주입되고 MCP가 `process.env`로 읽음 → 동일 경로.
 3. **빠른 레인 탭 → 독립 최상위 탭, Board와 Missions 사이.** `TabBar.tsx`에 `{ id: "lanes", label: "Lanes" }` 삽입(§6). 제품명 Quick Lanes.
+
+### 11.1 Plan 1 구현 상태 (2026-06-06 · ultracode 워크플로우)
+
+contextId 인프라를 **dormant로 출하**(동작 무변경, 회귀 0). 테스트 14/14 + 전체 470/470 통과, plan-touched 파일 tsc 에러 0.
+
+- ✅ `electron/mcp-server/context.ts` 순수 헬퍼(resolveContext/resolveContextForWrite/contextReadFilter/contextForKind/computeContextIdBackfill) + 단위테스트 10
+- ✅ 태스크 생성 3지점 `contextId` 기록(`tools.ts` create_task/bulk = `resolveContextForWrite()`, `dispatcher-impl.ts` = `missionId`)
+- ✅ `get_all_tasks` contextId 필터 + `all_contexts`(아무도 MARBLO_CONTEXT를 set 안 해 현재 **항상 unscoped**)
+- ✅ 프런트 `Task.contextId` + `taskService` 매퍼(누락→"board") + `isLaneTask` + `TaskCard` 마킹(amber 좌측바+칩) + 기존 호출부 2곳(`TaskCreateModal`/`OrchestratorChat`) `contextId:"board"` 보정
+- ✅ `scripts/backfill-context-id.mjs` 백필 러너(dry-run 기본/`--apply`)
+- ⏸ **보드 오케 활성화(`MARBLO_CONTEXT="board"` 주입) 보류** → Plan 2에서 백필 자동화와 함께. 사유: 레인 미존재 시 활성화 이득~0 · 백필 전 레거시 시야손실 위험(§9). `orchestrator-manager.ts` 주입은 제거됨, `contextForKind`는 Plan 2 대기(테스트만 커버).
+- ⏸ 에이전트측 주입(`agent-config` + Codex allowlist) → Plan 2(레인 spawn과 함께).
+- ⚠️ 코드는 검증 완료·**미커밋**: 더티 워킹트리(`tools.ts`/`dispatcher-impl.ts`/`orchestrator-manager.ts`에 무관한 기존 WIP 혼재)라 깔끔한 분리 커밋 불가 → 사용자 WIP 흐름에 통합 위임.
