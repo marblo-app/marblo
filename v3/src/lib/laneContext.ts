@@ -13,13 +13,19 @@
  */
 const RESERVED_BOARD = "board";
 
-/** Quick Lane task — "lane:" 접두사를 가진 contextId. */
+/**
+ * Quick Lane task — "lane:" 접두사를 가진 contextId.
+ * ("board" 는 "lane:" 로 시작하지 않으므로 RESERVED_BOARD 를 따로 검사하지
+ *  않아도 안전하다 — by construction.)
+ */
 export function isLaneTask(contextId: string | undefined): boolean {
   return !!contextId && contextId.startsWith("lane:");
 }
 
 /** Mission task — board 도 lane 도 아닌(= missionId 그 자체) contextId. */
-export function isMissionTask(contextId: string | undefined): boolean {
+export function isMissionTask(
+  contextId: string | undefined
+): contextId is string {
   return (
     !!contextId &&
     contextId !== RESERVED_BOARD &&
@@ -29,5 +35,5 @@ export function isMissionTask(contextId: string | undefined): boolean {
 
 /** Mission task 의 missionId, 아니면 null. */
 export function getMissionId(contextId: string | undefined): string | null {
-  return isMissionTask(contextId) ? (contextId as string) : null;
+  return isMissionTask(contextId) ? contextId : null;
 }

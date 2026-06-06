@@ -20,6 +20,9 @@ describe("isLaneTask", () => {
     // 회귀: 예전엔 board 아니면 전부 lane 으로 판정해 미션을 lane 으로 오판했다.
     expect(isLaneTask("mission-xyz")).toBe(false);
   });
+  it("is true for a bare lane: prefix (empty laneId)", () => {
+    expect(isLaneTask("lane:")).toBe(true);
+  });
 });
 
 describe("isMissionTask", () => {
@@ -45,5 +48,8 @@ describe("getMissionId", () => {
     expect(getMissionId("board")).toBeNull();
     expect(getMissionId("lane:abc")).toBeNull();
     expect(getMissionId(undefined)).toBeNull();
+  });
+  it("returns null for an empty string", () => {
+    expect(getMissionId("")).toBeNull();
   });
 });
