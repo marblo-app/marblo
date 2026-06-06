@@ -107,6 +107,65 @@ export interface CleanupStaleResult {
 const STALE_MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_IDLE_DAYS = 14;
 
+/**
+ * Relative node_modules locations to provision into a fresh worktree, in the
+ * order they are linked. Monorepo-aware: node_modules can live at the repo root
+ * and/or under the `v3/` package, so we link whichever sources actually exist.
+ */
+const NODE_MODULES_CANDIDATES = [
+  "node_modules",
+  path.join("v3", "node_modules"),
+];
+
+/**
+ * Symlink the main repo's node_modules into a freshly created worktree so the
+ * isolated agent can run npm typecheck/test/build without a fresh install.
+ * node_modules is `.gitignore`d, so it never exists in a fresh checkout.
+ *
+ * For each candidate (repo root + the v3 monorepo package), if the source
+ * exists under `repoRoot` it is linked to the matching path under
+ * `worktreePath` with an ABSOLUTE symlink (no copy → instant, zero disk).
+ *
+ * - Idempotent: any existing entry at the target — including a symlink, even a
+ *   broken one — is left untouched and skipped (`lstat` does not follow links).
+ * - Never throws: a missing source or a failed link only logs a warning;
+ *   worktree creation itself must always succeed.
+ *
+ * Exported (not just a private method) so it is directly unit-testable.
+ */
+export function provisionNodeModules(
+  repoRoot: string,
+  worktreePath: string,
+): void {
+  for (const rel of NODE_MODULES_CANDIDATES) {
+    const src = path.resolve(repoRoot, rel); // absolute → absolute symlink
+    const dest = path.join(worktreePath, rel);
+    try {
+      // Source must exist — skip silently otherwise (never-throw).
+      if (!fs.existsSync(src)) continue;
+      // Idempotent: bail if anything already occupies the target. lstat does
+      // not follow symlinks, so a present (even broken) link still counts.
+      try {
+        fs.lstatSync(dest);
+        continue; // already provisioned
+      } catch {
+        // ENOENT — nothing there; fall through and create the link.
+      }
+      // The parent (e.g. <wt>/v3) exists in any real checkout; mkdir is a
+      // cheap, idempotent guard so an unexpected layout can't make us throw.
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.symlinkSync(src, dest, "dir");
+    } catch (e) {
+      // Best-effort: log and move on so create() still resolves successfully.
+      console.warn(
+        `[WorktreeManager] node_modules provisioning skipped for ${rel}: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+  }
+}
+
 export class WorktreeManager {
   private worktreesRoot: string;
 
@@ -187,6 +246,11 @@ export class WorktreeManager {
     if (res.code !== 0) {
       throw new Error(`git worktree add failed: ${res.stderr.trim()}`);
     }
+
+    // Provision node_modules immediately so the isolated agent can run
+    // npm typecheck/test/build without a fresh install. Best-effort &
+    // never-throws — a failure here must not fail worktree creation.
+    provisionNodeModules(params.repoRoot, wtPath);
 
     const headRes = await this.runGit(["rev-parse", "HEAD"], wtPath);
     // Normalize the path to resolve OS-level symlinks (e.g. /var → /private/var on macOS)

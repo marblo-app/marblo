@@ -3,7 +3,10 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { WorktreeManager } from "../../electron/worktree-manager";
+import {
+  WorktreeManager,
+  provisionNodeModules,
+} from "../../electron/worktree-manager";
 
 function git(args: string[], cwd: string): string {
   const r = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -99,6 +102,102 @@ describe("WorktreeManager.create", () => {
     };
     await mgr.create(params);
     await expect(mgr.create(params)).rejects.toThrow(/worktree add failed/i);
+  });
+});
+
+describe("WorktreeManager — node_modules provisioning", () => {
+  let repoRoot: string;
+  let mgr: WorktreeManager;
+  beforeEach(() => {
+    ({ repoRoot, mgr } = makeRepo());
+  });
+
+  it("symlinks the main repo node_modules into a new worktree (absolute, no copy)", async () => {
+    // node_modules is .gitignore'd in real life; here it's simply untracked,
+    // so the fresh worktree checkout won't contain it until we provision.
+    fs.mkdirSync(path.join(repoRoot, "node_modules"));
+    fs.writeFileSync(
+      path.join(repoRoot, "node_modules", ".marker"),
+      "from-main\n"
+    );
+
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "nodemods0001",
+      slug: "deps",
+    });
+
+    const link = path.join(info.path, "node_modules");
+    // It's a symlink (not a copy)…
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    // …with an absolute target resolving to the main repo's node_modules…
+    const target = fs.readlinkSync(link);
+    expect(path.isAbsolute(target)).toBe(true);
+    expect(fs.realpathSync(link)).toBe(
+      fs.realpathSync(path.join(repoRoot, "node_modules"))
+    );
+    // …and content is readable through the link.
+    expect(fs.readFileSync(path.join(link, ".marker"), "utf8")).toBe(
+      "from-main\n"
+    );
+  });
+
+  it("is idempotent — a second provision is a no-op and never throws", () => {
+    fs.mkdirSync(path.join(repoRoot, "node_modules"));
+    // Stand-in worktree dir (real create() would produce this).
+    const wt = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-wt-dest-"));
+
+    provisionNodeModules(repoRoot, wt);
+    const link = path.join(wt, "node_modules");
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    const firstTarget = fs.readlinkSync(link);
+
+    // Second call must not throw and must leave the existing link untouched.
+    expect(() => provisionNodeModules(repoRoot, wt)).not.toThrow();
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(link)).toBe(firstTarget);
+  });
+
+  it("skips silently when the source has no node_modules — create still succeeds", async () => {
+    // makeRepo() builds a repo with no node_modules anywhere.
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "nonodemods01",
+      slug: "bare",
+    });
+
+    // Worktree was created successfully…
+    expect(info.branch).toBe("marblo/bare-nonodemo");
+    expect(fs.existsSync(path.join(info.path, "README.md"))).toBe(true);
+    // …but no node_modules link was provisioned (nothing to link).
+    expect(fs.existsSync(path.join(info.path, "node_modules"))).toBe(false);
+  });
+
+  it("does not dirty the worktree — the symlink stays git-ignored", async () => {
+    // The ignore pattern MUST omit the trailing slash: "node_modules/" matches
+    // directories only, but git treats the provisioned symlink as a file, so it
+    // would show as untracked and force status().dirty=true on every worktree.
+    fs.writeFileSync(path.join(repoRoot, ".gitignore"), "node_modules\n");
+    git(["add", "."], repoRoot);
+    git(["commit", "-m", "ignore node_modules"], repoRoot);
+    fs.mkdirSync(path.join(repoRoot, "node_modules"));
+
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "cleanstatus1",
+      slug: "clean status",
+    });
+
+    // The symlink was provisioned…
+    expect(
+      fs.lstatSync(path.join(info.path, "node_modules")).isSymbolicLink()
+    ).toBe(true);
+    // …yet the worktree reports clean (ignored, so not counted as dirty).
+    const s = await mgr.status(info.path, "main");
+    expect(s.dirty).toBe(false);
   });
 });
 

@@ -15,7 +15,10 @@ build/
 venv/
 
 # Node
-node_modules/
+# No trailing slash so this also matches a node_modules symlink (WorktreeManager
+# provisions node_modules into worktrees as a symlink, which a trailing-slash
+# "node_modules/" pattern — directories only — would leave untracked).
+node_modules
 .next/
 frontend/.next/
 frontend/node_modules/

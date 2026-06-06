@@ -1,4 +1,7 @@
-node_modules/
+# No trailing slash: matches the dir AND a node_modules symlink (WorktreeManager
+# provisions node_modules into worktrees as a symlink; a trailing-slash pattern
+# matches directories only, so the link would otherwise pollute git status).
+node_modules
 dist/
 dist-electron/
 release/
