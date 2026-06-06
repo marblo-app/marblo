@@ -372,6 +372,21 @@ function sendToOwner(
 // (agent:spawned, agent:statusChanged, etc.) to only the matching window(s).
 const windowProjects = new Map<number, string>(); // webContents.id → projectId
 
+// Per-window restore state, keyed by webContents.id (stable across a renderer
+// reload). The main process survives macOS sleep/wake, so when a window's
+// renderer is discarded+reloaded on wake it can ask main "what folder/project
+// did I have?" and reconnect — instead of falling back to the new-window
+// folder picker. Unlike windowProjects (event scoping, cleared when a project
+// closes), this map is NEVER cleared by transient nulls during a reload: it
+// only accumulates non-empty values and is dropped when the window closes.
+// The global app-state.json holds a single slot, so it can't represent more
+// than one open project — this per-window map is what makes multi-window
+// reconnect correct. See src/lib/sessionRestore.ts for the precedence rules.
+const windowRestore = new Map<
+  number,
+  { rootPath?: string; projectId?: string }
+>();
+
 function getProjectForSender(senderId: number): string | undefined {
   return windowProjects.get(senderId);
 }
@@ -1122,6 +1137,8 @@ function createWindow(isNewWindow = false) {
     fsManager.stopWatching(`win-${closedSenderId}`);
     // Drop the window→project registration.
     windowProjects.delete(closedSenderId);
+    // Drop the per-window restore record (no point reconnecting a closed window).
+    windowRestore.delete(closedSenderId);
     if (mainWindow === win) {
       // Promote another window as primary, or null
       mainWindow =
@@ -1640,6 +1657,29 @@ ipcMain.handle("window:registerProject", (event, projectId: string) => {
     return;
   }
   windowProjects.set(event.sender.id, projectId);
+});
+
+// Persist this window's folder/project so it can reconnect after a renderer
+// reload (e.g. macOS sleep/wake discards a background window's renderer).
+// Only non-empty fields are merged in — a transient null during reload must
+// NOT wipe the saved state (that's the race that left woken windows on the
+// folder picker). Cleared only when the window closes.
+ipcMain.handle(
+  "window:registerRestore",
+  (event, state: { rootPath?: string; projectId?: string }) => {
+    const next = { ...(windowRestore.get(event.sender.id) ?? {}) };
+    if (typeof state?.rootPath === "string" && state.rootPath) {
+      next.rootPath = state.rootPath;
+    }
+    if (typeof state?.projectId === "string" && state.projectId) {
+      next.projectId = state.projectId;
+    }
+    windowRestore.set(event.sender.id, next);
+  },
+);
+
+ipcMain.handle("window:getRestoreState", (event) => {
+  return windowRestore.get(event.sender.id) ?? {};
 });
 
 ipcMain.handle("agent:remove", (_event, agentId: string) => {

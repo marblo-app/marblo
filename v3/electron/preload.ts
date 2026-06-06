@@ -23,6 +23,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     isNewWindow: () => isNewWindow,
     registerProject: (projectId: string) =>
       ipcRenderer.invoke("window:registerProject", projectId),
+    // Persist this window's folder/project in main (keyed by webContents.id,
+    // stable across a renderer reload) so it can reconnect after sleep/wake.
+    // Only non-empty fields are stored; never cleared by transient nulls.
+    registerRestore: (state: { rootPath?: string; projectId?: string }) =>
+      ipcRenderer.invoke("window:registerRestore", state),
+    // Read back this window's saved folder/project for reconnect on startup.
+    getRestoreState: () =>
+      ipcRenderer.invoke("window:getRestoreState") as Promise<{
+        rootPath?: string;
+        projectId?: string;
+      }>,
   },
   // Resolved Claude Code binary used to launch agents (path + version).
   claude: {
