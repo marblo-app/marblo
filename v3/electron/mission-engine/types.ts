@@ -37,6 +37,9 @@ export interface MissionStep {
   onFailure?: MissionStepFailurePolicy;
   status: MissionStepStatus;
   output?: unknown;
+  // 실시간 진행 출력 — running 중인 step 의 stdout/stderr tail.
+  // skill-runner 가 throttled 로 mission doc 에 write. 종료 시 final output 으로 정리.
+  liveOutput?: string;
   error?: string;
   retryCount?: number;
   startedAt?: Date;

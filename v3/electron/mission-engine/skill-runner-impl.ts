@@ -31,6 +31,7 @@ export function createSkillRunner(deps: SkillRunnerDeps): SkillRunner {
     skill: string;
     args?: string;
     timeoutMs?: number;
+    onProgress?: (chunk: string) => void;
   }): Promise<SkillResult> {
     const startedAt = Date.now();
 
@@ -85,19 +86,56 @@ export function createSkillRunner(deps: SkillRunnerDeps): SkillRunner {
       let resolved = false;
       let stdout = "";
       let stderr = "";
+      // throttle: 2초마다 또는 chunk가 500바이트 누적되면 onProgress 호출.
+      let lastProgressAt = 0;
+      let lastEmittedLen = 0;
+      const PROGRESS_INTERVAL_MS = 2_000;
+      const PROGRESS_MIN_DELTA = 500;
+      const emitProgress = (force = false) => {
+        if (!input.onProgress) return;
+        const now = Date.now();
+        const combinedLen = stdout.length + stderr.length;
+        if (
+          !force &&
+          now - lastProgressAt < PROGRESS_INTERVAL_MS &&
+          combinedLen - lastEmittedLen < PROGRESS_MIN_DELTA
+        ) {
+          return;
+        }
+        lastProgressAt = now;
+        lastEmittedLen = combinedLen;
+        // 최근 4000자 tail 만 (Firestore write cost + UI render 부담 완화).
+        const tail =
+          stderr.length > 0
+            ? `${stdout}\n[stderr]\n${stderr}`.slice(-4000)
+            : stdout.slice(-4000);
+        try {
+          input.onProgress(tail);
+        } catch {
+          /* best-effort */
+        }
+      };
 
-      const child = spawn(ccBinary, ["--print", prompt], {
-        cwd,
-        env: {
-          PATH: process.env.PATH ?? "",
-          HOME: process.env.HOME ?? "",
-          USER: process.env.USER ?? "",
-          LANG: process.env.LANG ?? "en_US.UTF-8",
-          MARBLO_PROJECT: process.env.MARBLO_PROJECT ?? "",
-          MARBLO_MISSION_ID: input.missionId,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      // --dangerously-skip-permissions: 헤드리스 `--print` 실행은 stdin 이
+      // ignore 라 권한 프롬프트가 뜨면 응답할 수 없어 그대로 멈춘다. 스킬이
+      // 파일 편집/bash/MCP tool 을 쓰면 자동승인이 없으면 동작 자체가 막힘.
+      // 다른 워커(claude/codex/gemini/agy)와 동일하게 무인 자동 실행이 기본.
+      const child = spawn(
+        ccBinary,
+        ["--print", "--dangerously-skip-permissions", prompt],
+        {
+          cwd,
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+            USER: process.env.USER ?? "",
+            LANG: process.env.LANG ?? "en_US.UTF-8",
+            MARBLO_PROJECT: process.env.MARBLO_PROJECT ?? "",
+            MARBLO_MISSION_ID: input.missionId,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        }
+      );
 
       const timer = setTimeout(() => {
         try {
@@ -120,27 +158,42 @@ export function createSkillRunner(deps: SkillRunnerDeps): SkillRunner {
         resolved = true;
         clearTimeout(timer);
         const durationMs = Date.now() - startedAt;
-        const outTail = stdout.slice(-8000);
-        const errTail = stderr.slice(-2000);
+        // stdout 우선, 비면 stderr 도 포함해서 항상 뭐라도 저장.
+        // claude --print 가 tool-use 만 하고 final text 가 없으면 stdout 이 비기도 함.
+        const stdoutTail = stdout.slice(-8000);
+        const stderrTail = stderr.slice(-2000);
+        const combinedOutput =
+          stdoutTail.length > 0 && stderrTail.length > 0
+            ? `${stdoutTail}\n\n--- stderr ---\n${stderrTail}`
+            : stdoutTail.length > 0
+            ? stdoutTail
+            : stderrTail.length > 0
+            ? `(stdout was empty)\n--- stderr ---\n${stderrTail}`
+            : "(no output captured)";
         log(`runSkill ${input.skill} ${ok ? "ok" : "fail"}`, {
           missionId: input.missionId,
           durationMs,
+          stdoutLen: stdout.length,
+          stderrLen: stderr.length,
         });
         resolve({
           success: ok,
-          output: outTail,
+          output: combinedOutput,
           error: ok
             ? undefined
-            : [errLine, errTail].filter(Boolean).join("\n") || "non-zero exit",
+            : [errLine, stderrTail].filter(Boolean).join("\n") ||
+              "non-zero exit",
           durationMs,
         });
       };
 
       child.stdout.on("data", (b: Buffer) => {
         stdout += b.toString();
+        emitProgress();
       });
       child.stderr.on("data", (b: Buffer) => {
         stderr += b.toString();
+        emitProgress();
       });
       child.on("exit", (code, signal) => {
         finish(

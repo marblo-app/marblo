@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { TimelineEvent, TimelineEventType } from "../../types/mission";
 
 const ICONS: Record<TimelineEventType, string> = {
@@ -34,30 +35,64 @@ export function MissionTimeline({ events, emptyHint }: MissionTimelineProps) {
   return (
     <ol className="space-y-1.5">
       {ordered.map((ev, i) => (
-        <li
-          key={i}
-          className="flex gap-3 rounded-lg border border-gray-700/60 bg-gray-800/40 p-2.5 text-sm"
-        >
-          <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center text-base leading-none">
-            {ICONS[ev.type] ?? "·"}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="font-medium text-gray-200">
-                {formatType(ev.type)}
-              </span>
-              <time className="flex-shrink-0 text-xs text-gray-500">
-                {formatTime(ev.ts)}
-              </time>
-            </div>
-            <div className="mt-0.5 truncate text-xs text-gray-400">
-              {describe(ev)}
-            </div>
-          </div>
-        </li>
+        <TimelineRow key={i} event={ev} />
       ))}
     </ol>
   );
+}
+
+function TimelineRow({ event }: { event: TimelineEvent }) {
+  const ev = event;
+  const isExpandable =
+    ev.type === "supervisor.note" ||
+    ev.type === "step.completed" ||
+    ev.type === "step.failed";
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <li
+      className={`flex gap-3 rounded-lg border border-gray-700/60 bg-gray-800/40 p-2.5 text-sm ${
+        isExpandable ? "cursor-pointer hover:bg-gray-800/70" : ""
+      }`}
+      onClick={() => isExpandable && setExpanded((v) => !v)}
+    >
+      <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center text-base leading-none">
+        {ICONS[ev.type] ?? "·"}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="font-medium text-gray-200">
+            {formatType(ev.type)}
+          </span>
+          <div className="flex flex-shrink-0 items-center gap-2 text-xs text-gray-500">
+            {isExpandable && <span>{expanded ? "▾" : "▸"}</span>}
+            <time>{formatTime(ev.ts)}</time>
+          </div>
+        </div>
+        <div
+          className={`mt-0.5 text-xs text-gray-400 ${
+            ev.type === "supervisor.note" || expanded
+              ? "whitespace-pre-wrap break-words"
+              : "truncate"
+          }`}
+        >
+          {describe(ev)}
+        </div>
+        {expanded && (
+          <pre className="mt-2 max-h-96 overflow-y-auto rounded-lg bg-black/40 px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-300 whitespace-pre-wrap break-words">
+            {prettyPayload(ev.payload)}
+          </pre>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function prettyPayload(p: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(p, null, 2);
+  } catch {
+    return String(p);
+  }
 }
 
 function toDate(v: unknown): Date {
@@ -98,8 +133,12 @@ function describe(ev: TimelineEvent): string {
       return `Agent ${str(p.agentId)} stuck`;
     case "agent.completed":
       return `Task ${str(p.taskId)}`;
-    case "supervisor.note":
-      return str(p.message);
+    case "supervisor.note": {
+      const parts = [str(p.message)];
+      if (p.templateLabel) parts.push(`· ${str(p.templateLabel)}`);
+      if (p.goal) parts.push(`· "${str(p.goal)}"`);
+      return parts.filter(Boolean).join(" ");
+    }
     case "mission.paused":
       return `${str(p.kind)}${p.reason ? ` · ${p.reason}` : ""}`;
     case "mission.resumed":

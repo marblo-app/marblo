@@ -80,8 +80,8 @@ export function SettingsPage() {
               plan === "team"
                 ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
                 : plan === "pro"
-                ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
+                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                  : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
             }`}
           >
             {plan.toUpperCase()} {t("header.planBadge.suffix")}
@@ -261,26 +261,26 @@ const PRESETS = [
   {
     id: "recommended",
     label: "Marblo Recommended",
-    desc: "Claude 60% + Gemini 20% + Codex 20%",
+    desc: "Claude 60% + Antigravity 20% + Codex 20%",
     icon: "🎯",
   },
   {
     id: "balanced",
     label: "Balanced",
-    desc: "Equal rotation across all models",
+    desc: "Equal rotation across Claude / Antigravity / Codex",
     icon: "⚖️",
   },
   {
     id: "codex-only",
-    label: "Codex/GPT 100%",
-    desc: "All agents use OpenAI Codex/GPT",
+    label: "Codex 100%",
+    desc: "All agents use OpenAI Codex",
     icon: "🟢",
   },
   {
-    id: "gemini-only",
-    label: "Gemini 100%",
-    desc: "All agents use Google Gemini",
-    icon: "🔵",
+    id: "antigravity-only",
+    label: "Antigravity 100%",
+    desc: "All agents use Google Antigravity (agy)",
+    icon: "🟠",
   },
 ];
 
@@ -386,7 +386,7 @@ function SubscriptionPlansSection() {
 
   const update = (i: number, patch: Partial<SubscriptionPlanEntry>) => {
     setPlans((prev) =>
-      prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p))
+      prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)),
     );
   };
 

@@ -6,6 +6,7 @@ import { useAgentStore } from "../../stores/agentStore";
 import MiniTerminal from "./MiniTerminal";
 import AgentStatusLabel from "./AgentStatusLabel";
 import AttentionBadge from "./AttentionBadge";
+import HarnessVersionBadge from "./HarnessVersionBadge";
 
 const MODEL_ICONS: Record<ModelType, { icon: string; color: string }> = {
   claude: { icon: "🟣", color: "#a855f7" },
@@ -177,6 +178,10 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
             <span className="text-[9px] uppercase tracking-wider text-[#6c7086] flex-shrink-0">
               {agent.role}
             </span>
+            <HarnessVersionBadge
+              model={agent.model}
+              className="flex-shrink-0"
+            />
             <AgentStatusLabel
               agent={agent}
               sessionId={sessionId}

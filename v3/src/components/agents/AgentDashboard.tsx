@@ -5,7 +5,6 @@ import AgentStatusCard from "./AgentStatusCard";
 import AgentFleetGrid from "./AgentFleetGrid";
 import TeamSummary from "./TeamSummary";
 import ActivityFeed from "./ActivityFeed";
-import CostWidget from "./CostWidget";
 import AuditTimeline from "./AuditTimeline";
 import { useCostStore } from "../../stores/costStore";
 import { useTerminalStore } from "../../stores/terminalStore";
@@ -73,7 +72,7 @@ export default function AgentDashboard({
   const sessions = useTerminalStore((s) => s.sessions);
   const shellTerminals = useMemo(
     () => sessions.filter((sess) => !sess.isAgent),
-    [sessions]
+    [sessions],
   );
 
   if (loading) {
@@ -129,13 +128,13 @@ export default function AgentDashboard({
               className="flex items-center gap-1.5 rounded border border-red-600/30 bg-red-600/10 px-3 py-1.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/20"
               onClick={() => {
                 const inactive = visibleAgents.filter(
-                  (a) => a.status !== "working"
+                  (a) => a.status !== "working",
                 );
                 if (
                   confirm(
                     t("agents.dashboard.cleanupConfirm", {
                       count: inactive.length,
-                    })
+                    }),
                   )
                 ) {
                   inactive.forEach((a) => onDelete(a.id));
@@ -190,11 +189,9 @@ export default function AgentDashboard({
         </div>
       )}
 
-      {/* Cost Tracking */}
-      <CostWidget />
-
       {/* Activity & Audit Tabs — ActivityFeed receives the full list so the
-          orchestrator agent doc keeps its events visible. */}
+          orchestrator agent doc keeps its events visible.
+          Usage/cost moved out to the top-level "Usage" tab. */}
       <ActivityAuditTabs projectId={projectId} agents={agents} />
     </div>
   );
@@ -202,7 +199,7 @@ export default function AgentDashboard({
 
 // ── Activity & Audit Tabs ────────────────────────────────────
 
-type TabType = "activity" | "audit" | "usage" | "guide";
+type TabType = "activity" | "audit" | "guide";
 
 function ActivityAuditTabs({
   projectId,
@@ -216,7 +213,6 @@ function ActivityAuditTabs({
   const tabs: { key: TabType; label: string }[] = [
     { key: "activity", label: "Activity" },
     { key: "audit", label: "Audit Trail" },
-    { key: "usage", label: "Usage" },
     { key: "guide", label: "Guide" },
   ];
 
@@ -242,8 +238,6 @@ function ActivityAuditTabs({
         <ActivityFeed projectId={projectId} agents={agents} />
       ) : activeTab === "audit" ? (
         <AuditTimeline />
-      ) : activeTab === "usage" ? (
-        <UsageDashboard agents={agents} />
       ) : (
         <AgentGuide />
       )}
@@ -262,7 +256,11 @@ const MODEL_LIMITS: Record<
     icon: "🟣",
     note: "Max 구독: 무제한 (5분 쿨다운) / Pro: 일일 제한 있음",
   },
-  gpt: { label: "Codex CLI", icon: "🟢", note: "API 과금 — 신규 $5 크레딧" },
+  gpt: {
+    label: "Codex CLI",
+    icon: "🟢",
+    note: "ChatGPT 구독 — rate limit 기반",
+  },
   gemini: {
     label: "Gemini CLI",
     icon: "🔵",
@@ -271,13 +269,29 @@ const MODEL_LIMITS: Record<
   },
 };
 
+// Declared subscription plan per model family (the "seed"; Settings editing is
+// a follow-up). Codex's actual plan is auto-detected from its session rollout
+// (agent.detectedPlanType) and overrides this default when present.
+const PLAN_DEFAULTS: Record<string, string> = {
+  claude: "Max",
+  gpt: "Plus",
+  gemini: "Pro",
+  antigravity: "Pro",
+};
+
+function planLabelFor(model: string, agents: Agent[]): string {
+  const detected = agents.map((a) => a.detectedPlanType).find(Boolean);
+  if (detected) return detected.charAt(0).toUpperCase() + detected.slice(1);
+  return PLAN_DEFAULTS[model] || "—";
+}
+
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return `${n}`;
 }
 
-function UsageDashboard({ agents }: { agents: Agent[] }) {
+export function UsageDashboard({ agents }: { agents: Agent[] }) {
   // Cost source priority: live Firestore-backed agent.* fields (updated by
   // useCostWriter on every cost:update) → BigQuery historical via costStore
   // → empty. The Firestore path works without Cloud Functions deployed.
@@ -321,7 +335,6 @@ function UsageDashboard({ agents }: { agents: Agent[] }) {
           icon: "⚪",
           note: "",
         };
-        const isClaude = model === "claude";
 
         // Aggregate tokens/cost for this model group
         const modelTotals = modelAgents.reduce(
@@ -342,7 +355,7 @@ function UsageDashboard({ agents }: { agents: Agent[] }) {
             outputTokens: 0,
             cacheRead: 0,
             cacheWrite: 0,
-          }
+          },
         );
         const totalTokens =
           modelTotals.inputTokens +
@@ -367,21 +380,25 @@ function UsageDashboard({ agents }: { agents: Agent[] }) {
                 </span>
               </div>
               <span className="text-sm font-mono font-medium text-gray-200">
-                {isClaude
-                  ? `${formatTokens(totalTokens)} tokens`
-                  : `$${modelTotals.cost.toFixed(2)}`}
+                {`${formatTokens(totalTokens)} tokens`}
               </span>
             </div>
 
             {/* Model-level gauge */}
             <ModelUsageGauge
               model={model}
-              cost={modelTotals.cost}
               totalTokens={totalTokens}
+              planLabel={planLabelFor(model, modelAgents)}
+              rateLimitPercent={(() => {
+                const ps = modelAgents
+                  .map((a) => a.rateLimitPercent)
+                  .filter((p): p is number => typeof p === "number");
+                return ps.length ? Math.max(...ps) : undefined;
+              })()}
             />
 
-            {/* Token breakdown for Claude */}
-            {isClaude && totalTokens > 0 && (
+            {/* Token breakdown (all models — usage is token-based) */}
+            {totalTokens > 0 && (
               <div className="grid grid-cols-4 gap-2 text-center">
                 <TokenStat
                   label="Input"
@@ -416,8 +433,8 @@ function UsageDashboard({ agents }: { agents: Agent[] }) {
                     (d.cacheReadTokens || 0) +
                     (d.cacheWriteTokens || 0)
                   : 0;
-                const barBase = isClaude ? totalTokens : modelTotals.cost;
-                const barValue = isClaude ? agentTokens : d?.cost || 0;
+                const barBase = totalTokens;
+                const barValue = agentTokens;
                 const barPct = barBase > 0 ? (barValue / barBase) * 100 : 0;
 
                 return (
@@ -432,9 +449,7 @@ function UsageDashboard({ agents }: { agents: Agent[] }) {
                       />
                     </div>
                     <span className="text-xs font-mono text-gray-400 w-20 text-right">
-                      {isClaude
-                        ? formatTokens(agentTokens)
-                        : `$${(d?.cost || 0).toFixed(2)}`}
+                      {formatTokens(agentTokens)}
                     </span>
                   </div>
                 );
@@ -461,20 +476,15 @@ function UsageDashboard({ agents }: { agents: Agent[] }) {
           <div className="flex items-center justify-between rounded-lg border border-gray-700 bg-gray-800 px-4 py-3">
             <span className="text-xs text-gray-400">Total</span>
             <div className="flex items-center gap-4">
-              <span className="text-sm font-mono text-gray-300">
+              <span className="text-lg font-mono font-bold text-gray-100">
                 {formatTokens(
                   summary.totalInputTokens +
                     summary.totalOutputTokens +
                     summary.totalCacheReadTokens +
-                    summary.totalCacheWriteTokens
+                    summary.totalCacheWriteTokens,
                 )}{" "}
                 tokens
               </span>
-              {summary.totalCost > 0 && (
-                <span className="text-lg font-mono font-bold text-gray-100">
-                  ${summary.totalCost.toFixed(2)}
-                </span>
-              )}
             </div>
           </div>
         )}
@@ -502,72 +512,80 @@ function TokenStat({
 }
 
 function ModelUsageGauge({
-  model,
-  cost,
+  model: _model,
   totalTokens,
+  planLabel,
+  rateLimitPercent,
 }: {
   model: string;
-  cost: number;
   totalTokens: number;
+  planLabel: string;
+  /** Live rate-limit usage % (codex). When present, shown instead of the
+   * token-activity gauge — it's the real "how close to your plan limit". */
+  rateLimitPercent?: number;
 }) {
-  if (model === "claude") {
-    // Claude Max: token-based activity gauge
-    // Rough scale: 0 → 10M low, 10M→50M medium, 50M+ high
-    const pct =
-      totalTokens === 0 ? 0 : Math.min((totalTokens / 50_000_000) * 100, 100);
-    const levelLabel =
-      totalTokens === 0
-        ? "대기"
-        : totalTokens < 10_000_000
-        ? "낮음"
-        : totalTokens < 50_000_000
-        ? "보통"
-        : "높음";
-    const levelColor =
-      totalTokens === 0
-        ? "text-gray-500"
-        : totalTokens < 10_000_000
+  // Subscription plans are flat-fee, so we never show a fake "$N budget".
+  // Codex exposes a live rate-limit %, which is the meaningful "vs limit"
+  // signal; everything else falls back to a token-activity gauge.
+  if (typeof rateLimitPercent === "number") {
+    const pct = Math.min(Math.max(rateLimitPercent, 0), 100);
+    const color =
+      pct < 70 ? "bg-green-500" : pct < 90 ? "bg-amber-500" : "bg-red-500";
+    const colorText =
+      pct < 70
         ? "text-green-400"
-        : totalTokens < 50_000_000
-        ? "text-purple-400"
-        : "text-amber-400";
-
+        : pct < 90
+          ? "text-amber-400"
+          : "text-red-400";
     return (
       <div className="space-y-1">
         <div className="flex items-center justify-between text-[10px]">
-          <span className="text-gray-500">세션 활동량</span>
-          <span className={levelColor}>
-            {levelLabel} ({formatTokens(totalTokens)})
-          </span>
+          <span className="text-gray-500">구독: {planLabel} · 한도 사용률</span>
+          <span className={colorText}>{pct.toFixed(0)}%</span>
         </div>
         <div className="h-2 w-full rounded-full bg-gray-700">
           <div
-            className="h-2 rounded-full bg-purple-500 transition-all duration-700"
-            style={{ width: `${Math.max(pct, totalTokens > 0 ? 3 : 0)}%` }}
+            className={`h-2 rounded-full ${color} transition-all duration-700`}
+            style={{ width: `${pct}%` }}
           />
         </div>
       </div>
     );
   }
 
-  // API-based models: cost gauge
-  const maxBudget = model === "gpt" ? 5 : 10;
-  const pct = Math.min((cost / maxBudget) * 100, 100);
-  const color =
-    pct < 40 ? "bg-green-500" : pct < 75 ? "bg-amber-500" : "bg-red-500";
-  const colorText =
-    pct < 40 ? "text-green-400" : pct < 75 ? "text-amber-400" : "text-red-400";
+  // Flat subscription, no live limit data → token-activity gauge.
+  // Rough scale: 0 → 10M low, 10M→50M medium, 50M+ high.
+  const pct =
+    totalTokens === 0 ? 0 : Math.min((totalTokens / 50_000_000) * 100, 100);
+  const levelLabel =
+    totalTokens === 0
+      ? "대기"
+      : totalTokens < 10_000_000
+        ? "낮음"
+        : totalTokens < 50_000_000
+          ? "보통"
+          : "높음";
+  const levelColor =
+    totalTokens === 0
+      ? "text-gray-500"
+      : totalTokens < 10_000_000
+        ? "text-green-400"
+        : totalTokens < 50_000_000
+          ? "text-purple-400"
+          : "text-amber-400";
 
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-[10px]">
-        <span className="text-gray-500">예산 ${maxBudget} 대비</span>
-        <span className={colorText}>{pct.toFixed(0)}%</span>
+        <span className="text-gray-500">구독: {planLabel} · 활동량</span>
+        <span className={levelColor}>
+          {levelLabel} ({formatTokens(totalTokens)})
+        </span>
       </div>
       <div className="h-2 w-full rounded-full bg-gray-700">
         <div
-          className={`h-2 rounded-full ${color} transition-all duration-700`}
-          style={{ width: `${pct}%` }}
+          className="h-2 rounded-full bg-purple-500 transition-all duration-700"
+          style={{ width: `${Math.max(pct, totalTokens > 0 ? 3 : 0)}%` }}
         />
       </div>
     </div>

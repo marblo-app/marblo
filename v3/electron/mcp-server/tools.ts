@@ -14,6 +14,7 @@ import {
   type QueryConstraint,
 } from "firebase/firestore";
 import { db } from "./firebase.js";
+import { resolveContextForWrite, contextReadFilter } from "./context.js";
 import { applyProjection, type ApplyProjectionInput } from "./projection.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -104,6 +105,7 @@ function resolveProject(projectId?: string): string {
 interface TaskDoc {
   id: string;
   projectId: string;
+  contextId: string;
   title: string;
   description: string;
   status: TaskStatus;
@@ -235,11 +237,19 @@ export function registerTools(server: McpServer): void {
         .describe(
           "Ignore default project filter, show all projects (default: false)"
         ),
+      all_contexts: z
+        .boolean()
+        .optional()
+        .describe(
+          "Ignore default context filter, show all contexts in the project (default: false)"
+        ),
     },
-    async ({ project_id, role, all_projects }) => {
+    async ({ project_id, role, all_projects, all_contexts }) => {
       const projectId = all_projects ? "" : resolveProject(project_id);
+      const contextId = contextReadFilter(!!all_contexts);
       const constraints: QueryConstraint[] = [];
       if (projectId) constraints.push(where("projectId", "==", projectId));
+      if (contextId) constraints.push(where("contextId", "==", contextId));
       if (role) constraints.push(where("role", "==", role));
 
       const q = query(collection(db, "tasks"), ...constraints);
@@ -253,7 +263,8 @@ export function registerTools(server: McpServer): void {
       const lines = docs.map((t: any) => {
         const claimed = t.claimedBy ? ` → ${t.claimedBy}` : "";
         const proj = all_projects ? ` project=${t.projectId || "(none)"}` : "";
-        return `- [${t.status}] ${t.title} (role=${t.role}, id=${t.id}${proj})${claimed}`;
+        const ctx = all_contexts ? ` ctx=${t.contextId || "(none)"}` : "";
+        return `- [${t.status}] ${t.title} (role=${t.role}, id=${t.id}${proj}${ctx})${claimed}`;
       });
       return text(lines.join("\n"));
     },
@@ -355,6 +366,7 @@ export function registerTools(server: McpServer): void {
         createdAt: now,
         updatedAt: now,
         projectId,
+        contextId: resolveContextForWrite(),
       };
 
       const ref = await addDoc(collection(db, "tasks"), data);
@@ -497,6 +509,7 @@ export function registerTools(server: McpServer): void {
         // Always use the resolved project (Firestore doc ID from MARBLO_PROJECT env)
         // Ignore per-task project_id overrides — they cause ID mismatch with the board
         data.projectId = project;
+        data.contextId = resolveContextForWrite();
 
         try {
           const ref = await addDoc(collection(db, "tasks"), data);
@@ -695,7 +708,7 @@ export function registerTools(server: McpServer): void {
   // 7. add_activity
   auditedTool(
     "add_activity",
-    "Add an activity log entry to a task. Use to record work progress, decisions, or events.",
+    "Add an activity log entry to a task. Use to record work progress, decisions, or events. Also notifies the orchestrator PTY.",
     {
       task_id: z.string().describe("Task ID"),
       message: z.string().describe("Activity message"),
@@ -717,6 +730,12 @@ export function registerTools(server: McpServer): void {
         lastActivitySummary: message,
         activityPayload: { agentId: resolvedAgentId, message },
       });
+
+      const preview =
+        message.length > 300 ? `${message.slice(0, 300)}...` : message;
+      notifyOrchestrator(
+        `[Task Activity] "${task.title}" progress update (role=${task.role}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`
+      );
       return text(`Activity logged: ${message}`);
     }
   );
@@ -948,8 +967,12 @@ export function registerTools(server: McpServer): void {
     {
       name: z.string().describe('Agent display name (e.g., "backend-auth")'),
       model: z
-        .enum(["claude", "gemini", "gpt", "antigravity", "local", "custom"])
-        .describe("AI model to use"),
+        .enum(["claude", "codex", "gpt", "antigravity", "local", "custom"])
+        .describe(
+          "AI model to use. 'codex' and 'gpt' are the same OpenAI Codex CLI " +
+            "(there is no separate 'gpt' CLI) — both spawn the `codex` binary. " +
+            "Fleet: claude (Claude Code) / codex (OpenAI Codex) / antigravity (agy)."
+        ),
       role: z.string().describe("Agent role (backend/frontend/test/devops)"),
       command: z
         .string()
@@ -963,8 +986,27 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe("Initial prompt to send to the agent after boot"),
+      task_id: z
+        .string()
+        .optional()
+        .describe(
+          "Marblo task ID for completion reporting. When provided, the bridge appends the same completion protocol used by dispatch_task."
+        ),
     },
-    async ({ name, model, role, command, cwd, initial_prompt }) => {
+    async ({
+      name,
+      model: rawModel,
+      role,
+      command,
+      cwd,
+      initial_prompt,
+      task_id,
+    }) => {
+      // "codex" is the user-facing name for the Codex CLI; the internal
+      // ModelType is "gpt". Fold it here so the Firestore agent doc and the
+      // renderer's Record<ModelType> icon maps stay consistent. (The bridge
+      // also normalizes, but the doc is written from this var.)
+      const model = rawModel === "codex" ? "gpt" : rawModel;
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
@@ -980,6 +1022,7 @@ export function registerTools(server: McpServer): void {
           command,
           cwd,
           initialPrompt: initial_prompt,
+          taskId: task_id,
           // Forward MARBLO_PROJECT so bridge scopes the new agent to the
           // correct window in multi-window mode.
           projectId: process.env.MARBLO_PROJECT || "",
@@ -1004,6 +1047,9 @@ export function registerTools(server: McpServer): void {
           agentId?: string;
           ptySessionId?: string;
           error?: string;
+          // Board task the bridge bound the agent to — the supplied task_id, or
+          // an ad-hoc task the WorktreeCoordinator created when none was given.
+          taskId?: string | null;
         };
 
         if (!result.success) {
@@ -1028,7 +1074,9 @@ export function registerTools(server: McpServer): void {
               model,
               role,
               status: "idle",
-              currentTaskId: null,
+              // Link the agent to its board task — the supplied task_id, or the
+              // ad-hoc worktree task the bridge auto-created (result.taskId).
+              currentTaskId: result.taskId ?? task_id ?? null,
               command: command || model,
               skillFile: "",
               createdAt: Timestamp.now(),
@@ -1369,7 +1417,11 @@ export function registerTools(server: McpServer): void {
       model: z
         .string()
         .optional()
-        .describe("Preferred model hint (claude/gemini/gpt/antigravity)"),
+        .describe(
+          "Preferred model hint (claude/codex/antigravity). 'codex' and 'gpt' " +
+            "both map to the OpenAI Codex CLI. When set, this model is forced " +
+            "over tag scoring."
+        ),
       name: z.string().optional().describe("Agent name hint"),
       cwd: z.string().optional().describe("Working directory"),
       tags: z
@@ -1468,6 +1520,9 @@ export function registerTools(server: McpServer): void {
           score?: number;
           reason?: string;
           error?: string;
+          // Board task bound to the agent — the supplied task_id, or an ad-hoc
+          // task the WorktreeCoordinator created for a spawn without one.
+          taskId?: string | null;
         };
 
         if (!result.success) {
@@ -1496,7 +1551,9 @@ export function registerTools(server: McpServer): void {
                   model: result.model || model || "claude",
                   role,
                   status: "working",
-                  currentTaskId: task_id || null,
+                  // Link to the board task — the supplied task_id, or the ad-hoc
+                  // worktree task the bridge auto-created (result.taskId).
+                  currentTaskId: result.taskId ?? task_id ?? null,
                   command: result.model || model || "claude",
                   skillFile: "",
                   createdAt: Timestamp.now(),

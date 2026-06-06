@@ -50,13 +50,21 @@ export function createFixRunner(deps: FixRunnerDeps): FixRunner {
     missionId: string;
     projectId: string;
     goal: string;
+    priorContext?: string;
   }): Promise<{ success: boolean; error?: string }> {
     await ready;
+
+    // priorContext (e.g. /investigate 결과) 가 있으면 description / instruction 에
+    // 같이 실어 코딩 agent 가 그대로 반영해서 작업하도록.
+    const description = input.priorContext
+      ? `${input.goal}\n\n--- Prior investigation / context ---\n${input.priorContext}\n--- end ---`
+      : input.goal;
+    const instruction = description;
 
     const now = Timestamp.now();
     const taskRef = await addDoc(collection(db, "tasks"), {
       title: input.goal.slice(0, 80),
-      description: input.goal,
+      description,
       role: "backend",
       priority: 3,
       status: "TODO",
@@ -78,7 +86,7 @@ export function createFixRunner(deps: FixRunnerDeps): FixRunner {
     // dispatchOne is synchronous (returns immediately after agent spawn/reuse).
     const dispatchResult = deps.dispatchOne({
       role: "backend",
-      instruction: input.goal,
+      instruction,
       taskId,
       complexity: "standard",
       projectId: input.projectId,

@@ -43,7 +43,7 @@ function logFirestoreError(label: string, err: unknown, uid: string): void {
 
 /** Bump this string when policy text changes. Existing users will be
  *  re-prompted because their stored version no longer matches. */
-export const CURRENT_POLICY_VERSION = "2026-05-08";
+export const CURRENT_POLICY_VERSION = "2026-06-01";
 
 export type ConsentFlags = {
   sentry: boolean;

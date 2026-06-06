@@ -15,9 +15,19 @@ interface PrivacyPolicyPageProps {
 
 const ROW: { label: string; value: string }[] = [
   {
-    label: "수집 항목",
+    label: "비식별 1차 지표 (BigQuery)",
     value:
-      "크래시 스택 트레이스 (파일 경로 마스킹), 에러 메시지 (PII 마스킹), OS·앱 버전, 익명 사용 패턴 (클릭/페이지 이동)",
+      "마블로 자체 운영 품질을 위해 식별정보를 제거한 비식별 데이터만 우리 GCP(BigQuery)에 상시 수집합니다. 수집 항목: 익명 설치 ID(계정 UID 아님), 이벤트 종류, 토큰/비용/지속시간 등 집계 지표. 계정 식별자·코드·입력 텍스트는 포함되지 않으며, 에러 메시지는 송신 전 PII 마스킹됩니다.",
+  },
+  {
+    label: "옵트인 항목 (앱 크래시)",
+    value:
+      "(동의 시에만) 크래시 스택 트레이스 (파일 경로 마스킹), 에러 메시지 (PII 마스킹), OS·앱 버전 — Sentry로 전송. 앱은 GA4·Mixpanel 등 사용 분석 도구로 데이터를 보내지 않습니다.",
+  },
+  {
+    label: "웹사이트 분석 (GA4)",
+    value:
+      "마블로 웹사이트(marblo.app)는 데스크톱 앱과 별개로 GA4(Google Analytics 4)를 사용해 익명 방문 통계를 수집하며, 웹사이트 자체 쿠키 동의의 적용을 받습니다. 데스크톱 앱에는 적용되지 않습니다.",
   },
   {
     label: "미수집 항목",
@@ -26,11 +36,13 @@ const ROW: { label: string; value: string }[] = [
   },
   {
     label: "처리 위치",
-    value: "Sentry / GA4 / Mixpanel 모두 미국 (별도 국외 이전 동의 필요)",
+    value:
+      "비식별 1차 지표: 우리 GCP(BigQuery) — 식별정보 없음. 옵트인 Sentry(앱 크래시): 미국 (별도 국외 이전 동의 필요). 웹사이트 GA4: 미국.",
   },
   {
     label: "보유 기간",
-    value: "Sentry 90일 / GA4 14개월 / Mixpanel 12개월",
+    value:
+      "비식별 1차 지표: 집계 분석 목적 보관 (개인 식별 불가). Sentry: 90일. 웹사이트 GA4: 14개월.",
   },
   {
     label: "거부 효과",
@@ -78,10 +90,14 @@ export function PrivacyPolicyPage({ onClose }: PrivacyPolicyPageProps) {
             요약
           </h2>
           <p className="text-[#bac2de] leading-relaxed">
-            마블로는 모든 외부 송신 텔레메트리를 <b>명시적 옵트인</b>으로
-            운영합니다. 동의하지 않아도 모든 기능은 동일하게 작동합니다. 동의
-            후에도 코드/BYOK 키/사용자 입력 텍스트는 절대 외부로 전송되지
-            않습니다.
+            마블로 데스크톱 앱은 외부 <b>제3자 서비스(Sentry, 크래시 리포트)</b>{" "}
+            송신을 <b>명시적 옵트인</b>으로 운영합니다. 자체 운영 품질을 위한
+            1차 지표는 <b>식별정보를 제거한 비식별 데이터</b>로만, 우리
+            GCP(BigQuery)에 수집합니다 — 계정 식별자(UID) 없이 익명 설치 ID만
+            사용합니다. 동의하지 않아도 모든 기능은 동일하게 작동하며, 어느
+            경로로도 코드·BYOK 키·사용자 입력 텍스트는 전송되지 않습니다.
+            (마블로 웹사이트는 앱과 별개로 GA4를 사용하며, 웹사이트 자체 쿠키
+            동의의 적용을 받습니다.)
           </p>
         </section>
 
@@ -130,10 +146,15 @@ export function PrivacyPolicyPage({ onClose }: PrivacyPolicyPageProps) {
               BYOK API 키 (sk-ant-*, sk-*, AIza*) → <code>&lt;API_KEY&gt;</code>
             </li>
             <li>오케스트레이터 prompt / 사용자 입력 텍스트 → 송신 차단</li>
+            <li>
+              계정 식별자(senderId·userId·이메일) → 1차 텔레메트리에서 제거,
+              익명 설치 ID로 대체
+            </li>
           </ul>
           <p className="mt-2 text-[10px] text-[#6c7086]">
             구현: <code>v3/src/lib/telemetry/scrub.ts</code>. Sentry SDK
-            beforeSend 훅과 GA4 event params 양쪽에서 적용됩니다.
+            beforeSend 훅과 1차 BigQuery 텔레메트리 (
+            <code>telemetryService.ts</code>) 양쪽에서 적용됩니다.
           </p>
         </section>
 

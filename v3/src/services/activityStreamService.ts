@@ -31,6 +31,9 @@ export type ActivityType =
   | "agent:spawned"
   | "pm:feedback"
   | "activity:note"
+  | "mission:step"
+  | "mission:state"
+  | "mission:note"
   | "error"
   | "other";
 
@@ -56,6 +59,9 @@ export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
   "agent:spawned": "Agent spawned",
   "pm:feedback": "PM feedback",
   "activity:note": "Activity note",
+  "mission:step": "Mission step",
+  "mission:state": "Mission state",
+  "mission:note": "Mission note",
   error: "Error",
   other: "Other",
 };
@@ -69,6 +75,9 @@ export const ACTIVITY_TYPE_ICON: Record<ActivityType, string> = {
   "agent:spawned": "🚀",
   "pm:feedback": "💬",
   "activity:note": "📌",
+  "mission:step": "🎯",
+  "mission:state": "🚦",
+  "mission:note": "📋",
   error: "❌",
   other: "•",
 };
@@ -77,7 +86,7 @@ export const ACTIVITY_TYPE_ICON: Record<ActivityType, string> = {
 function classify(
   toolName: string,
   params: Record<string, unknown>,
-  success: boolean
+  success: boolean,
 ): ActivityType {
   if (!success) return "error";
   switch (toolName) {
@@ -103,6 +112,18 @@ function classify(
     case "add_activity":
       return "activity:note";
     default:
+      // mission engine 이 audit_logs 에 미러링한 timeline 이벤트.
+      // toolName 패턴: "mission.step.started", "mission.step.completed",
+      // "mission.supervisor.note", "mission.mission.paused" 등.
+      if (toolName.startsWith("mission.step.")) return "mission:step";
+      if (toolName.startsWith("mission.supervisor")) return "mission:note";
+      if (
+        toolName.startsWith("mission.mission.") ||
+        toolName.startsWith("mission.agent.")
+      ) {
+        return "mission:state";
+      }
+      if (toolName.startsWith("mission.")) return "mission:state";
       return "other";
   }
 }
@@ -125,8 +146,8 @@ function toEntry(raw: AuditLogRaw): ActivityEntry {
     typeof (raw.createdAt as { toDate?: () => Date }).toDate === "function"
       ? (raw.createdAt as { toDate: () => Date }).toDate()
       : raw.createdAt instanceof Date
-      ? raw.createdAt
-      : new Date();
+        ? raw.createdAt
+        : new Date();
   const params = raw.params ?? {};
   const success = raw.success ?? true;
   const toolName = raw.toolName ?? "unknown";
@@ -151,7 +172,7 @@ function toEntry(raw: AuditLogRaw): ActivityEntry {
 export function subscribeToActivityStream(
   projectId: string,
   callback: (entries: ActivityEntry[]) => void,
-  max = 100
+  max = 100,
 ): Unsubscribe {
   const ref = collection(db, "audit_logs");
   const constraints = projectId
@@ -166,13 +187,13 @@ export function subscribeToActivityStream(
     q,
     (snap) => {
       const entries = snap.docs.map((d) =>
-        toEntry({ id: d.id, ...(d.data() as Omit<AuditLogRaw, "id">) })
+        toEntry({ id: d.id, ...(d.data() as Omit<AuditLogRaw, "id">) }),
       );
       callback(entries);
     },
     (err) => {
       console.warn("[ActivityStream] subscribe error:", err);
       callback([]);
-    }
+    },
   );
 }

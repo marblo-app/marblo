@@ -30,6 +30,12 @@ export interface LaunchOptions {
   /** Mock 모드 — Firestore/LLM 호출을 fixture 가 stub 한다는 신호 */
   mock?: boolean;
   /**
+   * missionService 를 Firestore 대신 in-memory 백엔드로 — 결정적 미션탭 E2E.
+   * preload 가 MARBLO_TEST_MISSIONS_INMEM=1 을 testMode.missionsInMemory 로
+   * 노출하고, missionService 가 그 플래그를 보고 분기한다.
+   */
+  missionsInMem?: boolean;
+  /**
    * Firebase Auth 게이트 우회 (기본 true). preload 가
    * MARBLO_TEST_BYPASS_AUTH=1 을 보고 mock user 를 주입한다. 인증 흐름 자체를
    * 테스트하는 spec 만 false 로 끄면 된다.
@@ -48,13 +54,13 @@ async function ensureBuilt(): Promise<void> {
   if (fs.existsSync(DIST_MAIN)) return;
   // Electron tsc + vite build. tests/playwright/README.md 안내.
   throw new Error(
-    `Electron main.js 가 없습니다. 먼저 빌드하세요: cd ${REPO_ROOT} && npm run build`
+    `Electron main.js 가 없습니다. 먼저 빌드하세요: cd ${REPO_ROOT} && npm run build`,
   );
 }
 
 /** 마블로 Electron 앱을 launch. 호출자는 close() 보장 필요. */
 export async function launchMarblo(
-  opts: LaunchOptions = {}
+  opts: LaunchOptions = {},
 ): Promise<LaunchedApp> {
   await ensureBuilt();
 
@@ -70,6 +76,8 @@ export async function launchMarblo(
     MARBLO_FORCE_PROD: "1",
     // Firebase Auth 우회 — preload 가 이 env 를 보고 testMode.bypassAuth 노출.
     ...(bypassAuth ? { MARBLO_TEST_BYPASS_AUTH: "1" } : {}),
+    // missionService in-memory 백엔드 — preload 가 testMode.missionsInMemory 노출.
+    ...(opts.missionsInMem ? { MARBLO_TEST_MISSIONS_INMEM: "1" } : {}),
     // BYOK 키 없이 부팅 가능하도록 빈 슬롯 보장 (이미 LLM lazy init 패치 적용됨)
     ...opts.env,
   };

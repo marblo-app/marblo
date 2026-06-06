@@ -154,7 +154,7 @@ export const STARTUP_DIALOG_MATCHERS: StartupDialogMatcher[] = [
 export function composeInitialPrompt(
   model: ModelType,
   instruction: string,
-  skillContent?: string
+  skillContent?: string,
 ): string {
   const isClaude = model === "claude";
   const sanitized = isClaude
@@ -183,12 +183,12 @@ export class AgentManager {
     rootPath: string,
     sessionId: string,
     label: string,
-    agentId: string
+    agentId: string,
   ) => void;
   private onRestartAttempt?: (
     agentId: string,
     attempt: number,
-    maxAttempts: number
+    maxAttempts: number,
   ) => void;
   private onRestartFailed?: (agentId: string, exitCode: number) => void;
   private getMainWindow?: () => BrowserWindow | null;
@@ -196,7 +196,7 @@ export class AgentManager {
     rootPath: string,
     requested: string,
     filterLabel?: string,
-    filterAgentId?: string
+    filterAgentId?: string,
   ) => string | null;
 
   constructor(
@@ -206,15 +206,15 @@ export class AgentManager {
       rootPath: string,
       sessionId: string,
       label: string,
-      agentId: string
+      agentId: string,
     ) => void,
     onRestartAttempt?: (
       agentId: string,
       attempt: number,
-      maxAttempts: number
+      maxAttempts: number,
     ) => void,
     onRestartFailed?: (agentId: string, exitCode: number) => void,
-    getMainWindow?: () => BrowserWindow | null
+    getMainWindow?: () => BrowserWindow | null,
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = new AgentConfigGenerator();
@@ -231,8 +231,8 @@ export class AgentManager {
       rootPath: string,
       requested: string,
       filterLabel?: string,
-      filterAgentId?: string
-    ) => string | null
+      filterAgentId?: string,
+    ) => string | null,
   ) {
     this.resolveSessionId = resolver;
   }
@@ -258,7 +258,7 @@ export class AgentManager {
       console.log(
         `[Agent:${params.id}] Resolved 'latest' → ${
           resolvedResumeId ?? "none (new session)"
-        }`
+        }`,
       );
     }
     const isResume =
@@ -283,12 +283,12 @@ export class AgentManager {
       params.cwd,
       params.initialPrompt,
       params.projectId,
-      isResume ? resolvedResumeId : undefined
+      isResume ? resolvedResumeId : undefined,
     );
 
     if (isResume) {
       console.log(
-        `[Agent:${params.id}] Resuming session: ${resolvedResumeId} (model=${params.model})`
+        `[Agent:${params.id}] Resuming session: ${resolvedResumeId} (model=${params.model})`,
       );
     }
 
@@ -307,7 +307,7 @@ export class AgentManager {
       launchConfig.command,
       launchConfig.args,
       params.cwd,
-      mergedEnv
+      mergedEnv,
     );
 
     // Notify caller IMMEDIATELY so they can register data listeners
@@ -320,7 +320,7 @@ export class AgentManager {
       const prompt = composeInitialPrompt(
         params.model,
         launchConfig.initialPrompt,
-        launchConfig.skillContent
+        launchConfig.skillContent,
       );
       let sent = false;
       const sendPrompt = () => {
@@ -331,7 +331,7 @@ export class AgentManager {
         // CR inside the message body without submitting).
         this.ptyManager.writeAndSubmit(ptySessionId, prompt);
         console.log(
-          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`
+          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`,
         );
       };
 
@@ -369,7 +369,7 @@ export class AgentManager {
       // doesn't get applied to claude agents (false positive on a chat
       // message containing the same words).
       const activeMatchers = STARTUP_DIALOG_MATCHERS.filter(
-        (m) => !m.applies || m.applies.includes(params.model)
+        (m) => !m.applies || m.applies.includes(params.model),
       );
       const dismissed = new Set<RegExp>();
 
@@ -385,7 +385,7 @@ export class AgentManager {
           if (dlg.pattern.test(outputBuffer)) {
             dismissed.add(dlg.pattern);
             console.log(
-              `[Agent:${params.id}] Dismissing blocking dialog: ${dlg.label}`
+              `[Agent:${params.id}] Dismissing blocking dialog: ${dlg.label}`,
             );
             // Small delay so the TUI is in steady state when we type.
             setTimeout(() => {
@@ -429,7 +429,7 @@ export class AgentManager {
           require("os").homedir(),
           ".claude",
           "projects",
-          encodedPath
+          encodedPath,
         );
         const files = require("fs").existsSync(sessionsDir)
           ? require("fs")
@@ -441,7 +441,7 @@ export class AgentManager {
       } catch (err) {
         console.error(
           `[AgentManager] Failed to read existing session files for rootPath="${rootPath}":`,
-          err
+          err,
         );
         existingIds = new Set();
       }
@@ -453,7 +453,7 @@ export class AgentManager {
             require("os").homedir(),
             ".claude",
             "projects",
-            encodedPath
+            encodedPath,
           );
           if (!require("fs").existsSync(sessionsDir)) return;
           const currentFiles = require("fs")
@@ -467,7 +467,7 @@ export class AgentManager {
         } catch (err) {
           console.error(
             `[AgentManager] Failed to detect new session file for agent="${agentId}" rootPath="${rootPath}":`,
-            err
+            err,
           );
         }
       }, 5000);
@@ -516,62 +516,68 @@ export class AgentManager {
         require("os").homedir(),
         ".gemini",
         "antigravity-cli",
-        "conversations"
+        "conversations",
       );
-      let existingIds: Set<string>;
-      try {
-        existingIds = require("fs").existsSync(conversationsDir)
-          ? new Set(
-              require("fs")
-                .readdirSync(conversationsDir)
-                .filter((f: string) => f.endsWith(".pb"))
-                .map((f: string) => f.replace(/\.pb$/, ""))
-            )
-          : new Set();
-      } catch (err) {
-        console.error(
-          `[AgentManager] Failed to snapshot agy conversations for agent="${agentId}":`,
-          err
-        );
-        existingIds = new Set();
-      }
+      // agy migrated from a flat .pb store to per-conversation SQLite (.db);
+      // both formats still appear, so snapshot/scan UUID basenames from either
+      // (ignoring .db-wal/.db-shm sidecars, which don't end in ".db").
+      const listConvIds = (): Set<string> => {
+        try {
+          if (!require("fs").existsSync(conversationsDir)) return new Set();
+          return new Set<string>(
+            require("fs")
+              .readdirSync(conversationsDir)
+              .filter((f: string) => f.endsWith(".pb") || f.endsWith(".db"))
+              .map((f: string) => f.replace(/\.(pb|db)$/, "")),
+          );
+        } catch (err) {
+          console.error(
+            `[AgentManager] Failed to snapshot agy conversations for agent="${agentId}":`,
+            err,
+          );
+          return new Set();
+        }
+      };
+      const convMtime = (id: string): number => {
+        for (const ext of [".db", ".pb"]) {
+          try {
+            return require("fs").statSync(
+              require("path").join(conversationsDir, `${id}${ext}`),
+            ).mtimeMs;
+          } catch {
+            /* try next ext */
+          }
+        }
+        return 0;
+      };
+      const existingIds = listConvIds();
 
       setTimeout(() => {
         try {
-          if (!require("fs").existsSync(conversationsDir)) return;
-          const currentFiles = require("fs")
-            .readdirSync(conversationsDir)
-            .filter((f: string) => f.endsWith(".pb"))
-            .map((f: string) => f.replace(/\.pb$/, ""));
-          const newIds = currentFiles.filter(
-            (id: string) => !existingIds.has(id)
+          const newIds = Array.from(listConvIds()).filter(
+            (id: string) => !existingIds.has(id),
           );
-          // Race ambiguity: if >1 .pb appeared in the window (parallel
-          // spawn, user's own terminal session), we can't tell which is
-          // ours. Pick the most-recently-modified one as best-effort.
+          // Race ambiguity: if >1 conversation appeared in the window (parallel
+          // spawn, user's own terminal session), we can't tell which is ours.
+          // Pick the most-recently-modified one as best-effort.
           if (newIds.length === 0) return;
           let chosenId = newIds[0];
           if (newIds.length > 1) {
             chosenId = newIds
-              .map((id: string) => ({
-                id,
-                mtime: require("fs").statSync(
-                  require("path").join(conversationsDir, `${id}.pb`)
-                ).mtimeMs,
-              }))
+              .map((id: string) => ({ id, mtime: convMtime(id) }))
               .sort(
                 (a: { mtime: number }, b: { mtime: number }) =>
-                  b.mtime - a.mtime
+                  b.mtime - a.mtime,
               )[0].id;
             console.warn(
-              `[AgentManager] agy: ${newIds.length} new conversations detected during agent="${agentId}" window, picking newest=${chosenId}`
+              `[AgentManager] agy: ${newIds.length} new conversations detected during agent="${agentId}" window, picking newest=${chosenId}`,
             );
           }
           this.onSessionDetected!(rootPath, chosenId, agentName, agentId);
         } catch (err) {
           console.error(
             `[AgentManager] Failed to detect agy conversation for agent="${agentId}":`,
-            err
+            err,
           );
         }
       }, 35000);
@@ -642,7 +648,7 @@ export class AgentManager {
       params.role || "backend",
       spawnProjectId,
       promptHash,
-      promptLength
+      promptLength,
     );
 
     // Start heartbeat for anomaly detection (ML-4)
@@ -696,11 +702,11 @@ export class AgentManager {
         mainTelemetry.agentStopped(
           this.getMainWindow?.() ?? null,
           params.id,
-          exitCode
+          exitCode,
         );
         if (isGracefulCompletion) {
           console.log(
-            `[Agent:${agent.id}] Graceful completion (exit ${exitCode} after ${runtimeMs}ms) — marking stopped, not restarting.`
+            `[Agent:${agent.id}] Graceful completion (exit ${exitCode} after ${runtimeMs}ms) — marking stopped, not restarting.`,
           );
         }
         return;
@@ -712,7 +718,7 @@ export class AgentManager {
       if (wasFastFail) {
         agent.fastFailCount++;
         console.warn(
-          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`
+          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`,
         );
       }
 
@@ -725,17 +731,17 @@ export class AgentManager {
       if (agent.restartCount < MAX_RESTARTS && !fastFailExceeded) {
         const delay = Math.min(
           BACKOFF_BASE_MS * Math.pow(2, agent.restartCount),
-          BACKOFF_MAX_MS
+          BACKOFF_MAX_MS,
         );
         agent.restartCount++;
         this.onRestartAttempt?.(agent.id, agent.restartCount, MAX_RESTARTS);
         mainTelemetry.agentRestarted(
           this.getMainWindow?.() ?? null,
           agent.id,
-          agent.restartCount
+          agent.restartCount,
         );
         console.log(
-          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`
+          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`,
         );
 
         agent.restartTimer = setTimeout(() => {
@@ -750,15 +756,15 @@ export class AgentManager {
         mainTelemetry.agentCrashed(
           this.getMainWindow?.() ?? null,
           agent.id,
-          exitCode
+          exitCode,
         );
         if (fastFailExceeded) {
           console.error(
-            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`
+            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`,
           );
         } else {
           console.error(
-            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
+            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
           );
         }
       }
@@ -785,7 +791,7 @@ export class AgentManager {
     this.agents.delete(agentId);
 
     console.log(
-      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`
+      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`,
     );
 
     // Re-launch with resume
@@ -796,11 +802,11 @@ export class AgentManager {
         agent.cwd,
         "latest",
         agent.name,
-        agent.id
+        agent.id,
       );
       resolvedSessionId = resolved ?? "new";
       console.log(
-        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`
+        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`,
       );
     }
 
@@ -980,7 +986,7 @@ export class AgentManager {
       }
     });
     console.log(
-      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`
+      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`,
     );
   }
 
@@ -996,7 +1002,7 @@ export class AgentManager {
   listAgentsByProject(projectId: string | undefined): AgentInstance[] {
     if (!projectId) return this.listAgents();
     return Array.from(this.agents.values()).filter(
-      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId
+      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId,
     );
   }
 

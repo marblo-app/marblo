@@ -16,6 +16,8 @@ import { getNextStatuses } from "../../services/stateMachine";
 import { useAgentStore } from "../../stores/agentStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useTerminalStore } from "../../stores/terminalStore";
+import { useAgentFocusStore } from "../../stores/agentFocusStore";
+import { getSessionIdForAgent } from "../../stores/agentSessionMap";
 import { useProjectStore } from "../../stores/projectStore";
 import { useAuth } from "../../hooks/useAuth";
 
@@ -197,21 +199,30 @@ function AgentTerminalButton({
 }) {
   const agents = useAgentStore((s) => s.agents);
   const terminalSessions = useTerminalStore((s) => s.sessions);
-  const attachSession = useTerminalStore((s) => s.attachSession);
+  const openTerminalForSession = useTerminalStore(
+    (s) => s.openTerminalForSession,
+  );
+  const setFocusedAgent = useAgentFocusStore((s) => s.setFocusedAgent);
 
   if (!claimedBy) return null;
 
-  // Find matching agent
-  const agent = agents.find((a) => a.name === claimedBy || a.id === claimedBy);
+  const normalizedClaim = claimedBy.toLowerCase();
+  const agent = agents.find(
+    (a) =>
+      a.role !== "orchestrator" &&
+      (a.id === claimedBy ||
+        a.name === claimedBy ||
+        a.name.toLowerCase() === normalizedClaim),
+  );
   if (!agent) return null;
 
-  // Check if terminal session exists for this agent
-  const ptySessionId = `agent-${agent.id}`;
+  const ptySessionId = getSessionIdForAgent(agent.id);
   const hasSession = terminalSessions.some((s) => s.id === ptySessionId);
 
   const handleOpenTerminal = () => {
     const icon = MODEL_ICONS[agent.model] || "⚪";
-    attachSession(ptySessionId, `${icon} ${agent.name}`);
+    setFocusedAgent(agent.id);
+    openTerminalForSession(ptySessionId, `${icon} ${agent.name}`);
     onClose(); // Close modal to show terminal
   };
 

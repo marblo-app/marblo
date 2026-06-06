@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // 코드는 이 값을 임의로 set 할 수 없다 (preload 만 process.env 접근 가능).
   testMode: {
     bypassAuth: process.env.MARBLO_TEST_BYPASS_AUTH === "1",
+    // MARBLO_TEST_MISSIONS_INMEM=1 일 때만 true. missionService 가 Firestore
+    // 대신 in-memory 백엔드로 분기해 결정적 미션탭 E2E 를 가능케 한다. preload
+    // 만 process.env 접근 → renderer 가 임의 set 불가, production 미설정.
+    missionsInMemory: process.env.MARBLO_TEST_MISSIONS_INMEM === "1",
   },
   // Multi-window: renderer registers its current project so main can scope
   // agent:* and orchestrator:* events to the right window. Pass empty string
@@ -19,6 +23,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     isNewWindow: () => isNewWindow,
     registerProject: (projectId: string) =>
       ipcRenderer.invoke("window:registerProject", projectId),
+  },
+  // Resolved Claude Code binary used to launch agents (path + version).
+  claude: {
+    version: (): Promise<{ command: string; version: string }> =>
+      ipcRenderer.invoke("claude:version"),
+    // Fast installed-version map per agent model (claude/gpt/antigravity/gemini).
+    cliVersions: (): Promise<Record<string, string>> =>
+      ipcRenderer.invoke("harness:cliVersions"),
   },
   send: (channel: string, data: unknown) => {
     ipcRenderer.send(channel, data);
@@ -128,6 +140,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
         cacheReadTokens: number;
         cacheWriteTokens: number;
         totalCost: number;
+        detectedPlanType?: string;
+        rateLimitPercent?: number;
+        rateLimitResetAt?: number;
       }) => void,
     ) => {
       ipcRenderer.on("cost:update", (_event, data) => callback(data));
@@ -295,6 +310,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       }>,
   },
   clipboard: {
+    readText: () => ipcRenderer.invoke("clipboard:readText") as Promise<string>,
     getImagePath: () =>
       ipcRenderer.invoke("clipboard:getImagePath") as Promise<string | null>,
     getFilePaths: () =>

@@ -1,7 +1,7 @@
 import { where, type Unsubscribe } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import type { Task, TaskStatus } from "../types/task";
-import telemetry from "./telemetryService";
+import telemetry, { getClientId } from "./telemetryService";
 import { functions } from "../lib/firebase";
 import {
   getDocument,
@@ -30,7 +30,11 @@ const COLLECTION = "tasks";
 const DATE_FIELDS = ["claimedAt", "createdAt", "updatedAt"];
 
 function toTask(raw: Record<string, unknown>): Task {
-  return convertTimestamps<Task>(raw, DATE_FIELDS);
+  const task = convertTimestamps<Task>(raw, DATE_FIELDS);
+  return {
+    ...task,
+    contextId: (raw.contextId as string) || "board",
+  };
 }
 
 export async function getTasks(projectId: string): Promise<Task[]> {
@@ -189,6 +193,7 @@ export async function updateTaskStatus(
     // Log task outcome to BigQuery for ML training data
     logTaskOutcomeFn({
       outcome: {
+        clientId: getClientId(),
         taskId,
         projectId: task.projectId,
         taskType: null, // TODO: derive from task metadata when available

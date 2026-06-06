@@ -85,7 +85,7 @@ export const ORCHESTRATOR_PROMPT_SIGNATURE =
  */
 export function firstUserMessageStartsWith(
   filePath: string,
-  signature: string,
+  signature: string
 ): boolean {
   try {
     const stat = fs.statSync(filePath);
@@ -110,7 +110,7 @@ export function firstUserMessageStartsWith(
       else if (Array.isArray(content))
         text = content
           .map((c) =>
-            typeof c === "string" ? c : ((c as { text?: string })?.text ?? ""),
+            typeof c === "string" ? c : (c as { text?: string })?.text ?? ""
           )
           .join(" ");
       if (text.trimStart().startsWith(signature)) return true;
@@ -129,7 +129,7 @@ export function firstUserMessageStartsWith(
  */
 export function isOrchestratorSession(
   rootPath: string,
-  sessionId: string,
+  sessionId: string
 ): boolean {
   const p = path.join(claudeProjectDir(rootPath), `${sessionId}.jsonl`);
   return firstUserMessageStartsWith(p, ORCHESTRATOR_PROMPT_SIGNATURE);
@@ -165,7 +165,7 @@ export class OrchestratorManager {
     ptyManager: PtyManager,
     configGenerator: AgentConfigGenerator,
     onStatusChange?: (status: OrchestratorStatus) => void,
-    kind: string = "board",
+    kind: string = "board"
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = configGenerator;
@@ -188,7 +188,7 @@ export class OrchestratorManager {
     rootPath: string,
     bridgePort: number,
     onPtyReady?: (ptySessionId: string) => void,
-    resumeSessionId?: string, // specific session ID or 'latest' for --continue
+    resumeSessionId?: string // specific session ID or 'latest' for --continue
   ): OrchestratorSession {
     // Stop existing session if any
     if (this.session) {
@@ -226,7 +226,7 @@ export class OrchestratorManager {
     console.log(
       `[Orchestrator:${this.kind}] rootPath=${rootPath}, resumeSessionId=${
         resumeSessionId || "auto"
-      }, shouldResume=${!!shouldResume}`,
+      }, shouldResume=${!!shouldResume}`
     );
 
     // Generate MCP config for orchestrator (always claude)
@@ -237,7 +237,7 @@ export class OrchestratorManager {
         role: "orchestrator",
         command: "claude",
       },
-      rootPath,
+      rootPath
     );
 
     // Add resume flag — always resolve to the actual session ID for the orchestrator
@@ -245,16 +245,16 @@ export class OrchestratorManager {
       const resolvedId = this.resolveSessionId(
         rootPath,
         resumeSessionId,
-        "Orchestrator",
+        "Orchestrator"
       );
       if (resolvedId) {
         launchConfig.args.push("--resume", resolvedId);
         console.log(
-          `[Orchestrator] Resuming session: ${resolvedId} (requested: ${resumeSessionId})`,
+          `[Orchestrator] Resuming session: ${resolvedId} (requested: ${resumeSessionId})`
         );
       } else {
         console.log(
-          `[Orchestrator] No matching orchestrator session found for "${resumeSessionId}", starting new`,
+          `[Orchestrator] No matching orchestrator session found for "${resumeSessionId}", starting new`
         );
       }
     } else if (!resumeSessionId && shouldResume) {
@@ -262,16 +262,16 @@ export class OrchestratorManager {
       const resolvedId = this.resolveSessionId(
         rootPath,
         "latest",
-        "Orchestrator",
+        "Orchestrator"
       );
       if (resolvedId) {
         launchConfig.args.push("--resume", resolvedId);
         console.log(
-          `[Orchestrator] Auto-continuing orchestrator session: ${resolvedId}`,
+          `[Orchestrator] Auto-continuing orchestrator session: ${resolvedId}`
         );
       } else {
         console.log(
-          `[Orchestrator] No orchestrator session found, starting new`,
+          `[Orchestrator] No orchestrator session found, starting new`
         );
       }
     }
@@ -284,7 +284,7 @@ export class OrchestratorManager {
     try {
       const configContent = fs.readFileSync(
         launchConfig.mcpConfigPath,
-        "utf-8",
+        "utf-8"
       );
       const config = JSON.parse(configContent);
       if (config.mcpServers?.marblo?.env) {
@@ -293,7 +293,7 @@ export class OrchestratorManager {
         fs.writeFileSync(
           launchConfig.mcpConfigPath,
           JSON.stringify(config, null, 2),
-          "utf-8",
+          "utf-8"
         );
       }
     } catch {
@@ -316,7 +316,7 @@ export class OrchestratorManager {
       launchConfig.command,
       launchConfig.args,
       rootPath,
-      mergedEnv,
+      mergedEnv
     );
 
     // Notify caller IMMEDIATELY so they can register data listeners
@@ -426,7 +426,7 @@ export class OrchestratorManager {
       rootPath,
       ptySessionId,
       existingRawIds,
-      labelTarget,
+      labelTarget
     );
 
     // Monitor PTY exit — auto-restart on crash
@@ -444,11 +444,11 @@ export class OrchestratorManager {
       if (this.restartCount < ORCH_MAX_RESTARTS && this.lastLaunchArgs) {
         const delay = Math.min(
           ORCH_BACKOFF_BASE_MS * Math.pow(2, this.restartCount),
-          ORCH_BACKOFF_MAX_MS,
+          ORCH_BACKOFF_MAX_MS
         );
         this.restartCount++;
         console.log(
-          `[Orchestrator] Crash (exit ${exitCode}). Restart ${this.restartCount}/${ORCH_MAX_RESTARTS} in ${delay}ms`,
+          `[Orchestrator] Crash (exit ${exitCode}). Restart ${this.restartCount}/${ORCH_MAX_RESTARTS} in ${delay}ms`
         );
 
         this.restartTimer = setTimeout(() => {
@@ -467,7 +467,7 @@ export class OrchestratorManager {
         this.setStatus("error");
         this.configGenerator.cleanup(sessionId);
         console.error(
-          `[Orchestrator] Max restarts (${ORCH_MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
+          `[Orchestrator] Max restarts (${ORCH_MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
         );
       }
     });
@@ -495,7 +495,7 @@ export class OrchestratorManager {
   restart(
     projectId: string,
     rootPath: string,
-    bridgePort: number,
+    bridgePort: number
   ): OrchestratorSession {
     this.stop();
     return this.launch(projectId, rootPath, bridgePort);
@@ -517,7 +517,7 @@ export class OrchestratorManager {
       ".claude",
       "projects",
       encodedPath,
-      "marblo-labels.json",
+      "marblo-labels.json"
     );
   }
 
@@ -533,7 +533,7 @@ export class OrchestratorManager {
     rootPath: string,
     sessionUuid: string,
     label: string,
-    agentId?: string,
+    agentId?: string
   ): void {
     const labels = this.readLabels(rootPath);
     labels[sessionUuid] = { label, agentId, createdAt: Date.now() };
@@ -541,7 +541,7 @@ export class OrchestratorManager {
       fs.writeFileSync(
         this.getLabelsPath(rootPath),
         JSON.stringify(labels, null, 2),
-        "utf-8",
+        "utf-8"
       );
     } catch {
       /* best-effort */
@@ -561,7 +561,7 @@ export class OrchestratorManager {
         os.homedir(),
         ".claude",
         "projects",
-        encodedPath,
+        encodedPath
       );
       if (!fs.existsSync(sessionsDir)) return [];
 
@@ -597,7 +597,7 @@ export class OrchestratorManager {
     rootPath: string,
     requested: string,
     filterLabel?: string,
-    filterAgentId?: string,
+    filterAgentId?: string
   ): string | null {
     if (requested !== "latest") return requested; // specific UUID, return as-is
 
@@ -606,7 +606,7 @@ export class OrchestratorManager {
     const match = sessions.find(
       (s) =>
         (filterAgentId && s.agentId === filterAgentId) ||
-        (filterLabel && s.label === filterLabel),
+        (filterLabel && s.label === filterLabel)
     );
     return match?.id ?? null;
   }
@@ -628,7 +628,7 @@ export class OrchestratorManager {
         os.homedir(),
         ".claude",
         "projects",
-        encodedPath,
+        encodedPath
       );
       if (!fs.existsSync(sessionsDir)) return [];
       return fs
@@ -651,7 +651,7 @@ export class OrchestratorManager {
     rootPath: string,
     ptySessionId: string,
     existingIds: Set<string>,
-    label: string,
+    label: string
   ): void {
     const MAX_ATTEMPTS = 20;
     const INTERVAL_MS = 2000;
@@ -676,14 +676,14 @@ export class OrchestratorManager {
         .find((id) =>
           firstUserMessageStartsWith(
             path.join(dir, `${id}.jsonl`),
-            ORCHESTRATOR_PROMPT_SIGNATURE,
-          ),
+            ORCHESTRATOR_PROMPT_SIGNATURE
+          )
         );
       if (match) {
         this.saveSessionLabel(rootPath, match, label);
         this.saveOrchSessionId(rootPath, match);
         console.log(
-          `[Orchestrator:${this.kind}] Labeled session ${match} as "${label}" (attempt ${attempts})`,
+          `[Orchestrator:${this.kind}] Labeled session ${match} as "${label}" (attempt ${attempts})`
         );
         return;
       }
@@ -692,7 +692,7 @@ export class OrchestratorManager {
         setTimeout(tick, INTERVAL_MS);
       } else {
         console.warn(
-          `[Orchestrator:${this.kind}] No orchestrator session detected after ${attempts} attempts — left unlabeled (content-scan resolver still recovers it)`,
+          `[Orchestrator:${this.kind}] No orchestrator session detected after ${attempts} attempts — left unlabeled (content-scan resolver still recovers it)`
         );
       }
     };
@@ -735,7 +735,7 @@ export class OrchestratorManager {
       this.saveSessionLabel(rootPath, byContent, labelTarget);
       this.saveOrchSessionId(rootPath, byContent);
       console.log(
-        `[Orchestrator:${this.kind}] Recovered prior session ${byContent} by content signature → persisted (store + label)`,
+        `[Orchestrator:${this.kind}] Recovered prior session ${byContent} by content signature → persisted (store + label)`
       );
     }
     return byContent;
@@ -754,16 +754,16 @@ export class OrchestratorManager {
       ".claude",
       "projects",
       encodedPath,
-      "marblo-orch-sessions.json",
+      "marblo-orch-sessions.json"
     );
   }
 
   private readOrchStore(
-    rootPath: string,
+    rootPath: string
   ): Record<string, { sessionId: string; updatedAt: number }> {
     try {
       return JSON.parse(
-        fs.readFileSync(this.getOrchStorePath(rootPath), "utf-8"),
+        fs.readFileSync(this.getOrchStorePath(rootPath), "utf-8")
       );
     } catch {
       return {};
@@ -778,7 +778,7 @@ export class OrchestratorManager {
       fs.writeFileSync(
         this.getOrchStorePath(rootPath),
         JSON.stringify(store, null, 2),
-        "utf-8",
+        "utf-8"
       );
     } catch {
       /* best-effort */
@@ -793,7 +793,7 @@ export class OrchestratorManager {
       ".claude",
       "projects",
       encodedPath,
-      `${id}.jsonl`,
+      `${id}.jsonl`
     );
     return fs.existsSync(p) && !isSummaryOnlyJsonl(p);
   }

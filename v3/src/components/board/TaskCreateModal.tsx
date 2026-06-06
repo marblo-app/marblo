@@ -1,27 +1,27 @@
-import { useState } from 'react';
-import type { AgentRole } from '../../types/task';
-import { createTask } from '../../services/taskService';
+import { useState } from "react";
+import type { AgentRole } from "../../types/task";
+import { createTask } from "../../services/taskService";
 
 interface TaskCreateModalProps {
   projectId: string;
   onClose: () => void;
 }
 
-const ROLES: AgentRole[] = ['backend', 'frontend', 'test', 'devops'];
+const ROLES: AgentRole[] = ["backend", "frontend", "test", "devops"];
 
 export function TaskCreateModal({ projectId, onClose }: TaskCreateModalProps) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [role, setRole] = useState<AgentRole>('backend');
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [role, setRole] = useState<AgentRole>("backend");
   const [priority, setPriority] = useState(3);
-  const [scope, setScope] = useState('');
+  const [scope, setScope] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) {
-      setError('Title is required');
+      setError("Title is required");
       return;
     }
 
@@ -30,37 +30,44 @@ export function TaskCreateModal({ projectId, onClose }: TaskCreateModalProps) {
     try {
       await createTask({
         projectId,
+        contextId: "board",
         title: title.trim(),
         description: description.trim(),
-        status: 'TODO',
+        status: "TODO",
         role,
         priority,
         dependsOn: [],
         dependsOnCompleted: false,
         claimedBy: null,
         claimedAt: null,
-        scope: scope.trim() ? scope.split(',').map((s) => s.trim()) : [],
-        comment: '',
-        prUrl: '',
+        scope: scope.trim() ? scope.split(",").map((s) => s.trim()) : [],
+        comment: "",
+        prUrl: "",
         hasPmFeedback: false,
       });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create task');
+      setError(err instanceof Error ? err.message : "Failed to create task");
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onClose}
+    >
       <div
         className="w-full max-w-lg rounded-lg bg-gray-800 border border-gray-700 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gray-700 px-5 py-4">
           <h2 className="text-lg font-semibold text-gray-100">Create Task</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-200">
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-200"
+          >
             ✕
           </button>
         </div>
@@ -73,7 +80,9 @@ export function TaskCreateModal({ projectId, onClose }: TaskCreateModalProps) {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Title *</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Title *
+            </label>
             <input
               type="text"
               value={title}
@@ -85,7 +94,9 @@ export function TaskCreateModal({ projectId, onClose }: TaskCreateModalProps) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Description</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Description
+            </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -97,20 +108,26 @@ export function TaskCreateModal({ projectId, onClose }: TaskCreateModalProps) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Role *</label>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Role *
+              </label>
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as AgentRole)}
                 className="w-full rounded bg-gray-700 border border-gray-600 px-3 py-2 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
               >
                 {ROLES.map((r) => (
-                  <option key={r} value={r}>{r}</option>
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Priority (1-5)</label>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Priority (1-5)
+              </label>
               <input
                 type="number"
                 min={1}
@@ -123,7 +140,9 @@ export function TaskCreateModal({ projectId, onClose }: TaskCreateModalProps) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Scope (comma-separated)</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Scope (comma-separated)
+            </label>
             <input
               type="text"
               value={scope}
@@ -146,7 +165,7 @@ export function TaskCreateModal({ projectId, onClose }: TaskCreateModalProps) {
               disabled={submitting}
               className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
             >
-              {submitting ? 'Creating...' : 'Create Task'}
+              {submitting ? "Creating..." : "Create Task"}
             </button>
           </div>
         </form>

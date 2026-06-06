@@ -5,6 +5,7 @@ import type { Task } from "../../types/task";
 import { getPresenceStatus, type PresenceStatus } from "../../types/user";
 import { useAgentStore } from "../../stores/agentStore";
 import { usePresence } from "../../hooks/usePresence";
+import { isLaneTask } from "../../lib/laneContext";
 import FlowKanbanLink from "../flows/FlowKanbanLink";
 
 const PRESENCE_DOT: Record<PresenceStatus, string> = {
@@ -150,8 +151,8 @@ function TaskCardContent({
   const statusHighlight = isBlocked
     ? "border-l-2 border-l-orange-500"
     : isFailed
-      ? "border-l-2 border-l-red-500"
-      : "";
+    ? "border-l-2 border-l-red-500"
+    : "";
 
   // Pulse the card whenever Firestore reports a change (status, claimedBy,
   // hasPmFeedback, prUrl, etc — they all bump updatedAt). Each card owns its
@@ -196,7 +197,7 @@ function TaskCardContent({
     <div
       className={`relative cursor-pointer rounded-lg bg-gray-800 p-3 shadow hover:bg-gray-750 transition-colors border border-gray-700/50 hover:border-gray-600 ${statusHighlight} ${
         isDragging ? "ring-2 ring-blue-500" : ""
-      }`}
+      } ${isLaneTask(task.contextId) ? "border-l-2 border-l-amber-500" : ""}`}
       onClick={() => onClick(task)}
     >
       {pulsing && <span aria-hidden="true" className="mb-card-pulse-overlay" />}
@@ -225,6 +226,14 @@ function TaskCardContent({
         >
           {priority.label}
         </span>
+        {isLaneTask(task.contextId) && (
+          <span
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-500/20 text-amber-300"
+            title={`context: ${task.contextId}`}
+          >
+            ⛙ {task.contextId.startsWith("lane:") ? "Lane" : task.contextId}
+          </span>
+        )}
         {isBlocked && (
           <span className="inline-flex rounded px-1.5 py-0.5 text-xs font-medium bg-orange-500/20 text-orange-400">
             BLOCKED

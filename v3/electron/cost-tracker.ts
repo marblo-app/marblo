@@ -1,14 +1,26 @@
 /**
  * Cost tracker — two strategies:
- *   1. Claude sessions: parse JSONL session files for message.usage (accurate)
- *   2. Other CLIs: parse PTY output for token/cost patterns (best-effort)
+ *   1. JSONL session files (claude / codex / gemini): parse per-format token
+ *      usage incrementally (accurate). See session-parsers.ts.
+ *   2. Other CLIs (antigravity / custom): parse PTY output for token/cost
+ *      patterns (best-effort).
  * Read-only observer: does not affect PTY data flow.
  */
 
 import fs from "fs";
 import path from "path";
 import os from "os";
-import readline from "readline";
+import { encodeClaudeProjectDir } from "./claude-paths";
+import { codexSessionsDir, geminiTmpDir } from "./agent-config";
+import {
+  newParseState,
+  parseSessionDelta,
+  type ParseState,
+  type RateLimitInfo,
+  type SessionFormat,
+  type TokenTotals,
+} from "./session-parsers";
+import { readAgyDbDelta, resolveAgyStore } from "./agy-usage";
 
 export interface CostEntry {
   totalCost: number;
@@ -24,6 +36,11 @@ export interface CostEntry {
   deltaCacheReadTokens: number;
   deltaCacheWriteTokens: number;
   deltaCost: number;
+  // Subscription / rate-limit (codex only; undefined otherwise). Latest
+  // snapshot, not a delta — the writer SETs these on the agent doc.
+  detectedPlanType?: string;
+  rateLimitPercent?: number;
+  rateLimitResetAt?: number;
 }
 
 // Patent claim 8 (단락 256-264): 서로 다른 과금체계가 적용되는 2 이상의
@@ -67,7 +84,7 @@ type RawTokenRate = { inputPer1M: number; outputPer1M: number };
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json",
+  "subscription-plans.json"
 );
 
 interface SubscriptionPlanEntry {
@@ -99,7 +116,7 @@ function loadSubscriptionPlans(): SubscriptionPlanEntry[] {
   } catch (err) {
     console.error(
       "[CostTracker] Failed to load subscription plans:",
-      err instanceof Error ? err.message : err,
+      err instanceof Error ? err.message : err
     );
     subscriptionPlanCache = [];
     return [];
@@ -120,6 +137,9 @@ const MODEL_PRICING: Record<string, RawTokenRate> = {
   "claude-3-opus": { inputPer1M: 15, outputPer1M: 75 },
   // OpenAI
   "gpt-5.5": { inputPer1M: 5, outputPer1M: 20 },
+  // Generic gpt-5.x fallback (codex reports ids like gpt-5.4, gpt-5.5-codex);
+  // longest-prefix match means a specific row above still wins when present.
+  "gpt-5": { inputPer1M: 5, outputPer1M: 20 },
   "gpt-4o": { inputPer1M: 2.5, outputPer1M: 10 },
   "gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.6 },
   "gpt-4.1": { inputPer1M: 2, outputPer1M: 8 },
@@ -129,6 +149,8 @@ const MODEL_PRICING: Record<string, RawTokenRate> = {
   "o3-mini": { inputPer1M: 1.1, outputPer1M: 4.4 },
   "o4-mini": { inputPer1M: 1.1, outputPer1M: 4.4 },
   // Gemini
+  "gemini-3-pro": { inputPer1M: 1.25, outputPer1M: 10 },
+  "gemini-3-flash": { inputPer1M: 0.15, outputPer1M: 0.6 },
   "gemini-2.5-pro": { inputPer1M: 1.25, outputPer1M: 10 },
   "gemini-2.5-flash": { inputPer1M: 0.15, outputPer1M: 0.6 },
   "gemini-2.0-flash": { inputPer1M: 0.1, outputPer1M: 0.4 },
@@ -145,23 +167,67 @@ const OUTPUT_TOKENS_PATTERN = /(?:output)[\s]*(?:tokens)?[:\s]*([0-9,]+)/i;
 const MAX_BUFFER_SIZE = 2048;
 const SESSION_POLL_INTERVAL_MS = 15_000; // poll JSONL every 15s
 
+const ZERO_TOTALS: TokenTotals = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+};
+
+/**
+ * Read a JSONL file into its lines, matching `readline` semantics: a trailing
+ * newline does NOT yield a final empty element, so line indices stay stable as
+ * complete records are appended (the line-count watermark relies on this).
+ */
+function readJsonlLines(filePath: string): string[] {
+  const raw = fs.readFileSync(filePath, "utf-8");
+  if (!raw) return [];
+  const lines = raw.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
 interface SessionTracker {
   agentId: string;
+  format: SessionFormat;
+  // claude: fixed JSONL path. codex/gemini: the currently-tracked newest
+  // session file under searchRoot ("" until the CLI writes one).
   filePath: string;
+  // codex/gemini: directory tree to scan for the newest session file
+  // ("" for claude, which uses a fixed filePath).
+  searchRoot: string;
+  // Per-current-file parse state (line watermark + cumulative + model).
+  state: ParseState;
+  // Cross-file running totals that drive the emitted rollup — survives a file
+  // rotation (codex/gemini start a fresh file on resume) so no data is lost.
+  accumulated: TokenTotals;
+  // Current model id for pricing / display (refined as the file is parsed).
   model: string;
-  lastLineCount: number;
-  accumulated: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    cacheWriteTokens: number;
-  };
+  // Last rate-limit % emitted — so we only re-emit on change (codex), not
+  // every 15s tick when only the rate-limit (and no tokens) is present.
+  lastRlPercent?: number;
+  timer: ReturnType<typeof setInterval>;
+}
+
+// Antigravity tracker. agy stores token usage in a per-conversation SQLite
+// store (protobuf blobs), polled incrementally by gen_metadata row idx — a
+// different mechanism from the JSONL `SessionTracker`, so it gets its own map.
+interface AgyTracker {
+  agentId: string;
+  /** Highest gen_metadata.idx already counted (-1 = none yet). */
+  lastIdx: number;
+  accumulated: TokenTotals;
+  model: string;
+  /** true once we discover only a legacy .pb store (tokens not decodable). */
+  limited: boolean;
+  loggedLimited: boolean;
   timer: ReturnType<typeof setInterval>;
 }
 
 export class CostTracker {
   private buffers: Map<string, string> = new Map();
   private sessions: Map<string, SessionTracker> = new Map();
+  private agySessions: Map<string, AgyTracker> = new Map();
   private onCostDetected?: (agentId: string, cost: CostEntry) => void;
 
   constructor(onCostDetected?: (agentId: string, cost: CostEntry) => void) {
@@ -228,11 +294,23 @@ export class CostTracker {
     deltaOutputTokens: number,
     accumulatedInputTokens = 0,
     accumulatedOutputTokens = 0,
+    deltaCacheReadTokens = 0,
+    deltaCacheWriteTokens = 0
   ): number {
     if (pricing.scheme === "per-token") {
+      // API-equivalent value INCLUDING cache. Cache rates aren't in the table;
+      // derive from the input rate via the standard Anthropic ratios (cache
+      // read = 0.1×input, 5-min cache write = 1.25×input) as a model-agnostic
+      // approximation. Without this, cache-heavy models (Claude routinely has
+      // 90%+ of its tokens as cache reads) get costed at ~4% of real value,
+      // which made Codex look pricier than Claude.
+      const cacheReadPer1M = pricing.inputPer1M * 0.1;
+      const cacheWritePer1M = pricing.inputPer1M * 1.25;
       return (
         (deltaInputTokens * pricing.inputPer1M +
-          deltaOutputTokens * pricing.outputPer1M) /
+          deltaOutputTokens * pricing.outputPer1M +
+          deltaCacheReadTokens * cacheReadPer1M +
+          deltaCacheWriteTokens * cacheWritePer1M) /
         1_000_000
       );
     }
@@ -254,7 +332,7 @@ export class CostTracker {
     // portion above allowance, split proportionally across input/output.
     const overageDelta = Math.min(
       deltaInputTokens + deltaOutputTokens,
-      totalAfter - Math.max(totalBefore, allowance),
+      totalAfter - Math.max(totalBefore, allowance)
     );
     if (overageDelta <= 0) return 0;
     const totalDelta = deltaInputTokens + deltaOutputTokens || 1;
@@ -267,30 +345,48 @@ export class CostTracker {
     );
   }
 
-  // ── Strategy 1: Claude JSONL Session File Tracking ──────────
+  // ── Strategy 1: JSONL Session File Tracking (claude / codex / gemini) ──
 
   /**
-   * Start tracking a Claude session JSONL file for token usage.
-   * If sessionId is provided, tracks that specific file.
-   * If sessionId is null/undefined, finds the most recent JSONL in the project dir.
+   * Start tracking an agent's session file for token usage.
+   *
+   * Claude writes a JSONL under `~/.claude/projects/<encoded>/<sessionId>.jsonl`
+   * (a concrete file we can resolve immediately). Codex/Gemini write under a
+   * per-agent CLI home that may not exist yet at launch — those route through
+   * `trackCliSession`, whose poller self-resolves the newest file each tick.
    */
   trackSession(
     agentId: string,
     rootPath: string,
     sessionId: string | null | undefined,
-    model: string,
+    model: string
   ): void {
     // Don't double-track
     if (this.sessions.has(agentId)) {
       this.stopSession(agentId);
     }
 
-    const encodedPath = rootPath.replace(/\//g, "-");
+    // Codex / Gemini: file-based tracking from the per-agent CLI home dir.
+    // These never resolve to a ~/.claude path, so route them out early.
+    if (model === "gpt" || model === "gemini") {
+      this.trackCliSession(agentId, model);
+      return;
+    }
+
+    // Antigravity: token usage lives in protobuf blobs in a per-conversation
+    // SQLite store, attributed via agentId → conversationUUID. Separate
+    // subsystem (not JSONL) — see trackAgySession.
+    if (model === "antigravity") {
+      this.trackAgySession(agentId);
+      return;
+    }
+
+    const encodedPath = encodeClaudeProjectDir(rootPath);
     const projectDir = path.join(
       os.homedir(),
       ".claude",
       "projects",
-      encodedPath,
+      encodedPath
     );
 
     let filePath: string;
@@ -313,7 +409,7 @@ export class CostTracker {
         }
         filePath = path.join(projectDir, files[0].name);
         console.log(
-          `[CostTracker] No sessionId — using most recent: ${files[0].name}`,
+          `[CostTracker] No sessionId — using most recent: ${files[0].name}`
         );
       } catch {
         console.warn(`[CostTracker] Cannot read project dir: ${projectDir}`);
@@ -328,27 +424,63 @@ export class CostTracker {
 
     const tracker: SessionTracker = {
       agentId,
+      format: "claude",
       filePath,
+      searchRoot: "",
+      state: newParseState(),
+      accumulated: { ...ZERO_TOTALS },
       model,
-      lastLineCount: 0,
-      accumulated: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      },
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS,
+        SESSION_POLL_INTERVAL_MS
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`,
+      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`
     );
 
     // Do an initial scan right away
+    this.pollSessionFile(agentId);
+  }
+
+  /**
+   * Start file-based tracking for a Codex (gpt) or Gemini agent. Unlike the
+   * Claude path, the session file may not exist yet at launch — the poller
+   * re-resolves the newest session file under the per-agent CLI home on every
+   * tick, so it picks the file up as soon as the CLI writes it. No data is
+   * lost: the file persists, and a reconnect re-scans it from scratch.
+   *
+   *   Codex:  <CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl
+   *   Gemini: <GEMINI_CLI_HOME>/.gemini/tmp/<hash>/chats/session-*.jsonl
+   */
+  private trackCliSession(agentId: string, model: "gpt" | "gemini"): void {
+    const format: SessionFormat = model === "gpt" ? "codex" : "gemini";
+    const searchRoot =
+      format === "codex" ? codexSessionsDir(agentId) : geminiTmpDir(agentId);
+
+    const tracker: SessionTracker = {
+      agentId,
+      format,
+      filePath: "",
+      searchRoot,
+      state: newParseState(),
+      accumulated: { ...ZERO_TOTALS },
+      // Best-guess default until the session records its real model id.
+      model: format === "codex" ? "gpt-5.5" : "gemini-2.5-pro",
+      timer: setInterval(
+        () => this.pollSessionFile(agentId),
+        SESSION_POLL_INTERVAL_MS
+      ),
+    };
+
+    this.sessions.set(agentId, tracker);
+    console.log(
+      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`
+    );
+
+    // Initial scan (file may not exist yet — poller tolerates that).
     this.pollSessionFile(agentId);
   }
 
@@ -358,125 +490,287 @@ export class CostTracker {
       clearInterval(tracker.timer);
       this.sessions.delete(agentId);
     }
+    this.stopAgySession(agentId);
   }
 
-  private async pollSessionFile(agentId: string): Promise<void> {
+  /**
+   * Poll the tracked file once: resolve the active file (codex/gemini rotate),
+   * parse the new lines via the format-specific parser, fold the delta into the
+   * agent's running total, and emit. Synchronous — session files are bounded
+   * and we only re-read on a 15s tick.
+   */
+  private pollSessionFile(agentId: string): void {
     const tracker = this.sessions.get(agentId);
     if (!tracker) return;
 
     try {
-      const { filePath, lastLineCount } = tracker;
-      if (!fs.existsSync(filePath)) return;
-
-      // Read file line by line
-      const stream = fs.createReadStream(filePath, { encoding: "utf-8" });
-      const rl = readline.createInterface({
-        input: stream,
-        crlfDelay: Infinity,
-      });
-
-      let lineNum = 0;
-      let newInput = 0;
-      let newOutput = 0;
-      let newCacheRead = 0;
-      let newCacheWrite = 0;
-      let detectedModel = tracker.model;
-
-      for await (const line of rl) {
-        lineNum++;
-        // Skip already-processed lines
-        if (lineNum <= lastLineCount) continue;
-
-        try {
-          const entry = JSON.parse(line);
-          if (entry.type === "assistant" && entry.message?.usage) {
-            const u = entry.message.usage;
-            newInput += u.input_tokens || 0;
-            newOutput += u.output_tokens || 0;
-            newCacheRead += u.cache_read_input_tokens || 0;
-            newCacheWrite += u.cache_creation_input_tokens || 0;
-
-            // Detect model from the message
-            if (entry.message.model) {
-              detectedModel = entry.message.model;
-            }
-          }
-        } catch {
-          // Skip malformed lines
+      // codex / gemini: re-resolve the newest session file each tick (it may
+      // appear after launch, or rotate when the agent resumes). On a file
+      // switch, reset the per-file parse state but KEEP `accumulated` so the
+      // agent's cross-session running total is preserved (no data loss).
+      if (tracker.format !== "claude") {
+        const newest = this.findNewestSessionFile(tracker);
+        if (!newest) return;
+        if (newest !== tracker.filePath) {
+          tracker.filePath = newest;
+          tracker.state = newParseState();
         }
       }
 
-      tracker.lastLineCount = lineNum;
-      tracker.model = detectedModel;
+      if (!tracker.filePath || !fs.existsSync(tracker.filePath)) return;
 
-      // Only fire callback if new tokens detected
-      if (
-        newInput > 0 ||
-        newOutput > 0 ||
-        newCacheRead > 0 ||
-        newCacheWrite > 0
-      ) {
-        tracker.accumulated.inputTokens += newInput;
-        tracker.accumulated.outputTokens += newOutput;
-        tracker.accumulated.cacheReadTokens += newCacheRead;
-        tracker.accumulated.cacheWriteTokens += newCacheWrite;
-
-        const acc = tracker.accumulated;
-
-        // Patent claim 8: route through pricing-scheme aware calculator.
-        // For per-token models this is the same arithmetic as before; for
-        // subscription models the incremental cost is 0 within allowance
-        // and only over-allowance excess gets per-token charged.
-        const pricing = this.findPricing(detectedModel);
-        const totalCost = this.computeIncrementalCost(
-          pricing,
-          acc.inputTokens,
-          acc.outputTokens,
-          0,
-          0,
-        );
-        const deltaCost = this.computeIncrementalCost(
-          pricing,
-          newInput,
-          newOutput,
-          acc.inputTokens - newInput,
-          acc.outputTokens - newOutput,
-        );
-
-        this.onCostDetected?.(agentId, {
-          totalCost,
-          inputTokens: acc.inputTokens,
-          outputTokens: acc.outputTokens,
-          cacheReadTokens: acc.cacheReadTokens,
-          cacheWriteTokens: acc.cacheWriteTokens,
-          model: detectedModel,
-          timestamp: Date.now(),
-          deltaInputTokens: newInput,
-          deltaOutputTokens: newOutput,
-          deltaCacheReadTokens: newCacheRead,
-          deltaCacheWriteTokens: newCacheWrite,
-          deltaCost,
-        });
-
-        console.log(
-          `[CostTracker] Agent=${agentId} model=${detectedModel} ` +
-            `in=${acc.inputTokens.toLocaleString()} out=${acc.outputTokens.toLocaleString()} ` +
-            `cache_read=${acc.cacheReadTokens.toLocaleString()} cache_write=${acc.cacheWriteTokens.toLocaleString()}`,
-        );
-      }
+      const lines = readJsonlLines(tracker.filePath);
+      const { delta, newState } = parseSessionDelta(
+        tracker.format,
+        lines,
+        tracker.state
+      );
+      tracker.state = newState;
+      if (newState.model) tracker.model = newState.model;
+      this.emit(tracker, delta, newState.rateLimit);
     } catch (err) {
       console.error(
-        `[CostTracker] Error polling session file for agent=${agentId}:`,
-        err,
+        `[CostTracker] Error polling session for agent=${agentId}:`,
+        err
       );
     }
   }
 
-  // ── Strategy 2: PTY Output Parsing (non-Claude CLIs) ───────
+  /** Fold a token delta into the agent's running total and fire onCostDetected.
+   * Also forwards the latest rate-limit snapshot (codex) — emitted when tokens
+   * change OR the rate-limit % moves, so flat polls don't spam the writer. */
+  private emit(
+    tracker: SessionTracker,
+    delta: TokenTotals,
+    rateLimit?: RateLimitInfo | null
+  ): void {
+    const hasTokens =
+      delta.input > 0 ||
+      delta.output > 0 ||
+      delta.cacheRead > 0 ||
+      delta.cacheWrite > 0;
+    const rlPercent = rateLimit?.primaryPercent ?? undefined;
+    const rlChanged =
+      typeof rlPercent === "number" && rlPercent !== tracker.lastRlPercent;
+    if (!hasTokens && !rlChanged) return;
+    if (typeof rlPercent === "number") tracker.lastRlPercent = rlPercent;
+
+    const acc = tracker.accumulated;
+    acc.input += delta.input;
+    acc.output += delta.output;
+    acc.cacheRead += delta.cacheRead;
+    acc.cacheWrite += delta.cacheWrite;
+
+    // Patent claim 8: route through pricing-scheme aware calculator.
+    const pricing = this.findPricing(tracker.model);
+    const totalCost = this.computeIncrementalCost(
+      pricing,
+      acc.input,
+      acc.output,
+      0,
+      0,
+      acc.cacheRead,
+      acc.cacheWrite
+    );
+    const deltaCost = this.computeIncrementalCost(
+      pricing,
+      delta.input,
+      delta.output,
+      acc.input - delta.input,
+      acc.output - delta.output,
+      delta.cacheRead,
+      delta.cacheWrite
+    );
+
+    this.onCostDetected?.(tracker.agentId, {
+      totalCost,
+      inputTokens: acc.input,
+      outputTokens: acc.output,
+      cacheReadTokens: acc.cacheRead,
+      cacheWriteTokens: acc.cacheWrite,
+      model: tracker.model,
+      timestamp: Date.now(),
+      deltaInputTokens: delta.input,
+      deltaOutputTokens: delta.output,
+      deltaCacheReadTokens: delta.cacheRead,
+      deltaCacheWriteTokens: delta.cacheWrite,
+      deltaCost,
+      detectedPlanType: rateLimit?.planType ?? undefined,
+      rateLimitPercent: rlPercent,
+      rateLimitResetAt: rateLimit?.primaryResetAt ?? undefined,
+    });
+
+    console.log(
+      `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} ` +
+        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()} ` +
+        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`
+    );
+  }
+
+  /** Walk searchRoot and return the newest session file matching the format. */
+  private findNewestSessionFile(tracker: SessionTracker): string | null {
+    const root = tracker.searchRoot;
+    if (!root || !fs.existsSync(root)) return null;
+    let best: { path: string; mtime: number } | null = null;
+    const stack = [root];
+    while (stack.length > 0) {
+      const dir = stack.pop()!;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(full);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const matches =
+          tracker.format === "codex"
+            ? entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")
+            : entry.name.startsWith("session-") &&
+              entry.name.endsWith(".jsonl");
+        if (!matches) continue;
+        let mtime: number;
+        try {
+          mtime = fs.statSync(full).mtimeMs;
+        } catch {
+          continue;
+        }
+        if (!best || mtime > best.mtime) best = { path: full, mtime };
+      }
+    }
+    return best ? best.path : null;
+  }
+
+  // ── Strategy 1b: Antigravity SQLite Store Tracking ─────────────
+
+  /**
+   * Start tracking an antigravity agent. The conversation `.db` is born after
+   * the first turn and lives under the user's shared ~/.gemini, so the poller
+   * re-resolves it (by agentId → conversationUUID) each tick and reads new
+   * `gen_metadata` rows incrementally. Resilient to the file not existing yet
+   * and to a reconnect (the watermark restarts at -1, re-summing the store).
+   */
+  private trackAgySession(agentId: string): void {
+    if (this.agySessions.has(agentId)) this.stopAgySession(agentId);
+    const tracker: AgyTracker = {
+      agentId,
+      lastIdx: -1,
+      accumulated: { ...ZERO_TOTALS },
+      model: "gemini-3-flash", // agy default; refined from the store
+      limited: false,
+      loggedLimited: false,
+      timer: setInterval(
+        () => this.pollAgySession(agentId),
+        SESSION_POLL_INTERVAL_MS
+      ),
+    };
+    this.agySessions.set(agentId, tracker);
+    console.log(
+      `[CostTracker] Tracking antigravity store for agent=${agentId}`
+    );
+    this.pollAgySession(agentId);
+  }
+
+  private stopAgySession(agentId: string): void {
+    const t = this.agySessions.get(agentId);
+    if (t) {
+      clearInterval(t.timer);
+      this.agySessions.delete(agentId);
+    }
+  }
+
+  private pollAgySession(agentId: string): void {
+    const tracker = this.agySessions.get(agentId);
+    if (!tracker) return;
+    try {
+      const store = resolveAgyStore(agentId);
+      if (!store) return; // .db not written yet — try again next tick
+      if (store.format === "pb") {
+        // Legacy flat-protobuf store — token blobs aren't reliably decodable.
+        // Mark limited (PTY parsing still captures rate-limit/exit signals).
+        if (!tracker.loggedLimited) {
+          tracker.limited = true;
+          tracker.loggedLimited = true;
+          console.warn(
+            `[CostTracker] agy agent=${agentId} uses legacy .pb store — ` +
+              `token capture limited (no decode); relying on PTY signals.`
+          );
+        }
+        return;
+      }
+      const delta = readAgyDbDelta(store.path, tracker.lastIdx);
+      tracker.lastIdx = delta.maxIdx;
+      if (delta.model) tracker.model = delta.model;
+      this.emitAgy(tracker, delta.input, delta.output);
+    } catch (err) {
+      console.error(
+        `[CostTracker] Error polling agy store for agent=${agentId}:`,
+        err
+      );
+    }
+  }
+
+  /** Fold an agy token delta into the running total and fire onCostDetected.
+   * Mirrors `emit` but works off the standalone AgyTracker. agy reports no
+   * separate cache tokens, so cacheRead/cacheWrite stay 0. */
+  private emitAgy(tracker: AgyTracker, dInput: number, dOutput: number): void {
+    if (dInput <= 0 && dOutput <= 0) return;
+    const acc = tracker.accumulated;
+    acc.input += dInput;
+    acc.output += dOutput;
+
+    const pricing = this.findPricing(tracker.model);
+    const totalCost = this.computeIncrementalCost(
+      pricing,
+      acc.input,
+      acc.output,
+      0,
+      0
+    );
+    const deltaCost = this.computeIncrementalCost(
+      pricing,
+      dInput,
+      dOutput,
+      acc.input - dInput,
+      acc.output - dOutput
+    );
+
+    this.onCostDetected?.(tracker.agentId, {
+      totalCost,
+      inputTokens: acc.input,
+      outputTokens: acc.output,
+      cacheReadTokens: acc.cacheRead,
+      cacheWriteTokens: acc.cacheWrite,
+      model: tracker.model,
+      timestamp: Date.now(),
+      deltaInputTokens: dInput,
+      deltaOutputTokens: dOutput,
+      deltaCacheReadTokens: 0,
+      deltaCacheWriteTokens: 0,
+      deltaCost,
+    });
+
+    console.log(
+      `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} (agy) ` +
+        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`
+    );
+  }
+
+  // ── Strategy 2: PTY Output Parsing (antigravity / custom) ───────
 
   processOutput(agentId: string, data: string): void {
-    // Skip if we're tracking this agent via session file
+    // Skip if we're tracking this agent via a session file or the agy store —
+    // double-counting PTY-scraped numbers on top of accurate file tracking
+    // would inflate usage. (A limited .pb agy session stays tracked here, so
+    // its PTY fallback still applies.)
     if (this.sessions.has(agentId)) return;
+    const agy = this.agySessions.get(agentId);
+    if (agy && !agy.limited) return;
 
     let buffer = (this.buffers.get(agentId) || "") + data;
     if (buffer.length > MAX_BUFFER_SIZE) {
@@ -533,7 +827,7 @@ export class CostTracker {
         const cost = this.computeIncrementalCost(
           pricing,
           inputTokens,
-          outputTokens,
+          outputTokens
         );
 
         this.onCostDetected?.(agentId, {
@@ -564,5 +858,9 @@ export class CostTracker {
       clearInterval(tracker.timer);
     }
     this.sessions.clear();
+    for (const tracker of this.agySessions.values()) {
+      clearInterval(tracker.timer);
+    }
+    this.agySessions.clear();
   }
 }

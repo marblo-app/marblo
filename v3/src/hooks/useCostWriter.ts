@@ -54,6 +54,13 @@ export function useCostWriter() {
           costUpdatedAt: serverTimestamp(),
         };
         if (data.model) update.detectedModelId = data.model;
+        // Rate-limit / plan snapshot (codex) — SET latest value, not increment.
+        if (data.detectedPlanType)
+          update.detectedPlanType = data.detectedPlanType;
+        if (typeof data.rateLimitPercent === "number")
+          update.rateLimitPercent = data.rateLimitPercent;
+        if (typeof data.rateLimitResetAt === "number")
+          update.rateLimitResetAt = data.rateLimitResetAt;
         updateDoc(ref, update).catch((err) => {
           // Doc may not exist yet (e.g. orchestrator session) — ignore.
           console.warn(

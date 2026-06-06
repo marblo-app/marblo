@@ -63,20 +63,27 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
     missionId: string;
     projectId: string;
     goal: string;
+    priorContext?: string;
   }): Promise<string[]> {
     await ready;
+
+    // priorContext (e.g. /plan-eng-review) 가 있으면 decomposer 의 goal 에 합쳐
+    // 더 풍부한 task 분해 + 각 task description 에도 컨텍스트가 반영되도록.
+    const enrichedGoal = input.priorContext
+      ? `${input.goal}\n\n--- Prior planning / context ---\n${input.priorContext}\n--- end ---`
+      : input.goal;
 
     // 1) Decompose
     let tasks: DecomposedTask[];
     try {
-      const decomposed = await deps.decomposer().decompose(input.goal);
+      const decomposed = await deps.decomposer().decompose(enrichedGoal);
       tasks = decomposed.tasks;
     } catch (e) {
       log("decompose failed — falling back to single task", { err: String(e) });
       tasks = [
         {
           title: input.goal.slice(0, 80),
-          description: input.goal,
+          description: enrichedGoal,
           role: "backend",
           priority: 3,
           depends_on: [],
@@ -114,6 +121,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
         hasPmFeedback: false,
         projectId: input.projectId,
         missionId: input.missionId,
+        contextId: input.missionId,
         createdAt: now,
         updatedAt: now,
       };

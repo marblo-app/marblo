@@ -505,7 +505,7 @@ export function registerTools(server) {
         return text(`Task '${task.title}' status updated to ${newStatus}.${unblockedNote}`);
     });
     // 7. add_activity
-    auditedTool("add_activity", "Add an activity log entry to a task. Use to record work progress, decisions, or events.", {
+    auditedTool("add_activity", "Add an activity log entry to a task. Use to record work progress, decisions, or events. Also notifies the orchestrator PTY.", {
         task_id: z.string().describe("Task ID"),
         message: z.string().describe("Activity message"),
         agent_id: z.string().optional().describe("Agent ID"),
@@ -525,6 +525,8 @@ export function registerTools(server) {
             lastActivitySummary: message,
             activityPayload: { agentId: resolvedAgentId, message },
         });
+        const preview = message.length > 300 ? `${message.slice(0, 300)}...` : message;
+        notifyOrchestrator(`[Task Activity] "${task.title}" progress update (role=${task.role}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`);
         return text(`Activity logged: ${message}`);
     });
     // 8. submit_for_review
@@ -693,8 +695,10 @@ export function registerTools(server) {
     auditedTool("spawn_agent", "Spawn a new agent via the Electron bridge. The agent gets its own PTY session and terminal tab. Requires MARBLO_BRIDGE_PORT env var.", {
         name: z.string().describe('Agent display name (e.g., "backend-auth")'),
         model: z
-            .enum(["claude", "gemini", "gpt", "antigravity", "local", "custom"])
-            .describe("AI model to use"),
+            .enum(["claude", "codex", "gpt", "antigravity", "local", "custom"])
+            .describe("AI model to use. 'codex' and 'gpt' are the same OpenAI Codex CLI " +
+            "(there is no separate 'gpt' CLI) — both spawn the `codex` binary. " +
+            "Fleet: claude (Claude Code) / codex (OpenAI Codex) / antigravity (agy)."),
         role: z.string().describe("Agent role (backend/frontend/test/devops)"),
         command: z
             .string()
@@ -708,7 +712,16 @@ export function registerTools(server) {
             .string()
             .optional()
             .describe("Initial prompt to send to the agent after boot"),
-    }, async ({ name, model, role, command, cwd, initial_prompt }) => {
+        task_id: z
+            .string()
+            .optional()
+            .describe("Marblo task ID for completion reporting. When provided, the bridge appends the same completion protocol used by dispatch_task."),
+    }, async ({ name, model: rawModel, role, command, cwd, initial_prompt, task_id, }) => {
+        // "codex" is the user-facing name for the Codex CLI; the internal
+        // ModelType is "gpt". Fold it here so the Firestore agent doc and the
+        // renderer's Record<ModelType> icon maps stay consistent. (The bridge
+        // also normalizes, but the doc is written from this var.)
+        const model = rawModel === "codex" ? "gpt" : rawModel;
         const bridgePort = process.env.MARBLO_BRIDGE_PORT;
         if (!bridgePort) {
             return text("Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.");
@@ -721,6 +734,7 @@ export function registerTools(server) {
                 command,
                 cwd,
                 initialPrompt: initial_prompt,
+                taskId: task_id,
                 // Forward MARBLO_PROJECT so bridge scopes the new agent to the
                 // correct window in multi-window mode.
                 projectId: process.env.MARBLO_PROJECT || "",
@@ -966,7 +980,9 @@ export function registerTools(server) {
         model: z
             .string()
             .optional()
-            .describe("Preferred model hint (claude/gemini/gpt/antigravity)"),
+            .describe("Preferred model hint (claude/codex/antigravity). 'codex' and 'gpt' " +
+            "both map to the OpenAI Codex CLI. When set, this model is forced " +
+            "over tag scoring."),
         name: z.string().optional().describe("Agent name hint"),
         cwd: z.string().optional().describe("Working directory"),
         tags: z

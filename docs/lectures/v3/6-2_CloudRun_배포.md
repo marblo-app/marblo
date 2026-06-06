@@ -29,6 +29,7 @@ Cloud Run이 뭔지 간단히 설명드릴게요.
 서버 관리가 필요 없다는 게 핵심이에요. EC2처럼 24시간 서버를 유지할 필요가 없습니다.
 
 이번 섹션에서는:
+
 1. Dockerfile 작성 (마블로 에이전트가 생성한 것 활용)
 2. 이미지 빌드 + 푸시
 3. Cloud Run 배포
@@ -246,14 +247,14 @@ gcloud run deploy marblo-todo-app \
 
 각 옵션 설명:
 
-| 옵션 | 설명 |
-|------|------|
-| `--allow-unauthenticated` | 누구나 접근 가능 (공개 API) |
-| `--port=8080` | 컨테이너가 리스닝하는 포트 |
-| `--memory=512Mi` | 인스턴스당 메모리 |
-| `--cpu=1` | CPU 코어 수 |
-| `--min-instances=0` | 요청 없으면 0으로 줄임 (비용 절감) |
-| `--max-instances=3` | 최대 3개까지 자동 스케일 |
+| 옵션                      | 설명                               |
+| ------------------------- | ---------------------------------- |
+| `--allow-unauthenticated` | 누구나 접근 가능 (공개 API)        |
+| `--port=8080`             | 컨테이너가 리스닝하는 포트         |
+| `--memory=512Mi`          | 인스턴스당 메모리                  |
+| `--cpu=1`                 | CPU 코어 수                        |
+| `--min-instances=0`       | 요청 없으면 0으로 줄임 (비용 절감) |
+| `--max-instances=3`       | 최대 3개까지 자동 스케일           |
 
 화면: 배포 진행 중...
 
@@ -304,6 +305,30 @@ gcloud run services update marblo-todo-app \
   --set-env-vars="DATABASE_URL=postgresql://user:pass@host:5432/dbname" \
   --set-env-vars="API_SECRET=your-secret-key"
 ```
+
+### Cloud SQL 연결 (ReachWave 본 강의 경로)
+
+ReachWave는 6-1에서 만든 `reachwave-db` 인스턴스에 붙습니다. Cloud Run에서 Cloud SQL은 **Unix 소켓**(`/cloudsql/<connectionName>`)으로 연결하는 게 표준입니다 — IP 노출 없이 IAM으로 인증되어 가장 안전합니다.
+
+```bash
+# 1) 인스턴스 연결 이름 가져오기
+INSTANCE_CONN=$(gcloud sql instances describe reachwave-db \
+  --format='value(connectionName)')
+# 예: marblo-todo-app-12345:asia-northeast3:reachwave-db
+
+# 2) DB 비밀번호는 Secret Manager에 저장
+echo -n "<6-1에서 만든 reachwave_app 비밀번호>" | \
+  gcloud secrets create reachwave-db-password --data-file=-
+
+# 3) Cloud Run 서비스에 Cloud SQL을 붙이고 DATABASE_URL 주입
+gcloud run services update marblo-todo-app \
+  --region=${REGION} \
+  --add-cloudsql-instances="${INSTANCE_CONN}" \
+  --set-env-vars="DATABASE_URL=postgresql+psycopg://reachwave_app@/reachwave?host=/cloudsql/${INSTANCE_CONN}" \
+  --set-secrets="DB_PASSWORD=reachwave-db-password:latest"
+```
+
+SQLAlchemy 측에서는 `DATABASE_URL`에 비밀번호 부분만 코드에서 합성하면 됩니다 (`postgresql+psycopg://reachwave_app:${DB_PASSWORD}@/...`). 호스팅을 Supabase·Neon으로 옮겨도 이 URL 한 줄만 바뀌고 나머지 코드는 그대로입니다.
 
 **중요: 민감한 값은 Secret Manager를 사용하세요.**
 
@@ -383,6 +408,7 @@ gcloud logging read \
 화면: GCP 콘솔 — Cloud Run 대시보드
 
 GCP 콘솔에서 시각적으로도 확인할 수 있습니다:
+
 - **요청 수**: 시간별 요청 그래프
 - **지연 시간**: p50, p95, p99 응답 시간
 - **오류율**: 4xx, 5xx 에러 비율
@@ -415,6 +441,7 @@ https://your-app.run.app ← 전 세계 접속 가능!
 ```
 
 핵심 포인트:
+
 1. **Dockerfile**: Multi-stage 빌드 + non-root 사용자
 2. **Cloud Run**: 서버리스, 자동 스케일링, HTTPS 자동
 3. **환경변수**: 일반 값은 `--set-env-vars`, 민감한 값은 Secret Manager
@@ -423,4 +450,5 @@ https://your-app.run.app ← 전 세계 접속 가능!
 다음 섹션에서는 배포된 서비스를 크론잡으로 자동화하는 방법을 배우겠습니다.
 
 ---
+
 다음: [[6-3_크론잡_자동화]]

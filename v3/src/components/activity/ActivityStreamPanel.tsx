@@ -18,6 +18,7 @@ import { useAgentStore } from "../../stores/agentStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { MacroView } from "./MacroView";
 import { formatActivity } from "../../services/activityFormatters";
+import type { Agent } from "../../types/agent";
 
 const MODEL_ICONS: Record<string, string> = {
   claude: "🟣",
@@ -63,6 +64,53 @@ function extractTaskId(entry: ActivityEntry): string | null {
   const p = entry.params;
   if (typeof p.task_id === "string") return p.task_id;
   if (typeof p.taskId === "string") return p.taskId as string;
+  return null;
+}
+
+function extractSpawnedAgentId(entry: ActivityEntry): string | null {
+  if (entry.toolName !== "spawn_agent") return null;
+  const match = /Agent ID:\s*([^\s]+)/.exec(entry.result);
+  return match ? match[1] : null;
+}
+
+function strParam(
+  params: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = params[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function resolveActivityAgent(
+  entry: ActivityEntry,
+  agents: Agent[],
+  taskId: string | null,
+): Agent | null {
+  const candidates = [
+    extractSpawnedAgentId(entry),
+    strParam(entry.params, "agentId"),
+    strParam(entry.params, "agent_id"),
+    entry.agentId !== "unknown" ? entry.agentId : null,
+    strParam(entry.params, "name"),
+  ].filter((v): v is string => !!v);
+
+  const realAgents = agents.filter((a) => a.role !== "orchestrator");
+  for (const candidate of candidates) {
+    const normalized = candidate.toLowerCase();
+    const found = realAgents.find(
+      (a) =>
+        a.id === candidate ||
+        a.name === candidate ||
+        a.name.toLowerCase() === normalized,
+    );
+    if (found) return found;
+  }
+
+  if (taskId) {
+    const byTask = realAgents.find((a) => a.currentTaskId === taskId);
+    if (byTask) return byTask;
+  }
+
   return null;
 }
 
@@ -117,11 +165,11 @@ function jumpTo(target: { type: "task" | "agent"; id: string }) {
  */
 function ActivityRow({ entry }: { entry: ActivityEntry }) {
   const [expanded, setExpanded] = useState(false);
+  const agents = useAgentStore((s) => s.agents);
   const icon = ACTIVITY_TYPE_ICON[entry.type];
   const label = ACTIVITY_TYPE_LABEL[entry.type];
   const taskId = extractTaskId(entry);
-  const agentId =
-    entry.agentId && entry.agentId !== "unknown" ? entry.agentId : null;
+  const agent = resolveActivityAgent(entry, agents, taskId);
 
   // 헤드라인 + detail 모두 activityFormatters 가 담당 —
   // raw result/params 노출 방지 + 'Category: action payload' 통일 포맷.
@@ -194,7 +242,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
               ))}
             </dl>
           )}
-          {(taskId || agentId) && (
+          {(taskId || agent) && (
             <div className="flex gap-1.5 pt-0.5">
               {taskId && (
                 <button
@@ -208,12 +256,12 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
                   📋 태스크 열기
                 </button>
               )}
-              {agentId && (
+              {agent && (
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    jumpTo({ type: "agent", id: agentId });
+                    jumpTo({ type: "agent", id: agent.id });
                   }}
                   className="rounded bg-[#cba6f7]/20 px-2 py-1 text-[10px] text-[#cba6f7] hover:bg-[#cba6f7]/30"
                 >

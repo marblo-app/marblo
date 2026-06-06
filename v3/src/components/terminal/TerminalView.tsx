@@ -105,6 +105,26 @@ export default memo(function TerminalView({
         onLeftWhenEmptyRef.current();
         return false;
       }
+      // Cmd/Ctrl+V — paste explicitly. The native menu paste does not
+      // reliably reach xterm's hidden textarea after an OAuth browser
+      // round-trip (typing works, paste is lost), which broke pasting auth
+      // tokens (e.g. Antigravity `agy` login). Read the clipboard ourselves
+      // and inject via terminal.paste(), which respects bracketed-paste mode.
+      if (
+        e.type === "keydown" &&
+        (e.key === "v" || e.key === "V") &&
+        (e.metaKey || e.ctrlKey) &&
+        !e.altKey
+      ) {
+        e.preventDefault();
+        void window.electronAPI.clipboard
+          .readText()
+          .then((text) => {
+            if (text) terminal.paste(text);
+          })
+          .catch(() => {});
+        return false;
+      }
       return true;
     });
 

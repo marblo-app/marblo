@@ -203,7 +203,8 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
             {filtered.map((pkg) => {
               const isBusy = busy === pkg.id;
               const isInstalled = pkg.status === "installed";
-              const isRequired = pkg.category === "required";
+              const isDeprecated = !!pkg.deprecated;
+              const isRequired = pkg.category === "required" && !isDeprecated;
               const isBundled = pkg.install.kind === "bundled";
               const isManual = pkg.install.kind === "manual";
               const ver = versions[pkg.id];
@@ -221,17 +222,24 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                         {pkg.type}
                       </span>
                     </div>
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] ${
-                        isInstalled
-                          ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
-                          : isManual
-                          ? "bg-[#f9e2af]/20 text-[#f9e2af]"
-                          : "bg-[#313244] text-[#6c7086]"
-                      }`}
-                    >
-                      {isInstalled ? "설치됨" : isManual ? "수동" : "미설치"}
-                    </span>
+                    <div className="flex flex-shrink-0 items-center gap-1">
+                      {isDeprecated && (
+                        <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
+                          단종 예정
+                        </span>
+                      )}
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] ${
+                          isInstalled
+                            ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
+                            : isManual
+                            ? "bg-[#f9e2af]/20 text-[#f9e2af]"
+                            : "bg-[#313244] text-[#6c7086]"
+                        }`}
+                      >
+                        {isInstalled ? "설치됨" : isManual ? "수동" : "미설치"}
+                      </span>
+                    </div>
                   </div>
                   <p className="mb-2 text-xs text-[#bac2de]">
                     {pkg.description}
@@ -252,7 +260,12 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                     </div>
                   )}
                   <div className="flex items-center gap-2">
-                    {!isInstalled && (
+                    {isDeprecated && (
+                      <span className="text-xs text-[#f38ba8]">
+                        단종 예정 — 설치 비권장
+                      </span>
+                    )}
+                    {!isInstalled && !isDeprecated && (
                       <button
                         onClick={() => handleInstall(pkg)}
                         disabled={isBusy || isBundled}

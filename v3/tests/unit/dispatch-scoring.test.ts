@@ -9,6 +9,7 @@ import {
   costEfficiencyScore,
   roleMatchIndex,
   loadBalanceIndex,
+  normalizeModel,
   WEIGHTS,
   MAX_AGENTS,
   MAX_PER_ROLE,
@@ -654,5 +655,51 @@ describe("subscription-aware costEfficiencyScore (Claude Max 우위)", () => {
     ];
     const result = scoreAgents(agents, "backend");
     expect(result[0].agent.model).toBe("claude");
+  });
+});
+
+// ── normalizeModel: Codex/agy alias folding ─────────────────
+//
+// Underpins the dispatch reuse hard-filter: an explicit "코덱스"/"codex"
+// request must fold onto the internal id "gpt" so it matches gpt agents and
+// spawns the Codex CLI. There is no separate "gpt" CLI — both are Codex.
+describe("normalizeModel", () => {
+  it("folds 'codex' onto the internal id 'gpt'", () => {
+    expect(normalizeModel("codex")).toBe("gpt");
+    expect(normalizeModel("Codex")).toBe("gpt");
+    expect(normalizeModel("CODEX")).toBe("gpt");
+  });
+
+  it("passes 'gpt' through unchanged", () => {
+    expect(normalizeModel("gpt")).toBe("gpt");
+  });
+
+  it("folds concrete gpt/codex model slugs onto 'gpt'", () => {
+    expect(normalizeModel("gpt-5")).toBe("gpt");
+    expect(normalizeModel("gpt-4.1-mini")).toBe("gpt");
+    expect(normalizeModel("codex-mini")).toBe("gpt");
+  });
+
+  it("folds 'agy' onto 'antigravity'", () => {
+    expect(normalizeModel("agy")).toBe("antigravity");
+    expect(normalizeModel("antigravity")).toBe("antigravity");
+  });
+
+  it("passes the other canonical models through", () => {
+    expect(normalizeModel("claude")).toBe("claude");
+    expect(normalizeModel("gemini")).toBe("gemini"); // back-compat retained
+    expect(normalizeModel("local")).toBe("local");
+    expect(normalizeModel("custom")).toBe("custom");
+  });
+
+  it("returns undefined for empty/unknown input so callers fall back to scoring", () => {
+    expect(normalizeModel(undefined)).toBeUndefined();
+    expect(normalizeModel("")).toBeUndefined();
+    expect(normalizeModel("llama-3")).toBeUndefined();
+  });
+
+  it("is case/whitespace tolerant", () => {
+    expect(normalizeModel("  Codex  ")).toBe("gpt");
+    expect(normalizeModel(" AGY ")).toBe("antigravity");
   });
 });

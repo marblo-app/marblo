@@ -131,6 +131,9 @@ interface AgentAPI {
       taskId?: string;
       taskType?: string;
       sessionId?: string;
+      detectedPlanType?: string;
+      rateLimitPercent?: number;
+      rateLimitResetAt?: number;
     }) => void,
   ) => void;
   offCostUpdate: () => void;
@@ -310,6 +313,7 @@ interface SubscriptionPlansAPI {
 }
 
 interface ClipboardAPI {
+  readText: () => Promise<string>;
   getImagePath: () => Promise<string | null>;
   getFilePaths: () => Promise<string[]>;
 }
@@ -369,6 +373,7 @@ interface HarnessPackage {
   };
   detect: { path?: string; mcpKey?: string; binary?: string };
   url?: string;
+  deprecated?: { note: string };
   status: "installed" | "not-installed" | "manual-required" | "unknown";
 }
 
@@ -411,12 +416,21 @@ interface UpdaterAPI {
 interface TestModeAPI {
   /** Main process 가 MARBLO_TEST_BYPASS_AUTH=1 로 launch 됐을 때만 true. */
   bypassAuth: boolean;
+  /** MARBLO_TEST_MISSIONS_INMEM=1 로 launch 됐을 때만 true. missionService 가
+   * Firestore 대신 in-memory 백엔드를 써 결정적 미션탭 E2E 를 가능케 한다. */
+  missionsInMemory: boolean;
+}
+
+interface ClaudeAPI {
+  version: () => Promise<{ command: string; version: string }>;
+  cliVersions: () => Promise<Record<string, string>>;
 }
 
 interface ElectronAPI {
   platform: string;
   testMode: TestModeAPI;
   window: WindowAPI;
+  claude: ClaudeAPI;
   harness: HarnessAPI;
   send: (channel: string, data: unknown) => void;
   on: (channel: string, callback: (...args: unknown[]) => void) => void;

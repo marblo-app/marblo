@@ -1,7 +1,154 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { execFileSync } from "child_process";
 import { ModelType } from "./agent-manager";
+
+export interface ResolvedCli {
+  /** Absolute path to the binary, or the bare name if resolution failed. */
+  command: string;
+  /** Parsed "X.Y.Z" version string, or "" if unknown. */
+  version: string;
+}
+
+let _claudeResolved: ResolvedCli | null = null;
+
+/**
+ * Resolve the `claude` binary deterministically instead of trusting PATH
+ * order. A stale npm/bun install — e.g. `~/.bun/bin/claude` symlinked to an
+ * accidental `npm i` under `~/node_modules` — can shadow the auto-updated
+ * native build at `~/.local/bin/claude`, pinning every spawned agent (and the
+ * orchestrator) to an old model list (Opus 4.1 / Sonnet 4). The harness
+ * auto-updater only touches the native/npm-global installs, never these
+ * stray copies, so the shadow persists across restarts.
+ *
+ * We probe the canonical install locations, ask each for its version, and
+ * pick the newest — never a stray copy. Memoized; call resetClaudeResolution
+ * after an update to re-probe.
+ */
+export function resolveClaudeBinary(): ResolvedCli {
+  if (_claudeResolved) return _claudeResolved;
+  const home = os.homedir();
+  // Locations a `claude` must never resolve to: bun's shim dir and the
+  // accidental `npm i` tree directly under HOME. NOTE: we intentionally do
+  // NOT block all `node_modules` paths — legit homebrew / npm-global installs
+  // live under their own `lib/node_modules`, and blocking those would defeat
+  // the purpose.
+  const blocked = [path.join(home, ".bun"), path.join(home, "node_modules")];
+  const isBlocked = (p: string) =>
+    blocked.some((b) => p === b || p.startsWith(b + path.sep));
+  // Canonical install locations, highest trust first. The native installer
+  // (~/.local/bin) self-updates; homebrew / npm-global come next.
+  const candidates = [
+    path.join(home, ".local/bin/claude"),
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+    path.join(home, ".npm-global/bin/claude"),
+  ];
+  const parseVer = (s: string): number[] => {
+    const m = s.match(/(\d+)\.(\d+)\.(\d+)/);
+    return m ? [+m[1], +m[2], +m[3]] : [0, 0, 0];
+  };
+  const cmp = (a: number[], b: number[]) =>
+    a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+
+  let best: ResolvedCli | null = null;
+  let bestVer = [0, 0, 0];
+  for (const c of candidates) {
+    try {
+      const real = fs.realpathSync(c);
+      if (isBlocked(real)) continue;
+      const out = execFileSync(c, ["--version"], {
+        timeout: 5000,
+        encoding: "utf-8",
+      }).trim();
+      const ver = parseVer(out);
+      if (!best || cmp(ver, bestVer) > 0) {
+        best = { command: c, version: out.match(/\d+\.\d+\.\d+/)?.[0] || "" };
+        bestVer = ver;
+      }
+    } catch {
+      // Missing, non-executable, or blocked candidate — skip.
+    }
+  }
+  _claudeResolved = best || { command: "claude", version: "" };
+  return _claudeResolved;
+}
+
+/** Clear the memoized claude resolution (e.g. after a harness update). */
+export function resetClaudeResolution(): void {
+  _claudeResolved = null;
+  _harnessCliResolved.clear();
+}
+
+const _harnessCliResolved = new Map<ModelType, ResolvedCli>();
+
+// Binary name each model launches with. "gpt" is Codex; "antigravity" is the
+// `agy` CLI. local/custom have no managed binary.
+const MODEL_BINARY: Partial<Record<ModelType, string>> = {
+  gemini: "gemini",
+  gpt: "codex",
+  antigravity: "agy",
+};
+
+/**
+ * Resolve the installed CLI version for any agent model, fast and offline —
+ * a plain `<bin> --version`, no npm-registry round-trip. Unlike the Harness
+ * store's `getCatalogVersions` (network-coupled, and it omits the shell-
+ * installed `agy` and gemini), this works for every managed CLI and returns
+ * instantly, so agent cards can show a version badge the same way the
+ * orchestrator header does. Memoized per model.
+ */
+export function resolveHarnessCli(model: ModelType): ResolvedCli {
+  if (model === "claude") return resolveClaudeBinary();
+  const cached = _harnessCliResolved.get(model);
+  if (cached) return cached;
+
+  const binary = MODEL_BINARY[model];
+  const home = os.homedir();
+  const stray = [path.join(home, ".bun"), path.join(home, "node_modules")];
+  const isStray = (p: string) =>
+    stray.some((b) => p === b || p.startsWith(b + path.sep));
+
+  let resolved: ResolvedCli = { command: binary || model, version: "" };
+  if (binary) {
+    for (const dir of getEnrichedPath().split(":")) {
+      if (!dir) continue;
+      const candidate = path.join(dir, binary);
+      try {
+        const real = fs.realpathSync(candidate);
+        if (isStray(real)) continue;
+        const out = execFileSync(candidate, ["--version"], {
+          timeout: 5000,
+          encoding: "utf-8",
+        }).trim();
+        const v = out.match(/\d+\.\d+\.\d+/)?.[0];
+        if (v) {
+          resolved = { command: candidate, version: v };
+          break;
+        }
+      } catch {
+        // Missing / non-executable / stray — keep scanning.
+      }
+    }
+  }
+  _harnessCliResolved.set(model, resolved);
+  return resolved;
+}
+
+/** Installed version string per model (empty string if not detectable). */
+export function resolveAllHarnessVersions(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const model of [
+    "claude",
+    "gpt",
+    "antigravity",
+    "gemini",
+  ] as ModelType[]) {
+    out[model] = resolveHarnessCli(model).version;
+  }
+  return out;
+}
 
 export interface LaunchConfig {
   model: ModelType;
@@ -21,6 +168,38 @@ interface MCPServerEntry {
 
 const SKILLS_DIR = path.resolve(__dirname, "..", "skills");
 const CONFIG_DIR = path.resolve(os.tmpdir(), "marblo-agent-configs");
+const TF_SKILL_DIR_CANDIDATES = [
+  // Packaged app bundle.
+  path.join(process.resourcesPath || "", "bundled-harness", "skills"),
+  // Dev/runtime from compiled Electron output: v3/dist-electron -> repo root.
+  path.resolve(__dirname, "..", "..", "config", "claude", "skills"),
+  // Dev/runtime from TS source: v3/electron -> repo root.
+  path.resolve(__dirname, "..", "..", "..", "config", "claude", "skills"),
+  // Repo-local bundle copied by setup scripts.
+  path.resolve(__dirname, "..", "..", ".claude", "skills"),
+  path.resolve(__dirname, "..", "..", "..", ".claude", "skills"),
+];
+
+/**
+ * Root of the per-agent Codex session tree (`<CODEX_HOME>/sessions`), where
+ * the CLI writes `YYYY/MM/DD/rollout-*.jsonl`. Each agent gets an isolated
+ * CODEX_HOME, so this directory is unambiguously that agent's — no shared
+ * account / attribution problem (unlike antigravity). Used by the cost
+ * tracker to locate the agent's rollout file.
+ */
+export function codexSessionsDir(agentId: string): string {
+  return path.join(CONFIG_DIR, `codex-home-${agentId}`, "sessions");
+}
+
+/**
+ * Root of the per-agent Gemini chat-log tree
+ * (`<GEMINI_CLI_HOME>/.gemini/tmp/<project>/chats/session-*.jsonl`). Isolated
+ * per agent like Codex above. Used by the cost tracker to locate the agent's
+ * chat session file.
+ */
+export function geminiTmpDir(agentId: string): string {
+  return path.join(CONFIG_DIR, `gemini-home-${agentId}`, ".gemini", "tmp");
+}
 
 // MCP server entry point (compiled JS in dist-mcp/)
 function getMCPServerPath(): string {
@@ -58,6 +237,17 @@ function getEnrichedPath(): string {
   const pathSet = new Set(basePath.split(":"));
   for (const p of extraPaths) {
     pathSet.add(p);
+  }
+  // Put the resolved claude's own directory first so any PATH-based `claude`
+  // lookup (by the CLI itself or by sub-tools) hits the newest install rather
+  // than a stale shadowing copy (e.g. ~/.bun/bin/claude). The command we spawn
+  // already uses the absolute path; this keeps child lookups consistent.
+  const resolvedDir = path.dirname(resolveClaudeBinary().command);
+  if (path.isAbsolute(resolvedDir)) {
+    return [
+      resolvedDir,
+      ...Array.from(pathSet).filter((p) => p !== resolvedDir),
+    ].join(":");
   }
   return Array.from(pathSet).join(":");
 }
@@ -191,6 +381,54 @@ function buildMCPServerEntry(
     args: [getMCPServerPath()],
     env: getMCPServerEnv(projectDir, marbloProjectId, agentId),
   };
+}
+
+function stripFrontmatter(content: string): string {
+  return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+}
+
+function frontmatterValue(content: string, key: string): string {
+  const match = content.match(
+    new RegExp(`^${key}:\\s*(?:"([^"]*)"|'([^']*)'|([^\\r\\n]*))`, "m"),
+  );
+  return (match?.[1] || match?.[2] || match?.[3] || "").trim();
+}
+
+function yamlString(value: string): string {
+  return JSON.stringify(value.replace(/\r?\n/g, " "));
+}
+
+function discoverTfSkillDirs(projectDir: string): Array<{
+  name: string;
+  skillPath: string;
+}> {
+  const dirs = [
+    // If a target project explicitly carries Marblo commands, prefer them.
+    path.join(projectDir, ".claude", "skills"),
+    ...TF_SKILL_DIR_CANDIDATES,
+  ];
+  const seen = new Set<string>();
+  const result: Array<{ name: string; skillPath: string }> = [];
+
+  for (const dir of dirs) {
+    if (!dir || !fs.existsSync(dir)) continue;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith("tf-")) continue;
+      if (seen.has(entry.name)) continue;
+      const skillPath = path.join(dir, entry.name, "SKILL.md");
+      if (!fs.existsSync(skillPath)) continue;
+      seen.add(entry.name);
+      result.push({ name: entry.name, skillPath });
+    }
+  }
+
+  return result.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export class AgentConfigGenerator {
@@ -701,6 +939,8 @@ export class AgentConfigGenerator {
       }
     }
 
+    this.generateCodexTfPrompts(agentId, codexHome, projectDir);
+
     // Auto-trust the agent's working directory so Codex doesn't show its
     // "Do you trust the contents of this directory?" interactive dialog
     // on first run. Without this, the dialog blocks the TUI before any
@@ -753,6 +993,54 @@ export class AgentConfigGenerator {
     this.trackFile(agentId, targetAuth);
     // Return the file path; buildCLICommand derives CODEX_HOME from dirname.
     return configPath;
+  }
+
+  private generateCodexTfPrompts(
+    agentId: string,
+    codexHome: string,
+    projectDir: string,
+  ): void {
+    const promptDir = path.join(codexHome, "prompts");
+    const skills = discoverTfSkillDirs(projectDir);
+    if (skills.length === 0) return;
+
+    fs.mkdirSync(promptDir, { recursive: true });
+    for (const skill of skills) {
+      let raw = "";
+      try {
+        raw = fs.readFileSync(skill.skillPath, "utf-8");
+      } catch {
+        continue;
+      }
+
+      const description =
+        frontmatterValue(raw, "description") ||
+        `Run the Marblo /${skill.name} workflow`;
+      const argumentHint = frontmatterValue(raw, "argument-hint");
+      const body = stripFrontmatter(raw);
+      const prompt = [
+        "---",
+        `description: ${yamlString(description)}`,
+        ...(argumentHint ? [`argument-hint: ${yamlString(argumentHint)}`] : []),
+        "---",
+        "",
+        `You are executing the Marblo /${skill.name} workflow inside Codex CLI.`,
+        "Follow the workflow below exactly. Use Marblo MCP tools for task, agent, and activity operations.",
+        "If the workflow mentions Claude-specific slash command mechanics, interpret the included instructions directly in Codex.",
+        "",
+        "User arguments:",
+        "$ARGUMENTS",
+        "",
+        `# Marblo /${skill.name} workflow`,
+        "",
+        body,
+        "",
+      ].join("\n");
+
+      const promptPath = path.join(promptDir, `${skill.name}.md`);
+      fs.writeFileSync(promptPath, prompt, "utf-8");
+      this.trackFile(agentId, promptPath);
+    }
   }
 
   private safeRealpath(p: string): string | null {
@@ -811,7 +1099,7 @@ export class AgentConfigGenerator {
         // resolved to a UUID by the caller via resolveSessionId before we
         // get here, so we only emit --resume when we have a concrete id.
         return {
-          command: baseCommand || "claude",
+          command: baseCommand || resolveClaudeBinary().command,
           args: [
             "--dangerously-skip-permissions",
             "--mcp-config",
@@ -924,7 +1212,15 @@ export class AgentConfigGenerator {
         //     35s 후 새 .pb basename 을 캡처해 onSessionDetected 로
         //     Firestore 에 저장하므로, 다음 reconnect 부터는 UUID 가
         //     들어와 정확한 resume 가능.
-        const agyArgs: string[] = [];
+        // --dangerously-skip-permissions: agy 도 Claude 와 동일한 플래그명으로
+        //   모든 tool permission 요청을 자동 승인한다 — agy --help 기준
+        //   "Auto-approve all tool permission requests without prompting".
+        //   이게 없으면 워커가 매 tool 호출마다 대화형 승인 프롬프트를 띄워
+        //   무인(헤드리스 PTY) 실행이 멈춘다. Claude 의
+        //   --dangerously-skip-permissions / Codex 의 approval_policy="never" /
+        //   Gemini 의 --yolo 와 같은 "기본 욜로모드" 역할.
+        //   ※ agy 에는 --yolo 플래그가 없다 (Gemini CLI 와 다름).
+        const agyArgs: string[] = ["--dangerously-skip-permissions"];
         if (wantResume) {
           if (resumeIsLatest) {
             agyArgs.push("--continue");

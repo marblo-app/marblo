@@ -18,6 +18,29 @@ import { TerminalPage } from "../pages/TerminalPage";
  * 로 옵션 주입 가능.
  */
 
+/**
+ * openMockMissions 가 돌려주는 in-memory 미션 백엔드 구동 핸들.
+ * missionService 가 (MARBLO_TEST_MISSIONS_INMEM=1 일 때) Firestore 대신 쓰는
+ * in-memory 스토어를 테스트에서 직접 조작/조회한다. 미션 진행(상태/스텝/
+ * 타임라인)을 결정적으로 구동해 UI 재렌더를 단언하는 데 사용.
+ */
+export interface MissionsMockHandle {
+  /** in-mem 미션 개수 (UI createMission 직후 폴링용). */
+  count(): Promise<number>;
+  /** lastActivityAt 내림차순 첫 미션 id — 가장 최근 활동한 미션. */
+  latestId(): Promise<string | null>;
+  /** 미션 리스트 스냅샷 (읽기 전용 핵심 필드). */
+  list(): Promise<
+    Array<{ id: string; status: string; goal: string; templateId: string }>
+  >;
+  /** 미션 필드 patch — status/steps/contextLog 등 구동 (엔진 진행 흉내). */
+  patch(id: string, partial: Record<string, unknown>): Promise<void>;
+  /** UI 없이 미션 직접 주입. */
+  seed(missions: Array<Record<string, unknown>>): Promise<void>;
+  /** 전체 초기화. */
+  reset(): Promise<void>;
+}
+
 export interface MarbloHandle {
   app: ElectronApplication;
   page: Page;
@@ -66,6 +89,25 @@ export interface MarbloHandle {
    * @returns inject 된 mock 카드 id 목록 (시나리오에서 카드 클릭/단언에 사용)
    */
   openMockKanban(): Promise<{ todoIds: string[]; inProgressIds: string[] }>;
+  /**
+   * Tier 2 mock helper — missionService in-memory 백엔드를 활성화하고 Missions
+   * 탭으로 전환한다. 진짜 Firestore/LLM 없이 미션탭 end-to-end 흐름(템플릿 카드
+   * → LaunchDialog → createMission → 리스트/디테일/타임라인 → 상태 전이)을
+   * 결정적으로 검증할 수 있다.
+   *
+   * 전제: launch 옵션 missionsInMem=true (test.use({ marbloOptions:
+   * { missionsInMem: true } })). 그래야 preload 가 testMode.missionsInMemory 를
+   * 노출하고 missionService 가 in-memory 로 분기한다.
+   *
+   * 흐름:
+   *   1. projectStore.setCurrentProject — MissionsTab 의 projectId 게이트 통과
+   *   2. Missions 탭 전환 → MissionsTab mount → subscribeToMissions →
+   *      in-mem 백엔드의 ensureHatch() 가 window.__marbloTest.missions 설치
+   *   3. 핸들 반환 — 미션 생성(UI)/주입(seed)/구동(patch)/조회(list/count)
+   *
+   * @returns in-memory 미션 백엔드 구동 핸들
+   */
+  openMockMissions(): Promise<MissionsMockHandle>;
 }
 
 type Fixtures = {
@@ -105,6 +147,9 @@ export const test = base.extend<Fixtures>({
       },
       async openMockKanban() {
         return openMockKanban(page, handle);
+      },
+      async openMockMissions() {
+        return openMockMissions(page, handle);
       },
     };
 
@@ -378,6 +423,167 @@ async function openMockKanban(
   await page.waitForTimeout(300);
 
   return { todoIds, inProgressIds };
+}
+
+/**
+ * Mock 미션탭 활성화. missionService 의 in-memory 백엔드(MARBLO_TEST_MISSIONS_INMEM
+ * =1 전제)를 띄우고 Missions 탭으로 전환한다. Firestore/LLM 없이 미션 흐름을
+ * 결정적으로 구동/단언하기 위한 핸들을 돌려준다.
+ *
+ * window.__marbloTest.missions 해치는 첫 in-mem 호출(MissionsTab mount 의
+ * subscribeToMissions) 시점에 설치되므로, 탭 전환 후 해치 노출을 명시 대기한다.
+ */
+async function openMockMissions(
+  page: Page,
+  handle: MarbloHandle,
+): Promise<MissionsMockHandle> {
+  await dismissFirstRunDialogs(page);
+
+  // 0) Project inject — MissionsTab 의 `if (!projectId)` 게이트 통과.
+  //    projectStore hatch 노출 대기 → inject → race 흡수 위해 짧은 후 재 inject.
+  await page.waitForFunction(
+    () => {
+      const tw = (
+        window as unknown as {
+          __marbloTest?: { stores: { project?: unknown } };
+        }
+      ).__marbloTest;
+      return !!tw?.stores?.project;
+    },
+    null,
+    { timeout: 5000 },
+  );
+
+  const injectProject = async () =>
+    page.evaluate(() => {
+      const tw = (
+        window as unknown as {
+          __marbloTest?: {
+            stores: {
+              project: {
+                getState: () => {
+                  currentProject: { id: string } | null;
+                  setCurrentProject: (p: unknown) => void;
+                };
+              };
+            };
+          };
+        }
+      ).__marbloTest;
+      if (!tw) throw new Error("__marbloTest hatch 가 노출되지 않음");
+      tw.stores.project.getState().setCurrentProject({
+        id: "test-mock-project",
+        name: "Mock Project",
+        ownerId: "test-user-bypass",
+        members: ["test-user-bypass"],
+        folderPath: "/tmp/marblo-test",
+        enabledModels: ["claude"],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return tw.stores.project.getState().currentProject?.id ?? null;
+    });
+
+  await injectProject();
+  await page.waitForTimeout(300);
+  await injectProject();
+
+  // 1) Missions 탭으로 전환 → MissionsTab mount → subscribeToMissions →
+  //    in-mem 백엔드 ensureHatch() 가 window.__marbloTest.missions 설치.
+  await handle.openTab("missions");
+
+  // 2) missions 해치 노출 대기 (in-mem 활성 + subscribe 발생 확인).
+  await page.waitForFunction(
+    () => {
+      const tw = (
+        window as unknown as { __marbloTest?: { missions?: unknown } }
+      ).__marbloTest;
+      return !!tw?.missions;
+    },
+    null,
+    { timeout: 5000 },
+  );
+
+  // 모든 구동/조회는 page.evaluate 로 해치를 직접 호출. latestId/sort 는
+  // Date 직렬화 경계를 피하려 브라우저 컨텍스트 안에서 계산한다.
+  type MissionsHatch = {
+    count(): number;
+    list(): Array<Record<string, unknown>>;
+    patch(id: string, partial: Record<string, unknown>): void;
+    seed(missions: Array<Record<string, unknown>>): void;
+    reset(): void;
+  };
+  return {
+    async count() {
+      return page.evaluate(() => {
+        const m = (
+          window as unknown as { __marbloTest: { missions: MissionsHatch } }
+        ).__marbloTest.missions;
+        return m.count();
+      });
+    },
+    async latestId() {
+      return page.evaluate(() => {
+        const m = (
+          window as unknown as { __marbloTest: { missions: MissionsHatch } }
+        ).__marbloTest.missions;
+        const list = m.list() as Array<{ id: string; lastActivityAt: Date }>;
+        const sorted = [...list].sort(
+          (a, b) =>
+            new Date(b.lastActivityAt).getTime() -
+            new Date(a.lastActivityAt).getTime(),
+        );
+        return sorted[0]?.id ?? null;
+      });
+    },
+    async list() {
+      return page.evaluate(() => {
+        const m = (
+          window as unknown as { __marbloTest: { missions: MissionsHatch } }
+        ).__marbloTest.missions;
+        return (
+          m.list() as Array<{
+            id: string;
+            status: string;
+            goal: string;
+            templateId: string;
+          }>
+        ).map((x) => ({
+          id: x.id,
+          status: x.status,
+          goal: x.goal,
+          templateId: x.templateId,
+        }));
+      });
+    },
+    async patch(id: string, partial: Record<string, unknown>) {
+      await page.evaluate(
+        ({ id, partial }) => {
+          const m = (
+            window as unknown as { __marbloTest: { missions: MissionsHatch } }
+          ).__marbloTest.missions;
+          m.patch(id, partial);
+        },
+        { id, partial },
+      );
+    },
+    async seed(missions: Array<Record<string, unknown>>) {
+      await page.evaluate((missions) => {
+        const m = (
+          window as unknown as { __marbloTest: { missions: MissionsHatch } }
+        ).__marbloTest.missions;
+        m.seed(missions);
+      }, missions);
+    },
+    async reset() {
+      await page.evaluate(() => {
+        const m = (
+          window as unknown as { __marbloTest: { missions: MissionsHatch } }
+        ).__marbloTest.missions;
+        m.reset();
+      });
+    },
+  };
 }
 
 async function dismissFirstRunDialogs(page: Page): Promise<void> {
