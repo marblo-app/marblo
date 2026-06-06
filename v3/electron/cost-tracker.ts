@@ -13,6 +13,7 @@ import os from "os";
 import { encodeClaudeProjectDir } from "./claude-paths";
 import { codexSessionsDir, geminiTmpDir } from "./agent-config";
 import {
+  formatForModel,
   newParseState,
   parseSessionDelta,
   type ParseState,
@@ -462,7 +463,11 @@ export class CostTracker {
    *   Gemini: <GEMINI_CLI_HOME>/.gemini/tmp/<hash>/chats/session-*.jsonl
    */
   private trackCliSession(agentId: string, model: "gpt" | "gemini"): void {
-    const format: SessionFormat = model === "gpt" ? "codex" : "gemini";
+    // SSOT: model→session-format mapping lives in session-parsers.formatForModel.
+    // `model` is narrowed to "gpt" | "gemini" here, so it always maps to a
+    // concrete format ("codex" | "gemini") — never the null (antigravity/custom)
+    // branch — hence the non-null assertion.
+    const format: SessionFormat = formatForModel(model)!;
     const searchRoot =
       format === "codex" ? codexSessionsDir(agentId) : geminiTmpDir(agentId);
 

@@ -26,19 +26,32 @@ export function resolveContextForWrite(env: Env = process.env): string {
 /** contextId to filter get_all_tasks by; "" = no context constraint. */
 export function contextReadFilter(
   allContexts: boolean,
-  env: Env = process.env
+  env: Env = process.env,
 ): string {
   return allContexts ? "" : resolveContext(env);
 }
 
-/** MARBLO_CONTEXT value to inject for an orchestrator of the given kind. */
+/**
+ * MARBLO_CONTEXT value to inject for an orchestrator of the given kind.
+ *
+ * NOTE (dead export, intentionally kept): nothing calls this in production yet.
+ * It is the missing half of the context-scoping design described in the module
+ * header ("the board orchestrator sets MARBLO_CONTEXT='board'") — but the
+ * orchestrator spawn never actually injects MARBLO_CONTEXT. The real wiring is:
+ * in OrchestratorManager (electron/orchestrator-manager.ts), where the MCP env
+ * is built (alongside MARBLO_BRIDGE_PORT / MARBLO_PROJECT), set
+ *   config.mcpServers.marblo.env.MARBLO_CONTEXT = contextForKind(this.kind)
+ * (only when non-empty, so non-board orchestrators stay unscoped). Until that
+ * lands, every orchestrator runs unscoped; do NOT remove this until either the
+ * wiring is added or the context-scoping design is dropped.
+ */
 export function contextForKind(kind: string): string {
   return kind === "board" ? "board" : "";
 }
 
 /** Compute contextId backfill for tasks missing it. missionId wins, else "board". */
 export function computeContextIdBackfill(
-  tasks: { id: string; contextId?: string; missionId?: string }[]
+  tasks: { id: string; contextId?: string; missionId?: string }[],
 ): { id: string; contextId: string }[] {
   return tasks
     .filter((t) => !t.contextId)

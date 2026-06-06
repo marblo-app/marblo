@@ -6,12 +6,16 @@ import {
   contextForKind,
   computeContextIdBackfill,
 } from "../../electron/mcp-server/context";
+// The one-off backfill script duplicates computeContextIdBackfill (it cannot
+// import the TS source without a build step). Import that copy here so the
+// parity test below catches any drift between the two implementations.
+import { computeContextIdBackfill as backfillScriptImpl } from "../../scripts/backfill-context-id.mjs";
 
 describe("resolveContext (read-scope)", () => {
   it("returns the MARBLO_CONTEXT value when set", () => {
     expect(resolveContext({ MARBLO_CONTEXT: "board" })).toBe("board");
     expect(resolveContext({ MARBLO_CONTEXT: "lane:abc123" })).toBe(
-      "lane:abc123"
+      "lane:abc123",
     );
   });
   it("returns empty string (unscoped) when unset", () => {
@@ -60,5 +64,32 @@ describe("computeContextIdBackfill", () => {
       { id: "a", contextId: "board" },
       { id: "b", contextId: "m1" },
     ]);
+  });
+});
+
+describe("computeContextIdBackfill parity (context.ts ↔ backfill-context-id.mjs)", () => {
+  // The two implementations are byte-for-byte copies today; this guards against
+  // future drift by asserting they agree across a range of input shapes.
+  const cases: { id: string; contextId?: string; missionId?: string }[][] = [
+    [],
+    [{ id: "a" }],
+    [{ id: "b", missionId: "m1" }],
+    [{ id: "c", contextId: "lane:z" }],
+    [{ id: "d", contextId: "" }], // empty string is falsy → still backfilled
+    [{ id: "e", missionId: "m2", contextId: "x" }], // already labeled → skipped
+    [
+      { id: "a" },
+      { id: "b", missionId: "m1" },
+      { id: "c", contextId: "lane:z" },
+      { id: "d", contextId: "" },
+      { id: "e", missionId: "m2", contextId: "x" },
+    ],
+  ];
+  cases.forEach((tasks, i) => {
+    it(`case ${i}: script copy matches the context.ts source`, () => {
+      expect(backfillScriptImpl(tasks)).toEqual(
+        computeContextIdBackfill(tasks),
+      );
+    });
   });
 });
