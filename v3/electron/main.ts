@@ -54,6 +54,10 @@ import {
 } from "./mission-engine/wire";
 import { WorktreeManager } from "./worktree-manager";
 import { WorktreeCoordinator } from "./worktree-coordinator";
+import {
+  registerWorktreeIpc,
+  type WorktreeProjectRoot,
+} from "./worktree-ipc";
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
 
 // .env 파일에서 Firebase 환경변수 로드 (Electron 메인 프로세스용)
@@ -659,6 +663,35 @@ function getDecomposer(): TaskDecomposer {
 // 컨텍스트 오염 방지 + 동시 사용 가능 + 미션 PTY 가 Missions 탭에 별도 노출.
 const missionOrchestrators = new Map<string, OrchestratorManager>();
 const missionOrchestratorOwners = new Map<string, number>(); // projectId → webContents.id
+
+function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
+  const roots: WorktreeProjectRoot[] = [];
+  const addRoot = (
+    projectId: string | undefined,
+    repoRoot: string | undefined,
+  ) => {
+    if (!projectId || !repoRoot) return;
+    roots.push({
+      projectId,
+      repoRoot: repoRoot === "~" ? os.homedir() : repoRoot,
+    });
+  };
+
+  for (const [projectId, manager] of orchestrators) {
+    addRoot(projectId, manager.getSession()?.rootPath);
+  }
+  for (const [projectId, manager] of missionOrchestrators) {
+    addRoot(projectId, manager.getSession()?.rootPath);
+  }
+
+  const state = readAppState();
+  addRoot(state.lastProjectId, state.lastRootPath);
+
+  return roots;
+}
+
+registerWorktreeIpc(ipcMain, worktreeManager, collectWorktreeProjectRoots);
+
 function createMissionOrchestratorInstance(
   projectId: string,
 ): OrchestratorManager {
@@ -1464,7 +1497,22 @@ function setupPtyForwarding(sid: string): void {
 
 ipcMain.handle(
   "agent:launch",
-  (event, { agent, cwd, initialPrompt, resumeSessionId, projectId }) => {
+  async (event, { agent, cwd, initialPrompt, resumeSessionId, projectId }) => {
+    let launchCwd = cwd;
+    try {
+      const prep = await worktreeCoordinator.prepare({
+        projectId,
+        taskId: undefined,
+        title: agent.name,
+        repoRoot: cwd,
+        requestedCwd: cwd,
+      });
+      launchCwd = prep.cwd;
+    } catch (err) {
+      console.error("[agent:launch] worktree prepare failed:", err);
+      launchCwd = cwd;
+    }
+
     // Resolve 'latest' to the actual session ID for this specific agent
     let resolvedSessionId = resumeSessionId;
     if (resumeSessionId === "latest") {
@@ -1481,7 +1529,7 @@ ipcMain.handle(
         // Stateless file-IO — any orchestrator instance reads the same on-disk
         // session metadata, so we don't need a project-specific instance here.
         const resolved = getAnyOrchestrator().resolveSessionId(
-          cwd,
+          launchCwd,
           "latest",
           agent.name,
           agent.id,
@@ -1500,7 +1548,7 @@ ipcMain.handle(
       model: agent.model,
       role: agent.role,
       command: agent.command,
-      cwd,
+      cwd: launchCwd,
       initialPrompt,
       resumeSessionId: resolvedSessionId,
       projectId,

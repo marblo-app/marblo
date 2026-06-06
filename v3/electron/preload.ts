@@ -172,6 +172,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.on("agent:syncStatus", (_event, data) => callback(data));
     },
   },
+  worktree: {
+    list: () => ipcRenderer.invoke("worktree:list"),
+    refresh: () => ipcRenderer.invoke("worktree:refresh"),
+    status: (path: string, baseRef: string) =>
+      ipcRenderer.invoke("worktree:status", { path, baseRef }),
+    remove: (repoRoot: string, path: string, deleteBranch?: boolean) =>
+      ipcRenderer.invoke("worktree:remove", { repoRoot, path, deleteBranch }),
+    prune: (repoRoot: string) => ipcRenderer.invoke("worktree:prune", repoRoot),
+  },
   missionOrchestrator: {
     start: (args: {
       projectId: string;
