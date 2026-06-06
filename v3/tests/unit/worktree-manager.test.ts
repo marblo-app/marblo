@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -78,7 +78,7 @@ describe("WorktreeManager.create", () => {
     expect(info.head).toMatch(/^[0-9a-f]{40}$/);
     // The new branch is checked out in the worktree
     expect(git(["rev-parse", "--abbrev-ref", "HEAD"], info.path)).toBe(
-      info.branch
+      info.branch,
     );
   });
 
@@ -89,7 +89,7 @@ describe("WorktreeManager.create", () => {
         projectId: "p",
         taskId: "../escape",
         slug: "x",
-      })
+      }),
     ).rejects.toThrow(/invalid taskId/);
   });
 
@@ -118,7 +118,7 @@ describe("WorktreeManager — node_modules provisioning", () => {
     fs.mkdirSync(path.join(repoRoot, "node_modules"));
     fs.writeFileSync(
       path.join(repoRoot, "node_modules", ".marker"),
-      "from-main\n"
+      "from-main\n",
     );
 
     const info = await mgr.create({
@@ -135,11 +135,11 @@ describe("WorktreeManager — node_modules provisioning", () => {
     const target = fs.readlinkSync(link);
     expect(path.isAbsolute(target)).toBe(true);
     expect(fs.realpathSync(link)).toBe(
-      fs.realpathSync(path.join(repoRoot, "node_modules"))
+      fs.realpathSync(path.join(repoRoot, "node_modules")),
     );
     // …and content is readable through the link.
     expect(fs.readFileSync(path.join(link, ".marker"), "utf8")).toBe(
-      "from-main\n"
+      "from-main\n",
     );
   });
 
@@ -193,7 +193,7 @@ describe("WorktreeManager — node_modules provisioning", () => {
 
     // The symlink was provisioned…
     expect(
-      fs.lstatSync(path.join(info.path, "node_modules")).isSymbolicLink()
+      fs.lstatSync(path.join(info.path, "node_modules")).isSymbolicLink(),
     ).toBe(true);
     // …yet the worktree reports clean (ignored, so not counted as dirty).
     const s = await mgr.status(info.path, "main");
@@ -367,7 +367,7 @@ describe("WorktreeManager — full lifecycle", () => {
     });
     fs.writeFileSync(
       path.join(info.path, "feature.ts"),
-      "export const x = 1;\n"
+      "export const x = 1;\n",
     );
     git(["add", "."], info.path);
     git(["commit", "-m", "feature"], info.path);
@@ -384,5 +384,114 @@ describe("WorktreeManager — full lifecycle", () => {
     expect(git(["branch", "--list", info.branch], repoRoot)).toBe("");
     // Only the main worktree remains
     expect((await mgr.list(repoRoot)).map((w) => w.path)).toEqual([repoRoot]);
+  });
+});
+
+describe("WorktreeManager.create — origin fetch (FU3)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("runs `git fetch origin` before adding the worktree (fresh base)", async () => {
+    const { repoRoot, mgr } = makeRepo();
+    // Silence the expected offline-fetch warning (makeRepo has no remote).
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Spy without replacing — observe the git calls create() makes.
+    const spy = vi.spyOn(mgr as unknown as { runGit: () => unknown }, "runGit");
+
+    await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "fetchcall001",
+      slug: "fetch",
+    });
+
+    const calls = spy.mock.calls.map((c) => (c[0] as string[]).join(" "));
+    const fetchIdx = calls.findIndex((c) => c === "fetch origin");
+    const addIdx = calls.findIndex((c) => c.startsWith("worktree add"));
+    // fetch happened…
+    expect(fetchIdx).toBeGreaterThanOrEqual(0);
+    // …and strictly BEFORE the worktree add (so the base is fresh, not stale).
+    expect(addIdx).toBeGreaterThan(fetchIdx);
+  });
+
+  it("falls back to the local base and still creates when fetch fails (offline)", async () => {
+    // makeRepo() has no `origin` remote → `git fetch origin` exits non-zero.
+    // create() must warn and fall back to the local ref, never throw.
+    const { repoRoot, mgr } = makeRepo();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "offlinebase1",
+      slug: "offline",
+    });
+
+    // Worktree was still created on the local base…
+    expect(fs.existsSync(info.path)).toBe(true);
+    expect(info.branch).toBe("marblo/offline-offlineb");
+    expect(info.head).toMatch(/^[0-9a-f]{40}$/);
+    // …and the fetch failure surfaced as a visible warning.
+    expect(warn).toHaveBeenCalled();
+    const warned = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(warned).toMatch(/fetch origin failed/);
+  });
+
+  it("skips the fetch when an explicit baseRef is given (respects caller intent)", async () => {
+    const { repoRoot, mgr } = makeRepo();
+    const spy = vi.spyOn(mgr as unknown as { runGit: () => unknown }, "runGit");
+
+    await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "explicitbase",
+      slug: "pinned",
+      baseRef: "main",
+    });
+
+    const calls = spy.mock.calls.map((c) => (c[0] as string[]).join(" "));
+    expect(calls).not.toContain("fetch origin");
+  });
+
+  it("fetches the latest origin/main so the worktree branches off the newest base", async () => {
+    // Build remote(v1) → clone(local) → advance remote to v2. Now local's
+    // origin/main is stale at v1; create() must fetch and land on v2.
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-wt-remote-"));
+    const realBase = fs.realpathSync(base);
+    const remote = path.join(realBase, "remote");
+    const local = path.join(realBase, "local");
+    const wtRoot = path.join(realBase, "worktrees");
+
+    fs.mkdirSync(remote, { recursive: true });
+    git(["init", "-b", "main"], remote);
+    git(["config", "user.email", "t@t.com"], remote);
+    git(["config", "user.name", "t"], remote);
+    fs.writeFileSync(path.join(remote, "README.md"), "v1\n");
+    git(["add", "."], remote);
+    git(["commit", "-m", "v1"], remote);
+
+    // Clone → local's origin/main + origin/HEAD now track v1.
+    git(["clone", remote, local], realBase);
+
+    // Advance upstream to v2 AFTER the clone → local's origin/main is stale.
+    fs.writeFileSync(path.join(remote, "README.md"), "v2\n");
+    git(["add", "."], remote);
+    git(["commit", "-m", "v2"], remote);
+    const remoteHead = git(["rev-parse", "HEAD"], remote);
+
+    const mgr = new WorktreeManager({ worktreesRoot: wtRoot });
+    const info = await mgr.create({
+      repoRoot: local,
+      projectId: "p",
+      taskId: "freshbase001",
+      slug: "fresh",
+    });
+
+    // create() fetched first → HEAD is v2 (the newest base), not the stale v1.
+    expect(info.head).toBe(remoteHead);
+    expect(fs.readFileSync(path.join(info.path, "README.md"), "utf8")).toBe(
+      "v2\n",
+    );
   });
 });
