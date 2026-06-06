@@ -1,5 +1,8 @@
+import * as fs from "node:fs";
 import type { IpcMain } from "electron";
 import type {
+  CleanupStaleResult,
+  StaleInfo,
   WorktreeInfo,
   WorktreeManager,
   WorktreeStatus,
@@ -12,6 +15,10 @@ export interface WorktreeProjectRoot {
 
 export interface WorktreeListItem extends WorktreeInfo {
   status: WorktreeStatus;
+  /** Cleanup candidate (merged into base or long idle). Main worktree → false. */
+  stale: boolean;
+  /** Full stale verdict; omitted for the main worktree (never stale). */
+  staleInfo?: StaleInfo;
 }
 
 export interface WorktreeProjectGroup {
@@ -52,6 +59,11 @@ interface WorktreeResolveArgs {
   projectId?: string;
   taskId?: string;
   conflicts?: string[];
+}
+
+interface WorktreeCleanupStaleArgs {
+  repoRoot: string;
+  maxIdleDays?: number;
 }
 
 /**
@@ -139,6 +151,21 @@ function parseMergeArgs(args: unknown): WorktreeMergeArgs {
   };
 }
 
+function parseCleanupStaleArgs(args: unknown): WorktreeCleanupStaleArgs {
+  if (!isRecord(args))
+    throw new Error("worktree:cleanupStale args must be object");
+  const maxIdleDays =
+    typeof args.maxIdleDays === "number" &&
+    Number.isFinite(args.maxIdleDays) &&
+    args.maxIdleDays >= 0
+      ? args.maxIdleDays
+      : undefined;
+  return {
+    repoRoot: requireString(args.repoRoot, "repoRoot"),
+    maxIdleDays,
+  };
+}
+
 function parseResolveArgs(args: unknown): WorktreeResolveArgs {
   if (!isRecord(args)) throw new Error("worktree:resolve args must be object");
   return {
@@ -187,11 +214,23 @@ export function registerWorktreeIpc(
       roots.map(async ({ projectId, repoRoot }) => {
         const baseRef = await worktreeManager.resolveBaseRef(repoRoot);
         const worktrees = await worktreeManager.list(repoRoot);
+        // The main working tree (path === repoRoot) is "merged" by definition
+        // and must never be flagged stale / offered for cleanup.
+        const realRepoRoot = fs.existsSync(repoRoot)
+          ? fs.realpathSync(repoRoot)
+          : repoRoot;
         const items = await Promise.all(
-          worktrees.map(async (worktree) => ({
-            ...worktree,
-            status: await worktreeManager.status(worktree.path, baseRef),
-          })),
+          worktrees.map(async (worktree) => {
+            const status = await worktreeManager.status(worktree.path, baseRef);
+            if (worktree.path === realRepoRoot) {
+              return { ...worktree, status, stale: false };
+            }
+            const staleInfo = await worktreeManager.staleInfo(
+              worktree.path,
+              baseRef,
+            );
+            return { ...worktree, status, stale: staleInfo.stale, staleInfo };
+          }),
         );
         return { projectId, repoRoot, baseRef, worktrees: items };
       }),
@@ -218,6 +257,22 @@ export function registerWorktreeIpc(
     await worktreeManager.prune(requireString(repoRoot, "repoRoot"));
     return { success: true };
   });
+
+  // Stale hygiene (WORKTREE-SPEC §4): bulk-remove worktrees that are already
+  // merged into base or long idle, deleting their branches. Delegates to the
+  // manager (reuses list/staleInfo/remove); the main worktree is never touched.
+  ipcMain.handle(
+    "worktree:cleanupStale",
+    async (_event, args: unknown): Promise<CleanupStaleResult> => {
+      const parsed = parseCleanupStaleArgs(args);
+      return worktreeManager.cleanupStale(
+        parsed.repoRoot,
+        parsed.maxIdleDays !== undefined
+          ? { maxIdleDays: parsed.maxIdleDays }
+          : undefined,
+      );
+    },
+  );
 
   // ── Merge stage (WORKTREE-SPEC §4/§6) ──────────────────────────
 

@@ -359,11 +359,21 @@ interface WorktreeStatus {
   deletions: number;
 }
 
+interface WorktreeStaleInfo {
+  merged: boolean;
+  idleDays: number;
+  stale: boolean;
+}
+
 interface WorktreeListItem {
   path: string;
   branch: string;
   head: string;
   status: WorktreeStatus;
+  /** Cleanup candidate (merged into base or long idle). Main worktree → false. */
+  stale?: boolean;
+  /** Full stale verdict; omitted for the main worktree. */
+  staleInfo?: WorktreeStaleInfo;
 }
 
 interface WorktreeProjectGroup {
@@ -371,6 +381,19 @@ interface WorktreeProjectGroup {
   repoRoot: string;
   baseRef: string;
   worktrees: WorktreeListItem[];
+}
+
+interface WorktreeMergeArgs {
+  repoRoot: string;
+  path: string;
+  baseRef: string;
+  branch: string;
+}
+
+interface WorktreeResolveArgs extends WorktreeMergeArgs {
+  projectId?: string;
+  taskId?: string;
+  conflicts?: string[];
 }
 
 interface WorktreeAPI {
@@ -383,6 +406,29 @@ interface WorktreeAPI {
     deleteBranch?: boolean,
   ) => Promise<{ success: boolean }>;
   prune: (repoRoot: string) => Promise<{ success: boolean }>;
+  cleanupStale: (
+    repoRoot: string,
+    maxIdleDays?: number,
+  ) => Promise<{
+    removed: string[];
+    failed: { path: string; error: string }[];
+  }>;
+  rebase: (
+    path: string,
+    baseRef: string,
+  ) => Promise<{ ok: boolean; conflicts?: string[] }>;
+  merge: (args: WorktreeMergeArgs) => Promise<{
+    ok: boolean;
+    needsResolve?: boolean;
+    conflicts?: string[];
+    error?: string;
+  }>;
+  resolve: (args: WorktreeResolveArgs) => Promise<{
+    success: boolean;
+    agentId?: string;
+    stub?: boolean;
+    reason?: string;
+  }>;
 }
 
 interface WindowAPI {

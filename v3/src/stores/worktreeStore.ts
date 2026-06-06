@@ -11,11 +11,34 @@ interface WorktreeState {
   lastError: string | null;
 
   refresh: () => Promise<void>;
+  rebase: (path: string, baseRef: string) => Promise<void>;
+  merge: (args: {
+    repoRoot: string;
+    path: string;
+    baseRef: string;
+    branch: string;
+  }) => Promise<void>;
+  resolve: (args: {
+    repoRoot: string;
+    path: string;
+    baseRef: string;
+    branch: string;
+    projectId?: string;
+    taskId?: string;
+    conflicts?: string[];
+  }) => Promise<void>;
   remove: (
     repoRoot: string,
     path: string,
     deleteBranch?: boolean,
   ) => Promise<void>;
+  cleanupStale: (
+    repoRoot: string,
+    maxIdleDays?: number,
+  ) => Promise<{
+    removed: string[];
+    failed: { path: string; error: string }[];
+  }>;
   getWorktreesByProject: (projectId: string) => Worktree[];
   getGroupedByProject: () => Record<string, Worktree[]>;
   statusPill: (worktree: Worktree) => WorktreeStatusPill;
@@ -24,6 +47,33 @@ interface WorktreeState {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Failed to load worktrees";
+}
+
+function assertActionResult(
+  result: unknown,
+  fallbackMessage: string,
+): asserts result {
+  if (!result || typeof result !== "object") return;
+  if ("ok" in result && result.ok === false) {
+    const conflicts =
+      "conflicts" in result && Array.isArray(result.conflicts)
+        ? result.conflicts.join(", ")
+        : "";
+    const error =
+      "error" in result && typeof result.error === "string"
+        ? result.error
+        : conflicts
+          ? `${fallbackMessage}: ${conflicts}`
+          : fallbackMessage;
+    throw new Error(error);
+  }
+  if ("success" in result && result.success === false) {
+    const reason =
+      "reason" in result && typeof result.reason === "string"
+        ? result.reason
+        : fallbackMessage;
+    throw new Error(reason);
+  }
 }
 
 function inferTaskId(projectId: string, worktreePath: string): string | null {
@@ -49,6 +99,7 @@ function normalizeWorktree(
     repoRoot: group.repoRoot,
     head: item.head,
     createdAt: null,
+    stale: item.stale ?? item.staleInfo?.stale ?? false,
     status: item.status,
   };
 }
@@ -93,6 +144,57 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
     set({ loading: true, lastError: null });
     try {
       await window.electronAPI.worktree.remove(repoRoot, path, deleteBranch);
+      await get().refresh();
+    } catch (err) {
+      set({ loading: false, lastError: errorMessage(err) });
+      throw err;
+    }
+  },
+
+  cleanupStale: async (repoRoot, maxIdleDays) => {
+    set({ loading: true, lastError: null });
+    try {
+      const result = await window.electronAPI.worktree.cleanupStale(
+        repoRoot,
+        maxIdleDays,
+      );
+      await get().refresh();
+      return result;
+    } catch (err) {
+      set({ loading: false, lastError: errorMessage(err) });
+      throw err;
+    }
+  },
+
+  rebase: async (path, baseRef) => {
+    set({ loading: true, lastError: null });
+    try {
+      const result = await window.electronAPI.worktree.rebase(path, baseRef);
+      assertActionResult(result, "Rebase failed");
+      await get().refresh();
+    } catch (err) {
+      set({ loading: false, lastError: errorMessage(err) });
+      throw err;
+    }
+  },
+
+  merge: async (args) => {
+    set({ loading: true, lastError: null });
+    try {
+      const result = await window.electronAPI.worktree.merge(args);
+      assertActionResult(result, "Merge failed");
+      await get().refresh();
+    } catch (err) {
+      set({ loading: false, lastError: errorMessage(err) });
+      throw err;
+    }
+  },
+
+  resolve: async (args) => {
+    set({ loading: true, lastError: null });
+    try {
+      const result = await window.electronAPI.worktree.resolve(args);
+      assertActionResult(result, "Resolve failed");
       await get().refresh();
     } catch (err) {
       set({ loading: false, lastError: errorMessage(err) });
