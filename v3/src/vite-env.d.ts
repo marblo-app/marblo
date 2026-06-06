@@ -346,6 +346,45 @@ interface SystemAPI {
   offWake: () => void;
 }
 
+interface WorktreeStatus {
+  branch: string;
+  baseRef: string;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  mergeable: boolean;
+  conflicts: string[];
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
+interface WorktreeListItem {
+  path: string;
+  branch: string;
+  head: string;
+  status: WorktreeStatus;
+}
+
+interface WorktreeProjectGroup {
+  projectId: string;
+  repoRoot: string;
+  baseRef: string;
+  worktrees: WorktreeListItem[];
+}
+
+interface WorktreeAPI {
+  list: () => Promise<WorktreeProjectGroup[]>;
+  refresh: () => Promise<WorktreeProjectGroup[]>;
+  status: (path: string, baseRef: string) => Promise<WorktreeStatus>;
+  remove: (
+    repoRoot: string,
+    path: string,
+    deleteBranch?: boolean,
+  ) => Promise<{ success: boolean }>;
+  prune: (repoRoot: string) => Promise<{ success: boolean }>;
+}
+
 interface WindowAPI {
   /** True for File > New Window / Cmd+Shift+N windows. */
   isNewWindow: () => boolean;
@@ -437,6 +476,7 @@ interface ElectronAPI {
   off: (channel: string) => void;
   pty: PtyAPI;
   agent: AgentAPI;
+  worktree: WorktreeAPI;
   orchestrator: OrchestratorAPI;
   orchestratorSession: OrchestratorSessionAPI;
   missionOrchestrator: MissionOrchestratorAPI;
