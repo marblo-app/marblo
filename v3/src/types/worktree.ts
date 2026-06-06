@@ -26,11 +26,21 @@ export interface Worktree {
   status?: WorktreeStatus;
 }
 
+export interface WorktreeStaleInfo {
+  merged: boolean;
+  idleDays: number;
+  stale: boolean;
+}
+
 export interface WorktreeListItem {
   path: string;
   branch: string;
   head: string;
   status: WorktreeStatus;
+  /** Cleanup candidate (merged into base or long idle). Main worktree → false. */
+  stale?: boolean;
+  /** Full stale verdict; omitted for the main worktree. */
+  staleInfo?: WorktreeStaleInfo;
 }
 
 export interface WorktreeProjectGroup {

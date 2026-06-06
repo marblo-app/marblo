@@ -222,6 +222,7 @@ export function WorktreeTab() {
   const merge = useWorktreeStore((s) => s.merge);
   const resolve = useWorktreeStore((s) => s.resolve);
   const remove = useWorktreeStore((s) => s.remove);
+  const cleanupStale = useWorktreeStore((s) => s.cleanupStale);
   const statusPill = useWorktreeStore((s) => s.statusPill);
   const projects = useProjectStore((s) => s.projects);
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -239,6 +240,7 @@ export function WorktreeTab() {
   );
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [cleaningStale, setCleaningStale] = useState(false);
 
   // mount 시 1회 로드. 실패는 store.lastError 로 표면화되므로 swallow.
   useEffect(() => {
@@ -291,6 +293,12 @@ export function WorktreeTab() {
       .map((id) => ({ id, name: projectName(id) }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [worktrees, projectName]);
+
+  // 정리 가능(stale) 워크트리 — 이미 base에 머지됨 / 장기 무활동.
+  const staleWorktrees = useMemo(
+    () => worktrees.filter((wt) => wt.stale),
+    [worktrees],
+  );
 
   const isEmpty = !loading && worktrees.length === 0;
   const noMatches = !loading && worktrees.length > 0 && groups.length === 0;
@@ -362,6 +370,45 @@ export function WorktreeTab() {
     }
   };
 
+  // 정리 가능 워크트리를 repoRoot별로 묶어 일괄 cleanup (deleteBranch).
+  const handleCleanupStale = async () => {
+    setActionError(null);
+    setActionMessage(null);
+    if (staleWorktrees.length === 0) return;
+
+    const repoRoots = Array.from(
+      new Set(staleWorktrees.map((wt) => wt.repoRoot)),
+    );
+    const ok = window.confirm(
+      `정리 가능(stale) 워크트리 ${staleWorktrees.length}개를 제거하고 브랜치도 cleanup할까요?`,
+    );
+    if (!ok) return;
+
+    setCleaningStale(true);
+    try {
+      let removed = 0;
+      const failures: string[] = [];
+      for (const repoRoot of repoRoots) {
+        const result = await cleanupStale(repoRoot);
+        removed += result.removed.length;
+        for (const fail of result.failed) {
+          failures.push(`${fail.path}: ${fail.error}`);
+        }
+      }
+      if (failures.length > 0) {
+        setActionError(
+          `${removed}개 정리, ${failures.length}개 실패 — ${failures.join("; ")}`,
+        );
+      } else {
+        setActionMessage(`stale 워크트리 ${removed}개 정리 완료`);
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "stale cleanup 실패");
+    } finally {
+      setCleaningStale(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       {/* 헤더 + 필터 */}
@@ -405,14 +452,30 @@ export function WorktreeTab() {
           Mergeable
         </label>
 
-        <button
-          type="button"
-          onClick={() => refresh().catch(() => {})}
-          disabled={loading}
-          className="ml-auto rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-50"
-        >
-          {loading ? "새로고침 중…" : "새로고침"}
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {staleWorktrees.length > 0 && (
+            <button
+              type="button"
+              onClick={handleCleanupStale}
+              disabled={cleaningStale || loading}
+              title="이미 머지됨/장기 무활동인 워크트리를 일괄 제거 (브랜치 cleanup)"
+              className="rounded border border-amber-500/40 px-2 py-1 text-xs text-amber-300 transition hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              {cleaningStale
+                ? "정리 중…"
+                : `⚠️ 정리 가능 일괄 cleanup (${staleWorktrees.length})`}
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => refresh().catch(() => {})}
+            disabled={loading}
+            className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-50"
+          >
+            {loading ? "새로고침 중…" : "새로고침"}
+          </button>
+        </div>
       </div>
 
       {/* 에러 배너 */}

@@ -32,6 +32,13 @@ interface WorktreeState {
     path: string,
     deleteBranch?: boolean,
   ) => Promise<void>;
+  cleanupStale: (
+    repoRoot: string,
+    maxIdleDays?: number,
+  ) => Promise<{
+    removed: string[];
+    failed: { path: string; error: string }[];
+  }>;
   getWorktreesByProject: (projectId: string) => Worktree[];
   getGroupedByProject: () => Record<string, Worktree[]>;
   statusPill: (worktree: Worktree) => WorktreeStatusPill;
@@ -92,6 +99,7 @@ function normalizeWorktree(
     repoRoot: group.repoRoot,
     head: item.head,
     createdAt: null,
+    stale: item.stale ?? item.staleInfo?.stale ?? false,
     status: item.status,
   };
 }
@@ -137,6 +145,21 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
     try {
       await window.electronAPI.worktree.remove(repoRoot, path, deleteBranch);
       await get().refresh();
+    } catch (err) {
+      set({ loading: false, lastError: errorMessage(err) });
+      throw err;
+    }
+  },
+
+  cleanupStale: async (repoRoot, maxIdleDays) => {
+    set({ loading: true, lastError: null });
+    try {
+      const result = await window.electronAPI.worktree.cleanupStale(
+        repoRoot,
+        maxIdleDays,
+      );
+      await get().refresh();
+      return result;
     } catch (err) {
       set({ loading: false, lastError: errorMessage(err) });
       throw err;

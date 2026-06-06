@@ -182,6 +182,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     remove: (repoRoot: string, path: string, deleteBranch?: boolean) =>
       ipcRenderer.invoke("worktree:remove", { repoRoot, path, deleteBranch }),
     prune: (repoRoot: string) => ipcRenderer.invoke("worktree:prune", repoRoot),
+    // Bulk-remove stale worktrees (merged into base / long idle) + their
+    // branches (WORKTREE-SPEC §4). Returns { removed, failed }.
+    cleanupStale: (repoRoot: string, maxIdleDays?: number) =>
+      ipcRenderer.invoke("worktree:cleanupStale", { repoRoot, maxIdleDays }),
     // Rebase the worktree branch onto base (WORKTREE-SPEC §4). Returns
     // { ok, conflicts? } — manager safe-aborts on conflict.
     rebase: (path: string, baseRef: string) =>

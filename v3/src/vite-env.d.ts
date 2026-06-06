@@ -359,11 +359,21 @@ interface WorktreeStatus {
   deletions: number;
 }
 
+interface WorktreeStaleInfo {
+  merged: boolean;
+  idleDays: number;
+  stale: boolean;
+}
+
 interface WorktreeListItem {
   path: string;
   branch: string;
   head: string;
   status: WorktreeStatus;
+  /** Cleanup candidate (merged into base or long idle). Main worktree → false. */
+  stale?: boolean;
+  /** Full stale verdict; omitted for the main worktree. */
+  staleInfo?: WorktreeStaleInfo;
 }
 
 interface WorktreeProjectGroup {
@@ -396,6 +406,13 @@ interface WorktreeAPI {
     deleteBranch?: boolean,
   ) => Promise<{ success: boolean }>;
   prune: (repoRoot: string) => Promise<{ success: boolean }>;
+  cleanupStale: (
+    repoRoot: string,
+    maxIdleDays?: number,
+  ) => Promise<{
+    removed: string[];
+    failed: { path: string; error: string }[];
+  }>;
   rebase: (
     path: string,
     baseRef: string,

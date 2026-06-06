@@ -78,6 +78,35 @@ export const DEFAULT_REVIEW_POLICY: ReviewPolicy = {
   autoMergeWhenGreen: false,
 };
 
+/** Stale-hygiene verdict for one worktree (WORKTREE-SPEC §4 stale 감지). */
+export interface StaleInfo {
+  /** Branch tip has no commits beyond base (already merged / nothing to merge). */
+  merged: boolean;
+  /** Whole days since the last commit (0 when there is no commit / can't tell). */
+  idleDays: number;
+  /** Cleanup candidate: merged OR idle past the threshold. */
+  stale: boolean;
+}
+
+/** Options for stale detection. `now` is injectable for deterministic tests. */
+export interface StaleOptions {
+  /** Idle days that mark a worktree stale even when unmerged. Default 14. */
+  maxIdleDays?: number;
+  /** Reference "now" for idleDays math. Defaults to the wall clock. */
+  now?: Date;
+}
+
+/** Outcome of a bulk stale cleanup (WORKTREE-SPEC §4 일괄 cleanup). */
+export interface CleanupStaleResult {
+  /** Worktree paths successfully removed. */
+  removed: string[];
+  /** Worktrees that were stale but failed to remove, with the reason. */
+  failed: { path: string; error: string }[];
+}
+
+const STALE_MS_PER_DAY = 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_IDLE_DAYS = 14;
+
 export class WorktreeManager {
   private worktreesRoot: string;
 
@@ -419,5 +448,95 @@ export class WorktreeManager {
       );
     }
     return { ok, version };
+  }
+
+  /**
+   * True when the worktree's HEAD has no commits beyond `baseRef` — i.e. the
+   * branch is already merged into base (or never diverged). Implemented via
+   * `git rev-list --count <baseRef>..HEAD` (== ahead): 0 ⇒ merged. Accepts a
+   * worktree path; on any git error returns false (conservative — never report
+   * "merged" when we can't prove it). (WORKTREE-SPEC §4 stale 감지.)
+   */
+  async isMergedIntoBase(
+    worktreePath: string,
+    baseRef: string,
+  ): Promise<boolean> {
+    const res = await this.runGit(
+      ["rev-list", "--count", `${baseRef}..HEAD`],
+      worktreePath,
+    );
+    if (res.code !== 0) return false;
+    const ahead = parseInt(res.stdout.trim(), 10);
+    return Number.isFinite(ahead) && ahead === 0;
+  }
+
+  /** Last commit time of the worktree's HEAD (`git log -1 --format=%cI`), or null. */
+  async lastActivityAt(worktreePath: string): Promise<Date | null> {
+    const res = await this.runGit(["log", "-1", "--format=%cI"], worktreePath);
+    if (res.code !== 0 || !res.stdout.trim()) return null;
+    const when = new Date(res.stdout.trim());
+    return Number.isNaN(when.getTime()) ? null : when;
+  }
+
+  /**
+   * Stale-hygiene verdict for a worktree (WORKTREE-SPEC §4): merged into base,
+   * how many whole days idle, and the combined `stale` flag
+   * (`merged || idleDays >= maxIdleDays`, default maxIdleDays=14).
+   */
+  async staleInfo(
+    worktreePath: string,
+    baseRef: string,
+    opts?: StaleOptions,
+  ): Promise<StaleInfo> {
+    const maxIdleDays = opts?.maxIdleDays ?? DEFAULT_MAX_IDLE_DAYS;
+    const merged = await this.isMergedIntoBase(worktreePath, baseRef);
+    const last = await this.lastActivityAt(worktreePath);
+    const now = opts?.now ?? new Date();
+    let idleDays = 0;
+    if (last) {
+      idleDays = Math.floor(
+        (now.getTime() - last.getTime()) / STALE_MS_PER_DAY,
+      );
+      if (idleDays < 0) idleDays = 0;
+    }
+    const stale = merged || idleDays >= maxIdleDays;
+    return { merged, idleDays, stale };
+  }
+
+  /**
+   * Bulk-remove every stale worktree under `repoRoot` (WORKTREE-SPEC §4 일괄
+   * cleanup). Reuses list() + staleInfo() to decide, then remove() with
+   * deleteBranch:true. The main working tree (path === repoRoot) is always
+   * skipped — it is "merged" by definition and cannot be `git worktree remove`d.
+   * Never throws on a single failure: each failure is collected in `failed` so
+   * one stuck worktree doesn't block the rest.
+   */
+  async cleanupStale(
+    repoRoot: string,
+    opts?: StaleOptions,
+  ): Promise<CleanupStaleResult> {
+    const baseRef = await this.resolveBaseRef(repoRoot);
+    const worktrees = await this.list(repoRoot);
+    const realRepoRoot = fs.existsSync(repoRoot)
+      ? fs.realpathSync(repoRoot)
+      : repoRoot;
+
+    const removed: string[] = [];
+    const failed: { path: string; error: string }[] = [];
+    for (const wt of worktrees) {
+      if (wt.path === realRepoRoot) continue; // never touch the main worktree
+      const info = await this.staleInfo(wt.path, baseRef, opts);
+      if (!info.stale) continue;
+      try {
+        await this.remove(repoRoot, wt.path, { deleteBranch: true });
+        removed.push(wt.path);
+      } catch (e) {
+        failed.push({
+          path: wt.path,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    return { removed, failed };
   }
 }
