@@ -1,0 +1,417 @@
+import { useEffect, useMemo } from "react";
+import type { Agent } from "../../types/agent";
+import type { CostLog } from "../../types/cost";
+import { useProjectStore } from "../../stores/projectStore";
+import { useAgentStore } from "../../stores/agentStore";
+import { useCostStore } from "../../stores/costStore";
+import { UsageDashboard } from "../agents/AgentDashboard";
+
+/**
+ * Top-level Usage tab. Surfaces what used to be buried two levels deep
+ * (Agents → Activity/Audit/Usage). Pulls the same data sources:
+ *   - live per-agent rolling totals from the Firestore agent docs
+ *     (written by useCostWriter on every cost:update)
+ *   - BigQuery historical summary (byDay / byAgent) via costStore
+ *
+ * Sections: totals → daily trend → per-model & per-agent (reused
+ * UsageDashboard) → rate-limit status.
+ */
+export function UsagePage() {
+  const currentProject = useProjectStore((s) => s.currentProject);
+  const agents = useAgentStore((s) => s.agents);
+  const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
+  const { summary, logs, loadCosts } = useCostStore();
+  const projectId = currentProject?.id || "";
+
+  useEffect(() => {
+    if (!projectId) return;
+    return subscribeToAgents(projectId);
+  }, [projectId, subscribeToAgents]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    loadCosts(projectId);
+  }, [projectId, loadCosts]);
+
+  // Live totals from agent docs (preferred), summed across the fleet.
+  const totals = useMemo(() => {
+    let cost = 0;
+    let input = 0;
+    let output = 0;
+    let cacheRead = 0;
+    let cacheWrite = 0;
+    let hasLive = false;
+    for (const a of agents) {
+      if (
+        a.totalCost !== undefined ||
+        a.totalInputTokens !== undefined ||
+        a.totalOutputTokens !== undefined
+      ) {
+        hasLive = true;
+      }
+      cost += a.totalCost ?? 0;
+      input += a.totalInputTokens ?? 0;
+      output += a.totalOutputTokens ?? 0;
+      cacheRead += a.totalCacheReadTokens ?? 0;
+      cacheWrite += a.totalCacheWriteTokens ?? 0;
+    }
+    // Fall back to BigQuery summary when no live agent totals exist yet.
+    if (!hasLive && summary) {
+      cost = summary.totalCost;
+      input = summary.totalInputTokens;
+      output = summary.totalOutputTokens;
+      cacheRead = summary.totalCacheReadTokens;
+      cacheWrite = summary.totalCacheWriteTokens;
+    }
+    return {
+      cost,
+      input,
+      output,
+      cacheRead,
+      cacheWrite,
+      tokens: input + output + cacheRead + cacheWrite,
+    };
+  }, [agents, summary]);
+
+  if (!projectId) {
+    return (
+      <div className="p-6 text-sm text-gray-500">
+        프로젝트를 선택하면 사용량이 표시됩니다.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 p-4">
+      <div>
+        <h1 className="text-lg font-semibold text-gray-100">Usage</h1>
+        <p className="text-xs text-gray-500">
+          모델·에이전트·일자별 토큰 사용량. 라이브(에이전트 문서) +
+          히스토리(BigQuery) 합산.
+        </p>
+      </div>
+
+      {/* Totals */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <SummaryCard label="총 토큰" value={formatTokens(totals.tokens)} />
+        <SummaryCard
+          label="Input / Output"
+          value={`${formatTokens(totals.input)} / ${formatTokens(totals.output)}`}
+        />
+        <SummaryCard
+          label="Cache (R/W)"
+          value={`${formatTokens(totals.cacheRead)} / ${formatTokens(totals.cacheWrite)}`}
+        />
+      </div>
+
+      {/* Daily trend (per-model) */}
+      <DailyTrend logs={logs} agents={agents} />
+
+      {/* Per-model & per-agent (reused) */}
+      <Section title="모델별 / 에이전트별">
+        <UsageDashboard agents={agents} />
+      </Section>
+
+      {/* Rate-limit status */}
+      <RateLimitPanel agents={agents} />
+    </div>
+  );
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  return `${n}`;
+}
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className="mt-1 font-mono text-base font-medium text-gray-100">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <h2 className="text-sm font-medium text-gray-300">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+const MODEL_FAMILY_META: Record<string, { label: string; color: string }> = {
+  claude: { label: "Claude", color: "#a78bfa" }, // purple
+  gpt: { label: "Codex", color: "#34d399" }, // green
+  gemini: { label: "Gemini", color: "#60a5fa" }, // blue
+  antigravity: { label: "Antigravity", color: "#fb923c" }, // orange
+  other: { label: "기타", color: "#9ca3af" },
+};
+
+/** Map a detected model id (claude-opus-4-7, gpt-5.4, gemini-3-flash…) to a
+ * model family. antigravity also emits gemini-* ids, so the agent-doc family
+ * (resolved by agentId) is preferred; this is the id-only fallback. */
+function familyFromModelId(m: string): string {
+  if (!m) return "other";
+  if (m.startsWith("claude")) return "claude";
+  if (m.startsWith("gemini")) return "gemini";
+  if (/^(gpt|o[0-9]|codex)/i.test(m)) return "gpt";
+  return "other";
+}
+
+type DayCell = { tokens: number; cost: number };
+
+/**
+ * Per-model daily token-usage trend. Re-aggregates from the raw cost logs
+ * (model + timestamp), resolving each log's family via its agent doc. Token-
+ * based (these are flat subscriptions, so $ is notional and excluded from the
+ * UI). Stacked CSS bars, no chart dependency. Fixed 30-day axis.
+ */
+function DailyTrend({ logs, agents }: { logs: CostLog[]; agents: Agent[] }) {
+  const { days, families } = useMemo(() => {
+    const familyByAgent = new Map(
+      agents.map((a) => [a.id, a.model || "claude"]),
+    );
+    const map: Record<string, Record<string, DayCell>> = {};
+    const famSet = new Set<string>();
+    for (const log of logs) {
+      const d =
+        log.createdAt instanceof Date ? log.createdAt : new Date(log.createdAt);
+      if (isNaN(d.getTime())) continue;
+      const day = d.toISOString().split("T")[0];
+      const fam =
+        familyByAgent.get(log.agentId) || familyFromModelId(log.model);
+      famSet.add(fam);
+      const tokens =
+        (log.inputTokens || 0) +
+        (log.outputTokens || 0) +
+        (log.cacheReadTokens || 0) +
+        (log.cacheWriteTokens || 0);
+      map[day] ||= {};
+      const cell = (map[day][fam] ||= { tokens: 0, cost: 0 });
+      cell.tokens += tokens;
+      cell.cost += log.totalCost;
+    }
+    // Fixed 30-day axis (today back 29 days) so a single day's activity reads
+    // as one thin bar on a month timeline instead of one full-width bar.
+    const today = new Date();
+    const dayList: [string, Record<string, DayCell>][] = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().split("T")[0];
+      dayList.push([key, map[key] || {}]);
+    }
+    return { days: dayList, families: Array.from(famSet) };
+  }, [logs, agents]);
+
+  const valOf = (cell: DayCell) => cell.tokens;
+  const fmt = (n: number) => `${formatTokens(n)} tok`;
+  const sumDay = (fams: Record<string, DayCell>) =>
+    Object.values(fams).reduce((s, c) => s + valOf(c), 0);
+
+  if (families.length === 0) {
+    return (
+      <Section title="일자별 추이 (모델별)">
+        <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4 text-xs text-gray-500">
+          아직 일자별 데이터가 없습니다. 모델별 추이는 BigQuery 비용 로그에서
+          집계됩니다 — 새 빌드로 에이전트를 실행하면 채워집니다.
+        </div>
+      </Section>
+    );
+  }
+
+  const maxDay = Math.max(...days.map(([, fams]) => sumDay(fams)), 0.000001);
+
+  return (
+    <Section title="일자별 추이 (모델별, 최근 30일)">
+      <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4">
+        {/* legend */}
+        <div className="mb-3 flex flex-wrap gap-3">
+          {families.map((f) => {
+            const meta = MODEL_FAMILY_META[f] || MODEL_FAMILY_META.other;
+            return (
+              <span
+                key={f}
+                className="flex items-center gap-1 text-[11px] text-gray-400"
+              >
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-sm"
+                  style={{ background: meta.color }}
+                />
+                {meta.label}
+              </span>
+            );
+          })}
+        </div>
+        <div className="flex h-40 items-end gap-1">
+          {days.map(([date, fams]) => {
+            const total = sumDay(fams);
+            const tooltip =
+              `${date}: ${fmt(total)}\n` +
+              families
+                .filter((f) => fams[f])
+                .map(
+                  (f) =>
+                    `${MODEL_FAMILY_META[f]?.label || f}: ${fmt(valOf(fams[f]))}`,
+                )
+                .join("\n");
+            return (
+              <div
+                key={date}
+                className="flex flex-1 flex-col justify-end"
+                style={{ height: "100%" }}
+                title={tooltip}
+              >
+                <div
+                  className="flex w-full flex-col-reverse overflow-hidden rounded-t"
+                  style={{
+                    height:
+                      total > 0
+                        ? `${Math.max(2, (total / maxDay) * 100)}%`
+                        : "0%",
+                  }}
+                >
+                  {families
+                    .filter((f) => fams[f] && valOf(fams[f]) > 0)
+                    .map((f) => {
+                      const meta =
+                        MODEL_FAMILY_META[f] || MODEL_FAMILY_META.other;
+                      return (
+                        <div
+                          key={f}
+                          className="w-full"
+                          style={{
+                            height: `${(valOf(fams[f]) / total) * 100}%`,
+                            background: meta.color,
+                          }}
+                        />
+                      );
+                    })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex justify-between text-[10px] text-gray-500">
+          <span>{days[0][0]}</span>
+          <span>{days[days.length - 1][0]}</span>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+// ── Rate-limit status ────────────────────────────────────────
+
+const RATE_LIMIT_GUIDANCE: Record<
+  string,
+  { label: string; icon: string; note: string }
+> = {
+  claude: {
+    label: "Claude Code",
+    icon: "🟣",
+    note: "Max 구독: 5시간/주간 한도 (CLI 자체 관리) · Pro: 일일 제한",
+  },
+  gpt: {
+    label: "Codex CLI",
+    icon: "🟢",
+    note: "rollout 의 rate_limits(5h/주간 window, used_percent) — 라이브 표시 후속",
+  },
+  gemini: {
+    label: "Gemini CLI",
+    icon: "🔵",
+    note: "무료: 분당/일일 요청 한도 · 초과 시 프로세스 종료",
+  },
+  antigravity: {
+    label: "Antigravity (agy)",
+    icon: "🟠",
+    note: "개인 Gemini 계정 쿼터 공유 — 쿼터가 가장 빡빡, 초과 잦음",
+  },
+};
+
+/**
+ * Rate-limit status per model in use. Live percent/reset data isn't plumbed
+ * to the frontend yet (Codex exposes it in rollout rate_limits; capture is a
+ * follow-up backend task), so for now this surfaces per-model guidance and a
+ * live gauge when an agent doc carries `rateLimitPercent`.
+ */
+function RateLimitPanel({ agents }: { agents: Agent[] }) {
+  const modelsInUse = useMemo(() => {
+    const s = new Set<string>();
+    for (const a of agents) s.add(a.model || "claude");
+    return Array.from(s);
+  }, [agents]);
+
+  if (modelsInUse.length === 0) return null;
+
+  return (
+    <Section title="한도(Rate limit) 상태">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {modelsInUse.map((model) => {
+          const g = RATE_LIMIT_GUIDANCE[model] || {
+            label: model,
+            icon: "⚪",
+            note: "한도 정보 없음",
+          };
+          // Defensive read: live percent may land on the agent doc later.
+          const live = agents
+            .filter((a) => (a.model || "claude") === model)
+            .map((a) => (a as { rateLimitPercent?: number }).rateLimitPercent)
+            .find((p) => typeof p === "number");
+          return (
+            <div
+              key={model}
+              className="rounded-lg border border-gray-700 bg-gray-800/50 p-3"
+            >
+              <div className="flex items-center gap-2">
+                <span>{g.icon}</span>
+                <span className="text-sm font-medium text-gray-200">
+                  {g.label}
+                </span>
+                {typeof live === "number" && (
+                  <span className="ml-auto font-mono text-xs text-gray-300">
+                    {live.toFixed(0)}%
+                  </span>
+                )}
+              </div>
+              {typeof live === "number" && (
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-700">
+                  <div
+                    className={`h-full ${
+                      live >= 90
+                        ? "bg-red-500"
+                        : live >= 70
+                          ? "bg-amber-500"
+                          : "bg-green-500"
+                    }`}
+                    style={{ width: `${Math.min(100, live)}%` }}
+                  />
+                </div>
+              )}
+              <p className="mt-2 text-[11px] leading-snug text-gray-500">
+                {g.note}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-gray-600">
+        ⓘ 라이브 한도(used_percent / 리셋 시각) 실시간 추적은 후속 백엔드
+        작업에서 연결됩니다.
+      </p>
+    </Section>
+  );
+}
+
+export default UsagePage;

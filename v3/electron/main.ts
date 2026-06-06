@@ -54,10 +54,7 @@ import {
 } from "./mission-engine/wire";
 import { WorktreeManager } from "./worktree-manager";
 import { WorktreeCoordinator } from "./worktree-coordinator";
-import {
-  registerWorktreeIpc,
-  type WorktreeProjectRoot,
-} from "./worktree-ipc";
+import { registerWorktreeIpc, type WorktreeProjectRoot } from "./worktree-ipc";
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
 
 // .env 파일에서 Firebase 환경변수 로드 (Electron 메인 프로세스용)
@@ -1498,12 +1495,15 @@ function setupPtyForwarding(sid: string): void {
 
 ipcMain.handle(
   "agent:launch",
-  async (event, { agent, cwd, initialPrompt, resumeSessionId, projectId }) => {
+  async (
+    event,
+    { agent, cwd, initialPrompt, resumeSessionId, projectId, taskId },
+  ) => {
     let launchCwd = cwd;
     try {
       const prep = await worktreeCoordinator.prepare({
         projectId,
-        taskId: undefined,
+        taskId,
         title: agent.name,
         repoRoot: cwd,
         requestedCwd: cwd,

@@ -83,6 +83,7 @@ interface AgentAPI {
     initialPrompt?: string,
     resumeSessionId?: string,
     projectId?: string,
+    taskId?: string,
   ) => Promise<{ id: string; ptySessionId: string; status: string }>;
   stop: (id: string) => Promise<void>;
   restart: (

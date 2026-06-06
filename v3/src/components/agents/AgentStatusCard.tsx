@@ -171,6 +171,8 @@ export default function AgentStatusCard({
         cwd,
         undefined,
         resumeSessionId,
+        undefined,
+        agent.currentTaskId ?? undefined,
       );
       if (result) {
         useTerminalStore
