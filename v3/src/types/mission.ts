@@ -40,6 +40,8 @@ export interface MissionStep {
   onFailure?: MissionStepFailurePolicy;
   status: MissionStepStatus;
   output?: unknown;
+  // 실시간 진행 출력 — running 중인 step 의 stdout/stderr tail.
+  liveOutput?: string;
   error?: string;
   retryCount?: number;
   startedAt?: Date;

@@ -47,6 +47,22 @@ export default memo(function OrchestratorPanel() {
   const setSession = useOrchestratorStore((s) => s.setSession);
   const setStatus = useOrchestratorStore((s) => s.setStatus);
   const clear = useOrchestratorStore((s) => s.clear);
+
+  // Resolved Claude Code build that agents actually launch with. Shown in the
+  // header so a stale shadowing install (old model list) is immediately visible.
+  const [claudeVersion, setClaudeVersion] = useState<string>("");
+  useEffect(() => {
+    let alive = true;
+    window.electronAPI.claude
+      .version()
+      .then((info) => {
+        if (alive) setClaudeVersion(info.version);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [panelHeight, setPanelHeight] = useState(computeDefaultHeight);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -239,6 +255,14 @@ export default memo(function OrchestratorPanel() {
             <span className="text-[#6c7086]">
               {status === "running" ? "Claude Code" : "Starting..."}
             </span>
+            {claudeVersion && (
+              <span
+                className="rounded bg-[#313244]/60 px-1.5 py-0.5 font-mono text-[10px] text-[#a6adc8]"
+                title={`Agents launch with Claude Code v${claudeVersion}`}
+              >
+                v{claudeVersion}
+              </span>
+            )}
             {/* Stop button */}
             <button
               onClick={handleStop}

@@ -24,14 +24,17 @@ export interface OrchestratorRegistryDeps {
 }
 
 export function createOrchestratorRegistry(
-  deps: OrchestratorRegistryDeps
+  deps: OrchestratorRegistryDeps,
 ): OrchestratorRegistry {
   function refFor(
     sessionId: string,
-    manager: OrchestratorManager
+    manager: OrchestratorManager,
   ): OrchestratorRef {
     return {
       sessionId,
+      get ptySessionId(): string | null {
+        return manager.getSession()?.ptySessionId ?? null;
+      },
       isAlive: () => manager.isRunning(),
       postMessage: async (message: string) => {
         const session = manager.getSession();

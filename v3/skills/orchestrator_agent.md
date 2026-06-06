@@ -115,25 +115,26 @@
 3. **이종 모델 활용 (필수)**:
    모든 `dispatch_task` 호출 시 태스크 내용에서 tags를 반드시 도출할 것:
 
+   주력 fleet 은 **Claude Code / Codex / Antigravity 3종** (Gemini 는 제외됨):
    - 복잡한 코딩/리팩토링: `tags=["architecture", "multi-file", "coding"]` → Claude
-   - 리서치/분석/문서: `tags=["research", "analysis", "documentation"]` → Gemini
+   - 리서치/분석/문서: `tags=["research", "analysis", "documentation"]` → Antigravity (agy)
    - 단순 수정/빠른 작업: `tags=["simple-fix", "quick-edit"]` → Codex
-   - 대규모 컨텍스트: `tags=["large-context"]` → Gemini
+   - 대규모 컨텍스트 / 다단계 자율: `tags=["large-context", "agentic", "multi-agent", "autonomous"]` → Antigravity (agy)
    - GitHub 연동: `tags=["github"]` → Codex
-   - 에이전트 중심 / 다단계 자율: `tags=["agentic", "multi-agent", "autonomous"]` → Antigravity (agy)
 
    tags가 없으면 모델이 라운드로빈으로 자동 배정됨. 최적 배정을 위해 tags 명시를 권장.
 
 4. **사용자 모델 지정 우선 (강제)**:
-   사용자가 특정 모델로 작업하라고 요청하면 (예: "코덱스 써", "use codex", "Gemini로 해줘"),
+   사용자가 특정 모델로 작업하라고 요청하면 (예: "코덱스 써", "use codex", "agy로 해줘"),
    `dispatch_task`의 `model` 파라미터를 명시적으로 지정해서 그 모델을 강제할 것:
-
-   - 코덱스 / GPT 요청 → `model="gpt"`
-   - Gemini 요청 → `model="gemini"`
+   - 코덱스 / Codex 요청 → `model="codex"` (또는 `"gpt"` — **둘은 동일한 OpenAI Codex CLI**.
+     별도의 "gpt" CLI 는 없으며, 내부 모델 id 가 `gpt` 일 뿐 실제 실행 바이너리는 `codex` 다.
+     `"codex"` / `"gpt"` 어느 쪽을 넘겨도 dispatch 가 자동으로 정규화한다.)
    - 클로드 요청 → `model="claude"`
-   - Antigravity / agy 요청 → `model="antigravity"` (v1: standalone `agy` 스폰, MCP 자동 연결은 추후 추가)
+   - Antigravity / agy 요청 → `model="antigravity"` (또는 `"agy"`)
      `model`이 명시되면 tags 점수 / 라운드로빈 무시하고 해당 모델로 직접 스폰함.
      사용자 의도를 무시하고 다른 모델 쓰지 말 것.
+   - ⚠️ Gemini 는 fleet 에서 제외됨 — `model="gemini"` 를 쓰지 말 것.
 
 5. **`task_id` 의무화 (자동 완료 보고)**:
    기존 task 와 연결된 dispatch 는 **반드시** `task_id` 를 같이 넘긴다:
@@ -249,16 +250,21 @@ Marblo 슬래시 명령어 가이드를 보여줌.
 
 특정 task 를 콕 집어 위임할 때는 `dispatch_task(..., task_id="...")` 를 사용 — bridge 가 "[완료 규약]" footer 를 자동 붙여 `submit_for_review` / `update_task_status` 호출 의무를 워커에게 명시한다. 위 일반 템플릿은 워커가 스스로 큐에서 태스크를 꺼내는 경우의 부트스트랩이다.
 
-#### Antigravity 예외 — MCP 워크플로우 위임 불가
+#### Antigravity 운영 메모
 
-`model="antigravity"` 스폰은 v1에서 MCP 자동 연결이 없으므로 위 템플릿(claim_task / submit_for_review 등)을 그대로 전달하면 에이전트가 도구 호출에 실패한다. Antigravity 는 **MCP 없이 standalone 으로 처리 가능한 단일 작업**(예: 코드베이스 조사, 단발성 리팩토링, 분석 리포트 작성)에만 위임할 것:
+`model="antigravity"` (agy) 도 2026-05 부터 marblo MCP 연결됨 — 글로벌
+`~/.gemini/antigravity-cli/mcp_config.json` 에 첫 스폰 시 자동 머지된다. 따라서
+claim_task / add_activity / submit_for_review 호출이 가능하고, 일반 워커와 동일한
+태스크 워크플로우로 위임할 수 있다.
 
-```
-다음 작업을 수행하고 결과를 텍스트로 보고해줘.
-{단일 작업 지시}
-```
+제약/주의:
 
-태스크 ID 매핑/상태 업데이트는 오케스트레이터가 결과 텍스트를 받아서 대신 처리한다. MCP 연동 워크플로우가 필요한 태스크는 claude / gpt / gemini 로 배정할 것. 첫 스폰 시 OAuth 브라우저 인증이 뜰 수 있으므로 사용자에게 인증 완료를 안내하고, 두 번째 스폰부터 안정적으로 작업 위임이 가능하다.
+- 첫 스폰 시 OAuth 브라우저 인증이 뜰 수 있음. 사용자에게 안내 후 두 번째 스폰부터 안정.
+- **단일 Marblo 인스턴스 가정** — 글로벌 mcp_config.json 은 HOME 공유라 여러 Marblo
+  윈도우가 같은 사용자 계정에서 동시 가동되면 마지막 spawn 의 marblo 항목이 모든
+  agy 에 공유된다 (per-agent 환경변수는 ${VAR} substitution 으로 자기 PTY env 값을
+  쓰지만, 한 윈도우만 띄우는 게 안전).
+- agy 는 Gemini 3.5 Flash 백엔드 — 복잡한 멀티-스텝 리팩토링/리뷰는 claude/gpt 우선.
 
 ## 제약 사항
 

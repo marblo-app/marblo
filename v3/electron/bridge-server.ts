@@ -14,12 +14,11 @@ import { BrowserWindow } from "electron";
 import {
   scoreAgents as scoreAgentsFn,
   scoreModels as scoreModelsFn,
-  checkSpawnConstraints,
   resolvePreset,
-  MAX_AGENTS,
-  MAX_PER_ROLE,
+  normalizeModel,
   type AgentInfo,
 } from "./dispatch-scoring";
+import type { WorktreeCoordinator } from "./worktree-coordinator";
 
 /**
  * Append a completion-protocol footer to a dispatched instruction so the
@@ -39,7 +38,7 @@ import {
  */
 export function withCompletionFooter(
   instruction: string,
-  taskId?: string
+  taskId?: string,
 ): string {
   if (!taskId) return instruction;
   const footer = [
@@ -48,11 +47,40 @@ export function withCompletionFooter(
     `[완료 규약 — task_id="${taskId}"]`,
     "이 작업을 마치면 반드시 아래 marblo MCP 도구를 호출해야 오케스트레이터에게 자동 보고된다 (텍스트 답변만으론 오케스트레이터가 결과를 못 본다):",
     `- 진행 로그: add_activity(task_id="${taskId}", message="...")`,
+    `- 진행 상황은 ticket 본문(description)이 아니라 add_activity 로만 보고 — 본문은 생성 시점의 불변 스펙이다.`,
     `- 정상 완료 / 리뷰 가능: submit_for_review(task_id="${taskId}", pr_url?)`,
     `- 실패 / 반려: update_task_status(task_id="${taskId}", status="FAILED", comment="이유")`,
     "위 도구 호출 직후 오케스트레이터 PTY 로 알림이 자동 주입된다.",
   ].join("\n");
   return instruction + footer;
+}
+
+/**
+ * Build the instruction for a Resolve(agent) spawned in a conflicted worktree
+ * (WORKTREE-SPEC §6). The agent is already cwd'd into the worktree; it rebases
+ * onto base, resolves conflicts, continues the rebase, and commits. Kept
+ * deterministic and explicit so the worker doesn't guess the git flow.
+ */
+export function buildResolverPrompt(req: {
+  baseRef: string;
+  branch: string;
+  conflicts?: string[];
+}): string {
+  const files =
+    req.conflicts && req.conflicts.length > 0
+      ? `\n충돌 파일(예상): ${req.conflicts.join(", ")}`
+      : "";
+  return [
+    `[머지 충돌 해결 — 워크트리 브랜치 ${req.branch}]`,
+    `이 워크트리는 base \`${req.baseRef}\` 위로 rebase 시 충돌이 난다.${files}`,
+    "",
+    "다음 절차로 해결할 것:",
+    `1. \`git rebase ${req.baseRef}\` 실행`,
+    "2. 충돌 파일을 양쪽 의도를 보존하며 수정",
+    "3. `git add <해결된 파일>` 후 `git rebase --continue` (남은 충돌 반복)",
+    "4. rebase 완료 후 `git status`로 클린 상태 확인",
+    "5. 해결 불가하면 `git rebase --abort` 후 사유를 보고",
+  ].join("\n");
 }
 
 export interface SpawnAgentRequest {
@@ -62,6 +90,9 @@ export interface SpawnAgentRequest {
   command?: string;
   cwd?: string;
   initialPrompt?: string;
+  /** Optional task ID used to append the completion-reporting footer for
+   * direct spawn_agent calls. dispatch_task already appends this footer. */
+  taskId?: string;
   /** Project ID — required in multi-window mode to scope the agent's view
    * to the correct window. MCP server forwards MARBLO_PROJECT here. */
   projectId?: string;
@@ -78,6 +109,11 @@ interface SpawnAgentResponse {
   agentId?: string;
   ptySessionId?: string;
   error?: string;
+  /** Board task the agent was bound to — the caller's taskId, or an ad-hoc
+   * task auto-created by WorktreeCoordinator when none was supplied (null when
+   * there is no project context / non-git fallback). The MCP layer reads this
+   * to set the agent doc's currentTaskId. */
+  taskId?: string | null;
 }
 
 interface NotifyOrchestratorRequest {
@@ -118,6 +154,9 @@ export interface DispatchTaskResponse {
   score?: number;
   reason?: string;
   error?: string;
+  /** Board task bound to the (possibly newly spawned) agent — used by the
+   * MCP layer to set the agent doc's currentTaskId. */
+  taskId?: string | null;
 }
 
 /**
@@ -145,7 +184,7 @@ export class BridgeServer {
   // single-instance setter to support per-project orchestrators in
   // multi-window mode.
   private orchestratorLookup: (
-    projectId: string
+    projectId: string,
   ) => OrchestratorManager | null = () => null;
   // Per-project enabledModels lookup — main wires this so dispatchTask
   // doesn't read process.env (which races across windows).
@@ -174,18 +213,25 @@ export class BridgeServer {
       }) => void)
     | null = null;
 
+  // Runs just before every spawn to guarantee a board task + isolated git
+  // worktree for the agent (WORKTREE-SPEC). Never throws — falls back to a
+  // plain cwd for non-git / no-project spawns, preserving legacy behavior.
+  private worktreeCoordinator: WorktreeCoordinator;
+
   constructor(
     agentManager: AgentManager,
     ptyManager: PtyManager,
-    ptyBuffers: Map<string, string[]>
+    ptyBuffers: Map<string, string[]>,
+    worktreeCoordinator: WorktreeCoordinator,
   ) {
     this.agentManager = agentManager;
     this.ptyManager = ptyManager;
     this.ptyBuffers = ptyBuffers;
+    this.worktreeCoordinator = worktreeCoordinator;
   }
 
   setOrchestratorLookup(
-    lookup: (projectId: string) => OrchestratorManager | null
+    lookup: (projectId: string) => OrchestratorManager | null,
   ): void {
     this.orchestratorLookup = lookup;
   }
@@ -199,13 +245,13 @@ export class BridgeServer {
       name: string;
       model: string;
       role: string;
-    }) => void
+    }) => void,
   ): void {
     this.agentSpawnedHook = hook;
   }
 
   setEnabledModelsLookup(
-    lookup: (projectId: string) => string[] | undefined
+    lookup: (projectId: string) => string[] | undefined,
   ): void {
     this.enabledModelsLookup = lookup;
   }
@@ -324,7 +370,7 @@ export class BridgeServer {
         } catch (err) {
           console.warn(
             "[BridgeServer] Failed to write port-discovery file:",
-            err
+            err,
           );
         }
         console.log(`[BridgeServer] Listening on 127.0.0.1:${this.port}`);
@@ -365,13 +411,13 @@ export class BridgeServer {
 
   private handleSpawnAgent(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
     });
-    req.on("end", () => {
+    req.on("end", async () => {
       let params: SpawnAgentRequest;
       try {
         params = JSON.parse(body) as SpawnAgentRequest;
@@ -383,7 +429,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -395,12 +441,12 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required fields: name, model, role",
-            })
+            }),
           );
           return;
         }
 
-        const result = this.spawnNewAgent(params);
+        const result = await this.spawnNewAgent(params);
 
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));
@@ -419,13 +465,13 @@ export class BridgeServer {
 
   private handleDispatchTask(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
     });
-    req.on("end", () => {
+    req.on("end", async () => {
       let params: DispatchTaskRequest;
       try {
         params = JSON.parse(body) as DispatchTaskRequest;
@@ -437,7 +483,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -449,12 +495,12 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required fields: role, instruction",
-            })
+            }),
           );
           return;
         }
 
-        const result = this.dispatchTask(params);
+        const result = await this.dispatchTask(params);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));
       } catch (err) {
@@ -463,7 +509,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: err instanceof Error ? err.message : "Unknown error",
-          })
+          }),
         );
       }
     });
@@ -473,7 +519,7 @@ export class BridgeServer {
 
   private handleKillAgent(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -491,7 +537,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -503,7 +549,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required field: agentName",
-            })
+            }),
           );
           return;
         }
@@ -515,7 +561,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: `Agent '${params.agentName}' not found`,
-            })
+            }),
           );
           return;
         }
@@ -529,7 +575,7 @@ export class BridgeServer {
         console.log(
           `[BridgeServer] Removed agent '${params.agentName}' (reason: ${
             params.reason || "none"
-          })`
+          })`,
         );
 
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -540,7 +586,7 @@ export class BridgeServer {
             reason: `Agent '${params.agentName}' stopped${
               params.reason ? `: ${params.reason}` : ""
             }`,
-          })
+          }),
         );
       } catch (err) {
         res.writeHead(500, { "Content-Type": "application/json" });
@@ -548,7 +594,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: err instanceof Error ? err.message : "Unknown error",
-          })
+          }),
         );
       }
     });
@@ -558,7 +604,7 @@ export class BridgeServer {
 
   private handleNotifyOrchestrator(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -576,7 +622,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -588,7 +634,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required field: message",
-            })
+            }),
           );
           return;
         }
@@ -603,7 +649,7 @@ export class BridgeServer {
               error: params.projectId
                 ? `Orchestrator not running for project ${params.projectId}`
                 : "Orchestrator not running (missing projectId)",
-            })
+            }),
           );
           return;
         }
@@ -615,7 +661,7 @@ export class BridgeServer {
         console.log(
           `[BridgeServer] Notified orchestrator (project=${
             params.projectId
-          }): ${params.message.slice(0, 80)}...`
+          }): ${params.message.slice(0, 80)}...`,
         );
 
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -626,7 +672,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: err instanceof Error ? err.message : "Unknown error",
-          })
+          }),
         );
       }
     });
@@ -636,7 +682,7 @@ export class BridgeServer {
 
   private handleReuseAgent(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -654,7 +700,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -666,7 +712,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required fields: agentName, instruction",
-            })
+            }),
           );
           return;
         }
@@ -679,7 +725,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: `Agent '${params.agentName}' not found`,
-            })
+            }),
           );
           return;
         }
@@ -690,7 +736,7 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: `Agent '${params.agentName}' is not available (status: ${agent.status})`,
-            })
+            }),
           );
           return;
         }
@@ -700,7 +746,7 @@ export class BridgeServer {
         console.log(
           `[BridgeServer] Reused agent '${
             params.agentName
-          }': ${params.instruction.slice(0, 80)}...`
+          }': ${params.instruction.slice(0, 80)}...`,
         );
 
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -711,7 +757,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: err instanceof Error ? err.message : "Unknown error",
-          })
+          }),
         );
       }
     });
@@ -721,14 +767,17 @@ export class BridgeServer {
 
   // Public so MissionEngine wiring can call this in-process (Step 5 mission feature).
   // HTTP /dispatch-task handler also calls it via this same entrypoint.
-  dispatchTask(params: DispatchTaskRequest): DispatchTaskResponse {
-    const {
-      role,
-      instruction,
-      complexity = "standard",
-      model,
-      tags = [],
-    } = params;
+  // Async because the spawn path awaits WorktreeCoordinator (git worktree prep)
+  // before launching. The mission-engine dispatchOne port is synchronous, so
+  // main.ts adapts this with a fire-and-forget shim there.
+  async dispatchTask(
+    params: DispatchTaskRequest,
+  ): Promise<DispatchTaskResponse> {
+    const { role, instruction, complexity = "standard", tags = [] } = params;
+    // Fold "codex"/"agy" aliases onto canonical ids so an explicit model
+    // request matches the right agents during reuse scoring AND spawns the
+    // right CLI. undefined (no/unknown hint) falls through to tag scoring.
+    const model = normalizeModel(params.model);
 
     // Append a completion-protocol footer so the worker knows which MCP
     // calls close the loop back to the orchestrator. Without this, agents
@@ -739,7 +788,7 @@ export class BridgeServer {
     // can't be reported via these tools).
     const effectiveInstruction = withCompletionFooter(
       instruction,
-      params.taskId
+      params.taskId,
     );
 
     // Step 0: Logical agent for simple tasks
@@ -748,6 +797,7 @@ export class BridgeServer {
         success: true,
         action: "logical",
         reason: `Simple task — use internal sub-agent (complexity='simple')`,
+        taskId: params.taskId ?? null,
       };
     }
 
@@ -757,9 +807,20 @@ export class BridgeServer {
 
     // Step 1 & 2: Score existing agents
     const scored = this.scoreAgents(allAgents, role, model, tags);
+    // Explicit model request wins over reuse. When the user/orchestrator
+    // names a model (normalized: "코덱스"/"codex" → "gpt"), only an agent of
+    // that SAME model may be reused/restarted; otherwise we fall through to
+    // Step 3 and spawn the requested model fresh. Without this gate an idle
+    // Claude (role match alone scores ~180, well over the 100 threshold)
+    // hijacks a "코덱스 스폰" request. When no model is specified, reuse is
+    // unrestricted (model === undefined → predicate is always true).
+    const modelMatches = (m: string) => !model || m === model;
     // Only idle agents are safe to reuse — working agents may be mid-task
     const reusable = scored.filter(
-      (s) => s.score >= 100 && s.agent.status === "idle"
+      (s) =>
+        s.score >= 100 &&
+        s.agent.status === "idle" &&
+        modelMatches(s.agent.model),
     );
 
     // Step 1: Reuse idle agent
@@ -770,14 +831,14 @@ export class BridgeServer {
       if (fullAgent) {
         this.ptyManager.writeAndSubmit(
           fullAgent.ptySessionId,
-          effectiveInstruction
+          effectiveInstruction,
         );
       }
       this.agentManager.setStatus(best.agent.id, "working");
       this.syncAgentStatus(best.agent.id, "working", params.taskId);
 
       console.log(
-        `[BridgeServer] Dispatch: reused '${best.agent.name}' (score=${best.score})`
+        `[BridgeServer] Dispatch: reused '${best.agent.name}' (score=${best.score})`,
       );
       return {
         success: true,
@@ -787,12 +848,16 @@ export class BridgeServer {
         model: best.agent.model,
         score: best.score,
         reason: best.reason,
+        taskId: params.taskId ?? null,
       };
     }
 
-    // Step 2: Restart stopped agent
+    // Step 2: Restart stopped agent (same explicit-model gate as reuse)
     const restartable = scored.filter(
-      (s) => s.score >= 100 && s.agent.status === "stopped"
+      (s) =>
+        s.score >= 100 &&
+        s.agent.status === "stopped" &&
+        modelMatches(s.agent.model),
     );
 
     if (restartable.length > 0) {
@@ -800,14 +865,14 @@ export class BridgeServer {
       // Pass instruction as initialPrompt so readiness detection handles delivery timing
       const restarted = this.agentManager.restart(
         best.agent.id,
-        effectiveInstruction
+        effectiveInstruction,
       );
       if (restarted) {
         this.agentManager.setStatus(restarted.id, "working");
         this.syncAgentStatus(restarted.id, "working", params.taskId);
 
         console.log(
-          `[BridgeServer] Dispatch: restarted '${best.agent.name}' (score=${best.score})`
+          `[BridgeServer] Dispatch: restarted '${best.agent.name}' (score=${best.score})`,
         );
         return {
           success: true,
@@ -817,24 +882,19 @@ export class BridgeServer {
           model: best.agent.model,
           score: best.score,
           reason: best.reason,
+          taskId: params.taskId ?? null,
         };
       }
     }
 
     // Step 3: Spawn new agent
-    // Check constraints
-    const agentInfos: AgentInfo[] = allAgents.map((a) => ({
-      id: a.id,
-      name: a.name,
-      model: a.model,
-      role: a.role,
-      status: a.status,
-      restartCount: a.restartCount,
-    }));
-    const constraint = checkSpawnConstraints(agentInfos, role);
-    if (!constraint.allowed) {
-      return { success: false, error: constraint.error };
-    }
+    // NOTE: Spawn-count caps (MAX_AGENTS / MAX_PER_ROLE) were intentionally
+    // removed (2026-06-02) — Marblo runs heterogeneous fleets where a role
+    // can easily have 10+ agents (e.g. many Claude Code workers), so a hard
+    // ceiling fought the product. There is no spawn-count limit now; the
+    // only backstops are agent-manager's per-agent FAST_FAIL/MAX_RESTARTS
+    // (crash loops) — not total count. Re-add a working-agent-based cap here
+    // if runaway auto-dispatch ever becomes a problem.
 
     // Select best model. Order:
     //   1. enabledModels in the request body
@@ -857,12 +917,17 @@ export class BridgeServer {
     // resolveSpawnCwd run the full chain (parent agent → orchestrator
     // rootPath → process.cwd()) so dispatch-time spawns inherit the
     // project folder instead of /.
-    const spawnResult = this.spawnNewAgent({
+    // Pass the RAW instruction + taskId here (not effectiveInstruction):
+    // spawnNewAgent appends the completion footer once, using the worktree
+    // coordinator's resolved taskId (the caller's, or a freshly created ad-hoc
+    // task). Passing the already-footered effectiveInstruction would double it.
+    const spawnResult = await this.spawnNewAgent({
       name: agentName,
       model: selectedModel,
       role,
       cwd: params.cwd,
-      initialPrompt: effectiveInstruction,
+      initialPrompt: instruction,
+      taskId: params.taskId,
       projectId: params.projectId,
       parentAgentId: params.parentAgentId,
     });
@@ -874,10 +939,17 @@ export class BridgeServer {
       };
     }
 
-    this.syncAgentStatus(spawnResult.agentId!, "working", params.taskId);
+    // Bind status to the resolved board task — spawnResult.taskId is the
+    // caller's taskId or the ad-hoc worktree task created by the coordinator.
+    const resolvedTaskId = spawnResult.taskId ?? params.taskId ?? null;
+    this.syncAgentStatus(
+      spawnResult.agentId!,
+      "working",
+      resolvedTaskId ?? undefined,
+    );
 
     console.log(
-      `[BridgeServer] Dispatch: spawned '${agentName}' (model=${selectedModel})`
+      `[BridgeServer] Dispatch: spawned '${agentName}' (model=${selectedModel})`,
     );
     return {
       success: true,
@@ -887,6 +959,7 @@ export class BridgeServer {
       model: selectedModel,
       score: 0,
       reason: `No reusable agent found. Spawned new ${selectedModel} agent '${agentName}'`,
+      taskId: resolvedTaskId,
     };
   }
 
@@ -896,7 +969,7 @@ export class BridgeServer {
     agents: AgentInstance[],
     role: string,
     preferredModel?: ModelType,
-    tags: string[] = []
+    tags: string[] = [],
   ) {
     const infos: AgentInfo[] = agents.map((a) => ({
       id: a.id,
@@ -939,21 +1012,93 @@ export class BridgeServer {
     return process.cwd();
   }
 
+  // ── Conflict resolution (WORKTREE-SPEC §6 충돌 경로) ──────────
+  //
+  // When the clean squash-merge path hits a rebase conflict, the merge cockpit
+  // routes to Resolve(agent): spawn a builder agent *inside* the conflicted
+  // worktree to resolve it (Conductor's `/resolve-merge-conflicts` model).
+  //
+  // We reuse the normal spawn path — passing the worktree as cwd AND the
+  // bound taskId so WorktreeCoordinator.prepare() reuses the EXISTING worktree
+  // (its path is ~/.marblo/worktrees/<projectId>/<taskId>) instead of cutting
+  // a fresh one. main.ts wires this as the registerWorktreeIpc spawnResolver
+  // callback: `(req) => bridge.spawnResolverAgent(req)`.
+
+  async spawnResolverAgent(req: {
+    repoRoot: string;
+    worktreePath: string;
+    baseRef: string;
+    branch: string;
+    projectId?: string;
+    taskId?: string;
+    conflicts?: string[];
+  }): Promise<{
+    success: boolean;
+    agentId?: string;
+    taskId?: string | null;
+    error?: string;
+  }> {
+    const shortBranch = req.branch.split("/").pop() || "worktree";
+    const result = await this.spawnNewAgent({
+      name: `resolver-${shortBranch}`,
+      model: "claude",
+      role: "backend",
+      cwd: req.worktreePath,
+      taskId: req.taskId,
+      projectId: req.projectId,
+      initialPrompt: buildResolverPrompt(req),
+    });
+    return {
+      success: result.success,
+      agentId: result.agentId,
+      taskId: result.taskId ?? req.taskId ?? null,
+      error: result.error,
+    };
+  }
+
   // ── Shared spawn logic ──────────────────────────────────────
 
-  private spawnNewAgent(params: SpawnAgentRequest): SpawnAgentResponse {
+  private async spawnNewAgent(
+    params: SpawnAgentRequest,
+  ): Promise<SpawnAgentResponse> {
+    // Fold model aliases ("codex" → "gpt", "agy" → "antigravity") at the
+    // single spawn chokepoint so every caller (HTTP /spawn-agent, dispatch,
+    // mission engine) routes to the right CLI even when the orchestrator
+    // says the natural word "codex" instead of the internal id "gpt".
+    params.model = normalizeModel(params.model) ?? params.model;
     const agentId = crypto.randomUUID();
     // cwd resolution chain: explicit → parent agent's cwd → orchestrator
     // for the same project → process.cwd(). This fixes the "agent opens
     // in / instead of project folder" issue when the orchestrator omits
     // cwd in dispatch_task. Electron launched from Finder has process.cwd()
     // == "/", so the explicit-cwd fallback is what kept it working at all.
-    const cwd = this.resolveSpawnCwd(params);
+    const repoRoot = this.resolveSpawnCwd(params);
+
+    // WORKTREE-SPEC: hand the resolved repo root to the coordinator, which
+    // guarantees a board task + an isolated git worktree for this spawn and
+    // returns the cwd the agent should launch in. Never throws — for non-git
+    // or no-project spawns it falls back to repoRoot (legacy behavior) and
+    // leaves taskId as the caller's value (or null).
+    const prep = await this.worktreeCoordinator.prepare({
+      projectId: params.projectId,
+      taskId: params.taskId,
+      title: params.name,
+      // Raw spawn prompt (pre-footer) so the ad-hoc ticket shows what the agent
+      // was asked to do; only used when the coordinator auto-creates a task.
+      description: params.initialPrompt,
+      repoRoot,
+      requestedCwd: repoRoot,
+    });
+    const cwd = prep.cwd;
 
     // PTY forwarding is delegated to the host (main process) via
     // agentSpawnedHook so multi-window owner-routing happens consistently.
     // We fall back to bridge-local broadcast forwarding only when no hook
-    // is wired (legacy / test paths).
+    // is wired (legacy / test paths). Footer uses the coordinator's resolved
+    // taskId so ad-hoc spawns report against the auto-created board task.
+    const initialPrompt = params.initialPrompt
+      ? withCompletionFooter(params.initialPrompt, prep.taskId ?? params.taskId)
+      : params.initialPrompt;
     const instance = this.agentManager.launch({
       id: agentId,
       name: params.name,
@@ -961,7 +1106,7 @@ export class BridgeServer {
       role: params.role,
       command: params.command || this.getDefaultCommand(params.model),
       cwd,
-      initialPrompt: params.initialPrompt,
+      initialPrompt,
       projectId: params.projectId,
       onPtyReady: (sid) => {
         if (this.agentSpawnedHook) {
@@ -1011,6 +1156,7 @@ export class BridgeServer {
       success: true,
       agentId,
       ptySessionId: sid,
+      taskId: prep.taskId ?? params.taskId ?? null,
     };
   }
 
@@ -1019,7 +1165,7 @@ export class BridgeServer {
   private syncAgentStatus(
     agentId: string,
     status: AgentStatus,
-    currentTaskId?: string
+    currentTaskId?: string,
   ): void {
     // Include agentName so the renderer can match by name (Firestore doc ID != AgentManager UUID)
     const agent = this.agentManager.getAgent(agentId);
@@ -1053,7 +1199,7 @@ export class BridgeServer {
 
   private handleSetAgentStatus(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -1072,8 +1218,8 @@ export class BridgeServer {
       let agent = params.agentName
         ? this.agentManager.getAgentByName(params.agentName)
         : params.agentId
-        ? this.agentManager.getAgent(params.agentId)
-        : null;
+          ? this.agentManager.getAgent(params.agentId)
+          : null;
 
       if (!agent) {
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -1088,7 +1234,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: `Invalid status: ${params.status}`,
-          })
+          }),
         );
         return;
       }
@@ -1096,7 +1242,7 @@ export class BridgeServer {
       this.agentManager.setStatus(agent.id, params.status as AgentStatus);
       this.syncAgentStatus(agent.id, params.status as AgentStatus);
       console.log(
-        `[BridgeServer] Set agent "${agent.name}" status → ${params.status}`
+        `[BridgeServer] Set agent "${agent.name}" status → ${params.status}`,
       );
 
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -1117,7 +1263,7 @@ export class BridgeServer {
 
   private handleInjectMessage(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ): void {
     let body = "";
     req.on("data", (chunk) => {
@@ -1142,7 +1288,7 @@ export class BridgeServer {
             error: `Invalid JSON: ${
               err instanceof Error ? err.message : "parse error"
             }`,
-          })
+          }),
         );
         return;
       }
@@ -1153,7 +1299,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: "Missing required fields: targetAgent, tag, message",
-          })
+          }),
         );
         return;
       }
@@ -1164,8 +1310,8 @@ export class BridgeServer {
               params.taskId ? ` taskId=${params.taskId}` : ""
             }`
           : params.taskId
-          ? ` taskId=${params.taskId}`
-          : "";
+            ? ` taskId=${params.taskId}`
+            : "";
         const formatted = `[${params.tag}]${taskMeta}\n${params.message}`;
 
         // Try to find the target agent
@@ -1176,7 +1322,7 @@ export class BridgeServer {
           // Agent is online — inject directly (split for discrete Enter)
           this.ptyManager.writeAndSubmit(agent.ptySessionId, formatted);
           console.log(
-            `[BridgeServer] Injected [${params.tag}] → agent "${agent.name}"`
+            `[BridgeServer] Injected [${params.tag}] → agent "${agent.name}"`,
           );
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
@@ -1184,7 +1330,7 @@ export class BridgeServer {
               success: true,
               delivered: "agent",
               agentName: agent.name,
-            })
+            }),
           );
         } else {
           // Agent offline — fallback to orchestrator (route by projectId)
@@ -1194,7 +1340,7 @@ export class BridgeServer {
             const forwarded = `[${params.tag} → Forwarded] agent="${params.targetAgent}"${taskMeta}\n에이전트 오프라인. 원본: ${params.message}`;
             this.ptyManager.writeAndSubmit(session.ptySessionId, forwarded);
             console.log(
-              `[BridgeServer] Forwarded [${params.tag}] → orchestrator (agent "${params.targetAgent}" offline)`
+              `[BridgeServer] Forwarded [${params.tag}] → orchestrator (agent "${params.targetAgent}" offline)`,
             );
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(
@@ -1202,18 +1348,18 @@ export class BridgeServer {
                 success: true,
                 delivered: "orchestrator",
                 reason: `Agent "${params.targetAgent}" offline`,
-              })
+              }),
             );
           } else {
             console.warn(
-              `[BridgeServer] Cannot deliver [${params.tag}]: agent "${params.targetAgent}" offline, orchestrator not running`
+              `[BridgeServer] Cannot deliver [${params.tag}]: agent "${params.targetAgent}" offline, orchestrator not running`,
             );
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(
               JSON.stringify({
                 success: false,
                 error: "Agent offline and orchestrator not running",
-              })
+              }),
             );
           }
         }
@@ -1223,7 +1369,7 @@ export class BridgeServer {
           JSON.stringify({
             success: false,
             error: err instanceof Error ? err.message : "Unknown error",
-          })
+          }),
         );
       }
     });

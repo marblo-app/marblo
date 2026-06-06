@@ -99,7 +99,10 @@ export function AgentsTab() {
       const result = await window.electronAPI.agent.launch(
         agent,
         data.cwd,
-        data.initialPrompt
+        data.initialPrompt,
+        undefined,
+        projectId,
+        data.assignedTaskId,
       );
       // 에이전트 실행 즉시 터미널 탭 자동 연결 (출력 유실 방지)
       const MODEL_ICONS: Record<string, string> = {
@@ -114,7 +117,7 @@ export function AgentsTab() {
         .getState()
         .attachSession(
           result.ptySessionId,
-          `${MODEL_ICONS[data.model] || "⚪"} ${data.name}`
+          `${MODEL_ICONS[data.model] || "⚪"} ${data.name}`,
         );
     } catch (err) {
       console.error("Agent launch failed:", err);

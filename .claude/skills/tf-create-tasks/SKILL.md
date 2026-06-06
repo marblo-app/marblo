@@ -30,12 +30,15 @@ allowed-tools: Bash, Read, Glob, Grep
 ### 태스크 카드 형식
 
 ```
-TASK-001: [제목]
+TASK-001: [제목 — 한 줄]
   role: backend | frontend | test | devops
   priority: 5(긴급) ~ 1(낮음)
   depends_on: [TASK-NNN, ...]
   scope: [수정할 파일 경로들]
-  완료 기준: [어떻게 되면 끝인지]
+  goal: 목표 1~2문장 (무엇을/왜)
+  changes: [추가/수정할 함수·동작 불릿]
+  acceptance: [검증 가능한 완료 기준]
+  notes: [제약·주의 (선택)]
 ```
 
 ### 분해 원칙
@@ -45,6 +48,8 @@ TASK-001: [제목]
 3. **의존성**: 반드시 순서가 있는 것만 depends_on
 4. **scope**: 파일 영역 분리 → Git 충돌 방지
 5. **검증**: 각 태스크에 완료 기준 명시
+6. **본문 구조화**: 줄글 금지. goal/changes/acceptance/notes 필드로 나눠 작성. 파일 경로는 scope에만.
+7. **진행 분리**: 작업 중 진행 내용은 description이 아니라 add_activity로 기록.
 
 ---
 

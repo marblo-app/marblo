@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { Agent, ModelType, AgentStatus } from "../../types/agent";
+import HarnessVersionBadge from "./HarnessVersionBadge";
 import type { Task } from "../../types/task";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useEditorStore } from "../../stores/editorStore";
@@ -170,6 +171,8 @@ export default function AgentStatusCard({
         cwd,
         undefined,
         resumeSessionId,
+        undefined,
+        agent.currentTaskId ?? undefined,
       );
       if (result) {
         useTerminalStore
@@ -241,6 +244,7 @@ export default function AgentStatusCard({
                 {agent.role}
               </span>
               <span className="font-mono">{agent.command}</span>
+              <HarnessVersionBadge model={agent.model} />
             </div>
           </div>
         </div>

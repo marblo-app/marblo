@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // 코드는 이 값을 임의로 set 할 수 없다 (preload 만 process.env 접근 가능).
   testMode: {
     bypassAuth: process.env.MARBLO_TEST_BYPASS_AUTH === "1",
+    // MARBLO_TEST_MISSIONS_INMEM=1 일 때만 true. missionService 가 Firestore
+    // 대신 in-memory 백엔드로 분기해 결정적 미션탭 E2E 를 가능케 한다. preload
+    // 만 process.env 접근 → renderer 가 임의 set 불가, production 미설정.
+    missionsInMemory: process.env.MARBLO_TEST_MISSIONS_INMEM === "1",
   },
   // Multi-window: renderer registers its current project so main can scope
   // agent:* and orchestrator:* events to the right window. Pass empty string
@@ -19,6 +23,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     isNewWindow: () => isNewWindow,
     registerProject: (projectId: string) =>
       ipcRenderer.invoke("window:registerProject", projectId),
+  },
+  // Resolved Claude Code binary used to launch agents (path + version).
+  claude: {
+    version: (): Promise<{ command: string; version: string }> =>
+      ipcRenderer.invoke("claude:version"),
+    // Fast installed-version map per agent model (claude/gpt/antigravity/gemini).
+    cliVersions: (): Promise<Record<string, string>> =>
+      ipcRenderer.invoke("harness:cliVersions"),
   },
   send: (channel: string, data: unknown) => {
     ipcRenderer.send(channel, data);
@@ -85,6 +97,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       initialPrompt?: string,
       resumeSessionId?: string,
       projectId?: string,
+      taskId?: string,
     ) =>
       ipcRenderer.invoke("agent:launch", {
         agent,
@@ -92,6 +105,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         initialPrompt,
         resumeSessionId,
         projectId,
+        taskId,
       }),
     stop: (id: string) => ipcRenderer.invoke("agent:stop", id),
     restart: (id: string) => ipcRenderer.invoke("agent:restart", id),
@@ -128,6 +142,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
         cacheReadTokens: number;
         cacheWriteTokens: number;
         totalCost: number;
+        detectedPlanType?: string;
+        rateLimitPercent?: number;
+        rateLimitResetAt?: number;
       }) => void,
     ) => {
       ipcRenderer.on("cost:update", (_event, data) => callback(data));
@@ -156,6 +173,42 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ) => {
       ipcRenderer.on("agent:syncStatus", (_event, data) => callback(data));
     },
+  },
+  worktree: {
+    list: () => ipcRenderer.invoke("worktree:list"),
+    refresh: () => ipcRenderer.invoke("worktree:refresh"),
+    status: (path: string, baseRef: string) =>
+      ipcRenderer.invoke("worktree:status", { path, baseRef }),
+    remove: (repoRoot: string, path: string, deleteBranch?: boolean) =>
+      ipcRenderer.invoke("worktree:remove", { repoRoot, path, deleteBranch }),
+    prune: (repoRoot: string) => ipcRenderer.invoke("worktree:prune", repoRoot),
+    // Bulk-remove stale worktrees (merged into base / long idle) + their
+    // branches (WORKTREE-SPEC §4). Returns { removed, failed }.
+    cleanupStale: (repoRoot: string, maxIdleDays?: number) =>
+      ipcRenderer.invoke("worktree:cleanupStale", { repoRoot, maxIdleDays }),
+    // Rebase the worktree branch onto base (WORKTREE-SPEC §4). Returns
+    // { ok, conflicts? } — manager safe-aborts on conflict.
+    rebase: (path: string, baseRef: string) =>
+      ipcRenderer.invoke("worktree:rebase", { path, baseRef }),
+    // Clean squash-merge path: rebase → squash onto base → cleanup. Returns
+    // { ok, needsResolve?, conflicts?, error? }.
+    merge: (args: {
+      repoRoot: string;
+      path: string;
+      baseRef: string;
+      branch: string;
+    }) => ipcRenderer.invoke("worktree:merge", args),
+    // Conflict path: spawn a Resolve(agent) in the worktree (WORKTREE-SPEC §6).
+    // Returns { success, agentId?, stub?, reason? }.
+    resolve: (args: {
+      repoRoot: string;
+      path: string;
+      baseRef: string;
+      branch: string;
+      projectId?: string;
+      taskId?: string;
+      conflicts?: string[];
+    }) => ipcRenderer.invoke("worktree:resolve", args),
   },
   missionOrchestrator: {
     start: (args: {
@@ -295,6 +348,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       }>,
   },
   clipboard: {
+    readText: () => ipcRenderer.invoke("clipboard:readText") as Promise<string>,
     getImagePath: () =>
       ipcRenderer.invoke("clipboard:getImagePath") as Promise<string | null>,
     getFilePaths: () =>

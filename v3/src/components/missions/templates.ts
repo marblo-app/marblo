@@ -104,13 +104,17 @@ export function listTemplates(): MissionTemplateMeta[] {
 }
 
 export function instantiateTemplateSteps(id: MissionTemplateId): MissionStep[] {
-  return TEMPLATE_META[id].steps.map((spec, index) => ({
-    type: spec.type,
-    skill: spec.skill,
-    args: spec.args,
-    onFailure: spec.onFailure,
-    index,
-    status: "pending" as const,
-    retryCount: 0,
-  }));
+  // Firestore 는 undefined 필드를 거부하므로 명시적으로 set 된 키만 포함시킨다.
+  return TEMPLATE_META[id].steps.map((spec, index) => {
+    const step: MissionStep = {
+      type: spec.type,
+      index,
+      status: "pending",
+      retryCount: 0,
+    };
+    if (spec.skill !== undefined) step.skill = spec.skill;
+    if (spec.args !== undefined) step.args = spec.args;
+    if (spec.onFailure !== undefined) step.onFailure = spec.onFailure;
+    return step;
+  });
 }

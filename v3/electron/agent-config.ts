@@ -1,7 +1,155 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import crypto from "crypto";
+import { execFileSync } from "child_process";
 import { ModelType } from "./agent-manager";
+
+export interface ResolvedCli {
+  /** Absolute path to the binary, or the bare name if resolution failed. */
+  command: string;
+  /** Parsed "X.Y.Z" version string, or "" if unknown. */
+  version: string;
+}
+
+let _claudeResolved: ResolvedCli | null = null;
+
+/**
+ * Resolve the `claude` binary deterministically instead of trusting PATH
+ * order. A stale npm/bun install — e.g. `~/.bun/bin/claude` symlinked to an
+ * accidental `npm i` under `~/node_modules` — can shadow the auto-updated
+ * native build at `~/.local/bin/claude`, pinning every spawned agent (and the
+ * orchestrator) to an old model list (Opus 4.1 / Sonnet 4). The harness
+ * auto-updater only touches the native/npm-global installs, never these
+ * stray copies, so the shadow persists across restarts.
+ *
+ * We probe the canonical install locations, ask each for its version, and
+ * pick the newest — never a stray copy. Memoized; call resetClaudeResolution
+ * after an update to re-probe.
+ */
+export function resolveClaudeBinary(): ResolvedCli {
+  if (_claudeResolved) return _claudeResolved;
+  const home = os.homedir();
+  // Locations a `claude` must never resolve to: bun's shim dir and the
+  // accidental `npm i` tree directly under HOME. NOTE: we intentionally do
+  // NOT block all `node_modules` paths — legit homebrew / npm-global installs
+  // live under their own `lib/node_modules`, and blocking those would defeat
+  // the purpose.
+  const blocked = [path.join(home, ".bun"), path.join(home, "node_modules")];
+  const isBlocked = (p: string) =>
+    blocked.some((b) => p === b || p.startsWith(b + path.sep));
+  // Canonical install locations, highest trust first. The native installer
+  // (~/.local/bin) self-updates; homebrew / npm-global come next.
+  const candidates = [
+    path.join(home, ".local/bin/claude"),
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+    path.join(home, ".npm-global/bin/claude"),
+  ];
+  const parseVer = (s: string): number[] => {
+    const m = s.match(/(\d+)\.(\d+)\.(\d+)/);
+    return m ? [+m[1], +m[2], +m[3]] : [0, 0, 0];
+  };
+  const cmp = (a: number[], b: number[]) =>
+    a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+
+  let best: ResolvedCli | null = null;
+  let bestVer = [0, 0, 0];
+  for (const c of candidates) {
+    try {
+      const real = fs.realpathSync(c);
+      if (isBlocked(real)) continue;
+      const out = execFileSync(c, ["--version"], {
+        timeout: 5000,
+        encoding: "utf-8",
+      }).trim();
+      const ver = parseVer(out);
+      if (!best || cmp(ver, bestVer) > 0) {
+        best = { command: c, version: out.match(/\d+\.\d+\.\d+/)?.[0] || "" };
+        bestVer = ver;
+      }
+    } catch {
+      // Missing, non-executable, or blocked candidate — skip.
+    }
+  }
+  _claudeResolved = best || { command: "claude", version: "" };
+  return _claudeResolved;
+}
+
+/** Clear the memoized claude resolution (e.g. after a harness update). */
+export function resetClaudeResolution(): void {
+  _claudeResolved = null;
+  _harnessCliResolved.clear();
+}
+
+const _harnessCliResolved = new Map<ModelType, ResolvedCli>();
+
+// Binary name each model launches with. "gpt" is Codex; "antigravity" is the
+// `agy` CLI. local/custom have no managed binary.
+const MODEL_BINARY: Partial<Record<ModelType, string>> = {
+  gemini: "gemini",
+  gpt: "codex",
+  antigravity: "agy",
+};
+
+/**
+ * Resolve the installed CLI version for any agent model, fast and offline —
+ * a plain `<bin> --version`, no npm-registry round-trip. Unlike the Harness
+ * store's `getCatalogVersions` (network-coupled, and it omits the shell-
+ * installed `agy` and gemini), this works for every managed CLI and returns
+ * instantly, so agent cards can show a version badge the same way the
+ * orchestrator header does. Memoized per model.
+ */
+export function resolveHarnessCli(model: ModelType): ResolvedCli {
+  if (model === "claude") return resolveClaudeBinary();
+  const cached = _harnessCliResolved.get(model);
+  if (cached) return cached;
+
+  const binary = MODEL_BINARY[model];
+  const home = os.homedir();
+  const stray = [path.join(home, ".bun"), path.join(home, "node_modules")];
+  const isStray = (p: string) =>
+    stray.some((b) => p === b || p.startsWith(b + path.sep));
+
+  let resolved: ResolvedCli = { command: binary || model, version: "" };
+  if (binary) {
+    for (const dir of getEnrichedPath().split(":")) {
+      if (!dir) continue;
+      const candidate = path.join(dir, binary);
+      try {
+        const real = fs.realpathSync(candidate);
+        if (isStray(real)) continue;
+        const out = execFileSync(candidate, ["--version"], {
+          timeout: 5000,
+          encoding: "utf-8",
+        }).trim();
+        const v = out.match(/\d+\.\d+\.\d+/)?.[0];
+        if (v) {
+          resolved = { command: candidate, version: v };
+          break;
+        }
+      } catch {
+        // Missing / non-executable / stray — keep scanning.
+      }
+    }
+  }
+  _harnessCliResolved.set(model, resolved);
+  return resolved;
+}
+
+/** Installed version string per model (empty string if not detectable). */
+export function resolveAllHarnessVersions(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const model of [
+    "claude",
+    "gpt",
+    "antigravity",
+    "gemini",
+  ] as ModelType[]) {
+    out[model] = resolveHarnessCli(model).version;
+  }
+  return out;
+}
 
 export interface LaunchConfig {
   model: ModelType;
@@ -11,6 +159,60 @@ export interface LaunchConfig {
   mcpConfigPath: string;
   skillContent: string;
   initialPrompt?: string;
+  /**
+   * For Claude only: the session id this launch is PINNED to (via the
+   * `--session-id` flag on a fresh launch, or the `--resume` UUID on a resume).
+   * Lets the caller wire cost tracking deterministically — no racy post-launch
+   * "which new JSONL appeared?" scan. Undefined for non-Claude models, and for
+   * the rare unresolved `--resume latest` claude case (caller falls back to
+   * detection). See claudeSessionArgs.
+   */
+  claudeSessionId?: string;
+}
+
+/**
+ * Decide Claude's session-related CLI args and the resulting session id.
+ *
+ * Per-agent token attribution keys off the Claude session JSONL filename
+ * (`<sessionId>.jsonl`). Rather than racily detecting which file a fresh spawn
+ * created — fragile when several Claude agents share one cwd, which is exactly
+ * when attribution silently collapses onto the orchestrator — we PIN the id up
+ * front and hand it straight to the cost tracker. Claude Code 2.1+ honors
+ * `--session-id <uuid>` and names the JSONL after it (verified empirically).
+ *
+ *   fresh / "new" (pinFreshSession)→ `--session-id <newSessionId>`, id = newSessionId
+ *   fresh / "new" (else)           → no session flag,               id = undefined
+ *   resume concrete UUID           → `--resume <uuid>`,             id = uuid
+ *   resume "latest" (unresolved)   → no session flag,               id = undefined
+ *
+ * `pinFreshSession` is opt-in: the AGENT path turns it on so each spawn's
+ * tokens attribute deterministically. The orchestrator leaves it OFF — it owns
+ * its own session lifecycle (it pushes `--resume` onto the args itself and
+ * detects its session by prompt signature), so injecting `--session-id` there
+ * would both be redundant and collide with its manual `--resume` on resume.
+ *
+ * The "latest" sentinel normally reaches the CLI already resolved to a concrete
+ * UUID (the caller's resolveSessionId); if it didn't, we leave it unpinned so
+ * the legacy post-launch detector can still recover it. We never emit both
+ * `--resume` and `--session-id`.
+ */
+export function claudeSessionArgs(
+  resumeSessionId: string | undefined,
+  newSessionId: string,
+  pinFreshSession: boolean,
+): { args: string[]; sessionId?: string } {
+  const wantResume = !!resumeSessionId && resumeSessionId !== "new";
+  const resumeIsLatest = resumeSessionId === "latest";
+  if (wantResume && !resumeIsLatest) {
+    return { args: ["--resume", resumeSessionId!], sessionId: resumeSessionId };
+  }
+  if (wantResume && resumeIsLatest) {
+    return { args: [], sessionId: undefined };
+  }
+  if (pinFreshSession) {
+    return { args: ["--session-id", newSessionId], sessionId: newSessionId };
+  }
+  return { args: [], sessionId: undefined };
 }
 
 interface MCPServerEntry {
@@ -21,6 +223,38 @@ interface MCPServerEntry {
 
 const SKILLS_DIR = path.resolve(__dirname, "..", "skills");
 const CONFIG_DIR = path.resolve(os.tmpdir(), "marblo-agent-configs");
+const TF_SKILL_DIR_CANDIDATES = [
+  // Packaged app bundle.
+  path.join(process.resourcesPath || "", "bundled-harness", "skills"),
+  // Dev/runtime from compiled Electron output: v3/dist-electron -> repo root.
+  path.resolve(__dirname, "..", "..", "config", "claude", "skills"),
+  // Dev/runtime from TS source: v3/electron -> repo root.
+  path.resolve(__dirname, "..", "..", "..", "config", "claude", "skills"),
+  // Repo-local bundle copied by setup scripts.
+  path.resolve(__dirname, "..", "..", ".claude", "skills"),
+  path.resolve(__dirname, "..", "..", "..", ".claude", "skills"),
+];
+
+/**
+ * Root of the per-agent Codex session tree (`<CODEX_HOME>/sessions`), where
+ * the CLI writes `YYYY/MM/DD/rollout-*.jsonl`. Each agent gets an isolated
+ * CODEX_HOME, so this directory is unambiguously that agent's — no shared
+ * account / attribution problem (unlike antigravity). Used by the cost
+ * tracker to locate the agent's rollout file.
+ */
+export function codexSessionsDir(agentId: string): string {
+  return path.join(CONFIG_DIR, `codex-home-${agentId}`, "sessions");
+}
+
+/**
+ * Root of the per-agent Gemini chat-log tree
+ * (`<GEMINI_CLI_HOME>/.gemini/tmp/<project>/chats/session-*.jsonl`). Isolated
+ * per agent like Codex above. Used by the cost tracker to locate the agent's
+ * chat session file.
+ */
+export function geminiTmpDir(agentId: string): string {
+  return path.join(CONFIG_DIR, `gemini-home-${agentId}`, ".gemini", "tmp");
+}
 
 // MCP server entry point (compiled JS in dist-mcp/)
 function getMCPServerPath(): string {
@@ -58,6 +292,17 @@ function getEnrichedPath(): string {
   const pathSet = new Set(basePath.split(":"));
   for (const p of extraPaths) {
     pathSet.add(p);
+  }
+  // Put the resolved claude's own directory first so any PATH-based `claude`
+  // lookup (by the CLI itself or by sub-tools) hits the newest install rather
+  // than a stale shadowing copy (e.g. ~/.bun/bin/claude). The command we spawn
+  // already uses the absolute path; this keeps child lookups consistent.
+  const resolvedDir = path.dirname(resolveClaudeBinary().command);
+  if (path.isAbsolute(resolvedDir)) {
+    return [
+      resolvedDir,
+      ...Array.from(pathSet).filter((p) => p !== resolvedDir),
+    ].join(":");
   }
   return Array.from(pathSet).join(":");
 }
@@ -193,6 +438,54 @@ function buildMCPServerEntry(
   };
 }
 
+function stripFrontmatter(content: string): string {
+  return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+}
+
+function frontmatterValue(content: string, key: string): string {
+  const match = content.match(
+    new RegExp(`^${key}:\\s*(?:"([^"]*)"|'([^']*)'|([^\\r\\n]*))`, "m"),
+  );
+  return (match?.[1] || match?.[2] || match?.[3] || "").trim();
+}
+
+function yamlString(value: string): string {
+  return JSON.stringify(value.replace(/\r?\n/g, " "));
+}
+
+function discoverTfSkillDirs(projectDir: string): Array<{
+  name: string;
+  skillPath: string;
+}> {
+  const dirs = [
+    // If a target project explicitly carries Marblo commands, prefer them.
+    path.join(projectDir, ".claude", "skills"),
+    ...TF_SKILL_DIR_CANDIDATES,
+  ];
+  const seen = new Set<string>();
+  const result: Array<{ name: string; skillPath: string }> = [];
+
+  for (const dir of dirs) {
+    if (!dir || !fs.existsSync(dir)) continue;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith("tf-")) continue;
+      if (seen.has(entry.name)) continue;
+      const skillPath = path.join(dir, entry.name, "SKILL.md");
+      if (!fs.existsSync(skillPath)) continue;
+      seen.add(entry.name);
+      result.push({ name: entry.name, skillPath });
+    }
+  }
+
+  return result.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export class AgentConfigGenerator {
   private generatedFiles: Map<string, string[]> = new Map();
 
@@ -258,6 +551,11 @@ export class AgentConfigGenerator {
     initialPrompt?: string,
     marbloProjectId?: string,
     resumeSessionId?: string,
+    // Opt-in: pin a fresh Claude launch to a generated --session-id so its
+    // tokens attribute deterministically. The agent path passes true; the
+    // orchestrator leaves it false (manages its own session). See
+    // claudeSessionArgs.
+    pinClaudeSession = false,
   ): LaunchConfig {
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
@@ -271,7 +569,7 @@ export class AgentConfigGenerator {
         ? fs.readFileSync(skillPath, "utf-8")
         : "";
 
-    const { command, args, env } = this.buildCLICommand(
+    const { command, args, env, claudeSessionId } = this.buildCLICommand(
       agent.model,
       agent.command,
       mcpConfigPath,
@@ -279,6 +577,7 @@ export class AgentConfigGenerator {
       marbloProjectId,
       agent.id,
       resumeSessionId,
+      pinClaudeSession,
     );
 
     return {
@@ -289,6 +588,7 @@ export class AgentConfigGenerator {
       mcpConfigPath,
       skillContent,
       initialPrompt,
+      claudeSessionId,
     };
   }
 
@@ -701,6 +1001,8 @@ export class AgentConfigGenerator {
       }
     }
 
+    this.generateCodexTfPrompts(agentId, codexHome, projectDir);
+
     // Auto-trust the agent's working directory so Codex doesn't show its
     // "Do you trust the contents of this directory?" interactive dialog
     // on first run. Without this, the dialog blocks the TUI before any
@@ -755,6 +1057,54 @@ export class AgentConfigGenerator {
     return configPath;
   }
 
+  private generateCodexTfPrompts(
+    agentId: string,
+    codexHome: string,
+    projectDir: string,
+  ): void {
+    const promptDir = path.join(codexHome, "prompts");
+    const skills = discoverTfSkillDirs(projectDir);
+    if (skills.length === 0) return;
+
+    fs.mkdirSync(promptDir, { recursive: true });
+    for (const skill of skills) {
+      let raw = "";
+      try {
+        raw = fs.readFileSync(skill.skillPath, "utf-8");
+      } catch {
+        continue;
+      }
+
+      const description =
+        frontmatterValue(raw, "description") ||
+        `Run the Marblo /${skill.name} workflow`;
+      const argumentHint = frontmatterValue(raw, "argument-hint");
+      const body = stripFrontmatter(raw);
+      const prompt = [
+        "---",
+        `description: ${yamlString(description)}`,
+        ...(argumentHint ? [`argument-hint: ${yamlString(argumentHint)}`] : []),
+        "---",
+        "",
+        `You are executing the Marblo /${skill.name} workflow inside Codex CLI.`,
+        "Follow the workflow below exactly. Use Marblo MCP tools for task, agent, and activity operations.",
+        "If the workflow mentions Claude-specific slash command mechanics, interpret the included instructions directly in Codex.",
+        "",
+        "User arguments:",
+        "$ARGUMENTS",
+        "",
+        `# Marblo /${skill.name} workflow`,
+        "",
+        body,
+        "",
+      ].join("\n");
+
+      const promptPath = path.join(promptDir, `${skill.name}.md`);
+      fs.writeFileSync(promptPath, prompt, "utf-8");
+      this.trackFile(agentId, promptPath);
+    }
+  }
+
   private safeRealpath(p: string): string | null {
     try {
       return fs.realpathSync(p);
@@ -794,7 +1144,13 @@ export class AgentConfigGenerator {
     marbloProjectId?: string,
     agentId?: string,
     resumeSessionId?: string,
-  ): { command: string; args: string[]; env: Record<string, string> } {
+    pinFreshClaudeSession = false,
+  ): {
+    command: string;
+    args: string[];
+    env: Record<string, string>;
+    claudeSessionId?: string;
+  } {
     const env = getMCPServerEnv(projectDir, marbloProjectId, agentId);
     // Normalize resume signals: "new" means force-fresh, "latest" means
     // "pick the most recent" (CLI-specific syntax), anything else is a
@@ -806,22 +1162,30 @@ export class AgentConfigGenerator {
     // that runs non-interactively and exits. Instead, prompts are sent via
     // stdin after the CLI starts, keeping the session interactive.
     switch (model) {
-      case "claude":
-        // Claude Code accepts `--resume <UUID>` as a flag; "latest" is
-        // resolved to a UUID by the caller via resolveSessionId before we
-        // get here, so we only emit --resume when we have a concrete id.
+      case "claude": {
+        // Pin the session id up front so cost tracking can attribute tokens
+        // deterministically (see claudeSessionArgs). A fresh launch gets
+        // `--session-id <uuid>` when pinning is opted in (agent path); a
+        // concrete resume gets `--resume <uuid>`; an unresolved "latest" stays
+        // unpinned (caller resolves it before we get here, else the legacy
+        // detector recovers it).
+        const { args: sessionArgs, sessionId } = claudeSessionArgs(
+          resumeSessionId,
+          crypto.randomUUID(),
+          pinFreshClaudeSession,
+        );
         return {
-          command: baseCommand || "claude",
+          command: baseCommand || resolveClaudeBinary().command,
           args: [
             "--dangerously-skip-permissions",
             "--mcp-config",
             mcpConfigPath,
-            ...(wantResume && !resumeIsLatest
-              ? ["--resume", resumeSessionId!]
-              : []),
+            ...sessionArgs,
           ],
           env,
+          claudeSessionId: sessionId,
         };
+      }
 
       case "gemini": {
         // Per-agent isolation via GEMINI_CLI_HOME (NOT HOME override).

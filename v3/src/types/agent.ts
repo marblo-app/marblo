@@ -27,4 +27,10 @@ export interface Agent {
   totalCacheReadTokens?: number;
   totalCacheWriteTokens?: number;
   costUpdatedAt?: Date;
+  // Subscription / rate-limit signals. Codex exposes these in its session
+  // rollout (plan_type + rate_limits.used_percent); claude/agy don't, so they
+  // stay undefined and the UI falls back to the declared plan + token activity.
+  detectedPlanType?: string; // e.g. "plus", "pro" (codex plan_type)
+  rateLimitPercent?: number; // 0-100, codex primary window used_percent
+  rateLimitResetAt?: number; // epoch seconds, codex primary window reset
 }

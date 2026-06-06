@@ -42,13 +42,6 @@ const MODEL_OPTIONS: {
     color: "#10a37f",
   },
   {
-    value: "gemini",
-    label: "Gemini CLI",
-    icon: "🔵",
-    command: "gemini",
-    color: "#3b82f6",
-  },
-  {
     value: "antigravity",
     label: "Antigravity (agy)",
     icon: "🟠",
@@ -102,7 +95,7 @@ export default function AgentAddModal({
 
   // Available tasks (TODO or CLAIMED, not already done)
   const availableTasks = tasks.filter(
-    (t) => t.status === "TODO" || t.status === "CLAIMED"
+    (t) => t.status === "TODO" || t.status === "CLAIMED",
   );
 
   const handleModelChange = (m: ModelType) => {

@@ -3,7 +3,11 @@
 export interface DecomposedTask {
   title: string;
   description: string;
-  role: 'backend' | 'frontend' | 'test' | 'devops';
+  goal?: string;
+  changes?: string[];
+  acceptance?: string[];
+  notes?: string[];
+  role: "backend" | "frontend" | "test" | "devops";
   priority: number;
   depends_on: string[];
   scope: string[];
@@ -46,7 +50,7 @@ export class DAGGenerator {
     const labels: Record<string, string> = {};
 
     for (let i = 0; i < tasks.length; i++) {
-      const nodeId = `TASK-${String(i + 1).padStart(3, '0')}`;
+      const nodeId = `TASK-${String(i + 1).padStart(3, "0")}`;
       nodes.push(nodeId);
       labels[nodeId] = tasks[i].title;
 
@@ -82,7 +86,7 @@ export class DAGGenerator {
 
     // Kahn's algorithm with layer tracking
     const layers: string[][] = [];
-    let queue = dag.nodes.filter(n => (inDegree.get(n) ?? 0) === 0);
+    let queue = dag.nodes.filter((n) => (inDegree.get(n) ?? 0) === 0);
     let processed = 0;
 
     while (queue.length > 0) {
@@ -105,8 +109,10 @@ export class DAGGenerator {
 
     if (processed < dag.nodes.length) {
       const cycles = this.detectCycles(dag);
-      const cycleInfo = cycles ? ` Cycles: ${JSON.stringify(cycles)}` : '';
-      throw new Error(`DAG contains cycles — topological sort failed.${cycleInfo}`);
+      const cycleInfo = cycles ? ` Cycles: ${JSON.stringify(cycles)}` : "";
+      throw new Error(
+        `DAG contains cycles — topological sort failed.${cycleInfo}`,
+      );
     }
 
     return layers;
@@ -125,7 +131,9 @@ export class DAGGenerator {
       if (adj.has(from)) adj.get(from)!.push(to);
     }
 
-    const WHITE = 0, GRAY = 1, BLACK = 2;
+    const WHITE = 0,
+      GRAY = 1,
+      BLACK = 2;
     const color = new Map<string, number>();
     const parent = new Map<string, string | null>();
     const cycles: string[][] = [];
@@ -176,7 +184,7 @@ export class DAGGenerator {
       layers = this.topologicalSort(dag);
     } catch {
       // If cycles exist, put each node in its own layer
-      layers = dag.nodes.map(n => [n]);
+      layers = dag.nodes.map((n) => [n]);
     }
 
     const NODE_WIDTH = 200;
@@ -195,15 +203,15 @@ export class DAGGenerator {
         const nodeId = layer[nodeIdx];
         flowNodes.push({
           id: nodeId,
-          type: 'default',
+          type: "default",
           position: {
             x: layerIdx * LAYER_GAP_X,
             y: startY + nodeIdx * NODE_GAP_Y,
           },
           data: {
             label: dag.labels[nodeId] || nodeId,
-            role: '',
-            status: 'TODO',
+            role: "",
+            status: "TODO",
           },
         });
       }

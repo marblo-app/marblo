@@ -9,8 +9,15 @@
  *  - Re-shown when CURRENT_POLICY_VERSION bumps (text changed → re-prompt).
  *
  * The modal also captures a single `overseasTransfer` checkbox — required
- * because Sentry/GA4/Mixpanel are all US-hosted and PIPA requires a
- * separate national-export consent on top of the per-service flag.
+ * because Sentry is US-hosted and PIPA requires a separate national-export
+ * consent on top of the per-service flag.
+ *
+ * Note: GA4/Mixpanel are intentionally NOT offered here. This Electron app
+ * sends nothing to them (GA4 has no measurement id wired + zero call sites;
+ * Mixpanel has no code). Asking consent for data we never send would be a
+ * false disclosure. The marketing website uses GA4 separately under its own
+ * cookie consent — see PrivacyPolicyPage. The ga4/mixpanel flags remain in
+ * the consent schema (always false) for forward-compat.
  */
 import { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
@@ -32,19 +39,9 @@ const ROWS: {
     hint: "스택 트레이스에서 파일 경로·환경변수·BYOK 키는 자동 마스킹.",
   },
   {
-    id: "ga4",
-    label: "사용 분석 보내기 (GA4, 미국 호스팅)",
-    hint: "익명 클릭/페이지 이동만. IP는 익명화 후 송신.",
-  },
-  {
-    id: "mixpanel",
-    label: "제품 funnel 분석 (Mixpanel, 미국 호스팅) — Q4 활성화",
-    hint: "현재는 비활성. 미리 동의해두면 활성화 시점에 자동 적용.",
-  },
-  {
     id: "overseasTransfer",
     label: "국외 이전 별도 동의 (PIPA 제15조 제2항)",
-    hint: "위 서비스 모두 미국 서버에 데이터를 처리합니다. 위 항목 중 하나라도 켜려면 이 동의가 필수입니다.",
+    hint: "Sentry는 미국 서버에서 데이터를 처리합니다. 위 항목을 켜려면 이 동의가 필수입니다.",
     separate: true,
   },
 ];
@@ -72,20 +69,16 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
   // turns on a service flag (overseas transfer is implied by enabling any
   // of them — but we still show it explicitly so consent is informed).
   useEffect(() => {
-    const anyOn = flags.sentry || flags.ga4 || flags.mixpanel;
-    if (!anyOn && flags.overseasTransfer) {
+    if (!flags.sentry && flags.overseasTransfer) {
       setFlags((f) => ({ ...f, overseasTransfer: false }));
     }
-  }, [flags.sentry, flags.ga4, flags.mixpanel, flags.overseasTransfer]);
+  }, [flags.sentry, flags.overseasTransfer]);
 
   const allow = async () => {
     if (!user) return;
-    // Hard guard: if any service is on, overseasTransfer must also be on.
-    const anyOn = flags.sentry || flags.ga4 || flags.mixpanel;
-    if (anyOn && !flags.overseasTransfer) {
-      setError(
-        "Sentry/GA4/Mixpanel은 미국 호스팅이라 국외 이전 동의가 필수입니다.",
-      );
+    // Hard guard: if Sentry is on, overseasTransfer must also be on.
+    if (flags.sentry && !flags.overseasTransfer) {
+      setError("Sentry는 미국 호스팅이라 국외 이전 동의가 필수입니다.");
       return;
     }
     setSubmitting(true);
@@ -142,10 +135,11 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
             마블로를 더 안정적으로 만들도록 도와주세요
           </h2>
           <p className="mt-1 text-xs text-[#bac2de] leading-relaxed">
-            익명 크래시 리포트와 사용 분석을 보내주시면 마블로가 빠르게
-            개선됩니다.{" "}
+            아래 <b>제3자 서비스(미국 호스팅)</b> 송신에 동의해 주시면 마블로가
+            빠르게 개선됩니다.{" "}
             <b>코드 내용 · BYOK 키 · 사용자 입력은 절대 보내지 않습니다.</b>{" "}
-            거부해도 모든 기능은 동일하게 작동합니다.
+            거부해도 모든 기능은 동일하게 작동합니다. (자체 운영 품질 지표는
+            식별정보 없는 비식별 데이터로만 수집 — 자세히 보기 참조.)
           </p>
         </div>
 
@@ -161,7 +155,6 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
                 onChange={(e) =>
                   setFlags((f) => ({ ...f, [row.id]: e.target.checked }))
                 }
-                disabled={row.id === "mixpanel"}
                 className="mt-0.5 h-4 w-4 accent-[#89b4fa] disabled:opacity-50"
               />
               <div className="flex-1 min-w-0">

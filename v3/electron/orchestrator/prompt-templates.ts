@@ -1,5 +1,5 @@
-import type { ChatMessage } from './llm-client.js';
-import type { FlowNode, FlowEdge } from './dag-generator.js';
+import type { ChatMessage } from "./llm-client.js";
+import type { FlowNode, FlowEdge } from "./dag-generator.js";
 
 // ── Decomposition Prompt ─────────────────────────────────────
 
@@ -15,13 +15,23 @@ Rules:
 - Ensure no circular dependencies
 - Order tasks so dependencies come before dependents
 
+Ticket body — fill these STRUCTURED fields (do NOT cram everything into one paragraph):
+- goal: 1-2 sentences, what & why. No file paths here.
+- changes: array of short bullet strings — concrete functions/behaviors to add or modify. No run-on sentences, no duplication.
+- acceptance: array of verifiable done-criteria (e.g. "tests/unit/foo.test.ts passes").
+- notes: array (optional) — constraints, rollback rules, reuse notes.
+Put file paths in "scope", not in prose. Progress updates during work go to add_activity, never the ticket body.
+
 Output format (strict JSON, no markdown):
 {
   "projectName": "string",
   "tasks": [
     {
-      "title": "string",
-      "description": "string",
+      "title": "string (한 줄)",
+      "goal": "string",
+      "changes": ["string"],
+      "acceptance": ["string"],
+      "notes": ["string"],
       "role": "backend" | "frontend" | "test" | "devops",
       "priority": 1-5,
       "depends_on": ["TASK-NNN"],
@@ -40,8 +50,8 @@ export function buildDecomposePrompt(
     userContent += `\n\nAdditional context:\n${context}`;
   }
   return [
-    { role: 'system', content: DECOMPOSE_SYSTEM },
-    { role: 'user', content: userContent },
+    { role: "system", content: DECOMPOSE_SYSTEM },
+    { role: "user", content: userContent },
   ];
 }
 
@@ -56,12 +66,22 @@ Rules:
 - Same rules as decomposition: role, priority, scope, estimatedHours
 - Ensure no circular dependencies with existing tasks
 
+Ticket body — fill these STRUCTURED fields (do NOT cram everything into one paragraph):
+- goal: 1-2 sentences, what & why. No file paths here.
+- changes: array of short bullet strings — concrete functions/behaviors to add or modify.
+- acceptance: array of verifiable done-criteria.
+- notes: array (optional) — constraints, rollback rules, reuse notes.
+Put file paths in "scope", not in prose. Progress updates during work go to add_activity, never the ticket body.
+
 Output format (strict JSON, no markdown):
 {
   "tasks": [
     {
-      "title": "string",
-      "description": "string",
+      "title": "string (한 줄)",
+      "goal": "string",
+      "changes": ["string"],
+      "acceptance": ["string"],
+      "notes": ["string"],
       "role": "backend" | "frontend" | "test" | "devops",
       "priority": 1-5,
       "depends_on": ["TASK-NNN"],
@@ -76,16 +96,16 @@ export function buildAddTasksPrompt(
   newRequirement: string,
 ): ChatMessage[] {
   return [
-    { role: 'system', content: ADD_TASKS_SYSTEM },
+    { role: "system", content: ADD_TASKS_SYSTEM },
     {
-      role: 'user',
+      role: "user",
       content: [
-        'Existing tasks:',
+        "Existing tasks:",
         existingTasks,
-        '',
-        'New requirement to add:',
+        "",
+        "New requirement to add:",
         newRequirement,
-      ].join('\n'),
+      ].join("\n"),
     },
   ];
 }
@@ -111,12 +131,18 @@ export function buildDAGValidationPrompt(
   tasks: Array<{ title: string; depends_on: string[] }>,
 ): ChatMessage[] {
   const taskSummary = tasks
-    .map((t, i) => `TASK-${String(i + 1).padStart(3, '0')}: ${t.title} (depends_on: ${t.depends_on.join(', ') || 'none'})`)
-    .join('\n');
+    .map(
+      (t, i) =>
+        `TASK-${String(i + 1).padStart(3, "0")}: ${t.title} (depends_on: ${t.depends_on.join(", ") || "none"})`,
+    )
+    .join("\n");
 
   return [
-    { role: 'system', content: DAG_SYSTEM },
-    { role: 'user', content: `Analyze the dependency graph:\n\n${taskSummary}` },
+    { role: "system", content: DAG_SYSTEM },
+    {
+      role: "user",
+      content: `Analyze the dependency graph:\n\n${taskSummary}`,
+    },
   ];
 }
 
@@ -138,8 +164,11 @@ export function buildRoleClassificationPrompt(
   taskDescription: string,
 ): ChatMessage[] {
   return [
-    { role: 'system', content: ROLE_SYSTEM },
-    { role: 'user', content: `Title: ${taskTitle}\nDescription: ${taskDescription}` },
+    { role: "system", content: ROLE_SYSTEM },
+    {
+      role: "user",
+      content: `Title: ${taskTitle}\nDescription: ${taskDescription}`,
+    },
   ];
 }
 
@@ -184,8 +213,8 @@ export function buildFlowGenerationPrompt(
     userContent += `\n\nAdditional context:\n${context}`;
   }
   return [
-    { role: 'system', content: FLOW_GENERATION_SYSTEM },
-    { role: 'user', content: userContent },
+    { role: "system", content: FLOW_GENERATION_SYSTEM },
+    { role: "user", content: userContent },
   ];
 }
 
@@ -212,17 +241,19 @@ export function buildFlowExtensionPrompt(
   requirement: string,
 ): ChatMessage[] {
   const summary = [
-    'Existing nodes:',
-    ...existingFlow.nodes.map(n => `  - ${n.id}: ${n.data.label} (type=${n.type})`),
-    '',
-    'Existing edges:',
-    ...existingFlow.edges.map(e => `  - ${e.source} → ${e.target}`),
-  ].join('\n');
+    "Existing nodes:",
+    ...existingFlow.nodes.map(
+      (n) => `  - ${n.id}: ${n.data.label} (type=${n.type})`,
+    ),
+    "",
+    "Existing edges:",
+    ...existingFlow.edges.map((e) => `  - ${e.source} → ${e.target}`),
+  ].join("\n");
 
   return [
-    { role: 'system', content: FLOW_EXTENSION_SYSTEM },
+    { role: "system", content: FLOW_EXTENSION_SYSTEM },
     {
-      role: 'user',
+      role: "user",
       content: `${summary}\n\nNew requirement:\n${requirement}`,
     },
   ];

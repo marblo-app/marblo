@@ -48,6 +48,10 @@ export interface TaskDispatcher {
     missionId: string;
     projectId: string;
     goal: string;
+    // 직전 gstack step 들의 결과 요약 (e.g. /investigate, /plan-eng-review).
+    // decomposer 가 더 풍부한 task 분해를 생성하고, 각 task description 에 컨텍스트
+    // 가 포함되도록 보강용.
+    priorContext?: string;
   }): Promise<string[]>;
 
   // wait step: 현재 미션이 거느린 task 들의 상태를 일괄 조회.
@@ -62,14 +66,38 @@ export interface SkillResult {
   output?: unknown;
   error?: string;
   durationMs: number;
+  /**
+   * PTY 출력의 끝부분에 사용자 입력 요청 패턴이 감지된 경우 그 텍스트.
+   * 예: `/ship` 이 "Create PR? (y/n)" 묻고 멈춘 케이스.
+   * engine 은 이 값이 있으면 다음 step 으로 advance 하기 전에 mission 을
+   * waiting_for_human 으로 전이 + 알림 카드 표시.
+   */
+  userInputDetected?: string;
 }
 
 export interface SkillRunner {
   runSkill(input: {
     missionId: string;
+    projectId: string;
     skill: string; // ALLOWED_SKILLS 중 하나 — runner 가 다시 검증
     args?: string;
     timeoutMs?: number;
+    // 진행 중 출력 콜백 — runner 가 stdout/stderr tail 을 throttle 해서 호출.
+    // engine 이 이걸 받아 mission step.liveOutput 으로 write 한다.
+    onProgress?: (chunk: string) => void;
+    // 슬래시 명령 직전에 PTY 로 먼저 주입할 자유 텍스트. 보통 직전 step output 요약.
+    // claude 가 brief ack 한 후 실제 슬래시 명령 실행 → 컨텍스트 연결 효과.
+    chainPrelude?: string;
+  }): Promise<SkillResult>;
+  // 자유 텍스트 메시지를 PTY 로 전달 (slash command 가 아닌 경우).
+  // 최종 종합 보고서 생성 같이 슬래시 allowlist 밖의 작업에 쓰임.
+  // 구현체는 PTY 가 없는 headless runner 에서는 reject 해도 됨.
+  runRawMessage?(input: {
+    missionId: string;
+    projectId: string;
+    prompt: string;
+    timeoutMs?: number;
+    onProgress?: (chunk: string) => void;
   }): Promise<SkillResult>;
 }
 
@@ -80,11 +108,18 @@ export interface FixRunner {
     missionId: string;
     projectId: string;
     goal: string;
+    // 직전 step (보통 /investigate) 의 출력 요약. 코딩 agent 의 task description
+    // 에 포함되어 조사 결과를 그대로 반영해 작업.
+    priorContext?: string;
   }): Promise<{ success: boolean; error?: string }>;
 }
 
 export interface OrchestratorRef {
   sessionId: string;
+  // PTY session 식별자 — PtySkillRunner 가 ptyManager.onData / writeAndSubmit 의
+  // 대상으로 사용. ensureSession 직후 set 됨. orchestrator 가 아직 launch 중이라
+  // null 이면 caller 가 재시도해야 함.
+  ptySessionId: string | null;
   isAlive(): boolean;
   postMessage(message: string): Promise<void>;
 }

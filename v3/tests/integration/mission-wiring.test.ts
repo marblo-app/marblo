@@ -55,9 +55,10 @@ describe("Mission wiring (scenario 1+2 shape guard)", () => {
     const src = readFile("electron/bridge-server.ts");
     expect(src).toMatch(/export\s+interface\s+DispatchTaskRequest/);
     expect(src).toMatch(/export\s+interface\s+DispatchTaskResponse/);
-    // public 메서드 — private 키워드가 없어야 함
+    // public 메서드 — private 키워드가 없어야 함 (async 전환 후에도 public 유지:
+    // worktree prep 를 await 하므로 `async dispatchTask(` 형태도 허용).
     expect(src).not.toMatch(/private\s+dispatchTask\(/);
-    expect(src).toMatch(/\n\s*dispatchTask\(/);
+    expect(src).toMatch(/\n\s*(?:async\s+)?dispatchTask\(/);
   });
 
   it("Mission run_skill allowlist 가 mission-engine types.ts 와 동기화", () => {

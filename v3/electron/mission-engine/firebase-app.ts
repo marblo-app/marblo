@@ -1,5 +1,6 @@
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
+import { initializeFirestore } from "firebase/firestore";
 
 // Main 프로세스 전용 firebase 인스턴스 — pending-instruction-listener / mcp-server
 // 와 같은 패턴 (별도 named app + anonymous auth).
@@ -21,9 +22,19 @@ export function getMissionFirebaseApp(): {
 } {
   if (cached) return cached;
 
+  // e2e/test 모드 — Playwright launch.ts가 MARBLO_TEST_BYPASS_AUTH=1 을 기본 주입.
+  // worktree처럼 .env가 없는 환경에서 apiKey=undefined로 getAuth가 throw하면
+  // main process가 다이얼로그와 함께 죽는다 (auth/invalid-api-key). 더미 키로
+  // initialize하고 signIn 시도 자체를 skip 해서 호출 경로만 살려둔다.
+  const isTestMode =
+    process.env.MARBLO_TEST_MODE === "mock" ||
+    process.env.MARBLO_TEST_BYPASS_AUTH === "1";
+
+  const apiKey =
+    process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || "";
+
   const config = {
-    apiKey:
-      process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || "",
+    apiKey: apiKey || (isTestMode ? "test-api-key" : ""),
     authDomain:
       process.env.FIREBASE_AUTH_DOMAIN ||
       process.env.VITE_FIREBASE_AUTH_DOMAIN ||
@@ -44,16 +55,24 @@ export function getMissionFirebaseApp(): {
       process.env.FIREBASE_APP_ID || process.env.VITE_FIREBASE_APP_ID || "",
   };
 
-  const app =
-    getApps().find((a) => a.name === APP_NAME) ||
-    initializeApp(config, APP_NAME);
-  const authReady = signInAnonymously(getAuth(app))
-    .then(() => {
-      console.log("[MissionEngine] anonymous firebase auth OK");
-    })
-    .catch((err) => {
-      console.error("[MissionEngine] anonymous firebase auth failed:", err);
-    });
+  const existing = getApps().find((a) => a.name === APP_NAME);
+  const app = existing || initializeApp(config, APP_NAME);
+  if (!existing) {
+    // step.output / step.error 등 optional 필드가 undefined 인 상태로 patch 되는
+    // 경우 addDoc/updateDoc 실패를 막기 위해 firestore 초기화 시 옵션을 켠다.
+    // 이후 getFirestore(app) 호출은 동일 인스턴스를 반환한다.
+    initializeFirestore(app, { ignoreUndefinedProperties: true });
+  }
+
+  const authReady = isTestMode
+    ? Promise.resolve()
+    : signInAnonymously(getAuth(app))
+        .then(() => {
+          console.log("[MissionEngine] anonymous firebase auth OK");
+        })
+        .catch((err) => {
+          console.error("[MissionEngine] anonymous firebase auth failed:", err);
+        });
 
   cached = { app, authReady };
   return cached;

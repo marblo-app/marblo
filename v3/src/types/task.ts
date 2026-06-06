@@ -1,11 +1,23 @@
-export type TaskStatus = 'TODO' | 'CLAIMED' | 'IN_PROGRESS' | 'REVIEW' | 'BLOCKED' | 'FAILED' | 'DONE';
-export type AgentRole = 'backend' | 'frontend' | 'test' | 'devops';
+export type TaskStatus =
+  | "TODO"
+  | "CLAIMED"
+  | "IN_PROGRESS"
+  | "REVIEW"
+  | "BLOCKED"
+  | "FAILED"
+  | "DONE";
+export type AgentRole = "backend" | "frontend" | "test" | "devops";
 
 export interface Task {
   id: string;
   projectId: string;
+  contextId: string;
   title: string;
   description: string;
+  goal?: string;
+  changes?: string[];
+  acceptance?: string[];
+  notes?: string[];
   status: TaskStatus;
   role: AgentRole;
   priority: number; // 1~5

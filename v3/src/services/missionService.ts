@@ -17,6 +17,7 @@ import {
   toTimestamp,
   convertTimestamps,
 } from "./firestore";
+import { inMemEnabled, inMem } from "./missionService.inmem";
 
 const COLLECTION = "missions";
 const DATE_FIELDS = ["launchedAt", "lastActivityAt", "completedAt"];
@@ -42,9 +43,10 @@ function toMission(raw: Record<string, unknown>): Mission {
 }
 
 export async function getMissions(projectId: string): Promise<Mission[]> {
+  if (inMemEnabled()) return inMem.getMissions(projectId);
   const docs = await queryDocuments<Record<string, unknown>>(
     COLLECTION,
-    where("projectId", "==", projectId)
+    where("projectId", "==", projectId),
   );
   return docs
     .map(toMission)
@@ -52,13 +54,15 @@ export async function getMissions(projectId: string): Promise<Mission[]> {
 }
 
 export async function getMission(missionId: string): Promise<Mission | null> {
+  if (inMemEnabled()) return inMem.getMission(missionId);
   const raw = await getDocument<Record<string, unknown>>(COLLECTION, missionId);
   return raw ? toMission(raw) : null;
 }
 
 export async function createMission(
-  data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">
+  data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">,
 ): Promise<string> {
+  if (inMemEnabled()) return inMem.createMission(data);
   const now = new Date();
   return createDocument(COLLECTION, {
     ...data,
@@ -70,8 +74,9 @@ export async function createMission(
 
 export async function updateMission(
   missionId: string,
-  data: Partial<Omit<Mission, "id" | "launchedAt">>
+  data: Partial<Omit<Mission, "id" | "launchedAt">>,
 ): Promise<void> {
+  if (inMemEnabled()) return inMem.updateMission(missionId, data);
   const payload: Record<string, unknown> = {
     ...data,
     lastActivityAt: toTimestamp(new Date()),
@@ -83,13 +88,15 @@ export async function updateMission(
 }
 
 export async function deleteMission(missionId: string): Promise<void> {
+  if (inMemEnabled()) return inMem.deleteMission(missionId);
   await deleteDocument(COLLECTION, missionId);
 }
 
 export function subscribeToMissions(
   projectId: string,
-  callback: (missions: Mission[]) => void
+  callback: (missions: Mission[]) => void,
 ): Unsubscribe {
+  if (inMemEnabled()) return inMem.subscribeToMissions(projectId, callback);
   return subscribeToCollection<Record<string, unknown>>(
     COLLECTION,
     [where("projectId", "==", projectId)],
@@ -98,20 +105,21 @@ export function subscribeToMissions(
         docs
           .map(toMission)
           .sort(
-            (a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime()
-          )
-      )
+            (a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime(),
+          ),
+      ),
   );
 }
 
 export function subscribeToMission(
   missionId: string,
-  callback: (mission: Mission | null) => void
+  callback: (mission: Mission | null) => void,
 ): Unsubscribe {
+  if (inMemEnabled()) return inMem.subscribeToMission(missionId, callback);
   return subscribeToDocument<Record<string, unknown>>(
     COLLECTION,
     missionId,
-    (raw) => callback(raw ? toMission(raw) : null)
+    (raw) => callback(raw ? toMission(raw) : null),
   );
 }
 
@@ -119,7 +127,7 @@ export function subscribeToMission(
 // 드물다. Step 2 에서 동시 wakeup 경합이 발생하면 transaction 으로 갈아끼울 것.
 export async function appendTimelineEvent(
   missionId: string,
-  event: TimelineEvent
+  event: TimelineEvent,
 ): Promise<void> {
   const mission = await getMission(missionId);
   if (!mission) throw new Error(`Mission not found: ${missionId}`);
@@ -131,7 +139,7 @@ export async function appendTimelineEvent(
 export async function updateMissionStep(
   missionId: string,
   stepIndex: number,
-  patch: Partial<MissionStep>
+  patch: Partial<MissionStep>,
 ): Promise<void> {
   const mission = await getMission(missionId);
   if (!mission) throw new Error(`Mission not found: ${missionId}`);
@@ -147,7 +155,7 @@ export async function updateMissionStep(
 export async function setMissionStatus(
   missionId: string,
   status: MissionStatus,
-  extras?: { completedAt?: Date; abandonedReason?: string }
+  extras?: { completedAt?: Date; abandonedReason?: string },
 ): Promise<void> {
   const patch: Partial<Omit<Mission, "id" | "launchedAt">> = { status };
   if (extras?.completedAt) patch.completedAt = extras.completedAt;

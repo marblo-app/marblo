@@ -11,6 +11,7 @@ import { getMissionFirebaseApp } from "./firebase-app";
 import { createMissionStore } from "./store-impl";
 import { createTaskDispatcher } from "./dispatcher-impl";
 import { createSkillRunner } from "./skill-runner-impl";
+import { createPtySkillRunner } from "./pty-skill-runner-impl";
 import { createFixRunner } from "./fix-runner-impl";
 import { createOrchestratorRegistry } from "./orch-registry-impl";
 import { MissionEventForwarder } from "./event-forwarder";
@@ -37,7 +38,10 @@ export interface BuiltMissionEngine {
   engine: MissionEngine;
   eventBus: InProcessMissionEventBus;
   forwarder: MissionEventForwarder;
-  /** app.whenReady 이후 호출 — status='planning' 미션을 engine 에 픽업시킨다. */
+  /**
+   * app.whenReady 이후 호출 — status='planning' 미션을 engine 에 픽업시킨다.
+   * 초기 1회 startup 조회 + 이후 Firestore 구독으로 런타임 신규 planning 미션도 자동 픽업.
+   */
   pickupPlanningMissions: () => Promise<void>;
   /** AgentManager.onStatusChange 안에서 호출 — agent 상태 변화를 미션으로 forward. */
   forwardAgentStatus: (agentId: string, status: string) => void;
@@ -46,7 +50,7 @@ export interface BuiltMissionEngine {
 }
 
 export function buildMissionEngine(
-  deps: BuildMissionEngineDeps
+  deps: BuildMissionEngineDeps,
 ): BuiltMissionEngine {
   const { app, authReady } = getMissionFirebaseApp();
   const eventBus = new InProcessMissionEventBus();
@@ -59,7 +63,6 @@ export function buildMissionEngine(
     agentManager: deps.agentManager,
     dispatchOne: deps.dispatchOne,
   });
-  const skillRunner = createSkillRunner({});
   const fixRunner = createFixRunner({
     app,
     authReady,
@@ -71,6 +74,18 @@ export function buildMissionEngine(
     ptyManager: deps.ptyManager,
     bridgePort: deps.bridgePort,
   });
+  // SkillRunner: env flag 로 PTY routing 또는 legacy headless spawn 선택.
+  // 기본은 PTY (사용자 가시성 + 빌링 안전).
+  const useHeadlessSkillRunner = process.env.MARBLO_SKILL_RUNNER === "headless";
+  const skillRunner = useHeadlessSkillRunner
+    ? createSkillRunner({})
+    : createPtySkillRunner({
+        orchestrators: orchRegistry,
+        ptyManager: deps.ptyManager,
+      });
+  console.log(
+    `[MissionEngine] skill runner mode: ${useHeadlessSkillRunner ? "headless" : "pty"}`,
+  );
 
   const engine = new MissionEngine({
     store,
@@ -84,37 +99,51 @@ export function buildMissionEngine(
   const forwarder = new MissionEventForwarder({ app, authReady, eventBus });
 
   // Planning 미션 픽업 — UI 가 status='planning' 으로 만들어 둔 미션을 engine.resume
-  // 으로 이어 받는다. Firestore 직접 쿼리.
+  // 으로 이어 받는다. 1회 startup 조회 후 onSnapshot 으로 런타임 신규 mission 도 자동 픽업.
+  // resume 은 inFlight set 으로 중복 호출 방지하므로 (initial getDocs + onSnapshot
+  // added 이벤트가 동일 doc 으로 두 번 들어와도) 안전.
+  let planningUnsub: (() => void) | null = null;
+  const pickedUp = new Set<string>();
+
   async function pickupPlanningMissions(): Promise<void> {
     await authReady;
+    if (planningUnsub) return; // idempotent — 두 번 호출돼도 한 번만 구독
     try {
-      const { getFirestore, collection, query, where, getDocs } = await import(
-        "firebase/firestore"
-      );
+      const { getFirestore, collection, query, where, onSnapshot } =
+        await import("firebase/firestore");
       const db = getFirestore(app);
       const q = query(
         collection(db, "missions"),
-        where("status", "==", "planning")
+        where("status", "==", "planning"),
       );
-      const snap = await getDocs(q);
-      for (const docSnap of snap.docs) {
-        engine
-          .resume(docSnap.id)
-          .catch((err) =>
-            console.error(
-              "[MissionEngine] planning pickup failed",
-              docSnap.id,
-              err
-            )
+      planningUnsub = onSnapshot(
+        q,
+        (snap) => {
+          console.log(
+            `[MissionEngine] planning snapshot: size=${snap.size} changes=${snap.docChanges().length}`,
           );
-      }
-      if (!snap.empty) {
-        console.log(
-          `[MissionEngine] picked up ${snap.size} planning mission(s)`
-        );
-      }
+          for (const change of snap.docChanges()) {
+            if (change.type === "removed") {
+              pickedUp.delete(change.doc.id);
+              continue;
+            }
+            const id = change.doc.id;
+            if (pickedUp.has(id)) continue;
+            pickedUp.add(id);
+            console.log(
+              `[MissionEngine] picking up planning mission ${id} (change=${change.type})`,
+            );
+            engine.resume(id).catch((err) => {
+              pickedUp.delete(id); // 실패 시 다음 트리거에서 재시도 가능
+              console.error("[MissionEngine] planning pickup failed", id, err);
+            });
+          }
+        },
+        (err) => console.warn("[MissionEngine] planning subscribe error:", err),
+      );
+      console.log("[MissionEngine] planning subscription started");
     } catch (err) {
-      console.warn("[MissionEngine] planning pickup query failed:", err);
+      console.warn("[MissionEngine] planning pickup setup failed:", err);
     }
   }
 
@@ -136,6 +165,10 @@ export function buildMissionEngine(
   }
 
   function dispose(): void {
+    if (planningUnsub) {
+      planningUnsub();
+      planningUnsub = null;
+    }
     forwarder.stop();
     engine.dispose();
   }

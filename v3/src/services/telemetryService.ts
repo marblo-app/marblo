@@ -1,5 +1,6 @@
 import { httpsCallable } from "firebase/functions";
 import { auth, functions } from "../lib/firebase";
+import { scrubValue } from "../lib/telemetry/scrub";
 
 export type TelemetryEvent =
   | "agent:spawned"
@@ -62,6 +63,55 @@ export function setTelemetryEnabled(enabled: boolean) {
   telemetryEnabled = enabled;
 }
 
+const CLIENT_ID_KEY = "marblo.telemetry.clientId";
+
+/**
+ * Stable, anonymous per-install identifier. Random UUID persisted in
+ * localStorage and NEVER linked to the Firebase account — there is no
+ * mapping table anywhere. This is what lets us honestly call the 1st-party
+ * BigQuery telemetry 비식별(익명): rows carry this id, never the auth uid.
+ * Clearing storage just mints a new id, which is fine for aggregate analytics.
+ *
+ * Shared with taskService so the task-outcome ML rows use the same anonymous
+ * id instead of the account uid.
+ */
+export function getClientId(): string {
+  try {
+    let id = localStorage.getItem(CLIENT_ID_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(CLIENT_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return "anon";
+  }
+}
+
+/**
+ * Strip identifying / PII fields from a telemetry payload before it ever
+ * touches the queue. scrubValue() masks file paths, emails, phones and BYOK
+ * keys and drops free-text user-input keys (prompt/message/…); on top of that
+ * we explicitly drop the few account identifiers scrub.ts doesn't know about
+ * (senderId/userId/uid/email in metadata). The result is de-identified — safe
+ * for the always-on 1st-party sink without per-user consent.
+ *
+ * Applied at the single logTelemetry() choke point, so it also covers events
+ * injected from the main process via the App.tsx IPC bridge.
+ */
+function anonymize(payload: TelemetryPayload): TelemetryPayload {
+  const scrubbed = scrubValue(payload) as TelemetryPayload;
+  if (scrubbed.metadata && typeof scrubbed.metadata === "object") {
+    const m = { ...(scrubbed.metadata as Record<string, unknown>) };
+    delete m.senderId;
+    delete m.userId;
+    delete m.uid;
+    delete m.email;
+    scrubbed.metadata = m;
+  }
+  return scrubbed;
+}
+
 // Separate heartbeat queue — goes to agent_heartbeats table, not events
 const heartbeatQueue: TelemetryPayload[] = [];
 let heartbeatFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -69,9 +119,13 @@ let heartbeatFlushTimer: ReturnType<typeof setTimeout> | null = null;
 export function logTelemetry(payload: TelemetryPayload) {
   if (!telemetryEnabled) return;
 
+  // De-identify before anything is queued or sent. Single guarantee point —
+  // every telemetry path (convenience helpers + IPC bridge) flows through here.
+  const clean = anonymize(payload);
+
   // Route heartbeats to separate queue/table
-  if (payload.event === "agent:heartbeat") {
-    heartbeatQueue.push(payload);
+  if (clean.event === "agent:heartbeat") {
+    heartbeatQueue.push(clean);
     if (heartbeatQueue.length >= 10) {
       flushHeartbeats();
     } else if (!heartbeatFlushTimer) {
@@ -80,7 +134,7 @@ export function logTelemetry(payload: TelemetryPayload) {
     return;
   }
 
-  eventQueue.push(payload);
+  eventQueue.push(clean);
 
   if (eventQueue.length >= MAX_QUEUE_SIZE) {
     flushTelemetry();
@@ -98,6 +152,7 @@ async function flushHeartbeats() {
   if (!auth.currentUser) return;
 
   const batch = heartbeatQueue.splice(0, 50);
+  const clientId = getClientId();
   try {
     await logHeartbeatFn({
       beats: batch.map((b) => ({
@@ -106,6 +161,7 @@ async function flushHeartbeats() {
         status: b.status,
         tokensAccumulated: b.tokensInput ?? 0,
         costAccumulated: b.cost ?? 0,
+        clientId,
         timestamp: new Date().toISOString(),
       })),
     });
@@ -123,7 +179,10 @@ async function flushTelemetry() {
   if (eventQueue.length === 0) return;
   if (!auth.currentUser) return;
 
-  const batch = eventQueue.splice(0, MAX_QUEUE_SIZE);
+  const clientId = getClientId();
+  const batch = eventQueue
+    .splice(0, MAX_QUEUE_SIZE)
+    .map((e) => ({ ...e, clientId }));
 
   try {
     await logTelemetryBatch({ events: batch });

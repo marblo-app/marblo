@@ -62,7 +62,7 @@ function findRepoRoot(): string {
   }
   if (tryDir(process.cwd())) return process.cwd();
   throw new Error(
-    "Could not locate v3 project root (looked for electron/mcp-server/tools.ts). Set MARBLO_ROOT env."
+    "Could not locate v3 project root (looked for electron/mcp-server/tools.ts). Set MARBLO_ROOT env.",
   );
 }
 
@@ -86,14 +86,52 @@ test(
     const region = src.slice(handlerStart, handlerStart + 4000);
     assert(
       /notifyOrchestrator\(/.test(region),
-      "update_task_status must call notifyOrchestrator (단락 228 자동 신규지시)"
+      "update_task_status must call notifyOrchestrator (단락 228 자동 신규지시)",
     );
     assert(
       /Task Update/.test(region),
-      "notification must include '[Task Update]' tag for orchestrator parsing"
+      "notification must include '[Task Update]' tag for orchestrator parsing",
     );
-  }
+  },
 );
+
+test("add_activity calls notifyOrchestrator for progress updates", "shape", () => {
+  const src = readFile("electron/mcp-server/tools.ts");
+  const handlerStart = src.indexOf('"add_activity"');
+  assert(handlerStart > 0, "add_activity handler must exist");
+  const region = src.slice(handlerStart, handlerStart + 3000);
+  assert(
+    /notifyOrchestrator\(/.test(region),
+    "add_activity must notify orchestrator so mid-task progress reaches the orchestrator PTY",
+  );
+  assert(
+    /Task Activity/.test(region),
+    "activity notification must include '[Task Activity]' tag for orchestrator parsing",
+  );
+});
+
+test("spawn_agent accepts task_id and bridge appends completion footer", "shape", () => {
+  const tools = readFile("electron/mcp-server/tools.ts");
+  const spawnStart = tools.indexOf('"spawn_agent"');
+  assert(spawnStart > 0, "spawn_agent handler must exist");
+  const spawnRegion = tools.slice(spawnStart, spawnStart + 5000);
+  assert(
+    /task_id/.test(spawnRegion) && /taskId:\s*task_id/.test(spawnRegion),
+    "spawn_agent must forward task_id to the bridge as taskId",
+  );
+
+  const bridge = readFile("electron/bridge-server.ts");
+  assert(
+    /taskId\?:\s*string/.test(bridge),
+    "bridge SpawnAgentRequest must include optional taskId",
+  );
+  assert(
+    /withCompletionFooter\(params\.initialPrompt,\s*params\.taskId\)/.test(
+      bridge,
+    ),
+    "direct spawn_agent path must append completion footer when taskId is provided",
+  );
+});
 
 test(
   "DONE transition triggers dependency resolution + per-unblock notification",
@@ -105,17 +143,17 @@ test(
     // per unblocked task.
     assert(
       /array-contains.*task_id/.test(src),
-      "must query tasks where dependsOn array-contains the completed task_id"
+      "must query tasks where dependsOn array-contains the completed task_id",
     );
     assert(
       /Dependency Resolved/.test(src),
-      "must emit '[Dependency Resolved]' notification per unblocked task"
+      "must emit '[Dependency Resolved]' notification per unblocked task",
     );
     assert(
       /dependsOnCompleted:\s*true/.test(src),
-      "must mark unblocked tasks dependsOnCompleted=true"
+      "must mark unblocked tasks dependsOnCompleted=true",
     );
-  }
+  },
 );
 
 test("notifyOrchestrator is wired to bridge HTTP endpoint", "shape", () => {
@@ -124,13 +162,13 @@ test("notifyOrchestrator is wired to bridge HTTP endpoint", "shape", () => {
     /notifyOrchestrator/.test(src) &&
       /\/notify-orchestrator/.test(src) &&
       /MARBLO_PROJECT/.test(src),
-    "notifyOrchestrator must POST to /notify-orchestrator with projectId for multi-window routing"
+    "notifyOrchestrator must POST to /notify-orchestrator with projectId for multi-window routing",
   );
   const bridge = readFile("electron/bridge-server.ts");
   assert(
     /\/notify-orchestrator/.test(bridge) &&
       /handleNotifyOrchestrator|handleInjectMessage/.test(bridge),
-    "bridge must expose /notify-orchestrator endpoint"
+    "bridge must expose /notify-orchestrator endpoint",
   );
 });
 
@@ -144,22 +182,22 @@ test(
       /case "claude"/.test(src) &&
         /case "gemini"/.test(src) &&
         /case "gpt"/.test(src),
-      "buildCLICommand must branch for claude / gemini / gpt"
+      "buildCLICommand must branch for claude / gemini / gpt",
     );
     // Each branch must produce its own isolated env (PTY isolation per claim 1)
     assert(
       /CODEX_HOME/.test(src),
-      "codex branch must isolate via CODEX_HOME (claim 1 격리)"
+      "codex branch must isolate via CODEX_HOME (claim 1 격리)",
     );
     assert(
       /HOME:\s*geminiHome/.test(src),
-      "gemini branch must isolate via per-agent HOME"
+      "gemini branch must isolate via per-agent HOME",
     );
     assert(
       /--mcp-config/.test(src),
-      "claude branch must inject per-agent MCP config"
+      "claude branch must inject per-agent MCP config",
     );
-  }
+  },
 );
 
 test(
@@ -169,9 +207,9 @@ test(
     const src = readFile("electron/agent-config.ts");
     assert(
       /\[features\]/.test(src) || /features.*strip/i.test(src),
-      "generateGPTConfig must strip [features] section from inherited user config"
+      "generateGPTConfig must strip [features] section from inherited user config",
     );
-  }
+  },
 );
 
 // ── Tier 2: behavior (LLM-billable, gated) ──────────────────
@@ -179,7 +217,7 @@ test(
 const RUN_LLM = process.env.RUN_LLM_E2E === "1";
 
 test(
-  "three heterogeneous agents (claude+codex+gemini) can all spawn alive concurrently",
+  "four heterogeneous agents (claude+codex+gemini+antigravity) can all spawn alive concurrently",
   "behavior",
   async () => {
     if (!RUN_LLM) {
@@ -203,7 +241,7 @@ test(
 
     // codex with autotrust (mirrors generateGPTConfig fix)
     const codexHome = fs.mkdtempSync(
-      path.join(os.tmpdir(), "marblo-collab-codex-")
+      path.join(os.tmpdir(), "marblo-collab-codex-"),
     );
     const realCwd = (() => {
       try {
@@ -215,10 +253,10 @@ test(
     fs.writeFileSync(
       path.join(codexHome, "config.toml"),
       `[projects.${JSON.stringify(
-        cwd
+        cwd,
       )}]\ntrust_level = "trusted"\n[projects.${JSON.stringify(
-        realCwd
-      )}]\ntrust_level = "trusted"\n`
+        realCwd,
+      )}]\ntrust_level = "trusted"\n`,
     );
     const userAuth = path.join(os.homedir(), ".codex/auth.json");
     if (fs.existsSync(userAuth)) {
@@ -234,6 +272,8 @@ test(
         args: ["--dangerously-skip-permissions"],
         env: {} as NodeJS.ProcessEnv,
         readyPattern: /\? for shortcuts|Type your message/i,
+        // Claude has no blocking startup dialog when --dangerously-skip-permissions
+        autoDismiss: undefined as { pattern: RegExp; keys: string } | undefined,
       },
       {
         name: "codex",
@@ -246,6 +286,7 @@ test(
         ],
         env: { CODEX_HOME: codexHome },
         readyPattern: /Explain this codebase|esc to interrupt/i,
+        autoDismiss: undefined,
       },
       {
         name: "gemini",
@@ -253,6 +294,23 @@ test(
         args: ["--skip-trust", "--yolo"],
         env: {},
         readyPattern: /Type your message|\? for shortcuts/i,
+        autoDismiss: undefined,
+      },
+      {
+        // Antigravity (agy) — verified post-trust uses the same
+        // `? for shortcuts` footer as Claude. The blocker is the
+        // trust dialog on first visit to a cwd, defaulted to "Yes"
+        // so a bare \r accepts. Without auto-dismiss this test would
+        // hang at the dialog and time out.
+        name: "antigravity",
+        cmd: "agy",
+        args: [],
+        env: {},
+        readyPattern: /\? for shortcuts/i,
+        autoDismiss: {
+          pattern: /Do you trust the contents of this project/i,
+          keys: "\r",
+        },
       },
     ];
 
@@ -270,9 +328,21 @@ test(
         buffer: "",
         alive: true,
         readyPattern: spec.readyPattern,
+        autoDismiss: spec.autoDismiss,
+        dismissed: false,
       };
       proc.onData((d) => {
         session.buffer += d;
+        if (
+          session.autoDismiss &&
+          !session.dismissed &&
+          session.autoDismiss.pattern.test(session.buffer)
+        ) {
+          session.dismissed = true;
+          setTimeout(() => {
+            session.proc.write(session.autoDismiss!.keys);
+          }, 300);
+        }
       });
       proc.onExit(() => {
         session.alive = false;
@@ -280,10 +350,11 @@ test(
       sessions.push(session);
     }
 
-    // Wait up to 30s for all three to reach ready state
+    // Wait up to 45s for all CLIs to reach ready state (45 not 30 — agy's
+    // first-run OAuth can stretch the window past Claude/Codex/Gemini).
     const start = Date.now();
     let allReady = false;
-    while (Date.now() - start < 30000) {
+    while (Date.now() - start < 45000) {
       allReady = sessions.every((s) => s.readyPattern.test(s.buffer));
       if (allReady) break;
       await new Promise((r) => setTimeout(r, 200));
@@ -291,16 +362,16 @@ test(
 
     const alive = sessions.filter((s) => s.alive).length;
     assert(
-      alive === 3,
-      `expected all 3 CLIs alive after spawn, got ${alive} (${sessions
+      alive === sessions.length,
+      `expected all ${sessions.length} CLIs alive after spawn, got ${alive} (${sessions
         .map((s) => `${s.name}=${s.alive}`)
-        .join(", ")})`
+        .join(", ")})`,
     );
     assert(
       allReady,
-      `not all CLIs reached ready state within 30s (${sessions
+      `not all CLIs reached ready state within 45s (${sessions
         .map((s) => `${s.name}=${s.readyPattern.test(s.buffer)}`)
-        .join(", ")})`
+        .join(", ")})`,
     );
 
     // Cleanup
@@ -309,7 +380,7 @@ test(
         s.proc.kill();
       } catch {}
     }
-  }
+  },
 );
 
 // ── runner ────────────────────────────────────────────────

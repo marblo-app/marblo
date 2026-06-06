@@ -16,6 +16,10 @@ import type {
   DispatchTaskResponse,
 } from "../bridge-server";
 import type { AgentManager } from "../agent-manager";
+import {
+  composeTaskBody,
+  taskBodyStorageFields,
+} from "../mcp-server/task-body.js";
 
 // 미션 goal 을 decompose → tasks 컬렉션에 write → bridgeServer 의 dispatchTask 로
 // 에이전트 spawn/reuse. orchestrator MCP create_tasks_bulk + dispatch_task 가
@@ -37,7 +41,7 @@ export interface TaskDispatcherDeps {
 function resolveDeps(
   rawDeps: string[] | undefined,
   indexToId: Record<number, string>,
-  selfIndex: number
+  selfIndex: number,
 ): string[] {
   if (!rawDeps?.length) return [];
   const out: string[] = [];
@@ -63,20 +67,27 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
     missionId: string;
     projectId: string;
     goal: string;
+    priorContext?: string;
   }): Promise<string[]> {
     await ready;
+
+    // priorContext (e.g. /plan-eng-review) 가 있으면 decomposer 의 goal 에 합쳐
+    // 더 풍부한 task 분해 + 각 task description 에도 컨텍스트가 반영되도록.
+    const enrichedGoal = input.priorContext
+      ? `${input.goal}\n\n--- Prior planning / context ---\n${input.priorContext}\n--- end ---`
+      : input.goal;
 
     // 1) Decompose
     let tasks: DecomposedTask[];
     try {
-      const decomposed = await deps.decomposer().decompose(input.goal);
+      const decomposed = await deps.decomposer().decompose(enrichedGoal);
       tasks = decomposed.tasks;
     } catch (e) {
       log("decompose failed — falling back to single task", { err: String(e) });
       tasks = [
         {
           title: input.goal.slice(0, 80),
-          description: input.goal,
+          description: enrichedGoal,
           role: "backend",
           priority: 3,
           depends_on: [],
@@ -100,7 +111,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
       const resolvedDeps = resolveDeps(t.depends_on, indexToId, i);
       const docPayload = {
         title: t.title,
-        description: t.description,
+        ...taskBodyStorageFields(t),
         role: t.role,
         priority: t.priority,
         status: "TODO",
@@ -114,6 +125,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
         hasPmFeedback: false,
         projectId: input.projectId,
         missionId: input.missionId,
+        contextId: input.missionId,
         createdAt: now,
         updatedAt: now,
       };
@@ -132,7 +144,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
       try {
         const result = deps.dispatchOne({
           role: t.role,
-          instruction: t.description,
+          instruction: composeTaskBody(t),
           taskId,
           complexity: "standard",
           projectId: input.projectId,
@@ -156,7 +168,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
   }
 
   async function getTaskStatuses(
-    taskIds: string[]
+    taskIds: string[],
   ): Promise<Record<string, TaskStatusLite>> {
     await ready;
     const out: Record<string, TaskStatusLite> = {};
@@ -172,7 +184,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
         } catch (e) {
           log("getTaskStatus failed", { taskId: id, err: String(e) });
         }
-      })
+      }),
     );
     return out;
   }

@@ -193,7 +193,7 @@ interface SubscriptionPlanEntry {
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json"
+  "subscription-plans.json",
 );
 
 let _subPlanCache: SubscriptionPlanEntry[] | null = null;
@@ -327,7 +327,7 @@ export type ModelPreset =
   | "recommended"
   | "balanced"
   | "codex-only"
-  | "gemini-only";
+  | "antigravity-only";
 
 export const MODEL_PRESETS: Record<
   ModelPreset,
@@ -340,23 +340,23 @@ export const MODEL_PRESETS: Record<
   },
   recommended: {
     label: "Marblo Recommended",
-    models: ["claude", "claude", "claude", "gemini", "gpt"],
-    description: "Claude 60% + Gemini 20% + Codex 20% (cost-optimized)",
+    models: ["claude", "claude", "claude", "antigravity", "gpt"],
+    description: "Claude 60% + Antigravity 20% + Codex 20% (cost-optimized)",
   },
   balanced: {
     label: "Balanced",
-    models: ["claude", "gemini", "gpt"],
-    description: "Equal rotation across all models",
+    models: ["claude", "antigravity", "gpt"],
+    description: "Equal rotation across Claude / Antigravity / Codex",
   },
   "codex-only": {
-    label: "Codex/GPT 100%",
+    label: "Codex 100%",
     models: ["gpt"],
-    description: "All agents use OpenAI Codex/GPT",
+    description: "All agents use OpenAI Codex (model id 'gpt')",
   },
-  "gemini-only": {
-    label: "Gemini 100%",
-    models: ["gemini"],
-    description: "All agents use Google Gemini",
+  "antigravity-only": {
+    label: "Antigravity 100%",
+    models: ["antigravity"],
+    description: "All agents use Google Antigravity (agy)",
   },
 };
 
@@ -365,6 +365,40 @@ export function resolvePreset(preset?: string): ModelType[] {
     return MODEL_PRESETS[preset as ModelPreset].models;
   }
   return MODEL_PRESETS["recommended"].models;
+}
+
+// ── Model alias normalization ───────────────────────────────
+//
+// The user-facing / orchestrator-facing name for OpenAI's CLI is "Codex"
+// (the binary is literally `codex`); there is NO "gpt" CLI. Internally we
+// still key everything off the ModelType `"gpt"`, so callers that say
+// "codex" (the natural word a user/orchestrator uses) must be folded onto
+// "gpt" before any spawn/score logic runs. Same idea for agy → antigravity.
+// Folding aliases at the spawn chokepoint (bridge-server) is why an
+// explicit "코덱스 스폰해줘" no longer silently mis-routes.
+const MODEL_ALIASES: Record<string, ModelType> = {
+  claude: "claude",
+  codex: "gpt", // ← the important one: Codex CLI == ModelType "gpt"
+  gpt: "gpt",
+  gemini: "gemini", // retained for back-compat with existing gemini agents
+  antigravity: "antigravity",
+  agy: "antigravity",
+  local: "local",
+  custom: "custom",
+};
+
+/**
+ * Fold a free-form model string (e.g. "codex", "GPT", "agy") onto a canonical
+ * ModelType. Returns undefined for unknown input so callers can fall back to
+ * tag scoring instead of silently defaulting to a wrong model.
+ */
+export function normalizeModel(model?: string): ModelType | undefined {
+  if (!model) return undefined;
+  const key = model.trim().toLowerCase();
+  if (MODEL_ALIASES[key]) return MODEL_ALIASES[key];
+  // "gpt-5", "gpt-4.1" 등 구체 모델 슬러그도 Codex(gpt)로 접는다.
+  if (key.startsWith("gpt") || key.startsWith("codex")) return "gpt";
+  return undefined;
 }
 
 // ── Constraints ─────────────────────────────────────────────
@@ -378,7 +412,7 @@ export function scoreAgents(
   agents: AgentInfo[],
   role: string,
   preferredModel?: ModelType,
-  tags: string[] = []
+  tags: string[] = [],
 ): ScoredAgent[] {
   const results: ScoredAgent[] = [];
 
@@ -416,7 +450,7 @@ export function scoreAgents(
     if (preferredModel && agent.model === preferredModel) {
       score += WEIGHTS.modelPreference;
       reasons.push(
-        `model=${preferredModel} matched (+${WEIGHTS.modelPreference})`
+        `model=${preferredModel} matched (+${WEIGHTS.modelPreference})`,
       );
     }
 
@@ -431,7 +465,7 @@ export function scoreAgents(
     }
     if (tagMatches > 0) {
       reasons.push(
-        `${tagMatches} tag(s) matched (+${tagMatches * WEIGHTS.tagBonus})`
+        `${tagMatches} tag(s) matched (+${tagMatches * WEIGHTS.tagBonus})`,
       );
     }
 
@@ -463,7 +497,7 @@ let modelRoundRobin = 0;
 
 export function scoreModels(
   enabledModels: ModelType[],
-  tags: string[]
+  tags: string[],
 ): ModelType {
   // Score every enabled model first so we can both pick the winner and
   // detect ties / near-ties.
@@ -532,10 +566,10 @@ export function scoreModels(
 
 export function checkSpawnConstraints(
   agents: AgentInfo[],
-  role: string
+  role: string,
 ): { allowed: boolean; error?: string } {
   const activeAgents = agents.filter(
-    (a) => a.status !== "stopped" && a.status !== "error"
+    (a) => a.status !== "stopped" && a.status !== "error",
   );
   if (activeAgents.length >= MAX_AGENTS) {
     return {

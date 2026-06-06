@@ -83,6 +83,7 @@ interface AgentAPI {
     initialPrompt?: string,
     resumeSessionId?: string,
     projectId?: string,
+    taskId?: string,
   ) => Promise<{ id: string; ptySessionId: string; status: string }>;
   stop: (id: string) => Promise<void>;
   restart: (
@@ -131,6 +132,9 @@ interface AgentAPI {
       taskId?: string;
       taskType?: string;
       sessionId?: string;
+      detectedPlanType?: string;
+      rateLimitPercent?: number;
+      rateLimitResetAt?: number;
     }) => void,
   ) => void;
   offCostUpdate: () => void;
@@ -310,6 +314,7 @@ interface SubscriptionPlansAPI {
 }
 
 interface ClipboardAPI {
+  readText: () => Promise<string>;
   getImagePath: () => Promise<string | null>;
   getFilePaths: () => Promise<string[]>;
 }
@@ -342,6 +347,91 @@ interface SystemAPI {
   offWake: () => void;
 }
 
+interface WorktreeStatus {
+  branch: string;
+  baseRef: string;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  mergeable: boolean;
+  conflicts: string[];
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
+interface WorktreeStaleInfo {
+  merged: boolean;
+  idleDays: number;
+  stale: boolean;
+}
+
+interface WorktreeListItem {
+  path: string;
+  branch: string;
+  head: string;
+  status: WorktreeStatus;
+  /** Cleanup candidate (merged into base or long idle). Main worktree → false. */
+  stale?: boolean;
+  /** Full stale verdict; omitted for the main worktree. */
+  staleInfo?: WorktreeStaleInfo;
+}
+
+interface WorktreeProjectGroup {
+  projectId: string;
+  repoRoot: string;
+  baseRef: string;
+  worktrees: WorktreeListItem[];
+}
+
+interface WorktreeMergeArgs {
+  repoRoot: string;
+  path: string;
+  baseRef: string;
+  branch: string;
+}
+
+interface WorktreeResolveArgs extends WorktreeMergeArgs {
+  projectId?: string;
+  taskId?: string;
+  conflicts?: string[];
+}
+
+interface WorktreeAPI {
+  list: () => Promise<WorktreeProjectGroup[]>;
+  refresh: () => Promise<WorktreeProjectGroup[]>;
+  status: (path: string, baseRef: string) => Promise<WorktreeStatus>;
+  remove: (
+    repoRoot: string,
+    path: string,
+    deleteBranch?: boolean,
+  ) => Promise<{ success: boolean }>;
+  prune: (repoRoot: string) => Promise<{ success: boolean }>;
+  cleanupStale: (
+    repoRoot: string,
+    maxIdleDays?: number,
+  ) => Promise<{
+    removed: string[];
+    failed: { path: string; error: string }[];
+  }>;
+  rebase: (
+    path: string,
+    baseRef: string,
+  ) => Promise<{ ok: boolean; conflicts?: string[] }>;
+  merge: (args: WorktreeMergeArgs) => Promise<{
+    ok: boolean;
+    needsResolve?: boolean;
+    conflicts?: string[];
+    error?: string;
+  }>;
+  resolve: (args: WorktreeResolveArgs) => Promise<{
+    success: boolean;
+    agentId?: string;
+    stub?: boolean;
+    reason?: string;
+  }>;
+}
+
 interface WindowAPI {
   /** True for File > New Window / Cmd+Shift+N windows. */
   isNewWindow: () => boolean;
@@ -369,6 +459,7 @@ interface HarnessPackage {
   };
   detect: { path?: string; mcpKey?: string; binary?: string };
   url?: string;
+  deprecated?: { note: string };
   status: "installed" | "not-installed" | "manual-required" | "unknown";
 }
 
@@ -411,18 +502,28 @@ interface UpdaterAPI {
 interface TestModeAPI {
   /** Main process 가 MARBLO_TEST_BYPASS_AUTH=1 로 launch 됐을 때만 true. */
   bypassAuth: boolean;
+  /** MARBLO_TEST_MISSIONS_INMEM=1 로 launch 됐을 때만 true. missionService 가
+   * Firestore 대신 in-memory 백엔드를 써 결정적 미션탭 E2E 를 가능케 한다. */
+  missionsInMemory: boolean;
+}
+
+interface ClaudeAPI {
+  version: () => Promise<{ command: string; version: string }>;
+  cliVersions: () => Promise<Record<string, string>>;
 }
 
 interface ElectronAPI {
   platform: string;
   testMode: TestModeAPI;
   window: WindowAPI;
+  claude: ClaudeAPI;
   harness: HarnessAPI;
   send: (channel: string, data: unknown) => void;
   on: (channel: string, callback: (...args: unknown[]) => void) => void;
   off: (channel: string) => void;
   pty: PtyAPI;
   agent: AgentAPI;
+  worktree: WorktreeAPI;
   orchestrator: OrchestratorAPI;
   orchestratorSession: OrchestratorSessionAPI;
   missionOrchestrator: MissionOrchestratorAPI;

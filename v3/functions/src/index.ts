@@ -46,7 +46,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
 
@@ -56,7 +56,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
     if (!subSnap.exists || !subSnap.data()?.paddleSubscriptionId) {
       throw new functions.https.HttpsError(
         "not-found",
-        "구독 정보를 찾을 수 없습니다."
+        "구독 정보를 찾을 수 없습니다.",
       );
     }
 
@@ -71,7 +71,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ effective_from: "next_billing_period" }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -79,12 +79,12 @@ export const cancelPaddleSubscription = functions.https.onCall(
       console.error("Paddle cancel failed:", error);
       throw new functions.https.HttpsError(
         "internal",
-        "구독 취소에 실패했습니다."
+        "구독 취소에 실패했습니다.",
       );
     }
 
     return { success: true };
-  }
+  },
 );
 
 // ─── Paddle Webhook ──────────────────────────────────────────────
@@ -163,12 +163,12 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
         if (data.current_billing_period) {
           if (data.current_billing_period.starts_at) {
             update.currentPeriodStart = admin.firestore.Timestamp.fromDate(
-              new Date(data.current_billing_period.starts_at)
+              new Date(data.current_billing_period.starts_at),
             );
           }
           if (data.current_billing_period.ends_at) {
             update.currentPeriodEnd = admin.firestore.Timestamp.fromDate(
-              new Date(data.current_billing_period.ends_at)
+              new Date(data.current_billing_period.ends_at),
             );
           }
         }
@@ -240,7 +240,7 @@ export const createTossCheckout = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
 
@@ -249,7 +249,7 @@ export const createTossCheckout = functions.https.onCall(
     if (!amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "유효하지 않은 플랜입니다."
+        "유효하지 않은 플랜입니다.",
       );
     }
 
@@ -265,7 +265,7 @@ export const createTossCheckout = functions.https.onCall(
     });
 
     return { orderId, amount, planType };
-  }
+  },
 );
 
 // ─── Confirm Toss Payment ────────────────────────────────────────
@@ -274,7 +274,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
 
@@ -288,7 +288,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (!orderSnap.exists) {
       throw new functions.https.HttpsError(
         "not-found",
-        "주문을 찾을 수 없습니다."
+        "주문을 찾을 수 없습니다.",
       );
     }
 
@@ -296,7 +296,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (order.amount !== amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "결제 금액이 일치하지 않습니다."
+        "결제 금액이 일치하지 않습니다.",
       );
     }
 
@@ -316,7 +316,7 @@ export const confirmTossPayment = functions.https.onCall(
       console.error("TossPayments confirm failed:", error);
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "결제 승인에 실패했습니다."
+        error.message || "결제 승인에 실패했습니다.",
       );
     }
 
@@ -349,7 +349,7 @@ export const confirmTossPayment = functions.https.onCall(
     });
 
     return { success: true };
-  }
+  },
 );
 
 // ─── TossPayments Webhook ────────────────────────────────────────
@@ -413,19 +413,19 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
       method: "POST",
       headers: {
         Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-          "base64"
+          "base64",
         )}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ authKey, customerKey }),
-    }
+    },
   );
 
   if (!response.ok) {
     const error = await response.json();
     throw new functions.https.HttpsError(
       "internal",
-      error.message || "Failed to issue billing key"
+      error.message || "Failed to issue billing key",
     );
   }
 
@@ -452,7 +452,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
         currentPeriodEnd: periodEnd,
         createdAt: now,
       },
-      { merge: true }
+      { merge: true },
     );
 
   return { success: true, billingKey };
@@ -470,7 +470,7 @@ export const chargeBillingKey = functions.https.onCall(
         method: "POST",
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64"
+            "base64",
           )}`,
           "Content-Type": "application/json",
         },
@@ -480,14 +480,14 @@ export const chargeBillingKey = functions.https.onCall(
           orderId,
           orderName,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
       const error = await response.json();
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "Failed to charge billing key"
+        error.message || "Failed to charge billing key",
       );
     }
 
@@ -505,7 +505,7 @@ export const chargeBillingKey = functions.https.onCall(
     });
 
     return { success: true, paymentKey: responseData.paymentKey };
-  }
+  },
 );
 
 // 토스 정기결제 취소
@@ -521,7 +521,7 @@ export const cancelTossSubscription = functions.https.onCall(
     });
 
     return { success: true };
-  }
+  },
 );
 
 // ============================================
@@ -546,7 +546,7 @@ export const createLectureOrder = functions.https.onCall(
     if (!existingPurchase.empty) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "Already purchased this lecture"
+        "Already purchased this lecture",
       );
     }
 
@@ -573,7 +573,7 @@ export const createLectureOrder = functions.https.onCall(
     });
 
     return { orderId, amount, orderName };
-  }
+  },
 );
 
 // 강의 단건결제 확인
@@ -591,19 +591,19 @@ export const confirmLecturePayment = functions.https.onCall(
         method: "POST",
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64"
+            "base64",
           )}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ paymentKey, orderId, amount }),
-      }
+      },
     );
 
     if (!response.ok) {
       const error = await response.json();
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "Payment confirmation failed"
+        error.message || "Payment confirmation failed",
       );
     }
 
@@ -630,7 +630,7 @@ export const confirmLecturePayment = functions.https.onCall(
     await issueLectureCouponInternal(userId);
 
     return { success: true };
-  }
+  },
 );
 
 // ============================================
@@ -643,7 +643,7 @@ export const validateCoupon = functions.https.onCall(async (data, context) => {
   if (!code)
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Coupon code required"
+      "Coupon code required",
     );
 
   // Rate limit: stops brute-force code guessing. Per-uid (5/min, 30/5min)
@@ -655,14 +655,14 @@ export const validateCoupon = functions.https.onCall(async (data, context) => {
   if (!uidCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`
+      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`,
     );
   }
   const ipCheck = await enforceRateLimit(ipKey, COUPON_RULES_IP);
   if (!ipCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`
+      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`,
     );
   }
 
@@ -717,19 +717,19 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
   const ip = extractIp(context.rawRequest);
   const uidCheck = await enforceRateLimit(
     `coupon:uid:${userId}`,
-    COUPON_RULES_UID
+    COUPON_RULES_UID,
   );
   if (!uidCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`
+      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`,
     );
   }
   const ipCheck = await enforceRateLimit(`coupon:ip:${ip}`, COUPON_RULES_IP);
   if (!ipCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`
+      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`,
     );
   }
 
@@ -746,7 +746,7 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
   switch (coupon.type) {
     case "discount":
       discountAmount = Math.round(
-        (baseAmount * (coupon.discountPercent || 0)) / 100
+        (baseAmount * (coupon.discountPercent || 0)) / 100,
       );
       finalAmount = baseAmount - discountAmount;
       break;
@@ -790,7 +790,7 @@ export const createCouponBatch = functions.https.onCall(
     if (!Array.isArray(coupons) || coupons.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Coupons array required"
+        "Coupons array required",
       );
     }
 
@@ -812,7 +812,7 @@ export const createCouponBatch = functions.https.onCall(
 
     await batch.commit();
     return { created: coupons.length };
-  }
+  },
 );
 
 // 강의 구매 → 앱 쿠폰 자동 발급 (내부 함수)
@@ -846,14 +846,16 @@ export const issueLectureCoupon = functions.https.onCall(
 
     await issueLectureCouponInternal(userId);
     return { couponCode: "LECTURE2026" };
-  }
+  },
 );
 
 // ─── Telemetry → BigQuery ─────────────────────────────────────
 
 interface TelemetryRow {
   event: string;
-  userId: string;
+  /** Anonymous per-install id (see telemetryService.getClientId). Stored in
+   *  place of the Firebase uid so the events table stays 비식별(익명). */
+  clientId?: string;
   appVersion: string;
   projectId?: string;
   agentId?: string;
@@ -897,23 +899,25 @@ export const logTelemetryBatch = functions.https.onCall(
     if (!Array.isArray(events) || events.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "events array required"
+        "events array required",
       );
     }
 
     if (events.length > 100) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Max 100 events per batch"
+        "Max 100 events per batch",
       );
     }
 
-    const userId = context.auth.uid;
+    // Auth is required for anti-abuse, but we deliberately DO NOT persist the
+    // uid. The events table is 비식별(익명): the `userId` column now holds the
+    // client-supplied anonymous install id, never the Firebase account uid.
     const now = new Date().toISOString();
 
     const rows = events.map((e) => ({
       event: e.event,
-      userId,
+      userId: e.clientId || "anon",
       appVersion: e.appVersion || "3.0.0",
       projectId: e.projectId || null,
       agentId: e.agentId || null,
@@ -956,7 +960,7 @@ export const logTelemetryBatch = functions.https.onCall(
     await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
 
     return { inserted: rows.length };
-  }
+  },
 );
 
 interface CostRow {
@@ -984,7 +988,7 @@ export const logCostBatch = functions.https.onCall(async (data, context) => {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "entries array required"
+      "entries array required",
     );
   }
 
@@ -1024,7 +1028,7 @@ export const getCostLogs = functions.https.onCall(async (data, context) => {
   if (!projectId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "projectId required"
+      "projectId required",
     );
   }
 
@@ -1061,15 +1065,16 @@ export const logTaskOutcome = functions.https.onCall(async (data, context) => {
   if (!d || !d.taskId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "outcome with taskId required"
+      "outcome with taskId required",
     );
   }
 
-  const userId = context.auth.uid;
+  // 비식별: store the anonymous client id, not the account uid (anti-abuse
+  // auth above is enough — the row itself stays de-identified).
   const now = new Date().toISOString();
 
   const row = {
-    userId,
+    userId: d.clientId || "anon",
     taskId: d.taskId,
     projectId: d.projectId || null,
     taskType: d.taskType || null,
@@ -1110,22 +1115,22 @@ export const logHeartbeat = functions.https.onCall(async (data, context) => {
   if (!Array.isArray(beats) || beats.length === 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "beats array required"
+      "beats array required",
     );
   }
 
   if (beats.length > 50) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Max 50 beats per batch"
+      "Max 50 beats per batch",
     );
   }
 
-  const userId = context.auth.uid;
+  // 비식별: heartbeats carry the anonymous client id, not the account uid.
   const now = new Date().toISOString();
 
   const rows = beats.map((b: Record<string, unknown>) => ({
-    userId,
+    userId: (b.clientId as string) || "anon",
     agentId: b.agentId || "",
     projectId: b.projectId || null,
     status: b.status || null,
@@ -1154,7 +1159,7 @@ export const logFlowExecution = functions.https.onCall(
     if (!d || !d.flowId || !d.runId) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "execution with flowId and runId required"
+        "execution with flowId and runId required",
       );
     }
 
@@ -1184,7 +1189,7 @@ export const logFlowExecution = functions.https.onCall(
       .insert([row]);
 
     return { inserted: 1 };
-  }
+  },
 );
 
 // ============================================
@@ -1222,5 +1227,5 @@ export const triggerReconcile = functions.https.onCall(
     const provider = (data?.provider as string) || "toss";
     if (provider === "paddle") return reconcilePaddlePending();
     return reconcileTossPending();
-  }
+  },
 );

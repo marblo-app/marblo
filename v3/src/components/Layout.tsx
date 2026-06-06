@@ -7,9 +7,11 @@ import OrchestratorPanel from "./orchestrator/OrchestratorPanel";
 import { BoardTab } from "./tabs/BoardTab";
 import { CodeTab } from "./tabs/CodeTab";
 import { AgentsTab } from "./tabs/AgentsTab";
+import { UsagePage } from "./usage/UsagePage";
 import { FlowsTab } from "./tabs/FlowsTab";
 import { MissionsTab } from "./tabs/MissionsTab";
 import { DeployTab } from "./tabs/DeployTab";
+import { WorktreeTab } from "./tabs/WorktreeTab";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PlanGate } from "./settings/PlanGate";
 import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
@@ -51,8 +53,10 @@ const tabComponents: Record<TabId, () => JSX.Element> = {
   missions: MissionsTab,
   code: CodeTab,
   agents: AgentsTab,
+  usage: UsagePage,
   flows: GatedFlowsTab,
   deploy: DeployTab,
+  worktrees: WorktreeTab,
   harness: HarnessTabPanel,
   settings: SettingsPage,
 };

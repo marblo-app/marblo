@@ -51,6 +51,38 @@ function toDate(v: unknown): Date {
   return new Date(v as string | number);
 }
 
+function summarizeEventPayload(event: TimelineEvent): string {
+  const p = event.payload ?? {};
+  const pick = (k: string): string => {
+    const v = (p as Record<string, unknown>)[k];
+    return v == null ? "" : String(v);
+  };
+  switch (event.type) {
+    case "step.started":
+      return `Step ${Number(pick("index")) + 1} · ${pick("skill") || pick("type")}`;
+    case "step.completed":
+      return `Step ${Number(pick("index")) + 1} · ${pick("skill") || pick("type")} 완료`;
+    case "step.failed":
+      return `Step ${Number(pick("index")) + 1} 실패 · ${pick("error") || "unknown"}`;
+    case "agent.dispatched":
+      return `Task ${pick("taskId")} dispatched`;
+    case "agent.completed":
+      return `Task ${pick("taskId")} done`;
+    case "agent.stuck":
+      return `Agent ${pick("agentId")} stuck`;
+    case "supervisor.note":
+      return pick("message");
+    case "mission.paused":
+      return `Paused · ${pick("kind") || pick("reason")}`;
+    case "mission.resumed":
+      return `Resumed from ${pick("from")}`;
+    default: {
+      const json = JSON.stringify(p);
+      return json.length > 200 ? json.slice(0, 200) + "..." : json;
+    }
+  }
+}
+
 function rawToMission(id: string, raw: MissionDoc): Mission {
   return {
     id,
@@ -97,7 +129,7 @@ export function createMissionStore(deps: MissionStoreDeps): MissionStore {
   }
 
   async function createMission(
-    data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">
+    data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">,
   ): Promise<string> {
     await ready;
     const now = Timestamp.now();
@@ -113,7 +145,7 @@ export function createMissionStore(deps: MissionStoreDeps): MissionStore {
 
   async function updateMission(
     missionId: string,
-    patch: Partial<Omit<Mission, "id" | "launchedAt">>
+    patch: Partial<Omit<Mission, "id" | "launchedAt">>,
   ): Promise<void> {
     await ready;
     const payload: Record<string, unknown> = {
@@ -128,7 +160,7 @@ export function createMissionStore(deps: MissionStoreDeps): MissionStore {
 
   async function appendTimelineEvent(
     missionId: string,
-    event: TimelineEvent
+    event: TimelineEvent,
   ): Promise<void> {
     // missionService 와 동일하게 단순 read-modify-write. owner orchestrator 단독
     // 쓰기 가정 — 다중 동시 쓰기가 필요해지면 transaction 으로 교체.
@@ -137,12 +169,27 @@ export function createMissionStore(deps: MissionStoreDeps): MissionStore {
     await updateMission(missionId, {
       contextLog: [...mission.contextLog, event],
     });
+    // Activity Stream 패널은 audit_logs 컬렉션을 구독한다. mission timeline 이벤트도
+    // 거기에 미러링하면 우측 stream 패널에 즉시 나타난다. fire-and-forget — 실패해도
+    // 미션 진행을 막지 않음.
+    addDoc(collection(db, "audit_logs"), {
+      projectId: mission.projectId,
+      agentId: `mission:${missionId.slice(0, 8)}`,
+      toolName: `mission.${event.type}`,
+      params: { missionId, goal: mission.goal },
+      result: summarizeEventPayload(event),
+      duration: 0,
+      success: !event.type.endsWith(".failed"),
+      createdAt: Timestamp.now(),
+    }).catch((err) =>
+      console.warn("[MissionStore] audit_logs mirror failed:", String(err)),
+    );
   }
 
   async function updateMissionStep(
     missionId: string,
     stepIndex: number,
-    patch: Partial<MissionStep>
+    patch: Partial<MissionStep>,
   ): Promise<void> {
     const mission = await getMission(missionId);
     if (!mission) throw new Error(`Mission not found: ${missionId}`);
@@ -157,7 +204,7 @@ export function createMissionStore(deps: MissionStoreDeps): MissionStore {
   async function setMissionStatus(
     missionId: string,
     status: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string }
+    extras?: { completedAt?: Date; abandonedReason?: string },
   ): Promise<void> {
     const patch: Partial<Omit<Mission, "id" | "launchedAt">> = { status };
     if (extras?.completedAt) patch.completedAt = extras.completedAt;

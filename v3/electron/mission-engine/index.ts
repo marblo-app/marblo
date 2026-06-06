@@ -88,7 +88,10 @@ export class MissionEngine {
         `Cannot resume terminal mission ${missionId} (status=${mission.status})`,
       );
     }
+    // planning: UI 에서 직접 doc 만 만든 미션을 engine 이 인계받는 경로.
+    // sleeping / waiting_for_human: 일반 wake-up 경로.
     if (
+      mission.status === "planning" ||
       mission.status === "sleeping" ||
       mission.status === "waiting_for_human"
     ) {
@@ -215,10 +218,59 @@ export class MissionEngine {
       },
     });
 
+    // liveOutput write 는 step-executor 가 호출하는 throttle 된 콜백 안에서.
+    // skill-runner 자체도 throttle 하지만 Firestore write 도 한 번 더 막아 cost 절감.
+    const liveOutputThrottleMs = 1_500;
+    let lastLiveWriteAt = 0;
+    let lastLivePayload = "";
+    const onProgress = (chunk: string) => {
+      const now = Date.now();
+      if (now - lastLiveWriteAt < liveOutputThrottleMs) return;
+      if (chunk === lastLivePayload) return;
+      lastLiveWriteAt = now;
+      lastLivePayload = chunk;
+      this.deps.store
+        .updateMissionStep(mission.id, step.index, { liveOutput: chunk })
+        .catch((err) =>
+          this.log("liveOutput write failed", {
+            err: String(err),
+            missionId: mission.id,
+            stepIndex: step.index,
+          }),
+        );
+    };
+
+    // 직전 success step (가까운 것부터) 의 output 을 컨텍스트로 활용.
+    //   - gstack step: PTY 에 prelude 주입 → claude conversation 에 컨텍스트 연결
+    //   - dispatch/fix step: 코딩 agent 의 task description / instruction 에 합쳐짐
+    //   - wait step: 컨텍스트 의미 없음 (단순 polling)
+    let chainPrelude: string | undefined;
+    if (step.type !== "wait" && step.index > 0) {
+      const prev = mission.steps
+        .slice(0, step.index)
+        .reverse()
+        .find((s) => s.status === "success" && typeof s.output === "string");
+      if (prev) {
+        const outTail = (prev.output as string).slice(-2000);
+        if (step.type === "gstack") {
+          chainPrelude =
+            `[Marblo Mission] 이전 step \`${prev.skill ?? prev.type}\` 결과 요약입니다.` +
+            ` 다음 작업은 이 결과를 반영해서 진행해주세요. (긴 메시지는 한 줄로 ack 만 해도 OK.)\n\n` +
+            `--- 직전 step 결과 (마지막 2000자) ---\n${outTail}\n--- end ---`;
+        } else {
+          // fix / dispatch — agent task description 에 임베드되므로 ack 요청 불필요.
+          chainPrelude =
+            `Previous step: ${prev.skill ?? prev.type}\n` + outTail;
+        }
+      }
+    }
+
     const result = await executeStep(mission, step, {
       skillRunner: this.deps.skillRunner,
       dispatcher: this.deps.dispatcher,
       fixRunner: this.deps.fixRunner,
+      onProgress,
+      chainPrelude,
     });
 
     // wait step pending → sleeping 전환 (retry 아님)
@@ -264,7 +316,12 @@ export class MissionEngine {
     }
 
     if (result.success) {
-      return this.markSuccessAndAdvance(mission, step.index, result.output);
+      return this.markSuccessAndAdvance(
+        mission,
+        step.index,
+        result.output,
+        result.userInputDetected,
+      );
     }
     return this.handleFailure(mission, step.index, result.error);
   }
@@ -273,6 +330,7 @@ export class MissionEngine {
     mission: Mission,
     stepIndex: number,
     output: unknown,
+    userInputDetected?: string,
   ): Promise<boolean> {
     const completedAt = this.now();
     const step = mission.steps[stepIndex];
@@ -281,6 +339,7 @@ export class MissionEngine {
       output,
       completedAt,
       error: undefined,
+      liveOutput: undefined,
     });
     await this.deps.store.appendTimelineEvent(mission.id, {
       ts: completedAt,
@@ -291,6 +350,38 @@ export class MissionEngine {
         skill: step.skill ?? null,
       },
     });
+
+    // PtySkillRunner 가 사용자 입력 요청 패턴을 감지한 경우:
+    // step 은 success 로 마감하되, 다음 step 으로 advance 하지 않고 mission 을
+    // waiting_for_human 으로 멈춤. 사용자가 PTY 에 직접 답하고 Resume 누르면
+    // 다음 step 진행.
+    if (userInputDetected) {
+      await this.deps.store.appendTimelineEvent(mission.id, {
+        ts: this.now(),
+        type: "user.decision",
+        payload: {
+          kind: "pty_input_required",
+          stepIndex,
+          skill: step.skill ?? null,
+          question: userInputDetected,
+          notifyUser: true,
+        },
+      });
+      // currentStepIndex 는 advance 안 함 — Resume 후 같은 위치에서 시작.
+      // 다음 step 으로 가야 하므로 advance 는 하되 mission 만 멈춤.
+      const fresh = await this.requireMission(mission.id);
+      const isLastStep = fresh.currentStepIndex + 1 >= fresh.steps.length;
+      await this.deps.store.updateMission(mission.id, {
+        currentStepIndex: fresh.currentStepIndex + 1,
+      });
+      if (isLastStep) {
+        await this.completeMission(fresh);
+      } else {
+        await this.transition(fresh, "waiting_for_human");
+      }
+      return false;
+    }
+
     const fresh = await this.requireMission(mission.id);
     if (fresh.currentStepIndex + 1 >= fresh.steps.length) {
       await this.deps.store.updateMission(mission.id, {
@@ -321,6 +412,7 @@ export class MissionEngine {
         status: "skipped",
         error,
         completedAt,
+        liveOutput: undefined,
       });
       await this.deps.store.appendTimelineEvent(mission.id, {
         ts: completedAt,
@@ -341,6 +433,7 @@ export class MissionEngine {
         retryCount: currentRetries + 1,
         error,
         startedAt: undefined,
+        liveOutput: undefined,
       });
       await this.deps.store.appendTimelineEvent(mission.id, {
         ts: completedAt,
@@ -360,6 +453,7 @@ export class MissionEngine {
       status: "failed",
       error,
       completedAt,
+      liveOutput: undefined,
     });
     await this.deps.store.appendTimelineEvent(mission.id, {
       ts: completedAt,
@@ -376,14 +470,96 @@ export class MissionEngine {
   }
 
   private async completeMission(mission: Mission): Promise<void> {
+    // 최종 종합 보고서 생성 — completed 로 전이하기 전에. runRawMessage 가 가능한
+    // skillRunner 일 때만 (PtySkillRunner). headless runner 는 skip.
+    let synthesisNote: string | undefined;
+    let synthesisPath: string | undefined;
+    if (typeof this.deps.skillRunner.runRawMessage === "function") {
+      try {
+        // 미션 폴더 slug: 한글 / 영문 / 숫자 보존, 공백·특수문자는 - 로.
+        const slug = mission.goal
+          .replace(/[^\p{L}\p{N}\s-]/gu, "")
+          .trim()
+          .replace(/\s+/g, "-")
+          .slice(0, 40)
+          .replace(/-+$/, "");
+        const folder = `docs/missions/${slug || "mission"}-${mission.id.slice(0, 6)}`;
+        const summaryPath = `${folder}/SUMMARY.md`;
+        const stepsSummary = mission.steps
+          .filter((s) => s.status === "success" || s.status === "failed")
+          .map((s) => {
+            const idx = String(s.index + 1).padStart(2, "0");
+            const skillSlug = (s.skill ?? s.type).replace(/^\//, "");
+            const stepPath = `${folder}/${idx}-${skillSlug}.md`;
+            return (
+              `- Step ${s.index + 1} (${s.skill ?? s.type}): ${s.status}\n` +
+              `  → 저장 경로: ${stepPath}\n` +
+              (typeof s.output === "string"
+                ? `  output (마지막 1200자):\n${(s.output as string).slice(-1200)}\n`
+                : "")
+            );
+          })
+          .join("\n");
+        const prompt =
+          `[Marblo Mission Synthesis]\n` +
+          `미션 "${mission.goal}" 의 모든 step 이 끝났습니다.\n` +
+          `이제 단계별 결과 파일들과 종합 보고서를 작성해주세요.\n\n` +
+          `폴더: ${folder}/\n` +
+          `파일 구조:\n` +
+          `  - 각 step 결과: {NN}-{skill}.md (e.g. 01-design-review.md)\n` +
+          `  - 종합 보고서: SUMMARY.md\n\n` +
+          `SUMMARY.md 에 포함할 내용:\n` +
+          `- 미션 목표 / 템플릿\n` +
+          `- 각 step 의 핵심 발견 요약 + 해당 step 파일 링크\n` +
+          `- 통합 권고사항 / 액션 아이템\n` +
+          `- (해당되면) 변경된 파일 / PR 링크\n\n` +
+          `절차:\n` +
+          `1. 폴더 생성 + 각 step 결과를 위 경로에 markdown 으로 저장 (아래 결과 활용)\n` +
+          `2. SUMMARY.md 작성\n` +
+          `3. 마지막 메시지로 정확히 "${summaryPath}" 한 줄만 출력\n\n` +
+          `--- Step 결과 ---\n${stepsSummary}\n--- end ---`;
+
+        const synth = await this.deps.skillRunner.runRawMessage({
+          missionId: mission.id,
+          projectId: mission.projectId,
+          prompt,
+          timeoutMs: 5 * 60 * 1000,
+        });
+        if (synth.success && typeof synth.output === "string") {
+          synthesisNote = (synth.output as string).slice(-4000);
+          // claude 가 마지막에 path 만 한 줄로 출력하도록 지시 → 가장 마지막 비어있지 않은
+          // 줄에서 'docs/missions/' prefix 찾기.
+          const lines = synthesisNote
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean);
+          for (const l of [...lines].reverse()) {
+            if (l.includes("docs/missions/")) {
+              synthesisPath = l.replace(/[`"']/g, "").trim();
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        this.log("synthesis failed", { err: String(e) });
+      }
+    }
+
     const completedAt = this.now();
     await this.transition(mission, "completed", { completedAt });
     await this.deps.store.appendTimelineEvent(mission.id, {
       ts: completedAt,
       type: "supervisor.note",
       payload: {
-        message: "Mission completed",
+        message: synthesisPath
+          ? `Mission completed · 종합 보고서: ${synthesisPath}`
+          : synthesisNote
+            ? "Mission completed · 종합 보고서 작성됨 (파일 경로 미확인)"
+            : "Mission completed",
         templateLabel: MISSION_TEMPLATES[mission.templateId]?.label,
+        synthesisPath: synthesisPath ?? null,
+        // 파일 읽기 없이도 Firestore 만으로 보고서 미리보기 가능하도록 4000자 보관.
+        synthesisExcerpt: synthesisNote ? synthesisNote.slice(-4000) : null,
       },
     });
   }
