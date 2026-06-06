@@ -16,6 +16,7 @@ import {
   scoreModels as scoreModelsFn,
   resolvePreset,
   normalizeModel,
+  isWorktreeIsolated,
   type AgentInfo,
 } from "./dispatch-scoring";
 import type { WorktreeCoordinator } from "./worktree-coordinator";
@@ -815,12 +816,28 @@ export class BridgeServer {
     // hijacks a "코덱스 스폰" request. When no model is specified, reuse is
     // unrestricted (model === undefined → predicate is always true).
     const modelMatches = (m: string) => !model || m === model;
+    // Worktree isolation gate: reuse/restart re-use an existing PTY in its
+    // CURRENT cwd and never run through WorktreeCoordinator.prepare(). When a
+    // dispatch targets an isolated worktree (projectId+taskId) but the candidate
+    // is sitting in another tree (the main checkout, or a different task's
+    // worktree), reusing it would pollute the wrong tree — so we drop it here
+    // and let dispatch fall through to a coordinator-routed fresh spawn that
+    // lands in the right worktree. Non-isolated dispatch (no projectId/taskId)
+    // keeps unrestricted reuse — no regression. cwd comes from the full
+    // AgentInstance (AgentInfo carries no cwd).
+    const worktreeOk = (agentId: string) =>
+      isWorktreeIsolated(
+        this.agentManager.getAgent(agentId)?.cwd,
+        params.projectId,
+        params.taskId,
+      );
     // Only idle agents are safe to reuse — working agents may be mid-task
     const reusable = scored.filter(
       (s) =>
         s.score >= 100 &&
         s.agent.status === "idle" &&
-        modelMatches(s.agent.model),
+        modelMatches(s.agent.model) &&
+        worktreeOk(s.agent.id),
     );
 
     // Step 1: Reuse idle agent
@@ -852,12 +869,16 @@ export class BridgeServer {
       };
     }
 
-    // Step 2: Restart stopped agent (same explicit-model gate as reuse)
+    // Step 2: Restart stopped agent (same explicit-model + worktree-isolation
+    // gates as reuse). restart() relaunches the PTY at the agent's STORED cwd,
+    // also bypassing the coordinator — so a stopped agent in the wrong tree
+    // must likewise fall through to a fresh, correctly-isolated spawn.
     const restartable = scored.filter(
       (s) =>
         s.score >= 100 &&
         s.agent.status === "stopped" &&
-        modelMatches(s.agent.model),
+        modelMatches(s.agent.model) &&
+        worktreeOk(s.agent.id),
     );
 
     if (restartable.length > 0) {
