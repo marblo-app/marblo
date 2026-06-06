@@ -54,10 +54,10 @@ export class WorktreeManager {
         proc.stdout.on("data", (d) => (stdout += d.toString()));
         proc.stderr.on("data", (d) => (stderr += d.toString()));
         proc.on("close", (code) =>
-          resolve({ code: code ?? 1, stdout, stderr })
+          resolve({ code: code ?? 1, stdout, stderr }),
         );
         proc.on("error", (e) =>
-          resolve({ code: 1, stdout, stderr: String(e) })
+          resolve({ code: 1, stdout, stderr: String(e) }),
         );
       } catch (e) {
         resolve({ code: 1, stdout, stderr: String(e) });
@@ -69,12 +69,12 @@ export class WorktreeManager {
   async resolveBaseRef(repoRoot: string): Promise<string> {
     const sym = await this.runGit(
       ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-      repoRoot
+      repoRoot,
     );
     if (sym.code === 0 && sym.stdout.trim()) return sym.stdout.trim();
     const cur = await this.runGit(
       ["rev-parse", "--abbrev-ref", "HEAD"],
-      repoRoot
+      repoRoot,
     );
     if (cur.code === 0 && cur.stdout.trim()) return cur.stdout.trim();
     return "HEAD";
@@ -105,13 +105,13 @@ export class WorktreeManager {
     const wtPath = path.join(
       this.worktreesRoot,
       params.projectId,
-      params.taskId
+      params.taskId,
     );
     fs.mkdirSync(path.dirname(wtPath), { recursive: true });
 
     const res = await this.runGit(
       ["worktree", "add", "-b", branch, wtPath, baseRef],
-      params.repoRoot
+      params.repoRoot,
     );
     if (res.code !== 0) {
       throw new Error(`git worktree add failed: ${res.stderr.trim()}`);
@@ -127,7 +127,7 @@ export class WorktreeManager {
   async list(repoRoot: string): Promise<WorktreeInfo[]> {
     const res = await this.runGit(
       ["worktree", "list", "--porcelain"],
-      repoRoot
+      repoRoot,
     );
     if (res.code !== 0) return [];
 
@@ -165,14 +165,14 @@ export class WorktreeManager {
   async status(worktreePath: string, baseRef: string): Promise<WorktreeStatus> {
     const branchRes = await this.runGit(
       ["rev-parse", "--abbrev-ref", "HEAD"],
-      worktreePath
+      worktreePath,
     );
     const branch = branchRes.stdout.trim();
 
     // behind = left (baseRef-only), ahead = right (HEAD-only)
     const ab = await this.runGit(
       ["rev-list", "--left-right", "--count", `${baseRef}...HEAD`],
-      worktreePath
+      worktreePath,
     );
     let behind = 0;
     let ahead = 0;
@@ -187,7 +187,7 @@ export class WorktreeManager {
 
     const ns = await this.runGit(
       ["diff", "--numstat", `${baseRef}...HEAD`],
-      worktreePath
+      worktreePath,
     );
     let filesChanged = 0;
     let insertions = 0;
@@ -207,7 +207,7 @@ export class WorktreeManager {
     // conflict from "cannot merge / bad ref", which also exits 1 with no OID.
     const mt = await this.runGit(
       ["merge-tree", "--write-tree", "--name-only", baseRef, "HEAD"],
-      worktreePath
+      worktreePath,
     );
     const mtLines = mt.stdout.split("\n");
     const firstLine = mtLines[0]?.trim() ?? "";
@@ -241,20 +241,20 @@ export class WorktreeManager {
   async remove(
     repoRoot: string,
     worktreePath: string,
-    opts?: { deleteBranch?: boolean }
+    opts?: { deleteBranch?: boolean },
   ): Promise<void> {
     let branch = "";
     if (opts?.deleteBranch) {
       const b = await this.runGit(
         ["rev-parse", "--abbrev-ref", "HEAD"],
-        worktreePath
+        worktreePath,
       );
       if (b.code === 0) branch = b.stdout.trim();
     }
 
     const res = await this.runGit(
       ["worktree", "remove", "--force", worktreePath],
-      repoRoot
+      repoRoot,
     );
     if (res.code !== 0) {
       throw new Error(`git worktree remove failed: ${res.stderr.trim()}`);
@@ -264,7 +264,7 @@ export class WorktreeManager {
       const del = await this.runGit(["branch", "-D", branch], repoRoot);
       if (del.code !== 0) {
         console.warn(
-          `[WorktreeManager] failed to delete branch ${branch}: ${del.stderr.trim()}`
+          `[WorktreeManager] failed to delete branch ${branch}: ${del.stderr.trim()}`,
         );
       }
     }
@@ -272,5 +272,26 @@ export class WorktreeManager {
 
   async prune(repoRoot: string): Promise<void> {
     await this.runGit(["worktree", "prune"], repoRoot);
+  }
+
+  /**
+   * status()'s mergeability check uses `git merge-tree --write-tree`, which
+   * requires git >= 2.38. Parse `git --version` and warn when the local git is
+   * too old so the unreliable mergeable/conflicts fields are explained.
+   */
+  async gitSupportsMergeTree(): Promise<{ ok: boolean; version: string }> {
+    const res = await this.runGit(["--version"], process.cwd());
+    const m = res.stdout.match(/(\d+)\.(\d+)(?:\.(\d+))?/);
+    const version = m ? m[0] : res.stdout.trim();
+    const major = m ? parseInt(m[1], 10) : 0;
+    const minor = m ? parseInt(m[2], 10) : 0;
+    const ok = major > 2 || (major === 2 && minor >= 38);
+    if (!ok) {
+      console.warn(
+        `[WorktreeManager] git ${version || "unknown"} < 2.38 — ` +
+          `merge-tree --write-tree unsupported; status() mergeability may be unreliable.`,
+      );
+    }
+    return { ok, version };
   }
 }
