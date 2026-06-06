@@ -18,6 +18,7 @@ import {
   doc,
   updateDoc,
 } from "firebase/firestore";
+import { pathToFileURL } from "url";
 
 const APPLY = process.argv.includes("--apply");
 
@@ -36,8 +37,12 @@ const firebaseConfig = {
   appId: process.env.FIREBASE_APP_ID || process.env.VITE_FIREBASE_APP_ID,
 };
 
-// Inlined copy of computeContextIdBackfill (Task 1) — keep in sync.
-function computeContextIdBackfill(tasks) {
+// Copy of computeContextIdBackfill from electron/mcp-server/context.ts.
+// This standalone .mjs cannot import the TS source (or its built dist-mcp/
+// artifact) without coupling the script to a build step, so the logic is
+// duplicated here but exported — tests/unit/context.test.ts imports both
+// implementations and asserts parity, so drift fails CI instead of silently.
+export function computeContextIdBackfill(tasks) {
   return tasks
     .filter((t) => !t.contextId)
     .map((t) => ({ id: t.id, contextId: t.missionId ?? "board" }));
@@ -46,7 +51,7 @@ function computeContextIdBackfill(tasks) {
 async function main() {
   if (!firebaseConfig.projectId) {
     throw new Error(
-      "Missing Firebase env (FIREBASE_PROJECT_ID / VITE_FIREBASE_PROJECT_ID)."
+      "Missing Firebase env (FIREBASE_PROJECT_ID / VITE_FIREBASE_PROJECT_ID).",
     );
   }
   const app = initializeApp(firebaseConfig);
@@ -71,9 +76,13 @@ async function main() {
   console.log(`\nApplied ${updates.length} updates.`);
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  });
+// Only run the migration when invoked directly (node scripts/backfill-context-id.mjs).
+// When imported (e.g. by the parity test) this guard keeps main() from firing.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
+    .then(() => process.exit(0))
+    .catch((e) => {
+      console.error(e);
+      process.exit(1);
+    });
+}
