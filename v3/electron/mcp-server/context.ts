@@ -34,16 +34,8 @@ export function contextReadFilter(
 /**
  * MARBLO_CONTEXT value to inject for an orchestrator of the given kind.
  *
- * NOTE (dead export, intentionally kept): nothing calls this in production yet.
- * It is the missing half of the context-scoping design described in the module
- * header ("the board orchestrator sets MARBLO_CONTEXT='board'") — but the
- * orchestrator spawn never actually injects MARBLO_CONTEXT. The real wiring is:
- * in OrchestratorManager (electron/orchestrator-manager.ts), where the MCP env
- * is built (alongside MARBLO_BRIDGE_PORT / MARBLO_PROJECT), set
- *   config.mcpServers.marblo.env.MARBLO_CONTEXT = contextForKind(this.kind)
- * (only when non-empty, so non-board orchestrators stay unscoped). Until that
- * lands, every orchestrator runs unscoped; do NOT remove this until either the
- * wiring is added or the context-scoping design is dropped.
+ * NOTE: OrchestratorManager injects this into the Marblo MCP env while patching
+ * MARBLO_BRIDGE_PORT / MARBLO_PROJECT, only when non-empty.
  */
 export function contextForKind(kind: string): string {
   return kind === "board" ? "board" : "";
