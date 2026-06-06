@@ -373,6 +373,19 @@ interface WorktreeProjectGroup {
   worktrees: WorktreeListItem[];
 }
 
+interface WorktreeMergeArgs {
+  repoRoot: string;
+  path: string;
+  baseRef: string;
+  branch: string;
+}
+
+interface WorktreeResolveArgs extends WorktreeMergeArgs {
+  projectId?: string;
+  taskId?: string;
+  conflicts?: string[];
+}
+
 interface WorktreeAPI {
   list: () => Promise<WorktreeProjectGroup[]>;
   refresh: () => Promise<WorktreeProjectGroup[]>;
@@ -383,6 +396,22 @@ interface WorktreeAPI {
     deleteBranch?: boolean,
   ) => Promise<{ success: boolean }>;
   prune: (repoRoot: string) => Promise<{ success: boolean }>;
+  rebase: (
+    path: string,
+    baseRef: string,
+  ) => Promise<{ ok: boolean; conflicts?: string[] }>;
+  merge: (args: WorktreeMergeArgs) => Promise<{
+    ok: boolean;
+    needsResolve?: boolean;
+    conflicts?: string[];
+    error?: string;
+  }>;
+  resolve: (args: WorktreeResolveArgs) => Promise<{
+    success: boolean;
+    agentId?: string;
+    stub?: boolean;
+    reason?: string;
+  }>;
 }
 
 interface WindowAPI {

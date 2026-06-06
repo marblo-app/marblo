@@ -1,15 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useEditorStore } from "../../stores/editorStore";
 import type {
   Worktree,
   WorktreeStatusPill,
   WorktreeStatusTone,
 } from "../../types/worktree";
-
-// 크로스 프로젝트 Worktree 칵핏 (spec §7.1).
-// 읽기 + 상태 pill 까지만. 행 액션(Rebase/Merge/Open/Delete)은 다음 태스크
-// (wt-tab-actions)에서 배선하므로 여기서는 disabled placeholder 로 자리만 잡는다.
 
 const TONE_CLASSES: Record<WorktreeStatusTone, string> = {
   danger: "bg-red-500/15 text-red-300 border border-red-500/30",
@@ -51,22 +48,100 @@ function ConflictSummary({ worktree }: { worktree: Worktree }) {
   return <span className="text-gray-500">충돌없음</span>;
 }
 
-// 행 액션 placeholder. 다음 태스크(wt-tab-actions)에서 onClick 배선.
-function RowActions() {
-  const actions = ["Rebase", "Merge", "Open", "✕"];
+type RowAction = "rebase" | "merge" | "resolve" | "open" | "delete";
+
+function ActionButton({
+  children,
+  disabled,
+  title,
+  tone = "default",
+  onClick,
+}: {
+  children: ReactNode;
+  disabled?: boolean;
+  title: string;
+  tone?: "default" | "danger" | "ready";
+  onClick: () => void;
+}) {
+  const toneClass =
+    tone === "danger"
+      ? "border-red-500/40 text-red-300 hover:bg-red-500/10"
+      : tone === "ready"
+        ? "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+        : "border-gray-700 text-gray-300 hover:bg-gray-800";
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      title={title}
+      onClick={onClick}
+      className={`rounded border px-1.5 py-0.5 text-[11px] transition disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600 disabled:opacity-60 ${toneClass}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function RowActions({
+  worktree,
+  busyAction,
+  onAction,
+}: {
+  worktree: Worktree;
+  busyAction: RowAction | null;
+  onAction: (worktree: Worktree, action: RowAction) => void;
+}) {
+  const mergeable = worktree.status?.mergeable === true;
+  const canResolve = Boolean(worktree.status && !worktree.status.mergeable);
+  const disabled = busyAction !== null;
+
   return (
     <div className="flex flex-shrink-0 items-center gap-1">
-      {actions.map((label) => (
-        <button
-          key={label}
-          type="button"
-          disabled
-          title="다음 태스크(wt-tab-actions)에서 배선됩니다"
-          className="cursor-not-allowed rounded border border-gray-700 px-1.5 py-0.5 text-[11px] text-gray-500 opacity-60"
+      <ActionButton
+        disabled={disabled}
+        title={`Rebase ${worktree.branch} from ${worktree.baseRef}`}
+        onClick={() => onAction(worktree, "rebase")}
+      >
+        {busyAction === "rebase" ? "Rebasing" : "Rebase"}
+      </ActionButton>
+      {mergeable ? (
+        <ActionButton
+          disabled={disabled}
+          title={`Squash-merge ${worktree.branch}`}
+          tone="ready"
+          onClick={() => onAction(worktree, "merge")}
         >
-          {label}
-        </button>
-      ))}
+          {busyAction === "merge" ? "Merging" : "Merge"}
+        </ActionButton>
+      ) : (
+        <ActionButton
+          disabled={disabled || !canResolve}
+          title={
+            canResolve
+              ? `Spawn resolver for ${worktree.branch}`
+              : "충돌 상태에서만 Resolve 가능"
+          }
+          onClick={() => onAction(worktree, "resolve")}
+        >
+          {busyAction === "resolve" ? "Resolving" : "Resolve"}
+        </ActionButton>
+      )}
+      <ActionButton
+        disabled={disabled}
+        title="Code 탭에서 이 worktree 열기"
+        onClick={() => onAction(worktree, "open")}
+      >
+        Open
+      </ActionButton>
+      <ActionButton
+        disabled={disabled}
+        title="워크트리 제거 및 브랜치 cleanup"
+        tone="danger"
+        onClick={() => onAction(worktree, "delete")}
+      >
+        {busyAction === "delete" ? "Deleting" : "Delete"}
+      </ActionButton>
     </div>
   );
 }
@@ -74,9 +149,13 @@ function RowActions() {
 function WorktreeRow({
   worktree,
   pill,
+  busyAction,
+  onAction,
 }: {
   worktree: Worktree;
   pill: WorktreeStatusPill;
+  busyAction: RowAction | null;
+  onAction: (worktree: Worktree, action: RowAction) => void;
 }) {
   const status = worktree.status;
   const ahead = status?.ahead ?? 0;
@@ -123,7 +202,11 @@ function WorktreeRow({
           <ConflictSummary worktree={worktree} />
         </span>
         <span className="ml-auto">
-          <RowActions />
+          <RowActions
+            worktree={worktree}
+            busyAction={busyAction}
+            onAction={onAction}
+          />
         </span>
       </div>
     </div>
@@ -135,14 +218,27 @@ export function WorktreeTab() {
   const loading = useWorktreeStore((s) => s.loading);
   const lastError = useWorktreeStore((s) => s.lastError);
   const refresh = useWorktreeStore((s) => s.refresh);
+  const rebase = useWorktreeStore((s) => s.rebase);
+  const merge = useWorktreeStore((s) => s.merge);
+  const resolve = useWorktreeStore((s) => s.resolve);
+  const remove = useWorktreeStore((s) => s.remove);
   const statusPill = useWorktreeStore((s) => s.statusPill);
   const projects = useProjectStore((s) => s.projects);
+  const currentProject = useProjectStore((s) => s.currentProject);
+  const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
+  const setRootPath = useEditorStore((s) => s.setRootPath);
+  const closeAllFiles = useEditorStore((s) => s.closeAllFiles);
 
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<WorktreeStatusTone | "all">(
     "all",
   );
   const [mergeableOnly, setMergeableOnly] = useState(false);
+  const [busy, setBusy] = useState<{ id: string; action: RowAction } | null>(
+    null,
+  );
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   // mount 시 1회 로드. 실패는 store.lastError 로 표면화되므로 swallow.
   useEffect(() => {
@@ -198,6 +294,73 @@ export function WorktreeTab() {
 
   const isEmpty = !loading && worktrees.length === 0;
   const noMatches = !loading && worktrees.length > 0 && groups.length === 0;
+
+  const openWorktree = (worktree: Worktree) => {
+    const project = projects.find((p) => p.id === worktree.projectId);
+    if (project && currentProject?.id !== project.id) {
+      setCurrentProject(project);
+    }
+    closeAllFiles();
+    setRootPath(worktree.path);
+    const codeTab = Array.from(document.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Code",
+    );
+    codeTab?.click();
+  };
+
+  const handleAction = async (worktree: Worktree, action: RowAction) => {
+    setActionError(null);
+    setActionMessage(null);
+
+    if (action === "open") {
+      openWorktree(worktree);
+      setActionMessage(`${worktree.branch} worktree를 Code 탭에 열었습니다.`);
+      return;
+    }
+
+    if (action === "delete") {
+      const ok = window.confirm(
+        `${worktree.branch} worktree를 제거하고 브랜치도 cleanup할까요?`,
+      );
+      if (!ok) return;
+    }
+
+    setBusy({ id: worktree.id, action });
+    try {
+      if (action === "rebase") {
+        await rebase(worktree.path, worktree.baseRef);
+        setActionMessage(`${worktree.branch} rebase 완료`);
+      } else if (action === "merge") {
+        await merge({
+          repoRoot: worktree.repoRoot,
+          path: worktree.path,
+          baseRef: worktree.baseRef,
+          branch: worktree.branch,
+        });
+        setActionMessage(`${worktree.branch} squash-merge 완료`);
+      } else if (action === "resolve") {
+        await resolve({
+          repoRoot: worktree.repoRoot,
+          path: worktree.path,
+          baseRef: worktree.baseRef,
+          branch: worktree.branch,
+          projectId: worktree.projectId,
+          taskId: worktree.taskId ?? undefined,
+          conflicts: worktree.status?.conflicts,
+        });
+        setActionMessage(`${worktree.branch} resolve agent 시작`);
+      } else if (action === "delete") {
+        await remove(worktree.repoRoot, worktree.path, true);
+        setActionMessage(`${worktree.branch} worktree 제거 완료`);
+      }
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Worktree action failed",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
@@ -258,6 +421,16 @@ export function WorktreeTab() {
           워크트리 로드 실패: {lastError}
         </div>
       )}
+      {actionError && (
+        <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          워크트리 액션 실패: {actionError}
+        </div>
+      )}
+      {actionMessage && (
+        <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
+          {actionMessage}
+        </div>
+      )}
 
       {/* 본문 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -293,6 +466,8 @@ export function WorktreeTab() {
                       key={wt.id}
                       worktree={wt}
                       pill={statusPill(wt)}
+                      busyAction={busy?.id === wt.id ? busy.action : null}
+                      onAction={handleAction}
                     />
                   ))}
                 </div>
