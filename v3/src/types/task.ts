@@ -14,6 +14,10 @@ export interface Task {
   contextId: string;
   title: string;
   description: string;
+  goal?: string;
+  changes?: string[];
+  acceptance?: string[];
+  notes?: string[];
   status: TaskStatus;
   role: AgentRole;
   priority: number; // 1~5

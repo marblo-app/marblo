@@ -20,6 +20,7 @@ import { useAgentFocusStore } from "../../stores/agentFocusStore";
 import { getSessionIdForAgent } from "../../stores/agentSessionMap";
 import { useProjectStore } from "../../stores/projectStore";
 import { useAuth } from "../../hooks/useAuth";
+import { TaskBodySections, hasAnyBody } from "./TaskBodySections";
 
 type DetailTab = "comments" | "activity";
 
@@ -575,16 +576,9 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                 </div>
               </div>
             </div>
-          ) : /* Description (read-only) */
-          task.description ? (
-            <div>
-              <h3 className="text-xs font-medium text-gray-400 uppercase mb-1">
-                Description
-              </h3>
-              <p className="text-sm text-gray-300 whitespace-pre-wrap">
-                {task.description}
-              </p>
-            </div>
+          ) : /* Body (read-only, structured sections) */
+          hasAnyBody(task) ? (
+            <TaskBodySections task={task} />
           ) : (
             <button
               onClick={() => setEditing(true)}
