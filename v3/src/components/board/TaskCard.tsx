@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "../../types/task";
+import type { WorktreeStatusTone } from "../../types/worktree";
 import { getPresenceStatus, type PresenceStatus } from "../../types/user";
 import { useAgentStore } from "../../stores/agentStore";
+import { useEditorStore } from "../../stores/editorStore";
+import { useWorktreeStore } from "../../stores/worktreeStore";
 import { usePresence } from "../../hooks/usePresence";
 import { isLaneTask } from "../../lib/laneContext";
 import FlowKanbanLink from "../flows/FlowKanbanLink";
@@ -75,6 +78,16 @@ const PRIORITY_CONFIG: Record<number, { label: string; color: string }> = {
   1: { label: "P1", color: "bg-gray-500/20 text-gray-400" },
 };
 
+const WORKTREE_PILL_TONE: Record<WorktreeStatusTone, string> = {
+  danger: "bg-red-500/15 text-red-300 border-red-500/30",
+  warning: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  behind: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
+  ready: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  idle: "bg-gray-500/15 text-gray-300 border-gray-500/30",
+};
+
+let didRequestWorktrees = false;
+
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
   if (seconds < 60) return "just now";
@@ -145,14 +158,20 @@ function TaskCardContent({
   const priority = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG[1];
   const roleColor = ROLE_COLORS[task.role] ?? "bg-gray-500/20 text-gray-400";
   const roleIcon = ROLE_ICONS[task.role] ?? "📋";
+  const worktrees = useWorktreeStore((s) => s.worktrees);
+  const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+  const statusPill = useWorktreeStore((s) => s.statusPill);
+  const setRootPath = useEditorStore((s) => s.setRootPath);
+  const matchingWorktree = worktrees.find((wt) => wt.taskId === task.id);
+  const matchingPill = matchingWorktree ? statusPill(matchingWorktree) : null;
 
   const isBlocked = task.status === "BLOCKED";
   const isFailed = task.status === "FAILED";
   const statusHighlight = isBlocked
     ? "border-l-2 border-l-orange-500"
     : isFailed
-    ? "border-l-2 border-l-red-500"
-    : "";
+      ? "border-l-2 border-l-red-500"
+      : "";
 
   // Pulse the card whenever Firestore reports a change (status, claimedBy,
   // hasPmFeedback, prUrl, etc — they all bump updatedAt). Each card owns its
@@ -160,6 +179,12 @@ function TaskCardContent({
   const updatedKey =
     task.updatedAt instanceof Date ? task.updatedAt.getTime() : 0;
   const pulsing = usePulseOnChange(updatedKey);
+
+  useEffect(() => {
+    if (didRequestWorktrees) return;
+    didRequestWorktrees = true;
+    refreshWorktrees().catch(() => {});
+  }, [refreshWorktrees]);
 
   // Resolve the claimant agent → owner userId so we can show whose machine
   // is currently hosting the agent and whether that teammate is online.
@@ -258,6 +283,28 @@ function TaskCardContent({
           <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-indigo-500/20 text-indigo-400">
             ⚡ Flow
           </span>
+        )}
+        {matchingWorktree && matchingPill && (
+          <>
+            <span
+              className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs font-medium ${WORKTREE_PILL_TONE[matchingPill.tone]}`}
+              title={`${matchingWorktree.branch} · ${matchingWorktree.path}`}
+            >
+              <span aria-hidden>{matchingPill.icon}</span>
+              {matchingPill.label}
+            </span>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setRootPath(matchingWorktree.path);
+              }}
+              className="min-w-0 max-w-[11rem] truncate rounded px-1.5 py-0.5 font-mono text-xs text-blue-300 hover:bg-blue-500/10 hover:text-blue-200"
+              title={`Code 탭 루트를 ${matchingWorktree.path}(으)로 전환`}
+            >
+              {matchingWorktree.branch}
+            </button>
+          </>
         )}
       </div>
 
