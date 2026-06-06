@@ -16,7 +16,10 @@ import type {
   DispatchTaskResponse,
 } from "../bridge-server";
 import type { AgentManager } from "../agent-manager";
-import { composeTaskBody, taskBodyStorageFields } from "../task-body.js";
+import {
+  composeTaskBody,
+  taskBodyStorageFields,
+} from "../mcp-server/task-body.js";
 
 // 미션 goal 을 decompose → tasks 컬렉션에 write → bridgeServer 의 dispatchTask 로
 // 에이전트 spawn/reuse. orchestrator MCP create_tasks_bulk + dispatch_task 가

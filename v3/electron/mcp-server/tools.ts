@@ -16,7 +16,7 @@ import {
 import { db } from "./firebase.js";
 import { resolveContextForWrite, contextReadFilter } from "./context.js";
 import { applyProjection, type ApplyProjectionInput } from "./projection.js";
-import { validateTaskBodyInput, taskBodyStorageFields } from "../task-body.js";
+import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";

@@ -5,7 +5,7 @@ import {
   hasStructuredBody,
   validateTaskBodyInput,
   taskBodyStorageFields,
-} from "../../electron/task-body";
+} from "../../electron/mcp-server/task-body";
 
 describe("composeTaskBody", () => {
   it("composes all four sections, omitting nothing", () => {
