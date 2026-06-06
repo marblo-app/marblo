@@ -5,6 +5,7 @@ import { Sidebar } from "./sidebar/Sidebar";
 import { AgentListPanel } from "./agents/list-panel/AgentListPanel";
 import OrchestratorPanel from "./orchestrator/OrchestratorPanel";
 import { BoardTab } from "./tabs/BoardTab";
+import { LanesTab } from "./lanes/LanesTab";
 import { CodeTab } from "./tabs/CodeTab";
 import { AgentsTab } from "./tabs/AgentsTab";
 import { UsagePage } from "./usage/UsagePage";
@@ -50,6 +51,7 @@ function HarnessTabPanel() {
 const tabComponents: Record<TabId, () => JSX.Element> = {
   guide: GuideTab,
   board: BoardTab,
+  lanes: LanesTab,
   missions: MissionsTab,
   code: CodeTab,
   agents: AgentsTab,
