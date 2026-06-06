@@ -54,6 +54,34 @@ export function withCompletionFooter(
   return instruction + footer;
 }
 
+/**
+ * Build the instruction for a Resolve(agent) spawned in a conflicted worktree
+ * (WORKTREE-SPEC §6). The agent is already cwd'd into the worktree; it rebases
+ * onto base, resolves conflicts, continues the rebase, and commits. Kept
+ * deterministic and explicit so the worker doesn't guess the git flow.
+ */
+export function buildResolverPrompt(req: {
+  baseRef: string;
+  branch: string;
+  conflicts?: string[];
+}): string {
+  const files =
+    req.conflicts && req.conflicts.length > 0
+      ? `\n충돌 파일(예상): ${req.conflicts.join(", ")}`
+      : "";
+  return [
+    `[머지 충돌 해결 — 워크트리 브랜치 ${req.branch}]`,
+    `이 워크트리는 base \`${req.baseRef}\` 위로 rebase 시 충돌이 난다.${files}`,
+    "",
+    "다음 절차로 해결할 것:",
+    `1. \`git rebase ${req.baseRef}\` 실행`,
+    "2. 충돌 파일을 양쪽 의도를 보존하며 수정",
+    "3. `git add <해결된 파일>` 후 `git rebase --continue` (남은 충돌 반복)",
+    "4. rebase 완료 후 `git status`로 클린 상태 확인",
+    "5. 해결 불가하면 `git rebase --abort` 후 사유를 보고",
+  ].join("\n");
+}
+
 export interface SpawnAgentRequest {
   name: string;
   model: "claude" | "gemini" | "gpt" | "antigravity" | "local" | "custom";
@@ -981,6 +1009,50 @@ export class BridgeServer {
       if (root) return root;
     }
     return process.cwd();
+  }
+
+  // ── Conflict resolution (WORKTREE-SPEC §6 충돌 경로) ──────────
+  //
+  // When the clean squash-merge path hits a rebase conflict, the merge cockpit
+  // routes to Resolve(agent): spawn a builder agent *inside* the conflicted
+  // worktree to resolve it (Conductor's `/resolve-merge-conflicts` model).
+  //
+  // We reuse the normal spawn path — passing the worktree as cwd AND the
+  // bound taskId so WorktreeCoordinator.prepare() reuses the EXISTING worktree
+  // (its path is ~/.marblo/worktrees/<projectId>/<taskId>) instead of cutting
+  // a fresh one. main.ts wires this as the registerWorktreeIpc spawnResolver
+  // callback: `(req) => bridge.spawnResolverAgent(req)`.
+
+  async spawnResolverAgent(req: {
+    repoRoot: string;
+    worktreePath: string;
+    baseRef: string;
+    branch: string;
+    projectId?: string;
+    taskId?: string;
+    conflicts?: string[];
+  }): Promise<{
+    success: boolean;
+    agentId?: string;
+    taskId?: string | null;
+    error?: string;
+  }> {
+    const shortBranch = req.branch.split("/").pop() || "worktree";
+    const result = await this.spawnNewAgent({
+      name: `resolver-${shortBranch}`,
+      model: "claude",
+      role: "backend",
+      cwd: req.worktreePath,
+      taskId: req.taskId,
+      projectId: req.projectId,
+      initialPrompt: buildResolverPrompt(req),
+    });
+    return {
+      success: result.success,
+      agentId: result.agentId,
+      taskId: result.taskId ?? req.taskId ?? null,
+      error: result.error,
+    };
   }
 
   // ── Shared spawn logic ──────────────────────────────────────

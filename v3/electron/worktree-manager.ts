@@ -36,6 +36,48 @@ export interface CreateWorktreeParams {
   baseRef?: string;
 }
 
+/** Result of a rebase-onto-base attempt (WORKTREE-SPEC §4 머지단계). */
+export interface RebaseResult {
+  ok: boolean;
+  /** Unmerged paths captured before the safe `--abort` (only when ok=false). */
+  conflicts?: string[];
+}
+
+/** Result of the clean squash-merge path (WORKTREE-SPEC §6 머지 실행 주체). */
+export interface SquashMergeResult {
+  ok: boolean;
+  /** True when the rebase step hit a conflict → caller routes to Resolve(agent). */
+  needsResolve?: boolean;
+  conflicts?: string[];
+  /** Populated when a deterministic git step failed for a non-conflict reason. */
+  error?: string;
+}
+
+/**
+ * Review owner for a worktree's Review stage (WORKTREE-SPEC §6). Pluggable:
+ * a human gate, the orchestrator, or the assigned agent. v1 default = 'human'.
+ */
+export type ReviewOwner = "human" | "orchestrator" | "agent";
+
+/** Default review owner — v1 keeps the final merge click with a human. */
+export const DEFAULT_REVIEW_OWNER: ReviewOwner = "human";
+
+/**
+ * Review/merge policy attached to a worktree row. `autoMergeWhenGreen` is the
+ * opt-in "green이면 자동 머지" toggle from §6 — a placeholder hook in v1 (UI
+ * wiring is a follow-up); defaults keep merges human-gated.
+ */
+export interface ReviewPolicy {
+  owner: ReviewOwner;
+  autoMergeWhenGreen: boolean;
+}
+
+/** v1 default policy: human owner, auto-merge off. */
+export const DEFAULT_REVIEW_POLICY: ReviewPolicy = {
+  owner: DEFAULT_REVIEW_OWNER,
+  autoMergeWhenGreen: false,
+};
+
 export class WorktreeManager {
   private worktreesRoot: string;
 
@@ -268,6 +310,90 @@ export class WorktreeManager {
         );
       }
     }
+  }
+
+  /**
+   * Rebase the worktree's branch onto `baseRef` (WORKTREE-SPEC §4 머지단계).
+   * Runs `git rebase <baseRef>` inside the worktree. On success → {ok:true}.
+   * On conflict, capture the unmerged paths, then `git rebase --abort` to
+   * restore the working tree (safe stop — never leaves a half-rebased tree),
+   * returning {ok:false, conflicts:[...]}.
+   */
+  async rebaseOntoBase(
+    worktreePath: string,
+    baseRef: string,
+  ): Promise<RebaseResult> {
+    const res = await this.runGit(["rebase", baseRef], worktreePath);
+    if (res.code === 0) return { ok: true };
+
+    // Conflict (or other failure): list unmerged paths while the rebase is
+    // still in progress, then abort to leave the working tree exactly as it
+    // was before the rebase started.
+    const unmerged = await this.runGit(
+      ["diff", "--name-only", "--diff-filter=U"],
+      worktreePath,
+    );
+    const conflicts = unmerged.stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    await this.runGit(["rebase", "--abort"], worktreePath);
+    return { ok: false, conflicts };
+  }
+
+  /**
+   * Clean merge path (WORKTREE-SPEC §6): rebase the worktree branch onto base,
+   * squash it onto the checked-out base branch in repoRoot, then remove the
+   * worktree + branch. Deterministic; safe-stops on conflict without breaking
+   * either working tree.
+   *
+   *   (a) rebaseOntoBase — conflict → {ok:false, needsResolve:true} and STOP.
+   *   (b) `git merge --squash <branch>` + commit on base.
+   *   (c) remove(repoRoot, worktreePath, {deleteBranch:true}).
+   */
+  async squashMergeToBase(
+    repoRoot: string,
+    worktreePath: string,
+    baseRef: string,
+    branch: string,
+  ): Promise<SquashMergeResult> {
+    // (a) Rebase first — bail to the Resolve(agent) path on conflict.
+    const rebase = await this.rebaseOntoBase(worktreePath, baseRef);
+    if (!rebase.ok) {
+      return { ok: false, needsResolve: true, conflicts: rebase.conflicts };
+    }
+
+    // (b) Squash the rebased branch onto the base branch checked out in
+    // repoRoot. --squash stages the changes without advancing <branch> or
+    // creating a merge commit; the explicit commit lands a single squashed
+    // commit on base.
+    const squash = await this.runGit(["merge", "--squash", branch], repoRoot);
+    if (squash.code !== 0) {
+      // Defensive: a clean rebase shouldn't conflict here, but never leave a
+      // half-staged base — back it out so repoRoot stays pristine.
+      await this.runGit(["merge", "--abort"], repoRoot);
+      await this.runGit(["reset", "--hard"], repoRoot);
+      return {
+        ok: false,
+        error: `merge --squash failed: ${squash.stderr.trim()}`,
+      };
+    }
+
+    const commit = await this.runGit(
+      ["commit", "-m", `Merge ${branch} (squash)`],
+      repoRoot,
+    );
+    if (commit.code !== 0) {
+      await this.runGit(["reset", "--hard"], repoRoot);
+      return {
+        ok: false,
+        error: `squash commit failed: ${commit.stderr.trim()}`,
+      };
+    }
+
+    // (c) Tear down the now-merged worktree and its branch.
+    await this.remove(repoRoot, worktreePath, { deleteBranch: true });
+    return { ok: true };
   }
 
   async prune(repoRoot: string): Promise<void> {

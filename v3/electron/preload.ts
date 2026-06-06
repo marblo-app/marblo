@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       initialPrompt?: string,
       resumeSessionId?: string,
       projectId?: string,
+      taskId?: string,
     ) =>
       ipcRenderer.invoke("agent:launch", {
         agent,
@@ -104,6 +105,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         initialPrompt,
         resumeSessionId,
         projectId,
+        taskId,
       }),
     stop: (id: string) => ipcRenderer.invoke("agent:stop", id),
     restart: (id: string) => ipcRenderer.invoke("agent:restart", id),
@@ -180,6 +182,29 @@ contextBridge.exposeInMainWorld("electronAPI", {
     remove: (repoRoot: string, path: string, deleteBranch?: boolean) =>
       ipcRenderer.invoke("worktree:remove", { repoRoot, path, deleteBranch }),
     prune: (repoRoot: string) => ipcRenderer.invoke("worktree:prune", repoRoot),
+    // Rebase the worktree branch onto base (WORKTREE-SPEC §4). Returns
+    // { ok, conflicts? } — manager safe-aborts on conflict.
+    rebase: (path: string, baseRef: string) =>
+      ipcRenderer.invoke("worktree:rebase", { path, baseRef }),
+    // Clean squash-merge path: rebase → squash onto base → cleanup. Returns
+    // { ok, needsResolve?, conflicts?, error? }.
+    merge: (args: {
+      repoRoot: string;
+      path: string;
+      baseRef: string;
+      branch: string;
+    }) => ipcRenderer.invoke("worktree:merge", args),
+    // Conflict path: spawn a Resolve(agent) in the worktree (WORKTREE-SPEC §6).
+    // Returns { success, agentId?, stub?, reason? }.
+    resolve: (args: {
+      repoRoot: string;
+      path: string;
+      baseRef: string;
+      branch: string;
+      projectId?: string;
+      taskId?: string;
+      conflicts?: string[];
+    }) => ipcRenderer.invoke("worktree:resolve", args),
   },
   missionOrchestrator: {
     start: (args: {
