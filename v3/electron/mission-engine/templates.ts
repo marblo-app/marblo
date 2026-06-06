@@ -35,7 +35,7 @@ export const MISSION_TEMPLATES: Record<MissionTemplateId, MissionTemplate> = {
     label: "Quick Fix",
     emoji: "⚡",
     weight: "light",
-    description: "버그 / 소수정 / 핫픽스",
+    description: "버그 하나를 빠르게 — 원인 추적부터 수정·리뷰·배포까지",
     steps: [
       { type: "gstack", skill: "/investigate", onFailure: "escalate" },
       { type: "fix" },
@@ -48,7 +48,7 @@ export const MISSION_TEMPLATES: Record<MissionTemplateId, MissionTemplate> = {
     label: "Polish",
     emoji: "💅",
     weight: "light",
-    description: "기존 UI 다듬기 · 시각 QA",
+    description: "이미 있는 화면을 더 깔끔하게 — 디자인 점검 후 배포",
     steps: [
       { type: "gstack", skill: "/design-review", onFailure: "retry" },
       { type: "gstack", skill: "/review", onFailure: "retry" },
@@ -60,7 +60,7 @@ export const MISSION_TEMPLATES: Record<MissionTemplateId, MissionTemplate> = {
     label: "Feature",
     emoji: "🛠️",
     weight: "medium",
-    description: "이미 기획된 작업 구현",
+    description: "기획이 끝난 기능 구현 — 설계 검토 후 만들고 QA·배포",
     steps: [
       { type: "gstack", skill: "/plan-eng-review" },
       { type: "dispatch" },
@@ -75,7 +75,8 @@ export const MISSION_TEMPLATES: Record<MissionTemplateId, MissionTemplate> = {
     label: "Full Feature",
     emoji: "🏛️",
     weight: "heavy",
-    description: "제대로 된 신기능 (강의 데모 60초 hook)",
+    description:
+      "아이디어부터 배포까지 통째로 — 기획·설계·디자인 검토를 거쳐 끝까지",
     steps: [
       { type: "gstack", skill: "/office-hours" },
       { type: "gstack", skill: "/plan-ceo-review" },
@@ -91,10 +92,10 @@ export const MISSION_TEMPLATES: Record<MissionTemplateId, MissionTemplate> = {
   },
   research: {
     id: "research",
-    label: "Research only",
+    label: "Research",
     emoji: "🔬",
     weight: "heavy",
-    description: "구현 없이 의사결정만 (디자인 docs 생성)",
+    description: "코드는 그대로, 방향만 — 요구사항을 파고들어 기획·전략 정리",
     steps: [
       { type: "gstack", skill: "/office-hours" },
       { type: "gstack", skill: "/plan-ceo-review" },
