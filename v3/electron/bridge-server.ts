@@ -1083,6 +1083,9 @@ export class BridgeServer {
       projectId: params.projectId,
       taskId: params.taskId,
       title: params.name,
+      // Raw spawn prompt (pre-footer) so the ad-hoc ticket shows what the agent
+      // was asked to do; only used when the coordinator auto-creates a task.
+      description: params.initialPrompt,
       repoRoot,
       requestedCwd: repoRoot,
     });

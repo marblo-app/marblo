@@ -5,6 +5,9 @@ export interface PrepareInput {
   projectId?: string;
   taskId?: string;
   title?: string;
+  /** Spawn prompt for ad-hoc tasks — persisted as the board task's description
+   *  so a worktree-spawned agent's ticket shows what it was asked to do. */
+  description?: string;
   repoRoot: string;
   requestedCwd?: string;
 }
@@ -17,7 +20,11 @@ export interface PrepareResult {
 
 export interface WorktreeCoordinatorDeps {
   worktreeManager: WorktreeManager;
-  createTask: (input: { projectId: string; title: string }) => Promise<string>;
+  createTask: (input: {
+    projectId: string;
+    title: string;
+    description?: string;
+  }) => Promise<string>;
 }
 
 /**
@@ -38,7 +45,8 @@ export class WorktreeCoordinator {
   }
 
   async prepare(input: PrepareInput): Promise<PrepareResult> {
-    const { projectId, taskId, title, repoRoot, requestedCwd } = input;
+    const { projectId, taskId, title, description, repoRoot, requestedCwd } =
+      input;
     const fallback = (tid: string | null): PrepareResult => ({
       taskId: tid,
       cwd: requestedCwd ?? repoRoot,
@@ -65,6 +73,7 @@ export class WorktreeCoordinator {
       resolvedTaskId = await this.createTask({
         projectId,
         title: title ?? "ad-hoc",
+        description,
       });
     }
 

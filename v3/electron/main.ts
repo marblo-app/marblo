@@ -438,13 +438,14 @@ const sidGen = new Map<string, number>();
 const worktreeManager = new WorktreeManager();
 const worktreeCoordinator = new WorktreeCoordinator({
   worktreeManager,
-  createTask: async ({ projectId, title }) => {
+  createTask: async ({ projectId, title, description }) => {
     const { app, authReady } = getMissionFirebaseApp();
     await authReady;
     const wtDb = getFirestore(app);
     const now = fbTimestamp.now();
     const ref = await fbAddDoc(fbCollection(wtDb, "tasks"), {
       title,
+      description: description ?? "",
       projectId,
       role: "backend",
       priority: 3,

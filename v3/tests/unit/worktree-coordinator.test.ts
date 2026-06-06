@@ -80,6 +80,26 @@ describe("WorktreeCoordinator.prepare", () => {
     expect(res.cwd).toBe(path.join(wtRoot, "proj1", "adhoc-generated-id"));
   });
 
+  it("threads the spawn prompt into the ad-hoc createTask call as description", async () => {
+    const { repoRoot, mgr } = makeRepo();
+    const createTask = vi.fn(async () => "adhoc-desc-id");
+    const coord = new WorktreeCoordinator({ worktreeManager: mgr, createTask });
+
+    await coord.prepare({
+      projectId: "proj1",
+      title: "wt-runtime-test2",
+      description: "Fix the login bug in auth.ts",
+      repoRoot,
+    });
+
+    // Ad-hoc ticket carries the spawn prompt so its board card isn't empty.
+    expect(createTask).toHaveBeenCalledWith({
+      projectId: "proj1",
+      title: "wt-runtime-test2",
+      description: "Fix the login bug in auth.ts",
+    });
+  });
+
   it("reuses the existing worktree on a second prepare with the same taskId (no duplicate create)", async () => {
     const { repoRoot, mgr } = makeRepo();
     const createTask = vi.fn(async () => "unused");
