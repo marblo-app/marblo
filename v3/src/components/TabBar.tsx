@@ -261,7 +261,7 @@ interface TabBarProps {
 }
 
 // Hidden tabs in production — only shown when VITE_DEV_FEATURES includes the tab id
-const DEV_ONLY_TABS: Set<TabId> = new Set(["flows", "deploy", "worktrees"]);
+const DEV_ONLY_TABS: Set<TabId> = new Set(["flows", "deploy"]);
 const devFeatures = (import.meta.env.VITE_DEV_FEATURES || "")
   .split(",")
   .map((s: string) => s.trim());

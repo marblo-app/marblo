@@ -235,6 +235,9 @@ export function WorktreeTab() {
     "all",
   );
   const [mergeableOnly, setMergeableOnly] = useState(false);
+  // 예외 뷰: 자동머지 안 되고 사람이 봐야 하는 것만 (충돌/머지불가 or stale).
+  // 자율성 다이얼 L1에서 clean+mergeable은 자동머지되므로 예외가 아님.
+  const [exceptionsOnly, setExceptionsOnly] = useState(false);
   const [busy, setBusy] = useState<{ id: string; action: RowAction } | null>(
     null,
   );
@@ -265,6 +268,12 @@ export function WorktreeTab() {
       if (mergeableOnly && !wt.status?.mergeable) {
         return false;
       }
+      if (exceptionsOnly) {
+        const isException = wt.status
+          ? !wt.status.mergeable || wt.stale === true
+          : false;
+        if (!isException) return false;
+      }
       return true;
     });
 
@@ -282,6 +291,7 @@ export function WorktreeTab() {
     projectFilter,
     statusFilter,
     mergeableOnly,
+    exceptionsOnly,
     statusPill,
     projectName,
   ]);
@@ -450,6 +460,19 @@ export function WorktreeTab() {
             className="accent-emerald-500"
           />
           Mergeable
+        </label>
+
+        <label
+          className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-300"
+          title="자동머지 안 되고 사람이 봐야 하는 것만 (충돌/머지불가 또는 stale)"
+        >
+          <input
+            type="checkbox"
+            checked={exceptionsOnly}
+            onChange={(e) => setExceptionsOnly(e.target.checked)}
+            className="accent-amber-500"
+          />
+          ⚠️ 예외만
         </label>
 
         <div className="ml-auto flex items-center gap-2">
