@@ -17,6 +17,9 @@ interface WorktreeState {
     path: string;
     baseRef: string;
     branch: string;
+    projectId?: string;
+    taskId?: string;
+    mode?: "manual" | "auto";
   }) => Promise<void>;
   resolve: (args: {
     repoRoot: string;

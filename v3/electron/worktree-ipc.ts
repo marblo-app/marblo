@@ -49,7 +49,46 @@ interface WorktreeMergeArgs {
   path: string;
   baseRef: string;
   branch: string;
+  /** For the merge-history audit record (best-effort; merge proceeds without). */
+  projectId?: string;
+  taskId?: string;
+  /** "manual" = human clicked Merge; "auto" = orchestrator auto-merge (future). */
+  mode?: MergeMode;
 }
+
+interface WorktreeShowCommitArgs {
+  repoRoot: string;
+  sha: string;
+}
+
+export type MergeMode = "manual" | "auto";
+
+/**
+ * One immutable audit entry for a completed (squash-merged) worktree. Captured
+ * at the merge chokepoint just before the worktree is torn down — the only
+ * place all of {sha, branch, task} are still known. Persisted append-only
+ * (see firestore.rules merge_history) so the cockpit's "완료 이력" view can
+ * reconstruct who merged what, when, and link back to the diff via headSha.
+ */
+export interface MergeHistoryRecord {
+  projectId: string;
+  taskId?: string;
+  repoRoot: string;
+  branch: string;
+  baseRef: string;
+  headSha: string;
+  mode: MergeMode;
+  mergedAt: Date;
+}
+
+/**
+ * Injected by the host (main.ts) to persist a merge record. Left undefined in
+ * tests / partial wiring, in which case merges simply aren't recorded (the
+ * merge itself always proceeds). Fire-and-forget: never blocks the merge.
+ */
+export type MergeHistoryRecorder = (
+  record: MergeHistoryRecord,
+) => Promise<void>;
 
 interface WorktreeResolveArgs {
   repoRoot: string;
@@ -148,6 +187,24 @@ function parseMergeArgs(args: unknown): WorktreeMergeArgs {
     path: requireString(args.path, "path"),
     baseRef: requireString(args.baseRef, "baseRef"),
     branch: requireString(args.branch, "branch"),
+    projectId:
+      typeof args.projectId === "string" && args.projectId.length > 0
+        ? args.projectId
+        : undefined,
+    taskId:
+      typeof args.taskId === "string" && args.taskId.length > 0
+        ? args.taskId
+        : undefined,
+    mode: args.mode === "auto" ? "auto" : "manual",
+  };
+}
+
+function parseShowCommitArgs(args: unknown): WorktreeShowCommitArgs {
+  if (!isRecord(args))
+    throw new Error("worktree:showCommit args must be object");
+  return {
+    repoRoot: requireString(args.repoRoot, "repoRoot"),
+    sha: requireString(args.sha, "sha"),
   };
 }
 
@@ -207,6 +264,7 @@ export function registerWorktreeIpc(
   worktreeManager: WorktreeManager,
   getProjectRoots: ProjectRootProvider = defaultProjectRootProvider,
   spawnResolver?: WorktreeResolverSpawner,
+  recordMergeHistory?: MergeHistoryRecorder,
 ): void {
   const listWorktrees = async (): Promise<WorktreeProjectGroup[]> => {
     const roots = uniqueProjectRoots(getProjectRoots());
@@ -288,12 +346,40 @@ export function registerWorktreeIpc(
   // invokes worktree:resolve to spawn a Resolve(agent).
   ipcMain.handle("worktree:merge", async (_event, args: unknown) => {
     const parsed = parseMergeArgs(args);
-    return worktreeManager.squashMergeToBase(
+    const result = await worktreeManager.squashMergeToBase(
       parsed.repoRoot,
       parsed.path,
       parsed.baseRef,
       parsed.branch,
     );
+
+    // Append-only audit record on success — fire-and-forget so a Firestore
+    // hiccup never fails or stalls the merge. Needs projectId + the sha that
+    // the manager captured before teardown; skip silently if either is absent.
+    if (result.ok && recordMergeHistory && parsed.projectId && result.mergedSha) {
+      void recordMergeHistory({
+        projectId: parsed.projectId,
+        taskId: parsed.taskId,
+        repoRoot: parsed.repoRoot,
+        branch: parsed.branch,
+        baseRef: parsed.baseRef,
+        headSha: result.mergedSha,
+        mode: parsed.mode ?? "manual",
+        mergedAt: new Date(),
+      }).catch((err) => {
+        console.error("[MergeHistory] record failed:", err);
+      });
+    }
+
+    return result;
+  });
+
+  // Recover the diff of a completed merge for the "완료 이력" view: the worktree
+  // is long gone, but its squashed commit lives on base — `git show <sha>`.
+  ipcMain.handle("worktree:showCommit", async (_event, args: unknown) => {
+    const parsed = parseShowCommitArgs(args);
+    const diff = await worktreeManager.showCommit(parsed.repoRoot, parsed.sha);
+    return { ok: true, diff };
   });
 
   // Conflict path: spawn a resolver agent inside the conflicted worktree. Wired

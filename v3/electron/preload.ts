@@ -202,13 +202,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     rebase: (path: string, baseRef: string) =>
       ipcRenderer.invoke("worktree:rebase", { path, baseRef }),
     // Clean squash-merge path: rebase → squash onto base → cleanup. Returns
-    // { ok, needsResolve?, conflicts?, error? }.
+    // { ok, needsResolve?, conflicts?, error?, mergedSha? }. projectId/taskId/mode
+    // are best-effort metadata for the merge-history audit trail.
     merge: (args: {
       repoRoot: string;
       path: string;
       baseRef: string;
       branch: string;
+      projectId?: string;
+      taskId?: string;
+      mode?: "manual" | "auto";
     }) => ipcRenderer.invoke("worktree:merge", args),
+    // Render a completed merge's diff for the "완료 이력" view (git show <sha>
+    // on base, where the squashed commit lives after the worktree is gone).
+    // Returns { ok, diff }.
+    showCommit: (repoRoot: string, sha: string) =>
+      ipcRenderer.invoke("worktree:showCommit", { repoRoot, sha }),
     // Conflict path: spawn a Resolve(agent) in the worktree (WORKTREE-SPEC §6).
     // Returns { success, agentId?, stub?, reason? }.
     resolve: (args: {

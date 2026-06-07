@@ -54,7 +54,11 @@ import {
 } from "./mission-engine/wire";
 import { WorktreeManager } from "./worktree-manager";
 import { WorktreeCoordinator } from "./worktree-coordinator";
-import { registerWorktreeIpc, type WorktreeProjectRoot } from "./worktree-ipc";
+import {
+  registerWorktreeIpc,
+  type WorktreeProjectRoot,
+  type MergeHistoryRecord,
+} from "./worktree-ipc";
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
 
 // .env 파일에서 Firebase 환경변수 로드 (Electron 메인 프로세스용)
@@ -718,7 +722,37 @@ function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
   return roots;
 }
 
-registerWorktreeIpc(ipcMain, worktreeManager, collectWorktreeProjectRoots);
+// Append-only merge audit trail (WORKTREE-SPEC §6 / autonomy-dial audit log).
+// Writes one immutable doc per completed merge to the `merge_history`
+// collection, reusing the mission firebase app (anonymous auth) like the
+// worktree coordinator's task writer above. Best-effort: the merge handler
+// fires this without awaiting, so a Firestore failure never affects the merge.
+const recordMergeHistory = async (
+  record: MergeHistoryRecord,
+): Promise<void> => {
+  const { app, authReady } = getMissionFirebaseApp();
+  await authReady;
+  const db = getFirestore(app);
+  await fbAddDoc(fbCollection(db, "merge_history"), {
+    projectId: record.projectId,
+    taskId: record.taskId ?? null,
+    repoRoot: record.repoRoot,
+    branch: record.branch,
+    baseRef: record.baseRef,
+    headSha: record.headSha,
+    mode: record.mode,
+    mergedAt: fbTimestamp.fromDate(record.mergedAt),
+    createdAt: fbTimestamp.now(),
+  });
+};
+
+registerWorktreeIpc(
+  ipcMain,
+  worktreeManager,
+  collectWorktreeProjectRoots,
+  undefined,
+  recordMergeHistory,
+);
 
 function createMissionOrchestratorInstance(
   projectId: string,

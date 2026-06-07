@@ -389,6 +389,10 @@ interface WorktreeMergeArgs {
   path: string;
   baseRef: string;
   branch: string;
+  /** Best-effort metadata for the merge-history audit trail. */
+  projectId?: string;
+  taskId?: string;
+  mode?: "manual" | "auto";
 }
 
 interface WorktreeResolveArgs extends WorktreeMergeArgs {
@@ -423,6 +427,7 @@ interface WorktreeAPI {
     needsResolve?: boolean;
     conflicts?: string[];
     error?: string;
+    mergedSha?: string;
   }>;
   resolve: (args: WorktreeResolveArgs) => Promise<{
     success: boolean;
@@ -430,6 +435,10 @@ interface WorktreeAPI {
     stub?: boolean;
     reason?: string;
   }>;
+  showCommit: (
+    repoRoot: string,
+    sha: string,
+  ) => Promise<{ ok: boolean; diff: string }>;
 }
 
 interface WindowAPI {

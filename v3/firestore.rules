@@ -171,6 +171,17 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ===== Merge History (worktree audit trail) =====
+    // Append-only record of completed (squash-merged) worktrees. Written by the
+    // Electron main process at the merge chokepoint; read by the cockpit's
+    // "완료 이력" view. Immutable, same posture as audit_logs.
+    match /merge_history/{mergeId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+
     // ===== Telemetry Events =====
     match /telemetry_events/{eventId} {
       allow read: if isAuthenticated();
