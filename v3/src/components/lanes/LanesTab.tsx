@@ -4,11 +4,13 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useAgentStore } from "../../stores/agentStore";
+import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useAgentSessionMap } from "../../stores/agentSessionMap";
 import * as taskService from "../../services/taskService";
 import * as agentService from "../../services/agentService";
+import { checkAgentSpawn } from "../../lib/planLimits";
 import type { Agent } from "../../types/agent";
 import { LaneCreateModal, type LaneLaunchInput } from "./LaneCreateModal";
 
@@ -52,7 +54,7 @@ function LaneTerminalButton({ agent }: { agent: Agent }) {
   const ptySessionId = useAgentSessionMap((s) => s.map[agent.id]);
   // 실제로 attach 가능한 세션이 이 윈도우에 존재하는지(=라이브 PTY) 교차 확인.
   const hasLiveSession = useTerminalStore((s) =>
-    ptySessionId ? s.sessions.some((sess) => sess.id === ptySessionId) : false
+    ptySessionId ? s.sessions.some((sess) => sess.id === ptySessionId) : false,
   );
   const canOpen = Boolean(ptySessionId);
 
@@ -131,9 +133,19 @@ export function LanesTab() {
     // 레인을 만들기 전에 막고 사용자에게 알린다 (orphan 태스크도 방지).
     if (!rootPath) {
       setError(
-        "프로젝트 폴더 경로가 없어 격리 워크트리를 만들 수 없습니다. 사이드바에서 프로젝트 폴더를 먼저 여세요."
+        "프로젝트 폴더 경로가 없어 격리 워크트리를 만들 수 없습니다. 사이드바에서 프로젝트 폴더를 먼저 여세요.",
       );
       throw new Error("no repo root");
+    }
+    // 플랜 동시 실행 한도 게이트: 이 핸들러는 agentStore.spawnAgent 를 우회해
+    // agentService.createAgent + electronAPI.agent.launch 를 직접 호출하므로
+    // (AgentsTab.handleLaunch 와 동일 사정) 여기서 checkAgentSpawn 을 재검사한다.
+    // 진실의 원천은 lib/planLimits.ts. task/agent doc 생성 전에 막아 orphan 방지.
+    const plan = useSubscriptionStore.getState().getPlan();
+    const spawnCheck = checkAgentSpawn(plan, agents);
+    if (!spawnCheck.allowed) {
+      setError(spawnCheck.reason ?? "에이전트 동시 실행 한도에 도달했습니다.");
+      throw new Error("agent limit reached");
     }
     const taskId = await taskService.createTask({
       projectId,
@@ -172,7 +184,7 @@ export function LanesTab() {
       prompt,
       undefined,
       projectId,
-      taskId
+      taskId,
     );
     // launch 가 돌려준 진짜 ptySessionId 를 매핑에 박아 둔다 — lane row 의
     // "터미널" 버튼이 이걸 reactive 로 읽어 활성화된다.
@@ -181,7 +193,7 @@ export function LanesTab() {
       .getState()
       .attachSession(
         result.ptySessionId,
-        `${HARNESS_ICON[model] ?? "⚪"} ${agentData.name}`
+        `${HARNESS_ICON[model] ?? "⚪"} ${agentData.name}`,
       );
     refreshWorktrees().catch(() => {});
   };
