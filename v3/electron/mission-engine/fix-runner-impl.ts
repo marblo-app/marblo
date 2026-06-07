@@ -78,6 +78,9 @@ export function createFixRunner(deps: FixRunnerDeps): FixRunner {
       hasPmFeedback: false,
       projectId: input.projectId,
       missionId: input.missionId,
+      // contextId = missionId(접두사 없음) 로 기록해야 칸반 카드가 isMissionTask 로
+      // 미션 task 를 인식해 🎯 Mission 뱃지를 렌더한다. dispatcher-impl 과 동일 규약.
+      contextId: input.missionId,
       createdAt: now,
       updatedAt: now,
     });
