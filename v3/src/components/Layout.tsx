@@ -152,7 +152,7 @@ export function Layout() {
   }, [toggleActivityStream]);
 
   // Restore last session (rootPath + project) on startup
-  const { isNewWindow } = useSessionRestore();
+  const { isNewWindow, restoreSettled } = useSessionRestore();
   const rootPath = useEditorStore((s) => s.rootPath);
 
   // Auto-launch orchestrator when project is selected
@@ -275,6 +275,24 @@ export function Layout() {
   const setRootPath = useEditorStore((s) => s.setRootPath);
   const findByFolderPath = useProjectStore((s) => s.findByFolderPath);
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
+
+  // New window, restore still in flight: hold off the folder picker until we
+  // know whether this is a fresh new window or one reconnecting after a
+  // sleep/wake renderer reload — otherwise a woken window flashes the picker
+  // before its project comes back.
+  if (isNewWindow && !rootPath && !restoreSettled) {
+    return (
+      <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
+        <Header onNavigateToSettings={() => setActiveTab("settings")} />
+        <div className="flex flex-1 items-center justify-center">
+          <div className="text-center">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
+            <p className="mt-3 text-sm text-gray-400">세션 복원 중...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // New window: show folder picker prompt
   if (isNewWindow && !rootPath) {

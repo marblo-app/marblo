@@ -216,6 +216,9 @@ interface AppState {
   lastRootPath?: string;
   wasOrchestratorRunning?: boolean;
   modelPreset?: string;
+  // Project windows open at last quit, so a full restart can reopen them all
+  // (the single lastProjectId/lastRootPath above only covers one window).
+  windows?: Array<{ rootPath?: string; projectId?: string }>;
 }
 
 function readAppState(): AppState {
@@ -371,6 +374,33 @@ function sendToOwner(
 // `window:registerProject` IPC; we use this to scope project-level events
 // (agent:spawned, agent:statusChanged, etc.) to only the matching window(s).
 const windowProjects = new Map<number, string>(); // webContents.id → projectId
+
+// Per-window restore state, keyed by webContents.id (stable across a renderer
+// reload). The main process survives macOS sleep/wake, so when a window's
+// renderer is discarded+reloaded on wake it can ask main "what folder/project
+// did I have?" and reconnect — instead of falling back to the new-window
+// folder picker. Unlike windowProjects (event scoping, cleared when a project
+// closes), this map is NEVER cleared by transient nulls during a reload: it
+// only accumulates non-empty values and is dropped when the window closes.
+// The global app-state.json holds a single slot, so it can't represent more
+// than one open project — this per-window map is what makes multi-window
+// reconnect correct. See src/lib/sessionRestore.ts for the precedence rules.
+const windowRestore = new Map<
+  number,
+  { rootPath?: string; projectId?: string }
+>();
+
+// Set on before-quit so per-window close handlers don't strip the saved
+// session on the way out — we want the set of windows open AT quit to persist.
+let isQuitting = false;
+
+// Snapshot the currently-open project windows to disk so a full restart can
+// reopen them all (see restoreWindowSession). Called whenever a window's
+// project changes or a window closes — cheap and infrequent.
+function persistWindowSession(): void {
+  const windows = [...windowRestore.values()].filter((w) => w.rootPath);
+  writeAppState({ windows });
+}
 
 function getProjectForSender(senderId: number): string | undefined {
   return windowProjects.get(senderId);
@@ -1122,6 +1152,11 @@ function createWindow(isNewWindow = false) {
     fsManager.stopWatching(`win-${closedSenderId}`);
     // Drop the window→project registration.
     windowProjects.delete(closedSenderId);
+    // Drop the per-window restore record (no point reconnecting a closed window).
+    windowRestore.delete(closedSenderId);
+    // A user-closed window leaves the restore set; but during quit we keep it
+    // so the next launch reopens everything that was open.
+    if (!isQuitting) persistWindowSession();
     if (mainWindow === win) {
       // Promote another window as primary, or null
       mainWindow =
@@ -1222,6 +1257,33 @@ function createWindow(isNewWindow = false) {
     },
   ]);
   Menu.setApplicationMenu(menu);
+
+  return win;
+}
+
+// On launch, reopen every project window that was open at last quit. Falls
+// back to a single default window (which restores via the global app-state)
+// when no multi-window session was saved. Seeds each window's per-window
+// restore record (windowRestore, keyed by webContents.id) so its renderer
+// reconnects to the right project instead of showing the folder picker —
+// see src/lib/sessionRestore.ts.
+function restoreWindowSession(): void {
+  const saved = (readAppState().windows ?? [])
+    .filter((w) => w && w.rootPath)
+    .slice(0, 10); // sanity cap — never spawn a runaway number of windows
+  if (saved.length === 0) {
+    createWindow();
+    return;
+  }
+  saved.forEach((w, i) => {
+    // First window is primary; the rest open as additional windows. Their
+    // seeded restore state makes them reconnect rather than show the picker.
+    const win = createWindow(i > 0);
+    windowRestore.set(win.webContents.id, {
+      rootPath: w.rootPath,
+      projectId: w.projectId,
+    });
+  });
 }
 
 // --- PTY IPC Handlers ---
@@ -1640,6 +1702,32 @@ ipcMain.handle("window:registerProject", (event, projectId: string) => {
     return;
   }
   windowProjects.set(event.sender.id, projectId);
+});
+
+// Persist this window's folder/project so it can reconnect after a renderer
+// reload (e.g. macOS sleep/wake discards a background window's renderer).
+// Only non-empty fields are merged in — a transient null during reload must
+// NOT wipe the saved state (that's the race that left woken windows on the
+// folder picker). Cleared only when the window closes.
+ipcMain.handle(
+  "window:registerRestore",
+  (event, state: { rootPath?: string; projectId?: string }) => {
+    const next = { ...(windowRestore.get(event.sender.id) ?? {}) };
+    if (typeof state?.rootPath === "string" && state.rootPath) {
+      next.rootPath = state.rootPath;
+    }
+    if (typeof state?.projectId === "string" && state.projectId) {
+      next.projectId = state.projectId;
+    }
+    windowRestore.set(event.sender.id, next);
+    // Keep the on-disk multi-window session current so a full restart reopens
+    // every project window (not just the last-touched one).
+    persistWindowSession();
+  },
+);
+
+ipcMain.handle("window:getRestoreState", (event) => {
+  return windowRestore.get(event.sender.id) ?? {};
 });
 
 ipcMain.handle("agent:remove", (_event, agentId: string) => {
@@ -2470,7 +2558,9 @@ app.whenReady().then(async () => {
     console.error("[Main] Failed to start BridgeServer:", err);
   }
 
-  createWindow();
+  // Reopen all project windows that were open at last quit (multi-window
+  // session restore). Single default window when nothing was saved.
+  restoreWindowSession();
 
   // --- powerMonitor: notify renderer on system wake ---
   powerMonitor.on("resume", () => {
@@ -2520,6 +2610,12 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  // Capture the windows open at quit BEFORE they start closing, so the next
+  // launch can reopen them all. isQuitting also tells per-window close handlers
+  // not to strip the saved session on the way out.
+  isQuitting = true;
+  persistWindowSession();
+
   // Full cleanup when actually quitting (Cmd+Q)
   kanbanBridge.detach();
   stopAllOrchestrators();

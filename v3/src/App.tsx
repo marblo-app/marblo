@@ -1,26 +1,32 @@
-import { useEffect } from 'react';
-import { AuthProvider } from './auth';
-import { useAuth } from './hooks/useAuth';
-import { LoginPage } from './auth';
-import { Layout } from './components/Layout';
-import { ErrorBoundary } from './components/ErrorBoundary';
-import { useProjectStore } from './stores/projectStore';
-import { useSubscriptionStore } from './stores/subscriptionStore';
-import { logTelemetry, setTelemetryEnabled, type TelemetryEvent } from './services/telemetryService';
-import telemetry from './services/telemetryService';
+import { useEffect } from "react";
+import { AuthProvider } from "./auth";
+import { useAuth } from "./hooks/useAuth";
+import { LoginPage } from "./auth";
+import { Layout } from "./components/Layout";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { useProjectStore } from "./stores/projectStore";
+import { useSubscriptionStore } from "./stores/subscriptionStore";
+import {
+  logTelemetry,
+  setTelemetryEnabled,
+  type TelemetryEvent,
+} from "./services/telemetryService";
+import telemetry from "./services/telemetryService";
 
 // DIAGNOSTIC: VITE_DISABLE_TELEMETRY=1 disables all telemetry + cost writes
 // (logTelemetryBatch, logCostBatch, logHeartbeat Cloud Function calls).
 // Tests if Firebase Cloud Function calls during typing cause input delay.
-if (import.meta.env.VITE_DISABLE_TELEMETRY === '1') {
+if (import.meta.env.VITE_DISABLE_TELEMETRY === "1") {
   setTelemetryEnabled(false);
-  console.warn('[DIAG] Telemetry DISABLED — no logTelemetryBatch/logHeartbeat calls');
+  console.warn(
+    "[DIAG] Telemetry DISABLED — no logTelemetryBatch/logHeartbeat calls",
+  );
 }
 
 // Performance monitor: log long tasks that block the main thread.
 // `attribution` reveals what was running (script src, container element).
 // `event` entryType (interactionId) helps identify INP spikes specifically.
-if (typeof PerformanceObserver !== 'undefined') {
+if (typeof PerformanceObserver !== "undefined") {
   type AttributedEntry = PerformanceEntry & {
     attribution?: Array<{
       name?: string;
@@ -36,31 +42,62 @@ if (typeof PerformanceObserver !== 'undefined') {
         if (entry.duration <= 50) continue;
         const a = entry.attribution?.[0];
         const attr = a
-          ? `type=${a.containerType ?? '?'} name=${a.containerName ?? '?'} id=${a.containerId ?? '?'} src=${a.containerSrc ?? '?'}`
-          : 'no-attribution';
+          ? `type=${a.containerType ?? "?"} name=${a.containerName ?? "?"} id=${a.containerId ?? "?"} src=${a.containerSrc ?? "?"}`
+          : "no-attribution";
         console.warn(`[LONGTASK] ${entry.duration.toFixed(0)}ms — ${attr}`);
       }
-    }).observe({ entryTypes: ['longtask'] });
-  } catch { /* not supported */ }
+    }).observe({ entryTypes: ["longtask"] });
+  } catch {
+    /* not supported */
+  }
 
   // Track slow keystroke INP — AGGREGATED to avoid Heisenbug (per-event console.warn
   // with DevTools open is itself slow ~5-15ms, which inflates INP and creates a
   // feedback loop). Buffer entries and log a 5-second summary instead.
-  type InpEntry = { duration: number; inputDelay: number; processing: number; presentation: number };
+  type InpEntry = {
+    duration: number;
+    inputDelay: number;
+    processing: number;
+    presentation: number;
+  };
   const inpBuffer: InpEntry[] = [];
   try {
     new PerformanceObserver((list) => {
-      for (const entry of list.getEntries() as Array<PerformanceEntry & { interactionId?: number; processingStart?: number; processingEnd?: number; target?: Element | null }>) {
+      for (const entry of list.getEntries() as Array<
+        PerformanceEntry & {
+          interactionId?: number;
+          processingStart?: number;
+          processingEnd?: number;
+          target?: Element | null;
+        }
+      >) {
         if (entry.duration <= 100) continue;
-        if (entry.entryType !== 'event') continue;
-        if (entry.name !== 'keydown' && entry.name !== 'keyup' && entry.name !== 'input') continue;
+        if (entry.entryType !== "event") continue;
+        if (
+          entry.name !== "keydown" &&
+          entry.name !== "keyup" &&
+          entry.name !== "input"
+        )
+          continue;
         const inputDelay = (entry.processingStart ?? 0) - entry.startTime;
-        const processing = (entry.processingEnd ?? 0) - (entry.processingStart ?? 0);
+        const processing =
+          (entry.processingEnd ?? 0) - (entry.processingStart ?? 0);
         const presentation = entry.duration - inputDelay - processing;
-        inpBuffer.push({ duration: entry.duration, inputDelay, processing, presentation });
+        inpBuffer.push({
+          duration: entry.duration,
+          inputDelay,
+          processing,
+          presentation,
+        });
       }
-    }).observe({ type: 'event', durationThreshold: 100, buffered: true } as PerformanceObserverInit);
-  } catch { /* not supported */ }
+    }).observe({
+      type: "event",
+      durationThreshold: 100,
+      buffered: true,
+    } as PerformanceObserverInit);
+  } catch {
+    /* not supported */
+  }
 
   setInterval(() => {
     if (inpBuffer.length === 0) return;
@@ -70,7 +107,9 @@ if (typeof PerformanceObserver !== 'undefined') {
     const p50 = dur[Math.floor(dur.length / 2)];
     const p95 = dur[Math.floor(dur.length * 0.95)] ?? dur[dur.length - 1];
     const max = dur[dur.length - 1];
-    const avgInDel = (inDel.reduce((a, b) => a + b, 0) / inDel.length).toFixed(0);
+    const avgInDel = (inDel.reduce((a, b) => a + b, 0) / inDel.length).toFixed(
+      0,
+    );
     console.warn(
       `[INP-5s] count=${samples.length} p50=${p50?.toFixed(0)}ms p95=${p95?.toFixed(0)}ms max=${max?.toFixed(0)}ms | avgInputDelay=${avgInDel}ms`,
     );
@@ -84,7 +123,9 @@ if (typeof PerformanceObserver !== 'undefined') {
     const now = performance.now();
     const drift = now - lastSched - 100;
     if (drift > 30) {
-      console.warn(`[MAIN-BUSY] ${drift.toFixed(0)}ms drift (target 100ms, actual ${(now - lastSched).toFixed(0)}ms)`);
+      console.warn(
+        `[MAIN-BUSY] ${drift.toFixed(0)}ms drift (target 100ms, actual ${(now - lastSched).toFixed(0)}ms)`,
+      );
     }
     lastSched = now;
     setTimeout(tick, 100);
@@ -97,19 +138,19 @@ if (typeof PerformanceObserver !== 'undefined') {
   // Logs every 1s when total > 5 events/sec.
   if (window.electronAPI?.on) {
     const channels = [
-      'fs:change',
-      'cost:update',
-      'agent:syncStatus',
-      'agent:statusChanged',
-      'agent:restartAttempt',
-      'agent:restartFailed',
-      'agent:spawned',
-      'agent:deleted',
-      'telemetry:event',
-      'orchestrator:statusChanged',
-      'flow:event',
-      'system:wake',
-      'terminal:new',
+      "fs:change",
+      "cost:update",
+      "agent:syncStatus",
+      "agent:statusChanged",
+      "agent:restartAttempt",
+      "agent:restartFailed",
+      "agent:spawned",
+      "agent:deleted",
+      "telemetry:event",
+      "orchestrator:statusChanged",
+      "flow:event",
+      "system:wake",
+      "terminal:new",
     ];
     const counts = new Map<string, number>(channels.map((c) => [c, 0]));
     let windowStart = performance.now();
@@ -132,7 +173,9 @@ if (typeof PerformanceObserver !== 'undefined') {
         counts.set(ch, 0);
       }
       if (total > 5) {
-        console.warn(`[IPC-FREQ] ${(elapsed / 1000).toFixed(1)}s window | total=${total} | ${parts.join(' ')}`);
+        console.warn(
+          `[IPC-FREQ] ${(elapsed / 1000).toFixed(1)}s window | total=${total} | ${parts.join(" ")}`,
+        );
       }
     }, 1000);
   }
@@ -141,24 +184,32 @@ if (typeof PerformanceObserver !== 'undefined') {
 function AppContent() {
   const { user, loading } = useAuth();
   const subscribeToProjects = useProjectStore((s) => s.subscribeToProjects);
-  const clearCurrentProject = useProjectStore((s) => s.clearCurrentProject);
   const setAutoSelectFirstProject = useProjectStore(
     (s) => s.setAutoSelectFirstProject,
   );
-  const subscribeToSubscription = useSubscriptionStore((s) => s.subscribeToSubscription);
+  const subscribeToSubscription = useSubscriptionStore(
+    (s) => s.subscribeToSubscription,
+  );
 
   // DIAGNOSTIC TEST: Firebase realtime listeners suspected of causing typing
   // input delay (React reconciliation triggered by snapshot updates competing
   // with input handlers on main thread). Toggle via env var to compare.
-  const FIREBASE_LISTENERS_ENABLED = import.meta.env.VITE_DISABLE_FB_LISTENERS !== '1';
+  const FIREBASE_LISTENERS_ENABLED =
+    import.meta.env.VITE_DISABLE_FB_LISTENERS !== "1";
   useEffect(() => {
     if (!user) return;
     const isNewWindow = window.electronAPI.window.isNewWindow();
+    // Don't auto-grab project[0] for an explicitly-opened new window. Whether
+    // the window shows the folder picker or reconnects to its previous project
+    // (after a sleep/wake renderer reload) is decided by useSessionRestore —
+    // which also owns clearing, so we must NOT clear here or we'd clobber a
+    // pending reconnect.
     setAutoSelectFirstProject(!isNewWindow);
-    if (isNewWindow) clearCurrentProject();
 
     if (!FIREBASE_LISTENERS_ENABLED) {
-      console.warn('[DIAG] Firebase listeners DISABLED via VITE_DISABLE_FB_LISTENERS=1 — projects/subscription will not sync');
+      console.warn(
+        "[DIAG] Firebase listeners DISABLED via VITE_DISABLE_FB_LISTENERS=1 — projects/subscription will not sync",
+      );
       return;
     }
 
@@ -173,7 +224,6 @@ function AppContent() {
     user?.uid,
     subscribeToProjects,
     subscribeToSubscription,
-    clearCurrentProject,
     setAutoSelectFirstProject,
     FIREBASE_LISTENERS_ENABLED,
   ]);
@@ -191,7 +241,16 @@ function AppContent() {
 
   // Bridge main process telemetry events to Firestore
   useEffect(() => {
-    const api = (window as unknown as { electronAPI?: { telemetry?: { onEvent: (cb: (data: Record<string, unknown>) => void) => void; offEvent: () => void } } }).electronAPI;
+    const api = (
+      window as unknown as {
+        electronAPI?: {
+          telemetry?: {
+            onEvent: (cb: (data: Record<string, unknown>) => void) => void;
+            offEvent: () => void;
+          };
+        };
+      }
+    ).electronAPI;
     if (api?.telemetry) {
       // Remove any stale listeners first to prevent duplicates
       api.telemetry.offEvent();

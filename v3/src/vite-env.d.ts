@@ -439,6 +439,16 @@ interface WindowAPI {
    * (agent:spawned, agent:statusChanged, etc.) to this window. Pass empty
    * string to clear the registration when the project is closed. */
   registerProject: (projectId: string) => Promise<void>;
+  /** Persist this window's folder/project in main, keyed by webContents.id
+   * (stable across a renderer reload). Lets a window reconnect to its project
+   * after a sleep/wake reload. Only non-empty fields are stored; the record is
+   * never cleared by transient nulls (only when the window closes). */
+  registerRestore: (state: {
+    rootPath?: string;
+    projectId?: string;
+  }) => Promise<void>;
+  /** Read back this window's saved folder/project for reconnect on startup. */
+  getRestoreState: () => Promise<{ rootPath?: string; projectId?: string }>;
 }
 
 interface HarnessPackage {
