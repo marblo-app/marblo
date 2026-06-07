@@ -8,7 +8,7 @@ import { useAgentStore } from "../../stores/agentStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { usePresence } from "../../hooks/usePresence";
-import { isLaneTask } from "../../lib/laneContext";
+import { isLaneTask, isMissionTask } from "../../lib/laneContext";
 import FlowKanbanLink from "../flows/FlowKanbanLink";
 
 const PRESENCE_DOT: Record<PresenceStatus, string> = {
@@ -68,6 +68,16 @@ const ROLE_ICONS: Record<string, string> = {
   frontend: "🎨",
   test: "🧪",
   devops: "🚀",
+};
+
+// agentStore 의 MODEL_ICONS 와 동일 (기존 AgentList/AgentStatusCard 중복 패턴).
+const MODEL_ICONS: Record<string, string> = {
+  claude: "🟣",
+  gemini: "🔵",
+  gpt: "🟢",
+  antigravity: "🟠",
+  local: "⚫",
+  custom: "⚪",
 };
 
 const PRIORITY_CONFIG: Record<number, { label: string; color: string }> = {
@@ -222,7 +232,9 @@ function TaskCardContent({
     <div
       className={`relative cursor-pointer rounded-lg bg-gray-800 p-3 shadow hover:bg-gray-750 transition-colors border border-gray-700/50 hover:border-gray-600 ${statusHighlight} ${
         isDragging ? "ring-2 ring-blue-500" : ""
-      } ${isLaneTask(task.contextId) ? "border-l-2 border-l-amber-500" : ""}`}
+      } ${isLaneTask(task.contextId) ? "border-l-2 border-l-amber-500" : ""} ${
+        isMissionTask(task.contextId) ? "border-l-2 border-l-violet-500" : ""
+      }`}
       onClick={() => onClick(task)}
     >
       {pulsing && <span aria-hidden="true" className="mb-card-pulse-overlay" />}
@@ -256,7 +268,20 @@ function TaskCardContent({
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-500/20 text-amber-300"
             title={`context: ${task.contextId}`}
           >
-            ⛙ {task.contextId.startsWith("lane:") ? "Lane" : task.contextId}
+            ⛙ Lane
+          </span>
+        )}
+        {isMissionTask(task.contextId) && (
+          <span
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-violet-500/20 text-violet-300"
+            title={`mission: ${task.contextId}`}
+          >
+            🎯 Mission
+            {claimingAgent?.model && (
+              <span aria-label={`agent: ${claimingAgent.model}`}>
+                {MODEL_ICONS[claimingAgent.model] ?? "⚪"}
+              </span>
+            )}
           </span>
         )}
         {isBlocked && (
@@ -287,7 +312,9 @@ function TaskCardContent({
         {matchingWorktree && matchingPill && (
           <>
             <span
-              className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs font-medium ${WORKTREE_PILL_TONE[matchingPill.tone]}`}
+              className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs font-medium ${
+                WORKTREE_PILL_TONE[matchingPill.tone]
+              }`}
               title={`${matchingWorktree.branch} · ${matchingWorktree.path}`}
             >
               <span aria-hidden>{matchingPill.icon}</span>

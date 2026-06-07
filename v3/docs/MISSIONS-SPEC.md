@@ -144,21 +144,27 @@ export interface Mission {
 
 코드 상수로 시작 (`v3/electron/mission-engine/templates.ts`). Firestore seed는 v3.1.
 
-| Template ID    | 라벨             | 무게   | 시퀀스                                                                                                                                               |
-| -------------- | ---------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick-fix`    | ⚡ Quick Fix     | Light  | `/investigate` → fix → `/review` → `/ship`                                                                                                           |
-| `polish`       | 💅 Polish        | Light  | `/design-review` → `/review` → `/ship`                                                                                                               |
-| `feature`      | 🛠️ Feature       | Medium | `/plan-eng-review` → dispatch → wait → `/review` → `/qa` → `/ship`                                                                                   |
-| `full-feature` | 🏛️ Full Feature  | Heavy  | `/office-hours` → `/plan-ceo-review` → `/plan-eng-review` → `/plan-design-review` → dispatch → wait → `/review` → `/qa` → `/design-review` → `/ship` |
-| `research`     | 🔬 Research only | Heavy  | `/office-hours` → `/plan-ceo-review`                                                                                                                 |
+| Template ID    | 라벨            | 무게   | 시퀀스                                                                                                                                               |
+| -------------- | --------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quick-fix`    | ⚡ Quick Fix    | Light  | `/investigate` → fix → `/review` → `/ship`                                                                                                           |
+| `polish`       | 💅 Polish       | Light  | `/design-review` → `/review` → `/ship`                                                                                                               |
+| `feature`      | 🛠️ Feature      | Medium | `/plan-eng-review` → dispatch → wait → `/review` → `/qa` → `/ship`                                                                                   |
+| `full-feature` | 🏛️ Full Feature | Heavy  | `/office-hours` → `/plan-ceo-review` → `/plan-eng-review` → `/plan-design-review` → dispatch → wait → `/review` → `/qa` → `/design-review` → `/ship` |
+| `research`     | 🔬 Research     | Heavy  | `/office-hours` → `/plan-ceo-review`                                                                                                                 |
 
-사용 시나리오:
+### 5.1 카드 카피 (사용자 화면 노출 — 고객용)
 
-- Quick Fix: 버그, 소수정, 핫픽스
-- Polish: 기존 UI 다듬기, 시각 QA
-- Feature: 이미 기획된 작업 구현
-- Full Feature: 제대로 된 신기능 (강의 데모 영상 60초 hook)
-- Research only: 구현 없이 의사결정만 (디자인 docs 생성)
+템플릿 카탈로그 카드(`MissionTemplateCatalog`)에 그대로 렌더링되는 `description`. 내부 메모(데모 훅 등)는 절대 포함하지 않는다.
+
+| Template        | description (카드 한 줄)                                           |
+| --------------- | ------------------------------------------------------------------ |
+| ⚡ Quick Fix    | 버그 하나를 빠르게 — 원인 추적부터 수정·리뷰·배포까지              |
+| 💅 Polish       | 이미 있는 화면을 더 깔끔하게 — 디자인 점검 후 배포                 |
+| 🛠️ Feature      | 기획이 끝난 기능 구현 — 설계 검토 후 만들고 QA·배포                |
+| 🏛️ Full Feature | 아이디어부터 배포까지 통째로 — 기획·설계·디자인 검토를 거쳐 끝까지 |
+| 🔬 Research     | 코드는 그대로, 방향만 — 요구사항을 파고들어 기획·전략 정리         |
+
+> **카피 원칙:** "무엇을 — 어떻게" 한 줄, 고객 관점 가치 중심. `(강의 데모 60초 hook)`, `디자인 docs 생성` 같은 내부/개발 표현 금지. 진짜 카피(`templates.ts`)와 이 표를 항상 동기화한다. (`full-feature`가 강의 60초 데모의 메인 시나리오라는 사실은 §6의 데모 시나리오에만 기록하고, 카드 카피에는 넣지 않는다.)
 
 ## 6. UI 명세
 
@@ -219,6 +225,88 @@ v3/src/components/
   ✅ Mission completed
 ```
 
+### 6.6 칸반 ↔ Mission 연결 (Mission 뱃지) — NEW
+
+#### 설계 원칙
+
+Mission은 칸반 카드의 **상위 레이어**다. 별도 보드/탭을 신설하지 않는다 — 기존 칸반에 "이 카드가 어느 미션 소속인지" 출처 마킹만 추가한다. Quick Lanes가 이미 쓰는 `contextId` 뱃지 패턴(`TaskCard`의 좌측 보더 + 뱃지)을 그대로 재사용한다.
+
+Mission(영속적 의도) ≠ Task(칸반 카드, 작업 단위). 관계는 **Mission 1 : N Tasks**. 칸반 카드의 상태 변화가 곧 미션 `wait` step의 진행이며, 단일 진실원은 Firestore `tasks/*`다. 미션 없이 사람이 직접 만든 애드혹 task도 보드에 공존한다 (Quick Lane과 동일 — 뱃지로만 구분).
+
+#### A. contextId 컨벤션 (현행 유지)
+
+task의 출처는 `contextId` 한 필드로 구분한다. **현재 코드 컨벤션을 유지**한다 (마이그레이션 리스크 회피):
+
+| 출처       | contextId                        | 생성 위치                                                           |
+| ---------- | -------------------------------- | ------------------------------------------------------------------- |
+| 일반 보드  | `"board"`                        | `TaskCreateModal`, `resolveContextForWrite` 폴백                    |
+| Quick Lane | `"lane:<laneId>"`                | Quick Lanes                                                         |
+| Mission    | `<missionId>` (raw, 접두사 없음) | `dispatcher-impl.ts` `dispatchTasks` → `contextId: input.missionId` |
+
+> mission task의 contextId는 **missionId 그 자체**다 (`"mission:"` 접두사 없음). `context.ts` 백필도 `missionId ?? "board"`로 동일. 접두사 통일(`mission:<id>`)은 MCP context 레이어까지 건드려야 해 **v3.1 리팩터로 미룬다**. 이번엔 "board도 lane도 아니면 mission"으로 판별한다.
+
+#### B. 판별 유틸 (`src/lib/laneContext.ts` 수정 + 확장)
+
+현재 `isLaneTask(contextId)`는 `contextId !== "board"`면 **전부 lane으로 오판** → mission task에 `⛙ <missionId(UUID)>` 흉한 뱃지가 붙는 버그. 3-way로 분리한다:
+
+```ts
+const RESERVED_BOARD = "board";
+export function isMissionTask(c?: string): boolean {
+  return !!c && c !== RESERVED_BOARD && !c.startsWith("lane:");
+}
+export function isLaneTask(c?: string): boolean {
+  // 좁힘: lane: 접두사만 (기존엔 board 아니면 전부 true 였음)
+  return !!c && c.startsWith("lane:");
+}
+export function getMissionId(c?: string): string | null {
+  return isMissionTask(c) ? c! : null;
+}
+```
+
+> ⚠️ `isLaneTask` 의미가 바뀌므로 호출처 전수 점검 필요 (`TaskCard.tsx` 보더/뱃지 2곳). 회귀 가드: 미션 task → mission 뱃지 / lane task → lane 뱃지 / board task → 뱃지 없음.
+
+#### C. TaskCard 뱃지 렌더 (`TaskCard.tsx`)
+
+3-way 시각 구분:
+
+| 출처    | 좌측 보더             | 뱃지                                                                |
+| ------- | --------------------- | ------------------------------------------------------------------- |
+| board   | 없음                  | 없음                                                                |
+| lane    | `border-l-amber-500`  | `⛙ Lane` (amber)                                                    |
+| mission | `border-l-violet-500` | `🎯 <미션 라벨>` (violet) + **담당 에이전트** (Claude/Codex/Gemini) |
+
+- 미션 라벨: `getMissionId(contextId)` → 미션 store 조회 → `mission.goal` 약어. 미션 store가 TaskCard 범위에 없으면 generic `🎯 Mission` + `title=goal` hover.
+- 담당 에이전트: 기존 `task.role` 뱃지에 더해 미션 맥락에서 **모델(Claude/Codex/Gemini)** 표기를 보강 — 데모의 "에이전트별 상태" 그림 핵심.
+
+#### D. 칸반 미션 필터 (데모 핵심 샷)
+
+칸반 상단에 "Mission별 보기" 드롭다운. 특정 미션 선택 → 그 미션 task만 표시. 데모 "결제 플로우 추가" 미션 선택 → 보드에 카드 3개(Claude 구현 / Codex 테스트 / Gemini 릴리즈노트)만 남고 컬럼을 가로질러 이동. **데모 시나리오의 "칸반에서 각 에이전트 상태 변화"가 정확히 이 화면.**
+
+#### E. MissionDetail ↔ Board 딥링크
+
+- MissionDetail에 **"보드에서 보기"** 버튼 → BoardTab 전환 + 해당 missionId 필터 자동 적용 (D 드롭다운 프리셋).
+- (선택) 역방향: 칸반 미션 카드 뱃지 클릭 → MissionDetail로 점프.
+
+#### F. wait step 진행률 = 칸반 카드 집계
+
+`runWait`(`dispatcher.getTaskStatuses(taskIds)`)가 집계하는 상태를 MissionTimeline 진행률("3개 중 2개 완료")로 노출. 칸반 카드 상태 전이 = 미션 진행, 별도 카운터 없음.
+
+#### 데이터 흐름
+
+```
+Mission.dispatch step
+  → dispatcher.dispatchTasks({ missionId, ... })   // contextId = missionId
+  → Firestore tasks/* (contextId 태그됨)
+  → KanbanBoard 구독 → TaskCard: isMissionTask() → 🎯 뱃지 + 에이전트
+  → 카드 상태 전이 → runWait getTaskStatuses 집계 → MissionTimeline 진행률
+```
+
+#### 이번 스코프 / 보류
+
+- **이번 (데모 최소 요건):** B(판별 유틸 3-way) + C(TaskCard 미션 뱃지 + 에이전트).
+- **MVP+:** D(미션 필터 드롭다운), E(딥링크), F(진행률 집계).
+- **v3.1 보류:** 미션별 보드 swimlane(행 분리), 칸반에서 직접 미션 생성, `mission:<id>` 접두사 통일 마이그레이션.
+
 ## 7. Mission Engine 아키텍처
 
 ### 파일 구조
@@ -241,13 +329,13 @@ export class MissionEngine {
     private orchestratorManager: OrchestratorManager,
     private taskService: TaskService,
     private mcpServer: MCPServer, // run_skill 호출용
-    private eventBus: EventBus // D 이벤트 wakeup
+    private eventBus: EventBus, // D 이벤트 wakeup
   ) {}
 
   async launch(
     projectId: string,
     goal: string,
-    templateId: MissionTemplateId
+    templateId: MissionTemplateId,
   ): Promise<Mission>;
   async resume(missionId: string): Promise<void>;
   async abandon(missionId: string, reason?: string): Promise<void>;

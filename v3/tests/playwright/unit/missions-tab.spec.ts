@@ -31,7 +31,7 @@ async function injectMockProject(page: Page) {
       return !!tw?.stores?.project;
     },
     null,
-    { timeout: 5000 },
+    { timeout: 5000 }
   );
 
   const setOnce = async () => {
@@ -88,7 +88,7 @@ marbloTest(
     for (const pat of errorPatterns) {
       await expect(
         marblo.page.locator(`text=/${pat}/i`),
-        `에러 패턴 "${pat}" 가 보임`,
+        `에러 패턴 "${pat}" 가 보임`
       ).toHaveCount(0);
     }
 
@@ -110,9 +110,9 @@ marbloTest(
     }
     expect(
       visibleCount,
-      "MissionsTab placeholder/카탈로그/empty state 중 어느 것도 안 보임",
+      "MissionsTab placeholder/카탈로그/empty state 중 어느 것도 안 보임"
     ).toBeGreaterThanOrEqual(1);
-  },
+  }
 );
 
 marbloTest(
@@ -133,10 +133,10 @@ marbloTest(
     for (const label of labels) {
       await expect(
         marblo.page.locator(`text=${label}`).first(),
-        `템플릿 "${label}" 카드가 안 보임`,
+        `템플릿 "${label}" 카드가 안 보임`
       ).toBeVisible({ timeout: 8000 });
     }
-  },
+  }
 );
 
 marbloTest(
@@ -158,9 +158,9 @@ marbloTest(
     await cancelBtn.click();
     await expect(
       marblo.page.locator('button:has-text("취소")'),
-      "취소 클릭 후 LaunchDialog 가 닫히지 않음",
+      "취소 클릭 후 LaunchDialog 가 닫히지 않음"
     ).toHaveCount(0, { timeout: 3000 });
-  },
+  }
 );
 
 // 옵션 A — 5개 템플릿 각각의 LaunchDialog 흐름 smoke.
@@ -178,20 +178,33 @@ marbloTest(
 //
 // 실제 createMission(Firestore write) 는 트리거하지 않는다 — "취소"만 누른다.
 //
-// 주의: "Research only" 라벨은 "Research" 가 아니다. 그리고 "Feature" 카드를
-// exact 매칭하지 않으면 "Full Feature" 와 충돌하므로 heading exact 매칭을 쓴다.
+// 주의: "Feature" 카드를 exact 매칭하지 않으면 "Full Feature" 와 충돌하므로
+// heading exact 매칭을 쓴다. (preview 는 templates.ts description 과 동기화)
 const LAUNCH_TEMPLATES = [
-  { label: "Quick Fix", preview: "버그 / 소수정 / 핫픽스", steps: 4 },
-  { label: "Polish", preview: "기존 UI 다듬기 · 시각 QA", steps: 3 },
-  { label: "Feature", preview: "이미 기획된 작업 구현", steps: 6 },
+  {
+    label: "Quick Fix",
+    preview: "버그 하나를 빠르게 — 원인 추적부터 수정·리뷰·배포까지",
+    steps: 4,
+  },
+  {
+    label: "Polish",
+    preview: "이미 있는 화면을 더 깔끔하게 — 디자인 점검 후 배포",
+    steps: 3,
+  },
+  {
+    label: "Feature",
+    preview: "기획이 끝난 기능 구현 — 설계 검토 후 만들고 QA·배포",
+    steps: 6,
+  },
   {
     label: "Full Feature",
-    preview: "제대로 된 신기능 (강의 데모 60초 hook)",
+    preview:
+      "아이디어부터 배포까지 통째로 — 기획·설계·디자인 검토를 거쳐 끝까지",
     steps: 10,
   },
   {
-    label: "Research only",
-    preview: "구현 없이 의사결정만 (디자인 docs 생성)",
+    label: "Research",
+    preview: "코드는 그대로, 방향만 — 요구사항을 파고들어 기획·전략 정리",
     steps: 2,
   },
 ] as const;
@@ -210,7 +223,7 @@ for (const tpl of LAUNCH_TEMPLATES) {
         .getByRole("heading", { name: tpl.label, exact: true })
         .first();
       await expect(card, `카탈로그 카드 "${tpl.label}" 가 안 보임`).toBeVisible(
-        { timeout: 8000 },
+        { timeout: 8000 }
       );
       await card.click();
 
@@ -223,18 +236,18 @@ for (const tpl of LAUNCH_TEMPLATES) {
       // heading role 로 헤더만 정확히 집는다.
       await expect(
         dialog.getByRole("heading", { name: "🚀 Launch Mission" }),
-        "LaunchDialog 헤더가 안 보임",
+        "LaunchDialog 헤더가 안 보임"
       ).toBeVisible();
 
       // 선택된 템플릿의 미리보기(`{description} · {N} step`)가 다이얼로그 안에
       // 보여야 한다. description 과 step 수를 각각 단언.
       await expect(
         dialog.getByText(tpl.preview),
-        `다이얼로그에 "${tpl.label}" description 미리보기가 안 보임`,
+        `다이얼로그에 "${tpl.label}" description 미리보기가 안 보임`
       ).toBeVisible();
       await expect(
         dialog.getByText(`${tpl.steps} step`),
-        `다이얼로그에 "${tpl.label}" step 수(${tpl.steps})가 안 보임`,
+        `다이얼로그에 "${tpl.label}" step 수(${tpl.steps})가 안 보임`
       ).toBeVisible();
 
       // 취소 → 다이얼로그 닫힘 (createMission 미호출).
@@ -245,8 +258,8 @@ for (const tpl of LAUNCH_TEMPLATES) {
       await cancelBtn.click();
       await expect(
         marblo.page.locator('button:has-text("취소")'),
-        "취소 클릭 후 LaunchDialog 가 닫히지 않음",
+        "취소 클릭 후 LaunchDialog 가 닫히지 않음"
       ).toHaveCount(0, { timeout: 3000 });
-    },
+    }
   );
 }
