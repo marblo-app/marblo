@@ -8,6 +8,7 @@ import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useAgentSessionMap } from "../../stores/agentSessionMap";
+import { useAgentFocusStore } from "../../stores/agentFocusStore";
 import * as taskService from "../../services/taskService";
 import * as agentService from "../../services/agentService";
 import { checkAgentSpawn } from "../../lib/planLimits";
@@ -74,6 +75,7 @@ function LaneTerminalButton({ agent }: { agent: Agent }) {
       onClick={() => {
         if (!ptySessionId) return;
         useTerminalStore.getState().openTerminalForSession(ptySessionId, label);
+        useAgentFocusStore.getState().setFocusedAgent(agent.id);
       }}
       className="rounded bg-gray-700 px-2 py-0.5 text-[11px] text-gray-200 hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
     >
