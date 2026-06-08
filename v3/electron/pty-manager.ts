@@ -194,7 +194,15 @@ export class PtyManager {
     const session = this.sessions.get(id);
     if (session) {
       session.process.onExit(({ exitCode }) => {
-        this.sessions.delete(id);
+        // PTY ids are deterministic (`agent-<id>`) and reused verbatim on
+        // restart, so a killed OLD process can fire its onExit AFTER a fresh
+        // session has already claimed the same id. Evict the map entry only
+        // when THIS exact session still occupies the id — comparing by id
+        // string alone would delete the replacement, orphaning its live
+        // process and silently dropping every subsequent write()/writeAndSubmit().
+        if (this.sessions.get(id) === session) {
+          this.sessions.delete(id);
+        }
         callback(exitCode);
       });
     }

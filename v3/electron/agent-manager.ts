@@ -717,6 +717,17 @@ export class AgentManager {
       // would always be false on restart since the sid is reused verbatim.
       if (agent !== instance) return;
 
+      // The PTY process is gone — release the heartbeat interval before taking
+      // any branch below. Every branch is terminal for THIS instance: the
+      // stopped/error branches leave a dead entry in the map (never deleted
+      // here), and the auto-restart branch spawns a FRESH instance with its
+      // own heartbeat via launch(). Without this clear the 30s interval (and
+      // its telemetry.heartbeat emissions) leaked on every crash/completion.
+      if (agent.heartbeatTimer) {
+        clearInterval(agent.heartbeatTimer);
+        agent.heartbeatTimer = null;
+      }
+
       agent.lastExitCode = exitCode;
       const runtimeMs = Date.now() - agent.spawnedAt;
 
@@ -815,11 +826,9 @@ export class AgentManager {
     const fastFailCount = agent.fastFailCount;
     const onPtyReady = agent.onPtyReady;
 
-    // Cleanup old PTY, config, and heartbeat
-    if (agent.heartbeatTimer) {
-      clearInterval(agent.heartbeatTimer);
-      agent.heartbeatTimer = null;
-    }
+    // Cleanup old PTY, config, and timers (heartbeat + the backoff timer that
+    // just fired). onExit already released the heartbeat, but stay consistent.
+    this.clearAgentTimers(agent);
     this.ptyManager.kill(agent.ptySessionId);
     this.configGenerator.cleanup(agentId);
     this.agents.delete(agentId);
@@ -860,12 +869,14 @@ export class AgentManager {
     newInstance.fastFailCount = fastFailCount;
   }
 
-  stop(agentId: string): void {
-    const agent = this.agents.get(agentId);
-    if (!agent) return;
-
-    // Mark as intentional stop before killing
-    agent.stopRequested = true;
+  /**
+   * Release an agent's lifecycle timers — the restart-backoff setTimeout and
+   * the heartbeat setInterval — so neither (nor the telemetry the heartbeat
+   * emits) outlives the agent's PTY. Idempotent and null-safe: every teardown
+   * path (stop / restart / auto-restart / PTY exit) calls it so timer cleanup
+   * stays consistent across them.
+   */
+  private clearAgentTimers(agent: AgentInstance): void {
     if (agent.restartTimer) {
       clearTimeout(agent.restartTimer);
       agent.restartTimer = null;
@@ -874,6 +885,15 @@ export class AgentManager {
       clearInterval(agent.heartbeatTimer);
       agent.heartbeatTimer = null;
     }
+  }
+
+  stop(agentId: string): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+
+    // Mark as intentional stop before killing
+    agent.stopRequested = true;
+    this.clearAgentTimers(agent);
 
     this.ptyManager.kill(agent.ptySessionId);
     this.configGenerator.cleanup(agentId);
@@ -889,14 +909,7 @@ export class AgentManager {
 
     // Kill existing PTY + cleanup configs + heartbeat
     agent.stopRequested = true;
-    if (agent.restartTimer) {
-      clearTimeout(agent.restartTimer);
-      agent.restartTimer = null;
-    }
-    if (agent.heartbeatTimer) {
-      clearInterval(agent.heartbeatTimer);
-      agent.heartbeatTimer = null;
-    }
+    this.clearAgentTimers(agent);
     this.ptyManager.kill(agent.ptySessionId);
     this.configGenerator.cleanup(agentId);
     this.agents.delete(agentId);
