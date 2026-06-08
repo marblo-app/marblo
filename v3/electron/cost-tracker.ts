@@ -59,6 +59,8 @@ interface PerTokenPricing {
 
 interface SubscriptionPricing {
   scheme: "subscription";
+  /** Stable key for sharing monthly allowance accounting across sessions. */
+  monthlyScopeKey: string;
   /** Flat monthly fee in USD (e.g. Claude Max $200, ChatGPT Plus $20). */
   monthlyFlatUsd: number;
   /**
@@ -204,6 +206,9 @@ interface SessionTracker {
   accumulated: TokenTotals;
   // Current model id for pricing / display (refined as the file is parsed).
   model: string;
+  // Agent/session-scoped running cost. Subscription allowance accounting is
+  // monthly-scoped separately; this remains the total emitted for this tracker.
+  totalCostUsd: number;
   // Last rate-limit % emitted — so we only re-emit on change (codex), not
   // every 15s tick when only the rate-limit (and no tokens) is present.
   lastRlPercent?: number;
@@ -219,6 +224,7 @@ interface AgyTracker {
   lastIdx: number;
   accumulated: TokenTotals;
   model: string;
+  totalCostUsd: number;
   /** true once we discover only a legacy .pb store (tokens not decodable). */
   limited: boolean;
   loggedLimited: boolean;
@@ -229,6 +235,7 @@ export class CostTracker {
   private buffers: Map<string, string> = new Map();
   private sessions: Map<string, SessionTracker> = new Map();
   private agySessions: Map<string, AgyTracker> = new Map();
+  private monthlySubscriptionTokens: Map<string, TokenTotals> = new Map();
   private onCostDetected?: (agentId: string, cost: CostEntry) => void;
 
   constructor(onCostDetected?: (agentId: string, cost: CostEntry) => void) {
@@ -254,6 +261,7 @@ export class CostTracker {
     if (matchedPlan) {
       return {
         scheme: "subscription",
+        monthlyScopeKey: matchedPlan.modelPrefix,
         monthlyFlatUsd: matchedPlan.monthlyFlatUsd,
         monthlyTokenAllowance: matchedPlan.monthlyTokenAllowance,
         overagePerToken: matchedPlan.overagePerToken,
@@ -344,6 +352,66 @@ export class CostTracker {
         overOutput * pricing.overagePerToken.outputPer1M) /
       1_000_000
     );
+  }
+
+  private monthKey(now = new Date()): string {
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    return `${now.getFullYear()}-${month}`;
+  }
+
+  private monthlyUsageKey(pricing: SubscriptionPricing): string {
+    return `${this.monthKey()}:${pricing.monthlyScopeKey}`;
+  }
+
+  private getMonthlySubscriptionTotals(
+    pricing: SubscriptionPricing,
+  ): TokenTotals {
+    const key = this.monthlyUsageKey(pricing);
+    const existing = this.monthlySubscriptionTokens.get(key);
+    if (existing) return existing;
+    const created = { ...ZERO_TOTALS };
+    this.monthlySubscriptionTokens.set(key, created);
+    return created;
+  }
+
+  private computeDeltaCost(
+    pricing: ModelPricing,
+    delta: TokenTotals,
+  ): number {
+    if (pricing.scheme === "subscription") {
+      const monthly = this.getMonthlySubscriptionTotals(pricing);
+      return this.computeIncrementalCost(
+        pricing,
+        delta.input,
+        delta.output,
+        monthly.input,
+        monthly.output,
+        delta.cacheRead,
+        delta.cacheWrite,
+      );
+    }
+
+    return this.computeIncrementalCost(
+      pricing,
+      delta.input,
+      delta.output,
+      0,
+      0,
+      delta.cacheRead,
+      delta.cacheWrite,
+    );
+  }
+
+  private recordMonthlySubscriptionUsage(
+    pricing: ModelPricing,
+    delta: TokenTotals,
+  ): void {
+    if (pricing.scheme !== "subscription") return;
+    const monthly = this.getMonthlySubscriptionTotals(pricing);
+    monthly.input += delta.input;
+    monthly.output += delta.output;
+    monthly.cacheRead += delta.cacheRead;
+    monthly.cacheWrite += delta.cacheWrite;
   }
 
   // ── Strategy 1: JSONL Session File Tracking (claude / codex / gemini) ──
@@ -437,6 +505,7 @@ export class CostTracker {
       state: newParseState(),
       accumulated: { ...ZERO_TOTALS },
       model,
+      totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
         SESSION_POLL_INTERVAL_MS,
@@ -480,6 +549,7 @@ export class CostTracker {
       accumulated: { ...ZERO_TOTALS },
       // Best-guess default until the session records its real model id.
       model: format === "codex" ? "gpt-5.5" : "gemini-2.5-pro",
+      totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
         SESSION_POLL_INTERVAL_MS,
@@ -567,34 +637,20 @@ export class CostTracker {
     if (typeof rlPercent === "number") tracker.lastRlPercent = rlPercent;
 
     const acc = tracker.accumulated;
+
+    // Patent claim 8: route through pricing-scheme aware calculator.
+    const pricing = this.findPricing(tracker.model);
+    const deltaCost = this.computeDeltaCost(pricing, delta);
+    this.recordMonthlySubscriptionUsage(pricing, delta);
+
     acc.input += delta.input;
     acc.output += delta.output;
     acc.cacheRead += delta.cacheRead;
     acc.cacheWrite += delta.cacheWrite;
-
-    // Patent claim 8: route through pricing-scheme aware calculator.
-    const pricing = this.findPricing(tracker.model);
-    const totalCost = this.computeIncrementalCost(
-      pricing,
-      acc.input,
-      acc.output,
-      0,
-      0,
-      acc.cacheRead,
-      acc.cacheWrite,
-    );
-    const deltaCost = this.computeIncrementalCost(
-      pricing,
-      delta.input,
-      delta.output,
-      acc.input - delta.input,
-      acc.output - delta.output,
-      delta.cacheRead,
-      delta.cacheWrite,
-    );
+    tracker.totalCostUsd += deltaCost;
 
     this.onCostDetected?.(tracker.agentId, {
-      totalCost,
+      totalCost: tracker.totalCostUsd,
       inputTokens: acc.input,
       outputTokens: acc.output,
       cacheReadTokens: acc.cacheRead,
@@ -673,6 +729,7 @@ export class CostTracker {
       lastIdx: -1,
       accumulated: { ...ZERO_TOTALS },
       model: "gemini-3-flash", // agy default; refined from the store
+      totalCostUsd: 0,
       limited: false,
       loggedLimited: false,
       timer: setInterval(
@@ -732,27 +789,23 @@ export class CostTracker {
   private emitAgy(tracker: AgyTracker, dInput: number, dOutput: number): void {
     if (dInput <= 0 && dOutput <= 0) return;
     const acc = tracker.accumulated;
-    acc.input += dInput;
-    acc.output += dOutput;
 
     const pricing = this.findPricing(tracker.model);
-    const totalCost = this.computeIncrementalCost(
-      pricing,
-      acc.input,
-      acc.output,
-      0,
-      0,
-    );
-    const deltaCost = this.computeIncrementalCost(
-      pricing,
-      dInput,
-      dOutput,
-      acc.input - dInput,
-      acc.output - dOutput,
-    );
+    const delta: TokenTotals = {
+      input: dInput,
+      output: dOutput,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
+    const deltaCost = this.computeDeltaCost(pricing, delta);
+    this.recordMonthlySubscriptionUsage(pricing, delta);
+
+    acc.input += dInput;
+    acc.output += dOutput;
+    tracker.totalCostUsd += deltaCost;
 
     this.onCostDetected?.(tracker.agentId, {
-      totalCost,
+      totalCost: tracker.totalCostUsd,
       inputTokens: acc.input,
       outputTokens: acc.output,
       cacheReadTokens: acc.cacheRead,
@@ -865,6 +918,7 @@ export class CostTracker {
 
   clearAll(): void {
     this.buffers.clear();
+    this.monthlySubscriptionTokens.clear();
     for (const tracker of this.sessions.values()) {
       clearInterval(tracker.timer);
     }
