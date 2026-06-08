@@ -9,6 +9,7 @@ import type { MissionEngineDeps, MissionEngineEvent } from "./ports";
 import { assertMissionTransition, isTerminalMission } from "./state-machine";
 import { executeStep, WAIT_PENDING } from "./step-executor";
 import { instantiateSteps, MISSION_TEMPLATES, getTemplate } from "./templates";
+import { verifyStepGate } from "./gates";
 import {
   createConductorDriver,
   getMissionDriver,
@@ -49,7 +50,7 @@ export class MissionEngine {
 
   constructor(
     private readonly deps: MissionEngineDeps,
-    options?: MissionEngineOptions,
+    options?: MissionEngineOptions
   ) {
     this.maxRetries = deps.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.now = deps.now ?? (() => new Date());
@@ -65,18 +66,27 @@ export class MissionEngine {
         ? createConductorDriver({
             store: deps.store,
             orchestrators: deps.orchestrators,
+            eventBus: deps.eventBus,
+            // wait 게이트용 task 상태 조회 — dispatcher 헬퍼 재사용.
+            getTaskStatuses: (taskIds) =>
+              deps.dispatcher.getTaskStatuses(taskIds),
+            maxRetries: this.maxRetries,
+            notifier: deps.notifier,
+            now: this.now,
             logger: this.log,
+            // 통합(P2-B): gates.ts 의 결정적 게이트 주입.
+            verifyStepGate,
           })
         : null);
     if (this.missionDriver !== "engine") {
       this.log(
-        `driver=${this.missionDriver} (B안 orchestrator-driven — Phase 1 스텁, 실제 미진행)`,
+        `driver=${this.missionDriver} (B안 orchestrator-driven — Phase 1 스텁, 실제 미진행)`
       );
     }
     this.unsubscribe = deps.eventBus.on((event) =>
       this.onEvent(event).catch((err) =>
-        this.log("event handler error", { err: String(err), event }),
-      ),
+        this.log("event handler error", { err: String(err), event })
+      )
     );
   }
 
@@ -126,7 +136,7 @@ export class MissionEngine {
     const mission = await this.requireMission(missionId);
     if (isTerminalMission(mission.status)) {
       throw new Error(
-        `Cannot resume terminal mission ${missionId} (status=${mission.status})`,
+        `Cannot resume terminal mission ${missionId} (status=${mission.status})`
       );
     }
     // planning: UI 에서 직접 doc 만 만든 미션을 engine 이 인계받는 경로.
@@ -190,7 +200,7 @@ export class MissionEngine {
         // 이미 dispatch 된 task 가 있으면 재연결 (중복 dispatch 방지).
         const reconnected = await this.reconnectDispatchStepToExistingTasks(
           mission.id,
-          idx,
+          idx
         );
         if (!reconnected) {
           await this.deps.store.updateMissionStep(mission.id, idx, {
@@ -231,7 +241,7 @@ export class MissionEngine {
    */
   private async reconnectDispatchStepToExistingTasks(
     missionId: string,
-    stepIndex: number,
+    stepIndex: number
   ): Promise<boolean> {
     const existing = await this.deps.dispatcher.findMissionTaskIds(missionId);
     if (existing.length === 0) return false;
@@ -309,11 +319,11 @@ export class MissionEngine {
   private async notifyOrchestratorMissionStopped(
     mission: Mission,
     kind: "paused" | "abandoned",
-    reason?: string,
+    reason?: string
   ): Promise<void> {
     try {
       const ref = this.deps.orchestrators.getSession(
-        mission.ownerOrchestratorSessionId,
+        mission.ownerOrchestratorSessionId
       );
       if (!ref || !ref.isAlive()) return;
       const header =
@@ -363,11 +373,12 @@ export class MissionEngine {
       return;
     }
 
-    // B안(orchestrator-driven): 외부 이벤트는 지휘자가 게이트 평가에 쓴다 (§3 이벤트
-    // wakeup). 엔진은 타임라인 append / advance 를 하지 않고 위임. Phase 1 스텁이라
-    // no-op + log. 기본 driver='engine' 이면 이 분기를 타지 않아 A안 경로가 불변.
+    // B안(orchestrator-driven): 외부 이벤트(스텝완료 보고 'mission.step_reported'
+    // 포함)는 지휘자가 **자체 버스 구독**으로 직접 처리한다(createConductorDriver 가
+    // deps.eventBus 를 구독). 엔진의 이 핸들러는 orchestrator 모드에서 no-op —
+    // 같은 이벤트를 conductor 로 이중 전달하지 않는다(같은 버스를 둘 다 구독하므로).
+    // 기본 driver='engine' 이면 이 분기를 타지 않아 A안 경로가 불변.
     if (this.missionDriver === "orchestrator") {
-      await this.conductor?.onEvent(event);
       return;
     }
 
@@ -405,7 +416,7 @@ export class MissionEngine {
     // 로깅해 가시화한다 — 재진입 시엔 advanceStep 의 running 가드가 멱등 처리.
     this.runAdvanceLoop(missionId)
       .catch((err) =>
-        this.log("advance loop error", { missionId, err: String(err) }),
+        this.log("advance loop error", { missionId, err: String(err) })
       )
       .finally(() => {
         this.inFlight.delete(missionId);
@@ -450,7 +461,7 @@ export class MissionEngine {
       if (step.type === "dispatch") {
         const reconnected = await this.reconnectDispatchStepToExistingTasks(
           mission.id,
-          step.index,
+          step.index
         );
         // 재연결됨 → success 마킹됨. 다음 iteration 의 success 가드가 인덱스를
         // 전진시켜 wait step 으로 넘어간다(중복 dispatch 없이).
@@ -510,7 +521,7 @@ export class MissionEngine {
             err: String(err),
             missionId: mission.id,
             stepIndex: step.index,
-          }),
+          })
         );
     };
 
@@ -598,7 +609,7 @@ export class MissionEngine {
         mission,
         step.index,
         result.output,
-        result.userInputDetected,
+        result.userInputDetected
       );
     }
     return this.handleFailure(mission, step.index, result.error);
@@ -608,7 +619,7 @@ export class MissionEngine {
     mission: Mission,
     stepIndex: number,
     output: unknown,
-    userInputDetected?: string,
+    userInputDetected?: string
   ): Promise<boolean> {
     const completedAt = this.now();
     const step = mission.steps[stepIndex];
@@ -686,7 +697,7 @@ export class MissionEngine {
   private async handleFailure(
     mission: Mission,
     stepIndex: number,
-    error: string | undefined,
+    error: string | undefined
   ): Promise<boolean> {
     const step = mission.steps[stepIndex];
     const policy = step.onFailure ?? "retry";
@@ -781,7 +792,7 @@ export class MissionEngine {
           .replace(/-+$/, "");
         const folder = `docs/missions/${slug || "mission"}-${mission.id.slice(
           0,
-          6,
+          6
         )}`;
         const summaryPath = `${folder}/SUMMARY.md`;
         const stepsSummary = mission.steps
@@ -795,7 +806,7 @@ export class MissionEngine {
               `  → 저장 경로: ${stepPath}\n` +
               (typeof s.output === "string"
                 ? `  output (마지막 1200자):\n${(s.output as string).slice(
-                    -1200,
+                    -1200
                   )}\n`
                 : "")
             );
@@ -855,8 +866,8 @@ export class MissionEngine {
         message: synthesisPath
           ? `Mission completed · 종합 보고서: ${synthesisPath}`
           : synthesisNote
-            ? "Mission completed · 종합 보고서 작성됨 (파일 경로 미확인)"
-            : "Mission completed",
+          ? "Mission completed · 종합 보고서 작성됨 (파일 경로 미확인)"
+          : "Mission completed",
         templateLabel: MISSION_TEMPLATES[mission.templateId]?.label,
         synthesisPath: synthesisPath ?? null,
         // 파일 읽기 없이도 Firestore 만으로 보고서 미리보기 가능하도록 4000자 보관.
@@ -868,7 +879,7 @@ export class MissionEngine {
   private async transition(
     mission: Mission,
     next: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string },
+    extras?: { completedAt?: Date; abandonedReason?: string }
   ): Promise<void> {
     if (mission.status === next) return;
     assertMissionTransition(mission.status, next);
@@ -913,13 +924,19 @@ export {
   TERMINAL_STATUSES,
 } from "./state-machine";
 export { InProcessMissionEventBus } from "./event-handler";
-export { createConductorDriver, getMissionDriver } from "./conductor-driver";
+export {
+  createConductorDriver,
+  getMissionDriver,
+  MISSION_STEP_REPORTED_EVENT,
+} from "./conductor-driver";
 export type {
   ConductorDriver,
   ConductorDriverDeps,
   GateResult,
   MissionDriver,
+  StepGateContext,
   StepReport,
+  VerifyStepGate,
 } from "./conductor-driver";
 export type {
   MissionEngineDeps,
