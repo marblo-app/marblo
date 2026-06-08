@@ -314,14 +314,26 @@ describe("B안 e2e — orchestrator-driven 풀 루프 (grant→report→gate→a
     expect(typeof h.posts[0]).toBe("string");
     expect(h.posts[0].length).toBeGreaterThan(0);
 
-    // ── 스텝 0→1→2→3 을 success 보고로 순차 전진 (전진은 store 상태로 검증) ──
-    for (let i = 0; i < 4; i++) {
-      emitReport(h.bus, id, i, "success", { output: `step ${i} output` });
-      await waitFor(() => h.store.raw(id).steps[i + 1].status === "running");
-      const m = h.store.raw(id);
-      expect(m.steps[i].status).toBe("success");
-      expect(m.currentStepIndex).toBe(i + 1);
-    }
+    // ── 스텝 0(gstack) success 보고 → 게이트(output) 통과 → 스텝 1(dispatch) 전진 ──
+    emitReport(h.bus, id, 0, "success", { output: "step 0 output" });
+    await waitFor(() => h.store.raw(id).steps[1].status === "running");
+    expect(h.store.raw(id).steps[0].status).toBe("success");
+    expect(h.store.raw(id).currentStepIndex).toBe(1);
+
+    // ── 스텝 1(dispatch) success 보고 → 게이트(t1·t2 DONE) 통과 → 스텝 2(wait) 전진.
+    //    wait 는 task 가 이미 DONE 이라 grant 시점에 별도 보고 없이 자동 통과하므로
+    //    한 번의 dispatch 보고로 스텝 2 를 건너뛰고 스텝 3 까지 전진한다(§8-3 폴링). ──
+    emitReport(h.bus, id, 1, "success", { output: "step 1 output" });
+    await waitFor(() => h.store.raw(id).steps[3].status === "running");
+    expect(h.store.raw(id).steps[1].status).toBe("success");
+    expect(h.store.raw(id).steps[2].status).toBe("success"); // wait 자동 통과.
+    expect(h.store.raw(id).currentStepIndex).toBe(3);
+
+    // ── 스텝 3(gstack /review) success 보고 → 스텝 4 전진 ──
+    emitReport(h.bus, id, 3, "success", { output: "step 3 output" });
+    await waitFor(() => h.store.raw(id).steps[4].status === "running");
+    expect(h.store.raw(id).steps[3].status).toBe("success");
+    expect(h.store.raw(id).currentStepIndex).toBe(4);
 
     // ── 마지막 스텝(4, /ship): 내장 게이트가 PR URL 을 요구 → URL 포함 output 보고 ──
     emitReport(h.bus, id, 4, "success", {
@@ -527,7 +539,7 @@ describe("B안 e2e — 게이트 미통과 시 전진 차단 → retry 재허가
 // ════════════════════════ 4) wait 스텝 (task 완료 게이트) ════════════════════
 
 describe("B안 e2e — wait 스텝: 내장 게이트가 task 전부 DONE 을 요구", () => {
-  it("일부 task 미완료면 보류(retry), 전부 DONE 된 뒤 외부 wakeup 이벤트로 advance 한다", async () => {
+  it("일부 task 미완료면 retry 없이 running 유지하다가, 전부 DONE 된 뒤 외부 wakeup 이벤트로 advance 한다", async () => {
     // 내장 기본 게이트 사용(주입 안 함): wait = mission.taskIds 전부 DONE.
     const steps = [step(0, "wait", { onFailure: "retry" })];
     const h = buildHarness();
@@ -535,12 +547,25 @@ describe("B안 e2e — wait 스텝: 내장 게이트가 task 전부 DONE 을 요
     h.taskStatuses.t1 = "DONE";
     h.taskStatuses.t2 = "IN_PROGRESS"; // 미완료.
 
+    // wait 는 grant 시점에 게이트를 1회 평가하지만 t2 미완료 → running 유지(오케 grant 없음).
     h.conductor.requestAdvance(id);
     await waitFor(() => h.store.raw(id).steps[0].status === "running");
 
-    // 오케가 success 보고해도 미완료 task 가 있어 게이트 보류 → retry(재허가).
+    // 오케가 success 보고해도 미완료 task 가 있어 게이트 보류. task-게이트 스텝이라
+    // retry(재할당)하지 않고 — 중복 task 방지 — running 을 유지하며 supervisor.note
+    // (awaiting_tasks)만 남긴다(§8-3 "완료대기는 지휘자가"). 다음 스텝으로 넘기지 않음.
     emitReport(h.bus, id, 0, "success");
-    await waitFor(() => (h.store.raw(id).steps[0].retryCount ?? 0) === 1);
+    await waitFor(() =>
+      h.store
+        .raw(id)
+        .contextLog.some(
+          (e) =>
+            e.type === "supervisor.note" &&
+            (e.payload as { kind?: string }).kind === "awaiting_tasks",
+        ),
+    );
+    expect(h.store.raw(id).steps[0].status).toBe("running");
+    expect(h.store.raw(id).steps[0].retryCount ?? 0).toBe(0); // retry 안 함.
     expect(h.store.raw(id).currentStepIndex).toBe(0);
     expect(h.store.raw(id).status).toBe("active");
 
@@ -555,7 +580,7 @@ describe("B안 e2e — wait 스텝: 내장 게이트가 task 전부 DONE 을 요
     expect(h.store.raw(id).steps[0].status).toBe("success");
   });
 
-  it("taskIds 가 전부 DONE 이면 success 보고 한 번으로 wait 게이트를 통과해 advance 한다", async () => {
+  it("taskIds 가 전부 DONE 이면 grant 시 즉시 게이트를 통과해(보고 없이) 다음 스텝으로 advance 한다", async () => {
     const steps = [
       step(0, "wait", { onFailure: "retry" }),
       step(1, "gstack", { skill: "/ship", onFailure: "escalate" }),
@@ -564,9 +589,9 @@ describe("B안 e2e — wait 스텝: 내장 게이트가 task 전부 DONE 을 요
     const id = await makeMission(h.store, steps, { taskIds: ["t1"] });
     h.taskStatuses.t1 = "DONE";
 
+    // wait 스텝은 오케 grant 없이 grant 시점에 게이트를 1회 평가 → 이미 DONE 이므로
+    // 별도 success 보고 없이 그 자리에서 통과·전진한다(running 에 머무르지 않음).
     h.conductor.requestAdvance(id);
-    await waitFor(() => h.store.raw(id).steps[0].status === "running");
-    emitReport(h.bus, id, 0, "success");
     await waitFor(() => h.store.raw(id).steps[1].status === "running");
     expect(h.store.raw(id).steps[0].status).toBe("success");
     expect(h.store.raw(id).currentStepIndex).toBe(1);
