@@ -88,6 +88,13 @@ export function loadBalanceIndex(agent: AgentInfo): number {
       return 10;
     case "error":
       return 5;
+    default:
+      // status 는 타입상 위 4개로 닫혀 있지만, IPC/디스크/구버전 enum 등에서
+      // 들어온 예상 밖 값(undefined·오타)이면 switch 가 어떤 case 도 못 맞춰
+      // undefined 를 반환하고, 호출부의 가중합 `WEIGHTS.loadBalance * lIdx` 이
+      // NaN 으로 오염된다. 가장 보수적인 부하값(error 와 동일한 5)으로 대체해
+      // NaN 전파를 차단하고, 알 수 없는 상태의 후보에는 낮은 우선순위를 준다.
+      return 5;
   }
 }
 
@@ -406,6 +413,17 @@ export function normalizeModel(model?: string): ModelType | undefined {
 export const MAX_AGENTS = 5;
 export const MAX_PER_ROLE = 2;
 
+// ── NaN/비유한 방어 유틸 ─────────────────────────────────────
+//
+// 점수 입력(메트릭)이 결측·undefined·0나눗셈 등으로 NaN/Infinity 가 되면
+// 가중합 한 항만 오염돼도 score 전체가 NaN 으로 번지고, 그 NaN 이
+// results.sort 비교자 `(a, b) => b.score - a.score` 에 들어가면 비교 결과가
+// NaN → 정렬 순서가 미정의가 돼 잘못된 에이전트가 선택된다. 모든 점수 성분을
+// 합산 전에 이 가드로 통과시켜 유한수만 스코어링/정렬에 들어가게 한다.
+function finiteOr(value: number, fallback: number): number {
+  return Number.isFinite(value) ? value : fallback;
+}
+
 // ── Scoring: existing agents ────────────────────────────────
 
 export function scoreAgents(
@@ -423,8 +441,11 @@ export function scoreAgents(
     const rIdx = roleMatchIndex(agent, role);
     if (rIdx === 0) continue;
 
-    const lIdx = loadBalanceIndex(agent);
-    const cIdx = costEfficiencyScore(agent.model, tags);
+    // 메트릭은 합산 전에 NaN/Infinity 가드를 통과시킨다. 비유한값이 한 항만
+    // 섞여도 score 전체가 NaN 이 되어 정렬을 망가뜨린다. loadBalanceIndex 는
+    // default 로 이미 유한값을 보장하지만 방어적으로 한 번 더 감싼다.
+    const lIdx = finiteOr(loadBalanceIndex(agent), 0);
+    const cIdx = finiteOr(costEfficiencyScore(agent.model, tags), 0);
 
     // Core: w1·역할 + w2·부하균등 + w3·비용효율 (특허 [식 1])
     let score =
@@ -469,11 +490,19 @@ export function scoreAgents(
       );
     }
 
-    // 보조 3: 재시작 페널티 (음수 가중치)
-    if (agent.restartCount > 0) {
+    // 보조 3: 재시작 페널티 (음수 가중치). restartCount 가 NaN/비유한이면
+    // 페널티를 더하지 않는다(곱셈이 NaN 으로 번지는 것을 차단).
+    if (Number.isFinite(agent.restartCount) && agent.restartCount > 0) {
       const penalty = agent.restartCount * WEIGHTS.restartPenalty;
       score += penalty; // restartPenalty 자체가 음수
       reasons.push(`${agent.restartCount} restart(s) (${penalty})`);
+    }
+
+    // 최종 방어: 위 성분 가드를 모두 통과해도 어떤 경로로든 score 가 비유한값이면
+    // 정렬 비교자를 오염시키므로 이 후보를 제외한다(후보 제외 전략). 정상 입력에선
+    // 도달하지 않는 backstop 이지만, NaN 이 정렬·선택에 새어드는 것을 원천 차단한다.
+    if (!Number.isFinite(score)) {
+      continue;
     }
 
     results.push({
@@ -529,7 +558,9 @@ export function scoreModels(
     // expensive-model strengths don't apply. Same function as scoreAgents
     // for consistency between reuse and fresh-spawn paths.
     score += costEfficiencyScore(model, tags);
-    scored.push({ model, score });
+    // 방어: 비유한 점수는 아래 정렬/타이밴드 비교(topScore - s.score)를
+    // 오염시키므로 0 으로 대체. 정상 입력에선 항상 유한값이라 no-op 이다.
+    scored.push({ model, score: finiteOr(score, 0) });
   }
 
   if (scored.length === 0) {

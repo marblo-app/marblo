@@ -904,3 +904,63 @@ describe("plan concurrency cap (M2)", () => {
     });
   });
 });
+
+// ── N6: NaN guard — 결측/undefined/구버전 enum 점수 오염 방어 ──
+//
+// status 가 타입 union 밖(IPC/디스크/구버전 enum)으로 들어오면 예전엔
+// loadBalanceIndex 가 어떤 case 도 못 맞춰 undefined 를 반환 → scoreAgents 의
+// 가중합 `WEIGHTS.loadBalance * lIdx` 이 NaN → score 전체가 NaN → results.sort
+// 비교자가 NaN 을 받아 정렬이 미정의가 되고 잘못된 에이전트가 뽑혔다.
+describe("N6: NaN guard against contaminated scores", () => {
+  // 타입 시스템을 우회해 '오염된' 런타임 입력을 만든다(IPC/디스크에서 실제
+  // 발생 가능). 픽스처가 아니라 방어 대상 그 자체다.
+  const corruptStatus = "zombie" as unknown as AgentStatus;
+
+  it("loadBalanceIndex returns a finite fallback for an unknown status", () => {
+    const v = loadBalanceIndex(makeAgent({ status: corruptStatus }));
+    expect(Number.isFinite(v)).toBe(true);
+  });
+
+  it("scoreAgents yields a finite score for an agent with a corrupt status", () => {
+    const result = scoreAgents(
+      [makeAgent({ status: corruptStatus })],
+      "backend",
+    );
+    expect(result).toHaveLength(1);
+    expect(Number.isFinite(result[0].score)).toBe(true);
+    // reason 문자열에도 NaN 이 새어들어가면 안 된다.
+    expect(result[0].reason).not.toContain("NaN");
+  });
+
+  it("keeps sort order well-defined and all scores finite when valid + corrupt agents are mixed", () => {
+    const agents = [
+      makeAgent({ id: "1", name: "be-corrupt", status: corruptStatus }),
+      makeAgent({ id: "2", name: "be-idle", status: "idle" }),
+      makeAgent({ id: "3", name: "be-working", status: "working" }),
+    ];
+    const result = scoreAgents(agents, "backend");
+    // 모든 점수가 유한해야 한다.
+    expect(result.every((r) => Number.isFinite(r.score))).toBe(true);
+    // 내림차순 정렬이 NaN 비교로 깨지지 않았는지(인접쌍 단조 감소) 확인.
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i - 1].score).toBeGreaterThanOrEqual(result[i].score);
+    }
+    // 정상 idle 에이전트가 corrupt 후보보다 위에 와야 한다(잘못된 선택 방지).
+    expect(result[0].agent.status).toBe("idle");
+  });
+
+  it("does not let a corrupt restartCount (NaN) contaminate the score", () => {
+    const result = scoreAgents(
+      [makeAgent({ status: "idle", restartCount: NaN })],
+      "backend",
+    );
+    expect(result).toHaveLength(1);
+    expect(Number.isFinite(result[0].score)).toBe(true);
+  });
+
+  it("scoreModels stays within enabledModels even with a tag set (no NaN-broken sort)", () => {
+    const enabled = ["claude", "gpt"] as ModelType[];
+    const result = scoreModels(enabled, ["architecture"]);
+    expect(enabled).toContain(result);
+  });
+});
