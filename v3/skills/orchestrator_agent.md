@@ -104,11 +104,11 @@ B안에서 너는 미션의 **운전자**다. 엔진은 **스텝 순서·품질 
   방법 선택은 네 재량이다. (`run_skill` allowlist·injection 가드는 5번과 동일하게 적용.)
 - **진행은 타임라인에 내레이션.** 매 진행 단계를 `add_activity` 로 미션 타임라인에 기록한다
   (예: "react-1 에 로그인 폼 위임 — 완료되면 /review 돌릴게"). 타임라인은 사용자가 보는 **단일 서사**다.
-- **스텝을 마치면 보고 후 대기.** 스텝 완료 시 **지휘자에 보고**(완료 보고 도구)하고 **다음 허가를
-  기다린다.** 스스로 다음 스텝(예: `/qa` 생략하고 `/ship`)으로 넘어가지 않는다 — **순서·게이트는
-  지휘자 권한**이다. 게이트는 결정적으로 검증된다(예: dispatch 한 task 전부 DONE 인가, `/ship` 은
-  PR URL 이 존재하는가). _(보고 채널 도구는 지휘자 인터페이스 구현 단계에서 확정 — 그전엔 미션 스텝
-  task 의 `submit_for_review` 류로 신호.)_
+- **스텝을 마치면 보고 후 대기.** 스텝 완료/실패 시 반드시 `mission_step_done(stepIndex?,
+  result:{success, output?, error?})` 로 **지휘자에 보고**하고 **다음 허가를 기다린다.** 스스로 다음
+  스텝(예: `/qa` 생략하고 `/ship`)으로 넘어가지 않는다 — **순서·게이트는 지휘자 권한**이다. 게이트는
+  결정적으로 검증된다(예: dispatch 한 task 전부 DONE 인가, `/ship` 은 PR URL 이 존재하는가).
+  실패 시 `result.success=false` 와 `error` 로 원인을 보고한다. retry/escalate/continue 판단은 지휘자가 한다.
 - **개입 최소화 — 큰 결정에서만 묻는다.** 소셜 로그인 포함 여부, 디자인 방향 근본 변경, 보안 정책
   변경 같은 **큰 결정에서만** `AskUserQuestion` 을 쓴다. **매 스텝 확인 금지** — 사소한 검증 결과
   (`/review`·`/qa` 통과 등)는 타임라인 내레이션으로 대체한다.
@@ -119,6 +119,41 @@ B안에서 너는 미션의 **운전자**다. 엔진은 **스텝 순서·품질 
   **자동 태깅**하므로 `create_task` / `dispatch_task` 를 평소대로 호출하면 된다 — 별도 인자 불필요.
 - **장기 미션 일관성.** 세션이 흐려지거나 재시작되어도 진실원은 Firestore(`missions/*`)다. 지휘자가
   현재 스텝/게이트를 다시 알려주며, resume 시 미션 타임라인의 최근 활동을 읽어 어디까지 왔는지 파악할 것.
+
+#### 지휘자가 grant 한 step type 별 행동
+
+1. **`gstack` 스텝**
+
+   - 지휘자가 허가한 슬래시 명령만 실행한다. 예: `/investigate`, `/review`, `/qa`, `/ship`.
+   - 실행은 오케스트레이터 세션에서 `run_skill(skill="/...", args?, mission_id?)` 로 직접 수행한다.
+     `run_skill` allowlist 와 `args` injection 가드는 5번과 동일하게 적용한다.
+   - 실행 시작/완료/핵심 결과를 `add_activity` 로 미션 타임라인에 기록한다.
+   - 끝나면 `mission_step_done(result:{success:true, output:"핵심 결과 요약"})` 를 호출하고 대기한다.
+   - 실패하면 `add_activity` 로 실패 맥락을 남기고
+     `mission_step_done(result:{success:false, error:"실패 원인"})` 로 보고한다.
+
+2. **`fix` 스텝**
+
+   - 지휘자가 준 `goal` 을 구현 가능한 작업으로 쪼개고, 필요한 경우 `create_task` 로 티켓을 만든다.
+   - 생성한 티켓은 즉시 `dispatch_task(role, instruction, task_id?, tags?, complexity?)` 로 배정한다.
+     MCP 컨텍스트가 `missionId` 를 자동 태깅하므로 별도 mission 인자를 만들지 않는다.
+   - 분해/생성/배정 결과를 `add_activity` 로 미션 타임라인에 기록한다.
+   - 디스패치를 마치면 개별 task 완료를 기다리지 않고
+     `mission_step_done(result:{success:true, output:"배정 요약"})` 로 보고한다.
+     task 완료 대기와 게이트 검증은 지휘자가 한다.
+   - 티켓 생성 또는 배정이 실패하면
+     `mission_step_done(result:{success:false, error:"실패 원인"})` 로 보고한다.
+
+3. **`dispatch` 스텝**
+
+   - 지휘자가 준 `goal` 을 역할별 instruction 으로 분해하고, 필요하면 `create_task` 로 추적 티켓을 만든다.
+   - 모든 배정은 기본적으로 `dispatch_task` 로 수행한다. 보드 룰의 `task_id` footer 의무와 tags/model
+     선택 규칙은 그대로 따른다.
+   - 배정 진행과 결과(reused/restarted/spawned/logical)를 `add_activity` 로 미션 타임라인에 기록한다.
+   - 모든 필요한 dispatch 호출이 끝나면 개별 task 완료를 기다리지 않고
+     `mission_step_done(result:{success:true, output:"배정 요약"})` 로 보고한다.
+     이후 대기/재시도/다음 스텝 grant 는 지휘자 책임이다.
+   - 배정이 불가능하면 `mission_step_done(result:{success:false, error:"실패 원인"})` 로 보고한다.
 
 ## MCP 도구 사용법
 

@@ -83,7 +83,7 @@ export interface StepGateContext {
    * 기존 dispatcher.getTaskStatuses 를 재사용해 주입한다.
    */
   getTaskStatuses: (
-    taskIds: string[],
+    taskIds: string[]
   ) => Promise<Record<string, TaskStatusLite>>;
   /** 게이트 평가 시점의 미션 스냅샷 (taskIds / 직전 step output 등). */
   mission: Mission;
@@ -101,7 +101,7 @@ export interface StepGateContext {
  */
 export type VerifyStepGate = (
   step: MissionStep,
-  ctx: StepGateContext,
+  ctx: StepGateContext
 ) => Promise<{ pass: boolean; reason?: string }>;
 
 /**
@@ -125,8 +125,22 @@ export interface ConductorDriverDeps {
   eventBus: MissionEventBus;
   /** wait 게이트용 task 상태 조회 — dispatcher.getTaskStatuses 재사용해 주입. */
   getTaskStatuses: (
-    taskIds: string[],
+    taskIds: string[]
   ) => Promise<Record<string, TaskStatusLite>>;
+  /**
+   * 오케스트레이터가 MCP(`create_task`/`dispatch_task`)로 만든 미션 task 의 **비종료**
+   * id 들을 역추적 (dispatcher.findMissionTaskIds 재사용해 주입, §5.2).
+   *
+   * B안에선 task 를 **오케가 직접** 만들기 때문에(지휘자가 만들지 않음) 지휘자의
+   * `mission.taskIds` 는 비어 있다. wait/dispatch 게이트 검증 직전 이 헬퍼로
+   * `mission.taskIds` 를 동기화해, `getTaskStatuses` 가 오케 생성 task 를 보고
+   * "전부 DONE" 판정을 내릴 수 있게 한다 (§5.2 / §8-3). 오케 `create_task` 는 B1-3 로
+   * `missionId` 가 태깅돼 있어 단일 필드 쿼리로 잡힌다.
+   *
+   * 미주입 시 동기화는 no-op — 지휘자는 `mission.taskIds` 를 그대로 사용한다
+   * (Phase 2 호환: 게이트가 직접 주입된 fake 든 default 든 동작 불변).
+   */
+  findMissionTaskIds?: (missionId: string) => Promise<string[]>;
   /**
    * P2-B `gates.ts` 의 게이트 검증기. 통합 시
    *   `import { verifyStepGate } from "./gates"` 로 주입.
@@ -183,13 +197,24 @@ export interface ConductorDriver {
 const PR_URL_RE = /https?:\/\/\S+/;
 
 /**
+ * task 완료 게이트가 걸리는 스텝 타입 — wait / dispatch (gates.ts 의
+ * verifyTaskCompletionGate 와 동일 분류). 이 스텝들은 (a) 게이트 검증 직전
+ * `findMissionTaskIds` 로 taskIds 를 동기화하고, (b) 성공 보고여도 task 가 아직
+ * 완료 전이면 retry(재할당) 하지 않고 **running 유지 + 이벤트로 재평가**한다
+ * (재dispatch 로 중복 task 가 생기는 걸 막는다 — §5.2 / §8-3).
+ */
+function isTaskGatedStep(step: MissionStep): boolean {
+  return step.type === "wait" || step.type === "dispatch";
+}
+
+/**
  * 내장 기본 게이트 — §5.1 결정적 예시. P2-B gates.ts 미주입 시 폴백한다.
- *   - wait  : mission.taskIds 가 전부 DONE 이어야 통과 (미완료 task 있으면 보류).
- *   - /ship : 스텝 output 에 PR URL 이 있어야 통과.
- *   - 그 외  : 오케스트레이터의 성공 보고를 신뢰(통과).
+ *   - wait/dispatch : mission.taskIds 가 전부 DONE 이어야 통과 (미완료 있으면 보류).
+ *   - /ship         : 스텝 output 에 PR URL 이 있어야 통과.
+ *   - 그 외          : 오케스트레이터의 성공 보고를 신뢰(통과).
  */
 const defaultStepGate: VerifyStepGate = async (step, ctx) => {
-  if (step.type === "wait") {
+  if (isTaskGatedStep(step)) {
     const ids = ctx.mission.taskIds ?? [];
     if (ids.length === 0) return { pass: true };
     const statuses = await ctx.getTaskStatuses(ids);
@@ -197,7 +222,7 @@ const defaultStepGate: VerifyStepGate = async (step, ctx) => {
     if (notDone.length > 0) {
       return {
         pass: false,
-        reason: `wait gate: ${notDone.length}/${ids.length} task(s) not DONE`,
+        reason: `${step.type} gate: ${notDone.length}/${ids.length} task(s) not DONE`,
       };
     }
     return { pass: true };
@@ -207,8 +232,8 @@ const defaultStepGate: VerifyStepGate = async (step, ctx) => {
       typeof step.output === "string"
         ? step.output
         : step.output != null
-          ? JSON.stringify(step.output)
-          : "";
+        ? JSON.stringify(step.output)
+        : "";
     if (PR_URL_RE.test(out)) return { pass: true };
     return {
       pass: false,
@@ -219,11 +244,46 @@ const defaultStepGate: VerifyStepGate = async (step, ctx) => {
 };
 
 /**
- * Phase 2 Conductor — orchestrator-driven 운전 루프.
+ * 스텝 타입별 '현재 스텝만' 허가 지시 메시지 (§3.2 / §8-3). 오케스트레이터 PTY 에
+ * 주입되며, 스텝 안에서 무엇을 어떤 도구로 하고 어떻게 보고할지를 결정적으로 못박는다.
+ *   - gstack    : 그 스킬을 `run_skill` 로 직접 실행 → `mission_step_done(success)`.
+ *   - fix/dispatch : `create_task`/`dispatch_task` 로 분해·할당(missionId 자동태깅)
+ *                    → `mission_step_done`. task 완료 대기는 지휘자 몫.
+ *   - wait      : 여기로 오지 않는다(오케 grant 없이 지휘자가 폴링) — grantStep 에서 분기.
+ * 어느 경우든 "스스로 다음 스텝으로 넘어가지 마세요" 를 포함해 순서·게이트 권한이
+ * 지휘자에 있음을 명시한다.
+ */
+function buildGrantMessage(
+  mission: Mission,
+  step: MissionStep,
+  stepIndex: number
+): string {
+  if (step.type === "gstack") {
+    const skill = step.skill ?? "(스킬 미지정)";
+    return (
+      `【Marblo Mission】 현재 스텝 ${stepIndex}: ${skill} (gstack)\n` +
+      `이 스텝은 ${skill} 실행입니다. 당신 세션에서 run_skill 로 직접 실행한 뒤, ` +
+      `완료되면 mission_step_done(success) 로 보고하세요.\n` +
+      `다음 스텝으로 스스로 넘어가지 마세요 — 순서·게이트는 지휘자가 관리합니다.`
+    );
+  }
+  // fix / dispatch — 작업 분해·할당 스텝. 목표는 step.args(있으면) 우선, 없으면 미션 goal.
+  const goal = step.args?.trim() || mission.goal;
+  return (
+    `【Marblo Mission】 현재 스텝 ${stepIndex}: ${step.type} (작업 분해·할당)\n` +
+    `이 스텝의 목표: ${goal}\n` +
+    `create_task · dispatch_task 로 작업을 분해·할당하세요 (missionId 는 자동 태깅됩니다). ` +
+    `할당을 마치면 mission_step_done 으로 보고하세요. 분해된 task 들의 완료 대기는 지휘자가 합니다.\n` +
+    `다음 스텝으로 스스로 넘어가지 마세요 — 순서·게이트는 지휘자가 관리합니다.`
+  );
+}
+
+/**
+ * Conductor — orchestrator-driven 운전 루프 (Phase 2 골격 + Phase 3 운전 완성).
  * 기본 driver 가 engine 이라 명시적으로 orchestrator 를 켜야만 생성·호출된다.
  */
 export function createConductorDriver(
-  deps: ConductorDriverDeps,
+  deps: ConductorDriverDeps
 ): ConductorDriver {
   const log =
     deps.logger ??
@@ -243,13 +303,46 @@ export function createConductorDriver(
     const next = prev
       .then(fn, fn)
       .catch((err) =>
-        log("mission chain error", { missionId, err: String(err) }),
+        log("mission chain error", { missionId, err: String(err) })
       );
     chains.set(missionId, next);
     void next.finally(() => {
       if (chains.get(missionId) === next) chains.delete(missionId);
     });
     return next;
+  }
+
+  // 오케가 MCP 로 만든 task 를 게이트가 보도록 mission.taskIds 를 동기화한다(§5.2).
+  // B안에선 지휘자가 task 를 만들지 않으므로 mission.taskIds 가 비어 있다 →
+  // findMissionTaskIds(missionId) 로 비종료 task id 를 끌어와 **머지**한다.
+  //   · 머지(덮어쓰기 아님): 이미 DONE 으로 빠져 findMissionTaskIds 가 더는 안 주는
+  //     task id 도 mission.taskIds 에 보존 → 게이트가 getTaskStatuses 로 실제 상태를
+  //     읽어 "전부 DONE" 을 정확히 판정(빈 목록의 vacuous pass 방지) + abandon/진행률용
+  //     이력 유지. engine 의 dispatch 누적/재연결 머지(index.ts)와 같은 컨벤션.
+  //   · findMissionTaskIds 미주입(Phase 2 경로)이거나 새 id 가 없으면 no-op.
+  async function syncMissionTaskIds(missionId: string): Promise<void> {
+    if (!deps.findMissionTaskIds) return;
+    let found: string[];
+    try {
+      found = await deps.findMissionTaskIds(missionId);
+    } catch (err) {
+      log("syncMissionTaskIds — findMissionTaskIds failed (keep existing)", {
+        missionId,
+        err: String(err),
+      });
+      return;
+    }
+    if (found.length === 0) return;
+    const fresh = await deps.store.getMission(missionId);
+    if (!fresh) return;
+    const merged = Array.from(new Set([...fresh.taskIds, ...found]));
+    if (merged.length === fresh.taskIds.length) return; // 새로 붙일 게 없음
+    await deps.store.updateMission(missionId, { taskIds: merged });
+    log("syncMissionTaskIds — merged orchestrator-created task ids", {
+      missionId,
+      total: merged.length,
+      added: merged.length - fresh.taskIds.length,
+    });
   }
 
   // ──────────────────────────── 운전 루프 ────────────────────────────
@@ -275,7 +368,7 @@ export function createConductorDriver(
 
   async function grantStep(
     missionId: string,
-    stepIndex: number,
+    stepIndex: number
   ): Promise<void> {
     const mission = await deps.store.getMission(missionId);
     if (!mission || isTerminalMission(mission.status)) return;
@@ -312,9 +405,31 @@ export function createConductorDriver(
       },
     });
 
-    // 미션 오케 PTY 에 '현재 스텝만' 허가 메시지 주입 (best-effort).
+    // wait 스텝: 오케에 grant 하지 않는다 — 지휘자가 task 완료를 폴링한다(§8-3).
+    // running 마킹 후, 직전 dispatch 의 task 가 이미 전부 DONE 인 경우를 위해 즉시
+    // 게이트를 1회 평가해 통과하면 바로 전진한다. 미통과면 running 으로 남아 task
+    // 이벤트(onEvent)/보고(onStepReport)로 재평가된다.
+    if (step.type === "wait") {
+      log("grantStep — wait step: conductor polls (no orchestrator grant)", {
+        missionId,
+        stepIndex,
+      });
+      const gate = await verifyGateInternal(missionId, stepIndex);
+      if (gate.passed) {
+        log("grantStep — wait gate already satisfied at grant, advancing", {
+          missionId,
+          stepIndex,
+        });
+        await passStepAndAdvance(missionId, stepIndex);
+      }
+      return;
+    }
+
+    // gstack / fix / dispatch — 미션 오케 PTY 에 스텝 타입별 '현재 스텝만' 지시 주입
+    // (best-effort). 메시지는 스텝 타입별로 무엇을 어떤 도구로 하고 어떻게 보고할지
+    // 못박는다(§3.2 / §8-3).
     const ref = deps.orchestrators.getSession(
-      mission.ownerOrchestratorSessionId,
+      mission.ownerOrchestratorSessionId
     );
     if (!ref || !ref.isAlive()) {
       log("grantStep — no live owner orchestrator session (best-effort skip)", {
@@ -324,15 +439,13 @@ export function createConductorDriver(
       });
       return;
     }
-    const label = step.skill ?? step.type;
     try {
-      await ref.postMessage(
-        `【Marblo Mission】 현재 스텝 ${stepIndex}: ${label} 만 진행하세요. 끝나면 mission_step_done 을 호출해 보고하세요. 다음 스텝으로 스스로 넘어가지 마세요.`,
-      );
+      await ref.postMessage(buildGrantMessage(mission, step, stepIndex));
       log("grantStep — granted to orchestrator", {
         missionId,
         stepIndex,
-        label,
+        type: step.type,
+        skill: step.skill ?? null,
       });
     } catch (err) {
       log("grantStep — postMessage failed (best-effort)", {
@@ -377,46 +490,74 @@ export function createConductorDriver(
       await handleStepFailure(
         report.missionId,
         idx,
-        report.error ?? "orchestrator reported step failure",
+        report.error ?? "orchestrator reported step failure"
       );
       return;
     }
 
     // 성공 보고 → output 반영 후 게이트 검증 (게이트가 step.output 을 읽음).
+    // verifyGateInternal 은 task-게이트 스텝이면 직전에 findMissionTaskIds 로
+    // mission.taskIds 를 동기화한다(§5.2) — 오케가 MCP 로 만든 task 가 보이도록.
     if (report.output !== undefined) {
       await deps.store.updateMissionStep(report.missionId, idx, {
         output: report.output,
       });
     }
     const gate = await verifyGateInternal(report.missionId, idx);
-    if (!gate.passed) {
+    if (gate.passed) {
+      await passStepAndAdvance(report.missionId, idx);
+      return;
+    }
+
+    // 게이트 미통과 — 스텝 타입에 따라 분기한다.
+    const step = mission.steps[idx];
+    if (isTaskGatedStep(step)) {
+      // dispatch/wait: 분해·할당은 됐지만 task 가 아직 완료 전이다. retry(재할당)하면
+      // 중복 task 가 생기므로 **재시도하지 않는다** — 스텝을 running 으로 유지하고
+      // task 이벤트(onEvent)/추가 보고(onStepReport)로 게이트를 재평가해 전부 DONE
+      // 되면 전진한다("완료대기는 지휘자가" — §8-3). 다음 스텝으로 넘기지 않는다.
       await deps.store.appendTimelineEvent(report.missionId, {
         ts: now(),
         type: "supervisor.note",
         payload: {
-          message: `gate held at step ${idx}: ${gate.reason ?? "(no reason)"}`,
+          message: `awaiting task completion at step ${idx}: ${
+            gate.reason ?? "(tasks pending)"
+          }`,
           index: idx,
-          kind: "gate_failed",
+          kind: "awaiting_tasks",
         },
       });
-      // 게이트 미통과 = 보고는 성공이라 했지만 결정적 검증이 거부 → 실패와 동일하게
-      // retry(재허가)/escalate. 다음 스텝으로 절대 넘기지 않는다(§5.1 핵심).
-      await handleStepFailure(
-        report.missionId,
-        idx,
-        `gate not passed: ${gate.reason ?? ""}`,
-      );
+      log("onStepReport — task-gated step pending, waiting (no retry)", {
+        missionId: report.missionId,
+        stepIndex: idx,
+        reason: gate.reason,
+      });
       return;
     }
 
-    await passStepAndAdvance(report.missionId, idx);
+    // gstack/fix: 보고는 성공이라 했지만 결정적 게이트가 거부 → 실패와 동일하게
+    // retry(재허가)/escalate. 다음 스텝으로 절대 넘기지 않는다(§5.1 핵심).
+    await deps.store.appendTimelineEvent(report.missionId, {
+      ts: now(),
+      type: "supervisor.note",
+      payload: {
+        message: `gate held at step ${idx}: ${gate.reason ?? "(no reason)"}`,
+        index: idx,
+        kind: "gate_failed",
+      },
+    });
+    await handleStepFailure(
+      report.missionId,
+      idx,
+      `gate not passed: ${gate.reason ?? ""}`
+    );
   }
 
   // 현재 스텝을 success 마킹하고 다음 스텝 허가(또는 미션 완료). gate pass 후 +
   // 외부 이벤트로 wait 게이트가 충족됐을 때 공유하는 단일 전진 지점.
   async function passStepAndAdvance(
     missionId: string,
-    stepIndex: number,
+    stepIndex: number
   ): Promise<void> {
     await markStepSuccess(missionId, stepIndex);
     const fresh = await deps.store.getMission(missionId);
@@ -432,7 +573,7 @@ export function createConductorDriver(
 
   async function markStepSuccess(
     missionId: string,
-    stepIndex: number,
+    stepIndex: number
   ): Promise<void> {
     const mission = await deps.store.getMission(missionId);
     const step = mission?.steps[stepIndex];
@@ -461,7 +602,7 @@ export function createConductorDriver(
   async function handleStepFailure(
     missionId: string,
     stepIndex: number,
-    error: string,
+    error: string
   ): Promise<void> {
     const mission = await deps.store.getMission(missionId);
     if (!mission || isTerminalMission(mission.status)) return;
@@ -553,7 +694,7 @@ export function createConductorDriver(
       mission,
       `⏸️ [Marblo Mission] 스텝 ${stepIndex} (${
         step.skill ?? step.type
-      }) 에서 사용자 확인을 기다립니다: ${error}`,
+      }) 에서 사용자 확인을 기다립니다: ${error}`
     );
   }
 
@@ -572,7 +713,7 @@ export function createConductorDriver(
     });
     notifyOrchestrator(
       mission,
-      `✅ [Marblo Mission] 모든 스텝이 끝나 미션이 완료되었습니다.`,
+      `✅ [Marblo Mission] 모든 스텝이 끝나 미션이 완료되었습니다.`
     );
   }
 
@@ -580,14 +721,14 @@ export function createConductorDriver(
   // 않는다. fire-and-forget (상태 전이 흐름을 blocking 하지 않음).
   function notifyOrchestrator(mission: Mission, message: string): void {
     const ref = deps.orchestrators.getSession(
-      mission.ownerOrchestratorSessionId,
+      mission.ownerOrchestratorSessionId
     );
     if (!ref || !ref.isAlive()) return;
     void ref.postMessage(message).catch((err) =>
       log("notifyOrchestrator failed (best-effort)", {
         missionId: mission.id,
         err: String(err),
-      }),
+      })
     );
   }
 
@@ -595,7 +736,7 @@ export function createConductorDriver(
     missionId: string,
     fromStatus: MissionStatus,
     next: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string },
+    extras?: { completedAt?: Date; abandonedReason?: string }
   ): Promise<void> {
     if (fromStatus === next) return;
     assertMissionTransition(fromStatus, next);
@@ -604,12 +745,21 @@ export function createConductorDriver(
 
   async function verifyGateInternal(
     missionId: string,
-    stepIndex: number,
+    stepIndex: number
   ): Promise<GateResult> {
-    const mission = await deps.store.getMission(missionId);
+    let mission = await deps.store.getMission(missionId);
     if (!mission) return { passed: false, reason: "mission not found" };
-    const step = mission.steps[stepIndex];
+    let step = mission.steps[stepIndex];
     if (!step) return { passed: false, reason: "step out of range" };
+    // task-게이트 스텝(wait/dispatch)은 검증 직전 오케 생성 task 를 동기화한다(§5.2).
+    // getTaskStatuses 가 오케가 MCP 로 만든 task 의 상태를 봐야 "전부 DONE" 을 판정
+    // 가능하므로, 게이트 평가에 쓸 mission 스냅샷도 동기화 후로 다시 읽는다.
+    if (isTaskGatedStep(step)) {
+      await syncMissionTaskIds(missionId);
+      mission = await deps.store.getMission(missionId);
+      if (!mission) return { passed: false, reason: "mission not found" };
+      step = mission.steps[stepIndex] ?? step;
+    }
     try {
       const r = await verify(step, {
         getTaskStatuses: deps.getTaskStatuses,
@@ -669,8 +819,8 @@ export function createConductorDriver(
     enqueue(event.missionId, () =>
       String(event.type) === MISSION_STEP_REPORTED_EVENT
         ? onStepReport(parseStepReport(event))
-        : onEvent(event),
-    ),
+        : onEvent(event)
+    )
   );
 
   log("created (Phase 2 — orchestrator-driven 운전 루프 활성)");
@@ -683,7 +833,7 @@ export function createConductorDriver(
     onStepReport,
     async verifyGate(
       missionId: string,
-      stepIndex: number,
+      stepIndex: number
     ): Promise<GateResult> {
       return verifyGateInternal(missionId, stepIndex);
     },
