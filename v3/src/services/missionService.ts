@@ -1,4 +1,10 @@
-import { where, type Unsubscribe } from "firebase/firestore";
+import {
+  doc,
+  runTransaction,
+  where,
+  type DocumentData,
+  type Unsubscribe,
+} from "firebase/firestore";
 import type {
   Mission,
   MissionStatus,
@@ -17,10 +23,23 @@ import {
   toTimestamp,
   convertTimestamps,
 } from "./firestore";
+import { db } from "../lib/firebase";
 import { inMemEnabled, inMem } from "./missionService.inmem";
 
 const COLLECTION = "missions";
 const DATE_FIELDS = ["launchedAt", "lastActivityAt", "completedAt"];
+
+function dateMs(value: Date | null | undefined): number {
+  return value?.getTime() ?? 0;
+}
+
+function lastActivityMs(mission: Mission): number {
+  return dateMs(mission.lastActivityAt) || dateMs(mission.launchedAt);
+}
+
+function missionFromSnapshot(id: string, data: DocumentData): Mission {
+  return toMission({ id, ...data });
+}
 
 // Nested Date 필드 (steps[].startedAt/completedAt, contextLog[].ts) 도 변환.
 // convertTimestamps 는 top-level 만 처리하므로 직접 펴줘야 한다.
@@ -50,7 +69,7 @@ export async function getMissions(projectId: string): Promise<Mission[]> {
   );
   return docs
     .map(toMission)
-    .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime());
+    .sort((a, b) => lastActivityMs(b) - lastActivityMs(a));
 }
 
 export async function getMission(missionId: string): Promise<Mission | null> {
@@ -104,9 +123,7 @@ export function subscribeToMissions(
       callback(
         docs
           .map(toMission)
-          .sort(
-            (a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime(),
-          ),
+          .sort((a, b) => lastActivityMs(b) - lastActivityMs(a)),
       ),
   );
 }
@@ -123,16 +140,27 @@ export function subscribeToMission(
   );
 }
 
-// Mission engine 은 owner orchestrator 세션 단독으로 timeline 을 쓰므로 실질 충돌은
-// 드물다. Step 2 에서 동시 wakeup 경합이 발생하면 transaction 으로 갈아끼울 것.
 export async function appendTimelineEvent(
   missionId: string,
   event: TimelineEvent,
 ): Promise<void> {
-  const mission = await getMission(missionId);
-  if (!mission) throw new Error(`Mission not found: ${missionId}`);
-  await updateMission(missionId, {
-    contextLog: [...mission.contextLog, event],
+  if (inMemEnabled()) {
+    const mission = await inMem.getMission(missionId);
+    if (!mission) throw new Error(`Mission not found: ${missionId}`);
+    await inMem.updateMission(missionId, {
+      contextLog: [...mission.contextLog, event],
+    });
+    return;
+  }
+  const ref = doc(db, COLLECTION, missionId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists()) throw new Error(`Mission not found: ${missionId}`);
+    const mission = missionFromSnapshot(snapshot.id, snapshot.data());
+    transaction.update(ref, {
+      contextLog: [...mission.contextLog, event],
+      lastActivityAt: toTimestamp(new Date()),
+    });
   });
 }
 
@@ -141,14 +169,32 @@ export async function updateMissionStep(
   stepIndex: number,
   patch: Partial<MissionStep>,
 ): Promise<void> {
-  const mission = await getMission(missionId);
-  if (!mission) throw new Error(`Mission not found: ${missionId}`);
-  if (stepIndex < 0 || stepIndex >= mission.steps.length) {
-    throw new Error(`Step index out of bounds: ${stepIndex}`);
+  if (inMemEnabled()) {
+    const mission = await inMem.getMission(missionId);
+    if (!mission) throw new Error(`Mission not found: ${missionId}`);
+    if (stepIndex < 0 || stepIndex >= mission.steps.length) {
+      throw new Error(`Step index out of bounds: ${stepIndex}`);
+    }
+    const steps = [...mission.steps];
+    steps[stepIndex] = { ...steps[stepIndex], ...patch };
+    await inMem.updateMission(missionId, { steps });
+    return;
   }
-  const steps = [...mission.steps];
-  steps[stepIndex] = { ...steps[stepIndex], ...patch };
-  await updateMission(missionId, { steps });
+  const ref = doc(db, COLLECTION, missionId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists()) throw new Error(`Mission not found: ${missionId}`);
+    const mission = missionFromSnapshot(snapshot.id, snapshot.data());
+    if (stepIndex < 0 || stepIndex >= mission.steps.length) {
+      throw new Error(`Step index out of bounds: ${stepIndex}`);
+    }
+    const steps = [...mission.steps];
+    steps[stepIndex] = { ...steps[stepIndex], ...patch };
+    transaction.update(ref, {
+      steps,
+      lastActivityAt: toTimestamp(new Date()),
+    });
+  });
 }
 
 // 단순 status write. 전이 검증 (state-machine.ts) 은 Step 2 에서 별도 파일로 분리.
