@@ -34,8 +34,8 @@ export class MissionEngine {
       ((m, meta) => console.log(`[MissionEngine] ${m}`, meta ?? ""));
     this.unsubscribe = deps.eventBus.on((event) =>
       this.onEvent(event).catch((err) =>
-        this.log("event handler error", { err: String(err), event }),
-      ),
+        this.log("event handler error", { err: String(err), event })
+      )
     );
   }
 
@@ -85,7 +85,7 @@ export class MissionEngine {
     const mission = await this.requireMission(missionId);
     if (isTerminalMission(mission.status)) {
       throw new Error(
-        `Cannot resume terminal mission ${missionId} (status=${mission.status})`,
+        `Cannot resume terminal mission ${missionId} (status=${mission.status})`
       );
     }
     // planning: UI 에서 직접 doc 만 만든 미션을 engine 이 인계받는 경로.
@@ -119,16 +119,36 @@ export class MissionEngine {
    * 정말로 한 곳에서 멈추면 미션은 active 로 남아, 사용자가 PTY 패널에서 직접
    * 이어가거나 Resume 으로 개입할 수 있다(human-in-the-loop fallback 유지).
    */
+  // 사용자가 명시적으로 ⏸️Pause 한 미션과 wait-step 대기(sleeping) 를 구분한다.
+  // 둘 다 status="sleeping" 으로 저장되므로(pause()/wait 모두 transition→"sleeping"),
+  // 마지막 paused/resumed timeline 이벤트의 kind 로 판별한다. paused_by_user 면
+  // 앱 재시작 시 자동 복구하지 않는다(유저 의도 보존).
+  private isPausedByUser(mission: Mission): boolean {
+    for (let i = mission.contextLog.length - 1; i >= 0; i--) {
+      const ev = mission.contextLog[i];
+      if (ev.type === "mission.resumed") return false;
+      if (ev.type === "mission.paused") {
+        return ev.payload?.kind === "paused_by_user";
+      }
+    }
+    return false;
+  }
+
   async recoverInFlight(missionId: string): Promise<void> {
     const mission = await this.requireMission(missionId);
     if (isTerminalMission(mission.status)) return;
+    // 유저가 일시정지한 미션은 자동 재개 금지 — wait-step sleeping 만 복구한다.
+    if (mission.status === "sleeping" && this.isPausedByUser(mission)) {
+      this.log("recover: skipping user-paused mission", { missionId });
+      return;
+    }
     const idx = mission.currentStepIndex;
     const step = mission.steps[idx];
     if (step && step.status === "running") {
       if (step.type === "dispatch") {
         // 이미 dispatch 된 task 가 있으면 재연결 (중복 dispatch 방지).
         const existing = await this.deps.dispatcher.findMissionTaskIds(
-          mission.id,
+          mission.id
         );
         if (existing.length > 0) {
           const merged = Array.from(new Set([...mission.taskIds, ...existing]));
@@ -313,7 +333,7 @@ export class MissionEngine {
             err: String(err),
             missionId: mission.id,
             stepIndex: step.index,
-          }),
+          })
         );
     };
 
@@ -399,7 +419,7 @@ export class MissionEngine {
         mission,
         step.index,
         result.output,
-        result.userInputDetected,
+        result.userInputDetected
       );
     }
     return this.handleFailure(mission, step.index, result.error);
@@ -409,7 +429,7 @@ export class MissionEngine {
     mission: Mission,
     stepIndex: number,
     output: unknown,
-    userInputDetected?: string,
+    userInputDetected?: string
   ): Promise<boolean> {
     const completedAt = this.now();
     const step = mission.steps[stepIndex];
@@ -487,7 +507,7 @@ export class MissionEngine {
   private async handleFailure(
     mission: Mission,
     stepIndex: number,
-    error: string | undefined,
+    error: string | undefined
   ): Promise<boolean> {
     const step = mission.steps[stepIndex];
     const policy = step.onFailure ?? "retry";
@@ -582,7 +602,7 @@ export class MissionEngine {
           .replace(/-+$/, "");
         const folder = `docs/missions/${slug || "mission"}-${mission.id.slice(
           0,
-          6,
+          6
         )}`;
         const summaryPath = `${folder}/SUMMARY.md`;
         const stepsSummary = mission.steps
@@ -596,7 +616,7 @@ export class MissionEngine {
               `  → 저장 경로: ${stepPath}\n` +
               (typeof s.output === "string"
                 ? `  output (마지막 1200자):\n${(s.output as string).slice(
-                    -1200,
+                    -1200
                   )}\n`
                 : "")
             );
@@ -656,8 +676,8 @@ export class MissionEngine {
         message: synthesisPath
           ? `Mission completed · 종합 보고서: ${synthesisPath}`
           : synthesisNote
-            ? "Mission completed · 종합 보고서 작성됨 (파일 경로 미확인)"
-            : "Mission completed",
+          ? "Mission completed · 종합 보고서 작성됨 (파일 경로 미확인)"
+          : "Mission completed",
         templateLabel: MISSION_TEMPLATES[mission.templateId]?.label,
         synthesisPath: synthesisPath ?? null,
         // 파일 읽기 없이도 Firestore 만으로 보고서 미리보기 가능하도록 4000자 보관.
@@ -669,7 +689,7 @@ export class MissionEngine {
   private async transition(
     mission: Mission,
     next: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string },
+    extras?: { completedAt?: Date; abandonedReason?: string }
   ): Promise<void> {
     if (mission.status === next) return;
     assertMissionTransition(mission.status, next);

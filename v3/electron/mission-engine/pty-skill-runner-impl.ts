@@ -109,9 +109,12 @@ const NOISE_LINE_PATTERNS: RegExp[] = [
   // "Baked for 4s", "✻ Thinking…" 등. token/effort/elapsed 마커가 강한 신호.
   /thinking with \S+ effort/i,
   /·\s*[↑↓]?\s*[\d.]+[km]?\s*tokens?/i, // "· ↓129 tokens", "· 1.2k tokens"
-  /\b\d+\s*tokens?\b/i,
+  // NOTE: bare /\d+ tokens/ 패턴은 제거 — 위 스피너 패턴과 중복이고 "50 tokens 예산"
+  // 같은 정상 LLM 줄을 통째로 삭제하던 과매칭 위험이 있었다.
   /\(\s*\d+s\s*·/i, // "(4s · ..." elapsed+token 헤더
-  /^\s*[✢·*•⠁-⣿✶✻✽✦❀✺⏺⠿]+\s*\w+(?:ing|ed)\b/i, // "✶ Sprouting", "❀ Baked"
+  // 스피너 글리프(브라유/✶✻… )로 시작하는 진행 라인만. ·*• 마크다운 불릿은
+  // 제외 — "* Updated X" / "• Removing Y" 같은 정상 불릿 결론을 오삭제하지 않도록.
+  /^\s*[✢⠁-⣿✶✻✽✦❀✺⏺]+\s*\w+(?:ing|ed)\b/i, // "✶ Sprouting", "❀ Baked"
   /\bBaked for\b/i,
   // 모바일 앱 / remote-control 안내 (claude 2.x tip).
   /Control this session from the Claude mobile app/i,
@@ -210,7 +213,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
   function waitForIdle(
     ptyId: string,
     timeoutMs: number,
-    quietMs: number,
+    quietMs: number
   ): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     return new Promise<boolean>((resolve) => {
@@ -246,7 +249,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
     ptyId: string,
     run: ActiveRun,
     success: boolean,
-    errLine?: string,
+    errLine?: string
   ): void {
     clearTimeout(run.timeoutTimer);
     if (run.quiescenceTimer) clearTimeout(run.quiescenceTimer);
@@ -267,7 +270,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
         missionId: run.missionId,
         durationMs,
         bufferLen: run.buffer.length,
-      },
+      }
     );
     run.resolve({
       success,
@@ -275,9 +278,9 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
         outTail.length > 0
           ? outTail
           : success
-            ? "(no output captured)"
-            : (errLine ?? "non-zero"),
-      error: success ? undefined : (errLine ?? "skill did not return cleanly"),
+          ? "(no output captured)"
+          : errLine ?? "non-zero",
+      error: success ? undefined : errLine ?? "skill did not return cleanly",
       durationMs,
       userInputDetected,
     });
@@ -383,7 +386,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
     const ready = await waitForIdle(
       ptyId,
       READY_WAIT_TIMEOUT_MS,
-      firstInject ? IDLE_QUIET_FRESH_MS : IDLE_QUIET_WARM_MS,
+      firstInject ? IDLE_QUIET_FRESH_MS : IDLE_QUIET_WARM_MS
     );
     warmedPtyIds.add(ptyId);
     if (!ready) {
@@ -410,7 +413,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
 
     const timeoutMs = Math.min(
       Math.max(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, 10_000),
-      MAX_TIMEOUT_MS,
+      MAX_TIMEOUT_MS
     );
 
     return new Promise<SkillResult>((resolve) => {
@@ -444,7 +447,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
           ptyId,
           run,
           false,
-          `writeAndSubmit failed: ${e instanceof Error ? e.message : String(e)}`,
+          `writeAndSubmit failed: ${e instanceof Error ? e.message : String(e)}`
         );
       }
     });

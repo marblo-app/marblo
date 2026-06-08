@@ -52,11 +52,11 @@ export function createFixRunner(deps: FixRunnerDeps): FixRunner {
   // 이 미션에 이미 만들어진 가장 최근 task 한 개. 멱등 재연결용 — 있으면 새로
   // 만들지 않고 그 task 를 폴링한다. missionId 단일 필드 쿼리(복합 인덱스 불필요).
   async function findExistingMissionTask(
-    missionId: string,
+    missionId: string
   ): Promise<{ id: string; status?: string } | null> {
     try {
       const snap = await getDocs(
-        query(collection(db, "tasks"), where("missionId", "==", missionId)),
+        query(collection(db, "tasks"), where("missionId", "==", missionId))
       );
       if (snap.empty) return null;
       const docs = snap.docs.map((d) => {
@@ -200,7 +200,7 @@ const CONTEXT_NOISE_PATTERNS: RegExp[] = [
   /\besc(ape)? to interrupt\b/i,
   /thinking with \S+ effort/i,
   /·\s*[↑↓]?\s*[\d.]+[km]?\s*tokens?/i,
-  /\b\d+\s*tokens?\b/i,
+  // bare /\d+ tokens/ 제거 — 위 스피너 패턴과 중복 + 정상 문구 과매칭(pty-skill-runner 와 동일).
   /Control this session from the Claude mobile app/i,
   /claude\.com\/download/i,
   /\/remote-control\b/i,
