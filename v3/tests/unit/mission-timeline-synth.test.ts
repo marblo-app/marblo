@@ -403,13 +403,14 @@ describe("B안 P4-C — task.activity_logged → contextLog 'task.activity' 합�
       SYNTH_TIMEOUT,
     );
     const e = synthEntries(h.store.raw(id), "task.activity")[0];
+    // contextLog 'task.activity' payload 계약 = {taskId,message,agentId,taskTitle,key}.
+    // activityAtMillis 는 버스 이벤트 전용(키에 인코딩됨) — contextLog payload 엔 없다.
     expect(keyOf(e)).toBe("task.activity:t1:1000");
     expect(e.payload).toMatchObject({
       taskId: "t1",
       message: "작업 시작",
       agentId: "a1",
       taskTitle: "Build X",
-      activityAtMillis: 1000,
     });
 
     // 같은 activityAtMillis(=같은 key) 재emit → skip.
