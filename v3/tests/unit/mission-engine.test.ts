@@ -137,6 +137,15 @@ function makeDispatcher(
       }
       return out;
     },
+    async findMissionTaskIds(missionId) {
+      // 기본 fake 는 미션 task 없음으로 가정 (테스트가 __setStatuses 로 주입 가능).
+      return Object.keys(statuses).filter(
+        (id) =>
+          id.includes(missionId) &&
+          statuses[id] !== "DONE" &&
+          statuses[id] !== "FAILED",
+      );
+    },
     async killAgentsForTasks(taskIds) {
       spy.killCalls.push([...taskIds]);
     },
@@ -462,6 +471,29 @@ describe("scenario 5 — escalate → waiting_for_human", () => {
     expect(notifyEvt).toBeTruthy();
   });
 
+  it("notifier 가 escalate 시 호출된다 (OS 알림 / 인앱 surface 트리거)", async () => {
+    const calls: Array<{
+      kind: string;
+      projectId: string;
+      missionId: string;
+    }> = [];
+    const { engine, store } = buildEngine({
+      skillRunner: makeSkillRunner({ alwaysFail: true }),
+      notifier: (n) => calls.push(n),
+    });
+    const m = await engine.launch({
+      projectId: "p1",
+      goal: "broken thing",
+      templateId: "quick-fix",
+    });
+
+    await waitFor(() => store.raw(m.id)?.status === "waiting_for_human", 2000);
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    expect(calls[0].kind).toBe("escalate");
+    expect(calls[0].projectId).toBe("p1");
+    expect(calls[0].missionId).toBe(m.id);
+  });
+
   it("retry 정책 (default) — maxRetries=2 후에 waiting_for_human", async () => {
     const { engine, store } = buildEngine({
       // /review 는 onFailure='retry'. 3 번 실패하게 만들기 (retry 2 회 한도 초과)
@@ -609,6 +641,103 @@ describe("dispose", () => {
     expect(bus.size()).toBe(1);
     engine.dispose();
     expect(bus.size()).toBe(0);
+  });
+});
+
+describe("scenario 9 — 앱 재시작 in-flight 복구", () => {
+  it("running 이던 gstack step 은 pending 으로 리셋 후 재실행된다", async () => {
+    const { engine, store } = buildEngine();
+    const steps: MissionStep[] = [
+      {
+        index: 0,
+        type: "gstack",
+        skill: "/review",
+        onFailure: "escalate",
+        status: "running",
+      },
+      {
+        index: 1,
+        type: "gstack",
+        skill: "/ship",
+        onFailure: "escalate",
+        status: "pending",
+      },
+    ];
+    const id = await store.createMission({
+      projectId: "p1",
+      goal: "resume me",
+      templateId: "polish",
+      status: "active",
+      ownerOrchestratorSessionId: "orch-1",
+      steps,
+      currentStepIndex: 0,
+      taskIds: [],
+      contextLog: [],
+    });
+
+    await engine.recoverInFlight(id);
+    // pending 으로 리셋 후 재실행되어 success 로 마감(default fake runner 는 성공).
+    await waitFor(() => store.raw(id)!.steps[0].status === "success", 2000);
+    expect(store.raw(id)!.steps[0].status).toBe("success");
+  });
+
+  it("running 이던 fix step 은 멈추지 않고 이어간다(멱등 재연결은 fix-runner 책임)", async () => {
+    const fixSpy = vi.fn(async () => ({ success: true }));
+    const { engine, store } = buildEngine({ fixRunner: { runFix: fixSpy } });
+    const steps: MissionStep[] = [
+      { index: 0, type: "fix", onFailure: "escalate", status: "running" },
+    ];
+    const id = await store.createMission({
+      projectId: "p1",
+      goal: "broken thing",
+      templateId: "quick-fix",
+      status: "active",
+      ownerOrchestratorSessionId: "orch-1",
+      steps,
+      currentStepIndex: 0,
+      taskIds: [],
+      contextLog: [],
+    });
+
+    await engine.recoverInFlight(id);
+    // waiting_for_human 으로 멈추지 않는다 — 이어서 진행.
+    expect(store.raw(id)!.status).not.toBe("waiting_for_human");
+    // fix-runner 를 다시 호출(실제 구현은 기존 task 에 멱등 재연결).
+    await waitFor(() => fixSpy.mock.calls.length > 0, 2000);
+    expect(fixSpy).toHaveBeenCalled();
+  });
+
+  it("running 이던 dispatch step 은 기존 task 에 재연결하고 재dispatch 하지 않는다", async () => {
+    const { engine, store, spy, dispatcher } = buildEngine();
+    // 미션 task 가 이미 존재한다고 가정 — findMissionTaskIds 가 잡아낸다.
+    dispatcher.__setStatuses({
+      "t-m1-1": "IN_PROGRESS",
+      "t-m1-2": "IN_PROGRESS",
+    });
+    const steps: MissionStep[] = [
+      { index: 0, type: "dispatch", onFailure: "escalate", status: "running" },
+      { index: 1, type: "wait", onFailure: "escalate", status: "pending" },
+    ];
+    const id = await store.createMission({
+      projectId: "p1",
+      goal: "feature",
+      templateId: "feature",
+      status: "active",
+      ownerOrchestratorSessionId: "orch-1",
+      steps,
+      currentStepIndex: 0,
+      taskIds: [],
+      contextLog: [],
+    });
+
+    await engine.recoverInFlight(id);
+    // dispatch 는 재실행되지 않아야 한다(중복 방지) — dispatchTasks 호출 0.
+    expect(spy.dispatchCalls.length).toBe(0);
+    // 기존 task 가 mission.taskIds 에 재연결됨.
+    await waitFor(() => (store.raw(id)?.taskIds.length ?? 0) >= 2, 2000);
+    expect(store.raw(id)!.taskIds).toEqual(
+      expect.arrayContaining(["t-m1-1", "t-m1-2"]),
+    );
   });
 });
 

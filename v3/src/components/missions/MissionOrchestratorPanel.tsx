@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
 import OrchestratorTerminal from "../orchestrator/OrchestratorTerminal";
@@ -35,6 +35,8 @@ export function MissionOrchestratorPanel() {
 
   const api = window.electronAPI?.missionOrchestrator;
   const [restarting, setRestarting] = useState(false);
+  const [attention, setAttention] = useState(false);
+  const reconnectKeyRef = useRef<string | null>(null);
 
   // status listener — open 여부 관계없이 항상 부착 (state 보여주기용).
   useEffect(() => {
@@ -48,6 +50,60 @@ export function MissionOrchestratorPanel() {
       }
     };
   }, [api]);
+
+  // 부팅 / 탭 진입 시 직전 mission 세션이 있으면 자동 resume — board 오케스트레이터
+  // 와 동일한 무중단 재연결. 직전 세션이 없으면 spawn 하지 않는다 (미션 안 쓰는
+  // 프로젝트는 비용 0). open 여부와 무관하게 1회 수행.
+  useEffect(() => {
+    if (!api || !currentProject?.id || !rootPath) return;
+    const key = `${currentProject.id}:${rootPath}`;
+    if (reconnectKeyRef.current === key) return;
+    reconnectKeyRef.current = key;
+    const projectId = currentProject.id;
+    let cancelled = false;
+    (async () => {
+      try {
+        const existing = await api.getSession(projectId);
+        if (existing) {
+          if (!cancelled) {
+            setSession(existing);
+            setStatus(existing.status);
+          }
+          return;
+        }
+        const prior = await api.resolvePrevious(rootPath);
+        if (!prior || cancelled) return; // 이어갈 세션 없음 — 사용자가 직접 시작
+        const resumed = await api.start({ projectId, rootPath });
+        if (resumed && !cancelled) {
+          setSession(resumed);
+          setStatus(resumed.status);
+        }
+      } catch {
+        /* best-effort — 실패 시 사용자가 PTY 보기로 수동 시작 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, currentProject?.id, rootPath]);
+
+  // 미션이 사용자 개입을 요구하면 (waiting_for_human + notifyUser) PTY 패널을
+  // 자동으로 펼쳐 질문을 바로 보여준다. main 프로세스가 OS 알림도 별도 발사.
+  useEffect(() => {
+    if (!api?.onNeedsInput) return;
+    api.onNeedsInput((notice) => {
+      if (notice.projectId !== currentProject?.id) return;
+      setOpen(true);
+      setAttention(true);
+    });
+    return () => {
+      try {
+        api.removeNeedsInputListener?.();
+      } catch {
+        /* best-effort */
+      }
+    };
+  }, [api, currentProject?.id]);
 
   // Restart: stop + 짧은 대기 후 start. 비어있는 PTY 복구 / 세션 재시도용.
   const handleRestart = async () => {
@@ -116,7 +172,13 @@ export function MissionOrchestratorPanel() {
           : "bg-gray-500";
 
   return (
-    <div className="rounded-lg border border-gray-700 bg-gray-900/50">
+    <div
+      className={`rounded-lg border bg-gray-900/50 transition-colors ${
+        attention
+          ? "border-amber-500/70 ring-1 ring-amber-500/40"
+          : "border-gray-700"
+      }`}
+    >
       <div className="flex items-center justify-between px-3 py-1.5">
         <div className="flex items-center gap-2 text-xs">
           <span className={`h-2 w-2 rounded-full ${statusColor}`} />
@@ -124,6 +186,11 @@ export function MissionOrchestratorPanel() {
             Mission Orchestrator
           </span>
           <span className="text-gray-500">· {status}</span>
+          {attention && (
+            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+              🙋 입력 대기
+            </span>
+          )}
           {session?.sessionId && (
             <span
               title={session.sessionId}
@@ -148,7 +215,10 @@ export function MissionOrchestratorPanel() {
             {restarting ? "재시작 중..." : "🔄 Restart"}
           </button>
           <button
-            onClick={() => setOpen((v) => !v)}
+            onClick={() => {
+              setOpen((v) => !v);
+              setAttention(false);
+            }}
             disabled={!api}
             className="rounded border border-gray-700 px-2 py-0.5 text-gray-300 hover:bg-gray-800 disabled:opacity-40"
           >

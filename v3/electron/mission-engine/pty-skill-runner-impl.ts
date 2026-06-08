@@ -26,6 +26,23 @@ const DEFAULT_TIMEOUT_MS = 600_000; // 10 min
 const MAX_TIMEOUT_MS = 1_800_000; // 30 min
 const POST_COMMAND_GRACE_MS = 5_000;
 const QUIESCENCE_MS = 1_500;
+// 명령 주입 전 오케스트레이터가 idle prompt(readiness) 에 도달했는지 대기하는 한도.
+// 갓 launch 된 오케스트레이터는 MCP 로드 + 초기 프롬프트 처리에 수십 초 걸릴 수
+// 있어 넉넉히. 이 대기가 없으면 부팅 중 PTY 에 슬래시 명령을 흘려 유실 → 명령이
+// 실행되지 않았는데 idle footer 가 readiness 로 매칭되어 거짓 success → 미션이 한
+// 곳에서 멈추고 idle 잔해가 step.output 으로 흘러 티켓을 오염시킨다.
+const READY_WAIT_TIMEOUT_MS = 90_000;
+// readiness 를 본 뒤 이 시간만큼 추가 출력이 없으면 "idle 안정" 으로 판단.
+// warm 세션(이미 한 번 명령을 받은 PTY)용 짧은 quiet.
+const IDLE_QUIET_WARM_MS = 700;
+// 갓 launch 된 세션용 긴 quiet. OrchestratorManager 가 readiness 후 ~1.5초 뒤
+// 초기 프롬프트("You are the Marblo Orchestrator Agent...")를 주입하므로, 그보다
+// 짧게 기다리면 초기 프롬프트 주입 전에 ready 로 판단해 스킬 명령이 초기 프롬프트와
+// 충돌한다. 1.5초 + 초기 프롬프트 응답 처리까지 덮도록 넉넉히 잡아, fresh 세션에선
+// 초기 프롬프트 round-trip 이 끝나고 idle 로 안정된 뒤에야 주입한다.
+const IDLE_QUIET_FRESH_MS = 3_000;
+// chainPrelude ack 대기 한도.
+const CHAIN_ACK_TIMEOUT_MS = 8_000;
 // Claude Code 1.x / 2.x 의 idle prompt 신호.
 // 응답 마치고 입력창으로 돌아왔을 때 footer 또는 placeholder 가 다시 보인다.
 // 매칭은 ANSI strip 한 버퍼에서 수행.
@@ -83,10 +100,28 @@ function stripAnsi(s: string): string {
 // step.output 으로 저장될 때 사용자가 봤을 때 의미있는 LLM 응답만 남기기 위함.
 // 너무 공격적으로 자르면 LLM 응답까지 날아갈 수 있으니, 안전한 패턴만 매칭.
 const NOISE_LINE_PATTERNS: RegExp[] = [
-  /^\s*[⏵▶▸]+\s*bypass permissions on/i,
-  /^\s*[✢·*•⠁⠂⠄⡀⢀⠐⠈]+\s*(Shimmying|Cogitating|Pondering|Thinking|Working|Generating|Computing|Crafting|Forging|Synthesizing)/i,
-  /^\s*⎿\s*Tip:\s*Use \/statusline/i,
-  /^\s*─{10,}\s*$/, // 분리선
+  // claude 2.x footer — 화살표/box 문자 prefix 가 다양해서(⏵▶▸→❯ 또는 무접두)
+  // 줄 어디에 있든 "bypass permissions on" 이 보이면 노이즈로 본다.
+  /bypass permissions on/i,
+  /shift\s*\+?\s*tab to cycle/i,
+  /\besc(ape)? to interrupt\b/i,
+  // 스피너/진행 라인 — "✶ Sprouting… (4s · ↓129 tokens · thinking with xhigh effort)",
+  // "Baked for 4s", "✻ Thinking…" 등. token/effort/elapsed 마커가 강한 신호.
+  /thinking with \S+ effort/i,
+  /·\s*[↑↓]?\s*[\d.]+[km]?\s*tokens?/i, // "· ↓129 tokens", "· 1.2k tokens"
+  // NOTE: bare /\d+ tokens/ 패턴은 제거 — 위 스피너 패턴과 중복이고 "50 tokens 예산"
+  // 같은 정상 LLM 줄을 통째로 삭제하던 과매칭 위험이 있었다.
+  /\(\s*\d+s\s*·/i, // "(4s · ..." elapsed+token 헤더
+  // 스피너 글리프(브라유/✶✻… )로 시작하는 진행 라인만. ·*• 마크다운 불릿은
+  // 제외 — "* Updated X" / "• Removing Y" 같은 정상 불릿 결론을 오삭제하지 않도록.
+  /^\s*[✢⠁-⣿✶✻✽✦❀✺⏺]+\s*\w+(?:ing|ed)\b/i, // "✶ Sprouting", "❀ Baked"
+  /\bBaked for\b/i,
+  // 모바일 앱 / remote-control 안내 (claude 2.x tip).
+  /Control this session from the Claude mobile app/i,
+  /claude\.com\/download/i,
+  /\/remote-control\b/i,
+  /^\s*⎿\s*Tip:/i,
+  /^\s*─{6,}\s*$/, // 분리선
   /^\s*>\s*$/, // 빈 input prompt
   /^\s*\?\s*for shortcuts\s*$/i,
   /^\s*Type your message/i,
@@ -157,6 +192,45 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
   // 금지. 같은 projectId 에서 두 mission 이 동시에 step 실행 시도 시 두 번째는 대기.
   const activeByPty = new Map<string, ActiveRun>();
   const waitQueueByPty = new Map<string, Array<() => void>>();
+  // activeRun 과 무관하게 항상 갱신되는 최근 PTY 출력 + 마지막 데이터 시각.
+  // 명령 주입 전에 오케스트레이터가 idle prompt 에 도달했는지(waitForIdle) 판단하는
+  // 용도 — activeRun 의 buffer 는 run 이 set 된 뒤에만 채워지므로 별도 추적이 필요.
+  const idleStateByPty = new Map<string, { buf: string; lastDataAt: number }>();
+  // 이 PTY 에 명령을 한 번이라도 성공적으로 주입했는지. 첫 주입은 fresh quiet
+  // (초기 프롬프트 round-trip 을 덮는 긴 idle), 이후는 warm quiet 으로 빠르게.
+  const warmedPtyIds = new Set<string>();
+
+  function recordIdle(ptyId: string, data: string): void {
+    const st = idleStateByPty.get(ptyId) ?? { buf: "", lastDataAt: 0 };
+    st.buf = (st.buf + data).slice(-4000);
+    st.lastDataAt = Date.now();
+    idleStateByPty.set(ptyId, st);
+  }
+
+  // 오케스트레이터가 입력 prompt(readiness 패턴) 에 도달하고 최근 출력이 멎을
+  // (IDLE_QUIET_MS) 때까지 대기. timeout 시 false 를 반환하되 caller 는 그래도 진행
+  // (best-effort) — 영원히 막지 않는다.
+  function waitForIdle(
+    ptyId: string,
+    timeoutMs: number,
+    quietMs: number
+  ): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    return new Promise<boolean>((resolve) => {
+      const check = () => {
+        const st = idleStateByPty.get(ptyId);
+        const cleaned = st ? stripAnsi(st.buf) : "";
+        const ready = READINESS_PATTERNS.some((p) => p.test(cleaned));
+        const quietFor = st
+          ? Date.now() - st.lastDataAt
+          : Number.POSITIVE_INFINITY;
+        if (ready && quietFor >= quietMs) return resolve(true);
+        if (Date.now() > deadline) return resolve(false);
+        setTimeout(check, 150);
+      };
+      check();
+    });
+  }
 
   function emitProgress(run: ActiveRun, force = false): void {
     if (!run.onProgress) return;
@@ -175,7 +249,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
     ptyId: string,
     run: ActiveRun,
     success: boolean,
-    errLine?: string,
+    errLine?: string
   ): void {
     clearTimeout(run.timeoutTimer);
     if (run.quiescenceTimer) clearTimeout(run.quiescenceTimer);
@@ -189,12 +263,14 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
       ? detectUserInputRequest(outTail)
       : undefined;
     log(
-      `runSkill ${run.skill} ${success ? "ok" : "fail"}${userInputDetected ? " [user-input-detected]" : ""}`,
+      `runSkill ${run.skill} ${success ? "ok" : "fail"}${
+        userInputDetected ? " [user-input-detected]" : ""
+      }`,
       {
         missionId: run.missionId,
         durationMs,
         bufferLen: run.buffer.length,
-      },
+      }
     );
     run.resolve({
       success,
@@ -202,9 +278,9 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
         outTail.length > 0
           ? outTail
           : success
-            ? "(no output captured)"
-            : (errLine ?? "non-zero"),
-      error: success ? undefined : (errLine ?? "skill did not return cleanly"),
+          ? "(no output captured)"
+          : errLine ?? "non-zero",
+      error: success ? undefined : errLine ?? "skill did not return cleanly",
       durationMs,
       userInputDetected,
     });
@@ -220,6 +296,8 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
     if (attachedPtyIds.has(ptyId)) return;
     attachedPtyIds.add(ptyId);
     deps.ptyManager.onData(ptyId, (data: string) => {
+      // activeRun 유무와 무관하게 idle 추적은 항상 갱신 (waitForIdle 용).
+      recordIdle(ptyId, data);
       const run = activeByPty.get(ptyId);
       if (!run) return;
       const now = Date.now();
@@ -297,34 +375,45 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
       });
     }
 
+    // 명령 주입 전 오케스트레이터가 idle prompt 에 도달했는지 대기. 갓 launch 된
+    // 세션은 MCP 로드 + 초기 프롬프트("You are the Marblo Orchestrator Agent...")
+    // 처리 중이라, 여기서 기다리지 않고 슬래시 명령을 흘리면 부팅 출력에 섞여
+    // 유실되고 → 명령이 실행되지 않은 채 idle footer 가 readiness 로 매칭되어
+    // 거짓 success → 미션이 멈추고 idle 잔해가 step.output 을 오염시킨다. 이미
+    // idle 이면 즉시 반환되므로 warm 세션엔 사실상 무비용.
+    // 첫 주입은 fresh quiet(초기 프롬프트 round-trip 을 덮음), 이후는 warm.
+    const firstInject = !warmedPtyIds.has(ptyId);
+    const ready = await waitForIdle(
+      ptyId,
+      READY_WAIT_TIMEOUT_MS,
+      firstInject ? IDLE_QUIET_FRESH_MS : IDLE_QUIET_WARM_MS
+    );
+    warmedPtyIds.add(ptyId);
+    if (!ready) {
+      log("orchestrator not idle before inject — proceeding best-effort", {
+        missionId: input.missionId,
+        label: input.label,
+        ptyId,
+      });
+    }
+
     // chainPrelude — 메인 prompt 전에 컨텍스트 메시지 주입. claude 가 짧게 ack 한 후
-    // (readiness 패턴 + 짧은 quiescence) 다음 prompt 로 진행.
+    // (idle 로 복귀) 다음 prompt 로 진행.
     if (input.chainPrelude && input.chainPrelude.trim().length > 0) {
       try {
         deps.ptyManager.writeAndSubmit(ptyId, input.chainPrelude);
       } catch (e) {
         log("chainPrelude writeAndSubmit failed", { err: String(e) });
       }
-      // 5초까지 ack 대기 — claude 가 짧게 응답하고 idle 로 돌아오면 진행.
-      // (보통 1-3초). polling 으로 PTY 버퍼의 readiness 패턴 검사.
-      const chainAckDeadline = Date.now() + 5_000;
-      await new Promise<void>((res) => {
-        const check = () => {
-          if (Date.now() > chainAckDeadline) return res();
-          const cleaned = stripAnsi(
-            (activeByPty.get(ptyId)?.buffer ?? "").slice(-2000),
-          );
-          // activeRun 이 아직 없으면 attachListener 의 buffer 가 없음 → 그냥 대기.
-          if (READINESS_PATTERNS.some((p) => p.test(cleaned))) return res();
-          setTimeout(check, 200);
-        };
-        setTimeout(check, 800);
-      });
+      // ack 대기 — chainPrelude 주입 직후엔 곧장 readiness 가 남아있을 수 있어
+      // 짧게 텀을 둔 뒤 idle 안정을 본다 (warm quiet).
+      await new Promise<void>((r) => setTimeout(r, 400));
+      await waitForIdle(ptyId, CHAIN_ACK_TIMEOUT_MS, IDLE_QUIET_WARM_MS);
     }
 
     const timeoutMs = Math.min(
       Math.max(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, 10_000),
-      MAX_TIMEOUT_MS,
+      MAX_TIMEOUT_MS
     );
 
     return new Promise<SkillResult>((resolve) => {
@@ -358,7 +447,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
           ptyId,
           run,
           false,
-          `writeAndSubmit failed: ${e instanceof Error ? e.message : String(e)}`,
+          `writeAndSubmit failed: ${e instanceof Error ? e.message : String(e)}`
         );
       }
     });

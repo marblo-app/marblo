@@ -4,6 +4,9 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
+  query,
+  where,
   addDoc,
   Timestamp,
   type Firestore,
@@ -189,6 +192,27 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
     return out;
   }
 
+  // 미션에 이미 생성된 (비종료) task id 들. 앱 재시작 후 dispatch step 이 다시
+  // 돌 때, 새로 만들지 않고 이걸로 재연결해 중복 dispatch 를 막는다. missionId 는
+  // dispatch/fix 가 task 에 태깅하므로 단일 필드 쿼리(복합 인덱스 불필요).
+  async function findMissionTaskIds(missionId: string): Promise<string[]> {
+    await ready;
+    try {
+      const snap = await getDocs(
+        query(collection(db, "tasks"), where("missionId", "==", missionId)),
+      );
+      return snap.docs
+        .filter((d) => {
+          const s = (d.data() as { status?: string } | undefined)?.status;
+          return s !== "DONE" && s !== "FAILED";
+        })
+        .map((d) => d.id);
+    } catch (e) {
+      log("findMissionTaskIds failed", { missionId, err: String(e) });
+      return [];
+    }
+  }
+
   async function killAgentsForTasks(taskIds: string[]): Promise<void> {
     await ready;
     const seen = new Set<string>();
@@ -211,5 +235,10 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
     }
   }
 
-  return { dispatchTasks, getTaskStatuses, killAgentsForTasks };
+  return {
+    dispatchTasks,
+    getTaskStatuses,
+    findMissionTaskIds,
+    killAgentsForTasks,
+  };
 }

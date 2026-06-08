@@ -240,6 +240,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("missionOrchestrator:getSession", projectId),
     stop: (projectId: string) =>
       ipcRenderer.invoke("missionOrchestrator:stop", projectId),
+    // 직전 mission 오케스트레이터 세션 id (kind=mission) — 없으면 null. 부팅 시
+    // 자동 재연결(resume) 여부 판단용. board 의 resolvePrevious 와 동일 패턴.
+    resolvePrevious: (rootPath: string): Promise<string | null> =>
+      ipcRenderer.invoke("missionOrchestrator:resolvePrevious", rootPath),
     onStatusChange: (callback: (data: { status: string }) => void) => {
       ipcRenderer.on("missionOrchestrator:statusChanged", (_event, data) =>
         callback(data),
@@ -247,6 +251,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
     removeStatusListener: () => {
       ipcRenderer.removeAllListeners("missionOrchestrator:statusChanged");
+    },
+    // 미션이 사용자 개입을 요구할 때 (waiting_for_human + notifyUser) — 인앱
+    // 토스트 / 탭 attention dot 용. OS 알림은 main 프로세스가 별도 발사.
+    onNeedsInput: (
+      callback: (notice: {
+        missionId: string;
+        projectId: string;
+        goal: string;
+        kind: "pty_input_required" | "escalate";
+        question?: string;
+        skill?: string | null;
+      }) => void,
+    ) => {
+      ipcRenderer.on("mission:needsInput", (_event, notice) =>
+        callback(notice),
+      );
+    },
+    removeNeedsInputListener: () => {
+      ipcRenderer.removeAllListeners("mission:needsInput");
     },
   },
   orchestrator: {

@@ -57,6 +57,10 @@ export interface TaskDispatcher {
   // wait step: 현재 미션이 거느린 task 들의 상태를 일괄 조회.
   getTaskStatuses(taskIds: string[]): Promise<Record<string, TaskStatusLite>>;
 
+  // 미션에 이미 생성된 (비종료) task id 들. 앱 재시작 후 dispatch step 이 다시
+  // 실행될 때, 이미 만든 task 를 재연결하고 중복 dispatch 를 막는 멱등 복구용.
+  findMissionTaskIds(missionId: string): Promise<string[]>;
+
   // abandon: 진행 중 task 의 에이전트를 정리.
   killAgentsForTasks(taskIds: string[]): Promise<void>;
 }
@@ -159,6 +163,20 @@ export interface MissionEventBus {
   emit(event: MissionEngineEvent): void;
 }
 
+// 미션이 사용자 개입을 요구할 때 (waiting_for_human + notifyUser) 의 알림 페이로드.
+// gstack 스킬은 상호작용(AskUserQuestion 등) 이 잦아 PTY 패널을 안 보고 있으면
+// 미션이 멈춘 줄 모른다 → main.ts wiring 이 OS 알림 / 인앱 뱃지로 surface.
+export interface MissionNeedsInputNotice {
+  missionId: string;
+  projectId: string;
+  goal: string;
+  kind: "pty_input_required" | "escalate";
+  question?: string;
+  skill?: string | null;
+}
+
+export type MissionNotifier = (notice: MissionNeedsInputNotice) => void;
+
 export interface MissionEngineDeps {
   store: MissionStore;
   dispatcher: TaskDispatcher;
@@ -168,6 +186,8 @@ export interface MissionEngineDeps {
   orchestrators: OrchestratorRegistry;
   // D10 결정: retry default 2 회 (1-2회 후 알림 카드).
   maxRetries?: number;
+  // 미션이 사용자 개입을 요구할 때 호출 (OS 알림 / 인앱). 미지정 시 no-op.
+  notifier?: MissionNotifier;
   // 테스트 / 로깅용
   now?: () => Date;
   logger?: (msg: string, meta?: Record<string, unknown>) => void;

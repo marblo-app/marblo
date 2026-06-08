@@ -16,10 +16,16 @@ import type { OrchestratorRef, OrchestratorRegistry } from "./ports";
 export interface OrchestratorRegistryDeps {
   orchestrators: Map<string, OrchestratorManager>;
   createInstance: (projectId: string) => OrchestratorManager;
+  // main.ts 가 제공하는 단일 launch 경로. 있으면 ensureSession 은 직접 launch
+  // 하지 않고 이걸 호출한다 — forwarding(PTY 출력 → renderer) + kind 별 resume +
+  // rootPath 해석이 모두 여기에 모여 있어, 엔진이 패널보다 먼저 오케스트레이터를
+  // 띄워도 PTY 패널이 빈 화면이 되지 않는다. 미지정 시 아래 자체 launch fallback
+  // (forwarding 없음 — 주로 테스트용).
+  ensureLaunched?: (projectId: string) => OrchestratorManager;
   ptyManager: PtyManager;
   bridgePort: () => number;
-  // launch 시 cwd — Step 5b 단계에선 projectRoot env 만 활용. 정식 구현은
-  // renderer 에서 받은 rootPath 를 전달.
+  // launch 시 cwd — fallback 경로에서만 사용. 정식 구현은 ensureLaunched 가
+  // renderer/appState 기반 rootPath 를 해석.
   defaultRootPath?: string;
 }
 
@@ -50,6 +56,21 @@ export function createOrchestratorRegistry(
     missionId: string;
     projectId: string;
   }): Promise<OrchestratorRef> {
+    // 정식 경로: main.ts 의 단일 launch 헬퍼. forwarding + resume + rootPath 를
+    // 책임지고 살아있는 manager 를 반환한다.
+    if (deps.ensureLaunched) {
+      const manager = deps.ensureLaunched(input.projectId);
+      const session = manager.getSession();
+      if (!session) {
+        throw new Error(
+          `mission orchestrator failed to launch (project=${input.projectId})`,
+        );
+      }
+      return Promise.resolve(refFor(session.sessionId, manager));
+    }
+
+    // Fallback (테스트 / ensureLaunched 미주입): 직접 launch. forwarding 이 없어
+    // PTY 출력이 renderer 로 가지 않지만, 엔진 로직 자체는 동작한다.
     let manager = deps.orchestrators.get(input.projectId);
     if (!manager) {
       manager = deps.createInstance(input.projectId);
@@ -58,7 +79,6 @@ export function createOrchestratorRegistry(
 
     let session = manager.getSession();
     if (!manager.isRunning() || !session) {
-      // 살아있지 않으면 launch. rootPath 는 env 또는 default 사용.
       const rootPath =
         deps.defaultRootPath ??
         process.env.MARBLO_PROJECT_ROOT ??

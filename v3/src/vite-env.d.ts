@@ -212,8 +212,20 @@ interface MissionOrchestratorAPI {
     status: string;
   } | null>;
   stop: (projectId: string) => Promise<void>;
+  resolvePrevious: (rootPath: string) => Promise<string | null>;
   onStatusChange: (callback: (data: { status: string }) => void) => void;
   removeStatusListener: () => void;
+  onNeedsInput: (
+    callback: (notice: {
+      missionId: string;
+      projectId: string;
+      goal: string;
+      kind: "pty_input_required" | "escalate";
+      question?: string;
+      skill?: string | null;
+    }) => void,
+  ) => void;
+  removeNeedsInputListener: () => void;
 }
 
 interface OrchestratorSessionAPI {

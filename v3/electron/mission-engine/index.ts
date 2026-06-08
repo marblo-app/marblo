@@ -34,8 +34,8 @@ export class MissionEngine {
       ((m, meta) => console.log(`[MissionEngine] ${m}`, meta ?? ""));
     this.unsubscribe = deps.eventBus.on((event) =>
       this.onEvent(event).catch((err) =>
-        this.log("event handler error", { err: String(err), event }),
-      ),
+        this.log("event handler error", { err: String(err), event })
+      )
     );
   }
 
@@ -85,7 +85,7 @@ export class MissionEngine {
     const mission = await this.requireMission(missionId);
     if (isTerminalMission(mission.status)) {
       throw new Error(
-        `Cannot resume terminal mission ${missionId} (status=${mission.status})`,
+        `Cannot resume terminal mission ${missionId} (status=${mission.status})`
       );
     }
     // planning: UI 에서 직접 doc 만 만든 미션을 engine 이 인계받는 경로.
@@ -103,6 +103,103 @@ export class MissionEngine {
       });
     }
     this.scheduleAdvance(missionId);
+  }
+
+  /**
+   * 앱 재시작 후 in-flight (active / sleeping) 미션을 끊김없이 이어 진행한다.
+   * 엔진은 부팅 시 in-memory 상태가 없으므로, Firestore 에 status="running" 으로
+   * 남은 step 은 "직전 실행 중 크래시" 를 의미한다. 멈추지 않고 이어가되, 이미 만든
+   * task 가 있으면 재연결해 중복 생성을 막는다(멱등 복구). step type 별:
+   *   - gstack: 오케스트레이터 세션은 resume 으로 컨텍스트가 이어지므로 "pending"
+   *     으로 되돌려 같은 세션에서 재실행.
+   *   - dispatch: 이미 만든 task 가 있으면(findMissionTaskIds) taskIds 에 재연결 +
+   *     step 을 success 로 마감(중복 dispatch 방지). 없으면 깨끗이 재실행.
+   *   - fix: fix-runner 자체가 멱등(기존 task 재연결)이라 그대로 재실행 → 재연결.
+   *   - wait: taskIds 폴링만 하므로 그대로 재개(안전).
+   * 정말로 한 곳에서 멈추면 미션은 active 로 남아, 사용자가 PTY 패널에서 직접
+   * 이어가거나 Resume 으로 개입할 수 있다(human-in-the-loop fallback 유지).
+   */
+  // 사용자가 명시적으로 ⏸️Pause 한 미션과 wait-step 대기(sleeping) 를 구분한다.
+  // 둘 다 status="sleeping" 으로 저장되므로(pause()/wait 모두 transition→"sleeping"),
+  // 마지막 paused/resumed timeline 이벤트의 kind 로 판별한다. paused_by_user 면
+  // 앱 재시작 시 자동 복구하지 않는다(유저 의도 보존).
+  private isPausedByUser(mission: Mission): boolean {
+    for (let i = mission.contextLog.length - 1; i >= 0; i--) {
+      const ev = mission.contextLog[i];
+      if (ev.type === "mission.resumed") return false;
+      if (ev.type === "mission.paused") {
+        return ev.payload?.kind === "paused_by_user";
+      }
+    }
+    return false;
+  }
+
+  async recoverInFlight(missionId: string): Promise<void> {
+    const mission = await this.requireMission(missionId);
+    if (isTerminalMission(mission.status)) return;
+    // 유저가 일시정지한 미션은 자동 재개 금지 — wait-step sleeping 만 복구한다.
+    if (mission.status === "sleeping" && this.isPausedByUser(mission)) {
+      this.log("recover: skipping user-paused mission", { missionId });
+      return;
+    }
+    const idx = mission.currentStepIndex;
+    const step = mission.steps[idx];
+    if (step && step.status === "running") {
+      if (step.type === "dispatch") {
+        // 이미 dispatch 된 task 가 있으면 재연결 (중복 dispatch 방지).
+        const existing = await this.deps.dispatcher.findMissionTaskIds(
+          mission.id
+        );
+        if (existing.length > 0) {
+          const merged = Array.from(new Set([...mission.taskIds, ...existing]));
+          await this.deps.store.updateMission(mission.id, {
+            taskIds: merged,
+          });
+          await this.deps.store.updateMissionStep(mission.id, idx, {
+            status: "success",
+            completedAt: this.now(),
+            liveOutput: undefined,
+            error: undefined,
+          });
+          await this.deps.store.appendTimelineEvent(mission.id, {
+            ts: this.now(),
+            type: "mission.resumed",
+            payload: {
+              message: `recovered: reconnected to ${existing.length} dispatched task(s)`,
+              stepIndex: idx,
+            },
+          });
+          this.log("recover: reconnected dispatch step to existing tasks", {
+            missionId,
+            stepIndex: idx,
+            taskCount: existing.length,
+          });
+        } else {
+          await this.deps.store.updateMissionStep(mission.id, idx, {
+            status: "pending",
+            startedAt: undefined,
+            error: undefined,
+          });
+        }
+      } else {
+        // gstack / fix: pending 으로 되돌려 재실행. fix-runner 는 멱등 재연결,
+        // gstack 은 resume 된 오케스트레이터 세션에서 같은 컨텍스트로 재실행.
+        await this.deps.store.updateMissionStep(mission.id, idx, {
+          status: "pending",
+          startedAt: undefined,
+          liveOutput: undefined,
+          error: undefined,
+        });
+        this.log("recover: reset running step → pending (idempotent re-run)", {
+          missionId,
+          stepIndex: idx,
+          stepType: step.type,
+          skill: step.skill ?? null,
+        });
+      }
+      // wait: 그대로 두고 resume → runWait 가 기존 taskIds 를 재폴링(안전).
+    }
+    await this.resume(missionId);
   }
 
   async abandon(missionId: string, reason?: string): Promise<void> {
@@ -236,7 +333,7 @@ export class MissionEngine {
             err: String(err),
             missionId: mission.id,
             stepIndex: step.index,
-          }),
+          })
         );
     };
 
@@ -254,7 +351,9 @@ export class MissionEngine {
         const outTail = (prev.output as string).slice(-2000);
         if (step.type === "gstack") {
           chainPrelude =
-            `[Marblo Mission] 이전 step \`${prev.skill ?? prev.type}\` 결과 요약입니다.` +
+            `[Marblo Mission] 이전 step \`${
+              prev.skill ?? prev.type
+            }\` 결과 요약입니다.` +
             ` 다음 작업은 이 결과를 반영해서 진행해주세요. (긴 메시지는 한 줄로 ack 만 해도 OK.)\n\n` +
             `--- 직전 step 결과 (마지막 2000자) ---\n${outTail}\n--- end ---`;
         } else {
@@ -320,7 +419,7 @@ export class MissionEngine {
         mission,
         step.index,
         result.output,
-        result.userInputDetected,
+        result.userInputDetected
       );
     }
     return this.handleFailure(mission, step.index, result.error);
@@ -330,7 +429,7 @@ export class MissionEngine {
     mission: Mission,
     stepIndex: number,
     output: unknown,
-    userInputDetected?: string,
+    userInputDetected?: string
   ): Promise<boolean> {
     const completedAt = this.now();
     const step = mission.steps[stepIndex];
@@ -367,6 +466,15 @@ export class MissionEngine {
           notifyUser: true,
         },
       });
+      // 능동 알림 — 사용자가 PTY 패널을 안 보고 있어도 미션이 답을 기다리는 걸 안다.
+      this.deps.notifier?.({
+        missionId: mission.id,
+        projectId: mission.projectId,
+        goal: mission.goal,
+        kind: "pty_input_required",
+        question: userInputDetected,
+        skill: step.skill ?? null,
+      });
       // currentStepIndex 는 advance 안 함 — Resume 후 같은 위치에서 시작.
       // 다음 step 으로 가야 하므로 advance 는 하되 mission 만 멈춤.
       const fresh = await this.requireMission(mission.id);
@@ -399,7 +507,7 @@ export class MissionEngine {
   private async handleFailure(
     mission: Mission,
     stepIndex: number,
-    error: string | undefined,
+    error: string | undefined
   ): Promise<boolean> {
     const step = mission.steps[stepIndex];
     const policy = step.onFailure ?? "retry";
@@ -465,6 +573,15 @@ export class MissionEngine {
         notifyUser: true,
       },
     });
+    // 능동 알림 — step 실패로 미션이 사용자 확인을 기다린다.
+    this.deps.notifier?.({
+      missionId: mission.id,
+      projectId: mission.projectId,
+      goal: mission.goal,
+      kind: "escalate",
+      question: error ? `단계 실패: ${error}` : undefined,
+      skill: mission.steps[stepIndex]?.skill ?? null,
+    });
     await this.transition(mission, "waiting_for_human");
     return false;
   }
@@ -483,7 +600,10 @@ export class MissionEngine {
           .replace(/\s+/g, "-")
           .slice(0, 40)
           .replace(/-+$/, "");
-        const folder = `docs/missions/${slug || "mission"}-${mission.id.slice(0, 6)}`;
+        const folder = `docs/missions/${slug || "mission"}-${mission.id.slice(
+          0,
+          6
+        )}`;
         const summaryPath = `${folder}/SUMMARY.md`;
         const stepsSummary = mission.steps
           .filter((s) => s.status === "success" || s.status === "failed")
@@ -495,7 +615,9 @@ export class MissionEngine {
               `- Step ${s.index + 1} (${s.skill ?? s.type}): ${s.status}\n` +
               `  → 저장 경로: ${stepPath}\n` +
               (typeof s.output === "string"
-                ? `  output (마지막 1200자):\n${(s.output as string).slice(-1200)}\n`
+                ? `  output (마지막 1200자):\n${(s.output as string).slice(
+                    -1200
+                  )}\n`
                 : "")
             );
           })
@@ -554,8 +676,8 @@ export class MissionEngine {
         message: synthesisPath
           ? `Mission completed · 종합 보고서: ${synthesisPath}`
           : synthesisNote
-            ? "Mission completed · 종합 보고서 작성됨 (파일 경로 미확인)"
-            : "Mission completed",
+          ? "Mission completed · 종합 보고서 작성됨 (파일 경로 미확인)"
+          : "Mission completed",
         templateLabel: MISSION_TEMPLATES[mission.templateId]?.label,
         synthesisPath: synthesisPath ?? null,
         // 파일 읽기 없이도 Firestore 만으로 보고서 미리보기 가능하도록 4000자 보관.
@@ -567,7 +689,7 @@ export class MissionEngine {
   private async transition(
     mission: Mission,
     next: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string },
+    extras?: { completedAt?: Date; abandonedReason?: string }
   ): Promise<void> {
     if (mission.status === next) return;
     assertMissionTransition(mission.status, next);
@@ -626,6 +748,8 @@ export type {
   OrchestratorRegistry,
   MissionEventBus,
   MissionEventHandler,
+  MissionNeedsInputNotice,
+  MissionNotifier,
 } from "./ports";
 export { ALLOWED_SKILLS, isAllowedSkill } from "./types";
 export type {
