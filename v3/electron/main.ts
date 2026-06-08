@@ -697,6 +697,17 @@ function getDecomposer(): TaskDecomposer {
 const missionOrchestrators = new Map<string, OrchestratorManager>();
 const missionOrchestratorOwners = new Map<string, number>(); // projectId → webContents.id
 
+// Mission orchestrator lookup — lets /notify-orchestrator route mission-context
+// task notifications (contextId=missionId) to the per-project MISSION
+// orchestrator instead of the board one, so mission progress stays out of the
+// board orchestrator PTY. `missionOrchestrators` is populated lazily by
+// ensureMissionOrchestratorLaunched / missionOrchestrator:start; until a mission
+// orchestrator exists this returns null and the bridge drops the mission
+// notification (never falls back to the board orch).
+bridgeServer.setMissionOrchestratorLookup(
+  (projectId: string) => missionOrchestrators.get(projectId) ?? null,
+);
+
 function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
   const roots: WorktreeProjectRoot[] = [];
   const addRoot = (

@@ -33,6 +33,30 @@ interface ActiveMissionRow {
   missionId: string;
   projectId: string;
   status: string;
+  // 유저가 ⏸️ Pause 한 미션인가 (마지막 paused/resumed timeline 이벤트로 판별).
+  // true 면 task.status_changed wakeup 신호를 발행하지 않는다 — engine.onEvent
+  // 가드와 동일 의도의 이중 방어(발원지에서 차단).
+  pausedByUser: boolean;
+}
+
+/**
+ * mission doc 의 contextLog 를 뒤에서부터 훑어 "유저가 명시적으로 Pause 했는가" 판정.
+ * engine/index.ts 의 isPausedByUser 와 동일한 규칙: 가장 가까운 mission.resumed 면
+ * 재개됨(false), mission.paused(kind="paused_by_user") 면 일시정지(true).
+ * wait-step sleeping(kind="sleeping") / abandoned 는 paused_by_user 아님.
+ */
+export function isMissionPausedByUser(data: Record<string, unknown>): boolean {
+  const log = data.contextLog;
+  if (!Array.isArray(log)) return false;
+  for (let i = log.length - 1; i >= 0; i--) {
+    const ev = log[i] as { type?: string; payload?: { kind?: string } } | null;
+    if (!ev || typeof ev.type !== "string") continue;
+    if (ev.type === "mission.resumed") return false;
+    if (ev.type === "mission.paused") {
+      return ev.payload?.kind === "paused_by_user";
+    }
+  }
+  return false;
 }
 
 export interface MissionEventForwarderDeps {
@@ -71,12 +95,12 @@ export class MissionEventForwarder {
 
     const q = query(
       collection(this.db, "missions"),
-      where("status", "in", ACTIVE_STATUSES)
+      where("status", "in", ACTIVE_STATUSES),
     );
     this.missionsUnsub = onSnapshot(
       q,
       (snap) => this.handleMissionsSnapshot(snap.docs),
-      (err) => this.log("missions subscribe error", { err: String(err) })
+      (err) => this.log("missions subscribe error", { err: String(err) }),
     );
     this.log("started");
   }
@@ -108,7 +132,7 @@ export class MissionEventForwarder {
     docs: ReadonlyArray<{
       id: string;
       data(): Record<string, unknown>;
-    }>
+    }>,
   ): void {
     const next = new Map<string, ActiveMissionRow>();
     const projectsNeeded = new Set<string>();
@@ -117,7 +141,12 @@ export class MissionEventForwarder {
       const projectId = String(data.projectId ?? "");
       const status = String(data.status ?? "");
       if (!projectId || !status) continue;
-      next.set(d.id, { missionId: d.id, projectId, status });
+      next.set(d.id, {
+        missionId: d.id,
+        projectId,
+        status,
+        pausedByUser: status === "sleeping" && isMissionPausedByUser(data),
+      });
       projectsNeeded.add(projectId);
     }
     this.activeMissions = next;
@@ -144,7 +173,7 @@ export class MissionEventForwarder {
   private subscribeTasksForProject(projectId: string): void {
     const q = query(
       collection(this.db, "tasks"),
-      where("projectId", "==", projectId)
+      where("projectId", "==", projectId),
     );
     const unsub = onSnapshot(
       q,
@@ -157,12 +186,17 @@ export class MissionEventForwarder {
           const data = change.doc.data();
           const missionId = data.missionId as string | undefined;
           if (!missionId) continue;
-          if (!this.activeMissions.has(missionId)) continue;
+          const row = this.activeMissions.get(missionId);
+          if (!row) continue;
           const status = String(data.status ?? "");
           if (!status) continue;
           const prev = this.lastTaskStatus.get(change.doc.id);
           this.lastTaskStatus.set(change.doc.id, status);
           if (prev === status) continue; // no actual change
+          // 이중 방어: 유저가 ⏸️ Pause 한 미션은 task 변화로 깨우지 않는다.
+          // lastTaskStatus 는 위에서 갱신해 두므로, 나중에 Resume 되면 그 사이
+          // 쌓인 변화가 중복 재발행되지 않는다(다음 실제 변화부터 정상 forward).
+          if (row.pausedByUser) continue;
 
           this.eventBus.emit({
             type: "task.status_changed",
@@ -176,7 +210,7 @@ export class MissionEventForwarder {
         }
       },
       (err) =>
-        this.log("tasks subscribe error", { projectId, err: String(err) })
+        this.log("tasks subscribe error", { projectId, err: String(err) }),
     );
     this.tasksUnsubs.set(projectId, unsub);
     this.log("subscribed tasks for project", { projectId });

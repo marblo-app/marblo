@@ -153,4 +153,43 @@ export async function applyProjection(db, taskId, mut) {
         }
     });
 }
+/**
+ * 후행 task(`dependentId`)의 모든 선행 의존이 DONE 이면 `dependsOnCompleted` 를
+ * 트랜잭션 안에서 멱등하게 true 로 flip 한다. `completedTaskId` 는 이 해소를
+ * 촉발한(=방금 DONE 된) 선행 task 로, DONE 으로 간주해 재조회를 생략한다.
+ *
+ * 반환 `unblocked` 는 "이 호출이 실제로 flip 을 수행했는가" 이다 — 동시 완료
+ * race 에서 단 하나의 호출만 true 를 받으므로 호출부의 notify 가 중복되지 않는다.
+ */
+export async function resolveDependentIfReady(db, dependentId, completedTaskId) {
+    return runTransaction(db, async (txn) => {
+        const depRef = doc(db, "tasks", dependentId);
+        const depSnap = await txn.get(depRef);
+        if (!depSnap.exists())
+            return { unblocked: false };
+        const depData = depSnap.data();
+        // 멱등 가드: 이미 누군가(동시 완료 race 의 승자) 풀었으면 재-notify 금지.
+        if (depData.dependsOnCompleted)
+            return { unblocked: false };
+        // 모든 선행 의존이 DONE 인지 같은 트랜잭션 스냅샷으로 확인.
+        // (Firestore 규칙상 모든 read 는 첫 write 이전 — 아래 txn.update 는 루프 뒤.)
+        const allDeps = depData.dependsOn ?? [];
+        for (const depId of allDeps) {
+            // 방금 이 해소를 촉발한 선행은 DONE 으로 간주(트리거 그 자체).
+            if (depId === completedTaskId)
+                continue;
+            const upstream = await txn.get(doc(db, "tasks", depId));
+            if (!upstream.exists() ||
+                upstream.data().status !== "DONE") {
+                return { unblocked: false };
+            }
+        }
+        // 여기 도달한 트랜잭션만 단독 승자 — 멱등하게 true 로 flip.
+        txn.update(depRef, {
+            dependsOnCompleted: true,
+            updatedAt: Timestamp.now(),
+        });
+        return { unblocked: true, title: depData.title, role: depData.role };
+    });
+}
 //# sourceMappingURL=projection.js.map

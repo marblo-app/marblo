@@ -2,7 +2,7 @@ import { z } from "zod";
 import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, Timestamp, } from "firebase/firestore";
 import { db } from "./firebase.js";
 import { resolveContextForWrite, contextReadFilter } from "./context.js";
-import { applyProjection } from "./projection.js";
+import { applyProjection, resolveDependentIfReady, } from "./projection.js";
 import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -30,8 +30,17 @@ const SKILLS_DIR = process.env.MARBLO_SKILLS_DIR ||
 /**
  * Send a notification to the orchestrator via the bridge server.
  * Fire-and-forget — errors are silently ignored.
+ *
+ * `contextId` scopes the notification to the right orchestrator (Quick Lanes
+ * 눈/브레인 분리). The board orchestrator only owns context="board" tasks;
+ * mission tasks carry contextId=missionId. Without this, every mission task's
+ * status/activity/review notification was routed to the board orchestrator
+ * (the only one the bridge's projectId lookup knew), flooding the main orch
+ * PTY with mission progress. The bridge uses contextId to route mission-context
+ * notifications to the mission orchestrator instead (and drop them from board).
+ * Empty/"board" stays on the board orchestrator (unchanged behavior).
  */
-function notifyOrchestrator(message) {
+function notifyOrchestrator(message, contextId) {
     const bridgePort = process.env.MARBLO_BRIDGE_PORT;
     if (!bridgePort)
         return;
@@ -43,7 +52,7 @@ function notifyOrchestrator(message) {
     fetch(`http://127.0.0.1:${bridgePort}/notify-orchestrator`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, projectId }),
+        body: JSON.stringify({ message, projectId, contextId: contextId ?? "" }),
     }).catch(() => {
         /* best-effort */
     });
@@ -509,44 +518,41 @@ export function registerTools(server) {
         }
         // Notify orchestrator about status change
         const commentNote = comment ? ` — ${comment}` : "";
-        notifyOrchestrator(`[Task Update] "${task.title}" ${task.status} → ${newStatus} (role=${task.role}, id=${task_id})${commentNote}`);
-        // ── Inline dependency resolution ──
-        // When a task completes, check all tasks that depend on it
-        // and mark them ready if ALL their deps are now DONE.
+        notifyOrchestrator(`[Task Update] "${task.title}" ${task.status} → ${newStatus} (role=${task.role}, id=${task_id})${commentNote}`, task.contextId);
+        // ── Inline dependency resolution (atomic, idempotent — N4) ──
+        // When a task completes, resolve every task that depends on it. The
+        // per-dependent flip (dependsOnCompleted -> true) runs inside a
+        // transaction (resolveDependentIfReady) that re-checks the flag and all
+        // upstream statuses atomically, so two dependencies completing
+        // concurrently cannot both observe a stale false and double-notify the
+        // orchestrator (-> duplicate dispatch of the same task). Each dependent
+        // is isolated in its own try/catch so one transient failure does not
+        // strand the rest. notify fires only for the transaction that actually
+        // performed the flip -> exactly once per unblocked task.
         let unblocked = 0;
         if (newStatus === "DONE") {
+            let depDocs = [];
             try {
                 const depQ = query(collection(db, "tasks"), where("dependsOn", "array-contains", task_id));
-                const depSnap = await getDocs(depQ);
-                for (const depDoc of depSnap.docs) {
-                    const depData = depDoc.data();
-                    if (depData.dependsOnCompleted)
-                        continue; // already resolved
-                    // Check if ALL dependencies are now DONE
-                    const allDeps = depData.dependsOn ?? [];
-                    let allMet = true;
-                    for (const depId of allDeps) {
-                        if (depId === task_id)
-                            continue; // we know this one is DONE
-                        const depTask = await fetchTask(depId);
-                        if (!depTask || depTask.status !== "DONE") {
-                            allMet = false;
-                            break;
-                        }
-                    }
-                    if (allMet) {
-                        await updateDoc(doc(db, "tasks", depDoc.id), {
-                            dependsOnCompleted: true,
-                            updatedAt: Timestamp.now(),
-                        });
-                        unblocked++;
-                        // Notify orchestrator about newly unblocked task
-                        notifyOrchestrator(`[Dependency Resolved] "${depData.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${depData.role})`);
-                    }
-                }
+                depDocs = (await getDocs(depQ)).docs;
             }
             catch (err) {
-                console.error("[MCP] Dependency resolution error:", err);
+                console.error("[MCP] Dependency query error:", err);
+            }
+            for (const depDoc of depDocs) {
+                try {
+                    const res = await resolveDependentIfReady(db, depDoc.id, task_id);
+                    if (res.unblocked) {
+                        unblocked++;
+                        // Notify orchestrator about newly unblocked task. Scope to the
+                        // completed task's context — a mission's dependents share its
+                        // contextId, so this routes to the same (mission/board) orch.
+                        notifyOrchestrator(`[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`, task.contextId);
+                    }
+                }
+                catch (err) {
+                    console.error(`[MCP] Dependency resolution error for ${depDoc.id}:`, err);
+                }
             }
         }
         const unblockedNote = unblocked > 0 ? ` Unblocked ${unblocked} dependent task(s).` : "";
@@ -574,7 +580,7 @@ export function registerTools(server) {
             activityPayload: { agentId: resolvedAgentId, message },
         });
         const preview = message.length > 300 ? `${message.slice(0, 300)}...` : message;
-        notifyOrchestrator(`[Task Activity] "${task.title}" progress update (role=${task.role}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`);
+        notifyOrchestrator(`[Task Activity] "${task.title}" progress update (role=${task.role}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`, task.contextId);
         return text(`Activity logged: ${message}`);
     });
     // 8. submit_for_review
@@ -627,7 +633,7 @@ export function registerTools(server) {
         }
         // Notify orchestrator about review submission
         const prNote = pr_url ? ` PR: ${pr_url}` : "";
-        notifyOrchestrator(`[Review Submitted] "${task.title}" is ready for review (role=${task.role}, id=${task_id})${prNote}`);
+        notifyOrchestrator(`[Review Submitted] "${task.title}" is ready for review (role=${task.role}, id=${task_id})${prNote}`, task.contextId);
         return text(`Task '${task.title}' submitted for review. Status: REVIEW`);
     });
     // 9. get_task_dependencies

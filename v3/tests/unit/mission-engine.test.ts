@@ -11,6 +11,7 @@ import {
   instantiateSteps,
   listTemplates,
 } from "../../electron/mission-engine";
+import { isMissionPausedByUser } from "../../electron/mission-engine/event-forwarder";
 import type {
   Mission,
   MissionStatus,
@@ -628,6 +629,199 @@ describe("manual pause / wake", () => {
     // terminal 에서 pause 호출은 no-op
     await engine.pause(m.id);
     expect(store.raw(m.id)!.status).toBe("completed");
+  });
+});
+
+// ──────────── scenario 2b: onEvent honors user pause (HIGH-1) ────────────
+
+describe("onEvent — user-paused mission is not woken by task/agent events", () => {
+  function makePausedSleepingMission(
+    store: InMemoryStore,
+    pausedByUser: boolean,
+  ): Promise<string> {
+    const steps: MissionStep[] = [
+      {
+        index: 0,
+        type: "gstack",
+        skill: "/review",
+        onFailure: "escalate",
+        status: "pending",
+      },
+    ];
+    return store.createMission({
+      projectId: "p1",
+      goal: "paused work",
+      templateId: "polish",
+      status: "sleeping",
+      ownerOrchestratorSessionId: "sess-p1",
+      steps,
+      currentStepIndex: 0,
+      taskIds: ["t1"],
+      contextLog: [
+        {
+          ts: new Date(),
+          type: "mission.paused",
+          payload: { kind: pausedByUser ? "paused_by_user" : "sleeping" },
+        },
+      ],
+    });
+  }
+
+  it("paused_by_user sleeping 미션은 task.status_changed / agent idle 로 안 깨어난다", async () => {
+    const { store, bus } = buildEngine();
+    const id = await makePausedSleepingMission(store, true);
+
+    // event-forwarder(task.status_changed) + forwardAgentStatus(agent.completed)
+    // 양쪽 신호를 모사. 둘 다 무시되어야 한다.
+    bus.emit({
+      type: "task.status_changed",
+      missionId: id,
+      payload: { taskId: "t1", from: "IN_PROGRESS", to: "DONE" },
+    });
+    bus.emit({
+      type: "agent.completed",
+      missionId: id,
+      payload: { agentId: "a1", status: "idle" },
+    });
+
+    // 잠깐 기다려도 sleeping 유지 (깨어났다면 active → 진행했을 것).
+    await new Promise((r) => setTimeout(r, 120));
+    const m = store.raw(id)!;
+    expect(m.status).toBe("sleeping");
+    // 진행 안 됨 — step 은 여전히 pending.
+    expect(m.steps[0].status).toBe("pending");
+    // 무시된 이벤트는 paused 미션 timeline 을 오염시키지 않는다 (append 전 return).
+    expect(m.contextLog.some((e) => e.type === "agent.completed")).toBe(false);
+  });
+
+  it("wait-step sleeping(비 유저-pause) 미션은 정상적으로 깨어나 진행한다", async () => {
+    const { store, bus } = buildEngine();
+    const id = await makePausedSleepingMission(store, false);
+
+    bus.emit({
+      type: "task.status_changed",
+      missionId: id,
+      payload: { taskId: "t1", from: "IN_PROGRESS", to: "DONE" },
+    });
+
+    // 깨어나서 gstack /review (fake runner 성공) 실행 → 끝까지 진행 → completed.
+    await waitFor(() => store.raw(id)?.status === "completed", 2000);
+    expect(store.raw(id)!.status).toBe("completed");
+  });
+});
+
+// ──────── scenario 3b: pause/abandon notifies mission orchestrator ────────
+
+describe("pause/abandon — bracketed-paste-safe orchestrator notification", () => {
+  async function activeMissionWithOrch(): Promise<{
+    engine: MissionEngine;
+    store: InMemoryStore;
+    spy: DispatchSpy;
+    orch: OrchestratorRegistry;
+    id: string;
+  }> {
+    const orch = makeOrchRegistry();
+    const { engine, store, spy } = buildEngine({ orchestrators: orch });
+    const id = await store.createMission({
+      projectId: "p1",
+      goal: "live mission",
+      templateId: "polish",
+      status: "active",
+      ownerOrchestratorSessionId: "sess-p1",
+      steps: instantiateSteps("polish"),
+      currentStepIndex: 0,
+      taskIds: ["t1"],
+      contextLog: [],
+    });
+    // owner orchestrator 세션을 살려둔다 (sessionId = sess-p1).
+    await orch.ensureSession({ missionId: id, projectId: "p1" });
+    return { engine, store, spy, orch, id };
+  }
+
+  it("pause 시 owner orchestrator 에 멀티라인 안내를 postMessage(=bracketed paste)로 1회 보낸다", async () => {
+    const { engine, store, orch, id } = await activeMissionWithOrch();
+    await engine.pause(id);
+
+    expect(store.raw(id)!.status).toBe("sleeping");
+    const ref = orch.getSession("sess-p1")!;
+    const postMessage = ref.postMessage as ReturnType<typeof vi.fn>;
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    const sent = postMessage.mock.calls[0][0] as string;
+    // 멀티라인 — 이 경우가 raw write 면 깨지는 케이스. postMessage→writeAndSubmit 가
+    // bracketed-paste 로 감싸 한 메시지로 제출하므로 안전.
+    expect(sent).toContain("\n");
+    expect(sent).toContain("일시정지");
+  });
+
+  it("abandon 시 owner orchestrator 에 안내를 보내고 agent 를 kill 한다", async () => {
+    const { engine, store, spy, orch, id } = await activeMissionWithOrch();
+    await engine.abandon(id, "user_cancelled");
+
+    expect(store.raw(id)!.status).toBe("abandoned");
+    expect(spy.killCalls.length).toBe(1);
+    const ref = orch.getSession("sess-p1")!;
+    const postMessage = ref.postMessage as ReturnType<typeof vi.fn>;
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    const sent = postMessage.mock.calls[0][0] as string;
+    expect(sent).toContain("\n");
+    expect(sent).toContain("중단");
+  });
+
+  it("owner orchestrator 세션이 없으면 best-effort 로 조용히 넘어간다(상태 전이는 정상)", async () => {
+    // orch registry 에 세션을 만들지 않음 → getSession 이 null.
+    const orch = makeOrchRegistry();
+    const { engine, store } = buildEngine({ orchestrators: orch });
+    const id = await store.createMission({
+      projectId: "p1",
+      goal: "no orch",
+      templateId: "polish",
+      status: "active",
+      ownerOrchestratorSessionId: "sess-missing",
+      steps: instantiateSteps("polish"),
+      currentStepIndex: 0,
+      taskIds: [],
+      contextLog: [],
+    });
+    await expect(engine.pause(id)).resolves.toBeUndefined();
+    expect(store.raw(id)!.status).toBe("sleeping");
+  });
+});
+
+// ────────────── event-forwarder: user-pause detection ──────────────
+
+describe("event-forwarder isMissionPausedByUser", () => {
+  it("마지막 paused 이벤트가 paused_by_user 면 true", () => {
+    expect(
+      isMissionPausedByUser({
+        contextLog: [
+          { type: "step.started", payload: {} },
+          { type: "mission.paused", payload: { kind: "paused_by_user" } },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("wait-step sleeping(kind=sleeping) 은 false", () => {
+    expect(
+      isMissionPausedByUser({
+        contextLog: [{ type: "mission.paused", payload: { kind: "sleeping" } }],
+      }),
+    ).toBe(false);
+  });
+
+  it("pause 후 resume 됐으면 false (가장 가까운 이벤트가 resumed)", () => {
+    expect(
+      isMissionPausedByUser({
+        contextLog: [
+          { type: "mission.paused", payload: { kind: "paused_by_user" } },
+          { type: "mission.resumed", payload: { by: "user" } },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("contextLog 없으면 false (방어)", () => {
+    expect(isMissionPausedByUser({})).toBe(false);
   });
 });
 
