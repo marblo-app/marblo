@@ -49,7 +49,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       [where("projectId", "==", projectId)],
       (docs) => {
         set({ agents: docs.map(toAgent), loading: false });
-      },
+      }
     );
   },
 
@@ -75,6 +75,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         undefined,
         undefined,
         projectId,
+        agent.currentTaskId ?? undefined
       );
       return id;
     } catch (err) {
@@ -130,7 +131,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         undefined,
         undefined,
         projectId,
-        agent.currentTaskId ?? undefined,
+        agent.currentTaskId ?? undefined
       );
     } catch (err) {
       set({
@@ -155,7 +156,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   getAgentByName: (name: string): Agent | undefined => {
     const { agents } = get();
     return agents.find(
-      (a: Agent) => a.name.toLowerCase() === name.toLowerCase(),
+      (a: Agent) => a.name.toLowerCase() === name.toLowerCase()
     );
   },
 
@@ -191,7 +192,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               result.ptySessionId,
               `${MODEL_ICONS[restartedAgent.model] || "⚪"} ${
                 restartedAgent.name
-              }`,
+              }`
             );
         }
         return;
@@ -207,7 +208,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // project — breaking file access from inside the agent.
       const { useEditorStore } = await import("./editorStore");
       const cwd = useEditorStore.getState().rootPath ?? "~";
-      const launchResult = await window.electronAPI.agent.launch(agent, cwd);
+      // taskId 를 함께 넘겨 worktreeCoordinator.prepare 가 task 워크트리에서
+      // 부팅하도록 한다 — 안 넘기면 앱 재시작 후 재기동된 task 에이전트가 repo
+      // root 에서 떠 격리가 깨진다(launchAgent/createAgent 와 동일 규약).
+      const launchResult = await window.electronAPI.agent.launch(
+        agent,
+        cwd,
+        undefined,
+        undefined,
+        undefined,
+        agent.currentTaskId ?? undefined
+      );
       await agentService.updateAgent(id, { status: "idle" as AgentStatus });
 
       // Attach terminal session (MODEL_ICONS hoisted to top of restartAgent)
@@ -216,7 +227,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         .getState()
         .attachSession(
           launchResult.ptySessionId,
-          `${MODEL_ICONS[agent.model] || "⚪"} ${agent.name}`,
+          `${MODEL_ICONS[agent.model] || "⚪"} ${agent.name}`
         );
     } catch (err) {
       set({
@@ -248,17 +259,17 @@ if (typeof window !== "undefined" && window.electronAPI?.agent?.onSyncStatus) {
       // Match by name — AgentManager UUID != Firestore doc ID, but names are shared
       const { agents } = useAgentStore.getState();
       const match = agents.find(
-        (a) => a.name.toLowerCase() === agentName.toLowerCase(),
+        (a) => a.name.toLowerCase() === agentName.toLowerCase()
       );
       if (match) {
         agentService.updateAgent(match.id, updates).catch((err) => {
           console.error(
             "[AgentStore] Failed to sync agent status to Firestore:",
-            err,
+            err
           );
         });
       }
-    },
+    }
   );
 }
 
@@ -288,7 +299,7 @@ if (
           "[AgentStore] Failed to sync PTY status to Firestore:",
           agentId,
           status,
-          err,
+          err
         );
       });
   });
