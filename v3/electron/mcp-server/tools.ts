@@ -14,10 +14,15 @@ import {
   type QueryConstraint,
 } from "firebase/firestore";
 import { db } from "./firebase.js";
-import { resolveContextForWrite, contextReadFilter } from "./context.js";
+import {
+  resolveContext,
+  resolveContextForWrite,
+  contextReadFilter,
+} from "./context.js";
 import {
   applyProjection,
   resolveDependentIfReady,
+  isLaneContext,
   type ApplyProjectionInput,
 } from "./projection.js";
 import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
@@ -299,11 +304,21 @@ export function registerTools(server: McpServer): void {
     },
     async ({ role, project_id }) => {
       const projectId = resolveProject(project_id);
+      // Context scope — mirror get_all_tasks so the board orchestrator's
+      // dispatch feed only surfaces its own context. Only the board orch sets
+      // MARBLO_CONTEXT="board" (orchestrator-manager → contextForKind), so it
+      // alone becomes scoped to board tasks; plain worker agents and the
+      // mission orchestrator leave it unset → unscoped (zero behavior change).
+      // Without this, mission(contextId=missionId)/lane(contextId=lane:*) TODOs
+      // leaked into the board orchestrator's awareness and got dispatched/
+      // discussed there — the surviving PTY-contamination path after P3.
+      const contextId = resolveContext();
       const constraints: QueryConstraint[] = [
         where("status", "==", "TODO"),
         where("role", "==", role),
       ];
       if (projectId) constraints.push(where("projectId", "==", projectId));
+      if (contextId) constraints.push(where("contextId", "==", contextId));
 
       const q = query(collection(db, "tasks"), ...constraints);
       const snap = await getDocs(q);
@@ -706,12 +721,18 @@ export function registerTools(server: McpServer): void {
         }
       }
 
-      // Notify orchestrator about status change
-      const commentNote = comment ? ` — ${comment}` : "";
-      notifyOrchestrator(
-        `[Task Update] "${task.title}" ${task.status} → ${newStatus} (role=${task.role}, id=${task_id})${commentNote}`,
-        task.contextId,
-      );
+      // Notify orchestrator about status change. Lane tasks are silent on
+      // progress (P4): their update_status is a board-card + Firestore-activity
+      // event only — never an orch PTY wake — so the board orch isn't flooded
+      // with Quick Lane churn. Only submit_for_review routes a lane to the orch
+      // (the final review gate). board/mission progress is unaffected.
+      if (!isLaneContext(task.contextId)) {
+        const commentNote = comment ? ` — ${comment}` : "";
+        notifyOrchestrator(
+          `[Task Update] "${task.title}" ${task.status} → ${newStatus} (role=${task.role}, id=${task_id})${commentNote}`,
+          task.contextId,
+        );
+      }
 
       // ── Inline dependency resolution (atomic, idempotent — N4) ──
       // When a task completes, resolve every task that depends on it. The
@@ -744,10 +765,15 @@ export function registerTools(server: McpServer): void {
               // Notify orchestrator about newly unblocked task. Scope to the
               // completed task's context — a mission's dependents share its
               // contextId, so this routes to the same (mission/board) orch.
-              notifyOrchestrator(
-                `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`,
-                task.contextId,
-              );
+              // Lane dependents stay silent (P4): a Quick Lane's readiness is
+              // not an orch wake event — board orch picks lane work up via the
+              // board card, not a PTY inject.
+              if (!isLaneContext(task.contextId)) {
+                notifyOrchestrator(
+                  `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`,
+                  task.contextId,
+                );
+              }
             }
           } catch (err) {
             console.error(
@@ -792,12 +818,16 @@ export function registerTools(server: McpServer): void {
         activityPayload: { agentId: resolvedAgentId, message },
       });
 
-      const preview =
-        message.length > 300 ? `${message.slice(0, 300)}...` : message;
-      notifyOrchestrator(
-        `[Task Activity] "${task.title}" progress update (role=${task.role}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`,
-        task.contextId,
-      );
+      // Lane activity is silent on the orch PTY (P4) — the comment lives on the
+      // board card + Firestore activity stream only. board/mission unchanged.
+      if (!isLaneContext(task.contextId)) {
+        const preview =
+          message.length > 300 ? `${message.slice(0, 300)}...` : message;
+        notifyOrchestrator(
+          `[Task Activity] "${task.title}" progress update (role=${task.role}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`,
+          task.contextId,
+        );
+      }
       return text(`Activity logged: ${message}`);
     },
   );
@@ -855,7 +885,12 @@ export function registerTools(server: McpServer): void {
         }
       }
 
-      // Notify orchestrator about review submission
+      // Notify orchestrator about review submission. UNCONDITIONAL across all
+      // contexts — this is the single orch wake a lane task gets (its final
+      // verification gate), and board/mission always notify on review too. The
+      // bridge routes lane(contextId=lane:*) and board here to the BOARD orch
+      // (resolveNotifyTarget); missions go to the mission orch. Do NOT add a
+      // lane gate here — that would silence the lane review gate entirely.
       const prNote = pr_url ? ` PR: ${pr_url}` : "";
       notifyOrchestrator(
         `[Review Submitted] "${task.title}" is ready for review (role=${task.role}, id=${task_id})${prNote}`,
