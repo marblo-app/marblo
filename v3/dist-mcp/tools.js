@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, Timestamp, } from "firebase/firestore";
 import { db } from "./firebase.js";
-import { resolveContext, resolveContextForWrite, contextReadFilter, } from "./context.js";
+import { resolveContext, resolveContextForWrite, resolveMissionContextForWrite, contextReadFilter, } from "./context.js";
 import { applyProjection, resolveDependentIfReady, isLaneContext, } from "./projection.js";
 import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
 import * as fs from "node:fs";
@@ -81,6 +81,45 @@ async function fetchTask(taskId) {
 }
 function text(t) {
     return { content: [{ type: "text", text: t }] };
+}
+function applyMissionContextTags(data, missionId = resolveMissionContextForWrite()) {
+    if (!missionId)
+        return null;
+    const existingMissionId = data.missionId;
+    if (typeof existingMissionId === "string" &&
+        existingMissionId.length > 0 &&
+        existingMissionId !== missionId) {
+        return `missionId mismatch: existing '${existingMissionId}' does not match MARBLO_CONTEXT '${missionId}'.`;
+    }
+    const existingContextId = data.contextId;
+    if (typeof existingContextId === "string" &&
+        existingContextId.length > 0 &&
+        existingContextId !== missionId) {
+        return `contextId mismatch: existing '${existingContextId}' does not match mission context '${missionId}'.`;
+    }
+    data.missionId = missionId;
+    data.contextId = missionId;
+    return null;
+}
+async function ensureTaskMissionContext(taskId, task, missionId = resolveMissionContextForWrite()) {
+    if (!missionId)
+        return null;
+    if (task.missionId && task.missionId !== missionId) {
+        return `Task ${taskId} belongs to missionId '${task.missionId}', not current mission context '${missionId}'.`;
+    }
+    if (task.contextId && task.contextId !== missionId) {
+        return `Task ${taskId} has contextId '${task.contextId}', not current mission context '${missionId}'.`;
+    }
+    const patch = {};
+    if (!task.missionId)
+        patch.missionId = missionId;
+    if (!task.contextId)
+        patch.contextId = missionId;
+    if (Object.keys(patch).length > 0) {
+        patch.updatedAt = Timestamp.now();
+        await updateDoc(doc(db, "tasks", taskId), patch);
+    }
+    return null;
 }
 // ── Audit Logging ─────────────────────────────────────────────
 const MARBLO_AGENT_ID = process.env.MARBLO_AGENT_ID || "unknown";
@@ -295,6 +334,9 @@ export function registerTools(server) {
             projectId,
             contextId: resolveContextForWrite(),
         };
+        const missionContextError = applyMissionContextTags(data);
+        if (missionContextError)
+            return text(`Error: ${missionContextError}`);
         const ref = await addDoc(collection(db, "tasks"), data);
         return text(`Task created successfully!\nID: ${ref.id}\nTitle: ${title}\nRole: ${role}\nPriority: ${priority ?? 0}` +
             (warning ? `\n⚠️ ${warning}` : ""));
@@ -420,6 +462,11 @@ export function registerTools(server) {
             // Ignore per-task project_id overrides — they cause ID mismatch with the board
             data.projectId = project;
             data.contextId = resolveContextForWrite();
+            const missionContextError = applyMissionContextTags(data);
+            if (missionContextError) {
+                results.push(`  [FAILED] ${t.title || `task #${i}`} — ${missionContextError}`);
+                continue;
+            }
             try {
                 const ref = await addDoc(collection(db, "tasks"), data);
                 indexToId[i] = ref.id;
@@ -1081,18 +1128,55 @@ export function registerTools(server) {
         if (!bridgePort) {
             return text("Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.");
         }
+        const missionContextId = resolveMissionContextForWrite();
+        let dispatchTaskId = task_id;
+        if (missionContextId && !dispatchTaskId) {
+            const projectId = resolveProject(undefined);
+            if (!projectId) {
+                return text("Error: No project context. Set MARBLO_PROJECT env var before dispatching a mission task.");
+            }
+            const now = Timestamp.now();
+            const data = {
+                title: name || instruction.split(/\r?\n/, 1)[0].slice(0, 80),
+                description: instruction,
+                role,
+                priority: 3,
+                status: "TODO",
+                dependsOn: [],
+                dependsOnCompleted: true,
+                claimedBy: null,
+                claimedAt: null,
+                scope: tags ?? [],
+                comment: `Mission ${missionContextId} (dispatch_task)`,
+                prUrl: "",
+                hasPmFeedback: false,
+                projectId,
+                contextId: missionContextId,
+                missionId: missionContextId,
+                createdAt: now,
+                updatedAt: now,
+            };
+            const missionContextError = applyMissionContextTags(data, missionContextId);
+            if (missionContextError)
+                return text(`Error: ${missionContextError}`);
+            const ref = await addDoc(collection(db, "tasks"), data);
+            dispatchTaskId = ref.id;
+        }
         // Patent claim 4: 매칭점수 산출 단계는 선행 태스크의 존재 여부 및
         // 완료 여부를 먼저 판단하고, 선행이 없거나 완료된 태스크에 대해서만
         // 매칭점수를 산출한다. dispatch_task 가 매칭/스폰 진입점이므로 여기서
         // 명시적으로 dependency gate 를 둔다 — get_available_tasks 의 필터와
         // 별개로, task_id 가 직접 지정된 dispatch 경로(오케스트레이터가 특정
         // 태스크를 콕 집어 배정하는 케이스)에서도 같은 가드가 적용되도록 함.
-        if (task_id) {
+        if (dispatchTaskId) {
             try {
-                const task = await fetchTask(task_id);
+                const task = await fetchTask(dispatchTaskId);
                 if (!task) {
-                    return text(`Error: Task ${task_id} not found — refusing to dispatch.`);
+                    return text(`Error: Task ${dispatchTaskId} not found — refusing to dispatch.`);
                 }
+                const missionContextError = await ensureTaskMissionContext(dispatchTaskId, task, missionContextId);
+                if (missionContextError)
+                    return text(`Error: ${missionContextError}`);
                 if (!task.dependsOnCompleted) {
                     // Mark BLOCKED so it surfaces in the kanban board, then refuse
                     // to dispatch. Best-effort — failing to mark is not fatal.
@@ -1104,7 +1188,7 @@ export function registerTools(server) {
                     // a forced mark regardless of current status (same intent as the
                     // prior raw write), so the in-txn TOCTOU guard stays off.
                     try {
-                        await applyProjection(db, task_id, {
+                        await applyProjection(db, dispatchTaskId, {
                             newStatus: "BLOCKED",
                             lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
                             lastActivitySummary: "dispatch aborted: 선행 태스크 미완료 — BLOCKED",
@@ -1115,11 +1199,14 @@ export function registerTools(server) {
                         console.error("[dispatch_task] Failed to mark task BLOCKED:", markErr);
                     }
                     const pending = (task.dependsOn || []).join(", ") || "(unknown)";
-                    return text(`Dispatch aborted (patent claim 4: 선행태스크 미완료): task ${task_id} depends on [${pending}], not all complete. Task moved to BLOCKED. Resolve dependencies first, then re-dispatch.`);
+                    return text(`Dispatch aborted (patent claim 4: 선행태스크 미완료): task ${dispatchTaskId} depends on [${pending}], not all complete. Task moved to BLOCKED. Resolve dependencies first, then re-dispatch.`);
                 }
             }
             catch (err) {
                 console.error("[dispatch_task] Dependency precheck failed:", err);
+                if (missionContextId) {
+                    return text(`Error: Failed to verify mission task tags before dispatch — ${err instanceof Error ? err.message : String(err)}`);
+                }
                 // Don't block dispatch on a precheck failure — the bridge / agent
                 // path also has its own claim_task gate as defense-in-depth.
             }
@@ -1131,7 +1218,7 @@ export function registerTools(server) {
                 body: JSON.stringify({
                     role,
                     instruction,
-                    taskId: task_id,
+                    taskId: dispatchTaskId,
                     complexity: complexity || "standard",
                     model,
                     nameHint: name,
@@ -1167,7 +1254,7 @@ export function registerTools(server) {
                             status: "working",
                             // Link to the board task — the supplied task_id, or the ad-hoc
                             // worktree task the bridge auto-created (result.taskId).
-                            currentTaskId: result.taskId ?? task_id ?? null,
+                            currentTaskId: result.taskId ?? dispatchTaskId ?? null,
                             command: result.model || model || "claude",
                             skillFile: "",
                             createdAt: Timestamp.now(),
@@ -1192,6 +1279,8 @@ export function registerTools(server) {
                 lines.push(`  Model: ${result.model}`);
             if (result.score !== undefined)
                 lines.push(`  Score: ${result.score}`);
+            if (dispatchTaskId)
+                lines.push(`  Task ID: ${dispatchTaskId}`);
             if (result.action === "logical") {
                 lines.push(`\nAction required: Use internal sub-agent (Task/Agent tool) to handle this simple task directly.`);
             }
