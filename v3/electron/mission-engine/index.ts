@@ -147,34 +147,11 @@ export class MissionEngine {
     if (step && step.status === "running") {
       if (step.type === "dispatch") {
         // 이미 dispatch 된 task 가 있으면 재연결 (중복 dispatch 방지).
-        const existing = await this.deps.dispatcher.findMissionTaskIds(
+        const reconnected = await this.reconnectDispatchStepToExistingTasks(
           mission.id,
+          idx,
         );
-        if (existing.length > 0) {
-          const merged = Array.from(new Set([...mission.taskIds, ...existing]));
-          await this.deps.store.updateMission(mission.id, {
-            taskIds: merged,
-          });
-          await this.deps.store.updateMissionStep(mission.id, idx, {
-            status: "success",
-            completedAt: this.now(),
-            liveOutput: undefined,
-            error: undefined,
-          });
-          await this.deps.store.appendTimelineEvent(mission.id, {
-            ts: this.now(),
-            type: "mission.resumed",
-            payload: {
-              message: `recovered: reconnected to ${existing.length} dispatched task(s)`,
-              stepIndex: idx,
-            },
-          });
-          this.log("recover: reconnected dispatch step to existing tasks", {
-            missionId,
-            stepIndex: idx,
-            taskCount: existing.length,
-          });
-        } else {
+        if (!reconnected) {
           await this.deps.store.updateMissionStep(mission.id, idx, {
             status: "pending",
             startedAt: undefined,
@@ -200,6 +177,46 @@ export class MissionEngine {
       // wait: 그대로 두고 resume → runWait 가 기존 taskIds 를 재폴링(안전).
     }
     await this.resume(missionId);
+  }
+
+  /**
+   * "running" 으로 남은 dispatch step 을 이미 만들어진 task 에 멱등 재연결한다.
+   * recover(부팅) 경로와 live advanceStep 의 running 가드가 공유하는 단일 중복-
+   * dispatch 차단 지점. dispatch 는 부작용(task 생성)이 있어 무턱대고 재실행하면
+   * 6-7 중복이 되므로, findMissionTaskIds 로 이미 만든 비종료 task 가 있으면
+   * taskIds 에 병합(Set dedup) + step 을 success 로 마감하고 true 를 반환한다.
+   * 만들어진 task 가 없으면(=실제로 아무것도 dispatch 안 됨) false 를 반환해
+   * caller 가 깨끗이 재실행하게 둔다.
+   */
+  private async reconnectDispatchStepToExistingTasks(
+    missionId: string,
+    stepIndex: number,
+  ): Promise<boolean> {
+    const existing = await this.deps.dispatcher.findMissionTaskIds(missionId);
+    if (existing.length === 0) return false;
+    const fresh = await this.requireMission(missionId);
+    const merged = Array.from(new Set([...fresh.taskIds, ...existing]));
+    await this.deps.store.updateMission(missionId, { taskIds: merged });
+    await this.deps.store.updateMissionStep(missionId, stepIndex, {
+      status: "success",
+      completedAt: this.now(),
+      liveOutput: undefined,
+      error: undefined,
+    });
+    await this.deps.store.appendTimelineEvent(missionId, {
+      ts: this.now(),
+      type: "mission.resumed",
+      payload: {
+        message: `reconnected to ${existing.length} dispatched task(s) (dup-dispatch guard)`,
+        stepIndex,
+      },
+    });
+    this.log("reconnected dispatch step to existing tasks", {
+      missionId,
+      stepIndex,
+      taskCount: existing.length,
+    });
+    return true;
   }
 
   async abandon(missionId: string, reason?: string): Promise<void> {
@@ -324,9 +341,17 @@ export class MissionEngine {
   private scheduleAdvance(missionId: string): void {
     if (this.inFlight.has(missionId)) return;
     this.inFlight.add(missionId);
-    this.runAdvanceLoop(missionId).finally(() => {
-      this.inFlight.delete(missionId);
-    });
+    // advance 루프가 reject 하면(예: dispatch 성공 후 taskIds/timeline write 중
+    // throw) step 이 "running"으로 남고 inFlight 만 풀린다. .finally 만 있으면
+    // unhandled rejection 으로 조용히 묻혀 stall 지점을 못 짚는다. .catch 로
+    // 로깅해 가시화한다 — 재진입 시엔 advanceStep 의 running 가드가 멱등 처리.
+    this.runAdvanceLoop(missionId)
+      .catch((err) =>
+        this.log("advance loop error", { missionId, err: String(err) }),
+      )
+      .finally(() => {
+        this.inFlight.delete(missionId);
+      });
   }
 
   private async runAdvanceLoop(missionId: string): Promise<void> {
@@ -353,6 +378,41 @@ export class MissionEngine {
     if (step.status === "success" || step.status === "skipped") {
       await this.deps.store.updateMission(mission.id, {
         currentStepIndex: mission.currentStepIndex + 1,
+      });
+      return true;
+    }
+
+    // 멱등 가드: step 이 "running" 인데 advance 루프가 (inFlight 로 직렬화돼) 새로
+    // 진입했다는 건, 직전 실행이 success 마킹에 도달하기 전에 끊겼다는 뜻이다 —
+    // 예: dispatch 성공 후 taskIds 누적/timeline write 중 throw, 혹은 앱 크래시 직후.
+    // 가드가 없으면 아래에서 step 을 다시 "running" 으로 쓰고 executeStep 을 재실행 →
+    // dispatch 가 task 를 또 만들어 6-7 중복 + 영구 stall 이 된다(이 버그의 근본원인).
+    // recover(부팅) 경로와 동일한 멱등 처리로 막는다.
+    if (step.status === "running") {
+      if (step.type === "dispatch") {
+        const reconnected = await this.reconnectDispatchStepToExistingTasks(
+          mission.id,
+          step.index,
+        );
+        // 재연결됨 → success 마킹됨. 다음 iteration 의 success 가드가 인덱스를
+        // 전진시켜 wait step 으로 넘어간다(중복 dispatch 없이).
+        if (reconnected) return true;
+        // 만들어진 task 가 없다 → 깨끗이 재실행해도 중복이 아니다(아래 reset 으로 낙하).
+      }
+      // dispatch(빈) / gstack / fix / wait — pending 으로 되돌려 다음 iteration 에서
+      // 재실행. gstack=resume 세션 재실행, fix=fix-runner 멱등 재연결, wait=폴링이라
+      // 안전. (라이브 재진입 시점의 "running" 은 항상 직전 실행이 끊긴 것이지,
+      // 동시 실행이 아니다 — inFlight 가 advance 루프를 직렬화하기 때문.)
+      await this.deps.store.updateMissionStep(mission.id, step.index, {
+        status: "pending",
+        startedAt: undefined,
+        liveOutput: undefined,
+        error: undefined,
+      });
+      this.log("advance: reset orphaned running step → pending", {
+        missionId: mission.id,
+        stepIndex: step.index,
+        stepType: step.type,
       });
       return true;
     }
@@ -454,16 +514,18 @@ export class MissionEngine {
       return false;
     }
 
-    // dispatch 성공 → taskIds 누적
+    // dispatch 성공 → taskIds 누적 (Set dedup — runDispatch 가 멱등 재사용으로
+    // 기존 taskIds 를 그대로 돌려줄 수 있어, 이미 들어있는 id 가 중복되지 않게 한다).
     if (step.type === "dispatch" && result.success) {
       const output = result.output as { taskIds?: string[] } | undefined;
       const newTaskIds = output?.taskIds ?? [];
       if (newTaskIds.length > 0) {
         const fresh = await this.requireMission(mission.id);
-        await this.deps.store.updateMission(mission.id, {
-          taskIds: [...fresh.taskIds, ...newTaskIds],
-        });
+        const existingSet = new Set(fresh.taskIds);
+        const merged = Array.from(new Set([...fresh.taskIds, ...newTaskIds]));
+        await this.deps.store.updateMission(mission.id, { taskIds: merged });
         for (const taskId of newTaskIds) {
+          if (existingSet.has(taskId)) continue; // 이미 기록된 dispatch 는 재기록 안 함
           await this.deps.store.appendTimelineEvent(mission.id, {
             ts: this.now(),
             type: "agent.dispatched",

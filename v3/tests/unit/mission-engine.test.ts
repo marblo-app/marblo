@@ -935,6 +935,97 @@ describe("scenario 9 — 앱 재시작 in-flight 복구", () => {
   });
 });
 
+// ─────── P6 회귀: 라이브 advanceStep running 가드 (중복 dispatch + stall) ───────
+// 버그: dispatch step 이 success 마킹 전에 끊겨 "running"으로 남으면, forwarder 의
+// task.status_changed 가 올 때마다 onEvent→advanceStep 재진입이 그 step 을 또
+// "running"으로 쓰고 executeStep 재실행 → dispatch 가 task 를 6-7회 중복 생성 +
+// 영구 stall. 라이브 advanceStep 에 running 가드를 넣어 막는다(recover 경로와 동일).
+describe("P6 — live advanceStep running guard (no dup-dispatch / no stall)", () => {
+  it("running dispatch step에 event가 여러 번 와도 기존 task에 재연결만, 재dispatch 0회", async () => {
+    const { store, bus, spy, dispatcher } = buildEngine();
+    const steps: MissionStep[] = [
+      { index: 0, type: "dispatch", onFailure: "escalate", status: "running" },
+      { index: 1, type: "wait", onFailure: "escalate", status: "pending" },
+      {
+        index: 2,
+        type: "gstack",
+        skill: "/review",
+        onFailure: "retry",
+        status: "pending",
+      },
+    ];
+    const id = await store.createMission({
+      projectId: "p1",
+      goal: "feature work",
+      templateId: "feature",
+      status: "active",
+      ownerOrchestratorSessionId: "orch-1",
+      steps,
+      currentStepIndex: 0,
+      taskIds: [],
+      contextLog: [],
+    });
+    // 이미 dispatch 된 (비종료) task 가 Firestore 에 있다 — findMissionTaskIds 매칭.
+    dispatcher.__setStatuses({
+      [`t-${id}-1`]: "IN_PROGRESS",
+      [`t-${id}-2`]: "IN_PROGRESS",
+    });
+
+    // forwarder 가 task 변화마다 emit 하는 상황을 모사 — 가드 없으면 매번 재dispatch.
+    for (let i = 0; i < 6; i++) {
+      bus.emit({
+        type: "task.status_changed",
+        missionId: id,
+        payload: { taskId: `t-${id}-1`, from: "TODO", to: "IN_PROGRESS" },
+      });
+    }
+
+    // dispatch step 이 재연결되어 success 로 마감되고, 재dispatch 는 한 번도 없다.
+    await waitFor(() => store.raw(id)!.steps[0].status === "success", 2000);
+    expect(spy.dispatchCalls.length).toBe(0);
+    expect(store.raw(id)!.taskIds).toEqual(
+      expect.arrayContaining([`t-${id}-1`, `t-${id}-2`]),
+    );
+    // 미완료 task 라 wait 에서 sleeping — 어쨌든 dispatch 가 또 돌지 않았다.
+    await waitFor(() => store.raw(id)!.status === "sleeping", 2000);
+    expect(spy.dispatchCalls.length).toBe(0);
+  }, 5000);
+
+  it("running dispatch step에 만들어진 task가 없으면 정확히 1회만 dispatch하고 진행한다", async () => {
+    const { store, bus, spy } = buildEngine();
+    // 아직 아무 task 도 없음 — findMissionTaskIds 는 빈 배열.
+    const steps: MissionStep[] = [
+      { index: 0, type: "dispatch", onFailure: "escalate", status: "running" },
+      { index: 1, type: "wait", onFailure: "escalate", status: "pending" },
+    ];
+    const id = await store.createMission({
+      projectId: "p1",
+      goal: "feature work",
+      templateId: "feature",
+      status: "active",
+      ownerOrchestratorSessionId: "orch-1",
+      steps,
+      currentStepIndex: 0,
+      taskIds: [],
+      contextLog: [],
+    });
+
+    // 여러 이벤트가 몰려도 dispatch 는 정확히 1회 (pending 리셋 후 깨끗이 재실행,
+    // 이후엔 만들어진 task 가 멱등 재사용을 타 중복 생성 안 됨).
+    for (let i = 0; i < 6; i++) {
+      bus.emit({
+        type: "task.status_changed",
+        missionId: id,
+        payload: { taskId: "noise", from: null, to: "TODO" },
+      });
+    }
+
+    await waitFor(() => store.raw(id)!.steps[0].status === "success", 2000);
+    expect(spy.dispatchCalls.length).toBe(1);
+    expect(store.raw(id)?.taskIds.length ?? 0).toBeGreaterThan(0);
+  }, 5000);
+});
+
 // Reset mock store before each suite (firebase mock keeps state across files)
 beforeEach(async () => {
   const mocks = (await import("../mocks/firebase-firestore")) as unknown as {

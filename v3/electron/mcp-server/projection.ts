@@ -31,6 +31,19 @@ export type TaskStatus =
   | "FAILED"
   | "DONE";
 
+// ── Context classification (Quick Lanes 눈/브레인 분리) ──────────
+// contextId 한 필드로 task 출처를 가른다:
+//   board  : "board" | "" | undefined
+//   lane   : "lane" | "lane:<laneId>"   (Quick Lane)
+//   mission: 그 외(= missionId raw, 접두사 없음 — dispatcher-impl 의 contextId: missionId)
+// src/lib/laneContext.ts(렌더러의 단일 소스)의 복제본이다 — MCP 서버는
+// electron/mcp-server/tsconfig(rootDir 격리)로 빌드돼 src/ 를 import 할 수 없다.
+// 동작 동치를 유지할 것. tools.ts 가 레인 task 의 '진행' notify(update_status/
+// add_activity/dependency-resolved)를 오케 PTY 로 안 보내도록 이 술어로 게이트한다.
+export function isLaneContext(contextId: string | undefined): boolean {
+  return contextId === "lane" || (!!contextId && contextId.startsWith("lane:"));
+}
+
 export interface TaskProjection {
   currentStatus: TaskStatus;
   lastAgentId: string;

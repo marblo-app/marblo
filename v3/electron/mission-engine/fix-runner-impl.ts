@@ -194,6 +194,18 @@ function sleep(ms: number): Promise<void> {
 // 직전 step output 을 에이전트 instruction 에 싣기 전 최종 정리. skill runner 가
 // 이미 cleanClaudeNoise 를 거치지만, footer/spinner/token 잔재가 남을 수 있어
 // 한 번 더 거르고 길이를 제한한다(본문이 아닌 instruction 이므로 과하게 자르지 않음).
+const SPINNER_GLYPHS = "✢⏺·✶✻✽✦❀✺✳⠁-⣿";
+const SPINNER_PREFIX_GLYPHS = "✢⏺✶✻✽✦❀✺✳⠁-⣿";
+const SPINNER_GLYPH_REGEX = new RegExp(`[${SPINNER_GLYPHS}]`, "gu");
+const SPINNER_ONLY_LINE_REGEX = new RegExp(`^\\s*[${SPINNER_GLYPHS}]+\\s*$`, "u");
+const SPINNER_PREFIX_FRAGMENT_REGEX = new RegExp(
+  `^\\s*[${SPINNER_PREFIX_GLYPHS}]+\\s*[\\p{L}\\p{N}_./:-]{0,18}[….]?\\s*$`,
+  "u"
+);
+const SPINNER_FOLLOWER_FRAGMENT_REGEX = /^\s*[\p{L}\p{N}]{1,4}[….]?\s*$/u;
+const SPINNER_STATUS_WORD_REGEX =
+  /^\s*(?:Gitifying|Thinking|Baking|Sprouting|Crunching|Working|Loading|Running|Reading|Writing|Editing|Searching|Analyzing|Investigating|Summarizing|Processing)[….]*\s*$/i;
+
 const CONTEXT_NOISE_PATTERNS: RegExp[] = [
   /bypass permissions on/i,
   /shift\s*\+?\s*tab to cycle/i,
@@ -201,20 +213,74 @@ const CONTEXT_NOISE_PATTERNS: RegExp[] = [
   /thinking with \S+ effort/i,
   /·\s*[↑↓]?\s*[\d.]+[km]?\s*tokens?/i,
   // bare /\d+ tokens/ 제거 — 위 스피너 패턴과 중복 + 정상 문구 과매칭(pty-skill-runner 와 동일).
+  /\(\s*\d+s\s*·/i,
+  /^\s*[✢⠁-⣿✶✻✽✦❀✺⏺]+\s*\w+(?:ing|ed)\b/i,
+  /\bBaked for\b/i,
   /Control this session from the Claude mobile app/i,
   /claude\.com\/download/i,
   /\/remote-control\b/i,
+  /^\s*⎿\s*Tip:/i,
+  /^\s*─{6,}\s*$/,
+  /^\s*>\s*$/,
+  /^\s*\?\s*for shortcuts\s*$/i,
+  /^\s*Type your message/i,
 ];
 
-function cleanContextForAgent(raw: string): string {
-  const kept = raw
+function applyCarriageReturnLineDiscipline(text: string): string {
+  return text
+    .replace(/\r\n/g, "\n")
     .split("\n")
-    .map((l) => l.replace(/\s+$/, ""))
-    .filter((l) => {
-      if (l.trim() === "") return false;
-      return !CONTEXT_NOISE_PATTERNS.some((p) => p.test(l));
-    });
-  const text = kept.join("\n").trim();
+    .map((line) => {
+      const lastRedraw = line.lastIndexOf("\r");
+      return lastRedraw === -1 ? line : line.slice(lastRedraw + 1);
+    })
+    .join("\n");
+}
+
+function isMostlySpinnerGlyphLine(line: string): boolean {
+  const compact = line.trim();
+  if (compact === "") return false;
+  const glyphCount = compact.match(SPINNER_GLYPH_REGEX)?.length ?? 0;
+  if (glyphCount === 0) return false;
+  const nonGlyph = compact
+    .replace(SPINNER_GLYPH_REGEX, "")
+    .replace(/\s+/g, "");
+  return glyphCount >= nonGlyph.length;
+}
+
+function isSpinnerNoiseLine(line: string): boolean {
+  return (
+    SPINNER_ONLY_LINE_REGEX.test(line) ||
+    SPINNER_PREFIX_FRAGMENT_REGEX.test(line) ||
+    SPINNER_STATUS_WORD_REGEX.test(line) ||
+    isMostlySpinnerGlyphLine(line)
+  );
+}
+
+function cleanContextForAgent(raw: string): string {
+  const flattened = applyCarriageReturnLineDiscipline(raw);
+  const out: string[] = [];
+  let spinnerNoiseRun = 0;
+  for (const line of flattened
+    .split("\n")
+    .map((l) => l.replace(/\s+$/, ""))) {
+    if (line.trim() === "") continue;
+    const isSpinnerNoise = isSpinnerNoiseLine(line);
+    const isSpinnerFollowerFragment =
+      spinnerNoiseRun > 0 && SPINNER_FOLLOWER_FRAGMENT_REGEX.test(line);
+    if (
+      isSpinnerNoise ||
+      isSpinnerFollowerFragment ||
+      CONTEXT_NOISE_PATTERNS.some((p) => p.test(line))
+    ) {
+      spinnerNoiseRun =
+        isSpinnerNoise || isSpinnerFollowerFragment ? spinnerNoiseRun + 1 : 0;
+      continue;
+    }
+    spinnerNoiseRun = 0;
+    out.push(line);
+  }
+  const text = out.join("\n").trim();
   // instruction 컨텍스트는 마지막 2000자만 (조사 결론은 보통 끝부분).
   return text.length > 2000 ? text.slice(-2000) : text;
 }

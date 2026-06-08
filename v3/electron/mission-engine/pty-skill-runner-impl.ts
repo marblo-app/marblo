@@ -96,9 +96,36 @@ function stripAnsi(s: string): string {
   return s.replace(ANSI_REGEX, "");
 }
 
+function applyCarriageReturnLineDiscipline(text: string): string {
+  return text
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => {
+      const lastRedraw = line.lastIndexOf("\r");
+      return lastRedraw === -1 ? line : line.slice(lastRedraw + 1);
+    })
+    .join("\n");
+}
+
+function cleanCapturedPtyOutput(text: string): string {
+  return cleanClaudeNoise(stripAnsi(applyCarriageReturnLineDiscipline(text)));
+}
+
 // claude TUI 가 매 프레임 redraw 하는 input box + footer + spinner 노이즈 제거.
 // step.output 으로 저장될 때 사용자가 봤을 때 의미있는 LLM 응답만 남기기 위함.
 // 너무 공격적으로 자르면 LLM 응답까지 날아갈 수 있으니, 안전한 패턴만 매칭.
+const SPINNER_GLYPHS = "✢⏺·✶✻✽✦❀✺✳⠁-⣿";
+const SPINNER_PREFIX_GLYPHS = "✢⏺✶✻✽✦❀✺✳⠁-⣿";
+const SPINNER_GLYPH_REGEX = new RegExp(`[${SPINNER_GLYPHS}]`, "gu");
+const SPINNER_ONLY_LINE_REGEX = new RegExp(`^\\s*[${SPINNER_GLYPHS}]+\\s*$`, "u");
+const SPINNER_PREFIX_FRAGMENT_REGEX = new RegExp(
+  `^\\s*[${SPINNER_PREFIX_GLYPHS}]+\\s*[\\p{L}\\p{N}_./:-]{0,18}[….]?\\s*$`,
+  "u"
+);
+const SPINNER_FOLLOWER_FRAGMENT_REGEX = /^\s*[\p{L}\p{N}]{1,4}[….]?\s*$/u;
+const SPINNER_STATUS_WORD_REGEX =
+  /^\s*(?:Gitifying|Thinking|Baking|Sprouting|Crunching|Working|Loading|Running|Reading|Writing|Editing|Searching|Analyzing|Investigating|Summarizing|Processing)[….]*\s*$/i;
+
 const NOISE_LINE_PATTERNS: RegExp[] = [
   // claude 2.x footer — 화살표/box 문자 prefix 가 다양해서(⏵▶▸→❯ 또는 무접두)
   // 줄 어디에 있든 "bypass permissions on" 이 보이면 노이즈로 본다.
@@ -127,20 +154,54 @@ const NOISE_LINE_PATTERNS: RegExp[] = [
   /^\s*Type your message/i,
 ];
 
+function isMostlySpinnerGlyphLine(line: string): boolean {
+  const compact = line.trim();
+  if (compact === "") return false;
+  const glyphCount = compact.match(SPINNER_GLYPH_REGEX)?.length ?? 0;
+  if (glyphCount === 0) return false;
+  const nonGlyph = compact
+    .replace(SPINNER_GLYPH_REGEX, "")
+    .replace(/\s+/g, "");
+  return glyphCount >= nonGlyph.length;
+}
+
+function isSpinnerNoiseLine(line: string): boolean {
+  return (
+    SPINNER_ONLY_LINE_REGEX.test(line) ||
+    SPINNER_PREFIX_FRAGMENT_REGEX.test(line) ||
+    SPINNER_STATUS_WORD_REGEX.test(line) ||
+    isMostlySpinnerGlyphLine(line)
+  );
+}
+
 function cleanClaudeNoise(text: string): string {
   const lines = text.split("\n");
   const out: string[] = [];
   let blankRun = 0;
+  let spinnerNoiseRun = 0;
   for (const raw of lines) {
     const line = raw.replace(/\s+$/, ""); // trailing whitespace
-    if (NOISE_LINE_PATTERNS.some((p) => p.test(line))) continue;
+    const isSpinnerNoise = isSpinnerNoiseLine(line);
+    const isSpinnerFollowerFragment =
+      spinnerNoiseRun > 0 && SPINNER_FOLLOWER_FRAGMENT_REGEX.test(line);
+    if (
+      isSpinnerNoise ||
+      isSpinnerFollowerFragment ||
+      NOISE_LINE_PATTERNS.some((p) => p.test(line))
+    ) {
+      spinnerNoiseRun =
+        isSpinnerNoise || isSpinnerFollowerFragment ? spinnerNoiseRun + 1 : 0;
+      continue;
+    }
     if (line.trim() === "") {
       blankRun += 1;
       if (blankRun > 1) continue; // 연속 빈 줄은 1줄로 축소
+      spinnerNoiseRun = 0;
       out.push("");
       continue;
     }
     blankRun = 0;
+    spinnerNoiseRun = 0;
     out.push(line);
   }
   // 연속 중복 라인 축소 (claude UI 가 같은 라인을 여러 번 redraw 한 잔재).
@@ -235,7 +296,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
   function emitProgress(run: ActiveRun, force = false): void {
     if (!run.onProgress) return;
     // 큰 버퍼 매번 cleanClaudeNoise 돌리는 cost 줄이려고 마지막 8KB 만 정리.
-    const cleaned = cleanClaudeNoise(stripAnsi(run.buffer.slice(-8000)));
+    const cleaned = cleanCapturedPtyOutput(run.buffer.slice(-8000));
     const tail = cleaned.slice(-4000);
     if (!force && tail.length === 0) return;
     try {
@@ -256,7 +317,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
     activeByPty.delete(ptyId);
     const durationMs = Date.now() - run.startedAt;
     // ANSI 제거 → claude TUI noise (footer/spinner/separator) 제거 → 마지막 8KB.
-    const cleaned = cleanClaudeNoise(stripAnsi(run.buffer));
+    const cleaned = cleanCapturedPtyOutput(run.buffer);
     const outTail = cleaned.slice(-8000);
     // success 케이스에서만 사용자 입력 패턴 감지 — fail/timeout 은 별도 알림.
     const userInputDetected = success

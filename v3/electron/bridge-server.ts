@@ -128,11 +128,42 @@ interface NotifyOrchestratorRequest {
   /** Project ID — required in multi-window mode to route to the right
    * orchestrator. MCP server forwards MARBLO_PROJECT env var here. */
   projectId?: string;
-  /** Task context — "board"/empty routes to the board orchestrator; a mission
-   * id (Quick Lanes 눈/브레인 분리) routes to that project's mission
-   * orchestrator instead, so mission task progress never floods the board
-   * orchestrator PTY. MCP server forwards the task's contextId here. */
+  /** Task context (Quick Lanes 눈/브레인 분리) — routed by resolveNotifyTarget:
+   *   "board"/empty        → board orchestrator
+   *   "lane"/"lane:<id>"   → board orchestrator (Quick Lane review gate; lane
+   *                          PROGRESS notifies are dropped upstream in
+   *                          mcp-server/tools.ts, so only submit_for_review
+   *                          reaches here)
+   *   <missionId> (other)  → that project's MISSION orchestrator — never the
+   *                          board one, so mission progress can't flood the
+   *                          board orch PTY.
+   * MCP server forwards the task's contextId here. */
   contextId?: string;
+}
+
+/**
+ * 3-way context → orchestrator routing target for /notify-orchestrator.
+ * Mirrors src/lib/laneContext.ts (the renderer's single source of truth);
+ * duplicated because electron/tsconfig (rootDir-isolated, excludes mcp-server
+ * + src) can't import across into src/. Keep in sync.
+ *
+ *   board  : "board" | "" | undefined        → "board"
+ *   lane   : "lane" | "lane:<laneId>"          → "board"  (review gate)
+ *   mission: 그 외(= missionId raw, 접두사 없음) → "mission"
+ *
+ * Lanes deliberately resolve to the BOARD orchestrator: a Quick Lane's only
+ * orch wake is its submit_for_review (the board orch is the verification gate).
+ * Lane progress (update_status/add_activity) never reaches this endpoint — it's
+ * gated out at the mcp-server notify call sites — so routing lane → board here
+ * only ever carries the review submission, not progress churn.
+ */
+export function resolveNotifyTarget(
+  contextId: string | undefined,
+): "board" | "mission" {
+  const ctx = contextId ?? "";
+  const isLaneContext = ctx === "lane" || ctx.startsWith("lane:");
+  const isMissionContext = ctx !== "" && ctx !== "board" && !isLaneContext;
+  return isMissionContext ? "mission" : "board";
 }
 
 // ── Dispatch types ──────────────────────────────────────────
@@ -691,16 +722,18 @@ export class BridgeServer {
           return;
         }
 
-        // Context-scoped routing (Quick Lanes 눈/브레인 분리). A mission task
-        // carries contextId=missionId; board tasks carry "board"/empty. Mission
-        // notifications go to the project's MISSION orchestrator — never the
-        // board one — so mission progress doesn't flood the main orch PTY. If a
-        // mission notification arrives but no mission orchestrator is running,
-        // we DROP it (returning 200) rather than fall back to the board orch,
-        // which would reintroduce the pollution this routing exists to prevent.
+        // 3-way context routing (Quick Lanes 눈/브레인 분리) — see
+        // resolveNotifyTarget. mission→mission orch, board+lane→board orch.
+        // A mission notification that arrives while no mission orchestrator is
+        // running is DROPPED (returning 200) rather than falling back to the
+        // board orch, which would reintroduce the pollution this routing exists
+        // to prevent. Lane review submissions land on the board orch (the Quick
+        // Lane verification gate); lane progress never reaches here (gated out
+        // at the mcp-server notify call sites).
         const projectId = params.projectId ?? "";
         const contextId = params.contextId ?? "";
-        const isMissionContext = contextId !== "" && contextId !== "board";
+        const target = resolveNotifyTarget(contextId);
+        const isMissionContext = target === "mission";
         const orch = isMissionContext
           ? this.missionOrchestratorLookup(projectId)
           : this.orchestratorLookup(projectId);
@@ -725,9 +758,7 @@ export class BridgeServer {
         // as a discrete keystroke (single-chunk gets paste-buffered).
         this.ptyManager.writeAndSubmit(session.ptySessionId, params.message);
         console.log(
-          `[BridgeServer] Notified ${
-            isMissionContext ? "mission" : "board"
-          } orchestrator (project=${projectId}, context=${
+          `[BridgeServer] Notified ${target} orchestrator (project=${projectId}, context=${
             contextId || "board"
           }): ${params.message.slice(0, 80)}...`,
         );
