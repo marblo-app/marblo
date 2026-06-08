@@ -97,6 +97,15 @@ async function runDispatch(
   priorContext?: string,
 ): Promise<StepResult> {
   try {
+    // 멱등: 이 미션이 이미 만든 (비종료) task 가 있으면 재dispatch 하지 않고 기존
+    // 것을 재사용한다. advanceStep 의 running 가드가 1차 방어지만, retry(부분 실패
+    // 후 재시도) 등 dispatch step 이 "pending" 으로 다시 실행되는 경로에서도 task 가
+    // 중복 생성되지 않도록 여기서 한 번 더 막는다. (템플릿당 dispatch step 은 최대
+    // 1개라 mission 단위 식별로 충분 — 같은 미션의 task = 이 dispatch 가 만든 것.)
+    const existing = await dispatcher.findMissionTaskIds(mission.id);
+    if (existing.length > 0) {
+      return { success: true, output: { taskIds: existing } };
+    }
     const taskIds = await dispatcher.dispatchTasks({
       missionId: mission.id,
       projectId: mission.projectId,

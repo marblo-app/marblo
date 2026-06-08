@@ -169,6 +169,16 @@ function makeDispatcher(calls: DispatchCall[]): TaskDispatcher {
       for (const id of taskIds) if (statuses[id]) out[id] = statuses[id];
       return out;
     },
+    async findMissionTaskIds(missionId) {
+      // 실제 구현과 동일 의미 — 이 미션의 비종료(DONE/FAILED 아님) task id.
+      // fake 는 dispatch 즉시 DONE 으로 두므로 보통 [] → runDispatch 멱등 검사 통과.
+      return Object.keys(statuses).filter(
+        (id) =>
+          id.includes(missionId) &&
+          statuses[id] !== "DONE" &&
+          statuses[id] !== "FAILED",
+      );
+    },
     async killAgentsForTasks() {},
   };
 }
