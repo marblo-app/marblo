@@ -119,21 +119,38 @@ async function runWait(
       return { success: true, output: { statuses: {} } };
     }
     const statuses = await dispatcher.getTaskStatuses(mission.taskIds);
-    const remaining = Object.entries(statuses).filter(
-      ([, s]) => s !== "DONE" && s !== "FAILED",
-    );
-    const anyFailed = Object.values(statuses).some((s) => s === "FAILED");
+    const entries = Object.entries(statuses);
+
+    // [N1] BLOCKED 는 자력으로 DONE 에 도달할 수 없는 비완료 터미널 상태다.
+    // remaining 에 그대로 두면 engine 이 영구 sleeping(WAIT_PENDING) 으로 데드락한다.
+    // 진행 중인 sibling 이 남아있더라도 즉시 wait 를 중단하고 실패로 보고해
+    // engine 의 onFailure(escalate) 경로로 위임한다 — sleeping 으로 전환하지 않는다.
+    const blockedTaskIds = entries
+      .filter(([, s]) => s === "BLOCKED")
+      .map(([id]) => id);
+    const failedTaskIds = entries
+      .filter(([, s]) => s === "FAILED")
+      .map(([id]) => id);
+    if (blockedTaskIds.length > 0) {
+      return {
+        success: false,
+        error: "one_or_more_tasks_blocked",
+        output: { statuses, blockedTaskIds, failedTaskIds },
+      };
+    }
+
+    const remaining = entries.filter(([, s]) => s !== "DONE" && s !== "FAILED");
     if (remaining.length === 0) {
       // FAILED 하나라도 있으면 wait step 도 실패로 본다 — onFailure 정책에 위임.
-      return anyFailed
+      return failedTaskIds.length > 0
         ? {
             success: false,
             error: "one_or_more_tasks_failed",
-            output: { statuses },
+            output: { statuses, failedTaskIds },
           }
         : { success: true, output: { statuses } };
     }
-    // 아직 미완료 → sleeping
+    // 아직 미완료 (TODO/CLAIMED/IN_PROGRESS/REVIEW) → sleeping
     return { success: false, error: WAIT_PENDING, output: { statuses } };
   } catch (e) {
     return { success: false, error: errMsg(e) };
