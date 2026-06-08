@@ -51,6 +51,12 @@ export interface SquashMergeResult {
   conflicts?: string[];
   /** Populated when a deterministic git step failed for a non-conflict reason. */
   error?: string;
+  /**
+   * SHA of the squashed commit landed on base — captured before the worktree
+   * is torn down, so the merge can be recorded in the audit trail and the
+   * original diff recovered later via `git show <sha>`.
+   */
+  mergedSha?: string;
 }
 
 /**
@@ -142,7 +148,7 @@ const NODE_MODULES_CANDIDATES = [
  */
 export function provisionNodeModules(
   repoRoot: string,
-  worktreePath: string,
+  worktreePath: string
 ): void {
   for (const rel of NODE_MODULES_CANDIDATES) {
     const src = path.resolve(repoRoot, rel); // absolute → absolute symlink
@@ -167,7 +173,7 @@ export function provisionNodeModules(
       console.warn(
         `[WorktreeManager] node_modules provisioning skipped for ${rel}: ${
           e instanceof Error ? e.message : String(e)
-        }`,
+        }`
       );
     }
   }
@@ -189,7 +195,7 @@ export class WorktreeManager {
   private runGit(
     args: string[],
     cwd: string,
-    opts?: { timeoutMs?: number },
+    opts?: { timeoutMs?: number }
   ): Promise<GitResult> {
     return new Promise((resolve) => {
       let stdout = "";
@@ -236,12 +242,12 @@ export class WorktreeManager {
   async resolveBaseRef(repoRoot: string): Promise<string> {
     const sym = await this.runGit(
       ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-      repoRoot,
+      repoRoot
     );
     if (sym.code === 0 && sym.stdout.trim()) return sym.stdout.trim();
     const cur = await this.runGit(
       ["rev-parse", "--abbrev-ref", "HEAD"],
-      repoRoot,
+      repoRoot
     );
     if (cur.code === 0 && cur.stdout.trim()) return cur.stdout.trim();
     return "HEAD";
@@ -262,7 +268,7 @@ export class WorktreeManager {
    */
   async fetchOrigin(
     repoRoot: string,
-    timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
+    timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS
   ): Promise<boolean> {
     const res = await this.runGit(["fetch", "origin"], repoRoot, {
       timeoutMs,
@@ -272,7 +278,7 @@ export class WorktreeManager {
         `[WorktreeManager] git fetch origin failed — branching the worktree ` +
           `off the last-known local origin ref (may be stale): ${
             res.stderr.trim() || `exit ${res.code}`
-          }`,
+          }`
       );
       return false;
     }
@@ -311,13 +317,13 @@ export class WorktreeManager {
     const wtPath = path.join(
       this.worktreesRoot,
       params.projectId,
-      params.taskId,
+      params.taskId
     );
     fs.mkdirSync(path.dirname(wtPath), { recursive: true });
 
     const res = await this.runGit(
       ["worktree", "add", "-b", branch, wtPath, baseRef],
-      params.repoRoot,
+      params.repoRoot
     );
     if (res.code !== 0) {
       throw new Error(`git worktree add failed: ${res.stderr.trim()}`);
@@ -338,7 +344,7 @@ export class WorktreeManager {
   async list(repoRoot: string): Promise<WorktreeInfo[]> {
     const res = await this.runGit(
       ["worktree", "list", "--porcelain"],
-      repoRoot,
+      repoRoot
     );
     if (res.code !== 0) return [];
 
@@ -376,14 +382,14 @@ export class WorktreeManager {
   async status(worktreePath: string, baseRef: string): Promise<WorktreeStatus> {
     const branchRes = await this.runGit(
       ["rev-parse", "--abbrev-ref", "HEAD"],
-      worktreePath,
+      worktreePath
     );
     const branch = branchRes.stdout.trim();
 
     // behind = left (baseRef-only), ahead = right (HEAD-only)
     const ab = await this.runGit(
       ["rev-list", "--left-right", "--count", `${baseRef}...HEAD`],
-      worktreePath,
+      worktreePath
     );
     let behind = 0;
     let ahead = 0;
@@ -398,7 +404,7 @@ export class WorktreeManager {
 
     const ns = await this.runGit(
       ["diff", "--numstat", `${baseRef}...HEAD`],
-      worktreePath,
+      worktreePath
     );
     let filesChanged = 0;
     let insertions = 0;
@@ -418,7 +424,7 @@ export class WorktreeManager {
     // conflict from "cannot merge / bad ref", which also exits 1 with no OID.
     const mt = await this.runGit(
       ["merge-tree", "--write-tree", "--name-only", baseRef, "HEAD"],
-      worktreePath,
+      worktreePath
     );
     const mtLines = mt.stdout.split("\n");
     const firstLine = mtLines[0]?.trim() ?? "";
@@ -452,20 +458,20 @@ export class WorktreeManager {
   async remove(
     repoRoot: string,
     worktreePath: string,
-    opts?: { deleteBranch?: boolean },
+    opts?: { deleteBranch?: boolean }
   ): Promise<void> {
     let branch = "";
     if (opts?.deleteBranch) {
       const b = await this.runGit(
         ["rev-parse", "--abbrev-ref", "HEAD"],
-        worktreePath,
+        worktreePath
       );
       if (b.code === 0) branch = b.stdout.trim();
     }
 
     const res = await this.runGit(
       ["worktree", "remove", "--force", worktreePath],
-      repoRoot,
+      repoRoot
     );
     if (res.code !== 0) {
       throw new Error(`git worktree remove failed: ${res.stderr.trim()}`);
@@ -475,7 +481,7 @@ export class WorktreeManager {
       const del = await this.runGit(["branch", "-D", branch], repoRoot);
       if (del.code !== 0) {
         console.warn(
-          `[WorktreeManager] failed to delete branch ${branch}: ${del.stderr.trim()}`,
+          `[WorktreeManager] failed to delete branch ${branch}: ${del.stderr.trim()}`
         );
       }
     }
@@ -490,7 +496,7 @@ export class WorktreeManager {
    */
   async rebaseOntoBase(
     worktreePath: string,
-    baseRef: string,
+    baseRef: string
   ): Promise<RebaseResult> {
     const res = await this.runGit(["rebase", baseRef], worktreePath);
     if (res.code === 0) return { ok: true };
@@ -500,7 +506,7 @@ export class WorktreeManager {
     // was before the rebase started.
     const unmerged = await this.runGit(
       ["diff", "--name-only", "--diff-filter=U"],
-      worktreePath,
+      worktreePath
     );
     const conflicts = unmerged.stdout
       .split("\n")
@@ -524,7 +530,7 @@ export class WorktreeManager {
     repoRoot: string,
     worktreePath: string,
     baseRef: string,
-    branch: string,
+    branch: string
   ): Promise<SquashMergeResult> {
     // (a) Rebase first — bail to the Resolve(agent) path on conflict.
     const rebase = await this.rebaseOntoBase(worktreePath, baseRef);
@@ -550,7 +556,7 @@ export class WorktreeManager {
 
     const commit = await this.runGit(
       ["commit", "-m", `Merge ${branch} (squash)`],
-      repoRoot,
+      repoRoot
     );
     if (commit.code !== 0) {
       await this.runGit(["reset", "--hard"], repoRoot);
@@ -560,9 +566,34 @@ export class WorktreeManager {
       };
     }
 
+    // Capture the squashed commit's SHA on base BEFORE teardown — once the
+    // worktree+branch are gone this is the only stable handle on the merge.
+    const headRev = await this.runGit(["rev-parse", "HEAD"], repoRoot);
+    const mergedSha = headRev.code === 0 ? headRev.stdout.trim() : undefined;
+
     // (c) Tear down the now-merged worktree and its branch.
     await this.remove(repoRoot, worktreePath, { deleteBranch: true });
-    return { ok: true };
+    return { ok: true, mergedSha };
+  }
+
+  /**
+   * Render a merged commit for the audit-trail diff view: `git show` with a
+   * stat header + patch, no color/pager. Used by WorktreeTab's "완료 이력" to
+   * recover what a now-removed worktree actually landed on base. Output is
+   * capped so a giant squash can't flood the renderer.
+   */
+  async showCommit(repoRoot: string, sha: string): Promise<string> {
+    const res = await this.runGit(
+      ["show", "--stat", "--patch", "--no-color", sha],
+      repoRoot
+    );
+    if (res.code !== 0) {
+      throw new Error(`git show ${sha} failed: ${res.stderr.trim()}`);
+    }
+    const MAX = 200_000; // ~200KB guard against pathological squashes
+    return res.stdout.length > MAX
+      ? `${res.stdout.slice(0, MAX)}\n\n…(생략됨 — 전체는 git show ${sha})`
+      : res.stdout;
   }
 
   async prune(repoRoot: string): Promise<void> {
@@ -584,7 +615,7 @@ export class WorktreeManager {
     if (!ok) {
       console.warn(
         `[WorktreeManager] git ${version || "unknown"} < 2.38 — ` +
-          `merge-tree --write-tree unsupported; status() mergeability may be unreliable.`,
+          `merge-tree --write-tree unsupported; status() mergeability may be unreliable.`
       );
     }
     return { ok, version };
@@ -599,11 +630,11 @@ export class WorktreeManager {
    */
   async isMergedIntoBase(
     worktreePath: string,
-    baseRef: string,
+    baseRef: string
   ): Promise<boolean> {
     const res = await this.runGit(
       ["rev-list", "--count", `${baseRef}..HEAD`],
-      worktreePath,
+      worktreePath
     );
     if (res.code !== 0) return false;
     const ahead = parseInt(res.stdout.trim(), 10);
@@ -626,7 +657,7 @@ export class WorktreeManager {
   async staleInfo(
     worktreePath: string,
     baseRef: string,
-    opts?: StaleOptions,
+    opts?: StaleOptions
   ): Promise<StaleInfo> {
     const maxIdleDays = opts?.maxIdleDays ?? DEFAULT_MAX_IDLE_DAYS;
     const merged = await this.isMergedIntoBase(worktreePath, baseRef);
@@ -635,7 +666,7 @@ export class WorktreeManager {
     let idleDays = 0;
     if (last) {
       idleDays = Math.floor(
-        (now.getTime() - last.getTime()) / STALE_MS_PER_DAY,
+        (now.getTime() - last.getTime()) / STALE_MS_PER_DAY
       );
       if (idleDays < 0) idleDays = 0;
     }
@@ -653,7 +684,7 @@ export class WorktreeManager {
    */
   async cleanupStale(
     repoRoot: string,
-    opts?: StaleOptions,
+    opts?: StaleOptions
   ): Promise<CleanupStaleResult> {
     const baseRef = await this.resolveBaseRef(repoRoot);
     const worktrees = await this.list(repoRoot);

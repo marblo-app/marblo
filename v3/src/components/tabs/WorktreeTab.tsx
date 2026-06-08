@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
+import { subscribeToMergeHistory } from "../../services/mergeHistoryService";
+import type { MergeHistoryEntry } from "../../types/mergeHistory";
 import type {
   Worktree,
   WorktreeStatusPill,
@@ -213,6 +215,132 @@ function WorktreeRow({
   );
 }
 
+// ── 완료 이력 (merge-history 감사 트레일) ─────────────────────────────
+
+function relativeTime(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "방금";
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}일 전`;
+  return date.toLocaleDateString("ko-KR");
+}
+
+function MergeModeBadge({ mode }: { mode: MergeHistoryEntry["mode"] }) {
+  const isAuto = mode === "auto";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+        isAuto
+          ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
+          : "bg-sky-500/15 text-sky-300 border border-sky-500/30"
+      }`}
+      title={isAuto ? "오케스트레이터 자동머지" : "사람이 머지"}
+    >
+      {isAuto ? "🤖 자동" : "🙂 사람"}
+    </span>
+  );
+}
+
+function MergeHistoryRow({
+  entry,
+  projectLabel,
+}: {
+  entry: MergeHistoryEntry;
+  projectLabel: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [diff, setDiff] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = async () => {
+    const next = !expanded;
+    setExpanded(next);
+    // Lazy-load the diff on first expand; the squashed commit lives on base.
+    if (next && diff === null && !loading) {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await window.electronAPI.worktree.showCommit(
+          entry.repoRoot,
+          entry.headSha,
+        );
+        setDiff(res.diff);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "diff 로드 실패");
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-800/40 px-3 py-2">
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex w-full items-center gap-3 text-left"
+        title="클릭하면 머지된 diff (git show)"
+      >
+        <span aria-hidden className="text-gray-500">
+          {expanded ? "▾" : "▸"}
+        </span>
+        <span
+          className="w-28 flex-shrink-0 truncate text-xs text-gray-500"
+          title={projectLabel}
+        >
+          {projectLabel}
+        </span>
+        <span
+          className="min-w-0 flex-1 truncate text-sm text-gray-100"
+          title={entry.taskId ?? undefined}
+        >
+          {entry.taskId ?? <span className="text-gray-500">(ad-hoc)</span>}
+        </span>
+        <span
+          className="w-44 flex-shrink-0 truncate font-mono text-xs text-blue-300"
+          title={entry.branch}
+        >
+          {entry.branch}
+        </span>
+        <span
+          className="w-16 flex-shrink-0 font-mono text-xs text-emerald-300"
+          title={`${entry.headSha} — 클릭하면 diff`}
+        >
+          {entry.headSha.slice(0, 7)}
+        </span>
+        <span
+          className="w-20 flex-shrink-0 text-right text-xs text-gray-400"
+          title={entry.mergedAt.toLocaleString("ko-KR")}
+        >
+          {relativeTime(entry.mergedAt)}
+        </span>
+        <span className="w-16 flex-shrink-0 text-right">
+          <MergeModeBadge mode={entry.mode} />
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="mt-2 border-t border-gray-800 pt-2">
+          {loading ? (
+            <p className="text-xs text-gray-500">diff 불러오는 중…</p>
+          ) : error ? (
+            <p className="text-xs text-red-300">{error}</p>
+          ) : (
+            <pre className="max-h-96 overflow-auto rounded bg-gray-900/70 p-2 font-mono text-[11px] leading-snug text-gray-300">
+              {diff}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function WorktreeTab() {
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const loading = useWorktreeStore((s) => s.loading);
@@ -244,11 +372,38 @@ export function WorktreeTab() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [cleaningStale, setCleaningStale] = useState(false);
+  // 완료 이력 뷰 — 머지되어 사라진 워크트리의 감사 트레일 (merge_history).
+  const [historyView, setHistoryView] = useState(false);
+  const [history, setHistory] = useState<MergeHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // mount 시 1회 로드. 실패는 store.lastError 로 표면화되므로 swallow.
   useEffect(() => {
     refresh().catch(() => {});
   }, [refresh]);
+
+  // 완료 이력은 뷰가 켜졌을 때만 구독 (on-demand 리스너).
+  useEffect(() => {
+    if (!historyView) return;
+    setHistoryLoading(true);
+    const unsub = subscribeToMergeHistory(
+      (entries) => {
+        setHistory(entries);
+        setHistoryLoading(false);
+      },
+      { maxResults: 200 },
+    );
+    return () => unsub();
+  }, [historyView]);
+
+  // 프로젝트 필터를 완료 이력에도 적용 (이력은 이미 최신순 정렬됨).
+  const historyEntries = useMemo(
+    () =>
+      projectFilter === "all"
+        ? history
+        : history.filter((e) => e.projectId === projectFilter),
+    [history, projectFilter],
+  );
 
   // projectId → 사람이 읽는 이름. 미등록 프로젝트는 id 그대로.
   const projectName = useMemo(() => {
@@ -354,6 +509,10 @@ export function WorktreeTab() {
           path: worktree.path,
           baseRef: worktree.baseRef,
           branch: worktree.branch,
+          // 머지 이력 감사 트레일용 메타 (사람이 누른 머지).
+          projectId: worktree.projectId,
+          taskId: worktree.taskId ?? undefined,
+          mode: "manual",
         });
         setActionMessage(`${worktree.branch} squash-merge 완료`);
       } else if (action === "resolve") {
@@ -475,6 +634,19 @@ export function WorktreeTab() {
           ⚠️ 예외만
         </label>
 
+        <button
+          type="button"
+          onClick={() => setHistoryView((v) => !v)}
+          title="완료(머지)되어 사라진 워크트리의 감사 이력 — sha 클릭 시 diff"
+          className={`rounded border px-2 py-1 text-xs transition ${
+            historyView
+              ? "border-sky-500/50 bg-sky-500/15 text-sky-200"
+              : "border-gray-700 text-gray-300 hover:bg-gray-800"
+          }`}
+        >
+          📜 완료 이력
+        </button>
+
         <div className="ml-auto flex items-center gap-2">
           {staleWorktrees.length > 0 && (
             <button
@@ -520,7 +692,35 @@ export function WorktreeTab() {
 
       {/* 본문 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {loading && worktrees.length === 0 ? (
+        {historyView ? (
+          historyLoading && history.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-sm text-gray-500">
+              완료 이력을 불러오는 중…
+            </div>
+          ) : historyEntries.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
+                <p className="text-sm text-gray-300">
+                  완료된 머지 이력이 없습니다.
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  워크트리가 머지되면 여기에 감사 이력으로 쌓입니다. (sha 클릭
+                  시 diff)
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {historyEntries.map((entry) => (
+                <MergeHistoryRow
+                  key={entry.id}
+                  entry={entry}
+                  projectLabel={projectName(entry.projectId)}
+                />
+              ))}
+            </div>
+          )
+        ) : loading && worktrees.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-gray-500">
             워크트리를 불러오는 중…
           </div>
