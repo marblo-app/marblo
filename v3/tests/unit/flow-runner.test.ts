@@ -371,4 +371,102 @@ describe('FlowRunner', () => {
       expect(state.nodeResults['no2'].status).toBe('skipped');
     });
   });
+
+  describe('join-aware downstream skipping', () => {
+    // Diamond: a branch forks into two arms (b, c) that re-converge on d.
+    // With a real branch exactly one arm is taken, so one parent of the join
+    // is skipped. The join must still run because the other parent is live —
+    // the pre-fix recursion dropped d outright yet reported 'completed'.
+    it('runs a re-converging join node when one parent arm is skipped', async () => {
+      const flow = makeFlow(
+        [
+          makeNode('in', 'input', { flag: false }),
+          makeNode('branch', 'branch', { condition: 'truthy', field: 'flag' }),
+          makeNode('b', 'output'), // 'true' arm — skipped (flag is false)
+          makeNode('c', 'output'), // 'false' arm — live
+          makeNode('d', 'output'), // join of b & c
+        ],
+        [
+          makeEdge('in', 'branch'),
+          makeEdge('branch', 'b', 'true'),
+          makeEdge('branch', 'c', 'false'),
+          makeEdge('b', 'd'),
+          makeEdge('c', 'd'),
+        ],
+      );
+
+      const state = await runner.run(flow);
+      expect(state.status).toBe('completed');
+      expect(state.nodeResults['b'].status).toBe('skipped');
+      expect(state.nodeResults['c'].status).toBe('success');
+      // The join survives because the live arm (c) still feeds it.
+      expect(state.nodeResults['d'].status).toBe('success');
+      expect(state.nodeResults['d'].status).not.toBe('skipped');
+    });
+
+    // The live arm is deeper than the skipped arm: when the branch is
+    // processed, the join is reached via the short skipped arm while the live
+    // arm's nodes are still pending in later layers. The join must be kept
+    // alive on the pending parent and run once that arm resolves.
+    it('keeps a join alive when the live arm resolves in a later layer', async () => {
+      const flow = makeFlow(
+        [
+          makeNode('in', 'input', { flag: true }),
+          makeNode('branch', 'branch', { condition: 'truthy', field: 'flag' }),
+          makeNode('short', 'output'), // 'false' arm — skipped, short path
+          makeNode('live1', 'input'), // 'true' arm — live, deeper path
+          makeNode('live2', 'output'),
+          makeNode('join', 'output'),
+        ],
+        [
+          makeEdge('in', 'branch'),
+          makeEdge('branch', 'short', 'false'),
+          makeEdge('branch', 'live1', 'true'),
+          makeEdge('live1', 'live2'),
+          makeEdge('short', 'join'),
+          makeEdge('live2', 'join'),
+        ],
+      );
+
+      const state = await runner.run(flow);
+      expect(state.status).toBe('completed');
+      expect(state.nodeResults['short'].status).toBe('skipped');
+      expect(state.nodeResults['live2'].status).toBe('success');
+      expect(state.nodeResults['join'].status).toBe('success');
+    });
+
+    // Control: when EVERY parent of a join is dead the join must still be
+    // skipped (no false survival). The whole subtree below a skipped arm,
+    // including its re-convergence point, is dropped.
+    it('still skips a join when all of its parents are dead', async () => {
+      const flow = makeFlow(
+        [
+          makeNode('in', 'input', { flag: true }),
+          makeNode('branch', 'branch', { condition: 'truthy', field: 'flag' }),
+          makeNode('keep', 'output'), // 'true' arm — taken
+          makeNode('y', 'input'), // 'false' arm — skipped
+          makeNode('p', 'output'),
+          makeNode('q', 'output'),
+          makeNode('join', 'output'), // join of p & q, both descend from y
+        ],
+        [
+          makeEdge('in', 'branch'),
+          makeEdge('branch', 'keep', 'true'),
+          makeEdge('branch', 'y', 'false'),
+          makeEdge('y', 'p'),
+          makeEdge('y', 'q'),
+          makeEdge('p', 'join'),
+          makeEdge('q', 'join'),
+        ],
+      );
+
+      const state = await runner.run(flow);
+      expect(state.status).toBe('completed');
+      expect(state.nodeResults['keep'].status).toBe('success');
+      expect(state.nodeResults['y'].status).toBe('skipped');
+      expect(state.nodeResults['p'].status).toBe('skipped');
+      expect(state.nodeResults['q'].status).toBe('skipped');
+      expect(state.nodeResults['join'].status).toBe('skipped');
+    });
+  });
 });

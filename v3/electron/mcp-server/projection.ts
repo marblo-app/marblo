@@ -67,7 +67,7 @@ export function computeTaskProjection(
   currentStatus: TaskStatus,
   taskId: string,
   now: Timestamp,
-  mut: ProjectionMutation
+  mut: ProjectionMutation,
 ): TaskProjection {
   const nextStatus = mut.newStatus ?? currentStatus;
   const milestonesPassed = prev?.milestonesPassed ?? [];
@@ -107,7 +107,7 @@ export function computeTaskProjection(
 export function applyMissionStatusDelta(
   prev: Record<string, number> | undefined,
   oldStatus: TaskStatus,
-  newStatus: TaskStatus
+  newStatus: TaskStatus,
 ): Record<string, number> {
   const next = { ...(prev ?? {}) };
   if (oldStatus === newStatus) return next;
@@ -126,7 +126,10 @@ export interface ApplyProjectionInput extends ProjectionMutation {
    * false 면 throw → 트랜잭션 abort (TOCTOU 방어). 핸들러가 트랜잭션 밖에서 한
    * status 검사는 동시 claim/update race 를 못 막는다 (둘 다 통과 후 마지막 write
    * 가 이김). 같은 술어를 넘겨 트랜잭션 안에서 재검사하면 두 번째 커밋이 거부된다.
-   * 미지정 시 검사 생략 (add_activity 처럼 status 안 바꾸는 경로).
+   * 미지정 시 검사 생략 — add_activity 처럼 status 안 바꾸는 경로, 그리고
+   * update_task_status(force=true) 같은 문서화된 escape hatch 가 여기로 온다.
+   * 즉 force 는 'validateFrom 을 안 넘긴다' 로 관통한다: 핸들러가 트랜잭션 밖
+   * 검사를 건너뛰었으면 이 in-txn 재검사도 함께 꺼져야 escape hatch 가 산다.
    */
   validateFrom?: (from: TaskStatus) => boolean;
 }
@@ -138,10 +141,10 @@ export interface ApplyProjectionInput extends ProjectionMutation {
  */
 async function recomputeMissionCounts(
   db: Firestore,
-  missionId: string
+  missionId: string,
 ): Promise<Record<string, number>> {
   const snap = await getDocs(
-    query(collection(db, "tasks"), where("missionId", "==", missionId))
+    query(collection(db, "tasks"), where("missionId", "==", missionId)),
   );
   const counts: Record<string, number> = {};
   snap.forEach((d) => {
@@ -162,7 +165,7 @@ async function recomputeMissionCounts(
 export async function applyProjection(
   db: Firestore,
   taskId: string,
-  mut: ApplyProjectionInput
+  mut: ApplyProjectionInput,
 ): Promise<void> {
   const taskRef = doc(db, "tasks", taskId);
   const activityRef = mut.activityPayload
@@ -207,7 +210,7 @@ export async function applyProjection(
     // 재검사. 핸들러가 트랜잭션 밖에서 한 검사는 동시 claim/update race 를 못 막는다.
     if (mut.newStatus && mut.validateFrom && !mut.validateFrom(oldStatus)) {
       throw new Error(
-        `Task ${taskId} cannot transition from ${oldStatus} to ${mut.newStatus}`
+        `Task ${taskId} cannot transition from ${oldStatus} to ${mut.newStatus}`,
       );
     }
 
@@ -223,7 +226,7 @@ export async function applyProjection(
       oldStatus,
       taskId,
       now,
-      mut
+      mut,
     );
 
     const taskUpdate: Record<string, unknown> = {
