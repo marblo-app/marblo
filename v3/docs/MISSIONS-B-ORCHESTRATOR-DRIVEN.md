@@ -231,6 +231,49 @@ MISSIONS-SPEC §8 의 룰을 **B안용으로 강화**한다 (요지):
 
 ---
 
+## 12. 회귀 · 벤치
+
+> Phase 5-B. §8-6("회귀: 데모 시나리오 e2e 로 게이트 순서 보장 확인 + 토큰/지연 벤치")의 운영 절차. 두 층으로 나눈다 — **(a) LLM 없이 결정적인 회귀 스위트**(CI 상시)와 **(b) 실 LLM 라이브 벤치**(수동/주기). 단위테스트는 지휘자 운전 _사이클의 오버헤드_(게이트·전진·store 왕복)만 결정적으로 지킬 수 있고, 실제 *토큰 비용·체감 지연*은 실 오케 세션이 있어야 측정된다 — 둘의 경계가 이 절의 핵심이다.
+
+### 12.1 결정적 회귀 e2e (LLM 없이 · CI 상시)
+
+B안 운전 계약을 in-memory fake(store/orch/eventBus)로 end-to-end 고정한다. 실시간·랜덤 의존이 없어 flaky 하지 않다.
+
+| 스위트 (Phase)          | 파일                                           | 무엇을 지키나                                                                                             |
+| ----------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Phase 3 — 풀 루프       | `tests/unit/mission-b-e2e.test.ts`             | grant→report→gate→advance→complete 전 구간 + 게이트 fail→retry/escalate + wait(task 완료) 게이트          |
+| Phase 4 — 타임라인 합성 | `tests/unit/mission-timeline-synth.test.ts`    | forwarder 신호(task.status_changed/activity_logged) → contextLog `task.status`/`task.activity` 합성·dedup |
+| Phase 5 — 데모 시나리오 | `tests/unit/mission-b-demo-regression.test.ts` | 강의 데모 시나리오(템플릿 풀루프)의 **게이트 순서 보장** — 단계 누락/역순 회귀 차단 (§5.6)                |
+| Phase 5 — 지휘자 벤치   | `tests/unit/mission-b-conductor-bench.test.ts` | full-feature(10스텝) **N미션**을 completed 까지 구동 — 전부 완주 + 스텝 순서 보존 + 운전 오버헤드 회귀    |
+
+실행:
+
+```bash
+cd v3 && npx vitest run \
+  tests/unit/mission-b-e2e.test.ts \
+  tests/unit/mission-timeline-synth.test.ts \
+  tests/unit/mission-b-demo-regression.test.ts \
+  tests/unit/mission-b-conductor-bench.test.ts
+```
+
+**지휘자 벤치(`mission-b-conductor-bench`)의 성격:** 정확성은 _엄격히_ 단정하고(전부 completed, `currentStepIndex===steps.length`, `step.started` 인덱스 `0..9` 오름차순), 타이밍은 _informational_ 로그(`총 / 미션당 / 스텝당 ms`) + **관대한** 스모크 실링(미션당 400ms 예산 — 실측은 보통 한 자릿수 ms)만 둔다. 타이트한 perf 게이트는 CI flaky 의 원인이라 두지 않는다. 이 실링은 운전 루프가 O(n²)/블로킹으로 무너지는 _catastrophic_ 회귀만 잡는 안전망이다.
+
+### 12.2 라이브 토큰/지연 벤치 (실 LLM · 수동/주기)
+
+**왜 단위테스트로 못 잡나:** 위 벤치는 미션 오케스트레이터를 fake(LLM 없음)로 대체하므로 *지휘자 사이클 오버헤드*만 측정한다. 실제 지배적 비용 — **오케 세션의 토큰 소비**(컨텍스트 크기·추론 토큰·다중 턴 드리프트, §5.5)와 **스텝 체감 지연**(LLM 추론 시간) — 은 실 Claude 세션이 돌아야만 발생한다. 따라서 이 층은 단위테스트가 아니라 실행 절차로 측정한다.
+
+**절차:**
+
+1. **드라이버 플립 + 앱 재시작.** `MISSION_DRIVER=orchestrator` 로 설정(`getMissionDriver()` 가 main 프로세스에서 `process.env.MISSION_DRIVER` / fallback `VITE_MISSION_DRIVER` 를 **엔진 생성 시 1회** 읽으므로 재시작 필수). Docker 운영 시 compose env 에 주입 후 `docker compose up -d --build`; 로컬 dev 면 launch 전 `export MISSION_DRIVER=orchestrator`. 미설정/오타는 안전하게 `engine`(A안)으로 폴백한다.
+2. **데모 시나리오 실행.** 미션탭에서 `feature`(6스텝) 또는 `full-feature`(10스텝) 템플릿으로 미션을 시작하고 끝까지(또는 대표 구간까지) 굴린다. 동일 시나리오를 A안(`engine`)으로도 한 번 돌려 **A vs B 대조군**을 만든다.
+3. **측정 항목(어디서 보나):**
+   - **토큰** — 미션 오케스트레이터 세션(`kind="mission"` PTY)의 토큰/비용. Claude 세션 statusline·cost 표시 + 텔레메트리(BigQuery 1차 수집, `telemetry_privacy_policy`) 의 세션 단위 토큰. A안은 오케 PTY 가 슬래시 명령만 받으므로 토큰이 얇고, B안은 오케가 자율 운전하므로 더 두껍다 — 이 **증분**이 B안의 진짜 비용.
+   - **스텝 지연** — `missions/*` 의 `contextLog` 에서 각 스텝의 `step.started` ↔ `step.completed` 타임스탬프(`ts`) 차이. 미션 타임라인 UI 가 스텝 전이를 렌더하므로 육안으로도 확인 가능. 지휘자 게이트 왕복 지연(결정적, 위 단위벤치로 회귀 감시)과 LLM 추론 지연(여기서만 측정)을 분리해서 본다.
+   - **드리프트/재주입 비용** — 장기 미션에서 헌법 재주입(get_agent_skill) + 컨텍스트 요약 빈도(§5.5). 세션이 길어질수록 턴당 토큰이 증가하는지 추세를 본다.
+4. **합격선(소프트):** B안 토큰 증분이 "끊김없는 단일 경험"(§1·§10 전환 트리거)이 주는 가치 대비 수용 가능한지를 _정성_ 판단한다. 토큰/지연에 하드 게이트를 걸지 않는다 — 모델·시나리오·컨텍스트에 따라 변동이 크기 때문. 회귀의 _결정적_ 부분(순서·완주·사이클 오버헤드)은 §12.1 이, _확률적_ 부분(토큰·체감)은 이 라이브 절차가 나눠 책임진다.
+
+---
+
 ## 부록 — 관련 코드 앵커 (v3.1 구현자용)
 
 | 관심사                                                  | 위치                                                     |
