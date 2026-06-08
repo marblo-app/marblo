@@ -146,7 +146,15 @@ export type MissionEngineEventType =
   | "agent.stuck"
   | "agent.completed"
   | "user.input_received"
-  | "mission.wakeup_request";
+  | "mission.wakeup_request"
+  // B안 Phase 2 (보고 채널) — 미션 오케스트레이터가 스텝 완료/실패를 지휘자
+  // (Conductor) 에 보고하는 신호. MCP 도구 `mission_step_done` 이 발원지이며,
+  // 메인 프로세스 bridge 가 이 이벤트로 변환해 emit 한다. 페이로드는
+  //   payload: { stepIndex: number; result: { success: boolean; output?: unknown; error?: string } }
+  // (missionId 는 다른 이벤트들과 동일하게 최상위 필드). 지휘자(P2-A)가 이 이벤트를
+  // 구독해 onStepReport 로 처리 — result.success → StepReport.status 매핑.
+  // 설계: v3/docs/MISSIONS-B-ORCHESTRATOR-DRIVEN.md §4 / §8.4.
+  | "mission.step_reported";
 
 export interface MissionEngineEvent {
   type: MissionEngineEventType;

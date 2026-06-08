@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, Timestamp, } from "firebase/firestore";
 import { db } from "./firebase.js";
-import { resolveContext, resolveContextForWrite, resolveMissionContextForWrite, contextReadFilter, } from "./context.js";
+import { resolveContext, resolveContextForWrite, resolveMissionContextForWrite, contextReadFilter, buildMissionStepReportedEvent, } from "./context.js";
 import { applyProjection, resolveDependentIfReady, isLaneContext, } from "./projection.js";
 import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
 import * as fs from "node:fs";
@@ -53,6 +53,39 @@ function notifyOrchestrator(message, contextId) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, projectId, contextId: contextId ?? "" }),
+    }).catch(() => {
+        /* best-effort */
+    });
+}
+/**
+ * B안 Phase 2 보고 채널 — 오케스트레이터의 `mission_step_done` 을 미션 지휘자
+ * (Conductor) 로 전달한다.
+ *
+ * MCP 서버는 별도 프로세스라 메인 프로세스의 in-process `MissionEventBus` 에 직접
+ * emit 할 수 없다(spawn/dispatch 와 동일 제약). 그래서 bridge 로 POST 하면, 메인
+ * 프로세스가 이 요청을 받아
+ *   eventBus.emit({ type: "mission.step_reported", missionId, payload: { stepIndex, result } })
+ * 로 변환한다. 계약: P2-A 지휘자가 이 이벤트를 구독해 `onStepReport` 로 처리.
+ *
+ * ── 통합 seam (P2-C 스코프 밖 — 메인 프로세스 1줄 배선) ──
+ *   bridge-server: `POST /mission-step-report` 핸들러가 body `{missionId, stepIndex,
+ *   result}` 를 파싱해 주입된 콜백 호출 → main.ts 가 그 콜백을 위 `eventBus.emit` 로
+ *   연결. 이 엔드포인트가 아직 없으면 아래 fetch 는 조용히 무시된다(best-effort).
+ *
+ * Fire-and-forget — 보고 유실이 미션 진행을 막지 않도록 에러를 삼킨다.
+ */
+function emitMissionStepReport(event) {
+    const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+    if (!bridgePort)
+        return;
+    fetch(`http://127.0.0.1:${bridgePort}/mission-step-report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            missionId: event.missionId,
+            stepIndex: event.payload.stepIndex,
+            result: event.payload.result,
+        }),
     }).catch(() => {
         /* best-effort */
     });
@@ -1737,6 +1770,48 @@ export function registerTools(server) {
                 finish(false, `spawn error: ${err.message}`);
             });
         });
+    });
+    // mission_step_done — B안 Phase 2 (보고 채널): 미션 오케스트레이터 → 지휘자
+    // 스텝완료/실패 보고. 설계: v3/docs/MISSIONS-B-ORCHESTRATOR-DRIVEN.md §4 / §8.4.
+    auditedTool("mission_step_done", "Report completion (or failure) of the CURRENT mission step to the mission " +
+        "conductor. Valid only inside a mission orchestrator context " +
+        "(MARBLO_CONTEXT=<missionId>); board / Quick Lane / unscoped callers are " +
+        "rejected. Emits the 'mission.step_reported' event the conductor subscribes " +
+        "to. Call this when a granted step is finished — do NOT advance to the next " +
+        "step yourself; the conductor verifies the step gate and grants the next.", {
+        stepIndex: z
+            .number()
+            .int()
+            .optional()
+            .describe("Index of the completed step. Omit to let the conductor use the " +
+            "mission's current step."),
+        result: z
+            .object({
+            success: z.boolean().describe("Whether the step succeeded."),
+            output: z
+                .unknown()
+                .optional()
+                .describe("Artifact summary for gate verification (e.g. PR URL, review verdict)."),
+            error: z
+                .string()
+                .optional()
+                .describe("Failure reason when success=false."),
+        })
+            .optional()
+            .describe("Step result. Omit to report a successful completion."),
+    }, async ({ stepIndex, result }) => {
+        const event = buildMissionStepReportedEvent(stepIndex, result);
+        if (!event) {
+            return text("Error: mission_step_done requires a mission context. This caller is on " +
+                "the board / a Quick Lane / unscoped (MARBLO_CONTEXT is not a missionId), " +
+                "so there is no mission step to report.");
+        }
+        emitMissionStepReport(event);
+        const { missionId, payload } = event;
+        const status = payload.result.success ? "success" : "failed";
+        const stepLabel = payload.stepIndex < 0 ? "current step" : `step ${payload.stepIndex}`;
+        return text(`Reported ${stepLabel} as ${status} to the conductor for mission ${missionId}.` +
+            (payload.result.error ? ` (error: ${payload.result.error})` : ""));
     });
 }
 //# sourceMappingURL=tools.js.map

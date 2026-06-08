@@ -70,3 +70,67 @@ export function computeContextIdBackfill(
     .filter((t) => !t.contextId)
     .map((t) => ({ id: t.id, contextId: t.missionId ?? "board" }));
 }
+
+// ── Mission step report (B안 Phase 2 — 오케스트레이터 → 지휘자 보고 채널) ──
+// 설계: v3/docs/MISSIONS-B-ORCHESTRATOR-DRIVEN.md §4 / §8.4.
+//
+// mcp-server 는 별도 프로세스 + 격리 컴파일(rootDir)이라 mission-engine/ports 의
+// MissionEngineEvent 를 import 할 수 없다. 그래서 'mission.step_reported' 이벤트의
+// 페이로드 계약을 여기 순수 모듈에 미러한다 (firebase 미의존 → 단위테스트 격리).
+
+/**
+ * 현재 MCP 호출 컨텍스트의 missionId. board / Quick Lane / 미설정이면 `null`
+ * (= 미션 컨텍스트가 아니므로 스텝 보고 불가). `resolveMissionContextForWrite` 와
+ * 동일 규칙의 의미상 별칭 — 보고(report) 경로에서 의도를 분명히 하려고 분리했다.
+ */
+export function resolveMissionIdFromContext(
+  env: Env = process.env,
+): string | null {
+  return resolveMissionContextForWrite(env);
+}
+
+/** 오케스트레이터가 보고한 스텝 결과 (MissionEventBus 'mission.step_reported' payload). */
+export interface MissionStepResult {
+  success: boolean;
+  output?: unknown;
+  error?: string;
+}
+
+/**
+ * MissionEventBus 'mission.step_reported' 이벤트 (mcp-server 측 미러).
+ * mission-engine/ports.ts 의 `MissionEngineEvent` 와 구조 동일: `{ type, missionId, payload }`.
+ * 지휘자(P2-A)는 `event.missionId` + `event.payload.{stepIndex,result}` 로 읽는다.
+ */
+export interface MissionStepReportedEvent {
+  type: "mission.step_reported";
+  missionId: string;
+  payload: { stepIndex: number; result: MissionStepResult };
+}
+
+/**
+ * 미지정 stepIndex 의 sentinel. 오케스트레이터가 stepIndex 를 생략하면 지휘자가
+ * 미션의 현재 스텝(mission.currentStep)으로 해석하라는 신호.
+ */
+export const UNSPECIFIED_STEP_INDEX = -1;
+
+/**
+ * 스텝완료 보고 이벤트 빌더 (순수). 미션 컨텍스트가 아니면 `null` 을 반환해 거부한다.
+ *  - `stepIndex` 미지정 → `UNSPECIFIED_STEP_INDEX` (지휘자가 현재 스텝으로 해석).
+ *  - `result` 미지정 → `{ success: true }` (도구명 'done' = 성공 보고가 기본).
+ */
+export function buildMissionStepReportedEvent(
+  stepIndex: number | undefined,
+  result: MissionStepResult | undefined,
+  env: Env = process.env,
+): MissionStepReportedEvent | null {
+  const missionId = resolveMissionIdFromContext(env);
+  if (!missionId) return null;
+  return {
+    type: "mission.step_reported",
+    missionId,
+    payload: {
+      stepIndex: stepIndex ?? UNSPECIFIED_STEP_INDEX,
+      result: result ?? { success: true },
+    },
+  };
+}
