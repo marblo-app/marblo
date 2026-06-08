@@ -33,7 +33,14 @@ const QUIESCENCE_MS = 1_500;
 // 곳에서 멈추고 idle 잔해가 step.output 으로 흘러 티켓을 오염시킨다.
 const READY_WAIT_TIMEOUT_MS = 90_000;
 // readiness 를 본 뒤 이 시간만큼 추가 출력이 없으면 "idle 안정" 으로 판단.
-const IDLE_QUIET_MS = 700;
+// warm 세션(이미 한 번 명령을 받은 PTY)용 짧은 quiet.
+const IDLE_QUIET_WARM_MS = 700;
+// 갓 launch 된 세션용 긴 quiet. OrchestratorManager 가 readiness 후 ~1.5초 뒤
+// 초기 프롬프트("You are the Marblo Orchestrator Agent...")를 주입하므로, 그보다
+// 짧게 기다리면 초기 프롬프트 주입 전에 ready 로 판단해 스킬 명령이 초기 프롬프트와
+// 충돌한다. 1.5초 + 초기 프롬프트 응답 처리까지 덮도록 넉넉히 잡아, fresh 세션에선
+// 초기 프롬프트 round-trip 이 끝나고 idle 로 안정된 뒤에야 주입한다.
+const IDLE_QUIET_FRESH_MS = 3_000;
 // chainPrelude ack 대기 한도.
 const CHAIN_ACK_TIMEOUT_MS = 8_000;
 // Claude Code 1.x / 2.x 의 idle prompt 신호.
@@ -186,6 +193,9 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
   // 명령 주입 전에 오케스트레이터가 idle prompt 에 도달했는지(waitForIdle) 판단하는
   // 용도 — activeRun 의 buffer 는 run 이 set 된 뒤에만 채워지므로 별도 추적이 필요.
   const idleStateByPty = new Map<string, { buf: string; lastDataAt: number }>();
+  // 이 PTY 에 명령을 한 번이라도 성공적으로 주입했는지. 첫 주입은 fresh quiet
+  // (초기 프롬프트 round-trip 을 덮는 긴 idle), 이후는 warm quiet 으로 빠르게.
+  const warmedPtyIds = new Set<string>();
 
   function recordIdle(ptyId: string, data: string): void {
     const st = idleStateByPty.get(ptyId) ?? { buf: "", lastDataAt: 0 };
@@ -197,7 +207,11 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
   // 오케스트레이터가 입력 prompt(readiness 패턴) 에 도달하고 최근 출력이 멎을
   // (IDLE_QUIET_MS) 때까지 대기. timeout 시 false 를 반환하되 caller 는 그래도 진행
   // (best-effort) — 영원히 막지 않는다.
-  function waitForIdle(ptyId: string, timeoutMs: number): Promise<boolean> {
+  function waitForIdle(
+    ptyId: string,
+    timeoutMs: number,
+    quietMs: number,
+  ): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     return new Promise<boolean>((resolve) => {
       const check = () => {
@@ -207,7 +221,7 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
         const quietFor = st
           ? Date.now() - st.lastDataAt
           : Number.POSITIVE_INFINITY;
-        if (ready && quietFor >= IDLE_QUIET_MS) return resolve(true);
+        if (ready && quietFor >= quietMs) return resolve(true);
         if (Date.now() > deadline) return resolve(false);
         setTimeout(check, 150);
       };
@@ -364,7 +378,14 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
     // 유실되고 → 명령이 실행되지 않은 채 idle footer 가 readiness 로 매칭되어
     // 거짓 success → 미션이 멈추고 idle 잔해가 step.output 을 오염시킨다. 이미
     // idle 이면 즉시 반환되므로 warm 세션엔 사실상 무비용.
-    const ready = await waitForIdle(ptyId, READY_WAIT_TIMEOUT_MS);
+    // 첫 주입은 fresh quiet(초기 프롬프트 round-trip 을 덮음), 이후는 warm.
+    const firstInject = !warmedPtyIds.has(ptyId);
+    const ready = await waitForIdle(
+      ptyId,
+      READY_WAIT_TIMEOUT_MS,
+      firstInject ? IDLE_QUIET_FRESH_MS : IDLE_QUIET_WARM_MS,
+    );
+    warmedPtyIds.add(ptyId);
     if (!ready) {
       log("orchestrator not idle before inject — proceeding best-effort", {
         missionId: input.missionId,
@@ -382,9 +403,9 @@ export function createPtySkillRunner(deps: PtySkillRunnerDeps): SkillRunner {
         log("chainPrelude writeAndSubmit failed", { err: String(e) });
       }
       // ack 대기 — chainPrelude 주입 직후엔 곧장 readiness 가 남아있을 수 있어
-      // 짧게 텀을 둔 뒤 idle 안정을 본다.
+      // 짧게 텀을 둔 뒤 idle 안정을 본다 (warm quiet).
       await new Promise<void>((r) => setTimeout(r, 400));
-      await waitForIdle(ptyId, CHAIN_ACK_TIMEOUT_MS);
+      await waitForIdle(ptyId, CHAIN_ACK_TIMEOUT_MS, IDLE_QUIET_WARM_MS);
     }
 
     const timeoutMs = Math.min(
