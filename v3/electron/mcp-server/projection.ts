@@ -262,3 +262,81 @@ export async function applyProjection(
     }
   });
 }
+
+// ── Task dependency DAG resolution (N4 race fix) ───────────────
+//
+// `dependsOnCompleted` 는 "이 후행 task 의 모든 선행 의존이 DONE 인가" 플래그다.
+// 어떤 선행 task 가 DONE 되면, 그것을 의존하는 각 후행 task 에 대해 이 함수를
+// 호출해 "모든 의존이 DONE 이면 플래그를 단 한 번만 true 로 뒤집고, 그때만
+// unblocked=true 를 돌려준다". 호출부는 unblocked=true 일 때만 오케스트레이터에
+// notify 하므로 notify(=디스패치)가 정확히 한 번 발사된다.
+//
+// N4 버그: 예전엔 tools.ts 가 트랜잭션 없이 getDocs 스냅샷의
+// `if (dependsOnCompleted) continue` 를 읽고 → 그 뒤 updateDoc 으로 뒤집었다.
+// T 가 D1·D2 에 의존하고 D1·D2 가 동시에 완료되면 두 핸들러가 모두 stale 한
+// false 를 읽어 둘 다 flip + 둘 다 notify → 같은 T 가 중복 디스패치됐다
+// (check-then-act 비원자성).
+//
+// 수정: flip 을 트랜잭션 안에서 재검사한다(멱등 가드). 트랜잭션 내부에서 다시
+// 읽은 dependsOnCompleted 가 이미 true 면(=race 의 패자) 아무 write 도 안 하고
+// unblocked=false 를 돌려준다. 모든 의존의 DONE 여부도 같은 트랜잭션 스냅샷으로
+// 확인해 TOCTOU 를 닫는다 (applyProjection 의 bug_005 가드와 같은 결).
+export interface DependencyResolution {
+  /** 이 호출이 후행 task 를 막 unblock 했는가(=notify 를 보내야 하는가). */
+  unblocked: boolean;
+  /** unblock 된 후행 task 의 표시용 메타(호출부 notify 메시지에 사용). */
+  title?: string;
+  role?: string;
+}
+
+/**
+ * 후행 task(`dependentId`)의 모든 선행 의존이 DONE 이면 `dependsOnCompleted` 를
+ * 트랜잭션 안에서 멱등하게 true 로 flip 한다. `completedTaskId` 는 이 해소를
+ * 촉발한(=방금 DONE 된) 선행 task 로, DONE 으로 간주해 재조회를 생략한다.
+ *
+ * 반환 `unblocked` 는 "이 호출이 실제로 flip 을 수행했는가" 이다 — 동시 완료
+ * race 에서 단 하나의 호출만 true 를 받으므로 호출부의 notify 가 중복되지 않는다.
+ */
+export async function resolveDependentIfReady(
+  db: Firestore,
+  dependentId: string,
+  completedTaskId: string,
+): Promise<DependencyResolution> {
+  return runTransaction(db, async (txn) => {
+    const depRef = doc(db, "tasks", dependentId);
+    const depSnap = await txn.get(depRef);
+    if (!depSnap.exists()) return { unblocked: false };
+
+    const depData = depSnap.data() as {
+      dependsOn?: string[];
+      dependsOnCompleted?: boolean;
+      title?: string;
+      role?: string;
+    };
+
+    // 멱등 가드: 이미 누군가(동시 완료 race 의 승자) 풀었으면 재-notify 금지.
+    if (depData.dependsOnCompleted) return { unblocked: false };
+
+    // 모든 선행 의존이 DONE 인지 같은 트랜잭션 스냅샷으로 확인.
+    // (Firestore 규칙상 모든 read 는 첫 write 이전 — 아래 txn.update 는 루프 뒤.)
+    const allDeps = depData.dependsOn ?? [];
+    for (const depId of allDeps) {
+      // 방금 이 해소를 촉발한 선행은 DONE 으로 간주(트리거 그 자체).
+      if (depId === completedTaskId) continue;
+      const upstream = await txn.get(doc(db, "tasks", depId));
+      if (
+        !upstream.exists() ||
+        (upstream.data() as { status?: string }).status !== "DONE"
+      ) {
+        return { unblocked: false };
+      }
+    }
+
+    // 여기 도달한 트랜잭션만 단독 승자 — 멱등하게 true 로 flip.
+    txn.update(depRef, {
+      dependsOnCompleted: true,
+      updatedAt: Timestamp.now(),
+    });
+    return { unblocked: true, title: depData.title, role: depData.role };
+  });
+}
