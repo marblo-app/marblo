@@ -190,6 +190,12 @@ async function flushTelemetry() {
     console.warn("[Telemetry] Flush failed:", error);
     if (eventQueue.length < MAX_QUEUE_SIZE * 2) {
       eventQueue.unshift(...batch);
+    } else {
+      console.warn("[Telemetry] Dropping failed telemetry batch:", {
+        dropped: batch.length,
+        queueLength: eventQueue.length,
+        maxBuffered: MAX_QUEUE_SIZE * 2,
+      });
     }
   }
 }

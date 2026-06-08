@@ -12,15 +12,13 @@
  * 경로 안에서 AgentConfigGenerator 가 수행 — 그쪽은 별도 unit 으로 이미
  * 다른 곳에서 검증되므로 여기서는 라우팅 분기만 본다.)
  *
- * 참고: 프로젝트 vitest 설정이 Node22+vitest4 ESM 충돌로 ERR_REQUIRE_ESM
- * 발생 (사전 존재 이슈, 본 패치와 무관). standalone Node 로 실행:
- *   npx tsc tests/unit/dynamic-spawn.test.ts --module commonjs --target es2020 \
- *     --moduleResolution node --esModuleInterop --skipLibCheck --outDir /tmp/...
- *   node /tmp/.../dynamic-spawn.test.js
+ * Run with:
+ *   npx vitest run tests/unit/dynamic-spawn.test.ts
  */
 
 import * as os from "os";
 import * as path from "path";
+import { describe, expect, it } from "vitest";
 import {
   scoreAgents,
   checkSpawnConstraints,
@@ -29,16 +27,6 @@ import {
   MAX_PER_ROLE,
   type AgentInfo,
 } from "../../electron/dispatch-scoring";
-
-// ── tiny harness ────────────────────────────────────────────
-
-const tests: Array<{ name: string; fn: () => void }> = [];
-function test(name: string, fn: () => void) {
-  tests.push({ name, fn });
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`Assertion failed: ${msg}`);
-}
 
 // ── helpers ────────────────────────────────────────────────
 
@@ -72,59 +60,6 @@ function wouldSpawnNew(
   return reusable.length === 0;
 }
 
-// ── tests ──────────────────────────────────────────────────
-
-test("dispatch with no agents at all → spawn new (claim 3 trigger)", () => {
-  assert(wouldSpawnNew([], "backend"), "empty agent list must trigger spawn");
-});
-
-test("dispatch with role mismatch only → spawn new (claim 3 trigger)", () => {
-  // 명세서 도 2(b) 시나리오: backend/frontend/design 만 있는데 translation
-  // 요청 들어오면 어떤 에이전트도 매칭 안 됨 → 신규 에이전트 생성.
-  const agents = [
-    makeAgent({ id: "a1", name: "backend", model: "claude", role: "backend" }),
-    makeAgent({
-      id: "a2",
-      name: "frontend",
-      model: "gemini",
-      role: "frontend",
-    }),
-    makeAgent({ id: "a3", name: "design", model: "gpt", role: "design" }),
-  ];
-  assert(
-    wouldSpawnNew(agents, "translation"),
-    "no role match must trigger spawn for new role 'translation'",
-  );
-});
-
-test("dispatch with idle role-matched agent → reuse (no spawn)", () => {
-  const agents = [makeAgent({ status: "idle", role: "backend" })];
-  assert(
-    !wouldSpawnNew(agents, "backend"),
-    "idle role-match must reuse, not spawn",
-  );
-});
-
-test("dispatch with only working role-matched agent → spawn new", () => {
-  // working 에이전트는 mid-task 라 안전하게 reuse 못함 → 새로 spawn.
-  const agents = [makeAgent({ status: "working", role: "backend" })];
-  assert(
-    wouldSpawnNew(agents, "backend"),
-    "working agents must NOT be reused; trigger spawn",
-  );
-});
-
-test("dispatch with only stopped role-matched agent → spawn new (restart not reuse)", () => {
-  // bridge-server.dispatchTask separates restart vs reuse; from a
-  // "would-spawn-something-new" perspective both qualify as not-reuse.
-  // Stopped agents have status='stopped' → not in reusable filter.
-  const agents = [makeAgent({ status: "stopped", role: "backend" })];
-  assert(
-    wouldSpawnNew(agents, "backend"),
-    "stopped agents not reusable; restart/spawn path triggers",
-  );
-});
-
 // ── Worktree isolation gate (FU1: dispatch reuse must not break isolation) ──
 //
 // Full reuse decision as bridge-server.dispatchTask runs it: an idle, role/
@@ -152,75 +87,103 @@ const PROJ = "GFB8JnJrrX6AgahqmGB3";
 const TASK = "x2AaMaMUpUagHyuI5kRb";
 const targetWt = path.join(os.homedir(), ".marblo", "worktrees", PROJ, TASK);
 
-test("reuse: projectId set + agent in MAIN checkout → NOT reused (spawn fresh)", () => {
-  assert(
-    !wouldReuseInWorktree("/Users/dev/marblo/v3", PROJ, TASK),
-    "idle agent parked in main checkout must not be reused for an isolated task",
-  );
+describe("dynamic spawn routing", () => {
+  it("dispatch with no agents at all → spawn new (claim 3 trigger)", () => {
+    expect(wouldSpawnNew([], "backend")).toBe(true);
+  });
+
+  it("dispatch with role mismatch only → spawn new (claim 3 trigger)", () => {
+    // 명세서 도 2(b) 시나리오: backend/frontend/design 만 있는데 translation
+    // 요청 들어오면 어떤 에이전트도 매칭 안 됨 → 신규 에이전트 생성.
+    const agents = [
+      makeAgent({
+        id: "a1",
+        name: "backend",
+        model: "claude",
+        role: "backend",
+      }),
+      makeAgent({
+        id: "a2",
+        name: "frontend",
+        model: "gemini",
+        role: "frontend",
+      }),
+      makeAgent({ id: "a3", name: "design", model: "gpt", role: "design" }),
+    ];
+    expect(wouldSpawnNew(agents, "translation")).toBe(true);
+  });
+
+  it("dispatch with idle role-matched agent → reuse (no spawn)", () => {
+    const agents = [makeAgent({ status: "idle", role: "backend" })];
+    expect(wouldSpawnNew(agents, "backend")).toBe(false);
+  });
+
+  it("dispatch with only working role-matched agent → spawn new", () => {
+    // working 에이전트는 mid-task 라 안전하게 reuse 못함 → 새로 spawn.
+    const agents = [makeAgent({ status: "working", role: "backend" })];
+    expect(wouldSpawnNew(agents, "backend")).toBe(true);
+  });
+
+  it("dispatch with only stopped role-matched agent → spawn new (restart not reuse)", () => {
+    // bridge-server.dispatchTask separates restart vs reuse; from a
+    // "would-spawn-something-new" perspective both qualify as not-reuse.
+    // Stopped agents have status='stopped' → not in reusable filter.
+    const agents = [makeAgent({ status: "stopped", role: "backend" })];
+    expect(wouldSpawnNew(agents, "backend")).toBe(true);
+  });
 });
 
-test("reuse: projectId set + agent already in target worktree → reused", () => {
-  assert(
-    wouldReuseInWorktree(targetWt, PROJ, TASK),
-    "idle agent already in the task's worktree is safe to reuse",
-  );
+describe("worktree isolation gate", () => {
+  it("reuse: projectId set + agent in MAIN checkout → NOT reused (spawn fresh)", () => {
+    expect(wouldReuseInWorktree("/Users/dev/marblo/v3", PROJ, TASK)).toBe(
+      false,
+    );
+  });
+
+  it("reuse: projectId set + agent already in target worktree → reused", () => {
+    expect(wouldReuseInWorktree(targetWt, PROJ, TASK)).toBe(true);
+  });
+
+  it("reuse: no projectId (isolation not required) → reuse retained", () => {
+    expect(wouldReuseInWorktree("/anywhere/at/all", undefined, TASK)).toBe(
+      true,
+    );
+  });
 });
 
-test("reuse: no projectId (isolation not required) → reuse retained", () => {
-  assert(
-    wouldReuseInWorktree("/anywhere/at/all", undefined, TASK),
-    "non-isolated dispatch must keep reusing idle agents regardless of cwd",
-  );
+describe("spawn constraints", () => {
+  it("spawn constraint check blocks at MAX_AGENTS", () => {
+    const agents: AgentInfo[] = [];
+    for (let i = 0; i < MAX_AGENTS; i++) {
+      agents.push(
+        makeAgent({ id: `a${i}`, status: "working", role: "backend" }),
+      );
+    }
+    const r = checkSpawnConstraints(agents, "backend");
+    expect(r.allowed).toBe(false);
+    expect(r.error).toContain("max agents");
+  });
+
+  it("spawn constraint check blocks at MAX_PER_ROLE", () => {
+    const agents: AgentInfo[] = [];
+    for (let i = 0; i < MAX_PER_ROLE; i++) {
+      agents.push(
+        makeAgent({ id: `a${i}`, status: "working", role: "backend" }),
+      );
+    }
+    const r = checkSpawnConstraints(agents, "backend");
+    expect(r.allowed).toBe(false);
+    // But other roles still allowed
+    const r2 = checkSpawnConstraints(agents, "translation");
+    expect(r2.allowed).toBe(true);
+  });
+
+  it("spawn constraint allows when only stopped/error agents present (slot frees)", () => {
+    const agents = [
+      makeAgent({ id: "a1", status: "stopped", role: "backend" }),
+      makeAgent({ id: "a2", status: "error", role: "backend" }),
+    ];
+    const r = checkSpawnConstraints(agents, "backend");
+    expect(r.allowed).toBe(true);
+  });
 });
-
-test("spawn constraint check blocks at MAX_AGENTS", () => {
-  const agents: AgentInfo[] = [];
-  for (let i = 0; i < MAX_AGENTS; i++) {
-    agents.push(makeAgent({ id: `a${i}`, status: "working", role: "backend" }));
-  }
-  const r = checkSpawnConstraints(agents, "backend");
-  assert(!r.allowed, "MAX_AGENTS reached must block spawn");
-  assert(
-    typeof r.error === "string" && r.error.includes("max agents"),
-    "error message must explain",
-  );
-});
-
-test("spawn constraint check blocks at MAX_PER_ROLE", () => {
-  const agents: AgentInfo[] = [];
-  for (let i = 0; i < MAX_PER_ROLE; i++) {
-    agents.push(makeAgent({ id: `a${i}`, status: "working", role: "backend" }));
-  }
-  const r = checkSpawnConstraints(agents, "backend");
-  assert(!r.allowed, "MAX_PER_ROLE reached must block spawn for that role");
-  // But other roles still allowed
-  const r2 = checkSpawnConstraints(agents, "translation");
-  assert(r2.allowed, "different role unaffected by per-role cap");
-});
-
-test("spawn constraint allows when only stopped/error agents present (slot frees)", () => {
-  const agents = [
-    makeAgent({ id: "a1", status: "stopped", role: "backend" }),
-    makeAgent({ id: "a2", status: "error", role: "backend" }),
-  ];
-  const r = checkSpawnConstraints(agents, "backend");
-  assert(r.allowed, "stopped/error agents don't count toward active cap");
-});
-
-// ── runner ────────────────────────────────────────────────
-
-let pass = 0;
-let fail = 0;
-for (const t of tests) {
-  try {
-    t.fn();
-    console.log("✓ " + t.name);
-    pass++;
-  } catch (err) {
-    console.log("✗ " + t.name);
-    console.log("  " + (err instanceof Error ? err.message : String(err)));
-    fail++;
-  }
-}
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail > 0 ? 1 : 0);
