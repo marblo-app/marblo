@@ -9,6 +9,12 @@ import type { MissionEngineDeps, MissionEngineEvent } from "./ports";
 import { assertMissionTransition, isTerminalMission } from "./state-machine";
 import { executeStep, WAIT_PENDING } from "./step-executor";
 import { instantiateSteps, MISSION_TEMPLATES, getTemplate } from "./templates";
+import {
+  createConductorDriver,
+  getMissionDriver,
+  type ConductorDriver,
+  type MissionDriver,
+} from "./conductor-driver";
 
 // MissionEngine — 미션 라이프사이클을 책임지는 코어.
 // 명세: v3/docs/MISSIONS-SPEC.md §7.
@@ -19,19 +25,54 @@ import { instantiateSteps, MISSION_TEMPLATES, getTemplate } from "./templates";
 
 const DEFAULT_MAX_RETRIES = 2; // D10: 1-2회 retry 후 알림 카드
 
+/**
+ * MissionEngine 생성 옵션 — B안(orchestrator-driven) 운전 토글.
+ * 미지정 시 driver 는 env(getMissionDriver) 에서 읽고 기본 'engine' (A안 불변).
+ * conductor 미지정 + driver='orchestrator' 면 엔진이 deps 로 스텁을 자체 조립한다.
+ */
+export interface MissionEngineOptions {
+  driver?: MissionDriver;
+  conductor?: ConductorDriver;
+}
+
 export class MissionEngine {
   private readonly maxRetries: number;
   private readonly now: () => Date;
   private readonly log: (msg: string, meta?: Record<string, unknown>) => void;
   private readonly inFlight: Set<string> = new Set();
   private readonly unsubscribe: () => void;
+  // B안 운전 토글. 'engine'(기본) = 아래 advance-loop 가 운전(A안). 'orchestrator'
+  // = 미션 오케스트레이터가 운전 + conductor 가 게이트 보장(B안). Phase 1 에선
+  // conductor 가 스텁이라 orchestrator 모드는 실제 진행을 하지 않는다(의도).
+  private readonly missionDriver: MissionDriver;
+  private readonly conductor: ConductorDriver | null;
 
-  constructor(private readonly deps: MissionEngineDeps) {
+  constructor(
+    private readonly deps: MissionEngineDeps,
+    options?: MissionEngineOptions,
+  ) {
     this.maxRetries = deps.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.now = deps.now ?? (() => new Date());
     this.log =
       deps.logger ??
       ((m, meta) => console.log(`[MissionEngine] ${m}`, meta ?? ""));
+    // driver 결정 — 명시 옵션 > env > 기본 'engine'. orchestrator 인데 conductor
+    // 가 주입 안 됐으면 엔진이 스텁을 자체 조립(테스트/직접생성 경로 대비).
+    this.missionDriver = options?.driver ?? getMissionDriver();
+    this.conductor =
+      options?.conductor ??
+      (this.missionDriver === "orchestrator"
+        ? createConductorDriver({
+            store: deps.store,
+            orchestrators: deps.orchestrators,
+            logger: this.log,
+          })
+        : null);
+    if (this.missionDriver !== "engine") {
+      this.log(
+        `driver=${this.missionDriver} (B안 orchestrator-driven — Phase 1 스텁, 실제 미진행)`,
+      );
+    }
     this.unsubscribe = deps.eventBus.on((event) =>
       this.onEvent(event).catch((err) =>
         this.log("event handler error", { err: String(err), event }),
@@ -298,6 +339,7 @@ export class MissionEngine {
   /** UI / wiring 종료 시 호출. event bus 구독 해제. */
   dispose(): void {
     this.unsubscribe();
+    this.conductor?.dispose();
   }
 
   // ──────────────────────────── internals ────────────────────────────
@@ -321,6 +363,14 @@ export class MissionEngine {
       return;
     }
 
+    // B안(orchestrator-driven): 외부 이벤트는 지휘자가 게이트 평가에 쓴다 (§3 이벤트
+    // wakeup). 엔진은 타임라인 append / advance 를 하지 않고 위임. Phase 1 스텁이라
+    // no-op + log. 기본 driver='engine' 이면 이 분기를 타지 않아 A안 경로가 불변.
+    if (this.missionDriver === "orchestrator") {
+      await this.conductor?.onEvent(event);
+      return;
+    }
+
     await this.deps.store.appendTimelineEvent(event.missionId, {
       ts: this.now(),
       type: mapEventToTimeline(event.type),
@@ -339,6 +389,14 @@ export class MissionEngine {
   // 한 미션에 동시에 advance 1개만 돌도록 보호. event flood / resume 중복 호출
   // 시 race 방지.
   private scheduleAdvance(missionId: string): void {
+    // B안(orchestrator-driven): 엔진 advance-loop 대신 지휘자(Conductor)에 운전을
+    // 위임한다. launch / resume / onEvent 의 운전 트리거가 모두 여기로 모이므로
+    // 분기점이 하나로 충분하다. Phase 1 에선 conductor 가 스텁(no-op + log)이라
+    // 실제 진행은 아직 일어나지 않는다(의도). 기본 driver='engine'(아래 경로 불변).
+    if (this.missionDriver === "orchestrator") {
+      this.conductor?.requestAdvance(missionId);
+      return;
+    }
     if (this.inFlight.has(missionId)) return;
     this.inFlight.add(missionId);
     // advance 루프가 reject 하면(예: dispatch 성공 후 taskIds/timeline write 중
@@ -855,6 +913,14 @@ export {
   TERMINAL_STATUSES,
 } from "./state-machine";
 export { InProcessMissionEventBus } from "./event-handler";
+export { createConductorDriver, getMissionDriver } from "./conductor-driver";
+export type {
+  ConductorDriver,
+  ConductorDriverDeps,
+  GateResult,
+  MissionDriver,
+  StepReport,
+} from "./conductor-driver";
 export type {
   MissionEngineDeps,
   MissionEngineEvent,
