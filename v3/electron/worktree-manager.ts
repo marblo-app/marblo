@@ -39,8 +39,15 @@ export interface CreateWorktreeParams {
 /** Result of a rebase-onto-base attempt (WORKTREE-SPEC §4 머지단계). */
 export interface RebaseResult {
   ok: boolean;
-  /** Unmerged paths captured before the safe `--abort` (only when ok=false). */
+  /** Unmerged paths captured before the safe `--abort` (only on a real conflict). */
   conflicts?: string[];
+  /**
+   * Set when the rebase failed for a NON-conflict reason (dirty working tree,
+   * bad ref, etc.) — i.e. git refused before a rebase ever started, so there
+   * are no `conflicts` to resolve. Lets callers distinguish "needs conflict
+   * resolution" from "couldn't even begin" instead of swallowing the cause.
+   */
+  error?: string;
 }
 
 /** Result of the clean squash-merge path (WORKTREE-SPEC §6 머지 실행 주체). */
@@ -148,7 +155,7 @@ const NODE_MODULES_CANDIDATES = [
  */
 export function provisionNodeModules(
   repoRoot: string,
-  worktreePath: string
+  worktreePath: string,
 ): void {
   for (const rel of NODE_MODULES_CANDIDATES) {
     const src = path.resolve(repoRoot, rel); // absolute → absolute symlink
@@ -173,7 +180,7 @@ export function provisionNodeModules(
       console.warn(
         `[WorktreeManager] node_modules provisioning skipped for ${rel}: ${
           e instanceof Error ? e.message : String(e)
-        }`
+        }`,
       );
     }
   }
@@ -195,7 +202,7 @@ export class WorktreeManager {
   private runGit(
     args: string[],
     cwd: string,
-    opts?: { timeoutMs?: number }
+    opts?: { timeoutMs?: number },
   ): Promise<GitResult> {
     return new Promise((resolve) => {
       let stdout = "";
@@ -242,12 +249,12 @@ export class WorktreeManager {
   async resolveBaseRef(repoRoot: string): Promise<string> {
     const sym = await this.runGit(
       ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-      repoRoot
+      repoRoot,
     );
     if (sym.code === 0 && sym.stdout.trim()) return sym.stdout.trim();
     const cur = await this.runGit(
       ["rev-parse", "--abbrev-ref", "HEAD"],
-      repoRoot
+      repoRoot,
     );
     if (cur.code === 0 && cur.stdout.trim()) return cur.stdout.trim();
     return "HEAD";
@@ -268,7 +275,7 @@ export class WorktreeManager {
    */
   async fetchOrigin(
     repoRoot: string,
-    timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS
+    timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
   ): Promise<boolean> {
     const res = await this.runGit(["fetch", "origin"], repoRoot, {
       timeoutMs,
@@ -278,22 +285,80 @@ export class WorktreeManager {
         `[WorktreeManager] git fetch origin failed — branching the worktree ` +
           `off the last-known local origin ref (may be stale): ${
             res.stderr.trim() || `exit ${res.code}`
-          }`
+          }`,
       );
       return false;
     }
     return true;
   }
 
-  /** marblo/<sanitized-slug>-<first 8 of taskId> */
-  private branchName(slug: string, taskId: string): string {
-    const cleanSlug =
+  /** Sanitize a free-form slug into a branch-safe segment (≤32 chars). */
+  private sanitizeSlug(slug: string): string {
+    return (
       slug
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "")
-        .slice(0, 32) || "task";
-    return `marblo/${cleanSlug}-${taskId.slice(0, 8)}`;
+        .slice(0, 32) || "task"
+    );
+  }
+
+  /** marblo/<sanitized-slug>-<first 8 of taskId> (default, collision-prone). */
+  private branchName(slug: string, taskId: string): string {
+    return `marblo/${this.sanitizeSlug(slug)}-${taskId.slice(0, 8)}`;
+  }
+
+  /** True when a local branch ref `<name>` already exists in `repoRoot`. */
+  private async branchExists(repoRoot: string, name: string): Promise<boolean> {
+    const res = await this.runGit(
+      ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`],
+      repoRoot,
+    );
+    return res.code === 0;
+  }
+
+  /**
+   * Pick a branch name that does not collide with an existing local branch
+   * (L4). The default `marblo/<slug>-<id8>` keeps the short, readable form for
+   * the overwhelmingly common no-collision case; only on an actual clash do we
+   * escalate specificity — first by widening the taskId slice (12 → 16 → full
+   * id), then, if even the full id collides, by appending a numeric suffix.
+   * This makes `create()` robust to two taskIds that share their first 8 chars
+   * (or a leftover branch from a previous run) instead of failing the worktree
+   * add outright. Returns the default name unchanged when there is no clash, so
+   * existing exact-name expectations are preserved.
+   */
+  private async uniqueBranchName(
+    repoRoot: string,
+    slug: string,
+    taskId: string,
+  ): Promise<string> {
+    const slugPart = this.sanitizeSlug(slug);
+    const candidate = (idLen: number) =>
+      `marblo/${slugPart}-${taskId.slice(0, idLen)}`;
+
+    const base = candidate(8);
+    if (!(await this.branchExists(repoRoot, base))) return base;
+
+    // Collision — widen the id slice. Dedupe so we don't retest the same
+    // string when taskId is shorter than the next width.
+    const widths = [...new Set([12, 16, taskId.length])].filter((w) => w > 8);
+    for (const w of widths) {
+      const cand = candidate(w);
+      if (cand !== base && !(await this.branchExists(repoRoot, cand))) {
+        return cand;
+      }
+    }
+
+    // Even the full id collides (or taskId ≤ 8 chars) — append a counter.
+    for (let i = 2; i < 1000; i++) {
+      const cand = `${base}-${i}`;
+      if (!(await this.branchExists(repoRoot, cand))) return cand;
+    }
+    // Pathological: 1000 collisions. Fall back to the full id + base so the
+    // caller still gets a deterministic name (worktree add will surface any
+    // remaining clash as its own error).
+    return `${base}-${taskId}`;
   }
 
   async create(params: CreateWorktreeParams): Promise<WorktreeInfo> {
@@ -313,17 +378,23 @@ export class WorktreeManager {
     }
     const baseRef =
       params.baseRef ?? (await this.resolveBaseRef(params.repoRoot));
-    const branch = this.branchName(params.slug, params.taskId);
+    // Collision-safe: keeps the short `marblo/<slug>-<id8>` name unless that
+    // ref already exists, in which case it escalates specificity (L4).
+    const branch = await this.uniqueBranchName(
+      params.repoRoot,
+      params.slug,
+      params.taskId,
+    );
     const wtPath = path.join(
       this.worktreesRoot,
       params.projectId,
-      params.taskId
+      params.taskId,
     );
     fs.mkdirSync(path.dirname(wtPath), { recursive: true });
 
     const res = await this.runGit(
       ["worktree", "add", "-b", branch, wtPath, baseRef],
-      params.repoRoot
+      params.repoRoot,
     );
     if (res.code !== 0) {
       throw new Error(`git worktree add failed: ${res.stderr.trim()}`);
@@ -344,7 +415,7 @@ export class WorktreeManager {
   async list(repoRoot: string): Promise<WorktreeInfo[]> {
     const res = await this.runGit(
       ["worktree", "list", "--porcelain"],
-      repoRoot
+      repoRoot,
     );
     if (res.code !== 0) return [];
 
@@ -382,14 +453,14 @@ export class WorktreeManager {
   async status(worktreePath: string, baseRef: string): Promise<WorktreeStatus> {
     const branchRes = await this.runGit(
       ["rev-parse", "--abbrev-ref", "HEAD"],
-      worktreePath
+      worktreePath,
     );
     const branch = branchRes.stdout.trim();
 
     // behind = left (baseRef-only), ahead = right (HEAD-only)
     const ab = await this.runGit(
       ["rev-list", "--left-right", "--count", `${baseRef}...HEAD`],
-      worktreePath
+      worktreePath,
     );
     let behind = 0;
     let ahead = 0;
@@ -404,7 +475,7 @@ export class WorktreeManager {
 
     const ns = await this.runGit(
       ["diff", "--numstat", `${baseRef}...HEAD`],
-      worktreePath
+      worktreePath,
     );
     let filesChanged = 0;
     let insertions = 0;
@@ -424,7 +495,7 @@ export class WorktreeManager {
     // conflict from "cannot merge / bad ref", which also exits 1 with no OID.
     const mt = await this.runGit(
       ["merge-tree", "--write-tree", "--name-only", baseRef, "HEAD"],
-      worktreePath
+      worktreePath,
     );
     const mtLines = mt.stdout.split("\n");
     const firstLine = mtLines[0]?.trim() ?? "";
@@ -458,20 +529,20 @@ export class WorktreeManager {
   async remove(
     repoRoot: string,
     worktreePath: string,
-    opts?: { deleteBranch?: boolean }
+    opts?: { deleteBranch?: boolean },
   ): Promise<void> {
     let branch = "";
     if (opts?.deleteBranch) {
       const b = await this.runGit(
         ["rev-parse", "--abbrev-ref", "HEAD"],
-        worktreePath
+        worktreePath,
       );
       if (b.code === 0) branch = b.stdout.trim();
     }
 
     const res = await this.runGit(
       ["worktree", "remove", "--force", worktreePath],
-      repoRoot
+      repoRoot,
     );
     if (res.code !== 0) {
       throw new Error(`git worktree remove failed: ${res.stderr.trim()}`);
@@ -481,88 +552,275 @@ export class WorktreeManager {
       const del = await this.runGit(["branch", "-D", branch], repoRoot);
       if (del.code !== 0) {
         console.warn(
-          `[WorktreeManager] failed to delete branch ${branch}: ${del.stderr.trim()}`
+          `[WorktreeManager] failed to delete branch ${branch}: ${del.stderr.trim()}`,
         );
       }
     }
   }
 
   /**
+   * True when a rebase is mid-flight in `worktreePath` — i.e. git's rebase
+   * state dir (`rebase-merge` or `rebase-apply`) exists under this worktree's
+   * git dir. This is the signal that `git rebase` actually STARTED and stopped
+   * on a conflict, as opposed to refusing before it began (dirty tree, bad
+   * ref). `git rev-parse --git-path` resolves the correct per-worktree git dir
+   * for a linked worktree, so this is accurate even off the main checkout.
+   */
+  private async rebaseInProgress(worktreePath: string): Promise<boolean> {
+    for (const state of ["rebase-merge", "rebase-apply"]) {
+      const gp = await this.runGit(
+        ["rev-parse", "--git-path", state],
+        worktreePath,
+      );
+      if (gp.code !== 0) continue;
+      const raw = gp.stdout.trim();
+      if (!raw) continue;
+      const abs = path.isAbsolute(raw) ? raw : path.join(worktreePath, raw);
+      if (fs.existsSync(abs)) return true;
+    }
+    return false;
+  }
+
+  /**
    * Rebase the worktree's branch onto `baseRef` (WORKTREE-SPEC §4 머지단계).
    * Runs `git rebase <baseRef>` inside the worktree. On success → {ok:true}.
-   * On conflict, capture the unmerged paths, then `git rebase --abort` to
-   * restore the working tree (safe stop — never leaves a half-rebased tree),
-   * returning {ok:false, conflicts:[...]}.
+   *
+   * On a non-zero exit we must NOT blindly assume "conflict" (the old bug, M5):
+   * `git rebase` also exits non-zero when it refuses to even start — a dirty
+   * working tree ("cannot rebase: you have unstaged changes"), a bad/unknown
+   * ref, etc. Those leave NO rebase in progress and NO unmerged paths, so the
+   * old code returned `{ok:false, conflicts:[]}` and spuriously ran
+   * `rebase --abort` ("no rebase in progress"), mis-routing the caller to the
+   * conflict-resolver with nothing to resolve and swallowing the real cause.
+   *
+   * So we discriminate on whether a rebase actually STARTED:
+   *  - mid-flight (rebase state dir present) → genuine conflict. Capture the
+   *    unmerged paths, `--abort` to restore the tree, return {ok:false,
+   *    conflicts}.
+   *  - not started → surface the underlying error as {ok:false, error}; there
+   *    is nothing to abort.
    */
   async rebaseOntoBase(
     worktreePath: string,
-    baseRef: string
+    baseRef: string,
   ): Promise<RebaseResult> {
     const res = await this.runGit(["rebase", baseRef], worktreePath);
     if (res.code === 0) return { ok: true };
 
-    // Conflict (or other failure): list unmerged paths while the rebase is
-    // still in progress, then abort to leave the working tree exactly as it
-    // was before the rebase started.
-    const unmerged = await this.runGit(
-      ["diff", "--name-only", "--diff-filter=U"],
-      worktreePath
-    );
-    const conflicts = unmerged.stdout
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-    await this.runGit(["rebase", "--abort"], worktreePath);
-    return { ok: false, conflicts };
+    // Did a rebase actually start and stop mid-flight? Only then is this a
+    // real conflict that the resolver can act on.
+    if (await this.rebaseInProgress(worktreePath)) {
+      const unmerged = await this.runGit(
+        ["diff", "--name-only", "--diff-filter=U"],
+        worktreePath,
+      );
+      const conflicts = unmerged.stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      // Abort to leave the working tree exactly as it was pre-rebase.
+      await this.runGit(["rebase", "--abort"], worktreePath);
+      return { ok: false, conflicts };
+    }
+
+    // Pre-flight refusal (dirty tree / bad ref / etc.): no rebase in progress,
+    // nothing to abort. Surface the real reason instead of swallowing it.
+    return {
+      ok: false,
+      error:
+        res.stderr.trim() ||
+        res.stdout.trim() ||
+        `git rebase ${baseRef} failed (exit ${res.code})`,
+    };
   }
 
   /**
    * Clean merge path (WORKTREE-SPEC §6): rebase the worktree branch onto base,
-   * squash it onto the checked-out base branch in repoRoot, then remove the
-   * worktree + branch. Deterministic; safe-stops on conflict without breaking
-   * either working tree.
+   * land a single squashed commit on the LOCAL base branch, then remove the
+   * worktree + branch. Deterministic; safe-stops on conflict/dirty without
+   * breaking either working tree.
    *
-   *   (a) rebaseOntoBase — conflict → {ok:false, needsResolve:true} and STOP.
-   *   (b) `git merge --squash <branch>` + commit on base.
+   * H2 (data-loss) hardening — two invariants this method now guarantees:
+   *
+   *  ① The squash is computed against `baseRef` itself (its resolved commit),
+   *     NOT against whatever branch repoRoot happens to have checked out. The
+   *     old code ran `git merge --squash` against repoRoot's HEAD, so when HEAD
+   *     diverged from baseRef (e.g. baseRef=origin/main while repoRoot sat on a
+   *     stale local main) the squash conflated unrelated commits or landed on
+   *     the wrong branch. We resolve `baseRef^{commit}` and pick a landing
+   *     strategy from how repoRoot relates to THAT commit.
+   *
+   *  ② No destructive git command (squash-stage, `reset --hard`, ff) ever runs
+   *     against a repoRoot that has uncommitted changes. A dirty repoRoot is
+   *     refused up front, so a user's in-progress WIP can never be wiped. The
+   *     old error paths ran `git reset --hard` on repoRoot unconditionally,
+   *     destroying any uncommitted work.
+   *
+   *   (a) rebaseOntoBase — real conflict → {ok:false, needsResolve:true}; a
+   *       non-conflict rebase failure (dirty/bad ref) → {ok:false, error}.
+   *   (b) Land the squash on base (strategy by repoRoot↔base relationship).
    *   (c) remove(repoRoot, worktreePath, {deleteBranch:true}).
    */
   async squashMergeToBase(
     repoRoot: string,
     worktreePath: string,
     baseRef: string,
-    branch: string
+    branch: string,
   ): Promise<SquashMergeResult> {
-    // (a) Rebase first — bail to the Resolve(agent) path on conflict.
+    // (a) Rebase first. A real conflict routes to Resolve(agent); a non-conflict
+    // failure (dirty worktree / bad ref) is surfaced as a plain error rather
+    // than mis-routed to the resolver with an empty conflict list (M5).
     const rebase = await this.rebaseOntoBase(worktreePath, baseRef);
     if (!rebase.ok) {
-      return { ok: false, needsResolve: true, conflicts: rebase.conflicts };
-    }
-
-    // (b) Squash the rebased branch onto the base branch checked out in
-    // repoRoot. --squash stages the changes without advancing <branch> or
-    // creating a merge commit; the explicit commit lands a single squashed
-    // commit on base.
-    const squash = await this.runGit(["merge", "--squash", branch], repoRoot);
-    if (squash.code !== 0) {
-      // Defensive: a clean rebase shouldn't conflict here, but never leave a
-      // half-staged base — back it out so repoRoot stays pristine.
-      await this.runGit(["merge", "--abort"], repoRoot);
-      await this.runGit(["reset", "--hard"], repoRoot);
+      if (rebase.error) return { ok: false, error: rebase.error };
       return {
         ok: false,
-        error: `merge --squash failed: ${squash.stderr.trim()}`,
+        needsResolve: true,
+        conflicts: rebase.conflicts ?? [],
       };
     }
 
-    const commit = await this.runGit(
-      ["commit", "-m", `Merge ${branch} (squash)`],
-      repoRoot
+    // Resolve the EXACT base commit we squash onto — this, not repoRoot's
+    // current HEAD, is the merge basis (H2 ①).
+    const baseShaRes = await this.runGit(
+      ["rev-parse", "--verify", `${baseRef}^{commit}`],
+      repoRoot,
     );
-    if (commit.code !== 0) {
-      await this.runGit(["reset", "--hard"], repoRoot);
+    if (baseShaRes.code !== 0) {
       return {
         ok: false,
-        error: `squash commit failed: ${commit.stderr.trim()}`,
+        error: `cannot resolve baseRef '${baseRef}': ${baseShaRes.stderr.trim()}`,
+      };
+    }
+    const baseSha = baseShaRes.stdout.trim();
+
+    const repoHeadRes = await this.runGit(["rev-parse", "HEAD"], repoRoot);
+    if (repoHeadRes.code !== 0) {
+      return {
+        ok: false,
+        error: `cannot resolve repoRoot HEAD: ${repoHeadRes.stderr.trim()}`,
+      };
+    }
+    const repoHead = repoHeadRes.stdout.trim();
+
+    // H2 ②: refuse to touch a repoRoot that has uncommitted changes. No squash,
+    // no reset, no ref move — the user's WIP is left exactly as it is, and the
+    // worktree is preserved so the merge can be retried after they commit/stash.
+    const dirtyRes = await this.runGit(["status", "--porcelain"], repoRoot);
+    if (dirtyRes.stdout.trim().length > 0) {
+      return {
+        ok: false,
+        error:
+          "repoRoot has uncommitted changes; commit or stash them before " +
+          "merging (refusing to risk your working tree)",
+      };
+    }
+    // repoRoot is clean from here on, so any `reset --hard` below restores a
+    // known-clean state and cannot discard user work.
+
+    // How does repoRoot's checked-out branch relate to the base commit?
+    //  - baseSha is an ancestor of repoHead → repoRoot is at/ahead of base.
+    //  - repoHead is an ancestor of baseSha → repoRoot is strictly behind base.
+    const baseAncestorOfRepo =
+      (
+        await this.runGit(
+          ["merge-base", "--is-ancestor", baseSha, repoHead],
+          repoRoot,
+        )
+      ).code === 0;
+    const repoAncestorOfBase =
+      (
+        await this.runGit(
+          ["merge-base", "--is-ancestor", repoHead, baseSha],
+          repoRoot,
+        )
+      ).code === 0;
+
+    if (baseAncestorOfRepo) {
+      // (b1) repoRoot is up-to-date with (or ahead of) base. merge-base(repoHead,
+      // branch) == baseSha (branch was just rebased onto baseSha and repoHead
+      // descends from baseSha), so `git merge --squash` stages exactly the
+      // task's net changes onto the checked-out base branch — correct, and the
+      // working tree reflects it. (This is the tested clean-merge path.)
+      const squash = await this.runGit(["merge", "--squash", branch], repoRoot);
+      if (squash.code !== 0) {
+        // repoRoot verified clean above → restoring to the captured HEAD only
+        // discards the half-staged merge, never user WIP. (`merge --abort` is a
+        // no-op for --squash but harmless.)
+        await this.runGit(["merge", "--abort"], repoRoot);
+        await this.runGit(["reset", "--hard", repoHead], repoRoot);
+        return {
+          ok: false,
+          error: `merge --squash failed: ${squash.stderr.trim()}`,
+        };
+      }
+      const commit = await this.runGit(
+        ["commit", "-m", `Merge ${branch} (squash)`],
+        repoRoot,
+      );
+      if (commit.code !== 0) {
+        await this.runGit(["reset", "--hard", repoHead], repoRoot);
+        return {
+          ok: false,
+          error: `squash commit failed: ${commit.stderr.trim()}`,
+        };
+      }
+    } else if (repoAncestorOfBase) {
+      // (b2) repoRoot is strictly BEHIND base (e.g. local main behind
+      // origin/main — the divergence the old code mis-squashed). Build the
+      // squashed commit on top of the resolved base via pure plumbing
+      // (commit-tree touches no working tree or index), then fast-forward
+      // repoRoot onto it. repoHead is an ancestor of baseSha and the new commit
+      // descends from baseSha, so `merge --ff-only` is a guaranteed pure
+      // fast-forward: it brings repoRoot up to base AND lands the task in one
+      // move, with zero risk (repoRoot verified clean).
+      const treeRes = await this.runGit(
+        ["rev-parse", "--verify", `${branch}^{tree}`],
+        repoRoot,
+      );
+      if (treeRes.code !== 0) {
+        return {
+          ok: false,
+          error: `cannot resolve tree of '${branch}': ${treeRes.stderr.trim()}`,
+        };
+      }
+      const newCommit = await this.runGit(
+        [
+          "commit-tree",
+          treeRes.stdout.trim(),
+          "-p",
+          baseSha,
+          "-m",
+          `Merge ${branch} (squash)`,
+        ],
+        repoRoot,
+      );
+      if (newCommit.code !== 0) {
+        return {
+          ok: false,
+          error: `commit-tree failed: ${newCommit.stderr.trim()}`,
+        };
+      }
+      const ff = await this.runGit(
+        ["merge", "--ff-only", newCommit.stdout.trim()],
+        repoRoot,
+      );
+      if (ff.code !== 0) {
+        return {
+          ok: false,
+          error: `fast-forward to squash commit failed: ${ff.stderr.trim()}`,
+        };
+      }
+    } else {
+      // (b3) repoRoot's branch has diverged from base in BOTH directions
+      // (unrelated history / rewritten base). Landing here would either lose
+      // repoRoot's local commits or fabricate a misleading history — refuse and
+      // preserve everything (worktree kept) rather than guess.
+      return {
+        ok: false,
+        error:
+          `repoRoot branch has diverged from base '${baseRef}' ` +
+          "(neither is an ancestor of the other); resolve manually",
       };
     }
 
@@ -585,7 +843,7 @@ export class WorktreeManager {
   async showCommit(repoRoot: string, sha: string): Promise<string> {
     const res = await this.runGit(
       ["show", "--stat", "--patch", "--no-color", sha],
-      repoRoot
+      repoRoot,
     );
     if (res.code !== 0) {
       throw new Error(`git show ${sha} failed: ${res.stderr.trim()}`);
@@ -615,7 +873,7 @@ export class WorktreeManager {
     if (!ok) {
       console.warn(
         `[WorktreeManager] git ${version || "unknown"} < 2.38 — ` +
-          `merge-tree --write-tree unsupported; status() mergeability may be unreliable.`
+          `merge-tree --write-tree unsupported; status() mergeability may be unreliable.`,
       );
     }
     return { ok, version };
@@ -630,11 +888,11 @@ export class WorktreeManager {
    */
   async isMergedIntoBase(
     worktreePath: string,
-    baseRef: string
+    baseRef: string,
   ): Promise<boolean> {
     const res = await this.runGit(
       ["rev-list", "--count", `${baseRef}..HEAD`],
-      worktreePath
+      worktreePath,
     );
     if (res.code !== 0) return false;
     const ahead = parseInt(res.stdout.trim(), 10);
@@ -657,7 +915,7 @@ export class WorktreeManager {
   async staleInfo(
     worktreePath: string,
     baseRef: string,
-    opts?: StaleOptions
+    opts?: StaleOptions,
   ): Promise<StaleInfo> {
     const maxIdleDays = opts?.maxIdleDays ?? DEFAULT_MAX_IDLE_DAYS;
     const merged = await this.isMergedIntoBase(worktreePath, baseRef);
@@ -666,7 +924,7 @@ export class WorktreeManager {
     let idleDays = 0;
     if (last) {
       idleDays = Math.floor(
-        (now.getTime() - last.getTime()) / STALE_MS_PER_DAY
+        (now.getTime() - last.getTime()) / STALE_MS_PER_DAY,
       );
       if (idleDays < 0) idleDays = 0;
     }
@@ -684,7 +942,7 @@ export class WorktreeManager {
    */
   async cleanupStale(
     repoRoot: string,
-    opts?: StaleOptions
+    opts?: StaleOptions,
   ): Promise<CleanupStaleResult> {
     const baseRef = await this.resolveBaseRef(repoRoot);
     const worktrees = await this.list(repoRoot);
