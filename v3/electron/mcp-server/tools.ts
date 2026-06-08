@@ -15,7 +15,11 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase.js";
 import { resolveContextForWrite, contextReadFilter } from "./context.js";
-import { applyProjection, type ApplyProjectionInput } from "./projection.js";
+import {
+  applyProjection,
+  resolveDependentIfReady,
+  type ApplyProjectionInput,
+} from "./projection.js";
 import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -699,49 +703,45 @@ export function registerTools(server: McpServer): void {
         `[Task Update] "${task.title}" ${task.status} → ${newStatus} (role=${task.role}, id=${task_id})${commentNote}`,
       );
 
-      // ── Inline dependency resolution ──
-      // When a task completes, check all tasks that depend on it
-      // and mark them ready if ALL their deps are now DONE.
+      // ── Inline dependency resolution (atomic, idempotent — N4) ──
+      // When a task completes, resolve every task that depends on it. The
+      // per-dependent flip (dependsOnCompleted -> true) runs inside a
+      // transaction (resolveDependentIfReady) that re-checks the flag and all
+      // upstream statuses atomically, so two dependencies completing
+      // concurrently cannot both observe a stale false and double-notify the
+      // orchestrator (-> duplicate dispatch of the same task). Each dependent
+      // is isolated in its own try/catch so one transient failure does not
+      // strand the rest. notify fires only for the transaction that actually
+      // performed the flip -> exactly once per unblocked task.
       let unblocked = 0;
       if (newStatus === "DONE") {
+        let depDocs: Array<{ id: string }> = [];
         try {
           const depQ = query(
             collection(db, "tasks"),
-            where("dependsOn", "array-contains", task_id),
+            where("dependsOn", "array-contains", task_id)
           );
-          const depSnap = await getDocs(depQ);
+          depDocs = (await getDocs(depQ)).docs;
+        } catch (err) {
+          console.error("[MCP] Dependency query error:", err);
+        }
 
-          for (const depDoc of depSnap.docs) {
-            const depData = depDoc.data();
-            if (depData.dependsOnCompleted) continue; // already resolved
-
-            // Check if ALL dependencies are now DONE
-            const allDeps: string[] = depData.dependsOn ?? [];
-            let allMet = true;
-            for (const depId of allDeps) {
-              if (depId === task_id) continue; // we know this one is DONE
-              const depTask = await fetchTask(depId);
-              if (!depTask || depTask.status !== "DONE") {
-                allMet = false;
-                break;
-              }
-            }
-
-            if (allMet) {
-              await updateDoc(doc(db, "tasks", depDoc.id), {
-                dependsOnCompleted: true,
-                updatedAt: Timestamp.now(),
-              });
+        for (const depDoc of depDocs) {
+          try {
+            const res = await resolveDependentIfReady(db, depDoc.id, task_id);
+            if (res.unblocked) {
               unblocked++;
-
               // Notify orchestrator about newly unblocked task
               notifyOrchestrator(
-                `[Dependency Resolved] "${depData.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${depData.role})`,
+                `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`
               );
             }
+          } catch (err) {
+            console.error(
+              `[MCP] Dependency resolution error for ${depDoc.id}:`,
+              err
+            );
           }
-        } catch (err) {
-          console.error("[MCP] Dependency resolution error:", err);
         }
       }
 
