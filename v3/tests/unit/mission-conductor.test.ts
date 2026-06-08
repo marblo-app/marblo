@@ -44,7 +44,7 @@ class InMemoryStore implements MissionStore {
     return m ? structuredClone(m) : null;
   }
   async createMission(
-    data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">,
+    data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">
   ): Promise<string> {
     const id = `m${this.nextId++}`;
     const now = new Date();
@@ -59,7 +59,7 @@ class InMemoryStore implements MissionStore {
   }
   async updateMission(
     id: string,
-    patch: Partial<Omit<Mission, "id" | "launchedAt">>,
+    patch: Partial<Omit<Mission, "id" | "launchedAt">>
   ): Promise<void> {
     const cur = this.docs.get(id);
     if (!cur) throw new Error(`Mission ${id} not found`);
@@ -73,7 +73,7 @@ class InMemoryStore implements MissionStore {
   async updateMissionStep(
     id: string,
     stepIndex: number,
-    patch: Partial<MissionStep>,
+    patch: Partial<MissionStep>
   ): Promise<void> {
     const cur = this.docs.get(id);
     if (!cur) throw new Error(`Mission ${id} not found`);
@@ -85,7 +85,7 @@ class InMemoryStore implements MissionStore {
   async setMissionStatus(
     id: string,
     status: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string },
+    extras?: { completedAt?: Date; abandonedReason?: string }
   ): Promise<void> {
     const cur = this.docs.get(id);
     if (!cur) throw new Error(`Mission ${id} not found`);
@@ -164,7 +164,7 @@ async function makeMission(
     steps?: MissionStep[];
     taskIds?: string[];
     goal?: string;
-  } = {},
+  } = {}
 ): Promise<string> {
   const templateId = opts.templateId ?? "research";
   return store.createMission({
@@ -184,7 +184,7 @@ function reportEvent(
   missionId: string,
   stepIndex: number,
   status: "success" | "failed",
-  extra?: { output?: unknown; error?: string },
+  extra?: { output?: unknown; error?: string }
 ): MissionEngineEvent {
   return {
     type: MISSION_STEP_REPORTED_EVENT,
@@ -199,7 +199,7 @@ function reportEvent(
 async function waitFor(
   predicate: () => boolean,
   timeoutMs = 2000,
-  intervalMs = 5,
+  intervalMs = 5
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -239,7 +239,7 @@ describe("ConductorDriver — grantStep", () => {
       .raw(id)!
       .contextLog.find((e) => e.type === "step.started");
     expect((started?.payload as { driver?: string })?.driver).toBe(
-      "orchestrator",
+      "orchestrator"
     );
   });
 
@@ -303,9 +303,9 @@ describe("ConductorDriver — 보고 → 게이트 → 전진 루프", () => {
         (e) =>
           e.type === "supervisor.note" &&
           String((e.payload as { message?: string }).message).includes(
-            "completed",
-          ),
-      ),
+            "completed"
+          )
+      )
     ).toBe(true);
   });
 
@@ -379,8 +379,8 @@ describe("ConductorDriver — 게이트 보류 시 전진 차단", () => {
       store
         .raw(id)!
         .contextLog.some(
-          (e) => (e.payload as { kind?: string }).kind === "gate_failed",
-        ),
+          (e) => (e.payload as { kind?: string }).kind === "gate_failed"
+        )
     ).toBe(true);
 
     // 2차 보고 → 게이트 통과 → 단일 스텝이라 완료.
@@ -398,13 +398,20 @@ describe("ConductorDriver — 게이트 보류 시 전진 차단", () => {
     taskStatuses.t1 = "DONE";
     taskStatuses.t2 = "IN_PROGRESS";
 
+    // P3-A: wait 스텝은 오케에 grant 하지 않는다 — 지휘자가 task 완료를 폴링한다(§8-3).
+    // requestAdvance → running 마킹 + 즉시 게이트 1회 평가(미완료라 보류).
     conductor.requestAdvance(id);
-    await waitFor(() => posts.length === 1);
+    await waitFor(() => store.raw(id)!.steps[0].status === "running");
+    // grant 평가가 완전히 정착하도록 짧게 비운다(미완료라 어떤 전이도 일어나지 않음).
+    await new Promise((r) => setTimeout(r, 30));
 
-    // 미완료 task 존재 → 게이트 보류 → retry(재허가).
-    bus.emit(reportEvent(id, 0, "success"));
-    await waitFor(() => (store.raw(id)!.steps[0].retryCount ?? 0) === 1);
+    // 미완료 task 존재 → 게이트 보류 → 전진/완료/재시도 없이 running 유지.
+    // wait 은 grant 메시지를 PTY 로 주입하지 않으므로 posts 는 0 (gstack grant 와 구분).
+    expect(posts.length).toBe(0);
     expect(store.raw(id)!.currentStepIndex).toBe(0);
+    expect(store.raw(id)!.steps[0].status).toBe("running");
+    // task-게이트 스텝은 재dispatch 중복 방지를 위해 retry 하지 않는다(§8-3).
+    expect(store.raw(id)!.steps[0].retryCount ?? 0).toBe(0);
 
     // task 완료 후 외부 이벤트(agent.completed) wakeup → wait 게이트 재평가 → 통과 → 전진.
     taskStatuses.t2 = "DONE";
@@ -443,7 +450,7 @@ describe("ConductorDriver — 게이트 보류 시 전진 차단", () => {
       bus.emit(
         reportEvent(id, 0, "success", {
           output: "PR: https://github.com/x/y/pull/9",
-        }),
+        })
       );
       await waitFor(() => store.raw(id)!.status === "completed");
       expect(store.raw(id)!.steps[0].status).toBe("success");
@@ -577,7 +584,7 @@ describe("MissionEngine — orchestrator 모드는 conductor 에 위임, engine 
   function minimalEngineDeps(
     store: InMemoryStore,
     bus: InProcessMissionEventBus,
-    orch: OrchestratorRegistry,
+    orch: OrchestratorRegistry
   ) {
     const dispatcher: TaskDispatcher = {
       async dispatchTasks() {
@@ -636,7 +643,7 @@ describe("MissionEngine — orchestrator 모드는 conductor 에 위임, engine 
       {
         driver: "orchestrator",
         conductor,
-      },
+      }
     );
 
     const mission = await engine.launch({
@@ -665,7 +672,7 @@ describe("MissionEngine — orchestrator 모드는 conductor 에 위임, engine 
       {
         driver: "orchestrator",
         conductor,
-      },
+      }
     );
     const id = await store.createMission({
       projectId: "p1",
