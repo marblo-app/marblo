@@ -146,3 +146,85 @@ describe("step-executor — wait step(runWait)", () => {
     expect(output?.blockedTaskIds).toContain("t2");
   });
 });
+
+// ─────── P6 회귀: dispatch step 멱등 (중복 dispatch 차단) ───────
+describe("step-executor — dispatch step(runDispatch) 멱등", () => {
+  const DISPATCH_STEP: MissionStep = {
+    index: 0,
+    type: "dispatch",
+    status: "running",
+  };
+
+  function makeDispatchMission(): Mission {
+    const now = new Date();
+    return {
+      id: "m-disp",
+      projectId: "p-test",
+      goal: "ship feature",
+      templateId: "feature",
+      status: "active",
+      ownerOrchestratorSessionId: "orch-1",
+      steps: [DISPATCH_STEP],
+      currentStepIndex: 0,
+      taskIds: [],
+      contextLog: [],
+      launchedAt: now,
+      lastActivityAt: now,
+      completedAt: null,
+    };
+  }
+
+  function makeDispatchDeps(existing: string[]): {
+    deps: ExecutorDeps;
+    calls: { dispatch: number };
+  } {
+    const calls = { dispatch: 0 };
+    const dispatcher: TaskDispatcher = {
+      async dispatchTasks() {
+        calls.dispatch += 1;
+        return ["new-1", "new-2"];
+      },
+      async getTaskStatuses() {
+        return {};
+      },
+      async findMissionTaskIds() {
+        return existing;
+      },
+      async killAgentsForTasks() {},
+    };
+    const skillRunner: SkillRunner = {
+      async runSkill() {
+        throw new Error("skillRunner should not be called for dispatch step");
+      },
+    };
+    const fixRunner: FixRunner = {
+      async runFix() {
+        throw new Error("fixRunner should not be called for dispatch step");
+      },
+    };
+    return { deps: { skillRunner, dispatcher, fixRunner }, calls };
+  }
+
+  it("이미 만들어진 task 가 있으면 재dispatch 하지 않고 기존 taskIds 를 재사용한다", async () => {
+    const { deps, calls } = makeDispatchDeps(["exist-1", "exist-2"]);
+    const r = await executeStep(makeDispatchMission(), DISPATCH_STEP, deps);
+    expect(r.success).toBe(true);
+    expect((r.output as { taskIds: string[] }).taskIds).toEqual([
+      "exist-1",
+      "exist-2",
+    ]);
+    // 핵심: dispatchTasks 가 호출되지 않아야 한다(중복 생성 차단).
+    expect(calls.dispatch).toBe(0);
+  });
+
+  it("만들어진 task 가 없으면 정확히 1회 dispatch 한다", async () => {
+    const { deps, calls } = makeDispatchDeps([]);
+    const r = await executeStep(makeDispatchMission(), DISPATCH_STEP, deps);
+    expect(r.success).toBe(true);
+    expect((r.output as { taskIds: string[] }).taskIds).toEqual([
+      "new-1",
+      "new-2",
+    ]);
+    expect(calls.dispatch).toBe(1);
+  });
+});
