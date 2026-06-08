@@ -142,6 +142,10 @@ export interface OrchestratorRegistry {
 // Engine 외부에서 들어오는 신호 — task 상태 변화, agent stuck 등.
 // orchestrator timeline 의 TimelineEventType 과는 별개 layer.
 export type MissionEngineEventType =
+  // task 상태 전이 wakeup 신호. 발원지=event-forwarder(Firestore tasks 구독). A안의
+  // wait-step wakeup 이자 B안에서 지휘자가 'task.status' TimelineEvent 로 합성하는
+  // 원천. 페이로드(B안 Phase 4-A 로 taskTitle 추가):
+  //   payload: { taskId, from, to, taskTitle }
   | "task.status_changed"
   | "agent.stuck"
   | "agent.completed"
@@ -154,7 +158,15 @@ export type MissionEngineEventType =
   // (missionId 는 다른 이벤트들과 동일하게 최상위 필드). 지휘자(P2-A)가 이 이벤트를
   // 구독해 onStepReport 로 처리 — result.success → StepReport.status 매핑.
   // 설계: v3/docs/MISSIONS-B-ORCHESTRATOR-DRIVEN.md §4 / §8.4.
-  | "mission.step_reported";
+  | "mission.step_reported"
+  // B안 Phase 4-A (타임라인 합성) — task 에 add_activity 내레이션이 기록될 때(즉
+  // projection.lastActivityAt 가 갱신될 때)의 신호. 발원지=event-forwarder 이며,
+  // 오케스트레이터(B) 모드에서만 발행한다(A안 engine 의 generic onEvent 가 이 이벤트를
+  // supervisor.note + scheduleAdvance 로 처리하지 않도록 = A안 무영향). 페이로드:
+  //   payload: { taskId, message, agentId, taskTitle, activityAtMillis }
+  // 지휘자가 구독해 'task.activity' TimelineEvent 로 contextLog 에 합성한다.
+  // 설계: v3/docs/MISSIONS-B-ORCHESTRATOR-DRIVEN.md §3.3 / §5.4 / §8-5.
+  | "task.activity_logged";
 
 export interface MissionEngineEvent {
   type: MissionEngineEventType;

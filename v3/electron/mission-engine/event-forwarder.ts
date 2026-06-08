@@ -9,6 +9,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import type { MissionEventBus } from "./ports";
+import { getMissionDriver } from "./conductor-driver";
 
 // Wait-step wakeup 메커니즘.
 // MissionEngine 은 wait step 진입 시 sleeping 으로 전환되고, eventBus 에 들어오는
@@ -59,6 +60,23 @@ export function isMissionPausedByUser(data: Record<string, unknown>): boolean {
   return false;
 }
 
+/**
+ * task 문서의 projection.lastActivityAt(Firestore Timestamp)를 millis 로 변환.
+ * projection 미시드/비정상 타입이면 null — 호출부가 activity 발행을 건너뛴다.
+ */
+function projectionActivityMillis(
+  data: Record<string, unknown>,
+): number | null {
+  const projection = data.projection as
+    | { lastActivityAt?: unknown }
+    | undefined;
+  const ts = projection?.lastActivityAt;
+  if (ts && typeof (ts as { toMillis?: unknown }).toMillis === "function") {
+    return (ts as { toMillis: () => number }).toMillis();
+  }
+  return null;
+}
+
 export interface MissionEventForwarderDeps {
   app: FirebaseApp;
   authReady?: Promise<void>;
@@ -79,6 +97,10 @@ export class MissionEventForwarder {
   private activeMissions: Map<string, ActiveMissionRow> = new Map();
   // taskId → last seen status (so we only forward on actual changes)
   private lastTaskStatus: Map<string, string> = new Map();
+  // taskId → last seen projection.lastActivityAt (millis). add_activity 가 status 를
+  // 바꾸지 않으므로 별도 추적 — 값이 달라졌을 때만 task.activity_logged 를 발행한다.
+  // (B안 타임라인 합성 전용. orchestrator 모드에서만 채워진다 — 아래 emit 가드 참고.)
+  private lastActivityAt: Map<string, number> = new Map();
 
   constructor(deps: MissionEventForwarderDeps) {
     this.db = getFirestore(deps.app);
@@ -125,6 +147,7 @@ export class MissionEventForwarder {
     this.tasksUnsubs.clear();
     this.activeMissions.clear();
     this.lastTaskStatus.clear();
+    this.lastActivityAt.clear();
     this.log("stopped");
   }
 
@@ -181,6 +204,7 @@ export class MissionEventForwarder {
         for (const change of snap.docChanges()) {
           if (change.type === "removed") {
             this.lastTaskStatus.delete(change.doc.id);
+            this.lastActivityAt.delete(change.doc.id);
             continue;
           }
           const data = change.doc.data();
@@ -188,25 +212,68 @@ export class MissionEventForwarder {
           if (!missionId) continue;
           const row = this.activeMissions.get(missionId);
           if (!row) continue;
-          const status = String(data.status ?? "");
-          if (!status) continue;
-          const prev = this.lastTaskStatus.get(change.doc.id);
-          this.lastTaskStatus.set(change.doc.id, status);
-          if (prev === status) continue; // no actual change
-          // 이중 방어: 유저가 ⏸️ Pause 한 미션은 task 변화로 깨우지 않는다.
-          // lastTaskStatus 는 위에서 갱신해 두므로, 나중에 Resume 되면 그 사이
-          // 쌓인 변화가 중복 재발행되지 않는다(다음 실제 변화부터 정상 forward).
-          if (row.pausedByUser) continue;
+          const taskTitle = typeof data.title === "string" ? data.title : null;
 
-          this.eventBus.emit({
-            type: "task.status_changed",
-            missionId,
-            payload: {
-              taskId: change.doc.id,
-              from: prev ?? null,
-              to: status,
-            },
-          });
+          // ── (1) status 변화 신호 ─────────────────────────────────────────
+          // A안 wait-step wakeup 의 원천이자, B안에서 지휘자가 'task.status' 로
+          // 합성하는 원천. (B안 Phase 4-A: payload 에 taskTitle 추가.)
+          const status = String(data.status ?? "");
+          if (status) {
+            const prev = this.lastTaskStatus.get(change.doc.id);
+            this.lastTaskStatus.set(change.doc.id, status);
+            // 이중 방어: 유저가 ⏸️ Pause 한 미션은 task 변화로 깨우지 않는다.
+            // lastTaskStatus 는 위에서 갱신해 두므로, 나중에 Resume 되면 그 사이
+            // 쌓인 변화가 중복 재발행되지 않는다(다음 실제 변화부터 정상 forward).
+            if (prev !== status && !row.pausedByUser) {
+              this.eventBus.emit({
+                type: "task.status_changed",
+                missionId,
+                payload: {
+                  taskId: change.doc.id,
+                  from: prev ?? null,
+                  to: status,
+                  taskTitle,
+                },
+              });
+            }
+          }
+
+          // ── (2) activity(add_activity) 신호 ──────────────────────────────
+          // B안 타임라인 합성 전용(단일 writer=지휘자). add_activity 는 status 를
+          // 바꾸지 않으므로 projection.lastActivityAt 변화로 감지한다. A안 engine 은
+          // 모든 버스 이벤트를 generic onEvent(=supervisor.note append + scheduleAdvance)
+          // 로 처리하므로, 이 신규 이벤트를 A안에 흘리면 "A안 무영향" 이 깨진다 →
+          // orchestrator(B) 모드에서만 발행한다.
+          if (getMissionDriver() === "orchestrator") {
+            const activityAtMillis = projectionActivityMillis(data);
+            if (activityAtMillis !== null) {
+              const prevAt = this.lastActivityAt.get(change.doc.id);
+              // status 와 동일하게 가드 전에 갱신 — Resume 후 중복 재발행 방지.
+              this.lastActivityAt.set(change.doc.id, activityAtMillis);
+              if (prevAt !== activityAtMillis && !row.pausedByUser) {
+                const projection = data.projection as
+                  | { lastActivitySummary?: unknown; lastAgentId?: unknown }
+                  | undefined;
+                this.eventBus.emit({
+                  type: "task.activity_logged",
+                  missionId,
+                  payload: {
+                    taskId: change.doc.id,
+                    message:
+                      typeof projection?.lastActivitySummary === "string"
+                        ? projection.lastActivitySummary
+                        : "",
+                    agentId:
+                      typeof projection?.lastAgentId === "string"
+                        ? projection.lastAgentId
+                        : null,
+                    taskTitle,
+                    activityAtMillis,
+                  },
+                });
+              }
+            }
+          }
         }
       },
       (err) =>

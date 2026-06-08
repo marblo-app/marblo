@@ -1,4 +1,9 @@
-import type { Mission, MissionStatus, MissionStep } from "./types";
+import type {
+  Mission,
+  MissionStatus,
+  MissionStep,
+  TimelineEvent,
+} from "./types";
 import type {
   MissionEngineEvent,
   MissionEventBus,
@@ -83,7 +88,7 @@ export interface StepGateContext {
    * 기존 dispatcher.getTaskStatuses 를 재사용해 주입한다.
    */
   getTaskStatuses: (
-    taskIds: string[]
+    taskIds: string[],
   ) => Promise<Record<string, TaskStatusLite>>;
   /** 게이트 평가 시점의 미션 스냅샷 (taskIds / 직전 step output 등). */
   mission: Mission;
@@ -101,7 +106,7 @@ export interface StepGateContext {
  */
 export type VerifyStepGate = (
   step: MissionStep,
-  ctx: StepGateContext
+  ctx: StepGateContext,
 ) => Promise<{ pass: boolean; reason?: string }>;
 
 /**
@@ -125,7 +130,7 @@ export interface ConductorDriverDeps {
   eventBus: MissionEventBus;
   /** wait 게이트용 task 상태 조회 — dispatcher.getTaskStatuses 재사용해 주입. */
   getTaskStatuses: (
-    taskIds: string[]
+    taskIds: string[],
   ) => Promise<Record<string, TaskStatusLite>>;
   /**
    * 오케스트레이터가 MCP(`create_task`/`dispatch_task`)로 만든 미션 task 의 **비종료**
@@ -232,8 +237,8 @@ const defaultStepGate: VerifyStepGate = async (step, ctx) => {
       typeof step.output === "string"
         ? step.output
         : step.output != null
-        ? JSON.stringify(step.output)
-        : "";
+          ? JSON.stringify(step.output)
+          : "";
     if (PR_URL_RE.test(out)) return { pass: true };
     return {
       pass: false,
@@ -256,7 +261,7 @@ const defaultStepGate: VerifyStepGate = async (step, ctx) => {
 function buildGrantMessage(
   mission: Mission,
   step: MissionStep,
-  stepIndex: number
+  stepIndex: number,
 ): string {
   if (step.type === "gstack") {
     const skill = step.skill ?? "(스킬 미지정)";
@@ -283,7 +288,7 @@ function buildGrantMessage(
  * 기본 driver 가 engine 이라 명시적으로 orchestrator 를 켜야만 생성·호출된다.
  */
 export function createConductorDriver(
-  deps: ConductorDriverDeps
+  deps: ConductorDriverDeps,
 ): ConductorDriver {
   const log =
     deps.logger ??
@@ -303,7 +308,7 @@ export function createConductorDriver(
     const next = prev
       .then(fn, fn)
       .catch((err) =>
-        log("mission chain error", { missionId, err: String(err) })
+        log("mission chain error", { missionId, err: String(err) }),
       );
     chains.set(missionId, next);
     void next.finally(() => {
@@ -368,7 +373,7 @@ export function createConductorDriver(
 
   async function grantStep(
     missionId: string,
-    stepIndex: number
+    stepIndex: number,
   ): Promise<void> {
     const mission = await deps.store.getMission(missionId);
     if (!mission || isTerminalMission(mission.status)) return;
@@ -429,7 +434,7 @@ export function createConductorDriver(
     // (best-effort). 메시지는 스텝 타입별로 무엇을 어떤 도구로 하고 어떻게 보고할지
     // 못박는다(§3.2 / §8-3).
     const ref = deps.orchestrators.getSession(
-      mission.ownerOrchestratorSessionId
+      mission.ownerOrchestratorSessionId,
     );
     if (!ref || !ref.isAlive()) {
       log("grantStep — no live owner orchestrator session (best-effort skip)", {
@@ -490,7 +495,7 @@ export function createConductorDriver(
       await handleStepFailure(
         report.missionId,
         idx,
-        report.error ?? "orchestrator reported step failure"
+        report.error ?? "orchestrator reported step failure",
       );
       return;
     }
@@ -549,7 +554,7 @@ export function createConductorDriver(
     await handleStepFailure(
       report.missionId,
       idx,
-      `gate not passed: ${gate.reason ?? ""}`
+      `gate not passed: ${gate.reason ?? ""}`,
     );
   }
 
@@ -557,7 +562,7 @@ export function createConductorDriver(
   // 외부 이벤트로 wait 게이트가 충족됐을 때 공유하는 단일 전진 지점.
   async function passStepAndAdvance(
     missionId: string,
-    stepIndex: number
+    stepIndex: number,
   ): Promise<void> {
     await markStepSuccess(missionId, stepIndex);
     const fresh = await deps.store.getMission(missionId);
@@ -573,7 +578,7 @@ export function createConductorDriver(
 
   async function markStepSuccess(
     missionId: string,
-    stepIndex: number
+    stepIndex: number,
   ): Promise<void> {
     const mission = await deps.store.getMission(missionId);
     const step = mission?.steps[stepIndex];
@@ -602,7 +607,7 @@ export function createConductorDriver(
   async function handleStepFailure(
     missionId: string,
     stepIndex: number,
-    error: string
+    error: string,
   ): Promise<void> {
     const mission = await deps.store.getMission(missionId);
     if (!mission || isTerminalMission(mission.status)) return;
@@ -694,7 +699,7 @@ export function createConductorDriver(
       mission,
       `⏸️ [Marblo Mission] 스텝 ${stepIndex} (${
         step.skill ?? step.type
-      }) 에서 사용자 확인을 기다립니다: ${error}`
+      }) 에서 사용자 확인을 기다립니다: ${error}`,
     );
   }
 
@@ -713,7 +718,7 @@ export function createConductorDriver(
     });
     notifyOrchestrator(
       mission,
-      `✅ [Marblo Mission] 모든 스텝이 끝나 미션이 완료되었습니다.`
+      `✅ [Marblo Mission] 모든 스텝이 끝나 미션이 완료되었습니다.`,
     );
   }
 
@@ -721,14 +726,14 @@ export function createConductorDriver(
   // 않는다. fire-and-forget (상태 전이 흐름을 blocking 하지 않음).
   function notifyOrchestrator(mission: Mission, message: string): void {
     const ref = deps.orchestrators.getSession(
-      mission.ownerOrchestratorSessionId
+      mission.ownerOrchestratorSessionId,
     );
     if (!ref || !ref.isAlive()) return;
     void ref.postMessage(message).catch((err) =>
       log("notifyOrchestrator failed (best-effort)", {
         missionId: mission.id,
         err: String(err),
-      })
+      }),
     );
   }
 
@@ -736,7 +741,7 @@ export function createConductorDriver(
     missionId: string,
     fromStatus: MissionStatus,
     next: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string }
+    extras?: { completedAt?: Date; abandonedReason?: string },
   ): Promise<void> {
     if (fromStatus === next) return;
     assertMissionTransition(fromStatus, next);
@@ -745,7 +750,7 @@ export function createConductorDriver(
 
   async function verifyGateInternal(
     missionId: string,
-    stepIndex: number
+    stepIndex: number,
   ): Promise<GateResult> {
     let mission = await deps.store.getMission(missionId);
     if (!mission) return { passed: false, reason: "mission not found" };
@@ -778,11 +783,22 @@ export function createConductorDriver(
       await onStepReport(parseStepReport(event));
       return;
     }
+    const mission = await deps.store.getMission(event.missionId);
+    // 미션이 active 가 아니면(또는 terminal/없음) 합성·재평가 모두 하지 않는다 —
+    // 합성 append 는 지휘자가 운전 중(active)일 때만(단일 writer 원칙·기존 가드).
+    if (!mission || mission.status !== "active") return;
+
+    // ── B안 Phase 4-A: 타임라인 합성(단일 writer = 지휘자) ──
+    // forwarder 가 보내는 task.status_changed / task.activity_logged 를 contextLog 의
+    // TimelineEvent 로 합성해 하나의 서사를 만든다. dedup(payload.key)으로 앱 재시작
+    // 시 forwarder 가 현재 상태를 재emit 해도 중복 합성을 막는다. onEvent 는 미션별
+    // enqueue 로 직렬화되므로 read-check-append race 가 없다(mission 스냅샷이 일관).
+    await synthesizeTimeline(event, mission);
+
     // 외부 wakeup (agent.completed / task.status_changed 등): 현재 스텝이 wait 이고
     // running 이면 게이트를 재평가해, 오케의 명시 보고 없이도 task 완료로 진행될 수
     // 있게 한다 (§3 이벤트 wakeup). 그 외 스텝은 오케 보고(onStepReport)로만 전진.
-    const mission = await deps.store.getMission(event.missionId);
-    if (!mission || mission.status !== "active") return;
+    // (task.status_changed 는 위 합성 + 이 재평가를 둘 다 트리거한다.)
     const idx = mission.currentStepIndex;
     const step = mission.steps[idx];
     if (!step || step.type !== "wait" || step.status !== "running") return;
@@ -795,6 +811,71 @@ export function createConductorDriver(
       });
       await passStepAndAdvance(event.missionId, idx);
     }
+  }
+
+  // forwarder task 신호 → contextLog TimelineEvent 합성. 합성 대상이 아니면 no-op.
+  // dedup: 동일 payload.key 가 이미 contextLog 에 있으면 skip(재emit 중복 방지).
+  // mission 스냅샷은 onEvent 가 방금 읽은 일관 스냅샷을 그대로 받는다(직렬화 보장).
+  async function synthesizeTimeline(
+    event: MissionEngineEvent,
+    mission: Mission,
+  ): Promise<void> {
+    const entry = buildSynthTimelineEvent(event);
+    if (!entry) return;
+    const key = (entry.payload as { key?: unknown }).key;
+    if (
+      typeof key === "string" &&
+      mission.contextLog.some(
+        (e) => (e.payload as { key?: unknown }).key === key,
+      )
+    ) {
+      log("synthesizeTimeline — dedup skip (key already in contextLog)", {
+        missionId: event.missionId,
+        key,
+      });
+      return;
+    }
+    await deps.store.appendTimelineEvent(event.missionId, entry);
+  }
+
+  // task.status_changed → 'task.status' / task.activity_logged → 'task.activity'.
+  // 그 외 이벤트는 null(합성 대상 아님). payload.key 는 멱등 dedup 키다.
+  function buildSynthTimelineEvent(
+    event: MissionEngineEvent,
+  ): TimelineEvent | null {
+    const p = event.payload ?? {};
+    if (event.type === "task.status_changed") {
+      const taskId = String(p.taskId ?? "");
+      const to = p.to == null ? "" : String(p.to);
+      return {
+        ts: now(),
+        type: "task.status",
+        payload: {
+          taskId,
+          from: p.from ?? null,
+          to: p.to ?? null,
+          taskTitle: p.taskTitle ?? null,
+          key: `task.status:${taskId}:${to}`,
+        },
+      };
+    }
+    if (event.type === "task.activity_logged") {
+      const taskId = String(p.taskId ?? "");
+      const activityAtMillis =
+        typeof p.activityAtMillis === "number" ? p.activityAtMillis : null;
+      return {
+        ts: now(),
+        type: "task.activity",
+        payload: {
+          taskId,
+          message: typeof p.message === "string" ? p.message : "",
+          agentId: p.agentId ?? null,
+          taskTitle: p.taskTitle ?? null,
+          key: `task.activity:${taskId}:${activityAtMillis}`,
+        },
+      };
+    }
+    return null;
   }
 
   function parseStepReport(event: MissionEngineEvent): StepReport {
@@ -819,8 +900,8 @@ export function createConductorDriver(
     enqueue(event.missionId, () =>
       String(event.type) === MISSION_STEP_REPORTED_EVENT
         ? onStepReport(parseStepReport(event))
-        : onEvent(event)
-    )
+        : onEvent(event),
+    ),
   );
 
   log("created (Phase 2 — orchestrator-driven 운전 루프 활성)");
@@ -833,7 +914,7 @@ export function createConductorDriver(
     onStepReport,
     async verifyGate(
       missionId: string,
-      stepIndex: number
+      stepIndex: number,
     ): Promise<GateResult> {
       return verifyGateInternal(missionId, stepIndex);
     },
