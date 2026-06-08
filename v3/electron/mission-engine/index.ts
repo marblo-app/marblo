@@ -254,7 +254,9 @@ export class MissionEngine {
         const outTail = (prev.output as string).slice(-2000);
         if (step.type === "gstack") {
           chainPrelude =
-            `[Marblo Mission] 이전 step \`${prev.skill ?? prev.type}\` 결과 요약입니다.` +
+            `[Marblo Mission] 이전 step \`${
+              prev.skill ?? prev.type
+            }\` 결과 요약입니다.` +
             ` 다음 작업은 이 결과를 반영해서 진행해주세요. (긴 메시지는 한 줄로 ack 만 해도 OK.)\n\n` +
             `--- 직전 step 결과 (마지막 2000자) ---\n${outTail}\n--- end ---`;
         } else {
@@ -367,6 +369,15 @@ export class MissionEngine {
           notifyUser: true,
         },
       });
+      // 능동 알림 — 사용자가 PTY 패널을 안 보고 있어도 미션이 답을 기다리는 걸 안다.
+      this.deps.notifier?.({
+        missionId: mission.id,
+        projectId: mission.projectId,
+        goal: mission.goal,
+        kind: "pty_input_required",
+        question: userInputDetected,
+        skill: step.skill ?? null,
+      });
       // currentStepIndex 는 advance 안 함 — Resume 후 같은 위치에서 시작.
       // 다음 step 으로 가야 하므로 advance 는 하되 mission 만 멈춤.
       const fresh = await this.requireMission(mission.id);
@@ -465,6 +476,15 @@ export class MissionEngine {
         notifyUser: true,
       },
     });
+    // 능동 알림 — step 실패로 미션이 사용자 확인을 기다린다.
+    this.deps.notifier?.({
+      missionId: mission.id,
+      projectId: mission.projectId,
+      goal: mission.goal,
+      kind: "escalate",
+      question: error ? `단계 실패: ${error}` : undefined,
+      skill: mission.steps[stepIndex]?.skill ?? null,
+    });
     await this.transition(mission, "waiting_for_human");
     return false;
   }
@@ -483,7 +503,10 @@ export class MissionEngine {
           .replace(/\s+/g, "-")
           .slice(0, 40)
           .replace(/-+$/, "");
-        const folder = `docs/missions/${slug || "mission"}-${mission.id.slice(0, 6)}`;
+        const folder = `docs/missions/${slug || "mission"}-${mission.id.slice(
+          0,
+          6,
+        )}`;
         const summaryPath = `${folder}/SUMMARY.md`;
         const stepsSummary = mission.steps
           .filter((s) => s.status === "success" || s.status === "failed")
@@ -495,7 +518,9 @@ export class MissionEngine {
               `- Step ${s.index + 1} (${s.skill ?? s.type}): ${s.status}\n` +
               `  → 저장 경로: ${stepPath}\n` +
               (typeof s.output === "string"
-                ? `  output (마지막 1200자):\n${(s.output as string).slice(-1200)}\n`
+                ? `  output (마지막 1200자):\n${(s.output as string).slice(
+                    -1200,
+                  )}\n`
                 : "")
             );
           })
@@ -626,6 +651,8 @@ export type {
   OrchestratorRegistry,
   MissionEventBus,
   MissionEventHandler,
+  MissionNeedsInputNotice,
+  MissionNotifier,
 } from "./ports";
 export { ALLOWED_SKILLS, isAllowedSkill } from "./types";
 export type {

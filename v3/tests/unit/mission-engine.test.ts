@@ -462,6 +462,29 @@ describe("scenario 5 — escalate → waiting_for_human", () => {
     expect(notifyEvt).toBeTruthy();
   });
 
+  it("notifier 가 escalate 시 호출된다 (OS 알림 / 인앱 surface 트리거)", async () => {
+    const calls: Array<{
+      kind: string;
+      projectId: string;
+      missionId: string;
+    }> = [];
+    const { engine, store } = buildEngine({
+      skillRunner: makeSkillRunner({ alwaysFail: true }),
+      notifier: (n) => calls.push(n),
+    });
+    const m = await engine.launch({
+      projectId: "p1",
+      goal: "broken thing",
+      templateId: "quick-fix",
+    });
+
+    await waitFor(() => store.raw(m.id)?.status === "waiting_for_human", 2000);
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    expect(calls[0].kind).toBe("escalate");
+    expect(calls[0].projectId).toBe("p1");
+    expect(calls[0].missionId).toBe(m.id);
+  });
+
   it("retry 정책 (default) — maxRetries=2 후에 waiting_for_human", async () => {
     const { engine, store } = buildEngine({
       // /review 는 onFailure='retry'. 3 번 실패하게 만들기 (retry 2 회 한도 초과)

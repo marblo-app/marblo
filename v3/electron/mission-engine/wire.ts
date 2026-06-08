@@ -7,6 +7,7 @@ import type { OrchestratorManager } from "../orchestrator-manager";
 import type { PtyManager } from "../pty-manager";
 import type { TaskDecomposer } from "../orchestrator/task-decomposer";
 import { MissionEngine, InProcessMissionEventBus } from "./index";
+import type { MissionNotifier } from "./ports";
 import { getMissionFirebaseApp } from "./firebase-app";
 import { createMissionStore } from "./store-impl";
 import { createTaskDispatcher } from "./dispatcher-impl";
@@ -29,6 +30,13 @@ export interface BuildMissionEngineDeps {
   taskDecomposer: () => TaskDecomposer;
   orchestrators: Map<string, OrchestratorManager>;
   createOrchestratorInstance: (projectId: string) => OrchestratorManager;
+  // main.ts 가 제공하는 미션 오케스트레이터 단일 launch 경로 — forwarding(PTY
+  // 출력 → renderer) + kind 별 resume + rootPath 해석을 포함한다. 미션 엔진의
+  // ensureSession 이 이걸 통해 launch 해야 PTY 패널에 출력이 흐르고 재시작 후
+  // 세션이 이어진다. 미지정 시 registry 가 자체 launch(테스트 fallback).
+  ensureOrchestratorLaunched?: (projectId: string) => OrchestratorManager;
+  // 미션이 사용자 개입을 요구할 때 OS 알림 / 인앱으로 surface. 미지정 시 no-op.
+  notifier?: MissionNotifier;
   ptyManager: PtyManager;
   bridgePort: () => number;
   dispatchOne: (params: DispatchTaskRequest) => DispatchTaskResponse;
@@ -71,6 +79,7 @@ export function buildMissionEngine(
   const orchRegistry = createOrchestratorRegistry({
     orchestrators: deps.orchestrators,
     createInstance: deps.createOrchestratorInstance,
+    ensureLaunched: deps.ensureOrchestratorLaunched,
     ptyManager: deps.ptyManager,
     bridgePort: deps.bridgePort,
   });
@@ -84,7 +93,9 @@ export function buildMissionEngine(
         ptyManager: deps.ptyManager,
       });
   console.log(
-    `[MissionEngine] skill runner mode: ${useHeadlessSkillRunner ? "headless" : "pty"}`,
+    `[MissionEngine] skill runner mode: ${
+      useHeadlessSkillRunner ? "headless" : "pty"
+    }`,
   );
 
   const engine = new MissionEngine({
@@ -94,6 +105,7 @@ export function buildMissionEngine(
     fixRunner,
     eventBus,
     orchestrators: orchRegistry,
+    notifier: deps.notifier,
   });
 
   const forwarder = new MissionEventForwarder({ app, authReady, eventBus });
@@ -120,7 +132,9 @@ export function buildMissionEngine(
         q,
         (snap) => {
           console.log(
-            `[MissionEngine] planning snapshot: size=${snap.size} changes=${snap.docChanges().length}`,
+            `[MissionEngine] planning snapshot: size=${snap.size} changes=${
+              snap.docChanges().length
+            }`,
           );
           for (const change of snap.docChanges()) {
             if (change.type === "removed") {

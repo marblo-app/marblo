@@ -241,12 +241,21 @@ export class OrchestratorManager {
       rootPath
     );
 
+    // Resume must be scoped to THIS orchestrator kind. Board sessions are
+    // labeled "Orchestrator", mission sessions "Orchestrator-mission". The old
+    // hardcoded "Orchestrator" here made a mission orchestrator resume the
+    // BOARD's claude session (two PTYs sharing one session → the mission PTY
+    // renders blank), and crash auto-restart (launch(..., "latest")) hit the
+    // same cross-contamination.
+    const labelTarget =
+      this.kind === "board" ? "Orchestrator" : `Orchestrator-${this.kind}`;
+
     // Add resume flag — always resolve to the actual session ID for the orchestrator
     if (resumeSessionId && resumeSessionId !== "new") {
       const resolvedId = this.resolveSessionId(
         rootPath,
         resumeSessionId,
-        "Orchestrator"
+        labelTarget
       );
       if (resolvedId) {
         launchConfig.args.push("--resume", resolvedId);
@@ -259,12 +268,8 @@ export class OrchestratorManager {
         );
       }
     } else if (!resumeSessionId && shouldResume) {
-      // Auto-continue latest orchestrator session
-      const resolvedId = this.resolveSessionId(
-        rootPath,
-        "latest",
-        "Orchestrator"
-      );
+      // Auto-continue latest orchestrator session (kind-scoped label)
+      const resolvedId = this.resolveSessionId(rootPath, "latest", labelTarget);
       if (resolvedId) {
         launchConfig.args.push("--resume", resolvedId);
         console.log(
@@ -397,12 +402,10 @@ export class OrchestratorManager {
 
     // Detect new session and auto-label it.
     //
-    // board kind keeps the bare "Orchestrator" label the renderer's
-    // auto-reconnect lookup (s.label === "Orchestrator") matches on; other
-    // kinds get a suffixed label so two orchestrators sharing a rootPath
+    // labelTarget (computed above, kind-scoped): board keeps the bare
+    // "Orchestrator" label the renderer's auto-reconnect lookup matches on;
+    // other kinds get a suffixed label so two orchestrators sharing a rootPath
     // don't claim each other's session.
-    const labelTarget =
-      this.kind === "board" ? "Orchestrator" : `Orchestrator-${this.kind}`;
 
     // Resume of a known session id — (re)label it directly so the label
     // survives even if it was ever lost. Cheap and idempotent.

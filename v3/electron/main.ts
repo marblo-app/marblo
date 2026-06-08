@@ -9,6 +9,7 @@ import {
   nativeImage,
   shell,
   safeStorage,
+  Notification,
 } from "electron";
 import path from "path";
 import fs from "fs";
@@ -772,11 +773,128 @@ function createMissionOrchestratorInstance(
   );
 }
 
+// 미션 오케스트레이터의 프로젝트 루트 해석. 엔진(ensureSession) 경로는 mission
+// doc 에 rootPath 가 없어 hint 없이 호출되므로, board 오케스트레이터 세션 →
+// 미션 세션 → appState 순으로 실제 프로젝트 루트를 찾는다.
+function resolveMissionRootPath(projectId: string, hint?: string): string {
+  const norm = (p?: string): string | undefined =>
+    p === "~" ? os.homedir() : p;
+  const fromHint = norm(hint);
+  if (fromHint) return fromHint;
+  const board = orchestrators.get(projectId)?.getSession()?.rootPath;
+  if (board) return board;
+  const mission = missionOrchestrators.get(projectId)?.getSession()?.rootPath;
+  if (mission) return mission;
+  const st = readAppState();
+  const fromState = norm(st.lastRootPath);
+  if (fromState) return fromState;
+  return process.env.MARBLO_PROJECT_ROOT ?? process.cwd();
+}
+
+// 미션 오케스트레이터를 보장 launch 하는 단일 경로. 패널 IPC
+// (missionOrchestrator:start) 와 미션 엔진(orch-registry ensureSession) 양쪽이
+// 이걸 통해 launch 한다. 두 책임을 한 곳에 모은 이유:
+//   1) onPtyReady 콜백으로 setupPtyForwarding(sid) 를 반드시 건다 — 엔진이
+//      패널보다 먼저 PTY 를 띄워도 출력이 renderer 로 흐른다. (예전엔 엔진 경로가
+//      콜백을 안 넘겨 PTY 가 살아있어도 패널이 빈 화면이었다.)
+//   2) 직전 mission 오케스트레이터 세션을 resume — 앱 재시작 후에도 컨텍스트
+//      연속 (board 오케스트레이터와 동일). crash auto-restart 도 lastOnPtyReady
+//      로 forwarding 을 유지한다.
+function ensureMissionOrchestratorLaunched(
+  projectId: string,
+  rootPathHint?: string,
+): OrchestratorManager {
+  let manager = missionOrchestrators.get(projectId);
+  if (!manager) {
+    manager = createMissionOrchestratorInstance(projectId);
+    missionOrchestrators.set(projectId, manager);
+  }
+  if (!manager.isRunning()) {
+    const rootPath = resolveMissionRootPath(projectId, rootPathHint);
+    // 직전 mission 세션 UUID (kind 별) 를 구체값으로 넘긴다 → launch 내부의
+    // "latest" 라벨 해석을 우회하고, 없으면 "new"(초기 프롬프트 포함 새 세션).
+    const resumeId = manager.resolveOrchestratorResumeId(rootPath) ?? "new";
+    manager.launch(
+      projectId,
+      rootPath,
+      bridgeServer.getPort(),
+      (sid) => {
+        // 소유 윈도우를 알면 그 창으로 라우팅, 모르면 setupPtyForwarding 의
+        // mainWindow 폴백 + 버퍼링으로 패널이 나중에 붙어도 backlog 수신.
+        const ownerId = missionOrchestratorOwners.get(projectId);
+        if (ownerId !== undefined) ptyOwners.set(sid, ownerId);
+        setupPtyForwarding(sid);
+      },
+      resumeId,
+    );
+  }
+  return manager;
+}
+
+// 미션이 사용자 개입을 요구할 때 (waiting_for_human + notifyUser) OS 알림 +
+// 인앱 IPC 로 surface. gstack 스킬은 상호작용(AskUserQuestion 등) 이 많아 PTY
+// 패널을 안 보고 있으면 미션이 멈춘 줄 모른다 → 능동 알림이 필요.
+function notifyMissionNeedsInput(n: {
+  missionId: string;
+  projectId: string;
+  goal: string;
+  kind: "pty_input_required" | "escalate";
+  question?: string;
+  skill?: string | null;
+}): void {
+  const title =
+    n.kind === "escalate"
+      ? "미션 단계 실패 — 확인이 필요합니다"
+      : "미션이 당신의 답을 기다립니다";
+  const detail = n.question ?? (n.skill ? `${n.skill} 단계` : "");
+  const body = [n.goal, detail].filter(Boolean).join("\n");
+  try {
+    if (Notification.isSupported()) {
+      const notif = new Notification({ title, body });
+      notif.on("click", () => {
+        // 클릭 시 소유 창(없으면 mainWindow) 포커스 + Missions 탭으로 이동.
+        const ownerId = missionOrchestratorOwners.get(n.projectId);
+        let win: BrowserWindow | null = null;
+        if (ownerId !== undefined) {
+          for (const w of allWindows) {
+            if (!w.isDestroyed() && w.webContents.id === ownerId) {
+              win = w;
+              break;
+            }
+          }
+        }
+        win = win ?? mainWindow;
+        if (win && !win.isDestroyed()) {
+          if (win.isMinimized()) win.restore();
+          win.focus();
+        }
+        sendToOwner(ownerId, "mission:focusRequest", {
+          missionId: n.missionId,
+        });
+      });
+      notif.show();
+    }
+  } catch (err) {
+    console.warn("[Mission] OS notification failed:", err);
+  }
+  // 인앱 surface — 소유 창(없으면 broadcast)에 이벤트. 렌더러가 토스트 / 탭
+  // attention dot 으로 표시.
+  const ownerId = missionOrchestratorOwners.get(n.projectId);
+  if (ownerId !== undefined) {
+    sendToOwner(ownerId, "mission:needsInput", n);
+  } else {
+    broadcast("mission:needsInput", n);
+  }
+}
+
 missionBundle = buildMissionEngine({
   agentManager,
   taskDecomposer: getDecomposer,
   orchestrators: missionOrchestrators,
   createOrchestratorInstance: createMissionOrchestratorInstance,
+  ensureOrchestratorLaunched: (projectId) =>
+    ensureMissionOrchestratorLaunched(projectId),
+  notifier: notifyMissionNeedsInput,
   ptyManager,
   bridgePort: () => bridgeServer.getPort(),
   // bridgeServer.dispatchTask is async now (it awaits worktree prep before
@@ -2028,41 +2146,23 @@ ipcMain.handle(
     if (!projectId || !rootPath) {
       throw new Error("projectId and rootPath required");
     }
-    let manager = missionOrchestrators.get(projectId);
-    if (!manager) {
-      manager = createMissionOrchestratorInstance(projectId);
-      missionOrchestrators.set(projectId, manager);
-    }
-    // 소유 윈도우 추적 — status event 라우팅용.
+    // 소유 윈도우 추적 — status event 라우팅 + onPtyReady 의 ptyOwners 세팅용.
+    // ensureMissionOrchestratorLaunched 호출 전에 set 해야 새로 launch 되는
+    // 경우 forwarding 이 곧장 이 창으로 향한다.
     missionOrchestratorOwners.set(projectId, event.sender.id);
-    if (!manager.isRunning()) {
-      const senderId = event.sender.id;
-      const session = manager.launch(
-        projectId,
-        rootPath,
-        bridgeServer.getPort(),
-        (sid) => {
-          // PTY 데이터가 renderer 로 forward 되도록 등록.
-          // board orchestrator 와 동일 패턴 — 이게 없으면 PTY 가 살아있어도
-          // renderer 의 OrchestratorTerminal 이 빈 화면만 본다.
-          ptyOwners.set(sid, senderId);
-          setupPtyForwarding(sid);
-        },
-      );
-      return {
-        sessionId: session.sessionId,
-        ptySessionId: session.ptySessionId,
-        status: session.status,
-      };
-    }
+    // 패널·엔진 공용 단일 launch 경로 — forwarding + resume + rootPath 포함.
+    const manager = ensureMissionOrchestratorLaunched(projectId, rootPath);
     const session = manager.getSession();
-    return session
-      ? {
-          sessionId: session.sessionId,
-          ptySessionId: session.ptySessionId,
-          status: session.status,
-        }
-      : null;
+    if (!session) return null;
+    // 엔진이 먼저 띄운 경우 forwarding 의 소유 윈도우가 이 패널이 아닐 수 있으니
+    // 라이브 출력을 현재 패널 창으로 재라우팅. (초기 backlog 는 pty:replay 가
+    // 호출 renderer 에게 직접 반환하므로 순서 무관.)
+    ptyOwners.set(session.ptySessionId, event.sender.id);
+    return {
+      sessionId: session.sessionId,
+      ptySessionId: session.ptySessionId,
+      status: session.status,
+    };
   },
 );
 
@@ -2087,6 +2187,24 @@ ipcMain.handle(
     const manager = missionOrchestrators.get(projectId);
     if (manager) {
       manager.stop();
+    }
+  },
+);
+
+// 직전 mission 오케스트레이터 세션 id (kind=mission, rootPath 스코프) 조회.
+// 부팅 시 렌더러가 "이 프로젝트에 이어갈 미션 세션이 있나?" 판단 → 있으면
+// start 로 resume. 없으면 자동 spawn 하지 않는다 (미션 안 쓰는 프로젝트는 비용 0).
+// manager 인스턴스만 보장하고 launch 는 하지 않는다 (파일 스캔만 수행).
+ipcMain.handle(
+  "missionOrchestrator:resolvePrevious",
+  async (_event, rootPath: string): Promise<string | null> => {
+    const resolved = rootPath === "~" ? os.homedir() : rootPath;
+    // 임시 manager — 파일 기반 resolve 만 하므로 map 에 보관/ launch 불필요.
+    const probe = createMissionOrchestratorInstance("__resolve_probe__");
+    try {
+      return probe.resolveOrchestratorResumeId(resolved);
+    } catch {
+      return null;
     }
   },
 );
