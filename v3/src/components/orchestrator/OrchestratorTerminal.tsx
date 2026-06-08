@@ -132,7 +132,7 @@ export default memo(function OrchestratorTerminal({
             } catch (err) {
               console.warn(
                 "[OrchestratorTerminal] WebGL init failed, falling back to canvas:",
-                err,
+                err
               );
               try {
                 terminal.loadAddon(new CanvasAddon());
@@ -147,7 +147,7 @@ export default memo(function OrchestratorTerminal({
             } catch (err) {
               console.warn(
                 "[OrchestratorTerminal] Canvas init failed, using DOM renderer:",
-                err,
+                err
               );
             }
           }
@@ -272,6 +272,89 @@ export default memo(function OrchestratorTerminal({
     let liveQueue: string[] = [];
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
     let maxTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Cold-start repaint. Opening the panel ('PTY 보기' / attention auto-open)
+    // showed a blank terminal until the user pressed a key. Two independent
+    // causes, two fixes:
+    //
+    //   1. Canvas renderer first paint. The CanvasAddon batches paints into the
+    //      rAF render loop and only repaints rows the core marked dirty. A bulk
+    //      replay write (or a flush of data queued before open) applies all at
+    //      once right after open(); with no further input, that first frame can
+    //      stay blank until a later write (the Enter echo) drives another render
+    //      cycle. terminal.refresh() re-marks the viewport dirty so the next
+    //      frame actually paints it. ensureFirstPaint() does this exactly once —
+    //      after the renderer is warm, normal writes paint on their own, so we
+    //      keep it off the hot live-stream path.
+    //
+    //   2. Alternate-screen TUI re-emit. The orchestrator is Claude Code's Ink
+    //      TUI in alternate-screen mode. On (re)attach it does not redraw its
+    //      current frame, and the replay ring buffer may no longer hold the
+    //      alt-screen-enter sequence, so the reconstructed frame can be stale or
+    //      partial (e.g. a waiting-for-human prompt). A terminal resize delivers
+    //      SIGWINCH, which makes Ink repaint the whole frame. fit() already
+    //      resizes on mount, but only when xterm's dims actually change — a
+    //      re-mount at the same panel size sends nothing, so the stale frame
+    //      survives. We force the issue by bumping cols by one and restoring it;
+    //      the kernel only signals on a real size change, so a same-size resize
+    //      would be a no-op.
+    //
+    //   ORDERING: main's pty:resize clears the pre-replay output buffer while it
+    //   still exists, so the nudge MUST run only AFTER pty:replay has drained +
+    //   deleted that buffer. nudgePtyRepaint() is therefore called solely from
+    //   the replay completion path below.
+    let firstPaintDone = false;
+    const forceRepaint = () => {
+      if (disposed || !termOpened) return;
+      try {
+        terminal.refresh(0, terminal.rows - 1);
+      } catch {
+        /* ignore */
+      }
+    };
+    const ensureFirstPaint = () => {
+      if (firstPaintDone) return;
+      firstPaintDone = true;
+      forceRepaint();
+    };
+    let nudgeRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+    const nudgePtyRepaint = () => {
+      if (disposed || !termOpened) return;
+      const cols = terminal.cols;
+      const rows = terminal.rows;
+      if (!cols || !rows) return;
+      try {
+        window.electronAPI.pty.resize(sessionId, cols + 1, rows);
+        nudgeRestoreTimer = setTimeout(() => {
+          nudgeRestoreTimer = null;
+          if (disposed) return;
+          window.electronAPI.pty.resize(sessionId, cols, rows);
+        }, 50);
+      } catch {
+        /* ignore */
+      }
+    };
+    // Focus so the user can answer immediately, but never steal focus from a
+    // field they're actively typing in elsewhere (auto-open can fire anytime).
+    const focusIfIdle = () => {
+      if (disposed || !termOpened) return;
+      const active = document.activeElement as HTMLElement | null;
+      const typingElsewhere =
+        !!active &&
+        active !== document.body &&
+        !containerRef.current?.contains(active) &&
+        (active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          active.isContentEditable);
+      if (typingElsewhere) return;
+      try {
+        terminal.focus();
+      } catch {
+        /* ignore */
+      }
+    };
+
     const flushLive = () => {
       if (settleTimer) clearTimeout(settleTimer);
       if (maxTimer) clearTimeout(maxTimer);
@@ -289,6 +372,9 @@ export default memo(function OrchestratorTerminal({
       // and land wrong. The callback runs after the data is applied.
       terminal.write(joined, () => {
         if (disposed) return;
+        // First live chunk warms the canvas renderer if replay didn't (e.g. a
+        // re-mount whose replay buffer was already drained). One-shot.
+        ensureFirstPaint();
         if (!wantBottomRef.current) return;
         // Slash menu open → pin the `> ` prompt to the top so it stays visible
         // with the command list below it (xterm otherwise follows the parked
@@ -323,14 +409,29 @@ export default memo(function OrchestratorTerminal({
       if (disposed) return;
       window.electronAPI.pty.replay(sessionId).then((buffered) => {
         if (disposed) return;
-        for (const chunk of buffered) {
-          if (termOpened) {
-            terminal.write(chunk);
-          } else {
-            pendingData.push(chunk);
-          }
+        if (!termOpened) {
+          // Terminal hasn't opened yet (container had zero size) — hand the
+          // backlog to the pendingData flush path, which repaints on flush.
+          for (const chunk of buffered) pendingData.push(chunk);
+          return;
         }
-        if (termOpened && wantBottomRef.current) terminal.scrollToBottom();
+        const joined = buffered.join("");
+        if (joined.length > 0) {
+          // Single write; scroll + force the canvas's first paint in the
+          // completion callback. Writes parse asynchronously, so the buffer is
+          // only settled (and the repaint targets the right rows) once it runs.
+          terminal.write(joined, () => {
+            if (disposed) return;
+            if (wantBottomRef.current) terminal.scrollToBottom();
+            ensureFirstPaint();
+          });
+        }
+        // Focus for immediate interaction, then nudge the alt-screen TUI to
+        // re-emit its current frame. The nudge also covers the re-mount case
+        // where the replay buffer was already drained (joined === "") — a
+        // SIGWINCH-driven repaint is then the only way to recover the live frame.
+        focusIfIdle();
+        nudgePtyRepaint();
       });
     }, 200);
 
@@ -341,11 +442,21 @@ export default memo(function OrchestratorTerminal({
         return;
       }
       if (termOpened && pendingData.length > 0) {
-        for (const d of pendingData) terminal.write(d);
+        // Single write + repaint in the completion callback, mirroring the
+        // replay path. Data routed here — the replay backlog when the container
+        // opened late (see the early-return above), or live chunks queued
+        // before open — is the first thing the canvas renderer sees, so it
+        // needs the one-shot first-paint kick too; otherwise the backlog can
+        // sit blank until a later write drives another render cycle.
+        const joined = pendingData.join("");
         pendingData.length = 0;
-        // Initial flush — user hasn't had a chance to scroll yet, but guard
-        // anyway in case data and a user wheel race at mount.
-        if (wantBottomRef.current) terminal.scrollToBottom();
+        terminal.write(joined, () => {
+          if (disposed) return;
+          // Initial flush — user hasn't had a chance to scroll yet, but guard
+          // anyway in case data and a user wheel race at mount.
+          if (wantBottomRef.current) terminal.scrollToBottom();
+          ensureFirstPaint();
+        });
         clearInterval(flushInterval);
       }
     }, 100);
@@ -363,7 +474,7 @@ export default memo(function OrchestratorTerminal({
     window.electronAPI.pty.onExit(sessionId, (code) => {
       if (disposed) return;
       terminal.write(
-        `\r\n\x1b[90m[Orchestrator exited with code ${code}]\x1b[0m\r\n`,
+        `\r\n\x1b[90m[Orchestrator exited with code ${code}]\x1b[0m\r\n`
       );
     });
 
@@ -458,6 +569,7 @@ export default memo(function OrchestratorTerminal({
       clearInterval(flushInterval);
       if (settleTimer) clearTimeout(settleTimer);
       if (maxTimer) clearTimeout(maxTimer);
+      if (nudgeRestoreTimer) clearTimeout(nudgeRestoreTimer);
       window.removeEventListener("resize", handleResize);
       resizeObserver?.disconnect();
       wrapperEl?.removeEventListener("wheel", onWheel, wheelOpts);
