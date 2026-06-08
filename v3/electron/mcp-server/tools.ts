@@ -666,8 +666,14 @@ export function registerTools(server: McpServer): void {
         newStatus,
         lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
         lastActivitySummary: comment || `status → ${newStatus}`,
-        // Re-validate the transition inside the txn against the real status.
-        validateFrom: (s) => canTransition(s, newStatus),
+        // Re-validate the transition inside the txn against the real status —
+        // but force=true is the documented escape hatch, so it must skip the
+        // in-txn re-check too. Leaving validateFrom undefined turns
+        // applyProjection's TOCTOU guard into a no-op, mirroring the outer
+        // `!force` gate above. Previously this predicate was set unconditionally,
+        // so force=true cleared the outer check yet still threw inside the
+        // transaction (projection.ts) — the escape hatch was effectively dead.
+        validateFrom: force ? undefined : (s) => canTransition(s, newStatus),
       };
       if (comment) projMut.extraTaskFields = { comment };
       if (newStatus === "BLOCKED")
@@ -1507,10 +1513,21 @@ export function registerTools(server: McpServer): void {
           if (!task.dependsOnCompleted) {
             // Mark BLOCKED so it surfaces in the kanban board, then refuse
             // to dispatch. Best-effort — failing to mark is not fatal.
+            // Route through applyProjection (not a raw updateDoc) so
+            // tasks/{id}.projection.currentStatus AND the mission's
+            // statusCounts move together with the real status — a bare
+            // updateDoc left both projections stale, so get_projection
+            // contradicted the actual BLOCKED status. No validateFrom: this is
+            // a forced mark regardless of current status (same intent as the
+            // prior raw write), so the in-txn TOCTOU guard stays off.
             try {
-              await updateDoc(doc(db, "tasks", task_id), {
-                status: "BLOCKED",
-                updatedAt: Timestamp.now(),
+              await applyProjection(db, task_id, {
+                newStatus: "BLOCKED",
+                lastAgentId:
+                  MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+                lastActivitySummary:
+                  "dispatch aborted: 선행 태스크 미완료 — BLOCKED",
+                blockerSummary: "선행 태스크 미완료 (dependsOn 미충족)",
               });
             } catch (markErr) {
               console.error(
