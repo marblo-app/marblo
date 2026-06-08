@@ -126,6 +126,56 @@ describe("WorktreeCoordinator.prepare", () => {
     expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("L3: concurrent prepare() for the SAME taskId creates exactly one worktree", async () => {
+    // Two dispatches racing for the same task. Without the per-(projectId,
+    // taskId) serialization lock, both would observe "no worktree yet" across
+    // the await in list() and both call create() → duplicate worktree TOCTOU.
+    const { repoRoot, wtRoot, mgr } = makeRepo();
+    const createTask = vi.fn(async () => "unused");
+    const createSpy = vi.spyOn(mgr, "create");
+    const coord = new WorktreeCoordinator({ worktreeManager: mgr, createTask });
+
+    const input = {
+      projectId: "projRace",
+      taskId: "racetask0001",
+      title: "Race",
+      repoRoot,
+    };
+    const [a, b] = await Promise.all([
+      coord.prepare(input),
+      coord.prepare(input),
+    ]);
+
+    // Exactly one create() despite the concurrent calls.
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    // Both resolve to the same worktree path, and exactly one reports it created.
+    const expectedCwd = path.join(wtRoot, "projRace", "racetask0001");
+    expect(a.cwd).toBe(expectedCwd);
+    expect(b.cwd).toBe(expectedCwd);
+    expect([a.worktreeCreated, b.worktreeCreated].filter(Boolean)).toHaveLength(
+      1,
+    );
+  });
+
+  it("L3: distinct taskIds run independently (lock is per-task, not global)", async () => {
+    const { repoRoot, wtRoot, mgr } = makeRepo();
+    const createTask = vi.fn(async () => "unused");
+    const createSpy = vi.spyOn(mgr, "create");
+    const coord = new WorktreeCoordinator({ worktreeManager: mgr, createTask });
+
+    const [a, b] = await Promise.all([
+      coord.prepare({ projectId: "p", taskId: "taskAAAA0001", repoRoot }),
+      coord.prepare({ projectId: "p", taskId: "taskBBBB0002", repoRoot }),
+    ]);
+
+    // Different tasks → two distinct worktrees, both created.
+    expect(createSpy).toHaveBeenCalledTimes(2);
+    expect(a.cwd).toBe(path.join(wtRoot, "p", "taskAAAA0001"));
+    expect(b.cwd).toBe(path.join(wtRoot, "p", "taskBBBB0002"));
+    expect(a.worktreeCreated).toBe(true);
+    expect(b.worktreeCreated).toBe(true);
+  });
+
   it("falls back to a plain cwd without creating when repoRoot is not a git repo", async () => {
     const nonGit = fs.realpathSync(
       fs.mkdtempSync(path.join(os.tmpdir(), "marblo-nogit-")),
