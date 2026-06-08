@@ -72,8 +72,17 @@ const SKILLS_DIR =
 /**
  * Send a notification to the orchestrator via the bridge server.
  * Fire-and-forget — errors are silently ignored.
+ *
+ * `contextId` scopes the notification to the right orchestrator (Quick Lanes
+ * 눈/브레인 분리). The board orchestrator only owns context="board" tasks;
+ * mission tasks carry contextId=missionId. Without this, every mission task's
+ * status/activity/review notification was routed to the board orchestrator
+ * (the only one the bridge's projectId lookup knew), flooding the main orch
+ * PTY with mission progress. The bridge uses contextId to route mission-context
+ * notifications to the mission orchestrator instead (and drop them from board).
+ * Empty/"board" stays on the board orchestrator (unchanged behavior).
  */
-function notifyOrchestrator(message: string): void {
+function notifyOrchestrator(message: string, contextId?: string): void {
   const bridgePort = process.env.MARBLO_BRIDGE_PORT;
   if (!bridgePort) return;
   // Forward MARBLO_PROJECT so the bridge routes to the right per-project
@@ -84,7 +93,7 @@ function notifyOrchestrator(message: string): void {
   fetch(`http://127.0.0.1:${bridgePort}/notify-orchestrator`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, projectId }),
+    body: JSON.stringify({ message, projectId, contextId: contextId ?? "" }),
   }).catch(() => {
     /* best-effort */
   });
@@ -701,6 +710,7 @@ export function registerTools(server: McpServer): void {
       const commentNote = comment ? ` — ${comment}` : "";
       notifyOrchestrator(
         `[Task Update] "${task.title}" ${task.status} → ${newStatus} (role=${task.role}, id=${task_id})${commentNote}`,
+        task.contextId,
       );
 
       // ── Inline dependency resolution (atomic, idempotent — N4) ──
@@ -719,7 +729,7 @@ export function registerTools(server: McpServer): void {
         try {
           const depQ = query(
             collection(db, "tasks"),
-            where("dependsOn", "array-contains", task_id)
+            where("dependsOn", "array-contains", task_id),
           );
           depDocs = (await getDocs(depQ)).docs;
         } catch (err) {
@@ -731,15 +741,18 @@ export function registerTools(server: McpServer): void {
             const res = await resolveDependentIfReady(db, depDoc.id, task_id);
             if (res.unblocked) {
               unblocked++;
-              // Notify orchestrator about newly unblocked task
+              // Notify orchestrator about newly unblocked task. Scope to the
+              // completed task's context — a mission's dependents share its
+              // contextId, so this routes to the same (mission/board) orch.
               notifyOrchestrator(
-                `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`
+                `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`,
+                task.contextId,
               );
             }
           } catch (err) {
             console.error(
               `[MCP] Dependency resolution error for ${depDoc.id}:`,
-              err
+              err,
             );
           }
         }
@@ -783,6 +796,7 @@ export function registerTools(server: McpServer): void {
         message.length > 300 ? `${message.slice(0, 300)}...` : message;
       notifyOrchestrator(
         `[Task Activity] "${task.title}" progress update (role=${task.role}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`,
+        task.contextId,
       );
       return text(`Activity logged: ${message}`);
     },
@@ -845,6 +859,7 @@ export function registerTools(server: McpServer): void {
       const prNote = pr_url ? ` PR: ${pr_url}` : "";
       notifyOrchestrator(
         `[Review Submitted] "${task.title}" is ready for review (role=${task.role}, id=${task_id})${prNote}`,
+        task.contextId,
       );
 
       return text(`Task '${task.title}' submitted for review. Status: REVIEW`);

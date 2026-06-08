@@ -1,12 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   Mission,
   MissionStep,
   MissionStepStatus,
 } from "../../types/mission";
+import type { Task, TaskStatus } from "../../types/task";
+import type { Agent } from "../../types/agent";
 import { MissionStatusBadge } from "./MissionStatusBadge";
 import { MissionTimeline } from "./MissionTimeline";
 import { TEMPLATE_META } from "./templates";
+import { useTaskStore } from "../../stores/taskStore";
+import { useAgentStore } from "../../stores/agentStore";
+import { useTerminalStore } from "../../stores/terminalStore";
+import { useAgentSessionMap } from "../../stores/agentSessionMap";
+import { useAgentFocusStore } from "../../stores/agentFocusStore";
 
 interface MissionDetailProps {
   mission: Mission;
@@ -33,6 +40,32 @@ export function MissionDetail({
   onRestart,
 }: MissionDetailProps) {
   const meta = TEMPLATE_META[mission.templateId];
+
+  // 미션 task 는 보드(KanbanBoard)에도 contextId=missionId 로 섞여 표시되지만
+  // (TaskCard 의 🎯 카드), 미션탭은 보드 task 를 구독하지 않으므로 여기서 직접
+  // 구독한다. agents 구독은 하단 AgentListPanel 도 하지만, 미션탭만 떠 있을 때를
+  // 위해 LanesTab 과 동일하게 함께 구독해 둔다(같은 쿼리라 멱등).
+  const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
+  const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
+  const allTasks = useTaskStore((s) => s.tasks);
+  const agents = useAgentStore((s) => s.agents);
+
+  useEffect(() => {
+    if (!mission.projectId) return;
+    const u1 = subscribeToTasks(mission.projectId);
+    const u2 = subscribeToAgents(mission.projectId);
+    return () => {
+      u1?.();
+      u2?.();
+    };
+  }, [mission.projectId, subscribeToTasks, subscribeToAgents]);
+
+  // 이 미션의 task 들 — dispatcher 가 contextId=missionId 로 태깅한다.
+  const missionTasks = useMemo(
+    () => allTasks.filter((t) => t.contextId === mission.id),
+    [allTasks, mission.id],
+  );
+
   const canPause = mission.status === "active";
   const canResume =
     mission.status === "sleeping" || mission.status === "waiting_for_human";
@@ -175,6 +208,8 @@ export function MissionDetail({
         </ol>
       </section>
 
+      <MissionTasksSection tasks={missionTasks} agents={agents} />
+
       <MissionReportSection mission={mission} />
 
       <section>
@@ -187,6 +222,140 @@ export function MissionDetail({
         />
       </section>
     </div>
+  );
+}
+
+// agentStore / TaskCard 의 MODEL_ICONS 와 동일 (harness 표식 중복 패턴).
+const MODEL_ICONS: Record<string, string> = {
+  claude: "🟣",
+  gemini: "🔵",
+  gpt: "🟢",
+  antigravity: "🟠",
+  local: "⚫",
+  custom: "⚪",
+};
+
+const TASK_STATUS_TONE: Record<TaskStatus, string> = {
+  TODO: "text-gray-400",
+  CLAIMED: "text-blue-300",
+  IN_PROGRESS: "text-blue-200",
+  REVIEW: "text-purple-300",
+  BLOCKED: "text-orange-300",
+  FAILED: "text-red-300",
+  DONE: "text-emerald-300",
+};
+
+function MissionTasksSection({
+  tasks,
+  agents,
+}: {
+  tasks: Task[];
+  agents: Agent[];
+}) {
+  // 미션 task 는 보드에도 🎯 카드로 뜨지만, 미션 상세에서도 같은 task 를 모아
+  // 각 담당 에이전트의 PTY 로 바로 점프할 수 있게 한다. dispatch 스텝 전이라
+  // task 가 아직 없으면 안내만 노출(= 보드에 안 보이는 것도 같은 이유).
+  return (
+    <section>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+        작업 · {tasks.length}
+      </h3>
+      {tasks.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-700/60 bg-gray-800/30 px-3 py-3 text-xs text-gray-500">
+          아직 디스패치된 작업이 없습니다. dispatch 스텝이 실행되면 여기와 칸반
+          보드에 미션 작업(🎯)이 나타납니다.
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {tasks.map((task) => (
+            <MissionTaskRow key={task.id} task={task} agents={agents} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * 미션 task 한 줄 + "🖥️ 에이전트 PTY" 버튼.
+ *
+ * 동작은 레인 터미널 fix(ab49b54) 와 동일: 담당 에이전트의 진짜 ptySessionId 로
+ * 세션을 열고, useAgentFocusStore.setFocusedAgent 로 하단 AgentListPanel 의
+ * FocusView 를 그 에이전트 PTY 로 전환한다.
+ *
+ * claimedBy 는 두 경로로 저장된다 — MCP claim_task(=agent.id) / 수동 할당
+ * (=agent.name). TaskCard 와 동일하게 양쪽을 매칭하고, PTY 매핑/포커스는 항상
+ * agent.id 를 키로 쓴다. ptySessionId 가 agentSessionMap 에 아직 없으면(세션
+ * 미생성/미등록) 죽은 fallback 채널을 attach 하지 않도록 버튼을 비활성화한다.
+ */
+function MissionTaskRow({ task, agents }: { task: Task; agents: Agent[] }) {
+  const claimingAgent = task.claimedBy
+    ? agents.find((a) => a.id === task.claimedBy || a.name === task.claimedBy)
+    : undefined;
+  const agentId = claimingAgent?.id;
+  const ptySessionId = useAgentSessionMap((s) =>
+    agentId ? s.map[agentId] : undefined,
+  );
+  const hasLiveSession = useTerminalStore((s) =>
+    ptySessionId ? s.sessions.some((sess) => sess.id === ptySessionId) : false,
+  );
+  const canOpen = Boolean(agentId && ptySessionId);
+  const modelIcon = claimingAgent
+    ? (MODEL_ICONS[claimingAgent.model] ?? "⚪")
+    : "📋";
+  const label = claimingAgent
+    ? `${MODEL_ICONS[claimingAgent.model] ?? "⚪"} ${claimingAgent.name}`
+    : task.title;
+
+  return (
+    <li className="flex items-center gap-2 rounded-lg border border-gray-700/60 bg-gray-800/40 px-3 py-2">
+      <span className="flex-shrink-0 text-sm" aria-hidden>
+        {modelIcon}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-gray-200">
+          {task.title}
+        </div>
+        <div className="mt-0.5 flex items-center gap-2 text-[11px]">
+          <span className={TASK_STATUS_TONE[task.status] ?? "text-gray-400"}>
+            {task.status}
+          </span>
+          <span className="truncate text-gray-500">
+            {claimingAgent
+              ? `👤 ${claimingAgent.name}`
+              : task.claimedBy
+                ? `👤 ${task.claimedBy}`
+                : "미할당"}
+          </span>
+        </div>
+      </div>
+      <button
+        type="button"
+        disabled={!canOpen}
+        title={
+          canOpen
+            ? hasLiveSession
+              ? "이 작업의 에이전트 PTY 보기"
+              : "에이전트 세션에 연결"
+            : claimingAgent
+              ? "실행 중인 PTY 세션이 없습니다"
+              : "담당 에이전트가 아직 없습니다"
+        }
+        onClick={() => {
+          if (!agentId || !ptySessionId) return;
+          useTerminalStore
+            .getState()
+            .openTerminalForSession(ptySessionId, label);
+          useAgentFocusStore.getState().setFocusedAgent(agentId);
+        }}
+        className="flex-shrink-0 rounded bg-gray-700 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        🖥️ 에이전트 PTY
+        {canOpen && !hasLiveSession && (
+          <span className="ml-1 text-[10px] text-gray-400">(연결)</span>
+        )}
+      </button>
+    </li>
   );
 }
 

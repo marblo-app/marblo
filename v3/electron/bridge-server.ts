@@ -128,6 +128,11 @@ interface NotifyOrchestratorRequest {
   /** Project ID — required in multi-window mode to route to the right
    * orchestrator. MCP server forwards MARBLO_PROJECT env var here. */
   projectId?: string;
+  /** Task context — "board"/empty routes to the board orchestrator; a mission
+   * id (Quick Lanes 눈/브레인 분리) routes to that project's mission
+   * orchestrator instead, so mission task progress never floods the board
+   * orchestrator PTY. MCP server forwards the task's contextId here. */
+  contextId?: string;
 }
 
 // ── Dispatch types ──────────────────────────────────────────
@@ -196,6 +201,13 @@ export class BridgeServer {
   private orchestratorLookup: (
     projectId: string,
   ) => OrchestratorManager | null = () => null;
+  // Mission orchestrator lookup — parallel to orchestratorLookup but for the
+  // per-project MISSION orchestrator (board 와 분리된 풀). Used by
+  // /notify-orchestrator to route mission-context task notifications to the
+  // mission orchestrator instead of the board one. Null until main wires it.
+  private missionOrchestratorLookup: (
+    projectId: string,
+  ) => OrchestratorManager | null = () => null;
   // Per-project enabledModels lookup — main wires this so dispatchTask
   // doesn't read process.env (which races across windows).
   private enabledModelsLookup: (projectId: string) => string[] | undefined =
@@ -261,6 +273,12 @@ export class BridgeServer {
     lookup: (projectId: string) => OrchestratorManager | null,
   ): void {
     this.orchestratorLookup = lookup;
+  }
+
+  setMissionOrchestratorLookup(
+    lookup: (projectId: string) => OrchestratorManager | null,
+  ): void {
+    this.missionOrchestratorLookup = lookup;
   }
 
   setAgentSpawnedHook(
@@ -673,16 +691,30 @@ export class BridgeServer {
           return;
         }
 
-        const orch = this.orchestratorLookup(params.projectId ?? "");
+        // Context-scoped routing (Quick Lanes 눈/브레인 분리). A mission task
+        // carries contextId=missionId; board tasks carry "board"/empty. Mission
+        // notifications go to the project's MISSION orchestrator — never the
+        // board one — so mission progress doesn't flood the main orch PTY. If a
+        // mission notification arrives but no mission orchestrator is running,
+        // we DROP it (returning 200) rather than fall back to the board orch,
+        // which would reintroduce the pollution this routing exists to prevent.
+        const projectId = params.projectId ?? "";
+        const contextId = params.contextId ?? "";
+        const isMissionContext = contextId !== "" && contextId !== "board";
+        const orch = isMissionContext
+          ? this.missionOrchestratorLookup(projectId)
+          : this.orchestratorLookup(projectId);
         const session = orch?.getSession();
         if (!session || session.status !== "running") {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
               success: false,
-              error: params.projectId
-                ? `Orchestrator not running for project ${params.projectId}`
-                : "Orchestrator not running (missing projectId)",
+              error: isMissionContext
+                ? `Mission orchestrator not running for project ${projectId} (context=${contextId}) — notification dropped`
+                : projectId
+                  ? `Orchestrator not running for project ${projectId}`
+                  : "Orchestrator not running (missing projectId)",
             }),
           );
           return;
@@ -693,8 +725,10 @@ export class BridgeServer {
         // as a discrete keystroke (single-chunk gets paste-buffered).
         this.ptyManager.writeAndSubmit(session.ptySessionId, params.message);
         console.log(
-          `[BridgeServer] Notified orchestrator (project=${
-            params.projectId
+          `[BridgeServer] Notified ${
+            isMissionContext ? "mission" : "board"
+          } orchestrator (project=${projectId}, context=${
+            contextId || "board"
           }): ${params.message.slice(0, 80)}...`,
         );
 

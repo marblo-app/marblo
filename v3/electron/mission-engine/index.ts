@@ -34,8 +34,8 @@ export class MissionEngine {
       ((m, meta) => console.log(`[MissionEngine] ${m}`, meta ?? ""));
     this.unsubscribe = deps.eventBus.on((event) =>
       this.onEvent(event).catch((err) =>
-        this.log("event handler error", { err: String(err), event })
-      )
+        this.log("event handler error", { err: String(err), event }),
+      ),
     );
   }
 
@@ -85,7 +85,7 @@ export class MissionEngine {
     const mission = await this.requireMission(missionId);
     if (isTerminalMission(mission.status)) {
       throw new Error(
-        `Cannot resume terminal mission ${missionId} (status=${mission.status})`
+        `Cannot resume terminal mission ${missionId} (status=${mission.status})`,
       );
     }
     // planning: UI 에서 직접 doc 만 만든 미션을 engine 이 인계받는 경로.
@@ -148,7 +148,7 @@ export class MissionEngine {
       if (step.type === "dispatch") {
         // 이미 dispatch 된 task 가 있으면 재연결 (중복 dispatch 방지).
         const existing = await this.deps.dispatcher.findMissionTaskIds(
-          mission.id
+          mission.id,
         );
         if (existing.length > 0) {
           const merged = Array.from(new Set([...mission.taskIds, ...existing]));
@@ -220,6 +220,7 @@ export class MissionEngine {
       type: "mission.paused",
       payload: { kind: "abandoned", reason: reason ?? null },
     });
+    await this.notifyOrchestratorMissionStopped(mission, "abandoned", reason);
   }
 
   /** 미션을 명시적으로 sleeping 상태로. UI ⏸️ Pause 버튼이 이걸 호출. */
@@ -232,6 +233,49 @@ export class MissionEngine {
       type: "mission.paused",
       payload: { kind: "paused_by_user" },
     });
+    await this.notifyOrchestratorMissionStopped(mission, "paused");
+  }
+
+  /**
+   * pause/abandon 시 미션 owner orchestrator(미션 PTY)에게 안내 메시지를 주입한다.
+   * 진행 중이던 gstack step 의 Claude 세션이 미션이 멈췄음을 알고 현재 작업을 멈추게
+   * 한다. 메시지는 여러 줄(상태 + 안내)이라, raw write 로 보내면 첫 줄바꿈에서
+   * 조기 제출돼 composer 에 깨져 들어간다(줄마다 별도 입력으로 쪼개짐). 그래서
+   * OrchestratorRef.postMessage 로 보낸다 — 내부적으로 PtyManager.writeAndSubmit 이
+   * bracketed-paste(ESC[200~ … ESC[201~)로 감싸 한 덩어리로 붙여넣고 끝에 단일 CR 로
+   * 제출하므로 멀티라인이 그대로 한 메시지로 들어간다.
+   *
+   * best-effort: 살아있는 owner 세션이 없거나 주입이 실패해도 미션 상태 전이를
+   * 막지 않는다. ensureSession(launch 유발) 대신 getSession 으로 기존 세션만 본다.
+   */
+  private async notifyOrchestratorMissionStopped(
+    mission: Mission,
+    kind: "paused" | "abandoned",
+    reason?: string,
+  ): Promise<void> {
+    try {
+      const ref = this.deps.orchestrators.getSession(
+        mission.ownerOrchestratorSessionId,
+      );
+      if (!ref || !ref.isAlive()) return;
+      const header =
+        kind === "abandoned"
+          ? `🛑 [Marblo Mission] 이 미션이 중단되었습니다${
+              reason ? ` (사유: ${reason})` : ""
+            }.`
+          : `⏸️ [Marblo Mission] 이 미션이 일시정지되었습니다.`;
+      const body =
+        kind === "abandoned"
+          ? `미션 "${mission.goal}" 은(는) 더 이상 진행되지 않습니다. 진행 중이던 작업이 있다면 중단하고 마무리해 주세요. (재개하려면 사용자가 새 미션을 시작합니다.)`
+          : `미션 "${mission.goal}" 의 자동 진행이 멈췄습니다. 진행 중이던 작업이 있다면 중단해 주세요. 사용자가 Resume 을 누르면 다음 단계부터 다시 진행됩니다.`;
+      await ref.postMessage(`${header}\n${body}`);
+    } catch (e) {
+      this.log("notifyOrchestratorMissionStopped failed", {
+        missionId: mission.id,
+        kind,
+        err: String(e),
+      });
+    }
   }
 
   /** UI / wiring 종료 시 호출. event bus 구독 해제. */
@@ -244,6 +288,21 @@ export class MissionEngine {
   private async onEvent(event: MissionEngineEvent): Promise<void> {
     const mission = await this.deps.store.getMission(event.missionId);
     if (!mission || isTerminalMission(mission.status)) return;
+
+    // 유저가 ⏸️ Pause 한 미션은 task.status_changed / agent idle 같은 이벤트로
+    // 자동 재개하지 않는다. recoverInFlight(부팅 복구)엔 동일 가드가 있었지만
+    // 런타임 event 경로(onEvent)엔 없어, paused_by_user 미션도 event-forwarder /
+    // forwardAgentStatus 신호가 오면 active 로 깨어나 버렸다. 같은 가드를 여기에도
+    // 적용해 일시정지 의도를 보존한다. (명시적 재개는 resume() — onEvent 우회.)
+    // append 보다 먼저 return 해 paused 미션 timeline 에 무시할 이벤트를 남기지 않고,
+    // mission.resumed 로 매핑되는 이벤트가 isPausedByUser 판정을 흐리는 것도 막는다.
+    if (mission.status === "sleeping" && this.isPausedByUser(mission)) {
+      this.log("onEvent: skipping user-paused mission", {
+        missionId: event.missionId,
+        eventType: event.type,
+      });
+      return;
+    }
 
     await this.deps.store.appendTimelineEvent(event.missionId, {
       ts: this.now(),
@@ -333,7 +392,7 @@ export class MissionEngine {
             err: String(err),
             missionId: mission.id,
             stepIndex: step.index,
-          })
+          }),
         );
     };
 
@@ -419,7 +478,7 @@ export class MissionEngine {
         mission,
         step.index,
         result.output,
-        result.userInputDetected
+        result.userInputDetected,
       );
     }
     return this.handleFailure(mission, step.index, result.error);
@@ -429,7 +488,7 @@ export class MissionEngine {
     mission: Mission,
     stepIndex: number,
     output: unknown,
-    userInputDetected?: string
+    userInputDetected?: string,
   ): Promise<boolean> {
     const completedAt = this.now();
     const step = mission.steps[stepIndex];
@@ -507,7 +566,7 @@ export class MissionEngine {
   private async handleFailure(
     mission: Mission,
     stepIndex: number,
-    error: string | undefined
+    error: string | undefined,
   ): Promise<boolean> {
     const step = mission.steps[stepIndex];
     const policy = step.onFailure ?? "retry";
@@ -602,7 +661,7 @@ export class MissionEngine {
           .replace(/-+$/, "");
         const folder = `docs/missions/${slug || "mission"}-${mission.id.slice(
           0,
-          6
+          6,
         )}`;
         const summaryPath = `${folder}/SUMMARY.md`;
         const stepsSummary = mission.steps
@@ -616,7 +675,7 @@ export class MissionEngine {
               `  → 저장 경로: ${stepPath}\n` +
               (typeof s.output === "string"
                 ? `  output (마지막 1200자):\n${(s.output as string).slice(
-                    -1200
+                    -1200,
                   )}\n`
                 : "")
             );
@@ -676,8 +735,8 @@ export class MissionEngine {
         message: synthesisPath
           ? `Mission completed · 종합 보고서: ${synthesisPath}`
           : synthesisNote
-          ? "Mission completed · 종합 보고서 작성됨 (파일 경로 미확인)"
-          : "Mission completed",
+            ? "Mission completed · 종합 보고서 작성됨 (파일 경로 미확인)"
+            : "Mission completed",
         templateLabel: MISSION_TEMPLATES[mission.templateId]?.label,
         synthesisPath: synthesisPath ?? null,
         // 파일 읽기 없이도 Firestore 만으로 보고서 미리보기 가능하도록 4000자 보관.
@@ -689,7 +748,7 @@ export class MissionEngine {
   private async transition(
     mission: Mission,
     next: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string }
+    extras?: { completedAt?: Date; abandonedReason?: string },
   ): Promise<void> {
     if (mission.status === next) return;
     assertMissionTransition(mission.status, next);
