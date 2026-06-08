@@ -137,6 +137,15 @@ function makeDispatcher(
       }
       return out;
     },
+    async findMissionTaskIds(missionId) {
+      // 기본 fake 는 미션 task 없음으로 가정 (테스트가 __setStatuses 로 주입 가능).
+      return Object.keys(statuses).filter(
+        (id) =>
+          id.includes(missionId) &&
+          statuses[id] !== "DONE" &&
+          statuses[id] !== "FAILED",
+      );
+    },
     async killAgentsForTasks(taskIds) {
       spy.killCalls.push([...taskIds]);
     },
@@ -672,7 +681,7 @@ describe("scenario 9 — 앱 재시작 in-flight 복구", () => {
     expect(store.raw(id)!.steps[0].status).toBe("success");
   });
 
-  it("running 이던 fix step 은 중복 생성 방지로 waiting_for_human 멈춤(재실행 안함)", async () => {
+  it("running 이던 fix step 은 멈추지 않고 이어간다(멱등 재연결은 fix-runner 책임)", async () => {
     const fixSpy = vi.fn(async () => ({ success: true }));
     const { engine, store } = buildEngine({ fixRunner: { runFix: fixSpy } });
     const steps: MissionStep[] = [
@@ -686,15 +695,49 @@ describe("scenario 9 — 앱 재시작 in-flight 복구", () => {
       ownerOrchestratorSessionId: "orch-1",
       steps,
       currentStepIndex: 0,
-      taskIds: ["t1"],
+      taskIds: [],
       contextLog: [],
     });
 
     await engine.recoverInFlight(id);
-    expect(store.raw(id)!.status).toBe("waiting_for_human");
-    // fix step 은 재실행되지 않아야 한다(중복 task/agent 방지).
-    expect(fixSpy).not.toHaveBeenCalled();
-    expect(store.raw(id)!.steps[0].status).toBe("running");
+    // waiting_for_human 으로 멈추지 않는다 — 이어서 진행.
+    expect(store.raw(id)!.status).not.toBe("waiting_for_human");
+    // fix-runner 를 다시 호출(실제 구현은 기존 task 에 멱등 재연결).
+    await waitFor(() => fixSpy.mock.calls.length > 0, 2000);
+    expect(fixSpy).toHaveBeenCalled();
+  });
+
+  it("running 이던 dispatch step 은 기존 task 에 재연결하고 재dispatch 하지 않는다", async () => {
+    const { engine, store, spy, dispatcher } = buildEngine();
+    // 미션 task 가 이미 존재한다고 가정 — findMissionTaskIds 가 잡아낸다.
+    dispatcher.__setStatuses({
+      "t-m1-1": "IN_PROGRESS",
+      "t-m1-2": "IN_PROGRESS",
+    });
+    const steps: MissionStep[] = [
+      { index: 0, type: "dispatch", onFailure: "escalate", status: "running" },
+      { index: 1, type: "wait", onFailure: "escalate", status: "pending" },
+    ];
+    const id = await store.createMission({
+      projectId: "p1",
+      goal: "feature",
+      templateId: "feature",
+      status: "active",
+      ownerOrchestratorSessionId: "orch-1",
+      steps,
+      currentStepIndex: 0,
+      taskIds: [],
+      contextLog: [],
+    });
+
+    await engine.recoverInFlight(id);
+    // dispatch 는 재실행되지 않아야 한다(중복 방지) — dispatchTasks 호출 0.
+    expect(spy.dispatchCalls.length).toBe(0);
+    // 기존 task 가 mission.taskIds 에 재연결됨.
+    await waitFor(() => (store.raw(id)?.taskIds.length ?? 0) >= 2, 2000);
+    expect(store.raw(id)!.taskIds).toEqual(
+      expect.arrayContaining(["t-m1-1", "t-m1-2"]),
+    );
   });
 });
 

@@ -4,6 +4,9 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
+  query,
+  where,
   addDoc,
   Timestamp,
   type Firestore,
@@ -46,6 +49,36 @@ export function createFixRunner(deps: FixRunnerDeps): FixRunner {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const pollMs = deps.pollIntervalMs ?? POLL_INTERVAL_MS;
 
+  // 이 미션에 이미 만들어진 가장 최근 task 한 개. 멱등 재연결용 — 있으면 새로
+  // 만들지 않고 그 task 를 폴링한다. missionId 단일 필드 쿼리(복합 인덱스 불필요).
+  async function findExistingMissionTask(
+    missionId: string,
+  ): Promise<{ id: string; status?: string } | null> {
+    try {
+      const snap = await getDocs(
+        query(collection(db, "tasks"), where("missionId", "==", missionId)),
+      );
+      if (snap.empty) return null;
+      const docs = snap.docs.map((d) => {
+        const data = d.data() as {
+          status?: string;
+          createdAt?: { toMillis?: () => number };
+        };
+        return {
+          id: d.id,
+          status: data.status,
+          createdAtMs: data.createdAt?.toMillis?.() ?? 0,
+        };
+      });
+      docs.sort((a, b) => b.createdAtMs - a.createdAtMs);
+      const top = docs[0];
+      return { id: top.id, status: top.status };
+    } catch (e) {
+      log("findExistingMissionTask failed", { missionId, err: String(e) });
+      return null;
+    }
+  }
+
   async function runFix(input: {
     missionId: string;
     projectId: string;
@@ -66,45 +99,64 @@ export function createFixRunner(deps: FixRunnerDeps): FixRunner {
       ? `${input.goal}\n\n--- 직전 조사 결과 (참고) ---\n${cleanedContext}\n--- end ---`
       : input.goal;
 
-    const now = Timestamp.now();
-    const taskRef = await addDoc(collection(db, "tasks"), {
-      title: input.goal.slice(0, 80),
-      description,
-      role: "backend",
-      priority: 3,
-      status: "TODO",
-      dependsOn: [],
-      dependsOnCompleted: true,
-      claimedBy: null,
-      claimedAt: null,
-      scope: [],
-      comment: `Mission ${input.missionId} (quick-fix)`,
-      prUrl: "",
-      hasPmFeedback: false,
-      projectId: input.projectId,
-      missionId: input.missionId,
-      // contextId = missionId(접두사 없음) 로 기록해야 칸반 카드가 isMissionTask 로
-      // 미션 task 를 인식해 🎯 Mission 뱃지를 렌더한다. dispatcher-impl 과 동일 규약.
-      contextId: input.missionId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    const taskId = taskRef.id;
+    // 멱등 재연결 — 앱 재시작으로 fix step 이 다시 실행돼도, 이 미션의 기존 task 가
+    // 있으면 새로 만들지 않고 그걸 이어 폴링한다(중복 task/agent 방지). 오케스트레이터
+    // 세션은 resume 으로 대화 컨텍스트가 이어지고, task 진실원은 Firestore 이므로
+    // 둘이 합쳐져 "끊김없이 이어짐"이 된다.
+    let taskId: string;
+    const existing = await findExistingMissionTask(input.missionId);
+    if (existing) {
+      if (existing.status === "DONE") return { success: true };
+      if (existing.status === "FAILED") {
+        return { success: false, error: "task failed" };
+      }
+      taskId = existing.id;
+      log("fix reconnect to existing task", {
+        taskId,
+        missionId: input.missionId,
+        status: existing.status ?? null,
+      });
+    } else {
+      const now = Timestamp.now();
+      const taskRef = await addDoc(collection(db, "tasks"), {
+        title: input.goal.slice(0, 80),
+        description,
+        role: "backend",
+        priority: 3,
+        status: "TODO",
+        dependsOn: [],
+        dependsOnCompleted: true,
+        claimedBy: null,
+        claimedAt: null,
+        scope: [],
+        comment: `Mission ${input.missionId} (quick-fix)`,
+        prUrl: "",
+        hasPmFeedback: false,
+        projectId: input.projectId,
+        missionId: input.missionId,
+        // contextId = missionId(접두사 없음) 로 기록해야 칸반 카드가 isMissionTask 로
+        // 미션 task 를 인식해 🎯 Mission 뱃지를 렌더한다. dispatcher-impl 과 동일 규약.
+        contextId: input.missionId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      taskId = taskRef.id;
 
-    // dispatchOne is synchronous (returns immediately after agent spawn/reuse).
-    const dispatchResult = deps.dispatchOne({
-      role: "backend",
-      instruction,
-      taskId,
-      complexity: "standard",
-      projectId: input.projectId,
-    });
-    if (!dispatchResult.success) {
-      log("dispatch failed", { taskId, error: dispatchResult.error });
-      return {
-        success: false,
-        error: dispatchResult.error ?? "dispatch failed",
-      };
+      // dispatchOne is synchronous (returns immediately after agent spawn/reuse).
+      const dispatchResult = deps.dispatchOne({
+        role: "backend",
+        instruction,
+        taskId,
+        complexity: "standard",
+        projectId: input.projectId,
+      });
+      if (!dispatchResult.success) {
+        log("dispatch failed", { taskId, error: dispatchResult.error });
+        return {
+          success: false,
+          error: dispatchResult.error ?? "dispatch failed",
+        };
+      }
     }
 
     // Poll until terminal or timeout. Wait-step polling lives in MissionEngine,

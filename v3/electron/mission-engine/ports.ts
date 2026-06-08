@@ -57,6 +57,10 @@ export interface TaskDispatcher {
   // wait step: 현재 미션이 거느린 task 들의 상태를 일괄 조회.
   getTaskStatuses(taskIds: string[]): Promise<Record<string, TaskStatusLite>>;
 
+  // 미션에 이미 생성된 (비종료) task id 들. 앱 재시작 후 dispatch step 이 다시
+  // 실행될 때, 이미 만든 task 를 재연결하고 중복 dispatch 를 막는 멱등 복구용.
+  findMissionTaskIds(missionId: string): Promise<string[]>;
+
   // abandon: 진행 중 task 의 에이전트를 정리.
   killAgentsForTasks(taskIds: string[]): Promise<void>;
 }
