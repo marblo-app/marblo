@@ -592,6 +592,116 @@ export function isWorktreeIsolated(
   return agentCwd.endsWith(suffix);
 }
 
+// ── Plan-based concurrency cap (M2) ─────────────────────────
+//
+// Source-of-truth: src/lib/planLimits.ts (renderer). The renderer enforces
+// this on user-initiated spawns (agentStore.createAgent / launchAgent, and
+// LanesTab re-add cbd5500). The BACKEND dispatch/spawn paths (MCP spawn_agent,
+// HTTP /dispatch-task) historically bypassed it once the old MAX_AGENTS /
+// MAX_PER_ROLE caps were removed — so a free/pro user (or a runaway auto-
+// dispatch) could fan out past their plan and drain credits. We re-apply the
+// SAME free=2 / pro=5 ceiling here, electron-local (electron code doesn't
+// import from src/, so we mirror the table instead of importing it — keep the
+// two in sync; the values are the SKU matrix, master plan §2.2).
+//
+// "Active" = idle | working (a live PTY consuming resources). stopped / error
+// don't count — they're already free and re-counting would punish recovery.
+// -1 means unlimited.
+export const AGENT_CONCURRENCY_LIMIT: Record<string, number> = {
+  free: 2,
+  pro: 5,
+  team: -1,
+  team_plus: -1,
+  enterprise: -1,
+};
+
+const PLAN_ACTIVE_STATUSES: AgentStatus[] = ["idle", "working"];
+
+/** Concurrency limit for a plan. Unknown / undefined / future plans → -1
+ * (unlimited), so an unresolved plan never *false-blocks* a legitimate spawn. */
+export function getPlanAgentLimit(plan: string | undefined): number {
+  if (!plan) return -1;
+  const limit = AGENT_CONCURRENCY_LIMIT[plan];
+  return limit === undefined ? -1 : limit;
+}
+
+/** Count agents that currently consume a concurrency slot (idle | working). */
+export function countActivePlanAgents(
+  agents: ReadonlyArray<{ status: AgentStatus }>,
+): number {
+  return agents.filter((a) => PLAN_ACTIVE_STATUSES.includes(a.status)).length;
+}
+
+// ── Cap whitelist (M2) ──────────────────────────────────────
+//
+// The orchestrator and system-initiated spawns MUST never be blocked by the
+// per-plan cap — if they were, capping a free user would freeze the whole
+// fleet (the orchestrator couldn't keep its essential helpers/recovery agents
+// running). Exemption is identified by EITHER:
+//   1. role ∈ {orchestrator, internal}  — the orchestrator agent itself and
+//      internal/logical sub-agents are infrastructure, not billable workers.
+//   2. an explicit `system` dispatch flag — set by system-initiated spawns
+//      that must proceed regardless of plan (e.g. merge-conflict resolver,
+//      mission recovery). User-/worker-initiated dispatches never set it, so
+//      they remain subject to the cap (the actual product gate).
+// Everything else (role=backend/frontend/test/... with no system flag) is a
+// billable worker and IS capped.
+export const CAP_EXEMPT_ROLES: ReadonlySet<string> = new Set([
+  "orchestrator",
+  "internal",
+]);
+
+export function isCapExempt(
+  role: string | undefined,
+  system?: boolean,
+): boolean {
+  if (system === true) return true;
+  if (!role) return false;
+  return CAP_EXEMPT_ROLES.has(role.trim().toLowerCase());
+}
+
+export interface PlanConcurrencyCheck {
+  /** true when the spawn may proceed (under limit OR exempt OR unlimited). */
+  allowed: boolean;
+  /** true when allowed purely because the request was whitelisted. */
+  exempt: boolean;
+  active: number;
+  limit: number;
+  /** Human-readable block reason (only set when allowed === false). */
+  reason?: string;
+}
+
+/**
+ * Gate a NET-NEW active agent (a fresh spawn, or a restart that re-activates a
+ * stopped agent) against the plan's concurrency cap. Reuse of an already-active
+ * (idle→working) agent adds no slot and should NOT be passed through here.
+ *
+ * `agents` should be the agents in the same scope the dispatch counts against
+ * (e.g. the requesting project's agents) — counted BEFORE the new one is added.
+ */
+export function checkPlanConcurrency(
+  plan: string | undefined,
+  agents: ReadonlyArray<{ status: AgentStatus }>,
+  opts: { role?: string; system?: boolean },
+): PlanConcurrencyCheck {
+  const active = countActivePlanAgents(agents);
+  const limit = getPlanAgentLimit(plan);
+
+  if (isCapExempt(opts.role, opts.system)) {
+    return { allowed: true, exempt: true, active, limit };
+  }
+  if (limit < 0 || active < limit) {
+    return { allowed: true, exempt: false, active, limit };
+  }
+  const reason =
+    plan === "free"
+      ? `Free 플랜은 동시 ${limit}개까지 에이전트를 띄울 수 있습니다 (현재 ${active}개 활성). Pro로 업그레이드하면 5개, Team부터 무제한입니다.`
+      : plan === "pro"
+        ? `Pro 플랜은 동시 ${limit}개까지 에이전트를 띄울 수 있습니다 (현재 ${active}개 활성). Team / Team Plus는 무제한입니다.`
+        : `현재 플랜은 동시 ${limit}개까지 에이전트를 띄울 수 있습니다 (현재 ${active}개 활성).`;
+  return { allowed: false, exempt: false, active, limit, reason };
+}
+
 // ── Dispatch constraint checks ──────────────────────────────
 
 export function checkSpawnConstraints(

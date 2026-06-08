@@ -17,6 +17,7 @@ import {
   resolvePreset,
   normalizeModel,
   isWorktreeIsolated,
+  checkPlanConcurrency,
   type AgentInfo,
 } from "./dispatch-scoring";
 import type { WorktreeCoordinator } from "./worktree-coordinator";
@@ -103,6 +104,11 @@ export interface SpawnAgentRequest {
    * window when external Claude Code invokes Marblo MCP without an
    * explicit project context. */
   parentAgentId?: string;
+  /** System-initiated spawn flag (M2 cap whitelist). When true, this spawn is
+   * exempt from the per-plan concurrency cap — set ONLY by system paths that
+   * must proceed regardless of plan (merge-conflict resolver, mission
+   * recovery). User-/worker-initiated spawns must leave this unset. */
+  system?: boolean;
 }
 
 interface SpawnAgentResponse {
@@ -142,6 +148,9 @@ export interface DispatchTaskRequest {
   /** Parent agent ID — fallback for owner resolution when projectId is
    * missing. MCP forwards MARBLO_AGENT_ID. */
   parentAgentId?: string;
+  /** System-initiated dispatch flag (M2 cap whitelist) — see SpawnAgentRequest.
+   * Exempts this dispatch's restart/spawn from the per-plan concurrency cap. */
+  system?: boolean;
 }
 
 export type DispatchAction = "logical" | "reused" | "restarted" | "spawned";
@@ -219,6 +228,23 @@ export class BridgeServer {
   // plain cwd for non-git / no-project spawns, preserving legacy behavior.
   private worktreeCoordinator: WorktreeCoordinator;
 
+  // M2 — per-plan concurrency cap source. Returns the requesting user's plan
+  // ("free" | "pro" | "team" | ...), or undefined when unknown. main wires
+  // this (setPlanLookup) so the backend dispatch/spawn paths enforce the SAME
+  // cap the renderer does (src/lib/planLimits.ts) instead of being bypassed by
+  // MCP spawn_agent / HTTP dispatch. Default reads MARBLO_PLAN so an env-only
+  // deploy still works; unknown → unlimited (never false-blocks a spawn).
+  private planLookup: (projectId?: string) => string | undefined = () =>
+    process.env.MARBLO_PLAN;
+
+  // L3 — per-taskId dispatch serialization. Concurrent dispatches for the same
+  // taskId must not each spawn their own agent (the WorktreeCoordinator only
+  // dedups worktree DIRECTORIES, and two dispatches can both decide "no
+  // reusable agent → spawn"). Chaining each task's dispatches makes the
+  // reuse/restart/spawn decision atomic per task. Keyed by taskId; entry is
+  // GC'd when its chain drains.
+  private taskDispatchLocks = new Map<string, Promise<unknown>>();
+
   constructor(
     agentManager: AgentManager,
     ptyManager: PtyManager,
@@ -255,6 +281,13 @@ export class BridgeServer {
     lookup: (projectId: string) => string[] | undefined,
   ): void {
     this.enabledModelsLookup = lookup;
+  }
+
+  /** M2 — wire the per-plan concurrency cap source. main should call this with
+   * a per-project plan lookup (the renderer pushes the active subscription
+   * plan). Until wired, the cap falls back to the MARBLO_PLAN env var. */
+  setPlanLookup(lookup: (projectId?: string) => string | undefined): void {
+    this.planLookup = lookup;
   }
 
   setMainWindow(win: BrowserWindow | null): void {
@@ -771,7 +804,41 @@ export class BridgeServer {
   // Async because the spawn path awaits WorktreeCoordinator (git worktree prep)
   // before launching. The mission-engine dispatchOne port is synchronous, so
   // main.ts adapts this with a fire-and-forget shim there.
+  //
+  // L3 — serialize by taskId so concurrent dispatches for the SAME task can't
+  // each spawn a duplicate agent. dispatchTaskInner additionally routes to an
+  // agent already bound to the task's worktree instead of spawning. Dispatches
+  // without a taskId can't be deduped and run directly.
   async dispatchTask(
+    params: DispatchTaskRequest,
+  ): Promise<DispatchTaskResponse> {
+    if (!params.taskId) return this.dispatchTaskInner(params);
+    return this.withTaskLock(params.taskId, () =>
+      this.dispatchTaskInner(params),
+    );
+  }
+
+  /** L3 — run `fn` after any in-flight dispatch for the same taskId settles
+   * (success or failure both release, so one failed dispatch can't wedge the
+   * task's queue). */
+  private withTaskLock<T>(taskId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.taskDispatchLocks.get(taskId) ?? Promise.resolve();
+    const result = prev.then(fn, fn);
+    const tail = result.then(
+      () => {},
+      () => {},
+    );
+    this.taskDispatchLocks.set(taskId, tail);
+    void tail.finally(() => {
+      // GC the entry once the chain drains (no newer dispatch chained on).
+      if (this.taskDispatchLocks.get(taskId) === tail) {
+        this.taskDispatchLocks.delete(taskId);
+      }
+    });
+    return result;
+  }
+
+  private async dispatchTaskInner(
     params: DispatchTaskRequest,
   ): Promise<DispatchTaskResponse> {
     const { role, instruction, complexity = "standard", tags = [] } = params;
@@ -805,6 +872,44 @@ export class BridgeServer {
     // Multi-window: only consider agents owned by the requesting project
     // for reuse / restart / spawn-constraint counting.
     const allAgents = this.agentManager.listAgentsByProject(params.projectId);
+
+    // L3 — per-task single-agent guarantee. If a live (non-stopped/-error)
+    // agent is already bound to this task's isolated worktree, a prior dispatch
+    // (serialized ahead of us by withTaskLock) already spawned/claimed it.
+    // Route this instruction to that agent instead of spawning a duplicate that
+    // would fight it in the same git tree. One worktree ⇒ one task ⇒ one agent
+    // (WORKTREE-SPEC), so the occupant IS this task's agent regardless of role.
+    if (params.projectId && params.taskId) {
+      const occupant = allAgents.find(
+        (a) =>
+          a.status !== "stopped" &&
+          a.status !== "error" &&
+          isWorktreeIsolated(a.cwd, params.projectId, params.taskId),
+      );
+      if (occupant) {
+        this.ptyManager.writeAndSubmit(
+          occupant.ptySessionId,
+          effectiveInstruction,
+        );
+        if (occupant.status === "idle") {
+          this.agentManager.setStatus(occupant.id, "working");
+        }
+        this.syncAgentStatus(occupant.id, "working", params.taskId);
+        console.log(
+          `[BridgeServer] Dispatch: routed to worktree occupant '${occupant.name}' (task=${params.taskId})`,
+        );
+        return {
+          success: true,
+          action: "reused",
+          agentId: occupant.id,
+          agentName: occupant.name,
+          model: occupant.model,
+          score: 0,
+          reason: `Agent already bound to task ${params.taskId}'s worktree — routed instead of spawning a duplicate (L3).`,
+          taskId: params.taskId ?? null,
+        };
+      }
+    }
 
     // Step 1 & 2: Score existing agents
     const scored = this.scoreAgents(allAgents, role, model, tags);
@@ -840,33 +945,58 @@ export class BridgeServer {
         worktreeOk(s.agent.id),
     );
 
-    // Step 1: Reuse idle agent
-    if (reusable.length > 0) {
-      const best = reusable[0];
-      // Resolve full AgentInstance from AgentManager (ScoredAgent.agent is AgentInfo)
-      const fullAgent = this.agentManager.getAgent(best.agent.id);
-      if (fullAgent) {
-        this.ptyManager.writeAndSubmit(
-          fullAgent.ptySessionId,
-          effectiveInstruction,
-        );
-      }
-      this.agentManager.setStatus(best.agent.id, "working");
-      this.syncAgentStatus(best.agent.id, "working", params.taskId);
+    // Step 1: Reuse idle agent.
+    // M6 — re-confirm the candidate's LIVE status at claim time. scoreAgents()
+    // snapshotted status when it ran; between then and now a concurrent
+    // dispatch could have claimed the agent, or its first PTY output byte could
+    // have auto-promoted it idle→working (agent-manager). Reusing an agent that
+    // is no longer idle injects a 2nd task into a live session. Skip any
+    // candidate whose live status isn't still "idle" and try the next; the
+    // claim (setStatus → working) is synchronous so a later dispatch in this
+    // same tick sees it as working and can't double-claim it.
+    for (const candidate of reusable) {
+      const fullAgent = this.agentManager.getAgent(candidate.agent.id);
+      if (!fullAgent || fullAgent.status !== "idle") continue; // stale → skip
+      this.ptyManager.writeAndSubmit(
+        fullAgent.ptySessionId,
+        effectiveInstruction,
+      );
+      this.agentManager.setStatus(fullAgent.id, "working");
+      this.syncAgentStatus(fullAgent.id, "working", params.taskId);
 
       console.log(
-        `[BridgeServer] Dispatch: reused '${best.agent.name}' (score=${best.score})`,
+        `[BridgeServer] Dispatch: reused '${candidate.agent.name}' (score=${candidate.score})`,
       );
       return {
         success: true,
         action: "reused",
-        agentId: best.agent.id,
-        agentName: best.agent.name,
-        model: best.agent.model,
-        score: best.score,
-        reason: best.reason,
+        agentId: fullAgent.id,
+        agentName: candidate.agent.name,
+        model: candidate.agent.model,
+        score: candidate.score,
+        reason: candidate.reason,
         taskId: params.taskId ?? null,
       };
+    }
+
+    // M2 — per-plan concurrency cap. We're past reuse (idle→working adds no
+    // slot). The remaining paths BOTH add a net-new active agent — restart
+    // re-activates a stopped agent (stopped→working), spawn creates a new one —
+    // so gate them here against the requesting user's plan (free=2 / pro=5 /
+    // team+ unlimited). Orchestrator / internal / system-flagged dispatches are
+    // exempt: capping them would freeze fleet operation. The spawn path is
+    // ALSO gated inside spawnNewAgent (so HTTP /spawn-agent is covered); this
+    // gate is what additionally stops a restart from exceeding the cap.
+    const planCap = checkPlanConcurrency(
+      this.planLookup(params.projectId),
+      allAgents,
+      { role, system: params.system },
+    );
+    if (!planCap.allowed) {
+      console.warn(
+        `[BridgeServer] Dispatch blocked by plan cap (role=${role}, active=${planCap.active}/${planCap.limit})`,
+      );
+      return { success: false, error: planCap.reason };
     }
 
     // Step 2: Restart stopped agent (same explicit-model + worktree-isolation
@@ -909,13 +1039,13 @@ export class BridgeServer {
     }
 
     // Step 3: Spawn new agent
-    // NOTE: Spawn-count caps (MAX_AGENTS / MAX_PER_ROLE) were intentionally
-    // removed (2026-06-02) — Marblo runs heterogeneous fleets where a role
-    // can easily have 10+ agents (e.g. many Claude Code workers), so a hard
-    // ceiling fought the product. There is no spawn-count limit now; the
-    // only backstops are agent-manager's per-agent FAST_FAIL/MAX_RESTARTS
-    // (crash loops) — not total count. Re-add a working-agent-based cap here
-    // if runaway auto-dispatch ever becomes a problem.
+    // NOTE: The old role-count caps (MAX_AGENTS / MAX_PER_ROLE) were removed
+    // (2026-06-02) — Marblo runs heterogeneous fleets where a role can have
+    // 10+ agents, so a hard per-role ceiling fought the product. The cap that
+    // DOES apply now is the per-PLAN concurrency cap gated above (M2,
+    // checkPlanConcurrency) + re-checked inside spawnNewAgent, with the
+    // orchestrator/internal/system whitelist. Per-agent FAST_FAIL/MAX_RESTARTS
+    // (agent-manager) still backstop crash loops.
 
     // Select best model. Order:
     //   1. enabledModels in the request body
@@ -951,6 +1081,9 @@ export class BridgeServer {
       taskId: params.taskId,
       projectId: params.projectId,
       parentAgentId: params.parentAgentId,
+      // Carry the cap-whitelist flag so a system dispatch's fresh spawn stays
+      // exempt at the spawnNewAgent gate too (M2).
+      system: params.system,
     });
 
     if (!spawnResult.success) {
@@ -1068,6 +1201,9 @@ export class BridgeServer {
       taskId: req.taskId,
       projectId: req.projectId,
       initialPrompt: buildResolverPrompt(req),
+      // System-initiated, must-proceed spawn (merge-conflict resolution) →
+      // exempt from the per-plan concurrency cap (M2).
+      system: true,
     });
     return {
       success: result.success,
@@ -1082,6 +1218,23 @@ export class BridgeServer {
   private async spawnNewAgent(
     params: SpawnAgentRequest,
   ): Promise<SpawnAgentResponse> {
+    // M2 — per-plan concurrency cap at the single spawn chokepoint, so EVERY
+    // new-agent path (HTTP /spawn-agent, dispatch Step 3, resolver) is gated,
+    // not just dispatch. Orchestrator / internal / system-flagged spawns are
+    // exempt (resolver passes system:true). Count the project's active agents
+    // before adding this one; unknown plan → unlimited (never false-blocks).
+    const cap = checkPlanConcurrency(
+      this.planLookup(params.projectId),
+      this.agentManager.listAgentsByProject(params.projectId),
+      { role: params.role, system: params.system },
+    );
+    if (!cap.allowed) {
+      console.warn(
+        `[BridgeServer] Spawn blocked by plan cap (role=${params.role}, active=${cap.active}/${cap.limit})`,
+      );
+      return { success: false, error: cap.reason };
+    }
+
     // Fold model aliases ("codex" → "gpt", "agy" → "antigravity") at the
     // single spawn chokepoint so every caller (HTTP /spawn-agent, dispatch,
     // mission engine) routes to the right CLI even when the orchestrator
@@ -1160,6 +1313,18 @@ export class BridgeServer {
     });
 
     const sid = instance.ptySessionId;
+
+    // M6 — claim the freshly-launched agent as "working" synchronously. launch()
+    // sets status "idle" and only the FIRST PTY output byte auto-promotes it to
+    // "working" (agent-manager). An agent dispatched with an initialPrompt IS
+    // working on it; leaving it "idle" until that first byte opens a window
+    // where a concurrent/subsequent reuse-dispatch grabs it and injects a 2nd
+    // task. Setting it here — no await between launch() and this line — closes
+    // that window. The heartbeat (5-min PTY silence) and MCP self-report demote
+    // it back to idle once it's genuinely free.
+    if (params.initialPrompt) {
+      this.agentManager.setStatus(agentId, "working");
+    }
 
     // Notify renderer to attach terminal tab. If hook is wired, main owns
     // the project-scoped notify; otherwise broadcast (legacy).

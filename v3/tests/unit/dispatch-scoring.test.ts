@@ -11,10 +11,15 @@ import {
   loadBalanceIndex,
   normalizeModel,
   isWorktreeIsolated,
+  checkPlanConcurrency,
+  isCapExempt,
+  getPlanAgentLimit,
+  countActivePlanAgents,
   WEIGHTS,
   MAX_AGENTS,
   MAX_PER_ROLE,
   type AgentInfo,
+  type AgentStatus,
   type ModelType,
 } from "../../electron/dispatch-scoring";
 
@@ -764,5 +769,138 @@ describe("isWorktreeIsolated", () => {
       TASK + "-extra",
     );
     expect(isWorktreeIsolated(lookalike, PROJECT, TASK)).toBe(false);
+  });
+});
+
+// ── M2: per-plan concurrency cap ────────────────────────────
+
+describe("plan concurrency cap (M2)", () => {
+  function statuses(...s: AgentStatus[]): { status: AgentStatus }[] {
+    return s.map((status) => ({ status }));
+  }
+
+  describe("getPlanAgentLimit", () => {
+    it("maps the SKU matrix: free=2, pro=5, team/team_plus/enterprise=unlimited", () => {
+      expect(getPlanAgentLimit("free")).toBe(2);
+      expect(getPlanAgentLimit("pro")).toBe(5);
+      expect(getPlanAgentLimit("team")).toBe(-1);
+      expect(getPlanAgentLimit("team_plus")).toBe(-1);
+      expect(getPlanAgentLimit("enterprise")).toBe(-1);
+    });
+
+    it("treats unknown / undefined plans as unlimited (never false-block)", () => {
+      expect(getPlanAgentLimit(undefined)).toBe(-1);
+      expect(getPlanAgentLimit("")).toBe(-1);
+      expect(getPlanAgentLimit("mystery_tier")).toBe(-1);
+    });
+  });
+
+  describe("countActivePlanAgents", () => {
+    it("counts only idle + working; stopped/error don't consume a slot", () => {
+      expect(
+        countActivePlanAgents(
+          statuses("idle", "working", "stopped", "error", "working"),
+        ),
+      ).toBe(3);
+      expect(countActivePlanAgents([])).toBe(0);
+    });
+  });
+
+  describe("isCapExempt — whitelist criteria", () => {
+    it("exempts the orchestrator and internal roles (case-insensitive)", () => {
+      expect(isCapExempt("orchestrator")).toBe(true);
+      expect(isCapExempt("Orchestrator")).toBe(true);
+      expect(isCapExempt("internal")).toBe(true);
+      expect(isCapExempt("INTERNAL")).toBe(true);
+    });
+
+    it("exempts any role when the system flag is set", () => {
+      expect(isCapExempt("backend", true)).toBe(true);
+      expect(isCapExempt(undefined, true)).toBe(true);
+    });
+
+    it("does NOT exempt billable worker roles without the system flag", () => {
+      expect(isCapExempt("backend")).toBe(false);
+      expect(isCapExempt("frontend", false)).toBe(false);
+      expect(isCapExempt("test")).toBe(false);
+      expect(isCapExempt(undefined)).toBe(false);
+    });
+  });
+
+  describe("checkPlanConcurrency", () => {
+    it("blocks a free worker spawn at the 2-agent ceiling", () => {
+      const r = checkPlanConcurrency("free", statuses("working", "idle"), {
+        role: "backend",
+      });
+      expect(r.allowed).toBe(false);
+      expect(r.exempt).toBe(false);
+      expect(r.active).toBe(2);
+      expect(r.limit).toBe(2);
+      expect(r.reason).toContain("Free");
+    });
+
+    it("allows a free worker spawn below the ceiling", () => {
+      const r = checkPlanConcurrency("free", statuses("working"), {
+        role: "backend",
+      });
+      expect(r.allowed).toBe(true);
+      expect(r.reason).toBeUndefined();
+    });
+
+    it("blocks a pro worker spawn at the 5-agent ceiling", () => {
+      const r = checkPlanConcurrency(
+        "pro",
+        statuses("working", "working", "idle", "working", "idle"),
+        { role: "backend" },
+      );
+      expect(r.allowed).toBe(false);
+      expect(r.reason).toContain("Pro");
+    });
+
+    it("does NOT count stopped/error agents toward the ceiling", () => {
+      // 2 active + 3 stopped/error under a free(2) cap → still blocked at 2,
+      // but if only 1 is active it's allowed despite extra dead agents.
+      const blocked = checkPlanConcurrency(
+        "free",
+        statuses("working", "idle", "stopped", "error"),
+        { role: "backend" },
+      );
+      expect(blocked.allowed).toBe(false);
+      const allowed = checkPlanConcurrency(
+        "free",
+        statuses("working", "stopped", "error", "stopped"),
+        { role: "backend" },
+      );
+      expect(allowed.allowed).toBe(true);
+    });
+
+    it("EXEMPTS the orchestrator even when the fleet is over the free cap", () => {
+      const r = checkPlanConcurrency(
+        "free",
+        statuses("working", "working", "working"),
+        { role: "orchestrator" },
+      );
+      expect(r.allowed).toBe(true);
+      expect(r.exempt).toBe(true);
+    });
+
+    it("EXEMPTS a system-flagged spawn (e.g. merge resolver) over the cap", () => {
+      const r = checkPlanConcurrency("free", statuses("working", "working"), {
+        role: "backend",
+        system: true,
+      });
+      expect(r.allowed).toBe(true);
+      expect(r.exempt).toBe(true);
+    });
+
+    it("never blocks on unlimited / unknown plans", () => {
+      const many = statuses(...Array<AgentStatus>(20).fill("working"));
+      expect(
+        checkPlanConcurrency("team", many, { role: "backend" }).allowed,
+      ).toBe(true);
+      expect(
+        checkPlanConcurrency(undefined, many, { role: "backend" }).allowed,
+      ).toBe(true);
+    });
   });
 });
