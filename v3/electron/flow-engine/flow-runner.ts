@@ -77,8 +77,12 @@ export class FlowRunner extends EventEmitter {
         }
       }
 
-      // Track which nodes to skip (branch filtering)
+      // Track which nodes to skip (branch filtering) and which edges carry no
+      // flow. deadEdges holds the not-taken branch edges so skip propagation
+      // is join-aware: a node that re-converges on a still-live branch is kept
+      // instead of being silently dropped while the flow reports completed.
       const skippedNodes = new Set<string>();
+      const deadEdges = new Set<string>();
 
       // Execute layer by layer
       for (const layer of layers) {
@@ -111,10 +115,15 @@ export class FlowRunner extends EventEmitter {
             const taken = branchOutput?.branch || 'true';
             const skipped = taken === 'true' ? 'false' : 'true';
 
-            // Skip nodes on the not-taken branch
+            // The not-taken branch edges carry no flow — record them as dead
+            // first so the join-aware propagation below sees the full picture,
+            // then skip their subtrees (re-converging live nodes survive).
             const skippedEdges = getOutgoingEdges(nodeId, flow.edges, skipped);
             for (const edge of skippedEdges) {
-              this.markDownstreamSkipped(edge.target, flow.edges, nodeMap, skippedNodes, state);
+              deadEdges.add(edge.id);
+            }
+            for (const edge of skippedEdges) {
+              this.markDownstreamSkipped(edge.target, flow.edges, nodeMap, skippedNodes, state, deadEdges);
             }
           }
         }
@@ -346,8 +355,22 @@ export class FlowRunner extends EventEmitter {
     nodeMap: Map<string, FlowNode>,
     skippedNodes: Set<string>,
     state: FlowExecutionState,
+    deadEdges: Set<string>,
   ): void {
     if (skippedNodes.has(nodeId)) return;
+
+    // Join-aware: only skip this node when EVERY incoming edge is dead. If any
+    // parent is still live or pending (feeding through a live edge), the node
+    // can still execute once that parent resolves — dropping a re-converging
+    // diamond/join branch here would silently delete it while the flow keeps
+    // reporting completed. When a later parent does get skipped it re-invokes
+    // this method, so the node is re-evaluated and skipped only if it truly
+    // ends up with no live parent.
+    const incoming = getIncomingEdges(nodeId, edges);
+    if (incoming.some(edge => !this.isEdgeDead(edge, skippedNodes, deadEdges, state))) {
+      return;
+    }
+
     skippedNodes.add(nodeId);
 
     state.nodeResults[nodeId] = {
@@ -357,11 +380,31 @@ export class FlowRunner extends EventEmitter {
       completedAt: new Date(),
     };
 
-    // Recursively skip downstream
+    // This node is skipped → its outgoing edges now carry no flow. Mark them
+    // dead before recursing so downstream join checks see them.
     const outgoing = getOutgoingEdges(nodeId, edges);
     for (const edge of outgoing) {
-      this.markDownstreamSkipped(edge.target, edges, nodeMap, skippedNodes, state);
+      deadEdges.add(edge.id);
     }
+    for (const edge of outgoing) {
+      this.markDownstreamSkipped(edge.target, edges, nodeMap, skippedNodes, state, deadEdges);
+    }
+  }
+
+  /**
+   * An incoming edge is "dead" (carries no flow) when it is a not-taken branch
+   * edge, or when its source node was skipped or errored. A node whose every
+   * incoming edge is dead can be skipped; a single live edge keeps it alive.
+   */
+  private isEdgeDead(
+    edge: FlowEdge,
+    skippedNodes: Set<string>,
+    deadEdges: Set<string>,
+    state: FlowExecutionState,
+  ): boolean {
+    if (deadEdges.has(edge.id)) return true;
+    if (skippedNodes.has(edge.source)) return true;
+    return state.nodeResults[edge.source]?.status === 'error';
   }
 
   private waitForResume(runId: string): Promise<void> {
