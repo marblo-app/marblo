@@ -57,7 +57,16 @@ export type TimelineEventType =
   | "agent.stuck"
   | "mission.paused"
   | "mission.resumed"
-  | "supervisor.note";
+  | "supervisor.note"
+  // B안 Phase 4-A — 지휘자(Conductor)가 forwarder 의 task 신호(task.status_changed /
+  // task.activity_logged)를 contextLog 의 TimelineEvent 로 "합성"해 하나의 서사를
+  // 만든다. 단일 writer = 지휘자(orchestrator 모드 전용). 발원지: conductor-driver.onEvent.
+  //   task.status   payload { taskId, from, to, taskTitle, key }
+  //   task.activity payload { taskId, message, agentId, taskTitle, key }
+  // dedup = payload.key 동일하면 skip. 렌더러 미러(src/types/mission.ts)도 함께
+  // 갱신(P4-B). 설계: v3/docs/MISSIONS-B-ORCHESTRATOR-DRIVEN.md §3.3 / §5.4 / §8-5.
+  | "task.status"
+  | "task.activity";
 
 export interface TimelineEvent {
   ts: Date;

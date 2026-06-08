@@ -59,7 +59,10 @@ export type TimelineEventType =
   | "agent.stuck"
   | "mission.paused"
   | "mission.resumed"
-  | "supervisor.note";
+  | "supervisor.note"
+  // 지휘자(B안)가 오케 task 의 상태전이/진행 내레이션을 미션 서사로 합성해 넣는다.
+  | "task.status"
+  | "task.activity";
 
 export interface TimelineEvent {
   ts: Date;
