@@ -105,6 +105,70 @@ export class MissionEngine {
     this.scheduleAdvance(missionId);
   }
 
+  /**
+   * 앱 재시작 후 in-flight (active / sleeping) 미션을 안전하게 이어 진행한다.
+   * 엔진은 부팅 시 in-memory 상태가 없으므로, Firestore 에 status="running" 으로
+   * 남은 step 은 "직전 실행 중 크래시" 를 의미한다. step type 별로 다르게 처리:
+   *   - gstack: 부수효과가 (대체로) 멱등 → "pending" 으로 되돌려 깨끗이 재실행.
+   *   - wait: taskIds 폴링만 하므로 그대로 재개(안전).
+   *   - fix / dispatch: 이미 task/agent 를 만들었을 수 있어 재실행 시 중복 생성
+   *     (중복 PR/에이전트) 위험 → 자동 재구동하지 않고 waiting_for_human 으로
+   *     멈춰 사용자가 확인 후 Resume 하게 한다.
+   * 그 외(스텝 사이 sleeping 등) 는 일반 resume.
+   */
+  async recoverInFlight(missionId: string): Promise<void> {
+    const mission = await this.requireMission(missionId);
+    if (isTerminalMission(mission.status)) return;
+    const idx = mission.currentStepIndex;
+    const step = mission.steps[idx];
+    if (step && step.status === "running") {
+      if (step.type === "gstack") {
+        await this.deps.store.updateMissionStep(mission.id, idx, {
+          status: "pending",
+          startedAt: undefined,
+          liveOutput: undefined,
+          error: undefined,
+        });
+        this.log("recover: reset running gstack step → pending", {
+          missionId,
+          stepIndex: idx,
+          skill: step.skill ?? null,
+        });
+      } else if (step.type === "fix" || step.type === "dispatch") {
+        await this.deps.store.appendTimelineEvent(mission.id, {
+          ts: this.now(),
+          type: "supervisor.note",
+          payload: {
+            message:
+              "앱 재시작으로 이 단계가 중단되었습니다. 중복 실행(중복 PR/에이전트) 방지를 위해 진행 상황을 확인하고 Resume 하세요.",
+            stepIndex: idx,
+            stepType: step.type,
+            notifyUser: true,
+          },
+        });
+        if (mission.status !== "waiting_for_human") {
+          await this.transition(mission, "waiting_for_human");
+        }
+        this.deps.notifier?.({
+          missionId,
+          projectId: mission.projectId,
+          goal: mission.goal,
+          kind: "escalate",
+          question: "앱 재시작으로 단계가 중단됨 — 확인 후 Resume 하세요.",
+          skill: step.skill ?? null,
+        });
+        this.log("recover: paused fix/dispatch step for human review", {
+          missionId,
+          stepIndex: idx,
+          stepType: step.type,
+        });
+        return; // 자동 재구동 금지
+      }
+      // wait: 그대로 두고 resume → runWait 가 기존 taskIds 를 재폴링(안전).
+    }
+    await this.resume(missionId);
+  }
+
   async abandon(missionId: string, reason?: string): Promise<void> {
     const mission = await this.requireMission(missionId);
     if (isTerminalMission(mission.status)) return;

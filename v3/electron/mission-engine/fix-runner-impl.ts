@@ -54,12 +54,17 @@ export function createFixRunner(deps: FixRunnerDeps): FixRunner {
   }): Promise<{ success: boolean; error?: string }> {
     await ready;
 
-    // priorContext (e.g. /investigate 결과) 가 있으면 description / instruction 에
-    // 같이 실어 코딩 agent 가 그대로 반영해서 작업하도록.
-    const description = input.priorContext
-      ? `${input.goal}\n\n--- Prior investigation / context ---\n${input.priorContext}\n--- end ---`
+    // 티켓 본문(description)은 생성 시점의 불변 스펙 — goal 만 담는다(정형화).
+    // 직전 조사 결과(priorContext)나 진행 상황을 본문에 덤프하면 PTY 잔해가 그대로
+    // 새어들어 티켓이 지저분해진다(기존 add_activity-only 원칙, bridge-server 참고).
+    // 컨텍스트는 본문이 아니라 에이전트 instruction(스폰 프롬프트)으로만 전달한다.
+    const description = input.goal;
+    const cleanedContext = input.priorContext
+      ? cleanContextForAgent(input.priorContext)
+      : "";
+    const instruction = cleanedContext
+      ? `${input.goal}\n\n--- 직전 조사 결과 (참고) ---\n${cleanedContext}\n--- end ---`
       : input.goal;
-    const instruction = description;
 
     const now = Timestamp.now();
     const taskRef = await addDoc(collection(db, "tasks"), {
@@ -132,4 +137,32 @@ export function createFixRunner(deps: FixRunnerDeps): FixRunner {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// 직전 step output 을 에이전트 instruction 에 싣기 전 최종 정리. skill runner 가
+// 이미 cleanClaudeNoise 를 거치지만, footer/spinner/token 잔재가 남을 수 있어
+// 한 번 더 거르고 길이를 제한한다(본문이 아닌 instruction 이므로 과하게 자르지 않음).
+const CONTEXT_NOISE_PATTERNS: RegExp[] = [
+  /bypass permissions on/i,
+  /shift\s*\+?\s*tab to cycle/i,
+  /\besc(ape)? to interrupt\b/i,
+  /thinking with \S+ effort/i,
+  /·\s*[↑↓]?\s*[\d.]+[km]?\s*tokens?/i,
+  /\b\d+\s*tokens?\b/i,
+  /Control this session from the Claude mobile app/i,
+  /claude\.com\/download/i,
+  /\/remote-control\b/i,
+];
+
+function cleanContextForAgent(raw: string): string {
+  const kept = raw
+    .split("\n")
+    .map((l) => l.replace(/\s+$/, ""))
+    .filter((l) => {
+      if (l.trim() === "") return false;
+      return !CONTEXT_NOISE_PATTERNS.some((p) => p.test(l));
+    });
+  const text = kept.join("\n").trim();
+  // instruction 컨텍스트는 마지막 2000자만 (조사 결론은 보통 끝부분).
+  return text.length > 2000 ? text.slice(-2000) : text;
 }

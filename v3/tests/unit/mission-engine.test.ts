@@ -635,6 +635,69 @@ describe("dispose", () => {
   });
 });
 
+describe("scenario 9 — 앱 재시작 in-flight 복구", () => {
+  it("running 이던 gstack step 은 pending 으로 리셋 후 재실행된다", async () => {
+    const { engine, store } = buildEngine();
+    const steps: MissionStep[] = [
+      {
+        index: 0,
+        type: "gstack",
+        skill: "/review",
+        onFailure: "escalate",
+        status: "running",
+      },
+      {
+        index: 1,
+        type: "gstack",
+        skill: "/ship",
+        onFailure: "escalate",
+        status: "pending",
+      },
+    ];
+    const id = await store.createMission({
+      projectId: "p1",
+      goal: "resume me",
+      templateId: "polish",
+      status: "active",
+      ownerOrchestratorSessionId: "orch-1",
+      steps,
+      currentStepIndex: 0,
+      taskIds: [],
+      contextLog: [],
+    });
+
+    await engine.recoverInFlight(id);
+    // pending 으로 리셋 후 재실행되어 success 로 마감(default fake runner 는 성공).
+    await waitFor(() => store.raw(id)!.steps[0].status === "success", 2000);
+    expect(store.raw(id)!.steps[0].status).toBe("success");
+  });
+
+  it("running 이던 fix step 은 중복 생성 방지로 waiting_for_human 멈춤(재실행 안함)", async () => {
+    const fixSpy = vi.fn(async () => ({ success: true }));
+    const { engine, store } = buildEngine({ fixRunner: { runFix: fixSpy } });
+    const steps: MissionStep[] = [
+      { index: 0, type: "fix", onFailure: "escalate", status: "running" },
+    ];
+    const id = await store.createMission({
+      projectId: "p1",
+      goal: "broken thing",
+      templateId: "quick-fix",
+      status: "active",
+      ownerOrchestratorSessionId: "orch-1",
+      steps,
+      currentStepIndex: 0,
+      taskIds: ["t1"],
+      contextLog: [],
+    });
+
+    await engine.recoverInFlight(id);
+    expect(store.raw(id)!.status).toBe("waiting_for_human");
+    // fix step 은 재실행되지 않아야 한다(중복 task/agent 방지).
+    expect(fixSpy).not.toHaveBeenCalled();
+    expect(store.raw(id)!.steps[0].status).toBe("running");
+  });
+});
+
 // Reset mock store before each suite (firebase mock keeps state across files)
 beforeEach(async () => {
   const mocks = (await import("../mocks/firebase-firestore")) as unknown as {

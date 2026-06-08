@@ -121,9 +121,42 @@ export function buildMissionEngine(
     await authReady;
     if (planningUnsub) return; // idempotent — 두 번 호출돼도 한 번만 구독
     try {
-      const { getFirestore, collection, query, where, onSnapshot } =
+      const { getFirestore, collection, query, where, onSnapshot, getDocs } =
         await import("firebase/firestore");
       const db = getFirestore(app);
+
+      // 1회성 in-flight 복구 — 앱이 꺼질 때 active/sleeping 이던 미션을 이어서
+      // 진행한다. recoverInFlight 가 step type 별로 안전 처리(gstack 재실행 /
+      // wait 폴링 / fix·dispatch 는 중복 생성 방지 위해 사용자 확인). planning 은
+      // 아래 구독이 처리하므로 제외, waiting_for_human 은 사용자 답 대기라 제외.
+      for (const status of ["active", "sleeping"] as const) {
+        try {
+          const snap = await getDocs(
+            query(collection(db, "missions"), where("status", "==", status)),
+          );
+          for (const d of snap.docs) {
+            if (pickedUp.has(d.id)) continue;
+            pickedUp.add(d.id);
+            console.log(
+              `[MissionEngine] recovering in-flight mission ${d.id} (status=${status})`,
+            );
+            engine.recoverInFlight(d.id).catch((err) => {
+              pickedUp.delete(d.id);
+              console.error(
+                "[MissionEngine] in-flight recovery failed",
+                d.id,
+                err,
+              );
+            });
+          }
+        } catch (err) {
+          console.warn(
+            `[MissionEngine] in-flight (${status}) recovery query failed:`,
+            err,
+          );
+        }
+      }
+
       const q = query(
         collection(db, "missions"),
         where("status", "==", "planning"),
