@@ -16,6 +16,7 @@ import { createPtySkillRunner } from "./pty-skill-runner-impl";
 import { createFixRunner } from "./fix-runner-impl";
 import { createOrchestratorRegistry } from "./orch-registry-impl";
 import { MissionEventForwarder } from "./event-forwarder";
+import { createConductorDriver, getMissionDriver } from "./conductor-driver";
 
 // MissionEngine 팩토리 — main.ts wiring 진입점.
 //
@@ -98,15 +99,29 @@ export function buildMissionEngine(
     }`,
   );
 
-  const engine = new MissionEngine({
-    store,
-    dispatcher,
-    skillRunner,
-    fixRunner,
-    eventBus,
-    orchestrators: orchRegistry,
-    notifier: deps.notifier,
-  });
+  // B안 미션 드라이버 토글 — 'engine'(기본, A안 advance-loop) | 'orchestrator'(B안
+  // 지휘자). 기본 engine 이라 A 동작 100% 불변. orchestrator 는 Phase 1 에선 스텁
+  // (no-op + log)이라 실제 미션이 진행되지 않는다(Phase 2~3 에서 채움).
+  // 설계: v3/docs/MISSIONS-B-ORCHESTRATOR-DRIVEN.md §3, §8.
+  const missionDriver = getMissionDriver();
+  console.log(`[MissionEngine] driver mode: ${missionDriver}`);
+  const conductor =
+    missionDriver === "orchestrator"
+      ? createConductorDriver({ store, orchestrators: orchRegistry })
+      : undefined;
+
+  const engine = new MissionEngine(
+    {
+      store,
+      dispatcher,
+      skillRunner,
+      fixRunner,
+      eventBus,
+      orchestrators: orchRegistry,
+      notifier: deps.notifier,
+    },
+    { driver: missionDriver, conductor },
+  );
 
   const forwarder = new MissionEventForwarder({ app, authReady, eventBus });
 

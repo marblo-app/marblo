@@ -23,6 +23,27 @@ export function resolveContextForWrite(env: Env = process.env): string {
   return resolveContext(env) || "board";
 }
 
+/** True when a contextId belongs to a Quick Lane, not a mission. */
+export function isLaneContextId(contextId: string | undefined): boolean {
+  return contextId === "lane" || (!!contextId && contextId.startsWith("lane:"));
+}
+
+/**
+ * Raw mission context from MARBLO_CONTEXT.
+ *
+ * Board and lane contexts keep their existing contextId-only behavior. Any
+ * other explicit context is a missionId and must also be written to missionId.
+ */
+export function resolveMissionContextForWrite(
+  env: Env = process.env,
+): string | null {
+  const contextId = resolveContext(env);
+  if (!contextId || contextId === "board" || isLaneContextId(contextId)) {
+    return null;
+  }
+  return contextId;
+}
+
 /** contextId to filter get_all_tasks by; "" = no context constraint. */
 export function contextReadFilter(
   allContexts: boolean,
