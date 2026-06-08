@@ -65,7 +65,16 @@ export class MissionEngine {
         ? createConductorDriver({
             store: deps.store,
             orchestrators: deps.orchestrators,
+            eventBus: deps.eventBus,
+            // wait 게이트용 task 상태 조회 — dispatcher 헬퍼 재사용.
+            getTaskStatuses: (taskIds) =>
+              deps.dispatcher.getTaskStatuses(taskIds),
+            maxRetries: this.maxRetries,
+            notifier: deps.notifier,
+            now: this.now,
             logger: this.log,
+            // 통합(오케): gates.ts 가 랜딩되면 `verifyStepGate: verifyStepGate`
+            // 주입. 미주입 시 conductor 내장 deterministic 기본 게이트 사용.
           })
         : null);
     if (this.missionDriver !== "engine") {
@@ -363,11 +372,12 @@ export class MissionEngine {
       return;
     }
 
-    // B안(orchestrator-driven): 외부 이벤트는 지휘자가 게이트 평가에 쓴다 (§3 이벤트
-    // wakeup). 엔진은 타임라인 append / advance 를 하지 않고 위임. Phase 1 스텁이라
-    // no-op + log. 기본 driver='engine' 이면 이 분기를 타지 않아 A안 경로가 불변.
+    // B안(orchestrator-driven): 외부 이벤트(스텝완료 보고 'mission.step_reported'
+    // 포함)는 지휘자가 **자체 버스 구독**으로 직접 처리한다(createConductorDriver 가
+    // deps.eventBus 를 구독). 엔진의 이 핸들러는 orchestrator 모드에서 no-op —
+    // 같은 이벤트를 conductor 로 이중 전달하지 않는다(같은 버스를 둘 다 구독하므로).
+    // 기본 driver='engine' 이면 이 분기를 타지 않아 A안 경로가 불변.
     if (this.missionDriver === "orchestrator") {
-      await this.conductor?.onEvent(event);
       return;
     }
 
@@ -913,13 +923,19 @@ export {
   TERMINAL_STATUSES,
 } from "./state-machine";
 export { InProcessMissionEventBus } from "./event-handler";
-export { createConductorDriver, getMissionDriver } from "./conductor-driver";
+export {
+  createConductorDriver,
+  getMissionDriver,
+  MISSION_STEP_REPORTED_EVENT,
+} from "./conductor-driver";
 export type {
   ConductorDriver,
   ConductorDriverDeps,
   GateResult,
   MissionDriver,
+  StepGateContext,
   StepReport,
+  VerifyStepGate,
 } from "./conductor-driver";
 export type {
   MissionEngineDeps,

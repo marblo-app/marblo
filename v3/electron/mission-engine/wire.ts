@@ -107,7 +107,16 @@ export function buildMissionEngine(
   console.log(`[MissionEngine] driver mode: ${missionDriver}`);
   const conductor =
     missionDriver === "orchestrator"
-      ? createConductorDriver({ store, orchestrators: orchRegistry })
+      ? createConductorDriver({
+          store,
+          orchestrators: orchRegistry,
+          eventBus,
+          // wait 게이트용 task 상태 조회 — dispatcher 헬퍼 재사용.
+          getTaskStatuses: (taskIds) => dispatcher.getTaskStatuses(taskIds),
+          notifier: deps.notifier,
+          // 통합: gates.ts 랜딩 시 `verifyStepGate: verifyStepGate` 주입.
+          // 미주입 시 conductor 내장 deterministic 기본 게이트 사용.
+        })
       : undefined;
 
   const engine = new MissionEngine(
