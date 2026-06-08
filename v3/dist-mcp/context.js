@@ -10,7 +10,12 @@ export function resolveContextForWrite(env = process.env) {
 export function contextReadFilter(allContexts, env = process.env) {
     return allContexts ? "" : resolveContext(env);
 }
-/** MARBLO_CONTEXT value to inject for an orchestrator of the given kind. */
+/**
+ * MARBLO_CONTEXT value to inject for an orchestrator of the given kind.
+ *
+ * NOTE: OrchestratorManager injects this into the Marblo MCP env while patching
+ * MARBLO_BRIDGE_PORT / MARBLO_PROJECT, only when non-empty.
+ */
 export function contextForKind(kind) {
     return kind === "board" ? "board" : "";
 }
