@@ -17,6 +17,7 @@ import { createFixRunner } from "./fix-runner-impl";
 import { createOrchestratorRegistry } from "./orch-registry-impl";
 import { MissionEventForwarder } from "./event-forwarder";
 import { createConductorDriver, getMissionDriver } from "./conductor-driver";
+import { verifyStepGate } from "./gates";
 
 // MissionEngine 팩토리 — main.ts wiring 진입점.
 //
@@ -59,7 +60,7 @@ export interface BuiltMissionEngine {
 }
 
 export function buildMissionEngine(
-  deps: BuildMissionEngineDeps,
+  deps: BuildMissionEngineDeps
 ): BuiltMissionEngine {
   const { app, authReady } = getMissionFirebaseApp();
   const eventBus = new InProcessMissionEventBus();
@@ -96,7 +97,7 @@ export function buildMissionEngine(
   console.log(
     `[MissionEngine] skill runner mode: ${
       useHeadlessSkillRunner ? "headless" : "pty"
-    }`,
+    }`
   );
 
   // B안 미션 드라이버 토글 — 'engine'(기본, A안 advance-loop) | 'orchestrator'(B안
@@ -114,8 +115,9 @@ export function buildMissionEngine(
           // wait 게이트용 task 상태 조회 — dispatcher 헬퍼 재사용.
           getTaskStatuses: (taskIds) => dispatcher.getTaskStatuses(taskIds),
           notifier: deps.notifier,
-          // 통합: gates.ts 랜딩 시 `verifyStepGate: verifyStepGate` 주입.
-          // 미주입 시 conductor 내장 deterministic 기본 게이트 사용.
+          // 통합(P2-B): gates.ts 의 결정적 게이트 주입. (미주입 시 conductor
+          // 내장 기본 게이트로 폴백.)
+          verifyStepGate,
         })
       : undefined;
 
@@ -129,7 +131,7 @@ export function buildMissionEngine(
       orchestrators: orchRegistry,
       notifier: deps.notifier,
     },
-    { driver: missionDriver, conductor },
+    { driver: missionDriver, conductor }
   );
 
   const forwarder = new MissionEventForwarder({ app, authReady, eventBus });
@@ -156,34 +158,34 @@ export function buildMissionEngine(
       for (const status of ["active", "sleeping"] as const) {
         try {
           const snap = await getDocs(
-            query(collection(db, "missions"), where("status", "==", status)),
+            query(collection(db, "missions"), where("status", "==", status))
           );
           for (const d of snap.docs) {
             if (pickedUp.has(d.id)) continue;
             pickedUp.add(d.id);
             console.log(
-              `[MissionEngine] recovering in-flight mission ${d.id} (status=${status})`,
+              `[MissionEngine] recovering in-flight mission ${d.id} (status=${status})`
             );
             engine.recoverInFlight(d.id).catch((err) => {
               pickedUp.delete(d.id);
               console.error(
                 "[MissionEngine] in-flight recovery failed",
                 d.id,
-                err,
+                err
               );
             });
           }
         } catch (err) {
           console.warn(
             `[MissionEngine] in-flight (${status}) recovery query failed:`,
-            err,
+            err
           );
         }
       }
 
       const q = query(
         collection(db, "missions"),
-        where("status", "==", "planning"),
+        where("status", "==", "planning")
       );
       planningUnsub = onSnapshot(
         q,
@@ -191,7 +193,7 @@ export function buildMissionEngine(
           console.log(
             `[MissionEngine] planning snapshot: size=${snap.size} changes=${
               snap.docChanges().length
-            }`,
+            }`
           );
           for (const change of snap.docChanges()) {
             if (change.type === "removed") {
@@ -202,7 +204,7 @@ export function buildMissionEngine(
             if (pickedUp.has(id)) continue;
             pickedUp.add(id);
             console.log(
-              `[MissionEngine] picking up planning mission ${id} (change=${change.type})`,
+              `[MissionEngine] picking up planning mission ${id} (change=${change.type})`
             );
             engine.resume(id).catch((err) => {
               pickedUp.delete(id); // 실패 시 다음 트리거에서 재시도 가능
@@ -210,7 +212,7 @@ export function buildMissionEngine(
             });
           }
         },
-        (err) => console.warn("[MissionEngine] planning subscribe error:", err),
+        (err) => console.warn("[MissionEngine] planning subscribe error:", err)
       );
       console.log("[MissionEngine] planning subscription started");
     } catch (err) {
