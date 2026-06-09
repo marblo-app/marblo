@@ -287,6 +287,24 @@ function truncateResult(result: unknown): string {
 
 // ── Tool Registration ────────────────────────────────────────
 
+// ── 토큰 절감: list 도구 결과 cap + 안내 footer ──
+// MCP 도구 결과는 호출 세션의 컨텍스트에 끝까지 잔존한다(오케/에이전트 비용의 큰
+// 축). list 도구가 무제한 덤프하면 컨텍스트가 불어나므로 기본 cap 을 둔다.
+const LIST_LIMIT_DEFAULT = 50;
+const TITLE_MAX = 80;
+function truncTitle(title: unknown, max = TITLE_MAX): string {
+  const s = typeof title === "string" ? title : String(title ?? "");
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+function capLines(lines: string[], limit: number, hint: string): string {
+  if (lines.length <= limit) return lines.join("\n");
+  const hidden = lines.length - limit;
+  return `${lines.slice(0, limit).join("\n")}\n… (+${hidden} more hidden — ${hint})`;
+}
+function isTerminalTaskStatus(s: unknown): boolean {
+  return s === "DONE" || s === "FAILED";
+}
+
 export function registerTools(server: McpServer): void {
   // Wrap server.tool to add automatic audit logging
   const originalTool = server.tool.bind(server);
@@ -338,7 +356,7 @@ export function registerTools(server: McpServer): void {
   // 1. get_all_tasks
   auditedTool(
     "get_all_tasks",
-    "Get all tasks regardless of status. Optionally filter by project and/or role. Set all_projects=true to ignore default project filter and see ALL tasks.",
+    "List tasks (open/non-terminal first, completed hidden at the tail). Filter by project/role; all_projects=true to span projects. Capped to `limit` (default 50) to keep results lean — raise limit or filter to see more.",
     {
       project_id: z.string().optional().describe("Project ID"),
       role: z
@@ -357,8 +375,15 @@ export function registerTools(server: McpServer): void {
         .describe(
           "Ignore default context filter, show all contexts in the project (default: false)",
         ),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Max rows to return (default 50; open tasks shown first)"),
     },
-    async ({ project_id, role, all_projects, all_contexts }) => {
+    async ({ project_id, role, all_projects, all_contexts, limit }) => {
       const projectId = all_projects ? "" : resolveProject(project_id);
       const contextId = contextReadFilter(!!all_contexts);
       const constraints: QueryConstraint[] = [];
@@ -371,16 +396,29 @@ export function registerTools(server: McpServer): void {
 
       if (snap.empty) return text("No tasks found.");
 
+      // 열린(비terminal) task 를 먼저, 같은 그룹 내에선 priority 내림차순. 완료/실패
+      // 다수가 컨텍스트를 먹던 것을 cap 으로 꼬리에서 잘라낸다.
       const docs = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .sort((a: any, b: any) => (b.priority ?? 0) - (a.priority ?? 0));
+        .map((d) => ({ id: d.id, ...d.data() }) as any)
+        .sort((a: any, b: any) => {
+          const ta = isTerminalTaskStatus(a.status) ? 1 : 0;
+          const tb = isTerminalTaskStatus(b.status) ? 1 : 0;
+          if (ta !== tb) return ta - tb; // open first
+          return (b.priority ?? 0) - (a.priority ?? 0);
+        });
       const lines = docs.map((t: any) => {
         const claimed = t.claimedBy ? ` → ${t.claimedBy}` : "";
         const proj = all_projects ? ` project=${t.projectId || "(none)"}` : "";
         const ctx = all_contexts ? ` ctx=${t.contextId || "(none)"}` : "";
-        return `- [${t.status}] ${t.title} (role=${t.role}, id=${t.id}${proj}${ctx})${claimed}`;
+        return `- [${t.status}] ${truncTitle(t.title)} (role=${t.role}, id=${t.id}${proj}${ctx})${claimed}`;
       });
-      return text(lines.join("\n"));
+      return text(
+        capLines(
+          lines,
+          limit ?? LIST_LIMIT_DEFAULT,
+          "raise limit or filter by role; completed tasks are at the tail",
+        ),
+      );
     },
     { userFacing: false },
   );
@@ -392,8 +430,15 @@ export function registerTools(server: McpServer): void {
     {
       role: z.string().describe("Agent role (backend/frontend/test/devops)"),
       project_id: z.string().optional().describe("Project ID"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Max rows (default 50)"),
     },
-    async ({ role, project_id }) => {
+    async ({ role, project_id, limit }) => {
       const projectId = resolveProject(project_id);
       // Context scope — mirror get_all_tasks so the board orchestrator's
       // dispatch feed only surfaces its own context. Only the board orch sets
@@ -426,9 +471,11 @@ export function registerTools(server: McpServer): void {
         const deps = t.dependsOn?.length
           ? ` (depends_on: ${t.dependsOn.join(", ")})`
           : "";
-        return `- [${t.id}] ${t.title} (priority=${t.priority})${deps}`;
+        return `- [${t.id}] ${truncTitle(t.title)} (priority=${t.priority})${deps}`;
       });
-      return text(lines.join("\n"));
+      return text(
+        capLines(lines, limit ?? LIST_LIMIT_DEFAULT, "raise limit to see more"),
+      );
     },
     { userFacing: false },
   );
@@ -1082,8 +1129,15 @@ export function registerTools(server: McpServer): void {
         .optional()
         .default(false)
         .describe("Show only PM feedback"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Max entries (default 30)"),
     },
-    async ({ task_id, pm_only }) => {
+    async ({ task_id, pm_only, limit }) => {
       const task = await fetchTask(task_id);
       if (!task) return text(`Error: Task ${task_id} not found.`);
 
@@ -1102,7 +1156,9 @@ export function registerTools(server: McpServer): void {
         const agent = a.agentId || "system";
         return `[${ts}] ${agent}: ${a.message}`;
       });
-      return text(lines.join("\n"));
+      return text(
+        capLines(lines, limit ?? 30, "raise limit for older entries"),
+      );
     },
     { userFacing: false },
   );
@@ -1310,8 +1366,15 @@ export function registerTools(server: McpServer): void {
     {
       keyword: z.string().describe("Search keyword"),
       project_id: z.string().optional().describe("Project ID"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Max rows (default 50)"),
     },
-    async ({ keyword, project_id }) => {
+    async ({ keyword, project_id, limit }) => {
       const projectId = resolveProject(project_id);
       const constraints: QueryConstraint[] = [];
       if (projectId) constraints.push(where("projectId", "==", projectId));
@@ -1331,12 +1394,18 @@ export function registerTools(server: McpServer): void {
       if (matches.length === 0)
         return text(`No tasks found matching '${keyword}'.`);
 
-      const lines = [`Found ${matches.length} task(s) matching '${keyword}':`];
-      matches.forEach((d) => {
+      const taskLines = matches.map((d) => {
         const t = d.data();
-        lines.push(`- [${t.status}] ${t.title} (role=${t.role}, id=${d.id})`);
+        return `- [${t.status}] ${truncTitle(t.title)} (role=${t.role}, id=${d.id})`;
       });
-      return text(lines.join("\n"));
+      const body = capLines(
+        taskLines,
+        limit ?? LIST_LIMIT_DEFAULT,
+        "narrow the keyword or raise limit",
+      );
+      return text(
+        `Found ${matches.length} task(s) matching '${keyword}':\n${body}`,
+      );
     },
     { userFacing: false },
   );
