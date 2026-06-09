@@ -5,12 +5,12 @@ import { modelTierForComplexity } from "../../electron/agent-config";
 // claude=--model(sonnet/opus), gpt(codex)=reasoning(low/medium/high). complexity
 // 미지정(오케스트레이터 경로)이면 override 없음 → 기본 모델 유지.
 describe("modelTierForComplexity", () => {
-  it("claude: standard/simple → sonnet, complex → opus", () => {
+  it("claude: simple → sonnet, standard/complex → opus (품질 우선: 기본=opus)", () => {
     expect(modelTierForComplexity("claude", "simple").claudeModel).toBe(
       "sonnet",
     );
     expect(modelTierForComplexity("claude", "standard").claudeModel).toBe(
-      "sonnet",
+      "opus",
     );
     expect(modelTierForComplexity("claude", "complex").claudeModel).toBe(
       "opus",

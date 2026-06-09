@@ -1691,7 +1691,10 @@ export function registerTools(server: McpServer): void {
         .enum(["simple", "standard", "complex"])
         .optional()
         .describe(
-          "'simple' = internal sub-agent, 'standard' = default, 'complex' = always physical agent",
+          "Task difficulty — also picks the agent model tier (cost/quality). " +
+            "'simple' = internal sub-agent + cheaper model; 'standard' (default) = " +
+            "top model (claude opus / gpt-5.5 medium); 'complex' = physical agent + " +
+            "top reasoning (claude opus / gpt-5.5 high). Set per task difficulty.",
         ),
       model: z
         .string()

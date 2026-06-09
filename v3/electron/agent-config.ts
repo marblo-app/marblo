@@ -92,10 +92,12 @@ const MODEL_BINARY: Partial<Record<ModelType, string>> = {
   antigravity: "agy",
 };
 
-// 작업 complexity → 프로바이더별 모델/레벨. 디스패치 에이전트 비용 절감(quota):
-// 표준 작업은 sonnet/medium 으로 충분, 어려운 것만 opus/high. complexity 가
-// undefined 면 override 하지 않아 기본 모델을 상속한다 — 오케스트레이터(opus 유지)
-// 경로가 이 길로 온다. claude=--model, gpt(codex)=model_reasoning_effort.
+// 작업 complexity → 프로바이더별 모델/레벨. 품질 우선 정책: 기본(standard)은
+// 최상위(claude=opus, gpt-5.5=medium)를 유지하고, 작은 작업(simple)만 한 단계 낮추며,
+// 어려운 작업(complex)은 최상위를 쓴다. complexity 가 undefined 면 override 하지 않아
+// 기본 모델을 상속한다(오케스트레이터 등). claude=--model, gpt(codex)=model_reasoning_effort.
+//   claude:  simple → sonnet,        standard/complex → opus
+//   gpt:     simple → low, standard → medium, complex → high
 export type TaskComplexity = "simple" | "standard" | "complex";
 export function modelTierForComplexity(
   model: ModelType,
@@ -103,15 +105,16 @@ export function modelTierForComplexity(
 ): { claudeModel?: string; codexReasoning?: string } {
   if (!complexity) return {}; // override 없음 → 기본 상속
   if (model === "claude") {
-    return { claudeModel: complexity === "complex" ? "opus" : "sonnet" };
+    // 기본·complex 는 opus(최상위), simple(작은 작업)만 sonnet 으로 하향.
+    return { claudeModel: complexity === "simple" ? "sonnet" : "opus" };
   }
   if (model === "gpt") {
     return {
       codexReasoning:
-        complexity === "complex"
-          ? "high"
-          : complexity === "simple"
-            ? "low"
+        complexity === "simple"
+          ? "low"
+          : complexity === "complex"
+            ? "high"
             : "medium",
     };
   }
