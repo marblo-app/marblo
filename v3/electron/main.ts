@@ -814,31 +814,46 @@ function resolveMissionRootPath(projectId: string, hint?: string): string {
 function ensureMissionOrchestratorLaunched(
   projectId: string,
   rootPathHint?: string,
+  missionId?: string,
 ): OrchestratorManager {
   let manager = missionOrchestrators.get(projectId);
   if (!manager) {
     manager = createMissionOrchestratorInstance(projectId);
     missionOrchestrators.set(projectId, manager);
   }
-  if (!manager.isRunning()) {
-    const rootPath = resolveMissionRootPath(projectId, rootPathHint);
-    // 직전 mission 세션 UUID (kind 별) 를 구체값으로 넘긴다 → launch 내부의
-    // "latest" 라벨 해석을 우회하고, 없으면 "new"(초기 프롬프트 포함 새 세션).
-    const resumeId = manager.resolveOrchestratorResumeId(rootPath) ?? "new";
-    manager.launch(
-      projectId,
-      rootPath,
-      bridgeServer.getPort(),
-      (sid) => {
-        // 소유 윈도우를 알면 그 창으로 라우팅, 모르면 setupPtyForwarding 의
-        // mainWindow 폴백 + 버퍼링으로 패널이 나중에 붙어도 backlog 수신.
-        const ownerId = missionOrchestratorOwners.get(projectId);
-        if (ownerId !== undefined) ptyOwners.set(sid, ownerId);
-        setupPtyForwarding(sid);
-      },
-      resumeId,
-    );
+  if (manager.isRunning()) {
+    // 이미 실행 중인 오케가 '다른' 미션을 운전 중이면, 새 미션을 위해 fresh 세션으로
+    // 교체한다(옛 미션 대화를 이어받아 /compact + 컨텍스트 오염되는 것 방지). 같은
+    // 미션이거나 missionId 미상(렌더러 reconnect/Restart)이면 실행 중 세션을 reuse.
+    const owner = manager.getOwnerMissionId();
+    if (missionId && owner && owner !== missionId) {
+      manager.stop();
+    } else {
+      return manager;
+    }
   }
+  const rootPath = resolveMissionRootPath(projectId, rootPathHint);
+  // resume 결정:
+  //  - missionId 알면: 그 미션의 세션이 있으면 resume(스텝→스텝 / 앱 재시작 이어가기),
+  //    없으면 "new"(새 미션 = fresh 세션 + 초기 프롬프트).
+  //  - missionId 미상(렌더러 부팅 reconnect): 기존처럼 직전 mission 세션 resume.
+  const resumeId = missionId
+    ? (manager.resolveMissionResumeId(rootPath, missionId) ?? "new")
+    : (manager.resolveOrchestratorResumeId(rootPath) ?? "new");
+  manager.launch(
+    projectId,
+    rootPath,
+    bridgeServer.getPort(),
+    (sid) => {
+      // 소유 윈도우를 알면 그 창으로 라우팅, 모르면 setupPtyForwarding 의
+      // mainWindow 폴백 + 버퍼링으로 패널이 나중에 붙어도 backlog 수신.
+      const ownerId = missionOrchestratorOwners.get(projectId);
+      if (ownerId !== undefined) ptyOwners.set(sid, ownerId);
+      setupPtyForwarding(sid);
+    },
+    resumeId,
+    missionId,
+  );
   return manager;
 }
 
@@ -903,8 +918,8 @@ missionBundle = buildMissionEngine({
   taskDecomposer: getDecomposer,
   orchestrators: missionOrchestrators,
   createOrchestratorInstance: createMissionOrchestratorInstance,
-  ensureOrchestratorLaunched: (projectId) =>
-    ensureMissionOrchestratorLaunched(projectId),
+  ensureOrchestratorLaunched: (projectId, missionId) =>
+    ensureMissionOrchestratorLaunched(projectId, undefined, missionId),
   notifier: notifyMissionNeedsInput,
   ptyManager,
   bridgePort: () => bridgeServer.getPort(),

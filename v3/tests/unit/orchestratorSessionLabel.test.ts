@@ -376,4 +376,72 @@ describe("OrchestratorManager session reconnect", () => {
       expect(store.mission?.sessionId).toBe(missionId);
     });
   });
+
+  // Regression: 새 미션을 시작하면 미션 오케스트레이터가 직전(아카이브된) 미션의
+  // Claude 세션을 resume → /compact + 옛 컨텍스트로 첫 스텝이 stall 했다. 수정:
+  // 세션을 mission 단위로 스코프 — 새 미션 = fresh("new"), 같은 미션 = resume.
+  describe("mission-scoped resume (new mission = fresh, same mission = resume)", () => {
+    // currentMissionId 를 주입한 mission 매니저 (full launch 없이 store 키잉 테스트용).
+    function missionManager(missionId: string | null): OrchestratorManager {
+      const mgr = makeManager("mission");
+      (mgr as unknown as { currentMissionId: string | null }).currentMissionId =
+        missionId;
+      return mgr;
+    }
+
+    it("saves a mission session under a mission:<id> key with missionId recorded", () => {
+      const mA = "m-aaaaaaaa";
+      const sidA = "sessA000-0000-0000-0000-000000000000";
+      missionManager(mA).saveOrchSessionId(rootPath, sidA);
+      const store = JSON.parse(fs.readFileSync(storePath(), "utf-8"));
+      expect(store[`mission:${mA}`]?.sessionId).toBe(sidA);
+      expect(store[`mission:${mA}`]?.missionId).toBe(mA);
+      // 레거시 단일 "mission" 키는 건드리지 않는다 (프로젝트 단위 오염 방지).
+      expect(store.mission).toBeUndefined();
+    });
+
+    it("resumes the SAME mission's session, returns null (→ fresh) for a NEW mission", () => {
+      const mA = "m-aaaaaaaa";
+      const sidA = "sessA111-0000-0000-0000-000000000000";
+      writeOrchestratorJsonl(sidA); // 실재하는 resumable 세션
+      missionManager(mA).saveOrchSessionId(rootPath, sidA);
+
+      // 같은 미션 → resume.
+      expect(makeManager("mission").resolveMissionResumeId(rootPath, mA)).toBe(
+        sidA,
+      );
+      // 다른(새) 미션 → null → 호출부가 "new"(fresh)로 띄운다. ★ 핵심 회귀.
+      expect(
+        makeManager("mission").resolveMissionResumeId(rootPath, "m-bbbbbbbb"),
+      ).toBeNull();
+    });
+
+    it("ignores a stored mission session whose jsonl no longer exists (→ fresh)", () => {
+      const mA = "m-cccccccc";
+      // 저장은 됐지만 .jsonl 이 없는(삭제된) 세션 → resumable 아님 → null.
+      missionManager(mA).saveOrchSessionId(
+        rootPath,
+        "gone0000-0000-0000-0000-000000000000",
+      );
+      expect(
+        makeManager("mission").resolveMissionResumeId(rootPath, mA),
+      ).toBeNull();
+    });
+
+    it("board kind never mission-resumes (always null)", () => {
+      const sid = "boardxxx-0000-0000-0000-000000000000";
+      writeOrchestratorJsonl(sid);
+      makeManager("board").saveOrchSessionId(rootPath, sid);
+      expect(
+        makeManager("board").resolveMissionResumeId(rootPath, "whatever"),
+      ).toBeNull();
+    });
+
+    it("tracks the running mission via getOwnerMissionId (used to swap on new mission)", () => {
+      const mgr = missionManager("m-dddddddd");
+      expect(mgr.getOwnerMissionId()).toBe("m-dddddddd");
+      const fresh = makeManager("mission");
+      expect(fresh.getOwnerMissionId()).toBeNull();
+    });
+  });
 });

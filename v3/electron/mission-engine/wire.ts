@@ -36,7 +36,10 @@ export interface BuildMissionEngineDeps {
   // 출력 → renderer) + kind 별 resume + rootPath 해석을 포함한다. 미션 엔진의
   // ensureSession 이 이걸 통해 launch 해야 PTY 패널에 출력이 흐르고 재시작 후
   // 세션이 이어진다. 미지정 시 registry 가 자체 launch(테스트 fallback).
-  ensureOrchestratorLaunched?: (projectId: string) => OrchestratorManager;
+  ensureOrchestratorLaunched?: (
+    projectId: string,
+    missionId?: string,
+  ) => OrchestratorManager;
   // 미션이 사용자 개입을 요구할 때 OS 알림 / 인앱으로 surface. 미지정 시 no-op.
   notifier?: MissionNotifier;
   ptyManager: PtyManager;
@@ -60,7 +63,7 @@ export interface BuiltMissionEngine {
 }
 
 export function buildMissionEngine(
-  deps: BuildMissionEngineDeps
+  deps: BuildMissionEngineDeps,
 ): BuiltMissionEngine {
   const { app, authReady } = getMissionFirebaseApp();
   const eventBus = new InProcessMissionEventBus();
@@ -97,7 +100,7 @@ export function buildMissionEngine(
   console.log(
     `[MissionEngine] skill runner mode: ${
       useHeadlessSkillRunner ? "headless" : "pty"
-    }`
+    }`,
   );
 
   // B안 미션 드라이버 토글 — 'engine'(기본, A안 advance-loop) | 'orchestrator'(B안
@@ -131,7 +134,7 @@ export function buildMissionEngine(
       orchestrators: orchRegistry,
       notifier: deps.notifier,
     },
-    { driver: missionDriver, conductor }
+    { driver: missionDriver, conductor },
   );
 
   const forwarder = new MissionEventForwarder({ app, authReady, eventBus });
@@ -158,34 +161,34 @@ export function buildMissionEngine(
       for (const status of ["active", "sleeping"] as const) {
         try {
           const snap = await getDocs(
-            query(collection(db, "missions"), where("status", "==", status))
+            query(collection(db, "missions"), where("status", "==", status)),
           );
           for (const d of snap.docs) {
             if (pickedUp.has(d.id)) continue;
             pickedUp.add(d.id);
             console.log(
-              `[MissionEngine] recovering in-flight mission ${d.id} (status=${status})`
+              `[MissionEngine] recovering in-flight mission ${d.id} (status=${status})`,
             );
             engine.recoverInFlight(d.id).catch((err) => {
               pickedUp.delete(d.id);
               console.error(
                 "[MissionEngine] in-flight recovery failed",
                 d.id,
-                err
+                err,
               );
             });
           }
         } catch (err) {
           console.warn(
             `[MissionEngine] in-flight (${status}) recovery query failed:`,
-            err
+            err,
           );
         }
       }
 
       const q = query(
         collection(db, "missions"),
-        where("status", "==", "planning")
+        where("status", "==", "planning"),
       );
       planningUnsub = onSnapshot(
         q,
@@ -193,7 +196,7 @@ export function buildMissionEngine(
           console.log(
             `[MissionEngine] planning snapshot: size=${snap.size} changes=${
               snap.docChanges().length
-            }`
+            }`,
           );
           for (const change of snap.docChanges()) {
             if (change.type === "removed") {
@@ -204,7 +207,7 @@ export function buildMissionEngine(
             if (pickedUp.has(id)) continue;
             pickedUp.add(id);
             console.log(
-              `[MissionEngine] picking up planning mission ${id} (change=${change.type})`
+              `[MissionEngine] picking up planning mission ${id} (change=${change.type})`,
             );
             engine.resume(id).catch((err) => {
               pickedUp.delete(id); // 실패 시 다음 트리거에서 재시도 가능
@@ -212,7 +215,7 @@ export function buildMissionEngine(
             });
           }
         },
-        (err) => console.warn("[MissionEngine] planning subscribe error:", err)
+        (err) => console.warn("[MissionEngine] planning subscribe error:", err),
       );
       console.log("[MissionEngine] planning subscription started");
     } catch (err) {

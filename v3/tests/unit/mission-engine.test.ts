@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MissionEngine,
   InProcessMissionEventBus,
@@ -29,6 +29,17 @@ import type {
   TaskDispatcher,
   TaskStatusLite,
 } from "../../electron/mission-engine/ports";
+
+// 이 스위트는 engine-driven(A안) advance-loop 를 검증한다. 로컬 v3/.env 의
+// MISSION_DRIVER=orchestrator(B안 플립)가 vitest 에 새어들어오면 엔진이 오케
+// 보고를 기다리느라 fake-port 미션이 진행되지 않아 전부 timeout 한다 → driver 를
+// 명시적으로 'engine' 으로 고정해 ambient env 와 무관하게 결정적으로 만든다.
+beforeEach(() => {
+  vi.stubEnv("MISSION_DRIVER", "engine");
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 // 모든 시나리오를 in-memory fake ports 로 검증.
 // MissionEngine.ts 가 외부 의존을 ports 인터페이스로만 받기 때문에 wire / Firestore
