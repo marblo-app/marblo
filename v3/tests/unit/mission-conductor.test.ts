@@ -129,6 +129,8 @@ interface BuildOpts {
   maxRetries?: number;
   orchAlive?: boolean;
   board?: MissionBoardPort;
+  reportNudgeIntervalMs?: number;
+  maxReportNudges?: number;
 }
 
 function buildConductor(opts: BuildOpts = {}): {
@@ -155,6 +157,8 @@ function buildConductor(opts: BuildOpts = {}): {
     notifier: opts.notifier,
     verifyStepGate: opts.verifyStepGate,
     board: opts.board,
+    reportNudgeIntervalMs: opts.reportNudgeIntervalMs,
+    maxReportNudges: opts.maxReportNudges,
     logger: () => {},
   });
   return { store, bus, conductor, posts: orch.posts, taskStatuses };
@@ -284,6 +288,61 @@ describe("ConductorDriver — grantStep", () => {
     // ensureSession 으로 얻은 라이브 세션("sess-1")으로 ownerOrchestratorSessionId 가
     // 영속 바인딩됐다 — 다음 grant 부터는 getSession 이 바로 매칭한다.
     expect(store.raw(id)!.ownerOrchestratorSessionId).toBe("sess-1");
+  });
+});
+
+// ──────────────────────── 보고-감시 watchdog ────────────────────────────
+
+describe("ConductorDriver — 보고-감시 watchdog", () => {
+  it("grant 후 보고가 없으면 '끝났으면 보고하라' nudge 를 주입한다", async () => {
+    const { store, conductor, posts } = buildConductor({
+      reportNudgeIntervalMs: 20,
+      maxReportNudges: 3,
+    });
+    const id = await makeMission(store, { templateId: "research" });
+    conductor.requestAdvance(id);
+    await waitFor(() => posts.length === 1); // grant 주입
+    // 보고를 안 하면 watchdog 이 nudge 를 추가로 주입한다.
+    await waitFor(() => posts.length >= 2, 2000);
+    const nudge = posts.find((p) => p.includes("【지휘자】"));
+    expect(nudge).toBeTruthy();
+    expect(nudge!).toContain("mission_step_done");
+    expect(nudge!).toContain("이 메시지는 무시");
+  });
+
+  it("mission_step_done 보고가 오면 watchdog 이 멈춰 더는 nudge 하지 않는다", async () => {
+    const { store, bus, conductor, posts } = buildConductor({
+      reportNudgeIntervalMs: 20,
+      maxReportNudges: 3,
+      // research step0(/office-hours, gstack)은 task 게이트가 아니라 즉시 통과 →
+      // 성공 보고 시 다음 스텝 grant. step0 의 watchdog 은 해제된다.
+    });
+    const id = await makeMission(store, { templateId: "research" });
+    conductor.requestAdvance(id);
+    await waitFor(() => posts.length === 1);
+    // step0 성공 보고 → 전진. step0 watchdog 해제.
+    bus.emit(reportEvent(id, 0, "success", { output: "ok" }));
+    await waitFor(() => store.raw(id)!.currentStepIndex === 1);
+    const countAfterAdvance = posts.filter((p) => p.includes("스텝 0")).length;
+    // 잠시 더 기다려도 step0 에 대한 추가 nudge 가 늘지 않아야 한다(해제 확인).
+    await new Promise((r) => setTimeout(r, 80));
+    const countLater = posts.filter((p) => p.includes("스텝 0")).length;
+    expect(countLater).toBe(countAfterAdvance);
+  });
+
+  it("nudge 한도 초과 시 escalate(notifier 호출 + waiting_for_human)", async () => {
+    const notes: string[] = [];
+    const { store, conductor } = buildConductor({
+      reportNudgeIntervalMs: 15,
+      maxReportNudges: 1,
+      notifier: (n) => notes.push(n.kind),
+    });
+    const id = await makeMission(store, { templateId: "research" });
+    conductor.requestAdvance(id);
+    // 1회 nudge 후 한도 초과 → escalate.
+    await waitFor(() => store.raw(id)!.status === "waiting_for_human", 3000);
+    expect(notes).toContain("escalate");
+    expect(store.raw(id)!.status).toBe("waiting_for_human");
   });
 });
 

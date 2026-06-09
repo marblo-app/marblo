@@ -916,30 +916,45 @@ function notifyMissionNeedsInput(n: {
   }
 }
 
-missionBundle = buildMissionEngine({
-  agentManager,
-  taskDecomposer: getDecomposer,
-  orchestrators: missionOrchestrators,
-  createOrchestratorInstance: createMissionOrchestratorInstance,
-  ensureOrchestratorLaunched: (projectId, missionId) =>
-    ensureMissionOrchestratorLaunched(projectId, undefined, missionId),
-  notifier: notifyMissionNeedsInput,
-  ptyManager,
-  bridgePort: () => bridgeServer.getPort(),
-  // bridgeServer.dispatchTask is async now (it awaits worktree prep before
-  // spawning). The mission-engine dispatchOne port is synchronous and only
-  // uses the result for best-effort logging — the mission owns its own task
-  // lifecycle via Firestore polling and already knows each taskId it passes
-  // in. So kick the worktree-isolated dispatch off in the background and
-  // return an optimistic synchronous ack; real failures surface via the
-  // .catch below and the mission's own status polling.
-  dispatchOne: (params) => {
-    void bridgeServer.dispatchTask(params).catch((err) => {
-      console.error("[Main] mission dispatch (async) failed:", err);
-    });
-    return { success: true };
-  },
-});
+// 미션은 MVP 제외(보드+오케스트레이터 집중) — 단일 플래그로 UI 탭(TabBar
+// DEV_ONLY_TABS)과 함께 엔진 기동을 게이트한다. 플래그 off 면 buildMissionEngine 을
+// 아예 안 불러 missionBundle=null → startup 의 forwarder.start()/pickupPlanningMissions()
+// 가 if(missionBundle) 가드로 스킵 → 잔존 테스트 미션이 자동 실행돼 quota 를 태우지
+// 않는다. (.env 가 main 에도 dotenv 로드되므로 VITE_DEV_FEATURES 를 그대로 읽는다.)
+const missionsEnabled = (process.env.VITE_DEV_FEATURES || "")
+  .split(",")
+  .map((s) => s.trim())
+  .includes("missions");
+if (!missionsEnabled) {
+  console.log(
+    "[Mission] disabled for MVP — set VITE_DEV_FEATURES=missions to enable the tab + engine",
+  );
+}
+if (missionsEnabled)
+  missionBundle = buildMissionEngine({
+    agentManager,
+    taskDecomposer: getDecomposer,
+    orchestrators: missionOrchestrators,
+    createOrchestratorInstance: createMissionOrchestratorInstance,
+    ensureOrchestratorLaunched: (projectId, missionId) =>
+      ensureMissionOrchestratorLaunched(projectId, undefined, missionId),
+    notifier: notifyMissionNeedsInput,
+    ptyManager,
+    bridgePort: () => bridgeServer.getPort(),
+    // bridgeServer.dispatchTask is async now (it awaits worktree prep before
+    // spawning). The mission-engine dispatchOne port is synchronous and only
+    // uses the result for best-effort logging — the mission owns its own task
+    // lifecycle via Firestore polling and already knows each taskId it passes
+    // in. So kick the worktree-isolated dispatch off in the background and
+    // return an optimistic synchronous ack; real failures surface via the
+    // .catch below and the mission's own status polling.
+    dispatchOne: (params) => {
+      void bridgeServer.dispatchTask(params).catch((err) => {
+        console.error("[Main] mission dispatch (async) failed:", err);
+      });
+      return { success: true };
+    },
+  });
 
 // --- Flow Engine Setup ---
 import {

@@ -89,7 +89,7 @@ export interface StepGateContext {
    * 기존 dispatcher.getTaskStatuses 를 재사용해 주입한다.
    */
   getTaskStatuses: (
-    taskIds: string[],
+    taskIds: string[]
   ) => Promise<Record<string, TaskStatusLite>>;
   /** 게이트 평가 시점의 미션 스냅샷 (taskIds / 직전 step output 등). */
   mission: Mission;
@@ -107,7 +107,7 @@ export interface StepGateContext {
  */
 export type VerifyStepGate = (
   step: MissionStep,
-  ctx: StepGateContext,
+  ctx: StepGateContext
 ) => Promise<{ pass: boolean; reason?: string }>;
 
 /**
@@ -131,7 +131,7 @@ export interface ConductorDriverDeps {
   eventBus: MissionEventBus;
   /** wait 게이트용 task 상태 조회 — dispatcher.getTaskStatuses 재사용해 주입. */
   getTaskStatuses: (
-    taskIds: string[],
+    taskIds: string[]
   ) => Promise<Record<string, TaskStatusLite>>;
   /**
    * 오케스트레이터가 MCP(`create_task`/`dispatch_task`)로 만든 미션 task 의 **비종료**
@@ -163,6 +163,14 @@ export interface ConductorDriverDeps {
    * 동작은 모두 건너뛴다(테스트/하위호환 불변). dispatcher-impl 이 구현 → wire.ts 주입.
    */
   board?: MissionBoardPort;
+  /**
+   * 보고-감시(report watchdog) nudge 간격 ms. grantStep 후 이 간격마다 보고가
+   * 없으면 오케에 "끝났으면 mission_step_done 보고하라"를 주입한다. 기본 240s
+   * (run_skill 타임아웃 10분 고려 — 진행 중 nudge 는 큐잉돼도 무해). 테스트는 짧게.
+   */
+  reportNudgeIntervalMs?: number;
+  /** 최대 nudge 횟수. 초과하면 escalate(waiting_for_human + 사용자 알림). 기본 3. */
+  maxReportNudges?: number;
   now?: () => Date;
   logger?: (msg: string, meta?: Record<string, unknown>) => void;
 }
@@ -244,8 +252,8 @@ const defaultStepGate: VerifyStepGate = async (step, ctx) => {
       typeof step.output === "string"
         ? step.output
         : step.output != null
-          ? JSON.stringify(step.output)
-          : "";
+        ? JSON.stringify(step.output)
+        : "";
     if (PR_URL_RE.test(out)) return { pass: true };
     return {
       pass: false,
@@ -268,7 +276,7 @@ const defaultStepGate: VerifyStepGate = async (step, ctx) => {
 function buildGrantMessage(
   mission: Mission,
   step: MissionStep,
-  stepIndex: number,
+  stepIndex: number
 ): string {
   if (step.type === "gstack") {
     const skill = step.skill ?? "(스킬 미지정)";
@@ -308,7 +316,7 @@ function buildGrantMessage(
  * 기본 driver 가 engine 이라 명시적으로 orchestrator 를 켜야만 생성·호출된다.
  */
 export function createConductorDriver(
-  deps: ConductorDriverDeps,
+  deps: ConductorDriverDeps
 ): ConductorDriver {
   const log =
     deps.logger ??
@@ -317,6 +325,19 @@ export function createConductorDriver(
   const now = deps.now ?? (() => new Date());
   const maxRetries = deps.maxRetries ?? 2;
   const verify: VerifyStepGate = deps.verifyStepGate ?? defaultStepGate;
+  const reportNudgeIntervalMs = deps.reportNudgeIntervalMs ?? 240_000;
+  const maxReportNudges = deps.maxReportNudges ?? 3;
+
+  // ── 보고-감시(report watchdog) ──
+  // gstack/fix/dispatch 스텝을 grant 한 뒤, 오케가 끝났는데도 mission_step_done 을
+  // 빠뜨려(특히 멀티턴 사용자 상호작용 뒤) 미션이 영구 stall 하는 걸 막는다. 스텝당
+  // 타이머를 걸어 일정 간격마다 "끝났으면 보고하라" nudge 를 주입하고, 한도 초과 시
+  // escalate(waiting_for_human). 보고 수신/스텝 전진/완료/dispose 시 해제한다.
+  // key = `${missionId}:${stepIndex}`.
+  const reportWatch = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; nudges: number }
+  >();
 
   // ── 미션별 작업 직렬화 ──
   // 이벤트 폭주(task.status_changed 버스트)나 launch + 이벤트 동시 도착 시
@@ -328,7 +349,7 @@ export function createConductorDriver(
     const next = prev
       .then(fn, fn)
       .catch((err) =>
-        log("mission chain error", { missionId, err: String(err) }),
+        log("mission chain error", { missionId, err: String(err) })
       );
     chains.set(missionId, next);
     void next.finally(() => {
@@ -391,7 +412,7 @@ export function createConductorDriver(
   }
   async function cardActivity(
     mission: Mission,
-    message: string,
+    message: string
   ): Promise<void> {
     if (!deps.board || !mission.missionCardTaskId) return;
     try {
@@ -402,6 +423,127 @@ export function createConductorDriver(
         err: String(err),
       });
     }
+  }
+
+  // ── 보고-감시 watchdog 헬퍼 ──
+  function buildReportNudge(stepIndex: number, step: MissionStep): string {
+    return (
+      `【지휘자】 스텝 ${stepIndex} (${
+        step.skill ?? step.type
+      }) 의 보고를 아직 못 받았습니다.\n` +
+      `이 스텝이 이미 끝났다면 지금 바로 mission_step_done({success:true, output:"핵심 결과 요약"}) 으로 ` +
+      `보고하세요 — 보고해야 다음 스텝으로 넘어갑니다.\n` +
+      `아직 진행 중이거나 사용자 답변을 기다리는 중이면 이 메시지는 무시하세요.`
+    );
+  }
+
+  // missionId(+stepIndex 지정 시 그 스텝만) 의 watchdog 타이머 해제.
+  function clearReportWatch(missionId: string, stepIndex?: number): void {
+    const prefix = `${missionId}:`;
+    for (const [key, w] of reportWatch) {
+      if (!key.startsWith(prefix)) continue;
+      if (stepIndex !== undefined && key !== `${missionId}:${stepIndex}`)
+        continue;
+      clearTimeout(w.timer);
+      reportWatch.delete(key);
+    }
+  }
+
+  // grant 후 보고 감시 시작. 스텝이 여전히 running 이면 nudge, 한도 초과면 escalate.
+  function startReportWatch(missionId: string, stepIndex: number): void {
+    const key = `${missionId}:${stepIndex}`;
+    clearReportWatch(missionId, stepIndex); // 같은 스텝 재grant 시 중복 방지
+    const schedule = (nudges: number): void => {
+      const timer = setTimeout(() => {
+        void tick(nudges);
+      }, reportNudgeIntervalMs);
+      // 이벤트 루프를 붙잡지 않게(테스트/종료 시 dangling 타이머 방지).
+      timer.unref?.();
+      reportWatch.set(key, { timer, nudges });
+    };
+    const tick = async (nudges: number): Promise<void> => {
+      if (!reportWatch.has(key)) return; // 그 사이 해제됨
+      const mission = await deps.store.getMission(missionId);
+      if (!mission || mission.status !== "active") {
+        clearReportWatch(missionId, stepIndex);
+        return;
+      }
+      const step = mission.steps[stepIndex];
+      // 스텝이 이미 전진/완료/실패(=보고 처리됨)면 감시 종료.
+      if (
+        !step ||
+        mission.currentStepIndex !== stepIndex ||
+        step.status !== "running"
+      ) {
+        clearReportWatch(missionId, stepIndex);
+        return;
+      }
+      if (nudges >= maxReportNudges) {
+        // 한도 초과 — 보고가 끝내 안 옴 → escalate(사용자 호출). 상태 전이는 enqueue
+        // 로 직렬화해 onStepReport 등과 race 하지 않는다.
+        clearReportWatch(missionId, stepIndex);
+        log("reportWatch — max nudges, escalating", { missionId, stepIndex });
+        void enqueue(missionId, async () => {
+          const m = await deps.store.getMission(missionId);
+          if (!m || m.status !== "active") return;
+          const s = m.steps[stepIndex];
+          if (
+            !s ||
+            m.currentStepIndex !== stepIndex ||
+            s.status !== "running"
+          ) {
+            return;
+          }
+          deps.notifier?.({
+            missionId,
+            projectId: m.projectId,
+            goal: m.goal,
+            kind: "escalate",
+            question: `스텝 ${stepIndex} (${
+              s.skill ?? s.type
+            }) 완료 보고가 없습니다. 확인이 필요합니다.`,
+            skill: s.skill ?? null,
+          });
+          await deps.store.appendTimelineEvent(missionId, {
+            ts: now(),
+            type: "step.failed",
+            payload: {
+              index: stepIndex,
+              error: "report timeout (no mission_step_done)",
+              policy: "escalate",
+              notifyUser: true,
+              driver: "orchestrator",
+            },
+          });
+          await transition(missionId, m.status, "waiting_for_human");
+          notifyOrchestrator(
+            m,
+            `⏸️ [Marblo Mission] 스텝 ${stepIndex} 완료 보고가 없어 사용자 확인을 요청했습니다. 끝났으면 mission_step_done 으로 보고하세요.`
+          );
+        });
+        return;
+      }
+      // nudge 주입(best-effort) — injectMessage 직렬화 경유라 부팅/grant 와 안 겹침.
+      const ref = deps.orchestrators.getSession(
+        mission.ownerOrchestratorSessionId
+      );
+      if (ref?.isAlive()) {
+        void ref.postMessage(buildReportNudge(stepIndex, step)).catch((err) =>
+          log("reportWatch — nudge failed (best-effort)", {
+            missionId,
+            stepIndex,
+            err: String(err),
+          })
+        );
+        log("reportWatch — nudged orchestrator to report", {
+          missionId,
+          stepIndex,
+          nudge: nudges + 1,
+        });
+      }
+      schedule(nudges + 1);
+    };
+    schedule(0);
   }
 
   // ──────────────────────────── 운전 루프 ────────────────────────────
@@ -430,7 +572,7 @@ export function createConductorDriver(
 
   async function grantStep(
     missionId: string,
-    stepIndex: number,
+    stepIndex: number
   ): Promise<void> {
     const mission = await deps.store.getMission(missionId);
     if (!mission || isTerminalMission(mission.status)) return;
@@ -469,7 +611,7 @@ export function createConductorDriver(
     // 대표 카드에 스텝 시작 댓글(best-effort, no-op if board 미주입/카드 미생성).
     await cardActivity(
       mission,
-      `스텝 ${stepIndex} 시작 · ${step.skill ?? step.type}`,
+      `스텝 ${stepIndex} 시작 · ${step.skill ?? step.type}`
     );
 
     // wait 스텝: 오케에 grant 하지 않는다 — 지휘자가 task 완료를 폴링한다(§8-3).
@@ -549,6 +691,9 @@ export function createConductorDriver(
         err: String(err),
       });
     }
+    // 보고 감시 시작 — 오케가 이 스텝을 끝내고 mission_step_done 을 빠뜨리면
+    // nudge → 한도 초과 시 escalate. (wait 스텝은 위에서 return 했으니 여기 안 옴.)
+    startReportWatch(missionId, stepIndex);
   }
 
   async function onStepReport(report: StepReport): Promise<void> {
@@ -580,12 +725,14 @@ export function createConductorDriver(
       });
       return;
     }
+    // 유효 보고 수신 → 이 스텝의 보고-감시 nudge 중단(성공/실패 모두).
+    clearReportWatch(report.missionId, idx);
 
     if (report.status === "failed") {
       await handleStepFailure(
         report.missionId,
         idx,
-        report.error ?? "orchestrator reported step failure",
+        report.error ?? "orchestrator reported step failure"
       );
       return;
     }
@@ -644,7 +791,7 @@ export function createConductorDriver(
     await handleStepFailure(
       report.missionId,
       idx,
-      `gate not passed: ${gate.reason ?? ""}`,
+      `gate not passed: ${gate.reason ?? ""}`
     );
   }
 
@@ -652,7 +799,7 @@ export function createConductorDriver(
   // 외부 이벤트로 wait 게이트가 충족됐을 때 공유하는 단일 전진 지점.
   async function passStepAndAdvance(
     missionId: string,
-    stepIndex: number,
+    stepIndex: number
   ): Promise<void> {
     await markStepSuccess(missionId, stepIndex);
     const fresh = await deps.store.getMission(missionId);
@@ -670,7 +817,7 @@ export function createConductorDriver(
 
   async function markStepSuccess(
     missionId: string,
-    stepIndex: number,
+    stepIndex: number
   ): Promise<void> {
     const mission = await deps.store.getMission(missionId);
     const step = mission?.steps[stepIndex];
@@ -699,7 +846,7 @@ export function createConductorDriver(
   async function handleStepFailure(
     missionId: string,
     stepIndex: number,
-    error: string,
+    error: string
   ): Promise<void> {
     const mission = await deps.store.getMission(missionId);
     if (!mission || isTerminalMission(mission.status)) return;
@@ -791,13 +938,14 @@ export function createConductorDriver(
       mission,
       `⏸️ [Marblo Mission] 스텝 ${stepIndex} (${
         step.skill ?? step.type
-      }) 에서 사용자 확인을 기다립니다: ${error}`,
+      }) 에서 사용자 확인을 기다립니다: ${error}`
     );
   }
 
   async function completeMission(missionId: string): Promise<void> {
     const mission = await deps.store.getMission(missionId);
     if (!mission || isTerminalMission(mission.status)) return;
+    clearReportWatch(missionId);
     const completedAt = now();
     await transition(missionId, mission.status, "completed", { completedAt });
     await deps.store.appendTimelineEvent(missionId, {
@@ -814,7 +962,7 @@ export function createConductorDriver(
         await deps.board.setCardStatus(mission.missionCardTaskId, "DONE");
         await deps.board.addCardActivity(
           mission.missionCardTaskId,
-          "미션 완료 ✅",
+          "미션 완료 ✅"
         );
       } catch (err) {
         log("completeMission card sync failed", {
@@ -825,7 +973,7 @@ export function createConductorDriver(
     }
     notifyOrchestrator(
       mission,
-      `✅ [Marblo Mission] 모든 스텝이 끝나 미션이 완료되었습니다.`,
+      `✅ [Marblo Mission] 모든 스텝이 끝나 미션이 완료되었습니다.`
     );
   }
 
@@ -833,14 +981,14 @@ export function createConductorDriver(
   // 않는다. fire-and-forget (상태 전이 흐름을 blocking 하지 않음).
   function notifyOrchestrator(mission: Mission, message: string): void {
     const ref = deps.orchestrators.getSession(
-      mission.ownerOrchestratorSessionId,
+      mission.ownerOrchestratorSessionId
     );
     if (!ref || !ref.isAlive()) return;
     void ref.postMessage(message).catch((err) =>
       log("notifyOrchestrator failed (best-effort)", {
         missionId: mission.id,
         err: String(err),
-      }),
+      })
     );
   }
 
@@ -848,7 +996,7 @@ export function createConductorDriver(
     missionId: string,
     fromStatus: MissionStatus,
     next: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string },
+    extras?: { completedAt?: Date; abandonedReason?: string }
   ): Promise<void> {
     if (fromStatus === next) return;
     assertMissionTransition(fromStatus, next);
@@ -857,7 +1005,7 @@ export function createConductorDriver(
 
   async function verifyGateInternal(
     missionId: string,
-    stepIndex: number,
+    stepIndex: number
   ): Promise<GateResult> {
     let mission = await deps.store.getMission(missionId);
     if (!mission) return { passed: false, reason: "mission not found" };
@@ -925,7 +1073,7 @@ export function createConductorDriver(
   // mission 스냅샷은 onEvent 가 방금 읽은 일관 스냅샷을 그대로 받는다(직렬화 보장).
   async function synthesizeTimeline(
     event: MissionEngineEvent,
-    mission: Mission,
+    mission: Mission
   ): Promise<void> {
     const entry = buildSynthTimelineEvent(event);
     if (!entry) return;
@@ -933,7 +1081,7 @@ export function createConductorDriver(
     if (
       typeof key === "string" &&
       mission.contextLog.some(
-        (e) => (e.payload as { key?: unknown }).key === key,
+        (e) => (e.payload as { key?: unknown }).key === key
       )
     ) {
       log("synthesizeTimeline — dedup skip (key already in contextLog)", {
@@ -948,7 +1096,7 @@ export function createConductorDriver(
   // task.status_changed → 'task.status' / task.activity_logged → 'task.activity'.
   // 그 외 이벤트는 null(합성 대상 아님). payload.key 는 멱등 dedup 키다.
   function buildSynthTimelineEvent(
-    event: MissionEngineEvent,
+    event: MissionEngineEvent
   ): TimelineEvent | null {
     const p = event.payload ?? {};
     if (event.type === "task.status_changed") {
@@ -1007,8 +1155,8 @@ export function createConductorDriver(
     enqueue(event.missionId, () =>
       String(event.type) === MISSION_STEP_REPORTED_EVENT
         ? onStepReport(parseStepReport(event))
-        : onEvent(event),
-    ),
+        : onEvent(event)
+    )
   );
 
   log("created (Phase 2 — orchestrator-driven 운전 루프 활성)");
@@ -1021,13 +1169,15 @@ export function createConductorDriver(
     onStepReport,
     async verifyGate(
       missionId: string,
-      stepIndex: number,
+      stepIndex: number
     ): Promise<GateResult> {
       return verifyGateInternal(missionId, stepIndex);
     },
     onEvent,
     dispose(): void {
       unsubscribe();
+      for (const w of reportWatch.values()) clearTimeout(w.timer);
+      reportWatch.clear();
       chains.clear();
       log("disposed");
     },

@@ -260,8 +260,11 @@ interface TabBarProps {
   onTabChange: (tab: TabId) => void;
 }
 
-// Hidden tabs in production — only shown when VITE_DEV_FEATURES includes the tab id
-const DEV_ONLY_TABS: Set<TabId> = new Set(["flows", "deploy"]);
+// Hidden tabs in production — only shown when VITE_DEV_FEATURES includes the tab id.
+// "missions" 는 MVP 제외(보드+오케스트레이터 집중). 미션은 고비용(subagent-heavy)·
+// conductor↔오케 sync 미해결로 후속 단순재설계 예정 — 코드는 플래그 뒤 보존(베타).
+// 같은 플래그(VITE_DEV_FEATURES=missions)가 main.ts 의 미션엔진 기동도 게이트한다.
+const DEV_ONLY_TABS: Set<TabId> = new Set(["flows", "deploy", "missions"]);
 const devFeatures = (import.meta.env.VITE_DEV_FEATURES || "")
   .split(",")
   .map((s: string) => s.trim());
