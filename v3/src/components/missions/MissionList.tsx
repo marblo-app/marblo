@@ -7,6 +7,8 @@ interface MissionListProps {
   selectedMissionId: string | null;
   onSelect: (missionId: string) => void;
   onAbandon: (missionId: string) => void;
+  // 영구 삭제(미션 문서 제거). 미지정이면 삭제 버튼을 숨긴다.
+  onDelete?: (missionId: string) => void;
 }
 
 export function MissionList({
@@ -14,6 +16,7 @@ export function MissionList({
   selectedMissionId,
   onSelect,
   onAbandon,
+  onDelete,
 }: MissionListProps) {
   if (missions.length === 0) {
     return (
@@ -36,7 +39,8 @@ export function MissionList({
         const completed = m.steps.filter(
           (s) => s.status === "success" || s.status === "skipped",
         ).length;
-        const canAbandon = m.status !== "completed" && m.status !== "abandoned";
+        const isTerminal = m.status === "completed" || m.status === "abandoned";
+        const canAbandon = !isTerminal;
         return (
           <li key={m.id}>
             <div
@@ -73,25 +77,43 @@ export function MissionList({
                     <span>· {formatRelative(m.lastActivityAt)}</span>
                   </div>
                 </div>
-                {canAbandon && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (
-                        confirm(
-                          "이 미션을 종료할까요? 진행 중인 task / agent 는 정리됩니다.",
-                        )
-                      ) {
-                        onAbandon(m.id);
-                      }
-                    }}
-                    className="rounded p-1 text-xs text-gray-500 transition-colors hover:bg-red-500/15 hover:text-red-400"
-                    title="Abandon mission"
-                  >
-                    🛑
-                  </button>
-                )}
+                <div className="flex flex-shrink-0 items-center gap-0.5">
+                  {canAbandon && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (
+                          confirm(
+                            "이 미션을 종료할까요? 진행 중인 task / agent 는 정리됩니다.",
+                          )
+                        ) {
+                          onAbandon(m.id);
+                        }
+                      }}
+                      className="rounded p-1 text-xs text-gray-500 transition-colors hover:bg-red-500/15 hover:text-red-400"
+                      title="Abandon mission (정지 후 아카이브)"
+                    >
+                      🛑
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const msg = isTerminal
+                          ? "이 미션 기록을 영구 삭제할까요? 되돌릴 수 없습니다."
+                          : "진행 중인 미션입니다. 영구 삭제하면 기록이 사라지고, 진행 중 task/agent 는 자동 정리되지 않을 수 있어요(먼저 🛑 Abandon 권장). 그래도 삭제할까요?";
+                        if (confirm(msg)) onDelete(m.id);
+                      }}
+                      className="rounded p-1 text-xs text-gray-500 transition-colors hover:bg-red-500/15 hover:text-red-400"
+                      title="Delete mission (영구 삭제)"
+                    >
+                      🗑️
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </li>
