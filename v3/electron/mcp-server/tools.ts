@@ -1581,7 +1581,11 @@ export function registerTools(server: McpServer): void {
             return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${a.id}${restart})`;
           });
           return text(
-            `Agents (${data.agents.length}, real-time):\n${lines.join("\n")}`,
+            `Agents (${data.agents.length}, real-time):\n${capLines(
+              lines,
+              LIST_LIMIT_DEFAULT,
+              "many agents — cleanup idle ones",
+            )}`,
           );
         } catch {
           // Bridge unavailable — fall through to Firestore
@@ -1604,7 +1608,11 @@ export function registerTools(server: McpServer): void {
         return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${d.id})${task}`;
       });
       return text(
-        `Agents (${snap.size}, Firestore fallback):\n${lines.join("\n")}`,
+        `Agents (${snap.size}, Firestore fallback):\n${capLines(
+          lines,
+          LIST_LIMIT_DEFAULT,
+          "many agents — cleanup idle ones",
+        )}`,
       );
     },
     { userFacing: false },
