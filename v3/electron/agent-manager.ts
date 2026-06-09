@@ -1,7 +1,11 @@
 import { BrowserWindow } from "electron";
 import crypto from "crypto";
 import { PtyManager } from "./pty-manager";
-import { AgentConfigGenerator, LaunchConfig } from "./agent-config";
+import {
+  AgentConfigGenerator,
+  LaunchConfig,
+  type TaskComplexity,
+} from "./agent-config";
 import { mainTelemetry } from "./telemetry";
 import { encodeClaudeProjectDir } from "./claude-paths";
 
@@ -46,6 +50,8 @@ export interface AgentLaunchParams {
   resumeSessionId?: string; // 'new' | 'latest' | UUID
   /** Firestore project document ID — injected as MARBLO_PROJECT env var into MCP */
   projectId?: string;
+  /** 작업 난이도 — claude(--model)·codex(reasoning) 모델/레벨 선택용. 미지정=기본. */
+  complexity?: TaskComplexity;
   /** Called immediately after PTY is created, before any output can be missed */
   onPtyReady?: (ptySessionId: string) => void;
 }
@@ -287,6 +293,8 @@ export class AgentManager {
       // Pin a fresh Claude launch to a generated --session-id so this agent's
       // tokens attribute to it deterministically (no racy post-launch scan).
       true,
+      // 작업 난이도 → claude(--model sonnet/opus)·codex(reasoning) 모델/레벨 선택.
+      params.complexity,
     );
 
     if (isResume) {

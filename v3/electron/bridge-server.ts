@@ -109,6 +109,9 @@ export interface SpawnAgentRequest {
    * must proceed regardless of plan (merge-conflict resolver, mission
    * recovery). User-/worker-initiated spawns must leave this unset. */
   system?: boolean;
+  /** 작업 난이도 — claude(--model sonnet/opus)·codex(reasoning low/med/high) 모델/
+   * 레벨 선택용. dispatch_task 가 전달. 미지정이면 기본 모델 유지. */
+  complexity?: "simple" | "standard" | "complex";
 }
 
 interface SpawnAgentResponse {
@@ -1149,6 +1152,8 @@ export class BridgeServer {
       // Carry the cap-whitelist flag so a system dispatch's fresh spawn stays
       // exempt at the spawnNewAgent gate too (M2).
       system: params.system,
+      // complexity → claude(--model)·codex(reasoning) 모델/레벨 선택.
+      complexity,
     });
 
     if (!spawnResult.success) {
@@ -1347,6 +1352,7 @@ export class BridgeServer {
       cwd,
       initialPrompt,
       projectId: params.projectId,
+      complexity: params.complexity,
       onPtyReady: (sid) => {
         if (this.agentSpawnedHook) {
           this.agentSpawnedHook({

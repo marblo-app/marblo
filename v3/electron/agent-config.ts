@@ -92,6 +92,32 @@ const MODEL_BINARY: Partial<Record<ModelType, string>> = {
   antigravity: "agy",
 };
 
+// 작업 complexity → 프로바이더별 모델/레벨. 디스패치 에이전트 비용 절감(quota):
+// 표준 작업은 sonnet/medium 으로 충분, 어려운 것만 opus/high. complexity 가
+// undefined 면 override 하지 않아 기본 모델을 상속한다 — 오케스트레이터(opus 유지)
+// 경로가 이 길로 온다. claude=--model, gpt(codex)=model_reasoning_effort.
+export type TaskComplexity = "simple" | "standard" | "complex";
+export function modelTierForComplexity(
+  model: ModelType,
+  complexity: TaskComplexity | undefined,
+): { claudeModel?: string; codexReasoning?: string } {
+  if (!complexity) return {}; // override 없음 → 기본 상속
+  if (model === "claude") {
+    return { claudeModel: complexity === "complex" ? "opus" : "sonnet" };
+  }
+  if (model === "gpt") {
+    return {
+      codexReasoning:
+        complexity === "complex"
+          ? "high"
+          : complexity === "simple"
+            ? "low"
+            : "medium",
+    };
+  }
+  return {}; // gemini/antigravity/local/custom — 레벨 플래그 없음(기본 유지)
+}
+
 /**
  * Resolve the installed CLI version for any agent model, fast and offline —
  * a plain `<bin> --version`, no npm-registry round-trip. Unlike the Harness
@@ -556,6 +582,9 @@ export class AgentConfigGenerator {
     // orchestrator leaves it false (manages its own session). See
     // claudeSessionArgs.
     pinClaudeSession = false,
+    // 작업 난이도 — claude(--model)·codex(reasoning) 모델/레벨 선택에 쓰인다.
+    // 미지정(오케스트레이터 경로)이면 기본 모델 유지(opus).
+    complexity?: TaskComplexity,
   ): LaunchConfig {
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
@@ -578,6 +607,7 @@ export class AgentConfigGenerator {
       agent.id,
       resumeSessionId,
       pinClaudeSession,
+      complexity,
     );
 
     return {
@@ -1145,6 +1175,7 @@ export class AgentConfigGenerator {
     agentId?: string,
     resumeSessionId?: string,
     pinFreshClaudeSession = false,
+    complexity?: TaskComplexity,
   ): {
     command: string;
     args: string[];
@@ -1174,10 +1205,13 @@ export class AgentConfigGenerator {
           crypto.randomUUID(),
           pinFreshClaudeSession,
         );
+        // complexity 기반 모델 핀(--model). 미지정(오케 경로)이면 기본 모델 상속.
+        const { claudeModel } = modelTierForComplexity(model, complexity);
         return {
           command: baseCommand || resolveClaudeBinary().command,
           args: [
             "--dangerously-skip-permissions",
+            ...(claudeModel ? ["--model", claudeModel] : []),
             "--mcp-config",
             mcpConfigPath,
             ...sessionArgs,
@@ -1252,6 +1286,12 @@ export class AgentConfigGenerator {
           "-c",
           'sandbox_mode="danger-full-access"',
         );
+        // complexity 기반 reasoning effort(모델은 사용자 config 유지). 미지정이면
+        // override 안 함. complex→high, standard→medium, simple→low.
+        const { codexReasoning } = modelTierForComplexity(model, complexity);
+        if (codexReasoning) {
+          codexArgs.push("-c", `model_reasoning_effort="${codexReasoning}"`);
+        }
         // Reject `baseCommand === "gpt"` — that's the model slug accidentally
         // saved to the Firestore agent doc by older builds of Layout.tsx, and
         // it shadows macOS's /usr/sbin/gpt (GUID Partition Table utility)
