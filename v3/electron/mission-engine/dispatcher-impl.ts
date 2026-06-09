@@ -8,10 +8,13 @@ import {
   query,
   where,
   addDoc,
+  updateDoc,
   Timestamp,
   type Firestore,
 } from "firebase/firestore";
-import type { TaskDispatcher, TaskStatusLite } from "./ports";
+import type { MissionBoardPort, TaskDispatcher, TaskStatusLite } from "./ports";
+import type { Mission } from "./types";
+import { applyProjection } from "../mcp-server/projection.js";
 import type { TaskDecomposer } from "../orchestrator/task-decomposer";
 import type { DecomposedTask } from "../orchestrator/dag-generator";
 import type {
@@ -59,7 +62,9 @@ function resolveDeps(
   return out;
 }
 
-export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
+export function createTaskDispatcher(
+  deps: TaskDispatcherDeps,
+): TaskDispatcher & MissionBoardPort {
   const db: Firestore = getFirestore(deps.app);
   const ready = deps.authReady ?? Promise.resolve();
   const log =
@@ -203,7 +208,14 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
       );
       return snap.docs
         .filter((d) => {
-          const s = (d.data() as { status?: string } | undefined)?.status;
+          const data = d.data() as
+            | { status?: string; isMissionCard?: boolean }
+            | undefined;
+          // 대표 카드(isMissionCard)는 wait/dispatch 게이트의 "전부 DONE" 집합에
+          // 들어가면 안 된다 — 카드는 미션이 끝나야 DONE 되므로, 게이트가 카드를
+          // 보면 영영 통과 못 해 미션이 멈춘다. 여기서 제외한다.
+          if (data?.isMissionCard) return false;
+          const s = data?.status;
           return s !== "DONE" && s !== "FAILED";
         })
         .map((d) => d.id);
@@ -235,10 +247,78 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps): TaskDispatcher {
     }
   }
 
+  // ── 미션 대표 보드 카드 (MissionBoardPort) ──────────────────────────
+  // 지휘자(conductor)가 미션 시작 시 보드에 '미션 대표 카드'를 1개 만들고
+  // (isMissionCard:true), 스텝 진행을 activity 로 쌓고, 상태를 동기화한다.
+  // 기존 task 도큐 스키마를 미러해 보드 렌더링이 깨지지 않게 한다.
+
+  async function createMissionCard(mission: Mission): Promise<string> {
+    await ready;
+    const now = Timestamp.now();
+    const ref = await addDoc(collection(db, "tasks"), {
+      title: `🎯 미션: ${mission.goal}`,
+      // 본문 필드 — 보드/상세 렌더러가 기대하는 구조화 본문 부분집합을 채운다.
+      ...taskBodyStorageFields({
+        description: `Mission ${mission.id} 대표 카드`,
+      }),
+      role: "backend",
+      priority: 3,
+      status: "IN_PROGRESS",
+      dependsOn: [],
+      dependsOnCompleted: true,
+      claimedBy: null,
+      claimedAt: null,
+      scope: [],
+      comment: `Mission ${mission.id} 대표 카드`,
+      prUrl: "",
+      hasPmFeedback: false,
+      projectId: mission.projectId,
+      missionId: mission.id,
+      contextId: mission.id,
+      isMissionCard: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return ref.id;
+  }
+
+  async function addCardActivity(
+    taskId: string,
+    message: string,
+  ): Promise<void> {
+    await ready;
+    // tools.ts 의 add_activity 와 동일 방식 — applyProjection 으로 activities/{auto}
+    // set + task/mission projection 갱신을 한 트랜잭션에서. best-effort.
+    try {
+      await applyProjection(db, taskId, {
+        lastAgentId: "mission-conductor",
+        lastActivitySummary: message,
+        activityPayload: { agentId: "mission-conductor", message },
+      });
+    } catch (e) {
+      log("addCardActivity failed", { taskId, err: String(e) });
+    }
+  }
+
+  async function setCardStatus(taskId: string, status: string): Promise<void> {
+    await ready;
+    try {
+      await updateDoc(doc(db, "tasks", taskId), {
+        status,
+        updatedAt: Timestamp.now(),
+      });
+    } catch (e) {
+      log("setCardStatus failed", { taskId, status, err: String(e) });
+    }
+  }
+
   return {
     dispatchTasks,
     getTaskStatuses,
     findMissionTaskIds,
     killAgentsForTasks,
+    createMissionCard,
+    addCardActivity,
+    setCardStatus,
   };
 }

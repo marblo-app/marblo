@@ -235,11 +235,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
       projectId: string;
       rootPath: string;
       modelType?: string;
+      missionId?: string;
     }) => ipcRenderer.invoke("missionOrchestrator:start", args),
     getSession: (projectId: string) =>
       ipcRenderer.invoke("missionOrchestrator:getSession", projectId),
     stop: (projectId: string) =>
       ipcRenderer.invoke("missionOrchestrator:stop", projectId),
+    // 미션 스코프 중지 — 그 미션에 바인딩된 오케만 stop (main 가드가
+    // getOwnerMissionId 일치할 때만 stop). 무관한 오케는 보존.
+    stopForMission: (projectId: string, missionId: string) =>
+      ipcRenderer.invoke(
+        "missionOrchestrator:stopForMission",
+        projectId,
+        missionId,
+      ),
     // 직전 mission 오케스트레이터 세션 id (kind=mission) — 없으면 null. 부팅 시
     // 자동 재연결(resume) 여부 판단용. board 의 resolvePrevious 와 동일 패턴.
     resolvePrevious: (rootPath: string): Promise<string | null> =>

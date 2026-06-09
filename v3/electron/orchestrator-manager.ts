@@ -171,6 +171,17 @@ export class OrchestratorManager {
   // (아카이브된) 미션 대화를 이어받아 /compact + 옛 컨텍스트로 첫 스텝이 막혔다.
   private currentMissionId: string | null = null;
 
+  // 부팅 프롬프트(launch 시 자동 주입)와 conductor 의 첫 step grant 가 같은 PTY 에
+  // 동시 writeAndSubmit 되면 bracketed-paste 버퍼가 병합되고 CR(Enter)이 유실돼
+  // 첫 스텝이 stall 한다. 그래서 모든 외부 주입(injectMessage)은
+  //   1) bootGate — 부팅 프롬프트 제출 사이클이 끝난 뒤에만, 그리고
+  //   2) injectChain — 서로 직렬화해서(겹치지 않게)
+  // PTY 로 보낸다. 부팅 프롬프트 자체는 launch 가 직접 writeAndSubmit 하고,
+  // bootGate 는 그 제출 직후 일정 시간 뒤 resolve 된다.
+  private bootGate: Promise<void> = Promise.resolve();
+  private resolveBootGate: () => void = () => {};
+  private injectChain: Promise<void> = Promise.resolve();
+
   constructor(
     ptyManager: PtyManager,
     configGenerator: AgentConfigGenerator,
@@ -191,6 +202,28 @@ export class OrchestratorManager {
 
   getSession(): OrchestratorSession | null {
     return this.session;
+  }
+
+  /**
+   * conductor → 미션 오케 PTY 로 메시지(스텝 grant 등)를 주입한다. 직접
+   * writeAndSubmit 을 호출하면 부팅 프롬프트와 같은 PTY 에 동시 write 되어
+   * bracketed-paste 버퍼가 병합되고 Enter 가 유실된다(첫 스텝 stall). 그래서
+   *   - bootGate: 부팅 프롬프트 제출 사이클이 끝난 뒤에만,
+   *   - injectChain: 직전 주입의 제출이 끝난 뒤에(직렬화)
+   * writeAndSubmit 한다. 게이트는 launch 마다 새로 걸린다.
+   */
+  injectMessage(text: string): Promise<void> {
+    const expectPty = this.session?.ptySessionId;
+    this.injectChain = this.injectChain.then(async () => {
+      await this.bootGate;
+      const cur = this.session?.ptySessionId;
+      // 게이트 대기 중 세션이 바뀌거나(미션 전환) 멈췄으면 주입 취소.
+      if (!cur || cur !== expectPty) return;
+      this.ptyManager.writeAndSubmit(cur, text);
+      // 다음 주입이 이 메시지의 제출 사이클과 겹치지 않도록 여유를 둔다(직렬화).
+      await new Promise((r) => setTimeout(r, 2500));
+    });
+    return this.injectChain;
   }
 
   launch(
@@ -214,6 +247,14 @@ export class OrchestratorManager {
     // 미션 컨텍스트를 유지해야 하므로 lastOwnerMissionId 로도 보관해 재주입한다.
     this.currentMissionId = ownerMissionId ?? null;
     this.lastOwnerMissionId = ownerMissionId ?? null;
+
+    // 이 launch 의 주입 게이트를 새로 건다. bootGate 는 부팅 프롬프트 제출(또는 resume
+    // settle) 후 resolve 되고, injectChain 은 직렬화 체인을 리셋한다. (resolve 되기
+    // 전까지 injectMessage 의 grant 주입은 대기 → 부팅과 인터리브되지 않는다.)
+    this.bootGate = new Promise<void>((resolve) => {
+      this.resolveBootGate = resolve;
+    });
+    this.injectChain = Promise.resolve();
 
     // Stable, project-scoped ID. Used as MARBLO_AGENT_ID, MCP config filename,
     // and the Firestore agents/* doc key — so the renderer can upsert one
@@ -310,7 +351,15 @@ export class OrchestratorManager {
       if (config.mcpServers?.marblo?.env) {
         config.mcpServers.marblo.env.MARBLO_BRIDGE_PORT = String(bridgePort);
         config.mcpServers.marblo.env.MARBLO_PROJECT = projectId;
-        const context = contextForKind(this.kind);
+        // 미션 오케는 MARBLO_CONTEXT 를 '운전 중인 미션 id' 로 스코프해야 MCP 서버가
+        // create_task/add_activity 를 missionId 로 태깅하고 mission_step_done 을
+        // 그 미션 보고로 해석한다. contextForKind("mission") 은 ""(미설정)이라 그것만
+        // 쓰면 미션 스코프가 배달되지 않아 mission_step_done 이 거부된다. 미션 전환 시
+        // stop+relaunch 하므로 launch 시점의 currentMissionId 가 곧 그 미션이다.
+        const context =
+          this.kind === "mission"
+            ? (this.currentMissionId ?? "")
+            : contextForKind(this.kind);
         if (context) {
           config.mcpServers.marblo.env.MARBLO_CONTEXT = context;
         }
@@ -362,6 +411,8 @@ export class OrchestratorManager {
         if (this.session?.ptySessionId === ptySessionId) {
           this.setStatus("running");
         }
+        // resume 은 부팅 프롬프트를 보내지 않으므로 CLI settle 후 곧장 주입 허용.
+        this.resolveBootGate();
       }, 2000);
     } else {
       // New session — send skill-based initial prompt.
@@ -371,11 +422,19 @@ export class OrchestratorManager {
       // Enter to register as a discrete keystroke. Readiness detection
       // mirrors agent-manager so we send only after the CLI is actually
       // accepting input.
-      const initialPrompt = [
-        "You are the Marblo Orchestrator Agent.",
-        `Read the orchestrator skill file: use get_agent_skill("orchestrator")`,
-        "Wait for user instructions.",
-      ].join(" ");
+      const initialPrompt =
+        this.kind === "mission"
+          ? [
+              "You are the Marblo Mission Orchestrator (B-mode, orchestrator-driven).",
+              `Read the orchestrator skill with get_agent_skill("orchestrator") and follow ONLY its Mission section (§6 — orchestrator-driven). Ignore the board tf-* slash commands.`,
+              "You drive exactly ONE mission. Do NOT start anything on your own.",
+              "Wait for the conductor (지휘자) to grant the first step via a system message, then execute that step with run_skill and report with mission_step_done.",
+            ].join(" ")
+          : [
+              "You are the Marblo Orchestrator Agent.",
+              `Read the orchestrator skill file: use get_agent_skill("orchestrator")`,
+              "Wait for user instructions.",
+            ].join(" ");
 
       let sent = false;
       const sendPrompt = () => {
@@ -384,6 +443,9 @@ export class OrchestratorManager {
         sent = true;
         this.ptyManager.writeAndSubmit(ptySessionId, initialPrompt);
         this.setStatus("running");
+        // 부팅 프롬프트의 제출 사이클(text→150ms→CR+재시도 ~2s)이 끝난 뒤에야
+        // conductor grant 주입을 허용한다 → 같은 PTY 동시 write 인터리브 제거.
+        setTimeout(() => this.resolveBootGate(), 3500);
       };
 
       let outputBuffer = "";
@@ -527,6 +589,9 @@ export class OrchestratorManager {
     this.session = null;
     this.restartCount = 0;
     this.currentMissionId = null;
+    // 대기 중이던 injectMessage 들이 영영 매달리지 않게 게이트를 푼다 — 세션이
+    // null 이라 실제 write 는 스킵된다.
+    this.resolveBootGate();
   }
 
   /**

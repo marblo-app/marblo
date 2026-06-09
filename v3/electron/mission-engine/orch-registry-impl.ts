@@ -50,7 +50,10 @@ export function createOrchestratorRegistry(
         if (!session) {
           throw new Error("orchestrator session not running");
         }
-        deps.ptyManager.writeAndSubmit(session.ptySessionId, message);
+        // injectMessage 가 bootGate(부팅 제출 완료) 이후 + injectChain 직렬화로
+        // 보낸다 — 부팅 프롬프트와 같은 PTY 동시 write(인터리브/Enter 유실) 방지.
+        // 직접 writeAndSubmit 하면 첫 grant 가 부팅과 섞여 첫 스텝이 stall 한다.
+        await manager.injectMessage(message);
       },
     };
   }

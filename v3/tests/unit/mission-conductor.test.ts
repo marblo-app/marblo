@@ -16,6 +16,7 @@ import type {
 } from "../../electron/mission-engine/types";
 import type {
   FixRunner,
+  MissionBoardPort,
   MissionEngineEvent,
   MissionNotifier,
   MissionStore,
@@ -44,7 +45,7 @@ class InMemoryStore implements MissionStore {
     return m ? structuredClone(m) : null;
   }
   async createMission(
-    data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">
+    data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">,
   ): Promise<string> {
     const id = `m${this.nextId++}`;
     const now = new Date();
@@ -59,7 +60,7 @@ class InMemoryStore implements MissionStore {
   }
   async updateMission(
     id: string,
-    patch: Partial<Omit<Mission, "id" | "launchedAt">>
+    patch: Partial<Omit<Mission, "id" | "launchedAt">>,
   ): Promise<void> {
     const cur = this.docs.get(id);
     if (!cur) throw new Error(`Mission ${id} not found`);
@@ -73,7 +74,7 @@ class InMemoryStore implements MissionStore {
   async updateMissionStep(
     id: string,
     stepIndex: number,
-    patch: Partial<MissionStep>
+    patch: Partial<MissionStep>,
   ): Promise<void> {
     const cur = this.docs.get(id);
     if (!cur) throw new Error(`Mission ${id} not found`);
@@ -85,7 +86,7 @@ class InMemoryStore implements MissionStore {
   async setMissionStatus(
     id: string,
     status: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string }
+    extras?: { completedAt?: Date; abandonedReason?: string },
   ): Promise<void> {
     const cur = this.docs.get(id);
     if (!cur) throw new Error(`Mission ${id} not found`);
@@ -127,6 +128,7 @@ interface BuildOpts {
   notifier?: MissionNotifier;
   maxRetries?: number;
   orchAlive?: boolean;
+  board?: MissionBoardPort;
 }
 
 function buildConductor(opts: BuildOpts = {}): {
@@ -152,6 +154,7 @@ function buildConductor(opts: BuildOpts = {}): {
     maxRetries: opts.maxRetries ?? 2,
     notifier: opts.notifier,
     verifyStepGate: opts.verifyStepGate,
+    board: opts.board,
     logger: () => {},
   });
   return { store, bus, conductor, posts: orch.posts, taskStatuses };
@@ -164,7 +167,7 @@ async function makeMission(
     steps?: MissionStep[];
     taskIds?: string[];
     goal?: string;
-  } = {}
+  } = {},
 ): Promise<string> {
   const templateId = opts.templateId ?? "research";
   return store.createMission({
@@ -184,7 +187,7 @@ function reportEvent(
   missionId: string,
   stepIndex: number,
   status: "success" | "failed",
-  extra?: { output?: unknown; error?: string }
+  extra?: { output?: unknown; error?: string },
 ): MissionEngineEvent {
   return {
     type: MISSION_STEP_REPORTED_EVENT,
@@ -199,7 +202,7 @@ function reportEvent(
 async function waitFor(
   predicate: () => boolean,
   timeoutMs = 2000,
-  intervalMs = 5
+  intervalMs = 5,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -229,17 +232,19 @@ describe("ConductorDriver — grantStep", () => {
 
     expect(store.raw(id)!.steps[0].status).toBe("running");
     expect(posts).toHaveLength(1);
-    // §3.2 — '한 번에 하나' 허가 + mission_step_done 보고 + 스스로 advance 금지.
+    // §3.2 — '한 번에 하나' 허가 + mission_step_done 보고 필수 + 스스로 advance 금지.
     expect(posts[0]).toContain("현재 스텝 0");
     expect(posts[0]).toContain("/office-hours");
     expect(posts[0]).toContain("mission_step_done");
-    expect(posts[0]).toContain("스스로 넘어가지 마세요");
+    // 보고가 다음 스텝의 전제임을 명시(완료 후 mission_step_done 미보고 → 교착 방지).
+    expect(posts[0]).toContain("보고를 받아야만 다음 스텝을 grant");
+    expect(posts[0]).toContain("스스로 다음 스텝을 실행하지 마세요");
     // step.started 타임라인이 driver=orchestrator 로 남는다.
     const started = store
       .raw(id)!
       .contextLog.find((e) => e.type === "step.started");
     expect((started?.payload as { driver?: string })?.driver).toBe(
-      "orchestrator"
+      "orchestrator",
     );
   });
 
@@ -259,6 +264,110 @@ describe("ConductorDriver — grantStep", () => {
     await waitFor(() => store.raw(id)!.steps[0].status === "running");
     expect(posts).toHaveLength(0); // 주입 스킵
     expect(store.raw(id)!.steps[0].status).toBe("running");
+  });
+
+  it("owner 세션이 'pending'(미바인딩, UI 직접 생성 경로)이면 ensureSession 으로 라이브 오케에 바인딩하고 grant 를 주입한다", async () => {
+    const { store, conductor, posts } = buildConductor();
+    const id = await makeMission(store, { templateId: "research" });
+    // UI 경로(MissionsTab.handleLaunch → missionService.createMission)는 engine.launch()
+    // (유일한 ensureSession 호출처)를 건너뛰어 ownerOrchestratorSessionId 가 실제 세션이
+    // 아니라 "pending" 으로 남는다. getSession("pending") 은 매칭 실패하므로, 예전엔 grant
+    // 가 조용히 스킵돼 첫 스텝(/investigate 등)이 영영 주입되지 않았다(버그②).
+    await store.updateMission(id, { ownerOrchestratorSessionId: "pending" });
+
+    conductor.requestAdvance(id);
+    await waitFor(() => posts.length === 1);
+
+    // grant 가 실제로 주입됐다(스킵되지 않음).
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toContain("현재 스텝 0");
+    // ensureSession 으로 얻은 라이브 세션("sess-1")으로 ownerOrchestratorSessionId 가
+    // 영속 바인딩됐다 — 다음 grant 부터는 getSession 이 바로 매칭한다.
+    expect(store.raw(id)!.ownerOrchestratorSessionId).toBe("sess-1");
+  });
+});
+
+// ──────────────────────── 대표 보드 카드 라이프사이클 ────────────────────
+
+describe("ConductorDriver — 대표 보드 카드 라이프사이클", () => {
+  it("미션 첫 advance 시 대표 카드를 1회 만들고 missionCardTaskId 영속 + 시작/스텝 댓글", async () => {
+    const cards: {
+      createCalls: number;
+      activities: string[];
+      statuses: string[];
+    } = { createCalls: 0, activities: [], statuses: [] };
+    const board: MissionBoardPort = {
+      createMissionCard: vi.fn(async () => {
+        cards.createCalls++;
+        return "card-1";
+      }),
+      addCardActivity: vi.fn(async (_id: string, m: string) => {
+        cards.activities.push(m);
+      }),
+      setCardStatus: vi.fn(async (_id: string, s: string) => {
+        cards.statuses.push(s);
+      }),
+    };
+    const { store, conductor, posts } = buildConductor({ board });
+    const id = await makeMission(store, { templateId: "research" });
+
+    conductor.requestAdvance(id);
+    await waitFor(() => posts.length === 1);
+
+    // 카드 1회 생성 + missionCardTaskId 영속.
+    expect(cards.createCalls).toBe(1);
+    expect(board.createMissionCard).toHaveBeenCalledTimes(1);
+    expect(store.raw(id)!.missionCardTaskId).toBe("card-1");
+    // 시작 댓글 + 첫 스텝 시작 댓글이 쌓인다.
+    expect(cards.activities.some((a) => a.includes("미션 시작"))).toBe(true);
+    expect(cards.activities.some((a) => a.includes("스텝 0 시작"))).toBe(true);
+  });
+
+  it("스텝 완료 → 다음 스텝 시작/완료 댓글이 쌓이고 미션 완료 시 카드 DONE 동기화", async () => {
+    const cards: {
+      createCalls: number;
+      activities: string[];
+      statuses: string[];
+    } = { createCalls: 0, activities: [], statuses: [] };
+    const board: MissionBoardPort = {
+      createMissionCard: vi.fn(async () => {
+        cards.createCalls++;
+        return "card-1";
+      }),
+      addCardActivity: vi.fn(async (_id: string, m: string) => {
+        cards.activities.push(m);
+      }),
+      setCardStatus: vi.fn(async (_id: string, s: string) => {
+        cards.statuses.push(s);
+      }),
+    };
+    const { store, bus, conductor } = buildConductor({ board });
+    const id = await makeMission(store, { templateId: "research" });
+
+    conductor.requestAdvance(id);
+    await waitFor(() => store.raw(id)!.steps[0].status === "running");
+    bus.emit(reportEvent(id, 0, "success"));
+    await waitFor(() => store.raw(id)!.steps[1].status === "running");
+    bus.emit(reportEvent(id, 1, "success"));
+    await waitFor(() => store.raw(id)!.status === "completed");
+
+    // 스텝 완료 댓글이 쌓이고, 완료 시 카드 상태가 DONE 으로 동기화된다.
+    expect(cards.activities.some((a) => a.includes("스텝 0 완료"))).toBe(true);
+    expect(cards.activities.some((a) => a.includes("미션 완료"))).toBe(true);
+    expect(cards.statuses).toContain("DONE");
+    expect(cards.createCalls).toBe(1); // 카드는 미션당 1회만 생성
+  });
+
+  it("board 미주입이면 카드 로직 전부 스킵(회귀 0) — 미션은 정상 완료", async () => {
+    const { store, bus, conductor } = buildConductor();
+    const id = await makeMission(store, { templateId: "research" });
+    conductor.requestAdvance(id);
+    await waitFor(() => store.raw(id)!.steps[0].status === "running");
+    bus.emit(reportEvent(id, 0, "success"));
+    await waitFor(() => store.raw(id)!.steps[1].status === "running");
+    bus.emit(reportEvent(id, 1, "success"));
+    await waitFor(() => store.raw(id)!.status === "completed");
+    expect(store.raw(id)!.missionCardTaskId).toBeUndefined();
   });
 });
 
@@ -303,9 +412,9 @@ describe("ConductorDriver — 보고 → 게이트 → 전진 루프", () => {
         (e) =>
           e.type === "supervisor.note" &&
           String((e.payload as { message?: string }).message).includes(
-            "completed"
-          )
-      )
+            "completed",
+          ),
+      ),
     ).toBe(true);
   });
 
@@ -379,8 +488,8 @@ describe("ConductorDriver — 게이트 보류 시 전진 차단", () => {
       store
         .raw(id)!
         .contextLog.some(
-          (e) => (e.payload as { kind?: string }).kind === "gate_failed"
-        )
+          (e) => (e.payload as { kind?: string }).kind === "gate_failed",
+        ),
     ).toBe(true);
 
     // 2차 보고 → 게이트 통과 → 단일 스텝이라 완료.
@@ -450,7 +559,7 @@ describe("ConductorDriver — 게이트 보류 시 전진 차단", () => {
       bus.emit(
         reportEvent(id, 0, "success", {
           output: "PR: https://github.com/x/y/pull/9",
-        })
+        }),
       );
       await waitFor(() => store.raw(id)!.status === "completed");
       expect(store.raw(id)!.steps[0].status).toBe("success");
@@ -584,7 +693,7 @@ describe("MissionEngine — orchestrator 모드는 conductor 에 위임, engine 
   function minimalEngineDeps(
     store: InMemoryStore,
     bus: InProcessMissionEventBus,
-    orch: OrchestratorRegistry
+    orch: OrchestratorRegistry,
   ) {
     const dispatcher: TaskDispatcher = {
       async dispatchTasks() {
@@ -643,7 +752,7 @@ describe("MissionEngine — orchestrator 모드는 conductor 에 위임, engine 
       {
         driver: "orchestrator",
         conductor,
-      }
+      },
     );
 
     const mission = await engine.launch({
@@ -672,7 +781,7 @@ describe("MissionEngine — orchestrator 모드는 conductor 에 위임, engine 
       {
         driver: "orchestrator",
         conductor,
-      }
+      },
     );
     const id = await store.createMission({
       projectId: "p1",

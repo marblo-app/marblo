@@ -822,11 +822,14 @@ function ensureMissionOrchestratorLaunched(
     missionOrchestrators.set(projectId, manager);
   }
   if (manager.isRunning()) {
-    // 이미 실행 중인 오케가 '다른' 미션을 운전 중이면, 새 미션을 위해 fresh 세션으로
-    // 교체한다(옛 미션 대화를 이어받아 /compact + 컨텍스트 오염되는 것 방지). 같은
-    // 미션이거나 missionId 미상(렌더러 reconnect/Restart)이면 실행 중 세션을 reuse.
+    // 미션 오케는 '포커스된 한 미션'에 종속된다. 요청 missionId 가 현재 운전 중인
+    // 미션과 다르면(=null 포함) 그 미션의 세션으로 교체한다 — 새 미션이면 fresh,
+    // 기존 미션이면 그 미션 세션 resume. owner 가 null 인 경우(패널이 missionId
+    // 없이 직전 세션을 미리 resume 해 둔 상태)도 반드시 교체해야 새 미션이 옛
+    // 대화를 이어받아 /compact 되는 증상이 사라진다. missionId 미상(렌더러
+    // reconnect/Restart)이면 실행 중 세션을 그대로 reuse.
     const owner = manager.getOwnerMissionId();
-    if (missionId && owner && owner !== missionId) {
+    if (missionId && owner !== missionId) {
       manager.stop();
     } else {
       return manager;
@@ -2166,9 +2169,14 @@ ipcMain.handle(
   "missionOrchestrator:start",
   async (
     event,
-    args: { projectId: string; rootPath: string; modelType?: string },
+    args: {
+      projectId: string;
+      rootPath: string;
+      modelType?: string;
+      missionId?: string;
+    },
   ) => {
-    const { projectId, rootPath } = args;
+    const { projectId, rootPath, missionId } = args;
     if (!projectId || !rootPath) {
       throw new Error("projectId and rootPath required");
     }
@@ -2177,7 +2185,13 @@ ipcMain.handle(
     // 경우 forwarding 이 곧장 이 창으로 향한다.
     missionOrchestratorOwners.set(projectId, event.sender.id);
     // 패널·엔진 공용 단일 launch 경로 — forwarding + resume + rootPath 포함.
-    const manager = ensureMissionOrchestratorLaunched(projectId, rootPath);
+    // missionId 를 넘기면 그 미션 세션에 종속(다르면 전환). 패널이 선택 미션을
+    // 전달하므로 카드 선택 시 오케가 그 미션으로 바뀐다.
+    const manager = ensureMissionOrchestratorLaunched(
+      projectId,
+      rootPath,
+      missionId,
+    );
     const session = manager.getSession();
     if (!session) return null;
     // 엔진이 먼저 띄운 경우 forwarding 의 소유 윈도우가 이 패널이 아닐 수 있으니
@@ -2212,6 +2226,19 @@ ipcMain.handle(
   async (_event, projectId: string) => {
     const manager = missionOrchestrators.get(projectId);
     if (manager) {
+      manager.stop();
+    }
+  },
+);
+
+// 미션 스코프 중지 — 어밴던/삭제된 미션에 바인딩된 오케만 stop 한다. 다른
+// 미션에 바인딩된 오케(getOwnerMissionId 불일치)는 보존하므로 무조건 호출해도
+// 안전(no-op). MissionsTab 의 abandon/delete 핸들러에서 fire-and-forget 호출.
+ipcMain.handle(
+  "missionOrchestrator:stopForMission",
+  async (_event, projectId: string, missionId: string) => {
+    const manager = missionOrchestrators.get(projectId);
+    if (manager && manager.getOwnerMissionId() === missionId) {
       manager.stop();
     }
   },

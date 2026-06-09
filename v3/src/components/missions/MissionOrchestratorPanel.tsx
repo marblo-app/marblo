@@ -25,7 +25,14 @@ interface SessionInfo {
 
 const PTY_HEIGHT = 200;
 
-export function MissionOrchestratorPanel() {
+// missionId: 현재 포커스(선택)된 미션. 이 패널은 그 미션의 오케스트레이터 세션에
+// 종속된다 — missionId 가 바뀌면 해당 미션 세션으로 connect/switch 하고, 새 미션이면
+// fresh 로 뜬다. null 이면(선택 없음/아카이브) 새 세션을 띄우지 않는다.
+export function MissionOrchestratorPanel({
+  missionId,
+}: {
+  missionId: string | null;
+}) {
   const currentProject = useProjectStore((s) => s.currentProject);
   const rootPath = useEditorStore((s) => s.rootPath);
   const [open, setOpen] = useState(false);
@@ -51,41 +58,47 @@ export function MissionOrchestratorPanel() {
     };
   }, [api]);
 
-  // 부팅 / 탭 진입 시 직전 mission 세션이 있으면 자동 resume — board 오케스트레이터
-  // 와 동일한 무중단 재연결. 직전 세션이 없으면 spawn 하지 않는다 (미션 안 쓰는
-  // 프로젝트는 비용 0). open 여부와 무관하게 1회 수행.
+  // 선택된 미션에 오케스트레이터를 종속시킨다. missionId 가 바뀌면 그 미션의
+  // 세션으로 connect/switch 하고(이미 그 미션이 실행 중이면 reuse, 새 미션이면
+  // fresh) 진행상황이 보이도록 패널을 자동으로 펼친다.
+  //
+  // 예전엔 mount 시 missionId 없이 resolvePrevious → start 로 '직전 세션'을 무조건
+  // resume 했는데, 그게 새 미션을 옛(아카이브된) 세션에 붙여 /compact 시키던 버그의
+  // 원인이었다 → 그 missionId-less 자동 resume 경로를 제거했다. 미션이 선택되지
+  // 않았으면(아카이브/없음) 새 세션을 띄우지 않는다(미션 안 쓰면 비용 0).
   useEffect(() => {
     if (!api || !currentProject?.id || !rootPath) return;
-    const key = `${currentProject.id}:${rootPath}`;
+    if (!missionId) {
+      // 바인딩된 미션이 사라짐(어밴던/삭제/선택 해제) → 패널 접고 재연결 키 리셋.
+      // 실제 PTY stop 은 MissionsTab 의 abandon/delete 핸들러가 미션 스코프로 수행한다
+      // (여기서 stop 하면 단순 포커스 해제로도 백그라운드 드라이브를 죽이게 됨).
+      reconnectKeyRef.current = null;
+      setOpen(false);
+      return;
+    }
+    const projectId = currentProject.id;
+    const key = `${projectId}:${missionId}`;
     if (reconnectKeyRef.current === key) return;
     reconnectKeyRef.current = key;
-    const projectId = currentProject.id;
+    // 새 미션으로 포커스 전환 → 진행상황 보이게 패널 자동 오픈.
+    setOpen(true);
+    setAttention(false);
     let cancelled = false;
     (async () => {
       try {
-        const existing = await api.getSession(projectId);
-        if (existing) {
-          if (!cancelled) {
-            setSession(existing);
-            setStatus(existing.status);
-          }
-          return;
+        const res = await api.start({ projectId, rootPath, missionId });
+        if (res && !cancelled) {
+          setSession(res);
+          setStatus(res.status);
         }
-        const prior = await api.resolvePrevious(rootPath);
-        if (!prior || cancelled) return; // 이어갈 세션 없음 — 사용자가 직접 시작
-        const resumed = await api.start({ projectId, rootPath });
-        if (resumed && !cancelled) {
-          setSession(resumed);
-          setStatus(resumed.status);
-        }
-      } catch {
-        /* best-effort — 실패 시 사용자가 PTY 보기로 수동 시작 */
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [api, currentProject?.id, rootPath]);
+  }, [api, currentProject?.id, rootPath, missionId]);
 
   // 미션이 사용자 개입을 요구하면 (waiting_for_human + notifyUser) PTY 패널을
   // 자동으로 펼쳐 질문을 바로 보여준다. main 프로세스가 OS 알림도 별도 발사.
@@ -113,11 +126,13 @@ export function MissionOrchestratorPanel() {
     try {
       await api.stop(currentProject.id);
       setSession(null);
+      reconnectKeyRef.current = null; // 다음 connect 효과가 다시 붙도록 키 리셋
       // status 가 stopped 로 도달할 때까지 짧게 대기 (PTY exit 처리 시간).
       await new Promise((r) => setTimeout(r, 500));
       const fresh = await api.start({
         projectId: currentProject.id,
         rootPath,
+        missionId: missionId ?? undefined,
       });
       if (fresh) {
         setSession(fresh);
@@ -144,7 +159,9 @@ export function MissionOrchestratorPanel() {
           setStatus(existing.status);
           return;
         }
-        const fresh = await api.start({ projectId, rootPath });
+        // 바인딩할 미션이 없으면 새 세션을 띄우지 않는다(missionId-less spawn 금지).
+        if (!missionId) return;
+        const fresh = await api.start({ projectId, rootPath, missionId });
         if (!cancelled && fresh) {
           setSession(fresh);
           setStatus(fresh.status);
@@ -158,7 +175,7 @@ export function MissionOrchestratorPanel() {
     return () => {
       cancelled = true;
     };
-  }, [api, open, currentProject?.id, rootPath]);
+  }, [api, open, currentProject?.id, rootPath, missionId]);
 
   if (!currentProject?.id || !rootPath) return null;
 
@@ -254,6 +271,13 @@ export function MissionOrchestratorPanel() {
               {status === "starting"
                 ? "Mission orchestrator 시작 중..."
                 : "PTY 준비 중..."}
+            </div>
+          )}
+          {session?.ptySessionId && (
+            <div className="border-t border-gray-800 px-3 py-1 text-[11px] leading-snug text-gray-500">
+              💡 진행이 멈춘 것 같으면 위 입력창에{" "}
+              <span className="text-gray-400">"다음 스텝 진행해줘"</span> 라고
+              입력해 오케스트레이터를 재촉하세요.
             </div>
           )}
         </ErrorBoundary>

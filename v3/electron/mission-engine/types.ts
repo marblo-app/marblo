@@ -87,6 +87,10 @@ export interface Mission {
   taskIds: string[];
   contextLog: TimelineEvent[];
 
+  /** 이 미션의 '대표 보드 카드'(tasks/*) id. 지휘자가 미션 시작 시 1개 만들고 진행을
+   *  activity 로 쌓는다. 한 번 만들면 재생성하지 않는 멱등 키. */
+  missionCardTaskId?: string;
+
   launchedAt: Date;
   lastActivityAt: Date;
   completedAt: Date | null;

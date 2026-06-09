@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Mission, MissionTemplateId } from "../../types/mission";
 import * as missionService from "../../services/missionService";
+import * as taskService from "../../services/taskService";
 import { useProjectStore } from "../../stores/projectStore";
 import { MissionList } from "../missions/MissionList";
 import { MissionDetail } from "../missions/MissionDetail";
@@ -96,6 +97,11 @@ export function MissionsTab() {
     (m) => m.status === "completed" || m.status === "abandoned",
   );
   const selected = missions.find((m) => m.id === selectedId) ?? null;
+  // 미션 오케스트레이터 패널이 종속될 미션. 선택 미션이 터미널(완료/포기)이면
+  // 새 오케를 띄울 필요가 없으니 null. 그 외(진행중·planning, 또는 방금 만들어
+  // 아직 list 에 없는 신규 미션 → selected=null 이지만 selectedId 존재)는 selectedId.
+  const focusedMissionId =
+    selected && isTerminalStatus(selected.status) ? null : selectedId;
 
   const handleLaunch = async ({
     goal,
@@ -141,6 +147,24 @@ export function MissionsTab() {
       type: "mission.paused",
       payload: { kind: "abandoned", reason: "user_abandoned" },
     });
+    // 미션이 terminal 로 가면 그 미션에 바인딩된 오케도 동반 중지. main 가드가
+    // getOwnerMissionId 일치할 때만 stop 하므로 무관 미션이면 no-op. fire-and-forget.
+    if (projectId) {
+      window.electronAPI?.missionOrchestrator?.stopForMission(
+        projectId,
+        missionId,
+      );
+    }
+    // 대표 보드 카드도 FAILED 로 동기화(있을 때만). 메타카드라 상태머신을 우회해
+    // 직접 set (conductor setCardStatus 와 동일 컨벤션). best-effort.
+    const cardId = missions.find((m) => m.id === missionId)?.missionCardTaskId;
+    if (cardId) {
+      try {
+        await taskService.updateTask(cardId, { status: "FAILED" });
+      } catch {
+        /* best-effort — 카드 동기화 실패가 어밴던을 막지 않음 */
+      }
+    }
   };
 
   const handlePause = async (missionId: string) => {
@@ -180,7 +204,9 @@ export function MissionsTab() {
           ts: new Date(),
           type: "supervisor.note",
           payload: {
-            message: `Re-run from ${source.id.slice(0, 8)} · template=${source.templateId}`,
+            message: `Re-run from ${source.id.slice(0, 8)} · template=${
+              source.templateId
+            }`,
             goal: source.goal,
           },
         },
@@ -194,9 +220,26 @@ export function MissionsTab() {
   // 미션 문서를 영구 삭제. 선택 중이던 미션이면 선택을 해제해 auto-select effect 가
   // 다음 후보를 고르도록 한다(빈 상태면 새 미션 카드 노출).
   const handleDelete = async (missionId: string) => {
+    // 미션 doc 삭제 전에 대표 카드 id 를 캡처(삭제 후엔 missions 에서 사라짐).
+    const cardId = missions.find((m) => m.id === missionId)?.missionCardTaskId;
     await missionService.deleteMission(missionId);
     if (selectedId === missionId) setSelectedId(null);
     if (userPickedId === missionId) setUserPickedId(null);
+    // 삭제된 미션에 바인딩된 오케도 동반 중지 (main 가드로 무관 미션은 no-op).
+    if (projectId) {
+      window.electronAPI?.missionOrchestrator?.stopForMission(
+        projectId,
+        missionId,
+      );
+    }
+    // 대표 보드 카드도 함께 삭제 — 안 그러면 보드에 고아 카드가 남는다. best-effort.
+    if (cardId) {
+      try {
+        await taskService.deleteTask(cardId);
+      } catch {
+        /* best-effort */
+      }
+    }
   };
 
   // 아카이브(완료/포기) 미션을 한 번에 정리 — 겹치는 미션이 쌓였을 때.
@@ -210,14 +253,28 @@ export function MissionsTab() {
       return;
     }
     const ids = archive.map((m) => m.id);
+    // 대표 카드 id 들도 미리 캡처해 함께 삭제(고아 카드 방지). best-effort.
+    const cardIds = archive
+      .map((m) => m.missionCardTaskId)
+      .filter((c): c is string => !!c);
     await Promise.all(ids.map((id) => missionService.deleteMission(id)));
+    await Promise.all(
+      cardIds.map((c) => taskService.deleteTask(c).catch(() => {})),
+    );
     if (selectedId && ids.includes(selectedId)) setSelectedId(null);
     if (userPickedId && ids.includes(userPickedId)) setUserPickedId(null);
+    // 아카이브 미션은 보통 오케 바인딩이 없어 no-op 이지만, 만약 바인딩돼 있으면
+    // main 가드가 그 미션 오케만 중지 (무관 오케 보존). 안전상 각 id 에 호출.
+    if (projectId) {
+      for (const id of ids) {
+        window.electronAPI?.missionOrchestrator?.stopForMission(projectId, id);
+      }
+    }
   };
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
-      <MissionOrchestratorPanel />
+      <MissionOrchestratorPanel missionId={focusedMissionId} />
       <div className="grid min-h-0 flex-1 grid-cols-[320px_1fr] gap-4">
         <aside className="space-y-4 overflow-y-auto pr-1">
           <div>

@@ -201,6 +201,7 @@ interface MissionOrchestratorAPI {
     projectId: string;
     rootPath: string;
     modelType?: string;
+    missionId?: string;
   }) => Promise<{
     sessionId: string;
     ptySessionId: string;
@@ -212,6 +213,9 @@ interface MissionOrchestratorAPI {
     status: string;
   } | null>;
   stop: (projectId: string) => Promise<void>;
+  /** 미션 스코프 중지 — 그 미션에 바인딩된 오케만 stop (main 가드가
+   * getOwnerMissionId 일치할 때만). 무관한 오케는 보존하므로 무조건 호출 안전. */
+  stopForMission: (projectId: string, missionId: string) => Promise<void>;
   resolvePrevious: (rootPath: string) => Promise<string | null>;
   onStatusChange: (callback: (data: { status: string }) => void) => void;
   removeStatusListener: () => void;

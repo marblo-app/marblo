@@ -12,23 +12,39 @@ import type {
 export interface MissionStore {
   getMission(missionId: string): Promise<Mission | null>;
   createMission(
-    data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">,
+    data: Omit<Mission, "id" | "launchedAt" | "lastActivityAt" | "completedAt">
   ): Promise<string>;
   updateMission(
     missionId: string,
-    patch: Partial<Omit<Mission, "id" | "launchedAt">>,
+    patch: Partial<Omit<Mission, "id" | "launchedAt">>
   ): Promise<void>;
   appendTimelineEvent(missionId: string, event: TimelineEvent): Promise<void>;
   updateMissionStep(
     missionId: string,
     stepIndex: number,
-    patch: Partial<MissionStep>,
+    patch: Partial<MissionStep>
   ): Promise<void>;
   setMissionStatus(
     missionId: string,
     status: MissionStatus,
-    extras?: { completedAt?: Date; abandonedReason?: string },
+    extras?: { completedAt?: Date; abandonedReason?: string }
   ): Promise<void>;
+}
+
+/**
+ * 미션 대표 보드 카드 포트 (conductor-driven). 지휘자가 미션 시작 시 보드에 '미션
+ * 대표 카드'(tasks/*, isMissionCard:true, contextId=missionId)를 만들고, 스텝 진행을
+ * 댓글(activity)로 쌓고, 상태를 동기화한다. 오케(LLM)가 dispatch/fix 스텝에서 만드는
+ * 실제 작업 카드와 별개이며, 대표 카드는 wait-게이트(findMissionTaskIds)에서 제외된다.
+ * 미주입 시 conductor 는 카드 동작을 건너뛴다(테스트/하위호환 불변).
+ */
+export interface MissionBoardPort {
+  /** 미션 대표 카드 생성 후 taskId 반환. idempotency 는 호출자(conductor)가 mission.missionCardTaskId 로 보장. */
+  createMissionCard(mission: Mission): Promise<string>;
+  /** 카드에 진행 댓글(activity) 추가 — applyProjection 으로 activities + projection 갱신. best-effort. */
+  addCardActivity(taskId: string, message: string): Promise<void>;
+  /** 카드 상태 동기화. status 는 보드 task 상태 문자열 ("IN_PROGRESS" | "DONE" | "FAILED" 등). */
+  setCardStatus(taskId: string, status: string): Promise<void>;
 }
 
 export type TaskStatusLite =
@@ -175,7 +191,7 @@ export interface MissionEngineEvent {
 }
 
 export type MissionEventHandler = (
-  event: MissionEngineEvent,
+  event: MissionEngineEvent
 ) => void | Promise<void>;
 
 export interface MissionEventBus {

@@ -5,6 +5,7 @@ import type {
   TimelineEvent,
 } from "./types";
 import type {
+  MissionBoardPort,
   MissionEngineEvent,
   MissionEventBus,
   MissionNotifier,
@@ -156,6 +157,12 @@ export interface ConductorDriverDeps {
   maxRetries?: number;
   /** escalate / 사용자 개입 필요 시 호출 (engine 과 동일 알림 채널). */
   notifier?: MissionNotifier;
+  /**
+   * 미션 대표 보드 카드 포트 (선택). 주입되면 지휘자가 미션 시작 시 대표 카드를
+   * 만들고 스텝 진행을 카드 activity 로 쌓고 상태를 동기화한다. 미주입 시 카드
+   * 동작은 모두 건너뛴다(테스트/하위호환 불변). dispatcher-impl 이 구현 → wire.ts 주입.
+   */
+  board?: MissionBoardPort;
   now?: () => Date;
   logger?: (msg: string, meta?: Record<string, unknown>) => void;
 }
@@ -265,11 +272,21 @@ function buildGrantMessage(
 ): string {
   if (step.type === "gstack") {
     const skill = step.skill ?? "(스킬 미지정)";
+    // gstack 스킬(특히 /investigate)은 '무엇을' 대상으로 돌릴지 목표가 있어야 의미가
+    // 있다. 목표 없이 grant 하면 스킬이 clarify 만 반복한다 → 미션 goal 을 함께 싣는다.
+    // step.args 가 있으면 그게 더 구체적인 대상이므로 우선.
+    const target = step.args?.trim() || mission.goal;
     return (
       `【Marblo Mission】 현재 스텝 ${stepIndex}: ${skill} (gstack)\n` +
-      `이 스텝은 ${skill} 실행입니다. 당신 세션에서 run_skill 로 직접 실행한 뒤, ` +
-      `완료되면 mission_step_done(success) 로 보고하세요.\n` +
-      `다음 스텝으로 스스로 넘어가지 마세요 — 순서·게이트는 지휘자가 관리합니다.`
+      `이 미션의 목표: ${target}\n` +
+      `지시: 위 목표를 대상으로 ${skill} 을 run_skill 로 직접 실행하세요. 조사/리뷰 결과 ` +
+      `같은 산출물을 만들면 그게 이 스텝의 완료입니다 — 사용자 결정을 기다리지 마세요.\n` +
+      `★필수: 완료 직후 mission_step_done({success:true, output:"핵심 결과 요약"}) 을 ` +
+      `반드시 호출해 보고하세요. 지휘자는 이 보고를 받아야만 다음 스텝을 grant 합니다 — ` +
+      `보고하지 않으면 미션이 영영 멈춥니다. 결과가 방향 선택을 요하더라도, 먼저 ` +
+      `mission_step_done 으로 보고(요약·권고를 output 에 담아)한 뒤 grant 를 기다리세요.\n` +
+      `보고 전에 스스로 다음 스텝을 실행하지 마세요 — 순서·게이트는 지휘자가 관리합니다. ` +
+      `실패 시 mission_step_done({success:false, error:"원인"}) 로 보고하세요.`
     );
   }
   // fix / dispatch — 작업 분해·할당 스텝. 목표는 step.args(있으면) 우선, 없으면 미션 goal.
@@ -277,9 +294,12 @@ function buildGrantMessage(
   return (
     `【Marblo Mission】 현재 스텝 ${stepIndex}: ${step.type} (작업 분해·할당)\n` +
     `이 스텝의 목표: ${goal}\n` +
-    `create_task · dispatch_task 로 작업을 분해·할당하세요 (missionId 는 자동 태깅됩니다). ` +
-    `할당을 마치면 mission_step_done 으로 보고하세요. 분해된 task 들의 완료 대기는 지휘자가 합니다.\n` +
-    `다음 스텝으로 스스로 넘어가지 마세요 — 순서·게이트는 지휘자가 관리합니다.`
+    `create_task · dispatch_task 로 작업을 분해·할당하세요 (missionId 는 자동 태깅됩니다).\n` +
+    `★필수: 할당을 마치면 mission_step_done({success:true, output:"배정 요약"}) 을 반드시 ` +
+    `호출해 보고하세요. 지휘자는 이 보고를 받아야만 다음으로 진행합니다 — 보고하지 않으면 ` +
+    `미션이 영영 멈춥니다. 분해된 task 들의 완료 대기는 지휘자가 하니 당신은 보고 후 대기하세요.\n` +
+    `보고 전에 스스로 다음 스텝을 실행하지 마세요 — 순서·게이트는 지휘자가 관리합니다. ` +
+    `실패 시 mission_step_done({success:false, error:"원인"}) 로 보고하세요.`
   );
 }
 
@@ -350,6 +370,40 @@ export function createConductorDriver(
     });
   }
 
+  // ── 미션 대표 보드 카드 라이프사이클 (deps.board 주입 시에만; 모두 best-effort) ──
+  // 미션 첫 advance 시 대표 카드를 1회 만들고 missionCardTaskId 를 영속화한다. 이후
+  // 스텝 진행/완료를 카드 activity 로 쌓고 미션 완료 시 카드 상태를 DONE 으로 동기화한다.
+  // 카드 호출은 절대 throw 로 미션 진행을 깨지 않는다(try/catch 로 흡수).
+  async function ensureMissionCard(mission: Mission): Promise<void> {
+    if (!deps.board) return;
+    if (mission.missionCardTaskId) return;
+    try {
+      const id = await deps.board.createMissionCard(mission);
+      await deps.store.updateMission(mission.id, { missionCardTaskId: id });
+      await deps.board.addCardActivity(id, `미션 시작 · ${mission.goal}`);
+      log("mission card created", { missionId: mission.id, cardId: id });
+    } catch (err) {
+      log("ensureMissionCard failed (best-effort)", {
+        missionId: mission.id,
+        err: String(err),
+      });
+    }
+  }
+  async function cardActivity(
+    mission: Mission,
+    message: string,
+  ): Promise<void> {
+    if (!deps.board || !mission.missionCardTaskId) return;
+    try {
+      await deps.board.addCardActivity(mission.missionCardTaskId, message);
+    } catch (err) {
+      log("cardActivity failed (best-effort)", {
+        missionId: mission.id,
+        err: String(err),
+      });
+    }
+  }
+
   // ──────────────────────────── 운전 루프 ────────────────────────────
 
   // 현재 스텝 진행을 오케에 허가하는 진입점. 미션이 active 가 아니면(planning 외)
@@ -368,6 +422,9 @@ export function createConductorDriver(
       await completeMission(missionId);
       return;
     }
+    // 첫 advance 에서 대표 카드를 1회 만들고 missionCardTaskId 를 영속화한다 →
+    // 이후 grantStep 의 re-fetch 가 카드 id 를 본다(best-effort, no-op if board 미주입).
+    await ensureMissionCard(mission);
     await grantStep(missionId, mission.currentStepIndex);
   }
 
@@ -409,6 +466,11 @@ export function createConductorDriver(
         driver: "orchestrator",
       },
     });
+    // 대표 카드에 스텝 시작 댓글(best-effort, no-op if board 미주입/카드 미생성).
+    await cardActivity(
+      mission,
+      `스텝 ${stepIndex} 시작 · ${step.skill ?? step.type}`,
+    );
 
     // wait 스텝: 오케에 grant 하지 않는다 — 지휘자가 task 완료를 폴링한다(§8-3).
     // running 마킹 후, 직전 dispatch 의 task 가 이미 전부 DONE 인 경우를 위해 즉시
@@ -433,9 +495,37 @@ export function createConductorDriver(
     // gstack / fix / dispatch — 미션 오케 PTY 에 스텝 타입별 '현재 스텝만' 지시 주입
     // (best-effort). 메시지는 스텝 타입별로 무엇을 어떤 도구로 하고 어떻게 보고할지
     // 못박는다(§3.2 / §8-3).
-    const ref = deps.orchestrators.getSession(
-      mission.ownerOrchestratorSessionId,
-    );
+    let ref = deps.orchestrators.getSession(mission.ownerOrchestratorSessionId);
+    if (!ref || !ref.isAlive()) {
+      // UI 직접 생성 경로(MissionsTab.handleLaunch → missionService.createMission)는
+      // engine.launch() 의 ensureSession 을 안 거쳐 ownerOrchestratorSessionId 가
+      // "pending" 으로 남는다 → getSession 매칭 실패 → 첫 스텝(/investigate)이 영영
+      // grant 되지 않는다. ensureSession 으로 미션 오케를 띄우고(idempotent reuse) 실제
+      // 세션으로 영속 바인딩한다.
+      try {
+        ref = await deps.orchestrators.ensureSession({
+          missionId,
+          projectId: mission.projectId,
+        });
+      } catch (err) {
+        log("grantStep — ensureSession failed (best-effort skip)", {
+          missionId,
+          stepIndex,
+          err: String(err),
+        });
+        return;
+      }
+      if (ref.sessionId !== mission.ownerOrchestratorSessionId) {
+        await deps.store.updateMission(missionId, {
+          ownerOrchestratorSessionId: ref.sessionId,
+        });
+        log("grantStep — bound mission to live orchestrator session", {
+          missionId,
+          stepIndex,
+          sessionId: ref.sessionId,
+        });
+      }
+    }
     if (!ref || !ref.isAlive()) {
       log("grantStep — no live owner orchestrator session (best-effort skip)", {
         missionId,
@@ -567,6 +657,8 @@ export function createConductorDriver(
     await markStepSuccess(missionId, stepIndex);
     const fresh = await deps.store.getMission(missionId);
     if (!fresh) return;
+    // 대표 카드에 스텝 완료 댓글(best-effort, no-op if board 미주입/카드 미생성).
+    await cardActivity(fresh, `스텝 ${stepIndex} 완료`);
     const nextIdx = stepIndex + 1;
     await deps.store.updateMission(missionId, { currentStepIndex: nextIdx });
     if (nextIdx >= fresh.steps.length) {
@@ -716,6 +808,21 @@ export function createConductorDriver(
         driver: "orchestrator",
       },
     });
+    // 대표 카드 상태를 DONE 으로 동기화 + 완료 댓글(best-effort — throw 로 완료를 깨지 않음).
+    if (deps.board && mission.missionCardTaskId) {
+      try {
+        await deps.board.setCardStatus(mission.missionCardTaskId, "DONE");
+        await deps.board.addCardActivity(
+          mission.missionCardTaskId,
+          "미션 완료 ✅",
+        );
+      } catch (err) {
+        log("completeMission card sync failed", {
+          missionId,
+          err: String(err),
+        });
+      }
+    }
     notifyOrchestrator(
       mission,
       `✅ [Marblo Mission] 모든 스텝이 끝나 미션이 완료되었습니다.`,

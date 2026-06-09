@@ -117,6 +117,16 @@ export function buildMissionEngine(
           eventBus,
           // wait 게이트용 task 상태 조회 — dispatcher 헬퍼 재사용.
           getTaskStatuses: (taskIds) => dispatcher.getTaskStatuses(taskIds),
+          // 오케가 MCP 로 만든 미션 task 의 비종료 id 역추적 — 게이트가 보도록
+          // mission.taskIds 동기화에 사용(§5.2). 대표 카드는 dispatcher 가 제외한다.
+          findMissionTaskIds: (mid) => dispatcher.findMissionTaskIds(mid),
+          // 미션 대표 보드 카드 포트 — dispatcher 구현을 주입. 지휘자가 미션 시작 시
+          // 대표 카드를 만들고 스텝 진행을 activity 로 쌓고 상태를 동기화한다.
+          board: {
+            createMissionCard: (m) => dispatcher.createMissionCard(m),
+            addCardActivity: (t, msg) => dispatcher.addCardActivity(t, msg),
+            setCardStatus: (t, s) => dispatcher.setCardStatus(t, s),
+          },
           notifier: deps.notifier,
           // 통합(P2-B): gates.ts 의 결정적 게이트 주입. (미주입 시 conductor
           // 내장 기본 게이트로 폴백.)
