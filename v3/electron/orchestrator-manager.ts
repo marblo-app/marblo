@@ -86,7 +86,7 @@ export const ORCHESTRATOR_PROMPT_SIGNATURE =
  */
 export function firstUserMessageStartsWith(
   filePath: string,
-  signature: string
+  signature: string,
 ): boolean {
   try {
     const stat = fs.statSync(filePath);
@@ -111,7 +111,7 @@ export function firstUserMessageStartsWith(
       else if (Array.isArray(content))
         text = content
           .map((c) =>
-            typeof c === "string" ? c : (c as { text?: string })?.text ?? ""
+            typeof c === "string" ? c : ((c as { text?: string })?.text ?? ""),
           )
           .join(" ");
       if (text.trimStart().startsWith(signature)) return true;
@@ -130,7 +130,7 @@ export function firstUserMessageStartsWith(
  */
 export function isOrchestratorSession(
   rootPath: string,
-  sessionId: string
+  sessionId: string,
 ): boolean {
   const p = path.join(claudeProjectDir(rootPath), `${sessionId}.jsonl`);
   return firstUserMessageStartsWith(p, ORCHESTRATOR_PROMPT_SIGNATURE);
@@ -155,6 +155,8 @@ export class OrchestratorManager {
     bridgePort: number;
   } | null = null;
   private lastOnPtyReady?: (ptySessionId: string) => void;
+  // crash auto-restart 가 동일 미션 세션을 이어가도록 마지막 ownerMissionId 보관.
+  private lastOwnerMissionId: string | null = null;
 
   // kind: 같은 projectId 안에서 여러 orchestrator (board, mission) 를 분리하기 위한
   // 식별 prefix. 'board' (default) 외에 'mission' 등을 주면 sessionId 가
@@ -162,11 +164,18 @@ export class OrchestratorManager {
   // 자동 resume 이 서로 충돌하지 않는다.
   private readonly kind: string;
 
+  // 현재 이 매니저가 운전 중인 미션 id (kind="mission" 전용). launch 시 주입되어
+  // orch-session store 를 mission 단위로 키잉(`mission:${missionId}`)하는 데 쓴다.
+  // 이게 있어야 "새 미션 시작 = fresh, 같은 미션 이어가기 = resume" 가 성립한다 —
+  // 예전엔 프로젝트 단위 단일 "mission" 세션을 무조건 resume 해, 새 미션이 직전
+  // (아카이브된) 미션 대화를 이어받아 /compact + 옛 컨텍스트로 첫 스텝이 막혔다.
+  private currentMissionId: string | null = null;
+
   constructor(
     ptyManager: PtyManager,
     configGenerator: AgentConfigGenerator,
     onStatusChange?: (status: OrchestratorStatus) => void,
-    kind: string = "board"
+    kind: string = "board",
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = configGenerator;
@@ -189,7 +198,8 @@ export class OrchestratorManager {
     rootPath: string,
     bridgePort: number,
     onPtyReady?: (ptySessionId: string) => void,
-    resumeSessionId?: string // specific session ID or 'latest' for --continue
+    resumeSessionId?: string, // specific session ID or 'latest' for --continue
+    ownerMissionId?: string, // kind="mission" 운전 대상 미션 id (세션 store 키잉용)
   ): OrchestratorSession {
     // Stop existing session if any
     if (this.session) {
@@ -200,6 +210,10 @@ export class OrchestratorManager {
     this.lastLaunchArgs = { projectId, rootPath, bridgePort };
     this.lastOnPtyReady = onPtyReady;
     this.stopRequested = false;
+    // stop() 이 null 로 리셋하므로 그 다음에 설정한다. crash auto-restart 는 같은
+    // 미션 컨텍스트를 유지해야 하므로 lastOwnerMissionId 로도 보관해 재주입한다.
+    this.currentMissionId = ownerMissionId ?? null;
+    this.lastOwnerMissionId = ownerMissionId ?? null;
 
     // Stable, project-scoped ID. Used as MARBLO_AGENT_ID, MCP config filename,
     // and the Firestore agents/* doc key — so the renderer can upsert one
@@ -227,7 +241,7 @@ export class OrchestratorManager {
     console.log(
       `[Orchestrator:${this.kind}] rootPath=${rootPath}, resumeSessionId=${
         resumeSessionId || "auto"
-      }, shouldResume=${!!shouldResume}`
+      }, shouldResume=${!!shouldResume}`,
     );
 
     // Generate MCP config for orchestrator (always claude)
@@ -238,7 +252,7 @@ export class OrchestratorManager {
         role: "orchestrator",
         command: "claude",
       },
-      rootPath
+      rootPath,
     );
 
     // Resume must be scoped to THIS orchestrator kind. Board sessions are
@@ -255,16 +269,16 @@ export class OrchestratorManager {
       const resolvedId = this.resolveSessionId(
         rootPath,
         resumeSessionId,
-        labelTarget
+        labelTarget,
       );
       if (resolvedId) {
         launchConfig.args.push("--resume", resolvedId);
         console.log(
-          `[Orchestrator] Resuming session: ${resolvedId} (requested: ${resumeSessionId})`
+          `[Orchestrator] Resuming session: ${resolvedId} (requested: ${resumeSessionId})`,
         );
       } else {
         console.log(
-          `[Orchestrator] No matching orchestrator session found for "${resumeSessionId}", starting new`
+          `[Orchestrator] No matching orchestrator session found for "${resumeSessionId}", starting new`,
         );
       }
     } else if (!resumeSessionId && shouldResume) {
@@ -273,11 +287,11 @@ export class OrchestratorManager {
       if (resolvedId) {
         launchConfig.args.push("--resume", resolvedId);
         console.log(
-          `[Orchestrator] Auto-continuing orchestrator session: ${resolvedId}`
+          `[Orchestrator] Auto-continuing orchestrator session: ${resolvedId}`,
         );
       } else {
         console.log(
-          `[Orchestrator] No orchestrator session found, starting new`
+          `[Orchestrator] No orchestrator session found, starting new`,
         );
       }
     }
@@ -290,7 +304,7 @@ export class OrchestratorManager {
     try {
       const configContent = fs.readFileSync(
         launchConfig.mcpConfigPath,
-        "utf-8"
+        "utf-8",
       );
       const config = JSON.parse(configContent);
       if (config.mcpServers?.marblo?.env) {
@@ -303,7 +317,7 @@ export class OrchestratorManager {
         fs.writeFileSync(
           launchConfig.mcpConfigPath,
           JSON.stringify(config, null, 2),
-          "utf-8"
+          "utf-8",
         );
       }
     } catch {
@@ -326,7 +340,7 @@ export class OrchestratorManager {
       launchConfig.command,
       launchConfig.args,
       rootPath,
-      mergedEnv
+      mergedEnv,
     );
 
     // Notify caller IMMEDIATELY so they can register data listeners
@@ -434,7 +448,7 @@ export class OrchestratorManager {
       rootPath,
       ptySessionId,
       existingRawIds,
-      labelTarget
+      labelTarget,
     );
 
     // Monitor PTY exit — auto-restart on crash
@@ -452,11 +466,11 @@ export class OrchestratorManager {
       if (this.restartCount < ORCH_MAX_RESTARTS && this.lastLaunchArgs) {
         const delay = Math.min(
           ORCH_BACKOFF_BASE_MS * Math.pow(2, this.restartCount),
-          ORCH_BACKOFF_MAX_MS
+          ORCH_BACKOFF_MAX_MS,
         );
         this.restartCount++;
         console.log(
-          `[Orchestrator] Crash (exit ${exitCode}). Restart ${this.restartCount}/${ORCH_MAX_RESTARTS} in ${delay}ms`
+          `[Orchestrator] Crash (exit ${exitCode}). Restart ${this.restartCount}/${ORCH_MAX_RESTARTS} in ${delay}ms`,
         );
 
         this.restartTimer = setTimeout(() => {
@@ -468,14 +482,28 @@ export class OrchestratorManager {
           } = this.lastLaunchArgs;
           this.configGenerator.cleanup(sessionId);
           this.session = null;
-          this.launch(pId, rp, bp, this.lastOnPtyReady, "latest");
+          // 미션 오케스트레이터는 같은 미션 세션을 정확히 이어간다(다른 미션 세션을
+          // "latest" 로 잘못 집지 않도록). board 는 기존대로 "latest".
+          const ownerMission = this.lastOwnerMissionId ?? undefined;
+          const resumeTarget =
+            this.kind === "mission" && ownerMission
+              ? (this.resolveMissionResumeId(rp, ownerMission) ?? "latest")
+              : "latest";
+          this.launch(
+            pId,
+            rp,
+            bp,
+            this.lastOnPtyReady,
+            resumeTarget,
+            ownerMission,
+          );
         }, delay);
       } else {
         // Max restarts exceeded
         this.setStatus("error");
         this.configGenerator.cleanup(sessionId);
         console.error(
-          `[Orchestrator] Max restarts (${ORCH_MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
+          `[Orchestrator] Max restarts (${ORCH_MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
         );
       }
     });
@@ -498,12 +526,22 @@ export class OrchestratorManager {
     this.setStatus("stopped");
     this.session = null;
     this.restartCount = 0;
+    this.currentMissionId = null;
+  }
+
+  /**
+   * 현재 이 매니저가 운전 중인 미션 id (kind="mission" 전용), 없으면 null.
+   * 호출부(ensureMissionOrchestratorLaunched)가 "실행 중인 오케가 다른 미션을
+   * 점유 중인가" 를 판정해 새 미션을 위해 fresh 세션으로 교체할지 결정한다.
+   */
+  getOwnerMissionId(): string | null {
+    return this.currentMissionId;
   }
 
   restart(
     projectId: string,
     rootPath: string,
-    bridgePort: number
+    bridgePort: number,
   ): OrchestratorSession {
     this.stop();
     return this.launch(projectId, rootPath, bridgePort);
@@ -525,7 +563,7 @@ export class OrchestratorManager {
       ".claude",
       "projects",
       encodedPath,
-      "marblo-labels.json"
+      "marblo-labels.json",
     );
   }
 
@@ -541,7 +579,7 @@ export class OrchestratorManager {
     rootPath: string,
     sessionUuid: string,
     label: string,
-    agentId?: string
+    agentId?: string,
   ): void {
     const labels = this.readLabels(rootPath);
     labels[sessionUuid] = { label, agentId, createdAt: Date.now() };
@@ -549,7 +587,7 @@ export class OrchestratorManager {
       fs.writeFileSync(
         this.getLabelsPath(rootPath),
         JSON.stringify(labels, null, 2),
-        "utf-8"
+        "utf-8",
       );
     } catch {
       /* best-effort */
@@ -569,7 +607,7 @@ export class OrchestratorManager {
         os.homedir(),
         ".claude",
         "projects",
-        encodedPath
+        encodedPath,
       );
       if (!fs.existsSync(sessionsDir)) return [];
 
@@ -605,7 +643,7 @@ export class OrchestratorManager {
     rootPath: string,
     requested: string,
     filterLabel?: string,
-    filterAgentId?: string
+    filterAgentId?: string,
   ): string | null {
     if (requested !== "latest") return requested; // specific UUID, return as-is
 
@@ -614,7 +652,7 @@ export class OrchestratorManager {
     const match = sessions.find(
       (s) =>
         (filterAgentId && s.agentId === filterAgentId) ||
-        (filterLabel && s.label === filterLabel)
+        (filterLabel && s.label === filterLabel),
     );
     return match?.id ?? null;
   }
@@ -636,7 +674,7 @@ export class OrchestratorManager {
         os.homedir(),
         ".claude",
         "projects",
-        encodedPath
+        encodedPath,
       );
       if (!fs.existsSync(sessionsDir)) return [];
       return fs
@@ -659,7 +697,7 @@ export class OrchestratorManager {
     rootPath: string,
     ptySessionId: string,
     existingIds: Set<string>,
-    label: string
+    label: string,
   ): void {
     const MAX_ATTEMPTS = 20;
     const INTERVAL_MS = 2000;
@@ -684,14 +722,14 @@ export class OrchestratorManager {
         .find((id) =>
           firstUserMessageStartsWith(
             path.join(dir, `${id}.jsonl`),
-            ORCHESTRATOR_PROMPT_SIGNATURE
-          )
+            ORCHESTRATOR_PROMPT_SIGNATURE,
+          ),
         );
       if (match) {
         this.saveSessionLabel(rootPath, match, label);
         this.saveOrchSessionId(rootPath, match);
         console.log(
-          `[Orchestrator:${this.kind}] Labeled session ${match} as "${label}" (attempt ${attempts})`
+          `[Orchestrator:${this.kind}] Labeled session ${match} as "${label}" (attempt ${attempts})`,
         );
         return;
       }
@@ -700,7 +738,7 @@ export class OrchestratorManager {
         setTimeout(tick, INTERVAL_MS);
       } else {
         console.warn(
-          `[Orchestrator:${this.kind}] No orchestrator session detected after ${attempts} attempts — left unlabeled (content-scan resolver still recovers it)`
+          `[Orchestrator:${this.kind}] No orchestrator session detected after ${attempts} attempts — left unlabeled (content-scan resolver still recovers it)`,
         );
       }
     };
@@ -743,7 +781,7 @@ export class OrchestratorManager {
       this.saveSessionLabel(rootPath, byContent, labelTarget);
       this.saveOrchSessionId(rootPath, byContent);
       console.log(
-        `[Orchestrator:${this.kind}] Recovered prior session ${byContent} by content signature → persisted (store + label)`
+        `[Orchestrator:${this.kind}] Recovered prior session ${byContent} by content signature → persisted (store + label)`,
       );
     }
     return byContent;
@@ -762,35 +800,67 @@ export class OrchestratorManager {
       ".claude",
       "projects",
       encodedPath,
-      "marblo-orch-sessions.json"
+      "marblo-orch-sessions.json",
     );
   }
 
   private readOrchStore(
-    rootPath: string
-  ): Record<string, { sessionId: string; updatedAt: number }> {
+    rootPath: string,
+  ): Record<
+    string,
+    { sessionId: string; updatedAt: number; missionId?: string }
+  > {
     try {
       return JSON.parse(
-        fs.readFileSync(this.getOrchStorePath(rootPath), "utf-8")
+        fs.readFileSync(this.getOrchStorePath(rootPath), "utf-8"),
       );
     } catch {
       return {};
     }
   }
 
-  /** Persist this orchestrator's claude session id under its `kind` key. */
+  /**
+   * store 키: board 는 "board". mission 은 운전 중인 미션이 있으면
+   * `mission:${missionId}` 로 미션 단위 분리(새 미션 = 새 키 = fresh), 미션을
+   * 모르면 레거시 "mission" 키(렌더러 reconnect self-heal 용).
+   */
+  private orchStoreKey(): string {
+    return this.kind === "mission" && this.currentMissionId
+      ? `mission:${this.currentMissionId}`
+      : this.kind;
+  }
+
+  /** Persist this orchestrator's claude session id under its store key. */
   saveOrchSessionId(rootPath: string, claudeSessionId: string): void {
     const store = this.readOrchStore(rootPath);
-    store[this.kind] = { sessionId: claudeSessionId, updatedAt: Date.now() };
+    store[this.orchStoreKey()] = {
+      sessionId: claudeSessionId,
+      updatedAt: Date.now(),
+      missionId: this.currentMissionId ?? undefined,
+    };
     try {
       fs.writeFileSync(
         this.getOrchStorePath(rootPath),
         JSON.stringify(store, null, 2),
-        "utf-8"
+        "utf-8",
       );
     } catch {
       /* best-effort */
     }
+  }
+
+  /**
+   * 미션 단위 resume 세션 id — `mission:${missionId}` 에 저장된 세션이 아직
+   * 실재(resumable)하면 그 id, 아니면 null. null 이면 호출부가 "new"(fresh)로
+   * 새 미션 세션을 띄운다. 이게 "새 미션 = fresh, 같은 미션 = 이어가기" 의 핵심.
+   * (board kind 에는 해당 없음 — 항상 null.)
+   */
+  resolveMissionResumeId(rootPath: string, missionId: string): string | null {
+    if (this.kind !== "mission" || !missionId) return null;
+    const stored =
+      this.readOrchStore(rootPath)[`mission:${missionId}`]?.sessionId;
+    if (stored && this.isResumableSession(rootPath, stored)) return stored;
+    return null;
   }
 
   /** True if `id` is a real, resumable session (exists, not a summary stub). */
@@ -801,7 +871,7 @@ export class OrchestratorManager {
       ".claude",
       "projects",
       encodedPath,
-      `${id}.jsonl`
+      `${id}.jsonl`,
     );
     return fs.existsSync(p) && !isSummaryOnlyJsonl(p);
   }

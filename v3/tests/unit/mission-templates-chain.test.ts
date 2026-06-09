@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MissionEngine,
   InProcessMissionEventBus,
@@ -25,6 +25,15 @@ import type {
 
 // 5개 미션 템플릿의 step chain + synthesis 가 제대로 흘러가는지 검증.
 // PtySkillRunner / 실제 PTY 없이 fake 만으로 ports 인터페이스를 통한 흐름을 확인.
+//
+// engine-driven(A안) 검증 스위트 — 로컬 v3/.env 의 MISSION_DRIVER=orchestrator 가
+// 새어들어오면 fake-port 미션이 진행되지 않아 timeout 하므로 driver 를 고정한다.
+beforeEach(() => {
+  vi.stubEnv("MISSION_DRIVER", "engine");
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 // ──────────────────────────── fakes ────────────────────────────
 

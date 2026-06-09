@@ -191,6 +191,30 @@ export function MissionsTab() {
     setUserPickedId(id);
   };
 
+  // 미션 문서를 영구 삭제. 선택 중이던 미션이면 선택을 해제해 auto-select effect 가
+  // 다음 후보를 고르도록 한다(빈 상태면 새 미션 카드 노출).
+  const handleDelete = async (missionId: string) => {
+    await missionService.deleteMission(missionId);
+    if (selectedId === missionId) setSelectedId(null);
+    if (userPickedId === missionId) setUserPickedId(null);
+  };
+
+  // 아카이브(완료/포기) 미션을 한 번에 정리 — 겹치는 미션이 쌓였을 때.
+  const handleClearArchive = async () => {
+    if (archive.length === 0) return;
+    if (
+      !confirm(
+        `아카이브된 미션 ${archive.length}개를 모두 영구 삭제할까요? 되돌릴 수 없습니다.`,
+      )
+    ) {
+      return;
+    }
+    const ids = archive.map((m) => m.id);
+    await Promise.all(ids.map((id) => missionService.deleteMission(id)));
+    if (selectedId && ids.includes(selectedId)) setSelectedId(null);
+    if (userPickedId && ids.includes(userPickedId)) setUserPickedId(null);
+  };
+
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       <MissionOrchestratorPanel />
@@ -205,13 +229,24 @@ export function MissionsTab() {
               selectedMissionId={selectedId}
               onSelect={handleSelect}
               onAbandon={handleAbandon}
+              onDelete={handleDelete}
             />
           </div>
           {archive.length > 0 && (
             <div>
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Archive
-              </h2>
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Archive
+                </h2>
+                <button
+                  type="button"
+                  onClick={handleClearArchive}
+                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 transition-colors hover:bg-red-500/15 hover:text-red-400"
+                  title="아카이브된 미션 전체 영구 삭제"
+                >
+                  🗑️ 전체 삭제
+                </button>
+              </div>
               <MissionList
                 missions={archive}
                 selectedMissionId={selectedId}
@@ -219,6 +254,7 @@ export function MissionsTab() {
                 onAbandon={() => {
                   /* archive 는 abandon 불가 */
                 }}
+                onDelete={handleDelete}
               />
             </div>
           )}
@@ -232,6 +268,7 @@ export function MissionsTab() {
               onResume={handleResume}
               onAbandon={handleAbandon}
               onRestart={handleRestart}
+              onDelete={handleDelete}
             />
           ) : (
             <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">

@@ -21,7 +21,10 @@ export interface OrchestratorRegistryDeps {
   // rootPath 해석이 모두 여기에 모여 있어, 엔진이 패널보다 먼저 오케스트레이터를
   // 띄워도 PTY 패널이 빈 화면이 되지 않는다. 미지정 시 아래 자체 launch fallback
   // (forwarding 없음 — 주로 테스트용).
-  ensureLaunched?: (projectId: string) => OrchestratorManager;
+  ensureLaunched?: (
+    projectId: string,
+    missionId?: string,
+  ) => OrchestratorManager;
   ptyManager: PtyManager;
   bridgePort: () => number;
   // launch 시 cwd — fallback 경로에서만 사용. 정식 구현은 ensureLaunched 가
@@ -59,7 +62,9 @@ export function createOrchestratorRegistry(
     // 정식 경로: main.ts 의 단일 launch 헬퍼. forwarding + resume + rootPath 를
     // 책임지고 살아있는 manager 를 반환한다.
     if (deps.ensureLaunched) {
-      const manager = deps.ensureLaunched(input.projectId);
+      // missionId 를 함께 넘겨야 launch 가 "새 미션 = fresh, 같은 미션 = resume"
+      // 를 결정할 수 있다 (없이 넘기면 직전 미션 세션을 무조건 resume 하는 옛 버그).
+      const manager = deps.ensureLaunched(input.projectId, input.missionId);
       const session = manager.getSession();
       if (!session) {
         throw new Error(

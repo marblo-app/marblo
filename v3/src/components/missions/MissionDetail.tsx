@@ -22,6 +22,8 @@ interface MissionDetailProps {
   onAbandon: (id: string) => void;
   /** 같은 goal + template 로 새 미션 생성. abandoned / completed 미션에서 호출. */
   onRestart: (mission: Mission) => void;
+  /** 미션 문서 영구 삭제. */
+  onDelete: (id: string) => void;
 }
 
 const STEP_ICON: Record<MissionStepStatus, string> = {
@@ -38,6 +40,7 @@ export function MissionDetail({
   onResume,
   onAbandon,
   onRestart,
+  onDelete,
 }: MissionDetailProps) {
   const meta = TEMPLATE_META[mission.templateId];
 
@@ -143,6 +146,18 @@ export function MissionDetail({
                 🔄 다시 실행
               </button>
             )}
+            <button
+              onClick={() => {
+                const msg = isTerminal
+                  ? "이 미션 기록을 영구 삭제할까요? 되돌릴 수 없습니다."
+                  : "진행 중인 미션입니다. 영구 삭제하면 기록이 사라지고, 진행 중 task/agent 는 자동 정리되지 않을 수 있어요(먼저 🛑 Abandon 권장). 그래도 삭제할까요?";
+                if (confirm(msg)) onDelete(mission.id);
+              }}
+              title="미션 영구 삭제"
+              className="rounded-lg border border-gray-600 bg-gray-700/40 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-red-500/40 hover:bg-red-500/15 hover:text-red-300"
+            >
+              🗑️ 삭제
+            </button>
           </div>
         </div>
         {needsAttention &&
