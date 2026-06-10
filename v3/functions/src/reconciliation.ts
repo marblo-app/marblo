@@ -19,7 +19,12 @@
  */
 import * as admin from "firebase-admin";
 
-const db = admin.firestore();
+// Lazy — admin.firestore() must NOT run at module load. index.ts imports this
+// module before calling admin.initializeApp(), and CJS runs imports first, so a
+// top-level admin.firestore() throws app/no-app and fails firebase-functions v5
+// source discovery for the whole codebase. Resolve on first use instead.
+let _db: admin.firestore.Firestore | null = null;
+const db = (): admin.firestore.Firestore => (_db ??= admin.firestore());
 
 const MIN_AGE_HOURS = 1; // Give the user time to finish the redirect.
 const MAX_AGE_HOURS = 24 * 7; // Don't keep banging old failed orders.
@@ -172,7 +177,7 @@ export async function reconcileTossPending(): Promise<ReconcileResult> {
   const cutoff = admin.firestore.Timestamp.fromMillis(
     Date.now() - MAX_AGE_HOURS * 3600 * 1000
   );
-  const stuck = await db
+  const stuck = await db()
     .collection("pendingOrders")
     .where("createdAt", ">", cutoff)
     .get();
@@ -233,7 +238,7 @@ export async function reconcilePaddlePending(): Promise<ReconcileResult> {
   const cutoff = admin.firestore.Timestamp.fromMillis(
     Date.now() - MAX_AGE_HOURS * 3600 * 1000
   );
-  const stuck = await db
+  const stuck = await db()
     .collection("pendingOrders")
     .where("provider", "==", "paddle")
     .where("createdAt", ">", cutoff)
