@@ -1,9 +1,10 @@
 import { useEffect, useMemo } from "react";
 import type { Agent } from "../../types/agent";
-import type { CostLog } from "../../types/cost";
 import { useProjectStore } from "../../stores/projectStore";
 import { useAgentStore } from "../../stores/agentStore";
 import { useCostStore } from "../../stores/costStore";
+import type { CostWeekly } from "../../stores/costStore";
+import type { CostByDayEntry } from "../../services/costService";
 import { UsageDashboard } from "../agents/AgentDashboard";
 
 /**
@@ -20,7 +21,7 @@ export function UsagePage() {
   const currentProject = useProjectStore((s) => s.currentProject);
   const agents = useAgentStore((s) => s.agents);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
-  const { summary, logs, loadCosts } = useCostStore();
+  const { summary, loadCosts, trend, weekly, loadSummary } = useCostStore();
   const projectId = currentProject?.id || "";
 
   useEffect(() => {
@@ -28,10 +29,13 @@ export function UsagePage() {
     return subscribeToAgents(projectId);
   }, [projectId, subscribeToAgents]);
 
+  // loadCosts: raw logs → live-totals fallback (summary). loadSummary: the
+  // server-aggregated daily trend + weekly token rollup (getCostSummary).
   useEffect(() => {
     if (!projectId) return;
     loadCosts(projectId);
-  }, [projectId, loadCosts]);
+    loadSummary(projectId);
+  }, [projectId, loadCosts, loadSummary]);
 
   // Live totals from agent docs (preferred), summed across the fleet.
   const totals = useMemo(() => {
@@ -91,6 +95,9 @@ export function UsagePage() {
         </p>
       </div>
 
+      {/* Recent 7-day token total (getCostSummary weekly rollup) */}
+      <WeeklyTokenCard weekly={weekly} />
+
       {/* Totals */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <SummaryCard label="총 토큰" value={formatTokens(totals.tokens)} />
@@ -108,8 +115,8 @@ export function UsagePage() {
         />
       </div>
 
-      {/* Daily trend (per-model) */}
-      <DailyTrend logs={logs} agents={agents} />
+      {/* Daily trend (per-model) — server-aggregated, accumulates across days */}
+      <DailyTrend trend={trend} rangeDays={weekly?.rangeDays ?? 30} />
 
       {/* Per-model & per-agent (reused) */}
       <Section title="모델별 / 에이전트별">
@@ -176,48 +183,123 @@ function familyFromModelId(m: string): string {
 type DayCell = { tokens: number; cost: number };
 
 /**
- * Per-model daily token-usage trend. Re-aggregates from the raw cost logs
- * (model + timestamp), resolving each log's family via its agent doc. Token-
- * based (these are flat subscriptions, so $ is notional and excluded from the
- * UI). Stacked CSS bars, no chart dependency. Fixed 30-day axis.
+ * "최근 7일 총 토큰량" — weekly token rollup from getCostSummary. The headline
+ * number is weeklyTotalTokens; the breakdown is weeklyByModel (one family-
+ * colored bar per model id). Window is a fixed last 7 days regardless of the
+ * daily-trend range.
  */
-function DailyTrend({ logs, agents }: { logs: CostLog[]; agents: Agent[] }) {
+function WeeklyTokenCard({ weekly }: { weekly: CostWeekly | null }) {
+  const total = weekly?.totalTokens ?? 0;
+  const byModel = useMemo(
+    () =>
+      [...(weekly?.byModel ?? [])].sort(
+        (a, b) => b.totalTokens - a.totalTokens,
+      ),
+    [weekly],
+  );
+
+  return (
+    <Section title="최근 7일 총 토큰량">
+      <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4">
+        <div className="flex items-baseline gap-2">
+          <span className="font-mono text-2xl font-semibold text-gray-100">
+            {formatTokens(total)}
+          </span>
+          <span className="text-xs text-gray-500">tokens · 최근 7일 누적</span>
+        </div>
+
+        {byModel.length > 0 ? (
+          <div className="mt-3 space-y-2">
+            {byModel.map((m, i) => {
+              const meta =
+                MODEL_FAMILY_META[familyFromModelId(m.model)] ||
+                MODEL_FAMILY_META.other;
+              const pct = total > 0 ? (m.totalTokens / total) * 100 : 0;
+              return (
+                <div key={m.model || i}>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="flex items-center gap-1.5 text-gray-300">
+                      <span
+                        className="inline-block h-2.5 w-2.5 rounded-sm"
+                        style={{ background: meta.color }}
+                      />
+                      <span className="font-medium">{meta.label}</span>
+                      <span className="text-gray-600">
+                        {m.model || "unknown"}
+                      </span>
+                    </span>
+                    <span className="font-mono text-gray-400">
+                      {formatTokens(m.totalTokens)}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-700">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ width: `${pct}%`, background: meta.color }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-3 text-[11px] leading-snug text-gray-500">
+            아직 최근 7일 토큰 데이터가 없습니다. getCostSummary(BigQuery) 집계
+            — 새 빌드로 에이전트를 실행하면 채워집니다.
+          </p>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * Per-model daily token-usage trend. Driven by getCostSummary.byDay — server-
+ * aggregated per day+model, so the trend accumulates across the full range
+ * instead of collapsing to a single busy day (the old raw-logs LIMIT 200 bug).
+ * Family is resolved from the model id (byDay carries no agentId, so
+ * antigravity's gemini-* ids fold into the gemini family — a known,
+ * non-blocking limitation). Token-based; flat subscriptions make $ notional, so
+ * it's excluded from the UI. Stacked CSS bars, no chart dependency.
+ */
+function DailyTrend({
+  trend,
+  rangeDays,
+}: {
+  trend: CostByDayEntry[];
+  rangeDays: number;
+}) {
+  const span = Math.max(1, Math.round(rangeDays) || 30);
   const { days, families } = useMemo(() => {
-    const familyByAgent = new Map(
-      agents.map((a) => [a.id, a.model || "claude"]),
-    );
     const map: Record<string, Record<string, DayCell>> = {};
     const famSet = new Set<string>();
-    for (const log of logs) {
-      const d =
-        log.createdAt instanceof Date ? log.createdAt : new Date(log.createdAt);
-      if (isNaN(d.getTime())) continue;
-      const day = d.toISOString().split("T")[0];
-      const fam =
-        familyByAgent.get(log.agentId) || familyFromModelId(log.model);
+    for (const row of trend) {
+      if (!row.date) continue;
+      const fam = familyFromModelId(row.model);
       famSet.add(fam);
       const tokens =
-        (log.inputTokens || 0) +
-        (log.outputTokens || 0) +
-        (log.cacheReadTokens || 0) +
-        (log.cacheWriteTokens || 0);
-      map[day] ||= {};
-      const cell = (map[day][fam] ||= { tokens: 0, cost: 0 });
+        row.totalTokens ||
+        (row.inputTokens || 0) +
+          (row.outputTokens || 0) +
+          (row.cacheReadTokens || 0) +
+          (row.cacheWriteTokens || 0);
+      map[row.date] ||= {};
+      const cell = (map[row.date][fam] ||= { tokens: 0, cost: 0 });
       cell.tokens += tokens;
-      cell.cost += log.totalCost;
+      cell.cost += row.cost || 0;
     }
-    // Fixed 30-day axis (today back 29 days) so a single day's activity reads
-    // as one thin bar on a month timeline instead of one full-width bar.
+    // Fixed axis: `span` days back from today, so sparse activity reads as thin
+    // bars on a stable timeline and zero-usage days show as gaps.
     const today = new Date();
     const dayList: [string, Record<string, DayCell>][] = [];
-    for (let i = 29; i >= 0; i--) {
+    for (let i = span - 1; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       const key = d.toISOString().split("T")[0];
       dayList.push([key, map[key] || {}]);
     }
     return { days: dayList, families: Array.from(famSet) };
-  }, [logs, agents]);
+  }, [trend, span]);
 
   const valOf = (cell: DayCell) => cell.tokens;
   const fmt = (n: number) => `${formatTokens(n)} tok`;
@@ -238,7 +320,7 @@ function DailyTrend({ logs, agents }: { logs: CostLog[]; agents: Agent[] }) {
   const maxDay = Math.max(...days.map(([, fams]) => sumDay(fams)), 0.000001);
 
   return (
-    <Section title="일자별 추이 (모델별, 최근 30일)">
+    <Section title={`일자별 추이 (모델별, 최근 ${span}일)`}>
       <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4">
         {/* legend */}
         <div className="mb-3 flex flex-wrap gap-3">
