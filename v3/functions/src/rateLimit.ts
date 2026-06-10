@@ -11,7 +11,13 @@
  */
 import * as admin from "firebase-admin";
 
-const db = admin.firestore();
+// Lazy — admin.firestore() must NOT run at module load. index.ts imports this
+// module (which executes it) before it calls admin.initializeApp(), so a
+// top-level admin.firestore() throws app/no-app and, under firebase-functions
+// v5 source discovery, fails analysis for the ENTIRE codebase (blocking every
+// function deploy). Resolve on first use instead.
+let _db: admin.firestore.Firestore | null = null;
+const db = (): admin.firestore.Firestore => (_db ??= admin.firestore());
 const COLLECTION = "rate_limits";
 
 export interface RateRule {
@@ -42,11 +48,11 @@ export async function enforce(
 ): Promise<RateCheck> {
   if (!rules.length)
     return { allowed: true, remaining: Infinity, retryAfter: 0 };
-  const docRef = db.collection(COLLECTION).doc(key);
+  const docRef = db().collection(COLLECTION).doc(key);
   const nowMs = Date.now();
   const maxWindowMs = Math.max(...rules.map((r) => r.windowSeconds)) * 1000;
 
-  return db.runTransaction(async (tx) => {
+  return db().runTransaction(async (tx) => {
     const snap = await tx.get(docRef);
     const existing = (snap.data()?.attempts as number[] | undefined) ?? [];
     // Drop entries older than the longest window — bounds storage.
