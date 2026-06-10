@@ -251,6 +251,30 @@ describe("applyProjection — Firestore 통합 (seed self-heal + TOCTOU 가드)"
     expect(t1.claimedBy).toBe("agent-1"); // 두 번째 claim 거부 — 그대로
   });
 
+  it("TODO 상태라도 claimedBy 가 남아 있으면 claim precondition 으로 재클레임 방지", async () => {
+    await setDoc(doc(db, "tasks", "t1"), {
+      status: "TODO",
+      claimedBy: "agent-1",
+    });
+
+    await expect(
+      applyProjection(db, "t1", {
+        newStatus: "CLAIMED",
+        lastAgentId: "agent-2",
+        extraTaskFields: { claimedBy: "agent-2" },
+        validateFrom: (s) => s === "TODO",
+        validateTask: (t) => t.claimedBy == null,
+      }),
+    ).rejects.toThrow(/precondition/);
+
+    const t1 = (await getDoc(doc(db, "tasks", "t1"))).data() as {
+      status: string;
+      claimedBy: string;
+    };
+    expect(t1.status).toBe("TODO");
+    expect(t1.claimedBy).toBe("agent-1");
+  });
+
   it("validateFrom 통과하는 정상 전이는 그대로 진행", async () => {
     await setDoc(doc(db, "tasks", "t1"), { status: "TODO" });
     await applyProjection(db, "t1", {

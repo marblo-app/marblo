@@ -53,6 +53,8 @@ export interface AgentLaunchParams {
   projectId?: string;
   /** 작업 난이도 — claude(--model)·codex(reasoning) 모델/레벨 선택용. 미지정=기본. */
   complexity?: TaskComplexity;
+  /** Board task currently bound to this agent, when launched by dispatch/spawn. */
+  currentTaskId?: string | null;
   /** claude 런타임 강등 재시작(§3.4-3)용 모델 override. 설정되면 complexity
    * resolver 대신 이 모델 id 로 --model 핀(예: fable5 실패 → "opus"). */
   claudeModelOverride?: string;
@@ -69,6 +71,7 @@ export interface AgentInstance {
   status: AgentStatus;
   command: string;
   cwd: string;
+  currentTaskId: string | null;
   launchConfig?: LaunchConfig;
   // --- Auto-restart fields ---
   restartCount: number;
@@ -675,6 +678,7 @@ export class AgentManager {
       status: "idle",
       command: params.command,
       cwd: params.cwd,
+      currentTaskId: params.currentTaskId ?? null,
       launchConfig,
       restartCount: 0,
       fastFailCount: 0,
@@ -938,6 +942,7 @@ export class AgentManager {
       role: agent.role,
       command: agent.command,
       cwd: agent.cwd,
+      currentTaskId: agent.currentTaskId,
       resumeSessionId: resolvedSessionId,
       onPtyReady,
       claudeModelOverride,
@@ -1001,6 +1006,7 @@ export class AgentManager {
       role: agent.role,
       command: agent.command,
       cwd: agent.cwd,
+      currentTaskId: agent.currentTaskId,
       initialPrompt,
       onPtyReady: agent.onPtyReady,
     });
@@ -1047,6 +1053,12 @@ export class AgentManager {
     this.onStatusChange?.(agentId, status);
   }
 
+  setCurrentTask(agentId: string, taskId: string | null): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    agent.currentTaskId = taskId;
+  }
+
   getAgentByName(name: string): AgentInstance | null {
     for (const agent of this.agents.values()) {
       if (agent.name === name) return agent;
@@ -1091,6 +1103,7 @@ export class AgentManager {
       status: "idle",
       command: agent.command,
       cwd: agent.cwd,
+      currentTaskId: null,
       restartCount: 0,
       fastFailCount: 0,
       spawnedAt: Date.now(),

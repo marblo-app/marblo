@@ -145,6 +145,10 @@ export interface ApplyProjectionInput extends ProjectionMutation {
    * 검사를 건너뛰었으면 이 in-txn 재검사도 함께 꺼져야 escape hatch 가 산다.
    */
   validateFrom?: (from: TaskStatus) => boolean;
+  /** Optional full-document guard for fields coupled to status, e.g. claimedBy. */
+  validateTask?: (
+    task: Record<string, unknown> & { status: TaskStatus },
+  ) => boolean;
 }
 
 /**
@@ -225,6 +229,9 @@ export async function applyProjection(
       throw new Error(
         `Task ${taskId} cannot transition from ${oldStatus} to ${mut.newStatus}`,
       );
+    }
+    if (mut.validateTask && !mut.validateTask(taskData)) {
+      throw new Error(`Task ${taskId} failed task mutation precondition`);
     }
 
     const missionId = taskData.missionId;

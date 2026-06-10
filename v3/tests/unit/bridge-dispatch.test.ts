@@ -32,6 +32,7 @@ interface FakeInstanceInit {
   status?: AgentStatus;
   cwd?: string;
   projectId?: string;
+  currentTaskId?: string | null;
   restartCount?: number;
 }
 
@@ -46,6 +47,7 @@ function makeInstance(init: FakeInstanceInit): AgentInstance & {
     status: init.status ?? "idle",
     ptySessionId: `pty-${init.id}`,
     cwd: init.cwd ?? "/repo",
+    currentTaskId: init.currentTaskId ?? null,
     restartCount: init.restartCount ?? 0,
     // projectId is what our FakeAgentManager filters on (real code reads
     // launchConfig.env.MARBLO_PROJECT; we keep the fake simple).
@@ -86,6 +88,11 @@ class FakeAgentManager {
     if (a && a.status !== status) a.status = status;
   }
 
+  setCurrentTask(id: string, taskId: string | null): void {
+    const a = this.agents.get(id);
+    if (a) a.currentTaskId = taskId;
+  }
+
   restart(id: string): AgentInstance | null {
     this.restartCalls++;
     const a = this.agents.get(id);
@@ -105,6 +112,7 @@ class FakeAgentManager {
     role: string;
     cwd: string;
     projectId?: string;
+    currentTaskId?: string | null;
     onPtyReady?: (sid: string) => void;
   }): AgentInstance {
     this.launchCalls++;
@@ -116,6 +124,7 @@ class FakeAgentManager {
       status: "idle",
       cwd: params.cwd,
       projectId: params.projectId,
+      currentTaskId: params.currentTaskId ?? null,
     });
     this.agents.set(params.id, inst);
     params.onPtyReady?.(inst.ptySessionId);
@@ -416,6 +425,41 @@ describe("dispatchTask — per-task uniqueness (L3)", () => {
     expect(res.action).toBe("reused");
     expect(res.agentId).toBe("occ");
     expect(am.launchCalls).toBe(0);
+  });
+
+  it("routes to the live task-bound agent instead of reassigning to another idle agent", async () => {
+    const { bridge, am, pty } = makeBridge();
+    am.seed(
+      makeInstance({
+        id: "a6b01b58",
+        role: "backend",
+        status: "working",
+        cwd: "/repo",
+        projectId: "px",
+        currentTaskId: "kYRmosC78fW7wUOyaAKG",
+      }),
+    );
+    am.seed(
+      makeInstance({
+        id: "9cc0601b",
+        role: "backend",
+        status: "idle",
+        cwd: path.join("/wt", "px", "kYRmosC78fW7wUOyaAKG"),
+        projectId: "px",
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId: "kYRmosC78fW7wUOyaAKG" }),
+    );
+
+    expect(res.action).toBe("reused");
+    expect(res.agentId).toBe("a6b01b58");
+    expect(am.launchCalls).toBe(0);
+    expect(pty.writes).toContainEqual(
+      expect.objectContaining({ sid: "pty-a6b01b58" }),
+    );
+    expect(pty.writes.some((w) => w.sid === "pty-9cc0601b")).toBe(false);
   });
 });
 

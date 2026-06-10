@@ -993,42 +993,22 @@ export class BridgeServer {
     // for reuse / restart / spawn-constraint counting.
     const allAgents = this.agentManager.listAgentsByProject(params.projectId);
 
-    // L3 — per-task single-agent guarantee. If a live (non-stopped/-error)
-    // agent is already bound to this task's isolated worktree, a prior dispatch
-    // (serialized ahead of us by withTaskLock) already spawned/claimed it.
-    // Route this instruction to that agent instead of spawning a duplicate that
-    // would fight it in the same git tree. One worktree ⇒ one task ⇒ one agent
-    // (WORKTREE-SPEC), so the occupant IS this task's agent regardless of role.
-    if (params.projectId && params.taskId) {
-      const occupant = allAgents.find(
-        (a) =>
-          a.status !== "stopped" &&
-          a.status !== "error" &&
-          isWorktreeIsolated(a.cwd, params.projectId, params.taskId),
+    // L3/RG — per-task single-agent guarantee. A task-bound live agent wins
+    // before normal idle reuse scoring. The binding can come from the isolated
+    // worktree cwd or the in-memory currentTaskId set by dispatch. This closes
+    // the observed reassign gap where the original worker was still live but a
+    // different just-idle agent scored as reusable for the same task.
+    const taskAgent = this.findLiveTaskAgent(
+      allAgents,
+      params.projectId,
+      params.taskId,
+    );
+    if (taskAgent && params.taskId) {
+      return this.routeToTaskAgent(
+        taskAgent,
+        effectiveInstruction,
+        params.taskId,
       );
-      if (occupant) {
-        this.ptyManager.writeAndSubmit(
-          occupant.ptySessionId,
-          effectiveInstruction,
-        );
-        if (occupant.status === "idle") {
-          this.agentManager.setStatus(occupant.id, "working");
-        }
-        this.syncAgentStatus(occupant.id, "working", params.taskId);
-        console.log(
-          `[BridgeServer] Dispatch: routed to worktree occupant '${occupant.name}' (task=${params.taskId})`,
-        );
-        return {
-          success: true,
-          action: "reused",
-          agentId: occupant.id,
-          agentName: occupant.name,
-          model: occupant.model,
-          score: 0,
-          reason: `Agent already bound to task ${params.taskId}'s worktree — routed instead of spawning a duplicate (L3).`,
-          taskId: params.taskId ?? null,
-        };
-      }
     }
 
     // Step 1 & 2: Score existing agents
@@ -1056,13 +1036,18 @@ export class BridgeServer {
         params.projectId,
         params.taskId,
       );
+    const taskBindingOk = (agentId: string) => {
+      const currentTaskId = this.agentManager.getAgent(agentId)?.currentTaskId;
+      return !currentTaskId || currentTaskId === params.taskId;
+    };
     // Only idle agents are safe to reuse — working agents may be mid-task
     const reusable = scored.filter(
       (s) =>
         s.score >= 100 &&
         s.agent.status === "idle" &&
         modelMatches(s.agent.model) &&
-        worktreeOk(s.agent.id),
+        worktreeOk(s.agent.id) &&
+        taskBindingOk(s.agent.id),
     );
 
     // Step 1: Reuse idle agent.
@@ -1128,7 +1113,8 @@ export class BridgeServer {
         s.score >= 100 &&
         s.agent.status === "stopped" &&
         modelMatches(s.agent.model) &&
-        worktreeOk(s.agent.id),
+        worktreeOk(s.agent.id) &&
+        taskBindingOk(s.agent.id),
     );
 
     if (restartable.length > 0) {
@@ -1371,6 +1357,54 @@ export class BridgeServer {
     };
   }
 
+  private findLiveTaskAgent(
+    agents: AgentInstance[],
+    projectId: string | undefined,
+    taskId: string | undefined,
+  ): AgentInstance | null {
+    if (!projectId || !taskId) return null;
+    const byTaskId = agents.find(
+      (a) =>
+        a.status !== "stopped" &&
+        a.status !== "error" &&
+        a.currentTaskId === taskId,
+    );
+    if (byTaskId) return byTaskId;
+    return (
+      agents.find(
+        (a) =>
+          a.status !== "stopped" &&
+          a.status !== "error" &&
+          isWorktreeIsolated(a.cwd, projectId, taskId),
+      ) ?? null
+    );
+  }
+
+  private routeToTaskAgent(
+    agent: AgentInstance,
+    instruction: string,
+    taskId: string,
+  ): DispatchTaskResponse {
+    this.ptyManager.writeAndSubmit(agent.ptySessionId, instruction);
+    if (agent.status === "idle") {
+      this.agentManager.setStatus(agent.id, "working");
+    }
+    this.syncAgentStatus(agent.id, "working", taskId);
+    console.log(
+      `[BridgeServer] Dispatch: routed to task-bound agent '${agent.name}' (task=${taskId})`,
+    );
+    return {
+      success: true,
+      action: "reused",
+      agentId: agent.id,
+      agentName: agent.name,
+      model: agent.model,
+      score: 0,
+      reason: `Agent already bound to task ${taskId} — routed instead of reassigning or spawning a duplicate.`,
+      taskId,
+    };
+  }
+
   // ── Scoring (delegated to dispatch-scoring.ts) ───────────────
 
   private scoreAgents(
@@ -1534,6 +1568,7 @@ export class BridgeServer {
       role: params.role,
       command: params.command || this.getDefaultCommand(params.model),
       cwd,
+      currentTaskId: prep.taskId ?? params.taskId ?? null,
       initialPrompt,
       projectId: params.projectId,
       complexity: params.complexity,
@@ -1606,15 +1641,18 @@ export class BridgeServer {
   private syncAgentStatus(
     agentId: string,
     status: AgentStatus,
-    currentTaskId?: string,
+    currentTaskId?: string | null,
   ): void {
     // Include agentName so the renderer can match by name (Firestore doc ID != AgentManager UUID)
     const agent = this.agentManager.getAgent(agentId);
+    if (currentTaskId !== undefined) {
+      this.agentManager.setCurrentTask(agentId, currentTaskId);
+    }
     this.broadcast("agent:syncStatus", {
       agentId,
       agentName: agent?.name || "",
       status,
-      currentTaskId: currentTaskId || null,
+      currentTaskId: currentTaskId ?? null,
     });
   }
 
@@ -1680,8 +1718,10 @@ export class BridgeServer {
         return;
       }
 
-      this.agentManager.setStatus(agent.id, params.status as AgentStatus);
-      this.syncAgentStatus(agent.id, params.status as AgentStatus);
+      const nextStatus = params.status as AgentStatus;
+      const nextTaskId = nextStatus === "working" ? undefined : null;
+      this.agentManager.setStatus(agent.id, nextStatus);
+      this.syncAgentStatus(agent.id, nextStatus, nextTaskId);
       console.log(
         `[BridgeServer] Set agent "${agent.name}" status → ${params.status}`,
       );

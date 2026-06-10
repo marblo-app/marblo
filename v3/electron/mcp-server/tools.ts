@@ -794,6 +794,12 @@ export function registerTools(server: McpServer): void {
         );
       }
 
+      if (task.claimedBy) {
+        return text(
+          `Error: Task is not available for claiming (already claimed by ${task.claimedBy}).`,
+        );
+      }
+
       if (!task.dependsOnCompleted) {
         return text("Error: Task dependencies are not yet met.");
       }
@@ -808,6 +814,7 @@ export function registerTools(server: McpServer): void {
         // Re-check inside the transaction — closes the claim race the
         // outside-the-txn `task.status !== "TODO"` check above can't.
         validateFrom: (s) => s === "TODO",
+        validateTask: (t) => t.claimedBy == null,
       });
 
       const lines = [
