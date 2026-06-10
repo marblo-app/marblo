@@ -979,6 +979,37 @@ interface CostRow {
   pricingSnapshot?: string;
 }
 
+interface CostSummaryByDayRow {
+  date: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  cost: number;
+}
+
+interface CostSummaryWeeklyByModelRow {
+  model: string;
+  totalTokens: number;
+  cost: number;
+}
+
+interface CostSummaryAggregateRow {
+  date?: string;
+  model?: string;
+  inputTokens?: number | string;
+  outputTokens?: number | string;
+  cacheReadTokens?: number | string;
+  cacheWriteTokens?: number | string;
+  totalTokens?: number | string;
+  cost?: number | string;
+}
+
+const toNumber = (value: number | string | undefined): number =>
+  Number(value ?? 0);
+
 export const logCostBatch = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Login required");
@@ -1050,6 +1081,124 @@ export const getCostLogs = functions.https.onCall(async (data, context) => {
   });
 
   return { logs: rows };
+});
+
+// Query aggregated cost summary from BigQuery for dashboard charts
+export const getCostSummary = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Login required");
+  }
+
+  const projectId: string = data.projectId;
+  if (!projectId) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "projectId required",
+    );
+  }
+
+  const requestedDays = Number(data.days ?? 30);
+  if (!Number.isInteger(requestedDays) || requestedDays <= 0) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "days must be a positive integer",
+    );
+  }
+
+  const userId = context.auth.uid;
+  const weeklyDays = 7;
+
+  const byDayQuery = `
+    SELECT
+      FORMAT_DATE('%F', DATE(timestamp)) AS date,
+      COALESCE(model, '') AS model,
+      SUM(COALESCE(inputTokens, 0)) AS inputTokens,
+      SUM(COALESCE(outputTokens, 0)) AS outputTokens,
+      SUM(COALESCE(cacheReadTokens, 0)) AS cacheReadTokens,
+      SUM(COALESCE(cacheWriteTokens, 0)) AS cacheWriteTokens,
+      SUM(
+        COALESCE(inputTokens, 0) +
+        COALESCE(outputTokens, 0) +
+        COALESCE(cacheReadTokens, 0) +
+        COALESCE(cacheWriteTokens, 0)
+      ) AS totalTokens,
+      SUM(COALESCE(totalCost, 0)) AS cost
+    FROM \`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\`
+    WHERE userId = @userId
+      AND projectId = @projectId
+      AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+    GROUP BY date, model
+    ORDER BY date ASC, model ASC
+  `;
+
+  const weeklyByModelQuery = `
+    SELECT
+      COALESCE(model, '') AS model,
+      SUM(
+        COALESCE(inputTokens, 0) +
+        COALESCE(outputTokens, 0) +
+        COALESCE(cacheReadTokens, 0) +
+        COALESCE(cacheWriteTokens, 0)
+      ) AS totalTokens,
+      SUM(COALESCE(totalCost, 0)) AS cost
+    FROM \`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\`
+    WHERE userId = @userId
+      AND projectId = @projectId
+      AND timestamp >= TIMESTAMP_SUB(
+        CURRENT_TIMESTAMP(),
+        INTERVAL @weeklyDays DAY
+      )
+    GROUP BY model
+    ORDER BY model ASC
+  `;
+
+  const [[byDayRows], [weeklyByModelRows]] = await Promise.all([
+    bigquery.query({
+      query: byDayQuery,
+      params: { userId, projectId, days: requestedDays },
+      location: "us-central1",
+    }),
+    bigquery.query({
+      query: weeklyByModelQuery,
+      params: { userId, projectId, weeklyDays },
+      location: "us-central1",
+    }),
+  ]);
+
+  const byDay: CostSummaryByDayRow[] = (
+    byDayRows as CostSummaryAggregateRow[]
+  ).map((row) => ({
+    date: row.date ?? "",
+    model: row.model ?? "",
+    inputTokens: toNumber(row.inputTokens),
+    outputTokens: toNumber(row.outputTokens),
+    cacheReadTokens: toNumber(row.cacheReadTokens),
+    cacheWriteTokens: toNumber(row.cacheWriteTokens),
+    totalTokens: toNumber(row.totalTokens),
+    cost: toNumber(row.cost),
+  }));
+
+  const weeklyByModel: CostSummaryWeeklyByModelRow[] = (
+    weeklyByModelRows as CostSummaryAggregateRow[]
+  ).map((row) => ({
+    model: row.model ?? "",
+    totalTokens: toNumber(row.totalTokens),
+    cost: toNumber(row.cost),
+  }));
+
+  const weeklyTotalTokens = weeklyByModel.reduce(
+    (total, row) => total + row.totalTokens,
+    0,
+  );
+  const weeklyCost = weeklyByModel.reduce((total, row) => total + row.cost, 0);
+
+  return {
+    byDay,
+    weeklyByModel,
+    weeklyTotalTokens,
+    weeklyCost,
+    rangeDays: requestedDays,
+  };
 });
 
 // ─── Task Outcomes → BigQuery ────────────────────────────────
