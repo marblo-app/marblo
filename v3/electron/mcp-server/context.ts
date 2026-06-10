@@ -71,6 +71,39 @@ export function computeContextIdBackfill(
     .map((t) => ({ id: t.id, contextId: t.missionId ?? "board" }));
 }
 
+/**
+ * Effective contextId of a task on the READ path. Applies the same backfill
+ * rule as computeContextIdBackfill (missionId wins, else "board") in memory,
+ * without mutating the doc. This is what lets legacy/externally-created tasks
+ * that were stored without a contextId still resolve to the board context
+ * instead of disappearing from it.
+ */
+export function effectiveContextId(task: {
+  contextId?: string;
+  missionId?: string;
+}): string {
+  return task.contextId || (task.missionId ?? "board");
+}
+
+/**
+ * Whether a task is visible under the given read-scope context.
+ *  - "" (unscoped) → every task is visible (no context filter).
+ *  - "board" → tasks effectively on the board, INCLUDING legacy tasks stored
+ *    without a contextId (effectiveContextId backfills them to "board"). This is
+ *    the regression fix: a single Firestore `==` cannot express
+ *    "contextId == 'board' OR contextId unset", so the board read must filter in
+ *    memory. A lane (lane:*) or mission task carries an explicit, non-board
+ *    contextId, so it never matches "board" — the lane-isolation invariant holds.
+ *  - any other context (lane:* / missionId) → exact effective-contextId match.
+ */
+export function isTaskInReadContext(
+  task: { contextId?: string; missionId?: string },
+  contextId: string,
+): boolean {
+  if (!contextId) return true;
+  return effectiveContextId(task) === contextId;
+}
+
 // ── Mission step report (B안 Phase 2 — 오케스트레이터 → 지휘자 보고 채널) ──
 // 설계: v3/docs/MISSIONS-B-ORCHESTRATOR-DRIVEN.md §4 / §8.4.
 //

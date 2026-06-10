@@ -19,6 +19,7 @@ import {
   resolveContextForWrite,
   resolveMissionContextForWrite,
   contextReadFilter,
+  isTaskInReadContext,
   buildMissionStepReportedEvent,
   type MissionStepReportedEvent,
 } from "./context.js";
@@ -449,18 +450,30 @@ export function registerTools(server: McpServer): void {
       // leaked into the board orchestrator's awareness and got dispatched/
       // discussed there — the surviving PTY-contamination path after P3.
       const contextId = resolveContext();
+      // The board context must also surface legacy/externally-created TODOs that
+      // were stored without a contextId. Firestore can't OR "contextId=='board'"
+      // with "contextId unset" in a single `==`, so for board we drop the
+      // Firestore context filter and match on the effective (backfilled)
+      // contextId in memory below. Non-board contexts (lane:* / mission) always
+      // carry an explicit contextId on write, so they keep the strict Firestore
+      // `==` and never leak into the board feed.
+      const filterContextInMemory = contextId === "board";
       const constraints: QueryConstraint[] = [
         where("status", "==", "TODO"),
         where("role", "==", role),
       ];
       if (projectId) constraints.push(where("projectId", "==", projectId));
-      if (contextId) constraints.push(where("contextId", "==", contextId));
+      if (contextId && !filterContextInMemory)
+        constraints.push(where("contextId", "==", contextId));
 
       const q = query(collection(db, "tasks"), ...constraints);
       const snap = await getDocs(q);
 
       const tasks = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }) as TaskDoc)
+        .filter(
+          (t) => !filterContextInMemory || isTaskInReadContext(t, contextId),
+        )
         .filter((t) => t.dependsOnCompleted)
         .sort((a, b) => b.priority - a.priority);
 

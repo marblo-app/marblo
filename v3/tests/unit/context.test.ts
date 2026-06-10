@@ -5,6 +5,8 @@ import {
   contextReadFilter,
   contextForKind,
   computeContextIdBackfill,
+  effectiveContextId,
+  isTaskInReadContext,
 } from "../../electron/mcp-server/context";
 // The one-off backfill script duplicates computeContextIdBackfill (it cannot
 // import the TS source without a build step). Import that copy here so the
@@ -91,5 +93,89 @@ describe("computeContextIdBackfill parity (context.ts ↔ backfill-context-id.mj
         computeContextIdBackfill(tasks),
       );
     });
+  });
+});
+
+describe("effectiveContextId (read-path backfill)", () => {
+  it("returns the explicit contextId when present", () => {
+    expect(effectiveContextId({ contextId: "board" })).toBe("board");
+    expect(effectiveContextId({ contextId: "lane:abc" })).toBe("lane:abc");
+    expect(effectiveContextId({ contextId: "mission-7" })).toBe("mission-7");
+  });
+  it("backfills a missing contextId to the missionId when set", () => {
+    expect(effectiveContextId({ missionId: "m1" })).toBe("m1");
+    expect(effectiveContextId({ contextId: "", missionId: "m1" })).toBe("m1");
+  });
+  it("backfills a missing contextId (and no mission) to 'board'", () => {
+    expect(effectiveContextId({})).toBe("board");
+    expect(effectiveContextId({ contextId: "" })).toBe("board");
+    expect(effectiveContextId({ contextId: undefined })).toBe("board");
+  });
+  it("agrees with computeContextIdBackfill on unlabeled tasks (one rule, two paths)", () => {
+    const tasks = [{ id: "a" }, { id: "b", missionId: "m1" }];
+    const backfilled = computeContextIdBackfill(tasks);
+    for (const t of tasks) {
+      const expected = backfilled.find((b) => b.id === t.id)!.contextId;
+      expect(effectiveContextId(t)).toBe(expected);
+    }
+  });
+});
+
+describe("isTaskInReadContext", () => {
+  it("unscoped ('') sees every task", () => {
+    expect(isTaskInReadContext({ contextId: "lane:x" }, "")).toBe(true);
+    expect(isTaskInReadContext({}, "")).toBe(true);
+  });
+  it("board includes a task with an explicit 'board' contextId", () => {
+    expect(isTaskInReadContext({ contextId: "board" }, "board")).toBe(true);
+  });
+  it("★회귀: board includes a legacy/external TODO stored without a contextId", () => {
+    expect(isTaskInReadContext({}, "board")).toBe(true);
+    expect(isTaskInReadContext({ contextId: "" }, "board")).toBe(true);
+    expect(isTaskInReadContext({ contextId: undefined }, "board")).toBe(true);
+  });
+  it("★lane 격리 불변: a lane task never leaks into the board feed", () => {
+    expect(isTaskInReadContext({ contextId: "lane:abc" }, "board")).toBe(false);
+    expect(isTaskInReadContext({ contextId: "lane:" }, "board")).toBe(false);
+  });
+  it("a mission task does not leak into the board feed", () => {
+    expect(isTaskInReadContext({ contextId: "mission-xyz" }, "board")).toBe(
+      false,
+    );
+    // contextId 미설정이라도 missionId 가 있으면 board 가 아니라 그 미션 소속.
+    expect(isTaskInReadContext({ missionId: "m1" }, "board")).toBe(false);
+  });
+  it("a lane read matches only its own lane (exact, no cross-lane leak)", () => {
+    expect(isTaskInReadContext({ contextId: "lane:abc" }, "lane:abc")).toBe(
+      true,
+    );
+    expect(isTaskInReadContext({ contextId: "lane:other" }, "lane:abc")).toBe(
+      false,
+    );
+    expect(isTaskInReadContext({}, "lane:abc")).toBe(false);
+  });
+});
+
+describe("get_available_tasks board filter (회귀 시나리오)", () => {
+  // production 의 board 경로와 동일한 술어를 가져온 docs 에 적용:
+  // tasks.filter((t) => isTaskInReadContext(t, "board")).
+  const tasks = [
+    { id: "legacy", role: "backend" }, // contextId 미설정(외부/legacy) → board 포함
+    { id: "board1", role: "backend", contextId: "board" },
+    { id: "lane1", role: "backend", contextId: "lane:q1" }, // 누출 금지
+    { id: "mission1", role: "backend", contextId: "mission-7" }, // 누출 금지
+    { id: "missionLegacy", role: "backend", missionId: "mission-7" }, // contextId 없지만 미션 소속 → 누출 금지
+  ];
+  it("board 가용 목록은 board+미설정만 포함하고 lane/mission 은 제외한다", () => {
+    const visible = tasks
+      .filter((t) => isTaskInReadContext(t, "board"))
+      .map((t) => t.id);
+    expect(visible).toEqual(["legacy", "board1"]);
+  });
+  it("lane:q1 컨텍스트로 읽으면 board/미설정/타lane 은 안 보이고 자기 lane 만 보인다", () => {
+    const visible = tasks
+      .filter((t) => isTaskInReadContext(t, "lane:q1"))
+      .map((t) => t.id);
+    expect(visible).toEqual(["lane1"]);
   });
 });
