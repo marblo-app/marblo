@@ -135,6 +135,8 @@ interface AgentAPI {
       detectedPlanType?: string;
       rateLimitPercent?: number;
       rateLimitResetAt?: number;
+      rateLimitWeeklyPercent?: number;
+      rateLimitWeeklyResetAt?: number;
     }) => void,
   ) => void;
   offCostUpdate: () => void;

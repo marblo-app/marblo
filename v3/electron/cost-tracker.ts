@@ -40,8 +40,12 @@ export interface CostEntry {
   // Subscription / rate-limit (codex only; undefined otherwise). Latest
   // snapshot, not a delta — the writer SETs these on the agent doc.
   detectedPlanType?: string;
-  rateLimitPercent?: number;
+  rateLimitPercent?: number; // 5h(primary) window used %
   rateLimitResetAt?: number;
+  // Weekly(7-day / secondary) window. Provider-agnostic field names so a
+  // future Claude statusline-capture source (Phase 1b) reuses the same pipe.
+  rateLimitWeeklyPercent?: number;
+  rateLimitWeeklyResetAt?: number;
 }
 
 // Patent claim 8 (단락 256-264): 서로 다른 과금체계가 적용되는 2 이상의
@@ -212,6 +216,9 @@ interface SessionTracker {
   // Last rate-limit % emitted — so we only re-emit on change (codex), not
   // every 15s tick when only the rate-limit (and no tokens) is present.
   lastRlPercent?: number;
+  // Same for the weekly (7-day / secondary) window — re-emit when it moves
+  // even if the 5h primary and token totals didn't.
+  lastRlWeeklyPercent?: number;
   timer: ReturnType<typeof setInterval>;
 }
 
@@ -374,10 +381,7 @@ export class CostTracker {
     return created;
   }
 
-  private computeDeltaCost(
-    pricing: ModelPricing,
-    delta: TokenTotals,
-  ): number {
+  private computeDeltaCost(pricing: ModelPricing, delta: TokenTotals): number {
     if (pricing.scheme === "subscription") {
       const monthly = this.getMonthlySubscriptionTotals(pricing);
       return this.computeIncrementalCost(
@@ -631,10 +635,16 @@ export class CostTracker {
       delta.cacheRead > 0 ||
       delta.cacheWrite > 0;
     const rlPercent = rateLimit?.primaryPercent ?? undefined;
+    const rlWeeklyPercent = rateLimit?.secondaryPercent ?? undefined;
     const rlChanged =
       typeof rlPercent === "number" && rlPercent !== tracker.lastRlPercent;
-    if (!hasTokens && !rlChanged) return;
+    const rlWeeklyChanged =
+      typeof rlWeeklyPercent === "number" &&
+      rlWeeklyPercent !== tracker.lastRlWeeklyPercent;
+    if (!hasTokens && !rlChanged && !rlWeeklyChanged) return;
     if (typeof rlPercent === "number") tracker.lastRlPercent = rlPercent;
+    if (typeof rlWeeklyPercent === "number")
+      tracker.lastRlWeeklyPercent = rlWeeklyPercent;
 
     const acc = tracker.accumulated;
 
@@ -665,6 +675,8 @@ export class CostTracker {
       detectedPlanType: rateLimit?.planType ?? undefined,
       rateLimitPercent: rlPercent,
       rateLimitResetAt: rateLimit?.primaryResetAt ?? undefined,
+      rateLimitWeeklyPercent: rlWeeklyPercent,
+      rateLimitWeeklyResetAt: rateLimit?.secondaryResetAt ?? undefined,
     });
 
     console.log(

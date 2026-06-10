@@ -188,6 +188,39 @@ describe("parseSessionDelta — codex (cumulative watermark)", () => {
       cacheWrite: 0,
     });
   });
+
+  // §Phase1a: 주간(7일/secondary) 윈도우도 캡처돼야 cost-tracker 가
+  // rateLimitWeekly* 로 흘려보낸다. primary(5h)와 함께 둘 다 보존되는지 확인.
+  it("captures both primary(5h) and secondary(weekly) rate-limit windows", () => {
+    const withRl = JSON.stringify({
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: null,
+        rate_limits: {
+          plan_type: "pro",
+          primary: { used_percent: 12, window_minutes: 300, resets_at: 111 },
+          secondary: {
+            used_percent: 34,
+            window_minutes: 10080,
+            resets_at: 222,
+          },
+        },
+      },
+    });
+    const { newState } = parseSessionDelta(
+      "codex",
+      [meta, withRl],
+      newParseState(),
+    );
+    expect(newState.rateLimit).toMatchObject({
+      planType: "pro",
+      primaryPercent: 12,
+      primaryResetAt: 111,
+      secondaryPercent: 34,
+      secondaryResetAt: 222,
+    });
+  });
 });
 
 describe("parseSessionDelta — gemini", () => {

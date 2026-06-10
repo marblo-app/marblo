@@ -61,6 +61,10 @@ export function useCostWriter() {
           update.rateLimitPercent = data.rateLimitPercent;
         if (typeof data.rateLimitResetAt === "number")
           update.rateLimitResetAt = data.rateLimitResetAt;
+        if (typeof data.rateLimitWeeklyPercent === "number")
+          update.rateLimitWeeklyPercent = data.rateLimitWeeklyPercent;
+        if (typeof data.rateLimitWeeklyResetAt === "number")
+          update.rateLimitWeeklyResetAt = data.rateLimitWeeklyResetAt;
         updateDoc(ref, update).catch((err) => {
           // Doc may not exist yet (e.g. orchestrator session) — ignore.
           console.warn(

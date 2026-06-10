@@ -1028,6 +1028,8 @@ const costTracker = new CostTracker((agentId, cost) => {
     detectedPlanType: cost.detectedPlanType,
     rateLimitPercent: cost.rateLimitPercent,
     rateLimitResetAt: cost.rateLimitResetAt,
+    rateLimitWeeklyPercent: cost.rateLimitWeeklyPercent,
+    rateLimitWeeklyResetAt: cost.rateLimitWeeklyResetAt,
   };
   if (projectId) {
     sendToProject(projectId, "cost:update", costPayload);

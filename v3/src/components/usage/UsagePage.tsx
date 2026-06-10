@@ -96,11 +96,15 @@ export function UsagePage() {
         <SummaryCard label="총 토큰" value={formatTokens(totals.tokens)} />
         <SummaryCard
           label="Input / Output"
-          value={`${formatTokens(totals.input)} / ${formatTokens(totals.output)}`}
+          value={`${formatTokens(totals.input)} / ${formatTokens(
+            totals.output,
+          )}`}
         />
         <SummaryCard
           label="Cache (R/W)"
-          value={`${formatTokens(totals.cacheRead)} / ${formatTokens(totals.cacheWrite)}`}
+          value={`${formatTokens(totals.cacheRead)} / ${formatTokens(
+            totals.cacheWrite,
+          )}`}
         />
       </div>
 
@@ -263,7 +267,9 @@ function DailyTrend({ logs, agents }: { logs: CostLog[]; agents: Agent[] }) {
                 .filter((f) => fams[f])
                 .map(
                   (f) =>
-                    `${MODEL_FAMILY_META[f]?.label || f}: ${fmt(valOf(fams[f]))}`,
+                    `${MODEL_FAMILY_META[f]?.label || f}: ${fmt(
+                      valOf(fams[f]),
+                    )}`,
                 )
                 .join("\n");
             return (
@@ -340,11 +346,57 @@ const RATE_LIMIT_GUIDANCE: Record<
   },
 };
 
+/** epoch seconds → 짧은 상대 리셋 표기 ("3일 후" / "5시간 후" / "곧"). */
+function fmtReset(epochSeconds: number): string {
+  const ms = epochSeconds * 1000 - Date.now();
+  if (ms <= 0) return "곧";
+  const hours = ms / 3_600_000;
+  if (hours >= 24) return `${Math.round(hours / 24)}일 후`;
+  if (hours >= 1) return `${Math.round(hours)}시간 후`;
+  return `${Math.max(1, Math.round(ms / 60_000))}분 후`;
+}
+
+/** 단일 한도 윈도우(5h / 주간) 게이지. percent = 사용%, 표기는 "남음" 기준. */
+function WindowGauge({
+  label,
+  percent,
+  resetAt,
+}: {
+  label: string;
+  percent: number;
+  resetAt?: number;
+}) {
+  const remaining = Math.max(0, 100 - percent);
+  return (
+    <div className="mt-2">
+      <div className="flex items-center justify-between text-[11px] text-gray-400">
+        <span>{label}</span>
+        <span className="font-mono text-gray-300">
+          {remaining.toFixed(0)}% 남음
+          {typeof resetAt === "number" ? ` · ${fmtReset(resetAt)} 리셋` : ""}
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-700">
+        <div
+          className={`h-full ${
+            percent >= 90
+              ? "bg-red-500"
+              : percent >= 70
+                ? "bg-amber-500"
+                : "bg-green-500"
+          }`}
+          style={{ width: `${Math.min(100, percent)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 /**
- * Rate-limit status per model in use. Live percent/reset data isn't plumbed
- * to the frontend yet (Codex exposes it in rollout rate_limits; capture is a
- * follow-up backend task), so for now this surfaces per-model guidance and a
- * live gauge when an agent doc carries `rateLimitPercent`.
+ * Rate-limit status per model in use. Surfaces the live 5h(primary) and
+ * weekly(7-day/secondary) windows when an agent doc carries them. Codex emits
+ * both in its rollout `rate_limits`; Claude weekly capture (statusline) is a
+ * Phase 1b follow-up that reuses the same `rateLimitWeekly*` fields.
  */
 function RateLimitPanel({ agents }: { agents: Agent[] }) {
   const modelsInUse = useMemo(() => {
@@ -364,11 +416,20 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
             icon: "⚪",
             note: "한도 정보 없음",
           };
-          // Defensive read: live percent may land on the agent doc later.
-          const live = agents
-            .filter((a) => (a.model || "claude") === model)
-            .map((a) => (a as { rateLimitPercent?: number }).rateLimitPercent)
-            .find((p) => typeof p === "number");
+          // 5h(primary) + 주간(7일/secondary) 윈도우를 agent doc 에서 읽는다.
+          // codex 가 둘 다 emit, claude 주간은 Phase 1b 캡처로 같은 필드 채움.
+          const forModel = agents.filter(
+            (a) => (a.model || "claude") === model,
+          );
+          const num = (vals: (number | undefined)[]) =>
+            vals.find((p) => typeof p === "number");
+          const live = num(forModel.map((a) => a.rateLimitPercent));
+          const liveReset = num(forModel.map((a) => a.rateLimitResetAt));
+          const weekly = num(forModel.map((a) => a.rateLimitWeeklyPercent));
+          const weeklyReset = num(
+            forModel.map((a) => a.rateLimitWeeklyResetAt),
+          );
+          const headline = typeof weekly === "number" ? weekly : live;
           return (
             <div
               key={model}
@@ -379,25 +440,22 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
                 <span className="text-sm font-medium text-gray-200">
                   {g.label}
                 </span>
-                {typeof live === "number" && (
+                {typeof headline === "number" && (
                   <span className="ml-auto font-mono text-xs text-gray-300">
-                    {live.toFixed(0)}%
+                    {typeof weekly === "number" ? "주간 " : ""}
+                    {Math.max(0, 100 - headline).toFixed(0)}% 남음
                   </span>
                 )}
               </div>
               {typeof live === "number" && (
-                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-700">
-                  <div
-                    className={`h-full ${
-                      live >= 90
-                        ? "bg-red-500"
-                        : live >= 70
-                          ? "bg-amber-500"
-                          : "bg-green-500"
-                    }`}
-                    style={{ width: `${Math.min(100, live)}%` }}
-                  />
-                </div>
+                <WindowGauge label="5시간" percent={live} resetAt={liveReset} />
+              )}
+              {typeof weekly === "number" && (
+                <WindowGauge
+                  label="주간(7일)"
+                  percent={weekly}
+                  resetAt={weeklyReset}
+                />
               )}
               <p className="mt-2 text-[11px] leading-snug text-gray-500">
                 {g.note}
@@ -407,8 +465,8 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
         })}
       </div>
       <p className="text-[11px] text-gray-600">
-        ⓘ 라이브 한도(used_percent / 리셋 시각) 실시간 추적은 후속 백엔드
-        작업에서 연결됩니다.
+        ⓘ Codex 는 5시간·주간(7일) 한도를 rollout 에서 실시간 표기합니다. Claude
+        주간 한도 표기는 후속(Phase 1b, statusline 캡처)에서 연결됩니다.
       </p>
     </Section>
   );

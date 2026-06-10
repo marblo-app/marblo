@@ -156,6 +156,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
         detectedPlanType?: string;
         rateLimitPercent?: number;
         rateLimitResetAt?: number;
+        rateLimitWeeklyPercent?: number;
+        rateLimitWeeklyResetAt?: number;
       }) => void,
     ) => {
       ipcRenderer.on("cost:update", (_event, data) => callback(data));

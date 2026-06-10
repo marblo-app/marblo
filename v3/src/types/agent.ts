@@ -33,4 +33,6 @@ export interface Agent {
   detectedPlanType?: string; // e.g. "plus", "pro" (codex plan_type)
   rateLimitPercent?: number; // 0-100, codex primary window used_percent
   rateLimitResetAt?: number; // epoch seconds, codex primary window reset
+  rateLimitWeeklyPercent?: number; // 0-100, weekly(7d/secondary) window used %
+  rateLimitWeeklyResetAt?: number; // epoch seconds, weekly window reset
 }
