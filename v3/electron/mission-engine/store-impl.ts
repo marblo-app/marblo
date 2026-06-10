@@ -83,7 +83,7 @@ function summarizeEventPayload(event: TimelineEvent): string {
   }
 }
 
-function rawToMission(id: string, raw: MissionDoc): Mission {
+export function rawToMission(id: string, raw: MissionDoc): Mission {
   return {
     id,
     projectId: raw.projectId,
@@ -100,7 +100,7 @@ function rawToMission(id: string, raw: MissionDoc): Mission {
     taskIds: raw.taskIds ?? [],
     contextLog: (raw.contextLog ?? []).map((e) => ({
       ...e,
-      ts: toDate(e.ts),
+      ts: e.ts ? toDate(e.ts) : new Date(),
     })),
     launchedAt: raw.launchedAt ? toDate(raw.launchedAt) : new Date(),
     lastActivityAt: raw.lastActivityAt
