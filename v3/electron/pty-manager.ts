@@ -20,6 +20,7 @@ const SUBMIT_SIGNAL = /esc to interrupt|[✻✶✳✽✢]|↓\s*\d+\s*tokens|tok
 
 export class PtyManager {
   private sessions: Map<string, PtySession> = new Map();
+  private writeAndSubmitQueues: Map<string, Promise<void>> = new Map();
 
   create(
     id: string,
@@ -95,6 +96,41 @@ export class PtyManager {
   ): void {
     const session = this.sessions.get(id);
     if (!session) return;
+
+    const previous = this.writeAndSubmitQueues.get(id) ?? Promise.resolve();
+    const next = previous
+      .catch(() => {
+        // Keep later writes moving even if an earlier queued submit failed.
+      })
+      .then(() =>
+        this.performWriteAndSubmit(id, session, text, delayMs, bracketedPaste),
+      );
+
+    this.writeAndSubmitQueues.set(id, next);
+    void next
+      .catch((err: unknown) => {
+        console.error(
+          `[PtyManager] writeAndSubmit failed for ${id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      })
+      .finally(() => {
+        if (this.writeAndSubmitQueues.get(id) === next) {
+          this.writeAndSubmitQueues.delete(id);
+        }
+      });
+  }
+
+  private async performWriteAndSubmit(
+    id: string,
+    session: PtySession,
+    text: string,
+    delayMs: number,
+    bracketedPaste: boolean,
+  ): Promise<void> {
+    if (this.sessions.get(id) !== session) return;
+
     if (bracketedPaste) {
       session.process.write(`\x1b[200~${text}\x1b[201~`);
     } else {
@@ -108,7 +144,8 @@ export class PtyManager {
     // unsubmitted — the user then has to press Enter manually. So instead of
     // trusting one gap, send the CR, watch the PTY for a submit signal, and
     // resend the CR if the agent didn't react.
-    setTimeout(() => this.submitWithRetry(id, 0), delayMs);
+    await this.sleep(delayMs);
+    await this.submitWithRetry(id, session, 0);
   }
 
   // Max number of CR (Enter) keystrokes to send before giving up.
@@ -122,43 +159,59 @@ export class PtyManager {
    * A redundant CR landing on an already-submitted/empty composer is a
    * no-op for the TUIs we drive, so over-sending is safe.
    */
-  private submitWithRetry(id: string, attempt: number): void {
-    const session = this.sessions.get(id);
-    if (!session) return;
+  private submitWithRetry(
+    id: string,
+    session: PtySession,
+    attempt: number,
+  ): Promise<void> {
+    if (this.sessions.get(id) !== session) return Promise.resolve();
 
-    let reacted = false;
-    const disposable = session.process.onData((chunk: string) => {
-      if (SUBMIT_SIGNAL.test(chunk)) reacted = true;
-    });
+    return new Promise((resolve) => {
+      let reacted = false;
+      const disposable = session.process.onData((chunk: string) => {
+        if (SUBMIT_SIGNAL.test(chunk)) reacted = true;
+      });
 
-    session.process.write("\r");
+      session.process.write("\r");
 
-    setTimeout(() => {
-      disposable.dispose();
-      if (reacted) {
-        if (attempt > 0) {
-          console.log(
-            `[PtyManager] submit confirmed for ${id} after ${attempt} retr${
-              attempt === 1 ? "y" : "ies"
-            }`,
-          );
+      setTimeout(() => {
+        disposable.dispose();
+        if (reacted) {
+          if (attempt > 0) {
+            console.log(
+              `[PtyManager] submit confirmed for ${id} after ${attempt} retr${
+                attempt === 1 ? "y" : "ies"
+              }`,
+            );
+          }
+          resolve();
+          return;
         }
-        return;
-      }
-      if (!this.sessions.has(id)) return;
-      if (attempt + 1 < PtyManager.SUBMIT_MAX_ATTEMPTS) {
-        console.warn(
-          `[PtyManager] Enter not registered for ${id} (attempt ${
-            attempt + 1
-          }/${PtyManager.SUBMIT_MAX_ATTEMPTS}) — resending CR`,
-        );
-        this.submitWithRetry(id, attempt + 1);
-      } else {
-        console.error(
-          `[PtyManager] Enter still not registered for ${id} after ${PtyManager.SUBMIT_MAX_ATTEMPTS} attempts — message may be sitting unsubmitted in the composer`,
-        );
-      }
-    }, PtyManager.SUBMIT_VERIFY_MS);
+        if (this.sessions.get(id) !== session) {
+          resolve();
+          return;
+        }
+        if (attempt + 1 < PtyManager.SUBMIT_MAX_ATTEMPTS) {
+          console.warn(
+            `[PtyManager] Enter not registered for ${id} (attempt ${
+              attempt + 1
+            }/${PtyManager.SUBMIT_MAX_ATTEMPTS}) — resending CR`,
+          );
+          void this.submitWithRetry(id, session, attempt + 1).then(resolve);
+        } else {
+          console.error(
+            `[PtyManager] Enter still not registered for ${id} after ${PtyManager.SUBMIT_MAX_ATTEMPTS} attempts — message may be sitting unsubmitted in the composer`,
+          );
+          resolve();
+        }
+      }, PtyManager.SUBMIT_VERIFY_MS);
+    });
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 
   resize(id: string, cols: number, rows: number): void {
