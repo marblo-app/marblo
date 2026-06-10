@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { modelTierForComplexity } from "../../electron/agent-config";
+import {
+  modelTierForComplexity,
+  resolveSimpleClaudeModel,
+  resolveSimpleCodexReasoning,
+} from "../../electron/agent-config";
 
 // 작업 complexity → 프로바이더별 모델/레벨. 디스패치 에이전트 비용 절감(quota):
 // claude=--model(sonnet/opus), gpt(codex)=reasoning(low/medium/high). complexity
@@ -14,6 +18,8 @@ describe("modelTierForComplexity", () => {
     "MARBLO_TOP_CLAUDE_MODEL",
     "MARBLO_TOP_CODEX_REASONING",
     "MARBLO_FABLE5_MIN_CLI",
+    "MARBLO_SIMPLE_CLAUDE_MODEL",
+    "MARBLO_SIMPLE_CODEX_REASONING",
   ];
   let saved: Record<string, string | undefined>;
   beforeEach(() => {
@@ -98,5 +104,46 @@ describe("modelTierForComplexity", () => {
       "medium",
     );
     expect(modelTierForComplexity("gpt", "simple").codexReasoning).toBe("low");
+  });
+
+  // ── §B: simple cheap 모델 env-configurable (isolate 물리스폰에서 사용) ──────
+
+  it("MARBLO_SIMPLE_CLAUDE_MODEL 은 simple claude 만 바꾸고 standard/complex 유지", () => {
+    process.env.MARBLO_SIMPLE_CLAUDE_MODEL = "haiku";
+    expect(modelTierForComplexity("claude", "simple").claudeModel).toBe(
+      "haiku",
+    );
+    // standard/complex 은 영향 없음(complex 는 별도 top resolver, env 미설정 → opus).
+    expect(modelTierForComplexity("claude", "standard").claudeModel).toBe(
+      "opus",
+    );
+    expect(modelTierForComplexity("claude", "complex").claudeModel).toBe(
+      "opus",
+    );
+  });
+
+  it("MARBLO_SIMPLE_CODEX_REASONING 은 simple codex 만 바꾸고 무효값은 low 폴백", () => {
+    process.env.MARBLO_SIMPLE_CODEX_REASONING = "medium";
+    expect(modelTierForComplexity("gpt", "simple").codexReasoning).toBe(
+      "medium",
+    );
+    process.env.MARBLO_SIMPLE_CODEX_REASONING = "bogus";
+    expect(modelTierForComplexity("gpt", "simple").codexReasoning).toBe("low");
+  });
+
+  it("resolveSimpleClaudeModel: env 미설정=sonnet(무회귀), 빈값=sonnet 폴백", () => {
+    expect(resolveSimpleClaudeModel()).toBe("sonnet");
+    process.env.MARBLO_SIMPLE_CLAUDE_MODEL = "   ";
+    expect(resolveSimpleClaudeModel()).toBe("sonnet");
+    process.env.MARBLO_SIMPLE_CLAUDE_MODEL = "OPUS";
+    expect(resolveSimpleClaudeModel()).toBe("opus"); // 소문자 정규화
+  });
+
+  it("resolveSimpleCodexReasoning: env 미설정=low(무회귀), 유효값만 통과", () => {
+    expect(resolveSimpleCodexReasoning()).toBe("low");
+    process.env.MARBLO_SIMPLE_CODEX_REASONING = "HIGH";
+    expect(resolveSimpleCodexReasoning()).toBe("high");
+    process.env.MARBLO_SIMPLE_CODEX_REASONING = "nonsense";
+    expect(resolveSimpleCodexReasoning()).toBe("low");
   });
 });

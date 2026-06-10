@@ -222,14 +222,38 @@ export function resolveTopCodexReasoning(): string {
   return ["low", "medium", "high"].includes(r) ? r : "high";
 }
 
+/** 기본 cheap Claude 모델 — simple 물리스폰(isolate)에서 사용. */
+export const DEFAULT_SIMPLE_CLAUDE_MODEL = "sonnet";
+
+/** simple(저난도) 에서 쓸 cheap Claude 모델. env MARBLO_SIMPLE_CLAUDE_MODEL,
+ * 기본 "sonnet". 빈 값이면 기본으로 폴백. (--model alias/id 를 그대로 전달) */
+export function resolveSimpleClaudeModel(): string {
+  const m = (
+    process.env.MARBLO_SIMPLE_CLAUDE_MODEL || DEFAULT_SIMPLE_CLAUDE_MODEL
+  )
+    .trim()
+    .toLowerCase();
+  return m || DEFAULT_SIMPLE_CLAUDE_MODEL;
+}
+
+/** simple 에서 쓸 cheap Codex reasoning effort. env MARBLO_SIMPLE_CODEX_REASONING,
+ * 기본 "low". 유효값(low/medium/high) 아니면 low 로 폴백. */
+export function resolveSimpleCodexReasoning(): string {
+  const r = (process.env.MARBLO_SIMPLE_CODEX_REASONING || "low")
+    .trim()
+    .toLowerCase();
+  return ["low", "medium", "high"].includes(r) ? r : "low";
+}
+
 // 작업 complexity → 프로바이더별 모델/레벨. 품질 우선 정책: 기본(standard)은
 // 최상위(claude=opus, gpt-5.5=medium)를 유지하고, 작은 작업(simple)만 한 단계 낮추며,
 // 어려운 작업(complex)은 최상위를 쓴다. complexity 가 undefined 면 override 하지 않아
 // 기본 모델을 상속한다(오케스트레이터 등). claude=--model, gpt(codex)=model_reasoning_effort.
-//   claude:  simple → sonnet,  standard → opus(리터럴),  complex → resolveTopClaudeModel()
-//   gpt:     simple → low,      standard → medium,        complex → resolveTopCodexReasoning()
-// ★결정1: complex 만 resolver 를 탄다. env 미설정 시 complex 도 opus/high 로 떨어져
-// 현행과 byte-identical(무회귀).
+//   claude:  simple → resolveSimpleClaudeModel(),  standard → opus(리터럴),  complex → resolveTopClaudeModel()
+//   gpt:     simple → resolveSimpleCodexReasoning(),  standard → medium,        complex → resolveTopCodexReasoning()
+// ★결정1: complex/simple 만 resolver 를 탄다. env 미설정 시 simple=sonnet/low,
+// complex=opus/high 로 떨어져 현행과 byte-identical(무회귀). simple 모델은
+// dispatch_task isolate=true(물리 cheap 스폰)일 때 비로소 실제로 쓰인다(§B).
 export type TaskComplexity = "simple" | "standard" | "complex";
 export function modelTierForComplexity(
   model: ModelType,
@@ -237,13 +261,15 @@ export function modelTierForComplexity(
 ): { claudeModel?: string; codexReasoning?: string } {
   if (!complexity) return {}; // override 없음 → 기본 상속
   if (model === "claude") {
-    if (complexity === "simple") return { claudeModel: "sonnet" }; // 하향
+    if (complexity === "simple")
+      return { claudeModel: resolveSimpleClaudeModel() }; // env, 기본 sonnet
     if (complexity === "complex")
       return { claudeModel: resolveTopClaudeModel() }; // env/버전가드/폴백(§3)
     return { claudeModel: "opus" }; // standard — 현행 리터럴 유지(무변동)
   }
   if (model === "gpt") {
-    if (complexity === "simple") return { codexReasoning: "low" };
+    if (complexity === "simple")
+      return { codexReasoning: resolveSimpleCodexReasoning() }; // env, 기본 low
     if (complexity === "complex")
       return { codexReasoning: resolveTopCodexReasoning() }; // env, 기본 high
     return { codexReasoning: "medium" };

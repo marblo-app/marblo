@@ -611,3 +611,52 @@ describe("dispatchTask — complex stages (§5)", () => {
     expect(am.launchCalls).toBe(1);
   });
 });
+
+// ── SPAWN-MODEL-ALLOCATION §B: simple cheap 물리스폰 opt-in (isolate) ──
+
+describe("dispatchTask — simple isolate (§B)", () => {
+  it("simple WITHOUT isolate → logical sub-agent (no physical spawn)", async () => {
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "isoTask00001",
+        complexity: "simple",
+        model: "claude",
+      }),
+    );
+    expect(res.action).toBe("logical");
+    expect(am.launchCalls).toBe(0);
+  });
+
+  it("simple WITH isolate=true → physical spawn (action=spawned)", async () => {
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "isoTask00002",
+        complexity: "simple",
+        model: "claude",
+        isolate: true,
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.action).toBe("spawned"); // logical 단락을 건너뜀
+    expect(am.launchCalls).toBe(1);
+  });
+
+  it("isolate is a no-op for non-simple (standard still spawns normally)", async () => {
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "isoTask00003",
+        complexity: "standard",
+        model: "claude",
+        isolate: true,
+      }),
+    );
+    expect(res.action).toBe("spawned");
+    expect(am.launchCalls).toBe(1);
+  });
+});

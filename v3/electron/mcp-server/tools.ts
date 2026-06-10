@@ -1757,6 +1757,15 @@ export function registerTools(server: McpServer): void {
             "dispatch 로 풀어 난도별 모델 매칭(설계→최상위, 기계적→cheap). " +
             "dependsOnPrevious 스텝은 순차, 아니면 병렬. complexity!=='complex' 면 무시됨.",
         ),
+      isolate: z
+        .boolean()
+        .optional()
+        .describe(
+          "★simple 전용 opt-in 물리스폰(기본 off). 기본은 complexity='simple' 이면 " +
+            "logical(오케 내부 서브에이전트)로 단락되는데, true 면 그 단락을 건너뛰고 " +
+            "cheap 모델(claude=sonnet, gpt=low)로 격리 worktree 물리 에이전트를 스폰한다. " +
+            "격리·병렬이 필요한 저난도 작업용. complexity!=='simple' 면 무시됨.",
+        ),
     },
     async ({
       role,
@@ -1769,6 +1778,7 @@ export function registerTools(server: McpServer): void {
       tags,
       mix,
       stages,
+      isolate,
     }) => {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
@@ -1899,6 +1909,19 @@ export function registerTools(server: McpServer): void {
         effectiveStages = undefined;
       }
 
+      // §B: isolate(simple cheap 물리스폰)는 simple 전용 opt-in. complexity!=="simple"
+      // 면 무시 + 경고(조용히 삼키지 않음). bridge 도 같은 가드를 둔다(simple 이 아니면
+      // 어차피 logical 단락을 안 타므로 isolate 가 무의미).
+      let effectiveIsolate = isolate;
+      if (isolate && complexity !== "simple") {
+        console.warn(
+          `[dispatch_task] isolate ignored — complexity='${
+            complexity || "standard"
+          }' (simple 전용).`,
+        );
+        effectiveIsolate = undefined;
+      }
+
       try {
         const response = await fetch(
           `http://127.0.0.1:${bridgePort}/dispatch-task`,
@@ -1916,6 +1939,7 @@ export function registerTools(server: McpServer): void {
               tags,
               mix: effectiveMix,
               stages: effectiveStages,
+              isolate: effectiveIsolate,
               projectId: process.env.MARBLO_PROJECT || "",
               // Forward parent agent id for owner fallback when projectId
               // is empty (external Claude Code → Marblo MCP path).

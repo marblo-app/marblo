@@ -226,7 +226,7 @@ MARBLO_MODEL_MIX            # default off. "cross-check" | "split-role" | "off"
 // agent-config.ts (현행)
 export function modelTierForComplexity(
   model: ModelType,
-  complexity: TaskComplexity | undefined
+  complexity: TaskComplexity | undefined,
 ): { claudeModel?: string; codexReasoning?: string };
 ```
 
@@ -362,6 +362,48 @@ dispatch_task(complexity="complex", mix?, stages?)
 | `complex_stages_dispatched` | 단계분할 디스패치                  | stageCount, perStageComplexity[]         |
 
 (텔레메트리 프라이버시는 memory 방침 — 자체 1차 비식별 상시수집/3rd-party 옵트인 — 을 따른다.)
+
+---
+
+## B. (확장 2026-06-10) simple 티어 cheap 물리스폰 opt-in (`isolate`)
+
+### B.1 동기
+
+`modelTierForComplexity`는 `simple → sonnet / codex low`를 돌려주지만, `bridge-server.ts`의 `dispatchSingle`이 **`complexity === "simple"`이면 무조건 `action="logical"`(오케 내부 서브에이전트)로 단락**시키므로, 그 cheap 모델 리터럴은 dispatch 경로에서 **실제로 한 번도 안 쓰이는 死코드**였다(2026-06-10 인앱 검증 중 확인). 즉 "쉬운 작업을 cheap 모델로 **격리/병렬 실행**"이 불가능했다 — logical은 오케 컨텍스트 안에서만 돈다.
+
+### B.2 결정 (사용자, 2026-06-10)
+
+기본은 **현행 logical 유지(가장 저렴, 무회귀)**. 단, 격리·병렬이 필요한 저난도 작업을 위해 **opt-in 물리스폰** 경로를 신설한다 — `dispatch_task(isolate: true)`. simple이라도 logical 단락을 건너뛰고 cheap 모델로 격리 worktree 물리 에이전트를 스폰한다.
+
+### B.3 cheap 모델 (env-configurable, 하드코딩 금지)
+
+| env                             | 기본     | 의미                                              |
+| ------------------------------- | -------- | ------------------------------------------------- |
+| `MARBLO_SIMPLE_CLAUDE_MODEL`    | `sonnet` | simple(isolate) Claude 모델 — `--model` alias/id  |
+| `MARBLO_SIMPLE_CODEX_REASONING` | `low`    | simple Codex reasoning effort(유효값만, 무효→low) |
+
+`resolveSimpleClaudeModel()` / `resolveSimpleCodexReasoning()`가 §3의 top resolver와 동일 스타일로 env를 읽는다. env 미설정 = `sonnet`/`low` → `modelTierForComplexity` 종전 리터럴과 **byte-identical(무회귀)**.
+
+### B.4 트리거 / 가드
+
+- `isolate`는 **simple 전용 opt-in**. `complexity !== "simple"`이면 무시 + 경고(조용히 안 삼킴) — `tools.ts`와 `bridge-server.ts` 양쪽 방어.
+- `isolate=false`(기본): `complexity==="simple"` → `action="logical"`(현행 100% 동일).
+- `isolate=true` + simple: logical 단락 skip → 통상 reuse/spawn 경로. fresh spawn 시 cheap 모델, 격리 worktree(다른 티어와 동일 경로).
+
+### B.5 흐름 요약
+
+```
+dispatch_task(complexity="simple", isolate?)
+  ├─ isolate=false(기본) → action="logical" (오케 내부 서브에이전트, 무스폰)
+  └─ isolate=true        → logical 단락 skip → reuse/spawn
+        └─ buildCLICommand → modelTierForComplexity("...", "simple")
+              ├─ claude → resolveSimpleClaudeModel()  (env, 기본 sonnet)
+              └─ gpt    → resolveSimpleCodexReasoning() (env, 기본 low)
+```
+
+### B.6 비용 안전
+
+물리스폰은 logical보다 비싸다(별도 프로세스). 그래서 **기본은 logical**이고, `isolate`는 격리/병렬 이득이 비용을 정당화할 때만 명시 발동한다. 스폰 자체는 cheap 티어이므로 standard/complex보다 저렴하며, `checkPlanConcurrency` 캡에 동일하게 종속.
 
 ---
 
