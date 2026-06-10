@@ -1181,7 +1181,7 @@ export class BridgeServer {
         | undefined) ||
       resolvePreset(process.env.MARBLO_MODEL_PRESET);
     const selectedModel =
-      model || this.scoreModels(enabledModels as ModelType[], tags);
+      model || this.scoreModels(enabledModels as ModelType[], tags, complexity);
     const agentName =
       params.nameHint ||
       `${role}-${selectedModel}-${Date.now().toString(36).slice(-4)}`;
@@ -1439,8 +1439,12 @@ export class BridgeServer {
     return scoreAgentsFn(infos, role, preferredModel, tags);
   }
 
-  private scoreModels(enabledModels: ModelType[], tags: string[]): ModelType {
-    return scoreModelsFn(enabledModels, tags);
+  private scoreModels(
+    enabledModels: ModelType[],
+    tags: string[],
+    complexity?: "simple" | "standard" | "complex",
+  ): ModelType {
+    return scoreModelsFn(enabledModels, tags, complexity);
   }
 
   /**

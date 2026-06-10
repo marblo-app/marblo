@@ -5,6 +5,7 @@ import * as path from "path";
 import {
   scoreAgents,
   scoreModels,
+  resolveSimpleAgyBias,
   checkSpawnConstraints,
   costEfficiencyScore,
   roleMatchIndex,
@@ -377,6 +378,92 @@ describe("scoreModels", () => {
       // winner; just assert the result stays within enabledModels.
       expect(["claude", "gemini"]).toContain(result);
     });
+  });
+});
+
+// ── §C: complexity→provider 소프트 라우팅 (simple→antigravity bias) ─────
+
+describe("scoreModels — simple→antigravity bias (§C)", () => {
+  let savedBias: string | undefined;
+  beforeEach(() => {
+    savedBias = process.env.MARBLO_AGY_SIMPLE_BIAS;
+    delete process.env.MARBLO_AGY_SIMPLE_BIAS;
+  });
+  afterEach(() => {
+    if (savedBias === undefined) delete process.env.MARBLO_AGY_SIMPLE_BIAS;
+    else process.env.MARBLO_AGY_SIMPLE_BIAS = savedBias;
+  });
+
+  it("resolveSimpleAgyBias: unset/0/음수/garbage → 0, 양수만 통과", () => {
+    expect(resolveSimpleAgyBias()).toBe(0);
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "0";
+    expect(resolveSimpleAgyBias()).toBe(0);
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "-5";
+    expect(resolveSimpleAgyBias()).toBe(0);
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "abc";
+    expect(resolveSimpleAgyBias()).toBe(0);
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "12";
+    expect(resolveSimpleAgyBias()).toBe(12);
+  });
+
+  it("bias OFF(미설정) + simple → 가점 없음(claude 선호 태그면 claude 유지=무회귀)", () => {
+    // architecture: claude +25, antigravity +0 → claude 압도(>tie-band).
+    const r = scoreModels(
+      ["claude", "antigravity"],
+      ["architecture"],
+      "simple",
+    );
+    expect(r).toBe("claude");
+  });
+
+  it("bias ON(큰 값) + simple → claude 선호 태그여도 antigravity 가 이김", () => {
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "100";
+    const r = scoreModels(
+      ["claude", "antigravity"],
+      ["architecture"],
+      "simple",
+    );
+    expect(r).toBe("antigravity");
+  });
+
+  it("bias ON + simple + 무태그 → 순수 round-robin 우회하고 antigravity 우위", () => {
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "100";
+    // 무태그여도 bias 가 hasTags 로 취급돼 점수 경쟁 → antigravity 압도.
+    const r = scoreModels(["claude", "antigravity"], [], "simple");
+    expect(r).toBe("antigravity");
+  });
+
+  it("bias ON 이어도 complexity=standard → 가점 없음(simple 전용)", () => {
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "100";
+    const r = scoreModels(
+      ["claude", "antigravity"],
+      ["architecture"],
+      "standard",
+    );
+    expect(r).toBe("claude");
+  });
+
+  it("bias ON 이어도 complexity=complex → 가점 없음(simple 전용)", () => {
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "100";
+    const r = scoreModels(
+      ["claude", "antigravity"],
+      ["architecture"],
+      "complex",
+    );
+    expect(r).toBe("claude");
+  });
+
+  it("bias ON + simple 이지만 antigravity 가 enabledModels 에 없으면 무효", () => {
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "100";
+    // architecture → claude 우위. 없는 antigravity 를 편애할 수 없음.
+    const r = scoreModels(["claude", "gpt"], ["architecture"], "simple");
+    expect(r).toBe("claude");
+  });
+
+  it("complexity 미지정(오케 경로)이면 bias 무관(무회귀)", () => {
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "100";
+    const r = scoreModels(["claude", "antigravity"], ["architecture"]);
+    expect(r).toBe("claude");
   });
 });
 

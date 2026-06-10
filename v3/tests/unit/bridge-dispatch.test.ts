@@ -660,3 +660,58 @@ describe("dispatchTask — simple isolate (§B)", () => {
     expect(am.launchCalls).toBe(1);
   });
 });
+
+// ── §C: complexity→provider 라우팅이 dispatch 경로까지 전달되는지(통합) ──
+
+describe("dispatchTask — simple→antigravity routing (§C)", () => {
+  let savedBias: string | undefined;
+  beforeEach(() => {
+    savedBias = process.env.MARBLO_AGY_SIMPLE_BIAS;
+  });
+  afterEach(() => {
+    if (savedBias === undefined) delete process.env.MARBLO_AGY_SIMPLE_BIAS;
+    else process.env.MARBLO_AGY_SIMPLE_BIAS = savedBias;
+  });
+
+  it("simple+isolate + bias → antigravity 로 스폰(complexity 가 scoreModels 까지 전달)", async () => {
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "100";
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "agyTask00001",
+        complexity: "simple",
+        isolate: true,
+        enabledModels: [
+          "claude",
+          "antigravity",
+        ] as DispatchTaskRequest["enabledModels"],
+        // 명시 model 없음 → scoreModels 가 고른다.
+      }),
+    );
+    expect(res.action).toBe("spawned");
+    const spawned = [...am.agents.values()];
+    expect(spawned.some((a) => a.model === "antigravity")).toBe(true);
+  });
+
+  it("명시 model 힌트는 bias 보다 우선(simple+isolate, model=claude → claude)", async () => {
+    process.env.MARBLO_AGY_SIMPLE_BIAS = "100";
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "agyTask00002",
+        complexity: "simple",
+        isolate: true,
+        model: "claude",
+        enabledModels: [
+          "claude",
+          "antigravity",
+        ] as DispatchTaskRequest["enabledModels"],
+      }),
+    );
+    expect(res.action).toBe("spawned");
+    const spawned = [...am.agents.values()];
+    expect(spawned.every((a) => a.model !== "antigravity")).toBe(true);
+  });
+});

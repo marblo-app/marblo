@@ -524,14 +524,42 @@ export function scoreAgents(
 // Round-robin counter for model selection when tags don't differentiate
 let modelRoundRobin = 0;
 
+// §C: complexity→provider 소프트 라우팅. 쉬운(simple) 작업에서 antigravity
+// 활용도를 점진적으로 높이기 위한 env-tunable 가점. `MARBLO_AGY_SIMPLE_BIAS`
+// (기본 "0" = off → 무회귀). 양수면 그만큼 antigravity 점수에 더한다. 작은 값
+// (예: 6~10)이면 claude(50)와 tie-band 안에서 round-robin = "조금씩" 활용,
+// 큰 값(예: 20)이면 simple 에서 antigravity 가 우위. 명시 model 힌트는 호출부
+// (selectedModel = model || scoreModels)에서 이미 우선되므로, 여기 도달 = 힌트
+// 없음. antigravity 가 enabledModels 에 없으면 0(없는 걸 편애하지 않음).
+export function resolveSimpleAgyBias(): number {
+  const n = Number((process.env.MARBLO_AGY_SIMPLE_BIAS || "0").trim());
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function simpleAgyBias(
+  complexity: "simple" | "standard" | "complex" | undefined,
+  enabledModels: ModelType[],
+): number {
+  if (complexity !== "simple") return 0;
+  if (!enabledModels.includes("antigravity")) return 0;
+  return resolveSimpleAgyBias();
+}
+
 export function scoreModels(
   enabledModels: ModelType[],
   tags: string[],
+  complexity?: "simple" | "standard" | "complex",
 ): ModelType {
   // Score every enabled model first so we can both pick the winner and
   // detect ties / near-ties.
   const scored: { model: ModelType; score: number }[] = [];
   let hasTags = tags.length > 0;
+
+  // §C: simple 작업의 antigravity 소프트 가점. 무태그여도 이 가점이 걸리면
+  // 아래 "순수 round-robin"(점수 무시) 분기를 우회해 점수 기반 경쟁/타이밴드를
+  // 타도록 hasTags 로 취급한다(0 이면 영향 없음 = 무회귀).
+  const agyBias = simpleAgyBias(complexity, enabledModels);
+  if (agyBias > 0) hasTags = true;
 
   for (const model of enabledModels) {
     let score = MODEL_BASE_SCORE[model] || 0;
@@ -558,6 +586,8 @@ export function scoreModels(
     // expensive-model strengths don't apply. Same function as scoreAgents
     // for consistency between reuse and fresh-spawn paths.
     score += costEfficiencyScore(model, tags);
+    // §C: simple → antigravity 소프트 가점(0 이면 no-op).
+    if (model === "antigravity") score += agyBias;
     // 방어: 비유한 점수는 아래 정렬/타이밴드 비교(topScore - s.score)를
     // 오염시키므로 0 으로 대체. 정상 입력에선 항상 유한값이라 no-op 이다.
     scored.push({ model, score: finiteOr(score, 0) });

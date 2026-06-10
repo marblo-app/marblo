@@ -407,6 +407,41 @@ dispatch_task(complexity="simple", isolate?)
 
 ---
 
+## C. (확장 2026-06-10) 복잡도→provider 소프트 라우팅 (`simple`→antigravity)
+
+### C.1 동기
+
+`modelTierForComplexity`(§2)는 **선택된 provider 내에서 모델 레벨**만 정한다. **어느 provider 를 쓸지**(claude/gpt/antigravity/gemini)는 별개 축 — `dispatch-scoring.ts`의 `scoreModels()`가 tag·cost-eff·round-robin 으로 고른다. 그래서 **complexity 는 provider 선택에 전혀 영향이 없었다**. 결과적으로 antigravity(base 45 < claude 50)는 agentic/multi-agent 태그가 명시될 때만 선택돼, "쉬운 작업을 antigravity 로 점진 위임"이 불가능했다.
+
+### C.2 결정 (사용자, 2026-06-10)
+
+쉬운(`simple`) 작업에 **antigravity 활용도를 점진적으로** 높인다. 하드 스위치가 아니라 **env-tunable 소프트 가점**으로, 처음엔 claude 와 tie-band 안에서 round-robin(가끔 antigravity)으로 시작해 값을 올리며 비중을 키운다.
+
+### C.3 메커니즘
+
+| env                      | 기본 | 의미                                                            |
+| ------------------------ | ---- | --------------------------------------------------------------- |
+| `MARBLO_AGY_SIMPLE_BIAS` | `0`  | `simple` 작업에서 antigravity 점수에 더하는 가점(0=off, 무회귀) |
+
+- `scoreModels(enabledModels, tags, complexity?)`에 `complexity` 인자 추가. `complexity==="simple"` + `antigravity∈enabledModels` + 가점>0 일 때만 antigravity 점수에 `resolveSimpleAgyBias()`를 더한다.
+- **무태그 우회:** 무태그 simple 은 원래 "순수 round-robin"(점수 무시)으로 빠지는데, 가점이 걸리면 `hasTags` 로 취급해 점수 경쟁/타이밴드 경로를 타게 한다(0 이면 영향 없음).
+- **튜닝 감각:** claude(50) vs antigravity(45) 기준 — 가점 `6~10` 이면 tie-band(±5) 안 → claude↔antigravity round-robin(조금씩), `20`+ 이면 antigravity 가 simple 에서 우위.
+
+### C.4 안전 / 무회귀
+
+- **명시 `model` 힌트가 항상 우선**: 호출부 `selectedModel = model || scoreModels(...)` — 힌트가 있으면 scoring 자체를 건너뛴다. 가점은 "힌트 없음 + simple" 일 때만 작동.
+- `complexity !== "simple"`(standard/complex/미지정) → 가점 0(영향 없음).
+- antigravity 가 `enabledModels`(프리셋)에 없으면 0 — **없는 provider 를 편애하지 않는다**.
+- 기본 `MARBLO_AGY_SIMPLE_BIAS=0` → 종전과 byte-identical.
+- ※ `simple` 은 §B `isolate` 물리스폰일 때만 scoring 을 타므로(아니면 logical), 이 라우팅은 자연히 **simple+isolate** 로 scope 된다.
+
+### C.5 비범위 (후속)
+
+- **provider 가용성 게이트**: 현재 antigravity 는 CLI 존재/인증 런타임 탐지가 없다(claude/codex/gemini 와 달리). 가점이 켜졌는데 `agy` 가 실제로 안 되면 스폰이 실패할 수 있음 — 가용성 프로브는 후속.
+- **남은 토큰/쿼터 연동 라우팅**: 모델별 잔여 예산을 읽어 스폰을 바이어스(별도 작업, §D 예정).
+
+---
+
 ## 9. 비범위 / 후속
 
 - **자동 분해**(LLM이 complex를 스스로 스텝으로 쪼개기) — 1차는 수동(`stages`)만. 비용/품질 검증 후 후속.
