@@ -1725,6 +1725,31 @@ export function registerTools(server: McpServer): void {
         .describe(
           "Task tags for model scoring (e.g., architecture, research, simple-fix)",
         ),
+      mix: z
+        .enum(["cross-check", "split-role"])
+        .optional()
+        .describe(
+          "★complex 전용 opt-in 모델 믹스(기본 off). 발동 시 Claude 최상위 + Codex " +
+            "high 2-spawn. 'cross-check'(기본)=교차검증, 'split-role'=역할분담. " +
+            "complexity!=='complex' 면 무시됨. 비용 2배(슬롯 2)이므로 정확성이 " +
+            "중요한 설계/보안/마이그레이션에만.",
+        ),
+      stages: z
+        .array(
+          z.object({
+            instruction: z.string(),
+            complexity: z.enum(["simple", "standard", "complex"]).optional(),
+            model: z.string().optional(),
+            tags: z.array(z.string()).optional(),
+            dependsOnPrevious: z.boolean().optional(),
+          }),
+        )
+        .optional()
+        .describe(
+          "★complex 전용 opt-in 단계분할(기본 단일). 스텝 배열을 각각 작은 " +
+            "dispatch 로 풀어 난도별 모델 매칭(설계→최상위, 기계적→cheap). " +
+            "dependsOnPrevious 스텝은 순차, 아니면 병렬. complexity!=='complex' 면 무시됨.",
+        ),
     },
     async ({
       role,
@@ -1735,6 +1760,8 @@ export function registerTools(server: McpServer): void {
       name,
       cwd,
       tags,
+      mix,
+      stages,
     }) => {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
@@ -1850,6 +1877,21 @@ export function registerTools(server: McpServer): void {
         }
       }
 
+      // SPAWN-MODEL-ALLOCATION-V2 §4/§5: mix(모델 믹스)·stages(단계분할)는 complex
+      // 전용 opt-in. complexity!=="complex" 면 조용히 삼키지 않고 무시 + 경고 후
+      // 단일 디스패치로 진행(기본 동작 무변동). bridge 도 같은 가드를 둔다(방어).
+      let effectiveMix = mix;
+      let effectiveStages = stages;
+      if (complexity !== "complex" && (mix || (stages && stages.length > 0))) {
+        console.warn(
+          `[dispatch_task] mix/stages ignored — complexity='${
+            complexity || "standard"
+          }' (complex 전용). 단일 디스패치로 진행.`,
+        );
+        effectiveMix = undefined;
+        effectiveStages = undefined;
+      }
+
       try {
         const response = await fetch(
           `http://127.0.0.1:${bridgePort}/dispatch-task`,
@@ -1865,6 +1907,8 @@ export function registerTools(server: McpServer): void {
               nameHint: name,
               cwd,
               tags,
+              mix: effectiveMix,
+              stages: effectiveStages,
               projectId: process.env.MARBLO_PROJECT || "",
               // Forward parent agent id for owner fallback when projectId
               // is empty (external Claude Code → Marblo MCP path).
@@ -1885,6 +1929,9 @@ export function registerTools(server: McpServer): void {
           // Board task bound to the agent — the supplied task_id, or an ad-hoc
           // task the WorktreeCoordinator created for a spawn without one.
           taskId?: string | null;
+          // 모델 믹스(§4) 동반 에이전트 / 단계분할(§5) 스텝 에이전트들.
+          companionAgentId?: string;
+          stageAgentIds?: string[];
         };
 
         if (!result.success) {
@@ -1898,7 +1945,9 @@ export function registerTools(server: McpServer): void {
         // as doc id — the renderer's onAgentSpawned listener also writes
         // the same doc, both converge on a single record.
         if (
-          (result.action === "spawned" || result.action === "restarted") &&
+          (result.action === "spawned" ||
+            result.action === "restarted" ||
+            result.action === "mixed") &&
           result.agentId
         ) {
           const projectId = resolveProject(undefined);
@@ -1939,6 +1988,10 @@ export function registerTools(server: McpServer): void {
         if (result.model) lines.push(`  Model: ${result.model}`);
         if (result.score !== undefined) lines.push(`  Score: ${result.score}`);
         if (dispatchTaskId) lines.push(`  Task ID: ${dispatchTaskId}`);
+        if (result.companionAgentId)
+          lines.push(`  Mix companion (Codex): ${result.companionAgentId}`);
+        if (result.stageAgentIds && result.stageAgentIds.length > 0)
+          lines.push(`  Stage agents: ${result.stageAgentIds.join(", ")}`);
         if (result.action === "logical") {
           lines.push(
             `\nAction required: Use internal sub-agent (Task/Agent tool) to handle this simple task directly.`,

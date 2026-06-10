@@ -4,6 +4,7 @@ import { PtyManager } from "./pty-manager";
 import {
   AgentConfigGenerator,
   LaunchConfig,
+  FALLBACK_TOP_CLAUDE_MODEL,
   type TaskComplexity,
 } from "./agent-config";
 import { mainTelemetry } from "./telemetry";
@@ -52,6 +53,9 @@ export interface AgentLaunchParams {
   projectId?: string;
   /** 작업 난이도 — claude(--model)·codex(reasoning) 모델/레벨 선택용. 미지정=기본. */
   complexity?: TaskComplexity;
+  /** claude 런타임 강등 재시작(§3.4-3)용 모델 override. 설정되면 complexity
+   * resolver 대신 이 모델 id 로 --model 핀(예: fable5 실패 → "opus"). */
+  claudeModelOverride?: string;
   /** Called immediately after PTY is created, before any output can be missed */
   onPtyReady?: (ptySessionId: string) => void;
 }
@@ -85,6 +89,15 @@ export interface AgentInstance {
    * working/idle automatically — bumped on every onData chunk, polled by
    * the heartbeat to drop back to idle after IDLE_INACTIVITY_MS of silence. */
   lastPtyActivity: number;
+  /** Claude only: the --model id this launch actually used (resolver result or
+   * runtime-downgrade override). Lets the fast-fail handler detect a Fable5
+   * launch and downgrade it to opus on restart (§3.4-3). undefined for
+   * non-claude / non-complex launches. */
+  topClaudeModel?: string;
+  /** Set once when a Fable5 launch is downgraded to opus after a runtime
+   * fast-fail. Carried into the auto-restart so the relaunch pins opus, and
+   * acts as the once-only guard so the downgrade can't loop. */
+  claudeModelOverride?: string;
 }
 
 /** Inactivity window after which an "auto-working" agent drops back to
@@ -295,7 +308,35 @@ export class AgentManager {
       true,
       // 작업 난이도 → claude(--model sonnet/opus)·codex(reasoning) 모델/레벨 선택.
       params.complexity,
+      // 런타임 강등 재시작 시 forced --model(예: fable5 실패 → "opus", §3.4-3).
+      params.claudeModelOverride,
     );
+
+    // 모델 할당 v2 텔레메트리 + 폴백 표식(§8.1/§8.4). modelResolution 은 complex
+    // claude 가 §3 resolver 를 탔을 때만 채워진다(override 경로는 비움).
+    // topClaudeModel 은 fast-fail 강등 판단에 쓰려고 인스턴스에 보존한다.
+    const resolution = launchConfig.modelResolution;
+    const topClaudeModel = params.claudeModelOverride ?? resolution?.model;
+    if (resolution) {
+      const win = this.getMainWindow?.() ?? null;
+      mainTelemetry.modelTierResolved(
+        win,
+        params.model,
+        params.complexity ?? "",
+        resolution.model,
+        params.id,
+      );
+      if (resolution.fallback) {
+        mainTelemetry.topModelFallback(
+          win,
+          resolution.fallback.reason,
+          resolution.fallback.requested,
+          resolution.fallback.installed,
+          resolution.fallback.fallbackTo,
+          params.id,
+        );
+      }
+    }
 
     if (isResume) {
       console.log(
@@ -644,6 +685,8 @@ export class AgentManager {
       heartbeatTimer: null,
       onPtyReady: params.onPtyReady,
       lastPtyActivity: Date.now(),
+      topClaudeModel,
+      claudeModelOverride: params.claudeModelOverride,
     };
 
     this.agents.set(params.id, instance);
@@ -773,6 +816,30 @@ export class AgentManager {
         console.warn(
           `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`,
         );
+
+        // §3.4-3 2차 안전망: Fable5 가 런타임에서 빠르게 실패(미지원 모델 오류
+        // 등)하면 opus 로 강등해 재시작한다. claudeModelOverride 가 한 번만
+        // 세팅되는 전이 가드 — 강등 후 opus 가 또 fast-fail 하면 일반 예산을
+        // 따른다. fastFail 예산은 강등 시점에 리셋해 opus 에 공정한 재시도를 준다.
+        if (
+          agent.model === "claude" &&
+          agent.topClaudeModel === "claude-fable-5" &&
+          !agent.claudeModelOverride
+        ) {
+          agent.claudeModelOverride = FALLBACK_TOP_CLAUDE_MODEL;
+          agent.fastFailCount = 0;
+          mainTelemetry.topModelFallback(
+            this.getMainWindow?.() ?? null,
+            "runtime_downgrade",
+            "claude-fable-5",
+            "runtime",
+            FALLBACK_TOP_CLAUDE_MODEL,
+            agent.id,
+          );
+          console.warn(
+            `[Agent:${agent.id}] Fable5 runtime fast-fail — downgrading to ${FALLBACK_TOP_CLAUDE_MODEL} on restart (§3.4-3).`,
+          );
+        }
       }
 
       // Stop restarting once we've burned the fast-fail budget — it's
@@ -833,6 +900,9 @@ export class AgentManager {
     const restartCount = agent.restartCount;
     const fastFailCount = agent.fastFailCount;
     const onPtyReady = agent.onPtyReady;
+    // Carry any Fable5→opus runtime downgrade into the relaunch so the restart
+    // pins the safe model instead of resolving Fable5 again (§3.4-3).
+    const claudeModelOverride = agent.claudeModelOverride;
 
     // Cleanup old PTY, config, and timers (heartbeat + the backoff timer that
     // just fired). onExit already released the heartbeat, but stay consistent.
@@ -870,6 +940,7 @@ export class AgentManager {
       cwd: agent.cwd,
       resumeSessionId: resolvedSessionId,
       onPtyReady,
+      claudeModelOverride,
     });
 
     // Carry over restart counters; spawnedAt is freshly set by launch().

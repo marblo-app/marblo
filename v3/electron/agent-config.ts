@@ -92,12 +92,144 @@ const MODEL_BINARY: Partial<Record<ModelType, string>> = {
   antigravity: "agy",
 };
 
+// ── 최상위 모델 견고화 (SPAWN-MODEL-ALLOCATION-V2 §3) ──────────────
+//
+// complex 티어가 쓰는 "현재 사용 가능한 최상위 Claude 모델 id"를 env 주입 +
+// CLI 버전가드 + 그레이스풀 폴백을 거쳐 결정한다(하드코딩 "opus" 제거).
+// ★사용자 결정1: resolver 는 complex 티어에만 적용한다 — standard 는 기존
+// "opus" 리터럴을 그대로 유지(표준작업 비용 무변동). 즉 MARBLO_TOP_CLAUDE_MODEL
+// 은 complex 작업에만 영향을 준다.
+
+/** 불확실한 모든 상황의 안전 귀결(§8.3). "최상위를 못 쓰는 것"은 허용,
+ * "spawn 자체가 깨지는 것"은 불허 — 그래서 늘 검증된 opus 로 떨어진다. */
+export const FALLBACK_TOP_CLAUDE_MODEL = "opus";
+
+/** Fable5 최소 요구 claude CLI 버전(버전가드 기본 임계값). env 로 덮어쓸 수 있다. */
+const DEFAULT_FABLE5_MIN_CLI = "2.1.170";
+
+/** claude 계열 모델 id alias. 프로바이더 정규화(normalizeModel, dispatch-scoring)
+ * 와는 다른 층 — 이건 claude 내부의 _모델 id_ alias 다. "fable" → "claude-fable-5". */
+export const CLAUDE_MODEL_ALIASES: Record<string, string> = {
+  fable: "claude-fable-5",
+};
+
+export interface TopModelFallback {
+  /** 폴백 사유 코드(텔레메트리/로그 키). */
+  reason: "fable5_version_guard" | "unknown_top_model";
+  /** 요청된 모델 id(alias 정규화 후). */
+  requested: string;
+  /** 설치된 claude CLI 버전(또는 "unknown"). */
+  installed: string;
+  /** 폴백된 모델 id. */
+  fallbackTo: string;
+  /** Fable5 버전가드일 때 요구 최소 버전. */
+  required?: string;
+}
+
+export interface TopModelResolution {
+  /** 실제로 사용할 claude 모델 id. */
+  model: string;
+  /** 폴백이 일어났으면 그 상세, 아니면 null. */
+  fallback: TopModelFallback | null;
+}
+
+/** semver "X.Y.Z" 비교. a<b → 음수, a==b → 0, a>b → 양수. 누락 파트는 0 취급. */
+export function cmpSemver(a: string, b: string): number {
+  const pa = a.split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = b.split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+/** 폴백을 조용히 넘기지 않는다(§8.1) — 구조화 콘솔 로그. 윈도우가 있는 호출자
+ * (agent-manager/bridge)는 이 위에 추가로 텔레메트리 이벤트를 쏜다. */
+function logTopModelFallback(f: TopModelFallback): void {
+  console.warn(
+    `[model-policy] top-model fallback: reason=${f.reason} ` +
+      `requested=${f.requested} installed=${f.installed}` +
+      `${f.required ? ` required=${f.required}` : ""} → ${f.fallbackTo}`,
+  );
+}
+
+/**
+ * 최상위 Claude 모델을 env/버전가드/폴백을 거쳐 결정한다(§3). 폴백 메타까지
+ * 반환하는 상세판 — 텔레메트리/사용자 표식용. 순수 함수(env + resolveClaudeBinary
+ * 만 읽음)라 단위테스트가 쉽다.
+ *
+ *   - MARBLO_TOP_CLAUDE_MODEL(기본 "opus")를 읽어 alias 정규화.
+ *   - claude-fable-5 면 설치된 claude CLI 버전을 MARBLO_FABLE5_MIN_CLI(기본
+ *     2.1.170)와 비교 — 미달/파싱실패 시 opus 로 그레이스풀 폴백 + 구조화 로그.
+ *   - opus/sonnet 은 통과. 검증 못 하는 미지 모델은 보수적으로 opus 폴백.
+ *
+ * @param installedVersion 설치된 claude CLI 버전 주입(테스트용). 미지정이면
+ *   resolveClaudeBinary().version(실제 설치본)을 쓴다.
+ */
+export function resolveTopClaudeModelDetailed(
+  installedVersion?: string,
+): TopModelResolution {
+  const raw = (process.env.MARBLO_TOP_CLAUDE_MODEL || FALLBACK_TOP_CLAUDE_MODEL)
+    .trim()
+    .toLowerCase();
+  const id = CLAUDE_MODEL_ALIASES[raw] || raw; // "fable" → "claude-fable-5"
+  const version = installedVersion ?? resolveClaudeBinary().version; // "X.Y.Z"
+
+  if (id === "claude-fable-5") {
+    const minCli = (
+      process.env.MARBLO_FABLE5_MIN_CLI || DEFAULT_FABLE5_MIN_CLI
+    ).trim();
+    if (!version || cmpSemver(version, minCli) < 0) {
+      const fallback: TopModelFallback = {
+        reason: "fable5_version_guard",
+        requested: id,
+        installed: version || "unknown",
+        required: minCli,
+        fallbackTo: FALLBACK_TOP_CLAUDE_MODEL,
+      };
+      logTopModelFallback(fallback);
+      return { model: FALLBACK_TOP_CLAUDE_MODEL, fallback };
+    }
+    return { model: "claude-fable-5", fallback: null };
+  }
+
+  // opus/sonnet 은 검증된 알려진 id — 통과.
+  if (id === "opus" || id === "sonnet") return { model: id, fallback: null };
+
+  // 검증 불가한 미지 모델 → 보수적으로 opus.
+  const fallback: TopModelFallback = {
+    reason: "unknown_top_model",
+    requested: id,
+    installed: version || "unknown",
+    fallbackTo: FALLBACK_TOP_CLAUDE_MODEL,
+  };
+  logTopModelFallback(fallback);
+  return { model: FALLBACK_TOP_CLAUDE_MODEL, fallback };
+}
+
+/** §3 resolver 의 모델 id 만 필요한 호출자용 얇은 래퍼. */
+export function resolveTopClaudeModel(): string {
+  return resolveTopClaudeModelDetailed().model;
+}
+
+/** complex 에서 쓸 Codex 최상위 reasoning effort. env MARBLO_TOP_CODEX_REASONING,
+ * 기본 "high". 유효값(low/medium/high) 아니면 high 로 폴백. */
+export function resolveTopCodexReasoning(): string {
+  const r = (process.env.MARBLO_TOP_CODEX_REASONING || "high")
+    .trim()
+    .toLowerCase();
+  return ["low", "medium", "high"].includes(r) ? r : "high";
+}
+
 // 작업 complexity → 프로바이더별 모델/레벨. 품질 우선 정책: 기본(standard)은
 // 최상위(claude=opus, gpt-5.5=medium)를 유지하고, 작은 작업(simple)만 한 단계 낮추며,
 // 어려운 작업(complex)은 최상위를 쓴다. complexity 가 undefined 면 override 하지 않아
 // 기본 모델을 상속한다(오케스트레이터 등). claude=--model, gpt(codex)=model_reasoning_effort.
-//   claude:  simple → sonnet,        standard/complex → opus
-//   gpt:     simple → low, standard → medium, complex → high
+//   claude:  simple → sonnet,  standard → opus(리터럴),  complex → resolveTopClaudeModel()
+//   gpt:     simple → low,      standard → medium,        complex → resolveTopCodexReasoning()
+// ★결정1: complex 만 resolver 를 탄다. env 미설정 시 complex 도 opus/high 로 떨어져
+// 현행과 byte-identical(무회귀).
 export type TaskComplexity = "simple" | "standard" | "complex";
 export function modelTierForComplexity(
   model: ModelType,
@@ -105,18 +237,16 @@ export function modelTierForComplexity(
 ): { claudeModel?: string; codexReasoning?: string } {
   if (!complexity) return {}; // override 없음 → 기본 상속
   if (model === "claude") {
-    // 기본·complex 는 opus(최상위), simple(작은 작업)만 sonnet 으로 하향.
-    return { claudeModel: complexity === "simple" ? "sonnet" : "opus" };
+    if (complexity === "simple") return { claudeModel: "sonnet" }; // 하향
+    if (complexity === "complex")
+      return { claudeModel: resolveTopClaudeModel() }; // env/버전가드/폴백(§3)
+    return { claudeModel: "opus" }; // standard — 현행 리터럴 유지(무변동)
   }
   if (model === "gpt") {
-    return {
-      codexReasoning:
-        complexity === "simple"
-          ? "low"
-          : complexity === "complex"
-            ? "high"
-            : "medium",
-    };
+    if (complexity === "simple") return { codexReasoning: "low" };
+    if (complexity === "complex")
+      return { codexReasoning: resolveTopCodexReasoning() }; // env, 기본 high
+    return { codexReasoning: "medium" };
   }
   return {}; // gemini/antigravity/local/custom — 레벨 플래그 없음(기본 유지)
 }
@@ -197,6 +327,15 @@ export interface LaunchConfig {
    * detection). See claudeSessionArgs.
    */
   claudeSessionId?: string;
+  /**
+   * Claude only: how the `--model` value was resolved when complexity ===
+   * "complex" (the only tier that runs the §3 resolver). Carries any
+   * graceful fallback (Fable5 version-guard miss, unknown model) so the
+   * spawn path can emit telemetry / surface a user-facing marker. Undefined
+   * for non-complex / non-claude launches and for runtime-downgrade
+   * relaunches (which pass an explicit override, not the resolver).
+   */
+  modelResolution?: TopModelResolution;
 }
 
 /**
@@ -588,6 +727,9 @@ export class AgentConfigGenerator {
     // 작업 난이도 — claude(--model)·codex(reasoning) 모델/레벨 선택에 쓰인다.
     // 미지정(오케스트레이터 경로)이면 기본 모델 유지(opus).
     complexity?: TaskComplexity,
+    // claude 런타임 강등 재시작(§3.4-3)용 모델 override. 설정되면 complexity
+    // 기반 resolver 대신 이 모델 id 로 --model 을 핀한다(예: fable5 실패 → "opus").
+    claudeModelOverride?: string,
   ): LaunchConfig {
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
@@ -601,17 +743,19 @@ export class AgentConfigGenerator {
         ? fs.readFileSync(skillPath, "utf-8")
         : "";
 
-    const { command, args, env, claudeSessionId } = this.buildCLICommand(
-      agent.model,
-      agent.command,
-      mcpConfigPath,
-      projectDir,
-      marbloProjectId,
-      agent.id,
-      resumeSessionId,
-      pinClaudeSession,
-      complexity,
-    );
+    const { command, args, env, claudeSessionId, modelResolution } =
+      this.buildCLICommand(
+        agent.model,
+        agent.command,
+        mcpConfigPath,
+        projectDir,
+        marbloProjectId,
+        agent.id,
+        resumeSessionId,
+        pinClaudeSession,
+        complexity,
+        claudeModelOverride,
+      );
 
     return {
       model: agent.model,
@@ -622,6 +766,7 @@ export class AgentConfigGenerator {
       skillContent,
       initialPrompt,
       claudeSessionId,
+      modelResolution,
     };
   }
 
@@ -1179,11 +1324,13 @@ export class AgentConfigGenerator {
     resumeSessionId?: string,
     pinFreshClaudeSession = false,
     complexity?: TaskComplexity,
+    claudeModelOverride?: string,
   ): {
     command: string;
     args: string[];
     env: Record<string, string>;
     claudeSessionId?: string;
+    modelResolution?: TopModelResolution;
   } {
     const env = getMCPServerEnv(projectDir, marbloProjectId, agentId);
     // Normalize resume signals: "new" means force-fresh, "latest" means
@@ -1209,7 +1356,20 @@ export class AgentConfigGenerator {
           pinFreshClaudeSession,
         );
         // complexity 기반 모델 핀(--model). 미지정(오케 경로)이면 기본 모델 상속.
-        const { claudeModel } = modelTierForComplexity(model, complexity);
+        // 결정 우선순위:
+        //   1) claudeModelOverride — 런타임 강등 재시작(fable5 실패 → opus, §3.4-3)
+        //   2) complex → resolveTopClaudeModelDetailed() (env/버전가드/폴백 + 메타)
+        //   3) 그 외(simple/standard/미지정) → modelTierForComplexity 리터럴
+        let claudeModel: string | undefined;
+        let modelResolution: TopModelResolution | undefined;
+        if (claudeModelOverride) {
+          claudeModel = claudeModelOverride;
+        } else if (complexity === "complex") {
+          modelResolution = resolveTopClaudeModelDetailed();
+          claudeModel = modelResolution.model;
+        } else {
+          claudeModel = modelTierForComplexity(model, complexity).claudeModel;
+        }
         return {
           command: baseCommand || resolveClaudeBinary().command,
           args: [
@@ -1221,6 +1381,7 @@ export class AgentConfigGenerator {
           ],
           env,
           claudeSessionId: sessionId,
+          modelResolution,
         };
       }
 

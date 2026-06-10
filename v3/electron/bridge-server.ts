@@ -20,6 +20,8 @@ import {
   checkPlanConcurrency,
   type AgentInfo,
 } from "./dispatch-scoring";
+import { mainTelemetry } from "./telemetry";
+import { resolveTopClaudeModelDetailed } from "./agent-config";
 import type { WorktreeCoordinator } from "./worktree-coordinator";
 
 /**
@@ -190,9 +192,31 @@ export interface DispatchTaskRequest {
   /** System-initiated dispatch flag (M2 cap whitelist) — see SpawnAgentRequest.
    * Exempts this dispatch's restart/spawn from the per-plan concurrency cap. */
   system?: boolean;
+  /** 모델 믹스(SPAWN-MODEL-ALLOCATION-V2 §4) — complex 전용 opt-in. 발동 시 Claude
+   * 최상위 + Codex high 2-spawn. "cross-check"=교차검증(기본), "split-role"=역할분담.
+   * complexity!=="complex" 면 무시(+경고). 미지정이면 단일 디스패치(무변동). */
+  mix?: "cross-check" | "split-role";
+  /** 단계분할(§5) — complex 전용 opt-in. 스텝 배열을 각각 작은 dispatch 로 풀어
+   * 난도별 모델을 매칭한다. dependsOnPrevious 인 스텝은 직전 스텝 후 디스패치(순차),
+   * 아니면 병렬. complexity!=="complex" 면 무시(+경고). */
+  stages?: Array<{
+    instruction: string;
+    complexity?: "simple" | "standard" | "complex";
+    /** 스텝별 프로바이더 힌트(claude/codex/gpt/...). normalizeModel 로 접힘. */
+    model?: string;
+    tags?: string[];
+    /** true 면 직전 스텝 완료 후 디스패치(순차 게이트). */
+    dependsOnPrevious?: boolean;
+  }>;
 }
 
-export type DispatchAction = "logical" | "reused" | "restarted" | "spawned";
+export type DispatchAction =
+  | "logical"
+  | "reused"
+  | "restarted"
+  | "spawned"
+  | "mixed"
+  | "staged";
 
 export interface DispatchTaskResponse {
   success: boolean;
@@ -206,6 +230,10 @@ export interface DispatchTaskResponse {
   /** Board task bound to the (possibly newly spawned) agent — used by the
    * MCP layer to set the agent doc's currentTaskId. */
   taskId?: string | null;
+  /** 모델 믹스(§4) 발동 시 동반 spawn 된 Codex 에이전트 id(있을 때만). */
+  companionAgentId?: string;
+  /** 단계분할(§5) 디스패치된 각 스텝 에이전트 id. */
+  stageAgentIds?: string[];
 }
 
 /**
@@ -906,7 +934,31 @@ export class BridgeServer {
     return result;
   }
 
+  // SPAWN-MODEL-ALLOCATION-V2 §4/§5 — complex 전용 opt-in 분기. mix(모델 믹스)·
+  // stages(단계분할)가 켜져 있고 complexity==="complex" 일 때만 새 경로를 타고,
+  // 그 외에는 dispatchSingle 로 떨어져 현행과 byte-identical(무회귀).
   private async dispatchTaskInner(
+    params: DispatchTaskRequest,
+  ): Promise<DispatchTaskResponse> {
+    const complexity = params.complexity ?? "standard";
+    const isComplex = complexity === "complex";
+    // complex 가 아닌데 mix/stages 가 들어오면 조용히 삼키지 않고 무시 + 경고
+    // (tools.ts 에서도 1차로 거르지만, 여기서도 방어적으로 가드).
+    if (!isComplex && (params.mix || (params.stages?.length ?? 0) > 0)) {
+      console.warn(
+        `[BridgeServer] mix/stages ignored — complexity='${complexity}' (complex 전용). 단일 디스패치로 진행.`,
+      );
+    }
+    if (isComplex && params.stages && params.stages.length > 0) {
+      return this.dispatchStages(params, params.stages);
+    }
+    if (isComplex && params.mix) {
+      return this.dispatchMix(params, params.mix);
+    }
+    return this.dispatchSingle(params);
+  }
+
+  private async dispatchSingle(
     params: DispatchTaskRequest,
   ): Promise<DispatchTaskResponse> {
     const { role, instruction, complexity = "standard", tags = [] } = params;
@@ -1175,6 +1227,20 @@ export class BridgeServer {
     console.log(
       `[BridgeServer] Dispatch: spawned '${agentName}' (model=${selectedModel})`,
     );
+    // §8.1 폴백 사용자 표식 — complex claude 가 최상위 모델 resolver 를 탔는데
+    // 버전가드/미지모델로 폴백됐으면 dispatch 응답에 표시(사용자가 왜 최상위가
+    // 아닌지 알 수 있게). read-only 재해석(같은 env → spawn 이 쓴 값과 일치).
+    let topModelNote = "";
+    if (selectedModel === "claude" && complexity === "complex") {
+      const res = resolveTopClaudeModelDetailed();
+      if (res.fallback) {
+        const f = res.fallback;
+        topModelNote =
+          ` | ⚠️ 최상위모델 폴백: ${f.requested} 미지원` +
+          `(installed=${f.installed}${f.required ? ` < ${f.required}` : ""})` +
+          ` → ${f.fallbackTo}`;
+      }
+    }
     return {
       success: true,
       action: "spawned",
@@ -1182,8 +1248,126 @@ export class BridgeServer {
       agentName,
       model: selectedModel,
       score: 0,
-      reason: `No reusable agent found. Spawned new ${selectedModel} agent '${agentName}'`,
+      reason: `No reusable agent found. Spawned new ${selectedModel} agent '${agentName}'${topModelNote}`,
       taskId: resolvedTaskId,
+    };
+  }
+
+  // ── 모델 믹스 (§4) — complex 전용, opt-in ────────────────────
+  //
+  // 1차 spawn(Claude 최상위, dispatchSingle)에 더해 Codex high 동반 에이전트를
+  // 추가로 띄운다. cross-check=교차검증(기본), split-role=역할분담. 동반은 공유
+  // taskId 없이 띄워(ad-hoc worktree) 1차의 격리 트리와 충돌하지 않게 한다(한
+  // worktree = 한 에이전트, WORKTREE-SPEC). 동반 spawn 은 spawnNewAgent 내부
+  // 비용 캡(§4.4: 믹스=슬롯 2)에 종속 — 캡에 막히면 1차만으로 그레이스풀 강등.
+  private async dispatchMix(
+    params: DispatchTaskRequest,
+    mode: "cross-check" | "split-role",
+  ): Promise<DispatchTaskResponse> {
+    const primary = await this.dispatchSingle(params);
+    // 1차가 실패/논리에이전트면 믹스 없이 그대로 반환.
+    if (!primary.success || primary.action === "logical") return primary;
+
+    const framed =
+      mode === "cross-check"
+        ? `[모델 믹스 · 교차검증] 아래 작업을 독립적으로 수행하고, 1차 에이전트의 산출물을 적대적으로 검증(refute)하라. 불일치 시 오케스트레이터에 에스컬레이션.\n\n${params.instruction}`
+        : `[모델 믹스 · 역할분담] 너는 테스트/기계적 변경/검증 담당이다. 설계·리팩터는 1차(Claude) 에이전트가 맡는다.\n\n${params.instruction}`;
+    const companionName = `${params.role}-codex-mix-${Date.now()
+      .toString(36)
+      .slice(-4)}`;
+    const companion = await this.spawnNewAgent({
+      name: companionName,
+      model: "gpt",
+      role: params.role,
+      cwd: params.cwd,
+      initialPrompt: framed,
+      // taskId 의도적으로 비움 — 1차의 격리 worktree 와 충돌 방지.
+      projectId: params.projectId,
+      parentAgentId: params.parentAgentId,
+      system: params.system,
+      complexity: "complex", // Codex high
+    });
+
+    mainTelemetry.modelMixDispatched(
+      this.mainWindow,
+      mode,
+      params.taskId ?? null,
+    );
+
+    if (!companion.success) {
+      console.warn(
+        `[BridgeServer] Mix(${mode}) companion spawn blocked/failed: ${companion.error} — 1차만으로 진행.`,
+      );
+      return {
+        ...primary,
+        reason: `${primary.reason} | 모델 믹스(${mode}) 동반 spawn 실패(${companion.error}) — 단일로 강등.`,
+      };
+    }
+    return {
+      ...primary,
+      action: "mixed",
+      companionAgentId: companion.agentId,
+      reason: `${primary.reason} | 모델 믹스(${mode}): Codex high 동반 에이전트 '${companionName}'(${companion.agentId}) spawn.`,
+    };
+  }
+
+  // ── 단계분할 (§5) — complex 전용, opt-in ─────────────────────
+  //
+  // complex 태스크를 스텝 배열로 풀어 각 스텝을 작은 dispatch 로 보낸다. 스텝은
+  // 자기 complexity/model/tags 를 가져 난도별 모델이 매칭된다(설계→최상위,
+  // 기계적→cheap). dependsOnPrevious 가 하나라도 있으면 순차(직전 완료 후),
+  // 아니면 병렬. 각 스텝은 taskId 없이 독립 에이전트로 떨어진다(1차 수동 분해 —
+  // 자동 분해는 후속). 동시성은 spawnNewAgent 의 플랜 캡(§8.2)에 종속.
+  private async dispatchStages(
+    parent: DispatchTaskRequest,
+    stages: NonNullable<DispatchTaskRequest["stages"]>,
+  ): Promise<DispatchTaskResponse> {
+    const runStage = (
+      stage: NonNullable<DispatchTaskRequest["stages"]>[number],
+    ): Promise<DispatchTaskResponse> =>
+      this.dispatchSingle({
+        role: parent.role,
+        instruction: stage.instruction,
+        complexity: stage.complexity ?? "standard",
+        model: stage.model ? normalizeModel(stage.model) : parent.model,
+        tags: stage.tags ?? parent.tags,
+        cwd: parent.cwd,
+        projectId: parent.projectId,
+        parentAgentId: parent.parentAgentId,
+        system: parent.system,
+        // taskId 의도적으로 비움 — 스텝마다 독립 에이전트(worktree 충돌 방지).
+      });
+
+    const anyOrdered = stages.some((s) => s.dependsOnPrevious);
+    const results: DispatchTaskResponse[] = [];
+    if (anyOrdered) {
+      // 순차: 직전 스텝이 끝난 뒤 다음 스텝을 디스패치.
+      for (const stage of stages) {
+        results.push(await runStage(stage));
+      }
+    } else {
+      results.push(...(await Promise.all(stages.map(runStage))));
+    }
+
+    mainTelemetry.complexStagesDispatched(
+      this.mainWindow,
+      stages.length,
+      stages.map((s) => s.complexity ?? "standard"),
+      parent.taskId ?? null,
+    );
+
+    const stageAgentIds = results
+      .map((r) => r.agentId)
+      .filter((id): id is string => Boolean(id));
+    return {
+      success: results.every((r) => r.success),
+      action: "staged",
+      agentId: stageAgentIds[0],
+      stageAgentIds,
+      reason: `Complex 단계분할: ${stages.length} 스텝 ${
+        anyOrdered ? "순차" : "병렬"
+      } 디스패치 (에이전트 ${stageAgentIds.length}개).`,
+      taskId: parent.taskId ?? null,
     };
   }
 

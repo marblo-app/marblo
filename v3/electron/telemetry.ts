@@ -83,4 +83,65 @@ export const mainTelemetry = {
       cost: costAccumulated,
     });
   },
+
+  // ── 스폰/모델 할당 v2 (SPAWN-MODEL-ALLOCATION-V2 §8.4) ──────────
+
+  /** modelTierForComplexity 가 complex 티어의 claude 모델을 결정한 시점. */
+  modelTierResolved(
+    win: BrowserWindow | null,
+    model: string,
+    complexity: string,
+    resolvedClaudeModel: string,
+    agentId?: string,
+  ) {
+    sendTelemetry(win, "model:tier_resolved", {
+      model,
+      complexity,
+      resolvedClaudeModel,
+      agentId,
+    });
+  },
+
+  /** 버전가드 미달 / 미지 모델 / 런타임 강등 등으로 최상위 모델이 폴백된 시점. */
+  topModelFallback(
+    win: BrowserWindow | null,
+    reason: string,
+    requested: string,
+    installed: string,
+    fallbackTo: string,
+    agentId?: string,
+    taskId?: string,
+  ) {
+    sendTelemetry(win, "model:top_fallback", {
+      reason,
+      requested,
+      installed,
+      fallbackTo,
+      agentId,
+      taskId,
+    });
+  },
+
+  /** complex 작업에 모델 믹스(cross-check/split-role)가 발동된 시점(§4). */
+  modelMixDispatched(
+    win: BrowserWindow | null,
+    mode: string,
+    taskId: string | null,
+  ) {
+    sendTelemetry(win, "model:mix_dispatched", { mode, taskId });
+  },
+
+  /** complex 작업의 단계분할이 디스패치된 시점(§5). */
+  complexStagesDispatched(
+    win: BrowserWindow | null,
+    stageCount: number,
+    perStageComplexity: string[],
+    taskId: string | null,
+  ) {
+    sendTelemetry(win, "model:complex_stages_dispatched", {
+      stageCount,
+      perStageComplexity,
+      taskId,
+    });
+  },
 };

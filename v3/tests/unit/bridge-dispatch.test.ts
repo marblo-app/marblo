@@ -418,3 +418,152 @@ describe("dispatchTask — per-task uniqueness (L3)", () => {
     expect(am.launchCalls).toBe(0);
   });
 });
+
+// ── SPAWN-MODEL-ALLOCATION-V2 §4 모델 믹스 (complex 전용 opt-in) ──────
+
+describe("dispatchTask — model mix (§4)", () => {
+  it("mix=cross-check on complex spawns a Codex companion (action=mixed)", async () => {
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "mixTask00001",
+        complexity: "complex",
+        model: "claude",
+        mix: "cross-check",
+      }),
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.action).toBe("mixed");
+    // Primary (claude, worktree-bound) + companion (codex, ad-hoc) = 2 spawns.
+    expect(am.launchCalls).toBe(2);
+    expect(res.companionAgentId).toBeTruthy();
+    // The companion is a Codex(gpt) agent.
+    const companion = am.getAgent(res.companionAgentId!);
+    expect(companion?.model).toBe("gpt");
+  });
+
+  it("split-role also spawns a companion (action=mixed)", async () => {
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "mixTask00002",
+        complexity: "complex",
+        model: "claude",
+        mix: "split-role",
+      }),
+    );
+    expect(res.action).toBe("mixed");
+    expect(am.launchCalls).toBe(2);
+  });
+
+  it("mix is IGNORED when complexity is not complex (single dispatch)", async () => {
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "mixTask00003",
+        complexity: "standard",
+        model: "claude",
+        mix: "cross-check",
+      }),
+    );
+    expect(res.action).toBe("spawned"); // not "mixed"
+    expect(res.companionAgentId).toBeUndefined();
+    expect(am.launchCalls).toBe(1);
+  });
+
+  it("mix degrades to single when the companion spawn is cap-blocked", async () => {
+    // free plan: cap=2. One worker already active → primary spawn takes the 2nd
+    // slot, so the companion spawn is blocked. Mix degrades to the primary.
+    const { bridge, am } = makeBridge("free");
+    am.seed(
+      makeInstance({
+        id: "w1",
+        status: "working",
+        projectId: "px",
+        cwd: "/repo",
+      }),
+    );
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "mixTask00004",
+        complexity: "complex",
+        model: "claude",
+        mix: "cross-check",
+      }),
+    );
+    // Primary succeeded; companion blocked → still success, no companion id.
+    expect(res.success).toBe(true);
+    expect(res.companionAgentId).toBeUndefined();
+    expect(res.reason).toContain("단일로 강등");
+    expect(am.launchCalls).toBe(1);
+  });
+});
+
+// ── SPAWN-MODEL-ALLOCATION-V2 §5 단계분할 (complex 전용 opt-in) ──────
+
+describe("dispatchTask — complex stages (§5)", () => {
+  it("dispatches each stage and returns stageAgentIds (action=staged)", async () => {
+    const { bridge } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "stgTask00001",
+        complexity: "complex",
+        model: "claude",
+        stages: [
+          { instruction: "design step", complexity: "complex" },
+          {
+            instruction: "mechanical step",
+            complexity: "standard",
+            dependsOnPrevious: true,
+          },
+        ],
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.action).toBe("staged");
+    // One result per stage (each carries an agentId — reuse may share one).
+    expect(res.stageAgentIds?.length).toBe(2);
+  });
+
+  it("a simple stage routes to a logical sub-agent (no spawn for that stage)", async () => {
+    const { bridge } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "stgTask00002",
+        complexity: "complex",
+        model: "claude",
+        stages: [
+          { instruction: "design", complexity: "complex" },
+          { instruction: "trivial rename", complexity: "simple" },
+        ],
+      }),
+    );
+    expect(res.action).toBe("staged");
+    // The simple stage is logical (no agentId), so only the complex stage
+    // contributes an agent id.
+    expect(res.stageAgentIds?.length).toBe(1);
+  });
+
+  it("stages are IGNORED when complexity is not complex (single dispatch)", async () => {
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "stgTask00003",
+        complexity: "standard",
+        model: "claude",
+        stages: [{ instruction: "x", complexity: "complex" }],
+      }),
+    );
+    expect(res.action).toBe("spawned"); // not "staged"
+    expect(res.stageAgentIds).toBeUndefined();
+    expect(am.launchCalls).toBe(1);
+  });
+});
