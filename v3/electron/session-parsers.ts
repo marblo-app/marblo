@@ -34,8 +34,11 @@ export interface TokenTotals {
 }
 
 /**
- * Subscription / rate-limit snapshot. Only codex emits this (in its rollout
- * `rate_limits` events); claude/gemini leave it null.
+ * Subscription / rate-limit snapshot. Codex emits this from its rollout
+ * `rate_limits` events; claude gets it from the account-global get_usage
+ * probe (claude-usage-probe.ts) — its session JSONL carries no rate-limit
+ * data, so the claude parser always leaves `ParseState.rateLimit` null.
+ * Gemini has no source.
  */
 export interface RateLimitInfo {
   planType: string | null; // e.g. "plus", "pro"
@@ -81,7 +84,7 @@ export function newParseState(): ParseState {
  * has no known format) — callers fall back to PTY parsing for those.
  */
 export function formatForModel(
-  model: string | null | undefined,
+  model: string | null | undefined
 ): SessionFormat | null {
   switch (model) {
     case "claude":
@@ -98,7 +101,7 @@ export function formatForModel(
 export function parseSessionDelta(
   format: SessionFormat,
   lines: string[],
-  state: ParseState,
+  state: ParseState
 ): ParseDelta {
   switch (format) {
     case "claude":
@@ -120,7 +123,7 @@ type LineUsage = (entry: unknown) => {
 function parseLineSummed(
   lines: string[],
   state: ParseState,
-  extract: LineUsage,
+  extract: LineUsage
 ): ParseDelta {
   const delta: TokenTotals = { ...ZERO };
   let model = state.model;
@@ -254,23 +257,23 @@ function parseCodexCumulative(lines: string[], state: ParseState): ParseDelta {
           planType:
             typeof rl.plan_type === "string"
               ? rl.plan_type
-              : (rateLimit?.planType ?? null),
+              : rateLimit?.planType ?? null,
           primaryPercent:
             typeof rl.primary?.used_percent === "number"
               ? rl.primary.used_percent
-              : (rateLimit?.primaryPercent ?? null),
+              : rateLimit?.primaryPercent ?? null,
           primaryResetAt:
             typeof rl.primary?.resets_at === "number"
               ? rl.primary.resets_at
-              : (rateLimit?.primaryResetAt ?? null),
+              : rateLimit?.primaryResetAt ?? null,
           secondaryPercent:
             typeof rl.secondary?.used_percent === "number"
               ? rl.secondary.used_percent
-              : (rateLimit?.secondaryPercent ?? null),
+              : rateLimit?.secondaryPercent ?? null,
           secondaryResetAt:
             typeof rl.secondary?.resets_at === "number"
               ? rl.secondary.resets_at
-              : (rateLimit?.secondaryResetAt ?? null),
+              : rateLimit?.secondaryResetAt ?? null,
         };
       }
       const total = e.payload.info?.total_token_usage;

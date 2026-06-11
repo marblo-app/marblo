@@ -11,7 +11,15 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { encodeClaudeProjectDir } from "./claude-paths";
-import { codexSessionsDir, geminiTmpDir } from "./agent-config";
+import {
+  codexSessionsDir,
+  geminiTmpDir,
+  resolveClaudeBinary,
+} from "./agent-config";
+import {
+  probeClaudeUsage,
+  type ClaudeUsageSnapshot,
+} from "./claude-usage-probe";
 import {
   formatForModel,
   newParseState,
@@ -91,7 +99,7 @@ type RawTokenRate = { inputPer1M: number; outputPer1M: number };
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json",
+  "subscription-plans.json"
 );
 
 interface SubscriptionPlanEntry {
@@ -123,7 +131,7 @@ function loadSubscriptionPlans(): SubscriptionPlanEntry[] {
   } catch (err) {
     console.error(
       "[CostTracker] Failed to load subscription plans:",
-      err instanceof Error ? err.message : err,
+      err instanceof Error ? err.message : err
     );
     subscriptionPlanCache = [];
     return [];
@@ -173,6 +181,18 @@ const OUTPUT_TOKENS_PATTERN = /(?:output)[\s]*(?:tokens)?[:\s]*([0-9,]+)/i;
 
 const MAX_BUFFER_SIZE = 2048;
 const SESSION_POLL_INTERVAL_MS = 15_000; // poll JSONL every 15s
+
+// ── Claude account rate-limit probe cadence (Phase 1b) ──────────────────
+// Plan limits move slowly; one headless get_usage probe per 5 minutes is
+// plenty and costs no tokens. A snapshot older than 3 missed polls is stale
+// and must NOT be re-emitted (the dashboard keeps showing the last-written
+// value, but we stop asserting it as current). After 3 consecutive probe
+// failures (old CLI without get_usage, auth problem, …) back off for 30
+// minutes so we don't spawn a doomed process every 5 minutes forever.
+const CLAUDE_PROBE_INTERVAL_MS = 5 * 60_000;
+const CLAUDE_PROBE_STALE_MS = 3 * CLAUDE_PROBE_INTERVAL_MS;
+const CLAUDE_PROBE_BACKOFF_MS = 30 * 60_000;
+const CLAUDE_PROBE_MAX_FAILURES = 3;
 
 const ZERO_TOTALS: TokenTotals = {
   input: 0,
@@ -245,6 +265,15 @@ export class CostTracker {
   private monthlySubscriptionTokens: Map<string, TokenTotals> = new Map();
   private onCostDetected?: (agentId: string, cost: CostEntry) => void;
 
+  // Claude plan rate-limits are ACCOUNT-global (all spawned claude agents
+  // share ~/.claude auth), so one probe + one snapshot serves every claude
+  // tracker. See claude-usage-probe.ts for why this is the official source.
+  private claudeUsage: ClaudeUsageSnapshot | null = null;
+  private claudeProbeTimer: ReturnType<typeof setInterval> | null = null;
+  private claudeProbeInFlight = false;
+  private claudeProbeFailures = 0;
+  private claudeProbeBackoffUntil = 0;
+
   constructor(onCostDetected?: (agentId: string, cost: CostEntry) => void) {
     this.onCostDetected = onCostDetected;
   }
@@ -311,7 +340,7 @@ export class CostTracker {
     accumulatedInputTokens = 0,
     accumulatedOutputTokens = 0,
     deltaCacheReadTokens = 0,
-    deltaCacheWriteTokens = 0,
+    deltaCacheWriteTokens = 0
   ): number {
     if (pricing.scheme === "per-token") {
       // API-equivalent value INCLUDING cache. Cache rates aren't in the table;
@@ -348,7 +377,7 @@ export class CostTracker {
     // portion above allowance, split proportionally across input/output.
     const overageDelta = Math.min(
       deltaInputTokens + deltaOutputTokens,
-      totalAfter - Math.max(totalBefore, allowance),
+      totalAfter - Math.max(totalBefore, allowance)
     );
     if (overageDelta <= 0) return 0;
     const totalDelta = deltaInputTokens + deltaOutputTokens || 1;
@@ -371,7 +400,7 @@ export class CostTracker {
   }
 
   private getMonthlySubscriptionTotals(
-    pricing: SubscriptionPricing,
+    pricing: SubscriptionPricing
   ): TokenTotals {
     const key = this.monthlyUsageKey(pricing);
     const existing = this.monthlySubscriptionTokens.get(key);
@@ -391,7 +420,7 @@ export class CostTracker {
         monthly.input,
         monthly.output,
         delta.cacheRead,
-        delta.cacheWrite,
+        delta.cacheWrite
       );
     }
 
@@ -402,13 +431,13 @@ export class CostTracker {
       0,
       0,
       delta.cacheRead,
-      delta.cacheWrite,
+      delta.cacheWrite
     );
   }
 
   private recordMonthlySubscriptionUsage(
     pricing: ModelPricing,
-    delta: TokenTotals,
+    delta: TokenTotals
   ): void {
     if (pricing.scheme !== "subscription") return;
     const monthly = this.getMonthlySubscriptionTotals(pricing);
@@ -432,7 +461,7 @@ export class CostTracker {
     agentId: string,
     rootPath: string,
     sessionId: string | null | undefined,
-    model: string,
+    model: string
   ): void {
     // Don't double-track
     if (this.sessions.has(agentId)) {
@@ -459,7 +488,7 @@ export class CostTracker {
       os.homedir(),
       ".claude",
       "projects",
-      encodedPath,
+      encodedPath
     );
 
     let filePath: string;
@@ -482,7 +511,7 @@ export class CostTracker {
         }
         filePath = path.join(projectDir, files[0].name);
         console.log(
-          `[CostTracker] No sessionId — using most recent: ${files[0].name}`,
+          `[CostTracker] No sessionId — using most recent: ${files[0].name}`
         );
       } catch {
         console.warn(`[CostTracker] Cannot read project dir: ${projectDir}`);
@@ -497,7 +526,7 @@ export class CostTracker {
     // Bailing here is exactly what left newly-spawned agents reading 0 tokens.
     if (!fs.existsSync(filePath)) {
       console.log(
-        `[CostTracker] Session file not present yet, will poll until it appears: ${filePath}`,
+        `[CostTracker] Session file not present yet, will poll until it appears: ${filePath}`
       );
     }
 
@@ -512,17 +541,88 @@ export class CostTracker {
       totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS,
+        SESSION_POLL_INTERVAL_MS
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`,
+      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`
     );
+
+    // Account-global rate-limit probe runs while any claude tracker lives.
+    this.ensureClaudeProbe();
 
     // Do an initial scan right away
     this.pollSessionFile(agentId);
+  }
+
+  // ── Claude account rate-limit probe (Phase 1b) ──────────────────────
+
+  private ensureClaudeProbe(): void {
+    if (this.claudeProbeTimer) return;
+    this.claudeProbeTimer = setInterval(
+      () => void this.pollClaudeUsage(),
+      CLAUDE_PROBE_INTERVAL_MS
+    );
+    void this.pollClaudeUsage();
+  }
+
+  /** Stop probing when the last claude-format tracker is gone. */
+  private stopClaudeProbeIfIdle(): void {
+    if (!this.claudeProbeTimer) return;
+    for (const t of this.sessions.values()) {
+      if (t.format === "claude") return;
+    }
+    clearInterval(this.claudeProbeTimer);
+    this.claudeProbeTimer = null;
+  }
+
+  private async pollClaudeUsage(): Promise<void> {
+    if (this.claudeProbeInFlight) return;
+    if (Date.now() < this.claudeProbeBackoffUntil) return;
+    this.claudeProbeInFlight = true;
+    try {
+      const snap = await probeClaudeUsage(resolveClaudeBinary().command);
+      if (snap) {
+        this.claudeUsage = snap;
+        this.claudeProbeFailures = 0;
+        console.log(
+          `[CostTracker] Claude rate-limit probe: 5h=${snap.primaryPercent}% ` +
+            `7d=${snap.secondaryPercent}% plan=${snap.planType ?? "?"}`
+        );
+      } else {
+        this.claudeProbeFailures++;
+        if (this.claudeProbeFailures >= CLAUDE_PROBE_MAX_FAILURES) {
+          this.claudeProbeBackoffUntil = Date.now() + CLAUDE_PROBE_BACKOFF_MS;
+          this.claudeProbeFailures = 0;
+          console.warn(
+            `[CostTracker] Claude rate-limit probe failed ${CLAUDE_PROBE_MAX_FAILURES}x — ` +
+              `backing off ${CLAUDE_PROBE_BACKOFF_MS / 60_000}min`
+          );
+        }
+      }
+    } finally {
+      this.claudeProbeInFlight = false;
+    }
+  }
+
+  /**
+   * Latest account-global claude rate-limit snapshot, or null when we have
+   * none / it has gone stale. Null means "no information" — emit() then
+   * leaves the rate-limit fields untouched instead of asserting dead values.
+   */
+  private freshClaudeRateLimit(): RateLimitInfo | null {
+    const s = this.claudeUsage;
+    if (!s) return null;
+    if (Date.now() - s.capturedAt > CLAUDE_PROBE_STALE_MS) return null;
+    return {
+      planType: s.planType,
+      primaryPercent: s.primaryPercent,
+      primaryResetAt: s.primaryResetAt,
+      secondaryPercent: s.secondaryPercent,
+      secondaryResetAt: s.secondaryResetAt,
+    };
   }
 
   /**
@@ -556,13 +656,13 @@ export class CostTracker {
       totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS,
+        SESSION_POLL_INTERVAL_MS
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`,
+      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`
     );
 
     // Initial scan (file may not exist yet — poller tolerates that).
@@ -576,6 +676,7 @@ export class CostTracker {
       this.sessions.delete(agentId);
     }
     this.stopAgySession(agentId);
+    this.stopClaudeProbeIfIdle();
   }
 
   /**
@@ -608,26 +709,35 @@ export class CostTracker {
       const { delta, newState } = parseSessionDelta(
         tracker.format,
         lines,
-        tracker.state,
+        tracker.state
       );
       tracker.state = newState;
       if (newState.model) tracker.model = newState.model;
-      this.emit(tracker, delta, newState.rateLimit);
+      // Rate-limit source per format: codex carries it inside the rollout
+      // JSONL (parsed into newState); claude JSONLs have none — the official
+      // source is the account-global get_usage probe (null when stale/absent,
+      // which emit() treats as "no information").
+      const rateLimit =
+        tracker.format === "claude"
+          ? this.freshClaudeRateLimit()
+          : newState.rateLimit;
+      this.emit(tracker, delta, rateLimit);
     } catch (err) {
       console.error(
         `[CostTracker] Error polling session for agent=${agentId}:`,
-        err,
+        err
       );
     }
   }
 
   /** Fold a token delta into the agent's running total and fire onCostDetected.
-   * Also forwards the latest rate-limit snapshot (codex) — emitted when tokens
-   * change OR the rate-limit % moves, so flat polls don't spam the writer. */
+   * Also forwards the latest rate-limit snapshot (codex rollout / claude
+   * get_usage probe) — emitted when tokens change OR the rate-limit % moves,
+   * so flat polls don't spam the writer. */
   private emit(
     tracker: SessionTracker,
     delta: TokenTotals,
-    rateLimit?: RateLimitInfo | null,
+    rateLimit?: RateLimitInfo | null
   ): void {
     const hasTokens =
       delta.input > 0 ||
@@ -682,7 +792,7 @@ export class CostTracker {
     console.log(
       `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} ` +
         `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()} ` +
-        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`,
+        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`
     );
   }
 
@@ -746,12 +856,12 @@ export class CostTracker {
       loggedLimited: false,
       timer: setInterval(
         () => this.pollAgySession(agentId),
-        SESSION_POLL_INTERVAL_MS,
+        SESSION_POLL_INTERVAL_MS
       ),
     };
     this.agySessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking antigravity store for agent=${agentId}`,
+      `[CostTracker] Tracking antigravity store for agent=${agentId}`
     );
     this.pollAgySession(agentId);
   }
@@ -778,7 +888,7 @@ export class CostTracker {
           tracker.loggedLimited = true;
           console.warn(
             `[CostTracker] agy agent=${agentId} uses legacy .pb store — ` +
-              `token capture limited (no decode); relying on PTY signals.`,
+              `token capture limited (no decode); relying on PTY signals.`
           );
         }
         return;
@@ -790,7 +900,7 @@ export class CostTracker {
     } catch (err) {
       console.error(
         `[CostTracker] Error polling agy store for agent=${agentId}:`,
-        err,
+        err
       );
     }
   }
@@ -833,7 +943,7 @@ export class CostTracker {
 
     console.log(
       `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} (agy) ` +
-        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`,
+        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`
     );
   }
 
@@ -903,7 +1013,7 @@ export class CostTracker {
         const cost = this.computeIncrementalCost(
           pricing,
           inputTokens,
-          outputTokens,
+          outputTokens
         );
 
         this.onCostDetected?.(agentId, {
@@ -939,5 +1049,10 @@ export class CostTracker {
       clearInterval(tracker.timer);
     }
     this.agySessions.clear();
+    if (this.claudeProbeTimer) {
+      clearInterval(this.claudeProbeTimer);
+      this.claudeProbeTimer = null;
+    }
+    this.claudeUsage = null;
   }
 }
