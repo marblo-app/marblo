@@ -481,9 +481,11 @@ function WindowGauge({
  * Phase 1b follow-up that reuses the same `rateLimitWeekly*` fields.
  */
 function RateLimitPanel({ agents }: { agents: Agent[] }) {
+  // model 이 비어있는(오케스트레이터/미상) 에이전트는 버킷팅에서 제외 —
+  // 실제 모델 id 가 있는 에이전트만 한도 패널에 표기한다.
   const modelsInUse = useMemo(() => {
     const s = new Set<string>();
-    for (const a of agents) s.add(a.model || "claude");
+    for (const a of agents) if (a.model) s.add(a.model);
     return Array.from(s);
   }, [agents]);
 
@@ -500,18 +502,40 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
           };
           // 5h(primary) + 주간(7일/secondary) 윈도우를 agent doc 에서 읽는다.
           // codex 가 둘 다 emit, claude 주간은 Phase 1b 캡처로 같은 필드 채움.
-          const forModel = agents.filter(
-            (a) => (a.model || "claude") === model,
-          );
-          const num = (vals: (number | undefined)[]) =>
-            vals.find((p) => typeof p === "number");
-          const live = num(forModel.map((a) => a.rateLimitPercent));
-          const liveReset = num(forModel.map((a) => a.rateLimitResetAt));
-          const weekly = num(forModel.map((a) => a.rateLimitWeeklyPercent));
-          const weeklyReset = num(
-            forModel.map((a) => a.rateLimitWeeklyResetAt),
-          );
+          // 빈 model 은 위 modelsInUse 에서 이미 걸러졌으므로 정확 일치만 본다.
+          const forModel = agents.filter((a) => a.model === model);
+          // 죽은/스테일 agent doc 에 잔존한 percent 를 현재값으로 오인하지
+          // 않도록, 한 대표 에이전트의 값만 읽는다. 선택 우선순위:
+          //  (1) 한도 percent 를 실제로 보유한 doc 만 후보
+          //  (2) working(실행 중) 상태 우선
+          //  (3) 가장 최근 갱신(costUpdatedAt → createdAt) 우선
+          const ts = (a: Agent) =>
+            new Date(a.costUpdatedAt ?? a.createdAt ?? 0).getTime();
+          const rep = forModel
+            .filter(
+              (a) =>
+                typeof a.rateLimitPercent === "number" ||
+                typeof a.rateLimitWeeklyPercent === "number",
+            )
+            .sort((x, y) => {
+              const xLive = x.status === "working" ? 1 : 0;
+              const yLive = y.status === "working" ? 1 : 0;
+              if (xLive !== yLive) return yLive - xLive;
+              return ts(y) - ts(x);
+            })[0];
+          const live =
+            typeof rep?.rateLimitPercent === "number"
+              ? rep.rateLimitPercent
+              : undefined;
+          const liveReset = rep?.rateLimitResetAt;
+          const weekly =
+            typeof rep?.rateLimitWeeklyPercent === "number"
+              ? rep.rateLimitWeeklyPercent
+              : undefined;
+          const weeklyReset = rep?.rateLimitWeeklyResetAt;
           const headline = typeof weekly === "number" ? weekly : live;
+          const hasData =
+            typeof live === "number" || typeof weekly === "number";
           return (
             <div
               key={model}
@@ -538,6 +562,10 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
                   percent={weekly}
                   resetAt={weeklyReset}
                 />
+              )}
+              {!hasData && (
+                // 유효한 percent 가 없으면 스테일 빨강 게이지 대신 우아하게 표기.
+                <p className="mt-2 text-xs text-gray-500">한도 정보 없음</p>
               )}
               <p className="mt-2 text-[11px] leading-snug text-gray-500">
                 {g.note}
