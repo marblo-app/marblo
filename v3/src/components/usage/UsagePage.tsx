@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Agent } from "../../types/agent";
 import { useProjectStore } from "../../stores/projectStore";
 import { useAgentStore } from "../../stores/agentStore";
@@ -104,13 +104,13 @@ export function UsagePage() {
         <SummaryCard
           label="Input / Output"
           value={`${formatTokens(totals.input)} / ${formatTokens(
-            totals.output,
+            totals.output
           )}`}
         />
         <SummaryCard
           label="Cache (R/W)"
           value={`${formatTokens(totals.cacheRead)} / ${formatTokens(
-            totals.cacheWrite,
+            totals.cacheWrite
           )}`}
         />
       </div>
@@ -193,9 +193,9 @@ function WeeklyTokenCard({ weekly }: { weekly: CostWeekly | null }) {
   const byModel = useMemo(
     () =>
       [...(weekly?.byModel ?? [])].sort(
-        (a, b) => b.totalTokens - a.totalTokens,
+        (a, b) => b.totalTokens - a.totalTokens
       ),
-    [weekly],
+    [weekly]
   );
 
   return (
@@ -270,6 +270,9 @@ function DailyTrend({
   rangeDays: number;
 }) {
   const span = Math.max(1, Math.round(rangeDays) || 30);
+  // 즉시 뜨는 커스텀 툴팁용 hover 상태. native title(약 1초 지연·작아서
+  // 못 알아챔)을 대체한다.
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const { days, families } = useMemo(() => {
     const map: Record<string, Record<string, DayCell>> = {};
     const famSet = new Set<string>();
@@ -340,56 +343,110 @@ function DailyTrend({
             );
           })}
         </div>
-        <div className="flex h-40 items-end gap-1">
-          {days.map(([date, fams]) => {
+        {/* relative 기준 컨테이너 — 커스텀 툴팁이 이 안에서 absolute 로 뜬다 */}
+        <div className="relative">
+          <div className="flex h-40 items-end gap-1">
+            {days.map(([date, fams], i) => {
+              const total = sumDay(fams);
+              return (
+                <div
+                  key={date}
+                  className="flex flex-1 cursor-default flex-col justify-end"
+                  style={{ height: "100%" }}
+                  onMouseEnter={() => setHoveredIndex(i)}
+                  onMouseLeave={() =>
+                    setHoveredIndex((cur) => (cur === i ? null : cur))
+                  }
+                >
+                  <div
+                    className="flex w-full flex-col-reverse overflow-hidden rounded-t"
+                    style={{
+                      height:
+                        total > 0
+                          ? `${Math.max(2, (total / maxDay) * 100)}%`
+                          : "0%",
+                    }}
+                  >
+                    {families
+                      .filter((f) => fams[f] && valOf(fams[f]) > 0)
+                      .map((f) => {
+                        const meta =
+                          MODEL_FAMILY_META[f] || MODEL_FAMILY_META.other;
+                        return (
+                          <div
+                            key={f}
+                            className="w-full"
+                            style={{
+                              height: `${(valOf(fams[f]) / total) * 100}%`,
+                              background: meta.color,
+                            }}
+                          />
+                        );
+                      })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 즉시 뜨는 커스텀 툴팁. 호버한 바 위에 뜨고, 좌우 끝에서는
+              화면 밖으로 잘리지 않도록 정렬을 좌/우 끝으로 보정한다. */}
+          {(() => {
+            if (hoveredIndex == null || !days[hoveredIndex]) return null;
+            const [date, fams] = days[hoveredIndex];
             const total = sumDay(fams);
-            const tooltip =
-              `${date}: ${fmt(total)}\n` +
-              families
-                .filter((f) => fams[f])
-                .map(
-                  (f) =>
-                    `${MODEL_FAMILY_META[f]?.label || f}: ${fmt(
-                      valOf(fams[f]),
-                    )}`,
-                )
-                .join("\n");
+            const ratio = (hoveredIndex + 0.5) / days.length;
+            // ratio 0(왼끝)→좌측 정렬, 1(오른끝)→우측 정렬, 중앙→센터.
+            const transform =
+              ratio < 0.15
+                ? "translateX(0)"
+                : ratio > 0.85
+                ? "translateX(-100%)"
+                : "translateX(-50%)";
+            const rows = families.filter((f) => fams[f] && valOf(fams[f]) > 0);
             return (
               <div
-                key={date}
-                className="flex flex-1 flex-col justify-end"
-                style={{ height: "100%" }}
-                title={tooltip}
+                className="pointer-events-none absolute bottom-full z-20 mb-2 w-max max-w-[220px] rounded-md border border-gray-700 bg-gray-900 px-3 py-2 shadow-lg"
+                style={{ left: `${ratio * 100}%`, transform }}
               >
-                <div
-                  className="flex w-full flex-col-reverse overflow-hidden rounded-t"
-                  style={{
-                    height:
-                      total > 0
-                        ? `${Math.max(2, (total / maxDay) * 100)}%`
-                        : "0%",
-                  }}
-                >
-                  {families
-                    .filter((f) => fams[f] && valOf(fams[f]) > 0)
-                    .map((f) => {
-                      const meta =
-                        MODEL_FAMILY_META[f] || MODEL_FAMILY_META.other;
-                      return (
-                        <div
-                          key={f}
-                          className="w-full"
-                          style={{
-                            height: `${(valOf(fams[f]) / total) * 100}%`,
-                            background: meta.color,
-                          }}
-                        />
-                      );
-                    })}
+                <div className="text-[11px] font-medium text-gray-200">
+                  {date}
                 </div>
+                {total > 0 ? (
+                  <>
+                    <div className="mt-0.5 font-mono text-xs text-gray-100">
+                      {fmt(total)}
+                    </div>
+                    <div className="mt-1.5 space-y-1">
+                      {rows.map((f) => {
+                        const meta =
+                          MODEL_FAMILY_META[f] || MODEL_FAMILY_META.other;
+                        return (
+                          <div
+                            key={f}
+                            className="flex items-center gap-1.5 text-[11px]"
+                          >
+                            <span
+                              className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                              style={{ background: meta.color }}
+                            />
+                            <span className="text-gray-300">{meta.label}</span>
+                            <span className="ml-auto pl-2 font-mono text-gray-400">
+                              {fmt(valOf(fams[f]))}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-0.5 text-[11px] text-gray-500">
+                    사용 없음
+                  </div>
+                )}
               </div>
             );
-          })}
+          })()}
         </div>
         <div className="mt-2 flex justify-between text-[10px] text-gray-500">
           <span>{days[0][0]}</span>
@@ -464,8 +521,8 @@ function WindowGauge({
             percent >= 90
               ? "bg-red-500"
               : percent >= 70
-                ? "bg-amber-500"
-                : "bg-green-500"
+              ? "bg-amber-500"
+              : "bg-green-500"
           }`}
           style={{ width: `${Math.min(100, percent)}%` }}
         />
@@ -515,7 +572,7 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
             .filter(
               (a) =>
                 typeof a.rateLimitPercent === "number" ||
-                typeof a.rateLimitWeeklyPercent === "number",
+                typeof a.rateLimitWeeklyPercent === "number"
             )
             .sort((x, y) => {
               const xLive = x.status === "working" ? 1 : 0;
