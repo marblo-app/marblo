@@ -1156,12 +1156,10 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
     bigquery.query({
       query: byDayQuery,
       params: { userId, projectId, days: requestedDays },
-      location: "us-central1",
     }),
     bigquery.query({
       query: weeklyByModelQuery,
       params: { userId, projectId, weeklyDays },
-      location: "us-central1",
     }),
   ]);
 
