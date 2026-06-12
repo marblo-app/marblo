@@ -7,8 +7,10 @@ import { create } from "zustand";
  * launch / attach 시점에 매핑을 박아둔다. AgentStatusCard 가 fallback 으로
  * 쓰는 "agent-${agentId}" 결정적 id 도 동일 인터페이스로 조회 가능하게 한다.
  *
- * 영속화는 sessionStorage(reload 안전, 탭 닫으면 사라짐) — Marblo app 은 단일
- * 윈도우 흐름이라 cross-tab 동기화는 불필요.
+ * 영속화는 localStorage — reload 뿐 아니라 앱 재시작 후에도 매핑이 살아남아야
+ * 진행 중 레인의 터미널을 재연결할 수 있다(B5). sessionStorage 는 윈도우를 닫으면
+ * 사라져 재시작 후 레인 "터미널" 버튼이 죽은 채널을 못 찾고 비활성화됐다.
+ * Marblo app 은 단일 윈도우 흐름이라 cross-tab 동기화는 불필요.
  */
 
 const STORAGE_KEY = "marblo.agentSessionMap.v1";
@@ -24,7 +26,7 @@ interface AgentSessionMapState {
 function readPersisted(): Record<string, string> {
   if (typeof window === "undefined") return {};
   try {
-    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
@@ -36,7 +38,7 @@ function readPersisted(): Record<string, string> {
 function writePersisted(map: Record<string, string>): void {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
   } catch {
     /* quota / disabled — best-effort */
   }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// vitest env is `node` — polyfill the bits of window/sessionStorage the store
+// vitest env is `node` — polyfill the bits of window/localStorage the store
 // touches so the persistence path is exercised exactly like in the renderer.
 class MemoryStorage {
   private data = new Map<string, string>();
@@ -19,12 +19,11 @@ class MemoryStorage {
 }
 
 const memStorage = new MemoryStorage();
-vi.stubGlobal("window", { sessionStorage: memStorage });
+vi.stubGlobal("window", { localStorage: memStorage });
 
 // Import AFTER the stub so the module-load read sees our polyfilled window.
-const { useAgentSessionMap, getSessionIdForAgent } = await import(
-  "../../src/stores/agentSessionMap"
-);
+const { useAgentSessionMap, getSessionIdForAgent } =
+  await import("../../src/stores/agentSessionMap");
 
 const STORAGE_KEY = "marblo.agentSessionMap.v1";
 
@@ -56,7 +55,7 @@ describe("agentSessionMap", () => {
     expect(useAgentSessionMap.getState().get("agent-1")).toBe("agent-agent-1");
   });
 
-  it("persists to sessionStorage", () => {
+  it("persists to localStorage (survives app restart — B5)", () => {
     useAgentSessionMap.getState().set("agent-1", "pty-aaa");
     const raw = memStorage.getItem(STORAGE_KEY);
     expect(raw).not.toBeNull();

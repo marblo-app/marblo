@@ -12,18 +12,18 @@ import { useAgentFocusStore } from "../../stores/agentFocusStore";
 import * as taskService from "../../services/taskService";
 import * as agentService from "../../services/agentService";
 import { checkAgentSpawn } from "../../lib/planLimits";
+import { buildLaneContextId, isLaneContext } from "../../lib/laneContext";
 import type { Agent } from "../../types/agent";
 import { LaneCreateModal, type LaneLaunchInput } from "./LaneCreateModal";
 import type { Task } from "../../types/task";
 import type { Worktree } from "../../types/worktree";
 
-// 빠른 작업 task 는 contextId="lane" 로 태깅된다. 보드 카드 마킹(좌측 amber
-// 바)은 기존 lib/laneContext.isLaneTask(=non-board 전체) 가 그대로 담당하고,
-// 여기 Lanes 탭 리스트는 lane 전용으로만 필터한다 — 미션 등 다른 컨텍스트가
-// 섞여 들어오는 것을 막기 위함. (보드 마킹 semantics 은 의도적으로 안 건드림.)
-const LANE_CONTEXT = "lane";
+// 빠른 작업 task 는 규약대로 contextId="lane:<laneId>" 로 태깅된다(lib/laneContext).
+// 보드 카드 마킹(좌측 amber 바)은 lib/laneContext.isLaneTask 가, 여기 Lanes 탭
+// 리스트는 isLaneContext 로 lane 전용 필터링한다 — 미션 등 다른 컨텍스트가 섞여
+// 들어오는 것을 막기 위함. (보드 마킹 semantics 은 의도적으로 안 건드림.)
 const isLaneRow = (contextId: string | undefined | null): boolean =>
-  !!contextId && (contextId === LANE_CONTEXT || contextId.startsWith("lane:"));
+  isLaneContext(contextId);
 
 const TONE_COLOR: Record<string, string> = {
   danger: "#f38ba8",
@@ -191,9 +191,14 @@ export function LanesTab() {
       setError(spawnCheck.reason ?? "에이전트 동시 실행 한도에 도달했습니다.");
       throw new Error("agent limit reached");
     }
+    // 레인마다 구별되는 contextId 를 규약("lane:<laneId>")대로 부여한다. task 생성
+    // 전에 laneId 가 필요하므로(contextId 는 생성 payload 에 들어간다) 여기서 미리
+    // 고유 id 를 만든다. 과거의 "lane" 단일 리터럴(B1)은 미션으로 오분류돼 보드
+    // 마킹이 깨졌었다 — 이제 buildLaneContextId 로 통일.
+    const laneId = crypto.randomUUID();
     const taskId = await taskService.createTask({
       projectId,
-      contextId: LANE_CONTEXT,
+      contextId: buildLaneContextId(laneId),
       title,
       description: "",
       status: "TODO",

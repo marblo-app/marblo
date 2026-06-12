@@ -1,9 +1,61 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildLaneContextId,
   getMissionId,
+  isLaneContext,
   isLaneTask,
   isMissionTask,
+  parseLaneContextId,
 } from "../../src/lib/laneContext";
+
+describe("buildLaneContextId", () => {
+  it('prefixes the laneId with "lane:" per the contextId 규약', () => {
+    expect(buildLaneContextId("abc123")).toBe("lane:abc123");
+  });
+  it("round-trips through parseLaneContextId", () => {
+    const laneId = "550e8400-e29b-41d4-a716-446655440000";
+    expect(parseLaneContextId(buildLaneContextId(laneId))).toBe(laneId);
+  });
+  it("produces a context that isLaneContext recognizes", () => {
+    expect(isLaneContext(buildLaneContextId("x"))).toBe(true);
+  });
+});
+
+describe("isLaneContext", () => {
+  it('is true for a "lane:" prefixed context', () => {
+    expect(isLaneContext("lane:abc")).toBe(true);
+  });
+  it("is true for a bare lane: prefix (empty laneId)", () => {
+    expect(isLaneContext("lane:")).toBe(true);
+  });
+  it("is false for board / mission / empty / null / undefined", () => {
+    expect(isLaneContext("board")).toBe(false);
+    expect(isLaneContext("mission-xyz")).toBe(false);
+    expect(isLaneContext("")).toBe(false);
+    expect(isLaneContext(null)).toBe(false);
+    expect(isLaneContext(undefined)).toBe(false);
+  });
+  it('is false for the legacy bare "lane" literal (B1 — no longer a lane)', () => {
+    // 옛 버그: contextId="lane" 단일 리터럴. 규약은 "lane:<id>" 뿐이다.
+    expect(isLaneContext("lane")).toBe(false);
+  });
+});
+
+describe("parseLaneContextId", () => {
+  it("extracts the laneId from a lane context", () => {
+    expect(parseLaneContextId("lane:abc123")).toBe("abc123");
+  });
+  it("returns an empty string for a bare lane: prefix", () => {
+    expect(parseLaneContextId("lane:")).toBe("");
+  });
+  it("returns null for non-lane contexts", () => {
+    expect(parseLaneContextId("board")).toBeNull();
+    expect(parseLaneContextId("mission-xyz")).toBeNull();
+    expect(parseLaneContextId("lane")).toBeNull();
+    expect(parseLaneContextId("")).toBeNull();
+    expect(parseLaneContextId(undefined)).toBeNull();
+  });
+});
 
 describe("isLaneTask", () => {
   it("is false for the board context", () => {
