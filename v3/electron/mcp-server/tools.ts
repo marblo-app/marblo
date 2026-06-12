@@ -27,7 +27,6 @@ import {
 import {
   applyProjection,
   resolveDependentIfReady,
-  isLaneContext,
   type ApplyProjectionInput,
 } from "./projection.js";
 import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
@@ -388,9 +387,11 @@ export function registerTools(server: McpServer): void {
     async ({ project_id, role, all_projects, all_contexts, limit }) => {
       const projectId = all_projects ? "" : resolveProject(project_id);
       const contextId = contextReadFilter(!!all_contexts);
+      const filterContextInMemory = contextId === "board";
       const constraints: QueryConstraint[] = [];
       if (projectId) constraints.push(where("projectId", "==", projectId));
-      if (contextId) constraints.push(where("contextId", "==", contextId));
+      if (contextId && !filterContextInMemory)
+        constraints.push(where("contextId", "==", contextId));
       if (role) constraints.push(where("role", "==", role));
 
       const q = query(collection(db, "tasks"), ...constraints);
@@ -401,14 +402,17 @@ export function registerTools(server: McpServer): void {
       // 열린(비terminal) task 를 먼저, 같은 그룹 내에선 priority 내림차순. 완료/실패
       // 다수가 컨텍스트를 먹던 것을 cap 으로 꼬리에서 잘라낸다.
       const docs = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }) as any)
-        .sort((a: any, b: any) => {
+        .map((d) => ({ id: d.id, ...d.data() }) as TaskDoc)
+        .filter(
+          (t) => !filterContextInMemory || isTaskInReadContext(t, contextId),
+        )
+        .sort((a, b) => {
           const ta = isTerminalTaskStatus(a.status) ? 1 : 0;
           const tb = isTerminalTaskStatus(b.status) ? 1 : 0;
           if (ta !== tb) return ta - tb; // open first
           return (b.priority ?? 0) - (a.priority ?? 0);
         });
-      const lines = docs.map((t: any) => {
+      const lines = docs.map((t) => {
         const claimed = t.claimedBy ? ` → ${t.claimedBy}` : "";
         const proj = all_projects ? ` project=${t.projectId || "(none)"}` : "";
         const ctx = all_contexts ? ` ctx=${t.contextId || "(none)"}` : "";
@@ -898,7 +902,7 @@ export function registerTools(server: McpServer): void {
       // event only — never an orch PTY wake — so the board orch isn't flooded
       // with Quick Lane churn. Only submit_for_review routes a lane to the orch
       // (the final review gate). board/mission progress is unaffected.
-      if (!isLaneContext(task.contextId)) {
+      if (!isLaneContextId(task.contextId)) {
         const commentNote = comment ? ` — ${comment}` : "";
         notifyOrchestrator(
           `[Task Update] "${task.title}" ${task.status} → ${newStatus} (role=${task.role}, id=${task_id})${commentNote}`,
@@ -940,7 +944,7 @@ export function registerTools(server: McpServer): void {
               // Lane dependents stay silent (P4): a Quick Lane's readiness is
               // not an orch wake event — board orch picks lane work up via the
               // board card, not a PTY inject.
-              if (!isLaneContext(task.contextId)) {
+              if (!isLaneContextId(task.contextId)) {
                 notifyOrchestrator(
                   `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`,
                   task.contextId,
@@ -992,7 +996,7 @@ export function registerTools(server: McpServer): void {
 
       // Lane activity is silent on the orch PTY (P4) — the comment lives on the
       // board card + Firestore activity stream only. board/mission unchanged.
-      if (!isLaneContext(task.contextId)) {
+      if (!isLaneContextId(task.contextId)) {
         const preview =
           message.length > 300 ? `${message.slice(0, 300)}...` : message;
         notifyOrchestrator(
