@@ -15,6 +15,7 @@ import { checkAgentSpawn } from "../../lib/planLimits";
 import { buildLaneContextId, isLaneContext } from "../../lib/laneContext";
 import type { Agent } from "../../types/agent";
 import { LaneCreateModal, type LaneLaunchInput } from "./LaneCreateModal";
+import { LaneDeleteConfirmModal } from "./LaneDeleteConfirmModal";
 import type { Task } from "../../types/task";
 import type { Worktree } from "../../types/worktree";
 
@@ -139,6 +140,7 @@ export function LanesTab() {
   const restartAgent = useAgentStore((s) => s.restartAgent);
 
   const [showCreate, setShowCreate] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<LaneRow | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<{
@@ -247,36 +249,87 @@ export function LanesTab() {
     refreshWorktrees().catch(() => {});
   };
 
-  const deleteLane = async (row: LaneRow) => {
-    const ok = window.confirm(
-      `"${row.task.title}" 레인 항목을 삭제할까요?\n\n에이전트, 태스크 기록, 격리 워크트리와 브랜치를 제거합니다.`,
-    );
-    if (!ok) return;
-
+  // cleanup 은 agent.stop → removeWorktree → agent.remove/deleteAgent →
+  // deleteTask → sessionMap.remove 순서로 진행된다. 프로세스 정리 계열
+  // (stop/remove)의 실패는 비치명 — 이미 죽은 프로세스일 수 있으므로 경고만
+  // 남기고 계속 간다. 반면 영구 기록 계열(removeWorktree/deleteAgent/
+  // deleteTask)의 실패는 치명 — 여기서 멈춰야 row 가 목록에 남아 같은 버튼으로
+  // 재시도할 수 있다 (이미 끝난 단계는 재시도 시 no-op 이거나 skip 된다).
+  const performDelete = async (row: LaneRow) => {
     setBusy({ taskId: row.task.id, action: "delete" });
     setError(null);
     setMessage(null);
+
+    const describe = (err: unknown) =>
+      err instanceof Error ? err.message : String(err);
+    const completed: string[] = [];
+    const warnings: string[] = [];
+    const failFatal = (step: string, err: unknown) => {
+      const lines = [
+        `레인 삭제가 "${step}" 단계에서 중단되었습니다: ${describe(err)}`,
+      ];
+      if (completed.length > 0)
+        lines.push(`완료된 단계: ${completed.join(", ")}`);
+      if (warnings.length > 0) lines.push(`경고: ${warnings.join(" / ")}`);
+      lines.push(
+        "항목이 목록에 남아 있으니 문제 해결 후 '삭제'로 재시도할 수 있습니다.",
+      );
+      setError(lines.join("\n"));
+    };
+
     try {
       if (row.agent) {
-        await window.electronAPI.agent.stop(row.agent.id).catch(() => {});
+        try {
+          await window.electronAPI.agent.stop(row.agent.id);
+          completed.push("에이전트 중지");
+        } catch (err) {
+          warnings.push(
+            `에이전트 중지 실패(이미 종료됐을 수 있음): ${describe(err)}`,
+          );
+        }
       }
       if (row.worktree) {
-        await removeWorktree(row.worktree.repoRoot, row.worktree.path, true);
+        try {
+          await removeWorktree(row.worktree.repoRoot, row.worktree.path, true);
+          completed.push("워크트리/브랜치 제거");
+        } catch (err) {
+          failFatal("워크트리/브랜치 제거", err);
+          return;
+        }
       }
       if (row.agent) {
-        await window.electronAPI.agent.remove(row.agent.id).catch(() => {});
-        await agentService.deleteAgent(row.agent.id);
+        try {
+          await window.electronAPI.agent.remove(row.agent.id);
+        } catch (err) {
+          warnings.push(`에이전트 프로세스 정리 실패: ${describe(err)}`);
+        }
+        try {
+          await agentService.deleteAgent(row.agent.id);
+          completed.push("에이전트 기록 삭제");
+        } catch (err) {
+          failFatal("에이전트 기록 삭제", err);
+          return;
+        }
       }
-      await taskService.deleteTask(row.task.id);
+      try {
+        await taskService.deleteTask(row.task.id);
+        completed.push("태스크 기록 삭제");
+      } catch (err) {
+        failFatal("태스크 기록 삭제", err);
+        return;
+      }
       if (row.agent) {
         useAgentSessionMap.getState().remove(row.agent.id);
       }
       setMessage(`"${row.task.title}" 레인 항목을 삭제했습니다.`);
-      refreshWorktrees().catch(() => {});
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "레인 항목 삭제 실패");
+      if (warnings.length > 0) {
+        setError(`경고(삭제는 완료됨): ${warnings.join(" / ")}`);
+      }
     } finally {
       setBusy(null);
+      // 치명 실패로 중단된 경우에도 워크트리 목록을 동기화해 둔다 — 재시도
+      // 시 이미 제거된 워크트리 단계가 정확히 skip 되도록.
+      refreshWorktrees().catch(() => {});
     }
   };
 
@@ -330,7 +383,7 @@ export function LanesTab() {
       </div>
 
       {error && (
-        <div className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+        <div className="whitespace-pre-line rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
           {error}
         </div>
       )}
@@ -421,7 +474,7 @@ export function LanesTab() {
                         type="button"
                         disabled={busyAction !== null}
                         title="완료/중단/충돌/실패 레인 항목 삭제"
-                        onClick={() => deleteLane(row)}
+                        onClick={() => setDeleteTarget(row)}
                         className="rounded border border-red-500/40 px-2 py-0.5 text-[11px] text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {busyAction === "delete" ? "삭제 중…" : "삭제"}
@@ -439,6 +492,21 @@ export function LanesTab() {
         <LaneCreateModal
           onCancel={() => setShowCreate(false)}
           onLaunch={launchLane}
+        />
+      )}
+
+      {deleteTarget && (
+        <LaneDeleteConfirmModal
+          title={deleteTarget.task.title}
+          branch={deleteTarget.worktree?.branch ?? null}
+          hasAgent={Boolean(deleteTarget.agent)}
+          hasWorktree={Boolean(deleteTarget.worktree)}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            const row = deleteTarget;
+            setDeleteTarget(null);
+            void performDelete(row);
+          }}
         />
       )}
     </div>
