@@ -55,6 +55,8 @@ export interface AgentLaunchParams {
   complexity?: TaskComplexity;
   /** Board task currently bound to this agent, when launched by dispatch/spawn. */
   currentTaskId?: string | null;
+  /** MARBLO_CONTEXT injected into this agent's MCP process, e.g. lane:<id>. */
+  contextId?: string;
   /** claude 런타임 강등 재시작(§3.4-3)용 모델 override. 설정되면 complexity
    * resolver 대신 이 모델 id 로 --model 핀(예: fable5 실패 → "opus"). */
   claudeModelOverride?: string;
@@ -313,6 +315,7 @@ export class AgentManager {
       params.complexity,
       // 런타임 강등 재시작 시 forced --model(예: fable5 실패 → "opus", §3.4-3).
       params.claudeModelOverride,
+      params.contextId,
     );
 
     // 모델 할당 v2 텔레메트리 + 폴백 표식(§8.1/§8.4). modelResolution 은 complex
@@ -943,6 +946,7 @@ export class AgentManager {
       command: agent.command,
       cwd: agent.cwd,
       currentTaskId: agent.currentTaskId,
+      contextId: agent.launchConfig?.env?.MARBLO_CONTEXT,
       resumeSessionId: resolvedSessionId,
       onPtyReady,
       claudeModelOverride,
@@ -1007,6 +1011,7 @@ export class AgentManager {
       command: agent.command,
       cwd: agent.cwd,
       currentTaskId: agent.currentTaskId,
+      contextId: agent.launchConfig?.env?.MARBLO_CONTEXT,
       initialPrompt,
       onPtyReady: agent.onPtyReady,
     });

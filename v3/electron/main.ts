@@ -23,7 +23,7 @@ import { AgentManager } from "./agent-manager";
 import { Updater } from "./updater";
 import { TaskDecomposer } from "./orchestrator/task-decomposer";
 import type { DecomposedTask } from "./orchestrator/dag-generator";
-import { BridgeServer } from "./bridge-server";
+import { BridgeServer, withCompletionFooter } from "./bridge-server";
 import {
   OrchestratorManager,
   isOrchestratorSession,
@@ -61,6 +61,7 @@ import {
   type MergeHistoryRecord,
 } from "./worktree-ipc";
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
+import { buildLaneContextId, isLaneContextId } from "./mcp-server/context";
 
 // .env 파일에서 Firebase 환경변수 로드 (Electron 메인 프로세스용)
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
@@ -964,6 +965,9 @@ import {
 import {
   getFirestore,
   collection as fbCollection,
+  doc as fbDoc,
+  getDoc as fbGetDoc,
+  updateDoc as fbUpdateDoc,
   addDoc as fbAddDoc,
   Timestamp as fbTimestamp,
 } from "firebase/firestore";
@@ -1753,6 +1757,33 @@ function setupPtyForwarding(sid: string): void {
   });
 }
 
+async function resolveLaneLaunchContext(
+  taskId: string | undefined,
+): Promise<string | undefined> {
+  if (!taskId) return undefined;
+  try {
+    const { app: fbApp, authReady } = getMissionFirebaseApp();
+    await authReady;
+    const ref = fbDoc(getFirestore(fbApp), "tasks", taskId);
+    const snap = await fbGetDoc(ref);
+    const rawContext = snap.data()?.contextId;
+    if (typeof rawContext !== "string" || !isLaneContextId(rawContext)) {
+      return undefined;
+    }
+    if (rawContext !== "lane") return rawContext;
+
+    const laneContextId = buildLaneContextId(taskId);
+    await fbUpdateDoc(ref, { contextId: laneContextId });
+    return laneContextId;
+  } catch (err) {
+    console.warn(
+      `[agent:launch] Failed to resolve task context for task=${taskId}:`,
+      err,
+    );
+    return undefined;
+  }
+}
+
 ipcMain.handle(
   "agent:launch",
   async (
@@ -1803,6 +1834,11 @@ ipcMain.handle(
     }
 
     const senderId = event.sender.id;
+    const laneContextId = await resolveLaneLaunchContext(taskId);
+    const effectiveInitialPrompt =
+      laneContextId && taskId
+        ? withCompletionFooter(initialPrompt || "", taskId)
+        : initialPrompt;
     const instance = agentManager.launch({
       id: agent.id,
       name: agent.name,
@@ -1810,9 +1846,11 @@ ipcMain.handle(
       role: agent.role,
       command: agent.command,
       cwd: launchCwd,
-      initialPrompt,
+      initialPrompt: effectiveInitialPrompt,
       resumeSessionId: resolvedSessionId,
       projectId,
+      currentTaskId: taskId ?? agent.currentTaskId ?? null,
+      contextId: laneContextId,
       onPtyReady: (sid) => {
         // Tag agent PTY with owner window so output flows back to the
         // launching window only.
@@ -1949,7 +1987,7 @@ ipcMain.handle("agent:healthStatus", (_event, agentId: string) => {
 
 ipcMain.handle(
   "agent:reconnect",
-  (
+  async (
     event,
     {
       agents,
@@ -1962,6 +2000,7 @@ ipcMain.handle(
         model: string;
         role: string;
         command: string;
+        currentTaskId?: string | null;
       }>;
       rootPath: string;
       projectId: string;
@@ -2108,6 +2147,9 @@ ipcMain.handle(
       }
 
       try {
+        const laneContextId = await resolveLaneLaunchContext(
+          agentData.currentTaskId ?? undefined,
+        );
         const instance = agentManager.launch({
           id: agentData.id,
           name: agentData.name,
@@ -2122,6 +2164,8 @@ ipcMain.handle(
           cwd: rootPath,
           resumeSessionId: resumeId ?? undefined,
           projectId,
+          currentTaskId: agentData.currentTaskId ?? null,
+          contextId: laneContextId,
           onPtyReady: (sid) => {
             ptyOwners.set(sid, senderId);
             setupPtyForwarding(sid);

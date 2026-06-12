@@ -18,6 +18,7 @@ import {
   normalizeModel,
   isWorktreeIsolated,
   checkPlanConcurrency,
+  isAgentContextReusable,
   type AgentInfo,
 } from "./dispatch-scoring";
 import { mainTelemetry } from "./telemetry";
@@ -97,6 +98,8 @@ export interface SpawnAgentRequest {
   /** Optional task ID used to append the completion-reporting footer for
    * direct spawn_agent calls. dispatch_task already appends this footer. */
   taskId?: string;
+  /** MCP context to inject into the spawned agent, e.g. board or lane:<id>. */
+  contextId?: string;
   /** Project ID — required in multi-window mode to scope the agent's view
    * to the correct window. MCP server forwards MARBLO_PROJECT here. */
   projectId?: string;
@@ -177,6 +180,8 @@ export interface DispatchTaskRequest {
   role: string;
   instruction: string;
   taskId?: string;
+  /** Caller MCP context. Used to keep board dispatches from reusing lane agents. */
+  contextId?: string;
   complexity?: "simple" | "standard" | "complex";
   model?: ModelType;
   enabledModels?: ModelType[];
@@ -520,6 +525,7 @@ export class BridgeServer {
         status: a.status,
         ptySessionId: a.ptySessionId,
         restartCount: a.restartCount,
+        contextId: a.launchConfig?.env?.MARBLO_CONTEXT,
       }));
 
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -824,7 +830,11 @@ export class BridgeServer {
       body += chunk;
     });
     req.on("end", () => {
-      let params: { agentName: string; instruction: string };
+      let params: {
+        agentName: string;
+        instruction: string;
+        contextId?: string;
+      };
       try {
         params = JSON.parse(body);
       } catch (err) {
@@ -871,6 +881,21 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: `Agent '${params.agentName}' is not available (status: ${agent.status})`,
+            }),
+          );
+          return;
+        }
+
+        const agentContextId = agent.launchConfig?.env?.MARBLO_CONTEXT;
+        if (!isAgentContextReusable(agentContextId, params.contextId)) {
+          const requestContext = params.contextId || "board";
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: `Agent '${params.agentName}' belongs to context '${
+                agentContextId || "board"
+              }' and cannot be reused from context '${requestContext}'`,
             }),
           );
           return;
@@ -1006,7 +1031,14 @@ export class BridgeServer {
 
     // Multi-window: only consider agents owned by the requesting project
     // for reuse / restart / spawn-constraint counting.
-    const allAgents = this.agentManager.listAgentsByProject(params.projectId);
+    const allAgents = this.agentManager
+      .listAgentsByProject(params.projectId)
+      .filter((agent) =>
+        isAgentContextReusable(
+          agent.launchConfig?.env?.MARBLO_CONTEXT,
+          params.contextId,
+        ),
+      );
 
     // L3/RG — per-task single-agent guarantee. A task-bound live agent wins
     // before normal idle reuse scoring. The binding can come from the isolated
@@ -1591,6 +1623,7 @@ export class BridgeServer {
       initialPrompt,
       projectId: params.projectId,
       complexity: params.complexity,
+      contextId: params.contextId,
       onPtyReady: (sid) => {
         if (this.agentSpawnedHook) {
           this.agentSpawnedHook({

@@ -31,6 +31,29 @@ export interface ScoredAgent {
   reason: string;
 }
 
+export function isLaneContextId(contextId: string | undefined): boolean {
+  return contextId === "lane" || (!!contextId && contextId.startsWith("lane:"));
+}
+
+/**
+ * Dispatch reuse/restart context gate.
+ *
+ * Lane agents carry MARBLO_CONTEXT=lane:<id> and must never be reused by board
+ * dispatches. A lane dispatch is stricter: only an agent from the same lane
+ * context may be reused. Non-lane requests keep the old behavior for non-lane
+ * agents.
+ */
+export function isAgentContextReusable(
+  agentContextId: string | undefined,
+  requestContextId: string | undefined,
+): boolean {
+  const agentIsLane = isLaneContextId(agentContextId);
+  const requestIsLane = isLaneContextId(requestContextId);
+  if (agentIsLane) return requestIsLane && agentContextId === requestContextId;
+  if (requestIsLane) return false;
+  return true;
+}
+
 // ── Patent claim 9 [식 1] 가중합: 매칭점수 = Σ (w_i × Index_i) ──
 //
 // 명세서 [식 1]: 매칭점수 = (w1 × 역할매칭지표) + (w2 × 부하균등지표)

@@ -28,6 +28,11 @@ export function isLaneContextId(contextId: string | undefined): boolean {
   return contextId === "lane" || (!!contextId && contextId.startsWith("lane:"));
 }
 
+/** Canonical Quick Lane contextId. Mirrors the renderer's buildLaneContextId. */
+export function buildLaneContextId(laneId: string): string {
+  return `lane:${laneId}`;
+}
+
 /**
  * Raw mission context from MARBLO_CONTEXT.
  *
@@ -59,7 +64,9 @@ export function contextReadFilter(
  * MARBLO_BRIDGE_PORT / MARBLO_PROJECT, only when non-empty.
  */
 export function contextForKind(kind: string): string {
-  return kind === "board" ? "board" : "";
+  if (kind === "board") return "board";
+  if (kind === "lane" || kind.startsWith("lane:")) return kind;
+  return "";
 }
 
 /** Compute contextId backfill for tasks missing it. missionId wins, else "board". */

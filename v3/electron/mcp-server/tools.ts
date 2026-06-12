@@ -19,6 +19,7 @@ import {
   resolveContextForWrite,
   resolveMissionContextForWrite,
   contextReadFilter,
+  isLaneContextId,
   isTaskInReadContext,
   buildMissionStepReportedEvent,
   type MissionStepReportedEvent,
@@ -1309,6 +1310,7 @@ export function registerTools(server: McpServer): void {
           // an external Claude Code session calls Marblo MCP without a
           // project context).
           parentAgentId: process.env.MARBLO_AGENT_ID || "",
+          contextId: process.env.MARBLO_CONTEXT || "",
         });
 
         const response = await fetch(
@@ -1666,6 +1668,7 @@ export function registerTools(server: McpServer): void {
               agentName: agent_name,
               instruction,
               projectId: process.env.MARBLO_PROJECT || "",
+              contextId: process.env.MARBLO_CONTEXT || "",
             }),
           },
         );
@@ -1944,6 +1947,7 @@ export function registerTools(server: McpServer): void {
               // Forward parent agent id for owner fallback when projectId
               // is empty (external Claude Code → Marblo MCP path).
               parentAgentId: process.env.MARBLO_AGENT_ID || "",
+              contextId: process.env.MARBLO_CONTEXT || "",
             }),
           },
         );
@@ -2119,6 +2123,7 @@ export function registerTools(server: McpServer): void {
             model: string;
             role: string;
             status: string;
+            contextId?: string;
           }>;
         };
 
@@ -2126,6 +2131,11 @@ export function registerTools(server: McpServer): void {
         const candidates = data.agents.filter((a) => {
           if (a.status !== "stopped" && a.status !== "error") return false;
           if (role && a.role !== role) return false;
+          const currentContext = process.env.MARBLO_CONTEXT || "";
+          const currentIsLane = isLaneContextId(currentContext);
+          const agentIsLane = isLaneContextId(a.contextId);
+          if (currentIsLane) return a.contextId === currentContext;
+          if (agentIsLane) return false;
           return true;
         });
 

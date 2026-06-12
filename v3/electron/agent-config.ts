@@ -505,6 +505,7 @@ function getMCPServerEnv(
   projectDir: string,
   marbloProjectId?: string,
   agentId?: string,
+  marbloContextId?: string,
 ): Record<string, string> {
   const env: Record<string, string> = {
     PATH: getEnrichedPath(),
@@ -536,6 +537,9 @@ function getMCPServerEnv(
   const resolvedProject = marbloProjectId || process.env.MARBLO_PROJECT || "";
   if (resolvedProject) {
     env.MARBLO_PROJECT = resolvedProject;
+  }
+  if (marbloContextId) {
+    env.MARBLO_CONTEXT = marbloContextId;
   }
   env.MARBLO_SKILLS_DIR = SKILLS_DIR;
 
@@ -624,11 +628,12 @@ function buildMCPServerEntry(
   projectDir: string,
   marbloProjectId?: string,
   agentId?: string,
+  marbloContextId?: string,
 ): MCPServerEntry {
   return {
     command: "node",
     args: [getMCPServerPath()],
-    env: getMCPServerEnv(projectDir, marbloProjectId, agentId),
+    env: getMCPServerEnv(projectDir, marbloProjectId, agentId, marbloContextId),
   };
 }
 
@@ -692,10 +697,16 @@ export class AgentConfigGenerator {
     model: ModelType,
     projectDir: string,
     marbloProjectId?: string,
+    marbloContextId?: string,
   ): string {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
-    const mcpEntry = buildMCPServerEntry(projectDir, marbloProjectId, agentId);
+    const mcpEntry = buildMCPServerEntry(
+      projectDir,
+      marbloProjectId,
+      agentId,
+      marbloContextId,
+    );
 
     switch (model) {
       case "claude":
@@ -756,12 +767,15 @@ export class AgentConfigGenerator {
     // claude 런타임 강등 재시작(§3.4-3)용 모델 override. 설정되면 complexity
     // 기반 resolver 대신 이 모델 id 로 --model 을 핀한다(예: fable5 실패 → "opus").
     claudeModelOverride?: string,
+    // Optional MCP context. Quick Lane agents use lane:<id> for board isolation.
+    marbloContextId?: string,
   ): LaunchConfig {
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
       agent.model,
       projectDir,
       marbloProjectId,
+      marbloContextId,
     );
     const skillPath = this.generateSkillFile(agent.id, agent.role, projectDir);
     const skillContent =
@@ -781,6 +795,7 @@ export class AgentConfigGenerator {
         pinClaudeSession,
         complexity,
         claudeModelOverride,
+        marbloContextId,
       );
 
     return {
@@ -1351,6 +1366,7 @@ export class AgentConfigGenerator {
     pinFreshClaudeSession = false,
     complexity?: TaskComplexity,
     claudeModelOverride?: string,
+    marbloContextId?: string,
   ): {
     command: string;
     args: string[];
@@ -1358,7 +1374,12 @@ export class AgentConfigGenerator {
     claudeSessionId?: string;
     modelResolution?: TopModelResolution;
   } {
-    const env = getMCPServerEnv(projectDir, marbloProjectId, agentId);
+    const env = getMCPServerEnv(
+      projectDir,
+      marbloProjectId,
+      agentId,
+      marbloContextId,
+    );
     // Normalize resume signals: "new" means force-fresh, "latest" means
     // "pick the most recent" (CLI-specific syntax), anything else is a
     // concrete session id.
