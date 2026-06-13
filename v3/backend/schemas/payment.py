@@ -72,10 +72,10 @@ class RefundResponse(BaseModel):
 
 class BillingKeyRequest(BaseModel):
     payment_method: Optional[str] = Field(default="TOSS", description="결제 방식 (TOSS, NAVERPAY)")
-    card_number: Optional[str] = Field(None, regex=r"^\d{13,19}$", description="카드 번호 (Toss 전용)")
-    card_expiry_year: Optional[str] = Field(None, regex=r"^\d{2}$", description="카드 만료 연도 (YY, Toss 전용)")
-    card_expiry_month: Optional[str] = Field(None, regex=r"^\d{2}$", description="카드 만료 월 (MM, Toss 전용)")
-    card_password: Optional[str] = Field(None, regex=r"^\d{2}$", description="카드 비밀번호 앞 2자리 (Toss 전용)")
+    card_number: Optional[str] = Field(None, pattern=r"^\d{13,19}$", description="카드 번호 (Toss 전용)")
+    card_expiry_year: Optional[str] = Field(None, pattern=r"^\d{2}$", description="카드 만료 연도 (YY, Toss 전용)")
+    card_expiry_month: Optional[str] = Field(None, pattern=r"^\d{2}$", description="카드 만료 월 (MM, Toss 전용)")
+    card_password: Optional[str] = Field(None, pattern=r"^\d{2}$", description="카드 비밀번호 앞 2자리 (Toss 전용)")
     birth_or_business_number: Optional[str] = Field(None, description="생년월일 6자리 또는 사업자번호 10자리 (Toss 전용)")
     return_url: Optional[str] = Field(None, description="NaverPay 빌링 인증 완료 후 리다이렉트 URL")
 
@@ -106,7 +106,7 @@ class BillingKeyRequest(BaseModel):
 
 class SubscriptionCreate(BaseModel):
     plan: SubscriptionPlan = Field(..., description="구독 플랜")
-    billing_cycle: str = Field(default="monthly", regex="^(monthly|yearly)$", description="결제 주기")
+    billing_cycle: str = Field(default="monthly", pattern="^(monthly|yearly)$", description="결제 주기")
     trial_days: Optional[int] = Field(None, ge=0, le=30, description="무료 체험 일수")
 
 
@@ -135,7 +135,7 @@ class SubscriptionResponse(BaseModel):
 
 class SubscriptionUpdate(BaseModel):
     plan: Optional[SubscriptionPlan] = Field(None, description="변경할 구독 플랜")
-    billing_cycle: Optional[str] = Field(None, regex="^(monthly|yearly)$", description="변경할 결제 주기")
+    billing_cycle: Optional[str] = Field(None, pattern="^(monthly|yearly)$", description="변경할 결제 주기")
 
 
 class SubscriptionCancel(BaseModel):

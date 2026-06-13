@@ -67,7 +67,7 @@ class Payment(Base):
     checkout_url = Column(String(500), nullable=True)
     failure_code = Column(String(50), nullable=True)
     failure_message = Column(Text, nullable=True)
-    metadata = Column(Text, nullable=True)
+    payment_metadata = Column("metadata", Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
