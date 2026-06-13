@@ -1156,9 +1156,11 @@ export class AgentConfigGenerator {
     // ★ MCP 통합 (2026-05-27 추가). agy 의 공식 MCP 설정 경로:
     //     ~/.gemini/antigravity-cli/mcp_config.json
     //   여기에 marblo MCP 항목을 머지한다. 다른 MCP 서버 항목은 그대로 보존.
-    //   per-agent 변수 (MARBLO_AGENT_ID/PROJECT/BRIDGE_PORT/PATH) 는 ${VAR}
-    //   substitution 으로 박아둬서, 동시에 여러 agy PTY 가 떠도 각자 자기
-    //   env 값으로 치환된다 (agy v1.20+ 가 MCP 자식 스폰 시 변환).
+    //   per-agent 변수 (MARBLO_AGENT_ID/PROJECT/BRIDGE_PORT/PATH) 는 spawn
+    //   시점의 resolved env 를 literal 로 박는다. agy 의 MCP child 는 항상
+    //   PTY parent env 를 상속/치환하지 않으므로 ${VAR} placeholder 를 쓰면
+    //   claim_task 처럼 인자만 쓰는 도구는 동작해도 add_activity 처럼 env
+    //   귀속/notify 에 의존하는 도구가 조용히 깨질 수 있다.
     //
     //   제약: 단일 Marblo 인스턴스 가정. 여러 Marblo 윈도우가 같은 글로벌
     //   파일에 동시 write 하면 마지막 writer 가 이김 (단, marblo entry 자체는
@@ -1171,17 +1173,16 @@ export class AgentConfigGenerator {
     fs.mkdirSync(globalConfigDir, { recursive: true });
     const globalConfigPath = path.join(globalConfigDir, "mcp_config.json");
 
-    // per-agent 로 달라야 하는 변수는 ${VAR} substitution 사용.
-    // 상수성 변수 (Firebase, MARBLO_SKILLS_DIR) 는 literal 로 박는다.
-    const SUBSTITUTE_KEYS = new Set([
-      "PATH",
-      "MARBLO_AGENT_ID",
-      "MARBLO_PROJECT",
-      "MARBLO_BRIDGE_PORT",
-    ]);
+    // agy launches MCP servers from this shared global config. Older code used
+    // "${VAR}" placeholders for per-agent values, assuming agy would substitute
+    // the PTY env when it spawned the MCP child. In practice agy can launch the
+    // child from an isolated environment, so placeholders reach the MCP server
+    // literally; tools that depend on MARBLO_AGENT_ID/PROJECT/BRIDGE_PORT then
+    // fail or become unattributable while argument-only tools still appear to
+    // work. Write the resolved spawn-time env instead.
     const marbloEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(mcpEntry.env || {})) {
-      marbloEnv[key] = SUBSTITUTE_KEYS.has(key) ? `\${${key}}` : value;
+      marbloEnv[key] = value;
     }
 
     let existing: Record<string, unknown> = {};
@@ -1224,6 +1225,17 @@ export class AgentConfigGenerator {
         JSON.stringify(merged, null, 2),
         "utf-8",
       );
+      console.info("[agy] merged Marblo MCP config", {
+        globalConfigPath,
+        command: mcpEntry.command,
+        args: mcpEntry.args,
+        envKeys: Object.keys(marbloEnv).sort(),
+        hasAgentId: !!marbloEnv.MARBLO_AGENT_ID,
+        hasProject: !!marbloEnv.MARBLO_PROJECT,
+        hasBridgePort: !!marbloEnv.MARBLO_BRIDGE_PORT,
+        hasContext: !!marbloEnv.MARBLO_CONTEXT,
+        existingServerKeys: Object.keys(existingServers).sort(),
+      });
       // NOTE: do NOT trackFile() globalConfigPath — it's user-shared.
       // cleanup() would clobber other agents' / other MCP servers' state.
     }
@@ -1241,6 +1253,15 @@ export class AgentConfigGenerator {
           agentId,
           globalConfigPath,
           mergeFailed: !!parseError,
+          marbloServer: {
+            command: mcpEntry.command,
+            args: mcpEntry.args,
+            envKeys: Object.keys(marbloEnv).sort(),
+            hasAgentId: !!marbloEnv.MARBLO_AGENT_ID,
+            hasProject: !!marbloEnv.MARBLO_PROJECT,
+            hasBridgePort: !!marbloEnv.MARBLO_BRIDGE_PORT,
+            hasContext: !!marbloEnv.MARBLO_CONTEXT,
+          },
           createdAt: Date.now(),
         },
         null,
@@ -1625,8 +1646,10 @@ export class AgentConfigGenerator {
         //   override 없이 그냥 `agy` 를 부른다. 워커 간 conversation/state
         //   충돌은 별도 트래킹.
         //
-        // MCP: agy v1 은 MCP 미통합. mcpConfigPath 는 generateAntigravityConfig
-        //   의 sentinel 일 뿐, agy 가 읽지 않는다.
+        // MCP: generateAntigravityConfig 가 agy 의 글로벌
+        //   ~/.gemini/antigravity-cli/mcp_config.json 에 Marblo entry 를
+        //   merge 한다. mcpConfigPath 는 sentinel/diagnostic path 로도 넘겨
+        //   spawned process logs 에서 어떤 agent config 였는지 추적한다.
         //
         // Resume:
         //   resumeSessionId = concrete UUID → --conversation <UUID> (정확)
