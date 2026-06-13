@@ -13,6 +13,7 @@ import * as taskService from "../../services/taskService";
 import * as agentService from "../../services/agentService";
 import { checkAgentSpawn } from "../../lib/planLimits";
 import { buildLaneContextId, isLaneContext } from "../../lib/laneContext";
+import { laneStatusPill } from "../../lib/laneStatus";
 import type { Agent } from "../../types/agent";
 import { LaneCreateModal, type LaneLaunchInput } from "./LaneCreateModal";
 import { LaneDeleteConfirmModal } from "./LaneDeleteConfirmModal";
@@ -32,6 +33,9 @@ const TONE_COLOR: Record<string, string> = {
   behind: "#fab387",
   ready: "#a6e3a1",
   idle: "#6c7086",
+  done: "#a6e3a1",
+  review: "#89b4fa",
+  failed: "#f38ba8",
 };
 const HARNESS_ICON: Record<string, string> = {
   claude: "🟣",
@@ -136,7 +140,6 @@ export function LanesTab() {
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
   const removeWorktree = useWorktreeStore((s) => s.remove);
-  const statusPill = useWorktreeStore((s) => s.statusPill);
   const restartAgent = useAgentStore((s) => s.restartAgent);
 
   const [showCreate, setShowCreate] = useState(false);
@@ -408,7 +411,10 @@ export function LanesTab() {
         <div className="flex-1 space-y-1.5 overflow-y-auto">
           {laneRows.map(({ task, agent, worktree }) => {
             const row = { task, agent, worktree };
-            const pill = worktree ? statusPill(worktree) : null;
+            // 레인 상태 pill 의 단일 진실의 원천. worktree git 상태만 보던
+            // 과거 statusPill 과 달리, 연결된 task 의 터미널 상태를 반영해
+            // 완료된 레인이 "작업중"으로 남아 멈춘 것처럼 보이는 오탐을 없앤다.
+            const pill = laneStatusPill(task, worktree);
             const st = worktree?.status;
             const busyAction = busy?.taskId === task.id ? busy.action : null;
             const showRestart = canRestartLane(row);
