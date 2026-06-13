@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  Link2,
   Loader2,
   RefreshCw,
   XCircle,
@@ -91,6 +92,7 @@ export function ConnectionStatusPanel() {
   const [connection, setConnection] = useState<ProjectConnection | null>(null);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<ConnectionCheckResult | null>(
@@ -126,6 +128,30 @@ export function ConnectionStatusPanel() {
   useEffect(() => {
     void loadConnection();
   }, [loadConnection]);
+
+  // 현재 프로젝트(id+folderPath)로 연결을 생성/재동기화한다. upsert 는
+  // connect()→deriveGitRepoMeta 로 repoUrl·defaultBranch 를 git 에서 자동
+  // 채우므로 사용자가 URL 을 직접 입력하지 않아도 동작한다(OAuth UI 없음).
+  // accessMode 는 일부러 비워 둔다 — 신규 연결은 store 기본값 'read', 재동기화는
+  // 기존 모드를 그대로 보존한다(merge: 입력 > 기존 > 기본).
+  const handleConnect = useCallback(async () => {
+    const projectId = currentProject?.id;
+    const localPath = currentProject?.folderPath;
+    if (!projectId || !localPath) return;
+
+    setConnecting(true);
+    setError(null);
+    try {
+      await window.electronAPI.connection.upsert({ projectId, localPath });
+      await loadConnection();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "연결 생성에 실패했습니다.",
+      );
+    } finally {
+      setConnecting(false);
+    }
+  }, [currentProject?.id, currentProject?.folderPath, loadConnection]);
 
   const activeAgents = useMemo(
     () => agents.filter((agent) => agent.status !== "stopped"),
@@ -171,6 +197,22 @@ export function ConnectionStatusPanel() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
+          {connection && (
+            <button
+              type="button"
+              onClick={() => void handleConnect()}
+              disabled={!currentProject?.folderPath || connecting}
+              title="git 메타(repo URL·기본 브랜치) 재동기화"
+              className="inline-flex h-8 items-center gap-1.5 rounded border border-[#313244] px-3 text-xs font-medium text-[#bac2de] hover:border-[#45475a] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {connecting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Link2 className="h-3.5 w-3.5" />
+              )}
+              재동기화
+            </button>
+          )}
           <button
             type="button"
             onClick={handleCheck}
@@ -199,8 +241,35 @@ export function ConnectionStatusPanel() {
           연결 상태 확인 중
         </div>
       ) : !connection ? (
-        <div className="rounded border border-dashed border-[#45475a] px-3 py-4 text-sm text-[#bac2de]">
-          연결된 repo가 없습니다.
+        <div className="rounded border border-dashed border-[#45475a] px-3 py-4">
+          <p className="mb-1 text-sm text-[#bac2de]">연결된 repo가 없습니다.</p>
+          {currentProject?.folderPath ? (
+            <>
+              <p className="mb-3 text-xs text-[#6c7086]">
+                현재 프로젝트의 로컬 경로로 연결을 만들면 repo URL·기본 브랜치를
+                git 에서 자동으로 채웁니다.
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleConnect()}
+                disabled={connecting}
+                className="inline-flex h-8 items-center gap-1.5 rounded bg-[#89b4fa] px-3 text-xs font-medium text-[#1e1e2e] hover:bg-[#74a8f5] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {connecting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Link2 className="h-3.5 w-3.5" />
+                )}
+                {connecting ? "연결 중" : "연결하기"}
+              </button>
+            </>
+          ) : (
+            <p className="text-xs text-[#6c7086]">
+              {currentProject
+                ? "프로젝트에 로컬 경로(folderPath)가 없어 연결할 수 없습니다. 프로젝트 설정에서 경로를 지정하세요."
+                : "프로젝트를 먼저 선택하세요."}
+            </p>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
