@@ -33,9 +33,10 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.triggerReconcile = exports.scheduledReconcilePaddle = exports.scheduledReconcileToss = exports.logFlowExecution = exports.logHeartbeat = exports.logTaskOutcome = exports.getCostLogs = exports.logCostBatch = exports.logTelemetryBatch = exports.issueLectureCoupon = exports.createCouponBatch = exports.applyCoupon = exports.validateCoupon = exports.confirmLecturePayment = exports.createLectureOrder = exports.cancelTossSubscription = exports.chargeBillingKey = exports.issueBillingKey = exports.tossWebhook = exports.confirmTossPayment = exports.createTossCheckout = exports.paddleWebhook = exports.cancelPaddleSubscription = void 0;
+exports.triggerReconcile = exports.scheduledReconcilePaddle = exports.scheduledReconcileToss = exports.logFlowExecution = exports.logHeartbeat = exports.logTaskOutcome = exports.getCostSummary = exports.getCostLogs = exports.logCostBatch = exports.logTelemetryBatch = exports.issueLectureCoupon = exports.createCouponBatch = exports.applyCoupon = exports.validateCoupon = exports.confirmLecturePayment = exports.createLectureOrder = exports.cancelTossSubscription = exports.chargeBillingKey = exports.issueBillingKey = exports.tossWebhook = exports.confirmTossPayment = exports.createTossCheckout = exports.paddleWebhook = exports.cancelPaddleSubscription = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
+const crypto = __importStar(require("crypto"));
 const bigquery_1 = require("@google-cloud/bigquery");
 const rateLimit_1 = require("./rateLimit");
 const reconciliation_1 = require("./reconciliation");
@@ -51,6 +52,7 @@ const PADDLE_WEBHOOK_SECRET = process.env.PADDLE_WEBHOOK_SECRET;
 const PADDLE_API_BASE = "https://api.paddle.com";
 const TOSS_SECRET_KEY = process.env.TOSS_SECRET_KEY;
 const TOSS_API_BASE = "https://api.tosspayments.com/v1";
+const TOSS_WEBHOOK_SECRET = process.env.TOSS_WEBHOOK_SECRET || "";
 const PLAN_PRICES_KRW = {
     pro: 19000,
     team: 29000,
@@ -90,16 +92,66 @@ exports.cancelPaddleSubscription = functions.https.onCall(async (_data, context)
     }
     return { success: true };
 });
+// ─── Webhook signature verification (H1) ─────────────────────────
+//
+// 위조된 웹훅으로 구독 상태를 조작하는 것을 막는다. 서명은 반드시 원본
+// 바이트(req.rawBody)에 대해 계산해야 한다 — JSON.parse 후 재직렬화하면
+// 키 순서/공백이 달라져 HMAC 이 깨진다. 비교는 timing-safe 하게 한다.
+/** 길이까지 포함해 timing-safe 한 hex 문자열 비교. */
+function timingSafeEqualHex(a, b) {
+    const bufA = Buffer.from(a, "utf8");
+    const bufB = Buffer.from(b, "utf8");
+    if (bufA.length !== bufB.length)
+        return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+}
+/**
+ * Toss 웹훅 서명 검증. 백엔드(payment_service.verify_webhook)와 동일 스킴:
+ * HMAC-SHA256(secret, `${timestamp}.${rawBody}`) hex, 헤더
+ * x-toss-webhook-signature / x-toss-webhook-timestamp.
+ */
+function verifyTossWebhook(signature, timestamp, rawBody) {
+    if (!TOSS_WEBHOOK_SECRET || !signature || !timestamp || !rawBody)
+        return false;
+    const message = `${timestamp}.${rawBody.toString("utf8")}`;
+    const expected = crypto
+        .createHmac("sha256", TOSS_WEBHOOK_SECRET)
+        .update(message)
+        .digest("hex");
+    return timingSafeEqualHex(signature, expected);
+}
+/**
+ * Paddle Billing 웹훅 서명 검증. 헤더 형식: `ts=<unix>;h1=<hmac-hex>`.
+ * HMAC-SHA256(secret, `${ts}:${rawBody}`) 를 h1 과 비교 (Paddle 공식 스킴).
+ */
+function verifyPaddleSignature(signatureHeader, rawBody) {
+    if (!PADDLE_WEBHOOK_SECRET || !signatureHeader || !rawBody)
+        return false;
+    const parts = Object.fromEntries(signatureHeader.split(";").map((kv) => {
+        const idx = kv.indexOf("=");
+        return [kv.slice(0, idx).trim(), kv.slice(idx + 1).trim()];
+    }));
+    const ts = parts["ts"];
+    const h1 = parts["h1"];
+    if (!ts || !h1)
+        return false;
+    const expected = crypto
+        .createHmac("sha256", PADDLE_WEBHOOK_SECRET)
+        .update(`${ts}:${rawBody.toString("utf8")}`)
+        .digest("hex");
+    return timingSafeEqualHex(h1, expected);
+}
 // ─── Paddle Webhook ──────────────────────────────────────────────
 exports.paddleWebhook = functions.https.onRequest(async (req, res) => {
     if (req.method !== "POST") {
         res.status(405).send("Method Not Allowed");
         return;
     }
-    // Verify webhook signature
-    const signature = req.headers["paddle-signature"];
-    if (!signature && PADDLE_WEBHOOK_SECRET) {
-        res.status(401).send("Missing signature");
+    // H1: 서명 검증. 기존 코드는 헤더 '존재'만 확인해(`!signature && SECRET`)
+    // 아무 값이나 넣으면 통과했다 — 서명 값 자체를 HMAC 으로 검증한다.
+    const signature = req.headers["paddle-signature"] || "";
+    if (!verifyPaddleSignature(signature, req.rawBody)) {
+        res.status(401).send("Invalid webhook signature");
         return;
     }
     const { event_type, data } = req.body;
@@ -294,6 +346,14 @@ exports.tossWebhook = functions.https.onRequest(async (req, res) => {
         res.status(405).send("Method Not Allowed");
         return;
     }
+    // H1: 서명 검증. 기존엔 검증이 전무해 위조 PAYMENT_STATUS_CHANGED 로
+    // 임의 구독을 canceled/past_due 로 바꿀 수 있었다.
+    const tossSignature = req.headers["x-toss-webhook-signature"] || "";
+    const tossTimestamp = req.headers["x-toss-webhook-timestamp"] || "";
+    if (!verifyTossWebhook(tossSignature, tossTimestamp, req.rawBody)) {
+        res.status(401).send("Invalid webhook signature");
+        return;
+    }
     const { eventType, data: eventData } = req.body;
     switch (eventType) {
         case "PAYMENT_STATUS_CHANGED": {
@@ -370,8 +430,31 @@ exports.issueBillingKey = functions.https.onCall(async (data, context) => {
     return { success: true, billingKey };
 });
 // 빌링키로 정기결제 실행
-exports.chargeBillingKey = functions.https.onCall(async (data, _context) => {
-    const { userId, billingKey, amount, orderId, orderName, customerKey } = data;
+exports.chargeBillingKey = functions.https.onCall(async (_data, context) => {
+    // C1: 인증 필수 + 결제 파라미터는 전부 서버에서 유도한다.
+    // 기존엔 인증 없이 userId/amount/billingKey 를 클라이언트 data 에서
+    // 받아, 임의 사용자의 빌링키로 임의 금액을 청구할 수 있었다(무인증+IDOR).
+    const userId = context.auth?.uid;
+    if (!userId)
+        throw new functions.https.HttpsError("unauthenticated", "Login required");
+    // 호출자 본인의 구독 문서에서 billingKey/customerKey/plan 을 읽는다 —
+    // 클라이언트 입력은 신뢰하지 않는다.
+    const subRef = db.collection("subscriptions").doc(userId);
+    const subSnap = await subRef.get();
+    const sub = subSnap.data();
+    if (!subSnap.exists || !sub?.tossBillingKey || !sub?.tossCustomerKey) {
+        throw new functions.https.HttpsError("failed-precondition", "No billing key registered for this account");
+    }
+    const planType = sub.planType || "pro";
+    const amount = PLAN_PRICES_KRW[planType];
+    if (!amount) {
+        throw new functions.https.HttpsError("failed-precondition", `Plan '${planType}' is not chargeable`);
+    }
+    const billingKey = sub.tossBillingKey;
+    const customerKey = sub.tossCustomerKey;
+    // orderId 도 서버 생성 — 클라이언트가 통제하지 못하게 한다.
+    const orderId = `sub_${userId}_${Date.now()}`;
+    const orderName = `Marblo ${planType} 구독`;
     const response = await fetch(`https://api.tosspayments.com/v1/billing/${billingKey}`, {
         method: "POST",
         headers: {
@@ -664,11 +747,13 @@ exports.logTelemetryBatch = functions.https.onCall(async (data, context) => {
     if (events.length > 100) {
         throw new functions.https.HttpsError("invalid-argument", "Max 100 events per batch");
     }
-    const userId = context.auth.uid;
+    // Auth is required for anti-abuse, but we deliberately DO NOT persist the
+    // uid. The events table is 비식별(익명): the `userId` column now holds the
+    // client-supplied anonymous install id, never the Firebase account uid.
     const now = new Date().toISOString();
     const rows = events.map((e) => ({
         event: e.event,
-        userId,
+        userId: e.clientId || "anon",
         appVersion: e.appVersion || "3.0.0",
         projectId: e.projectId || null,
         agentId: e.agentId || null,
@@ -710,6 +795,7 @@ exports.logTelemetryBatch = functions.https.onCall(async (data, context) => {
     await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
     return { inserted: rows.length };
 });
+const toNumber = (value) => Number(value ?? 0);
 exports.logCostBatch = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Login required");
@@ -765,6 +851,98 @@ exports.getCostLogs = functions.https.onCall(async (data, context) => {
     });
     return { logs: rows };
 });
+// Query aggregated cost summary from BigQuery for dashboard charts
+exports.getCostSummary = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const projectId = data.projectId;
+    if (!projectId) {
+        throw new functions.https.HttpsError("invalid-argument", "projectId required");
+    }
+    const requestedDays = Number(data.days ?? 30);
+    if (!Number.isInteger(requestedDays) || requestedDays <= 0) {
+        throw new functions.https.HttpsError("invalid-argument", "days must be a positive integer");
+    }
+    const userId = context.auth.uid;
+    const weeklyDays = 7;
+    const byDayQuery = `
+    SELECT
+      FORMAT_DATE('%F', DATE(timestamp)) AS date,
+      COALESCE(model, '') AS model,
+      SUM(COALESCE(inputTokens, 0)) AS inputTokens,
+      SUM(COALESCE(outputTokens, 0)) AS outputTokens,
+      SUM(COALESCE(cacheReadTokens, 0)) AS cacheReadTokens,
+      SUM(COALESCE(cacheWriteTokens, 0)) AS cacheWriteTokens,
+      SUM(
+        COALESCE(inputTokens, 0) +
+        COALESCE(outputTokens, 0) +
+        COALESCE(cacheReadTokens, 0) +
+        COALESCE(cacheWriteTokens, 0)
+      ) AS totalTokens,
+      SUM(COALESCE(totalCost, 0)) AS cost
+    FROM \`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\`
+    WHERE userId = @userId
+      AND projectId = @projectId
+      AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+    GROUP BY date, model
+    ORDER BY date ASC, model ASC
+  `;
+    const weeklyByModelQuery = `
+    SELECT
+      COALESCE(model, '') AS model,
+      SUM(
+        COALESCE(inputTokens, 0) +
+        COALESCE(outputTokens, 0) +
+        COALESCE(cacheReadTokens, 0) +
+        COALESCE(cacheWriteTokens, 0)
+      ) AS totalTokens,
+      SUM(COALESCE(totalCost, 0)) AS cost
+    FROM \`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\`
+    WHERE userId = @userId
+      AND projectId = @projectId
+      AND timestamp >= TIMESTAMP_SUB(
+        CURRENT_TIMESTAMP(),
+        INTERVAL @weeklyDays DAY
+      )
+    GROUP BY model
+    ORDER BY model ASC
+  `;
+    const [[byDayRows], [weeklyByModelRows]] = await Promise.all([
+        bigquery.query({
+            query: byDayQuery,
+            params: { userId, projectId, days: requestedDays },
+        }),
+        bigquery.query({
+            query: weeklyByModelQuery,
+            params: { userId, projectId, weeklyDays },
+        }),
+    ]);
+    const byDay = byDayRows.map((row) => ({
+        date: row.date ?? "",
+        model: row.model ?? "",
+        inputTokens: toNumber(row.inputTokens),
+        outputTokens: toNumber(row.outputTokens),
+        cacheReadTokens: toNumber(row.cacheReadTokens),
+        cacheWriteTokens: toNumber(row.cacheWriteTokens),
+        totalTokens: toNumber(row.totalTokens),
+        cost: toNumber(row.cost),
+    }));
+    const weeklyByModel = weeklyByModelRows.map((row) => ({
+        model: row.model ?? "",
+        totalTokens: toNumber(row.totalTokens),
+        cost: toNumber(row.cost),
+    }));
+    const weeklyTotalTokens = weeklyByModel.reduce((total, row) => total + row.totalTokens, 0);
+    const weeklyCost = weeklyByModel.reduce((total, row) => total + row.cost, 0);
+    return {
+        byDay,
+        weeklyByModel,
+        weeklyTotalTokens,
+        weeklyCost,
+        rangeDays: requestedDays,
+    };
+});
 // ─── Task Outcomes → BigQuery ────────────────────────────────
 const BQ_TASK_OUTCOMES_TABLE = "task_outcomes";
 exports.logTaskOutcome = functions.https.onCall(async (data, context) => {
@@ -775,10 +953,11 @@ exports.logTaskOutcome = functions.https.onCall(async (data, context) => {
     if (!d || !d.taskId) {
         throw new functions.https.HttpsError("invalid-argument", "outcome with taskId required");
     }
-    const userId = context.auth.uid;
+    // 비식별: store the anonymous client id, not the account uid (anti-abuse
+    // auth above is enough — the row itself stays de-identified).
     const now = new Date().toISOString();
     const row = {
-        userId,
+        userId: d.clientId || "anon",
         taskId: d.taskId,
         projectId: d.projectId || null,
         taskType: d.taskType || null,
@@ -816,10 +995,10 @@ exports.logHeartbeat = functions.https.onCall(async (data, context) => {
     if (beats.length > 50) {
         throw new functions.https.HttpsError("invalid-argument", "Max 50 beats per batch");
     }
-    const userId = context.auth.uid;
+    // 비식별: heartbeats carry the anonymous client id, not the account uid.
     const now = new Date().toISOString();
     const rows = beats.map((b) => ({
-        userId,
+        userId: b.clientId || "anon",
         agentId: b.agentId || "",
         projectId: b.projectId || null,
         status: b.status || null,

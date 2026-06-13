@@ -58,7 +58,12 @@ exports.reconcilePaddlePending = reconcilePaddlePending;
  * synthetic week of stuck orders — see tests/reconciliation.test.mjs.
  */
 const admin = __importStar(require("firebase-admin"));
-const db = admin.firestore();
+// Lazy — admin.firestore() must NOT run at module load. index.ts imports this
+// module before calling admin.initializeApp(), and CJS runs imports first, so a
+// top-level admin.firestore() throws app/no-app and fails firebase-functions v5
+// source discovery for the whole codebase. Resolve on first use instead.
+let _db = null;
+const db = () => (_db ?? (_db = admin.firestore()));
 const MIN_AGE_HOURS = 1; // Give the user time to finish the redirect.
 const MAX_AGE_HOURS = 24 * 7; // Don't keep banging old failed orders.
 const TOSS_SECRET_KEY = process.env.TOSS_SECRET_KEY || "";
@@ -169,7 +174,7 @@ async function reconcileTossPending() {
         errors: 0,
     };
     const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - MAX_AGE_HOURS * 3600 * 1000);
-    const stuck = await db
+    const stuck = await db()
         .collection("pendingOrders")
         .where("createdAt", ">", cutoff)
         .get();
@@ -226,7 +231,7 @@ async function reconcilePaddlePending() {
     // Until the Paddle integration is more fleshed out, we scan
     // pendingOrders documents flagged with provider='paddle'.
     const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - MAX_AGE_HOURS * 3600 * 1000);
-    const stuck = await db
+    const stuck = await db()
         .collection("pendingOrders")
         .where("provider", "==", "paddle")
         .where("createdAt", ">", cutoff)
