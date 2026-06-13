@@ -31,6 +31,10 @@ import {
   type ApplyProjectionInput,
 } from "./projection.js";
 import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
+import {
+  formatAgentTaskRoleLabel,
+  normalizeFirestoreFallbackAgentStatus,
+} from "./agent-status-labels.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
@@ -191,6 +195,34 @@ async function fetchTask(taskId: string): Promise<TaskDoc | null> {
 
 function text(t: string) {
   return { content: [{ type: "text" as const, text: t }] };
+}
+
+async function fetchAgentRole(agentId: string): Promise<string | null> {
+  if (!agentId || agentId === "unknown" || isOrchestratorAgentId(agentId)) {
+    return null;
+  }
+  try {
+    const snap = await getDoc(doc(db, "agents", agentId));
+    if (!snap.exists()) return null;
+    const role = snap.data().role;
+    return typeof role === "string" && role.trim() ? role : null;
+  } catch (err) {
+    console.warn("[MCP] Failed to fetch agent role:", err);
+    return null;
+  }
+}
+
+async function markAgentStoppedInFirestore(agentId: string): Promise<void> {
+  if (!agentId) return;
+  try {
+    await updateDoc(doc(db, "agents", agentId), {
+      status: "stopped",
+      currentTaskId: null,
+      updatedAt: Timestamp.now(),
+    });
+  } catch (err) {
+    console.warn("[MCP] Failed to mark killed agent stopped:", err);
+  }
 }
 
 function applyMissionContextTags(
@@ -923,8 +955,12 @@ export function registerTools(server: McpServer): void {
       // (the final review gate). board/mission progress is unaffected.
       if (!isLaneContextId(task.contextId)) {
         const commentNote = comment ? ` — ${comment}` : "";
+        const roleLabel = formatAgentTaskRoleLabel(
+          task.role,
+          await fetchAgentRole(MARBLO_AGENT_ID),
+        );
         notifyOrchestrator(
-          `[Task Update] "${task.title}" ${task.status} → ${newStatus} (role=${task.role}, id=${task_id})${commentNote}`,
+          `[Task Update] "${task.title}" ${task.status} → ${newStatus} (${roleLabel}, id=${task_id})${commentNote}`,
           task.contextId,
         );
       }
@@ -1021,8 +1057,12 @@ export function registerTools(server: McpServer): void {
       if (!isLaneContextId(task.contextId)) {
         const preview =
           message.length > 300 ? `${message.slice(0, 300)}...` : message;
+        const roleLabel = formatAgentTaskRoleLabel(
+          task.role,
+          await fetchAgentRole(resolvedAgentId),
+        );
         notifyOrchestrator(
-          `[Task Activity] "${task.title}" progress update (role=${task.role}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`,
+          `[Task Activity] "${task.title}" progress update (${roleLabel}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`,
           task.contextId,
         );
       }
@@ -1093,8 +1133,12 @@ export function registerTools(server: McpServer): void {
       // (resolveNotifyTarget); missions go to the mission orch. Do NOT add a
       // lane gate here — that would silence the lane review gate entirely.
       const prNote = pr_url ? ` PR: ${pr_url}` : "";
+      const roleLabel = formatAgentTaskRoleLabel(
+        task.role,
+        await fetchAgentRole(MARBLO_AGENT_ID),
+      );
       notifyOrchestrator(
-        `[Review Submitted] "${task.title}" is ready for review (role=${task.role}, id=${task_id})${prNote}`,
+        `[Review Submitted] "${task.title}" is ready for review (${roleLabel}, id=${task_id})${prNote}`,
         task.contextId,
       );
 
@@ -1655,8 +1699,15 @@ export function registerTools(server: McpServer): void {
 
       const lines = snap.docs.map((d) => {
         const a = d.data();
-        const task = a.currentTaskId ? ` → task=${a.currentTaskId}` : "";
-        return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${d.id})${task}`;
+        const statusInfo = normalizeFirestoreFallbackAgentStatus(a.status);
+        const task =
+          !statusInfo.staleActive && a.currentTaskId
+            ? ` → task=${a.currentTaskId}`
+            : "";
+        const stale = statusInfo.staleActive
+          ? ` stale=${String(a.status)}`
+          : "";
+        return `- [${statusInfo.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${d.id}${stale})${task}`;
       });
       return text(
         `Agents (${snap.size}, Firestore fallback):\n${capLines(
@@ -1985,6 +2036,7 @@ export function registerTools(server: McpServer): void {
           action?: string;
           agentId?: string;
           agentName?: string;
+          agentRole?: string;
           model?: string;
           score?: number;
           reason?: string;
@@ -2023,7 +2075,7 @@ export function registerTools(server: McpServer): void {
                   ownerId: "orchestrator",
                   name: result.agentName || `${role}-agent`,
                   model: result.model || model || "claude",
-                  role,
+                  role: result.agentRole || role,
                   status: "working",
                   // Link to the board task — the supplied task_id, or the ad-hoc
                   // worktree task the bridge auto-created (result.taskId).
@@ -2075,6 +2127,7 @@ export function registerTools(server: McpServer): void {
         ];
         if (result.agentId) lines.push(`  Agent ID: ${result.agentId}`);
         if (result.agentName) lines.push(`  Agent Name: ${result.agentName}`);
+        if (result.agentRole) lines.push(`  Agent Role: ${result.agentRole}`);
         if (result.model) lines.push(`  Model: ${result.model}`);
         if (result.score !== undefined) lines.push(`  Score: ${result.score}`);
         if (dispatchTaskId) lines.push(`  Task ID: ${dispatchTaskId}`);
@@ -2136,6 +2189,10 @@ export function registerTools(server: McpServer): void {
               result.error || "Unknown error"
             }`,
           );
+        }
+
+        if (result.agentId) {
+          await markAgentStoppedInFirestore(result.agentId);
         }
 
         return text(`${result.reason}`);
@@ -2205,14 +2262,24 @@ export function registerTools(server: McpServer): void {
         const results: string[] = [];
         for (const agent of candidates) {
           try {
-            await fetch(`http://127.0.0.1:${bridgePort}/kill-agent`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                agentName: agent.name,
-                reason: "cleanup",
-              }),
-            });
+            const response = await fetch(
+              `http://127.0.0.1:${bridgePort}/kill-agent`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  agentName: agent.name,
+                  reason: "cleanup",
+                }),
+              },
+            );
+            const result = (await response.json()) as {
+              success: boolean;
+              agentId?: string;
+            };
+            if (result.success && result.agentId) {
+              await markAgentStoppedInFirestore(result.agentId);
+            }
             results.push(`${agent.name} (${agent.status})`);
           } catch {
             results.push(`${agent.name} (failed to kill)`);

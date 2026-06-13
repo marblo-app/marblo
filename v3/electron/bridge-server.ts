@@ -233,6 +233,9 @@ export interface DispatchTaskResponse {
   action?: DispatchAction;
   agentId?: string;
   agentName?: string;
+  /** Actual registered role of the selected agent. May differ from task role
+   * when routing to an already-bound or manually reused agent. */
+  agentRole?: string;
   model?: string;
   score?: number;
   reason?: string;
@@ -691,6 +694,8 @@ export class BridgeServer {
           return;
         }
 
+        this.agentManager.stop(agent.id);
+        this.syncAgentStatus(agent.id, "stopped", null);
         this.agentManager.remove(agent.id);
         // Notify renderer to delete from Firestore too
         this.broadcast("agent:deleted", {
@@ -1124,6 +1129,7 @@ export class BridgeServer {
         action: "reused",
         agentId: fullAgent.id,
         agentName: candidate.agent.name,
+        agentRole: fullAgent.role,
         model: candidate.agent.model,
         score: candidate.score,
         reason: candidate.reason,
@@ -1183,6 +1189,7 @@ export class BridgeServer {
           action: "restarted",
           agentId: restarted.id,
           agentName: best.agent.name,
+          agentRole: restarted.role,
           model: best.agent.model,
           score: best.score,
           reason: best.reason,
@@ -1279,6 +1286,7 @@ export class BridgeServer {
       action: "spawned",
       agentId: spawnResult.agentId,
       agentName,
+      agentRole: role,
       model: selectedModel,
       score: 0,
       reason: `No reusable agent found. Spawned new ${selectedModel} agent '${agentName}'${topModelNote}`,
@@ -1445,6 +1453,7 @@ export class BridgeServer {
       action: "reused",
       agentId: agent.id,
       agentName: agent.name,
+      agentRole: agent.role,
       model: agent.model,
       score: 0,
       reason: `Agent already bound to task ${taskId} — routed instead of reassigning or spawning a duplicate.`,
