@@ -62,6 +62,13 @@ import {
 } from "./worktree-ipc";
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
 import { buildLaneContextId, isLaneContextId } from "./mcp-server/context";
+import {
+  getProjectConnection,
+  upsertProjectConnection,
+  listProjectConnections,
+  touchProjectLastRun,
+  type ProjectConnectionInput,
+} from "./connection-store";
 
 // .env 파일에서 Firebase 환경변수 로드 (Electron 메인 프로세스용)
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
@@ -1700,6 +1707,32 @@ ipcMain.handle("fs:revealInFinder", (_event, targetPath: string) => {
   shell.showItemInFolder(targetPath);
   return { success: true };
 });
+
+// --- Connection IPC Handlers (연동 T1·기반) ---
+//
+// 프로젝트↔repo 연결의 단일 진실원. T2(Harness 탭)·T3(미션 선택)는 렌더러에서
+// `connection:get` 으로 연결 상태를 읽고, electron-side 소비자는 connection-store
+// 의 getProjectConnection 을 직접 import 한다. upsert 는 git 메타(repoUrl·default
+// branch)를 가능하면 자동 채운다(MCP-first, OAuth UI 없음).
+
+ipcMain.handle("connection:get", (_event, projectId: string) => {
+  return getProjectConnection(projectId);
+});
+
+ipcMain.handle("connection:list", () => {
+  return listProjectConnections();
+});
+
+ipcMain.handle("connection:upsert", (_event, input: ProjectConnectionInput) => {
+  return upsertProjectConnection(input);
+});
+
+ipcMain.handle(
+  "connection:touchLastRun",
+  (_event, { projectId, at }: { projectId: string; at?: number }) => {
+    return touchProjectLastRun(projectId, at);
+  },
+);
 
 // --- Agent IPC Handlers ---
 

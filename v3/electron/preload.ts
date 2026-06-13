@@ -500,6 +500,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     revealInFinder: (targetPath: string) =>
       ipcRenderer.invoke("fs:revealInFinder", targetPath),
   },
+  // 프로젝트↔repo 연결 단일 진실원 (연동 T1). T2/T3 가 소비하는 읽기 인터페이스.
+  connection: {
+    get: (projectId: string) => ipcRenderer.invoke("connection:get", projectId),
+    list: () => ipcRenderer.invoke("connection:list"),
+    upsert: (input: unknown) => ipcRenderer.invoke("connection:upsert", input),
+    touchLastRun: (projectId: string, at?: number) =>
+      ipcRenderer.invoke("connection:touchLastRun", { projectId, at }),
+  },
   updater: {
     check: () => ipcRenderer.invoke("updater:check"),
     download: () => ipcRenderer.invoke("updater:download"),
