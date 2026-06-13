@@ -513,6 +513,50 @@ interface HarnessAPI {
   uninstall: (id: string) => Promise<{ success: boolean; error?: string }>;
 }
 
+type ConnectionAccessMode = "read" | "write" | "pr" | "commit";
+type ConnectionPermissionsState = "unknown" | "pending" | "granted" | "denied";
+
+interface ProjectConnection {
+  projectId: string;
+  localPath: string;
+  repoUrl: string | null;
+  defaultBranch: string | null;
+  connectedHarness: string | null;
+  availableMcps: string[];
+  accessMode: ConnectionAccessMode;
+  lastRunAt: number | null;
+  permissionsState: ConnectionPermissionsState;
+}
+
+interface ConnectionCheckItem {
+  id: "repo" | "branch" | "issues" | "pullRequest" | "auth";
+  label: string;
+  status: "pass" | "warn" | "fail";
+  detail: string;
+}
+
+interface ConnectionCheckResult {
+  checkedAt: number;
+  ok: boolean;
+  items: ConnectionCheckItem[];
+}
+
+interface ConnectionAPI {
+  get: (projectId: string) => Promise<ProjectConnection | null>;
+  list: () => Promise<ProjectConnection[]>;
+  upsert: (
+    input: Partial<ProjectConnection> & {
+      projectId: string;
+      localPath: string;
+    },
+  ) => Promise<ProjectConnection>;
+  touchLastRun: (
+    projectId: string,
+    at?: number,
+  ) => Promise<ProjectConnection | null>;
+  check: (projectId: string) => Promise<ConnectionCheckResult>;
+}
+
 interface UpdaterStatus {
   status:
     | "checking"
@@ -574,6 +618,7 @@ interface ElectronAPI {
   bridge: BridgeAPI;
   appState: AppStateAPI;
   system: SystemAPI;
+  connection: ConnectionAPI;
   updater: UpdaterAPI;
 }
 

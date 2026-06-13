@@ -15,6 +15,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import http from "http";
+import { spawn } from "node:child_process";
 import dotenv from "dotenv";
 import { PtyManager } from "./pty-manager";
 import { PendingInstructionListener } from "./pending-instruction-listener";
@@ -69,6 +70,21 @@ import {
   touchProjectLastRun,
   type ProjectConnectionInput,
 } from "./connection-store";
+
+type ConnectionCheckStatus = "pass" | "warn" | "fail";
+
+interface ConnectionCheckItem {
+  id: "repo" | "branch" | "issues" | "pullRequest" | "auth";
+  label: string;
+  status: ConnectionCheckStatus;
+  detail: string;
+}
+
+interface ConnectionCheckResult {
+  checkedAt: number;
+  ok: boolean;
+  items: ConnectionCheckItem[];
+}
 
 // .env 파일에서 Firebase 환경변수 로드 (Electron 메인 프로세스용)
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
@@ -1708,6 +1724,345 @@ ipcMain.handle("fs:revealInFinder", (_event, targetPath: string) => {
   return { success: true };
 });
 
+function makeConnectionCheckItem(
+  id: ConnectionCheckItem["id"],
+  label: string,
+  status: ConnectionCheckStatus,
+  detail: string,
+): ConnectionCheckItem {
+  return { id, label, status, detail };
+}
+
+function parseGitHubRepoSlug(repoUrl: string | null): string | null {
+  if (!repoUrl) return null;
+  const trimmed = repoUrl.trim().replace(/\.git$/, "");
+  const sshMatch = trimmed.match(/^git@github\.com:([^/]+\/[^/]+)$/i);
+  if (sshMatch) return sshMatch[1];
+
+  try {
+    const url = new URL(trimmed);
+    if (url.hostname !== "github.com") return null;
+    const parts = url.pathname.replace(/^\/+/, "").split("/");
+    if (parts.length < 2 || !parts[0] || !parts[1]) return null;
+    return `${parts[0]}/${parts[1]}`;
+  } catch {
+    return null;
+  }
+}
+
+function runConnectionCheckCommand(
+  command: string,
+  args: string[],
+  cwd: string | undefined,
+  timeoutMs = 10_000,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (code: number) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({
+        code,
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+      });
+    };
+
+    try {
+      const child = spawn(command, args, {
+        cwd,
+        env: process.env,
+        shell: false,
+      });
+      timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* already exited */
+        }
+        finish(124);
+      }, timeoutMs);
+      timer.unref?.();
+      child.stdout.on("data", (data) => {
+        stdout += data.toString();
+        if (stdout.length > 12_000) stdout = stdout.slice(-12_000);
+      });
+      child.stderr.on("data", (data) => {
+        stderr += data.toString();
+        if (stderr.length > 12_000) stderr = stderr.slice(-12_000);
+      });
+      child.on("close", (code) => finish(code ?? 1));
+      child.on("error", (err) => {
+        stderr = err.message;
+        finish(-1);
+      });
+    } catch (err) {
+      stderr = err instanceof Error ? err.message : String(err);
+      finish(-1);
+    }
+  });
+}
+
+function parseRepoView(stdout: string): {
+  defaultBranch?: string;
+  viewerPermission?: string;
+} {
+  try {
+    const parsed = JSON.parse(stdout) as {
+      defaultBranchRef?: { name?: string } | null;
+      viewerPermission?: string | null;
+    };
+    return {
+      defaultBranch: parsed.defaultBranchRef?.name,
+      viewerPermission: parsed.viewerPermission ?? undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function checkProjectConnectionHealth(
+  projectId: string,
+): Promise<ConnectionCheckResult> {
+  const checkedAt = Date.now();
+  const connection = getProjectConnection(projectId);
+  if (!connection) {
+    return {
+      checkedAt,
+      ok: false,
+      items: [
+        makeConnectionCheckItem(
+          "repo",
+          "Repo access",
+          "fail",
+          "프로젝트 연결 정보가 없습니다.",
+        ),
+        makeConnectionCheckItem(
+          "branch",
+          "Branch",
+          "fail",
+          "기본 브랜치를 확인할 연결 정보가 없습니다.",
+        ),
+        makeConnectionCheckItem(
+          "issues",
+          "Issue read",
+          "fail",
+          "Issue 조회를 위한 repo 연결 정보가 없습니다.",
+        ),
+        makeConnectionCheckItem(
+          "pullRequest",
+          "PR create",
+          "fail",
+          "PR 권한을 확인할 repo 연결 정보가 없습니다.",
+        ),
+        makeConnectionCheckItem(
+          "auth",
+          "Token/auth",
+          "fail",
+          "GitHub 인증 상태를 확인할 연결 정보가 없습니다.",
+        ),
+      ],
+    };
+  }
+
+  const cwd = fs.existsSync(connection.localPath)
+    ? connection.localPath
+    : undefined;
+  const repoSlug = parseGitHubRepoSlug(connection.repoUrl);
+  const hasGitHubMcp = connection.availableMcps.some((mcp) =>
+    /github/i.test(mcp),
+  );
+  const items: ConnectionCheckItem[] = [];
+
+  const auth = await runConnectionCheckCommand(
+    "gh",
+    ["auth", "status", "-h", "github.com"],
+    cwd,
+  );
+  const ghAvailable = auth.code !== -1;
+  const ghAuthed = auth.code === 0;
+  items.push(
+    makeConnectionCheckItem(
+      "auth",
+      "Token/auth",
+      ghAuthed ? "pass" : "fail",
+      ghAuthed
+        ? hasGitHubMcp
+          ? "GitHub 인증과 GitHub MCP 연결 신호를 확인했습니다."
+          : "GitHub 인증을 확인했습니다."
+        : ghAvailable
+          ? "GitHub CLI 인증이 필요합니다. OAuth 화면은 열지 않았습니다."
+          : "GitHub CLI를 찾을 수 없습니다. GitHub MCP 또는 gh 인증 경로가 필요합니다.",
+    ),
+  );
+
+  let repoView:
+    | { defaultBranch?: string; viewerPermission?: string }
+    | undefined;
+  if (repoSlug && ghAuthed) {
+    const repo = await runConnectionCheckCommand(
+      "gh",
+      [
+        "repo",
+        "view",
+        repoSlug,
+        "--json",
+        "nameWithOwner,defaultBranchRef,viewerPermission",
+      ],
+      cwd,
+    );
+    if (repo.code === 0) repoView = parseRepoView(repo.stdout);
+    items.push(
+      makeConnectionCheckItem(
+        "repo",
+        "Repo access",
+        repo.code === 0 ? "pass" : "fail",
+        repo.code === 0
+          ? `${repoSlug} 접근 가능`
+          : repo.stderr || `${repoSlug} 접근 확인 실패`,
+      ),
+    );
+  } else if (connection.repoUrl) {
+    const repo = await runConnectionCheckCommand(
+      "git",
+      ["ls-remote", "--exit-code", connection.repoUrl, "HEAD"],
+      cwd,
+    );
+    items.push(
+      makeConnectionCheckItem(
+        "repo",
+        "Repo access",
+        repo.code === 0 ? "warn" : "fail",
+        repo.code === 0
+          ? "git remote 접근은 가능하지만 GitHub 인증 점검은 통과하지 못했습니다."
+          : repo.stderr || "repo 접근 확인 실패",
+      ),
+    );
+  } else {
+    items.push(
+      makeConnectionCheckItem(
+        "repo",
+        "Repo access",
+        "fail",
+        "repo URL이 연결 정보에 없습니다.",
+      ),
+    );
+  }
+
+  const defaultBranch =
+    connection.defaultBranch ?? repoView?.defaultBranch ?? null;
+  if (repoSlug && ghAuthed && defaultBranch) {
+    const branch = await runConnectionCheckCommand(
+      "gh",
+      ["api", `repos/${repoSlug}/branches/${defaultBranch}`],
+      cwd,
+    );
+    items.push(
+      makeConnectionCheckItem(
+        "branch",
+        "Branch",
+        branch.code === 0 ? "pass" : "fail",
+        branch.code === 0
+          ? `${defaultBranch} 브랜치 확인`
+          : branch.stderr || `${defaultBranch} 브랜치 확인 실패`,
+      ),
+    );
+  } else if (connection.repoUrl && defaultBranch) {
+    const branch = await runConnectionCheckCommand(
+      "git",
+      [
+        "ls-remote",
+        "--exit-code",
+        connection.repoUrl,
+        `refs/heads/${defaultBranch}`,
+      ],
+      cwd,
+    );
+    items.push(
+      makeConnectionCheckItem(
+        "branch",
+        "Branch",
+        branch.code === 0 ? "warn" : "fail",
+        branch.code === 0
+          ? `${defaultBranch} 브랜치는 확인했지만 GitHub API 인증은 통과하지 못했습니다.`
+          : branch.stderr || `${defaultBranch} 브랜치 확인 실패`,
+      ),
+    );
+  } else {
+    items.push(
+      makeConnectionCheckItem(
+        "branch",
+        "Branch",
+        "fail",
+        "기본 브랜치 정보가 없습니다.",
+      ),
+    );
+  }
+
+  if (repoSlug && ghAuthed) {
+    const issues = await runConnectionCheckCommand(
+      "gh",
+      ["issue", "list", "--repo", repoSlug, "--limit", "1", "--json", "number"],
+      cwd,
+    );
+    items.push(
+      makeConnectionCheckItem(
+        "issues",
+        "Issue read",
+        issues.code === 0 ? "pass" : "fail",
+        issues.code === 0
+          ? "Issue 조회 가능"
+          : issues.stderr || "Issue 조회 권한 확인 실패",
+      ),
+    );
+  } else {
+    items.push(
+      makeConnectionCheckItem(
+        "issues",
+        "Issue read",
+        "fail",
+        "GitHub 인증이 없어 Issue 조회를 확인하지 못했습니다.",
+      ),
+    );
+  }
+
+  const viewerPermission = repoView?.viewerPermission;
+  const canWriteToRepo = ["ADMIN", "MAINTAIN", "WRITE"].includes(
+    viewerPermission ?? "",
+  );
+  const connectionAllowsPr =
+    connection.accessMode === "pr" || connection.accessMode === "commit";
+  items.push(
+    makeConnectionCheckItem(
+      "pullRequest",
+      "PR create",
+      canWriteToRepo && connectionAllowsPr
+        ? "pass"
+        : canWriteToRepo
+          ? "warn"
+          : "fail",
+      canWriteToRepo && connectionAllowsPr
+        ? `PR 생성 가능 (${viewerPermission})`
+        : canWriteToRepo
+          ? `GitHub 권한은 ${viewerPermission}이지만 connection accessMode가 ${connection.accessMode}입니다.`
+          : viewerPermission
+            ? `현재 GitHub 권한 ${viewerPermission}으로 PR 생성을 보장할 수 없습니다.`
+            : "GitHub repo 권한 정보를 확인하지 못했습니다.",
+    ),
+  );
+
+  return {
+    checkedAt,
+    ok: items.every((item) => item.status === "pass"),
+    items,
+  };
+}
+
 // --- Connection IPC Handlers (연동 T1·기반) ---
 //
 // 프로젝트↔repo 연결의 단일 진실원. T2(Harness 탭)·T3(미션 선택)는 렌더러에서
@@ -1733,6 +2088,10 @@ ipcMain.handle(
     return touchProjectLastRun(projectId, at);
   },
 );
+
+ipcMain.handle("connection:check", (_event, projectId: string) => {
+  return checkProjectConnectionHealth(projectId);
+});
 
 // --- Agent IPC Handlers ---
 

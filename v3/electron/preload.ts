@@ -507,6 +507,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     upsert: (input: unknown) => ipcRenderer.invoke("connection:upsert", input),
     touchLastRun: (projectId: string, at?: number) =>
       ipcRenderer.invoke("connection:touchLastRun", { projectId, at }),
+    check: (projectId: string) =>
+      ipcRenderer.invoke("connection:check", projectId),
   },
   updater: {
     check: () => ipcRenderer.invoke("updater:check"),
