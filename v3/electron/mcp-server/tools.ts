@@ -2042,6 +2042,33 @@ export function registerTools(server: McpServer): void {
           }
         }
 
+        // Bind the board task to the dispatched agent so the kanban shows the
+        // REAL worker immediately — and overwrite any stale claimedBy left by a
+        // previous (now-dead) agent. Before this, dispatch updated only the
+        // agent doc's currentTaskId; the task's claimedBy stayed pinned to the
+        // stale agent, so the board showed the wrong assignee and the task
+        // looked unstarted until a human reassigned it by hand. The orchestrator
+        // no longer auto-claims (see isOrchestratorAgentId / WORKER_AGENT_ID), so
+        // the dispatched worker is the correct owner to record here. Applies to
+        // every binding action (spawned/restarted/reused/mixed) — not 'logical'
+        // (internal sub-agent, no real agent to bind).
+        const boundTaskId = result.taskId ?? dispatchTaskId;
+        if (result.agentId && boundTaskId && result.action !== "logical") {
+          try {
+            await updateDoc(doc(db, "tasks", boundTaskId), {
+              claimedBy: result.agentId,
+              claimedAt: Timestamp.now(),
+            });
+          } catch (err) {
+            // Non-fatal — the agent is already dispatched; the board just keeps
+            // showing the stale assignee. Surface for diagnosis.
+            console.error(
+              "[dispatch_task] Failed to bind task claimedBy:",
+              err,
+            );
+          }
+        }
+
         const lines = [
           `Dispatch: ${result.action}`,
           `  Reason: ${result.reason}`,
