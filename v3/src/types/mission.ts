@@ -16,6 +16,15 @@ export type MissionTemplateId =
   | "full-feature"
   | "research";
 
+export type MissionAccessMode = "read" | "write" | "pr" | "commit";
+
+export interface MissionTargetRepository {
+  projectId: string;
+  localPath: string;
+  repoUrl: string | null;
+  defaultBranch: string | null;
+}
+
 export type MissionStepType =
   | "gstack" // /review, /qa, /ship, /plan-* 등 슬래시 명령
   | "dispatch" // dispatch_task로 task 분해 + 에이전트 할당
@@ -82,6 +91,9 @@ export interface Mission {
   currentStepIndex: number;
   taskIds: string[];
   contextLog: TimelineEvent[];
+  targetRepository?: MissionTargetRepository;
+  targetBranch?: string;
+  targetAccessMode?: MissionAccessMode;
 
   /** 이 미션의 '대표 보드 카드'(tasks/*) id. 지휘자가 미션 시작 시 1개 만들고 진행을
    *  activity 로 쌓는다. 한 번 만들면 재생성하지 않는 멱등 키. */

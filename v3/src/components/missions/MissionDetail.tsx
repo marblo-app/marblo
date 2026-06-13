@@ -98,6 +98,25 @@ export function MissionDetail({
                 <span>· 완료 {formatDate(mission.completedAt)}</span>
               )}
             </div>
+            {(mission.targetRepository ||
+              mission.targetBranch ||
+              mission.targetAccessMode) && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                {mission.targetRepository && (
+                  <span>
+                    repo:{" "}
+                    {mission.targetRepository.repoUrl ??
+                      mission.targetRepository.localPath}
+                  </span>
+                )}
+                {mission.targetBranch && (
+                  <span>· branch: {mission.targetBranch}</span>
+                )}
+                {mission.targetAccessMode && (
+                  <span>· access: {mission.targetAccessMode}</span>
+                )}
+              </div>
+            )}
             {mission.abandonedReason && (
               <p className="mt-2 text-xs text-red-300">
                 Abandoned: {mission.abandonedReason}

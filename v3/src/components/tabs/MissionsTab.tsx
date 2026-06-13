@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import type { Mission, MissionTemplateId } from "../../types/mission";
+import type {
+  Mission,
+  MissionAccessMode,
+  MissionTargetRepository,
+  MissionTemplateId,
+} from "../../types/mission";
 import * as missionService from "../../services/missionService";
 import * as taskService from "../../services/taskService";
 import { useProjectStore } from "../../stores/projectStore";
@@ -106,9 +111,15 @@ export function MissionsTab() {
   const handleLaunch = async ({
     goal,
     templateId,
+    targetRepository,
+    targetBranch,
+    targetAccessMode,
   }: {
     goal: string;
     templateId: MissionTemplateId;
+    targetRepository?: MissionTargetRepository;
+    targetBranch?: string;
+    targetAccessMode?: MissionAccessMode;
   }) => {
     const steps = instantiateTemplateSteps(templateId);
     const id = await missionService.createMission({
@@ -121,6 +132,9 @@ export function MissionsTab() {
       steps,
       currentStepIndex: 0,
       taskIds: [],
+      targetRepository,
+      targetBranch,
+      targetAccessMode,
       contextLog: [
         {
           ts: new Date(),
@@ -128,6 +142,9 @@ export function MissionsTab() {
           payload: {
             message: `Mission queued · template=${templateId}`,
             goal,
+            targetRepository,
+            targetBranch,
+            targetAccessMode,
           },
         },
       ],
@@ -199,6 +216,9 @@ export function MissionsTab() {
       steps,
       currentStepIndex: 0,
       taskIds: [],
+      targetRepository: source.targetRepository,
+      targetBranch: source.targetBranch,
+      targetAccessMode: source.targetAccessMode,
       contextLog: [
         {
           ts: new Date(),
@@ -355,6 +375,7 @@ export function MissionsTab() {
 
       {launchTemplate && (
         <MissionLaunchDialog
+          projectId={projectId}
           initialTemplateId={launchTemplate}
           onCancel={() => setLaunchTemplate(null)}
           onLaunch={handleLaunch}
