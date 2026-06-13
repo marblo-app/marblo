@@ -1,5 +1,6 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import * as crypto from "crypto";
 import { BigQuery } from "@google-cloud/bigquery";
 import {
   enforce as enforceRateLimit,
@@ -24,6 +25,7 @@ const PADDLE_API_BASE = "https://api.paddle.com";
 
 const TOSS_SECRET_KEY = process.env.TOSS_SECRET_KEY!;
 const TOSS_API_BASE = "https://api.tosspayments.com/v1";
+const TOSS_WEBHOOK_SECRET = process.env.TOSS_WEBHOOK_SECRET || "";
 
 const PLAN_PRICES_KRW: Record<string, number> = {
   pro: 19000,
@@ -88,6 +90,65 @@ export const cancelPaddleSubscription = functions.https.onCall(
   },
 );
 
+// ─── Webhook signature verification (H1) ─────────────────────────
+//
+// 위조된 웹훅으로 구독 상태를 조작하는 것을 막는다. 서명은 반드시 원본
+// 바이트(req.rawBody)에 대해 계산해야 한다 — JSON.parse 후 재직렬화하면
+// 키 순서/공백이 달라져 HMAC 이 깨진다. 비교는 timing-safe 하게 한다.
+
+/** 길이까지 포함해 timing-safe 한 hex 문자열 비교. */
+function timingSafeEqualHex(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Toss 웹훅 서명 검증. 백엔드(payment_service.verify_webhook)와 동일 스킴:
+ * HMAC-SHA256(secret, `${timestamp}.${rawBody}`) hex, 헤더
+ * x-toss-webhook-signature / x-toss-webhook-timestamp.
+ */
+function verifyTossWebhook(
+  signature: string,
+  timestamp: string,
+  rawBody: Buffer | undefined,
+): boolean {
+  if (!TOSS_WEBHOOK_SECRET || !signature || !timestamp || !rawBody)
+    return false;
+  const message = `${timestamp}.${rawBody.toString("utf8")}`;
+  const expected = crypto
+    .createHmac("sha256", TOSS_WEBHOOK_SECRET)
+    .update(message)
+    .digest("hex");
+  return timingSafeEqualHex(signature, expected);
+}
+
+/**
+ * Paddle Billing 웹훅 서명 검증. 헤더 형식: `ts=<unix>;h1=<hmac-hex>`.
+ * HMAC-SHA256(secret, `${ts}:${rawBody}`) 를 h1 과 비교 (Paddle 공식 스킴).
+ */
+function verifyPaddleSignature(
+  signatureHeader: string,
+  rawBody: Buffer | undefined,
+): boolean {
+  if (!PADDLE_WEBHOOK_SECRET || !signatureHeader || !rawBody) return false;
+  const parts = Object.fromEntries(
+    signatureHeader.split(";").map((kv) => {
+      const idx = kv.indexOf("=");
+      return [kv.slice(0, idx).trim(), kv.slice(idx + 1).trim()];
+    }),
+  );
+  const ts = parts["ts"];
+  const h1 = parts["h1"];
+  if (!ts || !h1) return false;
+  const expected = crypto
+    .createHmac("sha256", PADDLE_WEBHOOK_SECRET)
+    .update(`${ts}:${rawBody.toString("utf8")}`)
+    .digest("hex");
+  return timingSafeEqualHex(h1, expected);
+}
+
 // ─── Paddle Webhook ──────────────────────────────────────────────
 export const paddleWebhook = functions.https.onRequest(async (req, res) => {
   if (req.method !== "POST") {
@@ -95,10 +156,11 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
     return;
   }
 
-  // Verify webhook signature
-  const signature = req.headers["paddle-signature"] as string;
-  if (!signature && PADDLE_WEBHOOK_SECRET) {
-    res.status(401).send("Missing signature");
+  // H1: 서명 검증. 기존 코드는 헤더 '존재'만 확인해(`!signature && SECRET`)
+  // 아무 값이나 넣으면 통과했다 — 서명 값 자체를 HMAC 으로 검증한다.
+  const signature = (req.headers["paddle-signature"] as string) || "";
+  if (!verifyPaddleSignature(signature, req.rawBody)) {
+    res.status(401).send("Invalid webhook signature");
     return;
   }
 
@@ -360,6 +422,17 @@ export const tossWebhook = functions.https.onRequest(async (req, res) => {
     return;
   }
 
+  // H1: 서명 검증. 기존엔 검증이 전무해 위조 PAYMENT_STATUS_CHANGED 로
+  // 임의 구독을 canceled/past_due 로 바꿀 수 있었다.
+  const tossSignature =
+    (req.headers["x-toss-webhook-signature"] as string) || "";
+  const tossTimestamp =
+    (req.headers["x-toss-webhook-timestamp"] as string) || "";
+  if (!verifyTossWebhook(tossSignature, tossTimestamp, req.rawBody)) {
+    res.status(401).send("Invalid webhook signature");
+    return;
+  }
+
   const { eventType, data: eventData } = req.body;
 
   switch (eventType) {
@@ -461,9 +534,40 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
 
 // 빌링키로 정기결제 실행
 export const chargeBillingKey = functions.https.onCall(
-  async (data, _context) => {
-    const { userId, billingKey, amount, orderId, orderName, customerKey } =
-      data;
+  async (_data, context) => {
+    // C1: 인증 필수 + 결제 파라미터는 전부 서버에서 유도한다.
+    // 기존엔 인증 없이 userId/amount/billingKey 를 클라이언트 data 에서
+    // 받아, 임의 사용자의 빌링키로 임의 금액을 청구할 수 있었다(무인증+IDOR).
+    const userId = context.auth?.uid;
+    if (!userId)
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+
+    // 호출자 본인의 구독 문서에서 billingKey/customerKey/plan 을 읽는다 —
+    // 클라이언트 입력은 신뢰하지 않는다.
+    const subRef = db.collection("subscriptions").doc(userId);
+    const subSnap = await subRef.get();
+    const sub = subSnap.data();
+    if (!subSnap.exists || !sub?.tossBillingKey || !sub?.tossCustomerKey) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "No billing key registered for this account",
+      );
+    }
+
+    const planType: string = sub.planType || "pro";
+    const amount = PLAN_PRICES_KRW[planType];
+    if (!amount) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        `Plan '${planType}' is not chargeable`,
+      );
+    }
+
+    const billingKey = sub.tossBillingKey as string;
+    const customerKey = sub.tossCustomerKey as string;
+    // orderId 도 서버 생성 — 클라이언트가 통제하지 못하게 한다.
+    const orderId = `sub_${userId}_${Date.now()}`;
+    const orderName = `Marblo ${planType} 구독`;
 
     const response = await fetch(
       `https://api.tosspayments.com/v1/billing/${billingKey}`,
