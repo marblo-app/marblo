@@ -20,6 +20,7 @@ import {
   resolveMissionContextForWrite,
   contextReadFilter,
   isLaneContextId,
+  isOrchestratorAgentId,
   isTaskInReadContext,
   buildMissionStepReportedEvent,
   type MissionStepReportedEvent,
@@ -249,6 +250,22 @@ async function ensureTaskMissionContext(
 // ── Audit Logging ─────────────────────────────────────────────
 
 const MARBLO_AGENT_ID = process.env.MARBLO_AGENT_ID || "unknown";
+
+/**
+ * 작업자 귀속(claimedBy / projection.lastAgentId)에 쓸 agent id.
+ *
+ * 오케스트레이터가 task 를 대신 갱신(상태 전이/auto-claim)할 때 자기 공유
+ * id(`orchestrator-<projectId>`)를 담당자로 찍으면 get_all_tasks/보드가 다수
+ * task 의 담당자를 그 단일 id 로 표시해 부하분산이 과부하로 오인한다. 오케·
+ * unknown 은 "" 로 떨어뜨려 — applyProjection 의 `lastAgentId || prev` 규칙이
+ * 직전 실제 작업자 값을 보존하고, claimedBy auto-claim 은 `&& WORKER_AGENT_ID`
+ * 가드로 건너뛴다. (작업자가 자기 id 로 직접 호출하면 그대로 귀속된다.)
+ */
+function workerAgentId(rawId: string): string {
+  if (!rawId || rawId === "unknown" || isOrchestratorAgentId(rawId)) return "";
+  return rawId;
+}
+const WORKER_AGENT_ID = workerAgentId(MARBLO_AGENT_ID);
 
 function auditLog(entry: {
   projectId: string;
@@ -868,7 +885,9 @@ export function registerTools(server: McpServer): void {
       // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
       const projMut: ApplyProjectionInput = {
         newStatus,
-        lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+        // 오케가 대신 상태를 바꿔도 작업자 귀속은 직전 실제 작업자를 보존
+        // ("" → applyProjection 의 `|| prev`). 부하분산 오인 방지.
+        lastAgentId: WORKER_AGENT_ID,
         lastActivitySummary: comment || `status → ${newStatus}`,
         // Re-validate the transition inside the txn against the real status —
         // but force=true is the documented escape hatch, so it must skip the
@@ -988,8 +1007,11 @@ export function registerTools(server: McpServer): void {
       const resolvedAgentId = agent_id || MARBLO_AGENT_ID;
       // Activity doc + Firestore projection (lastActivity*) in one transaction.
       // No status change. Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+      // 작업자 귀속(lastAgentId)에는 오케/unknown 을 빼서(workerAgentId) 직전
+      // 실제 작업자를 보존하되, activity 로그 자체의 agentId 는 누가 남겼는지
+      // 보여주려 resolvedAgentId 그대로 유지한다.
       await applyProjection(db, task_id, {
-        lastAgentId: resolvedAgentId === "unknown" ? "" : resolvedAgentId,
+        lastAgentId: workerAgentId(resolvedAgentId),
         lastActivitySummary: message,
         activityPayload: { agentId: resolvedAgentId, message },
       });
@@ -1029,7 +1051,7 @@ export function registerTools(server: McpServer): void {
       // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
       const projMut: ApplyProjectionInput = {
         newStatus: "REVIEW",
-        lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+        lastAgentId: WORKER_AGENT_ID,
         lastActivitySummary: pr_url
           ? `submitted for review — ${pr_url}`
           : "submitted for review",
@@ -1041,9 +1063,12 @@ export function registerTools(server: McpServer): void {
       };
       const extra: Record<string, unknown> = {};
       if (pr_url) extra.prUrl = pr_url;
-      // Auto-claim if the task was never claimed
-      if (!task.claimedBy) {
-        extra.claimedBy = MARBLO_AGENT_ID;
+      // Auto-claim if the task was never claimed — but never to the
+      // orchestrator's shared id (WORKER_AGENT_ID is "" for orchestrator),
+      // else the board shows the orch as assignee for every task it submits
+      // on a worker's behalf and load-balancing reads it as overload.
+      if (!task.claimedBy && WORKER_AGENT_ID) {
+        extra.claimedBy = WORKER_AGENT_ID;
         extra.claimedAt = Timestamp.now();
       }
       if (Object.keys(extra).length) projMut.extraTaskFields = extra;
@@ -1870,8 +1895,7 @@ export function registerTools(server: McpServer): void {
             try {
               await applyProjection(db, dispatchTaskId, {
                 newStatus: "BLOCKED",
-                lastAgentId:
-                  MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+                lastAgentId: WORKER_AGENT_ID,
                 lastActivitySummary:
                   "dispatch aborted: 선행 태스크 미완료 — BLOCKED",
                 blockerSummary: "선행 태스크 미완료 (dependsOn 미충족)",

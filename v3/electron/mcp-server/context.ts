@@ -34,6 +34,20 @@ export function buildLaneContextId(laneId: string): string {
 }
 
 /**
+ * 보드/미션 오케스트레이터의 MARBLO_AGENT_ID 규약 판별.
+ *
+ * orchestrator-manager 는 sessionId(`orchestrator-<projectId>` 또는
+ * `orchestrator-<kind>-<projectId>`)를 그대로 MARBLO_AGENT_ID 로 주입한다.
+ * 오케는 task 를 '대신' 갱신(상태 전이/auto-claim)할 뿐 실제 작업자가
+ * 아니므로, 담당자(claimedBy)·작업자(projection.lastAgentId) 귀속에서
+ * 제외해야 한다. 그러지 않으면 get_all_tasks/보드가 다수 task 의 담당자를
+ * 이 단일 공유 id 로 표시해 부하분산이 과부하로 오인한다.
+ */
+export function isOrchestratorAgentId(agentId: string | undefined): boolean {
+  return !!agentId && agentId.startsWith("orchestrator-");
+}
+
+/**
  * Raw mission context from MARBLO_CONTEXT.
  *
  * Board and lane contexts keep their existing contextId-only behavior. Any

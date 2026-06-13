@@ -9,6 +9,7 @@ import {
   isTaskInReadContext,
   isLaneContextId,
   buildLaneContextId,
+  isOrchestratorAgentId,
 } from "../../electron/mcp-server/context";
 // The one-off backfill script duplicates computeContextIdBackfill (it cannot
 // import the TS source without a build step). Import that copy here so the
@@ -75,6 +76,19 @@ describe("isLaneContextId / buildLaneContextId (lane 격리 규약)", () => {
     expect(isLaneContextId("mission-7")).toBe(false);
     expect(isLaneContextId(undefined)).toBe(false);
     expect(isLaneContextId("")).toBe(false);
+  });
+});
+
+describe("isOrchestratorAgentId (담당자 귀속 제외 규약)", () => {
+  it("orchestrator-manager sessionId 규약(board/kind 분리)을 인식한다", () => {
+    expect(isOrchestratorAgentId("orchestrator-proj123")).toBe(true);
+    expect(isOrchestratorAgentId("orchestrator-mission-proj123")).toBe(true);
+  });
+  it("실제 작업자 id / 미설정은 오케가 아니다 (귀속 유지)", () => {
+    expect(isOrchestratorAgentId("backend-claude-3")).toBe(false);
+    expect(isOrchestratorAgentId("unknown")).toBe(false);
+    expect(isOrchestratorAgentId(undefined)).toBe(false);
+    expect(isOrchestratorAgentId("")).toBe(false);
   });
 });
 
