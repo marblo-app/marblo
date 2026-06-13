@@ -14,6 +14,24 @@ export interface ResolvedCli {
 
 let _claudeResolved: ResolvedCli | null = null;
 
+interface ClaudeBinaryCandidate {
+  command: string;
+  source: string;
+  native: boolean;
+}
+
+interface ProbedClaudeBinary extends ResolvedCli {
+  source: string;
+  native: boolean;
+  realpath: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error);
+}
+
 /**
  * Resolve the `claude` binary deterministically instead of trusting PATH
  * order. A stale npm/bun install — e.g. `~/.bun/bin/claude` symlinked to an
@@ -25,7 +43,8 @@ let _claudeResolved: ResolvedCli | null = null;
  *
  * We probe the canonical install locations, ask each for its version, and
  * pick the newest — never a stray copy. Memoized; call resetClaudeResolution
- * after an update to re-probe.
+ * after a managed update to re-probe. External CLI upgrades made outside the
+ * harness are otherwise seen after app restart or explicit reset.
  */
 export function resolveClaudeBinary(): ResolvedCli {
   if (_claudeResolved) return _claudeResolved;
@@ -41,11 +60,27 @@ export function resolveClaudeBinary(): ResolvedCli {
   // Canonical install locations, highest trust first. The native installer
   // (~/.local/bin) self-updates; homebrew / npm-global come next.
   const candidates = [
-    path.join(home, ".local/bin/claude"),
-    "/opt/homebrew/bin/claude",
-    "/usr/local/bin/claude",
-    path.join(home, ".npm-global/bin/claude"),
-  ];
+    {
+      command: path.join(home, ".local/bin/claude"),
+      source: "native-local",
+      native: true,
+    },
+    {
+      command: "/opt/homebrew/bin/claude",
+      source: "homebrew-arm",
+      native: false,
+    },
+    {
+      command: "/usr/local/bin/claude",
+      source: "homebrew-intel",
+      native: false,
+    },
+    {
+      command: path.join(home, ".npm-global/bin/claude"),
+      source: "npm-global",
+      native: false,
+    },
+  ] satisfies ClaudeBinaryCandidate[];
   const parseVer = (s: string): number[] => {
     const m = s.match(/(\d+)\.(\d+)\.(\d+)/);
     return m ? [+m[1], +m[2], +m[3]] : [0, 0, 0];
@@ -53,30 +88,82 @@ export function resolveClaudeBinary(): ResolvedCli {
   const cmp = (a: number[], b: number[]) =>
     a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
-  let best: ResolvedCli | null = null;
+  const logSkip = (
+    candidate: ClaudeBinaryCandidate,
+    reason: string,
+    detail?: string,
+  ) => {
+    console.warn("[claude-resolver] candidate skipped", {
+      command: candidate.command,
+      source: candidate.source,
+      reason,
+      ...(detail ? { detail } : {}),
+    });
+  };
+
+  let best: ProbedClaudeBinary | null = null;
   let bestVer = [0, 0, 0];
   for (const c of candidates) {
+    let real = "";
     try {
-      const real = fs.realpathSync(c);
-      if (isBlocked(real)) continue;
-      const out = execFileSync(c, ["--version"], {
+      real = fs.realpathSync(c.command);
+    } catch (error) {
+      logSkip(c, "realpath_failed", errorMessage(error));
+      continue;
+    }
+    if (isBlocked(real)) {
+      logSkip(c, "blocked_shadow_path", real);
+      continue;
+    }
+
+    let out = "";
+    try {
+      out = execFileSync(c.command, ["--version"], {
         timeout: 5000,
         encoding: "utf-8",
       }).trim();
-      const ver = parseVer(out);
-      if (!best || cmp(ver, bestVer) > 0) {
-        best = { command: c, version: out.match(/\d+\.\d+\.\d+/)?.[0] || "" };
-        bestVer = ver;
-      }
-    } catch {
-      // Missing, non-executable, or blocked candidate — skip.
+    } catch (error) {
+      logSkip(c, "version_exec_failed", errorMessage(error));
+      continue;
+    }
+
+    const version = out.match(/\d+\.\d+\.\d+/)?.[0] || "";
+    if (!version) {
+      logSkip(c, "unparseable_version", out || "<empty>");
+      continue;
+    }
+
+    const ver = parseVer(version);
+    const compare = cmp(ver, bestVer);
+    if (!best || compare > 0 || (compare === 0 && c.native && !best.native)) {
+      best = {
+        command: c.command,
+        version,
+        source: c.source,
+        native: c.native,
+        realpath: real,
+      };
+      bestVer = ver;
     }
   }
-  _claudeResolved = best || { command: "claude", version: "" };
+  _claudeResolved = best
+    ? { command: best.command, version: best.version }
+    : { command: "claude", version: "" };
+  console.info("[claude-resolver] resolved claude binary", {
+    command: _claudeResolved.command,
+    version: _claudeResolved.version || "unknown",
+    source: best?.source ?? "path-fallback",
+    realpath: best?.realpath ?? "",
+    native: best?.native ?? false,
+  });
   return _claudeResolved;
 }
 
-/** Clear the memoized claude resolution (e.g. after a harness update). */
+/**
+ * Clear the memoized claude resolution (e.g. after a harness update). This is
+ * the only in-process re-interpretation path; without it, an external CLI
+ * upgrade is picked up on the next app process start.
+ */
 export function resetClaudeResolution(): void {
   _claudeResolved = null;
   _harnessCliResolved.clear();
@@ -120,6 +207,8 @@ export interface TopModelFallback {
   requested: string;
   /** 설치된 claude CLI 버전(또는 "unknown"). */
   installed: string;
+  /** 선택된 claude command(진단용, 실제 resolver 경로에서만 채워짐). */
+  command?: string;
   /** 폴백된 모델 id. */
   fallbackTo: string;
   /** Fable5 버전가드일 때 요구 최소 버전. */
@@ -147,11 +236,14 @@ export function cmpSemver(a: string, b: string): number {
 /** 폴백을 조용히 넘기지 않는다(§8.1) — 구조화 콘솔 로그. 윈도우가 있는 호출자
  * (agent-manager/bridge)는 이 위에 추가로 텔레메트리 이벤트를 쏜다. */
 function logTopModelFallback(f: TopModelFallback): void {
-  console.warn(
-    `[model-policy] top-model fallback: reason=${f.reason} ` +
-      `requested=${f.requested} installed=${f.installed}` +
-      `${f.required ? ` required=${f.required}` : ""} → ${f.fallbackTo}`,
-  );
+  console.warn("[model-policy] top-model fallback", {
+    reason: f.reason,
+    requested: f.requested,
+    installed: f.installed,
+    command: f.command ?? "unknown",
+    ...(f.required ? { required: f.required } : {}),
+    fallbackTo: f.fallbackTo,
+  });
 }
 
 /**
@@ -174,7 +266,9 @@ export function resolveTopClaudeModelDetailed(
     .trim()
     .toLowerCase();
   const id = CLAUDE_MODEL_ALIASES[raw] || raw; // "fable" → "claude-fable-5"
-  const version = installedVersion ?? resolveClaudeBinary().version; // "X.Y.Z"
+  const resolvedCli =
+    installedVersion === undefined ? resolveClaudeBinary() : null;
+  const version = installedVersion ?? resolvedCli?.version ?? ""; // "X.Y.Z"
 
   if (id === "claude-fable-5") {
     const minCli = (
@@ -185,6 +279,7 @@ export function resolveTopClaudeModelDetailed(
         reason: "fable5_version_guard",
         requested: id,
         installed: version || "unknown",
+        ...(resolvedCli ? { command: resolvedCli.command } : {}),
         required: minCli,
         fallbackTo: FALLBACK_TOP_CLAUDE_MODEL,
       };
@@ -202,6 +297,7 @@ export function resolveTopClaudeModelDetailed(
     reason: "unknown_top_model",
     requested: id,
     installed: version || "unknown",
+    ...(resolvedCli ? { command: resolvedCli.command } : {}),
     fallbackTo: FALLBACK_TOP_CLAUDE_MODEL,
   };
   logTopModelFallback(fallback);
