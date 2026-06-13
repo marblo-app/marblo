@@ -6,14 +6,16 @@ import Link from "next/link";
 import { Check } from "lucide-react";
 
 const plans = ["free", "pro", "team", "team_plus", "enterprise"] as const;
-type Plan = typeof plans[number];
+type Plan = (typeof plans)[number];
 
 // Monthly prices (KRW, source of truth: v3.1 launch master plan §2.1)
+// team       — per-seat (₩29,000/seat)
+// team_plus  — per-team floor: ₩290,000 = 5 seats incl., +₩59,000 per extra seat
 const MONTHLY_PRICES: Record<Plan, number> = {
   free: 0,
   pro: 19000,
   team: 29000,
-  team_plus: 59000,
+  team_plus: 290000,
   enterprise: 0,
 };
 
@@ -25,7 +27,7 @@ export default function PricingSection() {
   const getPrice = (plan: Plan) => {
     const monthly = MONTHLY_PRICES[plan];
     if (plan === "free" || plan === "enterprise") return monthly;
-    return isAnnual ? Math.round(monthly * 12 * 0.8) : monthly; // 20% discount for annual
+    return isAnnual ? monthly * 10 : monthly; // annual = ×10 (2 months free)
   };
 
   const getDisplayPrice = (plan: Plan) => {
@@ -40,38 +42,58 @@ export default function PricingSection() {
       const jpyMonthly: Partial<Record<Plan, number>> = {
         pro: 2200,
         team: 3700,
-        team_plus: 7300,
+        team_plus: 36500, // per-team floor (5 seats × ¥7,300)
       };
       const monthly = jpyMonthly[plan] ?? 0;
-      const jpy = isAnnual ? Math.round(monthly * 12 * 0.8) : monthly;
+      const jpy = isAnnual ? monthly * 10 : monthly;
       return `\u00A5${jpy.toLocaleString()}`;
     }
     // USD pricing per master plan \u00A72.1
     const usdMonthly: Partial<Record<Plan, number>> = {
       pro: 15,
       team: 25,
-      team_plus: 49,
+      team_plus: 245, // per-team floor (5 seats × $49)
     };
     const monthly = usdMonthly[plan] ?? 0;
-    const usd = isAnnual ? Math.round(monthly * 12 * 0.8) : monthly;
+    const usd = isAnnual ? monthly * 10 : monthly;
     return `$${usd}`;
   };
+
+  // Team is billed per-seat; Team Plus is a per-team floor (5 seats incl.).
+  const isPerSeat = (plan: Plan) => plan === "team";
 
   const getPeriod = (plan: Plan) => {
     if (plan === "free")
       return locale === "ko"
         ? "\uC601\uAD6C \uBB34\uB8CC"
         : locale === "ja"
-        ? "\u6C38\u4E45\u7121\u6599"
-        : "forever free";
+          ? "\u6C38\u4E45\u7121\u6599"
+          : "forever free";
     if (plan === "enterprise") return "";
+    const seat = isPerSeat(plan);
     if (isAnnual)
       return locale === "ko"
-        ? "/\uB144"
+        ? seat
+          ? "/\uC778/\uB144"
+          : "/\uB144"
         : locale === "ja"
-        ? "/\u5E74"
-        : "/year";
-    return locale === "ko" ? "/\uC6D4" : locale === "ja" ? "/\u6708" : "/mo";
+          ? seat
+            ? "/\u4EBA/\u5E74"
+            : "/\u5E74"
+          : seat
+            ? "/seat/yr"
+            : "/year";
+    return locale === "ko"
+      ? seat
+        ? "/\uC778/\uC6D4"
+        : "/\uC6D4"
+      : locale === "ja"
+        ? seat
+          ? "/\u4EBA/\u6708"
+          : "/\u6708"
+        : seat
+          ? "/seat/mo"
+          : "/mo";
   };
 
   return (
@@ -86,8 +108,8 @@ export default function PricingSection() {
           {locale === "ko"
             ? "\uC6D4\uAC04"
             : locale === "ja"
-            ? "\u6708\u984D"
-            : "Monthly"}
+              ? "\u6708\u984D"
+              : "Monthly"}
         </span>
         <button
           onClick={() => setIsAnnual(!isAnnual)}
@@ -109,16 +131,16 @@ export default function PricingSection() {
           {locale === "ko"
             ? "\uC5F0\uAC04"
             : locale === "ja"
-            ? "\u5E74\u984D"
-            : "Annual"}
+              ? "\u5E74\u984D"
+              : "Annual"}
         </span>
         {isAnnual && (
           <span className="text-xs bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full font-medium">
             {locale === "ko"
-              ? "20% \uD560\uC778"
+              ? "2\uAC1C\uC6D4 \uBB34\uB8CC"
               : locale === "ja"
-              ? "20%\u5272\u5F15"
-              : "20% off"}
+                ? "2\u30F6\u6708\u7121\u6599"
+                : "2 months free"}
           </span>
         )}
       </div>
@@ -158,11 +180,18 @@ export default function PricingSection() {
                   </span>
                 </div>
               ) : (
-                <div className="mt-2 mb-6 flex items-baseline gap-1">
-                  <span className="text-4xl font-bold text-white">
-                    {getDisplayPrice(plan)}
-                  </span>
-                  <span className="text-zinc-400">{getPeriod(plan)}</span>
+                <div className="mt-2 mb-6">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-4xl font-bold text-white">
+                      {getDisplayPrice(plan)}
+                    </span>
+                    <span className="text-zinc-400">{getPeriod(plan)}</span>
+                  </div>
+                  {plan === "team_plus" && (
+                    <p className="text-xs text-zinc-500 mt-2">
+                      {t("team_plus.note")}
+                    </p>
+                  )}
                 </div>
               )}
 

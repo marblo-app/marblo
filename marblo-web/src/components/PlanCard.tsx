@@ -40,15 +40,20 @@ export default function PlanCard({ plan, highlighted }: PlanCardProps) {
           </span>
         </div>
       ) : (
-        <div className="mt-2 mb-6 flex items-baseline gap-1">
-          <span className="text-4xl font-bold text-white">
-            {t(`${plan}.price`)}
-          </span>
-          {plan !== "free" && (
-            <span className="text-zinc-400">{t(`${plan}.period`)}</span>
-          )}
-          {plan === "free" && (
-            <span className="text-zinc-400 ml-1">{t(`${plan}.period`)}</span>
+        <div className="mt-2 mb-6">
+          <div className="flex items-baseline gap-1">
+            <span className="text-4xl font-bold text-white">
+              {t(`${plan}.price`)}
+            </span>
+            {plan !== "free" && (
+              <span className="text-zinc-400">{t(`${plan}.period`)}</span>
+            )}
+            {plan === "free" && (
+              <span className="text-zinc-400 ml-1">{t(`${plan}.period`)}</span>
+            )}
+          </div>
+          {plan === "team_plus" && (
+            <p className="text-xs text-zinc-500 mt-2">{t("team_plus.note")}</p>
           )}
         </div>
       )}

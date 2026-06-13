@@ -224,7 +224,7 @@ export interface PlanFeatures {
 // PLAN_PRICES와 정확히 일치해야 함 — drift 시 결제 페이지 ↔ 데스크탑 앱
 // gating이 어긋남.
 //
-// 연간 결제는 월 × 12 × 0.8 (20% 할인). marblo-web의 동일 공식과 일치.
+// 연간 결제는 월 × 10 (2개월 무료). marblo-web의 동일 공식과 일치.
 export const PAYMENT_PLANS: Record<SubscriptionPlan, PlanFeatures> = {
   [SubscriptionPlan.FREE]: {
     name: "Free",
@@ -241,7 +241,7 @@ export const PAYMENT_PLANS: Record<SubscriptionPlan, PlanFeatures> = {
   [SubscriptionPlan.PRO]: {
     name: "Pro",
     price_monthly: 19000,
-    price_yearly: Math.round(19000 * 12 * 0.8), // 182,400원
+    price_yearly: 19000 * 10, // 190,000원 (2개월 무료)
     features: [
       "무제한 프로젝트",
       "무제한 에이전트 (BYOK · API 비용 사용자 부담)",
@@ -255,7 +255,7 @@ export const PAYMENT_PLANS: Record<SubscriptionPlan, PlanFeatures> = {
   [SubscriptionPlan.TEAM]: {
     name: "Team",
     price_monthly: 29000, // per seat
-    price_yearly: Math.round(29000 * 12 * 0.8), // 278,400원 per seat
+    price_yearly: 29000 * 10, // 290,000원 per seat (2개월 무료)
     features: [
       "팀 공유 워크스페이스",
       "실시간 협업",
@@ -267,8 +267,8 @@ export const PAYMENT_PLANS: Record<SubscriptionPlan, PlanFeatures> = {
   },
   [SubscriptionPlan.TEAM_PLUS]: {
     name: "Team Plus",
-    price_monthly: 59000, // per seat
-    price_yearly: Math.round(59000 * 12 * 0.8), // 566,400원 per seat
+    price_monthly: 290000, // per-team floor (5 seats incl., +₩59,000/seat)
+    price_yearly: 290000 * 10, // 2,900,000원 per team (2개월 무료)
     features: [
       "SSO (Auth0/Clerk)",
       "감사 로그 노출",

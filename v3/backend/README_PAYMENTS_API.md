@@ -241,12 +241,15 @@ GET /api/v1/payments/statistics/subscriptions
 
 ## Subscription Plans & Pricing
 
-| Plan       | Monthly (KRW) | Yearly (KRW)       | Features           |
-| ---------- | ------------- | ------------------ | ------------------ |
-| Free       | 0             | 0                  | 기본 기능          |
-| Basic      | 9,900         | 95,040 (20% 할인)  | 기본 + 고급 분석   |
-| Pro        | 29,900        | 287,040 (20% 할인) | Basic + API 액세스 |
-| Enterprise | 99,900        | 959,040 (20% 할인) | Pro + 전용 지원    |
+> 연간 = 월 × 10 (2개월 무료). 단일 진실원: docs/v3.1\_런칭\_마스터플랜.md §2.1.
+
+| Plan       | Monthly (KRW)       | Yearly (KRW, ×10) | Features                   |
+| ---------- | ------------------- | ----------------- | -------------------------- |
+| Free       | 0                   | 0                 | 기본 기능                  |
+| Pro        | 19,000              | 190,000           | 개인 무제한                |
+| Team       | 29,000 / seat       | 290,000 / seat    | 팀 협업                    |
+| Team Plus  | 290,000 / 팀(5시트) | 2,900,000 / 팀    | SSO·감사·우선지원          |
+| Enterprise | 별도 협의           | 별도 협의         | SAML·온프레미스·전담매니저 |
 
 ## Error Handling
 

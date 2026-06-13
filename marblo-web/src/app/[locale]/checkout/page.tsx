@@ -15,12 +15,16 @@ const PLAN_PRICES: Record<
   string,
   { name: string; monthly: number; annual: number }
 > = {
-  pro: { name: "Pro", monthly: 19000, annual: Math.round(19000 * 12 * 0.8) },
-  team: { name: "Team", monthly: 29000, annual: Math.round(29000 * 12 * 0.8) },
+  pro: { name: "Pro", monthly: 19000, annual: 19000 * 10 },
+  // Team bills per seat (₩29,000); checkout currently charges 1 seat (seat
+  // quantity selector is a follow-up).
+  team: { name: "Team", monthly: 29000, annual: 29000 * 10 },
+  // Team Plus is a per-team floor: ₩290,000 = 5 seats included.
+  // Extra seats (+₩59,000/seat) handled post-purchase (follow-up).
   team_plus: {
     name: "Team Plus",
-    monthly: 59000,
-    annual: Math.round(59000 * 12 * 0.8),
+    monthly: 290000,
+    annual: 290000 * 10,
   },
 };
 

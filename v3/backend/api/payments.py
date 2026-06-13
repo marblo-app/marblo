@@ -260,13 +260,14 @@ async def create_subscription(
 
         plan_amounts = {
             SubscriptionPlan.FREE: 0,
-            SubscriptionPlan.BASIC: 9900,
-            SubscriptionPlan.PRO: 29900,
-            SubscriptionPlan.ENTERPRISE: 99900
+            SubscriptionPlan.PRO: 19000,
+            SubscriptionPlan.TEAM: 29000,          # per seat
+            SubscriptionPlan.TEAM_PLUS: 290000,    # per team (5 seats incl.)
+            SubscriptionPlan.ENTERPRISE: 0,        # Contact Sales — negotiated
         }
 
         if subscription.billing_cycle == "yearly":
-            amount = plan_amounts[subscription.plan] * 12 * 0.8
+            amount = plan_amounts[subscription.plan] * 10  # 연 = 월 × 10 (2개월 무료)
         else:
             amount = plan_amounts[subscription.plan]
 
@@ -340,9 +341,10 @@ async def update_subscription(
     if update_data.plan:
         plan_amounts = {
             SubscriptionPlan.FREE: 0,
-            SubscriptionPlan.BASIC: 9900,
-            SubscriptionPlan.PRO: 29900,
-            SubscriptionPlan.ENTERPRISE: 99900
+            SubscriptionPlan.PRO: 19000,
+            SubscriptionPlan.TEAM: 29000,          # per seat
+            SubscriptionPlan.TEAM_PLUS: 290000,    # per team (5 seats incl.)
+            SubscriptionPlan.ENTERPRISE: 0,        # Contact Sales — negotiated
         }
         subscription.plan = update_data.plan
         subscription.amount = plan_amounts[update_data.plan]

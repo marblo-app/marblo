@@ -192,9 +192,10 @@
     },
     "team_plus": {
       "name": "Team Plus",
-      "price": "$49",
-      "price_usd": "$49",
-      "period": "/seat/mo",
+      "price": "$245",
+      "price_usd": "$245",
+      "period": "/mo",
+      "note": "Per team · 5 seats included, +$49 per extra seat",
       "description": "B2B-ready: SSO, audit logs, and priority support",
       "features": [
         "SSO (Auth0/Clerk)",
@@ -218,7 +219,7 @@
         "All Team Plus features included"
       ]
     },
-    "annual_discount": "Save 20% with annual billing",
+    "annual_discount": "2 months free with annual billing",
     "subscribe": "Subscribe",
     "current": "Current Plan",
     "most_popular": "Most Popular"

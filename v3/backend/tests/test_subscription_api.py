@@ -35,7 +35,7 @@ class TestSubscriptionAPI:
         db_session.commit()
 
         subscription_data = {
-            "plan": SubscriptionPlan.BASIC,
+            "plan": SubscriptionPlan.PRO,
             "billing_cycle": "monthly"
         }
 
@@ -63,8 +63,8 @@ class TestSubscriptionAPI:
         assert response.status_code == 200
         data = response.json()
         assert data["billing_cycle"] == "yearly"
-        # Yearly should have 20% discount: 29900 * 12 * 0.8
-        assert data["amount"] == int(29900 * 12 * 0.8)
+        # Yearly = monthly x 10 (2 months free): 19000 * 10
+        assert data["amount"] == 19000 * 10
 
     def test_get_current_subscription(self, client: TestClient, test_subscription):
         """Test current subscription retrieval."""
@@ -94,7 +94,7 @@ class TestSubscriptionAPI:
         assert response.status_code == 200
         data = response.json()
         assert data["plan"] == SubscriptionPlan.PRO
-        assert data["amount"] == 29900  # PRO plan price
+        assert data["amount"] == 19000  # PRO plan price
 
     def test_update_subscription_billing_cycle(self, client: TestClient, test_subscription):
         """Test subscription billing cycle update."""
@@ -227,10 +227,10 @@ class TestSubscriptionPlans:
         assert data["amount"] == 0  # Free plan should be 0
         assert data["plan"] == SubscriptionPlan.FREE
 
-    def test_basic_plan_subscription(self, client: TestClient, test_user):
-        """Test basic plan subscription."""
+    def test_team_plan_subscription(self, client: TestClient, test_user):
+        """Test team plan subscription."""
         subscription_data = {
-            "plan": SubscriptionPlan.BASIC,
+            "plan": SubscriptionPlan.TEAM,
             "billing_cycle": "monthly"
         }
 
@@ -238,8 +238,8 @@ class TestSubscriptionPlans:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["amount"] == 9900  # Basic plan price
-        assert data["plan"] == SubscriptionPlan.BASIC
+        assert data["amount"] == 29000  # Team plan price (per seat)
+        assert data["plan"] == SubscriptionPlan.TEAM
 
     def test_pro_plan_subscription(self, client: TestClient, test_user):
         """Test pro plan subscription."""
@@ -252,8 +252,22 @@ class TestSubscriptionPlans:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["amount"] == 29900  # Pro plan price
+        assert data["amount"] == 19000  # Pro plan price
         assert data["plan"] == SubscriptionPlan.PRO
+
+    def test_team_plus_plan_subscription(self, client: TestClient, test_user):
+        """Test team_plus plan subscription (per-team floor, 5 seats incl.)."""
+        subscription_data = {
+            "plan": SubscriptionPlan.TEAM_PLUS,
+            "billing_cycle": "monthly"
+        }
+
+        response = client.post("/api/v1/payments/subscriptions", json=subscription_data)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["amount"] == 290000  # Team Plus floor (5 seats)
+        assert data["plan"] == SubscriptionPlan.TEAM_PLUS
 
     def test_enterprise_plan_subscription(self, client: TestClient, test_user):
         """Test enterprise plan subscription."""
@@ -266,7 +280,7 @@ class TestSubscriptionPlans:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["amount"] == 99900  # Enterprise plan price
+        assert data["amount"] == 0  # Enterprise — Contact Sales (negotiated)
         assert data["plan"] == SubscriptionPlan.ENTERPRISE
 
 
@@ -276,7 +290,7 @@ class TestTrialPeriods:
     def test_subscription_with_trial(self, client: TestClient, test_user):
         """Test subscription creation with trial period."""
         subscription_data = {
-            "plan": SubscriptionPlan.BASIC,
+            "plan": SubscriptionPlan.PRO,
             "billing_cycle": "monthly",
             "trial_days": 14
         }
@@ -291,7 +305,7 @@ class TestTrialPeriods:
     def test_subscription_without_trial(self, client: TestClient, test_user):
         """Test subscription creation without trial period."""
         subscription_data = {
-            "plan": SubscriptionPlan.BASIC,
+            "plan": SubscriptionPlan.PRO,
             "billing_cycle": "monthly"
         }
 
@@ -305,7 +319,7 @@ class TestTrialPeriods:
     def test_invalid_trial_days(self, client: TestClient, test_user):
         """Test subscription creation with invalid trial days."""
         subscription_data = {
-            "plan": SubscriptionPlan.BASIC,
+            "plan": SubscriptionPlan.PRO,
             "billing_cycle": "monthly",
             "trial_days": 100  # Exceeds 30 day limit
         }

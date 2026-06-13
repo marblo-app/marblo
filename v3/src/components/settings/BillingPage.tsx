@@ -33,7 +33,7 @@ const PLANS: PlanCard[] = [
   {
     type: 'pro',
     name: 'Pro',
-    priceUSD: '$19/mo',
+    priceUSD: '$15/mo',
     priceKRW: '₩19,000/월',
     features: [
       '프로젝트 3개',
@@ -45,14 +45,27 @@ const PLANS: PlanCard[] = [
   {
     type: 'team',
     name: 'Team',
-    priceUSD: '$49/mo',
-    priceKRW: '₩49,000/월',
+    priceUSD: '$25/인/월',
+    priceKRW: '₩29,000/인/월',
     features: [
       '무제한 프로젝트',
       '무제한 에이전트',
       '팀 협업',
       '오케스트레이터',
       '우선 지원',
+    ],
+  },
+  {
+    type: 'team_plus',
+    name: 'Team Plus',
+    priceUSD: '$245/mo',
+    priceKRW: '₩290,000/월',
+    features: [
+      'SSO (Auth0/Clerk)',
+      '감사 로그 노출',
+      '우선 지원 (Slack 채널)',
+      '5시트 포함 · 추가 시트당 ₩59,000',
+      '모든 Team 기능 포함',
     ],
   },
 ];

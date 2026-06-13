@@ -59,7 +59,7 @@ const MONTHLY_PRICES: Record<Plan, number> = {
   free: 0,
   pro: 19000,
   team: 29000,
-  team_plus: 59000,
+  team_plus: 290000, // per-team floor (5 seats incl.)
   enterprise: 0, // "Contact us"
 };
 ```
@@ -80,10 +80,10 @@ Features (ko.json):
 | Tier 개수 | 4                         | 5                                  |
 | BASIC     | 9,900원 존재              | 없음                               |
 | Team 모델 | 없음                      | 인당 과금 명확                     |
-| Team Plus | 없음                      | 59,000원                           |
+| Team Plus | 없음                      | 290,000원/팀(5시트)                |
 | Pro 가격  | 29,900원                  | 19,000원                           |
 
-→ **v3 코드 전면 재작성 필요**.
+→ **v3 백엔드/앱 정렬 완료 (2026-06-08)**: enum free/pro/team/team_plus/enterprise · 가격 19,000/29,000/290,000 · 연간 ×10.
 
 ## 5. 후속 액션 (구현 ticket 단위)
 
@@ -119,7 +119,7 @@ export const PAYMENT_PLANS: Record<SubscriptionPlan, PlanFeatures> = {
   [SubscriptionPlan.PRO]: {
     name: "Pro",
     price_monthly: 19000,
-    price_yearly: Math.round(19000 * 12 * 0.8),
+    price_yearly: 19000 * 10, // 190,000 (2개월 무료)
     features: [
       "무제한 프로젝트",
       "무제한 에이전트 (BYOK — API key 사용자 부담, 정액제 권장)",
@@ -133,7 +133,7 @@ export const PAYMENT_PLANS: Record<SubscriptionPlan, PlanFeatures> = {
   [SubscriptionPlan.TEAM]: {
     name: "Team",
     price_monthly: 29000, // 인당
-    price_yearly: Math.round(29000 * 12 * 0.8),
+    price_yearly: 29000 * 10,
     features: [
       "Pro 전체 + 팀 협업",
       "팀원 추가 (인당 과금)",
@@ -143,8 +143,8 @@ export const PAYMENT_PLANS: Record<SubscriptionPlan, PlanFeatures> = {
   },
   [SubscriptionPlan.TEAM_PLUS]: {
     name: "Team Plus",
-    price_monthly: 59000,
-    price_yearly: Math.round(59000 * 12 * 0.8),
+    price_monthly: 290000, // per-team floor (5 seats)
+    price_yearly: 290000 * 10,
     features: ["Team 전체 + ...(마블로 웹과 동기화)"],
   },
   [SubscriptionPlan.ENTERPRISE]: {
@@ -391,7 +391,7 @@ export function getCostPolicy(
 - **API key 잔액/사용량 자동 모니터링** — Anthropic Admin API 연동은 v3.1+
 - **팀별 cost dashboard** — Team plan 사용자의 팀 단위 비용 추적은 v3.1
 - **사용량 기반 plan** (예: per Mission 과금) — 현재는 구독 모델만. 사용량 모델은 v3.2+
-- **연간 결제 할인 차등화** — 현재 일률 20%. Tier별 차등은 v3.1+
+- **연간 결제 할인 차등화** — 현재 일률 ×10(2개월 무료). Tier별 차등은 v3.1+
 
 ## 11. 다음 단계 (받는 에이전트에게)
 

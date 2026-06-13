@@ -192,9 +192,10 @@
     },
     "team_plus": {
       "name": "Team Plus",
-      "price": "¥7,300",
-      "price_usd": "$49",
-      "period": "/人/月",
+      "price": "¥36,500",
+      "price_usd": "$245",
+      "period": "/月",
+      "note": "チーム単位 · 5席含む、追加1席¥7,300",
       "description": "SSO・監査ログ・優先サポートが必要なB2B導入段階",
       "features": [
         "SSO (Auth0/Clerk)",
@@ -218,7 +219,7 @@
         "全てのTeam Plus機能を含む"
       ]
     },
-    "annual_discount": "年間支払いで20%割引",
+    "annual_discount": "年間支払いで2ヶ月無料",
     "subscribe": "登録する",
     "current": "現在のプラン",
     "most_popular": "一番人気"

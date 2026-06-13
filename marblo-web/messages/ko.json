@@ -192,9 +192,10 @@
     },
     "team_plus": {
       "name": "Team Plus",
-      "price": "₩59,000",
-      "price_usd": "$49",
-      "period": "/인/월",
+      "price": "₩290,000",
+      "price_usd": "$245",
+      "period": "/월",
+      "note": "팀당 · 5시트 포함, 추가 시트당 ₩59,000",
       "description": "SSO·감사 로그·우선 지원이 필요한 B2B 도입 단계",
       "features": [
         "SSO (Auth0/Clerk)",
@@ -218,7 +219,7 @@
         "모든 Team Plus 기능 포함"
       ]
     },
-    "annual_discount": "연간 결제 시 20% 할인",
+    "annual_discount": "연간 결제 시 2개월 무료",
     "subscribe": "구독하기",
     "current": "현재 플랜",
     "most_popular": "가장 인기"

@@ -198,7 +198,7 @@ def sample_payment_data():
 def sample_subscription_data():
     """Sample subscription creation data."""
     return {
-        "plan": SubscriptionPlan.BASIC,
+        "plan": SubscriptionPlan.PRO,
         "billing_cycle": "monthly",
         "trial_days": 7
     }
@@ -231,9 +231,9 @@ def test_subscription(db_session, test_user):
         user_id=test_user.id,
         customer_key=test_user.customer_key,
         billing_key="test_billing_key_123",
-        plan=SubscriptionPlan.BASIC,
+        plan=SubscriptionPlan.PRO,
         status=SubscriptionStatus.ACTIVE,
-        amount=9900,
+        amount=19000,
         billing_cycle="monthly",
         current_period_start=now,
         current_period_end=now + timedelta(days=30),

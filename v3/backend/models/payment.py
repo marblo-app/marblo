@@ -37,9 +37,12 @@ class SubscriptionStatus(str, enum.Enum):
 
 class SubscriptionPlan(str, enum.Enum):
     FREE = "free"
-    BASIC = "basic"
     PRO = "pro"
+    TEAM = "team"
+    TEAM_PLUS = "team_plus"
     ENTERPRISE = "enterprise"
+    # NOTE: 'basic' (legacy) 제거됨. Postgres enum에는 마이그레이션 002에서
+    # 'team'/'team_plus' 추가 (PG는 enum 값 삭제 불가 → 'basic'은 deprecated로 잔존).
 
 
 class Payment(Base):

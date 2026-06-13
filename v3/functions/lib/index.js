@@ -53,7 +53,8 @@ const TOSS_SECRET_KEY = process.env.TOSS_SECRET_KEY;
 const TOSS_API_BASE = "https://api.tosspayments.com/v1";
 const PLAN_PRICES_KRW = {
     pro: 19000,
-    team: 39000,
+    team: 29000,
+    team_plus: 290000, // per-team floor (5 seats incl.)
 };
 // Map Paddle Price IDs to plan types (set in Firebase environment config)
 const PADDLE_PRICE_TO_PLAN = {

@@ -20,12 +20,13 @@ const PLAN_NAMES: Record<PlanType, string> = {
   enterprise: "Enterprise",
 };
 
-// 마스터플랜 §2.1: Pro $15 / Team $25 per seat / Team Plus $49 per seat.
+// 마스터플랜 §2.1: Pro $15 / Team $25 per seat /
+// Team Plus $245/팀 (5 seats incl., +$49/seat).
 const PLAN_PRICES: Record<PlanType, string> = {
   free: "$0",
   pro: "$15/mo",
   team: "$25/seat/mo",
-  team_plus: "$49/seat/mo",
+  team_plus: "$245/mo",
   enterprise: "Contact Sales",
 };
 

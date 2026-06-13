@@ -88,12 +88,13 @@ export function canUseFeature(
 }
 
 // ─── Plan Pricing (KRW) ─────────────────────────────────────────
-// 마스터플랜 §2.1 한국 가격. Pro 정액, Team / Team Plus는 per-seat.
+// 마스터플랜 §2.1 한국 가격. Pro 정액, Team은 per-seat,
+// Team Plus는 팀 플로어(₩290,000 = 5시트 포함, 추가 시트당 ₩59,000).
 // Enterprise는 별도 협의 (0 = "Contact Sales" sentinel).
 export const PLAN_PRICES_KRW: Record<Exclude<PlanType, "free">, number> = {
   pro: 19000,
   team: 29000,
-  team_plus: 59000,
+  team_plus: 290000,
   enterprise: 0,
 };
 

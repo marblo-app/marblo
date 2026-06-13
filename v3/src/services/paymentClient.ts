@@ -312,10 +312,10 @@ export class PaymentUtils {
   }
 
   /**
-   * Calculate yearly discount (20% off)
+   * Calculate yearly price (2 months free — annual = monthly × 10)
    */
   static calculateYearlyDiscount(monthlyPrice: number): number {
-    return Math.floor(monthlyPrice * 12 * 0.8);
+    return monthlyPrice * 10;
   }
 
   /**
