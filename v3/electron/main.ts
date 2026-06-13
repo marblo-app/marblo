@@ -20,7 +20,7 @@ import dotenv from "dotenv";
 import { PtyManager } from "./pty-manager";
 import { PendingInstructionListener } from "./pending-instruction-listener";
 import { FsManager } from "./fs-manager";
-import { AgentManager } from "./agent-manager";
+import { AgentManager, serializeAgent } from "./agent-manager";
 import { Updater } from "./updater";
 import { TaskDecomposer } from "./orchestrator/task-decomposer";
 import type { DecomposedTask } from "./orchestrator/dag-generator";
@@ -2318,7 +2318,12 @@ ipcMain.handle("agent:list", (event, projectId?: string) => {
   // registered for this window. If neither, return everything (single-window
   // legacy behavior).
   const scope = projectId || getProjectForSender(event.sender.id);
-  return agentManager.listAgentsByProject(scope);
+  // AgentInstance carries non-serializable fields (onPtyReady callback,
+  // restart/heartbeat Timer handles, launchConfig). Map each to a plain
+  // object so structuredClone — used by Electron IPC to copy the return
+  // value across the process boundary — doesn't throw "An object could not
+  // be cloned". (regression: this handler returned raw instances.)
+  return agentManager.listAgentsByProject(scope).map(serializeAgent);
 });
 
 // Renderer registers its current project so we can scope events

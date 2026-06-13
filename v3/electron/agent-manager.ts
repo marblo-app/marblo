@@ -105,6 +105,39 @@ export interface AgentInstance {
   claudeModelOverride?: string;
 }
 
+/**
+ * Structured-clone-safe projection of an AgentInstance for the Electron IPC
+ * boundary. AgentInstance carries fields that the structured-clone algorithm
+ * cannot serialize — the `onPtyReady` callback (a function), the
+ * `restartTimer` / `heartbeatTimer` Timer handles, and the nested
+ * `launchConfig`. Returning a raw AgentInstance from an `ipcMain.handle`
+ * channel therefore throws "An object could not be cloned" (see the
+ * `agent:list` handler). This shape mirrors exactly the fields the renderer
+ * consumes, all serializable scalars.
+ */
+export interface SerializableAgent {
+  id: string;
+  name: string;
+  model: ModelType;
+  role: string;
+  ptySessionId: string;
+  status: AgentStatus;
+  currentTaskId: string | null;
+}
+
+/** Map an AgentInstance to a plain, IPC-cloneable object. */
+export function serializeAgent(agent: AgentInstance): SerializableAgent {
+  return {
+    id: agent.id,
+    name: agent.name,
+    model: agent.model,
+    role: agent.role,
+    ptySessionId: agent.ptySessionId,
+    status: agent.status,
+    currentTaskId: agent.currentTaskId,
+  };
+}
+
 /** Inactivity window after which an "auto-working" agent drops back to
  * idle. Long enough that agy / claude pausing to think or wait for user
  * input doesn't flip them to idle (which would make the orchestrator stop
