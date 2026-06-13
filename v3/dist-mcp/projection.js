@@ -127,6 +127,9 @@ export async function applyProjection(db, taskId, mut) {
         if (mut.newStatus && mut.validateFrom && !mut.validateFrom(oldStatus)) {
             throw new Error(`Task ${taskId} cannot transition from ${oldStatus} to ${mut.newStatus}`);
         }
+        if (mut.validateTask && !mut.validateTask(taskData)) {
+            throw new Error(`Task ${taskId} failed task mutation precondition`);
+        }
         const missionId = taskData.missionId;
         const missionRef = missionId ? doc(db, "missions", missionId) : null;
         // Firestore 트랜잭션은 모든 read 가 첫 write 이전이어야 함.

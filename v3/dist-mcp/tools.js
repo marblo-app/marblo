@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, Timestamp, } from "firebase/firestore";
 import { db } from "./firebase.js";
-import { resolveContext, resolveContextForWrite, resolveMissionContextForWrite, contextReadFilter, buildMissionStepReportedEvent, } from "./context.js";
-import { applyProjection, resolveDependentIfReady, isLaneContext, } from "./projection.js";
+import { resolveContext, resolveContextForWrite, resolveMissionContextForWrite, contextReadFilter, isLaneContextId, isOrchestratorAgentId, isTaskInReadContext, buildMissionStepReportedEvent, } from "./context.js";
+import { applyProjection, resolveDependentIfReady, } from "./projection.js";
 import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -156,6 +156,22 @@ async function ensureTaskMissionContext(taskId, task, missionId = resolveMission
 }
 // ── Audit Logging ─────────────────────────────────────────────
 const MARBLO_AGENT_ID = process.env.MARBLO_AGENT_ID || "unknown";
+/**
+ * 작업자 귀속(claimedBy / projection.lastAgentId)에 쓸 agent id.
+ *
+ * 오케스트레이터가 task 를 대신 갱신(상태 전이/auto-claim)할 때 자기 공유
+ * id(`orchestrator-<projectId>`)를 담당자로 찍으면 get_all_tasks/보드가 다수
+ * task 의 담당자를 그 단일 id 로 표시해 부하분산이 과부하로 오인한다. 오케·
+ * unknown 은 "" 로 떨어뜨려 — applyProjection 의 `lastAgentId || prev` 규칙이
+ * 직전 실제 작업자 값을 보존하고, claimedBy auto-claim 은 `&& WORKER_AGENT_ID`
+ * 가드로 건너뛴다. (작업자가 자기 id 로 직접 호출하면 그대로 귀속된다.)
+ */
+function workerAgentId(rawId) {
+    if (!rawId || rawId === "unknown" || isOrchestratorAgentId(rawId))
+        return "";
+    return rawId;
+}
+const WORKER_AGENT_ID = workerAgentId(MARBLO_AGENT_ID);
 function auditLog(entry) {
     addDoc(collection(db, "audit_logs"), {
         ...entry,
@@ -181,6 +197,24 @@ function truncateResult(result) {
     return t.length > 500 ? t.slice(0, 500) + "..." : t;
 }
 // ── Tool Registration ────────────────────────────────────────
+// ── 토큰 절감: list 도구 결과 cap + 안내 footer ──
+// MCP 도구 결과는 호출 세션의 컨텍스트에 끝까지 잔존한다(오케/에이전트 비용의 큰
+// 축). list 도구가 무제한 덤프하면 컨텍스트가 불어나므로 기본 cap 을 둔다.
+const LIST_LIMIT_DEFAULT = 50;
+const TITLE_MAX = 80;
+function truncTitle(title, max = TITLE_MAX) {
+    const s = typeof title === "string" ? title : String(title ?? "");
+    return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+function capLines(lines, limit, hint) {
+    if (lines.length <= limit)
+        return lines.join("\n");
+    const hidden = lines.length - limit;
+    return `${lines.slice(0, limit).join("\n")}\n… (+${hidden} more hidden — ${hint})`;
+}
+function isTerminalTaskStatus(s) {
+    return s === "DONE" || s === "FAILED";
+}
 export function registerTools(server) {
     // Wrap server.tool to add automatic audit logging
     const originalTool = server.tool.bind(server);
@@ -223,7 +257,7 @@ export function registerTools(server) {
         });
     }
     // 1. get_all_tasks
-    auditedTool("get_all_tasks", "Get all tasks regardless of status. Optionally filter by project and/or role. Set all_projects=true to ignore default project filter and see ALL tasks.", {
+    auditedTool("get_all_tasks", "List tasks (open/non-terminal first, completed hidden at the tail). Filter by project/role; all_projects=true to span projects. Capped to `limit` (default 50) to keep results lean — raise limit or filter to see more.", {
         project_id: z.string().optional().describe("Project ID"),
         role: z
             .string()
@@ -237,13 +271,21 @@ export function registerTools(server) {
             .boolean()
             .optional()
             .describe("Ignore default context filter, show all contexts in the project (default: false)"),
-    }, async ({ project_id, role, all_projects, all_contexts }) => {
+        limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(500)
+            .optional()
+            .describe("Max rows to return (default 50; open tasks shown first)"),
+    }, async ({ project_id, role, all_projects, all_contexts, limit }) => {
         const projectId = all_projects ? "" : resolveProject(project_id);
         const contextId = contextReadFilter(!!all_contexts);
+        const filterContextInMemory = contextId === "board";
         const constraints = [];
         if (projectId)
             constraints.push(where("projectId", "==", projectId));
-        if (contextId)
+        if (contextId && !filterContextInMemory)
             constraints.push(where("contextId", "==", contextId));
         if (role)
             constraints.push(where("role", "==", role));
@@ -251,22 +293,38 @@ export function registerTools(server) {
         const snap = await getDocs(q);
         if (snap.empty)
             return text("No tasks found.");
+        // 열린(비terminal) task 를 먼저, 같은 그룹 내에선 priority 내림차순. 완료/실패
+        // 다수가 컨텍스트를 먹던 것을 cap 으로 꼬리에서 잘라낸다.
         const docs = snap.docs
             .map((d) => ({ id: d.id, ...d.data() }))
-            .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+            .filter((t) => !filterContextInMemory || isTaskInReadContext(t, contextId))
+            .sort((a, b) => {
+            const ta = isTerminalTaskStatus(a.status) ? 1 : 0;
+            const tb = isTerminalTaskStatus(b.status) ? 1 : 0;
+            if (ta !== tb)
+                return ta - tb; // open first
+            return (b.priority ?? 0) - (a.priority ?? 0);
+        });
         const lines = docs.map((t) => {
             const claimed = t.claimedBy ? ` → ${t.claimedBy}` : "";
             const proj = all_projects ? ` project=${t.projectId || "(none)"}` : "";
             const ctx = all_contexts ? ` ctx=${t.contextId || "(none)"}` : "";
-            return `- [${t.status}] ${t.title} (role=${t.role}, id=${t.id}${proj}${ctx})${claimed}`;
+            return `- [${t.status}] ${truncTitle(t.title)} (role=${t.role}, id=${t.id}${proj}${ctx})${claimed}`;
         });
-        return text(lines.join("\n"));
+        return text(capLines(lines, limit ?? LIST_LIMIT_DEFAULT, "raise limit or filter by role; completed tasks are at the tail"));
     }, { userFacing: false });
     // 2. get_available_tasks
     auditedTool("get_available_tasks", "Get TODO tasks available for the given role. Returns tasks whose dependencies are satisfied.", {
         role: z.string().describe("Agent role (backend/frontend/test/devops)"),
         project_id: z.string().optional().describe("Project ID"),
-    }, async ({ role, project_id }) => {
+        limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(200)
+            .optional()
+            .describe("Max rows (default 50)"),
+    }, async ({ role, project_id, limit }) => {
         const projectId = resolveProject(project_id);
         // Context scope — mirror get_all_tasks so the board orchestrator's
         // dispatch feed only surfaces its own context. Only the board orch sets
@@ -277,18 +335,27 @@ export function registerTools(server) {
         // leaked into the board orchestrator's awareness and got dispatched/
         // discussed there — the surviving PTY-contamination path after P3.
         const contextId = resolveContext();
+        // The board context must also surface legacy/externally-created TODOs that
+        // were stored without a contextId. Firestore can't OR "contextId=='board'"
+        // with "contextId unset" in a single `==`, so for board we drop the
+        // Firestore context filter and match on the effective (backfilled)
+        // contextId in memory below. Non-board contexts (lane:* / mission) always
+        // carry an explicit contextId on write, so they keep the strict Firestore
+        // `==` and never leak into the board feed.
+        const filterContextInMemory = contextId === "board";
         const constraints = [
             where("status", "==", "TODO"),
             where("role", "==", role),
         ];
         if (projectId)
             constraints.push(where("projectId", "==", projectId));
-        if (contextId)
+        if (contextId && !filterContextInMemory)
             constraints.push(where("contextId", "==", contextId));
         const q = query(collection(db, "tasks"), ...constraints);
         const snap = await getDocs(q);
         const tasks = snap.docs
             .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((t) => !filterContextInMemory || isTaskInReadContext(t, contextId))
             .filter((t) => t.dependsOnCompleted)
             .sort((a, b) => b.priority - a.priority);
         if (tasks.length === 0)
@@ -297,9 +364,9 @@ export function registerTools(server) {
             const deps = t.dependsOn?.length
                 ? ` (depends_on: ${t.dependsOn.join(", ")})`
                 : "";
-            return `- [${t.id}] ${t.title} (priority=${t.priority})${deps}`;
+            return `- [${t.id}] ${truncTitle(t.title)} (priority=${t.priority})${deps}`;
         });
-        return text(lines.join("\n"));
+        return text(capLines(lines, limit ?? LIST_LIMIT_DEFAULT, "raise limit to see more"));
     }, { userFacing: false });
     // 3. create_task
     auditedTool("create_task", "Create a task. Use STRUCTURED fields: goal (1-2 sentences), changes[] (bullets), acceptance[] (verifiable done-criteria), notes[] (optional). Put file paths in scope, not prose. role: backend/frontend/test/devops.", {
@@ -531,6 +598,9 @@ export function registerTools(server) {
         if (task.status !== "TODO") {
             return text("Error: Task is not available for claiming (not in TODO status).");
         }
+        if (task.claimedBy) {
+            return text(`Error: Task is not available for claiming (already claimed by ${task.claimedBy}).`);
+        }
         if (!task.dependsOnCompleted) {
             return text("Error: Task dependencies are not yet met.");
         }
@@ -544,6 +614,7 @@ export function registerTools(server) {
             // Re-check inside the transaction — closes the claim race the
             // outside-the-txn `task.status !== "TODO"` check above can't.
             validateFrom: (s) => s === "TODO",
+            validateTask: (t) => t.claimedBy == null,
         });
         const lines = [
             `Successfully claimed task: ${task.title}`,
@@ -579,7 +650,9 @@ export function registerTools(server) {
         // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
         const projMut = {
             newStatus,
-            lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+            // 오케가 대신 상태를 바꿔도 작업자 귀속은 직전 실제 작업자를 보존
+            // ("" → applyProjection 의 `|| prev`). 부하분산 오인 방지.
+            lastAgentId: WORKER_AGENT_ID,
             lastActivitySummary: comment || `status → ${newStatus}`,
             // Re-validate the transition inside the txn against the real status —
             // but force=true is the documented escape hatch, so it must skip the
@@ -612,7 +685,7 @@ export function registerTools(server) {
         // event only — never an orch PTY wake — so the board orch isn't flooded
         // with Quick Lane churn. Only submit_for_review routes a lane to the orch
         // (the final review gate). board/mission progress is unaffected.
-        if (!isLaneContext(task.contextId)) {
+        if (!isLaneContextId(task.contextId)) {
             const commentNote = comment ? ` — ${comment}` : "";
             notifyOrchestrator(`[Task Update] "${task.title}" ${task.status} → ${newStatus} (role=${task.role}, id=${task_id})${commentNote}`, task.contextId);
         }
@@ -647,7 +720,7 @@ export function registerTools(server) {
                         // Lane dependents stay silent (P4): a Quick Lane's readiness is
                         // not an orch wake event — board orch picks lane work up via the
                         // board card, not a PTY inject.
-                        if (!isLaneContext(task.contextId)) {
+                        if (!isLaneContextId(task.contextId)) {
                             notifyOrchestrator(`[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`, task.contextId);
                         }
                     }
@@ -676,14 +749,17 @@ export function registerTools(server) {
         const resolvedAgentId = agent_id || MARBLO_AGENT_ID;
         // Activity doc + Firestore projection (lastActivity*) in one transaction.
         // No status change. Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+        // 작업자 귀속(lastAgentId)에는 오케/unknown 을 빼서(workerAgentId) 직전
+        // 실제 작업자를 보존하되, activity 로그 자체의 agentId 는 누가 남겼는지
+        // 보여주려 resolvedAgentId 그대로 유지한다.
         await applyProjection(db, task_id, {
-            lastAgentId: resolvedAgentId === "unknown" ? "" : resolvedAgentId,
+            lastAgentId: workerAgentId(resolvedAgentId),
             lastActivitySummary: message,
             activityPayload: { agentId: resolvedAgentId, message },
         });
         // Lane activity is silent on the orch PTY (P4) — the comment lives on the
         // board card + Firestore activity stream only. board/mission unchanged.
-        if (!isLaneContext(task.contextId)) {
+        if (!isLaneContextId(task.contextId)) {
             const preview = message.length > 300 ? `${message.slice(0, 300)}...` : message;
             notifyOrchestrator(`[Task Activity] "${task.title}" progress update (role=${task.role}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`, task.contextId);
         }
@@ -705,7 +781,7 @@ export function registerTools(server) {
         // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
         const projMut = {
             newStatus: "REVIEW",
-            lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+            lastAgentId: WORKER_AGENT_ID,
             lastActivitySummary: pr_url
                 ? `submitted for review — ${pr_url}`
                 : "submitted for review",
@@ -718,9 +794,12 @@ export function registerTools(server) {
         const extra = {};
         if (pr_url)
             extra.prUrl = pr_url;
-        // Auto-claim if the task was never claimed
-        if (!task.claimedBy) {
-            extra.claimedBy = MARBLO_AGENT_ID;
+        // Auto-claim if the task was never claimed — but never to the
+        // orchestrator's shared id (WORKER_AGENT_ID is "" for orchestrator),
+        // else the board shows the orch as assignee for every task it submits
+        // on a worker's behalf and load-balancing reads it as overload.
+        if (!task.claimedBy && WORKER_AGENT_ID) {
+            extra.claimedBy = WORKER_AGENT_ID;
             extra.claimedAt = Timestamp.now();
         }
         if (Object.keys(extra).length)
@@ -801,7 +880,14 @@ export function registerTools(server) {
             .optional()
             .default(false)
             .describe("Show only PM feedback"),
-    }, async ({ task_id, pm_only }) => {
+        limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(200)
+            .optional()
+            .describe("Max entries (default 30)"),
+    }, async ({ task_id, pm_only, limit }) => {
         const task = await fetchTask(task_id);
         if (!task)
             return text(`Error: Task ${task_id} not found.`);
@@ -818,7 +904,7 @@ export function registerTools(server) {
             const agent = a.agentId || "system";
             return `[${ts}] ${agent}: ${a.message}`;
         });
-        return text(lines.join("\n"));
+        return text(capLines(lines, limit ?? 30, "raise limit for older entries"));
     }, { userFacing: false });
     // 12. check_feedback
     auditedTool("check_feedback", "Check for tasks that have unread PM feedback. Filter by role and optionally by project.", {
@@ -908,6 +994,7 @@ export function registerTools(server) {
                 // an external Claude Code session calls Marblo MCP without a
                 // project context).
                 parentAgentId: process.env.MARBLO_AGENT_ID || "",
+                contextId: process.env.MARBLO_CONTEXT || "",
             });
             const response = await fetch(`http://127.0.0.1:${bridgePort}/spawn-agent`, {
                 method: "POST",
@@ -955,7 +1042,14 @@ export function registerTools(server) {
     auditedTool("search_tasks", "Search tasks by keyword in title or description. Optionally filter by project.", {
         keyword: z.string().describe("Search keyword"),
         project_id: z.string().optional().describe("Project ID"),
-    }, async ({ keyword, project_id }) => {
+        limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(200)
+            .optional()
+            .describe("Max rows (default 50)"),
+    }, async ({ keyword, project_id, limit }) => {
         const projectId = resolveProject(project_id);
         const constraints = [];
         if (projectId)
@@ -970,12 +1064,12 @@ export function registerTools(server) {
         });
         if (matches.length === 0)
             return text(`No tasks found matching '${keyword}'.`);
-        const lines = [`Found ${matches.length} task(s) matching '${keyword}':`];
-        matches.forEach((d) => {
+        const taskLines = matches.map((d) => {
             const t = d.data();
-            lines.push(`- [${t.status}] ${t.title} (role=${t.role}, id=${d.id})`);
+            return `- [${t.status}] ${truncTitle(t.title)} (role=${t.role}, id=${d.id})`;
         });
-        return text(lines.join("\n"));
+        const body = capLines(taskLines, limit ?? LIST_LIMIT_DEFAULT, "narrow the keyword or raise limit");
+        return text(`Found ${matches.length} task(s) matching '${keyword}':\n${body}`);
     }, { userFacing: false });
     // 16. get_task — Get single task detail (including description)
     auditedTool("get_task", "Get full details of a single task by ID, including description, scope, dependencies, and comments.", {
@@ -1080,7 +1174,7 @@ export function registerTools(server) {
                     const restart = a.restartCount > 0 ? ` restarts=${a.restartCount}` : "";
                     return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${a.id}${restart})`;
                 });
-                return text(`Agents (${data.agents.length}, real-time):\n${lines.join("\n")}`);
+                return text(`Agents (${data.agents.length}, real-time):\n${capLines(lines, LIST_LIMIT_DEFAULT, "many agents — cleanup idle ones")}`);
             }
             catch {
                 // Bridge unavailable — fall through to Firestore
@@ -1100,7 +1194,7 @@ export function registerTools(server) {
             const task = a.currentTaskId ? ` → task=${a.currentTaskId}` : "";
             return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${d.id})${task}`;
         });
-        return text(`Agents (${snap.size}, Firestore fallback):\n${lines.join("\n")}`);
+        return text(`Agents (${snap.size}, Firestore fallback):\n${capLines(lines, LIST_LIMIT_DEFAULT, "many agents — cleanup idle ones")}`);
     }, { userFacing: false });
     // ── reuse_agent — Send a new instruction to an existing idle agent
     auditedTool("reuse_agent", "Send a new task instruction to an existing idle agent via its PTY session. Use this BEFORE spawn_agent to check if an idle agent with the matching role already exists. The agent will receive the message in its terminal stdin.", {
@@ -1121,6 +1215,7 @@ export function registerTools(server) {
                     agentName: agent_name,
                     instruction,
                     projectId: process.env.MARBLO_PROJECT || "",
+                    contextId: process.env.MARBLO_CONTEXT || "",
                 }),
             });
             const result = (await response.json());
@@ -1143,7 +1238,10 @@ export function registerTools(server) {
         complexity: z
             .enum(["simple", "standard", "complex"])
             .optional()
-            .describe("'simple' = internal sub-agent, 'standard' = default, 'complex' = always physical agent"),
+            .describe("Task difficulty — also picks the agent model tier (cost/quality). " +
+            "'simple' = internal sub-agent + cheaper model; 'standard' (default) = " +
+            "top model (claude opus / gpt-5.5 medium); 'complex' = physical agent + " +
+            "top reasoning (claude opus / gpt-5.5 high). Set per task difficulty."),
         model: z
             .string()
             .optional()
@@ -1156,7 +1254,33 @@ export function registerTools(server) {
             .array(z.string())
             .optional()
             .describe("Task tags for model scoring (e.g., architecture, research, simple-fix)"),
-    }, async ({ role, instruction, task_id, complexity, model, name, cwd, tags, }) => {
+        mix: z
+            .enum(["cross-check", "split-role"])
+            .optional()
+            .describe("★complex 전용 opt-in 모델 믹스(기본 off). 발동 시 Claude 최상위 + Codex " +
+            "high 2-spawn. 'cross-check'(기본)=교차검증, 'split-role'=역할분담. " +
+            "complexity!=='complex' 면 무시됨. 비용 2배(슬롯 2)이므로 정확성이 " +
+            "중요한 설계/보안/마이그레이션에만."),
+        stages: z
+            .array(z.object({
+            instruction: z.string(),
+            complexity: z.enum(["simple", "standard", "complex"]).optional(),
+            model: z.string().optional(),
+            tags: z.array(z.string()).optional(),
+            dependsOnPrevious: z.boolean().optional(),
+        }))
+            .optional()
+            .describe("★complex 전용 opt-in 단계분할(기본 단일). 스텝 배열을 각각 작은 " +
+            "dispatch 로 풀어 난도별 모델 매칭(설계→최상위, 기계적→cheap). " +
+            "dependsOnPrevious 스텝은 순차, 아니면 병렬. complexity!=='complex' 면 무시됨."),
+        isolate: z
+            .boolean()
+            .optional()
+            .describe("★simple 전용 opt-in 물리스폰(기본 off). 기본은 complexity='simple' 이면 " +
+            "logical(오케 내부 서브에이전트)로 단락되는데, true 면 그 단락을 건너뛰고 " +
+            "cheap 모델(claude=sonnet, gpt=low)로 격리 worktree 물리 에이전트를 스폰한다. " +
+            "격리·병렬이 필요한 저난도 작업용. complexity!=='simple' 면 무시됨."),
+    }, async ({ role, instruction, task_id, complexity, model, name, cwd, tags, mix, stages, isolate, }) => {
         const bridgePort = process.env.MARBLO_BRIDGE_PORT;
         if (!bridgePort) {
             return text("Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.");
@@ -1223,7 +1347,7 @@ export function registerTools(server) {
                     try {
                         await applyProjection(db, dispatchTaskId, {
                             newStatus: "BLOCKED",
-                            lastAgentId: MARBLO_AGENT_ID === "unknown" ? "" : MARBLO_AGENT_ID,
+                            lastAgentId: WORKER_AGENT_ID,
                             lastActivitySummary: "dispatch aborted: 선행 태스크 미완료 — BLOCKED",
                             blockerSummary: "선행 태스크 미완료 (dependsOn 미충족)",
                         });
@@ -1244,6 +1368,24 @@ export function registerTools(server) {
                 // path also has its own claim_task gate as defense-in-depth.
             }
         }
+        // SPAWN-MODEL-ALLOCATION-V2 §4/§5: mix(모델 믹스)·stages(단계분할)는 complex
+        // 전용 opt-in. complexity!=="complex" 면 조용히 삼키지 않고 무시 + 경고 후
+        // 단일 디스패치로 진행(기본 동작 무변동). bridge 도 같은 가드를 둔다(방어).
+        let effectiveMix = mix;
+        let effectiveStages = stages;
+        if (complexity !== "complex" && (mix || (stages && stages.length > 0))) {
+            console.warn(`[dispatch_task] mix/stages ignored — complexity='${complexity || "standard"}' (complex 전용). 단일 디스패치로 진행.`);
+            effectiveMix = undefined;
+            effectiveStages = undefined;
+        }
+        // §B: isolate(simple cheap 물리스폰)는 simple 전용 opt-in. complexity!=="simple"
+        // 면 무시 + 경고(조용히 삼키지 않음). bridge 도 같은 가드를 둔다(simple 이 아니면
+        // 어차피 logical 단락을 안 타므로 isolate 가 무의미).
+        let effectiveIsolate = isolate;
+        if (isolate && complexity !== "simple") {
+            console.warn(`[dispatch_task] isolate ignored — complexity='${complexity || "standard"}' (simple 전용).`);
+            effectiveIsolate = undefined;
+        }
         try {
             const response = await fetch(`http://127.0.0.1:${bridgePort}/dispatch-task`, {
                 method: "POST",
@@ -1257,10 +1399,14 @@ export function registerTools(server) {
                     nameHint: name,
                     cwd,
                     tags,
+                    mix: effectiveMix,
+                    stages: effectiveStages,
+                    isolate: effectiveIsolate,
                     projectId: process.env.MARBLO_PROJECT || "",
                     // Forward parent agent id for owner fallback when projectId
                     // is empty (external Claude Code → Marblo MCP path).
                     parentAgentId: process.env.MARBLO_AGENT_ID || "",
+                    contextId: process.env.MARBLO_CONTEXT || "",
                 }),
             });
             const result = (await response.json());
@@ -1273,7 +1419,9 @@ export function registerTools(server) {
             // Idempotent setDoc(..., {merge:true}) with the bridge's agentId
             // as doc id — the renderer's onAgentSpawned listener also writes
             // the same doc, both converge on a single record.
-            if ((result.action === "spawned" || result.action === "restarted") &&
+            if ((result.action === "spawned" ||
+                result.action === "restarted" ||
+                result.action === "mixed") &&
                 result.agentId) {
                 const projectId = resolveProject(undefined);
                 if (projectId) {
@@ -1314,6 +1462,10 @@ export function registerTools(server) {
                 lines.push(`  Score: ${result.score}`);
             if (dispatchTaskId)
                 lines.push(`  Task ID: ${dispatchTaskId}`);
+            if (result.companionAgentId)
+                lines.push(`  Mix companion (Codex): ${result.companionAgentId}`);
+            if (result.stageAgentIds && result.stageAgentIds.length > 0)
+                lines.push(`  Stage agents: ${result.stageAgentIds.join(", ")}`);
             if (result.action === "logical") {
                 lines.push(`\nAction required: Use internal sub-agent (Task/Agent tool) to handle this simple task directly.`);
             }
@@ -1369,6 +1521,13 @@ export function registerTools(server) {
                 if (a.status !== "stopped" && a.status !== "error")
                     return false;
                 if (role && a.role !== role)
+                    return false;
+                const currentContext = process.env.MARBLO_CONTEXT || "";
+                const currentIsLane = isLaneContextId(currentContext);
+                const agentIsLane = isLaneContextId(a.contextId);
+                if (currentIsLane)
+                    return a.contextId === currentContext;
+                if (agentIsLane)
                     return false;
                 return true;
             });

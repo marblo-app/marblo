@@ -10,6 +10,23 @@ export function resolveContextForWrite(env = process.env) {
 export function isLaneContextId(contextId) {
     return contextId === "lane" || (!!contextId && contextId.startsWith("lane:"));
 }
+/** Canonical Quick Lane contextId. Mirrors the renderer's buildLaneContextId. */
+export function buildLaneContextId(laneId) {
+    return `lane:${laneId}`;
+}
+/**
+ * 보드/미션 오케스트레이터의 MARBLO_AGENT_ID 규약 판별.
+ *
+ * orchestrator-manager 는 sessionId(`orchestrator-<projectId>` 또는
+ * `orchestrator-<kind>-<projectId>`)를 그대로 MARBLO_AGENT_ID 로 주입한다.
+ * 오케는 task 를 '대신' 갱신(상태 전이/auto-claim)할 뿐 실제 작업자가
+ * 아니므로, 담당자(claimedBy)·작업자(projection.lastAgentId) 귀속에서
+ * 제외해야 한다. 그러지 않으면 get_all_tasks/보드가 다수 task 의 담당자를
+ * 이 단일 공유 id 로 표시해 부하분산이 과부하로 오인한다.
+ */
+export function isOrchestratorAgentId(agentId) {
+    return !!agentId && agentId.startsWith("orchestrator-");
+}
 /**
  * Raw mission context from MARBLO_CONTEXT.
  *
@@ -34,13 +51,43 @@ export function contextReadFilter(allContexts, env = process.env) {
  * MARBLO_BRIDGE_PORT / MARBLO_PROJECT, only when non-empty.
  */
 export function contextForKind(kind) {
-    return kind === "board" ? "board" : "";
+    if (kind === "board")
+        return "board";
+    if (kind === "lane" || kind.startsWith("lane:"))
+        return kind;
+    return "";
 }
 /** Compute contextId backfill for tasks missing it. missionId wins, else "board". */
 export function computeContextIdBackfill(tasks) {
     return tasks
         .filter((t) => !t.contextId)
         .map((t) => ({ id: t.id, contextId: t.missionId ?? "board" }));
+}
+/**
+ * Effective contextId of a task on the READ path. Applies the same backfill
+ * rule as computeContextIdBackfill (missionId wins, else "board") in memory,
+ * without mutating the doc. This is what lets legacy/externally-created tasks
+ * that were stored without a contextId still resolve to the board context
+ * instead of disappearing from it.
+ */
+export function effectiveContextId(task) {
+    return task.contextId || (task.missionId ?? "board");
+}
+/**
+ * Whether a task is visible under the given read-scope context.
+ *  - "" (unscoped) → every task is visible (no context filter).
+ *  - "board" → tasks effectively on the board, INCLUDING legacy tasks stored
+ *    without a contextId (effectiveContextId backfills them to "board"). This is
+ *    the regression fix: a single Firestore `==` cannot express
+ *    "contextId == 'board' OR contextId unset", so the board read must filter in
+ *    memory. A lane (lane:*) or mission task carries an explicit, non-board
+ *    contextId, so it never matches "board" — the lane-isolation invariant holds.
+ *  - any other context (lane:* / missionId) → exact effective-contextId match.
+ */
+export function isTaskInReadContext(task, contextId) {
+    if (!contextId)
+        return true;
+    return effectiveContextId(task) === contextId;
 }
 // ── Mission step report (B안 Phase 2 — 오케스트레이터 → 지휘자 보고 채널) ──
 // 설계: v3/docs/MISSIONS-B-ORCHESTRATOR-DRIVEN.md §4 / §8.4.
