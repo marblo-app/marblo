@@ -356,6 +356,17 @@ export const confirmTossPayment = functions.https.onCall(
     }
 
     const order = orderSnap.data()!;
+    // IDOR 가드: 본인 주문만 확인할 수 있다. orderId 는 클라이언트가 넘기고
+    // 형식이 열거 가능(`marblo_<plan>_<uid>_<ts>`)하므로, 소유권 확인이 없으면
+    // 인증된 사용자가 남의 orderId 로 구독을 활성화/덮어쓸 수 있다(그 doc 의
+    // userId 로 subscriptions 가 기록됨). 실 익스플로잇은 유효 paymentKey 가
+    // 게이트하지만, 방어심층으로 호출자 uid 와 주문 소유자를 대조한다.
+    if (order.userId !== context.auth.uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "본인의 주문만 확인할 수 있습니다.",
+      );
+    }
     if (order.amount !== amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
