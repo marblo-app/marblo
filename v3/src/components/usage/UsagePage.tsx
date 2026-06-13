@@ -6,6 +6,10 @@ import { useCostStore } from "../../stores/costStore";
 import type { CostWeekly } from "../../stores/costStore";
 import type { CostByDayEntry } from "../../services/costService";
 import { UsageDashboard } from "../agents/AgentDashboard";
+import {
+  CONNECTED_RATE_LIMIT_PACKAGES,
+  getRateLimitProviderModels,
+} from "./rateLimitProviders";
 
 /**
  * Top-level Usage tab. Surfaces what used to be buried two levels deep
@@ -532,26 +536,45 @@ function WindowGauge({
 }
 
 /**
- * Rate-limit status per model in use. Surfaces the live 5h(primary) and
- * weekly(7-day/secondary) windows when an agent doc carries them. Codex emits
- * both in its rollout `rate_limits`; Claude weekly capture (statusline) is a
- * Phase 1b follow-up that reuses the same `rateLimitWeekly*` fields.
+ * Rate-limit status per connected provider. Claude Code and Codex should stay
+ * visible once their CLI harnesses are installed, even before the current
+ * project has spawned an agent for that provider.
  */
 function RateLimitPanel({ agents }: { agents: Agent[] }) {
-  // model 이 비어있는(오케스트레이터/미상) 에이전트는 버킷팅에서 제외 —
-  // 실제 모델 id 가 있는 에이전트만 한도 패널에 표기한다.
-  const modelsInUse = useMemo(() => {
-    const s = new Set<string>();
-    for (const a of agents) if (a.model) s.add(a.model);
-    return Array.from(s);
-  }, [agents]);
+  const [connectedModels, setConnectedModels] = useState<Agent["model"][]>([]);
 
-  if (modelsInUse.length === 0) return null;
+  useEffect(() => {
+    let alive = true;
+    window.electronAPI.harness
+      .list()
+      .then((packages) => {
+        if (!alive) return;
+        setConnectedModels(
+          packages
+            .filter((p) => p.status === "installed")
+            .map((p) => CONNECTED_RATE_LIMIT_PACKAGES[p.id])
+            .filter((model): model is Agent["model"] => Boolean(model)),
+        );
+      })
+      .catch(() => {
+        if (alive) setConnectedModels([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const providerModels = useMemo(
+    () => getRateLimitProviderModels(agents, connectedModels),
+    [agents, connectedModels],
+  );
+
+  if (providerModels.length === 0) return null;
 
   return (
     <Section title="한도(Rate limit) 상태">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {modelsInUse.map((model) => {
+        {providerModels.map((model) => {
           const g = RATE_LIMIT_GUIDANCE[model] || {
             label: model,
             icon: "⚪",
@@ -609,6 +632,11 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
                     {Math.max(0, 100 - headline).toFixed(0)}% 남음
                   </span>
                 )}
+                {typeof headline !== "number" && (
+                  <span className="ml-auto text-xs text-gray-500">
+                    사용 없음
+                  </span>
+                )}
               </div>
               {typeof live === "number" && (
                 <WindowGauge label="5시간" percent={live} resetAt={liveReset} />
@@ -622,7 +650,7 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
               )}
               {!hasData && (
                 // 유효한 percent 가 없으면 스테일 빨강 게이지 대신 우아하게 표기.
-                <p className="mt-2 text-xs text-gray-500">한도 정보 없음</p>
+                <p className="mt-2 text-xs text-gray-500">사용 없음</p>
               )}
               <p className="mt-2 text-[11px] leading-snug text-gray-500">
                 {g.note}
