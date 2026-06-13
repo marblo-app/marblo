@@ -16,6 +16,8 @@ import {
   isCapExempt,
   getPlanAgentLimit,
   countActivePlanAgents,
+  isLaneContextId,
+  isAgentContextReusable,
   WEIGHTS,
   MAX_AGENTS,
   MAX_PER_ROLE,
@@ -856,6 +858,54 @@ describe("isWorktreeIsolated", () => {
       TASK + "-extra",
     );
     expect(isWorktreeIsolated(lookalike, PROJECT, TASK)).toBe(false);
+  });
+});
+
+// ── Lane 격리: dispatch reuse / cleanup context gate ─────────
+//
+// bridge-server 는 dispatch 후보를 점수화하기 전에 allAgents 를
+// isAgentContextReusable(agent.MARBLO_CONTEXT, request.contextId) 로 거른다.
+// /reuse-agent 핸들러와 cleanup_agents(tools.ts) 도 동일 의미의 게이트를
+// 적용한다 — 즉 이 한 함수가 "보드 dispatch 는 레인 에이전트를 재사용/정리할
+// 수 없고, 레인 dispatch 는 같은 레인 에이전트만 만질 수 있다"는 격리 불변을
+// 담는다.
+
+describe("isLaneContextId (dispatch-scoring 로컬 복제본)", () => {
+  it("legacy 'lane' 과 concrete 'lane:<id>' 를 인식한다", () => {
+    expect(isLaneContextId("lane")).toBe(true);
+    expect(isLaneContextId("lane:q1")).toBe(true);
+  });
+  it("board / mission / 미설정은 lane 이 아니다", () => {
+    expect(isLaneContextId("board")).toBe(false);
+    expect(isLaneContextId("mission-7")).toBe(false);
+    expect(isLaneContextId(undefined)).toBe(false);
+    expect(isLaneContextId("")).toBe(false);
+  });
+});
+
+describe("isAgentContextReusable (레인↔보드 reuse/cleanup 격리 불변)", () => {
+  it("★보드 dispatch 는 레인 에이전트를 재사용할 수 없다", () => {
+    expect(isAgentContextReusable("lane:q1", "board")).toBe(false);
+    expect(isAgentContextReusable("lane:q1", undefined)).toBe(false);
+    expect(isAgentContextReusable("lane", "board")).toBe(false);
+  });
+
+  it("★레인 dispatch 는 같은 레인 에이전트만 재사용한다 (cross-lane 차단)", () => {
+    expect(isAgentContextReusable("lane:q1", "lane:q1")).toBe(true);
+    expect(isAgentContextReusable("lane:q1", "lane:q2")).toBe(false);
+  });
+
+  it("★레인 dispatch 는 보드/unscoped 에이전트를 끌어쓰지 않는다", () => {
+    // 레인은 자기 격리 워크트리 에이전트만 만져야 한다.
+    expect(isAgentContextReusable("board", "lane:q1")).toBe(false);
+    expect(isAgentContextReusable(undefined, "lane:q1")).toBe(false);
+  });
+
+  it("보드↔보드 / unscoped 는 기존대로 재사용 가능 (무회귀)", () => {
+    expect(isAgentContextReusable("board", "board")).toBe(true);
+    expect(isAgentContextReusable(undefined, undefined)).toBe(true);
+    expect(isAgentContextReusable(undefined, "board")).toBe(true);
+    expect(isAgentContextReusable("board", undefined)).toBe(true);
   });
 });
 

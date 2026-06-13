@@ -7,6 +7,8 @@ import {
   computeContextIdBackfill,
   effectiveContextId,
   isTaskInReadContext,
+  isLaneContextId,
+  buildLaneContextId,
 } from "../../electron/mcp-server/context";
 // The one-off backfill script duplicates computeContextIdBackfill (it cannot
 // import the TS source without a build step). Import that copy here so the
@@ -50,8 +52,29 @@ describe("contextForKind", () => {
   it("maps board → 'board'", () => {
     expect(contextForKind("board")).toBe("board");
   });
-  it("maps non-board kinds → '' (unscoped, no regression)", () => {
+  it("maps mission/other kinds → '' (unscoped, no regression)", () => {
     expect(contextForKind("mission")).toBe("");
+  });
+  it("★lane: passes a lane kind through so the orchestrator stays lane-scoped", () => {
+    expect(contextForKind("lane")).toBe("lane");
+    expect(contextForKind("lane:q1")).toBe("lane:q1");
+  });
+});
+
+describe("isLaneContextId / buildLaneContextId (lane 격리 규약)", () => {
+  it("buildLaneContextId 는 렌더러와 동일한 'lane:<id>' 형식을 만든다", () => {
+    expect(buildLaneContextId("task-42")).toBe("lane:task-42");
+    expect(isLaneContextId(buildLaneContextId("task-42"))).toBe(true);
+  });
+  it("isLaneContextId 는 legacy 'lane' 과 concrete 'lane:<id>' 둘 다 인식한다", () => {
+    expect(isLaneContextId("lane")).toBe(true);
+    expect(isLaneContextId("lane:abc")).toBe(true);
+  });
+  it("board / mission / 미설정은 lane 이 아니다", () => {
+    expect(isLaneContextId("board")).toBe(false);
+    expect(isLaneContextId("mission-7")).toBe(false);
+    expect(isLaneContextId(undefined)).toBe(false);
+    expect(isLaneContextId("")).toBe(false);
   });
 });
 
