@@ -16,6 +16,7 @@ import { WorktreeTab } from "./tabs/WorktreeTab";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PlanGate } from "./settings/PlanGate";
 import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
+import { ChatToastHost } from "./chat/ChatToastHost";
 import { TaskCreateModal } from "./board/TaskCreateModal";
 import { HarnessStore } from "./harness/HarnessStore";
 import { GuideTab } from "./guide/GuideTab";
@@ -396,6 +397,9 @@ export function Layout() {
 
       {/* PIPA consent — auto-shows on first launch / policy version bump */}
       <PrivacyConsentGate />
+
+      {/* Global team-chat listener and transient top notification. */}
+      <ChatToastHost />
 
       {/* Modals triggered from CommandPanel */}
       {showOrchestratorChat && (

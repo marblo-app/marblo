@@ -1,0 +1,196 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { MessageCircle, X } from "lucide-react";
+import { useAuth } from "../../hooks/useAuth";
+import { useChatStore } from "../../stores/chatStore";
+import { useProjectStore } from "../../stores/projectStore";
+import type { ChatMessage } from "../../types/chat";
+
+interface ChatToast {
+  id: string;
+  senderName: string;
+  content: string;
+}
+
+interface TopToastProps {
+  toast: ChatToast;
+  isLeaving: boolean;
+  onDismiss: () => void;
+  onPauseChange: (paused: boolean) => void;
+}
+
+const TOAST_DURATION_MS = 3600;
+const EXIT_DURATION_MS = 180;
+const SUMMARY_LIMIT = 120;
+
+function summarizeMessage(content: string): string {
+  const compact = content.replace(/\s+/g, " ").trim();
+  if (compact.length <= SUMMARY_LIMIT) return compact;
+  return `${compact.slice(0, SUMMARY_LIMIT - 1)}...`;
+}
+
+function TopToast({
+  toast,
+  isLeaving,
+  onDismiss,
+  onPauseChange,
+}: TopToastProps) {
+  return (
+    <div className="pointer-events-none fixed left-0 right-0 top-4 z-[1000] flex justify-center px-4">
+      <button
+        type="button"
+        aria-label="Dismiss chat notification"
+        onClick={onDismiss}
+        onMouseEnter={() => onPauseChange(true)}
+        onMouseLeave={() => onPauseChange(false)}
+        className={`pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-lg border border-gray-700 bg-gray-900/95 px-4 py-3 text-left shadow-2xl shadow-black/30 backdrop-blur transition-all duration-200 ${
+          isLeaving
+            ? "-translate-y-2 opacity-0"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
+        <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-300">
+          <MessageCircle className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-gray-100">
+            {toast.senderName}
+          </span>
+          <span className="mt-0.5 block line-clamp-2 text-sm leading-5 text-gray-300">
+            {toast.content}
+          </span>
+        </span>
+        <X
+          className="mt-0.5 h-4 w-4 flex-shrink-0 text-gray-500"
+          aria-hidden="true"
+        />
+      </button>
+    </div>
+  );
+}
+
+export function ChatToastHost() {
+  const { user } = useAuth();
+  const projectId = useProjectStore((s) => s.currentProject?.id ?? null);
+  const messages = useChatStore((s) => s.messages);
+  const loading = useChatStore((s) => s.loading);
+  const subscribeToMessages = useChatStore((s) => s.subscribeToMessages);
+
+  const [toast, setToast] = useState<ChatToast | null>(null);
+  const [isLeaving, setIsLeaving] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const hydratedRef = useRef(false);
+  const lastSeenMessageIdRef = useRef<string | null>(null);
+  const dismissTimerRef = useRef<number | null>(null);
+  const exitTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return subscribeToMessages(projectId ?? "");
+  }, [projectId, subscribeToMessages]);
+
+  useEffect(() => {
+    hydratedRef.current = false;
+    lastSeenMessageIdRef.current = null;
+    setToast(null);
+    setIsLeaving(false);
+    setIsPaused(false);
+  }, [projectId]);
+
+  const clearTimers = useCallback(() => {
+    if (dismissTimerRef.current !== null) {
+      window.clearTimeout(dismissTimerRef.current);
+      dismissTimerRef.current = null;
+    }
+    if (exitTimerRef.current !== null) {
+      window.clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = null;
+    }
+  }, []);
+
+  const dismissToast = useCallback(() => {
+    if (!toast) return;
+    clearTimers();
+    setIsLeaving(true);
+    exitTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      setIsLeaving(false);
+      setIsPaused(false);
+      exitTimerRef.current = null;
+    }, EXIT_DURATION_MS);
+  }, [clearTimers, toast]);
+
+  useEffect(() => {
+    if (!toast || isPaused) return;
+    dismissTimerRef.current = window.setTimeout(
+      dismissToast,
+      TOAST_DURATION_MS,
+    );
+    return () => {
+      if (dismissTimerRef.current !== null) {
+        window.clearTimeout(dismissTimerRef.current);
+        dismissTimerRef.current = null;
+      }
+    };
+  }, [dismissToast, isPaused, toast]);
+
+  useEffect(() => {
+    return clearTimers;
+  }, [clearTimers]);
+
+  useEffect(() => {
+    if (!projectId || loading) return;
+
+    const latestMessage =
+      messages.length > 0 ? messages[messages.length - 1] : null;
+
+    if (!hydratedRef.current) {
+      hydratedRef.current = true;
+      lastSeenMessageIdRef.current = latestMessage?.id ?? null;
+      return;
+    }
+
+    const latestMessageId = latestMessage?.id ?? null;
+    if (latestMessageId === lastSeenMessageIdRef.current) return;
+
+    const previousMessageId = lastSeenMessageIdRef.current;
+    lastSeenMessageIdRef.current = latestMessageId;
+
+    const previousIndex = previousMessageId
+      ? messages.findIndex((msg) => msg.id === previousMessageId)
+      : -1;
+    const newMessages =
+      previousIndex >= 0 ? messages.slice(previousIndex + 1) : messages;
+    const incoming = [...newMessages]
+      .reverse()
+      .find(
+        (msg): msg is ChatMessage =>
+          msg.type === "user" &&
+          (!user?.uid || msg.senderId !== user.uid) &&
+          msg.content.trim().length > 0,
+      );
+
+    if (!incoming) return;
+
+    clearTimers();
+    setIsLeaving(false);
+    setIsPaused(false);
+    setToast({
+      id: incoming.id,
+      senderName: incoming.senderName || "Chat",
+      content: summarizeMessage(incoming.content),
+    });
+  }, [clearTimers, loading, messages, projectId, user?.uid]);
+
+  if (!toast || typeof document === "undefined") return null;
+
+  return createPortal(
+    <TopToast
+      key={toast.id}
+      toast={toast}
+      isLeaving={isLeaving}
+      onDismiss={dismissToast}
+      onPauseChange={setIsPaused}
+    />,
+    document.body,
+  );
+}

@@ -129,8 +129,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 export function ProjectChat() {
   const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
-  const { messages, loading, sendMessage, subscribeToMessages, resetUnread } =
-    useChatStore();
+  const { messages, loading, sendMessage, resetUnread } = useChatStore();
   const agents = useAgentStore((s) => s.agents);
 
   const [input, setInput] = useState("");
@@ -139,13 +138,6 @@ export function ProjectChat() {
   const [mentionFilter, setMentionFilter] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  // Subscribe to messages
-  useEffect(() => {
-    if (!currentProject) return;
-    const unsub = subscribeToMessages(currentProject.id);
-    return unsub;
-  }, [currentProject, subscribeToMessages]);
 
   // Auto-scroll
   useEffect(() => {
