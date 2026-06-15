@@ -5,14 +5,7 @@ import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { httpsCallable, getFunctions } from "firebase/functions";
-import {
-  collection,
-  getDocs,
-  query,
-  orderBy,
-  Timestamp,
-} from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
 import app from "@/lib/firebase";
 import {
   Loader2,
@@ -22,19 +15,53 @@ import {
   Users,
   UserCheck,
   Award,
+  MessageSquare,
+  X,
 } from "lucide-react";
 
+// 신청 목록 항목 (getFounderWaitlist 함수 응답; 날짜는 ISO 문자열).
 type WaitlistEntry = {
   id: string;
   email: string;
-  source?: string;
-  createdAt?: Timestamp | null;
+  locale?: string | null;
+  source?: string | null;
+  createdAt?: string | null;
+};
+
+// 파운더 현황 항목 (listFounders 함수 응답).
+type FounderEntry = {
+  email: string;
+  status?: string | null;
+  accessGrantedAt?: string | null;
+  feedbackSubmittedAt?: string | null;
+  interviewedAt?: string | null;
+  proGrantedMonths?: number;
+  feedbackId?: string | null;
+  hasFeedback?: boolean;
+};
+
+// 6문항 피드백 (getFounderFeedbackByEmail 함수 응답).
+type FounderFeedback = {
+  answers: {
+    q1: string;
+    q2: string;
+    q3: string;
+    q4: string;
+    q5: string;
+    reason: string;
+  };
+  rating: number | null;
+  consentQuote: boolean;
+  createdAt: string | null;
 };
 
 // Firebase callable errors carry a `code` like "functions/permission-denied".
 type CallableError = { code?: string; message?: string };
 
-function mapError(err: CallableError, kind: "select" | "interview"): string {
+function mapError(
+  err: CallableError,
+  kind: "select" | "interview" | "list"
+): string {
   const code = err?.code || "";
   if (code === "functions/permission-denied") {
     return "어드민 권한이 없습니다 (ADMIN_UID 미설정 또는 계정 불일치).";
@@ -50,10 +77,12 @@ function mapError(err: CallableError, kind: "select" | "interview"): string {
   return err?.message || "알 수 없는 오류가 발생했습니다.";
 }
 
-function formatDate(ts?: Timestamp | null): string {
-  if (!ts || typeof ts.toDate !== "function") return "—";
+// ISO 문자열을 한국어 날짜·시각으로. 없거나 파싱 실패 시 "—".
+function formatDate(iso?: string | null): string {
+  if (!iso) return "—";
   try {
-    const d = ts.toDate();
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
     return d.toLocaleString("ko-KR", {
       year: "numeric",
       month: "2-digit",
@@ -89,6 +118,19 @@ export default function AdminPage() {
   const [interviewSuccess, setInterviewSuccess] = useState<string | null>(null);
   const [interviewError, setInterviewError] = useState<string | null>(null);
 
+  // 파운더 현황 state
+  const [founders, setFounders] = useState<FounderEntry[]>([]);
+  const [foundersLoading, setFoundersLoading] = useState(true);
+  const [foundersError, setFoundersError] = useState<string | null>(null);
+
+  // 피드백 열람 모달 state
+  const [fbOpen, setFbOpen] = useState(false);
+  const [fbEmail, setFbEmail] = useState("");
+  const [fbLoading, setFbLoading] = useState(false);
+  const [fbError, setFbError] = useState<string | null>(null);
+  const [fbData, setFbData] = useState<FounderFeedback | null>(null);
+  const [fbEmpty, setFbEmpty] = useState(false);
+
   // Auth gate
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -106,7 +148,7 @@ export default function AdminPage() {
     return () => unsub();
   }, [locale, router]);
 
-  // Load waitlist
+  // 신청 목록 로드 (Cloud Function 경유 — 클라 직접 조회는 규칙으로 차단됨).
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -114,27 +156,16 @@ export default function AdminPage() {
       setListLoading(true);
       setListError(null);
       try {
-        const q = query(
-          collection(db, "betatester50_waitlist"),
-          orderBy("createdAt", "desc")
+        const fn = httpsCallable<unknown, { items: WaitlistEntry[] }>(
+          getFunctions(app, "us-central1"),
+          "getFounderWaitlist"
         );
-        const snap = await getDocs(q);
+        const res = await fn({});
         if (cancelled) return;
-        const rows: WaitlistEntry[] = snap.docs.map((d) => {
-          const data = d.data() as Record<string, unknown>;
-          return {
-            id: d.id,
-            email: (data.email as string) || "(이메일 없음)",
-            source: data.source as string | undefined,
-            createdAt: (data.createdAt as Timestamp | undefined) ?? null,
-          };
-        });
-        setEntries(rows);
+        setEntries(res.data.items || []);
       } catch (err: unknown) {
         if (cancelled) return;
-        const message =
-          err instanceof Error ? err.message : "목록을 불러오지 못했습니다.";
-        setListError(message);
+        setListError(mapError(err as CallableError, "list"));
       } finally {
         if (!cancelled) setListLoading(false);
       }
@@ -144,6 +175,60 @@ export default function AdminPage() {
       cancelled = true;
     };
   }, [user]);
+
+  // 파운더 현황 로드 (Cloud Function 경유).
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const load = async () => {
+      setFoundersLoading(true);
+      setFoundersError(null);
+      try {
+        const fn = httpsCallable<unknown, { items: FounderEntry[] }>(
+          getFunctions(app, "us-central1"),
+          "listFounders"
+        );
+        const res = await fn({});
+        if (cancelled) return;
+        setFounders(res.data.items || []);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        setFoundersError(mapError(err as CallableError, "list"));
+      } finally {
+        if (!cancelled) setFoundersLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // 피드백 열람 — 이메일로 6문항 조회 후 모달 표시.
+  const openFeedback = useCallback(async (email: string) => {
+    setFbOpen(true);
+    setFbEmail(email);
+    setFbLoading(true);
+    setFbError(null);
+    setFbData(null);
+    setFbEmpty(false);
+    try {
+      const fn = httpsCallable<
+        { email: string },
+        { feedback: FounderFeedback | null }
+      >(getFunctions(app, "us-central1"), "getFounderFeedbackByEmail");
+      const res = await fn({ email });
+      if (res.data.feedback) {
+        setFbData(res.data.feedback);
+      } else {
+        setFbEmpty(true);
+      }
+    } catch (err: unknown) {
+      setFbError(mapError(err as CallableError, "list"));
+    } finally {
+      setFbLoading(false);
+    }
+  }, []);
 
   const handleSelect = useCallback(async (entry: WaitlistEntry) => {
     setSelecting((s) => ({ ...s, [entry.id]: true }));
@@ -207,11 +292,8 @@ export default function AdminPage() {
           </div>
           <p className="text-sm text-zinc-400 leading-relaxed">
             대기자(waitlist)를 확인하고 파운더를 선정하세요. 선정 시 3일간의
-            피드백 제출 기간이 시작됩니다. 제출된 피드백과 Pro 상태는 현재
-            Firestore 콘솔(
-            <code className="text-zinc-300">founders</code>,{" "}
-            <code className="text-zinc-300">founder_feedback</code>)에서 확인할
-            수 있습니다.
+            피드백 제출 기간이 시작됩니다. 파운더 현황과 제출된 6문항 피드백은
+            아래 &quot;파운더 현황&quot; 섹션에서 바로 확인할 수 있습니다.
           </p>
           <div className="mt-3 flex items-start gap-2 text-xs text-amber-400 bg-amber-950/30 border border-amber-900/40 rounded-lg p-3">
             <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
@@ -351,7 +433,188 @@ export default function AdminPage() {
             </div>
           )}
         </section>
+
+        {/* 파운더 현황 card */}
+        <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Award className="w-5 h-5 text-indigo-400" />
+              <h2 className="text-lg font-semibold">파운더 현황</h2>
+            </div>
+            {!foundersLoading && !foundersError && (
+              <span className="text-sm text-zinc-400">
+                총 {founders.length}명
+              </span>
+            )}
+          </div>
+
+          {foundersLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+            </div>
+          ) : foundersError ? (
+            <div className="flex items-start gap-3 text-red-400 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
+              <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
+              <p className="text-sm">{foundersError}</p>
+            </div>
+          ) : founders.length === 0 ? (
+            <p className="text-sm text-zinc-500 py-8 text-center">
+              선정된 파운더가 없습니다.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-zinc-500 border-b border-zinc-800">
+                    <th className="py-2 pr-4 font-medium">이메일</th>
+                    <th className="py-2 pr-4 font-medium">상태</th>
+                    <th className="py-2 pr-4 font-medium">접근부여</th>
+                    <th className="py-2 pr-4 font-medium">피드백제출</th>
+                    <th className="py-2 pr-4 font-medium">인터뷰</th>
+                    <th className="py-2 pr-4 font-medium">Pro개월</th>
+                    <th className="py-2 font-medium text-right">피드백</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {founders.map((f) => (
+                    <tr
+                      key={f.email}
+                      className="border-b border-zinc-800/60 last:border-0 align-top"
+                    >
+                      <td className="py-3 pr-4 break-all">{f.email}</td>
+                      <td className="py-3 pr-4 text-zinc-300">
+                        {f.status || "—"}
+                      </td>
+                      <td className="py-3 pr-4 text-zinc-400 whitespace-nowrap">
+                        {formatDate(f.accessGrantedAt)}
+                      </td>
+                      <td className="py-3 pr-4 text-zinc-400 whitespace-nowrap">
+                        {formatDate(f.feedbackSubmittedAt)}
+                      </td>
+                      <td className="py-3 pr-4 text-zinc-400 whitespace-nowrap">
+                        {formatDate(f.interviewedAt)}
+                      </td>
+                      <td className="py-3 pr-4 text-zinc-300">
+                        {f.proGrantedMonths ?? 0}
+                      </td>
+                      <td className="py-3 text-right">
+                        {f.hasFeedback ? (
+                          <button
+                            onClick={() => openFeedback(f.email)}
+                            className="inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 px-3 py-1.5 rounded-lg text-sm font-medium transition"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            보기
+                          </button>
+                        ) : (
+                          <span className="text-xs text-zinc-600">미제출</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* 임의 이메일 피드백 조회 */}
+          <div className="mt-5 pt-4 border-t border-zinc-800 flex flex-col sm:flex-row gap-3">
+            <input
+              type="email"
+              value={fbEmail}
+              onChange={(e) => setFbEmail(e.target.value)}
+              placeholder="피드백을 볼 이메일 (founder@example.com)"
+              className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
+            />
+            <button
+              onClick={() => openFeedback(fbEmail.trim())}
+              disabled={!fbEmail.trim()}
+              className="inline-flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-100 px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap"
+            >
+              <MessageSquare className="w-4 h-4" />
+              피드백 보기
+            </button>
+          </div>
+        </section>
       </div>
+
+      {/* 피드백 열람 모달 */}
+      {fbOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setFbOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-2xl p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-lg font-semibold break-all">
+                  피드백 — {fbEmail}
+                </h3>
+              </div>
+              <button
+                onClick={() => setFbOpen(false)}
+                className="text-zinc-400 hover:text-zinc-200 transition shrink-0"
+                aria-label="닫기"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {fbLoading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+              </div>
+            ) : fbError ? (
+              <div className="flex items-start gap-3 text-red-400 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
+                <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
+                <p className="text-sm">{fbError}</p>
+              </div>
+            ) : fbEmpty ? (
+              <p className="text-sm text-zinc-500 py-8 text-center">
+                아직 제출된 피드백이 없습니다.
+              </p>
+            ) : fbData ? (
+              <div className="space-y-4 text-sm">
+                <div className="flex items-center gap-4 text-zinc-300">
+                  <span>
+                    점수:{" "}
+                    <span className="font-semibold text-indigo-300">
+                      {fbData.rating ?? "—"}/10
+                    </span>
+                  </span>
+                  <span className="text-zinc-500">
+                    제출: {formatDate(fbData.createdAt)}
+                  </span>
+                  {fbData.consentQuote && (
+                    <span className="text-green-400 text-xs">인용 동의함</span>
+                  )}
+                </div>
+                {(
+                  [
+                    ["① 무엇을 하려 했나", fbData.answers.q1],
+                    ["② 좋았던 점", fbData.answers.q2],
+                    ["③ 내 문제를 해결한 점", fbData.answers.q3],
+                    ["④ 막히거나 아쉬운 점", fbData.answers.q4],
+                    ["⑤ 있었으면 하는 것", fbData.answers.q5],
+                    ["⑥ 점수 이유", fbData.answers.reason],
+                  ] as const
+                ).map(([label, val]) => (
+                  <div key={label}>
+                    <p className="text-zinc-500 mb-1">{label}</p>
+                    <p className="text-zinc-100 whitespace-pre-wrap leading-relaxed">
+                      {val || "—"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

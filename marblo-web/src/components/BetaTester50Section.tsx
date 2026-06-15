@@ -3,13 +3,12 @@
 import { useEffect, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
-import { collection, getCountFromServer } from "firebase/firestore";
+import { httpsCallable, getFunctions } from "firebase/functions";
 import { Sparkles } from "lucide-react";
-import { db } from "@/lib/firebase";
+import app from "@/lib/firebase";
 import BetaTester50SignupForm from "./BetaTester50SignupForm";
 
 const SEAT_CAP = 100;
-const COLLECTION = "betatester50_waitlist";
 // Only reveal the "N seats left" counter once at least this many people
 // have signed up — empty counters read as "nobody's buying." Configurable
 // at build time via NEXT_PUBLIC_SEATS_COUNTER_THRESHOLD.
@@ -27,9 +26,13 @@ export default function BetaTester50Section() {
     let cancelled = false;
     (async () => {
       try {
-        const snap = await getCountFromServer(collection(db, COLLECTION));
+        const fn = httpsCallable<unknown, { count: number }>(
+          getFunctions(app, "us-central1"),
+          "getWaitlistCount"
+        );
+        const res = await fn({});
         if (cancelled) return;
-        const count = snap.data().count ?? 0;
+        const count = res.data.count ?? 0;
         setSeatsLeft(Math.max(0, SEAT_CAP - count));
       } catch {
         // Fallback: static copy shown when seatsLeft remains null

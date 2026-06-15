@@ -275,7 +275,10 @@ service cloud.firestore {
         && request.resource.data.locale in ['ko', 'en', 'ja']
         && request.resource.data.source in ['home', 'promo_bar', 'foundation50_page']
         && request.resource.data.agreed == true;
-      allow list: if true;
+      // 읽기는 전면 차단(로그인 누구나 이메일을 list 로 열람하던 홀 차단).
+      // 좌석 카운트는 공개 함수 getWaitlistCount, 어드민 신청목록은
+      // getFounderWaitlist 등 Cloud Functions(admin SDK) 경유로만 노출한다.
+      allow list: if false;
       allow get: if false;
       allow update, delete: if false;
     }
