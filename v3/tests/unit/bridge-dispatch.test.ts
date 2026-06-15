@@ -463,6 +463,81 @@ describe("dispatchTask — per-task uniqueness (L3)", () => {
   });
 });
 
+// ── [RG] distinct-task fan-out — 배정 라이프사이클 증상① 회귀 가드 ───────
+//
+// 사용자 보고(증상①): "여러 태스크를 한 번에 만들면 각각 서로 다른 실제
+// 에이전트로 스폰돼야 한다 — 한 에이전트(예: 직전 'fix-restart-regression')로
+// claimedBy 가 쏠리면 안 된다."
+//
+// 기존 L3 테스트는 '동일 태스크 → 정확히 1 에이전트' 방향만 핀했다. 그 반대
+// 방향 — 서로 다른 태스크를 동시에 디스패치하면 서로 다른 에이전트로 분산되고
+// 직전 유휴 에이전트로 쏠리지 않는다 — 은 미커버였다. dispatchTask 가 돌려주는
+// agentId 가 MCP 레이어(tools.ts dispatch_task)에서 task.claimedBy 로 그대로
+// 바인딩되므로 'agentId 분산 == claimedBy(=카드 담당자) 분산' 이다.
+describe("dispatchTask — distinct-task fan-out (RG, 증상①)", () => {
+  it("동시 디스패치된 서로 다른 isolated 태스크는 각각 fresh 에이전트로 — 직전 유휴로 쏠리지 않음", async () => {
+    const { bridge, am } = makeBridge();
+    // 직전 작업에서 남은 유휴 에이전트 1기 — 메인 체크아웃(/repo)에 주차.
+    // 워크트리 격리 게이트(isWorktreeIsolated)가 이 에이전트를 어떤 isolated
+    // 태스크에도 reuse 못 하게 막아, 각 태스크가 자기 워크트리로 fresh spawn 된다.
+    am.seed(
+      makeInstance({
+        id: "stale-idle",
+        role: "backend",
+        status: "idle",
+        cwd: "/repo",
+        projectId: "px",
+      }),
+    );
+
+    const taskIds = ["fanTask0001", "fanTask0002", "fanTask0003"];
+    const results = await Promise.all(
+      taskIds.map((taskId) =>
+        bridge.dispatchTask(dispatch({ projectId: "px", taskId })),
+      ),
+    );
+
+    // 전부 성공 + 전부 fresh spawn(유휴 에이전트로 reuse 쏠림 없음).
+    expect(results.every((r) => r.success)).toBe(true);
+    expect(results.every((r) => r.action === "spawned")).toBe(true);
+    expect(am.launchCalls).toBe(3);
+
+    // 핵심: 서로 다른 에이전트로 분산 + 누구도 stale 유휴 에이전트로 귀속되지 않음.
+    const agentIds = results.map((r) => r.agentId);
+    expect(new Set(agentIds).size).toBe(3); // 3개 모두 distinct
+    expect(agentIds).not.toContain("stale-idle");
+  });
+
+  it("reuse 가능 컨텍스트에서도 두 distinct 태스크가 한 유휴 에이전트로 동시 쏠리지 않음 (M6 동기 claim)", async () => {
+    const { bridge, am } = makeBridge();
+    // 비격리(projectId 없음) → 워크트리 게이트 통과, 유휴 에이전트 reuse 허용.
+    // 두 태스크가 모두 이 한 기를 reuse 하려 들면 claimedBy 가 같은 id 로 쏠린다.
+    // M6 동기 working-claim 이 둘 중 하나만 reuse 하고 나머지는 fresh spawn 시킨다.
+    am.seed(
+      makeInstance({
+        id: "idle-1",
+        role: "backend",
+        status: "idle",
+        cwd: "/repo",
+      }),
+    );
+
+    const [a, b] = await Promise.all([
+      bridge.dispatchTask(dispatch({ taskId: "distA0000001" })),
+      bridge.dispatchTask(dispatch({ taskId: "distB0000001" })),
+    ]);
+
+    expect(a.success && b.success).toBe(true);
+    // 정확히 하나만 유휴 에이전트를 reuse, 다른 하나는 fresh spawn.
+    const actions = [a.action, b.action].sort();
+    expect(actions).toEqual(["reused", "spawned"]);
+    // 두 태스크가 서로 다른 에이전트로 — claimedBy 쏠림(동일 id) 없음.
+    expect(a.agentId).not.toBe(b.agentId);
+    // 유휴 1기는 reuse 되므로 신규 launch 는 정확히 1회.
+    expect(am.launchCalls).toBe(1);
+  });
+});
+
 // ── SPAWN-MODEL-ALLOCATION-V2 §4 모델 믹스 (complex 전용 opt-in) ──────
 
 describe("dispatchTask — model mix (§4)", () => {
