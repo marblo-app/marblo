@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
+import { TelegramChannelPanel } from "./TelegramChannelPanel";
 
 interface HarnessStoreProps {
   /** Pass undefined to render inline as a tab (no modal overlay, no close X). */
@@ -197,6 +198,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
             normal document flow without separate nested scrollbars. */}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <ConnectionStatusPanel />
+          <TelegramChannelPanel />
 
           {/* List */}
           <div className="p-4">
