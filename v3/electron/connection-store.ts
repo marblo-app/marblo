@@ -73,6 +73,9 @@ export interface GitRepoMeta {
 const DEFAULT_STORE_DIR = path.join(os.homedir(), ".marblo");
 const DEFAULT_STORE_FILE = "connections.json";
 
+/** harness 가 MCP 를 등록하는 글로벌 CLI 설정(harness-manager 와 동일 경로). */
+const CLAUDE_JSON = path.join(os.homedir(), ".claude.json");
+
 /** git 호출 타임아웃 — 오프라인/auth-wedge 가 연결 저장을 막지 못하게. */
 const GIT_TIMEOUT_MS = 5_000;
 
@@ -189,6 +192,25 @@ export class ConnectionStore {
     delete all[projectId];
     this.writeAll(all);
     return true;
+  }
+
+  /**
+   * 접근모드(쓰기 강도)를 설정하면서 권한 동의 상태를 'granted' 로 승격한다.
+   * 사용자가 명시적으로 쓰기 강도를 고르는 행위 = 권한 부여(grant)이므로
+   * accessMode 저장과 permissionsState='granted' 를 한 번에 묶는다. 레코드가
+   * 없으면 null(no-op) — 미연결 프로젝트엔 접근모드를 부여하지 않는다.
+   */
+  setAccessMode(
+    projectId: string,
+    accessMode: AccessMode,
+  ): ProjectConnection | null {
+    const existing = this.get(projectId);
+    if (!existing) return null;
+    return this.upsert({
+      ...existing,
+      accessMode,
+      permissionsState: "granted",
+    });
   }
 }
 
@@ -314,4 +336,71 @@ export function touchProjectLastRun(
   at: number = Date.now(),
 ): ProjectConnection | null {
   return getConnectionStore().touchLastRun(projectId, at);
+}
+
+/**
+ * 접근모드 설정 + 권한 'granted' 승격(grant). 레코드 없으면 null.
+ * (IPC connection:setAccess 의 진입점.)
+ */
+export function setAccessMode(
+  projectId: string,
+  accessMode: AccessMode,
+): ProjectConnection | null {
+  return getConnectionStore().setAccessMode(projectId, accessMode);
+}
+
+/**
+ * 연결 해제 — 레코드 삭제. 있었으면 true, 없었으면 false.
+ * (IPC connection:remove 의 진입점.)
+ */
+export function removeConnection(projectId: string): boolean {
+  return getConnectionStore().remove(projectId);
+}
+
+// ─── availableMcps 실채우기 ──────────────────────────────────────────
+// 저장 레코드의 availableMcps 는 비어 있을 수 있다(연결 시점엔 모름). 렌더러가
+// "이 프로젝트 에이전트가 어떤 MCP 를 쓸 수 있나"를 알려면 *실시간* 설치 상태가
+// 필요하므로, 저장 레이어에 박아두지 않고 읽기 경계(connection:get/upsert)에서
+// computeAvailableMcps() 로 채워 돌려준다. 이렇게 하면 MCP 를 새로 설치/제거해도
+// 저장 레코드 마이그레이션 없이 즉시 반영되고, 저장 라운드트립 불변식도 깨지지
+// 않는다(순수 store 는 입력만 보존).
+
+/**
+ * 이 머신의 프로젝트 에이전트가 사용 가능한 MCP 서버 id 목록.
+ *  - marblo: 번들 MCP 라 항상 사용 가능(설치 여부와 무관) → 항상 포함.
+ *  - 그 외: harness 가 등록하는 `~/.claude.json` 의 mcpServers 키.
+ * 파일 없음/손상이어도 절대 throw 하지 않고 최소 ["marblo"] 를 보장한다.
+ * 정렬해 결정적(deterministic) 순서로 반환.
+ */
+export function computeAvailableMcps(): string[] {
+  const mcps = new Set<string>(["marblo"]);
+  try {
+    const raw = fs.readFileSync(CLAUDE_JSON, "utf-8");
+    const parsed = JSON.parse(raw) as { mcpServers?: Record<string, unknown> };
+    const servers = parsed?.mcpServers;
+    if (servers && typeof servers === "object" && !Array.isArray(servers)) {
+      for (const key of Object.keys(servers)) {
+        if (key) mcps.add(key);
+      }
+    }
+  } catch {
+    // 파일 없음(ENOENT)/손상 — marblo 만 보장.
+  }
+  return [...mcps].sort();
+}
+
+/**
+ * 렌더러 경계용 — 저장 레코드의 availableMcps 를 실제 사용 가능한 MCP 목록으로
+ * 채워 새 객체로 반환한다(저장 파일은 건드리지 않음). 저장돼 있던 값은 union 으로
+ * 보존해 명시적으로 넣어둔 MCP 가 사라지지 않게 한다. conn 이 null 이면 null.
+ */
+export function withAvailableMcps(
+  conn: ProjectConnection | null,
+): ProjectConnection | null {
+  if (!conn) return conn;
+  const merged = new Set<string>([
+    ...conn.availableMcps,
+    ...computeAvailableMcps(),
+  ]);
+  return { ...conn, availableMcps: [...merged].sort() };
 }

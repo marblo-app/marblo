@@ -76,7 +76,11 @@ import {
   upsertProjectConnection,
   listProjectConnections,
   touchProjectLastRun,
+  setAccessMode,
+  removeConnection,
+  withAvailableMcps,
   type ProjectConnectionInput,
+  type AccessMode,
 } from "./connection-store";
 
 type ConnectionCheckStatus = "pass" | "warn" | "fail";
@@ -2079,16 +2083,22 @@ async function checkProjectConnectionHealth(
 // branch)를 가능하면 자동 채운다(MCP-first, OAuth UI 없음).
 
 ipcMain.handle("connection:get", (_event, projectId: string) => {
-  return getProjectConnection(projectId);
+  // 렌더러에는 실시간 availableMcps 를 채워 돌려준다(저장 레코드는 비어 있을 수
+  // 있음) — connection-store.withAvailableMcps 가 ~/.claude.json + marblo 로 채움.
+  return withAvailableMcps(getProjectConnection(projectId));
 });
 
 ipcMain.handle("connection:list", () => {
   return listProjectConnections();
 });
 
-ipcMain.handle("connection:upsert", (_event, input: ProjectConnectionInput) => {
-  return upsertProjectConnection(input);
-});
+ipcMain.handle(
+  "connection:upsert",
+  async (_event, input: ProjectConnectionInput) => {
+    const conn = await upsertProjectConnection(input);
+    return withAvailableMcps(conn);
+  },
+);
 
 ipcMain.handle(
   "connection:touchLastRun",
@@ -2099,6 +2109,24 @@ ipcMain.handle(
 
 ipcMain.handle("connection:check", (_event, projectId: string) => {
   return checkProjectConnectionHealth(projectId);
+});
+
+// 접근모드(쓰기 강도) 설정 = 권한 grant. accessMode 저장 + permissionsState
+// 'granted' 승격을 한 번에 처리하고, 갱신된 연결(availableMcps 채움)을 돌려준다.
+// 미연결 프로젝트면 setAccessMode 가 null → 그대로 null 반환.
+ipcMain.handle(
+  "connection:setAccess",
+  (
+    _event,
+    { projectId, accessMode }: { projectId: string; accessMode: AccessMode },
+  ) => {
+    return withAvailableMcps(setAccessMode(projectId, accessMode));
+  },
+);
+
+// 연결 해제 — 레코드 삭제. 있었으면 true, 없었으면 false.
+ipcMain.handle("connection:remove", (_event, projectId: string) => {
+  return removeConnection(projectId);
 });
 
 // --- Telegram Channels IPC Handlers (텔레그램 T1·보안 민감) ---
