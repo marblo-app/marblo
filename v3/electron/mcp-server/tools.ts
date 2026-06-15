@@ -1729,8 +1729,16 @@ export function registerTools(server: McpServer): void {
       instruction: z
         .string()
         .describe("New instruction/task to send to the agent"),
+      task_id: z
+        .string()
+        .optional()
+        .describe(
+          "Marblo task ID to bind to the reused agent. When set, the task's " +
+            "claimedBy is rebound to this agent (mirrors dispatch_task) so the " +
+            "board shows the REAL worker immediately instead of a stale assignee.",
+        ),
     },
-    async ({ agent_name, instruction }) => {
+    async ({ agent_name, instruction, task_id }) => {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
@@ -1747,6 +1755,7 @@ export function registerTools(server: McpServer): void {
             body: JSON.stringify({
               agentName: agent_name,
               instruction,
+              taskId: task_id || "",
               projectId: process.env.MARBLO_PROJECT || "",
               contextId: process.env.MARBLO_CONTEXT || "",
             }),
@@ -1767,9 +1776,29 @@ export function registerTools(server: McpServer): void {
           );
         }
 
+        // Bind the board task to the reused agent so the kanban shows the REAL
+        // worker immediately — and overwrite any stale claimedBy left by a
+        // previous owner. Without this, reuse_agent only nudged the PTY and the
+        // task's claimedBy stayed pinned to whoever last auto-claimed it, so the
+        // board showed the wrong/uniform assignee until the agent happened to
+        // call update_task_status. Same pattern as dispatch_task's task binding.
+        if (result.agentId && task_id) {
+          try {
+            await updateDoc(doc(db, "tasks", task_id), {
+              claimedBy: result.agentId,
+              claimedAt: Timestamp.now(),
+            });
+          } catch (err) {
+            // Non-fatal — the instruction is already delivered; the board just
+            // keeps showing the stale assignee. Surface for diagnosis.
+            console.error("[reuse_agent] Failed to bind task claimedBy:", err);
+          }
+        }
+
         return text(
           `Instruction sent to existing agent '${agent_name}'.\n` +
             `  Agent ID: ${result.agentId}\n` +
+            (task_id ? `  Bound task: ${task_id}\n` : "") +
             `  Instruction: ${instruction.slice(0, 100)}${
               instruction.length > 100 ? "..." : ""
             }`,

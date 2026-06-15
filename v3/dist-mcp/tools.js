@@ -4,6 +4,7 @@ import { db } from "./firebase.js";
 import { resolveContext, resolveContextForWrite, resolveMissionContextForWrite, contextReadFilter, isLaneContextId, isOrchestratorAgentId, isTaskInReadContext, buildMissionStepReportedEvent, } from "./context.js";
 import { applyProjection, resolveDependentIfReady, } from "./projection.js";
 import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
+import { formatAgentTaskRoleLabel, normalizeFirestoreFallbackAgentStatus, } from "./agent-status-labels.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
@@ -114,6 +115,36 @@ async function fetchTask(taskId) {
 }
 function text(t) {
     return { content: [{ type: "text", text: t }] };
+}
+async function fetchAgentRole(agentId) {
+    if (!agentId || agentId === "unknown" || isOrchestratorAgentId(agentId)) {
+        return null;
+    }
+    try {
+        const snap = await getDoc(doc(db, "agents", agentId));
+        if (!snap.exists())
+            return null;
+        const role = snap.data().role;
+        return typeof role === "string" && role.trim() ? role : null;
+    }
+    catch (err) {
+        console.warn("[MCP] Failed to fetch agent role:", err);
+        return null;
+    }
+}
+async function markAgentStoppedInFirestore(agentId) {
+    if (!agentId)
+        return;
+    try {
+        await updateDoc(doc(db, "agents", agentId), {
+            status: "stopped",
+            currentTaskId: null,
+            updatedAt: Timestamp.now(),
+        });
+    }
+    catch (err) {
+        console.warn("[MCP] Failed to mark killed agent stopped:", err);
+    }
 }
 function applyMissionContextTags(data, missionId = resolveMissionContextForWrite()) {
     if (!missionId)
@@ -687,7 +718,8 @@ export function registerTools(server) {
         // (the final review gate). board/mission progress is unaffected.
         if (!isLaneContextId(task.contextId)) {
             const commentNote = comment ? ` — ${comment}` : "";
-            notifyOrchestrator(`[Task Update] "${task.title}" ${task.status} → ${newStatus} (role=${task.role}, id=${task_id})${commentNote}`, task.contextId);
+            const roleLabel = formatAgentTaskRoleLabel(task.role, await fetchAgentRole(MARBLO_AGENT_ID));
+            notifyOrchestrator(`[Task Update] "${task.title}" ${task.status} → ${newStatus} (${roleLabel}, id=${task_id})${commentNote}`, task.contextId);
         }
         // ── Inline dependency resolution (atomic, idempotent — N4) ──
         // When a task completes, resolve every task that depends on it. The
@@ -761,7 +793,8 @@ export function registerTools(server) {
         // board card + Firestore activity stream only. board/mission unchanged.
         if (!isLaneContextId(task.contextId)) {
             const preview = message.length > 300 ? `${message.slice(0, 300)}...` : message;
-            notifyOrchestrator(`[Task Activity] "${task.title}" progress update (role=${task.role}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`, task.contextId);
+            const roleLabel = formatAgentTaskRoleLabel(task.role, await fetchAgentRole(resolvedAgentId));
+            notifyOrchestrator(`[Task Activity] "${task.title}" progress update (${roleLabel}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`, task.contextId);
         }
         return text(`Activity logged: ${message}`);
     });
@@ -823,7 +856,8 @@ export function registerTools(server) {
         // (resolveNotifyTarget); missions go to the mission orch. Do NOT add a
         // lane gate here — that would silence the lane review gate entirely.
         const prNote = pr_url ? ` PR: ${pr_url}` : "";
-        notifyOrchestrator(`[Review Submitted] "${task.title}" is ready for review (role=${task.role}, id=${task_id})${prNote}`, task.contextId);
+        const roleLabel = formatAgentTaskRoleLabel(task.role, await fetchAgentRole(MARBLO_AGENT_ID));
+        notifyOrchestrator(`[Review Submitted] "${task.title}" is ready for review (${roleLabel}, id=${task_id})${prNote}`, task.contextId);
         return text(`Task '${task.title}' submitted for review. Status: REVIEW`);
     });
     // 9. get_task_dependencies
@@ -1191,8 +1225,14 @@ export function registerTools(server) {
             return text("No agents found.");
         const lines = snap.docs.map((d) => {
             const a = d.data();
-            const task = a.currentTaskId ? ` → task=${a.currentTaskId}` : "";
-            return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${d.id})${task}`;
+            const statusInfo = normalizeFirestoreFallbackAgentStatus(a.status);
+            const task = !statusInfo.staleActive && a.currentTaskId
+                ? ` → task=${a.currentTaskId}`
+                : "";
+            const stale = statusInfo.staleActive
+                ? ` stale=${String(a.status)}`
+                : "";
+            return `- [${statusInfo.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${d.id}${stale})${task}`;
         });
         return text(`Agents (${snap.size}, Firestore fallback):\n${capLines(lines, LIST_LIMIT_DEFAULT, "many agents — cleanup idle ones")}`);
     }, { userFacing: false });
@@ -1202,7 +1242,13 @@ export function registerTools(server) {
         instruction: z
             .string()
             .describe("New instruction/task to send to the agent"),
-    }, async ({ agent_name, instruction }) => {
+        task_id: z
+            .string()
+            .optional()
+            .describe("Marblo task ID to bind to the reused agent. When set, the task's " +
+            "claimedBy is rebound to this agent (mirrors dispatch_task) so the " +
+            "board shows the REAL worker immediately instead of a stale assignee."),
+    }, async ({ agent_name, instruction, task_id }) => {
         const bridgePort = process.env.MARBLO_BRIDGE_PORT;
         if (!bridgePort) {
             return text("Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.");
@@ -1214,6 +1260,7 @@ export function registerTools(server) {
                 body: JSON.stringify({
                     agentName: agent_name,
                     instruction,
+                    taskId: task_id || "",
                     projectId: process.env.MARBLO_PROJECT || "",
                     contextId: process.env.MARBLO_CONTEXT || "",
                 }),
@@ -1222,8 +1269,28 @@ export function registerTools(server) {
             if (!result.success) {
                 return text(`Cannot reuse agent '${agent_name}': ${result.error || "Unknown error"}. Consider using spawn_agent instead.`);
             }
+            // Bind the board task to the reused agent so the kanban shows the REAL
+            // worker immediately — and overwrite any stale claimedBy left by a
+            // previous owner. Without this, reuse_agent only nudged the PTY and the
+            // task's claimedBy stayed pinned to whoever last auto-claimed it, so the
+            // board showed the wrong/uniform assignee until the agent happened to
+            // call update_task_status. Same pattern as dispatch_task's task binding.
+            if (result.agentId && task_id) {
+                try {
+                    await updateDoc(doc(db, "tasks", task_id), {
+                        claimedBy: result.agentId,
+                        claimedAt: Timestamp.now(),
+                    });
+                }
+                catch (err) {
+                    // Non-fatal — the instruction is already delivered; the board just
+                    // keeps showing the stale assignee. Surface for diagnosis.
+                    console.error("[reuse_agent] Failed to bind task claimedBy:", err);
+                }
+            }
             return text(`Instruction sent to existing agent '${agent_name}'.\n` +
                 `  Agent ID: ${result.agentId}\n` +
+                (task_id ? `  Bound task: ${task_id}\n` : "") +
                 `  Instruction: ${instruction.slice(0, 100)}${instruction.length > 100 ? "..." : ""}`);
         }
         catch (err) {
@@ -1431,7 +1498,7 @@ export function registerTools(server) {
                             ownerId: "orchestrator",
                             name: result.agentName || `${role}-agent`,
                             model: result.model || model || "claude",
-                            role,
+                            role: result.agentRole || role,
                             status: "working",
                             // Link to the board task — the supplied task_id, or the ad-hoc
                             // worktree task the bridge auto-created (result.taskId).
@@ -1480,6 +1547,8 @@ export function registerTools(server) {
                 lines.push(`  Agent ID: ${result.agentId}`);
             if (result.agentName)
                 lines.push(`  Agent Name: ${result.agentName}`);
+            if (result.agentRole)
+                lines.push(`  Agent Role: ${result.agentRole}`);
             if (result.model)
                 lines.push(`  Model: ${result.model}`);
             if (result.score !== undefined)
@@ -1517,6 +1586,9 @@ export function registerTools(server) {
             const result = (await response.json());
             if (!result.success) {
                 return text(`Failed to kill agent '${agent_name}': ${result.error || "Unknown error"}`);
+            }
+            if (result.agentId) {
+                await markAgentStoppedInFirestore(result.agentId);
             }
             return text(`${result.reason}`);
         }
@@ -1563,7 +1635,7 @@ export function registerTools(server) {
             const results = [];
             for (const agent of candidates) {
                 try {
-                    await fetch(`http://127.0.0.1:${bridgePort}/kill-agent`, {
+                    const response = await fetch(`http://127.0.0.1:${bridgePort}/kill-agent`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
@@ -1571,6 +1643,10 @@ export function registerTools(server) {
                             reason: "cleanup",
                         }),
                     });
+                    const result = (await response.json());
+                    if (result.success && result.agentId) {
+                        await markAgentStoppedInFirestore(result.agentId);
+                    }
                     results.push(`${agent.name} (${agent.status})`);
                 }
                 catch {

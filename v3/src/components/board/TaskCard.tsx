@@ -357,7 +357,7 @@ function TaskCardContent({
           <span>
             {task.claimedBy
               ? `👤 ${claimingAgent?.name || task.claimedBy}`
-              : "Unclaimed"}
+              : "미배정"}
           </span>
         </span>
         <span>{timeAgo(task.createdAt)}</span>

@@ -838,6 +838,7 @@ export class BridgeServer {
       let params: {
         agentName: string;
         instruction: string;
+        taskId?: string;
         contextId?: string;
       };
       try {
@@ -908,6 +909,18 @@ export class BridgeServer {
 
         // Write instruction to agent's PTY stdin (split for discrete Enter)
         this.ptyManager.writeAndSubmit(agent.ptySessionId, params.instruction);
+
+        // Rebind the agent to the new task so currentTaskId reverse-map views
+        // (LanesTab, ActivityStreamPanel) and the agent doc point at the task it
+        // is now actually working — not the stale previous one. Mirrors the
+        // dispatch path's syncAgentStatus("working", taskId). Only when a taskId
+        // is supplied; otherwise leave currentTaskId untouched (the idle/stopped
+        // transition in /set-agent-status already clears it on completion).
+        if (params.taskId) {
+          this.agentManager.setStatus(agent.id, "working");
+          this.syncAgentStatus(agent.id, "working", params.taskId);
+        }
+
         console.log(
           `[BridgeServer] Reused agent '${
             params.agentName
