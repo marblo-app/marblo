@@ -9,6 +9,7 @@ import {
   COUPON_RULES_IP,
 } from "./rateLimit";
 import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
+import sgMail from "@sendgrid/mail";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -26,6 +27,16 @@ const PADDLE_API_BASE = "https://api.paddle.com";
 const TOSS_SECRET_KEY = process.env.TOSS_SECRET_KEY!;
 const TOSS_API_BASE = "https://api.tosspayments.com/v1";
 const TOSS_WEBHOOK_SECRET = process.env.TOSS_WEBHOOK_SECRET || "";
+
+// ─── SendGrid (파운더 접근 안내 이메일) ──────────────────────────────
+// 전부 선택값 — 미설정 시 발송만 스킵하고 배포·선정은 정상 동작한다.
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || "";
+const FOUNDER_FROM_EMAIL =
+  process.env.FOUNDER_FROM_EMAIL || "support@marblo.app";
+const FOUNDER_FROM_NAME = process.env.FOUNDER_FROM_NAME || "Marblo";
+const DISCORD_INVITE_URL = process.env.DISCORD_INVITE_URL || ""; // 설정 시에만 초대 링크 노출
+const SITE_BASE = "https://marblo.app";
+const FOUNDER_COURSE_COUPON = "FOUNDER50"; // 강의 50% 할인 쿠폰 코드
 
 const PLAN_PRICES_KRW: Record<string, number> = {
   pro: 19000,
@@ -1038,6 +1049,210 @@ async function grantFounderProInternal(
   return periodEnd;
 }
 
+// ─── 파운더 접근 안내 이메일 (SendGrid) ──────────────────────────────
+//
+// 선정된 파운더에게 ①선정 축하 ②베타 다운로드 ③피드백(필수·3일) ④강의 50%
+// 쿠폰(FOUNDER50) ⑤디스코드(env 있을 때만) 를 ko/en/ja 로 발송한다.
+// 반드시 non-throwing — API 키 미설정/발송 실패 시 console.warn 후 false 반환.
+// (이메일 실패로 선정 자체가 깨지면 안 된다.)
+
+type FounderLocale = "ko" | "en" | "ja";
+
+function normalizeFounderLocale(locale: string): FounderLocale {
+  if (locale === "en" || locale === "ja") return locale;
+  return "ko"; // 알 수 없는 값은 한국어 기본
+}
+
+interface FounderEmailContent {
+  subject: string;
+  html: string;
+  text: string;
+}
+
+function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
+  const downloadUrl = `${SITE_BASE}/${locale}/download`;
+  const feedbackUrl = `${SITE_BASE}/${locale}/founders/feedback`;
+  const coupon = FOUNDER_COURSE_COUPON;
+  const hasDiscord = !!DISCORD_INVITE_URL;
+
+  if (locale === "en") {
+    const discordHtml = hasDiscord
+      ? `<p><a href="${DISCORD_INVITE_URL}" style="color:#4f46e5;font-weight:600">Join the Founders Discord →</a></p>`
+      : `<p style="color:#666">A separate Discord invite will follow shortly.</p>`;
+    const discordText = hasDiscord
+      ? `Join the Founders Discord: ${DISCORD_INVITE_URL}`
+      : `A separate Discord invite will follow shortly.`;
+    return {
+      subject: "🎉 You're a Marblo Founder — Access Details Inside",
+      html: founderHtmlShell(`
+        <h1 style="font-size:22px;margin:0 0 16px">🎉 Welcome, Founder!</h1>
+        <p>You've been selected as one of our founding members. Founders shape Marblo from day one — thank you for joining us.</p>
+        <h2 style="font-size:17px;margin:24px 0 8px">1. Get the beta</h2>
+        <p>Download Marblo here: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
+        <h2 style="font-size:17px;margin:24px 0 8px">2. Feedback (required, within 3 days)</h2>
+        <p>Please submit your feedback within <strong>3 days</strong>: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
+        Submitting earns you <strong>3 months of Pro free</strong> (6 months if you also do a short interview).</p>
+        <h2 style="font-size:17px;margin:24px 0 8px">3. 50% off the course</h2>
+        <p>Use coupon code <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> at checkout for <strong>50% off</strong> the Marblo course — double the 25% early-bird discount.</p>
+        <h2 style="font-size:17px;margin:24px 0 8px">4. Community</h2>
+        ${discordHtml}
+      `),
+      text: [
+        "Welcome, Founder!",
+        "",
+        "You've been selected as one of our founding members.",
+        "",
+        `1. Get the beta: ${downloadUrl}`,
+        "",
+        `2. Feedback (required, within 3 days): ${feedbackUrl}`,
+        "   Submitting earns 3 months of Pro free (6 months with an interview).",
+        "",
+        `3. 50% off the course — coupon code: ${coupon} (double the 25% early-bird discount).`,
+        "",
+        `4. ${discordText}`,
+      ].join("\n"),
+    };
+  }
+
+  if (locale === "ja") {
+    const discordHtml = hasDiscord
+      ? `<p><a href="${DISCORD_INVITE_URL}" style="color:#4f46e5;font-weight:600">ファウンダー Discord に参加する →</a></p>`
+      : `<p style="color:#666">Discord の招待は追ってご案内します。</p>`;
+    const discordText = hasDiscord
+      ? `ファウンダー Discord: ${DISCORD_INVITE_URL}`
+      : `Discord の招待は追ってご案内します。`;
+    return {
+      subject: "🎉 Marblo ファウンダーに選ばれました — アクセス案内",
+      html: founderHtmlShell(`
+        <h1 style="font-size:22px;margin:0 0 16px">🎉 ファウンダー選定おめでとうございます！</h1>
+        <p>あなたは Marblo のファウンダーに選ばれました。ファウンダーは初日から Marblo を形づくる存在です。ご参加ありがとうございます。</p>
+        <h2 style="font-size:17px;margin:24px 0 8px">1. ベータ版を入手</h2>
+        <p>こちらからダウンロード: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
+        <h2 style="font-size:17px;margin:24px 0 8px">2. フィードバック（必須・3日以内）</h2>
+        <p><strong>3日以内</strong>にご提出ください: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
+        提出すると <strong>Pro 3ヶ月無料</strong>（インタビューに応じると6ヶ月）。</p>
+        <h2 style="font-size:17px;margin:24px 0 8px">3. 講座 50% 割引</h2>
+        <p>チェックアウトでクーポンコード <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> を入力すると講座が <strong>50% OFF</strong> — アーリーバード 25% の2倍です。</p>
+        <h2 style="font-size:17px;margin:24px 0 8px">4. コミュニティ</h2>
+        ${discordHtml}
+      `),
+      text: [
+        "ファウンダー選定おめでとうございます！",
+        "",
+        "あなたは Marblo のファウンダーに選ばれました。",
+        "",
+        `1. ベータ版を入手: ${downloadUrl}`,
+        "",
+        `2. フィードバック（必須・3日以内）: ${feedbackUrl}`,
+        "   提出すると Pro 3ヶ月無料（インタビューで6ヶ月）。",
+        "",
+        `3. 講座 50% 割引 — クーポンコード: ${coupon}（アーリーバード 25% の2倍）。`,
+        "",
+        `4. ${discordText}`,
+      ].join("\n"),
+    };
+  }
+
+  // 기본: 한국어
+  const discordHtml = hasDiscord
+    ? `<p><a href="${DISCORD_INVITE_URL}" style="color:#4f46e5;font-weight:600">파운더 디스코드 참여하기 →</a></p>`
+    : `<p style="color:#666">디스코드 초대는 곧 별도로 안내드리겠습니다.</p>`;
+  const discordText = hasDiscord
+    ? `파운더 디스코드: ${DISCORD_INVITE_URL}`
+    : `디스코드 초대는 곧 별도로 안내드리겠습니다.`;
+  return {
+    subject: "🎉 마블로 파운더로 선정되셨습니다 — 접근 안내",
+    html: founderHtmlShell(`
+      <h1 style="font-size:22px;margin:0 0 16px">🎉 파운더로 선정되셨습니다!</h1>
+      <p>마블로의 파운더로 선정되신 것을 축하드립니다. 파운더는 첫날부터 마블로를 함께 만들어가는 분들입니다. 함께해 주셔서 감사합니다.</p>
+      <h2 style="font-size:17px;margin:24px 0 8px">1. 베타 접근</h2>
+      <p>여기에서 마블로를 다운로드하세요: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
+      <h2 style="font-size:17px;margin:24px 0 8px">2. 피드백 (필수, 3일 이내)</h2>
+      <p><strong>3일 이내</strong>에 피드백을 제출해 주세요: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
+      제출하시면 <strong>Pro 3개월</strong>을 무료로 드립니다 (인터뷰까지 참여 시 6개월).</p>
+      <h2 style="font-size:17px;margin:24px 0 8px">3. 강의 50% 할인 쿠폰</h2>
+      <p>체크아웃에서 쿠폰 코드 <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> 를 입력하시면 강의가 <strong>50% 할인</strong>됩니다 — 얼리버드 25%의 2배 혜택입니다.</p>
+      <h2 style="font-size:17px;margin:24px 0 8px">4. 커뮤니티</h2>
+      ${discordHtml}
+    `),
+    text: [
+      "파운더로 선정되셨습니다!",
+      "",
+      "마블로의 파운더로 선정되신 것을 축하드립니다.",
+      "",
+      `1. 베타 접근(다운로드): ${downloadUrl}`,
+      "",
+      `2. 피드백 (필수, 3일 이내): ${feedbackUrl}`,
+      "   제출 시 Pro 3개월 무료 (인터뷰까지 참여 시 6개월).",
+      "",
+      `3. 강의 50% 할인 — 쿠폰 코드: ${coupon} (얼리버드 25%의 2배).`,
+      "",
+      `4. ${discordText}`,
+    ].join("\n"),
+  };
+}
+
+// 공통 HTML 래퍼 (간단·인라인 스타일).
+function founderHtmlShell(inner: string): string {
+  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f6f6f6">
+  <div style="max-width:560px;margin:0 auto;padding:32px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a;background:#ffffff">
+    ${inner}
+    <hr style="border:none;border-top:1px solid #eee;margin:32px 0 16px"/>
+    <p style="font-size:12px;color:#999;margin:0">Marblo · support@marblo.app</p>
+  </div></body></html>`;
+}
+
+/**
+ * 파운더 접근 안내 이메일 발송. 반드시 non-throwing.
+ * - SENDGRID_API_KEY 미설정 시 console.warn 후 false 반환(스킵).
+ * - 발송 성공 시 true, 그 외 false.
+ */
+async function sendFounderAccessEmail(
+  email: string,
+  locale: string
+): Promise<boolean> {
+  try {
+    if (!SENDGRID_API_KEY) {
+      console.warn(
+        "[founder-email] SENDGRID_API_KEY 미설정 — 발송 스킵:",
+        email
+      );
+      return false;
+    }
+    sgMail.setApiKey(SENDGRID_API_KEY);
+    const content = buildFounderAccessEmail(normalizeFounderLocale(locale));
+    await sgMail.send({
+      to: email,
+      from: { email: FOUNDER_FROM_EMAIL, name: FOUNDER_FROM_NAME },
+      subject: content.subject,
+      text: content.text,
+      html: content.html,
+    });
+    return true;
+  } catch (err) {
+    console.warn("[founder-email] 발송 실패:", email, err);
+    return false;
+  }
+}
+
+// waitlist 에서 해당 이메일의 locale 을 조회(없으면 'ko').
+async function lookupFounderLocale(email: string): Promise<string> {
+  try {
+    const snap = await db
+      .collection("betatester50_waitlist")
+      .where("email", "==", email)
+      .limit(1)
+      .get();
+    if (!snap.empty) {
+      const loc = snap.docs[0].data()?.locale;
+      if (typeof loc === "string" && loc) return loc;
+    }
+  } catch (err) {
+    console.warn("[founder-email] locale 조회 실패:", email, err);
+  }
+  return "ko";
+}
+
 // 파운더 선정 (관리자용) — waitlist 이메일을 founders 로 승격.
 // accessGrantedAt 이 3일 피드백 윈도우의 기준. resetWindow=true 면 윈도우 재시작.
 export const markFounderSelected = functions.https.onCall(
@@ -1071,7 +1286,46 @@ export const markFounderSelected = functions.https.onCall(
       update.accessGrantedAt = admin.firestore.FieldValue.serverTimestamp();
     }
     await ref.set(update, { merge: true });
-    return { ok: true, email };
+
+    // 선정 직후 접근 안내 이메일 자동 발송. 이메일 실패가 선정을 깨면 안 되므로
+    // sendFounderAccessEmail 은 non-throwing 이고 결과만 기록한다.
+    const locale = await lookupFounderLocale(email);
+    const emailSent = await sendFounderAccessEmail(email, locale);
+    await ref.set(
+      {
+        accessEmailSent: emailSent,
+        accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return { ok: true, email, emailSent };
+  }
+);
+
+// 파운더 접근 안내 이메일 재발송 (관리자용) — /admin 에서 수동 재발송용.
+export const resendFounderAccessEmail = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const email =
+      typeof data?.email === "string" ? normalizeEmail(data.email) : "";
+    if (!email) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "email required"
+      );
+    }
+    const locale = await lookupFounderLocale(email);
+    const emailSent = await sendFounderAccessEmail(email, locale);
+    await db.collection("founders").doc(email).set(
+      {
+        accessEmailSent: emailSent,
+        accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return { ok: true, emailSent };
   }
 );
 

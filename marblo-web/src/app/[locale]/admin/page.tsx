@@ -16,6 +16,7 @@ import {
   UserCheck,
   Award,
   MessageSquare,
+  Mail,
   X,
 } from "lucide-react";
 
@@ -60,7 +61,7 @@ type CallableError = { code?: string; message?: string };
 
 function mapError(
   err: CallableError,
-  kind: "select" | "interview" | "list"
+  kind: "select" | "interview" | "list" | "resend"
 ): string {
   const code = err?.code || "";
   if (code === "functions/permission-denied") {
@@ -122,6 +123,10 @@ export default function AdminPage() {
   const [founders, setFounders] = useState<FounderEntry[]>([]);
   const [foundersLoading, setFoundersLoading] = useState(true);
   const [foundersError, setFoundersError] = useState<string | null>(null);
+
+  // 접근 이메일 재발송 state (이메일 키)
+  const [resending, setResending] = useState<Record<string, boolean>>({});
+  const [resendMsg, setResendMsg] = useState<Record<string, string>>({});
 
   // 피드백 열람 모달 state
   const [fbOpen, setFbOpen] = useState(false);
@@ -269,6 +274,34 @@ export default function AdminPage() {
       setInterviewLoading(false);
     }
   }, [interviewEmail]);
+
+  // 접근 안내 이메일 재발송 (resendFounderAccessEmail).
+  const handleResend = useCallback(async (email: string) => {
+    if (!email) return;
+    setResending((s) => ({ ...s, [email]: true }));
+    setResendMsg((m) => ({ ...m, [email]: "" }));
+    try {
+      const functions = getFunctions(app, "us-central1");
+      const fn = httpsCallable<unknown, { ok: boolean; emailSent: boolean }>(
+        functions,
+        "resendFounderAccessEmail"
+      );
+      const res = await fn({ email });
+      setResendMsg((m) => ({
+        ...m,
+        [email]: res.data?.emailSent
+          ? "재발송 완료"
+          : "발송 스킵(이메일 미설정)",
+      }));
+    } catch (err: unknown) {
+      setResendMsg((m) => ({
+        ...m,
+        [email]: mapError(err as CallableError, "resend"),
+      }));
+    } finally {
+      setResending((s) => ({ ...s, [email]: false }));
+    }
+  }, []);
 
   // Auth loading
   if (authLoading) {
@@ -472,6 +505,7 @@ export default function AdminPage() {
                     <th className="py-2 pr-4 font-medium">피드백제출</th>
                     <th className="py-2 pr-4 font-medium">인터뷰</th>
                     <th className="py-2 pr-4 font-medium">Pro개월</th>
+                    <th className="py-2 pr-4 font-medium">접근이메일</th>
                     <th className="py-2 font-medium text-right">피드백</th>
                   </tr>
                 </thead>
@@ -496,6 +530,27 @@ export default function AdminPage() {
                       </td>
                       <td className="py-3 pr-4 text-zinc-300">
                         {f.proGrantedMonths ?? 0}
+                      </td>
+                      <td className="py-3 pr-4">
+                        <div className="flex flex-col gap-1">
+                          <button
+                            onClick={() => handleResend(f.email)}
+                            disabled={!!resending[f.email]}
+                            className="inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-100 px-3 py-1.5 rounded-lg text-xs font-medium transition w-fit"
+                          >
+                            {resending[f.email] ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Mail className="w-3.5 h-3.5" />
+                            )}
+                            재발송
+                          </button>
+                          {resendMsg[f.email] && (
+                            <span className="text-xs text-zinc-400">
+                              {resendMsg[f.email]}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 text-right">
                         {f.hasFeedback ? (
