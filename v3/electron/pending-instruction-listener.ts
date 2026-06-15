@@ -15,6 +15,38 @@ import { PtyManager } from "./pty-manager";
 
 const NAMED_APP = "pending-instruction-listener";
 
+/**
+ * 프로세스 수명 동안 같은 지시 doc 을 두 번 PTY 로 주입하지 않게 하는 in-process
+ * 멱등 가드. 처음 보는 `id` 면 기록하고 true(=이번에 전달), 이후 호출엔 false.
+ *
+ * 왜 필요한가: 에이전트가 재시작되면 setAgentSpawnedHook 이 detach→attach 를
+ * 다시 부르고, 새 onSnapshot 의 "초기 스냅샷"은 현재 매칭되는(isDelivered==false)
+ * 모든 doc 을 type:"added" 로 한꺼번에 재방출한다. Firestore 의 latency
+ * compensation 이 같은 앱 인스턴스 내에선 직전 tx.update(isDelivered:true) 를
+ * 로컬 캐시에 즉시 반영해 주긴 하지만 — (a) 캐시 비활성/지연, (b) 향후 두 번째
+ * attach 경로/별도 Firestore 앱 추가, (c) 같은 스냅샷 틱 내 중복 added — 같은
+ * 회귀 벡터가 생기면 "터미널 재오픈/에이전트 재시작 시 재주입"이 되살아난다.
+ * Firestore 트랜잭션은 교차-프로세스 once-only 의 durable 보증이고, 이 Set 은
+ * in-process re-attach 재주입 창을 닫는 belt-and-suspenders 다.
+ *
+ * `max` 를 넘으면 가장 오래된 id 부터 FIFO 로 비운다(장수 프로세스의 무한 증식
+ * 방지). 비워진 id 는 durable 한 Firestore isDelivered 플래그가 계속 막아준다.
+ */
+export function claimDeliveryOnce(
+  seen: Set<string>,
+  id: string,
+  max = 5000,
+): boolean {
+  if (seen.has(id)) return false;
+  seen.add(id);
+  if (seen.size > max) {
+    // Set 은 삽입 순서를 보존하므로 첫 값이 가장 오래된 id.
+    const oldest = seen.values().next().value;
+    if (oldest !== undefined) seen.delete(oldest);
+  }
+  return true;
+}
+
 function getDb(): Firestore {
   const config = {
     apiKey:
@@ -63,6 +95,9 @@ export class PendingInstructionListener {
   private db: Firestore;
   private unsubscribers: Map<string, Unsubscribe> = new Map();
   private ptyManager: PtyManager;
+  // 프로세스 수명 멱등 가드 — 이미 PTY 로 주입한 지시 doc id 집합. re-attach
+  // (에이전트 재시작) 초기 스냅샷이 같은 doc 을 다시 added 로 올려도 재주입 0.
+  private deliveredDocIds: Set<string> = new Set();
 
   constructor(ptyManager: PtyManager) {
     this.db = getDb();
@@ -80,7 +115,7 @@ export class PendingInstructionListener {
     const q = query(
       collection(this.db, "pendingInstructions"),
       where("targetAgentId", "==", agentId),
-      where("isDelivered", "==", false)
+      where("isDelivered", "==", false),
     );
 
     const unsub = onSnapshot(
@@ -108,14 +143,14 @@ export class PendingInstructionListener {
       (err) => {
         console.warn(
           `[PendingInstructionListener] subscribe error for agent ${agentId}:`,
-          err
+          err,
         );
-      }
+      },
     );
 
     this.unsubscribers.set(agentId, unsub);
     console.log(
-      `[PendingInstructionListener] attached agent=${agentId} pty=${ptySessionId}`
+      `[PendingInstructionListener] attached agent=${agentId} pty=${ptySessionId}`,
     );
   }
 
@@ -139,11 +174,16 @@ export class PendingInstructionListener {
 
   private async deliver(
     docSnap: DocumentSnapshot,
-    ptySessionId: string
+    ptySessionId: string,
   ): Promise<void> {
     const ref = docSnap.ref;
     let message = "";
     let won = false;
+
+    // In-process 멱등: 이번 프로세스에서 이미 주입한 doc 이면 즉시 중단(재주입 0).
+    // durable 보증은 아래 트랜잭션의 isDelivered 플래그가, in-process re-attach
+    // 재주입 창은 이 가드가 막는다. claimDeliveryOnce 는 "처음 본 것"일 때만 true.
+    if (this.deliveredDocIds.has(ref.id)) return;
 
     try {
       won = await runTransaction(this.db, async (tx) => {
@@ -161,16 +201,21 @@ export class PendingInstructionListener {
     } catch (err) {
       console.warn(
         `[PendingInstructionListener] delivery txn failed for ${ref.id}:`,
-        err
+        err,
       );
       return;
     }
 
     if (!won) return;
 
+    // 트랜잭션을 우리가 이겼다 = 우리가 전달 책임자. in-process 가드에 기록해
+    // re-attach 초기 스냅샷이 같은 doc 을 다시 올려도 두 번 주입하지 않는다.
+    // (트랜잭션 실패/미승리 시엔 기록하지 않아 정당한 재시도를 막지 않는다.)
+    claimDeliveryOnce(this.deliveredDocIds, ref.id);
+
     if (!message) {
       console.warn(
-        `[PendingInstructionListener] empty message for ${ref.id} — skip PTY inject`
+        `[PendingInstructionListener] empty message for ${ref.id} — skip PTY inject`,
       );
       return;
     }
@@ -180,8 +225,8 @@ export class PendingInstructionListener {
       console.log(
         `[PendingInstructionListener] injected to pty=${ptySessionId}: ${message.slice(
           0,
-          80
-        )}`
+          80,
+        )}`,
       );
     } catch (err) {
       // PTY injection failed AFTER we already marked delivered. Don't
@@ -190,7 +235,7 @@ export class PendingInstructionListener {
       // can re-issue the instruction manually.
       console.error(
         `[PendingInstructionListener] PTY inject failed for ${ref.id} (already marked delivered):`,
-        err
+        err,
       );
     }
   }
