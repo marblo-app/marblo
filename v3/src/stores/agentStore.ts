@@ -17,6 +17,14 @@ function toAgent(raw: Record<string, unknown>): Agent {
   return convertTimestamps<Agent>(raw, DATE_FIELDS);
 }
 
+function dedupeAgentsById(agents: Agent[]): Agent[] {
+  const byId = new Map<string, Agent>();
+  for (const agent of agents) {
+    byId.set(agent.id, agent);
+  }
+  return Array.from(byId.values());
+}
+
 interface AgentState {
   agents: Agent[];
   loading: boolean;
@@ -48,7 +56,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       COLLECTION,
       [where("projectId", "==", projectId)],
       (docs) => {
-        set({ agents: docs.map(toAgent), loading: false });
+        set({ agents: dedupeAgentsById(docs.map(toAgent)), loading: false });
       }
     );
   },

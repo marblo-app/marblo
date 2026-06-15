@@ -126,7 +126,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
       const id = await createTerminalSession(
         `Terminal ${terminalSpawnCounter}`
       );
-      setFocusedId(id);
+      setFocusedId(`terminal:${id}`);
     } catch (err) {
       console.error("[AgentListPanel] Failed to spawn terminal:", err);
       terminalSpawnCounter--;
@@ -184,7 +184,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
     const shellRows: AgentRowData[] = sessions
       .filter((s) => !s.isAgent)
       .map((s) => ({
-        id: s.id,
+        id: `terminal:${s.id}`,
         vendor: "internal" as VendorKind,
         displayName: s.name,
         taskId: null,
