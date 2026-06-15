@@ -193,10 +193,16 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
           </div>
         )}
 
-        <ConnectionStatusPanel />
+        {/* Connection panel is capped so a fully-populated connection (status
+            grid + MCP table + check results) can't grow tall enough to squeeze
+            the flex-1 catalog list below it to zero height. shrink-0 keeps it
+            from collapsing; max-h + its own scroll bounds its footprint. */}
+        <div className="max-h-[40%] flex-shrink-0 overflow-y-auto">
+          <ConnectionStatusPanel />
+        </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {filtered.length === 0 && (
             <p className="text-center text-sm text-[#6c7086]">
               표시할 패키지가 없습니다.
