@@ -6,6 +6,9 @@ import * as path from "node:path";
 import {
   ConnectionStore,
   deriveGitRepoMeta,
+  parseGitHubRepoSlug,
+  normalizeGitUrl,
+  repoUrlsMatch,
   type ProjectConnection,
 } from "../../electron/connection-store";
 
@@ -274,5 +277,106 @@ describe("deriveGitRepoMeta", () => {
     const meta = await deriveGitRepoMeta(repoRoot);
     expect(meta.repoUrl).toBeNull(); // no origin remote
     expect(meta.defaultBranch).toBe("trunk"); // current-branch fallback
+  });
+});
+
+describe("parseGitHubRepoSlug", () => {
+  it("parses https form (with/without .git, trailing slash)", () => {
+    expect(parseGitHubRepoSlug("https://github.com/owner/repo")).toBe(
+      "owner/repo",
+    );
+    expect(parseGitHubRepoSlug("https://github.com/owner/repo.git")).toBe(
+      "owner/repo",
+    );
+    expect(parseGitHubRepoSlug("https://github.com/owner/repo/")).toBe(
+      "owner/repo",
+    );
+  });
+
+  it("parses ssh (scp) form", () => {
+    expect(parseGitHubRepoSlug("git@github.com:owner/repo.git")).toBe(
+      "owner/repo",
+    );
+  });
+
+  it("preserves case in the returned slug", () => {
+    expect(parseGitHubRepoSlug("https://github.com/Owner/Repo")).toBe(
+      "Owner/Repo",
+    );
+  });
+
+  it("returns null for non-github hosts and bad input", () => {
+    expect(parseGitHubRepoSlug("https://gitlab.com/owner/repo")).toBeNull();
+    expect(parseGitHubRepoSlug("not a url")).toBeNull();
+    expect(parseGitHubRepoSlug(null)).toBeNull();
+    expect(parseGitHubRepoSlug(undefined)).toBeNull();
+    expect(parseGitHubRepoSlug("")).toBeNull();
+  });
+});
+
+describe("normalizeGitUrl", () => {
+  it("normalizes https/ssh of the same self-hosted repo to one form", () => {
+    expect(normalizeGitUrl("https://git.example.com/Team/Proj.git")).toBe(
+      "git.example.com/team/proj",
+    );
+    expect(normalizeGitUrl("git@git.example.com:Team/Proj.git")).toBe(
+      "git.example.com/team/proj",
+    );
+  });
+
+  it("returns null for junk", () => {
+    expect(normalizeGitUrl("nonsense")).toBeNull();
+    expect(normalizeGitUrl(null)).toBeNull();
+    expect(normalizeGitUrl("")).toBeNull();
+  });
+});
+
+describe("repoUrlsMatch", () => {
+  it("matches the same GitHub repo across protocol/case/.git/slash variants", () => {
+    expect(
+      repoUrlsMatch(
+        "git@github.com:Owner/Repo.git",
+        "https://github.com/owner/repo/",
+      ),
+    ).toBe(true);
+  });
+
+  it("flags different GitHub repos as a mismatch", () => {
+    expect(
+      repoUrlsMatch(
+        "https://github.com/owner/repo",
+        "https://github.com/owner/other",
+      ),
+    ).toBe(false);
+  });
+
+  it("falls back to generic normalization for non-github hosts", () => {
+    expect(
+      repoUrlsMatch(
+        "git@git.example.com:team/proj.git",
+        "https://git.example.com/team/proj",
+      ),
+    ).toBe(true);
+    expect(
+      repoUrlsMatch(
+        "https://git.example.com/team/proj",
+        "https://git.example.com/team/other",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not cross-match github and a same-named self-hosted repo", () => {
+    expect(
+      repoUrlsMatch(
+        "https://github.com/owner/repo",
+        "https://gitlab.com/owner/repo",
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false when either side is missing/unparseable", () => {
+    expect(repoUrlsMatch(null, "https://github.com/owner/repo")).toBe(false);
+    expect(repoUrlsMatch("https://github.com/owner/repo", "")).toBe(false);
+    expect(repoUrlsMatch("junk", "also junk")).toBe(false);
   });
 });

@@ -289,6 +289,91 @@ export async function deriveGitRepoMeta(
   return meta;
 }
 
+// ─── origin ↔ 저장 repoUrl 일치 검증(순수 함수) ──────────────────────
+// 저장된 repoUrl 이 실제 로컬 git origin 과 다른 repo 를 가리키면 잘못된 repo 에
+// 작업할 위험이 있다. connection:check 가 `git remote get-url origin` 결과와
+// 저장 repoUrl 을 아래 순수 비교 함수로 대조해 'mismatch' 를 표시한다.
+
+/**
+ * GitHub repo URL → "owner/repo" 슬러그. https/ssh 양식 모두 지원하고
+ * `.git` 접미(대소문자 무시)·끝 슬래시를 제거한다. github.com 이 아니거나
+ * 형식이 아니면 null. main.ts 연결 체크가 `gh` 명령 인자로도 재사용하므로
+ * (표시/명령용) 슬러그의 대소문자는 보존한다 — 비교는 호출부에서 무시한다.
+ */
+export function parseGitHubRepoSlug(
+  repoUrl: string | null | undefined,
+): string | null {
+  if (!repoUrl) return null;
+  const trimmed = repoUrl
+    .trim()
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "");
+  const sshMatch = trimmed.match(/^git@github\.com:([^/]+\/[^/]+)$/i);
+  if (sshMatch) return sshMatch[1];
+
+  try {
+    const url = new URL(trimmed);
+    if (url.hostname.toLowerCase() !== "github.com") return null;
+    const parts = url.pathname.replace(/^\/+/, "").split("/");
+    if (parts.length < 2 || !parts[0] || !parts[1]) return null;
+    return `${parts[0]}/${parts[1]}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 임의 git remote URL 을 비교용 정규형으로 — `host/owner/repo` 소문자,
+ * 프로토콜·credential(user@)·`.git`·끝 슬래시 제거. GitHub 이 아닌
+ * self-hosted 호스트에도 동작하는 폴백 정규화. 못 구하면 null.
+ */
+export function normalizeGitUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const s = url
+    .trim()
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "");
+  if (!s) return null;
+
+  // scp-like 양식: [user@]host:owner/repo (URL 로 파싱되지 않음)
+  const scp = s.match(/^[^@\s/]+@([^:\s]+):(.+)$/);
+  if (scp) {
+    const host = scp[1];
+    const repoPath = scp[2].replace(/^\/+/, "");
+    if (!repoPath) return null;
+    return `${host}/${repoPath}`.toLowerCase();
+  }
+
+  try {
+    const u = new URL(s);
+    const host = u.hostname;
+    const repoPath = u.pathname.replace(/^\/+/, "");
+    if (!host || !repoPath) return null;
+    return `${host}/${repoPath}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 두 git remote URL 이 같은 repo 를 가리키는지(순수 비교). 먼저 GitHub
+ * 슬러그로 대조하고(대소문자 무시), 양쪽 다 GitHub 슬러그가 아니면 generic
+ * host/path 정규화로 폴백한다. 한쪽이라도 정규화 불가면 false.
+ */
+export function repoUrlsMatch(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const slugA = parseGitHubRepoSlug(a);
+  const slugB = parseGitHubRepoSlug(b);
+  if (slugA && slugB) return slugA.toLowerCase() === slugB.toLowerCase();
+
+  const normA = normalizeGitUrl(a);
+  const normB = normalizeGitUrl(b);
+  if (!normA || !normB) return false;
+  return normA === normB;
+}
+
 // ─── 기본 싱글톤 + 모듈 레벨 편의 함수 ───────────────────────────────
 // 태스크가 명시한 이름(getProjectConnection / upsertProjectConnection)을
 // 기본 store 인스턴스 위에 노출한다. main.ts·T2·T3 는 이 함수들만 쓰면 된다.

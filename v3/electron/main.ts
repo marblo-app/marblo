@@ -79,6 +79,8 @@ import {
   setAccessMode,
   removeConnection,
   withAvailableMcps,
+  parseGitHubRepoSlug,
+  repoUrlsMatch,
   type ProjectConnectionInput,
   type AccessMode,
 } from "./connection-store";
@@ -86,7 +88,7 @@ import {
 type ConnectionCheckStatus = "pass" | "warn" | "fail";
 
 interface ConnectionCheckItem {
-  id: "repo" | "branch" | "issues" | "pullRequest" | "auth";
+  id: "repo" | "branch" | "issues" | "pullRequest" | "auth" | "mismatch";
   label: string;
   status: ConnectionCheckStatus;
   detail: string;
@@ -1745,22 +1747,8 @@ function makeConnectionCheckItem(
   return { id, label, status, detail };
 }
 
-function parseGitHubRepoSlug(repoUrl: string | null): string | null {
-  if (!repoUrl) return null;
-  const trimmed = repoUrl.trim().replace(/\.git$/, "");
-  const sshMatch = trimmed.match(/^git@github\.com:([^/]+\/[^/]+)$/i);
-  if (sshMatch) return sshMatch[1];
-
-  try {
-    const url = new URL(trimmed);
-    if (url.hostname !== "github.com") return null;
-    const parts = url.pathname.replace(/^\/+/, "").split("/");
-    if (parts.length < 2 || !parts[0] || !parts[1]) return null;
-    return `${parts[0]}/${parts[1]}`;
-  } catch {
-    return null;
-  }
-}
+// parseGitHubRepoSlug / repoUrlsMatch 는 connection-store 의 단일 진실원에서
+// import 한다(origin↔repoUrl 일치 비교와 동일 로직 재사용).
 
 function runConnectionCheckCommand(
   command: string,
@@ -1890,6 +1878,65 @@ async function checkProjectConnectionHealth(
     /github/i.test(mcp),
   );
   const items: ConnectionCheckItem[] = [];
+
+  // origin mismatch — 로컬 git origin 이 저장된 repoUrl 과 같은 repo 를
+  // 가리키는지 검증. 불일치면 잘못된 repo 에 작업할 위험이므로 fail 로 표시한다.
+  if (!cwd) {
+    items.push(
+      makeConnectionCheckItem(
+        "mismatch",
+        "Repo match",
+        "warn",
+        "로컬 경로가 없어 origin 일치 여부를 확인할 수 없습니다.",
+      ),
+    );
+  } else {
+    const origin = await runConnectionCheckCommand(
+      "git",
+      ["remote", "get-url", "origin"],
+      cwd,
+    );
+    const localOrigin = origin.code === 0 ? origin.stdout.trim() : "";
+    if (!connection.repoUrl) {
+      items.push(
+        makeConnectionCheckItem(
+          "mismatch",
+          "Repo match",
+          "warn",
+          "저장된 repo URL이 없어 로컬 origin과 비교할 수 없습니다.",
+        ),
+      );
+    } else if (!localOrigin) {
+      items.push(
+        makeConnectionCheckItem(
+          "mismatch",
+          "Repo match",
+          "warn",
+          "로컬 git origin을 확인하지 못해 일치 여부를 비교할 수 없습니다.",
+        ),
+      );
+    } else if (repoUrlsMatch(localOrigin, connection.repoUrl)) {
+      items.push(
+        makeConnectionCheckItem(
+          "mismatch",
+          "Repo match",
+          "pass",
+          `로컬 origin이 저장된 repo와 일치합니다 (${
+            parseGitHubRepoSlug(connection.repoUrl) ?? connection.repoUrl
+          }).`,
+        ),
+      );
+    } else {
+      items.push(
+        makeConnectionCheckItem(
+          "mismatch",
+          "Repo match",
+          "fail",
+          `로컬 origin(${localOrigin})이 저장된 repo URL(${connection.repoUrl})과 다릅니다. 잘못된 repo에 작업할 위험이 있습니다.`,
+        ),
+      );
+    }
+  }
 
   const auth = await runConnectionCheckCommand(
     "gh",

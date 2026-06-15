@@ -133,7 +133,7 @@ export function ConnectionStatusPanel() {
   const [applyingAccess, setApplyingAccess] = useState(false);
   const [removingConnection, setRemovingConnection] = useState(false);
   const [checkResult, setCheckResult] = useState<ConnectionCheckResult | null>(
-    null
+    null,
   );
 
   const loadConnection = useCallback(async () => {
@@ -155,7 +155,7 @@ export function ConnectionStatusPanel() {
       setAgents(nextAgents);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 상태를 불러오지 못했습니다."
+        err instanceof Error ? err.message : "연결 상태를 불러오지 못했습니다.",
       );
     } finally {
       setLoading(false);
@@ -187,7 +187,7 @@ export function ConnectionStatusPanel() {
       await loadConnection();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 생성에 실패했습니다."
+        err instanceof Error ? err.message : "연결 생성에 실패했습니다.",
       );
     } finally {
       setConnecting(false);
@@ -196,7 +196,7 @@ export function ConnectionStatusPanel() {
 
   const activeAgents = useMemo(
     () => agents.filter((agent) => agent.status !== "stopped"),
-    [agents]
+    [agents],
   );
 
   const handleCheck = async () => {
@@ -206,13 +206,13 @@ export function ConnectionStatusPanel() {
     setCheckResult(null);
     try {
       const result = await window.electronAPI.connection.check(
-        currentProject.id
+        currentProject.id,
       );
       setCheckResult(result);
       await loadConnection();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 확인에 실패했습니다."
+        err instanceof Error ? err.message : "연결 확인에 실패했습니다.",
       );
     } finally {
       setChecking(false);
@@ -233,7 +233,7 @@ export function ConnectionStatusPanel() {
       await loadConnection();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "권한 적용에 실패했습니다."
+        err instanceof Error ? err.message : "권한 적용에 실패했습니다.",
       );
     } finally {
       setApplyingAccess(false);
@@ -245,7 +245,7 @@ export function ConnectionStatusPanel() {
     if (!projectId || !connection) return;
 
     const confirmed = window.confirm(
-      "현재 프로젝트의 repo 연결을 해제하시겠습니까?"
+      "현재 프로젝트의 repo 연결을 해제하시겠습니까?",
     );
     if (!confirmed) return;
 
@@ -258,7 +258,7 @@ export function ConnectionStatusPanel() {
       setAccessModeDraft("read");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 해제에 실패했습니다."
+        err instanceof Error ? err.message : "연결 해제에 실패했습니다.",
       );
     } finally {
       setRemovingConnection(false);
@@ -493,6 +493,28 @@ export function ConnectionStatusPanel() {
                   {checkResult.ok ? "정상" : "확인 필요"}
                 </span>
               </div>
+              {(() => {
+                // 'Repo match' 항목이 실패면 = 로컬 origin ↔ 저장 repoUrl 불일치.
+                // 잘못된 repo 에 작업할 위험이라 항목 그리드 위에 눈에 띄는
+                // 'Repo Mismatch' 배지·원인을 별도로 띄운다(기존 렌더링 확장).
+                const mismatch = checkResult.items.find(
+                  (it) => it.label === "Repo match" && it.status === "fail",
+                );
+                if (!mismatch) return null;
+                return (
+                  <div className="mb-2 flex items-start gap-2 rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-3 py-2">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#f38ba8]" />
+                    <div className="min-w-0">
+                      <span className="inline-flex items-center rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#f38ba8]">
+                        Repo Mismatch
+                      </span>
+                      <p className="mt-1 text-[11px] leading-4 text-[#f38ba8]">
+                        {mismatch.detail}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="grid gap-2 md:grid-cols-2">
                 {checkResult.items.map((item) => {
                   const style = CHECK_STATUS_STYLE[item.status];
@@ -549,7 +571,7 @@ function ManualConnectForm({
     const trimmedUrl = repoUrl.trim();
     if (!isValidRepoUrl(trimmedUrl)) {
       setError(
-        "올바른 repo URL 형식이 아닙니다. 예: https://github.com/owner/repo 또는 git@github.com:owner/repo.git"
+        "올바른 repo URL 형식이 아닙니다. 예: https://github.com/owner/repo 또는 git@github.com:owner/repo.git",
       );
       return;
     }
@@ -566,7 +588,7 @@ function ManualConnectForm({
       await onConnected();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "수동 연결에 실패했습니다."
+        err instanceof Error ? err.message : "수동 연결에 실패했습니다.",
       );
     } finally {
       setSubmitting(false);
