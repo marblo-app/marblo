@@ -790,3 +790,146 @@ describe("dispatchTask — simple→antigravity routing (§C)", () => {
     expect(spawned.every((a) => a.model !== "antigravity")).toBe(true);
   });
 });
+
+// ── [레인-dispatch] 명시 모델이 reuse/restart 후보를 하드필터 (증상①) ──────
+//
+// 사용자 보고(레인 경로 증상①): "태스크를 codex 로 명시 지정해도 새 codex 가
+// 안 뜨고 기존 다른 모델(심지어 claude) idle 에이전트로 reuse 배정된다 — 명시
+// 모델이 reuse 후보 하드필터에 반영 안 됨."
+//
+// dispatchSingle 은 이미 modelMatches(=`!model || agent.model === model`) 로
+// reuse(스코어≥100 idle)와 restart(stopped) 양쪽 후보를 명시 모델로 하드필터
+// 한다. 요청 모델은 normalizeModel 로 정규화("codex"→"gpt")되고, 스폰 에이전트는
+// 그 정규화값(selectedModel)을 model 로 저장하므로 양변이 같은 canonical 로 비교
+// 된다. 따라서 codex 요청은 claude idle 을 절대 reuse 못 하고 fresh codex 를
+// 스폰해야 한다. 이 방향(모델 존중 reuse)은 기존 테스트에 미커버였다 — 회귀 락.
+//
+// 주의: claude idle 은 role+load+cost-eff+reuse 합산으로 ~183 점이라 100 임계를
+// 한참 넘는다. 모델 필터가 없으면(또는 명시 모델이 누락되면) 바로 이 claude 가
+// hijack 하는 게 정확히 보고된 증상이다.
+describe("dispatchTask — 명시 모델 하드필터 (레인-dispatch 증상①)", () => {
+  it("model=codex 인데 claude idle 만 있으면 → reuse 안 하고 fresh codex(gpt) 스폰", async () => {
+    const { bridge, am, pty } = makeBridge();
+    am.seed(
+      makeInstance({
+        id: "claudeIdle",
+        role: "backend",
+        status: "idle",
+        model: "claude",
+        cwd: "/repo",
+        projectId: "px",
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", model: "codex" }),
+    );
+
+    // 명시 codex → claude idle 을 hijack 하지 않고 새 gpt 에이전트를 스폰.
+    expect(res.action).toBe("spawned");
+    expect(res.model).toBe("gpt");
+    // claude idle 은 손대지 않음(주입 없음 + 여전히 idle).
+    expect(pty.writes.some((w) => w.sid === "pty-claudeIdle")).toBe(false);
+    expect(am.getAgent("claudeIdle")?.status).toBe("idle");
+  });
+
+  it("model=gpt 인데 claude idle + gpt idle 공존 → 점수 높은 claude 가 아니라 gpt idle 을 reuse", async () => {
+    const { bridge, am, pty } = makeBridge();
+    am.seed(
+      makeInstance({
+        id: "claudeIdle",
+        role: "backend",
+        status: "idle",
+        model: "claude",
+        cwd: "/repo",
+        projectId: "px",
+      }),
+    );
+    am.seed(
+      makeInstance({
+        id: "gptIdle",
+        role: "backend",
+        status: "idle",
+        model: "gpt",
+        cwd: "/repo",
+        projectId: "px",
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", model: "gpt" }),
+    );
+
+    expect(res.action).toBe("reused");
+    expect(res.agentId).toBe("gptIdle");
+    expect(res.model).toBe("gpt");
+    // claude idle 은 후보에서 하드필터로 제외 — 주입 없음.
+    expect(pty.writes.some((w) => w.sid === "pty-claudeIdle")).toBe(false);
+    expect(pty.writes.some((w) => w.sid === "pty-gptIdle")).toBe(true);
+  });
+
+  it("model=codex 별칭은 gpt idle 을 reuse (normalizeModel 별칭 폴딩이 필터 앞에서 적용)", async () => {
+    const { bridge, am } = makeBridge();
+    am.seed(
+      makeInstance({
+        id: "gptIdle",
+        role: "backend",
+        status: "idle",
+        model: "gpt",
+        cwd: "/repo",
+        projectId: "px",
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", model: "codex" }),
+    );
+
+    // "codex" → "gpt" 정규화 후 동일 모델 idle 을 reuse.
+    expect(res.action).toBe("reused");
+    expect(res.agentId).toBe("gptIdle");
+  });
+
+  it("model=codex 인데 stopped claude 만 있으면 → restart 안 하고 fresh codex 스폰", async () => {
+    const { bridge, am } = makeBridge();
+    am.seed(
+      makeInstance({
+        id: "claudeStopped",
+        role: "backend",
+        status: "stopped",
+        model: "claude",
+        cwd: "/repo",
+        projectId: "px",
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", model: "codex" }),
+    );
+
+    // restart 후보(stopped)도 동일 모델 하드필터에 걸려 제외 → fresh gpt.
+    expect(res.action).toBe("spawned");
+    expect(res.model).toBe("gpt");
+    expect(am.restartCalls).toBe(0);
+  });
+
+  it("명시 모델 없으면(undefined) reuse 무제한 — claude idle 을 정상 reuse(무회귀 확인)", async () => {
+    const { bridge, am } = makeBridge();
+    am.seed(
+      makeInstance({
+        id: "claudeIdle",
+        role: "backend",
+        status: "idle",
+        model: "claude",
+        cwd: "/repo",
+        projectId: "px",
+      }),
+    );
+
+    // model 미지정 → modelMatches 가 항상 true → 기존 reuse 동작 유지.
+    const res = await bridge.dispatchTask(dispatch({ projectId: "px" }));
+
+    expect(res.action).toBe("reused");
+    expect(res.agentId).toBe("claudeIdle");
+  });
+});
