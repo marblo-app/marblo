@@ -1613,6 +1613,118 @@ ipcMain.handle("harness:cliVersions", () => {
   return resolveAllHarnessVersions();
 });
 
+// --- Board IPC Handlers ---
+interface BoardWorktreeDiffArgs {
+  taskId?: string;
+  worktreePath?: string;
+  baseRef?: string;
+}
+
+interface BoardGitResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+const BOARD_DIFF_MAX_BYTES = 200_000;
+
+function runBoardGit(args: string[], cwd: string): Promise<BoardGitResult> {
+  return new Promise((resolve) => {
+    const proc = spawn("git", args, { cwd });
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout.on("data", (data) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+    proc.on("error", (err) => {
+      resolve({ code: 1, stdout, stderr: err.message });
+    });
+    proc.on("close", (code) => {
+      resolve({ code: code ?? 0, stdout, stderr });
+    });
+  });
+}
+
+function truncateBoardDiff(diff: string): string {
+  if (diff.length <= BOARD_DIFF_MAX_BYTES) return diff;
+  return `${diff.slice(
+    0,
+    BOARD_DIFF_MAX_BYTES,
+  )}\n\n...(truncated - run git diff locally for full output)`;
+}
+
+async function buildBoardWorktreeDiff(
+  worktreePath: string,
+  baseRef: string,
+): Promise<string> {
+  if (
+    !fs.existsSync(worktreePath) ||
+    !fs.statSync(worktreePath).isDirectory()
+  ) {
+    throw new Error(`worktree path not found: ${worktreePath}`);
+  }
+
+  let comparisonRef = baseRef;
+  const mergeBase = await runBoardGit(
+    ["merge-base", baseRef, "HEAD"],
+    worktreePath,
+  );
+  if (mergeBase.code === 0 && mergeBase.stdout.trim()) {
+    comparisonRef = mergeBase.stdout.trim();
+  }
+
+  const tracked = await runBoardGit(
+    [
+      "diff",
+      "--stat",
+      "--patch",
+      "--no-color",
+      "--no-ext-diff",
+      comparisonRef,
+      "--",
+    ],
+    worktreePath,
+  );
+  if (tracked.code !== 0) {
+    throw new Error(`git diff failed: ${tracked.stderr.trim()}`);
+  }
+
+  const parts = [tracked.stdout.trimEnd()].filter(Boolean);
+  const untracked = await runBoardGit(
+    ["ls-files", "--others", "--exclude-standard"],
+    worktreePath,
+  );
+  if (untracked.code === 0) {
+    for (const filePath of untracked.stdout.split("\n").filter(Boolean)) {
+      const fileDiff = await runBoardGit(
+        ["diff", "--no-index", "--no-color", "--", "/dev/null", filePath],
+        worktreePath,
+      );
+      if ((fileDiff.code === 0 || fileDiff.code === 1) && fileDiff.stdout) {
+        parts.push(fileDiff.stdout.trimEnd());
+      }
+      if (parts.join("\n\n").length > BOARD_DIFF_MAX_BYTES) break;
+    }
+  }
+
+  return truncateBoardDiff(parts.join("\n\n"));
+}
+
+ipcMain.handle(
+  "board:worktreeDiff",
+  async (_event, args: BoardWorktreeDiffArgs) => {
+    const worktreePath = args?.worktreePath?.trim();
+    if (!worktreePath) {
+      throw new Error("board:worktreeDiff requires worktreePath");
+    }
+    return buildBoardWorktreeDiff(worktreePath, args.baseRef?.trim() || "HEAD");
+  },
+);
+
 // --- File System IPC Handlers ---
 ipcMain.handle("fs:readTree", (_event, rootPath: string) => {
   return fsManager.readTree(rootPath);

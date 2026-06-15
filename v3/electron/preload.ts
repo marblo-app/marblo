@@ -232,6 +232,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
       conflicts?: string[];
     }) => ipcRenderer.invoke("worktree:resolve", args),
   },
+  board: {
+    worktreeDiff: (args: {
+      taskId?: string;
+      worktreePath?: string;
+      baseRef?: string;
+    }) => ipcRenderer.invoke("board:worktreeDiff", args),
+  },
   missionOrchestrator: {
     start: (args: {
       projectId: string;

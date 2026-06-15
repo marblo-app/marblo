@@ -19,10 +19,13 @@ import { useTerminalStore } from "../../stores/terminalStore";
 import { useAgentFocusStore } from "../../stores/agentFocusStore";
 import { getSessionIdForAgent } from "../../stores/agentSessionMap";
 import { useProjectStore } from "../../stores/projectStore";
+import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useAuth } from "../../hooks/useAuth";
 import { TaskBodySections, hasAnyBody } from "./TaskBodySections";
+import { DiffViewer } from "./DiffViewer";
+import type { Worktree } from "../../types/worktree";
 
-type DetailTab = "comments" | "activity";
+type DetailTab = "comments" | "activity" | "diff";
 
 const STATUS_COLORS: Record<TaskStatus, string> = {
   TODO: "bg-gray-600",
@@ -80,6 +83,21 @@ const MODEL_ICONS: Record<string, string> = {
   local: "⚫",
   custom: "⚪",
 };
+
+function findTaskWorktree(worktrees: Worktree[], task: Task): Worktree | null {
+  return (
+    worktrees.find((worktree) => worktree.taskId === task.id) ??
+    worktrees.find((worktree) =>
+      worktree.path.split(/[\\/]+/).includes(task.id),
+    ) ??
+    worktrees.find((worktree) => worktree.branch.includes(task.id)) ??
+    null
+  );
+}
+
+function getErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
 
 function AgentAssign({
   taskId,
@@ -263,9 +281,14 @@ interface TaskDetailModalProps {
 export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
+  const worktrees = useWorktreeStore((s) => s.worktrees);
+  const refreshWorktrees = useWorktreeStore((s) => s.refresh);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [detailTab, setDetailTab] = useState<DetailTab>("comments");
+  const [diff, setDiff] = useState<string | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState<string | null>(null);
   const [newMessage, setNewMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
@@ -281,6 +304,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const nextStatuses = getNextStatuses(task.status);
   const roleColor =
     ROLE_COLORS[task.role] ?? "bg-gray-500/20 text-gray-400 border-gray-500/30";
+  const taskWorktree = findTaskWorktree(worktrees, task);
 
   useEffect(() => {
     const unsubscribe = subscribeToActivities(task.id, setActivities);
@@ -295,6 +319,54 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activities, comments]);
+
+  useEffect(() => {
+    setDiff(null);
+    setDiffError(null);
+    setDiffLoading(false);
+  }, [task.id]);
+
+  const loadDiff = async () => {
+    if (diffLoading) return;
+
+    setDiffLoading(true);
+    setDiffError(null);
+    try {
+      let worktree = findTaskWorktree(
+        useWorktreeStore.getState().worktrees,
+        task,
+      );
+
+      if (!worktree) {
+        await refreshWorktrees();
+        worktree = findTaskWorktree(
+          useWorktreeStore.getState().worktrees,
+          task,
+        );
+      }
+
+      if (!worktree) {
+        throw new Error("이 태스크에 연결된 worktree를 찾을 수 없습니다.");
+      }
+
+      const loadedDiff = await window.electronAPI.board.worktreeDiff({
+        taskId: task.id,
+        worktreePath: worktree.path,
+        baseRef: worktree.baseRef,
+      });
+      setDiff(loadedDiff);
+    } catch (err) {
+      setDiffError(getErrorMessage(err, "diff 로드 실패"));
+    } finally {
+      setDiffLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (detailTab === "diff" && diff === null && !diffLoading && !diffError) {
+      void loadDiff();
+    }
+  });
 
   const handleStatusChange = async (newStatus: TaskStatus) => {
     setStatusUpdating(true);
@@ -740,10 +812,58 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
               >
                 Activity ({activities.length})
               </button>
+              <button
+                onClick={() => setDetailTab("diff")}
+                className={`px-3 py-1 text-xs font-semibold uppercase rounded-t transition-colors ${
+                  detailTab === "diff"
+                    ? "bg-gray-900/50 text-blue-400 border-b-2 border-blue-500"
+                    : "text-gray-500 hover:text-gray-400"
+                }`}
+              >
+                변경 diff
+              </button>
             </div>
 
-            <div className="max-h-64 overflow-y-auto rounded bg-gray-900/50 border border-gray-700/50">
-              {detailTab === "comments" ? (
+            <div
+              className={`rounded bg-gray-900/50 border border-gray-700/50 ${
+                detailTab === "diff" ? "p-2" : "max-h-64 overflow-y-auto"
+              }`}
+            >
+              {detailTab === "diff" ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3 px-1">
+                    <div className="min-w-0 text-xs text-gray-500">
+                      {taskWorktree ? (
+                        <>
+                          <span className="text-gray-400">branch </span>
+                          <span className="font-mono text-blue-300">
+                            {taskWorktree.branch}
+                          </span>
+                        </>
+                      ) : (
+                        "연결된 worktree를 조회합니다."
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDiff(null);
+                        void loadDiff();
+                      }}
+                      disabled={diffLoading}
+                      className="flex-shrink-0 rounded border border-gray-600 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-50"
+                    >
+                      새로고침
+                    </button>
+                  </div>
+                  <DiffViewer
+                    diff={diff ?? ""}
+                    loading={diffLoading}
+                    error={diffError}
+                    onRetry={loadDiff}
+                  />
+                </div>
+              ) : detailTab === "comments" ? (
                 /* Comments Tab */
                 comments.length === 0 ? (
                   <div className="px-3 py-4 text-center text-xs text-gray-600">
@@ -825,37 +945,39 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
         </div>
 
         {/* Activity Input */}
-        <div className="border-t border-gray-700 px-5 py-3">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                detailTab === "comments"
-                  ? "Add comment..."
-                  : "Add PM activity..."
-              }
-              className={`flex-1 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none ${
-                detailTab === "comments"
-                  ? "bg-green-500/5 border border-green-500/20 focus:border-green-500/50"
-                  : "bg-yellow-500/5 border border-yellow-500/20 focus:border-yellow-500/50"
-              }`}
-            />
-            <button
-              onClick={handleSendActivity}
-              disabled={!newMessage.trim() || sending}
-              className={`rounded px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${
-                detailTab === "comments"
-                  ? "bg-green-600 hover:bg-green-500"
-                  : "bg-yellow-600 hover:bg-yellow-500"
-              }`}
-            >
-              Send
-            </button>
+        {detailTab !== "diff" && (
+          <div className="border-t border-gray-700 px-5 py-3">
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  detailTab === "comments"
+                    ? "Add comment..."
+                    : "Add PM activity..."
+                }
+                className={`flex-1 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none ${
+                  detailTab === "comments"
+                    ? "bg-green-500/5 border border-green-500/20 focus:border-green-500/50"
+                    : "bg-yellow-500/5 border border-yellow-500/20 focus:border-yellow-500/50"
+                }`}
+              />
+              <button
+                onClick={handleSendActivity}
+                disabled={!newMessage.trim() || sending}
+                className={`rounded px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${
+                  detailTab === "comments"
+                    ? "bg-green-600 hover:bg-green-500"
+                    : "bg-yellow-600 hover:bg-yellow-500"
+                }`}
+              >
+                Send
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

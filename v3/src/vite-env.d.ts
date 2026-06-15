@@ -459,6 +459,14 @@ interface WorktreeAPI {
   ) => Promise<{ ok: boolean; diff: string }>;
 }
 
+interface BoardAPI {
+  worktreeDiff: (args: {
+    taskId?: string;
+    worktreePath?: string;
+    baseRef?: string;
+  }) => Promise<string>;
+}
+
 interface WindowAPI {
   /** True for File > New Window / Cmd+Shift+N windows. */
   isNewWindow: () => boolean;
@@ -612,6 +620,7 @@ interface ElectronAPI {
   pty: PtyAPI;
   agent: AgentAPI;
   worktree: WorktreeAPI;
+  board: BoardAPI;
   orchestrator: OrchestratorAPI;
   orchestratorSession: OrchestratorSessionAPI;
   missionOrchestrator: MissionOrchestratorAPI;
