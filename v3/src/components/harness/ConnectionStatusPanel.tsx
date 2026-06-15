@@ -87,6 +87,20 @@ function checkIcon(status: ConnectionCheckItem["status"]) {
   return <AlertTriangle className="h-3.5 w-3.5" />;
 }
 
+// GitHub repo URL 형식 검증 — https://host/owner/repo(.git) 또는
+// git@host:owner/repo(.git) 만 허용한다. 백엔드 connect() 는 입력 repoUrl 을
+// 그대로 보존하므로(merge: 입력 > 기존 > git 자동채움) 잘못된 값이 저장되지
+// 않도록 프론트에서 1차로 거른다.
+function isValidRepoUrl(value: string): boolean {
+  const v = value.trim();
+  if (!v) return false;
+  // https://github.com/owner/repo  (옵션: .git, 끝 슬래시)
+  const httpsForm = /^https?:\/\/[^/\s]+\/[^/\s]+\/[^/\s]+?(?:\.git)?\/?$/;
+  // git@github.com:owner/repo  (옵션: .git)
+  const sshForm = /^[\w.-]+@[^:\s]+:[^/\s]+\/[^/\s]+?(?:\.git)?$/;
+  return httpsForm.test(v) || sshForm.test(v);
+}
+
 export function ConnectionStatusPanel() {
   const currentProject = useProjectStore((s) => s.currentProject);
   const [connection, setConnection] = useState<ProjectConnection | null>(null);
@@ -96,7 +110,7 @@ export function ConnectionStatusPanel() {
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<ConnectionCheckResult | null>(
-    null,
+    null
   );
 
   const loadConnection = useCallback(async () => {
@@ -118,7 +132,7 @@ export function ConnectionStatusPanel() {
       setAgents(nextAgents);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 상태를 불러오지 못했습니다.",
+        err instanceof Error ? err.message : "연결 상태를 불러오지 못했습니다."
       );
     } finally {
       setLoading(false);
@@ -146,7 +160,7 @@ export function ConnectionStatusPanel() {
       await loadConnection();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 생성에 실패했습니다.",
+        err instanceof Error ? err.message : "연결 생성에 실패했습니다."
       );
     } finally {
       setConnecting(false);
@@ -155,7 +169,7 @@ export function ConnectionStatusPanel() {
 
   const activeAgents = useMemo(
     () => agents.filter((agent) => agent.status !== "stopped"),
-    [agents],
+    [agents]
   );
 
   const handleCheck = async () => {
@@ -165,13 +179,13 @@ export function ConnectionStatusPanel() {
     setCheckResult(null);
     try {
       const result = await window.electronAPI.connection.check(
-        currentProject.id,
+        currentProject.id
       );
       setCheckResult(result);
       await loadConnection();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 확인에 실패했습니다.",
+        err instanceof Error ? err.message : "연결 확인에 실패했습니다."
       );
     } finally {
       setChecking(false);
@@ -262,6 +276,11 @@ export function ConnectionStatusPanel() {
                 )}
                 {connecting ? "연결 중" : "연결하기"}
               </button>
+              <ManualConnectForm
+                projectId={currentProject.id}
+                localPath={currentProject.folderPath}
+                onConnected={loadConnection}
+              />
             </>
           ) : (
             <p className="text-xs text-[#6c7086]">
@@ -302,6 +321,14 @@ export function ConnectionStatusPanel() {
               value={formatDate(connection.lastRunAt)}
             />
           </div>
+
+          {!connection.repoUrl && (
+            <ManualConnectForm
+              projectId={connection.projectId}
+              localPath={connection.localPath}
+              onConnected={loadConnection}
+            />
+          )}
 
           <div>
             <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -370,6 +397,106 @@ export function ConnectionStatusPanel() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// git remote 가 없거나 자동 도출되지 않은 프로젝트를 위한 수동 연결 폼.
+// repo URL(필수)·기본 브랜치(선택)를 직접 입력해 connection 을 생성/갱신한다.
+// 자동 '연결하기'(git 도출)와 공존하며, repoUrl 이 비어 있을 때 보조/오버라이드로
+// 노출된다. 입력 repoUrl 은 백엔드 connect() 가 그대로 보존한다.
+function ManualConnectForm({
+  projectId,
+  localPath,
+  onConnected,
+}: {
+  projectId: string;
+  localPath: string;
+  onConnected: () => Promise<void> | void;
+}) {
+  const [repoUrl, setRepoUrl] = useState("");
+  const [defaultBranch, setDefaultBranch] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = useCallback(async () => {
+    const trimmedUrl = repoUrl.trim();
+    if (!isValidRepoUrl(trimmedUrl)) {
+      setError(
+        "올바른 repo URL 형식이 아닙니다. 예: https://github.com/owner/repo 또는 git@github.com:owner/repo.git"
+      );
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const trimmedBranch = defaultBranch.trim();
+      await window.electronAPI.connection.upsert({
+        projectId,
+        localPath,
+        repoUrl: trimmedUrl,
+        ...(trimmedBranch ? { defaultBranch: trimmedBranch } : {}),
+      });
+      await onConnected();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "수동 연결에 실패했습니다."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }, [repoUrl, defaultBranch, projectId, localPath, onConnected]);
+
+  return (
+    <div className="mt-3 rounded border border-[#313244] bg-[#1e1e2e] p-3">
+      <div className="mb-2 flex items-center gap-1.5">
+        <Link2 className="h-3.5 w-3.5 text-[#bac2de]" />
+        <span className="text-xs font-medium text-[#bac2de]">
+          repo URL 직접 입력
+        </span>
+      </div>
+      <p className="mb-2 text-[11px] leading-4 text-[#6c7086]">
+        git remote 가 없거나 자동으로 도출되지 않은 경우 repo URL 을 직접 입력해
+        연결할 수 있습니다.
+      </p>
+      <div className="space-y-2">
+        <input
+          type="text"
+          value={repoUrl}
+          onChange={(e) => setRepoUrl(e.target.value)}
+          placeholder="https://github.com/owner/repo"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          className="w-full rounded border border-[#313244] bg-[#181825] px-2.5 py-1.5 text-xs text-[#cdd6f4] placeholder:text-[#6c7086] focus:border-[#89b4fa] focus:outline-none"
+        />
+        <input
+          type="text"
+          value={defaultBranch}
+          onChange={(e) => setDefaultBranch(e.target.value)}
+          placeholder="기본 브랜치 (선택, 예: main)"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          className="w-full rounded border border-[#313244] bg-[#181825] px-2.5 py-1.5 text-xs text-[#cdd6f4] placeholder:text-[#6c7086] focus:border-[#89b4fa] focus:outline-none"
+        />
+      </div>
+      {error && (
+        <p className="mt-2 text-[11px] leading-4 text-[#f38ba8]">{error}</p>
+      )}
+      <button
+        type="button"
+        onClick={() => void handleSubmit()}
+        disabled={submitting || !repoUrl.trim()}
+        className="mt-2 inline-flex h-8 items-center gap-1.5 rounded border border-[#313244] px-3 text-xs font-medium text-[#bac2de] hover:border-[#45475a] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {submitting ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Link2 className="h-3.5 w-3.5" />
+        )}
+        {submitting ? "연결 중" : "수동 연결"}
+      </button>
     </div>
   );
 }
