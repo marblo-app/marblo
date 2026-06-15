@@ -193,132 +193,135 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
           </div>
         )}
 
-        {/* Connection panel is capped so a fully-populated connection (status
-            grid + MCP table + check results) can't grow tall enough to squeeze
-            the flex-1 catalog list below it to zero height. shrink-0 keeps it
-            from collapsing; max-h + its own scroll bounds its footprint. */}
-        <div className="max-h-[40%] flex-shrink-0 overflow-y-auto">
+        {/* Body scrolls as one unit so the connection state and catalog stay in
+            normal document flow without separate nested scrollbars. */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <ConnectionStatusPanel />
-        </div>
 
-        {/* List */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {filtered.length === 0 && (
-            <p className="text-center text-sm text-[#6c7086]">
-              표시할 패키지가 없습니다.
-            </p>
-          )}
-          <div className="grid gap-3 md:grid-cols-2">
-            {filtered.map((pkg) => {
-              const isBusy = busy === pkg.id;
-              const isInstalled = pkg.status === "installed";
-              const isDeprecated = !!pkg.deprecated;
-              const isRequired = pkg.category === "required" && !isDeprecated;
-              const isBundled = pkg.install.kind === "bundled";
-              const isManual = pkg.install.kind === "manual";
-              const ver = versions[pkg.id];
-              return (
-                <div
-                  key={pkg.id}
-                  className="rounded-md border border-[#313244] bg-[#181825] p-3 transition-colors hover:border-[#45475a]"
-                >
-                  <div className="mb-1 flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-semibold text-[#cdd6f4]">
-                        {pkg.name}
-                      </span>
-                      <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] uppercase text-[#6c7086]">
-                        {pkg.type}
-                      </span>
-                    </div>
-                    <div className="flex flex-shrink-0 items-center gap-1">
-                      {isDeprecated && (
-                        <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
-                          단종 예정
+          {/* List */}
+          <div className="p-4">
+            {filtered.length === 0 && (
+              <p className="text-center text-sm text-[#6c7086]">
+                표시할 패키지가 없습니다.
+              </p>
+            )}
+            <div className="grid gap-3 md:grid-cols-2">
+              {filtered.map((pkg) => {
+                const isBusy = busy === pkg.id;
+                const isInstalled = pkg.status === "installed";
+                const isDeprecated = !!pkg.deprecated;
+                const isRequired = pkg.category === "required" && !isDeprecated;
+                const isBundled = pkg.install.kind === "bundled";
+                const isManual = pkg.install.kind === "manual";
+                const ver = versions[pkg.id];
+                return (
+                  <div
+                    key={pkg.id}
+                    className="rounded-md border border-[#313244] bg-[#181825] p-3 transition-colors hover:border-[#45475a]"
+                  >
+                    <div className="mb-1 flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-semibold text-[#cdd6f4]">
+                          {pkg.name}
                         </span>
-                      )}
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-[10px] ${
-                          isInstalled
-                            ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
+                        <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] uppercase text-[#6c7086]">
+                          {pkg.type}
+                        </span>
+                      </div>
+                      <div className="flex flex-shrink-0 items-center gap-1">
+                        {isDeprecated && (
+                          <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
+                            단종 예정
+                          </span>
+                        )}
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] ${
+                            isInstalled
+                              ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
+                              : isManual
+                                ? "bg-[#f9e2af]/20 text-[#f9e2af]"
+                                : "bg-[#313244] text-[#6c7086]"
+                          }`}
+                        >
+                          {isInstalled
+                            ? "설치됨"
                             : isManual
-                              ? "bg-[#f9e2af]/20 text-[#f9e2af]"
-                              : "bg-[#313244] text-[#6c7086]"
-                        }`}
-                      >
-                        {isInstalled ? "설치됨" : isManual ? "수동" : "미설치"}
-                      </span>
+                              ? "수동"
+                              : "미설치"}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  <p className="mb-2 text-xs text-[#bac2de]">
-                    {pkg.description}
-                  </p>
-                  {ver && isInstalled && ver.localVersion && (
-                    <div className="mb-3 flex items-center gap-1.5 text-[10px]">
-                      <span className="text-[#6c7086]">
-                        v{ver.localVersion}
-                      </span>
-                      {ver.updateState === "outdated" && ver.latestVersion && (
-                        <span className="rounded bg-[#f9e2af]/20 px-1.5 py-0.5 text-[#f9e2af]">
-                          → v{ver.latestVersion} 업데이트 대기 중
+                    <p className="mb-2 text-xs text-[#bac2de]">
+                      {pkg.description}
+                    </p>
+                    {ver && isInstalled && ver.localVersion && (
+                      <div className="mb-3 flex items-center gap-1.5 text-[10px]">
+                        <span className="text-[#6c7086]">
+                          v{ver.localVersion}
+                        </span>
+                        {ver.updateState === "outdated" &&
+                          ver.latestVersion && (
+                            <span className="rounded bg-[#f9e2af]/20 px-1.5 py-0.5 text-[#f9e2af]">
+                              → v{ver.latestVersion} 업데이트 대기 중
+                            </span>
+                          )}
+                        {ver.updateState === "up-to-date" && (
+                          <span className="text-[#6c7086]">(최신)</span>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      {isDeprecated && (
+                        <span className="text-xs text-[#f38ba8]">
+                          단종 예정 — 설치 비권장
                         </span>
                       )}
-                      {ver.updateState === "up-to-date" && (
-                        <span className="text-[#6c7086]">(최신)</span>
+                      {!isInstalled && !isDeprecated && (
+                        <button
+                          onClick={() => handleInstall(pkg)}
+                          disabled={isBusy || isBundled}
+                          className="rounded bg-[#89b4fa]/20 px-2.5 py-1 text-xs text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/30 disabled:opacity-50"
+                        >
+                          {isBusy
+                            ? "설치 중..."
+                            : isManual
+                              ? "안내 보기"
+                              : isBundled
+                                ? "자동 설치됨"
+                                : isRequired
+                                  ? "필수 — 설치"
+                                  : STATUS_LABEL[pkg.status]}
+                        </button>
+                      )}
+                      {isInstalled && !isRequired && (
+                        <button
+                          onClick={() => handleUninstall(pkg)}
+                          disabled={isBusy}
+                          className="rounded bg-[#f38ba8]/20 px-2.5 py-1 text-xs text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30 disabled:opacity-50"
+                        >
+                          {isBusy ? "처리 중..." : "제거"}
+                        </button>
+                      )}
+                      {isInstalled && isRequired && (
+                        <span className="text-xs text-[#6c7086]">
+                          필수 패키지 — 제거 불가
+                        </span>
+                      )}
+                      {pkg.url && (
+                        <a
+                          href={pkg.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-auto text-xs text-[#6c7086] hover:text-[#89b4fa]"
+                        >
+                          문서 →
+                        </a>
                       )}
                     </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    {isDeprecated && (
-                      <span className="text-xs text-[#f38ba8]">
-                        단종 예정 — 설치 비권장
-                      </span>
-                    )}
-                    {!isInstalled && !isDeprecated && (
-                      <button
-                        onClick={() => handleInstall(pkg)}
-                        disabled={isBusy || isBundled}
-                        className="rounded bg-[#89b4fa]/20 px-2.5 py-1 text-xs text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/30 disabled:opacity-50"
-                      >
-                        {isBusy
-                          ? "설치 중..."
-                          : isManual
-                            ? "안내 보기"
-                            : isBundled
-                              ? "자동 설치됨"
-                              : isRequired
-                                ? "필수 — 설치"
-                                : STATUS_LABEL[pkg.status]}
-                      </button>
-                    )}
-                    {isInstalled && !isRequired && (
-                      <button
-                        onClick={() => handleUninstall(pkg)}
-                        disabled={isBusy}
-                        className="rounded bg-[#f38ba8]/20 px-2.5 py-1 text-xs text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30 disabled:opacity-50"
-                      >
-                        {isBusy ? "처리 중..." : "제거"}
-                      </button>
-                    )}
-                    {isInstalled && isRequired && (
-                      <span className="text-xs text-[#6c7086]">
-                        필수 패키지 — 제거 불가
-                      </span>
-                    )}
-                    {pkg.url && (
-                      <a
-                        href={pkg.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-auto text-xs text-[#6c7086] hover:text-[#89b4fa]"
-                      >
-                        문서 →
-                      </a>
-                    )}
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
 
