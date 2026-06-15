@@ -965,6 +965,299 @@ export const issueLectureCoupon = functions.https.onCall(
   },
 );
 
+// ═══════════════════════════════════════════════════════════════════
+// Founder Beta (파운더 100인 무료 베타) — 피드백 → Pro 무료 부여
+// ═══════════════════════════════════════════════════════════════════
+//
+// 흐름 (이메일 발송은 수동 MVP — 어드민이 접근 안내·폼 링크를 직접 전달):
+//   1) 어드민이 betatester50_waitlist 검토 후 markFounderSelected({email}) 로 선정.
+//      founders/{normalizedEmail} 생성, accessGrantedAt = 선정 시각(3일 클럭 시작).
+//   2) 파운더가 같은 (이메일 인증된) 계정으로 로그인 → /foundation50/feedback
+//      6문항 제출 → submitFounderFeedback(): 선정 여부 + accessGrantedAt+3일 이내
+//      검증 → founder_feedback 저장 + Pro 3개월 직접 부여(결제 우회).
+//   3) 인터뷰 완료 시 어드민 markFounderInterviewed({email}) → Pro +3개월(총 6).
+//
+// 어드민 식별: triggerReconcile 과 동일하게 ADMIN_UID env 단일 체크.
+
+const FOUNDER_FEEDBACK_WINDOW_DAYS = 3;
+const FOUNDER_PRO_MONTHS = 3;
+const FOUNDER_INTERVIEW_BONUS_MONTHS = 3; // 3 → 6 누적
+const FOUNDER_FIELD_MAX = 5000;
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function addMonths(base: Date, months: number): Date {
+  const d = new Date(base);
+  d.setMonth(d.getMonth() + months);
+  return d;
+}
+
+function requireAdmin(context: functions.https.CallableContext): void {
+  const adminUid = process.env.ADMIN_UID;
+  if (!adminUid || context.auth?.uid !== adminUid) {
+    throw new functions.https.HttpsError("permission-denied", "Admin only");
+  }
+}
+
+// Pro 구독을 결제 없이 직접 부여/연장 (내부 함수).
+// 이미 미래까지 유효한 구독이 있으면 그 끝에서 이어 붙여 기간을 축소하지 않는다.
+// paymentProvider="founder_grant" 로 결제 기반 구독과 구분.
+async function grantFounderProInternal(
+  userId: string,
+  months: number,
+  reason: string,
+): Promise<Date> {
+  const now = new Date();
+  const subRef = db.collection("subscriptions").doc(userId);
+  const snap = await subRef.get();
+  const data = snap.data();
+  const existingEnd =
+    data?.currentPeriodEnd && typeof data.currentPeriodEnd.toDate === "function"
+      ? data.currentPeriodEnd.toDate()
+      : null;
+  const base = existingEnd && existingEnd > now ? existingEnd : now;
+  const periodEnd = addMonths(base, months);
+
+  const payload: Record<string, unknown> = {
+    userId,
+    planType: "pro",
+    status: "active",
+    paymentProvider: "founder_grant",
+    founderGrant: true,
+    founderGrantReason: reason,
+    currentPeriodEnd: admin.firestore.Timestamp.fromDate(periodEnd),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  if (!snap.exists) {
+    payload.currentPeriodStart = admin.firestore.Timestamp.fromDate(now);
+    payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+  await subRef.set(payload, { merge: true });
+  return periodEnd;
+}
+
+// 파운더 선정 (관리자용) — waitlist 이메일을 founders 로 승격.
+// accessGrantedAt 이 3일 피드백 윈도우의 기준. resetWindow=true 면 윈도우 재시작.
+export const markFounderSelected = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const email =
+      typeof data?.email === "string" ? normalizeEmail(data.email) : "";
+    if (!email) {
+      throw new functions.https.HttpsError("invalid-argument", "email required");
+    }
+
+    const ref = db.collection("founders").doc(email);
+    const snap = await ref.get();
+
+    const update: Record<string, unknown> = {
+      email,
+      status: "selected",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (!snap.exists) {
+      update.selectedAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+    if (
+      !snap.exists ||
+      !snap.data()?.accessGrantedAt ||
+      data?.resetWindow === true
+    ) {
+      update.accessGrantedAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+    await ref.set(update, { merge: true });
+    return { ok: true, email };
+  },
+);
+
+// 구조화 피드백 제출 (파운더 본인) — 검증 후 저장 + Pro 3개월 직접 부여.
+export const submitFounderFeedback = functions.https.onCall(
+  async (data, context) => {
+    const uid = context.auth?.uid;
+    const token = context.auth?.token;
+    if (!uid || !token?.email) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다.",
+      );
+    }
+    // 무료 Pro 부여 경계 — 이메일 소유권 위조 방지를 위해 인증된 이메일만 허용.
+    if (token.email_verified !== true) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "이메일 인증이 완료된 계정만 제출할 수 있습니다.",
+      );
+    }
+    const email = normalizeEmail(token.email);
+
+    const answers = data?.answers;
+    if (!answers || typeof answers !== "object") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "피드백 내용이 필요합니다.",
+      );
+    }
+    const str = (v: unknown): string =>
+      typeof v === "string" ? v.trim().slice(0, FOUNDER_FIELD_MAX) : "";
+    const q1 = str(answers.q1); // 무엇을 하려 했나
+    const q2 = str(answers.q2); // 좋았던 점
+    const q3 = str(answers.q3); // 내 문제를 해결한 점 (선택)
+    const q4 = str(answers.q4); // 막히거나 아쉬운 점
+    const q5 = str(answers.q5); // 있었으면 하는 것
+    const reason = str(answers.reason); // 점수 이유
+    const rating = Number(answers.rating);
+    if (!q1 || !q2 || !q4 || !q5 || !reason) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "필수 문항(①②④⑤⑥)을 모두 입력해 주세요.",
+      );
+    }
+    if (!Number.isInteger(rating) || rating < 1 || rating > 10) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "점수는 1~10 사이여야 합니다.",
+      );
+    }
+
+    const fRef = db.collection("founders").doc(email);
+
+    // 트랜잭션으로 선정·윈도우·중복제출 검증 + 제출 마킹을 원자적으로 처리
+    // (중복 클릭에 의한 이중 부여 방지).
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(fRef);
+      if (!s.exists || s.data()?.status === "rejected") {
+        throw new functions.https.HttpsError(
+          "permission-denied",
+          "선정된 파운더가 아닙니다. 선정 안내 이메일의 계정으로 로그인했는지 확인해 주세요.",
+        );
+      }
+      const fd = s.data()!;
+      if (fd.feedbackSubmittedAt) {
+        throw new functions.https.HttpsError(
+          "already-exists",
+          "이미 피드백을 제출하셨습니다.",
+        );
+      }
+      const granted =
+        fd.accessGrantedAt && typeof fd.accessGrantedAt.toDate === "function"
+          ? fd.accessGrantedAt.toDate()
+          : null;
+      if (!granted) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "접근 권한이 아직 부여되지 않았습니다.",
+        );
+      }
+      const deadline = new Date(
+        granted.getTime() + FOUNDER_FEEDBACK_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+      );
+      if (new Date() > deadline) {
+        throw new functions.https.HttpsError(
+          "deadline-exceeded",
+          "피드백 제출 기한(접근 후 3일)이 지났습니다.",
+        );
+      }
+      tx.set(
+        fRef,
+        {
+          userId: uid,
+          status: "feedback_submitted",
+          feedbackSubmittedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    });
+
+    // 피드백 저장 + Pro 3개월 부여
+    const fbRef = await db.collection("founder_feedback").add({
+      email,
+      userId: uid,
+      locale: typeof data?.locale === "string" ? data.locale : null,
+      answers: { q1, q2, q3, q4, q5, reason },
+      rating,
+      consentQuote: answers.consentQuote === true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const periodEnd = await grantFounderProInternal(
+      uid,
+      FOUNDER_PRO_MONTHS,
+      "founder_feedback",
+    );
+
+    await fRef.set(
+      {
+        feedbackId: fbRef.id,
+        proGrantedMonths: FOUNDER_PRO_MONTHS,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return {
+      ok: true,
+      proMonths: FOUNDER_PRO_MONTHS,
+      currentPeriodEnd: periodEnd.toISOString(),
+    };
+  },
+);
+
+// 인터뷰 완료 마킹 (관리자용) — Pro +3개월 연장 (총 6). 피드백 제출로 계정이
+// 연결(userId)된 파운더만 대상.
+export const markFounderInterviewed = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const email =
+      typeof data?.email === "string" ? normalizeEmail(data.email) : "";
+    if (!email) {
+      throw new functions.https.HttpsError("invalid-argument", "email required");
+    }
+    const fRef = db.collection("founders").doc(email);
+    const fSnap = await fRef.get();
+    if (!fSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "founder not found");
+    }
+    const f = fSnap.data()!;
+    const uid = f.userId;
+    if (!uid) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "피드백 제출 전이라 계정이 연결되지 않았습니다. 피드백 제출 후 진행하세요.",
+      );
+    }
+    if (f.interviewedAt) {
+      throw new functions.https.HttpsError(
+        "already-exists",
+        "이미 인터뷰 보너스가 적용되었습니다.",
+      );
+    }
+    const periodEnd = await grantFounderProInternal(
+      uid,
+      FOUNDER_INTERVIEW_BONUS_MONTHS,
+      "founder_interview",
+    );
+    await fRef.set(
+      {
+        status: "interviewed",
+        interviewedAt: admin.firestore.FieldValue.serverTimestamp(),
+        proGrantedMonths:
+          (typeof f.proGrantedMonths === "number" ? f.proGrantedMonths : 0) +
+          FOUNDER_INTERVIEW_BONUS_MONTHS,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return {
+      ok: true,
+      bonusMonths: FOUNDER_INTERVIEW_BONUS_MONTHS,
+      currentPeriodEnd: periodEnd.toISOString(),
+    };
+  },
+);
+
 // ─── Telemetry → BigQuery ─────────────────────────────────────
 
 interface TelemetryRow {

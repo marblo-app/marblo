@@ -279,5 +279,21 @@ service cloud.firestore {
       allow get: if false;
       allow update, delete: if false;
     }
+
+    // ===== Founders (파운더 100인 무료 베타 선정/상태) =====
+    // Document ID = normalized email. 선정·피드백·인터뷰 상태와 Pro 부여 기록.
+    // 전적으로 Cloud Functions(Admin SDK, 규칙 우회)로만 기록한다.
+    // 클라이언트 직접 접근 차단 — 상태 확인/제출은 callable 함수 경유.
+    match /founders/{email} {
+      allow read, write: if false;
+    }
+
+    // ===== Founder Feedback (구조화 6문항 피드백) =====
+    // submitFounderFeedback 함수만 생성. 본인은 자신의 피드백을 읽을 수 있다.
+    match /founder_feedback/{feedbackId} {
+      allow read: if isAuthenticated()
+        && resource.data.userId == request.auth.uid;
+      allow write: if false; // Only Cloud Functions can write
+    }
   }
 }
