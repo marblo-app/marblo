@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { encodeClaudeProjectDir, claudeProjectDir } from "./claude-paths";
-import { PtyManager } from "./pty-manager";
+import { PtyManager, type DangerEvent } from "./pty-manager";
 import { AgentConfigGenerator, LaunchConfig } from "./agent-config";
 import type { ModelType } from "./agent-manager";
 import { contextForKind } from "./mcp-server/context";
@@ -183,6 +183,13 @@ export class OrchestratorManager {
   private resolveBootGate: () => void = () => {};
   private injectChain: Promise<void> = Promise.resolve();
 
+  // --- Safety guard (MVP-P0-1) ---
+  // The orchestrator drives the MAIN checkout (not a sandboxed worktree), so a
+  // dangerous command injected into its PTY is the highest-risk path. We record
+  // detections that target this orchestrator's session for visibility.
+  private dangerWarnings: DangerEvent[] = [];
+  private static readonly MAX_DANGER_WARNINGS = 100;
+
   constructor(
     ptyManager: PtyManager,
     configGenerator: AgentConfigGenerator,
@@ -193,6 +200,29 @@ export class OrchestratorManager {
     this.configGenerator = configGenerator;
     this.onStatusChange = onStatusChange;
     this.kind = kind;
+
+    // Connect the danger-detection hook to the injection path. The chokepoint
+    // lives in PtyManager.writeAndSubmit (covers boot prompt + injectMessage);
+    // here we just record the ones aimed at our own session.
+    this.ptyManager.onDanger((e) => {
+      if (e.sessionId !== this.session?.ptySessionId) return;
+      this.dangerWarnings.push(e);
+      if (
+        this.dangerWarnings.length > OrchestratorManager.MAX_DANGER_WARNINGS
+      ) {
+        this.dangerWarnings.shift();
+      }
+      console.warn(
+        `[OrchestratorManager:${this.kind}] dangerous command ${
+          e.blocked ? "BLOCKED" : "detected"
+        } on orchestrator PTY (${e.match.severity}: ${e.match.pattern})`,
+      );
+    });
+  }
+
+  /** Dangerous-command detections recorded for this orchestrator's PTY. */
+  getDangerWarnings(): DangerEvent[] {
+    return [...this.dangerWarnings];
   }
 
   isRunning(): boolean {

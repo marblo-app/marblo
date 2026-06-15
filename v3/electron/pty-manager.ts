@@ -1,11 +1,24 @@
 import * as pty from "node-pty";
 import os from "os";
+import { detectDangerousCommand, type DangerMatch } from "./danger-command";
 
 export interface PtySession {
   id: string;
   name: string;
   process: pty.IPty;
   shell: string;
+}
+
+/** Emitted when a dangerous command is detected on a writeAndSubmit. */
+export interface DangerEvent {
+  /** PTY session id the write was targeting. */
+  sessionId: string;
+  /** The text that triggered detection. */
+  text: string;
+  /** What matched. */
+  match: DangerMatch;
+  /** Whether the write was blocked (not sent) by the active policy. */
+  blocked: boolean;
 }
 
 // Output that only appears once an agent CLI has actually accepted a submit
@@ -21,6 +34,48 @@ const SUBMIT_SIGNAL = /esc to interrupt|[✻✶✳✽✢]|↓\s*\d+\s*tokens|tok
 export class PtyManager {
   private sessions: Map<string, PtySession> = new Map();
   private writeAndSubmitQueues: Map<string, Promise<void>> = new Map();
+
+  // --- Dangerous-command safety guard (MVP-P0-1) ---
+  // Every writeAndSubmit is screened by detectDangerousCommand. Matches are
+  // logged and broadcast to listeners. By default nothing is blocked (warn-only)
+  // to preserve existing behavior; an operator can flip blocking on for the
+  // non-isolated paths (e.g. the orchestrator, which drives the main checkout).
+  private dangerListeners: Array<(e: DangerEvent) => void> = [];
+  private blockDangerous = false;
+
+  /**
+   * Subscribe to dangerous-command detections. Returns an unsubscribe fn.
+   * Multiple subscribers are supported (orchestrator + future UI/IPC).
+   */
+  onDanger(listener: (e: DangerEvent) => void): () => void {
+    this.dangerListeners.push(listener);
+    return () => {
+      this.dangerListeners = this.dangerListeners.filter((l) => l !== listener);
+    };
+  }
+
+  /**
+   * Policy flag: when true, a detected high-severity command is BLOCKED
+   * (the write is dropped, never reaching the PTY). Medium-severity is always
+   * warn-only. Defaults to false (warn-only for everything).
+   */
+  setBlockDangerous(block: boolean): void {
+    this.blockDangerous = block;
+  }
+
+  private emitDanger(e: DangerEvent): void {
+    for (const l of this.dangerListeners) {
+      try {
+        l(e);
+      } catch (err) {
+        console.error(
+          `[PtyManager] danger listener threw: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+  }
 
   create(
     id: string,
@@ -96,6 +151,20 @@ export class PtyManager {
   ): void {
     const session = this.sessions.get(id);
     if (!session) return;
+
+    // Safety guard: screen the payload for dangerous commands before it reaches
+    // the PTY. Warn always; block high-severity only when policy is enabled.
+    const match = detectDangerousCommand(text);
+    if (match.matched) {
+      const blocked = this.blockDangerous && match.severity === "high";
+      console.warn(
+        `[PtyManager] dangerous command detected (${match.severity}: ${
+          match.pattern
+        }) for ${id}${blocked ? " — BLOCKED" : ""}`,
+      );
+      this.emitDanger({ sessionId: id, text, match, blocked });
+      if (blocked) return;
+    }
 
     const previous = this.writeAndSubmitQueues.get(id) ?? Promise.resolve();
     const next = previous
