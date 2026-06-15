@@ -7,7 +7,8 @@
     "foundation50": "파운더 100",
     "login": "로그인",
     "signup": "회원가입",
-    "myLectures": "내 강의"
+    "myLectures": "내 강의",
+    "logout": "로그아웃"
   },
   "hero": {
     "title": "혼자서 팀 전체의\n성과를 만드세요",

@@ -7,7 +7,8 @@
     "foundation50": "ファウンダー100",
     "login": "ログイン",
     "signup": "新規登録",
-    "myLectures": "マイ講座"
+    "myLectures": "マイ講座",
+    "logout": "ログアウト"
   },
   "hero": {
     "title": "一人で、チーム全体の\n成果を出す",
