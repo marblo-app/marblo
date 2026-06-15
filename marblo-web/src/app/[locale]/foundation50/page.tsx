@@ -4,7 +4,7 @@ import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import {
   Sparkles,
-  GraduationCap,
+  Rocket,
   Gift,
   Crown,
   FileText,
@@ -12,7 +12,6 @@ import {
   Key,
   Calendar,
 } from "lucide-react";
-import BetaTester50PriceBlock from "@/components/BetaTester50PriceBlock";
 import BetaTester50SignupForm from "@/components/BetaTester50SignupForm";
 
 export default function Foundation50Page() {
@@ -21,7 +20,7 @@ export default function Foundation50Page() {
 
   const benefits = [
     {
-      icon: GraduationCap,
+      icon: Rocket,
       titleKey: "benefit1_title",
       bodyKey: "benefit1_body",
     },
@@ -76,10 +75,6 @@ export default function Foundation50Page() {
             {t("subtitle")}
           </p>
           <p className="text-sm text-zinc-500 mt-4">{t("limit_note")}</p>
-
-          <div className="mt-7 flex justify-center">
-            <BetaTester50PriceBlock align="center" />
-          </div>
 
           <div className="mt-8 max-w-xl mx-auto text-left">
             <BetaTester50SignupForm source="foundation50_page" />

@@ -1,4 +1,7 @@
-// Foundation 50 (KO: 베타 얼리버드 50 / 초기 베타테스터 50인) shared config.
+// Founder beta (KO: 마블로 파운더 100인 무료 베타) shared config.
+// NOTE: internal identifiers (foundation50 route, betatester50_waitlist
+// collection, NEXT_PUBLIC_FOUNDATION50_OPEN env) keep the legacy "50" name
+// to preserve existing links and signup data — only user-facing copy says 100.
 //
 // Signup now writes directly to Firestore (collection: betatester50_waitlist)
 // via BetaTester50SignupForm — no Google Form involved.

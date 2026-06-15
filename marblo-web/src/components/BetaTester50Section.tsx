@@ -6,10 +6,9 @@ import Link from "next/link";
 import { collection, getCountFromServer } from "firebase/firestore";
 import { Sparkles } from "lucide-react";
 import { db } from "@/lib/firebase";
-import BetaTester50PriceBlock from "./BetaTester50PriceBlock";
 import BetaTester50SignupForm from "./BetaTester50SignupForm";
 
-const SEAT_CAP = 50;
+const SEAT_CAP = 100;
 const COLLECTION = "betatester50_waitlist";
 // Only reveal the "N seats left" counter once at least this many people
 // have signed up — empty counters read as "nobody's buying." Configurable
@@ -43,7 +42,7 @@ export default function BetaTester50Section() {
 
   const isClosed = seatsLeft === 0;
   // Reveal the live counter only after enough seats are taken — until then
-  // show the static "한정 50명" copy so the section never reads as empty.
+  // show the static "한정 100명" copy so the section never reads as empty.
   const seatsTaken = seatsLeft === null ? 0 : SEAT_CAP - seatsLeft;
   const showLiveCounter =
     seatsLeft !== null && seatsTaken >= COUNTER_REVEAL_THRESHOLD;
@@ -74,10 +73,6 @@ export default function BetaTester50Section() {
             <p className="mt-4 text-lg md:text-xl text-zinc-300 leading-relaxed max-w-2xl">
               {t("subtitle")}
             </p>
-
-            <div className="mt-7">
-              <BetaTester50PriceBlock />
-            </div>
 
             <div className="mt-8">
               <BetaTester50SignupForm
