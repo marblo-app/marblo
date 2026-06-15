@@ -184,6 +184,7 @@ if (typeof PerformanceObserver !== "undefined") {
 function AppContent() {
   const { user, loading } = useAuth();
   const subscribeToProjects = useProjectStore((s) => s.subscribeToProjects);
+  const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
   const setAutoSelectFirstProject = useProjectStore(
     (s) => s.setAutoSelectFirstProject,
   );
@@ -276,6 +277,22 @@ function AppContent() {
 
   if (!user) {
     return <LoginPage />;
+  }
+
+  // Cold-start gate: the renderer can mount before the first projects snapshot
+  // has settled, which would flash an empty board ("No Projects") until a manual
+  // refresh. Hold a loading state until the projects store has hydrated. Skipped
+  // when Firebase listeners are disabled (diagnostic) — otherwise we'd hang here
+  // forever since nothing would ever flip projectsHydrated.
+  if (FIREBASE_LISTENERS_ENABLED && !projectsHydrated) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-900">
+        <div className="text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
+          <p className="mt-3 text-sm text-gray-400">프로젝트 불러오는 중...</p>
+        </div>
+      </div>
+    );
   }
 
   return <Layout />;

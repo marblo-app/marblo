@@ -14,11 +14,21 @@ function toProject(raw: Record<string, unknown>): Project {
   return convertTimestamps<Project>(raw, DATE_FIELDS);
 }
 
+// Cold-start race: the very first onSnapshot can arrive empty before Firestore
+// has hydrated / the auth token has propagated to the SDK (a permission error is
+// collapsed to [] by subscribeToCollection). Re-arm the listener a few times with
+// backoff so the board recovers without a manual renderer refresh.
+const COLD_START_RETRY_BACKOFF_MS = [300, 800, 1500];
+
 interface ProjectState {
   currentProject: Project | null;
   projects: Project[];
   autoSelectFirstProject: boolean;
   loading: boolean;
+  // True once the first projects snapshot has settled (carried data, or the
+  // cold-start retries were exhausted). Lets the UI distinguish "still loading
+  // on cold start" from "genuinely has no projects".
+  projectsHydrated: boolean;
   error: string | null;
 
   setCurrentProject: (project: Project) => void;
@@ -43,6 +53,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   autoSelectFirstProject: true,
   loading: false,
+  projectsHydrated: false,
   error: null,
 
   setCurrentProject: (project: Project) => {
@@ -129,26 +140,76 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   subscribeToProjects: (userId: string) => {
-    set({ loading: true });
-    return subscribeToCollection<Record<string, unknown>>(
-      COLLECTION,
-      [where("members", "array-contains", userId)],
-      (docs) => {
-        const projects = docs.map(toProject);
-        const { currentProject, autoSelectFirstProject } = get();
+    set({ loading: true, projectsHydrated: false });
 
-        // Auto-select first project if none selected
-        let nextCurrent = currentProject;
-        if (!nextCurrent && autoSelectFirstProject && projects.length > 0) {
-          nextCurrent = projects[0];
-        } else if (nextCurrent) {
-          // Sync current project with latest data
-          const updated = projects.find((p) => p.id === nextCurrent!.id);
-          nextCurrent = updated || (projects.length > 0 ? projects[0] : null);
-        }
+    let cancelled = false;
+    let innerUnsub: (() => void) | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    // Only the *initial* cold-start triggers retries. Once we accept an
+    // authoritative snapshot, later emptying (e.g. last project deleted) must
+    // not re-arm the listener.
+    let settled = false;
 
-        set({ projects, currentProject: nextCurrent, loading: false });
-      },
-    );
+    const arm = () => {
+      if (cancelled) return;
+      innerUnsub = subscribeToCollection<Record<string, unknown>>(
+        COLLECTION,
+        [where("members", "array-contains", userId)],
+        (docs) => {
+          if (cancelled) return;
+          const projects = docs.map(toProject);
+          const { currentProject, autoSelectFirstProject } = get();
+
+          // Auto-select first project if none selected
+          let nextCurrent = currentProject;
+          if (!nextCurrent && autoSelectFirstProject && projects.length > 0) {
+            nextCurrent = projects[0];
+          } else if (nextCurrent) {
+            // Sync current project with latest data
+            const updated = projects.find((p) => p.id === nextCurrent!.id);
+            nextCurrent =
+              updated || (projects.length > 0 ? projects[0] : null);
+          }
+
+          // Cold-start: first snapshot empty → likely transient (cold cache /
+          // token lag). Tear down this listener and re-arm after a backoff,
+          // keeping the store loading/unhydrated so the UI shows a spinner
+          // instead of a false "No Projects". Give up after a few tries.
+          if (
+            !settled &&
+            projects.length === 0 &&
+            attempt < COLD_START_RETRY_BACKOFF_MS.length
+          ) {
+            const delay = COLD_START_RETRY_BACKOFF_MS[attempt];
+            attempt += 1;
+            // Keep whatever currentProject we have but don't flip loading off.
+            set({ projects, currentProject: nextCurrent });
+            if (innerUnsub) {
+              innerUnsub();
+              innerUnsub = null;
+            }
+            retryTimer = setTimeout(arm, delay);
+            return;
+          }
+
+          settled = true;
+          set({
+            projects,
+            currentProject: nextCurrent,
+            loading: false,
+            projectsHydrated: true,
+          });
+        },
+      );
+    };
+
+    arm();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (innerUnsub) innerUnsub();
+    };
   },
 }));

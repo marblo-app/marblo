@@ -38,6 +38,8 @@ const ROLES: AgentRole[] = ["backend", "frontend", "test", "devops"];
 
 export function KanbanBoard() {
   const currentProject = useProjectStore((s) => s.currentProject);
+  const projectsLoading = useProjectStore((s) => s.loading);
+  const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
   const tasks = useTaskStore((s) => s.tasks);
   const loading = useTaskStore((s) => s.loading);
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
@@ -162,6 +164,19 @@ export function KanbanBoard() {
     });
 
   if (!currentProject) {
+    // Distinguish "still loading on cold start" from "genuinely no project".
+    // Until the projects store has hydrated (or while it's actively loading),
+    // show a spinner rather than a false "No Projects" empty state.
+    if (!projectsHydrated || projectsLoading) {
+      return (
+        <div className="flex h-full items-center justify-center text-gray-400">
+          <div className="text-center">
+            <div className="animate-spin h-8 w-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-3" />
+            <p className="text-sm">Loading projects...</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
         <div className="text-center">
