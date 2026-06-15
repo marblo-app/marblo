@@ -22,6 +22,7 @@ import {
 const HOME = os.homedir();
 const CLAUDE_DIR = path.join(HOME, ".claude");
 const CLAUDE_JSON = path.join(HOME, ".claude.json");
+const CODEX_DIR = path.join(HOME, ".codex");
 
 export type InstallStatus =
   | "installed"
@@ -755,4 +756,144 @@ export function scheduleHarnessUpdates(
   };
   void run();
   updateSweepTimer = setInterval(run, UPDATE_CHECK_INTERVAL_MS);
+}
+
+// ── CLI auth live-probe ────────────────────────────────────────────
+//
+// A CLI binary being on PATH only means it's *installed* — not that the
+// user has logged in. Spawning an unauthenticated `claude` / `codex` drops
+// into an interactive login prompt that hangs the PTY (no readiness pattern
+// ever matches). Before spawning, the UI live-probes login state via cheap,
+// NON-INTERACTIVE signals (env keys + on-disk credential files) so it can
+// surface a "login required" badge with the exact command to run instead of
+// silently hanging.
+
+export type CliAuthModel = "claude" | "codex";
+
+export interface CliAuthResult {
+  /** Binary present on PATH. */
+  installed: boolean;
+  /** Login/credentials detected. Always false when `installed` is false. */
+  authenticated: boolean;
+  /** Concrete next command to run (install or login) when blocked. */
+  action?: string;
+}
+
+function envHasValue(...names: string[]): boolean {
+  return names.some((n) => {
+    const v = process.env[n];
+    return typeof v === "string" && v.trim().length > 0;
+  });
+}
+
+/**
+ * macOS keychain probe — best-effort fallback. Claude Code stores OAuth
+ * tokens in the login keychain on macOS rather than a flat file. We only
+ * check *existence* (no `-w`, so the secret is never read) and cap it with a
+ * short timeout so a keychain access prompt can't hang the probe.
+ */
+async function macKeychainHasClaudeCreds(): Promise<boolean> {
+  if (process.platform !== "darwin") return false;
+  const security = findBinaryPath("security");
+  if (!security) return false;
+  const r = await runCommand(
+    security,
+    ["find-generic-password", "-s", "Claude Code-credentials"],
+    undefined,
+    2_000,
+  );
+  return r.code === 0;
+}
+
+/** Synchronous, non-interactive signals that Claude Code is logged in. */
+function claudeAuthenticatedSync(): boolean {
+  // 1) API key via env — Claude Code authenticates non-interactively with it.
+  if (envHasValue("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")) return true;
+  // 2) Linux/Windows OAuth token store.
+  if (fileExists(path.join(CLAUDE_DIR, ".credentials.json"))) return true;
+  // 3) `~/.claude.json` records the logged-in account / configured key.
+  const cfg = readClaudeJson() as Record<string, unknown>;
+  if (cfg && typeof cfg === "object") {
+    if (cfg.oauthAccount && typeof cfg.oauthAccount === "object") return true;
+    if (
+      cfg.customApiKeyResponses &&
+      typeof cfg.customApiKeyResponses === "object"
+    ) {
+      return true;
+    }
+    if (typeof cfg.primaryApiKey === "string" && cfg.primaryApiKey.length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Non-interactive signals that Codex is logged in. */
+function codexAuthenticated(): boolean {
+  // Codex honors an API key from the environment.
+  if (envHasValue("OPENAI_API_KEY")) return true;
+  // `codex login` writes credentials to ~/.codex/auth.json.
+  const authPath = path.join(CODEX_DIR, "auth.json");
+  if (!fileExists(authPath)) return false;
+  try {
+    const raw = JSON.parse(fs.readFileSync(authPath, "utf-8")) as Record<
+      string,
+      unknown
+    >;
+    if (!raw || typeof raw !== "object") return false;
+    if (
+      typeof raw.OPENAI_API_KEY === "string" &&
+      raw.OPENAI_API_KEY.length > 0
+    ) {
+      return true;
+    }
+    if (raw.tokens && typeof raw.tokens === "object") return true;
+    // A non-empty auth.json generally means a completed login.
+    return Object.keys(raw).length > 0;
+  } catch {
+    // Exists but unreadable/corrupt — treat as not authenticated.
+    return false;
+  }
+}
+
+/**
+ * Live-probe install + login state for a required CLI. Fast and
+ * non-interactive: PATH lookup + env/file checks, with a single guarded
+ * keychain existence check on macOS for Claude. Never spawns the CLI itself.
+ */
+export async function probeCliAuth(
+  model: CliAuthModel,
+): Promise<CliAuthResult> {
+  if (model === "claude") {
+    if (!isBinaryOnPath("claude")) {
+      return {
+        installed: false,
+        authenticated: false,
+        action: "npm install -g @anthropic-ai/claude-code",
+      };
+    }
+    let authed = claudeAuthenticatedSync();
+    if (!authed) authed = await macKeychainHasClaudeCreds();
+    return authed
+      ? { installed: true, authenticated: true }
+      : { installed: true, authenticated: false, action: "claude login" };
+  }
+  if (model === "codex") {
+    if (!isBinaryOnPath("codex")) {
+      return {
+        installed: false,
+        authenticated: false,
+        action: "npm install -g @openai/codex",
+      };
+    }
+    return codexAuthenticated()
+      ? { installed: true, authenticated: true }
+      : { installed: true, authenticated: false, action: "codex login" };
+  }
+  // Exhaustive guard for an unexpected model value.
+  return {
+    installed: false,
+    authenticated: false,
+    action: `unknown model: ${String(model)}`,
+  };
 }

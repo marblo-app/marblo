@@ -36,6 +36,8 @@ import {
   uninstallPackage,
   scheduleHarnessUpdates,
   getCatalogVersions,
+  probeCliAuth,
+  type CliAuthModel,
 } from "./harness-manager";
 import { FlowRunner } from "./flow-engine/flow-runner";
 import { KanbanBridge } from "./flow-engine/kanban-bridge";
@@ -3283,6 +3285,23 @@ ipcMain.handle("harness:uninstall", async (_event, id: string) => {
     };
   }
 });
+
+// Live-probe a required CLI's install + login state so the UI can show a
+// "login required" badge instead of spawning into a hanging auth prompt.
+ipcMain.handle(
+  "harness:cliAuthCheck",
+  async (_event, payload: { model: CliAuthModel }) => {
+    try {
+      return await probeCliAuth(payload.model);
+    } catch (err) {
+      return {
+        installed: false,
+        authenticated: false,
+        action: err instanceof Error ? err.message : "probe failed",
+      };
+    }
+  },
+);
 
 app.whenReady().then(async () => {
   // safeStorage only comes online after `ready`. The module-load

@@ -24,6 +24,13 @@ const STATUS_LABEL: Record<HarnessPackage["status"], string> = {
   unknown: "확인 중",
 };
 
+// Catalog packages whose login state we live-probe (binary on PATH ≠ logged
+// in — spawning an unauthenticated CLI hangs on its login prompt).
+const CLI_AUTH_MODELS: Record<string, "claude" | "codex"> = {
+  "cli-claude-code": "claude",
+  "cli-codex": "codex",
+};
+
 export function HarnessStore({ onClose }: HarnessStoreProps) {
   const [packages, setPackages] = useState<HarnessPackage[]>([]);
   const [versions, setVersions] = useState<Record<string, HarnessVersionInfo>>(
@@ -33,6 +40,24 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [authStates, setAuthStates] = useState<Record<string, CliAuthResult>>(
+    {},
+  );
+  const [authChecking, setAuthChecking] = useState<Record<string, boolean>>({});
+
+  const refreshAuth = useCallback(async (pkgId: string) => {
+    const model = CLI_AUTH_MODELS[pkgId];
+    if (!model) return;
+    setAuthChecking((prev) => ({ ...prev, [pkgId]: true }));
+    try {
+      const res = await window.electronAPI.harness.cliAuthCheck(model);
+      setAuthStates((prev) => ({ ...prev, [pkgId]: res }));
+    } catch {
+      /* keep previous auth state — probe is best-effort */
+    } finally {
+      setAuthChecking((prev) => ({ ...prev, [pkgId]: false }));
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -55,6 +80,13 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Live-probe CLI login state whenever the catalog (re)loads.
+  useEffect(() => {
+    for (const id of Object.keys(CLI_AUTH_MODELS)) {
+      if (packages.some((p) => p.id === id)) void refreshAuth(id);
+    }
+  }, [packages, refreshAuth]);
 
   const filtered = packages.filter(
     (p) => filter === "all" || p.category === filter,
@@ -216,6 +248,10 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                 const isBundled = pkg.install.kind === "bundled";
                 const isManual = pkg.install.kind === "manual";
                 const ver = versions[pkg.id];
+                const auth = CLI_AUTH_MODELS[pkg.id]
+                  ? authStates[pkg.id]
+                  : undefined;
+                const authBusy = !!authChecking[pkg.id];
                 return (
                   <div
                     key={pkg.id}
@@ -251,6 +287,21 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                               ? "수동"
                               : "미설치"}
                         </span>
+                        {auth && isInstalled && (
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] ${
+                              auth.authenticated
+                                ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
+                                : "bg-[#f9e2af]/20 text-[#f9e2af]"
+                            }`}
+                          >
+                            {authBusy
+                              ? "인증 확인 중…"
+                              : auth.authenticated
+                                ? "Ready"
+                                : "인증 필요"}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <p className="mb-2 text-xs text-[#bac2de]">
@@ -270,6 +321,25 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                         {ver.updateState === "up-to-date" && (
                           <span className="text-[#6c7086]">(최신)</span>
                         )}
+                      </div>
+                    )}
+                    {auth && isInstalled && !auth.authenticated && (
+                      <div className="mb-3 rounded border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-2 py-1.5 text-[10px] text-[#f9e2af]">
+                        <div className="mb-1.5">
+                          로그인이 필요합니다. 터미널에서{" "}
+                          <code className="rounded bg-[#313244] px-1 py-0.5 text-[#f9e2af]">
+                            {auth.action ?? "login"}
+                          </code>{" "}
+                          실행 후 Re-check 하세요. (미인증 상태로 spawn 시
+                          로그인 프롬프트에서 멈춥니다)
+                        </div>
+                        <button
+                          onClick={() => refreshAuth(pkg.id)}
+                          disabled={authBusy}
+                          className="rounded bg-[#f9e2af]/20 px-2 py-0.5 text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/30 disabled:opacity-50"
+                        >
+                          {authBusy ? "확인 중…" : "Re-check"}
+                        </button>
                       </div>
                     )}
                     <div className="flex items-center gap-2">

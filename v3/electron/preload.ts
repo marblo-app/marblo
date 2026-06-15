@@ -466,6 +466,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
         success: boolean;
         error?: string;
       }>,
+    cliAuthCheck: (model: "claude" | "codex") =>
+      ipcRenderer.invoke("harness:cliAuthCheck", { model }) as Promise<{
+        installed: boolean;
+        authenticated: boolean;
+        action?: string;
+      }>,
   },
   fs: {
     readTree: (rootPath: string) => ipcRenderer.invoke("fs:readTree", rootPath),

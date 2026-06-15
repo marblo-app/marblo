@@ -506,11 +506,18 @@ interface HarnessVersionInfo {
   updateState: "up-to-date" | "outdated" | "unknown";
 }
 
+interface CliAuthResult {
+  installed: boolean;
+  authenticated: boolean;
+  action?: string;
+}
+
 interface HarnessAPI {
   list: () => Promise<HarnessPackage[]>;
   versions: () => Promise<Record<string, HarnessVersionInfo>>;
   install: (id: string) => Promise<{ success: boolean; error?: string }>;
   uninstall: (id: string) => Promise<{ success: boolean; error?: string }>;
+  cliAuthCheck: (model: "claude" | "codex") => Promise<CliAuthResult>;
 }
 
 type ConnectionAccessMode = "read" | "write" | "pr" | "commit";
