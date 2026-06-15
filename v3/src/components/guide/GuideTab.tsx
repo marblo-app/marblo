@@ -168,7 +168,58 @@ const SECTIONS: GuideSection[] = [
     ),
   },
   {
-    title: "7. 다음 단계",
+    title: "7. 텔레그램 채널 연결 — 에이전트 알림 / 제어를 텔레그램으로",
+    body: (
+      <div className="text-sm text-[#bac2de] leading-relaxed space-y-3">
+        <p>
+          텔레그램 봇을 연결하면 에이전트 진행 상황을 알림으로 받고, 텔레그램
+          채팅으로 오케스트레이터에 메시지를 보낼 수 있습니다. 아래 순서대로
+          설정합니다.
+        </p>
+        <ol className="list-decimal pl-5 space-y-2">
+          <li>
+            <strong>봇 생성 → 토큰 발급:</strong> 텔레그램에서{" "}
+            <code className="text-[#89b4fa]">@BotFather</code> 와 대화를 열고{" "}
+            <code className="text-[#89b4fa]">/newbot</code> 으로 봇을 만든 뒤,
+            발급된 <strong>봇 토큰</strong>(
+            <code className="text-[#89b4fa]">123456:ABC-DEF...</code> 형식)을
+            복사합니다.
+          </li>
+          <li>
+            <strong>봇을 채널 / 그룹에 추가 → chatId 확인:</strong> 알림을 받을
+            채널(또는 그룹)에 위 봇을 멤버로 추가한 뒤, 해당 대화의{" "}
+            <strong>chatId</strong> 를 확인합니다. 예:{" "}
+            <code className="text-[#89b4fa]">
+              api.telegram.org/bot&lt;토큰&gt;/getUpdates
+            </code>{" "}
+            응답의 <code className="text-[#89b4fa]">chat.id</code> 값. 채널은
+            보통 <code className="text-[#89b4fa]">-100...</code> 으로
+            시작합니다.
+          </li>
+          <li>
+            <strong>telegram 플러그인 설치:</strong> 사용자 Claude Code에{" "}
+            <code className="text-[#89b4fa]">
+              plugin:telegram@claude-plugins-official
+            </code>{" "}
+            플러그인을 설치합니다 (Harness 스토어 또는 플러그인 마켓).
+          </li>
+          <li>
+            <strong>하네스탭 채널 패널에 입력 → 토글:</strong> 상단{" "}
+            <strong>Harness</strong> 탭의 채널 패널에 봇 토큰과 chatId 를
+            입력하고, 토글을 켜서 채널을 활성화합니다.
+          </li>
+        </ol>
+        <p className="rounded-md border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-3 py-2 text-[#f9e2af]">
+          ⚠️ 채널 설정은{" "}
+          <strong>이후 새로 launch 하는 오케스트레이터에만</strong> 적용됩니다.
+          이미 실행 중인 오케스트레이터에 반영하려면{" "}
+          <strong>해당 오케스트레이터를 재시작</strong>해야 합니다.
+        </p>
+      </div>
+    ),
+  },
+  {
+    title: "8. 다음 단계",
     body: (
       <ul className="list-disc pl-5 text-sm text-[#bac2de] space-y-1">
         <li>Board 탭에서 태스크 흐름 확인</li>
