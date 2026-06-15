@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Loader2, RefreshCw, Save, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronDown,
+  Loader2,
+  RefreshCw,
+  Save,
+  XCircle,
+} from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 
 type InboundCapability = "read" | "trigger";
@@ -70,6 +77,7 @@ export function TelegramChannelPanel() {
   const [status, setStatus] = useState<ChannelStatus | null>(null);
   const [chatId, setChatId] = useState("");
   const [botToken, setBotToken] = useState("");
+  const [guideOpen, setGuideOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -316,6 +324,63 @@ export function TelegramChannelPanel() {
           ))}
         </div>
       ) : null}
+
+      <div className="mt-3 rounded border border-[#313244] bg-[#1e1e2e]">
+        <button
+          type="button"
+          onClick={() => setGuideOpen((open) => !open)}
+          aria-expanded={guideOpen}
+          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-[#bac2de] hover:bg-[#313244]/60"
+        >
+          <span>어떻게 연결하나요?</span>
+          <ChevronDown
+            className={`h-4 w-4 text-[#6c7086] transition-transform ${
+              guideOpen ? "rotate-180" : ""
+            }`}
+          />
+        </button>
+        {guideOpen && (
+          <div className="space-y-3 border-t border-[#313244] px-3 py-3 text-[11px] leading-5 text-[#bac2de]">
+            <ol className="grid gap-2 md:grid-cols-2">
+              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
+                1.{" "}
+                <a
+                  href="https://t.me/BotFather"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#89b4fa] hover:underline"
+                >
+                  @BotFather
+                </a>
+                에서 봇을 만들고 bot token을 복사합니다.
+              </li>
+              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
+                2. 만든 봇을 사용할 채널 또는 그룹에 추가합니다.
+              </li>
+              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
+                3. 대상이 공개 채널이면 @username을, 비공개 채널/그룹이면
+                Telegram API 응답에서 chatId를 확인합니다.
+              </li>
+              <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
+                4. bot token과 chatId를 입력해 저장한 뒤 활성 토글을 켭니다.
+              </li>
+            </ol>
+            <div className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
+              <p className="mb-1 text-xs font-medium text-[#cdd6f4]">
+                Telegram 플러그인 필요
+              </p>
+              <p>
+                <code className="rounded bg-[#313244] px-1.5 py-0.5 text-[#cdd6f4]">
+                  --channels plugin:telegram@claude-plugins-official
+                </code>
+                이 동작하려면 telegram 플러그인이 설치되어 있어야 합니다. 하네스
+                스토어에서 telegram 플러그인을 설치하거나, CLI에서 같은 플러그인
+                이름으로 설치한 뒤 채널을 활성화하세요.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
