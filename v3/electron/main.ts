@@ -64,6 +64,14 @@ import {
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
 import { buildLaneContextId, isLaneContextId } from "./mcp-server/context";
 import {
+  getTelegramChannelConfig,
+  listTelegramChannelConfigs,
+  setTelegramChannelFromLocalSettings,
+  getTelegramChannelStatus,
+  removeTelegramChannel,
+  type TelegramChannelInput,
+} from "./telegram-channels";
+import {
   getProjectConnection,
   upsertProjectConnection,
   listProjectConnections,
@@ -2091,6 +2099,36 @@ ipcMain.handle(
 
 ipcMain.handle("connection:check", (_event, projectId: string) => {
   return checkProjectConnectionHealth(projectId);
+});
+
+// --- Telegram Channels IPC Handlers (텔레그램 T1·보안 민감) ---
+//
+// 프론트(T2)가 채널 설정을 읽기/쓰기/상태조회한다. ★쓰기(telegramChannel:set)는
+// 로컬 설정 경로 — 이 경로에서만 권한 파일(access.json)이 동기화된다(chmod 600).
+// 텔레그램 인바운드(다른 티켓)는 telegram-channels 의 read-only 함수만 import 하며
+// 권한을 변경할 수 없다(보안 불변식). chatId 가 비면 enabled 가 false 로 강등되고
+// status.canEnable=false 로 노출되어 프론트가 토글을 잠근다.
+
+ipcMain.handle("telegramChannel:get", (_event, projectId: string) => {
+  return getTelegramChannelConfig(projectId);
+});
+
+ipcMain.handle("telegramChannel:list", () => {
+  return listTelegramChannelConfigs();
+});
+
+ipcMain.handle("telegramChannel:set", (_event, input: TelegramChannelInput) => {
+  // 로컬 설정 경로 — 설정 저장 + access.json 동기화. 합성 상태를 돌려줘
+  // 프론트가 토글 잠금/사유(issues)를 즉시 반영하게 한다.
+  return setTelegramChannelFromLocalSettings(input);
+});
+
+ipcMain.handle("telegramChannel:status", (_event, projectId: string) => {
+  return getTelegramChannelStatus(projectId);
+});
+
+ipcMain.handle("telegramChannel:remove", (_event, projectId: string) => {
+  return removeTelegramChannel(projectId);
 });
 
 // --- Agent IPC Handlers ---

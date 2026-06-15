@@ -6,6 +6,7 @@ import { PtyManager } from "./pty-manager";
 import { AgentConfigGenerator, LaunchConfig } from "./agent-config";
 import type { ModelType } from "./agent-manager";
 import { contextForKind } from "./mcp-server/context";
+import { YOLO_FLAG, telegramChannelLaunchFlags } from "./telegram-channels";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
@@ -295,6 +296,29 @@ export class OrchestratorManager {
       },
       rootPath,
     );
+
+    // ── Telegram Channels 스폰 주입 (텔레그램 T1) ──────────────────────
+    // ★신규 오케스트레이터는 욜로(--dangerously-skip-permissions)와 채널 플래그
+    // (--channels plugin:telegram@...)를 함께 물고 시작한다. claude 의 욜로 플래그는
+    // buildCLICommand 가 이미 주입하지만(채널 인바운드 무인 트리거 전제), 여기서
+    // 존재를 한 번 더 보장한다 — 채널을 켜면서 욜로가 빠지는 일이 없도록.
+    // 채널 플래그는 그 프로젝트의 채널 연결이 "활성"(enabled && 프리플라이트 통과)
+    // 일 때만 주입한다. chatId 가 비어 활성 불가면 telegramChannelLaunchFlags 가
+    // 빈 배열을 돌려주므로 채널 없이 정상 부팅한다.
+    if (!launchConfig.args.includes(YOLO_FLAG)) {
+      launchConfig.args.unshift(YOLO_FLAG);
+    }
+    const channelFlags = telegramChannelLaunchFlags(projectId);
+    if (channelFlags.length > 0) {
+      launchConfig.args.push(...channelFlags);
+      console.log(
+        `[Orchestrator:${
+          this.kind
+        }] Telegram channel active → injecting ${channelFlags.join(
+          " ",
+        )} (+ ${YOLO_FLAG})`,
+      );
+    }
 
     // Resume must be scoped to THIS orchestrator kind. Board sessions are
     // labeled "Orchestrator", mission sessions "Orchestrator-mission". The old

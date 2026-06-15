@@ -510,6 +510,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
     check: (projectId: string) =>
       ipcRenderer.invoke("connection:check", projectId),
   },
+  // 오케스트레이터↔Telegram 채널 연결 (텔레그램 T1·보안 민감). T2 설정 UI 가
+  // 소비한다. set 은 로컬 설정 경로 — 여기서만 권한 파일(access.json)이 갱신된다.
+  // status.canEnable=false (chatId 없음 등)면 프론트가 토글을 잠가야 한다.
+  telegramChannel: {
+    get: (projectId: string) =>
+      ipcRenderer.invoke("telegramChannel:get", projectId),
+    list: () => ipcRenderer.invoke("telegramChannel:list"),
+    set: (input: {
+      projectId: string;
+      botToken?: string | null;
+      chatId?: string | null;
+      enabled?: boolean;
+      inboundCapability?: "read" | "trigger";
+    }) => ipcRenderer.invoke("telegramChannel:set", input),
+    status: (projectId: string) =>
+      ipcRenderer.invoke("telegramChannel:status", projectId),
+    remove: (projectId: string) =>
+      ipcRenderer.invoke("telegramChannel:remove", projectId),
+  },
   updater: {
     check: () => ipcRenderer.invoke("updater:check"),
     download: () => ipcRenderer.invoke("updater:download"),
