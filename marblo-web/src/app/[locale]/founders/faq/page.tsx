@@ -17,7 +17,7 @@ export default function Foundation50FaqPage() {
 
         <div className="relative max-w-3xl mx-auto px-4 pt-20 pb-10">
           <Link
-            href={`/${locale}/foundation50`}
+            href={`/${locale}/founders`}
             className="inline-flex items-center gap-1.5 text-sm text-indigo-300 hover:text-indigo-200 transition mb-6"
           >
             <ArrowLeft className="w-4 h-4" />

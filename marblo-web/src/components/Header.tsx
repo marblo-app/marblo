@@ -47,7 +47,7 @@ export default function Header() {
               {t("lectures")}
             </Link>
             <Link
-              href={`/${locale}/foundation50`}
+              href={`/${locale}/founders`}
               className="text-indigo-300 hover:text-indigo-200 transition font-medium"
             >
               {t("foundation50")}

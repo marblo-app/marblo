@@ -94,6 +94,7 @@ export default function BetaTester50Section() {
                   <li>{t("receive_item1")}</li>
                   <li>{t("receive_item2")}</li>
                   <li>{t("receive_item3")}</li>
+                  <li>{t("receive_item4")}</li>
                 </ul>
               </div>
               <div>
@@ -112,7 +113,7 @@ export default function BetaTester50Section() {
             </p>
 
             <Link
-              href={`/${locale}/foundation50`}
+              href={`/${locale}/founders`}
               className="inline-flex items-center gap-1 mt-4 text-sm text-indigo-300 hover:text-indigo-200 transition"
             >
               {t("details_link")}

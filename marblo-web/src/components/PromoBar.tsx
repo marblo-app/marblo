@@ -66,7 +66,7 @@ export default function PromoBar() {
           </div>
 
           <Link
-            href={`/${locale}/foundation50`}
+            href={`/${locale}/founders`}
             className="text-xs text-indigo-100/80 hover:text-white underline-offset-4 hover:underline shrink-0"
           >
             {t("details_cta")}

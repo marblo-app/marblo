@@ -49,7 +49,7 @@ export default function FounderFeedbackPage() {
     const unsub = onAuthStateChanged(auth, (u) => {
       setAuthLoading(false);
       if (!u) {
-        const redirectPath = `/${locale}/foundation50/feedback`;
+        const redirectPath = `/${locale}/founders/feedback`;
         router.push(
           `/${locale}/auth/login?redirect=${encodeURIComponent(redirectPath)}`
         );
@@ -152,7 +152,7 @@ export default function FounderFeedbackPage() {
         <div className="absolute inset-0 bg-gradient-to-b from-indigo-950/40 via-zinc-950 to-zinc-950" />
         <div className="relative max-w-2xl mx-auto px-4 pt-16 pb-8">
           <Link
-            href={`/${locale}/foundation50`}
+            href={`/${locale}/founders`}
             className="inline-flex items-center gap-1.5 text-sm text-indigo-300 hover:text-indigo-200 transition mb-6"
           >
             <ArrowLeft className="w-4 h-4" />

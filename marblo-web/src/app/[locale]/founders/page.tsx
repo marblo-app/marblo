@@ -11,6 +11,7 @@ import {
   MessageCircle,
   Key,
   Calendar,
+  Percent,
 } from "lucide-react";
 import BetaTester50SignupForm from "@/components/BetaTester50SignupForm";
 
@@ -33,6 +34,11 @@ export default function Foundation50Page() {
       icon: Crown,
       titleKey: "benefit3_title",
       bodyKey: "benefit3_body",
+    },
+    {
+      icon: Percent,
+      titleKey: "benefit4_title",
+      bodyKey: "benefit4_body",
     },
   ] as const;
 
@@ -87,7 +93,7 @@ export default function Foundation50Page() {
         <h2 className="text-2xl md:text-3xl font-bold text-center mb-10">
           {t("benefits_heading")}
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {benefits.map((b) => {
             const Icon = b.icon;
             return (
@@ -200,7 +206,7 @@ export default function Foundation50Page() {
 
         <div className="flex flex-col sm:flex-row gap-3 justify-center mt-8">
           <Link
-            href={`/${locale}/foundation50/faq`}
+            href={`/${locale}/founders/faq`}
             className="bg-indigo-600/20 border border-indigo-500/50 hover:bg-indigo-600/30 text-indigo-100 px-6 py-3 rounded-lg font-medium transition text-center"
           >
             {t("faq_link")}
