@@ -5,9 +5,21 @@ import {
   Link2,
   Loader2,
   RefreshCw,
+  ShieldCheck,
+  Unlink,
   XCircle,
 } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
+
+declare global {
+  interface ConnectionAPI {
+    setAccess: (input: {
+      projectId: string;
+      accessMode: ConnectionAccessMode;
+    }) => Promise<ProjectConnection>;
+    remove: (projectId: string) => Promise<boolean>;
+  }
+}
 
 interface AgentSummary {
   id: string;
@@ -16,6 +28,13 @@ interface AgentSummary {
   role: string;
   status: string;
 }
+
+const ACCESS_MODES: ProjectConnection["accessMode"][] = [
+  "read",
+  "write",
+  "pr",
+  "commit",
+];
 
 const ACCESS_LABEL: Record<ProjectConnection["accessMode"], string> = {
   read: "Read",
@@ -109,6 +128,10 @@ export function ConnectionStatusPanel() {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [accessModeDraft, setAccessModeDraft] =
+    useState<ProjectConnection["accessMode"]>("read");
+  const [applyingAccess, setApplyingAccess] = useState(false);
+  const [removingConnection, setRemovingConnection] = useState(false);
   const [checkResult, setCheckResult] = useState<ConnectionCheckResult | null>(
     null
   );
@@ -142,6 +165,10 @@ export function ConnectionStatusPanel() {
   useEffect(() => {
     void loadConnection();
   }, [loadConnection]);
+
+  useEffect(() => {
+    setAccessModeDraft(connection?.accessMode ?? "read");
+  }, [connection]);
 
   // 현재 프로젝트(id+folderPath)로 연결을 생성/재동기화한다. upsert 는
   // connect()→deriveGitRepoMeta 로 repoUrl·defaultBranch 를 git 에서 자동
@@ -191,6 +218,52 @@ export function ConnectionStatusPanel() {
       setChecking(false);
     }
   };
+
+  const handleApplyAccess = useCallback(async () => {
+    const projectId = currentProject?.id;
+    if (!projectId || !connection) return;
+
+    setApplyingAccess(true);
+    setError(null);
+    try {
+      await window.electronAPI.connection.setAccess({
+        projectId,
+        accessMode: accessModeDraft,
+      });
+      await loadConnection();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "권한 적용에 실패했습니다."
+      );
+    } finally {
+      setApplyingAccess(false);
+    }
+  }, [accessModeDraft, connection, currentProject?.id, loadConnection]);
+
+  const handleRemoveConnection = useCallback(async () => {
+    const projectId = currentProject?.id;
+    if (!projectId || !connection) return;
+
+    const confirmed = window.confirm(
+      "현재 프로젝트의 repo 연결을 해제하시겠습니까?"
+    );
+    if (!confirmed) return;
+
+    setRemovingConnection(true);
+    setError(null);
+    try {
+      await window.electronAPI.connection.remove(projectId);
+      setConnection(null);
+      setCheckResult(null);
+      setAccessModeDraft("read");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "연결 해제에 실패했습니다."
+      );
+    } finally {
+      setRemovingConnection(false);
+    }
+  }, [connection, currentProject?.id]);
 
   return (
     <div className="border-b border-[#313244] bg-[#181825] px-4 py-3">
@@ -346,6 +419,59 @@ export function ConnectionStatusPanel() {
               <span className="text-[11px] text-[#6c7086]">
                 현재 모드: {ACCESS_LABEL[connection.accessMode]}
               </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 rounded border border-[#313244] bg-[#1e1e2e] p-2">
+              <div className="inline-flex overflow-hidden rounded border border-[#313244]">
+                {ACCESS_MODES.map((mode) => {
+                  const selected = accessModeDraft === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setAccessModeDraft(mode)}
+                      disabled={applyingAccess || removingConnection}
+                      aria-pressed={selected}
+                      className={`h-8 px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                        selected
+                          ? "bg-[#89b4fa] text-[#1e1e2e]"
+                          : "bg-[#181825] text-[#bac2de] hover:bg-[#313244]"
+                      }`}
+                    >
+                      {ACCESS_LABEL[mode]}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleApplyAccess()}
+                disabled={
+                  applyingAccess ||
+                  removingConnection ||
+                  accessModeDraft === connection.accessMode
+                }
+                className="inline-flex h-8 items-center gap-1.5 rounded bg-[#a6e3a1]/20 px-3 text-xs font-medium text-[#a6e3a1] hover:bg-[#a6e3a1]/30 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {applyingAccess ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                )}
+                권한 적용
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleRemoveConnection()}
+                disabled={applyingAccess || removingConnection}
+                className="inline-flex h-8 items-center gap-1.5 rounded border border-[#f38ba8]/40 px-3 text-xs font-medium text-[#f38ba8] hover:bg-[#f38ba8]/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {removingConnection ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Unlink className="h-3.5 w-3.5" />
+                )}
+                연결 해제
+              </button>
             </div>
           </div>
 

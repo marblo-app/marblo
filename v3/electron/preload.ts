@@ -505,10 +505,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     get: (projectId: string) => ipcRenderer.invoke("connection:get", projectId),
     list: () => ipcRenderer.invoke("connection:list"),
     upsert: (input: unknown) => ipcRenderer.invoke("connection:upsert", input),
+    setAccess: (input: unknown) =>
+      ipcRenderer.invoke("connection:setAccess", input),
     touchLastRun: (projectId: string, at?: number) =>
       ipcRenderer.invoke("connection:touchLastRun", { projectId, at }),
     check: (projectId: string) =>
       ipcRenderer.invoke("connection:check", projectId),
+    remove: (projectId: string) =>
+      ipcRenderer.invoke("connection:remove", projectId),
   },
   // 오케스트레이터↔Telegram 채널 연결 (텔레그램 T1·보안 민감). T2 설정 UI 가
   // 소비한다. set 은 로컬 설정 경로 — 여기서만 권한 파일(access.json)이 갱신된다.
