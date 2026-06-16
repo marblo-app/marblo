@@ -36,8 +36,11 @@ describe("OrchestratorManager session reconnect", () => {
     return path.join(sessionsDir(), "marblo-orch-sessions.json");
   }
   function makeManager(kind = "board"): OrchestratorManager {
+    const ptyManager = {
+      onDanger: vi.fn(() => vi.fn()),
+    };
     const mgr = new OrchestratorManager(
-      {} as never,
+      ptyManager as never,
       {} as never,
       undefined,
       kind,
@@ -159,6 +162,7 @@ describe("OrchestratorManager session reconnect", () => {
       const ptyManager = {
         create: vi.fn(),
         onData: vi.fn(),
+        onDanger: vi.fn(() => vi.fn()),
         onExit: vi.fn(),
         writeAndSubmit: vi.fn(),
         kill: vi.fn(),
