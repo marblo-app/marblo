@@ -374,6 +374,56 @@ describe("dispatchTask — reuse race (M6)", () => {
   });
 });
 
+// ── tracked-model guard — agy progress activity fallback ─────────────
+
+describe("dispatchTask — requireTrackedModel", () => {
+  it("excludes idle antigravity agents and spawns a tracked model when tagged", async () => {
+    const { bridge, am, pty } = makeBridge();
+    am.seed(
+      makeInstance({
+        id: "agy-idle",
+        model: "antigravity",
+        role: "backend",
+        status: "idle",
+        cwd: "/repo",
+        projectId: "px",
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        enabledModels: ["antigravity", "gpt"],
+        tags: ["require_tracked_model"],
+      }),
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.action).toBe("spawned");
+    expect(res.model).toBe("gpt");
+    expect(am.launchCalls).toBe(1);
+    expect(pty.writes.some((w) => w.sid === "pty-agy-idle")).toBe(false);
+  });
+
+  it("does not honor an explicit antigravity hint when tracking is required", async () => {
+    const { bridge, am } = makeBridge();
+
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        model: "antigravity",
+        enabledModels: ["antigravity", "gpt"],
+        requireTrackedModel: true,
+      }),
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.action).toBe("spawned");
+    expect(res.model).toBe("gpt");
+    expect(am.launchCalls).toBe(1);
+  });
+});
+
 // ── [L3] per-task single agent under concurrency ────────────
 
 describe("dispatchTask — per-task uniqueness (L3)", () => {

@@ -513,6 +513,12 @@ interface MCPServerEntry {
 
 const SKILLS_DIR = path.resolve(__dirname, "..", "skills");
 const CONFIG_DIR = path.resolve(os.tmpdir(), "marblo-agent-configs");
+const ANTIGRAVITY_MCP_CONFIG_RELATIVE_PATHS = [
+  // Antigravity 2.0 shared config for IDE + CLI.
+  [".gemini", "config", "mcp_config.json"],
+  // Older agy CLI builds read this dedicated per-CLI config path.
+  [".gemini", "antigravity-cli", "mcp_config.json"],
+] as const;
 const TF_SKILL_DIR_CANDIDATES = [
   // Packaged app bundle.
   path.join(process.resourcesPath || "", "bundled-harness", "skills"),
@@ -549,6 +555,10 @@ export function geminiTmpDir(agentId: string): string {
 // MCP server entry point (compiled JS in dist-mcp/)
 function getMCPServerPath(): string {
   return path.resolve(__dirname, "..", "dist-mcp", "index.js");
+}
+
+function getAntigravityConfigHome(): string {
+  return process.env.MARBLO_AGY_CONFIG_HOME || os.homedir();
 }
 
 /**
@@ -1153,9 +1163,11 @@ export class AgentConfigGenerator {
     //   실패하고 OAuth 재인증 (invalid_grant) 로 빠진다. 사용자 본인
     //   ~/.gemini 를 그대로 쓰게 두는 게 유일한 안정 경로.
     //
-    // ★ MCP 통합 (2026-05-27 추가). agy 의 공식 MCP 설정 경로:
+    // ★ MCP 통합. agy 의 현재 공유 MCP 설정 경로:
+    //     ~/.gemini/config/mcp_config.json
+    //   구버전 agy CLI 호환을 위해 기존 전용 경로도 함께 머지한다:
     //     ~/.gemini/antigravity-cli/mcp_config.json
-    //   여기에 marblo MCP 항목을 머지한다. 다른 MCP 서버 항목은 그대로 보존.
+    //   각 파일의 다른 MCP 서버 항목은 그대로 보존.
     //   per-agent 변수 (MARBLO_AGENT_ID/PROJECT/BRIDGE_PORT/PATH) 는 spawn
     //   시점의 resolved env 를 literal 로 박는다. agy 의 MCP child 는 항상
     //   PTY parent env 를 상속/치환하지 않으므로 ${VAR} placeholder 를 쓰면
@@ -1165,13 +1177,10 @@ export class AgentConfigGenerator {
     //   제약: 단일 Marblo 인스턴스 가정. 여러 Marblo 윈도우가 같은 글로벌
     //   파일에 동시 write 하면 마지막 writer 가 이김 (단, marblo entry 자체는
     //   거의 idempotent 라 실제 충돌은 드묾). 다중 인스턴스 격리는 별도 트랙.
-    const globalConfigDir = path.join(
-      os.homedir(),
-      ".gemini",
-      "antigravity-cli",
+    const agyConfigHome = getAntigravityConfigHome();
+    const globalConfigPaths = ANTIGRAVITY_MCP_CONFIG_RELATIVE_PATHS.map(
+      (parts) => path.join(agyConfigHome, ...parts),
     );
-    fs.mkdirSync(globalConfigDir, { recursive: true });
-    const globalConfigPath = path.join(globalConfigDir, "mcp_config.json");
 
     // agy launches MCP servers from this shared global config. Older code used
     // "${VAR}" placeholders for per-agent values, assuming agy would substitute
@@ -1185,26 +1194,40 @@ export class AgentConfigGenerator {
       marbloEnv[key] = value;
     }
 
-    let existing: Record<string, unknown> = {};
-    let parseError: unknown = null;
-    if (fs.existsSync(globalConfigPath)) {
-      try {
-        existing = JSON.parse(
-          fs.readFileSync(globalConfigPath, "utf-8"),
-        ) as Record<string, unknown>;
-      } catch (err) {
-        parseError = err;
-      }
-    }
+    const mergeResults: Array<{
+      globalConfigPath: string;
+      mergeFailed: boolean;
+      existingServerKeys: string[];
+    }> = [];
 
-    if (parseError) {
-      // 사용자의 손상된 JSON 을 함부로 덮어쓰지 않는다 — 로그만 남기고
-      // sentinel 만 생성해서 cleanup contract 충족. 사용자가 파일을 손보면
-      // 다음 spawn 부터 정상 머지.
-      console.warn(
-        `[agy] ${globalConfigPath} parse failed (${parseError}); leaving file untouched, MCP disabled for this agent.`,
-      );
-    } else {
+    for (const globalConfigPath of globalConfigPaths) {
+      fs.mkdirSync(path.dirname(globalConfigPath), { recursive: true });
+      let existing: Record<string, unknown> = {};
+      let parseError: unknown = null;
+      if (fs.existsSync(globalConfigPath)) {
+        try {
+          existing = JSON.parse(
+            fs.readFileSync(globalConfigPath, "utf-8"),
+          ) as Record<string, unknown>;
+        } catch (err) {
+          parseError = err;
+        }
+      }
+
+      if (parseError) {
+        // 사용자의 손상된 JSON 을 함부로 덮어쓰지 않는다. 다른 config path 는
+        // 계속 시도하되, sentinel 에 실패 경로를 남겨 디버그 가능하게 한다.
+        console.warn(
+          `[agy] ${globalConfigPath} parse failed (${parseError}); leaving file untouched, MCP disabled for this path.`,
+        );
+        mergeResults.push({
+          globalConfigPath,
+          mergeFailed: true,
+          existingServerKeys: [],
+        });
+        continue;
+      }
+
       const existingServers = (existing.mcpServers ?? {}) as Record<
         string,
         unknown
@@ -1220,28 +1243,45 @@ export class AgentConfigGenerator {
           },
         },
       };
-      fs.writeFileSync(
-        globalConfigPath,
-        JSON.stringify(merged, null, 2),
-        "utf-8",
-      );
-      console.info("[agy] merged Marblo MCP config", {
-        globalConfigPath,
-        command: mcpEntry.command,
-        args: mcpEntry.args,
-        envKeys: Object.keys(marbloEnv).sort(),
-        hasAgentId: !!marbloEnv.MARBLO_AGENT_ID,
-        hasProject: !!marbloEnv.MARBLO_PROJECT,
-        hasBridgePort: !!marbloEnv.MARBLO_BRIDGE_PORT,
-        hasContext: !!marbloEnv.MARBLO_CONTEXT,
-        existingServerKeys: Object.keys(existingServers).sort(),
-      });
-      // NOTE: do NOT trackFile() globalConfigPath — it's user-shared.
-      // cleanup() would clobber other agents' / other MCP servers' state.
+      const existingServerKeys = Object.keys(existingServers).sort();
+      try {
+        fs.writeFileSync(
+          globalConfigPath,
+          JSON.stringify(merged, null, 2),
+          "utf-8",
+        );
+        mergeResults.push({
+          globalConfigPath,
+          mergeFailed: false,
+          existingServerKeys,
+        });
+        console.info("[agy] merged Marblo MCP config", {
+          globalConfigPath,
+          command: mcpEntry.command,
+          args: mcpEntry.args,
+          envKeys: Object.keys(marbloEnv).sort(),
+          hasAgentId: !!marbloEnv.MARBLO_AGENT_ID,
+          hasProject: !!marbloEnv.MARBLO_PROJECT,
+          hasBridgePort: !!marbloEnv.MARBLO_BRIDGE_PORT,
+          hasContext: !!marbloEnv.MARBLO_CONTEXT,
+          existingServerKeys,
+        });
+      } catch (err) {
+        console.warn(
+          `[agy] ${globalConfigPath} write failed (${err}); MCP disabled for this path.`,
+        );
+        mergeResults.push({
+          globalConfigPath,
+          mergeFailed: true,
+          existingServerKeys,
+        });
+      }
     }
+    // NOTE: do NOT trackFile() global config paths — they're user-shared.
+    // cleanup() would clobber other agents' / other MCP servers' state.
 
     // 우리 CONFIG_DIR 의 sentinel 만 트래킹 → cleanup contract 만족.
-    // sentinel 에 globalConfigPath 를 기록해서 디버그 시 어디로 머지했는지
+    // sentinel 에 globalConfigPaths 를 기록해서 디버그 시 어디로 머지했는지
     // 추적 가능.
     const sentinelDir = path.join(CONFIG_DIR, `antigravity-home-${agentId}`);
     fs.mkdirSync(sentinelDir, { recursive: true });
@@ -1251,8 +1291,10 @@ export class AgentConfigGenerator {
       JSON.stringify(
         {
           agentId,
-          globalConfigPath,
-          mergeFailed: !!parseError,
+          globalConfigPath: globalConfigPaths[0],
+          globalConfigPaths,
+          mergeFailed: mergeResults.every((result) => result.mergeFailed),
+          mergeResults,
           marbloServer: {
             command: mcpEntry.command,
             args: mcpEntry.args,

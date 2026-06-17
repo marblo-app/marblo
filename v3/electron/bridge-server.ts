@@ -176,6 +176,43 @@ export function resolveNotifyTarget(
 
 // ── Dispatch types ──────────────────────────────────────────
 
+const TRACKED_MODEL_FALLBACKS: ModelType[] = ["claude", "gpt"];
+const TRACKED_MODEL_TAGS = new Set([
+  "require-tracked-model",
+  "require-tracked-models",
+  "tracked-model",
+  "tracked-model-required",
+  "progress-tracking",
+  "progress-tracking-required",
+  "activity-tracking",
+  "activity-tracking-required",
+  "needs-progress",
+  "needs-tracking",
+]);
+
+function normalizeDispatchTag(tag: string): string {
+  return tag.trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
+function isTrackedDispatchModel(model: ModelType): boolean {
+  return model !== "antigravity";
+}
+
+function dispatchRequiresTrackedModel(params: {
+  requireTrackedModel?: boolean;
+  tags?: string[];
+}): boolean {
+  if (params.requireTrackedModel) return true;
+  return (params.tags ?? []).some((tag) =>
+    TRACKED_MODEL_TAGS.has(normalizeDispatchTag(tag)),
+  );
+}
+
+function trackedModelCandidates(models: ModelType[]): ModelType[] {
+  const filtered = models.filter(isTrackedDispatchModel);
+  return filtered.length > 0 ? filtered : TRACKED_MODEL_FALLBACKS;
+}
+
 export interface DispatchTaskRequest {
   role: string;
   instruction: string;
@@ -197,6 +234,11 @@ export interface DispatchTaskRequest {
   /** System-initiated dispatch flag (M2 cap whitelist) — see SpawnAgentRequest.
    * Exempts this dispatch's restart/spawn from the per-plan concurrency cap. */
   system?: boolean;
+  /** When true, never assign this dispatch to a model whose progress/activity
+   * MCP telemetry is not reliable. Tags such as `require_tracked_model` and
+   * `progress-tracking` enable the same guard for MCP callers whose schema has
+   * not yet grown this explicit flag. */
+  requireTrackedModel?: boolean;
   /** simple 물리스폰 opt-in(§B). 기본 false 면 complexity==="simple" 은 종전대로
    * action="logical"(내부 서브에이전트)로 단락된다. true 면 logical 단락을 건너뛰고
    * cheap 모델(claude=resolveSimpleClaudeModel/기본 sonnet, gpt=low)로 격리 worktree
@@ -1029,7 +1071,12 @@ export class BridgeServer {
     // Fold "codex"/"agy" aliases onto canonical ids so an explicit model
     // request matches the right agents during reuse scoring AND spawns the
     // right CLI. undefined (no/unknown hint) falls through to tag scoring.
-    const model = normalizeModel(params.model);
+    const requiresTrackedModel = dispatchRequiresTrackedModel(params);
+    const requestedModel = normalizeModel(params.model);
+    const model =
+      requiresTrackedModel && requestedModel === "antigravity"
+        ? undefined
+        : requestedModel;
 
     // Append a completion-protocol footer so the worker knows which MCP
     // calls close the loop back to the orchestrator. Without this, agents
@@ -1066,6 +1113,10 @@ export class BridgeServer {
           agent.launchConfig?.env?.MARBLO_CONTEXT,
           params.contextId,
         ),
+      )
+      .filter(
+        (agent) =>
+          !requiresTrackedModel || isTrackedDispatchModel(agent.model),
       );
 
     // L3/RG — per-task single-agent guarantee. A task-bound live agent wins
@@ -1242,8 +1293,11 @@ export class BridgeServer {
         | ModelType[]
         | undefined) ||
       resolvePreset(process.env.MARBLO_MODEL_PRESET);
+    const eligibleModels = requiresTrackedModel
+      ? trackedModelCandidates(enabledModels as ModelType[])
+      : (enabledModels as ModelType[]);
     const selectedModel =
-      model || this.scoreModels(enabledModels as ModelType[], tags, complexity);
+      model || this.scoreModels(eligibleModels, tags, complexity);
     const agentName =
       params.nameHint ||
       `${role}-${selectedModel}-${Date.now().toString(36).slice(-4)}`;
@@ -1386,6 +1440,7 @@ export class BridgeServer {
     parent: DispatchTaskRequest,
     stages: NonNullable<DispatchTaskRequest["stages"]>,
   ): Promise<DispatchTaskResponse> {
+    const parentRequiresTrackedModel = dispatchRequiresTrackedModel(parent);
     const runStage = (
       stage: NonNullable<DispatchTaskRequest["stages"]>[number],
     ): Promise<DispatchTaskResponse> =>
@@ -1399,6 +1454,7 @@ export class BridgeServer {
         projectId: parent.projectId,
         parentAgentId: parent.parentAgentId,
         system: parent.system,
+        requireTrackedModel: parentRequiresTrackedModel,
         // taskId 의도적으로 비움 — 스텝마다 독립 에이전트(worktree 충돌 방지).
       });
 
