@@ -27,6 +27,7 @@
     "lint:fix": "eslint . --fix",
     "build:mcp": "tsc -p electron/mcp-server/tsconfig.json && echo '{\"type\":\"module\"}' > dist-mcp/package.json",
     "mcp": "node dist-mcp/index.js",
+    "relock": "bash scripts/relock.sh",
     "test": "vitest run",
     "test:watch": "vitest",
     "worktree:reap": "tsc -p electron/tsconfig.json && node dist-electron/scripts/reap-worktrees.js",

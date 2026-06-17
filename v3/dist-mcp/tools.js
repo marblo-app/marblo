@@ -1,17 +1,24 @@
 import { z } from "zod";
-import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, Timestamp, } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, Timestamp, } from "firebase/firestore";
 import { db } from "./firebase.js";
 import { resolveContext, resolveContextForWrite, resolveMissionContextForWrite, contextReadFilter, isLaneContextId, isOrchestratorAgentId, isTaskInReadContext, buildMissionStepReportedEvent, } from "./context.js";
 import { applyProjection, resolveDependentIfReady, } from "./projection.js";
-import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
+import { validateTaskBodyInput, taskBodyStorageFields, composeTaskBody, } from "./task-body.js";
+import { evaluateDeleteGuards } from "./task-delete.js";
+import { chunkBulkTasks, normalizeBulkTasksPayload, } from "./bulk-task-payload.js";
 import { formatAgentTaskRoleLabel, normalizeFirestoreFallbackAgentStatus, } from "./agent-status-labels.js";
+import { evaluateTerminalTaskReap, STALE_TERMINAL_REAP_MS, } from "./agent-reap.js";
+import { formatCompletionReport, resolveCompletionReport, } from "./completion-report.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 const VALID_TRANSITIONS = {
     // CLAIMED → TODO is the manual claim-recall path (renderer's
     // `unclaimTask`). Kept in sync with src/services/stateMachine.ts.
-    TODO: ["CLAIMED", "IN_PROGRESS"],
+    // TODO → DONE is the direct-complete path for logical / never-claimed tasks
+    // (orchestrator closes an internal sub-task out without a claim cycle) — no
+    // force=true needed.
+    TODO: ["CLAIMED", "IN_PROGRESS", "DONE"],
     CLAIMED: ["IN_PROGRESS", "REVIEW", "DONE", "FAILED", "TODO"],
     IN_PROGRESS: ["REVIEW", "DONE", "BLOCKED", "FAILED"],
     REVIEW: ["DONE", "TODO", "IN_PROGRESS"],
@@ -112,6 +119,70 @@ async function fetchTask(taskId) {
     if (!snap.exists())
         return null;
     return { id: snap.id, ...snap.data() };
+}
+function nonEmptyString(value) {
+    return typeof value === "string" && value.trim() ? value : null;
+}
+async function fetchAgentIdHint(agentId) {
+    if (!agentId)
+        return null;
+    try {
+        const snap = await getDoc(doc(db, "agents", agentId));
+        if (snap.exists()) {
+            const data = snap.data();
+            return {
+                id: snap.id,
+                name: nonEmptyString(data.name),
+                role: nonEmptyString(data.role),
+                status: nonEmptyString(data.status),
+                currentTaskId: nonEmptyString(data.currentTaskId),
+                source: "Firestore",
+            };
+        }
+    }
+    catch (err) {
+        console.warn("[MCP] Failed to check agent id in Firestore:", err);
+    }
+    const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+    if (!bridgePort)
+        return null;
+    try {
+        const projectId = process.env.MARBLO_PROJECT || "";
+        const url = projectId
+            ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(projectId)}`
+            : `http://127.0.0.1:${bridgePort}/agents`;
+        const response = await fetch(url);
+        const data = (await response.json());
+        const agents = Array.isArray(data.agents) ? data.agents : [];
+        const match = agents.find((a) => nonEmptyString(a.id) === agentId);
+        if (!match)
+            return null;
+        return {
+            id: agentId,
+            name: nonEmptyString(match.name),
+            role: nonEmptyString(match.role),
+            status: nonEmptyString(match.status),
+            currentTaskId: nonEmptyString(match.currentTaskId),
+            source: "Bridge",
+        };
+    }
+    catch (err) {
+        console.warn("[MCP] Failed to check agent id via bridge:", err);
+        return null;
+    }
+}
+function formatAgentIdAsTaskIdError(id, agent) {
+    const details = [
+        agent.name ? `name=${agent.name}` : null,
+        agent.role ? `role=${agent.role}` : null,
+        agent.status ? `status=${agent.status}` : null,
+        `source=${agent.source}`,
+    ].filter((part) => part !== null);
+    const agentDetails = details.length ? ` (${details.join(", ")})` : "";
+    const taskHint = agent.currentTaskId
+        ? ` Use get_task with currentTaskId=${agent.currentTaskId}.`
+        : " This agent has no currentTaskId, so there is no connected task to fetch.";
+    return `Error: '${id}' is an agent id, not a task id.${agentDetails}${taskHint}`;
 }
 function text(t) {
     return { content: [{ type: "text", text: t }] };
@@ -241,10 +312,83 @@ function capLines(lines, limit, hint) {
     if (lines.length <= limit)
         return lines.join("\n");
     const hidden = lines.length - limit;
-    return `${lines.slice(0, limit).join("\n")}\n… (+${hidden} more hidden — ${hint})`;
+    return `${lines
+        .slice(0, limit)
+        .join("\n")}\n… (+${hidden} more hidden — ${hint})`;
 }
 function isTerminalTaskStatus(s) {
     return s === "DONE" || s === "FAILED";
+}
+// ── 완료 보고(completion report) 규약 ──
+// 에이전트가 REVIEW/DONE 으로 닫을 때 "무엇이 문제였고 어떻게 풀었는지" 구조화
+// 요약을 티켓에 "✅ 완료 보고" activity 로 남기게 한다. 진행 add_activity 가
+// 흩어지고 최종 요약이 PR 본문에만 있어 보드/티켓에서 완료 내역을 한눈에 못 보던
+// 문제를 막는다. 순수 로직(포맷/판정/nudge)은 ./completion-report.ts.
+/** submit_for_review / update_task_status 가 받는 optional 구조화 완료 요약. */
+const completionSummaryShape = z
+    .object({
+    problem: z.string().optional().describe("무엇이 문제였나 / 무엇을 하려 했나"),
+    approach: z.string().optional().describe("어떻게 접근/해결했나"),
+    changes: z.string().optional().describe("무엇을 바꿨나 (파일/모듈 요약)"),
+    verification: z
+        .string()
+        .optional()
+        .describe("어떻게 검증했나 (테스트/타입체크/수동확인)"),
+    pr: z.string().optional().describe("관련 PR URL"),
+})
+    .optional()
+    .describe('완료 요약(선택). 주면 티켓에 "✅ 완료 보고" activity 로 기록된다. ' +
+    "안 주면 직전 완료 보고 activity 를 인식하고, 그것도 없으면 보완 nudge 를 돌려준다.");
+/**
+ * 같은 트랜잭션 밖에서 완료 보고 activity 한 건을 기록(상태 변경 없음).
+ * add_activity 핸들러와 같은 projection 경로를 쓰되, 별도 orch PTY notify 는
+ * 하지 않는다 — submit_for_review/update_status 가 이미 완료 이벤트를 알린다.
+ */
+async function recordCompletionReport(taskId, reportMessage) {
+    await applyProjection(db, taskId, {
+        lastAgentId: workerAgentId(MARBLO_AGENT_ID),
+        lastActivitySummary: reportMessage,
+        activityPayload: { agentId: MARBLO_AGENT_ID, message: reportMessage },
+    });
+}
+/** task 의 최근 activity 메시지들(createdAt 내림차순, 최대 window 개). */
+async function fetchRecentActivityMessages(taskId, window = 20) {
+    const q = query(collection(db, "activities"), where("taskId", "==", taskId));
+    const snap = await getDocs(q);
+    return snap.docs
+        .map((d) => d.data())
+        .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0))
+        .slice(0, window)
+        .map((d) => d.message ?? "");
+}
+/**
+ * REVIEW/DONE 전이 시 완료 보고 규약을 적용하고, 보완이 필요하면 nudge 문자열을
+ * 반환한다(호출부가 응답 text 끝에 덧붙임). 순수 결정은 resolveCompletionReport.
+ *
+ * ⚠️ 절대 throw/block 하지 않는다 — 보고 누락은 상태 전이를 막지 않는다(에이전트
+ * stranding 방지). best-effort: Firestore 조회/기록 실패는 삼키고 nudge 없이 통과.
+ */
+async function applyCompletionReport(taskId, status, summary) {
+    try {
+        // 행복 경로(summary 동봉)에선 Firestore 조회를 아낀다 — summary 가 있으면
+        // 무조건 기록이고 최근 activity 는 볼 필요 없다. summary 가 없을 때만 최근
+        // activity 를 읽어 이미 보고가 있는지 본 뒤 nudge 여부를 가린다.
+        if (formatCompletionReport(summary)) {
+            const { report } = resolveCompletionReport(taskId, status, summary, []);
+            if (report)
+                await recordCompletionReport(taskId, report);
+            return "";
+        }
+        const recent = await fetchRecentActivityMessages(taskId);
+        const { report, nudge } = resolveCompletionReport(taskId, status, summary, recent);
+        if (report)
+            await recordCompletionReport(taskId, report);
+        return nudge;
+    }
+    catch (err) {
+        console.error("[MCP] completion-report handling failed:", err);
+        return "";
+    }
 }
 export function registerTools(server) {
     // Wrap server.tool to add automatic audit logging
@@ -257,12 +401,16 @@ export function registerTools(server) {
             originalTool(name, description, schema, handler);
             return;
         }
-        originalTool(name, description, schema, async (...args) => {
+        // ToolCallback<Args> is a deferred conditional type while Args is generic,
+        // so it isn't directly callable — invoke it through a structural shim that
+        // exposes only the CallToolResult shape we read for audit logging.
+        const invoke = handler;
+        const wrapped = (async (...args) => {
             const start = Date.now();
             let success = true;
             let resultText = "";
             try {
-                const result = await handler(...args);
+                const result = await invoke(...args);
                 resultText = result?.content?.[0]?.text || "";
                 return result;
             }
@@ -273,7 +421,7 @@ export function registerTools(server) {
             }
             finally {
                 const duration = Date.now() - start;
-                const params = args[0] || {};
+                const params = (args[0] || {});
                 const projectId = resolveProject(params.project_id);
                 auditLog({
                     projectId,
@@ -286,6 +434,7 @@ export function registerTools(server) {
                 });
             }
         });
+        originalTool(name, description, schema, wrapped);
     }
     // 1. get_all_tasks
     auditedTool("get_all_tasks", "List tasks (open/non-terminal first, completed hidden at the tail). Filter by project/role; all_projects=true to span projects. Capped to `limit` (default 50) to keep results lean — raise limit or filter to see more.", {
@@ -328,6 +477,7 @@ export function registerTools(server) {
         // 다수가 컨텍스트를 먹던 것을 cap 으로 꼬리에서 잘라낸다.
         const docs = snap.docs
             .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((t) => !t.deleted)
             .filter((t) => !filterContextInMemory || isTaskInReadContext(t, contextId))
             .sort((a, b) => {
             const ta = isTerminalTaskStatus(a.status) ? 1 : 0;
@@ -386,6 +536,7 @@ export function registerTools(server) {
         const snap = await getDocs(q);
         const tasks = snap.docs
             .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((t) => !t.deleted)
             .filter((t) => !filterContextInMemory || isTaskInReadContext(t, contextId))
             .filter((t) => t.dependsOnCompleted)
             .sort((a, b) => b.priority - a.priority);
@@ -479,29 +630,14 @@ export function registerTools(server) {
             .optional()
             .describe("JSON array of task objects (string)"),
         tasks: z
-            .array(z.record(z.unknown()))
+            .union([z.array(z.record(z.unknown())), z.string()])
             .optional()
-            .describe("Array of task objects (alternative to tasks_json)"),
+            .describe("Array of task objects, or a JSON array string when clients serialize array params"),
     }, async ({ tasks_json, tasks }) => {
-        let taskList;
-        if (tasks && Array.isArray(tasks)) {
-            // 배열 직접 전달
-            taskList = tasks;
-        }
-        else if (tasks_json) {
-            // JSON 문자열 전달
-            try {
-                taskList = JSON.parse(tasks_json);
-            }
-            catch (e) {
-                return text(`Error: Invalid JSON — ${e.message}`);
-            }
-            if (!Array.isArray(taskList))
-                return text("Error: tasks_json must be a JSON array.");
-        }
-        else {
-            return text("Error: Either tasks_json (string) or tasks (array) is required.");
-        }
+        const normalized = normalizeBulkTasksPayload({ tasks_json, tasks });
+        if (normalized.error)
+            return text(normalized.error);
+        const taskList = normalized.tasks ?? [];
         const project = resolveProject("");
         if (!project) {
             return text("Error: No project context. Set MARBLO_PROJECT env var or include project_id in each task.\n" +
@@ -519,93 +655,95 @@ export function registerTools(server) {
         const indexToId = {};
         const results = [];
         let successCount = 0;
-        for (let i = 0; i < taskList.length; i++) {
-            const t = taskList[i];
-            let resolvedDeps = null;
-            let depError = null;
-            const rawDeps = t.depends_on;
-            if (rawDeps && rawDeps.length > 0) {
-                resolvedDeps = [];
-                for (const depRef of rawDeps) {
-                    if (UUID_RE.test(depRef)) {
-                        resolvedDeps.push(depRef);
-                        continue;
-                    }
-                    const taskMatch = TASK_NNN_RE.exec(depRef);
-                    if (taskMatch) {
-                        const idx = parseInt(taskMatch[1], 10) - 1;
-                        if (idx in indexToId) {
-                            resolvedDeps.push(indexToId[idx]);
+        const indexedTasks = taskList.map((task, index) => ({ task, index }));
+        for (const chunk of chunkBulkTasks(indexedTasks)) {
+            for (const { task: t, index: i } of chunk) {
+                let resolvedDeps = null;
+                let depError = null;
+                const rawDeps = t.depends_on;
+                if (rawDeps && rawDeps.length > 0) {
+                    resolvedDeps = [];
+                    for (const depRef of rawDeps) {
+                        if (UUID_RE.test(depRef)) {
+                            resolvedDeps.push(depRef);
                             continue;
                         }
-                        depError =
-                            idx >= i
-                                ? `depends_on '${depRef}' references a task not yet created (forward reference)`
-                                : `depends_on '${depRef}' — task at index ${idx} failed or out of range`;
-                        break;
-                    }
-                    if (depRef in aliasMap) {
-                        const idx = aliasMap[depRef];
-                        if (idx in indexToId) {
-                            resolvedDeps.push(indexToId[idx]);
-                            continue;
+                        const taskMatch = TASK_NNN_RE.exec(depRef);
+                        if (taskMatch) {
+                            const idx = parseInt(taskMatch[1], 10) - 1;
+                            if (idx in indexToId) {
+                                resolvedDeps.push(indexToId[idx]);
+                                continue;
+                            }
+                            depError =
+                                idx >= i
+                                    ? `depends_on '${depRef}' references a task not yet created (forward reference)`
+                                    : `depends_on '${depRef}' — task at index ${idx} failed or out of range`;
+                            break;
                         }
-                        depError =
-                            idx >= i
-                                ? `depends_on alias '${depRef}' references a task not yet created`
-                                : `depends_on alias '${depRef}' — referenced task failed`;
+                        if (depRef in aliasMap) {
+                            const idx = aliasMap[depRef];
+                            if (idx in indexToId) {
+                                resolvedDeps.push(indexToId[idx]);
+                                continue;
+                            }
+                            depError =
+                                idx >= i
+                                    ? `depends_on alias '${depRef}' references a task not yet created`
+                                    : `depends_on alias '${depRef}' — referenced task failed`;
+                            break;
+                        }
+                        depError = `depends_on '${depRef}' is not a valid UUID, TASK-NNN, or known alias`;
                         break;
                     }
-                    depError = `depends_on '${depRef}' is not a valid UUID, TASK-NNN, or known alias`;
-                    break;
                 }
-            }
-            if (depError) {
-                results.push(`  [FAILED] ${t.title || `task #${i}`} — ${depError}`);
-                continue;
-            }
-            const now = Timestamp.now();
-            const deps = resolvedDeps ?? [];
-            const data = {
-                title: t.title || "",
-                ...taskBodyStorageFields({
-                    goal: t.goal,
-                    changes: t.changes,
-                    acceptance: t.acceptance,
-                    notes: t.notes,
-                    description: t.description,
-                }),
-                role: t.role || "backend",
-                priority: t.priority ?? 0,
-                status: "TODO",
-                dependsOn: deps,
-                dependsOnCompleted: deps.length === 0,
-                claimedBy: null,
-                claimedAt: null,
-                scope: t.scope || [],
-                comment: t.context || "",
-                prUrl: "",
-                hasPmFeedback: false,
-                createdAt: now,
-                updatedAt: now,
-            };
-            // Always use the resolved project (Firestore doc ID from MARBLO_PROJECT env)
-            // Ignore per-task project_id overrides — they cause ID mismatch with the board
-            data.projectId = project;
-            data.contextId = resolveContextForWrite();
-            const missionContextError = applyMissionContextTags(data);
-            if (missionContextError) {
-                results.push(`  [FAILED] ${t.title || `task #${i}`} — ${missionContextError}`);
-                continue;
-            }
-            try {
-                const ref = await addDoc(collection(db, "tasks"), data);
-                indexToId[i] = ref.id;
-                results.push(`  [${ref.id}] ${data.title} (role=${data.role}, priority=${data.priority})`);
-                successCount++;
-            }
-            catch (e) {
-                results.push(`  [FAILED] ${t.title || `task #${i}`} — ${e.message}`);
+                if (depError) {
+                    results.push(`  [FAILED] ${t.title || `task #${i}`} — ${depError}`);
+                    continue;
+                }
+                const now = Timestamp.now();
+                const deps = resolvedDeps ?? [];
+                const data = {
+                    title: t.title || "",
+                    ...taskBodyStorageFields({
+                        goal: t.goal,
+                        changes: t.changes,
+                        acceptance: t.acceptance,
+                        notes: t.notes,
+                        description: t.description,
+                    }),
+                    role: t.role || "backend",
+                    priority: t.priority ?? 0,
+                    status: "TODO",
+                    dependsOn: deps,
+                    dependsOnCompleted: deps.length === 0,
+                    claimedBy: null,
+                    claimedAt: null,
+                    scope: t.scope || [],
+                    comment: t.context || "",
+                    prUrl: "",
+                    hasPmFeedback: false,
+                    createdAt: now,
+                    updatedAt: now,
+                };
+                // Always use the resolved project (Firestore doc ID from MARBLO_PROJECT env)
+                // Ignore per-task project_id overrides — they cause ID mismatch with the board
+                data.projectId = project;
+                data.contextId = resolveContextForWrite();
+                const missionContextError = applyMissionContextTags(data);
+                if (missionContextError) {
+                    results.push(`  [FAILED] ${t.title || `task #${i}`} — ${missionContextError}`);
+                    continue;
+                }
+                try {
+                    const ref = await addDoc(collection(db, "tasks"), data);
+                    indexToId[i] = ref.id;
+                    results.push(`  [${ref.id}] ${data.title} (role=${data.role}, priority=${data.priority})`);
+                    successCount++;
+                }
+                catch (e) {
+                    results.push(`  [FAILED] ${t.title || `task #${i}`} — ${e.message}`);
+                }
             }
         }
         const depMappings = [];
@@ -668,7 +806,8 @@ export function registerTools(server) {
             .boolean()
             .optional()
             .describe("Skip state machine validation (default: false)"),
-    }, async ({ task_id, status, comment, force }) => {
+        summary: completionSummaryShape,
+    }, async ({ task_id, status, comment, force, summary }) => {
         const task = await fetchTask(task_id);
         if (!task)
             return text(`Error: Task ${task_id} not found.`);
@@ -708,6 +847,23 @@ export function registerTools(server) {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ agentId: MARBLO_AGENT_ID, status: "idle" }),
+                }).catch(() => { });
+            }
+        }
+        // Auto-reap the task's isolated worktree once it's terminal (DONE) so the
+        // 100+ orphaned-worktree pileup (disk waste + shared-branch lock) can't
+        // recur. Best-effort + fully guarded on the bridge side: a dirty or
+        // unmerged-unpushed worktree is preserved (work-loss guard), and a tree
+        // still owned by a working agent is deferred. Fire just after the idle
+        // signal so the reporting agent is no longer "working" when it lands.
+        if (newStatus === "DONE") {
+            const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+            const projectId = process.env.MARBLO_PROJECT;
+            if (bridgePort && projectId) {
+                fetch(`http://127.0.0.1:${bridgePort}/reap-worktree`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ projectId, taskId: task_id }),
                 }).catch(() => { });
             }
         }
@@ -763,7 +919,12 @@ export function registerTools(server) {
             }
         }
         const unblockedNote = unblocked > 0 ? ` Unblocked ${unblocked} dependent task(s).` : "";
-        return text(`Task '${task.title}' status updated to ${newStatus}.${unblockedNote}`);
+        // 완료 보고 규약 — REVIEW/DONE 으로 닫을 때만. 보고 누락은 soft nudge 로만
+        // 보완 요청하고, 상태 전이는 위에서 이미 커밋됐다(절대 블록 안 함).
+        const completionNudge = newStatus === "REVIEW" || newStatus === "DONE"
+            ? await applyCompletionReport(task_id, newStatus, summary)
+            : "";
+        return text(`Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${completionNudge}`);
     });
     // 7. add_activity
     auditedTool("add_activity", "Add an activity log entry to a task. Use to record work progress, decisions, or events. Also notifies the orchestrator PTY.", {
@@ -802,7 +963,8 @@ export function registerTools(server) {
     auditedTool("submit_for_review", "Submit a task for review. Moves the task to REVIEW status.", {
         task_id: z.string().describe("Task ID"),
         pr_url: z.string().optional().describe("Pull request URL"),
-    }, async ({ task_id, pr_url }) => {
+        summary: completionSummaryShape,
+    }, async ({ task_id, pr_url, summary }) => {
         const task = await fetchTask(task_id);
         if (!task)
             return text(`Error: Task ${task_id} not found.`);
@@ -858,7 +1020,15 @@ export function registerTools(server) {
         const prNote = pr_url ? ` PR: ${pr_url}` : "";
         const roleLabel = formatAgentTaskRoleLabel(task.role, await fetchAgentRole(MARBLO_AGENT_ID));
         notifyOrchestrator(`[Review Submitted] "${task.title}" is ready for review (${roleLabel}, id=${task_id})${prNote}`, task.contextId);
-        return text(`Task '${task.title}' submitted for review. Status: REVIEW`);
+        // 완료 보고 규약 — summary 가 있을 때만 pr_url 을 summary.pr 로 폴백한다.
+        // pr_url 만 단독으로 온 기존 호출은 보고로 치지 않는다(빈약한 PR-only 보고로
+        // nudge 를 잠재우면 규약의 취지가 무너지므로). 보고 누락 시 soft nudge 만
+        // 돌려주고 REVIEW 전이는 그대로 유지(절대 블록 안 함).
+        const reportSummary = summary
+            ? { ...summary, pr: summary.pr ?? pr_url }
+            : undefined;
+        const completionNudge = await applyCompletionReport(task_id, "REVIEW", reportSummary);
+        return text(`Task '${task.title}' submitted for review. Status: REVIEW${completionNudge}`);
     });
     // 9. get_task_dependencies
     auditedTool("get_task_dependencies", "Check dependency status for a task. Shows which dependent tasks are completed and which are pending.", {
@@ -1093,8 +1263,13 @@ export function registerTools(server) {
         const lowerKeyword = keyword.toLowerCase();
         const matches = snap.docs.filter((d) => {
             const t = d.data();
+            if (t.deleted)
+                return false;
+            // 구조화 본문도 검색 대상에 포함 — description 이 "" 인 태스크가 키워드
+            // 검색에서 누락되던 문제를 막는다.
+            const body = composeTaskBody(t).toLowerCase();
             return (t.title?.toLowerCase().includes(lowerKeyword) ||
-                t.description?.toLowerCase().includes(lowerKeyword));
+                body.includes(lowerKeyword));
         });
         if (matches.length === 0)
             return text(`No tasks found matching '${keyword}'.`);
@@ -1110,15 +1285,24 @@ export function registerTools(server) {
         task_id: z.string().describe("Task ID"),
     }, async ({ task_id }) => {
         const task = await fetchTask(task_id);
-        if (!task)
+        if (!task) {
+            const agentHint = await fetchAgentIdHint(task_id);
+            if (agentHint) {
+                return text(formatAgentIdAsTaskIdError(task_id, agentHint));
+            }
             return text(`Error: Task ${task_id} not found.`);
+        }
+        // 구조화 필드(goal/changes/acceptance/notes)로 만든 태스크는 description 이
+        // "" 로 저장된다 — 그대로 노출하면 에이전트가 "설명 비어있음"으로 읽으므로,
+        // 구조화 본문을 렌더해 채운다. legacy description-only 태스크는 그대로 통과.
+        const body = composeTaskBody(task);
         const lines = [
             `ID: ${task.id}`,
             `Title: ${task.title}`,
-            `Status: ${task.status}`,
+            `Status: ${task.status}${task.deleted ? " (deleted)" : ""}`,
             `Role: ${task.role}`,
             `Priority: ${task.priority}`,
-            `Description: ${task.description || "(empty)"}`,
+            `Description: ${body || "(empty)"}`,
             `Claimed by: ${task.claimedBy || "(none)"}`,
             `Depends on: ${task.dependsOn?.length ? task.dependsOn.join(", ") : "(none)"}`,
             `Dependencies met: ${task.dependsOnCompleted}`,
@@ -1128,6 +1312,80 @@ export function registerTools(server) {
             `Has PM feedback: ${task.hasPmFeedback}`,
         ];
         return text(lines.join("\n"));
+    }, { userFacing: false });
+    // 16a. delete_task — soft (default) / hard delete with ownership + confirm
+    // safety guards. soft sets a `deleted` flag (recoverable, hidden from lists);
+    // hard removes the Firestore doc. Guards (see task-delete.ts): confirm=true
+    // required, another agent's in-flight claim is protected, and unfinished
+    // dependents block the delete — each overridable with force=true.
+    auditedTool("delete_task", "Delete a task. mode='soft' (default) hides it recoverably; mode='hard' permanently removes it. Requires confirm=true. Refuses to delete a task actively claimed by another agent or one with unfinished dependents unless force=true.", {
+        task_id: z.string().describe("Task ID"),
+        mode: z
+            .enum(["soft", "hard"])
+            .optional()
+            .describe("soft (hide, recoverable; default) or hard (permanent)"),
+        confirm: z
+            .boolean()
+            .optional()
+            .describe("Must be true to actually delete (mis-deletion guard)"),
+        force: z
+            .boolean()
+            .optional()
+            .describe("Override ownership/dependent guards (default: false)"),
+        reason: z.string().optional().describe("Why the task is being deleted"),
+    }, async ({ task_id, mode, confirm, force, reason }) => {
+        const task = await fetchTask(task_id);
+        if (!task)
+            return text(`Error: Task ${task_id} not found.`);
+        const delMode = mode ?? "soft";
+        // Count unfinished tasks that depend on this one (would be stranded).
+        let dependentCount = 0;
+        try {
+            const depQ = query(collection(db, "tasks"), where("dependsOn", "array-contains", task_id));
+            const depSnap = await getDocs(depQ);
+            dependentCount = depSnap.docs.filter((d) => {
+                const dep = d.data();
+                return !dep.deleted && !isTerminalTaskStatus(dep.status);
+            }).length;
+        }
+        catch (err) {
+            console.error("[MCP] delete_task dependent query error:", err);
+        }
+        const { error } = evaluateDeleteGuards({
+            task: {
+                id: task.id,
+                title: task.title,
+                status: task.status,
+                claimedBy: task.claimedBy,
+                deleted: task.deleted,
+            },
+            mode: delMode,
+            confirm: confirm ?? false,
+            requesterAgentId: MARBLO_AGENT_ID,
+            dependentCount,
+            force,
+        });
+        if (error)
+            return text(`Error: ${error}`);
+        if (delMode === "hard") {
+            await deleteDoc(doc(db, "tasks", task_id));
+        }
+        else {
+            await updateDoc(doc(db, "tasks", task_id), {
+                deleted: true,
+                deletedAt: Timestamp.now(),
+                deletedBy: MARBLO_AGENT_ID || "unknown",
+                deleteReason: reason ?? "",
+                updatedAt: Timestamp.now(),
+            });
+        }
+        if (!isLaneContextId(task.contextId)) {
+            const reasonNote = reason ? ` — ${reason}` : "";
+            notifyOrchestrator(`[Task Deleted] "${task.title}" ${delMode}-deleted (id=${task_id})${reasonNote}`, task.contextId);
+        }
+        return text(`Task '${task.title}' ${delMode === "hard"
+            ? "permanently deleted"
+            : "soft-deleted (recoverable)"}.`);
     }, { userFacing: false });
     // 16b. get_projection — Layer A read path. Lets the orchestrator answer
     // "what's happening now?" with a single read instead of waking an LLM.
@@ -1205,8 +1463,11 @@ export function registerTools(server) {
                 if (data.agents.length === 0)
                     return text("No agents found.");
                 const lines = data.agents.map((a) => {
-                    const restart = a.restartCount > 0 ? ` restarts=${a.restartCount}` : "";
-                    return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${a.id}${restart})`;
+                    const restart = a.restartCount > 0 ? `, restarts=${a.restartCount}` : "";
+                    const task = a.currentTaskId
+                        ? `, currentTaskId=${a.currentTaskId}`
+                        : "";
+                    return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, agentId=${a.id}${task}${restart})`;
                 });
                 return text(`Agents (${data.agents.length}, real-time):\n${capLines(lines, LIST_LIMIT_DEFAULT, "many agents — cleanup idle ones")}`);
             }
@@ -1227,12 +1488,12 @@ export function registerTools(server) {
             const a = d.data();
             const statusInfo = normalizeFirestoreFallbackAgentStatus(a.status);
             const task = !statusInfo.staleActive && a.currentTaskId
-                ? ` → task=${a.currentTaskId}`
+                ? `, currentTaskId=${a.currentTaskId}`
                 : "";
             const stale = statusInfo.staleActive
-                ? ` stale=${String(a.status)}`
+                ? `, staleStatus=${String(a.status)}`
                 : "";
-            return `- [${statusInfo.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${d.id}${stale})${task}`;
+            return `- [${statusInfo.status}] ${a.name} (model=${a.model}, role=${a.role}, agentId=${d.id}${task}${stale})`;
         });
         return text(`Agents (${snap.size}, Firestore fallback):\n${capLines(lines, LIST_LIMIT_DEFAULT, "many agents — cleanup idle ones")}`);
     }, { userFacing: false });
@@ -1596,8 +1857,8 @@ export function registerTools(server) {
             return text(`Error: Failed to reach bridge server — ${err.message}`);
         }
     });
-    // ── cleanup_agents — Batch cleanup of stopped/error agents
-    auditedTool("cleanup_agents", "Clean up stopped or error-state agents. Optionally filter by role. Returns list of cleaned agents.", {
+    // ── cleanup_agents — Batch reap of dead-PTY + terminal-task agents
+    auditedTool("cleanup_agents", "Clean up stale agents: those whose PTY died (stopped/error) AND those still alive but bound to a terminal (DONE/FAILED) task and PTY-idle past the grace window. Optionally filter by role. Returns list of cleaned agents with reasons.", {
         role: z.string().optional().describe("Only clean agents with this role"),
     }, async ({ role }) => {
         const bridgePort = process.env.MARBLO_BRIDGE_PORT;
@@ -1612,42 +1873,91 @@ export function registerTools(server) {
                 : `http://127.0.0.1:${bridgePort}/agents`;
             const listResponse = await fetch(listUrl);
             const data = (await listResponse.json());
-            // Filter candidates for cleanup
-            const candidates = data.agents.filter((a) => {
-                if (a.status !== "stopped" && a.status !== "error")
-                    return false;
-                if (role && a.role !== role)
-                    return false;
-                const currentContext = process.env.MARBLO_CONTEXT || "";
-                const currentIsLane = isLaneContextId(currentContext);
-                const agentIsLane = isLaneContextId(a.contextId);
+            // Multi-window lane scoping: a lane orchestrator only reaps agents in
+            // its own lane; a board orchestrator never reaps lane-owned agents.
+            // Shared by both the dead-PTY and terminal-task reap passes below.
+            const currentContext = process.env.MARBLO_CONTEXT || "";
+            const currentIsLane = isLaneContextId(currentContext);
+            const inScope = (a) => {
                 if (currentIsLane)
                     return a.contextId === currentContext;
-                if (agentIsLane)
+                if (isLaneContextId(a.contextId))
                     return false;
                 return true;
-            });
+            };
+            // Pass 1 — agents whose PTY already died (status stopped/error).
+            // Reason recorded as the raw status for the report.
+            const candidates = [];
+            for (const a of data.agents) {
+                if (a.status !== "stopped" && a.status !== "error")
+                    continue;
+                if (role && a.role !== role)
+                    continue;
+                if (!inScope(a))
+                    continue;
+                candidates.push({ agent: a, reason: a.status });
+            }
+            // Pass 2 — agents still alive (working/idle) but bound to a task that
+            // is already terminal (DONE/FAILED) and PTY-silent past the grace
+            // window. The old status-only filter skipped these "zombies" (57 had to
+            // be hand-killed in one session). Gated strictly on the connected
+            // task's terminal status + idle window so a genuinely-working agent is
+            // never misjudged — see agent-reap.ts.
+            const now = Date.now();
+            const seen = new Set(candidates.map((c) => c.agent.id));
+            for (const a of data.agents) {
+                if (seen.has(a.id))
+                    continue;
+                if (a.status === "stopped" || a.status === "error")
+                    continue;
+                if (role && a.role !== role)
+                    continue;
+                if (!inScope(a))
+                    continue;
+                if (!a.currentTaskId)
+                    continue;
+                let taskStatus = null;
+                try {
+                    const task = await fetchTask(a.currentTaskId);
+                    taskStatus = task?.status ?? null;
+                }
+                catch {
+                    // Lookup failure → treat as non-terminal (preserve). evaluate()
+                    // below short-circuits on a null/unknown status.
+                }
+                const decision = evaluateTerminalTaskReap({
+                    currentTaskId: a.currentTaskId,
+                    taskStatus,
+                    lastPtyActivity: a.lastPtyActivity ?? now,
+                    now,
+                    staleMs: STALE_TERMINAL_REAP_MS,
+                });
+                if (decision.reap) {
+                    candidates.push({ agent: a, reason: `stale: ${decision.reason}` });
+                }
+            }
             if (candidates.length === 0) {
                 const roleNote = role ? ` for role '${role}'` : "";
-                return text(`No stopped/error agents found${roleNote}. Nothing to clean up.`);
+                return text(`No reapable agents found${roleNote} (no stopped/error agents and no live agents on terminal tasks). Nothing to clean up.`);
             }
-            // Kill each candidate
+            // Kill each candidate, logging its reap reason.
             const results = [];
-            for (const agent of candidates) {
+            for (const { agent, reason } of candidates) {
+                console.log(`[cleanup_agents] reaping ${agent.name} (${agent.status}) — ${reason}`);
                 try {
                     const response = await fetch(`http://127.0.0.1:${bridgePort}/kill-agent`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             agentName: agent.name,
-                            reason: "cleanup",
+                            reason: `cleanup: ${reason}`,
                         }),
                     });
                     const result = (await response.json());
                     if (result.success && result.agentId) {
                         await markAgentStoppedInFirestore(result.agentId);
                     }
-                    results.push(`${agent.name} (${agent.status})`);
+                    results.push(`${agent.name} (${reason})`);
                 }
                 catch {
                     results.push(`${agent.name} (failed to kill)`);
@@ -1854,7 +2164,7 @@ export function registerTools(server) {
             return text("No pending instructions.");
         const max = typeof limit === "number" && limit > 0 ? limit : 50;
         const docs = snap.docs
-            .map((d) => ({ id: d.id, ...d.data() }))
+            .map((d) => ({ ...d.data(), id: d.id }))
             .sort((a, b) => {
             const at = a.createdAt?.toMillis?.() ?? 0;
             const bt = b.createdAt?.toMillis?.() ?? 0;

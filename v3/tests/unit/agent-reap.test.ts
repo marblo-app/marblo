@@ -13,7 +13,7 @@ import {
   evaluateTerminalTaskReap,
   isTerminalTaskStatus,
   STALE_TERMINAL_REAP_MS,
-} from "../../electron/agent-reap";
+} from "../../electron/mcp-server/agent-reap";
 
 const NOW = 1_000_000_000_000;
 const PAST_GRACE = NOW - STALE_TERMINAL_REAP_MS - 1; // idle just past the window

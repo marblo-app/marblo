@@ -49,7 +49,7 @@ import {
 import {
   evaluateTerminalTaskReap,
   STALE_TERMINAL_REAP_MS,
-} from "../agent-reap.js";
+} from "./agent-reap.js";
 import {
   formatCompletionReport,
   resolveCompletionReport,
@@ -2993,7 +2993,7 @@ export function registerTools(server: McpServer): void {
 
       const max = typeof limit === "number" && limit > 0 ? limit : 50;
       const docs = snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as PendingInstructionDoc) }))
+        .map((d) => ({ ...(d.data() as PendingInstructionDoc), id: d.id }))
         .sort((a, b) => {
           const at = a.createdAt?.toMillis?.() ?? 0;
           const bt = b.createdAt?.toMillis?.() ?? 0;
