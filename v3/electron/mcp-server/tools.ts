@@ -205,11 +205,89 @@ interface TaskDoc {
   deleted?: boolean;
 }
 
+interface AgentIdHint {
+  id: string;
+  name: string | null;
+  role: string | null;
+  status: string | null;
+  currentTaskId: string | null;
+  source: "Firestore" | "Bridge";
+}
+
 async function fetchTask(taskId: string): Promise<TaskDoc | null> {
   const ref = doc(db, "tasks", taskId);
   const snap = await getDoc(ref);
   if (!snap.exists()) return null;
   return { id: snap.id, ...snap.data() } as TaskDoc;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+async function fetchAgentIdHint(agentId: string): Promise<AgentIdHint | null> {
+  if (!agentId) return null;
+
+  try {
+    const snap = await getDoc(doc(db, "agents", agentId));
+    if (snap.exists()) {
+      const data = snap.data() as Record<string, unknown>;
+      return {
+        id: snap.id,
+        name: nonEmptyString(data.name),
+        role: nonEmptyString(data.role),
+        status: nonEmptyString(data.status),
+        currentTaskId: nonEmptyString(data.currentTaskId),
+        source: "Firestore",
+      };
+    }
+  } catch (err) {
+    console.warn("[MCP] Failed to check agent id in Firestore:", err);
+  }
+
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) return null;
+
+  try {
+    const projectId = process.env.MARBLO_PROJECT || "";
+    const url = projectId
+      ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
+          projectId
+        )}`
+      : `http://127.0.0.1:${bridgePort}/agents`;
+    const response = await fetch(url);
+    const data = (await response.json()) as {
+      agents?: Array<Record<string, unknown>>;
+    };
+    const agents = Array.isArray(data.agents) ? data.agents : [];
+    const match = agents.find((a) => nonEmptyString(a.id) === agentId);
+    if (!match) return null;
+    return {
+      id: agentId,
+      name: nonEmptyString(match.name),
+      role: nonEmptyString(match.role),
+      status: nonEmptyString(match.status),
+      currentTaskId: nonEmptyString(match.currentTaskId),
+      source: "Bridge",
+    };
+  } catch (err) {
+    console.warn("[MCP] Failed to check agent id via bridge:", err);
+    return null;
+  }
+}
+
+function formatAgentIdAsTaskIdError(id: string, agent: AgentIdHint): string {
+  const details = [
+    agent.name ? `name=${agent.name}` : null,
+    agent.role ? `role=${agent.role}` : null,
+    agent.status ? `status=${agent.status}` : null,
+    `source=${agent.source}`,
+  ].filter((part): part is string => part !== null);
+  const agentDetails = details.length ? ` (${details.join(", ")})` : "";
+  const taskHint = agent.currentTaskId
+    ? ` Use get_task with currentTaskId=${agent.currentTaskId}.`
+    : " This agent has no currentTaskId, so there is no connected task to fetch.";
+  return `Error: '${id}' is an agent id, not a task id.${agentDetails}${taskHint}`;
 }
 
 function text(t: string) {
@@ -1553,7 +1631,13 @@ export function registerTools(server: McpServer): void {
     },
     async ({ task_id }) => {
       const task = await fetchTask(task_id);
-      if (!task) return text(`Error: Task ${task_id} not found.`);
+      if (!task) {
+        const agentHint = await fetchAgentIdHint(task_id);
+        if (agentHint) {
+          return text(formatAgentIdAsTaskIdError(task_id, agentHint));
+        }
+        return text(`Error: Task ${task_id} not found.`);
+      }
 
       // 구조화 필드(goal/changes/acceptance/notes)로 만든 태스크는 description 이
       // "" 로 저장된다 — 그대로 노출하면 에이전트가 "설명 비어있음"으로 읽으므로,
@@ -1800,6 +1884,7 @@ export function registerTools(server: McpServer): void {
               role: string;
               status: string;
               ptySessionId: string;
+              currentTaskId?: string | null;
               restartCount: number;
             }>;
           };
@@ -1808,8 +1893,11 @@ export function registerTools(server: McpServer): void {
 
           const lines = data.agents.map((a) => {
             const restart =
-              a.restartCount > 0 ? ` restarts=${a.restartCount}` : "";
-            return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${a.id}${restart})`;
+              a.restartCount > 0 ? `, restarts=${a.restartCount}` : "";
+            const task = a.currentTaskId
+              ? `, currentTaskId=${a.currentTaskId}`
+              : "";
+            return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, agentId=${a.id}${task}${restart})`;
           });
           return text(
             `Agents (${data.agents.length}, real-time):\n${capLines(
@@ -1838,12 +1926,12 @@ export function registerTools(server: McpServer): void {
         const statusInfo = normalizeFirestoreFallbackAgentStatus(a.status);
         const task =
           !statusInfo.staleActive && a.currentTaskId
-            ? ` → task=${a.currentTaskId}`
+            ? `, currentTaskId=${a.currentTaskId}`
             : "";
         const stale = statusInfo.staleActive
-          ? ` stale=${String(a.status)}`
+          ? `, staleStatus=${String(a.status)}`
           : "";
-        return `- [${statusInfo.status}] ${a.name} (model=${a.model}, role=${a.role}, id=${d.id}${stale})${task}`;
+        return `- [${statusInfo.status}] ${a.name} (model=${a.model}, role=${a.role}, agentId=${d.id}${task}${stale})`;
       });
       return text(
         `Agents (${snap.size}, Firestore fallback):\n${capLines(
