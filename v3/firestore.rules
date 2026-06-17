@@ -246,6 +246,18 @@ service cloud.firestore {
       allow write: if false; // Only Cloud Functions can write
     }
 
+    // ===== Coupons =====
+    // Coupon lifecycle and redemption records are managed exclusively through
+    // Cloud Functions/Admin SDK. Clients must use validateCoupon/applyCoupon
+    // callables instead of reading or mutating these collections directly.
+    match /coupons/{couponCode} {
+      allow read, write: if false;
+    }
+
+    match /couponRedemptions/{redemptionId} {
+      allow read, write: if false;
+    }
+
     // ===== Lectures (marblo-web sales site) =====
     match /lectures/{lectureId} {
       allow read: if true; // Public: anyone can browse published lectures

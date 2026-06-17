@@ -652,6 +652,53 @@ describe("subscriptions collection", () => {
   });
 });
 
+// ===== Coupons =====
+
+describe("coupons collection", () => {
+  it("클라이언트에서 쿠폰을 읽거나 쓸 수 없다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+
+    await assertFails(getDoc(doc(db, "coupons", "WELCOME2026")));
+    await assertFails(
+      setDoc(doc(db, "coupons", "WELCOME2026"), {
+        code: "WELCOME2026",
+        type: "discount",
+        discountPercent: 50,
+        maxUses: 100,
+        usedCount: 0,
+        createdAt: new Date(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db, "coupons", "WELCOME2026"), {
+        usedCount: 999,
+      }),
+    );
+    await assertFails(deleteDoc(doc(db, "coupons", "WELCOME2026")));
+  });
+});
+
+describe("couponRedemptions collection", () => {
+  it("클라이언트에서 쿠폰 사용 기록을 읽거나 쓸 수 없다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+
+    await assertFails(getDoc(doc(db, "couponRedemptions", "redemption-1")));
+    await assertFails(
+      setDoc(doc(db, "couponRedemptions", "redemption-1"), {
+        couponCode: "WELCOME2026",
+        userId: ADMIN_ID,
+        redeemedAt: new Date(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db, "couponRedemptions", "redemption-1"), {
+        userId: OUTSIDER_ID,
+      }),
+    );
+    await assertFails(deleteDoc(doc(db, "couponRedemptions", "redemption-1")));
+  });
+});
+
 // ===== Activities =====
 
 describe("activities collection", () => {
@@ -694,5 +741,7 @@ describe("unauthenticated access", () => {
     await assertFails(getDoc(doc(db, "flows", "flow-1")));
     await assertFails(getDoc(doc(db, "invitations", "inv-1")));
     await assertFails(getDoc(doc(db, "subscriptions", OWNER_ID)));
+    await assertFails(getDoc(doc(db, "coupons", "WELCOME2026")));
+    await assertFails(getDoc(doc(db, "couponRedemptions", "redemption-1")));
   });
 });

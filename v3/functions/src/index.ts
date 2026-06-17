@@ -908,10 +908,7 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
 // 쿠폰 일괄 생성 (관리자용)
 export const createCouponBatch = functions.https.onCall(
   async (data, context) => {
-    const userId = context.auth?.uid;
-    // Simple admin check - you can enhance this with custom claims
-    if (!userId)
-      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    requireAdmin(context);
 
     const { coupons } = data;
     if (!Array.isArray(coupons) || coupons.length === 0) {
