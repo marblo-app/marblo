@@ -128,11 +128,19 @@ export function Layout() {
   // tab. The destination tab consumes the latched target on mount via
   // useNavigationStore.consumeJump() and applies its own selection.
   const pendingJump = useNavigationStore((s) => s.pendingJump);
+  const consumeJump = useNavigationStore((s) => s.consumeJump);
   useEffect(() => {
     if (!pendingJump) return;
     if (pendingJump.type === "task") setActiveTab("board");
     else if (pendingJump.type === "agent") setActiveTab("agents");
-  }, [pendingJump]);
+    else if (pendingJump.type === "code") {
+      // Sidebar file click → bring the Code tab forward. Nothing downstream
+      // consumes this jump (the editor reads openFiles directly), so clear it
+      // here to avoid leaving a stale latch.
+      setActiveTab("code");
+      consumeJump();
+    }
+  }, [pendingJump, consumeJump]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;

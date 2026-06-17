@@ -12,7 +12,8 @@ import { create } from "zustand";
  */
 export type JumpTarget =
   | { type: "task"; id: string }
-  | { type: "agent"; id: string };
+  | { type: "agent"; id: string }
+  | { type: "code" };
 
 interface NavigationState {
   pendingJump: JumpTarget | null;

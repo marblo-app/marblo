@@ -10,6 +10,9 @@ import { useEditorStore } from "../../stores/editorStore";
 import { useProjectStore } from "../../stores/projectStore";
 import type { Project } from "../../types/project";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
+import { useWorktreeStore } from "../../stores/worktreeStore";
+import { useNavigationStore } from "../../stores/navigationStore";
+import { describeRootView, treeSignature } from "../../lib/fileTreeView";
 import { useAuth } from "../../hooks/useAuth";
 import { FileTreeContextMenu, ContextMenuItem } from "./FileTreeContextMenu";
 import { FileTreeConfirmDialog } from "./FileTreeConfirmDialog";
@@ -118,6 +121,7 @@ function FileTreeNode({
 }: FileTreeNodeProps) {
   const openFile = useEditorStore((s) => s.openFile);
   const activeFilePath = useEditorStore((s) => s.activeFilePath);
+  const requestJump = useNavigationStore((s) => s.requestJump);
   const selectedPath = useFileTreeStore((s) => s.selectedPath);
   const setSelected = useFileTreeStore((s) => s.setSelected);
   const clipboardOp = useFileTreeStore((s) => s.clipboardOp);
@@ -161,9 +165,12 @@ function FileTreeNode({
     if (node.type === "directory") {
       toggleExpanded(node.path);
     } else {
+      // Single click opens the file AND brings the Code tab forward, so the
+      // editor is visible even when another main tab (Board/Agents/…) is active.
       openFile(node.path);
+      requestJump({ type: "code" });
     }
-  }, [node, toggleExpanded, openFile, setSelected]);
+  }, [node, toggleExpanded, openFile, requestJump, setSelected]);
 
   const commitRename = useCallback(async () => {
     if (renameCommittedRef.current) return;
@@ -323,6 +330,7 @@ function FileTreeNode({
               if (node.type === "directory") return;
               e.stopPropagation();
               openFile(node.path);
+              requestJump({ type: "code" });
             }}
             className="flex flex-1 items-center gap-1 truncate text-left"
           >
@@ -479,6 +487,7 @@ export function FileTree() {
   const handlePathRenamed = useEditorStore((s) => s.handlePathRenamed);
   const handlePathRemoved = useEditorStore((s) => s.handlePathRemoved);
   const openFile = useEditorStore((s) => s.openFile);
+  const requestJump = useNavigationStore((s) => s.requestJump);
 
   const selectedPath = useFileTreeStore((s) => s.selectedPath);
   const setSelected = useFileTreeStore((s) => s.setSelected);
@@ -492,6 +501,18 @@ export function FileTree() {
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
   const findByPathOrRemote = useProjectStore((s) => s.findByPathOrRemote);
   const createProject = useProjectStore((s) => s.createProject);
+  const currentProject = useProjectStore((s) => s.currentProject);
+
+  const worktrees = useWorktreeStore((s) => s.worktrees);
+  const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+
+  // Explicit "what am I looking at" descriptor for the header. A worktree's
+  // basename is often a generated id, so we surface branch/taskId + full path.
+  const rootView = useMemo(
+    () =>
+      describeRootView(rootPath, worktrees, currentProject?.folderPath ?? null),
+    [rootPath, worktrees, currentProject?.folderPath],
+  );
 
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -503,7 +524,15 @@ export function FileTree() {
   );
   const newProjectInputRef = useRef<HTMLInputElement>(null);
 
-  const loadingRef = useRef(false);
+  // Monotonic load token: only the most recent load may apply its result, so a
+  // rapid worktree switch (or a forced refresh issued mid-load) can never be
+  // clobbered by a slower, older read. This replaces the old `loadingRef` guard
+  // that silently *dropped* concurrent loads — the source of stale trees on
+  // worktree switch and of "refresh did nothing".
+  const loadSeqRef = useRef(0);
+  // Signature of the last applied tree+status, so watcher/poll reloads that
+  // return identical data don't trigger needless re-renders / flicker.
+  const lastSignatureRef = useRef<string>("");
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Build a flat lookup of all paths in the tree (for keyboard navigation + node lookup)
@@ -520,38 +549,62 @@ export function FileTree() {
   }, [tree]);
 
   const loadTree = useCallback(async (dirPath: string, showLoading = true) => {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
+    const seq = ++loadSeqRef.current;
     if (showLoading) setLoading(true);
     try {
       const [nodes, statuses] = await Promise.all([
         window.electronAPI.fs.readTree(dirPath),
         window.electronAPI.fs.gitStatus(dirPath),
       ]);
-      setTree(nodes);
-      setGitStatuses(statuses);
+      // A newer load (worktree switch / forced refresh) superseded us — discard
+      // this stale result so it can't overwrite fresher data.
+      if (seq !== loadSeqRef.current) return;
+      const signature = treeSignature(nodes, statuses);
+      if (signature !== lastSignatureRef.current) {
+        lastSignatureRef.current = signature;
+        setTree(nodes);
+        setGitStatuses(statuses);
+      }
     } catch (err) {
-      console.error("Failed to load file tree:", err);
+      if (seq === loadSeqRef.current)
+        console.error("Failed to load file tree:", err);
     } finally {
-      loadingRef.current = false;
-      if (showLoading) setLoading(false);
+      if (seq === loadSeqRef.current && showLoading) setLoading(false);
     }
   }, []);
 
+  // Keep the worktree list fresh so the header can name the current root.
+  useEffect(() => {
+    refreshWorktrees().catch(() => {});
+  }, [refreshWorktrees]);
+
   useEffect(() => {
     if (!rootPath) return;
+    // New root → forget the previous tree's signature so the first load always
+    // applies, even if it happens to match stale React state.
+    lastSignatureRef.current = "";
     loadTree(rootPath, true);
     window.electronAPI.fs.watch(rootPath);
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     const handler = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => loadTree(rootPath, false), 2000);
+      timer = setTimeout(() => loadTree(rootPath, false), 400);
     };
     window.electronAPI.fs.onFileChange(handler);
 
+    // Fallbacks for changes native fs.watch can miss — notably files written by
+    // another process (an agent's git ops inside this worktree). A window-focus
+    // refresh covers "I switched away and the agent worked"; a slow poll is the
+    // safety net. Snapshot dedupe keeps both no-ops cheap when nothing changed.
+    const onFocus = () => loadTree(rootPath, false);
+    window.addEventListener("focus", onFocus);
+    const poll = setInterval(() => loadTree(rootPath, false), 5000);
+
     return () => {
       if (timer) clearTimeout(timer);
+      clearInterval(poll);
+      window.removeEventListener("focus", onFocus);
       window.electronAPI.fs.offFileChange?.();
     };
   }, [rootPath, loadTree]);
@@ -627,13 +680,16 @@ export function FileTree() {
         }
         await loadTree(rootPath, false);
         setSelected(newPath);
-        if (type === "file") openFile(newPath);
+        if (type === "file") {
+          openFile(newPath);
+          requestJump({ type: "code" });
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "생성 실패";
         setErrorMessage(`생성 실패: ${msg}`);
       }
     },
-    [rootPath, loadTree, setSelected, openFile],
+    [rootPath, loadTree, setSelected, openFile, requestJump],
   );
 
   const commitRename = useCallback(
@@ -992,7 +1048,13 @@ export function FileTree() {
   }, []);
 
   const handleRefresh = useCallback(() => {
-    if (rootPath) loadTree(rootPath);
+    if (!rootPath) return;
+    // Force a real re-read that bypasses dedupe, so the user always gets the
+    // latest on-disk state (and visible loading feedback) even if the cached
+    // signature happens to match. The seq-guard in loadTree means this beats
+    // any in-flight watcher/poll reload rather than being dropped.
+    lastSignatureRef.current = "";
+    loadTree(rootPath, true);
   }, [rootPath, loadTree]);
 
   if (!rootPath) {
@@ -1074,89 +1136,116 @@ export function FileTree() {
       )}
 
       {/* Project path header + toolbar */}
-      <div className="flex items-center gap-1 border-b border-gray-700 px-2 py-1">
-        <span
-          className="flex-1 truncate text-[11px] text-gray-400"
-          title={rootPath}
-        >
-          {rootPath.split("/").pop()}
-        </span>
-        <button
-          onClick={() => handleCreate("file")}
-          className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-          title="새 파일 (⌘N)"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+      <div className="flex flex-col border-b border-gray-700">
+        <div className="flex items-center gap-1 px-2 pt-1">
+          <span
+            className="truncate text-[11px] font-medium text-gray-300"
+            title={rootView?.fullPath ?? rootPath}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 13h6m-3-3v6m-7 4h14a2 2 0 002-2V8a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-            />
-          </svg>
-        </button>
-        <button
-          onClick={() => handleCreate("directory")}
-          className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-          title="새 폴더 (⇧⌘N)"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+            {rootView?.label ?? rootPath.split("/").pop()}
+          </span>
+          {rootView?.kind === "worktree" && (
+            <span
+              className="flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300"
+              title="활성 워크트리"
+            >
+              {rootView.detail ? `WT · ${rootView.detail}` : "WT"}
+            </span>
+          )}
+          {rootView?.kind === "project" && (
+            <span
+              className="flex-shrink-0 rounded bg-gray-600/40 px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400"
+              title="프로젝트 루트"
+            >
+              ROOT
+            </span>
+          )}
+          <span className="flex-1" />
+          <button
+            onClick={() => handleCreate("file")}
+            className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+            title="새 파일 (⌘N)"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 11v4m-2-2h4m6 5a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 2h7a2 2 0 012 2v11z"
-            />
-          </svg>
-        </button>
-        <button
-          onClick={handleRefresh}
-          className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-          title="새로고침"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 13h6m-3-3v6m-7 4h14a2 2 0 002-2V8a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+              />
+            </svg>
+          </button>
+          <button
+            onClick={() => handleCreate("directory")}
+            className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+            title="새 폴더 (⇧⌘N)"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-            />
-          </svg>
-        </button>
-        <button
-          onClick={handleSelectDirectory}
-          className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-          title="다른 폴더 열기"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 11v4m-2-2h4m6 5a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 2h7a2 2 0 012 2v11z"
+              />
+            </svg>
+          </button>
+          <button
+            onClick={handleRefresh}
+            className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+            title="새로고침"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-            />
-          </svg>
-        </button>
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+          </button>
+          <button
+            onClick={handleSelectDirectory}
+            className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+            title="다른 폴더 열기"
+          >
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+              />
+            </svg>
+          </button>
+        </div>
+        {/* Full path of the root currently being viewed — makes a worktree
+            switch unmistakable (basenames are often generated ids). */}
+        <div
+          className="truncate px-2 pb-1 text-[10px] text-gray-500"
+          title={rootView?.fullPath ?? rootPath}
+        >
+          {rootView?.fullPath ?? rootPath}
+        </div>
       </div>
 
       {/* Tree content */}
