@@ -32,6 +32,10 @@ import {
 } from "./projection.js";
 import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
 import {
+  chunkBulkTasks,
+  normalizeBulkTasksPayload,
+} from "./bulk-task-payload.js";
+import {
   formatAgentTaskRoleLabel,
   normalizeFirestoreFallbackAgentStatus,
 } from "./agent-status-labels.js";
@@ -661,30 +665,16 @@ export function registerTools(server: McpServer): void {
         .optional()
         .describe("JSON array of task objects (string)"),
       tasks: z
-        .array(z.record(z.unknown()))
+        .union([z.array(z.record(z.unknown())), z.string()])
         .optional()
-        .describe("Array of task objects (alternative to tasks_json)"),
+        .describe(
+          "Array of task objects, or a JSON array string when clients serialize array params",
+        ),
     },
     async ({ tasks_json, tasks }) => {
-      let taskList: Record<string, unknown>[];
-
-      if (tasks && Array.isArray(tasks)) {
-        // 배열 직접 전달
-        taskList = tasks;
-      } else if (tasks_json) {
-        // JSON 문자열 전달
-        try {
-          taskList = JSON.parse(tasks_json);
-        } catch (e: unknown) {
-          return text(`Error: Invalid JSON — ${(e as Error).message}`);
-        }
-        if (!Array.isArray(taskList))
-          return text("Error: tasks_json must be a JSON array.");
-      } else {
-        return text(
-          "Error: Either tasks_json (string) or tasks (array) is required.",
-        );
-      }
+      const normalized = normalizeBulkTasksPayload({ tasks_json, tasks });
+      if (normalized.error) return text(normalized.error);
+      const taskList = normalized.tasks ?? [];
 
       const project = resolveProject("");
       if (!project) {
@@ -707,111 +697,113 @@ export function registerTools(server: McpServer): void {
       const results: string[] = [];
       let successCount = 0;
 
-      for (let i = 0; i < taskList.length; i++) {
-        const t = taskList[i];
-        let resolvedDeps: string[] | null = null;
-        let depError: string | null = null;
-        const rawDeps = t.depends_on as string[] | undefined;
+      const indexedTasks = taskList.map((task, index) => ({ task, index }));
+      for (const chunk of chunkBulkTasks(indexedTasks)) {
+        for (const { task: t, index: i } of chunk) {
+          let resolvedDeps: string[] | null = null;
+          let depError: string | null = null;
+          const rawDeps = t.depends_on as string[] | undefined;
 
-        if (rawDeps && rawDeps.length > 0) {
-          resolvedDeps = [];
-          for (const depRef of rawDeps) {
-            if (UUID_RE.test(depRef)) {
-              resolvedDeps.push(depRef);
-              continue;
-            }
-
-            const taskMatch = TASK_NNN_RE.exec(depRef);
-            if (taskMatch) {
-              const idx = parseInt(taskMatch[1], 10) - 1;
-              if (idx in indexToId) {
-                resolvedDeps.push(indexToId[idx]);
+          if (rawDeps && rawDeps.length > 0) {
+            resolvedDeps = [];
+            for (const depRef of rawDeps) {
+              if (UUID_RE.test(depRef)) {
+                resolvedDeps.push(depRef);
                 continue;
               }
-              depError =
-                idx >= i
-                  ? `depends_on '${depRef}' references a task not yet created (forward reference)`
-                  : `depends_on '${depRef}' — task at index ${idx} failed or out of range`;
-              break;
-            }
 
-            if (depRef in aliasMap) {
-              const idx = aliasMap[depRef];
-              if (idx in indexToId) {
-                resolvedDeps.push(indexToId[idx]);
-                continue;
+              const taskMatch = TASK_NNN_RE.exec(depRef);
+              if (taskMatch) {
+                const idx = parseInt(taskMatch[1], 10) - 1;
+                if (idx in indexToId) {
+                  resolvedDeps.push(indexToId[idx]);
+                  continue;
+                }
+                depError =
+                  idx >= i
+                    ? `depends_on '${depRef}' references a task not yet created (forward reference)`
+                    : `depends_on '${depRef}' — task at index ${idx} failed or out of range`;
+                break;
               }
-              depError =
-                idx >= i
-                  ? `depends_on alias '${depRef}' references a task not yet created`
-                  : `depends_on alias '${depRef}' — referenced task failed`;
+
+              if (depRef in aliasMap) {
+                const idx = aliasMap[depRef];
+                if (idx in indexToId) {
+                  resolvedDeps.push(indexToId[idx]);
+                  continue;
+                }
+                depError =
+                  idx >= i
+                    ? `depends_on alias '${depRef}' references a task not yet created`
+                    : `depends_on alias '${depRef}' — referenced task failed`;
+                break;
+              }
+
+              depError = `depends_on '${depRef}' is not a valid UUID, TASK-NNN, or known alias`;
               break;
             }
-
-            depError = `depends_on '${depRef}' is not a valid UUID, TASK-NNN, or known alias`;
-            break;
           }
-        }
 
-        if (depError) {
-          results.push(
-            `  [FAILED] ${(t.title as string) || `task #${i}`} — ${depError}`,
-          );
-          continue;
-        }
+          if (depError) {
+            results.push(
+              `  [FAILED] ${(t.title as string) || `task #${i}`} — ${depError}`,
+            );
+            continue;
+          }
 
-        const now = Timestamp.now();
-        const deps = resolvedDeps ?? [];
-        const data: Record<string, unknown> = {
-          title: (t.title as string) || "",
-          ...taskBodyStorageFields({
-            goal: t.goal as string | undefined,
-            changes: t.changes as string[] | undefined,
-            acceptance: t.acceptance as string[] | undefined,
-            notes: t.notes as string[] | undefined,
-            description: t.description as string | undefined,
-          }),
-          role: (t.role as string) || "backend",
-          priority: (t.priority as number) ?? 0,
-          status: "TODO",
-          dependsOn: deps,
-          dependsOnCompleted: deps.length === 0,
-          claimedBy: null,
-          claimedAt: null,
-          scope: (t.scope as string[]) || [],
-          comment: (t.context as string) || "",
-          prUrl: "",
-          hasPmFeedback: false,
-          createdAt: now,
-          updatedAt: now,
-        };
-        // Always use the resolved project (Firestore doc ID from MARBLO_PROJECT env)
-        // Ignore per-task project_id overrides — they cause ID mismatch with the board
-        data.projectId = project;
-        data.contextId = resolveContextForWrite();
-        const missionContextError = applyMissionContextTags(data);
-        if (missionContextError) {
-          results.push(
-            `  [FAILED] ${
-              (t.title as string) || `task #${i}`
-            } — ${missionContextError}`,
-          );
-          continue;
-        }
+          const now = Timestamp.now();
+          const deps = resolvedDeps ?? [];
+          const data: Record<string, unknown> = {
+            title: (t.title as string) || "",
+            ...taskBodyStorageFields({
+              goal: t.goal as string | undefined,
+              changes: t.changes as string[] | undefined,
+              acceptance: t.acceptance as string[] | undefined,
+              notes: t.notes as string[] | undefined,
+              description: t.description as string | undefined,
+            }),
+            role: (t.role as string) || "backend",
+            priority: (t.priority as number) ?? 0,
+            status: "TODO",
+            dependsOn: deps,
+            dependsOnCompleted: deps.length === 0,
+            claimedBy: null,
+            claimedAt: null,
+            scope: (t.scope as string[]) || [],
+            comment: (t.context as string) || "",
+            prUrl: "",
+            hasPmFeedback: false,
+            createdAt: now,
+            updatedAt: now,
+          };
+          // Always use the resolved project (Firestore doc ID from MARBLO_PROJECT env)
+          // Ignore per-task project_id overrides — they cause ID mismatch with the board
+          data.projectId = project;
+          data.contextId = resolveContextForWrite();
+          const missionContextError = applyMissionContextTags(data);
+          if (missionContextError) {
+            results.push(
+              `  [FAILED] ${
+                (t.title as string) || `task #${i}`
+              } — ${missionContextError}`,
+            );
+            continue;
+          }
 
-        try {
-          const ref = await addDoc(collection(db, "tasks"), data);
-          indexToId[i] = ref.id;
-          results.push(
-            `  [${ref.id}] ${data.title} (role=${data.role}, priority=${data.priority})`,
-          );
-          successCount++;
-        } catch (e: unknown) {
-          results.push(
-            `  [FAILED] ${(t.title as string) || `task #${i}`} — ${
-              (e as Error).message
-            }`,
-          );
+          try {
+            const ref = await addDoc(collection(db, "tasks"), data);
+            indexToId[i] = ref.id;
+            results.push(
+              `  [${ref.id}] ${data.title} (role=${data.role}, priority=${data.priority})`,
+            );
+            successCount++;
+          } catch (e: unknown) {
+            results.push(
+              `  [FAILED] ${(t.title as string) || `task #${i}`} — ${
+                (e as Error).message
+              }`,
+            );
+          }
         }
       }
 
