@@ -23,16 +23,16 @@ class TestPaymentAPI:
             assert data["status"] == "ready"
             assert "checkout_url" in data
 
-    def test_request_payment_naverpay(self, client: TestClient, test_user, sample_payment_data, mock_naverpay_service):
-        """Test NaverPay payment request."""
+    def test_request_payment_naverpay_disabled(self, client: TestClient, test_user, sample_payment_data, mock_naverpay_service):
+        """Test NaverPay payment request is disabled by default."""
         payment_data = {**sample_payment_data, "payment_method": "NAVERPAY"}
 
         with patch('backend.api.payments.naverpay_service', mock_naverpay_service):
             response = client.post("/api/v1/payments/request", json=payment_data)
 
-            assert response.status_code == 200
-            data = response.json()
-            assert data["amount"] == payment_data["amount"]
+            assert response.status_code == 403
+            assert "NaverPay is disabled" in response.json()["detail"]
+            mock_naverpay_service.request_payment.assert_not_called()
 
     def test_request_payment_invalid_amount(self, client: TestClient, test_user, sample_payment_data):
         """Test payment request with invalid amount."""
@@ -41,7 +41,7 @@ class TestPaymentAPI:
         response = client.post("/api/v1/payments/request", json=invalid_data)
         assert response.status_code == 422  # Validation error
 
-    def test_confirm_payment_success(self, client: TestClient, test_user, mock_toss_service):
+    def test_confirm_payment_success(self, client: TestClient, test_user, test_payment, mock_toss_service):
         """Test successful payment confirmation."""
         confirm_data = {
             "payment_key": "test_payment_key_123",
@@ -151,8 +151,8 @@ class TestBillingAPI:
             assert "billing_key" in data
             assert "customer_key" in data
 
-    def test_register_billing_key_naverpay(self, client: TestClient, test_user, mock_naverpay_service):
-        """Test NaverPay billing agreement creation."""
+    def test_register_billing_key_naverpay_disabled(self, client: TestClient, test_user, mock_naverpay_service):
+        """Test NaverPay billing agreement creation is disabled by default."""
         billing_data = {
             "payment_method": "NAVERPAY",
             "return_url": "http://localhost:3001/billing/callback"
@@ -161,10 +161,9 @@ class TestBillingAPI:
         with patch('backend.api.payments.naverpay_service', mock_naverpay_service):
             response = client.post("/api/v1/payments/billing/register", json=billing_data)
 
-            assert response.status_code == 200
-            data = response.json()
-            assert "redirect_url" in data
-            assert "customer_key" in data
+            assert response.status_code == 403
+            assert "NaverPay is disabled" in response.json()["detail"]
+            mock_naverpay_service.create_billing_agreement.assert_not_called()
 
     def test_register_billing_key_invalid_card(self, client: TestClient, test_user):
         """Test billing key registration with invalid card data."""
@@ -238,8 +237,8 @@ class TestWebhookAPI:
 
             assert response.status_code == 401
 
-    def test_naverpay_webhook_valid_signature(self, client: TestClient, mock_naverpay_service):
-        """Test NaverPay webhook with valid signature."""
+    def test_naverpay_webhook_disabled(self, client: TestClient, mock_naverpay_service):
+        """Test NaverPay webhook is disabled by default."""
         webhook_data = {
             "eventType": "PAYMENT_STATUS_CHANGED",
             "id": "naverpay_webhook_123",
@@ -261,9 +260,9 @@ class TestWebhookAPI:
                 headers=headers
             )
 
-            assert response.status_code == 200
-            data = response.json()
-            assert data["status"] == "received"
+            assert response.status_code == 403
+            assert "NaverPay is disabled" in response.json()["detail"]
+            mock_naverpay_service.verify_webhook.assert_not_called()
 
 
 class TestPaymentStatistics:

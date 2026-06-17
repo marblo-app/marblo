@@ -21,13 +21,17 @@ class NaverPayService:
         self.api_key = settings.NAVERPAY_API_KEY
         self.secret_key = settings.NAVERPAY_SECRET_KEY
         self.webhook_secret = settings.NAVERPAY_WEBHOOK_SECRET
+        if settings.NAVERPAY_ENABLED and not all(
+            [self.merchant_id, self.api_key, self.secret_key, self.webhook_secret]
+        ):
+            raise ValueError("NaverPay credentials are required when NAVERPAY_ENABLED is true")
         self.headers = self._get_auth_headers()
 
     def _get_auth_headers(self) -> Dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {self.api_key or ''}",
             "Content-Type": "application/json",
-            "X-Merchant-ID": self.merchant_id
+            "X-Merchant-ID": self.merchant_id or ""
         }
 
     def _generate_signature(self, data: Dict[str, Any], timestamp: str) -> str:
@@ -36,7 +40,7 @@ class NaverPayService:
         param_string = "&".join([f"{k}={v}" for k, v in sorted_params])
         message = f"{timestamp}.{param_string}"
         return hmac.new(
-            self.secret_key.encode(),
+            (self.secret_key or "").encode(),
             message.encode(),
             hashlib.sha256
         ).hexdigest()

@@ -3,6 +3,7 @@ Test configuration and fixtures for the payment system.
 """
 import pytest
 import asyncio
+from datetime import datetime
 from typing import Generator, AsyncGenerator
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -91,38 +92,55 @@ def mock_toss_service():
 
     # Mock successful payment request
     async def mock_request_payment(*args, **kwargs):
+        now = datetime.now()
         payment = Payment(
+            id=1,
             order_id="test_order_123",
             user_id=kwargs.get('user_id', 1),
             amount=kwargs.get('amount', 10000),
+            currency="KRW",
             status=PaymentStatus.READY,
-            checkout_url="https://checkout.toss.com/test"
+            checkout_url="https://checkout.toss.com/test",
+            requested_at=now,
+            cancel_amount=0,
+            created_at=now
         )
         return payment
 
     # Mock successful payment confirmation
     async def mock_confirm_payment(*args, **kwargs):
+        now = datetime.now()
         payment = Payment(
+            id=1,
             payment_key="test_payment_key_123",
             order_id=kwargs.get('order_id', 'test_order_123'),
             user_id=1,
             amount=kwargs.get('amount', 10000),
+            currency="KRW",
             status=PaymentStatus.DONE,
             method="카드",
-            receipt_url="https://receipt.toss.com/test"
+            receipt_url="https://receipt.toss.com/test",
+            requested_at=now,
+            cancel_amount=0,
+            created_at=now
         )
         return payment
 
     # Mock successful payment cancellation
     async def mock_cancel_payment(*args, **kwargs):
+        now = datetime.now()
         payment = Payment(
+            id=1,
             payment_key=kwargs.get('payment_key', 'test_payment_key_123'),
             order_id="test_order_123",
             user_id=1,
             amount=10000,
+            currency="KRW",
             status=PaymentStatus.CANCELED,
-            cancel_amount=kwargs.get('cancel_amount', 10000),
-            cancel_reason=kwargs.get('cancel_reason', 'Test cancellation')
+            cancel_amount=kwargs.get('cancel_amount') or 10000,
+            cancel_reason=kwargs.get('cancel_reason', 'Test cancellation'),
+            requested_at=now,
+            created_at=now
         )
         return payment
 

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import json
 import uuid
 from backend.db.base import get_db
+from backend.core.config import settings
 from backend.services.payment_service import TossPaymentsService
 from backend.services.naverpay_service import NaverPayService
 from backend.schemas.payment import (
@@ -39,7 +40,27 @@ import logging
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
 logger = logging.getLogger(__name__)
 toss_service = TossPaymentsService()
-naverpay_service = NaverPayService()
+naverpay_service: Optional[NaverPayService] = NaverPayService() if settings.NAVERPAY_ENABLED else None
+
+NAVERPAY_DISABLED_DETAIL = "NaverPay is disabled. Use Toss for Korea or Paddle for global payments."
+NAVERPAY_METHODS = {"NAVERPAY", "NAVERPAY_BILLING"}
+
+
+def is_naverpay_method(payment_method: object) -> bool:
+    method_value = getattr(payment_method, "value", payment_method)
+    return str(method_value or "").upper() in NAVERPAY_METHODS
+
+
+def naverpay_disabled_exception() -> HTTPException:
+    return HTTPException(status_code=403, detail=NAVERPAY_DISABLED_DETAIL)
+
+
+def get_naverpay_service() -> NaverPayService:
+    if not settings.NAVERPAY_ENABLED:
+        raise naverpay_disabled_exception()
+    if naverpay_service is None:
+        raise HTTPException(status_code=503, detail="NaverPay service is not configured")
+    return naverpay_service
 
 
 def get_current_user(user_id: int = 1) -> int:
@@ -53,10 +74,11 @@ async def request_payment(
     user_id: int = Depends(get_current_user)
 ):
     try:
-        payment_method = getattr(payment_request, 'payment_method', 'TOSS').upper()
+        payment_method = (payment_request.payment_method or 'TOSS').upper()
 
-        if payment_method == "NAVERPAY":
-            payment = await naverpay_service.request_payment(
+        if is_naverpay_method(payment_method):
+            service = get_naverpay_service()
+            payment = await service.request_payment(
                 db=db,
                 user_id=user_id,
                 amount=payment_request.amount,
@@ -79,6 +101,8 @@ async def request_payment(
                 fail_url=payment_request.fail_url
             )
         return PaymentResponse.from_orm(payment)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Payment request failed: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -94,8 +118,9 @@ async def confirm_payment(
         if not payment:
             raise ValueError(f"Payment not found for order_id: {payment_confirm.order_id}")
 
-        if payment.method == "NAVERPAY":
-            payment = await naverpay_service.confirm_payment(
+        if is_naverpay_method(payment.method):
+            service = get_naverpay_service()
+            payment = await service.confirm_payment(
                 db=db,
                 payment_key=payment_confirm.payment_key,
                 order_id=payment_confirm.order_id,
@@ -109,6 +134,8 @@ async def confirm_payment(
                 amount=payment_confirm.amount
             )
         return PaymentResponse.from_orm(payment)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -126,8 +153,9 @@ async def cancel_payment(
         if not payment:
             raise ValueError(f"Payment not found for payment_key: {payment_cancel.payment_key}")
 
-        if payment.method == "NAVERPAY" or payment.method == "NAVERPAY_BILLING":
-            payment = await naverpay_service.cancel_payment(
+        if is_naverpay_method(payment.method):
+            service = get_naverpay_service()
+            payment = await service.cancel_payment(
                 db=db,
                 payment_key=payment_cancel.payment_key,
                 cancel_reason=payment_cancel.cancel_reason,
@@ -141,6 +169,8 @@ async def cancel_payment(
                 cancel_amount=payment_cancel.cancel_amount
             )
         return PaymentResponse.from_orm(payment)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -155,11 +185,14 @@ async def get_payment_status(payment_key: str, db: Session = Depends(get_db)):
         if not payment:
             raise HTTPException(status_code=404, detail="Payment not found")
 
-        if payment.method == "NAVERPAY" or payment.method == "NAVERPAY_BILLING":
-            status = await naverpay_service.get_payment_status(payment_key)
+        if is_naverpay_method(payment.method):
+            service = get_naverpay_service()
+            status = await service.get_payment_status(payment_key)
         else:
             status = await toss_service.get_payment_status(payment_key)
         return status
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get payment status: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -208,10 +241,11 @@ async def register_billing_key(
             raise HTTPException(status_code=404, detail="User not found")
 
         customer_key = user.customer_key or f"customer_{uuid.uuid4().hex[:16]}"
-        payment_method = getattr(billing_request, 'payment_method', 'TOSS').upper()
+        payment_method = (billing_request.payment_method or 'TOSS').upper()
 
-        if payment_method == "NAVERPAY":
-            redirect_url = await naverpay_service.create_billing_agreement(
+        if is_naverpay_method(payment_method):
+            service = get_naverpay_service()
+            redirect_url = await service.create_billing_agreement(
                 db=db,
                 user_id=user_id,
                 customer_email=user.email,
@@ -231,6 +265,8 @@ async def register_billing_key(
                 birth_or_business_number=billing_request.birth_or_business_number
             )
             return {"billing_key": billing_key, "customer_key": customer_key}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to register billing key: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -451,6 +487,8 @@ async def handle_toss_webhook(
         )
 
         return {"status": "received"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Toss webhook processing failed: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -465,10 +503,11 @@ async def handle_naverpay_webhook(
     x_naverpay_timestamp: str = Header(None)
 ):
     try:
+        service = get_naverpay_service()
         body = await request.body()
         body_str = body.decode('utf-8')
 
-        if not naverpay_service.verify_webhook(
+        if not service.verify_webhook(
             signature=x_naverpay_signature,
             timestamp=x_naverpay_timestamp,
             body=body_str
@@ -496,6 +535,8 @@ async def handle_naverpay_webhook(
         )
 
         return {"status": "received"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"NaverPay webhook processing failed: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -532,7 +573,8 @@ async def process_naverpay_webhook_async(
     try:
         webhook = db.query(PaymentWebhook).filter(PaymentWebhook.id == webhook_id).first()
 
-        await naverpay_service.process_webhook(db, event_type, data.get("data", {}))
+        service = get_naverpay_service()
+        await service.process_webhook(db, event_type, data.get("data", {}))
 
         webhook.status = "PROCESSED"
         webhook.processed_at = datetime.now()

@@ -11,7 +11,7 @@ class PaymentRequestCreate(BaseModel):
     customer_name: str = Field(..., min_length=1, max_length=50, description="고객명")
     success_url: str = Field(..., description="결제 성공 시 리다이렉트 URL")
     fail_url: str = Field(..., description="결제 실패 시 리다이렉트 URL")
-    payment_method: Optional[str] = Field(default="TOSS", description="결제 방식 (TOSS, NAVERPAY)")
+    payment_method: Optional[str] = Field(default="TOSS", description="결제 방식 (TOSS)")
 
 
 class PaymentConfirm(BaseModel):
@@ -71,13 +71,13 @@ class RefundResponse(BaseModel):
 
 
 class BillingKeyRequest(BaseModel):
-    payment_method: Optional[str] = Field(default="TOSS", description="결제 방식 (TOSS, NAVERPAY)")
+    payment_method: Optional[str] = Field(default="TOSS", description="결제 방식 (TOSS)")
     card_number: Optional[str] = Field(None, pattern=r"^\d{13,19}$", description="카드 번호 (Toss 전용)")
     card_expiry_year: Optional[str] = Field(None, pattern=r"^\d{2}$", description="카드 만료 연도 (YY, Toss 전용)")
     card_expiry_month: Optional[str] = Field(None, pattern=r"^\d{2}$", description="카드 만료 월 (MM, Toss 전용)")
     card_password: Optional[str] = Field(None, pattern=r"^\d{2}$", description="카드 비밀번호 앞 2자리 (Toss 전용)")
     birth_or_business_number: Optional[str] = Field(None, description="생년월일 6자리 또는 사업자번호 10자리 (Toss 전용)")
-    return_url: Optional[str] = Field(None, description="NaverPay 빌링 인증 완료 후 리다이렉트 URL")
+    return_url: Optional[str] = Field(None, description="비활성화된 NaverPay 재활성화 시 사용할 리다이렉트 URL")
 
     @validator('card_expiry_month')
     def validate_month(cls, v):
