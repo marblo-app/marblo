@@ -51,11 +51,11 @@ export function withCompletionFooter(
     "",
     `[완료 규약 — task_id="${taskId}"]`,
     "이 작업을 마치면 반드시 아래 marblo MCP 도구를 호출해야 오케스트레이터에게 자동 보고된다 (텍스트 답변만으론 오케스트레이터가 결과를 못 본다):",
-    `- 진행 로그: add_activity(task_id="${taskId}", message="...")`,
+    `- 진행 로그: add_activity(task_id="${taskId}", message="...") — 일반 progress 는 타임라인에만 기록된다.`,
     `- 진행 상황은 ticket 본문(description)이 아니라 add_activity 로만 보고 — 본문은 생성 시점의 불변 스펙이다.`,
     `- 정상 완료 / 리뷰 가능: submit_for_review(task_id="${taskId}", pr_url?)`,
     `- 실패 / 반려: update_task_status(task_id="${taskId}", status="FAILED", comment="이유")`,
-    "위 도구 호출 직후 오케스트레이터 PTY 로 알림이 자동 주입된다.",
+    "완료/실패/차단 같은 중요 이벤트만 오케스트레이터 PTY 로 자동 주입된다.",
   ].join("\n");
   return instruction + footer;
 }
@@ -172,6 +172,41 @@ export function resolveNotifyTarget(
   const isLaneContext = ctx === "lane" || ctx.startsWith("lane:");
   const isMissionContext = ctx !== "" && ctx !== "board" && !isLaneContext;
   return isMissionContext ? "mission" : "board";
+}
+
+const IMPORTANT_TASK_UPDATE_STATUSES = new Set(["DONE", "FAILED", "BLOCKED"]);
+
+function mentionsStuckOrBlocked(message: string): boolean {
+  return /\b(stuck|blocked|blocker|blocking)\b/i.test(message) ||
+    /막힘|차단|블로커/.test(message);
+}
+
+/**
+ * Decide whether a bridge notification should wake the orchestrator PTY.
+ *
+ * Timeline-only progress still reaches Firestore via the MCP tool that emitted
+ * it; this gate only suppresses the extra PTY conversation turn. Unknown
+ * notification shapes remain injectable so new important events do not get
+ * silently dropped until they add an explicit classifier here.
+ */
+export function shouldInjectOrchestratorNotification(message: string): boolean {
+  const trimmed = message.trim();
+  if (!trimmed) return false;
+  if (mentionsStuckOrBlocked(trimmed)) return true;
+
+  if (trimmed.startsWith("[Task Activity]")) {
+    return false;
+  }
+
+  if (trimmed.startsWith("[Task Update]")) {
+    const match = trimmed.match(/\s→\s([A-Z_]+)\b/);
+    return match ? IMPORTANT_TASK_UPDATE_STATUSES.has(match[1]) : true;
+  }
+
+  if (trimmed.startsWith("[Review Submitted]")) return true;
+  if (trimmed.startsWith("[Dependency Resolved]")) return true;
+
+  return true;
 }
 
 // ── Dispatch types ──────────────────────────────────────────
@@ -832,6 +867,22 @@ export class BridgeServer {
         const projectId = params.projectId ?? "";
         const contextId = params.contextId ?? "";
         const target = resolveNotifyTarget(contextId);
+        if (!shouldInjectOrchestratorNotification(params.message)) {
+          console.log(
+            `[BridgeServer] Suppressed timeline-only ${target} orchestrator notification (project=${projectId}, context=${
+              contextId || "board"
+            }): ${params.message.slice(0, 80)}...`,
+          );
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              success: true,
+              injected: false,
+              reason: "timeline-only notification suppressed",
+            }),
+          );
+          return;
+        }
         const isMissionContext = target === "mission";
         const orch = isMissionContext
           ? this.missionOrchestratorLookup(projectId)
@@ -863,7 +914,7 @@ export class BridgeServer {
         );
 
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ success: true }));
+        res.end(JSON.stringify({ success: true, injected: true }));
       } catch (err) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(

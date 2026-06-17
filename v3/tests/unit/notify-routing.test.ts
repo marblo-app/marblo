@@ -19,7 +19,10 @@
 // electron-side and mcp-side copies stay behaviorally identical.
 
 import { describe, expect, it } from "vitest";
-import { resolveNotifyTarget } from "../../electron/bridge-server";
+import {
+  resolveNotifyTarget,
+  shouldInjectOrchestratorNotification,
+} from "../../electron/bridge-server";
 import { isLaneContext } from "../../electron/mcp-server/projection";
 
 describe("resolveNotifyTarget — /notify-orchestrator 3-way routing", () => {
@@ -54,13 +57,13 @@ describe("isLaneContext — mcp-server progress-notify gate", () => {
     expect(isLaneContext("lane")).toBe(true);
   });
 
-  it("is false for board / empty / undefined (board progress still notifies)", () => {
+  it("is false for board / empty / undefined", () => {
     expect(isLaneContext("board")).toBe(false);
     expect(isLaneContext("")).toBe(false);
     expect(isLaneContext(undefined)).toBe(false);
   });
 
-  it("is false for a mission context (mission progress still notifies its orch)", () => {
+  it("is false for a mission context", () => {
     expect(isLaneContext("mission-xyz")).toBe(false);
     expect(isLaneContext("aB3uuid1234567890XY")).toBe(false);
   });
@@ -77,13 +80,62 @@ describe("routing parity — isLaneContext ↔ resolveNotifyTarget", () => {
     });
   });
 
-  // A mission context is the inverse: NOT lane-gated (progress notifies flow),
-  // AND routes to the mission orch (never the board one).
+  // A mission context is the inverse: NOT lane-gated, AND routes to the
+  // mission orch (never the board one) when an important event is injected.
   const missionContexts = ["m1", "mission-xyz", "aB3uuid1234567890XY"];
   missionContexts.forEach((ctx) => {
     it(`mission "${ctx}": not gated AND routes to mission`, () => {
       expect(isLaneContext(ctx)).toBe(false);
       expect(resolveNotifyTarget(ctx)).toBe("mission");
     });
+  });
+});
+
+describe("shouldInjectOrchestratorNotification — quiet progress gate", () => {
+  it("suppresses ordinary add_activity progress notifications", () => {
+    expect(
+      shouldInjectOrchestratorNotification(
+        '[Task Activity] "Build API" progress update (backend, id=t1, agent=a1): implementing handler',
+      ),
+    ).toBe(false);
+  });
+
+  it("suppresses ordinary status progress notifications", () => {
+    expect(
+      shouldInjectOrchestratorNotification(
+        '[Task Update] "Build API" CLAIMED → IN_PROGRESS (backend, id=t1)',
+      ),
+    ).toBe(false);
+  });
+
+  it("injects completion, failure, blocked, and review notifications", () => {
+    expect(
+      shouldInjectOrchestratorNotification(
+        '[Task Update] "Build API" IN_PROGRESS → DONE (backend, id=t1)',
+      ),
+    ).toBe(true);
+    expect(
+      shouldInjectOrchestratorNotification(
+        '[Task Update] "Build API" IN_PROGRESS → FAILED (backend, id=t1)',
+      ),
+    ).toBe(true);
+    expect(
+      shouldInjectOrchestratorNotification(
+        '[Task Update] "Build API" IN_PROGRESS → BLOCKED (backend, id=t1)',
+      ),
+    ).toBe(true);
+    expect(
+      shouldInjectOrchestratorNotification(
+        '[Review Submitted] "Build API" is ready for review (backend, id=t1)',
+      ),
+    ).toBe(true);
+  });
+
+  it("injects stuck add_activity notifications", () => {
+    expect(
+      shouldInjectOrchestratorNotification(
+        '[Task Activity] "Build API" progress update (backend, id=t1, agent=a1): stuck on missing credentials',
+      ),
+    ).toBe(true);
   });
 });
