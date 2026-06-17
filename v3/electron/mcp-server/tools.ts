@@ -50,6 +50,11 @@ import {
   evaluateTerminalTaskReap,
   STALE_TERMINAL_REAP_MS,
 } from "../agent-reap.js";
+import {
+  formatCompletionReport,
+  resolveCompletionReport,
+  type CompletionSummary,
+} from "./completion-report.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
@@ -453,6 +458,105 @@ function capLines(lines: string[], limit: number, hint: string): string {
 }
 function isTerminalTaskStatus(s: unknown): boolean {
   return s === "DONE" || s === "FAILED";
+}
+
+// ── 완료 보고(completion report) 규약 ──
+// 에이전트가 REVIEW/DONE 으로 닫을 때 "무엇이 문제였고 어떻게 풀었는지" 구조화
+// 요약을 티켓에 "✅ 완료 보고" activity 로 남기게 한다. 진행 add_activity 가
+// 흩어지고 최종 요약이 PR 본문에만 있어 보드/티켓에서 완료 내역을 한눈에 못 보던
+// 문제를 막는다. 순수 로직(포맷/판정/nudge)은 ./completion-report.ts.
+
+/** submit_for_review / update_task_status 가 받는 optional 구조화 완료 요약. */
+const completionSummaryShape = z
+  .object({
+    problem: z.string().optional().describe("무엇이 문제였나 / 무엇을 하려 했나"),
+    approach: z.string().optional().describe("어떻게 접근/해결했나"),
+    changes: z.string().optional().describe("무엇을 바꿨나 (파일/모듈 요약)"),
+    verification: z
+      .string()
+      .optional()
+      .describe("어떻게 검증했나 (테스트/타입체크/수동확인)"),
+    pr: z.string().optional().describe("관련 PR URL"),
+  })
+  .optional()
+  .describe(
+    '완료 요약(선택). 주면 티켓에 "✅ 완료 보고" activity 로 기록된다. ' +
+      "안 주면 직전 완료 보고 activity 를 인식하고, 그것도 없으면 보완 nudge 를 돌려준다."
+  );
+
+/**
+ * 같은 트랜잭션 밖에서 완료 보고 activity 한 건을 기록(상태 변경 없음).
+ * add_activity 핸들러와 같은 projection 경로를 쓰되, 별도 orch PTY notify 는
+ * 하지 않는다 — submit_for_review/update_status 가 이미 완료 이벤트를 알린다.
+ */
+async function recordCompletionReport(
+  taskId: string,
+  reportMessage: string
+): Promise<void> {
+  await applyProjection(db, taskId, {
+    lastAgentId: workerAgentId(MARBLO_AGENT_ID),
+    lastActivitySummary: reportMessage,
+    activityPayload: { agentId: MARBLO_AGENT_ID, message: reportMessage },
+  });
+}
+
+/** task 의 최근 activity 메시지들(createdAt 내림차순, 최대 window 개). */
+async function fetchRecentActivityMessages(
+  taskId: string,
+  window = 20
+): Promise<string[]> {
+  const q = query(collection(db, "activities"), where("taskId", "==", taskId));
+  const snap = await getDocs(q);
+  return snap.docs
+    .map(
+      (d) =>
+        d.data() as {
+          message?: string;
+          createdAt?: { toMillis?: () => number };
+        }
+    )
+    .sort(
+      (a, b) =>
+        (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)
+    )
+    .slice(0, window)
+    .map((d) => d.message ?? "");
+}
+
+/**
+ * REVIEW/DONE 전이 시 완료 보고 규약을 적용하고, 보완이 필요하면 nudge 문자열을
+ * 반환한다(호출부가 응답 text 끝에 덧붙임). 순수 결정은 resolveCompletionReport.
+ *
+ * ⚠️ 절대 throw/block 하지 않는다 — 보고 누락은 상태 전이를 막지 않는다(에이전트
+ * stranding 방지). best-effort: Firestore 조회/기록 실패는 삼키고 nudge 없이 통과.
+ */
+async function applyCompletionReport(
+  taskId: string,
+  status: string,
+  summary: CompletionSummary | undefined
+): Promise<string> {
+  try {
+    // 행복 경로(summary 동봉)에선 Firestore 조회를 아낀다 — summary 가 있으면
+    // 무조건 기록이고 최근 activity 는 볼 필요 없다. summary 가 없을 때만 최근
+    // activity 를 읽어 이미 보고가 있는지 본 뒤 nudge 여부를 가린다.
+    if (formatCompletionReport(summary)) {
+      const { report } = resolveCompletionReport(taskId, status, summary, []);
+      if (report) await recordCompletionReport(taskId, report);
+      return "";
+    }
+    const recent = await fetchRecentActivityMessages(taskId);
+    const { report, nudge } = resolveCompletionReport(
+      taskId,
+      status,
+      summary,
+      recent
+    );
+    if (report) await recordCompletionReport(taskId, report);
+    return nudge;
+  } catch (err) {
+    console.error("[MCP] completion-report handling failed:", err);
+    return "";
+  }
 }
 
 interface PendingInstructionDoc {
@@ -1008,8 +1112,9 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe("Skip state machine validation (default: false)"),
+      summary: completionSummaryShape,
     },
-    async ({ task_id, status, comment, force }) => {
+    async ({ task_id, status, comment, force, summary }) => {
       const task = await fetchTask(task_id);
       if (!task) return text(`Error: Task ${task_id} not found.`);
 
@@ -1147,8 +1252,16 @@ export function registerTools(server: McpServer): void {
 
       const unblockedNote =
         unblocked > 0 ? ` Unblocked ${unblocked} dependent task(s).` : "";
+
+      // 완료 보고 규약 — REVIEW/DONE 으로 닫을 때만. 보고 누락은 soft nudge 로만
+      // 보완 요청하고, 상태 전이는 위에서 이미 커밋됐다(절대 블록 안 함).
+      const completionNudge =
+        newStatus === "REVIEW" || newStatus === "DONE"
+          ? await applyCompletionReport(task_id, newStatus, summary)
+          : "";
+
       return text(
-        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}`
+        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${completionNudge}`
       );
     }
   );
@@ -1207,8 +1320,9 @@ export function registerTools(server: McpServer): void {
     {
       task_id: z.string().describe("Task ID"),
       pr_url: z.string().optional().describe("Pull request URL"),
+      summary: completionSummaryShape,
     },
-    async ({ task_id, pr_url }) => {
+    async ({ task_id, pr_url, summary }) => {
       const task = await fetchTask(task_id);
       if (!task) return text(`Error: Task ${task_id} not found.`);
 
@@ -1272,7 +1386,22 @@ export function registerTools(server: McpServer): void {
         task.contextId
       );
 
-      return text(`Task '${task.title}' submitted for review. Status: REVIEW`);
+      // 완료 보고 규약 — summary 가 있을 때만 pr_url 을 summary.pr 로 폴백한다.
+      // pr_url 만 단독으로 온 기존 호출은 보고로 치지 않는다(빈약한 PR-only 보고로
+      // nudge 를 잠재우면 규약의 취지가 무너지므로). 보고 누락 시 soft nudge 만
+      // 돌려주고 REVIEW 전이는 그대로 유지(절대 블록 안 함).
+      const reportSummary: CompletionSummary | undefined = summary
+        ? { ...summary, pr: summary.pr ?? pr_url }
+        : undefined;
+      const completionNudge = await applyCompletionReport(
+        task_id,
+        "REVIEW",
+        reportSummary
+      );
+
+      return text(
+        `Task '${task.title}' submitted for review. Status: REVIEW${completionNudge}`
+      );
     }
   );
 

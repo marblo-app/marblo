@@ -53,7 +53,11 @@ export function withCompletionFooter(
     "이 작업을 마치면 반드시 아래 marblo MCP 도구를 호출해야 오케스트레이터에게 자동 보고된다 (텍스트 답변만으론 오케스트레이터가 결과를 못 본다):",
     `- 진행 로그: add_activity(task_id="${taskId}", message="...") — 일반 progress 는 타임라인에만 기록된다.`,
     `- 진행 상황은 ticket 본문(description)이 아니라 add_activity 로만 보고 — 본문은 생성 시점의 불변 스펙이다.`,
-    `- 정상 완료 / 리뷰 가능: submit_for_review(task_id="${taskId}", pr_url?)`,
+    // 완료 보고 규약: REVIEW/DONE 으로 닫기 직전, "무엇이 문제였고 어떻게 풀었는지"
+    // 구조화 요약을 티켓에 한 건 남긴다. 보드/티켓에서 완료 내역을 한눈에 보기 위함.
+    // submit_for_review/update_task_status 에 summary 로 같은 필드를 직접 넘겨도 된다.
+    `- 완료 직전 보고: add_activity(task_id="${taskId}", message="✅ 완료 보고\\n- 문제: ...\\n- 접근: ...\\n- 변경: ...\\n- 검증: ...\\n- PR: ...") — 보드/티켓에서 완료 내역을 한눈에 보기 위해 필수.`,
+    `- 정상 완료 / 리뷰 가능: submit_for_review(task_id="${taskId}", pr_url?, summary?) — summary 에 {problem,approach,changes,verification,pr} 를 주면 위 보고를 자동 기록한다.`,
     `- 실패 / 반려: update_task_status(task_id="${taskId}", status="FAILED", comment="이유")`,
     "완료/실패/차단 같은 중요 이벤트만 오케스트레이터 PTY 로 자동 주입된다.",
   ].join("\n");
