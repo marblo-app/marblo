@@ -206,7 +206,7 @@ export interface WebhookEvent {
   id: string;
   eventType: string;
   timestamp: string;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
 }
 
 // Plan Features Interface

@@ -23,7 +23,7 @@ function formatModelName(model?: string): string {
 
 export function LLMNode({ data, selected }: NodeProps) {
   const d = data as unknown as BaseNodeData;
-  const config = d.config as Record<string, any>;
+  const config = d.config as { model?: string; temperature?: number; maxTokens?: number; prompt?: string };
 
   return (
     <div

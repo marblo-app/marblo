@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { User, Building, Target, ChevronDown, ArrowRight } from "lucide-react";
 
-interface CompanyProfile {
+export interface CompanyProfile {
   companyName: string;
   industry: string;
   businessType: string;

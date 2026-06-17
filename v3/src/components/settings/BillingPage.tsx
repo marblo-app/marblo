@@ -129,7 +129,7 @@ export function BillingPage() {
         // TossPayments
         const { orderId, amount } = await createTossCheckout(user.uid, selectedPlan);
         await loadTossPaymentsSDK();
-        const tossPayments = (window as any).TossPayments(
+        const tossPayments = window.TossPayments!(
           import.meta.env.VITE_TOSS_CLIENT_KEY
         );
         const payment = tossPayments.payment({ customerKey: user.uid });
@@ -430,10 +430,33 @@ export function BillingPage() {
 }
 
 // ─── TossPayments SDK Loader ─────────────────────────────────────
+interface TossPaymentMethods {
+  requestPayment(options: {
+    method: string;
+    amount: { currency: string; value: number };
+    orderId: string;
+    orderName: string;
+    successUrl: string;
+    failUrl: string;
+  }): Promise<{ paymentKey?: string } | undefined>;
+}
+
+interface TossPaymentsInstance {
+  payment(options: { customerKey: string }): TossPaymentMethods;
+}
+
+type TossPaymentsSDK = (clientKey: string) => TossPaymentsInstance;
+
+declare global {
+  interface Window {
+    TossPayments?: TossPaymentsSDK;
+  }
+}
+
 let tossSDKLoaded = false;
 
 function loadTossPaymentsSDK(): Promise<void> {
-  if (tossSDKLoaded || (window as any).TossPayments) {
+  if (tossSDKLoaded || window.TossPayments) {
     tossSDKLoaded = true;
     return Promise.resolve();
   }

@@ -36,7 +36,7 @@ const tests: Array<{
   fn: () => Promise<void> | void;
 }> = [];
 
-function test(name: string, tier: "shape" | "behavior", fn: () => any) {
+function test(name: string, tier: "shape" | "behavior", fn: () => Promise<void> | void) {
   tests.push({ name, tier, fn });
 }
 

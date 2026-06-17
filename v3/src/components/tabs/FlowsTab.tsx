@@ -249,12 +249,13 @@ export function FlowsTab() {
   }, [executionState, nodeResults]);
 
   const handleConfigChange = useCallback(
-    (nodeId: string, config: Record<string, any>) => {
+    (nodeId: string, config: Record<string, unknown>) => {
       canvasRef.current?.updateNodeConfig(nodeId, config);
       // Update the selectedNode state to reflect changes in the panel
       setSelectedNode((prev) => {
         if (!prev || prev.id !== nodeId) return prev;
-        const newLabel = config._label;
+        const newLabel =
+          typeof config._label === 'string' ? config._label : undefined;
         const cleanConfig = { ...config };
         delete cleanConfig._label;
         return {

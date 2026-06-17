@@ -16,7 +16,7 @@ describe("validateTask carries structured fields", () => {
         depends_on: [],
         scope: [],
         estimatedHours: 1,
-      } as any,
+      } as Parameters<typeof validateTask>[0],
       0,
       1,
     );
@@ -35,7 +35,7 @@ describe("validateTask carries structured fields", () => {
         depends_on: [],
         scope: [],
         estimatedHours: 1,
-      } as any,
+      } as Parameters<typeof validateTask>[0],
       0,
       1,
     );

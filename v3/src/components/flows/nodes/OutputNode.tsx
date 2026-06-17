@@ -3,7 +3,7 @@ import type { BaseNodeData } from './BaseNode';
 
 export function OutputNode({ data, selected }: NodeProps) {
   const d = data as unknown as BaseNodeData;
-  const config = d.config as Record<string, any>;
+  const config = d.config as { format?: string; preview?: string };
 
   return (
     <div

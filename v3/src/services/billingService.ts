@@ -120,10 +120,30 @@ export function subscribeToSubscription(
 }
 
 // ─── Paddle (해외 결제) ──────────────────────────────────────────
+interface PaddleSDK {
+  Initialize(options: { token: string; environment: string }): void;
+  Checkout: {
+    open(options: {
+      items: { priceId: string; quantity: number }[];
+      customData?: Record<string, unknown>;
+      customer?: { email: string };
+      settings?: { theme?: string; locale?: string; successUrl?: string };
+      success?: () => void;
+      closed?: () => void;
+    }): void;
+  };
+}
+
+declare global {
+  interface Window {
+    Paddle?: PaddleSDK;
+  }
+}
+
 let paddleLoaded = false;
 
 export function loadPaddleSDK(): Promise<void> {
-  if (paddleLoaded || (window as any).Paddle) {
+  if (paddleLoaded || window.Paddle) {
     paddleLoaded = true;
     return Promise.resolve();
   }
@@ -136,7 +156,7 @@ export function loadPaddleSDK(): Promise<void> {
       const clientToken = import.meta.env.VITE_PADDLE_CLIENT_TOKEN;
       const environment = import.meta.env.VITE_PADDLE_ENVIRONMENT || "sandbox";
       if (clientToken) {
-        (window as any).Paddle.Initialize({
+        window.Paddle!.Initialize({
           token: clientToken,
           environment,
         });
@@ -156,7 +176,7 @@ export async function openPaddleCheckout(
   await loadPaddleSDK();
 
   return new Promise((resolve, reject) => {
-    (window as any).Paddle.Checkout.open({
+    window.Paddle!.Checkout.open({
       items: [{ priceId, quantity: 1 }],
       customData: { userId },
       customer: email ? { email } : undefined,

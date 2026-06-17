@@ -38,7 +38,7 @@ const nodeTypes = {
 };
 
 export interface FlowCanvasHandle {
-  updateNodeConfig: (nodeId: string, config: Record<string, any>) => void;
+  updateNodeConfig: (nodeId: string, config: Record<string, unknown>) => void;
 }
 
 export type NodeExecutionStatus = 'running' | 'completed' | 'error' | 'skipped';
@@ -98,7 +98,7 @@ function toFlowNodes(rfNodes: Node[]): FlowNode[] {
     position: n.position,
     data: {
       label: (n.data as Record<string, unknown>).label as string,
-      config: ((n.data as Record<string, unknown>).config ?? {}) as Record<string, any>,
+      config: ((n.data as Record<string, unknown>).config ?? {}) as Record<string, unknown>,
     },
   }));
 }
@@ -158,7 +158,7 @@ export const FlowCanvas = forwardRef<FlowCanvasHandle, FlowCanvasProps>(
     useImperativeHandle(
       ref,
       () => ({
-        updateNodeConfig: (nodeId: string, config: Record<string, any>) => {
+        updateNodeConfig: (nodeId: string, config: Record<string, unknown>) => {
           setNodes((nds) => {
             const updated = nds.map((n) => {
               if (n.id !== nodeId) return n;
@@ -272,7 +272,7 @@ export const FlowCanvas = forwardRef<FlowCanvasHandle, FlowCanvasProps>(
           position: node.position,
           data: {
             label: (data.label as string) || '',
-            config: ((data.config as Record<string, any>) ?? {}),
+            config: ((data.config as Record<string, unknown>) ?? {}),
           },
         };
         onNodeSelect(flowNode);

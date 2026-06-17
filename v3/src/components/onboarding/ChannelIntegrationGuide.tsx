@@ -23,7 +23,7 @@ interface IntegrationChannel {
 
 interface ChannelIntegrationGuideProps {
   availableChannels?: IntegrationChannel[];
-  onConnect: (channelId: string, config: any) => Promise<void>;
+  onConnect: (channelId: string, config: string) => Promise<void>;
   onSkip?: () => void;
 }
 

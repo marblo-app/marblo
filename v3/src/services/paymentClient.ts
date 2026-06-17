@@ -119,8 +119,8 @@ class PaymentClient {
     });
   }
 
-  async getPaymentStatus(paymentKey: string): Promise<any> {
-    return this.request(`/payments/status/${paymentKey}`);
+  async getPaymentStatus(paymentKey: string): Promise<PaymentResponse> {
+    return this.request<PaymentResponse>(`/payments/status/${paymentKey}`);
   }
 
   async getPaymentHistory(

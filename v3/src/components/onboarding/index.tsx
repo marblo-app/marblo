@@ -6,3 +6,4 @@ export { SetupWizard } from "./SetupWizard";
 export type { WizardConfig } from "./SetupWizard";
 export { WelcomeScreen } from "./WelcomeScreen";
 export { ProfileSetupForm } from "./ProfileSetupForm";
+export type { CompanyProfile } from "./ProfileSetupForm";

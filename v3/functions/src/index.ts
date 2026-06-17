@@ -227,7 +227,7 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
 
       if (!snap.empty) {
         const docRef = snap.docs[0].ref;
-        const update: Record<string, any> = {
+        const update: Record<string, unknown> = {
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
 

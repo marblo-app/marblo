@@ -10,7 +10,7 @@ const LANG_ICONS: Record<string, string> = {
 
 export function CodeNode({ data, selected }: NodeProps) {
   const d = data as unknown as BaseNodeData;
-  const config = d.config as Record<string, any>;
+  const config = d.config as { language?: string; script?: string; timeout?: number };
   const lang = config.language || 'python';
 
   return (

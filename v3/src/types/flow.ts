@@ -5,7 +5,7 @@ export interface FlowNode {
   id: string;
   type: NodeType;
   position: { x: number; y: number };
-  data: { label: string; config: Record<string, any> };
+  data: { label: string; config: Record<string, unknown> };
 }
 
 export interface FlowEdge {
@@ -34,7 +34,7 @@ export interface FlowRun {
   flowId: string;
   status: 'running' | 'paused' | 'completed' | 'failed';
   currentNodeId: string;
-  nodeResults: Record<string, { status: string; output: any; error?: string }>;
+  nodeResults: Record<string, { status: string; output: unknown; error?: string }>;
   startedAt: Date;
   completedAt: Date | null;
 }

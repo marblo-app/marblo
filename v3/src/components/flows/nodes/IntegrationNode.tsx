@@ -14,8 +14,13 @@ export const INTEGRATION_SERVICES: Record<string, { icon: string; color: string;
 
 export function IntegrationNode({ data, selected }: NodeProps) {
   const d = data as unknown as BaseNodeData;
-  const config = d.config as Record<string, any>;
-  const service = INTEGRATION_SERVICES[config.service] || INTEGRATION_SERVICES.webhook;
+  const config = d.config as {
+    service?: string;
+    action?: string;
+    channel?: string;
+    description?: string;
+  };
+  const service = INTEGRATION_SERVICES[config.service ?? ''] || INTEGRATION_SERVICES.webhook;
 
   return (
     <div

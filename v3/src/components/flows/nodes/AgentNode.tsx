@@ -3,7 +3,15 @@ import type { BaseNodeData } from './BaseNode';
 
 export function AgentNode({ data, selected }: NodeProps) {
   const d = data as unknown as BaseNodeData;
-  const config = d.config as Record<string, any>;
+  const config = d.config as {
+    connectionMode?: string;
+    agentName?: string;
+    name?: string;
+    role?: string;
+    model?: string;
+    timeout?: number;
+    taskDescription?: string;
+  };
   const isExisting = config.connectionMode === 'existing';
 
   const handleDoubleClick = () => {

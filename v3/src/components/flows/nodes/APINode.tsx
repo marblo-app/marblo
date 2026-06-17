@@ -10,9 +10,9 @@ const METHOD_COLORS: Record<string, string> = {
 
 export function APINode({ data, selected }: NodeProps) {
   const d = data as unknown as BaseNodeData;
-  const config = d.config as Record<string, any>;
+  const config = d.config as { method?: string; url?: string; headers?: { key: string; value: string }[] };
   const method = config.method || 'GET';
-  const headers = (config.headers as { key: string; value: string }[]) || [];
+  const headers = config.headers || [];
 
   return (
     <div

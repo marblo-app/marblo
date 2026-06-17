@@ -5,8 +5,74 @@ import { useProjectStore } from '../../stores/projectStore';
 
 interface NodeConfigPanelProps {
   node: FlowNode;
-  onConfigChange: (nodeId: string, config: Record<string, any>) => void;
+  onConfigChange: (nodeId: string, config: Record<string, unknown>) => void;
   onClose: () => void;
+}
+
+type ConfigUpdate = (key: string, value: unknown) => void;
+
+interface InputNodeConfig {
+  variableName?: string;
+  inputType?: string;
+  defaultValue?: string;
+}
+
+interface LLMNodeConfig {
+  model?: string;
+  prompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+interface AgentNodeConfig {
+  connectionMode?: string;
+  agentId?: string;
+  agentName?: string;
+  role?: string;
+  model?: string;
+  taskDescription?: string;
+  timeout?: number;
+}
+
+interface APINodeConfig {
+  method?: string;
+  url?: string;
+  headers?: { key: string; value: string }[];
+  body?: string;
+}
+
+interface HumanNodeConfig {
+  message?: string;
+}
+
+interface BranchNodeConfig {
+  condition?: string;
+}
+
+interface OutputNodeConfig {
+  format?: string;
+  preview?: string;
+}
+
+interface CodeNodeConfig {
+  language?: string;
+  script?: string;
+  cwd?: string;
+  timeout?: number;
+  envVars?: string;
+}
+
+interface IntegrationNodeConfig {
+  service?: string;
+  action?: string;
+  channel?: string;
+  chatId?: string;
+  spreadsheetId?: string;
+  repo?: string;
+  webhookUrl?: string;
+  to?: string;
+  body?: string;
+  apiToken?: string;
 }
 
 const TYPE_COLORS: Record<NodeType, { accent: string; label: string; icon: string }> = {
@@ -123,8 +189,8 @@ function InputConfig({
   config,
   update,
 }: {
-  config: Record<string, any>;
-  update: (key: string, value: any) => void;
+  config: InputNodeConfig;
+  update: ConfigUpdate;
 }) {
   return (
     <>
@@ -207,8 +273,8 @@ function LLMConfig({
   config,
   update,
 }: {
-  config: Record<string, any>;
-  update: (key: string, value: any) => void;
+  config: LLMNodeConfig;
+  update: ConfigUpdate;
 }) {
   const temperature = config.temperature ?? 0.7;
   return (
@@ -264,8 +330,8 @@ function AgentConfig({
   config,
   update,
 }: {
-  config: Record<string, any>;
-  update: (key: string, value: any) => void;
+  config: AgentNodeConfig;
+  update: ConfigUpdate;
 }) {
   const agents = useAgentStore((s) => s.agents);
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -388,8 +454,8 @@ function APIConfig({
   config,
   update,
 }: {
-  config: Record<string, any>;
-  update: (key: string, value: any) => void;
+  config: APINodeConfig;
+  update: ConfigUpdate;
 }) {
   const method = config.method || 'GET';
   const headers: { key: string; value: string }[] = config.headers || [];
@@ -493,8 +559,8 @@ function HumanConfig({
   config,
   update,
 }: {
-  config: Record<string, any>;
-  update: (key: string, value: any) => void;
+  config: HumanNodeConfig;
+  update: ConfigUpdate;
 }) {
   return (
     <div>
@@ -513,8 +579,8 @@ function BranchConfig({
   config,
   update,
 }: {
-  config: Record<string, any>;
-  update: (key: string, value: any) => void;
+  config: BranchNodeConfig;
+  update: ConfigUpdate;
 }) {
   return (
     <div>
@@ -536,8 +602,8 @@ function OutputConfig({
   config,
   update,
 }: {
-  config: Record<string, any>;
-  update: (key: string, value: any) => void;
+  config: OutputNodeConfig;
+  update: ConfigUpdate;
 }) {
   return (
     <>
@@ -567,8 +633,8 @@ function CodeConfig({
   config,
   update,
 }: {
-  config: Record<string, any>;
-  update: (key: string, value: any) => void;
+  config: CodeNodeConfig;
+  update: ConfigUpdate;
 }) {
   return (
     <>
@@ -642,8 +708,8 @@ function IntegrationConfig({
   config,
   update,
 }: {
-  config: Record<string, any>;
-  update: (key: string, value: any) => void;
+  config: IntegrationNodeConfig;
+  update: ConfigUpdate;
 }) {
   const service = config.service || 'slack';
   const actions = INTEGRATION_ACTIONS[service] || INTEGRATION_ACTIONS.webhook;
@@ -765,28 +831,43 @@ function IntegrationConfig({
   );
 }
 
-const CONFIG_RENDERERS: Record<
-  NodeType,
-  (props: { config: Record<string, any>; update: (key: string, value: any) => void }) => JSX.Element
-> = {
-  input: InputConfig,
-  llm: LLMConfig,
-  agent: AgentConfig,
-  code: CodeConfig,
-  api: APIConfig,
-  integration: IntegrationConfig,
-  human: HumanConfig,
-  branch: BranchConfig,
-  output: OutputConfig,
-};
+function renderTypeConfig(
+  type: NodeType,
+  config: Record<string, unknown>,
+  update: ConfigUpdate,
+): JSX.Element | null {
+  switch (type) {
+    case 'input':
+      return <InputConfig config={config as InputNodeConfig} update={update} />;
+    case 'llm':
+      return <LLMConfig config={config as LLMNodeConfig} update={update} />;
+    case 'agent':
+      return <AgentConfig config={config as AgentNodeConfig} update={update} />;
+    case 'code':
+      return <CodeConfig config={config as CodeNodeConfig} update={update} />;
+    case 'api':
+      return <APIConfig config={config as APINodeConfig} update={update} />;
+    case 'integration':
+      return (
+        <IntegrationConfig config={config as IntegrationNodeConfig} update={update} />
+      );
+    case 'human':
+      return <HumanConfig config={config as HumanNodeConfig} update={update} />;
+    case 'branch':
+      return <BranchConfig config={config as BranchNodeConfig} update={update} />;
+    case 'output':
+      return <OutputConfig config={config as OutputNodeConfig} update={update} />;
+    default:
+      return null;
+  }
+}
 
 export function NodeConfigPanel({ node, onConfigChange, onClose }: NodeConfigPanelProps) {
   const config = node.data.config || {};
   const colors = TYPE_COLORS[node.type];
-  const ConfigRenderer = CONFIG_RENDERERS[node.type];
 
-  const update = useCallback(
-    (key: string, value: any) => {
+  const update = useCallback<ConfigUpdate>(
+    (key, value) => {
       onConfigChange(node.id, { ...config, [key]: value });
     },
     [node.id, config, onConfigChange],
@@ -841,7 +922,7 @@ export function NodeConfigPanel({ node, onConfigChange, onClose }: NodeConfigPan
         <div className="border-t border-gray-700" />
 
         {/* Type-specific config */}
-        <ConfigRenderer config={config} update={update} />
+        {renderTypeConfig(node.type, config, update)}
       </div>
     </div>
   );

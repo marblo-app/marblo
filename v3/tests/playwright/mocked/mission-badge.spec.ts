@@ -15,12 +15,12 @@ test("@mocked 미션 task 는 🎯 Mission 뱃지로 렌더된다 (⛙ Lane 아�
         __marbloTest?: {
           stores: {
             task: {
-              getState: () => { tasks: any[] };
-              setState: (s: any) => void;
+              getState: () => { tasks: Array<{ projectId?: string; [key: string]: unknown }> };
+              setState: (s: { tasks: Array<Record<string, unknown>> }) => void;
             };
             agent: {
-              getState: () => { agents: any[] };
-              setState: (s: any) => void;
+              getState: () => { agents: Array<Record<string, unknown>> };
+              setState: (s: { agents: Array<Record<string, unknown>> }) => void;
             };
           };
         };

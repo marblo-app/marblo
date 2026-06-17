@@ -1,4 +1,5 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import {
   collection,
@@ -454,14 +455,25 @@ function isTerminalTaskStatus(s: unknown): boolean {
   return s === "DONE" || s === "FAILED";
 }
 
+interface PendingInstructionDoc {
+  id: string;
+  createdAt?: { toMillis?: () => number };
+  isDelivered?: boolean;
+  fromUserName?: string;
+  fromUserId?: string;
+  sourceType?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
 export function registerTools(server: McpServer): void {
   // Wrap server.tool to add automatic audit logging
   const originalTool = server.tool.bind(server);
-  function auditedTool(
+  function auditedTool<Args extends ZodRawShapeCompat>(
     name: string,
     description: string,
-    schema: any,
-    handler: (...args: any[]) => Promise<any>,
+    schema: Args,
+    handler: ToolCallback<Args>,
     opts: { userFacing?: boolean } = {}
   ): void {
     const userFacing = opts.userFacing ?? true;
@@ -471,13 +483,19 @@ export function registerTools(server: McpServer): void {
       originalTool(name, description, schema, handler);
       return;
     }
-    originalTool(name, description, schema, async (...args: any[]) => {
+    // ToolCallback<Args> is a deferred conditional type while Args is generic,
+    // so it isn't directly callable — invoke it through a structural shim that
+    // exposes only the CallToolResult shape we read for audit logging.
+    const invoke = handler as unknown as (
+      ...args: unknown[]
+    ) => Promise<{ content?: Array<{ text?: string }> }>;
+    const wrapped = (async (...args: unknown[]) => {
       const start = Date.now();
       let success = true;
       let resultText = "";
 
       try {
-        const result = await handler(...args);
+        const result = await invoke(...args);
         resultText = result?.content?.[0]?.text || "";
         return result;
       } catch (err) {
@@ -486,8 +504,8 @@ export function registerTools(server: McpServer): void {
         throw err;
       } finally {
         const duration = Date.now() - start;
-        const params = args[0] || {};
-        const projectId = resolveProject(params.project_id);
+        const params = (args[0] || {}) as Record<string, unknown>;
+        const projectId = resolveProject(params.project_id as string | undefined);
 
         auditLog({
           projectId,
@@ -499,7 +517,8 @@ export function registerTools(server: McpServer): void {
           success,
         });
       }
-    });
+    }) as unknown as ToolCallback<Args>;
+    originalTool(name, description, schema, wrapped);
   }
 
   // 1. get_all_tasks
@@ -2845,15 +2864,15 @@ export function registerTools(server: McpServer): void {
 
       const max = typeof limit === "number" && limit > 0 ? limit : 50;
       const docs = snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Record<string, unknown>) }))
-        .sort((a: any, b: any) => {
+        .map((d) => ({ id: d.id, ...(d.data() as PendingInstructionDoc) }))
+        .sort((a, b) => {
           const at = a.createdAt?.toMillis?.() ?? 0;
           const bt = b.createdAt?.toMillis?.() ?? 0;
           return at - bt;
         })
         .slice(0, max);
 
-      const lines = docs.map((d: any) => {
+      const lines = docs.map((d) => {
         const delivered = d.isDelivered ? " [delivered]" : "";
         const who = d.fromUserName || d.fromUserId || "system";
         const src = d.sourceType || "other";

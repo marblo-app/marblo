@@ -4,7 +4,7 @@ import { makeNode, makeEdge, makeFlow, mockLLMProvider } from '../setup';
 import { getFirestore } from 'firebase/firestore';
 import type { FlowEvent } from '../../electron/flow-engine/types';
 
-const db = getFirestore() as any;
+const db = getFirestore();
 
 describe('Flow Engine Integration', () => {
   describe('multi-step LLM pipeline', () => {
@@ -27,11 +27,11 @@ describe('Flow Engine Integration', () => {
       // Verify data flow
       const inputResult = state.nodeResults['input'];
       expect(inputResult.status).toBe('success');
-      expect((inputResult.output as any).topic).toBe('TypeScript');
+      expect((inputResult.output as { topic: string }).topic).toBe('TypeScript');
 
       const llmResult = state.nodeResults['llm'];
       expect(llmResult.status).toBe('success');
-      expect((llmResult.output as any).response).toBe('Generated summary');
+      expect((llmResult.output as { response: string }).response).toBe('Generated summary');
 
       const outputResult = state.nodeResults['output'];
       expect(outputResult.status).toBe('success');
@@ -64,7 +64,7 @@ describe('Flow Engine Integration', () => {
 
       // Branch took the 'true' path
       expect(state.nodeResults['check'].status).toBe('success');
-      expect((state.nodeResults['check'].output as any).branch).toBe('true');
+      expect((state.nodeResults['check'].output as { branch: string }).branch).toBe('true');
 
       // True path executed
       expect(state.nodeResults['pass-llm'].status).toBe('success');
@@ -93,7 +93,7 @@ describe('Flow Engine Integration', () => {
 
       const agentResult = state.nodeResults['agent'];
       expect(agentResult.status).toBe('success');
-      const output = agentResult.output as any;
+      const output = agentResult.output as { delegated: boolean; agentName: string; task: string };
       expect(output.delegated).toBe(true);
       expect(output.agentName).toBe('backend-bot');
       expect(output.task).toBe('Fix auth');
@@ -126,7 +126,7 @@ describe('Flow Engine Integration', () => {
 
       const apiResult = state.nodeResults['api'];
       expect(apiResult.status).toBe('success');
-      expect((apiResult.output as any).data.users[0].name).toBe('Alice');
+      expect((apiResult.output as { data: { users: { name: string }[] } }).data.users[0].name).toBe('Alice');
 
       vi.unstubAllGlobals();
     });

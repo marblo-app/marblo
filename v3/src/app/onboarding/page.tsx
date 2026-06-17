@@ -9,13 +9,17 @@ import {
   ChannelIntegrationGuide,
   SetupWizard,
 } from "../../components/onboarding";
-import type { OnboardingStep, WizardConfig } from "../../components/onboarding";
+import type {
+  OnboardingStep,
+  WizardConfig,
+  CompanyProfile,
+} from "../../components/onboarding";
 
 interface OnboardingState {
   currentStep: number;
   completedSteps: Set<number>;
-  profile?: any;
-  channels?: any[];
+  profile?: CompanyProfile;
+  channels?: { channelId: string; config: string }[];
   config?: WizardConfig;
   showWelcome: boolean;
 }
@@ -36,7 +40,7 @@ export default function OnboardingPage() {
     window.location.href = "/dashboard";
   };
 
-  const handleProfileSubmit = (profile: any) => {
+  const handleProfileSubmit = (profile: CompanyProfile) => {
     setState((prev) => ({
       ...prev,
       profile,
@@ -45,7 +49,7 @@ export default function OnboardingPage() {
     }));
   };
 
-  const handleChannelConnect = async (channelId: string, config: any) => {
+  const handleChannelConnect = async (channelId: string, config: string) => {
     // 채널 연동 로직
     console.log("Connecting channel:", channelId, config);
 

@@ -5,7 +5,7 @@ import { getFirestore } from 'firebase/firestore';
 import type { FlowEvent } from '../../electron/flow-engine/types';
 
 // Get mock Firestore
-const db = getFirestore() as any;
+const db = getFirestore();
 
 describe('FlowRunner', () => {
   let runner: FlowRunner;
@@ -305,7 +305,7 @@ describe('FlowRunner', () => {
       expect(state.status).toBe('completed');
       const humanResult = state.nodeResults['human'];
       expect(humanResult.status).toBe('success');
-      expect((humanResult.output as any).approved).toBe(true);
+      expect((humanResult.output as { approved: boolean }).approved).toBe(true);
     });
 
     it('fails when human rejects', async () => {

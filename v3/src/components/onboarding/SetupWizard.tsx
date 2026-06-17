@@ -99,7 +99,10 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
     }
   };
 
-  const updateConfig = (section: keyof WizardConfig, updates: any) => {
+  const updateConfig = <K extends keyof WizardConfig>(
+    section: K,
+    updates: Partial<WizardConfig[K]>,
+  ) => {
     setConfig((prev) => ({
       ...prev,
       [section]: {
@@ -126,7 +129,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
           {sections.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setActiveSection(id as any)}
+              onClick={() => setActiveSection(id as keyof WizardConfig)}
               className={`
                 w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors
                 ${
@@ -230,7 +233,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     Theme
                   </label>
                   <div className="flex gap-3">
-                    {["light", "dark", "system"].map((theme) => (
+                    {(["light", "dark", "system"] as const).map((theme) => (
                       <button
                         key={theme}
                         onClick={() => updateConfig("preferences", { theme })}
