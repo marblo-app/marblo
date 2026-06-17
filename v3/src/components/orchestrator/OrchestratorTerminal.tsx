@@ -128,7 +128,7 @@ export default memo(function OrchestratorTerminal({
               const webglAddon = new WebglAddon();
               webglAddon.onContextLoss(() => webglAddon.dispose());
               terminal.loadAddon(webglAddon);
-              console.log("[OrchestratorTerminal] WebGL renderer active");
+              console.debug("[OrchestratorTerminal] WebGL renderer active");
             } catch (err) {
               console.warn(
                 "[OrchestratorTerminal] WebGL init failed, falling back to canvas:",
@@ -143,7 +143,7 @@ export default memo(function OrchestratorTerminal({
           } else {
             try {
               terminal.loadAddon(new CanvasAddon());
-              console.log("[OrchestratorTerminal] Canvas renderer active");
+              console.debug("[OrchestratorTerminal] Canvas renderer active");
             } catch (err) {
               console.warn(
                 "[OrchestratorTerminal] Canvas init failed, using DOM renderer:",

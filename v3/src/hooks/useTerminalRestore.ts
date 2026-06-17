@@ -48,7 +48,7 @@ export function useTerminalRestore(): void {
       });
       restored++;
     }
-    console.log(
+    console.debug(
       `[TerminalRestore] project=${projectId}: ${restored} respawned, ${skipped} already-present`
     );
   }, [currentProject?.id, sessions, createSession]);

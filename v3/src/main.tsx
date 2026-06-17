@@ -22,7 +22,7 @@ if (window.electronAPI?.testMode?.bypassAuth) {
       task: useTaskStore,
     },
   };
-  console.log("[TestHatch] window.__marbloTest exposed (bypassAuth mode)");
+  console.debug("[TestHatch] window.__marbloTest exposed (bypassAuth mode)");
 }
 
 // Prevent Vite HMR from full-page reloading after sleep/wake
@@ -33,11 +33,11 @@ if (import.meta.hot) {
   let wasDisconnected = false;
   import.meta.hot.on("vite:ws:disconnect", () => {
     wasDisconnected = true;
-    console.log("[HMR] WebSocket disconnected (likely sleep)");
+    console.debug("[HMR] WebSocket disconnected (likely sleep)");
   });
   import.meta.hot.on("vite:ws:connect", () => {
     if (wasDisconnected) {
-      console.log(
+      console.debug(
         "[HMR] WebSocket reconnected after disconnect — state preserved"
       );
       wasDisconnected = false;

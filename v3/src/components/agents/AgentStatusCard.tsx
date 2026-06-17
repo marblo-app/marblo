@@ -153,7 +153,7 @@ export default function AgentStatusCard({
   const handleSessionSelect = async (resumeSessionId: string) => {
     setShowSessionPicker(false);
     const cwd = rootPath || "~";
-    console.log("[AgentStatusCard] handleSessionSelect:", {
+    console.debug("[AgentStatusCard] handleSessionSelect:", {
       resumeSessionId,
       cwd,
       agentId: agent.id,

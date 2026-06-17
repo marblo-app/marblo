@@ -4,6 +4,7 @@
 // rules incrementally rather than enabling everything at once.
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
+import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
 export default tseslint.config(
@@ -45,5 +46,22 @@ export default tseslint.config(
         },
       ],
     },
-  }
+  },
+
+  // Renderer (React) source: enable the stable react-hooks "recommended" set
+  // (rules-of-hooks=error, exhaustive-deps=warn) and a no-console policy.
+  // Scoped to src/** only — the Electron main process (electron/) and Cloud
+  // Functions use console as their primary node-side logger, so banning it
+  // there is out of scope for this baseline.
+  {
+    files: ["src/**/*.{ts,tsx,jsx}"],
+    plugins: { "react-hooks": reactHooks },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      // Forbid the catch-all console.log; allow explicit, leveled logging.
+      // console.debug stays available for tagged diagnostics (hidden by
+      // default in devtools), so existing logs convert without losing intent.
+      "no-console": ["error", { allow: ["warn", "error", "info", "debug"] }],
+    },
+  },
 );

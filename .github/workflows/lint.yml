@@ -1,0 +1,42 @@
+name: Lint
+
+# Lint gate for v3. Blocks PRs (and pushes to main) when ESLint reports
+# errors. exhaustive-deps and other advisory rules are configured as
+# warnings in v3/eslint.config.mjs and do not fail this gate by design.
+on:
+  push:
+    branches: [main]
+    paths: ["v3/**"]
+  pull_request:
+    branches: [main]
+    paths: ["v3/**"]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: v3/package-lock.json
+
+      # Use `npm install` (not `npm ci`) on purpose. The committed lock is
+      # generated on macOS and omits electron-builder's optional win32 subtree
+      # (electron-builder-squirrel-windows, archiver, …); `npm ci` strictly
+      # validates lock/package.json sync up front and fails on Linux with
+      # "Missing … from lock file" before it can honor --omit=optional. The
+      # lint toolchain (eslint, typescript-eslint, react-hooks) are all regular
+      # devDependencies, so reconciling with `npm install --omit=optional`
+      # installs exactly what lint needs without tripping the strict check.
+      - name: Install dependencies
+        working-directory: v3
+        run: npm install --no-audit --no-fund --omit=optional
+
+      - name: Lint
+        working-directory: v3
+        run: npm run lint

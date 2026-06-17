@@ -95,7 +95,7 @@ export function useCostWriter() {
       })
         .then((result) => {
           const res = result.data as { inserted: number };
-          console.log(
+          console.debug(
             `[CostWriter] Sent to BigQuery: ${res.inserted} entry for agent=${data.agentId}`,
           );
         })

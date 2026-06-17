@@ -79,7 +79,7 @@ export function useOrchestratorAutoLaunch() {
           upsertOrchestratorAgentDoc(projectId, "working").catch(
             () => undefined,
           );
-          console.log(
+          console.debug(
             priorId
               ? `[Orchestrator] Auto-reconnected: ${priorId}`
               : `[Orchestrator] Auto-started fresh session (no prior session)`,

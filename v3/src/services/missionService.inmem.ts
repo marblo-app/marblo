@@ -100,7 +100,7 @@ function ensureHatch(): void {
       return missions.length;
     },
   };
-  console.log("[TestHatch] window.__marbloTest.missions exposed (in-memory)");
+  console.debug("[TestHatch] window.__marbloTest.missions exposed (in-memory)");
 }
 
 export function inMemEnabled(): boolean {

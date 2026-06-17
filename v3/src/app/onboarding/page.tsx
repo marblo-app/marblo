@@ -51,7 +51,7 @@ export default function OnboardingPage() {
 
   const handleChannelConnect = async (channelId: string, config: string) => {
     // 채널 연동 로직
-    console.log("Connecting channel:", channelId, config);
+    console.debug("Connecting channel:", channelId, config);
 
     setState((prev) => ({
       ...prev,
@@ -78,7 +78,7 @@ export default function OnboardingPage() {
 
   const handleComplete = () => {
     // 온보딩 완료 처리
-    console.log("Onboarding completed with:", {
+    console.debug("Onboarding completed with:", {
       profile: state.profile,
       channels: state.channels,
       config: state.config,

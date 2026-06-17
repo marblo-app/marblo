@@ -127,7 +127,7 @@ export function useSessionRestore() {
           setCurrentProject(target);
         }
 
-        console.log(
+        console.debug(
           "[SessionRestore] Restored:",
           restoreRoot,
           target?.id ?? null,

@@ -152,7 +152,7 @@ export default memo(function TerminalView({
             const webglAddon = new WebglAddon();
             webglAddon.onContextLoss(() => webglAddon.dispose());
             terminal.loadAddon(webglAddon);
-            console.log("[TerminalView] WebGL renderer active");
+            console.debug("[TerminalView] WebGL renderer active");
           } catch (err) {
             console.warn(
               "[TerminalView] WebGL init failed, using DOM renderer:",

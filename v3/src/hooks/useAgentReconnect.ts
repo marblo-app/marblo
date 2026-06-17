@@ -111,7 +111,7 @@ export function useAgentReconnect() {
           // 분모는 이번에 시도한 배치 크기 (list.length). 전체 agents.length 대신
           // 이걸 써야 partial-snapshot 으로 여러 번 호출돼도 각 호출이 정직히
           // "이번 배치에서 N/M" 형태로 표시된다.
-          console.log(
+          console.debug(
             `[Reconnect] ${reconnectedCount}/${list.length} agents reconnected`,
           );
         }
@@ -145,7 +145,7 @@ export function useAgentReconnect() {
       if (result) {
         setSession(result.sessionId, result.ptySessionId);
         setOrchestratorStatus("running");
-        console.log("[Reconnect] Orchestrator re-attached:", priorId);
+        console.debug("[Reconnect] Orchestrator re-attached:", priorId);
       }
     } catch (err) {
       console.error("[Reconnect] Orchestrator reconnect failed:", err);
@@ -189,7 +189,7 @@ export function useAgentReconnect() {
   // 둔다. (effect 의존성에 agents 가 있어 set 비우면 자동 재발화)
   useEffect(() => {
     const handleWake = () => {
-      console.log("[Reconnect] System wake detected — attempting reconnect");
+      console.debug("[Reconnect] System wake detected — attempting reconnect");
       attemptedAgentIdsRef.current = new Set();
       reconnect();
       reconnectOrchestrator();
