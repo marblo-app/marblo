@@ -353,7 +353,9 @@ function truncTitle(title: unknown, max = TITLE_MAX): string {
 function capLines(lines: string[], limit: number, hint: string): string {
   if (lines.length <= limit) return lines.join("\n");
   const hidden = lines.length - limit;
-  return `${lines.slice(0, limit).join("\n")}\n… (+${hidden} more hidden — ${hint})`;
+  return `${lines
+    .slice(0, limit)
+    .join("\n")}\n… (+${hidden} more hidden — ${hint})`;
 }
 function isTerminalTaskStatus(s: unknown): boolean {
   return s === "DONE" || s === "FAILED";
@@ -469,7 +471,9 @@ export function registerTools(server: McpServer): void {
         const claimed = t.claimedBy ? ` → ${t.claimedBy}` : "";
         const proj = all_projects ? ` project=${t.projectId || "(none)"}` : "";
         const ctx = all_contexts ? ` ctx=${t.contextId || "(none)"}` : "";
-        return `- [${t.status}] ${truncTitle(t.title)} (role=${t.role}, id=${t.id}${proj}${ctx})${claimed}`;
+        return `- [${t.status}] ${truncTitle(t.title)} (role=${t.role}, id=${
+          t.id
+        }${proj}${ctx})${claimed}`;
       });
       return text(
         capLines(
@@ -542,7 +546,9 @@ export function registerTools(server: McpServer): void {
         const deps = t.dependsOn?.length
           ? ` (depends_on: ${t.dependsOn.join(", ")})`
           : "";
-        return `- [${t.id}] ${truncTitle(t.title)} (priority=${t.priority})${deps}`;
+        return `- [${t.id}] ${truncTitle(t.title)} (priority=${
+          t.priority
+        })${deps}`;
       });
       return text(
         capLines(lines, limit ?? LIST_LIMIT_DEFAULT, "raise limit to see more"),
@@ -936,6 +942,24 @@ export function registerTools(server: McpServer): void {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ agentId: MARBLO_AGENT_ID, status: "idle" }),
+          }).catch(() => {});
+        }
+      }
+
+      // Auto-reap the task's isolated worktree once it's terminal (DONE) so the
+      // 100+ orphaned-worktree pileup (disk waste + shared-branch lock) can't
+      // recur. Best-effort + fully guarded on the bridge side: a dirty or
+      // unmerged-unpushed worktree is preserved (work-loss guard), and a tree
+      // still owned by a working agent is deferred. Fire just after the idle
+      // signal so the reporting agent is no longer "working" when it lands.
+      if (newStatus === "DONE") {
+        const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+        const projectId = process.env.MARBLO_PROJECT;
+        if (bridgePort && projectId) {
+          fetch(`http://127.0.0.1:${bridgePort}/reap-worktree`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ projectId, taskId: task_id }),
           }).catch(() => {});
         }
       }
@@ -1483,7 +1507,9 @@ export function registerTools(server: McpServer): void {
 
       const taskLines = matches.map((d) => {
         const t = d.data();
-        return `- [${t.status}] ${truncTitle(t.title)} (role=${t.role}, id=${d.id})`;
+        return `- [${t.status}] ${truncTitle(t.title)} (role=${t.role}, id=${
+          d.id
+        })`;
       });
       const body = capLines(
         taskLines,

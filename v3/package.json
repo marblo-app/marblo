@@ -29,6 +29,7 @@
     "mcp": "node dist-mcp/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "worktree:reap": "tsc -p electron/tsconfig.json && node dist-electron/scripts/reap-worktrees.js",
     "test:e2e:pw": "playwright test",
     "test:e2e:pw:ui": "playwright test --ui",
     "test:e2e:pw:headed": "playwright test --headed",

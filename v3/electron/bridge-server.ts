@@ -468,6 +468,11 @@ export class BridgeServer {
           return;
         }
 
+        if (req.method === "POST" && req.url === "/reap-worktree") {
+          this.handleReapWorktree(req, res);
+          return;
+        }
+
         if (req.method === "POST" && req.url === "/inject-message") {
           this.handleInjectMessage(req, res);
           return;
@@ -1802,6 +1807,103 @@ export class BridgeServer {
 
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ success: true }));
+    });
+  }
+
+  // ── POST /reap-worktree ─────────────────────────────────────
+  //
+  // Auto-reap the isolated worktree of a terminal task (DONE) or merged PR —
+  // the fix for the 100+ orphaned-worktree pileup that locked the shared
+  // branch. Fired best-effort by update_task_status (MCP) when a task hits
+  // DONE; the heavy lifting + work-loss guard lives in WorktreeManager.reap
+  // (dirty / unmerged-unpushed worktrees are preserved, never destroyed).
+  //
+  // Extra guard here: never pull the rug from an agent still ACTIVELY working
+  // in that worktree (status === "working"). On DONE the reporting agent is
+  // already set idle, so the normal path proceeds; this only defers the rare
+  // case of a reap arriving while a live session still owns the tree.
+
+  private handleReapWorktree(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      const reply = (code: number, payload: Record<string, unknown>) => {
+        res.writeHead(code, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(payload));
+      };
+
+      let params: {
+        projectId?: string;
+        taskId?: string;
+        requireMerged?: boolean;
+      };
+      try {
+        params = JSON.parse(body);
+      } catch {
+        reply(400, { success: false, error: "Invalid JSON" });
+        return;
+      }
+
+      const { projectId, taskId, requireMerged } = params;
+      if (!projectId || !taskId) {
+        reply(400, { success: false, error: "projectId and taskId required" });
+        return;
+      }
+
+      const repoRoot =
+        this.orchestratorLookup(projectId)?.getSession()?.rootPath;
+      if (!repoRoot) {
+        reply(200, {
+          success: true,
+          removed: false,
+          reason: "no repo root for project",
+        });
+        return;
+      }
+
+      // Defer if a live agent still owns this worktree (AgentInfo carries no
+      // cwd, so resolve the full instance for each candidate).
+      const suffix = path.sep + path.join(projectId, taskId);
+      const busy = this.agentManager
+        .listAgentsByProject(projectId)
+        .some((a) => {
+          const full = this.agentManager.getAgent(a.id);
+          return (
+            full?.status === "working" &&
+            !!full.cwd &&
+            full.cwd.endsWith(suffix)
+          );
+        });
+      if (busy) {
+        reply(200, {
+          success: true,
+          removed: false,
+          reason: "owning agent still working",
+        });
+        return;
+      }
+
+      void this.worktreeCoordinator
+        .reapForTask({ projectId, taskId, repoRoot, requireMerged })
+        .then((result) => {
+          if (result.removed) {
+            console.log(
+              `[BridgeServer] Reaped worktree for task ${taskId} (${result.reason})`,
+            );
+          }
+          reply(200, { success: true, ...result });
+        })
+        .catch((e) => {
+          reply(200, {
+            success: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        });
     });
   }
 

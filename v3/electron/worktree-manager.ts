@@ -117,6 +117,62 @@ export interface CleanupStaleResult {
   failed: { path: string; error: string }[];
 }
 
+/**
+ * Work-loss safety verdict for reaping one worktree. A worktree is only
+ * `safe` to remove when removing it cannot lose work: the tree is clean AND
+ * every commit is either already merged into base or pushed to the remote
+ * (a PR carries it). `blockers` enumerates the reasons it is NOT safe.
+ */
+export interface ReapSafety {
+  /** Working tree has uncommitted changes (`git status --porcelain` non-empty). */
+  dirty: boolean;
+  /** Branch tip has no commits beyond base (already merged / never diverged). */
+  merged: boolean;
+  /**
+   * Commits on HEAD that are neither in base nor on `origin/<branch>` — i.e.
+   * local-only work that removal would destroy. `-1` means the branch state
+   * could not be read (treated as unsafe, conservatively).
+   */
+  unpushedCommits: number;
+  /** Safe to `git worktree remove` without losing work. */
+  safe: boolean;
+  /** Human-readable reasons removal was refused (empty when `safe`). */
+  blockers: string[];
+}
+
+/** Outcome of reaping a single worktree (auto-reap on DONE / merge). */
+export interface ReapResult {
+  path: string;
+  removed: boolean;
+  /** Branch the worktree was on (captured before teardown), when known. */
+  branch?: string;
+  /** Why it was removed, or why it was preserved. */
+  reason: string;
+  safety: ReapSafety;
+}
+
+/** Outcome of a bulk reap sweep over every worktree under a repo. */
+export interface ReapAllResult {
+  /** Worktree paths successfully removed. */
+  removed: string[];
+  /** Worktrees deliberately kept (unmerged/dirty work), with the reason. */
+  preserved: { path: string; reason: string }[];
+  /** Worktrees that were reap candidates but errored, with the reason. */
+  failed: { path: string; error: string }[];
+}
+
+/** Options for a reap (single or bulk). */
+export interface ReapOptions {
+  /** Override the auto-resolved base ref (origin default branch). */
+  baseRef?: string;
+  /**
+   * Only reap when the branch is fully merged into base. Use for the
+   * "PR merged" trigger; leave false for the "task DONE" trigger, which still
+   * reaps a clean, fully-pushed worktree even before the squash lands on base.
+   */
+  requireMerged?: boolean;
+}
+
 const STALE_MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_IDLE_DAYS = 14;
 
@@ -967,5 +1023,200 @@ export class WorktreeManager {
       }
     }
     return { removed, failed };
+  }
+
+  /** True when the worktree has uncommitted changes. Conservative: a git
+   *  error reads as "dirty" so a reap never proceeds on an unreadable tree. */
+  private async hasUncommittedChanges(worktreePath: string): Promise<boolean> {
+    const st = await this.runGit(["status", "--porcelain"], worktreePath);
+    if (st.code !== 0) return true;
+    return st.stdout.trim().length > 0;
+  }
+
+  /**
+   * Work-loss safety check for reaping a worktree (the guard behind the
+   * auto-reap-on-DONE/merge hook). Removal is only `safe` when it cannot lose
+   * work:
+   *  - clean working tree (no uncommitted changes), AND
+   *  - every commit beyond base is either merged into base OR already pushed to
+   *    `origin/<branch>` (a PR carries it).
+   * Anything else (dirty tree, local-only commits, unreadable state) is a
+   * blocker → preserve. Never throws.
+   */
+  async reapSafety(worktreePath: string, baseRef: string): Promise<ReapSafety> {
+    const dirty = await this.hasUncommittedChanges(worktreePath);
+    const merged = await this.isMergedIntoBase(worktreePath, baseRef);
+
+    const blockers: string[] = [];
+    if (dirty) blockers.push("uncommitted changes");
+
+    let unpushedCommits = 0;
+    if (!merged) {
+      // Branch has commits beyond base. They are safe to drop only if every
+      // one is on the remote; otherwise removing the worktree destroys them.
+      const ahead = await this.runGit(
+        ["rev-list", "--count", `${baseRef}..HEAD`],
+        worktreePath,
+      );
+      const aheadN = ahead.code === 0 ? parseInt(ahead.stdout.trim(), 10) : NaN;
+      if (!Number.isFinite(aheadN)) {
+        // Can't read branch state → refuse to reap (conservative).
+        unpushedCommits = -1;
+        blockers.push("branch state undeterminable");
+      } else {
+        const br = await this.runGit(
+          ["rev-parse", "--abbrev-ref", "HEAD"],
+          worktreePath,
+        );
+        const branch = br.code === 0 ? br.stdout.trim() : "HEAD";
+        if (!branch || branch === "HEAD") {
+          // Detached HEAD → no upstream to vouch for the commits; all local-only.
+          unpushedCommits = aheadN;
+        } else {
+          const remote = await this.runGit(
+            ["rev-list", "--count", `origin/${branch}..HEAD`],
+            worktreePath,
+          );
+          // origin/<branch> missing (no push) → exit non-zero → all aheadN are
+          // local-only. Otherwise the count is commits not yet on the remote.
+          unpushedCommits =
+            remote.code === 0
+              ? parseInt(remote.stdout.trim(), 10) || 0
+              : aheadN;
+        }
+        if (unpushedCommits > 0) {
+          blockers.push(`${unpushedCommits} unmerged, unpushed commit(s)`);
+        }
+      }
+    }
+
+    return {
+      dirty,
+      merged,
+      unpushedCommits,
+      safe: blockers.length === 0,
+      blockers,
+    };
+  }
+
+  /**
+   * Auto-reap a single worktree once its task is terminal (DONE) or its branch
+   * is merged — the fix for the 100+ orphaned-worktree pileup that locked the
+   * shared branch (WORKTREE-SPEC §4 라이프사이클 정리).
+   *
+   * Safety-gated by reapSafety(): a dirty tree or local-only (unmerged AND
+   * unpushed) commits are PRESERVED with a warning, never removed — work loss
+   * is worse than a stray worktree. The main checkout is never touched. The
+   * branch is deleted only when fully merged; a pushed-but-unmerged branch
+   * keeps its local ref so the PR's commits stay reachable. Never throws.
+   */
+  async reap(
+    repoRoot: string,
+    worktreePath: string,
+    opts?: ReapOptions,
+  ): Promise<ReapResult> {
+    const realRepoRoot = fs.existsSync(repoRoot)
+      ? fs.realpathSync(repoRoot)
+      : repoRoot;
+    const realWt = fs.existsSync(worktreePath)
+      ? fs.realpathSync(worktreePath)
+      : worktreePath;
+    if (realWt === realRepoRoot) {
+      return {
+        path: worktreePath,
+        removed: false,
+        reason: "refusing to reap the main worktree",
+        safety: {
+          dirty: false,
+          merged: true,
+          unpushedCommits: 0,
+          safe: false,
+          blockers: ["main worktree"],
+        },
+      };
+    }
+
+    const baseRef = opts?.baseRef ?? (await this.resolveBaseRef(repoRoot));
+    const safety = await this.reapSafety(worktreePath, baseRef);
+
+    if (opts?.requireMerged && !safety.merged) {
+      return {
+        path: worktreePath,
+        removed: false,
+        reason: "branch not merged into base",
+        safety,
+      };
+    }
+
+    if (!safety.safe) {
+      console.warn(
+        `[WorktreeManager] preserving worktree ${worktreePath} — ${safety.blockers.join(
+          "; ",
+        )} (work-loss guard)`,
+      );
+      return {
+        path: worktreePath,
+        removed: false,
+        reason: `preserved: ${safety.blockers.join("; ")}`,
+        safety,
+      };
+    }
+
+    // Capture the branch name before teardown for the audit trail.
+    let branch: string | undefined;
+    const b = await this.runGit(
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      worktreePath,
+    );
+    if (b.code === 0 && b.stdout.trim()) branch = b.stdout.trim();
+
+    await this.remove(repoRoot, worktreePath, { deleteBranch: safety.merged });
+    return {
+      path: worktreePath,
+      removed: true,
+      branch,
+      reason: safety.merged
+        ? "merged into base"
+        : "clean and fully pushed (no work to lose)",
+      safety,
+    };
+  }
+
+  /**
+   * Bulk reap every worktree under `repoRoot` whose work is safely captured
+   * elsewhere — the one-shot cleanup path for an accrued backlog of orphaned
+   * worktrees. Runs `git worktree prune` first to drop admin entries for
+   * already-deleted dirs, then reap()s each linked worktree under the same
+   * work-loss guard (dirty/unmerged-unpushed are preserved, not removed).
+   * The main checkout is always skipped. Never throws on a single failure.
+   */
+  async reapAll(repoRoot: string, opts?: ReapOptions): Promise<ReapAllResult> {
+    await this.prune(repoRoot);
+    const baseRef = opts?.baseRef ?? (await this.resolveBaseRef(repoRoot));
+    const worktrees = await this.list(repoRoot);
+    const realRepoRoot = fs.existsSync(repoRoot)
+      ? fs.realpathSync(repoRoot)
+      : repoRoot;
+
+    const removed: string[] = [];
+    const preserved: { path: string; reason: string }[] = [];
+    const failed: { path: string; error: string }[] = [];
+    for (const wt of worktrees) {
+      if (wt.path === realRepoRoot) continue; // never touch the main worktree
+      try {
+        const res = await this.reap(repoRoot, wt.path, {
+          baseRef,
+          requireMerged: opts?.requireMerged,
+        });
+        if (res.removed) removed.push(wt.path);
+        else preserved.push({ path: wt.path, reason: res.reason });
+      } catch (e) {
+        failed.push({
+          path: wt.path,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    return { removed, preserved, failed };
   }
 }
