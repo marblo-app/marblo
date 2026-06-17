@@ -8,6 +8,7 @@ import {
   addDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   query,
   where,
   Timestamp,
@@ -30,7 +31,12 @@ import {
   resolveDependentIfReady,
   type ApplyProjectionInput,
 } from "./projection.js";
-import { validateTaskBodyInput, taskBodyStorageFields } from "./task-body.js";
+import {
+  validateTaskBodyInput,
+  taskBodyStorageFields,
+  composeTaskBody,
+} from "./task-body.js";
+import { evaluateDeleteGuards, type DeleteMode } from "./task-delete.js";
 import {
   chunkBulkTasks,
   normalizeBulkTasksPayload,
@@ -61,7 +67,10 @@ type TaskStatus =
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   // CLAIMED → TODO is the manual claim-recall path (renderer's
   // `unclaimTask`). Kept in sync with src/services/stateMachine.ts.
-  TODO: ["CLAIMED", "IN_PROGRESS"],
+  // TODO → DONE is the direct-complete path for logical / never-claimed tasks
+  // (orchestrator closes an internal sub-task out without a claim cycle) — no
+  // force=true needed.
+  TODO: ["CLAIMED", "IN_PROGRESS", "DONE"],
   CLAIMED: ["IN_PROGRESS", "REVIEW", "DONE", "FAILED", "TODO"],
   IN_PROGRESS: ["REVIEW", "DONE", "BLOCKED", "FAILED"],
   REVIEW: ["DONE", "TODO", "IN_PROGRESS"],
@@ -192,6 +201,8 @@ interface TaskDoc {
   comment: string;
   prUrl: string;
   hasPmFeedback: boolean;
+  /** soft-delete 표식 — true 면 목록/조회에서 숨긴다. */
+  deleted?: boolean;
 }
 
 async function fetchTask(taskId: string): Promise<TaskDoc | null> {
@@ -462,6 +473,7 @@ export function registerTools(server: McpServer): void {
       // 다수가 컨텍스트를 먹던 것을 cap 으로 꼬리에서 잘라낸다.
       const docs = snap.docs
         .map((d) => ({ id: d.id, ...d.data() } as TaskDoc))
+        .filter((t) => !t.deleted)
         .filter(
           (t) => !filterContextInMemory || isTaskInReadContext(t, contextId)
         )
@@ -537,6 +549,7 @@ export function registerTools(server: McpServer): void {
 
       const tasks = snap.docs
         .map((d) => ({ id: d.id, ...d.data() } as TaskDoc))
+        .filter((t) => !t.deleted)
         .filter(
           (t) => !filterContextInMemory || isTaskInReadContext(t, contextId)
         )
@@ -1499,10 +1512,14 @@ export function registerTools(server: McpServer): void {
 
       const lowerKeyword = keyword.toLowerCase();
       const matches = snap.docs.filter((d) => {
-        const t = d.data();
+        const t = d.data() as TaskDoc;
+        if (t.deleted) return false;
+        // 구조화 본문도 검색 대상에 포함 — description 이 "" 인 태스크가 키워드
+        // 검색에서 누락되던 문제를 막는다.
+        const body = composeTaskBody(t).toLowerCase();
         return (
           t.title?.toLowerCase().includes(lowerKeyword) ||
-          t.description?.toLowerCase().includes(lowerKeyword)
+          body.includes(lowerKeyword)
         );
       });
 
@@ -1538,13 +1555,17 @@ export function registerTools(server: McpServer): void {
       const task = await fetchTask(task_id);
       if (!task) return text(`Error: Task ${task_id} not found.`);
 
+      // 구조화 필드(goal/changes/acceptance/notes)로 만든 태스크는 description 이
+      // "" 로 저장된다 — 그대로 노출하면 에이전트가 "설명 비어있음"으로 읽으므로,
+      // 구조화 본문을 렌더해 채운다. legacy description-only 태스크는 그대로 통과.
+      const body = composeTaskBody(task);
       const lines = [
         `ID: ${task.id}`,
         `Title: ${task.title}`,
-        `Status: ${task.status}`,
+        `Status: ${task.status}${task.deleted ? " (deleted)" : ""}`,
         `Role: ${task.role}`,
         `Priority: ${task.priority}`,
-        `Description: ${task.description || "(empty)"}`,
+        `Description: ${body || "(empty)"}`,
         `Claimed by: ${task.claimedBy || "(none)"}`,
         `Depends on: ${
           task.dependsOn?.length ? task.dependsOn.join(", ") : "(none)"
@@ -1556,6 +1577,99 @@ export function registerTools(server: McpServer): void {
         `Has PM feedback: ${task.hasPmFeedback}`,
       ];
       return text(lines.join("\n"));
+    },
+    { userFacing: false }
+  );
+
+  // 16a. delete_task — soft (default) / hard delete with ownership + confirm
+  // safety guards. soft sets a `deleted` flag (recoverable, hidden from lists);
+  // hard removes the Firestore doc. Guards (see task-delete.ts): confirm=true
+  // required, another agent's in-flight claim is protected, and unfinished
+  // dependents block the delete — each overridable with force=true.
+  auditedTool(
+    "delete_task",
+    "Delete a task. mode='soft' (default) hides it recoverably; mode='hard' permanently removes it. Requires confirm=true. Refuses to delete a task actively claimed by another agent or one with unfinished dependents unless force=true.",
+    {
+      task_id: z.string().describe("Task ID"),
+      mode: z
+        .enum(["soft", "hard"])
+        .optional()
+        .describe("soft (hide, recoverable; default) or hard (permanent)"),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe("Must be true to actually delete (mis-deletion guard)"),
+      force: z
+        .boolean()
+        .optional()
+        .describe("Override ownership/dependent guards (default: false)"),
+      reason: z.string().optional().describe("Why the task is being deleted"),
+    },
+    async ({ task_id, mode, confirm, force, reason }) => {
+      const task = await fetchTask(task_id);
+      if (!task) return text(`Error: Task ${task_id} not found.`);
+
+      const delMode: DeleteMode = mode ?? "soft";
+
+      // Count unfinished tasks that depend on this one (would be stranded).
+      let dependentCount = 0;
+      try {
+        const depQ = query(
+          collection(db, "tasks"),
+          where("dependsOn", "array-contains", task_id)
+        );
+        const depSnap = await getDocs(depQ);
+        dependentCount = depSnap.docs.filter((d) => {
+          const dep = d.data() as TaskDoc;
+          return !dep.deleted && !isTerminalTaskStatus(dep.status);
+        }).length;
+      } catch (err) {
+        console.error("[MCP] delete_task dependent query error:", err);
+      }
+
+      const { error } = evaluateDeleteGuards({
+        task: {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          claimedBy: task.claimedBy,
+          deleted: task.deleted,
+        },
+        mode: delMode,
+        confirm: confirm ?? false,
+        requesterAgentId: MARBLO_AGENT_ID,
+        dependentCount,
+        force,
+      });
+      if (error) return text(`Error: ${error}`);
+
+      if (delMode === "hard") {
+        await deleteDoc(doc(db, "tasks", task_id));
+      } else {
+        await updateDoc(doc(db, "tasks", task_id), {
+          deleted: true,
+          deletedAt: Timestamp.now(),
+          deletedBy: MARBLO_AGENT_ID || "unknown",
+          deleteReason: reason ?? "",
+          updatedAt: Timestamp.now(),
+        });
+      }
+
+      if (!isLaneContextId(task.contextId)) {
+        const reasonNote = reason ? ` — ${reason}` : "";
+        notifyOrchestrator(
+          `[Task Deleted] "${task.title}" ${delMode}-deleted (id=${task_id})${reasonNote}`,
+          task.contextId
+        );
+      }
+
+      return text(
+        `Task '${task.title}' ${
+          delMode === "hard"
+            ? "permanently deleted"
+            : "soft-deleted (recoverable)"
+        }.`
+      );
     },
     { userFacing: false }
   );

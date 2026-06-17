@@ -88,6 +88,14 @@ export async function updateDoc(
   col.set(ref.docId, applyUpdate(existing, data));
 }
 
+export async function deleteDoc(ref: {
+  collectionPath: string;
+  docId: string;
+}) {
+  const col = getCollection(ref.collectionPath);
+  col.delete(ref.docId);
+}
+
 export function query(
   collection: { path?: string },
   ...constraints: unknown[]
@@ -127,7 +135,10 @@ export function orderBy(_field: string, _direction?: string) {
   return { type: "orderBy" };
 }
 
-export function onSnapshot(_query: unknown, _callback: (snap: unknown) => void) {
+export function onSnapshot(
+  _query: unknown,
+  _callback: (snap: unknown) => void
+) {
   return () => {}; // unsubscribe
 }
 

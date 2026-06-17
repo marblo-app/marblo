@@ -47,6 +47,21 @@ describe("composeTaskBody", () => {
     expect(composeTaskBody({})).toBe("");
   });
 
+  it("renders the structured body even when description is blank-stored", () => {
+    // Structured tasks are persisted with description:"" (taskBodyStorageFields).
+    // get_task must render the structured body instead of showing "(empty)",
+    // else agents read the brief as "설명 비어있음". (friction #5)
+    const out = composeTaskBody({
+      goal: "G",
+      changes: ["c1"],
+      acceptance: ["a1"],
+      description: "",
+    });
+    expect(out).toContain("## 목표");
+    expect(out).toContain("c1");
+    expect(out).not.toBe("");
+  });
+
   it("trims whitespace-only entries", () => {
     expect(composeTaskBody({ goal: "  ", changes: ["  ", "c1"] })).toBe(
       ["## 변경·접근", "- c1"].join("\n"),

@@ -4,7 +4,9 @@ const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   // CLAIMED → TODO is the manual claim-recall path: a teammate's claim
   // gets reverted because that teammate is offline (or stuck) and another
   // member wants to pick the task up. See `unclaimTask` in taskService.
-  TODO: ["CLAIMED", "IN_PROGRESS"],
+  // TODO → DONE is the direct-complete path for logical / never-claimed tasks
+  // (kept in sync with electron/mcp-server/tools.ts VALID_TRANSITIONS).
+  TODO: ["CLAIMED", "IN_PROGRESS", "DONE"],
   CLAIMED: ["IN_PROGRESS", "REVIEW", "DONE", "FAILED", "TODO"],
   IN_PROGRESS: ["REVIEW", "DONE", "BLOCKED", "FAILED"],
   REVIEW: ["DONE", "TODO", "IN_PROGRESS"],
