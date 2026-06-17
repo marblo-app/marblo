@@ -534,6 +534,11 @@ export class BridgeServer {
         ptySessionId: a.ptySessionId,
         restartCount: a.restartCount,
         contextId: a.launchConfig?.env?.MARBLO_CONTEXT,
+        // Exposed so cleanup_agents can reap agents whose connected task is
+        // terminal (DONE/FAILED) even while their PTY still reports working —
+        // gated on PTY-silence via lastPtyActivity (see agent-reap.ts).
+        currentTaskId: a.currentTaskId,
+        lastPtyActivity: a.lastPtyActivity,
       }));
 
     res.writeHead(200, { "Content-Type": "application/json" });
