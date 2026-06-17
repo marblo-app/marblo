@@ -8,7 +8,8 @@
     "login": "ログイン",
     "signup": "新規登録",
     "myLectures": "マイ講座",
-    "logout": "ログアウト"
+    "logout": "ログアウト",
+    "privacy": "プライバシー"
   },
   "hero": {
     "title": "一人で、チーム全体の\n成果を出す",
@@ -377,7 +378,8 @@
     "noAccount": "アカウントをお持ちでないですか？",
     "hasAccount": "すでにアカウントをお持ちですか？",
     "signupLink": "新規登録",
-    "loginLink": "ログイン"
+    "loginLink": "ログイン",
+    "passwordMismatch": "パスワードが一致しません。"
   },
   "checkout": {
     "title": "お支払い",
@@ -420,7 +422,10 @@
     "errorMessage": "エラー内容",
     "tryAgain": "もう一度お支払い",
     "contactSupport": "サポートへ問い合わせ",
-    "unknownError": "不明なエラー"
+    "unknownError": "不明なエラー",
+    "consentLabel": "決済の実行、および決済代行会社（TossPayments）への個人情報の第三者提供に同意します。（必須）",
+    "consentView": "プライバシーポリシー",
+    "consentRequired": "決済を進めるには同意が必要です。"
   },
   "lectures": {
     "title": "講座",
@@ -457,5 +462,40 @@
     "biz_phone_label": "電話",
     "biz_phone_value": "+82-10-3019-7778",
     "copyright": "© 2026 HYPEMARC. All rights reserved."
+  },
+  "consent": {
+    "agreeAll": "すべて同意する",
+    "required_badge": "[必須]",
+    "optional_badge": "[任意]",
+    "view": "表示",
+    "collectionUse_label": "個人情報の収集・利用への同意",
+    "collectionUse_hint": "サービス提供に必要なメールアドレス・決済/利用履歴などの個人情報を収集・利用します。",
+    "overseasTransfer_label": "個人情報の国外移転に関する個別同意（PIPA 第15条第2項）",
+    "overseasTransfer_hint": "データはGoogle Cloud（Firebase）など国外サーバーで処理・保管されます。",
+    "marketing_label": "マーケティング情報の受信への同意",
+    "marketing_hint": "新機能・特典・イベント情報をメールでお届けします。拒否してもサービスのご利用に制限はありません。",
+    "error_required": "必須項目すべてに同意する必要があります。",
+    "save_error": "同意の保存に失敗しました。しばらくしてから再度お試しください。",
+    "saving": "保存中...",
+    "gate_title": "サービス利用には同意が必要です",
+    "gate_intro": "個人情報保護法に基づき、以下の必須項目に同意いただくとMarbloを引き続きご利用いただけます。",
+    "gate_continue": "同意して続行",
+    "gate_logout": "ログアウト",
+    "settings_title": "プライバシーと同意の管理",
+    "settings_subtitle": "同意内容の確認・変更や、個人情報の削除を請求できます。",
+    "settings_required_section": "必須同意（登録・決済）",
+    "settings_status_agreed": "同意済み",
+    "settings_status_none": "記録なし",
+    "settings_version": "ポリシーバージョン",
+    "settings_acceptedAt": "最終同意日時",
+    "settings_marketing_section": "マーケティング情報の受信（任意）",
+    "settings_marketing_desc": "新機能・特典のお知らせをメールで受け取ります。いつでもオフにできます。",
+    "settings_withdraw_title": "必須同意の撤回",
+    "settings_withdraw_desc": "必須同意を撤回するとサービスのご利用が終了し、アカウントおよび個人情報の削除手続きが行われます。下記より請求してください。",
+    "settings_withdraw_button": "同意撤回およびアカウント削除請求",
+    "settings_deletion_title": "個人情報の削除請求（PIPA 第36条）",
+    "settings_deletion_desc": "保有する個人情報の削除を請求します。30日以内に処理結果をご案内します。",
+    "settings_deletion_button": "削除請求メールを送る",
+    "settings_view_policy": "プライバシーポリシーを表示"
   }
 }

@@ -6,6 +6,7 @@ import { routing } from "@/i18n/routing";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import PromoBar from "@/components/PromoBar";
+import PrivacyConsentGate from "@/components/PrivacyConsentGate";
 import "../globals.css";
 
 export const metadata: Metadata = {
@@ -79,6 +80,8 @@ export default async function LocaleLayout({
           <Header />
           <main className="flex-1">{children}</main>
           <Footer />
+          {/* PIPA 동의 게이트 — 로그인했지만 필수 동의가 없으면 차단 모달 */}
+          <PrivacyConsentGate />
         </NextIntlClientProvider>
       </body>
     </html>

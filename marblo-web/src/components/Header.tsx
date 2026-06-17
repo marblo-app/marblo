@@ -73,6 +73,12 @@ export default function Header() {
                 >
                   {t("myLectures")}
                 </Link>
+                <Link
+                  href={`/${locale}/my/privacy`}
+                  className="text-zinc-400 hover:text-white transition"
+                >
+                  {t("privacy")}
+                </Link>
                 <button
                   type="button"
                   onClick={handleLogout}
@@ -147,6 +153,13 @@ export default function Header() {
                   className="text-zinc-400 hover:text-white transition"
                 >
                   {t("myLectures")}
+                </Link>
+                <Link
+                  href={`/${locale}/my/privacy`}
+                  onClick={closeMobile}
+                  className="text-zinc-400 hover:text-white transition"
+                >
+                  {t("privacy")}
                 </Link>
                 <button
                   type="button"

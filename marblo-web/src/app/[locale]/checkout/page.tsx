@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations, useLocale } from "next-intl";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { httpsCallable, getFunctions } from "firebase/functions";
@@ -43,6 +44,7 @@ export default function CheckoutPage() {
   const [sdkReady, setSdkReady] = useState(false);
   const [discount, setDiscount] = useState(0);
   const [couponCode, setCouponCode] = useState("");
+  const [paymentConsent, setPaymentConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Resolve plan or lecture info
@@ -119,6 +121,11 @@ export default function CheckoutPage() {
 
   const handlePayment = async () => {
     if (!user) return;
+    // 결제 전 필수 동의 게이팅 — 결제대행사(토스) 제3자 제공 동의 없이 결제 불가.
+    if (!paymentConsent) {
+      setError(t("consentRequired"));
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -290,10 +297,33 @@ export default function CheckoutPage() {
               </span>
             </div>
 
+            {/* Payment consent gate (PIPA — 결제대행사 제3자 제공 동의) */}
+            <label className="flex items-start gap-2.5 mt-4 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={paymentConsent}
+                onChange={(e) => {
+                  setPaymentConsent(e.target.checked);
+                  if (error) setError(null);
+                }}
+                className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-900 text-indigo-500 focus:ring-indigo-500/40 shrink-0"
+              />
+              <span className="text-sm text-zinc-300 leading-snug">
+                {t("consentLabel")}{" "}
+                <Link
+                  href={`/${locale}/legal/privacy`}
+                  target="_blank"
+                  className="text-indigo-400 hover:text-indigo-300 underline"
+                >
+                  {t("consentView")}
+                </Link>
+              </span>
+            </label>
+
             {/* Pay button */}
             <button
               onClick={handlePayment}
-              disabled={loading || !sdkReady}
+              disabled={loading || !sdkReady || !paymentConsent}
               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl text-lg font-semibold transition mt-4 flex items-center justify-center gap-2"
             >
               {loading ? (

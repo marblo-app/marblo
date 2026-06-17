@@ -8,7 +8,8 @@
     "login": "Login",
     "signup": "Sign Up",
     "myLectures": "My Lectures",
-    "logout": "Log out"
+    "logout": "Log out",
+    "privacy": "Privacy"
   },
   "hero": {
     "title": "One developer.\nAn entire team's output.",
@@ -377,7 +378,8 @@
     "noAccount": "Don't have an account?",
     "hasAccount": "Already have an account?",
     "signupLink": "Sign up",
-    "loginLink": "Login"
+    "loginLink": "Login",
+    "passwordMismatch": "Passwords do not match."
   },
   "checkout": {
     "title": "Checkout",
@@ -420,7 +422,10 @@
     "errorMessage": "Error Details",
     "tryAgain": "Try Payment Again",
     "contactSupport": "Contact Support",
-    "unknownError": "Unknown error"
+    "unknownError": "Unknown error",
+    "consentLabel": "I agree to proceed with payment and to the provision of my personal data to the payment processor (TossPayments). (Required)",
+    "consentView": "Privacy Policy",
+    "consentRequired": "Payment consent is required to proceed."
   },
   "lectures": {
     "title": "Lectures",
@@ -457,5 +462,40 @@
     "biz_phone_label": "Phone",
     "biz_phone_value": "+82-10-3019-7778",
     "copyright": "© 2026 HYPEMARC. All rights reserved."
+  },
+  "consent": {
+    "agreeAll": "Agree to all",
+    "required_badge": "[Required]",
+    "optional_badge": "[Optional]",
+    "view": "View",
+    "collectionUse_label": "Consent to collection and use of personal data",
+    "collectionUse_hint": "We collect your email and payment/usage records as needed to provide the service.",
+    "overseasTransfer_label": "Separate consent to overseas transfer of personal data (PIPA Art. 15(2))",
+    "overseasTransfer_hint": "Your data is processed and stored on overseas servers such as Google Cloud (Firebase).",
+    "marketing_label": "Consent to receive marketing communications",
+    "marketing_hint": "Get news about features, benefits, and events by email. Declining does not affect your use of the service.",
+    "error_required": "You must agree to all required items to continue.",
+    "save_error": "Failed to save your consent. Please try again shortly.",
+    "saving": "Saving...",
+    "gate_title": "Your consent is required to use the service",
+    "gate_intro": "Under the Personal Information Protection Act, you must agree to the required items below to continue using Marblo.",
+    "gate_continue": "Agree and continue",
+    "gate_logout": "Log out",
+    "settings_title": "Privacy & Consent",
+    "settings_subtitle": "Review and change your consent, or request deletion of your personal data.",
+    "settings_required_section": "Required consent (sign-up & payment)",
+    "settings_status_agreed": "Agreed",
+    "settings_status_none": "No record",
+    "settings_version": "Policy version",
+    "settings_acceptedAt": "Last agreed",
+    "settings_marketing_section": "Marketing communications (optional)",
+    "settings_marketing_desc": "Receive news about features and benefits by email. You can turn this off anytime.",
+    "settings_withdraw_title": "Withdraw required consent",
+    "settings_withdraw_desc": "Withdrawing required consent ends your use of the service and starts account and data deletion. Please request it below.",
+    "settings_withdraw_button": "Withdraw consent & request account deletion",
+    "settings_deletion_title": "Personal data deletion request (PIPA Art. 36)",
+    "settings_deletion_desc": "Request deletion of your stored personal data. We will respond within 30 days.",
+    "settings_deletion_button": "Send deletion request email",
+    "settings_view_policy": "View Privacy Policy"
   }
 }
