@@ -190,7 +190,7 @@ export const PAYMENT_PLANS: Record<SubscriptionPlan, PlanFeatures> = {
 
 **lectures 페이지:** "AI 매니저는 어떻게 작동하는가" 챕터에 "단순 플로우 자동화 → Mission supervisor 진화" 서사 한 단락 추가.
 
-**연관 ticket**: 마스터플랜 §2.4 + §5 Track A + §8 P0-18/P0-19 + docs/p0_status.md 동기화는 Sprint A에서 완료 (TaskForce f65bb1a1). 이 A2는 marblo-web 코드/i18n 작업만 남음.
+**연관 ticket**: 마스터플랜 §2.4 + §5 Track A + §8 P0-18/P0-19 + docs/MVP/p0_status.md 동기화는 Sprint A에서 완료 (TaskForce f65bb1a1). 이 A2는 marblo-web 코드/i18n 작업만 남음.
 
 ### A3. Pro features BYOK + 정액제 권장 명시 🔴 P0
 

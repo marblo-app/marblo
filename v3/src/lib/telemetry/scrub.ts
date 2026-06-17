@@ -1,7 +1,7 @@
 /**
  * PII scrubber — sanitizes telemetry payloads BEFORE they leave the
  * machine. Implements the regex set documented in
- * docs/v3.1_런칭_마스터플랜.md §15.6 PII Scrubbing (P0-9 의무 — 동의와 별개).
+ * docs/MVP/v3.1_런칭_마스터플랜.md §15.6 PII Scrubbing (P0-9 의무 — 동의와 별개).
  *
  * Even when a user has explicitly consented to telemetry, the following
  * patterns are still masked or blocked entirely. Consent is about whether

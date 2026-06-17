@@ -219,7 +219,7 @@ export interface PlanFeatures {
 }
 
 // Payment Plan Configuration
-// Source of truth: docs/v3.1_런칭_마스터플랜.md §2.1 가격표.
+// Source of truth: docs/MVP/v3.1_런칭_마스터플랜.md §2.1 가격표.
 // marblo-web/src/components/PricingSection.tsx + checkout/page.tsx
 // PLAN_PRICES와 정확히 일치해야 함 — drift 시 결제 페이지 ↔ 데스크탑 앱
 // gating이 어긋남.

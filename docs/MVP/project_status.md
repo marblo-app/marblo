@@ -397,7 +397,7 @@ cd v3 && npm run dev
 - `marblo/.claude/commands/tf-*.md` × 18
 - `~/.claude/projects/-Users-.../memory/marblo_v3_claude_dir_quirk.md`
 - `~/.claude/projects/-Users-.../memory/MEMORY.md`
-- `marblo/docs/project_status.md` (이 문서)
+- `marblo/docs/MVP/project_status.md` (이 문서)
 
 ### 수정
 

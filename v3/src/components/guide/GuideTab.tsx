@@ -258,7 +258,7 @@ export function GuideTab() {
         ))}
 
         <footer className="border-t border-[#313244] pt-4 text-xs text-[#6c7086]">
-          더 자세한 내용은 <code>docs/project_status.md</code> 또는 PRD 문서
+          더 자세한 내용은 <code>docs/MVP/project_status.md</code> 또는 PRD 문서
           참조.
         </footer>
       </div>

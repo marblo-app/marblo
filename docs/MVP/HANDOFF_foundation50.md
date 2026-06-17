@@ -156,9 +156,9 @@ EN/JA 버전은 messages/{en,ja}.json의 foundation50 섹션을 그대로 번역
 
 **입력값**:
 
-- `docs/v3.1_런칭_마스터플랜.md` §1.5 (강의 가격), §2.4 (Foundation 50), §11 (마케팅 funnel — 인프런 → 자체 직판)
+- `docs/MVP/v3.1_런칭_마스터플랜.md` §1.5 (강의 가격), §2.4 (Foundation 50), §11 (마케팅 funnel — 인프런 → 자체 직판)
 - `v3/docs/PRICING-AND-COST-SAFETY-SPEC.md` A2 (마케팅 메시지 재포지셔닝 scope 확장: 평생 50% 폐기 → 강의 50% + Pro 6개월)
-- `docs/p0_status.md` — P0-18 (강의 호스팅 셋업), P0-19 (Foundation 50 waitlist 폼) 신규 추가, P0-8 (closed beta) 폐기 마킹
+- `docs/MVP/p0_status.md` — P0-18 (강의 호스팅 셋업), P0-19 (Foundation 50 waitlist 폼) 신규 추가, P0-8 (closed beta) 폐기 마킹
 
 **산출물**: 위 3개 문서 commit 1건. inconsistency `grep -n "Foundation 50\|평생 50%\|클로즈드 베타\|인프런"` 검증.
 
@@ -264,9 +264,9 @@ Promo bar 자동 비활성화. `/foundation50` 페이지 자체는 여전히 살
 
 이번 세션에서 명시적으로 손대지 않았어요:
 
-- `docs/v3.1_런칭_마스터플랜.md` — 5/6 작성본 그대로. Sprint A에서 sync
+- `docs/MVP/v3.1_런칭_마스터플랜.md` — 5/6 작성본 그대로. Sprint A에서 sync
 - `v3/docs/PRICING-AND-COST-SAFETY-SPEC.md` — A2 ticket scope 변경 필요. Sprint A
-- `docs/p0_status.md` — P0-18/P0-19 신규 추가, P0-8 closed beta 폐기 마킹. Sprint A
+- `docs/MVP/p0_status.md` — P0-18/P0-19 신규 추가, P0-8 closed beta 폐기 마킹. Sprint A
 - `marblo-web/src/data/lectures.ts` — LECTURE_PACKAGES에 `betaEarlybird50` 패키지 추가. Sprint B
 - `marblo-web/src/app/[locale]/page.tsx` (랜딩 메인 hero) — Foundation 50 강조 섹션 추가는 의도적으로 안 함 (promo bar로 충분 판단). 필요 시 별도 sprint.
 - `v3/skills/orchestrator_agent.md` — A7 (Orchestrator skill 룰 추가) 그대로. PRICING-SPEC 별도 ticket
@@ -306,7 +306,7 @@ Promo bar 자동 비활성화. `/foundation50` 페이지 자체는 여전히 살
 이 가이드 받은 에이전트가 가장 빨리 시작하는 방법:
 
 ```
-docs/HANDOFF_foundation50.md 읽고, §4 Sprint A부터 진행해.
+docs/MVP/HANDOFF_foundation50.md 읽고, §4 Sprint A부터 진행해.
 TaskForce MCP로 ticket 생성 후 작업, 완료 시 REVIEW 제출.
 의문 있는 결정은 §1 CEO 결정 사슬과 §7 주의사항 참조.
 ```
