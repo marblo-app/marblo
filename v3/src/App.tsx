@@ -13,9 +13,11 @@ import {
 } from "./services/telemetryService";
 import telemetry from "./services/telemetryService";
 
-// DIAGNOSTIC: VITE_DISABLE_TELEMETRY=1 disables all telemetry + cost writes
-// (logTelemetryBatch, logCostBatch, logHeartbeat Cloud Function calls).
-// Tests if Firebase Cloud Function calls during typing cause input delay.
+// First-party telemetry is OFF by default (local-only build, PIPA) — the
+// initial enabled-state is resolved from the build flag in telemetryService
+// (see lib/telemetry/firstPartyGate.ts). VITE_DISABLE_TELEMETRY=1 is the hard
+// kill-switch: it force-disables here too, overriding any opt-in, and keeps
+// Cloud Function calls (logTelemetryBatch/logHeartbeat) from ever firing.
 if (import.meta.env.VITE_DISABLE_TELEMETRY === "1") {
   setTelemetryEnabled(false);
   console.warn(
@@ -42,7 +44,9 @@ if (typeof PerformanceObserver !== "undefined") {
         if (entry.duration <= 50) continue;
         const a = entry.attribution?.[0];
         const attr = a
-          ? `type=${a.containerType ?? "?"} name=${a.containerName ?? "?"} id=${a.containerId ?? "?"} src=${a.containerSrc ?? "?"}`
+          ? `type=${a.containerType ?? "?"} name=${a.containerName ?? "?"} id=${
+              a.containerId ?? "?"
+            } src=${a.containerSrc ?? "?"}`
           : "no-attribution";
         console.warn(`[LONGTASK] ${entry.duration.toFixed(0)}ms — ${attr}`);
       }
@@ -111,7 +115,11 @@ if (typeof PerformanceObserver !== "undefined") {
       0,
     );
     console.warn(
-      `[INP-5s] count=${samples.length} p50=${p50?.toFixed(0)}ms p95=${p95?.toFixed(0)}ms max=${max?.toFixed(0)}ms | avgInputDelay=${avgInDel}ms`,
+      `[INP-5s] count=${samples.length} p50=${p50?.toFixed(
+        0,
+      )}ms p95=${p95?.toFixed(0)}ms max=${max?.toFixed(
+        0,
+      )}ms | avgInputDelay=${avgInDel}ms`,
     );
   }, 5000);
 
@@ -124,7 +132,9 @@ if (typeof PerformanceObserver !== "undefined") {
     const drift = now - lastSched - 100;
     if (drift > 30) {
       console.warn(
-        `[MAIN-BUSY] ${drift.toFixed(0)}ms drift (target 100ms, actual ${(now - lastSched).toFixed(0)}ms)`,
+        `[MAIN-BUSY] ${drift.toFixed(0)}ms drift (target 100ms, actual ${(
+          now - lastSched
+        ).toFixed(0)}ms)`,
       );
     }
     lastSched = now;
@@ -174,7 +184,9 @@ if (typeof PerformanceObserver !== "undefined") {
       }
       if (total > 5) {
         console.warn(
-          `[IPC-FREQ] ${(elapsed / 1000).toFixed(1)}s window | total=${total} | ${parts.join(" ")}`,
+          `[IPC-FREQ] ${(elapsed / 1000).toFixed(
+            1,
+          )}s window | total=${total} | ${parts.join(" ")}`,
         );
       }
     }, 1000);

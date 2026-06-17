@@ -1,6 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 import { auth, functions } from "../lib/firebase";
 import { scrubValue } from "../lib/telemetry/scrub";
+import { firstPartyTelemetryDefaultEnabled } from "../lib/telemetry/firstPartyGate";
 
 export type TelemetryEvent =
   | "agent:spawned"
@@ -49,7 +50,12 @@ interface TelemetryPayload {
   retryOf?: string;
 }
 
-let telemetryEnabled = true;
+// First-party telemetry (Firebase Functions → BigQuery) is OFF by default.
+// The 6/23 build ships local-only (PIPA): no analytics leaves the device
+// without an explicit opt-in. Enabled only when the build flag is set; the
+// in-app consent toggle flips this at runtime via setTelemetryEnabled() (dev8).
+// See lib/telemetry/firstPartyGate.ts for the policy.
+let telemetryEnabled = firstPartyTelemetryDefaultEnabled();
 const eventQueue: TelemetryPayload[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -93,8 +99,10 @@ export function getClientId(): string {
  * touches the queue. scrubValue() masks file paths, emails, phones and BYOK
  * keys and drops free-text user-input keys (prompt/message/…); on top of that
  * we explicitly drop the few account identifiers scrub.ts doesn't know about
- * (senderId/userId/uid/email in metadata). The result is de-identified — safe
- * for the always-on 1st-party sink without per-user consent.
+ * (senderId/userId/uid/email in metadata). The result is de-identified —
+ * defense-in-depth for the 1st-party sink. Note: as of the 6/23 local-only
+ * build that sink is OFF by default (see firstPartyGate.ts); scrubbing stays
+ * always-on so that even an opted-in build never ships PII.
  *
  * Applied at the single logTelemetry() choke point, so it also covers events
  * injected from the main process via the App.tsx IPC bridge.

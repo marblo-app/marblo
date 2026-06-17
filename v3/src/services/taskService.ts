@@ -3,6 +3,7 @@ import { httpsCallable } from "firebase/functions";
 import type { Task, TaskStatus } from "../types/task";
 import telemetry, { getClientId } from "./telemetryService";
 import { functions } from "../lib/firebase";
+import { firstPartyTelemetryDefaultEnabled } from "../lib/telemetry/firstPartyGate";
 import {
   getDocument,
   queryDocuments,
@@ -40,7 +41,7 @@ function toTask(raw: Record<string, unknown>): Task {
 export async function getTasks(projectId: string): Promise<Task[]> {
   const docs = await queryDocuments<Record<string, unknown>>(
     COLLECTION,
-    where("projectId", "==", projectId)
+    where("projectId", "==", projectId),
   );
   return docs.map(toTask).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 }
@@ -51,7 +52,7 @@ export async function getTask(taskId: string): Promise<Task | null> {
 }
 
 export async function createTask(
-  data: Omit<Task, "id" | "createdAt" | "updatedAt">
+  data: Omit<Task, "id" | "createdAt" | "updatedAt">,
 ): Promise<string> {
   const now = new Date();
   const taskId = await createDocument(COLLECTION, {
@@ -65,7 +66,7 @@ export async function createTask(
     taskId,
     data.projectId || "",
     data.role || "",
-    data.priority
+    data.priority,
   );
 
   return taskId;
@@ -73,7 +74,7 @@ export async function createTask(
 
 export async function updateTask(
   taskId: string,
-  data: Partial<Omit<Task, "id" | "createdAt">>
+  data: Partial<Omit<Task, "id" | "createdAt">>,
 ): Promise<void> {
   const payload: Record<string, unknown> = {
     ...data,
@@ -91,21 +92,21 @@ export async function deleteTask(taskId: string): Promise<void> {
 
 export function subscribeToTasks(
   projectId: string,
-  callback: (tasks: Task[]) => void
+  callback: (tasks: Task[]) => void,
 ): Unsubscribe {
   return subscribeToCollection<Record<string, unknown>>(
     COLLECTION,
     [where("projectId", "==", projectId)],
     (docs) =>
       callback(
-        docs.map(toTask).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
-      )
+        docs.map(toTask).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)),
+      ),
   );
 }
 
 export async function claimTask(
   taskId: string,
-  agentId: string
+  agentId: string,
 ): Promise<void> {
   const task = await getTask(taskId);
   if (!task) throw new Error(`Task not found: ${taskId}`);
@@ -144,13 +145,13 @@ export async function unclaimTask(taskId: string): Promise<void> {
     taskId,
     previousStatus,
     "TODO",
-    previousClaimant ?? undefined
+    previousClaimant ?? undefined,
   );
 }
 
 export async function updateTaskStatus(
   taskId: string,
-  status: TaskStatus
+  status: TaskStatus,
 ): Promise<void> {
   const task = await getTask(taskId);
   if (!task) throw new Error(`Task not found: ${taskId}`);
@@ -163,7 +164,7 @@ export async function updateTaskStatus(
     taskId,
     currentStatus,
     status,
-    task.claimedBy ?? undefined
+    task.claimedBy ?? undefined,
   );
   if (status === "DONE") {
     const durationMs = task.claimedAt
@@ -180,7 +181,7 @@ export async function updateTaskStatus(
       try {
         agentSnap = await getDocument<AgentCostSnapshot>(
           "agents",
-          task.claimedBy
+          task.claimedBy,
         );
       } catch {
         agentSnap = null;
@@ -190,35 +191,40 @@ export async function updateTaskStatus(
     // over the family enum ("claude") for ML training fidelity.
     const outcomeModel = agentSnap?.detectedModelId ?? agentSnap?.model ?? null;
 
-    // Log task outcome to BigQuery for ML training data
-    logTaskOutcomeFn({
-      outcome: {
-        clientId: getClientId(),
-        taskId,
-        projectId: task.projectId,
-        taskType: null, // TODO: derive from task metadata when available
-        taskComplexity: task.priority, // use priority as proxy for now
-        role: task.role,
-        model: outcomeModel,
-        scopeFileCount: task.scope?.length ?? 0,
-        success: true,
-        durationMs: durationMs ?? null,
-        // Cumulative-at-completion. NOT per-task delta — for that, join
-        // BigQuery cost_logs by taskId. Still useful as a noisy signal
-        // ("agent in this state had spent N total when it finished").
-        totalInputTokens: agentSnap?.totalInputTokens ?? null,
-        totalOutputTokens: agentSnap?.totalOutputTokens ?? null,
-        totalCost: agentSnap?.totalCost ?? null,
-        retriesCount: 0,
-        createdAt:
-          task.createdAt instanceof Date
-            ? task.createdAt.toISOString()
-            : new Date().toISOString(),
-        completedAt: new Date().toISOString(),
-      },
-    }).catch((err) => {
-      console.warn("[TaskOutcome] Failed to log outcome:", err);
-    });
+    // Log task outcome to BigQuery for ML training data — first-party
+    // telemetry, gated OFF by default for the local-only 6/23 build (PIPA).
+    // The Firestore task writes above are core product data and stay; only
+    // this analytics send is gated. See lib/telemetry/firstPartyGate.ts.
+    if (firstPartyTelemetryDefaultEnabled()) {
+      logTaskOutcomeFn({
+        outcome: {
+          clientId: getClientId(),
+          taskId,
+          projectId: task.projectId,
+          taskType: null, // TODO: derive from task metadata when available
+          taskComplexity: task.priority, // use priority as proxy for now
+          role: task.role,
+          model: outcomeModel,
+          scopeFileCount: task.scope?.length ?? 0,
+          success: true,
+          durationMs: durationMs ?? null,
+          // Cumulative-at-completion. NOT per-task delta — for that, join
+          // BigQuery cost_logs by taskId. Still useful as a noisy signal
+          // ("agent in this state had spent N total when it finished").
+          totalInputTokens: agentSnap?.totalInputTokens ?? null,
+          totalOutputTokens: agentSnap?.totalOutputTokens ?? null,
+          totalCost: agentSnap?.totalCost ?? null,
+          retriesCount: 0,
+          createdAt:
+            task.createdAt instanceof Date
+              ? task.createdAt.toISOString()
+              : new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+        },
+      }).catch((err) => {
+        console.warn("[TaskOutcome] Failed to log outcome:", err);
+      });
+    }
   }
 
   // 태스크 상태 전이(REVIEW/DONE) 는 audit_logs → 우측 ActivityStreamPanel

@@ -40,7 +40,14 @@
                                           └──────────────────┘
 ```
 
-스위치: `VITE_DISABLE_TELEMETRY=1`이면 Firebase 호출 전부 차단. 디폴트 ON.
+스위치 (2026-06-17 갱신 — 로컬 온리 정합):
+
+- **디폴트 OFF.** 1차 텔레메트리(Firebase Functions→BigQuery + useCostWriter 의 Firestore cost roll-up + taskService task_outcome)는 **기본적으로 외부 송신하지 않는다.** 6/23 빌드는 로컬 온리(PIPA — 명시 옵트인 없이 분석 데이터가 기기를 떠나지 않음).
+- 켜는 법: 빌드플래그 `VITE_FIRST_PARTY_TELEMETRY=1`(내부/도그푸드 빌드) 또는 런타임 인앱 동의 후 `setTelemetryEnabled(true)`(dev8 옵트인 토글).
+- `VITE_DISABLE_TELEMETRY=1` 은 모든 경로를 덮는 하드 kill-switch(빌드플래그보다 우선).
+- 정책 단일 진실원: `v3/src/lib/telemetry/firstPartyGate.ts`.
+- 3rd-party(Sentry/GA4)는 이전부터 옵트인(`maybeInit*(consented)`, 기본 동의 all-false) — 동일 정책.
+- 로컬 JSONL(`~/.claude` 세션파일, main-process cost-tracker 로컬 read)은 외부 송신이 아니므로 게이트와 무관하게 유지(동의 불필요).
 
 ---
 
