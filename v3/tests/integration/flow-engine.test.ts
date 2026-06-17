@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { FlowRunner } from '../../electron/flow-engine/flow-runner';
 import { makeNode, makeEdge, makeFlow, mockLLMProvider } from '../setup';
 import { getFirestore } from 'firebase/firestore';
-import type { FlowEvent, FlowExecutionState } from '../../electron/flow-engine/types';
+import type { FlowEvent } from '../../electron/flow-engine/types';
 
 const db = getFirestore() as any;
 

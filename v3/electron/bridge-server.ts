@@ -1768,7 +1768,7 @@ export class BridgeServer {
         return;
       }
 
-      let agent = params.agentName
+      const agent = params.agentName
         ? this.agentManager.getAgentByName(params.agentName)
         : params.agentId
           ? this.agentManager.getAgent(params.agentId)

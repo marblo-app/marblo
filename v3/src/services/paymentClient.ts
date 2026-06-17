@@ -253,12 +253,10 @@ export function createPaymentClient(
   return new PaymentClient(config);
 }
 
-// React Hook for Payment Client
 import { useMemo } from "react";
 
-interface UsePaymentClientConfig extends PaymentClientConfig {}
-
-export function usePaymentClient(config: UsePaymentClientConfig) {
+// React Hook for Payment Client
+export function usePaymentClient(config: PaymentClientConfig) {
   return useMemo(
     () => createPaymentClient(config),
     [config.apiBaseUrl, config.apiKey, config.timeout]

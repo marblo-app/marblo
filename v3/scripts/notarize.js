@@ -12,11 +12,12 @@
  * If credentials are missing, notarization is skipped with a warning.
  */
 
-const { notarize } = require("@electron/notarize");
-const path = require("path");
-
 /** @param {import("electron-builder").AfterPackContext} context */
 module.exports = async function notarizing(context) {
+  const [{ notarize }, path] = await Promise.all([
+    import("@electron/notarize"),
+    import("node:path"),
+  ]);
   const { electronPlatformName, appOutDir } = context;
 
   // Only notarize macOS builds

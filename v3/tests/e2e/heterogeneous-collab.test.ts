@@ -226,7 +226,7 @@ test(
     }
     // Lazy import — node-pty is a native module not always available in
     // shape-only test environments.
-    const pty = require("node-pty") as PtyMod;
+    const pty = (await import("node-pty")) as PtyMod;
     const sessions: Array<{
       name: string;
       proc: ReturnType<PtyMod["spawn"]>;
@@ -262,7 +262,9 @@ test(
     if (fs.existsSync(userAuth)) {
       try {
         fs.symlinkSync(userAuth, path.join(codexHome, "auth.json"));
-      } catch {}
+      } catch {
+        // Best-effort auth sharing; tests can still exercise fallback paths.
+      }
     }
 
     const specs = [
@@ -378,7 +380,9 @@ test(
     for (const s of sessions) {
       try {
         s.proc.kill();
-      } catch {}
+      } catch {
+        // Process may already have exited.
+      }
     }
   },
 );

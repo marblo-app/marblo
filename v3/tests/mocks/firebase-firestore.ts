@@ -127,7 +127,7 @@ export function orderBy(_field: string, _direction?: string) {
   return { type: "orderBy" };
 }
 
-export function onSnapshot(_query: unknown, callback: (snap: unknown) => void) {
+export function onSnapshot(_query: unknown, _callback: (snap: unknown) => void) {
   return () => {}; // unsubscribe
 }
 

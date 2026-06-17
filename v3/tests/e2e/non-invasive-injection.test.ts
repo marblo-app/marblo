@@ -324,7 +324,9 @@ maybeLlmTest("codex", {
     if (fs.existsSync(userAuth)) {
       try {
         fs.symlinkSync(userAuth, path.join(codexHome, "auth.json"));
-      } catch {}
+      } catch {
+        // Best-effort auth sharing; tests can still exercise fallback paths.
+      }
     }
     return { CODEX_HOME: codexHome };
   },

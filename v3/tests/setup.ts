@@ -3,7 +3,6 @@ import type {
   FlowEdge,
   Flow,
   NodeContext,
-  FlowExecutionState,
   LLMProvider,
 } from '../electron/flow-engine/types';
 import type { DecomposedTask } from '../electron/orchestrator/dag-generator';

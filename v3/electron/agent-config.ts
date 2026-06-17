@@ -824,7 +824,7 @@ export class AgentConfigGenerator {
    * Generate role-specific skill file in the project's skills directory.
    * Returns the path to the skill file.
    */
-  generateSkillFile(agentId: string, role: string, projectDir: string): string {
+  generateSkillFile(agentId: string, role: string, _projectDir: string): string {
     const safeRole = role.replace(/[^a-zA-Z0-9_]/g, "");
     const skillSource = path.join(SKILLS_DIR, `${safeRole}_agent.md`);
 

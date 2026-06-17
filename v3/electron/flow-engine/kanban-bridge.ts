@@ -229,7 +229,7 @@ export class KanbanBridge {
     status: string,
   ): Promise<void> {
     // Find the bridged task by flowId + nodeId
-    for (const [key, bridged] of this.bridgedTasks) {
+    for (const bridged of this.bridgedTasks.values()) {
       if (bridged.flowId === flowId && bridged.nodeId === nodeId) {
         try {
           const ref = doc(this.db, 'tasks', bridged.taskId);
@@ -258,7 +258,7 @@ export class KanbanBridge {
       if (node) {
         // Find associated runId from bridgedTasks or runner state
         let runId: string | undefined;
-        for (const [key, bridged] of this.bridgedTasks) {
+        for (const bridged of this.bridgedTasks.values()) {
           if (bridged.flowId === flowId) {
             runId = bridged.runId;
             break;

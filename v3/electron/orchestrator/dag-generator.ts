@@ -187,8 +187,6 @@ export class DAGGenerator {
       layers = dag.nodes.map((n) => [n]);
     }
 
-    const NODE_WIDTH = 200;
-    const NODE_HEIGHT = 60;
     const LAYER_GAP_X = 280;
     const NODE_GAP_Y = 100;
 

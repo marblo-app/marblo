@@ -47,7 +47,7 @@ export class LLMClient {
    * Send chat messages and parse the response as JSON.
    * Extracts JSON from markdown code blocks if present.
    */
-  async chatJSON<T>(messages: ChatMessage[], schema?: object): Promise<T> {
+  async chatJSON<T>(messages: ChatMessage[], _schema?: object): Promise<T> {
     // Append JSON instruction to the last user message
     const jsonMessages = messages.map((m, i) => {
       if (i === messages.length - 1 && m.role === 'user') {

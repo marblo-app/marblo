@@ -2,7 +2,6 @@ import type {
   Mission,
   MissionStatus,
   MissionTemplateId,
-  TimelineEvent,
   TimelineEventType,
 } from "./types";
 import type { MissionEngineDeps, MissionEngineEvent } from "./ports";

@@ -46,7 +46,7 @@ export function findReconnectCandidates(
   // directly, so we must repeat the filter here. Without it the most
   // recent label by createdAt — often a stub created right before app
   // exit — wins over the real session sharing the same agent name.
-  let labels: Record<string, LabelEntry> = {};
+  const labels: Record<string, LabelEntry> = {};
   try {
     const raw = JSON.parse(fs.readFileSync(labelsPath, "utf-8")) as Record<
       string,
@@ -60,22 +60,6 @@ export function findReconnectCandidates(
     }
   } catch {
     /* no labels file */
-  }
-
-  // Collect all Claude session JSONL files
-  let sessionFiles: Array<{ id: string; mtime: number }> = [];
-  try {
-    const files = fs
-      .readdirSync(projectDir)
-      .filter((f) => f.endsWith(".jsonl"))
-      .map((f) => {
-        const stat = fs.statSync(path.join(projectDir, f));
-        return { id: f.replace(".jsonl", ""), mtime: stat.mtimeMs };
-      })
-      .sort((a, b) => b.mtime - a.mtime); // most recent first
-    sessionFiles = files;
-  } catch {
-    /* can't read directory */
   }
 
   // Track which sessions are already claimed

@@ -100,7 +100,6 @@ function ensureHatch(): void {
       return missions.length;
     },
   };
-  // eslint-disable-next-line no-console
   console.log("[TestHatch] window.__marbloTest.missions exposed (in-memory)");
 }
 

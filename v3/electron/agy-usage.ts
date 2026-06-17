@@ -181,6 +181,7 @@ function tryUtf8(b: Uint8Array): string | null {
     const s = Buffer.from(b).toString("utf-8");
     // Printable iff round-trips and has no control chars (except whitespace).
     if (Buffer.from(s, "utf-8").length !== b.length) return null;
+    // eslint-disable-next-line no-control-regex -- Protobuf text extraction must reject raw control bytes.
     if (/[\x00-\x08\x0e-\x1f]/.test(s)) return null;
     return s;
   } catch {

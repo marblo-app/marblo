@@ -6,7 +6,6 @@ import {
   dialog,
   powerMonitor,
   clipboard,
-  nativeImage,
   shell,
   safeStorage,
   Notification,
@@ -15,7 +14,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import http from "http";
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import dotenv from "dotenv";
 import { PtyManager } from "./pty-manager";
 import { PendingInstructionListener } from "./pending-instruction-listener";
@@ -2974,7 +2973,7 @@ ipcMain.handle(
   async (event, { projectId, rootPath, resumeSessionId, enabledModels }) => {
     const port = bridgeServer.getPort();
     // Resolve '~' to actual home directory
-    const resolvedPath = rootPath === "~" ? require("os").homedir() : rootPath;
+    const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
 
     // Store enabledModels per-project (not as global env var) so two
     // concurrent windows don't race and overwrite each other's preset.
@@ -3056,7 +3055,7 @@ ipcMain.handle(
 ipcMain.handle(
   "orchestratorSession:listSessions",
   (_event, rootPath: string) => {
-    const resolvedPath = rootPath === "~" ? require("os").homedir() : rootPath;
+    const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
     // Stateless file-IO — any instance works.
     return getAnyOrchestrator().listSessions(resolvedPath);
   },
@@ -3068,7 +3067,7 @@ ipcMain.handle(
 ipcMain.handle(
   "orchestratorSession:resolvePrevious",
   (_event, rootPath: string) => {
-    const resolvedPath = rootPath === "~" ? require("os").homedir() : rootPath;
+    const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
     return getAnyOrchestrator().resolveOrchestratorResumeId(resolvedPath);
   },
 );
@@ -3262,7 +3261,6 @@ ipcMain.handle("clipboard:getImagePath", async () => {
 ipcMain.handle("clipboard:getFilePaths", () => {
   if (process.platform === "darwin") {
     try {
-      const { execSync } = require("child_process");
       // Use osascript (AppleScript) — no compilation needed, fast
       const result = execSync(
         `osascript -e 'set filePaths to {}' -e 'try' -e 'set theClip to the clipboard as «class furl»' -e 'set end of filePaths to POSIX path of theClip' -e 'end try' -e 'try' -e 'set fileList to the clipboard as list' -e 'repeat with f in fileList' -e 'try' -e 'set end of filePaths to POSIX path of (f as «class furl»)' -e 'end try' -e 'end repeat' -e 'end try' -e 'set text item delimiters to linefeed' -e 'filePaths as text'`,

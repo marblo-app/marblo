@@ -19,6 +19,7 @@
 // Single regex covering the most common ANSI families. We strip OSC/DCS/SOS/PM/APC
 // with their terminator (BEL or ESC \), then CSI with parameter/final byte,
 // then any leftover ESC <single byte> sequences.
+/* eslint-disable no-control-regex -- ANSI/control sanitizing intentionally matches ESC, BEL, and C0 bytes. */
 const OSC_OR_STRING = /\x1b[\]PX^_][\s\S]*?(?:\x07|\x1b\\)/g;
 const CSI = /\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g;
 // ESC <intermediate(0x20-0x2f)>* <final(0x30-0x7e)> — covers nF/Fp/Fs/C1
@@ -27,6 +28,7 @@ const CSI = /\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g;
 const SHORT_ESC = /\x1b[\x20-\x2f]*[\x30-\x7e]/g;
 // 비-인쇄 제어 문자 (\t, \n, \r 은 보존)
 const STRIP_CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+/* eslint-enable no-control-regex */
 
 export function stripAnsi(input: string): string {
   if (!input) return "";

@@ -188,7 +188,7 @@ export class FlowGenerator {
   private normalizeEdges(
     raw: LLMFlowResponse['edges'],
   ): FlowEdge[] {
-    return raw.map((e, i) => ({
+    return raw.map((e) => ({
       id: e.id || `edge-${e.source}-${e.target}`,
       source: e.source,
       target: e.target,

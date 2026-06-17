@@ -4,7 +4,6 @@ import os from "os";
 import { encodeClaudeProjectDir, claudeProjectDir } from "./claude-paths";
 import { PtyManager, type DangerEvent } from "./pty-manager";
 import { AgentConfigGenerator, LaunchConfig } from "./agent-config";
-import type { ModelType } from "./agent-manager";
 import { contextForKind } from "./mcp-server/context";
 import { YOLO_FLAG, telegramChannelLaunchFlags } from "./telegram-channels";
 

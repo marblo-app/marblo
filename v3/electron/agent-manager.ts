@@ -1,5 +1,8 @@
 import { BrowserWindow } from "electron";
 import crypto from "crypto";
+import fs from "fs";
+import os from "os";
+import path from "path";
 import { PtyManager } from "./pty-manager";
 import {
   AgentConfigGenerator,
@@ -544,14 +547,14 @@ export class AgentManager {
         let existingIds: Set<string>;
         try {
           const encodedPath = encodeClaudeProjectDir(rootPath);
-          const sessionsDir = require("path").join(
-            require("os").homedir(),
+          const sessionsDir = path.join(
+            os.homedir(),
             ".claude",
             "projects",
             encodedPath,
           );
-          const files = require("fs").existsSync(sessionsDir)
-            ? require("fs")
+          const files = fs.existsSync(sessionsDir)
+            ? fs
                 .readdirSync(sessionsDir)
                 .filter((f: string) => f.endsWith(".jsonl"))
                 .map((f: string) => f.replace(".jsonl", ""))
@@ -568,14 +571,14 @@ export class AgentManager {
         setTimeout(() => {
           try {
             const encodedPath = encodeClaudeProjectDir(rootPath);
-            const sessionsDir = require("path").join(
-              require("os").homedir(),
+            const sessionsDir = path.join(
+              os.homedir(),
               ".claude",
               "projects",
               encodedPath,
             );
-            if (!require("fs").existsSync(sessionsDir)) return;
-            const currentFiles = require("fs")
+            if (!fs.existsSync(sessionsDir)) return;
+            const currentFiles = fs
               .readdirSync(sessionsDir)
               .filter((f: string) => f.endsWith(".jsonl"))
               .map((f: string) => f.replace(".jsonl", ""));
@@ -634,8 +637,8 @@ export class AgentManager {
       const rootPath = params.cwd;
       const agentName = params.name;
       const agentId = params.id;
-      const conversationsDir = require("path").join(
-        require("os").homedir(),
+      const conversationsDir = path.join(
+        os.homedir(),
         ".gemini",
         "antigravity-cli",
         "conversations",
@@ -645,9 +648,9 @@ export class AgentManager {
       // (ignoring .db-wal/.db-shm sidecars, which don't end in ".db").
       const listConvIds = (): Set<string> => {
         try {
-          if (!require("fs").existsSync(conversationsDir)) return new Set();
+          if (!fs.existsSync(conversationsDir)) return new Set();
           return new Set<string>(
-            require("fs")
+            fs
               .readdirSync(conversationsDir)
               .filter((f: string) => f.endsWith(".pb") || f.endsWith(".db"))
               .map((f: string) => f.replace(/\.(pb|db)$/, "")),
@@ -663,9 +666,8 @@ export class AgentManager {
       const convMtime = (id: string): number => {
         for (const ext of [".db", ".pb"]) {
           try {
-            return require("fs").statSync(
-              require("path").join(conversationsDir, `${id}${ext}`),
-            ).mtimeMs;
+            return fs.statSync(path.join(conversationsDir, `${id}${ext}`))
+              .mtimeMs;
           } catch {
             /* try next ext */
           }

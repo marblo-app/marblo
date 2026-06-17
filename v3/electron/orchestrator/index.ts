@@ -85,7 +85,7 @@ export class OrchestratorService {
       const routingMap = this.router.routeBatch(decomposition.tasks, agents);
 
       let taskIndex = 0;
-      for (const [task, result] of routingMap) {
+      for (const [, result] of routingMap) {
         const taskId = createdTaskIds[taskIndex];
         if (taskId) {
           routing.set(taskId, result);

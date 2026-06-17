@@ -97,7 +97,6 @@ export function useSessionRestore() {
       cancelled = true;
     };
     // rootPath is read but guarded by phase1StartedRef; deps kept minimal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNewWindow]);
 
   // Phase 2 — once projects are loaded and we have a source folder, resolve it

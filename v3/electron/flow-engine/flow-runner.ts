@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
-  collection,
   doc,
   getDoc,
   setDoc,
@@ -101,7 +100,7 @@ export class FlowRunner extends EventEmitter {
 
         // Execute nodes in parallel within a layer
         const results = await Promise.all(
-          activeNodes.map(nodeId => this.executeNode(runId, nodeId, nodeMap, flow.edges, skippedNodes)),
+          activeNodes.map(nodeId => this.executeNode(runId, nodeId, nodeMap, flow.edges)),
         );
 
         // Process branch results — mark skipped downstream nodes
@@ -228,7 +227,6 @@ export class FlowRunner extends EventEmitter {
     nodeId: string,
     nodeMap: Map<string, FlowNode>,
     edges: FlowEdge[],
-    skippedNodes: Set<string>,
   ): Promise<NodeExecutionResult> {
     const state = this.states.get(runId)!;
     const node = nodeMap.get(nodeId);

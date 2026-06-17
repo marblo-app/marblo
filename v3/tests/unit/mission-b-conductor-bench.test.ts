@@ -343,7 +343,6 @@ describe("B안 벤치 — full-feature N미션 지휘자 풀루프 (정확성 + 
     // ── 타이밍(informational): 절대 단정 기준 아님. 회귀 추적용 로그. ──
     const perMissionMs = elapsedMs / BENCH_MISSIONS;
     const perStepMs = elapsedMs / (BENCH_MISSIONS * FULL_FEATURE_STEP_COUNT);
-    // eslint-disable-next-line no-console
     console.log(
       `[conductor-bench] full-feature ×${BENCH_MISSIONS} → 총 ${elapsedMs}ms · ` +
         `미션당(동시구동 amortized) ${perMissionMs.toFixed(2)}ms · ` +
