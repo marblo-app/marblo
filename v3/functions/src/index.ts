@@ -9,7 +9,7 @@ import {
   COUPON_RULES_IP,
 } from "./rateLimit";
 import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
-import sgMail from "@sendgrid/mail";
+import { Resend } from "resend";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -30,9 +30,9 @@ const TOSS_WEBHOOK_SECRET = process.env.TOSS_WEBHOOK_SECRET || "";
 
 // ─── SendGrid (파운더 접근 안내 이메일) ──────────────────────────────
 // 전부 선택값 — 미설정 시 발송만 스킵하고 배포·선정은 정상 동작한다.
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || "";
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const FOUNDER_FROM_EMAIL =
-  process.env.FOUNDER_FROM_EMAIL || "support@marblo.app";
+  process.env.FOUNDER_FROM_EMAIL || "founders@marblo.app";
 const FOUNDER_FROM_NAME = process.env.FOUNDER_FROM_NAME || "Marblo";
 const DISCORD_INVITE_URL = process.env.DISCORD_INVITE_URL || ""; // 설정 시에만 초대 링크 노출
 const SITE_BASE = "https://marblo.app";
@@ -1201,7 +1201,7 @@ function founderHtmlShell(inner: string): string {
 
 /**
  * 파운더 접근 안내 이메일 발송. 반드시 non-throwing.
- * - SENDGRID_API_KEY 미설정 시 console.warn 후 false 반환(스킵).
+ * - RESEND_API_KEY 미설정 시 console.warn 후 false 반환(스킵).
  * - 발송 성공 시 true, 그 외 false.
  */
 async function sendFounderAccessEmail(
@@ -1209,22 +1209,23 @@ async function sendFounderAccessEmail(
   locale: string
 ): Promise<boolean> {
   try {
-    if (!SENDGRID_API_KEY) {
-      console.warn(
-        "[founder-email] SENDGRID_API_KEY 미설정 — 발송 스킵:",
-        email
-      );
+    if (!RESEND_API_KEY) {
+      console.warn("[founder-email] RESEND_API_KEY 미설정 — 발송 스킵:", email);
       return false;
     }
-    sgMail.setApiKey(SENDGRID_API_KEY);
+    const resend = new Resend(RESEND_API_KEY);
     const content = buildFounderAccessEmail(normalizeFounderLocale(locale));
-    await sgMail.send({
-      to: email,
-      from: { email: FOUNDER_FROM_EMAIL, name: FOUNDER_FROM_NAME },
+    const { error } = await resend.emails.send({
+      from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
+      to: [email],
       subject: content.subject,
-      text: content.text,
       html: content.html,
+      text: content.text,
     });
+    if (error) {
+      console.warn("[founder-email] resend error:", error);
+      return false;
+    }
     return true;
   } catch (err) {
     console.warn("[founder-email] 발송 실패:", email, err);
