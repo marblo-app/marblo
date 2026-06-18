@@ -14,6 +14,7 @@ import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import {
   describeRootView,
+  filterWorktreesByProject,
   resolveRootSwitch,
   treeSignature,
 } from "../../lib/fileTreeView";
@@ -526,11 +527,12 @@ function WorktreeSwitch({
   // On main / project / folder → offer the task worktree(s).
   if (toTasks.length === 1) {
     const target = toTasks[0];
+    const targetTitle = `${target.label}${target.taskId ? ` · ${target.taskId}` : ""}\n${target.path}`;
     return (
       <button
         onClick={() => onSwitch(target.path)}
         className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-        title={`작업 워크트리로${target.taskId ? ` · ${target.taskId}` : ""}`}
+        title={targetTitle}
       >
         <svg
           className="h-3.5 w-3.5"
@@ -600,15 +602,15 @@ function WorktreeMenuButton({
         </svg>
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] max-w-[240px] overflow-hidden rounded border border-gray-700 bg-gray-800 py-1 shadow-lg">
+        <div className="absolute right-0 top-full z-20 mt-1 w-[min(80vw,360px)] min-w-[260px] overflow-hidden rounded border border-gray-700 bg-gray-800 py-1 shadow-lg">
           {tasks.map((t) => (
             <button
               key={t.path}
               onClick={() => onSwitch(t.path)}
-              className="flex w-full items-center gap-1 px-2 py-1 text-left text-[12px] text-gray-300 hover:bg-gray-700"
-              title={t.path}
+              className="flex w-full min-w-0 items-center gap-2 px-2 py-1 text-left text-[12px] text-gray-300 hover:bg-gray-700"
+              title={`${t.label}${t.taskId ? ` · ${t.taskId}` : ""}\n${t.path}`}
             >
-              <span className="truncate">{t.label}</span>
+              <span className="min-w-0 flex-1 truncate">{t.label}</span>
               {t.taskId && (
                 <span className="ml-auto flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300">
                   {t.taskId}
@@ -667,13 +669,21 @@ export function FileTree() {
 
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+  const currentProjectWorktrees = useMemo(
+    () => filterWorktreesByProject(worktrees, currentProject?.id),
+    [worktrees, currentProject?.id],
+  );
 
   // Explicit "what am I looking at" descriptor for the header. A worktree's
   // basename is often a generated id, so we surface branch/taskId + full path.
   const rootView = useMemo(
     () =>
-      describeRootView(rootPath, worktrees, currentProject?.folderPath ?? null),
-    [rootPath, worktrees, currentProject?.folderPath],
+      describeRootView(
+        rootPath,
+        currentProjectWorktrees,
+        currentProject?.folderPath ?? null,
+      ),
+    [rootPath, currentProjectWorktrees, currentProject?.folderPath],
   );
 
   // What the header's root-switch control should offer (jump to main, or pick a
@@ -682,10 +692,10 @@ export function FileTree() {
     () =>
       resolveRootSwitch(
         rootPath,
-        worktrees,
+        currentProjectWorktrees,
         currentProject?.folderPath ?? null,
       ),
-    [rootPath, worktrees, currentProject?.folderPath],
+    [rootPath, currentProjectWorktrees, currentProject?.folderPath],
   );
 
   const [showWorktreeMenu, setShowWorktreeMenu] = useState(false);

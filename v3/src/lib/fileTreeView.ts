@@ -26,6 +26,14 @@ function basename(p: string): string {
   return p.split("/").pop() || p;
 }
 
+export function filterWorktreesByProject(
+  worktrees: Worktree[],
+  projectId: string | null | undefined,
+): Worktree[] {
+  if (!projectId) return [];
+  return worktrees.filter((worktree) => worktree.projectId === projectId);
+}
+
 /**
  * Describe the root the tree is currently showing.
  *

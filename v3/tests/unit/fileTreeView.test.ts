@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   describeRootView,
+  filterWorktreesByProject,
   resolveRootSwitch,
   treeSignature,
 } from "../../src/lib/fileTreeView";
@@ -132,6 +133,34 @@ describe("resolveRootSwitch", () => {
     expect(sw?.mainPath).toBe("/repo");
     expect(sw?.toMain).toBe("/repo");
     expect(sw?.toTasks).toEqual([]);
+  });
+});
+
+describe("filterWorktreesByProject", () => {
+  it("excludes worktrees from other projects", () => {
+    const p1Main = wt({ id: "p1-main", projectId: "p1", path: "/repo" });
+    const p1Task = wt({
+      id: "p1-task",
+      projectId: "p1",
+      path: "/repo/.worktrees/a",
+    });
+    const p2Task = wt({
+      id: "p2-task",
+      projectId: "p2",
+      path: "/other/.worktrees/b",
+    });
+
+    expect(
+      filterWorktreesByProject([p1Main, p2Task, p1Task], "p1").map(
+        (worktree) => worktree.id,
+      ),
+    ).toEqual(["p1-main", "p1-task"]);
+  });
+
+  it("returns an empty list without a current project", () => {
+    expect(filterWorktreesByProject([wt({ projectId: "p1" })], null)).toEqual(
+      [],
+    );
   });
 });
 
