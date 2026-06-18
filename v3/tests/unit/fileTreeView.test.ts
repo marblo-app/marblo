@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { describeRootView, treeSignature } from "../../src/lib/fileTreeView";
+import {
+  describeRootView,
+  resolveRootSwitch,
+  treeSignature,
+} from "../../src/lib/fileTreeView";
 import type { Worktree } from "../../src/types/worktree";
 
 function wt(partial: Partial<Worktree>): Worktree {
@@ -66,6 +70,68 @@ describe("describeRootView", () => {
     const worktrees = [wt({ path: "/repo", branch: "main", taskId: null })];
     const view = describeRootView("/repo", worktrees, "/repo");
     expect(view?.kind).toBe("worktree");
+  });
+});
+
+describe("resolveRootSwitch", () => {
+  const main = wt({
+    id: "main",
+    path: "/repo",
+    repoRoot: "/repo",
+    branch: "main",
+    taskId: null,
+  });
+  const taskA = wt({
+    id: "a",
+    path: "/repo/.worktrees/a",
+    repoRoot: "/repo",
+    branch: "marblo/a",
+    taskId: "T1",
+  });
+  const taskB = wt({
+    id: "b",
+    path: "/repo/.worktrees/b",
+    repoRoot: "/repo",
+    branch: "marblo/b",
+    taskId: "T2",
+  });
+
+  it("returns null when no main worktree or project path is known", () => {
+    expect(resolveRootSwitch("/repo/.worktrees/a", [taskA], null)).toBeNull();
+  });
+
+  it("returns null on main when there is no task worktree to switch to", () => {
+    expect(resolveRootSwitch("/repo", [main], "/repo")).toBeNull();
+  });
+
+  it("offers task worktrees when viewing main", () => {
+    const sw = resolveRootSwitch("/repo", [main, taskB, taskA], "/repo");
+    expect(sw?.toMain).toBeNull();
+    expect(sw?.mainPath).toBe("/repo");
+    // Sorted by label.
+    expect(sw?.toTasks.map((t) => t.path)).toEqual([
+      "/repo/.worktrees/a",
+      "/repo/.worktrees/b",
+    ]);
+    expect(sw?.toTasks[0]).toMatchObject({ label: "marblo/a", taskId: "T1" });
+  });
+
+  it("offers jump-to-main and other tasks when viewing a task worktree", () => {
+    const sw = resolveRootSwitch(
+      "/repo/.worktrees/a",
+      [main, taskA, taskB],
+      "/repo",
+    );
+    expect(sw?.toMain).toBe("/repo");
+    // The currently-viewed worktree is excluded from the task list.
+    expect(sw?.toTasks.map((t) => t.path)).toEqual(["/repo/.worktrees/b"]);
+  });
+
+  it("falls back to the project path when main worktree entry is absent", () => {
+    const sw = resolveRootSwitch("/repo/.worktrees/a", [taskA], "/repo");
+    expect(sw?.mainPath).toBe("/repo");
+    expect(sw?.toMain).toBe("/repo");
+    expect(sw?.toTasks).toEqual([]);
   });
 });
 

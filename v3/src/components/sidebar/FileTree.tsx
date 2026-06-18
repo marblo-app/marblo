@@ -12,7 +12,12 @@ import type { Project } from "../../types/project";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useNavigationStore } from "../../stores/navigationStore";
-import { describeRootView, treeSignature } from "../../lib/fileTreeView";
+import {
+  describeRootView,
+  resolveRootSwitch,
+  treeSignature,
+} from "../../lib/fileTreeView";
+import type { RootSwitchTarget } from "../../lib/fileTreeView";
 import { useAuth } from "../../hooks/useAuth";
 import { FileTreeContextMenu, ContextMenuItem } from "./FileTreeContextMenu";
 import { FileTreeConfirmDialog } from "./FileTreeConfirmDialog";
@@ -460,6 +465,163 @@ function InlineCreateInput({
   );
 }
 
+interface WorktreeSwitchProps {
+  /** Jump-to-main target path; null when already on main. */
+  toMain: string | null;
+  /** Task worktrees the tree root can switch to. */
+  toTasks: RootSwitchTarget[];
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  menuRef: React.RefObject<HTMLDivElement>;
+  onSwitch: (path: string) => void;
+}
+
+// Compact header control: jump the file tree root to the MAIN worktree, or to a
+// task worktree. A single alternative renders as a direct icon button; multiple
+// task worktrees collapse into a small dropdown so the header stays tidy.
+function WorktreeSwitch({
+  toMain,
+  toTasks,
+  open,
+  setOpen,
+  menuRef,
+  onSwitch,
+}: WorktreeSwitchProps) {
+  if (toMain) {
+    // On a task worktree → primary action is "back to main". Extra task
+    // worktrees (if any) are still reachable via the dropdown below.
+    return (
+      <div className="relative flex items-center" ref={menuRef}>
+        <button
+          onClick={() => onSwitch(toMain)}
+          className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+          title="메인 워크트리로"
+        >
+          <svg
+            className="h-3.5 w-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
+            />
+          </svg>
+        </button>
+        {toTasks.length > 0 && (
+          <WorktreeMenuButton
+            tasks={toTasks}
+            open={open}
+            setOpen={setOpen}
+            onSwitch={onSwitch}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // On main / project / folder → offer the task worktree(s).
+  if (toTasks.length === 1) {
+    const target = toTasks[0];
+    return (
+      <button
+        onClick={() => onSwitch(target.path)}
+        className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+        title={`작업 워크트리로${target.taskId ? ` · ${target.taskId}` : ""}`}
+      >
+        <svg
+          className="h-3.5 w-3.5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M8 7l4-4m0 0l4 4m-4-4v18"
+            transform="rotate(90 12 12)"
+          />
+        </svg>
+      </button>
+    );
+  }
+
+  return (
+    <div className="relative flex items-center" ref={menuRef}>
+      <WorktreeMenuButton
+        tasks={toTasks}
+        open={open}
+        setOpen={setOpen}
+        onSwitch={onSwitch}
+        title="작업 워크트리로"
+      />
+    </div>
+  );
+}
+
+interface WorktreeMenuButtonProps {
+  tasks: RootSwitchTarget[];
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  onSwitch: (path: string) => void;
+  title?: string;
+}
+
+function WorktreeMenuButton({
+  tasks,
+  open,
+  setOpen,
+  onSwitch,
+  title = "다른 작업 워크트리로",
+}: WorktreeMenuButtonProps) {
+  return (
+    <>
+      <button
+        onClick={() => setOpen(!open)}
+        className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+        title={title}
+      >
+        <svg
+          className="h-3.5 w-3.5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] max-w-[240px] overflow-hidden rounded border border-gray-700 bg-gray-800 py-1 shadow-lg">
+          {tasks.map((t) => (
+            <button
+              key={t.path}
+              onClick={() => onSwitch(t.path)}
+              className="flex w-full items-center gap-1 px-2 py-1 text-left text-[12px] text-gray-300 hover:bg-gray-700"
+              title={t.path}
+            >
+              <span className="truncate">{t.label}</span>
+              {t.taskId && (
+                <span className="ml-auto flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300">
+                  {t.taskId}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function FileTree() {
   const [tree, setTree] = useState<FileNode[]>([]);
   const [gitStatuses, setGitStatuses] = useState<Record<string, string>>({});
@@ -513,6 +675,21 @@ export function FileTree() {
       describeRootView(rootPath, worktrees, currentProject?.folderPath ?? null),
     [rootPath, worktrees, currentProject?.folderPath],
   );
+
+  // What the header's root-switch control should offer (jump to main, or pick a
+  // task worktree). Null when there's no main worktree or no alternative root.
+  const rootSwitch = useMemo(
+    () =>
+      resolveRootSwitch(
+        rootPath,
+        worktrees,
+        currentProject?.folderPath ?? null,
+      ),
+    [rootPath, worktrees, currentProject?.folderPath],
+  );
+
+  const [showWorktreeMenu, setShowWorktreeMenu] = useState(false);
+  const worktreeMenuRef = useRef<HTMLDivElement>(null);
 
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -622,6 +799,25 @@ export function FileTree() {
     const t = setTimeout(() => setErrorMessage(null), 3500);
     return () => clearTimeout(t);
   }, [errorMessage]);
+
+  // Close the worktree-switch menu on outside click / Escape.
+  useEffect(() => {
+    if (!showWorktreeMenu) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!worktreeMenuRef.current?.contains(e.target as Node)) {
+        setShowWorktreeMenu(false);
+      }
+    };
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setShowWorktreeMenu(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showWorktreeMenu]);
 
   const expandPath = useCallback((p: string) => {
     setExpanded((prev) => {
@@ -1047,6 +1243,18 @@ export function FileTree() {
     setPendingGitRemoteUrl(null);
   }, []);
 
+  // Switch the tree root to another worktree (main or task). Selection is
+  // cleared because paths from the previous root no longer exist in the new one.
+  const handleSwitchRoot = useCallback(
+    (path: string) => {
+      setShowWorktreeMenu(false);
+      if (path === rootPath) return;
+      setSelected(null);
+      setRootPath(path);
+    },
+    [rootPath, setRootPath, setSelected],
+  );
+
   const handleRefresh = useCallback(() => {
     if (!rootPath) return;
     // Force a real re-read that bypasses dedupe, so the user always gets the
@@ -1161,6 +1369,19 @@ export function FileTree() {
             </span>
           )}
           <span className="flex-1" />
+          {rootSwitch && (
+            <>
+              <WorktreeSwitch
+                toMain={rootSwitch.toMain}
+                toTasks={rootSwitch.toTasks}
+                open={showWorktreeMenu}
+                setOpen={setShowWorktreeMenu}
+                menuRef={worktreeMenuRef}
+                onSwitch={handleSwitchRoot}
+              />
+              <span className="mx-0.5 h-3.5 w-px bg-gray-700" />
+            </>
+          )}
           <button
             onClick={() => handleCreate("file")}
             className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
