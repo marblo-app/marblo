@@ -23,6 +23,11 @@ import {
 } from "../../lib/fileTreeView";
 import type { WorktreeMenuPosition } from "../../lib/fileTreeView";
 import type { RootSwitchTarget } from "../../lib/fileTreeView";
+import {
+  folderLabel,
+  loadRecentFolders,
+  saveRecentFolder,
+} from "../../lib/recentFolders";
 import { useAuth } from "../../hooks/useAuth";
 import { FileTreeContextMenu, ContextMenuItem } from "./FileTreeContextMenu";
 import { FileTreeConfirmDialog } from "./FileTreeConfirmDialog";
@@ -746,6 +751,39 @@ export function FileTree() {
   const worktreeMenuRef = useRef<HTMLDivElement>(null);
   const worktreePortalMenuRef = useRef<HTMLDivElement>(null);
 
+  // "Open Folder" (read-only browse) — recents list + dropdown state. The list
+  // is persisted in localStorage so a user can quickly re-open a folder.
+  const [recentFolders, setRecentFolders] = useState<string[]>([]);
+  const [showRecentMenu, setShowRecentMenu] = useState(false);
+  // The menu is rendered in a body portal (like the worktree switch) so the
+  // narrow, overflow-hidden sidebar can't clip it. recentMenuRef = trigger
+  // zone, recentPortalMenuRef = the portalled menu, recentButtonRef = the
+  // chevron we anchor the menu to.
+  const recentMenuRef = useRef<HTMLDivElement>(null);
+  const recentPortalMenuRef = useRef<HTMLDivElement>(null);
+  const recentButtonRef = useRef<HTMLButtonElement>(null);
+  const [recentMenuPosition, setRecentMenuPosition] =
+    useState<WorktreeMenuPosition | null>(null);
+  useEffect(() => {
+    setRecentFolders(loadRecentFolders());
+  }, []);
+
+  const updateRecentMenuPosition = useCallback(() => {
+    const button = recentButtonRef.current;
+    if (!button) return;
+    setRecentMenuPosition(
+      calculateWorktreeMenuPosition(
+        button.getBoundingClientRect(),
+        window.innerWidth,
+      ),
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!showRecentMenu) return;
+    updateRecentMenuPosition();
+  }, [showRecentMenu, updateRecentMenuPosition]);
+
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [pendingFolderPath, setPendingFolderPath] = useState<string | null>(
@@ -881,6 +919,35 @@ export function FileTree() {
       window.removeEventListener("scroll", onViewportChange, true);
     };
   }, [showWorktreeMenu]);
+
+  // Close the recent-folders menu on outside click / Escape. The menu lives in
+  // a body portal, so outside-click must treat both the trigger zone and the
+  // portalled menu as "inside" (else clicking the menu would close it).
+  useEffect(() => {
+    if (!showRecentMenu) return;
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const insideTrigger = recentMenuRef.current?.contains(target);
+      const insidePortal = recentPortalMenuRef.current?.contains(target);
+      if (!insideTrigger && !insidePortal) {
+        setShowRecentMenu(false);
+      }
+    };
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setShowRecentMenu(false);
+    };
+    const onViewportChange = () => setShowRecentMenu(false);
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
+    };
+  }, [showRecentMenu]);
 
   const expandPath = useCallback((p: string) => {
     setExpanded((prev) => {
@@ -1318,6 +1385,38 @@ export function FileTree() {
     [rootPath, setRootPath, setSelected],
   );
 
+  // ---------- Open Folder (v1: read-only browse, no project/task binding) ----
+  // Switch the tree root to an arbitrary local folder. Unlike
+  // handleSelectDirectory above, this does NOT create/bind a project or look up
+  // git — it's a plain "browse this folder" entry point. Reuses the existing
+  // fs.selectDirectory IPC (showOpenDialog → openDirectory).
+  const openFolderPath = useCallback(
+    (path: string) => {
+      if (!path || path === rootPath) {
+        setRecentFolders(saveRecentFolder(path));
+        return;
+      }
+      setSelected(null);
+      setRootPath(path);
+      setRecentFolders(saveRecentFolder(path));
+    },
+    [rootPath, setRootPath, setSelected],
+  );
+
+  const handleOpenFolder = useCallback(async () => {
+    const dir = await window.electronAPI.fs.selectDirectory();
+    if (!dir) return;
+    openFolderPath(dir);
+  }, [openFolderPath]);
+
+  const handleOpenRecent = useCallback(
+    (path: string) => {
+      setShowRecentMenu(false);
+      openFolderPath(path);
+    },
+    [openFolderPath],
+  );
+
   const handleRefresh = useCallback(() => {
     if (!rootPath) return;
     // Force a real re-read that bypasses dedupe, so the user always gets the
@@ -1432,6 +1531,94 @@ export function FileTree() {
             </span>
           )}
           <span className="flex-1" />
+          {/* Open Folder (read-only browse) — its own zone, divided from the
+              worktree switch and the project file-ops below it. */}
+          <div ref={recentMenuRef} className="relative flex items-center">
+            <button
+              onClick={handleOpenFolder}
+              className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+              title="폴더 열기… (읽기전용 브라우즈)"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v1M3 13l1.5-4.5A1 1 0 015.45 8H20a1 1 0 01.95 1.32L19.4 14.5a2 2 0 01-1.9 1.36H5.5a2 2 0 01-1.9-1.36L3 13z"
+                />
+              </svg>
+            </button>
+            {recentFolders.length > 0 && (
+              <button
+                ref={recentButtonRef}
+                onClick={() => setShowRecentMenu((v) => !v)}
+                className={`rounded p-0.5 hover:bg-gray-700 hover:text-gray-300 ${
+                  showRecentMenu ? "text-gray-300" : "text-gray-500"
+                }`}
+                title="최근 연 폴더"
+                aria-haspopup="menu"
+                aria-expanded={showRecentMenu}
+              >
+                <svg
+                  className="h-3 w-3"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+            )}
+            {/* Body portal + position:fixed (left-anchored, viewport-clamped via
+                calculateWorktreeMenuPosition) so the menu can't be clipped by
+                the narrow, overflow-hidden sidebar — same fix as #146/#147 for
+                the worktree switch. */}
+            {showRecentMenu &&
+              recentFolders.length > 0 &&
+              recentMenuPosition &&
+              createPortal(
+                <div
+                  ref={recentPortalMenuRef}
+                  className="z-50 max-h-64 w-[min(80vw,360px)] min-w-[224px] overflow-auto rounded border border-gray-700 bg-gray-800 py-1 shadow-lg"
+                  style={{
+                    position: "fixed",
+                    left: `${recentMenuPosition.left}px`,
+                    top: `${recentMenuPosition.top}px`,
+                  }}
+                  role="menu"
+                >
+                  <div className="px-2 pb-1 text-[9px] font-bold uppercase tracking-wide text-gray-500">
+                    최근 연 폴더
+                  </div>
+                  {recentFolders.map((path) => (
+                    <button
+                      key={path}
+                      onClick={() => handleOpenRecent(path)}
+                      className="block w-full truncate px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
+                      title={path}
+                      role="menuitem"
+                    >
+                      {folderLabel(path)}
+                      <span className="ml-1 text-[9px] text-gray-500">
+                        {path}
+                      </span>
+                    </button>
+                  ))}
+                </div>,
+                document.body,
+              )}
+          </div>
+          <span className="mx-0.5 h-3.5 w-px bg-gray-700" />
           {rootSwitch && (
             <>
               <WorktreeSwitch
