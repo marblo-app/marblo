@@ -1,11 +1,13 @@
 import {
   useState,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useRef,
   useMemo,
   KeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useEditorStore } from "../../stores/editorStore";
 import { useProjectStore } from "../../stores/projectStore";
 import type { Project } from "../../types/project";
@@ -15,9 +17,11 @@ import { useNavigationStore } from "../../stores/navigationStore";
 import {
   describeRootView,
   filterWorktreesByProject,
+  calculateWorktreeMenuPosition,
   resolveRootSwitch,
   treeSignature,
 } from "../../lib/fileTreeView";
+import type { WorktreeMenuPosition } from "../../lib/fileTreeView";
 import type { RootSwitchTarget } from "../../lib/fileTreeView";
 import { useAuth } from "../../hooks/useAuth";
 import { FileTreeContextMenu, ContextMenuItem } from "./FileTreeContextMenu";
@@ -474,6 +478,7 @@ interface WorktreeSwitchProps {
   open: boolean;
   setOpen: (open: boolean) => void;
   menuRef: React.RefObject<HTMLDivElement>;
+  portalMenuRef: React.RefObject<HTMLDivElement>;
   onSwitch: (path: string) => void;
 }
 
@@ -486,6 +491,7 @@ function WorktreeSwitch({
   open,
   setOpen,
   menuRef,
+  portalMenuRef,
   onSwitch,
 }: WorktreeSwitchProps) {
   if (toMain) {
@@ -517,6 +523,7 @@ function WorktreeSwitch({
             tasks={toTasks}
             open={open}
             setOpen={setOpen}
+            portalMenuRef={portalMenuRef}
             onSwitch={onSwitch}
           />
         )}
@@ -558,6 +565,7 @@ function WorktreeSwitch({
         tasks={toTasks}
         open={open}
         setOpen={setOpen}
+        portalMenuRef={portalMenuRef}
         onSwitch={onSwitch}
         title="작업 워크트리로"
       />
@@ -569,6 +577,7 @@ interface WorktreeMenuButtonProps {
   tasks: RootSwitchTarget[];
   open: boolean;
   setOpen: (open: boolean) => void;
+  portalMenuRef: React.RefObject<HTMLDivElement>;
   onSwitch: (path: string) => void;
   title?: string;
 }
@@ -577,12 +586,65 @@ function WorktreeMenuButton({
   tasks,
   open,
   setOpen,
+  portalMenuRef,
   onSwitch,
   title = "다른 작업 워크트리로",
 }: WorktreeMenuButtonProps) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [position, setPosition] = useState<WorktreeMenuPosition | null>(null);
+
+  const updatePosition = useCallback(() => {
+    const button = buttonRef.current;
+    if (!button) return;
+    setPosition(
+      calculateWorktreeMenuPosition(
+        button.getBoundingClientRect(),
+        window.innerWidth,
+      ),
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+  }, [open, updatePosition]);
+
+  const menu =
+    open && position
+      ? createPortal(
+          <div
+            ref={portalMenuRef}
+            className="z-50 w-[min(80vw,360px)] min-w-[260px] overflow-hidden rounded border border-gray-700 bg-gray-800 py-1 shadow-lg"
+            style={{
+              position: "fixed",
+              right: `${position.right}px`,
+              top: `${position.top}px`,
+            }}
+          >
+            {tasks.map((t) => (
+              <button
+                key={t.path}
+                onClick={() => onSwitch(t.path)}
+                className="flex w-full min-w-0 items-center gap-2 px-2 py-1 text-left text-[12px] text-gray-300 hover:bg-gray-700"
+                title={`${t.label}${t.taskId ? ` · ${t.taskId}` : ""}\n${t.path}`}
+              >
+                <span className="min-w-0 flex-1 truncate">{t.label}</span>
+                {t.taskId && (
+                  <span className="ml-auto flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300">
+                    {t.taskId}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )
+      : null;
+
   return (
     <>
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
         title={title}
@@ -601,25 +663,7 @@ function WorktreeMenuButton({
           />
         </svg>
       </button>
-      {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-[min(80vw,360px)] min-w-[260px] overflow-hidden rounded border border-gray-700 bg-gray-800 py-1 shadow-lg">
-          {tasks.map((t) => (
-            <button
-              key={t.path}
-              onClick={() => onSwitch(t.path)}
-              className="flex w-full min-w-0 items-center gap-2 px-2 py-1 text-left text-[12px] text-gray-300 hover:bg-gray-700"
-              title={`${t.label}${t.taskId ? ` · ${t.taskId}` : ""}\n${t.path}`}
-            >
-              <span className="min-w-0 flex-1 truncate">{t.label}</span>
-              {t.taskId && (
-                <span className="ml-auto flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300">
-                  {t.taskId}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
+      {menu}
     </>
   );
 }
@@ -700,6 +744,7 @@ export function FileTree() {
 
   const [showWorktreeMenu, setShowWorktreeMenu] = useState(false);
   const worktreeMenuRef = useRef<HTMLDivElement>(null);
+  const worktreePortalMenuRef = useRef<HTMLDivElement>(null);
 
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -814,18 +859,26 @@ export function FileTree() {
   useEffect(() => {
     if (!showWorktreeMenu) return;
     const onPointerDown = (e: MouseEvent) => {
-      if (!worktreeMenuRef.current?.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideTrigger = worktreeMenuRef.current?.contains(target);
+      const insidePortal = worktreePortalMenuRef.current?.contains(target);
+      if (!insideTrigger && !insidePortal) {
         setShowWorktreeMenu(false);
       }
     };
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") setShowWorktreeMenu(false);
     };
+    const onViewportChange = () => setShowWorktreeMenu(false);
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
     };
   }, [showWorktreeMenu]);
 
@@ -1387,6 +1440,7 @@ export function FileTree() {
                 open={showWorktreeMenu}
                 setOpen={setShowWorktreeMenu}
                 menuRef={worktreeMenuRef}
+                portalMenuRef={worktreePortalMenuRef}
                 onSwitch={handleSwitchRoot}
               />
               <span className="mx-0.5 h-3.5 w-px bg-gray-700" />

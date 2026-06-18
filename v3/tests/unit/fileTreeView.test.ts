@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calculateWorktreeMenuPosition,
   describeRootView,
   filterWorktreesByProject,
   resolveRootSwitch,
@@ -161,6 +162,26 @@ describe("filterWorktreesByProject", () => {
     expect(filterWorktreesByProject([wt({ projectId: "p1" })], null)).toEqual(
       [],
     );
+  });
+});
+
+describe("calculateWorktreeMenuPosition", () => {
+  it("right-aligns a fixed menu to the trigger rect", () => {
+    expect(
+      calculateWorktreeMenuPosition({ right: 312, bottom: 48 }, 800),
+    ).toEqual({
+      right: 488,
+      top: 52,
+    });
+  });
+
+  it("clamps the right offset when the trigger reaches past the viewport", () => {
+    expect(
+      calculateWorktreeMenuPosition({ right: 812, bottom: 48 }, 800),
+    ).toEqual({
+      right: 0,
+      top: 52,
+    });
   });
 });
 

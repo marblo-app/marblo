@@ -76,6 +76,27 @@ export interface RootSwitchTarget {
   taskId?: string;
 }
 
+export interface WorktreeMenuAnchorRect {
+  right: number;
+  bottom: number;
+}
+
+export interface WorktreeMenuPosition {
+  right: number;
+  top: number;
+}
+
+export function calculateWorktreeMenuPosition(
+  anchorRect: WorktreeMenuAnchorRect,
+  viewportWidth: number,
+  gap = 4,
+): WorktreeMenuPosition {
+  return {
+    right: Math.max(0, viewportWidth - anchorRect.right),
+    top: anchorRect.bottom + gap,
+  };
+}
+
 /**
  * Decide what the header's root-switch control should offer.
  *
