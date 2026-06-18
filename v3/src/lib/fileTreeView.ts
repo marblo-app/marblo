@@ -77,24 +77,36 @@ export interface RootSwitchTarget {
 }
 
 export interface WorktreeMenuAnchorRect {
+  left: number;
   right: number;
   bottom: number;
 }
 
 export interface WorktreeMenuPosition {
-  right: number;
+  left: number;
   top: number;
 }
 
+/**
+ * Position the portal worktree menu opening *rightwards* from the trigger.
+ *
+ * The trigger lives in the narrow left sidebar header, so anchoring the menu's
+ * right edge to the button (the old behaviour) made a 260–360px menu spill off
+ * the left edge of the screen. Anchor the menu's *left* edge to the button and
+ * clamp it inside the viewport so the menu always opens toward the roomy editor
+ * area and never gets clipped.
+ */
 export function calculateWorktreeMenuPosition(
   anchorRect: WorktreeMenuAnchorRect,
   viewportWidth: number,
   gap = 4,
 ): WorktreeMenuPosition {
-  return {
-    right: Math.max(0, viewportWidth - anchorRect.right),
-    top: anchorRect.bottom + gap,
-  };
+  const width = Math.max(260, Math.min(360, viewportWidth * 0.8));
+  const margin = 8;
+  let left = anchorRect.left; // open rightwards from the button's left edge
+  left = Math.min(left, viewportWidth - width - margin); // clamp to right edge
+  left = Math.max(margin, left); // clamp to left edge
+  return { left, top: anchorRect.bottom + gap };
 }
 
 /**

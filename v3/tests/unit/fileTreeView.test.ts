@@ -166,21 +166,29 @@ describe("filterWorktreesByProject", () => {
 });
 
 describe("calculateWorktreeMenuPosition", () => {
-  it("right-aligns a fixed menu to the trigger rect", () => {
-    expect(
-      calculateWorktreeMenuPosition({ right: 312, bottom: 48 }, 800),
-    ).toEqual({
-      right: 488,
-      top: 52,
-    });
+  it("opens rightwards from a narrow left-sidebar trigger without clipping", () => {
+    // Narrow sidebar button: left 220, right 280. Wide viewport.
+    const pos = calculateWorktreeMenuPosition(
+      { left: 220, right: 280, bottom: 40 },
+      1440,
+    );
+    const width = Math.max(260, Math.min(360, 1440 * 0.8)); // 360
+    // Left-aligned to the button, no clamp needed → stays on screen.
+    expect(pos).toEqual({ left: 220, top: 44 });
+    expect(pos.left).toBeGreaterThanOrEqual(8);
+    expect(pos.left + width).toBeLessThanOrEqual(1440);
   });
 
-  it("clamps the right offset when the trigger reaches past the viewport", () => {
+  it("clamps to the right edge when the trigger is near the viewport edge", () => {
+    const width = Math.max(260, Math.min(360, 1440 * 0.8)); // 360
     expect(
-      calculateWorktreeMenuPosition({ right: 812, bottom: 48 }, 800),
+      calculateWorktreeMenuPosition(
+        { left: 1400, right: 1430, bottom: 40 },
+        1440,
+      ),
     ).toEqual({
-      right: 0,
-      top: 52,
+      left: 1440 - width - 8, // 1072
+      top: 44,
     });
   });
 });

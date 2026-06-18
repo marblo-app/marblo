@@ -617,7 +617,7 @@ function WorktreeMenuButton({
             className="z-50 w-[min(80vw,360px)] min-w-[260px] overflow-hidden rounded border border-gray-700 bg-gray-800 py-1 shadow-lg"
             style={{
               position: "fixed",
-              right: `${position.right}px`,
+              left: `${position.left}px`,
               top: `${position.top}px`,
             }}
           >
