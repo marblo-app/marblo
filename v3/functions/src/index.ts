@@ -9,7 +9,6 @@ import {
   COUPON_RULES_IP,
 } from "./rateLimit";
 import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
-import { Resend } from "resend";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -1213,17 +1212,24 @@ async function sendFounderAccessEmail(
       console.warn("[founder-email] RESEND_API_KEY 미설정 — 발송 스킵:", email);
       return false;
     }
-    const resend = new Resend(RESEND_API_KEY);
     const content = buildFounderAccessEmail(normalizeFounderLocale(locale));
-    const { error } = await resend.emails.send({
-      from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
-      to: [email],
-      subject: content.subject,
-      html: content.html,
-      text: content.text,
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
+        to: [email],
+        subject: content.subject,
+        html: content.html,
+        text: content.text,
+      }),
     });
-    if (error) {
-      console.warn("[founder-email] resend error:", error);
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      console.warn(`[founder-email] resend HTTP ${resp.status}: ${body}`);
       return false;
     }
     return true;
