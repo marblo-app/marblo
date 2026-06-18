@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
 const LAST_UPDATED = "2026-05-25";
-const EFFECTIVE_DATE = "2026년 X월 X일 (GA 출시 직전 확정)";
+const EFFECTIVE_DATE = "2026년 6월 18일";
 
 export default function TermsOfServicePage() {
   const t = useTranslations("footer");
@@ -142,7 +142,7 @@ export default function TermsOfServicePage() {
               (베타 종료 후)
             </li>
             <li>
-              <strong>Team 플랜</strong>: 월 ₩49,000 또는 그에 상당하는 외화
+              <strong>Team 플랜</strong>: 월 ₩29,000 또는 그에 상당하는 외화
               금액
             </li>
             <li>
@@ -487,7 +487,7 @@ export default function TermsOfServicePage() {
         <li>상호: 주식회사 하이프마크 (HYPEMARC)</li>
         <li>대표: 김동원</li>
         <li>사업자등록번호: 408-88-02189</li>
-        <li>통신판매업 신고번호: 신고 진행 중</li>
+        <li>통신판매업 신고번호: 2026-서울송파-1496</li>
         <li>주소: 서울특별시 송파구 백제고분로50길 16, 2층</li>
         <li>
           이메일: <a href="mailto:support@marblo.app">support@marblo.app</a>
