@@ -108,8 +108,9 @@ export default function PrivacyPolicyPage() {
           PG 사가 직접 보관).
         </li>
         <li>
-          <strong>이메일 발송 서비스 (Resend 또는 동급)</strong> — 안내 메일 및
-          트랜잭션 메일 발송 시 사용 예정.
+          <strong>Twilio SendGrid, Inc. (미국 소재)</strong> — 파운더 선정 안내
+          등 트랜잭션 이메일 발송. 이를 위해 이용자의 이메일 주소가 미국 소재
+          서버로 국외 이전됩니다.
         </li>
       </ul>
       <p>
