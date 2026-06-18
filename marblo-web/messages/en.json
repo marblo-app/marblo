@@ -470,7 +470,7 @@
     "view": "View",
     "collectionUse_label": "Consent to collection and use of personal data",
     "collectionUse_hint": "We collect your email and payment/usage records as needed to provide the service.",
-    "overseasTransfer_label": "Separate consent to overseas transfer of personal data (PIPA Art. 15(2))",
+    "overseasTransfer_label": "Separate consent to overseas transfer of personal data (PIPA Art. 28-8)",
     "overseasTransfer_hint": "Your data is processed and stored on overseas servers such as Google Cloud (Firebase).",
     "marketing_label": "Consent to receive marketing communications",
     "marketing_hint": "Get news about features, benefits, and events by email. Declining does not affect your use of the service.",

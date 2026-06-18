@@ -470,7 +470,7 @@
     "view": "表示",
     "collectionUse_label": "個人情報の収集・利用への同意",
     "collectionUse_hint": "サービス提供に必要なメールアドレス・決済/利用履歴などの個人情報を収集・利用します。",
-    "overseasTransfer_label": "個人情報の国外移転に関する個別同意（PIPA 第15条第2項）",
+    "overseasTransfer_label": "個人情報の国外移転に関する個別同意（PIPA 第28条の8）",
     "overseasTransfer_hint": "データはGoogle Cloud（Firebase）など国外サーバーで処理・保管されます。",
     "marketing_label": "マーケティング情報の受信への同意",
     "marketing_hint": "新機能・特典・イベント情報をメールでお届けします。拒否してもサービスのご利用に制限はありません。",

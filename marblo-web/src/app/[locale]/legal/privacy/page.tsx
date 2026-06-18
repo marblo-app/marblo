@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
-const LAST_UPDATED = "2026-05-25";
+const LAST_UPDATED = "2026-06-18";
 
 export default function PrivacyPolicyPage() {
   const t = useTranslations("footer");
@@ -71,7 +71,26 @@ export default function PrivacyPolicyPage() {
         <li>웹사이트 방문 기록(로그): 3개월 (통신비밀보호법)</li>
       </ul>
 
-      <h2>4. 개인정보의 제3자 제공</h2>
+      <h2>4. 개인정보의 파기 절차 및 방법</h2>
+      <p>
+        회사는 개인정보의 보유기간이 경과하거나 처리 목적이 달성되는 등
+        개인정보가 불필요하게 되었을 때에는 지체 없이 해당 개인정보를 파기합니다
+        (개인정보 보호법 제21조).
+      </p>
+      <ul>
+        <li>
+          파기 절차: 파기 사유가 발생한 개인정보를 선정하고, 개인정보
+          보호책임자의 확인을 거쳐 파기합니다. 다른 법령에 따라 보존하여야 하는
+          경우에는 해당 개인정보를 별도의 데이터베이스로 분리하여 보존합니다.
+        </li>
+        <li>
+          파기 방법: 전자적 파일 형태의 개인정보는 복원이 불가능한 방법으로 영구
+          삭제하며, 종이 문서 등에 기록·저장된 개인정보는 분쇄하거나 소각하여
+          파기합니다.
+        </li>
+      </ul>
+
+      <h2>5. 개인정보의 제3자 제공</h2>
       <p>
         회사는 정보주체의 별도 동의가 없는 한 개인정보를 제3자에게 제공하지
         않습니다. 단, 다음의 경우는 예외로 합니다.
@@ -84,7 +103,7 @@ export default function PrivacyPolicyPage() {
         </li>
       </ul>
 
-      <h2>5. 개인정보 처리 위탁</h2>
+      <h2>6. 개인정보 처리 위탁</h2>
       <p>
         회사는 안정적인 서비스 제공을 위해 다음과 같이 개인정보 처리 업무를
         위탁하고 있습니다.
@@ -101,15 +120,15 @@ export default function PrivacyPolicyPage() {
           <strong>Vercel Inc.</strong> — 웹사이트 호스팅 및 배포.
         </li>
         <li>
-          <strong>Cloudflare Inc.</strong> — CDN 및 DDoS 방어.
+          <strong>Cloudflare, Inc.</strong> — CDN 및 DDoS 방어.
         </li>
         <li>
           <strong>토스페이먼츠 / Stripe</strong> — 결제 처리 (실제 결제 정보는
           PG 사가 직접 보관).
         </li>
         <li>
-          <strong>Twilio SendGrid, Inc. (미국 소재)</strong> — 파운더 선정 안내
-          등 트랜잭션 이메일 발송. 이를 위해 이용자의 이메일 주소가 미국 소재
+          <strong>Resend, Inc. (미국 소재)</strong> — 파운더 선정 안내 등
+          트랜잭션 이메일 발송. 이를 위해 이용자의 이메일 주소가 미국 소재
           서버로 국외 이전됩니다.
         </li>
       </ul>
@@ -118,7 +137,100 @@ export default function PrivacyPolicyPage() {
         체결하며, 위탁 업무 종료 시 개인정보가 안전하게 파기되도록 관리합니다.
       </p>
 
-      <h2>6. 정보주체의 권리와 행사 방법</h2>
+      <h2>7. 개인정보의 국외 이전</h2>
+      <p>
+        회사는 서비스 제공을 위해 다음과 같이 개인정보를 국외로 이전하고 있으며,
+        「개인정보 보호법」 제28조의8에 따라 국외 이전에 관한 사항을 아래와 같이
+        고지합니다. 이전받는 자는 모두 미국에 소재합니다.
+      </p>
+      <ul>
+        <li>
+          <strong>Google LLC (Firebase / Cloud Firestore)</strong>
+          <ul>
+            <li>
+              이전 항목: 이메일 주소, 인증 식별자(Google/GitHub OAuth), 서비스
+              이용·생성 콘텐츠, 거래 식별 정보
+            </li>
+            <li>이전 국가: 미국</li>
+            <li>
+              이전 일시 및 방법: 회원가입·서비스 이용 시 정보통신망을 통한
+              암호화 전송으로 수시 이전
+            </li>
+            <li>
+              이전받는 자 및 연락처: Google LLC (개인정보 처리방침 및 문의:
+              https://policies.google.com/privacy)
+            </li>
+            <li>이용 목적: 회원 인증 및 데이터 저장·동기화</li>
+            <li>보유·이용 기간: 회원 탈퇴 또는 위탁계약 종료 시까지</li>
+          </ul>
+        </li>
+        <li>
+          <strong>Vercel Inc.</strong>
+          <ul>
+            <li>
+              이전 항목: 접속 IP, 브라우저 정보 등 서비스 접속 시 자동 수집되는
+              정보
+            </li>
+            <li>이전 국가: 미국</li>
+            <li>
+              이전 일시 및 방법: 웹사이트 접속 시 정보통신망을 통한 암호화
+              전송으로 수시 이전
+            </li>
+            <li>
+              이전받는 자 및 연락처: Vercel Inc. (개인정보 처리방침 및 문의:
+              https://vercel.com/legal/privacy-policy)
+            </li>
+            <li>이용 목적: 웹사이트 호스팅 및 배포</li>
+            <li>보유·이용 기간: 위탁계약 종료 시까지</li>
+          </ul>
+        </li>
+        <li>
+          <strong>Cloudflare, Inc.</strong>
+          <ul>
+            <li>
+              이전 항목: 접속 IP, 브라우저 정보 등 서비스 접속 시 자동 수집되는
+              정보
+            </li>
+            <li>이전 국가: 미국</li>
+            <li>
+              이전 일시 및 방법: 웹사이트 접속 시 정보통신망을 통한 암호화
+              전송으로 수시 이전
+            </li>
+            <li>
+              이전받는 자 및 연락처: Cloudflare, Inc. (개인정보 처리방침 및
+              문의: https://www.cloudflare.com/privacypolicy/)
+            </li>
+            <li>이용 목적: CDN 및 DDoS 방어</li>
+            <li>보유·이용 기간: 위탁계약 종료 시까지</li>
+          </ul>
+        </li>
+        <li>
+          <strong>Resend, Inc.</strong>
+          <ul>
+            <li>이전 항목: 이메일 주소</li>
+            <li>이전 국가: 미국</li>
+            <li>
+              이전 일시 및 방법: 트랜잭션 이메일 발송 시 정보통신망을 통한
+              암호화 전송으로 수시 이전
+            </li>
+            <li>
+              이전받는 자 및 연락처: Resend, Inc. (개인정보 처리방침 및 문의:
+              https://resend.com/legal/privacy-policy)
+            </li>
+            <li>이용 목적: 파운더 선정 안내 등 트랜잭션 이메일 발송</li>
+            <li>보유·이용 기간: 발송 목적 달성 시까지</li>
+          </ul>
+        </li>
+      </ul>
+      <p>
+        정보주체는 개인정보의 국외 이전을 거부할 수 있습니다. 다만 위 이전은
+        서비스 제공에 필수적이므로, 거부하시는 경우 회원가입 및 서비스 이용이
+        제한될 수 있습니다. 국외 이전 거부 또는 동의 철회는{" "}
+        <a href="mailto:support@marblo.app">support@marblo.app</a> 으로 요청하실
+        수 있습니다.
+      </p>
+
+      <h2>8. 정보주체의 권리와 행사 방법</h2>
       <p>정보주체는 회사에 대해 다음의 권리를 행사할 수 있습니다.</p>
       <ul>
         <li>개인정보 열람 요구</li>
@@ -133,7 +245,20 @@ export default function PrivacyPolicyPage() {
         조치하겠습니다.
       </p>
 
-      <h2>7. 개인정보의 안전성 확보 조치</h2>
+      <h2>9. 만 14세 미만 아동의 개인정보 처리</h2>
+      <p>
+        회사는 만 14세 미만 아동의 개인정보를 처리하기 위하여 동의가 필요한
+        경우에는 그 법정대리인의 동의를 받으며, 법정대리인이 동의하였는지를
+        확인합니다 (개인정보 보호법 제22조의2). 이때 법정대리인의 동의를 받기
+        위하여 필요한 최소한의 정보(법정대리인의 성명 및 연락처)는 법정대리인의
+        동의 없이 해당 아동으로부터 직접 수집할 수 있습니다.
+      </p>
+      <p>
+        회사는 만 14세 미만 아동에게 개인정보 처리와 관련한 사항을 고지할 때에는
+        아동이 이해하기 쉬운 양식과 명확하고 알기 쉬운 언어를 사용합니다.
+      </p>
+
+      <h2>10. 개인정보의 안전성 확보 조치</h2>
       <ul>
         <li>
           이메일 등 개인정보는 Firestore 보안 규칙으로 외부 무단 조회를
@@ -149,14 +274,14 @@ export default function PrivacyPolicyPage() {
         </li>
       </ul>
 
-      <h2>8. 쿠키(Cookie) 의 사용</h2>
+      <h2>11. 쿠키(Cookie) 의 사용</h2>
       <p>
         회사는 로그인 상태 유지, 다국어 설정 보존 등을 위해 쿠키를 사용합니다.
         정보주체는 브라우저 설정을 통해 쿠키 저장을 거부할 수 있으나, 일부
         서비스의 사용이 제한될 수 있습니다.
       </p>
 
-      <h2>9. 개인정보 보호책임자</h2>
+      <h2>12. 개인정보 보호책임자</h2>
       <ul>
         <li>책임자: 김동원 (대표)</li>
         <li>
@@ -165,7 +290,7 @@ export default function PrivacyPolicyPage() {
         <li>전화: 010-3019-7778</li>
       </ul>
 
-      <h2>10. 권익 침해 구제 방법</h2>
+      <h2>13. 권익 침해 구제 방법</h2>
       <p>
         정보주체는 개인정보 침해로 인한 구제를 받기 위해 다음 기관에 상담을
         신청할 수 있습니다.
@@ -177,7 +302,7 @@ export default function PrivacyPolicyPage() {
         <li>경찰청 사이버수사국: 182 / ecrm.police.go.kr</li>
       </ul>
 
-      <h2>11. 본 방침의 변경</h2>
+      <h2>14. 본 방침의 변경</h2>
       <p>
         본 개인정보처리방침은 법령 또는 서비스 정책 변경에 따라 개정될 수
         있으며, 변경 시 본 페이지를 통해 사전 공지합니다. 중요한 변경의 경우

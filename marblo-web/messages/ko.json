@@ -470,7 +470,7 @@
     "view": "보기",
     "collectionUse_label": "개인정보 수집·이용 동의",
     "collectionUse_hint": "이메일, 결제·이용 내역 등 서비스 제공에 필요한 개인정보를 수집·이용합니다.",
-    "overseasTransfer_label": "개인정보 국외 이전 별도 동의 (PIPA 제15조 제2항)",
+    "overseasTransfer_label": "개인정보 국외 이전 별도 동의 (PIPA 제28조의8)",
     "overseasTransfer_hint": "데이터는 Google Cloud(Firebase) 등 국외 서버에서 처리·보관됩니다.",
     "marketing_label": "마케팅·광고성 정보 수신 동의",
     "marketing_hint": "신규 기능·혜택·이벤트 소식을 이메일로 받아봅니다. 거부해도 서비스 이용에 제한이 없습니다.",
