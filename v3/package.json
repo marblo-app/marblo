@@ -4,7 +4,7 @@
   "description": "Marblo v3.0 - Desktop App",
   "repository": {
     "type": "git",
-    "url": "https://github.com/marblo-app/marblo.git"
+    "url": "https://github.com/melocream/marblo.git"
   },
   "main": "dist-electron/main.js",
   "scripts": {

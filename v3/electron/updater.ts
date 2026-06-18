@@ -1,6 +1,7 @@
 import { autoUpdater, UpdateInfo } from "electron-updater";
 import { BrowserWindow, ipcMain } from "electron";
 import { AppUpdater } from "electron-updater";
+import type { GithubOptions } from "builder-util-runtime";
 
 export type UpdateStage =
   | "checking"
@@ -28,6 +29,30 @@ const RECHECK_INTERVAL_MS = 4 * 3600 * 1000;
  *  to give the user time to save work. Default 5 minutes. */
 const DEFAULT_HOTFIX_GRACE_MS = 5 * 60 * 1000;
 
+const DEFAULT_UPDATE_FEED_OWNER = "melocream";
+const DEFAULT_UPDATE_FEED_REPO = "marblo";
+const DEFAULT_UPDATE_FEED_CHANNEL = "latest";
+
+function getUpdaterEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value ? value : undefined;
+}
+
+function resolveGithubFeedOptions(): GithubOptions {
+  const privateFeed = getUpdaterEnv("MARBLO_UPDATER_PRIVATE") === "true";
+  const token =
+    getUpdaterEnv("MARBLO_UPDATER_TOKEN") ?? getUpdaterEnv("GH_TOKEN");
+
+  return {
+    provider: "github",
+    owner: getUpdaterEnv("MARBLO_UPDATER_OWNER") ?? DEFAULT_UPDATE_FEED_OWNER,
+    repo: getUpdaterEnv("MARBLO_UPDATER_REPO") ?? DEFAULT_UPDATE_FEED_REPO,
+    channel:
+      getUpdaterEnv("MARBLO_UPDATER_CHANNEL") ?? DEFAULT_UPDATE_FEED_CHANNEL,
+    ...(privateFeed ? { private: true, token } : {}),
+  };
+}
+
 export class Updater {
   private mainWindow: BrowserWindow | null = null;
   private recheckTimer: ReturnType<typeof setInterval> | null = null;
@@ -38,6 +63,9 @@ export class Updater {
     // this to true via shouldAutoInstall() check on update-available.
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
+    // Keep runtime update checks pinned to the release repo instead of relying
+    // on package.json repository inference, which can drift during repo moves.
+    autoUpdater.setFeedURL(resolveGithubFeedOptions());
 
     this.setupEventHandlers();
     this.setupIPC();
