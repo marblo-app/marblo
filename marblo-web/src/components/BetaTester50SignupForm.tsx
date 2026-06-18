@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
+import Link from "next/link";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { db } from "@/lib/firebase";
@@ -31,6 +32,7 @@ export default function BetaTester50SignupForm({
 
   const [email, setEmail] = useState("");
   const [agreed, setAgreed] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -41,6 +43,11 @@ export default function BetaTester50SignupForm({
     const cleaned = email.trim().toLowerCase();
     if (!EMAIL_RE.test(cleaned) || cleaned.length > 254) {
       setErrorMsg(t("error_invalid_email"));
+      setStatus("error");
+      return;
+    }
+    if (!ageConfirmed) {
+      setErrorMsg(t("error_age_required"));
       setStatus("error");
       return;
     }
@@ -131,13 +138,33 @@ export default function BetaTester50SignupForm({
           {isClosed
             ? t("closed")
             : isSubmitting
-            ? t("cta_submitting")
-            : t("cta_apply")}
+              ? t("cta_submitting")
+              : t("cta_apply")}
           {!isClosed && !isSubmitting && (
             <ArrowRight className={compact ? "w-3.5 h-3.5" : "w-4 h-4"} />
           )}
         </button>
       </div>
+
+      <label
+        className={
+          compact
+            ? "flex items-start gap-2 text-xs text-indigo-100/90 cursor-pointer select-none"
+            : "flex items-start gap-2 text-sm text-zinc-300 cursor-pointer select-none"
+        }
+      >
+        <input
+          type="checkbox"
+          checked={ageConfirmed}
+          onChange={(e) => {
+            setAgeConfirmed(e.target.checked);
+            if (status === "error") setStatus("idle");
+          }}
+          disabled={isClosed || isSubmitting}
+          className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-900 text-indigo-500 focus:ring-indigo-500/40"
+        />
+        <span className="leading-snug">{t("age_confirm_label")}</span>
+      </label>
 
       <label
         className={
@@ -156,7 +183,16 @@ export default function BetaTester50SignupForm({
           disabled={isClosed || isSubmitting}
           className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-900 text-indigo-500 focus:ring-indigo-500/40"
         />
-        <span className="leading-snug">{t("consent_label")}</span>
+        <span className="leading-snug">
+          {t("consent_label")}{" "}
+          <Link
+            href={`/${locale}/legal/privacy`}
+            target="_blank"
+            className="text-indigo-300 hover:text-indigo-200 underline"
+          >
+            {t("consent_privacy_view")}
+          </Link>
+        </span>
       </label>
 
       {errorMsg && (

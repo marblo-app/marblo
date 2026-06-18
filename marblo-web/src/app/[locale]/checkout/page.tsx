@@ -61,10 +61,10 @@ export default function CheckoutPage() {
   const baseAmount = isLecture
     ? lectureInfo?.price || 0
     : planInfo
-    ? billing === "annual"
-      ? planInfo.annual
-      : planInfo.monthly
-    : 0;
+      ? billing === "annual"
+        ? planInfo.annual
+        : planInfo.monthly
+      : 0;
   const finalAmount = Math.max(0, baseAmount - discount);
 
   // Validate query params
@@ -78,7 +78,7 @@ export default function CheckoutPage() {
           ? `/${locale}/checkout?type=lecture&slug=${lectureSlug}`
           : `/${locale}/checkout?plan=${plan}`;
         router.push(
-          `/${locale}/auth/login?redirect=${encodeURIComponent(redirectPath)}`
+          `/${locale}/auth/login?redirect=${encodeURIComponent(redirectPath)}`,
         );
       } else {
         setUser(u);
@@ -93,9 +93,8 @@ export default function CheckoutPage() {
     let cancelled = false;
     const preload = async () => {
       try {
-        const { loadTossPayments } = await import(
-          "@tosspayments/tosspayments-sdk"
-        );
+        const { loadTossPayments } =
+          await import("@tosspayments/tosspayments-sdk");
         await loadTossPayments(process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "");
         if (!cancelled) setSdkReady(true);
       } catch (err) {
@@ -116,7 +115,7 @@ export default function CheckoutPage() {
       }
       setCouponCode(result.code);
     },
-    [baseAmount]
+    [baseAmount],
   );
 
   const handlePayment = async () => {
@@ -136,11 +135,10 @@ export default function CheckoutPage() {
           lectureSlug,
           userId: user.uid,
         })) as { data: { amount: number; orderId: string; orderName: string } };
-        const { loadTossPayments } = await import(
-          "@tosspayments/tosspayments-sdk"
-        );
+        const { loadTossPayments } =
+          await import("@tosspayments/tosspayments-sdk");
         const toss = await loadTossPayments(
-          process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || ""
+          process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "",
         );
         const payment = toss.payment({ customerKey: user.uid });
         await payment.requestPayment({
@@ -152,11 +150,10 @@ export default function CheckoutPage() {
           failUrl: `${window.location.origin}/${locale}/checkout/fail`,
         });
       } else if (plan) {
-        const { loadTossPayments } = await import(
-          "@tosspayments/tosspayments-sdk"
-        );
+        const { loadTossPayments } =
+          await import("@tosspayments/tosspayments-sdk");
         const toss = await loadTossPayments(
-          process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || ""
+          process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY || "",
         );
         const payment = toss.payment({ customerKey: user.uid });
         await payment.requestBillingAuth({
@@ -197,7 +194,7 @@ export default function CheckoutPage() {
           <button
             onClick={() =>
               router.push(
-                isLecture ? `/${locale}/lectures` : `/${locale}/pricing`
+                isLecture ? `/${locale}/lectures` : `/${locale}/pricing`,
               )
             }
             className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition"
@@ -319,6 +316,19 @@ export default function CheckoutPage() {
                 </Link>
               </span>
             </label>
+
+            {/* Third-party provision disclosure (PIPA — 제3자 제공 고지) */}
+            <div className="mt-2 rounded-lg bg-zinc-800/40 border border-zinc-700/60 px-3 py-2.5 text-xs text-zinc-400 leading-relaxed">
+              <p className="font-medium text-zinc-300">
+                {t("thirdPartyTitle")}
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                <li>{t("thirdPartyRecipient")}</li>
+                <li>{t("thirdPartyItems")}</li>
+                <li>{t("thirdPartyPurpose")}</li>
+                <li>{t("thirdPartyRetention")}</li>
+              </ul>
+            </div>
 
             {/* Pay button */}
             <button

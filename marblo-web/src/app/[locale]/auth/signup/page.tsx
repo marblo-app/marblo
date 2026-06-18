@@ -27,6 +27,7 @@ export default function SignupPage() {
     overseasTransfer: false,
     marketing: false,
   });
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -36,6 +37,10 @@ export default function SignupPage() {
     e.preventDefault();
     if (password !== confirm) {
       setError(t("passwordMismatch"));
+      return;
+    }
+    if (!ageConfirmed) {
+      setError(t("ageRequired"));
       return;
     }
     if (!requiredOk) {
@@ -85,6 +90,16 @@ export default function SignupPage() {
             onChange={setConsent}
             disabled={submitting}
           />
+          <label className="flex items-start gap-2 text-sm text-zinc-300 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={ageConfirmed}
+              onChange={(e) => setAgeConfirmed(e.target.checked)}
+              disabled={submitting}
+              className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-900 text-indigo-500 focus:ring-indigo-500/40 shrink-0"
+            />
+            <span className="leading-snug">{t("ageConfirm")}</span>
+          </label>
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button
             type="submit"

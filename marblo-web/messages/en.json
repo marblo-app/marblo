@@ -318,8 +318,11 @@
     "closed": "Founder recruiting (100) is closed",
     "error_invalid_email": "Please enter a valid email address.",
     "error_network": "Something went wrong. Please try again.",
-    "error_consent_required": "Please agree to the Founder role.",
-    "consent_label": "I agree to the Founder role (submit structured feedback within 3 days of access · some answers may be quoted in reviews and promotion).",
+    "error_consent_required": "Please consent to the collection and use of your personal data and to the Founder role.",
+    "error_age_required": "You must be at least 14 years old to apply.",
+    "age_confirm_label": "[Required] I am 14 years of age or older.",
+    "consent_label": "[Required] I consent to the collection and use of my personal data (email address) and to the Founder role. (Collected: email address · Purpose: Founder recruitment and selection notice · submit structured feedback within 3 days of access; some answers may be quoted in reviews and promotion)",
+    "consent_privacy_view": "Privacy Policy",
     "receive_heading": "💎 What Founders get",
     "receive_item1": "✓ Free beta — full Marblo feature access before public launch",
     "receive_item2": "✓ 3 months of Marblo Pro free when you submit structured feedback (6 months with an interview)",
@@ -379,7 +382,9 @@
     "hasAccount": "Already have an account?",
     "signupLink": "Sign up",
     "loginLink": "Login",
-    "passwordMismatch": "Passwords do not match."
+    "passwordMismatch": "Passwords do not match.",
+    "ageConfirm": "[Required] I am 14 years of age or older.",
+    "ageRequired": "You must be at least 14 years old to sign up."
   },
   "checkout": {
     "title": "Checkout",
@@ -425,7 +430,12 @@
     "unknownError": "Unknown error",
     "consentLabel": "I agree to proceed with payment and to the provision of my personal data to the payment processor (TossPayments). (Required)",
     "consentView": "Privacy Policy",
-    "consentRequired": "Payment consent is required to proceed."
+    "consentRequired": "Payment consent is required to proceed.",
+    "thirdPartyTitle": "Disclosure of third-party provision to the payment processor",
+    "thirdPartyRecipient": "Recipient: TossPayments Co., Ltd.",
+    "thirdPartyItems": "Items provided: purchaser identifier (email), order number, payment amount",
+    "thirdPartyPurpose": "Purpose: payment processing and authorization/verification of the payment method",
+    "thirdPartyRetention": "Retention period: the period required by applicable law (e.g., the Act on Consumer Protection in Electronic Commerce)"
   },
   "lectures": {
     "title": "Lectures",
