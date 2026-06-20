@@ -366,7 +366,7 @@
     "error_email_unverified": "メール認証が完了したアカウントのみ提出できます。メール認証後に再度お試しください。",
     "error_not_founder": "選定されたファウンダーアカウントではありません。選定案内メールを受け取ったアドレスでログインしているかご確認ください。",
     "error_already_submitted": "すでにフィードバックを提出済みです。",
-    "error_deadline": "フィードバック提出期限（アクセス後3日）が過ぎました。サポートが必要な場合は support@marblo.app までご連絡ください。",
+    "error_deadline": "フィードバック提出期限（アクセス後3日）が過ぎました。サポートが必要な場合は john.kim@hypemarc.com までご連絡ください。",
     "error_invalid": "入力内容をご確認ください。",
     "error_network": "しばらくしてから再度お試しください。"
   },
@@ -468,7 +468,7 @@
     "biz_address_label": "住所",
     "biz_address_value": "大韓民国ソウル特別市松坡区百済古墳路50ギル16, 2階",
     "biz_email_label": "メール",
-    "biz_email_value": "support@marblo.app",
+    "biz_email_value": "john.kim@hypemarc.com",
     "biz_phone_label": "電話",
     "biz_phone_value": "+82-10-3019-7778",
     "copyright": "© 2026 HYPEMARC. All rights reserved."

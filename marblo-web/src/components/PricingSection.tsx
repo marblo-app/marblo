@@ -210,7 +210,7 @@ export default function PricingSection() {
               <div className="mt-8">
                 {isEnterprise ? (
                   <a
-                    href="mailto:support@marblo.app"
+                    href="mailto:john.kim@hypemarc.com"
                     className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium"
                   >
                     {t(`${plan}.cta`)}

@@ -366,7 +366,7 @@
     "error_email_unverified": "이메일 인증이 완료된 계정만 제출할 수 있습니다. 이메일 인증 후 다시 시도해 주세요.",
     "error_not_founder": "선정된 파운더 계정이 아닙니다. 선정 안내 이메일을 받은 주소로 로그인했는지 확인해 주세요.",
     "error_already_submitted": "이미 피드백을 제출하셨습니다.",
-    "error_deadline": "피드백 제출 기한(접근 후 3일)이 지났습니다. 지원이 필요하면 support@marblo.app 로 연락해 주세요.",
+    "error_deadline": "피드백 제출 기한(접근 후 3일)이 지났습니다. 지원이 필요하면 john.kim@hypemarc.com 로 연락해 주세요.",
     "error_invalid": "입력값을 확인해 주세요.",
     "error_network": "잠시 후 다시 시도해 주세요."
   },
@@ -468,7 +468,7 @@
     "biz_address_label": "주소",
     "biz_address_value": "서울특별시 송파구 백제고분로50길 16, 2층",
     "biz_email_label": "이메일",
-    "biz_email_value": "support@marblo.app",
+    "biz_email_value": "john.kim@hypemarc.com",
     "biz_phone_label": "전화",
     "biz_phone_value": "010-3019-7778",
     "copyright": "© 2026 HYPEMARC. All rights reserved."

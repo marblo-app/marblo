@@ -28,7 +28,7 @@ function buildDeletionMailto(uid: string, email: string | null): string {
       `삭제 대상: 계정 및 관련 개인정보 전체\n\n` +
       `30일 이내 처리 결과 회신 부탁드립니다.\n`
   );
-  return `mailto:support@marblo.app?subject=${subject}&body=${body}`;
+  return `mailto:john.kim@hypemarc.com?subject=${subject}&body=${body}`;
 }
 
 /** 필수 동의 철회 = 서비스 이용 종료 → 계정/데이터 삭제 요청 메일. */
@@ -44,7 +44,7 @@ function buildWithdrawMailto(uid: string, email: string | null): string {
       `이메일: ${email ?? "(미확인)"}\n\n` +
       `필수 동의 철회 시 서비스 이용이 종료됨을 확인하였습니다.\n`
   );
-  return `mailto:support@marblo.app?subject=${subject}&body=${body}`;
+  return `mailto:john.kim@hypemarc.com?subject=${subject}&body=${body}`;
 }
 
 export default function PrivacySettingsPage() {

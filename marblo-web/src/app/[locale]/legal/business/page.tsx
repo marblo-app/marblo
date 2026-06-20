@@ -70,7 +70,7 @@ export default function BusinessInfoPage() {
         주시면 영업일 기준 3일 이내에 회신드립니다.
       </p>
       <ul>
-        <li>이메일: support@marblo.app</li>
+        <li>이메일: john.kim@hypemarc.com</li>
         <li>전화: 010-3019-7778 (평일 10:00–18:00, 한국 시간)</li>
       </ul>
     </LegalPageLayout>
