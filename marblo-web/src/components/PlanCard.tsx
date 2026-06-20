@@ -70,7 +70,7 @@ export default function PlanCard({ plan, highlighted }: PlanCardProps) {
       <div className="mt-8">
         {isEnterprise ? (
           <a
-            href="mailto:john.kim@hypemarc.com"
+            href="mailto:team@marblo.app"
             className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium"
           >
             {t(`${plan}.cta`)}

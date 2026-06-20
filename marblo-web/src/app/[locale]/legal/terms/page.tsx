@@ -490,7 +490,7 @@ export default function TermsOfServicePage() {
         <li>통신판매업 신고번호: 2026-서울송파-1496</li>
         <li>주소: 서울특별시 송파구 백제고분로50길 16, 2층</li>
         <li>
-          이메일: <a href="mailto:john.kim@hypemarc.com">john.kim@hypemarc.com</a>
+          이메일: <a href="mailto:team@marblo.app">team@marblo.app</a>
         </li>
         <li>전화: 010-3019-7778</li>
       </ul>

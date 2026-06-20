@@ -67,7 +67,7 @@
 `requireAdmin`이 `ADMIN_UID` env 단일 체크(index.ts:1004-1009). 미설정/계정불일치면 `/admin`의 선정·인터뷰·현황·피드백열람이 전부 `permission-denied`. **오픈 전 functions 배포 환경에 `ADMIN_UID` 설정 확인 필수.**
 
 **M2. 배포 env 확인 — `RESEND_API_KEY` 미설정 시 자동 이메일 스킵**
-미설정 시 선정 안내 이메일이 발송되지 않고 스킵(index.ts:1211-1214). 수동 재발송/메일로 우회 가능하나, 자동화를 켜려면 `RESEND_API_KEY`(+선택 `FOUNDER_FROM_EMAIL`, `DISCORD_INVITE_URL`) 설정 필요. 발신 도메인(`founders@marblo.app`) SPF/DKIM 검증도 사전 확인 권장.
+미설정 시 선정 안내 이메일이 발송되지 않고 스킵(index.ts:1211-1214). 수동 재발송/메일로 우회 가능하나, 자동화를 켜려면 `RESEND_API_KEY`(+선택 `FOUNDER_FROM_EMAIL`, `DISCORD_INVITE_URL`) 설정 필요. 발신 도메인(`team@marblo.app`) SPF/DKIM 검증도 사전 확인 권장.
 
 ### 🟢 Low
 

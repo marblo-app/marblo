@@ -91,7 +91,7 @@ export default function RefundPolicyPage() {
         <li>환불 받으실 결제 수단 (원 결제 수단 환불이 원칙)</li>
       </ul>
       <p>
-        접수처: <a href="mailto:john.kim@hypemarc.com">john.kim@hypemarc.com</a>
+        접수처: <a href="mailto:team@marblo.app">team@marblo.app</a>
       </p>
       <p>
         영업일 기준 <strong>3일 이내</strong> 검토 결과 회신, 승인 시 결제

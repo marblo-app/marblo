@@ -226,7 +226,7 @@ export default function PrivacyPolicyPage() {
         정보주체는 개인정보의 국외 이전을 거부할 수 있습니다. 다만 위 이전은
         서비스 제공에 필수적이므로, 거부하시는 경우 회원가입 및 서비스 이용이
         제한될 수 있습니다. 국외 이전 거부 또는 동의 철회는{" "}
-        <a href="mailto:john.kim@hypemarc.com">john.kim@hypemarc.com</a> 으로 요청하실
+        <a href="mailto:team@marblo.app">team@marblo.app</a> 으로 요청하실
         수 있습니다.
       </p>
 
@@ -240,7 +240,7 @@ export default function PrivacyPolicyPage() {
         <li>제공한 동의의 철회</li>
       </ul>
       <p>
-        권리 행사는 <a href="mailto:john.kim@hypemarc.com">john.kim@hypemarc.com</a>{" "}
+        권리 행사는 <a href="mailto:team@marblo.app">team@marblo.app</a>{" "}
         으로 서면, 전자우편 등을 통해 요청하실 수 있으며, 회사는 지체 없이
         조치하겠습니다.
       </p>
@@ -285,7 +285,7 @@ export default function PrivacyPolicyPage() {
       <ul>
         <li>책임자: 김동원 (대표)</li>
         <li>
-          이메일: <a href="mailto:john.kim@hypemarc.com">john.kim@hypemarc.com</a>
+          이메일: <a href="mailto:team@marblo.app">team@marblo.app</a>
         </li>
         <li>전화: 010-3019-7778</li>
       </ul>

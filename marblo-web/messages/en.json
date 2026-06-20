@@ -363,7 +363,7 @@
     "error_email_unverified": "Only accounts with a verified email can submit. Please verify your email and try again.",
     "error_not_founder": "This isn't a selected founder account. Make sure you logged in with the email that received the selection notice.",
     "error_already_submitted": "You've already submitted feedback.",
-    "error_deadline": "The feedback window (3 days after access) has passed. Contact john.kim@hypemarc.com if you need help.",
+    "error_deadline": "The feedback window (3 days after access) has passed. Contact team@marblo.app if you need help.",
     "error_invalid": "Please check your input.",
     "error_network": "Please try again in a moment."
   },
@@ -465,7 +465,7 @@
     "biz_address_label": "Address",
     "biz_address_value": "2F, 16 Baekjegobun-ro 50-gil, Songpa-gu, Seoul, Republic of Korea",
     "biz_email_label": "Email",
-    "biz_email_value": "john.kim@hypemarc.com",
+    "biz_email_value": "team@marblo.app",
     "biz_phone_label": "Phone",
     "biz_phone_value": "+82-10-3019-7778",
     "copyright": "© 2026 HYPEMARC. All rights reserved."

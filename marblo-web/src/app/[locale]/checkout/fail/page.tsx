@@ -56,7 +56,7 @@ export default function CheckoutFailPage() {
           </Link>
 
           <a
-            href={locale === 'ko' ? 'mailto:john.kim@hypemarc.com?subject=결제 오류 문의' : 'mailto:john.kim@hypemarc.com?subject=Payment Error Inquiry'}
+            href={locale === 'ko' ? 'mailto:team@marblo.app?subject=결제 오류 문의' : 'mailto:team@marblo.app?subject=Payment Error Inquiry'}
             className="inline-flex items-center justify-center gap-2 bg-zinc-700 hover:bg-zinc-600 text-white px-6 py-3 rounded-lg transition"
           >
             <MessageCircle className="w-5 h-5" />
