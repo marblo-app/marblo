@@ -135,3 +135,52 @@ describe("evaluateTerminalTaskReap — preserve branch (never misjudge live work
     );
   });
 });
+
+describe("evaluateTerminalTaskReap — orchestrator is never auto-reaped", () => {
+  // Regression: a working orchestrator vanished from get_agents + its terminal
+  // tab mid-session. Root cause — the orchestrator is a long-lived singleton
+  // coordinator that legitimately sits PTY-silent while waiting on its
+  // subagents to report back. When it stayed bound (currentTaskId) to a task it
+  // had just driven to DONE/FAILED, cleanup_agents Pass 2 mistook it for a
+  // finished zombie and killed it (/kill-agent → remove + agent:deleted). The
+  // role guard below makes role==='orchestrator' unconditionally preserved, so
+  // no terminal-task + idle combination can ever rug-pull it.
+
+  it("preserves an orchestrator on a DONE task past the grace window", () => {
+    const d = evaluateTerminalTaskReap({
+      role: "orchestrator",
+      currentTaskId: "t-done",
+      taskStatus: "DONE",
+      lastPtyActivity: PAST_GRACE,
+      now: NOW,
+    });
+    expect(d.reap).toBe(false);
+    expect(d.reason).toContain("orchestrator");
+  });
+
+  it("preserves an orchestrator on a FAILED task even when long idle", () => {
+    const d = evaluateTerminalTaskReap({
+      role: "orchestrator",
+      currentTaskId: "t-failed",
+      taskStatus: "FAILED",
+      lastPtyActivity: NOW - STALE_TERMINAL_REAP_MS * 100,
+      now: NOW,
+    });
+    expect(d.reap).toBe(false);
+  });
+
+  it("still reaps a NON-orchestrator worker under the same terminal+idle conditions", () => {
+    // Guards the guard: the role exclusion must not disable zombie cleanup for
+    // ordinary workers (the original 57-zombie problem).
+    for (const role of ["backend", "frontend", undefined]) {
+      const d = evaluateTerminalTaskReap({
+        role,
+        currentTaskId: "t-done",
+        taskStatus: "DONE",
+        lastPtyActivity: PAST_GRACE,
+        now: NOW,
+      });
+      expect(d.reap).toBe(true);
+    }
+  });
+});

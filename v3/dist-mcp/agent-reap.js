@@ -42,7 +42,16 @@ export const STALE_TERMINAL_REAP_MS = 300_000; // 5 min
  * Pure: no I/O, no clock — every input is supplied by the caller.
  */
 export function evaluateTerminalTaskReap(input) {
-    const { currentTaskId, taskStatus, lastPtyActivity, now, staleMs = STALE_TERMINAL_REAP_MS, } = input;
+    const { role, currentTaskId, taskStatus, lastPtyActivity, now, staleMs = STALE_TERMINAL_REAP_MS, } = input;
+    // The orchestrator is a permanent coordinator, never a finished worker. No
+    // terminal-task + idle combination should ever reap it — preserve before any
+    // other check.
+    if (role === "orchestrator") {
+        return {
+            reap: false,
+            reason: "orchestrator is a long-lived coordinator — never auto-reaped",
+        };
+    }
     if (!currentTaskId) {
         return {
             reap: false,

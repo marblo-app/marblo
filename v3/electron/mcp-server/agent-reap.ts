@@ -41,6 +41,15 @@ export function isTerminalTaskStatus(status: unknown): boolean {
 export const STALE_TERMINAL_REAP_MS = 300_000; // 5 min
 
 export interface AgentReapInput {
+  /**
+   * The agent's role. The orchestrator is a long-lived singleton coordinator —
+   * it legitimately sits PTY-silent while waiting on its subagents to report
+   * back, and it stays bound (currentTaskId) to tasks it has just driven to a
+   * terminal state. It must NEVER be auto-reaped, or it vanishes from the agent
+   * list AND its terminal tab mid-session, taking its in-flight context with
+   * it. Any other role (or omitted) is reaped under the normal gate.
+   */
+  role?: string;
   /** The task this agent is currently bound to, or null if unbound. */
   currentTaskId: string | null;
   /**
@@ -71,12 +80,23 @@ export function evaluateTerminalTaskReap(
   input: AgentReapInput,
 ): AgentReapDecision {
   const {
+    role,
     currentTaskId,
     taskStatus,
     lastPtyActivity,
     now,
     staleMs = STALE_TERMINAL_REAP_MS,
   } = input;
+
+  // The orchestrator is a permanent coordinator, never a finished worker. No
+  // terminal-task + idle combination should ever reap it — preserve before any
+  // other check.
+  if (role === "orchestrator") {
+    return {
+      reap: false,
+      reason: "orchestrator is a long-lived coordinator — never auto-reaped",
+    };
+  }
 
   if (!currentTaskId) {
     return {

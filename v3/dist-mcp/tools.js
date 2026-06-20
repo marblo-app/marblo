@@ -327,7 +327,10 @@ function isTerminalTaskStatus(s) {
 /** submit_for_review / update_task_status 가 받는 optional 구조화 완료 요약. */
 const completionSummaryShape = z
     .object({
-    problem: z.string().optional().describe("무엇이 문제였나 / 무엇을 하려 했나"),
+    problem: z
+        .string()
+        .optional()
+        .describe("무엇이 문제였나 / 무엇을 하려 했나"),
     approach: z.string().optional().describe("어떻게 접근/해결했나"),
     changes: z.string().optional().describe("무엇을 바꿨나 (파일/모듈 요약)"),
     verification: z
@@ -1926,6 +1929,7 @@ export function registerTools(server) {
                     // below short-circuits on a null/unknown status.
                 }
                 const decision = evaluateTerminalTaskReap({
+                    role: a.role,
                     currentTaskId: a.currentTaskId,
                     taskStatus,
                     lastPtyActivity: a.lastPtyActivity ?? now,
