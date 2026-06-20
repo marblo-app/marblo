@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
-const LAST_UPDATED = "2026-06-18";
+const LAST_UPDATED = "2026-07-14";
 
 export default function PrivacyPolicyPage() {
   const t = useTranslations("footer");

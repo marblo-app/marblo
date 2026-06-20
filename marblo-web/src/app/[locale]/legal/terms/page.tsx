@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
 const LAST_UPDATED = "2026-05-25";
-const EFFECTIVE_DATE = "2026년 6월 18일";
+const EFFECTIVE_DATE = "2026년 7월 14일";
 
 export default function TermsOfServicePage() {
   const t = useTranslations("footer");

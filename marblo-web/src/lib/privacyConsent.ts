@@ -16,7 +16,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "./firebase";
 
 /** 동의 문구가 바뀌면 이 버전을 올린다 → 사용자에게 재동의를 요구. */
-export const CURRENT_POLICY_VERSION = "2026-06-18";
+export const CURRENT_POLICY_VERSION = "2026-07-14";
 
 export type ConsentLocale = "ko" | "en" | "ja";
 
