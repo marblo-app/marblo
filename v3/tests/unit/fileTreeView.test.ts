@@ -3,6 +3,7 @@ import {
   calculateWorktreeMenuPosition,
   describeRootView,
   filterWorktreesByProject,
+  isActiveTaskWorktree,
   resolveRootSwitch,
   treeSignature,
 } from "../../src/lib/fileTreeView";
@@ -134,6 +135,73 @@ describe("resolveRootSwitch", () => {
     expect(sw?.mainPath).toBe("/repo");
     expect(sw?.toMain).toBe("/repo");
     expect(sw?.toTasks).toEqual([]);
+  });
+
+  it("excludes stale worktrees from the switch targets", () => {
+    const staleTask = wt({
+      id: "stale",
+      path: "/repo/.worktrees/stale",
+      repoRoot: "/repo",
+      branch: "marblo/stale",
+      taskId: "T9",
+      stale: true,
+    });
+    const sw = resolveRootSwitch("/repo", [main, taskA, staleTask], "/repo");
+    expect(sw?.toTasks.map((t) => t.path)).toEqual(["/repo/.worktrees/a"]);
+  });
+
+  it("excludes worktrees with no taskId (ad-hoc feat/fix branches)", () => {
+    const adhoc = wt({
+      id: "adhoc",
+      path: "/repo/.claude/worktrees/feat-x",
+      repoRoot: "/repo",
+      branch: "feat/x",
+      taskId: null,
+    });
+    const sw = resolveRootSwitch("/repo", [main, taskA, adhoc], "/repo");
+    expect(sw?.toTasks.map((t) => t.path)).toEqual(["/repo/.worktrees/a"]);
+  });
+
+  it("includes a healthy active task worktree", () => {
+    const sw = resolveRootSwitch("/repo", [main, taskA], "/repo");
+    expect(sw?.toTasks).toEqual([
+      { path: "/repo/.worktrees/a", label: "marblo/a", taskId: "T1" },
+    ]);
+  });
+
+  it("returns null on main when every worktree is filtered out", () => {
+    const adhoc = wt({
+      id: "adhoc",
+      path: "/repo/.claude/worktrees/feat-x",
+      repoRoot: "/repo",
+      branch: "feat/x",
+      taskId: null,
+    });
+    const staleTask = wt({
+      id: "stale",
+      path: "/repo/.worktrees/stale",
+      repoRoot: "/repo",
+      branch: "marblo/stale",
+      taskId: "T9",
+      stale: true,
+    });
+    expect(
+      resolveRootSwitch("/repo", [main, adhoc, staleTask], "/repo"),
+    ).toBeNull();
+  });
+});
+
+describe("isActiveTaskWorktree", () => {
+  it("accepts a worktree with a taskId that is not stale", () => {
+    expect(isActiveTaskWorktree(wt({ taskId: "T1", stale: false }))).toBe(true);
+  });
+
+  it("rejects a worktree without a taskId", () => {
+    expect(isActiveTaskWorktree(wt({ taskId: null }))).toBe(false);
+  });
+
+  it("rejects a stale worktree even with a taskId", () => {
+    expect(isActiveTaskWorktree(wt({ taskId: "T1", stale: true }))).toBe(false);
   });
 });
 

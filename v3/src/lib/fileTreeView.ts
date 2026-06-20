@@ -129,6 +129,27 @@ export interface RootSwitch {
   toTasks: RootSwitchTarget[];
 }
 
+/**
+ * Is this worktree an *active task* worktree worth offering as a switch target?
+ *
+ * The dropdown used to list every worktree under the project, but
+ * `~/.marblo/worktrees` accumulates dozens of stale / abandoned
+ * feat·fix·security branches that were created outside the task flow. We only
+ * offer worktrees that:
+ *
+ *  1. belong to a task — `taskId != null`. This is the load-bearing filter:
+ *     ad-hoc branches (e.g. `.claude/worktrees/feat/*`) have no inferred taskId,
+ *     so they drop out here regardless of the stale heuristic.
+ *  2. aren't stale. `stale` is computed in the electron main process
+ *     (`merged into base` or `idle > N days`, see {@link WorktreeStaleInfo}) and
+ *     acts as a *secondary* guard. We keep taskId as the primary signal so a
+ *     recently-touched task worktree is never hidden just because the stale
+ *     verdict is aggressive.
+ */
+export function isActiveTaskWorktree(worktree: Worktree): boolean {
+  return worktree.taskId != null && !worktree.stale;
+}
+
 export function resolveRootSwitch(
   rootPath: string | null,
   worktrees: Worktree[],
@@ -142,9 +163,13 @@ export function resolveRootSwitch(
   const mainPath = mainWorktree?.path ?? projectRootPath ?? null;
   if (!mainPath) return null;
 
-  // Task worktrees: anything that isn't the main worktree path.
+  // Switch targets: active task worktrees only — exclude the main worktree path,
+  // ad-hoc branches without a taskId, and stale worktrees (see
+  // isActiveTaskWorktree). Main-jump (`toMain`) and describeRootView are
+  // intentionally left untouched.
   const toTasks: RootSwitchTarget[] = worktrees
     .filter((w) => w.path !== mainPath)
+    .filter(isActiveTaskWorktree)
     .map((w) => ({
       path: w.path,
       label: w.branch || basename(w.path),
