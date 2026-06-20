@@ -792,6 +792,13 @@ export function FileTree() {
   const [pendingGitRemoteUrl, setPendingGitRemoteUrl] = useState<string | null>(
     null,
   );
+  // When an unregistered folder is picked we present a choice (register as a
+  // project vs. read-only browse) instead of jumping straight to the register
+  // banner. Holds the picked path + its git remote until the user chooses.
+  const [folderChoice, setFolderChoice] = useState<{
+    path: string;
+    remoteUrl: string | null;
+  } | null>(null);
   const newProjectInputRef = useRef<HTMLInputElement>(null);
 
   // Monotonic load token: only the most recent load may apply its result, so a
@@ -1325,12 +1332,31 @@ export function FileTree() {
       return;
     }
 
-    const folderName = dir.split("/").pop() || "new-project";
-    setNewProjectName(folderName);
-    setPendingFolderPath(dir);
-    setPendingGitRemoteUrl(remoteUrl);
-    setShowNewProject(true);
+    // Unregistered folder: don't auto-open the register banner. Offer a choice
+    // — register as a project (existing flow), or just browse read-only.
+    setFolderChoice({ path: dir, remoteUrl });
   }, [setRootPath, findByPathOrRemote, setCurrentProject]);
+
+  // "Register as a project" branch of the folder-choice banner → hand off to
+  // the existing inline new-project banner with the picked folder prefilled.
+  const handleChooseRegister = useCallback(() => {
+    if (!folderChoice) return;
+    const { path, remoteUrl } = folderChoice;
+    const folderName = path.split("/").pop() || "new-project";
+    setNewProjectName(folderName);
+    setPendingFolderPath(path);
+    setPendingGitRemoteUrl(remoteUrl);
+    setFolderChoice(null);
+    setShowNewProject(true);
+  }, [folderChoice]);
+
+  // "Browse (read-only)" branch → the root was already switched to the folder in
+  // handleSelectDirectory, so we only remember it in recents. No project bind.
+  const handleChooseBrowse = useCallback(() => {
+    if (!folderChoice) return;
+    setRecentFolders(saveRecentFolder(folderChoice.path));
+    setFolderChoice(null);
+  }, [folderChoice]);
 
   const handleCreateInlineProject = useCallback(async () => {
     if (!newProjectName.trim() || !user || !pendingFolderPath) return;
@@ -1403,18 +1429,18 @@ export function FileTree() {
     [rootPath, setRootPath, setSelected],
   );
 
-  const handleOpenFolder = useCallback(async () => {
-    const dir = await window.electronAPI.fs.selectDirectory();
-    if (!dir) return;
-    openFolderPath(dir);
-  }, [openFolderPath]);
-
+  // Recent-folder click on the unified "Open Folder" dropdown: browse the path
+  // read-only — but if it's a registered project, switch to it (bind) so the
+  // header reflects the project, matching the main button's behavior.
   const handleOpenRecent = useCallback(
-    (path: string) => {
+    async (path: string) => {
       setShowRecentMenu(false);
+      const remoteUrl = await window.electronAPI.fs.gitRemoteUrl(path);
+      const existing = findByPathOrRemote(path, remoteUrl);
       openFolderPath(path);
+      if (existing) setCurrentProject(existing);
     },
-    [openFolderPath],
+    [openFolderPath, findByPathOrRemote, setCurrentProject],
   );
 
   const handleRefresh = useCallback(() => {
@@ -1460,6 +1486,43 @@ export function FileTree() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Folder-open choice banner — shown when an unregistered folder is
+          picked: register it as a project, or just browse it read-only. */}
+      {folderChoice && (
+        <div className="border-b border-blue-500/30 bg-blue-500/10 px-3 py-2">
+          <p className="mb-1 text-[11px] font-medium text-blue-400">
+            폴더 열기
+          </p>
+          <p
+            className="mb-2 truncate text-[10px] text-gray-400"
+            title={folderChoice.path}
+          >
+            {folderChoice.path}
+          </p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleChooseRegister}
+              className="rounded bg-blue-600 px-2 py-1 text-[11px] text-white hover:bg-blue-500"
+            >
+              프로젝트로 등록
+            </button>
+            <button
+              onClick={handleChooseBrowse}
+              className="rounded bg-gray-700 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-600"
+            >
+              둘러보기 (읽기전용)
+            </button>
+            <button
+              onClick={() => setFolderChoice(null)}
+              className="ml-auto rounded px-2 py-1 text-[11px] text-gray-400 hover:text-gray-200"
+              title="취소"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Inline project creation banner */}
       {showNewProject && (
         <div className="border-b border-blue-500/30 bg-blue-500/10 px-3 py-2">
@@ -1531,13 +1594,14 @@ export function FileTree() {
             </span>
           )}
           <span className="flex-1" />
-          {/* Open Folder (read-only browse) — its own zone, divided from the
-              worktree switch and the project file-ops below it. */}
+          {/* Open Folder — single unified entry point: pick a folder (registers
+              or browses, via the choice banner), with a recents dropdown. Its
+              own zone, divided from the worktree switch and file-ops below. */}
           <div ref={recentMenuRef} className="relative flex items-center">
             <button
-              onClick={handleOpenFolder}
+              onClick={handleSelectDirectory}
               className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-              title="폴더 열기… (읽기전용 브라우즈)"
+              title="폴더 열기"
             >
               <svg
                 className="h-3.5 w-3.5"
@@ -1549,7 +1613,7 @@ export function FileTree() {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v1M3 13l1.5-4.5A1 1 0 015.45 8H20a1 1 0 01.95 1.32L19.4 14.5a2 2 0 01-1.9 1.36H5.5a2 2 0 01-1.9-1.36L3 13z"
+                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
                 />
               </svg>
             </button>
@@ -1687,25 +1751,6 @@ export function FileTree() {
                 strokeLinejoin="round"
                 strokeWidth={2}
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-          </button>
-          <button
-            onClick={handleSelectDirectory}
-            className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-            title="다른 폴더 열기"
-          >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
               />
             </svg>
           </button>
