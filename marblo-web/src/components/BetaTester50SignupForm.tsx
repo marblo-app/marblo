@@ -10,21 +10,19 @@ import { db } from "@/lib/firebase";
 const COLLECTION = "betatester50_waitlist";
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-type Status = "idle" | "submitting" | "success" | "error" | "closed";
+type Status = "idle" | "submitting" | "success" | "error";
 type Locale = "ko" | "en" | "ja";
 type Source = "home" | "promo_bar" | "foundation50_page";
 
 interface Props {
   source: Source;
   layout?: "stacked" | "inline-compact";
-  isClosed?: boolean;
   onSuccess?: () => void;
 }
 
 export default function BetaTester50SignupForm({
   source,
   layout = "stacked",
-  isClosed = false,
   onSuccess,
 }: Props) {
   const t = useTranslations("betatester50");
@@ -38,7 +36,7 @@ export default function BetaTester50SignupForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (status === "submitting" || isClosed) return;
+    if (status === "submitting") return;
 
     const cleaned = email.trim().toLowerCase();
     if (!EMAIL_RE.test(cleaned) || cleaned.length > 254) {
@@ -112,7 +110,7 @@ export default function BetaTester50SignupForm({
           inputMode="email"
           autoComplete="email"
           required
-          disabled={isClosed || isSubmitting}
+          disabled={isSubmitting}
           value={email}
           onChange={(e) => {
             setEmail(e.target.value);
@@ -128,19 +126,15 @@ export default function BetaTester50SignupForm({
         />
         <button
           type="submit"
-          disabled={isClosed || isSubmitting}
+          disabled={isSubmitting}
           className={
             compact
               ? "inline-flex items-center justify-center gap-1 bg-white text-indigo-700 hover:bg-indigo-50 disabled:bg-zinc-300 disabled:text-zinc-500 disabled:cursor-not-allowed transition px-3 py-1.5 rounded-md text-sm font-semibold shrink-0"
               : "inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-700 disabled:text-zinc-400 disabled:cursor-not-allowed text-white px-7 py-4 rounded-xl text-base font-semibold transition shadow-lg shadow-indigo-600/30"
           }
         >
-          {isClosed
-            ? t("closed")
-            : isSubmitting
-              ? t("cta_submitting")
-              : t("cta_apply")}
-          {!isClosed && !isSubmitting && (
+          {isSubmitting ? t("cta_submitting") : t("cta_apply")}
+          {!isSubmitting && (
             <ArrowRight className={compact ? "w-3.5 h-3.5" : "w-4 h-4"} />
           )}
         </button>
@@ -160,7 +154,7 @@ export default function BetaTester50SignupForm({
             setAgeConfirmed(e.target.checked);
             if (status === "error") setStatus("idle");
           }}
-          disabled={isClosed || isSubmitting}
+          disabled={isSubmitting}
           className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-900 text-indigo-500 focus:ring-indigo-500/40"
         />
         <span className="leading-snug">{t("age_confirm_label")}</span>
@@ -180,7 +174,7 @@ export default function BetaTester50SignupForm({
             setAgreed(e.target.checked);
             if (status === "error") setStatus("idle");
           }}
-          disabled={isClosed || isSubmitting}
+          disabled={isSubmitting}
           className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-900 text-indigo-500 focus:ring-indigo-500/40"
         />
         <span className="leading-snug">
