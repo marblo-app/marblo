@@ -21,7 +21,6 @@ export default function BusinessInfoPage() {
     <LegalPageLayout
       title={t("business_info")}
       lastUpdated={LAST_UPDATED}
-      showDraftNotice={false}
     >
       <p>
         대한민국 「전자상거래 등에서의 소비자보호에 관한 법률」 제13조 및

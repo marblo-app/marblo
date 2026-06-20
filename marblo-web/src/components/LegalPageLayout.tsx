@@ -2,19 +2,17 @@
 
 import { useLocale } from "next-intl";
 import Link from "next/link";
-import { ArrowLeft, AlertCircle } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 interface Props {
   title: string;
   lastUpdated: string;
-  showDraftNotice?: boolean;
   children: React.ReactNode;
 }
 
 export default function LegalPageLayout({
   title,
   lastUpdated,
-  showDraftNotice = true,
   children,
 }: Props) {
   const locale = useLocale();
@@ -33,12 +31,6 @@ export default function LegalPageLayout({
       : locale === "ja"
       ? "本ページは韓国の電子商取引法に基づき、韓国語が原本として作成されています。日本語要約版は順次提供予定です。"
       : "This page is authored in Korean as the original under Korean e-commerce law. An English summary will follow.";
-  const draftNotice =
-    locale === "ja"
-      ? "本ページは弁護士検証進行中の標準ドラフトです。GAローンチ前に最終版へ差し替え予定です。"
-      : locale === "en"
-      ? "This page is a standard draft pending legal review. The final version will be published before GA."
-      : "본 페이지는 변호사 검토 진행 중인 표준 초안입니다. GA 출시 전 최종판으로 교체될 예정입니다.";
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
@@ -61,13 +53,6 @@ export default function LegalPageLayout({
         {localeNotice && (
           <div className="mt-6 bg-zinc-900/60 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-zinc-400 leading-relaxed">
             {localeNotice}
-          </div>
-        )}
-
-        {showDraftNotice && (
-          <div className="mt-4 bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 flex items-start gap-2 text-sm text-amber-200 leading-relaxed">
-            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-300" />
-            <span>{draftNotice}</span>
           </div>
         )}
 
