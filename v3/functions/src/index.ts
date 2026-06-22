@@ -59,7 +59,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
 
@@ -69,7 +69,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
     if (!subSnap.exists || !subSnap.data()?.paddleSubscriptionId) {
       throw new functions.https.HttpsError(
         "not-found",
-        "구독 정보를 찾을 수 없습니다."
+        "구독 정보를 찾을 수 없습니다.",
       );
     }
 
@@ -84,7 +84,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ effective_from: "next_billing_period" }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -92,12 +92,12 @@ export const cancelPaddleSubscription = functions.https.onCall(
       console.error("Paddle cancel failed:", error);
       throw new functions.https.HttpsError(
         "internal",
-        "구독 취소에 실패했습니다."
+        "구독 취소에 실패했습니다.",
       );
     }
 
     return { success: true };
-  }
+  },
 );
 
 // ─── Webhook signature verification (H1) ─────────────────────────
@@ -122,7 +122,7 @@ function timingSafeEqualHex(a: string, b: string): boolean {
 function verifyTossWebhook(
   signature: string,
   timestamp: string,
-  rawBody: Buffer | undefined
+  rawBody: Buffer | undefined,
 ): boolean {
   if (!TOSS_WEBHOOK_SECRET || !signature || !timestamp || !rawBody)
     return false;
@@ -140,14 +140,14 @@ function verifyTossWebhook(
  */
 function verifyPaddleSignature(
   signatureHeader: string,
-  rawBody: Buffer | undefined
+  rawBody: Buffer | undefined,
 ): boolean {
   if (!PADDLE_WEBHOOK_SECRET || !signatureHeader || !rawBody) return false;
   const parts = Object.fromEntries(
     signatureHeader.split(";").map((kv) => {
       const idx = kv.indexOf("=");
       return [kv.slice(0, idx).trim(), kv.slice(idx + 1).trim()];
-    })
+    }),
   );
   const ts = parts["ts"];
   const h1 = parts["h1"];
@@ -236,12 +236,12 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
         if (data.current_billing_period) {
           if (data.current_billing_period.starts_at) {
             update.currentPeriodStart = admin.firestore.Timestamp.fromDate(
-              new Date(data.current_billing_period.starts_at)
+              new Date(data.current_billing_period.starts_at),
             );
           }
           if (data.current_billing_period.ends_at) {
             update.currentPeriodEnd = admin.firestore.Timestamp.fromDate(
-              new Date(data.current_billing_period.ends_at)
+              new Date(data.current_billing_period.ends_at),
             );
           }
         }
@@ -313,7 +313,7 @@ export const createTossCheckout = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
 
@@ -322,7 +322,7 @@ export const createTossCheckout = functions.https.onCall(
     if (!amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "유효하지 않은 플랜입니다."
+        "유효하지 않은 플랜입니다.",
       );
     }
 
@@ -338,7 +338,7 @@ export const createTossCheckout = functions.https.onCall(
     });
 
     return { orderId, amount, planType };
-  }
+  },
 );
 
 // ─── Confirm Toss Payment ────────────────────────────────────────
@@ -347,7 +347,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
 
@@ -361,7 +361,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (!orderSnap.exists) {
       throw new functions.https.HttpsError(
         "not-found",
-        "주문을 찾을 수 없습니다."
+        "주문을 찾을 수 없습니다.",
       );
     }
 
@@ -374,13 +374,13 @@ export const confirmTossPayment = functions.https.onCall(
     if (order.userId !== context.auth.uid) {
       throw new functions.https.HttpsError(
         "permission-denied",
-        "본인의 주문만 확인할 수 있습니다."
+        "본인의 주문만 확인할 수 있습니다.",
       );
     }
     if (order.amount !== amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "결제 금액이 일치하지 않습니다."
+        "결제 금액이 일치하지 않습니다.",
       );
     }
 
@@ -400,7 +400,7 @@ export const confirmTossPayment = functions.https.onCall(
       console.error("TossPayments confirm failed:", error);
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "결제 승인에 실패했습니다."
+        error.message || "결제 승인에 실패했습니다.",
       );
     }
 
@@ -433,7 +433,7 @@ export const confirmTossPayment = functions.https.onCall(
     });
 
     return { success: true };
-  }
+  },
 );
 
 // ─── TossPayments Webhook ────────────────────────────────────────
@@ -508,19 +508,19 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
       method: "POST",
       headers: {
         Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-          "base64"
+          "base64",
         )}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ authKey, customerKey }),
-    }
+    },
   );
 
   if (!response.ok) {
     const error = await response.json();
     throw new functions.https.HttpsError(
       "internal",
-      error.message || "Failed to issue billing key"
+      error.message || "Failed to issue billing key",
     );
   }
 
@@ -547,7 +547,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
         currentPeriodEnd: periodEnd,
         createdAt: now,
       },
-      { merge: true }
+      { merge: true },
     );
 
   return { success: true, billingKey };
@@ -571,7 +571,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (!subSnap.exists || !sub?.tossBillingKey || !sub?.tossCustomerKey) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "No billing key registered for this account"
+        "No billing key registered for this account",
       );
     }
 
@@ -580,7 +580,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (!amount) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        `Plan '${planType}' is not chargeable`
+        `Plan '${planType}' is not chargeable`,
       );
     }
 
@@ -596,7 +596,7 @@ export const chargeBillingKey = functions.https.onCall(
         method: "POST",
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64"
+            "base64",
           )}`,
           "Content-Type": "application/json",
         },
@@ -606,14 +606,14 @@ export const chargeBillingKey = functions.https.onCall(
           orderId,
           orderName,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
       const error = await response.json();
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "Failed to charge billing key"
+        error.message || "Failed to charge billing key",
       );
     }
 
@@ -631,7 +631,7 @@ export const chargeBillingKey = functions.https.onCall(
     });
 
     return { success: true, paymentKey: responseData.paymentKey };
-  }
+  },
 );
 
 // 토스 정기결제 취소
@@ -647,7 +647,7 @@ export const cancelTossSubscription = functions.https.onCall(
     });
 
     return { success: true };
-  }
+  },
 );
 
 // ============================================
@@ -672,7 +672,7 @@ export const createLectureOrder = functions.https.onCall(
     if (!existingPurchase.empty) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "Already purchased this lecture"
+        "Already purchased this lecture",
       );
     }
 
@@ -699,7 +699,7 @@ export const createLectureOrder = functions.https.onCall(
     });
 
     return { orderId, amount, orderName };
-  }
+  },
 );
 
 // 강의 단건결제 확인
@@ -717,19 +717,19 @@ export const confirmLecturePayment = functions.https.onCall(
         method: "POST",
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64"
+            "base64",
           )}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ paymentKey, orderId, amount }),
-      }
+      },
     );
 
     if (!response.ok) {
       const error = await response.json();
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "Payment confirmation failed"
+        error.message || "Payment confirmation failed",
       );
     }
 
@@ -756,7 +756,7 @@ export const confirmLecturePayment = functions.https.onCall(
     await issueLectureCouponInternal(userId);
 
     return { success: true };
-  }
+  },
 );
 
 // ============================================
@@ -769,7 +769,7 @@ export const validateCoupon = functions.https.onCall(async (data, context) => {
   if (!code)
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Coupon code required"
+      "Coupon code required",
     );
 
   // Rate limit: stops brute-force code guessing. Per-uid (5/min, 30/5min)
@@ -781,14 +781,14 @@ export const validateCoupon = functions.https.onCall(async (data, context) => {
   if (!uidCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`
+      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`,
     );
   }
   const ipCheck = await enforceRateLimit(ipKey, COUPON_RULES_IP);
   if (!ipCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`
+      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`,
     );
   }
 
@@ -843,19 +843,19 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
   const ip = extractIp(context.rawRequest);
   const uidCheck = await enforceRateLimit(
     `coupon:uid:${userId}`,
-    COUPON_RULES_UID
+    COUPON_RULES_UID,
   );
   if (!uidCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`
+      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`,
     );
   }
   const ipCheck = await enforceRateLimit(`coupon:ip:${ip}`, COUPON_RULES_IP);
   if (!ipCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`
+      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`,
     );
   }
 
@@ -872,7 +872,7 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
   switch (coupon.type) {
     case "discount":
       discountAmount = Math.round(
-        (baseAmount * (coupon.discountPercent || 0)) / 100
+        (baseAmount * (coupon.discountPercent || 0)) / 100,
       );
       finalAmount = baseAmount - discountAmount;
       break;
@@ -913,7 +913,7 @@ export const createCouponBatch = functions.https.onCall(
     if (!Array.isArray(coupons) || coupons.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Coupons array required"
+        "Coupons array required",
       );
     }
 
@@ -935,7 +935,7 @@ export const createCouponBatch = functions.https.onCall(
 
     await batch.commit();
     return { created: coupons.length };
-  }
+  },
 );
 
 // 강의 구매 → 앱 쿠폰 자동 발급 (내부 함수)
@@ -969,7 +969,7 @@ export const issueLectureCoupon = functions.https.onCall(
 
     await issueLectureCouponInternal(userId);
     return { couponCode: "LECTURE2026" };
-  }
+  },
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1014,7 +1014,7 @@ function requireAdmin(context: functions.https.CallableContext): void {
 async function grantFounderProInternal(
   userId: string,
   months: number,
-  reason: string
+  reason: string,
 ): Promise<Date> {
   const now = new Date();
   const subRef = db.collection("subscriptions").doc(userId);
@@ -1205,7 +1205,7 @@ function founderHtmlShell(inner: string): string {
  */
 async function sendFounderAccessEmail(
   email: string,
-  locale: string
+  locale: string,
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
@@ -1267,7 +1267,7 @@ export const markFounderSelected = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required"
+        "email required",
       );
     }
 
@@ -1300,11 +1300,11 @@ export const markFounderSelected = functions.https.onCall(
         accessEmailSent: emailSent,
         accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
 
     return { ok: true, email, emailSent };
-  }
+  },
 );
 
 // 파운더 접근 안내 이메일 재발송 (관리자용) — /admin 에서 수동 재발송용.
@@ -1316,7 +1316,7 @@ export const resendFounderAccessEmail = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required"
+        "email required",
       );
     }
     const locale = await lookupFounderLocale(email);
@@ -1327,10 +1327,10 @@ export const resendFounderAccessEmail = functions.https.onCall(
         accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
     return { ok: true, emailSent };
-  }
+  },
 );
 
 // 구조화 피드백 제출 (파운더 본인) — 검증 후 저장 + Pro 3개월 직접 부여.
@@ -1341,14 +1341,14 @@ export const submitFounderFeedback = functions.https.onCall(
     if (!uid || !token?.email) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
     // 무료 Pro 부여 경계 — 이메일 소유권 위조 방지를 위해 인증된 이메일만 허용.
     if (token.email_verified !== true) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "이메일 인증이 완료된 계정만 제출할 수 있습니다."
+        "이메일 인증이 완료된 계정만 제출할 수 있습니다.",
       );
     }
     const email = normalizeEmail(token.email);
@@ -1357,7 +1357,7 @@ export const submitFounderFeedback = functions.https.onCall(
     if (!answers || typeof answers !== "object") {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "피드백 내용이 필요합니다."
+        "피드백 내용이 필요합니다.",
       );
     }
     const str = (v: unknown): string =>
@@ -1372,13 +1372,13 @@ export const submitFounderFeedback = functions.https.onCall(
     if (!q1 || !q2 || !q4 || !q5 || !reason) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "필수 문항(①②④⑤⑥)을 모두 입력해 주세요."
+        "필수 문항(①②④⑤⑥)을 모두 입력해 주세요.",
       );
     }
     if (!Number.isInteger(rating) || rating < 1 || rating > 10) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "점수는 1~10 사이여야 합니다."
+        "점수는 1~10 사이여야 합니다.",
       );
     }
 
@@ -1391,14 +1391,14 @@ export const submitFounderFeedback = functions.https.onCall(
       if (!s.exists || s.data()?.status === "rejected") {
         throw new functions.https.HttpsError(
           "permission-denied",
-          "선정된 파운더가 아닙니다. 선정 안내 이메일의 계정으로 로그인했는지 확인해 주세요."
+          "선정된 파운더가 아닙니다. 선정 안내 이메일의 계정으로 로그인했는지 확인해 주세요.",
         );
       }
       const fd = s.data()!;
       if (fd.feedbackSubmittedAt) {
         throw new functions.https.HttpsError(
           "already-exists",
-          "이미 피드백을 제출하셨습니다."
+          "이미 피드백을 제출하셨습니다.",
         );
       }
       const granted =
@@ -1408,16 +1408,16 @@ export const submitFounderFeedback = functions.https.onCall(
       if (!granted) {
         throw new functions.https.HttpsError(
           "failed-precondition",
-          "접근 권한이 아직 부여되지 않았습니다."
+          "접근 권한이 아직 부여되지 않았습니다.",
         );
       }
       const deadline = new Date(
-        granted.getTime() + FOUNDER_FEEDBACK_WINDOW_DAYS * 24 * 60 * 60 * 1000
+        granted.getTime() + FOUNDER_FEEDBACK_WINDOW_DAYS * 24 * 60 * 60 * 1000,
       );
       if (new Date() > deadline) {
         throw new functions.https.HttpsError(
           "deadline-exceeded",
-          "피드백 제출 기한(접근 후 3일)이 지났습니다."
+          "피드백 제출 기한(접근 후 3일)이 지났습니다.",
         );
       }
       tx.set(
@@ -1428,7 +1428,7 @@ export const submitFounderFeedback = functions.https.onCall(
           feedbackSubmittedAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true }
+        { merge: true },
       );
     });
 
@@ -1446,7 +1446,7 @@ export const submitFounderFeedback = functions.https.onCall(
     const periodEnd = await grantFounderProInternal(
       uid,
       FOUNDER_PRO_MONTHS,
-      "founder_feedback"
+      "founder_feedback",
     );
 
     await fRef.set(
@@ -1455,7 +1455,7 @@ export const submitFounderFeedback = functions.https.onCall(
         proGrantedMonths: FOUNDER_PRO_MONTHS,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
 
     return {
@@ -1463,7 +1463,7 @@ export const submitFounderFeedback = functions.https.onCall(
       proMonths: FOUNDER_PRO_MONTHS,
       currentPeriodEnd: periodEnd.toISOString(),
     };
-  }
+  },
 );
 
 // 인터뷰 완료 마킹 (관리자용) — Pro +3개월 연장 (총 6). 피드백 제출로 계정이
@@ -1476,7 +1476,7 @@ export const markFounderInterviewed = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required"
+        "email required",
       );
     }
     const fRef = db.collection("founders").doc(email);
@@ -1489,19 +1489,19 @@ export const markFounderInterviewed = functions.https.onCall(
     if (!uid) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "피드백 제출 전이라 계정이 연결되지 않았습니다. 피드백 제출 후 진행하세요."
+        "피드백 제출 전이라 계정이 연결되지 않았습니다. 피드백 제출 후 진행하세요.",
       );
     }
     if (f.interviewedAt) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "이미 인터뷰 보너스가 적용되었습니다."
+        "이미 인터뷰 보너스가 적용되었습니다.",
       );
     }
     const periodEnd = await grantFounderProInternal(
       uid,
       FOUNDER_INTERVIEW_BONUS_MONTHS,
-      "founder_interview"
+      "founder_interview",
     );
     await fRef.set(
       {
@@ -1512,14 +1512,14 @@ export const markFounderInterviewed = functions.https.onCall(
           FOUNDER_INTERVIEW_BONUS_MONTHS,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
     return {
       ok: true,
       bonusMonths: FOUNDER_INTERVIEW_BONUS_MONTHS,
       currentPeriodEnd: periodEnd.toISOString(),
     };
-  }
+  },
 );
 
 // Timestamp → ISO 문자열(없거나 형식이 아니면 null). 어드민 read 함수 공용.
@@ -1561,7 +1561,7 @@ export const getFounderWaitlist = functions.https.onCall(
       };
     });
     return { items };
-  }
+  },
 );
 
 // 파운더 현황(어드민) — founders 컬렉션 전체 요약. 상태·시각·Pro개월 등.
@@ -1595,7 +1595,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required"
+        "email required",
       );
     }
     const snap = await db
@@ -1625,7 +1625,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
         createdAt: tsToIso(v.createdAt),
       },
     };
-  }
+  },
 );
 
 // ─── Telemetry → BigQuery ─────────────────────────────────────
@@ -1666,6 +1666,87 @@ interface TelemetryRow {
   promptLength?: number;
   parentAgentId?: string;
   retryOf?: string;
+  // ── dispatch:decision event fields (DISPATCH-DECISION-TELEMETRY) ──
+  // The model-dispatch decision snapshot ("어떤 모델을 어떤 태스크에 왜 배치했나").
+  // These arrive top-level on the dispatch:decision event; we fold them into the
+  // existing `metadata` STRING column as JSON rather than add dedicated BigQuery
+  // columns — see the mapping note below for why.
+  reuseVsSpawn?: string;
+  selectedModel?: string;
+  complexity?: string;
+  tags?: string[];
+  eligibleModels?: string[];
+  explicitModel?: boolean;
+  decisionReason?: string;
+  modelSelectionMode?: string;
+  perModelScores?: unknown;
+  agentScore?: number;
+}
+
+// dispatch:decision fields that get folded into the `metadata` JSON column.
+// `model`/`agentId`/`taskId`/`role` are NOT here — they map to first-class
+// columns already (selectedModel is also sent as `model` for GROUP BY model).
+const DISPATCH_DECISION_META_KEYS = [
+  "reuseVsSpawn",
+  "selectedModel",
+  "complexity",
+  "tags",
+  "eligibleModels",
+  "explicitModel",
+  "decisionReason",
+  "modelSelectionMode",
+  "perModelScores",
+  "agentScore",
+] as const;
+
+/**
+ * Build the `metadata` STRING column value for an event.
+ *
+ * For dispatch:decision we merge the decision-specific fields (perModelScores,
+ * reuseVsSpawn, selection mode, …) into the metadata JSON. Design choice: a
+ * single JSON STRING column instead of flattened per-field BigQuery columns.
+ *   - Backward compatible: no ALTER TABLE on a streaming-insert table (adding
+ *     columns there risks insert failures until the schema change propagates,
+ *     and would break replay of existing rows). Deploy = `firebase deploy`
+ *     for the function only; no BigQuery migration required.
+ *   - Query-friendly: analysts use JSON_VALUE(metadata,'$.reuseVsSpawn'),
+ *     JSON_VALUE(metadata,'$.selectedModel'), JSON_QUERY(metadata,
+ *     '$.perModelScores') to slice/join against cost_logs.taskId + outcomes.
+ */
+function buildMetadata(e: TelemetryRow): string | null {
+  const base =
+    e.metadata != null
+      ? typeof e.metadata === "string"
+        ? safeParseObject(e.metadata)
+        : (e.metadata as Record<string, unknown>)
+      : {};
+
+  if (e.event === "dispatch:decision") {
+    const decision: Record<string, unknown> = { ...base };
+    const row = e as unknown as Record<string, unknown>;
+    for (const key of DISPATCH_DECISION_META_KEYS) {
+      const v = row[key];
+      if (v !== undefined) decision[key] = v;
+    }
+    return Object.keys(decision).length > 0 ? JSON.stringify(decision) : null;
+  }
+
+  if (e.metadata == null) return null;
+  return typeof e.metadata === "string"
+    ? e.metadata
+    : JSON.stringify(e.metadata);
+}
+
+/** Parse a JSON object string, returning {} on anything non-object/invalid. */
+function safeParseObject(s: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(s);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 export const logTelemetryBatch = functions.https.onCall(
@@ -1678,14 +1759,14 @@ export const logTelemetryBatch = functions.https.onCall(
     if (!Array.isArray(events) || events.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "events array required"
+        "events array required",
       );
     }
 
     if (events.length > 100) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Max 100 events per batch"
+        "Max 100 events per batch",
       );
     }
 
@@ -1715,11 +1796,7 @@ export const logTelemetryBatch = functions.https.onCall(
       exitCode: e.exitCode ?? null,
       nodeType: e.nodeType || null,
       nodeCount: e.nodeCount ?? null,
-      metadata: e.metadata
-        ? typeof e.metadata === "string"
-          ? e.metadata
-          : JSON.stringify(e.metadata)
-        : null,
+      metadata: buildMetadata(e),
       // ML-ready columns
       taskType: e.taskType || null,
       taskComplexity: e.taskComplexity ?? null,
@@ -1739,7 +1816,7 @@ export const logTelemetryBatch = functions.https.onCall(
     await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
 
     return { inserted: rows.length };
-  }
+  },
 );
 
 interface CostRow {
@@ -1798,7 +1875,7 @@ export const logCostBatch = functions.https.onCall(async (data, context) => {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "entries array required"
+      "entries array required",
     );
   }
 
@@ -1838,7 +1915,7 @@ export const getCostLogs = functions.https.onCall(async (data, context) => {
   if (!projectId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "projectId required"
+      "projectId required",
     );
   }
 
@@ -1872,7 +1949,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
   if (!projectId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "projectId required"
+      "projectId required",
     );
   }
 
@@ -1880,7 +1957,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
   if (!Number.isInteger(requestedDays) || requestedDays <= 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "days must be a positive integer"
+      "days must be a positive integer",
     );
   }
 
@@ -1965,7 +2042,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
 
   const weeklyTotalTokens = weeklyByModel.reduce(
     (total, row) => total + row.totalTokens,
-    0
+    0,
   );
   const weeklyCost = weeklyByModel.reduce((total, row) => total + row.cost, 0);
 
@@ -1991,7 +2068,7 @@ export const logTaskOutcome = functions.https.onCall(async (data, context) => {
   if (!d || !d.taskId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "outcome with taskId required"
+      "outcome with taskId required",
     );
   }
 
@@ -2041,14 +2118,14 @@ export const logHeartbeat = functions.https.onCall(async (data, context) => {
   if (!Array.isArray(beats) || beats.length === 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "beats array required"
+      "beats array required",
     );
   }
 
   if (beats.length > 50) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Max 50 beats per batch"
+      "Max 50 beats per batch",
     );
   }
 
@@ -2085,7 +2162,7 @@ export const logFlowExecution = functions.https.onCall(
     if (!d || !d.flowId || !d.runId) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "execution with flowId and runId required"
+        "execution with flowId and runId required",
       );
     }
 
@@ -2115,7 +2192,7 @@ export const logFlowExecution = functions.https.onCall(
       .insert([row]);
 
     return { inserted: 1 };
-  }
+  },
 );
 
 // ============================================
@@ -2153,5 +2230,5 @@ export const triggerReconcile = functions.https.onCall(
     const provider = (data?.provider as string) || "toss";
     if (provider === "paddle") return reconcilePaddlePending();
     return reconcileTossPending();
-  }
+  },
 );

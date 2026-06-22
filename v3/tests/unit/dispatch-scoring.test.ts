@@ -5,6 +5,7 @@ import * as path from "path";
 import {
   scoreAgents,
   scoreModels,
+  scoreModelsDetailed,
   resolveSimpleAgyBias,
   checkSpawnConstraints,
   costEfficiencyScore,
@@ -1099,5 +1100,84 @@ describe("N6: NaN guard against contaminated scores", () => {
     const enabled = ["claude", "gpt"] as ModelType[];
     const result = scoreModels(enabled, ["architecture"]);
     expect(enabled).toContain(result);
+  });
+});
+
+// ── scoreModelsDetailed Tests (dispatch decision telemetry) ──
+describe("scoreModelsDetailed", () => {
+  it("selected matches the thin scoreModels() wrapper for the same call", () => {
+    // Same inputs + identical round-robin counter advance → same winner.
+    // Run detailed first, then scoreModels; with a differentiating tag the
+    // pick is deterministic (top-score) regardless of counter state.
+    const detailed = scoreModelsDetailed(["gemini", "gpt"], ["large-context"]);
+    expect(detailed.selected).toBe("gemini");
+    expect(scoreModels(["gemini", "gpt"], ["large-context"])).toBe("gemini");
+  });
+
+  it("exposes a per-model breakdown for every enabled model", () => {
+    const result = scoreModelsDetailed(["claude", "gpt"], ["architecture"]);
+    expect(result.scores).toHaveLength(2);
+    const claude = result.scores.find((s) => s.model === "claude")!;
+    // architecture is a claude bonus (+25) and a gpt penalty (-10).
+    expect(claude.tagBonus).toBe(25);
+    expect(claude.tagPenalty).toBe(0);
+    const gpt = result.scores.find((s) => s.model === "gpt")!;
+    expect(gpt.tagPenalty).toBe(-10);
+    // total = base + tagBonus + tagPenalty + costEff + agyBias (per model).
+    for (const s of result.scores) {
+      expect(s.total).toBe(
+        s.base + s.tagBonus + s.tagPenalty + s.costEff + s.agyBias,
+      );
+      expect(Number.isFinite(s.total)).toBe(true);
+    }
+  });
+
+  it("scores are sorted by total desc and selected is a real winner", () => {
+    const result = scoreModelsDetailed(
+      ["gpt", "claude", "gemini"],
+      ["architecture"],
+    );
+    for (let i = 1; i < result.scores.length; i++) {
+      expect(result.scores[i - 1].total).toBeGreaterThanOrEqual(
+        result.scores[i].total,
+      );
+    }
+    // architecture → claude is the clear top-score winner.
+    expect(result.selected).toBe("claude");
+    expect(result.mode).toBe("top-score");
+  });
+
+  it("reports round-robin-no-tags mode when nothing differentiates", () => {
+    const result = scoreModelsDetailed(["claude", "gpt"], []);
+    expect(result.mode).toBe("round-robin-no-tags");
+    expect(["claude", "gpt"]).toContain(result.selected);
+  });
+
+  it("reports tie-band-round-robin with >1 contender on a near-tie", () => {
+    // "documentation": gemini 45+20+8=73, antigravity 45+15+9=69 → diff 4,
+    // both within TIED_SCORE_BAND(5) of the top → contenders length 2.
+    const result = scoreModelsDetailed(
+      ["gemini", "antigravity"],
+      ["documentation"],
+    );
+    expect(result.contenders.length).toBeGreaterThan(1);
+    expect(result.mode).toBe("tie-band-round-robin");
+  });
+
+  it("empty enabledModels → empty mode + safe fallback", () => {
+    const result = scoreModelsDetailed([], []);
+    expect(result.mode).toBe("empty");
+    expect(result.scores).toHaveLength(0);
+    expect(result.selected).toBe("claude");
+  });
+
+  it("custom models carry base only (no tag bonus/penalty)", () => {
+    const result = scoreModelsDetailed(["custom"] as ModelType[], [
+      "architecture",
+      "multi-file",
+    ]);
+    const custom = result.scores[0];
+    expect(custom.tagBonus).toBe(0);
+    expect(custom.tagPenalty).toBe(0);
   });
 });

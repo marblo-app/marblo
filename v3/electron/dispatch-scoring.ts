@@ -568,14 +568,58 @@ function simpleAgyBias(
   return resolveSimpleAgyBias();
 }
 
-export function scoreModels(
+// ── Per-model score breakdown (dispatch decision telemetry) ──
+//
+// scoreModels() collapses the model competition down to a single winner, but
+// the *why* (each model's component scores + how the winner was picked) is the
+// signal the dispatch-decision telemetry needs to answer "어떤 모델을 왜 골랐나".
+// scoreModelsDetailed() exposes that breakdown; scoreModels() is now a thin
+// wrapper over it (`.selected`) so every existing caller/test is byte-identical.
+export interface PerModelScore {
+  model: ModelType;
+  /** MODEL_BASE_SCORE[model] */
+  base: number;
+  /** Σ matched MODEL_TAG_BONUSES (≥0). */
+  tagBonus: number;
+  /** Σ matched MODEL_TAG_PENALTIES (≤0). */
+  tagPenalty: number;
+  /** costEfficiencyScore(model, tags) — patent claim 9 비용효율지표. */
+  costEff: number;
+  /** §C simple→antigravity soft bias (0 unless it applies to this model). */
+  agyBias: number;
+  /** Final weighted total used for ranking. */
+  total: number;
+}
+
+/** How scoreModels picked the winner among the scored models. */
+export type ModelSelectionMode =
+  | "empty" // no enabled models → fallback
+  | "top-score" // single clear winner
+  | "round-robin-no-tags" // no differentiating signal → rotate for diversity
+  | "tie-band-round-robin"; // near-tied top → rotate among contenders
+
+export interface ModelSelection {
+  selected: ModelType;
+  /** Per-model component breakdown, sorted by total desc. */
+  scores: PerModelScore[];
+  mode: ModelSelectionMode;
+  /** Models within TIED_SCORE_BAND of the top score (the round-robin pool). */
+  contenders: ModelType[];
+}
+
+/**
+ * Score the enabled models and return BOTH the selected model and the full
+ * per-model breakdown + selection mode. Side-effect parity with the old
+ * scoreModels(): the module-level round-robin counter advances exactly once
+ * per call in the two round-robin branches (so repeated calls rotate
+ * identically). Pure aside from that counter.
+ */
+export function scoreModelsDetailed(
   enabledModels: ModelType[],
   tags: string[],
   complexity?: "simple" | "standard" | "complex",
-): ModelType {
-  // Score every enabled model first so we can both pick the winner and
-  // detect ties / near-ties.
-  const scored: { model: ModelType; score: number }[] = [];
+): ModelSelection {
+  const scored: PerModelScore[] = [];
   let hasTags = tags.length > 0;
 
   // §C: simple 작업의 antigravity 소프트 가점. 무태그여도 이 가점이 걸리면
@@ -585,21 +629,23 @@ export function scoreModels(
   if (agyBias > 0) hasTags = true;
 
   for (const model of enabledModels) {
-    let score = MODEL_BASE_SCORE[model] || 0;
+    const base = MODEL_BASE_SCORE[model] || 0;
+    let tagBonus = 0;
+    let tagPenalty = 0;
 
     // Custom models use base score only (no tag bonuses/penalties).
     if (model !== "custom") {
       const bonuses = MODEL_TAG_BONUSES[model] || {};
       for (const tag of tags) {
         if (bonuses[tag]) {
-          score += bonuses[tag];
+          tagBonus += bonuses[tag];
           hasTags = true;
         }
       }
       const penalties = MODEL_TAG_PENALTIES[model] || {};
       for (const tag of tags) {
         if (penalties[tag]) {
-          score += penalties[tag];
+          tagPenalty += penalties[tag];
           hasTags = true;
         }
       }
@@ -608,42 +654,80 @@ export function scoreModels(
     // small per-model bonus so cheaper models break ties on tasks where
     // expensive-model strengths don't apply. Same function as scoreAgents
     // for consistency between reuse and fresh-spawn paths.
-    score += costEfficiencyScore(model, tags);
+    const costEff = costEfficiencyScore(model, tags);
     // §C: simple → antigravity 소프트 가점(0 이면 no-op).
-    if (model === "antigravity") score += agyBias;
-    // 방어: 비유한 점수는 아래 정렬/타이밴드 비교(topScore - s.score)를
+    const thisAgyBias = model === "antigravity" ? agyBias : 0;
+
+    const rawTotal = base + tagBonus + tagPenalty + costEff + thisAgyBias;
+    // 방어: 비유한 점수는 아래 정렬/타이밴드 비교(topScore - s.total)를
     // 오염시키므로 0 으로 대체. 정상 입력에선 항상 유한값이라 no-op 이다.
-    scored.push({ model, score: finiteOr(score, 0) });
+    scored.push({
+      model,
+      base,
+      tagBonus,
+      tagPenalty,
+      costEff,
+      agyBias: thisAgyBias,
+      total: finiteOr(rawTotal, 0),
+    });
   }
 
   if (scored.length === 0) {
-    return enabledModels[0] || "claude";
+    return {
+      selected: enabledModels[0] || "claude",
+      scores: [],
+      mode: "empty",
+      contenders: [],
+    };
   }
 
-  scored.sort((a, b) => b.score - a.score);
-  const topScore = scored[0].score;
+  scored.sort((a, b) => b.total - a.total);
+  const topScore = scored[0].total;
+  const contenders = scored
+    .filter((s) => topScore - s.total <= TIED_SCORE_BAND)
+    .map((s) => s.model);
 
   // No tags at all → pure round-robin across enabled models for diversity.
   if (!hasTags && enabledModels.length > 1) {
     const idx = modelRoundRobin % enabledModels.length;
     modelRoundRobin++;
-    return enabledModels[idx];
+    return {
+      selected: enabledModels[idx],
+      scores: scored,
+      mode: "round-robin-no-tags",
+      contenders,
+    };
   }
 
   // Tied / near-tied at the top → round-robin among the contenders so we
   // don't always snap to whichever happened to be listed first. Without
   // this, a `simple-fix` tag that ties Claude and GPT (both at 70 in the
   // updated bonuses) would always pick Claude due to enabledModels order.
-  const contenders = scored
-    .filter((s) => topScore - s.score <= TIED_SCORE_BAND)
-    .map((s) => s.model);
   if (contenders.length > 1) {
     const idx = modelRoundRobin % contenders.length;
     modelRoundRobin++;
-    return contenders[idx];
+    return {
+      selected: contenders[idx],
+      scores: scored,
+      mode: "tie-band-round-robin",
+      contenders,
+    };
   }
 
-  return scored[0].model;
+  return {
+    selected: scored[0].model,
+    scores: scored,
+    mode: "top-score",
+    contenders,
+  };
+}
+
+export function scoreModels(
+  enabledModels: ModelType[],
+  tags: string[],
+  complexity?: "simple" | "standard" | "complex",
+): ModelType {
+  return scoreModelsDetailed(enabledModels, tags, complexity).selected;
 }
 
 // ── Worktree isolation gate (dispatch reuse / restart) ──────

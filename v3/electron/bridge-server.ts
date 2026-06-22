@@ -13,15 +13,16 @@ import { OrchestratorManager } from "./orchestrator-manager";
 import { BrowserWindow } from "electron";
 import {
   scoreAgents as scoreAgentsFn,
-  scoreModels as scoreModelsFn,
+  scoreModelsDetailed as scoreModelsDetailedFn,
   resolvePreset,
   normalizeModel,
   isWorktreeIsolated,
   checkPlanConcurrency,
   isAgentContextReusable,
   type AgentInfo,
+  type ModelSelection,
 } from "./dispatch-scoring";
-import { mainTelemetry } from "./telemetry";
+import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import { resolveTopClaudeModelDetailed } from "./agent-config";
 import type { WorktreeCoordinator } from "./worktree-coordinator";
 
@@ -181,8 +182,10 @@ export function resolveNotifyTarget(
 const IMPORTANT_TASK_UPDATE_STATUSES = new Set(["DONE", "FAILED", "BLOCKED"]);
 
 function mentionsStuckOrBlocked(message: string): boolean {
-  return /\b(stuck|blocked|blocker|blocking)\b/i.test(message) ||
-    /막힘|차단|블로커/.test(message);
+  return (
+    /\b(stuck|blocked|blocker|blocking)\b/i.test(message) ||
+    /막힘|차단|블로커/.test(message)
+  );
 }
 
 /**
@@ -230,7 +233,10 @@ const TRACKED_MODEL_TAGS = new Set([
 ]);
 
 function normalizeDispatchTag(tag: string): string {
-  return tag.trim().toLowerCase().replace(/[\s_]+/g, "-");
+  return tag
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-");
 }
 
 function isTrackedDispatchModel(model: ModelType): boolean {
@@ -1170,8 +1176,7 @@ export class BridgeServer {
         ),
       )
       .filter(
-        (agent) =>
-          !requiresTrackedModel || isTrackedDispatchModel(agent.model),
+        (agent) => !requiresTrackedModel || isTrackedDispatchModel(agent.model),
       );
 
     // L3/RG — per-task single-agent guarantee. A task-bound live agent wins
@@ -1253,6 +1258,23 @@ export class BridgeServer {
       console.log(
         `[BridgeServer] Dispatch: reused '${candidate.agent.name}' (score=${candidate.score})`,
       );
+      // Decision snapshot: reuse picked an existing idle agent via agent-level
+      // scoring (scoreAgents) — no fresh model competition ran, so eligibleModels
+      // / perModelScores are empty; agentScore carries the winning match score.
+      this.emitDispatchDecision({
+        taskId: params.taskId ?? null,
+        agentId: fullAgent.id,
+        role,
+        complexity,
+        tags,
+        eligibleModels: [],
+        selectedModel: candidate.agent.model,
+        perModelScores: [],
+        decisionReason: candidate.reason,
+        reuseVsSpawn: "reuse",
+        explicitModel: !!model,
+        agentScore: candidate.score,
+      });
       return {
         success: true,
         action: "reused",
@@ -1313,6 +1335,20 @@ export class BridgeServer {
         console.log(
           `[BridgeServer] Dispatch: restarted '${best.agent.name}' (score=${best.score})`,
         );
+        this.emitDispatchDecision({
+          taskId: params.taskId ?? null,
+          agentId: restarted.id,
+          role,
+          complexity,
+          tags,
+          eligibleModels: [],
+          selectedModel: best.agent.model,
+          perModelScores: [],
+          decisionReason: best.reason,
+          reuseVsSpawn: "restart",
+          explicitModel: !!model,
+          agentScore: best.score,
+        });
         return {
           success: true,
           action: "restarted",
@@ -1351,8 +1387,14 @@ export class BridgeServer {
     const eligibleModels = requiresTrackedModel
       ? trackedModelCandidates(enabledModels as ModelType[])
       : (enabledModels as ModelType[]);
-    const selectedModel =
-      model || this.scoreModels(eligibleModels, tags, complexity);
+    // Score the eligible models ONCE (when no explicit model was named) so the
+    // dispatch-decision telemetry can carry the per-model breakdown + how the
+    // winner was picked. scoreModelsDetailed advances the round-robin counter
+    // exactly once, identical to the old scoreModels() call — no double-rotate.
+    const modelSelection: ModelSelection | null = model
+      ? null
+      : scoreModelsDetailedFn(eligibleModels, tags, complexity);
+    const selectedModel = model || modelSelection!.selected;
     const agentName =
       params.nameHint ||
       `${role}-${selectedModel}-${Date.now().toString(36).slice(-4)}`;
@@ -1399,6 +1441,25 @@ export class BridgeServer {
     console.log(
       `[BridgeServer] Dispatch: spawned '${agentName}' (model=${selectedModel})`,
     );
+    // Decision snapshot: fresh spawn. When the model was scored (no explicit
+    // hint) carry the full per-model breakdown + selection mode; an explicit
+    // model request bypasses scoring (explicitModel=true, perModelScores=[]).
+    this.emitDispatchDecision({
+      taskId: resolvedTaskId,
+      agentId: spawnResult.agentId,
+      role,
+      complexity,
+      tags,
+      eligibleModels: eligibleModels as string[],
+      selectedModel,
+      perModelScores: modelSelection?.scores ?? [],
+      modelSelectionMode: modelSelection?.mode,
+      decisionReason: model
+        ? `Explicit model '${model}' requested — scoring bypassed. Spawned new ${selectedModel} agent.`
+        : `Scored ${eligibleModels.length} model(s) → ${selectedModel} (${modelSelection?.mode}). Spawned new agent.`,
+      reuseVsSpawn: "spawn",
+      explicitModel: !!model,
+    });
     // §8.1 폴백 사용자 표식 — complex claude 가 최상위 모델 resolver 를 탔는데
     // 버전가드/미지모델로 폴백됐으면 dispatch 응답에 표시(사용자가 왜 최상위가
     // 아닌지 알 수 있게). read-only 재해석(같은 env → spawn 이 쓴 값과 일치).
@@ -1614,12 +1675,21 @@ export class BridgeServer {
     return scoreAgentsFn(infos, role, preferredModel, tags);
   }
 
-  private scoreModels(
-    enabledModels: ModelType[],
-    tags: string[],
-    complexity?: "simple" | "standard" | "complex",
-  ): ModelType {
-    return scoreModelsFn(enabledModels, tags, complexity);
+  /**
+   * Emit a dispatch:decision telemetry snapshot for the renderer → BigQuery
+   * pipe. Rides the exact same path as every other mainTelemetry event, so the
+   * first-party opt-in gate (firstPartyTelemetryDefaultEnabled) and PII scrub
+   * (telemetryService.anonymize) apply automatically — consent OFF ⇒ 0 external
+   * sends. Best-effort: a destroyed/absent window is a silent no-op and never
+   * blocks dispatch. Payload is de-identified (ids + model names + scores +
+   * short reason strings only; never prompt text / paths / keys).
+   */
+  private emitDispatchDecision(payload: DispatchDecisionPayload): void {
+    try {
+      mainTelemetry.dispatchDecision(this.mainWindow, payload);
+    } catch (err) {
+      console.warn("[BridgeServer] dispatch:decision telemetry failed:", err);
+    }
   }
 
   /**

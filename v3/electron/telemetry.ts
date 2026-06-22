@@ -144,4 +144,62 @@ export const mainTelemetry = {
       taskId,
     });
   },
+
+  // ── 디스패치 결정 스냅샷 (DISPATCH-DECISION-TELEMETRY) ────────
+  //
+  // "어떤 모델을 어떤 태스크(complexity/tags/role)에 왜(점수/사유) 배치했고
+  // → reuse/restart/spawn 중 무엇이었나" 를 BigQuery 에서 결과(cost_logs /
+  // 결과 events)와 join 분석할 수 있게 1건의 스냅샷을 남긴다. dispatchSingle 의
+  // 각 종착 분기(reuse/restart/spawn) 직후 호출된다.
+  //
+  // 게이트·PII: 이 이벤트도 다른 모든 이벤트와 동일하게 렌더러의 logTelemetry
+  // choke point(firstPartyTelemetryDefaultEnabled opt-in 게이트 + scrub PII)를
+  // 통과한 뒤에야 외부로 나간다 — 동의 OFF 면 외부송신 0. 페이로드는 비식별:
+  // 프롬프트 원문·파일경로·키를 절대 싣지 않는다(id/모델명/점수/사유 문자열만).
+  dispatchDecision(
+    win: BrowserWindow | null,
+    payload: DispatchDecisionPayload,
+  ) {
+    sendTelemetry(win, "dispatch:decision", {
+      agentId: payload.agentId,
+      taskId: payload.taskId,
+      role: payload.role,
+      // selectedModel → 표준 `model` 컬럼으로도 적재(GROUP BY model 용이).
+      model: payload.selectedModel,
+      // dispatch-decision 고유 필드들 — functions 가 metadata(JSON) 로 접는다.
+      reuseVsSpawn: payload.reuseVsSpawn,
+      selectedModel: payload.selectedModel,
+      complexity: payload.complexity,
+      tags: payload.tags,
+      eligibleModels: payload.eligibleModels,
+      explicitModel: payload.explicitModel,
+      decisionReason: payload.decisionReason,
+      modelSelectionMode: payload.modelSelectionMode,
+      perModelScores: payload.perModelScores,
+      agentScore: payload.agentScore,
+    });
+  },
 };
+
+/** dispatch:decision 이벤트 페이로드. 비식별 — id/모델명/점수/사유만. */
+export interface DispatchDecisionPayload {
+  taskId: string | null;
+  agentId?: string;
+  role: string;
+  complexity: string;
+  tags: string[];
+  /** 점수 경쟁에 들어간 후보 모델들(spawn 경로에서만 의미, 그 외 []). */
+  eligibleModels: string[];
+  selectedModel: string;
+  /** scoreModelsDetailed 의 per-model 분해(spawn 경로에서만, 그 외 []). */
+  perModelScores: unknown[];
+  /** 선택 방식(top-score / round-robin / tie-band) — spawn 경로에서만. */
+  modelSelectionMode?: string;
+  /** 사람이 읽을 결정 사유(예: reuse 후보 reason 또는 spawn 사유). */
+  decisionReason: string;
+  reuseVsSpawn: "reuse" | "restart" | "spawn";
+  /** 사용자/오케가 모델을 명시했는지(명시 시 점수경쟁 우회). */
+  explicitModel: boolean;
+  /** reuse/restart 경로에서 선택된 기존 에이전트의 매칭 점수. */
+  agentScore?: number;
+}

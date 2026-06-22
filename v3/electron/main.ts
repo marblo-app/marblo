@@ -1059,6 +1059,14 @@ const costTracker = new CostTracker((agentId, cost) => {
   const costPayload = {
     projectId,
     agentId,
+    // ML/analytics join key: stamp the agent's CURRENT task so cost_logs rows
+    // can join BigQuery `events` (incl. dispatch:decision) on taskId. The agent
+    // doc's currentTaskId is set by syncAgentStatus on EVERY dispatch path
+    // (spawn / reuse / restart), so this populates taskId regardless of how the
+    // agent got the work — previously the payload carried no taskId at all, so
+    // cost_logs.taskId was always null and the join was broken. null when the
+    // agent isn't bound to a board task (one-off / orchestrator session).
+    taskId: agent?.currentTaskId ?? null,
     model: cost.model,
     inputTokens: cost.deltaInputTokens,
     outputTokens: cost.deltaOutputTokens,
