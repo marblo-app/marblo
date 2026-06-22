@@ -2,6 +2,8 @@
 
 > 대상: Marblo Electron 앱(`v3/`)의 macOS / Windows 배포 빌드 서명·공증.
 > 작성: 2026-06-20. 빌드 파이프라인 = `.github/workflows/build.yml`(Build & Release), 패키징 = `v3/electron-builder.yml`.
+>
+> 👉 **키보드 앞에서 바로 따라치는 실행 절차 + 실제 에러 트러블슈팅**은 [`signing_runbook.md`](./signing_runbook.md)(서명·공증 실전 런북)를 보라. 이 문서는 준비/배경/인증서 종류/Windows EV 옵션 비교 **레퍼런스**다.
 
 ## 0. 왜 필요한가 / 선행 조건
 
