@@ -9,6 +9,9 @@ aliases: [Sprint 2 프론트엔드]
 > 모듈 4 · 섹션 4-4 · 약 50분
 > 관련: [[4-3_Sprint1_백엔드]] | [[4-5_Sprint3_통합리뷰]]
 
+> 🗄️ **[구버전 · M5로 이동]** 이 문서는 구 모듈4(ReachWave / P3) 자료입니다. 강의 재편(재작성 청사진 기준)으로 **모듈 5(실전 SaaS 스프린트, P3)**로 이동·재집필되었습니다. 최신 본문은 신 **[[5-4_Sprint2_프론트_병렬통합]]** 를 보세요.
+> 신 모듈4는 **P2 날씨 대시보드 멀티에이전트 협업**(Claude + Codex)으로 바뀌었습니다 → [[4-4_리뷰거버넌스_반려재작업]].
+
 ---
 
 ## 도입 (5분)
@@ -182,7 +185,8 @@ export default function URLInputForm() {
   const router = useRouter();
 
   const isValidYouTubeURL = (url: string) => {
-    const pattern = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w-]+/;
+    const pattern =
+      /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w-]+/;
     return pattern.test(url);
   };
 
@@ -201,7 +205,7 @@ export default function URLInputForm() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ url }),
       });
@@ -224,7 +228,10 @@ export default function URLInputForm() {
         <input
           type="url"
           value={url}
-          onChange={(e) => { setUrl(e.target.value); setError(""); }}
+          onChange={(e) => {
+            setUrl(e.target.value);
+            setError("");
+          }}
           placeholder="YouTube URL을 붙여넣으세요"
           className="flex-1 p-3 border rounded-lg text-lg"
         />
@@ -237,9 +244,7 @@ export default function URLInputForm() {
           {loading ? "분석 중..." : "분석하기"}
         </button>
       </div>
-      {error && (
-        <p className="text-red-500 mt-2 text-sm">{error}</p>
-      )}
+      {error && <p className="text-red-500 mt-2 text-sm">{error}</p>}
     </div>
   );
 }
@@ -326,8 +331,10 @@ export default function InsightCard({ analysis }: InsightCardProps) {
           alt={analysis.video.title}
           className="w-full h-48 object-cover"
         />
-        <div className="absolute bottom-2 right-2 bg-black/70 text-white
-                        px-2 py-1 rounded text-sm">
+        <div
+          className="absolute bottom-2 right-2 bg-black/70 text-white
+                        px-2 py-1 rounded text-sm"
+        >
           {formatDuration(analysis.video.duration)}
         </div>
       </div>
@@ -351,9 +358,11 @@ export default function InsightCard({ analysis }: InsightCardProps) {
           <ul className="space-y-2">
             {analysis.key_points.map((point, i) => (
               <li key={i} className="flex items-start gap-2">
-                <span className="bg-blue-100 text-blue-700 rounded-full
+                <span
+                  className="bg-blue-100 text-blue-700 rounded-full
                                w-6 h-6 flex items-center justify-center
-                               text-sm flex-shrink-0 mt-0.5">
+                               text-sm flex-shrink-0 mt-0.5"
+                >
                   {i + 1}
                 </span>
                 <span className="text-gray-700">{point}</span>
@@ -365,8 +374,11 @@ export default function InsightCard({ analysis }: InsightCardProps) {
         {/* 키워드 태그 */}
         <div className="flex flex-wrap gap-2">
           {analysis.keywords.map((kw, i) => (
-            <span key={i} className="bg-gray-100 text-gray-600 px-3 py-1
-                                     rounded-full text-sm">
+            <span
+              key={i}
+              className="bg-gray-100 text-gray-600 px-3 py-1
+                                     rounded-full text-sm"
+            >
               #{kw}
             </span>
           ))}
@@ -399,6 +411,7 @@ export default function InsightCard({ analysis }: InsightCardProps) {
 ```
 
 **체크리스트:**
+
 - [ ] 썸네일이 정상 표시되는가?
 - [ ] AI 요약이 충분히 읽기 편한가?
 - [ ] 핵심 포인트 번호 매기기가 깔끔한가?
@@ -476,7 +489,11 @@ export default async function DashboardPage() {
 import { useState, useEffect, useCallback } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 
-export default function SearchBar({ onSearch }: { onSearch: (q: string) => void }) {
+export default function SearchBar({
+  onSearch,
+}: {
+  onSearch: (q: string) => void;
+}) {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounce(query, 300);
 
@@ -513,4 +530,5 @@ Sprint 2에서 진행된 내용:
 다음 Sprint에서는 모든 것을 하나로 합치고, 최종 테스트를 진행합니다.
 
 ---
+
 다음: [[4-5_Sprint3_통합리뷰]]
