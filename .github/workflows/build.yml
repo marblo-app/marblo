@@ -209,6 +209,29 @@ jobs:
         working-directory: v3
         run: npm run build:electron
 
+      - name: Verify macOS signing inputs
+        if: steps.guard.outputs.build == 'true' && matrix.platform == 'mac' && github.event_name != 'pull_request'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::${name} is required for signed and notarized macOS release builds"
+              missing=1
+            fi
+          done
+          if [[ "${missing}" -ne 0 ]]; then
+            exit 1
+          fi
+          echo "macOS signing and notarization inputs are present."
+
       - name: Build Electron (${{ matrix.platform }}-${{ matrix.arch }})
         if: steps.guard.outputs.build == 'true'
         working-directory: v3
@@ -239,6 +262,10 @@ jobs:
           APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+          # Make the notarize afterSign hook FAIL (not silently skip) when Apple
+          # credentials are missing on a real (non-PR) mac release build. Mac legs
+          # only; empty elsewhere so the hook keeps its skip-on-missing behavior.
+          MARBLO_REQUIRE_MAC_NOTARIZATION: ${{ matrix.platform == 'mac' && github.event_name != 'pull_request' }}
           # Windows is shipped UNSIGNED from CI. Code signing is done manually
           # with the KoreaSSL USB token (see v3/docs/code_signing_setup.md Part B),
           # so no WIN_CSC_* secrets are wired here. electron-builder produces an
@@ -254,6 +281,29 @@ jobs:
         # mac/linux pass no override → npmRebuild stays true and they rebuild
         # node-pty during packaging exactly as before (no regression).
         run: npx electron-builder --${{ matrix.platform }} --${{ matrix.arch }} --publish never -c.extraMetadata.author.name=Marblo -c.extraMetadata.author.email=support@marblo.app ${{ matrix.platform == 'win' && '-c.npmRebuild=false' || '' }}
+
+      - name: Verify macOS notarization smoke
+        if: steps.guard.outputs.build == 'true' && matrix.platform == 'mac' && github.event_name != 'pull_request'
+        working-directory: v3
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(find dist -maxdepth 3 -type d -name '*.app' -print -quit)"
+          if [[ -z "${app_path}" ]]; then
+            echo "::error::No macOS .app bundle found in v3/dist"
+            exit 1
+          fi
+          dmg_path="$(find dist -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          if [[ -z "${dmg_path}" ]]; then
+            echo "::error::No macOS .dmg artifact found in v3/dist"
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "${app_path}"
+          spctl --assess --type execute --verbose=4 "${app_path}"
+          xcrun stapler validate "${app_path}"
+          hdiutil verify "${dmg_path}"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "${dmg_path}"
 
       - name: Upload artifacts
         if: steps.guard.outputs.build == 'true'

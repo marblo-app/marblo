@@ -95,5 +95,10 @@
   },
   "build": {
     "extends": "electron-builder.yml"
+  },
+  "overrides": {
+    "@electron/osx-sign": {
+      "isbinaryfile": "^5.0.4"
+    }
   }
 }

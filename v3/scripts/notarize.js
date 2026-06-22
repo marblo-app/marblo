@@ -9,15 +9,12 @@
  *   APPLE_TEAM_ID               - Apple Developer Team ID (10-char alphanumeric)
  *
  * This script runs automatically after code signing via electron-builder's afterSign hook.
- * If credentials are missing, notarization is skipped with a warning.
+ * If credentials are missing, notarization is skipped with a warning unless
+ * MARBLO_REQUIRE_MAC_NOTARIZATION=true is set.
  */
 
 /** @param {import("electron-builder").AfterPackContext} context */
 module.exports = async function notarizing(context) {
-  const [{ notarize }, path] = await Promise.all([
-    import("@electron/notarize"),
-    import("node:path"),
-  ]);
   const { electronPlatformName, appOutDir } = context;
 
   // Only notarize macOS builds
@@ -37,17 +34,32 @@ module.exports = async function notarizing(context) {
     return;
   }
 
-  const appleId = process.env.APPLE_ID;
-  const appleIdPassword = process.env.APPLE_APP_SPECIFIC_PASSWORD;
-  const teamId = process.env.APPLE_TEAM_ID;
+  const credentials = {
+    APPLE_ID: process.env.APPLE_ID,
+    APPLE_APP_SPECIFIC_PASSWORD: process.env.APPLE_APP_SPECIFIC_PASSWORD,
+    APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
+  };
+  const missingCredentials = Object.entries(credentials)
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  const requireNotarization =
+    process.env.MARBLO_REQUIRE_MAC_NOTARIZATION === "true";
 
-  if (!appleId || !appleIdPassword || !teamId) {
-    console.log(
-      "⚠️  Skipping notarization: APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, or APPLE_TEAM_ID not set"
-    );
+  if (missingCredentials.length > 0) {
+    const message = `Skipping notarization: missing ${missingCredentials.join(
+      ", "
+    )}`;
+    if (requireNotarization) {
+      throw new Error(message);
+    }
+    console.log(`⚠️  ${message}`);
     return;
   }
 
+  const [{ notarize }, path] = await Promise.all([
+    import("@electron/notarize"),
+    import("node:path"),
+  ]);
   const appName = context.packager.appInfo.productFilename;
   const appPath = path.join(appOutDir, `${appName}.app`);
 
@@ -57,9 +69,9 @@ module.exports = async function notarizing(context) {
     await notarize({
       tool: "notarytool",
       appPath,
-      appleId,
-      appleIdPassword,
-      teamId,
+      appleId: credentials.APPLE_ID,
+      appleIdPassword: credentials.APPLE_APP_SPECIFIC_PASSWORD,
+      teamId: credentials.APPLE_TEAM_ID,
     });
     console.log(`✅ Notarization complete for ${appName}`);
   } catch (error) {
