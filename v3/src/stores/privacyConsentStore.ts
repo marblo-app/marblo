@@ -1,9 +1,11 @@
 import { create } from "zustand";
 import {
   DEFAULT_CONSENT,
-  getConsent,
+  getConsentWithRetry,
   saveConsent,
   isConsentCurrent,
+  hasAcceptedConsentCached,
+  rememberConsentAccepted,
   CURRENT_POLICY_VERSION,
   type ConsentFlags,
   type PrivacyConsent,
@@ -35,12 +37,41 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
 
     load: async (uid: string) => {
       set({ loading: true });
-      const consent = await getConsent(uid);
-      set({
-        consent,
-        loading: false,
-        needsPrompt: !isConsentCurrent(consent),
-      });
+      const result = await getConsentWithRetry(uid);
+
+      if (result.status === "ok") {
+        // Authoritative read. Re-prompt only if the stored version is stale.
+        const { consent } = result;
+        set({
+          consent,
+          loading: false,
+          needsPrompt: !isConsentCurrent(consent),
+        });
+        // Keep the proof-of-consent cache in sync so a later read failure
+        // (sleep/resume, offline) won't re-prompt this already-consented user.
+        if (isConsentCurrent(consent)) {
+          rememberConsentAccepted(uid, consent.version);
+        }
+        return;
+      }
+
+      if (result.status === "missing") {
+        // Read succeeded, user genuinely has no consent record → prompt.
+        set({ consent: DEFAULT_CONSENT, loading: false, needsPrompt: true });
+        return;
+      }
+
+      // result.status === "error": the read FAILED, so the stored consent is
+      // unknown. Do NOT flip needsPrompt to true on a transient failure — that
+      // is the sleep/resume bug. If we have local proof this user already
+      // accepted the CURRENT policy version, keep the modal hidden; otherwise
+      // hold the existing needsPrompt (don't surface the modal off a failure).
+      // PIPA 옵트인 정설: 실패 시 '동의 간주'가 아니라 '이미 동의자 재프롬프트 안 함'.
+      if (hasAcceptedConsentCached(uid, CURRENT_POLICY_VERSION)) {
+        set({ loading: false, needsPrompt: false });
+      } else {
+        set({ loading: false });
+      }
     },
 
     save: async (uid, flags, locale = "ko") => {

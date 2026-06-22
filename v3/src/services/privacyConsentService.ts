@@ -78,6 +78,23 @@ interface RawConsent {
   locale?: string;
 }
 
+/**
+ * Result of a consent read. We MUST distinguish three outcomes — folding a
+ * transient read failure into "no consent" is exactly the sleep/resume bug:
+ *
+ *   - "ok"      : Firestore read succeeded and a consent record exists.
+ *   - "missing" : read succeeded but the user has no consent record yet
+ *                 (genuinely not consented → prompt is correct).
+ *   - "error"   : read FAILED (offline, stale auth token, permission-denied,
+ *                 unavailable, …). The stored consent is UNKNOWN — callers must
+ *                 NOT treat this as "not consented". PIPA 옵트인 정설: 실패는
+ *                 '동의 간주'도 '미동의 간주'도 아니다 — 그냥 모른다.
+ */
+export type GetConsentResult =
+  | { status: "ok"; consent: PrivacyConsent }
+  | { status: "missing" }
+  | { status: "error"; code: string | null };
+
 function toConsent(raw: RawConsent | undefined): PrivacyConsent {
   if (!raw) return DEFAULT_CONSENT;
   return {
@@ -94,16 +111,98 @@ function toConsent(raw: RawConsent | undefined): PrivacyConsent {
   };
 }
 
-export async function getConsent(uid: string): Promise<PrivacyConsent> {
+/**
+ * Read the consent record for `uid`, distinguishing a successful read (with or
+ * without a record) from a failed read. NEVER returns DEFAULT_CONSENT on
+ * failure — that conflation is the sleep/resume re-prompt bug.
+ */
+export async function getConsent(uid: string): Promise<GetConsentResult> {
   try {
     const snap = await getDoc(doc(db, "users", uid));
-    const data = snap.exists() ? snap.data() : null;
-    return toConsent(
-      (data?.privacyConsent as RawConsent | undefined) ?? undefined,
-    );
+    const raw = snap.exists()
+      ? (snap.data()?.privacyConsent as RawConsent | undefined)
+      : undefined;
+    if (!raw) return { status: "missing" };
+    return { status: "ok", consent: toConsent(raw) };
   } catch (err) {
     logFirestoreError("getConsent", err, uid);
-    return DEFAULT_CONSENT;
+    const code = (err as { code?: string }).code ?? null;
+    return { status: "error", code };
+  }
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * getConsent with a short linear backoff over transient failures. On wake the
+ * very first read often fails (network not up / auth token not refreshed yet);
+ * one or two retries usually land once connectivity returns. Only an "error"
+ * outcome is retried — "ok"/"missing" are authoritative and returned at once.
+ *
+ * `backoffMs` is injectable so unit tests can run retries instantly.
+ */
+export async function getConsentWithRetry(
+  uid: string,
+  attempts = 3,
+  backoffMs = 400,
+): Promise<GetConsentResult> {
+  let last: GetConsentResult = { status: "error", code: null };
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const result = await getConsent(uid);
+    if (result.status !== "error") return result;
+    last = result;
+    if (attempt < attempts && backoffMs > 0) await sleep(backoffMs * attempt);
+  }
+  return last;
+}
+
+/**
+ * Local proof-of-consent cache.
+ *
+ * Records "this uid successfully saved consent for this policy version" in
+ * localStorage. Used by the store on a FAILED read to suppress a needless
+ * re-prompt for someone we KNOW already consented (sleep/resume), without ever
+ * fabricating consent — the key is written only after a real server write
+ * succeeds, and it is version-scoped so a policy bump invalidates it.
+ *
+ * ⚠ This proves "do not re-prompt", NOT "consent is granted". Optional-SDK
+ * gating still reads the live flags; this only governs modal visibility.
+ */
+const CONSENT_CACHE_PREFIX = "marblo:consentAccepted:";
+
+function consentCacheKey(uid: string, version: string): string {
+  return `${CONSENT_CACHE_PREFIX}${uid}:${version}`;
+}
+
+function safeLocalStorage(): Storage | null {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Record that `uid` accepted `version`. Best-effort — never throws. */
+export function rememberConsentAccepted(uid: string, version: string): void {
+  if (!version) return;
+  try {
+    safeLocalStorage()?.setItem(consentCacheKey(uid, version), "1");
+  } catch {
+    // private mode / quota / disabled storage — cache is best-effort.
+  }
+}
+
+/** True iff we have local proof `uid` accepted `version` on this device. */
+export function hasAcceptedConsentCached(
+  uid: string,
+  version: string,
+): boolean {
+  if (!version) return false;
+  try {
+    return safeLocalStorage()?.getItem(consentCacheKey(uid, version)) === "1";
+  } catch {
+    return false;
   }
 }
 
@@ -127,6 +226,9 @@ export async function saveConsent(
       },
       { merge: true },
     );
+    // Server write succeeded → arm the proof-of-consent cache so a later read
+    // failure (sleep/resume, offline) won't re-prompt this user.
+    rememberConsentAccepted(uid, CURRENT_POLICY_VERSION);
   } catch (err) {
     logFirestoreError("saveConsent", err, uid);
     throw err;
