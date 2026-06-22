@@ -42,7 +42,11 @@ mac:
 win:
   target:
     - nsis
-  icon: resources/icon.ico
+  # Use the 1024x1024 PNG, not resources/icon.ico (which is only 16x16 and trips
+  # electron-builder's "icon must be at least 256x256" / ERR_ICON_TOO_SMALL guard
+  # for the nsis target). electron-builder generates a correct multi-size .ico
+  # from a >=256px PNG.
+  icon: resources/icon.png
   signingHashAlgorithms:
     - sha256
 

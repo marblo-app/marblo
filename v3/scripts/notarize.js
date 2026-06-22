@@ -25,6 +25,18 @@ module.exports = async function notarizing(context) {
     return;
   }
 
+  // electron-builder skips code signing on pull-request builds, producing an
+  // ad-hoc-signed app. Notarization requires a real Developer ID signature, so
+  // it would fail ("code has no resources but signature indicates they must be
+  // present"). Skip notarization for PR verification builds — release builds
+  // (tag push / workflow_dispatch / branch push) still sign and notarize.
+  if (process.env.GITHUB_EVENT_NAME === "pull_request") {
+    console.log(
+      "⚠️  Skipping notarization: pull-request build (code signing is skipped on PRs)"
+    );
+    return;
+  }
+
   const appleId = process.env.APPLE_ID;
   const appleIdPassword = process.env.APPLE_APP_SPECIFIC_PASSWORD;
   const teamId = process.env.APPLE_TEAM_ID;

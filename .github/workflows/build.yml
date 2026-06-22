@@ -31,7 +31,14 @@ jobs:
           - os: macos-13
             platform: mac
             arch: x64
-          - os: windows-latest
+          # Pinned to windows-2022 (not windows-latest). The latest image now ships
+          # Visual Studio 18 (VS 2026), whose major version has no entry in node-gyp's
+          # VS-version table (15→2017, 16→2019, 17→2022), so node-gyp reports
+          # "unknown version undefined" and the node-pty native rebuild fails. VS 2026
+          # is too new for any released node-gyp. windows-2022 carries VS 2022
+          # (major 17), which node-gyp fully supports. Revisit once node-gyp ships
+          # VS 2026 support.
+          - os: windows-2022
             platform: win
             arch: x64
           - os: ubuntu-latest
@@ -40,29 +47,153 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
-    # Skip if workflow_dispatch with specific platform
-    if: >-
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.platform == 'all' ||
-      github.event.inputs.platform == matrix.platform
+    # Fail fast instead of hanging for the 360-minute default. A native rebuild or
+    # electron-builder download that stalls would otherwise pin a runner for hours
+    # and (with the concurrency limit) keep the other matrix legs queued.
+    timeout-minutes: 30
 
     steps:
+      # NOTE: the platform filter for workflow_dispatch must live at STEP level.
+      # A job-level `if:` cannot reference the `matrix` context (it is evaluated
+      # before matrix expansion → "Unrecognized named-value: 'matrix'" → the whole
+      # workflow fails validation and spawns 0 jobs). This guard step is the only
+      # place that decides whether the rest of the matrix leg should run.
+      - name: Determine whether to build this platform
+        id: guard
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" != "workflow_dispatch" \
+                || "${{ github.event.inputs.platform }}" == "all" \
+                || "${{ github.event.inputs.platform }}" == "${{ matrix.platform }}" ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Building ${{ matrix.platform }}-${{ matrix.arch }}"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping ${{ matrix.platform }} (workflow_dispatch selected '${{ github.event.inputs.platform }}')"
+          fi
+
       - name: Checkout
+        if: steps.guard.outputs.build == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: steps.guard.outputs.build == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: v3/package-lock.json
 
+      # node-gyp (pulled in transitively for the node-pty native module) ships a
+      # bundled gyp that cannot run under Python 3.12 (distutils was removed).
+      # GitHub runners default to 3.12, which makes any native rebuild fail with
+      # a gyp import error. Pin 3.11 so node-gyp works on every OS.
+      - name: Setup Python (for node-gyp)
+        if: steps.guard.outputs.build == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install dependencies
+        if: steps.guard.outputs.build == 'true'
         working-directory: v3
-        run: npm ci
+        # Two known hazards, both handled here without touching the committed lockfile:
+        #  1. The committed package-lock.json drifts out of sync with package.json
+        #     (npm ci → EUSAGE). Fall back to `npm install` to reconcile per-runner.
+        #  2. The `postinstall: electron-rebuild` hook rebuilds the node-pty native
+        #     module at install time and fails on CI toolchains. `--ignore-scripts`
+        #     skips it; electron-builder rebuilds native modules itself during
+        #     packaging (npmRebuild defaults to true), which is the correct place.
+        run: npm ci --ignore-scripts || npm install --ignore-scripts --no-audit --no-fund
+
+      # Replace the transitively-pinned node-gyp 9.4.1 with node-gyp 10 across the
+      # tree (the hoisted copy and the one @electron/rebuild resolves). 9.4.1 is old
+      # enough to mis-handle the current windows toolchain; 10 generates a modern
+      # vcxproj. No lockfile/package.json change. (VS *detection* itself is handled
+      # by the MSVC dev-environment step below, not by this node-gyp swap.)
+      - name: Upgrade node-gyp (win)
+        if: steps.guard.outputs.build == 'true' && matrix.platform == 'win'
+        working-directory: v3
+        shell: bash
+        run: |
+          npm install -g --no-audit --no-fund node-gyp@10
+          NG_SRC="$(npm root -g)/node-gyp"
+          echo "Global node-gyp@10 at: $NG_SRC"
+          for dest in node_modules/node-gyp node_modules/@electron/rebuild/node_modules/node-gyp; do
+            if [ -d "$(dirname "$dest")" ]; then
+              rm -rf "$dest"
+              cp -r "$NG_SRC" "$dest"
+              echo "Replaced $dest with node-gyp@10"
+            fi
+          done
+
+      # node-gyp finds Visual Studio by running a PowerShell script that enumerates
+      # every VS install as JSON, captured through execFile's maxBuffer. The runner
+      # now ships Visual Studio 18 (VS 2026) alongside 2022, and the combined
+      # enumeration overflows that buffer (RangeError ERR_CHILD_PROCESS_STDIO_MAXBUFFER):
+      # the JSON is truncated, node-gyp parses the version as "undefined", and the
+      # node-pty rebuild fails — or HANGS for the full timeout when the caller
+      # (electron-builder / electron-rebuild) captures the child's stdout, because the
+      # oversized output fills the unread pipe and the child blocks on write. node-gyp
+      # checks VCINSTALLDIR *before* that PowerShell probe, so importing the VS
+      # developer environment here (vswhere -> vcvars64) makes node-gyp use this path
+      # and skip the probe entirely. Persisted via GITHUB_ENV/GITHUB_PATH so the
+      # rebuild and packaging steps inherit it. Self-contained (no third-party action).
+      - name: Set up MSVC build environment (win)
+        if: steps.guard.outputs.build == 'true' && matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw "No Visual Studio with the C++ toolset found on the runner" }
+          Write-Host "Using Visual Studio at: $vs"
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found at $vcvars" }
+          $before = @{}
+          Get-ChildItem Env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          cmd /c "`"$vcvars`" && set" | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') {
+              $name = $matches[1]; $value = $matches[2]
+              if ($name -ieq 'Path') {
+                ($value -split ';') | Where-Object { $_ -and ($before['Path'] -notlike "*$_*") } | ForEach-Object {
+                  $_ | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+                }
+              } elseif (($before[$name] -ne $value) -and ($name -notmatch '^(GITHUB_|RUNNER_|PROMPT$)')) {
+                "$name=$value" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              }
+            }
+          }
+          Write-Host "VCINSTALLDIR will be exported for node-gyp:"
+          (cmd /c "`"$vcvars`" >nul 2>&1 && echo %VCINSTALLDIR%")
+
+      # node-pty is the only native module. With the MSVC environment imported above,
+      # node-gyp uses VCINSTALLDIR and skips the buffer-overflowing PowerShell probe,
+      # so build node-pty against the Electron ABI by calling node-gyp DIRECTLY here.
+      # Direct invocation streams node-gyp/MSBuild output straight to the step console
+      # (no captured pipe → no buffer-fill deadlock) and --verbose surfaces any stall.
+      # The packaging step then runs with -c.npmRebuild=false on windows so
+      # electron-builder ships this binary instead of rebuilding it. Windows-only;
+      # mac/linux keep npmRebuild's default (true) → no regression.
+      - name: Pre-rebuild node-pty for Electron (win)
+        if: steps.guard.outputs.build == 'true' && matrix.platform == 'win'
+        working-directory: v3
+        shell: bash
+        timeout-minutes: 10
+        env:
+          MSBUILDDISABLENODEREUSE: "1"
+        run: |
+          NG="$PWD/node_modules/node-gyp/bin/node-gyp.js"
+          echo "node-gyp: $(node "$NG" --version)"
+          cd node_modules/node-pty
+          node "$NG" rebuild --verbose --arch=x64 \
+            --target=33.4.11 --dist-url=https://electronjs.org/headers
 
       - name: Create .env
+        if: steps.guard.outputs.build == 'true'
         working-directory: v3
+        # Force bash: the default shell on windows runners is PowerShell, which
+        # cannot run this heredoc.
+        shell: bash
         run: |
           cat > .env << 'EOF'
           VITE_FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}
@@ -74,25 +205,58 @@ jobs:
           EOF
 
       - name: Build app
+        if: steps.guard.outputs.build == 'true'
         working-directory: v3
         run: npm run build:electron
 
       - name: Build Electron (${{ matrix.platform }}-${{ matrix.arch }})
+        if: steps.guard.outputs.build == 'true'
         working-directory: v3
+        timeout-minutes: 22
+        # Force bash on every OS. Under the windows default shell (PowerShell) the
+        # `-c.extraMetadata.*=...` overrides get mangled into a bogus config-file
+        # path (ENOENT). Git Bash is present on windows runners and tokenizes the
+        # args identically to the mac/linux legs, which build cleanly.
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS code signing + notarization
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Windows code signing
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: npx electron-builder --${{ matrix.platform }} --${{ matrix.arch }} --publish never
+          # Disable MSBuild node reuse. Persisted MSBuild build nodes are a known
+          # cause of native-rebuild hangs on windows CI runners — the node-pty
+          # rebuild stalled indefinitely at "preparing moduleName=node-pty".
+          # Harmless on mac/linux (no MSBuild).
+          MSBUILDDISABLENODEREUSE: "1"
+          # Verbose electron-builder logging on windows only, to surface where a
+          # stall happens if one recurs. Empty (no-op) on mac/linux.
+          DEBUG: ${{ matrix.platform == 'win' && 'electron-builder' || '' }}
+          # macOS code signing + notarization — gated to the mac legs ONLY. These
+          # were previously set for every platform, which leaked the Apple
+          # "Developer ID" cert (CSC_LINK) into the windows leg; electron-builder
+          # picked it up and would try to Authenticode-sign the nsis installer with
+          # a cert that isn't valid for windows. Windows must ship UNSIGNED from CI
+          # (see below), so emit empty values there (and on linux).
+          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+          # Windows is shipped UNSIGNED from CI. Code signing is done manually
+          # with the KoreaSSL USB token (see v3/docs/code_signing_setup.md Part B),
+          # so no WIN_CSC_* secrets are wired here. electron-builder produces an
+          # unsigned nsis installer when no certificate is present.
+        # package.json has no `author` field; the linux fpm target (.deb) requires
+        # an author email. Inject it via electron-builder config override instead
+        # of editing package.json. Object form (.name/.email) avoids angle-bracket
+        # quoting issues across bash/pwsh. Harmless on mac/win.
+        #
+        # On windows only, -c.npmRebuild=false: node-pty was already rebuilt against
+        # Electron by the pre-rebuild step above, so skip electron-builder's
+        # in-process rebuild (the one that deadlocked on the MSBuild output pipe).
+        # mac/linux pass no override → npmRebuild stays true and they rebuild
+        # node-pty during packaging exactly as before (no regression).
+        run: npx electron-builder --${{ matrix.platform }} --${{ matrix.arch }} --publish never -c.extraMetadata.author.name=Marblo -c.extraMetadata.author.email=support@marblo.app ${{ matrix.platform == 'win' && '-c.npmRebuild=false' || '' }}
 
       - name: Upload artifacts
+        if: steps.guard.outputs.build == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: marblo-${{ matrix.platform }}-${{ matrix.arch }}
