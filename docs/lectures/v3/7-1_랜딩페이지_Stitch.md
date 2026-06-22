@@ -9,6 +9,9 @@ aliases: [SaaS 랜딩페이지 디자인]
 > 모듈 7 · 섹션 7-1 · 약 40분
 > 관련: [[6-4_CICD_파이프라인]] | [[7-2_런칭_체크리스트]]
 
+> 🗄️ **[구버전 · 신 7-4로 통합]** 이 문서는 구 모듈7(랜딩페이지·런칭) 자료입니다. 강의 재편(재작성 청사진 기준)으로 구 `7-1_랜딩페이지_Stitch` + `7-2_런칭_체크리스트`가 **[[7-4_랜딩페이지_런칭체크리스트]]** 한 편으로 흡수·재집필되었습니다. 최신 본문은 그쪽을 보세요.
+> 주요 변경: Stitch MCP **필수 → 선택**(미가용 시 에이전트 직접 구현), 예시 SaaS를 **ReachWave(콜드메일)**로 통일, 4탭 → 9탭 UI 반영.
+
 ---
 
 ## 도입 (5분)
@@ -143,13 +146,13 @@ claude
 
 ### 각 섹션의 역할
 
-| 섹션 | 목적 | 전환율 기여 |
-|------|------|------------|
-| Hero | 3초 안에 가치 전달 | 가장 중요 — 여기서 70% 이탈 결정 |
-| Features | "이게 뭘 해주는데?" | 관심 유지 |
-| How It Works | "어떻게 쓰는 거야?" | 사용 장벽 낮춤 |
-| Pricing | "얼마야?" | 구매 의사 결정 |
-| CTA | "지금 하자!" | 최종 전환 |
+| 섹션         | 목적                | 전환율 기여                      |
+| ------------ | ------------------- | -------------------------------- |
+| Hero         | 3초 안에 가치 전달  | 가장 중요 — 여기서 70% 이탈 결정 |
+| Features     | "이게 뭘 해주는데?" | 관심 유지                        |
+| How It Works | "어떻게 쓰는 거야?" | 사용 장벽 낮춤                   |
+| Pricing      | "얼마야?"           | 구매 의사 결정                   |
+| CTA          | "지금 하자!"        | 최종 전환                        |
 
 이 구조를 그대로 따라갈 겁니다.
 
@@ -263,8 +266,8 @@ export default function HeroSection() {
           transition={{ delay: 0.2 }}
           className="text-xl text-gray-300 mb-10 max-w-2xl mx-auto"
         >
-          유튜브 영상 URL 하나면 충분합니다. AI가 핵심 내용을 요약하고,
-          트렌드를 분석하고, 인사이트 리포트를 자동 생성합니다.
+          유튜브 영상 URL 하나면 충분합니다. AI가 핵심 내용을 요약하고, 트렌드를
+          분석하고, 인사이트 리포트를 자동 생성합니다.
         </motion.p>
 
         {/* CTA 버튼 */}
@@ -274,11 +277,18 @@ export default function HeroSection() {
           transition={{ delay: 0.3 }}
           className="flex flex-col sm:flex-row gap-4 justify-center"
         >
-          <Button size="lg" className="bg-purple-600 hover:bg-purple-700 text-lg px-8 py-6">
+          <Button
+            size="lg"
+            className="bg-purple-600 hover:bg-purple-700 text-lg px-8 py-6"
+          >
             무료로 시작하기
             <ArrowRight className="ml-2 w-5 h-5" />
           </Button>
-          <Button size="lg" variant="outline" className="text-lg px-8 py-6 border-gray-600 text-gray-300 hover:bg-gray-800">
+          <Button
+            size="lg"
+            variant="outline"
+            className="text-lg px-8 py-6 border-gray-600 text-gray-300 hover:bg-gray-800"
+          >
             <Play className="mr-2 w-5 h-5" />
             데모 보기
           </Button>
@@ -304,11 +314,7 @@ const plans = [
     name: "Free",
     price: "0",
     description: "시작해보세요",
-    features: [
-      "월 10건 분석",
-      "기본 요약 리포트",
-      "1개 채널 트래킹",
-    ],
+    features: ["월 10건 분석", "기본 요약 리포트", "1개 채널 트래킹"],
     cta: "무료로 시작",
     highlighted: false,
   },
@@ -473,4 +479,5 @@ npm install @vercel/og
 다음 섹션에서는 이 랜딩페이지를 실제로 런칭하기 위한 체크리스트를 다루겠습니다. 도메인, SSL, 에러 모니터링, 법적 페이지까지요.
 
 ---
+
 다음: [[7-2_런칭_체크리스트]]
