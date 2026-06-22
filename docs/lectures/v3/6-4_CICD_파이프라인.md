@@ -9,6 +9,9 @@ aliases: [CICD 파이프라인]
 > 모듈 6 · 섹션 6-4 · 약 20분
 > 관련: [[6-3_크론잡_자동화]] | [[실습_GCP_배포]]
 
+> 🗄️ **[구버전 · M7로 이동]** 이 문서는 구 모듈6(GCP 배포·자동화) 자료입니다. 강의 재편(재작성 청사진 기준)으로 **모듈 7(배포 + 런칭)**의 **[[7-3_크론잡_CICD_자동화]]** 로 이동·재집필되었습니다. 최신 본문은 그쪽을 보세요.
+> 신 모듈6는 **플릿·오케 심화 + 사용량/비용**으로 바뀌었습니다 → [[6-1_모델별강점_Claude_Codex_Antigravity]].
+
 ---
 
 ## 도입 (3분)
@@ -67,8 +70,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - run: npm ci
       - run: npm run lint
@@ -76,13 +79,13 @@ jobs:
 
   # ── 빌드 + 배포 ──
   deploy:
-    needs: test  # 테스트 통과해야 배포
+    needs: test # 테스트 통과해야 배포
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     permissions:
       contents: read
-      id-token: write  # Workload Identity Federation용
+      id-token: write # Workload Identity Federation용
 
     steps:
       - uses: actions/checkout@v4
@@ -339,4 +342,5 @@ Cloud Run: 새 버전 자동 배포
 이것으로 모듈 6의 마지막 이론 섹션입니다. 다음은 전체 과정을 처음부터 끝까지 해보는 종합 실습입니다.
 
 ---
+
 다음: [[실습_GCP_배포]]
