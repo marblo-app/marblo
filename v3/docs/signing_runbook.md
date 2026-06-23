@@ -166,6 +166,164 @@ CI는 Windows를 **무서명 nsis `.exe`**로 산출한다(`build.yml`에 `WIN_C
 
 ---
 
+## 6. ★ GitHub Release 발행 — 서명 빌드를 자동업데이트 피드로 싣기
+
+§1~4에서 만든 **서명·공증된 산출물**을 실제로 사용자에게 흘려보내는 단계다. 여기서의 관심사는 "서명물을 **올바른 메타데이터와 함께** Release에 싣기" 한 가지다. 릴리스 생애주기(일반/핫픽스/롤백/리허설 절차)는 [`electron_updater_runbook.md`](./electron_updater_runbook.md)에 있고 중복하지 않는다. **이 절은 그 앞단 — 서명 빌드를 자동업데이트가 깨지지 않게 피드에 올리는 메커니즘**을 다룬다.
+
+### 6-0. 개념 — 빌드물은 커밋이 아니라 Release 에셋이다
+
+- `.dmg` / `.zip` / `.exe`는 **git 커밋에 넣지 않는다.** repo 비대화·LFS를 피하려고 GitHub **Release 에셋**으로 올린다.
+- electron-updater는 런타임에 Release의 **`latest*.yml`** 메타파일을 폴링해 새 버전을 감지하고, yml이 가리키는 본체(.zip/.exe)를 **sha512 무결성 검증** 후 내려받아 설치한다. → yml의 해시와 실제 에셋이 어긋나면 업데이트가 깨진다(§6-2의 Windows 함정 핵심).
+- **호스트 = `github.com/melocream/marblo`** (= origin). `electron-builder.yml`의 `publish: provider: github`는 owner/repo를 명시하지 않고 `v3/package.json`의 `repository.url`(`https://github.com/melocream/marblo.git`)에서 도출한다. 런타임 피드는 `v3/electron/updater.ts` 기본값 `melocream/marblo`. **이 두 곳이 같은 repo를 가리켜야** 발행처와 수신처가 일치한다(메모리 [release_host_melocream_decision]).
+
+### 6-1. macOS — `--publish always`로 한 번에 업로드
+
+mac은 §1의 서명·공증이 빌드에 배선돼 있어, 로컬에서 `--publish always`로 Release 업로드까지 한 방에 된다:
+
+```bash
+cd v3
+export GH_TOKEN=<melocream/marblo Release 쓰기 권한 PAT>   # 실값 금지, env로만
+npm run build:electron                                     # tsc(electron) + vite build
+npx electron-builder --mac --arm64 --publish always
+```
+
+- 결과: 서명+공증된 **`.dmg` / `.zip` + `latest-mac.yml` + `.blockmap`** 이 `melocream/marblo`의 **draft Release**(태그 = `v<package.json version>`)에 자동 업로드된다.
+- `GH_TOKEN`: GitHub PAT(classic의 `repo` scope 또는 fine-grained의 Contents: write). **시크릿 실값을 문서·코드에 넣지 말 것** — 셸 env로만 주입한다.
+- CI는 `--publish never`로 돌리고 별도 release job이 처리한다(§6-4). `--publish always`는 **로컬 수동 발행**일 때만.
+- 로컬 풀 빌드 시 `extraResources`가 `dist-mcp/`를 복사하므로 그 디렉터리가 있어야 한다. 없으면 `npm run build:mcp`를 먼저 돌린다.
+
+### 6-2. ★ Windows 함정 (핵심) — "빌드 후 서명"은 자동업데이트를 깬다
+
+CI(그리고 로컬 electron-builder)는 Windows를 **무서명 `.exe`**로 산출한다(§4, `WIN_CSC_*` 미배선). 문제는 순서다:
+
+1. electron-builder가 **무서명 exe**를 만들고, **그 순간** `latest.yml`의 `sha512`/`size`와 `.blockmap`을 계산한다.
+2. 그 뒤 USB 토큰 `signtool`로 서명하면 **exe 바이트가 바뀐다.**
+3. 이제 `latest.yml`(무서명 기준 해시)과 실제 서명된 exe가 **불일치** → electron-updater가 다운로드 후 sha512 검증에서 실패 → **자동업데이트가 깨진다.** `.blockmap`도 무서명 exe 기준이라 함께 stale.
+
+#### (권장) `win.sign` 커스텀 훅 — 빌드 _도중_ 서명
+
+electron-builder의 `win.sign`에 커스텀 서명 모듈 경로를 주면, electron-builder가 **`latest.yml`/`.blockmap`을 만들기 전 서명 단계에서** 그 훅을 호출한다. → 메타데이터가 **서명된 exe 기준**으로 생성되어 해시가 처음부터 일치한다.
+
+`v3/electron-builder.yml`의 `win` 블록에 `sign` 한 줄을 추가(설정 위치):
+
+```yaml
+win:
+  target:
+    - nsis
+  icon: resources/icon.png
+  signingHashAlgorithms:
+    - sha256
+  sign: ./scripts/win-sign.js # ← 빌드 도중 서명 훅 (아래 파일)
+```
+
+`v3/scripts/win-sign.js` (훅 예시):
+
+```js
+// electron-builder가 서명 대상 파일마다 이 함수를 호출한다(configuration.path = 대상 exe).
+// 전제: SafeNet/KoreaSSL USB 토큰이 꽂혀 있어야 하고, signtool 실행 중 토큰 PIN 입력
+// 프롬프트가 콘솔에 뜬다(stdio:'inherit'로 노출). PIN 입력만 사람이 한다.
+const { execFileSync } = require("node:child_process");
+
+exports.default = async function (configuration) {
+  execFileSync(
+    "signtool",
+    [
+      "sign",
+      "/fd",
+      "sha256",
+      "/tr",
+      "http://timestamp.digicert.com", // RFC3161 타임스탬프(만료 후에도 서명 유효)
+      "/td",
+      "sha256",
+      "/a", // 토큰의 적합한 인증서 자동 선택
+      configuration.path,
+    ],
+    { stdio: "inherit" },
+  );
+};
+```
+
+이러면 `npx electron-builder --win --x64 --publish never`(또는 `always`) 한 번으로 **서명된 exe + 일치하는 `latest.yml` + `.blockmap`**이 함께 나온다.
+
+> ⚠️ 위 yml/훅 변경은 **코드 변경**이라 본 문서(런북) 범위 밖이다. 여기서는 가이드만 제공하며, 실제 적용은 별도 티켓에서 `workflow_dispatch`로 win 서명 경로를 검증하며 진행한다(가짜통과 주의, §5).
+
+#### (차선) 수동 서명 후 `latest.yml` 재계산
+
+빌드-후-서명을 피할 수 없을 때(§4 절차로 이미 서명한 exe만 있을 때). 서명된 exe 기준으로 `latest.yml`의 해시·크기를 다시 써야 한다:
+
+```bash
+# 서명된 exe의 sha512 (electron-updater는 base64 인코딩된 sha512를 본다)
+openssl dgst -sha512 -binary "Marblo-Setup-3.0.0.exe" | openssl base64 -A; echo
+# 크기(bytes)
+stat -f%z "Marblo-Setup-3.0.0.exe"   # macOS/BSD  (Git Bash on Windows/Linux: stat -c%s)
+```
+
+위 값으로 `latest.yml`의 `files[].sha512` / `files[].size` 와 최하단 `path` / `sha512`를 교체한다.
+
+> ⚠️ **한계:** `.blockmap`도 무서명 exe 기준이라 stale 상태로 남는다 → 차등(delta) 업데이트가 깨져 매번 전체 재다운로드로 폴백한다. blockmap을 서명된 exe에 맞게 정확히 재생성하려면 결국 빌드 파이프라인이 필요하다. **그래서 (권장) 훅 방식이 정답이고, 차선은 임시방편으로만.**
+
+### 6-3. `gh release` CLI 절차 (mac + win을 한 태그에 모으기)
+
+```bash
+REPO=melocream/marblo
+TAG="v$(node -p "require('./v3/package.json').version")"   # 예: v3.0.0
+
+# 1) draft Release 생성 (--publish always가 이미 draft를 만들었으면 이 단계는 건너뛴다)
+gh release create "$TAG" --repo "$REPO" --draft --title "$TAG" --notes "...changelog..."
+
+# 2) 에셋 업로드 — 산출물 + 메타파일을 전부 (빠지면 §6-5대로 자동업데이트가 안 됨)
+gh release upload "$TAG" --repo "$REPO" \
+  v3/dist/*.dmg v3/dist/*.zip v3/dist/latest-mac.yml \
+  v3/dist/*.exe v3/dist/latest.yml \
+  v3/dist/*.blockmap
+
+# 3) 피드 검증(electron_updater_runbook §1) 후 공개
+gh release edit "$TAG" --repo "$REPO" --draft=false
+```
+
+- mac 빌드(맥)와 win 수동서명(윈도우 머신)은 보통 **다른 머신**에서 나온다. **같은 `$TAG` draft**에 각 머신에서 `gh release upload`로 추가하면 한 Release에 mac/win이 모인다.
+- 공개(`--draft=false`)는 `latest*.yml`까지 다 올라가고 피드 검증을 통과한 뒤에만. draft 상태에서는 electron-updater가 피드를 못 본다.
+
+### 6-4. CI 자동 경로와의 관계 (반드시 알아야 할 갭)
+
+- `v*` 태그를 push하면 `build.yml`의 `release` job(`softprops/action-gh-release@v2`, `draft: true`, `if: startsWith(github.ref, 'refs/tags/v')`)이 아티팩트로 draft Release를 만든다.
+- ★ **그러나** CI의 `Upload artifacts` 스텝 glob은 `*.dmg / *.zip / *.exe / *.AppImage / *.deb` 뿐 — **`latest*.yml`과 `.blockmap`을 아티팩트로 올리지 않는다**(`build.yml` L319~324). 따라서 **태그-자동 Release만으로는 자동업데이트 메타가 빠져 업데이트가 동작하지 않는다.**
+- 게다가 Windows는 CI 산출물이 **무서명 exe**다(§4). → 현재 신뢰 경로는 **6-1(mac `--publish always`) + 6-2(win 서명 훅) + 6-3(`gh release upload`)** 으로 **메타파일·서명까지 완비된 Release를 직접 만드는 것**이다. (CI 메타파일 누락을 build.yml에서 메울지는 별도 티켓.)
+
+### 6-5. 필수 메타파일 — 빠지면 자동업데이트 동작 안 함
+
+| 플랫폼 | 파일                     | 필수도        | 역할 / 없으면                                                     |
+| ------ | ------------------------ | ------------- | ----------------------------------------------------------------- |
+| mac    | `latest-mac.yml`         | **하드 필수** | 버전·zip URL·sha512. 없으면 **새 버전 감지 자체 불가**            |
+| mac    | `<app>-<ver>-*.zip`      | **하드 필수** | mac 업데이트 적용 본체(`.dmg`는 신규 설치용일 뿐, 업데이트엔 zip) |
+| mac    | `*.zip.blockmap`         | 권장          | 차등 다운로드용. 없으면 전체 재다운로드로 폴백(동작은 함)         |
+| win    | `latest.yml`             | **하드 필수** | 버전·exe URL·sha512. 없으면 **새 버전 감지 자체 불가**            |
+| win    | `Marblo-Setup-<ver>.exe` | **하드 필수** | 업데이트 본체                                                     |
+| win    | `*.exe.blockmap`         | 권장          | 차등 다운로드용. 없으면 전체 재다운로드로 폴백                    |
+
+정리: **`latest*.yml`은 하드 필수** — 없으면 자동업데이트가 아예 안 뜬다. **`.blockmap`은 차등 다운로드용** — 빠지면 매번 전체 파일을 다시 받느라 대역폭을 낭비할 뿐 업데이트 자체는 된다. 둘 다 올리는 것을 **기본값으로** 삼아 6-3 upload 목록에 항상 포함시킨다.
+
+### 6-6. Windows에서 Claude Code로 빌드·서명·업로드
+
+서명용 Windows 머신에 **Claude Code(CLI)**를 띄워 전 과정을 시킬 수 있다:
+
+```
+npm run build:electron → npx electron-builder --win --x64 (win.sign 훅) → gh release upload
+```
+
+**사람이 직접 해야 하는 건 단 둘뿐**이다:
+
+1. SafeNet/KoreaSSL **USB 토큰을 물리적으로 꽂기**
+2. `signtool` 서명 중 뜨는 **토큰 PIN 입력**
+
+나머지(빌드·서명 호출·업로드)는 전부 자동화 가능하다. PIN 실값은 어디에도 저장하지 말고 프롬프트에 그때만 입력한다.
+
+### 6-7. P0-12b 리허설과의 연결
+
+이렇게 **메타파일·서명까지 완비**해 발행한 Release라야 **구버전 → 핫픽스 자동수신 리허설**(P0-12b, 티켓 `nzDieNhedP5sWnagJY3e`)이 의미가 있다. `latest*.yml`이 빠졌거나 win exe가 무서명/해시 불일치면 리허설은 통과할 수 없다. 리허설 절차는 [`electron_updater_runbook.md`](./electron_updater_runbook.md) §4를 따른다.
+
+---
+
 ## 부록 — 빠른 체크리스트
 
 - [ ] 유료 Apple Developer Program 멤버십 active
@@ -177,3 +335,11 @@ CI는 Windows를 **무서명 nsis `.exe`**로 산출한다(`build.yml`에 `WIN_C
 - [ ] 로컬 `spctl --assess` / `stapler validate` 재검증 (§1-6)
 - [ ] Windows: 무서명 .exe 다운 → USB 토큰 signtool 수동 서명 (§4)
 - [ ] PR 초록만 믿지 말고 push/dispatch로 서명경로 실검증 (§5)
+- [ ] 발행 호스트 = `melocream/marblo` 확인 (repository.url ↔ updater.ts 일치, §6-0)
+- [ ] mac: `GH_TOKEN`(env) 설정 후 `electron-builder --mac --arm64 --publish always` (§6-1)
+- [ ] win: 빌드-후-서명 함정 회피 — `win.sign` 훅으로 빌드 도중 서명(권장) / 차선은 latest.yml 재계산 (§6-2)
+- [ ] `gh release upload`에 `latest*.yml` + `.blockmap` 포함 (mac/win 같은 태그에 모으기, §6-3)
+- [ ] CI 태그-자동 Release는 `latest*.yml`/`.blockmap` 미포함 갭 인지 — 수동 보완 (§6-4)
+- [ ] 메타파일 점검: `latest-mac.yml`/`latest.yml`(하드 필수) + `.blockmap`(권장) 다 올렸는지 (§6-5)
+- [ ] 공개 전 draft 상태에서 피드 검증, 이후 `gh release edit --draft=false` (§6-3)
+- [ ] P0-12b(`nzDieNhedP5sWnagJY3e`) 구버전→핫픽스 수신 리허설 연결 (§6-7)
