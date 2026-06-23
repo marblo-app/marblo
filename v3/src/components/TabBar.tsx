@@ -288,7 +288,13 @@ export function TabBar({ activeTab, onTabChange, onPopOut }: TabBarProps) {
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
-            className={`group relative flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${
+            className={`group relative flex items-center gap-1.5 py-2 pl-4 text-sm font-medium transition-colors ${
+              // Pop-out tabs get extra right padding so the floating ↗ button
+              // (absolute, ~18px wide) sits clear of the label instead of
+              // overlapping its last characters. Constant regardless of hover
+              // (the button is opacity-only) → no layout shift.
+              canPopOut ? "pr-7" : "pr-4"
+            } ${
               activeTab === tab.id
                 ? "border-b-2 border-blue-500 text-blue-400"
                 : "text-gray-400 hover:text-gray-200"
@@ -301,8 +307,9 @@ export function TabBar({ activeTab, onTabChange, onPopOut }: TabBarProps) {
               // with a click handler that stops propagation (avoids switching
               // the tab) — valid HTML and pops the panel into its own window.
               // Absolutely positioned so it never affects the tab's width or
-              // the spacing between tabs (it floats over the right padding and
-              // only becomes visible on hover) — keeps all tabs uniform.
+              // the spacing between tabs — it floats inside the extra right
+              // padding the pop-out tab reserves (pr-7) and only becomes
+              // visible on hover, so it never overlaps the label text.
               <span
                 role="button"
                 tabIndex={-1}
@@ -312,7 +319,7 @@ export function TabBar({ activeTab, onTabChange, onPopOut }: TabBarProps) {
                   e.stopPropagation();
                   onPopOut(tab.id as "board" | "code");
                 }}
-                className="absolute right-0.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 opacity-0 transition-opacity hover:text-gray-200 group-hover:opacity-100"
+                className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 opacity-0 transition-opacity hover:text-gray-200 group-hover:opacity-100"
               >
                 <svg
                   className="h-3.5 w-3.5"
