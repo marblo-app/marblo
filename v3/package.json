@@ -37,7 +37,7 @@
     "test:e2e:pw:headed": "playwright test --headed",
     "test:e2e:pw:debug": "PWDEBUG=1 playwright test",
     "test:e2e:pw:report": "playwright show-report",
-    "postinstall": "electron-rebuild"
+    "postinstall": "electron-rebuild && node scripts/fix-pty-perms.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
