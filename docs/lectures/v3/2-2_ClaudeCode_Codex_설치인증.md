@@ -108,6 +108,7 @@ codex login
 정리하면 — **기본 2인은 Claude Code + Codex, 3번째는 Antigravity.** Gemini는 무대에서 내려갔습니다.
 
 [설명보드: "우리 팀의 fleet" 구성도]
+📊 보드 파일: [assets/2-2_우리팀_Fleet_구성도.excalidraw](assets/2-2_우리팀_Fleet_구성도.excalidraw) — Excalidraw 에디터/excalidraw.com 에서 열기
 
 - 가로로 카드 3장: 🟣 Claude Code(주력·설계/리뷰) / 🟢 Codex(구현/테스트) / 🟠 Antigravity(곧 합류).
 - 그 아래 흐릿한 회색 카드 1장: Gemini — 위에 빨간 "단종 예정" 도장.

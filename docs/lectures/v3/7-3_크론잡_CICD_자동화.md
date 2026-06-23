@@ -218,6 +218,7 @@ Deploy ReachWave API
 > 💡 같은 일을 **반복**해서 여러 서비스/잡에 깔아야 한다면 — 예를 들어 "프론트에도 같은 파이프라인, staging 환경도 추가, Slack 알림도" — 모듈 8의 **Ralph**(`/tf-ralph`)로 배치 처리할 수 있습니다([[8-2_Ralph_반복자동화]]). 여기선 한 줄짜리 자동화를 손으로 익혀 두는 게 먼저예요.
 
 > **[설명보드: 7-3 자동화의 두 축]** — Excalidraw (후속 제작)
+> 📊 보드 파일: [assets/7-3_자동화의_두축.excalidraw](assets/7-3_자동화의_두축.excalidraw) — Excalidraw 에디터/excalidraw.com 에서 열기
 >
 > - 왼쪽 축(크론): 시계 아이콘 → Cloud Scheduler → (OIDC 자물쇠) → Cloud Run `/cron/daily-digest` → "리드 재수집 + A/B 집계". 캡션 "정해진 시각에 알아서".
 > - 오른쪽 축(CI/CD): 개발자 → `main` 머지 → GitHub Actions(test→build→deploy, WIF 자물쇠) → Cloud Run 새 리비전. 캡션 "머지가 곧 배포".

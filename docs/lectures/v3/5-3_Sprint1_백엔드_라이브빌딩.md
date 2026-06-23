@@ -341,6 +341,7 @@ async def toss_webhook(req: Request, body: dict = Body(...)):
 - [ ] 테스트키/운영키 환경 변수 분리
 
 > **[설명보드: 5-3 백엔드 병렬 분담]** — Excalidraw (후속 제작)
+> 📊 보드 파일: [assets/5-3_백엔드_병렬분담.excalidraw](assets/5-3_백엔드_병렬분담.excalidraw) — Excalidraw 에디터/excalidraw.com 에서 열기
 >
 > - 왼쪽 레인 🟣 Claude: OAuth·LLM 분석·5톤 생성·결제(견고함이 필요한 핵심 로직).
 > - 오른쪽 레인 Codex: DB·CSV·큐·webhook 수신·Docker(패턴화된 보일러플레이트).

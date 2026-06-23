@@ -321,6 +321,7 @@ docker compose up -d --build
 이 모든 게 에이전트들이 22개 태스크를 처리해 만든 결과물입니다. 직접 코딩한 건 없고, PM으로서 기획·관찰·리뷰·의사결정만 했어요.
 
 > **[설명보드: 5-4 의존성 해제 → 속도]** — Excalidraw (후속 제작)
+> 📊 보드 파일: [assets/5-4_의존성해제_속도.excalidraw](assets/5-4_의존성해제_속도.excalidraw) — Excalidraw 에디터/excalidraw.com 에서 열기
 >
 > - 타임라인 가로축: Sprint 1(백엔드) → REVIEW 게이트 → Sprint 2(프론트 병렬 폭발).
 > - 게이트 통과 직후 프론트 레인 6개가 한꺼번에 열리는 "팬아웃" 시각화.
