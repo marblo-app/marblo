@@ -35,11 +35,28 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
     edges: [string, string][];
   } | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Whether the user is currently parked near the bottom of the log.
+  // Captured on scroll (i.e. before new streamed content arrives) so that
+  // scrolling up to read past logs suppresses the auto-scroll. Defaults to
+  // true so the first messages stick to the bottom.
+  const isAtBottomRef = useRef(true);
+
+  const handleScroll = () => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    isAtBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = messagesContainerRef.current;
+    if (!el || !isAtBottomRef.current) return;
+    // Set scrollTop directly (instant) on the message container itself —
+    // avoids smooth-animation accumulation during streaming and prevents the
+    // scroll from propagating to ancestor scroll containers (the whole panel).
+    el.scrollTop = el.scrollHeight;
   }, [messages, loading]);
 
   useEffect(() => {
@@ -206,7 +223,11 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto p-4 space-y-4"
+        >
           {messages.length === 0 && (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
@@ -275,8 +296,6 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
               </div>
             </div>
           )}
-
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Editable Task Preview */}
