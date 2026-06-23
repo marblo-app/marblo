@@ -7,6 +7,9 @@
     "url": "https://github.com/melocream/marblo.git"
   },
   "main": "dist-electron/main.js",
+  "engines": {
+    "node": ">=20 <23"
+  },
   "scripts": {
     "predev": "npm run build:mcp",
     "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"sleep 2 && electron . --remote-debugging-port=9222\"",
