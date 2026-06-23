@@ -25,6 +25,11 @@ import { TaskDecomposer } from "./orchestrator/task-decomposer";
 import type { DecomposedTask } from "./orchestrator/dag-generator";
 import { BridgeServer, withCompletionFooter } from "./bridge-server";
 import {
+  AgentWatchdog,
+  resolveWatchdogConfig,
+  type WatchdogTicket,
+} from "./agent-watchdog";
+import {
   OrchestratorManager,
   isOrchestratorSession,
 } from "./orchestrator-manager";
@@ -544,6 +549,124 @@ const bridgeServer = new BridgeServer(
   worktreeCoordinator,
 );
 
+// ── Agent health watchdog (native orchestrator self-recovery) ──
+// Periodically inspects CLAIMED/IN_PROGRESS board tickets whose assigned worker
+// has died (PTY exited → stopped/error, or removed) or gone silent (alive but no
+// PTY output / board activity past the grace window) and recovers them:
+// nudge the live PTY, then respawn via the guard-safe dispatchTask path
+// (per-task lock + findLiveTaskAgent → no double-spawn). Recovery-only — it
+// never claims TODO tickets. Mission tickets are excluded here because the
+// conductor's own report-watchdog (conductor-driver.ts) already owns them.
+// Started/stopped in the app lifecycle below.
+const agentWatchdog = new AgentWatchdog(
+  {
+    listActiveTickets: async (): Promise<WatchdogTicket[]> => {
+      const { app, authReady } = getMissionFirebaseApp();
+      await authReady;
+      const db = getFirestore(app);
+      const snap = await fbGetDocs(
+        fbQuery(
+          fbCollection(db, "tasks"),
+          fbWhere("status", "in", ["CLAIMED", "IN_PROGRESS"]),
+        ),
+      );
+      const out: WatchdogTicket[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        // Mission tickets are recovered by the conductor's report-watchdog.
+        if (data.missionId) return;
+        const projection = data.projection as
+          | { lastAgentId?: unknown; lastActivityAt?: unknown }
+          | undefined;
+        const agentId =
+          (typeof projection?.lastAgentId === "string" &&
+            projection.lastAgentId) ||
+          (typeof data.claimedBy === "string"
+            ? (data.claimedBy as string)
+            : null) ||
+          null;
+        const ts = projection?.lastActivityAt as
+          | { toMillis?: () => number }
+          | undefined;
+        out.push({
+          taskId: d.id,
+          projectId: typeof data.projectId === "string" ? data.projectId : "",
+          status: data.status as "CLAIMED" | "IN_PROGRESS",
+          role: typeof data.role === "string" ? data.role : "backend",
+          agentId: agentId || null,
+          lastActivityAtMs:
+            typeof ts?.toMillis === "function" ? ts.toMillis() : null,
+          title: typeof data.title === "string" ? data.title : undefined,
+        });
+      });
+      return out;
+    },
+    getAgentHealth: (agentId) => {
+      const a = agentManager.getAgent(agentId);
+      if (!a) return null;
+      return {
+        status: a.status,
+        lastPtyActivityMs: a.lastPtyActivity,
+        currentTaskId: a.currentTaskId,
+      };
+    },
+    nudgeAgent: (agentId, message) => {
+      const a = agentManager.getAgent(agentId);
+      if (!a) return false;
+      try {
+        ptyManager.writeAndSubmit(a.ptySessionId, message);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    respawnForTicket: async (ticket) => {
+      try {
+        const res = await bridgeServer.dispatchTask({
+          role: ticket.role,
+          instruction:
+            `이전 담당 에이전트가 중단/침묵 상태로 감지되어 워치독이 복구를 ` +
+            `트리거했습니다. 태스크 "${
+              ticket.title ?? ticket.taskId
+            }" 의 현재 ` +
+            `상태를 점검하고, 끝났으면 submit_for_review, 막혔으면 ` +
+            `update_task_status(BLOCKED), 아니면 이어서 진행하세요.`,
+          taskId: ticket.taskId,
+          projectId: ticket.projectId || undefined,
+          // Recovery must not be blocked by the per-plan concurrency cap.
+          system: true,
+        });
+        return res?.success !== false;
+      } catch (err) {
+        console.error("[AgentWatchdog] respawn dispatch failed:", err);
+        return false;
+      }
+    },
+    recordRecovery: (ticket, phase, detail) => {
+      // Board-visible audit WITHOUT bumping projection.lastActivityAt (which
+      // would mask the watchdog's own silence detection). Best-effort, fire
+      // and forget — never blocks or breaks a sweep.
+      void (async () => {
+        try {
+          const { app, authReady } = getMissionFirebaseApp();
+          await authReady;
+          const db = getFirestore(app);
+          await fbAddDoc(fbCollection(db, "activities"), {
+            taskId: ticket.taskId,
+            agentId: ticket.agentId ?? "watchdog",
+            message: `🔧 [Watchdog ${phase}] ${detail}`,
+            createdAt: fbTimestamp.now(),
+            source: "watchdog",
+          });
+        } catch (err) {
+          console.error("[AgentWatchdog] recordRecovery write failed:", err);
+        }
+      })();
+    },
+  },
+  resolveWatchdogConfig(),
+);
+
 // Per-project orchestrator instances. One window per project is the typical
 // usage; if the same project is opened in two windows they share an instance
 // (same view, same PTY) — distinct projects stay fully isolated.
@@ -1008,6 +1131,9 @@ import {
   getDoc as fbGetDoc,
   updateDoc as fbUpdateDoc,
   addDoc as fbAddDoc,
+  query as fbQuery,
+  where as fbWhere,
+  getDocs as fbGetDocs,
   Timestamp as fbTimestamp,
 } from "firebase/firestore";
 
@@ -3549,6 +3675,14 @@ app.whenReady().then(async () => {
       console.error("[Main] Mission engine startup failed:", err);
     }
   }
+
+  // Native agent-health watchdog — self-recovers stuck board tickets without
+  // relying on the orchestrator's own /loop session. Recovery-only.
+  try {
+    agentWatchdog.start();
+  } catch (err) {
+    console.error("[Main] Agent watchdog startup failed:", err);
+  }
 });
 
 function stopAllOrchestrators(): void {
@@ -3567,6 +3701,7 @@ app.on("window-all-closed", () => {
     pendingListener.detachAll();
     ptyManager.killAll();
     fsManager.stopAllWatching();
+    agentWatchdog.stop();
     missionBundle?.dispose();
     app.quit();
   }
@@ -3588,6 +3723,7 @@ app.on("before-quit", () => {
   pendingListener.detachAll();
   ptyManager.killAll();
   fsManager.stopAllWatching();
+  agentWatchdog.stop();
   missionBundle?.dispose();
 });
 
