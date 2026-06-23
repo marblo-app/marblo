@@ -3,7 +3,12 @@ import path from "path";
 import os from "os";
 import { encodeClaudeProjectDir, claudeProjectDir } from "./claude-paths";
 import { PtyManager, type DangerEvent } from "./pty-manager";
-import { AgentConfigGenerator, LaunchConfig } from "./agent-config";
+import {
+  AgentConfigGenerator,
+  LaunchConfig,
+  resolveOrchestratorModel,
+  orchestratorCommandForModel,
+} from "./agent-config";
 import { contextForKind } from "./mcp-server/context";
 import { YOLO_FLAG, telegramChannelLaunchFlags } from "./telegram-channels";
 
@@ -315,13 +320,20 @@ export class OrchestratorManager {
       }, shouldResume=${!!shouldResume}`,
     );
 
-    // Generate MCP config for orchestrator (always claude)
+    // Generate MCP config for orchestrator. Model is env-selectable via
+    // MARBLO_ORCHESTRATOR_MODEL (default "claude"). The default path resolves
+    // to model:"claude"/command:"claude" — byte-identical to the previous
+    // hardcoding, so current behavior is unchanged. Selecting codex/local here
+    // only constructs the launchConfig for that binary; the orchestrator's
+    // actual readiness/prompt/session wiring for non-claude models is a
+    // separate follow-up (backlog IUj7YTFqJVZvi9AbtTPf).
+    const orchestratorModel = resolveOrchestratorModel();
     const launchConfig = this.configGenerator.getLaunchConfig(
       {
         id: sessionId,
-        model: "claude",
+        model: orchestratorModel,
         role: "orchestrator",
-        command: "claude",
+        command: orchestratorCommandForModel(orchestratorModel),
       },
       rootPath,
     );

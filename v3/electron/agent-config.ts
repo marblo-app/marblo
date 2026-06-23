@@ -179,6 +179,75 @@ const MODEL_BINARY: Partial<Record<ModelType, string>> = {
   antigravity: "agy",
 };
 
+// ── 오케스트레이터 부팅 모델 추상화 ─────────────────────────────────
+//
+// 워커는 이미 멀티모델(getLaunchConfig 모델분기 + MODEL_BINARY + resolveHarnessCli)
+// 을 타지만, 오케스트레이터만 model/command 가 "claude" 로 하드코딩돼 단락돼 있었다.
+// 이 단락을 env 로 풀어 codex/local 오케를 "실험 가능"하게만 한다 — codex/local
+// 오케의 실제 정상동작(PTY readiness, 프롬프트/헌법 분기, 세션파서)은 별도 백로그
+// (IUj7YTFqJVZvi9AbtTPf) 몫이다. 여기서는 launchConfig 가 선택된 모델로 *구성되기만*
+// 하면 된다.
+//
+// ★기본값 claude = 현 동작 0 변화가 절대 기준. 미설정/빈값/미지원 → "claude".
+
+/** 오케스트레이터 부팅 모델의 안전 기본값. 불확실한 모든 상황의 귀결. */
+export const DEFAULT_ORCHESTRATOR_MODEL: ModelType = "claude";
+
+/**
+ * 오케스트레이터를 어떤 모델로 부팅할지 env 로 결정한다(순수 함수 — process.env
+ * 만 읽음). MARBLO_ORCHESTRATOR_MODEL 을 유효 ModelType 으로 매핑한다.
+ *
+ *   - 미설정/빈값          → "claude" (기본, 현 동작 0 변화)
+ *   - "codex"             → "gpt" (기존 내부 네이밍으로 정규화)
+ *   - claude/gpt/antigravity/local/custom → 그대로
+ *   - 그 외 알 수 없는 값  → "claude" 폴백 + console.warn
+ *
+ * gemini 는 소프트 제거된 모델이라 의도적으로 받지 않는다(미지원 값으로 취급 →
+ * claude 폴백). 새 오케 모델을 실험하려면 이 허용 목록에 추가하면 된다.
+ */
+export function resolveOrchestratorModel(): ModelType {
+  const raw = (process.env.MARBLO_ORCHESTRATOR_MODEL || "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return DEFAULT_ORCHESTRATOR_MODEL;
+  // "codex" 는 사용자/문서에서 흔히 쓰는 별칭 — 내부 ModelType "gpt" 로 정규화.
+  const normalized = raw === "codex" ? "gpt" : raw;
+  const allowed: ModelType[] = [
+    "claude",
+    "gpt",
+    "antigravity",
+    "local",
+    "custom",
+  ];
+  if ((allowed as string[]).includes(normalized)) {
+    return normalized as ModelType;
+  }
+  console.warn(
+    `[orchestrator-model] unsupported MARBLO_ORCHESTRATOR_MODEL=${JSON.stringify(
+      raw,
+    )} → falling back to ${JSON.stringify(DEFAULT_ORCHESTRATOR_MODEL)}`,
+  );
+  return DEFAULT_ORCHESTRATOR_MODEL;
+}
+
+/**
+ * 오케스트레이터를 띄울 때 getLaunchConfig 의 agent.command(=buildCLICommand 의
+ * baseCommand)로 넘길 바이너리 이름을 모델에서 도출한다. 기존 워커 매핑(MODEL_BINARY)
+ * 을 그대로 재사용한다 — 새 분기 로직을 만들지 않는다.
+ *
+ *   - claude       → "claude" (★현행 리터럴 그대로. buildCLICommand 의 claude
+ *                     분기는 baseCommand 가 truthy 면 그대로 쓰므로, 이 값이
+ *                     기본 경로의 byte-identical 동등성을 보장한다.)
+ *   - gpt/antigravity/gemini → MODEL_BINARY (codex/agy/gemini)
+ *   - local/custom → 관리 바이너리가 없으므로 모델명을 그대로 넘긴다
+ *                     (buildCLICommand 의 custom/default 분기가 baseCommand 를
+ *                     그대로 command 로 사용 — 실험용 경로).
+ */
+export function orchestratorCommandForModel(model: ModelType): string {
+  if (model === "claude") return "claude";
+  return MODEL_BINARY[model] || model;
+}
+
 // ── 최상위 모델 견고화 (SPAWN-MODEL-ALLOCATION-V2 §3) ──────────────
 //
 // complex 티어가 쓰는 "현재 사용 가능한 최상위 Claude 모델 id"를 env 주입 +
@@ -834,7 +903,11 @@ export class AgentConfigGenerator {
    * Generate role-specific skill file in the project's skills directory.
    * Returns the path to the skill file.
    */
-  generateSkillFile(agentId: string, role: string, _projectDir: string): string {
+  generateSkillFile(
+    agentId: string,
+    role: string,
+    _projectDir: string,
+  ): string {
     const safeRole = role.replace(/[^a-zA-Z0-9_]/g, "");
     const skillSource = path.join(SKILLS_DIR, `${safeRole}_agent.md`);
 
