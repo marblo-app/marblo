@@ -1,5 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { addActivity } from "../../services/activityService";
+import {
+  clipboardEventHasImage,
+  insertAtCaret,
+  resolveClipboardImagePaths,
+} from "../../utils/clipboardImage";
 
 interface FeedbackEntry {
   text: string;
@@ -60,6 +65,22 @@ export default function FeedbackInput({
     }
   };
 
+  // Paste an image → save it to disk and inject its absolute path so the agent
+  // can Read it. Plain-text pastes fall through to the default behavior.
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    if (!clipboardEventHasImage(e)) return;
+    e.preventDefault();
+    const el = inputRef.current;
+    void resolveClipboardImagePaths().then((paths) => {
+      if (paths.length === 0 || !el) return;
+      const { value, caret } = insertAtCaret(el, paths.join(" "));
+      setText(value);
+      requestAnimationFrame(() => {
+        el.selectionStart = el.selectionEnd = caret;
+      });
+    });
+  };
+
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString("ko-KR", {
       hour: "2-digit",
@@ -115,6 +136,7 @@ export default function FeedbackInput({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder="PM 피드백을 에이전트에게 전달합니다"
           disabled={!sessionId || sending}
           className="flex-1 rounded bg-[#313244] px-3 py-1.5 text-sm text-[#cdd6f4] placeholder-[#6c7086] outline-none focus:ring-1 focus:ring-[#89b4fa] disabled:opacity-50"

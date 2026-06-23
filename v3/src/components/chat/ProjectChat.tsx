@@ -5,6 +5,11 @@ import { useAgentStore } from "../../stores/agentStore";
 import { useAuth } from "../../hooks/useAuth";
 import { addPendingInstruction } from "../../services/pendingInstructionService";
 import { sendSystemMessage } from "../../services/chatService";
+import {
+  clipboardEventHasImage,
+  insertAtCaret,
+  resolveClipboardImagePaths,
+} from "../../utils/clipboardImage";
 import type { ChatMessage } from "../../types/chat";
 
 function timeAgo(date: Date): string {
@@ -316,6 +321,22 @@ export function ProjectChat() {
     }
   };
 
+  // Paste an image → save it to disk and inject its absolute path so the
+  // mentioned agent can Read it. Plain-text pastes are left untouched.
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!clipboardEventHasImage(e)) return;
+    e.preventDefault();
+    const el = inputRef.current;
+    void resolveClipboardImagePaths().then((paths) => {
+      if (paths.length === 0 || !el) return;
+      const { value, caret } = insertAtCaret(el, paths.join(" "));
+      setInput(value);
+      requestAnimationFrame(() => {
+        el.selectionStart = el.selectionEnd = caret;
+      });
+    });
+  };
+
   if (!currentProject) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -366,6 +387,7 @@ export function ProjectChat() {
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder="메시지 입력... (@로 멘션)"
             rows={1}
             className="flex-1 resize-none rounded-lg border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"

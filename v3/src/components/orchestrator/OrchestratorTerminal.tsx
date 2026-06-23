@@ -6,6 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { CanvasAddon } from "@xterm/addon-canvas";
 import "@xterm/xterm/css/xterm.css";
 import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
+import { resolveClipboardForTerminal } from "../../utils/clipboardImage";
 
 interface OrchestratorTerminalProps {
   sessionId: string;
@@ -79,10 +80,9 @@ export default memo(function OrchestratorTerminal({
         !e.altKey
       ) {
         e.preventDefault();
-        void window.electronAPI.clipboard
-          .readText()
-          .then((text) => {
-            if (text) terminal.paste(text);
+        void resolveClipboardForTerminal()
+          .then((data) => {
+            if (data) terminal.paste(data);
           })
           .catch(() => {});
         return false;
