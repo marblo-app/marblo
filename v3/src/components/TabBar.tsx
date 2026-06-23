@@ -288,7 +288,7 @@ export function TabBar({ activeTab, onTabChange, onPopOut }: TabBarProps) {
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
-            className={`group flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${
+            className={`group relative flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === tab.id
                 ? "border-b-2 border-blue-500 text-blue-400"
                 : "text-gray-400 hover:text-gray-200"
@@ -300,6 +300,9 @@ export function TabBar({ activeTab, onTabChange, onPopOut }: TabBarProps) {
               // Nested inside the tab <button>, so this is a non-button element
               // with a click handler that stops propagation (avoids switching
               // the tab) — valid HTML and pops the panel into its own window.
+              // Absolutely positioned so it never affects the tab's width or
+              // the spacing between tabs (it floats over the right padding and
+              // only becomes visible on hover) — keeps all tabs uniform.
               <span
                 role="button"
                 tabIndex={-1}
@@ -309,7 +312,7 @@ export function TabBar({ activeTab, onTabChange, onPopOut }: TabBarProps) {
                   e.stopPropagation();
                   onPopOut(tab.id as "board" | "code");
                 }}
-                className="ml-1 rounded p-0.5 text-gray-500 opacity-0 transition-opacity hover:text-gray-200 group-hover:opacity-100"
+                className="absolute right-0.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 opacity-0 transition-opacity hover:text-gray-200 group-hover:opacity-100"
               >
                 <svg
                   className="h-3.5 w-3.5"
