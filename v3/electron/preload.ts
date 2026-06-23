@@ -34,6 +34,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
         rootPath?: string;
         projectId?: string;
       }>,
+    // Pop a tab (Board/Code) out into its own detached window. The new window
+    // inherits this window's project so it opens on the same data.
+    popOutTab: (view: "board" | "code") =>
+      ipcRenderer.invoke("window:popOutTab", view) as Promise<{
+        success: boolean;
+      }>,
   },
   // Resolved Claude Code binary used to launch agents (path + version).
   claude: {

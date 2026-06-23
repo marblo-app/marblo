@@ -258,7 +258,12 @@ const tabs: Tab[] = [
 interface TabBarProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  /** Pop a tab out into its own window. Only Board/Code expose the affordance. */
+  onPopOut?: (view: "board" | "code") => void;
 }
+
+// Tabs that can be detached into their own window.
+const POP_OUT_TABS: Set<TabId> = new Set(["board", "code"]);
 
 // Hidden tabs in production — only shown when VITE_DEV_FEATURES includes the tab id.
 // "missions" 는 MVP 제외(보드+오케스트레이터 집중). 미션은 고비용(subagent-heavy)·
@@ -269,7 +274,7 @@ const devFeatures = (import.meta.env.VITE_DEV_FEATURES || "")
   .split(",")
   .map((s: string) => s.trim());
 
-export function TabBar({ activeTab, onTabChange }: TabBarProps) {
+export function TabBar({ activeTab, onTabChange, onPopOut }: TabBarProps) {
   const visibleTabs = tabs.filter((tab) => {
     if (!DEV_ONLY_TABS.has(tab.id)) return true;
     return devFeatures.includes(tab.id);
@@ -277,20 +282,53 @@ export function TabBar({ activeTab, onTabChange }: TabBarProps) {
 
   return (
     <div className="flex border-b border-gray-700 bg-gray-900">
-      {visibleTabs.map((tab) => (
-        <button
-          key={tab.id}
-          onClick={() => onTabChange(tab.id)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${
-            activeTab === tab.id
-              ? "border-b-2 border-blue-500 text-blue-400"
-              : "text-gray-400 hover:text-gray-200"
-          }`}
-        >
-          {tab.icon}
-          {tab.label}
-        </button>
-      ))}
+      {visibleTabs.map((tab) => {
+        const canPopOut = !!onPopOut && POP_OUT_TABS.has(tab.id);
+        return (
+          <button
+            key={tab.id}
+            onClick={() => onTabChange(tab.id)}
+            className={`group flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === tab.id
+                ? "border-b-2 border-blue-500 text-blue-400"
+                : "text-gray-400 hover:text-gray-200"
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+            {canPopOut && (
+              // Nested inside the tab <button>, so this is a non-button element
+              // with a click handler that stops propagation (avoids switching
+              // the tab) — valid HTML and pops the panel into its own window.
+              <span
+                role="button"
+                tabIndex={-1}
+                title="별도 창으로 열기"
+                aria-label={`${tab.label} 별도 창으로 열기`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPopOut(tab.id as "board" | "code");
+                }}
+                className="ml-1 rounded p-0.5 text-gray-500 opacity-0 transition-opacity hover:text-gray-200 group-hover:opacity-100"
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M14 5h5m0 0v5m0-5L10 14M9 7H6a2 2 0 00-2 2v9a2 2 0 002 2h9a2 2 0 002-2v-3"
+                  />
+                </svg>
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

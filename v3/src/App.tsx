@@ -3,6 +3,7 @@ import { AuthProvider } from "./auth";
 import { useAuth } from "./hooks/useAuth";
 import { LoginPage } from "./auth";
 import { Layout } from "./components/Layout";
+import { DetachedLayout, type DetachedView } from "./components/DetachedLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useProjectStore } from "./stores/projectStore";
 import { useSubscriptionStore } from "./stores/subscriptionStore";
@@ -193,6 +194,15 @@ if (typeof PerformanceObserver !== "undefined") {
   }
 }
 
+// Detached pop-out windows are opened with `?detached=board|code` (see main's
+// createDetachedWindow). The query is fixed for a window's lifetime, so reading
+// location.search on each render is cheap and stable.
+function resolveDetachedView(): DetachedView | null {
+  if (typeof window === "undefined") return null;
+  const v = new URLSearchParams(window.location.search).get("detached");
+  return v === "board" || v === "code" ? v : null;
+}
+
 function AppContent() {
   const { user, loading } = useAuth();
   const subscribeToProjects = useProjectStore((s) => s.subscribeToProjects);
@@ -305,6 +315,11 @@ function AppContent() {
         </div>
       </div>
     );
+  }
+
+  const detachedView = resolveDetachedView();
+  if (detachedView) {
+    return <DetachedLayout view={detachedView} />;
   }
 
   return <Layout />;

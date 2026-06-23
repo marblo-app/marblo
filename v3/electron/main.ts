@@ -1313,12 +1313,23 @@ process.on("unhandledRejection", (reason) => {
   console.error("[FATAL] Unhandled rejection:", reason);
 });
 
-function createWindow(isNewWindow = false) {
+// Detached pop-out windows render a single tab (Board/Code) full-screen,
+// without the orchestrator PTY, agent panels or tab bar. The renderer detects
+// this via the `?detached=<view>` query (see App.tsx); main only has to append
+// the query and pick a sensible title/size. `detachedView` is undefined for the
+// normal full app window (0 behavior change for the regular path).
+type DetachedView = "board" | "code";
+
+function createWindow(isNewWindow = false, detachedView?: DetachedView) {
+  const detachedQuery = detachedView ? `?detached=${detachedView}` : "";
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: detachedView ? 1100 : 1200,
+    height: detachedView ? 820 : 800,
     minWidth: 800,
     minHeight: 600,
+    title: detachedView
+      ? `Marblo — ${detachedView === "board" ? "Board" : "Code"}`
+      : "Marblo",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -1330,7 +1341,7 @@ function createWindow(isNewWindow = false) {
   });
 
   if (isDev) {
-    win.loadURL("http://localhost:5173");
+    win.loadURL(`http://localhost:5173${detachedQuery}`);
     // DevTools disabled by default for performance — open manually with Cmd+Option+I
   } else {
     // Serve from localhost so Firebase Auth (signInWithPopup) works
@@ -1368,7 +1379,7 @@ function createWindow(isNewWindow = false) {
       const addr = server.address();
       const port = typeof addr === "object" && addr ? addr.port : 0;
       console.log(`[Marblo] Static server on http://127.0.0.1:${port}`);
-      win.loadURL(`http://127.0.0.1:${port}`);
+      win.loadURL(`http://127.0.0.1:${port}${detachedQuery}`);
     });
     win.on("closed", () => server.close());
   }
@@ -1507,6 +1518,25 @@ function createWindow(isNewWindow = false) {
   ]);
   Menu.setApplicationMenu(menu);
 
+  return win;
+}
+
+// Open a tab (Board/Code) in its own pop-out window. Reuses createWindow with a
+// `detachedView` so the renderer boots into the single-panel DetachedLayout.
+// `seed` carries the parent window's folder/project so the new window's
+// useSessionRestore reconnects to the SAME project rather than showing the
+// folder picker (per-window restore record wins even for new windows).
+function createDetachedWindow(
+  view: DetachedView,
+  seed?: { rootPath?: string; projectId?: string },
+): BrowserWindow {
+  const win = createWindow(true, view);
+  if (seed && (seed.rootPath || seed.projectId)) {
+    windowRestore.set(win.webContents.id, {
+      ...(seed.rootPath ? { rootPath: seed.rootPath } : {}),
+      ...(seed.projectId ? { projectId: seed.projectId } : {}),
+    });
+  }
   return win;
 }
 
@@ -2596,6 +2626,21 @@ ipcMain.handle(
 
 ipcMain.handle("window:getRestoreState", (event) => {
   return windowRestore.get(event.sender.id) ?? {};
+});
+
+// Pop a tab (Board/Code) out into its own window. The new window inherits the
+// requesting window's folder/project (from its restore record, with the live
+// project registration as a fallback) so it opens on the same project.
+ipcMain.handle("window:popOutTab", (event, view: DetachedView) => {
+  if (view !== "board" && view !== "code") return { success: false };
+  const senderId = event.sender.id;
+  const restore = windowRestore.get(senderId) ?? {};
+  const seed = {
+    rootPath: restore.rootPath,
+    projectId: restore.projectId ?? windowProjects.get(senderId),
+  };
+  createDetachedWindow(view, seed);
+  return { success: true };
 });
 
 ipcMain.handle("agent:remove", (_event, agentId: string) => {

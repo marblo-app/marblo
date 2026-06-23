@@ -484,6 +484,9 @@ interface WindowAPI {
   }) => Promise<void>;
   /** Read back this window's saved folder/project for reconnect on startup. */
   getRestoreState: () => Promise<{ rootPath?: string; projectId?: string }>;
+  /** Pop a tab (Board/Code) out into its own detached window. The new window
+   * inherits this window's folder/project so it opens on the same data. */
+  popOutTab: (view: "board" | "code") => Promise<{ success: boolean }>;
 }
 
 interface HarnessPackage {

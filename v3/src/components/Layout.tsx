@@ -375,7 +375,15 @@ export function Layout() {
         {/* Content area */}
         <div className="flex flex-1 flex-col overflow-hidden pl-2">
           {/* Tab bar */}
-          <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
+          <TabBar
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onPopOut={(view) => {
+              window.electronAPI.window.popOutTab(view).catch(() => {
+                /* older builds without the handler — best-effort */
+              });
+            }}
+          />
 
           {/* Tab content */}
           <div className="flex-1 overflow-auto">
