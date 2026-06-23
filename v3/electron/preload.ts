@@ -449,6 +449,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     offWake: () => {
       ipcRenderer.removeAllListeners("system:wake");
     },
+    nodeHealth: () => ipcRenderer.invoke("system:nodeHealth"),
   },
   harness: {
     list: () => ipcRenderer.invoke("harness:list"),

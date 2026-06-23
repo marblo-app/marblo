@@ -11,6 +11,17 @@ import {
 } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 
+// spawn-node preflight 결과 — main 프로세스 resolveNodeBinary 의 실제 실행
+// 검증 결과를 그대로 받는다. ok=false 면 깨진 node 로 MCP/에이전트 자식이
+// 침묵 -32000 으로 죽을 위험이므로 행동가능 배너를 띄운다.
+interface NodeSpawnPreflight {
+  ok: boolean;
+  command: string;
+  source: string;
+  version: string;
+  error?: string;
+}
+
 declare global {
   interface ConnectionAPI {
     setAccess: (input: {
@@ -18,6 +29,10 @@ declare global {
       accessMode: ConnectionAccessMode;
     }) => Promise<ProjectConnection>;
     remove: (projectId: string) => Promise<boolean>;
+  }
+  // 전역 SystemAPI 에 node 헬스 preflight 채널을 머지한다(선언 병합).
+  interface SystemAPI {
+    nodeHealth?: () => Promise<NodeSpawnPreflight>;
   }
 }
 
@@ -135,6 +150,27 @@ export function ConnectionStatusPanel() {
   const [checkResult, setCheckResult] = useState<ConnectionCheckResult | null>(
     null,
   );
+  const [nodePreflight, setNodePreflight] = useState<NodeSpawnPreflight | null>(
+    null,
+  );
+
+  // 하네스 진입 시 spawn-node 를 실제로 실행 검증한다. 실패하면 침묵 -32000
+  // 대신 행동가능 배너를 띄운다. nodeHealth IPC 가 없는 구버전 preload 와도
+  // 안전하게 동작하도록 옵셔널 호출 + try/catch 로 감싼다.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const probe = await window.electronAPI.system.nodeHealth?.();
+        if (!cancelled && probe) setNodePreflight(probe);
+      } catch {
+        // preflight 자체 실패는 무시 — 배너 미표시(기존 동작 유지).
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadConnection = useCallback(async () => {
     if (!currentProject?.id) {
@@ -315,6 +351,27 @@ export function ConnectionStatusPanel() {
           </button>
         </div>
       </div>
+
+      {nodePreflight && !nodePreflight.ok && (
+        <div className="mb-3 flex items-start gap-2 rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-3 py-2">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#f38ba8]" />
+          <div className="min-w-0">
+            <span className="inline-flex items-center rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#f38ba8]">
+              node 실행 불가
+            </span>
+            <p className="mt-1 text-[11px] leading-4 text-[#f38ba8]">
+              {nodePreflight.error ??
+                "spawn 용 node 바이너리를 실행하지 못했습니다."}{" "}
+              MCP·에이전트 자식이 뜨지 못하고 끊길 수 있습니다 (-32000).
+              터미널에서{" "}
+              <code className="rounded bg-[#f38ba8]/20 px-1">
+                brew reinstall node
+              </code>{" "}
+              후 앱을 재시작하세요.
+            </p>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mb-3 rounded border border-[#f38ba8]/30 bg-[#f38ba8]/10 px-3 py-2 text-xs text-[#f38ba8]">

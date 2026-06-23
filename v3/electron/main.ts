@@ -48,6 +48,7 @@ import {
   getAgyConversationId,
   resolveClaudeBinary,
   resolveAllHarnessVersions,
+  preflightNodeSpawn,
 } from "./agent-config";
 import { CostTracker } from "./cost-tracker";
 import { mainTelemetry } from "./telemetry";
@@ -2615,6 +2616,11 @@ ipcMain.handle("agent:healthStatus", (_event, agentId: string) => {
     lastExitCode: agent.lastExitCode,
   };
 });
+
+// spawn-node 실제 실행 검증 결과를 렌더러(연결 상태 패널)에 노출한다. 깨진
+// node 로 MCP/에이전트 자식이 침묵 -32000 으로 죽던 사고를, 행동가능 배너로
+// 드러내기 위한 preflight (marblo_mcp_dies_broken_node_binary).
+ipcMain.handle("system:nodeHealth", () => preflightNodeSpawn());
 
 ipcMain.handle(
   "agent:reconnect",

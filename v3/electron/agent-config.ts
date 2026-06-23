@@ -159,6 +159,192 @@ export function resolveClaudeBinary(): ResolvedCli {
   return _claudeResolved;
 }
 
+// ── spawn-node 바이너리 견고화 (marblo_mcp_dies_broken_node_binary) ────────
+//
+// MCP 자식과 일부 에이전트 자식은 `command:"node"` 로 PATH 의 첫 node 를 잡아
+// 떴다. 2026-06-19 brew 가 icu4c 74→78 로 올리면서 homebrew node(22.6.0)가
+// dyld 로드 불가가 됐고, PATH 첫 node 가 그 깨진 바이너리였던 탓에 spawn 즉시
+// 죽어 marblo MCP 가 침묵 -32000 으로 끊겼다. resolveClaudeBinary 와 같은 결
+// — PATH 순서를 믿지 않고 "알려진 정상 node 절대경로"를 직접 골라 실행가능성
+// 까지 검증한다.
+//
+// 최우선 후보는 Electron 번들 node(ELECTRON_RUN_AS_NODE=1 + process.execPath):
+// 앱이 떠 있다는 건 이 바이너리가 이미 정상이라는 뜻이라 "항상 존재·버전 일치"
+// 가 보장된다. 그게 어떤 이유로든 검증 실패하면 검증된 절대경로 node 로, 마지막
+// 으로 bare "node" 로 폴백한다(여기까지 오면 preflight 가 not-ok 로 기록되어
+// 하네스 배너가 뜬다).
+
+export interface ResolvedNode {
+  /** spawn 할 바이너리 절대경로(Electron 바이너리 run-as-node, 또는 node 경로). */
+  command: string;
+  /** `command` 를 node 인터프리터로 동작시키기 위해 반드시 주입해야 하는 env
+   *  (Electron 번들이면 ELECTRON_RUN_AS_NODE=1, 진짜 node 면 빈 객체). */
+  env: Record<string, string>;
+  /** 진단용 출처 키. */
+  source: string;
+  /** 검증으로 확인한 node 버전("X.Y.Z") 또는 "". */
+  version: string;
+}
+
+export interface NodeSpawnPreflight {
+  /** 실행 가능한 node 를 골랐으면 true. */
+  ok: boolean;
+  command: string;
+  source: string;
+  version: string;
+  /** ok=false 일 때만 채워지는 행동가능 메시지(하네스 배너용). */
+  error?: string;
+}
+
+interface NodeBinaryCandidate {
+  command: string;
+  source: string;
+  /** 이 후보를 node 로 실행하는 데 필요한 추가 env. */
+  env: Record<string, string>;
+}
+
+let _nodeResolved: ResolvedNode | null = null;
+let _nodePreflight: NodeSpawnPreflight | null = null;
+
+/** 후보를 실제로 한 번 실행해 "정상 동작하는 node 인지" 검증한다. 깨진 dyld
+ *  바이너리는 여기서 throw → not-ok 로 배제된다. process.versions.node 를
+ *  찍게 해 실행가능성과 버전을 동시에 확인한다. */
+function verifyNodeCandidate(
+  command: string,
+  extraEnv: Record<string, string>,
+): { ok: boolean; version: string; error?: string } {
+  try {
+    const out = execFileSync(
+      command,
+      ["-e", "process.stdout.write(process.versions.node)"],
+      {
+        timeout: 5000,
+        encoding: "utf-8",
+        env: { ...process.env, ...extraEnv },
+      },
+    ).trim();
+    const version = out.match(/\d+\.\d+\.\d+/)?.[0] || "";
+    if (!version) {
+      return { ok: false, version: "", error: "node가 버전을 보고하지 않음" };
+    }
+    return { ok: true, version };
+  } catch (error) {
+    return { ok: false, version: "", error: errorMessage(error) };
+  }
+}
+
+/**
+ * spawn 에 쓸 node 바이너리를 결정적으로 고른다. PATH 순서를 신뢰하지 않고
+ * 알려진 정상 경로를 직접 검증한다. 메모이즈되며, 환경이 바뀌면
+ * resetNodeResolution 후 재호출한다.
+ */
+export function resolveNodeBinary(): ResolvedNode {
+  if (_nodeResolved) return _nodeResolved;
+  const home = os.homedir();
+  // 최우선: Electron 번들 node. process.execPath 는 항상 존재하고(앱이 떠 있음)
+  // 버전이 앱과 일치한다. 그 다음 검증된 절대경로 node 후보들.
+  const candidates: NodeBinaryCandidate[] = [
+    {
+      command: process.execPath,
+      source: "electron-bundle",
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+    },
+    { command: "/opt/homebrew/bin/node", source: "homebrew-arm", env: {} },
+    { command: "/usr/local/bin/node", source: "homebrew-intel", env: {} },
+    {
+      command: path.join(home, ".local/bin/node"),
+      source: "local-bin",
+      env: {},
+    },
+    { command: path.join(home, ".volta/bin/node"), source: "volta", env: {} },
+    {
+      command: path.join(
+        home,
+        ".nvm/versions/node",
+        process.version,
+        "bin/node",
+      ),
+      source: "nvm-current",
+      env: {},
+    },
+  ];
+
+  const skips: string[] = [];
+  for (const c of candidates) {
+    // Electron 번들은 항상 존재하므로 access 체크를 건너뛴다. 나머지는 실행
+    // 비트가 없으면(=설치 안 됨) 빠르게 스킵한다.
+    if (c.source !== "electron-bundle") {
+      try {
+        fs.accessSync(c.command, fs.constants.X_OK);
+      } catch {
+        skips.push(`${c.source}:absent`);
+        continue;
+      }
+    }
+    const probe = verifyNodeCandidate(c.command, c.env);
+    if (!probe.ok) {
+      skips.push(`${c.source}:${probe.error ?? "verify_failed"}`);
+      console.warn("[node-resolver] candidate skipped", {
+        command: c.command,
+        source: c.source,
+        error: probe.error,
+      });
+      continue;
+    }
+    _nodeResolved = {
+      command: c.command,
+      env: c.env,
+      source: c.source,
+      version: probe.version,
+    };
+    _nodePreflight = {
+      ok: true,
+      command: c.command,
+      source: c.source,
+      version: probe.version,
+    };
+    console.info("[node-resolver] resolved spawn node", {
+      command: c.command,
+      source: c.source,
+      version: probe.version,
+    });
+    return _nodeResolved;
+  }
+
+  // 어떤 후보도 검증을 통과하지 못함 — Electron 번들까지 실패한 극단 상황.
+  // bare "node" 로라도 시도하되, preflight 를 not-ok 로 남겨 하네스 배너를 띄운다.
+  _nodeResolved = {
+    command: "node",
+    env: {},
+    source: "path-fallback",
+    version: "",
+  };
+  _nodePreflight = {
+    ok: false,
+    command: "node",
+    source: "path-fallback",
+    version: "",
+    error: `실행 가능한 node 바이너리를 찾지 못했습니다 (시도: ${
+      skips.join(", ") || "none"
+    }). 터미널에서 \`brew reinstall node\` 후 앱을 재시작하세요.`,
+  };
+  console.error("[node-resolver] no working node binary found", { skips });
+  return _nodeResolved;
+}
+
+/** spawn-node 의 실제 실행 검증 결과를 반환한다(하네스 preflight 배너용).
+ *  최초 호출 시 resolveNodeBinary 를 트리거해 검증을 수행한다. */
+export function preflightNodeSpawn(): NodeSpawnPreflight {
+  if (!_nodePreflight) resolveNodeBinary();
+  return _nodePreflight!;
+}
+
+/** 메모이즈된 node 결정을 비운다(node 재설치/환경 변경 후 재검증). */
+export function resetNodeResolution(): void {
+  _nodeResolved = null;
+  _nodePreflight = null;
+}
+
 /**
  * Clear the memoized claude resolution (e.g. after a harness update). This is
  * the only in-process re-interpretation path; without it, an external CLI
@@ -167,6 +353,7 @@ export function resolveClaudeBinary(): ResolvedCli {
 export function resetClaudeResolution(): void {
   _claudeResolved = null;
   _harnessCliResolved.clear();
+  resetNodeResolution();
 }
 
 const _harnessCliResolved = new Map<ModelType, ResolvedCli>();
@@ -805,10 +992,17 @@ function buildMCPServerEntry(
   agentId?: string,
   marbloContextId?: string,
 ): MCPServerEntry {
+  // PATH 의 첫 node 를 믿지 않고 검증된 node 를 pin 한다. Electron 번들이면
+  // ELECTRON_RUN_AS_NODE=1 가 함께 필요하므로 node.env 를 마지막에 머지해
+  // getMCPServerEnv 가 덮어쓰지 못하게 한다(키 충돌은 없지만 안전 우선).
+  const node = resolveNodeBinary();
   return {
-    command: "node",
+    command: node.command,
     args: [getMCPServerPath()],
-    env: getMCPServerEnv(projectDir, marbloProjectId, agentId, marbloContextId),
+    env: {
+      ...getMCPServerEnv(projectDir, marbloProjectId, agentId, marbloContextId),
+      ...node.env,
+    },
   };
 }
 
