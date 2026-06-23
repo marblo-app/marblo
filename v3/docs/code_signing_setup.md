@@ -16,16 +16,16 @@
 
 `build.yml`의 서명 배선 현황(이미 존재):
 
-| 환경변수(CI)                                        | 용도                           | electron-builder가 읽는 키 |
-| --------------------------------------------------- | ------------------------------ | -------------------------- |
-| `CSC_LINK` ← `secrets.MAC_CSC_LINK`                 | macOS 서명 인증서(.p12 base64) | `CSC_LINK`                 |
-| `CSC_KEY_PASSWORD` ← `secrets.MAC_CSC_KEY_PASSWORD` | .p12 암호                      | `CSC_KEY_PASSWORD`         |
-| `APPLE_ID`                                          | 공증 Apple ID                  | notarize 스크립트          |
-| `APPLE_APP_SPECIFIC_PASSWORD`                       | 공증 앱 암호                   | notarize 스크립트          |
-| `APPLE_TEAM_ID`                                     | 공증 팀 ID                     | notarize 스크립트          |
-| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD`             | **(파일형 전용)** Windows 서명 | electron-builder           |
+| 환경변수(CI)                                        | 용도                                             | electron-builder가 읽는 키 |
+| --------------------------------------------------- | ------------------------------------------------ | -------------------------- |
+| `CSC_LINK` ← `secrets.MAC_CSC_LINK`                 | macOS 서명 인증서(.p12 base64)                   | `CSC_LINK`                 |
+| `CSC_KEY_PASSWORD` ← `secrets.MAC_CSC_KEY_PASSWORD` | .p12 암호                                        | `CSC_KEY_PASSWORD`         |
+| `APPLE_ID`                                          | 공증 Apple ID                                    | notarize 스크립트          |
+| `APPLE_APP_SPECIFIC_PASSWORD`                       | 공증 앱 암호                                     | notarize 스크립트          |
+| `APPLE_TEAM_ID`                                     | 공증 팀 ID                                       | notarize 스크립트          |
+| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD`             | **(미사용)** 파일형 Windows 서명 — A안에선 안 씀 | electron-builder           |
 
-> macOS는 위 배선 그대로 동작한다. **Windows는 EV 인증서라 `WIN_CSC_LINK`(파일형) 방식이 불가** → Part B 참고(build.yml 수정 필요).
+> macOS는 위 배선 그대로 동작한다(시크릿 5종 등록 완료). **Windows는 코리아SSL USB 토큰 + 수동 로컬 서명(A안)이라 `WIN_CSC_LINK`(파일형)·CI 자동서명을 쓰지 않는다** → Part B 참고(build.yml에서 win 서명 단계 제거 필요).
 
 ---
 
@@ -83,49 +83,58 @@ repo **Settings → Secrets and variables → Actions → New repository secret*
 
 ---
 
-## Part B. Windows — EV 코드사이닝 (토큰/HSM)
+## Part B. Windows — 코드사이닝 (코리아SSL USB 토큰 / 수동 서명)
 
-> **EV 인증서는 개인키가 HSM/USB 토큰 밖으로 나오지 않으므로 `.pfx` 파일 base64(`WIN_CSC_LINK`) 방식이 불가능하다.** GitHub-hosted 러너에서 서명하려면 아래 클라우드 서명 경로 중 하나를 택하고 `build.yml`의 win 서명 단계를 그에 맞게 수정해야 한다.
+> **확정 방식(2026-06-20): 코리아SSL(한국디지털인증) USB 토큰 + 수동 로컬 서명(A안).**
+> 보유 인증서 = 코리아SSL 발급 코드사이닝 인증서, **Thales SafeNet USB 토큰** 형태. 개인키가 토큰 밖으로 나오지 않으므로 `.pfx` 파일 base64(`WIN_CSC_LINK`) 방식·GitHub-hosted 러너 자동 서명은 **불가**. → CI는 **미서명 `.exe`까지만 산출**, 서명은 토큰 꽂은 Windows에서 사람이 `signtool`로 수행한다.
 
-### 옵션 1 — Azure Trusted Signing ★권장
+> **참고(원천 CA)**: 코리아SSL은 Sectigo·DigiCert 등을 재판매. 타임스탬프 URL이 CA별로 다르니 SAC에서 인증서 "발급자(Issued by)" 또는 주문확인서 제품명으로 확인할 것.
+>
+> - Sectigo → `http://timestamp.sectigo.com`
+> - DigiCert → `http://timestamp.digicert.com`
 
-- Microsoft 운영 클라우드 서명. **~$9.99/월**, 토큰 불필요, SmartScreen 평판 즉시 양호.
-- **요건**: Azure 구독 + 조직 신원 검증(법인 3년+ 이력 권장; 그 외 추가 검증 경로 있음). Trusted Signing Account + Certificate Profile 생성.
-- **CI**: `azure/trusted-signing-action`(또는 electron-builder custom sign hook)으로 서명. 자격증명은 Azure 서비스 주체(`AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET`) + 엔드포인트/계정/프로필.
-- **주의**: 기존 보유 EV 토큰 인증서는 사용하지 않고, Azure가 발급·관리하는 인증서로 대체된다.
+### B-1. 준비 (Windows PC, 1회)
 
-### 옵션 2 — 발급사 클라우드 HSM 서명 (기존 EV 인증서 유지)
+1. **SafeNet Authentication Client(SAC)** 설치 — 코리아SSL 발급 안내/고객지원에서 받음. (토큰엔 인증서가 이미 들어 있어 별도 설치 없이 드라이버+관리툴만 설치.) 토큰 꽂으면 SAC에 인증서가 보이고 서명 시 **토큰 PIN**을 물음. 토큰은 복제 불가·PIN 다회 오입력 시 잠김 → PIN 보관 주의.
+2. **Windows SDK** 설치(= `signtool.exe`). 설치 시 "Windows SDK Signing Tools" 항목만 체크해도 됨. 경로 예: `C:\Program Files (x86)\Windows Kits\10\bin\<버전>\x64\signtool.exe`.
 
-- DigiCert **KeyLocker(Software Trust Manager)**, Sectigo, GlobalSign 등 발급사가 제공하는 클라우드 HSM 서명 서비스. 인증서를 발급사 HSM으로 옮기거나 이미 거기 있으면 API/클라이언트 툴로 서명.
-- **CI**: 발급사 CLI/`smctl` + API 키로 `signtool` 서명. 시크릿은 발급사별로 상이(API 키, 키 별칭, 인증 파일 등).
-- 기존 EV 인증서를 그대로 살리고 싶을 때 적합. 단 발급사 서비스 비용/설정이 옵션 1보다 번거로울 수 있음.
+### B-2. 서명 (릴리스마다)
 
-### 옵션 3 — 셀프호스트 러너 + 물리 토큰 (비권장)
+1. CI(GitHub Actions) 빌드 성공 → **Actions → 해당 실행 → Artifacts**에서 미서명 `Marblo-Setup.exe` 다운로드(예: `C:\sign\`).
+2. 토큰 꽂은 상태로 PowerShell에서 (Sectigo 기준 예시):
+   ```powershell
+   signtool sign /fd SHA256 /tr http://timestamp.sectigo.com /td SHA256 /a "C:\sign\Marblo-Setup.exe"
+   ```
+   - `/a` 토큰 인증서 자동 선택, `/tr` 타임스탬프(만료 후에도 서명 유효 — 필수). DigiCert면 `/tr http://timestamp.digicert.com`.
+   - 실행 시 SAC 창에서 **PIN 입력** → 서명 완료. (`/a`로 자동선택 안 되면 `/sha1 <인증서지문>` 지정.)
+3. 서명된 `.exe`를 릴리스에 업로드.
 
-- USB 토큰 꽂힌 Windows 머신을 self-hosted runner로 등록. 서명 시 토큰 PIN 입력이 필요해 자동화가 어렵고 보안/가용성 부담. CI 부적합.
+### B-3. build.yml 수정 (devops, CI 빌드 복구와 함께)
 
-### build.yml 수정 (옵션 확정 후 devops가 진행)
+현재 `build.yml`의 win 서명은 `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD`(파일형) 전제 → A안과 안 맞음.
 
-현재 `build.yml`의 win 서명은 `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD`(파일형) 전제다. EV는 이게 안 맞으므로:
+- win 서명 단계를 **제거**하고, 미서명 설치 파일을 정상 빌드·Artifact 업로드만 하도록 정리. (`WIN_CSC_LINK` 관련 시크릿은 **등록 불필요**.)
+- `electron-builder.yml`의 win 설정에서 서명 강제 옵션이 빌드를 깨지 않도록 확인.
 
-- 옵션 확정 → 해당 서명 액션/스텝으로 교체 + 필요한 시크릿 등록 + `electron-builder.yml`의 `win.sign`(커스텀 서명 훅) 또는 액션 기반 서명으로 구성.
-- 이 변경은 사용자가 서명 서비스 가입/계정 발급을 마친 뒤 별도 티켓으로 수행한다.
+### B-4. 검증
 
-### 검증
+서명된 `.exe`에 `signtool verify /pa /v Marblo-Setup.exe` 또는 우클릭 → 속성 → 디지털 서명에서 게시자(하이프마크)/타임스탬프 확인.
 
-빌드 `.exe`에 `signtool verify /pa /v Marblo-Setup.exe` 또는 우클릭 → 속성 → 디지털 서명에서 게시자/타임스탬프 확인.
+### (대안) 완전 자동화가 필요해지면
+
+릴리스가 매우 잦아지면 토큰 대신 **클라우드 HSM 서명**(DigiCert KeyLocker 등 발급사 클라우드 HSM, 또는 Azure Trusted Signing ~$9.99/월)으로 전환 검토. 단 토큰 키를 재발급/이전해야 하고 비용·세팅이 추가됨. 셀프호스트 러너(토큰 상시 꽂힌 Windows를 러너 등록)는 PIN/가용성 부담으로 **비권장**. 데스크톱 앱 릴리스 빈도에선 A안(수동)이 가장 적은 노력.
 
 ---
 
 ## 순서 요약 (체크리스트)
 
 - [ ] **(진행중)** CI 빌드 파이프라인 복구 → Mac/Win 설치파일 실제 산출
-- [ ] **macOS**: 유료 Developer Program 멤버십 확인 → Developer ID Application 인증서 발급 → .p12 export → 시크릿 5종 등록(A-6)
-- [ ] **Windows EV**: 클라우드 서명 옵션 결정(Azure Trusted Signing 권장) → 계정/인증서 준비 → build.yml win 서명 단계 수정(devops) + 시크릿 등록
+- [x] **macOS**: Developer ID Application 인증서 발급 → .p12 export → 시크릿 5종 등록(A-6) — **완료(2026-06-20)**
+- [ ] **Windows(A안)**: 코리아SSL 토큰 꽂을 Windows PC 준비 + SAC/Windows SDK 설치 → build.yml win 서명 단계 제거(devops) → 미서명 `.exe` 다운로드 후 `signtool` 수동 서명
 - [ ] 서명/공증 적용 빌드 검증(`spctl`/`signtool`)
 - [ ] `v*` 태그 릴리스 + electron-updater 리허설 (→ `v3/docs/electron_updater_runbook.md`)
 
 ## 비용/현실 노트
 
 - macOS 공증은 사실상 필수(Gatekeeper 강제). 베타라도 적용 권장.
-- Windows는 미서명으로 베타를 먼저 돌리고(GA 전 EV 서명) 가는 선택도 현실적. 단 SmartScreen 경고로 초기 신뢰도/전환 손해를 감수.
+- Windows는 코리아SSL 토큰 보유 → **수동 로컬 서명(A안)**. 릴리스마다 토큰+`signtool` 한 번이라 인프라 부담 0. 미서명으로 베타 먼저 돌리는 것도 가능(SmartScreen 경고는 OV면 다운로드 누적으로 점차 완화). 완전 자동화가 필요해질 때만 클라우드 HSM 전환 검토.
