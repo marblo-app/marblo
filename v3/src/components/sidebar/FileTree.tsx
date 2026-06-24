@@ -29,6 +29,7 @@ import {
   saveRecentFolder,
 } from "../../lib/recentFolders";
 import { useAuth } from "../../hooks/useAuth";
+import { useTranslation, t as translate } from "../../lib/i18n";
 import { FileTreeContextMenu, ContextMenuItem } from "./FileTreeContextMenu";
 import { FileTreeConfirmDialog } from "./FileTreeConfirmDialog";
 
@@ -414,6 +415,7 @@ function InlineCreateInput({
   onCommit,
   onCancel,
 }: InlineCreateInputProps) {
+  const { t } = useTranslation();
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const committedRef = useRef(false);
@@ -468,7 +470,11 @@ function InlineCreateInput({
           e.stopPropagation();
         }}
         onBlur={commit}
-        placeholder={type === "directory" ? "폴더 이름" : "파일 이름"}
+        placeholder={
+          type === "directory"
+            ? t("sidebar.tree.folderName")
+            : t("sidebar.tree.fileName")
+        }
         className="flex-1 rounded border border-blue-500 bg-gray-900 px-1 py-0 text-[13px] text-white outline-none"
       />
     </div>
@@ -499,6 +505,7 @@ function WorktreeSwitch({
   portalMenuRef,
   onSwitch,
 }: WorktreeSwitchProps) {
+  const { t } = useTranslation();
   if (toMain) {
     // On a task worktree → primary action is "back to main". Extra task
     // worktrees (if any) are still reachable via the dropdown below.
@@ -507,7 +514,7 @@ function WorktreeSwitch({
         <button
           onClick={() => onSwitch(toMain)}
           className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-          title="메인 워크트리로"
+          title={t("sidebar.tree.toMain")}
         >
           <svg
             className="h-3.5 w-3.5"
@@ -539,7 +546,9 @@ function WorktreeSwitch({
   // On main / project / folder → offer the task worktree(s).
   if (toTasks.length === 1) {
     const target = toTasks[0];
-    const targetTitle = `${target.label}${target.taskId ? ` · ${target.taskId}` : ""}\n${target.path}`;
+    const targetTitle = `${target.label}${
+      target.taskId ? ` · ${target.taskId}` : ""
+    }\n${target.path}`;
     return (
       <button
         onClick={() => onSwitch(target.path)}
@@ -572,7 +581,7 @@ function WorktreeSwitch({
         setOpen={setOpen}
         portalMenuRef={portalMenuRef}
         onSwitch={onSwitch}
-        title="작업 워크트리로"
+        title={t("sidebar.tree.toTask")}
       />
     </div>
   );
@@ -593,8 +602,9 @@ function WorktreeMenuButton({
   setOpen,
   portalMenuRef,
   onSwitch,
-  title = "다른 작업 워크트리로",
+  title,
 }: WorktreeMenuButtonProps) {
+  const { t } = useTranslation();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [position, setPosition] = useState<WorktreeMenuPosition | null>(null);
 
@@ -631,7 +641,9 @@ function WorktreeMenuButton({
                 key={t.path}
                 onClick={() => onSwitch(t.path)}
                 className="flex w-full min-w-0 items-center gap-2 px-2 py-1 text-left text-[12px] text-gray-300 hover:bg-gray-700"
-                title={`${t.label}${t.taskId ? ` · ${t.taskId}` : ""}\n${t.path}`}
+                title={`${t.label}${t.taskId ? ` · ${t.taskId}` : ""}\n${
+                  t.path
+                }`}
               >
                 <span className="min-w-0 flex-1 truncate">{t.label}</span>
                 {t.taskId && (
@@ -652,7 +664,7 @@ function WorktreeMenuButton({
         ref={buttonRef}
         onClick={() => setOpen(!open)}
         className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-        title={title}
+        title={title ?? t("sidebar.tree.toOtherTask")}
       >
         <svg
           className="h-3.5 w-3.5"
@@ -674,6 +686,7 @@ function WorktreeMenuButton({
 }
 
 export function FileTree() {
+  const { t } = useTranslation();
   const [tree, setTree] = useState<FileNode[]>([]);
   const [gitStatuses, setGitStatuses] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -1018,8 +1031,11 @@ export function FileTree() {
           requestJump({ type: "code" });
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "생성 실패";
-        setErrorMessage(`생성 실패: ${msg}`);
+        const msg =
+          err instanceof Error
+            ? err.message
+            : translate("sidebar.tree.createFail");
+        setErrorMessage(translate("sidebar.tree.createFailMsg", { msg }));
       }
     },
     [rootPath, loadTree, setSelected, openFile, requestJump],
@@ -1036,8 +1052,11 @@ export function FileTree() {
         await loadTree(rootPath, false);
         setSelected(newPath);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "이름 변경 실패";
-        setErrorMessage(`이름 변경 실패: ${msg}`);
+        const msg =
+          err instanceof Error
+            ? err.message
+            : translate("sidebar.tree.renameFail");
+        setErrorMessage(translate("sidebar.tree.renameFailMsg", { msg }));
       }
     },
     [rootPath, handlePathRenamed, loadTree, setSelected],
@@ -1048,10 +1067,10 @@ export function FileTree() {
       if (!rootPath) return;
       const isDir = target.type === "directory";
       setConfirmDialog({
-        title: "삭제 확인",
-        message: `'${target.name}'을(를) 영구적으로 삭제하시겠습니까?${
-          isDir ? "\n폴더 안의 모든 항목이 함께 삭제됩니다." : ""
-        }`,
+        title: translate("sidebar.tree.deleteTitle"),
+        message:
+          translate("sidebar.tree.deleteMsg", { name: target.name }) +
+          (isDir ? translate("sidebar.tree.deleteDirSuffix") : ""),
         danger: true,
         onConfirm: async () => {
           try {
@@ -1061,8 +1080,11 @@ export function FileTree() {
             await loadTree(rootPath, false);
             if (selectedPath === target.path) setSelected(null);
           } catch (err) {
-            const msg = err instanceof Error ? err.message : "삭제 실패";
-            setErrorMessage(`삭제 실패: ${msg}`);
+            const msg =
+              err instanceof Error
+                ? err.message
+                : translate("sidebar.tree.deleteFail");
+            setErrorMessage(translate("sidebar.tree.deleteFailMsg", { msg }));
           } finally {
             setConfirmDialog(null);
           }
@@ -1087,7 +1109,7 @@ export function FileTree() {
       if (!dir) return;
       // Prevent pasting a directory into itself or its descendant
       if (dir === clipboardPath || dir.startsWith(clipboardPath + "/")) {
-        setErrorMessage("자기 자신 안으로 붙여넣을 수 없습니다");
+        setErrorMessage(translate("sidebar.tree.pasteSelf"));
         return;
       }
       const targetPath = joinPath(dir, basename(clipboardPath));
@@ -1107,8 +1129,11 @@ export function FileTree() {
         }
         await loadTree(rootPath, false);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "붙여넣기 실패";
-        setErrorMessage(`붙여넣기 실패: ${msg}`);
+        const msg =
+          err instanceof Error
+            ? err.message
+            : translate("sidebar.tree.pasteFail");
+        setErrorMessage(translate("sidebar.tree.pasteFailMsg", { msg }));
       }
     },
     [
@@ -1139,8 +1164,11 @@ export function FileTree() {
         await loadTree(rootPath, false);
         setSelected(newPath);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "이동 실패";
-        setErrorMessage(`이동 실패: ${msg}`);
+        const msg =
+          err instanceof Error
+            ? err.message
+            : translate("sidebar.tree.moveFail");
+        setErrorMessage(translate("sidebar.tree.moveFailMsg", { msg }));
       }
     },
     [
@@ -1159,7 +1187,7 @@ export function FileTree() {
 
   const handleCopyPath = useCallback((p: string) => {
     navigator.clipboard.writeText(p).catch(() => {
-      setErrorMessage("경로 복사 실패");
+      setErrorMessage(translate("sidebar.tree.copyPathFail"));
     });
   }, []);
 
@@ -1175,12 +1203,12 @@ export function FileTree() {
         : rootPath || "";
 
       items.push({
-        label: "새 파일",
+        label: translate("sidebar.tree.newFile"),
         shortcut: "⌘N",
         onClick: () => handleCreate("file", targetForCreate),
       });
       items.push({
-        label: "새 폴더",
+        label: translate("sidebar.tree.newFolder"),
         shortcut: "⇧⌘N",
         onClick: () => handleCreate("directory", targetForCreate),
       });
@@ -1188,19 +1216,19 @@ export function FileTree() {
       if (node) {
         items.push({ label: "", separator: true });
         items.push({
-          label: "잘라내기",
+          label: translate("sidebar.tree.cut"),
           shortcut: "⌘X",
           onClick: () => cutToClipboard(node.path),
         });
         items.push({
-          label: "복사",
+          label: translate("sidebar.tree.copy"),
           shortcut: "⌘C",
           onClick: () => copyToClipboard(node.path),
         });
       }
 
       items.push({
-        label: "붙여넣기",
+        label: translate("sidebar.tree.paste"),
         shortcut: "⌘V",
         disabled: !clipboardPath,
         onClick: () => handlePaste(node && isDir ? node.path : undefined),
@@ -1209,23 +1237,23 @@ export function FileTree() {
       if (node) {
         items.push({ label: "", separator: true });
         items.push({
-          label: "이름 변경",
+          label: translate("sidebar.tree.rename"),
           shortcut: "Enter",
           onClick: () => setRenamingPath(node.path),
         });
         items.push({
-          label: "삭제",
+          label: translate("sidebar.tree.delete"),
           shortcut: "Delete",
           danger: true,
           onClick: () => handleDelete(node),
         });
         items.push({ label: "", separator: true });
         items.push({
-          label: "Finder에서 보기",
+          label: translate("sidebar.tree.revealInFinder"),
           onClick: () => handleRevealInFinder(node.path),
         });
         items.push({
-          label: "경로 복사",
+          label: translate("sidebar.tree.copyPath"),
           onClick: () => handleCopyPath(node.path),
         });
       }
@@ -1469,12 +1497,14 @@ export function FileTree() {
             d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
           />
         </svg>
-        <p className="mt-2 text-xs text-gray-500">프로젝트 열기</p>
+        <p className="mt-2 text-xs text-gray-500">
+          {t("sidebar.tree.openProject")}
+        </p>
         <button
           onClick={handleSelectDirectory}
           className="mt-2 rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
         >
-          폴더 선택
+          {t("sidebar.tree.selectFolder")}
         </button>
       </div>
     );
@@ -1491,7 +1521,7 @@ export function FileTree() {
       {folderChoice && (
         <div className="border-b border-blue-500/30 bg-blue-500/10 px-3 py-2">
           <p className="mb-1 text-[11px] font-medium text-blue-400">
-            폴더 열기
+            {t("sidebar.tree.openFolder")}
           </p>
           <p
             className="mb-2 truncate text-[10px] text-gray-400"
@@ -1504,20 +1534,20 @@ export function FileTree() {
               onClick={handleChooseRegister}
               className="rounded bg-blue-600 px-2 py-1 text-[11px] text-white hover:bg-blue-500"
             >
-              프로젝트로 등록
+              {t("sidebar.tree.registerProject")}
             </button>
             <button
               onClick={handleChooseBrowse}
               className="rounded bg-gray-700 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-600"
             >
-              둘러보기 (읽기전용)
+              {t("sidebar.tree.browseReadonly")}
             </button>
             <button
               onClick={() => setFolderChoice(null)}
               className="ml-auto rounded px-2 py-1 text-[11px] text-gray-400 hover:text-gray-200"
-              title="취소"
+              title={t("sidebar.tree.cancel")}
             >
-              취소
+              {t("sidebar.tree.cancel")}
             </button>
           </div>
         </div>
@@ -1527,7 +1557,7 @@ export function FileTree() {
       {showNewProject && (
         <div className="border-b border-blue-500/30 bg-blue-500/10 px-3 py-2">
           <p className="mb-1 text-[11px] font-medium text-blue-400">
-            새 프로젝트
+            {t("sidebar.tree.newProject")}
           </p>
           <div className="flex items-center gap-1">
             <input
@@ -1540,12 +1570,12 @@ export function FileTree() {
                 if (e.key === "Escape") handleCancelInlineProject();
               }}
               className="flex-1 rounded border border-gray-600 bg-gray-700 px-2 py-1 text-xs text-gray-200 focus:border-blue-500 focus:outline-none"
-              placeholder="프로젝트 이름"
+              placeholder={t("sidebar.tree.projectNamePlaceholder")}
             />
             <button
               onClick={handleCreateInlineProject}
               className="rounded bg-blue-600 px-2 py-1 text-[11px] text-white hover:bg-blue-500"
-              title="생성"
+              title={t("sidebar.tree.create")}
             >
               <svg
                 className="h-3.5 w-3.5"
@@ -1563,7 +1593,7 @@ export function FileTree() {
             </button>
           </div>
           <p className="mt-1 text-[10px] text-gray-500">
-            Enter로 생성 / Esc 취소
+            {t("sidebar.tree.createHint")}
           </p>
         </div>
       )}
@@ -1580,7 +1610,7 @@ export function FileTree() {
           {rootView?.kind === "worktree" && (
             <span
               className="flex-shrink-0 rounded bg-purple-500/20 px-1 text-[9px] font-bold uppercase tracking-wide text-purple-300"
-              title="활성 워크트리"
+              title={t("sidebar.tree.activeWorktree")}
             >
               {rootView.detail ? `WT · ${rootView.detail}` : "WT"}
             </span>
@@ -1588,7 +1618,7 @@ export function FileTree() {
           {rootView?.kind === "project" && (
             <span
               className="flex-shrink-0 rounded bg-gray-600/40 px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400"
-              title="프로젝트 루트"
+              title={t("sidebar.tree.projectRoot")}
             >
               ROOT
             </span>
@@ -1601,7 +1631,7 @@ export function FileTree() {
             <button
               onClick={handleSelectDirectory}
               className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-              title="폴더 열기"
+              title={t("sidebar.tree.openFolder")}
             >
               <svg
                 className="h-3.5 w-3.5"
@@ -1624,7 +1654,7 @@ export function FileTree() {
                 className={`rounded p-0.5 hover:bg-gray-700 hover:text-gray-300 ${
                   showRecentMenu ? "text-gray-300" : "text-gray-500"
                 }`}
-                title="최근 연 폴더"
+                title={t("sidebar.tree.recentFolders")}
                 aria-haspopup="menu"
                 aria-expanded={showRecentMenu}
               >
@@ -1662,7 +1692,7 @@ export function FileTree() {
                   role="menu"
                 >
                   <div className="px-2 pb-1 text-[9px] font-bold uppercase tracking-wide text-gray-500">
-                    최근 연 폴더
+                    {t("sidebar.tree.recentFolders")}
                   </div>
                   {recentFolders.map((path) => (
                     <button
@@ -1700,7 +1730,7 @@ export function FileTree() {
           <button
             onClick={() => handleCreate("file")}
             className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-            title="새 파일 (⌘N)"
+            title={t("sidebar.tree.newFileShortcut")}
           >
             <svg
               className="h-3.5 w-3.5"
@@ -1719,7 +1749,7 @@ export function FileTree() {
           <button
             onClick={() => handleCreate("directory")}
             className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-            title="새 폴더 (⇧⌘N)"
+            title={t("sidebar.tree.newFolderShortcut")}
           >
             <svg
               className="h-3.5 w-3.5"
@@ -1738,7 +1768,7 @@ export function FileTree() {
           <button
             onClick={handleRefresh}
             className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-            title="새로고침"
+            title={t("sidebar.tree.refresh")}
           >
             <svg
               className="h-3.5 w-3.5"
@@ -1779,7 +1809,9 @@ export function FileTree() {
       >
         {loading ? (
           <div className="flex items-center justify-center py-4">
-            <span className="text-xs text-gray-500">로딩 중...</span>
+            <span className="text-xs text-gray-500">
+              {t("sidebar.tree.loading")}
+            </span>
           </div>
         ) : (
           <>
@@ -1839,7 +1871,7 @@ export function FileTree() {
           title={confirmDialog.title}
           message={confirmDialog.message}
           danger={confirmDialog.danger}
-          confirmLabel="삭제"
+          confirmLabel={t("sidebar.tree.delete")}
           onConfirm={confirmDialog.onConfirm}
           onCancel={() => setConfirmDialog(null)}
         />

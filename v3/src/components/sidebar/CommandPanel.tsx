@@ -6,6 +6,7 @@ import {
 } from "../orchestrator/SlashCommandPopup";
 import { useOrchestratorStore } from "../../stores/orchestratorStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
+import { useTranslation } from "../../lib/i18n";
 
 interface CommandPanelProps {
   onOpenOrchestrator?: () => void;
@@ -16,6 +17,7 @@ export function CommandPanel({
   onOpenOrchestrator,
   onOpenCreateTask,
 }: CommandPanelProps) {
+  const { t } = useTranslation();
   const ptySessionId = useOrchestratorStore((s) => s.ptySessionId);
   const status = useOrchestratorStore((s) => s.status);
   const canUse = useSubscriptionStore((s) => s.canUse);
@@ -38,7 +40,7 @@ export function CommandPanel({
         setTimeout(() => setSending(null), 500);
       }
     },
-    [ptySessionId]
+    [ptySessionId],
   );
 
   // Group commands by category
@@ -73,7 +75,7 @@ export function CommandPanel({
               d="M13 10V3L4 14h7v7l9-11h-7z"
             />
           </svg>
-          오케스트레이터
+          {t("orchestrator.title")}
           <span
             className={`ml-auto h-2 w-2 rounded-full ${
               isRunning ? "bg-green-400" : "bg-gray-600"
@@ -82,7 +84,7 @@ export function CommandPanel({
         </div>
         {!isRunning && (
           <p className="mt-1 text-[11px] text-gray-500">
-            오케스트레이터가 실행 중이 아닙니다
+            {t("orchestrator.notRunning")}
           </p>
         )}
       </div>
@@ -97,7 +99,7 @@ export function CommandPanel({
           <div key={cat}>
             <div className="px-3 pt-2 pb-1">
               <div className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                {catInfo.icon} {catInfo.label}
+                {catInfo.icon} {t(catInfo.label)}
               </div>
             </div>
             <div className="space-y-0.5 px-2">
@@ -134,12 +136,12 @@ export function CommandPanel({
                       {cmd.label}
                     </span>
                     <span className="truncate text-[11px] text-gray-400">
-                      {cmd.description}
+                      {t(cmd.description)}
                     </span>
                   </span>
                   {sending === cmd.command && (
                     <span className="flex-shrink-0 text-[10px] text-blue-400">
-                      전송…
+                      {t("orchestrator.sending")}
                     </span>
                   )}
                 </button>
@@ -168,7 +170,7 @@ export function CommandPanel({
               d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
             />
           </svg>
-          보드
+          {t("orchestrator.board")}
         </div>
       </div>
 
@@ -194,7 +196,7 @@ export function CommandPanel({
                 />
               </svg>
             </span>
-            <span className="flex-1">AI 태스크 분해</span>
+            <span className="flex-1">{t("orchestrator.aiDecompose")}</span>
           </button>
         )}
 
@@ -206,7 +208,7 @@ export function CommandPanel({
           <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-gray-700/50 text-[12px] text-green-400">
             +
           </span>
-          <span className="flex-1">새 태스크 추가</span>
+          <span className="flex-1">{t("orchestrator.addTask")}</span>
         </button>
       </div>
     </div>

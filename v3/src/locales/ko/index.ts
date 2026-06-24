@@ -15,6 +15,9 @@ import { header } from "./header";
 import { settings } from "./settings";
 import { agents } from "./agents";
 import { plan } from "./plan";
+import { harness } from "./harness";
+import { sidebar } from "./sidebar";
+import { orchestrator } from "./orchestrator";
 import { guide } from "./guide";
 import { missions } from "./missions";
 import { legal } from "./legal";
@@ -28,6 +31,9 @@ export const ko = {
   ...settings,
   ...agents,
   ...plan,
+  ...harness,
+  ...sidebar,
+  ...orchestrator,
   ...guide,
   ...missions,
   ...legal,

@@ -10,6 +10,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
+import { useTranslation, useLocaleStore, t as translate } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 
 // spawn-node preflight 결과 — main 프로세스 resolveNodeBinary 의 실제 실행
 // 검증 결과를 그대로 받는다. ok=false 면 깨진 node 로 MCP/에이전트 자식이
@@ -58,35 +60,26 @@ const ACCESS_LABEL: Record<ProjectConnection["accessMode"], string> = {
   commit: "Commit",
 };
 
-const PERMISSIONS_LABEL: Record<ProjectConnection["permissionsState"], string> =
-  {
-    unknown: "미확인",
-    pending: "대기",
-    granted: "허용",
-    denied: "거부",
-  };
+// Permission-state display label (enum value stays English; only the label is
+// translated). Read locale at call time via the pure t().
+function permissionsLabel(
+  state: ProjectConnection["permissionsState"],
+): string {
+  return translate(`harness.perm.${state}` as MessageKey);
+}
 
-const CHECK_STATUS_STYLE: Record<
-  ConnectionCheckItem["status"],
-  { label: string; className: string }
-> = {
-  pass: {
-    label: "통과",
-    className: "bg-[#a6e3a1]/15 text-[#a6e3a1]",
-  },
-  warn: {
-    label: "주의",
-    className: "bg-[#f9e2af]/15 text-[#f9e2af]",
-  },
-  fail: {
-    label: "실패",
-    className: "bg-[#f38ba8]/15 text-[#f38ba8]",
-  },
+// Connection-check item status → tone className (language-neutral). The label
+// is translated separately via t("harness.checkStatus.*").
+const CHECK_STATUS_CLASS: Record<ConnectionCheckItem["status"], string> = {
+  pass: "bg-[#a6e3a1]/15 text-[#a6e3a1]",
+  warn: "bg-[#f9e2af]/15 text-[#f9e2af]",
+  fail: "bg-[#f38ba8]/15 text-[#f38ba8]",
 };
 
 function formatDate(value: number | null): string {
-  if (!value) return "기록 없음";
-  return new Intl.DateTimeFormat("ko-KR", {
+  if (!value) return translate("harness.conn.noRecord");
+  const locale = useLocaleStore.getState().locale === "ko" ? "ko-KR" : "en-US";
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
@@ -104,15 +97,27 @@ function mcpStatus(connection: ProjectConnection): {
   className: string;
 } {
   if (connection.permissionsState === "granted") {
-    return { label: "사용 가능", className: "text-[#a6e3a1]" };
+    return {
+      label: translate("harness.mcp.available"),
+      className: "text-[#a6e3a1]",
+    };
   }
   if (connection.permissionsState === "denied") {
-    return { label: "권한 거부", className: "text-[#f38ba8]" };
+    return {
+      label: translate("harness.mcp.denied"),
+      className: "text-[#f38ba8]",
+    };
   }
   if (connection.permissionsState === "pending") {
-    return { label: "권한 대기", className: "text-[#f9e2af]" };
+    return {
+      label: translate("harness.mcp.pending"),
+      className: "text-[#f9e2af]",
+    };
   }
-  return { label: "미확인", className: "text-[#6c7086]" };
+  return {
+    label: translate("harness.mcp.unknown"),
+    className: "text-[#6c7086]",
+  };
 }
 
 function checkIcon(status: ConnectionCheckItem["status"]) {
@@ -136,6 +141,7 @@ function isValidRepoUrl(value: string): boolean {
 }
 
 export function ConnectionStatusPanel() {
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const [connection, setConnection] = useState<ProjectConnection | null>(null);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -191,7 +197,9 @@ export function ConnectionStatusPanel() {
       setAgents(nextAgents);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 상태를 불러오지 못했습니다.",
+        err instanceof Error
+          ? err.message
+          : translate("harness.conn.loadError"),
       );
     } finally {
       setLoading(false);
@@ -223,7 +231,9 @@ export function ConnectionStatusPanel() {
       await loadConnection();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 생성에 실패했습니다.",
+        err instanceof Error
+          ? err.message
+          : translate("harness.conn.createError"),
       );
     } finally {
       setConnecting(false);
@@ -248,7 +258,9 @@ export function ConnectionStatusPanel() {
       await loadConnection();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 확인에 실패했습니다.",
+        err instanceof Error
+          ? err.message
+          : translate("harness.conn.checkError"),
       );
     } finally {
       setChecking(false);
@@ -269,7 +281,9 @@ export function ConnectionStatusPanel() {
       await loadConnection();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "권한 적용에 실패했습니다.",
+        err instanceof Error
+          ? err.message
+          : translate("harness.conn.accessError"),
       );
     } finally {
       setApplyingAccess(false);
@@ -280,9 +294,7 @@ export function ConnectionStatusPanel() {
     const projectId = currentProject?.id;
     if (!projectId || !connection) return;
 
-    const confirmed = window.confirm(
-      "현재 프로젝트의 repo 연결을 해제하시겠습니까?",
-    );
+    const confirmed = window.confirm(translate("harness.conn.removeConfirm"));
     if (!confirmed) return;
 
     setRemovingConnection(true);
@@ -294,7 +306,9 @@ export function ConnectionStatusPanel() {
       setAccessModeDraft("read");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "연결 해제에 실패했습니다.",
+        err instanceof Error
+          ? err.message
+          : translate("harness.conn.removeError"),
       );
     } finally {
       setRemovingConnection(false);
@@ -305,9 +319,11 @@ export function ConnectionStatusPanel() {
     <div className="border-b border-[#313244] bg-[#181825] px-4 py-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-[#cdd6f4]">연결 상태</h3>
+          <h3 className="text-sm font-semibold text-[#cdd6f4]">
+            {t("harness.conn.title")}
+          </h3>
           <p className="text-xs text-[#6c7086]">
-            {currentProject?.name ?? "프로젝트 미선택"}
+            {currentProject?.name ?? t("harness.conn.noProject")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -315,7 +331,7 @@ export function ConnectionStatusPanel() {
             type="button"
             onClick={() => void loadConnection()}
             disabled={loading}
-            title="연결 상태 새로고침"
+            title={t("harness.conn.refreshTitle")}
             className="inline-flex h-8 w-8 items-center justify-center rounded border border-[#313244] text-[#bac2de] hover:border-[#45475a] hover:bg-[#313244] disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -325,7 +341,7 @@ export function ConnectionStatusPanel() {
               type="button"
               onClick={() => void handleConnect()}
               disabled={!currentProject?.folderPath || connecting}
-              title="git 메타(repo URL·기본 브랜치) 재동기화"
+              title={t("harness.conn.resyncTitle")}
               className="inline-flex h-8 items-center gap-1.5 rounded border border-[#313244] px-3 text-xs font-medium text-[#bac2de] hover:border-[#45475a] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {connecting ? (
@@ -333,7 +349,7 @@ export function ConnectionStatusPanel() {
               ) : (
                 <Link2 className="h-3.5 w-3.5" />
               )}
-              재동기화
+              {t("harness.conn.resync")}
             </button>
           )}
           <button
@@ -347,7 +363,7 @@ export function ConnectionStatusPanel() {
             ) : (
               <CheckCircle2 className="h-3.5 w-3.5" />
             )}
-            연결 확인
+            {t("harness.conn.check")}
           </button>
         </div>
       </div>
@@ -357,17 +373,15 @@ export function ConnectionStatusPanel() {
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#f38ba8]" />
           <div className="min-w-0">
             <span className="inline-flex items-center rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#f38ba8]">
-              node 실행 불가
+              {t("harness.conn.nodeBadge")}
             </span>
             <p className="mt-1 text-[11px] leading-4 text-[#f38ba8]">
-              {nodePreflight.error ??
-                "spawn 용 node 바이너리를 실행하지 못했습니다."}{" "}
-              MCP·에이전트 자식이 뜨지 못하고 끊길 수 있습니다 (-32000).
-              터미널에서{" "}
+              {nodePreflight.error ?? t("harness.conn.nodeError")}{" "}
+              {t("harness.conn.nodeHintBefore")}{" "}
               <code className="rounded bg-[#f38ba8]/20 px-1">
                 brew reinstall node
               </code>{" "}
-              후 앱을 재시작하세요.
+              {t("harness.conn.nodeHintAfter")}
             </p>
           </div>
         </div>
@@ -382,16 +396,17 @@ export function ConnectionStatusPanel() {
       {loading ? (
         <div className="flex h-28 items-center justify-center text-xs text-[#6c7086]">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          연결 상태 확인 중
+          {t("harness.conn.loading")}
         </div>
       ) : !connection ? (
         <div className="rounded border border-dashed border-[#45475a] px-3 py-4">
-          <p className="mb-1 text-sm text-[#bac2de]">연결된 repo가 없습니다.</p>
+          <p className="mb-1 text-sm text-[#bac2de]">
+            {t("harness.conn.noRepo")}
+          </p>
           {currentProject?.folderPath ? (
             <>
               <p className="mb-3 text-xs text-[#6c7086]">
-                현재 프로젝트의 로컬 경로로 연결을 만들면 repo URL·기본 브랜치를
-                git 에서 자동으로 채웁니다.
+                {t("harness.conn.autoFillHint")}
               </p>
               <button
                 type="button"
@@ -404,7 +419,9 @@ export function ConnectionStatusPanel() {
                 ) : (
                   <Link2 className="h-3.5 w-3.5" />
                 )}
-                {connecting ? "연결 중" : "연결하기"}
+                {connecting
+                  ? t("harness.conn.connecting")
+                  : t("harness.conn.connect")}
               </button>
               <ManualConnectForm
                 projectId={currentProject.id}
@@ -415,8 +432,8 @@ export function ConnectionStatusPanel() {
           ) : (
             <p className="text-xs text-[#6c7086]">
               {currentProject
-                ? "프로젝트에 로컬 경로(folderPath)가 없어 연결할 수 없습니다. 프로젝트 설정에서 경로를 지정하세요."
-                : "프로젝트를 먼저 선택하세요."}
+                ? t("harness.conn.noFolderPath")
+                : t("harness.conn.selectProjectFirst")}
             </p>
           )}
         </div>
@@ -425,16 +442,18 @@ export function ConnectionStatusPanel() {
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             <StatusField
               label="Repo URL"
-              value={connection.repoUrl ?? "미확인"}
+              value={connection.repoUrl ?? t("harness.conn.unknown")}
             />
             <StatusField
               label="Default branch"
-              value={connection.defaultBranch ?? "미확인"}
+              value={connection.defaultBranch ?? t("harness.conn.unknown")}
             />
             <StatusField label="Local path" value={connection.localPath} />
             <StatusField
               label="Connected harness"
-              value={connection.connectedHarness ?? "미연결"}
+              value={
+                connection.connectedHarness ?? t("harness.conn.notConnected")
+              }
             />
             <StatusField
               label="Connected agent"
@@ -443,7 +462,7 @@ export function ConnectionStatusPanel() {
                   ? activeAgents
                       .map((agent) => `${agent.name} (${agent.model})`)
                       .join(", ")
-                  : "실행 중인 에이전트 없음"
+                  : t("harness.conn.noActiveAgents")
               }
             />
             <StatusField
@@ -474,7 +493,9 @@ export function ConnectionStatusPanel() {
                 </span>
               ))}
               <span className="text-[11px] text-[#6c7086]">
-                현재 모드: {ACCESS_LABEL[connection.accessMode]}
+                {t("harness.conn.currentMode", {
+                  mode: ACCESS_LABEL[connection.accessMode],
+                })}
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-2 rounded border border-[#313244] bg-[#1e1e2e] p-2">
@@ -514,7 +535,7 @@ export function ConnectionStatusPanel() {
                 ) : (
                   <ShieldCheck className="h-3.5 w-3.5" />
                 )}
-                권한 적용
+                {t("harness.conn.applyAccess")}
               </button>
               <button
                 type="button"
@@ -527,7 +548,7 @@ export function ConnectionStatusPanel() {
                 ) : (
                   <Unlink className="h-3.5 w-3.5" />
                 )}
-                연결 해제
+                {t("harness.conn.disconnect")}
               </button>
             </div>
           </div>
@@ -538,7 +559,7 @@ export function ConnectionStatusPanel() {
             <div className="rounded border border-[#313244] bg-[#1e1e2e] p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="text-xs font-medium text-[#bac2de]">
-                  연결 확인 결과
+                  {t("harness.conn.checkResult")}
                 </span>
                 <span
                   className={`rounded px-2 py-0.5 text-[11px] ${
@@ -547,7 +568,9 @@ export function ConnectionStatusPanel() {
                       : "bg-[#f38ba8]/15 text-[#f38ba8]"
                   }`}
                 >
-                  {checkResult.ok ? "정상" : "확인 필요"}
+                  {checkResult.ok
+                    ? t("harness.conn.ok")
+                    : t("harness.conn.needsCheck")}
                 </span>
               </div>
               {(() => {
@@ -574,7 +597,7 @@ export function ConnectionStatusPanel() {
               })()}
               <div className="grid gap-2 md:grid-cols-2">
                 {checkResult.items.map((item) => {
-                  const style = CHECK_STATUS_STYLE[item.status];
+                  const statusClass = CHECK_STATUS_CLASS[item.status];
                   return (
                     <div
                       key={item.id}
@@ -585,10 +608,12 @@ export function ConnectionStatusPanel() {
                           {item.label}
                         </span>
                         <span
-                          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${style.className}`}
+                          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${statusClass}`}
                         >
                           {checkIcon(item.status)}
-                          {style.label}
+                          {t(
+                            `harness.checkStatus.${item.status}` as MessageKey,
+                          )}
                         </span>
                       </div>
                       <p className="text-[11px] leading-4 text-[#6c7086]">
@@ -619,6 +644,7 @@ function ManualConnectForm({
   localPath: string;
   onConnected: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation();
   const [repoUrl, setRepoUrl] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -627,9 +653,7 @@ function ManualConnectForm({
   const handleSubmit = useCallback(async () => {
     const trimmedUrl = repoUrl.trim();
     if (!isValidRepoUrl(trimmedUrl)) {
-      setError(
-        "올바른 repo URL 형식이 아닙니다. 예: https://github.com/owner/repo 또는 git@github.com:owner/repo.git",
-      );
+      setError(translate("harness.conn.invalidUrl"));
       return;
     }
     setSubmitting(true);
@@ -645,7 +669,9 @@ function ManualConnectForm({
       await onConnected();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "수동 연결에 실패했습니다.",
+        err instanceof Error
+          ? err.message
+          : translate("harness.conn.manualError"),
       );
     } finally {
       setSubmitting(false);
@@ -657,12 +683,11 @@ function ManualConnectForm({
       <div className="mb-2 flex items-center gap-1.5">
         <Link2 className="h-3.5 w-3.5 text-[#bac2de]" />
         <span className="text-xs font-medium text-[#bac2de]">
-          repo URL 직접 입력
+          {t("harness.conn.manualTitle")}
         </span>
       </div>
       <p className="mb-2 text-[11px] leading-4 text-[#6c7086]">
-        git remote 가 없거나 자동으로 도출되지 않은 경우 repo URL 을 직접 입력해
-        연결할 수 있습니다.
+        {t("harness.conn.manualHint")}
       </p>
       <div className="space-y-2">
         <input
@@ -679,7 +704,7 @@ function ManualConnectForm({
           type="text"
           value={defaultBranch}
           onChange={(e) => setDefaultBranch(e.target.value)}
-          placeholder="기본 브랜치 (선택, 예: main)"
+          placeholder={t("harness.conn.branchPlaceholder")}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
@@ -700,7 +725,9 @@ function ManualConnectForm({
         ) : (
           <Link2 className="h-3.5 w-3.5" />
         )}
-        {submitting ? "연결 중" : "수동 연결"}
+        {submitting
+          ? t("harness.conn.connecting")
+          : t("harness.conn.manualConnect")}
       </button>
     </div>
   );
@@ -718,6 +745,7 @@ function StatusField({ label, value }: { label: string; value: string }) {
 }
 
 function McpStatusTable({ connection }: { connection: ProjectConnection }) {
+  const { t } = useTranslation();
   const status = mcpStatus(connection);
   const mcps = connection.availableMcps;
 
@@ -726,17 +754,25 @@ function McpStatusTable({ connection }: { connection: ProjectConnection }) {
       <table className="w-full table-fixed text-left text-xs">
         <thead className="bg-[#313244]/60 text-[11px] uppercase text-[#6c7086]">
           <tr>
-            <th className="w-1/4 px-3 py-2 font-medium">MCP명</th>
-            <th className="w-1/4 px-3 py-2 font-medium">상태</th>
-            <th className="w-1/4 px-3 py-2 font-medium">권한</th>
-            <th className="w-1/4 px-3 py-2 font-medium">마지막사용</th>
+            <th className="w-1/4 px-3 py-2 font-medium">
+              {t("harness.mcp.colName")}
+            </th>
+            <th className="w-1/4 px-3 py-2 font-medium">
+              {t("harness.mcp.colStatus")}
+            </th>
+            <th className="w-1/4 px-3 py-2 font-medium">
+              {t("harness.mcp.colPerm")}
+            </th>
+            <th className="w-1/4 px-3 py-2 font-medium">
+              {t("harness.mcp.colLastUsed")}
+            </th>
           </tr>
         </thead>
         <tbody>
           {mcps.length === 0 ? (
             <tr>
               <td colSpan={4} className="px-3 py-3 text-center text-[#6c7086]">
-                사용 가능한 MCP가 없습니다.
+                {t("harness.mcp.empty")}
               </td>
             </tr>
           ) : (
@@ -749,7 +785,7 @@ function McpStatusTable({ connection }: { connection: ProjectConnection }) {
                   {status.label}
                 </td>
                 <td className="px-3 py-2 text-[#bac2de]">
-                  {PERMISSIONS_LABEL[connection.permissionsState]} /{" "}
+                  {permissionsLabel(connection.permissionsState)} /{" "}
                   {ACCESS_LABEL[connection.accessMode]}
                 </td>
                 <td className="px-3 py-2 text-[#6c7086]">

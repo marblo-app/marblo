@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { TelegramChannelPanel } from "./TelegramChannelPanel";
+import { useTranslation, t as translate } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 
 interface HarnessStoreProps {
   /** Pass undefined to render inline as a tab (no modal overlay, no close X). */
@@ -9,20 +11,23 @@ interface HarnessStoreProps {
 
 type CategoryFilter = "all" | "required" | "recommended" | "mcp" | "cli";
 
-const CATEGORY_LABEL: Record<CategoryFilter, string> = {
-  all: "전체",
-  required: "필수 (자동 설치)",
-  recommended: "추천 스킬",
-  mcp: "유용한 MCP",
-  cli: "CLI",
-};
+const CATEGORY_FILTERS: CategoryFilter[] = [
+  "all",
+  "required",
+  "recommended",
+  "mcp",
+  "cli",
+];
 
-const STATUS_LABEL: Record<HarnessPackage["status"], string> = {
-  installed: "설치됨",
-  "not-installed": "설치",
-  "manual-required": "수동 설치",
-  unknown: "확인 중",
-};
+// Display labels read locale at call time via the pure t() (the enum value
+// itself stays the identifier used for filtering/lookup).
+function categoryLabel(cat: CategoryFilter): string {
+  return translate(`harness.store.cat.${cat}` as MessageKey);
+}
+
+function statusLabel(status: HarnessPackage["status"]): string {
+  return translate(`harness.store.status.${status}` as MessageKey);
+}
 
 // Catalog packages whose login state we live-probe (binary on PATH ≠ logged
 // in — spawning an unauthenticated CLI hangs on its login prompt).
@@ -32,6 +37,7 @@ const CLI_AUTH_MODELS: Record<string, "claude" | "codex"> = {
 };
 
 export function HarnessStore({ onClose }: HarnessStoreProps) {
+  const { t } = useTranslation();
   const [packages, setPackages] = useState<HarnessPackage[]>([]);
   const [versions, setVersions] = useState<Record<string, HarnessVersionInfo>>(
     {},
@@ -64,7 +70,11 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
       const list = await window.electronAPI.harness.list();
       setPackages(list);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "불러오기 실패");
+      setError(
+        err instanceof Error
+          ? err.message
+          : translate("harness.store.loadFail"),
+      );
     }
     // Versions are looked up lazily — they require network (npm view) and
     // can take several seconds. Render the list immediately and patch in
@@ -96,21 +106,20 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
     setError(null);
     setInfo(null);
     if (pkg.install.kind === "manual") {
-      setInfo(pkg.install.instructions ?? "수동 설치 안내가 없습니다.");
+      setInfo(
+        pkg.install.instructions ?? translate("harness.store.noManualGuide"),
+      );
       return;
     }
     setBusy(pkg.id);
     try {
       const result = await window.electronAPI.harness.install(pkg.id);
       if (!result.success) {
-        setError(result.error ?? "설치 실패");
+        setError(result.error ?? translate("harness.store.installFail"));
       } else {
         const postInstall = pkg.install.postInstall;
-        setInfo(
-          postInstall
-            ? `${pkg.name} 설치 완료. ${postInstall}`
-            : `${pkg.name} 설치 완료.`,
-        );
+        const done = translate("harness.store.installDone", { name: pkg.name });
+        setInfo(postInstall ? `${done} ${postInstall}` : done);
       }
     } finally {
       setBusy(null);
@@ -121,14 +130,17 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
   const handleUninstall = async (pkg: HarnessPackage) => {
     setError(null);
     setInfo(null);
-    if (!confirm(`${pkg.name} 제거하시겠습니까?`)) return;
+    if (
+      !confirm(translate("harness.store.uninstallConfirm", { name: pkg.name }))
+    )
+      return;
     setBusy(pkg.id);
     try {
       const result = await window.electronAPI.harness.uninstall(pkg.id);
       if (!result.success) {
-        setError(result.error ?? "제거 실패");
+        setError(result.error ?? translate("harness.store.uninstallFail"));
       } else {
-        setInfo(`${pkg.name} 제거됨.`);
+        setInfo(translate("harness.store.uninstallDone", { name: pkg.name }));
       }
     } finally {
       setBusy(null);
@@ -169,10 +181,10 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
               />
             </svg>
             <h2 className="text-sm font-semibold text-[#cdd6f4]">
-              Harness 스토어
+              {t("harness.store.title")}
             </h2>
             <span className="text-xs text-[#6c7086]">
-              스킬 / MCP 한 번에 설치
+              {t("harness.store.subtitle")}
             </span>
           </div>
           {onClose && (
@@ -199,7 +211,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
 
         {/* Filter */}
         <div className="flex gap-1.5 border-b border-[#313244] px-4 py-2">
-          {(Object.keys(CATEGORY_LABEL) as CategoryFilter[]).map((cat) => (
+          {CATEGORY_FILTERS.map((cat) => (
             <button
               key={cat}
               onClick={() => setFilter(cat)}
@@ -209,7 +221,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                   : "text-[#6c7086] hover:bg-[#313244] hover:text-[#cdd6f4]"
               }`}
             >
-              {CATEGORY_LABEL[cat]}
+              {categoryLabel(cat)}
             </button>
           ))}
         </div>
@@ -236,7 +248,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
           <div className="p-4">
             {filtered.length === 0 && (
               <p className="text-center text-sm text-[#6c7086]">
-                표시할 패키지가 없습니다.
+                {t("harness.store.emptyList")}
               </p>
             )}
             <div className="grid gap-3 md:grid-cols-2">
@@ -269,7 +281,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                       <div className="flex flex-shrink-0 items-center gap-1">
                         {isDeprecated && (
                           <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
-                            단종 예정
+                            {t("harness.store.deprecated")}
                           </span>
                         )}
                         <span
@@ -282,10 +294,10 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                           }`}
                         >
                           {isInstalled
-                            ? "설치됨"
+                            ? t("harness.store.badge.installed")
                             : isManual
-                              ? "수동"
-                              : "미설치"}
+                              ? t("harness.store.badge.manual")
+                              : t("harness.store.badge.notInstalled")}
                         </span>
                         {auth && isInstalled && (
                           <span
@@ -296,10 +308,10 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                             }`}
                           >
                             {authBusy
-                              ? "인증 확인 중…"
+                              ? t("harness.store.auth.checking")
                               : auth.authenticated
                                 ? "Ready"
-                                : "인증 필요"}
+                                : t("harness.store.auth.needed")}
                           </span>
                         )}
                       </div>
@@ -315,37 +327,42 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                         {ver.updateState === "outdated" &&
                           ver.latestVersion && (
                             <span className="rounded bg-[#f9e2af]/20 px-1.5 py-0.5 text-[#f9e2af]">
-                              → v{ver.latestVersion} 업데이트 대기 중
+                              {t("harness.store.updatePending", {
+                                version: ver.latestVersion,
+                              })}
                             </span>
                           )}
                         {ver.updateState === "up-to-date" && (
-                          <span className="text-[#6c7086]">(최신)</span>
+                          <span className="text-[#6c7086]">
+                            {t("harness.store.upToDate")}
+                          </span>
                         )}
                       </div>
                     )}
                     {auth && isInstalled && !auth.authenticated && (
                       <div className="mb-3 rounded border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-2 py-1.5 text-[10px] text-[#f9e2af]">
                         <div className="mb-1.5">
-                          로그인이 필요합니다. 터미널에서{" "}
+                          {t("harness.store.auth.loginHintBefore")}{" "}
                           <code className="rounded bg-[#313244] px-1 py-0.5 text-[#f9e2af]">
                             {auth.action ?? "login"}
                           </code>{" "}
-                          실행 후 Re-check 하세요. (미인증 상태로 spawn 시
-                          로그인 프롬프트에서 멈춥니다)
+                          {t("harness.store.auth.loginHintAfter")}
                         </div>
                         <button
                           onClick={() => refreshAuth(pkg.id)}
                           disabled={authBusy}
                           className="rounded bg-[#f9e2af]/20 px-2 py-0.5 text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/30 disabled:opacity-50"
                         >
-                          {authBusy ? "확인 중…" : "Re-check"}
+                          {authBusy
+                            ? t("harness.store.auth.checkingShort")
+                            : "Re-check"}
                         </button>
                       </div>
                     )}
                     <div className="flex items-center gap-2">
                       {isDeprecated && (
                         <span className="text-xs text-[#f38ba8]">
-                          단종 예정 — 설치 비권장
+                          {t("harness.store.deprecatedNoInstall")}
                         </span>
                       )}
                       {!isInstalled && !isDeprecated && (
@@ -355,14 +372,14 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                           className="rounded bg-[#89b4fa]/20 px-2.5 py-1 text-xs text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/30 disabled:opacity-50"
                         >
                           {isBusy
-                            ? "설치 중..."
+                            ? t("harness.store.installing")
                             : isManual
-                              ? "안내 보기"
+                              ? t("harness.store.viewGuide")
                               : isBundled
-                                ? "자동 설치됨"
+                                ? t("harness.store.bundled")
                                 : isRequired
-                                  ? "필수 — 설치"
-                                  : STATUS_LABEL[pkg.status]}
+                                  ? t("harness.store.requiredInstall")
+                                  : statusLabel(pkg.status)}
                         </button>
                       )}
                       {isInstalled && !isRequired && (
@@ -371,12 +388,14 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                           disabled={isBusy}
                           className="rounded bg-[#f38ba8]/20 px-2.5 py-1 text-xs text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30 disabled:opacity-50"
                         >
-                          {isBusy ? "처리 중..." : "제거"}
+                          {isBusy
+                            ? t("harness.store.processing")
+                            : t("harness.store.uninstall")}
                         </button>
                       )}
                       {isInstalled && isRequired && (
                         <span className="text-xs text-[#6c7086]">
-                          필수 패키지 — 제거 불가
+                          {t("harness.store.requiredNoRemove")}
                         </span>
                       )}
                       {pkg.url && (
@@ -386,7 +405,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                           rel="noopener noreferrer"
                           className="ml-auto text-xs text-[#6c7086] hover:text-[#89b4fa]"
                         >
-                          문서 →
+                          {t("harness.store.docs")}
                         </a>
                       )}
                     </div>
@@ -400,14 +419,10 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
         {/* Footer note */}
         <div className="space-y-1 border-t border-[#313244] px-4 py-2 text-[11px] text-[#6c7086]">
           <div>
-            <span className="text-[#89b4fa]">●</span> Marblo MCP는 대시보드
-            내부에서 spawn 된 에이전트에만 자동 연결됩니다 (per-agent isolated
-            config). 외부 터미널 CLI 세션은 사용자의 taskforce MCP 등 별도
-            설정으로 관리하세요.
+            <span className="text-[#89b4fa]">●</span>{" "}
+            {t("harness.store.footerMcp")}
           </div>
-          <div>
-            외부 GitHub URL 직접 설치는 차후 추가될 예정입니다 (신뢰 검증 후).
-          </div>
+          <div>{t("harness.store.footerGithub")}</div>
         </div>
       </div>
     </div>

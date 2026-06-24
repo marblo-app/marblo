@@ -1,3 +1,5 @@
+import { useTranslation } from "../../lib/i18n";
+
 interface Props {
   title: string;
   message: string;
@@ -10,11 +12,12 @@ interface Props {
 export function FileTreeConfirmDialog({
   title,
   message,
-  confirmLabel = "확인",
+  confirmLabel,
   danger = false,
   onConfirm,
   onCancel,
 }: Props) {
+  const { t } = useTranslation();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-[400px] max-w-[90vw] rounded-lg border border-gray-700 bg-gray-800 p-5 shadow-2xl">
@@ -27,7 +30,7 @@ export function FileTreeConfirmDialog({
             onClick={onCancel}
             className="rounded bg-gray-700 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-600"
           >
-            취소
+            {t("sidebar.tree.cancel")}
           </button>
           <button
             onClick={onConfirm}
@@ -38,7 +41,7 @@ export function FileTreeConfirmDialog({
             }`}
             autoFocus
           >
-            {confirmLabel}
+            {confirmLabel ?? t("sidebar.tree.confirm")}
           </button>
         </div>
       </div>
