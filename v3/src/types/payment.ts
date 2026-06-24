@@ -16,13 +16,17 @@ export enum PaymentStatus {
 }
 
 // Payment Method Enum
+// Internal values are English code identifiers (runtime/payment branching is
+// keyed off these, never off display text). Human-facing labels live in the
+// i18n table under `billing.data.paymentMethod.<CODE>` — resolve via t() at
+// the render site, not from the enum value.
 export enum PaymentMethod {
-  CARD = "카드",
-  VIRTUAL_ACCOUNT = "가상계좌",
-  TRANSFER = "계좌이체",
-  MOBILE_PHONE = "휴대폰",
-  GIFT_CERTIFICATE = "상품권",
-  EASY_PAY = "간편결제",
+  CARD = "CARD",
+  VIRTUAL_ACCOUNT = "VIRTUAL_ACCOUNT",
+  TRANSFER = "TRANSFER",
+  MOBILE_PHONE = "MOBILE_PHONE",
+  GIFT_CERTIFICATE = "GIFT_CERTIFICATE",
+  EASY_PAY = "EASY_PAY",
 }
 
 // Subscription Status Enum

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 import type { Agent } from "../../types/agent";
 import { useProjectStore } from "../../stores/projectStore";
 import { useAgentStore } from "../../stores/agentStore";
@@ -22,6 +24,7 @@ import {
  * UsageDashboard) → rate-limit status.
  */
 export function UsagePage() {
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const agents = useAgentStore((s) => s.agents);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
@@ -84,7 +87,7 @@ export function UsagePage() {
   if (!projectId) {
     return (
       <div className="p-6 text-sm text-gray-500">
-        프로젝트를 선택하면 사용량이 표시됩니다.
+        {t("usage.selectProjectPrompt")}
       </div>
     );
   }
@@ -92,11 +95,10 @@ export function UsagePage() {
   return (
     <div className="space-y-6 p-4">
       <div>
-        <h1 className="text-lg font-semibold text-gray-100">Usage</h1>
-        <p className="text-xs text-gray-500">
-          모델·에이전트·일자별 토큰 사용량. 라이브(에이전트 문서) +
-          히스토리(BigQuery) 합산.
-        </p>
+        <h1 className="text-lg font-semibold text-gray-100">
+          {t("usage.title")}
+        </h1>
+        <p className="text-xs text-gray-500">{t("usage.subtitle")}</p>
       </div>
 
       {/* Recent 7-day token total (getCostSummary weekly rollup) */}
@@ -104,15 +106,18 @@ export function UsagePage() {
 
       {/* Totals */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <SummaryCard label="총 토큰" value={formatTokens(totals.tokens)} />
         <SummaryCard
-          label="Input / Output"
+          label={t("usage.card.totalTokens")}
+          value={formatTokens(totals.tokens)}
+        />
+        <SummaryCard
+          label={t("usage.card.inputOutput")}
           value={`${formatTokens(totals.input)} / ${formatTokens(
             totals.output
           )}`}
         />
         <SummaryCard
-          label="Cache (R/W)"
+          label={t("usage.card.cache")}
           value={`${formatTokens(totals.cacheRead)} / ${formatTokens(
             totals.cacheWrite
           )}`}
@@ -123,7 +128,7 @@ export function UsagePage() {
       <DailyTrend trend={trend} rangeDays={weekly?.rangeDays ?? 30} />
 
       {/* Per-model & per-agent (reused) */}
-      <Section title="모델별 / 에이전트별">
+      <Section title={t("usage.section.byModelAgent")}>
         <UsageDashboard agents={agents} />
       </Section>
 
@@ -165,13 +170,22 @@ function Section({
   );
 }
 
+// Brand labels stay literal; only the catch-all "other" is translated via
+// familyLabel() at the render site (the label here is an inert fallback).
 const MODEL_FAMILY_META: Record<string, { label: string; color: string }> = {
   claude: { label: "Claude", color: "#a78bfa" }, // purple
   gpt: { label: "Codex", color: "#34d399" }, // green
   gemini: { label: "Gemini", color: "#60a5fa" }, // blue
   antigravity: { label: "Antigravity", color: "#fb923c" }, // orange
-  other: { label: "기타", color: "#9ca3af" },
+  other: { label: "Other", color: "#9ca3af" },
 };
+
+/** Display label for a model family. Brand names are literal; the "other"
+ * catch-all is localized. */
+function familyLabel(family: string, t: (key: MessageKey) => string): string {
+  if (family === "other") return t("usage.modelFamily.other");
+  return MODEL_FAMILY_META[family]?.label ?? family;
+}
 
 /** Map a detected model id (claude-opus-4-7, gpt-5.4, gemini-3-flash…) to a
  * model family. antigravity also emits gemini-* ids, so the agent-doc family
@@ -193,6 +207,7 @@ type DayCell = { tokens: number; cost: number };
  * daily-trend range.
  */
 function WeeklyTokenCard({ weekly }: { weekly: CostWeekly | null }) {
+  const { t } = useTranslation();
   const total = weekly?.totalTokens ?? 0;
   const byModel = useMemo(
     () =>
@@ -203,21 +218,22 @@ function WeeklyTokenCard({ weekly }: { weekly: CostWeekly | null }) {
   );
 
   return (
-    <Section title="최근 7일 총 토큰량">
+    <Section title={t("usage.weekly.title")}>
       <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4">
         <div className="flex items-baseline gap-2">
           <span className="font-mono text-2xl font-semibold text-gray-100">
             {formatTokens(total)}
           </span>
-          <span className="text-xs text-gray-500">tokens · 최근 7일 누적</span>
+          <span className="text-xs text-gray-500">
+            {t("usage.weekly.tokensSuffix")}
+          </span>
         </div>
 
         {byModel.length > 0 ? (
           <div className="mt-3 space-y-2">
             {byModel.map((m, i) => {
-              const meta =
-                MODEL_FAMILY_META[familyFromModelId(m.model)] ||
-                MODEL_FAMILY_META.other;
+              const family = familyFromModelId(m.model);
+              const meta = MODEL_FAMILY_META[family] || MODEL_FAMILY_META.other;
               const pct = total > 0 ? (m.totalTokens / total) * 100 : 0;
               return (
                 <div key={m.model || i}>
@@ -227,7 +243,9 @@ function WeeklyTokenCard({ weekly }: { weekly: CostWeekly | null }) {
                         className="inline-block h-2.5 w-2.5 rounded-sm"
                         style={{ background: meta.color }}
                       />
-                      <span className="font-medium">{meta.label}</span>
+                      <span className="font-medium">
+                        {familyLabel(family, t)}
+                      </span>
                       <span className="text-gray-600">
                         {m.model || "unknown"}
                       </span>
@@ -248,8 +266,7 @@ function WeeklyTokenCard({ weekly }: { weekly: CostWeekly | null }) {
           </div>
         ) : (
           <p className="mt-3 text-[11px] leading-snug text-gray-500">
-            아직 최근 7일 토큰 데이터가 없습니다. getCostSummary(BigQuery) 집계
-            — 새 빌드로 에이전트를 실행하면 채워집니다.
+            {t("usage.weekly.empty")}
           </p>
         )}
       </div>
@@ -273,6 +290,7 @@ function DailyTrend({
   trend: CostByDayEntry[];
   rangeDays: number;
 }) {
+  const { t } = useTranslation();
   const span = Math.max(1, Math.round(rangeDays) || 30);
   // 즉시 뜨는 커스텀 툴팁용 hover 상태. native title(약 1초 지연·작아서
   // 못 알아챔)을 대체한다.
@@ -315,10 +333,9 @@ function DailyTrend({
 
   if (families.length === 0) {
     return (
-      <Section title="일자별 추이 (모델별)">
+      <Section title={t("usage.trend.titleEmpty")}>
         <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4 text-xs text-gray-500">
-          아직 일자별 데이터가 없습니다. 모델별 추이는 BigQuery 비용 로그에서
-          집계됩니다 — 새 빌드로 에이전트를 실행하면 채워집니다.
+          {t("usage.trend.empty")}
         </div>
       </Section>
     );
@@ -327,7 +344,7 @@ function DailyTrend({
   const maxDay = Math.max(...days.map(([, fams]) => sumDay(fams)), 0.000001);
 
   return (
-    <Section title={`일자별 추이 (모델별, 최근 ${span}일)`}>
+    <Section title={t("usage.trend.title", { span })}>
       <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4">
         {/* legend */}
         <div className="mb-3 flex flex-wrap gap-3">
@@ -342,7 +359,7 @@ function DailyTrend({
                   className="inline-block h-2.5 w-2.5 rounded-sm"
                   style={{ background: meta.color }}
                 />
-                {meta.label}
+                {familyLabel(f, t)}
               </span>
             );
           })}
@@ -434,7 +451,9 @@ function DailyTrend({
                               className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
                               style={{ background: meta.color }}
                             />
-                            <span className="text-gray-300">{meta.label}</span>
+                            <span className="text-gray-300">
+                              {familyLabel(f, t)}
+                            </span>
                             <span className="ml-auto pl-2 font-mono text-gray-400">
                               {fmt(valOf(fams[f]))}
                             </span>
@@ -445,7 +464,7 @@ function DailyTrend({
                   </>
                 ) : (
                   <div className="mt-0.5 text-[11px] text-gray-500">
-                    사용 없음
+                    {t("usage.trend.noUsage")}
                   </div>
                 )}
               </div>
@@ -463,40 +482,39 @@ function DailyTrend({
 
 // ── Rate-limit status ────────────────────────────────────────
 
-const RATE_LIMIT_GUIDANCE: Record<
-  string,
-  { label: string; icon: string; note: string }
-> = {
-  claude: {
-    label: "Claude Code",
-    icon: "🟣",
-    note: "Max 구독: 5시간/주간 한도 (CLI 자체 관리) · Pro: 일일 제한",
-  },
-  gpt: {
-    label: "Codex CLI",
-    icon: "🟢",
-    note: "rollout 의 rate_limits(5h/주간 window, used_percent) — 라이브 표시 후속",
-  },
-  gemini: {
-    label: "Gemini CLI",
-    icon: "🔵",
-    note: "무료: 분당/일일 요청 한도 · 초과 시 프로세스 종료",
-  },
-  antigravity: {
-    label: "Antigravity (agy)",
-    icon: "🟠",
-    note: "개인 Gemini 계정 쿼터 공유 — 쿼터가 가장 빡빡, 초과 잦음",
-  },
+type Translate = (
+  key: MessageKey,
+  vars?: Record<string, string | number>
+) => string;
+
+// CLI brand labels + icons stay literal; the Korean guidance note moves to
+// usage.rateLimit.note.<family>, resolved via rateLimitNote() at render.
+const RATE_LIMIT_GUIDANCE: Record<string, { label: string; icon: string }> = {
+  claude: { label: "Claude Code", icon: "🟣" },
+  gpt: { label: "Codex CLI", icon: "🟢" },
+  gemini: { label: "Gemini CLI", icon: "🔵" },
+  antigravity: { label: "Antigravity (agy)", icon: "🟠" },
 };
 
+const RATE_LIMIT_NOTE_KEYS: Record<string, MessageKey> = {
+  claude: "usage.rateLimit.note.claude",
+  gpt: "usage.rateLimit.note.gpt",
+  gemini: "usage.rateLimit.note.gemini",
+  antigravity: "usage.rateLimit.note.antigravity",
+};
+
+function rateLimitNote(model: string, t: Translate): string {
+  return t(RATE_LIMIT_NOTE_KEYS[model] ?? "usage.rateLimit.note.none");
+}
+
 /** epoch seconds → 짧은 상대 리셋 표기 ("3일 후" / "5시간 후" / "곧"). */
-function fmtReset(epochSeconds: number): string {
+function fmtReset(epochSeconds: number, t: Translate): string {
   const ms = epochSeconds * 1000 - Date.now();
-  if (ms <= 0) return "곧";
+  if (ms <= 0) return t("usage.reset.soon");
   const hours = ms / 3_600_000;
-  if (hours >= 24) return `${Math.round(hours / 24)}일 후`;
-  if (hours >= 1) return `${Math.round(hours)}시간 후`;
-  return `${Math.max(1, Math.round(ms / 60_000))}분 후`;
+  if (hours >= 24) return t("usage.reset.days", { n: Math.round(hours / 24) });
+  if (hours >= 1) return t("usage.reset.hours", { n: Math.round(hours) });
+  return t("usage.reset.minutes", { n: Math.max(1, Math.round(ms / 60_000)) });
 }
 
 /** 단일 한도 윈도우(5h / 주간) 게이지. percent = 사용%, 표기는 "남음" 기준. */
@@ -509,14 +527,19 @@ function WindowGauge({
   percent: number;
   resetAt?: number;
 }) {
+  const { t } = useTranslation();
   const remaining = Math.max(0, 100 - percent);
   return (
     <div className="mt-2">
       <div className="flex items-center justify-between text-[11px] text-gray-400">
         <span>{label}</span>
         <span className="font-mono text-gray-300">
-          {remaining.toFixed(0)}% 남음
-          {typeof resetAt === "number" ? ` · ${fmtReset(resetAt)} 리셋` : ""}
+          {t("usage.rateLimit.remaining", { percent: remaining.toFixed(0) })}
+          {typeof resetAt === "number"
+            ? ` · ${t("usage.rateLimit.resetSuffix", {
+                time: fmtReset(resetAt, t),
+              })}`
+            : ""}
         </span>
       </div>
       <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-700">
@@ -541,6 +564,7 @@ function WindowGauge({
  * project has spawned an agent for that provider.
  */
 function RateLimitPanel({ agents }: { agents: Agent[] }) {
+  const { t } = useTranslation();
   const [connectedModels, setConnectedModels] = useState<Agent["model"][]>([]);
 
   useEffect(() => {
@@ -553,7 +577,7 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
           packages
             .filter((p) => p.status === "installed")
             .map((p) => CONNECTED_RATE_LIMIT_PACKAGES[p.id])
-            .filter((model): model is Agent["model"] => Boolean(model)),
+            .filter((model): model is Agent["model"] => Boolean(model))
         );
       })
       .catch(() => {
@@ -566,19 +590,18 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
 
   const providerModels = useMemo(
     () => getRateLimitProviderModels(agents, connectedModels),
-    [agents, connectedModels],
+    [agents, connectedModels]
   );
 
   if (providerModels.length === 0) return null;
 
   return (
-    <Section title="한도(Rate limit) 상태">
+    <Section title={t("usage.rateLimit.title")}>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {providerModels.map((model) => {
           const g = RATE_LIMIT_GUIDANCE[model] || {
             label: model,
             icon: "⚪",
-            note: "한도 정보 없음",
           };
           // 5h(primary) + 주간(7일/secondary) 윈도우를 agent doc 에서 읽는다.
           // codex 가 둘 다 emit, claude 주간은 Phase 1b 캡처로 같은 필드 채움.
@@ -628,40 +651,49 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
                 </span>
                 {typeof headline === "number" && (
                   <span className="ml-auto font-mono text-xs text-gray-300">
-                    {typeof weekly === "number" ? "주간 " : ""}
-                    {Math.max(0, 100 - headline).toFixed(0)}% 남음
+                    {typeof weekly === "number"
+                      ? `${t("usage.rateLimit.weeklyLabel")} `
+                      : ""}
+                    {t("usage.rateLimit.remaining", {
+                      percent: Math.max(0, 100 - headline).toFixed(0),
+                    })}
                   </span>
                 )}
                 {typeof headline !== "number" && (
                   <span className="ml-auto text-xs text-gray-500">
-                    사용 없음
+                    {t("usage.rateLimit.noUsage")}
                   </span>
                 )}
               </div>
               {typeof live === "number" && (
-                <WindowGauge label="5시간" percent={live} resetAt={liveReset} />
+                <WindowGauge
+                  label={t("usage.rateLimit.window.5h")}
+                  percent={live}
+                  resetAt={liveReset}
+                />
               )}
               {typeof weekly === "number" && (
                 <WindowGauge
-                  label="주간(7일)"
+                  label={t("usage.rateLimit.window.weekly")}
                   percent={weekly}
                   resetAt={weeklyReset}
                 />
               )}
               {!hasData && (
                 // 유효한 percent 가 없으면 스테일 빨강 게이지 대신 우아하게 표기.
-                <p className="mt-2 text-xs text-gray-500">사용 없음</p>
+                <p className="mt-2 text-xs text-gray-500">
+                  {t("usage.rateLimit.noUsage")}
+                </p>
               )}
               <p className="mt-2 text-[11px] leading-snug text-gray-500">
-                {g.note}
+                {rateLimitNote(model, t)}
               </p>
             </div>
           );
         })}
       </div>
       <p className="text-[11px] text-gray-600">
-        ⓘ Codex 는 5시간·주간(7일) 한도를 rollout 에서 실시간 표기합니다. Claude
-        주간 한도 표기는 후속(Phase 1b, statusline 캡처)에서 연결됩니다.
+        ⓘ {t("usage.rateLimit.footer")}
       </p>
     </Section>
   );

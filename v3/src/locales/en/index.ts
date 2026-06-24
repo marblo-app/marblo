@@ -12,6 +12,8 @@ import { header } from "./header";
 import { settings } from "./settings";
 import { agents } from "./agents";
 import { plan } from "./plan";
+import { billing } from "./billing";
+import { usage } from "./usage";
 import { onboarding } from "./onboarding";
 import { common } from "./common";
 
@@ -20,6 +22,8 @@ export const en: Record<MessageKey, string> = {
   ...settings,
   ...agents,
   ...plan,
+  ...billing,
+  ...usage,
   ...onboarding,
   ...common,
 };
