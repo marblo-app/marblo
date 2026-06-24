@@ -230,6 +230,68 @@ async function fetchTask(taskId: string): Promise<TaskDoc | null> {
   return { id: snap.id, ...snap.data() } as TaskDoc;
 }
 
+/**
+ * Bind a board task to the agent a dispatch/reuse just routed work to, and
+ * advance it out of TODO so the board + watchdog treat it as live.
+ *
+ * Two effects:
+ *   1. claimedBy/claimedAt → the REAL worker. Overwrites a stale assignee left
+ *      by a previous (now-dead) owner. ALWAYS applied (existing behavior).
+ *   2. status TODO → CLAIMED. Before this, dispatch bound an agent but left the
+ *      task in TODO, so the board showed it unstarted (a human had to flip it to
+ *      IN_PROGRESS) and the watchdog's active scan (CLAIMED/IN_PROGRESS only)
+ *      skipped it. The agent's first `add_activity` then promotes CLAIMED →
+ *      IN_PROGRESS. Mirrors `claim_task` semantics (claim → CLAIMED).
+ *
+ * Reassign guard: status is advanced ONLY from TODO. A task already CLAIMED /
+ * IN_PROGRESS / REVIEW / etc (re-dispatch or re-bind of an in-flight task) keeps
+ * its status untouched — we never regress or stomp a more-advanced state. The
+ * status move rides applyProjection so tasks/{id}.projection.currentStatus and
+ * the mission's statusCounts stay in lockstep with the real status (a bare
+ * updateDoc would leave both projections stale).
+ *
+ * Best-effort: a write failure is non-fatal (the agent is already dispatched),
+ * surfaced via console.error for diagnosis.
+ */
+async function bindTaskToDispatchedAgent(
+  taskId: string,
+  agentId: string,
+): Promise<void> {
+  const extraTaskFields = {
+    claimedBy: agentId,
+    claimedAt: Timestamp.now(),
+  };
+  let task: TaskDoc | null = null;
+  try {
+    task = await fetchTask(taskId);
+  } catch (err) {
+    console.error("[dispatch bind] fetchTask failed:", err);
+  }
+  if (task?.status === "TODO") {
+    try {
+      await applyProjection(db, taskId, {
+        newStatus: "CLAIMED",
+        lastAgentId: agentId,
+        lastActivitySummary: `dispatched to ${agentId}`,
+        extraTaskFields,
+        // Only advance from TODO. Re-checked inside the txn to close the TOCTOU
+        // where a concurrent claim/update already moved the task; on abort we
+        // fall through below to keep at least the claimedBy binding fresh.
+        validateFrom: (s) => s === "TODO",
+      });
+      return;
+    } catch (err) {
+      console.error(
+        "[dispatch bind] TODO→CLAIMED projection failed, keeping claimedBy only:",
+        err,
+      );
+    }
+  }
+  // Already progressed (or the projection write aborted) — rebind the real
+  // worker without touching status (respect the reassign guard; never regress).
+  await updateDoc(doc(db, "tasks", taskId), extraTaskFields);
+}
+
 function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
@@ -1292,8 +1354,35 @@ export function registerTools(server: McpServer): void {
       // Agents tab Activity feed filters by `agentId in [our agents]`, so
       // logging "unknown" makes the activity invisible.
       const resolvedAgentId = agent_id || MARBLO_AGENT_ID;
+
+      // First real activity promotes a freshly-dispatched task CLAIMED →
+      // IN_PROGRESS — dispatch only advances TODO → CLAIMED, so this is the
+      // signal that the bound agent has actually started working. Only from
+      // CLAIMED (validateFrom re-checks inside the txn against a concurrent
+      // promotion race); IN_PROGRESS/REVIEW/etc are left untouched. Done in its
+      // OWN best-effort transaction, BEFORE the activity write below, so a
+      // promotion race can never drop the activity log itself.
+      if (task.status === "CLAIMED") {
+        try {
+          await applyProjection(db, task_id, {
+            newStatus: "IN_PROGRESS",
+            lastAgentId: workerAgentId(resolvedAgentId),
+            lastActivitySummary: message,
+            validateFrom: (s) => s === "CLAIMED",
+          });
+        } catch (err) {
+          // Concurrent transition already moved it out of CLAIMED — fine, the
+          // activity log below still records the progress. Best-effort only.
+          console.error(
+            "[add_activity] CLAIMED→IN_PROGRESS promotion skipped:",
+            err,
+          );
+        }
+      }
+
       // Activity doc + Firestore projection (lastActivity*) in one transaction.
-      // No status change. Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+      // Status is advanced by the promotion block above, not here. Spec:
+      // docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
       // 작업자 귀속(lastAgentId)에는 오케/unknown 을 빼서(workerAgentId) 직전
       // 실제 작업자를 보존하되, activity 로그 자체의 agentId 는 누가 남겼는지
       // 보여주려 resolvedAgentId 그대로 유지한다.
@@ -2164,10 +2253,10 @@ export function registerTools(server: McpServer): void {
         // call update_task_status. Same pattern as dispatch_task's task binding.
         if (result.agentId && task_id) {
           try {
-            await updateDoc(doc(db, "tasks", task_id), {
-              claimedBy: result.agentId,
-              claimedAt: Timestamp.now(),
-            });
+            // Rebind claimedBy AND advance TODO → CLAIMED (mirrors dispatch_task)
+            // so a reused agent's task leaves the board's TODO column. See
+            // bindTaskToDispatchedAgent.
+            await bindTaskToDispatchedAgent(task_id, result.agentId);
           } catch (err) {
             // Non-fatal — the instruction is already delivered; the board just
             // keeps showing the stale assignee. Surface for diagnosis.
@@ -2516,10 +2605,10 @@ export function registerTools(server: McpServer): void {
         const boundTaskId = result.taskId ?? dispatchTaskId;
         if (result.agentId && boundTaskId && result.action !== "logical") {
           try {
-            await updateDoc(doc(db, "tasks", boundTaskId), {
-              claimedBy: result.agentId,
-              claimedAt: Timestamp.now(),
-            });
+            // Rebind claimedBy AND advance TODO → CLAIMED so the dispatched task
+            // never lingers in the board's TODO column (and the watchdog's
+            // active scan picks it up). See bindTaskToDispatchedAgent.
+            await bindTaskToDispatchedAgent(boundTaskId, result.agentId);
           } catch (err) {
             // Non-fatal — the agent is already dispatched; the board just keeps
             // showing the stale assignee. Surface for diagnosis.
