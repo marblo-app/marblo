@@ -4,6 +4,7 @@ import type { MessageKey } from "../../locales/ko";
 import type { Agent } from "../../types/agent";
 import { useProjectStore } from "../../stores/projectStore";
 import { useAgentStore } from "../../stores/agentStore";
+import { useAuth } from "../../hooks/useAuth";
 import { useCostStore } from "../../stores/costStore";
 import type { CostWeekly } from "../../stores/costStore";
 import type { CostByDayEntry } from "../../services/costService";
@@ -27,14 +28,27 @@ export function UsagePage() {
   const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const agents = useAgentStore((s) => s.agents);
+  const ownedAgents = useAgentStore((s) => s.ownedAgents);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
+  const subscribeToOwnedAgents = useAgentStore((s) => s.subscribeToOwnedAgents);
+  const { user } = useAuth();
   const { summary, loadCosts, trend, weekly, loadSummary } = useCostStore();
   const projectId = currentProject?.id || "";
+  const ownerId = user?.uid || "";
 
   useEffect(() => {
     if (!projectId) return;
     return subscribeToAgents(projectId);
   }, [projectId, subscribeToAgents]);
+
+  // Rate-limit panel is account-global: subscribe to every agent this user
+  // owns across all projects, not just the current one. The same Claude/Codex
+  // subscription limit is shared across projects, so this keeps the limit
+  // identical regardless of which project is selected.
+  useEffect(() => {
+    if (!ownerId) return;
+    return subscribeToOwnedAgents(ownerId);
+  }, [ownerId, subscribeToOwnedAgents]);
 
   // loadCosts: raw logs → live-totals fallback (summary). loadSummary: the
   // server-aggregated daily trend + weekly token rollup (getCostSummary).
@@ -113,13 +127,13 @@ export function UsagePage() {
         <SummaryCard
           label={t("usage.card.inputOutput")}
           value={`${formatTokens(totals.input)} / ${formatTokens(
-            totals.output
+            totals.output,
           )}`}
         />
         <SummaryCard
           label={t("usage.card.cache")}
           value={`${formatTokens(totals.cacheRead)} / ${formatTokens(
-            totals.cacheWrite
+            totals.cacheWrite,
           )}`}
         />
       </div>
@@ -132,8 +146,8 @@ export function UsagePage() {
         <UsageDashboard agents={agents} />
       </Section>
 
-      {/* Rate-limit status */}
-      <RateLimitPanel agents={agents} />
+      {/* Rate-limit status — account-global (all owned agents), not per-project */}
+      <RateLimitPanel agents={ownedAgents} />
     </div>
   );
 }
@@ -212,9 +226,9 @@ function WeeklyTokenCard({ weekly }: { weekly: CostWeekly | null }) {
   const byModel = useMemo(
     () =>
       [...(weekly?.byModel ?? [])].sort(
-        (a, b) => b.totalTokens - a.totalTokens
+        (a, b) => b.totalTokens - a.totalTokens,
       ),
-    [weekly]
+    [weekly],
   );
 
   return (
@@ -422,8 +436,8 @@ function DailyTrend({
               ratio < 0.15
                 ? "translateX(0)"
                 : ratio > 0.85
-                ? "translateX(-100%)"
-                : "translateX(-50%)";
+                  ? "translateX(-100%)"
+                  : "translateX(-50%)";
             const rows = families.filter((f) => fams[f] && valOf(fams[f]) > 0);
             return (
               <div
@@ -548,8 +562,8 @@ function WindowGauge({
             percent >= 90
               ? "bg-red-500"
               : percent >= 70
-              ? "bg-amber-500"
-              : "bg-green-500"
+                ? "bg-amber-500"
+                : "bg-green-500"
           }`}
           style={{ width: `${Math.min(100, percent)}%` }}
         />
@@ -618,7 +632,7 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
             .filter(
               (a) =>
                 typeof a.rateLimitPercent === "number" ||
-                typeof a.rateLimitWeeklyPercent === "number"
+                typeof a.rateLimitWeeklyPercent === "number",
             )
             .sort((x, y) => {
               const xLive = x.status === "working" ? 1 : 0;

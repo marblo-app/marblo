@@ -28,10 +28,17 @@ function dedupeAgentsById(agents: Agent[]): Agent[] {
 
 interface AgentState {
   agents: Agent[];
+  // Account-global agents (where ownerId == uid), independent of the
+  // currently selected project. Used only for the rate-limit panel, which
+  // must aggregate across ALL projects: Claude/Codex rate limits are
+  // account/subscription-global, so an agent in any project burns the same
+  // limit. Cost/spend aggregation stays project-scoped via `agents`.
+  ownedAgents: Agent[];
   loading: boolean;
   error: string | null;
 
   subscribeToAgents: (projectId: string) => () => void;
+  subscribeToOwnedAgents: (ownerId: string) => () => void;
   createAgent: (data: Omit<Agent, "id" | "createdAt">) => Promise<string>;
   updateAgent: (id: string, data: Partial<Agent>) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
@@ -44,6 +51,7 @@ interface AgentState {
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   agents: [],
+  ownedAgents: [],
   loading: false,
   error: null,
 
@@ -58,7 +66,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       [where("projectId", "==", projectId)],
       (docs) => {
         set({ agents: dedupeAgentsById(docs.map(toAgent)), loading: false });
-      }
+      },
+    );
+  },
+
+  // Subscribe to every agent the user owns, across all projects. Single
+  // equality filter (ownerId) — no composite index. Feeds the rate-limit
+  // panel so the account-global limit shows the same regardless of which
+  // project is selected, including projects that never probed it themselves.
+  subscribeToOwnedAgents: (ownerId: string) => {
+    if (!ownerId) {
+      set({ ownedAgents: [] });
+      return () => {};
+    }
+    return subscribeToCollection<Record<string, unknown>>(
+      COLLECTION,
+      [where("ownerId", "==", ownerId)],
+      (docs) => {
+        set({ ownedAgents: dedupeAgentsById(docs.map(toAgent)) });
+      },
     );
   },
 
@@ -83,7 +109,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         undefined,
         undefined,
         projectId,
-        agent.currentTaskId ?? undefined
+        agent.currentTaskId ?? undefined,
       );
       return id;
     } catch (err) {
@@ -138,7 +164,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         undefined,
         undefined,
         projectId,
-        agent.currentTaskId ?? undefined
+        agent.currentTaskId ?? undefined,
       );
     } catch (err) {
       set({
@@ -163,7 +189,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   getAgentByName: (name: string): Agent | undefined => {
     const { agents } = get();
     return agents.find(
-      (a: Agent) => a.name.toLowerCase() === name.toLowerCase()
+      (a: Agent) => a.name.toLowerCase() === name.toLowerCase(),
     );
   },
 
@@ -199,7 +225,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               result.ptySessionId,
               `${MODEL_ICONS[restartedAgent.model] || "⚪"} ${
                 restartedAgent.name
-              }`
+              }`,
             );
         }
         return;
@@ -224,7 +250,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         undefined,
         undefined,
         undefined,
-        agent.currentTaskId ?? undefined
+        agent.currentTaskId ?? undefined,
       );
       await agentService.updateAgent(id, { status: "idle" as AgentStatus });
 
@@ -234,7 +260,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         .getState()
         .attachSession(
           launchResult.ptySessionId,
-          `${MODEL_ICONS[agent.model] || "⚪"} ${agent.name}`
+          `${MODEL_ICONS[agent.model] || "⚪"} ${agent.name}`,
         );
     } catch (err) {
       set({
@@ -266,17 +292,17 @@ if (typeof window !== "undefined" && window.electronAPI?.agent?.onSyncStatus) {
       // Match by name — AgentManager UUID != Firestore doc ID, but names are shared
       const { agents } = useAgentStore.getState();
       const match = agents.find(
-        (a) => a.name.toLowerCase() === agentName.toLowerCase()
+        (a) => a.name.toLowerCase() === agentName.toLowerCase(),
       );
       if (match) {
         agentService.updateAgent(match.id, updates).catch((err) => {
           console.error(
             "[AgentStore] Failed to sync agent status to Firestore:",
-            err
+            err,
           );
         });
       }
-    }
+    },
   );
 }
 
@@ -306,7 +332,7 @@ if (
           "[AgentStore] Failed to sync PTY status to Firestore:",
           agentId,
           status,
-          err
+          err,
         );
       });
   });
