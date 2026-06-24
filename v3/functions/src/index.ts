@@ -1333,6 +1333,160 @@ export const resendFounderAccessEmail = functions.https.onCall(
   },
 );
 
+// ─── 신청 접수 확인 이메일 (Resend) ──────────────────────────────────
+//
+// /founders 신청 시 클라가 betatester50_waitlist 에 직접 doc 을 쓴다.
+// 신청자는 그 즉시 아무 메일도 못 받고, 접근 안내는 어드민이 '선정'할 때만
+// 발송된다. 그 공백을 메우기 위해 doc 생성 시 "접수됐습니다, 선정 시
+// 안내드릴게요" 확인 메일을 자동 발송한다.
+// 메일 본문/발송/스킵 정책은 위 파운더 접근 안내 이메일과 동일하게 재사용한다.
+
+function buildApplyConfirmEmail(locale: FounderLocale): FounderEmailContent {
+  if (locale === "en") {
+    return {
+      subject: "🙌 Your Marblo Founder beta application is in",
+      html: founderHtmlShell(`
+        <h1 style="font-size:22px;margin:0 0 16px">🙌 We got your application!</h1>
+        <p>Thanks for applying to the Marblo Founder beta. Your application has been received — there's nothing more you need to do right now.</p>
+        <p>We review applications on a rolling basis. <strong>If you're selected, we'll email you</strong> the download and onboarding details at this address, so keep an eye on your inbox.</p>
+        <p style="color:#666">Excited to build Marblo with founders like you. See you on the inside soon.</p>
+      `),
+      text: [
+        "We got your application!",
+        "",
+        "Thanks for applying to the Marblo Founder beta. Your application has been received — nothing more to do right now.",
+        "",
+        "We review applications on a rolling basis. If you're selected, we'll email you the download and onboarding details at this address.",
+        "",
+        "Excited to build Marblo with founders like you.",
+      ].join("\n"),
+    };
+  }
+
+  if (locale === "ja") {
+    return {
+      subject: "🙌 Marblo ファウンダーベータのお申し込みを受け付けました",
+      html: founderHtmlShell(`
+        <h1 style="font-size:22px;margin:0 0 16px">🙌 お申し込みを受け付けました！</h1>
+        <p>Marblo ファウンダーベータにお申し込みいただきありがとうございます。お申し込みは受理されました。いまの時点で追加の操作は必要ありません。</p>
+        <p>お申し込みは順次審査しております。<strong>選ばれた場合は、このアドレス宛にメールで</strong>ダウンロードとオンボーディングのご案内をお送りしますので、受信トレイをご確認ください。</p>
+        <p style="color:#666">あなたのようなファウンダーと一緒に Marblo をつくれることを楽しみにしています。</p>
+      `),
+      text: [
+        "お申し込みを受け付けました！",
+        "",
+        "Marblo ファウンダーベータにお申し込みいただきありがとうございます。お申し込みは受理されました。いまの時点で追加の操作は必要ありません。",
+        "",
+        "お申し込みは順次審査しております。選ばれた場合は、このアドレス宛にダウンロードとオンボーディングのご案内をメールでお送りします。",
+        "",
+        "あなたのようなファウンダーと一緒に Marblo をつくれることを楽しみにしています。",
+      ].join("\n"),
+    };
+  }
+
+  // 기본: 한국어
+  return {
+    subject: "🙌 마블로 파운더 베타 신청이 접수됐어요",
+    html: founderHtmlShell(`
+      <h1 style="font-size:22px;margin:0 0 16px">🙌 신청이 접수됐어요!</h1>
+      <p>마블로 파운더 베타에 신청해 주셔서 감사합니다. 신청이 정상적으로 접수되었으며, 지금은 따로 하실 일이 없습니다.</p>
+      <p>신청은 순차적으로 검토하고 있어요. <strong>선정되시면 이 주소로 이메일을 보내</strong> 다운로드와 시작 안내를 드릴 테니, 받은편지함을 확인해 주세요.</p>
+      <p style="color:#666">여러분 같은 파운더와 함께 마블로를 만들어갈 수 있어 기대돼요. 곧 안에서 뵙겠습니다.</p>
+    `),
+    text: [
+      "신청이 접수됐어요!",
+      "",
+      "마블로 파운더 베타에 신청해 주셔서 감사합니다. 신청이 정상적으로 접수되었으며, 지금은 따로 하실 일이 없습니다.",
+      "",
+      "신청은 순차적으로 검토하고 있어요. 선정되시면 이 주소로 이메일을 보내 다운로드와 시작 안내를 드립니다.",
+      "",
+      "여러분 같은 파운더와 함께 마블로를 만들어갈 수 있어 기대돼요. 곧 안에서 뵙겠습니다.",
+    ].join("\n"),
+  };
+}
+
+/**
+ * 신청 접수 확인 이메일 발송. 반드시 non-throwing (sendFounderAccessEmail 과 동일 정책).
+ * - RESEND_API_KEY 미설정 시 console.warn 후 false 반환(스킵).
+ * - 발송 성공 시 true, 그 외 false.
+ */
+async function sendApplyConfirmEmail(
+  email: string,
+  locale: string,
+): Promise<boolean> {
+  try {
+    if (!RESEND_API_KEY) {
+      console.warn(
+        "[apply-confirm-email] RESEND_API_KEY 미설정 — 발송 스킵:",
+        email,
+      );
+      return false;
+    }
+    const content = buildApplyConfirmEmail(normalizeFounderLocale(locale));
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
+        to: [email],
+        subject: content.subject,
+        html: content.html,
+        text: content.text,
+      }),
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      console.warn(`[apply-confirm-email] resend HTTP ${resp.status}: ${body}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("[apply-confirm-email] 발송 실패:", email, err);
+    return false;
+  }
+}
+
+// 신청 접수 확인 이메일 트리거 — waitlist doc 생성 시 1회 발송.
+// betatester50_waitlist 는 클라가 직접 쓰므로 콜러블이 아닌 onCreate 가 정석.
+// 트리거 재시도 폭주를 막기 위해 절대 throw 하지 않는다(에러는 삼키고 종료).
+export const sendApplyConfirmOnWaitlist = functions.firestore
+  .document("betatester50_waitlist/{docId}")
+  .onCreate(async (snap) => {
+    try {
+      const data = snap.data() || {};
+      const rawEmail = typeof data.email === "string" ? data.email : "";
+      const email = normalizeEmail(rawEmail);
+      if (!email) {
+        console.warn("[apply-confirm-email] email 없음 — 발송 스킵:", snap.id);
+        return;
+      }
+      const locale = typeof data.locale === "string" ? data.locale : "ko";
+      const emailSent = await sendApplyConfirmEmail(email, locale);
+      // 발송 흔적 기록(추적용). non-throwing — 기록 실패가 트리거를 깨면 안 된다.
+      await snap.ref
+        .set(
+          {
+            confirmEmailSent: emailSent,
+            confirmEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        )
+        .catch((err) =>
+          console.warn(
+            "[apply-confirm-email] 발송 흔적 기록 실패:",
+            snap.id,
+            err,
+          ),
+        );
+    } catch (err) {
+      // 트리거 재시도 폭주 방지 — 모든 에러를 삼킨다.
+      console.warn("[apply-confirm-email] 트리거 처리 실패:", snap.id, err);
+    }
+  });
+
 // 구조화 피드백 제출 (파운더 본인) — 검증 후 저장 + Pro 3개월 직접 부여.
 export const submitFounderFeedback = functions.https.onCall(
   async (data, context) => {
