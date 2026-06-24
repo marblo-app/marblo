@@ -235,17 +235,33 @@ export async function reconcilePaddlePending(): Promise<ReconcileResult> {
   // pendingPaddleOrders or as part of subscriptions with status=pending.
   // Until the Paddle integration is more fleshed out, we scan
   // pendingOrders documents flagged with provider='paddle'.
-  const cutoff = admin.firestore.Timestamp.fromMillis(
-    Date.now() - MAX_AGE_HOURS * 3600 * 1000
-  );
-  const stuck = await db()
+  // (provider ==) + (createdAt >) 는 서로 다른 필드라 복합 인덱스를 요구한다 —
+  // firestore.indexes.json 에 없으면 런타임 FAILED_PRECONDITION 으로 죽는다.
+  // Paddle pending 물량은 소량(국내=Toss 우선)이라, provider 단일 동등 쿼리(자동
+  // 단일필드 인덱스)만 날리고 createdAt 컷오프는 코드에서 필터한다. 선례:
+  // getFounderFeedbackByEmail(#211)·chatService. createdAt 은 Timestamp/Date/숫자/
+  // 문자열 어느 형태든 올 수 있어 toMillis 가드로 안전 비교한다.
+  const cutoffMs = Date.now() - MAX_AGE_HOURS * 3600 * 1000;
+  const toMillis = (x: unknown): number =>
+    x instanceof admin.firestore.Timestamp
+      ? x.toMillis()
+      : x instanceof Date
+      ? x.getTime()
+      : typeof x === "number"
+      ? x
+      : typeof x === "string"
+      ? new Date(x).getTime()
+      : 0;
+  const snap = await db()
     .collection("pendingOrders")
     .where("provider", "==", "paddle")
-    .where("createdAt", ">", cutoff)
     .get();
-  result.scanned = stuck.size;
+  const stuckDocs = snap.docs.filter(
+    (doc) => toMillis(doc.data().createdAt) > cutoffMs
+  );
+  result.scanned = stuckDocs.length;
   const now = Date.now();
-  for (const doc of stuck.docs) {
+  for (const doc of stuckDocs) {
     const order = doc.data();
     const createdAt =
       order.createdAt instanceof admin.firestore.Timestamp

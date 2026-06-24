@@ -41,6 +41,22 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "lastActivityAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "deployments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "startedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "merge_history",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "mergedAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
