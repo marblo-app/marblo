@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { ChevronRight, ChevronLeft, Check } from "lucide-react";
+import { useTranslation } from "../../lib/i18n";
 
 export interface OnboardingStep {
   id: string;
@@ -24,6 +25,7 @@ export const OnboardingSteps: React.FC<OnboardingStepsProps> = ({
   onComplete,
   onSkip,
 }) => {
+  const { t } = useTranslation();
   // completedSteps is collected but not rendered yet — kept for future
   // "step X/N complete" indicator. Prefix with _ so noUnusedLocals stays
   // happy without losing the write site.
@@ -76,7 +78,7 @@ export const OnboardingSteps: React.FC<OnboardingStepsProps> = ({
             className="flex items-center gap-2 px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <ChevronLeft className="w-4 h-4" />
-            Previous
+            {t("onboarding.nav.previous")}
           </button>
 
           <div className="flex gap-2">
@@ -85,7 +87,7 @@ export const OnboardingSteps: React.FC<OnboardingStepsProps> = ({
                 onClick={onSkip}
                 className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
-                Skip Setup
+                {t("onboarding.nav.skipSetup")}
               </button>
             )}
 
@@ -94,7 +96,7 @@ export const OnboardingSteps: React.FC<OnboardingStepsProps> = ({
                 onClick={handleSkipStep}
                 className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
-                Skip This Step
+                {t("onboarding.nav.skipStep")}
               </button>
             )}
 
@@ -104,12 +106,12 @@ export const OnboardingSteps: React.FC<OnboardingStepsProps> = ({
             >
               {currentStep === steps.length - 1 ? (
                 <>
-                  Complete
+                  {t("onboarding.nav.complete")}
                   <Check className="w-4 h-4" />
                 </>
               ) : (
                 <>
-                  Next
+                  {t("onboarding.nav.next")}
                   <ChevronRight className="w-4 h-4" />
                 </>
               )}

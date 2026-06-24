@@ -9,13 +9,20 @@ import {
   ExternalLink,
   AlertCircle,
 } from "lucide-react";
+import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 
+/**
+ * Channel `id` stays an English code identifier (used for connect calls,
+ * docs URLs, webhook branching); only the display name/description/setup
+ * steps are translated via key references. See ../../locales/README.md.
+ */
 interface IntegrationChannel {
   id: string;
-  name: string;
+  nameKey: MessageKey;
   icon: React.ReactNode;
-  description: string;
-  setupSteps: string[];
+  descKey: MessageKey;
+  setupStepKeys: MessageKey[];
   webhookUrl?: string;
   apiKey?: string;
   connected?: boolean;
@@ -30,84 +37,83 @@ interface ChannelIntegrationGuideProps {
 const defaultChannels: IntegrationChannel[] = [
   {
     id: "google-ads",
-    name: "Google Ads",
+    nameKey: "onboarding.channel.googleAds.name",
     icon: <Globe className="w-6 h-6" />,
-    description:
-      "Connect Google Ads to track and optimize campaign performance",
-    setupSteps: [
-      "Sign in to your Google Ads account",
-      "Go to Tools & Settings → API Center",
-      "Apply for API access or use existing access",
-      "Generate developer token and customer ID",
-      "Enable Google Ads API in Google Cloud Console",
-      "Configure OAuth2 credentials for your application",
+    descKey: "onboarding.channel.googleAds.desc",
+    setupStepKeys: [
+      "onboarding.channel.googleAds.step1",
+      "onboarding.channel.googleAds.step2",
+      "onboarding.channel.googleAds.step3",
+      "onboarding.channel.googleAds.step4",
+      "onboarding.channel.googleAds.step5",
+      "onboarding.channel.googleAds.step6",
     ],
   },
   {
     id: "meta",
-    name: "Meta Business",
+    nameKey: "onboarding.channel.meta.name",
     icon: <MessageCircle className="w-6 h-6" />,
-    description: "Integrate Meta (Facebook/Instagram) advertising platform",
-    setupSteps: [
-      "Go to Meta for Developers portal",
-      "Create a new app for Marketing API",
-      "Request Marketing API permissions",
-      "Get your App ID and App Secret",
-      "Generate access token with ads_management permissions",
-      "Add your ad account ID",
+    descKey: "onboarding.channel.meta.desc",
+    setupStepKeys: [
+      "onboarding.channel.meta.step1",
+      "onboarding.channel.meta.step2",
+      "onboarding.channel.meta.step3",
+      "onboarding.channel.meta.step4",
+      "onboarding.channel.meta.step5",
+      "onboarding.channel.meta.step6",
     ],
   },
   {
     id: "naver",
-    name: "네이버 쇼핑/검색광고",
+    nameKey: "onboarding.channel.naver.name",
     icon: <Hash className="w-6 h-6" />,
-    description: "네이버 쇼핑 및 검색광고 계정을 연동하여 성과를 관리하세요",
-    setupSteps: [
-      "네이버 검색광고 관리자 도구에 로그인",
-      "도구 → API 관리 → API 신청",
-      "API 키 및 시크릿 키 발급받기",
-      "고객 ID 확인 (우상단 고객센터에서 확인)",
-      "API 사용 승인 대기 (영업일 기준 1-2일)",
-      "발급된 API 정보 입력",
+    descKey: "onboarding.channel.naver.desc",
+    setupStepKeys: [
+      "onboarding.channel.naver.step1",
+      "onboarding.channel.naver.step2",
+      "onboarding.channel.naver.step3",
+      "onboarding.channel.naver.step4",
+      "onboarding.channel.naver.step5",
+      "onboarding.channel.naver.step6",
     ],
   },
   {
     id: "coupang",
-    name: "쿠팡 파트너스",
+    nameKey: "onboarding.channel.coupang.name",
     icon: <Zap className="w-6 h-6" />,
-    description: "쿠팡 파트너스 API를 연동하여 주문 및 수수료 데이터를 추적",
-    setupSteps: [
-      "쿠팡 파트너스에 로그인",
-      "파트너스 센터 → API 관리",
-      "Access Key와 Secret Key 발급",
-      "서비스 이용약관 동의",
-      "API 테스트 및 연동 확인",
+    descKey: "onboarding.channel.coupang.desc",
+    setupStepKeys: [
+      "onboarding.channel.coupang.step1",
+      "onboarding.channel.coupang.step2",
+      "onboarding.channel.coupang.step3",
+      "onboarding.channel.coupang.step4",
+      "onboarding.channel.coupang.step5",
     ],
   },
   {
     id: "smartstore",
-    name: "네이버 스마트스토어",
+    nameKey: "onboarding.channel.smartstore.name",
     icon: <Globe className="w-6 h-6" />,
-    description: "네이버 스마트스토어 주문 관리 및 정산 데이터 연동",
-    setupSteps: [
-      "네이버 커머스 API 센터 접속",
-      "스마트스토어 API 신청",
-      "Application ID 및 Secret 발급",
-      "스마트스토어 계정과 연동 승인",
-      "주문/상품 API 권한 확인",
-      "테스트 환경에서 API 호출 테스트",
+    descKey: "onboarding.channel.smartstore.desc",
+    setupStepKeys: [
+      "onboarding.channel.smartstore.step1",
+      "onboarding.channel.smartstore.step2",
+      "onboarding.channel.smartstore.step3",
+      "onboarding.channel.smartstore.step4",
+      "onboarding.channel.smartstore.step5",
+      "onboarding.channel.smartstore.step6",
     ],
   },
   {
     id: "webhook",
-    name: "Custom Webhook",
+    nameKey: "onboarding.channel.webhook.name",
     icon: <Zap className="w-6 h-6" />,
-    description: "Set up a custom webhook endpoint for maximum flexibility",
-    setupSteps: [
-      "Prepare your webhook endpoint URL",
-      "Ensure it accepts POST requests",
-      "Configure authentication if needed",
-      "Test the connection",
+    descKey: "onboarding.channel.webhook.desc",
+    setupStepKeys: [
+      "onboarding.channel.webhook.step1",
+      "onboarding.channel.webhook.step2",
+      "onboarding.channel.webhook.step3",
+      "onboarding.channel.webhook.step4",
     ],
   },
 ];
@@ -115,6 +121,7 @@ const defaultChannels: IntegrationChannel[] = [
 export const ChannelIntegrationGuide: React.FC<
   ChannelIntegrationGuideProps
 > = ({ availableChannels = defaultChannels, onConnect, onSkip }) => {
+  const { t } = useTranslation();
   // selectedChannel is reset via setSelectedChannel after a successful
   // connect (so the wizard returns to the channel list); the value itself
   // isn't read here yet — Future PR will use it for "active channel"
@@ -157,12 +164,10 @@ export const ChannelIntegrationGuide: React.FC<
           <AlertCircle className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5" />
           <div>
             <h4 className="font-medium text-blue-900 dark:text-blue-100">
-              Connect Your Communication Channels
+              {t("onboarding.channels.banner.title")}
             </h4>
             <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-              Integrate with your team's communication platforms to receive
-              real-time updates and notifications. You can always add more
-              channels later from settings.
+              {t("onboarding.channels.banner.desc")}
             </p>
           </div>
         </div>
@@ -198,16 +203,16 @@ export const ChannelIntegrationGuide: React.FC<
                   </div>
                   <div className="flex-1">
                     <h3 className="font-medium text-gray-900 dark:text-white flex items-center gap-2">
-                      {channel.name}
+                      {t(channel.nameKey)}
                       {channel.connected && (
                         <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
                           <Check className="w-3 h-3" />
-                          Connected
+                          {t("onboarding.channels.connected")}
                         </span>
                       )}
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                      {channel.description}
+                      {t(channel.descKey)}
                     </p>
                   </div>
                 </div>
@@ -217,7 +222,9 @@ export const ChannelIntegrationGuide: React.FC<
                     onClick={() => toggleSteps(channel.id)}
                     className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium"
                   >
-                    {expandedSteps === channel.id ? "Hide" : "Setup"} Guide
+                    {expandedSteps === channel.id
+                      ? t("onboarding.channels.hideGuide")
+                      : t("onboarding.channels.setupGuide")}
                   </button>
                 )}
               </div>
@@ -226,10 +233,10 @@ export const ChannelIntegrationGuide: React.FC<
                 <div className="mt-4 space-y-4 border-t dark:border-gray-700 pt-4">
                   <div className="space-y-2">
                     <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Setup Steps:
+                      {t("onboarding.channels.setupStepsTitle")}
                     </h4>
                     <ol className="space-y-2">
-                      {channel.setupSteps.map((step, index) => (
+                      {channel.setupStepKeys.map((stepKey, index) => (
                         <li
                           key={index}
                           className="flex gap-2 text-sm text-gray-600 dark:text-gray-400"
@@ -237,7 +244,7 @@ export const ChannelIntegrationGuide: React.FC<
                           <span className="font-medium text-gray-500">
                             {index + 1}.
                           </span>
-                          <span>{step}</span>
+                          <span>{t(stepKey)}</span>
                         </li>
                       ))}
                     </ol>
@@ -247,8 +254,8 @@ export const ChannelIntegrationGuide: React.FC<
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         {channel.id === "webhook"
-                          ? "Webhook URL"
-                          : "API Token/Key"}
+                          ? t("onboarding.channels.webhookUrl")
+                          : t("onboarding.channels.apiToken")}
                       </label>
                       <div className="flex gap-2">
                         <input
@@ -256,7 +263,7 @@ export const ChannelIntegrationGuide: React.FC<
                           placeholder={
                             channel.id === "webhook"
                               ? "https://your-webhook-url.com/hook"
-                              : "Enter your API token"
+                              : t("onboarding.channels.apiPlaceholder")
                           }
                           value={connectionConfig[channel.id] || ""}
                           onChange={(e) =>
@@ -291,7 +298,9 @@ export const ChannelIntegrationGuide: React.FC<
                         disabled={!connectionConfig[channel.id] || connecting}
                         className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
-                        {connecting ? "Connecting..." : "Connect Channel"}
+                        {connecting
+                          ? t("onboarding.channels.connecting")
+                          : t("onboarding.channels.connect")}
                       </button>
                       <button
                         onClick={() =>
@@ -303,7 +312,7 @@ export const ChannelIntegrationGuide: React.FC<
                         className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2"
                       >
                         <ExternalLink className="w-4 h-4" />
-                        Docs
+                        {t("onboarding.channels.docs")}
                       </button>
                     </div>
                   </div>
@@ -320,7 +329,7 @@ export const ChannelIntegrationGuide: React.FC<
             onClick={onSkip}
             className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
           >
-            I'll set this up later
+            {t("onboarding.channels.setupLater")}
           </button>
         </div>
       )}

@@ -1,5 +1,6 @@
 import React from "react";
 import { Check } from "lucide-react";
+import { useTranslation } from "../../lib/i18n";
 
 interface ProgressIndicatorProps {
   steps: Array<{
@@ -19,6 +20,8 @@ export const ProgressIndicator: React.FC<ProgressIndicatorProps> = ({
   onStepClick,
   variant = "stepper",
 }) => {
+  const { t } = useTranslation();
+
   if (variant === "dots") {
     return (
       <div className="flex items-center justify-center gap-2">
@@ -31,8 +34,8 @@ export const ProgressIndicator: React.FC<ProgressIndicatorProps> = ({
               index === currentStep
                 ? "w-8 bg-blue-600"
                 : completedSteps.has(index)
-                  ? "bg-green-600"
-                  : "bg-gray-300 dark:bg-gray-600"
+                ? "bg-green-600"
+                : "bg-gray-300 dark:bg-gray-600"
             } ${onStepClick ? "cursor-pointer hover:opacity-80" : ""}`}
           />
         ))}
@@ -47,10 +50,15 @@ export const ProgressIndicator: React.FC<ProgressIndicatorProps> = ({
       <div className="w-full">
         <div className="flex justify-between mb-2">
           <span className="text-sm text-gray-600 dark:text-gray-400">
-            Step {currentStep + 1} of {steps.length}
+            {t("onboarding.progress.stepOf", {
+              current: currentStep + 1,
+              total: steps.length,
+            })}
           </span>
           <span className="text-sm text-gray-600 dark:text-gray-400">
-            {Math.round(progress)}% Complete
+            {t("onboarding.progress.percentComplete", {
+              percent: Math.round(progress),
+            })}
           </span>
         </div>
         <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
@@ -80,8 +88,8 @@ export const ProgressIndicator: React.FC<ProgressIndicatorProps> = ({
                   index === currentStep
                     ? "border-blue-600 bg-blue-600 text-white"
                     : completedSteps.has(index)
-                      ? "border-green-600 bg-green-600 text-white"
-                      : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-400"
+                    ? "border-green-600 bg-green-600 text-white"
+                    : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-400"
                 }
                 ${
                   onStepClick &&
@@ -104,8 +112,8 @@ export const ProgressIndicator: React.FC<ProgressIndicatorProps> = ({
                   index === currentStep
                     ? "text-gray-900 dark:text-white"
                     : completedSteps.has(index)
-                      ? "text-green-600 dark:text-green-500"
-                      : "text-gray-500 dark:text-gray-400"
+                    ? "text-green-600 dark:text-green-500"
+                    : "text-gray-500 dark:text-gray-400"
                 }`}
               >
                 {step.title}

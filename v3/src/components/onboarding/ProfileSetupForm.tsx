@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { User, Building, Target, ChevronDown, ArrowRight } from "lucide-react";
+import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 
 export interface CompanyProfile {
   companyName: string;
@@ -18,60 +20,74 @@ interface ProfileSetupFormProps {
   onSkip?: () => void;
 }
 
-const industries = [
-  "이커머스/온라인 쇼핑",
-  "패션/뷰티",
-  "식품/음료",
-  "전자제품/가전",
-  "건강/의료",
-  "교육/학습",
-  "여행/숙박",
-  "부동산",
-  "금융/보험",
-  "IT/소프트웨어",
-  "게임/엔터테인먼트",
-  "스포츠/피트니스",
-  "기타",
+/**
+ * Data labels: the `value` is a stable English code identifier (what gets
+ * stored on the profile), and `labelKey` is the translated display label.
+ * Translating the stored value would break persistence/comparison — see
+ * ../../locales/README.md §"데이터 겸 UI 라벨".
+ */
+interface LabeledOption {
+  value: string;
+  labelKey: MessageKey;
+}
+
+const industries: LabeledOption[] = [
+  { value: "ecommerce", labelKey: "onboarding.industry.ecommerce" },
+  { value: "fashionBeauty", labelKey: "onboarding.industry.fashionBeauty" },
+  { value: "foodBeverage", labelKey: "onboarding.industry.foodBeverage" },
+  { value: "electronics", labelKey: "onboarding.industry.electronics" },
+  { value: "healthMedical", labelKey: "onboarding.industry.healthMedical" },
+  { value: "education", labelKey: "onboarding.industry.education" },
+  { value: "travel", labelKey: "onboarding.industry.travel" },
+  { value: "realEstate", labelKey: "onboarding.industry.realEstate" },
+  { value: "finance", labelKey: "onboarding.industry.finance" },
+  { value: "software", labelKey: "onboarding.industry.software" },
+  {
+    value: "gameEntertainment",
+    labelKey: "onboarding.industry.gameEntertainment",
+  },
+  { value: "sportsFitness", labelKey: "onboarding.industry.sportsFitness" },
+  { value: "other", labelKey: "onboarding.industry.other" },
 ];
 
-const businessTypes = [
-  "B2C (개인 고객 대상)",
-  "B2B (기업 고객 대상)",
-  "B2B2C (하이브리드)",
-  "마켓플레이스",
-  "SaaS/구독 서비스",
-  "기타",
+const businessTypes: LabeledOption[] = [
+  { value: "b2c", labelKey: "onboarding.businessType.b2c" },
+  { value: "b2b", labelKey: "onboarding.businessType.b2b" },
+  { value: "b2b2c", labelKey: "onboarding.businessType.b2b2c" },
+  { value: "marketplace", labelKey: "onboarding.businessType.marketplace" },
+  { value: "saas", labelKey: "onboarding.businessType.saas" },
+  { value: "other", labelKey: "onboarding.businessType.other" },
 ];
 
-const teamSizes = [
-  "1명 (개인)",
-  "2-5명",
-  "6-20명",
-  "21-50명",
-  "51-200명",
-  "201명 이상",
+const teamSizes: LabeledOption[] = [
+  { value: "solo", labelKey: "onboarding.teamSize.solo" },
+  { value: "2to5", labelKey: "onboarding.teamSize.2to5" },
+  { value: "6to20", labelKey: "onboarding.teamSize.6to20" },
+  { value: "21to50", labelKey: "onboarding.teamSize.21to50" },
+  { value: "51to200", labelKey: "onboarding.teamSize.51to200" },
+  { value: "201plus", labelKey: "onboarding.teamSize.201plus" },
 ];
 
-const budgetRanges = [
-  "월 100만원 미만",
-  "월 100-500만원",
-  "월 500-1,000만원",
-  "월 1,000-5,000만원",
-  "월 5,000만원 이상",
-  "예산 미정",
+const budgetRanges: LabeledOption[] = [
+  { value: "under1m", labelKey: "onboarding.budget.under1m" },
+  { value: "1to5m", labelKey: "onboarding.budget.1to5m" },
+  { value: "5to10m", labelKey: "onboarding.budget.5to10m" },
+  { value: "10to50m", labelKey: "onboarding.budget.10to50m" },
+  { value: "over50m", labelKey: "onboarding.budget.over50m" },
+  { value: "undecided", labelKey: "onboarding.budget.undecided" },
 ];
 
-const primaryGoals = [
-  "매출 증대",
-  "신규 고객 확보",
-  "브랜드 인지도 향상",
-  "고객 재구매율 증가",
-  "마케팅 ROI 개선",
-  "경쟁사 대비 우위 확보",
-  "글로벌 진출",
-  "신제품 론칭",
-  "계절성 매출 대응",
-  "데이터 기반 의사결정",
+const goalOptions: LabeledOption[] = [
+  { value: "revenue", labelKey: "onboarding.goal.revenue" },
+  { value: "newCustomers", labelKey: "onboarding.goal.newCustomers" },
+  { value: "brandAwareness", labelKey: "onboarding.goal.brandAwareness" },
+  { value: "retention", labelKey: "onboarding.goal.retention" },
+  { value: "roi", labelKey: "onboarding.goal.roi" },
+  { value: "competitive", labelKey: "onboarding.goal.competitive" },
+  { value: "global", labelKey: "onboarding.goal.global" },
+  { value: "productLaunch", labelKey: "onboarding.goal.productLaunch" },
+  { value: "seasonal", labelKey: "onboarding.goal.seasonal" },
+  { value: "dataDecision", labelKey: "onboarding.goal.dataDecision" },
 ];
 
 export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
@@ -79,6 +95,8 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
   onSubmit,
   onSkip,
 }) => {
+  const { t } = useTranslation();
+
   const [profile, setProfile] = useState<CompanyProfile>({
     companyName: "",
     industry: "",
@@ -97,19 +115,19 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
     const newErrors: Record<string, string> = {};
 
     if (!profile.companyName.trim()) {
-      newErrors.companyName = "회사명을 입력해주세요";
+      newErrors.companyName = t("onboarding.profile.error.companyName");
     }
     if (!profile.industry) {
-      newErrors.industry = "업종을 선택해주세요";
+      newErrors.industry = t("onboarding.profile.industryPlaceholder");
     }
     if (!profile.businessType) {
-      newErrors.businessType = "사업 유형을 선택해주세요";
+      newErrors.businessType = t("onboarding.profile.businessTypePlaceholder");
     }
     if (!profile.teamSize) {
-      newErrors.teamSize = "팀 규모를 선택해주세요";
+      newErrors.teamSize = t("onboarding.profile.teamSizePlaceholder");
     }
     if (profile.primaryGoals.length === 0) {
-      newErrors.primaryGoals = "최소 1개의 목표를 선택해주세요";
+      newErrors.primaryGoals = t("onboarding.profile.error.primaryGoals");
     }
 
     setErrors(newErrors);
@@ -139,10 +157,10 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
           <Building className="w-8 h-8 text-blue-600 dark:text-blue-400" />
         </div>
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-          프로필 설정
+          {t("onboarding.profile.title")}
         </h2>
         <p className="text-gray-600 dark:text-gray-400">
-          더 나은 추천과 분석을 위해 기본 정보를 입력해주세요
+          {t("onboarding.profile.subtitle")}
         </p>
       </div>
 
@@ -150,13 +168,13 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
         <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
             <User className="w-5 h-5" />
-            기본 정보
+            {t("onboarding.profile.basicInfo")}
           </h3>
 
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                회사명 *
+                {t("onboarding.profile.companyName")} *
               </label>
               <input
                 type="text"
@@ -172,7 +190,7 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
                     ? "border-red-300 dark:border-red-600"
                     : "border-gray-300 dark:border-gray-600"
                 }`}
-                placeholder="우리 회사"
+                placeholder={t("onboarding.profile.companyNamePlaceholder")}
               />
               {errors.companyName && (
                 <p className="text-sm text-red-600 mt-1">
@@ -183,7 +201,7 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                웹사이트
+                {t("onboarding.profile.website")}
               </label>
               <input
                 type="url"
@@ -198,7 +216,7 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                업종 *
+                {t("onboarding.profile.industry")} *
               </label>
               <div className="relative">
                 <select
@@ -215,10 +233,12 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
                       : "border-gray-300 dark:border-gray-600"
                   }`}
                 >
-                  <option value="">업종을 선택해주세요</option>
+                  <option value="">
+                    {t("onboarding.profile.industryPlaceholder")}
+                  </option>
                   {industries.map((industry) => (
-                    <option key={industry} value={industry}>
-                      {industry}
+                    <option key={industry.value} value={industry.value}>
+                      {t(industry.labelKey)}
                     </option>
                   ))}
                 </select>
@@ -231,7 +251,7 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                사업 유형 *
+                {t("onboarding.profile.businessType")} *
               </label>
               <div className="relative">
                 <select
@@ -248,10 +268,12 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
                       : "border-gray-300 dark:border-gray-600"
                   }`}
                 >
-                  <option value="">사업 유형을 선택해주세요</option>
+                  <option value="">
+                    {t("onboarding.profile.businessTypePlaceholder")}
+                  </option>
                   {businessTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
+                    <option key={type.value} value={type.value}>
+                      {t(type.labelKey)}
                     </option>
                   ))}
                 </select>
@@ -266,7 +288,7 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                팀 규모 *
+                {t("onboarding.profile.teamSize")} *
               </label>
               <div className="relative">
                 <select
@@ -283,10 +305,12 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
                       : "border-gray-300 dark:border-gray-600"
                   }`}
                 >
-                  <option value="">팀 규모를 선택해주세요</option>
+                  <option value="">
+                    {t("onboarding.profile.teamSizePlaceholder")}
+                  </option>
                   {teamSizes.map((size) => (
-                    <option key={size} value={size}>
-                      {size}
+                    <option key={size.value} value={size.value}>
+                      {t(size.labelKey)}
                     </option>
                   ))}
                 </select>
@@ -299,7 +323,7 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                월 마케팅 예산
+                {t("onboarding.profile.budget")}
               </label>
               <div className="relative">
                 <select
@@ -312,10 +336,12 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
                   }
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none"
                 >
-                  <option value="">예산 범위를 선택해주세요</option>
+                  <option value="">
+                    {t("onboarding.profile.budgetPlaceholder")}
+                  </option>
                   {budgetRanges.map((range) => (
-                    <option key={range} value={range}>
-                      {range}
+                    <option key={range.value} value={range.value}>
+                      {t(range.labelKey)}
                     </option>
                   ))}
                 </select>
@@ -326,7 +352,7 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
 
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              회사 소개
+              {t("onboarding.profile.description")}
             </label>
             <textarea
               value={profile.description}
@@ -335,7 +361,7 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
               }
               rows={3}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="회사의 주요 사업이나 특징을 간단히 설명해주세요"
+              placeholder={t("onboarding.profile.descriptionPlaceholder")}
             />
           </div>
         </div>
@@ -343,25 +369,25 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
         <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
             <Target className="w-5 h-5" />
-            마케팅 목표 *
+            {t("onboarding.profile.goalsTitle")} *
           </h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            주요 마케팅 목표를 선택해주세요 (복수 선택 가능)
+            {t("onboarding.profile.goalsHint")}
           </p>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {primaryGoals.map((goal) => (
+            {goalOptions.map((goal) => (
               <button
-                key={goal}
+                key={goal.value}
                 type="button"
-                onClick={() => toggleGoal(goal)}
+                onClick={() => toggleGoal(goal.value)}
                 className={`p-3 text-left border rounded-lg transition-all ${
-                  profile.primaryGoals.includes(goal)
+                  profile.primaryGoals.includes(goal.value)
                     ? "bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
                     : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-500"
                 }`}
               >
-                <span className="text-sm font-medium">{goal}</span>
+                <span className="text-sm font-medium">{t(goal.labelKey)}</span>
               </button>
             ))}
           </div>
@@ -377,14 +403,14 @@ export const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({
               onClick={onSkip}
               className="text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 font-medium"
             >
-              건너뛰기
+              {t("onboarding.common.skip")}
             </button>
           )}
           <button
             type="submit"
             className="ml-auto flex items-center gap-2 px-8 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
           >
-            다음 단계
+            {t("onboarding.profile.next")}
             <ArrowRight className="w-5 h-5" />
           </button>
         </div>

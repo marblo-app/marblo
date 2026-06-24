@@ -8,6 +8,7 @@ import {
   ArrowRight,
   CheckCircle,
 } from "lucide-react";
+import { useTranslation } from "../../lib/i18n";
 
 interface WelcomeScreenProps {
   onGetStarted: () => void;
@@ -18,34 +19,36 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onGetStarted,
   onSkip,
 }) => {
+  const { t } = useTranslation();
+
   const features = [
     {
       icon: <BarChart3 className="w-6 h-6" />,
-      title: "통합 대시보드",
-      description: "모든 채널의 성과를 한눈에 확인하고 분석하세요",
+      title: t("onboarding.welcome.feature.dashboard.title"),
+      description: t("onboarding.welcome.feature.dashboard.desc"),
     },
     {
       icon: <Zap className="w-6 h-6" />,
-      title: "자동화 워크플로우",
-      description: "반복 작업을 자동화하여 효율성을 극대화하세요",
+      title: t("onboarding.welcome.feature.automation.title"),
+      description: t("onboarding.welcome.feature.automation.desc"),
     },
     {
       icon: <Target className="w-6 h-6" />,
-      title: "AI 기반 최적화",
-      description: "AI가 분석한 인사이트로 마케팅 성과를 개선하세요",
+      title: t("onboarding.welcome.feature.ai.title"),
+      description: t("onboarding.welcome.feature.ai.desc"),
     },
     {
       icon: <Users className="w-6 h-6" />,
-      title: "팀 협업",
-      description: "팀원들과 실시간으로 협업하고 소통하세요",
+      title: t("onboarding.welcome.feature.collaboration.title"),
+      description: t("onboarding.welcome.feature.collaboration.desc"),
     },
   ];
 
   const steps = [
-    "프로필 설정 및 기본 정보 입력",
-    "마케팅 채널 연동 (Google Ads, Meta, 네이버 등)",
-    "대시보드 개인화 설정",
-    "팀원 초대 및 권한 설정",
+    t("onboarding.welcome.step.profile"),
+    t("onboarding.welcome.step.channels"),
+    t("onboarding.welcome.step.dashboard"),
+    t("onboarding.welcome.step.team"),
   ];
 
   return (
@@ -55,11 +58,10 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <Rocket className="w-10 h-10 text-white" />
         </div>
         <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
-          마블로에 오신 것을 환영합니다!
+          {t("onboarding.welcome.title")}
         </h1>
         <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-          통합 마케팅 플랫폼으로 여러 채널의 성과를 한곳에서 관리하고
-          최적화하세요. 몇 분만 투자하면 바로 시작할 수 있습니다.
+          {t("onboarding.welcome.subtitle")}
         </p>
       </div>
 
@@ -84,7 +86,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
       <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full mb-8">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 text-left">
-          🚀 설정 단계 (약 5분 소요)
+          {t("onboarding.welcome.stepsTitle")}
         </h3>
         <ul className="space-y-3 text-left">
           {steps.map((step, index) => (
@@ -101,7 +103,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           onClick={onGetStarted}
           className="flex items-center gap-2 px-8 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-lg hover:shadow-xl"
         >
-          시작하기
+          {t("onboarding.welcome.getStarted")}
           <ArrowRight className="w-5 h-5" />
         </button>
         {onSkip && (
@@ -109,7 +111,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             onClick={onSkip}
             className="px-8 py-3 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 font-medium transition-colors"
           >
-            나중에 설정하기
+            {t("onboarding.common.setupLater")}
           </button>
         )}
       </div>

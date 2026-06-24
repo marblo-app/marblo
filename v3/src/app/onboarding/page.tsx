@@ -14,6 +14,7 @@ import type {
   WizardConfig,
   CompanyProfile,
 } from "../../components/onboarding";
+import { useTranslation } from "../../lib/i18n";
 
 interface OnboardingState {
   currentStep: number;
@@ -25,6 +26,7 @@ interface OnboardingState {
 }
 
 export default function OnboardingPage() {
+  const { t } = useTranslation();
   const [state, setState] = useState<OnboardingState>({
     currentStep: 0,
     completedSteps: new Set(),
@@ -95,8 +97,8 @@ export default function OnboardingPage() {
   const steps: OnboardingStep[] = [
     {
       id: "profile",
-      title: "프로필 설정",
-      description: "회사 정보와 마케팅 목표를 설정해주세요",
+      title: t("onboarding.step.profile.title"),
+      description: t("onboarding.step.profile.description"),
       content: (
         <ProfileSetupForm
           initialProfile={state.profile}
@@ -107,8 +109,8 @@ export default function OnboardingPage() {
     },
     {
       id: "channels",
-      title: "채널 연동",
-      description: "마케팅 채널을 연동하여 통합 관리를 시작하세요",
+      title: t("onboarding.step.channels.title"),
+      description: t("onboarding.step.channels.description"),
       content: (
         <ChannelIntegrationGuide
           onConnect={handleChannelConnect}
@@ -119,8 +121,8 @@ export default function OnboardingPage() {
     },
     {
       id: "preferences",
-      title: "환경 설정",
-      description: "개인화 설정과 보안 옵션을 구성하세요",
+      title: t("onboarding.step.preferences.title"),
+      description: t("onboarding.step.preferences.description"),
       content: (
         <SetupWizard
           initialConfig={state.config}
@@ -132,8 +134,8 @@ export default function OnboardingPage() {
     },
     {
       id: "complete",
-      title: "설정 완료",
-      description: "모든 설정이 완료되었습니다",
+      title: t("onboarding.step.complete.title"),
+      description: t("onboarding.step.complete.description"),
       content: (
         <div className="text-center py-12">
           <div className="inline-flex items-center justify-center w-20 h-20 bg-green-100 dark:bg-green-900/30 rounded-full mb-6">
@@ -152,17 +154,16 @@ export default function OnboardingPage() {
             </svg>
           </div>
           <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-            🎉 설정 완료!
+            {t("onboarding.complete.heading")}
           </h3>
           <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
-            마블로 설정이 완료되었습니다. 이제 통합 대시보드에서 마케팅 성과를
-            확인하고 관리하세요.
+            {t("onboarding.complete.body")}
           </p>
           <button
             onClick={handleComplete}
             className="px-8 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors"
           >
-            대시보드로 이동
+            {t("onboarding.complete.goToDashboard")}
           </button>
         </div>
       ),
@@ -191,13 +192,13 @@ export default function OnboardingPage() {
         <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-              마블로 설정
+              {t("onboarding.header.title")}
             </h1>
             <button
               onClick={handleSkipOnboarding}
               className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
             >
-              나중에 설정하기
+              {t("onboarding.common.setupLater")}
             </button>
           </div>
           <div className="mt-6">

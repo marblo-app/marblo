@@ -9,6 +9,8 @@ import {
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
+import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 
 export interface WizardConfig {
   profile: {
@@ -79,6 +81,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
   onSave,
   onSkip,
 }) => {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<WizardConfig>({
     ...defaultConfig,
     ...initialConfig,
@@ -101,7 +104,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
 
   const updateConfig = <K extends keyof WizardConfig>(
     section: K,
-    updates: Partial<WizardConfig[K]>,
+    updates: Partial<WizardConfig[K]>
   ) => {
     setConfig((prev) => ({
       ...prev,
@@ -113,17 +116,39 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
   };
 
   const sections = [
-    { id: "profile", label: "Profile", icon: User },
-    { id: "preferences", label: "Preferences", icon: Settings },
-    { id: "workspace", label: "Workspace", icon: Globe },
-    { id: "security", label: "Security", icon: Shield },
+    {
+      id: "profile",
+      label: t("onboarding.wizard.section.profile"),
+      icon: User,
+    },
+    {
+      id: "preferences",
+      label: t("onboarding.wizard.section.preferences"),
+      icon: Settings,
+    },
+    {
+      id: "workspace",
+      label: t("onboarding.wizard.section.workspace"),
+      icon: Globe,
+    },
+    {
+      id: "security",
+      label: t("onboarding.wizard.section.security"),
+      icon: Shield,
+    },
   ];
+
+  const notifLabels: Record<string, MessageKey> = {
+    email: "onboarding.wizard.notif.email",
+    push: "onboarding.wizard.notif.push",
+    sound: "onboarding.wizard.notif.sound",
+  };
 
   return (
     <div className="flex h-full">
       <div className="w-64 border-r dark:border-gray-700 p-4">
         <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">
-          Setup Sections
+          {t("onboarding.wizard.sectionsTitle")}
         </h3>
         <nav className="space-y-1">
           {sections.map(({ id, label, icon: Icon }) => (
@@ -151,12 +176,12 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
           <div className="space-y-6">
             <div>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Profile Information
+                {t("onboarding.wizard.profileInfo")}
               </h3>
               <div className="grid gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Display Name
+                    {t("onboarding.wizard.displayName")}
                   </label>
                   <input
                     type="text"
@@ -164,14 +189,14 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     onChange={(e) =>
                       updateConfig("profile", { displayName: e.target.value })
                     }
-                    placeholder="Enter your name"
+                    placeholder={t("onboarding.wizard.displayNamePlaceholder")}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Email Address
+                    {t("onboarding.wizard.email")}
                   </label>
                   <input
                     type="email"
@@ -186,7 +211,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Role
+                    {t("onboarding.wizard.role")}
                   </label>
                   <select
                     value={config.profile.role}
@@ -195,16 +220,24 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     }
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="member">Team Member</option>
-                    <option value="lead">Team Lead</option>
-                    <option value="admin">Administrator</option>
-                    <option value="owner">Owner</option>
+                    <option value="member">
+                      {t("onboarding.wizard.role.member")}
+                    </option>
+                    <option value="lead">
+                      {t("onboarding.wizard.role.lead")}
+                    </option>
+                    <option value="admin">
+                      {t("onboarding.wizard.role.admin")}
+                    </option>
+                    <option value="owner">
+                      {t("onboarding.wizard.role.owner")}
+                    </option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Timezone
+                    {t("onboarding.wizard.timezone")}
                   </label>
                   <input
                     type="text"
@@ -225,12 +258,12 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
           <div className="space-y-6">
             <div>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Preferences
+                {t("onboarding.wizard.section.preferences")}
               </h3>
               <div className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                    Theme
+                    {t("onboarding.wizard.theme")}
                   </label>
                   <div className="flex gap-3">
                     {(["light", "dark", "system"] as const).map((theme) => (
@@ -238,7 +271,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         key={theme}
                         onClick={() => updateConfig("preferences", { theme })}
                         className={`
-                          px-4 py-2 rounded-lg border transition-colors capitalize
+                          px-4 py-2 rounded-lg border transition-colors
                           ${
                             config.preferences.theme === theme
                               ? "bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
@@ -255,7 +288,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         {theme === "system" && (
                           <Settings className="w-4 h-4 inline mr-2" />
                         )}
-                        {theme}
+                        {t(`onboarding.wizard.theme.${theme}` as MessageKey)}
                       </button>
                     ))}
                   </div>
@@ -263,7 +296,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                    Notifications
+                    {t("onboarding.wizard.notifications")}
                   </label>
                   <div className="space-y-3">
                     {Object.entries(config.preferences.notifications).map(
@@ -272,9 +305,8 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                           key={key}
                           className="flex items-center justify-between"
                         >
-                          <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">
-                            {key === "push" ? "Push Notifications" : key}{" "}
-                            Notifications
+                          <span className="text-sm text-gray-700 dark:text-gray-300">
+                            {t(notifLabels[key])}
                           </span>
                           <button
                             onClick={() =>
@@ -294,14 +326,14 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                             )}
                           </button>
                         </div>
-                      ),
+                      )
                     )}
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-700 dark:text-gray-300">
-                    Auto-save changes
+                    {t("onboarding.wizard.autoSave")}
                   </span>
                   <button
                     onClick={() =>
@@ -327,12 +359,12 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
           <div className="space-y-6">
             <div>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Workspace Settings
+                {t("onboarding.wizard.workspaceSettings")}
               </h3>
               <div className="grid gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Workspace Name
+                    {t("onboarding.wizard.workspaceName")}
                   </label>
                   <input
                     type="text"
@@ -340,14 +372,16 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     onChange={(e) =>
                       updateConfig("workspace", { name: e.target.value })
                     }
-                    placeholder="My Workspace"
+                    placeholder={t(
+                      "onboarding.wizard.workspaceNamePlaceholder"
+                    )}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Workspace Type
+                    {t("onboarding.wizard.workspaceType")}
                   </label>
                   <select
                     value={config.workspace.type}
@@ -356,15 +390,21 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     }
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="personal">Personal</option>
-                    <option value="team">Team</option>
-                    <option value="enterprise">Enterprise</option>
+                    <option value="personal">
+                      {t("onboarding.wizard.wsType.personal")}
+                    </option>
+                    <option value="team">
+                      {t("onboarding.wizard.wsType.team")}
+                    </option>
+                    <option value="enterprise">
+                      {t("onboarding.wizard.wsType.enterprise")}
+                    </option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Team Size
+                    {t("onboarding.wizard.teamSize")}
                   </label>
                   <select
                     value={config.workspace.size}
@@ -373,11 +413,21 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     }
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="1">Just me</option>
-                    <option value="1-10">1-10 people</option>
-                    <option value="11-50">11-50 people</option>
-                    <option value="51-200">51-200 people</option>
-                    <option value="201+">201+ people</option>
+                    <option value="1">
+                      {t("onboarding.wizard.size.solo")}
+                    </option>
+                    <option value="1-10">
+                      {t("onboarding.wizard.size.1to10")}
+                    </option>
+                    <option value="11-50">
+                      {t("onboarding.wizard.size.11to50")}
+                    </option>
+                    <option value="51-200">
+                      {t("onboarding.wizard.size.51to200")}
+                    </option>
+                    <option value="201+">
+                      {t("onboarding.wizard.size.201plus")}
+                    </option>
                   </select>
                 </div>
               </div>
@@ -389,16 +439,16 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
           <div className="space-y-6">
             <div>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Security Settings
+                {t("onboarding.wizard.securitySettings")}
               </h3>
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Two-Factor Authentication
+                      {t("onboarding.wizard.twoFactor")}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      Add an extra layer of security to your account
+                      {t("onboarding.wizard.twoFactorDesc")}
                     </p>
                   </div>
                   <button
@@ -419,7 +469,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Session Timeout (minutes)
+                    {t("onboarding.wizard.sessionTimeout")}
                   </label>
                   <input
                     type="number"
@@ -438,10 +488,10 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      IP Address Whitelist
+                      {t("onboarding.wizard.ipWhitelist")}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      Restrict access to specific IP addresses
+                      {t("onboarding.wizard.ipWhitelistDesc")}
                     </p>
                   </div>
                   <button
@@ -470,7 +520,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
               onClick={onSkip}
               className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
             >
-              I'll configure this later
+              {t("onboarding.wizard.configureLater")}
             </button>
           )}
           <button
@@ -479,7 +529,9 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
             className="ml-auto flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Save className="w-4 h-4" />
-            {saving ? "Saving..." : "Save Configuration"}
+            {saving
+              ? t("onboarding.wizard.saving")
+              : t("onboarding.wizard.save")}
           </button>
         </div>
       </div>
