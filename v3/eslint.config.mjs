@@ -64,4 +64,32 @@ export default tseslint.config(
       "no-console": ["error", { allow: ["warn", "error", "info", "debug"] }],
     },
   },
+
+  // i18n guard: discourage NEW hard-coded Korean UI strings in JSX. The app is
+  // mid-migration to English i18n (PR-0 namespace split → P1–P6 translation),
+  // so this is `warn`, not `error` — it surfaces un-migrated strings for the
+  // follow-up PRs without breaking `eslint .` (warnings exit 0) on the large
+  // body of pre-existing Korean literals. Hangul range = syllables + Jamo.
+  // What's exempt (data values, identifiers, logs/paths): see src/locales/README.md.
+  {
+    files: ["src/**/*.{tsx,jsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "warn",
+        {
+          // Visible text content: <div>안녕</div>
+          selector: "JSXText[value=/[\\u3130-\\u318F\\uAC00-\\uD7A3]/]",
+          message:
+            "JSX에 한글 UI 문자열을 직접 넣지 마세요. src/locales/<ns> 네임스페이스에 키를 추가하고 t()로 사용하세요. 데이터/식별자/로그 예외는 src/locales/README.md 참고.",
+        },
+        {
+          // User-facing string attributes: title/placeholder/aria-label/alt/label="한글"
+          selector:
+            "JSXAttribute[name.name=/^(title|placeholder|alt|label|aria-label)$/] > Literal[value=/[\\u3130-\\u318F\\uAC00-\\uD7A3]/]",
+          message:
+            "한글 UI 속성 문자열은 t()로 번역하세요. 예외는 src/locales/README.md 참고.",
+        },
+      ],
+    },
+  }
 );
