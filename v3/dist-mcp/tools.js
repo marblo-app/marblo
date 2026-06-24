@@ -598,6 +598,16 @@ export function registerTools(server) {
             .map((d) => ({ id: d.id, ...d.data() }))
             .filter((t) => !t.deleted)
             .filter((t) => !filterContextInMemory || isTaskInReadContext(t, contextId))
+            // Double-dispatch guard: drop tasks already bound to an agent. The
+            // `status == "TODO"` Firestore filter alone is racy — bindTaskToDispatchedAgent
+            // sets claimedBy and advances TODO→CLAIMED via applyProjection, but if that
+            // projection write aborts (TOCTOU) it falls back to a raw updateDoc that sets
+            // claimedBy while leaving status TODO. Such a task is bound yet still matches
+            // status==TODO, so without this guard it would leak back into the dispatch feed
+            // and get double-dispatched. Filter in memory (not a Firestore where) to also
+            // catch legacy tasks whose claimedBy field is missing — `== null` would skip
+            // those, but a falsy check covers both null and undefined.
+            .filter((t) => !t.claimedBy)
             .filter((t) => t.dependsOnCompleted)
             .sort((a, b) => b.priority - a.priority);
         if (tasks.length === 0)
