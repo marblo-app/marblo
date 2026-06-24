@@ -1466,6 +1466,29 @@ export const submitFounderFeedback = functions.https.onCall(
   },
 );
 
+// 내 파운더 선정 상태(본인 조회) — founders 컬렉션은 클라 직접 read 차단이라
+// /download 소프트 게이트가 "이 사용자가 선정됐는지"를 확인할 경로가 필요하다.
+// 인증된 본인 이메일로 founders/{normalizedEmail} 만 조회한다(타인 조회 불가).
+export const getMyFounderAccess = functions.https.onCall(
+  async (_data, context) => {
+    const uid = context.auth?.uid;
+    const token = context.auth?.token;
+    if (!uid || !token?.email) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다.",
+      );
+    }
+    const email = normalizeEmail(token.email);
+    const snap = await db.collection("founders").doc(email).get();
+    const fd = snap.exists ? snap.data() : null;
+    // 선정 = accessGrantedAt 존재 + rejected 아님 (submitFounderFeedback 과 동일 기준).
+    const accessGrantedAt =
+      fd && fd.status !== "rejected" ? tsToIso(fd.accessGrantedAt) : null;
+    return { hasAccess: !!accessGrantedAt, accessGrantedAt };
+  },
+);
+
 // 인터뷰 완료 마킹 (관리자용) — Pro +3개월 연장 (총 6). 피드백 제출로 계정이
 // 연결(userId)된 파운더만 대상.
 export const markFounderInterviewed = functions.https.onCall(

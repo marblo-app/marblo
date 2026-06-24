@@ -241,7 +241,14 @@
     "recommended": "Recommended",
     "download_now": "Download",
     "preparing": "Coming soon",
-    "mac_sub": "Signed & notarized"
+    "mac_sub": "Signed & notarized",
+    "gate_anon_title": "Sign in to download",
+    "gate_anon_body": "Marblo Desktop is available to selected founders. Sign in or create an account, then apply.",
+    "gate_login": "Log in",
+    "gate_signup": "Sign up",
+    "gate_pending_title": "You're not selected yet",
+    "gate_pending_body": "Apply to the founder beta — once you're selected, you can download right here.",
+    "gate_apply_cta": "Apply to the founder beta"
   },
   "promoBar": {
     "message": "🌟 Marblo Founders — Free beta · Pro 3 months for feedback · Lifetime Discord",

@@ -241,7 +241,14 @@
     "recommended": "推奨",
     "download_now": "ダウンロード",
     "preparing": "準備中",
-    "mac_sub": "署名・公証済み"
+    "mac_sub": "署名・公証済み",
+    "gate_anon_title": "ダウンロードにはログインが必要です",
+    "gate_anon_body": "Marbloデスクトップは選ばれたファウンダーに提供されます。ログインまたは登録のうえ、お申し込みください。",
+    "gate_login": "ログイン",
+    "gate_signup": "新規登録",
+    "gate_pending_title": "まだ選出されていません",
+    "gate_pending_body": "ファウンダーベータに申し込み、選出されるとここからダウンロードできます。",
+    "gate_apply_cta": "ファウンダーベータに申し込む"
   },
   "promoBar": {
     "message": "🌟 Marbloファウンダー募集 — 無料ベータ · フィードバックでPro 3ヶ月 · 永久Discord",

@@ -241,7 +241,14 @@
     "recommended": "추천",
     "download_now": "다운로드",
     "preparing": "준비 중",
-    "mac_sub": "서명·공증 완료"
+    "mac_sub": "서명·공증 완료",
+    "gate_anon_title": "로그인이 필요해요",
+    "gate_anon_body": "마블로 데스크탑은 선정된 파운더에게 제공됩니다. 로그인하거나 가입한 뒤 신청해 주세요.",
+    "gate_login": "로그인",
+    "gate_signup": "회원가입",
+    "gate_pending_title": "아직 선정되지 않았어요",
+    "gate_pending_body": "파운더 베타에 신청하고 선정되면 여기서 바로 다운로드할 수 있어요.",
+    "gate_apply_cta": "파운더 베타 신청하기"
   },
   "promoBar": {
     "message": "🌟 마블로 파운더 모집 — 무료 베타 · 피드백 시 Pro 3개월 · 평생 디스코드",
