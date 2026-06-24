@@ -38,6 +38,15 @@ mac:
   gatekeeperAssess: false
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
+  # Disable electron-builder's BUILT-IN notarization. electron-builder 25.x
+  # auto-notarizes whenever APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
+  # are present. We already notarize once via the afterSign hook
+  # (scripts/notarize.js), so leaving this enabled caused a DOUBLE notarytool
+  # submit: the built-in path's second submit stalled in Apple's backlog while
+  # electron-builder blocked on it, so the .dmg was never produced. Single-source
+  # notarization through the afterSign hook (which also handles PR-skip and the
+  # graceful missing-credential case). notarytool submit must run exactly once.
+  notarize: false
 
 win:
   target:
