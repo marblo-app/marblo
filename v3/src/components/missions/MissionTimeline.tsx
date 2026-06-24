@@ -1,5 +1,8 @@
 import { useState } from "react";
 import type { TimelineEvent, TimelineEventType } from "../../types/mission";
+import { useTranslation } from "../../lib/i18n";
+
+type TranslateFn = ReturnType<typeof useTranslation>["t"];
 
 const ICONS: Record<TimelineEventType, string> = {
   "step.started": "▶",
@@ -25,16 +28,17 @@ interface MissionTimelineProps {
 }
 
 export function MissionTimeline({ events, emptyHint }: MissionTimelineProps) {
+  const { t } = useTranslation();
   if (events.length === 0) {
     return (
       <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4 text-center text-sm text-gray-400">
-        {emptyHint ?? "아직 활동이 없습니다."}
+        {emptyHint ?? t("missions.timeline.empty")}
       </div>
     );
   }
   // 최근 항목이 위로 — orchestrator 가 가장 최근 한 일을 먼저 보여주는 게 자연스럽다.
   const ordered = [...events].sort(
-    (a, b) => toDate(b.ts).getTime() - toDate(a.ts).getTime()
+    (a, b) => toDate(b.ts).getTime() - toDate(a.ts).getTime(),
   );
   return (
     <ol className="space-y-1.5">
@@ -46,6 +50,7 @@ export function MissionTimeline({ events, emptyHint }: MissionTimelineProps) {
 }
 
 function TimelineRow({ event }: { event: TimelineEvent }) {
+  const { t, locale } = useTranslation();
   const ev = event;
   const isExpandable =
     ev.type === "supervisor.note" ||
@@ -69,7 +74,7 @@ function TimelineRow({ event }: { event: TimelineEvent }) {
           </span>
           <div className="flex flex-shrink-0 items-center gap-2 text-xs text-gray-500">
             {isExpandable && <span>{expanded ? "▾" : "▸"}</span>}
-            <time>{formatTime(ev.ts)}</time>
+            <time>{formatTime(ev.ts, locale)}</time>
           </div>
         </div>
         <div
@@ -79,7 +84,7 @@ function TimelineRow({ event }: { event: TimelineEvent }) {
               : "truncate"
           }`}
         >
-          {describe(ev)}
+          {describe(ev, t)}
         </div>
         {expanded && (
           <pre className="mt-2 max-h-96 overflow-y-auto rounded-lg bg-black/40 px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-300 whitespace-pre-wrap break-words">
@@ -110,26 +115,32 @@ function formatType(t: TimelineEventType): string {
     .join(" · ");
 }
 
-function formatTime(ts: Date): string {
-  return toDate(ts).toLocaleTimeString("ko-KR", {
+function formatTime(ts: Date, locale: string): string {
+  return toDate(ts).toLocaleTimeString(locale === "ko" ? "ko-KR" : "en-US", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
   });
 }
 
-function describe(ev: TimelineEvent): string {
+function describe(ev: TimelineEvent, t: TranslateFn): string {
   const p = ev.payload as Record<string, unknown>;
   switch (ev.type) {
     case "step.started":
       return `Step ${num(p.index) + 1} · ${p.skill ?? p.type ?? ""}${
-        p.attempt ? ` · 시도 ${p.attempt}` : ""
+        p.attempt
+          ? ` · ${t("missions.timeline.attempt", { attempt: str(p.attempt) })}`
+          : ""
       }`;
     case "step.completed":
       return `Step ${num(p.index) + 1} · ${p.skill ?? p.type ?? ""}`;
     case "step.failed":
       return `Step ${num(p.index) + 1} · ${p.error ?? "unknown"}${
-        p.willRetry ? " · 재시도 예정" : p.policy ? ` · ${p.policy}` : ""
+        p.willRetry
+          ? ` · ${t("missions.timeline.willRetry")}`
+          : p.policy
+            ? ` · ${p.policy}`
+            : ""
       }`;
     case "agent.dispatched":
       return `Task ${str(p.taskId)}`;

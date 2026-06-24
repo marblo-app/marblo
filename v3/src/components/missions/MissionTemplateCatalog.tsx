@@ -1,5 +1,6 @@
 import type { MissionTemplateId } from "../../types/mission";
-import { listTemplates } from "./templates";
+import { useTranslation } from "../../lib/i18n";
+import { listTemplates, TEMPLATE_DESC_KEY } from "./templates";
 
 interface MissionTemplateCatalogProps {
   onSelect: (id: MissionTemplateId) => void;
@@ -22,6 +23,7 @@ export function MissionTemplateCatalog({
   onSelect,
   highlighted,
 }: MissionTemplateCatalogProps) {
+  const { t: translate } = useTranslation();
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
       {listTemplates().map((t) => (
@@ -37,13 +39,17 @@ export function MissionTemplateCatalog({
           <div className="flex items-center justify-between">
             <span className="text-2xl leading-none">{t.emoji}</span>
             <span
-              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${WEIGHT_COLOR[t.weight]}`}
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                WEIGHT_COLOR[t.weight]
+              }`}
             >
               {WEIGHT_LABEL[t.weight]}
             </span>
           </div>
           <h3 className="text-base font-semibold text-gray-100">{t.label}</h3>
-          <p className="text-xs text-gray-400">{t.description}</p>
+          <p className="text-xs text-gray-400">
+            {translate(TEMPLATE_DESC_KEY[t.id])}
+          </p>
           <div className="mt-auto flex flex-wrap gap-1 pt-2">
             {t.steps.slice(0, 6).map((s, i) => (
               <span

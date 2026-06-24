@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "../../lib/i18n";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
 import OrchestratorTerminal from "../orchestrator/OrchestratorTerminal";
@@ -33,6 +34,7 @@ export function MissionOrchestratorPanel({
 }: {
   missionId: string | null;
 }) {
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const rootPath = useEditorStore((s) => s.rootPath);
   const [open, setOpen] = useState(false);
@@ -205,7 +207,7 @@ export function MissionOrchestratorPanel({
           <span className="text-gray-500">· {status}</span>
           {attention && (
             <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
-              🙋 입력 대기
+              {t("missions.orch.awaitingInput")}
             </span>
           )}
           {session?.sessionId && (
@@ -220,16 +222,16 @@ export function MissionOrchestratorPanel({
         <div className="flex items-center gap-2 text-xs">
           {!api && (
             <span className="text-yellow-400">
-              preload 옛 버전 (재시작 필요)
+              {t("missions.orch.preloadStale")}
             </span>
           )}
           <button
             onClick={handleRestart}
             disabled={!api || restarting}
-            title="세션 종료 후 새로 시작 (PTY 가 비어있을 때 사용)"
+            title={t("missions.orch.restartTitle")}
             className="rounded border border-gray-700 px-2 py-0.5 text-gray-300 hover:bg-gray-800 disabled:opacity-40"
           >
-            {restarting ? "재시작 중..." : "🔄 Restart"}
+            {restarting ? t("missions.orch.restarting") : "🔄 Restart"}
           </button>
           <button
             onClick={() => {
@@ -239,7 +241,7 @@ export function MissionOrchestratorPanel({
             disabled={!api}
             className="rounded border border-gray-700 px-2 py-0.5 text-gray-300 hover:bg-gray-800 disabled:opacity-40"
           >
-            {open ? "숨기기" : "PTY 보기"}
+            {open ? t("missions.orch.hide") : t("missions.orch.show")}
           </button>
         </div>
       </div>
@@ -269,15 +271,17 @@ export function MissionOrchestratorPanel({
               className="flex items-center justify-center border-t border-gray-700 text-xs text-gray-500"
             >
               {status === "starting"
-                ? "Mission orchestrator 시작 중..."
-                : "PTY 준비 중..."}
+                ? t("missions.orch.starting")
+                : t("missions.orch.ptyPreparing")}
             </div>
           )}
           {session?.ptySessionId && (
             <div className="border-t border-gray-800 px-3 py-1 text-[11px] leading-snug text-gray-500">
-              💡 진행이 멈춘 것 같으면 위 입력창에{" "}
-              <span className="text-gray-400">"다음 스텝 진행해줘"</span> 라고
-              입력해 오케스트레이터를 재촉하세요.
+              💡 {t("missions.orch.stuckHintPrefix")}
+              <span className="text-gray-400">
+                "{t("missions.orch.stuckHintQuote")}"
+              </span>
+              {t("missions.orch.stuckHintSuffix")}
             </div>
           )}
         </ErrorBoundary>

@@ -4,6 +4,7 @@ import type {
   MissionStepType,
   MissionTemplateId,
 } from "../../types/mission";
+import type { MessageKey } from "../../locales/ko";
 
 // frontend 측 mission 템플릿 메타데이터.
 // `v3/electron/mission-engine/templates.ts` 와 의도적으로 미러링한다 —
@@ -98,6 +99,20 @@ export const TEMPLATE_META: Record<MissionTemplateId, MissionTemplateMeta> = {
       { type: "gstack", skill: "/plan-ceo-review" },
     ],
   },
+};
+
+/**
+ * `missions.*` translation key for each template's user-facing description.
+ * The `description` field above stays as the Korean source-of-truth (and the
+ * electron-engine mirror), but the UI renders the localized copy via t() with
+ * these keys. Typed `MessageKey` so a missing locale entry is a compile error.
+ */
+export const TEMPLATE_DESC_KEY: Record<MissionTemplateId, MessageKey> = {
+  "quick-fix": "missions.template.quick-fix.desc",
+  polish: "missions.template.polish.desc",
+  feature: "missions.template.feature.desc",
+  "full-feature": "missions.template.full-feature.desc",
+  research: "missions.template.research.desc",
 };
 
 export function listTemplates(): MissionTemplateMeta[] {

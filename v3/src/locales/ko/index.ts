@@ -15,6 +15,9 @@ import { header } from "./header";
 import { settings } from "./settings";
 import { agents } from "./agents";
 import { plan } from "./plan";
+import { guide } from "./guide";
+import { missions } from "./missions";
+import { legal } from "./legal";
 import { billing } from "./billing";
 import { usage } from "./usage";
 import { onboarding } from "./onboarding";
@@ -25,6 +28,9 @@ export const ko = {
   ...settings,
   ...agents,
   ...plan,
+  ...guide,
+  ...missions,
+  ...legal,
   ...billing,
   ...usage,
   ...onboarding,

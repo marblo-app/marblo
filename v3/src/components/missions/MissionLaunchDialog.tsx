@@ -4,7 +4,8 @@ import type {
   MissionTargetRepository,
   MissionTemplateId,
 } from "../../types/mission";
-import { TEMPLATE_META, listTemplates } from "./templates";
+import { useTranslation } from "../../lib/i18n";
+import { TEMPLATE_DESC_KEY, TEMPLATE_META, listTemplates } from "./templates";
 
 interface MissionLaunchDialogProps {
   projectId: string;
@@ -79,6 +80,7 @@ export function MissionLaunchDialog({
   onCancel,
   onLaunch,
 }: MissionLaunchDialogProps) {
+  const { t } = useTranslation();
   const [goal, setGoal] = useState("");
   const [templateId, setTemplateId] = useState<MissionTemplateId>(
     initialTemplateId ?? "feature",
@@ -143,7 +145,7 @@ export function MissionLaunchDialog({
 
   const handleLaunch = async () => {
     if (!goal.trim()) {
-      setError("미션의 목표를 한 줄로 적어주세요.");
+      setError(t("missions.launch.goalRequired"));
       return;
     }
     setSubmitting(true);
@@ -174,14 +176,13 @@ export function MissionLaunchDialog({
             🚀 Launch Mission
           </h3>
           <p className="mt-1 text-xs text-gray-400">
-            한 줄 목표와 템플릿을 고르면 orchestrator 가 끝까지 책임지고
-            진행합니다.
+            {t("missions.launch.subtitle")}
           </p>
         </div>
         <div className="space-y-5 px-6 py-5">
           <div>
             <label className="mb-1.5 block text-xs font-medium text-gray-400">
-              목표 (한 줄)
+              {t("missions.launch.goalLabel")}
             </label>
             <input
               type="text"
@@ -190,34 +191,34 @@ export function MissionLaunchDialog({
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !submitting) handleLaunch();
               }}
-              placeholder='예: "로그인 페이지 만들어줘"'
+              placeholder={t("missions.launch.goalPlaceholder")}
               className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
               autoFocus
             />
           </div>
           <div>
             <label className="mb-1.5 block text-xs font-medium text-gray-400">
-              템플릿
+              {t("missions.launch.templateLabel")}
             </label>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-5">
-              {listTemplates().map((t) => (
+              {listTemplates().map((tpl) => (
                 <button
-                  key={t.id}
+                  key={tpl.id}
                   type="button"
-                  onClick={() => setTemplateId(t.id)}
+                  onClick={() => setTemplateId(tpl.id)}
                   className={`flex flex-col items-start gap-1 rounded-lg border p-2.5 text-left text-xs transition-colors ${
-                    templateId === t.id
+                    templateId === tpl.id
                       ? "border-blue-500 bg-blue-500/10 text-blue-100"
                       : "border-gray-700 bg-gray-900/60 text-gray-300 hover:border-gray-600"
                   }`}
                 >
-                  <span className="text-base">{t.emoji}</span>
-                  <span className="font-medium">{t.label}</span>
+                  <span className="text-base">{tpl.emoji}</span>
+                  <span className="font-medium">{tpl.label}</span>
                 </button>
               ))}
             </div>
             <p className="mt-2 text-xs text-gray-500">
-              {template.description} · {template.steps.length} step
+              {t(TEMPLATE_DESC_KEY[templateId])} · {template.steps.length} step
             </p>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)]">
@@ -261,7 +262,7 @@ export function MissionLaunchDialog({
                   ? selectedConnection.repoUrl || selectedConnection.localPath
                   : connectionError
                     ? `Connection load failed: ${connectionError}`
-                    : "연결된 repo가 없으면 미션만 생성됩니다."}
+                    : t("missions.launch.noConnectionHint")}
               </p>
             </div>
             <div>
@@ -314,7 +315,7 @@ export function MissionLaunchDialog({
             disabled={submitting}
             className="rounded-lg border border-gray-600 bg-gray-700/30 px-4 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-700/60 disabled:opacity-50"
           >
-            취소
+            {t("missions.cancel")}
           </button>
           <button
             type="button"
@@ -322,7 +323,7 @@ export function MissionLaunchDialog({
             disabled={submitting || !goal.trim()}
             className="rounded-lg border border-blue-500/50 bg-blue-500/20 px-4 py-2 text-sm font-medium text-blue-100 transition-colors hover:bg-blue-500/30 disabled:opacity-50"
           >
-            {submitting ? "시작 중..." : "🚀 Launch Mission"}
+            {submitting ? t("missions.launch.submitting") : "🚀 Launch Mission"}
           </button>
         </div>
       </div>

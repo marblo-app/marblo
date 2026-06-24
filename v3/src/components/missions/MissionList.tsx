@@ -1,6 +1,9 @@
 import type { Mission } from "../../types/mission";
+import { useTranslation } from "../../lib/i18n";
 import { MissionStatusBadge } from "./MissionStatusBadge";
 import { TEMPLATE_META } from "./templates";
+
+type TranslateFn = ReturnType<typeof useTranslation>["t"];
 
 interface MissionListProps {
   missions: Mission[];
@@ -18,15 +21,16 @@ export function MissionList({
   onAbandon,
   onDelete,
 }: MissionListProps) {
+  const { t } = useTranslation();
   if (missions.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
         <div className="text-3xl">🌱</div>
         <p className="mt-2 text-sm font-medium text-gray-300">
-          아직 진행 중인 미션이 없습니다.
+          {t("missions.list.emptyTitle")}
         </p>
         <p className="mt-1 text-xs text-gray-500">
-          아래에서 템플릿을 골라 첫 미션을 시작하세요.
+          {t("missions.list.emptyHint")}
         </p>
       </div>
     );
@@ -74,7 +78,7 @@ export function MissionList({
                     <span>
                       · {completed} / {total} step
                     </span>
-                    <span>· {formatRelative(m.lastActivityAt)}</span>
+                    <span>· {formatRelative(m.lastActivityAt, t)}</span>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-0.5">
@@ -83,16 +87,12 @@ export function MissionList({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (
-                          confirm(
-                            "이 미션을 종료할까요? 진행 중인 task / agent 는 정리됩니다.",
-                          )
-                        ) {
+                        if (confirm(t("missions.confirmAbandon"))) {
                           onAbandon(m.id);
                         }
                       }}
                       className="rounded p-1 text-xs text-gray-500 transition-colors hover:bg-red-500/15 hover:text-red-400"
-                      title="Abandon mission (정지 후 아카이브)"
+                      title={t("missions.list.abandonTitle")}
                     >
                       🛑
                     </button>
@@ -103,12 +103,12 @@ export function MissionList({
                       onClick={(e) => {
                         e.stopPropagation();
                         const msg = isTerminal
-                          ? "이 미션 기록을 영구 삭제할까요? 되돌릴 수 없습니다."
-                          : "진행 중인 미션입니다. 영구 삭제하면 기록이 사라지고, 진행 중 task/agent 는 자동 정리되지 않을 수 있어요(먼저 🛑 Abandon 권장). 그래도 삭제할까요?";
+                          ? t("missions.confirmDeleteTerminal")
+                          : t("missions.confirmDeleteActive");
                         if (confirm(msg)) onDelete(m.id);
                       }}
                       className="rounded p-1 text-xs text-gray-500 transition-colors hover:bg-red-500/15 hover:text-red-400"
-                      title="Delete mission (영구 삭제)"
+                      title={t("missions.list.deleteTitle")}
                     >
                       🗑️
                     </button>
@@ -123,16 +123,16 @@ export function MissionList({
   );
 }
 
-function formatRelative(d: Date): string {
+function formatRelative(d: Date, t: TranslateFn): string {
   const ts = d instanceof Date ? d : new Date(d);
   const diffMs = Date.now() - ts.getTime();
-  if (diffMs < 0) return "방금";
+  if (diffMs < 0) return t("missions.time.justNow");
   const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return `${sec}초 전`;
+  if (sec < 60) return t("missions.time.secondsAgo", { count: sec });
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}분 전`;
+  if (min < 60) return t("missions.time.minutesAgo", { count: min });
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}시간 전`;
+  if (hr < 24) return t("missions.time.hoursAgo", { count: hr });
   const day = Math.floor(hr / 24);
-  return `${day}일 전`;
+  return t("missions.time.daysAgo", { count: day });
 }

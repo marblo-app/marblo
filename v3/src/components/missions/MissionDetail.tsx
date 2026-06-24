@@ -9,6 +9,7 @@ import type { Agent } from "../../types/agent";
 import { MissionStatusBadge } from "./MissionStatusBadge";
 import { MissionTimeline } from "./MissionTimeline";
 import { TEMPLATE_META } from "./templates";
+import { useTranslation } from "../../lib/i18n";
 import { useTaskStore } from "../../stores/taskStore";
 import { useAgentStore } from "../../stores/agentStore";
 import { useTerminalStore } from "../../stores/terminalStore";
@@ -42,6 +43,7 @@ export function MissionDetail({
   onRestart,
   onDelete,
 }: MissionDetailProps) {
+  const { t, locale } = useTranslation();
   const meta = TEMPLATE_META[mission.templateId];
 
   // 미션 task 는 보드(KanbanBoard)에도 contextId=missionId 로 섞여 표시되지만
@@ -93,9 +95,19 @@ export function MissionDetail({
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-400">
               <MissionStatusBadge status={mission.status} />
               <span>· {meta?.label ?? mission.templateId}</span>
-              <span>· 시작 {formatDate(mission.launchedAt)}</span>
+              <span>
+                ·{" "}
+                {t("missions.detail.startedAt", {
+                  date: formatDate(mission.launchedAt, locale),
+                })}
+              </span>
               {mission.completedAt && (
-                <span>· 완료 {formatDate(mission.completedAt)}</span>
+                <span>
+                  ·{" "}
+                  {t("missions.detail.completedAt", {
+                    date: formatDate(mission.completedAt, locale),
+                  })}
+                </span>
               )}
             </div>
             {(mission.targetRepository ||
@@ -143,11 +155,7 @@ export function MissionDetail({
             {!isTerminal && (
               <button
                 onClick={() => {
-                  if (
-                    confirm(
-                      "미션을 종료할까요? 진행 중인 task / agent 는 정리됩니다.",
-                    )
-                  ) {
+                  if (confirm(t("missions.confirmAbandon"))) {
                     onAbandon(mission.id);
                   }
                 }}
@@ -159,23 +167,23 @@ export function MissionDetail({
             {isTerminal && (
               <button
                 onClick={() => onRestart(mission)}
-                title="같은 목표 + 템플릿으로 새 미션 시작"
+                title={t("missions.detail.restartTitle")}
                 className="rounded-lg border border-blue-500/50 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/20"
               >
-                🔄 다시 실행
+                {t("missions.detail.restart")}
               </button>
             )}
             <button
               onClick={() => {
                 const msg = isTerminal
-                  ? "이 미션 기록을 영구 삭제할까요? 되돌릴 수 없습니다."
-                  : "진행 중인 미션입니다. 영구 삭제하면 기록이 사라지고, 진행 중 task/agent 는 자동 정리되지 않을 수 있어요(먼저 🛑 Abandon 권장). 그래도 삭제할까요?";
+                  ? t("missions.confirmDeleteTerminal")
+                  : t("missions.confirmDeleteActive");
                 if (confirm(msg)) onDelete(mission.id);
               }}
-              title="미션 영구 삭제"
+              title={t("missions.detail.deleteTitle")}
               className="rounded-lg border border-gray-600 bg-gray-700/40 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-red-500/40 hover:bg-red-500/15 hover:text-red-300"
             >
-              🗑️ 삭제
+              {t("missions.detail.delete")}
             </button>
           </div>
         </div>
@@ -197,19 +205,22 @@ export function MissionDetail({
               <div className="mt-3 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-yellow-200">
                 <div className="font-medium">
                   {inputPayload
-                    ? "🙋 사용자 입력이 필요합니다."
-                    : "개입이 필요합니다."}
+                    ? t("missions.detail.needInput")
+                    : t("missions.detail.needAttention")}
                 </div>
                 <div className="mt-0.5 text-xs text-yellow-200/80">
                   {inputPayload
-                    ? `Step ${(inputPayload.stepIndex ?? 0) + 1} (${
-                        inputPayload.skill ?? ""
-                      }) 가 멈췄습니다 — 미션 Orchestrator PTY 에서 직접 답하고 Resume 을 누르세요.`
+                    ? t("missions.detail.stepStalled", {
+                        step: (inputPayload.stepIndex ?? 0) + 1,
+                        skill: inputPayload.skill ?? "",
+                      })
                     : failedStep
-                      ? `Step ${failedStep.index + 1} (${
-                          failedStep.skill ?? failedStep.type
-                        }) 실패 · ${failedStep.error ?? "unknown"}`
-                      : "마지막 step 결과를 확인하고 Resume 또는 Abandon 을 선택하세요."}
+                      ? t("missions.detail.stepFailed", {
+                          step: failedStep.index + 1,
+                          skill: failedStep.skill ?? failedStep.type,
+                          error: failedStep.error ?? "unknown",
+                        })
+                      : t("missions.detail.checkLastStep")}
                 </div>
                 {inputPayload?.question && (
                   <div className="mt-2 rounded border border-yellow-500/30 bg-black/30 px-2 py-1 font-mono text-[11px] text-yellow-100/90">
@@ -252,7 +263,7 @@ export function MissionDetail({
         </h3>
         <MissionTimeline
           events={mission.contextLog}
-          emptyHint="orchestrator 가 곧 시작합니다."
+          emptyHint={t("missions.detail.timelineEmpty")}
         />
       </section>
     </div>
@@ -286,18 +297,18 @@ function MissionTasksSection({
   tasks: Task[];
   agents: Agent[];
 }) {
+  const { t } = useTranslation();
   // 미션 task 는 보드에도 🎯 카드로 뜨지만, 미션 상세에서도 같은 task 를 모아
   // 각 담당 에이전트의 PTY 로 바로 점프할 수 있게 한다. dispatch 스텝 전이라
   // task 가 아직 없으면 안내만 노출(= 보드에 안 보이는 것도 같은 이유).
   return (
     <section>
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-        작업 · {tasks.length}
+        {t("missions.detail.tasksHeading")} · {tasks.length}
       </h3>
       {tasks.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-700/60 bg-gray-800/30 px-3 py-3 text-xs text-gray-500">
-          아직 디스패치된 작업이 없습니다. dispatch 스텝이 실행되면 여기와 칸반
-          보드에 미션 작업(🎯)이 나타납니다.
+          {t("missions.detail.noTasks")}
         </div>
       ) : (
         <ul className="space-y-1.5">
@@ -323,6 +334,7 @@ function MissionTasksSection({
  * 미생성/미등록) 죽은 fallback 채널을 attach 하지 않도록 버튼을 비활성화한다.
  */
 function MissionTaskRow({ task, agents }: { task: Task; agents: Agent[] }) {
+  const { t } = useTranslation();
   const claimingAgent = task.claimedBy
     ? agents.find((a) => a.id === task.claimedBy || a.name === task.claimedBy)
     : undefined;
@@ -359,7 +371,7 @@ function MissionTaskRow({ task, agents }: { task: Task; agents: Agent[] }) {
               ? `👤 ${claimingAgent.name}`
               : task.claimedBy
                 ? `👤 ${task.claimedBy}`
-                : "미할당"}
+                : t("missions.detail.unassigned")}
           </span>
         </div>
       </div>
@@ -369,11 +381,11 @@ function MissionTaskRow({ task, agents }: { task: Task; agents: Agent[] }) {
         title={
           canOpen
             ? hasLiveSession
-              ? "이 작업의 에이전트 PTY 보기"
-              : "에이전트 세션에 연결"
+              ? t("missions.detail.ptyView")
+              : t("missions.detail.ptyConnect")
             : claimingAgent
-              ? "실행 중인 PTY 세션이 없습니다"
-              : "담당 에이전트가 아직 없습니다"
+              ? t("missions.detail.ptyNoSession")
+              : t("missions.detail.ptyNoAgent")
         }
         onClick={() => {
           if (!agentId || !ptySessionId) return;
@@ -384,9 +396,11 @@ function MissionTaskRow({ task, agents }: { task: Task; agents: Agent[] }) {
         }}
         className="flex-shrink-0 rounded bg-gray-700 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        🖥️ 에이전트 PTY
+        {t("missions.detail.agentPty")}
         {canOpen && !hasLiveSession && (
-          <span className="ml-1 text-[10px] text-gray-400">(연결)</span>
+          <span className="ml-1 text-[10px] text-gray-400">
+            {t("missions.detail.connect")}
+          </span>
         )}
       </button>
     </li>
@@ -394,6 +408,7 @@ function MissionTaskRow({ task, agents }: { task: Task; agents: Agent[] }) {
 }
 
 function MissionReportSection({ mission }: { mission: Mission }) {
+  const { t } = useTranslation();
   // 종합 결과 — completed/waiting_for_human/abandoned 미션에서 각 step 출력을 묶어 보여줌.
   // active/sleeping/planning 미션은 step 카드 펼침으로 충분.
   const shouldShow =
@@ -418,10 +433,10 @@ function MissionReportSection({ mission }: { mission: Mission }) {
 
   const headerLabel =
     mission.status === "completed"
-      ? "📋 미션 결과"
+      ? t("missions.detail.resultCompleted")
       : mission.status === "waiting_for_human"
-        ? "⚠️ 현재까지의 진행 결과"
-        : "🛑 중단된 미션 — 그동안의 결과";
+        ? t("missions.detail.resultWaiting")
+        : t("missions.detail.resultAbandoned");
 
   const synthesisPayload = finalNote?.payload as
     | { synthesisPath?: string | null; synthesisExcerpt?: string | null }
@@ -446,7 +461,9 @@ function MissionReportSection({ mission }: { mission: Mission }) {
         >
           <summary className="flex cursor-pointer items-center gap-2 text-sm font-medium text-blue-200 marker:hidden">
             <span>📑</span>
-            <span className="flex-1 truncate">종합 보고서</span>
+            <span className="flex-1 truncate">
+              {t("missions.detail.synthesis")}
+            </span>
             {synthesisPath && (
               <code className="rounded bg-blue-500/10 px-2 py-0.5 text-[10px] text-blue-300">
                 {synthesisPath}
@@ -473,10 +490,10 @@ function MissionReportSection({ mission }: { mission: Mission }) {
                 Step {step.index + 1} · {step.skill ?? `<${step.type}>`}
               </span>
               <span className="text-xs text-gray-500 group-open:hidden">
-                펼치기
+                {t("missions.detail.expand")}
               </span>
               <span className="hidden text-xs text-gray-500 group-open:inline">
-                접기
+                {t("missions.detail.collapse")}
               </span>
             </summary>
             <pre className="mt-2 max-h-96 overflow-y-auto rounded-lg bg-black/40 px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-300 whitespace-pre-wrap break-words">
@@ -486,7 +503,7 @@ function MissionReportSection({ mission }: { mission: Mission }) {
         ))}
         {stepsWithOutput.length === 0 && (
           <div className="px-4 py-3 text-xs text-gray-500 italic">
-            출력이 저장된 step 이 없습니다.
+            {t("missions.detail.noStepOutput")}
           </div>
         )}
       </div>
@@ -501,6 +518,7 @@ function StepRow({
   step: MissionStep;
   isCurrent: boolean;
 }) {
+  const { t } = useTranslation();
   const isRunning = step.status === "running";
   const isTerminal =
     step.status === "success" ||
@@ -559,7 +577,8 @@ function StepRow({
         )}
         {canExpand && (
           <span className="flex-shrink-0 text-xs text-gray-500">
-            {expanded ? "▾" : "▸"} 출력 ({outputText.length}자)
+            {expanded ? "▾" : "▸"}{" "}
+            {t("missions.detail.outputChars", { count: outputText.length })}
           </span>
         )}
       </div>
@@ -662,11 +681,14 @@ function StepOutputPanel({
   finalText?: string;
   isRunning: boolean;
 }) {
+  const { t } = useTranslation();
   const text = live ?? finalText ?? "";
   if (!text) {
     return (
       <div className="border-t border-gray-700/40 px-3 py-2 text-xs text-gray-500 italic">
-        {isRunning ? "출력 대기 중... (2초 간격으로 갱신)" : "출력이 없습니다."}
+        {isRunning
+          ? t("missions.detail.awaitingOutput")
+          : t("missions.detail.noOutput")}
       </div>
     );
   }
@@ -679,10 +701,11 @@ function StepOutputPanel({
 }
 
 function ElapsedTime({ startedAt }: { startedAt: Date }) {
+  const { t } = useTranslation();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, []);
   const startedTs =
     startedAt instanceof Date ? startedAt.getTime() : Number(startedAt);
@@ -691,16 +714,17 @@ function ElapsedTime({ startedAt }: { startedAt: Date }) {
   const sec = elapsedSec % 60;
   return (
     <span className="flex-shrink-0 text-xs tabular-nums text-blue-300/80">
-      {min > 0 ? `${min}분 ` : ""}
-      {sec}초
+      {min > 0 ? `${min}${t("missions.detail.minuteSuffix")} ` : ""}
+      {sec}
+      {t("missions.detail.secondSuffix")}
     </span>
   );
 }
 
-function formatDate(d: Date | null): string {
+function formatDate(d: Date | null, locale: string): string {
   if (!d) return "";
   const ts = d instanceof Date ? d : new Date(d);
-  return ts.toLocaleString("ko-KR", {
+  return ts.toLocaleString(locale === "ko" ? "ko-KR" : "en-US", {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
