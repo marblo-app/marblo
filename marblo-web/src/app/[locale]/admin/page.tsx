@@ -103,6 +103,11 @@ export default function AdminPage() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
+  // 어드민 권한 판정: null=판정 전(로딩), true=어드민, false=권한 없음.
+  // 신규 콜러블 없이 첫 어드민 데이터 호출(getFounderWaitlist)의
+  // functions/permission-denied 신호를 재사용해 판정한다.
+  const [authorized, setAuthorized] = useState<boolean | null>(null);
+
   // Waitlist state
   const [entries, setEntries] = useState<WaitlistEntry[]>([]);
   const [listLoading, setListLoading] = useState(true);
@@ -168,9 +173,16 @@ export default function AdminPage() {
         const res = await fn({});
         if (cancelled) return;
         setEntries(res.data.items || []);
+        setAuthorized(true);
       } catch (err: unknown) {
         if (cancelled) return;
-        setListError(mapError(err as CallableError, "list"));
+        const ce = err as CallableError;
+        // permission-denied 만 권한 없음으로 판정. 그 외(네트워크 등)는
+        // 실제 어드민의 일시 오류일 수 있어 셸은 유지하고 에러만 표시.
+        setAuthorized(
+          ce?.code === "functions/permission-denied" ? false : true
+        );
+        setListError(mapError(ce, "list"));
       } finally {
         if (!cancelled) setListLoading(false);
       }
@@ -313,6 +325,43 @@ export default function AdminPage() {
   }
 
   if (!user) return null;
+
+  // 권한 판정 대기 — 어드민 데이터/구조가 노출되기 전 스피너만 표시.
+  if (authorized === null) {
+    return (
+      <div className="py-24 px-4 flex justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
+      </div>
+    );
+  }
+
+  // 로그인했으나 어드민이 아님 — 어드민 셸 대신 전체 차단 화면.
+  if (authorized === false) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center px-4">
+        <div className="max-w-md w-full text-center space-y-5">
+          <div className="flex justify-center">
+            <div className="rounded-full bg-red-950/40 border border-red-900/50 p-4">
+              <ShieldAlert className="w-8 h-8 text-red-400" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-xl font-bold">접근 권한 없음</h1>
+            <p className="text-sm text-zinc-400 leading-relaxed">
+              이 페이지는 어드민만 접근할 수 있습니다. 현재 계정에는 어드민
+              권한이 없습니다.
+            </p>
+          </div>
+          <button
+            onClick={() => router.push(`/${locale}`)}
+            className="inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition"
+          >
+            홈으로 가기
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 py-16 px-4">
