@@ -6,6 +6,7 @@ import {
   getDocument,
   convertTimestamps,
 } from "./firestore";
+import { t } from "../lib/i18n";
 
 const COLLECTION = "subscriptions";
 const DATE_FIELDS = ["currentPeriodStart", "currentPeriodEnd", "createdAt"];
@@ -68,7 +69,7 @@ export function getPlanLimits(planType: PlanType): PlanLimits {
 // ─── Feature Gating ──────────────────────────────────────────────
 export function canUseFeature(
   subscription: Subscription | null,
-  feature: string,
+  feature: string
 ): boolean {
   const plan = subscription?.planType ?? "free";
   const limits = PLAN_LIMITS[plan];
@@ -100,7 +101,7 @@ export const PLAN_PRICES_KRW: Record<Exclude<PlanType, "free">, number> = {
 
 // ─── Subscription CRUD ───────────────────────────────────────────
 export async function getSubscription(
-  userId: string,
+  userId: string
 ): Promise<Subscription | null> {
   const raw = await getDocument<Record<string, unknown>>(COLLECTION, userId);
   return raw ? toSubscription(raw) : null;
@@ -108,14 +109,14 @@ export async function getSubscription(
 
 export function subscribeToSubscription(
   userId: string,
-  callback: (sub: Subscription | null) => void,
+  callback: (sub: Subscription | null) => void
 ): () => void {
   return subscribeToDocument<Record<string, unknown>>(
     COLLECTION,
     userId,
     (raw) => {
       callback(raw ? toSubscription(raw) : null);
-    },
+    }
   );
 }
 
@@ -163,7 +164,7 @@ export function loadPaddleSDK(): Promise<void> {
       }
       resolve();
     };
-    script.onerror = () => reject(new Error("Paddle SDK 로드 실패"));
+    script.onerror = () => reject(new Error(t("common.payment.sdkLoadFailed")));
     document.head.appendChild(script);
   });
 }
@@ -171,7 +172,7 @@ export function loadPaddleSDK(): Promise<void> {
 export async function openPaddleCheckout(
   userId: string,
   priceId: string,
-  email?: string,
+  email?: string
 ): Promise<void> {
   await loadPaddleSDK();
 
@@ -186,7 +187,7 @@ export async function openPaddleCheckout(
         successUrl: `${window.location.origin}/settings/billing?paddle_success=true`,
       },
       success: () => resolve(),
-      closed: () => reject(new Error("결제 취소")),
+      closed: () => reject(new Error(t("common.payment.checkoutCanceled"))),
     });
   });
 }
@@ -194,7 +195,7 @@ export async function openPaddleCheckout(
 export async function cancelPaddleSubscription(userId: string): Promise<void> {
   const fn = httpsCallable<{ userId: string }, { success: boolean }>(
     functions,
-    "cancelPaddleSubscription",
+    "cancelPaddleSubscription"
   );
   await fn({ userId });
 }
@@ -202,7 +203,7 @@ export async function cancelPaddleSubscription(userId: string): Promise<void> {
 // ─── TossPayments (국내 결제) ────────────────────────────────────
 export async function createTossCheckout(
   userId: string,
-  planType: PlanType,
+  planType: PlanType
 ): Promise<{ paymentKey: string; orderId: string; amount: number }> {
   const fn = httpsCallable<
     { userId: string; planType: PlanType },
@@ -216,7 +217,7 @@ export async function createTossCheckout(
 export async function confirmTossPayment(
   orderId: string,
   paymentKey: string,
-  amount: number,
+  amount: number
 ): Promise<void> {
   const fn = httpsCallable<
     { orderId: string; paymentKey: string; amount: number },

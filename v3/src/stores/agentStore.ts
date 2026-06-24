@@ -9,6 +9,7 @@ import * as agentService from "../services/agentService";
 import { useProjectStore } from "./projectStore";
 import { useSubscriptionStore } from "./subscriptionStore";
 import { checkAgentSpawn } from "../lib/planLimits";
+import { t } from "../lib/i18n";
 
 const COLLECTION = "agents";
 const DATE_FIELDS = ["createdAt"];
@@ -68,8 +69,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const plan = useSubscriptionStore.getState().getPlan();
       const check = checkAgentSpawn(plan, get().agents);
       if (!check.allowed) {
-        const msg =
-          check.reason ?? "현재 플랜의 동시 에이전트 한도에 도달했습니다.";
+        const msg = check.reason ?? t("common.agentLimitReached");
         set({ error: msg });
         throw new Error(msg);
       }
@@ -127,8 +127,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const others = get().agents.filter((a) => a.id !== agent.id);
       const check = checkAgentSpawn(plan, others);
       if (!check.allowed) {
-        const msg =
-          check.reason ?? "현재 플랜의 동시 에이전트 한도에 도달했습니다.";
+        const msg = check.reason ?? t("common.agentLimitReached");
         set({ error: msg });
         throw new Error(msg);
       }

@@ -4,6 +4,7 @@ import type {
   WorktreeProjectGroup,
   WorktreeStatusPill,
 } from "../types/worktree";
+import { t } from "../lib/i18n";
 
 interface WorktreeState {
   worktrees: Worktree[];
@@ -33,11 +34,11 @@ interface WorktreeState {
   remove: (
     repoRoot: string,
     path: string,
-    deleteBranch?: boolean,
+    deleteBranch?: boolean
   ) => Promise<void>;
   cleanupStale: (
     repoRoot: string,
-    maxIdleDays?: number,
+    maxIdleDays?: number
   ) => Promise<{
     removed: string[];
     failed: { path: string; error: string }[];
@@ -54,7 +55,7 @@ function errorMessage(err: unknown): string {
 
 function assertActionResult(
   result: unknown,
-  fallbackMessage: string,
+  fallbackMessage: string
 ): asserts result {
   if (!result || typeof result !== "object") return;
   if ("ok" in result && result.ok === false) {
@@ -66,8 +67,8 @@ function assertActionResult(
       "error" in result && typeof result.error === "string"
         ? result.error
         : conflicts
-          ? `${fallbackMessage}: ${conflicts}`
-          : fallbackMessage;
+        ? `${fallbackMessage}: ${conflicts}`
+        : fallbackMessage;
     throw new Error(error);
   }
   if ("success" in result && result.success === false) {
@@ -88,7 +89,7 @@ function inferTaskId(projectId: string, worktreePath: string): string | null {
 
 function normalizeWorktree(
   group: WorktreeProjectGroup,
-  item: WorktreeProjectGroup["worktrees"][number],
+  item: WorktreeProjectGroup["worktrees"][number]
 ): Worktree {
   const taskId = inferTaskId(group.projectId, item.path);
   return {
@@ -110,18 +111,18 @@ function normalizeWorktree(
 export function statusPill(worktree: Worktree): WorktreeStatusPill {
   const status = worktree.status;
   if (status && (!status.mergeable || status.conflicts.length > 0)) {
-    return { icon: "🔴", label: "충돌", tone: "danger" };
+    return { icon: "🔴", label: t("common.worktree.conflict"), tone: "danger" };
   }
   if (worktree.stale) {
     return { icon: "⚠️", label: "stale", tone: "warning" };
   }
   if (status && status.behind > 0) {
-    return { icon: "🟡", label: "뒤처짐", tone: "behind" };
+    return { icon: "🟡", label: t("common.worktree.behind"), tone: "behind" };
   }
   if (status && status.mergeable && status.behind === 0 && status.ahead > 0) {
-    return { icon: "🟢", label: "머지 가능", tone: "ready" };
+    return { icon: "🟢", label: t("common.worktree.mergeable"), tone: "ready" };
   }
-  return { icon: "⚪", label: "작업중", tone: "idle" };
+  return { icon: "⚪", label: t("common.worktree.idle"), tone: "idle" };
 }
 
 export const useWorktreeStore = create<WorktreeState>((set, get) => ({
@@ -134,7 +135,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
     try {
       const groups = await window.electronAPI.worktree.list();
       const worktrees = groups.flatMap((group) =>
-        group.worktrees.map((item) => normalizeWorktree(group, item)),
+        group.worktrees.map((item) => normalizeWorktree(group, item))
       );
       set({ worktrees, loading: false });
     } catch (err) {
@@ -159,7 +160,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
     try {
       const result = await window.electronAPI.worktree.cleanupStale(
         repoRoot,
-        maxIdleDays,
+        maxIdleDays
       );
       await get().refresh();
       return result;
@@ -207,7 +208,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
 
   getWorktreesByProject: (projectId) => {
     return get().worktrees.filter(
-      (worktree) => worktree.projectId === projectId,
+      (worktree) => worktree.projectId === projectId
     );
   },
 
@@ -218,7 +219,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
         groups[worktree.projectId].push(worktree);
         return groups;
       },
-      {},
+      {}
     );
   },
 

@@ -15,12 +15,14 @@ import { header } from "./header";
 import { settings } from "./settings";
 import { agents } from "./agents";
 import { plan } from "./plan";
+import { common } from "./common";
 
 export const ko = {
   ...header,
   ...settings,
   ...agents,
   ...plan,
+  ...common,
 };
 
 export type MessageKey = keyof typeof ko;

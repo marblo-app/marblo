@@ -21,6 +21,7 @@ import {
   PaymentListParams,
   PaymentStatus,
 } from "../types/payment";
+import { t } from "../lib/i18n";
 
 interface PaymentClientConfig {
   apiBaseUrl: string;
@@ -280,16 +281,18 @@ export class PaymentUtils {
    */
   static getPaymentStatusText(status: PaymentStatus): string {
     const statusMap: Record<PaymentStatus, string> = {
-      [PaymentStatus.PENDING]: "결제 대기",
-      [PaymentStatus.READY]: "결제 준비",
-      [PaymentStatus.IN_PROGRESS]: "결제 진행중",
-      [PaymentStatus.DONE]: "결제 완료",
-      [PaymentStatus.CANCELED]: "결제 취소",
-      [PaymentStatus.PARTIAL_CANCELED]: "부분 취소",
-      [PaymentStatus.ABORTED]: "결제 중단",
-      [PaymentStatus.EXPIRED]: "결제 만료",
+      [PaymentStatus.PENDING]: t("common.payment.status.pending"),
+      [PaymentStatus.READY]: t("common.payment.status.ready"),
+      [PaymentStatus.IN_PROGRESS]: t("common.payment.status.inProgress"),
+      [PaymentStatus.DONE]: t("common.payment.status.done"),
+      [PaymentStatus.CANCELED]: t("common.payment.status.canceled"),
+      [PaymentStatus.PARTIAL_CANCELED]: t(
+        "common.payment.status.partialCanceled"
+      ),
+      [PaymentStatus.ABORTED]: t("common.payment.status.aborted"),
+      [PaymentStatus.EXPIRED]: t("common.payment.status.expired"),
     };
-    return statusMap[status] || "알 수 없음";
+    return statusMap[status] || t("common.unknown");
   }
 
   /**

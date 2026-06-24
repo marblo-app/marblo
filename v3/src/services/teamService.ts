@@ -1,7 +1,7 @@
-import { where } from 'firebase/firestore';
-import type { Invitation, InvitationRole } from '../types/invitation';
-import type { User } from '../types/user';
-import { ROLE_PERMISSIONS } from '../types/invitation';
+import { where } from "firebase/firestore";
+import type { Invitation, InvitationRole } from "../types/invitation";
+import type { User } from "../types/user";
+import { ROLE_PERMISSIONS } from "../types/invitation";
 import {
   getDocument,
   queryDocuments,
@@ -12,13 +12,14 @@ import {
   toTimestamp,
   convertTimestamps,
   subscribeToCollection,
-} from './firestore';
-import * as projectService from './projectService';
+} from "./firestore";
+import * as projectService from "./projectService";
+import { t } from "../lib/i18n";
 
-const INVITATIONS = 'invitations';
-const USERS = 'users';
-const INVITATION_DATE_FIELDS = ['createdAt', 'expiresAt'];
-const USER_DATE_FIELDS = ['createdAt'];
+const INVITATIONS = "invitations";
+const USERS = "users";
+const INVITATION_DATE_FIELDS = ["createdAt", "expiresAt"];
+const USER_DATE_FIELDS = ["createdAt"];
 
 function toInvitation(raw: Record<string, unknown>): Invitation {
   return convertTimestamps<Invitation>(raw, INVITATION_DATE_FIELDS);
@@ -34,7 +35,7 @@ export async function createInvitation(
   projectId: string,
   email: string,
   role: InvitationRole,
-  invitedBy: string,
+  invitedBy: string
 ): Promise<string> {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7일 후 만료
@@ -42,12 +43,12 @@ export async function createInvitation(
   // 중복 초대 체크
   const existing = await queryDocuments<Record<string, unknown>>(
     INVITATIONS,
-    where('projectId', '==', projectId),
-    where('invitedEmail', '==', email),
-    where('status', '==', 'pending'),
+    where("projectId", "==", projectId),
+    where("invitedEmail", "==", email),
+    where("status", "==", "pending")
   );
   if (existing.length > 0) {
-    throw new Error('이미 대기 중인 초대가 있습니다.');
+    throw new Error(t("common.team.duplicateInvite"));
   }
 
   return createDocument(INVITATIONS, {
@@ -55,7 +56,7 @@ export async function createInvitation(
     invitedEmail: email,
     invitedBy,
     role,
-    status: 'pending',
+    status: "pending",
     createdAt: toTimestamp(now),
     expiresAt: toTimestamp(expiresAt),
   });
@@ -63,32 +64,38 @@ export async function createInvitation(
 
 export async function acceptInvitation(
   invitationId: string,
-  userId: string,
+  userId: string
 ): Promise<void> {
-  const raw = await getDocument<Record<string, unknown>>(INVITATIONS, invitationId);
-  if (!raw) throw new Error('초대를 찾을 수 없습니다.');
+  const raw = await getDocument<Record<string, unknown>>(
+    INVITATIONS,
+    invitationId
+  );
+  if (!raw) throw new Error(t("common.team.inviteNotFound"));
 
   const invitation = toInvitation(raw);
-  if (invitation.status !== 'pending') {
-    throw new Error('이미 처리된 초대입니다.');
+  if (invitation.status !== "pending") {
+    throw new Error(t("common.team.inviteAlreadyHandled"));
   }
   if (new Date() > invitation.expiresAt) {
-    await updateDocument(INVITATIONS, invitationId, { status: 'expired' });
-    throw new Error('만료된 초대입니다.');
+    await updateDocument(INVITATIONS, invitationId, { status: "expired" });
+    throw new Error(t("common.team.inviteExpired"));
   }
 
   // 초대 상태 업데이트
-  await updateDocument(INVITATIONS, invitationId, { status: 'accepted' });
+  await updateDocument(INVITATIONS, invitationId, { status: "accepted" });
 
   // 프로젝트 멤버에 추가
   await projectService.addMember(invitation.projectId, userId);
 }
 
 export async function rejectInvitation(invitationId: string): Promise<void> {
-  const raw = await getDocument<Record<string, unknown>>(INVITATIONS, invitationId);
-  if (!raw) throw new Error('초대를 찾을 수 없습니다.');
+  const raw = await getDocument<Record<string, unknown>>(
+    INVITATIONS,
+    invitationId
+  );
+  if (!raw) throw new Error(t("common.team.inviteNotFound"));
 
-  await updateDocument(INVITATIONS, invitationId, { status: 'rejected' });
+  await updateDocument(INVITATIONS, invitationId, { status: "rejected" });
 }
 
 export async function cancelInvitation(invitationId: string): Promise<void> {
@@ -97,11 +104,13 @@ export async function cancelInvitation(invitationId: string): Promise<void> {
 
 // --- 초대 조회 ---
 
-export async function getPendingInvitations(projectId: string): Promise<Invitation[]> {
+export async function getPendingInvitations(
+  projectId: string
+): Promise<Invitation[]> {
   const docs = await queryDocuments<Record<string, unknown>>(
     INVITATIONS,
-    where('projectId', '==', projectId),
-    where('status', '==', 'pending'),
+    where("projectId", "==", projectId),
+    where("status", "==", "pending")
   );
   return docs.map(toInvitation);
 }
@@ -109,8 +118,8 @@ export async function getPendingInvitations(projectId: string): Promise<Invitati
 export async function getMyInvitations(email: string): Promise<Invitation[]> {
   const docs = await queryDocuments<Record<string, unknown>>(
     INVITATIONS,
-    where('invitedEmail', '==', email),
-    where('status', '==', 'pending'),
+    where("invitedEmail", "==", email),
+    where("status", "==", "pending")
   );
   return docs.map(toInvitation);
 }
@@ -119,29 +128,29 @@ export async function getMyInvitations(email: string): Promise<Invitation[]> {
 
 export function subscribeToPendingInvitations(
   projectId: string,
-  callback: (invitations: Invitation[]) => void,
+  callback: (invitations: Invitation[]) => void
 ) {
   return subscribeToCollection<Record<string, unknown>>(
     INVITATIONS,
-    [where('projectId', '==', projectId), where('status', '==', 'pending')],
-    (docs) => callback(docs.map(toInvitation)),
+    [where("projectId", "==", projectId), where("status", "==", "pending")],
+    (docs) => callback(docs.map(toInvitation))
   );
 }
 
 export function subscribeToMyInvitations(
   email: string,
-  callback: (invitations: Invitation[]) => void,
+  callback: (invitations: Invitation[]) => void
 ) {
   return subscribeToCollection<Record<string, unknown>>(
     INVITATIONS,
-    [where('invitedEmail', '==', email), where('status', '==', 'pending')],
-    (docs) => callback(docs.map(toInvitation)),
+    [where("invitedEmail", "==", email), where("status", "==", "pending")],
+    (docs) => callback(docs.map(toInvitation))
   );
 }
 
 // --- 멤버 관리 ---
 
-const MEMBER_ROLES = 'memberRoles';
+const MEMBER_ROLES = "memberRoles";
 
 function memberRoleDocId(projectId: string, userId: string): string {
   return `${projectId}_${userId}`;
@@ -150,7 +159,7 @@ function memberRoleDocId(projectId: string, userId: string): string {
 export async function updateMemberRole(
   projectId: string,
   userId: string,
-  role: InvitationRole,
+  role: InvitationRole
 ): Promise<void> {
   const docId = memberRoleDocId(projectId, userId);
   await setDocument(MEMBER_ROLES, docId, { projectId, userId, role });
@@ -158,7 +167,7 @@ export async function updateMemberRole(
 
 export async function removeMember(
   projectId: string,
-  userId: string,
+  userId: string
 ): Promise<void> {
   await projectService.removeMember(projectId, userId);
   const docId = memberRoleDocId(projectId, userId);
@@ -185,11 +194,11 @@ export async function getProjectMembers(projectId: string): Promise<User[]> {
 
 export async function getMemberRole(
   projectId: string,
-  userId: string,
+  userId: string
 ): Promise<InvitationRole> {
   // Owner 체크
   const project = await projectService.getProject(projectId);
-  if (project?.ownerId === userId) return 'owner';
+  if (project?.ownerId === userId) return "owner";
 
   // memberRoles에서 조회 (composite ID)
   const docId = memberRoleDocId(projectId, userId);
@@ -199,13 +208,13 @@ export async function getMemberRole(
   }
 
   // 기본 역할
-  return 'member';
+  return "member";
 }
 
 export async function checkPermission(
   projectId: string,
   userId: string,
-  action: string,
+  action: string
 ): Promise<boolean> {
   const role = await getMemberRole(projectId, userId);
   return ROLE_PERMISSIONS[role]?.includes(action) ?? false;
@@ -214,11 +223,11 @@ export async function checkPermission(
 // --- 멤버 역할 일괄 조회 ---
 
 export async function getMemberRoles(
-  projectId: string,
+  projectId: string
 ): Promise<Record<string, InvitationRole>> {
   const docs = await queryDocuments<Record<string, unknown>>(
     MEMBER_ROLES,
-    where('projectId', '==', projectId),
+    where("projectId", "==", projectId)
   );
 
   const roles: Record<string, InvitationRole> = {};
@@ -230,7 +239,7 @@ export async function getMemberRoles(
   // Owner는 프로젝트에서 확인
   const project = await projectService.getProject(projectId);
   if (project) {
-    roles[project.ownerId] = 'owner';
+    roles[project.ownerId] = "owner";
   }
 
   return roles;

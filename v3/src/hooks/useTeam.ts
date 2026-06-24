@@ -1,13 +1,17 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { where } from 'firebase/firestore';
-import type { User } from '../types/user';
-import type { Invitation, InvitationRole } from '../types/invitation';
-import { ROLE_PERMISSIONS } from '../types/invitation';
-import { subscribeToCollection, convertTimestamps } from '../services/firestore';
-import * as teamService from '../services/teamService';
-import { useAuth } from './useAuth';
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { where } from "firebase/firestore";
+import type { User } from "../types/user";
+import type { Invitation, InvitationRole } from "../types/invitation";
+import { ROLE_PERMISSIONS } from "../types/invitation";
+import {
+  subscribeToCollection,
+  convertTimestamps,
+} from "../services/firestore";
+import * as teamService from "../services/teamService";
+import { useAuth } from "./useAuth";
+import { t } from "../lib/i18n";
 
-const INVITATION_DATE_FIELDS = ['createdAt', 'expiresAt'];
+const INVITATION_DATE_FIELDS = ["createdAt", "expiresAt"];
 function toInvitation(raw: Record<string, unknown>): Invitation {
   return convertTimestamps<Invitation>(raw, INVITATION_DATE_FIELDS);
 }
@@ -15,7 +19,9 @@ function toInvitation(raw: Record<string, unknown>): Invitation {
 export function useTeam(projectId: string) {
   const { user } = useAuth();
   const [members, setMembers] = useState<User[]>([]);
-  const [memberRoles, setMemberRoles] = useState<Record<string, InvitationRole>>({});
+  const [memberRoles, setMemberRoles] = useState<
+    Record<string, InvitationRole>
+  >({});
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,14 +50,20 @@ export function useTeam(projectId: string) {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : '멤버 로드 실패');
+          setError(
+            err instanceof Error
+              ? err.message
+              : t("common.team.loadMembersFailed")
+          );
           setLoading(false);
         }
       }
     }
 
     loadMembers();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   // 초대 목록 실시간 구독
@@ -62,37 +74,38 @@ export function useTeam(projectId: string) {
     }
 
     const unsubscribe = subscribeToCollection<Record<string, unknown>>(
-      'invitations',
-      [where('projectId', '==', projectId), where('status', '==', 'pending')],
-      (docs) => setInvitations(docs.map(toInvitation)),
+      "invitations",
+      [where("projectId", "==", projectId), where("status", "==", "pending")],
+      (docs) => setInvitations(docs.map(toInvitation))
     );
 
     return () => unsubscribe();
   }, [projectId]);
 
   const currentRole = useMemo(() => {
-    if (!user) return 'viewer' as InvitationRole;
-    return memberRoles[user.uid] || 'member';
+    if (!user) return "viewer" as InvitationRole;
+    return memberRoles[user.uid] || "member";
   }, [user, memberRoles]);
 
   const invite = useCallback(
     async (email: string, role: InvitationRole) => {
       try {
-        if (!user) throw new Error('로그인이 필요합니다.');
+        if (!user) throw new Error(t("common.loginRequired"));
         await teamService.createInvitation(projectId, email, role, user.uid);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : '초대 실패';
+        const msg =
+          err instanceof Error ? err.message : t("common.team.inviteFailed");
         setError(msg);
         throw err;
       }
     },
-    [projectId, user],
+    [projectId, user]
   );
 
   const accept = useCallback(
     async (invitationId: string) => {
       try {
-        if (!user) throw new Error('로그인이 필요합니다.');
+        if (!user) throw new Error(t("common.loginRequired"));
         await teamService.acceptInvitation(invitationId, user.uid);
         // 멤버 목록 리로드
         const [memberList, roles] = await Promise.all([
@@ -102,39 +115,38 @@ export function useTeam(projectId: string) {
         setMembers(memberList);
         setMemberRoles(roles);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : '수락 실패';
+        const msg =
+          err instanceof Error ? err.message : t("common.team.acceptFailed");
         setError(msg);
         throw err;
       }
     },
-    [projectId, user],
+    [projectId, user]
   );
 
-  const reject = useCallback(
-    async (invitationId: string) => {
-      try {
-        await teamService.rejectInvitation(invitationId);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : '거절 실패';
-        setError(msg);
-        throw err;
-      }
-    },
-    [],
-  );
+  const reject = useCallback(async (invitationId: string) => {
+    try {
+      await teamService.rejectInvitation(invitationId);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : t("common.team.rejectFailed");
+      setError(msg);
+      throw err;
+    }
+  }, []);
 
-  const cancelInvitation = useCallback(
-    async (invitationId: string) => {
-      try {
-        await teamService.cancelInvitation(invitationId);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : '초대 취소 실패';
-        setError(msg);
-        throw err;
-      }
-    },
-    [],
-  );
+  const cancelInvitation = useCallback(async (invitationId: string) => {
+    try {
+      await teamService.cancelInvitation(invitationId);
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : t("common.team.cancelInviteFailed");
+      setError(msg);
+      throw err;
+    }
+  }, []);
 
   const updateRole = useCallback(
     async (userId: string, role: InvitationRole) => {
@@ -142,12 +154,15 @@ export function useTeam(projectId: string) {
         await teamService.updateMemberRole(projectId, userId, role);
         setMemberRoles((prev) => ({ ...prev, [userId]: role }));
       } catch (err) {
-        const msg = err instanceof Error ? err.message : '역할 변경 실패';
+        const msg =
+          err instanceof Error
+            ? err.message
+            : t("common.team.updateRoleFailed");
         setError(msg);
         throw err;
       }
     },
-    [projectId],
+    [projectId]
   );
 
   const removeMember = useCallback(
@@ -161,19 +176,22 @@ export function useTeam(projectId: string) {
           return next;
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : '멤버 제거 실패';
+        const msg =
+          err instanceof Error
+            ? err.message
+            : t("common.team.removeMemberFailed");
         setError(msg);
         throw err;
       }
     },
-    [projectId],
+    [projectId]
   );
 
   const checkPermission = useCallback(
     (action: string): boolean => {
       return ROLE_PERMISSIONS[currentRole]?.includes(action) ?? false;
     },
-    [currentRole],
+    [currentRole]
   );
 
   return {

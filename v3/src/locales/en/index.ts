@@ -12,10 +12,12 @@ import { header } from "./header";
 import { settings } from "./settings";
 import { agents } from "./agents";
 import { plan } from "./plan";
+import { common } from "./common";
 
 export const en: Record<MessageKey, string> = {
   ...header,
   ...settings,
   ...agents,
   ...plan,
+  ...common,
 };
