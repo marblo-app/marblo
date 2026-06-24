@@ -7,6 +7,7 @@ import {
   ACTIVITY_TYPE_LABEL,
   type ActivityEntry,
 } from "../../services/activityStreamService";
+import { useTranslation } from "../../lib/i18n";
 
 const STATUS_DOT: Record<string, string> = {
   working: "bg-[#a6e3a1]",
@@ -30,6 +31,7 @@ interface MacroViewProps {
 }
 
 export function MacroView({ entries, onSelectAgent }: MacroViewProps) {
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const agents = useAgentStore((s) => s.agents);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
@@ -57,16 +59,16 @@ export function MacroView({ entries, onSelectAgent }: MacroViewProps) {
 
   const totalCost = useMemo(
     () => agents.reduce((sum, a) => sum + (a.totalCost ?? 0), 0),
-    [agents]
+    [agents],
   );
   const totalTokens = useMemo(
     () =>
       agents.reduce(
         (sum, a) =>
           sum + (a.totalInputTokens ?? 0) + (a.totalOutputTokens ?? 0),
-        0
+        0,
       ),
-    [agents]
+    [agents],
   );
 
   // Errors / recent counts derived from the audit_logs window. One hour =
@@ -121,7 +123,7 @@ export function MacroView({ entries, onSelectAgent }: MacroViewProps) {
         </h3>
         {agents.length === 0 && (
           <p className="px-1 py-2 text-[10px] text-[#6c7086]">
-            활성 에이전트가 없습니다.
+            {t("activity.ui.macroNoAgents")}
           </p>
         )}
         <div className="space-y-0.5">
@@ -175,7 +177,9 @@ export function MacroView({ entries, onSelectAgent }: MacroViewProps) {
         </h3>
         <div className="space-y-1">
           {topRecent.length === 0 ? (
-            <p className="px-1 text-[10px] text-[#6c7086]">최근 활동 없음.</p>
+            <p className="px-1 text-[10px] text-[#6c7086]">
+              {t("activity.ui.macroNoRecent")}
+            </p>
           ) : (
             topRecent.map(([type, n]) => (
               <div
@@ -186,11 +190,11 @@ export function MacroView({ entries, onSelectAgent }: MacroViewProps) {
                   {ACTIVITY_TYPE_ICON[type as keyof typeof ACTIVITY_TYPE_ICON]}
                 </span>
                 <span className="flex-1 text-[#bac2de] truncate">
-                  {
+                  {t(
                     ACTIVITY_TYPE_LABEL[
                       type as keyof typeof ACTIVITY_TYPE_LABEL
-                    ]
-                  }
+                    ],
+                  )}
                 </span>
                 <span className="text-[#6c7086]">{n}</span>
               </div>

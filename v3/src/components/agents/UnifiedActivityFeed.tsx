@@ -3,6 +3,9 @@ import { Agent, ModelType } from "../../types";
 import { Activity } from "../../types";
 import { subscribeToCollection } from "../../services/firestore";
 import { where, limit } from "firebase/firestore";
+import { useTranslation } from "../../lib/i18n";
+
+type TFn = ReturnType<typeof useTranslation>["t"];
 
 interface UnifiedActivityFeedProps {
   agents: Agent[];
@@ -39,16 +42,16 @@ const modelEmoji: Record<ModelType, string> = {
   custom: "⚪",
 };
 
-function formatRelativeTime(date: Date): string {
+function formatRelativeTime(date: Date, t: TFn): string {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return "방금";
-  if (diffMin < 60) return `${diffMin}분 전`;
+  if (diffMin < 1) return t("activity.time.justNow");
+  if (diffMin < 60) return t("activity.time.minutesAgo", { n: diffMin });
   const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `${diffHour}시간 전`;
+  if (diffHour < 24) return t("activity.time.hoursAgo", { n: diffHour });
   const diffDay = Math.floor(diffHour / 24);
-  return `${diffDay}일 전`;
+  return t("activity.time.daysAgo", { n: diffDay });
 }
 
 type FilterType = "all" | string; // 'all' or agentId
@@ -56,6 +59,7 @@ type FilterType = "all" | string; // 'all' or agentId
 export default function UnifiedActivityFeed({
   agents,
 }: UnifiedActivityFeedProps) {
+  const { t } = useTranslation();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [filter, setFilter] = useState<FilterType>("all");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -97,10 +101,10 @@ export default function UnifiedActivityFeed({
             prev.forEach((a) => merged.set(a.id, a));
             items.forEach((a) => merged.set(a.id, a));
             return Array.from(merged.values()).sort(
-              (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+              (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
             );
           });
-        }
+        },
       );
       unsubscribers.push(unsub);
     });
@@ -124,9 +128,11 @@ export default function UnifiedActivityFeed({
     <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-100">통합 활동 피드</h3>
+        <h3 className="text-sm font-semibold text-gray-100">
+          {t("activity.ui.feedTitle")}
+        </h3>
         <span className="text-xs text-gray-500">
-          {filteredActivities.length}개 활동
+          {t("activity.ui.feedCount", { count: filteredActivities.length })}
         </span>
       </div>
 
@@ -140,7 +146,7 @@ export default function UnifiedActivityFeed({
               : "bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-300"
           }`}
         >
-          전체
+          {t("activity.ui.feedAll")}
         </button>
         {agents.map((agent) => {
           const isActive = filter === agent.id;
@@ -164,7 +170,7 @@ export default function UnifiedActivityFeed({
       <div ref={scrollRef} className="max-h-80 overflow-y-auto space-y-1.5">
         {filteredActivities.length === 0 ? (
           <div className="py-8 text-center text-sm text-gray-500">
-            활동이 없습니다
+            {t("activity.ui.feedEmpty")}
           </div>
         ) : (
           filteredActivities.map((activity) => {
@@ -187,7 +193,7 @@ export default function UnifiedActivityFeed({
                   )}
                   <span className="text-xs text-gray-600">·</span>
                   <span className="text-xs text-gray-500">
-                    {formatRelativeTime(activity.createdAt)}
+                    {formatRelativeTime(activity.createdAt, t)}
                   </span>
                 </div>
                 <p className="text-sm text-gray-300">{activity.message}</p>

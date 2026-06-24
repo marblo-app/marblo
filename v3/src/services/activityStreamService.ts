@@ -21,6 +21,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import type { MessageKey } from "../locales/ko";
 
 export type ActivityType =
   | "task:created"
@@ -50,20 +51,25 @@ export interface ActivityEntry {
   createdAt: Date;
 }
 
-export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
-  "task:created": "Task created",
-  "task:claimed": "Task claimed",
-  "task:progress": "Task progress",
-  "task:completed": "Task done",
-  "task:blocked": "Task blocked",
-  "agent:spawned": "Agent spawned",
-  "pm:feedback": "PM feedback",
-  "activity:note": "Activity note",
-  "mission:step": "Mission step",
-  "mission:state": "Mission state",
-  "mission:note": "Mission note",
-  error: "Error",
-  other: "Other",
+/**
+ * Activity type → `activity.*` 번역 키. 화면 표시명은 정적 UI 라벨이라
+ * locale 테이블에서 해석한다. 소비처(ActivityStreamPanel/MacroView)는
+ * `t(ACTIVITY_TYPE_LABEL[type])` 로 현재 로케일 문자열을 얻는다.
+ */
+export const ACTIVITY_TYPE_LABEL: Record<ActivityType, MessageKey> = {
+  "task:created": "activity.type.taskCreated",
+  "task:claimed": "activity.type.taskClaimed",
+  "task:progress": "activity.type.taskProgress",
+  "task:completed": "activity.type.taskCompleted",
+  "task:blocked": "activity.type.taskBlocked",
+  "agent:spawned": "activity.type.agentSpawned",
+  "pm:feedback": "activity.type.pmFeedback",
+  "activity:note": "activity.type.activityNote",
+  "mission:step": "activity.type.missionStep",
+  "mission:state": "activity.type.missionState",
+  "mission:note": "activity.type.missionNote",
+  error: "activity.type.error",
+  other: "activity.type.other",
 };
 
 export const ACTIVITY_TYPE_ICON: Record<ActivityType, string> = {

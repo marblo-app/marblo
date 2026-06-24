@@ -1,7 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
-import { where, limit } from 'firebase/firestore';
-import type { Agent } from '../../types/agent';
-import { subscribeToCollection, convertTimestamps } from '../../services/firestore';
+import { useState, useEffect, useRef } from "react";
+import { where, limit } from "firebase/firestore";
+import type { Agent } from "../../types/agent";
+import {
+  subscribeToCollection,
+  convertTimestamps,
+} from "../../services/firestore";
+import { useTranslation } from "../../lib/i18n";
+
+type TFn = ReturnType<typeof useTranslation>["t"];
 
 interface ActivityFeedProps {
   projectId: string;
@@ -16,13 +22,14 @@ interface ProjectActivity {
   createdAt: Date;
 }
 
-const DATE_FIELDS = ['createdAt'];
+const DATE_FIELDS = ["createdAt"];
 
 function toActivity(raw: Record<string, unknown>): ProjectActivity {
   return convertTimestamps<ProjectActivity>(raw, DATE_FIELDS);
 }
 
 export default function ActivityFeed({ projectId, agents }: ActivityFeedProps) {
+  const { t, locale } = useTranslation();
   const [activities, setActivities] = useState<ProjectActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const feedRef = useRef<HTMLDivElement>(null);
@@ -52,14 +59,13 @@ export default function ActivityFeed({ projectId, agents }: ActivityFeedProps) {
     const queryAgentIds = agentIds.slice(0, 30);
 
     const unsubscribe = subscribeToCollection<Record<string, unknown>>(
-      'activities',
-      [
-        where('agentId', 'in', queryAgentIds),
-        limit(50),
-      ],
+      "activities",
+      [where("agentId", "in", queryAgentIds), limit(50)],
       (docs) => {
         setActivities(
-          docs.map(toActivity).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+          docs
+            .map(toActivity)
+            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
         );
         setLoading(false);
       },
@@ -78,7 +84,9 @@ export default function ActivityFeed({ projectId, agents }: ActivityFeedProps) {
   if (loading) {
     return (
       <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
-        <h3 className="mb-3 text-sm font-medium text-gray-300">Activity Feed</h3>
+        <h3 className="mb-3 text-sm font-medium text-gray-300">
+          Activity Feed
+        </h3>
         <div className="flex items-center justify-center py-6">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
         </div>
@@ -91,12 +99,11 @@ export default function ActivityFeed({ projectId, agents }: ActivityFeedProps) {
       <h3 className="mb-3 text-sm font-medium text-gray-300">Activity Feed</h3>
 
       {activities.length === 0 ? (
-        <p className="py-4 text-center text-xs text-gray-600">아직 활동이 없습니다</p>
+        <p className="py-4 text-center text-xs text-gray-600">
+          {t("activity.ui.feedEmptyShort")}
+        </p>
       ) : (
-        <div
-          ref={feedRef}
-          className="max-h-64 space-y-1 overflow-y-auto pr-1"
-        >
+        <div ref={feedRef} className="max-h-64 space-y-1 overflow-y-auto pr-1">
           {activities.map((activity) => {
             const agent = agentMap.get(activity.agentId);
             return (
@@ -108,9 +115,13 @@ export default function ActivityFeed({ projectId, agents }: ActivityFeedProps) {
                 <div className="mt-0.5 shrink-0">
                   {agent ? (
                     <span className="text-sm">
-                      {agent.model === 'claude' ? '🟣' :
-                       agent.model === 'gemini' ? '🔵' :
-                       agent.model === 'gpt' ? '🟢' : '⚪'}
+                      {agent.model === "claude"
+                        ? "🟣"
+                        : agent.model === "gemini"
+                          ? "🔵"
+                          : agent.model === "gpt"
+                            ? "🟢"
+                            : "⚪"}
                     </span>
                   ) : (
                     <span className="text-sm">⚪</span>
@@ -124,7 +135,7 @@ export default function ActivityFeed({ projectId, agents }: ActivityFeedProps) {
                       {agent?.name || activity.agentId}
                     </span>
                     <span className="text-[10px] text-gray-600">
-                      {formatTime(activity.createdAt)}
+                      {formatTime(activity.createdAt, t, locale)}
                     </span>
                   </div>
                   <p className="mt-0.5 text-xs text-gray-400 break-words">
@@ -140,14 +151,17 @@ export default function ActivityFeed({ projectId, agents }: ActivityFeedProps) {
   );
 }
 
-function formatTime(date: Date): string {
-  if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+function formatTime(date: Date, t: TFn, locale: string): string {
+  if (!(date instanceof Date) || isNaN(date.getTime())) return "";
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return '방금';
-  if (mins < 60) return `${mins}분 전`;
+  if (mins < 1) return t("activity.time.justNow");
+  if (mins < 60) return t("activity.time.minutesAgo", { n: mins });
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}시간 전`;
-  return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+  if (hrs < 24) return t("activity.time.hoursAgo", { n: hrs });
+  return date.toLocaleDateString(locale === "ko" ? "ko-KR" : "en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }

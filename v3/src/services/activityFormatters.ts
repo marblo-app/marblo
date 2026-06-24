@@ -17,6 +17,17 @@
  * - 모르는 타입은 빈 헤드라인 — 렌더 사이드에서 카드 자체를 그릴지 결정.
  */
 import type { ActivityEntry, ActivityType } from "./activityStreamService";
+import type { MessageKey } from "../locales/ko";
+
+/**
+ * 번역 함수 시그니처. 호출부(React 컴포넌트)가 `useTranslation()` 의 `t` 를
+ * 넘겨 로케일 변경 시 재렌더되게 한다. 모듈 레벨 `t()` 를 직접 쓰면 로케일
+ * 토글에 반응하지 않으므로 인자로 받는다.
+ */
+export type TranslateFn = (
+  key: MessageKey,
+  vars?: Record<string, string | number>,
+) => string;
 
 export interface DetailRow {
   label: string;
@@ -30,17 +41,7 @@ export interface FormattedActivity {
   details: DetailRow[];
 }
 
-type Formatter = (e: ActivityEntry) => FormattedActivity;
-
-const FALLBACKS = {
-  title: "untitled",
-  reason: "no reason",
-  role: "agent",
-  missionStep: "step",
-  missionState: "state change",
-  errorResult: "unknown",
-  noteMessage: "(no message)",
-} as const;
+type Formatter = (e: ActivityEntry, t: TranslateFn) => FormattedActivity;
 
 /** 헤드라인 truncation 한계 — Tailwind line-clamp-2 와 별개로 너무 긴 한 줄 방지. */
 const HEADLINE_TASK_MAX = 80;
@@ -65,7 +66,7 @@ function firstLine(s: string): string {
  * 3) task_id 앞 8자 (`task abc12345`)
  * 4) FALLBACKS.title
  */
-function taskIdentifier(e: ActivityEntry): string {
+function taskIdentifier(e: ActivityEntry, t: TranslateFn): string {
   const fromParams = str(e.params.title);
   if (fromParams) return fromParams;
 
@@ -79,13 +80,13 @@ function taskIdentifier(e: ActivityEntry): string {
     str(e.params.task_id) || str((e.params as { taskId?: unknown }).taskId);
   if (taskId) return `task ${taskId.slice(0, 8)}`;
 
-  return FALLBACKS.title;
+  return t("activity.fallback.title");
 }
 
 /** spawn_agent result 다중행 텍스트에서 "  Agent ID: xxx" 추출. */
 function spawnedAgentId(e: ActivityEntry): string {
   const match = /Agent ID:\s*([^\s]+)/.exec(
-    typeof e.result === "string" ? e.result : ""
+    typeof e.result === "string" ? e.result : "",
   );
   return match ? match[1] : "";
 }
@@ -105,121 +106,158 @@ function rows(
 }
 
 const FORMATTERS: Record<ActivityType, Formatter> = {
-  "task:created": (e) => {
-    const title = taskIdentifier(e);
+  "task:created": (e, t) => {
+    const title = taskIdentifier(e, t);
     return {
-      headline: `Task: created "${title}"`,
+      headline: t("activity.headline.taskCreated", { title }),
       details: rows(
-        ["Title", title],
-        ["Role", str(e.params.role)],
-        ["Description", str(e.params.description)]
+        [t("activity.label.title"), title],
+        [t("activity.label.role"), str(e.params.role)],
+        [t("activity.label.description"), str(e.params.description)],
       ),
     };
   },
-  "task:claimed": (e) => {
-    const title = taskIdentifier(e);
+  "task:claimed": (e, t) => {
+    const title = taskIdentifier(e, t);
     return {
-      headline: `Task: claimed by ${e.agentId} — "${title}"`,
-      details: rows(["Agent", e.agentId], ["Task", title]),
+      headline: t("activity.headline.taskClaimed", {
+        agent: e.agentId,
+        title,
+      }),
+      details: rows(
+        [t("activity.label.agent"), e.agentId],
+        [t("activity.label.task"), title],
+      ),
     };
   },
-  "task:progress": (e) => {
-    const title = taskIdentifier(e);
+  "task:progress": (e, t) => {
+    const title = taskIdentifier(e, t);
     return {
-      headline: `Task: progress "${title}"`,
-      details: rows(["Task", title], ["Status", str(e.params.status)]),
+      headline: t("activity.headline.taskProgress", { title }),
+      details: rows(
+        [t("activity.label.task"), title],
+        [t("activity.label.status"), str(e.params.status)],
+      ),
     };
   },
-  "task:completed": (e) => {
-    const title = taskIdentifier(e);
+  "task:completed": (e, t) => {
+    const title = taskIdentifier(e, t);
     return {
-      headline: `Task: completed "${title}"`,
-      details: rows(["Task", title]),
+      headline: t("activity.headline.taskCompleted", { title }),
+      details: rows([t("activity.label.task"), title]),
     };
   },
-  "task:blocked": (e) => {
-    const title = taskIdentifier(e);
-    const reason = str(e.params.reason, FALLBACKS.reason);
+  "task:blocked": (e, t) => {
+    const title = taskIdentifier(e, t);
+    const reason = str(e.params.reason, t("activity.fallback.reason"));
     return {
-      headline: `Task: blocked "${title}" — ${reason}`,
-      details: rows(["Task", title], ["Reason", reason]),
+      headline: t("activity.headline.taskBlocked", { title, reason }),
+      details: rows(
+        [t("activity.label.task"), title],
+        [t("activity.label.reason"), reason],
+      ),
     };
   },
-  "agent:spawned": (e) => {
+  "agent:spawned": (e, t) => {
     const name = str(e.params.name);
     const role = str(e.params.role);
     const model = str(e.params.model);
     const initial = str(e.params.initial_prompt);
     const idFromResult = spawnedAgentId(e);
-    const displayName = name || idFromResult || FALLBACKS.role;
+    const displayName = name || idFromResult || t("activity.fallback.role");
     const roleSuffix = role ? ` (${role})` : "";
+    const fullName = `${displayName}${roleSuffix}`;
     const taskPreview = initial
       ? truncate(firstLine(initial), HEADLINE_TASK_MAX)
       : "";
     const headline = taskPreview
-      ? `Agent: spawned ${displayName}${roleSuffix} → "${taskPreview}"`
-      : `Agent: spawned ${displayName}${roleSuffix}`;
+      ? t("activity.headline.agentSpawnedWithTask", {
+          name: fullName,
+          task: taskPreview,
+        })
+      : t("activity.headline.agentSpawned", { name: fullName });
     return {
       headline,
       details: rows(
-        ["Name", name],
-        ["Agent ID", idFromResult],
-        ["Role", role],
-        ["Model", model],
-        ["Task", initial]
+        [t("activity.label.name"), name],
+        [t("activity.label.agentId"), idFromResult],
+        [t("activity.label.role"), role],
+        [t("activity.label.model"), model],
+        [t("activity.label.task"), initial],
       ),
     };
   },
-  "mission:step": (e) => {
-    const body = str(e.result, FALLBACKS.missionStep);
+  "mission:step": (e, t) => {
+    const body = str(e.result, t("activity.fallback.missionStep"));
     return {
-      headline: `Mission: ${body}`,
-      details: rows(["Step", body]),
+      headline: t("activity.headline.mission", { body }),
+      details: rows([t("activity.label.step"), body]),
     };
   },
-  "mission:state": (e) => {
-    const body = str(e.result, FALLBACKS.missionState);
+  "mission:state": (e, t) => {
+    const body = str(e.result, t("activity.fallback.missionState"));
     return {
-      headline: `Mission: ${body}`,
-      details: rows(["State", body]),
+      headline: t("activity.headline.mission", { body }),
+      details: rows([t("activity.label.state"), body]),
     };
   },
-  "mission:note": (e) => {
-    const body = str(e.result, FALLBACKS.noteMessage);
+  "mission:note": (e, t) => {
+    const body = str(e.result, t("activity.fallback.noteMessage"));
     return {
-      headline: joinWithDash(`Mission: ${e.agentId} note`, body),
-      details: rows(["Mission", e.agentId], ["Note", body]),
-    };
-  },
-  "activity:note": (e) => {
-    const message = str(e.params.message, FALLBACKS.noteMessage);
-    return {
-      headline: joinWithDash(`Note: ${e.agentId}`, message),
-      details: rows(["Agent", e.agentId], ["Message", message]),
-    };
-  },
-  "pm:feedback": (e) => {
-    const title = taskIdentifier(e);
-    return {
-      headline: `PM: feedback on "${title}"`,
+      headline: joinWithDash(
+        t("activity.headline.missionNotePrefix", { agent: e.agentId }),
+        body,
+      ),
       details: rows(
-        ["Task", title],
-        ["Comment", str(e.params.comment) || str(e.params.feedback)]
+        [t("activity.label.mission"), e.agentId],
+        [t("activity.label.note"), body],
       ),
     };
   },
-  error: (e) => {
-    const result = str(e.result, FALLBACKS.errorResult);
+  "activity:note": (e, t) => {
+    const message = str(e.params.message, t("activity.fallback.noteMessage"));
     return {
-      headline: `Error: ${e.toolName} failed — ${result}`,
-      details: rows(["Tool", e.toolName], ["Message", result]),
+      headline: joinWithDash(
+        t("activity.headline.notePrefix", { agent: e.agentId }),
+        message,
+      ),
+      details: rows(
+        [t("activity.label.agent"), e.agentId],
+        [t("activity.label.message"), message],
+      ),
+    };
+  },
+  "pm:feedback": (e, t) => {
+    const title = taskIdentifier(e, t);
+    return {
+      headline: t("activity.headline.pmFeedback", { title }),
+      details: rows(
+        [t("activity.label.task"), title],
+        [
+          t("activity.label.comment"),
+          str(e.params.comment) || str(e.params.feedback),
+        ],
+      ),
+    };
+  },
+  error: (e, t) => {
+    const result = str(e.result, t("activity.fallback.errorResult"));
+    return {
+      headline: t("activity.headline.error", { tool: e.toolName, result }),
+      details: rows(
+        [t("activity.label.tool"), e.toolName],
+        [t("activity.label.message"), result],
+      ),
     };
   },
   other: () => ({ headline: "", details: [] }),
 };
 
-export function formatActivity(entry: ActivityEntry): FormattedActivity {
+export function formatActivity(
+  entry: ActivityEntry,
+  t: TranslateFn,
+): FormattedActivity {
   // FORMATTERS 는 ActivityType union 전체를 exhaustive 하게 커버하므로
   // 런타임 null 체크 없음 — 새 ActivityType 추가 시 컴파일 에러로 강제됨.
-  return FORMATTERS[entry.type](entry);
+  return FORMATTERS[entry.type](entry, t);
 }

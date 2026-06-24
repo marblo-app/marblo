@@ -18,6 +18,7 @@ import { useAgentStore } from "../../stores/agentStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { MacroView } from "./MacroView";
 import { formatActivity } from "../../services/activityFormatters";
+import { useTranslation } from "../../lib/i18n";
 import type { Agent } from "../../types/agent";
 
 const MODEL_ICONS: Record<string, string> = {
@@ -73,10 +74,7 @@ function extractSpawnedAgentId(entry: ActivityEntry): string | null {
   return match ? match[1] : null;
 }
 
-function strParam(
-  params: Record<string, unknown>,
-  key: string,
-): string | null {
+function strParam(params: Record<string, unknown>, key: string): string | null {
   const value = params[key];
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -165,16 +163,17 @@ function jumpTo(target: { type: "task" | "agent"; id: string }) {
  */
 function ActivityRow({ entry }: { entry: ActivityEntry }) {
   const [expanded, setExpanded] = useState(false);
+  const { t } = useTranslation();
   const agents = useAgentStore((s) => s.agents);
   const icon = ACTIVITY_TYPE_ICON[entry.type];
-  const label = ACTIVITY_TYPE_LABEL[entry.type];
+  const label = t(ACTIVITY_TYPE_LABEL[entry.type]);
   const taskId = extractTaskId(entry);
   const agent = resolveActivityAgent(entry, agents, taskId);
 
   // 헤드라인 + detail 모두 activityFormatters 가 담당 —
   // raw result/params 노출 방지 + 'Category: action payload' 통일 포맷.
   // 빈 헤드라인(예: type=other) 이면 toolName 으로 안전망.
-  const { headline, details } = formatActivity(entry);
+  const { headline, details } = formatActivity(entry, t);
   const summary = headline || entry.toolName;
 
   return (
@@ -253,7 +252,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
                   }}
                   className="rounded bg-[#89b4fa]/20 px-2 py-1 text-[10px] text-[#89b4fa] hover:bg-[#89b4fa]/30"
                 >
-                  📋 태스크 열기
+                  📋 {t("activity.ui.openTask")}
                 </button>
               )}
               {agent && (
@@ -265,7 +264,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
                   }}
                   className="rounded bg-[#cba6f7]/20 px-2 py-1 text-[10px] text-[#cba6f7] hover:bg-[#cba6f7]/30"
                 >
-                  🤖 에이전트 보기
+                  🤖 {t("activity.ui.viewAgent")}
                 </button>
               )}
             </div>
@@ -277,6 +276,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
 }
 
 export function ActivityStreamPanel() {
+  const { t } = useTranslation();
   const { open, filter, setFilter, toggle, viewMode, setViewMode } =
     useActivityStreamStore();
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -385,7 +385,7 @@ export function ActivityStreamPanel() {
                       ? "bg-[#89b4fa]/20 text-[#89b4fa]"
                       : "text-[#6c7086] hover:bg-[#313244] hover:text-[#cdd6f4]"
                   }`}
-                  title={f === "all" ? "All" : ACTIVITY_TYPE_LABEL[f]}
+                  title={f === "all" ? "All" : t(ACTIVITY_TYPE_LABEL[f])}
                 >
                   <span>{icon}</span>
                   <span>{count}</span>
@@ -399,8 +399,8 @@ export function ActivityStreamPanel() {
             {filtered.length === 0 && (
               <p className="px-2 py-6 text-center text-xs text-[#6c7086]">
                 {entries.length === 0
-                  ? "활동이 아직 없습니다. 에이전트가 MCP 도구를 호출하면 여기 표시됩니다."
-                  : "이 필터에 해당하는 항목이 없습니다."}
+                  ? t("activity.ui.emptyNoActivity")
+                  : t("activity.ui.emptyNoFilterMatch")}
               </p>
             )}
             {filtered.map((e) => (
@@ -412,7 +412,7 @@ export function ActivityStreamPanel() {
 
       {/* Footer */}
       <div className="border-t border-[#313244] px-3 py-1.5 text-[10px] text-[#6c7086]">
-        Source: audit_logs · 최근 100건 · ⌘⇧A 토글
+        {t("activity.ui.footer", { count: 100 })}
       </div>
     </aside>
   );
