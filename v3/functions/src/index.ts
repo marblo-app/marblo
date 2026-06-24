@@ -1775,16 +1775,24 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
         "email required",
       );
     }
+    // orderBy 제거 — (email + createdAt) 복합 인덱스 없이 동작하도록 클라이언트 정렬.
+    // 선례: src/services/chatService.ts subscribeToMessages. createdAt 은 Firestore
+    // Timestamp 이거나 undefined 일 수 있어 toMillis 가드로 안전 비교 후 최신 1건 선택.
     const snap = await db
       .collection("founder_feedback")
       .where("email", "==", email)
-      .orderBy("createdAt", "desc")
-      .limit(1)
       .get();
     if (snap.empty) {
       return { feedback: null };
     }
-    const v = snap.docs[0].data() as Record<string, unknown>;
+    const toMillis = (x: unknown): number =>
+      x && typeof (x as { toMillis?: unknown }).toMillis === "function"
+        ? (x as { toMillis: () => number }).toMillis()
+        : 0;
+    const latest = snap.docs.reduce((a, b) =>
+      toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a,
+    );
+    const v = latest.data() as Record<string, unknown>;
     const a = (v.answers as Record<string, unknown>) || {};
     const str = (x: unknown): string => (typeof x === "string" ? x : "");
     return {
