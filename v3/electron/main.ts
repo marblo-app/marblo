@@ -21,6 +21,7 @@ import { PendingInstructionListener } from "./pending-instruction-listener";
 import { FsManager } from "./fs-manager";
 import { AgentManager, serializeAgent } from "./agent-manager";
 import { Updater } from "./updater";
+import { selectPersistableWindows } from "./windowSession";
 import { TaskDecomposer } from "./orchestrator/task-decomposer";
 import type { DecomposedTask } from "./orchestrator/dag-generator";
 import { BridgeServer, withCompletionFooter } from "./bridge-server";
@@ -437,7 +438,7 @@ const windowProjects = new Map<number, string>(); // webContents.id → projectI
 // reconnect correct. See src/lib/sessionRestore.ts for the precedence rules.
 const windowRestore = new Map<
   number,
-  { rootPath?: string; projectId?: string }
+  { rootPath?: string; projectId?: string; detached?: boolean }
 >();
 
 // Set on before-quit so per-window close handlers don't strip the saved
@@ -448,7 +449,10 @@ let isQuitting = false;
 // reopen them all (see restoreWindowSession). Called whenever a window's
 // project changes or a window closes — cheap and infrequent.
 function persistWindowSession(): void {
-  const windows = [...windowRestore.values()].filter((w) => w.rootPath);
+  // Exclude detached pop-out windows and dedupe by rootPath — otherwise popping
+  // out Board/Code tabs (which share the parent's rootPath) would reopen the
+  // same project as extra full windows on restart. See windowSession.ts.
+  const windows = selectPersistableWindows(windowRestore.values());
   writeAppState({ windows });
 }
 
@@ -1657,12 +1661,14 @@ function createDetachedWindow(
   seed?: { rootPath?: string; projectId?: string },
 ): BrowserWindow {
   const win = createWindow(true, view);
-  if (seed && (seed.rootPath || seed.projectId)) {
-    windowRestore.set(win.webContents.id, {
-      ...(seed.rootPath ? { rootPath: seed.rootPath } : {}),
-      ...(seed.projectId ? { projectId: seed.projectId } : {}),
-    });
-  }
+  // Always tag the per-window record as detached (even with no seed) so this
+  // pop-out is never written into the persisted multi-window session — it's a
+  // sub-panel of its parent project, not a standalone window to restore.
+  windowRestore.set(win.webContents.id, {
+    ...(seed?.rootPath ? { rootPath: seed.rootPath } : {}),
+    ...(seed?.projectId ? { projectId: seed.projectId } : {}),
+    detached: true,
+  });
   return win;
 }
 
@@ -1673,9 +1679,13 @@ function createDetachedWindow(
 // reconnects to the right project instead of showing the folder picker —
 // see src/lib/sessionRestore.ts.
 function restoreWindowSession(): void {
-  const saved = (readAppState().windows ?? [])
-    .filter((w) => w && w.rootPath)
-    .slice(0, 10); // sanity cap — never spawn a runaway number of windows
+  // Dedupe on read too — an app-state.json written by an older build (before
+  // detached windows were excluded) can hold the same project many times.
+  // selectPersistableWindows collapses those so we never reopen duplicates.
+  const saved = selectPersistableWindows(readAppState().windows ?? []).slice(
+    0,
+    10,
+  ); // sanity cap — never spawn a runaway number of windows
   if (saved.length === 0) {
     createWindow();
     return;
