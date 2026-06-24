@@ -73,6 +73,11 @@ nsis:
 
 publish:
   provider: github
+  # 소스 레포(melocream/marblo)는 private → 릴리스 자산을 익명 다운로드 불가.
+  # 공개 배포는 별도 public 레포 melocream/marblo-releases 로 발행한다.
+  # (electron-updater 자동 업데이트도 이 공개 레포에서 latest-mac.yml 을 읽는다.)
+  owner: melocream
+  repo: marblo-releases
 
 extraMetadata:
   main: dist-electron/main.js

@@ -14,7 +14,7 @@
   "hero": {
     "title": "One developer.\nAn entire team's output.",
     "subtitle": "Claude, GPT, and Gemini agents code simultaneously.\nYou direct. They execute.",
-    "cta_download": "Coming Soon",
+    "cta_download": "Download",
     "cta_pricing": "View Pricing",
     "badge": "AI Agent Orchestration Platform"
   },
@@ -142,7 +142,7 @@
   "cta_final": {
     "title": "Start free today",
     "subtitle": "Try Marblo with the Free plan,\nthen upgrade to Pro to command your agent army",
-    "download": "Coming Soon",
+    "download": "Download",
     "pricing": "Compare Plans"
   },
   "pricing": {
@@ -227,19 +227,21 @@
     "most_popular": "Most Popular"
   },
   "download": {
-    "title": "Marblo Desktop — Coming Soon",
-    "subtitle": "The AI Agent Army Workspace is almost ready.\nWe'll email you the moment it ships.",
-    "badge": "Coming Soon",
-    "notify_title": "Get launch notifications",
-    "notify_subtitle": "Sign up and we'll notify you as soon as downloads are live.",
+    "title": "Marblo Desktop (Beta)",
+    "subtitle": "The macOS (Apple Silicon) build is available to download now.\nWindows is coming soon.",
+    "badge": "Beta",
+    "notify_title": "Get notified when Windows ships",
+    "notify_subtitle": "Sign up and we'll notify you the moment the Windows build is ready.",
     "notify_cta": "Sign up for launch alerts",
     "pricing_cta": "Preview pricing plans",
-    "macos": "macOS (Apple Silicon / Intel)",
+    "macos": "macOS (Apple Silicon)",
     "windows": "Windows (64-bit)",
-    "linux": "Linux (AppImage)",
     "version": "Version",
     "releaseNotes": "Release Notes",
-    "recommended": "Recommended"
+    "recommended": "Recommended",
+    "download_now": "Download",
+    "preparing": "Coming soon",
+    "mac_sub": "Signed & notarized"
   },
   "promoBar": {
     "message": "🌟 Marblo Founders — Free beta · Pro 3 months for feedback · Lifetime Discord",

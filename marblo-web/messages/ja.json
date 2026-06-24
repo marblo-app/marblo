@@ -14,7 +14,7 @@
   "hero": {
     "title": "一人で、チーム全体の\n成果を出す",
     "subtitle": "Claude、GPT、Geminiエージェント軍団が同時にコーディング。\nあなたは指示するだけ。エージェントが実行します。",
-    "cta_download": "近日公開 (Coming Soon)",
+    "cta_download": "ダウンロード",
     "cta_pricing": "料金を見る",
     "badge": "AIエージェント・オーケストレーション・プラットフォーム"
   },
@@ -142,7 +142,7 @@
   "cta_final": {
     "title": "今すぐ無料で始めましょう",
     "subtitle": "Freeプランでお試しいただき、\nProにアップグレードしてエージェント軍団を運用しましょう",
-    "download": "近日公開 (Coming Soon)",
+    "download": "ダウンロード",
     "pricing": "プランを比較する"
   },
   "pricing": {
@@ -227,19 +227,21 @@
     "most_popular": "一番人気"
   },
   "download": {
-    "title": "Marbloデスクトップ — 近日公開",
-    "subtitle": "AIエージェント軍団ワークスペースはまもなく完成します。\nリリース次第、メールでお知らせします。",
-    "badge": "Coming Soon",
-    "notify_title": "リリース通知を受け取る",
-    "notify_subtitle": "ご登録いただくと、ダウンロード開始と同時にお知らせします。",
+    "title": "Marbloデスクトップ（ベータ）",
+    "subtitle": "macOS（Apple Silicon）版を今すぐダウンロードできます。\nWindows版は近日公開。",
+    "badge": "ベータ",
+    "notify_title": "Windows版のリリース通知を受け取る",
+    "notify_subtitle": "ご登録いただくと、Windows版の準備が整い次第お知らせします。",
     "notify_cta": "登録してリリース通知を受け取る",
     "pricing_cta": "料金プランをプレビュー",
-    "macos": "macOS (Apple Silicon / Intel)",
+    "macos": "macOS (Apple Silicon)",
     "windows": "Windows (64-bit)",
-    "linux": "Linux (AppImage)",
     "version": "バージョン",
     "releaseNotes": "リリースノート",
-    "recommended": "推奨"
+    "recommended": "推奨",
+    "download_now": "ダウンロード",
+    "preparing": "準備中",
+    "mac_sub": "署名・公証済み"
   },
   "promoBar": {
     "message": "🌟 Marbloファウンダー募集 — 無料ベータ · フィードバックでPro 3ヶ月 · 永久Discord",
