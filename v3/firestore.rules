@@ -64,6 +64,16 @@ service cloud.firestore {
     }
 
     // ===== Tasks =====
+    // ⚠️ 의도적으로 isAuthenticated() 만 검사한다 (아직 isProjectMember 미적용).
+    // tasks 는 렌더러(실 사용자 auth) 뿐 아니라 MCP 서버/오케스트레이터가
+    // *익명 인증 client SDK* 로 read/write 한다 (firebase-admin 아님:
+    // electron/mcp-server/firebase.ts 의 signInAnonymously). 익명 uid 는
+    // project.members 에 없으므로 isProjectMember 로 좁히면 에이전트 task
+    // 파이프라인(get_available_tasks / claim_task / create / update)이 전부
+    // PERMISSION_DENIED 로 깨진다.
+    // missions 블록과 동일한 custom-token 마이그레이션(렌더러 id token → main/MCP
+    // signInWithCustomToken) 이후에 chatMessages/taskComments 처럼 일괄 하드닝
+    // 예정. 보안 티켓 a7iz1slr 참조.
     match /tasks/{taskId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
@@ -111,17 +121,34 @@ service cloud.firestore {
     }
 
     // ===== Chat Messages =====
+    // 크로스테넌트 누출 차단: 프로젝트 멤버만 자기 프로젝트의 채팅을 읽고 쓸 수 있다.
+    // (이전엔 isAuthenticated() 만 검사 → 로그인한 누구나 projectId 만 알면 타 팀
+    //  채팅을 열람/주입할 수 있었음.)
+    // 작성자 무결성: type=='user' 메시지는 senderId 가 반드시 작성자 본인 uid.
+    //  system/agent 메시지는 senderId 가 라벨('system'/agentName)이라 검사 제외.
+    // 작성·구독 경로는 렌더러(src/services/chatService.ts, 실 사용자 auth) 뿐이므로
+    //  멤버 스코프로 좁혀도 정상 동작한다 (MCP/오케는 이 컬렉션을 건드리지 않음).
     match /chatMessages/{messageId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow read: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
+      allow create: if isAuthenticated()
+        && isProjectMember(request.resource.data.projectId)
+        && (request.resource.data.type != 'user'
+            || request.resource.data.senderId == request.auth.uid);
       allow update: if false;
       allow delete: if false;
     }
 
     // ===== Task Comments =====
+    // 크로스테넌트 누출 차단: 프로젝트 멤버만 자기 프로젝트의 코멘트를 읽고 쓸 수 있다.
+    // 작성자 무결성: authorId 는 반드시 작성자 본인 uid (src/services/commentService.ts
+    //  addComment 가 user.uid 를 authorId 로 기록).
     match /taskComments/{commentId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow read: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
+      allow create: if isAuthenticated()
+        && isProjectMember(request.resource.data.projectId)
+        && request.resource.data.authorId == request.auth.uid;
       allow update: if false;
       allow delete: if false;
     }
