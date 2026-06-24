@@ -1,12 +1,6 @@
 // v3/src/components/board/TaskBodySections.tsx
 import type { Task } from "../../types/task";
-
-const LABELS = {
-  goal: "목표",
-  changes: "변경·접근",
-  acceptance: "완료 기준",
-  notes: "제약·주의",
-} as const;
+import { useTranslation } from "../../lib/i18n";
 
 function nonEmpty(arr?: string[]): string[] {
   return (arr ?? []).map((s) => s.trim()).filter((s) => s.length > 0);
@@ -32,6 +26,7 @@ function isStructured(task: Task): boolean {
 }
 
 export function TaskBodySections({ task }: { task: Task }) {
+  const { t } = useTranslation();
   if (!isStructured(task)) {
     if (!task.description) return null;
     return (
@@ -53,7 +48,7 @@ export function TaskBodySections({ task }: { task: Task }) {
       {task.goal?.trim() && (
         <section>
           <h3 className="text-xs font-medium text-gray-400 uppercase mb-1">
-            {LABELS.goal}
+            {t("board.section.goal")}
           </h3>
           <p className="text-sm text-gray-200 whitespace-pre-wrap">
             {task.goal}
@@ -63,7 +58,7 @@ export function TaskBodySections({ task }: { task: Task }) {
       {changes.length > 0 && (
         <section>
           <h3 className="text-xs font-medium text-gray-400 uppercase mb-1">
-            {LABELS.changes}
+            {t("board.section.changes")}
           </h3>
           <ul className="list-disc list-inside space-y-0.5 text-sm text-gray-300">
             {changes.map((c, i) => (
@@ -75,7 +70,7 @@ export function TaskBodySections({ task }: { task: Task }) {
       {acceptance.length > 0 && (
         <section>
           <h3 className="text-xs font-medium text-gray-400 uppercase mb-1">
-            {LABELS.acceptance}
+            {t("board.section.acceptance")}
           </h3>
           <ul className="space-y-0.5 text-sm text-gray-300">
             {acceptance.map((a, i) => (
@@ -90,7 +85,7 @@ export function TaskBodySections({ task }: { task: Task }) {
       {notes.length > 0 && (
         <section>
           <h3 className="text-xs font-medium text-gray-400 uppercase mb-1">
-            {LABELS.notes}
+            {t("board.section.notes")}
           </h3>
           <ul className="list-disc list-inside space-y-0.5 text-sm text-gray-400">
             {notes.map((n, i) => (

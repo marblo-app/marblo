@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ModelType } from "../../types/agent";
+import { useTranslation } from "../../lib/i18n";
 
 const HARNESSES: {
   value: ModelType;
@@ -44,6 +45,7 @@ export function LaneCreateModal({
   onCancel: () => void;
   onLaunch: (input: LaneLaunchInput) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState("");
   const [model, setModel] = useState<ModelType>("claude");
   const [busy, setBusy] = useState(false);
@@ -64,10 +66,10 @@ export function LaneCreateModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-[420px] rounded-lg border border-gray-700 bg-gray-800 p-5 shadow-xl">
         <h3 className="mb-3 text-sm font-semibold text-gray-100">
-          ＋ 빠른 작업
+          {t("lanes.create.title")}
         </h3>
         <label className="mb-1 block text-xs font-medium text-gray-400">
-          무엇을 할까요?
+          {t("lanes.create.whatLabel")}
         </label>
         <input
           autoFocus
@@ -76,11 +78,11 @@ export function LaneCreateModal({
           onKeyDown={(e) => {
             if (e.key === "Enter") submit();
           }}
-          placeholder="예: 로그인 에러 메시지 개선"
+          placeholder={t("lanes.create.placeholder")}
           className="mb-4 w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-gray-100 focus:border-blue-500 focus:outline-none"
         />
         <label className="mb-2 block text-xs font-medium text-gray-400">
-          에이전트
+          {t("lanes.create.agentLabel")}
         </label>
         <div className="mb-5 space-y-1.5">
           {HARNESSES.map((h) => (
@@ -109,14 +111,14 @@ export function LaneCreateModal({
             onClick={onCancel}
             className="rounded px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200"
           >
-            취소
+            {t("lanes.create.cancel")}
           </button>
           <button
             onClick={submit}
             disabled={!title.trim() || busy}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
           >
-            {busy ? "시작 중…" : "시작"}
+            {busy ? t("lanes.create.starting") : t("lanes.create.start")}
           </button>
         </div>
       </div>

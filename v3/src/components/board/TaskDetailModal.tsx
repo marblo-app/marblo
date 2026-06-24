@@ -21,6 +21,7 @@ import { getSessionIdForAgent } from "../../stores/agentSessionMap";
 import { useProjectStore } from "../../stores/projectStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useAuth } from "../../hooks/useAuth";
+import { useTranslation } from "../../lib/i18n";
 import { TaskBodySections, hasAnyBody } from "./TaskBodySections";
 import { DiffViewer } from "./DiffViewer";
 import type { Worktree } from "../../types/worktree";
@@ -222,6 +223,7 @@ function AgentTerminalButton({
     (s) => s.openTerminalForSession,
   );
   const setFocusedAgent = useAgentFocusStore((s) => s.setFocusedAgent);
+  const { t } = useTranslation();
 
   if (!claimedBy) return null;
 
@@ -264,9 +266,12 @@ function AgentTerminalButton({
             d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
           />
         </svg>
-        {MODEL_ICONS[agent.model] || "⚪"} {agent.name} 터미널 보기
+        {MODEL_ICONS[agent.model] || "⚪"}{" "}
+        {t("board.taskDetail.viewTerminal", { name: agent.name })}
         {!hasSession && (
-          <span className="text-[10px] text-gray-500">(연결)</span>
+          <span className="text-[10px] text-gray-500">
+            {t("board.taskDetail.connect")}
+          </span>
         )}
       </button>
     </div>
@@ -279,6 +284,7 @@ interface TaskDetailModalProps {
 }
 
 export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
   const worktrees = useWorktreeStore((s) => s.worktrees);
@@ -346,7 +352,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
       }
 
       if (!worktree) {
-        throw new Error("이 태스크에 연결된 worktree를 찾을 수 없습니다.");
+        throw new Error(t("board.taskDetail.worktreeNotFound"));
       }
 
       const loadedDiff = await window.electronAPI.board.worktreeDiff({
@@ -356,7 +362,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
       });
       setDiff(loadedDiff);
     } catch (err) {
-      setDiffError(getErrorMessage(err, "diff 로드 실패"));
+      setDiffError(getErrorMessage(err, t("board.taskDetail.diffLoadFailed")));
     } finally {
       setDiffLoading(false);
     }
@@ -525,7 +531,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                   ? "text-blue-400 bg-blue-500/20"
                   : "text-gray-400 hover:text-gray-200"
               }`}
-              title="수정"
+              title={t("board.taskDetail.edit")}
             >
               <svg
                 className="h-4 w-4"
@@ -569,7 +575,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
             <div className="rounded border border-blue-500/30 bg-blue-500/5 p-4 space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-400 uppercase mb-1">
-                  제목
+                  {t("board.taskDetail.titleLabel")}
                 </label>
                 <input
                   type="text"
@@ -580,19 +586,19 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-400 uppercase mb-1">
-                  설명
+                  {t("board.taskDetail.descriptionLabel")}
                 </label>
                 <textarea
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
                   rows={4}
                   className="w-full rounded bg-gray-700 border border-gray-600 px-3 py-2 text-sm text-gray-100 focus:border-blue-500 focus:outline-none resize-none"
-                  placeholder="태스크 설명, 에이전트에게 전달할 상세 프롬프트..."
+                  placeholder={t("board.taskDetail.descriptionPlaceholder")}
                 />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-400 uppercase mb-1">
-                  우선순위
+                  {t("board.taskDetail.priorityLabel")}
                 </label>
                 <select
                   value={editPriority}
@@ -601,7 +607,12 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                 >
                   {[5, 4, 3, 2, 1].map((p) => (
                     <option key={p} value={p}>
-                      P{p} {p === 5 ? "(긴급)" : p === 1 ? "(낮음)" : ""}
+                      P{p}{" "}
+                      {p === 5
+                        ? t("board.taskDetail.priorityUrgent")
+                        : p === 1
+                          ? t("board.taskDetail.priorityLow")
+                          : ""}
                     </option>
                   ))}
                 </select>
@@ -625,7 +636,9 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                       d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
                     />
                   </svg>
-                  {deleting ? "삭제 중..." : "태스크 삭제"}
+                  {deleting
+                    ? t("board.taskDetail.deleting")
+                    : t("board.taskDetail.deleteTask")}
                 </button>
                 <div className="flex gap-2">
                   <button
@@ -637,13 +650,13 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                     }}
                     className="rounded px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors"
                   >
-                    취소
+                    {t("board.taskDetail.cancel")}
                   </button>
                   <button
                     onClick={handleSaveEdit}
                     className="rounded bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-500 transition-colors"
                   >
-                    저장
+                    {t("board.taskDetail.save")}
                   </button>
                 </div>
               </div>
@@ -656,7 +669,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
               onClick={() => setEditing(true)}
               className="w-full rounded border border-dashed border-gray-600 py-3 text-xs text-gray-500 hover:border-gray-500 hover:text-gray-400 transition-colors"
             >
-              + 설명 추가 (클릭하여 편집)
+              {t("board.taskDetail.addDescription")}
             </button>
           )}
 
@@ -820,7 +833,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                     : "text-gray-500 hover:text-gray-400"
                 }`}
               >
-                변경 diff
+                {t("board.taskDetail.diffTab")}
               </button>
             </div>
 
@@ -841,7 +854,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                           </span>
                         </>
                       ) : (
-                        "연결된 worktree를 조회합니다."
+                        t("board.taskDetail.lookingUpWorktree")
                       )}
                     </div>
                     <button
@@ -853,7 +866,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                       disabled={diffLoading}
                       className="flex-shrink-0 rounded border border-gray-600 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-50"
                     >
-                      새로고침
+                      {t("board.taskDetail.refresh")}
                     </button>
                   </div>
                   <DiffViewer

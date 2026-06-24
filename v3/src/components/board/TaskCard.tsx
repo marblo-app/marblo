@@ -9,18 +9,13 @@ import { useEditorStore } from "../../stores/editorStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { usePresence } from "../../hooks/usePresence";
 import { isLaneTask, isMissionTask } from "../../lib/laneContext";
+import { useTranslation } from "../../lib/i18n";
 import FlowKanbanLink from "../flows/FlowKanbanLink";
 
 const PRESENCE_DOT: Record<PresenceStatus, string> = {
   online: "bg-green-400",
   idle: "bg-yellow-400",
   offline: "bg-gray-500",
-};
-
-const PRESENCE_LABEL: Record<PresenceStatus, string> = {
-  online: "온라인",
-  idle: "유휴",
-  offline: "오프라인",
 };
 
 /**
@@ -165,6 +160,7 @@ function TaskCardContent({
   onFlowNavigate,
   isDragging,
 }: TaskCardProps & { isDragging?: boolean }) {
+  const { t } = useTranslation();
   const priority = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG[1];
   const roleColor = ROLE_COLORS[task.role] ?? "bg-gray-500/20 text-gray-400";
   const roleIcon = ROLE_ICONS[task.role] ?? "📋";
@@ -327,7 +323,9 @@ function TaskCardContent({
                 setRootPath(matchingWorktree.path);
               }}
               className="min-w-0 max-w-[11rem] truncate rounded px-1.5 py-0.5 font-mono text-xs text-blue-300 hover:bg-blue-500/10 hover:text-blue-200"
-              title={`Code 탭 루트를 ${matchingWorktree.path}(으)로 전환`}
+              title={t("board.taskCard.switchCodeRoot", {
+                path: matchingWorktree.path,
+              })}
             >
               {matchingWorktree.branch}
             </button>
@@ -349,15 +347,19 @@ function TaskCardContent({
         <span className="inline-flex items-center gap-1.5">
           {task.claimedBy && presence ? (
             <span
-              aria-label={`담당자 ${PRESENCE_LABEL[presence]}`}
-              title={`담당자 ${PRESENCE_LABEL[presence]}`}
+              aria-label={t("board.taskCard.assignee", {
+                status: t(`board.presence.${presence}`),
+              })}
+              title={t("board.taskCard.assignee", {
+                status: t(`board.presence.${presence}`),
+              })}
               className={`inline-block h-2 w-2 rounded-full ${PRESENCE_DOT[presence]}`}
             />
           ) : null}
           <span>
             {task.claimedBy
               ? `👤 ${claimingAgent?.name || task.claimedBy}`
-              : "미배정"}
+              : t("board.taskCard.unassigned")}
           </span>
         </span>
         <span>{timeAgo(task.createdAt)}</span>

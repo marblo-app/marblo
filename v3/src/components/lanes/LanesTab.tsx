@@ -19,6 +19,7 @@ import { LaneCreateModal, type LaneLaunchInput } from "./LaneCreateModal";
 import { LaneDeleteConfirmModal } from "./LaneDeleteConfirmModal";
 import type { Task } from "../../types/task";
 import type { Worktree } from "../../types/worktree";
+import { useTranslation } from "../../lib/i18n";
 
 // 빠른 작업 task 는 규약대로 contextId="lane:<laneId>" 로 태깅된다(lib/laneContext).
 // 보드 카드 마킹(좌측 amber 바)은 lib/laneContext.isLaneTask 가, 여기 Lanes 탭
@@ -89,6 +90,7 @@ function canRestartLane(row: LaneRow): boolean {
  * TaskDetailModal 이 쓰는 패턴과 동일.
  */
 function LaneTerminalButton({ agent }: { agent: Agent }) {
+  const { t } = useTranslation();
   // agentSessionMap 에 launch 시 등록된 진짜 ptySessionId. 미등록이면 undefined
   // (store 의 deterministic "agent-${id}" fallback 은 의도적으로 우회 — 죽은
   // 채널을 attach 하지 않기 위함).
@@ -108,9 +110,9 @@ function LaneTerminalButton({ agent }: { agent: Agent }) {
       title={
         canOpen
           ? hasLiveSession
-            ? "터미널 보기"
-            : "세션에 연결"
-          : "실행 중인 세션이 없습니다"
+            ? t("lanes.terminal.view")
+            : t("lanes.terminal.connect")
+          : t("lanes.terminal.noSession")
       }
       onClick={() => {
         if (!ptySessionId) return;
@@ -119,9 +121,11 @@ function LaneTerminalButton({ agent }: { agent: Agent }) {
       }}
       className="rounded bg-gray-700 px-2 py-0.5 text-[11px] text-gray-200 hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
     >
-      터미널
+      {t("lanes.terminal.label")}
       {canOpen && !hasLiveSession && (
-        <span className="ml-1 text-[10px] text-gray-400">(연결)</span>
+        <span className="ml-1 text-[10px] text-gray-400">
+          {t("lanes.terminal.connectBadge")}
+        </span>
       )}
     </button>
   );
@@ -141,6 +145,7 @@ export function LanesTab() {
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
   const removeWorktree = useWorktreeStore((s) => s.remove);
   const restartAgent = useAgentStore((s) => s.restartAgent);
+  const { t } = useTranslation();
 
   const [showCreate, setShowCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<LaneRow | null>(null);
@@ -173,7 +178,7 @@ export function LanesTab() {
 
   const launchLane = async ({ title, model, command }: LaneLaunchInput) => {
     if (!user || !projectId) {
-      setError("프로젝트를 먼저 선택하세요.");
+      setError(t("lanes.error.noProject"));
       throw new Error("no project");
     }
     setError(null);
@@ -181,9 +186,7 @@ export function LanesTab() {
     // 비면 worktreeCoordinator.prepare 가 조용히 plain cwd 로 폴백해 격리가 깨지므로,
     // 레인을 만들기 전에 막고 사용자에게 알린다 (orphan 태스크도 방지).
     if (!rootPath) {
-      setError(
-        "프로젝트 폴더 경로가 없어 격리 워크트리를 만들 수 없습니다. 사이드바에서 프로젝트 폴더를 먼저 여세요.",
-      );
+      setError(t("lanes.error.noRepoRoot"));
       throw new Error("no repo root");
     }
     // 플랜 동시 실행 한도 게이트: 이 핸들러는 agentStore.spawnAgent 를 우회해
@@ -193,7 +196,7 @@ export function LanesTab() {
     const plan = useSubscriptionStore.getState().getPlan();
     const spawnCheck = checkAgentSpawn(plan, agents);
     if (!spawnCheck.allowed) {
-      setError(spawnCheck.reason ?? "에이전트 동시 실행 한도에 도달했습니다.");
+      setError(spawnCheck.reason ?? t("lanes.error.agentLimit"));
       throw new Error("agent limit reached");
     }
     // 레인마다 구별되는 contextId 를 규약("lane:<laneId>")대로 부여한다. task 생성
@@ -269,14 +272,17 @@ export function LanesTab() {
     const warnings: string[] = [];
     const failFatal = (step: string, err: unknown) => {
       const lines = [
-        `레인 삭제가 "${step}" 단계에서 중단되었습니다: ${describe(err)}`,
+        t("lanes.delete.fatalStep", { step, error: describe(err) }),
       ];
       if (completed.length > 0)
-        lines.push(`완료된 단계: ${completed.join(", ")}`);
-      if (warnings.length > 0) lines.push(`경고: ${warnings.join(" / ")}`);
-      lines.push(
-        "항목이 목록에 남아 있으니 문제 해결 후 '삭제'로 재시도할 수 있습니다.",
-      );
+        lines.push(
+          t("lanes.delete.completedSteps", { steps: completed.join(", ") }),
+        );
+      if (warnings.length > 0)
+        lines.push(
+          t("lanes.delete.warningsLine", { warnings: warnings.join(" / ") }),
+        );
+      lines.push(t("lanes.delete.retryHint"));
       setError(lines.join("\n"));
     };
 
@@ -284,19 +290,19 @@ export function LanesTab() {
       if (row.agent) {
         try {
           await window.electronAPI.agent.stop(row.agent.id);
-          completed.push("에이전트 중지");
+          completed.push(t("lanes.delete.step.stopAgent"));
         } catch (err) {
           warnings.push(
-            `에이전트 중지 실패(이미 종료됐을 수 있음): ${describe(err)}`,
+            t("lanes.delete.warn.stopAgent", { error: describe(err) }),
           );
         }
       }
       if (row.worktree) {
         try {
           await removeWorktree(row.worktree.repoRoot, row.worktree.path, true);
-          completed.push("워크트리/브랜치 제거");
+          completed.push(t("lanes.delete.step.removeWorktree"));
         } catch (err) {
-          failFatal("워크트리/브랜치 제거", err);
+          failFatal(t("lanes.delete.step.removeWorktree"), err);
           return;
         }
       }
@@ -304,29 +310,35 @@ export function LanesTab() {
         try {
           await window.electronAPI.agent.remove(row.agent.id);
         } catch (err) {
-          warnings.push(`에이전트 프로세스 정리 실패: ${describe(err)}`);
+          warnings.push(
+            t("lanes.delete.warn.removeAgentProc", { error: describe(err) }),
+          );
         }
         try {
           await agentService.deleteAgent(row.agent.id);
-          completed.push("에이전트 기록 삭제");
+          completed.push(t("lanes.delete.step.deleteAgent"));
         } catch (err) {
-          failFatal("에이전트 기록 삭제", err);
+          failFatal(t("lanes.delete.step.deleteAgent"), err);
           return;
         }
       }
       try {
         await taskService.deleteTask(row.task.id);
-        completed.push("태스크 기록 삭제");
+        completed.push(t("lanes.delete.step.deleteTask"));
       } catch (err) {
-        failFatal("태스크 기록 삭제", err);
+        failFatal(t("lanes.delete.step.deleteTask"), err);
         return;
       }
       if (row.agent) {
         useAgentSessionMap.getState().remove(row.agent.id);
       }
-      setMessage(`"${row.task.title}" 레인 항목을 삭제했습니다.`);
+      setMessage(t("lanes.msg.deleted", { title: row.task.title }));
       if (warnings.length > 0) {
-        setError(`경고(삭제는 완료됨): ${warnings.join(" / ")}`);
+        setError(
+          t("lanes.msg.deletedWithWarnings", {
+            warnings: warnings.join(" / "),
+          }),
+        );
       }
     } finally {
       setBusy(null);
@@ -338,7 +350,7 @@ export function LanesTab() {
 
   const restartLane = async (row: LaneRow) => {
     if (!row.agent) {
-      setError("재시작할 에이전트가 없습니다.");
+      setError(t("lanes.error.noAgentToRestart"));
       return;
     }
 
@@ -351,10 +363,12 @@ export function LanesTab() {
       }
       await restartAgent(row.agent.id);
       useAgentSessionMap.getState().set(row.agent.id, `agent-${row.agent.id}`);
-      setMessage(`"${row.task.title}" 레인 항목을 다시 시작했습니다.`);
+      setMessage(t("lanes.msg.restarted", { title: row.task.title }));
       refreshWorktrees().catch(() => {});
     } catch (err) {
-      setError(err instanceof Error ? err.message : "레인 항목 재시작 실패");
+      setError(
+        err instanceof Error ? err.message : t("lanes.error.restartFailed"),
+      );
     } finally {
       setBusy(null);
     }
@@ -363,7 +377,7 @@ export function LanesTab() {
   if (!projectId) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-gray-400">
-        프로젝트를 선택하면 빠른 작업을 시작할 수 있습니다.
+        {t("lanes.noProjectPlaceholder")}
       </div>
     );
   }
@@ -373,15 +387,13 @@ export function LanesTab() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-gray-200">Lanes</h2>
-          <p className="text-xs text-gray-500">
-            메인 작업과 병렬로 — 떠오른 개선점을 독립 워크트리에서 빠르게
-          </p>
+          <p className="text-xs text-gray-500">{t("lanes.header.subtitle")}</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
           className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
         >
-          ＋ 빠른 작업
+          {t("lanes.newButton")}
         </button>
       </div>
 
@@ -399,11 +411,9 @@ export function LanesTab() {
       {laneRows.length === 0 ? (
         <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
           <div>
-            <p className="text-sm text-gray-300">
-              진행 중인 빠른 작업이 없습니다.
-            </p>
+            <p className="text-sm text-gray-300">{t("lanes.empty.title")}</p>
             <p className="mt-1 text-xs text-gray-500">
-              “＋ 빠른 작업”으로 개선점을 격리된 워크트리에서 시작하세요.
+              {t("lanes.empty.hint")}
             </p>
           </div>
         </div>
@@ -440,7 +450,9 @@ export function LanesTab() {
                           {worktree.branch}
                         </span>
                       ) : (
-                        <span className="text-gray-600">워크트리 준비 중…</span>
+                        <span className="text-gray-600">
+                          {t("lanes.row.worktreePreparing")}
+                        </span>
                       )}
                       {st && (
                         <span>
@@ -468,22 +480,26 @@ export function LanesTab() {
                       <button
                         type="button"
                         disabled={busyAction !== null}
-                        title="충돌/실패 상태의 레인 항목을 다시 시작"
+                        title={t("lanes.row.restartTip")}
                         onClick={() => restartLane(row)}
                         className="rounded border border-amber-500/40 px-2 py-0.5 text-[11px] text-amber-300 transition hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {busyAction === "restart" ? "재시작 중…" : "재시작"}
+                        {busyAction === "restart"
+                          ? t("lanes.row.restarting")
+                          : t("lanes.row.restart")}
                       </button>
                     )}
                     {showDelete && (
                       <button
                         type="button"
                         disabled={busyAction !== null}
-                        title="완료/중단/충돌/실패 레인 항목 삭제"
+                        title={t("lanes.row.deleteTip")}
                         onClick={() => setDeleteTarget(row)}
                         className="rounded border border-red-500/40 px-2 py-0.5 text-[11px] text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {busyAction === "delete" ? "삭제 중…" : "삭제"}
+                        {busyAction === "delete"
+                          ? t("lanes.row.deleting")
+                          : t("lanes.row.delete")}
                       </button>
                     )}
                   </div>

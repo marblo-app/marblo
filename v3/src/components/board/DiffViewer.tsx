@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "../../lib/i18n";
 
 interface DiffViewerProps {
   diff: string;
@@ -81,6 +82,7 @@ export function DiffViewer({
   error = null,
   onRetry,
 }: DiffViewerProps) {
+  const { t } = useTranslation();
   const { summary, files } = useMemo(() => parseDiff(diff), [diff]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -91,7 +93,7 @@ export function DiffViewer({
   if (loading) {
     return (
       <div className="rounded border border-gray-700/60 bg-gray-900/50 px-3 py-4 text-center text-xs text-gray-500">
-        변경 diff 불러오는 중...
+        {t("board.diff.loading")}
       </div>
     );
   }
@@ -107,7 +109,7 @@ export function DiffViewer({
               onClick={onRetry}
               className="flex-shrink-0 rounded border border-red-400/30 px-2 py-1 text-xs text-red-100 hover:bg-red-400/10"
             >
-              다시 시도
+              {t("board.diff.retry")}
             </button>
           )}
         </div>
@@ -118,7 +120,7 @@ export function DiffViewer({
   if (!diff.trim()) {
     return (
       <div className="rounded border border-gray-700/60 bg-gray-900/50 px-3 py-4 text-center text-xs text-gray-500">
-        표시할 변경 diff가 없습니다.
+        {t("board.diff.empty")}
       </div>
     );
   }
@@ -146,7 +148,9 @@ export function DiffViewer({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-gray-400">파일 {files.length}개</span>
+        <span className="text-gray-400">
+          {t("board.diff.fileCount", { count: files.length })}
+        </span>
         <span className="font-mono text-emerald-300">+{totals.additions}</span>
         <span className="font-mono text-red-300">-{totals.deletions}</span>
       </div>

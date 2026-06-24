@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Agent } from "../../types/agent";
 import type { Task } from "../../types/task";
+import type { MessageKey } from "../../locales/ko";
 import AgentStatusCard from "./AgentStatusCard";
 import AgentFleetGrid from "./AgentFleetGrid";
 import TeamSummary from "./TeamSummary";
@@ -249,23 +250,23 @@ function ActivityAuditTabs({
 
 const MODEL_LIMITS: Record<
   string,
-  { label: string; icon: string; daily?: number; note: string }
+  { label: string; icon: string; daily?: number; noteKey: MessageKey | "" }
 > = {
   claude: {
     label: "Claude Code",
     icon: "🟣",
-    note: "Max 구독: 무제한 (5분 쿨다운) / Pro: 일일 제한 있음",
+    noteKey: "agents.usage.note.claude",
   },
   gpt: {
     label: "Codex CLI",
     icon: "🟢",
-    note: "ChatGPT 구독 — rate limit 기반",
+    noteKey: "agents.usage.note.gpt",
   },
   gemini: {
     label: "Gemini CLI",
     icon: "🔵",
     daily: 1500,
-    note: "무료: 15 RPM, 1M TPM / 유료: 무제한",
+    noteKey: "agents.usage.note.gemini",
   },
 };
 
@@ -292,6 +293,7 @@ function formatTokens(n: number): string {
 }
 
 export function UsageDashboard({ agents }: { agents: Agent[] }) {
+  const { t } = useTranslation();
   // Cost source priority: live Firestore-backed agent.* fields (updated by
   // useCostWriter on every cost:update) → BigQuery historical via costStore
   // → empty. The Firestore path works without Cloud Functions deployed.
@@ -333,7 +335,7 @@ export function UsageDashboard({ agents }: { agents: Agent[] }) {
         const info = MODEL_LIMITS[model] || {
           label: model,
           icon: "⚪",
-          note: "",
+          noteKey: "",
         };
 
         // Aggregate tokens/cost for this model group
@@ -456,7 +458,9 @@ export function UsageDashboard({ agents }: { agents: Agent[] }) {
               })}
             </div>
 
-            <p className="text-[10px] text-gray-600">{info.note}</p>
+            <p className="text-[10px] text-gray-600">
+              {info.noteKey ? t(info.noteKey) : ""}
+            </p>
           </div>
         );
       })}
@@ -464,7 +468,7 @@ export function UsageDashboard({ agents }: { agents: Agent[] }) {
       {/* Empty state */}
       {agents.length === 0 && (
         <div className="py-8 text-center text-sm text-gray-500">
-          에이전트를 추가하면 사용량이 여기에 표시됩니다.
+          {t("agents.usage.empty")}
         </div>
       )}
 
@@ -524,6 +528,7 @@ function ModelUsageGauge({
    * token-activity gauge — it's the real "how close to your plan limit". */
   rateLimitPercent?: number;
 }) {
+  const { t } = useTranslation();
   // Subscription plans are flat-fee, so we never show a fake "$N budget".
   // Codex exposes a live rate-limit %, which is the meaningful "vs limit"
   // signal; everything else falls back to a token-activity gauge.
@@ -540,7 +545,9 @@ function ModelUsageGauge({
     return (
       <div className="space-y-1">
         <div className="flex items-center justify-between text-[10px]">
-          <span className="text-gray-500">구독: {planLabel} · 한도 사용률</span>
+          <span className="text-gray-500">
+            {t("agents.usage.gauge.rateLimit", { planLabel })}
+          </span>
           <span className={colorText}>{pct.toFixed(0)}%</span>
         </div>
         <div className="h-2 w-full rounded-full bg-gray-700">
@@ -559,12 +566,12 @@ function ModelUsageGauge({
     totalTokens === 0 ? 0 : Math.min((totalTokens / 50_000_000) * 100, 100);
   const levelLabel =
     totalTokens === 0
-      ? "대기"
+      ? t("agents.usage.level.idle")
       : totalTokens < 10_000_000
-        ? "낮음"
+        ? t("agents.usage.level.low")
         : totalTokens < 50_000_000
-          ? "보통"
-          : "높음";
+          ? t("agents.usage.level.medium")
+          : t("agents.usage.level.high");
   const levelColor =
     totalTokens === 0
       ? "text-gray-500"
@@ -577,7 +584,9 @@ function ModelUsageGauge({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-[10px]">
-        <span className="text-gray-500">구독: {planLabel} · 활동량</span>
+        <span className="text-gray-500">
+          {t("agents.usage.gauge.activity", { planLabel })}
+        </span>
         <span className={levelColor}>
           {levelLabel} ({formatTokens(totalTokens)})
         </span>
@@ -595,22 +604,31 @@ function ModelUsageGauge({
 // ── Agent Guide ──────────────────────────────────────────────
 
 function AgentGuide() {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4 text-sm">
       {/* CLI Comparison Table */}
       <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4 space-y-3">
         <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-          AI CLI 비교
+          {t("agents.guide.cliCompare.title")}
         </h4>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-gray-500 border-b border-gray-700">
                 <th className="text-left py-1.5 pr-3">CLI</th>
-                <th className="text-left py-1.5 pr-3">모델</th>
-                <th className="text-left py-1.5 pr-3">무료 사용</th>
-                <th className="text-left py-1.5 pr-3">강점</th>
-                <th className="text-left py-1.5">설치</th>
+                <th className="text-left py-1.5 pr-3">
+                  {t("agents.guide.cliCompare.col.model")}
+                </th>
+                <th className="text-left py-1.5 pr-3">
+                  {t("agents.guide.cliCompare.col.free")}
+                </th>
+                <th className="text-left py-1.5 pr-3">
+                  {t("agents.guide.cliCompare.col.strength")}
+                </th>
+                <th className="text-left py-1.5">
+                  {t("agents.guide.cliCompare.col.install")}
+                </th>
               </tr>
             </thead>
             <tbody className="text-gray-300">
@@ -619,9 +637,11 @@ function AgentGuide() {
                   <span className="text-purple-400">Claude Code</span>
                 </td>
                 <td className="py-2 pr-3 text-gray-400">Sonnet/Opus 4</td>
-                <td className="py-2 pr-3 text-gray-400">Pro/Max 구독 포함</td>
                 <td className="py-2 pr-3 text-gray-400">
-                  코드 품질, 아키텍처 설계, 복잡한 리팩토링
+                  {t("agents.guide.cliCompare.claude.free")}
+                </td>
+                <td className="py-2 pr-3 text-gray-400">
+                  {t("agents.guide.cliCompare.claude.strength")}
                 </td>
                 <td className="py-2 font-mono text-[10px] text-gray-500">
                   npm i -g @anthropic-ai/claude-code
@@ -632,9 +652,11 @@ function AgentGuide() {
                   <span className="text-green-400">Codex CLI</span>
                 </td>
                 <td className="py-2 pr-3 text-gray-400">GPT-4o / o3</td>
-                <td className="py-2 pr-3 text-gray-400">신규 $5 크레딧</td>
                 <td className="py-2 pr-3 text-gray-400">
-                  빠른 반복, API 연동, 간단한 수정
+                  {t("agents.guide.cliCompare.codex.free")}
+                </td>
+                <td className="py-2 pr-3 text-gray-400">
+                  {t("agents.guide.cliCompare.codex.strength")}
                 </td>
                 <td className="py-2 font-mono text-[10px] text-gray-500">
                   npm i -g @openai/codex
@@ -645,9 +667,11 @@ function AgentGuide() {
                   <span className="text-blue-400">Gemini CLI</span>
                 </td>
                 <td className="py-2 pr-3 text-gray-400">Gemini 2.5 Pro</td>
-                <td className="py-2 pr-3 text-gray-400">15 RPM 무료</td>
                 <td className="py-2 pr-3 text-gray-400">
-                  긴 컨텍스트(1M), 대규모 코드 분석
+                  {t("agents.guide.cliCompare.gemini.free")}
+                </td>
+                <td className="py-2 pr-3 text-gray-400">
+                  {t("agents.guide.cliCompare.gemini.strength")}
                 </td>
                 <td className="py-2 font-mono text-[10px] text-gray-500">
                   npm i -g @google/gemini-cli
@@ -661,37 +685,37 @@ function AgentGuide() {
       {/* When to Use Which Agent */}
       <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4 space-y-3">
         <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-          어떤 에이전트를 써야 할까?
+          {t("agents.guide.which.title")}
         </h4>
         <div className="space-y-2.5">
           <GuideCard
             icon="🟣"
             title="Claude Code"
             scenarios={[
-              "복잡한 아키텍처 설계/리팩토링",
-              "코드 리뷰 + 보안 분석",
-              "멀티파일 변경이 필요한 기능 구현",
-              "MCP 도구 연동 (Marblo 태스크 관리)",
+              t("agents.guide.which.claude.0"),
+              t("agents.guide.which.claude.1"),
+              t("agents.guide.which.claude.2"),
+              t("agents.guide.which.claude.3"),
             ]}
           />
           <GuideCard
             icon="🟢"
             title="Codex CLI"
             scenarios={[
-              "빠른 버그 수정 + 핫픽스",
-              "API 엔드포인트 추가",
-              "테스트 코드 작성",
-              "간단한 CRUD 구현",
+              t("agents.guide.which.codex.0"),
+              t("agents.guide.which.codex.1"),
+              t("agents.guide.which.codex.2"),
+              t("agents.guide.which.codex.3"),
             ]}
           />
           <GuideCard
             icon="🔵"
             title="Gemini CLI"
             scenarios={[
-              "대규모 코드베이스 분석 (1M 토큰 컨텍스트)",
-              "문서 생성 + 코드 설명",
-              "레거시 코드 이해 + 마이그레이션 계획",
-              "비용 절약이 필요한 반복 작업",
+              t("agents.guide.which.gemini.0"),
+              t("agents.guide.which.gemini.1"),
+              t("agents.guide.which.gemini.2"),
+              t("agents.guide.which.gemini.3"),
             ]}
           />
         </div>
@@ -700,26 +724,26 @@ function AgentGuide() {
       {/* Multi-Agent Strategy */}
       <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4 space-y-3">
         <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-          멀티 에이전트 전략
+          {t("agents.guide.strategy.title")}
         </h4>
         <div className="space-y-3 text-xs text-gray-400">
           <StrategyCard
-            title="독립 에이전트 (분리형)"
-            when="서로 다른 파일/모듈을 동시에 작업할 때"
-            example="프론트엔드 에이전트 + 백엔드 에이전트를 각각 실행하여 병렬 개발"
-            tip="Git 충돌 방지를 위해 작업 범위(scope)를 명확히 분리하세요"
+            title={t("agents.guide.strategy.independent.title")}
+            when={t("agents.guide.strategy.independent.when")}
+            example={t("agents.guide.strategy.independent.example")}
+            tip={t("agents.guide.strategy.independent.tip")}
           />
           <StrategyCard
-            title="혼합 모델 전략"
-            when="비용 최적화 + 품질 균형이 필요할 때"
-            example="Claude로 아키텍처 설계 → Codex로 반복 구현 → Gemini로 코드 리뷰"
-            tip="복잡한 작업은 Claude, 단순 반복은 Codex/Gemini로 비용을 절감하세요"
+            title={t("agents.guide.strategy.mixed.title")}
+            when={t("agents.guide.strategy.mixed.when")}
+            example={t("agents.guide.strategy.mixed.example")}
+            tip={t("agents.guide.strategy.mixed.tip")}
           />
           <StrategyCard
-            title="단일 에이전트 (집중형)"
-            when="하나의 복잡한 작업에 집중할 때"
-            example="대규모 리팩토링, 새로운 기능의 전체 구현"
-            tip="컨텍스트가 중요한 작업은 하나의 에이전트에 맡기는 것이 효율적입니다"
+            title={t("agents.guide.strategy.single.title")}
+            when={t("agents.guide.strategy.single.when")}
+            example={t("agents.guide.strategy.single.example")}
+            tip={t("agents.guide.strategy.single.tip")}
           />
         </div>
       </div>
@@ -727,23 +751,23 @@ function AgentGuide() {
       {/* Setup Instructions */}
       <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4 space-y-3">
         <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-          설치 가이드
+          {t("agents.guide.setup.title")}
         </h4>
         <div className="space-y-2 text-xs">
           <SetupStep
             step={1}
-            title="CLI 설치"
-            code="npm install -g @anthropic-ai/claude-code  # Claude\nnpm install -g @openai/codex               # Codex\nnpm install -g @google/gemini-cli           # Gemini"
+            title={t("agents.guide.setup.step1.title")}
+            code={t("agents.guide.setup.step1.code")}
           />
           <SetupStep
             step={2}
-            title="인증 설정"
-            code="# Claude: ANTHROPIC_API_KEY 환경변수 또는 Pro/Max 구독\n# Codex:  codex 실행 후 OAuth 브라우저 인증\n# Gemini: Google AI Studio에서 API 키 발급"
+            title={t("agents.guide.setup.step2.title")}
+            code={t("agents.guide.setup.step2.code")}
           />
           <SetupStep
             step={3}
-            title="Marblo에서 에이전트 추가"
-            code="# 1. 'Add Agent' 버튼 클릭\n# 2. 이름, 모델, 역할 선택\n# 3. MCP 연결은 자동 — 태스크 관리 바로 사용 가능"
+            title={t("agents.guide.setup.step3.title")}
+            code={t("agents.guide.setup.step3.code")}
           />
         </div>
       </div>
@@ -836,13 +860,20 @@ function SetupStep({
 
 // ── Setup Guide ──────────────────────────────────────────────
 
-const CLI_GUIDES = [
+const CLI_GUIDES: {
+  name: string;
+  icon: string;
+  install: string;
+  run: string;
+  noteKey: MessageKey;
+  color: string;
+}[] = [
   {
     name: "Claude Code",
     icon: "🟣",
     install: "npm install -g @anthropic-ai/claude-code",
     run: "claude --dangerously-skip-permissions",
-    note: "Anthropic API 키 필요 (ANTHROPIC_API_KEY)",
+    noteKey: "agents.setupGuide.note.claude",
     color: "border-purple-500/30",
   },
   {
@@ -850,7 +881,7 @@ const CLI_GUIDES = [
     icon: "🟢",
     install: "npm install -g @openai/codex",
     run: "codex --full-auto",
-    note: "OpenAI API 키 필요 (OPENAI_API_KEY)",
+    noteKey: "agents.setupGuide.note.codex",
     color: "border-green-500/30",
   },
   {
@@ -858,12 +889,13 @@ const CLI_GUIDES = [
     icon: "🔵",
     install: "npm install -g @google/gemini-cli",
     run: "gemini",
-    note: "Google AI API 키 필요",
+    noteKey: "agents.setupGuide.note.gemini",
     color: "border-blue-500/30",
   },
 ];
 
 function AgentSetupGuide({ onAddAgent }: { onAddAgent: () => void }) {
+  const { t } = useTranslation();
   const [showGuide, setShowGuide] = useState(true);
 
   return (
@@ -883,12 +915,12 @@ function AgentSetupGuide({ onAddAgent }: { onAddAgent: () => void }) {
             d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 00.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-2.47 2.47a2.25 2.25 0 01-1.59.659H9.06a2.25 2.25 0 01-1.591-.659L5 14.5m14 0V7a2 2 0 00-2-2H7a2 2 0 00-2 2v7.5"
           />
         </svg>
-        <p className="text-sm mb-3">에이전트가 없습니다</p>
+        <p className="text-sm mb-3">{t("agents.setupGuide.empty")}</p>
         <button
           className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-colors"
           onClick={onAddAgent}
         >
-          + 첫 에이전트 추가
+          {t("agents.setupGuide.addFirst")}
         </button>
       </div>
 
@@ -899,7 +931,7 @@ function AgentSetupGuide({ onAddAgent }: { onAddAgent: () => void }) {
           onClick={() => setShowGuide(!showGuide)}
         >
           <span className="text-sm font-medium text-gray-300">
-            사전 설치 가이드
+            {t("agents.setupGuide.preInstall")}
           </span>
           <svg
             className={`h-4 w-4 text-gray-500 transition-transform ${
@@ -921,8 +953,7 @@ function AgentSetupGuide({ onAddAgent }: { onAddAgent: () => void }) {
         {showGuide && (
           <div className="border-t border-gray-700 px-4 py-3 space-y-3">
             <p className="text-xs text-gray-500">
-              에이전트를 실행하려면 해당 AI CLI가 시스템에 설치되어 있어야
-              합니다.
+              {t("agents.setupGuide.preInstallDesc")}
             </p>
 
             {CLI_GUIDES.map((cli) => (
@@ -939,7 +970,7 @@ function AgentSetupGuide({ onAddAgent }: { onAddAgent: () => void }) {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-500 w-10 flex-shrink-0">
-                      설치
+                      {t("agents.setupGuide.install")}
                     </span>
                     <code className="flex-1 rounded bg-gray-800 px-2 py-1 text-xs text-gray-300 font-mono">
                       {cli.install}
@@ -947,24 +978,23 @@ function AgentSetupGuide({ onAddAgent }: { onAddAgent: () => void }) {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-500 w-10 flex-shrink-0">
-                      실행
+                      {t("agents.setupGuide.run")}
                     </span>
                     <code className="flex-1 rounded bg-gray-800 px-2 py-1 text-xs text-gray-300 font-mono">
                       {cli.run}
                     </code>
                   </div>
                 </div>
-                <p className="text-xs text-gray-500">{cli.note}</p>
+                <p className="text-xs text-gray-500">{t(cli.noteKey)}</p>
               </div>
             ))}
 
             <div className="rounded border border-amber-500/20 bg-amber-500/5 p-3">
               <p className="text-xs font-medium text-amber-400 mb-1">
-                MCP 연결 (선택)
+                {t("agents.setupGuide.mcp.title")}
               </p>
               <p className="text-xs text-gray-400 mb-2">
-                터미널에서 직접 CLI를 MCP와 연결하면 에이전트 없이도 티켓을
-                관리할 수 있습니다.
+                {t("agents.setupGuide.mcp.desc")}
               </p>
               <code className="block rounded bg-gray-800 px-2 py-1 text-xs text-gray-300 font-mono whitespace-pre">{`# Claude Code MCP 설정 (~/.claude.json)
 "mcpServers": {

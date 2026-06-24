@@ -12,6 +12,10 @@ import { header } from "./header";
 import { settings } from "./settings";
 import { agents } from "./agents";
 import { plan } from "./plan";
+import { board } from "./board";
+import { flows } from "./flows";
+import { worktree } from "./worktree";
+import { lanes } from "./lanes";
 import { harness } from "./harness";
 import { sidebar } from "./sidebar";
 import { orchestrator } from "./orchestrator";
@@ -28,6 +32,10 @@ export const en: Record<MessageKey, string> = {
   ...settings,
   ...agents,
   ...plan,
+  ...board,
+  ...flows,
+  ...worktree,
+  ...lanes,
   ...harness,
   ...sidebar,
   ...orchestrator,

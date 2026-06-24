@@ -20,6 +20,7 @@ import { TaskDetailModal } from "./TaskDetailModal";
 import { OrchestratorChat } from "../orchestrator/OrchestratorChat";
 import { getNextStatuses, canTransition } from "../../services/stateMachine";
 import { updateTaskStatus } from "../../services/taskService";
+import { useTranslation } from "../../lib/i18n";
 
 const COLUMN_STATUSES: TaskStatus[] = [
   "TODO",
@@ -37,6 +38,7 @@ const FALLBACK_COLUMN: Record<string, TaskStatus> = {
 const ROLES: AgentRole[] = ["backend", "frontend", "test", "devops"];
 
 export function KanbanBoard() {
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const projectsLoading = useProjectStore((s) => s.loading);
   const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
@@ -54,11 +56,11 @@ export function KanbanBoard() {
   // Drag-and-drop state
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [validDropStatuses, setValidDropStatuses] = useState<Set<TaskStatus>>(
-    new Set()
+    new Set(),
   );
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -253,7 +255,7 @@ export function KanbanBoard() {
                 d="M13 10V3L4 14h7v7l9-11h-7z"
               />
             </svg>
-            AI 분해
+            {t("board.aiBreakdown")}
           </button>
         )}
 

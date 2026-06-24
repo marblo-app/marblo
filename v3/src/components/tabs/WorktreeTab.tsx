@@ -9,6 +9,8 @@ import type {
   WorktreeStatusPill,
   WorktreeStatusTone,
 } from "../../types/worktree";
+import { t, useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 
 const TONE_CLASSES: Record<WorktreeStatusTone, string> = {
   danger: "bg-red-500/15 text-red-300 border border-red-500/30",
@@ -19,19 +21,24 @@ const TONE_CLASSES: Record<WorktreeStatusTone, string> = {
 };
 
 // 상태 필터 드롭다운 옵션. tone 값과 1:1.
-const STATUS_OPTIONS: { value: WorktreeStatusTone | "all"; label: string }[] = [
-  { value: "all", label: "전체 상태" },
-  { value: "ready", label: "🟢 머지 가능" },
-  { value: "behind", label: "🟡 뒤처짐" },
-  { value: "warning", label: "⚠️ stale" },
-  { value: "danger", label: "🔴 충돌" },
-  { value: "idle", label: "⚪ 작업중" },
+const STATUS_OPTIONS: {
+  value: WorktreeStatusTone | "all";
+  labelKey: MessageKey;
+}[] = [
+  { value: "all", labelKey: "worktree.filter.all" },
+  { value: "ready", labelKey: "worktree.filter.ready" },
+  { value: "behind", labelKey: "worktree.filter.behind" },
+  { value: "warning", labelKey: "worktree.filter.warning" },
+  { value: "danger", labelKey: "worktree.filter.danger" },
+  { value: "idle", labelKey: "worktree.filter.idle" },
 ];
 
 function StatusPill({ pill }: { pill: WorktreeStatusPill }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${TONE_CLASSES[pill.tone]}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+        TONE_CLASSES[pill.tone]
+      }`}
     >
       <span aria-hidden>{pill.icon}</span>
       {pill.label}
@@ -40,14 +47,19 @@ function StatusPill({ pill }: { pill: WorktreeStatusPill }) {
 }
 
 function ConflictSummary({ worktree }: { worktree: Worktree }) {
+  const { t } = useTranslation();
   const conflicts = worktree.status?.conflicts.length ?? 0;
   if (conflicts > 0) {
     return <span className="text-red-300">{conflicts} conflicts</span>;
   }
   if (worktree.status && !worktree.status.mergeable) {
-    return <span className="text-amber-300">rebase 필요</span>;
+    return (
+      <span className="text-amber-300">
+        {t("worktree.conflict.rebaseNeeded")}
+      </span>
+    );
   }
-  return <span className="text-gray-500">충돌없음</span>;
+  return <span className="text-gray-500">{t("worktree.conflict.none")}</span>;
 }
 
 type RowAction = "rebase" | "merge" | "resolve" | "open" | "delete";
@@ -94,6 +106,7 @@ function RowActions({
   busyAction: RowAction | null;
   onAction: (worktree: Worktree, action: RowAction) => void;
 }) {
+  const { t } = useTranslation();
   const mergeable = worktree.status?.mergeable === true;
   const canResolve = Boolean(worktree.status && !worktree.status.mergeable);
   const disabled = busyAction !== null;
@@ -122,7 +135,7 @@ function RowActions({
           title={
             canResolve
               ? `Spawn resolver for ${worktree.branch}`
-              : "충돌 상태에서만 Resolve 가능"
+              : t("worktree.action.resolveOnlyConflict")
           }
           onClick={() => onAction(worktree, "resolve")}
         >
@@ -131,14 +144,14 @@ function RowActions({
       )}
       <ActionButton
         disabled={disabled}
-        title="Code 탭에서 이 worktree 열기"
+        title={t("worktree.action.openInCode")}
         onClick={() => onAction(worktree, "open")}
       >
         Open
       </ActionButton>
       <ActionButton
         disabled={disabled}
-        title="워크트리 제거 및 브랜치 cleanup"
+        title={t("worktree.action.removeCleanup")}
         tone="danger"
         onClick={() => onAction(worktree, "delete")}
       >
@@ -159,6 +172,7 @@ function WorktreeRow({
   busyAction: RowAction | null;
   onAction: (worktree: Worktree, action: RowAction) => void;
 }) {
+  const { t } = useTranslation();
   const status = worktree.status;
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
@@ -197,8 +211,8 @@ function WorktreeRow({
       {/* 보조 행: ▲ahead ▼behind / 충돌수 / 액션 */}
       <div className="mt-1.5 flex items-center gap-3 pl-0.5 text-xs text-gray-400">
         <span className="flex items-center gap-2 font-mono">
-          <span title="ahead (base 대비 앞선 커밋)">▲{ahead}</span>
-          <span title="behind (base 대비 뒤처진 커밋)">▼{behind}</span>
+          <span title={t("worktree.row.aheadTip")}>▲{ahead}</span>
+          <span title={t("worktree.row.behindTip")}>▼{behind}</span>
         </span>
         <span>
           <ConflictSummary worktree={worktree} />
@@ -220,16 +234,17 @@ function WorktreeRow({
 function relativeTime(date: Date): string {
   const diffMs = Date.now() - date.getTime();
   const min = Math.floor(diffMs / 60000);
-  if (min < 1) return "방금";
-  if (min < 60) return `${min}분 전`;
+  if (min < 1) return t("worktree.time.justNow");
+  if (min < 60) return t("worktree.time.minutesAgo", { min });
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}시간 전`;
+  if (hr < 24) return t("worktree.time.hoursAgo", { hr });
   const day = Math.floor(hr / 24);
-  if (day < 30) return `${day}일 전`;
-  return date.toLocaleDateString("ko-KR");
+  if (day < 30) return t("worktree.time.daysAgo", { day });
+  return date.toLocaleDateString();
 }
 
 function MergeModeBadge({ mode }: { mode: MergeHistoryEntry["mode"] }) {
+  const { t } = useTranslation();
   const isAuto = mode === "auto";
   return (
     <span
@@ -238,9 +253,11 @@ function MergeModeBadge({ mode }: { mode: MergeHistoryEntry["mode"] }) {
           ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
           : "bg-sky-500/15 text-sky-300 border border-sky-500/30"
       }`}
-      title={isAuto ? "오케스트레이터 자동머지" : "사람이 머지"}
+      title={
+        isAuto ? t("worktree.merge.autoTip") : t("worktree.merge.humanTip")
+      }
     >
-      {isAuto ? "🤖 자동" : "🙂 사람"}
+      {isAuto ? t("worktree.merge.auto") : t("worktree.merge.human")}
     </span>
   );
 }
@@ -252,6 +269,7 @@ function MergeHistoryRow({
   entry: MergeHistoryEntry;
   projectLabel: string;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -271,7 +289,9 @@ function MergeHistoryRow({
         );
         setDiff(res.diff);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "diff 로드 실패");
+        setError(
+          err instanceof Error ? err.message : t("worktree.diffLoadFailed"),
+        );
       } finally {
         setLoading(false);
       }
@@ -284,7 +304,7 @@ function MergeHistoryRow({
         type="button"
         onClick={toggle}
         className="flex w-full items-center gap-3 text-left"
-        title="클릭하면 머지된 diff (git show)"
+        title={t("worktree.history.rowTip")}
       >
         <span aria-hidden className="text-gray-500">
           {expanded ? "▾" : "▸"}
@@ -309,7 +329,7 @@ function MergeHistoryRow({
         </span>
         <span
           className="w-16 flex-shrink-0 font-mono text-xs text-emerald-300"
-          title={`${entry.headSha} — 클릭하면 diff`}
+          title={t("worktree.history.shaTip", { sha: entry.headSha })}
         >
           {entry.headSha.slice(0, 7)}
         </span>
@@ -327,7 +347,9 @@ function MergeHistoryRow({
       {expanded && (
         <div className="mt-2 border-t border-gray-800 pt-2">
           {loading ? (
-            <p className="text-xs text-gray-500">diff 불러오는 중…</p>
+            <p className="text-xs text-gray-500">
+              {t("worktree.history.diffLoading")}
+            </p>
           ) : error ? (
             <p className="text-xs text-red-300">{error}</p>
           ) : (
@@ -357,6 +379,7 @@ export function WorktreeTab() {
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
   const setRootPath = useEditorStore((s) => s.setRootPath);
   const closeAllFiles = useEditorStore((s) => s.closeAllFiles);
+  const { t } = useTranslation();
 
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<WorktreeStatusTone | "all">(
@@ -487,13 +510,13 @@ export function WorktreeTab() {
 
     if (action === "open") {
       openWorktree(worktree);
-      setActionMessage(`${worktree.branch} worktree를 Code 탭에 열었습니다.`);
+      setActionMessage(t("worktree.msg.opened", { branch: worktree.branch }));
       return;
     }
 
     if (action === "delete") {
       const ok = window.confirm(
-        `${worktree.branch} worktree를 제거하고 브랜치도 cleanup할까요?`,
+        t("worktree.confirm.delete", { branch: worktree.branch }),
       );
       if (!ok) return;
     }
@@ -502,7 +525,9 @@ export function WorktreeTab() {
     try {
       if (action === "rebase") {
         await rebase(worktree.path, worktree.baseRef);
-        setActionMessage(`${worktree.branch} rebase 완료`);
+        setActionMessage(
+          t("worktree.msg.rebased", { branch: worktree.branch }),
+        );
       } else if (action === "merge") {
         await merge({
           repoRoot: worktree.repoRoot,
@@ -514,7 +539,7 @@ export function WorktreeTab() {
           taskId: worktree.taskId ?? undefined,
           mode: "manual",
         });
-        setActionMessage(`${worktree.branch} squash-merge 완료`);
+        setActionMessage(t("worktree.msg.merged", { branch: worktree.branch }));
       } else if (action === "resolve") {
         await resolve({
           repoRoot: worktree.repoRoot,
@@ -525,10 +550,14 @@ export function WorktreeTab() {
           taskId: worktree.taskId ?? undefined,
           conflicts: worktree.status?.conflicts,
         });
-        setActionMessage(`${worktree.branch} resolve agent 시작`);
+        setActionMessage(
+          t("worktree.msg.resolveStarted", { branch: worktree.branch }),
+        );
       } else if (action === "delete") {
         await remove(worktree.repoRoot, worktree.path, true);
-        setActionMessage(`${worktree.branch} worktree 제거 완료`);
+        setActionMessage(
+          t("worktree.msg.removed", { branch: worktree.branch }),
+        );
       }
     } catch (err) {
       setActionError(
@@ -549,7 +578,7 @@ export function WorktreeTab() {
       new Set(staleWorktrees.map((wt) => wt.repoRoot)),
     );
     const ok = window.confirm(
-      `정리 가능(stale) 워크트리 ${staleWorktrees.length}개를 제거하고 브랜치도 cleanup할까요?`,
+      t("worktree.confirm.cleanupStale", { count: staleWorktrees.length }),
     );
     if (!ok) return;
 
@@ -566,13 +595,19 @@ export function WorktreeTab() {
       }
       if (failures.length > 0) {
         setActionError(
-          `${removed}개 정리, ${failures.length}개 실패 — ${failures.join("; ")}`,
+          t("worktree.msg.cleanupPartial", {
+            removed,
+            failed: failures.length,
+            detail: failures.join("; "),
+          }),
         );
       } else {
-        setActionMessage(`stale 워크트리 ${removed}개 정리 완료`);
+        setActionMessage(t("worktree.msg.cleanupDone", { removed }));
       }
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "stale cleanup 실패");
+      setActionError(
+        err instanceof Error ? err.message : t("worktree.error.cleanupFailed"),
+      );
     } finally {
       setCleaningStale(false);
     }
@@ -606,7 +641,7 @@ export function WorktreeTab() {
         >
           {STATUS_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
-              {opt.label}
+              {t(opt.labelKey)}
             </option>
           ))}
         </select>
@@ -623,7 +658,7 @@ export function WorktreeTab() {
 
         <label
           className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-300"
-          title="자동머지 안 되고 사람이 봐야 하는 것만 (충돌/머지불가 또는 stale)"
+          title={t("worktree.exceptionsTip")}
         >
           <input
             type="checkbox"
@@ -631,20 +666,20 @@ export function WorktreeTab() {
             onChange={(e) => setExceptionsOnly(e.target.checked)}
             className="accent-amber-500"
           />
-          ⚠️ 예외만
+          {t("worktree.exceptionsLabel")}
         </label>
 
         <button
           type="button"
           onClick={() => setHistoryView((v) => !v)}
-          title="완료(머지)되어 사라진 워크트리의 감사 이력 — sha 클릭 시 diff"
+          title={t("worktree.historyToggleTip")}
           className={`rounded border px-2 py-1 text-xs transition ${
             historyView
               ? "border-sky-500/50 bg-sky-500/15 text-sky-200"
               : "border-gray-700 text-gray-300 hover:bg-gray-800"
           }`}
         >
-          📜 완료 이력
+          {t("worktree.historyToggleLabel")}
         </button>
 
         <div className="ml-auto flex items-center gap-2">
@@ -653,12 +688,14 @@ export function WorktreeTab() {
               type="button"
               onClick={handleCleanupStale}
               disabled={cleaningStale || loading}
-              title="이미 머지됨/장기 무활동인 워크트리를 일괄 제거 (브랜치 cleanup)"
+              title={t("worktree.cleanupStaleTip")}
               className="rounded border border-amber-500/40 px-2 py-1 text-xs text-amber-300 transition hover:bg-amber-500/10 disabled:opacity-50"
             >
               {cleaningStale
-                ? "정리 중…"
-                : `⚠️ 정리 가능 일괄 cleanup (${staleWorktrees.length})`}
+                ? t("worktree.cleaningStale")
+                : t("worktree.cleanupStaleLabel", {
+                    count: staleWorktrees.length,
+                  })}
             </button>
           )}
 
@@ -668,7 +705,7 @@ export function WorktreeTab() {
             disabled={loading}
             className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-50"
           >
-            {loading ? "새로고침 중…" : "새로고침"}
+            {loading ? t("worktree.refreshing") : t("worktree.refresh")}
           </button>
         </div>
       </div>
@@ -676,12 +713,12 @@ export function WorktreeTab() {
       {/* 에러 배너 */}
       {lastError && (
         <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-          워크트리 로드 실패: {lastError}
+          {t("worktree.error.loadFailed", { error: lastError })}
         </div>
       )}
       {actionError && (
         <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-          워크트리 액션 실패: {actionError}
+          {t("worktree.error.actionFailed", { error: actionError })}
         </div>
       )}
       {actionMessage && (
@@ -695,17 +732,16 @@ export function WorktreeTab() {
         {historyView ? (
           historyLoading && history.length === 0 ? (
             <div className="flex h-full items-center justify-center text-sm text-gray-500">
-              완료 이력을 불러오는 중…
+              {t("worktree.history.loading")}
             </div>
           ) : historyEntries.length === 0 ? (
             <div className="flex h-full items-center justify-center">
               <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
                 <p className="text-sm text-gray-300">
-                  완료된 머지 이력이 없습니다.
+                  {t("worktree.history.emptyTitle")}
                 </p>
                 <p className="mt-1 text-xs text-gray-500">
-                  워크트리가 머지되면 여기에 감사 이력으로 쌓입니다. (sha 클릭
-                  시 diff)
+                  {t("worktree.history.emptyHint")}
                 </p>
               </div>
             </div>
@@ -722,20 +758,22 @@ export function WorktreeTab() {
           )
         ) : loading && worktrees.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-gray-500">
-            워크트리를 불러오는 중…
+            {t("worktree.loading")}
           </div>
         ) : isEmpty ? (
           <div className="flex h-full items-center justify-center">
             <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
-              <p className="text-sm text-gray-300">워크트리가 없습니다.</p>
+              <p className="text-sm text-gray-300">
+                {t("worktree.emptyTitle")}
+              </p>
               <p className="mt-1 text-xs text-gray-500">
-                에이전트가 태스크용 워크트리를 만들면 여기에 표시됩니다.
+                {t("worktree.emptyHint")}
               </p>
             </div>
           </div>
         ) : noMatches ? (
           <div className="flex h-full items-center justify-center text-sm text-gray-500">
-            필터 조건에 맞는 워크트리가 없습니다.
+            {t("worktree.noMatches")}
           </div>
         ) : (
           <div className="space-y-4">
