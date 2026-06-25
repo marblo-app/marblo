@@ -1006,6 +1006,89 @@ function buildMCPServerEntry(
   };
 }
 
+// ── Per-agent MCP 화이트리스트 (RAM 절감 §성능) ──────────────────────────
+// 배경: claude 스폰이 `--mcp-config`만 주고 `--strict-mcp-config`를 안 주면
+// Claude 가 per-agent config(marblo 1개)에 사용자 글로벌 ~/.claude.json 의
+// MCP 6종(github/playwright/filesystem/context7/crossai-verifier/taskforce)을
+// 머지한다 → 에이전트마다 안 쓰는 서버까지 중복 스폰(특히 context7 은 npx
+// 래퍼+child 로 2프로세스)되어 플릿 전체 RAM ~7-16GB 낭비.
+//
+// 해결: claude args 에 `--strict-mcp-config` 를 붙여 글로벌 머지를 차단하되
+// (단독이면 marblo 만 남아 기능 박탈 → 회귀), per-agent config 에 "그 역할이
+// 실제 쓰는 글로벌 서버만" 명시 주입하는 화이트리스트로 기능 손실 0 을 유지.
+//
+// ⚠️ 오케스트레이터(role:"orchestrator")도 model:"claude" 경로를 그대로 타므로
+//    blanket 으로 깎으면 오케 MCP 능력까지 박탈된다. orchestrator/team_leader 는
+//    글로벌 전체를 화이트리스트해 현행을 byte-동등하게 보존하고, 워커 역할만 트림.
+//
+// codex(격리 CODEX_HOME, mcp_servers strip 후 marblo만)·gemini(settings.json
+// marblo만)는 이미 글로벌 머지가 없어 strict-동등 — 이 화이트리스트는 claude
+// 전용이다. agy 는 사용자 공유 글로벌 config 머지라 별개 트랙.
+//
+// marblo 는 역할 무관 항상 별도 주입(태스크 컨트롤 플레인)되므로 목록에서 제외.
+const ROLE_MCP_WHITELIST: Record<string, string[]> = {
+  backend: ["filesystem"],
+  frontend: ["filesystem", "playwright"],
+  test: ["playwright", "filesystem"],
+  devops: ["github", "filesystem"],
+  merge: ["github", "filesystem"],
+  flutter: ["filesystem"],
+};
+
+// 오케스트레이터급 역할 — 글로벌 전체 보존(현행 능력 유지).
+const FULL_MCP_ROLES = new Set(["orchestrator", "team_leader"]);
+
+// 알 수 없는 워커 역할의 보수적 기본값: 명백히 에이전트가 안 쓰는
+// crossai-verifier / taskforce / context7 만 제외하고 나머지는 살린다.
+const DEFAULT_WORKER_WHITELIST = ["github", "playwright", "filesystem"];
+
+/**
+ * 사용자 글로벌 ~/.claude.json 의 top-level mcpServers 를 읽는다.
+ * strict 적용 후에도 에이전트가 쓰던 서버를 그대로 재현하기 위한 source-of-truth.
+ */
+function readGlobalClaudeMcpServers(): Record<string, MCPServerEntry> {
+  try {
+    const f = path.join(os.homedir(), ".claude.json");
+    const parsed = JSON.parse(fs.readFileSync(f, "utf-8")) as {
+      mcpServers?: Record<string, MCPServerEntry>;
+    };
+    return parsed.mcpServers ?? {};
+  } catch {
+    // 글로벌 config 부재/파손 시엔 빈 집합 — per-agent marblo 만으로도 동작.
+    return {};
+  }
+}
+
+/** 역할별로 화이트리스트할 글로벌 서버 이름 목록을 고른다. */
+function whitelistNamesForRole(
+  role: string,
+  availableNames: string[],
+): string[] {
+  const r = (role || "").toLowerCase();
+  // 오케/리더: 글로벌 전체 보존(현행 byte-동등).
+  if (FULL_MCP_ROLES.has(r)) return availableNames;
+  if (ROLE_MCP_WHITELIST[r]) return ROLE_MCP_WHITELIST[r];
+  return DEFAULT_WORKER_WHITELIST;
+}
+
+/**
+ * 역할이 실제 쓰는 글로벌 MCP 서버 엔트리만 골라 반환. marblo 는 항상 별도
+ * 주입되므로 여기서 제외하며, 글로벌에 정의되지 않은 이름은 조용히 건너뛴다.
+ */
+function selectWhitelistedGlobalServers(
+  role: string,
+): Record<string, MCPServerEntry> {
+  const global = readGlobalClaudeMcpServers();
+  const names = whitelistNamesForRole(role, Object.keys(global));
+  const out: Record<string, MCPServerEntry> = {};
+  for (const name of names) {
+    if (name === "marblo") continue; // per-agent 로 따로 주입
+    const entry = global[name];
+    if (entry) out[name] = entry;
+  }
+  return out;
+}
+
 function stripFrontmatter(content: string): string {
   return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
 }
@@ -1067,6 +1150,9 @@ export class AgentConfigGenerator {
     projectDir: string,
     marbloProjectId?: string,
     marbloContextId?: string,
+    // 역할별 MCP 화이트리스트(claude strict 경로) 선택용. 미지정이면 기본
+    // 워커 화이트리스트가 적용된다.
+    role?: string,
   ): string {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
@@ -1079,7 +1165,7 @@ export class AgentConfigGenerator {
 
     switch (model) {
       case "claude":
-        return this.generateClaudeConfig(agentId, mcpEntry);
+        return this.generateClaudeConfig(agentId, mcpEntry, role);
       case "gemini":
         return this.generateGeminiConfig(agentId, mcpEntry);
       case "gpt":
@@ -1149,6 +1235,7 @@ export class AgentConfigGenerator {
       projectDir,
       marbloProjectId,
       marbloContextId,
+      agent.role,
     );
     const skillPath = this.generateSkillFile(agent.id, agent.role, projectDir);
     const skillContent =
@@ -1275,9 +1362,15 @@ export class AgentConfigGenerator {
   private generateClaudeConfig(
     agentId: string,
     mcpEntry: MCPServerEntry,
+    role?: string,
   ): string {
+    // strict 경로 전제: 글로벌 머지가 차단되므로, 이 역할이 실제 쓰는 글로벌
+    // 서버를 여기에 명시 포함해야 기능이 보존된다(화이트리스트). marblo 는 항상
+    // per-agent env 가 박힌 채로 마지막에 주입돼 동일 키가 있어도 우리 것이 이긴다.
+    const whitelisted = selectWhitelistedGlobalServers(role ?? "");
     const config = {
       mcpServers: {
+        ...whitelisted,
         marblo: {
           command: mcpEntry.command,
           args: mcpEntry.args,
@@ -1848,6 +1941,12 @@ export class AgentConfigGenerator {
           args: [
             "--dangerously-skip-permissions",
             ...(claudeModel ? ["--model", claudeModel] : []),
+            // --strict-mcp-config: 글로벌 ~/.claude.json MCP 머지를 차단한다.
+            // 이게 없으면 에이전트마다 안 쓰는 글로벌 서버 6종이 중복 스폰돼
+            // 플릿 RAM ~7-16GB 낭비(특히 context7 은 npx 더블스폰). per-agent
+            // config(generateClaudeConfig)가 역할별 화이트리스트로 필요한 서버를
+            // 명시 포함하므로 기능 손실 0. 반드시 화이트리스트와 세트로 동작.
+            "--strict-mcp-config",
             "--mcp-config",
             mcpConfigPath,
             ...sessionArgs,

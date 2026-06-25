@@ -51,6 +51,10 @@ export default memo(function TerminalView({
 
     const terminal = new Terminal({
       cursorBlink: false, // periodic redraw was contributing to RAF queue saturation
+      // 숨긴 탭도 버퍼를 메모리에 유지하므로(visibility 토글, 언마운트 아님)
+      // 에이전트가 많을수록 누적된다. 기본 1000줄 → 500줄로 캡해 renderer
+      // RAM 을 낮춘다(스크롤 히스토리 길이만 단축, 기능 무해).
+      scrollback: 500,
       fontSize: 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: {
