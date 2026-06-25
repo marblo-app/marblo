@@ -487,6 +487,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
         action?: string;
       }>,
   },
+  usage: {
+    // Account-global rate-limit snapshots, independent of any running agent.
+    // null per provider = no information (logged out / probe failed), never 0%.
+    accountRateLimits: () =>
+      ipcRenderer.invoke("usage:accountRateLimits") as Promise<{
+        claude: {
+          planType: string | null;
+          primaryPercent: number | null;
+          primaryResetAt: number | null;
+          secondaryPercent: number | null;
+          secondaryResetAt: number | null;
+        } | null;
+        gpt: {
+          planType: string | null;
+          primaryPercent: number | null;
+          primaryResetAt: number | null;
+          secondaryPercent: number | null;
+          secondaryResetAt: number | null;
+        } | null;
+      }>,
+  },
   fs: {
     readTree: (rootPath: string) => ipcRenderer.invoke("fs:readTree", rootPath),
     readFile: (filePath: string) => ipcRenderer.invoke("fs:readFile", filePath),

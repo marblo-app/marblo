@@ -768,7 +768,7 @@ interface MCPServerEntry {
 }
 
 const SKILLS_DIR = path.resolve(__dirname, "..", "skills");
-const CONFIG_DIR = path.resolve(os.tmpdir(), "marblo-agent-configs");
+export const CONFIG_DIR = path.resolve(os.tmpdir(), "marblo-agent-configs");
 const ANTIGRAVITY_MCP_CONFIG_RELATIVE_PATHS = [
   // Antigravity 2.0 shared config for IDE + CLI.
   [".gemini", "config", "mcp_config.json"],

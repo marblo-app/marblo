@@ -57,6 +57,7 @@ import {
   preflightNodeSpawn,
 } from "./agent-config";
 import { CostTracker } from "./cost-tracker";
+import { getAccountRateLimits } from "./account-usage";
 import { mainTelemetry } from "./telemetry";
 import {
   buildMissionEngine,
@@ -3607,6 +3608,12 @@ ipcMain.handle(
     }
   },
 );
+
+// Account-global rate-limit snapshots for the Usage tab. Independent of any
+// agent: claude is probed headlessly, codex/gpt is read from the newest
+// rollout across all codex homes. null fields = no information (logged out /
+// probe failed), never zero usage. See account-usage.ts.
+ipcMain.handle("usage:accountRateLimits", () => getAccountRateLimits());
 
 app.whenReady().then(async () => {
   // safeStorage only comes online after `ready`. The module-load

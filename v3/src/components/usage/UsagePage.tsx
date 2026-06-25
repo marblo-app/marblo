@@ -498,7 +498,7 @@ function DailyTrend({
 
 type Translate = (
   key: MessageKey,
-  vars?: Record<string, string | number>
+  vars?: Record<string, string | number>,
 ) => string;
 
 // CLI brand labels + icons stay literal; the Korean guidance note moves to
@@ -580,6 +580,14 @@ function WindowGauge({
 function RateLimitPanel({ agents }: { agents: Agent[] }) {
   const { t } = useTranslation();
   const [connectedModels, setConnectedModels] = useState<Agent["model"][]>([]);
+  // Account-global rate limits, independent of any running agent. This is the
+  // canonical source: claude is probed headlessly, codex/gpt is read from the
+  // newest rollout. It lets the panel show real utilization with ZERO agents,
+  // as long as the CLI is logged in. null per provider = no information.
+  const [account, setAccount] = useState<{
+    claude: RateLimitSnapshot | null;
+    gpt: RateLimitSnapshot | null;
+  } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -591,7 +599,7 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
           packages
             .filter((p) => p.status === "installed")
             .map((p) => CONNECTED_RATE_LIMIT_PACKAGES[p.id])
-            .filter((model): model is Agent["model"] => Boolean(model))
+            .filter((model): model is Agent["model"] => Boolean(model)),
         );
       })
       .catch(() => {
@@ -602,9 +610,30 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
     };
   }, []);
 
+  // Poll account-level limits on mount and every minute (the main process
+  // TTL-caches, so this never spawns a probe more than once a minute).
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      window.electronAPI.usage
+        .accountRateLimits()
+        .then((a) => {
+          if (alive) setAccount(a);
+        })
+        .catch(() => {
+          if (alive) setAccount(null);
+        });
+    load();
+    const id = setInterval(load, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
   const providerModels = useMemo(
     () => getRateLimitProviderModels(agents, connectedModels),
-    [agents, connectedModels]
+    [agents, connectedModels],
   );
 
   if (providerModels.length === 0) return null;
@@ -640,16 +669,36 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
               if (xLive !== yLive) return yLive - xLive;
               return ts(y) - ts(x);
             })[0];
+          // Account-global snapshot is the canonical source (works with zero
+          // agents); the per-agent doc is only a fallback when the probe has
+          // no data for that provider. claude/gpt have an account source;
+          // gemini/antigravity fall through to the agent doc as before.
+          const acct =
+            model === "claude"
+              ? account?.claude
+              : model === "gpt"
+                ? account?.gpt
+                : null;
           const live =
-            typeof rep?.rateLimitPercent === "number"
-              ? rep.rateLimitPercent
-              : undefined;
-          const liveReset = rep?.rateLimitResetAt;
+            typeof acct?.primaryPercent === "number"
+              ? acct.primaryPercent
+              : typeof rep?.rateLimitPercent === "number"
+                ? rep.rateLimitPercent
+                : undefined;
+          const liveReset =
+            typeof acct?.primaryPercent === "number"
+              ? (acct.primaryResetAt ?? undefined)
+              : rep?.rateLimitResetAt;
           const weekly =
-            typeof rep?.rateLimitWeeklyPercent === "number"
-              ? rep.rateLimitWeeklyPercent
-              : undefined;
-          const weeklyReset = rep?.rateLimitWeeklyResetAt;
+            typeof acct?.secondaryPercent === "number"
+              ? acct.secondaryPercent
+              : typeof rep?.rateLimitWeeklyPercent === "number"
+                ? rep.rateLimitWeeklyPercent
+                : undefined;
+          const weeklyReset =
+            typeof acct?.secondaryPercent === "number"
+              ? (acct.secondaryResetAt ?? undefined)
+              : rep?.rateLimitWeeklyResetAt;
           const headline = typeof weekly === "number" ? weekly : live;
           const hasData =
             typeof live === "number" || typeof weekly === "number";

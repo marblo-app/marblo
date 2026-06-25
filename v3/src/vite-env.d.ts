@@ -611,12 +611,31 @@ interface ClaudeAPI {
   cliVersions: () => Promise<Record<string, string>>;
 }
 
+/** Account-global rate-limit reading for one provider. null fields = no
+ * information (logged out / probe failed), never zero usage. */
+interface RateLimitSnapshot {
+  planType: string | null;
+  primaryPercent: number | null;
+  primaryResetAt: number | null;
+  secondaryPercent: number | null;
+  secondaryResetAt: number | null;
+}
+
+interface UsageAPI {
+  /** Account-level rate limits independent of any running agent. */
+  accountRateLimits: () => Promise<{
+    claude: RateLimitSnapshot | null;
+    gpt: RateLimitSnapshot | null;
+  }>;
+}
+
 interface ElectronAPI {
   platform: string;
   testMode: TestModeAPI;
   window: WindowAPI;
   claude: ClaudeAPI;
   harness: HarnessAPI;
+  usage: UsageAPI;
   send: (channel: string, data: unknown) => void;
   on: (channel: string, callback: (...args: unknown[]) => void) => void;
   off: (channel: string) => void;
