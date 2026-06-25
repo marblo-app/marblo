@@ -262,6 +262,34 @@ export default memo(function TerminalView({
       }
     });
 
+    // Alt-screen TUI re-emit nudge. A resumed agent (claude --continue /
+    // --resume after an app restart) reattaches to a LIVE pty, but its Ink TUI
+    // runs in alternate-screen mode and does NOT redraw its current frame on
+    // reattach — and the replay ring no longer holds the alt-screen-enter
+    // sequence, so there's nothing to reconstruct the frame from either. The
+    // terminal therefore stays blank until the user presses a key. Bumping
+    // cols by one and restoring delivers a real SIGWINCH (the kernel only
+    // signals on an actual size change), which makes Ink repaint the whole
+    // frame. Mirrors OrchestratorTerminal.nudgePtyRepaint. Called only on the
+    // alive-but-silent replay path below, so it never fires during normal work.
+    let nudgeRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+    const nudgePtyRepaint = () => {
+      if (disposed || !termOpened) return;
+      const cols = terminal.cols;
+      const rows = terminal.rows;
+      if (!cols || !rows) return;
+      try {
+        window.electronAPI.pty.resize(sessionId, cols + 1, rows);
+        nudgeRestoreTimer = setTimeout(() => {
+          nudgeRestoreTimer = null;
+          if (disposed) return;
+          window.electronAPI.pty.resize(sessionId, cols, rows);
+        }, 50);
+      } catch {
+        /* ignore */
+      }
+    };
+
     const replayTimer = window.setTimeout(() => {
       if (disposed) return;
       window.electronAPI.pty.replay(sessionId).then(async (buffered) => {
@@ -277,9 +305,11 @@ export default memo(function TerminalView({
         // Empty buffer can mean two things:
         //   (a) PTY is genuinely dead (e.g. after app restart) → warn.
         //   (b) PTY is alive but this is a re-mount (collapse + reopen in
-        //       AgentListPanel). The buffer was drained on the first mount,
-        //       so re-mounts always see length 0 even though the pty is fine.
-        // Probe pty:exists to disambiguate and only warn for case (a).
+        //       AgentListPanel) OR a resumed agent whose buffer was already
+        //       drained. The buffer is length 0 even though the pty is fine.
+        // Probe pty:exists to disambiguate: warn for case (a), nudge a repaint
+        // for case (b) so a resumed alt-screen TUI re-emits its frame instead
+        // of sitting blank until the user presses a key.
         if (!hasReceivedData && termOpened) {
           const alive = await window.electronAPI.pty
             .exists(sessionId)
@@ -293,6 +323,8 @@ export default memo(function TerminalView({
             terminal.write(
               "\x1b[90m  Agents 탭에서 Restart 버튼으로 재시작하세요.\x1b[0m\r\n\r\n",
             );
+          } else {
+            nudgePtyRepaint();
           }
         }
         if (termOpened && wantBottomRef.current) terminal.scrollToBottom();
@@ -446,6 +478,7 @@ export default memo(function TerminalView({
       clearInterval(flushInterval);
       if (settleTimer) clearTimeout(settleTimer);
       if (maxTimer) clearTimeout(maxTimer);
+      if (nudgeRestoreTimer) clearTimeout(nudgeRestoreTimer);
       window.removeEventListener("resize", handleResize);
       resizeObserver?.disconnect();
       wrapperEl?.removeEventListener("wheel", onWheel, wheelOpts);
