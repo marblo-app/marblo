@@ -12,7 +12,7 @@
   },
   "scripts": {
     "predev": "npm run build:mcp",
-    "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"sleep 2 && electron . --remote-debugging-port=9222\"",
+    "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"node scripts/dev-electron.mjs\"",
     "dev:vite": "vite",
     "predev:electron": "npm run build:mcp",
     "dev:electron": "tsc -p electron/tsconfig.json && electron .",
@@ -28,7 +28,7 @@
     "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "build:mcp": "tsc -p electron/mcp-server/tsconfig.json && echo '{\"type\":\"module\"}' > dist-mcp/package.json",
+    "build:mcp": "tsc -p electron/mcp-server/tsconfig.json && node scripts/write-mcp-pkg.mjs",
     "mcp": "node dist-mcp/index.js",
     "relock": "bash scripts/relock.sh",
     "sync": "bash scripts/sync-and-rebuild.sh",
