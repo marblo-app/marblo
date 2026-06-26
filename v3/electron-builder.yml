@@ -58,6 +58,11 @@ win:
   icon: resources/icon.png
   signingHashAlgorithms:
     - sha256
+  # Build-during-sign hook (KoreaSSL EV USB token). No-op unless WIN_SIGN=1, so
+  # CI/local builds without the token stay unsigned exactly as before. Signing
+  # here (not after the build) keeps latest.yml/.blockmap hashes matching the
+  # signed exe so electron-updater doesn't break. See docs/signing_runbook.md §6-2.
+  sign: ./scripts/win-sign.js
 
 linux:
   target:

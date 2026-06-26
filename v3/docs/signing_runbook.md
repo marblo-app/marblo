@@ -1,7 +1,7 @@
 # 데스크톱 앱 서명·공증 실전 런북 (직접 해보기)
 
 > 대상: Marblo Electron 앱(`v3/`)의 배포 빌드를 **처음부터 직접 서명·공증**하려는 사람.
-> 작성: 2026-06-22. 파이프라인 = `.github/workflows/build.yml`(Build & Release), 패키징 = `v3/electron-builder.yml`, 공증 훅 = `v3/scripts/notarize.js`.
+> 작성: 2026-06-22 (개정: 2026-06-26 — 발행처 marblo-releases 반영, win 서명 훅 추가). 파이프라인 = `.github/workflows/build.yml`(Build & Release), 패키징 = `v3/electron-builder.yml`, mac 공증 훅 = `v3/scripts/notarize.js`, win 서명 훅 = `v3/scripts/win-sign.js`.
 >
 > **이 문서와 [`code_signing_setup.md`](./code_signing_setup.md)의 역할 분담**
 >
@@ -134,6 +134,8 @@ xcrun stapler validate "/path/to/Marblo.app"        # → The validate action wo
 
 CI는 Windows를 **무서명 nsis `.exe`**로 산출한다(`build.yml`에 `WIN_CSC_*` 미배선, L276~278). EV 인증서는 개인키가 USB 토큰 밖으로 안 나와 파일형 base64 서명이 불가능하기 때문.
 
+> ✅ **권장 경로는 §6-2의 `win.sign` 빌드-도중-서명 훅**(구현됨, `scripts/win-sign.js`)이다 — 자동업데이트 메타(`latest.yml`/`.blockmap`)가 서명된 exe 기준으로 생성돼 깨지지 않는다. 아래 §4의 "빌드 후 별도 서명"은 **이미 만들어진 무서명 exe만 손에 있을 때의 차선**이며, 그 경우 `latest.yml` 재계산이 필요하다(§6-2 차선 항목).
+
 **수동 서명 절차 요약(A안 = 물리 토큰 로컬 서명):**
 
 1. CI Artifacts에서 무서명 `Marblo-Setup-<버전>.exe` 다운로드 (`marblo-win-x64`)
@@ -174,7 +176,10 @@ CI는 Windows를 **무서명 nsis `.exe`**로 산출한다(`build.yml`에 `WIN_C
 
 - `.dmg` / `.zip` / `.exe`는 **git 커밋에 넣지 않는다.** repo 비대화·LFS를 피하려고 GitHub **Release 에셋**으로 올린다.
 - electron-updater는 런타임에 Release의 **`latest*.yml`** 메타파일을 폴링해 새 버전을 감지하고, yml이 가리키는 본체(.zip/.exe)를 **sha512 무결성 검증** 후 내려받아 설치한다. → yml의 해시와 실제 에셋이 어긋나면 업데이트가 깨진다(§6-2의 Windows 함정 핵심).
-- **호스트 = `github.com/melocream/marblo`** (= origin). `electron-builder.yml`의 `publish: provider: github`는 owner/repo를 명시하지 않고 `v3/package.json`의 `repository.url`(`https://github.com/melocream/marblo.git`)에서 도출한다. 런타임 피드는 `v3/electron/updater.ts` 기본값 `melocream/marblo`. **이 두 곳이 같은 repo를 가리켜야** 발행처와 수신처가 일치한다(메모리 [release_host_melocream_decision]).
+- **발행처(publish) = `github.com/melocream/marblo-releases`** (공개 레포). 소스 레포 `melocream/marblo`는 **private**라 릴리스 자산을 익명 다운로드할 수 없어, 공개 배포는 별도 public 레포로 발행한다. `electron-builder.yml`의 `publish`가 `owner: melocream` / `repo: marblo-releases`로 **명시**돼 있다(`package.json`의 `repository.url`에서 도출하지 **않는다** — L79~80).
+- **런타임 수신 피드 = `v3/electron/updater.ts`의 `DEFAULT_UPDATE_FEED_OWNER`/`REPO`** (현재 기본값 `melocream` / `marblo`, L32~33). `MARBLO_UPDATER_OWNER`/`REPO` env로 override 가능하나 이는 **리허설 전용**이며 평소 빌드엔 주입되지 않는다.
+- ⚠️ **현재 발행처(`marblo-releases`)와 런타임 피드 기본값(`marblo`)이 불일치한다.** 그대로 배포하면 앱이 잘못된(게다가 private라 익명 접근 불가) 레포를 폴링해 **자동업데이트가 동작하지 않는다.** 반드시 둘을 일치시킬 것 — `updater.ts`의 `DEFAULT_UPDATE_FEED_REPO`를 `marblo-releases`로 바꾸거나, 패키징 시 `MARBLO_UPDATER_REPO=marblo-releases`를 굽는다. (메모리 [release_host_melocream_decision]는 marblo-releases 분리 이전 기준이라 갱신 필요.)
+- **CI Actions 시크릿은 소스 레포(`melocream/marblo`)에 등록한다** — Actions가 거기서 돌기 때문(§1-3). 반면 로컬 발행용 PAT(`GH_TOKEN`)은 **`marblo-releases` 쓰기 권한**이 필요하다(§6-1).
 
 ### 6-1. macOS — `--publish always`로 한 번에 업로드
 
@@ -182,13 +187,13 @@ mac은 §1의 서명·공증이 빌드에 배선돼 있어, 로컬에서 `--publ
 
 ```bash
 cd v3
-export GH_TOKEN=<melocream/marblo Release 쓰기 권한 PAT>   # 실값 금지, env로만
+export GH_TOKEN=<melocream/marblo-releases Release 쓰기 권한 PAT>   # 실값 금지, env로만
 npm run build:electron                                     # tsc(electron) + vite build
 npx electron-builder --mac --arm64 --publish always
 ```
 
-- 결과: 서명+공증된 **`.dmg` / `.zip` + `latest-mac.yml` + `.blockmap`** 이 `melocream/marblo`의 **draft Release**(태그 = `v<package.json version>`)에 자동 업로드된다.
-- `GH_TOKEN`: GitHub PAT(classic의 `repo` scope 또는 fine-grained의 Contents: write). **시크릿 실값을 문서·코드에 넣지 말 것** — 셸 env로만 주입한다.
+- 결과: 서명+공증된 **`.dmg` / `.zip` + `latest-mac.yml` + `.blockmap`** 이 `melocream/marblo-releases`의 **draft Release**(태그 = `v<package.json version>`)에 자동 업로드된다(발행처는 `electron-builder.yml`의 `publish` 블록 기준).
+- `GH_TOKEN`: **`marblo-releases` 쓰기** PAT(classic의 `repo` scope 또는 fine-grained의 Contents: write). **시크릿 실값을 문서·코드에 넣지 말 것** — 셸 env로만 주입한다.
 - CI는 `--publish never`로 돌리고 별도 release job이 처리한다(§6-4). `--publish always`는 **로컬 수동 발행**일 때만.
 - 로컬 풀 빌드 시 `extraResources`가 `dist-mcp/`를 복사하므로 그 디렉터리가 있어야 한다. 없으면 `npm run build:mcp`를 먼저 돌린다.
 
@@ -204,7 +209,9 @@ CI(그리고 로컬 electron-builder)는 Windows를 **무서명 `.exe`**로 산�
 
 electron-builder의 `win.sign`에 커스텀 서명 모듈 경로를 주면, electron-builder가 **`latest.yml`/`.blockmap`을 만들기 전 서명 단계에서** 그 훅을 호출한다. → 메타데이터가 **서명된 exe 기준**으로 생성되어 해시가 처음부터 일치한다.
 
-`v3/electron-builder.yml`의 `win` 블록에 `sign` 한 줄을 추가(설정 위치):
+> ✅ **이미 구현됨 (PR #242).** `v3/scripts/win-sign.js` + `electron-builder.yml`의 `win.sign` 배선이 레포에 있다. 아래는 설정 형태 참고용이며, **실제 구현은 `scripts/win-sign.js`가 단일 출처**다. 훅은 `WIN_SIGN=1`일 때만 서명하고(토큰 연결한 서명 머신), 그 외엔 no-op라 CI/일반 로컬 빌드는 기존처럼 무서명으로 안전하게 통과한다. signtool은 Windows SDK에서 자동 탐색(`SIGNTOOL_PATH`로 override).
+
+`v3/electron-builder.yml`의 `win` 블록 (적용된 형태):
 
 ```yaml
 win:
@@ -245,7 +252,18 @@ exports.default = async function (configuration) {
 
 이러면 `npx electron-builder --win --x64 --publish never`(또는 `always`) 한 번으로 **서명된 exe + 일치하는 `latest.yml` + `.blockmap`**이 함께 나온다.
 
-> ⚠️ 위 yml/훅 변경은 **코드 변경**이라 본 문서(런북) 범위 밖이다. 여기서는 가이드만 제공하며, 실제 적용은 별도 티켓에서 `workflow_dispatch`로 win 서명 경로를 검증하며 진행한다(가짜통과 주의, §5).
+> ⚠️ 훅 자체는 구현됐지만(PR #242) **실제 토큰 서명은 아직 검증 전**이다. EV USB 토큰을 서명 머신에 연결한 뒤 로컬 서명 빌드(`WIN_SIGN=1`, `npx electron-builder --win --x64`)를 1회 돌려 서명+해시 일치를 직접 확인할 것. CI(`workflow_dispatch`)는 토큰이 없어 win 서명을 검증하지 못하므로 PR 초록만 믿지 말 것(가짜통과, §5).
+>
+> **실서명 빌드 (PowerShell, 토큰 연결 상태):**
+>
+> ```powershell
+> npm run build:electron
+> $env:WIN_SIGN = "1"          # 없으면 무서명 no-op
+> npx electron-builder --win --x64 --publish never
+> # → 빌드 도중 signtool 이 토큰 PIN 입력을 콘솔에서 요구. PIN 입력 시 서명됨.
+> ```
+>
+> 검증: `signtool verify /pa /v "dist\Marblo-Setup-<버전>.exe"` (signtool 풀경로는 Windows SDK `...\bin\<ver>\x64\signtool.exe`).
 
 #### (차선) 수동 서명 후 `latest.yml` 재계산
 
@@ -265,7 +283,7 @@ stat -f%z "Marblo-Setup-3.0.0.exe"   # macOS/BSD  (Git Bash on Windows/Linux: st
 ### 6-3. `gh release` CLI 절차 (mac + win을 한 태그에 모으기)
 
 ```bash
-REPO=melocream/marblo
+REPO=melocream/marblo-releases   # 발행처 = 공개 레포 (소스 marblo 는 private)
 TAG="v$(node -p "require('./v3/package.json').version")"   # 예: v3.0.0
 
 # 1) draft Release 생성 (--publish always가 이미 draft를 만들었으면 이 단계는 건너뛴다)
@@ -335,7 +353,7 @@ npm run build:electron → npx electron-builder --win --x64 (win.sign 훅) → g
 - [ ] 로컬 `spctl --assess` / `stapler validate` 재검증 (§1-6)
 - [ ] Windows: 무서명 .exe 다운 → USB 토큰 signtool 수동 서명 (§4)
 - [ ] PR 초록만 믿지 말고 push/dispatch로 서명경로 실검증 (§5)
-- [ ] 발행 호스트 = `melocream/marblo` 확인 (repository.url ↔ updater.ts 일치, §6-0)
+- [ ] 발행처 = `melocream/marblo-releases` (공개) 확인 + ⚠️ updater.ts 기본 피드(`marblo`)와 불일치 해소 (§6-0)
 - [ ] mac: `GH_TOKEN`(env) 설정 후 `electron-builder --mac --arm64 --publish always` (§6-1)
 - [ ] win: 빌드-후-서명 함정 회피 — `win.sign` 훅으로 빌드 도중 서명(권장) / 차선은 latest.yml 재계산 (§6-2)
 - [ ] `gh release upload`에 `latest*.yml` + `.blockmap` 포함 (mac/win 같은 태그에 모으기, §6-3)
