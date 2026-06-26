@@ -157,10 +157,12 @@ interface AgentAPI {
       ptySessionId: string | null;
       /** reconnected=false 일 때 왜 skip 됐는지. 프론트가 Firestore status
        * 를 "stopped" 로 동기화할지 결정하는 데 사용. "no-session" 만
-       * stopped 로 마킹 (다른 사유는 그대로 둠). */
+       * stopped 로 마킹 (다른 사유는 그대로 둠). "foreign-machine" 은 타
+       * 머신/레거시 소유 doc — 절대 mutate 하면 안 되므로 그대로 둔다. */
       skippedReason?:
         | "no-session"
         | "already-running"
+        | "foreign-machine"
         | "launch-failed"
         | "unknown";
     }>

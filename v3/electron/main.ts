@@ -48,6 +48,8 @@ import type { Flow, FlowEvent, HumanInput } from "./flow-engine/types";
 import {
   findReconnectCandidates,
   resolveClaudeColdBootResumeId,
+  classifyMachineOwnership,
+  FOREIGN_MACHINE_SKIP_REASON,
 } from "./reconnect-manager";
 import {
   saveAgyConversationLabel,
@@ -271,6 +273,11 @@ interface AppState {
   // Project windows open at last quit, so a full restart can reopen them all
   // (the single lastProjectId/lastRootPath above only covers one window).
   windows?: Array<{ rootPath?: string; projectId?: string }>;
+  // Stable per-install identifier for this machine. Generated once on first
+  // boot and persisted. Stamped onto agent docs this machine launches so
+  // boot-restore / reap can be machine-scoped on a shared account (see
+  // getMachineId / stampAgentMachineOwnership). Never auto-changes.
+  machineId?: string;
 }
 
 function readAppState(): AppState {
@@ -291,6 +298,69 @@ function writeAppState(state: AppState): void {
   const existing = readAppState();
   const merged = { ...existing, ...state };
   fs.writeFileSync(APP_STATE_FILE, JSON.stringify(merged, null, 2), "utf-8");
+}
+
+// --- Machine identity (shared-account multi-machine safety) ---
+// john.kim signs into the same Firestore `agents/` collection from several
+// machines (Mac + Windows). Without a per-machine owner, a second machine's
+// boot rehydrates the WHOLE collection — foreign + stale docs included — which
+// caused the "83 phantom agents on launch" incident. We stamp every agent doc
+// this machine launches with a stable machineId, then scope boot-restore and
+// reap to docs this machine actually owns. Foreign docs stay read-only.
+let cachedMachineId: string | null = null;
+function getMachineId(): string {
+  if (cachedMachineId) return cachedMachineId;
+  const state = readAppState();
+  if (state.machineId) {
+    cachedMachineId = state.machineId;
+    return cachedMachineId;
+  }
+  // hostname+platform make it human-readable in the doc/board; the random UUID
+  // guarantees uniqueness even if two machines share a hostname. Persisted so
+  // it's stable across restarts — it must never silently change, or this
+  // machine would orphan its own agents.
+  const generated = `${os.hostname()}-${os.platform()}-${crypto.randomUUID()}`;
+  writeAppState({ machineId: generated });
+  cachedMachineId = generated;
+  return cachedMachineId;
+}
+
+// Stamp this machine's ownership onto an agent doc, once per agent per session.
+// Called from the AgentManager status callback, so it fires for every agent
+// this machine actually launches (fresh spawn AND reconnect) regardless of
+// which writer created the doc. setDoc(merge) is create-or-update: it never
+// clobbers other fields and works even if the doc write hasn't landed yet.
+// Re-stamping on reconnect also transfers ownership when a user manually
+// ▶ Starts an agent that previously ran on another machine.
+//
+// Writes go through the mission firebase app (anonymous auth) — the same
+// authed path WorktreeCoordinator uses for tasks/agents. The `agents` rule is
+// isAuthenticated-only, so anon auth is sufficient; the unauthenticated
+// flow-engine app would be rejected.
+const stampedMachineAgentIds = new Set<string>();
+function stampAgentMachineOwnership(agentId: string): void {
+  if (!agentId || stampedMachineAgentIds.has(agentId)) return;
+  stampedMachineAgentIds.add(agentId);
+  void (async () => {
+    try {
+      const { app, authReady } = getMissionFirebaseApp();
+      await authReady;
+      const db = getFirestore(app);
+      await fbSetDoc(
+        fbDoc(db, "agents", agentId),
+        { machineId: getMachineId() },
+        { merge: true },
+      );
+    } catch (err) {
+      // Allow a retry on the next status change rather than giving up forever.
+      stampedMachineAgentIds.delete(agentId);
+      console.warn(
+        "[MachineId] Failed to stamp agent ownership:",
+        agentId,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  })();
 }
 
 // Disable QUIC protocol — prevents ERR_QUIC_PROTOCOL_ERROR with Firestore in Electron
@@ -334,6 +404,11 @@ let missionBundle: BuiltMissionEngine | null = null;
 const agentManager = new AgentManager(
   ptyManager,
   (agentId, status) => {
+    // Claim machine ownership of this agent's doc — AgentManager only ever
+    // tracks agents THIS machine launched, so any agentId here is ours. Stamps
+    // once per session; enables machine-scoped boot-restore / reap on a shared
+    // account (see stampAgentMachineOwnership / agent:reconnect).
+    stampAgentMachineOwnership(agentId);
     // Free the pending-instruction listener once the agent is fully gone.
     // "error" is transient (auto-restart may follow), only "stopped" is final.
     if (status === "stopped") {
@@ -1134,6 +1209,7 @@ import {
   collection as fbCollection,
   doc as fbDoc,
   getDoc as fbGetDoc,
+  setDoc as fbSetDoc,
   updateDoc as fbUpdateDoc,
   addDoc as fbAddDoc,
   query as fbQuery,
@@ -2832,6 +2908,38 @@ ipcMain.handle(
       rootPath,
     );
 
+    // Machine-scoping (shared-account safety): read each agent doc's machineId
+    // so we only relaunch agents THIS machine owns. The `agents/` collection is
+    // shared across every machine on one account; without this, a second
+    // machine's boot rehydrates the whole project (the "83 phantom agents"
+    // incident). On a fetch failure we leave the map empty → every doc is
+    // treated as legacy → nothing auto-launches (the safe default this ticket
+    // mandates; the user can still ▶ Start manually).
+    const thisMachineId = getMachineId();
+    const machineIdByAgent = new Map<string, string | undefined>();
+    try {
+      const { app, authReady } = getMissionFirebaseApp();
+      await authReady;
+      const db = getFirestore(app);
+      const snap = await fbGetDocs(
+        fbQuery(
+          fbCollection(db, "agents"),
+          fbWhere("projectId", "==", projectId),
+        ),
+      );
+      snap.forEach((d) => {
+        machineIdByAgent.set(
+          d.id,
+          (d.data() as { machineId?: string }).machineId,
+        );
+      });
+    } catch (err) {
+      console.warn(
+        "[Reconnect] machineId map fetch failed — treating all docs as legacy (no auto-launch):",
+        err instanceof Error ? err.message : err,
+      );
+    }
+
     const results = [];
 
     for (const candidate of candidates) {
@@ -2869,6 +2977,36 @@ ipcMain.handle(
         // 의 onData 는 호출마다 listener 가 누적돼 데이터가 중복 forward
         // 되는 부작용).
         ptyOwners.set(existing.ptySessionId, senderId);
+        continue;
+      }
+
+      // Machine-ownership gate. Only relaunch agents THIS machine owns. A
+      // `foreign` doc (stamped by another machine) or a `legacy` doc (never
+      // stamped — possibly another machine's) is reported as a non-destructive
+      // skip: FOREIGN_MACHINE_SKIP_REASON is deliberately NOT "no-session", so
+      // the renderer leaves the shared doc untouched (marking it "stopped"
+      // would rewrite a live agent's status on the other machine). The agent
+      // still shows on the board, read-only. This is the core (a)/(b) fix.
+      // NB: the already-running check above wins first — if we have a live PTY
+      // for it, it is genuinely ours regardless of a stale doc machineId.
+      const ownership = classifyMachineOwnership(
+        machineIdByAgent.get(agentData.id),
+        thisMachineId,
+      );
+      if (ownership !== "own") {
+        console.log(
+          `[Reconnect] Agent ${agentData.name} (${agentData.model}) is ${
+            ownership === "foreign"
+              ? "owned by another machine"
+              : "unstamped/legacy"
+          } → read-only skip (no launch, no Firestore mutation)`,
+        );
+        results.push({
+          agentId: agentData.id,
+          reconnected: false,
+          ptySessionId: null,
+          skippedReason: FOREIGN_MACHINE_SKIP_REASON,
+        });
         continue;
       }
 

@@ -136,3 +136,58 @@ export function resolveClaudeColdBootResumeId(
 ): string | null {
   return labelSessionId ?? nameScopedSessionId ?? null;
 }
+
+/**
+ * Machine ownership of an `agents/` Firestore doc, relative to this machine.
+ *
+ * The `agents/` collection is shared across every machine signed into the same
+ * account (e.g. Windows + macOS as the same user). #231 stopped phantom Claude
+ * *launches*; this layer adds an explicit owner so boot-restore and reap are
+ * machine-scoped and non-destructive.
+ *
+ *  - `own`     — `machineId` matches this machine. Eligible to relaunch/reap.
+ *  - `foreign` — `machineId` belongs to another machine. Read-only: never
+ *                launch, never mutate (it may back a *live* agent over there).
+ *  - `legacy`  — no `machineId` (doc predates this field, or was created by a
+ *                writer that didn't stamp). Treated as possibly-foreign →
+ *                safe default is to NOT launch and NOT mutate. Once this machine
+ *                actually launches it (▶ Start), the status callback stamps the
+ *                doc and it becomes `own` on the next boot (self-healing).
+ */
+export type MachineOwnership = "own" | "foreign" | "legacy";
+
+export function classifyMachineOwnership(
+  docMachineId: string | null | undefined,
+  thisMachineId: string,
+): MachineOwnership {
+  if (!docMachineId) return "legacy";
+  return docMachineId === thisMachineId ? "own" : "foreign";
+}
+
+/**
+ * Boot-restore launch gate for shared-account multi-machine safety.
+ *
+ * Only agents this machine OWNS may be relaunched on boot. `foreign` and
+ * `legacy` docs fall through to a non-destructive skip — the core fix for
+ * "83 phantom agents attached on launch": a second machine on the same account
+ * must not resurrect the other machine's agent docs.
+ */
+export function isLaunchEligibleOnThisMachine(
+  docMachineId: string | null | undefined,
+  thisMachineId: string,
+): boolean {
+  return classifyMachineOwnership(docMachineId, thisMachineId) === "own";
+}
+
+/**
+ * Skip reason returned for docs this machine does NOT own (foreign/legacy).
+ *
+ * Intentionally NOT "no-session": the renderer (useAgentReconnect) marks
+ * "no-session" agents `status: "stopped"` in Firestore. Doing that to a
+ * *foreign* doc would destructively rewrite a live agent's status on the
+ * other machine — exactly the cross-machine damage this ticket must avoid.
+ * "no-session" stays reserved for THIS machine's own zombies (the reap path);
+ * any other reason (including this one) routes to the renderer's no-op branch,
+ * leaving the shared doc untouched.
+ */
+export const FOREIGN_MACHINE_SKIP_REASON = "foreign-machine" as const;

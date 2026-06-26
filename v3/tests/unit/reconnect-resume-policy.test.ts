@@ -16,7 +16,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { resolveClaudeColdBootResumeId } from "../../electron/reconnect-manager";
+import {
+  resolveClaudeColdBootResumeId,
+  classifyMachineOwnership,
+  isLaunchEligibleOnThisMachine,
+  FOREIGN_MACHINE_SKIP_REASON,
+} from "../../electron/reconnect-manager";
 
 describe("resolveClaudeColdBootResumeId", () => {
   it("prefers the labels-file (agent-specific) session id", () => {
@@ -38,5 +43,63 @@ describe("resolveClaudeColdBootResumeId", () => {
     // machine: no labels entry, no name/id-scoped JSONL. Must skip, not launch.
     const decision = resolveClaudeColdBootResumeId(null, null);
     expect(decision).toBeNull();
+  });
+});
+
+/**
+ * Machine-scoped boot restore + non-destructive reap (this ticket).
+ *
+ * The `agents/` collection is shared across every machine on one account. The
+ * resume-id policy above already blocks phantom Claude *launches*, but it's
+ * Claude-/session-specific. classifyMachineOwnership / isLaunchEligibleOnThisMachine
+ * make the rule explicit and model-agnostic: a machine only ever relaunches its
+ * OWN agent docs, and never mutates docs it doesn't own.
+ */
+describe("classifyMachineOwnership", () => {
+  const THIS = "macbook-darwin-uuid-A";
+
+  it("classifies a doc stamped with this machine's id as 'own'", () => {
+    expect(classifyMachineOwnership(THIS, THIS)).toBe("own");
+  });
+
+  it("classifies a doc stamped with another machine's id as 'foreign'", () => {
+    expect(classifyMachineOwnership("windows-win32-uuid-B", THIS)).toBe(
+      "foreign",
+    );
+  });
+
+  it("classifies an unstamped (null/undefined/empty) doc as 'legacy'", () => {
+    expect(classifyMachineOwnership(null, THIS)).toBe("legacy");
+    expect(classifyMachineOwnership(undefined, THIS)).toBe("legacy");
+    expect(classifyMachineOwnership("", THIS)).toBe("legacy");
+  });
+});
+
+describe("isLaunchEligibleOnThisMachine", () => {
+  const THIS = "macbook-darwin-uuid-A";
+
+  it("relaunches only this machine's own agents on boot", () => {
+    expect(isLaunchEligibleOnThisMachine(THIS, THIS)).toBe(true);
+  });
+
+  it("REGRESSION (83 phantom agents): a foreign machine's doc is NOT launched — Windows boot must 0-launch Mac-owned agents", () => {
+    expect(isLaunchEligibleOnThisMachine("windows-win32-uuid-B", THIS)).toBe(
+      false,
+    );
+  });
+
+  it("safe default: a legacy (unstamped) doc is NOT launched — it might belong to another machine", () => {
+    expect(isLaunchEligibleOnThisMachine(null, THIS)).toBe(false);
+    expect(isLaunchEligibleOnThisMachine(undefined, THIS)).toBe(false);
+  });
+});
+
+describe("FOREIGN_MACHINE_SKIP_REASON (non-destructiveness guard)", () => {
+  it("is NOT 'no-session' — foreign/legacy skips must not route to the renderer's stopped-marking branch, which would mutate another machine's live doc", () => {
+    // The renderer only writes status:"stopped" for "no-session". Any other
+    // reason hits its no-op branch. If this reason ever equaled "no-session",
+    // a Windows boot would rewrite a Mac agent's status on the shared doc.
+    expect(FOREIGN_MACHINE_SKIP_REASON).not.toBe("no-session");
+    expect(FOREIGN_MACHINE_SKIP_REASON).toBe("foreign-machine");
   });
 });
