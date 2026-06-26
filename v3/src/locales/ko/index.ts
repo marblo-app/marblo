@@ -30,6 +30,7 @@ import { usage } from "./usage";
 import { onboarding } from "./onboarding";
 import { common } from "./common";
 import { activity } from "./activity";
+import { bugReport } from "./bugReport";
 
 export const ko = {
   ...header,
@@ -51,6 +52,7 @@ export const ko = {
   ...onboarding,
   ...common,
   ...activity,
+  ...bugReport,
 };
 
 export type MessageKey = keyof typeof ko;

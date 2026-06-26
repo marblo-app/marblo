@@ -18,6 +18,8 @@ import {
   MessageSquare,
   Mail,
   X,
+  Bug,
+  RefreshCw,
 } from "lucide-react";
 
 // 신청 목록 항목 (getFounderWaitlist 함수 응답; 날짜는 ISO 문자열).
@@ -56,12 +58,38 @@ type FounderFeedback = {
   createdAt: string | null;
 };
 
+// 버그 신고 항목 (listBugReports 함수 응답).
+type BugReportStatus = "new" | "triaged" | "resolved";
+type BugReportItem = {
+  id: string;
+  uid: string;
+  email: string | null;
+  description: string;
+  appVersion: string | null;
+  platform: string | null;
+  context: {
+    recentLogs: string;
+    route: string;
+    agentSnapshot: string;
+  };
+  status: BugReportStatus;
+  createdAt: string | null;
+};
+
+const BUG_STATUS_LABEL: Record<BugReportStatus, string> = {
+  new: "신규",
+  triaged: "확인됨",
+  resolved: "해결됨",
+};
+
+const BUG_STATUS_ORDER: BugReportStatus[] = ["new", "triaged", "resolved"];
+
 // Firebase callable errors carry a `code` like "functions/permission-denied".
 type CallableError = { code?: string; message?: string };
 
 function mapError(
   err: CallableError,
-  kind: "select" | "interview" | "list" | "resend"
+  kind: "select" | "interview" | "list" | "resend",
 ): string {
   const code = err?.code || "";
   if (code === "functions/permission-denied") {
@@ -141,6 +169,16 @@ export default function AdminPage() {
   const [fbData, setFbData] = useState<FounderFeedback | null>(null);
   const [fbEmpty, setFbEmpty] = useState(false);
 
+  // 버그 신고 state
+  const [bugReports, setBugReports] = useState<BugReportItem[]>([]);
+  const [bugLoading, setBugLoading] = useState(true);
+  const [bugError, setBugError] = useState<string | null>(null);
+  const [bugStatusFilter, setBugStatusFilter] = useState<
+    BugReportStatus | "all"
+  >("all");
+  const [bugUpdating, setBugUpdating] = useState<Record<string, boolean>>({});
+  const [bugDetail, setBugDetail] = useState<BugReportItem | null>(null);
+
   // Auth gate
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -148,8 +186,8 @@ export default function AdminPage() {
       if (!u) {
         router.push(
           `/${locale}/auth/login?redirect=${encodeURIComponent(
-            "/" + locale + "/admin"
-          )}`
+            "/" + locale + "/admin",
+          )}`,
         );
       } else {
         setUser(u);
@@ -168,7 +206,7 @@ export default function AdminPage() {
       try {
         const fn = httpsCallable<unknown, { items: WaitlistEntry[] }>(
           getFunctions(app, "us-central1"),
-          "getFounderWaitlist"
+          "getFounderWaitlist",
         );
         const res = await fn({});
         if (cancelled) return;
@@ -180,7 +218,7 @@ export default function AdminPage() {
         // permission-denied 만 권한 없음으로 판정. 그 외(네트워크 등)는
         // 실제 어드민의 일시 오류일 수 있어 셸은 유지하고 에러만 표시.
         setAuthorized(
-          ce?.code === "functions/permission-denied" ? false : true
+          ce?.code === "functions/permission-denied" ? false : true,
         );
         setListError(mapError(ce, "list"));
       } finally {
@@ -203,7 +241,7 @@ export default function AdminPage() {
       try {
         const fn = httpsCallable<unknown, { items: FounderEntry[] }>(
           getFunctions(app, "us-central1"),
-          "listFounders"
+          "listFounders",
         );
         const res = await fn({});
         if (cancelled) return;
@@ -220,6 +258,52 @@ export default function AdminPage() {
       cancelled = true;
     };
   }, [user]);
+
+  // 버그 신고 목록 로드 (Cloud Function 경유 — 최신순 전량, UI 에서 status 필터).
+  const loadBugReports = useCallback(async () => {
+    setBugLoading(true);
+    setBugError(null);
+    try {
+      const fn = httpsCallable<unknown, { items: BugReportItem[] }>(
+        getFunctions(app, "us-central1"),
+        "listBugReports",
+      );
+      const res = await fn({});
+      setBugReports(res.data.items || []);
+    } catch (err: unknown) {
+      setBugError(mapError(err as CallableError, "list"));
+    } finally {
+      setBugLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    loadBugReports();
+  }, [user, loadBugReports]);
+
+  // 버그 신고 status 변경 (new → triaged → resolved). 낙관적 갱신.
+  const handleBugStatus = useCallback(
+    async (id: string, status: BugReportStatus) => {
+      setBugUpdating((s) => ({ ...s, [id]: true }));
+      try {
+        const fn = httpsCallable(
+          getFunctions(app, "us-central1"),
+          "updateBugReportStatus",
+        );
+        await fn({ id, status });
+        setBugReports((prev) =>
+          prev.map((r) => (r.id === id ? { ...r, status } : r)),
+        );
+        setBugDetail((d) => (d && d.id === id ? { ...d, status } : d));
+      } catch (err: unknown) {
+        setBugError(mapError(err as CallableError, "list"));
+      } finally {
+        setBugUpdating((s) => ({ ...s, [id]: false }));
+      }
+    },
+    [],
+  );
 
   // 피드백 열람 — 이메일로 6문항 조회 후 모달 표시.
   const openFeedback = useCallback(async (email: string) => {
@@ -278,7 +362,7 @@ export default function AdminPage() {
       const fn = httpsCallable(functions, "markFounderInterviewed");
       await fn({ email });
       setInterviewSuccess(
-        `인터뷰 보너스(+3개월)가 적용되었습니다 — 총 6개월로 연장됨.`
+        `인터뷰 보너스(+3개월)가 적용되었습니다 — 총 6개월로 연장됨.`,
       );
     } catch (err: unknown) {
       setInterviewError(mapError(err as CallableError, "interview"));
@@ -296,7 +380,7 @@ export default function AdminPage() {
       const functions = getFunctions(app, "us-central1");
       const fn = httpsCallable<unknown, { ok: boolean; emailSent: boolean }>(
         functions,
-        "resendFounderAccessEmail"
+        "resendFounderAccessEmail",
       );
       const res = await fn({ email });
       setResendMsg((m) => ({
@@ -640,7 +724,276 @@ export default function AdminPage() {
             </button>
           </div>
         </section>
+
+        {/* 버그 신고 트리아지 card */}
+        <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Bug className="w-5 h-5 text-indigo-400" />
+              <h2 className="text-lg font-semibold">버그 신고</h2>
+            </div>
+            <div className="flex items-center gap-3">
+              {!bugLoading && !bugError && (
+                <span className="text-sm text-zinc-400">
+                  총 {bugReports.length}건
+                </span>
+              )}
+              <button
+                onClick={loadBugReports}
+                disabled={bugLoading}
+                className="inline-flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-50 text-sm transition"
+                aria-label="새로고침"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 ${bugLoading ? "animate-spin" : ""}`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* status 필터 */}
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            {(["all", ...BUG_STATUS_ORDER] as const).map((s) => {
+              const active = bugStatusFilter === s;
+              const count =
+                s === "all"
+                  ? bugReports.length
+                  : bugReports.filter((r) => r.status === s).length;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setBugStatusFilter(s)}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                    active
+                      ? "bg-indigo-600 text-white"
+                      : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                  }`}
+                >
+                  {s === "all" ? "전체" : BUG_STATUS_LABEL[s]} ({count})
+                </button>
+              );
+            })}
+          </div>
+
+          {bugLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+            </div>
+          ) : bugError ? (
+            <div className="flex items-start gap-3 text-red-400 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
+              <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
+              <p className="text-sm">{bugError}</p>
+            </div>
+          ) : (
+            (() => {
+              const filtered =
+                bugStatusFilter === "all"
+                  ? bugReports
+                  : bugReports.filter((r) => r.status === bugStatusFilter);
+              if (filtered.length === 0) {
+                return (
+                  <p className="text-sm text-zinc-500 py-8 text-center">
+                    신고가 없습니다.
+                  </p>
+                );
+              }
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-zinc-500 border-b border-zinc-800">
+                        <th className="py-2 pr-4 font-medium">접수일</th>
+                        <th className="py-2 pr-4 font-medium">상태</th>
+                        <th className="py-2 pr-4 font-medium">신고자</th>
+                        <th className="py-2 pr-4 font-medium">환경</th>
+                        <th className="py-2 pr-4 font-medium">내용</th>
+                        <th className="py-2 font-medium text-right">액션</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((r) => (
+                        <tr
+                          key={r.id}
+                          className="border-b border-zinc-800/60 last:border-0 align-top"
+                        >
+                          <td className="py-3 pr-4 text-zinc-400 whitespace-nowrap">
+                            {formatDate(r.createdAt)}
+                          </td>
+                          <td className="py-3 pr-4">
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                                r.status === "new"
+                                  ? "bg-amber-950/40 text-amber-300"
+                                  : r.status === "triaged"
+                                    ? "bg-blue-950/40 text-blue-300"
+                                    : "bg-green-950/40 text-green-300"
+                              }`}
+                            >
+                              {BUG_STATUS_LABEL[r.status]}
+                            </span>
+                          </td>
+                          <td className="py-3 pr-4 break-all text-zinc-300">
+                            {r.email || "—"}
+                          </td>
+                          <td className="py-3 pr-4 text-zinc-400 whitespace-nowrap text-xs">
+                            <div>{r.platform || "—"}</div>
+                            <div className="text-zinc-600">
+                              v{r.appVersion || "—"}
+                            </div>
+                          </td>
+                          <td className="py-3 pr-4 text-zinc-300 max-w-[20rem]">
+                            <p className="line-clamp-2">{r.description}</p>
+                          </td>
+                          <td className="py-3 text-right">
+                            <div className="flex flex-col items-end gap-1.5">
+                              <button
+                                onClick={() => setBugDetail(r)}
+                                className="inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 px-3 py-1.5 rounded-lg text-xs font-medium transition"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                상세
+                              </button>
+                              <select
+                                value={r.status}
+                                disabled={!!bugUpdating[r.id]}
+                                onChange={(e) =>
+                                  handleBugStatus(
+                                    r.id,
+                                    e.target.value as BugReportStatus,
+                                  )
+                                }
+                                className="bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                              >
+                                {BUG_STATUS_ORDER.map((s) => (
+                                  <option key={s} value={s}>
+                                    {BUG_STATUS_LABEL[s]}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()
+          )}
+        </section>
       </div>
+
+      {/* 버그 신고 상세 모달 */}
+      {bugDetail && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setBugDetail(null)}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-2xl p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Bug className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-lg font-semibold">버그 신고 상세</h3>
+              </div>
+              <button
+                onClick={() => setBugDetail(null)}
+                className="text-zinc-400 hover:text-zinc-200 transition shrink-0"
+                aria-label="닫기"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-sm">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-zinc-400">
+                <span
+                  className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                    bugDetail.status === "new"
+                      ? "bg-amber-950/40 text-amber-300"
+                      : bugDetail.status === "triaged"
+                        ? "bg-blue-950/40 text-blue-300"
+                        : "bg-green-950/40 text-green-300"
+                  }`}
+                >
+                  {BUG_STATUS_LABEL[bugDetail.status]}
+                </span>
+                <span className="text-zinc-500">
+                  {formatDate(bugDetail.createdAt)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <p className="text-zinc-500 mb-0.5">신고자</p>
+                  <p className="text-zinc-200 break-all">
+                    {bugDetail.email || "—"}
+                  </p>
+                  <p className="text-zinc-600 break-all font-mono mt-0.5">
+                    {bugDetail.uid}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-zinc-500 mb-0.5">환경</p>
+                  <p className="text-zinc-200">
+                    {bugDetail.platform || "—"} · v{bugDetail.appVersion || "—"}
+                  </p>
+                  <p className="text-zinc-600 mt-0.5">
+                    {bugDetail.context.route || "—"}
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-zinc-500 mb-1">설명</p>
+                <p className="text-zinc-100 whitespace-pre-wrap leading-relaxed">
+                  {bugDetail.description}
+                </p>
+              </div>
+
+              {bugDetail.context.agentSnapshot && (
+                <div>
+                  <p className="text-zinc-500 mb-1">에이전트 스냅샷</p>
+                  <pre className="text-xs text-zinc-300 whitespace-pre-wrap bg-zinc-950/60 border border-zinc-800 rounded-lg p-3 overflow-x-auto">
+                    {bugDetail.context.agentSnapshot}
+                  </pre>
+                </div>
+              )}
+
+              {bugDetail.context.recentLogs && (
+                <div>
+                  <p className="text-zinc-500 mb-1">최근 로그</p>
+                  <pre className="text-xs text-zinc-300 whitespace-pre-wrap bg-zinc-950/60 border border-zinc-800 rounded-lg p-3 overflow-x-auto max-h-48">
+                    {bugDetail.context.recentLogs}
+                  </pre>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
+                <span className="text-xs text-zinc-500">상태 변경:</span>
+                {BUG_STATUS_ORDER.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => handleBugStatus(bugDetail.id, s)}
+                    disabled={
+                      !!bugUpdating[bugDetail.id] || bugDetail.status === s
+                    }
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                      bugDetail.status === s
+                        ? "bg-indigo-600 text-white"
+                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                    }`}
+                  >
+                    {BUG_STATUS_LABEL[s]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 피드백 열람 모달 */}
       {fbOpen && (

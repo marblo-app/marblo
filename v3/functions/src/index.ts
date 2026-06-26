@@ -1813,6 +1813,177 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
   },
 );
 
+// ─── In-app Bug Reports (사용자 버그 신고) ─────────────────────
+// 데스크톱 앱 'Report a bug' → submitBugReport(): 로그인 사용자가 자유 서술 +
+// 자동수집 컨텍스트(앱버전/플랫폼/라우트/에이전트 스냅샷)를 제출한다. founder
+// feedback 과 달리 1인 1회 제한이 없고(여러 건 허용) 가벼운 rate-guard 만 둔다.
+// 서버에서 uid/email/createdAt 을 각인하고 bugReports/ 에 기록.
+const BUG_REPORT_DESC_MAX = 5000;
+const BUG_REPORT_CTX_FIELD_MAX = 10000;
+const BUG_REPORT_MIN_INTERVAL_MS = 5000; // 연타 방지
+const BUG_REPORT_DAILY_MAX = 30; // 유저당 하루 상한
+const BUG_REPORT_STATUSES = ["new", "triaged", "resolved"] as const;
+
+export const submitBugReport = functions.https.onCall(async (data, context) => {
+  const uid = context.auth?.uid;
+  if (!uid) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "로그인이 필요합니다.",
+    );
+  }
+  // 이메일은 서버가 토큰에서 각인(클라 입력 불신). 인증 이메일 없으면 null.
+  const email =
+    typeof context.auth?.token?.email === "string"
+      ? normalizeEmail(context.auth.token.email)
+      : null;
+
+  const description =
+    typeof data?.description === "string"
+      ? data.description.trim().slice(0, BUG_REPORT_DESC_MAX)
+      : "";
+  if (!description) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "버그 설명을 입력해 주세요.",
+    );
+  }
+
+  const str = (v: unknown, max: number): string =>
+    typeof v === "string" ? v.trim().slice(0, max) : "";
+  const appVersion = str(data?.appVersion, 100);
+  const platform = str(data?.platform, 100);
+
+  const ctxIn = (
+    data?.context && typeof data.context === "object" ? data.context : {}
+  ) as Record<string, unknown>;
+  const reportContext = {
+    recentLogs: str(ctxIn.recentLogs, BUG_REPORT_CTX_FIELD_MAX),
+    route: str(ctxIn.route, 500),
+    agentSnapshot: str(ctxIn.agentSnapshot, BUG_REPORT_CTX_FIELD_MAX),
+  };
+
+  // 가벼운 rate-guard — 연타/스팸 방지. 전용 throttle 문서를 트랜잭션으로 갱신해
+  // (uid+createdAt 복합 인덱스 없이) 최근 제출 간격과 일일 카운트를 강제한다.
+  const throttleRef = db.collection("bugReportThrottle").doc(uid);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(throttleRef);
+    const now = Date.now();
+    const d = snap.exists ? snap.data()! : {};
+    const lastAt = typeof d.lastAtMs === "number" ? d.lastAtMs : 0;
+    if (now - lastAt < BUG_REPORT_MIN_INTERVAL_MS) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        "잠시 후 다시 시도해 주세요.",
+      );
+    }
+    const dayStart = typeof d.dayStartMs === "number" ? d.dayStartMs : 0;
+    const dayRolledOver = now - dayStart > 24 * 60 * 60 * 1000;
+    const dayCount = dayRolledOver
+      ? 0
+      : typeof d.dayCount === "number"
+        ? d.dayCount
+        : 0;
+    if (dayCount >= BUG_REPORT_DAILY_MAX) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        "하루 제출 한도를 초과했습니다. 내일 다시 시도해 주세요.",
+      );
+    }
+    tx.set(
+      throttleRef,
+      {
+        lastAtMs: now,
+        dayStartMs: dayRolledOver ? now : dayStart || now,
+        dayCount: dayCount + 1,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  });
+
+  const reportRef = await db.collection("bugReports").add({
+    uid,
+    email,
+    description,
+    appVersion: appVersion || null,
+    platform: platform || null,
+    context: reportContext,
+    status: "new",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { ok: true, id: reportRef.id };
+});
+
+// 어드민 트리아지 — bugReports 최신순 조회. status 필터는 어드민 UI 에서 적용
+// (status+createdAt 복합 인덱스 회피를 위해 서버는 항상 최신순 전량 반환).
+export const listBugReports = functions.https.onCall(async (_data, context) => {
+  requireAdmin(context);
+  const snap = await db
+    .collection("bugReports")
+    .orderBy("createdAt", "desc")
+    .limit(200)
+    .get();
+  const s = (x: unknown): string => (typeof x === "string" ? x : "");
+  const items = snap.docs.map((doc) => {
+    const v = doc.data() as Record<string, unknown>;
+    const c = (v.context as Record<string, unknown>) || {};
+    return {
+      id: doc.id,
+      uid: s(v.uid),
+      email: typeof v.email === "string" ? v.email : null,
+      description: s(v.description),
+      appVersion: typeof v.appVersion === "string" ? v.appVersion : null,
+      platform: typeof v.platform === "string" ? v.platform : null,
+      context: {
+        recentLogs: s(c.recentLogs),
+        route: s(c.route),
+        agentSnapshot: s(c.agentSnapshot),
+      },
+      status: typeof v.status === "string" ? v.status : "new",
+      createdAt: tsToIso(v.createdAt),
+    };
+  });
+  return { items };
+});
+
+// 어드민 트리아지 — 신고 status 변경(new → triaged → resolved). 클라 직접
+// update 는 규칙으로 차단되어 있으므로 이 콜러블(Admin SDK)만 status 를 바꾼다.
+export const updateBugReportStatus = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const id = typeof data?.id === "string" ? data.id.trim() : "";
+    const status = typeof data?.status === "string" ? data.status : "";
+    if (!id) {
+      throw new functions.https.HttpsError("invalid-argument", "id required");
+    }
+    if (!(BUG_REPORT_STATUSES as readonly string[]).includes(status)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "유효하지 않은 상태값입니다.",
+      );
+    }
+    const ref = db.collection("bugReports").doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new functions.https.HttpsError(
+        "not-found",
+        "신고를 찾을 수 없습니다.",
+      );
+    }
+    await ref.set(
+      {
+        status,
+        triagedBy: context.auth?.uid ?? null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return { ok: true };
+  },
+);
+
 // ─── Telemetry → BigQuery ─────────────────────────────────────
 
 interface TelemetryRow {

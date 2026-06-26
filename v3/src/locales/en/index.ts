@@ -27,6 +27,7 @@ import { usage } from "./usage";
 import { onboarding } from "./onboarding";
 import { common } from "./common";
 import { activity } from "./activity";
+import { bugReport } from "./bugReport";
 
 export const en: Record<MessageKey, string> = {
   ...header,
@@ -48,4 +49,5 @@ export const en: Record<MessageKey, string> = {
   ...onboarding,
   ...common,
   ...activity,
+  ...bugReport,
 };

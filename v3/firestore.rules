@@ -337,5 +337,25 @@ service cloud.firestore {
         && resource.data.userId == request.auth.uid;
       allow write: if false; // Only Cloud Functions can write
     }
+
+    // ===== Bug Reports (인앱 사용자 버그 신고) =====
+    // 앱은 submitBugReport 콜러블(Admin SDK) 경유로 제출 — 서버가 uid/email/
+    // createdAt 을 각인하고 입력을 검증한다. 아래 규칙은 방어선:
+    //  - read: 본인 신고만. 어드민 트리아지는 listBugReports 콜러블로 조회.
+    //  - create: 로그인 + 본인 uid 각인 시에만(비로그인 차단).
+    //  - update/delete: 금지 — status 변경은 updateBugReportStatus(어드민) 경로.
+    match /bugReports/{reportId} {
+      allow read: if isAuthenticated()
+        && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated()
+        && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // submitBugReport 의 rate-guard 가 쓰는 throttle 문서 — 전적으로 Cloud
+    // Functions(Admin SDK)로만 read/write. 클라이언트 직접 접근 차단.
+    match /bugReportThrottle/{uid} {
+      allow read, write: if false;
+    }
   }
 }

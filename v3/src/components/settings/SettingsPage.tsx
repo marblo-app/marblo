@@ -8,6 +8,7 @@ import { TeamManagement } from "./TeamManagement";
 import { PlanGate } from "./PlanGate";
 import { APIKeysSettings } from "./APIKeysSettings";
 import { PrivacySettings } from "./PrivacySettings";
+import { BugReportModal } from "./BugReportModal";
 
 type SettingsTab =
   | "profile"
@@ -16,7 +17,8 @@ type SettingsTab =
   | "team"
   | "apikeys"
   | "privacy"
-  | "language";
+  | "language"
+  | "bugreport";
 
 interface TabSpec {
   id: SettingsTab;
@@ -27,7 +29,8 @@ interface TabSpec {
     | "settings.tab.team"
     | "settings.tab.privacy"
     | "settings.tab.apikeys"
-    | "settings.tab.language";
+    | "settings.tab.language"
+    | "bugReport.tab";
   icon?: React.ReactNode;
 }
 
@@ -38,6 +41,7 @@ const TABS: TabSpec[] = [
   { id: "team", labelKey: "settings.tab.team" },
   { id: "privacy", labelKey: "settings.tab.privacy" },
   { id: "language", labelKey: "settings.tab.language" },
+  { id: "bugreport", labelKey: "bugReport.tab" },
   {
     id: "apikeys",
     labelKey: "settings.tab.apikeys",
@@ -123,6 +127,7 @@ export function SettingsPage() {
         {activeTab === "apikeys" && <APIKeysSettings />}
         {activeTab === "privacy" && <PrivacySettings />}
         {activeTab === "language" && <LanguageSection />}
+        {activeTab === "bugreport" && <BugReportSection />}
       </div>
     </div>
   );
@@ -247,6 +252,29 @@ function LanguageSection() {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function BugReportSection() {
+  const { t } = useTranslation();
+  const [showModal, setShowModal] = useState(false);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+        <h3 className="mb-1 text-sm font-medium text-gray-200">
+          {t("bugReport.heading")}
+        </h3>
+        <p className="mb-4 text-xs text-gray-500">{t("bugReport.help")}</p>
+        <button
+          onClick={() => setShowModal(true)}
+          className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
+        >
+          🐛 {t("bugReport.button")}
+        </button>
+      </div>
+      {showModal && <BugReportModal onClose={() => setShowModal(false)} />}
     </div>
   );
 }

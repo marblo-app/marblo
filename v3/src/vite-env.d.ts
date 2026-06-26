@@ -1,5 +1,9 @@
 /// <reference types="vite/client" />
 
+// Installed app version, injected by vite.config.ts `define`. Used by the
+// bug-report context collector to stamp the running app version.
+declare const __APP_VERSION__: string;
+
 interface FileNode {
   name: string;
   path: string;
