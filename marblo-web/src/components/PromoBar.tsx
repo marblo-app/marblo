@@ -58,7 +58,7 @@ export default function PromoBar() {
             <span className="font-medium">{t("message")}</span>
           </div>
 
-          <div className="w-full sm:w-auto sm:max-w-md">
+          <div className="hidden sm:block w-full sm:w-auto sm:max-w-md">
             <BetaTester50SignupForm
               source="promo_bar"
               layout="inline-compact"

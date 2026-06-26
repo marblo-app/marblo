@@ -101,7 +101,7 @@ function KanbanMockup({ color }: { color: Feature['color'] }) {
 function FlowMockup({ color }: { color: Feature['color'] }) {
   const nodes = ['Analyze', 'Tasks', 'Spawn', 'Review'];
   return (
-    <div className="flex items-center justify-between gap-2 h-full px-2">
+    <div className="flex flex-wrap sm:flex-nowrap items-center justify-center sm:justify-between gap-x-2 gap-y-3 h-full px-2">
       {nodes.map((node, i) => (
         <div key={node} className="flex items-center gap-2">
           <div className={`flex items-center justify-center rounded-xl px-3 py-2 text-xs font-medium border ${i === 0 || i === 3 ? `${color.bg} ${color.text} ${color.border}` : 'bg-zinc-800 text-zinc-300 border-zinc-700'}`}>

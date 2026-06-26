@@ -513,5 +513,10 @@
     "settings_deletion_desc": "保有する個人情報の削除を請求します。30日以内に処理結果をご案内します。",
     "settings_deletion_button": "削除請求メールを送る",
     "settings_view_policy": "プライバシーポリシーを表示"
+  },
+  "notFound": {
+    "title": "ページが見つかりません",
+    "description": "お探しのページは存在しないか、移動しました。",
+    "home_cta": "ホームへ戻る"
   }
 }
