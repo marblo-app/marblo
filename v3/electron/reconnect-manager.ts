@@ -106,3 +106,33 @@ export function findReconnectCandidates(
     };
   });
 }
+
+/**
+ * Decide a Claude agent's cold-boot resume target on `agent:reconnect`.
+ *
+ * Returns a concrete session UUID to `--resume`, or `null` to skip (the agent
+ * is reported as `no-session`, marked stopped, and waits for a manual ▶ Start).
+ *
+ * Policy (phantom-agents-on-launch fix): resume ONLY when this machine has an
+ * agent-SPECIFIC match —
+ *   - `labelSessionId`: a marblo-labels.json entry for this exact agent, or
+ *   - `nameScopedSessionId`: a name/id-scoped scan of ~/.claude/projects.
+ *
+ * The previous behaviour also had an "adopt the most-recent *unclaimed*
+ * session" fallback for labelless agents. That fallback is intentionally gone.
+ * The `agents/` Firestore collection carries no machine/session identity, so a
+ * second machine signed into the same account (e.g. Windows + macOS as the
+ * same user) rehydrates the *whole* project's agent docs — including stale
+ * zombies left by the other machine. With the blind fallback, every one of
+ * those labelless docs grabbed an arbitrary local JSONL and launched a real
+ * CLI process — the "83 phantom agents attached on launch" bug. Requiring an
+ * agent-specific match means a machine only ever resumes agents it actually
+ * has a session for; foreign/finished docs fall through to the skip path
+ * instead of being resurrected.
+ */
+export function resolveClaudeColdBootResumeId(
+  labelSessionId: string | null,
+  nameScopedSessionId: string | null,
+): string | null {
+  return labelSessionId ?? nameScopedSessionId ?? null;
+}

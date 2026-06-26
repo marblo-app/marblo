@@ -30,10 +30,7 @@ import {
   resolveWatchdogConfig,
   type WatchdogTicket,
 } from "./agent-watchdog";
-import {
-  OrchestratorManager,
-  isOrchestratorSession,
-} from "./orchestrator-manager";
+import { OrchestratorManager } from "./orchestrator-manager";
 import { installBundledHarness } from "./bundle-installer";
 import {
   listCatalog,
@@ -48,7 +45,10 @@ import { FlowRunner } from "./flow-engine/flow-runner";
 import { KanbanBridge } from "./flow-engine/kanban-bridge";
 import { createLLMProvider } from "./flow-engine/llm-provider";
 import type { Flow, FlowEvent, HumanInput } from "./flow-engine/types";
-import { findReconnectCandidates } from "./reconnect-manager";
+import {
+  findReconnectCandidates,
+  resolveClaudeColdBootResumeId,
+} from "./reconnect-manager";
 import {
   saveAgyConversationLabel,
   getAgyConversationId,
@@ -2832,13 +2832,6 @@ ipcMain.handle(
       rootPath,
     );
 
-    // Track Claude session IDs claimed during this reconnect pass — used
-    // by the "any-unclaimed-session" fallback below to avoid attaching the
-    // same JSONL to two different agents.
-    const claimedClaudeSessions = new Set<string>(
-      candidates.map((c) => c.sessionId).filter((s): s is string => Boolean(s)),
-    );
-
     const results = [];
 
     for (const candidate of candidates) {
@@ -2891,39 +2884,27 @@ ipcMain.handle(
       //   empty so we don't error out on a fresh agent that never ran.
       let resumeId: string | null | undefined = candidate.sessionId;
       if (agentData.model === "claude") {
-        if (!resumeId) {
-          resumeId = getAnyOrchestrator().resolveSessionId(
-            rootPath,
-            "latest",
-            agentData.name,
-            agentData.id,
-          );
-        }
-        // Aggressive fallback: agents created in earlier app versions don't
-        // have label entries in marblo-labels.json, so the name/id-filtered
-        // resolveSessionId returns null even when the project has plenty of
-        // resumable JSONLs. Attach the most-recent unclaimed session as a
-        // best-effort. --resume is token-free; worst case the user deletes
-        // the wrong-session agent and re-spawns.
-        //
-        // Never adopt the orchestrator's own session here: it's usually the
-        // most-recently-written JSONL, so without this guard a labelless agent
-        // grabs the orchestrator conversation instead of an agent one.
-        if (!resumeId) {
-          const allSessions = getAnyOrchestrator().listSessions(rootPath);
-          const unclaimed = allSessions.find(
-            (s) =>
-              !claimedClaudeSessions.has(s.id) &&
-              !isOrchestratorSession(rootPath, s.id),
-          );
-          if (unclaimed) {
-            resumeId = unclaimed.id;
-            claimedClaudeSessions.add(unclaimed.id);
-            console.log(
-              `[Reconnect] Claude agent ${agentData.name} → unlabeled-session fallback ${unclaimed.id}`,
+        // Resume ONLY on an agent-SPECIFIC match: a marblo-labels.json entry
+        // (candidate.sessionId) or a name/id-scoped ~/.claude scan. The old
+        // "adopt any unclaimed session" fallback for labelless agents is gone
+        // on purpose — see resolveClaudeColdBootResumeId. agents/ has no
+        // machine identity, so a second machine on the same account rehydrates
+        // the other machine's stale agent docs; the blind fallback let each of
+        // them grab an arbitrary local JSONL and launch a real CLI (the "83
+        // phantom agents on launch" bug). No specific match → fall through to
+        // the no-session skip below (marked stopped, woken via ▶ Start).
+        const nameScoped = candidate.sessionId
+          ? null
+          : getAnyOrchestrator().resolveSessionId(
+              rootPath,
+              "latest",
+              agentData.name,
+              agentData.id,
             );
-          }
-        }
+        resumeId = resolveClaudeColdBootResumeId(
+          candidate.sessionId,
+          nameScoped,
+        );
       } else {
         const model = agentData.model as
           | "claude"
