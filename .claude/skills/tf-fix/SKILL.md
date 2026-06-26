@@ -1,70 +1,73 @@
 ---
 name: tf-fix
-description: FAILED/BLOCKED 태스크 진단 + 복구, 또는 불필요한 태스크 취소/삭제
+description: Diagnose and recover FAILED/BLOCKED tasks, or cancel/delete unneeded ones. / FAILED/BLOCKED 태스크 진단 + 복구, 또는 불필요한 태스크 취소/삭제
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
-# Marblo 태스크 복구
+# Marblo Task Recovery
 
-> FAILED 또는 BLOCKED 상태의 태스크를 진단하고 복구합니다.
+> Diagnose and recover tasks in FAILED or BLOCKED state.
 
 ---
 
-## ⛔ 필수 규칙: Marblo MCP 전용
+## ⛔ Required rule: Marblo MCP only
 
-> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/상태변경/기록은 반드시 **Marblo MCP 도구**를 사용합니다:
+> **Never use the Claude Code built-in tools (TaskCreate, TaskList, TaskUpdate, TaskGet).**
+> Task lookup/status-change/logging MUST use the **Marblo MCP tools**:
 > `get_all_tasks`, `get_task_activities`, `update_task_status`, `add_activity`
 
 ---
 
-## 단계
+## Steps
 
-1. `get_all_tasks`로 FAILED / BLOCKED 태스크를 찾습니다.
-2. 각 문제 태스크에 대해:
-   a. `get_task_activities`로 활동 로그를 확인합니다 (실패 원인 파악).
-   b. 원인을 분류합니다:
-      - **환경 문제**: API 키 미설정, Docker 안 돌아감, 패키지 미설치
-      - **코드 문제**: 에이전트가 작성한 코드 버그, 테스트 실패
-      - **의존성 문제**: 선행 태스크가 아직 미완료
-      - **스킬 문제**: 스킬 파일 규칙이 모호해서 에이전트가 잘못 해석
-3. 원인에 맞는 해결책을 제시하고 실행합니다:
-   - 환경 문제 → 설정 수정 후 `update_task_status`로 TODO(retry)로 되돌리기
-   - 코드 문제 → 직접 수정 후 재시도 or 피드백 추가
-   - 의존성 → 선행 태스크 먼저 처리
-   - 스킬 → 스킬 파일 규칙 수정 제안
-4. 복구 후 `add_activity`로 수정 내용을 기록합니다.
+1. Use `get_all_tasks` to find FAILED / BLOCKED tasks.
+2. For each problem task:
+   a. Use `get_task_activities` to review the activity log (find the failure cause).
+   b. Classify the cause:
+   - **Environment issue**: API key not set, Docker not running, package not installed
+   - **Code issue**: bug in agent-written code, failing test
+   - **Dependency issue**: a prerequisite task is not yet done
+   - **Skill issue**: the skill file's rules were ambiguous, so the agent misread them
+3. Propose and apply a fix matching the cause:
+   - Environment issue → fix the config, then revert to TODO(retry) with `update_task_status`
+   - Code issue → fix it directly and retry, or add feedback
+   - Dependency → handle the prerequisite task first
+   - Skill → propose a fix to the skill file's rules
+4. After recovery, record the change with `add_activity`.
 
-## 자주 나오는 FAILED 원인
+## Common FAILED causes
 
-- `.env` 파일에 API 키 빠짐
-- Docker 컨테이너가 꺼져있음
-- 패키지 버전 충돌
-- 에이전트가 scope 밖 파일을 수정하려다 실패
+- API key missing from the `.env` file
+- Docker container is down
+- Package version conflict
+- Agent failed trying to modify a file outside its scope
 
 ---
 
-## 태스크 취소 / 삭제
+## Cancel / delete a task
 
-사용자가 "이 태스크 필요 없어", "취소해줘" 등 요청하면:
+When the user says "I don't need this task", "cancel it", etc.:
 
-1. `get_all_tasks`로 대상 태스크를 확인합니다.
-2. 사용자에게 확인합니다:
+1. Use `get_all_tasks` to confirm the target task.
+2. Confirm with the user:
+
    ```
-   ❌ 삭제 대상:
-     TASK-007: 결제 연동 (현재: TODO)
+   ❌ Delete target:
+     TASK-007: Payment integration (current: TODO)
 
-     이 태스크에 의존하는 다른 태스크: TASK-010, TASK-011
-     → 이 태스크들도 영향받을 수 있습니다.
+     Other tasks that depend on this: TASK-010, TASK-011
+     → These tasks may be affected too.
 
-     정말 삭제할까요?
+     Really delete?
    ```
-3. 승인 시 `curl -X DELETE http://localhost:8001/api/tasks/{id}` 호출
-4. `add_activity`로 관련 태스크에 "TASK-007 삭제됨 — 의존성 확인 필요" 기록
 
-### FAILED → 취소
+3. On approval, call `curl -X DELETE http://localhost:8001/api/tasks/{id}`
+4. Record "TASK-007 deleted — check dependencies" on the related tasks with `add_activity`.
 
-복구가 어려운 FAILED 태스크는 삭제 처리:
-- 3번 이상 재시도 실패
-- 더 이상 필요 없는 기능
-- scope가 완전히 바뀐 경우
+### FAILED → cancel
+
+For FAILED tasks that are hard to recover, delete them:
+
+- Failed 3+ retries
+- A feature no longer needed
+- The scope has changed completely

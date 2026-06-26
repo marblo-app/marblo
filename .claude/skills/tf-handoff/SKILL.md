@@ -1,42 +1,42 @@
 ---
 name: tf-handoff
-description: 에이전트가 실패한 태스크를 직접 이어받아서 완료합니다
+description: Take over a task an agent failed and finish it yourself. / 에이전트가 실패한 태스크를 직접 이어받아서 완료합니다
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
-# Marblo 수동 핸드오프
+# Marblo Manual Handoff
 
-> 에이전트가 처리하지 못한 태스크를 내가 직접 이어받아서 완료합니다.
+> Take over a task an agent couldn't handle and finish it yourself.
 
 ---
 
-## ⛔ 필수 규칙: Marblo MCP 전용
+## ⛔ Required rule: Marblo MCP only
 
-> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/상태변경/기록은 반드시 **Marblo MCP 도구**를 사용합니다:
+> **Never use the Claude Code built-in tools (TaskCreate, TaskList, TaskUpdate, TaskGet).**
+> Task lookup/status-change/logging MUST use the **Marblo MCP tools**:
 > `get_all_tasks`, `get_task_activities`, `update_task_status`, `claim_task`,
 > `add_activity`, `submit_for_review`, `get_agent_skill`
 
 ---
 
-## 단계
+## Steps
 
-1. `get_all_tasks`로 FAILED, BLOCKED, 또는 오래된 IN_PROGRESS 태스크를 찾습니다.
-2. 대상 태스크의 상태를 확인합니다:
-   - FAILED → `update_task_status`로 TODO(retry) → 다시 claim
-   - BLOCKED → 차단 원인 확인 → 해결 후 resolve
-   - IN_PROGRESS (오래됨) → 에이전트가 중단된 것. 활동 로그로 어디까지 했는지 확인
-3. `get_task_activities`로 에이전트가 어디까지 작업했는지 확인합니다.
-4. `get_agent_skill`로 해당 역할의 스킬 파일을 로드합니다.
-5. 에이전트가 남긴 코드를 확인하고 이어서 작업합니다:
-   - 이미 생성된 파일이 있으면 그 위에 이어서 작업
-   - 테스트가 실패했으면 수정
-   - 빠진 부분 보완
-6. 작업 중 `add_activity`로 "수동 핸드오프: [작업 내용]" 기록합니다.
-7. 완료 후 `submit_for_review` 또는 바로 DONE 처리합니다.
+1. Use `get_all_tasks` to find FAILED, BLOCKED, or stale IN_PROGRESS tasks.
+2. Check the target task's status:
+   - FAILED → revert to TODO(retry) with `update_task_status` → claim again
+   - BLOCKED → identify the blocking cause → resolve, then proceed
+   - IN_PROGRESS (stale) → an agent stalled. Check how far it got from the activity log
+3. Use `get_task_activities` to see how far the agent worked.
+4. Use `get_agent_skill` to load the skill file for that role.
+5. Review the code the agent left and continue:
+   - If files already exist, continue on top of them
+   - If a test failed, fix it
+   - Fill in the missing parts
+6. During work, record "Manual handoff: [what you did]" with `add_activity`.
+7. When done, `submit_for_review` or mark DONE directly.
 
-## 핸드오프 판단 기준
+## Handoff criteria
 
-- 에이전트가 3번 이상 같은 태스크에서 FAILED → 직접 하는 게 빠름
-- 환경 설정이 필요한 작업 (API 키, 외부 서비스 연동)
-- 에이전트가 scope 밖 수정이 필요한 복잡한 작업
+- An agent FAILED the same task 3+ times → doing it yourself is faster
+- Work that requires environment setup (API keys, external service integration)
+- Complex work where the agent needs to modify files outside its scope

@@ -1,121 +1,122 @@
 ---
 name: tf-feedback
-description: PM이 대시보드에서 남긴 피드백을 확인하고 답변/반영합니다. 양방향 소통 채널입니다.
+description: Check and respond to PM feedback left on the dashboard — a two-way communication channel. / PM이 대시보드에서 남긴 피드백을 확인하고 답변/반영합니다. 양방향 소통 채널입니다.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 
-# Marblo PM 피드백 확인 + 답변
+# Marblo PM Feedback Check + Reply
 
-> PM이 대시보드에서 태스크에 남긴 피드백(코멘트)을 확인하고 답변합니다.
-> 에이전트가 작업 중에 놓친 피드백을 잡아내는 양방향 소통 채널입니다.
+> Check and reply to the feedback (comments) the PM left on tasks in the dashboard.
+> A two-way communication channel that catches feedback an agent missed during work.
 
 ---
 
-## ⛔ 필수 규칙: Marblo MCP 전용
+## ⛔ Required rule: Marblo MCP only
 
-> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 피드백 확인/답변은 반드시 **Marblo MCP 도구**를 사용합니다:
+> **Never use the Claude Code built-in tools (TaskCreate, TaskList, TaskUpdate, TaskGet).**
+> Feedback check/reply MUST use the **Marblo MCP tools**:
 > `check_feedback`, `acknowledge_feedback`, `add_activity`, `get_task_activities`, `get_all_tasks`
 
 ---
 
-## Step 1: 미확인 피드백 조회
+## Step 1: Fetch unread feedback
 
-`check_feedback`으로 PM이 남긴 미확인 피드백을 조회합니다.
+Use `check_feedback` to fetch the unread feedback the PM left.
 
-### 피드백이 있을 때
+### When there is feedback
 
 ```
-💬 미확인 PM 피드백: {n}건
+💬 Unread PM feedback: {n}
 ━━━━━━━━━━━━━━━━━━━━━━━
 
-1. TASK-003: AI 요약 API (IN_PROGRESS)
-   💬 "파서 구현내용 설명해줄래?"
-   — 11분 전
+1. TASK-003: AI summary API (IN_PROGRESS)
+   💬 "Can you explain the parser implementation?"
+   — 11 minutes ago
 
-2. TASK-005: 메인 화면 (REVIEW)
-   💬 "반응형 확인 부탁. 모바일에서 잘리는 부분 있음"
-   — 2시간 전
+2. TASK-005: Main screen (REVIEW)
+   💬 "Please check responsiveness. Something gets cut off on mobile."
+   — 2 hours ago
 
-어떤 피드백부터 처리할까요? (번호 또는 '전체')
+Which feedback should we handle first? (number or 'all')
 ```
 
-### 피드백이 없을 때
+### When there is no feedback
 
 ```
-✅ 미확인 피드백 없음
+✅ No unread feedback
 
-💡 PM이 대시보드에서 피드백을 남기면 여기서 확인할 수 있습니다.
+💡 When the PM leaves feedback on the dashboard, you can check it here.
 ```
 
 ---
 
-## Step 2: 피드백 상세 확인 + 코드 분석
+## Step 2: Review feedback in detail + analyze code
 
-각 피드백에 대해:
+For each piece of feedback:
 
-1. `get_task_activities`로 전체 활동 로그를 확인합니다 (맥락 파악).
-2. 태스크의 scope 파일들을 읽어서 현재 코드 상태를 파악합니다.
-3. PM의 질문/요청을 분석합니다:
+1. Use `get_task_activities` to review the full activity log (get context).
+2. Read the task's scope files to understand the current code state.
+3. Analyze the PM's question/request:
 
-| 피드백 유형 | 대응 |
-|------------|------|
-| **질문** ("설명해줘", "왜 이렇게?") | 코드를 분석해서 답변 작성 |
-| **수정 요청** ("이거 바꿔줘", "추가해줘") | 코드 수정 후 결과 보고 |
-| **확인 요청** ("이거 맞아?", "테스트 됐어?") | 확인 후 결과 답변 |
-| **방향 지시** ("이 방식으로 해줘") | 방침 확인 + 반영 계획 답변 |
+| Feedback type                                                | Response                                              |
+| ------------------------------------------------------------ | ----------------------------------------------------- |
+| **Question** ("explain this", "why this way?")               | Analyze the code and write an answer                  |
+| **Change request** ("change this", "add this")               | Modify the code and report the result                 |
+| **Confirmation request** ("is this right?", "is it tested?") | Verify, then answer with the result                   |
+| **Direction** ("do it this way")                             | Confirm the approach + answer with a plan to apply it |
 
 ---
 
-## Step 3: 답변 + 반영
+## Step 3: Reply + apply
 
-### 3-1. 답변 달기
+### 3-1. Post a reply
 
-`add_activity`로 PM 피드백에 대한 답변을 기록합니다:
+Record a reply to the PM feedback with `add_activity`:
 
 ```
 add_activity:
   task_id: {task_id}
-  message: "💬 PM 피드백 답변: {상세 답변 내용}"
+  message: "💬 PM feedback reply: {detailed answer}"
 ```
 
-### 3-2. 코드 수정이 필요한 경우
+### 3-2. When a code change is needed
 
-1. 코드를 수정합니다.
-2. `add_activity`로 수정 내용을 기록합니다:
+1. Modify the code.
+2. Record the change with `add_activity`:
    ```
-   "💬 PM 피드백 반영: {수정한 파일} — {변경 내용}"
+   "💬 PM feedback applied: {file modified} — {what changed}"
    ```
 
-### 3-3. 피드백 확인 완료 처리
+### 3-3. Mark feedback as acknowledged
 
-`acknowledge_feedback`으로 해당 피드백을 읽음 처리합니다.
+Use `acknowledge_feedback` to mark the feedback as read.
 
 ---
 
-## Step 4: 처리 결과 요약
+## Step 4: Summarize results
 
 ```
-💬 피드백 처리 완료
+💬 Feedback handling complete
 ━━━━━━━━━━━━━━━━━
 
-  확인/답변: {n}건
-  코드 수정: {n}건
-  남은 미확인: {n}건
+  Checked/replied: {n}
+  Code changes:    {n}
+  Still unread:    {n}
 
-  답변 내역:
-  • TASK-003: 파서 구현 구조 설명 완료
-  • TASK-005: 모바일 반응형 CSS 수정 완료
+  Reply log:
+  • TASK-003: explained the parser implementation structure
+  • TASK-005: fixed mobile responsive CSS
 ```
 
 ---
 
-## 자동 리마인더
+## Auto reminder
 
-이 스킬은 다른 스킬 실행 중에도 활용됩니다:
-- `/tf-work`: 작업 중 `check_feedback` 호출 → 피드백 있으면 알림
-- `/tf-resume`: 재개 시 `check_feedback` 호출 → 중간에 온 피드백 확인
-- `/tf-hold`: 중단 시 미확인 피드백 여부 표시
+This skill is used during other skills as well:
 
-**하지만 PM이 급한 피드백을 보냈을 때** → `/tf-feedback`으로 즉시 확인 + 답변 가능
+- `/tf-work`: calls `check_feedback` during work → notifies if there is feedback
+- `/tf-resume`: calls `check_feedback` on resume → checks feedback that arrived in the meantime
+- `/tf-hold`: shows whether there is unread feedback when pausing
+
+**But when the PM sends urgent feedback** → use `/tf-feedback` to check and reply immediately.

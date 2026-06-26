@@ -1,106 +1,106 @@
 ---
 name: tf-create-tasks
-description: 분석 결과를 기반으로 Marblo MCP에 태스크를 일괄 생성합니다
+description: Bulk-create tasks in Marblo MCP from the analysis results. / 분석 결과를 기반으로 Marblo MCP에 태스크를 일괄 생성합니다
 allowed-tools: Bash, Read, Glob, Grep
 ---
 
-# Marblo 태스크 생성
+# Marblo Task Creation
 
-> `/tf-analyze` 분석 결과를 기반으로 태스크를 생성합니다.
-> 사용자 확인을 받은 후 `create_tasks_bulk`로 일괄 생성합니다.
+> Create tasks based on the `/tf-analyze` analysis results.
+> After getting the user's confirmation, bulk-create them with `create_tasks_bulk`.
 
 ---
 
-## ⛔ 필수 규칙: Marblo MCP 전용
+## ⛔ Required rule: Marblo MCP only
 
-> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 반드시 **Marblo MCP의 `create_tasks_bulk`**를 사용합니다.
+> **Never use the Claude Code built-in tools (TaskCreate, TaskList, TaskUpdate, TaskGet).**
+> You MUST use **Marblo MCP's `create_tasks_bulk`**.
 >
 > ```
-> ⛔ 잘못된 방법: Claude Code의 TaskCreate를 개별 호출
-> ✅ 올바른 방법: Marblo MCP의 create_tasks_bulk를 1번 호출
+> ⛔ Wrong way: call Claude Code's TaskCreate individually
+> ✅ Right way: call Marblo MCP's create_tasks_bulk once
 > ```
 
 ---
 
-## Phase 1: 태스크 목록 구성
+## Phase 1: Build the task list
 
-이전 분석 결과(대화 컨텍스트 또는 `docs/PRD.md`)를 기반으로 태스크를 구성합니다.
+Build the tasks based on the prior analysis result (conversation context or `docs/PRD.md`).
 
-### 태스크 카드 형식
+### Task card format
 
 ```
-TASK-001: [제목 — 한 줄]
+TASK-001: [title — one line]
   role: backend | frontend | test | devops
-  priority: 5(긴급) ~ 1(낮음)
+  priority: 5(urgent) ~ 1(low)
   depends_on: [TASK-NNN, ...]
-  scope: [수정할 파일 경로들]
-  goal: 목표 1~2문장 (무엇을/왜)
-  changes: [추가/수정할 함수·동작 불릿]
-  acceptance: [검증 가능한 완료 기준]
-  notes: [제약·주의 (선택)]
+  scope: [file paths to modify]
+  goal: 1-2 sentence goal (what/why)
+  changes: [bullets of functions/behaviors to add/modify]
+  acceptance: [verifiable completion criteria]
+  notes: [constraints/cautions (optional)]
 ```
 
-### 분해 원칙
+### Decomposition principles
 
-1. **크기**: 태스크 1개 = 1~2시간 분량
-2. **단위**: API 엔드포인트 1개 = 태스크 1개
-3. **의존성**: 반드시 순서가 있는 것만 depends_on
-4. **scope**: 파일 영역 분리 → Git 충돌 방지
-5. **검증**: 각 태스크에 완료 기준 명시
-6. **본문 구조화**: 줄글 금지. goal/changes/acceptance/notes 필드로 나눠 작성. 파일 경로는 scope에만.
-7. **진행 분리**: 작업 중 진행 내용은 description이 아니라 add_activity로 기록.
+1. **Size**: 1 task = 1-2 hours of work
+2. **Unit**: 1 API endpoint = 1 task
+3. **Dependencies**: only set depends_on where there is a real ordering
+4. **scope**: separate file areas → prevent Git conflicts
+5. **Verification**: state completion criteria for each task
+6. **Structured body**: no prose. Split into goal/changes/acceptance/notes fields. File paths go only in scope.
+7. **Separate progress**: log in-progress work via add_activity, not in the description.
 
 ---
 
-## Phase 2: 사용자 확인
+## Phase 2: User confirmation
 
 ```
-📋 생성할 태스크: {N}개
-📦 프로젝트: {project_name}
+📋 Tasks to create: {N}
+📦 Project: {project_name}
 
-TASK-001: [제목] (backend, priority: 5)
-TASK-002: [제목] (backend, priority: 4, depends_on: TASK-001)
-TASK-003: [제목] (frontend, priority: 4)
+TASK-001: [title] (backend, priority: 5)
+TASK-002: [title] (backend, priority: 4, depends_on: TASK-001)
+TASK-003: [title] (frontend, priority: 4)
 ...
 
-이대로 생성할까요?
+Create these as-is?
 ```
 
-**반드시 사용자 확인을 받은 후에만 생성합니다.**
+**Only create after getting the user's confirmation.**
 
 ---
 
-## Phase 3: 일괄 생성
+## Phase 3: Bulk creation
 
-1. **프로젝트명 확인**: 모든 태스크에 동일한 project 필드 사용
-2. **`create_tasks_bulk` 호출**: 한 번의 호출로 전체 태스크 생성
-3. **생성 결과 확인**:
-   - `get_all_tasks`로 대시보드 등록 확인
-   - 의존성 매핑 확인
-   - 누락된 태스크 없는지 확인
+1. **Confirm project name**: use the same project field for all tasks
+2. **Call `create_tasks_bulk`**: create all tasks in a single call
+3. **Verify the result**:
+   - Confirm dashboard registration with `get_all_tasks`
+   - Verify dependency mapping
+   - Check that no tasks are missing
 
 ---
 
-## Phase 4: 결과 보고
+## Phase 4: Report results
 
 ```
-✅ 태스크 생성 완료
+✅ Task creation complete
 ━━━━━━━━━━━━━━━━━━
 
-📦 프로젝트: {project_name}
-📋 생성된 태스크: {N}개
+📦 Project: {project_name}
+📋 Tasks created: {N}
 
-  backend:  {n}개
-  frontend: {n}개
-  test:     {n}개
-  devops:   {n}개
+  backend:  {n}
+  frontend: {n}
+  test:     {n}
+  devops:   {n}
 
-🔗 의존성 체인:
+🔗 Dependency chains:
   TASK-001 → TASK-002 → TASK-004
   TASK-001 → TASK-003 → TASK-005
 
-즉시 시작 가능: {M}개 (의존성 없음)
+Ready to start now: {M} (no dependencies)
 
-💡 다음 단계: `/tf-spawn-agents`로 에이전트를 배치하세요.
+💡 Next step: deploy agents with `/tf-spawn-agents`.
 ```

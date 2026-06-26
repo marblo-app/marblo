@@ -1,150 +1,153 @@
 ---
 name: tf-sync
-description: 현재 코드 상태와 Marblo 티켓을 동기화합니다. 누락된 업데이트를 잡아내고 티켓을 최신 상태로 맞춥니다.
+description: Sync the current code state with Marblo tickets — catch missed updates and bring tickets up to date. / 현재 코드 상태와 Marblo 티켓을 동기화합니다. 누락된 업데이트를 잡아내고 티켓을 최신 상태로 맞춥니다.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep
 ---
 
-# Marblo 티켓 동기화
+# Marblo Ticket Sync
 
-> 에이전트가 티켓 업데이트 없이 코딩만 진행한 경우,
-> 실제 코드 상태와 티켓 상태를 맞춰줍니다.
+> When an agent coded without updating its tickets,
+> reconcile the actual code state with the ticket state.
 
 ---
 
-## ⛔ 필수 규칙: Marblo MCP 전용
+## ⛔ Required rule: Marblo MCP only
 
-> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/상태변경/기록은 반드시 **Marblo MCP 도구**를 사용합니다:
+> **Never use the Claude Code built-in tools (TaskCreate, TaskList, TaskUpdate, TaskGet).**
+> Task lookup/status-change/logging MUST use the **Marblo MCP tools**:
 > `get_all_tasks`, `update_task_status`, `add_activity`, `submit_for_review`, `claim_task`
 
 ---
 
-## 언제 쓰나
+## When to use
 
-- 에이전트가 코드는 작성했는데 `add_activity`나 `submit_for_review`를 안 한 경우
-- 직접 코딩했는데 티켓 업데이트를 깜빡한 경우
-- 세션이 중간에 끊겨서 티켓 상태가 실제와 안 맞는 경우
-- "지금 티켓이랑 실제 진행 상태가 맞나?" 확인하고 싶을 때
-
----
-
-## Step 1: 현재 상태 수집
-
-두 가지를 동시에 확인합니다:
-
-### 1-1. Marblo 티켓 현황
-
-`get_all_tasks`로 전체 태스크를 조회합니다.
-각 태스크의 상태, scope(파일 경로), 마지막 activity를 정리합니다.
-
-### 1-2. 실제 코드 상태
-
-각 태스크의 scope에 명시된 파일들의 실제 존재 여부를 확인합니다:
-- 파일이 존재하는가?
-- 최근에 수정되었는가? (`git diff`, `git log`)
-- 테스트 파일이 있는가?
+- An agent wrote code but didn't `add_activity` or `submit_for_review`
+- You coded directly but forgot to update the ticket
+- The session was cut off midway so the ticket state doesn't match reality
+- You want to check "do the tickets match the actual progress right now?"
 
 ---
 
-## Step 2: 불일치 감지
+## Step 1: Collect the current state
 
-티켓 상태와 실제 코드를 비교해서 불일치를 찾습니다:
+Check two things at once:
 
-### 감지 패턴
+### 1-1. Marblo ticket status
+
+Use `get_all_tasks` to fetch all tasks.
+Organize each task's status, scope (file paths), and last activity.
+
+### 1-2. Actual code state
+
+Check whether the files listed in each task's scope actually exist:
+
+- Does the file exist?
+- Was it modified recently? (`git diff`, `git log`)
+- Is there a test file?
+
+---
+
+## Step 2: Detect mismatches
+
+Compare ticket state vs. actual code to find mismatches:
+
+### Detection patterns
 
 ```
-🔍 불일치 감지 결과:
+🔍 Mismatch detection result:
 ━━━━━━━━━━━━━━━━━━
 
-⚠️ 코드는 있는데 티켓이 TODO:
-   TASK-003: AI 요약 API
-   → backend/routes/summarize.py 이미 존재 (87줄)
-   → tests/test_summarize.py 이미 존재 (3개 테스트)
-   → 추천: IN_PROGRESS 또는 REVIEW로 업데이트
+⚠️ Code exists but ticket is TODO:
+   TASK-003: AI summary API
+   → backend/routes/summarize.py already exists (87 lines)
+   → tests/test_summarize.py already exists (3 tests)
+   → Recommend: update to IN_PROGRESS or REVIEW
 
-⚠️ 티켓이 IN_PROGRESS인데 활동 로그 없음:
-   TASK-004: URL 입력 화면
-   → 마지막 활동: 없음
-   → frontend/components/UrlInput.tsx 존재 (42줄)
-   → 추천: add_activity로 현재 상태 기록
+⚠️ Ticket is IN_PROGRESS but no activity log:
+   TASK-004: URL input screen
+   → Last activity: none
+   → frontend/components/UrlInput.tsx exists (42 lines)
+   → Recommend: record current state with add_activity
 
-⚠️ 티켓이 IN_PROGRESS인데 코드가 완성됨:
-   TASK-002: 유저 API
-   → backend/routes/users.py 존재 + 테스트 pass
-   → 추천: submit_for_review
+⚠️ Ticket is IN_PROGRESS but code is complete:
+   TASK-002: User API
+   → backend/routes/users.py exists + tests pass
+   → Recommend: submit_for_review
 
-✅ 정상:
-   TASK-001: DB 스키마 — DONE, models.py 존재
-   TASK-005: 인사이트 카드 — TODO, 파일 없음 (아직 시작 안 함)
+✅ OK:
+   TASK-001: DB schema — DONE, models.py exists
+   TASK-005: Insight card — TODO, no file (not started yet)
 ```
 
 ---
 
-## Step 3: 동기화 실행
+## Step 3: Run the sync
 
-사용자에게 불일치 목록을 보여주고 하나씩 처리합니다:
+Show the mismatch list to the user and handle them one at a time:
 
-### 3-1. 각 불일치에 대해 선택지 제시
+### 3-1. Present options for each mismatch
 
 ```
-TASK-003: AI 요약 API (현재: TODO → 코드 이미 존재)
+TASK-003: AI summary API (current: TODO → code already exists)
 
-  1. REVIEW로 업데이트 (코드 완성됨)
-  2. IN_PROGRESS로 업데이트 (아직 작업 중)
-  3. 활동 로그만 추가 (상태는 유지)
-  4. 건너뛰기
+  1. Update to REVIEW (code complete)
+  2. Update to IN_PROGRESS (still in progress)
+  3. Add an activity log only (keep status)
+  4. Skip
 
-  어떻게 할까요?
+  How would you like to proceed?
 ```
 
-### 3-2. 선택에 따라 실행
+### 3-2. Execute per choice
 
-- **REVIEW로 업데이트:**
-  1. `update_task_status` → IN_PROGRESS (TODO에서 바로 REVIEW 불가)
-  2. `add_activity`: "동기화: 코드 이미 완성됨 — [파일 목록]"
+- **Update to REVIEW:**
+
+  1. `update_task_status` → IN_PROGRESS (can't go straight from TODO to REVIEW)
+  2. `add_activity`: "Sync: code already complete — [file list]"
   3. `submit_for_review`
 
-- **IN_PROGRESS로 업데이트:**
-  1. `claim_task` (TODO인 경우)
-  2. `update_task_status` → IN_PROGRESS
-  3. `add_activity`: "동기화: 작업 진행 중 — [현재 상태]"
+- **Update to IN_PROGRESS:**
 
-- **활동 로그만 추가:**
-  1. `add_activity`: "동기화: [파일] 존재 확인, [현재 상태 요약]"
+  1. `claim_task` (if TODO)
+  2. `update_task_status` → IN_PROGRESS
+  3. `add_activity`: "Sync: work in progress — [current state]"
+
+- **Add activity log only:**
+  1. `add_activity`: "Sync: confirmed [file] exists, [current state summary]"
 
 ---
 
-## Step 4: 동기화 결과 요약
+## Step 4: Summarize the sync result
 
 ```
-🔄 동기화 완료
+🔄 Sync complete
 ━━━━━━━━━━━━━
 
-  업데이트됨:  3개
-  건너뜀:      1개
-  이미 정상:   4개
+  Updated:        3
+  Skipped:        1
+  Already OK:     4
 
-  현재 상태:
-  ✅ DONE:        2개
-  👀 REVIEW:      2개  ← 리뷰 필요!
-  🔄 IN_PROGRESS: 1개
-  📋 TODO:        3개
+  Current state:
+  ✅ DONE:        2
+  👀 REVIEW:      2  ← needs review!
+  🔄 IN_PROGRESS: 1
+  📋 TODO:        3
 
-  💡 다음: /tf-review로 REVIEW 2개 처리
+  💡 Next: handle 2 REVIEW with /tf-review
 ```
 
 ---
 
-## 자동 감지 기준
+## Auto-detection criteria
 
-| 티켓 상태 | 코드 상태 | 판정 |
-|----------|----------|------|
-| TODO | 파일 없음 | ✅ 정상 |
-| TODO | 파일 존재 | ⚠️ 누락 — 업데이트 필요 |
-| IN_PROGRESS | 파일 존재 + 활동 로그 있음 | ✅ 정상 |
-| IN_PROGRESS | 파일 존재 + 활동 로그 없음 | ⚠️ 로그 누락 |
-| IN_PROGRESS | 파일 존재 + 테스트 pass | ⚠️ REVIEW 제출 필요 |
-| REVIEW | 파일 존재 | ✅ 정상 |
-| DONE | 파일 존재 | ✅ 정상 |
-| DONE | 파일 없음 | ⚠️ 코드 삭제됨? 확인 필요 |
+| Ticket state | Code state                     | Verdict                         |
+| ------------ | ------------------------------ | ------------------------------- |
+| TODO         | no file                        | ✅ OK                           |
+| TODO         | file exists                    | ⚠️ missed — needs update        |
+| IN_PROGRESS  | file exists + has activity log | ✅ OK                           |
+| IN_PROGRESS  | file exists + no activity log  | ⚠️ missing log                  |
+| IN_PROGRESS  | file exists + tests pass       | ⚠️ needs REVIEW submission      |
+| REVIEW       | file exists                    | ✅ OK                           |
+| DONE         | file exists                    | ✅ OK                           |
+| DONE         | no file                        | ⚠️ code deleted? needs checking |

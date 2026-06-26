@@ -1,60 +1,60 @@
 ---
 name: tf-status
-description: 프로젝트 태스크 진행 상태를 대시보드 형태로 요약합니다
+description: Summarize project task progress as a dashboard. / 프로젝트 태스크 진행 상태를 대시보드 형태로 요약합니다
 allowed-tools: Bash, Read
 ---
 
-# Marblo 상태 확인
+# Marblo Status Check
 
-> 터미널에서 대시보드 없이 빠르게 현황을 파악합니다.
-
----
-
-## ⛔ 필수 규칙: Marblo MCP 전용
-
-> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회는 반드시 **Marblo MCP의 `get_all_tasks`와 `check_feedback`**을 사용합니다.
+> Quickly grasp the status from the terminal, without the dashboard.
 
 ---
 
-## 조회 순서
+## ⛔ Required rule: Marblo MCP only
 
-1. `get_all_tasks`로 전체 태스크 조회 (프로젝트 필터 적용)
-2. 상태별로 분류 + 카운트
-3. `check_feedback`으로 미확인 PM 피드백 확인
-4. FAILED/BLOCKED 태스크가 있으면 활동 로그로 원인 표시
+> **Never use the Claude Code built-in tools (TaskCreate, TaskList, TaskUpdate, TaskGet).**
+> Task lookup MUST use **Marblo MCP's `get_all_tasks` and `check_feedback`**.
 
-## 출력 형식
+---
+
+## Lookup order
+
+1. Use `get_all_tasks` to fetch all tasks (apply the project filter)
+2. Classify and count by status
+3. Use `check_feedback` to check unread PM feedback
+4. If there are FAILED/BLOCKED tasks, show the cause from the activity log
+
+## Output format
 
 ```
-📊 프로젝트: {project_name}
+📊 Project: {project_name}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  ✅ DONE          {n}개  ██████████░░  {percent}%
-  🔄 IN_PROGRESS   {n}개  {task titles}
-  👀 REVIEW        {n}개  {task titles} ← 리뷰 필요!
-  📋 TODO          {n}개
-  ❌ FAILED        {n}개  {원인 요약}
-  🚫 BLOCKED       {n}개
+  ✅ DONE          {n}  ██████████░░  {percent}%
+  🔄 IN_PROGRESS   {n}  {task titles}
+  👀 REVIEW        {n}  {task titles} ← needs review!
+  📋 TODO          {n}
+  ❌ FAILED        {n}  {cause summary}
+  🚫 BLOCKED       {n}
 
   ━━━━━━━━━━━━━━━
-  진행률: {done}/{total} ({percent}%)
-  예상 남은 태스크: {remaining}개
+  Progress: {done}/{total} ({percent}%)
+  Estimated remaining tasks: {remaining}
 
-⚠️ 주의 필요:
+⚠️ Needs attention:
   • FAILED: TASK-006 — "port already in use"
-  • 미확인 피드백: TASK-003에 PM 코멘트 있음
+  • Unread feedback: PM comment on TASK-003
 
-💡 다음 행동:
-  • /tf-review — REVIEW {n}개 처리
-  • /tf-fix — FAILED {n}개 복구
+💡 Next actions:
+  • /tf-review — handle {n} REVIEW
+  • /tf-fix — recover {n} FAILED
 ```
 
-## 상황별 추가 안내
+## Situational extra guidance
 
-| 상황 | 안내 |
-|------|------|
-| 모든 태스크 DONE | "🎉 프로젝트 완료! 수고하셨습니다." |
-| REVIEW가 3개 이상 | "리뷰가 밀려있습니다. `/tf-review`로 처리하세요." |
-| FAILED가 있음 | "문제가 있는 태스크가 있습니다. `/tf-fix`로 확인하세요." |
-| TODO만 있고 IN_PROGRESS 없음 | "아직 작업이 시작되지 않았습니다. `/tf-start`로 시작하세요." |
+| Situation                 | Guidance                                                |
+| ------------------------- | ------------------------------------------------------- |
+| All tasks DONE            | "🎉 Project complete! Great work."                      |
+| 3+ REVIEW                 | "Reviews are piling up. Handle them with `/tf-review`." |
+| There are FAILED          | "There are problem tasks. Check them with `/tf-fix`."   |
+| Only TODO, no IN_PROGRESS | "Work hasn't started yet. Start with `/tf-start`."      |

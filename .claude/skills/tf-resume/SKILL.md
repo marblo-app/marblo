@@ -1,276 +1,278 @@
 ---
 name: tf-resume
-description: 중단된 프로젝트를 이어서 진행합니다. 전체 컨텍스트 복원 → 계획 재점검 → 작업 재개까지 원스톱으로 처리합니다.
+description: Resume a paused project — restore full context, re-review the plan, and pick work back up, all in one stop. / 중단된 프로젝트를 이어서 진행합니다. 전체 컨텍스트 복원 → 계획 재점검 → 작업 재개까지 원스톱으로 처리합니다.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 argument-hint: [프로젝트명]
 ---
 
-# Marblo 프로젝트 재개
+# Marblo Project Resume
 
-> 새 세션, 또는 며칠 후 돌아왔을 때 — 프로젝트를 완전히 복원하고 이어서 진행합니다.
-> 티켓 현황 + 활동 로그 + PRD + 코드 상태를 종합해서 "지금 뭘 해야 하는지"를 알려줍니다.
+> A new session, or coming back days later — fully restore the project and continue.
+> Combine ticket status + activity log + PRD + code state to tell you "what to do right now".
 
 ---
 
-## ⛔ 필수 규칙: Marblo MCP 전용
+## ⛔ Required rule: Marblo MCP only
 
-> **절대 Claude Code 내장 도구(TaskCreate, TaskList, TaskUpdate, TaskGet)를 사용하지 마세요.**
-> 태스크 조회/기록/상태변경은 반드시 **Marblo MCP 도구**를 사용합니다:
+> **Never use the Claude Code built-in tools (TaskCreate, TaskList, TaskUpdate, TaskGet).**
+> Task lookup/logging/status-change MUST use the **Marblo MCP tools**:
 > `get_all_tasks`, `get_available_tasks`, `get_task_activities`, `check_feedback`,
 > `add_activity`, `submit_for_review`, `claim_task`, `update_task_status`,
 > `create_task`, `create_tasks_bulk`
 
 ---
 
-## Phase 1: 전체 컨텍스트 복원
+## Phase 1: Restore full context
 
-**5가지 소스**를 모두 읽고 종합합니다. 순서대로 진행합니다.
+**Read and combine all 5 sources.** Proceed in order.
 
-### 1-1. 프로젝트 문서 읽기
+### 1-1. Read project documents
 
-아래 파일들을 순서대로 찾아서 읽습니다:
+Find and read these files in order:
 
-1. **PRD** → `docs/PRD.md` (프로젝트 목표, 기능 목록, 기술 스택)
-2. **프로젝트 현황 문서** → `docs/project_status.md` (PM이 직접 작성한 현황 정리, 방향 메모)
-3. **CLAUDE.md** → 프로젝트 루트 (프로젝트별 규칙, 관례)
-4. **자동 메모리** → `.claude/projects/*/memory/MEMORY.md` (이전 세션에서 학습한 패턴, 결정사항)
-5. **사용자 지정 문서** → 사용자에게 물어봅니다:
+1. **PRD** → `docs/PRD.md` (project goals, feature list, tech stack)
+2. **Project status doc** → `docs/project_status.md` (status notes the PM wrote, direction memos)
+3. **CLAUDE.md** → project root (project-specific rules, conventions)
+4. **Auto memory** → `.claude/projects/*/memory/MEMORY.md` (patterns/decisions learned in prior sessions)
+5. **User-specified docs** → ask the user:
    ```
-   📖 추가로 읽어야 할 문서가 있나요?
-   (예: docs/NOTES.md, docs/ARCHITECTURE.md, 또는 '없음')
+   📖 Any additional documents to read?
+   (e.g.: docs/NOTES.md, docs/ARCHITECTURE.md, or 'none')
    ```
 
-### 1-2. 티켓 현황 전체 조회
+### 1-2. Fetch full ticket status
 
-`get_all_tasks`로 프로젝트 전체 태스크를 조회합니다.
+Use `get_all_tasks` to fetch all tasks in the project.
 
 ```
-📍 프로젝트 복원: {project_name}
+📍 Project restore: {project_name}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  ✅ DONE:        {n}개  {task titles}
-  🔄 IN_PROGRESS: {n}개  {task titles}
-  👀 REVIEW:      {n}개  {task titles}
-  📋 TODO:        {n}개  {task titles}
-  ❌ FAILED:      {n}개  {task titles}
+  ✅ DONE:        {n}  {task titles}
+  🔄 IN_PROGRESS: {n}  {task titles}
+  👀 REVIEW:      {n}  {task titles}
+  📋 TODO:        {n}  {task titles}
+  ❌ FAILED:      {n}  {task titles}
   ━━━━━━━━━━━━━━━
-  진행률: {done}/{total} ({percent}%)
+  Progress: {done}/{total} ({percent}%)
 ```
 
-### 1-3. 마지막 작업 내용 확인
+### 1-3. Check the last work
 
-IN_PROGRESS, REVIEW, 최근 DONE 태스크의 `get_task_activities`로 마지막 활동을 확인합니다:
-
-```
-📝 최근 활동:
-  • TASK-003 (IN_PROGRESS): "routes/summarize.py 생성 — POST /api/summarize" — 2일 전
-  • TASK-002 (REVIEW): "pytest 5/5 pass" — 3일 전
-  • TASK-001 (DONE): "DB 스키마 완료" — 4일 전
-```
-
-### 1-4. PM 피드백 확인
-
-`check_feedback`으로 중간에 온 PM 피드백을 확인합니다:
+Use `get_task_activities` on IN_PROGRESS, REVIEW, and recent DONE tasks to see the last activity:
 
 ```
-💬 미확인 PM 피드백: {n}건
-  • TASK-003: "파서 구현내용 설명해줄래?" — 1일 전
+📝 Recent activity:
+  • TASK-003 (IN_PROGRESS): "routes/summarize.py — POST /api/summarize" — 2 days ago
+  • TASK-002 (REVIEW): "pytest 5/5 pass" — 3 days ago
+  • TASK-001 (DONE): "DB schema complete" — 4 days ago
 ```
 
-### 1-5. 컨텍스트 종합 브리핑
+### 1-4. Check PM feedback
 
-수집한 모든 정보를 종합해서 사용자에게 브리핑합니다:
+Use `check_feedback` to check PM feedback that arrived in the meantime:
 
 ```
-📍 컨텍스트 복원 완료
+💬 Unread PM feedback: {n}
+  • TASK-003: "Can you explain the parser implementation?" — 1 day ago
+```
+
+### 1-5. Combined context briefing
+
+Combine all gathered info and brief the user:
+
+```
+📍 Context restore complete
 ━━━━━━━━━━━━━━━━━━━
 
-  📄 PRD: {프로젝트 한 줄 요약}
-  📊 진행률: {done}/{total} ({percent}%)
-  📝 마지막 작업: {최근 활동 요약}
-  💬 미확인 피드백: {n}건
-  📖 메모리: {주요 결정사항/패턴 요약}
+  📄 PRD: {one-line project summary}
+  📊 Progress: {done}/{total} ({percent}%)
+  📝 Last work: {recent activity summary}
+  💬 Unread feedback: {n}
+  📖 Memory: {key decisions/patterns summary}
 
-  ⏱️ 마지막 작업일: {last_activity_date}
+  ⏱️ Last activity date: {last_activity_date}
 ```
 
 ---
 
-## Phase 2: 상황 진단 + 다음 행동 결정
+## Phase 2: Diagnose the situation + decide the next action
 
-현재 상태를 분석해서 사용자에게 선택지를 제시합니다:
+Analyze the current state and present options to the user:
 
-### 케이스 A: 순조롭게 진행 중 (FAILED/BLOCKED 없음)
+### Case A: Going smoothly (no FAILED/BLOCKED)
 
 ```
-💡 현재 상황: 순조로움
+💡 Current situation: smooth
 ━━━━━━━━━━━━━━━━━━━━
 
-  바로 할 수 있는 것:
-  1. 📋 REVIEW {n}개 처리 → /tf-review  (처리하면 다음 태스크 풀림)
-  2. 🔧 IN_PROGRESS 이어서 작업 → 바로 코딩 시작
-  3. 📋 TODO에서 새 태스크 시작 → /tf-work
+  What you can do right now:
+  1. 📋 Handle {n} REVIEW → /tf-review  (unblocks the next tasks)
+  2. 🔧 Continue IN_PROGRESS → start coding right away
+  3. 📋 Start a new task from TODO → /tf-work
 
-  어떻게 할까요?
+  How would you like to proceed?
 ```
 
-### 케이스 B: 문제 있음 (FAILED/BLOCKED 존재)
+### Case B: Problems (FAILED/BLOCKED present)
 
 ```
-⚠️ 현재 상황: 문제 있음
+⚠️ Current situation: problems
 ━━━━━━━━━━━━━━━━━━━━━
 
   ❌ FAILED: TASK-006 — "port already in use"
-  🚫 BLOCKED: TASK-007 — TASK-006 완료 대기
+  🚫 BLOCKED: TASK-007 — waiting for TASK-006
 
-  추천:
-  1. 문제 먼저 해결 → /tf-fix
-  2. 문제 태스크 건너뛰고 다른 작업 진행
-  3. 문제 태스크 취소 → /tf-fix (삭제)
+  Recommendation:
+  1. Solve the problem first → /tf-fix
+  2. Skip the problem task and work on something else
+  3. Cancel the problem task → /tf-fix (delete)
 ```
 
-### 케이스 C: 계획 재점검 필요
+### Case C: Plan re-review needed
 
-아래 경우 계획 재점검을 제안합니다:
-- 전체 진행률이 50% 이상인데 남은 TODO가 비현실적
-- FAILED가 3개 이상
-- PM 피드백에 방향 전환 지시가 있음
-- 사용자가 "계획 다시 보자"고 요청
+Suggest a plan re-review in these cases:
+
+- Overall progress is 50%+ but the remaining TODO is unrealistic
+- 3+ FAILED tasks
+- PM feedback includes a direction change
+- The user requests "let's look at the plan again"
 
 ```
-🔄 계획 재점검 추천
+🔄 Plan re-review recommended
 ━━━━━━━━━━━━━━━━━
 
-  현재 PRD 대비 진행 상태:
-  • 핵심 기능 A: ✅ 완료
-  • 핵심 기능 B: 🔄 50% (TASK-003 진행 중)
-  • 핵심 기능 C: 📋 미시작 (TASK-005, 006, 007)
+  Progress vs. current PRD:
+  • Core feature A: ✅ done
+  • Core feature B: 🔄 50% (TASK-003 in progress)
+  • Core feature C: 📋 not started (TASK-005, 006, 007)
 
-  선택지:
-  1. 이대로 계속 진행
-  2. 계획 수정 (태스크 추가/삭제/재우선순위) → Phase 3로
-  3. 처음부터 다시 계획 → /tf-plan
+  Options:
+  1. Continue as-is
+  2. Revise the plan (add/delete/re-prioritize tasks) → go to Phase 3
+  3. Re-plan from scratch → /tf-plan
 ```
 
 ---
 
-## Phase 3: 계획 재점검 + 수정
+## Phase 3: Plan re-review + revision
 
-사용자가 계획 수정을 선택했거나, 상황 진단에서 재점검이 필요한 경우.
+When the user chose to revise the plan, or the diagnosis requires a re-review.
 
-### 3-1. PRD 대비 현 상태 매핑
+### 3-1. Map PRD vs. current state
 
-PRD의 핵심 기능 목록과 현재 태스크를 매핑합니다:
+Map the PRD's core feature list to the current tasks:
 
 ```
-📋 PRD 대비 현재 상태:
+📋 PRD vs. current state:
 ━━━━━━━━━━━━━━━━━━━━
 
-  핵심 기능 1: DB 스키마 설계
+  Core feature 1: DB schema design
   → TASK-001 ✅ DONE
 
-  핵심 기능 2: 유저 API + 인증
+  Core feature 2: User API + auth
   → TASK-002 ✅ DONE
   → TASK-003 🔄 IN_PROGRESS (50%)
 
-  핵심 기능 3: AI 요약
+  Core feature 3: AI summary
   → TASK-004 📋 TODO
   → TASK-005 📋 TODO
 
-  핵심 기능 4: 프론트엔드 UI
-  → ⚠️ 태스크 없음! PRD에는 있는데 태스크로 분해되지 않음
+  Core feature 4: Frontend UI
+  → ⚠️ No task! In the PRD but not decomposed into a task
 
-  PRD에 없는 태스크:
-  → TASK-006: Docker 설정 (FAILED) — PRD 범위 밖?
+  Tasks not in the PRD:
+  → TASK-006: Docker setup (FAILED) — outside PRD scope?
 ```
 
-### 3-2. 기존 태스크 정리
+### 3-2. Organize existing tasks
 
-각 남은 태스크에 대해 사용자 결정:
-
-```
-📋 남은 태스크 재평가:
-  1. TASK-004: AI 요약 API (TODO, priority: 3) → [유지 / 수정 / 삭제]
-  2. TASK-005: 요약 프롬프트 (TODO, priority: 3) → [유지 / 수정 / 삭제]
-  3. TASK-006: Docker 설정 (FAILED)            → [재시도 / 삭제]
-```
-
-사용자 결정에 따라:
-- **유지**: 그대로 둠
-- **수정**: priority, description, scope 변경 (PATCH API 호출)
-- **삭제**: `curl -X DELETE http://localhost:8001/api/tasks/{id}` 호출
-- **재시도**: `update_task_status` → TODO(retry)
-
-### 3-3. 새 태스크 추가
-
-PRD에 있지만 태스크가 없는 기능, 또는 새로 필요한 작업:
+For each remaining task, get the user's decision:
 
 ```
-📌 추가할 태스크:
-  NEW-1: 메인 화면 UI (frontend, priority: 4, depends_on: TASK-003)
-  NEW-2: 에러 페이지 (frontend, priority: 2)
-  NEW-3: E2E 테스트 (test, priority: 2, depends_on: NEW-1)
-
-  create_tasks_bulk로 일괄 생성할까요?
+📋 Re-evaluate remaining tasks:
+  1. TASK-004: AI summary API (TODO, priority: 3) → [keep / edit / delete]
+  2. TASK-005: Summary prompt (TODO, priority: 3) → [keep / edit / delete]
+  3. TASK-006: Docker setup (FAILED)            → [retry / delete]
 ```
 
-**반드시 `create_tasks_bulk` 한 번 호출로 일괄 생성합니다.** (개별 TaskCreate 금지)
+Based on the user's decision:
 
-### 3-4. 수정된 계획 확인
+- **Keep**: leave as-is
+- **Edit**: change priority, description, scope (call the PATCH API)
+- **Delete**: call `curl -X DELETE http://localhost:8001/api/tasks/{id}`
+- **Retry**: `update_task_status` → TODO(retry)
+
+### 3-3. Add new tasks
+
+Features in the PRD without tasks, or newly needed work:
 
 ```
-🔄 계획 수정 결과:
+📌 Tasks to add:
+  NEW-1: Main screen UI (frontend, priority: 4, depends_on: TASK-003)
+  NEW-2: Error page (frontend, priority: 2)
+  NEW-3: E2E tests (test, priority: 2, depends_on: NEW-1)
+
+  Bulk-create with create_tasks_bulk?
+```
+
+**Always bulk-create in a single `create_tasks_bulk` call.** (no individual TaskCreate)
+
+### 3-4. Confirm the revised plan
+
+```
+🔄 Plan revision result:
 ━━━━━━━━━━━━━━━━
 
-  삭제: 1개 (TASK-006)
-  수정: 1개 (TASK-004: priority 3→5)
-  추가: 3개 (NEW-1, NEW-2, NEW-3)
-  유지: 2개
+  Deleted: 1 (TASK-006)
+  Edited:  1 (TASK-004: priority 3→5)
+  Added:   3 (NEW-1, NEW-2, NEW-3)
+  Kept:    2
 
-  전체 남은 태스크: {n}개
-  예상 진행 순서:
-  1. TASK-003 (IN_PROGRESS) → 이어서 진행
-  2. TASK-004 (TODO, priority: 5) → 다음
-  3. NEW-1 (TODO, depends_on: TASK-003) → TASK-003 완료 후
+  Total remaining tasks: {n}
+  Expected order:
+  1. TASK-003 (IN_PROGRESS) → continue
+  2. TASK-004 (TODO, priority: 5) → next
+  3. NEW-1 (TODO, depends_on: TASK-003) → after TASK-003
   ...
 
-  이대로 진행할까요?
+  Proceed as-is?
 ```
 
 ---
 
-## Phase 4: 작업 재개
+## Phase 4: Resume work
 
-계획이 확정되면 실제 작업을 시작합니다:
+Once the plan is finalized, start the actual work:
 
-1. `add_activity`로 "▶️ 작업 재개 — [재개 요약]" 기록
-2. 우선순위에 따라 작업 시작:
-   - PM 피드백 있으면 → 먼저 확인/답변 (`/tf-feedback`)
-   - REVIEW 있으면 → 리뷰 처리 (다음 태스크 풀림)
-   - IN_PROGRESS 있으면 → 이어서 코딩
-   - TODO만 있으면 → `claim_task` → 새 작업 시작
-3. 이전 작업물(코드, 파일) 확인 후 이어서 진행
-4. 완료 시 `submit_for_review`
+1. Record "▶️ Work resumed — [resume summary]" with `add_activity`
+2. Start work by priority:
+   - If there is PM feedback → check/reply first (`/tf-feedback`)
+   - If there are REVIEWs → handle reviews (unblocks next tasks)
+   - If there is IN_PROGRESS → continue coding
+   - If only TODO → `claim_task` → start new work
+3. Review prior artifacts (code, files) and continue
+4. On completion, `submit_for_review`
 
 ---
 
-## 새 세션 컨텍스트 복원 원리
+## How new-session context restore works
 
-Claude Code를 새로 열면 이전 대화가 없습니다. 이 스킬이 복원하는 것:
+When you reopen Claude Code, the prior conversation is gone. What this skill restores:
 
-| 소스 | 복원하는 정보 |
-|------|-------------|
-| `docs/PRD.md` | 프로젝트 전체 목표, 기능 목록, 기술 스택 |
-| `docs/project_status.md` | PM이 직접 작성한 현황 정리, 방향 메모, 우선순위 변경 |
-| `CLAUDE.md` | 프로젝트별 규칙, 관례 |
-| `.claude/.../memory/` | 이전 세션에서 학습한 패턴, 결정사항, 디버깅 경험 |
-| 사용자 지정 문서 | 아키텍처 문서, 노트 등 추가 맥락 |
-| `get_all_tasks` | 전체 프로젝트 상태 (뭐가 끝났고 뭐가 남았는지) |
-| `get_task_activities` | 어디까지 했는지 (마지막 작업 내용) |
-| `check_feedback` | 중간에 온 PM 지시사항 |
-| scope 필드 | 어떤 파일을 수정하고 있었는지 |
-| depends_on | 다음에 풀리는 태스크가 뭔지 |
+| Source                   | Information restored                                                |
+| ------------------------ | ------------------------------------------------------------------- |
+| `docs/PRD.md`            | Overall project goals, feature list, tech stack                     |
+| `docs/project_status.md` | Status notes the PM wrote, direction memos, priority changes        |
+| `CLAUDE.md`              | Project-specific rules, conventions                                 |
+| `.claude/.../memory/`    | Patterns, decisions, debugging experience learned in prior sessions |
+| User-specified docs      | Architecture docs, notes, extra context                             |
+| `get_all_tasks`          | Full project state (what's done, what's left)                       |
+| `get_task_activities`    | How far each task got (last work)                                   |
+| `check_feedback`         | PM instructions that arrived in the meantime                        |
+| scope field              | Which files were being modified                                     |
+| depends_on               | Which task unlocks next                                             |
 
-> **Marblo 태스크 + PRD + 메모리 = 프로젝트의 완전한 기억.**
-> 대화가 리셋되어도, 세션이 바뀌어도, 이 세 가지가 컨텍스트를 유지합니다.
+> **Marblo tasks + PRD + memory = the project's complete memory.**
+> Even if the conversation resets or the session changes, these three keep the context.
