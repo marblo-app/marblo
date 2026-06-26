@@ -30,7 +30,12 @@ const RECHECK_INTERVAL_MS = 4 * 3600 * 1000;
 const DEFAULT_HOTFIX_GRACE_MS = 5 * 60 * 1000;
 
 const DEFAULT_UPDATE_FEED_OWNER = "melocream";
-const DEFAULT_UPDATE_FEED_REPO = "marblo";
+// Must match electron-builder.yml's `publish` target. The source repo
+// (melocream/marblo) is private, so releases are published to the PUBLIC
+// melocream/marblo-releases repo (electron-updater can't anonymously download
+// assets from a private repo). Pointing this at "marblo" makes the app poll a
+// repo with no public releases → auto-update silently never finds an update.
+const DEFAULT_UPDATE_FEED_REPO = "marblo-releases";
 const DEFAULT_UPDATE_FEED_CHANNEL = "latest";
 
 function getUpdaterEnv(name: string): string | undefined {
