@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   AgentWatchdog,
   resolveWatchdogConfig,
+  buildRespawnDispatch,
+  buildRespawnInstruction,
   DEFAULT_WATCHDOG_CONFIG,
   type WatchdogConfig,
   type WatchdogTicket,
@@ -334,6 +336,85 @@ describe("AgentWatchdog — recovery resets state", () => {
     h.clock.ms += 100; // well within the old backoff window
     await h.wd.tickOnce();
     expect(h.respawn).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── Respawn context preservation (the cwd/model/complexity fix) ────────────
+// Regression guard for: respawn dropped the original dispatch's cwd override
+// (→ a fresh empty base worktree lacking scope files → false BLOCKED) and
+// re-selected the model (→ a claude worker reborn as gpt). buildRespawnDispatch
+// is the pure payload builder main.ts feeds into bridgeServer.dispatchTask.
+describe("buildRespawnDispatch — restores original dispatch context", () => {
+  const WORKTREE = "/Users/x/.marblo/worktrees/proj-1/task-1";
+
+  it("restores cwd + model + complexity from the ticket's persisted dispatchMeta", () => {
+    const t = ticket({
+      cwd: WORKTREE,
+      model: "claude",
+      complexity: "complex",
+    });
+    const d = buildRespawnDispatch(t, null);
+    expect(d.cwd).toBe(WORKTREE);
+    expect(d.model).toBe("claude"); // NOT re-selected to gpt
+    expect(d.complexity).toBe("complex");
+    // Guard-safe dispatch shape: bound to the ticket, cap-exempt recovery.
+    expect(d.taskId).toBe("task-1");
+    expect(d.projectId).toBe("proj-1");
+    expect(d.role).toBe("backend");
+    expect(d.system).toBe(true);
+    expect(d.instruction).toBe(buildRespawnInstruction(t));
+  });
+
+  it("falls back to the live/stopped AgentInstance when dispatchMeta is absent", () => {
+    const t = ticket(); // no cwd/model persisted (e.g. dispatched before the fix)
+    const d = buildRespawnDispatch(t, { cwd: WORKTREE, model: "claude" });
+    expect(d.cwd).toBe(WORKTREE);
+    expect(d.model).toBe("claude");
+  });
+
+  it("ticket dispatchMeta wins over the live-agent fallback", () => {
+    const t = ticket({ cwd: WORKTREE, model: "gpt" });
+    const d = buildRespawnDispatch(t, {
+      cwd: "/some/other/tree",
+      model: "claude",
+    });
+    expect(d.cwd).toBe(WORKTREE);
+    expect(d.model).toBe("gpt");
+  });
+
+  it("leaves cwd/model undefined only when BOTH meta and fallback are missing", () => {
+    // This is the pre-fix path — dispatch then re-resolves cwd/model itself.
+    // We assert it's reached ONLY as a last resort, never when a source exists.
+    const d = buildRespawnDispatch(ticket(), null);
+    expect(d.cwd).toBeUndefined();
+    expect(d.model).toBeUndefined();
+    expect(d.complexity).toBeUndefined();
+  });
+});
+
+describe("AgentWatchdog — respawn carries the ticket context", () => {
+  it("a dead claude worker is respawned with its worktree+model intact", async () => {
+    const WORKTREE = "/Users/x/.marblo/worktrees/proj-1/task-1";
+    const h = makeHarness();
+    h.tickets[0] = ticket({
+      cwd: WORKTREE,
+      model: "claude",
+      complexity: "standard",
+    });
+    h.health.set(AGENT, {
+      status: "stopped",
+      lastPtyActivityMs: 0,
+      currentTaskId: TASK,
+    });
+    await h.wd.tickOnce();
+    // The watchdog hands the full ticket to respawnForTicket; the production
+    // closure builds the dispatch from it. Assert the context survives the hop.
+    expect(h.respawn).toHaveBeenCalledTimes(1);
+    const passed = h.respawn.mock.calls[0][0] as WatchdogTicket;
+    const dispatch = buildRespawnDispatch(passed, null);
+    expect(dispatch.cwd).toBe(WORKTREE);
+    expect(dispatch.model).toBe("claude");
+    expect(dispatch.complexity).toBe("standard");
   });
 });
 

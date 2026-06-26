@@ -28,6 +28,7 @@ import { BridgeServer, withCompletionFooter } from "./bridge-server";
 import {
   AgentWatchdog,
   resolveWatchdogConfig,
+  buildRespawnDispatch,
   type WatchdogTicket,
 } from "./agent-watchdog";
 import { OrchestratorManager } from "./orchestrator-manager";
@@ -668,6 +669,18 @@ const agentWatchdog = new AgentWatchdog(
         const ts = projection?.lastActivityAt as
           | { toMillis?: () => number }
           | undefined;
+        // Persisted at dispatch time (bridge-server persistDispatchMeta) so a
+        // respawn restores the original cwd + model + complexity instead of
+        // re-resolving them (fresh base worktree + claude→gpt re-selection).
+        const meta = data.dispatchMeta as
+          | { cwd?: unknown; model?: unknown; complexity?: unknown }
+          | undefined;
+        const metaComplexity =
+          meta?.complexity === "simple" ||
+          meta?.complexity === "standard" ||
+          meta?.complexity === "complex"
+            ? meta.complexity
+            : undefined;
         out.push({
           taskId: d.id,
           projectId: typeof data.projectId === "string" ? data.projectId : "",
@@ -677,6 +690,12 @@ const agentWatchdog = new AgentWatchdog(
           lastActivityAtMs:
             typeof ts?.toMillis === "function" ? ts.toMillis() : null,
           title: typeof data.title === "string" ? data.title : undefined,
+          cwd: typeof meta?.cwd === "string" && meta.cwd ? meta.cwd : undefined,
+          model:
+            typeof meta?.model === "string" && meta.model
+              ? meta.model
+              : undefined,
+          complexity: metaComplexity,
         });
       });
       return out;
@@ -702,20 +721,22 @@ const agentWatchdog = new AgentWatchdog(
     },
     respawnForTicket: async (ticket) => {
       try {
-        const res = await bridgeServer.dispatchTask({
-          role: ticket.role,
-          instruction:
-            `이전 담당 에이전트가 중단/침묵 상태로 감지되어 워치독이 복구를 ` +
-            `트리거했습니다. 태스크 "${
-              ticket.title ?? ticket.taskId
-            }" 의 현재 ` +
-            `상태를 점검하고, 끝났으면 submit_for_review, 막혔으면 ` +
-            `update_task_status(BLOCKED), 아니면 이어서 진행하세요.`,
-          taskId: ticket.taskId,
-          projectId: ticket.projectId || undefined,
-          // Recovery must not be blocked by the per-plan concurrency cap.
-          system: true,
-        });
+        // Restore the original dispatch's cwd/model/complexity so recovery lands
+        // in the SAME worktree on the SAME model. Prefer the ticket's persisted
+        // dispatchMeta; fall back to the (live or merely stopped) AgentInstance
+        // still bound to the ticket — it carries the agent's true cwd + model
+        // even after a PTY exit. Without this, dispatch re-resolves cwd to a
+        // fresh empty base worktree (false BLOCKED) and re-selects the model
+        // (claude reborn as gpt).
+        const live = ticket.agentId
+          ? agentManager.getAgent(ticket.agentId)
+          : null;
+        const res = await bridgeServer.dispatchTask(
+          buildRespawnDispatch(
+            ticket,
+            live ? { cwd: live.cwd, model: live.model } : null,
+          ),
+        );
         return res?.success !== false;
       } catch (err) {
         console.error("[AgentWatchdog] respawn dispatch failed:", err);
@@ -831,6 +852,40 @@ bridgeServer.setOrchestratorLookup(
 bridgeServer.setEnabledModelsLookup((projectId: string) =>
   projectEnabledModels.get(projectId),
 );
+
+// Persist each dispatch's resolved cwd/model/complexity onto the task doc as
+// `dispatchMeta`. The agent-health watchdog reads it back on respawn so recovery
+// restores the original working tree + model instead of re-resolving them — the
+// fix for "respawn drops the cwd override → fresh empty base worktree → false
+// BLOCKED, and claude reborn as gpt". setDoc(merge) is create-or-update and
+// never clobbers sibling fields. Best-effort, fire-and-forget.
+bridgeServer.setDispatchMetaHook((taskId, meta) => {
+  void (async () => {
+    try {
+      const { app, authReady } = getMissionFirebaseApp();
+      await authReady;
+      const db = getFirestore(app);
+      await fbSetDoc(
+        fbDoc(db, "tasks", taskId),
+        {
+          dispatchMeta: {
+            cwd: meta.cwd,
+            model: meta.model,
+            complexity: meta.complexity ?? null,
+            updatedAt: fbTimestamp.now(),
+          },
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.warn(
+        "[DispatchMeta] Failed to persist dispatchMeta for task",
+        taskId,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  })();
+});
 
 // When the bridge spawns an agent (via MCP /spawn-agent or /dispatch-task),
 // route its PTY output to the project-owning window and emit agent:spawned

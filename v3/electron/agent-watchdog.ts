@@ -26,6 +26,11 @@
 //   agent. listActiveTickets() is responsible for excluding TODO/terminal
 //   states; the sweep additionally skips any ticket with no bound agent.
 
+// Type-only import — erased at compile/test time, so the watchdog stays a pure,
+// Electron-free unit (the test imports only this module). Keeps the respawn
+// model in lockstep with the dispatch model union instead of duplicating it.
+import type { ModelType } from "./agent-manager";
+
 export type WatchdogTicketStatus = "CLAIMED" | "IN_PROGRESS";
 
 export interface WatchdogTicket {
@@ -43,6 +48,23 @@ export interface WatchdogTicket {
   lastActivityAtMs: number | null;
   /** Short title used to build the continuation instruction on respawn. */
   title?: string;
+  /** Resolved working directory of the original dispatch (the agent's actual
+   * cwd — typically its isolated per-task worktree), persisted as the task's
+   * `dispatchMeta.cwd`. Restored on respawn so recovery lands in the SAME tree
+   * instead of dispatch re-resolving cwd to a fresh base worktree (which lacks
+   * the scope files and false-BLOCKs the ticket). Undefined when never persisted
+   * → respawn falls back to the live AgentInstance's cwd, then to dispatch's own
+   * cwd resolution. */
+  cwd?: string;
+  /** Resolved model / CLI provider of the original dispatch (claude/gpt/…),
+   * persisted as `dispatchMeta.model`. Restored on respawn so a claude worker
+   * isn't reborn as gpt by dispatch's model re-selection. Undefined → fall back
+   * to the live AgentInstance's model, then to dispatch scoring. */
+  model?: string;
+  /** Task complexity of the original dispatch, persisted as
+   * `dispatchMeta.complexity`. Restored on respawn so the claude `--model` tier
+   * (sonnet/opus) / codex reasoning level matches the original. */
+  complexity?: "simple" | "standard" | "complex";
 }
 
 export type WatchdogAgentLiveStatus = "idle" | "working" | "error" | "stopped";
@@ -158,6 +180,69 @@ function buildBoardNudge(ticket: WatchdogTicket): string {
     `막혔다면 update_task_status(BLOCKED, 이유) 로 알려주세요. ` +
     `중단된 상태라면 이어서 계속 진행해 주세요.`
   );
+}
+
+/** Continuation instruction injected into the (re)dispatched worker when a stuck
+ * ticket is respawned. Mirrors the board nudge but framed as a recovery hand-off
+ * to a possibly-fresh agent. */
+export function buildRespawnInstruction(ticket: WatchdogTicket): string {
+  return (
+    `이전 담당 에이전트가 중단/침묵 상태로 감지되어 워치독이 복구를 ` +
+    `트리거했습니다. 태스크 "${ticket.title ?? ticket.taskId}" 의 현재 ` +
+    `상태를 점검하고, 끝났으면 submit_for_review, 막혔으면 ` +
+    `update_task_status(BLOCKED), 아니면 이어서 진행하세요.`
+  );
+}
+
+/** Guard-safe dispatch params for respawning a stuck ticket's worker — fed
+ * straight into bridgeServer.dispatchTask. `cwd`/`model`/`complexity` are the
+ * crux of the fix: without them dispatch re-resolves cwd (→ a fresh empty base
+ * worktree that lacks the task's scope files → false BLOCKED) and re-selects the
+ * model (→ a claude worker reborn as gpt). */
+export interface RespawnDispatchParams {
+  role: string;
+  instruction: string;
+  taskId: string;
+  projectId?: string;
+  cwd?: string;
+  model?: ModelType;
+  complexity?: "simple" | "standard" | "complex";
+  /** Recovery must not be blocked by the per-plan concurrency cap. */
+  system: true;
+}
+
+/**
+ * Build the respawn dispatch for a stuck ticket, restoring the ORIGINAL
+ * dispatch's working directory + model + complexity so recovery is faithful.
+ *
+ * Resolution order for cwd/model (first defined wins):
+ *   1. the ticket's persisted `dispatchMeta` (ticket.cwd / ticket.model) —
+ *      survives even full agent removal (reap),
+ *   2. `fallback` — the live (or merely stopped) AgentInstance still bound to
+ *      the ticket, read by the caller from agentManager.getAgent(agentId),
+ *   3. undefined — dispatch falls back to its own resolution (legacy behavior).
+ *
+ * Leaving cwd/model undefined is exactly the pre-fix bug, so callers should pass
+ * a fallback whenever the agent doc still exists.
+ */
+export function buildRespawnDispatch(
+  ticket: WatchdogTicket,
+  fallback?: { cwd?: string; model?: ModelType } | null,
+): RespawnDispatchParams {
+  // ticket.model is a free string (Firestore dispatchMeta); dispatch re-folds it
+  // through normalizeModel, so the union cast here only satisfies the request
+  // type — an unknown value can't slip past dispatch's own resolution.
+  const model = (ticket.model as ModelType | undefined) ?? fallback?.model;
+  return {
+    role: ticket.role,
+    instruction: buildRespawnInstruction(ticket),
+    taskId: ticket.taskId,
+    projectId: ticket.projectId || undefined,
+    cwd: ticket.cwd ?? fallback?.cwd ?? undefined,
+    model: model ?? undefined,
+    complexity: ticket.complexity,
+    system: true,
+  };
 }
 
 /**

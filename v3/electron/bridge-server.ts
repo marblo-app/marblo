@@ -419,6 +419,20 @@ export class BridgeServer {
   // GC'd when its chain drains.
   private taskDispatchLocks = new Map<string, Promise<unknown>>();
 
+  // Hook injected by main: persists the RESOLVED dispatch context (cwd / model /
+  // complexity) onto the board task doc as `dispatchMeta` once a dispatch
+  // confirms its agent. The agent-health watchdog reads this back on respawn so
+  // recovery restores the original cwd + model instead of re-resolving them —
+  // which dropped the explicit cwd override (→ fresh empty base worktree, false
+  // BLOCKED) and re-selected the model (→ a claude worker reborn as gpt).
+  // Best-effort, fire-and-forget — never blocks or fails a dispatch.
+  private dispatchMetaHook:
+    | ((
+        taskId: string,
+        meta: { cwd: string; model: string; complexity?: string },
+      ) => void)
+    | null = null;
+
   constructor(
     agentManager: AgentManager,
     ptyManager: PtyManager,
@@ -468,6 +482,18 @@ export class BridgeServer {
    * plan). Until wired, the cap falls back to the MARBLO_PLAN env var. */
   setPlanLookup(lookup: (projectId?: string) => string | undefined): void {
     this.planLookup = lookup;
+  }
+
+  /** Wire the dispatch-meta persister (main writes `dispatchMeta` onto the task
+   * doc). Until wired, dispatch still works — the watchdog just falls back to
+   * the live AgentInstance for cwd/model on respawn. */
+  setDispatchMetaHook(
+    hook: (
+      taskId: string,
+      meta: { cwd: string; model: string; complexity?: string },
+    ) => void,
+  ): void {
+    this.dispatchMetaHook = hook;
   }
 
   setMainWindow(win: BrowserWindow | null): void {
@@ -1069,10 +1095,48 @@ export class BridgeServer {
   async dispatchTask(
     params: DispatchTaskRequest,
   ): Promise<DispatchTaskResponse> {
-    if (!params.taskId) return this.dispatchTaskInner(params);
-    return this.withTaskLock(params.taskId, () =>
-      this.dispatchTaskInner(params),
-    );
+    const res = params.taskId
+      ? await this.withTaskLock(params.taskId, () =>
+          this.dispatchTaskInner(params),
+        )
+      : await this.dispatchTaskInner(params);
+    // Persist the resolved cwd/model/complexity so the watchdog can restore them
+    // on respawn (no fresh base worktree, no claude→gpt). Only when a real agent
+    // was bound to a task — "logical" (internal sub-agent) has no PTY/worktree,
+    // and a failed dispatch resolved nothing.
+    if (
+      params.taskId &&
+      res.success &&
+      res.agentId &&
+      res.action !== "logical"
+    ) {
+      this.persistDispatchMeta(params.taskId, res.agentId, params.complexity);
+    }
+    return res;
+  }
+
+  /** Persist the resolved dispatch context onto the task doc (via the main-wired
+   * hook) so the watchdog can restore it on respawn. cwd/model come from the
+   * live AgentInstance — the post-resolution source of truth for both fresh
+   * spawns AND reused/restarted agents — and complexity from the request.
+   * No-op when the hook is unset or the agent can't be resolved. */
+  private persistDispatchMeta(
+    taskId: string,
+    agentId: string,
+    complexity?: string,
+  ): void {
+    if (!this.dispatchMetaHook) return;
+    const agent = this.agentManager.getAgent(agentId);
+    if (!agent) return;
+    try {
+      this.dispatchMetaHook(taskId, {
+        cwd: agent.cwd,
+        model: agent.model,
+        complexity,
+      });
+    } catch (err) {
+      console.warn("[BridgeServer] persistDispatchMeta failed:", err);
+    }
   }
 
   /** L3 — run `fn` after any in-flight dispatch for the same taskId settles
