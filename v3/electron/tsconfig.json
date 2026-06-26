@@ -5,6 +5,13 @@
     "lib": ["ES2020"],
     "outDir": "../dist-electron",
     "rootDir": ".",
+    // Incremental so `tsc --watch` (dev) skips re-emitting unchanged files on
+    // startup. Without this the watch does a full rebuild that rewrites every
+    // dist-electron/*.js while electron is concurrently requiring them → torn
+    // reads ("X is not a function"). The dev script's first `tsc` writes the
+    // buildinfo; the watch then no-ops on boot.
+    "incremental": true,
+    "tsBuildInfoFile": "../dist-electron/.tsbuildinfo",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
