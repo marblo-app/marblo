@@ -609,13 +609,21 @@ export class OrchestratorManager {
           } = this.lastLaunchArgs;
           this.configGenerator.cleanup(sessionId);
           this.session = null;
-          // 미션 오케스트레이터는 같은 미션 세션을 정확히 이어간다(다른 미션 세션을
-          // "latest" 로 잘못 집지 않도록). board 는 기존대로 "latest".
+          // crash 후 자동재시작은 *직전에 크래시한 바로 그 세션*을 정확히 이어가야
+          // 한다(직전 컨텍스트가 그대로 보여야 함 — blank 금지). 예전엔 board 가
+          // "latest" 를 넘겨 launch() 의 라벨 전용 resolver(resolveSessionId)를
+          // 탔는데, marblo-labels.json 이 없는 흔한 경우엔 매치 실패 → fresh 세션이
+          // 부팅돼 직전 대화가 통째로 orphan(빈화면처럼 보임)되거나, 바쁜 공유 dir
+          // 에서 엉뚱한 세션을 집었다. 대신 store → 라벨 → 컨텐츠 시그니처로 복원하는
+          // robust resolver 로 정확한 세션 UUID 를 집어 넘긴다 — 렌더러 auto-reconnect
+          // (resolveOrchestratorResumeId)과 동일 경로. 미션은 미션 단위 resolver 로.
+          // 어느 쪽도 복원 불가(genuinely 없음)면 "new"(fresh) — "latest" 로 약한
+          // 라벨 resolver 를 다시 타며 엉뚱/blank 세션을 집을 여지를 없앤다.
           const ownerMission = this.lastOwnerMissionId ?? undefined;
           const resumeTarget =
             this.kind === "mission" && ownerMission
-              ? (this.resolveMissionResumeId(rp, ownerMission) ?? "latest")
-              : "latest";
+              ? (this.resolveMissionResumeId(rp, ownerMission) ?? "new")
+              : (this.resolveOrchestratorResumeId(rp) ?? "new");
           this.launch(
             pId,
             rp,

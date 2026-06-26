@@ -448,4 +448,159 @@ describe("OrchestratorManager session reconnect", () => {
       expect(fresh.getOwnerMissionId()).toBeNull();
     });
   });
+
+  // Regression: 오케 PTY 가 갑자기 꺼지고(crash, exit!=0) 자동재시작될 때, 직전에
+  // 크래시한 *바로 그 세션* 을 resume 해 직전 컨텍스트가 그대로 보여야 한다(blank
+  // 금지). 예전엔 board 가 launch(..., "latest") 로 재시작 → 라벨 전용 약한
+  // resolver 를 타, marblo-labels.json 이 없으면(흔한 경우) 매치 실패 → fresh 세션
+  // 부팅으로 직전 대화가 orphan(빈화면). 수정: robust resolver(store→라벨→컨텐츠
+  // 시그니처)로 정확한 UUID 를 집어 재개한다.
+  describe("crash auto-restart resumes the EXACT prior session (no blank)", () => {
+    interface CreateCall {
+      ptyId: string;
+      args: string[];
+    }
+
+    function makeRestartManager(kind = "board"): {
+      mgr: OrchestratorManager;
+      createCalls: CreateCall[];
+      exitCbs: Map<string, (code: number) => void>;
+      mcpConfigPath: string;
+    } {
+      const createCalls: CreateCall[] = [];
+      const exitCbs = new Map<string, (code: number) => void>();
+      const mcpConfigPath = path.join(
+        sessionsDir(),
+        `${kind}-restart-mcp.json`,
+      );
+      fs.writeFileSync(
+        mcpConfigPath,
+        JSON.stringify({ mcpServers: { marblo: { env: {} } } }),
+        "utf-8",
+      );
+      const ptyManager = {
+        create: vi.fn(
+          (ptyId: string, _name: string, _cmd: string, args: string[]) => {
+            createCalls.push({ ptyId, args: [...args] });
+          },
+        ),
+        onData: vi.fn(),
+        onDanger: vi.fn(() => vi.fn()),
+        onExit: vi.fn((ptyId: string, cb: (code: number) => void) => {
+          exitCbs.set(ptyId, cb);
+        }),
+        writeAndSubmit: vi.fn(),
+        kill: vi.fn(),
+      };
+      // Fresh launch config per call so --resume args never accumulate across
+      // relaunches (each launch must own its own args array).
+      const configGenerator = {
+        getLaunchConfig: vi.fn(() => ({
+          model: "claude",
+          command: "claude",
+          args: [] as string[],
+          env: {} as Record<string, string>,
+          mcpConfigPath,
+          skillContent: "",
+        })),
+        cleanup: vi.fn(),
+      };
+      const mgr = new OrchestratorManager(
+        ptyManager as unknown as ConstructorParameters<
+          typeof OrchestratorManager
+        >[0],
+        configGenerator as unknown as ConstructorParameters<
+          typeof OrchestratorManager
+        >[1],
+        undefined,
+        kind,
+      );
+      return { mgr, createCalls, exitCbs, mcpConfigPath };
+    }
+
+    it("resumes the crashed session by content signature even with NO labels/store file", async () => {
+      const crashedId = "crashed0-0000-0000-0000-000000000000";
+      writeOrchestratorJsonl(crashedId);
+
+      const { mgr, createCalls, exitCbs } = makeRestartManager("board");
+
+      // Initial launch resuming the (about-to-crash) session.
+      const session = mgr.launch(
+        "proj-x",
+        rootPath,
+        4567,
+        undefined,
+        crashedId,
+      );
+      const firstPty = session.ptySessionId;
+      expect(createCalls[0].args).toEqual(
+        expect.arrayContaining(["--resume", crashedId]),
+      );
+
+      // Simulate the EXACT failure mode: the labels + store files are gone
+      // (the documented "common case"). Only the content signature remains.
+      if (fs.existsSync(labelsPath())) fs.rmSync(labelsPath());
+      if (fs.existsSync(storePath())) fs.rmSync(storePath());
+
+      // Crash (non-zero exit) → auto-restart timer.
+      exitCbs.get(firstPty)?.(1);
+      await vi.advanceTimersByTimeAsync(2100); // past 2s backoff
+
+      // The relaunch must resume the SAME session — recovered by content
+      // signature — not boot a fresh one (which would render blank/orphan).
+      const relaunch = createCalls[createCalls.length - 1];
+      expect(relaunch.ptyId).not.toBe(firstPty);
+      expect(relaunch.args).toEqual(
+        expect.arrayContaining(["--resume", crashedId]),
+      );
+    });
+
+    it("does NOT pass the weak literal 'latest' to the restart launch", async () => {
+      const crashedId = "crashed1-0000-0000-0000-000000000000";
+      writeOrchestratorJsonl(crashedId);
+      const { mgr, createCalls, exitCbs } = makeRestartManager("board");
+      const { ptySessionId: firstPty } = mgr.launch(
+        "proj-x",
+        rootPath,
+        4567,
+        undefined,
+        crashedId,
+      );
+
+      exitCbs.get(firstPty)?.(1);
+      await vi.advanceTimersByTimeAsync(2100);
+
+      const relaunch = createCalls[createCalls.length - 1];
+      // The crashed session is concrete; "latest" must never leak through.
+      expect(relaunch.args).not.toContain("latest");
+      expect(relaunch.args).toEqual(
+        expect.arrayContaining(["--resume", crashedId]),
+      );
+    });
+
+    it("boots fresh (no --resume) when the prior session is genuinely gone", async () => {
+      const crashedId = "crashed2-0000-0000-0000-000000000000";
+      writeOrchestratorJsonl(crashedId);
+      const { mgr, createCalls, exitCbs } = makeRestartManager("board");
+      const { ptySessionId: firstPty } = mgr.launch(
+        "proj-x",
+        rootPath,
+        4567,
+        undefined,
+        crashedId,
+      );
+
+      // The session jsonl disappears (deleted) AND labels/store are gone →
+      // nothing resumable. Must start fresh rather than --resume a ghost.
+      fs.rmSync(path.join(sessionsDir(), `${crashedId}.jsonl`));
+      if (fs.existsSync(labelsPath())) fs.rmSync(labelsPath());
+      if (fs.existsSync(storePath())) fs.rmSync(storePath());
+
+      exitCbs.get(firstPty)?.(1);
+      await vi.advanceTimersByTimeAsync(2100);
+
+      const relaunch = createCalls[createCalls.length - 1];
+      expect(relaunch.args).not.toContain("--resume");
+    });
+  });
 });
