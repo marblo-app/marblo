@@ -59,7 +59,7 @@ function repoLabel(conn: LaunchConnection): string {
         ?.replace(/\.git$/, "") || conn.repoUrl
     );
   }
-  return conn.localPath.split("/").filter(Boolean).pop() || conn.localPath;
+  return conn.localPath.split(/[\\/]/).filter(Boolean).pop() || conn.localPath;
 }
 
 function toMissionTarget(

@@ -17,8 +17,10 @@ export const MAX_RECENT_FOLDERS = 5;
 
 /** Display label for a folder path — its basename, falling back to the path. */
 export function folderLabel(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
-  return trimmed.split("/").pop() || trimmed || path;
+  // Strip trailing separators, then take the last segment. Splits on both POSIX
+  // (/) and Windows (\) separators so native Windows paths don't show in full.
+  const trimmed = path.replace(/[\\/]+$/, "");
+  return trimmed.split(/[\\/]/).pop() || trimmed || path;
 }
 
 /**

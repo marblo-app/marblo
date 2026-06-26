@@ -82,11 +82,16 @@ function gitStatusColor(status?: string): string {
 }
 
 function basename(p: string): string {
-  return p.split("/").pop() || p;
+  // Handle both POSIX (/) and Windows (\) separators, and trailing separators,
+  // so a native Windows path like C:\Users\me\proj yields "proj" not the full path.
+  return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
 }
 
 function dirname(p: string): string {
-  const idx = p.lastIndexOf("/");
+  // Find the last POSIX (/) or Windows (\) separator. lastIndexOf("/") alone
+  // returns -1 on a native Windows path (C:\a\b), which would make dirname yield
+  // the whole path and break paste/move/create-relative file operations.
+  const idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
   return idx === -1 ? p : p.slice(0, idx);
 }
 
@@ -1370,7 +1375,7 @@ export function FileTree() {
   const handleChooseRegister = useCallback(() => {
     if (!folderChoice) return;
     const { path, remoteUrl } = folderChoice;
-    const folderName = path.split("/").pop() || "new-project";
+    const folderName = basename(path) || "new-project";
     setNewProjectName(folderName);
     setPendingFolderPath(path);
     setPendingGitRemoteUrl(remoteUrl);
@@ -1605,7 +1610,7 @@ export function FileTree() {
             className="truncate text-[11px] font-medium text-gray-300"
             title={rootView?.fullPath ?? rootPath}
           >
-            {rootView?.label ?? rootPath.split("/").pop()}
+            {rootView?.label ?? basename(rootPath)}
           </span>
           {rootView?.kind === "worktree" && (
             <span

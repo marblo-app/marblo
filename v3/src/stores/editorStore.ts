@@ -76,7 +76,9 @@ function getLanguage(filename: string): string {
 }
 
 function getFileName(filePath: string): string {
-  return filePath.split("/").pop() || filePath;
+  // Split on both POSIX (/) and Windows (\) separators so tab titles show the
+  // bare filename for native Windows paths.
+  return filePath.split(/[\\/]/).pop() || filePath;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({

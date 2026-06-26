@@ -58,29 +58,51 @@ export function resolveClaudeBinary(): ResolvedCli {
   const isBlocked = (p: string) =>
     blocked.some((b) => p === b || p.startsWith(b + path.sep));
   // Canonical install locations, highest trust first. The native installer
-  // (~/.local/bin) self-updates; homebrew / npm-global come next.
-  const candidates = [
-    {
-      command: path.join(home, ".local/bin/claude"),
-      source: "native-local",
-      native: true,
-    },
-    {
-      command: "/opt/homebrew/bin/claude",
-      source: "homebrew-arm",
-      native: false,
-    },
-    {
-      command: "/usr/local/bin/claude",
-      source: "homebrew-intel",
-      native: false,
-    },
-    {
-      command: path.join(home, ".npm-global/bin/claude"),
-      source: "npm-global",
-      native: false,
-    },
-  ] satisfies ClaudeBinaryCandidate[];
+  // (~/.local/bin) self-updates; homebrew / npm-global come next. Windows uses
+  // different conventions and binaries carry a .exe / .cmd extension, so the
+  // bare-name POSIX candidates would never realpath-resolve there.
+  const candidates: ClaudeBinaryCandidate[] =
+    os.platform() === "win32"
+      ? [
+          {
+            // Native Windows installer drops claude.exe under ~/.local/bin.
+            command: path.join(home, ".local", "bin", "claude.exe"),
+            source: "native-local",
+            native: true,
+          },
+          {
+            // npm -g install: claude.cmd shim under %APPDATA%\npm.
+            command: path.join(
+              process.env.APPDATA || path.join(home, "AppData", "Roaming"),
+              "npm",
+              "claude.cmd",
+            ),
+            source: "npm-global",
+            native: false,
+          },
+        ]
+      : [
+          {
+            command: path.join(home, ".local/bin/claude"),
+            source: "native-local",
+            native: true,
+          },
+          {
+            command: "/opt/homebrew/bin/claude",
+            source: "homebrew-arm",
+            native: false,
+          },
+          {
+            command: "/usr/local/bin/claude",
+            source: "homebrew-intel",
+            native: false,
+          },
+          {
+            command: path.join(home, ".npm-global/bin/claude"),
+            source: "npm-global",
+            native: false,
+          },
+        ];
   const parseVer = (s: string): number[] => {
     const m = s.match(/(\d+)\.(\d+)\.(\d+)/);
     return m ? [+m[1], +m[2], +m[3]] : [0, 0, 0];
@@ -118,10 +140,17 @@ export function resolveClaudeBinary(): ResolvedCli {
 
     let out = "";
     try {
-      out = execFileSync(c.command, ["--version"], {
-        timeout: 5000,
-        encoding: "utf-8",
-      }).trim();
+      // .cmd/.bat shims (npm-global on Windows) can't be exec'd directly —
+      // they must go through cmd.exe. Plain executables (.exe / POSIX) run as-is.
+      out = /\.(cmd|bat)$/i.test(c.command)
+        ? execFileSync("cmd.exe", ["/c", c.command, "--version"], {
+            timeout: 5000,
+            encoding: "utf-8",
+          }).trim()
+        : execFileSync(c.command, ["--version"], {
+            timeout: 5000,
+            encoding: "utf-8",
+          }).trim();
     } catch (error) {
       logSkip(c, "version_exec_failed", errorMessage(error));
       continue;
@@ -146,9 +175,42 @@ export function resolveClaudeBinary(): ResolvedCli {
       bestVer = ver;
     }
   }
-  _claudeResolved = best
-    ? { command: best.command, version: best.version }
-    : { command: "claude", version: "" };
+  if (best) {
+    _claudeResolved = { command: best.command, version: best.version };
+  } else if (os.platform() === "win32") {
+    // node-pty can't spawn a bare "claude" on Windows (it throws "File not
+    // found" — no PATH/PATHEXT resolution), so a PATH-only install would be
+    // unreachable. Resolve it to an absolute path via `where`, preferring a real
+    // .exe over a .cmd shim (node-pty can't spawn .cmd directly either).
+    let resolved: ResolvedCli = { command: "claude", version: "" };
+    try {
+      const hits = execFileSync("where", ["claude"], {
+        timeout: 5000,
+        encoding: "utf-8",
+      })
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const exe = hits.find((h) => /\.exe$/i.test(h)) || hits[0];
+      if (exe) {
+        let version = "";
+        try {
+          version =
+            execFileSync(exe, ["--version"], { timeout: 5000, encoding: "utf-8" })
+              .trim()
+              .match(/\d+\.\d+\.\d+/)?.[0] || "";
+        } catch {
+          /* version best-effort */
+        }
+        resolved = { command: exe, version };
+      }
+    } catch {
+      /* `where` found nothing — keep bare "claude" */
+    }
+    _claudeResolved = resolved;
+  } else {
+    _claudeResolved = { command: "claude", version: "" };
+  }
   console.info("[claude-resolver] resolved claude binary", {
     command: _claudeResolved.command,
     version: _claudeResolved.version || "unknown",
@@ -823,29 +885,48 @@ function getAntigravityConfigHome(): string {
  */
 function getEnrichedPath(): string {
   const basePath = process.env.PATH || "";
-  const extraPaths = [
-    "/opt/homebrew/bin",
-    "/opt/homebrew/sbin",
-    "/usr/local/bin",
-    "/usr/bin",
-    "/bin",
-    "/usr/sbin",
-    "/sbin",
-    path.join(os.homedir(), ".nvm/versions/node", process.version, "bin"),
-    // npm global bin locations — covers the default `npm install -g`
-    // prefix as well as common user-customized prefixes (~/.npm-global).
-    // The Harness store installs Codex / Gemini CLI here, so the
-    // spawned agent processes need these on PATH to find them.
-    path.join(os.homedir(), ".npm/bin"),
-    path.join(os.homedir(), ".npm-global/bin"),
-    path.join(os.homedir(), ".local/bin"),
-    path.join(os.homedir(), ".cargo/bin"),
-    path.join(os.homedir(), ".bun/bin"),
-    path.join(os.homedir(), ".deno/bin"),
-    path.join(os.homedir(), ".volta/bin"),
-  ];
+  // PATH separator is platform-specific: ";" on Windows, ":" on POSIX. Using a
+  // hardcoded ":" on Windows shreds the inherited PATH (drive-letter colons like
+  // C:\... get split apart), producing an unusable PATH that then overrides the
+  // good one in the spawned process env — which is why `claude` couldn't be
+  // found and the orchestrator failed to start on Windows.
+  const sep = path.delimiter;
+  const home = os.homedir();
+  const extraPaths =
+    os.platform() === "win32"
+      ? [
+          // Windows Electron already inherits the user PATH; just make sure the
+          // common CLI install dirs are present. Native installer drops
+          // claude.exe under ~/.local/bin; npm -g shims live under %APPDATA%\npm.
+          path.join(home, ".local", "bin"),
+          path.join(
+            process.env.APPDATA || path.join(home, "AppData", "Roaming"),
+            "npm",
+          ),
+        ]
+      : [
+          "/opt/homebrew/bin",
+          "/opt/homebrew/sbin",
+          "/usr/local/bin",
+          "/usr/bin",
+          "/bin",
+          "/usr/sbin",
+          "/sbin",
+          path.join(home, ".nvm/versions/node", process.version, "bin"),
+          // npm global bin locations — covers the default `npm install -g`
+          // prefix as well as common user-customized prefixes (~/.npm-global).
+          // The Harness store installs Codex / Gemini CLI here, so the
+          // spawned agent processes need these on PATH to find them.
+          path.join(home, ".npm/bin"),
+          path.join(home, ".npm-global/bin"),
+          path.join(home, ".local/bin"),
+          path.join(home, ".cargo/bin"),
+          path.join(home, ".bun/bin"),
+          path.join(home, ".deno/bin"),
+          path.join(home, ".volta/bin"),
+        ];
 
-  const pathSet = new Set(basePath.split(":"));
+  const pathSet = new Set(basePath.split(sep));
   for (const p of extraPaths) {
     pathSet.add(p);
   }
@@ -858,9 +939,9 @@ function getEnrichedPath(): string {
     return [
       resolvedDir,
       ...Array.from(pathSet).filter((p) => p !== resolvedDir),
-    ].join(":");
+    ].join(sep);
   }
-  return Array.from(pathSet).join(":");
+  return Array.from(pathSet).join(sep);
 }
 
 function getMCPServerEnv(
@@ -1937,7 +2018,14 @@ export class AgentConfigGenerator {
           claudeModel = modelTierForComplexity(model, complexity).claudeModel;
         }
         return {
-          command: baseCommand || resolveClaudeBinary().command,
+          // On Windows node-pty does NOT resolve a bare command via PATH/PATHEXT
+          // (it throws "File not found"), so the orchestrator's literal "claude"
+          // baseCommand can't be spawned. Use the resolved absolute path (claude.exe)
+          // there. POSIX is unchanged: bare "claude" baseCommand spawns as before.
+          command:
+            os.platform() === "win32"
+              ? resolveClaudeBinary().command
+              : baseCommand || resolveClaudeBinary().command,
           args: [
             "--dangerously-skip-permissions",
             ...(claudeModel ? ["--model", claudeModel] : []),

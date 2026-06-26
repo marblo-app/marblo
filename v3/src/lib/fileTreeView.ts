@@ -23,7 +23,9 @@ export interface RootView {
 }
 
 function basename(p: string): string {
-  return p.split("/").pop() || p;
+  // Handle both POSIX (/) and Windows (\) separators so native Windows paths
+  // collapse to their last segment instead of returning the whole path.
+  return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
 }
 
 export function filterWorktreesByProject(
