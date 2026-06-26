@@ -7,6 +7,7 @@ import { CanvasAddon } from "@xterm/addon-canvas";
 import "@xterm/xterm/css/xterm.css";
 import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 import { resolveClipboardForTerminal } from "../../utils/clipboardImage";
+import { MONO_FONT_FAMILY } from "../../lib/monoFont";
 
 interface OrchestratorTerminalProps {
   sessionId: string;
@@ -34,7 +35,7 @@ export default memo(function OrchestratorTerminal({
     const terminal = new Terminal({
       cursorBlink: false, // periodic redraw was contributing to RAF queue saturation
       fontSize: 13,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: MONO_FONT_FAMILY,
       theme: {
         background: "#181825",
         foreground: "#cdd6f4",

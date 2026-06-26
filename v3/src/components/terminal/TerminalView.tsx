@@ -6,6 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 import { resolveClipboardForTerminal } from "../../utils/clipboardImage";
+import { MONO_FONT_FAMILY } from "../../lib/monoFont";
 
 interface TerminalViewProps {
   sessionId: string;
@@ -56,7 +57,7 @@ export default memo(function TerminalView({
       // RAM 을 낮춘다(스크롤 히스토리 길이만 단축, 기능 무해).
       scrollback: 500,
       fontSize: 13,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: MONO_FONT_FAMILY,
       theme: {
         background: "#1e1e2e",
         foreground: "#cdd6f4",

@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { useEditorStore } from '../../stores/editorStore';
+import { MONO_FONT_FAMILY } from '../../lib/monoFont';
 
 interface CodeEditorProps {
   filePath: string;
@@ -82,6 +83,10 @@ export function CodeEditor({ filePath, content, language, readOnly = false }: Co
         readOnly,
         minimap: { enabled: true, scale: 1, showSlider: 'mouseover' },
         fontSize: 13,
+        // Match the terminals' stack. Without this Monaco uses its per-platform
+        // default (Consolas on Windows), looking different from the terminals and
+        // missing Cascadia Code when installed.
+        fontFamily: MONO_FONT_FAMILY,
         lineHeight: 20,
         padding: { top: 8 },
         scrollBeyondLastLine: false,
