@@ -19,6 +19,23 @@ const ORCH_MAX_RESTARTS = 3;
 const ORCH_BACKOFF_BASE_MS = 2000;
 const ORCH_BACKOFF_MAX_MS = 30000;
 
+// --- Concurrent-resume guard ---
+// Two orchestrator instances — e.g. two worktrees in the fleet, which are
+// SEPARATE OS processes — that `--resume` the SAME claude session id at the
+// same time make Claude Code render the second PTY blank: the user's existing
+// conversation appears to "vanish". We take an advisory, cross-process lock on
+// the resumed session id in a per-project lock file. Liveness is decided
+// PRIMARILY by whether the owning PID is still running (same host), with the
+// TTL only as a backstop against PID reuse after an uncaught crash.
+const ORCH_RESUME_LOCK_TTL_MS = 10 * 60 * 1000;
+
+interface OrchResumeLock {
+  ptySessionId: string;
+  kind: string;
+  pid: number;
+  updatedAt: number;
+}
+
 export interface SessionLabel {
   label: string;
   agentId?: string;
@@ -32,6 +49,10 @@ export interface OrchestratorSession {
   projectId: string;
   rootPath: string;
   launchConfig?: LaunchConfig;
+  // The concrete claude session UUID this PTY is bound to (resumed OR the
+  // freshly-detected one). Tracked so we can release the cross-process resume
+  // lock on exit/stop. Undefined until a session id is known.
+  claudeSessionId?: string;
 }
 
 /**
@@ -370,34 +391,54 @@ export class OrchestratorManager {
     const labelTarget =
       this.kind === "board" ? "Orchestrator" : `Orchestrator-${this.kind}`;
 
-    // Add resume flag — always resolve to the actual session ID for the orchestrator
+    // Resolve the concrete session id we intend to resume (if any). A null
+    // candidate means "no prior session matched" → start fresh.
+    let resumeCandidate: string | null = null;
     if (resumeSessionId && resumeSessionId !== "new") {
-      const resolvedId = this.resolveSessionId(
+      resumeCandidate = this.resolveSessionId(
         rootPath,
         resumeSessionId,
         labelTarget,
       );
-      if (resolvedId) {
-        launchConfig.args.push("--resume", resolvedId);
-        console.log(
-          `[Orchestrator] Resuming session: ${resolvedId} (requested: ${resumeSessionId})`,
-        );
-      } else {
+      if (!resumeCandidate) {
         console.log(
           `[Orchestrator] No matching orchestrator session found for "${resumeSessionId}", starting new`,
         );
       }
     } else if (!resumeSessionId && shouldResume) {
       // Auto-continue latest orchestrator session (kind-scoped label)
-      const resolvedId = this.resolveSessionId(rootPath, "latest", labelTarget);
-      if (resolvedId) {
-        launchConfig.args.push("--resume", resolvedId);
-        console.log(
-          `[Orchestrator] Auto-continuing orchestrator session: ${resolvedId}`,
-        );
-      } else {
+      resumeCandidate = this.resolveSessionId(rootPath, "latest", labelTarget);
+      if (!resumeCandidate) {
         console.log(
           `[Orchestrator] No orchestrator session found, starting new`,
+        );
+      }
+    }
+
+    // Concurrent-resume guard. Only attach `--resume` if no OTHER live
+    // orchestrator process already holds this session. A second `--resume` of
+    // the same id blanks both PTYs and orphans the user's visible conversation
+    // — exactly the "기존 세션 안보임(blank PTY)" symptom. When the lock is
+    // taken we start a FRESH session instead (the prior one stays intact for
+    // its real owner). `resumedSessionId` (not `shouldResume`) now gates the
+    // initial-prompt send below, so a fall-back-to-fresh correctly seeds the
+    // boot prompt — the old `shouldResume` gate skipped the prompt whenever a
+    // resume was *requested* even if no session was actually resumed.
+    let resumedSessionId: string | null = null;
+    if (resumeCandidate) {
+      if (this.acquireResumeLock(rootPath, resumeCandidate, ptySessionId)) {
+        launchConfig.args.push("--resume", resumeCandidate);
+        resumedSessionId = resumeCandidate;
+        console.log(
+          `[Orchestrator:${
+            this.kind
+          }] Resuming session: ${resumeCandidate} (requested: ${
+            resumeSessionId ?? "auto"
+          })`,
+        );
+      } else {
+        console.warn(
+          `[Orchestrator:${this.kind}] Session ${resumeCandidate} is already attached by another live orchestrator instance — starting a FRESH session to avoid a blank PTY (concurrent --resume guard).`,
         );
       }
     }
@@ -467,10 +508,13 @@ export class OrchestratorManager {
       projectId,
       rootPath,
       launchConfig,
+      claudeSessionId: resumedSessionId ?? undefined,
     };
 
-    // Send initial prompt only for NEW sessions (not resumed ones)
-    if (shouldResume && resumeSessionId !== "new") {
+    // Send initial prompt only for NEW sessions (not resumed ones). Gate on
+    // whether we ACTUALLY resumed (lock acquired + session matched), not on the
+    // mere request — a fall-back-to-fresh must still send the boot prompt.
+    if (resumedSessionId) {
       // Resumed session — just mark as running after CLI boots
       setTimeout(() => {
         if (this.session?.ptySessionId === ptySessionId) {
@@ -582,8 +626,12 @@ export class OrchestratorManager {
     this.ptyManager.onExit(ptySessionId, (exitCode) => {
       if (this.session?.ptySessionId !== ptySessionId) return;
 
-      // Intentional stop or clean exit
+      // Intentional stop or clean exit — release our resume lock so another
+      // instance (or our own next launch) can attach without false contention.
       if (this.stopRequested || exitCode === 0) {
+        if (this.session?.claudeSessionId) {
+          this.releaseResumeLock(rootPath, this.session.claudeSessionId);
+        }
         this.setStatus("stopped");
         this.configGenerator.cleanup(sessionId);
         return;
@@ -634,7 +682,11 @@ export class OrchestratorManager {
           );
         }, delay);
       } else {
-        // Max restarts exceeded
+        // Max restarts exceeded — give up and release the lock so a manual
+        // restart (or a sibling instance) can re-attach to the session.
+        if (this.session?.claudeSessionId) {
+          this.releaseResumeLock(rootPath, this.session.claudeSessionId);
+        }
         this.setStatus("error");
         this.configGenerator.cleanup(sessionId);
         console.error(
@@ -655,7 +707,8 @@ export class OrchestratorManager {
       this.restartTimer = null;
     }
 
-    const { ptySessionId, sessionId } = this.session;
+    const { ptySessionId, sessionId, rootPath, claudeSessionId } = this.session;
+    if (claudeSessionId) this.releaseResumeLock(rootPath, claudeSessionId);
     this.ptyManager.kill(ptySessionId);
     this.configGenerator.cleanup(sessionId);
     this.setStatus("stopped");
@@ -866,6 +919,12 @@ export class OrchestratorManager {
       if (match) {
         this.saveSessionLabel(rootPath, match, label);
         this.saveOrchSessionId(rootPath, match);
+        // Bind our resume lock to the freshly-created session id so a sibling
+        // instance can't later `--resume` it from under us and blank our PTY.
+        if (this.session?.ptySessionId === ptySessionId) {
+          this.session.claudeSessionId = match;
+          this.acquireResumeLock(rootPath, match, ptySessionId);
+        }
         console.log(
           `[Orchestrator:${this.kind}] Labeled session ${match} as "${label}" (attempt ${attempts})`,
         );
@@ -971,6 +1030,15 @@ export class OrchestratorManager {
   /** Persist this orchestrator's claude session id under its store key. */
   saveOrchSessionId(rootPath: string, claudeSessionId: string): void {
     const store = this.readOrchStore(rootPath);
+    // Repoint visibility: when the board/mission pointer moves to a DIFFERENT
+    // session, the previous conversation is orphaned (no longer auto-resumed).
+    // Surface it instead of silently swapping it out — "조용한 유실 금지".
+    const prev = store[this.orchStoreKey()]?.sessionId;
+    if (prev && prev !== claudeSessionId) {
+      console.warn(
+        `[Orchestrator:${this.kind}] Session pointer repointed ${prev} → ${claudeSessionId}; the prior conversation is now orphaned (it will not be auto-resumed).`,
+      );
+    }
     store[this.orchStoreKey()] = {
       sessionId: claudeSessionId,
       updatedAt: Date.now(),
@@ -984,6 +1052,101 @@ export class OrchestratorManager {
       );
     } catch {
       /* best-effort */
+    }
+  }
+
+  // ── Concurrent-resume lock (cross-process, advisory) ──────────────────
+  // A per-project file mapping claude-session-id → owning orchestrator. It
+  // prevents two LIVE instances from `--resume`-ing the same session at once
+  // (which renders the second PTY blank). Same-process re-resume — e.g. crash
+  // auto-restart — is always allowed (pid match).
+
+  private getOrchLocksPath(rootPath: string): string {
+    const encodedPath = encodeClaudeProjectDir(rootPath);
+    return path.join(
+      os.homedir(),
+      ".claude",
+      "projects",
+      encodedPath,
+      "marblo-orch-locks.json",
+    );
+  }
+
+  private readOrchLocks(rootPath: string): Record<string, OrchResumeLock> {
+    try {
+      return JSON.parse(
+        fs.readFileSync(this.getOrchLocksPath(rootPath), "utf-8"),
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  private writeOrchLocks(
+    rootPath: string,
+    locks: Record<string, OrchResumeLock>,
+  ): void {
+    try {
+      fs.writeFileSync(
+        this.getOrchLocksPath(rootPath),
+        JSON.stringify(locks, null, 2),
+        "utf-8",
+      );
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /** True if `pid` is a currently-running process on this host. */
+  private static isPidAlive(pid: number): boolean {
+    if (!pid || pid <= 0) return false;
+    try {
+      // Signal 0 performs error checking without sending a signal.
+      process.kill(pid, 0);
+      return true;
+    } catch (e) {
+      // EPERM = process exists but is owned by another user → still alive.
+      return (e as NodeJS.ErrnoException).code === "EPERM";
+    }
+  }
+
+  /** True if `lock` is held by a DIFFERENT orchestrator that is still alive. */
+  private isForeignLiveLock(lock?: OrchResumeLock): boolean {
+    if (!lock) return false;
+    if (lock.pid === process.pid) return false; // our own (incl. crash restart)
+    if (Date.now() - lock.updatedAt > ORCH_RESUME_LOCK_TTL_MS) return false; // stale
+    return OrchestratorManager.isPidAlive(lock.pid);
+  }
+
+  /**
+   * Try to claim the resume lock for `claudeSessionId`. Returns false when a
+   * different, still-running orchestrator already holds it — the caller then
+   * starts a fresh session instead of double-attaching (which blanks the PTY).
+   */
+  private acquireResumeLock(
+    rootPath: string,
+    claudeSessionId: string,
+    ptySessionId: string,
+  ): boolean {
+    const locks = this.readOrchLocks(rootPath);
+    if (this.isForeignLiveLock(locks[claudeSessionId])) return false;
+    locks[claudeSessionId] = {
+      ptySessionId,
+      kind: this.kind,
+      pid: process.pid,
+      updatedAt: Date.now(),
+    };
+    this.writeOrchLocks(rootPath, locks);
+    return true;
+  }
+
+  /** Release our resume lock for `claudeSessionId` (only if we still hold it). */
+  private releaseResumeLock(rootPath: string, claudeSessionId: string): void {
+    const locks = this.readOrchLocks(rootPath);
+    const held = locks[claudeSessionId];
+    if (held && held.pid === process.pid) {
+      delete locks[claudeSessionId];
+      this.writeOrchLocks(rootPath, locks);
     }
   }
 
