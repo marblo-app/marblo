@@ -313,6 +313,7 @@ const PRESETS = [
 ];
 
 function ModelPresetSection() {
+  const { t } = useTranslation();
   const [current, setCurrent] = useState("recommended");
   const [saving, setSaving] = useState(false);
 
@@ -339,12 +340,10 @@ function ModelPresetSection() {
     <div className="space-y-4">
       <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
         <h3 className="mb-1 text-sm font-medium text-gray-200">
-          Agent Model Preset
+          {t("settings.models.heading")}
         </h3>
         <p className="mb-4 text-xs text-gray-500">
-          오케스트레이터가 새 에이전트를 스폰할 때 어떤 모델을 사용할지
-          결정합니다. 태스크에 특정 tags가 있으면 최적 모델이 자동 선택되고,
-          없으면 프리셋 비율로 배분됩니다.
+          {t("settings.models.help")}
         </p>
         <div className="space-y-2">
           {PRESETS.map((p) => (
@@ -396,6 +395,7 @@ function ModelPresetSection() {
 // per-token 단가 대신 월정액 + 한도 기반으로 비용을 산출함. 빈 리스트면
 // 모든 모델은 기본 토큰단가로 과금 (현행 동작과 동일).
 function SubscriptionPlansSection() {
+  const { t } = useTranslation();
   const [plans, setPlans] = useState<SubscriptionPlanEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -437,7 +437,7 @@ function SubscriptionPlansSection() {
       if (result.success) {
         setSavedAt(Date.now());
       } else {
-        setError(result.error || "저장 실패");
+        setError(result.error || t("settings.saveFailed"));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -451,19 +451,16 @@ function SubscriptionPlansSection() {
   return (
     <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
       <h3 className="mb-1 text-sm font-medium text-gray-200">
-        구독제 플랜 등록
+        {t("settings.subscription.heading")}
       </h3>
       <p className="mb-4 text-xs text-gray-500">
-        Claude Max, ChatGPT Plus 처럼 월정액 구독으로 쓰는 모델이 있으면 여기
-        등록하세요. 등록된 모델은 토큰 단가가 아닌 월정액으로 비용이 계산되고,
-        선택적으로 월간 토큰 한도를 넘으면 그 초과분만 토큰 단가로 과금합니다.
-        등록 안 하면 기본 토큰 단가가 적용됩니다.
+        {t("settings.subscription.help")}
       </p>
 
       <div className="space-y-3">
         {plans.length === 0 && (
           <p className="text-xs text-gray-500 italic">
-            등록된 구독 플랜이 없습니다. 모든 모델은 토큰 단가로 과금됩니다.
+            {t("settings.subscription.empty")}
           </p>
         )}
         {plans.map((p, i) => (
@@ -477,7 +474,9 @@ function SubscriptionPlansSection() {
               value={p.modelPrefix}
               onChange={(e) => update(i, { modelPrefix: e.target.value })}
             />
-            <span className="text-xs text-gray-500">월정액 USD</span>
+            <span className="text-xs text-gray-500">
+              {t("settings.subscription.monthlyFlat")}
+            </span>
             <input
               type="number"
               min={0}
@@ -488,13 +487,15 @@ function SubscriptionPlansSection() {
                 update(i, { monthlyFlatUsd: Number(e.target.value) || 0 })
               }
             />
-            <span className="text-xs text-gray-500">월 토큰한도</span>
+            <span className="text-xs text-gray-500">
+              {t("settings.subscription.tokenAllowance")}
+            </span>
             <input
               type="number"
               min={0}
               step={100000}
               className="w-32 rounded bg-gray-800 px-2 py-1 text-xs text-gray-200"
-              placeholder="(선택)"
+              placeholder={t("settings.subscription.optional")}
               value={p.monthlyTokenAllowance ?? ""}
               onChange={(e) =>
                 update(i, {
@@ -508,7 +509,7 @@ function SubscriptionPlansSection() {
               onClick={() => removePlan(i)}
               className="ml-auto rounded bg-red-500/20 px-2 py-1 text-xs text-red-400 hover:bg-red-500/30"
             >
-              삭제
+              {t("settings.subscription.delete")}
             </button>
           </div>
         ))}
@@ -519,16 +520,20 @@ function SubscriptionPlansSection() {
           onClick={addPlan}
           className="rounded border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700/50"
         >
-          + 플랜 추가
+          {t("settings.subscription.addPlan")}
         </button>
         <button
           onClick={save}
           disabled={saving}
           className="rounded bg-blue-500/20 px-3 py-1.5 text-xs text-blue-400 hover:bg-blue-500/30 disabled:opacity-50"
         >
-          {saving ? "저장 중..." : "저장"}
+          {saving ? t("settings.subscription.saving") : t("common.save")}
         </button>
-        {savedAt && <span className="text-xs text-green-400">저장됨</span>}
+        {savedAt && (
+          <span className="text-xs text-green-400">
+            {t("settings.subscription.saved")}
+          </span>
+        )}
         {error && <span className="text-xs text-red-400">{error}</span>}
       </div>
     </div>

@@ -21,30 +21,30 @@ import { useAuth } from "../../hooks/useAuth";
 import { usePrivacyConsentStore } from "../../stores/privacyConsentStore";
 import type { ConsentFlags } from "../../services/privacyConsentService";
 import { maybeInitSentry } from "../../lib/telemetry/sentry";
+import { useTranslation, t } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 import { PrivacyPolicyPage } from "../legal/PrivacyPolicyPage";
 
-const ROWS: { id: keyof ConsentFlags; label: string; hint: string }[] = [
+const ROWS: {
+  id: keyof ConsentFlags;
+  labelKey: MessageKey;
+  hintKey: MessageKey;
+}[] = [
   {
     id: "sentry",
-    label: "익명 크래시 리포트 (Sentry)",
-    hint: "스택 트레이스에서 PII 자동 마스킹.",
+    labelKey: "settings.privacy.sentry.label",
+    hintKey: "settings.privacy.sentry.hint",
   },
 ];
 
 function buildDeletionMailto(uid: string): string {
-  const subject = encodeURIComponent("[Marblo] 텔레메트리 데이터 삭제 요청");
-  const body = encodeURIComponent(
-    `안녕하세요.\n\n` +
-      `아래 사용자의 텔레메트리 데이터 삭제를 요청합니다 (PIPA 제36조).\n\n` +
-      `사용자 UID: ${uid}\n\n` +
-      `대상 서비스:\n` +
-      `[ ] Sentry (크래시 리포트)\n\n` +
-      `30일 이내 응답 부탁드립니다.\n`,
-  );
+  const subject = encodeURIComponent(t("settings.privacy.deletion.subject"));
+  const body = encodeURIComponent(t("settings.privacy.deletion.body", { uid }));
   return `mailto:support@marblo.app?subject=${subject}&body=${body}`;
 }
 
 export function PrivacySettings() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const consent = usePrivacyConsentStore((s) => s.consent);
   const save = usePrivacyConsentStore((s) => s.save);
@@ -86,7 +86,7 @@ export function PrivacySettings() {
     } catch (err) {
       // Roll back optimistic UI on failure
       patchLocal({ [id]: !next } as Partial<ConsentFlags>);
-      setError(err instanceof Error ? err.message : "저장 실패");
+      setError(err instanceof Error ? err.message : t("settings.saveFailed"));
     } finally {
       setBusyKey(null);
     }
@@ -103,10 +103,11 @@ export function PrivacySettings() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-sm font-semibold text-[#cdd6f4]">Privacy</h2>
+        <h2 className="text-sm font-semibold text-[#cdd6f4]">
+          {t("settings.privacy.heading")}
+        </h2>
         <p className="mt-1 text-xs text-[#bac2de]">
-          외부 제3자(Sentry) 송신은 옵트인입니다. 거부해도 마블로 모든 기능은
-          정상 작동합니다.
+          {t("settings.privacy.optInDescription")}
         </p>
       </div>
 
@@ -119,8 +120,8 @@ export function PrivacySettings() {
             }`}
           >
             <div className="flex-1 min-w-0">
-              <div className="text-sm text-[#cdd6f4]">{row.label}</div>
-              <div className="text-[11px] text-[#6c7086]">{row.hint}</div>
+              <div className="text-sm text-[#cdd6f4]">{t(row.labelKey)}</div>
+              <div className="text-[11px] text-[#6c7086]">{t(row.hintKey)}</div>
             </div>
             <button
               type="button"
@@ -142,16 +143,19 @@ export function PrivacySettings() {
       </div>
 
       <div className="rounded border border-[#313244] bg-[#11111b] px-3 py-2 text-[11px] text-[#6c7086]">
-        <span className="text-[#bac2de]">자체 운영 품질 지표 (BigQuery)</span> —
-        식별정보를 제거한 비식별 데이터(익명 설치 ID, 토큰/비용/이벤트 종류)만
-        우리 GCP에 수집됩니다. 계정 UID·코드·입력 텍스트는 포함되지 않으며,
-        제3자에게 제공되지 않습니다.
+        <span className="text-[#bac2de]">
+          {t("settings.privacy.bigquery.label")}
+        </span>{" "}
+        — {t("settings.privacy.bigquery.body")}
       </div>
 
       {consent.sentry && (
         <div className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-3 py-2 text-[11px] text-[#f9e2af]">
-          국외 이전 동의: {consent.overseasTransfer ? "✓ 동의함" : "필요"} —
-          Sentry는 미국에서 처리됩니다 (PIPA 제15조 제2항).
+          {t("settings.privacy.overseas.notice", {
+            status: consent.overseasTransfer
+              ? t("settings.privacy.overseas.agreed")
+              : t("settings.privacy.overseas.required"),
+          })}
         </div>
       )}
 
@@ -167,22 +171,24 @@ export function PrivacySettings() {
           onClick={() => setShowPolicy(true)}
           className="text-[#89b4fa] hover:underline"
         >
-          처리방침 보기
+          {t("settings.privacy.viewPolicy")}
         </button>
         {user && (
           <a
             href={buildDeletionMailto(user.uid)}
             className="text-[#f38ba8] hover:underline"
           >
-            데이터 삭제 요청 (PIPA 제36조)
+            {t("settings.privacy.requestDeletion")}
           </a>
         )}
       </div>
 
       {consent.acceptedAt && (
         <p className="text-[10px] text-[#6c7086]">
-          마지막 동의 갱신: {consent.acceptedAt.toLocaleString()} (정책 버전{" "}
-          {consent.version})
+          {t("settings.privacy.lastUpdated", {
+            date: consent.acceptedAt.toLocaleString(),
+            version: consent.version,
+          })}
         </p>
       )}
     </div>

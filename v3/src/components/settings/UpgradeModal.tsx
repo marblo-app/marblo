@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import type { PlanType } from "../../types/subscription";
+import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 import {
   openPaddleCheckout,
   getPlanLimits,
@@ -30,11 +32,11 @@ const PLAN_PRICES: Record<PlanType, string> = {
   enterprise: "Contact Sales",
 };
 
-const FEATURE_LABELS: Record<string, string> = {
-  flowEditor: "Flow 에디터",
-  teamCollab: "팀 협업",
-  orchestrator: "오케스트레이터",
-  prioritySupport: "우선 지원",
+const FEATURE_LABEL_KEYS: Record<string, MessageKey> = {
+  flowEditor: "settings.upgrade.feature.flowEditor",
+  teamCollab: "settings.upgrade.feature.teamCollab",
+  orchestrator: "settings.upgrade.feature.orchestrator",
+  prioritySupport: "settings.upgrade.feature.prioritySupport",
 };
 
 export function UpgradeModal({
@@ -42,11 +44,13 @@ export function UpgradeModal({
   requiredPlan,
   onClose,
 }: UpgradeModalProps) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
 
   const requiredLimits = getPlanLimits(requiredPlan);
-  const featureLabel = FEATURE_LABELS[feature] ?? feature;
+  const featureLabelKey = FEATURE_LABEL_KEYS[feature];
+  const featureLabel = featureLabelKey ? t(featureLabelKey) : feature;
 
   const handleUpgrade = async () => {
     if (!user) return;
@@ -91,14 +95,27 @@ export function UpgradeModal({
 
         {/* 헤더 */}
         <div className="mb-5">
-          <h2 className="text-xl font-bold text-white">업그레이드 필요</h2>
+          <h2 className="text-xl font-bold text-white">
+            {t("settings.upgrade.needed")}
+          </h2>
           <p className="mt-2 text-sm text-gray-400">
-            <span className="font-medium text-blue-400">{featureLabel}</span>{" "}
-            기능은{" "}
-            <span className="font-medium text-white">
-              {PLAN_NAMES[requiredPlan]}
-            </span>{" "}
-            플랜부터 사용 가능합니다.
+            {t("settings.upgrade.featureRequiresPlan")
+              .split(/(\{feature\}|\{plan\})/)
+              .map((seg, i) => {
+                if (seg === "{feature}")
+                  return (
+                    <span key={i} className="font-medium text-blue-400">
+                      {featureLabel}
+                    </span>
+                  );
+                if (seg === "{plan}")
+                  return (
+                    <span key={i} className="font-medium text-white">
+                      {PLAN_NAMES[requiredPlan]}
+                    </span>
+                  );
+                return seg;
+              })}
           </p>
         </div>
 
@@ -107,7 +124,9 @@ export function UpgradeModal({
           <div className="flex items-center justify-between">
             <div>
               <p className="font-semibold text-white">
-                {PLAN_NAMES[requiredPlan]} 플랜
+                {t("settings.upgrade.planLabel", {
+                  plan: PLAN_NAMES[requiredPlan],
+                })}
               </p>
               <p className="text-2xl font-bold text-white">
                 {PLAN_PRICES[requiredPlan]}
@@ -116,21 +135,31 @@ export function UpgradeModal({
           </div>
           <ul className="mt-3 space-y-1.5 text-sm text-gray-300">
             <li>
-              프로젝트{" "}
               {requiredLimits.maxProjects === Infinity
-                ? "무제한"
-                : `${requiredLimits.maxProjects}개`}
+                ? t("settings.upgrade.projectsUnlimited")
+                : t("settings.upgrade.projectsCount", {
+                    count: requiredLimits.maxProjects,
+                  })}
             </li>
             <li>
-              에이전트{" "}
               {requiredLimits.maxAgents === Infinity
-                ? "무제한"
-                : `${requiredLimits.maxAgents}개`}
+                ? t("settings.upgrade.agentsUnlimited")
+                : t("settings.upgrade.agentsCount", {
+                    count: requiredLimits.maxAgents,
+                  })}
             </li>
-            {requiredLimits.hasFlowEditor && <li>Flow 에디터</li>}
-            {requiredLimits.hasOrchestrator && <li>오케스트레이터</li>}
-            {requiredLimits.hasTeamCollab && <li>팀 협업</li>}
-            {requiredLimits.hasPrioritySupport && <li>우선 지원</li>}
+            {requiredLimits.hasFlowEditor && (
+              <li>{t("settings.upgrade.feature.flowEditor")}</li>
+            )}
+            {requiredLimits.hasOrchestrator && (
+              <li>{t("settings.upgrade.feature.orchestrator")}</li>
+            )}
+            {requiredLimits.hasTeamCollab && (
+              <li>{t("settings.upgrade.feature.teamCollab")}</li>
+            )}
+            {requiredLimits.hasPrioritySupport && (
+              <li>{t("settings.upgrade.feature.prioritySupport")}</li>
+            )}
           </ul>
         </div>
 
@@ -140,7 +169,7 @@ export function UpgradeModal({
             onClick={onClose}
             className="flex-1 rounded border border-gray-600 py-2 text-sm text-gray-300 hover:bg-gray-700"
           >
-            닫기
+            {t("common.close")}
           </button>
           <button
             onClick={handleUpgrade}
@@ -148,8 +177,10 @@ export function UpgradeModal({
             className="flex-1 rounded bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {loading
-              ? "처리 중..."
-              : `${PLAN_NAMES[requiredPlan]}으로 업그레이드`}
+              ? t("settings.upgrade.processing")
+              : t("settings.upgrade.upgradeTo", {
+                  plan: PLAN_NAMES[requiredPlan],
+                })}
           </button>
         </div>
       </div>

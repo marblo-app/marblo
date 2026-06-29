@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
-import type { Invitation } from '../../types/invitation';
-import type { Project } from '../../types/project';
-import type { User } from '../../types/user';
-import { useAuth } from '../../hooks/useAuth';
-import * as teamService from '../../services/teamService';
-import { getDocument, convertTimestamps } from '../../services/firestore';
+import { useState, useEffect } from "react";
+import type { Invitation } from "../../types/invitation";
+import type { Project } from "../../types/project";
+import type { User } from "../../types/user";
+import { useAuth } from "../../hooks/useAuth";
+import { useTranslation } from "../../lib/i18n";
+import * as teamService from "../../services/teamService";
+import { getDocument, convertTimestamps } from "../../services/firestore";
 
 export function InvitationBanner() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [invitations, setInvitations] = useState<
     (Invitation & { projectName?: string; inviterName?: string })[]
@@ -25,21 +27,34 @@ export function InvitationBanner() {
         // 프로젝트명과 초대자 이름을 함께 로드
         const enriched = await Promise.all(
           invs.map(async (inv) => {
-            let projectName = '';
-            let inviterName = '';
+            let projectName = "";
+            let inviterName = "";
             try {
-              const project = await getDocument<Record<string, unknown>>('projects', inv.projectId);
+              const project = await getDocument<Record<string, unknown>>(
+                "projects",
+                inv.projectId,
+              );
               if (project) {
-                projectName = (convertTimestamps<Project>(project, ['createdAt', 'updatedAt'])).name;
+                projectName = convertTimestamps<Project>(project, [
+                  "createdAt",
+                  "updatedAt",
+                ]).name;
               }
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
             try {
-              const inviter = await getDocument<Record<string, unknown>>('users', inv.invitedBy);
+              const inviter = await getDocument<Record<string, unknown>>(
+                "users",
+                inv.invitedBy,
+              );
               if (inviter) {
-                const u = convertTimestamps<User>(inviter, ['createdAt']);
+                const u = convertTimestamps<User>(inviter, ["createdAt"]);
                 inviterName = u.displayName || u.email;
               }
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
             return { ...inv, projectName, inviterName };
           }),
         );
@@ -97,10 +112,24 @@ export function InvitationBanner() {
               />
             </svg>
             <span>
-              <strong className="text-blue-300">{inv.inviterName || '알 수 없음'}</strong>
-              님이{' '}
-              <strong className="text-blue-300">{inv.projectName || '프로젝트'}</strong>
-              에 초대했습니다
+              {t("settings.invitation.invitedYou")
+                .split(/(\{inviter\}|\{project\})/)
+                .map((seg, i) => {
+                  if (seg === "{inviter}")
+                    return (
+                      <strong key={i} className="text-blue-300">
+                        {inv.inviterName || t("common.unknown")}
+                      </strong>
+                    );
+                  if (seg === "{project}")
+                    return (
+                      <strong key={i} className="text-blue-300">
+                        {inv.projectName ||
+                          t("settings.invitation.fallbackProject")}
+                      </strong>
+                    );
+                  return seg;
+                })}
             </span>
             <span className="text-xs text-gray-500">({inv.role})</span>
           </div>
@@ -110,14 +139,14 @@ export function InvitationBanner() {
               disabled={processing === inv.id}
               className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              수락
+              {t("settings.invitation.accept")}
             </button>
             <button
               onClick={() => handleReject(inv.id)}
               disabled={processing === inv.id}
               className="rounded border border-gray-600 px-3 py-1 text-xs text-gray-300 hover:bg-gray-700 disabled:opacity-50"
             >
-              거절
+              {t("settings.invitation.reject")}
             </button>
           </div>
         </div>

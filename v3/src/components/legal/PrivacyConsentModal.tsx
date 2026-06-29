@@ -19,32 +19,42 @@
  * cookie consent — see PrivacyPolicyPage. The ga4/mixpanel flags remain in
  * the consent schema (always false) for forward-compat.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { usePrivacyConsentStore } from "../../stores/privacyConsentStore";
+import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 import { PrivacyPolicyPage } from "./PrivacyPolicyPage";
 
 type CheckboxId = "sentry" | "ga4" | "mixpanel" | "overseasTransfer";
 
 const ROWS: {
   id: CheckboxId;
-  label: string;
-  hint: string;
+  labelKey: MessageKey;
+  hintKey: MessageKey;
   /** Whether this is the "별도 동의" national-export box (rendered separately). */
   separate?: boolean;
 }[] = [
   {
     id: "sentry",
-    label: "크래시 리포트 보내기 (Sentry, 미국 호스팅)",
-    hint: "스택 트레이스에서 파일 경로·환경변수·BYOK 키는 자동 마스킹.",
+    labelKey: "legal.consent.sentry.label",
+    hintKey: "legal.consent.sentry.hint",
   },
   {
     id: "overseasTransfer",
-    label: "국외 이전 별도 동의 (PIPA 제15조 제2항)",
-    hint: "Sentry는 미국 서버에서 데이터를 처리합니다. 위 항목을 켜려면 이 동의가 필수입니다.",
+    labelKey: "legal.consent.overseas.label",
+    hintKey: "legal.consent.overseas.hint",
     separate: true,
   },
 ];
+
+/** Render a translated string with inline <b>…</b> emphasis as JSX. */
+function renderRich(text: string): ReactNode[] {
+  return text.split(/(<b>.*?<\/b>)/g).map((part, i) => {
+    const m = part.match(/^<b>(.*?)<\/b>$/);
+    return m ? <b key={i}>{m[1]}</b> : <span key={i}>{part}</span>;
+  });
+}
 
 interface PrivacyConsentModalProps {
   /** Called after the user clicks 허용/나중에 — host can hide the modal. */
@@ -52,6 +62,7 @@ interface PrivacyConsentModalProps {
 }
 
 export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const save = usePrivacyConsentStore((s) => s.save);
 
@@ -78,7 +89,7 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
     if (!user) return;
     // Hard guard: if Sentry is on, overseasTransfer must also be on.
     if (flags.sentry && !flags.overseasTransfer) {
-      setError("Sentry는 미국 호스팅이라 국외 이전 동의가 필수입니다.");
+      setError(t("legal.consent.overseasRequired"));
       return;
     }
     setSubmitting(true);
@@ -90,7 +101,9 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
       // 진입을 영구 차단하지 않는다. 권한 규칙·네트워크 단절·디플로이 지연
       // 등 일시적 사유로 onboarding 이 막히는 P1 버그 가드.
       console.warn("[PrivacyConsent] save failed, closing modal anyway:", err);
-      setError(err instanceof Error ? err.message : "저장 실패");
+      setError(
+        err instanceof Error ? err.message : t("legal.consent.saveFailed"),
+      );
     } finally {
       setSubmitting(false);
       onComplete?.();
@@ -132,14 +145,10 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
       <div className="w-full max-w-md rounded-lg border border-[#313244] bg-[#1e1e2e] shadow-2xl">
         <div className="border-b border-[#313244] px-6 py-4">
           <h2 className="text-base font-semibold text-[#cdd6f4]">
-            마블로를 더 안정적으로 만들도록 도와주세요
+            {t("legal.consent.heading")}
           </h2>
           <p className="mt-1 text-xs text-[#bac2de] leading-relaxed">
-            아래 <b>제3자 서비스(미국 호스팅)</b> 송신에 동의해 주시면 마블로가
-            빠르게 개선됩니다.{" "}
-            <b>코드 내용 · BYOK 키 · 사용자 입력은 절대 보내지 않습니다.</b>{" "}
-            거부해도 모든 기능은 동일하게 작동합니다. (자체 운영 품질 지표는
-            식별정보 없는 비식별 데이터로만 수집 — 자세히 보기 참조.)
+            {renderRich(t("legal.consent.body"))}
           </p>
         </div>
 
@@ -158,9 +167,9 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
                 className="mt-0.5 h-4 w-4 accent-[#89b4fa] disabled:opacity-50"
               />
               <div className="flex-1 min-w-0">
-                <div className="text-sm text-[#cdd6f4]">{row.label}</div>
+                <div className="text-sm text-[#cdd6f4]">{t(row.labelKey)}</div>
                 <div className="text-[11px] text-[#6c7086] leading-snug">
-                  {row.hint}
+                  {t(row.hintKey)}
                 </div>
               </div>
             </label>
@@ -182,9 +191,9 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
                 className="mt-0.5 h-4 w-4 accent-[#f9e2af]"
               />
               <div className="flex-1 min-w-0">
-                <div className="text-sm text-[#f9e2af]">{row.label}</div>
+                <div className="text-sm text-[#f9e2af]">{t(row.labelKey)}</div>
                 <div className="text-[11px] text-[#6c7086] leading-snug">
-                  {row.hint}
+                  {t(row.hintKey)}
                 </div>
               </div>
             </label>
@@ -201,7 +210,7 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
             onClick={() => setShowPolicy(true)}
             className="text-[11px] text-[#89b4fa] hover:underline"
           >
-            자세히 보기 (수집 항목 · 기간 · 거부 효과)
+            {t("legal.consent.viewDetails")}
           </button>
         </div>
 
@@ -212,7 +221,7 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
             disabled={submitting}
             className="flex-1 rounded border border-[#313244] px-4 py-2 text-sm text-[#bac2de] hover:bg-[#262640] disabled:opacity-50"
           >
-            나중에
+            {t("legal.consent.later")}
           </button>
           <button
             type="button"
@@ -220,7 +229,7 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
             disabled={submitting}
             className="flex-1 rounded bg-[#89b4fa] px-4 py-2 text-sm font-medium text-[#11111b] hover:bg-[#74a0e8] disabled:opacity-50"
           >
-            {submitting ? "저장 중..." : "허용"}
+            {submitting ? t("legal.consent.saving") : t("legal.consent.allow")}
           </button>
         </div>
       </div>

@@ -1,29 +1,31 @@
-import { useState } from 'react';
-import type { InvitationRole } from '../../types/invitation';
-import { useTeam } from '../../hooks/useTeam';
-import { useAuth } from '../../hooks/useAuth';
+import { useState } from "react";
+import type { InvitationRole } from "../../types/invitation";
+import { useTeam } from "../../hooks/useTeam";
+import { useAuth } from "../../hooks/useAuth";
+import { useTranslation } from "../../lib/i18n";
 
 const ROLE_BADGE_COLORS: Record<InvitationRole, string> = {
-  owner: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  admin: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  member: 'bg-green-500/20 text-green-400 border-green-500/30',
-  viewer: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  owner: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  admin: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  member: "bg-green-500/20 text-green-400 border-green-500/30",
+  viewer: "bg-gray-500/20 text-gray-400 border-gray-500/30",
 };
 
 const ROLE_LABELS: Record<InvitationRole, string> = {
-  owner: 'Owner',
-  admin: 'Admin',
-  member: 'Member',
-  viewer: 'Viewer',
+  owner: "Owner",
+  admin: "Admin",
+  member: "Member",
+  viewer: "Viewer",
 };
 
-const ASSIGNABLE_ROLES: InvitationRole[] = ['admin', 'member', 'viewer'];
+const ASSIGNABLE_ROLES: InvitationRole[] = ["admin", "member", "viewer"];
 
 interface TeamManagementProps {
   projectId: string;
 }
 
 export function TeamManagement({ projectId }: TeamManagementProps) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const {
     members,
@@ -39,12 +41,12 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
     clearError,
   } = useTeam(projectId);
 
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<InvitationRole>('member');
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<InvitationRole>("member");
   const [inviting, setInviting] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
-  const canManageMembers = checkPermission('manage_members');
+  const canManageMembers = checkPermission("manage_members");
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,8 +55,8 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
     setInviting(true);
     try {
       await invite(inviteEmail.trim(), inviteRole);
-      setInviteEmail('');
-      setInviteRole('member');
+      setInviteEmail("");
+      setInviteRole("member");
     } catch {
       // error is set in hook
     } finally {
@@ -101,7 +103,10 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
       {error && (
         <div className="flex items-center justify-between rounded border border-red-700 bg-red-900/30 px-4 py-2 text-sm text-red-400">
           <span>{error}</span>
-          <button onClick={clearError} className="ml-2 text-red-400 hover:text-red-300">
+          <button
+            onClick={clearError}
+            className="ml-2 text-red-400 hover:text-red-300"
+          >
             &times;
           </button>
         </div>
@@ -110,10 +115,14 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
       {/* Invite Form */}
       {canManageMembers && (
         <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
-          <h3 className="mb-3 text-sm font-medium text-gray-200">멤버 초대</h3>
+          <h3 className="mb-3 text-sm font-medium text-gray-200">
+            {t("settings.team.inviteHeading")}
+          </h3>
           <form onSubmit={handleInvite} className="flex items-end gap-3">
             <div className="flex-1">
-              <label className="mb-1 block text-xs text-gray-400">이메일</label>
+              <label className="mb-1 block text-xs text-gray-400">
+                {t("settings.team.email")}
+              </label>
               <input
                 type="email"
                 value={inviteEmail}
@@ -124,10 +133,14 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
               />
             </div>
             <div className="w-32">
-              <label className="mb-1 block text-xs text-gray-400">역할</label>
+              <label className="mb-1 block text-xs text-gray-400">
+                {t("settings.team.role")}
+              </label>
               <select
                 value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as InvitationRole)}
+                onChange={(e) =>
+                  setInviteRole(e.target.value as InvitationRole)
+                }
                 className="w-full rounded border border-gray-600 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
               >
                 {ASSIGNABLE_ROLES.map((role) => (
@@ -142,7 +155,9 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
               disabled={inviting || !inviteEmail.trim()}
               className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              {inviting ? '전송 중...' : '초대'}
+              {inviting
+                ? t("settings.team.inviting")
+                : t("settings.team.inviteButton")}
             </button>
           </form>
         </div>
@@ -152,7 +167,9 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
       {invitations.length > 0 && (
         <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
           <h3 className="mb-3 text-sm font-medium text-gray-200">
-            대기 중인 초대 ({invitations.length})
+            {t("settings.team.pendingInvitations", {
+              count: invitations.length,
+            })}
           </h3>
           <div className="space-y-2">
             {invitations.map((inv) => (
@@ -161,7 +178,9 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
                 className="flex items-center justify-between rounded border border-gray-700 bg-gray-900 px-3 py-2"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-sm text-gray-300">{inv.invitedEmail}</span>
+                  <span className="text-sm text-gray-300">
+                    {inv.invitedEmail}
+                  </span>
                   <RoleBadge role={inv.role} />
                 </div>
                 <div className="flex items-center gap-2">
@@ -173,7 +192,7 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
                       onClick={() => handleCancelInvitation(inv.id)}
                       className="rounded px-2 py-1 text-xs text-red-400 hover:bg-red-900/30"
                     >
-                      취소
+                      {t("common.cancel")}
                     </button>
                   )}
                 </div>
@@ -186,13 +205,13 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
       {/* Members List */}
       <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
         <h3 className="mb-3 text-sm font-medium text-gray-200">
-          멤버 ({members.length})
+          {t("settings.team.membersHeading", { count: members.length })}
         </h3>
         <div className="space-y-2">
           {members.map((member) => {
-            const role = memberRoles[member.id] || 'member';
+            const role = memberRoles[member.id] || "member";
             const isCurrentUser = user?.uid === member.id;
-            const isOwner = role === 'owner';
+            const isOwner = role === "owner";
 
             return (
               <div
@@ -209,7 +228,7 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
                     />
                   ) : (
                     <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-700 text-xs font-medium text-gray-300">
-                      {member.displayName?.[0] || member.email?.[0] || '?'}
+                      {member.displayName?.[0] || member.email?.[0] || "?"}
                     </div>
                   )}
                   <div>
@@ -218,10 +237,14 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
                         {member.displayName || member.email}
                       </span>
                       {isCurrentUser && (
-                        <span className="text-xs text-gray-500">(나)</span>
+                        <span className="text-xs text-gray-500">
+                          {t("settings.team.you")}
+                        </span>
                       )}
                     </div>
-                    <span className="text-xs text-gray-500">{member.email}</span>
+                    <span className="text-xs text-gray-500">
+                      {member.email}
+                    </span>
                   </div>
                 </div>
 
@@ -231,7 +254,10 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
                     <select
                       value={role}
                       onChange={(e) =>
-                        handleRoleChange(member.id, e.target.value as InvitationRole)
+                        handleRoleChange(
+                          member.id,
+                          e.target.value as InvitationRole,
+                        )
                       }
                       className="rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-gray-300 focus:border-blue-500 focus:outline-none"
                     >
@@ -259,13 +285,13 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
                             onClick={() => handleRemove(member.id)}
                             className="rounded bg-red-600 px-2 py-1 text-xs text-white hover:bg-red-700"
                           >
-                            확인
+                            {t("common.confirm")}
                           </button>
                           <button
                             onClick={() => setConfirmRemove(null)}
                             className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-700"
                           >
-                            취소
+                            {t("common.cancel")}
                           </button>
                         </div>
                       ) : (
@@ -273,7 +299,7 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
                           onClick={() => setConfirmRemove(member.id)}
                           className="rounded px-2 py-1 text-xs text-red-400 hover:bg-red-900/30"
                         >
-                          제거
+                          {t("settings.team.remove")}
                         </button>
                       )}
                     </>
@@ -285,7 +311,7 @@ export function TeamManagement({ projectId }: TeamManagementProps) {
 
           {members.length === 0 && (
             <p className="py-4 text-center text-sm text-gray-500">
-              아직 멤버가 없습니다.
+              {t("settings.team.empty")}
             </p>
           )}
         </div>
@@ -305,10 +331,10 @@ function RoleBadge({ role }: { role: InvitationRole }) {
 }
 
 function formatDate(date: Date): string {
-  if (!(date instanceof Date) || isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('ko-KR', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
+  if (!(date instanceof Date) || isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("ko-KR", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
   });
 }
