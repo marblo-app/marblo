@@ -1,15 +1,20 @@
-import { useEffect, useState } from 'react';
-import { useAuth } from '../../hooks/useAuth';
-import type { ActiveEditor } from '../../types/collaboration';
-import { subscribeToActiveEditors } from '../../services/collaborationService';
+import { useEffect, useState } from "react";
+import { useAuth } from "../../hooks/useAuth";
+import { useTranslation } from "../../lib/i18n";
+import type { ActiveEditor } from "../../types/collaboration";
+import { subscribeToActiveEditors } from "../../services/collaborationService";
 
 interface ConflictWarningProps {
   projectId: string;
   currentFilePath: string;
 }
 
-export function ConflictWarning({ projectId, currentFilePath }: ConflictWarningProps) {
+export function ConflictWarning({
+  projectId,
+  currentFilePath,
+}: ConflictWarningProps) {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [conflictEditors, setConflictEditors] = useState<ActiveEditor[]>([]);
 
   useEffect(() => {
@@ -43,10 +48,9 @@ export function ConflictWarning({ projectId, currentFilePath }: ConflictWarningP
         />
       </svg>
       <span className="text-sm text-yellow-300">
-        {conflictEditors.map((e) => e.displayName).join(', ')}
-        {conflictEditors.length === 1
-          ? ' 님이 이 파일을 수정 중입니다'
-          : ' 님이 이 파일을 수정 중입니다'}
+        {t("common.conflict.editing", {
+          names: conflictEditors.map((e) => e.displayName).join(", "),
+        })}
       </span>
     </div>
   );

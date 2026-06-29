@@ -28,6 +28,10 @@ import { onboarding } from "./onboarding";
 import { common } from "./common";
 import { activity } from "./activity";
 import { bugReport } from "./bugReport";
+import { chat } from "./chat";
+import { auth } from "./auth";
+import { updater } from "./updater";
+import { workHistory } from "./workHistory";
 import { deploy } from "./deploy";
 import { code } from "./code";
 import { terminal } from "./terminal";
@@ -53,6 +57,10 @@ export const en: Record<MessageKey, string> = {
   ...common,
   ...activity,
   ...bugReport,
+  ...chat,
+  ...auth,
+  ...updater,
+  ...workHistory,
   ...deploy,
   ...code,
   ...terminal,

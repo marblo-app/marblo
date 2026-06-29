@@ -58,4 +58,7 @@ export const common: Record<keyof typeof koCommon, string> = {
   "common.worktree.behind": "Behind",
   "common.worktree.mergeable": "Mergeable",
   "common.worktree.idle": "Working",
+
+  // — collaboration conflict banner —
+  "common.conflict.editing": "{names} is editing this file",
 };

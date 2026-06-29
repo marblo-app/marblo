@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { t, useTranslation } from "../../lib/i18n";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { subscribeToMergeHistory } from "../../services/mergeHistoryService";
@@ -21,12 +22,12 @@ const MAX_TRACKED = 50;
 function relativeTime(date: Date): string {
   const diffMs = Date.now() - date.getTime();
   const min = Math.floor(diffMs / 60000);
-  if (min < 1) return "방금";
-  if (min < 60) return `${min}분 전`;
+  if (min < 1) return t("workHistory.time.justNow");
+  if (min < 60) return t("workHistory.time.minutesAgo", { count: min });
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}시간 전`;
+  if (hr < 24) return t("workHistory.time.hoursAgo", { count: hr });
   const day = Math.floor(hr / 24);
-  if (day < 30) return `${day}일 전`;
+  if (day < 30) return t("workHistory.time.daysAgo", { count: day });
   return date.toLocaleDateString("ko-KR");
 }
 
@@ -53,6 +54,7 @@ function WorkHistoryRow({
   report: ParsedCompletionReport | null;
   mergeEntry: MergeHistoryEntry | null;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [diff, setDiff] = useState<string | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
@@ -71,7 +73,9 @@ function WorkHistoryRow({
       );
       setDiff(res.diff);
     } catch (err) {
-      setDiffError(err instanceof Error ? err.message : "diff 로드 실패");
+      setDiffError(
+        err instanceof Error ? err.message : t("workHistory.diff.loadFailed"),
+      );
     } finally {
       setDiffLoading(false);
     }
@@ -89,7 +93,11 @@ function WorkHistoryRow({
           {expanded ? "▾" : "▸"}
         </span>
         <span className="min-w-0 flex-1 truncate text-sm text-gray-100">
-          {task.title || <span className="text-gray-500">(제목 없음)</span>}
+          {task.title || (
+            <span className="text-gray-500">
+              {t("workHistory.row.untitled")}
+            </span>
+          )}
         </span>
         <span className="w-24 flex-shrink-0 truncate text-xs text-gray-400">
           {task.claimedBy ?? "—"}
@@ -101,7 +109,7 @@ function WorkHistoryRow({
         )}
         {report && (
           <span className="flex-shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
-            보고
+            {t("workHistory.badge.report")}
           </span>
         )}
         <span
@@ -116,15 +124,25 @@ function WorkHistoryRow({
         <div className="mt-2 space-y-1.5 border-t border-gray-800 pt-2">
           {report ? (
             <>
-              <ProvenanceField label="문제" value={report.problem} />
-              <ProvenanceField label="접근" value={report.approach} />
-              <ProvenanceField label="변경" value={report.changes} />
-              <ProvenanceField label="검증" value={report.verification} />
+              <ProvenanceField
+                label={t("workHistory.provenance.problem")}
+                value={report.problem}
+              />
+              <ProvenanceField
+                label={t("workHistory.provenance.approach")}
+                value={report.approach}
+              />
+              <ProvenanceField
+                label={t("workHistory.provenance.changes")}
+                value={report.changes}
+              />
+              <ProvenanceField
+                label={t("workHistory.provenance.verification")}
+                value={report.verification}
+              />
             </>
           ) : (
-            <p className="text-xs text-gray-500">
-              이 완료 태스크에는 구조화된 "✅ 완료 보고" 가 없습니다.
-            </p>
+            <p className="text-xs text-gray-500">{t("workHistory.noReport")}</p>
           )}
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -135,7 +153,7 @@ function WorkHistoryRow({
                 rel="noreferrer"
                 className="text-xs text-blue-400 hover:underline"
               >
-                PR 열기 ↗
+                {t("workHistory.openPr")} ↗
               </a>
             )}
             {mergeEntry && (
@@ -148,8 +166,8 @@ function WorkHistoryRow({
                 {diff !== null
                   ? `diff (${mergeEntry.headSha.slice(0, 7)})`
                   : diffLoading
-                    ? "로딩…"
-                    : "diff 보기"}
+                    ? t("workHistory.diff.loading")
+                    : t("workHistory.diff.view")}
               </button>
             )}
           </div>
@@ -175,6 +193,7 @@ function WorkHistoryRow({
 }
 
 export function WorkHistoryTab() {
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const tasks = useTaskStore((s) => s.tasks);
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
@@ -264,7 +283,7 @@ export function WorkHistoryTab() {
   if (!currentProject) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-gray-500">
-        프로젝트를 선택하면 작업내역이 표시됩니다.
+        {t("workHistory.selectProject")}
       </div>
     );
   }
@@ -272,10 +291,13 @@ export function WorkHistoryTab() {
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       <div className="flex items-center gap-2">
-        <h1 className="text-sm font-semibold text-gray-200">작업내역</h1>
+        <h1 className="text-sm font-semibold text-gray-200">
+          {t("workHistory.title")}
+        </h1>
         <span className="text-xs text-gray-500">
-          완료 {doneTasks.length}건
-          {doneTasks.length > MAX_TRACKED && ` · 최근 ${MAX_TRACKED}건 집계`}
+          {t("workHistory.doneCount", { count: doneTasks.length })}
+          {doneTasks.length > MAX_TRACKED &&
+            ` ${t("workHistory.recentAggregate", { count: MAX_TRACKED })}`}
         </span>
       </div>
 
@@ -285,9 +307,11 @@ export function WorkHistoryTab() {
         {doneTasks.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
-              <p className="text-sm text-gray-300">완료된 작업이 없습니다.</p>
+              <p className="text-sm text-gray-300">
+                {t("workHistory.empty.title")}
+              </p>
               <p className="mt-1 text-xs text-gray-500">
-                작업이 DONE 으로 넘어가면 여기에 provenance 와 함께 쌓입니다.
+                {t("workHistory.empty.hint")}
               </p>
             </div>
           </div>

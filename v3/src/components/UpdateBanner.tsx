@@ -15,6 +15,7 @@
  * Sits in Layout so it's visible from any tab.
  */
 import { useEffect, useState } from "react";
+import { useTranslation } from "../lib/i18n";
 
 interface UpdateStatus {
   status:
@@ -33,6 +34,7 @@ interface UpdateStatus {
 // updater API surface lives in src/vite-env.d.ts (ElectronAPI.updater).
 
 export function UpdateBanner() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [hotfixSecondsLeft, setHotfixSecondsLeft] = useState<number | null>(
     null,
@@ -103,66 +105,61 @@ export function UpdateBanner() {
 
       {status.status === "available" && (
         <>
-          <span className="text-[#bac2de]">새 버전 사용 가능</span>
+          <span className="text-[#bac2de]">{t("updater.available")}</span>
           <button
             onClick={handleDownload}
             className="ml-auto rounded bg-[#89b4fa]/20 px-3 py-1 text-[#89b4fa] hover:bg-[#89b4fa]/30"
           >
-            지금 다운로드
+            {t("updater.download")}
           </button>
           <button
             onClick={() => setDismissed(true)}
             className="rounded px-2 py-1 text-[#6c7086] hover:text-[#cdd6f4]"
           >
-            나중에
+            {t("updater.later")}
           </button>
         </>
       )}
 
       {status.status === "downloading" && (
         <span className="ml-auto text-[#bac2de]">
-          다운로드 중... {percent}%
+          {t("updater.downloading", { percent })}
         </span>
       )}
 
       {status.status === "downloaded" && !isHotfix && (
         <>
-          <span className="text-[#bac2de]">
-            업데이트 준비 완료. 다음 종료 시 자동 적용됩니다.
-          </span>
+          <span className="text-[#bac2de]">{t("updater.readyTitle")}</span>
           <button
             onClick={handleInstall}
             className="ml-auto rounded bg-[#89b4fa]/20 px-3 py-1 text-[#89b4fa] hover:bg-[#89b4fa]/30"
           >
-            지금 재시작
+            {t("updater.restartNow")}
           </button>
           <button
             onClick={() => setDismissed(true)}
             className="rounded px-2 py-1 text-[#6c7086] hover:text-[#cdd6f4]"
           >
-            닫기
+            {t("updater.close")}
           </button>
         </>
       )}
 
       {status.status === "downloaded" && isHotfix && (
         <>
-          <span>
-            긴급 업데이트. {hotfixSecondsLeft}초 후 자동 재시작됩니다 — 작업을
-            저장하세요.
-          </span>
+          <span>{t("updater.hotfix", { count: hotfixSecondsLeft ?? 0 })}</span>
           <button
             onClick={handleInstall}
             className="ml-auto rounded bg-[#f38ba8]/20 px-3 py-1 text-[#f38ba8] hover:bg-[#f38ba8]/30"
           >
-            지금 재시작
+            {t("updater.restartNow")}
           </button>
           <button
             onClick={handlePostpone}
             className="rounded px-2 py-1 text-[#6c7086] hover:text-[#cdd6f4]"
-            title="다음 실행 시 다시 적용됩니다"
+            title={t("updater.postponeTitle")}
           >
-            연기 (다음 실행)
+            {t("updater.postpone")}
           </button>
         </>
       )}

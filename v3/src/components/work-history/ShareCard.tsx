@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "../../lib/i18n";
 import { buildShareMarkdown, type ShareStats } from "../../lib/shareCard";
 
 interface ShareCardProps {
@@ -26,6 +27,7 @@ function Stat({ label, value, tone }: StatProps) {
  * 밖이라 "복사" 까지만 제공한다.
  */
 export function ShareCard({ stats }: ShareCardProps) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const markdown = buildShareMarkdown(stats);
 
@@ -47,17 +49,16 @@ export function ShareCard({ stats }: ShareCardProps) {
             Shipped with Marblo
           </h2>
           <p className="mt-0.5 text-[11px] text-gray-500">
-            완료 {stats.doneTasks}건 집계 · 테스트통과/리스크는 완료 보고 키워드
-            추정값
+            {t("workHistory.share.subtitle", { count: stats.doneTasks })}
           </p>
         </div>
         <button
           type="button"
           onClick={handleCopy}
           className="flex-shrink-0 rounded border border-emerald-500/40 px-2.5 py-1 text-xs text-emerald-300 transition hover:bg-emerald-500/10"
-          title="공유용 markdown 복사"
+          title={t("workHistory.share.copyTitle")}
         >
-          {copied ? "복사됨 ✓" : "markdown 복사"}
+          {copied ? t("workHistory.share.copied") : t("workHistory.share.copy")}
         </button>
       </div>
 

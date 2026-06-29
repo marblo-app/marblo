@@ -3,6 +3,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useAgentStore } from "../../stores/agentStore";
 import { useAuth } from "../../hooks/useAuth";
+import { useTranslation } from "../../lib/i18n";
 import { addPendingInstruction } from "../../services/pendingInstructionService";
 import { sendSystemMessage } from "../../services/chatService";
 import {
@@ -38,7 +39,7 @@ function MentionDropdown({
   onSelect: (target: MentionTarget) => void;
 }) {
   const filtered = targets.filter((t) =>
-    t.name.toLowerCase().includes(filter.toLowerCase())
+    t.name.toLowerCase().includes(filter.toLowerCase()),
   );
   if (filtered.length === 0) return null;
 
@@ -114,8 +115,8 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
             isMention
               ? "border-l-2 border-purple-500 bg-purple-500/10 text-gray-200"
               : isAgent
-              ? "border-l-2 border-blue-500 bg-blue-500/10 text-gray-200"
-              : "bg-gray-700/50 text-gray-200"
+                ? "border-l-2 border-blue-500 bg-blue-500/10 text-gray-200"
+                : "bg-gray-700/50 text-gray-200"
           }`}
         >
           <p className="whitespace-pre-wrap break-words">{msg.content}</p>
@@ -133,6 +134,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
 export function ProjectChat() {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const { messages, loading, sendMessage, resetUnread } = useChatStore();
   const agents = useAgentStore((s) => s.agents);
@@ -214,12 +216,12 @@ export function ProjectChat() {
             const ptySessions = await window.electronAPI.pty.list();
             const orchSession = ptySessions.find(
               (s: { id: string; name: string }) =>
-                s.name.toLowerCase().includes("orchestrator")
+                s.name.toLowerCase().includes("orchestrator"),
             );
             if (orchSession) {
               await window.electronAPI.pty.write(
                 orchSession.id,
-                instruction + "\r"
+                instruction + "\r",
               );
               injected = true;
             }
@@ -241,17 +243,17 @@ export function ProjectChat() {
             } catch (err) {
               console.error(
                 "Failed to enqueue orchestrator pending instruction:",
-                err
+                err,
               );
               await sendSystemMessage(
                 currentProject.id,
-                "⚠️ 오케스트레이터 큐 등록에 실패했습니다."
+                t("chat.orchestratorQueueFailed"),
               );
             }
           }
         } else {
           const agent = agents.find(
-            (a) => a.name.toLowerCase() === target.toLowerCase()
+            (a) => a.name.toLowerCase() === target.toLowerCase(),
           );
           if (agent) {
             // Fast path: agent is hosted on THIS machine — write straight
@@ -266,12 +268,12 @@ export function ProjectChat() {
                 const ptySessionId = `agent-${agent.id}`;
                 await window.electronAPI.pty.write(
                   ptySessionId,
-                  instruction + "\r"
+                  instruction + "\r",
                 );
                 injected = true;
               } catch {
                 console.warn(
-                  `Failed local PTY write to agent "${target}" — falling back to pending queue`
+                  `Failed local PTY write to agent "${target}" — falling back to pending queue`,
                 );
               }
             }
@@ -289,7 +291,7 @@ export function ProjectChat() {
               } catch (err) {
                 console.error(
                   `Failed to enqueue pending instruction for agent "${target}":`,
-                  err
+                  err,
                 );
               }
             }
@@ -305,7 +307,7 @@ export function ProjectChat() {
         user.uid,
         user.displayName || "User",
         user.photoURL || "",
-        content
+        content,
       );
     } catch (err) {
       console.error("Failed to send message:", err);
@@ -340,7 +342,7 @@ export function ProjectChat() {
   if (!currentProject) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-xs text-gray-500">프로젝트를 선택하세요</p>
+        <p className="text-xs text-gray-500">{t("chat.empty.noProject")}</p>
       </div>
     );
   }
@@ -358,8 +360,12 @@ export function ProjectChat() {
         {!loading && messages.length === 0 && (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <p className="text-xs text-gray-500">메시지가 없습니다</p>
-              <p className="mt-1 text-xs text-gray-600">팀 채팅을 시작하세요</p>
+              <p className="text-xs text-gray-500">
+                {t("chat.empty.noMessages")}
+              </p>
+              <p className="mt-1 text-xs text-gray-600">
+                {t("chat.empty.startHint")}
+              </p>
             </div>
           </div>
         )}
@@ -388,7 +394,7 @@ export function ProjectChat() {
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder="메시지 입력... (@로 멘션)"
+            placeholder={t("chat.inputPlaceholder")}
             rows={1}
             className="flex-1 resize-none rounded-lg border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
             disabled={sending}

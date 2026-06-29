@@ -64,4 +64,7 @@ export const common = {
   "common.worktree.behind": "뒤처짐",
   "common.worktree.mergeable": "머지 가능",
   "common.worktree.idle": "작업중",
+
+  // — collaboration conflict banner (components/collaboration/ConflictWarning) —
+  "common.conflict.editing": "{names} 님이 이 파일을 수정 중입니다",
 };

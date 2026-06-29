@@ -10,6 +10,7 @@ import {
   type User,
 } from "firebase/auth";
 import { auth } from "../lib/firebase";
+import { t } from "../lib/i18n";
 
 export interface AuthContextType {
   user: User | null;
@@ -63,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
       await signInWithPopup(auth, googleProvider);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "구글 로그인에 실패했습니다.");
+      setError(e instanceof Error ? e.message : t("auth.error.google"));
     }
   };
 
@@ -72,9 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
       await signInWithPopup(auth, githubProvider);
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "GitHub 로그인에 실패했습니다.",
-      );
+      setError(e instanceof Error ? e.message : t("auth.error.github"));
     }
   };
 
@@ -83,9 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
       await signInWithEmailAndPassword(auth, email, password);
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "이메일 로그인에 실패했습니다.",
-      );
+      setError(e instanceof Error ? e.message : t("auth.error.email"));
     }
   };
 
@@ -94,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
       await createUserWithEmailAndPassword(auth, email, password);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "회원가입에 실패했습니다.");
+      setError(e instanceof Error ? e.message : t("auth.error.signup"));
     }
   };
 
@@ -103,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
       await signOut(auth);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "로그아웃에 실패했습니다.");
+      setError(e instanceof Error ? e.message : t("auth.error.logout"));
     }
   };
 
