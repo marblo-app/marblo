@@ -9,6 +9,7 @@ import {
   COUPON_RULES_IP,
 } from "./rateLimit";
 import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
+import { redactSecrets } from "./redact";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -1857,10 +1858,14 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
   const ctxIn = (
     data?.context && typeof data.context === "object" ? data.context : {}
   ) as Record<string, unknown>;
+  // recentLogs / agentSnapshot 은 자동수집 로그라 토큰·API 키가 섞일 수 있다.
+  // 저장 직전 시크릿 패턴을 레닥션한다(베스트-에포트). route 는 앱 내부 경로라 제외.
   const reportContext = {
-    recentLogs: str(ctxIn.recentLogs, BUG_REPORT_CTX_FIELD_MAX),
+    recentLogs: redactSecrets(str(ctxIn.recentLogs, BUG_REPORT_CTX_FIELD_MAX)),
     route: str(ctxIn.route, 500),
-    agentSnapshot: str(ctxIn.agentSnapshot, BUG_REPORT_CTX_FIELD_MAX),
+    agentSnapshot: redactSecrets(
+      str(ctxIn.agentSnapshot, BUG_REPORT_CTX_FIELD_MAX),
+    ),
   };
 
   // 가벼운 rate-guard — 연타/스팸 방지. 전용 throttle 문서를 트랜잭션으로 갱신해

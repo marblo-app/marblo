@@ -342,13 +342,13 @@ service cloud.firestore {
     // 앱은 submitBugReport 콜러블(Admin SDK) 경유로 제출 — 서버가 uid/email/
     // createdAt 을 각인하고 입력을 검증한다. 아래 규칙은 방어선:
     //  - read: 본인 신고만. 어드민 트리아지는 listBugReports 콜러블로 조회.
-    //  - create: 로그인 + 본인 uid 각인 시에만(비로그인 차단).
+    //  - create: 금지 — 제출은 submitBugReport 콜러블(Admin SDK, rules 우회)만.
+    //    클라 직접 쓰기를 막아 임의 uid 각인/스키마 위조/스팸 주입을 차단한다.
     //  - update/delete: 금지 — status 변경은 updateBugReportStatus(어드민) 경로.
     match /bugReports/{reportId} {
       allow read: if isAuthenticated()
         && resource.data.uid == request.auth.uid;
-      allow create: if isAuthenticated()
-        && request.resource.data.uid == request.auth.uid;
+      allow create: if false;
       allow update, delete: if false;
     }
 
