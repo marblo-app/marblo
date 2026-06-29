@@ -196,7 +196,10 @@ export function resolveClaudeBinary(): ResolvedCli {
         let version = "";
         try {
           version =
-            execFileSync(exe, ["--version"], { timeout: 5000, encoding: "utf-8" })
+            execFileSync(exe, ["--version"], {
+              timeout: 5000,
+              encoding: "utf-8",
+            })
               .trim()
               .match(/\d+\.\d+\.\d+/)?.[0] || "";
         } catch {
@@ -989,6 +992,11 @@ function getMCPServerEnv(
   // Bridge port for MCP → Electron communication
   if (process.env.MARBLO_BRIDGE_PORT) {
     env.MARBLO_BRIDGE_PORT = process.env.MARBLO_BRIDGE_PORT;
+  }
+  // Per-session bearer token for the bridge's authenticated endpoints. Without
+  // this a spawned agent's MCP would 401 on spawn_agent / dispatch_task / etc.
+  if (process.env.MARBLO_BRIDGE_TOKEN) {
+    env.MARBLO_BRIDGE_TOKEN = process.env.MARBLO_BRIDGE_TOKEN;
   }
 
   // Agent ID for audit trail logging

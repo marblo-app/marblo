@@ -36,6 +36,21 @@ const DEFAULT_PROJECT = process.env.MARBLO_PROJECT || "";
 const SKILLS_DIR = process.env.MARBLO_SKILLS_DIR ||
     path.resolve(new URL(".", import.meta.url).pathname, "..", "..", "..", "skills");
 /**
+ * Build headers for a bridge request, attaching the per-session bearer token so
+ * the bridge's auth gate (local-RCE hardening) accepts the call. The token is
+ * injected via MARBLO_BRIDGE_TOKEN by the parent (orchestrator / agent env) or
+ * loaded from the ~/.marblo/bridge-token discovery file (external-CLI path) in
+ * index.ts. When absent (no bridge reachable) the header is simply omitted —
+ * the request fails the same way it would have anyway.
+ */
+function bridgeHeaders(extra) {
+    const headers = { ...(extra ?? {}) };
+    const token = process.env.MARBLO_BRIDGE_TOKEN;
+    if (token)
+        headers["Authorization"] = `Bearer ${token}`;
+    return headers;
+}
+/**
  * Send a notification to the orchestrator via the bridge server.
  * Fire-and-forget — errors are silently ignored.
  *
@@ -59,7 +74,7 @@ function notifyOrchestrator(message, contextId) {
     const projectId = process.env.MARBLO_PROJECT || "";
     fetch(`http://127.0.0.1:${bridgePort}/notify-orchestrator`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: bridgeHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ message, projectId, contextId: contextId ?? "" }),
     }).catch(() => {
         /* best-effort */
@@ -88,7 +103,7 @@ function emitMissionStepReport(event) {
         return;
     fetch(`http://127.0.0.1:${bridgePort}/mission-step-report`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: bridgeHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
             missionId: event.missionId,
             stepIndex: event.payload.stepIndex,
@@ -208,7 +223,7 @@ async function fetchAgentIdHint(agentId) {
         const url = projectId
             ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(projectId)}`
             : `http://127.0.0.1:${bridgePort}/agents`;
-        const response = await fetch(url);
+        const response = await fetch(url, { headers: bridgeHeaders() });
         const data = (await response.json());
         const agents = Array.isArray(data.agents) ? data.agents : [];
         const match = agents.find((a) => nonEmptyString(a.id) === agentId);
@@ -915,7 +930,7 @@ export function registerTools(server) {
             if (bridgePort) {
                 fetch(`http://127.0.0.1:${bridgePort}/set-agent-status`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: bridgeHeaders({ "Content-Type": "application/json" }),
                     body: JSON.stringify({ agentId: MARBLO_AGENT_ID, status: "idle" }),
                 }).catch(() => { });
             }
@@ -932,7 +947,7 @@ export function registerTools(server) {
             if (bridgePort && projectId) {
                 fetch(`http://127.0.0.1:${bridgePort}/reap-worktree`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: bridgeHeaders({ "Content-Type": "application/json" }),
                     body: JSON.stringify({ projectId, taskId: task_id }),
                 }).catch(() => { });
             }
@@ -1099,7 +1114,7 @@ export function registerTools(server) {
             if (bridgePort) {
                 fetch(`http://127.0.0.1:${bridgePort}/set-agent-status`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: bridgeHeaders({ "Content-Type": "application/json" }),
                     body: JSON.stringify({ agentId: MARBLO_AGENT_ID, status: "idle" }),
                 }).catch(() => { });
             }
@@ -1295,7 +1310,7 @@ export function registerTools(server) {
             });
             const response = await fetch(`http://127.0.0.1:${bridgePort}/spawn-agent`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: bridgeHeaders({ "Content-Type": "application/json" }),
                 body,
             });
             const result = (await response.json());
@@ -1551,7 +1566,7 @@ export function registerTools(server) {
                 const url = projectId
                     ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(projectId)}`
                     : `http://127.0.0.1:${bridgePort}/agents`;
-                const response = await fetch(url);
+                const response = await fetch(url, { headers: bridgeHeaders() });
                 const data = (await response.json());
                 if (data.agents.length === 0)
                     return text("No agents found.");
@@ -1610,7 +1625,7 @@ export function registerTools(server) {
         try {
             const response = await fetch(`http://127.0.0.1:${bridgePort}/reuse-agent`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: bridgeHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify({
                     agentName: agent_name,
                     instruction,
@@ -1810,7 +1825,7 @@ export function registerTools(server) {
         try {
             const response = await fetch(`http://127.0.0.1:${bridgePort}/dispatch-task`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: bridgeHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify({
                     role,
                     instruction,
@@ -1934,7 +1949,7 @@ export function registerTools(server) {
         try {
             const response = await fetch(`http://127.0.0.1:${bridgePort}/kill-agent`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: bridgeHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify({ agentName: agent_name, reason }),
             });
             const result = (await response.json());
@@ -1964,7 +1979,7 @@ export function registerTools(server) {
             const listUrl = projectId
                 ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(projectId)}`
                 : `http://127.0.0.1:${bridgePort}/agents`;
-            const listResponse = await fetch(listUrl);
+            const listResponse = await fetch(listUrl, { headers: bridgeHeaders() });
             const data = (await listResponse.json());
             // Multi-window lane scoping: a lane orchestrator only reaps agents in
             // its own lane; a board orchestrator never reaps lane-owned agents.
@@ -2041,7 +2056,7 @@ export function registerTools(server) {
                 try {
                     const response = await fetch(`http://127.0.0.1:${bridgePort}/kill-agent`, {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers: bridgeHeaders({ "Content-Type": "application/json" }),
                         body: JSON.stringify({
                             agentName: agent.name,
                             reason: `cleanup: ${reason}`,

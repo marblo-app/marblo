@@ -445,6 +445,14 @@ export class OrchestratorManager {
 
     // Inject MARBLO_BRIDGE_PORT into PTY env AND MCP config
     launchConfig.env.MARBLO_BRIDGE_PORT = String(bridgePort);
+    // Per-session bearer token for the bridge's authenticated endpoints. The
+    // bridge sets process.env.MARBLO_BRIDGE_TOKEN at boot (same main process);
+    // forward it so the orchestrator's MCP can call spawn_agent/dispatch_task
+    // without 401ing. Empty string when the bridge hasn't booted yet.
+    const bridgeToken = process.env.MARBLO_BRIDGE_TOKEN ?? "";
+    if (bridgeToken) {
+      launchConfig.env.MARBLO_BRIDGE_TOKEN = bridgeToken;
+    }
 
     // Also patch the MCP config file so the MCP server (node process)
     // gets MARBLO_BRIDGE_PORT — needed for spawn_agent tool
@@ -456,6 +464,9 @@ export class OrchestratorManager {
       const config = JSON.parse(configContent);
       if (config.mcpServers?.marblo?.env) {
         config.mcpServers.marblo.env.MARBLO_BRIDGE_PORT = String(bridgePort);
+        if (bridgeToken) {
+          config.mcpServers.marblo.env.MARBLO_BRIDGE_TOKEN = bridgeToken;
+        }
         config.mcpServers.marblo.env.MARBLO_PROJECT = projectId;
         // 미션 오케는 MARBLO_CONTEXT 를 '운전 중인 미션 id' 로 스코프해야 MCP 서버가
         // create_task/add_activity 를 missionId 로 태깅하고 mission_step_done 을

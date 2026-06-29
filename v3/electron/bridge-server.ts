@@ -1,4 +1,5 @@
 import http from "http";
+import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -216,6 +217,102 @@ export function shouldInjectOrchestratorNotification(message: string): boolean {
   return true;
 }
 
+// ── Local RCE hardening (per-session bearer token + host check) ──────────────
+//
+// The bridge is a localhost HTTP server that, via /spawn-agent + /dispatch-task,
+// can launch processes with an attacker-chosen command/cwd at the user's
+// privilege. Without auth, ANY local process (or a web page abusing
+// DNS-rebinding / port brute-forcing 127.0.0.1) could drive it → local RCE.
+// Defenses, layered:
+//   1. Per-session bearer token — generated at boot, written to a 0600 discovery
+//      file only the same OS user can read. A web page can't read local files,
+//      so it can't obtain the token. Sensitive endpoints 401 without it.
+//   2. Host-header allowlist — blocks DNS-rebinding (a rebound page still sends
+//      its own Host, e.g. attacker.com).
+//   3. Command allowlist — even an authenticated caller can only spawn a known
+//      CLI (claude/gemini/codex/agy), never an arbitrary command.
+//   4. Body-size cap — bounds request bodies so a local client can't OOM main.
+
+/** Max request body the bridge will buffer (1 MiB). Spawn/dispatch payloads are
+ * a few KB at most; anything larger is abuse. */
+export const MAX_BRIDGE_BODY_BYTES = 1024 * 1024;
+
+/** Discovery-file names under ~/.marblo (mirrors the existing bridge-port file). */
+export const BRIDGE_PORT_FILE = "bridge-port";
+export const BRIDGE_TOKEN_FILE = "bridge-token";
+
+/**
+ * True only when the request's Host header names the loopback interface.
+ * Strips the optional :port and unwraps IPv6 brackets. A missing Host is
+ * rejected (legitimate fetch() to http://127.0.0.1:<port> always sends one;
+ * DNS-rebinding pages send their attacker hostname).
+ */
+export function isLoopbackHost(hostHeader: string | undefined): boolean {
+  if (!hostHeader) return false;
+  let h = hostHeader.trim().toLowerCase();
+  if (h.startsWith("[")) {
+    // Bracketed IPv6: [::1] or [::1]:port
+    const end = h.indexOf("]");
+    h = end >= 0 ? h.slice(1, end) : h.slice(1);
+  } else {
+    // Strip a :port suffix only for IPv4/hostnames (a single colon). A bare
+    // IPv6 literal (multiple colons, no brackets) carries no port suffix, so
+    // leave it intact rather than truncating at its first colon.
+    const colonCount = (h.match(/:/g) || []).length;
+    if (colonCount === 1) {
+      h = h.slice(0, h.indexOf(":"));
+    }
+  }
+  return h === "127.0.0.1" || h === "localhost" || h === "::1";
+}
+
+/** CLI binaries the bridge is allowed to spawn (basenames of getDefaultCommand). */
+export const ALLOWED_SPAWN_COMMANDS = new Set([
+  "claude",
+  "gemini",
+  "codex",
+  "agy",
+]);
+
+/**
+ * Validate an optional spawn `command` override against the allowlist.
+ *  - empty/undefined → allowed (spawnNewAgent falls back to getDefaultCommand).
+ *  - otherwise the command must be a single token (no args, no shell
+ *    metacharacters) whose basename is a known CLI.
+ * This rejects arbitrary-command RCE (e.g. "node /tmp/x.js", "sh -c …") while
+ * still permitting both bare ("claude") and absolute ("/usr/local/bin/claude")
+ * forms of the known fleet binaries.
+ */
+export function isAllowedSpawnCommand(command: string | undefined): boolean {
+  if (command === undefined || command === null) return true;
+  const trimmed = String(command).trim();
+  if (!trimmed) return true;
+  // No whitespace (→ no arguments) and no shell metacharacters.
+  if (/\s/.test(trimmed)) return false;
+  if (/[;&|`$(){}<>\\\n\r"'*?!~]/.test(trimmed)) return false;
+  const base = trimmed.split("/").pop() || trimmed;
+  return ALLOWED_SPAWN_COMMANDS.has(base);
+}
+
+/**
+ * Constant-time bearer-token check. Returns true only when the Authorization
+ * header carries exactly `Bearer <expected>`. Empty `expected` (no token
+ * configured) always fails closed.
+ */
+export function bearerTokenMatches(
+  authHeader: string | string[] | undefined,
+  expected: string,
+): boolean {
+  if (!expected) return false;
+  if (!authHeader || Array.isArray(authHeader)) return false;
+  const m = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
+  if (!m) return false;
+  const provided = Buffer.from(m[1]);
+  const want = Buffer.from(expected);
+  if (provided.length !== want.length) return false;
+  return crypto.timingSafeEqual(provided, want);
+}
+
 // ── Dispatch types ──────────────────────────────────────────
 
 const TRACKED_MODEL_FALLBACKS: ModelType[] = ["claude", "gpt"];
@@ -354,6 +451,11 @@ export interface DispatchTaskResponse {
 export class BridgeServer {
   private server: http.Server | null = null;
   private port = 0;
+  // Per-session bearer token guarding the sensitive (command-bearing) endpoints.
+  // Generated on start(), written to a 0600 discovery file legitimate same-user
+  // clients read, and mirrored into process.env.MARBLO_BRIDGE_TOKEN so spawned
+  // agents / orchestrators inherit it. Empty until start() runs.
+  private token = "";
   private agentManager: AgentManager;
   private ptyManager: PtyManager;
   // Lookup function: returns the OrchestratorManager for a given projectId
@@ -521,13 +623,43 @@ export class BridgeServer {
     return this.port;
   }
 
+  /** Per-session bearer token for in-process callers (e.g. main's
+   * /inject-message). Empty until start() has run. */
+  getToken(): string {
+    return this.token;
+  }
+
+  /** Whether a request carries the valid per-session bearer token. */
+  private isAuthorized(req: http.IncomingMessage): boolean {
+    return bearerTokenMatches(req.headers["authorization"], this.token);
+  }
+
   async start(): Promise<number> {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
-        // CORS headers for local access
-        res.setHeader("Access-Control-Allow-Origin", "*");
+        // Loopback-only RPC server. No browser is a legitimate client, so we do
+        // NOT emit a wildcard Access-Control-Allow-Origin — a `*` would let any
+        // web page read responses and, via DNS-rebinding, drive spawns. Omitting
+        // the allow-origin header makes browsers block cross-origin reads by
+        // default; non-browser clients (Node fetch) ignore CORS entirely.
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+        res.setHeader(
+          "Access-Control-Allow-Headers",
+          "Content-Type, Authorization",
+        );
+        res.setHeader("Vary", "Origin");
+
+        // DNS-rebinding defense: reject any request whose Host isn't loopback.
+        if (!isLoopbackHost(req.headers.host)) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: "Forbidden: non-local host",
+            }),
+          );
+          return;
+        }
 
         if (req.method === "OPTIONS") {
           res.writeHead(204);
@@ -535,9 +667,47 @@ export class BridgeServer {
           return;
         }
 
+        // Body-size guard — cap buffered request bodies so a hostile local
+        // client can't OOM the main process. Attached before routing so it
+        // covers every handler; destroys the socket once the cap is exceeded.
+        let receivedBytes = 0;
+        req.on("data", (chunk: Buffer | string) => {
+          receivedBytes += Buffer.byteLength(chunk);
+          if (receivedBytes > MAX_BRIDGE_BODY_BYTES) {
+            try {
+              if (!res.headersSent) {
+                res.writeHead(413, { "Content-Type": "application/json" });
+                res.end(
+                  JSON.stringify({
+                    success: false,
+                    error: "Payload too large",
+                  }),
+                );
+              }
+            } catch {
+              /* headers may already be sent — ignore */
+            }
+            req.destroy();
+          }
+        });
+
+        // /health is the only unauthenticated route (liveness probe; leaks
+        // nothing beyond "a bridge is here"). Everything else requires the
+        // per-session bearer token.
         if (req.method === "GET" && req.url === "/health") {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "ok", port: this.port }));
+          return;
+        }
+
+        if (!this.isAuthorized(req)) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: "Unauthorized: missing or invalid bearer token",
+            }),
+          );
           return;
         }
 
@@ -601,20 +771,43 @@ export class BridgeServer {
         if (addr && typeof addr !== "string") {
           this.port = addr.port;
         }
-        // Set bridge port in process.env so ALL spawned agents inherit it
-        // via getMCPServerEnv() in agent-config.ts
+        // Per-session bearer token (256-bit). Regenerated every boot so a stale
+        // token from a previous run can't be replayed.
+        this.token = crypto.randomBytes(32).toString("hex");
+        // Set bridge port + token in process.env so ALL spawned agents and
+        // orchestrators inherit them via getMCPServerEnv() in agent-config.ts.
         process.env.MARBLO_BRIDGE_PORT = String(this.port);
-        // Write a port-discovery file so external Claude Code sessions
-        // (using the globally-registered Marblo MCP) can find a running
-        // Marblo without us hard-coding a port. The MCP server reads
-        // this file at startup if MARBLO_BRIDGE_PORT env is not set.
+        process.env.MARBLO_BRIDGE_TOKEN = this.token;
+        // Write discovery files so external Claude Code sessions (using the
+        // globally-registered Marblo MCP) can find a running Marblo + its token
+        // without us hard-coding a port. The MCP server reads these at startup
+        // when the env vars are not already injected. Both are 0600 — only the
+        // same OS user may read the token, which is what keeps a web page (no
+        // local file access) from ever obtaining it.
         try {
           const dir = path.join(os.homedir(), ".marblo");
           fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(path.join(dir, "bridge-port"), String(this.port));
+          fs.writeFileSync(
+            path.join(dir, BRIDGE_PORT_FILE),
+            String(this.port),
+            {
+              mode: 0o600,
+            },
+          );
+          fs.writeFileSync(path.join(dir, BRIDGE_TOKEN_FILE), this.token, {
+            mode: 0o600,
+          });
+          // writeFileSync's mode only applies on create; chmod existing files so
+          // an upgrade from a prior 0644 port file is also tightened.
+          try {
+            fs.chmodSync(path.join(dir, BRIDGE_PORT_FILE), 0o600);
+            fs.chmodSync(path.join(dir, BRIDGE_TOKEN_FILE), 0o600);
+          } catch {
+            /* best-effort on platforms without POSIX modes */
+          }
         } catch (err) {
           console.warn(
-            "[BridgeServer] Failed to write port-discovery file:",
+            "[BridgeServer] Failed to write port/token discovery files:",
             err,
           );
         }
@@ -692,6 +885,22 @@ export class BridgeServer {
             JSON.stringify({
               success: false,
               error: "Missing required fields: name, model, role",
+            }),
+          );
+          return;
+        }
+
+        // Command allowlist (defense-in-depth past the bearer token): refuse an
+        // arbitrary `command` override — only known fleet CLIs may be spawned.
+        // Empty command falls back to getDefaultCommand(model) in spawnNewAgent.
+        if (!isAllowedSpawnCommand(params.command)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: `Disallowed command override: only ${[
+                ...ALLOWED_SPAWN_COMMANDS,
+              ].join("/")} are permitted`,
             }),
           );
           return;

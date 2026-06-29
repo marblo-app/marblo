@@ -3596,7 +3596,12 @@ ipcMain.handle(
     if (!port) return { success: false, error: "Bridge server not running" };
     const res = await fetch(`http://127.0.0.1:${port}/inject-message`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // In-process caller — attach the bridge's per-session bearer token so
+        // the auth gate accepts it (local-RCE hardening).
+        Authorization: `Bearer ${bridgeServer.getToken()}`,
+      },
       body: JSON.stringify(params),
     });
     return res.json();

@@ -38,6 +38,22 @@ function readBridgePortFile() {
         return null;
     }
 }
+// Per-session bearer token guarding the bridge's command endpoints. Mirrors the
+// port discovery file (~/.marblo/bridge-token, 0600). Read it only when the
+// parent didn't inject MARBLO_BRIDGE_TOKEN via env (external-CLI path).
+function readBridgeTokenFile() {
+    try {
+        const tokenPath = path.join(os.homedir(), ".marblo", "bridge-token");
+        if (!fs.existsSync(tokenPath))
+            return null;
+        const token = fs.readFileSync(tokenPath, "utf-8").trim();
+        return token || null;
+    }
+    catch (err) {
+        console.error("[MCP] Failed to read bridge-token discovery file:", err);
+        return null;
+    }
+}
 function resolveBridgePort() {
     if (process.env.MARBLO_BRIDGE_PORT)
         return;
@@ -46,6 +62,15 @@ function resolveBridgePort() {
         process.env.MARBLO_BRIDGE_PORT = port;
         resolvedFromDiscoveryFile = true;
         console.error(`[MCP] Using bridge port ${port} from discovery file`);
+    }
+}
+function resolveBridgeToken() {
+    if (process.env.MARBLO_BRIDGE_TOKEN)
+        return;
+    const token = readBridgeTokenFile();
+    if (token) {
+        process.env.MARBLO_BRIDGE_TOKEN = token;
+        console.error("[MCP] Loaded bridge token from discovery file");
     }
 }
 // bridge 가 다른 포트로 재기동되면 discovery 파일은 갱신되지만 우리 env 는 stale 해
@@ -65,6 +90,12 @@ function refreshBridgePortFromFile() {
         console.error(`[MCP] Bridge port changed ${process.env.MARBLO_BRIDGE_PORT} -> ${port}; refreshed from discovery file`);
         process.env.MARBLO_BRIDGE_PORT = port;
     }
+    // A bridge restart rotates the token too — keep env in sync so the next call
+    // authenticates against the new bridge instead of 401ing on the stale token.
+    const token = readBridgeTokenFile();
+    if (token && token !== process.env.MARBLO_BRIDGE_TOKEN) {
+        process.env.MARBLO_BRIDGE_TOKEN = token;
+    }
 }
 function startBridgePortRefresher() {
     if (!resolvedFromDiscoveryFile)
@@ -75,6 +106,7 @@ function startBridgePortRefresher() {
         timer.unref();
 }
 resolveBridgePort();
+resolveBridgeToken();
 const server = new McpServer({
     name: "Marblo",
     version: "3.0.0",

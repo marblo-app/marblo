@@ -106,8 +106,23 @@ const SKILLS_DIR =
     "..",
     "..",
     "..",
-    "skills"
+    "skills",
   );
+
+/**
+ * Build headers for a bridge request, attaching the per-session bearer token so
+ * the bridge's auth gate (local-RCE hardening) accepts the call. The token is
+ * injected via MARBLO_BRIDGE_TOKEN by the parent (orchestrator / agent env) or
+ * loaded from the ~/.marblo/bridge-token discovery file (external-CLI path) in
+ * index.ts. When absent (no bridge reachable) the header is simply omitted —
+ * the request fails the same way it would have anyway.
+ */
+function bridgeHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...(extra ?? {}) };
+  const token = process.env.MARBLO_BRIDGE_TOKEN;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
 
 /**
  * Send a notification to the orchestrator via the bridge server.
@@ -132,7 +147,7 @@ function notifyOrchestrator(message: string, contextId?: string): void {
   const projectId = process.env.MARBLO_PROJECT || "";
   fetch(`http://127.0.0.1:${bridgePort}/notify-orchestrator`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: bridgeHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ message, projectId, contextId: contextId ?? "" }),
   }).catch(() => {
     /* best-effort */
@@ -161,7 +176,7 @@ function emitMissionStepReport(event: MissionStepReportedEvent): void {
   if (!bridgePort) return;
   fetch(`http://127.0.0.1:${bridgePort}/mission-step-report`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: bridgeHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       missionId: event.missionId,
       stepIndex: event.payload.stepIndex,
@@ -183,7 +198,7 @@ function resolveProject(projectId?: string): string {
   // Reject human-readable names like "stockai-platform" — they cause projectId mismatch
   if (projectId) {
     console.warn(
-      `[MCP] Ignoring non-Firestore project_id="${projectId}". Use MARBLO_PROJECT env var.`
+      `[MCP] Ignoring non-Firestore project_id="${projectId}". Use MARBLO_PROJECT env var.`,
     );
   }
   return "";
@@ -255,7 +270,7 @@ async function fetchTask(taskId: string): Promise<TaskDoc | null> {
  */
 async function bindTaskToDispatchedAgent(
   taskId: string,
-  agentId: string
+  agentId: string,
 ): Promise<void> {
   const extraTaskFields = {
     claimedBy: agentId,
@@ -283,7 +298,7 @@ async function bindTaskToDispatchedAgent(
     } catch (err) {
       console.error(
         "[dispatch bind] TODO→CLAIMED projection failed, keeping claimedBy only:",
-        err
+        err,
       );
     }
   }
@@ -323,10 +338,10 @@ async function fetchAgentIdHint(agentId: string): Promise<AgentIdHint | null> {
     const projectId = process.env.MARBLO_PROJECT || "";
     const url = projectId
       ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
-          projectId
+          projectId,
         )}`
       : `http://127.0.0.1:${bridgePort}/agents`;
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: bridgeHeaders() });
     const data = (await response.json()) as {
       agents?: Array<Record<string, unknown>>;
     };
@@ -395,7 +410,7 @@ async function markAgentStoppedInFirestore(agentId: string): Promise<void> {
 
 function applyMissionContextTags(
   data: Record<string, unknown>,
-  missionId: string | null = resolveMissionContextForWrite()
+  missionId: string | null = resolveMissionContextForWrite(),
 ): string | null {
   if (!missionId) return null;
 
@@ -425,7 +440,7 @@ function applyMissionContextTags(
 async function ensureTaskMissionContext(
   taskId: string,
   task: TaskDoc,
-  missionId: string | null = resolveMissionContextForWrite()
+  missionId: string | null = resolveMissionContextForWrite(),
 ): Promise<string | null> {
   if (!missionId) return null;
 
@@ -485,7 +500,7 @@ function auditLog(entry: {
 }
 
 function sanitizeParams(
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
 ): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(params)) {
@@ -549,7 +564,7 @@ const completionSummaryShape = z
   .optional()
   .describe(
     '완료 요약(선택). 주면 티켓에 "✅ 완료 보고" activity 로 기록된다. ' +
-      "안 주면 직전 완료 보고 activity 를 인식하고, 그것도 없으면 보완 nudge 를 돌려준다."
+      "안 주면 직전 완료 보고 activity 를 인식하고, 그것도 없으면 보완 nudge 를 돌려준다.",
   );
 
 /**
@@ -559,7 +574,7 @@ const completionSummaryShape = z
  */
 async function recordCompletionReport(
   taskId: string,
-  reportMessage: string
+  reportMessage: string,
 ): Promise<void> {
   await applyProjection(db, taskId, {
     lastAgentId: workerAgentId(MARBLO_AGENT_ID),
@@ -571,7 +586,7 @@ async function recordCompletionReport(
 /** task 의 최근 activity 메시지들(createdAt 내림차순, 최대 window 개). */
 async function fetchRecentActivityMessages(
   taskId: string,
-  window = 20
+  window = 20,
 ): Promise<string[]> {
   const q = query(collection(db, "activities"), where("taskId", "==", taskId));
   const snap = await getDocs(q);
@@ -581,11 +596,11 @@ async function fetchRecentActivityMessages(
         d.data() as {
           message?: string;
           createdAt?: { toMillis?: () => number };
-        }
+        },
     )
     .sort(
       (a, b) =>
-        (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)
+        (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0),
     )
     .slice(0, window)
     .map((d) => d.message ?? "");
@@ -601,7 +616,7 @@ async function fetchRecentActivityMessages(
 async function applyCompletionReport(
   taskId: string,
   status: string,
-  summary: CompletionSummary | undefined
+  summary: CompletionSummary | undefined,
 ): Promise<string> {
   try {
     // 행복 경로(summary 동봉)에선 Firestore 조회를 아낀다 — summary 가 있으면
@@ -617,7 +632,7 @@ async function applyCompletionReport(
       taskId,
       status,
       summary,
-      recent
+      recent,
     );
     if (report) await recordCompletionReport(taskId, report);
     return nudge;
@@ -646,7 +661,7 @@ export function registerTools(server: McpServer): void {
     description: string,
     schema: Args,
     handler: ToolCallback<Args>,
-    opts: { userFacing?: boolean } = {}
+    opts: { userFacing?: boolean } = {},
   ): void {
     const userFacing = opts.userFacing ?? true;
     if (!userFacing) {
@@ -678,7 +693,7 @@ export function registerTools(server: McpServer): void {
         const duration = Date.now() - start;
         const params = (args[0] || {}) as Record<string, unknown>;
         const projectId = resolveProject(
-          params.project_id as string | undefined
+          params.project_id as string | undefined,
         );
 
         auditLog({
@@ -709,13 +724,13 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          "Ignore default project filter, show all projects (default: false)"
+          "Ignore default project filter, show all projects (default: false)",
         ),
       all_contexts: z
         .boolean()
         .optional()
         .describe(
-          "Ignore default context filter, show all contexts in the project (default: false)"
+          "Ignore default context filter, show all contexts in the project (default: false)",
         ),
       limit: z
         .number()
@@ -743,10 +758,10 @@ export function registerTools(server: McpServer): void {
       // 열린(비terminal) task 를 먼저, 같은 그룹 내에선 priority 내림차순. 완료/실패
       // 다수가 컨텍스트를 먹던 것을 cap 으로 꼬리에서 잘라낸다.
       const docs = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as TaskDoc))
+        .map((d) => ({ id: d.id, ...d.data() }) as TaskDoc)
         .filter((t) => !t.deleted)
         .filter(
-          (t) => !filterContextInMemory || isTaskInReadContext(t, contextId)
+          (t) => !filterContextInMemory || isTaskInReadContext(t, contextId),
         )
         .sort((a, b) => {
           const ta = isTerminalTaskStatus(a.status) ? 1 : 0;
@@ -766,11 +781,11 @@ export function registerTools(server: McpServer): void {
         capLines(
           lines,
           limit ?? LIST_LIMIT_DEFAULT,
-          "raise limit or filter by role; completed tasks are at the tail"
-        )
+          "raise limit or filter by role; completed tasks are at the tail",
+        ),
       );
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 2. get_available_tasks
@@ -819,10 +834,10 @@ export function registerTools(server: McpServer): void {
       const snap = await getDocs(q);
 
       const tasks = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as TaskDoc))
+        .map((d) => ({ id: d.id, ...d.data() }) as TaskDoc)
         .filter((t) => !t.deleted)
         .filter(
-          (t) => !filterContextInMemory || isTaskInReadContext(t, contextId)
+          (t) => !filterContextInMemory || isTaskInReadContext(t, contextId),
         )
         // Double-dispatch guard: drop tasks already bound to an agent. The
         // `status == "TODO"` Firestore filter alone is racy — bindTaskToDispatchedAgent
@@ -849,10 +864,10 @@ export function registerTools(server: McpServer): void {
         })${deps}`;
       });
       return text(
-        capLines(lines, limit ?? LIST_LIMIT_DEFAULT, "raise limit to see more")
+        capLines(lines, limit ?? LIST_LIMIT_DEFAULT, "raise limit to see more"),
       );
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 3. create_task
@@ -869,13 +884,13 @@ export function registerTools(server: McpServer): void {
         .array(z.string())
         .optional()
         .describe(
-          "변경·접근: 추가/수정할 함수·동작을 짧은 불릿으로. 줄글/중복 금지."
+          "변경·접근: 추가/수정할 함수·동작을 짧은 불릿으로. 줄글/중복 금지.",
         ),
       acceptance: z
         .array(z.string())
         .optional()
         .describe(
-          "완료 기준: 검증 가능한 체크 항목(예: 'tests/unit/foo.test.ts 통과')."
+          "완료 기준: 검증 가능한 체크 항목(예: 'tests/unit/foo.test.ts 통과').",
         ),
       notes: z
         .array(z.string())
@@ -916,7 +931,7 @@ export function registerTools(server: McpServer): void {
       if (!projectId) {
         return text(
           "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter.\n" +
-            "In Electron: agents get this automatically. For external CLI: set MARBLO_PROJECT in MCP config."
+            "In Electron: agents get this automatically. For external CLI: set MARBLO_PROJECT in MCP config.",
         );
       }
 
@@ -954,9 +969,9 @@ export function registerTools(server: McpServer): void {
         `Task created successfully!\nID: ${
           ref.id
         }\nTitle: ${title}\nRole: ${role}\nPriority: ${priority ?? 0}` +
-          (warning ? `\n⚠️ ${warning}` : "")
+          (warning ? `\n⚠️ ${warning}` : ""),
       );
-    }
+    },
   );
 
   // 4. create_tasks_bulk
@@ -972,7 +987,7 @@ export function registerTools(server: McpServer): void {
         .union([z.array(z.record(z.unknown())), z.string()])
         .optional()
         .describe(
-          "Array of task objects, or a JSON array string when clients serialize array params"
+          "Array of task objects, or a JSON array string when clients serialize array params",
         ),
     },
     async ({ tasks_json, tasks }) => {
@@ -984,7 +999,7 @@ export function registerTools(server: McpServer): void {
       if (!project) {
         return text(
           "Error: No project context. Set MARBLO_PROJECT env var or include project_id in each task.\n" +
-            "In Electron: agents get this automatically. For external CLI: set MARBLO_PROJECT in MCP config."
+            "In Electron: agents get this automatically. For external CLI: set MARBLO_PROJECT in MCP config.",
         );
       }
 
@@ -1050,7 +1065,7 @@ export function registerTools(server: McpServer): void {
 
           if (depError) {
             results.push(
-              `  [FAILED] ${(t.title as string) || `task #${i}`} — ${depError}`
+              `  [FAILED] ${(t.title as string) || `task #${i}`} — ${depError}`,
             );
             continue;
           }
@@ -1089,7 +1104,7 @@ export function registerTools(server: McpServer): void {
             results.push(
               `  [FAILED] ${
                 (t.title as string) || `task #${i}`
-              } — ${missionContextError}`
+              } — ${missionContextError}`,
             );
             continue;
           }
@@ -1098,14 +1113,14 @@ export function registerTools(server: McpServer): void {
             const ref = await addDoc(collection(db, "tasks"), data);
             indexToId[i] = ref.id;
             results.push(
-              `  [${ref.id}] ${data.title} (role=${data.role}, priority=${data.priority})`
+              `  [${ref.id}] ${data.title} (role=${data.role}, priority=${data.priority})`,
             );
             successCount++;
           } catch (e: unknown) {
             results.push(
               `  [FAILED] ${(t.title as string) || `task #${i}`} — ${
                 (e as Error).message
-              }`
+              }`,
             );
           }
         }
@@ -1123,7 +1138,7 @@ export function registerTools(server: McpServer): void {
       if (depMappings.length > 0)
         output += `\n\nDependency ID mappings:\n${depMappings.join("\n")}`;
       return text(output);
-    }
+    },
   );
 
   // 5. claim_task
@@ -1140,13 +1155,13 @@ export function registerTools(server: McpServer): void {
 
       if (task.status !== "TODO") {
         return text(
-          "Error: Task is not available for claiming (not in TODO status)."
+          "Error: Task is not available for claiming (not in TODO status).",
         );
       }
 
       if (task.claimedBy) {
         return text(
-          `Error: Task is not available for claiming (already claimed by ${task.claimedBy}).`
+          `Error: Task is not available for claiming (already claimed by ${task.claimedBy}).`,
         );
       }
 
@@ -1177,7 +1192,7 @@ export function registerTools(server: McpServer): void {
       if (task.scope?.length)
         lines.push(`Scope (files): ${task.scope.join(", ")}`);
       return text(lines.join("\n"));
-    }
+    },
   );
 
   // 6. update_task_status
@@ -1205,8 +1220,8 @@ export function registerTools(server: McpServer): void {
           `Error: Cannot transition from ${
             task.status
           } to ${newStatus}. Valid targets: ${validTargets.join(
-            ", "
-          )}\nTip: Use force=true to skip validation.`
+            ", ",
+          )}\nTip: Use force=true to skip validation.`,
         );
       }
 
@@ -1239,7 +1254,7 @@ export function registerTools(server: McpServer): void {
         if (bridgePort) {
           fetch(`http://127.0.0.1:${bridgePort}/set-agent-status`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: bridgeHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({ agentId: MARBLO_AGENT_ID, status: "idle" }),
           }).catch(() => {});
         }
@@ -1257,7 +1272,7 @@ export function registerTools(server: McpServer): void {
         if (bridgePort && projectId) {
           fetch(`http://127.0.0.1:${bridgePort}/reap-worktree`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: bridgeHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({ projectId, taskId: task_id }),
           }).catch(() => {});
         }
@@ -1272,11 +1287,11 @@ export function registerTools(server: McpServer): void {
         const commentNote = comment ? ` — ${comment}` : "";
         const roleLabel = formatAgentTaskRoleLabel(
           task.role,
-          await fetchAgentRole(MARBLO_AGENT_ID)
+          await fetchAgentRole(MARBLO_AGENT_ID),
         );
         notifyOrchestrator(
           `[Task Update] "${task.title}" ${task.status} → ${newStatus} (${roleLabel}, id=${task_id})${commentNote}`,
-          task.contextId
+          task.contextId,
         );
       }
 
@@ -1296,7 +1311,7 @@ export function registerTools(server: McpServer): void {
         try {
           const depQ = query(
             collection(db, "tasks"),
-            where("dependsOn", "array-contains", task_id)
+            where("dependsOn", "array-contains", task_id),
           );
           depDocs = (await getDocs(depQ)).docs;
         } catch (err) {
@@ -1317,14 +1332,14 @@ export function registerTools(server: McpServer): void {
               if (!isLaneContextId(task.contextId)) {
                 notifyOrchestrator(
                   `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`,
-                  task.contextId
+                  task.contextId,
                 );
               }
             }
           } catch (err) {
             console.error(
               `[MCP] Dependency resolution error for ${depDoc.id}:`,
-              err
+              err,
             );
           }
         }
@@ -1341,9 +1356,9 @@ export function registerTools(server: McpServer): void {
           : "";
 
       return text(
-        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${completionNudge}`
+        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${completionNudge}`,
       );
-    }
+    },
   );
 
   // 7. add_activity
@@ -1385,7 +1400,7 @@ export function registerTools(server: McpServer): void {
           // activity log below still records the progress. Best-effort only.
           console.error(
             "[add_activity] CLAIMED→IN_PROGRESS promotion skipped:",
-            err
+            err,
           );
         }
       }
@@ -1409,15 +1424,15 @@ export function registerTools(server: McpServer): void {
           message.length > 300 ? `${message.slice(0, 300)}...` : message;
         const roleLabel = formatAgentTaskRoleLabel(
           task.role,
-          await fetchAgentRole(resolvedAgentId)
+          await fetchAgentRole(resolvedAgentId),
         );
         notifyOrchestrator(
           `[Task Activity] "${task.title}" progress update (${roleLabel}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`,
-          task.contextId
+          task.contextId,
         );
       }
       return text(`Activity logged: ${message}`);
-    }
+    },
   );
 
   // 8. submit_for_review
@@ -1471,7 +1486,7 @@ export function registerTools(server: McpServer): void {
         if (bridgePort) {
           fetch(`http://127.0.0.1:${bridgePort}/set-agent-status`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: bridgeHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({ agentId: MARBLO_AGENT_ID, status: "idle" }),
           }).catch(() => {});
         }
@@ -1486,11 +1501,11 @@ export function registerTools(server: McpServer): void {
       const prNote = pr_url ? ` PR: ${pr_url}` : "";
       const roleLabel = formatAgentTaskRoleLabel(
         task.role,
-        await fetchAgentRole(MARBLO_AGENT_ID)
+        await fetchAgentRole(MARBLO_AGENT_ID),
       );
       notifyOrchestrator(
         `[Review Submitted] "${task.title}" is ready for review (${roleLabel}, id=${task_id})${prNote}`,
-        task.contextId
+        task.contextId,
       );
 
       // 완료 보고 규약 — summary 가 있을 때만 pr_url 을 summary.pr 로 폴백한다.
@@ -1503,13 +1518,13 @@ export function registerTools(server: McpServer): void {
       const completionNudge = await applyCompletionReport(
         task_id,
         "REVIEW",
-        reportSummary
+        reportSummary,
       );
 
       return text(
-        `Task '${task.title}' submitted for review. Status: REVIEW${completionNudge}`
+        `Task '${task.title}' submitted for review. Status: REVIEW${completionNudge}`,
       );
-    }
+    },
   );
 
   // 9. get_task_dependencies
@@ -1539,14 +1554,14 @@ export function registerTools(server: McpServer): void {
           const completed = dep.status === "DONE";
           if (!completed) allCompleted = false;
           details.push(
-            `- [${completed ? "done" : "pending"}] ${dep.title} (${dep.status})`
+            `- [${completed ? "done" : "pending"}] ${dep.title} (${dep.status})`,
           );
         }
       }
 
       return text(`All completed: ${allCompleted}\n${details.join("\n")}`);
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 10. get_agent_skill
@@ -1560,7 +1575,7 @@ export function registerTools(server: McpServer): void {
       const safeRole = role.replace(/[^a-zA-Z0-9_]/g, "");
       if (!safeRole || safeRole !== role) {
         return text(
-          `Error: Invalid role name '${role}'. Use alphanumeric and underscore only.`
+          `Error: Invalid role name '${role}'. Use alphanumeric and underscore only.`,
         );
       }
 
@@ -1575,7 +1590,7 @@ export function registerTools(server: McpServer): void {
 
       return text(`Error: No skill file found for role '${role}'.`);
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 11. get_task_activities
@@ -1617,10 +1632,10 @@ export function registerTools(server: McpServer): void {
         return `[${ts}] ${agent}: ${a.message}`;
       });
       return text(
-        capLines(lines, limit ?? 30, "raise limit for older entries")
+        capLines(lines, limit ?? 30, "raise limit for older entries"),
       );
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 12. check_feedback
@@ -1649,12 +1664,12 @@ export function registerTools(server: McpServer): void {
       snap.docs.forEach((d) => {
         const t = d.data();
         lines.push(
-          `- [${d.id}] ${t.title} (status=${t.status}, priority=${t.priority})`
+          `- [${d.id}] ${t.title} (status=${t.status}, priority=${t.priority})`,
         );
       });
       return text(lines.join("\n"));
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 13. acknowledge_feedback
@@ -1673,9 +1688,9 @@ export function registerTools(server: McpServer): void {
         updatedAt: Timestamp.now(),
       });
       return text(
-        `Feedback acknowledged for task '${task.title}'. Badge cleared.`
+        `Feedback acknowledged for task '${task.title}'. Badge cleared.`,
       );
-    }
+    },
   );
 
   // 15. spawn_agent — HTTP bridge to Electron AgentManager
@@ -1689,7 +1704,7 @@ export function registerTools(server: McpServer): void {
         .describe(
           "AI model to use. 'codex' and 'gpt' are the same OpenAI Codex CLI " +
             "(there is no separate 'gpt' CLI) — both spawn the `codex` binary. " +
-            "Fleet: claude (Claude Code) / codex (OpenAI Codex) / antigravity (agy)."
+            "Fleet: claude (Claude Code) / codex (OpenAI Codex) / antigravity (agy).",
         ),
       role: z.string().describe("Agent role (backend/frontend/test/devops)"),
       command: z
@@ -1708,7 +1723,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Marblo task ID for completion reporting. When provided, the bridge appends the same completion protocol used by dispatch_task."
+          "Marblo task ID for completion reporting. When provided, the bridge appends the same completion protocol used by dispatch_task.",
         ),
     },
     async ({
@@ -1728,7 +1743,7 @@ export function registerTools(server: McpServer): void {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available."
+          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
         );
       }
 
@@ -1756,9 +1771,9 @@ export function registerTools(server: McpServer): void {
           `http://127.0.0.1:${bridgePort}/spawn-agent`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: bridgeHeaders({ "Content-Type": "application/json" }),
             body,
-          }
+          },
         );
 
         const result = (await response.json()) as {
@@ -1773,7 +1788,7 @@ export function registerTools(server: McpServer): void {
 
         if (!result.success) {
           return text(
-            `Error spawning agent: ${result.error || "Unknown error"}`
+            `Error spawning agent: ${result.error || "Unknown error"}`,
           );
         }
 
@@ -1800,7 +1815,7 @@ export function registerTools(server: McpServer): void {
               skillFile: "",
               createdAt: Timestamp.now(),
             },
-            { merge: true }
+            { merge: true },
           );
         }
 
@@ -1810,14 +1825,14 @@ export function registerTools(server: McpServer): void {
             `  Model: ${model}\n` +
             `  Role: ${role}\n` +
             `  Agent ID: ${result.agentId}\n` +
-            `  PTY Session: ${result.ptySessionId}`
+            `  PTY Session: ${result.ptySessionId}`,
         );
       } catch (err: unknown) {
         return text(
-          `Error: Failed to reach bridge server — ${(err as Error).message}`
+          `Error: Failed to reach bridge server — ${(err as Error).message}`,
         );
       }
-    }
+    },
   );
 
   // 14. search_tasks (bonus)
@@ -1868,13 +1883,13 @@ export function registerTools(server: McpServer): void {
       const body = capLines(
         taskLines,
         limit ?? LIST_LIMIT_DEFAULT,
-        "narrow the keyword or raise limit"
+        "narrow the keyword or raise limit",
       );
       return text(
-        `Found ${matches.length} task(s) matching '${keyword}':\n${body}`
+        `Found ${matches.length} task(s) matching '${keyword}':\n${body}`,
       );
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 16. get_task — Get single task detail (including description)
@@ -1917,7 +1932,7 @@ export function registerTools(server: McpServer): void {
       ];
       return text(lines.join("\n"));
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 16a. delete_task — soft (default) / hard delete with ownership + confirm
@@ -1955,7 +1970,7 @@ export function registerTools(server: McpServer): void {
       try {
         const depQ = query(
           collection(db, "tasks"),
-          where("dependsOn", "array-contains", task_id)
+          where("dependsOn", "array-contains", task_id),
         );
         const depSnap = await getDocs(depQ);
         dependentCount = depSnap.docs.filter((d) => {
@@ -1998,7 +2013,7 @@ export function registerTools(server: McpServer): void {
         const reasonNote = reason ? ` — ${reason}` : "";
         notifyOrchestrator(
           `[Task Deleted] "${task.title}" ${delMode}-deleted (id=${task_id})${reasonNote}`,
-          task.contextId
+          task.contextId,
         );
       }
 
@@ -2007,10 +2022,10 @@ export function registerTools(server: McpServer): void {
           delMode === "hard"
             ? "permanently deleted"
             : "soft-deleted (recoverable)"
-        }.`
+        }.`,
       );
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 16b. get_projection — Layer A read path. Lets the orchestrator answer
@@ -2024,7 +2039,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Task ID — returns the task projection (and its mission rollup)"
+          "Task ID — returns the task projection (and its mission rollup)",
         ),
       mission_id: z
         .string()
@@ -2062,7 +2077,7 @@ export function registerTools(server: McpServer): void {
               data.title ?? ""
             }") has no projection yet (status=${
               data.status ?? "?"
-            }); it updates on the next MCP tool call.`
+            }); it updates on the next MCP tool call.`,
           );
         } else {
           const when =
@@ -2076,7 +2091,7 @@ export function registerTools(server: McpServer): void {
               p.milestonesPassed?.length
                 ? p.milestonesPassed.join(", ")
                 : "(none)"
-            }`
+            }`,
           );
           if (p.blockerSummary) lines.push(`Blocker: ${p.blockerSummary}`);
         }
@@ -2104,7 +2119,7 @@ export function registerTools(server: McpServer): void {
 
       return text(lines.join("\n"));
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 17. get_agents — Real-time agent list (Bridge first, Firestore fallback)
@@ -2127,10 +2142,10 @@ export function registerTools(server: McpServer): void {
           const projectId = process.env.MARBLO_PROJECT || "";
           const url = projectId
             ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
-                projectId
+                projectId,
               )}`
             : `http://127.0.0.1:${bridgePort}/agents`;
-          const response = await fetch(url);
+          const response = await fetch(url, { headers: bridgeHeaders() });
           const data = (await response.json()) as {
             agents: Array<{
               id: string;
@@ -2158,8 +2173,8 @@ export function registerTools(server: McpServer): void {
             `Agents (${data.agents.length}, real-time):\n${capLines(
               lines,
               LIST_LIMIT_DEFAULT,
-              "many agents — cleanup idle ones"
-            )}`
+              "many agents — cleanup idle ones",
+            )}`,
           );
         } catch {
           // Bridge unavailable — fall through to Firestore
@@ -2192,11 +2207,11 @@ export function registerTools(server: McpServer): void {
         `Agents (${snap.size}, Firestore fallback):\n${capLines(
           lines,
           LIST_LIMIT_DEFAULT,
-          "many agents — cleanup idle ones"
-        )}`
+          "many agents — cleanup idle ones",
+        )}`,
       );
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // ── reuse_agent — Send a new instruction to an existing idle agent
@@ -2214,14 +2229,14 @@ export function registerTools(server: McpServer): void {
         .describe(
           "Marblo task ID to bind to the reused agent. When set, the task's " +
             "claimedBy is rebound to this agent (mirrors dispatch_task) so the " +
-            "board shows the REAL worker immediately instead of a stale assignee."
+            "board shows the REAL worker immediately instead of a stale assignee.",
         ),
     },
     async ({ agent_name, instruction, task_id }) => {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available."
+          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
         );
       }
 
@@ -2230,7 +2245,7 @@ export function registerTools(server: McpServer): void {
           `http://127.0.0.1:${bridgePort}/reuse-agent`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: bridgeHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({
               agentName: agent_name,
               instruction,
@@ -2238,7 +2253,7 @@ export function registerTools(server: McpServer): void {
               projectId: process.env.MARBLO_PROJECT || "",
               contextId: process.env.MARBLO_CONTEXT || "",
             }),
-          }
+          },
         );
 
         const result = (await response.json()) as {
@@ -2251,7 +2266,7 @@ export function registerTools(server: McpServer): void {
           return text(
             `Cannot reuse agent '${agent_name}': ${
               result.error || "Unknown error"
-            }. Consider using spawn_agent instead.`
+            }. Consider using spawn_agent instead.`,
           );
         }
 
@@ -2280,14 +2295,14 @@ export function registerTools(server: McpServer): void {
             (task_id ? `  Bound task: ${task_id}\n` : "") +
             `  Instruction: ${instruction.slice(0, 100)}${
               instruction.length > 100 ? "..." : ""
-            }`
+            }`,
         );
       } catch (err: unknown) {
         return text(
-          `Error: Failed to reach bridge server — ${(err as Error).message}`
+          `Error: Failed to reach bridge server — ${(err as Error).message}`,
         );
       }
-    }
+    },
   );
 
   // ── dispatch_task — Smart agent dispatch (reuse/restart/spawn/logical)
@@ -2305,7 +2320,7 @@ export function registerTools(server: McpServer): void {
           "Task difficulty — also picks the agent model tier (cost/quality). " +
             "'simple' = internal sub-agent + cheaper model; 'standard' (default) = " +
             "top model (claude opus / gpt-5.5 medium); 'complex' = physical agent + " +
-            "top reasoning (claude opus / gpt-5.5 high). Set per task difficulty."
+            "top reasoning (claude opus / gpt-5.5 high). Set per task difficulty.",
         ),
       model: z
         .string()
@@ -2313,7 +2328,7 @@ export function registerTools(server: McpServer): void {
         .describe(
           "Preferred model hint (claude/codex/antigravity). 'codex' and 'gpt' " +
             "both map to the OpenAI Codex CLI. When set, this model is forced " +
-            "over tag scoring."
+            "over tag scoring.",
         ),
       name: z.string().optional().describe("Agent name hint"),
       cwd: z.string().optional().describe("Working directory"),
@@ -2321,7 +2336,7 @@ export function registerTools(server: McpServer): void {
         .array(z.string())
         .optional()
         .describe(
-          "Task tags for model scoring (e.g., architecture, research, simple-fix)"
+          "Task tags for model scoring (e.g., architecture, research, simple-fix)",
         ),
       mix: z
         .enum(["cross-check", "split-role"])
@@ -2330,7 +2345,7 @@ export function registerTools(server: McpServer): void {
           "★complex 전용 opt-in 모델 믹스(기본 off). 발동 시 Claude 최상위 + Codex " +
             "high 2-spawn. 'cross-check'(기본)=교차검증, 'split-role'=역할분담. " +
             "complexity!=='complex' 면 무시됨. 비용 2배(슬롯 2)이므로 정확성이 " +
-            "중요한 설계/보안/마이그레이션에만."
+            "중요한 설계/보안/마이그레이션에만.",
         ),
       stages: z
         .array(
@@ -2340,13 +2355,13 @@ export function registerTools(server: McpServer): void {
             model: z.string().optional(),
             tags: z.array(z.string()).optional(),
             dependsOnPrevious: z.boolean().optional(),
-          })
+          }),
         )
         .optional()
         .describe(
           "★complex 전용 opt-in 단계분할(기본 단일). 스텝 배열을 각각 작은 " +
             "dispatch 로 풀어 난도별 모델 매칭(설계→최상위, 기계적→cheap). " +
-            "dependsOnPrevious 스텝은 순차, 아니면 병렬. complexity!=='complex' 면 무시됨."
+            "dependsOnPrevious 스텝은 순차, 아니면 병렬. complexity!=='complex' 면 무시됨.",
         ),
       isolate: z
         .boolean()
@@ -2355,7 +2370,7 @@ export function registerTools(server: McpServer): void {
           "★simple 전용 opt-in 물리스폰(기본 off). 기본은 complexity='simple' 이면 " +
             "logical(오케 내부 서브에이전트)로 단락되는데, true 면 그 단락을 건너뛰고 " +
             "cheap 모델(claude=sonnet, gpt=low)로 격리 worktree 물리 에이전트를 스폰한다. " +
-            "격리·병렬이 필요한 저난도 작업용. complexity!=='simple' 면 무시됨."
+            "격리·병렬이 필요한 저난도 작업용. complexity!=='simple' 면 무시됨.",
         ),
     },
     async ({
@@ -2374,7 +2389,7 @@ export function registerTools(server: McpServer): void {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available."
+          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
         );
       }
 
@@ -2385,7 +2400,7 @@ export function registerTools(server: McpServer): void {
         const projectId = resolveProject(undefined);
         if (!projectId) {
           return text(
-            "Error: No project context. Set MARBLO_PROJECT env var before dispatching a mission task."
+            "Error: No project context. Set MARBLO_PROJECT env var before dispatching a mission task.",
           );
         }
 
@@ -2413,7 +2428,7 @@ export function registerTools(server: McpServer): void {
 
         const missionContextError = applyMissionContextTags(
           data,
-          missionContextId
+          missionContextId,
         );
         if (missionContextError) return text(`Error: ${missionContextError}`);
 
@@ -2432,13 +2447,13 @@ export function registerTools(server: McpServer): void {
           const task = await fetchTask(dispatchTaskId);
           if (!task) {
             return text(
-              `Error: Task ${dispatchTaskId} not found — refusing to dispatch.`
+              `Error: Task ${dispatchTaskId} not found — refusing to dispatch.`,
             );
           }
           const missionContextError = await ensureTaskMissionContext(
             dispatchTaskId,
             task,
-            missionContextId
+            missionContextId,
           );
           if (missionContextError) return text(`Error: ${missionContextError}`);
           if (!task.dependsOnCompleted) {
@@ -2462,12 +2477,12 @@ export function registerTools(server: McpServer): void {
             } catch (markErr) {
               console.error(
                 "[dispatch_task] Failed to mark task BLOCKED:",
-                markErr
+                markErr,
               );
             }
             const pending = (task.dependsOn || []).join(", ") || "(unknown)";
             return text(
-              `Dispatch aborted (patent claim 4: 선행태스크 미완료): task ${dispatchTaskId} depends on [${pending}], not all complete. Task moved to BLOCKED. Resolve dependencies first, then re-dispatch.`
+              `Dispatch aborted (patent claim 4: 선행태스크 미완료): task ${dispatchTaskId} depends on [${pending}], not all complete. Task moved to BLOCKED. Resolve dependencies first, then re-dispatch.`,
             );
           }
         } catch (err) {
@@ -2476,7 +2491,7 @@ export function registerTools(server: McpServer): void {
             return text(
               `Error: Failed to verify mission task tags before dispatch — ${
                 err instanceof Error ? err.message : String(err)
-              }`
+              }`,
             );
           }
           // Don't block dispatch on a precheck failure — the bridge / agent
@@ -2493,7 +2508,7 @@ export function registerTools(server: McpServer): void {
         console.warn(
           `[dispatch_task] mix/stages ignored — complexity='${
             complexity || "standard"
-          }' (complex 전용). 단일 디스패치로 진행.`
+          }' (complex 전용). 단일 디스패치로 진행.`,
         );
         effectiveMix = undefined;
         effectiveStages = undefined;
@@ -2507,7 +2522,7 @@ export function registerTools(server: McpServer): void {
         console.warn(
           `[dispatch_task] isolate ignored — complexity='${
             complexity || "standard"
-          }' (simple 전용).`
+          }' (simple 전용).`,
         );
         effectiveIsolate = undefined;
       }
@@ -2517,7 +2532,7 @@ export function registerTools(server: McpServer): void {
           `http://127.0.0.1:${bridgePort}/dispatch-task`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: bridgeHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({
               role,
               instruction,
@@ -2536,7 +2551,7 @@ export function registerTools(server: McpServer): void {
               parentAgentId: process.env.MARBLO_AGENT_ID || "",
               contextId: process.env.MARBLO_CONTEXT || "",
             }),
-          }
+          },
         );
 
         const result = (await response.json()) as {
@@ -2592,7 +2607,7 @@ export function registerTools(server: McpServer): void {
                   skillFile: "",
                   createdAt: Timestamp.now(),
                 },
-                { merge: true }
+                { merge: true },
               );
             } catch (err) {
               // Non-fatal — agent is already running, Firestore just won't
@@ -2624,7 +2639,7 @@ export function registerTools(server: McpServer): void {
             // showing the stale assignee. Surface for diagnosis.
             console.error(
               "[dispatch_task] Failed to bind task claimedBy:",
-              err
+              err,
             );
           }
         }
@@ -2645,17 +2660,17 @@ export function registerTools(server: McpServer): void {
           lines.push(`  Stage agents: ${result.stageAgentIds.join(", ")}`);
         if (result.action === "logical") {
           lines.push(
-            `\nAction required: Use internal sub-agent (Task/Agent tool) to handle this simple task directly.`
+            `\nAction required: Use internal sub-agent (Task/Agent tool) to handle this simple task directly.`,
           );
         }
 
         return text(lines.join("\n"));
       } catch (err: unknown) {
         return text(
-          `Error: Failed to reach bridge server — ${(err as Error).message}`
+          `Error: Failed to reach bridge server — ${(err as Error).message}`,
         );
       }
-    }
+    },
   );
 
   // ── kill_agent — Stop and remove a specific agent
@@ -2670,7 +2685,7 @@ export function registerTools(server: McpServer): void {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available."
+          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
         );
       }
 
@@ -2679,9 +2694,9 @@ export function registerTools(server: McpServer): void {
           `http://127.0.0.1:${bridgePort}/kill-agent`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: bridgeHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({ agentName: agent_name, reason }),
-          }
+          },
         );
 
         const result = (await response.json()) as {
@@ -2695,7 +2710,7 @@ export function registerTools(server: McpServer): void {
           return text(
             `Failed to kill agent '${agent_name}': ${
               result.error || "Unknown error"
-            }`
+            }`,
           );
         }
 
@@ -2706,10 +2721,10 @@ export function registerTools(server: McpServer): void {
         return text(`${result.reason}`);
       } catch (err: unknown) {
         return text(
-          `Error: Failed to reach bridge server — ${(err as Error).message}`
+          `Error: Failed to reach bridge server — ${(err as Error).message}`,
         );
       }
-    }
+    },
   );
 
   // ── cleanup_agents — Batch reap of dead-PTY + terminal-task agents
@@ -2723,7 +2738,7 @@ export function registerTools(server: McpServer): void {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available."
+          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
         );
       }
 
@@ -2732,10 +2747,10 @@ export function registerTools(server: McpServer): void {
         const projectId = process.env.MARBLO_PROJECT || "";
         const listUrl = projectId
           ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
-              projectId
+              projectId,
             )}`
           : `http://127.0.0.1:${bridgePort}/agents`;
-        const listResponse = await fetch(listUrl);
+        const listResponse = await fetch(listUrl, { headers: bridgeHeaders() });
         const data = (await listResponse.json()) as {
           agents: Array<{
             id: string;
@@ -2763,7 +2778,7 @@ export function registerTools(server: McpServer): void {
         // Pass 1 — agents whose PTY already died (status stopped/error).
         // Reason recorded as the raw status for the report.
         const candidates: Array<{
-          agent: typeof data.agents[number];
+          agent: (typeof data.agents)[number];
           reason: string;
         }> = [];
         for (const a of data.agents) {
@@ -2813,7 +2828,7 @@ export function registerTools(server: McpServer): void {
         if (candidates.length === 0) {
           const roleNote = role ? ` for role '${role}'` : "";
           return text(
-            `No reapable agents found${roleNote} (no stopped/error agents and no live agents on terminal tasks). Nothing to clean up.`
+            `No reapable agents found${roleNote} (no stopped/error agents and no live agents on terminal tasks). Nothing to clean up.`,
           );
         }
 
@@ -2821,19 +2836,19 @@ export function registerTools(server: McpServer): void {
         const results: string[] = [];
         for (const { agent, reason } of candidates) {
           console.log(
-            `[cleanup_agents] reaping ${agent.name} (${agent.status}) — ${reason}`
+            `[cleanup_agents] reaping ${agent.name} (${agent.status}) — ${reason}`,
           );
           try {
             const response = await fetch(
               `http://127.0.0.1:${bridgePort}/kill-agent`,
               {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: bridgeHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify({
                   agentName: agent.name,
                   reason: `cleanup: ${reason}`,
                 }),
-              }
+              },
             );
             const result = (await response.json()) as {
               success: boolean;
@@ -2849,14 +2864,14 @@ export function registerTools(server: McpServer): void {
         }
 
         return text(
-          `Cleaned up ${results.length} agent(s): ${results.join(", ")}`
+          `Cleaned up ${results.length} agent(s): ${results.join(", ")}`,
         );
       } catch (err: unknown) {
         return text(
-          `Error: Failed to reach bridge server — ${(err as Error).message}`
+          `Error: Failed to reach bridge server — ${(err as Error).message}`,
         );
       }
-    }
+    },
   );
 
   // 17. create_flow — Create a new flow
@@ -2907,9 +2922,9 @@ export function registerTools(server: McpServer): void {
           `  ID: ${ref.id}\n` +
           `  Name: ${name}\n` +
           `  Nodes: ${parsedNodes.length}\n` +
-          `  Edges: ${parsedEdges.length}`
+          `  Edges: ${parsedEdges.length}`,
       );
-    }
+    },
   );
 
   // 18. get_flows — List project flows
@@ -2936,7 +2951,7 @@ export function registerTools(server: McpServer): void {
       });
       return text(`Flows (${snap.size}):\n${lines.join("\n")}`);
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 19. update_flow — Update an existing flow
@@ -2983,7 +2998,7 @@ export function registerTools(server: McpServer): void {
       await updateDoc(ref, updates);
       const flowName = name || snap.data()?.name || flow_id;
       return text(`Flow '${flowName}' updated successfully.`);
-    }
+    },
   );
 
   // 20. add_pending_instruction — Queue a new-instruction for delivery to an
@@ -2999,7 +3014,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Task ID this instruction relates to. Omit for task-less directives (e.g. orchestrator-level commands)."
+          "Task ID this instruction relates to. Omit for task-less directives (e.g. orchestrator-level commands).",
         ),
       target_agent_id: z
         .string()
@@ -3009,7 +3024,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Required when task_id is omitted; otherwise inferred from the task document."
+          "Project ID. Required when task_id is omitted; otherwise inferred from the task document.",
         ),
       source_type: z
         .enum(["kanban", "chat", "orchestrator", "other"])
@@ -3048,7 +3063,7 @@ export function registerTools(server: McpServer): void {
       }
       if (!projectId) {
         return text(
-          "Error: projectId could not be resolved. Pass project_id or set MARBLO_PROJECT."
+          "Error: projectId could not be resolved. Pass project_id or set MARBLO_PROJECT.",
         );
       }
 
@@ -3065,7 +3080,7 @@ export function registerTools(server: McpServer): void {
         deliveredAt: null,
       });
       return text(`Pending instruction queued: ${ref.id}`);
-    }
+    },
   );
 
   // 21. get_pending_instructions — Fetch pending instructions for a given
@@ -3117,7 +3132,7 @@ export function registerTools(server: McpServer): void {
       });
       return text(lines.join("\n"));
     },
-    { userFacing: false }
+    { userFacing: false },
   );
 
   // 22. mark_instruction_delivered — Flip `isDelivered` to true after the
@@ -3144,7 +3159,7 @@ export function registerTools(server: McpServer): void {
         deliveredAt: Timestamp.now(),
       });
       return text(`Instruction ${instruction_id} marked as delivered.`);
-    }
+    },
   );
 
   // 23. run_skill — Mission engine 용 (명세 §8).
@@ -3192,7 +3207,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "absolute cwd for the subprocess (default: MARBLO_PROJECT_ROOT or process.cwd())"
+          "absolute cwd for the subprocess (default: MARBLO_PROJECT_ROOT or process.cwd())",
         ),
       timeout_ms: z
         .number()
@@ -3206,7 +3221,7 @@ export function registerTools(server: McpServer): void {
       // 1) args sanitization — shell injection 방지
       if (args && SHELL_METACHARS.test(args)) {
         return text(
-          "Error: run_skill args contains forbidden shell metacharacters (;&|`$<>\\n)."
+          "Error: run_skill args contains forbidden shell metacharacters (;&|`$<>\\n).",
         );
       }
 
@@ -3220,12 +3235,12 @@ export function registerTools(server: McpServer): void {
         const stat = fs.statSync(resolvedCwd);
         if (!stat.isDirectory()) {
           return text(
-            `Error: run_skill cwd "${resolvedCwd}" is not a directory.`
+            `Error: run_skill cwd "${resolvedCwd}" is not a directory.`,
           );
         }
       } catch {
         return text(
-          `Error: run_skill cwd "${resolvedCwd}" does not exist or is not accessible.`
+          `Error: run_skill cwd "${resolvedCwd}" does not exist or is not accessible.`,
         );
       }
 
@@ -3300,14 +3315,14 @@ export function registerTools(server: McpServer): void {
             code === 0,
             code !== 0
               ? `exit code=${code} signal=${signal ?? "none"}`
-              : undefined
+              : undefined,
           );
         });
         child.on("error", (err) => {
           finish(false, `spawn error: ${err.message}`);
         });
       });
-    }
+    },
   );
 
   // mission_step_done — B안 Phase 2 (보고 채널): 미션 오케스트레이터 → 지휘자
@@ -3327,7 +3342,7 @@ export function registerTools(server: McpServer): void {
         .optional()
         .describe(
           "Index of the completed step. Omit to let the conductor use the " +
-            "mission's current step."
+            "mission's current step.",
         ),
       result: z
         .object({
@@ -3336,7 +3351,7 @@ export function registerTools(server: McpServer): void {
             .unknown()
             .optional()
             .describe(
-              "Artifact summary for gate verification (e.g. PR URL, review verdict)."
+              "Artifact summary for gate verification (e.g. PR URL, review verdict).",
             ),
           error: z
             .string()
@@ -3352,7 +3367,7 @@ export function registerTools(server: McpServer): void {
         return text(
           "Error: mission_step_done requires a mission context. This caller is on " +
             "the board / a Quick Lane / unscoped (MARBLO_CONTEXT is not a missionId), " +
-            "so there is no mission step to report."
+            "so there is no mission step to report.",
         );
       }
       emitMissionStepReport(event);
@@ -3362,8 +3377,8 @@ export function registerTools(server: McpServer): void {
         payload.stepIndex < 0 ? "current step" : `step ${payload.stepIndex}`;
       return text(
         `Reported ${stepLabel} as ${status} to the conductor for mission ${missionId}.` +
-          (payload.result.error ? ` (error: ${payload.result.error})` : "")
+          (payload.result.error ? ` (error: ${payload.result.error})` : ""),
       );
-    }
+    },
   );
 }
