@@ -5,6 +5,7 @@ import type { Task } from "../../types/task";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useCostStore } from "../../stores/costStore";
+import { t, useTranslation } from "../../lib/i18n";
 
 interface SessionInfo {
   id: string;
@@ -76,6 +77,7 @@ export default function AgentStatusCard({
   onRestart,
   onDelete,
 }: AgentStatusCardProps) {
+  const { t } = useTranslation();
   // Fall back when an agent doc carries an unexpected model / status — e.g.
   // older docs written with a versioned model id ("claude-opus-4-7") instead
   // of the ModelType family. Without these fallbacks the .icon / .color
@@ -340,10 +342,16 @@ export default function AgentStatusCard({
                 <button
                   className="rounded border border-gray-600/30 bg-gray-600/20 px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-red-600/20 hover:text-red-400 hover:border-red-600/30"
                   onClick={() => {
-                    if (confirm(`"${agent.name}" 에이전트를 삭제하시겠습니까?`))
+                    if (
+                      confirm(
+                        t("agents.statusCard.deleteConfirm", {
+                          name: agent.name,
+                        }),
+                      )
+                    )
                       onDelete(agent.id);
                   }}
-                  title="에이전트 삭제"
+                  title={t("agents.statusCard.deleteTitle")}
                 >
                   <svg
                     className="h-3.5 w-3.5"
@@ -446,10 +454,16 @@ export default function AgentStatusCard({
               <button
                 className="rounded border border-gray-600/30 bg-gray-600/20 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:bg-red-600/20 hover:text-red-400 hover:border-red-600/30"
                 onClick={() => {
-                  if (confirm(`"${agent.name}" 에이전트를 삭제하시겠습니까?`))
+                  if (
+                    confirm(
+                      t("agents.statusCard.deleteConfirm", {
+                        name: agent.name,
+                      }),
+                    )
+                  )
                     onDelete(agent.id);
                 }}
-                title="에이전트 삭제"
+                title={t("agents.statusCard.deleteTitle")}
               >
                 <svg
                   className="h-3.5 w-3.5"
@@ -475,7 +489,9 @@ export default function AgentStatusCard({
         <div className="mt-3 rounded border border-blue-800/40 bg-blue-900/20 px-3 py-2">
           <div className="flex items-center justify-between">
             <div className="min-w-0">
-              <span className="text-xs text-gray-500">현재 태스크</span>
+              <span className="text-xs text-gray-500">
+                {t("agents.statusCard.currentTask")}
+              </span>
               <p className="truncate text-sm text-gray-200">
                 {currentTask.title}
               </p>
@@ -511,7 +527,8 @@ export default function AgentStatusCard({
             />
           </svg>
           <span>
-            완료 <strong className="text-gray-300">{completedCount}</strong>
+            {t("agents.stats.done")}{" "}
+            <strong className="text-gray-300">{completedCount}</strong>
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -567,10 +584,10 @@ function formatDate(date: Date): string {
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "방금 전";
-  if (mins < 60) return `${mins}분 전`;
+  if (mins < 1) return t("agents.time.justNow");
+  if (mins < 60) return t("agents.time.minsAgo", { count: mins });
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}시간 전`;
+  if (hrs < 24) return t("agents.time.hoursAgo", { count: hrs });
   const days = Math.floor(hrs / 24);
-  return `${days}일 전`;
+  return t("agents.time.daysAgo", { count: days });
 }

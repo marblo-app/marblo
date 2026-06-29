@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ModelType } from "../../types/agent";
 import type { Task } from "../../types/task";
 import { useEditorStore } from "../../stores/editorStore";
+import { useTranslation } from "../../lib/i18n";
 
 interface AgentAddModalProps {
   projectId: string;
@@ -25,7 +26,7 @@ const MODEL_OPTIONS: {
   icon: string;
   command: string;
   color: string;
-  hint?: string;
+  hint?: boolean;
 }[] = [
   {
     value: "claude",
@@ -50,15 +51,15 @@ const MODEL_OPTIONS: {
   },
   {
     value: "local",
-    label: "Local Model (Ollama 등)",
+    label: "Local Model",
     icon: "⚫",
     command: "ollama",
     color: "#737373",
-    hint: "CLI 명령어를 ollama / lms / llama 등 본인 환경에 맞게 변경",
+    hint: true,
   },
   {
     value: "custom",
-    label: "Custom (직접 입력)",
+    label: "Custom",
     icon: "⚪",
     command: "",
     color: "#6b7280",
@@ -81,6 +82,7 @@ export default function AgentAddModal({
   onLaunch,
   onClose,
 }: AgentAddModalProps) {
+  const { t } = useTranslation();
   // 사이드바에서 선택된 프로젝트 폴더를 기본 작업 디렉토리로 사용
   const rootPath = useEditorStore((s) => s.rootPath);
 
@@ -177,7 +179,7 @@ export default function AgentAddModal({
           {/* Name */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              이름
+              {t("agents.addModal.name")}
             </label>
             <input
               type="text"
@@ -191,7 +193,7 @@ export default function AgentAddModal({
           {/* Model Selection */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
-              모델 선택
+              {t("agents.addModal.modelSelect")}
             </label>
             <div className="space-y-1.5">
               {MODEL_OPTIONS.map((opt) => (
@@ -211,10 +213,14 @@ export default function AgentAddModal({
                   onClick={() => handleModelChange(opt.value)}
                 >
                   <span className="text-lg">{opt.icon}</span>
-                  <span className="flex-1">{opt.label}</span>
+                  <span className="flex-1">
+                    {opt.value === "local" || opt.value === "custom"
+                      ? t(`agents.addModal.model.${opt.value}`)
+                      : opt.label}
+                  </span>
                   {opt.hint && model === opt.value && (
                     <span className="text-[10px] text-gray-500 truncate max-w-[55%]">
-                      {opt.hint}
+                      {t("agents.addModal.localHint")}
                     </span>
                   )}
                 </button>
@@ -225,7 +231,7 @@ export default function AgentAddModal({
           {/* Role */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              역할
+              {t("agents.addModal.role")}
             </label>
             <select
               value={role}
@@ -243,9 +249,9 @@ export default function AgentAddModal({
           {/* CLI Command */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              CLI 명령어
+              {t("agents.addModal.command")}
               <span className="ml-1 text-xs text-gray-500">
-                (모델에 따라 자동 설정, 수동 변경 가능)
+                {t("agents.addModal.commandHint")}
               </span>
             </label>
             <input
@@ -260,7 +266,7 @@ export default function AgentAddModal({
           {/* Working Directory */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              작업 디렉토리
+              {t("agents.addModal.cwd")}
             </label>
             <div className="flex gap-2">
               <input
@@ -281,7 +287,7 @@ export default function AgentAddModal({
                   }
                 }}
                 className="flex-shrink-0 rounded bg-gray-600 border border-gray-500 px-3 py-2 text-sm text-gray-300 hover:bg-gray-500 transition-colors"
-                title="폴더 선택"
+                title={t("agents.addModal.selectFolder")}
               >
                 📁
               </button>
@@ -291,8 +297,10 @@ export default function AgentAddModal({
           {/* Task Assignment */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              태스크 할당
-              <span className="ml-1 text-xs text-gray-500">(선택)</span>
+              {t("agents.addModal.taskAssign")}
+              <span className="ml-1 text-xs text-gray-500">
+                {t("agents.addModal.optional")}
+              </span>
             </label>
             {availableTasks.length > 0 ? (
               <select
@@ -300,7 +308,7 @@ export default function AgentAddModal({
                 onChange={(e) => setSelectedTaskId(e.target.value)}
                 className="w-full rounded bg-gray-700 border border-gray-600 px-3 py-2 text-sm text-gray-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
-                <option value="">태스크 없이 시작 (대화형)</option>
+                <option value="">{t("agents.addModal.noTask")}</option>
                 {availableTasks.map((t) => (
                   <option key={t.id} value={t.id}>
                     [{t.status}] {t.title} (P{t.priority})
@@ -309,8 +317,7 @@ export default function AgentAddModal({
               </select>
             ) : (
               <p className="text-xs text-gray-500">
-                할당 가능한 태스크가 없습니다. 보드에서 먼저 태스크를
-                생성하세요.
+                {t("agents.addModal.noTasksAvail")}
               </p>
             )}
           </div>
@@ -319,15 +326,15 @@ export default function AgentAddModal({
           {!selectedTaskId && (
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">
-                초기 프롬프트
+                {t("agents.addModal.initPrompt")}
                 <span className="ml-1 text-xs text-gray-500">
-                  (선택, 비우면 대화형으로 시작)
+                  {t("agents.addModal.initPromptHint")}
                 </span>
               </label>
               <textarea
                 value={customPrompt}
                 onChange={(e) => setCustomPrompt(e.target.value)}
-                placeholder="에이전트에게 시킬 작업을 입력하세요..."
+                placeholder={t("agents.addModal.promptPlaceholder")}
                 rows={2}
                 className="w-full rounded bg-gray-700 border border-gray-600 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
               />

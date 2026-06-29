@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { VENDOR_VISUALS, STATUS_PILL, type AgentRowData } from "./types";
+import { useTranslation } from "../../../lib/i18n";
 
 interface Props {
   row: AgentRowData;
@@ -13,6 +14,7 @@ interface Props {
 }
 
 function AgentRowImpl({ row, isHighlighted, onSelect, onDoubleClick }: Props) {
+  const { t } = useTranslation();
   // Defense-in-depth: row.vendor/status 는 AgentListPanel 에서 normalize 되지만,
   // 미래에 다른 호출 경로가 생기거나 신규 vendor/status 등록이 누락되어도
   // crash 가 아니라 회색 fallback 으로만 표시되도록 진입점에서 가드.
@@ -35,9 +37,7 @@ function AgentRowImpl({ row, isHighlighted, onSelect, onDoubleClick }: Props) {
         }
       }}
       title={
-        row.isAgent
-          ? "↑/↓: 이동 · Enter / → / 클릭: 포커스 · 더블클릭: Agents 탭"
-          : "↑/↓: 이동 · Enter: 터미널 포커스"
+        row.isAgent ? t("agents.row.agentTitle") : t("agents.row.terminalTitle")
       }
       className={`relative flex items-center gap-3 px-3 py-2 border-b border-[#313244] cursor-pointer transition-colors ${
         isHighlighted ? "bg-[#313244]" : "hover:bg-[#1e1e2e]/60"

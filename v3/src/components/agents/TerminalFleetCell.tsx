@@ -2,6 +2,7 @@ import { forwardRef, memo, useCallback, useState } from "react";
 import { useAgentFocusStore } from "../../stores/agentFocusStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import MiniTerminal from "./MiniTerminal";
+import { useTranslation } from "../../lib/i18n";
 
 interface TerminalFleetCellProps {
   /** PTY session id — MiniTerminal 의 채널 키이자 store 에서의 id. */
@@ -25,8 +26,9 @@ const TerminalFleetCellImpl = forwardRef<
   TerminalFleetCellProps
 >(function TerminalFleetCellImpl(
   { sessionId, name, isFocused = false, onFocus },
-  ref
+  ref,
 ) {
+  const { t } = useTranslation();
   const closeSession = useTerminalStore((s) => s.closeSession);
   const [deleting, setDeleting] = useState(false);
 
@@ -45,13 +47,13 @@ const TerminalFleetCellImpl = forwardRef<
         drillIn();
       }
     },
-    [drillIn]
+    [drillIn],
   );
 
   const handleDelete = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (!confirm(`터미널 "${name}" 을 닫을까요?`)) return;
+      if (!confirm(t("agents.terminalCell.closeConfirm", { name }))) return;
       setDeleting(true);
       try {
         await closeSession(sessionId);
@@ -61,7 +63,7 @@ const TerminalFleetCellImpl = forwardRef<
       }
       // 성공 시 컴포넌트 unmount.
     },
-    [closeSession, name, sessionId]
+    [closeSession, name, sessionId, t],
   );
 
   return (
@@ -75,11 +77,11 @@ const TerminalFleetCellImpl = forwardRef<
         onDoubleClick={drillIn}
         onKeyDown={handleKeyDown}
         onFocus={onFocus}
-        aria-label={`${name} 터미널 — Enter 또는 더블클릭으로 상세보기`}
+        aria-label={t("agents.terminalCell.ariaLabel", { name })}
         data-session-id={sessionId}
         className="w-full text-left rounded-lg border border-[#313244] bg-[#181825] p-2.5 hover:border-[#585b70] hover:bg-[#1e1e2e] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#cba6f7]"
         style={{ borderLeftColor: "#64748b", borderLeftWidth: 3 }}
-        title={`${name} — 단일 클릭=선택, Enter/더블클릭=하단 상세보기`}
+        title={t("agents.terminalCell.title", { name })}
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-2 mb-1.5 min-w-0">
@@ -116,8 +118,8 @@ const TerminalFleetCellImpl = forwardRef<
           tabIndex={-1}
           onClick={handleDelete}
           disabled={deleting}
-          title="터미널 닫기 (PTY kill + 영속 entry 제거)"
-          aria-label={`${name} 터미널 닫기`}
+          title={t("agents.terminalCell.closeTitle")}
+          aria-label={t("agents.terminalCell.closeAria", { name })}
           className="rounded border border-[#f38ba8]/40 bg-[#11111b]/90 px-1.5 py-0.5 text-[10px] text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/15 disabled:opacity-40"
         >
           {deleting ? "…" : "🗑"}

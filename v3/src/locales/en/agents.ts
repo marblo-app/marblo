@@ -108,4 +108,128 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.setupGuide.mcp.title": "MCP Connection (Optional)",
   "agents.setupGuide.mcp.desc":
     "Connect the CLI directly to MCP from your terminal to manage tickets without an agent.",
+
+  // ── Add Agent modal ─────────────────────────────────────────
+  "agents.addModal.model.local": "Local Model (Ollama, etc.)",
+  "agents.addModal.model.custom": "Custom (manual entry)",
+  "agents.addModal.localHint":
+    "Change the CLI command to match your setup (ollama / lms / llama, etc.)",
+  "agents.addModal.name": "Name",
+  "agents.addModal.modelSelect": "Select Model",
+  "agents.addModal.role": "Role",
+  "agents.addModal.command": "CLI Command",
+  "agents.addModal.commandHint": "(auto-set by model, manually editable)",
+  "agents.addModal.cwd": "Working Directory",
+  "agents.addModal.selectFolder": "Select folder",
+  "agents.addModal.taskAssign": "Task Assignment",
+  "agents.addModal.optional": "(optional)",
+  "agents.addModal.noTask": "Start without a task (interactive)",
+  "agents.addModal.noTasksAvail":
+    "No assignable tasks. Create one on the board first.",
+  "agents.addModal.initPrompt": "Initial Prompt",
+  "agents.addModal.initPromptHint":
+    "(optional, leave empty to start interactively)",
+  "agents.addModal.promptPlaceholder": "Enter what you want the agent to do...",
+
+  // ── Status labels ───────────────────────────────────────────
+  "agents.status.working": "Active",
+  "agents.status.idle": "Idle",
+  "agents.status.error": "Error",
+  "agents.status.stopped": "Stopped",
+
+  // ── Shared stats ────────────────────────────────────────────
+  "agents.stats.done": "Done",
+  "agents.stats.inProgress": "In progress",
+
+  // ── Relative / duration time ────────────────────────────────
+  "agents.time.justNow": "just now",
+  "agents.time.minsAgo": "{count}m ago",
+  "agents.time.hoursAgo": "{count}h ago",
+  "agents.time.daysAgo": "{count}d ago",
+  "agents.time.minutes": "{count}m",
+  "agents.time.hoursMinutes": "{hours}h {mins}m",
+
+  // ── Agent status card ───────────────────────────────────────
+  "agents.statusCard.deleteConfirm": 'Delete agent "{name}"?',
+  "agents.statusCard.deleteTitle": "Delete agent",
+  "agents.statusCard.currentTask": "Current task",
+
+  // ── Member card ─────────────────────────────────────────────
+  "agents.member.currentWork": "Current task",
+  "agents.member.model": "Model",
+  "agents.member.recentDone": "Recently completed",
+  "agents.member.inProgressWork": "In progress",
+
+  // ── Attention badge ─────────────────────────────────────────
+  "agents.attention.awaiting": "Awaiting input",
+  "agents.attention.awaitingTitle": "The agent is waiting for your input",
+
+  // ── Team dashboard ──────────────────────────────────────────
+  "agents.team.title": "Team Dashboard",
+  "agents.team.project": "Project",
+  "agents.team.members": "{count} members",
+  "agents.team.online": "{count} online",
+  "agents.team.doneToday": "Done today",
+  "agents.team.doneThisWeek": "Done this week",
+  "agents.team.avgTime": "Avg. completion time",
+  "agents.team.membersHeading": "Members",
+  "agents.team.noAgents": "No agents registered",
+  "agents.team.activity": "Activity",
+
+  // ── Team summary ────────────────────────────────────────────
+  "agents.summary.totalTasks": "Total tasks",
+
+  // ── Terminal fleet cell ─────────────────────────────────────
+  "agents.terminalCell.closeConfirm": 'Close terminal "{name}"?',
+  "agents.terminalCell.ariaLabel":
+    "{name} terminal — press Enter or double-click for details",
+  "agents.terminalCell.title":
+    "{name} — single click = select, Enter/double-click = details below",
+  "agents.terminalCell.closeTitle":
+    "Close terminal (PTY kill + remove persisted entry)",
+  "agents.terminalCell.closeAria": "Close {name} terminal",
+
+  // ── Agent fleet cell ────────────────────────────────────────
+  "agents.fleetCell.deleteConfirm": 'Delete agent "{name}"?',
+  "agents.fleetCell.ariaLabel":
+    "{name} — press Enter or double-click for details",
+  "agents.fleetCell.title":
+    "{name} — single click = select, Enter/double-click = details below",
+  "agents.fleetCell.startTitle": "Start session (cold restart — new PTY)",
+  "agents.fleetCell.startAria": "Start {name} session",
+  "agents.fleetCell.deleteTitle":
+    "Delete agent (stop PTY + remove Firestore doc)",
+  "agents.fleetCell.deleteAria": "Delete {name} agent",
+
+  // ── Agent fleet grid ────────────────────────────────────────
+  "agents.fleetGrid.addHint": "Add one with the Add Agent button above",
+  "agents.fleetGrid.ariaLabel":
+    "Agent grid — arrow keys to move, Enter for details",
+
+  // ── Agent list panel ────────────────────────────────────────
+  "agents.listPanel.noTerminal": "No terminal is connected to this agent.",
+  "agents.listPanel.startNewSession": "Start a new session?",
+  "agents.listPanel.newSessionTitle":
+    "Kill the existing PTY and start a new CLI session (no resume)",
+  "agents.listPanel.cliHint":
+    "If no session appears, check whether the CLI is installed in your console (claude / codex / gemini).",
+
+  // ── Agent row ───────────────────────────────────────────────
+  "agents.row.agentTitle":
+    "↑/↓: move · Enter / → / click: focus · double-click: Agents tab",
+  "agents.row.terminalTitle": "↑/↓: move · Enter: focus terminal",
+
+  // ── Focus view ──────────────────────────────────────────────
+  "agents.focus.backTitle": "Back to list (← / Esc)",
+  "agents.focus.renameTitle": "Rename (Ctrl+R)",
+  "agents.focus.newSessionTitle":
+    "Kill the current PTY and start a new CLI session",
+  "agents.focus.prevTitle": "Previous agent",
+  "agents.focus.nextTitle": "Next agent (→)",
+
+  // ── Agents tab ──────────────────────────────────────────────
+  "agents.tab.limitReached": "Agent limit reached",
+  "agents.tab.activeCount": "Active agents {active} / {limit}",
+  "agents.tab.plan": "plan",
+  "agents.tab.atLimitHint": "Limit reached — upgrade or stop an existing agent",
 };

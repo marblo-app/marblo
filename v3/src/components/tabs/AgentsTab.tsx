@@ -11,8 +11,10 @@ import { useAuth } from "../../hooks/useAuth";
 import { checkAgentSpawn } from "../../lib/planLimits";
 import type { Agent, ModelType } from "../../types/agent";
 import * as agentService from "../../services/agentService";
+import { useTranslation } from "../../lib/i18n";
 
 export function AgentsTab() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
   const agents = useAgentStore((s) => s.agents);
@@ -79,7 +81,7 @@ export function AgentsTab() {
       // Inline alert is the simplest blocking UI from a callback. A toast
       // would be nicer but Marblo doesn't have one yet; the message is
       // also visible in the agent-store error state for the dashboard.
-      alert(check.reason ?? "에이전트 한도 도달");
+      alert(check.reason ?? t("agents.tab.limitReached"));
       return;
     }
     const agentData = {
@@ -142,13 +144,15 @@ export function AgentsTab() {
           }`}
         >
           <span>
-            활성 에이전트 {throttle.active} / {throttle.limit} ·{" "}
-            <span className="uppercase">{planForBadge}</span> 플랜
+            {t("agents.tab.activeCount", {
+              active: throttle.active,
+              limit: throttle.limit,
+            })}{" "}
+            · <span className="uppercase">{planForBadge}</span>{" "}
+            {t("agents.tab.plan")}
           </span>
           {atLimit && (
-            <span className="text-[10px]">
-              한도 도달 — 업그레이드 또는 기존 에이전트 정지 필요
-            </span>
+            <span className="text-[10px]">{t("agents.tab.atLimitHint")}</span>
           )}
         </div>
       )}
@@ -160,7 +164,7 @@ export function AgentsTab() {
           loading={loading}
           onAddAgent={() => {
             if (atLimit) {
-              alert(throttle.reason ?? "에이전트 한도 도달");
+              alert(throttle.reason ?? t("agents.tab.limitReached"));
               return;
             }
             setShowAddModal(true);

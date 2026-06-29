@@ -3,6 +3,7 @@ import type { Agent } from "../../types/agent";
 import type { TerminalSession } from "../../stores/terminalStore";
 import AgentFleetCell from "./AgentFleetCell";
 import TerminalFleetCell from "./TerminalFleetCell";
+import { useTranslation } from "../../lib/i18n";
 
 const MIN_CELL_WIDTH = 240;
 const GRID_GAP_PX = 10; // gap-2.5 → 0.625rem → ~10px (Tailwind default base 16px)
@@ -35,6 +36,7 @@ export default function AgentFleetGrid({
   terminals = [],
   activityByAgent,
 }: AgentFleetGridProps) {
+  const { t } = useTranslation();
   const totalCount = agents.length + terminals.length;
 
   const [tooNarrow, setTooNarrow] = useState(false);
@@ -63,7 +65,7 @@ export default function AgentFleetGrid({
       }
       const n = Math.max(
         1,
-        Math.floor((width + GRID_GAP_PX) / (MIN_CELL_WIDTH + GRID_GAP_PX))
+        Math.floor((width + GRID_GAP_PX) / (MIN_CELL_WIDTH + GRID_GAP_PX)),
       );
       setCols(n);
     };
@@ -90,7 +92,7 @@ export default function AgentFleetGrid({
       setFocusedIndex(clamped);
       cellRefs.current.get(clamped)?.focus();
     },
-    [totalCount, focusedIndex]
+    [totalCount, focusedIndex],
   );
 
   const handleKeyDown = useCallback(
@@ -123,7 +125,7 @@ export default function AgentFleetGrid({
           break;
       }
     },
-    [totalCount, cols, focusedIndex, moveFocus]
+    [totalCount, cols, focusedIndex, moveFocus],
   );
 
   const registerCell = useCallback(
@@ -131,14 +133,14 @@ export default function AgentFleetGrid({
       if (el) cellRefs.current.set(index, el);
       else cellRefs.current.delete(index);
     },
-    []
+    [],
   );
 
   if (totalCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-[#6c7086]">
-        <p className="text-sm">에이전트가 없습니다</p>
-        <p className="text-xs mt-1">상단 Add Agent 버튼으로 추가하세요</p>
+        <p className="text-sm">{t("agents.setupGuide.empty")}</p>
+        <p className="text-xs mt-1">{t("agents.fleetGrid.addHint")}</p>
       </div>
     );
   }
@@ -154,7 +156,7 @@ export default function AgentFleetGrid({
     <div
       ref={containerRef}
       role="grid"
-      aria-label="에이전트 그리드 — 화살표로 이동, Enter 로 상세보기"
+      aria-label={t("agents.fleetGrid.ariaLabel")}
       onKeyDown={handleKeyDown}
       className="grid gap-2.5 p-3"
       style={columnStyle}

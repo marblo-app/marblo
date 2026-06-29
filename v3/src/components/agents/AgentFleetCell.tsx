@@ -7,6 +7,7 @@ import MiniTerminal from "./MiniTerminal";
 import AgentStatusLabel from "./AgentStatusLabel";
 import AttentionBadge from "./AttentionBadge";
 import HarnessVersionBadge from "./HarnessVersionBadge";
+import { useTranslation } from "../../lib/i18n";
 
 const MODEL_ICONS: Record<ModelType, { icon: string; color: string }> = {
   claude: { icon: "🟣", color: "#a855f7" },
@@ -50,6 +51,7 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
     },
     ref,
   ) {
+    const { t } = useTranslation();
     const modelInfo = MODEL_ICONS[agent.model] ?? MODEL_ICONS.custom;
     const statusInfo = STATUS_DOTS[agent.status] ?? STATUS_DOTS.idle;
 
@@ -114,7 +116,8 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
     const handleDelete = useCallback(
       async (e: React.MouseEvent) => {
         e.stopPropagation();
-        if (!confirm(`"${agent.name}" 에이전트를 삭제할까요?`)) return;
+        if (!confirm(t("agents.fleetCell.deleteConfirm", { name: agent.name })))
+          return;
         setPending("delete");
         try {
           await useAgentStore.getState().deleteAgent(agent.id);
@@ -124,7 +127,7 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
         }
         // 성공 시 컴포넌트가 unmount 되므로 setPending(null) 생략 (race-safe).
       },
-      [agent.id, agent.name],
+      [agent.id, agent.name, t],
     );
 
     // ▶ Start 버튼은 사용자가 의도적으로 깨워야 할 때만 노출 — running 중인
@@ -142,11 +145,11 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
           onDoubleClick={drillIn}
           onKeyDown={handleKeyDown}
           onFocus={onFocus}
-          aria-label={`${agent.name} — Enter 또는 더블클릭으로 상세보기`}
+          aria-label={t("agents.fleetCell.ariaLabel", { name: agent.name })}
           data-session-id={sessionId}
           className="w-full text-left rounded-lg border border-[#313244] bg-[#181825] p-2.5 hover:border-[#585b70] hover:bg-[#1e1e2e] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#cba6f7]"
           style={{ borderLeftColor: modelInfo.color, borderLeftWidth: 3 }}
-          title={`${agent.name} — 단일 클릭=선택, Enter/더블클릭=하단 상세보기`}
+          title={t("agents.fleetCell.title", { name: agent.name })}
         >
           {/* Header */}
           <div className="flex items-center justify-between gap-2 mb-1.5 min-w-0">
@@ -201,8 +204,8 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
               tabIndex={-1}
               onClick={handleStart}
               disabled={pending !== null}
-              title="세션 시작 (cold restart — 새 PTY 생성)"
-              aria-label={`${agent.name} 세션 시작`}
+              title={t("agents.fleetCell.startTitle")}
+              aria-label={t("agents.fleetCell.startAria", { name: agent.name })}
               className="rounded border border-[#a6e3a1]/40 bg-[#11111b]/90 px-1.5 py-0.5 text-[10px] text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/15 disabled:opacity-40"
             >
               {pending === "start" ? "…" : "▶ Start"}
@@ -213,8 +216,8 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
             tabIndex={-1}
             onClick={handleDelete}
             disabled={pending !== null}
-            title="에이전트 삭제 (PTY 종료 + Firestore 문서 제거)"
-            aria-label={`${agent.name} 에이전트 삭제`}
+            title={t("agents.fleetCell.deleteTitle")}
+            aria-label={t("agents.fleetCell.deleteAria", { name: agent.name })}
             className="rounded border border-[#f38ba8]/40 bg-[#11111b]/90 px-1.5 py-0.5 text-[10px] text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/15 disabled:opacity-40"
           >
             {pending === "delete" ? "…" : "🗑"}

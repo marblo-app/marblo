@@ -101,4 +101,126 @@ export const agents = {
   "agents.setupGuide.mcp.title": "MCP 연결 (선택)",
   "agents.setupGuide.mcp.desc":
     "터미널에서 직접 CLI를 MCP와 연결하면 에이전트 없이도 티켓을 관리할 수 있습니다.",
+
+  // ── Add Agent modal ─────────────────────────────────────────
+  "agents.addModal.model.local": "로컬 모델 (Ollama 등)",
+  "agents.addModal.model.custom": "커스텀 (직접 입력)",
+  "agents.addModal.localHint":
+    "CLI 명령어를 ollama / lms / llama 등 본인 환경에 맞게 변경",
+  "agents.addModal.name": "이름",
+  "agents.addModal.modelSelect": "모델 선택",
+  "agents.addModal.role": "역할",
+  "agents.addModal.command": "CLI 명령어",
+  "agents.addModal.commandHint": "(모델에 따라 자동 설정, 수동 변경 가능)",
+  "agents.addModal.cwd": "작업 디렉토리",
+  "agents.addModal.selectFolder": "폴더 선택",
+  "agents.addModal.taskAssign": "태스크 할당",
+  "agents.addModal.optional": "(선택)",
+  "agents.addModal.noTask": "태스크 없이 시작 (대화형)",
+  "agents.addModal.noTasksAvail":
+    "할당 가능한 태스크가 없습니다. 보드에서 먼저 태스크를 생성하세요.",
+  "agents.addModal.initPrompt": "초기 프롬프트",
+  "agents.addModal.initPromptHint": "(선택, 비우면 대화형으로 시작)",
+  "agents.addModal.promptPlaceholder": "에이전트에게 시킬 작업을 입력하세요...",
+
+  // ── Status labels ───────────────────────────────────────────
+  "agents.status.working": "작업 중",
+  "agents.status.idle": "대기",
+  "agents.status.error": "오류",
+  "agents.status.stopped": "중지",
+
+  // ── Shared stats ────────────────────────────────────────────
+  "agents.stats.done": "완료",
+  "agents.stats.inProgress": "진행 중",
+
+  // ── Relative / duration time ────────────────────────────────
+  "agents.time.justNow": "방금 전",
+  "agents.time.minsAgo": "{count}분 전",
+  "agents.time.hoursAgo": "{count}시간 전",
+  "agents.time.daysAgo": "{count}일 전",
+  "agents.time.minutes": "{count}분",
+  "agents.time.hoursMinutes": "{hours}시간 {mins}분",
+
+  // ── Agent status card ───────────────────────────────────────
+  "agents.statusCard.deleteConfirm": '"{name}" 에이전트를 삭제하시겠습니까?',
+  "agents.statusCard.deleteTitle": "에이전트 삭제",
+  "agents.statusCard.currentTask": "현재 태스크",
+
+  // ── Member card ─────────────────────────────────────────────
+  "agents.member.currentWork": "현재 작업",
+  "agents.member.model": "모델",
+  "agents.member.recentDone": "최근 완료 작업",
+  "agents.member.inProgressWork": "진행 중인 작업",
+
+  // ── Attention badge ─────────────────────────────────────────
+  "agents.attention.awaiting": "입력 대기",
+  "agents.attention.awaitingTitle":
+    "에이전트가 사용자 입력을 기다리고 있습니다",
+
+  // ── Team dashboard ──────────────────────────────────────────
+  "agents.team.title": "팀 대시보드",
+  "agents.team.project": "프로젝트",
+  "agents.team.members": "멤버 {count}명",
+  "agents.team.online": "{count}명 온라인",
+  "agents.team.doneToday": "오늘 완료",
+  "agents.team.doneThisWeek": "이번 주 완료",
+  "agents.team.avgTime": "평균 완료 시간",
+  "agents.team.membersHeading": "멤버",
+  "agents.team.noAgents": "등록된 에이전트가 없습니다",
+  "agents.team.activity": "활동",
+
+  // ── Team summary ────────────────────────────────────────────
+  "agents.summary.totalTasks": "전체 태스크",
+
+  // ── Terminal fleet cell ─────────────────────────────────────
+  "agents.terminalCell.closeConfirm": '터미널 "{name}" 을 닫을까요?',
+  "agents.terminalCell.ariaLabel":
+    "{name} 터미널 — Enter 또는 더블클릭으로 상세보기",
+  "agents.terminalCell.title":
+    "{name} — 단일 클릭=선택, Enter/더블클릭=하단 상세보기",
+  "agents.terminalCell.closeTitle": "터미널 닫기 (PTY kill + 영속 entry 제거)",
+  "agents.terminalCell.closeAria": "{name} 터미널 닫기",
+
+  // ── Agent fleet cell ────────────────────────────────────────
+  "agents.fleetCell.deleteConfirm": '"{name}" 에이전트를 삭제할까요?',
+  "agents.fleetCell.ariaLabel": "{name} — Enter 또는 더블클릭으로 상세보기",
+  "agents.fleetCell.title":
+    "{name} — 단일 클릭=선택, Enter/더블클릭=하단 상세보기",
+  "agents.fleetCell.startTitle": "세션 시작 (cold restart — 새 PTY 생성)",
+  "agents.fleetCell.startAria": "{name} 세션 시작",
+  "agents.fleetCell.deleteTitle":
+    "에이전트 삭제 (PTY 종료 + Firestore 문서 제거)",
+  "agents.fleetCell.deleteAria": "{name} 에이전트 삭제",
+
+  // ── Agent fleet grid ────────────────────────────────────────
+  "agents.fleetGrid.addHint": "상단 Add Agent 버튼으로 추가하세요",
+  "agents.fleetGrid.ariaLabel":
+    "에이전트 그리드 — 화살표로 이동, Enter 로 상세보기",
+
+  // ── Agent list panel ────────────────────────────────────────
+  "agents.listPanel.noTerminal": "이 에이전트에 연결된 터미널이 없습니다.",
+  "agents.listPanel.startNewSession": "새 세션을 시작하시겠습니까?",
+  "agents.listPanel.newSessionTitle":
+    "기존 PTY를 죽이고 새 CLI 세션 시작 (resume 안 함)",
+  "agents.listPanel.cliHint":
+    "세션이 안 뜨면 콘솔에서 CLI 설치 여부를 확인하세요 (claude / codex / gemini).",
+
+  // ── Agent row ───────────────────────────────────────────────
+  "agents.row.agentTitle":
+    "↑/↓: 이동 · Enter / → / 클릭: 포커스 · 더블클릭: Agents 탭",
+  "agents.row.terminalTitle": "↑/↓: 이동 · Enter: 터미널 포커스",
+
+  // ── Focus view ──────────────────────────────────────────────
+  "agents.focus.backTitle": "목록으로 (← / Esc)",
+  "agents.focus.renameTitle": "이름 변경 (Ctrl+R)",
+  "agents.focus.newSessionTitle": "현재 PTY 종료 후 새 CLI 세션 시작",
+  "agents.focus.prevTitle": "이전 에이전트",
+  "agents.focus.nextTitle": "다음 에이전트 (→)",
+
+  // ── Agents tab ──────────────────────────────────────────────
+  "agents.tab.limitReached": "에이전트 한도 도달",
+  "agents.tab.activeCount": "활성 에이전트 {active} / {limit}",
+  "agents.tab.plan": "플랜",
+  "agents.tab.atLimitHint":
+    "한도 도달 — 업그레이드 또는 기존 에이전트 정지 필요",
 };

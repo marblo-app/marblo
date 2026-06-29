@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Agent, AgentStatus, ModelType } from "../../types";
 import { Task } from "../../types";
+import { t, useTranslation } from "../../lib/i18n";
 
 interface MemberCardProps {
   agent: Agent;
@@ -9,28 +10,24 @@ interface MemberCardProps {
 
 const statusConfig: Record<
   AgentStatus,
-  { label: string; dot: string; bg: string; text: string }
+  { dot: string; bg: string; text: string }
 > = {
   working: {
-    label: "작업 중",
     dot: "bg-green-500",
     bg: "bg-green-500/10",
     text: "text-green-400",
   },
   idle: {
-    label: "대기",
     dot: "bg-yellow-500",
     bg: "bg-yellow-500/10",
     text: "text-yellow-400",
   },
   error: {
-    label: "오류",
     dot: "bg-red-500",
     bg: "bg-red-500/10",
     text: "text-red-400",
   },
   stopped: {
-    label: "중지",
     dot: "bg-gray-600",
     bg: "bg-gray-600/10",
     text: "text-gray-500",
@@ -67,21 +64,24 @@ function formatRelativeTime(date: Date): string {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return "방금";
-  if (diffMin < 60) return `${diffMin}분 전`;
+  if (diffMin < 1) return t("agents.time.justNow");
+  if (diffMin < 60) return t("agents.time.minsAgo", { count: diffMin });
   const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `${diffHour}시간 전`;
+  if (diffHour < 24) return t("agents.time.hoursAgo", { count: diffHour });
   const diffDay = Math.floor(diffHour / 24);
-  return `${diffDay}일 전`;
+  return t("agents.time.daysAgo", { count: diffDay });
 }
 
 export default function MemberCard({ agent, tasks }: MemberCardProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   // Fallback when an agent doc has a status / model outside the expected
   // enum (e.g., older docs polluted with a versioned model id). Prevents
   // a malformed Firestore doc from crashing the entire Agents tab.
   const status = statusConfig[agent.status] ?? statusConfig.idle;
+  const statusKey: AgentStatus =
+    agent.status in statusConfig ? agent.status : "idle";
   const modelKey: ModelType =
     agent.model in modelColors ? agent.model : "custom";
   // claimedBy 는 UI 수동할당(=agent.name)과 MCP claim_task(=agent.id) 두 경로로
@@ -134,7 +134,7 @@ export default function MemberCard({ agent, tasks }: MemberCardProps) {
         >
           <span className={`h-2 w-2 rounded-full ${status.dot}`} />
           <span className={`text-xs font-medium ${status.text}`}>
-            {status.label}
+            {t(`agents.status.${statusKey}`)}
           </span>
         </div>
       </div>
@@ -142,7 +142,9 @@ export default function MemberCard({ agent, tasks }: MemberCardProps) {
       {/* Current task */}
       {currentTask && (
         <div className="mt-3 rounded border border-blue-800/40 bg-blue-900/20 px-3 py-2">
-          <p className="text-xs text-gray-400">현재 작업</p>
+          <p className="text-xs text-gray-400">
+            {t("agents.member.currentWork")}
+          </p>
           <p className="mt-0.5 truncate text-sm text-blue-400">
             {currentTask.title}
           </p>
@@ -152,13 +154,13 @@ export default function MemberCard({ agent, tasks }: MemberCardProps) {
       {/* Stats row */}
       <div className="mt-3 flex items-center gap-4 text-xs text-gray-500">
         <span>
-          완료{" "}
+          {t("agents.stats.done")}{" "}
           <span className="text-gray-300 font-medium">
             {completedTasks.length}
           </span>
         </span>
         <span>
-          진행 중{" "}
+          {t("agents.stats.inProgress")}{" "}
           <span className="text-gray-300 font-medium">
             {inProgressTasks.length}
           </span>
@@ -170,12 +172,14 @@ export default function MemberCard({ agent, tasks }: MemberCardProps) {
       {expanded && (
         <div className="mt-3 border-t border-gray-700 pt-3 space-y-2">
           <div className="text-xs text-gray-400">
-            <span className="text-gray-500">모델:</span>{" "}
+            <span className="text-gray-500">{t("agents.member.model")}:</span>{" "}
             <span className="text-gray-300">{agent.model}</span>
           </div>
           {completedTasks.length > 0 && (
             <div>
-              <p className="text-xs text-gray-500 mb-1">최근 완료 작업</p>
+              <p className="text-xs text-gray-500 mb-1">
+                {t("agents.member.recentDone")}
+              </p>
               <div className="space-y-1">
                 {completedTasks.slice(0, 3).map((t) => (
                   <div
@@ -190,7 +194,9 @@ export default function MemberCard({ agent, tasks }: MemberCardProps) {
           )}
           {inProgressTasks.length > 0 && (
             <div>
-              <p className="text-xs text-gray-500 mb-1">진행 중인 작업</p>
+              <p className="text-xs text-gray-500 mb-1">
+                {t("agents.member.inProgressWork")}
+              </p>
               <div className="space-y-1">
                 {inProgressTasks.map((t) => (
                   <div

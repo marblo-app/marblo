@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { VENDOR_VISUALS, STATUS_PILL, type AgentRowData } from "./types";
+import { useTranslation } from "../../../lib/i18n";
 
 // FocusView renders ONLY the header (← All / name / nav buttons). The
 // terminal body slot lives in AgentListPanel so TerminalView instances
@@ -32,6 +33,7 @@ export function FocusView({
   onStart,
   isStarting,
 }: Props) {
+  const { t } = useTranslation();
   // Defense-in-depth: 미지 vendor/status 가 진입하면 crash 대신 회색 fallback.
   const vendor = VENDOR_VISUALS[row.vendor] ?? VENDOR_VISUALS.custom;
   const pill = STATUS_PILL[row.status] ?? STATUS_PILL.idle;
@@ -129,7 +131,7 @@ export function FocusView({
         <button
           onClick={onBack}
           className="rounded px-2 py-0.5 text-[11px] text-[#6c7086] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4]"
-          title="목록으로 (← / Esc)"
+          title={t("agents.focus.backTitle")}
         >
           ← All
         </button>
@@ -170,7 +172,7 @@ export function FocusView({
             onClick={() => row.isAgent && setEditing(true)}
             disabled={!row.isAgent}
             className="flex-1 truncate text-left text-sm text-[#cdd6f4] disabled:cursor-default"
-            title={row.isAgent ? "이름 변경 (Ctrl+R)" : undefined}
+            title={row.isAgent ? t("agents.focus.renameTitle") : undefined}
           >
             {row.displayName}
           </button>
@@ -199,7 +201,7 @@ export function FocusView({
             onClick={onStart}
             disabled={isStarting}
             className="rounded border border-[#585b70] px-2 py-0.5 text-[10px] text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-50"
-            title="현재 PTY 종료 후 새 CLI 세션 시작"
+            title={t("agents.focus.newSessionTitle")}
           >
             {isStarting ? "Starting…" : "+ New Session"}
           </button>
@@ -210,7 +212,7 @@ export function FocusView({
             onClick={onPrev}
             disabled={total <= 1}
             className="rounded px-1.5 py-0.5 text-[11px] text-[#6c7086] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4] disabled:opacity-30"
-            title="이전 에이전트"
+            title={t("agents.focus.prevTitle")}
           >
             ‹
           </button>
@@ -221,7 +223,7 @@ export function FocusView({
             onClick={onNext}
             disabled={total <= 1}
             className="rounded px-1.5 py-0.5 text-[11px] text-[#6c7086] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4] disabled:opacity-30"
-            title="다음 에이전트 (→)"
+            title={t("agents.focus.nextTitle")}
           >
             ›
           </button>

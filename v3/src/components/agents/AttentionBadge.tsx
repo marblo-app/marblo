@@ -2,6 +2,7 @@ import { memo } from "react";
 import type { AgentStatus } from "../../types/agent";
 import { usePtyMirrorStore } from "../../stores/ptyMirrorStore";
 import { isAwaitingInput } from "../../lib/attentionDetect";
+import { useTranslation } from "../../lib/i18n";
 
 interface AttentionBadgeProps {
   status: AgentStatus;
@@ -24,6 +25,7 @@ function AttentionBadgeImpl({
   restartCount = 0,
   lastExitCode = null,
 }: AttentionBadgeProps) {
+  const { t } = useTranslation();
   const lines = usePtyMirrorStore((s) => s.buffers[sessionId]?.lines ?? EMPTY);
 
   if (status === "error") {
@@ -45,9 +47,9 @@ function AttentionBadgeImpl({
     return (
       <span
         className="text-[10px] text-[#f9e2af] bg-[#f9e2af]/10 px-1.5 py-0.5 rounded font-medium"
-        title="에이전트가 사용자 입력을 기다리고 있습니다"
+        title={t("agents.attention.awaitingTitle")}
       >
-        ⏸ 입력 대기
+        ⏸ {t("agents.attention.awaiting")}
       </span>
     );
   }
