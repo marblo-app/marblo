@@ -13,6 +13,7 @@ import { FlowsTab } from "./tabs/FlowsTab";
 import { MissionsTab } from "./tabs/MissionsTab";
 import { DeployTab } from "./tabs/DeployTab";
 import { WorktreeTab } from "./tabs/WorktreeTab";
+import { WorkHistoryTab } from "./work-history/WorkHistoryTab";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PlanGate } from "./settings/PlanGate";
 import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
@@ -60,6 +61,7 @@ const tabComponents: Record<TabId, () => JSX.Element> = {
   flows: GatedFlowsTab,
   deploy: DeployTab,
   worktrees: WorktreeTab,
+  history: WorkHistoryTab,
   harness: HarnessTabPanel,
   settings: SettingsPage,
 };

@@ -9,6 +9,7 @@ export type TabId =
   | "flows"
   | "deploy"
   | "worktrees"
+  | "history"
   | "harness"
   | "settings";
 
@@ -205,6 +206,25 @@ const tabs: Tab[] = [
           strokeLinejoin="round"
           strokeWidth={2}
           d="M6 3v12m0 0a3 3 0 103 3m-3-3a3 3 0 013 3m6-15a3 3 0 11-3 3m3-3v6a3 3 0 01-3 3H9"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: "history",
+    label: "History",
+    icon: (
+      <svg
+        className="h-4 w-4"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
         />
       </svg>
     ),
