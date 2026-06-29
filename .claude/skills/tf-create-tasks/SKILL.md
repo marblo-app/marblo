@@ -1,6 +1,6 @@
 ---
 name: tf-create-tasks
-description: Bulk-create tasks in Marblo MCP from the analysis results. / 분석 결과를 기반으로 Marblo MCP에 태스크를 일괄 생성합니다
+description: Bulk-create tasks in Marblo MCP from the analysis results.
 allowed-tools: Bash, Read, Glob, Grep
 ---
 

@@ -1,5 +1,5 @@
 ---
-description: "프로젝트 태스크 진행 상태를 대시보드 형태로 요약합니다"
+description: "Summarize project task progress as a dashboard"
 disable-model-invocation: true
 ---
 

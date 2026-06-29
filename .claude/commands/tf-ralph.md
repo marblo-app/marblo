@@ -1,5 +1,5 @@
 ---
-description: "Ralph 패턴으로 반복 작업을 티켓 단위로 추적하며 일괄 처리합니다"
+description: "Batch-process repetitive work with the Ralph pattern, tracking each item as a ticket"
 disable-model-invocation: true
 ---
 

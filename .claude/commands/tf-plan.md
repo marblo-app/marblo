@@ -1,5 +1,5 @@
 ---
-description: "프로젝트 PRD를 작성하고 태스크 분해 계획을 수립합니다. 코드를 쓰기 전에 충분히 생각하는 단계입니다."
+description: "Write the project PRD and plan the task breakdown. A step for thinking hard before writing any code."
 disable-model-invocation: true
 ---
 

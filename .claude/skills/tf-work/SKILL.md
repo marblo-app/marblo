@@ -1,6 +1,6 @@
 ---
 name: tf-work
-description: Claim a task, code per the skill-file rules, and auto-log progress as you go. / 태스크를 claim하고 스킬 파일 규칙에 따라 코딩하면서 진행 상황을 자동 기록합니다
+description: Claim a task, code per the skill-file rules, and auto-log progress as you go.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---

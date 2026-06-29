@@ -1,6 +1,6 @@
 ---
 name: tf-spawn-agents
-description: Review tasks, spawn the right agents, and kick off work. / 태스크를 확인하고 적합한 에이전트를 스폰하여 작업을 시작합니다
+description: Review tasks, spawn the right agents, and kick off work.
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 

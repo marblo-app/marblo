@@ -1,6 +1,6 @@
 ---
 name: tf-fix
-description: Diagnose and recover FAILED/BLOCKED tasks, or cancel/delete unneeded ones. / FAILED/BLOCKED 태스크 진단 + 복구, 또는 불필요한 태스크 취소/삭제
+description: Diagnose and recover FAILED/BLOCKED tasks, or cancel/delete unneeded ones.
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---
 

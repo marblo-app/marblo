@@ -1,6 +1,6 @@
 ---
 name: tf-resume
-description: Resume a paused project — restore full context, re-review the plan, and pick work back up, all in one stop. / 중단된 프로젝트를 이어서 진행합니다. 전체 컨텍스트 복원 → 계획 재점검 → 작업 재개까지 원스톱으로 처리합니다.
+description: Resume a paused project — restore full context, re-review the plan, and pick work back up, all in one stop.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 argument-hint: [프로젝트명]

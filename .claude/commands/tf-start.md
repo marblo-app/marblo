@@ -1,5 +1,5 @@
 ---
-description: "PRD 기반으로 태스크를 생성하고 에이전트를 스폰해서 프로젝트를 시작합니다. /tf-plan 이후에 사용합니다."
+description: "Create tasks from the PRD and spawn agents to start the project. Use after /tf-plan."
 disable-model-invocation: true
 ---
 

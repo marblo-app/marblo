@@ -1,6 +1,6 @@
 ---
 name: tf-plan
-description: Write a project PRD (functional + non-functional + constraints + risks) and break it into 18-22 tasks (with model recommendations). A heavyweight planning step for thinking hard before writing code. / 프로젝트 PRD(기능+비기능+제약+리스크)를 작성하고 18-22개 태스크로 분해(모델 추천 포함). 코드를 쓰기 전에 충분히 생각하는 무거운 플래닝 단계입니다.
+description: Write a project PRD (functional + non-functional + constraints + risks) and break it into 18-22 tasks (with model recommendations). A heavyweight planning step for thinking hard before writing code.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 argument-hint: [프로젝트 설명 또는 아이디어]

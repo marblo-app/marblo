@@ -1,5 +1,5 @@
 ---
-description: "요구사항을 분석하고 컴포넌트, 역할, 의존성을 파악합니다"
+description: "Analyze requirements and map out components, roles, and dependencies"
 disable-model-invocation: true
 ---
 

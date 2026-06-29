@@ -1,6 +1,6 @@
 ---
 name: tf-feedback
-description: Check and respond to PM feedback left on the dashboard — a two-way communication channel. / PM이 대시보드에서 남긴 피드백을 확인하고 답변/반영합니다. 양방향 소통 채널입니다.
+description: Check and respond to PM feedback left on the dashboard — a two-way communication channel.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---

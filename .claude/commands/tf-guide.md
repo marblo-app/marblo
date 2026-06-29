@@ -1,5 +1,5 @@
 ---
-description: "Marblo 슬래시 명령어 가이드. 상황별 어떤 명령어를 쓸지 안내합니다."
+description: "Marblo slash command guide. Helps you choose which command to use in each situation."
 disable-model-invocation: true
 ---
 

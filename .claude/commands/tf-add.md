@@ -1,5 +1,5 @@
 ---
-description: "진행 중인 프로젝트에 새 태스크 추가 또는 기존 태스크 수정(우선순위, 설명 등)"
+description: "Add a new task to the active project, or edit an existing one (priority, description, etc.)"
 disable-model-invocation: true
 ---
 

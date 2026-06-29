@@ -1,5 +1,5 @@
 ---
-description: "PM이 대시보드에서 남긴 피드백을 확인하고 답변/반영합니다. 양방향 소통 채널입니다."
+description: "Check and respond to feedback the PM left on the dashboard. A two-way communication channel."
 disable-model-invocation: true
 ---
 

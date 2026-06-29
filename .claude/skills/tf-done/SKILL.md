@@ -1,6 +1,6 @@
 ---
 name: tf-done
-description: Wrap up a project — summarize results, archive DONE tasks, and run a retrospective. / 프로젝트 완료 정리. 결과 요약 + DONE 태스크 아카이브 + 회고를 진행합니다.
+description: Wrap up a project — summarize results, archive DONE tasks, and run a retrospective.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep
 argument-hint: [프로젝트명]

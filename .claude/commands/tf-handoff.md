@@ -1,5 +1,5 @@
 ---
-description: "에이전트가 실패한 태스크를 직접 이어받아서 완료합니다"
+description: "Take over a task an agent failed and finish it yourself"
 disable-model-invocation: true
 ---
 
