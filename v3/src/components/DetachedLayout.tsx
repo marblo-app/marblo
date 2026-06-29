@@ -4,15 +4,16 @@ import { Header } from "./Header";
 import { Sidebar } from "./sidebar/Sidebar";
 import { BoardTab } from "./tabs/BoardTab";
 import { CodeTab } from "./tabs/CodeTab";
+import { WorkHistoryTab } from "../components/work-history/WorkHistoryTab";
 import { TaskCreateModal } from "./board/TaskCreateModal";
 import { useSessionRestore } from "../hooks/useSessionRestore";
 import { useEditorStore } from "../stores/editorStore";
 import { useProjectStore } from "../stores/projectStore";
 
-export type DetachedView = "board" | "code";
+export type DetachedView = "board" | "code" | "history";
 
 /**
- * Detached pop-out window for a single tab (Board / Code).
+ * Detached pop-out window for a single tab (Board / Code / History).
  *
  * Rendered instead of <Layout> when the renderer boots with `?detached=<view>`
  * (set by main's createDetachedWindow). It deliberately drops the orchestrator
@@ -59,7 +60,8 @@ export function DetachedLayout({ view }: { view: DetachedView }) {
     );
   }
 
-  const TabComponent = view === "code" ? CodeTab : BoardTab;
+  const TabComponent =
+    view === "code" ? CodeTab : view === "history" ? WorkHistoryTab : BoardTab;
 
   return (
     <div className="flex h-screen flex-col bg-gray-900 text-gray-100">

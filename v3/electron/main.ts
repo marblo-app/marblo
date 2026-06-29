@@ -1580,7 +1580,7 @@ process.on("unhandledRejection", (reason) => {
 // this via the `?detached=<view>` query (see App.tsx); main only has to append
 // the query and pick a sensible title/size. `detachedView` is undefined for the
 // normal full app window (0 behavior change for the regular path).
-type DetachedView = "board" | "code";
+type DetachedView = "board" | "code" | "history";
 
 // ---------------------------------------------------------------------------
 // External link handling (open http(s) links in the OS default browser)
@@ -1686,7 +1686,13 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
     minWidth: 800,
     minHeight: 600,
     title: detachedView
-      ? `Marblo — ${detachedView === "board" ? "Board" : "Code"}`
+      ? `Marblo — ${
+          detachedView === "board"
+            ? "Board"
+            : detachedView === "code"
+              ? "Code"
+              : "History"
+        }`
       : "Marblo",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

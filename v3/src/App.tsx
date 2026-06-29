@@ -202,7 +202,7 @@ if (typeof PerformanceObserver !== "undefined") {
 function resolveDetachedView(): DetachedView | null {
   if (typeof window === "undefined") return null;
   const v = new URLSearchParams(window.location.search).get("detached");
-  return v === "board" || v === "code" ? v : null;
+  return v === "board" || v === "code" || v === "history" ? v : null;
 }
 
 function AppContent() {

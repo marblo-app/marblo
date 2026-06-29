@@ -280,12 +280,12 @@ const tabs: Tab[] = [
 interface TabBarProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
-  /** Pop a tab out into its own window. Only Board/Code expose the affordance. */
-  onPopOut?: (view: "board" | "code") => void;
+  /** Pop a tab out into its own window. Only Board/Code/History expose the affordance. */
+  onPopOut?: (view: "board" | "code" | "history") => void;
 }
 
 // Tabs that can be detached into their own window.
-const POP_OUT_TABS: Set<TabId> = new Set(["board", "code"]);
+const POP_OUT_TABS: Set<TabId> = new Set(["board", "code", "history"]);
 
 // Hidden tabs in production — only shown when VITE_DEV_FEATURES includes the tab id.
 // "missions" 는 MVP 제외(보드+오케스트레이터 집중). 미션은 고비용(subagent-heavy)·
@@ -340,7 +340,7 @@ export function TabBar({ activeTab, onTabChange, onPopOut }: TabBarProps) {
                 aria-label={t("sidebar.tab.popOutLabel", { name: tab.label })}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onPopOut(tab.id as "board" | "code");
+                  onPopOut(tab.id as "board" | "code" | "history");
                 }}
                 className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 opacity-0 transition-opacity hover:text-gray-200 group-hover:opacity-100"
               >
