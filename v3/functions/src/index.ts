@@ -13,7 +13,8 @@ import { redactSecrets } from "./redact";
 
 admin.initializeApp();
 const db = admin.firestore();
-const bigquery = new BigQuery();
+const BQ_LOCATION = "US";
+const bigquery = new BigQuery({ location: BQ_LOCATION });
 
 const BQ_DATASET = "marblo_telemetry";
 const BQ_EVENTS_TABLE = "events";
@@ -2295,6 +2296,7 @@ export const getCostLogs = functions.https.onCall(async (data, context) => {
   const [rows] = await bigquery.query({
     query,
     params: { userId, projectId, limit },
+    location: BQ_LOCATION,
   });
 
   return { logs: rows };
@@ -2373,10 +2375,12 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
     bigquery.query({
       query: byDayQuery,
       params: { userId, projectId, days: requestedDays },
+      location: BQ_LOCATION,
     }),
     bigquery.query({
       query: weeklyByModelQuery,
       params: { userId, projectId, weeklyDays },
+      location: BQ_LOCATION,
     }),
   ]);
 
