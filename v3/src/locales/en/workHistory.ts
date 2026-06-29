@@ -23,6 +23,7 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   "workHistory.noReport":
     'This completed task has no structured "✅ Completion report".',
   "workHistory.openPr": "Open PR",
+  "workHistory.openTicket": "View ticket",
   "workHistory.diff.view": "View diff",
   "workHistory.diff.loading": "Loading…",
   "workHistory.diff.loadFailed": "Failed to load diff",

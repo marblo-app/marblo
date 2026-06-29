@@ -13,6 +13,7 @@ import {
 import { computeShareStats, resolvePrUrl } from "../../lib/shareCard";
 import { useTaskActivities } from "../../hooks/useTaskActivities";
 import { DiffViewer } from "../board/DiffViewer";
+import { TaskDetailModal } from "../board/TaskDetailModal";
 import { ShareCard } from "./ShareCard";
 
 // 완료 보고를 추적할 최근 완료 태스크 상한. task 당 Firestore activities 리스너가
@@ -56,6 +57,7 @@ function WorkHistoryRow({
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
   const [diff, setDiff] = useState<string | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -82,113 +84,127 @@ function WorkHistoryRow({
   };
 
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-800/40 px-3 py-2">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-3 text-left"
-        title={task.id}
-      >
-        <span aria-hidden className="text-gray-500">
-          {expanded ? "▾" : "▸"}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-sm text-gray-100">
-          {task.title || (
-            <span className="text-gray-500">
-              {t("workHistory.row.untitled")}
+    <>
+      <div className="rounded-lg border border-gray-800 bg-gray-800/40 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex w-full items-center gap-3 text-left"
+          title={task.id}
+        >
+          <span aria-hidden className="text-gray-500">
+            {expanded ? "▾" : "▸"}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-sm text-gray-100">
+            {task.title || (
+              <span className="text-gray-500">
+                {t("workHistory.row.untitled")}
+              </span>
+            )}
+          </span>
+          <span className="w-24 flex-shrink-0 truncate text-xs text-gray-400">
+            {task.claimedBy ?? "—"}
+          </span>
+          {prUrl && (
+            <span className="flex-shrink-0 rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-medium text-violet-300">
+              PR
             </span>
           )}
-        </span>
-        <span className="w-24 flex-shrink-0 truncate text-xs text-gray-400">
-          {task.claimedBy ?? "—"}
-        </span>
-        {prUrl && (
-          <span className="flex-shrink-0 rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-medium text-violet-300">
-            PR
-          </span>
-        )}
-        {report && (
-          <span className="flex-shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
-            {t("workHistory.badge.report")}
-          </span>
-        )}
-        <span
-          className="w-16 flex-shrink-0 text-right text-xs text-gray-500"
-          title={task.updatedAt?.toLocaleString?.("ko-KR")}
-        >
-          {task.updatedAt ? relativeTime(task.updatedAt) : "—"}
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="mt-2 space-y-1.5 border-t border-gray-800 pt-2">
-          {report ? (
-            <>
-              <ProvenanceField
-                label={t("workHistory.provenance.problem")}
-                value={report.problem}
-              />
-              <ProvenanceField
-                label={t("workHistory.provenance.approach")}
-                value={report.approach}
-              />
-              <ProvenanceField
-                label={t("workHistory.provenance.changes")}
-                value={report.changes}
-              />
-              <ProvenanceField
-                label={t("workHistory.provenance.verification")}
-                value={report.verification}
-              />
-            </>
-          ) : (
-            <p className="text-xs text-gray-500">{t("workHistory.noReport")}</p>
+          {report && (
+            <span className="flex-shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+              {t("workHistory.badge.report")}
+            </span>
           )}
+          <span
+            className="w-16 flex-shrink-0 text-right text-xs text-gray-500"
+            title={task.updatedAt?.toLocaleString?.("ko-KR")}
+          >
+            {task.updatedAt ? relativeTime(task.updatedAt) : "—"}
+          </span>
+        </button>
 
-          <div className="flex flex-wrap items-center gap-3 pt-1">
-            {prUrl && (
-              <a
-                href={prUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-blue-400 hover:underline"
-              >
-                {t("workHistory.openPr")} ↗
-              </a>
+        {expanded && (
+          <div className="mt-2 space-y-1.5 border-t border-gray-800 pt-2">
+            {report ? (
+              <>
+                <ProvenanceField
+                  label={t("workHistory.provenance.problem")}
+                  value={report.problem}
+                />
+                <ProvenanceField
+                  label={t("workHistory.provenance.approach")}
+                  value={report.approach}
+                />
+                <ProvenanceField
+                  label={t("workHistory.provenance.changes")}
+                  value={report.changes}
+                />
+                <ProvenanceField
+                  label={t("workHistory.provenance.verification")}
+                  value={report.verification}
+                />
+              </>
+            ) : (
+              <p className="text-xs text-gray-500">
+                {t("workHistory.noReport")}
+              </p>
             )}
-            {mergeEntry && (
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              {prUrl && (
+                <a
+                  href={prUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-blue-400 hover:underline"
+                >
+                  {t("workHistory.openPr")} ↗
+                </a>
+              )}
               <button
                 type="button"
-                onClick={loadDiff}
-                disabled={diffLoading || diff !== null}
-                className="rounded border border-gray-700 px-2 py-0.5 text-xs text-gray-300 transition hover:bg-gray-800 disabled:opacity-50"
+                onClick={() => setShowDetail(true)}
+                className="text-xs text-blue-400 hover:underline"
               >
-                {diff !== null
-                  ? `diff (${mergeEntry.headSha.slice(0, 7)})`
-                  : diffLoading
-                    ? t("workHistory.diff.loading")
-                    : t("workHistory.diff.view")}
+                {t("workHistory.openTicket")}
               </button>
+              {mergeEntry && (
+                <button
+                  type="button"
+                  onClick={loadDiff}
+                  disabled={diffLoading || diff !== null}
+                  className="rounded border border-gray-700 px-2 py-0.5 text-xs text-gray-300 transition hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {diff !== null
+                    ? `diff (${mergeEntry.headSha.slice(0, 7)})`
+                    : diffLoading
+                      ? t("workHistory.diff.loading")
+                      : t("workHistory.diff.view")}
+                </button>
+              )}
+            </div>
+
+            {(diff !== null || diffError) && (
+              <div className="pt-1">
+                <DiffViewer
+                  diff={diff ?? ""}
+                  loading={diffLoading}
+                  error={diffError}
+                  onRetry={() => {
+                    setDiff(null);
+                    setDiffError(null);
+                    void loadDiff();
+                  }}
+                />
+              </div>
             )}
           </div>
-
-          {(diff !== null || diffError) && (
-            <div className="pt-1">
-              <DiffViewer
-                diff={diff ?? ""}
-                loading={diffLoading}
-                error={diffError}
-                onRetry={() => {
-                  setDiff(null);
-                  setDiffError(null);
-                  void loadDiff();
-                }}
-              />
-            </div>
-          )}
-        </div>
+        )}
+      </div>
+      {showDetail && (
+        <TaskDetailModal task={task} onClose={() => setShowDetail(false)} />
       )}
-    </div>
+    </>
   );
 }
 
@@ -289,7 +305,10 @@ export function WorkHistoryTab() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
+    // 단일 스크롤 흐름: 헤더·ShareCard·리스트를 한 overflow-y-auto 컨테이너에 일반
+    // 흐름으로 배치한다. 스크롤하면 ShareCard 도 함께 위로 밀려 올라가 리스트가 전체
+    // 높이를 활용한다(ShareCard sticky 미적용 — 요청=전체 스크롤).
+    <div className="flex h-full flex-col gap-3 overflow-y-auto p-4">
       <div className="flex items-center gap-2">
         <h1 className="text-sm font-semibold text-gray-200">
           {t("workHistory.title")}
@@ -303,31 +322,29 @@ export function WorkHistoryTab() {
 
       <ShareCard stats={shareStats} />
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {doneTasks.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
-              <p className="text-sm text-gray-300">
-                {t("workHistory.empty.title")}
-              </p>
-              <p className="mt-1 text-xs text-gray-500">
-                {t("workHistory.empty.hint")}
-              </p>
-            </div>
+      {doneTasks.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center py-12">
+          <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
+            <p className="text-sm text-gray-300">
+              {t("workHistory.empty.title")}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              {t("workHistory.empty.hint")}
+            </p>
           </div>
-        ) : (
-          <div className="space-y-1.5">
-            {trackedTasks.map((task) => (
-              <WorkHistoryRow
-                key={task.id}
-                task={task}
-                report={reports[task.id] ?? null}
-                mergeEntry={mergeByTask[task.id] ?? null}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {trackedTasks.map((task) => (
+            <WorkHistoryRow
+              key={task.id}
+              task={task}
+              report={reports[task.id] ?? null}
+              mergeEntry={mergeByTask[task.id] ?? null}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -75,5 +75,8 @@ export function extractFirstUrl(
 ): string | null {
   if (!text) return null;
   const match = text.match(/https?:\/\/[^\s)]+/);
-  return match ? match[0] : null;
+  if (!match) return null;
+  // 문장 끝에 붙은 트레일링 구두점/괄호는 URL 의 일부가 아니다.
+  // 예: "...pull/259." → "...pull/259".
+  return match[0].replace(/[.,;:!?'")\]>]+$/, "");
 }

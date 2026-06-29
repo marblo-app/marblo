@@ -31,6 +31,7 @@ export const workHistory = {
   "workHistory.noReport":
     '이 완료 태스크에는 구조화된 "✅ 완료 보고" 가 없습니다.',
   "workHistory.openPr": "PR 열기",
+  "workHistory.openTicket": "티켓 보기",
   "workHistory.diff.view": "diff 보기",
   "workHistory.diff.loading": "로딩…",
   "workHistory.diff.loadFailed": "diff 로드 실패",
