@@ -6,13 +6,14 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, GithubAuthProvider } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
+import { sanitizeRedirect } from '@/lib/sanitizeRedirect';
 
 export default function LoginPage() {
   const t = useTranslations('auth');
   const locale = useLocale();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get('redirect') || `/${locale}`;
+  const redirect = sanitizeRedirect(searchParams.get('redirect'), `/${locale}`);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
