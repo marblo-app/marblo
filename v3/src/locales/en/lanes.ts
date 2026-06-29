@@ -24,6 +24,12 @@ export const lanes: Record<keyof typeof koLanes, string> = {
     "Use “＋ Quick task” to start an improvement in an isolated worktree.",
   "lanes.noProjectPlaceholder": "Select a project to start quick tasks.",
 
+  // Status pills (laneStatusPill — terminal task states + idle)
+  "lanes.pill.done": "Done",
+  "lanes.pill.review": "Review",
+  "lanes.pill.failed": "Failed",
+  "lanes.pill.idle": "Preparing",
+
   // Row
   "lanes.row.worktreePreparing": "Preparing worktree…",
   "lanes.row.restartTip": "Restart a conflicted/failed lane item",

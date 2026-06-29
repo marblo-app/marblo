@@ -1,4 +1,6 @@
 import { statusPill } from "../stores/worktreeStore";
+import { t } from "./i18n";
+import type { MessageKey } from "../locales/ko";
 import type { Task } from "../types/task";
 import type { Worktree, WorktreeStatusPill } from "../types/worktree";
 
@@ -35,10 +37,17 @@ export interface LaneStatusPill {
   tone: LaneStatusTone;
 }
 
-const TERMINAL_PILL: Partial<Record<Task["status"], LaneStatusPill>> = {
-  DONE: { icon: "✅", label: "완료", tone: "done" },
-  REVIEW: { icon: "🔵", label: "리뷰", tone: "review" },
-  FAILED: { icon: "⛔", label: "실패", tone: "failed" },
+// Icons + tones are static; labels are resolved through `t()` at call time so
+// they follow the active locale (same pattern as worktreeStore.statusPill).
+const TERMINAL_PILL: Partial<
+  Record<
+    Task["status"],
+    Omit<LaneStatusPill, "label"> & { labelKey: MessageKey }
+  >
+> = {
+  DONE: { icon: "✅", labelKey: "lanes.pill.done", tone: "done" },
+  REVIEW: { icon: "🔵", labelKey: "lanes.pill.review", tone: "review" },
+  FAILED: { icon: "⛔", labelKey: "lanes.pill.failed", tone: "failed" },
 };
 
 export function laneStatusPill(
@@ -53,8 +62,13 @@ export function laneStatusPill(
   // 2. 터미널 task 상태가 완료 표시의 단일 진실 — git "작업중" 영구 표시(거짓
   //    stall)를 덮어쓴다.
   const terminal = TERMINAL_PILL[task.status];
-  if (terminal) return terminal;
+  if (terminal)
+    return {
+      icon: terminal.icon,
+      label: t(terminal.labelKey),
+      tone: terminal.tone,
+    };
 
   // 3. 진행 중 레인 → git 상태를 따른다. worktree 가 아직 없으면 "준비 중".
-  return git ?? { icon: "⚪", label: "준비 중", tone: "idle" };
+  return git ?? { icon: "⚪", label: t("lanes.pill.idle"), tone: "idle" };
 }

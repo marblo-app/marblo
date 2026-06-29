@@ -146,4 +146,7 @@ export const harness = {
   "harness.telegram.plugin.title": "Telegram 플러그인 필요",
   "harness.telegram.plugin.descAfter":
     "이 동작하려면 telegram 플러그인이 설치되어 있어야 합니다. 하네스 스토어에서 telegram 플러그인을 설치하거나, CLI에서 같은 플러그인 이름으로 설치한 뒤 채널을 활성화하세요.",
+
+  // HarnessVersionBadge — tooltip for an agent's installed CLI version
+  "harness.installedCliVersion": "설치된 CLI 버전 v{version}",
 };

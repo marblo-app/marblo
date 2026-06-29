@@ -1,4 +1,5 @@
 import { useRef, useCallback, useState, useEffect, memo } from "react";
+import { useTranslation } from "../../lib/i18n";
 import { useOrchestratorStore } from "../../stores/orchestratorStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
@@ -36,6 +37,7 @@ interface SessionInfo {
 }
 
 export default memo(function OrchestratorPanel() {
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const rootPath = useEditorStore((s) => s.rootPath);
   // Granular selectors — destructuring useOrchestratorStore() would re-render on every action;
@@ -304,7 +306,7 @@ export default memo(function OrchestratorPanel() {
               <button
                 onClick={handleShowSessionPicker}
                 className="rounded bg-[#313244]/50 px-1 py-0.5 text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] transition-colors"
-                title="세션 선택"
+                title={t("orchestrator.sessionPicker")}
               >
                 <svg
                   className="h-3.5 w-3.5"
@@ -376,7 +378,7 @@ export default memo(function OrchestratorPanel() {
             </div>
             {!rootPath && (
               <span className="ml-1 text-[10px] text-[#f9e2af]">
-                (폴더를 열면 자동 시작)
+                {t("orchestrator.autoStartHint")}
               </span>
             )}
           </>

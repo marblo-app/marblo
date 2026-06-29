@@ -13,6 +13,8 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.board": "Board",
   "orchestrator.aiDecompose": "AI task breakdown",
   "orchestrator.addTask": "Add task",
+  "orchestrator.sessionPicker": "Select session",
+  "orchestrator.autoStartHint": "(starts automatically when you open a folder)",
   // Category labels
   "orchestrator.cat.project": "Start project",
   "orchestrator.cat.project-step": "Step-by-step start",

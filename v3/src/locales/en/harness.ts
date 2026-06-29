@@ -147,4 +147,7 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.telegram.plugin.title": "Telegram plugin required",
   "harness.telegram.plugin.descAfter":
     " requires the telegram plugin to be installed. Install it from the Harness store, or via the CLI using the same plugin name, then enable the channel.",
+
+  // HarnessVersionBadge — tooltip for an agent's installed CLI version
+  "harness.installedCliVersion": "Installed CLI version v{version}",
 };

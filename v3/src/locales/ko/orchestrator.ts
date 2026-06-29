@@ -13,6 +13,8 @@ export const orchestrator = {
   "orchestrator.board": "보드",
   "orchestrator.aiDecompose": "AI 태스크 분해",
   "orchestrator.addTask": "새 태스크 추가",
+  "orchestrator.sessionPicker": "세션 선택",
+  "orchestrator.autoStartHint": "(폴더를 열면 자동 시작)",
   // Category labels
   "orchestrator.cat.project": "프로젝트 시작",
   "orchestrator.cat.project-step": "단계별 시작",

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "../lib/i18n";
 import { Header } from "./Header";
 import { Sidebar } from "./sidebar/Sidebar";
 import { BoardTab } from "./tabs/BoardTab";
@@ -49,7 +50,9 @@ export function DetachedLayout({ view }: { view: DetachedView }) {
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
-            <p className="mt-3 text-sm text-gray-400">세션 복원 중...</p>
+            <p className="mt-3 text-sm text-gray-400">
+              {t("common.restoringSession")}
+            </p>
           </div>
         </div>
       </div>

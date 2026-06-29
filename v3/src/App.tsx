@@ -13,6 +13,7 @@ import {
   type TelemetryEvent,
 } from "./services/telemetryService";
 import telemetry from "./services/telemetryService";
+import { t } from "./lib/i18n";
 
 // First-party telemetry is OFF by default (local-only build, PIPA) — the
 // initial enabled-state is resolved from the build flag in telemetryService
@@ -291,7 +292,7 @@ function AppContent() {
       <div className="flex h-screen items-center justify-center bg-gray-900">
         <div className="text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
-          <p className="mt-3 text-sm text-gray-400">로딩 중...</p>
+          <p className="mt-3 text-sm text-gray-400">{t("common.loading")}</p>
         </div>
       </div>
     );
@@ -311,7 +312,9 @@ function AppContent() {
       <div className="flex h-screen items-center justify-center bg-gray-900">
         <div className="text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
-          <p className="mt-3 text-sm text-gray-400">프로젝트 불러오는 중...</p>
+          <p className="mt-3 text-sm text-gray-400">
+            {t("common.loadingProjects")}
+          </p>
         </div>
       </div>
     );

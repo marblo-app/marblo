@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { t } from "../lib/i18n";
 import { Header } from "./Header";
 import { TabBar, type TabId } from "./TabBar";
 import { Sidebar } from "./sidebar/Sidebar";
@@ -300,7 +301,9 @@ export function Layout() {
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
-            <p className="mt-3 text-sm text-gray-400">세션 복원 중...</p>
+            <p className="mt-3 text-sm text-gray-400">
+              {t("common.restoringSession")}
+            </p>
           </div>
         </div>
       </div>
@@ -324,7 +327,7 @@ export function Layout() {
           <div className="text-center space-y-6">
             <div className="text-6xl">M</div>
             <h1 className="text-2xl font-bold text-gray-100">Marblo</h1>
-            <p className="text-gray-400">프로젝트 폴더를 선택하여 시작하세요</p>
+            <p className="text-gray-400">{t("common.selectFolderPrompt")}</p>
             <button
               onClick={handleSelectFolder}
               className="rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"

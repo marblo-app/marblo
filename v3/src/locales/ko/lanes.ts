@@ -24,6 +24,12 @@ export const lanes = {
   "lanes.noProjectPlaceholder":
     "프로젝트를 선택하면 빠른 작업을 시작할 수 있습니다.",
 
+  // Status pills (laneStatusPill — terminal task states + idle)
+  "lanes.pill.done": "완료",
+  "lanes.pill.review": "리뷰",
+  "lanes.pill.failed": "실패",
+  "lanes.pill.idle": "준비 중",
+
   // Row
   "lanes.row.worktreePreparing": "워크트리 준비 중…",
   "lanes.row.restartTip": "충돌/실패 상태의 레인 항목을 다시 시작",
