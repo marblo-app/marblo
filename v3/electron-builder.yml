@@ -29,9 +29,17 @@ extraResources:
 afterSign: scripts/notarize.js
 
 mac:
+  # Universal (x64 + arm64 merged via lipo) so a single DMG/zip runs natively on
+  # BOTH Intel and Apple Silicon Macs. Previously we shipped arm64-only, which
+  # Intel users could not launch (M5). Universal keeps latest-mac.yml + .blockmap
+  # single-arch, so electron-updater stays intact — unlike building x64 and arm64
+  # separately, where two latest-mac.yml can overwrite each other and break auto
+  # update. Tradeoff: ~2x build time and bundle size. P0-7 runs the signed build.
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: universal
+    - target: zip
+      arch: universal
   category: public.app-category.developer-tools
   icon: resources/icon.icns
   hardenedRuntime: true

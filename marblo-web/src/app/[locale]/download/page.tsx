@@ -18,8 +18,54 @@ import {
 
 // 버전 고정 다운로드 링크 — 새 빌드 릴리스 시 이 두 값만 갱신.
 const APP_VERSION = "v3.0.0";
-const MAC_DMG_URL =
-  "https://github.com/melocream/marblo-releases/releases/download/v3.0.0/Marblo-3.0.0-arm64.dmg";
+const RELEASE_BASE =
+  "https://github.com/melocream/marblo-releases/releases/download/v3.0.0";
+
+type MacArch = "universal" | "arm64" | "x64";
+
+// 현재 빌드는 Universal DMG 단일 산출(electron-builder mac.arch: universal)로
+// Intel(x64)·Apple Silicon(arm64) 모두에서 네이티브 실행된다. 그래서 세 아키 모두
+// 같은 universal DMG 로 매핑한다. 추후 per-arch DMG 로 분리하면 이 맵만 바꾸면 된다.
+const MAC_DMG_URLS: Record<MacArch, string> = {
+  universal: `${RELEASE_BASE}/Marblo-3.0.0-universal.dmg`,
+  arm64: `${RELEASE_BASE}/Marblo-3.0.0-universal.dmg`,
+  x64: `${RELEASE_BASE}/Marblo-3.0.0-universal.dmg`,
+};
+
+// 브라우저에서 macOS 칩(Intel vs Apple Silicon)을 베스트에포트로 감지한다.
+// UA 문자열은 Apple Silicon 에서도 "Intel Mac OS X" 로 보고하므로 신뢰 불가 →
+// WebGL 렌더러 문자열로 판별("Apple" 계열 = arm64, Intel/AMD/NVIDIA = x64).
+// 감지 실패 시 universal 로 폴백한다(어차피 universal 이 항상 올바른 자산).
+function detectMacArch(): MacArch {
+  if (typeof navigator === "undefined" || typeof document === "undefined") {
+    return "universal";
+  }
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = (canvas.getContext("webgl") ||
+      canvas.getContext("experimental-webgl")) as WebGLRenderingContext | null;
+    if (gl) {
+      const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+      if (dbg) {
+        const renderer = String(
+          gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || ""
+        );
+        if (/apple/i.test(renderer)) return "arm64";
+        if (/intel|amd|radeon|nvidia|geforce/i.test(renderer)) return "x64";
+      }
+    }
+  } catch {
+    // WebGL 차단/미지원 → universal 폴백
+  }
+  return "universal";
+}
+
+// 감지된 아키에 대응하는 칩 라벨 i18n 키.
+const MAC_ARCH_LABEL_KEY: Record<MacArch, string> = {
+  universal: "mac_arch_universal",
+  arm64: "mac_arch_apple",
+  x64: "mac_arch_intel",
+};
 
 // 소프트(인지) 게이트 상태. 바이너리는 공개 릴리스라 하드 차단이 아니라,
 // 미로그인/비선정 사용자에게 다운로드 대신 적절한 다음 행동을 안내한다.
@@ -29,6 +75,13 @@ export default function DownloadPage() {
   const t = useTranslations("download");
   const locale = useLocale();
   const [state, setState] = useState<AccessState>("loading");
+  // 서버/하이드레이션 일치를 위해 초기값은 universal(항상 올바른 자산). 마운트 후
+  // 클라이언트에서 감지해 칩 라벨만 정밀화한다 — DMG 링크는 어차피 동일.
+  const [macArch, setMacArch] = useState<MacArch>("universal");
+
+  useEffect(() => {
+    setMacArch(detectMacArch());
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -85,7 +138,7 @@ export default function DownloadPage() {
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Link
                 href={`/${locale}/auth/login?redirect=${encodeURIComponent(
-                  `/${locale}/download`,
+                  `/${locale}/download`
                 )}`}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium transition"
               >
@@ -126,9 +179,9 @@ export default function DownloadPage() {
             </p>
 
             <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* macOS — 다운로드 가능 */}
+              {/* macOS — 다운로드 가능 (Universal: Intel·Apple Silicon 공용) */}
               <a
-                href={MAC_DMG_URL}
+                href={MAC_DMG_URLS[macArch]}
                 className="group flex flex-col items-center justify-center gap-3 p-6 rounded-xl border border-indigo-500/50 bg-indigo-600/10 hover:bg-indigo-600/20 hover:border-indigo-400 transition"
               >
                 <Apple className="w-7 h-7 text-zinc-200" />
@@ -136,7 +189,8 @@ export default function DownloadPage() {
                   {t("macos")}
                 </span>
                 <span className="text-xs text-zinc-400">
-                  {t("mac_sub")} · {APP_VERSION}
+                  {t(MAC_ARCH_LABEL_KEY[macArch])} · {t("mac_sub")} ·{" "}
+                  {APP_VERSION}
                 </span>
                 <span className="mt-1 inline-flex items-center gap-2 bg-indigo-600 group-hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
                   <Download className="w-4 h-4" />
