@@ -28,6 +28,9 @@ import { onboarding } from "./onboarding";
 import { common } from "./common";
 import { activity } from "./activity";
 import { bugReport } from "./bugReport";
+import { deploy } from "./deploy";
+import { code } from "./code";
+import { terminal } from "./terminal";
 
 export const en: Record<MessageKey, string> = {
   ...header,
@@ -50,4 +53,7 @@ export const en: Record<MessageKey, string> = {
   ...common,
   ...activity,
   ...bugReport,
+  ...deploy,
+  ...code,
+  ...terminal,
 };

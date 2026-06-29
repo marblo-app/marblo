@@ -8,6 +8,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
+import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 
 type InboundCapability = "read" | "trigger";
 
@@ -56,22 +58,35 @@ function telegramChannel(): TelegramChannelAPI {
 }
 
 function statusBadge(status: ChannelStatus | null): {
-  label: string;
+  labelKey: MessageKey;
   className: string;
 } {
   if (!status) {
-    return { label: "대기", className: "bg-[#313244] text-[#6c7086]" };
+    return {
+      labelKey: "harness.telegram.status.idle",
+      className: "bg-[#313244] text-[#6c7086]",
+    };
   }
   if (status.active) {
-    return { label: "연결", className: "bg-[#a6e3a1]/15 text-[#a6e3a1]" };
+    return {
+      labelKey: "harness.telegram.status.connected",
+      className: "bg-[#a6e3a1]/15 text-[#a6e3a1]",
+    };
   }
   if (status.enabled && !status.canEnable) {
-    return { label: "확인 필요", className: "bg-[#f9e2af]/15 text-[#f9e2af]" };
+    return {
+      labelKey: "harness.telegram.status.needsCheck",
+      className: "bg-[#f9e2af]/15 text-[#f9e2af]",
+    };
   }
-  return { label: "미연결", className: "bg-[#313244] text-[#bac2de]" };
+  return {
+    labelKey: "harness.telegram.status.disconnected",
+    className: "bg-[#313244] text-[#bac2de]",
+  };
 }
 
 export function TelegramChannelPanel() {
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const [config, setConfig] = useState<TelegramChannelConfig | null>(null);
   const [status, setStatus] = useState<ChannelStatus | null>(null);
@@ -109,9 +124,7 @@ export function TelegramChannelPanel() {
       setBotToken(nextConfig?.botToken ?? "");
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "텔레그램 채널 상태를 불러오지 못했습니다.",
+        err instanceof Error ? err.message : t("harness.telegram.loadError"),
       );
     } finally {
       setLoading(false);
@@ -127,7 +140,7 @@ export function TelegramChannelPanel() {
   const trimmedBotToken = botToken.trim();
   const canToggleOn = !!trimmedChatId && !!status?.canEnable;
   const toggleBlockedReason = !trimmedChatId
-    ? "chatId 를 저장해야 활성화할 수 있습니다."
+    ? t("harness.telegram.needChatId")
     : status && !status.canEnable
       ? status.preflight.issues.join(" ")
       : "";
@@ -159,10 +172,10 @@ export function TelegramChannelPanel() {
           inboundCapability: config?.inboundCapability ?? "trigger",
         });
         await refreshAfterSave();
-        setMessage("채널 설정을 저장했습니다.");
+        setMessage(t("harness.telegram.saved"));
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "채널 설정 저장에 실패했습니다.",
+          err instanceof Error ? err.message : t("harness.telegram.saveError"),
         );
       } finally {
         setSaving(false);
@@ -190,15 +203,17 @@ export function TelegramChannelPanel() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-[#cdd6f4]">채널 연결</h3>
+            <h3 className="text-sm font-semibold text-[#cdd6f4]">
+              {t("harness.telegram.title")}
+            </h3>
             <span
               className={`rounded px-2 py-0.5 text-[11px] ${badge.className}`}
             >
-              {badge.label}
+              {t(badge.labelKey)}
             </span>
           </div>
           <p className="text-xs text-[#6c7086]">
-            {currentProject?.name ?? "프로젝트 미선택"}
+            {currentProject?.name ?? t("harness.conn.noProject")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -206,7 +221,7 @@ export function TelegramChannelPanel() {
             type="button"
             onClick={() => void loadChannel()}
             disabled={loading || saving || !projectId}
-            title="채널 상태 새로고침"
+            title={t("harness.telegram.refreshTitle")}
             className="inline-flex h-8 w-8 items-center justify-center rounded border border-[#313244] text-[#bac2de] hover:border-[#45475a] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -222,7 +237,7 @@ export function TelegramChannelPanel() {
               !projectId ||
               (status?.enabled ? false : !canToggleOn)
             }
-            title={toggleBlockedReason || "텔레그램 채널 활성화"}
+            title={toggleBlockedReason || t("harness.telegram.enableTitle")}
             className={`inline-flex h-8 items-center gap-2 rounded border px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               status?.enabled
                 ? "border-[#a6e3a1]/40 bg-[#a6e3a1]/15 text-[#a6e3a1]"
@@ -234,7 +249,9 @@ export function TelegramChannelPanel() {
             ) : (
               <XCircle className="h-3.5 w-3.5" />
             )}
-            {status?.enabled ? "활성" : "비활성"}
+            {status?.enabled
+              ? t("harness.telegram.enabled")
+              : t("harness.telegram.disabled")}
           </button>
         </div>
       </div>
@@ -253,7 +270,7 @@ export function TelegramChannelPanel() {
       {loading ? (
         <div className="flex h-24 items-center justify-center text-xs text-[#6c7086]">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          채널 상태 확인 중
+          {t("harness.telegram.loading")}
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
@@ -266,7 +283,7 @@ export function TelegramChannelPanel() {
               value={chatId}
               onChange={(e) => setChatId(e.target.value)}
               disabled={!projectId || saving}
-              placeholder="@channel 또는 chatId"
+              placeholder={t("harness.telegram.chatIdPlaceholder")}
               spellCheck={false}
               autoCapitalize="off"
               autoCorrect="off"
@@ -301,7 +318,7 @@ export function TelegramChannelPanel() {
               ) : (
                 <Save className="h-3.5 w-3.5" />
               )}
-              저장
+              {t("harness.telegram.save")}
             </button>
           </div>
         </div>
@@ -332,7 +349,7 @@ export function TelegramChannelPanel() {
           aria-expanded={guideOpen}
           className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-[#bac2de] hover:bg-[#313244]/60"
         >
-          <span>어떻게 연결하나요?</span>
+          <span>{t("harness.telegram.guide.toggle")}</span>
           <ChevronDown
             className={`h-4 w-4 text-[#6c7086] transition-transform ${
               guideOpen ? "rotate-180" : ""
@@ -343,7 +360,7 @@ export function TelegramChannelPanel() {
           <div className="space-y-3 border-t border-[#313244] px-3 py-3 text-[11px] leading-5 text-[#bac2de]">
             <ol className="grid gap-2 md:grid-cols-2">
               <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                1.{" "}
+                1. {t("harness.telegram.guide.step1Before")}
                 <a
                   href="https://t.me/BotFather"
                   target="_blank"
@@ -352,30 +369,27 @@ export function TelegramChannelPanel() {
                 >
                   @BotFather
                 </a>
-                에서 봇을 만들고 bot token을 복사합니다.
+                {t("harness.telegram.guide.step1After")}
               </li>
               <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                2. 만든 봇을 사용할 채널 또는 그룹에 추가합니다.
+                2. {t("harness.telegram.guide.step2")}
               </li>
               <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                3. 대상이 공개 채널이면 @username을, 비공개 채널/그룹이면
-                Telegram API 응답에서 chatId를 확인합니다.
+                3. {t("harness.telegram.guide.step3")}
               </li>
               <li className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                4. bot token과 chatId를 입력해 저장한 뒤 활성 토글을 켭니다.
+                4. {t("harness.telegram.guide.step4")}
               </li>
             </ol>
             <div className="rounded border border-[#313244] bg-[#181825] px-3 py-2">
               <p className="mb-1 text-xs font-medium text-[#cdd6f4]">
-                Telegram 플러그인 필요
+                {t("harness.telegram.plugin.title")}
               </p>
               <p>
                 <code className="rounded bg-[#313244] px-1.5 py-0.5 text-[#cdd6f4]">
                   --channels plugin:telegram@claude-plugins-official
                 </code>
-                이 동작하려면 telegram 플러그인이 설치되어 있어야 합니다. 하네스
-                스토어에서 telegram 플러그인을 설치하거나, CLI에서 같은 플러그인
-                이름으로 설치한 뒤 채널을 활성화하세요.
+                {t("harness.telegram.plugin.descAfter")}
               </p>
             </div>
           </div>

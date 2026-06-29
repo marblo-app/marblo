@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { DiffEditor } from '@monaco-editor/react';
+import { useState, useEffect } from "react";
+import { DiffEditor } from "@monaco-editor/react";
+import { useTranslation } from "../../lib/i18n";
 
 interface DiffViewerProps {
   filePath: string;
@@ -7,33 +8,43 @@ interface DiffViewerProps {
   currentContent: string;
 }
 
-export function DiffViewer({ filePath, language, currentContent }: DiffViewerProps) {
-  const [original, setOriginal] = useState<string>('');
+export function DiffViewer({
+  filePath,
+  language,
+  currentContent,
+}: DiffViewerProps) {
+  const { t } = useTranslation();
+  const [original, setOriginal] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
 
-    window.electronAPI.fs.gitDiff(filePath).then((result) => {
-      if (!cancelled) {
-        setOriginal(result.original);
-        setLoading(false);
-      }
-    }).catch(() => {
-      if (!cancelled) {
-        setOriginal('');
-        setLoading(false);
-      }
-    });
+    window.electronAPI.fs
+      .gitDiff(filePath)
+      .then((result) => {
+        if (!cancelled) {
+          setOriginal(result.original);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOriginal("");
+          setLoading(false);
+        }
+      });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [filePath]);
 
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-gray-500">
-        Diff 로딩 중...
+        {t("code.diffLoading")}
       </div>
     );
   }

@@ -31,6 +31,9 @@ import { onboarding } from "./onboarding";
 import { common } from "./common";
 import { activity } from "./activity";
 import { bugReport } from "./bugReport";
+import { deploy } from "./deploy";
+import { code } from "./code";
+import { terminal } from "./terminal";
 
 export const ko = {
   ...header,
@@ -53,6 +56,9 @@ export const ko = {
   ...common,
   ...activity,
   ...bugReport,
+  ...deploy,
+  ...code,
+  ...terminal,
 };
 
 export type MessageKey = keyof typeof ko;

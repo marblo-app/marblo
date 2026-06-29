@@ -5,6 +5,7 @@ import {
   insertAtCaret,
   resolveClipboardImagePaths,
 } from "../../utils/clipboardImage";
+import { useTranslation } from "../../lib/i18n";
 
 interface FeedbackEntry {
   text: string;
@@ -20,6 +21,7 @@ export default function FeedbackInput({
   sessionId,
   taskId,
 }: FeedbackInputProps) {
+  const { t } = useTranslation();
   const [text, setText] = useState("");
   const [history, setHistory] = useState<FeedbackEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -93,7 +95,9 @@ export default function FeedbackInput({
       {/* 히스토리 패널 */}
       {showHistory && history.length > 0 && (
         <div className="max-h-32 overflow-y-auto border-b border-[#313244] px-3 py-2">
-          <p className="mb-1 text-xs font-medium text-[#6c7086]">최근 피드백</p>
+          <p className="mb-1 text-xs font-medium text-[#6c7086]">
+            {t("terminal.feedback.recent")}
+          </p>
           {history.slice(0, 10).map((entry, i) => (
             <div key={i} className="flex items-start gap-2 py-0.5">
               <span className="flex-shrink-0 text-xs text-[#585b70]">
@@ -112,7 +116,7 @@ export default function FeedbackInput({
           <button
             onClick={() => setShowHistory(!showHistory)}
             className="flex-shrink-0 text-[#6c7086] hover:text-[#a6adc8] transition-colors"
-            title="피드백 히스토리"
+            title={t("terminal.feedback.historyTitle")}
           >
             <svg
               className="h-4 w-4"
@@ -137,7 +141,7 @@ export default function FeedbackInput({
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="PM 피드백을 에이전트에게 전달합니다"
+          placeholder={t("terminal.feedback.placeholder")}
           disabled={!sessionId || sending}
           className="flex-1 rounded bg-[#313244] px-3 py-1.5 text-sm text-[#cdd6f4] placeholder-[#6c7086] outline-none focus:ring-1 focus:ring-[#89b4fa] disabled:opacity-50"
         />
@@ -147,7 +151,7 @@ export default function FeedbackInput({
           disabled={!text.trim() || !sessionId || sending}
           className="flex-shrink-0 rounded bg-[#89b4fa] px-3 py-1.5 text-sm font-medium text-[#1e1e2e] hover:bg-[#74c7ec] disabled:opacity-40 transition-colors"
         >
-          {sending ? "..." : "전송"}
+          {sending ? "..." : t("terminal.feedback.send")}
         </button>
       </div>
     </div>

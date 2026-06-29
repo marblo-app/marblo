@@ -114,4 +114,36 @@ export const harness = {
     "Marblo MCP는 대시보드 내부에서 spawn 된 에이전트에만 자동 연결됩니다 (per-agent isolated config). 외부 터미널 CLI 세션은 사용자의 taskforce MCP 등 별도 설정으로 관리하세요.",
   "harness.store.footerGithub":
     "외부 GitHub URL 직접 설치는 차후 추가될 예정입니다 (신뢰 검증 후).",
+  // --- Telegram channel panel ---
+  // Status badge (fixed-set labels)
+  "harness.telegram.status.idle": "대기",
+  "harness.telegram.status.connected": "연결",
+  "harness.telegram.status.needsCheck": "확인 필요",
+  "harness.telegram.status.disconnected": "미연결",
+  "harness.telegram.title": "채널 연결",
+  "harness.telegram.loadError": "텔레그램 채널 상태를 불러오지 못했습니다.",
+  "harness.telegram.needChatId": "chatId 를 저장해야 활성화할 수 있습니다.",
+  "harness.telegram.saved": "채널 설정을 저장했습니다.",
+  "harness.telegram.saveError": "채널 설정 저장에 실패했습니다.",
+  "harness.telegram.refreshTitle": "채널 상태 새로고침",
+  "harness.telegram.enableTitle": "텔레그램 채널 활성화",
+  "harness.telegram.enabled": "활성",
+  "harness.telegram.disabled": "비활성",
+  "harness.telegram.loading": "채널 상태 확인 중",
+  "harness.telegram.chatIdPlaceholder": "@channel 또는 chatId",
+  "harness.telegram.save": "저장",
+  // Connection guide (collapsible)
+  "harness.telegram.guide.toggle": "어떻게 연결하나요?",
+  "harness.telegram.guide.step1Before": "",
+  "harness.telegram.guide.step1After":
+    "에서 봇을 만들고 bot token을 복사합니다.",
+  "harness.telegram.guide.step2":
+    "만든 봇을 사용할 채널 또는 그룹에 추가합니다.",
+  "harness.telegram.guide.step3":
+    "대상이 공개 채널이면 @username을, 비공개 채널/그룹이면 Telegram API 응답에서 chatId를 확인합니다.",
+  "harness.telegram.guide.step4":
+    "bot token과 chatId를 입력해 저장한 뒤 활성 토글을 켭니다.",
+  "harness.telegram.plugin.title": "Telegram 플러그인 필요",
+  "harness.telegram.plugin.descAfter":
+    "이 동작하려면 telegram 플러그인이 설치되어 있어야 합니다. 하네스 스토어에서 telegram 플러그인을 설치하거나, CLI에서 같은 플러그인 이름으로 설치한 뒤 채널을 활성화하세요.",
 };

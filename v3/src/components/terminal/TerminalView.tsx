@@ -7,6 +7,7 @@ import "@xterm/xterm/css/xterm.css";
 import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 import { resolveClipboardForTerminal } from "../../utils/clipboardImage";
 import { MONO_FONT_FAMILY } from "../../lib/monoFont";
+import { t } from "../../lib/i18n";
 
 interface TerminalViewProps {
   sessionId: string;
@@ -321,12 +322,14 @@ export default memo(function TerminalView({
             .catch(() => false);
           if (disposed) return;
           if (!alive) {
-            terminal.write("\r\n\x1b[33m  ⚠ 세션이 만료되었습니다.\x1b[0m\r\n");
             terminal.write(
-              "\x1b[90m  앱 재시작으로 PTY 세션이 종료되었습니다.\x1b[0m\r\n",
+              `\r\n\x1b[33m  ⚠ ${t("terminal.session.expired")}\x1b[0m\r\n`,
             );
             terminal.write(
-              "\x1b[90m  Agents 탭에서 Restart 버튼으로 재시작하세요.\x1b[0m\r\n\r\n",
+              `\x1b[90m  ${t("terminal.session.expiredReason")}\x1b[0m\r\n`,
+            );
+            terminal.write(
+              `\x1b[90m  ${t("terminal.session.restartHint")}\x1b[0m\r\n\r\n`,
             );
           } else {
             nudgePtyRepaint();

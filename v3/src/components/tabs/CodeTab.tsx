@@ -5,8 +5,10 @@ import { useWorktreeStore } from "../../stores/worktreeStore";
 import { EditorTabs } from "../code/EditorTabs";
 import { CodeEditor } from "../code/CodeEditor";
 import { DiffViewer } from "../code/DiffViewer";
+import { useTranslation } from "../../lib/i18n";
 
 export function CodeTab() {
+  const { t } = useTranslation();
   const openFiles = useEditorStore((s) => s.openFiles);
   const activeFilePath = useEditorStore((s) => s.activeFilePath);
   const showDiff = useEditorStore((s) => s.showDiff);
@@ -54,7 +56,7 @@ export function CodeTab() {
           value={selectedRoot}
           onChange={(event) => handleRootChange(event.target.value)}
           className="min-w-0 max-w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-200 outline-none focus:border-blue-500"
-          title={rootPath ?? "프로젝트 루트가 선택되지 않았습니다"}
+          title={rootPath ?? t("code.rootNotSelected")}
         >
           <option value="__project__">
             {projectRootPath
@@ -105,9 +107,11 @@ export function CodeTab() {
                   d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
                 />
               </svg>
-              <p className="mt-4 text-lg font-medium">파일을 선택하세요</p>
+              <p className="mt-4 text-lg font-medium">
+                {t("code.noFileSelected.title")}
+              </p>
               <p className="mt-1 text-sm text-gray-500">
-                사이드바에서 파일을 클릭하면 여기에 표시됩니다
+                {t("code.noFileSelected.hint")}
               </p>
             </div>
           </div>

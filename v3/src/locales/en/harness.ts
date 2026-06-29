@@ -118,4 +118,33 @@ export const harness: Record<keyof typeof koHarness, string> = {
     "Marblo MCP auto-connects only to agents spawned inside the dashboard (per-agent isolated config). Manage external terminal CLI sessions with your own setup, e.g. the taskforce MCP.",
   "harness.store.footerGithub":
     "Direct install from external GitHub URLs is coming later (after trust verification).",
+  // --- Telegram channel panel ---
+  "harness.telegram.status.idle": "Idle",
+  "harness.telegram.status.connected": "Connected",
+  "harness.telegram.status.needsCheck": "Needs check",
+  "harness.telegram.status.disconnected": "Disconnected",
+  "harness.telegram.title": "Channel connection",
+  "harness.telegram.loadError": "Failed to load Telegram channel status.",
+  "harness.telegram.needChatId": "Save a chatId before enabling.",
+  "harness.telegram.saved": "Channel settings saved.",
+  "harness.telegram.saveError": "Failed to save channel settings.",
+  "harness.telegram.refreshTitle": "Refresh channel status",
+  "harness.telegram.enableTitle": "Enable Telegram channel",
+  "harness.telegram.enabled": "Active",
+  "harness.telegram.disabled": "Inactive",
+  "harness.telegram.loading": "Checking channel status",
+  "harness.telegram.chatIdPlaceholder": "@channel or chatId",
+  "harness.telegram.save": "Save",
+  "harness.telegram.guide.toggle": "How do I connect?",
+  "harness.telegram.guide.step1Before": "Create a bot with ",
+  "harness.telegram.guide.step1After": " and copy the bot token.",
+  "harness.telegram.guide.step2":
+    "Add the bot to the channel or group you want to use.",
+  "harness.telegram.guide.step3":
+    "For a public channel use its @username; for a private channel/group, find the chatId in the Telegram API response.",
+  "harness.telegram.guide.step4":
+    "Enter the bot token and chatId, save, then turn on the active toggle.",
+  "harness.telegram.plugin.title": "Telegram plugin required",
+  "harness.telegram.plugin.descAfter":
+    " requires the telegram plugin to be installed. Install it from the Harness store, or via the CLI using the same plugin name, then enable the channel.",
 };
