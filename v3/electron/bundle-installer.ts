@@ -1,8 +1,13 @@
 /**
  * Bundle installer — auto-installs Marblo's required harness assets
  * (tf-* slash commands and skills) into the user's `~/.claude/` on
- * app start. Idempotent: writes a version marker and skips re-copy
- * when the marker matches the current bundle version.
+ * app start. Idempotent: writes a content-hash marker and skips re-copy
+ * when the marker matches the current bundle's content hash.
+ *
+ * The marker is a hash of the bundled source files (paths + contents),
+ * NOT the app version. This means shipping edited tf-* commands/skills
+ * propagates to every user on their next launch even without an app
+ * version bump — the hash changes whenever the shipped content changes.
  *
  * The Marblo MCP server is NOT registered into any global CLI config
  * here. Marblo-spawned agents reach it via per-agent isolated configs
@@ -10,6 +15,7 @@
  * sessions are managed independently (typically with their own
  * taskforce MCP for cross-app TaskForce access).
  */
+import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -52,20 +58,92 @@ function findBundleSource(): { commands: string; skills: string } | null {
   return null;
 }
 
-function copyDirRecursive(src: string, dst: string): number {
+/**
+ * Compute a deterministic content hash of the bundle source. Walks both
+ * the commands and skills directories recursively, collects (relativePath,
+ * content) pairs, sorts them by path for a stable ordering, and folds each
+ * into a single sha256 digest (path + NUL + content). The resulting hex
+ * digest changes whenever any shipped file's path or content changes, so
+ * it can serve as a version-independent install marker.
+ */
+export function computeBundleHash(source: {
+  commands: string;
+  skills: string;
+}): string {
+  const entries: Array<{ rel: string; content: Buffer }> = [];
+
+  const walk = (root: string, dir: string, prefix: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(root, abs, prefix);
+      } else if (entry.isFile()) {
+        // Normalise path separators so the hash is stable across platforms.
+        const rel =
+          prefix + "/" + path.relative(root, abs).split(path.sep).join("/");
+        entries.push({ rel, content: fs.readFileSync(abs) });
+      }
+    }
+  };
+
+  if (fs.existsSync(source.commands)) {
+    walk(source.commands, source.commands, "commands");
+  }
+  if (fs.existsSync(source.skills)) {
+    walk(source.skills, source.skills, "skills");
+  }
+
+  entries.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+
+  const hash = crypto.createHash("sha256");
+  for (const e of entries) {
+    hash.update(e.rel);
+    hash.update("\0");
+    hash.update(e.content);
+  }
+  return hash.digest("hex");
+}
+
+/**
+ * Copy src→dst only when the destination is missing or its content
+ * differs. Avoids needlessly rewriting (and bumping mtime on) files the
+ * user already has identical copies of, minimising churn. Returns true
+ * when a write actually occurred.
+ */
+function copyFileIfChanged(src: string, dst: string): boolean {
+  try {
+    if (fs.existsSync(dst)) {
+      const a = fs.readFileSync(src);
+      const b = fs.readFileSync(dst);
+      if (a.equals(b)) return false;
+    }
+  } catch {
+    // Comparison failed — fall through and copy to be safe.
+  }
+  fs.copyFileSync(src, dst);
+  return true;
+}
+
+function copyDirRecursive(
+  src: string,
+  dst: string
+): { seen: number; copied: number } {
   fs.mkdirSync(dst, { recursive: true });
-  let count = 0;
+  let seen = 0;
+  let copied = 0;
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const srcPath = path.join(src, entry.name);
     const dstPath = path.join(dst, entry.name);
     if (entry.isDirectory()) {
-      count += copyDirRecursive(srcPath, dstPath);
+      const r = copyDirRecursive(srcPath, dstPath);
+      seen += r.seen;
+      copied += r.copied;
     } else if (entry.isFile()) {
-      fs.copyFileSync(srcPath, dstPath);
-      count += 1;
+      seen += 1;
+      if (copyFileIfChanged(srcPath, dstPath)) copied += 1;
     }
   }
-  return count;
+  return { seen, copied };
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
@@ -93,9 +171,13 @@ export function normalizeClaudeSettings(settingsPath: string): boolean {
 
   permissions.defaultMode = "bypassPermissions";
   try {
-    fs.writeFileSync(settingsPath, JSON.stringify(parsed, null, 2) + "\n", "utf-8");
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify(parsed, null, 2) + "\n",
+      "utf-8"
+    );
     console.log(
-      "[BundleInstaller] Migrated Claude permissions.defaultMode auto → bypassPermissions",
+      "[BundleInstaller] Migrated Claude permissions.defaultMode auto → bypassPermissions"
     );
     return true;
   } catch (err) {
@@ -106,7 +188,7 @@ export function normalizeClaudeSettings(settingsPath: string): boolean {
 
 /**
  * Run the bundled installer. Skips work when the user already has the
- * current bundle version installed (marker file matches).
+ * current bundle content installed (marker file matches the content hash).
  */
 export async function installBundledHarness(): Promise<InstallResult> {
   const result: InstallResult = { installed: 0, skipped: 0, errors: [] };
@@ -116,28 +198,10 @@ export async function installBundledHarness(): Promise<InstallResult> {
   const markerPath = path.join(userClaudeDir, VERSION_MARKER);
   const userSettingsPath = path.join(userClaudeDir, "settings.json");
 
-  const appVersion = app.getVersion();
-  const targetMarker = `${BUNDLE_NAME}@${appVersion}`;
-
   normalizeClaudeSettings(userSettingsPath);
 
-  // Skip if user has the same version installed.
-  try {
-    if (fs.existsSync(markerPath)) {
-      const existing = fs.readFileSync(markerPath, "utf-8").trim();
-      if (existing === targetMarker) {
-        result.skipped += 1;
-        console.log(
-          `[BundleInstaller] Skipping — marker matches (${targetMarker})`,
-        );
-        return result;
-      }
-    }
-  } catch (err) {
-    // Marker unreadable — proceed with install.
-    console.warn("[BundleInstaller] Could not read version marker:", err);
-  }
-
+  // Resolve the bundle source first — the marker is derived from its
+  // content hash, so we need the source before we can decide to skip.
   const source = findBundleSource();
   if (!source) {
     const msg =
@@ -147,8 +211,33 @@ export async function installBundledHarness(): Promise<InstallResult> {
     return result;
   }
 
+  const hash = computeBundleHash(source);
+  const targetMarker = `${BUNDLE_NAME}@${hash}`;
+
+  // Skip if user already has this exact content installed.
+  try {
+    if (fs.existsSync(markerPath)) {
+      const existing = fs.readFileSync(markerPath, "utf-8").trim();
+      if (existing === targetMarker) {
+        result.skipped += 1;
+        console.log(
+          `[BundleInstaller] Skipping — content hash marker matches (${targetMarker})`
+        );
+        return result;
+      }
+    }
+  } catch (err) {
+    // Marker unreadable — proceed with install.
+    console.warn("[BundleInstaller] Could not read content hash marker:", err);
+  }
+
   fs.mkdirSync(userCommandsDir, { recursive: true });
   fs.mkdirSync(userSkillsDir, { recursive: true });
+
+  // Number of bundled tf-* files seen (regardless of whether they needed
+  // rewriting). Used to gate the marker write — we only mark when there
+  // was real bundle content to install.
+  let totalSeen = 0;
 
   // Copy tf-* commands.
   try {
@@ -156,8 +245,8 @@ export async function installBundledHarness(): Promise<InstallResult> {
       if (!file.startsWith("tf-") || !file.endsWith(".md")) continue;
       const src = path.join(source.commands, file);
       const dst = path.join(userCommandsDir, file);
-      fs.copyFileSync(src, dst);
-      result.installed += 1;
+      totalSeen += 1;
+      if (copyFileIfChanged(src, dst)) result.installed += 1;
     }
   } catch (err) {
     const msg = `Failed to copy commands: ${
@@ -176,7 +265,9 @@ export async function installBundledHarness(): Promise<InstallResult> {
       if (!entry.name.startsWith("tf-")) continue;
       const src = path.join(source.skills, entry.name);
       const dst = path.join(userSkillsDir, entry.name);
-      result.installed += copyDirRecursive(src, dst);
+      const r = copyDirRecursive(src, dst);
+      totalSeen += r.seen;
+      result.installed += r.copied;
     }
   } catch (err) {
     const msg = `Failed to copy skills: ${
@@ -194,17 +285,23 @@ export async function installBundledHarness(): Promise<InstallResult> {
   // (typically taskforce MCP for cross-app TaskForce access) — clobbering
   // those configs would conflict with that workflow.
 
-  // Write the version marker only if at least something installed.
-  if (result.installed > 0 && result.errors.length === 0) {
+  // Write the content hash marker once the install completed cleanly and
+  // there was actual bundle content. We gate on totalSeen (not installed)
+  // so that a re-copy whose files are already byte-identical still
+  // refreshes the marker and avoids re-checking on every future launch.
+  if (totalSeen > 0 && result.errors.length === 0) {
     try {
       fs.writeFileSync(markerPath, targetMarker, "utf-8");
     } catch (err) {
-      console.warn("[BundleInstaller] Could not write version marker:", err);
+      console.warn(
+        "[BundleInstaller] Could not write content hash marker:",
+        err
+      );
     }
   }
 
   console.log(
-    `[BundleInstaller] Installed ${result.installed} files, skipped ${result.skipped}, errors ${result.errors.length}`,
+    `[BundleInstaller] Installed ${result.installed} changed files (${totalSeen} bundled), skipped ${result.skipped}, errors ${result.errors.length}`
   );
   return result;
 }
