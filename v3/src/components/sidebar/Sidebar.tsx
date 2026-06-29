@@ -3,6 +3,7 @@ import { FileTree } from "./FileTree";
 import { CommandPanel } from "./CommandPanel";
 import { ProjectChat } from "../chat/ProjectChat";
 import { useChatStore } from "../../stores/chatStore";
+import { useTranslation } from "../../lib/i18n";
 
 type SidebarPanel = "files" | "commands" | "chat";
 
@@ -28,6 +29,7 @@ export function Sidebar({
   const isResizing = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const unreadCount = useChatStore((s) => s.unreadCount);
+  const { t } = useTranslation();
 
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -64,7 +66,7 @@ export function Sidebar({
       <button
         onClick={onToggle}
         className="flex h-full w-10 flex-col items-center border-r border-gray-700 bg-gray-800 pt-2 hover:bg-gray-750"
-        title="사이드바 열기"
+        title={t("sidebar.open")}
       >
         <svg
           className="h-5 w-5 text-gray-400"
@@ -103,7 +105,7 @@ export function Sidebar({
                 : "text-gray-500 hover:text-gray-400"
             }`}
           >
-            파일
+            {t("sidebar.tab.files")}
           </button>
           <button
             onClick={() => setActivePanel("commands")}
@@ -113,7 +115,7 @@ export function Sidebar({
                 : "text-gray-500 hover:text-gray-400"
             }`}
           >
-            명령어
+            {t("sidebar.tab.commands")}
           </button>
           <button
             onClick={() => {
@@ -126,7 +128,7 @@ export function Sidebar({
                 : "text-gray-500 hover:text-gray-400"
             }`}
           >
-            채팅
+            {t("sidebar.tab.chat")}
             {unreadCount > 0 && activePanel !== "chat" && (
               <span className="absolute -top-0.5 right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
                 {unreadCount > 99 ? "99+" : unreadCount}
@@ -136,7 +138,7 @@ export function Sidebar({
           <button
             onClick={onToggle}
             className="rounded p-0.5 mx-1 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
-            title="사이드바 닫기"
+            title={t("sidebar.close")}
           >
             <svg
               className="h-4 w-4"

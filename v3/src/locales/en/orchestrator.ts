@@ -47,4 +47,39 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.cmd.tf-done.desc": "Finish project + archive",
   "orchestrator.cmd.tf-ralph.desc": "Batch the same task N times",
   "orchestrator.cmd.tf-guide.desc": "Command guide",
+
+  // OrchestratorChat (AI task-breakdown dialog) — UI shell only; projectName /
+  // error.message are runtime data passed in as placeholders.
+  "orchestrator.chat.decomposed":
+    'Broke "{project}" into {count} tasks. They can run in parallel across {layers} layers.',
+  "orchestrator.chat.error": "An error occurred: {error}. Please try again.",
+  "orchestrator.chat.unknownError": "Unknown error",
+  "orchestrator.chat.created": "Created {count} tasks on the kanban board!",
+  "orchestrator.chat.createError": "Error while creating tasks: {error}",
+  "orchestrator.chat.emptyTitle":
+    "Describe your project requirements in plain language",
+  "orchestrator.chat.emptySubtitle":
+    "AI breaks them into tasks and builds a dependency graph",
+  "orchestrator.chat.decomposing": "Breaking down tasks...",
+  "orchestrator.chat.inputPlaceholder":
+    "Describe your project requirements... (Shift+Enter for a new line)",
+
+  // DecompositionResult — summary stat labels
+  "orchestrator.decomp.title": "Breakdown",
+  "orchestrator.decomp.tasks": "Tasks",
+  "orchestrator.decomp.layers": "Layers",
+  "orchestrator.decomp.dependencies": "Dependencies",
+  "orchestrator.decomp.estHours": "Est. time",
+
+  // TaskPreview — editable preview chrome (task title/description are data)
+  "orchestrator.preview.newTaskTitle": "New task",
+  "orchestrator.preview.execLayers": "Execution layers (DAG)",
+  "orchestrator.preview.descPlaceholder": "Description...",
+  "orchestrator.preview.done": "Done",
+  "orchestrator.preview.edit": "Edit",
+  "orchestrator.preview.delete": "Delete",
+  "orchestrator.preview.addTask": "+ Add task",
+  "orchestrator.preview.taskCount": "{count} tasks",
+  "orchestrator.preview.creating": "Creating...",
+  "orchestrator.preview.createOnBoard": "Create on board",
 };

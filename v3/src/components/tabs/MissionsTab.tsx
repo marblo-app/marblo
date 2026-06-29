@@ -14,6 +14,7 @@ import { MissionTemplateCatalog } from "../missions/MissionTemplateCatalog";
 import { MissionLaunchDialog } from "../missions/MissionLaunchDialog";
 import { MissionOrchestratorPanel } from "../missions/MissionOrchestratorPanel";
 import { instantiateTemplateSteps } from "../missions/templates";
+import { useTranslation } from "../../lib/i18n";
 
 // Step 5 wiring 전 단계:
 //   - LaunchDialog → missionService.createMission(status='planning')
@@ -26,6 +27,7 @@ function isTerminalStatus(s: Mission["status"]): boolean {
 }
 
 export function MissionsTab() {
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const projectId = currentProject?.id;
   const [missions, setMissions] = useState<Mission[]>([]);
@@ -43,7 +45,7 @@ export function MissionsTab() {
     }
     const unsubscribe = missionService.subscribeToMissions(
       projectId,
-      setMissions,
+      setMissions
     );
     return () => unsubscribe();
   }, [projectId]);
@@ -65,7 +67,7 @@ export function MissionsTab() {
     }
 
     const current = selectedId
-      ? (missions.find((m) => m.id === selectedId) ?? null)
+      ? missions.find((m) => m.id === selectedId) ?? null
       : null;
 
     // current 가 살아있고 non-terminal 이면 유지.
@@ -75,7 +77,7 @@ export function MissionsTab() {
     const nonTerminal = missions.find((m) => !isTerminalStatus(m.status));
     const candidate =
       missions.find(
-        (m) => m.status === "waiting_for_human" || m.status === "active",
+        (m) => m.status === "waiting_for_human" || m.status === "active"
       ) ?? nonTerminal;
 
     setSelectedId(candidate?.id ?? null);
@@ -90,16 +92,16 @@ export function MissionsTab() {
   if (!projectId) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-gray-400">
-        프로젝트를 선택하면 미션을 시작할 수 있습니다.
+        {t("missions.tab.noProject")}
       </div>
     );
   }
 
   const active = missions.filter(
-    (m) => m.status !== "completed" && m.status !== "abandoned",
+    (m) => m.status !== "completed" && m.status !== "abandoned"
   );
   const archive = missions.filter(
-    (m) => m.status === "completed" || m.status === "abandoned",
+    (m) => m.status === "completed" || m.status === "abandoned"
   );
   const selected = missions.find((m) => m.id === selectedId) ?? null;
   // 미션 오케스트레이터 패널이 종속될 미션. 선택 미션이 터미널(완료/포기)이면
@@ -169,7 +171,7 @@ export function MissionsTab() {
     if (projectId) {
       window.electronAPI?.missionOrchestrator?.stopForMission(
         projectId,
-        missionId,
+        missionId
       );
     }
     // 대표 보드 카드도 FAILED 로 동기화(있을 때만). 메타카드라 상태머신을 우회해
@@ -249,7 +251,7 @@ export function MissionsTab() {
     if (projectId) {
       window.electronAPI?.missionOrchestrator?.stopForMission(
         projectId,
-        missionId,
+        missionId
       );
     }
     // 대표 보드 카드도 함께 삭제 — 안 그러면 보드에 고아 카드가 남는다. best-effort.
@@ -266,9 +268,7 @@ export function MissionsTab() {
   const handleClearArchive = async () => {
     if (archive.length === 0) return;
     if (
-      !confirm(
-        `아카이브된 미션 ${archive.length}개를 모두 영구 삭제할까요? 되돌릴 수 없습니다.`,
-      )
+      !confirm(t("missions.tab.clearArchiveConfirm", { count: archive.length }))
     ) {
       return;
     }
@@ -279,7 +279,7 @@ export function MissionsTab() {
       .filter((c): c is string => !!c);
     await Promise.all(ids.map((id) => missionService.deleteMission(id)));
     await Promise.all(
-      cardIds.map((c) => taskService.deleteTask(c).catch(() => {})),
+      cardIds.map((c) => taskService.deleteTask(c).catch(() => {}))
     );
     if (selectedId && ids.includes(selectedId)) setSelectedId(null);
     if (userPickedId && ids.includes(userPickedId)) setUserPickedId(null);
@@ -319,9 +319,9 @@ export function MissionsTab() {
                   type="button"
                   onClick={handleClearArchive}
                   className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 transition-colors hover:bg-red-500/15 hover:text-red-400"
-                  title="아카이브된 미션 전체 영구 삭제"
+                  title={t("missions.tab.clearArchiveTitle")}
                 >
-                  🗑️ 전체 삭제
+                  {t("missions.tab.clearArchive")}
                 </button>
               </div>
               <MissionList
@@ -349,9 +349,11 @@ export function MissionsTab() {
             />
           ) : (
             <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
-              <p className="text-sm text-gray-300">선택된 미션이 없습니다.</p>
+              <p className="text-sm text-gray-300">
+                {t("missions.tab.noSelection")}
+              </p>
               <p className="mt-1 text-xs text-gray-500">
-                아래에서 템플릿을 골라 새 미션을 시작하세요.
+                {t("missions.tab.noSelectionHint")}
               </p>
             </div>
           )}
@@ -359,10 +361,10 @@ export function MissionsTab() {
           <section>
             <div className="mb-3 flex items-baseline justify-between">
               <h2 className="text-sm font-semibold text-gray-200">
-                새 미션 시작
+                {t("missions.tab.newMissionHeading")}
               </h2>
               <p className="text-xs text-gray-500">
-                템플릿을 누르면 한 줄 목표를 입력하는 화면이 뜹니다.
+                {t("missions.tab.newMissionHint")}
               </p>
             </div>
             <MissionTemplateCatalog

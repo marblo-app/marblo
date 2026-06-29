@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useTaskStore } from "../../stores/taskStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useTranslation } from "../../lib/i18n";
 import { TaskPreview } from "./TaskPreview";
 import { DecompositionResult } from "./DecompositionResult";
 
@@ -20,6 +21,7 @@ interface OrchestratorChatProps {
 }
 
 export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
+  const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const createTask = useTaskStore((s) => s.createTask);
 
@@ -85,7 +87,11 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
         ...prev,
         {
           role: "assistant",
-          content: `"${result.projectName}" 프로젝트를 ${result.tasks.length}개 태스크로 분해했습니다. ${layers.length}개 레이어로 병렬 실행 가능합니다.`,
+          content: t("orchestrator.chat.decomposed", {
+            project: result.projectName,
+            count: result.tasks.length,
+            layers: layers.length,
+          }),
           result: {
             projectName: result.projectName,
             tasks: result.tasks,
@@ -99,9 +105,12 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
         ...prev,
         {
           role: "assistant",
-          content: `오류가 발생했습니다: ${
-            err instanceof Error ? err.message : "알 수 없는 오류"
-          }. 다시 시도해주세요.`,
+          content: t("orchestrator.chat.error", {
+            error:
+              err instanceof Error
+                ? err.message
+                : t("orchestrator.chat.unknownError"),
+          }),
         },
       ]);
     } finally {
@@ -138,7 +147,9 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
         ...prev,
         {
           role: "assistant",
-          content: `${editableTasks.length}개 태스크가 칸반 보드에 생성되었습니다!`,
+          content: t("orchestrator.chat.created", {
+            count: editableTasks.length,
+          }),
         },
       ]);
       setEditableTasks(null);
@@ -148,9 +159,12 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
         ...prev,
         {
           role: "assistant",
-          content: `태스크 생성 중 오류: ${
-            err instanceof Error ? err.message : "알 수 없는 오류"
-          }`,
+          content: t("orchestrator.chat.createError", {
+            error:
+              err instanceof Error
+                ? err.message
+                : t("orchestrator.chat.unknownError"),
+          }),
         },
       ]);
     } finally {
@@ -200,7 +214,9 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
                 d="M13 10V3L4 14h7v7l9-11h-7z"
               />
             </svg>
-            <h2 className="text-sm font-semibold text-white">AI 태스크 분해</h2>
+            <h2 className="text-sm font-semibold text-white">
+              {t("orchestrator.aiDecompose")}
+            </h2>
           </div>
           <button
             onClick={onClose}
@@ -245,10 +261,10 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
                   />
                 </svg>
                 <p className="mt-3 text-sm text-gray-400">
-                  프로젝트 요구사항을 자연어로 입력하세요
+                  {t("orchestrator.chat.emptyTitle")}
                 </p>
                 <p className="mt-1 text-xs text-gray-600">
-                  AI가 태스크를 분해하고 의존성 그래프를 생성합니다
+                  {t("orchestrator.chat.emptySubtitle")}
                 </p>
               </div>
             </div>
@@ -290,7 +306,7 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
                 <div className="flex items-center gap-2">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-600 border-t-blue-400" />
                   <span className="text-sm text-gray-400">
-                    태스크를 분해하고 있습니다...
+                    {t("orchestrator.chat.decomposing")}
                   </span>
                 </div>
               </div>
@@ -319,7 +335,7 @@ export function OrchestratorChat({ onClose }: OrchestratorChatProps) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="프로젝트 요구사항을 입력하세요... (Shift+Enter로 줄바꿈)"
+              placeholder={t("orchestrator.chat.inputPlaceholder")}
               rows={2}
               className="flex-1 resize-none rounded-lg border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
               disabled={loading}

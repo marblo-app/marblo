@@ -45,6 +45,19 @@ export const missions: Record<keyof typeof koMissions, string> = {
   "missions.list.abandonTitle": "Abandon mission (stop and archive)",
   "missions.list.deleteTitle": "Delete mission (permanent)",
 
+  // tab (MissionsTab shell)
+  "missions.tab.noProject": "Select a project to start a mission.",
+  "missions.tab.clearArchiveTitle": "Permanently delete all archived missions",
+  "missions.tab.clearArchive": "🗑️ Delete all",
+  "missions.tab.clearArchiveConfirm":
+    "Permanently delete all {count} archived missions? This can't be undone.",
+  "missions.tab.noSelection": "No mission selected.",
+  "missions.tab.noSelectionHint":
+    "Pick a template below to start a new mission.",
+  "missions.tab.newMissionHeading": "Start a new mission",
+  "missions.tab.newMissionHint":
+    "Tap a template to open the one-line goal screen.",
+
   // relative time (list)
   "missions.time.justNow": "just now",
   "missions.time.secondsAgo": "{count}s ago",

@@ -62,4 +62,15 @@ export const sidebar = {
   "sidebar.tree.loading": "로딩 중...",
   // Confirm dialog
   "sidebar.tree.confirm": "확인",
+
+  // Sidebar shell (toggle + panel tabs)
+  "sidebar.open": "사이드바 열기",
+  "sidebar.close": "사이드바 닫기",
+  "sidebar.tab.files": "파일",
+  "sidebar.tab.commands": "명령어",
+  "sidebar.tab.chat": "채팅",
+
+  // TabBar — pop-out affordance (tab labels themselves stay English)
+  "sidebar.tab.popOut": "별도 창으로 열기",
+  "sidebar.tab.popOutLabel": "{name} 별도 창으로 열기",
 };

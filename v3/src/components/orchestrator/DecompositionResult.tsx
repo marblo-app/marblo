@@ -1,8 +1,10 @@
+import { useTranslation } from "../../lib/i18n";
+
 const ROLE_COLORS: Record<string, string> = {
-  backend: 'text-green-400',
-  frontend: 'text-blue-400',
-  test: 'text-yellow-400',
-  devops: 'text-purple-400',
+  backend: "text-green-400",
+  frontend: "text-blue-400",
+  test: "text-yellow-400",
+  devops: "text-purple-400",
 };
 
 interface DecompositionResultProps {
@@ -12,45 +14,64 @@ interface DecompositionResultProps {
   layers: number[][];
 }
 
-export function DecompositionResult({ projectName, tasks, dag, layers }: DecompositionResultProps) {
+export function DecompositionResult({
+  projectName,
+  tasks,
+  dag,
+  layers,
+}: DecompositionResultProps) {
+  const { t } = useTranslation();
   // Count roles
   const roleCounts: Record<string, number> = {};
-  for (const t of tasks) {
-    roleCounts[t.role] = (roleCounts[t.role] || 0) + 1;
+  for (const task of tasks) {
+    roleCounts[task.role] = (roleCounts[task.role] || 0) + 1;
   }
 
-  const totalHours = tasks.reduce((sum, t) => sum + t.estimatedHours, 0);
+  const totalHours = tasks.reduce((sum, task) => sum + task.estimatedHours, 0);
 
   return (
     <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4">
       <div className="flex items-center justify-between mb-3">
-        <h4 className="text-sm font-medium text-gray-200">분해 결과</h4>
+        <h4 className="text-sm font-medium text-gray-200">
+          {t("orchestrator.decomp.title")}
+        </h4>
         <span className="text-xs text-gray-500">{projectName}</span>
       </div>
 
       <div className="grid grid-cols-4 gap-3 text-center">
         <div>
           <p className="text-2xl font-bold text-white">{tasks.length}</p>
-          <p className="text-[10px] text-gray-500">태스크</p>
+          <p className="text-[10px] text-gray-500">
+            {t("orchestrator.decomp.tasks")}
+          </p>
         </div>
         <div>
           <p className="text-2xl font-bold text-white">{layers.length}</p>
-          <p className="text-[10px] text-gray-500">레이어</p>
+          <p className="text-[10px] text-gray-500">
+            {t("orchestrator.decomp.layers")}
+          </p>
         </div>
         <div>
           <p className="text-2xl font-bold text-white">{dag.edges.length}</p>
-          <p className="text-[10px] text-gray-500">의존성</p>
+          <p className="text-[10px] text-gray-500">
+            {t("orchestrator.decomp.dependencies")}
+          </p>
         </div>
         <div>
           <p className="text-2xl font-bold text-white">{totalHours}h</p>
-          <p className="text-[10px] text-gray-500">예상 시간</p>
+          <p className="text-[10px] text-gray-500">
+            {t("orchestrator.decomp.estHours")}
+          </p>
         </div>
       </div>
 
       {/* Role breakdown */}
       <div className="mt-3 flex items-center gap-3">
         {Object.entries(roleCounts).map(([role, count]) => (
-          <span key={role} className={`text-xs ${ROLE_COLORS[role] || 'text-gray-400'}`}>
+          <span
+            key={role}
+            className={`text-xs ${ROLE_COLORS[role] || "text-gray-400"}`}
+          >
             {role}: {count}
           </span>
         ))}

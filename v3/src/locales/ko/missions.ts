@@ -47,6 +47,19 @@ export const missions = {
   "missions.list.abandonTitle": "Abandon mission (정지 후 아카이브)",
   "missions.list.deleteTitle": "Delete mission (영구 삭제)",
 
+  // tab (MissionsTab shell)
+  "missions.tab.noProject": "프로젝트를 선택하면 미션을 시작할 수 있습니다.",
+  "missions.tab.clearArchiveTitle": "아카이브된 미션 전체 영구 삭제",
+  "missions.tab.clearArchive": "🗑️ 전체 삭제",
+  "missions.tab.clearArchiveConfirm":
+    "아카이브된 미션 {count}개를 모두 영구 삭제할까요? 되돌릴 수 없습니다.",
+  "missions.tab.noSelection": "선택된 미션이 없습니다.",
+  "missions.tab.noSelectionHint":
+    "아래에서 템플릿을 골라 새 미션을 시작하세요.",
+  "missions.tab.newMissionHeading": "새 미션 시작",
+  "missions.tab.newMissionHint":
+    "템플릿을 누르면 한 줄 목표를 입력하는 화면이 뜹니다.",
+
   // relative time (list)
   "missions.time.justNow": "방금",
   "missions.time.secondsAgo": "{count}초 전",

@@ -47,4 +47,38 @@ export const orchestrator = {
   "orchestrator.cmd.tf-done.desc": "프로젝트 완료 + 아카이브",
   "orchestrator.cmd.tf-ralph.desc": "같은 작업 N개 일괄 처리",
   "orchestrator.cmd.tf-guide.desc": "명령어 가이드",
+
+  // OrchestratorChat (AI task-breakdown dialog) — UI shell only; projectName /
+  // error.message are runtime data passed in as placeholders.
+  "orchestrator.chat.decomposed":
+    '"{project}" 프로젝트를 {count}개 태스크로 분해했습니다. {layers}개 레이어로 병렬 실행 가능합니다.',
+  "orchestrator.chat.error": "오류가 발생했습니다: {error}. 다시 시도해주세요.",
+  "orchestrator.chat.unknownError": "알 수 없는 오류",
+  "orchestrator.chat.created": "{count}개 태스크가 칸반 보드에 생성되었습니다!",
+  "orchestrator.chat.createError": "태스크 생성 중 오류: {error}",
+  "orchestrator.chat.emptyTitle": "프로젝트 요구사항을 자연어로 입력하세요",
+  "orchestrator.chat.emptySubtitle":
+    "AI가 태스크를 분해하고 의존성 그래프를 생성합니다",
+  "orchestrator.chat.decomposing": "태스크를 분해하고 있습니다...",
+  "orchestrator.chat.inputPlaceholder":
+    "프로젝트 요구사항을 입력하세요... (Shift+Enter로 줄바꿈)",
+
+  // DecompositionResult — summary stat labels
+  "orchestrator.decomp.title": "분해 결과",
+  "orchestrator.decomp.tasks": "태스크",
+  "orchestrator.decomp.layers": "레이어",
+  "orchestrator.decomp.dependencies": "의존성",
+  "orchestrator.decomp.estHours": "예상 시간",
+
+  // TaskPreview — editable preview chrome (task title/description are data)
+  "orchestrator.preview.newTaskTitle": "새 태스크",
+  "orchestrator.preview.execLayers": "실행 레이어 (DAG)",
+  "orchestrator.preview.descPlaceholder": "설명...",
+  "orchestrator.preview.done": "완료",
+  "orchestrator.preview.edit": "편집",
+  "orchestrator.preview.delete": "삭제",
+  "orchestrator.preview.addTask": "+ 태스크 추가",
+  "orchestrator.preview.taskCount": "{count}개 태스크",
+  "orchestrator.preview.creating": "생성 중...",
+  "orchestrator.preview.createOnBoard": "칸반에 생성",
 };

@@ -65,4 +65,15 @@ export const sidebar: Record<keyof typeof koSidebar, string> = {
   "sidebar.tree.loading": "Loading...",
   // Confirm dialog
   "sidebar.tree.confirm": "OK",
+
+  // Sidebar shell (toggle + panel tabs)
+  "sidebar.open": "Open sidebar",
+  "sidebar.close": "Close sidebar",
+  "sidebar.tab.files": "Files",
+  "sidebar.tab.commands": "Commands",
+  "sidebar.tab.chat": "Chat",
+
+  // TabBar — pop-out affordance (tab labels themselves stay English)
+  "sidebar.tab.popOut": "Open in a separate window",
+  "sidebar.tab.popOutLabel": "Open {name} in a separate window",
 };

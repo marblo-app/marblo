@@ -1,3 +1,5 @@
+import { useTranslation } from "../lib/i18n";
+
 export type TabId =
   | "guide"
   | "board"
@@ -295,6 +297,7 @@ const devFeatures = (import.meta.env.VITE_DEV_FEATURES || "")
   .map((s: string) => s.trim());
 
 export function TabBar({ activeTab, onTabChange, onPopOut }: TabBarProps) {
+  const { t } = useTranslation();
   const visibleTabs = tabs.filter((tab) => {
     if (!DEV_ONLY_TABS.has(tab.id)) return true;
     return devFeatures.includes(tab.id);
@@ -333,8 +336,8 @@ export function TabBar({ activeTab, onTabChange, onPopOut }: TabBarProps) {
               <span
                 role="button"
                 tabIndex={-1}
-                title="별도 창으로 열기"
-                aria-label={`${tab.label} 별도 창으로 열기`}
+                title={t("sidebar.tab.popOut")}
+                aria-label={t("sidebar.tab.popOutLabel", { name: tab.label })}
                 onClick={(e) => {
                   e.stopPropagation();
                   onPopOut(tab.id as "board" | "code");

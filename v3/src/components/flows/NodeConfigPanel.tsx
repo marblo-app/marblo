@@ -1,7 +1,9 @@
-import { useCallback } from 'react';
-import type { FlowNode, NodeType } from '../../types/flow';
-import { useAgentStore } from '../../stores/agentStore';
-import { useProjectStore } from '../../stores/projectStore';
+import { useCallback } from "react";
+import type { FlowNode, NodeType } from "../../types/flow";
+import { useAgentStore } from "../../stores/agentStore";
+import { useProjectStore } from "../../stores/projectStore";
+import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 
 interface NodeConfigPanelProps {
   node: FlowNode;
@@ -75,20 +77,27 @@ interface IntegrationNodeConfig {
   apiToken?: string;
 }
 
-const TYPE_COLORS: Record<NodeType, { accent: string; label: string; icon: string }> = {
-  input:       { accent: 'bg-green-500',   label: 'text-green-400',   icon: '📥' },
-  llm:         { accent: 'bg-purple-500',  label: 'text-purple-400',  icon: '🧠' },
-  agent:       { accent: 'bg-blue-500',    label: 'text-blue-400',    icon: '🤖' },
-  code:        { accent: 'bg-emerald-500', label: 'text-emerald-400', icon: '💻' },
-  api:         { accent: 'bg-orange-500',  label: 'text-orange-400',  icon: '🌐' },
-  integration: { accent: 'bg-rose-500',    label: 'text-rose-400',    icon: '🔗' },
-  human:       { accent: 'bg-yellow-500',  label: 'text-yellow-400',  icon: '👤' },
-  branch:      { accent: 'bg-cyan-500',    label: 'text-cyan-400',    icon: '🔀' },
-  output:      { accent: 'bg-pink-500',    label: 'text-pink-400',    icon: '📤' },
+const TYPE_COLORS: Record<
+  NodeType,
+  { accent: string; label: string; icon: string }
+> = {
+  input: { accent: "bg-green-500", label: "text-green-400", icon: "📥" },
+  llm: { accent: "bg-purple-500", label: "text-purple-400", icon: "🧠" },
+  agent: { accent: "bg-blue-500", label: "text-blue-400", icon: "🤖" },
+  code: { accent: "bg-emerald-500", label: "text-emerald-400", icon: "💻" },
+  api: { accent: "bg-orange-500", label: "text-orange-400", icon: "🌐" },
+  integration: { accent: "bg-rose-500", label: "text-rose-400", icon: "🔗" },
+  human: { accent: "bg-yellow-500", label: "text-yellow-400", icon: "👤" },
+  branch: { accent: "bg-cyan-500", label: "text-cyan-400", icon: "🔀" },
+  output: { accent: "bg-pink-500", label: "text-pink-400", icon: "📤" },
 };
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <label className="block text-[11px] font-medium text-gray-400 mb-1">{children}</label>;
+  return (
+    <label className="block text-[11px] font-medium text-gray-400 mb-1">
+      {children}
+    </label>
+  );
 }
 
 function TextInput({
@@ -197,27 +206,27 @@ function InputConfig({
       <div>
         <FieldLabel>Variable Name</FieldLabel>
         <TextInput
-          value={config.variableName || ''}
-          onChange={(v) => update('variableName', v)}
+          value={config.variableName || ""}
+          onChange={(v) => update("variableName", v)}
           placeholder="input"
         />
       </div>
       <div>
         <FieldLabel>Input Type</FieldLabel>
         <SelectInput
-          value={config.inputType || 'text'}
-          onChange={(v) => update('inputType', v)}
+          value={config.inputType || "text"}
+          onChange={(v) => update("inputType", v)}
           options={[
-            { value: 'text', label: 'Text' },
-            { value: 'file', label: 'File' },
+            { value: "text", label: "Text" },
+            { value: "file", label: "File" },
           ]}
         />
       </div>
       <div>
         <FieldLabel>Default Value</FieldLabel>
         <TextArea
-          value={config.defaultValue || ''}
-          onChange={(v) => update('defaultValue', v)}
+          value={config.defaultValue || ""}
+          onChange={(v) => update("defaultValue", v)}
           placeholder="Default input value..."
         />
       </div>
@@ -226,21 +235,30 @@ function InputConfig({
 }
 
 const LLM_MODEL_OPTIONS = [
-  { group: 'Anthropic', options: [
-    { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-    { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
-  ]},
-  { group: 'OpenAI', options: [
-    { value: 'gpt-4o', label: 'GPT-4o' },
-    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-    { value: 'o3', label: 'o3' },
-    { value: 'o4-mini', label: 'o4-mini' },
-  ]},
-  { group: 'Google', options: [
-    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  ]},
+  {
+    group: "Anthropic",
+    options: [
+      { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
+      { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+      { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+    ],
+  },
+  {
+    group: "OpenAI",
+    options: [
+      { value: "gpt-4o", label: "GPT-4o" },
+      { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+      { value: "o3", label: "o3" },
+      { value: "o4-mini", label: "o4-mini" },
+    ],
+  },
+  {
+    group: "Google",
+    options: [
+      { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+      { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    ],
+  },
 ];
 
 function GroupedSelect({
@@ -261,7 +279,9 @@ function GroupedSelect({
       {groups.map((g) => (
         <optgroup key={g.group} label={g.group}>
           {g.options.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
           ))}
         </optgroup>
       ))}
@@ -282,16 +302,16 @@ function LLMConfig({
       <div>
         <FieldLabel>Model</FieldLabel>
         <GroupedSelect
-          value={config.model || 'claude-opus-4-6'}
-          onChange={(v) => update('model', v)}
+          value={config.model || "claude-opus-4-6"}
+          onChange={(v) => update("model", v)}
           groups={LLM_MODEL_OPTIONS}
         />
       </div>
       <div>
         <FieldLabel>Prompt</FieldLabel>
         <TextArea
-          value={config.prompt || ''}
-          onChange={(v) => update('prompt', v)}
+          value={config.prompt || ""}
+          onChange={(v) => update("prompt", v)}
           placeholder="Enter your prompt..."
           rows={4}
         />
@@ -304,7 +324,7 @@ function LLMConfig({
           max={1}
           step={0.05}
           value={temperature}
-          onChange={(e) => update('temperature', Number(e.target.value))}
+          onChange={(e) => update("temperature", Number(e.target.value))}
           className="w-full accent-purple-500"
         />
         <div className="flex justify-between text-[10px] text-gray-500 mt-0.5">
@@ -316,7 +336,7 @@ function LLMConfig({
         <FieldLabel>Max Tokens</FieldLabel>
         <NumberInput
           value={config.maxTokens || 4096}
-          onChange={(v) => update('maxTokens', v)}
+          onChange={(v) => update("maxTokens", v)}
           min={1}
           max={200000}
           step={256}
@@ -333,14 +353,17 @@ function AgentConfig({
   config: AgentNodeConfig;
   update: ConfigUpdate;
 }) {
+  const { t } = useTranslation();
   const agents = useAgentStore((s) => s.agents);
   const currentProject = useProjectStore((s) => s.currentProject);
-  const projectAgents = agents.filter((a) => !currentProject || a.projectId === currentProject.id);
+  const projectAgents = agents.filter(
+    (a) => !currentProject || a.projectId === currentProject.id
+  );
 
-  const connectionMode = config.connectionMode || 'auto';
+  const connectionMode = config.connectionMode || "auto";
 
   const agentOptions = [
-    { value: '', label: '-- 선택 --' },
+    { value: "", label: t("flows.config.selectPlaceholder") },
     ...projectAgents.map((a) => ({
       value: a.id,
       label: `${a.name} (${a.model} · ${a.role})`,
@@ -350,35 +373,35 @@ function AgentConfig({
   return (
     <>
       <div>
-        <FieldLabel>연결 모드</FieldLabel>
+        <FieldLabel>{t("flows.config.connectionMode")}</FieldLabel>
         <SelectInput
           value={connectionMode}
-          onChange={(v) => update('connectionMode', v)}
+          onChange={(v) => update("connectionMode", v)}
           options={[
-            { value: 'existing', label: '기존 세션 연결' },
-            { value: 'auto', label: '자동 스폰 (새 에이전트)' },
+            { value: "existing", label: t("flows.config.mode.existing") },
+            { value: "auto", label: t("flows.config.mode.auto") },
           ]}
         />
         <p className="text-[10px] text-gray-500 mt-1">
-          {connectionMode === 'existing'
-            ? 'Agents 탭에서 실행 중인 세션에 연결합니다'
-            : '플로우 실행 시 새 에이전트를 자동으로 스폰합니다'}
+          {connectionMode === "existing"
+            ? t("flows.config.mode.existingHint")
+            : t("flows.config.mode.autoHint")}
         </p>
       </div>
 
-      {connectionMode === 'existing' ? (
+      {connectionMode === "existing" ? (
         <div>
-          <FieldLabel>에이전트 세션 선택</FieldLabel>
+          <FieldLabel>{t("flows.config.selectAgentSession")}</FieldLabel>
           <SelectInput
-            value={config.agentId || ''}
+            value={config.agentId || ""}
             onChange={(v) => {
-              update('agentId', v);
+              update("agentId", v);
               if (v) {
                 const agent = projectAgents.find((a) => a.id === v);
                 if (agent) {
-                  update('agentName', agent.name);
-                  update('model', agent.model);
-                  update('role', agent.role);
+                  update("agentName", agent.name);
+                  update("model", agent.model);
+                  update("role", agent.role);
                 }
               }
             }}
@@ -386,43 +409,43 @@ function AgentConfig({
           />
           {projectAgents.length === 0 && (
             <p className="text-[10px] text-yellow-500 mt-1">
-              실행 중인 에이전트가 없습니다. Agents 탭에서 먼저 스폰하세요.
+              {t("flows.config.noRunningAgents")}
             </p>
           )}
         </div>
       ) : (
         <>
           <div>
-            <FieldLabel>에이전트 이름</FieldLabel>
+            <FieldLabel>{t("flows.config.agentName")}</FieldLabel>
             <TextInput
-              value={config.agentName || ''}
-              onChange={(v) => update('agentName', v)}
+              value={config.agentName || ""}
+              onChange={(v) => update("agentName", v)}
               placeholder="e.g. backend-api"
             />
           </div>
           <div>
             <FieldLabel>Role</FieldLabel>
             <SelectInput
-              value={config.role || 'backend'}
-              onChange={(v) => update('role', v)}
+              value={config.role || "backend"}
+              onChange={(v) => update("role", v)}
               options={[
-                { value: 'backend', label: 'Backend' },
-                { value: 'frontend', label: 'Frontend' },
-                { value: 'test', label: 'Test' },
-                { value: 'devops', label: 'DevOps' },
+                { value: "backend", label: "Backend" },
+                { value: "frontend", label: "Frontend" },
+                { value: "test", label: "Test" },
+                { value: "devops", label: "DevOps" },
               ]}
             />
           </div>
           <div>
             <FieldLabel>Model</FieldLabel>
             <SelectInput
-              value={config.model || 'claude'}
-              onChange={(v) => update('model', v)}
+              value={config.model || "claude"}
+              onChange={(v) => update("model", v)}
               options={[
-                { value: 'claude', label: 'Claude Code' },
-                { value: 'gemini', label: 'Gemini CLI' },
-                { value: 'gpt', label: 'GPT / Codex CLI' },
-                { value: 'custom', label: 'Custom' },
+                { value: "claude", label: "Claude Code" },
+                { value: "gemini", label: "Gemini CLI" },
+                { value: "gpt", label: "GPT / Codex CLI" },
+                { value: "custom", label: "Custom" },
               ]}
             />
           </div>
@@ -431,9 +454,9 @@ function AgentConfig({
       <div>
         <FieldLabel>Task Description</FieldLabel>
         <TextArea
-          value={config.taskDescription || ''}
-          onChange={(v) => update('taskDescription', v)}
-          placeholder="이 에이전트가 수행할 작업..."
+          value={config.taskDescription || ""}
+          onChange={(v) => update("taskDescription", v)}
+          placeholder={t("flows.config.taskPlaceholder")}
           rows={4}
         />
       </div>
@@ -441,7 +464,7 @@ function AgentConfig({
         <FieldLabel>Timeout (minutes)</FieldLabel>
         <NumberInput
           value={config.timeout || 30}
-          onChange={(v) => update('timeout', v)}
+          onChange={(v) => update("timeout", v)}
           min={1}
           max={1440}
         />
@@ -457,24 +480,26 @@ function APIConfig({
   config: APINodeConfig;
   update: ConfigUpdate;
 }) {
-  const method = config.method || 'GET';
+  const method = config.method || "GET";
   const headers: { key: string; value: string }[] = config.headers || [];
-  const showBody = method === 'POST' || method === 'PUT';
+  const showBody = method === "POST" || method === "PUT";
 
   const addHeader = () => {
-    update('headers', [...headers, { key: '', value: '' }]);
+    update("headers", [...headers, { key: "", value: "" }]);
   };
 
   const removeHeader = (index: number) => {
     update(
-      'headers',
-      headers.filter((_, i) => i !== index),
+      "headers",
+      headers.filter((_, i) => i !== index)
     );
   };
 
-  const updateHeader = (index: number, field: 'key' | 'value', val: string) => {
-    const updated = headers.map((h, i) => (i === index ? { ...h, [field]: val } : h));
-    update('headers', updated);
+  const updateHeader = (index: number, field: "key" | "value", val: string) => {
+    const updated = headers.map((h, i) =>
+      i === index ? { ...h, [field]: val } : h
+    );
+    update("headers", updated);
   };
 
   return (
@@ -483,20 +508,20 @@ function APIConfig({
         <FieldLabel>HTTP Method</FieldLabel>
         <SelectInput
           value={method}
-          onChange={(v) => update('method', v)}
+          onChange={(v) => update("method", v)}
           options={[
-            { value: 'GET', label: 'GET' },
-            { value: 'POST', label: 'POST' },
-            { value: 'PUT', label: 'PUT' },
-            { value: 'DELETE', label: 'DELETE' },
+            { value: "GET", label: "GET" },
+            { value: "POST", label: "POST" },
+            { value: "PUT", label: "PUT" },
+            { value: "DELETE", label: "DELETE" },
           ]}
         />
       </div>
       <div>
         <FieldLabel>URL</FieldLabel>
         <TextInput
-          value={config.url || ''}
-          onChange={(v) => update('url', v)}
+          value={config.url || ""}
+          onChange={(v) => update("url", v)}
           placeholder="https://api.example.com/..."
         />
       </div>
@@ -516,14 +541,14 @@ function APIConfig({
               <input
                 type="text"
                 value={h.key}
-                onChange={(e) => updateHeader(i, 'key', e.target.value)}
+                onChange={(e) => updateHeader(i, "key", e.target.value)}
                 placeholder="Key"
                 className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
               />
               <input
                 type="text"
                 value={h.value}
-                onChange={(e) => updateHeader(i, 'value', e.target.value)}
+                onChange={(e) => updateHeader(i, "value", e.target.value)}
                 placeholder="Value"
                 className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
               />
@@ -544,8 +569,8 @@ function APIConfig({
         <div>
           <FieldLabel>Body</FieldLabel>
           <TextArea
-            value={config.body || ''}
-            onChange={(v) => update('body', v)}
+            value={config.body || ""}
+            onChange={(v) => update("body", v)}
             placeholder='{"key": "value"}'
             rows={4}
           />
@@ -566,8 +591,8 @@ function HumanConfig({
     <div>
       <FieldLabel>Approval Message / Question</FieldLabel>
       <TextArea
-        value={config.message || ''}
-        onChange={(v) => update('message', v)}
+        value={config.message || ""}
+        onChange={(v) => update("message", v)}
         placeholder="Do you approve this result?"
         rows={3}
       />
@@ -586,8 +611,8 @@ function BranchConfig({
     <div>
       <FieldLabel>Condition Expression</FieldLabel>
       <TextArea
-        value={config.condition || ''}
-        onChange={(v) => update('condition', v)}
+        value={config.condition || ""}
+        onChange={(v) => update("condition", v)}
         placeholder="result.status === 'success'"
         rows={3}
       />
@@ -610,19 +635,19 @@ function OutputConfig({
       <div>
         <FieldLabel>Output Format</FieldLabel>
         <SelectInput
-          value={config.format || 'text'}
-          onChange={(v) => update('format', v)}
+          value={config.format || "text"}
+          onChange={(v) => update("format", v)}
           options={[
-            { value: 'text', label: 'Text' },
-            { value: 'json', label: 'JSON' },
-            { value: 'file', label: 'File' },
+            { value: "text", label: "Text" },
+            { value: "json", label: "JSON" },
+            { value: "file", label: "File" },
           ]}
         />
       </div>
       <div>
         <FieldLabel>Result Preview</FieldLabel>
         <div className="w-full bg-gray-900 border border-gray-600 rounded px-2.5 py-1.5 text-sm text-gray-400 font-mono min-h-[60px] max-h-[120px] overflow-auto">
-          {config.preview || 'No output yet'}
+          {config.preview || "No output yet"}
         </div>
       </div>
     </>
@@ -636,46 +661,55 @@ function CodeConfig({
   config: CodeNodeConfig;
   update: ConfigUpdate;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <div>
         <FieldLabel>Language</FieldLabel>
         <SelectInput
-          value={config.language || 'python'}
-          onChange={(v) => update('language', v)}
+          value={config.language || "python"}
+          onChange={(v) => update("language", v)}
           options={[
-            { value: 'python', label: 'Python' },
-            { value: 'shell', label: 'Shell (Bash)' },
-            { value: 'node', label: 'Node.js' },
-            { value: 'typescript', label: 'TypeScript (tsx)' },
+            { value: "python", label: "Python" },
+            { value: "shell", label: "Shell (Bash)" },
+            { value: "node", label: "Node.js" },
+            { value: "typescript", label: "TypeScript (tsx)" },
           ]}
         />
       </div>
       <div>
         <FieldLabel>Script</FieldLabel>
         <TextArea
-          value={config.script || ''}
-          onChange={(v) => update('script', v)}
-          placeholder={config.language === 'shell' ? '#!/bin/bash\necho "hello"' : config.language === 'node' ? 'const result = await fetch(...)' : 'import pandas as pd\ndf = pd.read_csv("data.csv")'}
+          value={config.script || ""}
+          onChange={(v) => update("script", v)}
+          placeholder={
+            config.language === "shell"
+              ? '#!/bin/bash\necho "hello"'
+              : config.language === "node"
+              ? "const result = await fetch(...)"
+              : 'import pandas as pd\ndf = pd.read_csv("data.csv")'
+          }
           rows={8}
         />
         <p className="text-[10px] text-gray-500 mt-1">
-          직접 실행할 코드를 작성하세요. 이전 노드 결과는 <code className="text-emerald-400">input</code> 변수로 접근합니다.
+          {t("flows.config.codeHint.pre")}
+          <code className="text-emerald-400">input</code>
+          {t("flows.config.codeHint.post")}
         </p>
       </div>
       <div>
         <FieldLabel>Working Directory</FieldLabel>
         <TextInput
-          value={config.cwd || ''}
-          onChange={(v) => update('cwd', v)}
-          placeholder="프로젝트 루트 (기본값)"
+          value={config.cwd || ""}
+          onChange={(v) => update("cwd", v)}
+          placeholder={t("flows.config.cwdPlaceholder")}
         />
       </div>
       <div>
         <FieldLabel>Timeout (seconds)</FieldLabel>
         <NumberInput
           value={config.timeout || 60}
-          onChange={(v) => update('timeout', v)}
+          onChange={(v) => update("timeout", v)}
           min={1}
           max={3600}
         />
@@ -683,8 +717,8 @@ function CodeConfig({
       <div>
         <FieldLabel>Environment Variables</FieldLabel>
         <TextArea
-          value={config.envVars || ''}
-          onChange={(v) => update('envVars', v)}
+          value={config.envVars || ""}
+          onChange={(v) => update("envVars", v)}
           placeholder="KEY=value&#10;API_KEY=xxx"
           rows={3}
         />
@@ -693,15 +727,42 @@ function CodeConfig({
   );
 }
 
-const INTEGRATION_ACTIONS: Record<string, { value: string; label: string }[]> = {
-  slack:    [{ value: 'send_message', label: '메시지 전송' }, { value: 'upload_file', label: '파일 업로드' }, { value: 'create_channel', label: '채널 생성' }],
-  notion:   [{ value: 'create_page', label: '페이지 생성' }, { value: 'update_page', label: '페이지 수정' }, { value: 'query_database', label: 'DB 쿼리' }],
-  telegram: [{ value: 'send_message', label: '메시지 전송' }, { value: 'send_photo', label: '이미지 전송' }],
-  sheets:   [{ value: 'read_range', label: '범위 읽기' }, { value: 'write_range', label: '범위 쓰기' }, { value: 'append_row', label: '행 추가' }],
-  github:   [{ value: 'create_issue', label: '이슈 생성' }, { value: 'create_pr', label: 'PR 생성' }, { value: 'add_comment', label: '코멘트 추가' }],
-  discord:  [{ value: 'send_message', label: '메시지 전송' }, { value: 'create_thread', label: '스레드 생성' }],
-  email:    [{ value: 'send_email', label: '이메일 전송' }],
-  webhook:  [{ value: 'trigger', label: '웹훅 트리거' }],
+// Action option `value` is the persisted identifier; `labelKey` resolves to a
+// display label via t() at render time so the option list reacts to locale.
+const INTEGRATION_ACTIONS: Record<
+  string,
+  { value: string; labelKey: MessageKey }[]
+> = {
+  slack: [
+    { value: "send_message", labelKey: "flows.action.send_message" },
+    { value: "upload_file", labelKey: "flows.action.upload_file" },
+    { value: "create_channel", labelKey: "flows.action.create_channel" },
+  ],
+  notion: [
+    { value: "create_page", labelKey: "flows.action.create_page" },
+    { value: "update_page", labelKey: "flows.action.update_page" },
+    { value: "query_database", labelKey: "flows.action.query_database" },
+  ],
+  telegram: [
+    { value: "send_message", labelKey: "flows.action.send_message" },
+    { value: "send_photo", labelKey: "flows.action.send_photo" },
+  ],
+  sheets: [
+    { value: "read_range", labelKey: "flows.action.read_range" },
+    { value: "write_range", labelKey: "flows.action.write_range" },
+    { value: "append_row", labelKey: "flows.action.append_row" },
+  ],
+  github: [
+    { value: "create_issue", labelKey: "flows.action.create_issue" },
+    { value: "create_pr", labelKey: "flows.action.create_pr" },
+    { value: "add_comment", labelKey: "flows.action.add_comment" },
+  ],
+  discord: [
+    { value: "send_message", labelKey: "flows.action.send_message" },
+    { value: "create_thread", labelKey: "flows.action.create_thread" },
+  ],
+  email: [{ value: "send_email", labelKey: "flows.action.send_email" }],
+  webhook: [{ value: "trigger", labelKey: "flows.action.trigger" }],
 };
 
 function IntegrationConfig({
@@ -711,8 +772,14 @@ function IntegrationConfig({
   config: IntegrationNodeConfig;
   update: ConfigUpdate;
 }) {
-  const service = config.service || 'slack';
-  const actions = INTEGRATION_ACTIONS[service] || INTEGRATION_ACTIONS.webhook;
+  const { t } = useTranslation();
+  const service = config.service || "slack";
+  const actionDefs =
+    INTEGRATION_ACTIONS[service] || INTEGRATION_ACTIONS.webhook;
+  const actions = actionDefs.map((a) => ({
+    value: a.value,
+    label: t(a.labelKey),
+  }));
 
   return (
     <>
@@ -721,85 +788,85 @@ function IntegrationConfig({
         <SelectInput
           value={service}
           onChange={(v) => {
-            update('service', v);
-            update('action', '');
+            update("service", v);
+            update("action", "");
           }}
           options={[
-            { value: 'slack', label: 'Slack' },
-            { value: 'notion', label: 'Notion' },
-            { value: 'telegram', label: 'Telegram' },
-            { value: 'sheets', label: 'Google Sheets' },
-            { value: 'github', label: 'GitHub' },
-            { value: 'discord', label: 'Discord' },
-            { value: 'email', label: 'Email' },
-            { value: 'webhook', label: 'Webhook (Custom)' },
+            { value: "slack", label: "Slack" },
+            { value: "notion", label: "Notion" },
+            { value: "telegram", label: "Telegram" },
+            { value: "sheets", label: "Google Sheets" },
+            { value: "github", label: "GitHub" },
+            { value: "discord", label: "Discord" },
+            { value: "email", label: "Email" },
+            { value: "webhook", label: "Webhook (Custom)" },
           ]}
         />
       </div>
       <div>
         <FieldLabel>Action</FieldLabel>
         <SelectInput
-          value={config.action || actions[0]?.value || ''}
-          onChange={(v) => update('action', v)}
+          value={config.action || actions[0]?.value || ""}
+          onChange={(v) => update("action", v)}
           options={actions}
         />
       </div>
-      {(service === 'slack' || service === 'discord') && (
+      {(service === "slack" || service === "discord") && (
         <div>
           <FieldLabel>Channel</FieldLabel>
           <TextInput
-            value={config.channel || ''}
-            onChange={(v) => update('channel', v)}
+            value={config.channel || ""}
+            onChange={(v) => update("channel", v)}
             placeholder="#general"
           />
         </div>
       )}
-      {service === 'telegram' && (
+      {service === "telegram" && (
         <div>
           <FieldLabel>Chat ID</FieldLabel>
           <TextInput
-            value={config.chatId || ''}
-            onChange={(v) => update('chatId', v)}
+            value={config.chatId || ""}
+            onChange={(v) => update("chatId", v)}
             placeholder="123456789"
           />
         </div>
       )}
-      {service === 'sheets' && (
+      {service === "sheets" && (
         <div>
           <FieldLabel>Spreadsheet ID</FieldLabel>
           <TextInput
-            value={config.spreadsheetId || ''}
-            onChange={(v) => update('spreadsheetId', v)}
+            value={config.spreadsheetId || ""}
+            onChange={(v) => update("spreadsheetId", v)}
             placeholder="1BxiMVs0XRA5..."
           />
         </div>
       )}
-      {service === 'github' && (
+      {service === "github" && (
         <div>
           <FieldLabel>Repository</FieldLabel>
           <TextInput
-            value={config.repo || ''}
-            onChange={(v) => update('repo', v)}
+            value={config.repo || ""}
+            onChange={(v) => update("repo", v)}
             placeholder="owner/repo"
           />
         </div>
       )}
-      {service === 'webhook' && (
+      {service === "webhook" && (
         <div>
           <FieldLabel>Webhook URL</FieldLabel>
           <TextInput
-            value={config.webhookUrl || ''}
-            onChange={(v) => update('webhookUrl', v)}
+            value={config.webhookUrl || ""}
+            onChange={(v) => update("webhookUrl", v)}
             placeholder="https://hooks.example.com/..."
           />
         </div>
       )}
-      {service === 'email' && (
+      {service === "email" && (
         <div>
           <FieldLabel>To</FieldLabel>
           <TextInput
-            value={config.to || ''}
-            onChange={(v) => update('to', v)}
+            value={config.to || ""}
+            onChange={(v) => update("to", v)}
             placeholder="user@example.com"
           />
         </div>
@@ -807,24 +874,26 @@ function IntegrationConfig({
       <div>
         <FieldLabel>Message / Body</FieldLabel>
         <TextArea
-          value={config.body || ''}
-          onChange={(v) => update('body', v)}
-          placeholder="전송할 내용..."
+          value={config.body || ""}
+          onChange={(v) => update("body", v)}
+          placeholder={t("flows.config.bodyPlaceholder")}
           rows={4}
         />
         <p className="text-[10px] text-gray-500 mt-1">
-          이전 노드 결과를 <code className="text-rose-400">{'{{input}}'}</code>로 참조할 수 있습니다.
+          {t("flows.config.inputRefHint.pre")}
+          <code className="text-rose-400">{"{{input}}"}</code>
+          {t("flows.config.inputRefHint.post")}
         </p>
       </div>
       <div>
         <FieldLabel>API Token / Key</FieldLabel>
         <TextInput
-          value={config.apiToken || ''}
-          onChange={(v) => update('apiToken', v)}
-          placeholder="설정에서 환경변수로 관리 권장"
+          value={config.apiToken || ""}
+          onChange={(v) => update("apiToken", v)}
+          placeholder={t("flows.config.apiTokenPlaceholder")}
         />
         <p className="text-[10px] text-gray-500 mt-1">
-          보안을 위해 Settings 탭의 환경변수를 사용하세요.
+          {t("flows.config.apiTokenHint")}
         </p>
       </div>
     </>
@@ -834,35 +903,46 @@ function IntegrationConfig({
 function renderTypeConfig(
   type: NodeType,
   config: Record<string, unknown>,
-  update: ConfigUpdate,
+  update: ConfigUpdate
 ): JSX.Element | null {
   switch (type) {
-    case 'input':
+    case "input":
       return <InputConfig config={config as InputNodeConfig} update={update} />;
-    case 'llm':
+    case "llm":
       return <LLMConfig config={config as LLMNodeConfig} update={update} />;
-    case 'agent':
+    case "agent":
       return <AgentConfig config={config as AgentNodeConfig} update={update} />;
-    case 'code':
+    case "code":
       return <CodeConfig config={config as CodeNodeConfig} update={update} />;
-    case 'api':
+    case "api":
       return <APIConfig config={config as APINodeConfig} update={update} />;
-    case 'integration':
+    case "integration":
       return (
-        <IntegrationConfig config={config as IntegrationNodeConfig} update={update} />
+        <IntegrationConfig
+          config={config as IntegrationNodeConfig}
+          update={update}
+        />
       );
-    case 'human':
+    case "human":
       return <HumanConfig config={config as HumanNodeConfig} update={update} />;
-    case 'branch':
-      return <BranchConfig config={config as BranchNodeConfig} update={update} />;
-    case 'output':
-      return <OutputConfig config={config as OutputNodeConfig} update={update} />;
+    case "branch":
+      return (
+        <BranchConfig config={config as BranchNodeConfig} update={update} />
+      );
+    case "output":
+      return (
+        <OutputConfig config={config as OutputNodeConfig} update={update} />
+      );
     default:
       return null;
   }
 }
 
-export function NodeConfigPanel({ node, onConfigChange, onClose }: NodeConfigPanelProps) {
+export function NodeConfigPanel({
+  node,
+  onConfigChange,
+  onClose,
+}: NodeConfigPanelProps) {
   const config = node.data.config || {};
   const colors = TYPE_COLORS[node.type];
 
@@ -870,7 +950,7 @@ export function NodeConfigPanel({ node, onConfigChange, onClose }: NodeConfigPan
     (key, value) => {
       onConfigChange(node.id, { ...config, [key]: value });
     },
-    [node.id, config, onConfigChange],
+    [node.id, config, onConfigChange]
   );
 
   const updateLabel = useCallback(
@@ -880,7 +960,7 @@ export function NodeConfigPanel({ node, onConfigChange, onClose }: NodeConfigPan
       // and FlowCanvas will extract it.
       onConfigChange(node.id, { ...config, _label: label });
     },
-    [node.id, config, onConfigChange],
+    [node.id, config, onConfigChange]
   );
 
   return (
@@ -899,8 +979,18 @@ export function NodeConfigPanel({ node, onConfigChange, onClose }: NodeConfigPan
             onClick={onClose}
             className="text-gray-500 hover:text-gray-300 transition-colors"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -912,7 +1002,7 @@ export function NodeConfigPanel({ node, onConfigChange, onClose }: NodeConfigPan
         <div>
           <FieldLabel>Node Label</FieldLabel>
           <TextInput
-            value={node.data.label || ''}
+            value={node.data.label || ""}
             onChange={updateLabel}
             placeholder="Node name"
           />
