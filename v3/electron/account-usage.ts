@@ -12,10 +12,9 @@
  *     (claude-usage-probe.ts) — account-global plan utilization, no message
  *     sent. Probed against resolveClaudeBinary() so a stale shadow install is
  *     never used.
- *   - codex/gpt: the newest rollout `rate_limits` event across every codex
- *     home — the user's own ~/.codex AND the per-agent CODEX_HOMEs under
- *     CONFIG_DIR. Codex rate limits are account-global (all share one ChatGPT
- *     auth), so the most recently written reading is the account's state.
+ *   - codex/gpt: the authenticated `codex app-server --stdio`
+ *     account/rateLimits/read RPC (codex-usage-probe.ts), with rollout JSONL
+ *     parsing as fallback for older/failed CLIs.
  *
  * null always means "no information" (logged out / probe failed / no rollout),
  * NEVER zero usage. Results are TTL-cached so a UI mount doesn't spawn a probe
@@ -29,6 +28,7 @@ import {
   probeClaudeUsage,
   type ClaudeUsageSnapshot,
 } from "./claude-usage-probe";
+import { probeCodexUsage } from "./codex-usage-probe";
 import { resolveClaudeBinary, CONFIG_DIR } from "./agent-config";
 import {
   parseSessionDelta,
@@ -53,6 +53,7 @@ const GPT_FRESH_MS = 30_000;
 let claudeCache: ClaudeUsageSnapshot | null = null;
 let claudeInFlight: Promise<RateLimitInfo | null> | null = null;
 let gptCache: { at: number; info: RateLimitInfo | null } | null = null;
+let gptInFlight: Promise<RateLimitInfo | null> | null = null;
 
 function snapToInfo(s: ClaudeUsageSnapshot): RateLimitInfo {
   return {
@@ -146,11 +147,9 @@ function newestRollout(root: string): { path: string; mtime: number } | null {
 
 /**
  * Account-global Codex (gpt) plan utilization from the newest rollout across
- * all codex homes, or null when there's no usable reading. TTL-cached.
+ * all codex homes, or null when there's no usable reading.
  */
-export function getAccountGptRateLimit(): RateLimitInfo | null {
-  if (gptCache && Date.now() - gptCache.at < GPT_FRESH_MS) return gptCache.info;
-
+function readGptRateLimitFromRollouts(): RateLimitInfo | null {
   let best: { path: string; mtime: number } | null = null;
   for (const root of codexSessionRoots()) {
     const r = newestRollout(root);
@@ -172,15 +171,38 @@ export function getAccountGptRateLimit(): RateLimitInfo | null {
       info = null;
     }
   }
-  gptCache = { at: Date.now(), info };
   return info;
+}
+
+/**
+ * Account-global Codex (gpt) plan utilization, or null when there's no
+ * information. Uses the headless app-server probe first so the value appears
+ * even before any Codex agent/session has produced a rollout; falls back to
+ * the historic rollout parser when the probe is unavailable or unauthenticated.
+ * TTL-cached; coalesces concurrent callers onto a single in-flight probe.
+ */
+export async function getAccountGptRateLimit(): Promise<RateLimitInfo | null> {
+  if (gptCache && Date.now() - gptCache.at < GPT_FRESH_MS) return gptCache.info;
+  if (gptInFlight) return gptInFlight;
+
+  gptInFlight = (async () => {
+    try {
+      const snap = await probeCodexUsage();
+      const info = snap ? snapToInfo(snap) : readGptRateLimitFromRollouts();
+      gptCache = { at: Date.now(), info };
+      return info;
+    } finally {
+      gptInFlight = null;
+    }
+  })();
+  return gptInFlight;
 }
 
 /** Both account-level snapshots for the Usage tab rate-limit panel. */
 export async function getAccountRateLimits(): Promise<AccountRateLimits> {
   const [claude, gpt] = await Promise.all([
     getAccountClaudeRateLimit(),
-    Promise.resolve(getAccountGptRateLimit()),
+    getAccountGptRateLimit(),
   ]);
   return { claude, gpt };
 }
