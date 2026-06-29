@@ -110,7 +110,7 @@ function readWindow(v: unknown): WindowReading {
  */
 export function parseGetUsageResponse(
   obj: unknown,
-  requestId: string
+  requestId: string,
 ): ClaudeUsageSnapshot | null {
   if (!isRecord(obj) || obj.type !== "control_response") return null;
   const resp = obj.response;
@@ -162,7 +162,7 @@ export function isGetUsageError(obj: unknown, requestId: string): boolean {
  */
 export function probeClaudeUsage(
   claudeCommand: string,
-  timeoutMs: number = GET_USAGE_TIMEOUT_MS
+  timeoutMs: number = GET_USAGE_TIMEOUT_MS,
 ): Promise<ClaudeUsageSnapshot | null> {
   return new Promise((resolve) => {
     const requestId = `marblo-get-usage-${Date.now()}-${Math.random()
@@ -180,7 +180,7 @@ export function probeClaudeUsage(
     } catch (err) {
       console.warn(
         "[ClaudeUsageProbe] spawn failed:",
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
       resolve(null);
       return;
@@ -205,40 +205,73 @@ export function probeClaudeUsage(
     }, timeoutMs);
 
     let buf = "";
-    child.stdout?.on("data", (chunk: Buffer) => {
-      buf += chunk.toString("utf-8");
+
+    // Parse a single stdout line; calls finish() and returns true on a
+    // terminal outcome (our success snapshot or an error response for us).
+    const tryLine = (line: string): boolean => {
+      let obj: unknown;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        return false; // non-JSON noise on stdout
+      }
+      const snap = parseGetUsageResponse(obj, requestId);
+      if (snap) {
+        finish(snap);
+        return true;
+      }
+      if (isGetUsageError(obj, requestId)) {
+        console.warn(
+          "[ClaudeUsageProbe] get_usage rejected by CLI (old version?)",
+        );
+        finish(null);
+        return true;
+      }
+      return false;
+    };
+
+    // Drain complete (newline-terminated) lines from buf. When `flush` is set
+    // — i.e. stdout has ended or the process exited — also try whatever tail
+    // remains in buf: the final response can arrive without a trailing newline
+    // right before exit, and dropping it is exactly the lost-response race.
+    // Returns true once a terminal outcome is reached.
+    const drain = (flush: boolean): boolean => {
       let nl: number;
       while ((nl = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let obj: unknown;
-        try {
-          obj = JSON.parse(line);
-        } catch {
-          continue; // non-JSON noise on stdout
-        }
-        const snap = parseGetUsageResponse(obj, requestId);
-        if (snap) {
-          finish(snap);
-          return;
-        }
-        if (isGetUsageError(obj, requestId)) {
-          console.warn(
-            "[ClaudeUsageProbe] get_usage rejected by CLI (old version?)"
-          );
-          finish(null);
-          return;
-        }
+        if (line && tryLine(line)) return true;
       }
+      if (flush) {
+        const tail = buf.trim();
+        buf = "";
+        if (tail && tryLine(tail)) return true;
+      }
+      return false;
+    };
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      buf += chunk.toString("utf-8");
+      drain(false);
+    });
+
+    // stdout fully drained — the authoritative "no more output" signal. Flush
+    // the tail before giving up so a valid final line is never discarded.
+    child.stdout?.on("end", () => {
+      if (!drain(true)) finish(null);
     });
 
     child.on("error", (err) => {
       console.warn("[ClaudeUsageProbe] process error:", err.message);
       finish(null);
     });
-    // Exited without ever answering us (e.g. auth failure at startup).
-    child.on("exit", () => finish(null));
+    // Exit can fire before stdout's final 'data'/'end' is processed. Flush the
+    // buffer first (a valid response may sit unparsed in the tail) and only
+    // then resolve null. The `settled` guard makes this idempotent with the
+    // 'end' path, so whichever fires first wins.
+    child.on("exit", () => {
+      if (!drain(true)) finish(null);
+    });
 
     try {
       child.stdin?.write(
@@ -246,12 +279,12 @@ export function probeClaudeUsage(
           type: "control_request",
           request_id: requestId,
           request: { subtype: "get_usage" },
-        }) + "\n"
+        }) + "\n",
       );
     } catch (err) {
       console.warn(
         "[ClaudeUsageProbe] stdin write failed:",
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
       finish(null);
     }

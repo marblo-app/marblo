@@ -207,55 +207,86 @@ export function probeCodexUsage(
 
     let initialized = false;
     let buf = "";
-    child.stdout?.on("data", (chunk: Buffer) => {
-      buf += chunk.toString("utf-8");
+
+    // Parse a single stdout line. Returns true on a terminal outcome (our
+    // snapshot or an error response for us), at which point finish() has run.
+    const tryLine = (line: string): boolean => {
+      let obj: unknown;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        return false;
+      }
+
+      if (!initialized && isRecord(obj) && obj.id === initializeId) {
+        initialized = true;
+        if (isJsonRpcError(obj, initializeId)) {
+          finish(null);
+          return true;
+        }
+        try {
+          child.stdin?.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: rateLimitsId,
+              method: "account/rateLimits/read",
+              params: {},
+            }) + "\n",
+          );
+        } catch {
+          finish(null);
+          return true;
+        }
+        return false;
+      }
+
+      const snap = parseRateLimitsReadResponse(obj, rateLimitsId);
+      if (snap) {
+        finish(snap);
+        return true;
+      }
+      if (isJsonRpcError(obj, rateLimitsId)) {
+        finish(null);
+        return true;
+      }
+      return false;
+    };
+
+    // Drain newline-terminated lines from buf. When `flush` is set (stdout
+    // ended or process exited), also try the unterminated tail: the rateLimits
+    // response can land without a trailing newline right before exit, and
+    // dropping it is the lost-response race this probe shares with claude.
+    const drain = (flush: boolean): boolean => {
       let nl: number;
       while ((nl = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let obj: unknown;
-        try {
-          obj = JSON.parse(line);
-        } catch {
-          continue;
-        }
-
-        if (!initialized && isRecord(obj) && obj.id === initializeId) {
-          initialized = true;
-          if (isJsonRpcError(obj, initializeId)) {
-            finish(null);
-            return;
-          }
-          try {
-            child.stdin?.write(
-              JSON.stringify({
-                jsonrpc: "2.0",
-                id: rateLimitsId,
-                method: "account/rateLimits/read",
-                params: {},
-              }) + "\n",
-            );
-          } catch {
-            finish(null);
-          }
-          continue;
-        }
-
-        const snap = parseRateLimitsReadResponse(obj, rateLimitsId);
-        if (snap) {
-          finish(snap);
-          return;
-        }
-        if (isJsonRpcError(obj, rateLimitsId)) {
-          finish(null);
-          return;
-        }
+        if (line && tryLine(line)) return true;
       }
+      if (flush) {
+        const tail = buf.trim();
+        buf = "";
+        if (tail && tryLine(tail)) return true;
+      }
+      return false;
+    };
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      buf += chunk.toString("utf-8");
+      drain(false);
+    });
+
+    // stdout fully drained: flush the tail before resolving null.
+    child.stdout?.on("end", () => {
+      if (!drain(true)) finish(null);
     });
 
     child.on("error", () => finish(null));
-    child.on("exit", () => finish(null));
+    // Exit can beat stdout's final 'data'/'end'; flush the buffer before
+    // giving up. The `settled` guard keeps this idempotent with 'end'.
+    child.on("exit", () => {
+      if (!drain(true)) finish(null);
+    });
 
     try {
       child.stdin?.write(
