@@ -1582,6 +1582,102 @@ process.on("unhandledRejection", (reason) => {
 // normal full app window (0 behavior change for the regular path).
 type DetachedView = "board" | "code";
 
+// ---------------------------------------------------------------------------
+// External link handling (open http(s) links in the OS default browser)
+// ---------------------------------------------------------------------------
+// Bug: clicking a link inside the app (e.g. a GitHub PR URL) navigated the
+// Electron window itself. For private GitHub repos that meant the in-app
+// (unauthenticated) view rendered a 404. Fix: send all *external* http(s)
+// targets to the user's default browser via shell.openExternal, and never
+// externalize the app's own content or the Firebase auth popup flow.
+//
+// `webContents` are guarded with a WeakSet so the handler is registered exactly
+// once per webContents even though we wire it from multiple places
+// (createWindow, createDetachedWindow, and the global web-contents-created hook).
+const externalLinkHandledWebContents = new WeakSet<Electron.WebContents>();
+
+// Returns true when `rawUrl` is the app's OWN content (or part of the in-app
+// Firebase auth popup flow) and therefore must be allowed to load inside the
+// app rather than being kicked out to the system browser.
+//
+// IMPORTANT — do not externalize these or you break boot / login:
+//   - file://                         → preload + packaged assets
+//   - http(s)://localhost|127.0.0.1   → dev server (5173) and the prod static
+//                                        server (random 127.0.0.1 port). This is
+//                                        the app's own loaded origin; intercepting
+//                                        it would hijack normal in-app navigation.
+//   - non-http(s) schemes (about:blank, blob:, data:, devtools:, chrome:) →
+//                                        keep default behavior, never externalize.
+//   - Firebase auth domains + OAuth provider endpoints → signInWithPopup opens a
+//                                        popup that loads the Firebase auth handler,
+//                                        navigates to the provider (Google / GitHub
+//                                        OAuth), and postMessages the credential
+//                                        back to the opener. It MUST stay in-app.
+//                                        Note github.com is allowed ONLY for the
+//                                        /login/oauth path — ordinary github.com
+//                                        links (PR URLs) still open externally,
+//                                        which is exactly the bug we are fixing.
+function isInternalNavigationUrl(rawUrl: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(rawUrl);
+  } catch {
+    // Unparseable / empty (e.g. "about:blank") — leave to default behavior.
+    return true;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return true;
+
+  const host = u.hostname;
+  // The app's own loaded origin (dev server + prod static server).
+  if (host === "localhost" || host === "127.0.0.1") return true;
+
+  // Firebase auth popup flow (signInWithPopup, Google + GitHub providers).
+  const firebaseAuthDomain = (
+    process.env.FIREBASE_AUTH_DOMAIN ||
+    process.env.VITE_FIREBASE_AUTH_DOMAIN ||
+    ""
+  ).toLowerCase();
+  if (firebaseAuthDomain && host === firebaseAuthDomain) return true;
+  if (host.endsWith(".firebaseapp.com") || host.endsWith(".web.app"))
+    return true;
+  if (host === "accounts.google.com") return true;
+  // GitHub OAuth only — NOT general github.com links.
+  if (host === "github.com" && u.pathname.startsWith("/login/oauth"))
+    return true;
+
+  return false;
+}
+
+// Wire a webContents so that external http(s) links open in the OS browser.
+// Idempotent per webContents (WeakSet guard) so it is safe to call from every
+// window-creation path plus the global web-contents-created hook.
+function applyExternalLinkHandling(webContents: Electron.WebContents): void {
+  if (externalLinkHandledWebContents.has(webContents)) return;
+  externalLinkHandledWebContents.add(webContents);
+
+  // window.open / target="_blank" / window.open(...): external http(s) goes to
+  // the OS browser; everything internal (auth popup, about:blank, etc.) keeps
+  // the default behavior so the Firebase login popup still works.
+  webContents.setWindowOpenHandler(({ url }) => {
+    if (!isInternalNavigationUrl(url)) {
+      void shell.openExternal(url);
+      return { action: "deny" };
+    }
+    return { action: "allow" };
+  });
+
+  // In-place top-level navigation: if the page tries to navigate the window to
+  // an external http(s) URL, cancel it and hand off to the OS browser instead.
+  // App-origin / auth navigations pass through untouched (see
+  // isInternalNavigationUrl) so app boot and OAuth redirects are never hijacked.
+  webContents.on("will-navigate", (event, url) => {
+    if (!isInternalNavigationUrl(url)) {
+      event.preventDefault();
+      void shell.openExternal(url);
+    }
+  });
+}
+
 function createWindow(isNewWindow = false, detachedView?: DetachedView) {
   const detachedQuery = detachedView ? `?detached=${detachedView}` : "";
   const win = new BrowserWindow({
@@ -1601,6 +1697,10 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
     titleBarStyle: "hiddenInset",
     show: false,
   });
+
+  // Route external http(s) links to the OS browser (covers createDetachedWindow
+  // too, since it delegates to createWindow).
+  applyExternalLinkHandling(win.webContents);
 
   if (isDev) {
     win.loadURL(`http://localhost:5173${detachedQuery}`);
@@ -1793,6 +1893,9 @@ function createDetachedWindow(
   seed?: { rootPath?: string; projectId?: string },
 ): BrowserWindow {
   const win = createWindow(true, view);
+  // External-link handling is already applied via createWindow; re-asserting it
+  // here is a no-op (WeakSet-guarded) but keeps the contract explicit.
+  applyExternalLinkHandling(win.webContents);
   // Always tag the per-window record as detached (even with no seed) so this
   // pop-out is never written into the persisted multi-window session — it's a
   // sub-panel of its parent project, not a standalone window to restore.
@@ -3795,6 +3898,14 @@ ipcMain.handle(
 ipcMain.handle("usage:accountRateLimits", () => getAccountRateLimits());
 
 app.whenReady().then(async () => {
+  // Global safety net: any webContents created anywhere in the app (including
+  // child popups and any future windows) routes external http(s) links to the
+  // OS browser. App-origin and Firebase-auth navigations are exempted inside
+  // applyExternalLinkHandling, so app boot and OAuth popups are never hijacked.
+  app.on("web-contents-created", (_event, contents) => {
+    applyExternalLinkHandling(contents);
+  });
+
   // safeStorage only comes online after `ready`. The module-load
   // `readApiKeys()` returned {} if the user had encrypted keys on disk;
   // refresh now so the LLM provider picks them up before any flow runs.
