@@ -18,6 +18,12 @@ export const onboarding = {
   "onboarding.common.skip": "건너뛰기",
   "onboarding.common.setupLater": "나중에 설정하기",
 
+  // — LanguageFirstRun (first-launch language picker modal) —
+  "onboarding.langFirstRun.title": "언어를 선택하세요",
+  "onboarding.langFirstRun.subtitle":
+    "마블로를 사용할 언어를 선택하세요. 나중에 설정에서 언제든 변경할 수 있습니다.",
+  "onboarding.langFirstRun.continue": "계속",
+
   // — WelcomeScreen —
   "onboarding.welcome.title": "마블로에 오신 것을 환영합니다!",
   "onboarding.welcome.subtitle":

@@ -40,6 +40,24 @@ function detectInitialLocale(): Locale {
   return nav.toLowerCase().startsWith("ko") ? "ko" : "en";
 }
 
+/**
+ * Has the user ever made an explicit language choice? True once `setLocale`
+ * has persisted to localStorage. When false, `detectInitialLocale` only
+ * *guessed* from `navigator.language` (no write), so the first-run language
+ * modal should appear. Absence of STORAGE_KEY == not yet chosen.
+ */
+export function hasChosenLocale(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    return saved === "ko" || saved === "en";
+  } catch {
+    // localStorage unavailable (e.g. sandboxed) — treat as chosen so we
+    // never trap the user behind a modal we can't dismiss persistently.
+    return true;
+  }
+}
+
 interface LocaleState {
   locale: Locale;
   setLocale: (locale: Locale) => void;

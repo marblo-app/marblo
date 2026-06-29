@@ -10,6 +10,12 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.common.skip": "Skip",
   "onboarding.common.setupLater": "Set up later",
 
+  // — LanguageFirstRun (first-launch language picker modal) —
+  "onboarding.langFirstRun.title": "Choose your language",
+  "onboarding.langFirstRun.subtitle":
+    "Pick the language for Marblo. You can change it anytime in Settings.",
+  "onboarding.langFirstRun.continue": "Continue",
+
   // — WelcomeScreen —
   "onboarding.welcome.title": "Welcome to Marblo!",
   "onboarding.welcome.subtitle":

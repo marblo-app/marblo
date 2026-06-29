@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AuthProvider } from "./auth";
+import { LanguageFirstRun } from "./components/onboarding/LanguageFirstRun";
 import { useAuth } from "./hooks/useAuth";
 import { LoginPage } from "./auth";
 import { Layout } from "./components/Layout";
@@ -13,7 +14,7 @@ import {
   type TelemetryEvent,
 } from "./services/telemetryService";
 import telemetry from "./services/telemetryService";
-import { t } from "./lib/i18n";
+import { t, hasChosenLocale } from "./lib/i18n";
 
 // First-party telemetry is OFF by default (local-only build, PIPA) — the
 // initial enabled-state is resolved from the build flag in telemetryService
@@ -329,9 +330,19 @@ function AppContent() {
 }
 
 function App() {
+  // First-run language picker: shown once, before anything else (even login),
+  // when the user has never made an explicit choice. Detached pop-out windows
+  // skip it — they inherit the main window's already-persisted locale.
+  const [needsLocaleChoice, setNeedsLocaleChoice] = useState(
+    () => resolveDetachedView() === null && !hasChosenLocale(),
+  );
+
   return (
     <ErrorBoundary>
       <AuthProvider>
+        {needsLocaleChoice && (
+          <LanguageFirstRun onComplete={() => setNeedsLocaleChoice(false)} />
+        )}
         <AppContent />
       </AuthProvider>
     </ErrorBoundary>
