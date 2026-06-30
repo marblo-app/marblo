@@ -2,13 +2,13 @@
 
 운영자가 데스크탑 앱 릴리스 / 핫픽스 배포 시 따를 절차.
 
-마지막 점검: 2026-06-18 KST. GitHub 릴리스 repo는 `melocream/marblo`로 확정.
+마지막 점검: 2026-06-30 KST. GitHub 릴리스(피드) repo는 `melocream/marblo-releases`로 확정.
 
 ---
 
 ## 0. 사전 점검
 
-- [ ] 런타임 update feed: `v3/electron/updater.ts` 기본값은 `melocream/marblo`, channel은 `latest`
+- [ ] 런타임 update feed: `v3/electron/updater.ts` 기본값은 `melocream/marblo-releases`, channel은 `latest` (publish 대상과 일치. private 소스 repo는 익명 Release API가 404라 공개 유저 앱이 영원히 업데이트를 못 받음)
 - [ ] override가 필요한 리허설만 `MARBLO_UPDATER_OWNER`, `MARBLO_UPDATER_REPO`, `MARBLO_UPDATER_CHANNEL` 사용
 - [ ] `v3/electron-builder.yml`의 `publish.provider: github` 확인
 - [ ] GitHub Release 업로드 권한이 있는 PAT를 로컬 `GH_TOKEN`에 설정
@@ -18,14 +18,15 @@
 
 현재 repo URL 주의:
 
-- worktree origin: `https://github.com/melocream/marblo.git`
-- 런타임 updater feed: `melocream/marblo`
+- worktree origin: `https://github.com/melocream/marblo.git` (실제 소스 코드 repo, private)
+- 런타임 updater feed: `melocream/marblo-releases` (PUBLIC. electron-builder.yml `publish` 대상과 동일)
+- 소스 repo와 릴리스(피드) repo가 다른 이유: 소스 repo는 private라 익명 사용자에게 Release 자산이 404. electron-updater가 익명 다운로드를 하려면 피드가 PUBLIC repo여야 한다.
 - `v3/package.json`의 `repository.url`은 updater feed 결정에 의존하지 않는다. repo 이전 시 `updater.ts` 기본값과 CI Release 대상 repo를 함께 바꾼다.
 
 ## 1. GitHub Release 피드 검증
 
 ```bash
-REPO=melocream/marblo
+REPO=melocream/marblo-releases
 
 gh repo view "$REPO" --json nameWithOwner,visibility,defaultBranchRef
 gh release list --repo "$REPO" --limit 10
@@ -45,13 +46,13 @@ grep -R -E "^(version|path|sha512|url):" /tmp/marblo-updater-feed
 - metadata에 `version`, `files[].url`, `files[].sha512` 또는 동등한 checksum 필드가 존재
 - metadata version이 앱의 현재 버전보다 높다
 
-2026-06-18 점검 결과:
+2026-06-30 점검 결과 (feed drift 정정 후):
 
-- `gh release list --repo melocream/marblo --limit 20`: release 없음
-- `gh api repos/melocream/marblo/releases/latest`: 404
-- `https://github.com/melocream/marblo/releases/latest`: 404
+- 런타임 feed와 `electron-builder.yml` publish 대상이 모두 PUBLIC `melocream/marblo-releases`로 일치 (이전에는 feed가 private 소스 repo를 가리켜 익명 유저 앱이 Release를 404로 못 받았다 — 이 drift가 버그였다).
+- private 소스 repo는 익명 사용자에게 `releases/latest`가 404 → 공개 유저 앱의 feed로 절대 쓰지 않는다. 그래서 PUBLIC `marblo-releases`로 일치시킨다.
+- 위 §1 검증은 `REPO=melocream/marblo-releases` 기준으로 수행한다.
 
-따라서 이 상태에서는 실제 GitHub Release 기반 구버전 -> 핫픽스 수신 리허설을 완료할 수 없다. 실제 수신 리허설은 P0-12b(`nzDieNhedP5sWnagJY3e`)에서 P0-7 완료 후 수행한다.
+실제 GitHub Release 기반 구버전 -> 핫픽스 수신 리허설은 P0-12b(`nzDieNhedP5sWnagJY3e`)에서 P0-7 완료 후 수행한다.
 
 ## 2. 일반 릴리스
 
@@ -63,7 +64,7 @@ npm version patch
 npm run build:electron
 npx electron-builder --mac --publish never
 
-REPO=melocream/marblo
+REPO=melocream/marblo-releases
 TAG="v$(node -p "require('./package.json').version")"
 gh release create "$TAG" dist/*.zip dist/*.dmg dist/latest-mac.yml \
   --repo "$REPO" \
@@ -90,7 +91,7 @@ npm version patch
 npm run build:electron
 npx electron-builder --mac --publish never
 
-REPO=melocream/marblo
+REPO=melocream/marblo-releases
 TAG="v$(node -p "require('./package.json').version")"
 gh release create "$TAG" dist/*.zip dist/*.dmg dist/latest-mac.yml \
   --repo "$REPO" \
@@ -115,7 +116,7 @@ gh release edit "$TAG" --repo "$REPO" --draft=false
 실제 production repo에 public 핫픽스 Release를 만들기 전, 배포 책임자 승인을 받고 시간대를 고정한다. ad hoc public Release를 무단 생성하지 않는다.
 
 ```bash
-REPO=melocream/marblo
+REPO=melocream/marblo-releases
 OLD_VERSION=3.0.0
 HOTFIX_VERSION=3.0.1
 
@@ -168,7 +169,7 @@ npm version patch
 npm run build:electron
 npx electron-builder --mac --publish never
 
-REPO=melocream/marblo
+REPO=melocream/marblo-releases
 TAG="v$(node -p "require('./package.json').version")"
 gh release create "$TAG" dist/*.zip dist/*.dmg dist/latest-mac.yml \
   --repo "$REPO" \
@@ -191,8 +192,9 @@ gh release edit "$TAG" --repo "$REPO" --draft=false
 
 ## 변경 이력
 
-| 일자       | 변경                                                                        |
-| ---------- | --------------------------------------------------------------------------- |
-| 2026-06-18 | GitHub 릴리스 repo를 `melocream/marblo`로 확정하고 P0-12b 리허설 분리 반영. |
-| 2026-06-17 | feed repo drift 방지, 실제 피드 점검 결과, 최신 리허설 절차 반영.           |
-| 2026-05-12 | 초안. P0-12 핫픽스 강제 배포 메커니즘 + UpdateBanner 컴포넌트 추가.         |
+| 일자       | 변경                                                                                                                  |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| 2026-06-30 | 릴리스(피드) repo 표기를 `melocream/marblo-releases`로 일괄 정정 (publish 대상과 일치, private 소스 repo는 익명 404). |
+| 2026-06-18 | GitHub 릴리스 repo를 `melocream/marblo-releases`로 확정하고 P0-12b 리허설 분리 반영.                                  |
+| 2026-06-17 | feed repo drift 방지, 실제 피드 점검 결과, 최신 리허설 절차 반영.                                                     |
+| 2026-05-12 | 초안. P0-12 핫픽스 강제 배포 메커니즘 + UpdateBanner 컴포넌트 추가.                                                   |
