@@ -34,9 +34,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
         rootPath?: string;
         projectId?: string;
       }>,
-    // Pop a tab (Board/Code) out into its own detached window. The new window
+    // Pop a tab (Board/Code/History) out into its own detached window. The new window
     // inherits this window's project so it opens on the same data.
-    popOutTab: (view: "board" | "code") =>
+    popOutTab: (view: "board" | "code" | "history") =>
       ipcRenderer.invoke("window:popOutTab", view) as Promise<{
         success: boolean;
       }>,

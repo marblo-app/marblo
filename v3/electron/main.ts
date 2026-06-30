@@ -3009,7 +3009,7 @@ ipcMain.handle("window:getRestoreState", (event) => {
 // requesting window's folder/project (from its restore record, with the live
 // project registration as a fallback) so it opens on the same project.
 ipcMain.handle("window:popOutTab", (event, view: DetachedView) => {
-  if (view !== "board" && view !== "code") return { success: false };
+  if (view !== "board" && view !== "code" && view !== "history") return { success: false };
   const senderId = event.sender.id;
   const restore = windowRestore.get(senderId) ?? {};
   const seed = {
