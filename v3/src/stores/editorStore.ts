@@ -9,11 +9,19 @@ export interface OpenFile {
   isModified: boolean;
 }
 
+/** Surfaced to the user when a save fails to reach disk (data-loss risk). */
+export interface SaveError {
+  path: string;
+  name: string;
+  message: string;
+}
+
 interface EditorState {
   rootPath: string | null;
   openFiles: OpenFile[];
   activeFilePath: string | null;
   showDiff: boolean;
+  saveError: SaveError | null;
 
   setRootPath: (path: string | null) => void;
   openFile: (filePath: string) => Promise<void>;
@@ -22,6 +30,7 @@ interface EditorState {
   setActiveFile: (filePath: string) => void;
   updateContent: (filePath: string, content: string) => void;
   saveFile: (filePath: string) => Promise<void>;
+  clearSaveError: () => void;
   toggleDiff: () => void;
   // FileTree sync — call after file operations on disk
   handlePathRenamed: (fromPath: string, toPath: string) => void;
@@ -86,6 +95,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   openFiles: [],
   activeFilePath: null,
   showDiff: false,
+  saveError: null,
 
   setRootPath: (path: string | null) => {
     set({ rootPath: path });
@@ -169,15 +179,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       await window.electronAPI.fs.writeFile(filePath, file.content);
       set({
-        openFiles: openFiles.map((f) =>
+        // Re-read openFiles: content may have changed during the async write.
+        openFiles: get().openFiles.map((f) =>
           f.path === filePath
-            ? { ...f, originalContent: f.content, isModified: false }
+            ? {
+                ...f,
+                originalContent: file.content,
+                isModified: f.content !== file.content,
+              }
             : f,
         ),
+        saveError: null,
       });
     } catch (err) {
+      // A swallowed save error means the user's edit silently never reached
+      // disk — surface it so it can't be mistaken for a successful save.
       console.error("Failed to save file:", err);
+      set({
+        saveError: {
+          path: filePath,
+          name: getFileName(filePath),
+          message: err instanceof Error ? err.message : String(err),
+        },
+      });
     }
+  },
+
+  clearSaveError: () => {
+    set({ saveError: null });
   },
 
   toggleDiff: () => {

@@ -1,8 +1,8 @@
-import { useCallback, useRef } from 'react';
-import Editor, { type OnMount } from '@monaco-editor/react';
-import type { editor } from 'monaco-editor';
-import { useEditorStore } from '../../stores/editorStore';
-import { MONO_FONT_FAMILY } from '../../lib/monoFont';
+import { useCallback, useRef } from "react";
+import Editor, { type OnMount } from "@monaco-editor/react";
+import type { editor } from "monaco-editor";
+import { useEditorStore } from "../../stores/editorStore";
+import { MONO_FONT_FAMILY } from "../../lib/monoFont";
 
 interface CodeEditorProps {
   filePath: string;
@@ -11,16 +11,24 @@ interface CodeEditorProps {
   readOnly?: boolean;
 }
 
-export function CodeEditor({ filePath, content, language, readOnly = false }: CodeEditorProps) {
-  const updateContent = useEditorStore(s => s.updateContent);
-  const saveFile = useEditorStore(s => s.saveFile);
+export function CodeEditor({
+  filePath,
+  content,
+  language,
+  readOnly = false,
+}: CodeEditorProps) {
+  const updateContent = useEditorStore((s) => s.updateContent);
+  const saveFile = useEditorStore((s) => s.saveFile);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
   const formatAndSave = useCallback(async () => {
     const ed = editorRef.current;
     if (!ed || readOnly) return;
     const currentContent = ed.getValue();
-    const { formatted, error } = await window.electronAPI.code.format(currentContent, filePath);
+    const { formatted, error } = await window.electronAPI.code.format(
+      currentContent,
+      filePath,
+    );
     if (!error && formatted !== currentContent) {
       const pos = ed.getPosition();
       updateContent(filePath, formatted);
@@ -34,7 +42,10 @@ export function CodeEditor({ filePath, content, language, readOnly = false }: Co
     const ed = editorRef.current;
     if (!ed || readOnly) return;
     const currentContent = ed.getValue();
-    const { formatted, error } = await window.electronAPI.code.format(currentContent, filePath);
+    const { formatted, error } = await window.electronAPI.code.format(
+      currentContent,
+      filePath,
+    );
     if (!error && formatted !== currentContent) {
       const pos = ed.getPosition();
       updateContent(filePath, formatted);
@@ -43,33 +54,57 @@ export function CodeEditor({ filePath, content, language, readOnly = false }: Co
     }
   }, [filePath, readOnly, updateContent]);
 
+  // @monaco-editor/react registers `onMount` exactly once per editor instance,
+  // and this editor is reused across every open file (CodeTab renders
+  // <CodeEditor> without a per-file key, and we pass no `path` prop, so Monaco
+  // swaps content into a single shared model). If the Cmd+S action closed over
+  // `formatAndSave` directly it would capture the FIRST file's `filePath`
+  // forever — after switching files, Cmd+S would then call saveFile() with the
+  // stale path, that (unmodified) file would early-return, and the edit to the
+  // visible file would silently never hit disk. Routing through a ref that we
+  // keep pointed at the latest callback makes the once-registered action always
+  // save the file currently on screen.
+  const formatAndSaveRef = useRef(formatAndSave);
+  formatAndSaveRef.current = formatAndSave;
+  const formatOnlyRef = useRef(formatOnly);
+  formatOnlyRef.current = formatOnly;
+
   const handleMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
 
     // Cmd+S / Ctrl+S — format + save
     editor.addAction({
-      id: 'format-and-save',
-      label: 'Format and Save',
+      id: "format-and-save",
+      label: "Format and Save",
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
-      run: () => { formatAndSave(); },
+      run: () => {
+        formatAndSaveRef.current();
+      },
     });
 
     // Cmd+Shift+F / Ctrl+Shift+F — format only
     editor.addAction({
-      id: 'format-code',
-      label: 'Format Code',
-      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF],
-      run: () => { formatOnly(); },
+      id: "format-code",
+      label: "Format Code",
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
+      ],
+      run: () => {
+        formatOnlyRef.current();
+      },
     });
 
     editor.focus();
-  }, [formatAndSave, formatOnly]);
+  }, []);
 
-  const handleChange = useCallback((value: string | undefined) => {
-    if (value !== undefined && !readOnly) {
-      updateContent(filePath, value);
-    }
-  }, [filePath, readOnly, updateContent]);
+  const handleChange = useCallback(
+    (value: string | undefined) => {
+      if (value !== undefined && !readOnly) {
+        updateContent(filePath, value);
+      }
+    },
+    [filePath, readOnly, updateContent],
+  );
 
   return (
     <Editor
@@ -81,7 +116,7 @@ export function CodeEditor({ filePath, content, language, readOnly = false }: Co
       onMount={handleMount}
       options={{
         readOnly,
-        minimap: { enabled: true, scale: 1, showSlider: 'mouseover' },
+        minimap: { enabled: true, scale: 1, showSlider: "mouseover" },
         fontSize: 13,
         // Match the terminals' stack. Without this Monaco uses its per-platform
         // default (Consolas on Windows), looking different from the terminals and
@@ -90,9 +125,9 @@ export function CodeEditor({ filePath, content, language, readOnly = false }: Co
         lineHeight: 20,
         padding: { top: 8 },
         scrollBeyondLastLine: false,
-        wordWrap: 'off',
+        wordWrap: "off",
         tabSize: 2,
-        renderWhitespace: 'selection',
+        renderWhitespace: "selection",
         bracketPairColorization: { enabled: true },
         automaticLayout: true,
         guides: { bracketPairs: true, indentation: true },

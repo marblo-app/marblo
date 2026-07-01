@@ -15,6 +15,8 @@ export function CodeTab() {
   const rootPath = useEditorStore((s) => s.rootPath);
   const setRootPath = useEditorStore((s) => s.setRootPath);
   const closeAllFiles = useEditorStore((s) => s.closeAllFiles);
+  const saveError = useEditorStore((s) => s.saveError);
+  const clearSaveError = useEditorStore((s) => s.clearSaveError);
   const currentProject = useProjectStore((s) => s.currentProject);
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
@@ -74,6 +76,24 @@ export function CodeTab() {
 
       {/* Editor tabs */}
       <EditorTabs />
+
+      {/* Save failure — a swallowed write error means the edit never hit disk */}
+      {saveError && (
+        <div className="flex items-center gap-2 border-b border-red-800 bg-red-950/70 px-3 py-1.5 text-xs text-red-200">
+          <span className="flex-1 truncate">
+            {t("code.saveFailed", { name: saveError.name })}:{" "}
+            {saveError.message}
+          </span>
+          <button
+            type="button"
+            onClick={clearSaveError}
+            className="flex-shrink-0 rounded px-1.5 py-0.5 text-red-300 hover:bg-red-900/60 hover:text-red-100"
+            aria-label={t("code.saveFailedDismiss")}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Editor content */}
       <div className="flex-1 overflow-hidden">

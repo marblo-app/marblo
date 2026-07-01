@@ -11,4 +11,6 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.noFileSelected.hint": "Click a file in the sidebar to open it here",
   "code.diffView": "View diff",
   "code.diffLoading": "Loading diff...",
+  "code.saveFailed": "Failed to save {name} — changes were not written to disk",
+  "code.saveFailedDismiss": "Dismiss save error",
 };

@@ -12,4 +12,6 @@ export const code = {
   "code.noFileSelected.hint": "사이드바에서 파일을 클릭하면 여기에 표시됩니다",
   "code.diffView": "Diff 보기",
   "code.diffLoading": "Diff 로딩 중...",
+  "code.saveFailed": "{name} 저장 실패 — 디스크에 기록되지 않았습니다",
+  "code.saveFailedDismiss": "저장 실패 알림 닫기",
 };
