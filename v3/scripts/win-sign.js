@@ -58,6 +58,19 @@ exports.default = async function (configuration) {
     return;
   }
 
+  // Skip bundled third-party helper binaries (e.g. node-pty's winpty-agent.exe /
+  // conpty / pty.node, shipped for several arches). Each signtool call is a fresh
+  // token access → one PIN prompt per file when single-logon/PIN-caching is off,
+  // which balloons to a dozen+ prompts. SmartScreen reputation and the
+  // electron-updater integrity check only care about the primary executables
+  // (app exe, uninstaller, and the Setup installer), which live OUTSIDE
+  // node_modules and are still signed. Set WIN_SIGN_ALL=1 to sign everything
+  // (recommended once PIN caching is enabled).
+  if (process.env.WIN_SIGN_ALL !== "1" && /[\\/]node_modules[\\/]/.test(file)) {
+    console.log(`[win-sign] skip bundled binary (WIN_SIGN_ALL!=1): ${file}`);
+    return;
+  }
+
   const signtool = resolveSigntool();
   const tsUrl =
     process.env.WIN_TIMESTAMP_URL || "http://timestamp.digicert.com";

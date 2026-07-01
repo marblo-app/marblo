@@ -64,13 +64,16 @@ win:
   # for the nsis target). electron-builder generates a correct multi-size .ico
   # from a >=256px PNG.
   icon: resources/icon.png
-  signingHashAlgorithms:
-    - sha256
-  # Build-during-sign hook (KoreaSSL EV USB token). No-op unless WIN_SIGN=1, so
-  # CI/local builds without the token stay unsigned exactly as before. Signing
-  # here (not after the build) keeps latest.yml/.blockmap hashes matching the
-  # signed exe so electron-updater doesn't break. See docs/signing_runbook.md §6-2.
-  sign: ./scripts/win-sign.js
+  # electron-builder 25 moved win.sign / signingHashAlgorithms under
+  # win.signtoolOptions (the old top-level fields warn as deprecated).
+  signtoolOptions:
+    signingHashAlgorithms:
+      - sha256
+    # Build-during-sign hook (EV USB token). No-op unless WIN_SIGN=1, so CI/local
+    # builds without the token stay unsigned exactly as before. Signing here (not
+    # after the build) keeps latest.yml/.blockmap hashes matching the signed exe
+    # so electron-updater doesn't break. See docs/signing_runbook.md §6-2.
+    sign: ./scripts/win-sign.js
 
 linux:
   target:
@@ -83,6 +86,11 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
+  # Hyphenated, space-free name so the on-disk file matches the `url`/`path`
+  # electron-builder writes into latest.yml ("Marblo-Setup-<ver>.exe"). With the
+  # default name ("Marblo Setup <ver>.exe") a manual `gh release upload` lets
+  # GitHub rewrite the spaces, breaking the updater's filename lookup (404).
+  artifactName: ${productName}-Setup-${version}.${ext}
 
 publish:
   provider: github
