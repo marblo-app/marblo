@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { useProjectStore } from "../stores/projectStore";
-import { useEditorStore } from "../stores/editorStore";
 import { useOrchestratorStore } from "../stores/orchestratorStore";
 import {
   cleanupLegacyOrchestratorDocs,
@@ -11,10 +10,21 @@ import {
  * - Stops the orchestrator when project/folder changes or unmounts.
  * - Auto-reconnects to the latest orchestrator session on mount
  *   (e.g., after page reload or session restore).
+ *
+ * The orchestrator lifecycle is bound to the project's FIXED root
+ * (currentProject.folderPath), NOT to editorStore.rootPath (the path the
+ * editor/file-tree is currently viewing). Merely opening a worktree for
+ * inspection moves rootPath (WorktreeTab/TaskCard), and keying off it would
+ * tear down and relaunch the running orchestrator in a different
+ * claudeProjectDir — destroying its conversation context. Keying off
+ * folderPath keeps the orchestrator stable across worktree browsing while
+ * still tearing down on a genuine project switch.
  */
 export function useOrchestratorAutoLaunch() {
   const currentProject = useProjectStore((s) => s.currentProject);
-  const rootPath = useEditorStore((s) => s.rootPath);
+  // Project fixed root — see header comment. Falls back to null when the
+  // project has no folder bound (orchestrator can't run without a root).
+  const fixedRoot = currentProject?.folderPath ?? null;
   const clear = useOrchestratorStore((s) => s.clear);
   const prevKeyRef = useRef<string | null>(null);
   const autoConnectRef = useRef(false);
@@ -22,7 +32,7 @@ export function useOrchestratorAutoLaunch() {
   // Teardown on project/folder change
   useEffect(() => {
     const projectId = currentProject?.id;
-    const key = projectId && rootPath ? `${projectId}:${rootPath}` : null;
+    const key = projectId && fixedRoot ? `${projectId}:${fixedRoot}` : null;
 
     if (prevKeyRef.current && prevKeyRef.current !== key) {
       window.electronAPI.orchestratorSession.stop().catch(() => {});
@@ -35,14 +45,14 @@ export function useOrchestratorAutoLaunch() {
       window.electronAPI.orchestratorSession.stop().catch(() => {});
       clear();
     };
-  }, [currentProject?.id, rootPath, clear]);
+  }, [currentProject?.id, fixedRoot, clear]);
 
   // Auto-reconnect: separate effect so status changes don't trigger cleanup
   const setSession = useOrchestratorStore((s) => s.setSession);
   const setStatus = useOrchestratorStore((s) => s.setStatus);
 
   useEffect(() => {
-    if (autoConnectRef.current || !currentProject?.id || !rootPath) return;
+    if (autoConnectRef.current || !currentProject?.id || !fixedRoot) return;
     autoConnectRef.current = true;
 
     const projectId = currentProject.id;
@@ -60,14 +70,14 @@ export function useOrchestratorAutoLaunch() {
         // no prior orchestrator session.
         const priorId =
           await window.electronAPI.orchestratorSession.resolvePrevious(
-            rootPath,
+            fixedRoot,
           );
         const resumeId = priorId ?? "new";
 
         setStatus("starting");
         const result = await window.electronAPI.orchestratorSession.launch(
           projectId,
-          rootPath,
+          fixedRoot,
           resumeId,
         );
         if (result) {
@@ -92,5 +102,5 @@ export function useOrchestratorAutoLaunch() {
     };
 
     tryAutoConnect();
-  }, [currentProject?.id, rootPath, setSession, setStatus]);
+  }, [currentProject?.id, fixedRoot, setSession, setStatus]);
 }
