@@ -65,7 +65,13 @@ export class FsManager {
    * Check if a name should be ignored
    */
   private shouldIgnore(name: string, ignores: Set<string>): boolean {
-    if (name.startsWith(".") && name !== ".env.example") return true;
+    // Env config files (.env, .env.local, .env.production, .env.example, …)
+    // are always shown, even though they're dotfiles and usually gitignored —
+    // users need to see and edit them in the tree. This wins over BOTH the
+    // blanket dotfile hide below AND the gitignore-derived `ignores` set
+    // (which lists .env / .env.* from .gitignore).
+    if (name === ".env" || name.startsWith(".env.")) return false;
+    if (name.startsWith(".")) return true;
     return ignores.has(name);
   }
 
@@ -168,7 +174,7 @@ export class FsManager {
    * Get git diff for a specific file
    */
   async getGitDiff(
-    filePath: string,
+    filePath: string
   ): Promise<{ original: string; modified: string }> {
     const dir = path.dirname(filePath);
     return new Promise((resolve) => {
@@ -177,7 +183,7 @@ export class FsManager {
         const proc = spawn(
           "git",
           ["show", `HEAD:${path.relative(this.findGitRoot(dir), filePath)}`],
-          { cwd: dir },
+          { cwd: dir }
         );
         let original = "";
 
@@ -331,7 +337,7 @@ export class FsManager {
   watchDirectory(
     token: string,
     rootPath: string,
-    callback: (event: string, filePath: string) => void,
+    callback: (event: string, filePath: string) => void
   ): void {
     const existing = this.watchers.get(token);
     if (existing) existing.close();
@@ -348,7 +354,7 @@ export class FsManager {
             if (parts.some((p) => DEFAULT_IGNORES.has(p))) return;
             callback(eventType, fullPath);
           }
-        },
+        }
       );
       this.watchers.set(token, watcher);
     } catch {
