@@ -16,26 +16,31 @@ import {
   Lock,
 } from "lucide-react";
 
-// 버전 고정 다운로드 링크 — 새 빌드 릴리스 시 이 두 값만 갱신.
-const APP_VERSION = "v3.0.0";
-const RELEASE_BASE =
-  "https://github.com/melocream/marblo-releases/releases/download/v3.0.0";
+// 버전 고정 다운로드 링크 — 새 빌드 릴리스 시 이 값만 갱신.
+// 실제 릴리스 자산 파일명 패턴: Marblo-<ver>-arm64.dmg / Marblo-Setup-<ver>.exe
+const APP_VERSION = "v3.0.1";
+// 파일명에 쓰는 버전(선행 v 없는 SemVer). APP_VERSION 에서 파생.
+const VERSION = APP_VERSION.replace(/^v/, "");
+const RELEASE_BASE = `https://github.com/melocream/marblo-releases/releases/download/${APP_VERSION}`;
 
 type MacArch = "universal" | "arm64" | "x64";
 
-// 현재 빌드는 Universal DMG 단일 산출(electron-builder mac.arch: universal)로
-// Intel(x64)·Apple Silicon(arm64) 모두에서 네이티브 실행된다. 그래서 세 아키 모두
-// 같은 universal DMG 로 매핑한다. 추후 per-arch DMG 로 분리하면 이 맵만 바꾸면 된다.
+// v3.0.1 릴리스는 arm64 DMG 단일 산출이다(universal 빌드는 깨져서 미산출됨).
+// 따라서 세 아키 키 모두 실체인 arm64 DMG(Apple Silicon 대상)로 매핑한다.
+// per-arch/universal 자산이 다시 산출되면 이 맵만 바꾸면 된다.
 const MAC_DMG_URLS: Record<MacArch, string> = {
-  universal: `${RELEASE_BASE}/Marblo-3.0.0-universal.dmg`,
-  arm64: `${RELEASE_BASE}/Marblo-3.0.0-universal.dmg`,
-  x64: `${RELEASE_BASE}/Marblo-3.0.0-universal.dmg`,
+  universal: `${RELEASE_BASE}/Marblo-${VERSION}-arm64.dmg`,
+  arm64: `${RELEASE_BASE}/Marblo-${VERSION}-arm64.dmg`,
+  x64: `${RELEASE_BASE}/Marblo-${VERSION}-arm64.dmg`,
 };
+
+// Windows 인스톨러(NSIS). 실제 자산 파일명: Marblo-Setup-<ver>.exe
+const WIN_EXE_URL = `${RELEASE_BASE}/Marblo-Setup-${VERSION}.exe`;
 
 // 브라우저에서 macOS 칩(Intel vs Apple Silicon)을 베스트에포트로 감지한다.
 // UA 문자열은 Apple Silicon 에서도 "Intel Mac OS X" 로 보고하므로 신뢰 불가 →
 // WebGL 렌더러 문자열로 판별("Apple" 계열 = arm64, Intel/AMD/NVIDIA = x64).
-// 감지 실패 시 universal 로 폴백한다(어차피 universal 이 항상 올바른 자산).
+// 감지 실패 시 universal 키로 폴백한다(현재 세 키 모두 arm64 DMG 로 매핑되어 동일).
 function detectMacArch(): MacArch {
   if (typeof navigator === "undefined" || typeof document === "undefined") {
     return "universal";
@@ -75,8 +80,8 @@ export default function DownloadPage() {
   const t = useTranslations("download");
   const locale = useLocale();
   const [state, setState] = useState<AccessState>("loading");
-  // 서버/하이드레이션 일치를 위해 초기값은 universal(항상 올바른 자산). 마운트 후
-  // 클라이언트에서 감지해 칩 라벨만 정밀화한다 — DMG 링크는 어차피 동일.
+  // 서버/하이드레이션 일치를 위해 초기값은 universal 키. 마운트 후 클라이언트에서
+  // 감지해 칩 라벨만 정밀화한다 — 현재 세 키 모두 같은 arm64 DMG 로 매핑된다.
   const [macArch, setMacArch] = useState<MacArch>("universal");
 
   useEffect(() => {
@@ -179,7 +184,7 @@ export default function DownloadPage() {
             </p>
 
             <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* macOS — 다운로드 가능 (Universal: Intel·Apple Silicon 공용) */}
+              {/* macOS — 다운로드 가능 (arm64 단일 산출, Apple Silicon 대상) */}
               <a
                 href={MAC_DMG_URLS[macArch]}
                 className="group flex flex-col items-center justify-center gap-3 p-6 rounded-xl border border-indigo-500/50 bg-indigo-600/10 hover:bg-indigo-600/20 hover:border-indigo-400 transition"
@@ -198,14 +203,21 @@ export default function DownloadPage() {
                 </span>
               </a>
 
-              {/* Windows — 준비 중 */}
-              <div className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl border border-zinc-800 bg-zinc-900/50 opacity-60">
-                <Monitor className="w-7 h-7 text-zinc-400" />
-                <span className="text-sm font-medium text-zinc-300">
+              {/* Windows — 다운로드 가능 (NSIS 인스톨러) */}
+              <a
+                href={WIN_EXE_URL}
+                className="group flex flex-col items-center justify-center gap-3 p-6 rounded-xl border border-indigo-500/50 bg-indigo-600/10 hover:bg-indigo-600/20 hover:border-indigo-400 transition"
+              >
+                <Monitor className="w-7 h-7 text-zinc-200" />
+                <span className="text-sm font-medium text-zinc-100">
                   {t("windows")}
                 </span>
-                <span className="text-xs text-zinc-500">{t("preparing")}</span>
-              </div>
+                <span className="text-xs text-zinc-400">{APP_VERSION}</span>
+                <span className="mt-1 inline-flex items-center gap-2 bg-indigo-600 group-hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
+                  <Download className="w-4 h-4" />
+                  {t("download_now")}
+                </span>
+              </a>
             </div>
 
             <div className="mt-12 p-8 rounded-2xl border border-zinc-800 bg-zinc-900/40">
