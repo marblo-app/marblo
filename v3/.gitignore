@@ -10,6 +10,9 @@ release/
 .env
 .env.local
 .env.production
+# Firebase Functions v2 dotenv — per-project secrets, never commit
+.env.marblo-2253d
+.env.*.local
 
 # Claude Code local settings
 .claude/settings.local.json
