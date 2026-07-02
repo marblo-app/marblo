@@ -37,4 +37,11 @@ export const bugReport = {
   "bugReport.modal.rateLimited":
     "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
   "bugReport.modal.close": "닫기",
+
+  // ── One-time in-app notice (post-update discovery) ──────
+  "bugReport.notice.title": "🐛 버그 신고가 더 쉬워졌어요",
+  "bugReport.notice.body":
+    "이제 앱 상단 바의 🐛 버튼으로 어디서든 버그를 신고할 수 있어요.",
+  "bugReport.notice.cta": "지금 신고하기",
+  "bugReport.notice.dismiss": "안내 닫기",
 };

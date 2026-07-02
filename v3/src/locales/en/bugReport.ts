@@ -38,4 +38,11 @@ export const bugReport: Record<keyof typeof koBugReport, string> = {
   "bugReport.modal.loginRequired": "Sign in to report a bug.",
   "bugReport.modal.rateLimited": "Too many requests. Please try again shortly.",
   "bugReport.modal.close": "Close",
+
+  // ── One-time in-app notice (post-update discovery) ──────
+  "bugReport.notice.title": "🐛 Reporting bugs just got easier",
+  "bugReport.notice.body":
+    "You can now report a bug from anywhere using the 🐛 button in the app's top bar.",
+  "bugReport.notice.cta": "Report now",
+  "bugReport.notice.dismiss": "Dismiss notice",
 };

@@ -19,6 +19,7 @@ import { SettingsPage } from "./settings/SettingsPage";
 import { PlanGate } from "./settings/PlanGate";
 import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
 import { ChatToastHost } from "./chat/ChatToastHost";
+import { BugReportNoticeToast } from "./chat/BugReportNoticeToast";
 import { TaskCreateModal } from "./board/TaskCreateModal";
 import { HarnessStore } from "./harness/HarnessStore";
 import { GuideTab } from "./guide/GuideTab";
@@ -421,6 +422,10 @@ export function Layout() {
 
       {/* Global team-chat listener and transient top notification. */}
       <ChatToastHost />
+
+      {/* One-time notice: surfaces the new 🐛 bug-report button (PR #284)
+          to existing users after an update. Shows once, then never again. */}
+      <BugReportNoticeToast />
 
       {/* Modals triggered from CommandPanel */}
       {showOrchestratorChat && (
