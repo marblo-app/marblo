@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 import app from '@/lib/firebase';
+import { lectures } from '@/data/lectures';
+import { trackPurchase } from '@/lib/gtag';
 import { Check, Loader2, BookOpen, Download, LayoutDashboard, Home } from 'lucide-react';
 
 const PLAN_NAMES: Record<string, string> = {
@@ -20,11 +22,57 @@ export default function CheckoutSuccessPage() {
   const [processing, setProcessing] = useState(true);
   const [success, setSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // GA4 purchase 중복 발화 가드 — StrictMode 이중 마운트/재실행 방지.
+  const purchaseFiredRef = useRef(false);
 
   const type = searchParams.get('type');
   const plan = searchParams.get('plan');
   const amount = searchParams.get('amount');
   const isLecture = type === 'lecture';
+
+  // 강의 결제 확정 성공 시 GA4 purchase 1회만 발화.
+  // orderId 기준 중복 가드: ref(마운트 내) + sessionStorage(리로드/재마운트 간).
+  // 이메일 등 PII 는 넣지 않는다 — orderId(비식별)·금액·상품 slug/제목만.
+  const fireLecturePurchase = (orderId: string, amountParam: string) => {
+    const dedupeKey = `ga4_purchase_${orderId}`;
+    if (purchaseFiredRef.current) return;
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage.getItem(dedupeKey)) {
+        purchaseFiredRef.current = true;
+        return;
+      }
+    } catch {
+      // sessionStorage 접근 불가 — ref 가드만으로 진행
+    }
+    purchaseFiredRef.current = true;
+    try {
+      if (typeof window !== 'undefined') window.sessionStorage.setItem(dedupeKey, '1');
+    } catch {
+      // 무시 — 저장 실패해도 ref 가 이번 마운트 중복은 막음
+    }
+
+    const slug = searchParams.get('slug');
+    const lecture = slug ? lectures.find((l) => l.slug === slug) : undefined;
+    const itemName = lecture
+      ? locale === 'ko'
+        ? lecture.title_ko
+        : lecture.title_en
+      : undefined;
+    trackPurchase({
+      transactionId: orderId,
+      value: Number(amountParam),
+      currency: 'KRW',
+      items: [
+        {
+          item_id: slug ?? 'lecture',
+          item_name: itemName,
+          item_category: 'lecture',
+          price: Number(amountParam),
+          quantity: 1,
+        },
+      ],
+    });
+  };
 
   useEffect(() => {
     const confirmPayment = async () => {
@@ -39,6 +87,7 @@ export default function CheckoutSuccessPage() {
         if (isLecture && paymentKey && orderId && amountParam) {
           const confirm = httpsCallable(functions, 'confirmLecturePayment');
           await confirm({ paymentKey, orderId, amount: Number(amountParam) });
+          fireLecturePurchase(orderId, amountParam);
         } else if (authKey && customerKey && plan) {
           const issue = httpsCallable(functions, 'issueBillingKey');
           await issue({ authKey, customerKey, plan });

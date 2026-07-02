@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { notFound } from "next/navigation";
@@ -14,6 +15,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import PromoBar from "@/components/PromoBar";
 import PrivacyConsentGate from "@/components/PrivacyConsentGate";
+import GoogleAnalytics from "@/components/GoogleAnalytics";
 import "../globals.css";
 
 export async function generateMetadata({
@@ -94,6 +96,10 @@ export default async function LocaleLayout({
   return (
     <html lang={locale} className="dark">
       <body className="bg-zinc-950 text-white min-h-screen flex flex-col">
+        {/* GA4 로더 + 자동 pageview (측정ID 없으면 no-op). useSearchParams 사용 → Suspense 필수 */}
+        <Suspense fallback={null}>
+          <GoogleAnalytics />
+        </Suspense>
         <NextIntlClientProvider messages={messages}>
           <PromoBar />
           <Header />

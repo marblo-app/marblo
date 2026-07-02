@@ -6,6 +6,7 @@ import Link from "next/link";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { db } from "@/lib/firebase";
+import { trackGenerateLead } from "@/lib/gtag";
 
 const COLLECTION = "betatester50_waitlist";
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -67,6 +68,9 @@ export default function BetaTester50SignupForm({
         agreedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
       });
+      // GA4 generate_lead — waitlist 문서 쓰기 성공 직후에만 발화.
+      // ⚠️ 이메일 등 PII 미포함 — source/locale 같은 비식별 값만.
+      trackGenerateLead({ source, locale });
       setStatus("success");
       onSuccess?.();
     } catch {

@@ -7,6 +7,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { httpsCallable, getFunctions } from "firebase/functions";
 import { auth } from "@/lib/firebase";
 import app from "@/lib/firebase";
+import { trackAppDownload } from "@/lib/gtag";
 import {
   Apple,
   Monitor,
@@ -187,6 +188,13 @@ export default function DownloadPage() {
               {/* macOS — 다운로드 가능 (arm64 단일 산출, Apple Silicon 대상) */}
               <a
                 href={MAC_DMG_URLS[macArch]}
+                onClick={() =>
+                  trackAppDownload({
+                    os: "mac",
+                    arch: macArch,
+                    appVersion: APP_VERSION,
+                  })
+                }
                 className="group flex flex-col items-center justify-center gap-3 p-6 rounded-xl border border-indigo-500/50 bg-indigo-600/10 hover:bg-indigo-600/20 hover:border-indigo-400 transition"
               >
                 <Apple className="w-7 h-7 text-zinc-200" />
@@ -206,6 +214,9 @@ export default function DownloadPage() {
               {/* Windows — 다운로드 가능 (NSIS 인스톨러) */}
               <a
                 href={WIN_EXE_URL}
+                onClick={() =>
+                  trackAppDownload({ os: "win", appVersion: APP_VERSION })
+                }
                 className="group flex flex-col items-center justify-center gap-3 p-6 rounded-xl border border-indigo-500/50 bg-indigo-600/10 hover:bg-indigo-600/20 hover:border-indigo-400 transition"
               >
                 <Monitor className="w-7 h-7 text-zinc-200" />

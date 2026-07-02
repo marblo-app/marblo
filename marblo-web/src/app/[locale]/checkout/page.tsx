@@ -10,6 +10,7 @@ import { auth } from "@/lib/firebase";
 import app from "@/lib/firebase";
 import CouponInput from "@/components/CouponInput";
 import { lectures } from "@/data/lectures";
+import { trackBeginCheckout } from "@/lib/gtag";
 import { ArrowLeft, Loader2, AlertCircle, ShoppingCart } from "lucide-react";
 
 const PLAN_PRICES: Record<
@@ -127,6 +128,21 @@ export default function CheckoutPage() {
     }
     setLoading(true);
     setError(null);
+    // GA4 begin_checkout — 결제 요청 직전 발화(값/상품만, PII 없음).
+    trackBeginCheckout({
+      value: finalAmount,
+      currency: "KRW",
+      checkoutType: isLecture ? "lecture" : "subscription",
+      items: [
+        {
+          item_id: isLecture ? lectureSlug || "lecture" : plan || "plan",
+          item_name: itemName,
+          item_category: isLecture ? "lecture" : "subscription",
+          price: finalAmount,
+          quantity: 1,
+        },
+      ],
+    });
     try {
       if (isLecture && lectureSlug) {
         const functions = getFunctions(app, "us-central1");
@@ -146,7 +162,7 @@ export default function CheckoutPage() {
           amount: { currency: "KRW", value: data.amount },
           orderId: data.orderId,
           orderName: data.orderName,
-          successUrl: `${window.location.origin}/${locale}/checkout/success?type=lecture`,
+          successUrl: `${window.location.origin}/${locale}/checkout/success?type=lecture&slug=${lectureSlug}`,
           failUrl: `${window.location.origin}/${locale}/checkout/fail`,
         });
       } else if (plan) {
