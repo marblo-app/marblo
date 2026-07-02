@@ -19,6 +19,7 @@ from app.mcp_tools import (
     update_task_status,
 )
 from app.models import ActivityLog, AgentRole, Base, Task, TaskStatus
+from app.routers import plan as plan_router
 from app.schemas import (
     ActivityLogCreate,
     ActivityLogResponse,
@@ -60,6 +61,9 @@ app.add_middleware(
 
 # SSE endpoint for real-time updates
 app.add_api_route("/api/events", sse_endpoint, methods=["GET"])
+
+# Plan-based feature limits & usage dashboard
+app.include_router(plan_router.router)
 
 
 # --- REST API Endpoints ---
