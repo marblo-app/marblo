@@ -75,6 +75,18 @@ export default function Footer() {
                     : "Download"}
                 </Link>
               </li>
+              <li>
+                <Link
+                  href={`/${locale}/bugs`}
+                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                >
+                  {locale === "ko"
+                    ? "버그 신고"
+                    : locale === "ja"
+                    ? "バグを報告"
+                    : "Report a bug"}
+                </Link>
+              </li>
             </ul>
           </div>
 

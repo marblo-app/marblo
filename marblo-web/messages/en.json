@@ -522,5 +522,26 @@
     "title": "Page not found",
     "description": "The page you are looking for does not exist or has moved.",
     "home_cta": "Back to home"
+  },
+  "bugReport": {
+    "title": "Report a bug",
+    "subtitle": "Ran into a problem? Tell us what happened — the team looks at every report.",
+    "descriptionLabel": "What happened?",
+    "descriptionPlaceholder": "e.g. I launched an agent and the terminal froze on a black screen.",
+    "reproLabel": "Steps to reproduce (optional)",
+    "reproPlaceholder": "1) ...\n2) ...\n3) ...",
+    "expectedLabel": "Expected result (optional)",
+    "expectedPlaceholder": "e.g. The agent should have started the task normally.",
+    "privacyNote": "No need to enter personal info like your name or email — it's linked automatically from your signed-in account.",
+    "submit": "Send report",
+    "submitting": "Sending...",
+    "required": "Please describe what happened.",
+    "successTitle": "Report received",
+    "successBody": "Thanks for the report. The team will take a look.",
+    "submitAnother": "Report another bug",
+    "backHome": "Back home",
+    "errorGeneric": "Couldn't send your report. Please try again in a moment.",
+    "errorUnauthenticated": "You need to be signed in. Please sign in and try again.",
+    "errorRateLimited": "Too many requests. Please try again in a moment."
   }
 }

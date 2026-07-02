@@ -42,6 +42,7 @@ Marblo 파운더 베타에 오신 걸 환영해요. 여러분은 **AI 에이전�
 ### 5) 버그 신고 요령
 
 - **앱 내에서 바로**: 앱 **상단바 오른쪽의 🐛 버그 신고** 버튼을 누르면 어느 화면에서든 신고 창이 열려요. (**설정 → 버그리포트** 탭에서도 동일한 창이 열립니다.) 앱 버전·OS 등이 자동 첨부되니 무슨 일이 있었는지만 적으면 됩니다.
+- **웹에서**: 앱을 열 수 없을 때는 `marblo.app/bugs` 에서 로그인 후 바로 신고할 수 있어요.
 - **디스코드로**: 논의가 필요하거나 급한 이슈는 `#bugs` 채널에 스크린샷과 함께 아래 형식으로 남겨주세요:
 
 ```
@@ -98,6 +99,7 @@ Welcome to the Marblo Founder Beta. You're among the first to run a whole **team
 ### 5) How to report a bug
 
 - **Right inside the app**: Click the **🐛 Report Bug** button on the **right side of the top bar** to report from any screen. (The same dialog is also under **Settings → Report a Bug**.) Your app version, OS, etc. are auto-attached — just describe what happened.
+- **On the web**: If you can't open the app, report it straight from `marblo.app/bugs` after signing in.
 - **On Discord**: For anything urgent or worth discussing, drop it in `#bugs` with a screenshot, using this format:
 
 ```

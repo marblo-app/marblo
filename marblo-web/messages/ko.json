@@ -522,5 +522,26 @@
     "title": "페이지를 찾을 수 없습니다",
     "description": "요청하신 페이지가 존재하지 않거나 이동되었어요.",
     "home_cta": "홈으로 돌아가기"
+  },
+  "bugReport": {
+    "title": "버그 신고",
+    "subtitle": "문제를 발견하셨나요? 무슨 일이 있었는지 알려주세요. 개발팀이 바로 확인합니다.",
+    "descriptionLabel": "무슨 일이 있었나요?",
+    "descriptionPlaceholder": "예: 에이전트를 실행했더니 터미널이 검은 화면으로 멈췄어요.",
+    "reproLabel": "재현 단계 (선택)",
+    "reproPlaceholder": "1) ...\n2) ...\n3) ...",
+    "expectedLabel": "기대한 결과 (선택)",
+    "expectedPlaceholder": "예: 에이전트가 정상적으로 작업을 시작했어야 합니다.",
+    "privacyNote": "이름·이메일 같은 개인정보는 입력하지 않아도 됩니다. 로그인 계정 정보로 자동 연결됩니다.",
+    "submit": "신고 보내기",
+    "submitting": "보내는 중...",
+    "required": "무슨 일이 있었는지 설명을 입력해 주세요.",
+    "successTitle": "신고가 접수되었습니다",
+    "successBody": "소중한 제보 감사합니다. 개발팀이 확인하겠습니다.",
+    "submitAnother": "다른 버그 신고하기",
+    "backHome": "홈으로",
+    "errorGeneric": "신고를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "errorUnauthenticated": "로그인이 필요합니다. 다시 로그인한 뒤 시도해 주세요.",
+    "errorRateLimited": "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요."
   }
 }

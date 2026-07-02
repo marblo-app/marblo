@@ -15,6 +15,7 @@ import {
   Download,
   Loader2,
   Lock,
+  Bug,
 } from "lucide-react";
 
 // 버전 고정 다운로드 링크 — 새 빌드 릴리스 시 이 값만 갱신.
@@ -79,6 +80,7 @@ type AccessState = "loading" | "anon" | "pending" | "granted";
 
 export default function DownloadPage() {
   const t = useTranslations("download");
+  const tBug = useTranslations("bugReport");
   const locale = useLocale();
   const [state, setState] = useState<AccessState>("loading");
   // 서버/하이드레이션 일치를 위해 초기값은 universal 키. 마운트 후 클라이언트에서
@@ -252,6 +254,19 @@ export default function DownloadPage() {
               </div>
             </div>
           </>
+        )}
+
+        {/* 버그 신고 안내 — 모든 상태(미로그인/대기/선정)에서 노출. 웹이라 릴리스 없이 즉시 도달. */}
+        {state !== "loading" && (
+          <p className="mt-10 text-sm text-zinc-500">
+            <Link
+              href={`/${locale}/bugs`}
+              className="inline-flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 transition"
+            >
+              <Bug className="w-4 h-4" />
+              {tBug("title")}
+            </Link>
+          </p>
         )}
       </div>
     </div>

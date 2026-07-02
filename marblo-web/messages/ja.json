@@ -522,5 +522,26 @@
     "title": "ページが見つかりません",
     "description": "お探しのページは存在しないか、移動しました。",
     "home_cta": "ホームへ戻る"
+  },
+  "bugReport": {
+    "title": "バグを報告",
+    "subtitle": "問題が発生しましたか？何が起きたか教えてください。開発チームがすぐに確認します。",
+    "descriptionLabel": "何が起きましたか？",
+    "descriptionPlaceholder": "例：エージェントを起動したらターミナルが黒い画面のまま固まりました。",
+    "reproLabel": "再現手順（任意）",
+    "reproPlaceholder": "1) ...\n2) ...\n3) ...",
+    "expectedLabel": "期待した結果（任意）",
+    "expectedPlaceholder": "例：エージェントが正常にタスクを開始するはずでした。",
+    "privacyNote": "名前やメールなどの個人情報を入力する必要はありません。ログイン中のアカウントから自動的に紐付けられます。",
+    "submit": "報告を送信",
+    "submitting": "送信中...",
+    "required": "何が起きたか説明を入力してください。",
+    "successTitle": "報告を受け付けました",
+    "successBody": "ご報告ありがとうございます。開発チームが確認します。",
+    "submitAnother": "別のバグを報告",
+    "backHome": "ホームへ",
+    "errorGeneric": "報告を送信できませんでした。しばらくしてから再度お試しください。",
+    "errorUnauthenticated": "ログインが必要です。ログインし直してからお試しください。",
+    "errorRateLimited": "リクエストが多すぎます。しばらくしてから再度お試しください。"
   }
 }
