@@ -6,6 +6,7 @@ import { useSubscriptionStore } from "../stores/subscriptionStore";
 import { useActivityStreamStore } from "../stores/activityStreamStore";
 import { useTranslation } from "../lib/i18n";
 import { createProject } from "../services/projectService";
+import { BugReportModal } from "./settings/BugReportModal";
 
 interface HeaderProps {
   onNavigateToSettings?: () => void;
@@ -50,6 +51,32 @@ function ActivityStreamToggle() {
   );
 }
 
+/**
+ * Global "Report a bug" entry point. Always visible in the header so beta
+ * users can reach the existing BugReportModal without digging through
+ * Settings → Bug Report. Reuses the exact same modal + submitBugReport path;
+ * this only adds a second trigger.
+ */
+function BugReportButton() {
+  const { t } = useTranslation();
+  const [showModal, setShowModal] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setShowModal(true)}
+        title={t("bugReport.globalButtonTitle")}
+        aria-label={t("bugReport.globalButtonTitle")}
+        className="flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-gray-800 hover:text-gray-200"
+      >
+        <span aria-hidden>🐛</span>
+        <span>{t("bugReport.globalButton")}</span>
+      </button>
+      {showModal && <BugReportModal onClose={() => setShowModal(false)} />}
+    </>
+  );
+}
+
 const PLAN_BADGE_STYLES: Record<string, string> = {
   free: "bg-gray-500/20 text-gray-400 border-gray-500/30",
   pro: "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -65,7 +92,7 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
   const setRootPath = useEditorStore((s) => s.setRootPath);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
 
-  const handleSelectProject = (project: typeof projects[number]) => {
+  const handleSelectProject = (project: (typeof projects)[number]) => {
     if (currentProject?.id === project.id) {
       setShowProjectMenu(false);
       return;
@@ -237,6 +264,8 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
         className="flex items-center gap-1"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
+        <BugReportButton />
+
         <ActivityStreamToggle />
 
         <div className="relative" ref={userMenuRef}>

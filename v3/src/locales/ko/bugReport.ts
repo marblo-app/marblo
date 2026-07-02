@@ -10,6 +10,10 @@ export const bugReport = {
     "문제를 발견하셨나요? 무엇이 잘못되었는지 알려주시면 빠르게 살펴보겠습니다. 앱 버전·OS 등 진단에 필요한 정보가 자동으로 첨부됩니다.",
   "bugReport.button": "버그 신고하기",
 
+  // ── Global entry point (header) ─────────────────────────
+  "bugReport.globalButton": "버그 신고",
+  "bugReport.globalButtonTitle": "버그 신고 — 문제가 있으면 알려주세요",
+
   // ── Modal ───────────────────────────────────────────────
   "bugReport.modal.title": "버그 신고",
   "bugReport.modal.descriptionLabel": "무슨 일이 있었나요?",

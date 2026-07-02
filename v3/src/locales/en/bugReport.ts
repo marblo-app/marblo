@@ -12,6 +12,10 @@ export const bugReport: Record<keyof typeof koBugReport, string> = {
     "Found something broken? Tell us what went wrong and we'll take a look. Diagnostic details like app version and OS are attached automatically.",
   "bugReport.button": "Report a Bug",
 
+  // ── Global entry point (header) ─────────────────────────
+  "bugReport.globalButton": "Report Bug",
+  "bugReport.globalButtonTitle": "Report a bug — tell us if anything's broken",
+
   // ── Modal ───────────────────────────────────────────────
   "bugReport.modal.title": "Report a Bug",
   "bugReport.modal.descriptionLabel": "What happened?",
