@@ -12,6 +12,7 @@ import {
   Key,
   Calendar,
   Percent,
+  ArrowRight,
 } from "lucide-react";
 import BetaTester50SignupForm from "@/components/BetaTester50SignupForm";
 
@@ -65,11 +66,8 @@ export default function Foundation50Page() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       {/* ===================== HERO ===================== */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-indigo-950/40 via-zinc-950 to-zinc-950" />
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[450px] bg-indigo-600/10 rounded-full blur-3xl" />
-
-        <div className="relative max-w-4xl mx-auto px-4 pt-24 pb-12 text-center">
+      <section>
+        <div className="max-w-4xl mx-auto px-4 pt-24 pb-12 text-center">
           <span className="inline-flex items-center gap-2 bg-indigo-600/15 text-indigo-300 border border-indigo-500/40 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider">
             <Sparkles className="w-3.5 h-3.5" />
             {t("badge")}
@@ -82,7 +80,10 @@ export default function Foundation50Page() {
           </p>
           <p className="text-sm text-zinc-500 mt-4">{t("limit_note")}</p>
 
-          <div className="mt-8 max-w-xl mx-auto text-left">
+          <div
+            id="apply"
+            className="mt-8 max-w-xl mx-auto text-left scroll-mt-24"
+          >
             <BetaTester50SignupForm source="foundation50_page" />
           </div>
         </div>
@@ -171,16 +172,20 @@ export default function Foundation50Page() {
 
       {/* ===================== CTA ===================== */}
       <section className="max-w-3xl mx-auto px-4 py-16">
-        <div className="bg-gradient-to-br from-indigo-900/40 via-zinc-900 to-zinc-900 border border-indigo-500/30 rounded-2xl p-10 text-center">
+        <div className="bg-zinc-900/60 border border-indigo-500/30 rounded-2xl p-10 text-center">
           <h2 className="text-2xl md:text-3xl font-bold mb-3">
             {t("cta_heading")}
           </h2>
           <p className="text-zinc-300 mb-7 whitespace-pre-line leading-relaxed">
             {t("cta_body")}
           </p>
-          <div className="max-w-xl mx-auto text-left">
-            <BetaTester50SignupForm source="foundation50_page" />
-          </div>
+          <a
+            href="#apply"
+            className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-7 py-4 rounded-xl text-base font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900"
+          >
+            {t("cta_button")}
+            <ArrowRight className="w-4 h-4" aria-hidden="true" />
+          </a>
           <p className="text-xs text-zinc-500 mt-5 leading-relaxed">
             {t("cta_note")}
           </p>
@@ -207,19 +212,19 @@ export default function Foundation50Page() {
         <div className="flex flex-col sm:flex-row gap-3 justify-center mt-8">
           <Link
             href={`/${locale}/founders/faq`}
-            className="bg-indigo-600/20 border border-indigo-500/50 hover:bg-indigo-600/30 text-indigo-100 px-6 py-3 rounded-lg font-medium transition text-center"
+            className="bg-indigo-600/20 border border-indigo-500/50 hover:bg-indigo-600/30 text-indigo-100 px-6 py-3 rounded-lg font-medium transition text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
           >
             {t("faq_link")}
           </Link>
           <Link
             href={`/${locale}/pricing`}
-            className="border border-zinc-700 hover:bg-zinc-800 text-zinc-200 px-6 py-3 rounded-lg font-medium transition text-center"
+            className="border border-zinc-700 hover:bg-zinc-800 text-zinc-200 px-6 py-3 rounded-lg font-medium transition text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
           >
             {t("footer_pricing_cta")}
           </Link>
           <Link
             href={`/${locale}/lectures`}
-            className="border border-zinc-700 hover:bg-zinc-800 text-zinc-200 px-6 py-3 rounded-lg font-medium transition text-center"
+            className="border border-zinc-700 hover:bg-zinc-800 text-zinc-200 px-6 py-3 rounded-lg font-medium transition text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
           >
             {t("footer_lectures_cta")}
           </Link>

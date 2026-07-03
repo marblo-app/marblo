@@ -3,9 +3,8 @@
 import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
-import { Sparkles, X } from "lucide-react";
+import { Sparkles, ArrowRight, X } from "lucide-react";
 import { isPromoBarOpen, PROMO_BAR_DISMISS_KEY } from "@/lib/foundation50";
-import BetaTester50SignupForm from "./BetaTester50SignupForm";
 
 function subscribeDismissed(callback: () => void) {
   if (typeof window === "undefined") return () => {};
@@ -50,33 +49,30 @@ export default function PromoBar() {
   };
 
   return (
-    <div className="relative z-[60] border-b border-indigo-500/30 bg-gradient-to-r from-indigo-700/40 via-violet-700/30 to-indigo-700/40 backdrop-blur">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 text-sm">
-          <div className="flex items-center gap-2 text-indigo-100">
-            <Sparkles className="w-4 h-4 text-indigo-300 shrink-0" />
-            <span className="font-medium">{t("message")}</span>
-          </div>
-
-          <div className="hidden sm:block w-full sm:w-auto sm:max-w-md">
-            <BetaTester50SignupForm
-              source="promo_bar"
-              layout="inline-compact"
-            />
-          </div>
+    <div className="relative z-[60] border-b border-indigo-500/20 bg-indigo-950/60 backdrop-blur">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-center gap-x-3 gap-y-1 py-1.5 pr-8 text-sm flex-wrap">
+          <Sparkles
+            className="w-4 h-4 text-indigo-300 shrink-0"
+            aria-hidden="true"
+          />
+          <span className="font-medium text-indigo-100 text-center">
+            {t("message")}
+          </span>
 
           <Link
             href={`/${locale}/founders`}
-            className="text-xs text-indigo-100/80 hover:text-white underline-offset-4 hover:underline shrink-0"
+            className="inline-flex items-center gap-1 shrink-0 font-semibold text-white underline-offset-4 hover:underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 focus-visible:ring-offset-2 focus-visible:ring-offset-indigo-950"
           >
-            {t("details_cta")}
+            {t("cta")}
+            <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
           </Link>
 
           <button
             type="button"
             onClick={handleDismiss}
             aria-label={t("dismiss_aria")}
-            className="absolute right-2 top-2 sm:static sm:ml-2 text-indigo-200/70 hover:text-white transition"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-indigo-200/70 hover:text-white transition rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 focus-visible:ring-offset-2 focus-visible:ring-offset-indigo-950"
           >
             <X className="w-4 h-4" />
           </button>
