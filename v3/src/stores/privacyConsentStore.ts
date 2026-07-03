@@ -16,6 +16,18 @@ interface PrivacyConsentState {
   loading: boolean;
   /** True until the user has accepted the CURRENT policy version. */
   needsPrompt: boolean;
+  /**
+   * False until `load()` has resolved at least once for the current renderer.
+   *
+   * `needsPrompt` defaults to `true` (fail-safe), but that default must NEVER be
+   * shown to the user before we've actually read their consent — otherwise the
+   * blocking modal flashes on every cold start, and on macOS wake (which
+   * discards+reloads the renderer, resetting this store) the already-consented
+   * user watches the modal reappear for the whole read/retry window. The Gate
+   * gates the modal on `hasLoaded` so it only ever appears after an
+   * authoritative resolution.
+   */
+  hasLoaded: boolean;
   load: (uid: string) => Promise<void>;
   save: (uid: string, flags: ConsentFlags, locale?: string) => Promise<void>;
   /** Local update without Firestore write — used for optimistic UI in
@@ -34,6 +46,7 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
     consent: DEFAULT_CONSENT,
     loading: false,
     needsPrompt: true,
+    hasLoaded: false,
 
     load: async (uid: string) => {
       set({ loading: true });
@@ -45,6 +58,7 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
         set({
           consent,
           loading: false,
+          hasLoaded: true,
           needsPrompt: !isConsentCurrent(consent),
         });
         // Keep the proof-of-consent cache in sync so a later read failure
@@ -57,7 +71,12 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
 
       if (result.status === "missing") {
         // Read succeeded, user genuinely has no consent record → prompt.
-        set({ consent: DEFAULT_CONSENT, loading: false, needsPrompt: true });
+        set({
+          consent: DEFAULT_CONSENT,
+          loading: false,
+          hasLoaded: true,
+          needsPrompt: true,
+        });
         return;
       }
 
@@ -68,9 +87,9 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
       // hold the existing needsPrompt (don't surface the modal off a failure).
       // PIPA 옵트인 정설: 실패 시 '동의 간주'가 아니라 '이미 동의자 재프롬프트 안 함'.
       if (hasAcceptedConsentCached(uid, CURRENT_POLICY_VERSION)) {
-        set({ loading: false, needsPrompt: false });
+        set({ loading: false, hasLoaded: true, needsPrompt: false });
       } else {
-        set({ loading: false });
+        set({ loading: false, hasLoaded: true });
       }
     },
 
@@ -88,6 +107,7 @@ export const usePrivacyConsentStore = create<PrivacyConsentState>(
           locale,
         },
         needsPrompt: false,
+        hasLoaded: true,
       });
       await saveConsent(uid, flags, locale);
     },

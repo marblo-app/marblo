@@ -71,6 +71,45 @@ beforeEach(() => {
     consent: DEFAULT_CONSENT,
     loading: false,
     needsPrompt: true,
+    hasLoaded: false,
+  });
+});
+
+describe("hasLoaded — modal must not surface before the first resolution", () => {
+  it("starts false (cold start / post-wake renderer reload)", () => {
+    expect(usePrivacyConsentStore.getState().hasLoaded).toBe(false);
+  });
+
+  it("is false while load() is in flight, true once it resolves", async () => {
+    let resolveRead: (r: {
+      status: "ok";
+      consent: PrivacyConsent;
+    }) => void = () => {};
+    getConsentWithRetry.mockReturnValue(
+      new Promise((res) => {
+        resolveRead = res;
+      }),
+    );
+
+    const done = usePrivacyConsentStore.getState().load(UID);
+    // In-flight: the read (and its retry/backoff window) has not resolved, so
+    // the Gate must still see hasLoaded=false and keep the modal hidden even
+    // though needsPrompt defaults to true.
+    expect(usePrivacyConsentStore.getState().hasLoaded).toBe(false);
+
+    resolveRead({ status: "ok", consent: currentConsent() });
+    await done;
+    expect(usePrivacyConsentStore.getState().hasLoaded).toBe(true);
+  });
+
+  it.each([
+    ["ok", { status: "ok", consent: currentConsent() }],
+    ["missing", { status: "missing" }],
+    ["error", { status: "error", code: null }],
+  ] as const)("is true after a %s resolution", async (_label, result) => {
+    getConsentWithRetry.mockResolvedValue(result);
+    await usePrivacyConsentStore.getState().load(UID);
+    expect(usePrivacyConsentStore.getState().hasLoaded).toBe(true);
   });
 });
 

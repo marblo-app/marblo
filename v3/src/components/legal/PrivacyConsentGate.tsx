@@ -19,6 +19,7 @@ import { PrivacyConsentModal } from "./PrivacyConsentModal";
 export function PrivacyConsentGate() {
   const { user } = useAuth();
   const needsPrompt = usePrivacyConsentStore((s) => s.needsPrompt);
+  const hasLoaded = usePrivacyConsentStore((s) => s.hasLoaded);
   const sentryConsent = usePrivacyConsentStore((s) => s.consent.sentry);
   const load = usePrivacyConsentStore((s) => s.load);
 
@@ -39,6 +40,10 @@ export function PrivacyConsentGate() {
     maybeInitSentry(sentryConsent).catch(() => {});
   }, [sentryConsent]);
 
-  if (!user || !needsPrompt) return null;
+  // Never surface the blocking modal before consent has been read at least once.
+  // The store defaults needsPrompt=true (fail-safe); showing that default during
+  // the initial load/retry window is exactly the cold-start + macOS-wake
+  // re-prompt (the renderer is discarded+reloaded on wake, resetting the store).
+  if (!user || !hasLoaded || !needsPrompt) return null;
   return <PrivacyConsentModal />;
 }

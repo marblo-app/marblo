@@ -77,20 +77,116 @@ function toConsent(raw: RawConsent | undefined): PrivacyConsent {
 }
 
 /**
- * users/{uid}.privacyConsent 를 읽어 정규화한다. 읽기 실패는 fail-open —
- * DEFAULT_CONSENT(미동의)를 돌려준다. 실제 강제(게이팅)는 가입 폼 + 결제
- * 단계 + Gate 모달에서 이뤄진다.
+ * consent read 결과 — 세 상태를 구분한다. 일시적 read 실패를 "미동의"로
+ * 접으면(fail-open→DEFAULT) 재방문/재로드마다 이미 동의한 유저에게 게이트
+ * 모달이 다시 뜬다(데스크탑 앱의 sleep/resume 재프롬프트와 같은 버그).
+ *
+ *   - "ok"      : read 성공 + consent 레코드 존재.
+ *   - "missing" : read 성공 + 레코드 없음 (진짜 미동의 → 프롬프트가 정답).
+ *   - "error"   : read 실패 (offline / stale token / permission-denied / …).
+ *                 저장된 동의는 UNKNOWN — 호출자는 이를 "미동의"로 간주하면 안 된다.
  */
-export async function getConsent(uid: string): Promise<PrivacyConsent> {
+export type GetConsentResult =
+  | { status: "ok"; consent: PrivacyConsent }
+  | { status: "missing" }
+  | { status: "error"; code: string | null };
+
+/**
+ * users/{uid}.privacyConsent 를 읽어 세 상태로 구분한다. 절대 실패를
+ * DEFAULT_CONSENT 로 접지 않는다 — 그 접힘이 재방문 재프롬프트 버그다.
+ */
+export async function getConsentResult(uid: string): Promise<GetConsentResult> {
   try {
     const snap = await getDoc(doc(db, "users", uid));
-    const data = snap.exists() ? snap.data() : null;
-    return toConsent(
-      (data?.privacyConsent as RawConsent | undefined) ?? undefined,
-    );
+    const raw = snap.exists()
+      ? (snap.data()?.privacyConsent as RawConsent | undefined)
+      : undefined;
+    if (!raw) return { status: "missing" };
+    return { status: "ok", consent: toConsent(raw) };
   } catch (err) {
     console.warn("[privacyConsent] getConsent failed:", err);
-    return DEFAULT_CONSENT;
+    const code = (err as { code?: string }).code ?? null;
+    return { status: "error", code };
+  }
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * getConsentResult + 짧은 선형 backoff 재시도. 재로드 직후엔 첫 read 가
+ * 네트워크/토큰 미준비로 실패하기 쉽다 — 한두 번 재시도하면 대개 붙는다.
+ * "error" 만 재시도하고 "ok"/"missing" 은 확정값이라 즉시 반환.
+ * `backoffMs` 는 주입 가능(테스트가 즉시 돌도록).
+ */
+export async function getConsentWithRetry(
+  uid: string,
+  attempts = 3,
+  backoffMs = 400
+): Promise<GetConsentResult> {
+  let last: GetConsentResult = { status: "error", code: null };
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const result = await getConsentResult(uid);
+    if (result.status !== "error") return result;
+    last = result;
+    if (attempt < attempts && backoffMs > 0) await sleep(backoffMs * attempt);
+  }
+  return last;
+}
+
+/**
+ * users/{uid}.privacyConsent 를 읽어 정규화한다. 읽기 실패는 fail-open —
+ * DEFAULT_CONSENT(미동의)를 돌려준다. 게이팅(모달)이 아닌 표시용 경로(설정
+ * 페이지 등)에서 쓴다. 게이트는 getConsentWithRetry 를 써서 일시 실패에
+ * 재프롬프트하지 않는다.
+ */
+export async function getConsent(uid: string): Promise<PrivacyConsent> {
+  const result = await getConsentResult(uid);
+  return result.status === "ok" ? result.consent : DEFAULT_CONSENT;
+}
+
+/**
+ * 로컬 동의-증빙 캐시.
+ *
+ * "이 uid 가 이 정책 버전 동의를 서버에 성공적으로 저장했다"를 localStorage 에
+ * 기록한다. 게이트가 read 실패 시, 이미 동의한 것을 아는 유저에게 불필요한
+ * 재프롬프트를 억제하는 데 쓴다 — 동의를 날조하지 않는다(실제 서버 write 성공
+ * 후에만 기록, 버전 스코프라 정책 상향 시 무효화).
+ */
+const CONSENT_CACHE_PREFIX = "marblo:consentAccepted:";
+
+function consentCacheKey(uid: string, version: string): string {
+  return `${CONSENT_CACHE_PREFIX}${uid}:${version}`;
+}
+
+function safeLocalStorage(): Storage | null {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `uid` 가 `version` 동의를 마쳤음을 기록. best-effort — 절대 throw 안 함. */
+export function rememberConsentAccepted(uid: string, version: string): void {
+  if (!version) return;
+  try {
+    safeLocalStorage()?.setItem(consentCacheKey(uid, version), "1");
+  } catch {
+    // private mode / quota / disabled storage — 캐시는 best-effort.
+  }
+}
+
+/** 이 기기에서 `uid` 가 `version` 을 동의했다는 로컬 증빙이 있는가. */
+export function hasAcceptedConsentCached(
+  uid: string,
+  version: string
+): boolean {
+  if (!version) return false;
+  try {
+    return safeLocalStorage()?.getItem(consentCacheKey(uid, version)) === "1";
+  } catch {
+    return false;
   }
 }
 
@@ -101,7 +197,7 @@ export async function getConsent(uid: string): Promise<PrivacyConsent> {
 export async function saveConsent(
   uid: string,
   flags: ConsentFlags,
-  locale: ConsentLocale = "ko",
+  locale: ConsentLocale = "ko"
 ): Promise<void> {
   await setDoc(
     doc(db, "users", uid),
@@ -113,8 +209,11 @@ export async function saveConsent(
         locale,
       },
     },
-    { merge: true },
+    { merge: true }
   );
+  // 서버 write 성공 → 증빙 캐시를 무장. 이후 read 실패(재로드/재방문)에도
+  // 이 유저를 재프롬프트하지 않도록.
+  rememberConsentAccepted(uid, CURRENT_POLICY_VERSION);
 }
 
 /** 사용자가 현재 정책 버전을 본(동의 기록한) 적이 있는가. */
