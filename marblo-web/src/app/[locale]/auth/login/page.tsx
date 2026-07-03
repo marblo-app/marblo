@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, GithubAuthProvider } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { sanitizeRedirect } from '@/lib/sanitizeRedirect';
 
@@ -37,15 +37,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleGithub = async () => {
-    try {
-      await signInWithPopup(auth, new GithubAuthProvider());
-      router.push(redirect);
-    } catch (err: any) {
-      setError(err.message);
-    }
-  };
-
   return (
     <div className="py-24 px-4">
       <div className="max-w-md mx-auto bg-zinc-900 border border-zinc-800 rounded-2xl p-8">
@@ -53,9 +44,6 @@ export default function LoginPage() {
         <div className="space-y-3 mb-6">
           <button onClick={handleGoogle} className="w-full flex items-center justify-center gap-3 bg-white text-gray-900 py-3 rounded-lg font-medium hover:bg-gray-100 transition">
             {t('loginWithGoogle')}
-          </button>
-          <button onClick={handleGithub} className="w-full flex items-center justify-center gap-3 bg-zinc-800 text-white py-3 rounded-lg font-medium hover:bg-zinc-700 transition border border-zinc-700">
-            {t('loginWithGithub')}
           </button>
         </div>
         <div className="relative my-6">
