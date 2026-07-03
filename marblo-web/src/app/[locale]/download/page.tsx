@@ -232,27 +232,6 @@ export default function DownloadPage() {
                 </span>
               </a>
             </div>
-
-            <div className="mt-12 p-8 rounded-2xl border border-zinc-800 bg-zinc-900/40">
-              <h2 className="text-xl font-semibold">{t("notify_title")}</h2>
-              <p className="text-zinc-400 text-sm mt-2 mb-6">
-                {t("notify_subtitle")}
-              </p>
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <Link
-                  href={`/${locale}/auth/signup`}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium transition"
-                >
-                  {t("notify_cta")}
-                </Link>
-                <Link
-                  href={`/${locale}/pricing`}
-                  className="border border-zinc-700 hover:bg-zinc-800 text-zinc-200 px-6 py-3 rounded-lg font-medium transition"
-                >
-                  {t("pricing_cta")}
-                </Link>
-              </div>
-            </div>
           </>
         )}
 
