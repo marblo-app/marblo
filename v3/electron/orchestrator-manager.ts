@@ -10,7 +10,12 @@ import {
   orchestratorCommandForModel,
 } from "./agent-config";
 import { contextForKind } from "./mcp-server/context";
-import { YOLO_FLAG, telegramChannelLaunchFlags } from "./telegram-channels";
+import {
+  YOLO_FLAG,
+  telegramChannelLaunchFlags,
+  ensureTelegramPluginConfig,
+  getTelegramChannelConfig,
+} from "./telegram-channels";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
@@ -372,6 +377,31 @@ export class OrchestratorManager {
     }
     const channelFlags = telegramChannelLaunchFlags(projectId);
     if (channelFlags.length > 0) {
+      // 강건성: 공식 플러그인이 읽는 config(~/.claude/channels/telegram/{.env,
+      // access.json})가 실제로 존재하도록 스폰 직전 보장한다. 브릿지가 없으면
+      // 플러그인(bun)이 토큰 미설정으로 부팅 즉시 종료→getUpdates 미동작. 하네스탭
+      // 저장 시점에 이미 materialize 되지만, 수동 삭제/타머신/구버전 저장분에도
+      // 대비해 여기서 한 번 더 보장한다(저장된 로컬 config 로부터만 생성).
+      try {
+        ensureTelegramPluginConfig(projectId);
+      } catch (err) {
+        console.error(
+          `[Orchestrator:${this.kind}] Telegram plugin config materialize failed: ${err}`,
+        );
+      }
+
+      // ★provisioning race 방어: 플러그인 getUpdates 폴러(bun server.ts)는 launch
+      // 시점에 TELEGRAM_BOT_TOKEN 이 없으면 exit(1) 즉사하고 재기동하지 않는다.
+      // .env materialize 만으로는 파일이 launch 보다 늦게 보일 수 있어(파일 race)
+      // 인바운드가 전면 무동작할 수 있다. 플러그인 로더는 process.env 를 파일보다
+      // 우선하므로(멱등), 오케 launch env 에 토큰을 직접 주입하면 파일 타이밍과
+      // 무관하게 즉시 부팅된다 — 파일 materialize 와 belt-and-suspenders.
+      // 채널 비활성/토큰 없음이면 주입하지 않는다(빈 토큰 금지). 토큰은 로그 미출력.
+      const activeToken = getTelegramChannelConfig(projectId)?.botToken;
+      if (activeToken) {
+        launchConfig.env.TELEGRAM_BOT_TOKEN = activeToken;
+      }
+
       launchConfig.args.push(...channelFlags);
       console.log(
         `[Orchestrator:${

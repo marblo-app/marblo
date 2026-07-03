@@ -139,6 +139,52 @@ const DEFAULT_ACCESS_FILE = "telegram-access.json";
 /** 권한/비밀 파일 권한 — 소유자 read/write 만(0600). */
 const ACCESS_FILE_MODE = 0o600;
 
+// ─── 공식 텔레그램 플러그인 config 브릿지 ─────────────────────────────
+// 오케를 --channels plugin:telegram@claude-plugins-official 로 띄우면 공식
+// 플러그인(bun server.ts)은 ~/.claude/channels/telegram/{.env,access.json} 을
+// 읽는다. 마블로 store 는 ~/.marblo/telegram-*.json 에만 쓰므로 브릿지가 없으면
+// 플러그인 디렉토리 자체가 없어 부팅 즉시 종료(TELEGRAM_BOT_TOKEN 미설정 exit)
+// → getUpdates 폴러 미동작 → 메시지 적체. 로컬 설정 저장/스폰 시점에 마블로
+// 데이터로부터 플러그인 config 를 materialize 해 이 갭을 메운다.
+//
+// ★access.json 출처 가드와 동일 정신: 플러그인 config 생성/정리도 로컬 설정
+// 경로(setConfigFromLocalSettings·remove)와, 이미 로컬에 저장된 config 를 그대로
+// 읽는 스폰-직전 보장 경로(ensureTelegramPluginConfig)에서만 일어난다. 텔레그램
+// 인바운드는 이 코드에 도달하지 않는다(읽기 함수만 노출).
+
+/** 공식 플러그인이 상태를 읽는 기본 디렉토리(TELEGRAM_STATE_DIR 미설정 시). */
+const DEFAULT_PLUGIN_DIR = path.join(
+  os.homedir(),
+  ".claude",
+  "channels",
+  "telegram",
+);
+/** 플러그인 .env — TELEGRAM_BOT_TOKEN 이 사는 곳(플러그인은 없으면 exit). */
+const PLUGIN_ENV_FILE = ".env";
+/** 플러그인 access.json — 화이트리스트(allowFrom)/정책(dmPolicy). */
+const PLUGIN_ACCESS_FILE = "access.json";
+/** 플러그인 상태 디렉토리 권한 — 소유자만(0700). 플러그인 자체도 0o700 로 만든다. */
+const PLUGIN_DIR_MODE = 0o700;
+/** .env 안 봇 토큰 키. */
+const PLUGIN_TOKEN_KEY = "TELEGRAM_BOT_TOKEN";
+
+/**
+ * 공식 플러그인 access.json 스키마(server.ts 의 Access 타입과 일치). 우리는
+ * dmPolicy/allowFrom 만 소유·관리하고, 나머지 필드(groups·pending·delivery 옵션)는
+ * 기존 파일이 있으면 보존한다(플러그인/skill 이 쓴 런타임 상태 클로버 방지).
+ */
+interface PluginAccess {
+  dmPolicy: "pairing" | "allowlist" | "disabled";
+  allowFrom: string[];
+  groups: Record<string, unknown>;
+  pending: Record<string, unknown>;
+  mentionPatterns?: string[];
+  ackReaction?: string;
+  replyToMode?: "off" | "first" | "all";
+  textChunkLimit?: number;
+  chunkMode?: "length" | "newline";
+}
+
 type StoredConfigs = Record<string, TelegramChannelConfig>;
 type StoredAccess = Record<string, ChannelAccess>;
 
@@ -149,11 +195,14 @@ type StoredAccess = Record<string, ChannelAccess>;
 export class TelegramChannelStore {
   private configPath: string;
   private accessPath: string;
+  /** 공식 플러그인이 읽는 상태 디렉토리(브릿지 대상). 테스트는 tmp 로 주입한다. */
+  private pluginDir: string;
 
-  constructor(opts?: { storeDir?: string }) {
+  constructor(opts?: { storeDir?: string; pluginDir?: string }) {
     const dir = opts?.storeDir ?? DEFAULT_STORE_DIR;
     this.configPath = path.join(dir, DEFAULT_STORE_FILE);
     this.accessPath = path.join(dir, DEFAULT_ACCESS_FILE);
+    this.pluginDir = opts?.pluginDir ?? DEFAULT_PLUGIN_DIR;
   }
 
   /** 설정 파일 절대경로(진단용). */
@@ -163,6 +212,18 @@ export class TelegramChannelStore {
   /** 권한 파일 절대경로(진단용). */
   getAccessPath(): string {
     return this.accessPath;
+  }
+  /** 플러그인 상태 디렉토리 절대경로(진단용). */
+  getPluginDir(): string {
+    return this.pluginDir;
+  }
+  /** 플러그인 .env 절대경로(진단용). */
+  getPluginEnvPath(): string {
+    return path.join(this.pluginDir, PLUGIN_ENV_FILE);
+  }
+  /** 플러그인 access.json 절대경로(진단용). */
+  getPluginAccessPath(): string {
+    return path.join(this.pluginDir, PLUGIN_ACCESS_FILE);
   }
 
   // ── 설정(config) ──────────────────────────────────────────────────
@@ -239,6 +300,10 @@ export class TelegramChannelStore {
       LOCAL_SETTINGS_ORIGIN,
     );
 
+    // 공식 플러그인 config(~/.claude/channels/telegram) 브릿지 동기화.
+    // 활성이면 .env+access.json 생성, 비활성이면 토큰 제거·정리(멱등).
+    this.materializePluginConfig(merged);
+
     return this.getStatus(input.projectId);
   }
 
@@ -256,6 +321,17 @@ export class TelegramChannelStore {
       delete access[projectId];
       this.writeAccessMap(access);
     }
+    // 플러그인 config 도 정리(토큰 제거·allowlist 비활성). 채널이 다른 프로젝트로
+    // 남아 있을 수 있으나, 이 삭제 프로젝트가 마지막 활성이었다면 토큰을 지운다.
+    // materialize 는 비활성 config 를 받으면 .env 삭제 + access disabled 로 정리한다.
+    this.materializePluginConfig({
+      projectId,
+      botToken: null,
+      chatId: null,
+      enabled: false,
+      inboundCapability: "trigger",
+      updatedAt: now(),
+    });
     return had;
   }
 
@@ -318,6 +394,120 @@ export class TelegramChannelStore {
    */
   getAccess(projectId: string): ChannelAccess | null {
     return this.readAccess()[projectId] ?? null;
+  }
+
+  // ── 공식 플러그인 config 브릿지 (~/.claude/channels/telegram) ────────
+
+  /**
+   * projectId 의 현재 저장된 로컬 config 로부터 플러그인 config 를 다시 만든다.
+   * 오케 스폰 직전 강건성 보장용 — 이미 로컬에 저장된(=로컬 설정 경로로만 쓰인)
+   * config 를 그대로 읽어 materialize 하므로 인바운드 쓰기 경로가 아니다.
+   */
+  ensurePluginConfig(projectId: string): void {
+    const cfg = this.getConfig(projectId);
+    if (!cfg) return;
+    this.materializePluginConfig(cfg);
+  }
+
+  /**
+   * 마블로 채널 config 를 공식 플러그인이 읽는 파일 형식으로 실체화한다.
+   *   - 활성(enabled && 프리플라이트 통과 && 토큰/chatId 유효):
+   *       .env(TELEGRAM_BOT_TOKEN=<token>) + access.json(dmPolicy=allowlist,
+   *       allowFrom=[chatId]) 를 0600 으로 원자 기록, 디렉토리는 0700.
+   *   - 비활성/무효: .env 삭제(토큰 제거)하고, access.json 이 있으면 dmPolicy=
+   *       'disabled'·allowFrom=[] 로 중화(없으면 새로 만들지 않음).
+   * 멱등 — 같은 입력이면 같은 결과. 기존 파일의 소유하지 않는 필드(groups·pending·
+   * delivery 옵션·기타 env 키)는 보존한다.
+   */
+  private materializePluginConfig(cfg: TelegramChannelConfig): void {
+    const preflight = preflightChannel({
+      botToken: cfg.botToken,
+      chatId: cfg.chatId,
+    });
+    const active =
+      cfg.enabled && preflight.ok && !!cfg.botToken && !!cfg.chatId;
+
+    if (active) {
+      fs.mkdirSync(this.pluginDir, { recursive: true, mode: PLUGIN_DIR_MODE });
+      // 디렉토리가 이미 느슨한 권한으로 있었을 수 있으니 명시적 chmod.
+      try {
+        fs.chmodSync(this.pluginDir, PLUGIN_DIR_MODE);
+      } catch {
+        // Windows 등에서 chmod 무의미하면 무시(플러그인도 동일).
+      }
+      this.writePluginEnv(cfg.botToken!);
+      this.writePluginAccess([cfg.chatId!]);
+      return;
+    }
+
+    // 비활성 — 토큰을 제거하고(있으면) access 를 중화한다.
+    const envPath = this.getPluginEnvPath();
+    const parsed = readEnvFile(envPath);
+    if (parsed !== null) {
+      // 다른 env 키가 남아 있으면 토큰만 지우고 재기록, 아니면 파일 삭제.
+      delete parsed[PLUGIN_TOKEN_KEY];
+      if (Object.keys(parsed).length > 0) {
+        atomicWriteText(envPath, serializeEnv(parsed), ACCESS_FILE_MODE);
+      } else {
+        try {
+          fs.unlinkSync(envPath);
+        } catch {
+          // 이미 없으면 무시.
+        }
+      }
+    }
+    // access.json 은 이미 존재할 때만 중화(없으면 새로 만들지 않는다).
+    const accessPath = this.getPluginAccessPath();
+    const existing = readPluginAccessFile(accessPath);
+    if (existing !== null) {
+      const neutralized: PluginAccess = {
+        ...existing,
+        dmPolicy: "disabled",
+        allowFrom: [],
+      };
+      atomicWriteJson(accessPath, neutralized, ACCESS_FILE_MODE);
+    }
+  }
+
+  /** .env 에 TELEGRAM_BOT_TOKEN 을 설정(기존 다른 키 보존)하고 0600 원자 기록. */
+  private writePluginEnv(botToken: string): void {
+    const envPath = this.getPluginEnvPath();
+    const parsed = readEnvFile(envPath) ?? {};
+    parsed[PLUGIN_TOKEN_KEY] = botToken;
+    atomicWriteText(envPath, serializeEnv(parsed), ACCESS_FILE_MODE);
+  }
+
+  /**
+   * access.json 을 dmPolicy=allowlist + allowFrom 로 기록. 기존 파일이 있으면
+   * groups·pending·delivery 옵션 등 소유하지 않는 필드를 보존한다. 0600 원자 기록.
+   */
+  private writePluginAccess(allowFrom: string[]): void {
+    const accessPath = this.getPluginAccessPath();
+    const existing = readPluginAccessFile(accessPath);
+    const next: PluginAccess = {
+      // 소유하지 않는 필드는 기존값 보존, 없으면 플러그인 기본값.
+      groups: existing?.groups ?? {},
+      pending: existing?.pending ?? {},
+      ...(existing?.mentionPatterns !== undefined
+        ? { mentionPatterns: existing.mentionPatterns }
+        : {}),
+      ...(existing?.ackReaction !== undefined
+        ? { ackReaction: existing.ackReaction }
+        : {}),
+      ...(existing?.replyToMode !== undefined
+        ? { replyToMode: existing.replyToMode }
+        : {}),
+      ...(existing?.textChunkLimit !== undefined
+        ? { textChunkLimit: existing.textChunkLimit }
+        : {}),
+      ...(existing?.chunkMode !== undefined
+        ? { chunkMode: existing.chunkMode }
+        : {}),
+      // 우리가 소유하는 필드.
+      dmPolicy: "allowlist",
+      allowFrom,
+    };
+    atomicWriteJson(accessPath, next, ACCESS_FILE_MODE);
   }
 }
 
@@ -416,6 +606,99 @@ function atomicWriteJson(filePath: string, data: unknown, mode?: number): void {
   }
 }
 
+/**
+ * 텍스트 파일을 tmp→rename 으로 원자 기록(atomicWriteJson 의 텍스트 버전).
+ * .env(비밀 토큰 포함)를 0600 으로 기록하는 데 쓴다. tmp 도 같은 mode 로 생성.
+ */
+function atomicWriteText(
+  filePath: string,
+  content: string,
+  mode: number,
+): void {
+  fs.mkdirSync(path.dirname(filePath), {
+    recursive: true,
+    mode: PLUGIN_DIR_MODE,
+  });
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, content, { encoding: "utf-8", mode });
+  fs.chmodSync(tmp, mode);
+  fs.renameSync(tmp, filePath);
+  fs.chmodSync(filePath, mode);
+}
+
+/**
+ * .env 를 key→value 맵으로 읽는다(플러그인 로더와 동일한 `^(\w+)=(.*)$` 규칙).
+ * 파일이 없으면 null(존재 여부를 구분해 정리 로직이 판단하도록). 깨진 라인은 건너뛴다.
+ */
+function readEnvFile(filePath: string): Record<string, string> | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+  const out: Record<string, string> = {};
+  for (const line of raw.split("\n")) {
+    const m = line.match(/^(\w+)=(.*)$/);
+    if (m) out[m[1]] = m[2];
+  }
+  return out;
+}
+
+/** key→value 맵을 .env 텍스트로 직렬화(줄바꿈 종료). */
+function serializeEnv(env: Record<string, string>): string {
+  const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`);
+  return lines.length ? lines.join("\n") + "\n" : "";
+}
+
+/**
+ * 플러그인 access.json 을 읽어 PluginAccess 로 정규화한다. 파일 없음/깨짐이면 null
+ * (없을 때만 신규 생성을 스킵하려고 존재 여부를 구분). 절대 throw 안 함.
+ */
+function readPluginAccessFile(filePath: string): PluginAccess | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<PluginAccess>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return {
+      dmPolicy: parsed.dmPolicy ?? "pairing",
+      allowFrom: Array.isArray(parsed.allowFrom) ? parsed.allowFrom : [],
+      groups:
+        parsed.groups && typeof parsed.groups === "object" ? parsed.groups : {},
+      pending:
+        parsed.pending && typeof parsed.pending === "object"
+          ? parsed.pending
+          : {},
+      ...(parsed.mentionPatterns !== undefined
+        ? { mentionPatterns: parsed.mentionPatterns }
+        : {}),
+      ...(parsed.ackReaction !== undefined
+        ? { ackReaction: parsed.ackReaction }
+        : {}),
+      ...(parsed.replyToMode !== undefined
+        ? { replyToMode: parsed.replyToMode }
+        : {}),
+      ...(parsed.textChunkLimit !== undefined
+        ? { textChunkLimit: parsed.textChunkLimit }
+        : {}),
+      ...(parsed.chunkMode !== undefined
+        ? { chunkMode: parsed.chunkMode }
+        : {}),
+    };
+  } catch {
+    // 깨진 JSON 은 플러그인이 알아서 corrupt 처리(백업 후 리셋)하므로 우리는
+    // 건드리지 않는다 — null 로 취급해 소유 필드만 새로 쓰는 대신 스킵.
+    return null;
+  }
+}
+
 // ─── 기본 싱글톤 + 모듈 레벨 편의 함수 ────────────────────────────────
 // main.ts·orchestrator-manager·(텔레그램 인바운드)는 이 함수들만 쓰면 된다.
 
@@ -485,4 +768,14 @@ export function getTelegramChannelAccess(
  */
 export function telegramChannelLaunchFlags(projectId: string): string[] {
   return isTelegramChannelActive(projectId) ? [...TELEGRAM_CHANNEL_FLAGS] : [];
+}
+
+/**
+ * 오케 스폰 직전 강건성 보장 — projectId 의 채널이 활성이면 공식 플러그인 config
+ * (~/.claude/channels/telegram/{.env,access.json})가 존재하도록 보장한다. 이미
+ * 저장된 로컬 config 로부터만 materialize 하므로 인바운드 쓰기 경로가 아니다.
+ * config 가 없으면 no-op. orchestrator-manager 가 채널 플래그 주입 직전 호출한다.
+ */
+export function ensureTelegramPluginConfig(projectId: string): void {
+  getTelegramChannelStore().ensurePluginConfig(projectId);
 }
