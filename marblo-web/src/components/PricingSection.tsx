@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Check } from "lucide-react";
 
 const plans = ["free", "pro", "team", "team_plus", "enterprise"] as const;
-type Plan = (typeof plans)[number];
+type Plan = typeof plans[number];
 
 // Monthly prices (KRW, source of truth: v3.1 launch master plan §2.1)
 // team       — per-seat (₩29,000/seat)
@@ -67,8 +67,8 @@ export default function PricingSection() {
       return locale === "ko"
         ? "\uC601\uAD6C \uBB34\uB8CC"
         : locale === "ja"
-          ? "\u6C38\u4E45\u7121\u6599"
-          : "forever free";
+        ? "\u6C38\u4E45\u7121\u6599"
+        : "forever free";
     if (plan === "enterprise") return "";
     const seat = isPerSeat(plan);
     if (isAnnual)
@@ -77,23 +77,23 @@ export default function PricingSection() {
           ? "/\uC778/\uB144"
           : "/\uB144"
         : locale === "ja"
-          ? seat
-            ? "/\u4EBA/\u5E74"
-            : "/\u5E74"
-          : seat
-            ? "/seat/yr"
-            : "/year";
+        ? seat
+          ? "/\u4EBA/\u5E74"
+          : "/\u5E74"
+        : seat
+        ? "/seat/yr"
+        : "/year";
     return locale === "ko"
       ? seat
         ? "/\uC778/\uC6D4"
         : "/\uC6D4"
       : locale === "ja"
-        ? seat
-          ? "/\u4EBA/\u6708"
-          : "/\u6708"
-        : seat
-          ? "/seat/mo"
-          : "/mo";
+      ? seat
+        ? "/\u4EBA/\u6708"
+        : "/\u6708"
+      : seat
+      ? "/seat/mo"
+      : "/mo";
   };
 
   return (
@@ -108,12 +108,22 @@ export default function PricingSection() {
           {locale === "ko"
             ? "\uC6D4\uAC04"
             : locale === "ja"
-              ? "\u6708\u984D"
-              : "Monthly"}
+            ? "\u6708\u984D"
+            : "Monthly"}
         </span>
         <button
+          type="button"
+          role="switch"
+          aria-checked={isAnnual}
+          aria-label={
+            locale === "ko"
+              ? "연간 결제로 전환"
+              : locale === "ja"
+              ? "年額請求に切り替え"
+              : "Toggle annual billing"
+          }
           onClick={() => setIsAnnual(!isAnnual)}
-          className={`relative w-14 h-7 rounded-full transition-colors ${
+          className={`relative w-14 h-7 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
             isAnnual ? "bg-indigo-600" : "bg-zinc-700"
           }`}
         >
@@ -131,22 +141,22 @@ export default function PricingSection() {
           {locale === "ko"
             ? "\uC5F0\uAC04"
             : locale === "ja"
-              ? "\u5E74\u984D"
-              : "Annual"}
+            ? "\u5E74\u984D"
+            : "Annual"}
         </span>
         {isAnnual && (
           <span className="text-xs bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full font-medium">
             {locale === "ko"
               ? "2\uAC1C\uC6D4 \uBB34\uB8CC"
               : locale === "ja"
-                ? "2\u30F6\u6708\u7121\u6599"
-                : "2 months free"}
+              ? "2\u30F6\u6708\u7121\u6599"
+              : "2 months free"}
           </span>
         )}
       </div>
 
-      {/* Plan Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 max-w-7xl mx-auto">
+      {/* Plan Cards Grid — 3 cols at lg, 5 only at xl to avoid cramping */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5 max-w-7xl mx-auto">
         {plans.map((plan) => {
           const highlighted = plan === "pro";
           const isEnterprise = plan === "enterprise";
@@ -155,7 +165,7 @@ export default function PricingSection() {
           return (
             <div
               key={plan}
-              className={`rounded-2xl p-8 flex flex-col relative ${
+              className={`rounded-2xl p-6 flex flex-col relative ${
                 highlighted
                   ? "bg-indigo-600/10 border-2 border-indigo-500 ring-1 ring-indigo-500/50"
                   : "bg-zinc-900 border border-zinc-700/50"
@@ -166,7 +176,7 @@ export default function PricingSection() {
                   {t("most_popular")}
                 </span>
               )}
-              <h3 className="text-2xl font-bold text-white">
+              <h3 className="text-xl font-bold text-white">
                 {t(`${plan}.name`)}
               </h3>
               <p className="text-zinc-500 text-sm mt-1 mb-4">
@@ -182,7 +192,7 @@ export default function PricingSection() {
               ) : (
                 <div className="mt-2 mb-6">
                   <div className="flex items-baseline gap-1">
-                    <span className="text-4xl font-bold text-white">
+                    <span className="text-3xl font-bold text-white">
                       {getDisplayPrice(plan)}
                     </span>
                     <span className="text-zinc-400">{getPeriod(plan)}</span>
@@ -211,14 +221,14 @@ export default function PricingSection() {
                 {isEnterprise ? (
                   <a
                     href="mailto:team@marblo.app"
-                    className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium"
+                    className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
                   >
                     {t(`${plan}.cta`)}
                   </a>
                 ) : plan === "free" ? (
                   <Link
                     href={`/${locale}/download`}
-                    className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium"
+                    className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
                   >
                     {t("subscribe")}
                   </Link>
@@ -227,10 +237,10 @@ export default function PricingSection() {
                     href={`/${locale}/checkout?plan=${plan}${
                       isAnnual ? "&billing=annual" : ""
                     }`}
-                    className={`block w-full text-center py-3 rounded-lg transition font-medium ${
+                    className={`block w-full text-center py-3 rounded-lg transition font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
                       highlighted
                         ? "bg-indigo-600 hover:bg-indigo-500 text-white"
-                        : "bg-zinc-700 hover:bg-zinc-600 text-white"
+                        : "border border-indigo-500/60 text-indigo-300 hover:bg-indigo-500/10 hover:border-indigo-400"
                     }`}
                   >
                     {t("subscribe")}

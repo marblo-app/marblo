@@ -71,24 +71,24 @@ export default function PlanCard({ plan, highlighted }: PlanCardProps) {
         {isEnterprise ? (
           <a
             href="mailto:team@marblo.app"
-            className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium"
+            className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
           >
             {t(`${plan}.cta`)}
           </a>
         ) : plan === "free" ? (
           <Link
             href={`/${locale}/download`}
-            className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium"
+            className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
           >
             {t("subscribe")}
           </Link>
         ) : (
           <Link
             href={`/${locale}/checkout?plan=${plan}`}
-            className={`block w-full text-center py-3 rounded-lg transition font-medium ${
+            className={`block w-full text-center py-3 rounded-lg transition font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
               highlighted
-                ? "bg-indigo-600 hover:bg-indigo-700 text-white"
-                : "bg-zinc-700 hover:bg-zinc-600 text-white"
+                ? "bg-indigo-600 hover:bg-indigo-500 text-white"
+                : "border border-indigo-500/60 text-indigo-300 hover:bg-indigo-500/10 hover:border-indigo-400"
             }`}
           >
             {t("subscribe")}
