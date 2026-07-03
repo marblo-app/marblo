@@ -290,12 +290,74 @@ export class PtyManager {
     }
   }
 
+  // Grace before SIGKILL-sweeping a killed PTY's process group. Sized to the
+  // Telegram channel poller's own ~2s self-shutdown budget (server.ts force-
+  // exits 2s after SIGTERM) so a clean graceful exit — which releases the
+  // getUpdates long-poll slot — wins the race before we force-kill any
+  // straggler in the group.
+  private static readonly TREE_KILL_ESCALATE_MS = 2500;
+
   kill(id: string): void {
     const session = this.sessions.get(id);
     if (session) {
+      // Take down the whole PTY SUBTREE (child + grandchildren), not just the
+      // single child pid that node-pty's own .kill() signals. See
+      // killProcessTree — this is what stops an orchestrator's Telegram poller
+      // from orphaning across a stop/restart and 409-blocking the next one.
+      this.killProcessTree(session.process.pid);
       session.process.kill();
       this.sessions.delete(id);
     }
+  }
+
+  /**
+   * Terminate the ENTIRE process group of a PTY child — the child plus every
+   * descendant it spawned — instead of the lone child pid.
+   *
+   * Why: node-pty spawns each PTY via forkpty(), which setsid()s the child into
+   * a fresh session, making it its own process-GROUP leader (pgid === pid).
+   * Every process the child then spawns (an agent/orchestrator's MCP servers,
+   * e.g. the Telegram channel poller `bun server.ts`) inherits that group.
+   * node-pty's own `.kill()` runs `process.kill(pid, 'SIGHUP')` — a single
+   * POSITIVE pid — so it signals only the child; reaping the grandchildren is
+   * left to the kernel's fragile "controlling-process exit → SIGHUP the
+   * foreground process group" propagation. When that misses (the poller sits
+   * behind the `bun run` wrapper chain), the poller lives on as an orphan and
+   * keeps holding Telegram's single-consumer getUpdates slot, so the next
+   * orchestrator's poller gets 409 Conflict and inbound silently dies.
+   * Signalling the GROUP (a NEGATIVE pid) takes the whole subtree down
+   * deterministically with the orchestrator.
+   *
+   * Scope (critical): pgid === pid means `-pid` targets ONLY this PTY's own
+   * subtree. The Electron main process and every OTHER agent/orchestrator PTY
+   * live in different process groups (each its own setsid session), so they are
+   * untouched. The `pid > 1` / integer guard is load-bearing: `process.kill(-0)`
+   * would signal the CALLER's entire group (Electron + all agents) and `-1`
+   * would broadcast system-wide — never allow either.
+   */
+  private killProcessTree(pid: number | undefined): void {
+    if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 1) return;
+
+    // Graceful first: SIGTERM the group so the Telegram poller runs its own
+    // shutdown (release the getUpdates long-poll, remove its pidfile) — this is
+    // what keeps the handoff window short enough for the new poller to self-heal.
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {
+      // ESRCH (group already gone) / EPERM — nothing left to signal.
+    }
+
+    // Escalate: SIGKILL anything still alive in the group after the poller's
+    // graceful-exit budget. Same negative-pid scoping; unref so a pending sweep
+    // never keeps the event loop (or app shutdown) alive.
+    const sweep = setTimeout(() => {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        // Group already reaped — expected on the happy path.
+      }
+    }, PtyManager.TREE_KILL_ESCALATE_MS);
+    sweep.unref?.();
   }
 
   listSessions(): { id: string; name: string }[] {

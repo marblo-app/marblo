@@ -4,6 +4,11 @@ const { FakePty, spawned } = vi.hoisted(() => {
   class FakePty {
     written: string[] = [];
     dataCbs: Array<(data: string) => void> = [];
+    // node-pty's real IPty exposes the forked child pid; the group-kill path
+    // reads it. Default to a safe, valid pid so unrelated tests don't trip the
+    // scope guard; the reaping tests override it per case.
+    pid = 4242;
+    killed: (string | undefined)[] = [];
 
     write(data: string): void {
       this.written.push(data);
@@ -11,7 +16,9 @@ const { FakePty, spawned } = vi.hoisted(() => {
 
     resize(): void {}
 
-    kill(): void {}
+    kill(signal?: string): void {
+      this.killed.push(signal);
+    }
 
     onData(cb: (data: string) => void): { dispose: () => void } {
       this.dataCbs.push(cb);
@@ -127,5 +134,81 @@ describe("PtyManager.writeAndSubmit serialization", () => {
     procA.emitData(SUBMIT_SIGNAL);
     procB.emitData(SUBMIT_SIGNAL);
     await vi.advanceTimersByTimeAsync(VERIFY_MS);
+  });
+});
+
+describe("PtyManager.kill — process-group tree reaping", () => {
+  // Root cause (Telegram channel handoff, ticket EDcb8mflwAUMcJDrv5EV):
+  // node-pty's own .kill() only signals the single child pid (SIGHUP), so a
+  // grandchild the child spawned — the Telegram poller `bun server.ts`, an MCP
+  // stdio server in the child's process group — can outlive an orchestrator
+  // stop/restart as an orphan and keep holding Telegram's single-consumer
+  // getUpdates slot → the next orchestrator's poller 409s and inbound breaks.
+  // kill() must take down the whole PTY process GROUP (child + descendants).
+  let killSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    spawned.length = 0;
+    // Never actually signal anything from the test — record calls instead.
+    killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementation(() => true as unknown as boolean);
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    killSpy.mockRestore();
+  });
+
+  it("SIGTERMs the child's whole process group (negative pid), then SIGKILL-sweeps survivors", async () => {
+    const pm = new PtyManager();
+    pm.create("orch-1", "Orchestrator");
+    const proc = spawned[0] as FakePtyInst;
+    proc.pid = 4242;
+
+    pm.kill("orch-1");
+
+    // Graceful group SIGTERM, scoped to the child's own group (-pid) so the
+    // poller runs its own shutdown (drops the getUpdates long-poll) fast.
+    expect(killSpy).toHaveBeenCalledWith(-4242, "SIGTERM");
+    // node-pty's own single-pid cleanup still runs (closes the master fd).
+    expect(proc.killed.length).toBe(1);
+    // Escalation is deferred — no SIGKILL yet.
+    expect(killSpy).not.toHaveBeenCalledWith(-4242, "SIGKILL");
+
+    await vi.advanceTimersByTimeAsync(2500);
+    // Anything still in the group after the poller's ~2s grace gets SIGKILL.
+    expect(killSpy).toHaveBeenCalledWith(-4242, "SIGKILL");
+
+    // Session is evicted so a later write is a no-op.
+    expect(pm.listSessions()).toEqual([]);
+  });
+
+  it("never signals process group 0/1 or a non-integer pid (guards Electron + all other agents)", () => {
+    const pm = new PtyManager();
+    for (const badPid of [0, 1, -5, Number.NaN]) {
+      spawned.length = 0;
+      const id = `x-${String(badPid)}`;
+      pm.create(id, "x");
+      (spawned[0] as FakePtyInst).pid = badPid as number;
+      pm.kill(id);
+    }
+    // No group signal (negative-pid) may target 0, 1, or NaN — process.kill(-0)
+    // would blast the Electron main's OWN group (every agent), -1 the system.
+    for (const call of killSpy.mock.calls) {
+      const target = call[0] as number;
+      expect(Object.is(target, -0)).toBe(false);
+      expect(target).not.toBe(0);
+      expect(target).not.toBe(-1);
+      expect(Number.isNaN(target)).toBe(false);
+    }
+  });
+
+  it("kill on an unknown id does not signal any group", () => {
+    const pm = new PtyManager();
+    pm.kill("nope");
+    expect(killSpy).not.toHaveBeenCalled();
   });
 });
