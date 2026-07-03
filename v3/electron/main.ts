@@ -81,6 +81,7 @@ import {
   setTelegramChannelFromLocalSettings,
   getTelegramChannelStatus,
   removeTelegramChannel,
+  isTelegramChannelActive,
   type TelegramChannelInput,
 } from "./telegram-channels";
 import {
@@ -813,6 +814,8 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
       // queued during the crash window is delivered after recovery.
       if (status === "stopped" && projectId) {
         pendingListener.detach(`orch-${projectId}`);
+        // 소유 오케(board)가 멈추면 telegram 을 상주 미션 오케로 인계(단일 소유자 유지).
+        maybeHandoverTelegram(projectId);
       }
     },
   );
@@ -1169,6 +1172,62 @@ function ensureMissionOrchestratorLaunched(
     missionId,
   );
   return manager;
+}
+
+/**
+ * 텔레그램 단일 소유자 인계. 소유 오케(정상 흐름상 board)가 종료되면 owner lock 이
+ * 풀린다. 그 프로젝트에 미션 오케가 아직 살아 돌고 있으면, 그 미션 오케를 relaunch
+ * 해 telegram 소유권을 넘겨받게 한다(launch 게이팅이 자유 lock 을 획득 → --channels
+ * 재주입 → 폴러 재개). 채널 소유권 이동을 relaunch 로 처리하는 건 #296 과 동일 정신 —
+ * 구 폴러는 오케 종료(트리킬)로 이미 죽어 이중 폴러가 생기지 않는다. relaunch 는 미션
+ * 세션을 resume 하므로 미션 컨텍스트는 보존된다.
+ *
+ * board 가 미션보다 먼저 뜨므로 정상 흐름에선 board 가 소유 → 여기서 다루는 건
+ * 'board 종료 + 미션 상주' 케이스뿐. 역방향(미션 종료→board 인계)은 board 가 미션보다
+ * 늦게 소유하는 일이 없어 불필요하다(board 는 자기 launch 에서 자유 lock 을 자연 획득).
+ * crash(비정상 종료)는 status "stopped" 를 내지 않으므로(오케는 자동 재기동해 같은
+ * ownerId 로 재획득) 이 경로를 타지 않는다 — transient crash 에 불필요한 relaunch 없음.
+ *
+ * ★지연 + 재확인: restart() 는 내부적으로 stop()(→ "stopped")+launch() 를 연달아
+ * 부른다. 동기 인계는 그 짧은 창에서 telegram 을 미션으로 뺏어버린다(불필요한 미션
+ * relaunch). 그래서 짧게 지연한 뒤 소유 lock 이 그때도 비어 있을 때만 인계한다 —
+ * board 가 곧 재기동해 자기 lock 을 재획득하면(restart) 인계를 건너뛴다.
+ */
+const TELEGRAM_HANDOVER_DELAY_MS = 4000;
+
+function maybeHandoverTelegram(projectId: string): void {
+  if (!projectId || isQuitting) return; // 앱 종료 중엔 relaunch 하지 않는다.
+  if (!isTelegramChannelActive(projectId)) return;
+  const mission = missionOrchestrators.get(projectId);
+  if (!mission || !mission.isRunning()) return; // 넘겨줄 상주 미션 오케 없음.
+  const rootPath =
+    mission.getSession()?.rootPath ??
+    orchestrators.get(projectId)?.getSession()?.rootPath;
+  if (!rootPath) return;
+  // 소유자가 아직 살아 lock 을 쥐고 있으면(정상 흐름) 즉시 스킵 — 지연조차 불필요.
+  if (mission.isTelegramOwnerLive(rootPath, projectId)) return;
+
+  setTimeout(() => {
+    try {
+      if (isQuitting) return;
+      const m = missionOrchestrators.get(projectId);
+      if (!m || !m.isRunning()) return;
+      if (!isTelegramChannelActive(projectId)) return;
+      const rp = m.getSession()?.rootPath ?? rootPath;
+      // 지연 후 재확인: board 가 재기동해 lock 을 재획득했다면(restart 케이스)
+      // 소유자가 살아있으므로 인계하지 않는다 — 미션 relaunch 를 아낀다.
+      if (m.isTelegramOwnerLive(rp, projectId)) return;
+      const missionId = m.getOwnerMissionId() ?? undefined;
+      console.log(
+        `[Telegram] Owner orchestrator stopped for project ${projectId}; handing Telegram over to the running mission orchestrator (relaunch to re-inject --channels).`,
+      );
+      // stop→ensure relaunch: 미션 세션 resume(컨텍스트 보존) + 자유 owner lock 획득.
+      m.stop();
+      ensureMissionOrchestratorLaunched(projectId, rp, missionId);
+    } catch (err) {
+      console.error(`[Telegram] handover failed for ${projectId}: ${err}`);
+    }
+  }, TELEGRAM_HANDOVER_DELAY_MS);
 }
 
 // 미션이 사용자 개입을 요구할 때 (waiting_for_human + notifyUser) OS 알림 +

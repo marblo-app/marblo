@@ -12,6 +12,7 @@ import {
 import { contextForKind } from "./mcp-server/context";
 import {
   YOLO_FLAG,
+  TELEGRAM_CHANNEL_FLAGS,
   telegramChannelLaunchFlags,
   ensureTelegramPluginConfig,
   getTelegramChannelConfig,
@@ -35,6 +36,29 @@ const ORCH_BACKOFF_MAX_MS = 30000;
 const ORCH_RESUME_LOCK_TTL_MS = 10 * 60 * 1000;
 
 interface OrchResumeLock {
+  ptySessionId: string;
+  kind: string;
+  pid: number;
+  updatedAt: number;
+}
+
+// --- Telegram single-owner lock ---
+// A project can host TWO live orchestrators at once — the resident board
+// orchestrator (kind="board") and an on-demand mission orchestrator
+// (kind="mission"). Both inject `--channels plugin:telegram` on launch, and
+// Claude spawns one getUpdates poller each. Telegram's getUpdates is
+// single-consumer per bot, so two pollers evict each other with HTTP 409 —
+// continuous disconnection even in steady state. We gate channel injection on
+// a per-project owner lock so exactly ONE orchestrator owns Telegram.
+//
+// Ownership identity is the orchestrator's stable `sessionId` (board vs mission
+// differ), NOT the pid — two DIFFERENT instances in the SAME OS process (same
+// pid) must not both own it (unlike the resume lock, where same-pid re-attach
+// is desired for crash restart). Liveness is pure PID-liveness with NO TTL: the
+// telegram owner is long-lived (hours), so a TTL would wrongly reclaim it from a
+// still-running board.
+interface TelegramOwnerLock {
+  ownerId: string; // orchestrator sessionId — distinguishes board vs mission
   ptySessionId: string;
   kind: string;
   pid: number;
@@ -188,6 +212,8 @@ export class OrchestratorManager {
   private lastOnPtyReady?: (ptySessionId: string) => void;
   // crash auto-restart 가 동일 미션 세션을 이어가도록 마지막 ownerMissionId 보관.
   private lastOwnerMissionId: string | null = null;
+  // 이 launch 가 telegram 단일 소유권을 획득했는지 — release 대상 판정용.
+  private telegramOwned = false;
 
   // kind: 같은 projectId 안에서 여러 orchestrator (board, mission) 를 분리하기 위한
   // 식별 prefix. 'board' (default) 외에 'mission' 등을 주면 sessionId 가
@@ -375,7 +401,24 @@ export class OrchestratorManager {
     if (!launchConfig.args.includes(YOLO_FLAG)) {
       launchConfig.args.unshift(YOLO_FLAG);
     }
-    const channelFlags = telegramChannelLaunchFlags(projectId);
+    // ★단일 소유자 게이팅 (409 근본수정): 같은 프로젝트의 board+mission 오케가
+    // 각자 --channels 를 물면 폴러가 2개 뜨고 telegram getUpdates(봇당 단일 소비자)
+    // 가 409 로 서로 밀어낸다. 채널이 활성이어도 이 프로젝트의 telegram 소유권을
+    // 획득한 오케만 --channels 를 주입한다. 소유권은 오케 sessionId 로 식별(board vs
+    // mission 구분) — board 가 먼저 뜨므로 자연히 board 소유, board 부재 시 mission 이
+    // 소유(telegram 유지). stop/clean-exit 시 release, crash 재기동은 같은 ownerId 로
+    // 재획득. 다른 살아있는 오케가 이미 소유 중이면 빈 채널로(폴러 없이) 정상 부팅.
+    const channelActive = telegramChannelLaunchFlags(projectId).length > 0;
+    const ownsTelegram =
+      channelActive &&
+      this.acquireTelegramOwner(rootPath, projectId, sessionId, ptySessionId);
+    this.telegramOwned = ownsTelegram;
+    const channelFlags = ownsTelegram ? [...TELEGRAM_CHANNEL_FLAGS] : [];
+    if (channelActive && !ownsTelegram) {
+      console.log(
+        `[Orchestrator:${this.kind}] Telegram active but another live orchestrator owns it for this project → NOT injecting --channels (single-owner gating; avoids getUpdates 409).`,
+      );
+    }
     if (channelFlags.length > 0) {
       // 강건성: 공식 플러그인이 읽는 config(~/.claude/channels/telegram/{.env,
       // access.json})가 실제로 존재하도록 스폰 직전 보장한다. 브릿지가 없으면
@@ -673,6 +716,12 @@ export class OrchestratorManager {
         if (this.session?.claudeSessionId) {
           this.releaseResumeLock(rootPath, this.session.claudeSessionId);
         }
+        // Drop Telegram ownership so a surviving sibling can take over. Do this
+        // BEFORE the status callback (main handover reads a now-free lock).
+        if (this.telegramOwned) {
+          this.releaseTelegramOwner(rootPath, projectId, sessionId);
+          this.telegramOwned = false;
+        }
         this.setStatus("stopped");
         this.configGenerator.cleanup(sessionId);
         return;
@@ -728,6 +777,11 @@ export class OrchestratorManager {
         if (this.session?.claudeSessionId) {
           this.releaseResumeLock(rootPath, this.session.claudeSessionId);
         }
+        // Give up Telegram ownership too so a sibling can take over.
+        if (this.telegramOwned) {
+          this.releaseTelegramOwner(rootPath, projectId, sessionId);
+          this.telegramOwned = false;
+        }
         this.setStatus("error");
         this.configGenerator.cleanup(sessionId);
         console.error(
@@ -748,8 +802,15 @@ export class OrchestratorManager {
       this.restartTimer = null;
     }
 
-    const { ptySessionId, sessionId, rootPath, claudeSessionId } = this.session;
+    const { ptySessionId, sessionId, rootPath, claudeSessionId, projectId } =
+      this.session;
     if (claudeSessionId) this.releaseResumeLock(rootPath, claudeSessionId);
+    // Intentional stop → drop Telegram ownership BEFORE the status callback so a
+    // surviving sibling (handover) sees the lock free. Only releases if we own.
+    if (this.telegramOwned) {
+      this.releaseTelegramOwner(rootPath, projectId, sessionId);
+      this.telegramOwned = false;
+    }
     this.ptyManager.kill(ptySessionId);
     this.configGenerator.cleanup(sessionId);
     this.setStatus("stopped");
@@ -1189,6 +1250,120 @@ export class OrchestratorManager {
       delete locks[claudeSessionId];
       this.writeOrchLocks(rootPath, locks);
     }
+  }
+
+  // ── Telegram single-owner lock (per project) ──────────────────────────
+  // See TelegramOwnerLock above. Keyed by projectId within the project dir; a
+  // sibling file to marblo-orch-locks.json. Ownership identity is `ownerId`
+  // (the orchestrator sessionId), so board and mission — same pid, different
+  // instances — can't both own Telegram. Liveness is pure PID-liveness (no TTL).
+
+  private getTelegramOwnerPath(rootPath: string): string {
+    const encodedPath = encodeClaudeProjectDir(rootPath);
+    return path.join(
+      os.homedir(),
+      ".claude",
+      "projects",
+      encodedPath,
+      "marblo-telegram-owner.json",
+    );
+  }
+
+  private readTelegramOwners(
+    rootPath: string,
+  ): Record<string, TelegramOwnerLock> {
+    try {
+      return JSON.parse(
+        fs.readFileSync(this.getTelegramOwnerPath(rootPath), "utf-8"),
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  private writeTelegramOwners(
+    rootPath: string,
+    owners: Record<string, TelegramOwnerLock>,
+  ): void {
+    try {
+      fs.writeFileSync(
+        this.getTelegramOwnerPath(rootPath),
+        JSON.stringify(owners, null, 2),
+        "utf-8",
+      );
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /**
+   * True if `lock` is held by a DIFFERENT orchestrator instance that is still
+   * alive. Unlike the resume lock this compares `ownerId` (not pid): a mission
+   * instance sharing our process must still be treated as foreign vs the board.
+   * No TTL — a long-lived owner (pid alive) keeps ownership indefinitely; the
+   * lock is only reclaimable once the owning PROCESS dies (pid gone).
+   */
+  private isForeignLiveTelegramOwner(
+    lock: TelegramOwnerLock | undefined,
+    ownerId: string,
+  ): boolean {
+    if (!lock) return false;
+    if (lock.ownerId === ownerId) return false; // ours (incl. crash restart)
+    return OrchestratorManager.isPidAlive(lock.pid);
+  }
+
+  /**
+   * Try to claim Telegram ownership for `projectId`. Returns false when a
+   * different, still-running orchestrator already owns it — the caller then
+   * launches WITHOUT `--channels` (no second poller → no 409). Same-owner
+   * re-acquire (crash restart / relaunch of the same instance) always succeeds
+   * and repoints the ptySessionId. Dead/foreign-process locks are stolen.
+   */
+  private acquireTelegramOwner(
+    rootPath: string,
+    projectId: string,
+    ownerId: string,
+    ptySessionId: string,
+  ): boolean {
+    const owners = this.readTelegramOwners(rootPath);
+    if (this.isForeignLiveTelegramOwner(owners[projectId], ownerId)) {
+      return false;
+    }
+    owners[projectId] = {
+      ownerId,
+      ptySessionId,
+      kind: this.kind,
+      pid: process.pid,
+      updatedAt: Date.now(),
+    };
+    this.writeTelegramOwners(rootPath, owners);
+    return true;
+  }
+
+  /** Release our Telegram ownership for `projectId` (only if `ownerId` matches). */
+  private releaseTelegramOwner(
+    rootPath: string,
+    projectId: string,
+    ownerId: string,
+  ): void {
+    const owners = this.readTelegramOwners(rootPath);
+    const held = owners[projectId];
+    if (held && held.ownerId === ownerId) {
+      delete owners[projectId];
+      this.writeTelegramOwners(rootPath, owners);
+    }
+  }
+
+  /**
+   * True if `projectId` currently has a LIVE Telegram owner (owning pid still
+   * running). Public so the main process can decide, when an owner stops,
+   * whether a surviving sibling must take over Telegram (handover). Free or
+   * dead-owner projects return false.
+   */
+  isTelegramOwnerLive(rootPath: string, projectId: string): boolean {
+    const lock = this.readTelegramOwners(rootPath)[projectId];
+    if (!lock) return false;
+    return OrchestratorManager.isPidAlive(lock.pid);
   }
 
   /**
