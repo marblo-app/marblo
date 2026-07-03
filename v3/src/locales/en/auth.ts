@@ -10,4 +10,8 @@ export const auth: Record<keyof typeof koAuth, string> = {
   "auth.error.email": "Email sign-in failed.",
   "auth.error.signup": "Sign-up failed.",
   "auth.error.logout": "Sign-out failed.",
+  "auth.init.timeout.title": "Can't connect",
+  "auth.init.timeout.message":
+    "We couldn't reach the authentication service. Check your network connection. If this keeps happening the app may be misconfigured — try reinstalling or contact support.",
+  "auth.init.timeout.retry": "Try again",
 };
