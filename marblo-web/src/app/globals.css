@@ -1,5 +1,66 @@
 @import "tailwindcss";
 
+/* =============================================================================
+ * Marblo design tokens (Tailwind v4 @theme)
+ * -----------------------------------------------------------------------------
+ * Single source of truth for brand color, radius, spacing and typography.
+ * Owned by the design-foundation ticket — other web tickets CONSUME these via
+ * Tailwind utilities and should not redefine them here.
+ *
+ * How to use the tokens elsewhere:
+ *   - Color:   bg-brand-500 / text-brand-400 / border-brand-600 / ring-brand-400
+ *              (semantic: ring-ring, bg-accent, text-accent-foreground)
+ *   - Font:    font-display  (Space Grotesk — headings/hero)
+ *              font-sans     (Inter — default body, applied automatically)
+ *   - Radius:  rounded-card / rounded-button  (plus Tailwind's rounded-*)
+ *
+ * Brand hue = a single committed indigo accent. We intentionally standardize on
+ * ONE accent so pages can drop the indigo→violet gradient "AI-slop" dependence
+ * (see design-audit FINDING-005) in favor of a solid, coherent accent.
+ * ========================================================================== */
+@theme {
+  /* --- Brand scale (indigo) — the one committed accent -------------------- */
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1; /* primary accent */
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-800: #3730a3;
+  --color-brand-900: #312e81;
+  --color-brand-950: #1e1b4b;
+
+  /* --- Semantic radius tokens (on top of Tailwind's rounded-* scale) ------ */
+  --radius-button: 0.625rem; /* 10px — buttons / inputs / pills */
+  --radius-card: 0.875rem; /* 14px — cards / panels / media frames */
+
+  /* --- Section rhythm (consistent vertical spacing for layout tickets) ---- */
+  --spacing-section: 6rem; /* 96px — default block/section padding */
+  --spacing-section-sm: 4rem; /* 64px — tighter sections / mobile */
+}
+
+/* @theme inline: values that reference OTHER CSS variables (next/font output,
+ * or the brand scale above). `inline` makes generated utilities emit the
+ * referenced var directly, which is required for next/font variables and keeps
+ * the semantic aliases tracking the brand scale. */
+@theme inline {
+  /* --- Typography (self-hosted via next/font in [locale]/layout.tsx) ------ */
+  /* --font-space-grotesk / --font-inter are injected on <html> by next/font.
+   * CJK system fonts are appended so Korean/Japanese locales stay legible when
+   * the Latin webfont has no glyph. */
+  --font-sans: var(--font-inter), "Apple SD Gothic Neo", "Noto Sans KR",
+    "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), "Apple SD Gothic Neo",
+    "Noto Sans KR", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+
+  /* --- Semantic color aliases (track the brand scale) --------------------- */
+  --color-accent: var(--color-brand-500);
+  --color-accent-foreground: #ffffff;
+  --color-ring: var(--color-brand-400); /* focus-visible ring, bright on dark */
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -7,4 +68,26 @@ html {
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* =============================================================================
+ * Global focus-visible ring system (design-audit FINDING-006)
+ * -----------------------------------------------------------------------------
+ * Keyboard-only focus indicator applied to every focusable element. Mouse
+ * clicks won't trigger it (:focus-visible), so it adds a11y without visual
+ * noise. Components can opt into a custom ring but should not remove this.
+ * ========================================================================== */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Respect users who ask for reduced motion (design-audit FINDING-009). */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
 }

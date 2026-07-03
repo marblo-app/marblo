@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { Space_Grotesk, Inter } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { notFound } from "next/navigation";
@@ -17,6 +18,22 @@ import PromoBar from "@/components/PromoBar";
 import PrivacyConsentGate from "@/components/PrivacyConsentGate";
 import GoogleAnalytics from "@/components/GoogleAnalytics";
 import "../globals.css";
+
+// Self-hosted fonts (next/font/google → no runtime request to Google, no CLS).
+// Space Grotesk = display/headings; Inter = body. Each exposes a CSS variable
+// that globals.css maps to --font-display / --font-sans (see @theme inline).
+// Both are variable fonts, so no explicit `weight` is needed.
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-space-grotesk",
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export async function generateMetadata({
   params,
@@ -94,8 +111,11 @@ export default async function LocaleLayout({
   const messages = await getMessages();
 
   return (
-    <html lang={locale} className="dark">
-      <body className="bg-zinc-950 text-white min-h-screen flex flex-col">
+    <html
+      lang={locale}
+      className={`dark ${spaceGrotesk.variable} ${inter.variable}`}
+    >
+      <body className="font-sans bg-zinc-950 text-white min-h-screen flex flex-col">
         {/* GA4 로더 + 자동 pageview (측정ID 없으면 no-op). useSearchParams 사용 → Suspense 필수 */}
         <Suspense fallback={null}>
           <GoogleAnalytics />
