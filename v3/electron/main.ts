@@ -84,6 +84,10 @@ import {
   type TelegramChannelInput,
 } from "./telegram-channels";
 import {
+  runTelegramChannelHealthCheck,
+  type ChannelHealthReport,
+} from "./telegram-health";
+import {
   getProjectConnection,
   upsertProjectConnection,
   listProjectConnections,
@@ -476,6 +480,15 @@ function broadcast(channel: string, ...args: unknown[]): void {
       win.webContents.send(channel, ...args);
     }
   }
+}
+
+/**
+ * Broadcast a Telegram channel health report to the renderer so the UI can
+ * surface "webhook cleared" / "poller may be deaf — reconnect" states. The
+ * report carries no secret material (see telegram-health.ts).
+ */
+function emitTelegramHealth(report: ChannelHealthReport): void {
+  broadcast("telegram:health", report);
 }
 
 /** Send an IPC event to a specific webContents id (or fallback to mainWindow). */
@@ -3009,7 +3022,8 @@ ipcMain.handle("window:getRestoreState", (event) => {
 // requesting window's folder/project (from its restore record, with the live
 // project registration as a fallback) so it opens on the same project.
 ipcMain.handle("window:popOutTab", (event, view: DetachedView) => {
-  if (view !== "board" && view !== "code" && view !== "history") return { success: false };
+  if (view !== "board" && view !== "code" && view !== "history")
+    return { success: false };
   const senderId = event.sender.id;
   const restore = windowRestore.get(senderId) ?? {};
   const seed = {
@@ -3969,7 +3983,33 @@ app.whenReady().then(async () => {
   powerMonitor.on("resume", () => {
     console.log("[Main] System resumed from sleep — notifying renderer");
     broadcast("system:wake");
+    // Telegram channel poller self-heal: mac sleep kills the getUpdates TCP
+    // socket, and a stray webhook 409-wedges getUpdates permanently. The poller
+    // is a claude-owned MCP grandchild we can't restart directly (see
+    // telegram-health.ts), but with the stored bot token we can clear a webhook
+    // wedge and surface a deaf-poller warning out-of-band. Fire-and-forget.
+    void runTelegramChannelHealthCheck("wake", {
+      onReport: emitTelegramHealth,
+    }).catch((err) =>
+      console.warn("[Main] Telegram wake health check failed:", err),
+    );
   });
+
+  // Conservative periodic health sweep — catches steady-state disconnects that
+  // never fire a wake event (a webhook registered mid-session, or a silently
+  // deaf poller). Only probes active channels; no-op when none are configured.
+  // unref'd so it never keeps the process alive on quit.
+  const telegramHealthTimer = setInterval(
+    () => {
+      void runTelegramChannelHealthCheck("interval", {
+        onReport: emitTelegramHealth,
+      }).catch((err) =>
+        console.warn("[Main] Telegram interval health check failed:", err),
+      );
+    },
+    4 * 60 * 1000,
+  );
+  telegramHealthTimer.unref?.();
 
   // Share windows with bridge server
   if (mainWindow) {
