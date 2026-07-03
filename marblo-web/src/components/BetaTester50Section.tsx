@@ -12,10 +12,7 @@ export default function BetaTester50Section() {
   return (
     <section className="px-4 pt-4 pb-12 md:pb-16">
       <div className="max-w-4xl mx-auto">
-        <div className="relative overflow-hidden rounded-3xl border border-indigo-500/40 bg-gradient-to-br from-indigo-950/60 via-zinc-900 to-zinc-900 p-8 md:p-12 shadow-2xl shadow-indigo-900/30">
-          <div className="pointer-events-none absolute -top-24 -right-24 w-72 h-72 bg-indigo-500/20 rounded-full blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-32 -left-16 w-72 h-72 bg-fuchsia-500/10 rounded-full blur-3xl" />
-
+        <div className="relative overflow-hidden rounded-2xl border border-indigo-500/25 bg-zinc-900/80 p-8 md:p-12 shadow-2xl shadow-black/20">
           <div className="relative">
             <div className="flex flex-wrap items-center gap-3 mb-6">
               <span className="inline-flex items-center gap-2 bg-indigo-500/20 text-indigo-200 border border-indigo-400/40 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider">
