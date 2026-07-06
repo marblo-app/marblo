@@ -6,6 +6,9 @@ import {
   signInWithRedirect,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  setPersistence,
+  browserLocalPersistence,
+  browserPopupRedirectResolver,
   signOut,
   GoogleAuthProvider,
   GithubAuthProvider,
@@ -39,6 +42,21 @@ const githubProvider = new GithubAuthProvider();
 // 10s is comfortably above a normal cold start.
 const AUTH_INIT_TIMEOUT_MS = 10_000;
 
+// Build marker so packaged-app console logs unambiguously identify WHICH auth
+// build is running (dev/prod parity + stale-build detection). Bump the suffix
+// whenever the Google login flow changes so old bundles are recognizable.
+// Ticket XscLxYM75DR9ou52o7Za — the previous "무반응" regression was impossible
+// to triage because there was no way to tell whether the packaged app even ran
+// the redirect code path or a stale popup build.
+const AUTH_BUILD_TAG = "google-login=redirect-v2";
+
+// If signInWithRedirect neither navigates the window away nor rejects within
+// this window, its pending-redirect persistence write has silently hung (the
+// packaged 127.0.0.1 IndexedDB hang). We surface a visible error instead of a
+// dead, silent button. Generous so a slow-but-successful navigation never trips
+// it (a real navigation tears down this renderer well before then).
+const REDIRECT_NAV_WATCHDOG_MS = 8_000;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,6 +86,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
+    // One-line boot marker: proves which auth build is live and what authDomain
+    // the redirect handler URL will be built from (empty authDomain silently
+    // breaks signInWithRedirect). Grep the packaged console for "[auth]".
+    console.info(
+      `[auth] AuthProvider init (${AUTH_BUILD_TAG}, authDomain=${
+        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "<undefined>"
+      })`,
+    );
+
     // `settled` guards against the multiple resolution paths below racing each
     // other (timeout vs. onAuthStateChanged vs. authStateReady).
     let settled = false;
@@ -116,7 +143,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     getRedirectResult(auth)
       .then((result) => {
-        if (!result) return;
+        if (!result) {
+          console.info("[auth] getRedirectResult: no pending redirect");
+          return;
+        }
+        console.info("[auth] getRedirectResult: signed in via redirect");
         settled = true;
         clearTimeout(timeout);
         setError(null);
@@ -125,6 +156,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       })
       .catch((e) => {
+        const code = (e as { code?: string })?.code ?? "?";
+        console.error(`[auth] getRedirectResult: error code=${code}`, e);
         settled = true;
         clearTimeout(timeout);
         setError(e instanceof Error ? e.message : t("auth.error.google"));
@@ -138,10 +171,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loginWithGoogle = async () => {
+    const authDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN;
+    console.info(
+      `[auth] loginWithGoogle: enter (${AUTH_BUILD_TAG}, authDomain=${
+        authDomain || "<undefined>"
+      })`,
+    );
+    setError(null);
+
+    // A missing authDomain means the Firebase redirect handler URL can't be
+    // built and signInWithRedirect fails obscurely — surface it plainly rather
+    // than as a dead button.
+    if (!authDomain) {
+      console.error(
+        "[auth] loginWithGoogle: VITE_FIREBASE_AUTH_DOMAIN is empty",
+      );
+      setError(t("auth.error.google"));
+      return;
+    }
+
+    // Whether the window actually navigated away for the redirect. On a normal
+    // success the renderer is torn down before this matters; it only stays true-
+    // gating the watchdog when navigation never happens.
+    let navigated = false;
+
     try {
-      setError(null);
-      await signInWithRedirect(auth, googleProvider);
+      // Force a redirect-capable, reliably-writable persistence BEFORE
+      // navigating. On the packaged 127.0.0.1 origin IndexedDB can be left in a
+      // hung state (ticket Oq63rrnxMYv6fdeNeani); if signInWithRedirect's
+      // pending-state write lands on that hung store it never navigates and
+      // never throws → the silent dead button we are fixing. localStorage is
+      // reliable here. Race a timeout so a hung setPersistence can't itself
+      // wedge the flow — we proceed regardless.
+      await Promise.race([
+        setPersistence(auth, browserLocalPersistence),
+        new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
+      ]);
+      console.info(
+        "[auth] loginWithGoogle: persistence set → signInWithRedirect",
+      );
+
+      // Watchdog: a real redirect navigates this window away within a second or
+      // two. If it neither navigates nor rejects, the pending-redirect write
+      // hung — convert that silent no-op into a visible, actionable error.
+      const hangTimer = setTimeout(() => {
+        if (navigated) return;
+        console.error(
+          "[auth] loginWithGoogle: no navigation within " +
+            `${REDIRECT_NAV_WATCHDOG_MS}ms — redirect appears stuck`,
+        );
+        setError(t("auth.error.google"));
+      }, REDIRECT_NAV_WATCHDOG_MS);
+
+      await signInWithRedirect(
+        auth,
+        googleProvider,
+        browserPopupRedirectResolver,
+      );
+      // Reached only if the promise resolves before the window unloads.
+      navigated = true;
+      clearTimeout(hangTimer);
+      console.info(
+        "[auth] loginWithGoogle: signInWithRedirect resolved (navigating)",
+      );
     } catch (e) {
+      navigated = true;
+      const code = (e as { code?: string })?.code ?? "?";
+      console.error(`[auth] loginWithGoogle: caught code=${code}`, e);
       setError(e instanceof Error ? e.message : t("auth.error.google"));
     }
   };
