@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth";
@@ -83,6 +83,17 @@ const BUG_STATUS_LABEL: Record<BugReportStatus, string> = {
 };
 
 const BUG_STATUS_ORDER: BugReportStatus[] = ["new", "triaged", "resolved"];
+type AdminTab = "waitlist" | "founders" | "bugs";
+
+const ADMIN_TABS: Array<{
+  id: AdminTab;
+  label: string;
+  icon: typeof Users;
+}> = [
+  { id: "waitlist", label: "대기자", icon: Users },
+  { id: "founders", label: "파운더 현황", icon: Award },
+  { id: "bugs", label: "버그 신고", icon: Bug },
+];
 
 // Firebase callable errors carry a `code` like "functions/permission-denied".
 type CallableError = { code?: string; message?: string };
@@ -124,6 +135,10 @@ function formatDate(iso?: string | null): string {
   }
 }
 
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 export default function AdminPage() {
   const locale = useLocale();
   const router = useRouter();
@@ -137,6 +152,7 @@ export default function AdminPage() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);
 
   // Waitlist state
+  const [activeTab, setActiveTab] = useState<AdminTab>("waitlist");
   const [entries, setEntries] = useState<WaitlistEntry[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -178,6 +194,13 @@ export default function AdminPage() {
   >("all");
   const [bugUpdating, setBugUpdating] = useState<Record<string, boolean>>({});
   const [bugDetail, setBugDetail] = useState<BugReportItem | null>(null);
+  const selectedFounderEmails = useMemo(() => {
+    return new Set(
+      founders
+        .filter((f) => !!f.accessGrantedAt)
+        .map((f) => normalizeEmail(f.email)),
+    );
+  }, [founders]);
 
   // Auth gate
   useEffect(() => {
@@ -343,6 +366,32 @@ export default function AdminPage() {
       const fn = httpsCallable(functions, "markFounderSelected");
       await fn({ email: entry.email });
       setSelected((s) => ({ ...s, [entry.id]: true }));
+      setFounders((prev) => {
+        const email = normalizeEmail(entry.email);
+        const now = new Date().toISOString();
+        let found = false;
+        const next = prev.map((f) => {
+          if (normalizeEmail(f.email) !== email) return f;
+          found = true;
+          return {
+            ...f,
+            email,
+            status: f.status || "selected",
+            accessGrantedAt: f.accessGrantedAt || now,
+          };
+        });
+        if (found) return next;
+        return [
+          {
+            email,
+            status: "selected",
+            accessGrantedAt: now,
+            proGrantedMonths: 0,
+            hasFeedback: false,
+          },
+          ...next,
+        ];
+      });
     } catch (err: unknown) {
       const message = mapError(err as CallableError, "select");
       setRowError((e) => ({ ...e, [entry.id]: message }));
@@ -459,7 +508,7 @@ export default function AdminPage() {
           <p className="text-sm text-zinc-400 leading-relaxed">
             대기자(waitlist)를 확인하고 파운더를 선정하세요. 선정 시 3일간의
             피드백 제출 기간이 시작됩니다. 파운더 현황과 제출된 6문항 피드백은
-            아래 &quot;파운더 현황&quot; 섹션에서 바로 확인할 수 있습니다.
+            탭에서 바로 확인할 수 있습니다.
           </p>
           <div className="mt-3 flex items-start gap-2 text-xs text-amber-400 bg-amber-950/30 border border-amber-900/40 rounded-lg p-3">
             <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
@@ -471,7 +520,58 @@ export default function AdminPage() {
           </div>
         </header>
 
+        <nav
+          className="flex flex-wrap gap-2 border-b border-zinc-800 pb-3"
+          aria-label="어드민 섹션"
+        >
+          {ADMIN_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            const count =
+              tab.id === "waitlist"
+                ? entries.length
+                : tab.id === "founders"
+                  ? founders.length
+                  : bugReports.length;
+            const hasError =
+              (tab.id === "waitlist" && !!listError) ||
+              (tab.id === "founders" && !!foundersError) ||
+              (tab.id === "bugs" && !!bugError);
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  active
+                    ? "bg-indigo-600 text-white"
+                    : "bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {tab.label}
+                {hasError ? (
+                  <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-xs text-red-200">
+                    오류
+                  </span>
+                ) : (
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-xs ${
+                      active
+                        ? "bg-white/15 text-white"
+                        : "bg-zinc-800 text-zinc-400"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
         {/* Waitlist card */}
+        {activeTab === "waitlist" && (
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -512,7 +612,9 @@ export default function AdminPage() {
                 <tbody>
                   {entries.map((entry) => {
                     const isSelecting = !!selecting[entry.id];
-                    const isSelected = !!selected[entry.id];
+                    const isSelected =
+                      !!selected[entry.id] ||
+                      selectedFounderEmails.has(normalizeEmail(entry.email));
                     const err = rowError[entry.id];
                     return (
                       <tr
@@ -558,8 +660,10 @@ export default function AdminPage() {
             </div>
           )}
         </section>
+        )}
 
         {/* Interview card */}
+        {activeTab === "founders" && (
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
           <div className="flex items-center gap-2 mb-4">
             <UserCheck className="w-5 h-5 text-indigo-400" />
@@ -599,8 +703,10 @@ export default function AdminPage() {
             </div>
           )}
         </section>
+        )}
 
         {/* 파운더 현황 card */}
+        {activeTab === "founders" && (
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -724,8 +830,10 @@ export default function AdminPage() {
             </button>
           </div>
         </section>
+        )}
 
         {/* 버그 신고 트리아지 card */}
+        {activeTab === "bugs" && (
         <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -881,6 +989,7 @@ export default function AdminPage() {
             })()
           )}
         </section>
+        )}
       </div>
 
       {/* 버그 신고 상세 모달 */}
