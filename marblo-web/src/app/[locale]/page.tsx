@@ -147,10 +147,10 @@ export default function HomePage() {
             </h2>
             <p className="text-zinc-400 text-lg max-w-3xl mx-auto leading-relaxed">
               {locale === "ko"
-                ? "중앙 오케스트레이터가 Claude, GPT, Gemini, Codex 등 이종 AI 에이전트를 물리적/논리적으로 분할하여 태스크를 할당하고 관리합니다. 이것은 마블로에서만 가능합니다."
+                ? "중앙 오케스트레이터가 Claude, GPT/Codex, Antigravity 등 이종 AI 에이전트를 물리적/논리적으로 분할하여 태스크를 할당하고 관리합니다. 이것은 마블로에서만 가능합니다."
                 : locale === "ja"
-                ? "中央オーケストレーターがClaude、GPT、Gemini、Codexなど異種AIエージェントを物理的/論理的に分割してタスクを割り当て管理します。これはMarbloでのみ可能です。"
-                : "A central orchestrator physically and logically partitions heterogeneous AI agents — Claude, GPT, Gemini, Codex — to assign and manage tasks. This is only possible with Marblo."}
+                ? "中央オーケストレーターがClaude、GPT/Codex、Antigravityなど異種AIエージェントを物理的/論理的に分割してタスクを割り当て管理します。これはMarbloでのみ可能です。"
+                : "A central orchestrator physically and logically partitions heterogeneous AI agents — Claude, GPT/Codex, Antigravity — to assign and manage tasks. This is only possible with Marblo."}
             </p>
           </div>
           <div className="rounded-2xl border border-zinc-700/50 overflow-hidden shadow-2xl shadow-indigo-900/10">

@@ -13,7 +13,7 @@
   },
   "hero": {
     "title": "혼자서 팀 전체의\n성과를 만드세요",
-    "subtitle": "Claude, GPT, Gemini 에이전트 군단이 동시에 코딩합니다.\n당신은 지시하고, 에이전트가 실행합니다.",
+    "subtitle": "Claude, GPT/Codex, Antigravity 에이전트 군단이 동시에 코딩합니다.\n당신은 지시하고, 에이전트가 실행합니다.",
     "cta_download": "다운로드",
     "cta_pricing": "가격 보기",
     "badge": "AI 에이전트 오케스트레이션 플랫폼",
@@ -34,9 +34,9 @@
     "subtitle": "단순 코드 자동완성을 넘어, AI 에이전트를 프로젝트 매니저처럼 관리하세요",
     "multiagent": {
       "title": "멀티 에이전트 오케스트레이션",
-      "description": "Claude가 백엔드를, GPT가 프론트를, Gemini가 테스트를 — 동시에 처리합니다. 칸반 보드에서 각 에이전트의 진행 상황을 실시간으로 확인하세요.",
+      "description": "Claude가 백엔드를, GPT/Codex가 프론트를, Antigravity가 테스트를 — 동시에 처리합니다. 칸반 보드에서 각 에이전트의 진행 상황을 실시간으로 확인하세요.",
       "highlight": "경쟁사 대비 유일한 기능",
-      "detail": "마블로의 멀티 에이전트 시스템은 각 AI 모델의 강점을 극대화합니다.\n\nClaude는 정교한 백엔드 로직과 아키텍처 설계를, GPT는 빠른 프론트엔드 코딩과 UI 구현을, Gemini는 테스트 작성과 코드 리뷰를 담당합니다.\n\n각 에이전트는 독립된 터미널에서 실행되며, 칸반 보드에서 진행 상황을 실시간으로 모니터링할 수 있습니다. MCP 프로토콜을 통해 에이전트 간 컨텍스트를 공유하여, 마치 실제 개발팀처럼 협업합니다."
+      "detail": "마블로의 멀티 에이전트 시스템은 각 AI 모델의 강점을 극대화합니다.\n\nClaude는 정교한 백엔드 로직과 아키텍처 설계를, GPT/Codex는 빠른 프론트엔드 코딩과 UI 구현을, Antigravity는 테스트 작성과 코드 리뷰를 담당합니다.\n\n각 에이전트는 독립된 터미널에서 실행되며, 칸반 보드에서 진행 상황을 실시간으로 모니터링할 수 있습니다. MCP 프로토콜을 통해 에이전트 간 컨텍스트를 공유하여, 마치 실제 개발팀처럼 협업합니다."
     },
     "kanban": {
       "title": "칸반 보드 + 에이전트 통합",
@@ -88,7 +88,7 @@
       "terminal": {
         "label": "TERMINAL",
         "title": "터미널에서 바로 에이전트를 소환",
-        "description": "내장 터미널에서 슬래시 명령어 한 줄로 Claude, GPT, Gemini 에이전트를 생성합니다. 에이전트가 코드를 작성하고, 테스트하고, 배포하는 모습을 실시간으로 관찰하세요.",
+        "description": "내장 터미널에서 슬래시 명령어 한 줄로 Claude, GPT/Codex, Antigravity 에이전트를 생성합니다. 에이전트가 코드를 작성하고, 테스트하고, 배포하는 모습을 실시간으로 관찰하세요.",
         "bullet1": "/tf-spawn으로 원클릭 에이전트 생성",
         "bullet2": "에이전트 출력 실시간 스트리밍",
         "bullet3": "멀티 탭으로 여러 에이전트 동시 모니터링"
@@ -96,10 +96,10 @@
       "orchestration": {
         "label": "ORCHESTRATION",
         "title": "최적의 AI 모델을 자동 배치",
-        "description": "Claude는 코드 작성, GPT는 문서화, Gemini는 테스트 — 각 모델의 강점에 맞게 태스크를 최적 배치합니다. 비용 대비 성능을 극대화하는 스마트 오케스트레이션.",
+        "description": "Claude는 코드 작성, GPT/Codex는 문서화, Antigravity는 테스트 — 각 모델의 강점에 맞게 태스크를 최적 배치합니다. 비용 대비 성능을 극대화하는 스마트 오케스트레이션.",
         "bullet1": "모델별 강점 기반 자동 태스크 할당",
         "bullet2": "비용/성능 대시보드로 최적화",
-        "bullet3": "하나의 프로젝트에서 Claude + GPT + Gemini 동시 운용"
+        "bullet3": "하나의 프로젝트에서 Claude + GPT/Codex + Antigravity 동시 운용"
       }
     }
   },
@@ -116,7 +116,7 @@
       "kanban": "칸반 보드 + 태스크 관리",
       "flowEditor": "비주얼 Mission 에디터",
       "orchestrator": "자연어 Mission Launch",
-      "multiModel": "멀티 모델 (Claude+GPT+Gemini)",
+      "multiModel": "멀티 모델 (Claude+GPT/Codex+Antigravity)",
       "mcp": "MCP 프로토콜 지원",
       "local": "로컬 실행 (데이터 보호)",
       "price": "가격"

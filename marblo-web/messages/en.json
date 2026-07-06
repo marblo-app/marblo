@@ -13,7 +13,7 @@
   },
   "hero": {
     "title": "One developer.\nAn entire team's output.",
-    "subtitle": "Claude, GPT, and Gemini agents code simultaneously.\nYou direct. They execute.",
+    "subtitle": "Claude, GPT/Codex, and Antigravity agents code simultaneously.\nYou direct. They execute.",
     "cta_download": "Download",
     "cta_pricing": "View Pricing",
     "badge": "AI Agent Orchestration Platform",
@@ -34,9 +34,9 @@
     "subtitle": "Beyond code autocomplete — manage AI agents like a project manager",
     "multiagent": {
       "title": "Multi-Agent Orchestration",
-      "description": "Claude handles backend, GPT handles frontend, Gemini runs tests — all simultaneously. Track each agent's progress in real-time on the kanban board.",
+      "description": "Claude handles backend, GPT/Codex handles frontend, Antigravity runs tests — all simultaneously. Track each agent's progress in real-time on the kanban board.",
       "highlight": "Only tool with this capability",
-      "detail": "Marblo's multi-agent system maximizes each AI model's strengths.\n\nClaude handles sophisticated backend logic and architecture design, GPT delivers rapid frontend coding and UI implementation, and Gemini manages test writing and code review.\n\nEach agent runs in its own isolated terminal, and you can monitor progress in real-time on the kanban board. Through the MCP protocol, agents share context with each other, collaborating like a real development team."
+      "detail": "Marblo's multi-agent system maximizes each AI model's strengths.\n\nClaude handles sophisticated backend logic and architecture design, GPT/Codex delivers rapid frontend coding and UI implementation, and Antigravity manages test writing and code review.\n\nEach agent runs in its own isolated terminal, and you can monitor progress in real-time on the kanban board. Through the MCP protocol, agents share context with each other, collaborating like a real development team."
     },
     "kanban": {
       "title": "Kanban Board + Agent Integration",
@@ -88,7 +88,7 @@
       "terminal": {
         "label": "TERMINAL",
         "title": "Summon agents right from the terminal",
-        "description": "Spawn Claude, GPT, and Gemini agents with a single slash command in the built-in terminal. Watch agents write code, run tests, and deploy in real-time.",
+        "description": "Spawn Claude, GPT/Codex, and Antigravity agents with a single slash command in the built-in terminal. Watch agents write code, run tests, and deploy in real-time.",
         "bullet1": "One-click agent creation with /tf-spawn",
         "bullet2": "Real-time agent output streaming",
         "bullet3": "Multi-tab monitoring for multiple agents"
@@ -96,10 +96,10 @@
       "orchestration": {
         "label": "ORCHESTRATION",
         "title": "Auto-assign the best AI model",
-        "description": "Claude writes code, GPT documents, Gemini tests — tasks are optimally assigned based on each model's strengths. Smart orchestration that maximizes cost-performance.",
+        "description": "Claude writes code, GPT/Codex documents, Antigravity tests — tasks are optimally assigned based on each model's strengths. Smart orchestration that maximizes cost-performance.",
         "bullet1": "Automatic task assignment based on model strengths",
         "bullet2": "Cost/performance dashboard for optimization",
-        "bullet3": "Run Claude + GPT + Gemini simultaneously in one project"
+        "bullet3": "Run Claude + GPT/Codex + Antigravity simultaneously in one project"
       }
     }
   },
@@ -116,7 +116,7 @@
       "kanban": "Kanban board + task management",
       "flowEditor": "Visual Mission editor",
       "orchestrator": "Natural language Mission Launch",
-      "multiModel": "Multi-model (Claude+GPT+Gemini)",
+      "multiModel": "Multi-model (Claude+GPT/Codex+Antigravity)",
       "mcp": "MCP protocol support",
       "local": "Local execution (data protection)",
       "price": "Price"

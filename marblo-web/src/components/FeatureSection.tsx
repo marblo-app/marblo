@@ -234,7 +234,7 @@ function OrchestrationMockup({ color }: { color: Feature["color"] }) {
   const models = [
     { label: "Claude", x: "left-0 top-0" },
     { label: "GPT", x: "right-0 top-0" },
-    { label: "Gemini", x: "left-1/2 -translate-x-1/2 bottom-0" },
+    { label: "Antigravity", x: "left-1/2 -translate-x-1/2 bottom-0" },
   ];
 
   return (

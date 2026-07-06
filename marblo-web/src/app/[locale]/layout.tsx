@@ -56,14 +56,14 @@ export async function generateMetadata({
       template: "%s | Marblo",
     },
     description:
-      "Manage multiple AI agents on a kanban board. Run Claude, GPT, and Gemini simultaneously with visual flow editor.",
+      "Manage multiple AI agents on a kanban board. Run Claude, GPT/Codex, and Antigravity simultaneously with visual flow editor.",
     keywords: [
       "AI agent",
       "multi-agent",
       "kanban",
       "Claude",
       "GPT",
-      "Gemini",
+      "Antigravity",
       "developer tools",
       "AI orchestration",
       "Marblo",
@@ -73,7 +73,7 @@ export async function generateMetadata({
     openGraph: {
       title: "Marblo - AI Agent Army Workspace",
       description:
-        "Manage multiple AI agents on a kanban board. Run Claude, GPT, and Gemini simultaneously.",
+        "Manage multiple AI agents on a kanban board. Run Claude, GPT/Codex, and Antigravity simultaneously.",
       type: "website",
       siteName: "Marblo",
       url: alternates.canonical,
