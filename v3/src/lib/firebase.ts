@@ -27,9 +27,9 @@ export const app = initializeApp(firebaseConfig);
 // IndexedDB → localStorage → in-memory. 랜덤포트라 cross-launch persistence 는
 // 어차피 유지되지 않으므로 하위 폴백으로 내려가도 UX 손실은 미미하다.
 // ★popupRedirectResolver: initializeAuth 는 getAuth 와 달리 기본 resolver 를
-// 자동 포함하지 않는다. 이게 없으면 signInWithPopup(Google) 이
-// auth/argument-error 로 실패한다 (티켓 HYvcR2xwBf5uTkHpkKS8). browserPopup
-// RedirectResolver 를 명시해 팝업/리다이렉트 로그인을 복구한다.
+// 자동 포함하지 않는다. 이게 없으면 redirect/popup OAuth 가 auth/argument-error 로
+// 실패한다 (티켓 HYvcR2xwBf5uTkHpkKS8). Google 은 redirect flow 를 사용해
+// COOP 에 끊기는 popup window.closed 경로를 피한다.
 export const auth = initializeAuth(app, {
   persistence: [
     indexedDBLocalPersistence,

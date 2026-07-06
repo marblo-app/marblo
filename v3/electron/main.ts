@@ -1672,15 +1672,14 @@ const externalLinkHandledWebContents = new WeakSet<Electron.WebContents>();
 //   - file://                         → preload + packaged assets
 //   - http(s)://localhost|127.0.0.1   → dev server (5173) and the prod static
 //                                        server (random 127.0.0.1 port). This is
-//                                        the app's own loaded origin; intercepting
-//                                        it would hijack normal in-app navigation.
+//                                        the app's own loaded origin and the
+//                                        Firebase redirect return URL.
 //   - non-http(s) schemes (about:blank, blob:, data:, devtools:, chrome:) →
 //                                        keep default behavior, never externalize.
-//   - Firebase auth domains + OAuth provider endpoints → signInWithPopup opens a
-//                                        popup that loads the Firebase auth handler,
-//                                        navigates to the provider (Google / GitHub
-//                                        OAuth), and postMessages the credential
-//                                        back to the opener. It MUST stay in-app.
+//   - Firebase auth domains + OAuth provider endpoints → signInWithRedirect
+//                                        navigates the app window through the
+//                                        Firebase handler and provider, then back
+//                                        to 127.0.0.1. It MUST stay in-app.
 //                                        Note github.com is allowed ONLY for the
 //                                        /login/oauth path — ordinary github.com
 //                                        links (PR URLs) still open externally,
@@ -1724,8 +1723,8 @@ function applyExternalLinkHandling(webContents: Electron.WebContents): void {
   externalLinkHandledWebContents.add(webContents);
 
   // window.open / target="_blank" / window.open(...): external http(s) goes to
-  // the OS browser; everything internal (auth popup, about:blank, etc.) keeps
-  // the default behavior so the Firebase login popup still works.
+  // the OS browser; everything internal (auth redirects, about:blank, etc.)
+  // keeps the default behavior.
   webContents.setWindowOpenHandler(({ url }) => {
     if (!isInternalNavigationUrl(url)) {
       void shell.openExternal(url);
@@ -1780,7 +1779,8 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
     win.loadURL(`http://localhost:5173${detachedQuery}`);
     // DevTools disabled by default for performance — open manually with Cmd+Option+I
   } else {
-    // Serve from localhost so Firebase Auth (signInWithPopup) works
+    // Serve from localhost so Firebase Auth redirects can return to an
+    // authorized http://127.0.0.1 origin instead of file://.
     // file:// protocol causes auth/unauthorized-domain error
     const distPath = path.join(__dirname, "../dist");
     const server = http.createServer((req, res) => {
@@ -1808,12 +1808,6 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
       };
       res.writeHead(200, {
         "Content-Type": mimeTypes[ext] || "application/octet-stream",
-        // Firebase signInWithPopup(Google) 은 팝업 닫힘을 window.closed/
-        // window.close 로 감지한다. 기본 COOP 하에서 Google OAuth 팝업이
-        // 브라우징 컨텍스트를 끊어 이 호출이 차단되면 "Pending promise was
-        // never set" 로 로그인이 영영 완료되지 않는다(티켓 HYvcR2xw). opener 가
-        // 자신이 연 팝업 참조를 유지하도록 same-origin-allow-popups 를 준다.
-        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
       });
       fs.createReadStream(filePath).pipe(res);
     });
@@ -3987,31 +3981,15 @@ ipcMain.handle(
 ipcMain.handle("usage:accountRateLimits", () => getAccountRateLimits());
 
 app.whenReady().then(async () => {
+  console.log("[Marblo] auth=redirect build");
+
   // Global safety net: any webContents created anywhere in the app (including
   // child popups and any future windows) routes external http(s) links to the
   // OS browser. App-origin and Firebase-auth navigations are exempted inside
-  // applyExternalLinkHandling, so app boot and OAuth popups are never hijacked.
+  // applyExternalLinkHandling, so app boot and OAuth redirects are never
+  // hijacked.
   app.on("web-contents-created", (_event, contents) => {
     applyExternalLinkHandling(contents);
-  });
-
-  // Firebase signInWithPopup(Google): 팝업 닫힘을 window.closed 로 감지하는데
-  // Google OAuth 팝업의 COOP:same-origin 이 opener 관계를 끊어 이 호출이 차단되면
-  // "Pending promise was never set" 로 로그인이 완료되지 않는다(티켓 t02RAZ0N).
-  // 응답에서 COOP/COEP 를 제거해 팝업이 opener 와 연결을 유지하게 한다.
-  // 자식 팝업도 defaultSession 을 공유하므로 accounts.google.com 응답까지 커버된다.
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    const headers = details.responseHeaders ?? {};
-    for (const key of Object.keys(headers)) {
-      const lk = key.toLowerCase();
-      if (
-        lk === "cross-origin-opener-policy" ||
-        lk === "cross-origin-embedder-policy"
-      ) {
-        delete headers[key];
-      }
-    }
-    callback({ responseHeaders: headers });
   });
 
   // safeStorage only comes online after `ready`. The module-load

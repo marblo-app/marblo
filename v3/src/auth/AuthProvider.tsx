@@ -1,7 +1,9 @@
 import { createContext, useEffect, useState, type ReactNode } from "react";
 import {
   onAuthStateChanged,
+  getRedirectResult,
   signInWithPopup,
+  signInWithRedirect,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
@@ -112,6 +114,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Ignore — the timeout fallback still covers a stuck init.
       });
 
+    getRedirectResult(auth)
+      .then((result) => {
+        if (!result) return;
+        settled = true;
+        clearTimeout(timeout);
+        setError(null);
+        setInitDegraded(false);
+        setUser(result.user);
+        setLoading(false);
+      })
+      .catch((e) => {
+        settled = true;
+        clearTimeout(timeout);
+        setError(e instanceof Error ? e.message : t("auth.error.google"));
+        setLoading(false);
+      });
+
     return () => {
       clearTimeout(timeout);
       unsubscribe();
@@ -121,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithGoogle = async () => {
     try {
       setError(null);
-      await signInWithPopup(auth, googleProvider);
+      await signInWithRedirect(auth, googleProvider);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("auth.error.google"));
     }
