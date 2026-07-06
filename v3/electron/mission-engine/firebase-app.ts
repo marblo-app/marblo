@@ -1,5 +1,10 @@
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
-import { getAuth, signInAnonymously } from "firebase/auth";
+import {
+  getAuth,
+  onAuthStateChanged,
+  signInAnonymously,
+  type Auth,
+} from "firebase/auth";
 import { initializeFirestore } from "firebase/firestore";
 
 // Main 프로세스 전용 firebase 인스턴스 — pending-instruction-listener / mcp-server
@@ -13,8 +18,85 @@ import { initializeFirestore } from "firebase/firestore";
 //   - tasks/agents 룰은 isAuthenticated 만 검사하므로 anon auth 로 충분.
 
 const APP_NAME = "mission-engine";
+const AUTH_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000];
+const MAX_AUTH_RETRY_DELAY_MS = 30_000;
 
 let cached: { app: FirebaseApp; authReady: Promise<void> } | null = null;
+
+function getAnonymousAuthRetryDelayMs(attempt: number): number {
+  return Math.min(
+    AUTH_RETRY_DELAYS_MS[attempt - 1] ?? MAX_AUTH_RETRY_DELAY_MS,
+    MAX_AUTH_RETRY_DELAY_MS,
+  );
+}
+
+function getFirebaseAuthErrorCode(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+  }
+
+  return "unknown";
+}
+
+function startAnonymousAuth(auth: Auth): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    let attempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribe: (() => void) | undefined;
+
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      unsubscribe?.();
+
+      console.log("[MissionEngine] anonymous firebase auth OK");
+      resolve();
+    };
+
+    if (auth.currentUser) {
+      finish();
+      return;
+    }
+
+    unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) finish();
+    });
+
+    const attemptSignIn = async (): Promise<void> => {
+      if (done) return;
+
+      attempt += 1;
+      try {
+        await signInAnonymously(auth);
+        finish();
+      } catch (error) {
+        if (done) return;
+
+        const delayMs = getAnonymousAuthRetryDelayMs(attempt);
+        console.error(
+          `[MissionEngine] anonymous firebase auth failed (attempt ${attempt}; retrying in ${delayMs}ms; code=${getFirebaseAuthErrorCode(
+            error,
+          )})`,
+          error,
+        );
+
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          void attemptSignIn();
+        }, delayMs);
+      }
+    };
+
+    void attemptSignIn();
+  });
+}
 
 export function getMissionFirebaseApp(): {
   app: FirebaseApp;
@@ -64,15 +146,14 @@ export function getMissionFirebaseApp(): {
     initializeFirestore(app, { ignoreUndefinedProperties: true });
   }
 
+  // Electron main uses in-memory auth persistence, so each startup normally
+  // needs a fresh anonymous sign-in. Firestore callers await authReady; while
+  // offline this may wait indefinitely, but those callers would otherwise hit
+  // permission-denied until auth recovers, so retrying here lets the session
+  // self-heal after transient network or Electron net stack startup failures.
   const authReady = isTestMode
     ? Promise.resolve()
-    : signInAnonymously(getAuth(app))
-        .then(() => {
-          console.log("[MissionEngine] anonymous firebase auth OK");
-        })
-        .catch((err) => {
-          console.error("[MissionEngine] anonymous firebase auth failed:", err);
-        });
+    : startAnonymousAuth(getAuth(app));
 
   cached = { app, authReady };
   return cached;
