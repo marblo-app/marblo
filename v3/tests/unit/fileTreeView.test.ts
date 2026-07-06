@@ -3,7 +3,10 @@ import {
   calculateWorktreeMenuPosition,
   describeRootView,
   filterWorktreesByProject,
+  findMainWorktree,
   isActiveTaskWorktree,
+  isStrayWorktreeContainerRoot,
+  resolveLocalMainPath,
   resolveRootSwitch,
   treeSignature,
 } from "../../src/lib/fileTreeView";
@@ -73,6 +76,102 @@ describe("describeRootView", () => {
     const worktrees = [wt({ path: "/repo", branch: "main", taskId: null })];
     const view = describeRootView("/repo", worktrees, "/repo");
     expect(view?.kind).toBe("worktree");
+  });
+
+  it("ignores a trailing separator when matching a worktree path", () => {
+    const worktrees = [
+      wt({ path: "/repo/.worktrees/abc", branch: "marblo/foo", taskId: "T1" }),
+    ];
+    const view = describeRootView("/repo/.worktrees/abc/", worktrees, "/repo");
+    expect(view?.kind).toBe("worktree");
+    expect(view?.label).toBe("marblo/foo");
+  });
+
+  it(
+    "labels the main checkout as a worktree when reached via a non-canonical " +
+      "(symlinked/foreign) project-folder path — the multi-machine ROOT bug",
+    () => {
+      // git worktree list realpath'd the main entry (/private/...), but rootPath
+      // and folderPath stay raw (the symlinked /Users/... the picker returned).
+      const rawFolder = "/Users/me/dev/marblo";
+      const canonicalMain = "/private/Users/me/dev/marblo";
+      const worktrees = [
+        wt({
+          id: "main",
+          path: canonicalMain,
+          repoRoot: rawFolder,
+          branch: "메인 WT",
+          taskId: null,
+        }),
+      ];
+      const view = describeRootView(rawFolder, worktrees, rawFolder);
+      // Was degrading to kind "project" (the "ROOT" badge). Now surfaces the
+      // main branch, matching the canonical-path machine.
+      expect(view?.kind).toBe("worktree");
+      expect(view?.label).toBe("메인 WT");
+      expect(view?.detail).toBeUndefined();
+    },
+  );
+
+  it("still reports kind project when no worktree list is available yet", () => {
+    // Worktrees not loaded → no main entry to borrow a branch from.
+    const view = describeRootView("/repo", [], "/repo");
+    expect(view?.kind).toBe("project");
+    expect(view?.label).toBe("repo");
+  });
+});
+
+describe("findMainWorktree", () => {
+  it("returns null when there is no taskId-less entry", () => {
+    const task = wt({ path: "/repo/.worktrees/a", taskId: "T1" });
+    expect(findMainWorktree([task], "/repo")).toBeNull();
+  });
+
+  it("finds the main checkout by taskId even when path !== repoRoot (symlink)", () => {
+    const main = wt({
+      id: "main",
+      path: "/private/repo",
+      repoRoot: "/repo",
+      taskId: null,
+    });
+    expect(findMainWorktree([main], "/repo")?.id).toBe("main");
+  });
+
+  it("prefers the entry matching the project folder over other taskId-less ones", () => {
+    const adhoc = wt({
+      id: "adhoc",
+      path: "/repo/.claude/worktrees/feat-x",
+      repoRoot: "/repo",
+      taskId: null,
+    });
+    const main = wt({
+      id: "main",
+      path: "/repo",
+      repoRoot: "/repo",
+      taskId: null,
+    });
+    // Order deliberately puts the ad-hoc entry first.
+    expect(findMainWorktree([adhoc, main], "/repo")?.id).toBe("main");
+  });
+});
+
+describe("resolveLocalMainPath", () => {
+  it("prefers the local (canonical) main worktree path over the project folder", () => {
+    const main = wt({
+      id: "main",
+      path: "/private/repo",
+      repoRoot: "/repo",
+      taskId: null,
+    });
+    expect(resolveLocalMainPath([main], "/repo")).toBe("/private/repo");
+  });
+
+  it("falls back to the project folder when no main entry exists", () => {
+    expect(resolveLocalMainPath([], "/repo")).toBe("/repo");
+  });
+
+  it("returns null when neither is known", () => {
+    expect(resolveLocalMainPath([], null)).toBeNull();
   });
 });
 
@@ -188,6 +287,128 @@ describe("resolveRootSwitch", () => {
     expect(
       resolveRootSwitch("/repo", [main, adhoc, staleTask], "/repo"),
     ).toBeNull();
+  });
+
+  it("resolves mainPath to the canonical worktree path when it differs (symlink)", () => {
+    // Main entry realpath'd to /private/repo; folderPath still raw /repo.
+    const canonicalMain = wt({
+      id: "main",
+      path: "/private/repo",
+      repoRoot: "/repo",
+      branch: "main",
+      taskId: null,
+    });
+    const task = wt({
+      id: "a",
+      path: "/repo/.worktrees/a",
+      repoRoot: "/repo",
+      branch: "marblo/a",
+      taskId: "T1",
+    });
+    // Viewing the task worktree → "home" must target the CANONICAL main so the
+    // switch actually lands on the tree the app loads (and no-op is avoided).
+    const sw = resolveRootSwitch(
+      "/repo/.worktrees/a",
+      [canonicalMain, task],
+      "/repo",
+    );
+    expect(sw?.mainPath).toBe("/private/repo");
+    expect(sw?.toMain).toBe("/private/repo");
+  });
+
+  it("treats the raw project-folder path as on-main (no misleading home button)", () => {
+    const canonicalMain = wt({
+      id: "main",
+      path: "/private/repo",
+      repoRoot: "/repo",
+      branch: "main",
+      taskId: null,
+    });
+    const task = wt({
+      id: "a",
+      path: "/repo/.worktrees/a",
+      repoRoot: "/repo",
+      branch: "marblo/a",
+      taskId: "T1",
+    });
+    // rootPath is the raw folderPath (/repo), mainPath is canonical
+    // (/private/repo) — still "on main", so we offer tasks, not a home jump.
+    const sw = resolveRootSwitch("/repo", [canonicalMain, task], "/repo");
+    expect(sw?.toMain).toBeNull();
+    expect(sw?.toTasks.map((t) => t.path)).toEqual(["/repo/.worktrees/a"]);
+  });
+});
+
+describe("isStrayWorktreeContainerRoot", () => {
+  const p1 = wt({
+    id: "p1",
+    projectId: "p1",
+    path: "/Users/me/.marblo/worktrees/p1/T1",
+    repoRoot: "/repo",
+    taskId: "T1",
+  });
+
+  it("flags the shared worktrees container root", () => {
+    expect(
+      isStrayWorktreeContainerRoot(
+        "/Users/me/.marblo/worktrees",
+        [p1],
+        "/repo",
+      ),
+    ).toBe(true);
+  });
+
+  it("flags a per-project bucket inside the container", () => {
+    expect(
+      isStrayWorktreeContainerRoot(
+        "/Users/me/.marblo/worktrees/p1",
+        [p1],
+        "/repo",
+      ),
+    ).toBe(true);
+  });
+
+  it("does NOT flag a concrete leaf worktree path", () => {
+    expect(
+      isStrayWorktreeContainerRoot(
+        "/Users/me/.marblo/worktrees/p1/T1",
+        [p1],
+        "/repo",
+      ),
+    ).toBe(false);
+  });
+
+  it("does NOT flag a recognised worktree entry even if list is loaded", () => {
+    const container = wt({
+      id: "c",
+      path: "/Users/me/.marblo/worktrees",
+      repoRoot: "/repo",
+      taskId: null,
+    });
+    // A (contrived) worktree entry AT the container path is recognised → not stray.
+    expect(
+      isStrayWorktreeContainerRoot(
+        "/Users/me/.marblo/worktrees",
+        [container],
+        "/repo",
+      ),
+    ).toBe(false);
+  });
+
+  it("does NOT flag an intentionally browsed arbitrary folder", () => {
+    expect(
+      isStrayWorktreeContainerRoot("/Users/me/dev/some-lib", [p1], "/repo"),
+    ).toBe(false);
+  });
+
+  it("does NOT flag paths inside the project folder", () => {
+    expect(isStrayWorktreeContainerRoot("/repo/src", [p1], "/repo")).toBe(
+      false,
+    );
+  });
+
+  it("returns false for a null root", () => {
+    expect(isStrayWorktreeContainerRoot(null, [p1], "/repo")).toBe(false);
   });
 });
 

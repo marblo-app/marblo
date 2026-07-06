@@ -57,6 +57,12 @@ export const sidebar: Record<keyof typeof koSidebar, string> = {
   // Root header badges
   "sidebar.tree.activeWorktree": "Active worktree",
   "sidebar.tree.projectRoot": "Project root",
+  // Stray worktrees-container guard
+  "sidebar.tree.strayRootTitle": "This is a worktrees folder",
+  "sidebar.tree.strayRootDesc":
+    "This folder is the shared worktrees container, not the current project's main checkout — worktrees from other tasks may show up here.",
+  "sidebar.tree.strayRootToMain": "Go to main",
+  "sidebar.tree.strayRootPick": "Pick a folder",
   // Toolbar
   "sidebar.tree.recentFolders": "Recent folders",
   "sidebar.tree.newFileShortcut": "New file (⌘N)",

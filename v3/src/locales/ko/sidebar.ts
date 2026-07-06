@@ -54,6 +54,12 @@ export const sidebar = {
   // Root header badges
   "sidebar.tree.activeWorktree": "활성 워크트리",
   "sidebar.tree.projectRoot": "프로젝트 루트",
+  // Stray worktrees-container guard
+  "sidebar.tree.strayRootTitle": "다른 프로젝트의 워크트리 폴더입니다",
+  "sidebar.tree.strayRootDesc":
+    "이 폴더는 현재 프로젝트의 메인 체크아웃이 아니라 워크트리 모음 폴더입니다. 다른 작업의 워크트리가 함께 보일 수 있어요.",
+  "sidebar.tree.strayRootToMain": "메인으로",
+  "sidebar.tree.strayRootPick": "폴더 선택",
   // Toolbar
   "sidebar.tree.recentFolders": "최근 연 폴더",
   "sidebar.tree.newFileShortcut": "새 파일 (⌘N)",

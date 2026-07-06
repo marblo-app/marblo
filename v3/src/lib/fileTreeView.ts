@@ -25,7 +25,90 @@ export interface RootView {
 function basename(p: string): string {
   // Handle both POSIX (/) and Windows (\) separators so native Windows paths
   // collapse to their last segment instead of returning the whole path.
-  return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
+  return (
+    p
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() || p
+  );
+}
+
+/** Strip trailing separators so "/repo" and "/repo/" compare equal. */
+function normalizePath(p: string): string {
+  return p.replace(/[\\/]+$/, "");
+}
+
+/**
+ * Tolerant path equality for the sidebar's root bookkeeping.
+ *
+ * Only normalises trailing separators — it deliberately does NOT resolve
+ * symlinks (the renderer can't) — but it is the single chokepoint every path
+ * comparison in this module now flows through, so the symlink-aware matching we
+ * layer on top (recognising the project folder as the main checkout even when
+ * git realpath'd it) lives in one place. See {@link findMainWorktree}.
+ */
+function samePath(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  if (!a || !b) return false;
+  return normalizePath(a) === normalizePath(b);
+}
+
+/** True when `child` is `parent` itself or nested beneath it. */
+function isInsidePath(child: string, parent: string): boolean {
+  const c = normalizePath(child);
+  const p = normalizePath(parent);
+  return c === p || c.startsWith(`${p}/`) || c.startsWith(`${p}\\`);
+}
+
+/**
+ * Locate the repo's *main* working tree in a worktree list.
+ *
+ * The main checkout is the entry with no inferred task id (task worktrees live
+ * under `.../<projectId>/<taskId>`, so `inferTaskId` populates theirs; the main
+ * checkout's path doesn't contain the project id, so its taskId stays null).
+ *
+ * This is load-bearing for multi-machine correctness: `worktree-manager.list`
+ * realpaths every entry (symlinks resolved), while `rootPath` / `projectRootPath`
+ * arrive raw (a folder-picker / Firestore path with symlinks intact). So we
+ * canNOT rely on `path === repoRoot`; on a machine whose checkout sits behind a
+ * symlink that equality never holds and the main checkout was going undetected —
+ * the root cause of the "ROOT" header + dead home button. Keying off taskId
+ * finds it regardless of symlink layout; the folderPath / repoRoot matches below
+ * are only *preferences* to disambiguate when several taskId-less entries exist
+ * (e.g. ad-hoc `.claude/worktrees/*` branches that also lack a task id).
+ */
+export function findMainWorktree(
+  worktrees: Worktree[],
+  projectRootPath: string | null,
+): Worktree | null {
+  const mains = worktrees.filter((w) => w.taskId == null);
+  if (mains.length === 0) return null;
+  if (projectRootPath) {
+    const byProject = mains.find((w) => samePath(w.path, projectRootPath));
+    if (byProject) return byProject;
+  }
+  const byRepoRoot = mains.find((w) => samePath(w.path, w.repoRoot));
+  if (byRepoRoot) return byRepoRoot;
+  return mains[0];
+}
+
+/**
+ * This machine's canonical main-checkout path — the target a "home" reset must
+ * land on. Prefers the local worktree list's main entry (git-realpath'd, so it
+ * always matches the tree the app actually loads); falls back to the Firestore
+ * `projectRootPath` only when no local main entry is known.
+ */
+export function resolveLocalMainPath(
+  worktrees: Worktree[],
+  projectRootPath: string | null,
+): string | null {
+  return (
+    findMainWorktree(worktrees, projectRootPath)?.path ??
+    projectRootPath ??
+    null
+  );
 }
 
 export function filterWorktreesByProject(
@@ -40,8 +123,10 @@ export function filterWorktreesByProject(
  * Describe the root the tree is currently showing.
  *
  * - matches a known worktree  → kind "worktree" (label = branch, detail = taskId)
- * - equals the project folder → kind "project"
- * - anything else             → kind "folder"
+ * - is the main checkout       → kind "worktree" (main branch), even when reached
+ *   via a non-canonical/symlinked path that the exact match above misses
+ * - equals the project folder  → kind "project" (no worktree list available)
+ * - anything else              → kind "folder"
  */
 export function describeRootView(
   rootPath: string | null,
@@ -51,7 +136,7 @@ export function describeRootView(
   if (!rootPath) return null;
   const base = basename(rootPath);
 
-  const worktree = worktrees.find((w) => w.path === rootPath);
+  const worktree = worktrees.find((w) => samePath(w.path, rootPath));
   if (worktree) {
     return {
       label: worktree.branch || base,
@@ -61,7 +146,22 @@ export function describeRootView(
     };
   }
 
-  if (projectRootPath && rootPath === projectRootPath) {
+  // The project folder IS the repo's main working tree. When rootPath points at
+  // it via a non-canonical path (e.g. a symlinked checkout on another machine,
+  // where git's worktree list realpath'd the entry but folderPath / rootPath
+  // stayed raw), the exact-path match above misses. Recognise it as the main
+  // checkout and surface its branch — matching how the canonical-path machine
+  // renders it — instead of degrading to a bare "ROOT"/basename label.
+  if (projectRootPath && samePath(rootPath, projectRootPath)) {
+    const main = findMainWorktree(worktrees, projectRootPath);
+    if (main) {
+      return {
+        label: main.branch || base,
+        fullPath: rootPath,
+        kind: "worktree",
+        detail: main.taskId ?? undefined,
+      };
+    }
     return { label: base, fullPath: rootPath, kind: "project" };
   }
 
@@ -157,20 +257,19 @@ export function resolveRootSwitch(
   worktrees: Worktree[],
   projectRootPath: string | null,
 ): RootSwitch | null {
-  // Locate the main worktree: explicit entry (path === repoRoot) first, else
-  // the project folder path as a graceful fallback.
-  const mainWorktree = worktrees.find(
-    (w) => w.path === w.repoRoot && w.taskId == null,
-  );
-  const mainPath = mainWorktree?.path ?? projectRootPath ?? null;
+  // Locate this machine's main checkout (symlink-tolerant, keyed off taskId —
+  // see findMainWorktree) and fall back to the project folder path. mainPath is
+  // therefore the git-realpath'd local path when a main entry exists, so a
+  // "home" jump lands on the path the tree actually loads (which then matches in
+  // describeRootView) rather than a raw/foreign folderPath that no-ops.
+  const mainPath = resolveLocalMainPath(worktrees, projectRootPath);
   if (!mainPath) return null;
 
   // Switch targets: active task worktrees only — exclude the main worktree path,
   // ad-hoc branches without a taskId, and stale worktrees (see
-  // isActiveTaskWorktree). Main-jump (`toMain`) and describeRootView are
-  // intentionally left untouched.
+  // isActiveTaskWorktree).
   const toTasks: RootSwitchTarget[] = worktrees
-    .filter((w) => w.path !== mainPath)
+    .filter((w) => !samePath(w.path, mainPath))
     .filter(isActiveTaskWorktree)
     .map((w) => ({
       path: w.path,
@@ -179,7 +278,12 @@ export function resolveRootSwitch(
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  const onMain = rootPath === mainPath;
+  // "On main" also covers reaching the main checkout via its raw project-folder
+  // path (mainPath is canonical; rootPath may still be the symlinked folderPath),
+  // so we never show a misleading "back to main" control while already on it.
+  const onMain =
+    samePath(rootPath, mainPath) ||
+    (!!projectRootPath && samePath(rootPath, projectRootPath));
 
   // Only offer a control when there is somewhere to go.
   if (onMain) {
@@ -191,8 +295,36 @@ export function resolveRootSwitch(
   return {
     mainPath,
     toMain: mainPath,
-    toTasks: toTasks.filter((t) => t.path !== rootPath),
+    toTasks: toTasks.filter((t) => !samePath(t.path, rootPath)),
   };
+}
+
+/**
+ * True when the tree root is a *stray* worktrees container — the shared
+ * `~/.marblo/worktrees` directory, or a per-project bucket inside it — rather
+ * than a concrete checkout. Loading such a root spills sibling worktrees of
+ * OTHER projects / tasks into the file tree (the long-standing "다른 프로젝트
+ * 워크트리 노출" report). Callers use this to nudge back to main instead of
+ * rendering the stray tree.
+ *
+ * Deliberately narrow so the read-only "Open Folder" browse feature keeps
+ * working: a recognised concrete root (a real worktree entry, or the project
+ * folder / anything beneath it) is never stray, and only the marblo container
+ * path *shape* — `.marblo/worktrees` with at most one extra segment (the
+ * projectId bucket) — trips it. A real leaf worktree
+ * (`.marblo/worktrees/<projectId>/<taskId>`, two extra segments) does not.
+ */
+export function isStrayWorktreeContainerRoot(
+  rootPath: string | null,
+  worktrees: Worktree[],
+  projectRootPath: string | null,
+): boolean {
+  if (!rootPath) return false;
+  if (worktrees.some((w) => samePath(w.path, rootPath))) return false;
+  if (projectRootPath && isInsidePath(rootPath, projectRootPath)) return false;
+  return /(?:^|[\\/])\.marblo[\\/]worktrees(?:[\\/][^\\/]+)?$/.test(
+    normalizePath(rootPath),
+  );
 }
 
 /**

@@ -19,6 +19,8 @@ import {
   filterWorktreesByProject,
   calculateWorktreeMenuPosition,
   resolveRootSwitch,
+  resolveLocalMainPath,
+  isStrayWorktreeContainerRoot,
   treeSignature,
 } from "../../lib/fileTreeView";
 import type { WorktreeMenuPosition } from "../../lib/fileTreeView";
@@ -84,7 +86,12 @@ function gitStatusColor(status?: string): string {
 function basename(p: string): string {
   // Handle both POSIX (/) and Windows (\) separators, and trailing separators,
   // so a native Windows path like C:\Users\me\proj yields "proj" not the full path.
-  return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
+  return (
+    p
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() || p
+  );
 }
 
 function dirname(p: string): string {
@@ -758,6 +765,20 @@ export function FileTree() {
   const rootSwitch = useMemo(
     () =>
       resolveRootSwitch(
+        rootPath,
+        currentProjectWorktrees,
+        currentProject?.folderPath ?? null,
+      ),
+    [rootPath, currentProjectWorktrees, currentProject?.folderPath],
+  );
+
+  // Defensive guard: the tree root is the shared ~/.marblo/worktrees container
+  // (or a project bucket inside it) rather than a concrete checkout, so the tree
+  // would spill sibling worktrees of other projects/tasks. Nudge back to this
+  // machine's main checkout instead of silently rendering the stray tree.
+  const strayRoot = useMemo(
+    () =>
+      isStrayWorktreeContainerRoot(
         rootPath,
         currentProjectWorktrees,
         currentProject?.folderPath ?? null,
@@ -1444,6 +1465,26 @@ export function FileTree() {
     [rootPath, setRootPath, setSelected],
   );
 
+  // Reset the tree root to this machine's main checkout — the canonical local
+  // main path (git-realpath'd worktree entry, else the project folder). Used by
+  // the stray-container guard so "home" always lands on a valid local root
+  // instead of a foreign/stale path.
+  const handleResetToMain = useCallback(() => {
+    const mainPath = resolveLocalMainPath(
+      currentProjectWorktrees,
+      currentProject?.folderPath ?? null,
+    );
+    if (!mainPath || mainPath === rootPath) return;
+    setSelected(null);
+    setRootPath(mainPath);
+  }, [
+    currentProjectWorktrees,
+    currentProject?.folderPath,
+    rootPath,
+    setRootPath,
+    setSelected,
+  ]);
+
   // ---------- Open Folder (v1: read-only browse, no project/task binding) ----
   // Switch the tree root to an arbitrary local folder. Unlike
   // handleSelectDirectory above, this does NOT create/bind a project or look up
@@ -1817,6 +1858,31 @@ export function FileTree() {
             <span className="text-xs text-gray-500">
               {t("sidebar.tree.loading")}
             </span>
+          </div>
+        ) : strayRoot ? (
+          // Stray worktrees-container root → don't render other projects'
+          // worktrees; guide the user back to a real checkout instead.
+          <div className="flex flex-col items-start gap-2 px-3 py-4">
+            <p className="text-[12px] font-medium text-amber-400">
+              {t("sidebar.tree.strayRootTitle")}
+            </p>
+            <p className="text-[11px] leading-relaxed text-gray-400">
+              {t("sidebar.tree.strayRootDesc")}
+            </p>
+            <div className="mt-1 flex items-center gap-2">
+              <button
+                onClick={handleResetToMain}
+                className="rounded bg-blue-600 px-2 py-1 text-[11px] text-white hover:bg-blue-500"
+              >
+                {t("sidebar.tree.strayRootToMain")}
+              </button>
+              <button
+                onClick={handleSelectDirectory}
+                className="rounded bg-gray-700 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-600"
+              >
+                {t("sidebar.tree.strayRootPick")}
+              </button>
+            </div>
           </div>
         ) : (
           <>
