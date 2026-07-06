@@ -20,14 +20,14 @@ import {
 
 // 버전 고정 다운로드 링크 — 새 빌드 릴리스 시 이 값만 갱신.
 // 실제 릴리스 자산 파일명 패턴: Marblo-<ver>-arm64.dmg / Marblo-Setup-<ver>.exe
-const APP_VERSION = "v3.0.1";
+const APP_VERSION = "v3.0.2";
 // 파일명에 쓰는 버전(선행 v 없는 SemVer). APP_VERSION 에서 파생.
 const VERSION = APP_VERSION.replace(/^v/, "");
 const RELEASE_BASE = `https://github.com/melocream/marblo-releases/releases/download/${APP_VERSION}`;
 
 type MacArch = "universal" | "arm64" | "x64";
 
-// v3.0.1 릴리스는 arm64 DMG 단일 산출이다(universal 빌드는 깨져서 미산출됨).
+// v3.0.2 릴리스는 arm64 DMG 단일 산출이다(universal 빌드는 깨져서 미산출됨).
 // 따라서 세 아키 키 모두 실체인 arm64 DMG(Apple Silicon 대상)로 매핑한다.
 // per-arch/universal 자산이 다시 산출되면 이 맵만 바꾸면 된다.
 const MAC_DMG_URLS: Record<MacArch, string> = {
