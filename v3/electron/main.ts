@@ -9,6 +9,7 @@ import {
   shell,
   safeStorage,
   Notification,
+  session,
 } from "electron";
 import path from "path";
 import fs from "fs";
@@ -3992,6 +3993,25 @@ app.whenReady().then(async () => {
   // applyExternalLinkHandling, so app boot and OAuth popups are never hijacked.
   app.on("web-contents-created", (_event, contents) => {
     applyExternalLinkHandling(contents);
+  });
+
+  // Firebase signInWithPopup(Google): 팝업 닫힘을 window.closed 로 감지하는데
+  // Google OAuth 팝업의 COOP:same-origin 이 opener 관계를 끊어 이 호출이 차단되면
+  // "Pending promise was never set" 로 로그인이 완료되지 않는다(티켓 t02RAZ0N).
+  // 응답에서 COOP/COEP 를 제거해 팝업이 opener 와 연결을 유지하게 한다.
+  // 자식 팝업도 defaultSession 을 공유하므로 accounts.google.com 응답까지 커버된다.
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const headers = details.responseHeaders ?? {};
+    for (const key of Object.keys(headers)) {
+      const lk = key.toLowerCase();
+      if (
+        lk === "cross-origin-opener-policy" ||
+        lk === "cross-origin-embedder-policy"
+      ) {
+        delete headers[key];
+      }
+    }
+    callback({ responseHeaders: headers });
   });
 
   // safeStorage only comes online after `ready`. The module-load
