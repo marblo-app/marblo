@@ -1807,6 +1807,12 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
       };
       res.writeHead(200, {
         "Content-Type": mimeTypes[ext] || "application/octet-stream",
+        // Firebase signInWithPopup(Google) 은 팝업 닫힘을 window.closed/
+        // window.close 로 감지한다. 기본 COOP 하에서 Google OAuth 팝업이
+        // 브라우징 컨텍스트를 끊어 이 호출이 차단되면 "Pending promise was
+        // never set" 로 로그인이 영영 완료되지 않는다(티켓 HYvcR2xw). opener 가
+        // 자신이 연 팝업 참조를 유지하도록 same-origin-allow-popups 를 준다.
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
       });
       fs.createReadStream(filePath).pipe(res);
     });
