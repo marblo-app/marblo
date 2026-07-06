@@ -1,18 +1,27 @@
 /**
  * PIPA(개인정보 보호법) 동의 상태 서비스 — marblo-web.
  *
- * v3 데스크탑 앱(v3/src/services/privacyConsentService.ts)의 스키마/저장
- * 패턴을 웹으로 이식한다. 동일한 Firestore 문서 경로
- * (users/{uid}.privacyConsent)와 envelope(version / acceptedAt / locale +
- * merge:true 쓰기)를 그대로 사용해 데스크탑과 스키마 정합을 유지한다.
+ * v3 데스크탑 앱(v3/src/services/privacyConsentService.ts)의 consent envelope
+ * (version / acceptedAt / locale + merge:true 쓰기)를 웹으로 이식한다.
  *
- * 다만 웹은 텔레메트리(sentry/ga4/mixpanel) 동의가 아니라 *가입·결제* 맥락의
- * 동의이므로 플래그를 다음으로 치환한다:
+ * 다만 웹은 텔레메트리(sentry/ga4/mixpanel) 동의가 아니라 *가입·결제*
+ * 맥락의 동의이므로 users/{uid}.webPrivacyConsent 를 canonical field 로
+ * 사용한다. 기존 users/{uid}.privacyConsent 는 읽기 fallback 으로만 둔다.
+ * 앱이 같은 privacyConsent 맵을 앱 스키마/버전으로 저장하므로, 웹이 같은 맵을
+ * canonical 로 쓰면 양쪽이 서로를 stale 로 만들어 재프롬프트 루프가 생긴다.
+ *
+ * 웹 플래그:
  *   - collectionUse    : 개인정보 수집·이용 동의 (필수)
  *   - overseasTransfer : 개인정보 국외 이전 별도 동의 (필수, PIPA 제28조의8)
  *   - marketing        : 마케팅·광고성 정보 수신 (선택)
  */
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  serverTimestamp,
+  type FieldValue,
+} from "firebase/firestore";
 import { db } from "./firebase";
 
 /** 동의 문구가 바뀌면 이 버전을 올린다 → 사용자에게 재동의를 요구. */
@@ -55,8 +64,23 @@ interface RawConsent {
   overseasTransfer?: boolean;
   marketing?: boolean;
   version?: string;
-  acceptedAt?: { toDate: () => Date } | null;
+  acceptedAt?: { toDate: () => Date } | FieldValue | null;
   locale?: string;
+}
+
+interface RawConsentDocument {
+  /** Web canonical consent. Separated from the desktop app consent schema. */
+  webPrivacyConsent?: RawConsent;
+  /** Legacy web location and current desktop app location. Read fallback only. */
+  privacyConsent?: RawConsent;
+}
+
+function toDateOrNull(value: RawConsent["acceptedAt"]): Date | null {
+  return value &&
+    "toDate" in value &&
+    typeof value.toDate === "function"
+    ? value.toDate()
+    : null;
 }
 
 function toConsent(raw: RawConsent | undefined): PrivacyConsent {
@@ -68,10 +92,7 @@ function toConsent(raw: RawConsent | undefined): PrivacyConsent {
     overseasTransfer: !!raw.overseasTransfer,
     marketing: !!raw.marketing,
     version: raw.version ?? "",
-    acceptedAt:
-      raw.acceptedAt && typeof raw.acceptedAt.toDate === "function"
-        ? raw.acceptedAt.toDate()
-        : null,
+    acceptedAt: toDateOrNull(raw.acceptedAt),
     locale,
   };
 }
@@ -98,9 +119,10 @@ export type GetConsentResult =
 export async function getConsentResult(uid: string): Promise<GetConsentResult> {
   try {
     const snap = await getDoc(doc(db, "users", uid));
-    const raw = snap.exists()
-      ? (snap.data()?.privacyConsent as RawConsent | undefined)
+    const data = snap.exists()
+      ? (snap.data() as RawConsentDocument | undefined)
       : undefined;
+    const raw = data?.webPrivacyConsent ?? data?.privacyConsent;
     if (!raw) return { status: "missing" };
     return { status: "ok", consent: toConsent(raw) };
   } catch (err) {
@@ -108,6 +130,20 @@ export async function getConsentResult(uid: string): Promise<GetConsentResult> {
     const code = (err as { code?: string }).code ?? null;
     return { status: "error", code };
   }
+}
+
+function consentWritePayload(
+  flags: ConsentFlags,
+  locale: ConsentLocale
+): { webPrivacyConsent: RawConsent } {
+  return {
+    webPrivacyConsent: {
+      ...flags,
+      version: CURRENT_POLICY_VERSION,
+      acceptedAt: serverTimestamp(),
+      locale,
+    },
+  };
 }
 
 const sleep = (ms: number): Promise<void> =>
@@ -201,19 +237,37 @@ export async function saveConsent(
 ): Promise<void> {
   await setDoc(
     doc(db, "users", uid),
-    {
-      privacyConsent: {
-        ...flags,
-        version: CURRENT_POLICY_VERSION,
-        acceptedAt: serverTimestamp(),
-        locale,
-      },
-    },
+    consentWritePayload(flags, locale),
     { merge: true }
   );
   // 서버 write 성공 → 증빙 캐시를 무장. 이후 read 실패(재로드/재방문)에도
   // 이 유저를 재프롬프트하지 않도록.
   rememberConsentAccepted(uid, CURRENT_POLICY_VERSION);
+}
+
+/**
+ * #295 이전/앱 덮어쓰기 이후처럼 Firestore 의 legacy privacyConsent 가 stale
+ * 이더라도, 이 브라우저에 현재 웹 정책 동의 증빙 캐시가 있으면 canonical
+ * webPrivacyConsent 를 best-effort 로 복구한다. 필수 동의 gate 억제용 복구라
+ * 선택 마케팅 동의는 false 로 둔다.
+ */
+export async function repairCachedWebConsent(
+  uid: string,
+  locale: ConsentLocale = "ko"
+): Promise<void> {
+  if (!hasAcceptedConsentCached(uid, CURRENT_POLICY_VERSION)) return;
+  await setDoc(
+    doc(db, "users", uid),
+    consentWritePayload(
+      {
+        collectionUse: true,
+        overseasTransfer: true,
+        marketing: false,
+      },
+      locale
+    ),
+    { merge: true }
+  );
 }
 
 /** 사용자가 현재 정책 버전을 본(동의 기록한) 적이 있는가. */

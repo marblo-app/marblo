@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLocale } from "next-intl";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import {
@@ -8,7 +9,9 @@ import {
   hasRequiredConsent,
   hasAcceptedConsentCached,
   rememberConsentAccepted,
+  repairCachedWebConsent,
   CURRENT_POLICY_VERSION,
+  type ConsentLocale,
 } from "@/lib/privacyConsent";
 import PrivacyConsentModal from "./PrivacyConsentModal";
 
@@ -25,6 +28,7 @@ import PrivacyConsentModal from "./PrivacyConsentModal";
  * 저장한 로컬 증빙이 있으면 모달을 억제한다 — 데스크탑 앱 #177 과 동일한 방어.
  */
 export default function PrivacyConsentGate() {
+  const locale = useLocale() as ConsentLocale;
   const [uid, setUid] = useState<string | null>(null);
   const [needsConsent, setNeedsConsent] = useState(false);
 
@@ -42,13 +46,31 @@ export default function PrivacyConsentGate() {
 
       if (result.status === "ok") {
         const ok = hasRequiredConsent(result.consent);
-        setNeedsConsent(!ok);
         // 확정 동의 → 증빙 캐시 갱신(이후 read 실패에도 재프롬프트 안 함).
-        if (ok) rememberConsentAccepted(user.uid, CURRENT_POLICY_VERSION);
+        if (ok) {
+          rememberConsentAccepted(user.uid, CURRENT_POLICY_VERSION);
+          setNeedsConsent(false);
+          return;
+        }
+
+        // 앱이 legacy privacyConsent 를 앱 스키마/버전으로 덮어쓴 경우에도,
+        // 이 브라우저에 현재 웹 정책 동의 증빙이 있으면 재프롬프트하지 않는다.
+        if (hasAcceptedConsentCached(user.uid, CURRENT_POLICY_VERSION)) {
+          setNeedsConsent(false);
+          void repairCachedWebConsent(user.uid, locale);
+          return;
+        }
+
+        setNeedsConsent(true);
         return;
       }
 
       if (result.status === "missing") {
+        if (hasAcceptedConsentCached(user.uid, CURRENT_POLICY_VERSION)) {
+          setNeedsConsent(false);
+          void repairCachedWebConsent(user.uid, locale);
+          return;
+        }
         // read 성공 + 레코드 없음 → 진짜 미동의 → 프롬프트.
         setNeedsConsent(true);
         return;
@@ -65,7 +87,7 @@ export default function PrivacyConsentGate() {
       active = false;
       unsub();
     };
-  }, []);
+  }, [locale]);
 
   if (!uid || !needsConsent) return null;
   return (
