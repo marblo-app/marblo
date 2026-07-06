@@ -29,20 +29,24 @@ export const AuthContext = createContext<AuthContextType | null>(null);
 const googleProvider = new GoogleAuthProvider();
 const githubProvider = new GithubAuthProvider();
 
-// How long to wait for Firebase Auth to report an initial state before we
-// assume the config is broken (or the network is dead) and show an error
-// screen instead of an infinite spinner. See regression BAcFpVKbTFX18gs3UEEt:
-// a placeholder Firebase config makes onAuthStateChanged never fire, so
-// `loading` stayed true forever. 10s is comfortably above a normal cold start.
+// How long to wait for Firebase Auth to report an initial state before we stop
+// blocking on it. See regression BAcFpVKbTFX18gs3UEEt (placeholder config makes
+// onAuthStateChanged never fire) and Oq63rrnxMYv6fdeNeani (packaged 127.0.0.1
+// static-server origin makes IndexedDB persistence init silently hang before any
+// network request). In both cases `loading` would otherwise stay true forever.
+// 10s is comfortably above a normal cold start.
 const AUTH_INIT_TIMEOUT_MS = 10_000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Flips true if Firebase Auth never reports an initial state within the
-  // timeout — the signal that the embedded config is bad or the network is down.
-  const [initTimedOut, setInitTimedOut] = useState(false);
+  // Flips true if Firebase Auth doesn't report an initial state within the
+  // timeout. Rather than a dead-end error screen, we fall back to the normal
+  // (signed-out) login screen and surface this as a thin banner — a new user is
+  // simply not signed in yet, and the login flow makes its own network calls
+  // that work independently of the stalled persistence init.
+  const [initDegraded, setInitDegraded] = useState(false);
 
   useEffect(() => {
     // Test hatch — main process 가 MARBLO_TEST_BYPASS_AUTH=1 로 launch 된
@@ -62,29 +66,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    // Fail-safe: if the first auth state never arrives (e.g. an invalid embedded
-    // Firebase config where onAuthStateChanged silently never fires), surface an
-    // error screen rather than spinning forever.
+    // `settled` guards against the multiple resolution paths below racing each
+    // other (timeout vs. onAuthStateChanged vs. authStateReady).
+    let settled = false;
+
+    // Fail-safe: if the first auth state never arrives within the timeout (bad
+    // embedded config, or the packaged-app IndexedDB persistence hang), stop
+    // blocking. We do NOT show a dead-end error — instead we clear `loading` so
+    // the signed-out login screen renders, and flag `initDegraded` for a banner.
     const timeout = setTimeout(() => {
-      setInitTimedOut(true);
+      if (settled) return;
+      settled = true;
+      setInitDegraded(true);
+      setLoading(false);
     }, AUTH_INIT_TIMEOUT_MS);
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (settled) {
+        // A late-arriving real state after the degraded fallback: adopt it and
+        // drop the banner so recovery is seamless.
+        setInitDegraded(false);
+        setUser(firebaseUser);
+        setLoading(false);
+        return;
+      }
+      settled = true;
       clearTimeout(timeout);
       setUser(firebaseUser);
       setLoading(false);
     });
+
+    // Belt-and-suspenders alongside onAuthStateChanged: authStateReady() resolves
+    // once the initial auth state is determined. Awaiting it in parallel clears
+    // `loading` even if the onAuthStateChanged callback is delayed.
+    auth
+      .authStateReady()
+      .then(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        setUser(auth.currentUser);
+        setLoading(false);
+      })
+      .catch(() => {
+        // Ignore — the timeout fallback still covers a stuck init.
+      });
+
     return () => {
       clearTimeout(timeout);
       unsubscribe();
     };
   }, []);
-
-  // Config/network failure fallback. Only shown while auth is still unresolved —
-  // if a slow initial state eventually arrives, `loading` flips false and the
-  // normal app renders (graceful recovery, no forced reload needed).
-  if (initTimedOut && loading) {
-    return <AuthInitErrorScreen />;
-  }
 
   const loginWithGoogle = async () => {
     try {
@@ -147,37 +179,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearError,
       }}
     >
+      {initDegraded && !user && <AuthInitDegradedBanner />}
       {children}
     </AuthContext.Provider>
   );
 }
 
 /**
- * Shown when Firebase Auth never reports an initial state (bad embedded config
- * or dead network) — replaces the otherwise-infinite loading spinner with an
- * actionable message and a retry that reloads the renderer.
+ * Thin non-blocking banner shown when Firebase Auth's initial state took too
+ * long to resolve (e.g. the packaged-app IndexedDB persistence hang, ticket
+ * Oq63rrnxMYv6fdeNeani). Unlike the old dead-end error screen, the login screen
+ * still renders underneath so a new user can sign in — login makes its own
+ * network requests and works regardless of the stalled persistence init.
  */
-function AuthInitErrorScreen() {
+function AuthInitDegradedBanner() {
   return (
-    <div className="flex h-screen items-center justify-center bg-gray-900">
-      <div className="max-w-md px-6 text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-2xl">
-          ⚠️
-        </div>
-        <h1 className="text-lg font-semibold text-gray-100">
-          {t("auth.init.timeout.title")}
-        </h1>
-        <p className="mt-2 text-sm leading-relaxed text-gray-400">
-          {t("auth.init.timeout.message")}
-        </p>
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          className="mt-5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
-        >
-          {t("auth.init.timeout.retry")}
-        </button>
-      </div>
+    <div
+      role="status"
+      className="fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-2 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-200 backdrop-blur-sm"
+    >
+      <span aria-hidden="true">⚠️</span>
+      <span>{t("auth.init.degraded.banner")}</span>
     </div>
   );
 }

@@ -14,4 +14,6 @@ export const auth: Record<keyof typeof koAuth, string> = {
   "auth.init.timeout.message":
     "We couldn't reach the authentication service. Check your network connection. If this keeps happening the app may be misconfigured — try reinstalling or contact support.",
   "auth.init.timeout.retry": "Try again",
+  "auth.init.degraded.banner":
+    "Authentication is taking longer than usual to initialize. You can still sign in.",
 };
