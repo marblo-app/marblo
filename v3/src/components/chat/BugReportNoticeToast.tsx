@@ -1,18 +1,24 @@
 /**
- * BugReportNoticeToast — one-time, dismissible in-app notice that tells
- * existing users about the new 🐛 "Report a bug" button in the top bar
- * (added in PR #284). Shown once per install after an update; a localStorage
- * flag (`marblo:bugReportNoticeSeen`) keeps it from ever re-appearing —
- * same one-shot-flag idea as PrivacyConsent's `needsPrompt`.
+ * BugReportNoticeToast — one-time, dismissible first-run notice that welcomes
+ * new beta users and points them at the in-app bug reporter. Shown once, then
+ * never again: a localStorage flag (`marblo:betaBugReportNoticeSeen`) guards
+ * re-exposure — same one-shot idea as PrivacyConsent's `needsPrompt`.
  *
- * Non-blocking by design: it reuses ChatToastHost's top-center toast look
- * (fixed banner, backdrop blur, slide/fade, X to dismiss) rather than a
- * modal, so it never gates the app. It waits until the PIPA consent prompt
- * (if any) is resolved so the two first-run surfaces don't overlap.
+ * A NEW storage key (vs. the old post-update discovery notice) is intentional:
+ * the copy has changed to a beta-onboarding context, so users who dismissed the
+ * old "new 🐛 button" notice should still see this beta welcome exactly once.
  *
- * NOTE: this references the 🐛 button by copy only — it compiles and behaves
- * correctly even in a build where PR #284's button isn't present yet. It is
- * meaningful only once shipped alongside/after that button.
+ * Non-blocking by design: it renders as a bottom-center popup card whose
+ * backdrop is click-through (`pointer-events-none` on the wrapper, re-enabled
+ * only on the card), so it never gates the app — no dark overlay, no modal
+ * trap. It waits until the PIPA consent prompt (if any) is resolved so the two
+ * first-run surfaces don't overlap. Unlike a fleeting toast it does NOT
+ * auto-dismiss: this is a one-time welcome we want the user to actually read,
+ * so it persists until they act (CTA) or close it (X).
+ *
+ * CTA reuses the existing BugReportModal / submitBugReport path — no new
+ * backend. It complements (does not replace) the Header 🐛 button and the
+ * Settings bug-report tab; this popup is just the first-run hand-hold.
  */
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
@@ -21,11 +27,10 @@ import { useTranslation } from "../../lib/i18n";
 import { usePrivacyConsentStore } from "../../stores/privacyConsentStore";
 import { BugReportModal } from "../settings/BugReportModal";
 
-const STORAGE_KEY = "marblo:bugReportNoticeSeen";
+const STORAGE_KEY = "marblo:betaBugReportNoticeSeen";
 // Slight delay so the notice doesn't slam in during the login → main-UI
-// transition; long auto-dismiss because it's informational, not urgent.
+// transition. No auto-dismiss: a one-time beta welcome should stay until read.
 const SHOW_DELAY_MS = 900;
-const AUTO_DISMISS_MS = 12000;
 const EXIT_DURATION_MS = 200;
 
 function hasSeenNotice(): boolean {
@@ -71,13 +76,6 @@ export function BugReportNoticeToast() {
     window.setTimeout(() => setVisible(false), EXIT_DURATION_MS);
   };
 
-  // Auto-dismiss after a while so it never lingers.
-  useEffect(() => {
-    if (!visible) return;
-    const autoTimer = window.setTimeout(dismiss, AUTO_DISMISS_MS);
-    return () => window.clearTimeout(autoTimer);
-  }, [visible]);
-
   const openReport = () => {
     setVisible(false);
     setShowModal(true);
@@ -89,31 +87,42 @@ export function BugReportNoticeToast() {
     <>
       {visible &&
         createPortal(
-          <div className="pointer-events-none fixed left-0 right-0 top-4 z-[1000] flex justify-center px-4">
+          <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[1000] flex justify-center px-4">
             <div
               role="status"
               aria-live="polite"
-              className={`pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-lg border border-gray-700 bg-gray-900/95 px-4 py-3 text-left shadow-2xl shadow-black/30 backdrop-blur transition-all duration-200 ${
+              className={`pointer-events-auto relative flex w-full max-w-lg items-start gap-3.5 overflow-hidden rounded-xl border border-blue-500/40 bg-gray-900/95 px-5 py-4 text-left shadow-2xl shadow-blue-950/40 ring-1 ring-blue-500/10 backdrop-blur transition-all duration-200 ${
                 isLeaving
-                  ? "-translate-y-2 opacity-0"
+                  ? "translate-y-3 opacity-0"
                   : "translate-y-0 opacity-100"
               }`}
             >
-              <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-300">
-                <Bug className="h-4 w-4" aria-hidden="true" />
+              {/* Accent rail — extra visual weight vs. a plain toast. */}
+              <span
+                aria-hidden="true"
+                className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-blue-400 to-blue-600"
+              />
+              <span className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-300">
+                <Bug className="h-5 w-5" aria-hidden="true" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="block text-sm font-semibold text-gray-100">
-                  {t("bugReport.notice.title")}
-                </p>
-                <p className="mt-0.5 block text-sm leading-5 text-gray-300">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center rounded-full bg-blue-500/20 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-blue-300">
+                    {t("bugReport.notice.badge")}
+                  </span>
+                  <p className="block text-sm font-semibold text-gray-100">
+                    {t("bugReport.notice.title")}
+                  </p>
+                </div>
+                <p className="mt-1.5 block text-sm leading-5 text-gray-300">
                   {t("bugReport.notice.body")}
                 </p>
                 <button
                   type="button"
                   onClick={openReport}
-                  className="mt-2 text-sm font-medium text-blue-400 hover:text-blue-300"
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500"
                 >
+                  <Bug className="h-4 w-4" aria-hidden="true" />
                   {t("bugReport.notice.cta")}
                 </button>
               </div>

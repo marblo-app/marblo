@@ -423,8 +423,8 @@ export function Layout() {
       {/* Global team-chat listener and transient top notification. */}
       <ChatToastHost />
 
-      {/* One-time notice: surfaces the new 🐛 bug-report button (PR #284)
-          to existing users after an update. Shows once, then never again. */}
+      {/* One-time first-run beta notice: welcomes new users and points them at
+          the 🐛 bug reporter. Non-blocking, shows once, then never again. */}
       <BugReportNoticeToast />
 
       {/* Modals triggered from CommandPanel */}

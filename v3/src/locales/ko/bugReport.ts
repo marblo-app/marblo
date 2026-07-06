@@ -38,10 +38,11 @@ export const bugReport = {
     "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
   "bugReport.modal.close": "닫기",
 
-  // ── One-time in-app notice (post-update discovery) ──────
-  "bugReport.notice.title": "🐛 버그 신고가 더 쉬워졌어요",
+  // ── One-time first-run beta notice (new-user onboarding) ──────
+  "bugReport.notice.badge": "베타",
+  "bugReport.notice.title": "지금은 베타 기간이에요 🐛",
   "bugReport.notice.body":
-    "이제 앱 상단 바의 🐛 버튼으로 어디서든 버그를 신고할 수 있어요.",
-  "bugReport.notice.cta": "지금 신고하기",
+    "사용 중 버그가 있을 수 있어요. 문제를 발견하면 여기로 에러 리포트를 보내주세요 — 덕분에 더 빠르게 고칠 수 있어요. (앱 상단 바의 🐛 버튼으로 언제든 다시 신고할 수 있어요.)",
+  "bugReport.notice.cta": "버그 신고하기",
   "bugReport.notice.dismiss": "안내 닫기",
 };

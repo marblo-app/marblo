@@ -39,10 +39,11 @@ export const bugReport: Record<keyof typeof koBugReport, string> = {
   "bugReport.modal.rateLimited": "Too many requests. Please try again shortly.",
   "bugReport.modal.close": "Close",
 
-  // ── One-time in-app notice (post-update discovery) ──────
-  "bugReport.notice.title": "🐛 Reporting bugs just got easier",
+  // ── One-time first-run beta notice (new-user onboarding) ──────
+  "bugReport.notice.badge": "BETA",
+  "bugReport.notice.title": "You're on the beta 🐛",
   "bugReport.notice.body":
-    "You can now report a bug from anywhere using the 🐛 button in the app's top bar.",
-  "bugReport.notice.cta": "Report now",
+    "Things might still be a little buggy. If you hit a problem, send us an error report right here — it helps us fix it faster. (You can always report again from the 🐛 button in the top bar.)",
+  "bugReport.notice.cta": "Report a bug",
   "bugReport.notice.dismiss": "Dismiss notice",
 };
