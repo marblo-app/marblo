@@ -25,6 +25,8 @@ import {
 } from "./dispatch-scoring";
 import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import { resolveTopClaudeModelDetailed } from "./agent-config";
+import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
+import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
 import type { WorktreeCoordinator } from "./worktree-coordinator";
 
 /**
@@ -1418,7 +1420,86 @@ export class BridgeServer {
     if (isComplex && params.mix) {
       return this.dispatchMix(params, params.mix);
     }
+    // §B/티켓 XL3NhdW — usage 기반 자동 믹스(기본 off). 명시적 mix 가 없고
+    // complex 이며 MARBLO_AUTO_MIX 가 켜졌을 때만, Codex·Claude 둘 다 연결 +
+    // 전체 usage 여유 조건에서 자동으로 Codex 교차검증을 걸거나(mix), 한쪽이
+    // 소진 임박이면 반대 모델로 1차 라우팅(rerouteModel)한다. 결정은 순수함수
+    // decideAutoMix 가 내리고, 여기서는 그 결정을 dispatchMix/dispatchSingle 로
+    // 적용만 한다(폴백=현행 단일 디스패치 → 무회귀).
+    if (isComplex && !params.mix && isAutoMixEnabled()) {
+      const auto = await this.resolveAutoMix(params, complexity);
+      if (auto) {
+        let next = params;
+        // reroute 는 decideAutoMix 가 model 미명시일 때만 채우므로 명시 지정
+        // 을 덮어쓸 위험이 없다(재배정 가드 정책 보존).
+        if (auto.rerouteModel) {
+          next = { ...next, model: auto.rerouteModel };
+        }
+        if (auto.mix) {
+          return this.dispatchMix(next, auto.mix);
+        }
+        if (next !== params) {
+          return this.dispatchSingle(next);
+        }
+      }
+    }
     return this.dispatchSingle(params);
+  }
+
+  /**
+   * §B — 현재 account-global usage 를 프로브해 자동 믹스/라우팅 결정을 낸다.
+   * 순수 판정은 decideAutoMix 가 하고, 여기서는 usage 프로브(TTL 캐시)와 enabled
+   * 모델 판별 같은 부작용/조회만 담당한다. 프로브 실패 시엔 usage=null 로 넘어가
+   * decideAutoMix 가 "정보없음 → 무동작"으로 안전 폴백한다. 반환 null 은
+   * "적용할 결정 없음"(현행 단일 디스패치).
+   */
+  private async resolveAutoMix(
+    params: DispatchTaskRequest,
+    complexity: "simple" | "standard" | "complex",
+  ): Promise<{
+    mix?: "cross-check" | "split-role";
+    rerouteModel?: ModelType;
+  } | null> {
+    const enabledModels =
+      params.enabledModels ||
+      (this.enabledModelsLookup(params.projectId ?? "") as
+        | ModelType[]
+        | undefined) ||
+      resolvePreset(process.env.MARBLO_MODEL_PRESET);
+    const claudeEnabled = (enabledModels as ModelType[]).includes("claude");
+    const gptEnabled = (enabledModels as ModelType[]).includes("gpt");
+    const effectiveModel = normalizeModel(params.model);
+
+    // 둘 다 연결돼 있어야만 usage 프로브를 돌린다(불필요한 CLI 스폰 회피).
+    if (!claudeEnabled || !gptEnabled) return null;
+
+    let rateLimits: AccountRateLimits = { claude: null, gpt: null };
+    try {
+      rateLimits = await getAccountRateLimits();
+    } catch (err) {
+      console.warn(
+        `[BridgeServer] auto-mix usage 프로브 실패 — 무동작 폴백: ${String(err)}`,
+      );
+    }
+
+    const { headroomPct, exhaustPct } = autoMixThresholds();
+    const decision = decideAutoMix({
+      enabled: true,
+      complexity,
+      explicitMix: !!params.mix,
+      explicitModel: !!effectiveModel,
+      effectiveModel,
+      claudeEnabled,
+      gptEnabled,
+      claude: rateLimits.claude,
+      gpt: rateLimits.gpt,
+      headroomPct,
+      exhaustPct,
+    });
+
+    console.log(`[BridgeServer] auto-mix 결정: ${decision.reason}`);
+    if (!decision.mix && !decision.rerouteModel) return null;
+    return { mix: decision.mix, rerouteModel: decision.rerouteModel };
   }
 
   private async dispatchSingle(

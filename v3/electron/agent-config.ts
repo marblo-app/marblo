@@ -509,8 +509,24 @@ export function orchestratorCommandForModel(model: ModelType): string {
 // 은 complex 작업에만 영향을 준다.
 
 /** 불확실한 모든 상황의 안전 귀결(§8.3). "최상위를 못 쓰는 것"은 허용,
- * "spawn 자체가 깨지는 것"은 불허 — 그래서 늘 검증된 opus 로 떨어진다. */
+ * "spawn 자체가 깨지는 것"은 불허 — 그래서 늘 검증된 opus 로 떨어진다.
+ * 이건 "버전가드 미달/미지모델일 때의 안전 바닥"이지 "기본 선택값"이 아니다
+ * (기본 선택값은 DEFAULT_TOP_CLAUDE_MODEL). */
 export const FALLBACK_TOP_CLAUDE_MODEL = "opus";
+
+/**
+ * complex 티어의 *기본 선택값*(env MARBLO_TOP_CLAUDE_MODEL 미설정 시). "어려운
+ * 작업 → 최신 하이 모델" 정책(티켓 XL3NhdW)에 따라 최신 Claude 5 계열
+ * (fable → claude-fable-5)을 기본으로 자동 선호한다. 단 이 값은 그대로 채택되는
+ * 게 아니라 resolveTopClaudeModelDetailed 의 CLI 버전가드(MARBLO_FABLE5_MIN_CLI,
+ * 기본 2.1.170)를 통과해야만 실제 fable5 로 스폰되고, 미달이면 FALLBACK_TOP_
+ * CLAUDE_MODEL(opus)로 그레이스풀 폴백(구조화 로그)된다. 즉:
+ *   - CLI 자격 O → complex claude = fable5 (최신 하이)
+ *   - CLI 자격 X → complex claude = opus (안전 폴백, 로그 남김)
+ * ★적용 범위는 complex 티어 한정 — standard 는 여전히 "opus" 리터럴,
+ *   simple 은 resolveSimpleClaudeModel(기본 sonnet). simple/standard 무회귀.
+ * opus 로 되돌리려면 MARBLO_TOP_CLAUDE_MODEL=opus 를 명시하면 된다. */
+export const DEFAULT_TOP_CLAUDE_MODEL = "fable";
 
 /** Fable5 최소 요구 claude CLI 버전(버전가드 기본 임계값). env 로 덮어쓸 수 있다. */
 const DEFAULT_FABLE5_MIN_CLI = "2.1.170";
@@ -572,7 +588,8 @@ function logTopModelFallback(f: TopModelFallback): void {
  * 반환하는 상세판 — 텔레메트리/사용자 표식용. 순수 함수(env + resolveClaudeBinary
  * 만 읽음)라 단위테스트가 쉽다.
  *
- *   - MARBLO_TOP_CLAUDE_MODEL(기본 "opus")를 읽어 alias 정규화.
+ *   - MARBLO_TOP_CLAUDE_MODEL(기본 DEFAULT_TOP_CLAUDE_MODEL="fable")를 읽어
+ *     alias 정규화("fable" → "claude-fable-5").
  *   - claude-fable-5 면 설치된 claude CLI 버전을 MARBLO_FABLE5_MIN_CLI(기본
  *     2.1.170)와 비교 — 미달/파싱실패 시 opus 로 그레이스풀 폴백 + 구조화 로그.
  *   - opus/sonnet 은 통과. 검증 못 하는 미지 모델은 보수적으로 opus 폴백.
@@ -583,7 +600,7 @@ function logTopModelFallback(f: TopModelFallback): void {
 export function resolveTopClaudeModelDetailed(
   installedVersion?: string,
 ): TopModelResolution {
-  const raw = (process.env.MARBLO_TOP_CLAUDE_MODEL || FALLBACK_TOP_CLAUDE_MODEL)
+  const raw = (process.env.MARBLO_TOP_CLAUDE_MODEL || DEFAULT_TOP_CLAUDE_MODEL)
     .trim()
     .toLowerCase();
   const id = CLAUDE_MODEL_ALIASES[raw] || raw; // "fable" → "claude-fable-5"
@@ -669,7 +686,8 @@ export function resolveSimpleCodexReasoning(): string {
 //   claude:  simple → resolveSimpleClaudeModel(),  standard → opus(리터럴),  complex → resolveTopClaudeModel()
 //   gpt:     simple → resolveSimpleCodexReasoning(),  standard → medium,        complex → resolveTopCodexReasoning()
 // ★결정1: complex/simple 만 resolver 를 탄다. env 미설정 시 simple=sonnet/low,
-// complex=opus/high 로 떨어져 현행과 byte-identical(무회귀). simple 모델은
+// standard=opus(리터럴, 무변동). complex 는 DEFAULT_TOP_CLAUDE_MODEL="fable"
+// 정책으로 CLI 자격 충족 시 fable5, 미달이면 opus 폴백(티켓 XL3NhdW). simple 모델은
 // dispatch_task isolate=true(물리 cheap 스폰)일 때 비로소 실제로 쓰인다(§B).
 export type TaskComplexity = "simple" | "standard" | "complex";
 export function modelTierForComplexity(
