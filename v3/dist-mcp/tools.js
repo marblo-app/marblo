@@ -1339,6 +1339,29 @@ export function registerTools(server) {
                     createdAt: Timestamp.now(),
                 }, { merge: true });
             }
+            // Bind the board task to the spawned agent so it enters the watchdog's
+            // active scan (CLAIMED/IN_PROGRESS + a real agentId) IMMEDIATELY —
+            // before the worker has run a single MCP call. Without this, spawn_agent
+            // (unlike dispatch_task/reuse_agent, which both bind) left the task in
+            // TODO with no claimedBy/lastAgentId until the worker itself called
+            // claim_task/add_activity. A worker that dies on spawn (broken node/
+            // claude binary → fast-fail → agent-manager status "error") never makes
+            // that call, so the task stayed invisible to the watchdog (TODO is
+            // filtered out; a null agentId short-circuits inspect()) and its death
+            // was never detected or respawned. Binding here closes that gap: the
+            // ticket is now CLAIMED with the agent id, so the watchdog sees the
+            // dead/errored agent and recovers it. Mirrors dispatch_task's binding —
+            // bindTaskToDispatchedAgent only advances status FROM TODO (reassign
+            // guard) and is best-effort (non-fatal on write failure).
+            const boundTaskId = result.taskId ?? task_id;
+            if (result.agentId && boundTaskId) {
+                try {
+                    await bindTaskToDispatchedAgent(boundTaskId, result.agentId);
+                }
+                catch (err) {
+                    console.error("[spawn_agent] Failed to bind task claimedBy:", err);
+                }
+            }
             return text(`Agent spawned successfully!\n` +
                 `  Name: ${name}\n` +
                 `  Model: ${model}\n` +

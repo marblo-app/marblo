@@ -106,6 +106,14 @@ export interface WatchdogConfig {
   intervalMs: number;
   /** Silence (no PTY output / board activity) before a live agent is "stuck". */
   graceMs: number;
+  /** Grace for a freshly-observed ticket to produce its FIRST activity beyond
+   * the dispatch baseline. A spawned worker that dies before running a single
+   * MCP call still looks "fresh" (dispatch stamps projection.lastActivityAt and
+   * the PTY boot bumps lastPtyActivity), so plain silence-from-grace can't tell
+   * "born dead" from "just started". If a live-but-idle ticket produces zero new
+   * activity within this window, it's treated as born-dead and escalated
+   * straight to respawn (a never-started worker won't answer a nudge). */
+  firstActivityGraceMs: number;
   /** Minimum gap between consecutive nudges on the same ticket. */
   nudgeIntervalMs: number;
   /** Nudges to try before escalating to respawn. */
@@ -121,6 +129,8 @@ export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
   enabled: true,
   intervalMs: 60_000,
   graceMs: 300_000, // 5 min — matches agent-manager IDLE_INACTIVITY_MS
+  firstActivityGraceMs: 180_000, // 3 min — a spawned worker should have logged
+  // its first board activity / real PTY work well within this window.
   nudgeIntervalMs: 120_000,
   maxNudges: 2,
   maxRespawns: 3,
@@ -147,6 +157,11 @@ export function resolveWatchdogConfig(
     ),
     intervalMs: intEnv(env, "MARBLO_WATCHDOG_INTERVAL_MS", d.intervalMs),
     graceMs: intEnv(env, "MARBLO_WATCHDOG_GRACE_MS", d.graceMs),
+    firstActivityGraceMs: intEnv(
+      env,
+      "MARBLO_WATCHDOG_FIRST_ACTIVITY_MS",
+      d.firstActivityGraceMs,
+    ),
     nudgeIntervalMs: intEnv(env, "MARBLO_WATCHDOG_NUDGE_MS", d.nudgeIntervalMs),
     maxNudges: intEnv(env, "MARBLO_WATCHDOG_MAX_NUDGES", d.maxNudges),
     maxRespawns: intEnv(env, "MARBLO_WATCHDOG_MAX_RESPAWNS", d.maxRespawns),
@@ -257,6 +272,14 @@ export class AgentWatchdog {
   private readonly log: (msg: string, meta?: Record<string, unknown>) => void;
 
   private states = new Map<string, RecoveryState>();
+  /** First-activity tracker: when the watchdog first observed each active,
+   * agent-bound ticket, plus the freshest activity timestamp seen at that
+   * moment (the dispatch baseline). Used to detect a spawned worker that never
+   * produced its first real activity. Pruned alongside `states`. */
+  private firstSeen = new Map<
+    string,
+    { atMs: number; baselineActivityMs: number }
+  >();
   private timer: ReturnType<typeof setInterval> | null = null;
   private sweeping = false;
 
@@ -298,6 +321,7 @@ export class AgentWatchdog {
       this.timer = null;
     }
     this.states.clear();
+    this.firstSeen.clear();
     this.log("stopped");
   }
 
@@ -325,6 +349,9 @@ export class AgentWatchdog {
       for (const taskId of [...this.states.keys()]) {
         if (!seen.has(taskId)) this.states.delete(taskId);
       }
+      for (const taskId of [...this.firstSeen.keys()]) {
+        if (!seen.has(taskId)) this.firstSeen.delete(taskId);
+      }
     } catch (err) {
       this.log("sweep failed (best-effort)", { err: String(err) });
     } finally {
@@ -351,13 +378,37 @@ export class AgentWatchdog {
     );
     const silent = !dead && now - lastActiveMs > this.cfg.graceMs;
 
+    // First-activity heartbeat: record when we first saw this ticket (with the
+    // dispatch-baseline activity), then flag it "born dead" if it's still alive
+    // but produced ZERO new activity beyond that baseline within the window.
+    // This catches a spawned worker that died before its first MCP call while
+    // its PTY shell (and the dispatch's fresh timestamps) kept it looking
+    // active — silence-from-grace alone can't, because the clock starts fresh
+    // at dispatch. A never-started worker won't answer a nudge, so it escalates
+    // straight to respawn below.
+    const seenAt = this.firstSeen.get(ticket.taskId);
+    if (!seenAt) {
+      this.firstSeen.set(ticket.taskId, {
+        atMs: now,
+        baselineActivityMs: lastActiveMs,
+      });
+    }
+    const noFirstActivity =
+      !dead &&
+      !!seenAt &&
+      now - seenAt.atMs >= this.cfg.firstActivityGraceMs &&
+      lastActiveMs <= seenAt.baselineActivityMs;
+
     const state = this.states.get(ticket.taskId);
 
     // Healthy → if it had been stuck and activity has since advanced, it
     // recovered (e.g. a respawned worker started emitting). Reset its budget.
-    if (!dead && !silent) {
+    if (!dead && !silent && !noFirstActivity) {
       if (state && lastActiveMs > state.stuckAtActivityMs) {
         this.states.delete(ticket.taskId);
+        // Re-arm the first-activity baseline from the resumed activity so a
+        // later relapse is measured fresh (not against the stale spawn baseline).
+        this.firstSeen.delete(ticket.taskId);
         this.deps.recordRecovery?.(
           ticket,
           "recovered",
@@ -386,7 +437,10 @@ export class AgentWatchdog {
     if (!state) this.states.set(ticket.taskId, st);
     if (now < st.cooldownUntilMs) return;
 
-    const mustRespawn = dead || st.nudges >= this.cfg.maxNudges;
+    // A born-dead ticket (never produced first activity) skips nudging — a
+    // worker that never started won't answer — and respawns directly.
+    const mustRespawn =
+      dead || noFirstActivity || st.nudges >= this.cfg.maxNudges;
     if (mustRespawn) {
       if (st.respawns >= this.cfg.maxRespawns) {
         st.exhausted = true;
@@ -403,7 +457,13 @@ export class AgentWatchdog {
         });
         return;
       }
-      const reason = dead ? "dead" : "silent (nudges spent)";
+      const reason = dead
+        ? "dead"
+        : noFirstActivity
+          ? `no activity since spawn (${Math.round(
+              (now - (seenAt?.atMs ?? now)) / 1000,
+            )}s)`
+          : "silent (nudges spent)";
       let ok = false;
       try {
         ok = await this.deps.respawnForTicket(ticket);
@@ -420,6 +480,14 @@ export class AgentWatchdog {
       );
       st.cooldownUntilMs = now + backoff;
       st.stuckAtActivityMs = lastActiveMs;
+      // Re-arm the first-activity window so the freshly respawned worker gets a
+      // full firstActivityGraceMs to produce activity before it's judged
+      // born-dead again — without this, all respawns would burn within the
+      // short backoff span (each tick still sees the stale baseline as stuck).
+      this.firstSeen.set(ticket.taskId, {
+        atMs: now,
+        baselineActivityMs: lastActiveMs,
+      });
       this.deps.recordRecovery?.(
         ticket,
         "respawn",

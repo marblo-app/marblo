@@ -91,6 +91,16 @@ describe("resolveWatchdogConfig", () => {
     expect(c.enabled).toBe(true);
     expect(c.intervalMs).toBe(DEFAULT_WATCHDOG_CONFIG.intervalMs);
     expect(c.graceMs).toBe(DEFAULT_WATCHDOG_CONFIG.graceMs);
+    expect(c.firstActivityGraceMs).toBe(
+      DEFAULT_WATCHDOG_CONFIG.firstActivityGraceMs,
+    );
+  });
+
+  it("env overrides first-activity grace", () => {
+    const c = resolveWatchdogConfig({
+      MARBLO_WATCHDOG_FIRST_ACTIVITY_MS: "45000",
+    } as unknown as NodeJS.ProcessEnv);
+    expect(c.firstActivityGraceMs).toBe(45000);
   });
 
   it("env overrides interval/grace/enable", () => {
@@ -334,6 +344,124 @@ describe("AgentWatchdog — recovery resets state", () => {
     // acts immediately (no leftover cooldown blocking it).
     h.tickets.push(ticket());
     h.clock.ms += 100; // well within the old backoff window
+    await h.wd.tickOnce();
+    expect(h.respawn).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── First-activity heartbeat guard (spawn-then-instant-death) ──────────────
+// A worker that dies on spawn — before running a single MCP call — still looks
+// "fresh": dispatch stamps projection.lastActivityAt and the PTY boot bumps
+// lastPtyActivity, so the grace clock starts full at dispatch and plain
+// silence can't flag it for a whole graceMs. The first-activity guard captures
+// the dispatch baseline and, if the ticket produces ZERO new activity within
+// firstActivityGraceMs while alive-but-idle, treats it as born-dead → respawn
+// directly (a never-started worker won't answer a nudge).
+describe("AgentWatchdog — first-activity heartbeat", () => {
+  // graceMs huge so ordinary silence never fires — isolate the born-dead path.
+  const cfg = { firstActivityGraceMs: 30_000, graceMs: 1_000_000 };
+
+  it("born-dead (alive+idle, no activity since spawn) → respawn, no nudge", async () => {
+    const h = makeHarness(cfg);
+    // Fresh dispatch timestamps: agent alive & idle, PTY + board both stamped
+    // at spawn — exactly how a just-spawned worker looks before it dies.
+    h.health.set(AGENT, {
+      status: "idle",
+      lastPtyActivityMs: h.clock.ms,
+      currentTaskId: TASK,
+    });
+    h.tickets[0].lastActivityAtMs = h.clock.ms;
+
+    // Sweep 1 captures the baseline; nothing is stuck yet.
+    await h.wd.tickOnce();
+    expect(h.nudge).not.toHaveBeenCalled();
+    expect(h.respawn).not.toHaveBeenCalled();
+
+    // Worker produced NOTHING new; the window elapses.
+    h.clock.ms += 30_001;
+    await h.wd.tickOnce();
+    expect(h.nudge).not.toHaveBeenCalled(); // never-started → no nudge
+    expect(h.respawn).toHaveBeenCalledTimes(1);
+    expect(
+      h.records.some(
+        (r) =>
+          r.phase === "respawn" && /no activity since spawn/.test(r.detail),
+      ),
+    ).toBe(true);
+  });
+
+  it("does NOT fire before the first-activity window elapses", async () => {
+    const h = makeHarness(cfg);
+    h.health.set(AGENT, {
+      status: "idle",
+      lastPtyActivityMs: h.clock.ms,
+      currentTaskId: TASK,
+    });
+    h.tickets[0].lastActivityAtMs = h.clock.ms;
+
+    await h.wd.tickOnce();
+    h.clock.ms += 10_000; // still < 30s window
+    await h.wd.tickOnce();
+    expect(h.nudge).not.toHaveBeenCalled();
+    expect(h.respawn).not.toHaveBeenCalled();
+  });
+
+  it("a worker that DID produce activity is never flagged born-dead", async () => {
+    const h = makeHarness(cfg);
+    h.health.set(AGENT, {
+      status: "idle",
+      lastPtyActivityMs: h.clock.ms,
+      currentTaskId: TASK,
+    });
+    h.tickets[0].lastActivityAtMs = h.clock.ms;
+
+    // Sweep 1 captures baseline.
+    await h.wd.tickOnce();
+
+    // Worker logs real board activity AFTER the baseline (advances past it).
+    h.clock.ms += 5_000;
+    h.tickets[0].lastActivityAtMs = h.clock.ms;
+
+    // Long past the window — but activity advanced, so it's healthy, not stuck.
+    h.clock.ms += 30_001;
+    h.tickets[0].lastActivityAtMs = h.clock.ms; // still producing
+    h.health.set(AGENT, {
+      status: "working",
+      lastPtyActivityMs: h.clock.ms,
+      currentTaskId: TASK,
+    });
+    await h.wd.tickOnce();
+    expect(h.nudge).not.toHaveBeenCalled();
+    expect(h.respawn).not.toHaveBeenCalled();
+  });
+
+  it("re-arms the window after respawn so each respawn gets a fresh window", async () => {
+    const h = makeHarness({
+      ...cfg,
+      maxRespawns: 3,
+      backoffBaseMs: 1_000,
+      backoffMaxMs: 8_000,
+    });
+    h.health.set(AGENT, {
+      status: "idle",
+      lastPtyActivityMs: h.clock.ms,
+      currentTaskId: TASK,
+    });
+    h.tickets[0].lastActivityAtMs = h.clock.ms;
+
+    await h.wd.tickOnce(); // baseline
+    h.clock.ms += 30_001; // window elapsed
+    await h.wd.tickOnce(); // respawn #1
+    expect(h.respawn).toHaveBeenCalledTimes(1);
+
+    // Past the (1s) backoff but WITHIN the re-armed 30s window → no respawn yet,
+    // giving the respawned worker time to boot and log its first activity.
+    h.clock.ms += 5_000;
+    await h.wd.tickOnce();
+    expect(h.respawn).toHaveBeenCalledTimes(1);
+
+    // The re-armed window elapses with still no activity → respawn #2.
+    h.clock.ms += 30_001;
     await h.wd.tickOnce();
     expect(h.respawn).toHaveBeenCalledTimes(2);
   });
