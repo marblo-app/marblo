@@ -535,6 +535,19 @@ export class BridgeServer {
       ) => void)
     | null = null;
 
+  // Outbound Telegram sender — main wires this to the electron-owned
+  // TelegramPoller.sendMessage (the poller holds the bot token + last-inbound
+  // chat). The send_telegram_message MCP tool POSTs /send-telegram-message and
+  // the bridge routes here. Null until wired (tool then reports it's
+  // unavailable). Returns a token-SCRUBBED result — never surfaces the token.
+  private sendTelegramMessage:
+    | ((
+        projectId: string,
+        text: string,
+        chatId?: string,
+      ) => Promise<{ ok: boolean; chatId?: string; error?: string }>)
+    | null = null;
+
   constructor(
     agentManager: AgentManager,
     ptyManager: PtyManager,
@@ -596,6 +609,17 @@ export class BridgeServer {
     ) => void,
   ): void {
     this.dispatchMetaHook = hook;
+  }
+
+  /** Wire the outbound Telegram sender (main → TelegramPoller.sendMessage). */
+  setSendTelegramMessage(
+    fn: (
+      projectId: string,
+      text: string,
+      chatId?: string,
+    ) => Promise<{ ok: boolean; chatId?: string; error?: string }>,
+  ): void {
+    this.sendTelegramMessage = fn;
   }
 
   setMainWindow(win: BrowserWindow | null): void {
@@ -758,6 +782,11 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/inject-message") {
           this.handleInjectMessage(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/send-telegram-message") {
+          this.handleSendTelegram(req, res);
           return;
         }
 
@@ -2488,6 +2517,87 @@ export class BridgeServer {
           }),
         );
       }
+    });
+  }
+
+  // ── POST /send-telegram-message ────────────────────────────
+  //
+  // Outbound path for the send_telegram_message MCP tool: the orchestrator
+  // replies to a Telegram inbound by calling the tool, which POSTs here, and
+  // the bridge routes to the electron-owned TelegramPoller (holds the bot token
+  // + last-inbound chat). The token NEVER crosses this boundary — the request
+  // carries only projectId/text/chatId, and the response error is pre-scrubbed
+  // by the poller.
+  private handleSendTelegram(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      void (async () => {
+        let params: { projectId?: string; text?: string; chatId?: string };
+        try {
+          params = JSON.parse(body);
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: `Invalid JSON: ${
+                err instanceof Error ? err.message : "parse error"
+              }`,
+            }),
+          );
+          return;
+        }
+
+        const projectId = (params.projectId ?? "").trim();
+        const text = params.text ?? "";
+        if (!projectId || !text.trim()) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: "Missing required fields: projectId, text",
+            }),
+          );
+          return;
+        }
+
+        if (!this.sendTelegramMessage) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: "Telegram sender not available (no active channel).",
+            }),
+          );
+          return;
+        }
+
+        try {
+          const result = await this.sendTelegramMessage(
+            projectId,
+            text,
+            params.chatId,
+          );
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          // Defensive: the sender scrubs its own errors, but a thrown error
+          // here could carry unexpected content — keep it generic.
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: err instanceof Error ? err.message : "send failed",
+            }),
+          );
+        }
+      })();
     });
   }
 }

@@ -31,6 +31,17 @@ export interface DangerEvent {
 // shortcuts`) which is present even when nothing was submitted.
 const SUBMIT_SIGNAL = /esc to interrupt|[✻✶✳✽✢]|↓\s*\d+\s*tokens|tokens\)/i;
 
+/**
+ * True when a PTY output chunk shows the CLI is actively working (busy footer /
+ * spinner / streaming token counter), NOT the idle footer. Exported so callers
+ * that need an "is the orchestrator mid-turn?" signal (e.g. the Telegram poller's
+ * un-replied nudge, which waits for a busy→idle transition) can reuse the exact
+ * same detection writeAndSubmit uses, instead of duplicating a fragile regex.
+ */
+export function isBusySignal(data: string): boolean {
+  return SUBMIT_SIGNAL.test(data);
+}
+
 export class PtyManager {
   private sessions: Map<string, PtySession> = new Map();
   private writeAndSubmitQueues: Map<string, Promise<void>> = new Map();

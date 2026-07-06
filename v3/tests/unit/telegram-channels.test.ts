@@ -5,10 +5,8 @@ import * as path from "node:path";
 import {
   TelegramChannelStore,
   preflightChannel,
-  telegramChannelLaunchFlags,
   isTelegramChannelActive,
   _setDefaultTelegramChannelStore,
-  TELEGRAM_CHANNEL_PLUGIN,
   YOLO_FLAG,
 } from "../../electron/telegram-channels";
 
@@ -309,7 +307,10 @@ describe("공식 플러그인 config 브릿지 (~/.claude/channels/telegram)", (
   });
 });
 
-describe("telegramChannelLaunchFlags (스폰 주입)", () => {
+describe("isTelegramChannelActive (스폰 게이팅 신호)", () => {
+  // NOTE: 오케스트레이터의 --channels 주입은 제거됐다(폴러는 electron main 소유,
+  // ticket vw38IB2VcmOIOlFV51Wa). isTelegramChannelActive 는 이제 telegram-poller
+  // 가 "이 프로젝트의 getUpdates 루프를 돌릴지" 판단하는 신호로 쓰인다.
   let ctx: ReturnType<typeof makeStore>;
   beforeEach(() => {
     ctx = makeStore();
@@ -320,20 +321,18 @@ describe("telegramChannelLaunchFlags (스폰 주입)", () => {
     fs.rmSync(ctx.dir, { recursive: true, force: true });
   });
 
-  it("활성 채널이면 --channels plugin 플래그를 준다", () => {
+  it("활성 채널(enabled+프리플라이트 통과)이면 true", () => {
     ctx.store.setConfigFromLocalSettings({
       projectId: "p1",
       botToken: GOOD_TOKEN,
       chatId: GOOD_CHAT,
       enabled: true,
     });
-    const flags = telegramChannelLaunchFlags("p1");
-    expect(flags).toEqual(["--channels", TELEGRAM_CHANNEL_PLUGIN]);
     expect(isTelegramChannelActive("p1")).toBe(true);
   });
 
-  it("비활성/미설정이면 빈 배열 (채널 없이 부팅)", () => {
-    expect(telegramChannelLaunchFlags("nope")).toEqual([]);
+  it("비활성/미설정이면 false", () => {
+    expect(isTelegramChannelActive("nope")).toBe(false);
   });
 
   it("YOLO_FLAG 상수는 권한 스킵 플래그다", () => {

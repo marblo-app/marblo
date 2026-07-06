@@ -69,37 +69,109 @@ export interface ProbeOptions {
 const TELEGRAM_API = "https://api.telegram.org";
 const DEFAULT_TIMEOUT_MS = 8000;
 
-/** Strip any occurrence of the bot token from a diagnostic string. */
-function scrub(msg: string, token: string): string {
+/**
+ * Strip any occurrence of the bot token from a diagnostic string. Exported so
+ * every Telegram caller (health probe, poller inbound/outbound) can scrub the
+ * token out of logs, errors, and tool return values — the token must NEVER
+ * surface. Empty token is a no-op.
+ */
+export function scrubToken(msg: string, token: string): string {
   if (!token) return msg;
   return msg.split(token).join("<token>");
 }
 
+/** Parsed Telegram Bot API envelope. `result` shape is per-method. */
+export interface TelegramApiResponse<T = unknown> {
+  ok: boolean;
+  result?: T;
+  description?: string;
+}
+
 /**
- * Call one Telegram Bot API method with a hard timeout. Returns parsed JSON, or
- * throws on network/timeout/non-2xx. The token lives only in the URL path and
- * is never returned or logged by callers (see scrub()).
+ * A non-2xx HTTP response from the Bot API, carrying the status code and (for
+ * 429) the server-advised `retry_after` seconds. Lets outbound callers decide
+ * whether to retry and how long to wait. `message` is "HTTP <status>[: desc]";
+ * the description never contains the token (Telegram doesn't echo it), but
+ * callers still scrub before surfacing (belt-and-suspenders).
  */
-async function callApi(
+export class TelegramHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly retryAfter?: number,
+    message?: string,
+  ) {
+    super(message ?? `HTTP ${status}`);
+    this.name = "TelegramHttpError";
+  }
+}
+
+/** Options for a single {@link telegramApi} call. */
+export interface TelegramApiOptions {
+  /** Injectable fetch for tests. Defaults to global fetch (Node ≥ 18/22). */
+  fetchImpl?: typeof fetch;
+  /**
+   * Per-request abort timeout (ms). Default 8000. Long-poll getUpdates callers
+   * MUST pass a timeout LONGER than their `timeout` query param (else the abort
+   * fires mid-poll). Default 8000.
+   */
+  timeoutMs?: number;
+}
+
+/**
+ * Call one Telegram Bot API method with a hard timeout. `params` (when given)
+ * is sent as a JSON POST body — Telegram accepts POST for every method, which
+ * keeps values like message text out of the URL/query string. Returns the
+ * parsed JSON envelope, or throws on network/timeout/non-2xx.
+ *
+ * ★The bot token lives ONLY in the URL path (`/bot<token>/<method>`) and is
+ * never returned or logged here — callers scrub it from any diagnostic they
+ * surface via {@link scrubToken}. Shared by the health probe (getWebhookInfo/
+ * deleteWebhook) and the poller (getUpdates/sendMessage).
+ */
+export async function telegramApi<T = unknown>(
   token: string,
   method: string,
-  fetchImpl: typeof fetch,
-  timeoutMs: number,
-): Promise<{ ok: boolean; result?: unknown; description?: string }> {
+  params?: Record<string, unknown>,
+  opts: TelegramApiOptions = {},
+): Promise<TelegramApiResponse<T>> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(`${TELEGRAM_API}/bot${token}/${method}`, {
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+    const init: RequestInit = { signal: controller.signal };
+    if (params !== undefined) {
+      init.method = "POST";
+      init.headers = { "Content-Type": "application/json" };
+      init.body = JSON.stringify(params);
     }
-    return (await res.json()) as {
-      ok: boolean;
-      result?: unknown;
-      description?: string;
-    };
+    const res = await fetchImpl(`${TELEGRAM_API}/bot${token}/${method}`, init);
+    if (!res.ok) {
+      // Best-effort parse of the error envelope so 429 callers can honor
+      // `retry_after` and surface a description. Never throws on parse failure.
+      let retryAfter: number | undefined;
+      let description: string | undefined;
+      try {
+        const body = (await res.json()) as {
+          description?: string;
+          parameters?: { retry_after?: number };
+        };
+        description =
+          typeof body?.description === "string" ? body.description : undefined;
+        const ra = body?.parameters?.retry_after;
+        retryAfter = typeof ra === "number" ? ra : undefined;
+      } catch {
+        /* non-JSON error body — status alone still drives retry decisions */
+      }
+      throw new TelegramHttpError(
+        res.status,
+        retryAfter,
+        description
+          ? `HTTP ${res.status}: ${description}`
+          : `HTTP ${res.status}`,
+      );
+    }
+    return (await res.json()) as TelegramApiResponse<T>;
   } finally {
     clearTimeout(timer);
   }
@@ -127,13 +199,19 @@ export async function probeAndHealTelegramWebhook(
   const fetchImpl = opts.fetchImpl ?? fetch;
   const deleteIfSet = opts.deleteIfSet ?? true;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const apiOpts: TelegramApiOptions = { fetchImpl, timeoutMs };
 
   try {
-    const info = await callApi(trimmed, "getWebhookInfo", fetchImpl, timeoutMs);
+    const info = await telegramApi(
+      trimmed,
+      "getWebhookInfo",
+      undefined,
+      apiOpts,
+    );
     if (!info.ok) {
       return {
         ...base,
-        error: scrub(info.description ?? "getWebhookInfo not ok", trimmed),
+        error: scrubToken(info.description ?? "getWebhookInfo not ok", trimmed),
       };
     }
     const result = (info.result ?? {}) as {
@@ -151,7 +229,12 @@ export async function probeAndHealTelegramWebhook(
     if (webhookWasSet && deleteIfSet) {
       // drop_pending_updates=false: keep the backlog so messages queued while
       // the poller was wedged are delivered once getUpdates resumes.
-      const del = await callApi(trimmed, "deleteWebhook", fetchImpl, timeoutMs);
+      const del = await telegramApi(
+        trimmed,
+        "deleteWebhook",
+        { drop_pending_updates: false },
+        apiOpts,
+      );
       webhookCleared = del.ok === true;
     }
 
@@ -163,7 +246,7 @@ export async function probeAndHealTelegramWebhook(
     };
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
-    return { ...base, error: scrub(raw, trimmed) };
+    return { ...base, error: scrubToken(raw, trimmed) };
   }
 }
 

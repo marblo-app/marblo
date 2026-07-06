@@ -16,7 +16,7 @@ import os from "os";
 import http from "http";
 import { execSync, spawn } from "node:child_process";
 import dotenv from "dotenv";
-import { PtyManager } from "./pty-manager";
+import { PtyManager, isBusySignal } from "./pty-manager";
 import { PendingInstructionListener } from "./pending-instruction-listener";
 import { FsManager } from "./fs-manager";
 import { AgentManager, serializeAgent } from "./agent-manager";
@@ -81,13 +81,13 @@ import {
   setTelegramChannelFromLocalSettings,
   getTelegramChannelStatus,
   removeTelegramChannel,
-  isTelegramChannelActive,
   type TelegramChannelInput,
 } from "./telegram-channels";
 import {
   runTelegramChannelHealthCheck,
   type ChannelHealthReport,
 } from "./telegram-health";
+import { TelegramPoller } from "./telegram-poller";
 import {
   getProjectConnection,
   upsertProjectConnection,
@@ -489,7 +489,16 @@ function broadcast(channel: string, ...args: unknown[]): void {
  * report carries no secret material (see telegram-health.ts).
  */
 function emitTelegramHealth(report: ChannelHealthReport): void {
-  broadcast("telegram:health", report);
+  // Fold in the per-project outbound/inbound reliability counters (unanswered
+  // inbounds, failed sends) so the 4-min health channel surfaces silent loss.
+  // Loud log when any counter is non-zero — never let a drop pass unnoticed.
+  const reliability = telegramPoller.getReliabilityStats(report.projectId);
+  if (reliability.unanswered > 0 || reliability.sendFailures > 0) {
+    console.warn(
+      `[TelegramHealth] project=${report.projectId} reliability — unanswered inbounds=${reliability.unanswered}, failed sends=${reliability.sendFailures}`,
+    );
+  }
+  broadcast("telegram:health", { ...report, reliability });
 }
 
 /** Send an IPC event to a specific webContents id (or fallback to mainWindow). */
@@ -814,8 +823,9 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
       // queued during the crash window is delivered after recovery.
       if (status === "stopped" && projectId) {
         pendingListener.detach(`orch-${projectId}`);
-        // 소유 오케(board)가 멈추면 telegram 을 상주 미션 오케로 인계(단일 소유자 유지).
-        maybeHandoverTelegram(projectId);
+        // Telegram 인계(handover) 로직은 제거됐다 — 폴러가 오케에 종속되지 않고
+        // electron main 이 소유하므로 오케가 멈춰도 인계할 것이 없다
+        // (ticket vw38IB2VcmOIOlFV51Wa).
       }
     },
   );
@@ -1022,6 +1032,26 @@ bridgeServer.setMissionOrchestratorLookup(
   (projectId: string) => missionOrchestrators.get(projectId) ?? null,
 );
 
+// ── Telegram poller (electron-main-owned, ticket vw38IB2VcmOIOlFV51Wa) ──
+// Exactly one getUpdates loop per project, owned here — NOT inside any
+// orchestrator (which used to carry --channels and 409-flap on churn).
+// Inbound resolves the CURRENT live orchestrator (board wins over mission) and
+// injectMessage()s the text; when none is live the poller holds the offset so
+// the message is delivered after the next boot (at-least-once). Outbound
+// (send_telegram_message MCP tool → bridge) routes into sendMessage().
+const telegramPoller = new TelegramPoller({
+  resolveOrchestrator: (projectId: string) => {
+    const board = orchestrators.get(projectId);
+    if (board && board.isRunning()) return board;
+    const mission = missionOrchestrators.get(projectId);
+    if (mission && mission.isRunning()) return mission;
+    return null;
+  },
+});
+bridgeServer.setSendTelegramMessage((projectId, text, chatId) =>
+  telegramPoller.sendMessage(projectId, text, chatId),
+);
+
 function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
   const roots: WorktreeProjectRoot[] = [];
   const addRoot = (
@@ -1167,6 +1197,7 @@ function ensureMissionOrchestratorLaunched(
       const ownerId = missionOrchestratorOwners.get(projectId);
       if (ownerId !== undefined) ptyOwners.set(sid, ownerId);
       setupPtyForwarding(sid);
+      hookOrchestratorActivity(sid, projectId);
     },
     resumeId,
     missionId,
@@ -1175,60 +1206,24 @@ function ensureMissionOrchestratorLaunched(
 }
 
 /**
- * 텔레그램 단일 소유자 인계. 소유 오케(정상 흐름상 board)가 종료되면 owner lock 이
- * 풀린다. 그 프로젝트에 미션 오케가 아직 살아 돌고 있으면, 그 미션 오케를 relaunch
- * 해 telegram 소유권을 넘겨받게 한다(launch 게이팅이 자유 lock 을 획득 → --channels
- * 재주입 → 폴러 재개). 채널 소유권 이동을 relaunch 로 처리하는 건 #296 과 동일 정신 —
- * 구 폴러는 오케 종료(트리킬)로 이미 죽어 이중 폴러가 생기지 않는다. relaunch 는 미션
- * 세션을 resume 하므로 미션 컨텍스트는 보존된다.
- *
- * board 가 미션보다 먼저 뜨므로 정상 흐름에선 board 가 소유 → 여기서 다루는 건
- * 'board 종료 + 미션 상주' 케이스뿐. 역방향(미션 종료→board 인계)은 board 가 미션보다
- * 늦게 소유하는 일이 없어 불필요하다(board 는 자기 launch 에서 자유 lock 을 자연 획득).
- * crash(비정상 종료)는 status "stopped" 를 내지 않으므로(오케는 자동 재기동해 같은
- * ownerId 로 재획득) 이 경로를 타지 않는다 — transient crash 에 불필요한 relaunch 없음.
- *
- * ★지연 + 재확인: restart() 는 내부적으로 stop()(→ "stopped")+launch() 를 연달아
- * 부른다. 동기 인계는 그 짧은 창에서 telegram 을 미션으로 뺏어버린다(불필요한 미션
- * relaunch). 그래서 짧게 지연한 뒤 소유 lock 이 그때도 비어 있을 때만 인계한다 —
- * board 가 곧 재기동해 자기 lock 을 재획득하면(restart) 인계를 건너뛴다.
+ * Feed orchestrator PTY "busy" signals to the Telegram poller so its un-replied
+ * nudge can detect a busy→idle turn boundary. node-pty onData is add-only, so
+ * this extra listener coexists with setupPtyForwarding's. Cheap: a regex test
+ * per chunk, and markOrchestratorActivity is a no-op unless an inbound is
+ * awaiting a reply for this project.
  */
-const TELEGRAM_HANDOVER_DELAY_MS = 4000;
-
-function maybeHandoverTelegram(projectId: string): void {
-  if (!projectId || isQuitting) return; // 앱 종료 중엔 relaunch 하지 않는다.
-  if (!isTelegramChannelActive(projectId)) return;
-  const mission = missionOrchestrators.get(projectId);
-  if (!mission || !mission.isRunning()) return; // 넘겨줄 상주 미션 오케 없음.
-  const rootPath =
-    mission.getSession()?.rootPath ??
-    orchestrators.get(projectId)?.getSession()?.rootPath;
-  if (!rootPath) return;
-  // 소유자가 아직 살아 lock 을 쥐고 있으면(정상 흐름) 즉시 스킵 — 지연조차 불필요.
-  if (mission.isTelegramOwnerLive(rootPath, projectId)) return;
-
-  setTimeout(() => {
-    try {
-      if (isQuitting) return;
-      const m = missionOrchestrators.get(projectId);
-      if (!m || !m.isRunning()) return;
-      if (!isTelegramChannelActive(projectId)) return;
-      const rp = m.getSession()?.rootPath ?? rootPath;
-      // 지연 후 재확인: board 가 재기동해 lock 을 재획득했다면(restart 케이스)
-      // 소유자가 살아있으므로 인계하지 않는다 — 미션 relaunch 를 아낀다.
-      if (m.isTelegramOwnerLive(rp, projectId)) return;
-      const missionId = m.getOwnerMissionId() ?? undefined;
-      console.log(
-        `[Telegram] Owner orchestrator stopped for project ${projectId}; handing Telegram over to the running mission orchestrator (relaunch to re-inject --channels).`,
-      );
-      // stop→ensure relaunch: 미션 세션 resume(컨텍스트 보존) + 자유 owner lock 획득.
-      m.stop();
-      ensureMissionOrchestratorLaunched(projectId, rp, missionId);
-    } catch (err) {
-      console.error(`[Telegram] handover failed for ${projectId}: ${err}`);
-    }
-  }, TELEGRAM_HANDOVER_DELAY_MS);
+function hookOrchestratorActivity(sid: string, projectId: string): void {
+  if (!projectId) return;
+  ptyManager.onData(sid, (data) => {
+    if (isBusySignal(data)) telegramPoller.markOrchestratorActivity(projectId);
+  });
 }
+
+// NOTE: maybeHandoverTelegram (텔레그램 단일 소유자 인계) 는 제거됐다. 폴러가
+// 오케스트레이터에 종속되지 않고 electron main(telegramPoller)이 프로젝트당 1개를
+// 소유하므로, 오케가 멈춰도 넘겨줄 소유권이 없다. 채널 활성/비활성에 따른 폴러
+// 시작/정지는 telegramPoller.syncActiveChannels() 가 담당한다
+// (ticket vw38IB2VcmOIOlFV51Wa).
 
 // 미션이 사용자 개입을 요구할 때 (waiting_for_human + notifyUser) OS 알림 +
 // 인앱 IPC 로 surface. gstack 스킬은 상호작용(AskUserQuestion 등) 이 많아 PTY
@@ -2796,7 +2791,11 @@ ipcMain.handle("telegramChannel:list", () => {
 ipcMain.handle("telegramChannel:set", (_event, input: TelegramChannelInput) => {
   // 로컬 설정 경로 — 설정 저장 + access.json 동기화. 합성 상태를 돌려줘
   // 프론트가 토글 잠금/사유(issues)를 즉시 반영하게 한다.
-  return setTelegramChannelFromLocalSettings(input);
+  const status = setTelegramChannelFromLocalSettings(input);
+  // 채널 활성/비활성 변화를 폴러에 반영한다(활성 → getUpdates 루프 시작,
+  // 비활성 → 정지). syncActiveChannels 는 멱등이라 안전하다.
+  telegramPoller.syncActiveChannels();
+  return status;
 });
 
 ipcMain.handle("telegramChannel:status", (_event, projectId: string) => {
@@ -2804,7 +2803,10 @@ ipcMain.handle("telegramChannel:status", (_event, projectId: string) => {
 });
 
 ipcMain.handle("telegramChannel:remove", (_event, projectId: string) => {
-  return removeTelegramChannel(projectId);
+  const removed = removeTelegramChannel(projectId);
+  // 채널 삭제 → 해당 프로젝트 폴러 루프 정지.
+  telegramPoller.syncActiveChannels();
+  return removed;
 });
 
 // --- Agent IPC Handlers ---
@@ -3549,6 +3551,7 @@ ipcMain.handle(
         // back only to that window (not broadcast / mainWindow-only).
         ptyOwners.set(sid, senderId);
         setupPtyForwarding(sid);
+        hookOrchestratorActivity(sid, projectId);
         // Cross-machine routing: any teammate who @mentions the orchestrator
         // from a machine that has no local orch PTY enqueues into
         // pendingInstructions with targetAgentId = `orch-${projectId}`.
@@ -4038,33 +4041,46 @@ app.whenReady().then(async () => {
   // session restore). Single default window when nothing was saved.
   restoreWindowSession();
 
+  // Start the electron-owned Telegram poller: one getUpdates loop per active
+  // channel, resuming from the persisted offset. Idempotent — safe even if no
+  // channels are configured yet (starts nothing).
+  try {
+    telegramPoller.start();
+  } catch (err) {
+    console.error("[Main] Telegram poller start failed:", err);
+  }
+
   // --- powerMonitor: notify renderer on system wake ---
   powerMonitor.on("resume", () => {
     console.log("[Main] System resumed from sleep — notifying renderer");
     broadcast("system:wake");
-    // Telegram channel poller self-heal: mac sleep kills the getUpdates TCP
-    // socket, and a stray webhook 409-wedges getUpdates permanently. The poller
-    // is a claude-owned MCP grandchild we can't restart directly (see
-    // telegram-health.ts), but with the stored bot token we can clear a webhook
-    // wedge and surface a deaf-poller warning out-of-band. Fire-and-forget.
+    // Telegram poller self-heal: mac sleep kills the getUpdates TCP socket and
+    // a stray webhook 409-wedges getUpdates. The out-of-band health sweep
+    // clears a webhook wedge with the stored bot token; then reconcile poller
+    // loops so any that died on the dead socket are (re)started. Fire-and-forget.
     void runTelegramChannelHealthCheck("wake", {
       onReport: emitTelegramHealth,
-    }).catch((err) =>
-      console.warn("[Main] Telegram wake health check failed:", err),
-    );
+    })
+      .catch((err) =>
+        console.warn("[Main] Telegram wake health check failed:", err),
+      )
+      .finally(() => telegramPoller.syncActiveChannels());
   });
 
   // Conservative periodic health sweep — catches steady-state disconnects that
   // never fire a wake event (a webhook registered mid-session, or a silently
   // deaf poller). Only probes active channels; no-op when none are configured.
-  // unref'd so it never keeps the process alive on quit.
+  // unref'd so it never keeps the process alive on quit. Also reconciles poller
+  // loops so a crashed loop is revived and a newly-active channel gets one.
   const telegramHealthTimer = setInterval(
     () => {
       void runTelegramChannelHealthCheck("interval", {
         onReport: emitTelegramHealth,
-      }).catch((err) =>
-        console.warn("[Main] Telegram interval health check failed:", err),
-      );
+      })
+        .catch((err) =>
+          console.warn("[Main] Telegram interval health check failed:", err),
+        )
+        .finally(() => telegramPoller.syncActiveChannels());
     },
     4 * 60 * 1000,
   );
@@ -4108,6 +4124,7 @@ app.on("window-all-closed", () => {
     // Non-macOS: full cleanup and quit
     kanbanBridge.detach();
     stopAllOrchestrators();
+    void telegramPoller.stopAll();
     bridgeServer.stop();
     agentManager.stopAll();
     pendingListener.detachAll();
@@ -4130,6 +4147,7 @@ app.on("before-quit", () => {
   // Full cleanup when actually quitting (Cmd+Q)
   kanbanBridge.detach();
   stopAllOrchestrators();
+  void telegramPoller.stopAll();
   bridgeServer.stop();
   agentManager.stopAll();
   pendingListener.detachAll();

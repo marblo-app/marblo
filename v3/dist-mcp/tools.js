@@ -2491,5 +2491,53 @@ export function registerTools(server) {
         return text(`Reported ${stepLabel} as ${status} to the conductor for mission ${missionId}.` +
             (payload.result.error ? ` (error: ${payload.result.error})` : ""));
     });
+    // send_telegram_message — outbound reply to the project's Telegram channel.
+    // The electron-owned TelegramPoller holds the bot token + last-inbound chat;
+    // this tool POSTs to the bridge which routes to poller.sendMessage. The token
+    // NEVER crosses this boundary — we send only projectId/text/chatId, and any
+    // error returned is already token-scrubbed by the poller.
+    auditedTool("send_telegram_message", "Reply to the project's Telegram channel. Call this to answer a '[Telegram " +
+        "inbound ...]' message — a plain text response is NOT delivered to Telegram, " +
+        "only this tool is. chatId defaults to the last inbound chat for the project " +
+        "(pass it explicitly to target a specific chat). Requires an active Telegram " +
+        "channel and MARBLO_BRIDGE_PORT.", {
+        text: z.string().describe("Message text to send to Telegram."),
+        projectId: z
+            .string()
+            .optional()
+            .describe("Marblo project id. Defaults to MARBLO_PROJECT (the current context)."),
+        chatId: z
+            .string()
+            .optional()
+            .describe("Target chat id. Omit to reply to the last inbound chat for the project."),
+    }, async ({ text: messageText, projectId, chatId }) => {
+        const targetProject = projectId || process.env.MARBLO_PROJECT || "";
+        if (!targetProject) {
+            return text("Error: no projectId (set MARBLO_PROJECT or pass projectId).");
+        }
+        const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+        if (!bridgePort) {
+            return text("Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.");
+        }
+        try {
+            const response = await fetch(`http://127.0.0.1:${bridgePort}/send-telegram-message`, {
+                method: "POST",
+                headers: bridgeHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({
+                    projectId: targetProject,
+                    text: messageText,
+                    chatId,
+                }),
+            });
+            const result = (await response.json());
+            if (!result.ok) {
+                return text(`Failed to send Telegram message: ${result.error || "unknown error"}`);
+            }
+            return text(`Sent Telegram message to chat ${result.chatId ?? "(default)"}.`);
+        }
+        catch (err) {
+            return text(`Error sending Telegram message: ${err instanceof Error ? err.message : "network error"}`);
+        }
+    });
 }
 //# sourceMappingURL=tools.js.map

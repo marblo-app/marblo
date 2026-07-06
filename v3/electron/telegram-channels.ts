@@ -35,15 +35,12 @@ import * as path from "node:path";
  * 무인 트리거하려면 권한 프롬프트가 없어야 하므로 채널과 짝으로 강제된다. */
 export const YOLO_FLAG = "--dangerously-skip-permissions";
 
-/** Claude Code 채널 플러그인 식별자(텔레그램). */
+/** Claude Code 채널 플러그인 식별자(텔레그램). 참고용 상수 — 오케스트레이터는 더
+ * 이상 `--channels` 로 이 플러그인을 물지 않는다(폴러는 electron main 이 소유,
+ * ticket vw38IB2VcmOIOlFV51Wa). 플러그인 config 브릿지(materializePluginConfig)의
+ * 대상 디렉토리 정체성만 문서화한다. */
 export const TELEGRAM_CHANNEL_PLUGIN =
   "plugin:telegram@claude-plugins-official";
-
-/** `--channels <plugin>` 플래그 페어. orchestrator-manager 가 활성 시 args 에 push. */
-export const TELEGRAM_CHANNEL_FLAGS: readonly string[] = [
-  "--channels",
-  TELEGRAM_CHANNEL_PLUGIN,
-];
 
 // ─── access.json 쓰기 출처 가드 ───────────────────────────────────────
 
@@ -760,14 +757,6 @@ export function getTelegramChannelAccess(
   projectId: string,
 ): ChannelAccess | null {
   return getTelegramChannelStore().getAccess(projectId);
-}
-
-/**
- * 활성 채널의 스폰 주입 플래그를 돌려준다. 활성이 아니면 빈 배열.
- * orchestrator-manager 가 launchConfig.args 에 spread 한다.
- */
-export function telegramChannelLaunchFlags(projectId: string): string[] {
-  return isTelegramChannelActive(projectId) ? [...TELEGRAM_CHANNEL_FLAGS] : [];
 }
 
 /**
