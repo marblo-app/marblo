@@ -44,6 +44,13 @@ service cloud.firestore {
             && getMemberRoleDoc(projectId, request.auth.uid).role == 'admin');
     }
 
+    function isPlatformAdmin() {
+      return isAuthenticated()
+        && (request.auth.token.admin == true
+            || request.auth.token.role == 'admin'
+            || request.auth.token.marbloRole == 'admin');
+    }
+
     // ===== Users =====
     match /users/{userId} {
       allow read: if isAuthenticated();
@@ -330,12 +337,40 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // ===== Founder Feedback (구조화 6문항 피드백) =====
-    // submitFounderFeedback 함수만 생성. 본인은 자신의 피드백을 읽을 수 있다.
+    // ===== Founder Feedback (V2 7문항 설문 + 운영자 루브릭 채점) =====
+    // Cloud Functions(Admin SDK)가 정식 제출/채점 경로다. 직접 클라이언트 접근은
+    // 방어선으로만 제한한다: 사용자는 자기 설문만, 루브릭/선정/보상은 어드민만.
     match /founder_feedback/{feedbackId} {
       allow read: if isAuthenticated()
-        && resource.data.userId == request.auth.uid;
-      allow write: if false; // Only Cloud Functions can write
+        && (resource.data.userId == request.auth.uid || isPlatformAdmin());
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'userId',
+          'email',
+          'locale',
+          'answers',
+          'betaExpiresAt',
+          'createdAt'
+        ])
+        && request.resource.data.email is string
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.locale in ['ko', 'en', 'ja']
+        && request.resource.data.answers is map
+        && request.resource.data.answers.keys().hasOnly([
+          'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7'
+        ])
+        && request.resource.data.answers.q1 is string
+        && request.resource.data.answers.q2 is string
+        && request.resource.data.answers.q3 is string
+        && request.resource.data.answers.q4 is string
+        && request.resource.data.answers.q5 is string
+        && request.resource.data.answers.q6 is string
+        && request.resource.data.answers.q7 is string;
+      allow update: if isPlatformAdmin()
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.email == resource.data.email;
+      allow delete: if false;
     }
 
     // ===== Bug Reports (인앱 사용자 버그 신고) =====

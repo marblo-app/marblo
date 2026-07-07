@@ -975,23 +975,48 @@ export const issueLectureCoupon = functions.https.onCall(
 );
 
 // ═══════════════════════════════════════════════════════════════════
-// Founder Beta (파운더 100인 무료 베타) — 피드백 → Pro 무료 부여
+// Founder Beta (파운더 100인 무료 베타) — V2 설문/루브릭 → Pro 무료 부여
 // ═══════════════════════════════════════════════════════════════════
 //
-// 흐름 (이메일 발송은 수동 MVP — 어드민이 접근 안내·폼 링크를 직접 전달):
+// 흐름:
 //   1) 어드민이 betatester50_waitlist 검토 후 markFounderSelected({email}) 로 선정.
-//      founders/{normalizedEmail} 생성, accessGrantedAt = 선정 시각(3일 클럭 시작).
-//   2) 파운더가 같은 (이메일 인증된) 계정으로 로그인 → /foundation50/feedback
-//      6문항 제출 → submitFounderFeedback(): 선정 여부 + accessGrantedAt+3일 이내
-//      검증 → founder_feedback 저장 + Pro 3개월 직접 부여(결제 우회).
-//   3) 인터뷰 완료 시 어드민 markFounderInterviewed({email}) → Pro +3개월(총 6).
+//      founders/{normalizedEmail} 생성, betaExpiresAt = 선정/활성화 + 1개월.
+//   2) 파운더가 같은 (이메일 인증된) 계정으로 로그인 → /beta-survey
+//      7문항 제출 → submitFounderFeedback(): 선정 여부 + 중복 제출 검증 후
+//      founder_feedback 저장. 제출만으로 보상은 확정하지 않는다.
+//   3) 운영자가 루브릭 채점(reviewFounderFeedback) → 기준 통과 시 Pro 총 3개월.
+//   4) 운영자가 상위 응답자에게 인터뷰 요청(requestFounderInterview) 후 완료 처리
+//      (markFounderInterviewed) → Pro 총 6개월로 연장.
 //
 // 어드민 식별: triggerReconcile 과 동일하게 ADMIN_UID env 단일 체크.
 
-const FOUNDER_FEEDBACK_WINDOW_DAYS = 3;
+const FOUNDER_BETA_MONTHS = 1;
 const FOUNDER_PRO_MONTHS = 3;
-const FOUNDER_INTERVIEW_BONUS_MONTHS = 3; // 3 → 6 누적
+const FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS = 6;
+const FOUNDER_PRO_RUBRIC_MIN_TOTAL = 10;
+const FOUNDER_INTERVIEW_MIN_TOTAL = 14;
 const FOUNDER_FIELD_MAX = 5000;
+const FOUNDER_FEEDBACK_COLLECTION = "founder_feedback";
+const FOUNDERS_COLLECTION = "founders";
+
+interface FounderSurveyAnswers {
+  q1: string;
+  q2: string;
+  q3: string;
+  q4: string;
+  q5: string;
+  q6: string;
+  q7: string;
+}
+
+interface FounderRubricScore {
+  total: number;
+  specificity: number;
+  usageEvidence: number;
+  insightQuality: number;
+  actionability: number;
+  icpFit: number;
+}
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -1010,15 +1035,14 @@ function requireAdmin(context: functions.https.CallableContext): void {
   }
 }
 
-// Pro 구독을 결제 없이 직접 부여/연장 (내부 함수).
-// 이미 미래까지 유효한 구독이 있으면 그 끝에서 이어 붙여 기간을 축소하지 않는다.
-// paymentProvider="founder_grant" 로 결제 기반 구독과 구분.
-async function grantFounderProInternal(
+async function grantFounderProTotalInternal(
   userId: string,
-  months: number,
+  totalMonths: number,
   reason: string,
+  grantStartedAt: Date,
 ): Promise<Date> {
   const now = new Date();
+  const targetEnd = addMonths(grantStartedAt, totalMonths);
   const subRef = db.collection("subscriptions").doc(userId);
   const snap = await subRef.get();
   const data = snap.data();
@@ -1026,8 +1050,7 @@ async function grantFounderProInternal(
     data?.currentPeriodEnd && typeof data.currentPeriodEnd.toDate === "function"
       ? data.currentPeriodEnd.toDate()
       : null;
-  const base = existingEnd && existingEnd > now ? existingEnd : now;
-  const periodEnd = addMonths(base, months);
+  const periodEnd = existingEnd && existingEnd > targetEnd ? existingEnd : targetEnd;
 
   const payload: Record<string, unknown> = {
     userId,
@@ -1036,6 +1059,7 @@ async function grantFounderProInternal(
     paymentProvider: "founder_grant",
     founderGrant: true,
     founderGrantReason: reason,
+    founderGrantStartedAt: admin.firestore.Timestamp.fromDate(grantStartedAt),
     currentPeriodEnd: admin.firestore.Timestamp.fromDate(periodEnd),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
@@ -1069,7 +1093,7 @@ interface FounderEmailContent {
 
 function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
   const downloadUrl = `${SITE_BASE}/${locale}/download`;
-  const feedbackUrl = `${SITE_BASE}/${locale}/founders/feedback`;
+  const feedbackUrl = `${SITE_BASE}/${locale}/beta-survey`;
   const coupon = FOUNDER_COURSE_COUPON;
   const hasDiscord = !!DISCORD_INVITE_URL;
 
@@ -1087,9 +1111,9 @@ function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
         <p>You've been selected as one of our founding members. Founders shape Marblo from day one — thank you for joining us.</p>
         <h2 style="font-size:17px;margin:24px 0 8px">1. Get the beta</h2>
         <p>Download Marblo here: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
-        <h2 style="font-size:17px;margin:24px 0 8px">2. Feedback (required, within 3 days)</h2>
-        <p>Please submit your feedback within <strong>3 days</strong>: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
-        Submitting earns you <strong>3 months of Pro free</strong> (6 months if you also do a short interview).</p>
+        <h2 style="font-size:17px;margin:24px 0 8px">2. Survey after your 1-month beta</h2>
+        <p>Please submit the beta survey here: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
+        Thoughtful survey responses that pass rubric review earn <strong>3 months of Pro free</strong>. A small set of top responses may be invited to a video interview; completing it extends Pro to <strong>6 months total</strong>.</p>
         <h2 style="font-size:17px;margin:24px 0 8px">3. 50% off the course</h2>
         <p>Use coupon code <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> at checkout for <strong>50% off</strong> the Marblo course — double the 25% early-bird discount.</p>
         <h2 style="font-size:17px;margin:24px 0 8px">4. Community</h2>
@@ -1102,8 +1126,9 @@ function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
         "",
         `1. Get the beta: ${downloadUrl}`,
         "",
-        `2. Feedback (required, within 3 days): ${feedbackUrl}`,
-        "   Submitting earns 3 months of Pro free (6 months with an interview).",
+        `2. Beta survey: ${feedbackUrl}`,
+        "   Thoughtful responses that pass rubric review earn 3 months of Pro free.",
+        "   Top responses may be invited to a video interview; completion extends Pro to 6 months total.",
         "",
         `3. 50% off the course — coupon code: ${coupon} (double the 25% early-bird discount).`,
         "",
@@ -1126,9 +1151,9 @@ function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
         <p>あなたは Marblo のファウンダーに選ばれました。ファウンダーは初日から Marblo を形づくる存在です。ご参加ありがとうございます。</p>
         <h2 style="font-size:17px;margin:24px 0 8px">1. ベータ版を入手</h2>
         <p>こちらからダウンロード: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
-        <h2 style="font-size:17px;margin:24px 0 8px">2. フィードバック（必須・3日以内）</h2>
-        <p><strong>3日以内</strong>にご提出ください: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
-        提出すると <strong>Pro 3ヶ月無料</strong>（インタビューに応じると6ヶ月）。</p>
+        <h2 style="font-size:17px;margin:24px 0 8px">2. 1ヶ月ベータ後のアンケート</h2>
+        <p>ベータアンケートはこちら: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
+        ルーブリック審査を通過した丁寧な回答には <strong>Pro 3ヶ月無料</strong> を付与します。上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を <strong>合計6ヶ月</strong> に延長します。</p>
         <h2 style="font-size:17px;margin:24px 0 8px">3. 講座 50% 割引</h2>
         <p>チェックアウトでクーポンコード <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> を入力すると講座が <strong>50% OFF</strong> — アーリーバード 25% の2倍です。</p>
         <h2 style="font-size:17px;margin:24px 0 8px">4. コミュニティ</h2>
@@ -1141,8 +1166,9 @@ function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
         "",
         `1. ベータ版を入手: ${downloadUrl}`,
         "",
-        `2. フィードバック（必須・3日以内）: ${feedbackUrl}`,
-        "   提出すると Pro 3ヶ月無料（インタビューで6ヶ月）。",
+        `2. ベータアンケート: ${feedbackUrl}`,
+        "   ルーブリック審査を通過した丁寧な回答には Pro 3ヶ月無料を付与します。",
+        "   上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を合計6ヶ月に延長します。",
         "",
         `3. 講座 50% 割引 — クーポンコード: ${coupon}（アーリーバード 25% の2倍）。`,
         "",
@@ -1165,9 +1191,9 @@ function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
       <p>마블로의 파운더로 선정되신 것을 축하드립니다. 파운더는 첫날부터 마블로를 함께 만들어가는 분들입니다. 함께해 주셔서 감사합니다.</p>
       <h2 style="font-size:17px;margin:24px 0 8px">1. 베타 접근</h2>
       <p>여기에서 마블로를 다운로드하세요: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
-      <h2 style="font-size:17px;margin:24px 0 8px">2. 피드백 (필수, 3일 이내)</h2>
-      <p><strong>3일 이내</strong>에 피드백을 제출해 주세요: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
-      제출하시면 <strong>Pro 3개월</strong>을 무료로 드립니다 (인터뷰까지 참여 시 6개월).</p>
+      <h2 style="font-size:17px;margin:24px 0 8px">2. 1개월 베타 후 설문</h2>
+      <p>베타 설문은 여기에서 제출해 주세요: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
+      루브릭 검토를 통과한 성실 응답에는 <strong>Pro 3개월</strong>을 무료로 드립니다. 상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 <strong>총 6개월</strong>로 연장합니다.</p>
       <h2 style="font-size:17px;margin:24px 0 8px">3. 강의 50% 할인 쿠폰</h2>
       <p>체크아웃에서 쿠폰 코드 <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> 를 입력하시면 강의가 <strong>50% 할인</strong>됩니다 — 얼리버드 25%의 2배 혜택입니다.</p>
       <h2 style="font-size:17px;margin:24px 0 8px">4. 커뮤니티</h2>
@@ -1180,8 +1206,9 @@ function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
       "",
       `1. 베타 접근(다운로드): ${downloadUrl}`,
       "",
-      `2. 피드백 (필수, 3일 이내): ${feedbackUrl}`,
-      "   제출 시 Pro 3개월 무료 (인터뷰까지 참여 시 6개월).",
+      `2. 베타 설문: ${feedbackUrl}`,
+      "   루브릭 검토를 통과한 성실 응답에는 Pro 3개월을 무료로 드립니다.",
+      "   상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 총 6개월로 연장합니다.",
       "",
       `3. 강의 50% 할인 — 쿠폰 코드: ${coupon} (얼리버드 25%의 2배).`,
       "",
@@ -1260,7 +1287,7 @@ async function lookupFounderLocale(email: string): Promise<string> {
 }
 
 // 파운더 선정 (관리자용) — waitlist 이메일을 founders 로 승격.
-// accessGrantedAt 이 3일 피드백 윈도우의 기준. resetWindow=true 면 윈도우 재시작.
+// accessGrantedAt 이 1개월 베타 시작 기준. resetWindow=true 면 베타 기간 재시작.
 export const markFounderSelected = functions.https.onCall(
   async (data, context) => {
     requireAdmin(context);
@@ -1273,8 +1300,11 @@ export const markFounderSelected = functions.https.onCall(
       );
     }
 
-    const ref = db.collection("founders").doc(email);
+    const ref = db.collection(FOUNDERS_COLLECTION).doc(email);
     const snap = await ref.get();
+    const resetWindow = data?.resetWindow === true;
+    const betaStartedAt = new Date();
+    let betaExpiresAt = addMonths(betaStartedAt, FOUNDER_BETA_MONTHS);
 
     const update: Record<string, unknown> = {
       email,
@@ -1284,12 +1314,17 @@ export const markFounderSelected = functions.https.onCall(
     if (!snap.exists) {
       update.selectedAt = admin.firestore.FieldValue.serverTimestamp();
     }
-    if (
-      !snap.exists ||
-      !snap.data()?.accessGrantedAt ||
-      data?.resetWindow === true
-    ) {
+    if (!snap.exists || !snap.data()?.accessGrantedAt || resetWindow) {
       update.accessGrantedAt = admin.firestore.FieldValue.serverTimestamp();
+      update.betaExpiresAt = admin.firestore.Timestamp.fromDate(betaExpiresAt);
+    } else {
+      const existingBetaExpiresAt = snap.data()?.betaExpiresAt;
+      if (
+        existingBetaExpiresAt &&
+        typeof existingBetaExpiresAt.toDate === "function"
+      ) {
+        betaExpiresAt = existingBetaExpiresAt.toDate();
+      }
     }
     await ref.set(update, { merge: true });
 
@@ -1305,7 +1340,12 @@ export const markFounderSelected = functions.https.onCall(
       { merge: true },
     );
 
-    return { ok: true, email, emailSent };
+    return {
+      ok: true,
+      email,
+      emailSent,
+      betaExpiresAt: betaExpiresAt.toISOString(),
+    };
   },
 );
 
@@ -1323,7 +1363,7 @@ export const resendFounderAccessEmail = functions.https.onCall(
     }
     const locale = await lookupFounderLocale(email);
     const emailSent = await sendFounderAccessEmail(email, locale);
-    await db.collection("founders").doc(email).set(
+    await db.collection(FOUNDERS_COLLECTION).doc(email).set(
       {
         accessEmailSent: emailSent,
         accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1489,7 +1529,123 @@ export const sendApplyConfirmOnWaitlist = functions.firestore
     }
   });
 
-// 구조화 피드백 제출 (파운더 본인) — 검증 후 저장 + Pro 3개월 직접 부여.
+function parseFounderSurveyAnswers(raw: unknown): FounderSurveyAnswers {
+  if (!raw || typeof raw !== "object") {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "설문 답변이 필요합니다.",
+    );
+  }
+  const answers = raw as Record<string, unknown>;
+  const str = (v: unknown): string =>
+    typeof v === "string" ? v.trim().slice(0, FOUNDER_FIELD_MAX) : "";
+  const parsed: FounderSurveyAnswers = {
+    q1: str(answers.q1),
+    q2: str(answers.q2),
+    q3: str(answers.q3),
+    q4: str(answers.q4),
+    q5: str(answers.q5),
+    q6: str(answers.q6),
+    q7: str(answers.q7),
+  };
+  const missing = Object.entries(parsed)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+  if (missing.length > 0) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      `필수 7문항을 모두 입력해 주세요. 누락: ${missing.join(", ")}`,
+    );
+  }
+  return parsed;
+}
+
+function parseFounderRubricScore(raw: unknown): FounderRubricScore {
+  if (!raw || typeof raw !== "object") {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "rubricScore is required",
+    );
+  }
+  const input = raw as Record<string, unknown>;
+  const dimension = (key: keyof Omit<FounderRubricScore, "total">): number => {
+    const value = input[key];
+    if (
+      typeof value !== "number" ||
+      !Number.isInteger(value) ||
+      value < 0 ||
+      value > 3
+    ) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        `${key} must be an integer from 0 to 3`,
+      );
+    }
+    return value;
+  };
+  const specificity = dimension("specificity");
+  const usageEvidence = dimension("usageEvidence");
+  const insightQuality = dimension("insightQuality");
+  const actionability = dimension("actionability");
+  const icpFit = dimension("icpFit");
+  const total =
+    specificity * 2 +
+    usageEvidence * 2 +
+    insightQuality +
+    actionability +
+    icpFit;
+
+  const suppliedTotal = input.total;
+  if (
+    suppliedTotal !== undefined &&
+    (!Number.isInteger(suppliedTotal) || suppliedTotal !== total)
+  ) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      `rubricScore.total must equal ${total}`,
+    );
+  }
+
+  return {
+    total,
+    specificity,
+    usageEvidence,
+    insightQuality,
+    actionability,
+    icpFit,
+  };
+}
+
+async function getFounderFeedbackBySelector(
+  selector: unknown,
+): Promise<admin.firestore.DocumentSnapshot | null> {
+  if (!selector || typeof selector !== "object") return null;
+  const data = selector as Record<string, unknown>;
+  if (typeof data.feedbackId === "string" && data.feedbackId.trim()) {
+    const snap = await db
+      .collection(FOUNDER_FEEDBACK_COLLECTION)
+      .doc(data.feedbackId.trim())
+      .get();
+    return snap.exists ? snap : null;
+  }
+  const email =
+    typeof data.email === "string" ? normalizeEmail(data.email) : "";
+  if (!email) return null;
+  const snap = await db
+    .collection(FOUNDER_FEEDBACK_COLLECTION)
+    .where("email", "==", email)
+    .get();
+  if (snap.empty) return null;
+  const toMillis = (x: unknown): number =>
+    x && typeof (x as { toMillis?: unknown }).toMillis === "function"
+      ? (x as { toMillis: () => number }).toMillis()
+      : 0;
+  return snap.docs.reduce((a, b) =>
+    toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a,
+  );
+}
+
+// 구조화 설문 제출 (파운더 본인) — 검증 후 7문항 저장. 보상은 운영자 채점 후 확정.
 export const submitFounderFeedback = functions.https.onCall(
   async (data, context) => {
     const uid = context.auth?.uid;
@@ -1508,40 +1664,12 @@ export const submitFounderFeedback = functions.https.onCall(
       );
     }
     const email = normalizeEmail(token.email);
-
-    const answers = data?.answers;
-    if (!answers || typeof answers !== "object") {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "피드백 내용이 필요합니다.",
-      );
-    }
-    const str = (v: unknown): string =>
-      typeof v === "string" ? v.trim().slice(0, FOUNDER_FIELD_MAX) : "";
-    const q1 = str(answers.q1); // 무엇을 하려 했나
-    const q2 = str(answers.q2); // 좋았던 점
-    const q3 = str(answers.q3); // 내 문제를 해결한 점 (선택)
-    const q4 = str(answers.q4); // 막히거나 아쉬운 점
-    const q5 = str(answers.q5); // 있었으면 하는 것
-    const reason = str(answers.reason); // 점수 이유
-    const rating = Number(answers.rating);
-    if (!q1 || !q2 || !q4 || !q5 || !reason) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "필수 문항(①②④⑤⑥)을 모두 입력해 주세요.",
-      );
-    }
-    if (!Number.isInteger(rating) || rating < 1 || rating > 10) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "점수는 1~10 사이여야 합니다.",
-      );
-    }
-
-    const fRef = db.collection("founders").doc(email);
+    const answers = parseFounderSurveyAnswers(data?.answers);
+    const fRef = db.collection(FOUNDERS_COLLECTION).doc(email);
+    let betaExpiresAt: admin.firestore.Timestamp | null = null;
 
     // 트랜잭션으로 선정·윈도우·중복제출 검증 + 제출 마킹을 원자적으로 처리
-    // (중복 클릭에 의한 이중 부여 방지).
+    // (중복 클릭에 의한 중복 설문 방지).
     await db.runTransaction(async (tx) => {
       const s = await tx.get(fRef);
       if (!s.exists || s.data()?.status === "rejected") {
@@ -1554,7 +1682,7 @@ export const submitFounderFeedback = functions.https.onCall(
       if (fd.feedbackSubmittedAt) {
         throw new functions.https.HttpsError(
           "already-exists",
-          "이미 피드백을 제출하셨습니다.",
+          "이미 설문을 제출하셨습니다.",
         );
       }
       const granted =
@@ -1567,15 +1695,12 @@ export const submitFounderFeedback = functions.https.onCall(
           "접근 권한이 아직 부여되지 않았습니다.",
         );
       }
-      const deadline = new Date(
-        granted.getTime() + FOUNDER_FEEDBACK_WINDOW_DAYS * 24 * 60 * 60 * 1000,
-      );
-      if (new Date() > deadline) {
-        throw new functions.https.HttpsError(
-          "deadline-exceeded",
-          "피드백 제출 기한(접근 후 3일)이 지났습니다.",
-        );
-      }
+      betaExpiresAt =
+        fd.betaExpiresAt && typeof fd.betaExpiresAt.toDate === "function"
+          ? fd.betaExpiresAt
+          : admin.firestore.Timestamp.fromDate(
+              addMonths(granted, FOUNDER_BETA_MONTHS),
+            );
       tx.set(
         fRef,
         {
@@ -1588,27 +1713,31 @@ export const submitFounderFeedback = functions.https.onCall(
       );
     });
 
-    // 피드백 저장 + Pro 3개월 부여
-    const fbRef = await db.collection("founder_feedback").add({
+    const fbRef = await db.collection(FOUNDER_FEEDBACK_COLLECTION).add({
       email,
       userId: uid,
-      locale: typeof data?.locale === "string" ? data.locale : null,
-      answers: { q1, q2, q3, q4, q5, reason },
-      rating,
-      consentQuote: answers.consentQuote === true,
+      locale: normalizeFounderLocale(
+        typeof data?.locale === "string" ? data.locale : "ko",
+      ),
+      answers,
+      rubricScore: null,
+      reviewedBy: null,
+      reviewedAt: null,
+      proGrantedMonths: 0,
+      interviewRequested: false,
+      interviewRequestedAt: null,
+      interviewCompleted: false,
+      interviewCompletedAt: null,
+      betaExpiresAt,
+      proExpiresAt: null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-
-    const periodEnd = await grantFounderProInternal(
-      uid,
-      FOUNDER_PRO_MONTHS,
-      "founder_feedback",
-    );
 
     await fRef.set(
       {
         feedbackId: fbRef.id,
-        proGrantedMonths: FOUNDER_PRO_MONTHS,
+        betaExpiresAt,
+        proGrantedMonths: 0,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true },
@@ -1616,8 +1745,11 @@ export const submitFounderFeedback = functions.https.onCall(
 
     return {
       ok: true,
-      proMonths: FOUNDER_PRO_MONTHS,
-      currentPeriodEnd: periodEnd.toISOString(),
+      feedbackId: fbRef.id,
+      status: "pending_review",
+      betaExpiresAt: betaExpiresAt
+        ? (betaExpiresAt as admin.firestore.Timestamp).toDate().toISOString()
+        : null,
     };
   },
 );
@@ -1636,66 +1768,289 @@ export const getMyFounderAccess = functions.https.onCall(
       );
     }
     const email = normalizeEmail(token.email);
-    const snap = await db.collection("founders").doc(email).get();
+    const snap = await db.collection(FOUNDERS_COLLECTION).doc(email).get();
     const fd = snap.exists ? snap.data() : null;
     // 선정 = accessGrantedAt 존재 + rejected 아님 (submitFounderFeedback 과 동일 기준).
     const accessGrantedAt =
       fd && fd.status !== "rejected" ? tsToIso(fd.accessGrantedAt) : null;
-    return { hasAccess: !!accessGrantedAt, accessGrantedAt };
+    const betaExpiresAt =
+      fd && fd.status !== "rejected" ? tsToIso(fd.betaExpiresAt) : null;
+    return { hasAccess: !!accessGrantedAt, accessGrantedAt, betaExpiresAt };
   },
 );
 
-// 인터뷰 완료 마킹 (관리자용) — Pro +3개월 연장 (총 6). 피드백 제출로 계정이
-// 연결(userId)된 파운더만 대상.
+// 루브릭 채점 및 Pro 3개월 지급 확정 (관리자용).
+export const reviewFounderFeedback = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const feedbackSnap = await getFounderFeedbackBySelector(data);
+    if (!feedbackSnap?.exists) {
+      throw new functions.https.HttpsError("not-found", "feedback not found");
+    }
+    const feedback = feedbackSnap.data() as Record<string, unknown>;
+    const userId = typeof feedback.userId === "string" ? feedback.userId : "";
+    const email =
+      typeof feedback.email === "string" ? normalizeEmail(feedback.email) : "";
+    if (!userId || !email) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "feedback is missing userId or email",
+      );
+    }
+
+    const rubricScore = parseFounderRubricScore(data?.rubricScore);
+    const grantPro =
+      rubricScore.total >= FOUNDER_PRO_RUBRIC_MIN_TOTAL ||
+      data?.overrideGrantPro === true;
+    const existingGranted =
+      typeof feedback.proGrantedMonths === "number"
+        ? feedback.proGrantedMonths
+        : 0;
+    const grantStartedAt =
+      feedback.createdAt &&
+      typeof (feedback.createdAt as { toDate?: unknown }).toDate === "function"
+        ? (feedback.createdAt as { toDate: () => Date }).toDate()
+        : new Date();
+
+    let proExpiresAt: Date | null = null;
+    if (grantPro && existingGranted < FOUNDER_PRO_MONTHS) {
+      proExpiresAt = await grantFounderProTotalInternal(
+        userId,
+        FOUNDER_PRO_MONTHS,
+        "founder_survey_rubric",
+        grantStartedAt,
+      );
+    } else {
+      proExpiresAt =
+        feedback.proExpiresAt &&
+        typeof (feedback.proExpiresAt as { toDate?: unknown }).toDate ===
+          "function"
+          ? (feedback.proExpiresAt as { toDate: () => Date }).toDate()
+          : null;
+    }
+
+    const update: Record<string, unknown> = {
+      rubricScore,
+      reviewedBy: context.auth?.uid ?? null,
+      reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (grantPro) {
+      update.proGrantedMonths = Math.max(existingGranted, FOUNDER_PRO_MONTHS);
+      update.proExpiresAt = proExpiresAt
+        ? admin.firestore.Timestamp.fromDate(proExpiresAt)
+        : null;
+    }
+    await feedbackSnap.ref.set(update, { merge: true });
+
+    await db.collection(FOUNDERS_COLLECTION).doc(email).set(
+      {
+        status: grantPro ? "pro_granted" : "survey_reviewed",
+        rubricScore,
+        feedbackId: feedbackSnap.id,
+        proGrantedMonths: grantPro
+          ? Math.max(existingGranted, FOUNDER_PRO_MONTHS)
+          : existingGranted,
+        proExpiresAt: proExpiresAt
+          ? admin.firestore.Timestamp.fromDate(proExpiresAt)
+          : null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return {
+      ok: true,
+      feedbackId: feedbackSnap.id,
+      grantPro,
+      proMonths: grantPro
+        ? Math.max(existingGranted, FOUNDER_PRO_MONTHS)
+        : existingGranted,
+      proExpiresAt: proExpiresAt?.toISOString() ?? null,
+    };
+  },
+);
+
+// 루브릭 상위 응답자 조회 (관리자용). 복합 인덱스 부담을 줄이기 위해 점수 필터는
+// 메모리에서 적용하되, 운영용 표본 한도만 둔다.
+export const listTopFounderFeedback = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const limit =
+      typeof data?.limit === "number" && Number.isInteger(data.limit)
+        ? Math.min(Math.max(data.limit, 1), 100)
+        : 10;
+    const minScore =
+      typeof data?.minScore === "number"
+        ? data.minScore
+        : FOUNDER_INTERVIEW_MIN_TOTAL;
+    const snap = await db.collection(FOUNDER_FEEDBACK_COLLECTION).limit(1000).get();
+    const items = snap.docs
+      .map((doc) => {
+        const v = doc.data() as Record<string, unknown>;
+        const score = v.rubricScore as Record<string, unknown> | undefined;
+        return {
+          id: doc.id,
+          userId: typeof v.userId === "string" ? v.userId : "",
+          email: typeof v.email === "string" ? v.email : "",
+          locale: typeof v.locale === "string" ? v.locale : null,
+          rubricScore: score ?? null,
+          total:
+            score && typeof score.total === "number"
+              ? score.total
+              : Number.NEGATIVE_INFINITY,
+          usageEvidence:
+            score && typeof score.usageEvidence === "number"
+              ? score.usageEvidence
+              : 0,
+          actionability:
+            score && typeof score.actionability === "number"
+              ? score.actionability
+              : 0,
+          icpFit:
+            score && typeof score.icpFit === "number" ? score.icpFit : 0,
+          interviewRequested: v.interviewRequested === true,
+          interviewCompleted: v.interviewCompleted === true,
+          createdAt: tsToIso(v.createdAt),
+          reviewedAt: tsToIso(v.reviewedAt),
+        };
+      })
+      .filter((item) => item.total >= minScore)
+      .sort((a, b) => {
+        if (b.total !== a.total) return b.total - a.total;
+        if (b.icpFit !== a.icpFit) return b.icpFit - a.icpFit;
+        if (b.usageEvidence !== a.usageEvidence) {
+          return b.usageEvidence - a.usageEvidence;
+        }
+        return b.actionability - a.actionability;
+      })
+      .slice(0, limit);
+    return { items };
+  },
+);
+
+// 인터뷰 요청 마킹 (관리자용). 점수만으로 자동 선정하지 않고 운영자 명시 호출만 허용.
+export const requestFounderInterview = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const feedbackSnap = await getFounderFeedbackBySelector(data);
+    if (!feedbackSnap?.exists) {
+      throw new functions.https.HttpsError("not-found", "feedback not found");
+    }
+    const feedback = feedbackSnap.data() as Record<string, unknown>;
+    const email =
+      typeof feedback.email === "string" ? normalizeEmail(feedback.email) : "";
+    if (!email) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "feedback is missing email",
+      );
+    }
+    await feedbackSnap.ref.set(
+      {
+        interviewRequested: true,
+        interviewRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    await db.collection(FOUNDERS_COLLECTION).doc(email).set(
+      {
+        status: "interview_requested",
+        interviewRequested: true,
+        interviewRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return { ok: true, feedbackId: feedbackSnap.id };
+  },
+);
+
+// 인터뷰 완료 마킹 (관리자용) — 요청받은 사용자의 Pro를 총 6개월로 연장.
+// 피드백 제출로 계정이 연결(userId)된 파운더만 대상.
 export const markFounderInterviewed = functions.https.onCall(
   async (data, context) => {
     requireAdmin(context);
+    const feedbackSnap = await getFounderFeedbackBySelector(data);
+    if (!feedbackSnap?.exists) {
+      throw new functions.https.HttpsError("not-found", "feedback not found");
+    }
+    const feedback = feedbackSnap.data() as Record<string, unknown>;
     const email =
-      typeof data?.email === "string" ? normalizeEmail(data.email) : "";
+      typeof feedback.email === "string" ? normalizeEmail(feedback.email) : "";
     if (!email) {
       throw new functions.https.HttpsError(
-        "invalid-argument",
-        "email required",
+        "failed-precondition",
+        "feedback is missing email",
       );
     }
-    const fRef = db.collection("founders").doc(email);
+    const fRef = db.collection(FOUNDERS_COLLECTION).doc(email);
     const fSnap = await fRef.get();
     if (!fSnap.exists) {
       throw new functions.https.HttpsError("not-found", "founder not found");
     }
     const f = fSnap.data()!;
-    const uid = f.userId;
+    const uid =
+      typeof feedback.userId === "string"
+        ? feedback.userId
+        : typeof f.userId === "string"
+          ? f.userId
+          : "";
     if (!uid) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "피드백 제출 전이라 계정이 연결되지 않았습니다. 피드백 제출 후 진행하세요.",
+        "설문 제출 전이라 계정이 연결되지 않았습니다. 설문 제출 후 진행하세요.",
       );
     }
-    if (f.interviewedAt) {
+    if (feedback.interviewCompleted === true || f.interviewCompleted === true) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "이미 인터뷰 보너스가 적용되었습니다.",
+        "이미 인터뷰 보상이 적용되었습니다.",
       );
     }
-    const periodEnd = await grantFounderProInternal(
+    if (feedback.interviewRequested !== true && f.interviewRequested !== true) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "인터뷰 요청 대상자만 완료 처리할 수 있습니다.",
+      );
+    }
+    const grantStartedAt =
+      feedback.createdAt &&
+      typeof (feedback.createdAt as { toDate?: unknown }).toDate === "function"
+        ? (feedback.createdAt as { toDate: () => Date }).toDate()
+        : new Date();
+    const periodEnd = await grantFounderProTotalInternal(
       uid,
-      FOUNDER_INTERVIEW_BONUS_MONTHS,
+      FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
       "founder_interview",
+      grantStartedAt,
+    );
+    await feedbackSnap.ref.set(
+      {
+        interviewCompleted: true,
+        interviewCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
+        proGrantedMonths: FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
+        proExpiresAt: admin.firestore.Timestamp.fromDate(periodEnd),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
     );
     await fRef.set(
       {
         status: "interviewed",
+        interviewCompleted: true,
+        interviewCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
         interviewedAt: admin.firestore.FieldValue.serverTimestamp(),
-        proGrantedMonths:
-          (typeof f.proGrantedMonths === "number" ? f.proGrantedMonths : 0) +
-          FOUNDER_INTERVIEW_BONUS_MONTHS,
+        proGrantedMonths: FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
+        proExpiresAt: admin.firestore.Timestamp.fromDate(periodEnd),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
     return {
       ok: true,
-      bonusMonths: FOUNDER_INTERVIEW_BONUS_MONTHS,
+      proMonths: FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
       currentPeriodEnd: periodEnd.toISOString(),
     };
   },
@@ -1746,16 +2101,23 @@ export const getFounderWaitlist = functions.https.onCall(
 // 파운더 현황(어드민) — founders 컬렉션 전체 요약. 상태·시각·Pro개월 등.
 export const listFounders = functions.https.onCall(async (_data, context) => {
   requireAdmin(context);
-  const snap = await db.collection("founders").limit(1000).get();
+  const snap = await db.collection(FOUNDERS_COLLECTION).limit(1000).get();
   const items = snap.docs.map((d) => {
     const v = d.data() as Record<string, unknown>;
     const feedbackId = typeof v.feedbackId === "string" ? v.feedbackId : null;
+    const score = v.rubricScore as Record<string, unknown> | undefined;
     return {
       email: typeof v.email === "string" ? v.email : d.id,
       status: typeof v.status === "string" ? v.status : null,
       accessGrantedAt: tsToIso(v.accessGrantedAt),
+      betaExpiresAt: tsToIso(v.betaExpiresAt),
       feedbackSubmittedAt: tsToIso(v.feedbackSubmittedAt),
-      interviewedAt: tsToIso(v.interviewedAt),
+      rubricScore: score ?? null,
+      interviewRequested: v.interviewRequested === true,
+      interviewRequestedAt: tsToIso(v.interviewRequestedAt),
+      interviewCompleted: v.interviewCompleted === true,
+      interviewCompletedAt: tsToIso(v.interviewCompletedAt),
+      proExpiresAt: tsToIso(v.proExpiresAt),
       proGrantedMonths:
         typeof v.proGrantedMonths === "number" ? v.proGrantedMonths : 0,
       feedbackId,
@@ -1765,7 +2127,7 @@ export const listFounders = functions.https.onCall(async (_data, context) => {
   return { items };
 });
 
-// 이메일별 6문항 피드백 열람(어드민) — founder_feedback 최신 1건.
+// 이메일별 7문항 설문 열람(어드민) — founder_feedback 최신 1건.
 export const getFounderFeedbackByEmail = functions.https.onCall(
   async (data, context) => {
     requireAdmin(context);
@@ -1781,7 +2143,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
     // 선례: src/services/chatService.ts subscribeToMessages. createdAt 은 Firestore
     // Timestamp 이거나 undefined 일 수 있어 toMillis 가드로 안전 비교 후 최신 1건 선택.
     const snap = await db
-      .collection("founder_feedback")
+      .collection(FOUNDER_FEEDBACK_COLLECTION)
       .where("email", "==", email)
       .get();
     if (snap.empty) {
@@ -1799,16 +2161,30 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
     const str = (x: unknown): string => (typeof x === "string" ? x : "");
     return {
       feedback: {
+        id: latest.id,
+        userId: typeof v.userId === "string" ? v.userId : null,
+        email: typeof v.email === "string" ? v.email : null,
+        locale: typeof v.locale === "string" ? v.locale : null,
         answers: {
           q1: str(a.q1),
           q2: str(a.q2),
           q3: str(a.q3),
           q4: str(a.q4),
           q5: str(a.q5),
-          reason: str(a.reason),
+          q6: str(a.q6),
+          q7: str(a.q7),
         },
-        rating: typeof v.rating === "number" ? v.rating : null,
-        consentQuote: v.consentQuote === true,
+        rubricScore: v.rubricScore ?? null,
+        reviewedBy: typeof v.reviewedBy === "string" ? v.reviewedBy : null,
+        reviewedAt: tsToIso(v.reviewedAt),
+        proGrantedMonths:
+          typeof v.proGrantedMonths === "number" ? v.proGrantedMonths : 0,
+        betaExpiresAt: tsToIso(v.betaExpiresAt),
+        proExpiresAt: tsToIso(v.proExpiresAt),
+        interviewRequested: v.interviewRequested === true,
+        interviewRequestedAt: tsToIso(v.interviewRequestedAt),
+        interviewCompleted: v.interviewCompleted === true,
+        interviewCompletedAt: tsToIso(v.interviewCompletedAt),
         createdAt: tsToIso(v.createdAt),
       },
     };
