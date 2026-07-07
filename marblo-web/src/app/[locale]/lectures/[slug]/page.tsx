@@ -383,7 +383,7 @@ export default function LectureDetailPage() {
           </div>
           <div className="rounded-2xl border border-zinc-700/50 overflow-hidden shadow-2xl shadow-indigo-900/10">
             <Image
-              src="/images/agent-dashboard.png"
+              src="/images/orchestration-demo.webp"
               alt="Marblo Agent Dashboard"
               width={2560}
               height={1440}

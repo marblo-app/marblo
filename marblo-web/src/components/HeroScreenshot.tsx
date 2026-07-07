@@ -75,7 +75,7 @@ export default function HeroScreenshot() {
           {/* Screenshot */}
           <div className="relative w-full bg-zinc-900">
             <Image
-              src="/images/hero-screenshot.png"
+              src="/images/product-demo.webp"
               alt="Marblo v3 App Screenshot"
               width={2560}
               height={1440}
@@ -103,7 +103,7 @@ export default function HeroScreenshot() {
             onClick={(e) => e.stopPropagation()}
           >
             <Image
-              src="/images/hero-screenshot.png"
+              src="/images/product-demo.webp"
               alt="Marblo v3 App Screenshot"
               width={2560}
               height={1440}
