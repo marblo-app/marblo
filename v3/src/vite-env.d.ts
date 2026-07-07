@@ -48,6 +48,13 @@ interface FsAPI {
     toPath: string,
   ) => Promise<{ success: boolean; fromPath: string; toPath: string }>;
   revealInFinder: (targetPath: string) => Promise<{ success: boolean }>;
+  readFileBase64: (filePath: string) => Promise<string>;
+  getPathForFile: (file: File) => string;
+  importPaths: (args: {
+    rootPath: string;
+    destDir: string;
+    srcPaths: string[];
+  }) => Promise<{ success: boolean; imported: string[] }>;
 }
 
 interface PtyAPI {

@@ -4,7 +4,9 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { EditorTabs } from "../code/EditorTabs";
 import { CodeEditor } from "../code/CodeEditor";
+import { ImagePreview } from "../code/ImagePreview";
 import { DiffViewer } from "../code/DiffViewer";
+import { isImageFile } from "../../lib/imageFiles";
 import { useTranslation } from "../../lib/i18n";
 
 export function CodeTab() {
@@ -103,6 +105,12 @@ export function CodeTab() {
               filePath={activeFile.path}
               language={activeFile.language}
               currentContent={activeFile.content}
+            />
+          ) : isImageFile(activeFile.path) ? (
+            <ImagePreview
+              filePath={activeFile.path}
+              content={activeFile.content}
+              language={activeFile.language}
             />
           ) : (
             <CodeEditor

@@ -2330,6 +2330,51 @@ ipcMain.handle(
   },
 );
 
+// Read a file as base64 — used by the Code tab's ImagePreview to render raster
+// images (png/jpg/webp/…), whose bytes are meaningless as utf-8 text.
+ipcMain.handle("fs:readFileBase64", async (_event, filePath: string) => {
+  const buf = await fs.promises.readFile(filePath);
+  return buf.toString("base64");
+});
+
+// Import external OS files (e.g. dragged from Finder) into a project directory.
+// srcPaths are arbitrary absolute paths; destDir must live under rootPath
+// (fsGuard). Existing names are de-duped with a " copy" suffix rather than
+// clobbered. Copies recursively so dropped folders come in whole.
+ipcMain.handle(
+  "fs:importPaths",
+  async (
+    _event,
+    {
+      rootPath,
+      destDir,
+      srcPaths,
+    }: { rootPath: string; destDir: string; srcPaths: string[] },
+  ) => {
+    fsGuard(rootPath, destDir);
+    const imported: string[] = [];
+    for (const src of srcPaths) {
+      if (!src) continue;
+      let dest = path.join(destDir, path.basename(src));
+      if (fs.existsSync(dest)) {
+        const ext = path.extname(dest);
+        const base = path.basename(dest, ext);
+        let i = 1;
+        do {
+          dest = path.join(
+            destDir,
+            `${base} copy${i > 1 ? ` ${i}` : ""}${ext}`,
+          );
+          i += 1;
+        } while (fs.existsSync(dest));
+      }
+      await fs.promises.cp(src, dest, { recursive: true, errorOnExist: false });
+      imported.push(dest);
+    }
+    return { success: true, imported };
+  },
+);
+
 ipcMain.handle("fs:revealInFinder", (_event, targetPath: string) => {
   shell.showItemInFolder(targetPath);
   return { success: true };

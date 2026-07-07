@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const isNewWindow = process.argv.includes("--marblo-new-window=1");
 
@@ -540,6 +540,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("fs:copy", { rootPath, fromPath, toPath }),
     revealInFinder: (targetPath: string) =>
       ipcRenderer.invoke("fs:revealInFinder", targetPath),
+    readFileBase64: (filePath: string): Promise<string> =>
+      ipcRenderer.invoke("fs:readFileBase64", filePath),
+    // Electron 32+ removed File.path; webUtils.getPathForFile is the supported
+    // way to resolve a dropped file's absolute path (called from preload).
+    getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+    importPaths: (args: {
+      rootPath: string;
+      destDir: string;
+      srcPaths: string[];
+    }): Promise<{ success: boolean; imported: string[] }> =>
+      ipcRenderer.invoke("fs:importPaths", args),
   },
   // 프로젝트↔repo 연결 단일 진실원 (연동 T1). T2/T3 가 소비하는 읽기 인터페이스.
   connection: {

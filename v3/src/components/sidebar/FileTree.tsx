@@ -220,6 +220,13 @@ function FileTreeNode({
 
   const handleDragOver = (e: React.DragEvent) => {
     if (node.type !== "directory") return;
+    // OS file drop (Finder → directory): copy semantics
+    if (e.dataTransfer.types.includes("Files")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      if (!dragOver) setDragOver(true);
+      return;
+    }
     const sourcePath = e.dataTransfer.types.includes(
       "text/marblo-filetree-path",
     );
@@ -235,6 +242,24 @@ function FileTreeNode({
 
   const handleDrop = async (e: React.DragEvent) => {
     if (node.type !== "directory") return;
+    // OS file drop (Finder → directory): import into this folder
+    if (e.dataTransfer.files.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      const srcPaths = Array.from(e.dataTransfer.files)
+        .map((f) => window.electronAPI.fs.getPathForFile(f))
+        .filter(Boolean);
+      const rootPath = useEditorStore.getState().rootPath;
+      if (rootPath && srcPaths.length) {
+        await window.electronAPI.fs.importPaths({
+          rootPath,
+          destDir: node.path,
+          srcPaths,
+        });
+      }
+      return; // fs watcher가 트리 자동 갱신
+    }
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
