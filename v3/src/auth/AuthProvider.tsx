@@ -49,7 +49,7 @@ const AUTH_INIT_TIMEOUT_MS = 10_000;
 // Ticket XscLxYM75DR9ou52o7Za — the previous "무반응" regression was impossible
 // to triage because there was no way to tell whether the packaged app even ran
 // the redirect code path or a stale popup build.
-const AUTH_BUILD_TAG = "google-login=redirect-v2";
+const AUTH_BUILD_TAG = "google-login=redirect-v3-idb-heartbeat-fix";
 
 // If signInWithRedirect neither navigates the window away nor rejects within
 // this window, its pending-redirect persistence write has silently hung (the
@@ -217,11 +217,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         result.idToken,
         result.accessToken,
       );
+      // Timing marker (ticket kjqOupLBNbkL1MOziadX): the packaged-app failure was
+      // signInWithCredential hanging ~30s then throwing auth/network-request-failed
+      // because the SDK's heartbeat header prep read a hung IndexedDB on the
+      // 127.0.0.1 origin (fixed in lib/firebase.ts by neutralizing IndexedDB).
+      // A sub-second elapsed here is the proof the fix took; a ~30000ms elapsed
+      // followed by network-request-failed means the guard did not apply.
+      const t0 = Date.now();
       await signInWithCredential(auth, credential);
-      console.info("[auth] loginWithGoogle: loopback signInWithCredential ok");
+      console.info(
+        `[auth] loginWithGoogle: loopback signInWithCredential ok (${
+          Date.now() - t0
+        }ms)`,
+      );
     } catch (e) {
       const code = (e as { code?: string })?.code ?? "?";
-      console.error(`[auth] loginWithGoogle: loopback caught code=${code}`, e);
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(
+        `[auth] loginWithGoogle: loopback caught code=${code} message=${message}`,
+        e,
+      );
       setError(e instanceof Error ? e.message : t("auth.error.google"));
     }
   };
