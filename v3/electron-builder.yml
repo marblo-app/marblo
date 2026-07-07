@@ -59,10 +59,11 @@ mac:
 win:
   target:
     - nsis
-  # Use the 1024x1024 PNG, not resources/icon.ico (which is only 16x16 and trips
-  # electron-builder's "icon must be at least 256x256" / ERR_ICON_TOO_SMALL guard
-  # for the nsis target). electron-builder generates a correct multi-size .ico
-  # from a >=256px PNG.
+  # Point at the 1024x1024 PNG and let electron-builder derive a correct
+  # multi-size .ico from it. resources/icon.ico is now a valid >=256 multi-size
+  # frame set (16..256), so switching win.icon to it would also satisfy the nsis
+  # "icon must be at least 256x256" / ERR_ICON_TOO_SMALL guard — but deriving
+  # from the >=256px PNG is the simplest path and needs no ImageMagick.
   icon: resources/icon.png
   # electron-builder 25 moved win.sign / signingHashAlgorithms under
   # win.signtoolOptions (the old top-level fields warn as deprecated).
