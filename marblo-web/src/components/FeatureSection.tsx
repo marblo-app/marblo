@@ -1,7 +1,14 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Check, Layout, GitBranch, Terminal, Cpu } from "lucide-react";
+import {
+  Check,
+  Layout,
+  GitCompare,
+  Terminal,
+  ArrowLeftRight,
+  Cpu,
+} from "lucide-react";
 
 /* ---------- data ---------- */
 
@@ -16,7 +23,7 @@ interface Feature {
     accent: string;
     border: string;
   };
-  visual: "kanban" | "flow" | "terminal" | "orchestration";
+  visual: "kanban" | "diff" | "terminal" | "agentnav" | "orchestration";
 }
 
 const features: Feature[] = [
@@ -34,17 +41,17 @@ const features: Feature[] = [
     visual: "kanban",
   },
   {
-    key: "flow",
-    deepKey: "deep.flow",
-    icon: GitBranch,
+    key: "ticketdiff",
+    deepKey: "deep.ticketdiff",
+    icon: GitCompare,
     color: {
-      text: "text-cyan-400",
-      bg: "bg-cyan-500/10",
-      shadow: "shadow-cyan-500/10",
-      accent: "bg-cyan-500",
-      border: "border-cyan-500/20",
+      text: "text-emerald-400",
+      bg: "bg-emerald-500/10",
+      shadow: "shadow-emerald-500/10",
+      accent: "bg-emerald-500",
+      border: "border-emerald-500/20",
     },
-    visual: "flow",
+    visual: "diff",
   },
   {
     key: "terminal",
@@ -58,6 +65,19 @@ const features: Feature[] = [
       border: "border-violet-500/20",
     },
     visual: "terminal",
+  },
+  {
+    key: "agentnav",
+    deepKey: "deep.agentnav",
+    icon: ArrowLeftRight,
+    color: {
+      text: "text-cyan-400",
+      bg: "bg-cyan-500/10",
+      shadow: "shadow-cyan-500/10",
+      accent: "bg-cyan-500",
+      border: "border-cyan-500/20",
+    },
+    visual: "agentnav",
   },
   {
     key: "orchestration",
@@ -158,43 +178,88 @@ function KanbanMockup({ color }: { color: Feature["color"] }) {
   );
 }
 
-function FlowMockup({ color }: { color: Feature["color"] }) {
-  const nodes = ["Analyze", "Tasks", "Spawn", "Review"];
+function TicketDiffMockup({ color }: { color: Feature["color"] }) {
+  const diff: { sign: string; text: string; add: boolean }[] = [
+    { sign: "+", text: "export function LoginForm() {", add: true },
+    { sign: "+", text: "  const [email, setEmail] = useState('');", add: true },
+    { sign: "-", text: "  return null;", add: false },
+    { sign: "+", text: "  return <form>…</form>;", add: true },
+  ];
   return (
-    <div className="flex flex-wrap sm:flex-nowrap items-center justify-center sm:justify-between gap-x-2 gap-y-3 h-full px-2">
-      {nodes.map((node, i) => (
-        <div key={node} className="flex items-center gap-2">
+    <div className="flex flex-col gap-3 h-full justify-center">
+      {/* Ticket header with attached agent */}
+      <div className={`rounded-lg border ${color.border} ${color.bg} p-2.5`}>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-medium text-zinc-200 truncate">
+            #142 · Add login form
+          </span>
+          <span
+            className={`flex items-center gap-1 text-[9px] font-medium shrink-0 ${color.text}`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${color.accent}`} />
+            frontend-01
+          </span>
+        </div>
+      </div>
+      {/* Inline diff */}
+      <div className="rounded-lg border border-zinc-700/60 bg-zinc-950/60 p-2.5 font-mono text-[10px] leading-5">
+        {diff.map((line, i) => (
           <div
-            className={`flex items-center justify-center rounded-xl px-3 py-2 text-xs font-medium border ${
-              i === 0 || i === 3
-                ? `${color.bg} ${color.text} ${color.border}`
-                : "bg-zinc-800 text-zinc-300 border-zinc-700"
+            key={i}
+            className={`flex gap-2 ${
+              line.add ? "text-emerald-400" : "text-rose-400/80"
             }`}
           >
-            {node}
+            <span className="select-none opacity-70">{line.sign}</span>
+            <span className="truncate">{line.text}</span>
           </div>
-          {i < nodes.length - 1 && (
-            <svg
-              width="24"
-              height="12"
-              viewBox="0 0 24 12"
-              className="shrink-0"
-            >
-              <line
-                x1="0"
-                y1="6"
-                x2="18"
-                y2="6"
-                stroke="currentColor"
-                className="text-zinc-600"
-                strokeWidth="1.5"
-              />
-              <polygon
-                points="18,2 24,6 18,10"
-                fill="currentColor"
-                className="text-zinc-600"
-              />
-            </svg>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AgentNavMockup({ color }: { color: Feature["color"] }) {
+  const agents: { name: string; task: string; active?: boolean }[] = [
+    { name: "backend-01", task: "Auth API" },
+    { name: "frontend-01", task: "LoginForm", active: true },
+    { name: "test-01", task: "Integration tests" },
+  ];
+  return (
+    <div className="flex flex-col gap-2.5 h-full justify-center">
+      {agents.map((a) => (
+        <div
+          key={a.name}
+          className={`flex items-center justify-between gap-2 rounded-lg border p-2.5 ${
+            a.active
+              ? `${color.bg} ${color.border}`
+              : "bg-zinc-800/50 border-zinc-700/50"
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                a.active ? color.accent : "bg-zinc-500"
+              }`}
+            />
+            <span className="text-[11px] font-medium text-zinc-200 truncate">
+              {a.name}
+            </span>
+            <span className="text-[10px] text-zinc-500 truncate">{a.task}</span>
+          </div>
+          {a.active && (
+            <div className="flex items-center gap-1 shrink-0">
+              <kbd
+                className={`rounded border px-1 text-[9px] ${color.border} ${color.bg} ${color.text}`}
+              >
+                ←
+              </kbd>
+              <kbd
+                className={`rounded border px-1 text-[9px] ${color.border} ${color.bg} ${color.text}`}
+              >
+                →
+              </kbd>
+            </div>
           )}
         </div>
       ))}
@@ -305,8 +370,9 @@ const visualComponents: Record<
   React.FC<{ color: Feature["color"] }>
 > = {
   kanban: KanbanMockup,
-  flow: FlowMockup,
+  diff: TicketDiffMockup,
   terminal: TerminalMockup,
+  agentnav: AgentNavMockup,
   orchestration: OrchestrationMockup,
 };
 

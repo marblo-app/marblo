@@ -14,8 +14,8 @@ export default function HomePage() {
   const comparisonRows = [
     "multiAgent",
     "kanban",
-    "flowEditor",
-    "orchestrator",
+    "ticketDiff",
+    "agentNav",
     "multiModel",
     "mcp",
     "local",
@@ -30,13 +30,13 @@ export default function HomePage() {
       windsurf: false,
     },
     kanban: { marblo: true, cursor: false, copilot: false, windsurf: false },
-    flowEditor: {
+    ticketDiff: {
       marblo: true,
       cursor: false,
       copilot: false,
       windsurf: false,
     },
-    orchestrator: {
+    agentNav: {
       marblo: true,
       cursor: false,
       copilot: false,
@@ -266,6 +266,36 @@ export default function HomePage() {
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      {/* Real Experience — founder & early beta, honestly attributed */}
+      <section className="py-24 px-4">
+        <div className="max-w-5xl mx-auto">
+          <h2 className="text-3xl md:text-4xl font-bold text-center mb-4">
+            {t("experience.title")}
+          </h2>
+          <p className="text-zinc-400 text-center mb-12 text-lg">
+            {t("experience.subtitle")}
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {[1, 2].map((i) => (
+              <div
+                key={i}
+                className="bg-zinc-900 border border-zinc-700/50 rounded-2xl p-8 flex flex-col"
+              >
+                <span className="inline-block self-start bg-indigo-500/10 text-indigo-400 text-xs font-medium px-3 py-1 rounded-full mb-5 border border-indigo-500/20">
+                  {t(`experience.tag${i}`)}
+                </span>
+                <p className="text-zinc-200 text-lg mb-6 leading-relaxed flex-1">
+                  &ldquo;{t(`experience.quote${i}`)}&rdquo;
+                </p>
+                <div className="text-zinc-500 text-sm">
+                  — {t(`experience.role${i}`)}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>

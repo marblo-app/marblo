@@ -45,16 +45,16 @@
       "detail": "Marblo's kanban board manages agent work through a 5-stage state machine: TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE.\n\nWhen you create a task, it's automatically assigned to the right agent based on role (backend/frontend/test/DevOps). Each agent codes independently in its own terminal, with progress reflected on the kanban board in real-time.\n\nSet up task dependencies (depends_on) to automatically queue tasks until prerequisites are completed."
     },
     "flow": {
-      "title": "Mission Editor",
-      "description": "Design Mission pipelines visually with a node-based editor. Automate workflows from code generation → review → testing → deployment. (Successor to the Flow editor.)",
-      "highlight": "No-code Mission pipeline design",
-      "detail": "A visual editor for designing Mission pipelines with drag and drop. Marblo evolved from simple Flow automation to a Mission supervisor — give it a goal, and Marblo breaks down, executes, and tracks progress.\n\nNode types include agent execution, conditional branching, parallel processing, code review, and test execution. Connect them to build complex automation workflows without writing code.\n\nFor example, create a pipeline like 'Code Generation → Lint Check → Test Execution → Create PR on Pass' with just a few clicks. Save Mission templates for repeated use across projects."
+      "title": "Mission pipelines (coming soon)",
+      "description": "We're building Mission pipelines that chain multiple steps — code generation → review → testing → deployment — into one automated flow. Until it ships, manage agent work with the Kanban board and task tickets.",
+      "highlight": "Coming soon",
+      "detail": "We're building a Mission feature that chains multi-step work into a single automated pipeline.\n\nUntil it ships, you can manage agent work by creating tasks on the Kanban board and attaching an agent to a task ticket to review its changes as an inline diff."
     },
     "orchestrator": {
-      "title": "Mission Launch (Natural Language)",
-      "description": "Say \"Add login to this app\" and Marblo auto-decomposes the Mission, distributing tasks across agents. Cursor is one assistant; Marblo is a manager plus a fleet.",
-      "highlight": "Natural language → auto Mission decomposition",
-      "detail": "Give Marblo a goal in natural language and the AI manager decomposes the Mission and distributes tasks to the right agents.\n\nType \"Add login to this app\" and it breaks down into: 1) Backend auth API, 2) Frontend login form, 3) JWT token middleware, 4) Integration tests — four tasks assigned to separate agents.\n\nAgents analyze the codebase to write code that fits existing architecture, detecting dependencies to execute in the correct order."
+      "title": "Natural language Mission Launch (coming soon)",
+      "description": "We're building a feature that takes a goal in natural language and auto-decomposes it into tasks across agents. Until it ships, create tasks yourself and assign them to role-based agents.",
+      "highlight": "Coming soon",
+      "detail": "We're building a feature that takes a natural-language goal like \"Add login to this app\" and auto-decomposes it into separate tasks.\n\nUntil it ships, you can build the same flow by creating tasks on the Kanban board and assigning them to role-based agents (backend / frontend / test)."
     },
     "mcp": {
       "title": "Native MCP Protocol",
@@ -77,13 +77,13 @@
         "bullet2": "Real-time work logs per agent",
         "bullet3": "Drag and drop to adjust priorities"
       },
-      "flow": {
-        "label": "MISSION EDITOR",
-        "title": "Design Mission pipelines visually",
-        "description": "Design complex Missions with a node-based editor using drag and drop. See the entire pipeline from analysis → task creation → agent spawn → review at a glance. (Successor to the Flow editor.)",
-        "bullet1": "Define agent dependencies through node connections",
-        "bullet2": "Conditional branching — auto-route on success/failure",
-        "bullet3": "Automate repetitive work with Mission templates"
+      "ticketdiff": {
+        "label": "TASK TICKETS",
+        "title": "Attach an agent right from the ticket — and see the diff",
+        "description": "Link an agent directly to a work ticket and review the code changes it makes as an inline diff, right inside the ticket. Track exactly what changed without losing context.",
+        "bullet1": "Attach an agent directly to a ticket",
+        "bullet2": "Review changed files as an inline diff",
+        "bullet3": "Follow ticket → work → result in one place"
       },
       "terminal": {
         "label": "TERMINAL",
@@ -92,6 +92,14 @@
         "bullet1": "One-click agent creation with /tf-spawn",
         "bullet2": "Real-time agent output streaming",
         "bullet3": "Multi-tab monitoring for multiple agents"
+      },
+      "agentnav": {
+        "label": "AGENT PANEL",
+        "title": "Move between agents with arrow keys",
+        "description": "When several agents are running at once, jump between panels instantly with the arrow keys and monitor each agent's progress — switching by keyboard alone, no mouse needed.",
+        "bullet1": "Switch agent panels with the arrow keys",
+        "bullet2": "See the selected agent's terminal output instantly",
+        "bullet3": "Cycle through many agents from the keyboard"
       },
       "orchestration": {
         "label": "ORCHESTRATION",
@@ -114,8 +122,8 @@
     "rows": {
       "multiAgent": "Multi-agent simultaneous operation",
       "kanban": "Kanban board + task management",
-      "flowEditor": "Visual Mission editor",
-      "orchestrator": "Natural language Mission Launch",
+      "ticketDiff": "Ticket ↔ agent linking + inline diff",
+      "agentNav": "Arrow-key agent panel switching",
       "multiModel": "Multi-model (Claude+GPT/Codex+Antigravity)",
       "mcp": "MCP protocol support",
       "local": "Local execution (data protection)",
@@ -139,6 +147,16 @@
     "author2": "Startup CTO",
     "quote3": "Switched from Cursor — multi-agent is a completely different level",
     "author3": "Freelance Developer"
+  },
+  "experience": {
+    "title": "What it's like once you actually run it",
+    "subtitle": "No polished testimonials — just what we felt actually running it.",
+    "tag1": "A note from the maker",
+    "quote1": "I spawned close to a hundred agents at once and ran them together — it was genuinely something to see.",
+    "role1": "The maker of Marblo",
+    "tag2": "Early beta",
+    "quote2": "With the orchestrator at the center and the other agents working through it, managing a fleet of agents felt far easier.",
+    "role2": "Early beta user"
   },
   "cta_final": {
     "title": "Start free today",
@@ -172,8 +190,7 @@
       "features": [
         "Unlimited Projects",
         "Unlimited Agents (BYOK — you pay API costs)",
-        "Mission Editor (formerly Flow)",
-        "Mission Launch (Natural Language)",
+        "Mission pipelines (coming soon)",
         "Priority Support",
         "All Free features included"
       ]
@@ -307,7 +324,7 @@
     "subtitle": "Answers to the 5 most common questions before you apply. Further questions go in the #questions Discord channel after you join.",
     "back_link": "← Back to Founder signup",
     "q1_title": "1. What is Marblo?",
-    "q1_body": "Marblo is a heterogeneous AI agent orchestration desktop app. It lets you run Claude, GPT, Antigravity, and local models side by side and direct a fleet of agents through a Kanban board, a Mission editor, and an integrated terminal.\n\nA 1-minute demo video will land here right before GA. Until then, take a look at the 'Mission editor' and 'Orchestration' sections on the home page for screenshots.",
+    "q1_body": "Marblo is a heterogeneous AI agent orchestration desktop app. It lets you run Claude, GPT, Antigravity, and local models side by side and direct a fleet of agents through a Kanban board, task tickets, and an integrated terminal.\n\nA 1-minute demo video will land here right before GA. Until then, take a look at the 'Features' and 'Orchestration' sections on the home page for screenshots.",
     "q2_title": "2. How do I set up BYOK?",
     "q2_body": "On first launch, Marblo opens a settings panel where you register the model keys / subscriptions you want to use. Keys are stored encrypted in your OS keychain and never sent to Marblo servers.\n\n· Claude — issue an API key in the Anthropic console, or sign in with Claude Code Max\n· GPT — issue an API key in the OpenAI platform, or sign in with ChatGPT Plus\n· Antigravity — sign in with your Google account\n· Local models — point Marblo at your Ollama (or compatible) endpoint URL\n\nRegister only the models you actually plan to use. You do not have to register all of them.",
     "q3_title": "3. How do I submit the thoughtful survey?",
