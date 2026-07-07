@@ -19,7 +19,7 @@
     "prebuild": "npm run build:mcp",
     "build": "tsc -p electron/tsconfig.json && node scripts/check-firebase-env.mjs && vite build",
     "prebuild:electron": "npm run build:mcp",
-    "build:electron": "tsc -p electron/tsconfig.json && node scripts/check-firebase-env.mjs && vite build",
+    "build:electron": "tsc -p electron/tsconfig.json && node scripts/check-firebase-env.mjs && vite build && node scripts/write-oauth-config.mjs",
     "build:mac": "npm run build:electron && electron-builder --mac",
     "build:win": "npm run build:electron && electron-builder --win",
     "build:linux": "npm run build:electron && electron-builder --linux",

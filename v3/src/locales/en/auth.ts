@@ -6,6 +6,8 @@ import type { auth as koAuth } from "../ko/auth";
 
 export const auth: Record<keyof typeof koAuth, string> = {
   "auth.error.google": "Google sign-in failed.",
+  "auth.error.googleClientMissing":
+    "Google sign-in isn't configured yet. Contact your administrator or check the Desktop OAuth client setup.",
   "auth.error.github": "GitHub sign-in failed.",
   "auth.error.email": "Email sign-in failed.",
   "auth.error.signup": "Sign-up failed.",

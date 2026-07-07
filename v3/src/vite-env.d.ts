@@ -626,6 +626,18 @@ interface ClaudeAPI {
   cliVersions: () => Promise<Record<string, string>>;
 }
 
+/** Packaged-app Google sign-in via system-browser loopback OAuth (B안). */
+interface AuthAPI {
+  /** Run the loopback OAuth flow in the system browser; resolves with the
+   * id_token (+ access_token) on success, or { ok:false, error } otherwise. */
+  googleLoopback: () => Promise<{
+    ok: boolean;
+    idToken?: string;
+    accessToken?: string;
+    error?: string;
+  }>;
+}
+
 /** Account-global rate-limit reading for one provider. null fields = no
  * information (logged out / probe failed), never zero usage. */
 interface RateLimitSnapshot {
@@ -648,6 +660,7 @@ interface ElectronAPI {
   platform: string;
   testMode: TestModeAPI;
   window: WindowAPI;
+  auth: AuthAPI;
   claude: ClaudeAPI;
   harness: HarnessAPI;
   usage: UsageAPI;

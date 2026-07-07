@@ -41,6 +41,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
         success: boolean;
       }>,
   },
+  // Packaged-app Google sign-in via system-browser loopback OAuth (B안,
+  // ticket QvaYPAjAW822I0IDiwwZ). Returns the id_token (+ access_token) that the
+  // renderer feeds to signInWithCredential. See docs/GOOGLE_LOGIN_PACKAGED.md.
+  auth: {
+    googleLoopback: (): Promise<{
+      ok: boolean;
+      idToken?: string;
+      accessToken?: string;
+      error?: string;
+    }> => ipcRenderer.invoke("auth:googleLoopback"),
+  },
   // Resolved Claude Code binary used to launch agents (path + version).
   claude: {
     version: (): Promise<{ command: string; version: string }> =>

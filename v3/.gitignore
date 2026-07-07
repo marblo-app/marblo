@@ -14,6 +14,10 @@ release/
 .env.marblo-2253d
 .env.*.local
 
+# Packaged-app OAuth config (build-time extract of the 2 Google OAuth values
+# from .env, ticket QvaYPAjAW822I0IDiwwZ). Contains a secret — never commit.
+build-resources/
+
 # Claude Code local settings
 .claude/settings.local.json
 

@@ -4,6 +4,7 @@ import {
   getRedirectResult,
   signInWithPopup,
   signInWithRedirect,
+  signInWithCredential,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   setPersistence,
@@ -170,7 +171,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Packaged app (B안, ticket QvaYPAjAW822I0IDiwwZ): the app is served from the
+  // custom 127.0.0.1 static-server origin where signInWithRedirect silently
+  // hangs (storage partitioning — it never starts the top-level navigation). We
+  // instead run a system-browser loopback OAuth flow in the main process (RFC
+  // 8252 + PKCE), get back a Google id_token, and finish here with
+  // signInWithCredential. onAuthStateChanged then picks up the signed-in user.
+  const loginWithGoogleLoopback = async () => {
+    console.info(`[auth] loginWithGoogle: loopback path (${AUTH_BUILD_TAG})`);
+    // Pre-check the client id for a precise, actionable error. Main also guards
+    // and returns its own message, but this catches the common misconfiguration
+    // before we even open the browser.
+    if (!import.meta.env.VITE_GOOGLE_DESKTOP_OAUTH_CLIENT_ID) {
+      console.error(
+        "[auth] loginWithGoogle: VITE_GOOGLE_DESKTOP_OAUTH_CLIENT_ID is empty",
+      );
+      setError(t("auth.error.googleClientMissing"));
+      return;
+    }
+    try {
+      const result = await window.electronAPI!.auth.googleLoopback();
+      if (!result.ok || !result.idToken) {
+        console.error(
+          `[auth] loginWithGoogle: loopback failed — ${result.error ?? "unknown"}`,
+        );
+        setError(result.error || t("auth.error.google"));
+        return;
+      }
+      console.info(
+        "[auth] loginWithGoogle: loopback tokens received → signInWithCredential",
+      );
+      const credential = GoogleAuthProvider.credential(
+        result.idToken,
+        result.accessToken,
+      );
+      await signInWithCredential(auth, credential);
+      console.info("[auth] loginWithGoogle: loopback signInWithCredential ok");
+    } catch (e) {
+      const code = (e as { code?: string })?.code ?? "?";
+      console.error(`[auth] loginWithGoogle: loopback caught code=${code}`, e);
+      setError(e instanceof Error ? e.message : t("auth.error.google"));
+    }
+  };
+
   const loginWithGoogle = async () => {
+    // In the packaged app (built bundle + IPC bridge present) take the
+    // system-browser loopback path. Vite dev (import.meta.env.DEV) keeps the
+    // existing in-window redirect/popup flow so dev login never regresses.
+    if (
+      !import.meta.env.DEV &&
+      typeof window.electronAPI?.auth?.googleLoopback === "function"
+    ) {
+      setError(null);
+      return loginWithGoogleLoopback();
+    }
+
     const authDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN;
     console.info(
       `[auth] loginWithGoogle: enter (${AUTH_BUILD_TAG}, authDomain=${

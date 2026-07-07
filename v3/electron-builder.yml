@@ -25,6 +25,11 @@ extraResources:
     to: "dist-mcp"
     filter:
       - "**/*"
+  # Google 로그인 loopback OAuth config (client id + secret only). Written by
+  # scripts/write-oauth-config.mjs at the tail of build:electron. main reads it
+  # from process.resourcesPath at boot when app.isPackaged. Ticket QvaYPAjA.
+  - from: "build-resources/oauth-config.json"
+    to: "oauth-config.json"
 
 afterSign: scripts/notarize.js
 

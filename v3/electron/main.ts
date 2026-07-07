@@ -34,6 +34,7 @@ import {
 } from "./agent-watchdog";
 import { OrchestratorManager } from "./orchestrator-manager";
 import { installBundledHarness } from "./bundle-installer";
+import { runGoogleLoopbackOAuth } from "./google-oauth";
 import {
   listCatalog,
   installPackage,
@@ -120,6 +121,31 @@ interface ConnectionCheckResult {
 
 // .env 파일에서 Firebase 환경변수 로드 (Electron 메인 프로세스용)
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
+
+// Packaged app has no `.env`, so the Google 로그인 loopback OAuth values
+// (ticket QvaYPAjAW822I0IDiwwZ) would be empty and the flow would fail before
+// opening the browser. electron-builder ships JUST those two values as
+// resources/oauth-config.json (scripts/write-oauth-config.mjs — NOT the whole
+// .env, which holds Toss/Resend secrets). Load them into process.env here so
+// google-oauth.ts reads them normally. dev/unpackaged falls through to .env.
+if (app.isPackaged) {
+  try {
+    const cfgPath = path.join(process.resourcesPath, "oauth-config.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as {
+      clientId?: string;
+      clientSecret?: string;
+    };
+    if (cfg.clientId && !process.env.VITE_GOOGLE_DESKTOP_OAUTH_CLIENT_ID) {
+      process.env.VITE_GOOGLE_DESKTOP_OAUTH_CLIENT_ID = cfg.clientId;
+    }
+    if (cfg.clientSecret && !process.env.GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET) {
+      process.env.GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET = cfg.clientSecret;
+    }
+  } catch {
+    // Missing/malformed (dev build, or OAuth not configured) — the loopback
+    // flow will surface a clear "Desktop OAuth client 미설정" error if used.
+  }
+}
 
 // --- API Key Storage ---
 // BYOK keys are encrypted at rest with Electron's safeStorage API, which
@@ -2094,6 +2120,15 @@ ipcMain.handle("claude:version", () => {
 // round-trip, and it covers agy/gemini which harness:versions omits.
 ipcMain.handle("harness:cliVersions", () => {
   return resolveAllHarnessVersions();
+});
+
+// Packaged-app Google sign-in (B안, ticket QvaYPAjAW822I0IDiwwZ). The renderer
+// calls this on the packaged 127.0.0.1 origin where signInWithRedirect silently
+// hangs; main runs the system-browser loopback OAuth flow (RFC 8252 + PKCE) and
+// returns the id_token so the renderer can finish with signInWithCredential. The
+// client id/secret never leave main. See docs/GOOGLE_LOGIN_PACKAGED.md.
+ipcMain.handle("auth:googleLoopback", () => {
+  return runGoogleLoopbackOAuth();
 });
 
 // --- Board IPC Handlers ---

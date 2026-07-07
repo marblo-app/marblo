@@ -7,6 +7,10 @@
  */
 export const auth = {
   "auth.error.google": "구글 로그인에 실패했습니다.",
+  // 패키징 앱 B안(시스템 브라우저 loopback OAuth) 활성화에 필요한 Desktop OAuth
+  // client ID(VITE_GOOGLE_DESKTOP_OAUTH_CLIENT_ID)가 설정되지 않았을 때.
+  "auth.error.googleClientMissing":
+    "구글 로그인이 아직 설정되지 않았습니다. 관리자에게 문의하거나 Desktop OAuth client 설정을 확인해 주세요.",
   "auth.error.github": "GitHub 로그인에 실패했습니다.",
   "auth.error.email": "이메일 로그인에 실패했습니다.",
   "auth.error.signup": "회원가입에 실패했습니다.",
