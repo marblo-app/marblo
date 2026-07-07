@@ -7,6 +7,7 @@ import { useActivityStreamStore } from "../stores/activityStreamStore";
 import { useTranslation } from "../lib/i18n";
 import { createProject } from "../services/projectService";
 import { BugReportModal } from "./settings/BugReportModal";
+import marbloMark from "../assets/marblo-mark.svg";
 
 interface HeaderProps {
   onNavigateToSettings?: () => void;
@@ -152,6 +153,12 @@ export function Header({ onNavigateToSettings }: HeaderProps) {
     >
       {/* Left: Logo */}
       <div className="flex items-center gap-2">
+        <img
+          src={marbloMark}
+          alt="Marblo"
+          className="h-6 w-6 rounded-md"
+          draggable={false}
+        />
         <span className="text-lg font-bold text-white">Marblo</span>
         <span className="text-xs text-gray-500">v3</span>
       </div>

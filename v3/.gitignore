@@ -21,3 +21,6 @@ release/
 test-results/
 playwright-report/
 playwright/.cache/
+
+# OAuth client secret JSON (never commit)
+keys/

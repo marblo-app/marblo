@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  
+  <defs>
+    <radialGradient id="bgglowv3" cx="50%" cy="26%" r="75%">
+      <stop offset="0%" stop-color="#232338"/>
+      <stop offset="46%" stop-color="#131320"/>
+      <stop offset="100%" stop-color="#08080e"/>
+    </radialGradient>
+    <linearGradient id="framev3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="55%" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.10"/>
+    </linearGradient>
+    <filter id="bloomv3" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="26" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softbloomv3" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="48"/>
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#bgglowv3)"/>
+  <rect x="66" y="66" width="892" height="892" rx="176"
+        fill="none" stroke="url(#framev3)" stroke-width="3"/>
+  <circle cx="512.0" cy="512.0" r="200" fill="#A78BFA" opacity="0.18" filter="url(#softbloomv3)"/>
+  <g filter="url(#bloomv3)"><circle cx="416.0" cy="571.52" r="168" fill="none" stroke="#FFB020" stroke-width="46" opacity="0.5"/><circle cx="608.0" cy="571.52" r="168" fill="none" stroke="#22D3EE" stroke-width="46" opacity="0.5"/><circle cx="512.0" cy="411.2" r="168" fill="none" stroke="#34D399" stroke-width="46" opacity="0.5"/></g>
+  <g><circle cx="416.0" cy="571.52" r="168" fill="none" stroke="#FFB020" stroke-width="26" opacity="0.95"/><circle cx="608.0" cy="571.52" r="168" fill="none" stroke="#22D3EE" stroke-width="26" opacity="0.95"/><circle cx="512.0" cy="411.2" r="168" fill="none" stroke="#34D399" stroke-width="26" opacity="0.95"/></g>
+</svg>

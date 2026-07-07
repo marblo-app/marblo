@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="mbg" cx="50%" cy="24%" r="80%">
+      <stop offset="0%" stop-color="#20202f"/>
+      <stop offset="55%" stop-color="#121220"/>
+      <stop offset="100%" stop-color="#08080e"/>
+    </radialGradient>
+    <linearGradient id="mspec" gradientUnits="userSpaceOnUse" x1="14" y1="12" x2="50" y2="52">
+      <stop offset="0" stop-color="#FF6FB5"/>
+      <stop offset="0.3" stop-color="#C86BFF"/>
+      <stop offset="0.55" stop-color="#8A7CFF"/>
+      <stop offset="0.8" stop-color="#4AA8FF"/>
+      <stop offset="1" stop-color="#38E0E8"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#mbg)"/>
+  <circle cx="32" cy="32" r="20" fill="none" stroke="url(#mspec)" stroke-width="2.6"/>
+  <path d="M24 26 L30 32 L24 38" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="33.5" y="26" width="4.4" height="12" rx="1.6" fill="#ffffff"/>
+  <circle cx="32" cy="12" r="4.2" fill="#FFB020"/>
+  <circle cx="49.3" cy="42" r="4.2" fill="#22D3EE"/>
+  <circle cx="14.7" cy="42" r="4.2" fill="#34D399"/>
+</svg>

@@ -61,24 +61,14 @@ export default function HeroScreenshot() {
             transformOrigin: "bottom center",
           }}
         >
-          {/* Mac-style title bar */}
-          <div className="flex items-center gap-2 px-4 py-3 bg-zinc-800 border-b border-zinc-700">
-            <div className="flex gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-red-500" />
-              <div className="w-3 h-3 rounded-full bg-yellow-500" />
-              <div className="w-3 h-3 rounded-full bg-green-500" />
-            </div>
-            <span className="ml-auto mr-auto text-sm text-zinc-400 font-medium">
-              Marblo v3
-            </span>
-          </div>
-          {/* Screenshot */}
+          {/* Screenshot — the mockup already includes its own window chrome
+              (traffic lights + Marblo v3 header), so no separate title bar. */}
           <div className="relative w-full bg-zinc-900">
             <Image
               src="/images/product-demo.webp"
               alt="Marblo v3 App Screenshot"
               width={2560}
-              height={1440}
+              height={1320}
               className="w-full h-auto"
               priority
             />
@@ -106,7 +96,7 @@ export default function HeroScreenshot() {
               src="/images/product-demo.webp"
               alt="Marblo v3 App Screenshot"
               width={2560}
-              height={1440}
+              height={1320}
               className="w-full h-auto rounded-lg"
               quality={95}
             />

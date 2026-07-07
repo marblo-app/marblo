@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><defs>
+    <radialGradient id="bga" cx="50%" cy="24%" r="80%">
+      <stop offset="0%" stop-color="#20202f"/><stop offset="48%" stop-color="#121220"/><stop offset="100%" stop-color="#07070d"/>
+    </radialGradient>
+    <linearGradient id="framea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.20"/><stop offset="60%" stop-color="#ffffff" stop-opacity="0.04"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0.09"/>
+    </linearGradient>
+    <linearGradient id="speca" gradientUnits="userSpaceOnUse" x1="200" y1="180" x2="820" y2="850"><stop offset="0" stop-color="#FF6FB5"/><stop offset="0.3" stop-color="#C86BFF"/><stop offset="0.55" stop-color="#8A7CFF"/><stop offset="0.8" stop-color="#4AA8FF"/><stop offset="1" stop-color="#38E0E8"/></linearGradient>
+    <filter id="glowa" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="18" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="haloa" x="-90%" y="-90%" width="280%" height="280%"><feGaussianBlur stdDeviation="60"/></filter>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#bga)"/>
+  <circle cx="512.0" cy="512.0" r="230" fill="#8A7CFF" opacity="0.16" filter="url(#haloa)"/>
+  <rect x="66" y="66" width="892" height="892" rx="176" fill="none" stroke="url(#framea)" stroke-width="3"/><circle cx="512.0" cy="512.0" r="270" fill="none" stroke="url(#speca)" stroke-width="14" opacity="0.9" filter="url(#glowa)"/><circle cx="512.0" cy="242.0" r="30" fill="#FF6FB5" filter="url(#glowa)"/><circle cx="512.0" cy="242.0" r="14" fill="#ffffff" opacity="0.92"/><circle cx="745.8268590217984" cy="647.0" r="30" fill="#8A7CFF" filter="url(#glowa)"/><circle cx="745.8268590217984" cy="647.0" r="14" fill="#ffffff" opacity="0.92"/><circle cx="278.17314097820156" cy="647.0" r="30" fill="#38E0E8" filter="url(#glowa)"/><circle cx="278.17314097820156" cy="647.0" r="14" fill="#ffffff" opacity="0.92"/><g filter="url(#glowa)"><path d="M 448.2 454.0 L 506.2 512.0 L 448.2 570.0" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/><rect x="526.0" y="460.0" width="40" height="104" rx="10" fill="#ffffff"/></g></svg>

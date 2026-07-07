@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  
+  <defs>
+    <radialGradient id="bgglowv2" cx="50%" cy="26%" r="75%">
+      <stop offset="0%" stop-color="#232338"/>
+      <stop offset="46%" stop-color="#131320"/>
+      <stop offset="100%" stop-color="#08080e"/>
+    </radialGradient>
+    <linearGradient id="framev2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="55%" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.10"/>
+    </linearGradient>
+    <filter id="bloomv2" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="26" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softbloomv2" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="48"/>
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#bgglowv2)"/>
+  <rect x="66" y="66" width="892" height="892" rx="176"
+        fill="none" stroke="url(#framev2)" stroke-width="3"/>
+  <circle cx="512.0" cy="512.0" r="160" fill="#A78BFA" opacity="0.22" filter="url(#softbloomv2)"/>
+  <g filter="url(#bloomv2)"><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#FFB020" stroke-width="28" opacity="0.45" transform="rotate(0.0 512.0 512.0)" stroke-linecap="round"/><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#22D3EE" stroke-width="28" opacity="0.45" transform="rotate(30.0 512.0 512.0)" stroke-linecap="round"/><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#34D399" stroke-width="28" opacity="0.45" transform="rotate(60.0 512.0 512.0)" stroke-linecap="round"/><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#FFB020" stroke-width="28" opacity="0.45" transform="rotate(90.0 512.0 512.0)" stroke-linecap="round"/><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#22D3EE" stroke-width="28" opacity="0.45" transform="rotate(120.0 512.0 512.0)" stroke-linecap="round"/><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#34D399" stroke-width="28" opacity="0.45" transform="rotate(150.0 512.0 512.0)" stroke-linecap="round"/></g>
+  <g><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#FFB020" stroke-width="13" opacity="0.9" transform="rotate(0.0 512.0 512.0)" stroke-linecap="round"/><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#22D3EE" stroke-width="13" opacity="0.9" transform="rotate(30.0 512.0 512.0)" stroke-linecap="round"/><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#34D399" stroke-width="13" opacity="0.9" transform="rotate(60.0 512.0 512.0)" stroke-linecap="round"/><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#FFB020" stroke-width="13" opacity="0.9" transform="rotate(90.0 512.0 512.0)" stroke-linecap="round"/><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#22D3EE" stroke-width="13" opacity="0.9" transform="rotate(120.0 512.0 512.0)" stroke-linecap="round"/><ellipse cx="512.0" cy="512.0" rx="306" ry="122" fill="none" stroke="#34D399" stroke-width="13" opacity="0.9" transform="rotate(150.0 512.0 512.0)" stroke-linecap="round"/></g>
+  
+  <g filter="url(#bloomv2)" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M 442.0 448.0 L 494.0 512.0 L 442.0 576.0" stroke="#ffffff" stroke-width="26"/>
+  </g>
+  <rect x="520.0" y="454.0" width="46" height="118" rx="12" fill="#ffffff"/>
+</svg>

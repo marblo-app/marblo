@@ -35,8 +35,16 @@ export default function Header() {
         <div className="flex justify-between items-center h-16">
           <Link
             href={`/${locale}`}
-            className="text-xl font-bold text-white tracking-tight"
+            className="flex items-center gap-2 text-xl font-bold text-white tracking-tight"
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/marblo-mark.svg"
+              alt=""
+              width={28}
+              height={28}
+              className="rounded-md"
+            />
             Marblo
           </Link>
           <nav className="hidden md:flex items-center gap-6">

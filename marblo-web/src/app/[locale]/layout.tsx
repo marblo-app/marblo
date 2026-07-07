@@ -79,7 +79,7 @@ export async function generateMetadata({
       url: alternates.canonical,
       locale: og.locale,
       alternateLocale: og.alternateLocale,
-      images: [{ url: "/images/product-demo.webp", width: 2560, height: 1440 }],
+      images: [{ url: "/images/product-demo.webp", width: 2560, height: 1320 }],
     },
     twitter: {
       card: "summary_large_image",
