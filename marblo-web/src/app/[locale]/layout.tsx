@@ -79,13 +79,13 @@ export async function generateMetadata({
       url: alternates.canonical,
       locale: og.locale,
       alternateLocale: og.alternateLocale,
-      images: [{ url: "/images/product-demo.webp", width: 2560, height: 1320 }],
+      images: [{ url: "/images/product-demo.png", width: 2560, height: 1320 }],
     },
     twitter: {
       card: "summary_large_image",
       title: "Marblo - AI Agent Army Workspace",
       description: "Manage multiple AI agents on a kanban board.",
-      images: ["/images/product-demo.webp"],
+      images: ["/images/product-demo.png"],
     },
     robots: {
       index: true,

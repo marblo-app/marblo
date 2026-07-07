@@ -12,7 +12,9 @@ export default function robots(): MetadataRoute.Robots {
         userAgent: "*",
         allow: "/",
         // Keep auth flows and private user pages out of search results.
-        disallow: ["/auth/", "/my/", "/api/"],
+        // Routes are locale-prefixed (/ko/auth/, /en/my/, …), so match both the
+        // bare paths and the "/*/segment" form that covers every locale prefix.
+        disallow: ["/auth/", "/my/", "/api/", "/*/auth/", "/*/my/", "/*/admin"],
       },
     ],
     sitemap: "https://marblo.app/sitemap.xml",
