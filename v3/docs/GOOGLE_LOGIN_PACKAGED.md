@@ -167,3 +167,37 @@ client_secret 은 main 프로세스만 소유 — 렌더러엔 client_secret 노
    - `aud` 거부가 나면(드묾), Firebase Google provider 의 "Web SDK configuration"
      Web client ID 를 `VITE_GOOGLE_DESKTOP_OAUTH_CLIENT_ID` 로 쓰고 loopback 을 고정
      포트로 바꿔 그 Web 클라이언트에 redirect_uri 를 등록하는 경로로 대체.
+
+### 트러블슈팅 — `signInWithCredential` 이 `auth/network-request-failed`
+
+콘솔에 `loopback tokens received → signInWithCredential` **까지는 성공**한 뒤
+한참 있다가 `loopback caught code=auth/network-request-failed` 로 죽는 경우
+(즉 시스템 브라우저 로그인·토큰 수신은 정상, 마지막 Firebase credential 교환만
+실패):
+
+1. **authDomain iframe hang (이 PR 에서 코드로 해결됨 — 티켓 KVId8CCsu8pXYGhRGtz3).**
+   패키징 모드에서 `initializeAuth` 의 `popupRedirectResolver` 나
+   `getRedirectResult(auth)` 가 남아 있으면 Firebase 가 authDomain
+   iframe(`marblo-2253d.firebaseapp.com/__/auth/iframe`)을 로드하는데, 이 iframe 은
+   `127.0.0.1` top origin 에선 storage 파티셔닝으로 핸드셰이크가 hang 하고, 그 여파로
+   auth event manager 흐름이 막혀 `signInWithCredential` 이 timeout 후
+   `network-request-failed` 로 귀결된다. 이 PR 은 패키징(loopback) 모드에선 resolver
+   미지정 + `getRedirectResult` 스킵으로 iframe 을 아예 안 건드리게 했다. 콘솔에
+   `getRedirectResult: skipped (packaged loopback …)` 가 보이면 이 방어가 적용된
+   빌드다. (dev/웹 redirect·popup 은 그대로 동작 — 회귀 없음.)
+
+2. **Firebase Web API key 의 HTTP referrer 제한.** Google Cloud Console →
+   _APIs & Services → Credentials_ 에서 Firebase Web API key(=`VITE_FIREBASE_API_KEY`)
+   에 "HTTP referrers (web sites)" 제한이 걸려 있고 거기에 `127.0.0.1`(또는
+   `http://127.0.0.1:*`, `http://localhost:*`)가 **없으면** identitytoolkit/securetoken
+   호출이 403/CORS 로 막혀 SDK 상 `network-request-failed` 로 보인다. 해결:
+   - 제한을 **None** 으로 두거나(개발/데스크톱), 또는
+   - Website restrictions 에 `127.0.0.1` 및 `localhost` 를 추가.
+     패키징 앱은 랜덤 포트 `http://127.0.0.1:<port>` origin 에서 로드되므로 정확한 포트가
+     아닌 host 수준(`127.0.0.1`) 허용이 필요하다.
+
+3. **CSP `connect-src`.** `v3/src/index.html` 의 CSP `connect-src` 에
+   `https://securetoken.googleapis.com`(토큰 갱신)과
+   `https://identitytoolkit.googleapis.com`(credential 교환)이 모두 있어야 한다. 현재
+   둘 다 명시되어 있다. DevTools Network/Console 에 CSP 위반(`Refused to connect`)이
+   찍히면 이 목록을 확인.

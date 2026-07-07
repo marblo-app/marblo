@@ -15,7 +15,7 @@ import {
   GithubAuthProvider,
   type User,
 } from "firebase/auth";
-import { auth } from "../lib/firebase";
+import { auth, isPackagedLoopbackAuth } from "../lib/firebase";
 import { t } from "../lib/i18n";
 
 export interface AuthContextType {
@@ -142,28 +142,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Ignore — the timeout fallback still covers a stuck init.
       });
 
-    getRedirectResult(auth)
-      .then((result) => {
-        if (!result) {
-          console.info("[auth] getRedirectResult: no pending redirect");
-          return;
-        }
-        console.info("[auth] getRedirectResult: signed in via redirect");
-        settled = true;
-        clearTimeout(timeout);
-        setError(null);
-        setInitDegraded(false);
-        setUser(result.user);
-        setLoading(false);
-      })
-      .catch((e) => {
-        const code = (e as { code?: string })?.code ?? "?";
-        console.error(`[auth] getRedirectResult: error code=${code}`, e);
-        settled = true;
-        clearTimeout(timeout);
-        setError(e instanceof Error ? e.message : t("auth.error.google"));
-        setLoading(false);
-      });
+    // getRedirectResult 는 authDomain iframe(…/__/auth/iframe)을 로드한다. 패키징
+    // (loopback) 모드에선 이 iframe 이 127.0.0.1 top origin 에서 hang 하여 이후
+    // signInWithCredential 을 auth/network-request-failed 로 막는다 (티켓
+    // KVId8CCsu8pXYGhRGtz3). loopback 은 redirect 를 쓰지 않으므로 이 호출 자체가
+    // 불필요하다 → 패키징에선 스킵하고 dev/웹에서만 pending redirect 를 회수한다.
+    // 패키징에서 loading 은 onAuthStateChanged/authStateReady/timeout 이 해제한다.
+    if (!isPackagedLoopbackAuth) {
+      getRedirectResult(auth)
+        .then((result) => {
+          if (!result) {
+            console.info("[auth] getRedirectResult: no pending redirect");
+            return;
+          }
+          console.info("[auth] getRedirectResult: signed in via redirect");
+          settled = true;
+          clearTimeout(timeout);
+          setError(null);
+          setInitDegraded(false);
+          setUser(result.user);
+          setLoading(false);
+        })
+        .catch((e) => {
+          const code = (e as { code?: string })?.code ?? "?";
+          console.error(`[auth] getRedirectResult: error code=${code}`, e);
+          settled = true;
+          clearTimeout(timeout);
+          setError(e instanceof Error ? e.message : t("auth.error.google"));
+          setLoading(false);
+        });
+    } else {
+      console.info(
+        "[auth] getRedirectResult: skipped (packaged loopback — no authDomain iframe)",
+      );
+    }
 
     return () => {
       clearTimeout(timeout);

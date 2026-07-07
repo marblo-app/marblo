@@ -6,6 +6,7 @@ import { LoginPage } from "./auth";
 import { Layout } from "./components/Layout";
 import { DetachedLayout, type DetachedView } from "./components/DetachedLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { BrandLoader } from "./components/BrandLoader";
 import { useProjectStore } from "./stores/projectStore";
 import { useSubscriptionStore } from "./stores/subscriptionStore";
 import {
@@ -289,14 +290,7 @@ function AppContent() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-900">
-        <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
-          <p className="mt-3 text-sm text-gray-400">{t("common.loading")}</p>
-        </div>
-      </div>
-    );
+    return <BrandLoader label={t("common.loading")} />;
   }
 
   if (!user) {
@@ -309,16 +303,7 @@ function AppContent() {
   // when Firebase listeners are disabled (diagnostic) — otherwise we'd hang here
   // forever since nothing would ever flip projectsHydrated.
   if (FIREBASE_LISTENERS_ENABLED && !projectsHydrated) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-900">
-        <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
-          <p className="mt-3 text-sm text-gray-400">
-            {t("common.loadingProjects")}
-          </p>
-        </div>
-      </div>
-    );
+    return <BrandLoader label={t("common.loadingProjects")} />;
   }
 
   const detachedView = resolveDetachedView();
