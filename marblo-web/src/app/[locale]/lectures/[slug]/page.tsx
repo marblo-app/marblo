@@ -137,12 +137,12 @@ export default function LectureDetailPage() {
         {
           icon: Layers,
           title: '멀티모델 오케스트레이션',
-          desc: 'Claude + GPT + Gemini를 하나의 칸반 보드에서 동시 운용. 각 AI의 강점을 극대화하는 실전 전략을 배웁니다.',
+          desc: 'Claude + Codex + Antigravity를 하나의 칸반 보드에서 동시 운용. 각 AI의 강점을 극대화하는 실전 전략을 배웁니다.',
         },
         {
           icon: Monitor,
           title: '올인원 데스크탑 앱',
-          desc: '터미널, 칸반, 플로우 에디터, 코드 에디터 — 모든 것이 마블로 하나에. 설치부터 커스터마이징까지 완벽 가이드.',
+          desc: '터미널, 칸반, 오케스트레이터, 코드 에디터 — 모든 것이 마블로 하나에. 설치부터 커스터마이징까지 완벽 가이드.',
         },
         {
           icon: Rocket,
@@ -155,12 +155,12 @@ export default function LectureDetailPage() {
           {
             icon: Layers,
             title: 'マルチモデルオーケストレーション',
-            desc: 'Claude + GPT + Geminiを一つのカンバンボードで同時運用。各AIの強みを最大化する実践戦略を学びます。',
+            desc: 'Claude + Codex + Antigravityを一つのカンバンボードで同時運用。各AIの強みを最大化する実践戦略を学びます。',
           },
           {
             icon: Monitor,
             title: 'オールインワンデスクトップアプリ',
-            desc: 'ターミナル、カンバン、フローエディタ、コードエディタ — すべてがMarblo一つに。インストールからカスタマイズまで完全ガイド。',
+            desc: 'ターミナル、カンバン、オーケストレーター、コードエディタ — すべてがMarblo一つに。インストールからカスタマイズまで完全ガイド。',
           },
           {
             icon: Rocket,
@@ -172,12 +172,12 @@ export default function LectureDetailPage() {
           {
             icon: Layers,
             title: 'Multi-Model Orchestration',
-            desc: 'Run Claude + GPT + Gemini simultaneously on one kanban board. Learn real-world strategies to maximize each AI\'s strengths.',
+            desc: 'Run Claude + Codex + Antigravity simultaneously on one kanban board. Learn real-world strategies to maximize each AI\'s strengths.',
           },
           {
             icon: Monitor,
             title: 'All-in-One Desktop App',
-            desc: 'Terminal, Kanban, Flow Editor, Code Editor — everything in Marblo. Complete guide from installation to customization.',
+            desc: 'Terminal, Kanban, Orchestrator, Code Editor — everything in Marblo. Complete guide from installation to customization.',
           },
           {
             icon: Rocket,
@@ -375,10 +375,10 @@ export default function LectureDetailPage() {
             </h2>
             <p className="text-zinc-400 max-w-2xl mx-auto leading-relaxed">
               {locale === 'ko'
-                ? 'Claude, GPT, Gemini, Codex를 하나의 대시보드에서 동시 관리하고, 태스크를 물리적/논리적으로 분할하여 할당하는 방법을 실전으로 배웁니다.'
+                ? 'Claude, Codex(GPT), Antigravity를 하나의 대시보드에서 동시 관리하고, 태스크를 물리적/논리적으로 분할하여 할당하는 방법을 실전으로 배웁니다.'
                 : locale === 'ja'
-                  ? 'Claude、GPT、Gemini、Codexを一つのダッシュボードで同時管理し、タスクを物理的/論理的に分割して割り当てる方法を実践で学びます。'
-                  : 'Learn to manage Claude, GPT, Gemini, and Codex simultaneously from one dashboard, assigning tasks with physical and logical partitioning.'}
+                  ? 'Claude、Codex(GPT)、Antigravityを一つのダッシュボードで同時管理し、タスクを物理的/論理的に分割して割り当てる方法を実践で学びます。'
+                  : 'Learn to manage Claude, Codex (GPT), and Antigravity simultaneously from one dashboard, assigning tasks with physical and logical partitioning.'}
             </p>
           </div>
           <div className="rounded-2xl border border-zinc-700/50 overflow-hidden shadow-2xl shadow-indigo-900/10">
@@ -437,17 +437,17 @@ export default function LectureDetailPage() {
             {(locale === 'ko' ? [
               { icon: Monitor, iconColor: 'text-indigo-400', title: '날씨 대시보드', desc: '워밍업 프로젝트로 마블로의 전체 워크플로우를 체험합니다. /tf-plan → /tf-start → 에이전트 스폰 → 배포까지.', tag: '워밍업' },
               { icon: Rocket, iconColor: 'text-indigo-400', title: 'AI SaaS 서비스', desc: '풀스택 AI SaaS를 멀티 에이전트로 빌드합니다. 백엔드 + 프론트엔드 + 통합 테스트 → GCP Cloud Run 배포.', tag: '메인 프로젝트' },
-              { icon: Workflow, iconColor: 'text-indigo-400', title: '비주얼 AI 파이프라인', desc: '플로우 에디터로 LLM → Code → Branch → API 노드를 연결하여 자동화 파이프라인을 설계합니다.', tag: '플로우' },
+              { icon: Workflow, iconColor: 'text-indigo-400', title: '오케스트레이터 자동 분해 & dispatch', desc: '오케스트레이터가 목표를 태스크로 자동 분해해 Claude/Codex/Antigravity 에이전트에 dispatch. 티켓 → 에이전트 연결과 diff 추적까지 실전으로 다룹니다.', tag: '오케스트레이션' },
               { icon: Sparkles, iconColor: 'text-indigo-400', title: 'SaaS 랜딩페이지', desc: 'Stitch MCP를 활용해 마케팅 랜딩페이지를 디자인하고 런칭 체크리스트까지 완성합니다.', tag: '런칭' },
             ] : locale === 'ja' ? [
               { icon: Monitor, iconColor: 'text-indigo-400', title: '天気ダッシュボード', desc: 'ウォームアッププロジェクトでMarbloの全ワークフローを体験。/tf-plan → /tf-start → エージェントスポーン → デプロイまで。', tag: 'ウォームアップ' },
               { icon: Rocket, iconColor: 'text-indigo-400', title: 'AI SaaSサービス', desc: 'フルスタックAI SaaSをマルチエージェントでビルド。バックエンド＋フロントエンド＋統合テスト → GCP Cloud Runデプロイ。', tag: 'メインプロジェクト' },
-              { icon: Workflow, iconColor: 'text-indigo-400', title: 'ビジュアルAIパイプライン', desc: 'フローエディタでLLM → Code → Branch → APIノードを接続し、自動化パイプラインを設計します。', tag: 'フロー' },
+              { icon: Workflow, iconColor: 'text-indigo-400', title: 'オーケストレーター自動分解＆dispatch', desc: 'オーケストレーターが目標をタスクに自動分解し、Claude/Codex/Antigravityエージェントにdispatch。チケット → エージェント連携とdiff追跡まで実践で扱います。', tag: 'オーケストレーション' },
               { icon: Sparkles, iconColor: 'text-indigo-400', title: 'SaaSランディングページ', desc: 'Stitch MCPを活用してマーケティングランディングページをデザインし、ローンチチェックリストまで完成。', tag: 'ローンチ' },
             ] : [
               { icon: Monitor, iconColor: 'text-indigo-400', title: 'Weather Dashboard', desc: 'Experience Marblo\'s full workflow as a warmup. /tf-plan → /tf-start → agent spawn → deployment.', tag: 'Warmup' },
               { icon: Rocket, iconColor: 'text-indigo-400', title: 'AI SaaS Service', desc: 'Build a full-stack AI SaaS with multi-agents. Backend + Frontend + integration tests → GCP Cloud Run deployment.', tag: 'Main Project' },
-              { icon: Workflow, iconColor: 'text-indigo-400', title: 'Visual AI Pipeline', desc: 'Design automation pipelines in the Flow Editor by connecting LLM → Code → Branch → API nodes.', tag: 'Flow' },
+              { icon: Workflow, iconColor: 'text-indigo-400', title: 'Orchestrator Auto-Dispatch', desc: 'The orchestrator decomposes a goal into tasks and dispatches them to Claude/Codex/Antigravity agents — including ticket-to-agent linking and diff tracking.', tag: 'Orchestration' },
               { icon: Sparkles, iconColor: 'text-indigo-400', title: 'SaaS Landing Page', desc: 'Design a marketing landing page with Stitch MCP and complete the launch checklist.', tag: 'Launch' },
             ]).map((project, i) => (
               <div key={i} className="bg-zinc-900 border border-zinc-700/50 rounded-2xl p-8 hover:border-indigo-500/30 transition-all group">

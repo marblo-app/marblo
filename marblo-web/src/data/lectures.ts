@@ -73,12 +73,12 @@ export const lectures: LectureData[] = [
       "Manage multi AI agents in one desktop app, from project planning to deployment",
     description_ko: `AI 에이전트 군단을 데스크탑 앱에서 직접 관리하며, 실전 프로젝트를 처음부터 배포까지 완성합니다.
 
-Claude + Gemini + GPT 에이전트를 한 보드에서 동시에 운용하고, 칸반 보드에서 태스크를 관리하며, 비주얼 플로우 에디터로 AI 파이프라인을 설계합니다.
+Claude + Codex + Antigravity 에이전트를 한 보드에서 동시에 운용하고, 칸반 보드에서 태스크를 관리하며, 오케스트레이터가 목표를 자동 분해해 각 에이전트에 dispatch합니다.
 
 날씨 대시보드 워밍업 → AI SaaS 메인 프로젝트 → GCP 배포 → SaaS 런칭까지, 15.5시간 동안 실전 프로젝트를 완성합니다.`,
     description_en: `Manage AI agent armies directly from a desktop app, completing real projects from start to deployment.
 
-Run Claude + Gemini + GPT agents simultaneously on one board, manage tasks on a kanban board, and design AI pipelines with a visual flow editor.
+Run Claude + Codex + Antigravity agents simultaneously on one board, manage tasks on a kanban board, and let the orchestrator auto-decompose your goals and dispatch them to each agent.
 
 From weather dashboard warmup → AI SaaS main project → GCP deployment → SaaS launch, complete a real project in 15.5 hours.`,
     price: 149000,
@@ -193,15 +193,14 @@ From weather dashboard warmup → AI SaaS main project → GCP deployment → Sa
             youtubeId: "",
           },
           {
-            title: "2-6. Mission 에디터 기초 (구 Flow)",
-            title_en: "2-6. Mission Editor Basics (formerly Flow)",
+            title: "2-6. 티켓 → 에이전트 연결 + 실시간 diff 추적",
+            title_en: "2-6. Ticket → Agent Linking + Live Diff Tracking",
             duration: 1500,
             youtubeId: "",
           },
           {
-            title: "2-7. AI 매니저의 진화 — Flow → Mission supervisor",
-            title_en:
-              "2-7. How the AI Manager Evolved — Flow → Mission supervisor",
+            title: "2-7. 워크트리 격리 + 안전한 머지 워크플로우",
+            title_en: "2-7. Worktree Isolation + Safe Merge Workflow",
             duration: 1800,
             youtubeId: "",
           },
