@@ -6,8 +6,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { doc, getDoc } from 'firebase/firestore';
-import { db, auth } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { db } from '@/lib/firebase';
 import {
   Clock,
   Play,
@@ -51,15 +50,8 @@ export default function LectureDetailPage() {
   const slug = params.slug as string;
 
   const [lecture, setLecture] = useState<LectureData | null>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [openModules, setOpenModules] = useState<Set<number>>(new Set([0]));
   const [showSticky, setShowSticky] = useState(false);
-
-  // Auth listener
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setIsLoggedIn(!!u));
-    return () => unsub();
-  }, []);
 
   // Fetch lecture: Firestore first, static fallback
   useEffect(() => {
@@ -113,10 +105,6 @@ export default function LectureDetailPage() {
       return next;
     });
   };
-
-  const checkoutUrl = isLoggedIn
-    ? `/${locale}/checkout?type=lecture&slug=${slug}`
-    : `/${locale}/auth/login?redirect=/${locale}/lectures/${slug}`;
 
   if (!lecture || !stats) {
     return (
@@ -320,7 +308,7 @@ export default function LectureDetailPage() {
                   )}
                 </div>
                 <p className="text-sm text-zinc-500">
-                  {locale === 'ko' ? '얼리버드 한정가' : locale === 'ja' ? 'アーリーバード限定価格' : 'Early bird limited'}
+                  {locale === 'ko' ? '얼리버드 예정가' : locale === 'ja' ? 'アーリーバード予定価格' : 'Early bird (planned)'}
                 </p>
                 <div className="flex items-center gap-2 mt-3">
                   <Gift className="w-4 h-4 text-emerald-400" />
@@ -332,16 +320,16 @@ export default function LectureDetailPage() {
 
               {/* CTA */}
               <div className="flex flex-col items-center gap-3">
-                <Link
-                  href={checkoutUrl}
+                <a
+                  href="#lecture-notify"
                   className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white px-10 py-4 rounded-2xl text-lg font-bold transition-all shadow-lg shadow-indigo-600/25 hover:shadow-indigo-500/40 hover:scale-105 whitespace-nowrap"
                 >
-                  {t('purchase')}
+                  {t('notify_cta')}
                   <ArrowRight className="w-5 h-5" />
-                </Link>
+                </a>
                 <div className="flex items-center gap-2 text-zinc-500 text-xs">
-                  <Shield className="w-3.5 h-3.5" />
-                  <span>{locale === 'ko' ? '30일 환불 보장' : locale === 'ja' ? '30日間返金保証' : '30-day refund guarantee'}</span>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{t('coming_soon')}</span>
                 </div>
               </div>
             </div>
@@ -697,16 +685,16 @@ export default function LectureDetailPage() {
                     </div>
                   )}
 
-                  <Link
-                    href={checkoutUrl}
+                  <a
+                    href="#lecture-notify"
                     className={`block text-center py-3 rounded-xl font-semibold transition-all ${
                       isEarlyBird
                         ? 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-lg shadow-indigo-600/25'
                         : 'bg-zinc-800 hover:bg-zinc-700 text-white'
                     }`}
                   >
-                    {t('purchase')}
-                  </Link>
+                    {t('notify_cta')}
+                  </a>
                 </div>
               );
             })}
@@ -714,25 +702,24 @@ export default function LectureDetailPage() {
         </div>
       </section>
 
-      {/* ===================== FINAL CTA ===================== */}
-      <section className="py-24">
+      {/* ============ FINAL CTA → 곧 공개 예정 + 베타 신청 유입 (결제 대체) ============ */}
+      <section id="lecture-notify" className="py-24 scroll-mt-24">
         <div className="max-w-4xl mx-auto px-4 text-center">
           <div className="bg-gradient-to-br from-indigo-900/50 to-violet-900/50 border border-indigo-500/20 rounded-3xl p-12 md:p-16">
+            <div className="inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-400/30 rounded-full px-4 py-1.5 mb-5 text-sm text-indigo-300 font-medium">
+              <Sparkles className="w-4 h-4" />
+              {t('coming_soon')}
+            </div>
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              {locale === 'ko'
-                ? 'AI 에이전트 군단을 직접 운용하세요'
-                : locale === 'ja'
-                  ? 'AIエージェント軍団を自分で運用しよう'
-                  : 'Command Your Own AI Agent Army'}
+              {t('notify_heading')}
             </h2>
             <p className="text-zinc-400 text-lg mb-8 max-w-2xl mx-auto">
-              {locale === 'ko'
-                ? '15.5시간의 실전 프로젝트로 AI 에이전트 오케스트레이션을 마스터하세요. 얼리버드 가격은 한정 수량입니다.'
-                : locale === 'ja'
-                  ? '15.5時間の実践プロジェクトでAIエージェントオーケストレーションをマスター。アーリーバード価格は数量限定です。'
-                  : 'Master AI agent orchestration through 15.5 hours of hands-on projects. Early bird pricing is limited.'}
+              {t('notify_subtitle')}
             </p>
             <div className="flex items-center justify-center gap-4 mb-8">
+              <span className="text-sm text-zinc-500">
+                {locale === 'ko' ? '얼리버드 예정가' : locale === 'ja' ? 'アーリーバード予定価格' : 'Early bird (planned)'}
+              </span>
               {lecture.originalPrice && (
                 <span className="text-xl text-zinc-500 line-through">
                   {'\u20A9'}{lecture.originalPrice.toLocaleString()}
@@ -743,10 +730,10 @@ export default function LectureDetailPage() {
               </span>
             </div>
             <Link
-              href={checkoutUrl}
-              className="inline-flex items-center gap-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white px-12 py-4 rounded-xl text-lg font-bold transition-all shadow-lg shadow-indigo-600/25 hover:shadow-indigo-500/40 hover:scale-105"
+              href={`/${locale}/founders`}
+              className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white px-10 py-4 rounded-2xl text-lg font-bold transition-all shadow-lg shadow-indigo-600/25 hover:shadow-indigo-500/40 hover:scale-105"
             >
-              {t('purchase')}
+              {t('notify_beta_cta')}
               <ArrowRight className="w-5 h-5" />
             </Link>
           </div>
@@ -780,12 +767,12 @@ export default function LectureDetailPage() {
                   {'\u20A9'}{lecture.price.toLocaleString()}
                 </span>
               </div>
-              <Link
-                href={checkoutUrl}
+              <a
+                href="#lecture-notify"
                 className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg shadow-indigo-600/25"
               >
-                {t('purchase')}
-              </Link>
+                {t('notify_cta')}
+              </a>
             </div>
           </div>
         </div>

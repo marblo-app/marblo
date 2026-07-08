@@ -71,7 +71,22 @@ export default function CheckoutPage() {
   // Validate query params
   const isValid = isLecture ? !!lectureInfo : !!planInfo;
 
+  // 강의 실결제 차단(A안): 강의 콘텐츠 미준비 상태이므로 강의 체크아웃 진입
+  // 자체를 막고 강의 상세("출시 알림 받기")로 돌려보낸다. 직접 URL 진입도 차단.
+  // 되돌릴 때: 이 useEffect 를 제거하면 실결제 흐름이 복구된다.
   useEffect(() => {
+    if (type === "lecture") {
+      router.replace(
+        lectureSlug
+          ? `/${locale}/lectures/${lectureSlug}`
+          : `/${locale}/lectures`,
+      );
+    }
+  }, [type, lectureSlug, locale, router]);
+
+  useEffect(() => {
+    // 강의는 위 가드에서 리다이렉트하므로 로그인 리다이렉트를 걸지 않는다.
+    if (type === "lecture") return;
     const unsub = onAuthStateChanged(auth, (u) => {
       setAuthLoading(false);
       if (!u) {
@@ -86,7 +101,7 @@ export default function CheckoutPage() {
       }
     });
     return () => unsub();
-  }, [locale, plan, lectureSlug, isLecture, router]);
+  }, [locale, plan, lectureSlug, isLecture, type, router]);
 
   // Pre-load TossPayments SDK
   useEffect(() => {
@@ -186,6 +201,9 @@ export default function CheckoutPage() {
       setLoading(false);
     }
   };
+
+  // 강의 결제 비활성 — 위 가드 useEffect 가 리다이렉트하는 동안 UI 노출 방지.
+  if (type === "lecture") return null;
 
   // Auth loading state
   if (authLoading) {

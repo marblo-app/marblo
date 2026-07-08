@@ -509,7 +509,12 @@
     "duration": "分",
     "watch": "視聴する",
     "myLectures": "購入済み講座",
-    "noLectures": "購入済みの講座はありません"
+    "noLectures": "購入済みの講座はありません",
+    "notify_cta": "リリース通知を受け取る",
+    "coming_soon": "準備中 · 公開時に通知",
+    "notify_heading": "まもなく公開",
+    "notify_subtitle": "本講座は現在制作中です。今はMarbloベータに参加して実際にお試しいただけます — 正式公開時に最初にご案内します。",
+    "notify_beta_cta": "先にベータに申し込んでMarbloを使ってみる"
   },
   "footer": {
     "company": "Marblo",
