@@ -10,7 +10,8 @@
     "myLectures": "My Lectures",
     "logout": "Log out",
     "privacy": "Privacy",
-    "blog": "Blog"
+    "blog": "Blog",
+    "faq": "FAQ"
   },
   "hero": {
     "title": "One developer.\nAn entire team's output.",
@@ -243,7 +244,32 @@
     "annual_discount": "2 months free with annual billing",
     "subscribe": "Subscribe",
     "current": "Current Plan",
-    "most_popular": "Most Popular"
+    "most_popular": "Most Popular",
+    "faq": {
+      "title": "Frequently Asked Questions",
+      "items": [
+        {
+          "q": "What is included in the Free plan?",
+          "a": "The Free plan includes 1 project, 2 agents, the kanban board, the terminal and code editor, and MCP integration — free forever. It is enough to get a first feel for Marblo."
+        },
+        {
+          "q": "How much is Pro and what is different?",
+          "a": "The Pro plan is ₩19,000/month (about $15). It includes unlimited projects, unlimited agents, and priority support, plus everything in Free."
+        },
+        {
+          "q": "Are there separate AI usage fees?",
+          "a": "Yes. Each agent runs on your own API key or subscription (Claude→Anthropic, GPT/Codex→OpenAI, etc.). The Marblo fee is the orchestration cost of directing those agents and does not include AI usage fees."
+        },
+        {
+          "q": "Is there an annual discount?",
+          "a": "Yes. Choose annual billing and two months are free."
+        },
+        {
+          "q": "Are there team or enterprise plans?",
+          "a": "Yes. Team, Team Plus, and Enterprise plans are available, with SSO, audit logs, priority support, and on-premise deployment options."
+        }
+      ]
+    }
   },
   "download": {
     "title": "Marblo Desktop (Beta)",
@@ -617,5 +643,52 @@
       "news": "AI News",
       "product": "Product"
     }
+  },
+  "faq": {
+    "title": "Frequently Asked Questions",
+    "subtitle": "The questions we hear most often about Marblo.",
+    "home": "Home",
+    "items": [
+      {
+        "q": "What is Marblo?",
+        "a": "Marblo is a desktop app that orchestrates multiple AI coding agents simultaneously on a single kanban board. A central orchestrator splits tasks, assigns them to each agent, and tracks progress in real time. It runs on macOS and Windows."
+      },
+      {
+        "q": "Which AI agents does it support?",
+        "a": "It runs heterogeneous agents — Claude, GPT/Codex, and Antigravity — at the same time, assigning roles such as backend, frontend, and testing to fit each model's strengths."
+      },
+      {
+        "q": "How much does it cost?",
+        "a": "The Free plan is ₩0/month with core features; the Pro plan is ₩19,000/month (about $15) with unlimited projects and agents plus priority support. Team and Enterprise plans are also available."
+      },
+      {
+        "q": "Are there separate AI usage fees?",
+        "a": "Yes. Each agent runs on your own API key or subscription. The Marblo fee is the orchestration cost of directing those agents and does not include AI usage fees (bring your own model)."
+      },
+      {
+        "q": "Does it work on both Mac and Windows?",
+        "a": "Yes. Marblo ships as a desktop app for macOS and Windows, and you can get the installer from the download page."
+      },
+      {
+        "q": "What is MCP and why does it matter?",
+        "a": "MCP (Model Context Protocol) is an open standard for connecting AI to tools like files, databases, and APIs. Marblo supports MCP natively, so multiple agents share the same tools and context consistently."
+      },
+      {
+        "q": "Is my code safe?",
+        "a": "Every agent runs locally on your machine, so your code is not sent to external servers. That local boundary matters when handling sensitive code and data."
+      },
+      {
+        "q": "Won't multiple agents collide editing the same file?",
+        "a": "When needed, Marblo runs agents in isolated git worktrees so parallel work doesn't step on each other's files. Tasks are split by file or module so ownership doesn't overlap."
+      },
+      {
+        "q": "How do I track progress?",
+        "a": "Define work as tickets, assign them to agents, and watch each agent's state and completion on a kanban board (TODO → IN_PROGRESS → REVIEW → DONE). A person checks the result at the REVIEW stage."
+      },
+      {
+        "q": "Where do I download it?",
+        "a": "Get the macOS/Windows app from the download page. You can start right away on the Free plan."
+      }
+    ]
   }
 }

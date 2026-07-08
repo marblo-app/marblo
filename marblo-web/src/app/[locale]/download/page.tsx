@@ -8,6 +8,7 @@ import { httpsCallable, getFunctions } from "firebase/functions";
 import { auth } from "@/lib/firebase";
 import app from "@/lib/firebase";
 import { trackAppDownload } from "@/lib/gtag";
+import { buildSoftwareApplicationSchema } from "@/lib/schema";
 import {
   Apple,
   Monitor,
@@ -118,8 +119,16 @@ export default function DownloadPage() {
     };
   }, []);
 
+  // SoftwareApplication JSON-LD — same app entity as home (shared @id=APP_ID),
+  // carries operatingSystem, downloadUrl, Free/Pro offers, publisher=Organization.
+  const softwareSchema = buildSoftwareApplicationSchema(locale);
+
   return (
     <div className="py-24 px-4">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareSchema) }}
+      />
       <div className="max-w-3xl mx-auto text-center">
         <span className="inline-flex items-center gap-2 bg-indigo-600/15 text-indigo-300 border border-indigo-500/40 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider">
           <Sparkles className="w-3.5 h-3.5" />

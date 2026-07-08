@@ -222,3 +222,40 @@ export function buildBlogListSchema(opts: {
     })),
   };
 }
+
+/**
+ * Product node with the live pricing tiers as Offers, for the /pricing page.
+ * Kept distinct from the SoftwareApplication node (APP_ID) so the pricing page
+ * can expose plan Offers without redefining the app entity. Brand references
+ * the Organization by `@id`. Prices are the real KRW values (Free ₩0, Pro
+ * ₩19,000).
+ */
+export function buildProductOffersSchema(locale: string) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    "@id": `${SITE_URL}/#product`,
+    name: "Marblo",
+    description: pick(locale, APP_DESCRIPTION),
+    brand: { "@id": ORG_ID },
+    url: `${SITE_URL}/${locale}/pricing`,
+    offers: [
+      {
+        "@type": "Offer",
+        name: "Free",
+        price: "0",
+        priceCurrency: "KRW",
+        url: `${SITE_URL}/${locale}/pricing`,
+        availability: "https://schema.org/InStock",
+      },
+      {
+        "@type": "Offer",
+        name: "Pro",
+        price: "19000",
+        priceCurrency: "KRW",
+        url: `${SITE_URL}/${locale}/pricing`,
+        availability: "https://schema.org/InStock",
+      },
+    ],
+  };
+}

@@ -12,6 +12,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/download",
     "/founders",
     "/blog",
+    "/faq",
   ];
 
   // Per-page hreflang cluster shared across every locale entry for that page.
