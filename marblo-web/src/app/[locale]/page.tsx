@@ -5,11 +5,111 @@ import HeroScreenshot from "@/components/HeroScreenshot";
 import { Check, X, Minus } from "lucide-react";
 import FeatureSection from "@/components/FeatureSection";
 import BetaTester50Section from "@/components/BetaTester50Section";
+import {
+  buildSoftwareApplicationSchema,
+  buildFAQPageSchema,
+} from "@/lib/schema";
+
+// Answer-first FAQ for GEO (generative-engine optimization). Each answer opens
+// with the direct, citable claim so LLM crawlers can lift a self-contained
+// snippet. Facts only — no unreleased Mission/Flow features.
+const HOME_FAQS: Record<
+  "ko" | "en" | "ja",
+  { question: string; answer: string }[]
+> = {
+  ko: [
+    {
+      question: "마블로(Marblo)가 무엇인가요?",
+      answer:
+        "마블로는 여러 AI 코딩 에이전트를 하나의 칸반 보드에서 동시에 오케스트레이션하는 데스크톱 앱입니다. 중앙 오케스트레이터가 태스크를 분할해 각 에이전트에 할당하고 진행 상황을 실시간으로 추적합니다. macOS와 Windows에서 실행됩니다.",
+    },
+    {
+      question: "마블로는 어떤 AI 에이전트를 지원하나요?",
+      answer:
+        "마블로는 Claude, GPT/Codex, Antigravity 등 이종 AI 에이전트를 동시에 운용합니다. 각 모델의 강점에 맞춰 백엔드·프론트엔드·테스트 등 역할을 나눠 배치하며, MCP(Model Context Protocol)를 네이티브로 지원합니다.",
+    },
+    {
+      question: "마블로 가격은 얼마인가요?",
+      answer:
+        "마블로 Free 플랜은 월 ₩0이고 Pro 플랜은 월 ₩19,000(약 $15)입니다. AI 사용료는 별도이며, 각 에이전트는 사용자 본인의 API 키 또는 구독으로 운영합니다.",
+    },
+    {
+      question: "마블로는 맥과 윈도우에서 모두 작동하나요?",
+      answer:
+        "네. 마블로는 macOS와 Windows용 데스크톱 앱으로 제공되며 다운로드 페이지에서 설치 파일을 받을 수 있습니다. 모든 실행이 로컬 머신에서 이루어져 코드가 외부 서버로 전송되지 않습니다.",
+    },
+    {
+      question: "마블로를 쓰려면 내 API 키나 구독이 필요한가요?",
+      answer:
+        "네. 마블로는 이종 AI 에이전트 오케스트레이터이므로 각 모델(Claude, GPT/Codex 등)은 사용자 본인의 API 키 또는 구독으로 실행됩니다. 마블로 구독료는 에이전트를 통합 지휘하는 오케스트레이션 비용이며 AI 사용료를 포함하지 않습니다.",
+    },
+  ],
+  en: [
+    {
+      question: "What is Marblo?",
+      answer:
+        "Marblo is a desktop app that orchestrates multiple AI coding agents simultaneously on a single kanban board. A central orchestrator splits tasks, assigns them to each agent, and tracks progress in real time. It runs on macOS and Windows.",
+    },
+    {
+      question: "Which AI agents does Marblo support?",
+      answer:
+        "Marblo runs heterogeneous AI agents — Claude, GPT/Codex, and Antigravity — at the same time. It assigns roles such as backend, frontend, and testing based on each model's strengths, and supports the Model Context Protocol (MCP) natively.",
+    },
+    {
+      question: "How much does Marblo cost?",
+      answer:
+        "Marblo's Free plan is ₩0/month and the Pro plan is ₩19,000/month (about $15). AI usage is billed separately — each agent runs on your own API key or subscription.",
+    },
+    {
+      question: "Does Marblo work on both Mac and Windows?",
+      answer:
+        "Yes. Marblo ships as a desktop app for macOS and Windows, and you can get the installer from the download page. Everything runs locally on your machine, so your code is not sent to external servers.",
+    },
+    {
+      question: "Do I need my own API keys or subscriptions to use Marblo?",
+      answer:
+        "Yes. Because Marblo is a heterogeneous AI-agent orchestrator, each model (Claude, GPT/Codex, and others) runs on your own API key or subscription. The Marblo subscription is the cost of orchestrating those agents and does not include AI usage fees.",
+    },
+  ],
+  ja: [
+    {
+      question: "Marblo(マブロ)とは何ですか?",
+      answer:
+        "Marbloは複数のAIコーディングエージェントを一つのカンバンボードで同時にオーケストレーションするデスクトップアプリです。中央オーケストレーターがタスクを分割して各エージェントに割り当て、進捗をリアルタイムで追跡します。macOSとWindowsで動作します。",
+    },
+    {
+      question: "MarbloはどのAIエージェントに対応していますか?",
+      answer:
+        "MarbloはClaude、GPT/Codex、Antigravityなどの異種AIエージェントを同時に運用します。各モデルの強みに合わせてバックエンド・フロントエンド・テストなどの役割を分担し、MCP(Model Context Protocol)をネイティブ対応しています。",
+    },
+    {
+      question: "Marbloの料金はいくらですか?",
+      answer:
+        "MarbloのFreeプランは月額₩0、Proプランは月額₩19,000(約$15)です。AIの利用料金は別途で、各エージェントはユーザー自身のAPIキーまたはサブスクリプションで動作します。",
+    },
+    {
+      question: "MarbloはMacとWindowsの両方で動作しますか?",
+      answer:
+        "はい。MarbloはmacOSとWindows向けのデスクトップアプリとして提供され、ダウンロードページからインストーラーを入手できます。すべての処理はローカルマシン上で実行され、コードが外部サーバーに送信されることはありません。",
+    },
+    {
+      question:
+        "Marbloを使うには自分のAPIキーやサブスクリプションが必要ですか?",
+      answer:
+        "はい。Marbloは異種AIエージェントのオーケストレーターであるため、各モデル(Claude、GPT/Codexなど)はユーザー自身のAPIキーまたはサブスクリプションで実行されます。Marbloのサブスクリプション料金はエージェントを統合指揮するオーケストレーション費用であり、AI利用料は含みません。",
+    },
+  ],
+};
 
 export default function HomePage() {
   const t = useTranslations();
   const locale =
     t("nav.home") === "홈" ? "ko" : t("nav.home") === "ホーム" ? "ja" : "en";
+
+  // JSON-LD: the product node (SoftwareApplication) + answer-first FAQPage.
+  // Server-rendered into the home page HTML so it is present for crawlers.
+  const softwareSchema = buildSoftwareApplicationSchema(locale);
+  const faqSchema = buildFAQPageSchema(HOME_FAQS[locale]);
 
   const comparisonRows = [
     "multiAgent",
@@ -66,6 +166,14 @@ export default function HomePage() {
 
   return (
     <div>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareSchema) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+      />
       {/* Hero */}
       <section className="py-28 px-4 text-center relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-indigo-600/5 to-transparent" />

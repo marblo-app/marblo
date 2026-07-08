@@ -1,0 +1,25 @@
+# Marblo
+
+> Marblo is a desktop app that orchestrates multiple AI coding agents — Claude, GPT/Codex, and Antigravity — simultaneously on a single kanban board. A central orchestrator splits tasks and assigns them to each agent by strength (e.g. backend, frontend, testing), tracks progress in real time, supports the Model Context Protocol (MCP) natively, and runs entirely on your local machine. Built by HYPEMARC. Available for macOS and Windows.
+
+## Key facts
+
+- Product: Marblo desktop app (Electron), for macOS and Windows.
+- Core capability: heterogeneous multi-agent orchestration — run Claude, GPT/Codex, and Antigravity at the same time on one kanban board, coordinated by a central orchestrator.
+- MCP-native: supports the Model Context Protocol out of the box.
+- Local execution: agents run on the user's own machine; code is not sent to external servers.
+- Bring your own model: each agent runs on the user's own API key or subscription. The Marblo subscription is the orchestration cost and does not include AI usage fees.
+- Pricing: Free plan ₩0/month; Pro plan ₩19,000/month (about $15).
+- Company: HYPEMARC (주식회사 하이프마크). Contact: team@marblo.app.
+
+## Primary links
+
+- Home: https://marblo.app/en
+- Pricing: https://marblo.app/en/pricing
+- Download (macOS / Windows): https://marblo.app/en/download
+- Lectures: https://marblo.app/en/lectures
+- Founders beta program: https://marblo.app/en/founders
+
+## Languages
+
+Marblo's site is available in Korean (https://marblo.app/ko), English (https://marblo.app/en), and Japanese (https://marblo.app/ja).
