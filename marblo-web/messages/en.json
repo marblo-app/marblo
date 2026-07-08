@@ -9,7 +9,8 @@
     "signup": "Sign Up",
     "myLectures": "My Lectures",
     "logout": "Log out",
-    "privacy": "Privacy"
+    "privacy": "Privacy",
+    "blog": "Blog"
   },
   "hero": {
     "title": "One developer.\nAn entire team's output.",
@@ -599,5 +600,22 @@
     "errorGeneric": "Couldn't send your report. Please try again in a moment.",
     "errorUnauthenticated": "You need to be signed in. Please sign in and try again.",
     "errorRateLimited": "Too many requests. Please try again in a moment."
+  },
+  "blog": {
+    "title": "Blog",
+    "subtitle": "Practical notes on AI agents, MCP, and multi-agent orchestration",
+    "all": "All",
+    "empty": "No posts yet.",
+    "backToList": "Back to all posts",
+    "comments": "Comments",
+    "commentsComingSoon": "Comments are coming soon.",
+    "home": "Home",
+    "categories": {
+      "mcp": "MCP",
+      "agents": "Agents",
+      "orchestration": "Orchestration",
+      "news": "AI News",
+      "product": "Product"
+    }
   }
 }

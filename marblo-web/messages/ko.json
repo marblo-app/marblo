@@ -9,7 +9,8 @@
     "signup": "회원가입",
     "myLectures": "내 강의",
     "logout": "로그아웃",
-    "privacy": "개인정보"
+    "privacy": "개인정보",
+    "blog": "블로그"
   },
   "hero": {
     "title": "혼자서 팀 전체의\n성과를 만드세요",
@@ -599,5 +600,22 @@
     "errorGeneric": "신고를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.",
     "errorUnauthenticated": "로그인이 필요합니다. 다시 로그인한 뒤 시도해 주세요.",
     "errorRateLimited": "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요."
+  },
+  "blog": {
+    "title": "블로그",
+    "subtitle": "AI 에이전트·MCP·멀티에이전트 오케스트레이션에 대한 실전 노트",
+    "all": "전체",
+    "empty": "아직 글이 없습니다.",
+    "backToList": "목록으로 돌아가기",
+    "comments": "댓글",
+    "commentsComingSoon": "댓글 기능은 곧 제공됩니다.",
+    "home": "홈",
+    "categories": {
+      "mcp": "MCP",
+      "agents": "에이전트",
+      "orchestration": "오케스트레이션",
+      "news": "AI 소식",
+      "product": "제품"
+    }
   }
 }

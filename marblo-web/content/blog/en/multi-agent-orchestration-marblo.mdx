@@ -1,0 +1,32 @@
+---
+title: "Multi-Agent Orchestration — A Practical Structure, Seen Through Marblo"
+description: "Running an army of agents, not just one. How Marblo coordinates heterogeneous AI agents simultaneously on a kanban board."
+date: "2026-07-04"
+category: "orchestration"
+locales: ["ko", "en", "ja"]
+author: "Marblo"
+---
+
+## One agent vs. an army
+
+Most AI coding tools give you a single agent. That's great for quickly handling one thing, but it becomes a bottleneck at scale. Running **many agents at once** lets you push independent work in parallel — as long as you have a way to control who is doing what.
+
+## Marblo's approach
+
+In Marblo, a **central orchestrator** partitions heterogeneous AI agents (Claude, GPT/Codex, Antigravity) physically and logically, then assigns tasks. Roles are placed according to each model's strengths.
+
+- **Claude** — backend implementation
+- **GPT/Codex** — frontend
+- **Antigravity** — testing
+
+## Progress on a kanban board
+
+When many agents work at once, "what's happening right now" easily gets blurry. Marblo visualizes work on a **kanban board** (TODO → IN_PROGRESS → REVIEW → DONE), tracking each agent's state, assigned task, and completion in real time.
+
+## Local execution and MCP
+
+Every agent runs locally on your machine and **supports MCP natively**, sharing the same tools and context. Each model runs on your own API key or subscription, so Marblo focuses on the orchestration layer.
+
+## Takeaway
+
+The point of orchestration isn't "run a lot" — it's "run a lot while staying in control." Central coordination + kanban visibility + local execution form that triangle.

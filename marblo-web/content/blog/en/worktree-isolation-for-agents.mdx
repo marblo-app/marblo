@@ -1,0 +1,39 @@
+---
+title: "Parallel Work Without Conflicts: Worktree Isolation for Agents"
+description: "When several agents touch the same repo at once, they step on each other's changes. How git worktree isolation makes parallel work safe."
+date: "2026-07-03"
+category: "orchestration"
+locales: ["ko", "en"]
+author: "Marblo"
+---
+
+## Start with the problem
+
+The most common accident when running agents in parallel is **conflict from sharing one working tree**. While one agent edits files, another switches branches or overwrites the same file — and uncommitted work silently disappears.
+
+## The fix: git worktree
+
+`git worktree` lets one repository have **multiple working directories**, each checked out to a different branch. Give each agent its own worktree, and they can work in parallel without stepping on each other's files.
+
+```bash
+git worktree add ../agent-a feature/agent-a
+git worktree add ../agent-b feature/agent-b
+```
+
+Each worktree has its own branch and file state, so A's unfinished changes are invisible to B.
+
+## When to isolate
+
+- When two agents might touch the **same file or module**.
+- When trialing a risky refactor apart from the main line.
+- When a failure must not pollute the main workspace.
+
+Conversely, if agents only touch different files, isolation can be overkill — it carries a disk and setup cost.
+
+## When you merge
+
+Commit often in each worktree, and integrate finished work via a PR. Clean up worktrees that weren't changed.
+
+## In Marblo
+
+Marblo can spawn an agent in an **isolated worktree** when needed, so parallel work doesn't collide. Controllable parallelism — isolation is its foundation.

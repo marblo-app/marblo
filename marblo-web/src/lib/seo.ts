@@ -59,6 +59,33 @@ export function buildOpenGraphLocale(locale: string) {
 }
 
 /**
+ * Build `alternates` for a blog post. Unlike {@link buildAlternates}, hreflang
+ * `languages` are limited to `availableLocales` — the locales where the post
+ * actually exists — so we never point search engines at a missing translation.
+ * `x-default` prefers the default locale, falling back to the first available.
+ */
+export function buildBlogAlternates(
+  locale: string,
+  slug: string,
+  availableLocales: string[]
+) {
+  const langs = availableLocales.length ? availableLocales : [locale];
+  const languages: Record<string, string> = {};
+  for (const l of langs) {
+    languages[l] = `${SITE_URL}/${l}/blog/${slug}`;
+  }
+  const xDefault = langs.includes(routing.defaultLocale)
+    ? routing.defaultLocale
+    : langs[0];
+  languages["x-default"] = `${SITE_URL}/${xDefault}/blog/${slug}`;
+
+  return {
+    canonical: `${SITE_URL}/${locale}/blog/${slug}`,
+    languages,
+  };
+}
+
+/**
  * Derive the locale-stripped page path from a full request pathname.
  * "/en/pricing" → "/pricing"; "/en" → "".
  */

@@ -9,7 +9,8 @@
     "signup": "新規登録",
     "myLectures": "マイ講座",
     "logout": "ログアウト",
-    "privacy": "プライバシー"
+    "privacy": "プライバシー",
+    "blog": "ブログ"
   },
   "hero": {
     "title": "一人で、チーム全体の\n成果を出す",
@@ -599,5 +600,22 @@
     "errorGeneric": "報告を送信できませんでした。しばらくしてから再度お試しください。",
     "errorUnauthenticated": "ログインが必要です。ログインし直してからお試しください。",
     "errorRateLimited": "リクエストが多すぎます。しばらくしてから再度お試しください。"
+  },
+  "blog": {
+    "title": "ブログ",
+    "subtitle": "AIエージェント・MCP・マルチエージェント・オーケストレーションの実践ノート",
+    "all": "すべて",
+    "empty": "まだ記事がありません。",
+    "backToList": "記事一覧に戻る",
+    "comments": "コメント",
+    "commentsComingSoon": "コメント機能は近日公開予定です。",
+    "home": "ホーム",
+    "categories": {
+      "mcp": "MCP",
+      "agents": "エージェント",
+      "orchestration": "オーケストレーション",
+      "news": "AIニュース",
+      "product": "製品"
+    }
   }
 }

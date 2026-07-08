@@ -1,0 +1,44 @@
+---
+title: "Getting Started with MCP — the Open Standard for Connecting AI Agents to Tools and Data"
+description: "What the Model Context Protocol (MCP) is, why it matters, and how Marblo uses it — in a five-minute read."
+date: "2026-06-18"
+updated: "2026-07-02"
+category: "mcp"
+locales: ["ko", "en"]
+author: "Marblo"
+---
+
+## What is MCP?
+
+**MCP (Model Context Protocol)** is an open standard for connecting AI models to external tools and data sources. It was introduced by Anthropic and is now adopted by a range of AI clients. The core idea is simple: expose "tools an AI can use" through a standard interface, and any MCP-compatible client can use them as-is.
+
+Just as REST APIs standardized service-to-service integration, MCP standardizes the **AI ↔ tool** connection. Wrap a filesystem, database, internal API, or search index once as an MCP server, and multiple agents can share it.
+
+## Why it matters
+
+- **Reusability**: build a tool as an MCP server once instead of re-wiring it per client.
+- **Isolation**: each server exposes only its own scope, which keeps access easy to control.
+- **Composability**: attach several MCP servers to extend an agent's capabilities like Lego bricks.
+
+## A minimal example
+
+MCP servers usually talk over stdio or HTTP. You register a server in the client's config:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+    }
+  }
+}
+```
+
+With that in place, the agent gains tools to read and write in that directory.
+
+## Marblo and MCP
+
+Marblo supports **MCP natively**. When you run multiple AI agents at once, you can configure them to share the same set of MCP servers, keeping tools and context consistent. Everything runs locally, so sensitive data never leaves your machine.
+
+In the next post, we look at orchestration — assigning roles across several agents.

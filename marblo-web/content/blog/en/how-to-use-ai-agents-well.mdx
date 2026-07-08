@@ -1,0 +1,44 @@
+---
+title: "7 Principles for Using AI Coding Agents Well"
+description: "To use AI agents like teammates rather than tools, what do you need? Seven principles that hold up in practice, from task definition to verification."
+date: "2026-07-07"
+category: "agents"
+locales: ["ko", "en"]
+author: "Marblo"
+---
+
+## Start with the core
+
+The quality of an AI agent's output is proportional to the **quality of your instructions**. Before switching models, check these seven things — most problems disappear.
+
+## 1. Define the task precisely
+
+Not "fix login," but "fix the bug where email validation passes an empty string, and add a test for the failing case." State the **outcome and the done-condition**.
+
+## 2. Give enough context, but not too much
+
+Provide the relevant files, conventions, and constraints — without polluting the context with unrelated information. Hand broad exploration to a subagent and take back only the **conclusion**.
+
+## 3. Split into small units
+
+One decision at a time. Break large work into stages, each small enough to verify.
+
+## 4. Build in verification
+
+"Done" means "confirmed with a test," not "written." Require the agent to run and verify its own work.
+
+## 5. Separate roles
+
+Splitting exploration, implementation, and review across distinct perspectives raises quality. **Adversarial review** — asking an agent to refute its own result — is especially powerful.
+
+## 6. Work reversibly
+
+Commit often in small units, and do risky changes in an isolated workspace.
+
+## 7. Make it observable
+
+If you **can't see** what an agent is doing, you can't control it. Keep a board or log that tracks progress.
+
+## Let the tool enforce these
+
+Marblo turns these principles into structure — define tasks as tickets, assign roles to agents, and track progress on a kanban board. Riding the flow beats trying to remember the principles.

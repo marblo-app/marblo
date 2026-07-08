@@ -19,6 +19,18 @@
 - Download (macOS / Windows): https://marblo.app/en/download
 - Lectures: https://marblo.app/en/lectures
 - Founders beta program: https://marblo.app/en/founders
+- Blog: https://marblo.app/en/blog
+
+## Blog
+
+The Marblo blog publishes practical notes on AI agents, MCP, and multi-agent
+orchestration. RSS: https://marblo.app/en/blog/rss.xml (per-locale: /ko, /ja).
+Recent posts:
+
+- What Is Marblo — the AI Agent Army Workspace: https://marblo.app/en/blog/what-is-marblo
+- Getting Started with MCP — the open standard for connecting AI agents to tools and data: https://marblo.app/en/blog/mcp-getting-started
+- Claude Code Subagents in Practice — working in parallel: https://marblo.app/en/blog/claude-code-subagents
+- Multi-Agent Orchestration — a practical structure, seen through Marblo: https://marblo.app/en/blog/multi-agent-orchestration-marblo
 
 ## Languages
 

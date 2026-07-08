@@ -67,6 +67,12 @@ export default function Header() {
               {t("lectures")}
             </Link>
             <Link
+              href={`/${locale}/blog`}
+              className="text-zinc-400 hover:text-white transition"
+            >
+              {t("blog")}
+            </Link>
+            <Link
               href={`/${locale}/founders`}
               className="text-indigo-300 hover:text-indigo-200 transition font-medium"
             >
@@ -142,6 +148,13 @@ export default function Header() {
               className="text-zinc-400 hover:text-white transition"
             >
               {t("lectures")}
+            </Link>
+            <Link
+              href={`/${locale}/blog`}
+              onClick={closeMobile}
+              className="text-zinc-400 hover:text-white transition"
+            >
+              {t("blog")}
             </Link>
             <Link
               href={`/${locale}/founders`}

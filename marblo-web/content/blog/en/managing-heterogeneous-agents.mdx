@@ -1,0 +1,38 @@
+---
+title: "Managing Heterogeneous Agents — Placing Claude, Codex, and Antigravity by Strength"
+description: "When you run different AI models together on one project, who gets what? The management principles of heterogeneous orchestration."
+date: "2026-07-05"
+category: "orchestration"
+locales: ["ko", "en"]
+author: "Marblo"
+---
+
+## The conclusion first
+
+The heart of running heterogeneous agents is **"place by strength, and draw clear boundaries."** Splitting models with different characters across roles raises both throughput and quality more than running many copies of the same model.
+
+## Why heterogeneous
+
+Each model is good at a different grain of work. Give everything to one model, and its weakness becomes the whole system's bottleneck. Mixing models lets them cover each other's gaps — as long as it's clear who owns what.
+
+## An example placement
+
+Marblo uses this split as a default shape:
+
+- **Claude** — backend implementation: complex logic and long-context work.
+- **GPT/Codex** — frontend: UI composition and repetitive component work.
+- **Antigravity** — testing: verifying the code that was written.
+
+This split is a **starting point**, not a fixed rule. Adjust it to the project.
+
+## Draw clear boundaries
+
+The most common failure in heterogeneous work is **two agents editing the same file at once**. Split tasks by file or module so ownership doesn't overlap, and when needed, run them in parallel inside isolated workspaces.
+
+## Coordinate from the center
+
+Even if each agent runs well independently, you only stay in control when you can see **who is doing what** in one place. A central orchestrator assigns tasks, and a kanban board reflects state.
+
+## Takeaway
+
+Heterogeneous orchestration isn't "using many models" — it's "putting each model in its right place." Placement, boundaries, central coordination — those three are the backbone of managing it.

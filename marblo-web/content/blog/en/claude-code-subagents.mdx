@@ -1,0 +1,30 @@
+---
+title: "Claude Code Subagents in Practice — Working in Parallel"
+description: "When and how to use Claude Code subagents, from a practical angle: splitting exploration, implementation, and review across parallel agents."
+date: "2026-06-27"
+category: "agents"
+locales: ["ko", "en"]
+author: "Marblo"
+---
+
+## What subagents are
+
+Claude Code can delegate a task to a **subagent with its own context**. Instead of the main session reading every file itself, you hand a broad task like exploration to a subagent and get back only the conclusion. That keeps the main context from being flooded with file dumps.
+
+## When they help
+
+- **Broad exploration**: sweeping many directories and naming conventions to learn "where things live."
+- **Independent parallel work**: running several non-dependent tasks at once.
+- **Adversarial verification**: asking another agent to try to refute your result.
+
+## A practical pattern: explore → implement → review
+
+1. Use an **exploration** subagent to map the relevant code and conventions.
+2. The main session **implements** based on that conclusion.
+3. A separate **review** agent independently checks the diff.
+
+The key is "return only the conclusion." Have each agent make one decision at a time and leave the raw files in the subagent's context, so the main session stays light.
+
+## Beyond a single agent
+
+Subagents are powerful, but they are ultimately coordinated sequentially inside one session. To run **many agents physically at once** and watch each one's progress at a glance, you need a separate orchestration layer. Marblo is built to run heterogeneous agents — including Claude — simultaneously on a kanban board, tracking each agent's state in real time.

@@ -1,0 +1,49 @@
+---
+title: "MCP in Depth — Safely Connecting Agents to Files, Databases, and APIs"
+description: "Once you know MCP basics, the next step is safe connection. How to expose tools safely with scoped permissions, separated servers, and local execution."
+date: "2026-07-01"
+category: "mcp"
+locales: ["ko", "en"]
+author: "Marblo"
+---
+
+## Continuing on
+
+[Getting Started with MCP](/en/blog/mcp-getting-started) covered the basics. Now we look at **safe design** when connecting files, databases, and APIs to agents in a real project. One core principle — **expose only as much as needed.**
+
+## Separate servers by role
+
+Don't pile every permission into one giant MCP server. Split file access, DB queries, and external APIs into **separate servers**, so each exposes only its own scope and the blast radius stays small if something goes wrong.
+
+```json
+{
+  "mcpServers": {
+    "docs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/project/docs"]
+    },
+    "db-readonly": {
+      "command": "node",
+      "args": ["./mcp/db-readonly-server.js"]
+    }
+  }
+}
+```
+
+## Least privilege
+
+- **Files**: mount only the directory you need, not the whole project.
+- **DB**: if writes aren't needed, expose a **read-only** connection.
+- **API**: keep keys on the server side; don't expose them to the agent.
+
+## The safety of local execution
+
+Run MCP servers locally and data never leaves your machine. That **local boundary** matters when handling sensitive code or databases. Marblo runs every agent locally, so MCP servers can sit inside the same boundary.
+
+## When multiple agents share
+
+Sharing one set of MCP servers across agents keeps tools and context consistent. But for **servers with write access**, you must be able to track which agent made which change — tickets and a board fill that role.
+
+## Takeaway
+
+The point of advanced MCP isn't "connect more" — it's "connect **narrowly, locally, and traceably**."

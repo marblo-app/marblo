@@ -135,3 +135,90 @@ export function buildFAQPageSchema(
     mainEntity,
   };
 }
+
+/**
+ * BlogPosting node for a single blog article. `publisher` references the
+ * Organization by `@id` (defined in {@link buildOrganizationSchema}), so the
+ * article joins the same entity graph. `dateModified` falls back to
+ * `datePublished` when the post has no explicit update date.
+ */
+export function buildBlogPostingSchema(opts: {
+  url: string;
+  title: string;
+  description: string;
+  datePublished: string;
+  dateModified?: string;
+  authorName: string;
+  image?: string;
+  inLanguage: string;
+}) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    "@id": `${opts.url}#article`,
+    mainEntityOfPage: { "@type": "WebPage", "@id": opts.url },
+    url: opts.url,
+    headline: opts.title,
+    description: opts.description,
+    datePublished: opts.datePublished,
+    dateModified: opts.dateModified || opts.datePublished,
+    inLanguage: opts.inLanguage,
+    author: { "@type": "Organization", name: opts.authorName },
+    publisher: { "@id": ORG_ID },
+    ...(opts.image
+      ? {
+          image: opts.image.startsWith("http")
+            ? opts.image
+            : `${SITE_URL}${opts.image}`,
+        }
+      : {}),
+  };
+}
+
+/**
+ * BreadcrumbList node. Pass ordered { name, url } items (Home → Blog → Post).
+ * Empty-named items are dropped so the emitted schema never has blank fields.
+ */
+export function buildBreadcrumbSchema(
+  items: Array<{ name: string; url: string }>
+) {
+  const itemListElement = items
+    .filter((i) => i.name?.trim() && i.url)
+    .map((i, idx) => ({
+      "@type": "ListItem",
+      position: idx + 1,
+      name: i.name.trim(),
+      item: i.url,
+    }));
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement,
+  };
+}
+
+/**
+ * Blog + ItemList node for the blog index — lists the posts so crawlers see the
+ * collection. `posts` are ordered newest-first by the caller.
+ */
+export function buildBlogListSchema(opts: {
+  url: string;
+  name: string;
+  description: string;
+  posts: Array<{ url: string; title: string }>;
+}) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "Blog",
+    "@id": `${opts.url}#blog`,
+    url: opts.url,
+    name: opts.name,
+    description: opts.description,
+    publisher: { "@id": ORG_ID },
+    blogPost: opts.posts.map((p) => ({
+      "@type": "BlogPosting",
+      headline: p.title,
+      url: p.url,
+    })),
+  };
+}
