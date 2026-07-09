@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { ComponentPropsWithoutRef } from "react";
+import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MDXRemote } from "next-mdx-remote/rsc";
@@ -55,9 +55,38 @@ export async function generateMetadata({
   };
 }
 
+// Shared dark-theme chrome for figures/diagrams. Used by both the `figure` /
+// `figcaption` MDX overrides (markdown-generated figures) AND the <Diagram>
+// component below, so everything reads with one consistent tone.
+const FIGURE_CLS =
+  "my-8 overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 sm:p-6";
+const FIGCAPTION_CLS = "mt-3 text-center text-sm leading-relaxed text-zinc-500";
+
+// Reusable inline-SVG diagram wrapper. Posts write:
+//   <Diagram caption="…"><svg role="img" aria-label="…" …/></Diagram>
+// A *capitalized* component is used on purpose: MDX compiles author-written
+// literal <figure> tags to host elements that bypass the components map, so a
+// literal <figure> would never pick up FIGURE_CLS. A <Diagram> does resolve
+// through the map, giving us a single styling source. See docs/blog-diagrams.md.
+function Diagram({
+  caption,
+  children,
+}: {
+  caption: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <figure className={FIGURE_CLS}>
+      {children}
+      <figcaption className={FIGCAPTION_CLS}>{caption}</figcaption>
+    </figure>
+  );
+}
+
 // Dark-theme prose renderers. Tailwind v4 here has no typography plugin, so MDX
 // elements are styled explicitly — keeps everything in this route, no global CSS.
 const mdxComponents = {
+  Diagram,
   h2: (props: ComponentPropsWithoutRef<"h2">) => (
     <h2 className="mt-10 mb-4 text-2xl font-bold text-white" {...props} />
   ),
@@ -100,6 +129,21 @@ const mdxComponents = {
   blockquote: (props: ComponentPropsWithoutRef<"blockquote">) => (
     <blockquote
       className="my-6 border-l-2 border-indigo-500 pl-4 italic text-zinc-400"
+      {...props}
+    />
+  ),
+  // Applies to markdown-generated figures. Inline SVG diagrams use <Diagram>
+  // (see above) — literal <figure> tags in MDX bypass this map.
+  figure: (props: ComponentPropsWithoutRef<"figure">) => (
+    <figure className={FIGURE_CLS} {...props} />
+  ),
+  figcaption: (props: ComponentPropsWithoutRef<"figcaption">) => (
+    <figcaption className={FIGCAPTION_CLS} {...props} />
+  ),
+  img: (props: ComponentPropsWithoutRef<"img">) => (
+    // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
+    <img
+      className="mx-auto my-6 h-auto max-w-full rounded-lg border border-zinc-800"
       {...props}
     />
   ),

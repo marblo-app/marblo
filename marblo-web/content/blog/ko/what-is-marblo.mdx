@@ -2,6 +2,7 @@
 title: "마블로란 무엇인가 — AI 에이전트 군단 워크스페이스"
 description: "마블로는 여러 AI 코딩 에이전트를 칸반 보드에서 동시에 오케스트레이션하는 데스크톱 앱입니다. 핵심 개념과 구조를 한눈에 정리합니다."
 date: "2026-07-08"
+updated: "2026-07-09"
 category: "product"
 locales: ["ko", "en", "ja"]
 author: "Marblo"
@@ -9,26 +10,653 @@ author: "Marblo"
 
 ## 한 줄 정의
 
-**마블로(Marblo)** 는 여러 AI 코딩 에이전트를 하나의 칸반 보드에서 **동시에 오케스트레이션**하는 데스크톱 앱입니다. 중앙 오케스트레이터가 태스크를 나눠 각 에이전트에 할당하고, 진행 상황을 실시간으로 추적합니다. macOS와 Windows에서 실행됩니다.
+**마블로(Marblo)** 는 여러 AI 코딩 에이전트를 하나의 칸반 보드에서 **동시에 오케스트레이션**하는 데스크톱 앱입니다. 중앙 오케스트레이터가 큰 작업을 잘게 나눠 각 에이전트에 할당하고, 누가 지금 무엇을 하고 있는지를 실시간으로 추적합니다. macOS와 Windows에서 실행됩니다.
 
-Cursor나 Copilot이 에이전트 한 명을 붙여 준다면, 마블로는 **에이전트 군단**을 운용합니다.
+Cursor나 Copilot이 에이전트 한 명을 옆에 붙여 준다면, 마블로는 **에이전트 군단**을 운용합니다. 한 명의 개발자가 오케스트레이터 자리에 앉아, 서로 다른 모델을 쓰는 에이전트 여러 명을 동시에 지휘하는 것이 마블로가 그리는 그림입니다.
+
+## 왜 "한 명"이 아니라 "군단"인가
+
+지금의 AI 코딩 도구는 대부분 **1:1 대화형**입니다. 개발자 한 명이 에이전트 한 명과 대화하며 파일을 고칩니다. 이 방식은 직관적이지만, 에이전트가 긴 작업을 처리하는 동안 개발자는 사실상 대기하게 됩니다. 백엔드 리팩터링을 시키고 기다리는 동안, 프론트엔드 작업은 멈춰 있습니다.
+
+현실의 소프트웨어 작업은 병렬적입니다. API를 손보는 사람, 화면을 만드는 사람, 테스트를 채우는 사람이 동시에 움직일 때 팀은 빨라집니다. 마블로는 이 병렬성을 **한 사람의 워크스테이션 위로** 옮겨 옵니다. 개발자는 코드를 직접 타이핑하는 사람에서, 여러 에이전트에게 일을 나눠 주고 결과를 검수하는 **오케스트레이터**로 역할이 바뀝니다.
+
+<Diagram caption="오케스트레이터가 하나의 작업을 세 갈래로 나눠, 각 강점에 맞는 이종 에이전트에게 동시에 분배합니다.">
+  <svg
+    viewBox="0 0 640 340"
+    role="img"
+    aria-label="중앙 오케스트레이터가 작업을 나눠 백엔드는 Claude, 프론트엔드는 Codex, 테스트는 Antigravity 에이전트에게 동시에 분배하는 팬아웃 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-fanout"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="232"
+      y="24"
+      width="176"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="49"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="16"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      오케스트레이터
+    </text>
+    <text
+      x="320"
+      y="69"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      태스크 분할 · 할당 · 추적
+    </text>
+    <line
+      x1="320"
+      y1="84"
+      x2="112"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-fanout)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="320"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-fanout)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="528"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-fanout)"
+    />
+    <rect
+      x="24"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <text
+      x="112"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      백엔드 · API
+    </text>
+    <rect
+      x="232"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <text
+      x="320"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      프론트엔드 · UI
+    </text>
+    <rect
+      x="440"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      Antigravity
+    </text>
+    <text
+      x="528"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      테스트 · 검증
+    </text>
+  </svg>
+</Diagram>
 
 ## 핵심 구성 요소
 
-- **이종 에이전트**: Claude, GPT/Codex, Antigravity를 동시에 굴립니다. 각 모델의 강점에 맞춰 백엔드·프론트엔드·테스트 등 역할을 나눠 배치합니다.
-- **중앙 오케스트레이터**: 태스크를 분할하고 에이전트에 할당하며, 의존성과 순서를 관리합니다.
-- **칸반 보드**: TODO → IN_PROGRESS → REVIEW → DONE. 각 에이전트가 지금 뭘 하는지 한 화면에서 봅니다.
-- **MCP 네이티브**: Model Context Protocol을 기본 지원해, 파일·DB·API 같은 도구를 여러 에이전트가 공유합니다.
-- **로컬 실행**: 모든 에이전트가 사용자 머신에서 돌아갑니다. 코드가 외부 서버로 나가지 않습니다.
+마블로를 이루는 다섯 가지 요소를 하나씩 짚어 보겠습니다.
 
-## 비용 구조 — BYO 모델
+### 1. 이종(異種) 에이전트
 
-각 에이전트는 **사용자 본인의 API 키 또는 구독**으로 실행됩니다(Claude → Anthropic, GPT/Codex → OpenAI 등). 마블로 구독료는 이 에이전트들을 통합 지휘하는 **오케스트레이션 비용**이며, AI 사용료를 포함하지 않습니다. Free 플랜은 월 ₩0, Pro는 월 ₩19,000입니다.
+마블로는 한 종류의 모델에 묶이지 않습니다. **Claude, GPT/Codex, Antigravity** 를 동시에 굴립니다. 모델마다 잘하는 결이 다르기 때문에, 백엔드·프론트엔드·테스트 같은 역할을 각 모델의 강점에 맞춰 나눠 배치할 수 있습니다. 한 작업에서 막히면 다른 모델로 같은 문제를 다시 던져 보는 것도 가능합니다. 특정 벤더에 종속되지 않는다는 점은 도구 선택의 자유이자, 모델 생태계가 빠르게 바뀌는 시대의 안전장치이기도 합니다.
+
+### 2. 중앙 오케스트레이터
+
+오케스트레이터는 마블로의 지휘자입니다. 큰 목표를 여러 개의 태스크로 쪼개고, 각 태스크를 적절한 에이전트에 할당하며, 태스크 사이의 **의존성과 순서**를 관리합니다. "A가 끝나야 B를 시작할 수 있다" 같은 선후 관계를 오케스트레이터가 챙기기 때문에, 개발자는 하나하나 수동으로 조율하지 않아도 됩니다.
+
+### 3. 칸반 보드
+
+모든 태스크는 **TODO → IN_PROGRESS → REVIEW → DONE** 의 흐름을 따라 칸반 보드 위를 이동합니다. 어떤 에이전트가 지금 무엇을 하고 있는지, 무엇이 리뷰를 기다리는지, 무엇이 끝났는지를 한 화면에서 봅니다. 여러 에이전트가 동시에 움직여도 상태가 흩어지지 않고 보드 하나로 수렴합니다.
+
+<Diagram caption="모든 태스크는 이 네 단계를 따라 흐릅니다. 사람은 REVIEW 단계에서 결과를 검수하고 다음으로 넘깁니다.">
+  <svg
+    viewBox="0 0 720 180"
+    role="img"
+    aria-label="칸반 카드가 TODO에서 IN_PROGRESS, REVIEW를 거쳐 DONE으로 이동하는 4단계 라이프사이클"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-kanban"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="20"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <circle cx="44" cy="82" r="5" fill="#a1a1aa" />
+    <text
+      x="60"
+      y="87"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      TODO
+    </text>
+    <text
+      x="95"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      대기 중
+    </text>
+    <rect
+      x="195"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <circle cx="219" cy="82" r="5" fill="#6366f1" />
+    <text
+      x="235"
+      y="87"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      IN_PROGRESS
+    </text>
+    <text
+      x="270"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      에이전트 작업 중
+    </text>
+    <rect
+      x="370"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#fbbf24"
+      strokeWidth="1.5"
+    />
+    <circle cx="394" cy="82" r="5" fill="#fbbf24" />
+    <text
+      x="410"
+      y="87"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      REVIEW
+    </text>
+    <text
+      x="445"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      검수 대기
+    </text>
+    <rect
+      x="545"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <circle cx="569" cy="82" r="5" fill="#34d399" />
+    <text
+      x="585"
+      y="87"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      DONE
+    </text>
+    <text
+      x="620"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      완료
+    </text>
+    <line
+      x1="170"
+      y1="90"
+      x2="193"
+      y2="90"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-kanban)"
+    />
+    <line
+      x1="345"
+      y1="90"
+      x2="368"
+      y2="90"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-kanban)"
+    />
+    <line
+      x1="520"
+      y1="90"
+      x2="543"
+      y2="90"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-kanban)"
+    />
+  </svg>
+</Diagram>
+
+### 4. MCP 네이티브
+
+마블로는 **Model Context Protocol(MCP)** 을 기본으로 지원합니다. MCP는 에이전트가 파일 시스템·데이터베이스·외부 API 같은 도구에 접근하는 표준 통로입니다. 여러 에이전트가 같은 도구 집합을 공유하기 때문에, 각 에이전트가 저마다 다른 방식으로 환경에 붙는 혼란 없이 일관된 컨텍스트 위에서 협업합니다.
+
+### 5. 로컬 실행
+
+모든 에이전트는 **사용자 머신에서** 돌아갑니다. 코드가 마블로의 서버로 업로드되지 않습니다. 소스가 로컬에 머무른다는 점은 보안·규정 측면에서 중요하고, 사내 코드베이스처럼 외부 반출이 민감한 환경에서 특히 의미가 큽니다.
+
+## 비용 구조 — BYO 모델(Bring Your Own Model)
+
+마블로의 과금을 이해하려면 **두 가지 비용을 분리**해서 봐야 합니다.
+
+첫째는 **AI 사용료**입니다. 각 에이전트는 사용자 **본인의 API 키 또는 구독**으로 실행됩니다. Claude는 Anthropic 계정, GPT/Codex는 OpenAI 계정에 각각 청구되는 식입니다. 이 비용은 마블로를 거치지 않고 사용자가 해당 모델 제공사와 직접 정산합니다.
+
+둘째는 **오케스트레이션 비용**, 즉 마블로 구독료입니다. 이것은 여러 에이전트를 나누고, 할당하고, 추적하고, 안전하게 병합하도록 **통합 지휘하는 값**이며 AI 사용료를 포함하지 않습니다. 요금제는 다음과 같습니다.
+
+- **Free** — 월 **₩0**. 마블로를 처음 써 보고 오케스트레이션 흐름을 익히기에 충분합니다.
+- **Pro** — 월 **₩19,000**. 본격적으로 에이전트 군단을 운용하려는 개발자를 위한 요금제입니다.
+
+이 구조 덕분에 사용자는 원하는 모델을 자유롭게 고르고, AI 지출을 각 제공사에서 직접 통제하면서, 마블로에는 지휘 레이어에 대한 값만 지불합니다.
+
+<Diagram caption="이종 모델 구성. 각 에이전트는 사용자의 BYO 키로 실행되고, MCP 공유 도구와 로컬 실행 계층이 그 아래를 받칩니다.">
+  <svg
+    viewBox="0 0 640 400"
+    role="img"
+    aria-label="오케스트레이터가 각자 BYO 키로 실행되는 Claude·Codex·Antigravity 에이전트를 지휘하고, 그 아래 MCP 공유 도구 계층과 로컬 실행 계층이 받치는 구성"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-stack"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="160"
+      y="20"
+      width="320"
+      height="52"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="51"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      오케스트레이터
+    </text>
+    <line
+      x1="320"
+      y1="72"
+      x2="112"
+      y2="112"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <line
+      x1="320"
+      y1="72"
+      x2="320"
+      y2="112"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <line
+      x1="320"
+      y1="72"
+      x2="528"
+      y2="112"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <rect
+      x="24"
+      y="118"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="148"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <text
+      x="112"
+      y="169"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      BYO 키 · 구독
+    </text>
+    <rect
+      x="232"
+      y="118"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="148"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <text
+      x="320"
+      y="169"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      BYO 키 · 구독
+    </text>
+    <rect
+      x="440"
+      y="118"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="148"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      Antigravity
+    </text>
+    <text
+      x="528"
+      y="169"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      BYO 키 · 구독
+    </text>
+    <line
+      x1="112"
+      y1="190"
+      x2="112"
+      y2="234"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <line
+      x1="320"
+      y1="190"
+      x2="320"
+      y2="234"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <line
+      x1="528"
+      y1="190"
+      x2="528"
+      y2="234"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <rect
+      x="24"
+      y="240"
+      width="592"
+      height="52"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="271"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      MCP — 파일 · DB · API 도구 공유
+    </text>
+    <line
+      x1="320"
+      y1="292"
+      x2="320"
+      y2="326"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <rect
+      x="24"
+      y="332"
+      width="592"
+      height="52"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="363"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#a1a1aa"
+    >
+      내 컴퓨터에서 로컬 실행 — 코드가 외부로 나가지 않음
+    </text>
+  </svg>
+</Diagram>
+
+## 하루 흐름으로 보는 마블로
+
+실제 사용은 대략 이렇게 흘러갑니다. 아침에 "결제 모듈에 쿠폰 기능을 붙인다" 같은 목표를 오케스트레이터에게 던지면, 오케스트레이터가 이를 백엔드 API·프론트엔드 폼·테스트 케이스로 나눕니다. 각 태스크가 TODO로 보드에 올라오고, 강점에 맞는 에이전트가 하나씩 집어 IN_PROGRESS로 옮깁니다.
+
+에이전트가 코드를 완성하면 태스크는 REVIEW로 넘어옵니다. 여기서 **사람이 개입**합니다. 개발자는 변경 내용을 확인하고, 괜찮으면 DONE으로, 부족하면 코멘트와 함께 되돌려 보냅니다. 여러 에이전트가 동시에 움직이지만, 검수 지점이 REVIEW 한 곳으로 모이기 때문에 통제력을 잃지 않습니다. 이것이 마블로가 말하는 "**병렬로 밀어붙이되 통제 가능한 상태를 유지한다**"의 실제 모습입니다.
 
 ## 누구에게 맞나
 
-혼자서 팀 규모의 성과를 내고 싶은 개발자, 여러 작업을 병렬로 밀어붙이되 **통제 가능한 상태**를 유지하고 싶은 사람에게 맞습니다.
+- **혼자서 팀 규모의 성과를 내고 싶은 개발자.** 프론트·백엔드·테스트를 동시에 진행해 1인 개발의 처리량을 끌어올리고 싶은 경우.
+- **여러 작업을 병렬로 밀어붙이되 통제 가능한 상태를 유지하고 싶은 사람.** 에이전트를 풀어놓되, 무슨 일이 일어나는지 보드에서 놓치지 않고 보고 싶은 경우.
+- **특정 AI 벤더에 묶이기 싫은 사람.** 모델을 자유롭게 조합하고, 상황에 따라 갈아 끼우고 싶은 경우.
+- **코드를 외부 서버로 내보내기 어려운 환경.** 로컬 실행과 BYO 모델이 규정·보안 요건과 맞물리는 경우.
 
 ## 시작하기
 
-[다운로드 페이지](/ko/download)에서 macOS·Windows용 앱을 받아 바로 시작할 수 있습니다.
+[다운로드 페이지](/ko/download)에서 macOS·Windows용 앱을 받아 바로 시작할 수 있습니다. Free 플랜(월 ₩0)으로 오케스트레이션 흐름을 먼저 익힌 뒤, 필요해지면 Pro(월 ₩19,000)로 넘어가면 됩니다. 준비물은 실행하고 싶은 모델의 API 키 또는 구독뿐입니다.

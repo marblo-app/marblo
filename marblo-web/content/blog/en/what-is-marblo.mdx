@@ -2,6 +2,7 @@
 title: "What Is Marblo — the AI Agent Army Workspace"
 description: "Marblo is a desktop app that orchestrates multiple AI coding agents simultaneously on a kanban board. Here's the concept and structure at a glance."
 date: "2026-07-08"
+updated: "2026-07-09"
 category: "product"
 locales: ["ko", "en", "ja"]
 author: "Marblo"
@@ -9,26 +10,653 @@ author: "Marblo"
 
 ## One-line definition
 
-**Marblo** is a desktop app that **orchestrates multiple AI coding agents simultaneously** on a single kanban board. A central orchestrator splits tasks, assigns them to each agent, and tracks progress in real time. It runs on macOS and Windows.
+**Marblo** is a desktop app that **orchestrates multiple AI coding agents simultaneously** on a single kanban board. A central orchestrator splits a large job into small tasks, assigns them to individual agents, and tracks in real time who is doing what. It runs on macOS and Windows.
 
-Where Cursor or Copilot give you a single agent, Marblo runs an **army of agents**.
+Where Cursor or Copilot put a single agent at your side, Marblo runs an **army of agents**. One developer sits in the orchestrator's seat and directs several agents — each possibly running a different model — all at once.
+
+## Why an army, not a single agent
+
+Most AI coding tools today are **one-to-one and conversational**: a single developer chats with a single agent to change files. It's intuitive, but while the agent grinds through a long task, the developer effectively waits. Kick off a backend refactor, and your frontend work sits idle until it returns.
+
+Real software work is parallel. Teams move fast precisely because the person touching the API, the person building the screen, and the person filling in tests all move at once. Marblo brings that parallelism **onto a single workstation**. The developer's role shifts from typing every line to being the **orchestrator** — handing work out to several agents and reviewing what comes back.
+
+<Diagram caption="The orchestrator splits one job into three and hands each part to the heterogeneous agent that fits it best — all at the same time.">
+  <svg
+    viewBox="0 0 640 340"
+    role="img"
+    aria-label="A central orchestrator splitting one job three ways and distributing it to heterogeneous agents at once — backend to Claude, frontend to Codex, testing to Antigravity"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-fanout"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="232"
+      y="24"
+      width="176"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="49"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="16"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Orchestrator
+    </text>
+    <text
+      x="320"
+      y="69"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      split · assign · track
+    </text>
+    <line
+      x1="320"
+      y1="84"
+      x2="112"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-fanout)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="320"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-fanout)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="528"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-fanout)"
+    />
+    <rect
+      x="24"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <text
+      x="112"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      Backend · API
+    </text>
+    <rect
+      x="232"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <text
+      x="320"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      Frontend · UI
+    </text>
+    <rect
+      x="440"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      Antigravity
+    </text>
+    <text
+      x="528"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      Tests · Verify
+    </text>
+  </svg>
+</Diagram>
 
 ## Core components
 
-- **Heterogeneous agents**: run Claude, GPT/Codex, and Antigravity at once. Roles like backend, frontend, and testing are assigned to fit each model's strengths.
-- **Central orchestrator**: splits tasks, assigns them to agents, and manages dependencies and order.
-- **Kanban board**: TODO → IN_PROGRESS → REVIEW → DONE. See what every agent is doing on one screen.
-- **MCP native**: built-in Model Context Protocol support, so tools like files, databases, and APIs are shared across agents.
-- **Local execution**: every agent runs on your machine. Your code never leaves for external servers.
+Marblo is made of five parts. Here they are, one at a time.
+
+### 1. Heterogeneous agents
+
+Marblo isn't tied to one model. It runs **Claude, GPT/Codex, and Antigravity** at once. Because each model is good at different things, you can assign roles — backend, frontend, testing — to fit each model's strengths. When one agent gets stuck, you can throw the same problem at a different model. Not being locked to a single vendor is both a matter of freedom and a hedge in an era when the model landscape shifts fast.
+
+### 2. Central orchestrator
+
+The orchestrator is Marblo's conductor. It breaks a large goal into several tasks, assigns each task to the right agent, and manages the **dependencies and ordering** between them. Because the orchestrator keeps track of relationships like "B can't start until A is done," the developer doesn't have to coordinate every hand-off by hand.
+
+### 3. Kanban board
+
+Every task moves across the kanban board along the flow **TODO → IN_PROGRESS → REVIEW → DONE**. On a single screen you see which agent is doing what, what's waiting for review, and what's finished. Even with many agents moving at once, state doesn't scatter — it converges onto one board.
+
+<Diagram caption="Every task flows through these four stages. You step in at REVIEW to check the result and move it forward.">
+  <svg
+    viewBox="0 0 720 180"
+    role="img"
+    aria-label="A kanban card moving through four stages: TODO, then IN_PROGRESS, then REVIEW, then DONE"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-kanban"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="20"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <circle cx="44" cy="82" r="5" fill="#a1a1aa" />
+    <text
+      x="60"
+      y="87"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      TODO
+    </text>
+    <text
+      x="95"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      queued
+    </text>
+    <rect
+      x="195"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <circle cx="219" cy="82" r="5" fill="#6366f1" />
+    <text
+      x="235"
+      y="87"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      IN_PROGRESS
+    </text>
+    <text
+      x="270"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      agent working
+    </text>
+    <rect
+      x="370"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#fbbf24"
+      strokeWidth="1.5"
+    />
+    <circle cx="394" cy="82" r="5" fill="#fbbf24" />
+    <text
+      x="410"
+      y="87"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      REVIEW
+    </text>
+    <text
+      x="445"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      awaiting check
+    </text>
+    <rect
+      x="545"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <circle cx="569" cy="82" r="5" fill="#34d399" />
+    <text
+      x="585"
+      y="87"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      DONE
+    </text>
+    <text
+      x="620"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      complete
+    </text>
+    <line
+      x1="170"
+      y1="90"
+      x2="193"
+      y2="90"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-kanban)"
+    />
+    <line
+      x1="345"
+      y1="90"
+      x2="368"
+      y2="90"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-kanban)"
+    />
+    <line
+      x1="520"
+      y1="90"
+      x2="543"
+      y2="90"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-kanban)"
+    />
+  </svg>
+</Diagram>
+
+### 4. MCP native
+
+Marblo supports the **Model Context Protocol (MCP)** out of the box. MCP is the standard conduit through which an agent reaches tools like the file system, databases, and external APIs. Because multiple agents share the same set of tools, they collaborate on a consistent context instead of each wiring itself into the environment its own way.
+
+### 5. Local execution
+
+Every agent runs **on your machine**. Your code is not uploaded to Marblo's servers. Keeping the source local matters for security and compliance, and it's especially meaningful in environments — like an internal codebase — where sending code outside is sensitive.
 
 ## Cost model — bring your own model
 
-Each agent runs on **your own API key or subscription** (Claude → Anthropic, GPT/Codex → OpenAI, etc.). The Marblo subscription is the **orchestration cost** of directing those agents and does not include AI usage fees. The Free plan is ₩0/month; Pro is ₩19,000/month.
+To understand Marblo's pricing, **separate two costs**.
+
+The first is **AI usage**. Each agent runs on **your own API key or subscription**: Claude bills to your Anthropic account, GPT/Codex to your OpenAI account, and so on. That cost is settled directly between you and the model provider — it never passes through Marblo.
+
+The second is the **orchestration cost** — the Marblo subscription itself. This is the price of the layer that splits, assigns, tracks, and safely merges the work of many agents, and it does **not** include AI usage fees. The plans:
+
+- **Free** — **₩0/month**. Enough to try Marblo and learn the orchestration flow.
+- **Pro** — **₩19,000/month**. For developers ready to run an agent army in earnest.
+
+Because of this split, you're free to pick whatever models you want, control your AI spend directly with each provider, and pay Marblo only for the conducting layer.
+
+<Diagram caption="Heterogeneous model composition. Each agent runs on your BYO key, with the shared MCP tool layer and local execution underneath.">
+  <svg
+    viewBox="0 0 640 400"
+    role="img"
+    aria-label="An orchestrator directing Claude, Codex, and Antigravity agents that each run on your own BYO key, backed by a shared MCP tool layer and a local-execution layer beneath"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-stack"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="160"
+      y="20"
+      width="320"
+      height="52"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="51"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Orchestrator
+    </text>
+    <line
+      x1="320"
+      y1="72"
+      x2="112"
+      y2="112"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <line
+      x1="320"
+      y1="72"
+      x2="320"
+      y2="112"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <line
+      x1="320"
+      y1="72"
+      x2="528"
+      y2="112"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <rect
+      x="24"
+      y="118"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="148"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <text
+      x="112"
+      y="169"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      BYO key · sub
+    </text>
+    <rect
+      x="232"
+      y="118"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="148"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <text
+      x="320"
+      y="169"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      BYO key · sub
+    </text>
+    <rect
+      x="440"
+      y="118"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="148"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      Antigravity
+    </text>
+    <text
+      x="528"
+      y="169"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      BYO key · sub
+    </text>
+    <line
+      x1="112"
+      y1="190"
+      x2="112"
+      y2="234"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <line
+      x1="320"
+      y1="190"
+      x2="320"
+      y2="234"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <line
+      x1="528"
+      y1="190"
+      x2="528"
+      y2="234"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <rect
+      x="24"
+      y="240"
+      width="592"
+      height="52"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="271"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      MCP — shared file · DB · API tools
+    </text>
+    <line
+      x1="320"
+      y1="292"
+      x2="320"
+      y2="326"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-stack)"
+    />
+    <rect
+      x="24"
+      y="332"
+      width="592"
+      height="52"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="363"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#a1a1aa"
+    >
+      Runs locally on your machine — code never leaves
+    </text>
+  </svg>
+</Diagram>
+
+## A day with Marblo
+
+In practice it flows roughly like this. In the morning you hand the orchestrator a goal — say, "add a coupon feature to the payments module." The orchestrator breaks it into a backend API task, a frontend form task, and a set of test cases. Each lands on the board as TODO, and the agent whose strengths fit picks it up and moves it to IN_PROGRESS.
+
+When an agent finishes its code, the task moves to REVIEW. This is where **the human steps in.** You inspect the change and, if it's good, move it to DONE; if it falls short, you send it back with a comment. Many agents move at once, but because the checkpoint converges on the single REVIEW column, you never lose control. That's what Marblo means by "**push many things in parallel while staying in control.**"
 
 ## Who it's for
 
-Developers who want team-scale output on their own, and anyone who wants to push many tasks in parallel while staying **in control**.
+- **Developers who want team-scale output on their own** — running frontend, backend, and tests at once to lift the throughput of a solo build.
+- **People who want to push work in parallel while staying in control** — letting agents loose without losing sight, on the board, of what's happening.
+- **People who don't want to be locked to one AI vendor** — free to mix models and swap them as the situation calls for.
+- **Environments where code can't leave for outside servers** — where local execution and BYO models line up with compliance and security needs.
 
 ## Getting started
 
-Grab the macOS/Windows app from the [download page](/en/download) and start right away.
+Grab the macOS/Windows app from the [download page](/en/download) and start right away. Learn the orchestration flow on the Free plan (₩0/month) first, then move to Pro (₩19,000/month) when you need it. All you need to bring is the API key or subscription for the models you want to run.
