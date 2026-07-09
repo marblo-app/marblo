@@ -9,29 +9,187 @@ author: "Marblo"
 
 ## The core
 
-Past two or three agents, the management bottleneck isn't the model — it's **tracking**. The fix is simple: define work as **tickets** and reflect state on a **kanban board**. Exactly how people run teams.
+Once you move past two or three agents, the management bottleneck is not only model quality. The real bottleneck is **tracking**. Which agent is touching which files? Is a task blocked by a dependency, a missing product decision, or a failed test? Has a human reviewed the result, or did an agent merely declare it finished? Can another agent safely pick up the work? Those questions multiply quickly. A handful of chat windows is not a reliable control plane.
+
+Marblo's answer is deliberately simple: define work as **tickets** and expose ticket state on a **kanban board**. It is the same operating model human teams have used for years. Split a large goal into small tickets, give each ticket an owner, scope, done-condition, and activity log, then move it through TODO → IN_PROGRESS → REVIEW → DONE. Even when many AI agents are moving in parallel, the human operator can still understand the system from one board.
+
+A ticket is broader than a prompt. A prompt says, "Do this now." A ticket says why the work exists, what is in bounds, what must be true before the work is accepted, and who can continue from the result. If you want to command an army of agents, that unit of work has to be stable before the individual conversations start.
 
 ## Why tickets
 
-A ticket fixes "what, why, and the done-condition." Hand an agent a ticket and instructions stop scattering — and you're left with a basis to look back at **who decided what**. That provenance is auditability.
+Natural-language instruction is powerful, but it scatters easily. A simple request such as "polish the settings page" can turn into "also check dark mode," "fix type errors if you see them," "leave tests for later," and "do not touch the Electron main process." With one agent, you can often keep that context in your head. With five or ten agents running in parallel, the same habit becomes operational debt.
 
-## The flow
+A ticket reduces that drift. A good ticket fixes at least four things. First, the **problem**: why this work matters. Second, the **scope**: which files, screens, or modules are in bounds, and which areas are off limits. Third, the **done-condition**: whether the build must pass, a visual state must be checked, or a specific transition must work. Fourth, the **review lens**: what the human should inspect before accepting the result.
 
-1. **Define**: split work into tickets. Each ticket states outcome, scope, and done-condition.
-2. **Assign**: the orchestrator routes each ticket to a fitting agent.
-3. **Track**: state flows TODO → IN_PROGRESS → REVIEW → DONE on the board.
-4. **Record**: each agent logs its progress on the ticket.
+When those pieces are explicit, agents can operate with more independence. If the conversation grows long, the ticket remains the anchor. If a different agent needs to take over, it does not have to reconstruct the entire chat history. The description and activity log should be enough to recover the current state.
 
-## What the board gives you
+Tickets also create auditability. When multiple agents change code, one of the most expensive questions is, "Why did this happen?" A ticket preserves the starting condition, the assigned agent, intermediate decisions, verification results, and review request. That provenance matters when you are debugging a regression, approving work as a team lead, or deciding which parts of a workflow can be automated next.
 
-- **Visibility**: see at a glance what's in progress and what's blocked.
-- **Accountability**: each task's owner and state are clear.
-- **Retrospect**: finished decisions and their rationale live on the ticket.
+## Kanban is not just a board
 
-## Where humans step in
+A kanban board is not just a prettier list. In Marblo, it acts as a state machine. Work flows through TODO → IN_PROGRESS → REVIEW → DONE. That distinction matters because it separates an agent's claim that work is complete from a human's decision to accept it. An agent may implement a change and run checks, but the ticket should still move to REVIEW, not directly to DONE. The human reviews the scope, diff, tests, and product judgment there.
 
-You don't hand everything to automation. At REVIEW, a person checks the result, and decisions like merging stay with a human. The board makes those **decision points** explicit.
+TODO means the work is ready to be picked up. A vague request or unresolved dependency does not belong there; it should be clarified or blocked. IN_PROGRESS means an agent is actively working and has a clear owner. REVIEW means the output exists but is waiting for human judgment. DONE means the work has been accepted.
+
+Keeping those states strict makes parallel work safer. The more agents you run, the more expensive ambiguous states become. "Almost done," "probably fine," and "needs a quick look" are not operational states. A board gives the orchestrator a concrete next action: assign another agent, review what is waiting, split a blocked ticket, or reorder dependent work.
+
+<Diagram caption='A ticket starts in TODO, moves through implementation and review, and reaches DONE only after human acceptance.'>
+  <svg
+    viewBox="0 0 760 210"
+    role="img"
+    aria-label="A ticket moving across a kanban lifecycle from TODO to IN_PROGRESS to REVIEW to DONE, with human review before acceptance"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-ticket-kanban-en" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="18" y="62" width="150" height="82" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="93" y="92" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#e4e4e7">TODO</text>
+    <text x="93" y="118" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">ready work</text>
+    <line x1="168" y1="103" x2="216" y2="103" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-ticket-kanban-en)" />
+    <rect x="224" y="62" width="150" height="82" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="299" y="92" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#e4e4e7">IN_PROGRESS</text>
+    <text x="299" y="118" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">agent work</text>
+    <line x1="374" y1="103" x2="422" y2="103" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-ticket-kanban-en)" />
+    <rect x="430" y="62" width="150" height="82" rx="8" fill="#27272a" stroke="#fbbf24" strokeWidth="1.5" />
+    <text x="505" y="92" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#fbbf24">REVIEW</text>
+    <text x="505" y="118" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">human check</text>
+    <line x1="580" y1="103" x2="628" y2="103" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-ticket-kanban-en)" />
+    <rect x="636" y="62" width="106" height="82" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="689" y="92" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#34d399">DONE</text>
+    <text x="689" y="118" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">accepted</text>
+    <path d="M505 144 C505 176, 360 176, 299 144" fill="none" stroke="#6366f1" strokeWidth="2" strokeDasharray="5 5" markerEnd="url(#arrow-ticket-kanban-en)" />
+    <text x="402" y="193" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">if changes are needed, return with context</text>
+  </svg>
+</Diagram>
+
+## How tickets bind to agents
+
+Ticket-based operation separates **work** from **conversation**. The agent session is an execution channel. The ticket is the management channel. In Marblo, the orchestrator creates a ticket, looks at role and dependencies, assigns it to a suitable agent, and watches the status move. The agent claims the ticket, logs progress as activity, attaches verification results, and submits it for review.
+
+That binding simplifies several failure modes. If an agent fails, the ticket does not disappear. Another agent can continue from the same unit of work. If requirements change, the decision is recorded as ticket activity instead of hiding inside a transient chat message. If the task turns out to be too large, it can be split into smaller follow-up tickets. If the diff exceeds the requested scope, the reviewer can compare it against the ticket instead of guessing intent.
+
+It also lets the orchestrator match work to agent strengths. A frontend component ticket can go to an agent that reads UI context well. A type and build cleanup can go to an agent that scans a codebase quickly. Regression test design can go to an agent with a strong verification bias. The important choice is not the brand name of the model; it is the fit between the ticket's needs and the agent's role.
+
+<Diagram caption='The ticket is the source of truth for the work; the agent session is the channel that executes it.'>
+  <svg
+    viewBox="0 0 720 360"
+    role="img"
+    aria-label="An orchestrator creating a ticket, binding it to role-specific agents, and receiving activity logs and verification back onto the ticket"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-ticket-bind-en" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="250" y="20" width="220" height="70" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="360" y="48" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#e4e4e7">Orchestrator</text>
+    <text x="360" y="70" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">split · assign · prioritize</text>
+    <rect x="40" y="145" width="230" height="118" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="155" y="174" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#e4e4e7">Ticket</text>
+    <text x="70" y="204" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">problem · scope · done-condition</text>
+    <text x="70" y="226" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">deps · checks · activity log</text>
+    <rect x="450" y="128" width="220" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="560" y="162" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#34d399">Frontend Agent</text>
+    <rect x="450" y="206" width="220" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="560" y="240" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#818cf8">Backend Agent</text>
+    <rect x="450" y="284" width="220" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="560" y="318" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#38bdf8">Test Agent</text>
+    <line x1="317" y1="90" x2="191" y2="145" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-ticket-bind-en)" />
+    <line x1="270" y1="190" x2="450" y2="155" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-ticket-bind-en)" />
+    <line x1="270" y1="214" x2="450" y2="233" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-ticket-bind-en)" />
+    <line x1="270" y1="238" x2="450" y2="311" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-ticket-bind-en)" />
+    <path d="M450 182 C376 198, 346 220, 270 220" fill="none" stroke="#6366f1" strokeWidth="2" strokeDasharray="5 5" markerEnd="url(#arrow-ticket-bind-en)" />
+    <text x="356" y="288" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">progress and checks return to the ticket</text>
+  </svg>
+</Diagram>
+
+## What makes a good ticket
+
+A good ticket is specific enough for an agent to move independently, but not so prescriptive that it fights the codebase. "Make the button blue" may be too small to carry useful context. "Improve onboarding" is too broad to execute safely. A good ticket pairs the goal with boundaries.
+
+For a frontend ticket, useful details include the user problem, the screen involved, the components that are in scope, the files or processes that must not be touched, whether existing state stores should be reused, and which responsive, dark-mode, and accessibility expectations apply. For a backend ticket, useful details include data model constraints, migration requirements, API compatibility, and rollback expectations.
+
+Longer tickets are not automatically worse. In a multi-agent environment, a short but vague ticket often costs more than a detailed one. The key is that a ticket remains an execution unit, not an essay. The reader should be able to act after reading it. Background context should be just enough, while done-conditions should be written as checkable statements.
+
+## Why activity logs matter
+
+Not every meaningful decision appears in the final diff. An agent may try an approach and discard it. A test may fail for an environmental reason. PM feedback may change the scope. A reviewer may ask the agent to avoid a shared file. Those decisions are hard to recover from code alone. Activity logs attach them to the ticket.
+
+In Marblo, activity is more than a "currently working" marker. It is compressed handoff context for the next agent and the human reviewer. Good activity is short but concrete. "Implemented" is weak. "Connected the settings panel save flow to the existing Zustand store and left the Electron main process untouched" is useful. "Verified" is weak. "Confirmed Node 22 Next build passes and both ko/en posts exceed 7000 characters by wc -m" is useful.
+
+Over time, ticket activity becomes a lightweight decision log. When a regression appears, you can trace why a change entered the system. When an orchestrator is coordinating parallel work, it can see where risk is accumulating. It is part standup note, part review note, and part provenance record.
+
+## The review loop is the control point
+
+Many automation workflows treat "the agent says it is done" as the end of the process. That is unsafe for an agent army. The review loop is the control point. Agents can implement and verify, but product direction and risk acceptance still belong to a human. REVIEW is where that judgment becomes explicit.
+
+The loop should stay simple. The agent finishes, summarizes the change, records verification, and submits the ticket for review. The human compares the result against the ticket's done-condition and the actual diff. If it is acceptable, the ticket moves to DONE. If not, it returns to IN_PROGRESS with feedback or becomes a smaller follow-up ticket. The reason for rejection should be activity on the ticket so the next run does not repeat the same mistake.
+
+Review is not only about code style. It should check whether the change exceeded scope, touched shared files unnecessarily, actually satisfied the verification criteria, kept product facts accurate, and preserved accessibility or responsive behavior. When multiple agents are moving at once, review also has to catch accidental overwrites and cross-ticket conflicts.
+
+<Diagram caption='The review loop filters agent output through human judgment and sends changes back with context when needed.'>
+  <svg
+    viewBox="0 0 700 340"
+    role="img"
+    aria-label="An agent implements and verifies work, submits it to review, a human approves it to DONE or returns it with feedback"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-review-loop-en" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="44" y="96" width="150" height="74" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="119" y="126" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#34d399">Agent</text>
+    <text x="119" y="149" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">implement · verify</text>
+    <line x1="194" y1="133" x2="270" y2="133" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-review-loop-en)" />
+    <rect x="278" y="86" width="150" height="94" rx="8" fill="#27272a" stroke="#fbbf24" strokeWidth="1.5" />
+    <text x="353" y="120" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#fbbf24">REVIEW</text>
+    <text x="353" y="144" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">compare ticket and diff</text>
+    <line x1="428" y1="133" x2="504" y2="133" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-review-loop-en)" />
+    <rect x="512" y="96" width="144" height="74" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="584" y="126" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#34d399">DONE</text>
+    <text x="584" y="149" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">accepted</text>
+    <path d="M353 180 C335 258, 150 256, 119 170" fill="none" stroke="#6366f1" strokeWidth="2" strokeDasharray="6 5" markerEnd="url(#arrow-review-loop-en)" />
+    <rect x="214" y="230" width="220" height="54" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="324" y="262" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fill="#a1a1aa">feedback is logged on the ticket</text>
+  </svg>
+</Diagram>
+
+## Reducing conflict in parallel work
+
+Tickets and boards make parallel work possible, but they do not make every task safe to parallelize. Parallelism only helps when it is paired with dependency management. If two agents edit the same shared file at the same time, or a UI agent builds against a data contract that is still changing, the merge cost can erase the speed gain.
+
+Good orchestration looks for conflict before dispatching work. Independent screens, documentation, isolated components, and targeted tests are good candidates for parallel execution. Shared types, routing, build configuration, authentication, and migrations should usually be completed first or assigned to a single focused agent. When there is a dependency, the downstream ticket should wait until the upstream ticket reaches DONE or at least REVIEW with a stable contract.
+
+Scope boundaries matter. "Do not edit the main process," "leave page.tsx untouched," "preserve frontmatter," and "only change these content files" are not bureaucratic details. They are guardrails that make agent output reviewable. Boundaries that feel obvious to a human should still be explicit for an agent. Clear boundaries reduce review cost and make parallel changes easier to combine.
+
+## Put verification into the ticket
+
+Verification is not an afterthought. It should be part of the ticket from the beginning. Criteria like "build passes," "typecheck passes," "wc -m is at least 7000," "static MDX rendering works," or "mobile text does not overlap" give the agent something concrete to verify before review.
+
+The checks should match the work. For a writing task, character count, MDX compilation, link validity, and product factual accuracy matter. For a UI task, screenshots, accessibility, responsive layout, and state transitions matter. For a data task, migrations, rollback behavior, and API compatibility matter. "Test it" is too vague. The ticket should say which failures it is meant to catch.
+
+This is why Marblo keeps verification results in ticket activity. The reviewer can see which commands the agent ran, which criteria were covered, and which parts still require manual judgment. It is also valuable when an agent honestly records what it could not verify. Those gaps become the human review checklist.
+
+## The human role changes, it does not disappear
+
+Managing agents with tickets and kanban does not remove the human. It changes the human's job. Instead of editing every file directly, the human decomposes goals, defines boundaries, sets priorities, and decides whether output is acceptable. That is closer to leading a small engineering team than using a single autocomplete tool.
+
+A good orchestrator gives agents enough structure without micromanaging every implementation detail. The done-condition should be clear, while implementation can follow the codebase's existing patterns. When direction changes, the decision should be recorded on the ticket instead of scattered across chat. During review, the human should look first at risk and requirements, not personal taste.
+
+At first, this can feel slower. You have to write tickets, move statuses, and record activity. But as the number of agents grows, the structure creates speed. You do not reread every chat log. You do not guess who touched what. You process review-ready work from one place.
 
 ## In Marblo
 
-Marblo turns tasks into tickets, assigns them to agents, and tracks the whole army's progress on a kanban board in real time. A way to command many agents **while staying in control** — with tickets and the board at its center.
+Marblo is a desktop app for orchestrating multiple AI coding agents in one workspace. Tickets are the unit of work. The kanban board is the unit of state. Activity logs are the unit of decision history. Together, they turn a collection of agent sessions into a controllable system.
+
+In practice, the operating principles are straightforward. Break large goals into tickets. Put outcome, scope, done-condition, and verification method into each ticket. Let an agent own one ticket at a time. Record progress and decisions as activity. Treat REVIEW as a human step. Use DONE only after the result is accepted. Surface blocked work instead of hiding it.
+
+This is not a low-trust way to use agents. It is what allows agents to take on more work. When work is organized as tickets, state is visible on the board, and decisions are recorded as activity, the human can safely delegate larger amounts of work in parallel. Commanding an AI agent army is ultimately about designing the balance between automation and control.
+
+Tickets and kanban are the most practical starting point for that balance. The more complex the project, the more important it becomes to answer "who did what, and how far did it get?" immediately. Marblo puts that answer on the board, keeps context on each ticket, and keeps human review at the center of the flow. That is how many agents can move at once without turning the project into scattered conversations.
