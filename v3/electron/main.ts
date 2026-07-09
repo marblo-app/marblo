@@ -418,6 +418,10 @@ if (!app.isPackaged) {
 const isDev = process.env.MARBLO_FORCE_PROD !== "1" && !app.isPackaged;
 const updater = new Updater();
 const ptyManager = new PtyManager();
+// Periodic sweep to reclaim any PTY master fd leaked by a session whose child
+// died without a clean teardown — belt-and-suspenders against macOS
+// kern.tty.ptmx_max exhaustion (posix_spawnp failed on new terminals/agents).
+ptyManager.startReaper();
 const fsManager = new FsManager();
 // Bridges the cross-machine `pendingInstructions` Firestore queue to local
 // PTYs. attach/detach is driven by agent spawn / stop lifecycle below.

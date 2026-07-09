@@ -46,6 +46,21 @@ export class PtyManager {
   private sessions: Map<string, PtySession> = new Map();
   private writeAndSubmitQueues: Map<string, Promise<void>> = new Map();
 
+  // --- PTY master-fd leak guard ---
+  // node-pty (1.1.0) `.kill()` ONLY signals the child (unixTerminal.js:
+  // `process.kill(this.pid, signal)`) — it never closes the pseudo-terminal
+  // MASTER fd. The fd is released solely when node-pty's read stream reaches
+  // 'close', which `.destroy()` triggers explicitly. Relying on the child's
+  // exit alone leaks the master fd whenever a session is overwritten while
+  // live, or the OS "sometimes" fails to close the socket (a documented macOS
+  // behavior — see the DESTROY_SOCKET_TIMEOUT fallback in node-pty). Leaked
+  // masters accumulate against macOS `kern.tty.ptmx_max` (default 511); once
+  // the pool is exhausted openpty() returns ENXIO and EVERY subsequent
+  // agent/terminal spawn dies with a cryptic "posix_spawnp failed". So we
+  // `.destroy()` on every teardown path and sweep dead-but-mapped sessions.
+  private reaperTimer: ReturnType<typeof setInterval> | null = null;
+  private static readonly REAP_INTERVAL_MS = 60_000;
+
   // --- Dangerous-command safety guard (MVP-P0-1) ---
   // Every writeAndSubmit is screened by detectDangerousCommand. Matches are
   // logged and broadcast to listeners. By default nothing is blocked (warn-only)
@@ -103,6 +118,21 @@ export class PtyManager {
         : process.env.SHELL || "/bin/zsh");
     const shellArgs = args || [];
 
+    // fd-leak guard: PTY ids are deterministic and reused verbatim on
+    // restart/relaunch/reuse. If a LIVE session still occupies this id (a
+    // caller that skipped kill(), or an old process racing the new spawn),
+    // release its master fd BEFORE we overwrite the map slot — otherwise the
+    // old node-pty is dereferenced with its fd still open and leaks until quit.
+    // Also frees a slot in the pty pool before we allocate a new one.
+    const stale = this.sessions.get(id);
+    if (stale) {
+      console.warn(
+        `[PtyManager] create() reusing live id "${id}" — destroying stale PTY first (fd-leak guard)`,
+      );
+      this.destroyProcess(stale.process);
+      this.sessions.delete(id);
+    }
+
     let proc: pty.IPty;
     try {
       proc = pty.spawn(shell, shellArgs, {
@@ -113,6 +143,31 @@ export class PtyManager {
         env: env || (process.env as Record<string, string>),
       });
     } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      const msg = err instanceof Error ? err.message : String(err);
+      // macOS caps live pty masters at kern.tty.ptmx_max (default 511). When
+      // exhausted, openpty() returns ENXIO and node-pty surfaces it as the
+      // opaque "posix_spawnp failed". This is almost always our own leaked
+      // masters — sweep dead sessions now so a retry can succeed, and throw a
+      // cause the caller/log can actually act on instead of a spawn riddle.
+      if (
+        code === "ENXIO" ||
+        /ENXIO|posix_spawnp failed|openpty|out of pty|Device not configured/i.test(
+          msg,
+        )
+      ) {
+        console.error(
+          `[PtyManager] PTY pool exhausted spawning "${shell}" (${
+            code || "spawn error"
+          }) — running reaper to reclaim leaked fds`,
+        );
+        this.reap();
+        const e: NodeJS.ErrnoException = new Error(
+          `PTY exhausted: the OS pseudo-terminal pool is full (likely leaked terminal sessions). Reclaimed dead sessions — retry. Original: ${msg}`,
+        );
+        e.code = code || "ENXIO";
+        throw e;
+      }
       console.error(
         `[PtyManager] Failed to spawn shell="${shell}" cwd="${
           cwd || os.homedir()
@@ -316,8 +371,34 @@ export class PtyManager {
       // killProcessTree — this is what stops an orchestrator's Telegram poller
       // from orphaning across a stop/restart and 409-blocking the next one.
       this.killProcessTree(session.process.pid);
-      session.process.kill();
+      // Release the MASTER FD. node-pty's own .kill() ONLY sends a signal — it
+      // never closes the fd — so we call .destroy() (via destroyProcess), which
+      // is what closes the read stream and frees the fd. destroy() also SIGHUPs
+      // the direct child once the socket closes, so the child signal is covered.
+      this.destroyProcess(session.process);
       this.sessions.delete(id);
+    }
+  }
+
+  /**
+   * Release a node-pty's OS resources — critically the pseudo-terminal MASTER
+   * fd. node-pty 1.1.0's `.kill()` only signals the child; `.destroy()` is the
+   * sole method that closes the read stream (freeing the fd) and disposes the
+   * write stream. The `IPty` public type doesn't declare `destroy()` (it lives
+   * on the concrete UnixTerminal), so we reach it through a guarded cast and
+   * fall back to `.kill()` if it's ever absent. Idempotent and error-swallowing:
+   * destroying an already-dead/closed pty is a harmless no-op.
+   */
+  private destroyProcess(proc: pty.IPty): void {
+    try {
+      const destroy = (proc as unknown as { destroy?: () => void }).destroy;
+      if (typeof destroy === "function") {
+        destroy.call(proc);
+      } else {
+        proc.kill();
+      }
+    } catch {
+      // Already dead / socket already closed — fd release is idempotent.
     }
   }
 
@@ -398,6 +479,13 @@ export class PtyManager {
         if (this.sessions.get(id) === session) {
           this.sessions.delete(id);
         }
+        // The child is gone. node-pty MAY release the master fd via its own
+        // exit→socket-destroy timeout, but that path is best-effort on macOS
+        // ("sometimes the socket never gets closed"). Force it: destroy() this
+        // exact (possibly-stale) session so its master fd can't outlive the
+        // child. Safe even when the id was already reclaimed by a new session —
+        // we destroy the captured OLD `session` object, never the replacement.
+        this.destroyProcess(session.process);
         callback(exitCode);
       });
     }
@@ -406,6 +494,58 @@ export class PtyManager {
   killAll(): void {
     for (const [id] of this.sessions) {
       this.kill(id);
+    }
+  }
+
+  /**
+   * Start a periodic sweep that destroys sessions whose child process has died
+   * but whose map entry (and thus master fd) lingered — e.g. an onExit that
+   * never fired because the read stream stayed paused. Belt-and-suspenders on
+   * top of the explicit destroy() in kill()/onExit(); idempotent, so calling it
+   * once at app startup is enough. The interval is unref'd so it never keeps the
+   * event loop (or app shutdown) alive.
+   */
+  startReaper(): void {
+    if (this.reaperTimer) return;
+    this.reaperTimer = setInterval(
+      () => this.reap(),
+      PtyManager.REAP_INTERVAL_MS,
+    );
+    this.reaperTimer.unref?.();
+  }
+
+  stopReaper(): void {
+    if (this.reaperTimer) {
+      clearInterval(this.reaperTimer);
+      this.reaperTimer = null;
+    }
+  }
+
+  /**
+   * Sweep sessions whose child pid is confirmed dead (process.kill(pid, 0)
+   * throws ESRCH) and release their leaked master fd. Conservative: only ESRCH
+   * (definitely gone) triggers a destroy — EPERM or a pid the OS has since
+   * recycled reads as "alive" and is left untouched, so we never wrongfully
+   * destroy a live session. Also invoked synchronously when create() hits an
+   * exhausted pty pool, to reclaim slots before failing.
+   */
+  private reap(): void {
+    for (const [id, session] of this.sessions) {
+      const pid = session.process.pid;
+      if (typeof pid !== "number" || !Number.isInteger(pid)) continue;
+      let dead = false;
+      try {
+        process.kill(pid, 0); // probe only — throws ESRCH if the pid is gone
+      } catch (err) {
+        dead = (err as NodeJS.ErrnoException)?.code === "ESRCH";
+      }
+      if (dead) {
+        console.warn(
+          `[PtyManager] reaper: session "${id}" child pid ${pid} is dead — releasing leaked PTY fd`,
+        );
+        this.destroyProcess(session.process);
+        this.sessions.delete(id);
+      }
     }
   }
 }

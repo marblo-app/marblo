@@ -1,14 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { FakePty, spawned } = vi.hoisted(() => {
+const { FakePty, spawned, spawnControl } = vi.hoisted(() => {
   class FakePty {
     written: string[] = [];
     dataCbs: Array<(data: string) => void> = [];
+    exitCbs: Array<(e: { exitCode: number; signal?: number }) => void> = [];
     // node-pty's real IPty exposes the forked child pid; the group-kill path
     // reads it. Default to a safe, valid pid so unrelated tests don't trip the
     // scope guard; the reaping tests override it per case.
     pid = 4242;
     killed: (string | undefined)[] = [];
+    // node-pty's real UnixTerminal.destroy() is the ONLY method that closes the
+    // read stream and frees the master fd (kill() merely signals). PtyManager
+    // must route every teardown through destroy(); count invocations to prove
+    // the fd is actually released (leak fix, ticket s8HmkKIPzpMohBdth1mT).
+    destroyed = 0;
 
     write(data: string): void {
       this.written.push(data);
@@ -20,6 +26,10 @@ const { FakePty, spawned } = vi.hoisted(() => {
       this.killed.push(signal);
     }
 
+    destroy(): void {
+      this.destroyed++;
+    }
+
     onData(cb: (data: string) => void): { dispose: () => void } {
       this.dataCbs.push(cb);
       return {
@@ -29,23 +39,42 @@ const { FakePty, spawned } = vi.hoisted(() => {
       };
     }
 
-    onExit(): { dispose: () => void } {
-      return { dispose: () => {} };
+    onExit(cb: (e: { exitCode: number; signal?: number }) => void): {
+      dispose: () => void;
+    } {
+      this.exitCbs.push(cb);
+      return {
+        dispose: () => {
+          this.exitCbs = this.exitCbs.filter((registered) => registered !== cb);
+        },
+      };
     }
 
     emitData(data: string): void {
       for (const cb of [...this.dataCbs]) cb(data);
+    }
+
+    emitExit(exitCode = 0): void {
+      for (const cb of [...this.exitCbs]) cb({ exitCode });
     }
   }
 
   return {
     FakePty,
     spawned: [] as FakePty[],
+    // Lets a single test force the next pty.spawn() to throw a chosen error
+    // (e.g. ENXIO — the macOS pty-pool-exhausted signal). Cleared after firing.
+    spawnControl: { nextError: null as NodeJS.ErrnoException | null },
   };
 });
 
 vi.mock("node-pty", () => ({
   spawn: () => {
+    if (spawnControl.nextError) {
+      const err = spawnControl.nextError;
+      spawnControl.nextError = null;
+      throw err;
+    }
     const proc = new FakePty();
     spawned.push(proc);
     return proc;
@@ -173,8 +202,9 @@ describe("PtyManager.kill — process-group tree reaping", () => {
     // Graceful group SIGTERM, scoped to the child's own group (-pid) so the
     // poller runs its own shutdown (drops the getUpdates long-poll) fast.
     expect(killSpy).toHaveBeenCalledWith(-4242, "SIGTERM");
-    // node-pty's own single-pid cleanup still runs (closes the master fd).
-    expect(proc.killed.length).toBe(1);
+    // The MASTER FD is released via node-pty .destroy() — kill() only signals
+    // and would leak the fd. (destroy() also SIGHUPs the direct child itself.)
+    expect(proc.destroyed).toBe(1);
     // Escalation is deferred — no SIGKILL yet.
     expect(killSpy).not.toHaveBeenCalledWith(-4242, "SIGKILL");
 
@@ -210,5 +240,110 @@ describe("PtyManager.kill — process-group tree reaping", () => {
     const pm = new PtyManager();
     pm.kill("nope");
     expect(killSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("PtyManager — master-fd leak guard (ticket s8HmkKIPzpMohBdth1mT)", () => {
+  // Root cause: node-pty 1.1.0 .kill() only signals the child; the pty MASTER
+  // fd is freed solely by .destroy(). Overwriting a live id, an exit that
+  // leaves the map entry, or a paused stream all leak the master fd, which
+  // accumulates against macOS kern.tty.ptmx_max (511) until openpty() returns
+  // ENXIO and every new agent/terminal spawn dies with "posix_spawnp failed".
+  beforeEach(() => {
+    spawned.length = 0;
+    spawnControl.nextError = null;
+  });
+
+  it("destroys the stale live PTY when create() reuses the same id (no fd leak on relaunch)", () => {
+    const pm = new PtyManager();
+    pm.create("agent-7", "worker");
+    const first = spawned[0] as FakePtyInst;
+
+    // Relaunch reuses the deterministic id; the old process is still live.
+    pm.create("agent-7", "worker");
+    const second = spawned[1] as FakePtyInst;
+
+    // Old pty's fd released, new one live and owning the id.
+    expect(first.destroyed).toBe(1);
+    expect(second.destroyed).toBe(0);
+    expect(pm.listSessions()).toEqual([{ id: "agent-7", name: "worker" }]);
+  });
+
+  it("releases the master fd on child self-exit and evicts the session", () => {
+    const pm = new PtyManager();
+    pm.create("agent-x", "worker");
+    const proc = spawned[0] as FakePtyInst;
+    const exits: number[] = [];
+    pm.onExit("agent-x", (code) => exits.push(code));
+
+    proc.emitExit(0);
+
+    expect(exits).toEqual([0]); // caller callback still fires
+    expect(proc.destroyed).toBe(1); // fd released, not left to node-pty's timeout
+    expect(pm.listSessions()).toEqual([]); // map entry gone
+  });
+
+  it("a stale exit fires the callback but does NOT evict the replacement (destroys only the old pty)", () => {
+    const pm = new PtyManager();
+    pm.create("agent-r", "worker");
+    const oldProc = spawned[0] as FakePtyInst;
+    pm.onExit("agent-r", () => {});
+
+    // Same id reclaimed by a fresh session (relaunch) — create() already
+    // destroyed oldProc, and the NEW pty now owns the id.
+    pm.create("agent-r", "worker");
+    const newProc = spawned[1] as FakePtyInst;
+
+    // The OLD pty's late exit must not touch the replacement.
+    oldProc.emitExit(1);
+    expect(newProc.destroyed).toBe(0);
+    expect(pm.listSessions()).toEqual([{ id: "agent-r", name: "worker" }]);
+  });
+
+  it("reaper destroys sessions whose child pid is dead (ESRCH) and leaves live ones", () => {
+    const pm = new PtyManager();
+    pm.create("dead", "gone");
+    pm.create("alive", "running");
+    const deadProc = spawned[0] as FakePtyInst;
+    const aliveProc = spawned[1] as FakePtyInst;
+    deadProc.pid = 9001;
+    aliveProc.pid = 9002;
+
+    const killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementation((pid: number) => {
+        // pid 0-probe: dead pid throws ESRCH, live pid returns.
+        if (pid === 9001) {
+          const e: NodeJS.ErrnoException = new Error("no such process");
+          e.code = "ESRCH";
+          throw e;
+        }
+        return true as unknown as boolean;
+      });
+
+    try {
+      // Reaper is private; drive one sweep via the interval it schedules.
+      vi.useFakeTimers();
+      pm.startReaper();
+      vi.advanceTimersByTime(60_000);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      pm.stopReaper();
+      killSpy.mockRestore();
+    }
+
+    expect(deadProc.destroyed).toBe(1);
+    expect(aliveProc.destroyed).toBe(0);
+    expect(pm.listSessions()).toEqual([{ id: "alive", name: "running" }]);
+  });
+
+  it("surfaces an exhausted pty pool (ENXIO) as a clear 'PTY exhausted' error", () => {
+    const pm = new PtyManager();
+    const enxio: NodeJS.ErrnoException = new Error("posix_spawnp failed");
+    enxio.code = "ENXIO";
+    spawnControl.nextError = enxio;
+
+    expect(() => pm.create("boom", "worker")).toThrowError(/PTY exhausted/i);
   });
 });
