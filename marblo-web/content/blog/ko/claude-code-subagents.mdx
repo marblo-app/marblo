@@ -9,22 +9,297 @@ author: "Marblo"
 
 ## 서브에이전트란
 
-Claude Code는 하나의 작업을 **별도 컨텍스트를 가진 하위 에이전트**에게 위임할 수 있습니다. 메인 세션이 직접 모든 파일을 읽는 대신, 탐색 같은 넓은 작업을 서브에이전트에게 맡기고 결론만 받아오는 방식입니다. 덕분에 메인 컨텍스트가 파일 덤프로 오염되지 않습니다.
+Claude Code의 **서브에이전트(subagent)** 는 특정 종류의 일을 맡도록 분리된 하위 에이전트입니다. 메인 대화가 모든 파일, 로그, 검색 결과를 직접 끌어안는 대신, 별도 컨텍스트를 가진 에이전트가 조사를 수행하고 결론만 돌려줍니다. 공식 문서 기준으로 서브에이전트는 각자의 컨텍스트 창, 맞춤 시스템 프롬프트, 도구 접근 권한, 독립 권한 설정을 가질 수 있습니다. 그래서 "이 저장소에서 인증 로직이 어디에 있나 찾아줘"처럼 넓게 훑어야 하는 일을 메인 세션 밖으로 밀어낼 수 있습니다.
+
+이 구조의 핵심은 단순한 역할 이름이 아니라 **컨텍스트 격리**입니다. 코딩 에이전트 작업에서 컨텍스트는 작업 기억이자 판단 재료입니다. 메인 세션이 수천 줄의 검색 결과와 오래된 로그를 모두 읽으면, 나중에 실제 결정을 내려야 할 때 필요한 정보와 소음이 섞입니다. 반대로 탐색 서브에이전트가 원문을 읽고 "수정해야 할 파일은 A, 관련 테스트는 B, 주의할 관례는 C"처럼 정리해서 반환하면 메인 세션은 더 좁고 선명한 상태로 구현을 이어갈 수 있습니다.
+
+서브에이전트는 "작은 사람을 무한히 복제하는 기능"이라기보다, 한 Claude Code 세션 안에서 반복되는 작업 유형을 명시적으로 나누는 장치에 가깝습니다. 탐색, 계획, 리뷰, 디버깅, 데이터 점검처럼 작업의 성격이 분명한 경우에 특히 잘 맞습니다. 같은 일을 자주 시킨다면 `.claude/agents/` 또는 `~/.claude/agents/`에 Markdown 파일로 정의해 재사용할 수 있고, frontmatter로 이름, 설명, 허용 도구, 모델, 권한 모드 등을 설정할 수 있습니다.
+
+<Diagram caption="서브에이전트는 메인 세션 아래에서 역할별로 분기하지만, 각 분기는 자기 컨텍스트와 도구 범위를 갖고 결론만 돌려줍니다.">
+  <svg
+    viewBox="0 0 700 420"
+    role="img"
+    aria-label="메인 Claude Code 세션이 탐색, 구현 지원, 리뷰 서브에이전트로 작업을 위임하고 각 서브에이전트가 별도 컨텍스트에서 요약 결과만 반환하는 트리 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-subagent-tree" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="224" y="24" width="252" height="72" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="350" y="54" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="17" fontWeight="600" fill="#e4e4e7">
+      Claude Code main session
+    </text>
+    <text x="350" y="76" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      목표 설정 · 결정 · 최종 편집
+    </text>
+    <line x1="350" y1="96" x2="126" y2="190" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-subagent-tree)" />
+    <line x1="350" y1="96" x2="350" y2="190" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-subagent-tree)" />
+    <line x1="350" y1="96" x2="574" y2="190" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-subagent-tree)" />
+    <rect x="34" y="196" width="184" height="88" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="126" y="228" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#818cf8">
+      Explore
+    </text>
+    <text x="126" y="250" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      읽기 전용 조사
+    </text>
+    <text x="126" y="268" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      파일 위치 · 관례 요약
+    </text>
+    <rect x="258" y="196" width="184" height="88" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="350" y="228" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#34d399">
+      Specialist
+    </text>
+    <text x="350" y="250" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      도메인별 판단
+    </text>
+    <text x="350" y="268" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      API · UI · 데이터 규칙
+    </text>
+    <rect x="482" y="196" width="184" height="88" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="574" y="228" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#38bdf8">
+      Reviewer
+    </text>
+    <text x="574" y="250" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      독립 검토
+    </text>
+    <text x="574" y="268" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      회귀 · 누락 · 위험
+    </text>
+    <rect x="176" y="330" width="348" height="54" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="350" y="354" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="600" fill="#e4e4e7">
+      반환값은 원문 덤프가 아니라 의사결정 가능한 요약
+    </text>
+    <text x="350" y="374" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      "수정 파일 3개, 테스트 2개, 주의할 API 계약 1개"
+    </text>
+  </svg>
+</Diagram>
 
 ## 언제 쓰면 좋은가
 
-- **넓은 탐색**: 여러 디렉터리·네이밍 규칙을 훑어 "어디에 무엇이 있는지"만 알아낼 때.
-- **독립적 병렬 작업**: 서로 의존하지 않는 작업 여러 개를 동시에 굴릴 때.
-- **적대적 검증**: 만든 결과를 다른 관점에서 반증하도록 시킬 때.
+서브에이전트는 모든 요청에 붙이는 만능 옵션이 아닙니다. 작고 선형적인 수정, 예를 들어 버튼 문구 하나를 바꾸거나 한 함수의 타입 오류를 고치는 일에는 오히려 과합니다. 위임에는 요청을 설명하고 결과를 해석하는 비용이 들기 때문입니다. 좋은 기준은 "이 일을 메인 세션이 직접 하면 컨텍스트가 지저분해지는가"입니다.
+
+첫 번째로 잘 맞는 경우는 **넓은 탐색**입니다. 오래된 모노레포에서 결제 흐름을 고치려면 파일 이름, 라우트, 테스트, 타입 정의, 마이그레이션을 모두 찾아야 합니다. 메인 세션이 그 결과를 전부 읽으면 실제 수정 전에 이미 컨텍스트가 부풀어 오릅니다. 탐색 서브에이전트에게 "쓰기 금지, 관련 파일과 호출 흐름만 요약"이라고 맡기면, 메인 세션은 요약된 지도만 들고 구현을 시작할 수 있습니다.
+
+두 번째는 **독립 검증**입니다. 에이전트가 방금 만든 diff를 같은 대화에서 스스로 검토하면, 앞선 가정에 끌려갈 가능성이 있습니다. 별도 리뷰 서브에이전트는 더 차갑게 볼 수 있습니다. "이 변경이 공개 API 계약을 깨는지", "테스트가 실제 회귀를 잡는지", "접근성이나 모바일 레이아웃이 빠졌는지"처럼 반증 과제를 주면 좋습니다. 리뷰 결과는 칭찬보다 발견사항 중심이어야 하며, 파일과 라인 단위로 되돌아와야 쓸모가 있습니다.
+
+세 번째는 **역할 고정 작업**입니다. 팀이 반복해서 "DB 쿼리 안전성 점검", "React 컴포넌트 접근성 리뷰", "릴리스 노트 초안 작성" 같은 일을 시킨다면, 매번 긴 프롬프트를 붙이는 대신 서브에이전트 파일로 정의하는 편이 낫습니다. description을 명확히 쓰면 Claude가 자동으로 위임할 때도 판단하기 쉽고, 명시적으로 "code-reviewer 에이전트를 사용해"라고 부를 때도 결과가 일관됩니다.
+
+반대로 서브에이전트를 피해야 할 때도 있습니다. 작업이 한 파일 안에서 끝나거나, 사용자의 의도가 아직 모호하거나, 결과를 받기 전에 계속 대화하며 방향을 잡아야 한다면 메인 세션에서 처리하는 편이 좋습니다. 서브에이전트는 명확한 입력과 종료 조건을 좋아합니다. "대충 봐줘"보다는 "인증 관련 파일을 찾고, 수정 후보와 테스트 후보를 5개 이하로 요약해줘"가 훨씬 안정적입니다.
+
+## 컨텍스트 격리의 실제 효과
+
+컨텍스트 격리는 단순히 토큰을 아끼는 기술이 아닙니다. 더 중요한 효과는 **판단 표면을 줄이는 것**입니다. 코딩 작업에서 모델은 현재 대화에 들어온 내용을 근거로 다음 행동을 고릅니다. 여기에 관련 없는 검색 결과, 지나간 오류 로그, 이미 폐기한 구현안이 남아 있으면 이후 판단이 흐려질 수 있습니다.
+
+예를 들어 테스트 실패를 디버깅한다고 해보겠습니다. 메인 세션이 전체 로그를 직접 읽으면, 환경 경고, 오래된 deprecation 메시지, 무관한 snapshot 차이까지 모두 대화 안에 들어옵니다. 디버깅 서브에이전트가 같은 로그를 읽고 "실패 원인은 날짜 포맷 변경이며, 실제 수정 지점은 formatter.ts 한 곳"이라고 반환하면 메인 세션은 원인을 중심으로 움직일 수 있습니다. 필요하면 근거 파일만 추가로 열면 됩니다.
+
+또 다른 장점은 권한을 좁힐 수 있다는 점입니다. 탐색 에이전트에는 Read, Grep, Glob 같은 읽기 도구만 허용하고 Write나 Edit를 빼면, 조사 과정에서 의도치 않은 수정이 생기지 않습니다. 리뷰 에이전트도 읽기 전용으로 두는 편이 보통 안전합니다. 반면 복잡한 다단계 수정이 필요한 specialist에는 쓰기 권한을 줄 수 있습니다. 중요한 것은 모든 하위 에이전트에 같은 권한을 주지 않는 것입니다.
+
+<Diagram caption="메인 컨텍스트에는 결정에 필요한 요약만 남기고, 원문 파일·검색 결과·로그는 서브에이전트 컨텍스트 안에서 소모합니다.">
+  <svg
+    viewBox="0 0 720 360"
+    role="img"
+    aria-label="메인 컨텍스트는 짧은 결정 요약만 보관하고 서브에이전트 컨텍스트가 파일 원문, 검색 결과, 로그를 읽은 뒤 요약을 반환하는 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-context-isolation" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="34" y="50" width="260" height="236" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="164" y="82" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#e4e4e7">
+      Main context
+    </text>
+    <rect x="62" y="112" width="204" height="44" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="164" y="139" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#e4e4e7">
+      목표와 제약
+    </text>
+    <rect x="62" y="170" width="204" height="44" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="164" y="197" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#e4e4e7">
+      서브에이전트 요약
+    </text>
+    <rect x="62" y="228" width="204" height="44" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="164" y="255" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#e4e4e7">
+      최종 결정
+    </text>
+    <rect x="426" y="38" width="260" height="260" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="556" y="70" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#818cf8">
+      Subagent context
+    </text>
+    <rect x="454" y="100" width="204" height="38" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="556" y="124" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      파일 원문
+    </text>
+    <rect x="454" y="150" width="204" height="38" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="556" y="174" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      검색 결과
+    </text>
+    <rect x="454" y="200" width="204" height="38" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="556" y="224" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      실패 로그
+    </text>
+    <rect x="454" y="250" width="204" height="30" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="556" y="270" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      버려진 가설
+    </text>
+    <line x1="294" y1="132" x2="426" y2="132" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-context-isolation)" />
+    <line x1="426" y1="194" x2="294" y2="194" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-context-isolation)" />
+    <text x="360" y="120" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      위임
+    </text>
+    <text x="360" y="218" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      요약 반환
+    </text>
+  </svg>
+</Diagram>
 
 ## 실전 패턴: 탐색 → 구현 → 리뷰
 
-1. **탐색** 서브에이전트로 관련 코드 위치와 관례를 파악합니다.
-2. 메인 세션이 그 결론을 바탕으로 **구현**합니다.
-3. 별도 **리뷰** 에이전트가 diff를 독립적으로 점검합니다.
+가장 안전한 기본 패턴은 **탐색 → 구현 → 리뷰**입니다. 처음부터 여러 하위 에이전트에게 코드를 동시에 고치게 하기보다, 탐색을 분리하고 메인 세션이 구현 결정을 내린 뒤, 리뷰를 다시 분리하는 방식입니다. 이 흐름은 작게 시작해도 효과가 크고, 잘못된 병렬 수정으로 인한 충돌 가능성도 낮습니다.
 
-핵심은 "결론만 받는다"는 것입니다. 한 번에 하나의 결정을 내리게 하고, 파일 원문은 서브에이전트 컨텍스트에 남겨 두면 메인 세션이 가볍게 유지됩니다.
+1단계에서는 탐색 서브에이전트에게 범위를 줍니다. 좋은 요청은 "관련 파일을 모두 찾아줘"에서 끝나지 않습니다. "수정 후보 파일, 관련 테스트, 기존 패턴, 위험한 계약을 각각 5개 이하로 요약하고, 원문은 붙이지 말라"처럼 출력 형식을 제한해야 합니다. 읽기 전용 도구만 허용하면 더 좋습니다. 탐색의 산출물은 구현 계획이 아니라 지도입니다.
 
-## 한 명을 넘어서
+2단계에서는 메인 세션이 구현합니다. 이때 서브에이전트 요약을 그대로 믿고 자동으로 수정하기보다, 핵심 파일을 직접 다시 확인하는 과정이 필요합니다. 서브에이전트는 넓게 봤지만, 최종 책임은 메인 세션과 사용자에게 있습니다. 특히 공개 API, 데이터 마이그레이션, 결제, 인증, 권한 같은 고위험 영역에서는 요약 근거를 반드시 재확인해야 합니다.
 
-서브에이전트는 강력하지만, 결국 한 세션 안에서 순차적으로 조율됩니다. **여러 에이전트를 물리적으로 동시에** 굴리고, 각자의 진행 상황을 한눈에 보고 싶다면 별도의 오케스트레이션 레이어가 필요합니다. 마블로는 Claude를 포함한 이종 에이전트를 칸반 보드 위에서 동시에 운용하고, 각 에이전트의 상태를 실시간으로 추적하도록 설계됐습니다.
+3단계에서는 리뷰 서브에이전트를 부릅니다. 리뷰 요청은 "괜찮아?"보다 "회귀 위험, 누락된 테스트, 타입 안정성, 보안, 접근성 관점에서 수정 필요 항목만 보고하라"가 좋습니다. 리뷰 에이전트가 제안까지 모두 고치게 할 수도 있지만, 처음에는 읽기 전용 리뷰로 운영하는 편이 안정적입니다. 발견사항을 메인 세션이 선별해 반영하면, 책임 흐름이 명확합니다.
+
+이 패턴은 블로그 글 작성, 문서 개편, 테스트 보강에도 그대로 적용됩니다. 탐색 에이전트가 기존 톤과 구조를 요약하고, 메인 세션이 초안을 쓰고, 리뷰 에이전트가 사실성·중복·누락을 점검합니다. 중요한 것은 각 단계의 입출력을 좁게 만드는 것입니다. 서브에이전트가 자유롭게 모든 일을 하게 두면 편해 보이지만, 실제로는 결과를 검수하는 비용이 커집니다.
+
+## 병렬 작업은 어디까지 가능한가
+
+Claude Code 문서에서 서브에이전트는 단일 세션 안에서 동작하는 위임 구조로 설명됩니다. 최근 버전의 문서에는 서브에이전트를 백그라운드로 실행하는 옵션과 기본 동작도 언급되어 있지만, 제품의 본질은 여전히 "메인 세션이 하위 작업을 맡기고 결과를 받는 구조"입니다. 즉, 서브에이전트는 컨텍스트 관리와 전문화에는 강하지만, 여러 독립 세션을 한 화면에서 장시간 운영하고 상태를 추적하는 프로젝트 관리 레이어 자체는 아닙니다.
+
+그래서 병렬성을 이야기할 때 두 층을 구분해야 합니다. 첫 번째 층은 **세션 내부 병렬성**입니다. 한 대화 안에서 탐색, 리뷰, 조사 같은 하위 작업을 분리해 메인 세션 부담을 낮추는 방식입니다. 두 번째 층은 **워크스페이스 병렬성**입니다. 서로 다른 태스크를 여러 에이전트에게 동시에 맡기고, 각자의 진행 상태와 결과물을 칸반 또는 티켓으로 관리하는 방식입니다.
+
+작은 팀이나 개인 개발자에게는 두 층이 모두 필요할 수 있습니다. Claude Code 안에서는 서브에이전트로 한 작업의 탐색과 검증을 분리합니다. 동시에 Marblo 같은 오케스트레이션 레이어에서는 백엔드 수정, 프론트엔드 화면, 테스트 보강, 문서 작성 같은 독립 태스크를 여러 에이전트에게 나눕니다. 하나는 한 세션을 깨끗하게 유지하는 기술이고, 다른 하나는 여러 세션의 작업 흐름을 운영하는 기술입니다.
+
+<Diagram caption="서브에이전트 fan-out은 한 세션 안의 조사와 검증을 분리하고, 워크스페이스 fan-out은 여러 독립 태스크를 동시에 운영합니다.">
+  <svg
+    viewBox="0 0 760 390"
+    role="img"
+    aria-label="왼쪽은 하나의 Claude Code 세션이 여러 서브에이전트로 fan-out되는 구조이고 오른쪽은 Marblo 워크스페이스가 여러 독립 에이전트 세션으로 작업을 fan-out하는 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-fanout-subagents-ko" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="28" y="28" width="316" height="320" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="186" y="62" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#e4e4e7">
+      세션 내부 fan-out
+    </text>
+    <rect x="98" y="92" width="176" height="52" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="186" y="124" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="600" fill="#e4e4e7">
+      Claude Code
+    </text>
+    <line x1="186" y1="144" x2="90" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-ko)" />
+    <line x1="186" y1="144" x2="186" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-ko)" />
+    <line x1="186" y1="144" x2="282" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-ko)" />
+    <rect x="54" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="90" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#818cf8">
+      탐색
+    </text>
+    <rect x="150" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="186" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#34d399">
+      계획
+    </text>
+    <rect x="246" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="282" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#38bdf8">
+      리뷰
+    </text>
+    <text x="186" y="318" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      한 목표의 컨텍스트를 가볍게 유지
+    </text>
+    <rect x="416" y="28" width="316" height="320" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="574" y="62" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#e4e4e7">
+      워크스페이스 fan-out
+    </text>
+    <rect x="486" y="92" width="176" height="52" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="574" y="124" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="600" fill="#e4e4e7">
+      Marblo board
+    </text>
+    <line x1="574" y1="144" x2="478" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-ko)" />
+    <line x1="574" y1="144" x2="574" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-ko)" />
+    <line x1="574" y1="144" x2="670" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-ko)" />
+    <rect x="442" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="478" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#818cf8">
+      백엔드
+    </text>
+    <rect x="538" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="574" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#34d399">
+      UI
+    </text>
+    <rect x="634" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="670" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#38bdf8">
+      테스트
+    </text>
+    <text x="574" y="318" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      여러 독립 태스크의 상태를 한곳에서 추적
+    </text>
+  </svg>
+</Diagram>
+
+## 좋은 서브에이전트 정의의 조건
+
+커스텀 서브에이전트를 정의할 때 가장 중요한 필드는 description입니다. Claude는 이 설명을 보고 언제 해당 에이전트에 위임할지 판단합니다. "좋은 리뷰어"처럼 추상적인 문장보다 "코드 변경 후 보안, 타입 안정성, 테스트 누락을 찾을 때 사용"처럼 트리거가 분명해야 합니다. 이름도 짧고 역할을 드러내야 합니다. `code-reviewer`, `api-contract-auditor`, `frontend-a11y-checker` 같은 이름은 호출하는 사람에게도 의미가 분명합니다.
+
+도구 권한은 최소화합니다. 조사만 하는 에이전트라면 Read, Grep, Glob 정도로 충분합니다. 리뷰 에이전트도 보통 쓰기 권한이 필요 없습니다. 반대로 수정까지 맡길 에이전트라면 Write나 Edit가 필요할 수 있지만, 이 경우에도 작업 범위와 금지 사항을 프롬프트에 구체적으로 써야 합니다. 권한은 편의성보다 사고 반경을 먼저 고려해야 합니다.
+
+모델 선택도 역할에 맞춰야 합니다. 단순 탐색이나 형식 점검은 빠르고 저렴한 모델로 충분할 수 있고, 복잡한 아키텍처 판단이나 보안 리뷰는 더 강한 모델이 필요할 수 있습니다. Claude Code는 subagent frontmatter에 model을 둘 수 있으므로, 조직은 비용과 품질의 균형을 역할별로 조정할 수 있습니다. 다만 모델 이름과 동작은 제품 버전에 따라 변할 수 있으니, 팀 문서에는 "왜 이 모델을 골랐는가"를 남기는 편이 좋습니다.
+
+출력 형식은 반드시 제한합니다. "긴 설명"보다 "요약, 근거 파일, 위험도, 권장 조치"처럼 섹션을 정해두면 메인 세션이 처리하기 쉽습니다. 특히 리뷰 에이전트는 발견사항이 없을 때도 "이슈 없음, 남은 리스크는 수동 QA"처럼 명확히 말해야 합니다. 애매한 리뷰는 결국 사람이 다시 읽어야 하므로 자동화 가치가 낮습니다.
+
+## 프롬프트 예시
+
+탐색 서브에이전트에게는 다음처럼 요청할 수 있습니다.
+
+```text
+Use the Explore subagent. Read-only. Find where billing subscription status is
+computed and rendered. Return only:
+1. candidate files
+2. existing conventions
+3. tests to run
+4. risks or unclear points
+Do not paste full file contents.
+```
+
+리뷰 서브에이전트에게는 더 날카로운 기준을 줍니다.
+
+```text
+Use the code-reviewer subagent to review the current diff.
+Focus on behavioral regressions, missing tests, type safety, and security.
+Report only actionable findings with file references. If there are no blocking
+issues, say so and list residual risks.
+```
+
+서브에이전트를 체인처럼 연결할 수도 있습니다. 예를 들어 탐색 결과를 바탕으로 계획 에이전트가 변경 순서를 제안하고, 메인 세션이 구현한 뒤 리뷰 에이전트가 점검합니다. 다만 체인이 길어질수록 중간 요약의 손실이 누적됩니다. 각 단계마다 "이 결정은 확정인가, 다음 단계의 입력인가"를 분명히 해야 합니다.
+
+## 흔한 실패 패턴
+
+첫 번째 실패는 **원문을 그대로 반환하게 두는 것**입니다. 서브에이전트가 파일 내용을 길게 붙여 오면 컨텍스트 절약 효과가 사라집니다. 필요한 것은 원문이 아니라 판단입니다. 근거가 필요하면 파일 경로와 짧은 이유를 남기고, 메인 세션이 필요한 부분만 다시 열면 됩니다.
+
+두 번째 실패는 **한 에이전트에게 여러 결정을 동시에 맡기는 것**입니다. "아키텍처 조사하고, 구현하고, 테스트하고, 리뷰까지 해줘"는 편해 보이지만 결과를 검수하기 어렵습니다. 서브에이전트는 뚜렷한 역할 하나를 잘 수행할 때 가장 유용합니다. 큰 일은 여러 단계로 나누고, 각 단계의 결과를 사람이 이해 가능한 단위로 끊어야 합니다.
+
+세 번째 실패는 **권한을 넓게 열어두는 것**입니다. 읽기만 필요한 조사 에이전트가 수정 권한을 갖고 있으면 불필요한 위험이 생깁니다. 특히 프로젝트 루트, 환경 파일, 마이그레이션, 배포 설정을 만지는 작업에서는 권한과 범위를 좁히는 습관이 중요합니다. 좋은 자동화는 빠를 뿐 아니라 되돌릴 수 있어야 합니다.
+
+네 번째 실패는 **서브에이전트 결과를 검증 없이 믿는 것**입니다. 서브에이전트는 넓게 조사할 수 있지만, 놓칠 수 있습니다. 검색어가 부족했을 수도 있고, 비슷한 이름의 오래된 코드에 끌렸을 수도 있습니다. 중요한 변경 전에는 핵심 파일을 직접 열고, 테스트를 돌리고, diff를 읽어야 합니다. 서브에이전트는 판단을 돕는 도구이지 책임을 대체하지 않습니다.
+
+## Marblo와 함께 쓸 때의 기준
+
+Marblo는 여러 AI 코딩 에이전트를 칸반 보드에서 동시에 운용하는 오케스트레이션 레이어입니다. Claude Code 서브에이전트가 한 세션 내부의 컨텍스트와 역할을 정리한다면, Marblo는 여러 세션과 여러 태스크의 상태를 정리합니다. 둘은 경쟁 관계가 아니라 서로 다른 층입니다.
+
+예를 들어 "결제 설정 화면 개편"이라는 큰 목표가 있다고 합시다. Marblo에서는 이를 백엔드 API 정리, 프론트엔드 화면 수정, 테스트 보강, 문서 업데이트 같은 티켓으로 나눌 수 있습니다. 각 티켓을 맡은 Claude Code 세션 안에서는 다시 서브에이전트를 사용해 탐색과 리뷰를 분리합니다. 이렇게 하면 상위 레벨에서는 병렬 진행이 보이고, 하위 레벨에서는 각 세션의 컨텍스트가 깨끗하게 유지됩니다.
+
+Marblo 보드의 REVIEW 단계는 특히 서브에이전트 리뷰와 잘 맞습니다. 작업 에이전트가 티켓을 완료하면, 리뷰 서브에이전트가 diff를 독립적으로 읽고 발견사항을 남깁니다. 사람은 그 결과와 실제 diff를 함께 보고 승인하거나 되돌립니다. 이 흐름은 "AI가 AI를 검토한다"가 아니라 "사람이 검토하기 전에 별도 관점의 사전 점검을 추가한다"에 가깝습니다.
+
+## 결론
+
+Claude Code 서브에이전트의 가장 큰 가치는 더 많은 일을 시키는 데 있지 않습니다. 더 정확히는 **각 일을 더 작은 컨텍스트와 더 좁은 권한으로 처리하게 만드는 것**입니다. 탐색은 탐색대로, 구현은 구현대로, 리뷰는 리뷰대로 분리하면 메인 세션은 덜 혼잡해지고 의사결정은 더 명확해집니다.
+
+실전에서는 세 가지 규칙만 기억해도 충분합니다. 첫째, 서브에이전트에게는 명확한 역할과 종료 조건을 준다. 둘째, 원문 덤프가 아니라 판단 가능한 요약을 받는다. 셋째, 중요한 변경은 메인 세션과 사람이 다시 검증한다. 이 세 가지가 지켜지면 서브에이전트는 단순한 자동화 장식이 아니라, 긴 코딩 작업을 다루기 쉬운 단위로 쪼개는 실질적인 도구가 됩니다.
+
+그리고 여러 작업을 물리적으로 동시에 굴려야 하는 순간이 오면, 서브에이전트만으로는 부족합니다. 그때는 Marblo 같은 워크스페이스 오케스트레이션이 필요합니다. 한 세션 안에서는 Claude Code 서브에이전트로 컨텍스트를 정리하고, 여러 세션 사이에서는 Marblo로 태스크와 리뷰 흐름을 관리하는 조합이 가장 현실적인 운영 방식입니다.

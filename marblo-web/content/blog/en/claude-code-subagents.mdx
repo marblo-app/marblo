@@ -9,22 +9,299 @@ author: "Marblo"
 
 ## What subagents are
 
-Claude Code can delegate a task to a **subagent with its own context**. Instead of the main session reading every file itself, you hand a broad task like exploration to a subagent and get back only the conclusion. That keeps the main context from being flooded with file dumps.
+A **Claude Code subagent** is a specialized agent that handles a specific kind of work away from the main conversation. Instead of making the main session read every file, search result, and log line directly, you delegate a bounded task to a worker with its own context and get back a summary. In the current Claude Code documentation, subagents are described as having their own context window, custom system prompt, specific tool access, and independent permissions. That is the important part: a subagent is not just a label. It is a way to isolate work.
 
-## When they help
+That isolation matters because context is the working memory of a coding agent. If the main session absorbs thousands of lines of search output before it makes a design decision, useful facts and irrelevant noise sit side by side. A subagent can read the noisy material and return a small decision packet: the files that matter, the conventions already in place, the tests to run, and the open risks. The main session stays smaller and can spend its attention on the change itself.
 
-- **Broad exploration**: sweeping many directories and naming conventions to learn "where things live."
-- **Independent parallel work**: running several non-dependent tasks at once.
-- **Adversarial verification**: asking another agent to try to refute your result.
+Subagents are best understood as a **within-session delegation mechanism**. They are excellent for repeated job types such as exploration, planning, review, debugging, data validation, release-note drafting, or security checks. If you keep asking for the same kind of worker with the same instructions, you can define it as a Markdown file under `.claude/agents/` for a project or `~/.claude/agents/` for your user account. The frontmatter can define the name, description, tools, model, permission mode, maximum turns, and other behavior.
 
-## A practical pattern: explore → implement → review
+They are not a replacement for project management, long-running multi-session orchestration, or human review. A subagent can help one Claude Code session stay clean. A workspace layer such as Marblo helps you run several independent agent sessions, tasks, and reviews at once. Both layers are useful, but they solve different problems.
 
-1. Use an **exploration** subagent to map the relevant code and conventions.
-2. The main session **implements** based on that conclusion.
-3. A separate **review** agent independently checks the diff.
+<Diagram caption="A main Claude Code session can branch into role-specific subagents, each with its own context and tool scope, then receive only the decision-ready summary.">
+  <svg
+    viewBox="0 0 700 420"
+    role="img"
+    aria-label="A main Claude Code session delegating to exploration, specialist, and review subagents, each working in its own context and returning summarized conclusions"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-subagent-tree-en" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="224" y="24" width="252" height="72" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="350" y="54" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="17" fontWeight="600" fill="#e4e4e7">
+      Claude Code main session
+    </text>
+    <text x="350" y="76" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      goal · decisions · final edits
+    </text>
+    <line x1="350" y1="96" x2="126" y2="190" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-subagent-tree-en)" />
+    <line x1="350" y1="96" x2="350" y2="190" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-subagent-tree-en)" />
+    <line x1="350" y1="96" x2="574" y2="190" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-subagent-tree-en)" />
+    <rect x="34" y="196" width="184" height="88" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="126" y="228" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#818cf8">
+      Explore
+    </text>
+    <text x="126" y="250" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      read-only research
+    </text>
+    <text x="126" y="268" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      files · conventions
+    </text>
+    <rect x="258" y="196" width="184" height="88" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="350" y="228" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#34d399">
+      Specialist
+    </text>
+    <text x="350" y="250" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      domain judgment
+    </text>
+    <text x="350" y="268" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      API · UI · data
+    </text>
+    <rect x="482" y="196" width="184" height="88" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="574" y="228" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#38bdf8">
+      Reviewer
+    </text>
+    <text x="574" y="250" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      independent check
+    </text>
+    <text x="574" y="268" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      regressions · gaps
+    </text>
+    <rect x="176" y="330" width="348" height="54" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="350" y="354" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="600" fill="#e4e4e7">
+      Return a decision-ready summary, not a raw dump
+    </text>
+    <text x="350" y="374" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      "3 files, 2 tests, 1 contract risk"
+    </text>
+  </svg>
+</Diagram>
 
-The key is "return only the conclusion." Have each agent make one decision at a time and leave the raw files in the subagent's context, so the main session stays light.
+## When subagents help
 
-## Beyond a single agent
+Subagents are not a feature to attach to every prompt. If the job is tiny and linear, such as renaming a label or fixing one obvious type error, delegation adds overhead. You have to describe the task, wait for the worker, and interpret the result. A good rule of thumb is this: use a subagent when doing the work in the main conversation would make the main context messy.
 
-Subagents are powerful, but they are ultimately coordinated sequentially inside one session. To run **many agents physically at once** and watch each one's progress at a glance, you need a separate orchestration layer. Marblo is built to run heterogeneous agents — including Claude — simultaneously on a kanban board, tracking each agent's state in real time.
+The first strong use case is **broad exploration**. In a large repository, a change to subscription state might involve API routes, React components, generated types, database queries, tests, and documentation. If the main session reads all of that directly, it becomes bloated before any implementation begins. An exploration subagent can sweep the repo and return a compact map: candidate files, existing conventions, related tests, and risks. It should not paste full file contents unless explicitly asked.
+
+The second use case is **independent verification**. When the same conversation reviews its own work, it can be anchored by assumptions it already made. A separate review subagent can be colder. Ask it to look for behavioral regressions, missing tests, type safety problems, accessibility gaps, security risks, or contract breaks. The output should be findings first, tied to files and concrete risks. Praise and vague encouragement are less useful than actionable objections.
+
+The third use case is **repeatable specialist work**. If your team often asks for database query validation, frontend accessibility review, release note drafting, or API contract checks, a named subagent gives that work a stable shape. A clear description helps Claude decide when to delegate automatically, and it helps humans invoke the worker explicitly. The more repeatable the task, the more valuable the subagent definition becomes.
+
+There are also cases where you should avoid subagents. If the user's intent is still vague, keep the work in the main session and ask clarifying questions. If the work depends on continuous back-and-forth with the user, a delegated worker may run in the wrong direction. If the task is high-risk, such as auth, billing, migrations, or permission logic, subagents can help gather evidence but the main session and a human should still re-open the critical files and verify the final diff.
+
+## The practical effect of context isolation
+
+Context isolation is often described as token savings, but the deeper benefit is **decision hygiene**. A coding agent chooses its next action from what is currently in the conversation. If that conversation contains irrelevant search output, old failure logs, discarded implementation ideas, and stale assumptions, later decisions become harder to steer. A subagent lets the mess happen somewhere else and returns only the part that matters.
+
+Consider a debugging task. A failed test run might produce environment warnings, deprecation notices, snapshot noise, and one real stack trace. If the main session reads the whole thing, every later step carries that noise. A debugging subagent can inspect the output and report: "The real failure is a date formatter mismatch. The likely edit is in formatter.ts. The unrelated warnings do not block this change." The main session can then open only the files it needs.
+
+Tool scope is another practical benefit. An exploration worker can be read-only with Read, Grep, and Glob. A reviewer can also be read-only. A specialist that actually edits code may need write access, but that should be a deliberate choice. Giving every worker every tool is convenient, but it expands the blast radius of a mistaken instruction. The safest setup is role-specific: read-only for research, read-only for review, narrow write access only when the worker is meant to modify code.
+
+<Diagram caption="The main context keeps goals and summaries, while the subagent context consumes raw files, search results, logs, and discarded hypotheses.">
+  <svg
+    viewBox="0 0 720 360"
+    role="img"
+    aria-label="The main context keeping only goals, summaries, and final decisions while a subagent context reads raw files, search results, logs, and discarded hypotheses"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-context-isolation-en" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="34" y="50" width="260" height="236" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="164" y="82" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#e4e4e7">
+      Main context
+    </text>
+    <rect x="62" y="112" width="204" height="44" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="164" y="139" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#e4e4e7">
+      goal and constraints
+    </text>
+    <rect x="62" y="170" width="204" height="44" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="164" y="197" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#e4e4e7">
+      subagent summary
+    </text>
+    <rect x="62" y="228" width="204" height="44" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="164" y="255" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#e4e4e7">
+      final decision
+    </text>
+    <rect x="426" y="38" width="260" height="260" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="556" y="70" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#818cf8">
+      Subagent context
+    </text>
+    <rect x="454" y="100" width="204" height="38" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="556" y="124" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      raw files
+    </text>
+    <rect x="454" y="150" width="204" height="38" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="556" y="174" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      search results
+    </text>
+    <rect x="454" y="200" width="204" height="38" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="556" y="224" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      failure logs
+    </text>
+    <rect x="454" y="250" width="204" height="30" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="556" y="270" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      discarded hypotheses
+    </text>
+    <line x1="294" y1="132" x2="426" y2="132" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-context-isolation-en)" />
+    <line x1="426" y1="194" x2="294" y2="194" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-context-isolation-en)" />
+    <text x="360" y="120" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      delegate
+    </text>
+    <text x="360" y="218" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      summarize
+    </text>
+  </svg>
+</Diagram>
+
+## A practical pattern: explore, implement, review
+
+The safest default workflow is **explore → implement → review**. Instead of asking multiple workers to edit code at the same time, start by separating research, keep implementation under the main session, and then separate review. This gives you most of the context-management benefit without creating unnecessary merge conflicts or unclear ownership.
+
+In the exploration step, give the worker a strict scope. A weak request is "find the relevant files." A stronger request is "find the relevant files, tests, conventions, and contract risks; return no more than five bullets per section; do not paste raw file contents." Read-only tools are usually enough. The output of exploration is a map, not a decision to blindly execute.
+
+In the implementation step, the main session uses that map but still verifies the critical files. This is where judgment belongs. If the exploration summary says that three files matter, open those files and check the claim before editing. For low-risk documentation or styling work, the verification can be light. For API contracts, billing, authentication, migrations, or authorization, it should be explicit and careful.
+
+In the review step, call a separate reviewer with an adversarial brief. Do not ask "does this look good?" Ask for behavioral regressions, missing tests, type-safety problems, security issues, accessibility gaps, or broken contracts. Ask for findings first. Ask the reviewer to say clearly when there are no blocking issues and to list residual risks. The main session should then decide which findings to act on.
+
+This pattern also works outside code. For a blog post, an exploration worker can summarize the existing tone and structure, the main session can write the draft, and a review worker can check factual accuracy, duplicated sections, missing diagrams, and MDX validity. The key is to keep each step narrow. Subagents become unreliable when they are asked to research, plan, implement, test, and review all at once.
+
+## How far parallelism goes
+
+It is useful to separate two kinds of parallelism. The first is **within-session parallelism**. A Claude Code session can delegate side work to subagents so the main conversation stays focused. This is the right level for broad search, background research, review, debugging, and one-off specialist checks. The user still experiences it as one primary session that asks other workers for help.
+
+The second is **workspace parallelism**. That is the ability to run several independent tasks, often in separate sessions or worktrees, and monitor them from one place. A backend refactor, a frontend screen, a test suite expansion, and a documentation update might all move at the same time. You need a task board, ownership, status transitions, review gates, and merge discipline. Subagents can help inside each session, but they are not by themselves the workspace control plane.
+
+This distinction prevents disappointment. If you expect a subagent to behave like a full project manager, you will over-delegate and lose track of state. If you expect a workspace orchestrator to keep each individual session's context clean, you will still end up with bloated conversations. The practical answer is layered: use Claude Code subagents inside a task, and use Marblo or a similar orchestration layer across tasks.
+
+<Diagram caption="Subagent fan-out separates research and review inside one session; workspace fan-out runs independent tasks across visible agent lanes.">
+  <svg
+    viewBox="0 0 760 390"
+    role="img"
+    aria-label="A left panel showing one Claude Code session fanning out to subagents, and a right panel showing a Marblo workspace fanning out independent tasks to separate agent lanes"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-fanout-subagents-en" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="28" y="28" width="316" height="320" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="186" y="62" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#e4e4e7">
+      Within-session fan-out
+    </text>
+    <rect x="98" y="92" width="176" height="52" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="186" y="124" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="600" fill="#e4e4e7">
+      Claude Code
+    </text>
+    <line x1="186" y1="144" x2="90" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-en)" />
+    <line x1="186" y1="144" x2="186" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-en)" />
+    <line x1="186" y1="144" x2="282" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-en)" />
+    <rect x="54" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="90" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#818cf8">
+      Explore
+    </text>
+    <rect x="150" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="186" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#34d399">
+      Plan
+    </text>
+    <rect x="246" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="282" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#38bdf8">
+      Review
+    </text>
+    <text x="186" y="318" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      keeps one goal's context small
+    </text>
+    <rect x="416" y="28" width="316" height="320" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="574" y="62" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#e4e4e7">
+      Workspace fan-out
+    </text>
+    <rect x="486" y="92" width="176" height="52" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="574" y="124" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="600" fill="#e4e4e7">
+      Marblo board
+    </text>
+    <line x1="574" y1="144" x2="478" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-en)" />
+    <line x1="574" y1="144" x2="574" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-en)" />
+    <line x1="574" y1="144" x2="670" y2="220" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fanout-subagents-en)" />
+    <rect x="442" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="478" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#818cf8">
+      Backend
+    </text>
+    <rect x="538" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="574" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#34d399">
+      UI
+    </text>
+    <rect x="634" y="226" width="72" height="54" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="670" y="258" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#38bdf8">
+      Tests
+    </text>
+    <text x="574" y="318" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      tracks many independent tasks in one place
+    </text>
+  </svg>
+</Diagram>
+
+## What a good subagent definition includes
+
+The most important field in a custom subagent is the description. Claude uses it to decide when delegation is appropriate. A vague description such as "a good reviewer" is weak. A trigger-focused description such as "use after code changes to find security, type-safety, and missing-test issues" is much better. The name should also be short and clear: `code-reviewer`, `api-contract-auditor`, `frontend-a11y-checker`, or `migration-safety-reviewer`.
+
+Tool access should be minimal. A research worker usually needs read and search tools, not write access. A reviewer usually needs to inspect the repository and diff, not edit files. A specialist that is meant to modify code may need broader tools, but that should be deliberate and paired with a narrow prompt. Permissions are a design surface. They should express the job's risk profile.
+
+Model selection should match the work. Simple lookup and formatting jobs can often use a faster or cheaper model. Deep architecture review, security analysis, or ambiguous debugging may justify a stronger model. Claude Code lets subagent definitions carry a model field, so teams can tune cost and quality by role. Because model availability and behavior evolve, document why a particular model is assigned rather than treating the choice as permanent truth.
+
+The output format should be explicit. A good reviewer returns findings, evidence, severity, and recommended action. A good explorer returns candidate files, conventions, tests, and unknowns. A good release-note drafter returns user-facing changes, migration notes, and omissions. If no issues are found, the subagent should say so clearly and list any residual risk. Ambiguous summaries push the work back onto the human.
+
+## Prompt examples
+
+For exploration, a useful prompt is bounded and read-only:
+
+```text
+Use the Explore subagent. Read-only. Find where billing subscription status is
+computed and rendered. Return only:
+1. candidate files
+2. existing conventions
+3. tests to run
+4. risks or unclear points
+Do not paste full file contents.
+```
+
+For review, make the brief adversarial:
+
+```text
+Use the code-reviewer subagent to review the current diff.
+Focus on behavioral regressions, missing tests, type safety, and security.
+Report only actionable findings with file references. If there are no blocking
+issues, say so and list residual risks.
+```
+
+You can also chain subagents. Exploration can feed planning, planning can feed implementation, and implementation can feed review. But every chain loses some detail at each summary boundary. That is fine when the boundaries are intentional. It becomes risky when nobody knows whether a summary is a final decision, a hypothesis, or simply input for the next worker.
+
+## Common failure modes
+
+The first failure mode is **letting subagents return raw dumps**. If a worker pastes long file contents or full logs into the main session, the context-saving benefit disappears. Ask for decisions, not transcripts. If you need evidence, ask for file paths and short reasons, then reopen the specific files yourself.
+
+The second failure mode is **asking one worker to make too many decisions**. "Research this, implement it, test it, and review yourself" sounds efficient, but it is hard to verify. Subagents are strongest when each worker has one clear role. Break large jobs into stages, and make each stage produce something a human or the main session can evaluate.
+
+The third failure mode is **over-broad permissions**. A read-only researcher with write tools can accidentally change files. A reviewer with edit access can "fix" code before you have evaluated the finding. That may be fine in a highly automated workflow, but it should not be the default. Start narrow and expand only when the repeated workflow proves it needs more authority.
+
+The fourth failure mode is **believing the summary without verification**. Subagents can miss things. They can search with the wrong term, follow an old code path, or overlook a generated file. Before an important change, reopen the critical files, run the relevant tests, and read the diff. Delegation reduces noise; it does not remove responsibility.
+
+## Using subagents with Marblo
+
+Marblo is a workspace for orchestrating multiple AI coding agents on a kanban board. Claude Code subagents help inside one session. Marblo helps across sessions and tasks. The distinction is practical: a subagent can keep one task's context clean, while Marblo shows which tasks are TODO, IN_PROGRESS, in REVIEW, or DONE across the whole workspace.
+
+Imagine a larger goal: redesign the billing settings screen. In Marblo, you might split that into backend API cleanup, frontend UI work, test coverage, and documentation. Each ticket can run in its own agent lane. Inside the Claude Code lane for backend work, subagents can still handle exploration and review. Inside the frontend lane, a different subagent can check accessibility and responsive behavior. The board coordinates the work; subagents keep each lane focused.
+
+The REVIEW step is where the combination becomes especially useful. A worker finishes a ticket and submits a diff. A review subagent reads the diff from a separate context and reports concrete issues. The human then reads the findings and the actual diff before approval. This is not "AI reviewing AI" as a substitute for human judgment. It is a pre-review filter that gives the human a sharper checklist.
+
+## Conclusion
+
+The value of Claude Code subagents is not simply that they let you do more work. Their value is that they let you do work with **smaller contexts, narrower permissions, and clearer roles**. Exploration stays separate from implementation. Review stays separate from the assumptions that produced the diff. The main session can focus on decisions instead of carrying every intermediate artifact.
+
+In practice, remember three rules. Give each subagent a clear role and stopping point. Ask for decision-ready summaries rather than raw dumps. Verify important changes in the main session and with tests. Follow those rules and subagents become a practical way to tame long coding tasks, not just a novelty feature.
+
+When you need several independent tasks to move at the same time, add a workspace layer. Use Claude Code subagents to keep each session clean. Use Marblo to coordinate multiple agents, task tickets, review gates, and visible progress. That layered approach is the realistic way to work in parallel without losing track of what is happening.
