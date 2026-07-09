@@ -34,6 +34,7 @@
     "sync": "bash scripts/sync-and-rebuild.sh",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:pty-leak": "tsc -p electron/tsconfig.json && node --expose-gc tests/integration/pty-fd-leak.cjs",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run --config vitest.rules.config.mjs\"",
     "worktree:reap": "tsc -p electron/tsconfig.json && node dist-electron/scripts/reap-worktrees.js",
     "test:e2e:pw": "playwright test",

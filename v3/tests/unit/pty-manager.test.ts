@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "fs";
 
 const { FakePty, spawned, spawnControl } = vi.hoisted(() => {
   class FakePty {
@@ -347,3 +348,73 @@ describe("PtyManager — master-fd leak guard (ticket s8HmkKIPzpMohBdth1mT)", ()
     expect(() => pm.create("boom", "worker")).toThrowError(/PTY exhausted/i);
   });
 });
+
+// The real leak is the ORPHAN /dev/ptmx master node-pty opens per spawn and
+// never closes (ticket o1ozhfJtWVZemBPjQzZ2) — the earlier .destroy() fix was a
+// no-op against it. releaseOrphanMasterFds is the reclaim path; these tests pin
+// its SAFETY contract on a real character device (/dev/null) so a regression in
+// the guards is caught in CI, without needing real node-pty. The full real-fd,
+// zero-leak proof across every teardown path lives in the macOS/node22-only
+// integration harness (tests/integration/pty-fd-leak.cjs, `npm run test:pty-leak`).
+type OrphanFd = { fd: number; rdev: number };
+type WithRelease = { releaseOrphanMasterFds(orphanFds?: OrphanFd[]): void };
+
+// /dev/null is a character device on POSIX; on Windows there is no such fd, so
+// this contract (and the leak it guards) is POSIX-only. Skip cleanly elsewhere.
+const posix = process.platform !== "win32";
+
+describe.runIf(posix)(
+  "PtyManager — orphan master-fd reclaim contract (ticket o1ozhfJtWVZemBPjQzZ2)",
+  () => {
+    function openCharDev(): OrphanFd {
+      const fd = fs.openSync("/dev/null", "r");
+      return { fd, rdev: fs.fstatSync(fd).rdev };
+    }
+    const isOpen = (fd: number): boolean => {
+      try {
+        fs.fstatSync(fd);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    it("closes a captured orphan fd whose device still matches, reclaiming it", () => {
+      const pm = new PtyManager() as unknown as WithRelease;
+      const orphan = openCharDev();
+      expect(isOpen(orphan.fd)).toBe(true);
+
+      const list = [orphan];
+      pm.releaseOrphanMasterFds(list);
+
+      expect(isOpen(orphan.fd)).toBe(false); // fd reclaimed
+      expect(list).toHaveLength(0); // list emptied so repeat calls no-op
+    });
+
+    it("does NOT close an fd whose device no longer matches (anti wrong-close after recycle)", () => {
+      const pm = new PtyManager() as unknown as WithRelease;
+      const held = openCharDev();
+      try {
+        // Same fd number, but a bogus rdev — models the fd being recycled by the
+        // OS into a different device since capture. Must be left untouched.
+        pm.releaseOrphanMasterFds([{ fd: held.fd, rdev: held.rdev + 12345 }]);
+        expect(isOpen(held.fd)).toBe(true); // NOT closed
+      } finally {
+        fs.closeSync(held.fd);
+      }
+    });
+
+    it("is idempotent: a second teardown on the same list is a harmless no-op", () => {
+      const pm = new PtyManager() as unknown as WithRelease;
+      const orphan = openCharDev();
+      const list = [orphan];
+
+      pm.releaseOrphanMasterFds(list);
+      // Second call (e.g. kill() then a late onExit, or the reaper) must not
+      // throw and must not close whatever now holds that recycled fd number.
+      expect(() => pm.releaseOrphanMasterFds(list)).not.toThrow();
+      expect(() => pm.releaseOrphanMasterFds(undefined)).not.toThrow();
+      expect(() => pm.releaseOrphanMasterFds([])).not.toThrow();
+    });
+  },
+);

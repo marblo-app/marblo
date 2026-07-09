@@ -1,12 +1,30 @@
 import * as pty from "node-pty";
+import fs from "fs";
 import os from "os";
 import { detectDangerousCommand, type DangerMatch } from "./danger-command";
+
+/**
+ * A pseudo-terminal MASTER fd that node-pty opens at spawn but neither exposes
+ * nor closes on teardown — the ORPHAN. See PtyManager's fd-leak notes and
+ * captureOrphanMasterFds. Stored as an (fd, rdev) pair so teardown can verify
+ * the fd still points to the exact same device before closing it (a bare fd
+ * number could be recycled by the OS to something we must not close).
+ */
+interface OrphanFd {
+  fd: number;
+  rdev: number;
+}
 
 export interface PtySession {
   id: string;
   name: string;
   process: pty.IPty;
   shell: string;
+  /**
+   * Orphaned pty master fd(s) captured for this session at spawn, closed on
+   * teardown (destroyProcess). Empty on non-macOS / when none were detected.
+   */
+  orphanFds?: OrphanFd[];
 }
 
 /** Emitted when a dangerous command is detected on a writeAndSubmit. */
@@ -47,17 +65,20 @@ export class PtyManager {
   private writeAndSubmitQueues: Map<string, Promise<void>> = new Map();
 
   // --- PTY master-fd leak guard ---
-  // node-pty (1.1.0) `.kill()` ONLY signals the child (unixTerminal.js:
-  // `process.kill(this.pid, signal)`) — it never closes the pseudo-terminal
-  // MASTER fd. The fd is released solely when node-pty's read stream reaches
-  // 'close', which `.destroy()` triggers explicitly. Relying on the child's
-  // exit alone leaks the master fd whenever a session is overwritten while
-  // live, or the OS "sometimes" fails to close the socket (a documented macOS
-  // behavior — see the DESTROY_SOCKET_TIMEOUT fallback in node-pty). Leaked
-  // masters accumulate against macOS `kern.tty.ptmx_max` (default 511); once
-  // the pool is exhausted openpty() returns ENXIO and EVERY subsequent
-  // agent/terminal spawn dies with a cryptic "posix_spawnp failed". So we
-  // `.destroy()` on every teardown path and sweep dead-but-mapped sessions.
+  // node-pty (1.1.0) opens TWO /dev/ptmx master devices per spawn on macOS: the
+  // one it tracks (`proc.fd`, wrapped by its read stream) and a SECOND it never
+  // exposes on the JS API (opened via `new tty.ReadStream(term.fd)` in
+  // unixTerminal.js). `.kill()` only signals the child and closes nothing;
+  // `.destroy()` closes the read stream's tracked fd — but NEITHER closes that
+  // second, orphaned master. So both `.kill()` and `.destroy()` leak exactly one
+  // /dev/ptmx per teardown (empirically confirmed via lsof; see ticket
+  // o1ozhfJtWVZemBPjQzZ2). Leaked masters accumulate against macOS
+  // `kern.tty.ptmx_max` (default 511); once exhausted, openpty() returns ENXIO
+  // and EVERY subsequent agent/terminal spawn dies with a cryptic
+  // "posix_spawnp failed". The fix: capture that orphan fd at spawn
+  // (captureOrphanMasterFds) and `fs.closeSync()` it on every teardown path
+  // (destroyProcess → releaseOrphanMasterFds), in addition to `.destroy()`ing
+  // the tracked fd and sweeping dead-but-mapped sessions.
   private reaperTimer: ReturnType<typeof setInterval> | null = null;
   private static readonly REAP_INTERVAL_MS = 60_000;
 
@@ -129,9 +150,15 @@ export class PtyManager {
       console.warn(
         `[PtyManager] create() reusing live id "${id}" — destroying stale PTY first (fd-leak guard)`,
       );
-      this.destroyProcess(stale.process);
+      this.destroyProcess(stale.process, stale.orphanFds);
       this.sessions.delete(id);
     }
+
+    // Snapshot our open pty-master fds BEFORE spawning so we can attribute the
+    // orphan fd node-pty is about to leak (see captureOrphanMasterFds). Taken
+    // immediately before pty.spawn (a synchronous native call) so nothing else
+    // can open an fd in between — the diff is exact.
+    const beforeFds = this.snapshotCharDevFds();
 
     let proc: pty.IPty;
     try {
@@ -177,7 +204,16 @@ export class PtyManager {
       throw err;
     }
 
-    const session: PtySession = { id, name, process: proc, shell };
+    const session: PtySession = {
+      id,
+      name,
+      process: proc,
+      shell,
+      // Capture the orphan master fd node-pty just leaked (macOS only) so every
+      // teardown path can reclaim it. Runs synchronously right after spawn while
+      // the orphan is freshly open and unambiguously attributable to this call.
+      orphanFds: this.captureOrphanMasterFds(beforeFds, proc),
+    };
     this.sessions.set(id, session);
     return session;
   }
@@ -371,11 +407,12 @@ export class PtyManager {
       // killProcessTree — this is what stops an orchestrator's Telegram poller
       // from orphaning across a stop/restart and 409-blocking the next one.
       this.killProcessTree(session.process.pid);
-      // Release the MASTER FD. node-pty's own .kill() ONLY sends a signal — it
-      // never closes the fd — so we call .destroy() (via destroyProcess), which
-      // is what closes the read stream and frees the fd. destroy() also SIGHUPs
-      // the direct child once the socket closes, so the child signal is covered.
-      this.destroyProcess(session.process);
+      // Release the MASTER FDs. node-pty's own .kill() ONLY sends a signal — it
+      // never closes any fd — so we call .destroy() (via destroyProcess), which
+      // closes the read stream (proc.fd) and, in destroyProcess, closes the
+      // orphan master fd too. destroy() also SIGHUPs the direct child once the
+      // socket closes, so the child signal is covered.
+      this.destroyProcess(session.process, session.orphanFds);
       this.sessions.delete(id);
     }
   }
@@ -389,7 +426,7 @@ export class PtyManager {
    * fall back to `.kill()` if it's ever absent. Idempotent and error-swallowing:
    * destroying an already-dead/closed pty is a harmless no-op.
    */
-  private destroyProcess(proc: pty.IPty): void {
+  private destroyProcess(proc: pty.IPty, orphanFds?: OrphanFd[]): void {
     try {
       const destroy = (proc as unknown as { destroy?: () => void }).destroy;
       if (typeof destroy === "function") {
@@ -400,6 +437,113 @@ export class PtyManager {
     } catch {
       // Already dead / socket already closed — fd release is idempotent.
     }
+    // node-pty's `.destroy()` closes the master fd it TRACKS (`proc.fd`, wrapped
+    // by its read stream) but NOT the SECOND /dev/ptmx master it opens at spawn
+    // and never exposes (the "orphan" — see captureOrphanMasterFds). That orphan
+    // is what actually leaks against macOS `kern.tty.ptmx_max` on every teardown
+    // (verified: .kill() and .destroy() both leave exactly 1 orphan per session).
+    // Close it here, on every teardown path. Outside the try above and self-
+    // guarded so a destroy() throw can't skip it and a double teardown is a no-op.
+    this.releaseOrphanMasterFds(orphanFds);
+  }
+
+  // On macOS a device number packs major in the high 8 bits: major = rdev >> 24.
+  // Bit ops in JS coerce to int32; a pty master's rdev (major 15 → ~2.5e8) fits,
+  // but use integer division to stay safe if the packing ever widens.
+  private static deviceMajor(rdev: number): number {
+    return Math.floor(rdev / 0x1000000) & 0xff;
+  }
+
+  /**
+   * Snapshot this process's currently-open CHARACTER-device fds as an fd→rdev
+   * map. Cheap: one readdir of /dev/fd plus an fstat per fd. Used to diff the
+   * open-fd set across a pty.spawn so the newly-appearing pty master(s) can be
+   * attributed to a specific session. macOS-only — the orphan-fd leak is a macOS
+   * /dev/ptmx behavior, and gating here makes the whole mechanism a no-op on
+   * other platforms (returns an empty map, so nothing is ever captured/closed).
+   */
+  private snapshotCharDevFds(): Map<number, number> {
+    const snap = new Map<number, number>();
+    if (process.platform !== "darwin") return snap;
+    let names: string[];
+    try {
+      names = fs.readdirSync("/dev/fd");
+    } catch {
+      return snap;
+    }
+    for (const name of names) {
+      const fd = Number(name);
+      if (!Number.isInteger(fd)) continue;
+      try {
+        const st = fs.fstatSync(fd);
+        if (st.isCharacterDevice()) snap.set(fd, st.rdev);
+      } catch {
+        // fd closed between readdir and fstat (e.g. /dev/fd's own dir handle).
+      }
+    }
+    return snap;
+  }
+
+  /**
+   * Identify the orphaned pty MASTER fd(s) a spawn just leaked: character-device
+   * fds that (a) share `proc.fd`'s device MAJOR (so we never touch an unrelated
+   * char device like /dev/null), and (b) are NEW relative to `before` — absent,
+   * or present but with a DIFFERENT rdev (an fd number the OS recycled into a
+   * fresh pty device across the spawn). `proc.fd` itself is excluded: node-pty
+   * tracks and closes it via `.destroy()`. Comparing the (fd, rdev) pair rather
+   * than the bare fd number is what makes recycled fd numbers attributable.
+   *
+   * The major is read from `proc.fd` at capture time (self-calibrating — no
+   * hardcoded device number), so it survives node-pty patch bumps. `fd` and
+   * `destroy` are not on node-pty's public `IPty` type (they live on the
+   * concrete UnixTerminal), so both are reached through guarded casts.
+   */
+  private captureOrphanMasterFds(
+    before: Map<number, number>,
+    proc: pty.IPty,
+  ): OrphanFd[] {
+    if (process.platform !== "darwin") return [];
+    const procFd = (proc as unknown as { fd?: number }).fd;
+    if (typeof procFd !== "number" || !Number.isInteger(procFd)) return [];
+    let masterMajor: number;
+    try {
+      masterMajor = PtyManager.deviceMajor(fs.fstatSync(procFd).rdev);
+    } catch {
+      return [];
+    }
+    const orphans: OrphanFd[] = [];
+    for (const [fd, rdev] of this.snapshotCharDevFds()) {
+      if (fd === procFd) continue;
+      if (PtyManager.deviceMajor(rdev) !== masterMajor) continue;
+      if (before.get(fd) === rdev) continue; // unchanged device → pre-existing
+      orphans.push({ fd, rdev });
+    }
+    return orphans;
+  }
+
+  /**
+   * Close the orphan master fd(s) captured for a session, reclaiming the
+   * /dev/ptmx slot node-pty leaks per teardown. Self-guarding and idempotent:
+   * each fd is re-fstat'd and closed ONLY while it is still the exact same
+   * character device (rdev match) captured at spawn — so an fd number the OS has
+   * since recycled is never wrongly closed — and the list is emptied after, so a
+   * second teardown (kill() then a late onExit, or the reaper) is a harmless
+   * no-op. Errors (EBADF on an already-closed fd) are swallowed.
+   */
+  private releaseOrphanMasterFds(orphanFds?: OrphanFd[]): void {
+    if (!orphanFds || orphanFds.length === 0) return;
+    for (const { fd, rdev } of orphanFds) {
+      try {
+        const st = fs.fstatSync(fd);
+        if (st.isCharacterDevice() && st.rdev === rdev) {
+          fs.closeSync(fd);
+        }
+      } catch {
+        // EBADF (already closed) or fd recycled into a non-matching device —
+        // nothing of ours to reclaim.
+      }
+    }
+    orphanFds.length = 0;
   }
 
   /**
@@ -482,10 +626,10 @@ export class PtyManager {
         // The child is gone. node-pty MAY release the master fd via its own
         // exit→socket-destroy timeout, but that path is best-effort on macOS
         // ("sometimes the socket never gets closed"). Force it: destroy() this
-        // exact (possibly-stale) session so its master fd can't outlive the
+        // exact (possibly-stale) session so its master fds can't outlive the
         // child. Safe even when the id was already reclaimed by a new session —
         // we destroy the captured OLD `session` object, never the replacement.
-        this.destroyProcess(session.process);
+        this.destroyProcess(session.process, session.orphanFds);
         callback(exitCode);
       });
     }
@@ -543,7 +687,7 @@ export class PtyManager {
         console.warn(
           `[PtyManager] reaper: session "${id}" child pid ${pid} is dead — releasing leaked PTY fd`,
         );
-        this.destroyProcess(session.process);
+        this.destroyProcess(session.process, session.orphanFds);
         this.sessions.delete(id);
       }
     }
