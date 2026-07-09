@@ -9,11 +9,15 @@ author: "Marblo"
 
 ## Continuing on
 
-[Getting Started with MCP](/en/blog/mcp-getting-started) covered the basics. Now we look at **safe design** when connecting files, databases, and APIs to agents in a real project. One core principle — **expose only as much as needed.**
+[Getting Started with MCP](/en/blog/mcp-getting-started) covered the basics. Now we look at **safe design** when connecting files, databases, internal APIs, and external SaaS tools to agents in a real project. MCP is a way to give agents more capability, but operationally it is also a boundary system: it defines what is exposed, who can call it, and where the result is recorded.
+
+The core rule is simple: **expose only what is needed, run it locally when possible, and leave an audit trail.** Follow those three habits and MCP becomes a controlled interface to code and data instead of a risky everything-plugin. Ignore them and the convenience turns into ambiguity: every agent sees every tool, writes happen without ownership, and debugging becomes a reconstruction exercise.
+
+It helps to keep the terms precise. The host application is the app running the agent experience. The MCP client lives inside that host and communicates with servers. An MCP server exposes capabilities such as file search, document reading, database lookup, or API calls in a standard shape. Servers can provide three broad things: **tools**, which the model may ask to call; **resources**, which the host can read as context; and **prompts**, which package reusable instructions. A tool call is not the model freely reaching into the internet. It is mediated by the host, the configured server, and the server's input schema.
 
 ## Separate servers by role
 
-Don't pile every permission into one giant MCP server. Split file access, DB queries, and external APIs into **separate servers**, so each exposes only its own scope and the blast radius stays small if something goes wrong.
+Do not pile every permission into one giant MCP server. File access, database queries, deployment status, issue trackers, and billing APIs have very different risk profiles. Broad read access to product documentation may be acceptable. Write access to production data or payment operations belongs in a much tighter box. Splitting servers by role means each server exposes only its scope, and the blast radius stays small when something goes wrong.
 
 ```json
 {
@@ -30,20 +34,197 @@ Don't pile every permission into one giant MCP server. Split file access, DB que
 }
 ```
 
+This small example carries several important decisions. The docs server mounts only `/project/docs`. The database server advertises its read-only intent in the name. If an agent does not need the entire repository root, migration secrets, or environment files, do not make them visible by default. Tool names should be equally explicit. `run_query` is vague and powerful. `search_customers_readonly` tells the model what the tool is for and hints at the guardrail.
+
+<Diagram caption="MCP servers are split by permission boundary, and the host MCP client exposes only approved servers to the agent.">
+  <svg
+    viewBox="0 0 720 360"
+    role="img"
+    aria-label="An agent reaches docs, read-only database, and internal API servers through a host MCP client with separated permission scopes"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mcp-topology-en"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="36" y="118" width="158" height="92" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="115" y="152" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#34d399">AI Agent</text>
+    <text x="115" y="176" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">choose tool · fill args</text>
+    <rect x="260" y="92" width="190" height="144" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="355" y="124" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#e4e4e7">Host app</text>
+    <text x="355" y="150" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">MCP client</text>
+    <rect x="286" y="170" width="138" height="40" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="355" y="195" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fontWeight="600" fill="#e4e4e7">allowlist · schemas</text>
+    <rect x="526" y="34" width="156" height="66" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="604" y="61" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#e4e4e7">docs server</text>
+    <text x="604" y="82" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">read /project/docs</text>
+    <rect x="526" y="146" width="156" height="66" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="604" y="173" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#e4e4e7">db-readonly</text>
+    <text x="604" y="194" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">SELECT only</text>
+    <rect x="526" y="258" width="156" height="66" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="604" y="285" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#e4e4e7">internal-api</text>
+    <text x="604" y="306" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">approved endpoints</text>
+    <line x1="194" y1="164" x2="260" y2="164" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-topology-en)" />
+    <line x1="450" y1="134" x2="526" y2="72" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-topology-en)" />
+    <line x1="450" y1="164" x2="526" y2="178" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-topology-en)" />
+    <line x1="450" y1="194" x2="526" y2="290" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-topology-en)" />
+  </svg>
+</Diagram>
+
 ## Least privilege
 
-- **Files**: mount only the directory you need, not the whole project.
-- **DB**: if writes aren't needed, expose a **read-only** connection.
-- **API**: keep keys on the server side; don't expose them to the agent.
+MCP safety starts with habits, not with a big security product. Every time you add a server, ask whether the tool truly needs the permission you are about to grant.
+
+- **Files**: mount only the directories needed for the task, not the whole project. A documentation agent may need `content/blog` and `docs`. A test agent may need source and test folders. Neither usually needs `.env` files, keychain dumps, or customer data samples.
+- **Databases**: if writes are not needed, expose a read-only connection. Send analytical queries to a replica or a sample database, and put production writes behind a separate approval flow.
+- **APIs**: keep keys on the server side. Do not reveal token strings to the agent. Let the server provide narrow functions such as `create_issue` or `fetch_invoice_status`.
+- **Shells**: arbitrary command execution is the sharpest tool. If you need it, constrain the working directory, allowed commands, timeout, and output size.
+
+A good MCP tool makes its negative space clear. The important question is not only "what can it do" but also "what can it never do." `database.query(sql: string)` lets the model generate almost anything. `find_orders_by_customer(customerId: string)` narrows the input shape, query scope, and returned data. The narrower the tool, the less likely a reasoning mistake becomes an operational incident.
+
+## Keep tools, resources, and prompts separate
+
+MCP tools, resources, and prompts can look similar in a UI, but they are different primitives. A tool is an action: search, write a file, create a ticket, call an API, or run a calculation. A resource is readable context: a file, document, schema, log, or design note that the agent should understand. A prompt is a reusable procedure, such as a code review checklist, release note template, or migration audit routine.
+
+This distinction directly affects safety. You do not need a tool call just to read a README. Expose it as a resource. A payment refund, on the other hand, is clearly a tool and should carry audit logging and approval rules. Prompts are not permissions. Writing "do not delete anything" inside a prompt does not make a delete tool safe. The server scope and the tool implementation must enforce the boundary.
+
+<Diagram caption="Resources share read context, while tools stay as constrained actions; agents align on knowledge without inheriting the same write power.">
+  <svg
+    viewBox="0 0 720 390"
+    role="img"
+    aria-label="Multiple agents read documents and schemas from a shared resource registry, while constrained tool calls record audit logs"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mcp-resources-en"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="246" y="32" width="228" height="78" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="360" y="63" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#e4e4e7">Shared resources</text>
+    <text x="360" y="86" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">docs · schemas · logs · design notes</text>
+    <rect x="42" y="170" width="156" height="68" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="120" y="198" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#818cf8">Claude</text>
+    <text x="120" y="218" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">backend analysis</text>
+    <rect x="282" y="170" width="156" height="68" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="360" y="198" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#34d399">Codex</text>
+    <text x="360" y="218" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">UI implementation</text>
+    <rect x="522" y="170" width="156" height="68" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="600" y="198" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#38bdf8">Test agent</text>
+    <text x="600" y="218" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">verification plan</text>
+    <rect x="246" y="296" width="228" height="56" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="360" y="320" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="600" fill="#e4e4e7">Constrained tool calls</text>
+    <text x="360" y="339" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">audit log · approval · result record</text>
+    <line x1="300" y1="110" x2="154" y2="170" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-en)" />
+    <line x1="360" y1="110" x2="360" y2="170" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-en)" />
+    <line x1="420" y1="110" x2="566" y2="170" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-en)" />
+    <line x1="120" y1="238" x2="286" y2="310" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-en)" />
+    <line x1="360" y1="238" x2="360" y2="296" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-en)" />
+    <line x1="600" y1="238" x2="434" y2="310" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-en)" />
+  </svg>
+</Diagram>
 
 ## The safety of local execution
 
-Run MCP servers locally and data never leaves your machine. That **local boundary** matters when handling sensitive code or databases. Marblo runs every agent locally, so MCP servers can sit inside the same boundary.
+Run MCP servers locally and data does not need to leave the user's machine. That **local boundary** matters when handling sensitive code, internal documents, or local database snapshots. Marblo's multi-agent workflow assumes agents run on the local workstation, so MCP servers can live inside the same boundary. Even when a server calls a network API, the API key can remain in the server process environment while the model sees only the narrow tool.
+
+Local execution is not the same thing as complete security. A local server can still read secrets if you mount the wrong path, and a broad shell tool can still damage the local machine. Treat "local" as the starting line. Add sandboxing, working directory limits, read-only modes, command allowlists, timeouts, and log retention.
+
+The operational pattern is straightforward. First, review server configuration like code. Second, make read-only the default. Third, make write tools obvious in name and description. Fourth, attach tool calls to tickets or logs. Fifth, record failed calls too. Failure logs reveal whether permissions are too narrow, whether the model misunderstands a tool description, or whether a server is unreliable.
 
 ## When multiple agents share
 
-Sharing one set of MCP servers across agents keeps tools and context consistent. But for **servers with write access**, you must be able to track which agent made which change — tickets and a board fill that role.
+Sharing one MCP server set across agents keeps tools and context consistent. If a backend agent and a frontend agent read different API schemas, they may use the same words while imagining different contracts. Shared resources reduce that drift. But once write-capable servers are shared, you must know which agent made which change. In Marblo, the ticket and board provide that accountability layer.
+
+In a multi-agent environment, "same tools for everyone" is rarely the safest design. A better rule is: different responsibility, different exposure. A documentation agent may read blog content and design notes and write only inside a content folder. A backend agent may read schemas and tests but not write production data. A verification agent may run build, lint, and test commands while having no source-editing permission. The underlying MCP server configuration can be shared, while the host filters which tools each role can actually see.
+
+<Diagram caption="In a multi-agent workspace, agents may share the MCP layer while each role sees a different subset of tools and write permissions.">
+  <svg
+    viewBox="0 0 720 420"
+    role="img"
+    aria-label="An orchestrator assigns role-specific MCP access to three agents, and each tool call is recorded on the ticket timeline"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mcp-agents-en"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="270" y="24" width="180" height="62" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="360" y="49" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#e4e4e7">Orchestrator</text>
+    <text x="360" y="69" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">roles · tickets · access map</text>
+    <rect x="46" y="142" width="164" height="72" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="128" y="170" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#818cf8">Backend agent</text>
+    <text x="128" y="191" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">schema · tests · readonly DB</text>
+    <rect x="278" y="142" width="164" height="72" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="360" y="170" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#34d399">Frontend agent</text>
+    <text x="360" y="191" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">docs · components · local files</text>
+    <rect x="510" y="142" width="164" height="72" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="592" y="170" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#38bdf8">Test agent</text>
+    <text x="592" y="191" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">build · lint · test output</text>
+    <rect x="178" y="276" width="364" height="64" rx="8" fill="#18181b" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="360" y="302" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#e4e4e7">Shared MCP layer</text>
+    <text x="360" y="323" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">shared servers, role-filtered exposure</text>
+    <rect x="254" y="366" width="212" height="38" rx="8" fill="#27272a" stroke="#fbbf24" strokeWidth="1.5" />
+    <text x="360" y="390" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fontWeight="600" fill="#fbbf24">tool results logged to ticket timeline</text>
+    <line x1="316" y1="86" x2="150" y2="142" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-en)" />
+    <line x1="360" y1="86" x2="360" y2="142" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-en)" />
+    <line x1="404" y1="86" x2="570" y2="142" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-en)" />
+    <line x1="128" y1="214" x2="260" y2="276" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-en)" />
+    <line x1="360" y1="214" x2="360" y2="276" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-en)" />
+    <line x1="592" y1="214" x2="460" y2="276" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-en)" />
+    <line x1="360" y1="340" x2="360" y2="366" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-en)" />
+  </svg>
+</Diagram>
+
+## Write tool descriptions like contracts
+
+The model decides whether to use a tool by reading the name, description, and input schema. That means tool descriptions should read more like contracts than marketing copy. They should say what the tool does, what it does not do, which inputs are valid, and which failures are expected. "Manage files" is vague. "Read UTF-8 text files under the configured docs root" is much better.
+
+Keep input schemas narrow too. A single free-form string forces the model to infer the server's hidden rules. Split path, query, limit, and dry-run fields. Give write tools a dry-run mode when possible. Separate irreversible actions, such as deletion or external transmission, into tools with explicit confirmation steps. Return structured results as well: success status, changed targets, warnings, and suggested next steps are easier for the agent to reason about than a blob of prose.
+
+## Design for failure
+
+A safe MCP server treats failure as a normal path. If permission is missing, return a clear permission error. If a file is too large, return a bounded excerpt or ask for a narrower read. If a database query runs too long, time it out. If an external API rate-limits the call, say whether retrying makes sense. The agent should be able to adjust its plan from the failure message.
+
+Failure messages become collaboration signals in multi-agent work. If the frontend agent cannot find the API schema resource, that may mean the backend task has not reached review yet. If the test agent runs a build and fails because an environment variable is absent, that is an execution environment issue, not necessarily a code defect. Do not swallow tool failures. Put them on the ticket timeline so people and other agents share the same context.
+
+## Checklist
+
+Before attaching MCP to a real project, run the design through these questions.
+
+- Does this server have a single responsibility that fits in one sentence?
+- Are file, database, and API permissions separated by read and write needs?
+- Are secrets kept out of prompts and tool results?
+- Can the model use the tool safely from the name and schema alone?
+- Do write tools have at least one of audit logging, dry run, or approval?
+- When multiple agents share a server, is the caller identity recorded?
+- Are failure results structured enough to decide the next action?
 
 ## Takeaway
 
-The point of advanced MCP isn't "connect more" — it's "connect **narrowly, locally, and traceably**."
+The point of advanced MCP is not "connect more." More precisely, it is **connect narrowly, locally, and traceably**. Split tools by role-specific servers, organize resources as shared context, and tie write permissions to tickets and logs. Done this way, agents understand more of the project while their real actions stay inside boundaries a human can review.
+
+In a multi-agent workspace like Marblo, MCP is not just a plugin layer. It becomes collaboration infrastructure. Each agent sees only the tools it needs, reads the same resources, and leaves tool results on the board. With that structure in place, adding agents does not make coordination chaos grow at the same rate. Permissions, context, and responsibility all move inside the same coordinate system.

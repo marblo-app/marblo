@@ -9,11 +9,15 @@ author: "Marblo"
 
 ## 이어서
 
-[MCP 시작하기](/ko/blog/mcp-getting-started)에서 기본을 다뤘습니다. 이번엔 실제 프로젝트에서 파일·데이터베이스·API를 에이전트에 연결할 때의 **안전한 설계**를 봅니다. 핵심 원칙 하나 — **필요한 만큼만 노출한다.**
+[MCP 시작하기](/ko/blog/mcp-getting-started)에서 기본을 다뤘습니다. 이번에는 실제 프로젝트에서 파일, 데이터베이스, 내부 API, 외부 SaaS를 에이전트에 연결할 때의 **안전한 설계**를 봅니다. MCP는 에이전트에게 더 많은 능력을 주는 규격이지만, 운영 관점에서는 권한을 어디까지 열고, 누가 호출했고, 결과가 어디에 남는지를 정하는 경계 시스템이기도 합니다.
+
+핵심 원칙은 단순합니다. **필요한 만큼만 노출하고, 로컬에서 실행하며, 호출 흔적을 남긴다.** 이 세 가지를 지키면 MCP는 위험한 만능 플러그인이 아니라, 코드베이스와 데이터에 대한 제어된 인터페이스가 됩니다. 반대로 모든 권한을 한 서버에 몰아넣고 모든 에이전트가 같은 쓰기 권한을 공유하면, 편리함보다 추적 불가능성이 먼저 커집니다.
+
+MCP를 이해할 때는 먼저 용어를 정확히 나누는 것이 좋습니다. 호스트 애플리케이션은 에이전트를 실행하는 앱입니다. MCP 클라이언트는 호스트 안에서 서버와 통신하는 쪽입니다. MCP 서버는 파일 검색, 문서 읽기, DB 조회, API 호출 같은 기능을 표준 방식으로 노출합니다. 서버가 제공하는 것은 보통 세 종류입니다. 모델이 호출할 수 있는 **tools**, 애플리케이션이 컨텍스트로 읽어 올 수 있는 **resources**, 재사용 가능한 지시 템플릿인 **prompts**입니다. 도구 호출은 모델이 직접 인터넷을 자유롭게 두드리는 것이 아니라, 호스트가 허용한 서버와 스키마를 통해 중개됩니다.
 
 ## 서버를 역할별로 분리한다
 
-하나의 거대한 MCP 서버에 모든 권한을 몰아넣지 마세요. 파일 접근, DB 조회, 외부 API를 **별도 서버**로 나누면 각 서버가 자기 범위만 노출하고, 문제가 생겨도 영향 범위가 좁습니다.
+하나의 거대한 MCP 서버에 모든 권한을 몰아넣지 마세요. 파일 접근, DB 조회, 배포 상태 확인, 이슈 트래커, 결제 API는 서로 다른 위험도를 가집니다. 파일 읽기는 넓게 허용해도 괜찮을 수 있지만, 프로덕션 DB 쓰기나 결제 취소 API는 완전히 다른 취급을 받아야 합니다. 서버를 역할별로 나누면 각 서버가 자기 범위만 노출하고, 문제가 생겨도 영향 범위가 좁습니다.
 
 ```json
 {
@@ -30,20 +34,197 @@ author: "Marblo"
 }
 ```
 
+이 예시는 작지만 중요한 결정을 보여 줍니다. 문서 서버는 `/project/docs`만 마운트합니다. DB 서버는 이름부터 읽기 전용이라는 의도를 드러냅니다. 에이전트가 프로젝트 루트 전체를 뒤지거나, 마이그레이션 파일과 비밀 설정 파일을 모두 볼 필요가 없다면 처음부터 경로를 좁히는 편이 낫습니다. 도구 설명도 마찬가지입니다. `run_query`보다 `search_customers_readonly`처럼 목적과 제한이 드러나는 이름이 좋습니다.
+
+<Diagram caption="MCP 서버는 권한 단위로 나뉘고, 호스트의 MCP 클라이언트가 허용된 서버만 에이전트에게 노출합니다.">
+  <svg
+    viewBox="0 0 720 360"
+    role="img"
+    aria-label="에이전트가 호스트의 MCP 클라이언트를 통해 문서, 읽기 전용 데이터베이스, 내부 API 서버에 분리된 권한으로 접근하는 토폴로지"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mcp-topology-ko"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="36" y="118" width="158" height="92" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="115" y="152" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#34d399">AI 에이전트</text>
+    <text x="115" y="176" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">도구 선택 · 인자 생성</text>
+    <rect x="260" y="92" width="190" height="144" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="355" y="124" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#e4e4e7">호스트 앱</text>
+    <text x="355" y="150" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">MCP 클라이언트</text>
+    <rect x="286" y="170" width="138" height="40" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="355" y="195" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fontWeight="600" fill="#e4e4e7">허용 목록 · 스키마</text>
+    <rect x="526" y="34" width="156" height="66" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="604" y="61" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#e4e4e7">docs 서버</text>
+    <text x="604" y="82" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">/project/docs 읽기</text>
+    <rect x="526" y="146" width="156" height="66" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="604" y="173" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#e4e4e7">db-readonly</text>
+    <text x="604" y="194" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">SELECT 전용</text>
+    <rect x="526" y="258" width="156" height="66" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="604" y="285" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#e4e4e7">internal-api</text>
+    <text x="604" y="306" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">허용 엔드포인트</text>
+    <line x1="194" y1="164" x2="260" y2="164" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-topology-ko)" />
+    <line x1="450" y1="134" x2="526" y2="72" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-topology-ko)" />
+    <line x1="450" y1="164" x2="526" y2="178" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-topology-ko)" />
+    <line x1="450" y1="194" x2="526" y2="290" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-topology-ko)" />
+  </svg>
+</Diagram>
+
 ## 최소 권한 원칙
 
-- **파일**: 프로젝트 전체가 아니라 필요한 디렉터리만 마운트합니다.
-- **DB**: 쓰기가 필요 없다면 **읽기 전용** 연결만 노출합니다.
-- **API**: 키는 서버 쪽에 두고, 에이전트에는 노출하지 않습니다.
+MCP 보안은 거창한 제품 기능 이전에 습관의 문제입니다. 서버를 만들 때마다 "이 도구가 정말 이 권한을 가져야 하는가"를 묻는 것이 출발점입니다.
+
+- **파일**: 프로젝트 전체가 아니라 필요한 디렉터리만 마운트합니다. 문서 작성 에이전트에는 `content/blog`와 `docs`면 충분할 수 있습니다. 테스트 에이전트에는 소스와 테스트 디렉터리가 필요하지만, `.env`, 키체인 덤프, 고객 데이터 샘플까지 필요하지는 않습니다.
+- **DB**: 쓰기가 필요 없다면 읽기 전용 연결만 노출합니다. 분석용 질의는 replica나 샘플 DB로 보내고, 프로덕션 쓰기는 별도 승인 흐름을 둡니다.
+- **API**: 키는 서버 쪽에 둡니다. 에이전트에게 토큰 문자열을 보여 주지 말고, 서버가 `create_issue`, `fetch_invoice_status`처럼 좁은 함수를 제공합니다.
+- **셸**: 임의 명령 실행 도구는 가장 위험한 도구입니다. 꼭 필요하다면 작업 디렉터리, 허용 명령, 타임아웃, 출력 제한을 명확히 둡니다.
+
+좋은 MCP 도구는 "무엇이 가능한가"보다 "무엇이 불가능한가"가 분명합니다. 예를 들어 `database.query(sql: string)`은 모델이 어떤 SQL이든 생성할 수 있게 합니다. 반면 `find_orders_by_customer(customerId: string)`는 입력 모양, 질의 범위, 반환 데이터가 예측 가능합니다. 도구가 좁을수록 모델의 추론 오류가 실제 사고로 이어질 가능성이 낮아집니다.
+
+## 도구, 리소스, 프롬프트를 섞지 않는다
+
+MCP의 tools, resources, prompts는 비슷해 보이지만 역할이 다릅니다. 도구는 행동입니다. 검색, 파일 작성, 티켓 생성, API 호출처럼 상태를 바꾸거나 계산을 수행합니다. 리소스는 읽을 수 있는 컨텍스트입니다. 파일, 문서, 스키마, 로그, 설계 노트처럼 에이전트가 이해해야 하는 재료입니다. 프롬프트는 반복 가능한 작업 절차입니다. 코드 리뷰 프롬프트, 릴리스 노트 작성 프롬프트, 마이그레이션 점검 프롬프트처럼 호스트가 사용자에게 선택지로 제공할 수 있습니다.
+
+이 구분은 안전 설계에 직접 연결됩니다. README를 읽기 위해 도구 호출을 열 필요는 없습니다. 리소스로 제공하면 됩니다. 반대로 결제 환불은 리소스가 아니라 명백한 도구이며, 감사 로그와 승인 조건이 붙어야 합니다. 프롬프트는 권한이 아닙니다. 프롬프트에 "삭제하지 마"라고 적는 것만으로 삭제 도구가 안전해지지 않습니다. 권한은 서버 스코프와 도구 구현에서 제한해야 합니다.
+
+<Diagram caption="리소스는 읽기 컨텍스트로 공유되고, 도구는 제한된 행동으로 남겨 두면 에이전트 간 지식은 맞춰지면서 권한은 좁아집니다.">
+  <svg
+    viewBox="0 0 720 390"
+    role="img"
+    aria-label="여러 에이전트가 공유 리소스 레지스트리에서 문서와 스키마를 읽고, 제한된 도구 서버는 감사 로그를 남기며 호출되는 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mcp-resources-ko"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="246" y="32" width="228" height="78" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="360" y="63" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="16" fontWeight="600" fill="#e4e4e7">공유 리소스</text>
+    <text x="360" y="86" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">문서 · 스키마 · 로그 · 설계 노트</text>
+    <rect x="42" y="170" width="156" height="68" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="120" y="198" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#818cf8">Claude</text>
+    <text x="120" y="218" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">백엔드 분석</text>
+    <rect x="282" y="170" width="156" height="68" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="360" y="198" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#34d399">Codex</text>
+    <text x="360" y="218" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">UI 구현</text>
+    <rect x="522" y="170" width="156" height="68" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="600" y="198" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#38bdf8">테스트 에이전트</text>
+    <text x="600" y="218" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">검증 계획</text>
+    <rect x="246" y="296" width="228" height="56" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="360" y="320" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="600" fill="#e4e4e7">제한된 도구 호출</text>
+    <text x="360" y="339" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">감사 로그 · 승인 · 결과 기록</text>
+    <line x1="300" y1="110" x2="154" y2="170" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-ko)" />
+    <line x1="360" y1="110" x2="360" y2="170" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-ko)" />
+    <line x1="420" y1="110" x2="566" y2="170" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-ko)" />
+    <line x1="120" y1="238" x2="286" y2="310" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-ko)" />
+    <line x1="360" y1="238" x2="360" y2="296" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-ko)" />
+    <line x1="600" y1="238" x2="434" y2="310" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-resources-ko)" />
+  </svg>
+</Diagram>
 
 ## 로컬 실행이 주는 안전
 
-MCP 서버를 로컬에서 돌리면 데이터가 사용자 머신을 벗어나지 않습니다. 민감한 코드·DB를 다룰 때 이 **로컬 경계**가 중요합니다. 마블로는 모든 에이전트를 로컬에서 실행하므로, MCP 서버도 같은 경계 안에 둘 수 있습니다.
+MCP 서버를 로컬에서 돌리면 데이터가 사용자 머신을 벗어나지 않습니다. 민감한 코드, 사내 문서, 로컬 DB 덤프를 다룰 때 이 **로컬 경계**가 중요합니다. 마블로는 여러 에이전트를 로컬 워크스테이션 위에서 운용하는 흐름을 전제로 하므로, MCP 서버도 같은 경계 안에 둘 수 있습니다. 네트워크 API를 호출해야 하는 경우에도 API 키는 서버 프로세스의 환경 변수에 두고, 모델에게는 키 자체가 아니라 좁은 도구만 보이게 합니다.
+
+로컬 실행은 완전한 보안을 뜻하지 않습니다. 로컬 서버도 파일을 잘못 마운트하면 비밀 파일을 읽을 수 있고, 셸 도구가 넓으면 로컬 머신에서 큰 피해를 낼 수 있습니다. 그래서 로컬이라는 사실은 출발점일 뿐입니다. 여기에 샌드박스, 작업 디렉터리 제한, 읽기 전용 모드, 명령 allowlist, 타임아웃, 로그 보관이 더해져야 합니다.
+
+운영 팁은 간단합니다. 첫째, 서버별 설정 파일을 코드와 함께 리뷰합니다. 둘째, 기본값은 읽기 전용으로 둡니다. 셋째, 쓰기 도구는 이름과 설명에 효과를 분명히 적습니다. 넷째, 에이전트가 실행한 도구 호출을 티켓이나 로그에 남깁니다. 다섯째, 실패한 호출도 기록합니다. 실패 로그는 권한이 과도하게 좁은지, 모델이 도구 설명을 오해하는지, 서버가 불안정한지를 알려 줍니다.
 
 ## 여러 에이전트가 공유할 때
 
-동일한 MCP 서버 집합을 여러 에이전트가 공유하면 도구와 컨텍스트가 일관됩니다. 단, **읽기/쓰기 권한이 있는 서버**는 어느 에이전트가 어떤 변경을 하는지 추적할 수 있어야 합니다 — 티켓과 보드가 그 역할을 합니다.
+동일한 MCP 서버 집합을 여러 에이전트가 공유하면 도구와 컨텍스트가 일관됩니다. 백엔드 에이전트가 읽은 API 스키마와 프론트엔드 에이전트가 읽은 API 스키마가 다르면, 두 에이전트는 같은 단어로 다른 계약을 상상합니다. 공유 리소스는 이런 어긋남을 줄입니다. 그러나 쓰기 권한이 있는 서버를 공유할 때는 어느 에이전트가 어떤 변경을 했는지 추적할 수 있어야 합니다. 마블로에서는 티켓과 보드가 이 역할을 맡습니다.
+
+다중 에이전트 환경에서는 "권한은 같게, 책임은 다르게"가 아니라 "책임에 맞게 권한도 다르게"가 더 안전합니다. 문서 에이전트는 블로그와 문서 리소스를 읽고 제한된 파일 쓰기만 하면 됩니다. 백엔드 에이전트는 스키마와 테스트를 읽을 수 있지만 운영 DB 쓰기는 필요하지 않을 수 있습니다. 검증 에이전트는 빌드, 테스트, 린트를 실행할 수 있어도 소스 수정 권한은 없어도 됩니다. 같은 MCP 서버를 쓰더라도 호스트가 에이전트별로 노출 목록을 다르게 구성할 수 있어야 합니다.
+
+<Diagram caption="다중 에이전트 워크스페이스에서는 공통 MCP 레이어를 쓰더라도 역할별로 보이는 도구와 쓰기 권한을 다르게 제한합니다.">
+  <svg
+    viewBox="0 0 720 420"
+    role="img"
+    aria-label="오케스트레이터가 세 에이전트에게 역할별 MCP 접근 권한을 나누고, 각 에이전트의 도구 호출이 티켓 타임라인에 기록되는 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mcp-agents-ko"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="270" y="24" width="180" height="62" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="360" y="49" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="600" fill="#e4e4e7">오케스트레이터</text>
+    <text x="360" y="69" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">역할 · 티켓 · 권한 매핑</text>
+    <rect x="46" y="142" width="164" height="72" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="128" y="170" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#818cf8">Backend agent</text>
+    <text x="128" y="191" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">schema · tests · readonly DB</text>
+    <rect x="278" y="142" width="164" height="72" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="360" y="170" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#34d399">Frontend agent</text>
+    <text x="360" y="191" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">docs · components · local files</text>
+    <rect x="510" y="142" width="164" height="72" rx="8" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="592" y="170" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#38bdf8">Test agent</text>
+    <text x="592" y="191" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">build · lint · test output</text>
+    <rect x="178" y="276" width="364" height="64" rx="8" fill="#18181b" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="360" y="302" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="600" fill="#e4e4e7">공통 MCP 레이어</text>
+    <text x="360" y="323" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">서버 구성은 공유, 노출 도구는 역할별 필터링</text>
+    <rect x="254" y="366" width="212" height="38" rx="8" fill="#27272a" stroke="#fbbf24" strokeWidth="1.5" />
+    <text x="360" y="390" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fontWeight="600" fill="#fbbf24">티켓 타임라인에 호출 결과 기록</text>
+    <line x1="316" y1="86" x2="150" y2="142" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-ko)" />
+    <line x1="360" y1="86" x2="360" y2="142" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-ko)" />
+    <line x1="404" y1="86" x2="570" y2="142" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-ko)" />
+    <line x1="128" y1="214" x2="260" y2="276" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-ko)" />
+    <line x1="360" y1="214" x2="360" y2="276" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-ko)" />
+    <line x1="592" y1="214" x2="460" y2="276" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-ko)" />
+    <line x1="360" y1="340" x2="360" y2="366" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-mcp-agents-ko)" />
+  </svg>
+</Diagram>
+
+## 도구 설명은 계약서처럼 쓴다
+
+모델은 도구 이름, 설명, 입력 스키마를 보고 호출 여부를 결정합니다. 그래서 도구 설명은 마케팅 문구가 아니라 계약서처럼 써야 합니다. 무엇을 하는지, 무엇을 하지 않는지, 어떤 입력이 유효한지, 결과가 실패할 수 있는 조건이 무엇인지가 드러나야 합니다. "파일을 관리합니다"보다 "지정된 docs 루트 아래의 UTF-8 텍스트 파일만 읽습니다"가 훨씬 좋습니다.
+
+입력 스키마도 좁게 잡습니다. 자유 형식 문자열 하나에 모든 의도를 담게 하면 모델이 서버 내부 규칙을 추측해야 합니다. 경로, 검색어, limit, dryRun 같은 필드는 분리합니다. 쓰기 도구에는 가능하면 dry run을 둡니다. 삭제나 외부 전송처럼 되돌리기 어려운 행동은 확인 단계가 있는 별도 도구로 나눕니다. 또한 도구 결과는 모델이 다음 판단을 할 수 있을 만큼 구조화해야 합니다. 성공 여부, 변경된 대상, 경고, 다음에 필요한 조치를 명확히 반환합니다.
+
+## 실패를 설계한다
+
+안전한 MCP 서버는 실패를 정상 경로로 다룹니다. 권한이 없으면 "권한 없음"을 명확히 반환하고, 파일이 너무 크면 일부만 반환하거나 요약을 요구합니다. DB 질의가 오래 걸리면 타임아웃을 걸고, 외부 API가 rate limit을 주면 재시도 가능 여부를 알려 줍니다. 에이전트는 실패 메시지를 보고 계획을 수정할 수 있어야 합니다.
+
+특히 다중 에이전트에서는 실패 메시지가 협업 신호가 됩니다. 프론트엔드 에이전트가 API 스키마 리소스를 찾지 못했다면, 백엔드 태스크가 아직 REVIEW에 도달하지 않았다는 뜻일 수 있습니다. 테스트 에이전트가 빌드를 실행했지만 환경 변수가 없어서 실패했다면, 이는 코드 문제가 아니라 실행 환경 문제일 수 있습니다. 도구 실패를 조용히 삼키지 말고 티켓 활동으로 남기면, 사람과 다른 에이전트가 같은 맥락을 공유할 수 있습니다.
+
+## 체크리스트
+
+실제 프로젝트에 MCP를 붙이기 전에는 다음 질문을 통과시키면 좋습니다.
+
+- 이 서버는 한 문장으로 설명되는 단일 책임을 갖는가.
+- 파일, DB, API 권한이 읽기와 쓰기로 분리되어 있는가.
+- 비밀 값은 에이전트 프롬프트나 도구 결과에 노출되지 않는가.
+- 도구 이름과 스키마만 보고도 모델이 안전하게 사용할 수 있는가.
+- 쓰기 도구에는 감사 로그, dry run, 승인 흐름 중 하나 이상이 있는가.
+- 여러 에이전트가 같은 서버를 쓸 때 호출 주체가 기록되는가.
+- 실패 결과가 구조화되어 다음 행동을 결정할 수 있는가.
 
 ## 정리
 
-MCP 심화의 요점은 "더 많이 연결하기"가 아니라 "**좁게, 로컬에서, 추적 가능하게** 연결하기"입니다.
+MCP 심화의 요점은 "더 많이 연결하기"가 아닙니다. 더 정확하게 말하면 **좁게, 로컬에서, 추적 가능하게 연결하기**입니다. 도구는 역할별 서버로 나누고, 리소스는 공유 컨텍스트로 정리하며, 쓰기 권한은 티켓과 로그에 묶습니다. 그렇게 하면 에이전트는 프로젝트를 더 잘 이해하면서도, 실제 행동은 사람이 검토할 수 있는 경계 안에 머뭅니다.
+
+마블로 같은 다중 에이전트 워크스페이스에서 MCP는 단순한 플러그인 레이어가 아니라 협업 인프라가 됩니다. 각 에이전트는 필요한 도구만 보고, 같은 리소스를 읽으며, 호출 결과를 보드에 남깁니다. 이 구조가 갖춰지면 에이전트를 늘려도 혼란이 선형으로 커지지 않습니다. 권한, 컨텍스트, 책임이 같은 좌표계 안에서 움직이기 때문입니다.
