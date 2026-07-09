@@ -9,36 +9,667 @@ author: "Marblo"
 
 ## Start with the core
 
-The quality of an AI agent's output is proportional to the **quality of your instructions**. Before switching models, check these seven things — most problems disappear.
+The quality of an AI agent's output is proportional to the **quality of your instructions**. With the same model and the same codebase, the result changes completely depending on how you instruct it. Many people assume "if the output is weak, just switch to a better model" — but in practice, fixing your **instruction style** alone makes most problems disappear. Before switching models, check these seven things first.
+
+This post isn't about any one tool. It's about **working principles** that hold regardless of which AI coding agent you use — Claude Code, Cursor, Codex, whatever. At the end, though, we'll talk about how to enforce these principles not through human discipline but through the **structure of the tool**.
 
 ## 1. Define the task precisely
 
-Not "fix login," but "fix the bug where email validation passes an empty string, and add a test for the failing case." State the **outcome and the done-condition**.
+The most common failure comes from **vague instructions**. "Fix login" leaves out what needs fixing and what "fixed" even looks like. The agent fills the blanks with its own guesses, and if those guesses miss your intent, the result is wrong from the start.
+
+Instead, state the **outcome and the done-condition**.
+
+- ❌ "Fix login"
+- ✅ "Fix the bug where email validation passes an empty string, and add tests for three failing cases — empty string, whitespace, and malformed format. Existing passing cases must still pass."
+
+The second instruction contains all of it: **what (the bug), how to confirm it's fixed (three tests), and the regression guard (keep existing cases green)**. A good task definition is a **definition you can judge complete**. If you can't answer "is this done?" with yes or no, the task isn't fully defined yet.
 
 ## 2. Give enough context, but not too much
 
-Provide the relevant files, conventions, and constraints — without polluting the context with unrelated information. Hand broad exploration to a subagent and take back only the **conclusion**.
+An agent only knows what you give it. Withhold the relevant files, coding conventions, and constraints, and you'll get code that ignores project norms. Conversely, cram in unrelated information and you **pollute the context**, burying the signal that actually matters.
+
+The knack is **relevance**. Give only the files and rules this task needs, and leave the rest out. Delegate broad exploration that has to sweep many files to a **subagent**, and take back only the conclusion — instead of piling the whole file-by-file search into your main context, you get back a one-line result like "this logic lives in `auth/session.ts:42`." That keeps the main agent's context clean and leaves room for judgment.
 
 ## 3. Split into small units
 
-One decision at a time. Break large work into stages, each small enough to verify.
+One decision at a time. That's the rhythm of agent work. A giant instruction like "rebuild the entire auth system" makes it easy for the agent to lose the thread mid-way, and hard to trace where things went wrong when they do.
+
+Break large work so that **each stage is independently verifiable**. As in the diagram below, decompose one goal into several tasks with clear done-conditions — each task can be picked up in parallel by a different agent, and if one fails it doesn't bleed into the others.
+
+<Diagram caption="Decompose one large goal into small tasks with clear done-conditions. Each piece is verified independently, and different agents can take them on in parallel.">
+  <svg
+    viewBox="0 0 640 340"
+    role="img"
+    aria-label="One large goal decomposed into three small tasks — API, form, and tests — each carrying its own done-condition"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-decompose"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="180"
+      y="24"
+      width="280"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="49"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="16"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Large goal
+    </text>
+    <text
+      x="320"
+      y="69"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      Add coupons to the checkout module
+    </text>
+    <line
+      x1="320"
+      y1="84"
+      x2="112"
+      y2="220"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-decompose)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="320"
+      y2="220"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-decompose)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="528"
+      y2="220"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-decompose)"
+    />
+    <rect
+      x="24"
+      y="226"
+      width="176"
+      height="88"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="254"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      ① Coupon API
+    </text>
+    <text
+      x="112"
+      y="278"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      Done when
+    </text>
+    <text
+      x="112"
+      y="295"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      unit tests pass
+    </text>
+    <rect
+      x="232"
+      y="226"
+      width="176"
+      height="88"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="254"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      ② Coupon form
+    </text>
+    <text
+      x="320"
+      y="278"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      Done when
+    </text>
+    <text
+      x="320"
+      y="295"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      validity shown in UI
+    </text>
+    <rect
+      x="440"
+      y="226"
+      width="176"
+      height="88"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="254"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      ③ Failure tests
+    </text>
+    <text
+      x="528"
+      y="278"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      Done when
+    </text>
+    <text
+      x="528"
+      y="295"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      3 edge cases covered
+    </text>
+  </svg>
+</Diagram>
+
+Splitting into small units has another payoff. When each piece is small, it's **easy to roll back**, and when something breaks the scope is narrow enough to pin the cause fast. This connects directly to principle 6 below (work reversibly).
 
 ## 4. Build in verification
 
-"Done" means "confirmed with a test," not "written." Require the agent to run and verify its own work.
+"Written" is not done. **"Confirmed with a test"** is done. Don't stop at having the agent write code — require it to run and verify its own work, then report the result.
+
+Concrete ways to build verification into your instructions:
+
+- **Make the definition of done observable.** "Show that the build passes, the three new tests are green, and no existing test broke."
+- **Have the agent run it directly.** Make the agent run type checks, lint, and tests, and present the logs as evidence. It's far cheaper for the agent to catch a failure on the spot than for a human to run it later and discover it.
+- **Guard against false completion.** "All done" and the actual passing test output are two different things. Demand **evidence** that the type check and tests passed.
+
+Completion without verification is a **guess**. Making the agent actually run its own work — this one habit raises reliability the most.
 
 ## 5. Separate roles
 
-Splitting exploration, implementation, and review across distinct perspectives raises quality. **Adversarial review** — asking an agent to refute its own result — is especially powerful.
+Ask one agent to explore, implement, and review, and it ends up reviewing what it built itself. Like people, agents go easy on their own work. So **separate the perspectives**. Put an exploring agent, an implementing agent, and a review agent that tries to **refute** the result on separate seats, and quality rises noticeably.
+
+The especially powerful move is **adversarial review**. Instead of "check whether this code is correct," tell the reviewer **"try to break this code. Find an input that makes it fail."** A review that assumes success skims past defects; a review aimed at refutation digs into edge cases. Here's what that review loop looks like.
+
+<Diagram caption="The implement → adversarial review → verdict loop. If review finds a defect it goes back to implementation; only when refutation fails does it move on to done.">
+  <svg
+    viewBox="0 0 640 300"
+    role="img"
+    aria-label="An implementation result is challenged by adversarial review; finding a defect sends it back to implementation, while failing to refute moves it to done"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-review"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+      <marker
+        id="arrow-review-back"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#fbbf24" />
+      </marker>
+    </defs>
+    <rect
+      x="40"
+      y="60"
+      width="160"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="120"
+      y="92"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Implement
+    </text>
+    <text
+      x="120"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      write code
+    </text>
+    <rect
+      x="240"
+      y="60"
+      width="160"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#fbbf24"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="92"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Adversarial review
+    </text>
+    <text
+      x="320"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      try to refute
+    </text>
+    <rect
+      x="440"
+      y="60"
+      width="160"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="520"
+      y="92"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Done
+    </text>
+    <text
+      x="520"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      refute fails → pass
+    </text>
+    <line
+      x1="200"
+      y1="96"
+      x2="238"
+      y2="96"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-review)"
+    />
+    <line
+      x1="400"
+      y1="96"
+      x2="438"
+      y2="96"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-review)"
+    />
+    <path
+      d="M320,132 L320,200 L120,200 L120,134"
+      fill="none"
+      stroke="#fbbf24"
+      strokeWidth="2"
+      strokeDasharray="5,4"
+      markerEnd="url(#arrow-review-back)"
+    />
+    <text
+      x="220"
+      y="223"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#fbbf24"
+    >
+      defect found → back to implement
+    </text>
+  </svg>
+</Diagram>
+
+Running several reviewers and deciding by **majority vote** makes it sturdier still. Give one the correctness lens, one the security lens, one the performance lens, and a defect one perspective misses, another catches. This diversity of perspective filters far more than running the same review three times.
 
 ## 6. Work reversibly
 
-Commit often in small units, and do risky changes in an isolated workspace.
+Agents are fast — and being fast, they also go **fast in the wrong direction**. That's why keeping a **reversible state** matters at every step.
+
+- **Commit often, in small units.** When each stage lives in a commit, you can return to exactly the last good point when things drift.
+- **Do risky changes in an isolated workspace.** When several agents touch the same files at once, they overwrite each other's work. Run each agent in its own **isolated worktree**, and you can push in parallel without conflicts, merging back into the main workspace only when the result is good.
+
+The safety net of reversibility is what lets you **experiment boldly in parallel**. Without it, one wrong automated change wipes out hours of work.
 
 ## 7. Make it observable
 
-If you **can't see** what an agent is doing, you can't control it. Keep a board or log that tracks progress.
+If you **can't see** what an agent is doing, you can't control it. When you're talking one-on-one with a single agent, scrolling up shows you what happened — but the moment several agents move at once, that approach collapses. Once "who finished what, what's waiting for review, where it's stuck" scatters, the benefit of parallelism turns into chaos.
+
+So you need a mechanism that **converges progress into one place**. Make tasks into **tickets**, track state on a **board**, and keep each agent's decisions and results in a **log**. That way you never lose the whole picture, even with many agents working at once.
+
+## Sequential vs. parallel — why observability is the price of parallelism
+
+These principles earn their keep the moment you push **multiple tasks in parallel**. In sequential execution, task A must finish before B, and B before C — wall-clock time is the sum of each stage. Run non-dependent tasks in parallel, and the total collapses to **the slowest one**.
+
+<Diagram caption="Sequential takes the sum of the stages; parallel takes only the slowest one. But parallel is controllable only when observability, verification, and rollback are in place.">
+  <svg
+    viewBox="0 0 720 320"
+    role="img"
+    aria-label="Sequential execution stretches three tasks along a timeline making it long, while parallel execution starts all three at once so wall-clock time is short"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-timeline"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#a1a1aa" />
+      </marker>
+    </defs>
+    <text
+      x="20"
+      y="40"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#a1a1aa"
+    >
+      Sequential — sum of stages
+    </text>
+    <rect
+      x="20"
+      y="52"
+      width="180"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="110"
+      y="77"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Task A
+    </text>
+    <rect
+      x="210"
+      y="52"
+      width="180"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="300"
+      y="77"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Task B
+    </text>
+    <rect
+      x="400"
+      y="52"
+      width="180"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="490"
+      y="77"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      Task C
+    </text>
+    <line
+      x1="20"
+      y1="108"
+      x2="600"
+      y2="108"
+      stroke="#a1a1aa"
+      strokeWidth="1.5"
+      markerEnd="url(#arrow-timeline)"
+    />
+    <text
+      x="610"
+      y="112"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      time
+    </text>
+    <text
+      x="300"
+      y="132"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      total = A + B + C
+    </text>
+    <text
+      x="20"
+      y="188"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#6366f1"
+    >
+      Parallel — the slowest one
+    </text>
+    <rect
+      x="20"
+      y="200"
+      width="200"
+      height="34"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="120"
+      y="222"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Task A
+    </text>
+    <rect
+      x="20"
+      y="240"
+      width="260"
+      height="34"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="150"
+      y="262"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Task B
+    </text>
+    <rect
+      x="20"
+      y="280"
+      width="160"
+      height="34"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="100"
+      y="302"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      Task C
+    </text>
+    <line
+      x1="290"
+      y1="196"
+      x2="290"
+      y2="318"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+      strokeDasharray="5,4"
+    />
+    <text
+      x="300"
+      y="230"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#6366f1"
+    >
+      total =
+    </text>
+    <text
+      x="300"
+      y="248"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#6366f1"
+    >
+      max(A, B, C)
+    </text>
+  </svg>
+</Diagram>
+
+The catch is that parallelism isn't free. Three agents running at once are three times faster — but they can also go wrong in three places at once. So **parallel is controllable only when the earlier principles are in place**: precise task definitions (1) split the work so it doesn't overlap, verification (4) makes each one accountable for its own result, reversibility (6) isolates failures, and observability (7) shows the whole at a glance. Parallelism without observability is just fast chaos.
 
 ## Let the tool enforce these
 
-Marblo turns these principles into structure — define tasks as tickets, assign roles to agents, and track progress on a kanban board. Riding the flow beats trying to remember the principles.
+Knowing the principles and following them every time are different things. Lean on human discipline alone and it's the first thing to break when you're busy. So the final piece of advice is this — **instead of remembering the principles, ride a tool that makes them structural.**
+
+[Marblo](/en) is a desktop app that ports these seven directly into structure. Define tasks as **tickets**, and done-conditions stick around (1, 4); the orchestrator **decomposes** a large goal into small tasks (3), assigns each agent a **role** (5), tracks progress on a **kanban board** (7), and runs them in parallel in isolated worktrees while converging review at a single REVIEW column to keep everything **reversible** (6). Because it orchestrates **heterogeneous agents** — Claude, Codex, and Antigravity at once — you get the benefit of parallelism without losing control.
+
+Principles get forgotten; the flow stays. A good tool enforces good habits.

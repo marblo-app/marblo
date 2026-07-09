@@ -9,36 +9,667 @@ author: "Marblo"
 
 ## 핵심부터
 
-AI 에이전트의 결과 품질은 **지시의 품질**에 비례합니다. 모델을 바꾸기 전에 다음 7가지부터 점검하면 대부분의 문제가 사라집니다.
+AI 에이전트의 결과 품질은 **지시의 품질**에 비례합니다. 같은 모델, 같은 코드베이스라도 어떻게 지시하느냐에 따라 결과물은 완전히 달라집니다. 많은 사람이 "결과가 시원찮으면 더 좋은 모델로 바꾸면 된다"고 생각하지만, 실제로는 **지시 방식**을 손보는 것만으로 대부분의 문제가 사라집니다. 모델을 바꾸기 전에 다음 7가지부터 점검해 보세요.
+
+이 글은 특정 도구에 대한 것이 아니라, 어떤 AI 코딩 에이전트를 쓰든 통하는 **작업 원칙**에 대한 것입니다. Claude Code, Cursor, Codex, 그 무엇이든 마찬가지입니다. 다만 마지막에, 이 원칙들을 사람의 규율이 아니라 **도구의 구조**로 강제하는 방법을 이야기하겠습니다.
 
 ## 1. 태스크를 명확히 정의한다
 
-"로그인 고쳐줘"가 아니라 "이메일 형식 검증이 빈 문자열을 통과시키는 버그를 고치고, 실패 케이스 테스트를 추가하라"처럼 **결과와 완료 조건**을 명시합니다.
+가장 흔한 실패는 **모호한 지시**에서 옵니다. "로그인 고쳐줘"라는 지시에는 무엇을 고쳐야 하는지, 무엇이 고쳐진 상태인지가 빠져 있습니다. 에이전트는 빈칸을 스스로 추측으로 메우고, 그 추측이 당신의 의도와 어긋나면 결과는 처음부터 틀립니다.
+
+대신 **결과와 완료 조건**을 명시합니다.
+
+- ❌ "로그인 고쳐줘"
+- ✅ "이메일 형식 검증이 빈 문자열을 통과시키는 버그를 고치고, 빈 문자열·공백·잘못된 형식 세 가지 실패 케이스에 대한 테스트를 추가하라. 기존 통과 케이스는 그대로 통과해야 한다."
+
+두 번째 지시에는 **무엇이(버그), 어떻게 고쳐졌는지 확인하는 방법(세 가지 테스트), 회귀 방지 조건(기존 케이스 유지)** 이 모두 들어 있습니다. 좋은 태스크 정의는 곧 **완료를 판정할 수 있는 정의**입니다. "이게 끝난 건가?"라는 질문에 예/아니오로 답할 수 없다면, 태스크가 아직 덜 정의된 것입니다.
 
 ## 2. 컨텍스트를 충분히, 그러나 과하지 않게
 
-관련 파일·규칙·제약을 주되, 무관한 정보로 컨텍스트를 오염시키지 않습니다. 넓은 탐색은 서브에이전트에 맡기고 **결론만** 받는 방식이 효과적입니다.
+에이전트는 준 만큼만 압니다. 관련 파일·코딩 규칙·제약 조건을 주지 않으면 프로젝트 관습을 무시한 코드가 나옵니다. 반대로, 무관한 정보까지 잔뜩 밀어 넣으면 **컨텍스트가 오염**되어 정작 중요한 신호가 묻힙니다.
+
+요령은 **관련성**입니다. 지금 이 태스크에 필요한 파일과 규칙만 주고, 나머지는 덜어 냅니다. 넓은 범위를 뒤져야 하는 탐색은 **서브에이전트에 위임**하고 결론만 돌려받는 방식이 효과적입니다 — 수십 개 파일을 훑는 과정 전체를 메인 컨텍스트에 쌓지 않고, "이 로직은 `auth/session.ts:42`에 있다"는 한 줄 결론만 받는 것이죠. 이렇게 하면 메인 에이전트의 컨텍스트는 깨끗하게 유지되고, 판단에 쓸 여백이 남습니다.
 
 ## 3. 작은 단위로 쪼갠다
 
-한 번에 하나의 결정. 큰 작업은 여러 단계로 나눠 각 단계를 검증 가능한 크기로 만듭니다.
+한 번에 하나의 결정. 이것이 에이전트 작업의 리듬입니다. "인증 시스템 전체를 다시 만들어줘" 같은 거대한 지시는 에이전트가 중간에 길을 잃기 쉽고, 잘못됐을 때 어디서부터 어긋났는지 되짚기도 어렵습니다.
+
+큰 작업은 **각 단계가 독립적으로 검증 가능한 크기**가 되도록 나눕니다. 아래 그림처럼, 하나의 목표를 완료 조건이 분명한 여러 태스크로 분해하면 — 각 태스크는 서로 다른 에이전트가 병렬로 집어갈 수도 있고, 하나가 실패해도 나머지에 번지지 않습니다.
+
+<Diagram caption="하나의 큰 목표를 완료 조건이 분명한 작은 태스크로 분해합니다. 각 조각은 독립적으로 검증되고, 서로 다른 에이전트가 나눠 맡을 수 있습니다.">
+  <svg
+    viewBox="0 0 640 340"
+    role="img"
+    aria-label="큰 목표 하나가 API·폼·테스트 세 개의 작은 태스크로 분해되고, 각 태스크에 완료 조건이 붙는 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-decompose"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="180"
+      y="24"
+      width="280"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="49"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="16"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      큰 목표
+    </text>
+    <text
+      x="320"
+      y="69"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      결제 모듈에 쿠폰 기능 추가
+    </text>
+    <line
+      x1="320"
+      y1="84"
+      x2="112"
+      y2="220"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-decompose)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="320"
+      y2="220"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-decompose)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="528"
+      y2="220"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-decompose)"
+    />
+    <rect
+      x="24"
+      y="226"
+      width="176"
+      height="88"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="254"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      ① 쿠폰 검증 API
+    </text>
+    <text
+      x="112"
+      y="278"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      완료 조건
+    </text>
+    <text
+      x="112"
+      y="295"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      단위 테스트 통과
+    </text>
+    <rect
+      x="232"
+      y="226"
+      width="176"
+      height="88"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="254"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      ② 쿠폰 입력 폼
+    </text>
+    <text
+      x="320"
+      y="278"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      완료 조건
+    </text>
+    <text
+      x="320"
+      y="295"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      유효성 UI 반영
+    </text>
+    <rect
+      x="440"
+      y="226"
+      width="176"
+      height="88"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="254"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      ③ 실패 케이스 테스트
+    </text>
+    <text
+      x="528"
+      y="278"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      완료 조건
+    </text>
+    <text
+      x="528"
+      y="295"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      경계값 3종 커버
+    </text>
+  </svg>
+</Diagram>
+
+작은 단위로 쪼개는 데는 또 다른 이점이 있습니다. 각 조각이 작으면 **되돌리기 쉽고**, 문제가 생겼을 때 범위가 좁아 원인을 빠르게 짚을 수 있습니다. 이것은 뒤에서 다룰 6번 원칙(되돌릴 수 있게 작업한다)과 곧바로 이어집니다.
 
 ## 4. 검증을 내장한다
 
-"만들었다"가 아니라 "테스트로 확인했다"까지가 완료입니다. 에이전트에게 스스로 실행·검증하도록 요구하세요.
+"만들었다"는 완료가 아닙니다. **"테스트로 확인했다"** 까지가 완료입니다. 에이전트에게 코드를 작성하도록 시키는 데서 멈추지 말고, 스스로 실행하고 검증한 뒤 그 결과를 보고하도록 요구하세요.
+
+검증을 지시에 내장하는 구체적인 방법은 이렇습니다.
+
+- **완료의 정의를 관측 가능하게.** "빌드가 통과하고, 새 테스트 3개가 초록불이며, 기존 테스트가 깨지지 않았음을 출력으로 보여라."
+- **에이전트가 직접 실행하게.** 타입 체크·린트·테스트를 에이전트가 돌리고 그 로그를 근거로 제시하도록 합니다. 사람이 나중에 돌려서 실패를 발견하는 것보다, 에이전트가 그 자리에서 잡는 편이 훨씬 쌉니다.
+- **거짓 완료를 경계.** "다 됐습니다"라는 말과 실제 통과한 테스트 출력은 다릅니다. 타입 체크와 테스트가 통과했다는 **증거**를 요구하세요.
+
+검증이 없는 완료는 **추측**입니다. 에이전트가 자기 작업을 실제로 굴려 보게 만드는 것 — 이 한 가지가 신뢰도를 가장 크게 끌어올립니다.
 
 ## 5. 역할을 나눈다
 
-탐색·구현·리뷰를 각각 다른 관점으로 분리하면 품질이 올라갑니다. 특히 **적대적 리뷰**(만든 결과를 반증해 보게 하기)가 강력합니다.
+한 에이전트에게 탐색·구현·리뷰를 전부 시키면, 그 에이전트는 자기가 만든 것을 자기가 검토하게 됩니다. 사람이 그렇듯, 자기 결과에는 관대해지기 마련입니다. 그래서 **관점을 분리**합니다. 탐색하는 에이전트, 구현하는 에이전트, 그리고 그 결과를 **반증하려 드는** 리뷰 에이전트를 따로 두면 품질이 눈에 띄게 올라갑니다.
+
+특히 강력한 것이 **적대적 리뷰(adversarial review)** 입니다. 리뷰어에게 "이 코드가 맞는지 확인해줘"가 아니라 **"이 코드를 깨뜨려 봐. 실패하는 입력을 찾아봐"** 라고 시키는 것입니다. 통과를 전제로 훑는 리뷰는 결함을 놓치지만, 반증을 목표로 하는 리뷰는 엣지 케이스를 파고듭니다. 아래는 이 리뷰 루프의 모습입니다.
+
+<Diagram caption="구현 → 적대적 리뷰 → 판정의 루프. 리뷰가 결함을 찾으면 구현으로 되돌아가고, 반증에 실패해야 비로소 완료로 넘어갑니다.">
+  <svg
+    viewBox="0 0 640 300"
+    role="img"
+    aria-label="구현 결과를 적대적 리뷰가 반증 시도하고, 결함을 찾으면 구현으로 되돌리며 반증에 실패하면 완료로 넘어가는 리뷰 루프"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-review"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+      <marker
+        id="arrow-review-back"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#fbbf24" />
+      </marker>
+    </defs>
+    <rect
+      x="40"
+      y="60"
+      width="160"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="120"
+      y="92"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      구현
+    </text>
+    <text
+      x="120"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      코드 작성
+    </text>
+    <rect
+      x="240"
+      y="60"
+      width="160"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#fbbf24"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="92"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      적대적 리뷰
+    </text>
+    <text
+      x="320"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      반증 시도
+    </text>
+    <rect
+      x="440"
+      y="60"
+      width="160"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="520"
+      y="92"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      완료
+    </text>
+    <text
+      x="520"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      반증 실패 → 통과
+    </text>
+    <line
+      x1="200"
+      y1="96"
+      x2="238"
+      y2="96"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-review)"
+    />
+    <line
+      x1="400"
+      y1="96"
+      x2="438"
+      y2="96"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-review)"
+    />
+    <path
+      d="M320,132 L320,200 L120,200 L120,134"
+      fill="none"
+      stroke="#fbbf24"
+      strokeWidth="2"
+      strokeDasharray="5,4"
+      markerEnd="url(#arrow-review-back)"
+    />
+    <text
+      x="220"
+      y="223"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#fbbf24"
+    >
+      결함 발견 → 구현으로 되돌림
+    </text>
+  </svg>
+</Diagram>
+
+여러 리뷰어를 두고 **다수결**로 판정하면 더 견고해집니다. 한 명은 정확성, 한 명은 보안, 한 명은 성능 관점으로 나눠 보게 하면, 한 관점이 놓친 결함을 다른 관점이 잡습니다. 이런 관점 다양성은 같은 리뷰를 세 번 반복하는 것보다 훨씬 많은 것을 걸러 냅니다.
 
 ## 6. 되돌릴 수 있게 작업한다
 
-작은 단위로 자주 커밋하고, 위험한 변경은 격리된 작업 공간에서 진행합니다.
+에이전트는 빠르지만, 빠른 만큼 **잘못된 방향으로도 빠르게** 갑니다. 그래서 항상 **되돌릴 수 있는 상태**를 유지하는 것이 중요합니다.
+
+- **작은 단위로 자주 커밋합니다.** 각 단계가 커밋으로 남으면, 어긋났을 때 마지막으로 좋았던 지점으로 정확히 돌아갈 수 있습니다.
+- **위험한 변경은 격리된 작업 공간에서.** 여러 에이전트가 같은 파일을 동시에 건드리면 서로의 작업을 덮어씁니다. 각 에이전트를 **독립된 워크트리(worktree)** 에서 돌리면 충돌 없이 병렬로 밀어붙이고, 결과가 좋을 때만 본 작업 공간으로 병합할 수 있습니다.
+
+되돌릴 수 있다는 안전망이 있어야 **과감하게 병렬로 실험**할 수 있습니다. 안전장치가 없으면 한 번의 잘못된 자동 변경이 몇 시간의 작업을 날립니다.
 
 ## 7. 관측 가능하게 만든다
 
-에이전트가 무엇을 하는지 **보이지 않으면 통제할 수 없습니다.** 진행 상황을 추적하는 보드나 로그를 두세요.
+에이전트가 무엇을 하는지 **보이지 않으면 통제할 수 없습니다.** 한 에이전트와 1:1로 대화할 때는 스크롤만 올려도 무슨 일이 있었는지 보이지만, 여러 에이전트가 동시에 움직이기 시작하면 이 방식은 곧바로 무너집니다. 누가 무엇을 끝냈는지, 무엇이 리뷰를 기다리는지, 어디서 막혔는지가 흩어지면 — 병렬성의 이점은 혼돈으로 바뀝니다.
+
+그래서 진행 상황을 **한곳으로 수렴시키는 장치**가 필요합니다. 태스크를 **티켓**으로 만들고, 상태를 **보드**로 추적하고, 각 에이전트의 결정과 결과를 **로그**로 남기는 것. 이렇게 하면 여러 에이전트가 동시에 일해도 전체 그림을 놓치지 않습니다.
+
+## 순차와 병렬 — 왜 관측이 병렬의 전제인가
+
+이 원칙들이 진가를 발휘하는 순간은 **여러 작업을 병렬로** 밀어붙일 때입니다. 순차 실행에서는 태스크 A가 끝나야 B를, B가 끝나야 C를 시작합니다 — 벽시계 시간은 각 단계의 합입니다. 반면 서로 의존하지 않는 태스크를 병렬로 돌리면, 전체 시간은 **가장 느린 하나**로 줄어듭니다.
+
+<Diagram caption="순차는 단계의 합만큼 걸리고, 병렬은 가장 느린 하나만큼 걸립니다. 단, 병렬은 관측·검증·되돌리기가 갖춰져야 통제 가능합니다.">
+  <svg
+    viewBox="0 0 720 320"
+    role="img"
+    aria-label="순차 실행은 세 태스크가 시간축을 따라 이어져 길고, 병렬 실행은 세 태스크가 동시에 시작해 벽시계 시간이 짧은 비교"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-timeline"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#a1a1aa" />
+      </marker>
+    </defs>
+    <text
+      x="20"
+      y="40"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#a1a1aa"
+    >
+      순차 — 단계의 합
+    </text>
+    <rect
+      x="20"
+      y="52"
+      width="180"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="110"
+      y="77"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      태스크 A
+    </text>
+    <rect
+      x="210"
+      y="52"
+      width="180"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="300"
+      y="77"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      태스크 B
+    </text>
+    <rect
+      x="400"
+      y="52"
+      width="180"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="490"
+      y="77"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      태스크 C
+    </text>
+    <line
+      x1="20"
+      y1="108"
+      x2="600"
+      y2="108"
+      stroke="#a1a1aa"
+      strokeWidth="1.5"
+      markerEnd="url(#arrow-timeline)"
+    />
+    <text
+      x="610"
+      y="112"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      시간
+    </text>
+    <text
+      x="300"
+      y="132"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      총 소요 = A + B + C
+    </text>
+    <text
+      x="20"
+      y="188"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#6366f1"
+    >
+      병렬 — 가장 느린 하나
+    </text>
+    <rect
+      x="20"
+      y="200"
+      width="200"
+      height="34"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="120"
+      y="222"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      태스크 A
+    </text>
+    <rect
+      x="20"
+      y="240"
+      width="260"
+      height="34"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="150"
+      y="262"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      태스크 B
+    </text>
+    <rect
+      x="20"
+      y="280"
+      width="160"
+      height="34"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="100"
+      y="302"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      태스크 C
+    </text>
+    <line
+      x1="290"
+      y1="196"
+      x2="290"
+      y2="318"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+      strokeDasharray="5,4"
+    />
+    <text
+      x="300"
+      y="230"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#6366f1"
+    >
+      총 소요 =
+    </text>
+    <text
+      x="300"
+      y="248"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#6366f1"
+    >
+      max(A, B, C)
+    </text>
+  </svg>
+</Diagram>
+
+문제는, 병렬성이 공짜가 아니라는 점입니다. 세 에이전트가 동시에 돌면 세 배 빠르지만, 동시에 세 곳에서 문제가 생길 수도 있습니다. 그래서 **병렬은 앞선 원칙들이 갖춰졌을 때만 통제 가능**합니다 — 명확한 태스크 정의(1)로 서로 겹치지 않게 나누고, 검증(4)으로 각자 자기 결과를 책임지게 하고, 되돌리기(6)로 실패를 격리하고, 관측(7)으로 전체를 한눈에 봅니다. 관측 없는 병렬은 빠른 혼돈일 뿐입니다.
 
 ## 도구가 이 원칙을 강제하게
 
-마블로는 이 원칙들을 구조로 만듭니다 — 태스크를 티켓으로 정의하고, 에이전트에 역할을 배치하고, 칸반 보드로 진행을 추적합니다. 원칙을 기억하는 대신 흐름에 태우는 편이 오래 갑니다.
+원칙을 아는 것과 매번 지키는 것은 다릅니다. 사람의 규율에만 기대면 바쁠 때 가장 먼저 무너집니다. 그래서 마지막 조언은 이것입니다 — **원칙을 기억하는 대신, 원칙을 구조로 만드는 도구에 태워라.**
+
+[마블로(Marblo)](/ko)는 이 7가지를 그대로 구조로 옮긴 데스크톱 앱입니다. 태스크를 **티켓**으로 정의하니 완료 조건이 남고(1·4), 오케스트레이터가 큰 목표를 작은 태스크로 **분해**하며(3), 각 에이전트에 **역할**을 배치하고(5), **칸반 보드**로 진행을 추적하고(7), 격리된 워크트리에서 병렬로 돌리되 REVIEW 한 곳으로 검수를 수렴시켜 **되돌릴 수 있게**(6) 만듭니다. Claude·Codex·Antigravity를 동시에 굴리는 **이종 에이전트 오케스트레이션**이라, 병렬성의 이점을 통제력을 잃지 않고 누릴 수 있습니다.
+
+원칙은 잊혀도, 흐름은 남습니다. 좋은 도구는 좋은 습관을 강제합니다.
