@@ -1050,7 +1050,8 @@ async function grantFounderProTotalInternal(
     data?.currentPeriodEnd && typeof data.currentPeriodEnd.toDate === "function"
       ? data.currentPeriodEnd.toDate()
       : null;
-  const periodEnd = existingEnd && existingEnd > targetEnd ? existingEnd : targetEnd;
+  const periodEnd =
+    existingEnd && existingEnd > targetEnd ? existingEnd : targetEnd;
 
   const payload: Record<string, unknown> = {
     userId,
@@ -1286,8 +1287,67 @@ async function lookupFounderLocale(email: string): Promise<string> {
   return "ko";
 }
 
-// 파운더 선정 (관리자용) — waitlist 이메일을 founders 로 승격.
+// 파운더 선정 핵심 로직 (내부) — waitlist 이메일을 founders 로 승격.
 // accessGrantedAt 이 1개월 베타 시작 기준. resetWindow=true 면 베타 기간 재시작.
+// markFounderSelected onCall 과 Telegram 승인 웹훅 양쪽에서 재사용한다.
+async function markFounderSelectedInternal(
+  rawEmail: string,
+  resetWindow = false,
+): Promise<{
+  ok: true;
+  email: string;
+  emailSent: boolean;
+  betaExpiresAt: string;
+}> {
+  const email = normalizeEmail(rawEmail);
+  const ref = db.collection(FOUNDERS_COLLECTION).doc(email);
+  const snap = await ref.get();
+  const betaStartedAt = new Date();
+  let betaExpiresAt = addMonths(betaStartedAt, FOUNDER_BETA_MONTHS);
+
+  const update: Record<string, unknown> = {
+    email,
+    status: "selected",
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  if (!snap.exists) {
+    update.selectedAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+  if (!snap.exists || !snap.data()?.accessGrantedAt || resetWindow) {
+    update.accessGrantedAt = admin.firestore.FieldValue.serverTimestamp();
+    update.betaExpiresAt = admin.firestore.Timestamp.fromDate(betaExpiresAt);
+  } else {
+    const existingBetaExpiresAt = snap.data()?.betaExpiresAt;
+    if (
+      existingBetaExpiresAt &&
+      typeof existingBetaExpiresAt.toDate === "function"
+    ) {
+      betaExpiresAt = existingBetaExpiresAt.toDate();
+    }
+  }
+  await ref.set(update, { merge: true });
+
+  // 선정 직후 접근 안내 이메일 자동 발송. 이메일 실패가 선정을 깨면 안 되므로
+  // sendFounderAccessEmail 은 non-throwing 이고 결과만 기록한다.
+  const locale = await lookupFounderLocale(email);
+  const emailSent = await sendFounderAccessEmail(email, locale);
+  await ref.set(
+    {
+      accessEmailSent: emailSent,
+      accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  return {
+    ok: true,
+    email,
+    emailSent,
+    betaExpiresAt: betaExpiresAt.toISOString(),
+  };
+}
+
+// 파운더 선정 (관리자용) — waitlist 이메일을 founders 로 승격.
 export const markFounderSelected = functions.https.onCall(
   async (data, context) => {
     requireAdmin(context);
@@ -1299,53 +1359,8 @@ export const markFounderSelected = functions.https.onCall(
         "email required",
       );
     }
-
-    const ref = db.collection(FOUNDERS_COLLECTION).doc(email);
-    const snap = await ref.get();
     const resetWindow = data?.resetWindow === true;
-    const betaStartedAt = new Date();
-    let betaExpiresAt = addMonths(betaStartedAt, FOUNDER_BETA_MONTHS);
-
-    const update: Record<string, unknown> = {
-      email,
-      status: "selected",
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    };
-    if (!snap.exists) {
-      update.selectedAt = admin.firestore.FieldValue.serverTimestamp();
-    }
-    if (!snap.exists || !snap.data()?.accessGrantedAt || resetWindow) {
-      update.accessGrantedAt = admin.firestore.FieldValue.serverTimestamp();
-      update.betaExpiresAt = admin.firestore.Timestamp.fromDate(betaExpiresAt);
-    } else {
-      const existingBetaExpiresAt = snap.data()?.betaExpiresAt;
-      if (
-        existingBetaExpiresAt &&
-        typeof existingBetaExpiresAt.toDate === "function"
-      ) {
-        betaExpiresAt = existingBetaExpiresAt.toDate();
-      }
-    }
-    await ref.set(update, { merge: true });
-
-    // 선정 직후 접근 안내 이메일 자동 발송. 이메일 실패가 선정을 깨면 안 되므로
-    // sendFounderAccessEmail 은 non-throwing 이고 결과만 기록한다.
-    const locale = await lookupFounderLocale(email);
-    const emailSent = await sendFounderAccessEmail(email, locale);
-    await ref.set(
-      {
-        accessEmailSent: emailSent,
-        accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    return {
-      ok: true,
-      email,
-      emailSent,
-      betaExpiresAt: betaExpiresAt.toISOString(),
-    };
+    return markFounderSelectedInternal(email, resetWindow);
   },
 );
 
@@ -1843,21 +1858,24 @@ export const reviewFounderFeedback = functions.https.onCall(
     }
     await feedbackSnap.ref.set(update, { merge: true });
 
-    await db.collection(FOUNDERS_COLLECTION).doc(email).set(
-      {
-        status: grantPro ? "pro_granted" : "survey_reviewed",
-        rubricScore,
-        feedbackId: feedbackSnap.id,
-        proGrantedMonths: grantPro
-          ? Math.max(existingGranted, FOUNDER_PRO_MONTHS)
-          : existingGranted,
-        proExpiresAt: proExpiresAt
-          ? admin.firestore.Timestamp.fromDate(proExpiresAt)
-          : null,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+    await db
+      .collection(FOUNDERS_COLLECTION)
+      .doc(email)
+      .set(
+        {
+          status: grantPro ? "pro_granted" : "survey_reviewed",
+          rubricScore,
+          feedbackId: feedbackSnap.id,
+          proGrantedMonths: grantPro
+            ? Math.max(existingGranted, FOUNDER_PRO_MONTHS)
+            : existingGranted,
+          proExpiresAt: proExpiresAt
+            ? admin.firestore.Timestamp.fromDate(proExpiresAt)
+            : null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
 
     return {
       ok: true,
@@ -1884,7 +1902,10 @@ export const listTopFounderFeedback = functions.https.onCall(
       typeof data?.minScore === "number"
         ? data.minScore
         : FOUNDER_INTERVIEW_MIN_TOTAL;
-    const snap = await db.collection(FOUNDER_FEEDBACK_COLLECTION).limit(1000).get();
+    const snap = await db
+      .collection(FOUNDER_FEEDBACK_COLLECTION)
+      .limit(1000)
+      .get();
     const items = snap.docs
       .map((doc) => {
         const v = doc.data() as Record<string, unknown>;
@@ -1907,8 +1928,7 @@ export const listTopFounderFeedback = functions.https.onCall(
             score && typeof score.actionability === "number"
               ? score.actionability
               : 0,
-          icpFit:
-            score && typeof score.icpFit === "number" ? score.icpFit : 0,
+          icpFit: score && typeof score.icpFit === "number" ? score.icpFit : 0,
           interviewRequested: v.interviewRequested === true,
           interviewCompleted: v.interviewCompleted === true,
           createdAt: tsToIso(v.createdAt),
@@ -2971,5 +2991,379 @@ export const triggerReconcile = functions.https.onCall(
     const provider = (data?.provider as string) || "toss";
     if (provider === "paddle") return reconcilePaddlePending();
     return reconcileTossPending();
+  },
+);
+
+// ═══════════════════════════════════════════════════════════════════
+// ─── Founder Beta Telegram 승인 ─────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+//
+// 파운더 베타 신청/설문 제출을 관리자 텔레그램으로 알리고, 인라인 버튼으로
+// 승인/스킵/예외 Pro 부여를 처리한다. 기존 선정·부여 로직(markFounderSelectedInternal,
+// grantFounderProTotalInternal)을 그대로 재사용 — 알림+버튼 레이어만 얹는다.
+//
+// 안전 정책(기존 RESEND 패턴과 동일):
+//  - env(TELEGRAM_BETA_*) 미설정 시 알림/웹훅은 조용히 스킵 → 기존 흐름 무영향.
+//  - 텔레그램 API 호출은 전부 non-throwing(에러 삼킴) — 트리거 재시도 폭주 방지.
+//  - 웹훅은 시크릿 헤더 검증 + 관리자 chat/from 확인 + 멱등 처리 후 항상 200 반환.
+
+const TELEGRAM_BETA_BOT_TOKEN = process.env.TELEGRAM_BETA_BOT_TOKEN || "";
+const TELEGRAM_BETA_ADMIN_CHAT_ID =
+  process.env.TELEGRAM_BETA_ADMIN_CHAT_ID || "";
+const TELEGRAM_BETA_WEBHOOK_SECRET =
+  process.env.TELEGRAM_BETA_WEBHOOK_SECRET || "";
+
+type TgInlineButton =
+  | { text: string; callback_data: string }
+  | { text: string; url: string };
+type TgInlineKeyboard = TgInlineButton[][];
+
+interface TgCallbackQuery {
+  id: string;
+  from?: { id?: number | string };
+  message?: { message_id?: number; chat?: { id?: number | string } };
+  data?: string;
+}
+
+// 텔레그램 Bot API 호출(공통) — 토큰 없으면 스킵, 절대 throw 하지 않음.
+async function tgCall(
+  method: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  if (!TELEGRAM_BETA_BOT_TOKEN) return;
+  try {
+    const resp = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BETA_BOT_TOKEN}/${method}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      console.warn(`[tg] ${method} 실패:`, resp.status, body.slice(0, 200));
+    }
+  } catch (err) {
+    console.warn(`[tg] ${method} 예외:`, err);
+  }
+}
+
+// 관리자 chatId 로 메시지 발송(옵션 인라인 키보드). chatId 미설정 시 스킵.
+// 사용자 입력을 그대로 담으므로 parse_mode 없이 평문 전송(포맷 400/인젝션 회피).
+async function tgSend(
+  text: string,
+  inlineKeyboard?: TgInlineKeyboard,
+): Promise<void> {
+  if (!TELEGRAM_BETA_ADMIN_CHAT_ID) return;
+  const payload: Record<string, unknown> = {
+    chat_id: TELEGRAM_BETA_ADMIN_CHAT_ID,
+    text,
+    disable_web_page_preview: true,
+  };
+  if (inlineKeyboard) {
+    payload.reply_markup = { inline_keyboard: inlineKeyboard };
+  }
+  await tgCall("sendMessage", payload);
+}
+
+// 콜백 쿼리 로딩 상태 해제(+토스트 텍스트).
+async function tgAnswerCallbackQuery(id: string, text: string): Promise<void> {
+  await tgCall("answerCallbackQuery", { callback_query_id: id, text });
+}
+
+// 원 메시지 본문 교체 — 처리 결과(무엇을/언제)를 남긴다.
+async function tgEditMessageText(
+  chatId: string | number,
+  messageId: number,
+  text: string,
+): Promise<void> {
+  await tgCall("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    disable_web_page_preview: true,
+  });
+}
+
+// 사용자 텍스트를 max 자로 발췌(트림 + 말줄임).
+function tgSummarize(v: unknown, max = 200): string {
+  const s = typeof v === "string" ? v.trim() : "";
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+// ─── 트리거 1: 신규 신청 → 관리자 알림([선정][스킵]) ─────────────────
+export const notifyAdminOnWaitlistApply = functions.firestore
+  .document("betatester50_waitlist/{docId}")
+  .onCreate(async (snap) => {
+    try {
+      if (!TELEGRAM_BETA_BOT_TOKEN || !TELEGRAM_BETA_ADMIN_CHAT_ID) return;
+      const data = snap.data() || {};
+      const email = typeof data.email === "string" ? data.email : "";
+      const name = typeof data.name === "string" ? data.name : "";
+      const reason = tgSummarize(data.reason, 200);
+      const lines = [
+        "🆕 파운더 베타 신청",
+        name ? `이름: ${name}` : "",
+        `이메일: ${email || "(없음)"}`,
+        reason ? `사유: ${reason}` : "",
+      ].filter(Boolean);
+      await tgSend(lines.join("\n"), [
+        [
+          { text: "✅ 선정(1개월)", callback_data: `sel:${snap.id}` },
+          { text: "⏭️ 스킵", callback_data: `skip:${snap.id}` },
+        ],
+      ]);
+    } catch (err) {
+      // 트리거 재시도 폭주 방지 — 알림 실패는 삼킨다.
+      console.warn("[tg-waitlist] 알림 실패:", snap.id, err);
+    }
+  });
+
+// ─── 트리거 2: 설문 제출 → 관리자 알림([예외 Pro3개월][/admin 정밀채점]) ──
+export const notifyAdminOnFounderFeedback = functions.firestore
+  .document("founder_feedback/{docId}")
+  .onCreate(async (snap) => {
+    try {
+      if (!TELEGRAM_BETA_BOT_TOKEN || !TELEGRAM_BETA_ADMIN_CHAT_ID) return;
+      const data = snap.data() || {};
+      const email = typeof data.email === "string" ? data.email : "";
+      const answers =
+        data.answers && typeof data.answers === "object"
+          ? (data.answers as Record<string, unknown>)
+          : {};
+      const q6 = tgSummarize(answers.q6, 80);
+      const q1 = tgSummarize(answers.q1, 160);
+      const lines = [
+        "📝 파운더 설문 제출",
+        `이메일: ${email || "(없음)"}`,
+        q6 ? `q6: ${q6}` : "",
+        q1 ? `q1: ${q1}` : "",
+      ].filter(Boolean);
+      await tgSend(lines.join("\n"), [
+        [{ text: "⭐ 예외승인 Pro3개월", callback_data: `pro:${snap.id}` }],
+        [{ text: "📝 /admin 정밀채점", url: `${SITE_BASE}/ko/admin` }],
+      ]);
+    } catch (err) {
+      console.warn("[tg-feedback] 알림 실패:", snap.id, err);
+    }
+  });
+
+// ─── 웹훅 핸들러: 선정(sel) ─────────────────────────────────────────
+async function handleTgSelect(
+  cqId: string,
+  chatId: string,
+  messageId: number,
+  docId: string,
+): Promise<void> {
+  const snap = await db.collection("betatester50_waitlist").doc(docId).get();
+  if (!snap.exists) {
+    await tgAnswerCallbackQuery(cqId, "신청서를 찾을 수 없음");
+    return;
+  }
+  const data = snap.data() || {};
+  const email =
+    typeof data.email === "string" ? normalizeEmail(data.email) : "";
+  if (!email) {
+    await tgAnswerCallbackQuery(cqId, "이메일 없음");
+    return;
+  }
+  // 멱등: 이미 선정된 파운더면 재실행하지 않는다.
+  const fSnap = await db.collection(FOUNDERS_COLLECTION).doc(email).get();
+  if (fSnap.exists && fSnap.data()?.status === "selected") {
+    await tgAnswerCallbackQuery(cqId, "이미 선정됨");
+    if (messageId) {
+      await tgEditMessageText(chatId, messageId, `✅ 이미 선정됨 — ${email}`);
+    }
+    return;
+  }
+  const result = await markFounderSelectedInternal(email);
+  await tgAnswerCallbackQuery(cqId, "선정 완료");
+  if (messageId) {
+    await tgEditMessageText(
+      chatId,
+      messageId,
+      `✅ 선정 (1개월, 접근이메일 ${
+        result.emailSent ? "발송" : "발송 스킵"
+      }) — ${email}\n처리: ${new Date().toISOString()}`,
+    );
+  }
+}
+
+// ─── 웹훅 핸들러: 스킵(skip) ────────────────────────────────────────
+async function handleTgSkip(
+  cqId: string,
+  chatId: string,
+  messageId: number,
+  docId: string,
+): Promise<void> {
+  const ref = db.collection("betatester50_waitlist").doc(docId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    await tgAnswerCallbackQuery(cqId, "신청서를 찾을 수 없음");
+    return;
+  }
+  if (snap.data()?.skipped === true) {
+    await tgAnswerCallbackQuery(cqId, "이미 스킵됨");
+    return;
+  }
+  await ref.set(
+    {
+      skipped: true,
+      skippedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+  await tgAnswerCallbackQuery(cqId, "스킵 처리됨");
+  if (messageId) {
+    await tgEditMessageText(
+      chatId,
+      messageId,
+      `⏭️ 스킵됨 — 처리: ${new Date().toISOString()}`,
+    );
+  }
+}
+
+// ─── 웹훅 핸들러: 예외 Pro 3개월 부여(pro) ──────────────────────────
+async function handleTgProGrant(
+  cqId: string,
+  chatId: string,
+  messageId: number,
+  docId: string,
+): Promise<void> {
+  const ref = db.collection(FOUNDER_FEEDBACK_COLLECTION).doc(docId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    await tgAnswerCallbackQuery(cqId, "피드백을 찾을 수 없음");
+    return;
+  }
+  const data = snap.data() || {};
+  const userId = typeof data.userId === "string" ? data.userId : "";
+  const email =
+    typeof data.email === "string" ? normalizeEmail(data.email) : "";
+  if (!userId || !email) {
+    await tgAnswerCallbackQuery(cqId, "userId/email 누락");
+    return;
+  }
+  // 멱등: 이미 Pro 부여된 피드백은 재부여하지 않는다.
+  const existingGranted =
+    typeof data.proGrantedMonths === "number" ? data.proGrantedMonths : 0;
+  if (existingGranted > 0) {
+    await tgAnswerCallbackQuery(cqId, "이미 부여됨");
+    if (messageId) {
+      await tgEditMessageText(
+        chatId,
+        messageId,
+        `⭐ 이미 Pro 부여됨 (${existingGranted}개월) — ${email}`,
+      );
+    }
+    return;
+  }
+  const proExpiresAt = await grantFounderProTotalInternal(
+    userId,
+    FOUNDER_PRO_MONTHS,
+    "telegram_override",
+    new Date(),
+  );
+  await ref.set(
+    {
+      proGrantedMonths: FOUNDER_PRO_MONTHS,
+      proExpiresAt: admin.firestore.Timestamp.fromDate(proExpiresAt),
+      reviewedBy: "telegram",
+      reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+  await db
+    .collection(FOUNDERS_COLLECTION)
+    .doc(email)
+    .set(
+      {
+        proGrantedMonths: FOUNDER_PRO_MONTHS,
+        proExpiresAt: admin.firestore.Timestamp.fromDate(proExpiresAt),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  await tgAnswerCallbackQuery(cqId, "Pro 3개월 부여 완료");
+  if (messageId) {
+    await tgEditMessageText(
+      chatId,
+      messageId,
+      `⭐ Pro 3개월 부여 (예외승인) — ${email}\n처리: ${new Date().toISOString()}`,
+    );
+  }
+}
+
+// ─── 웹훅: 텔레그램 인라인 버튼 콜백 처리 ───────────────────────────
+// setWebhook 시 secret_token 을 등록하고, 텔레그램이 매 요청 헤더로 돌려준다.
+export const betaTelegramWebhook = functions.https.onRequest(
+  async (req, res) => {
+    // env 미설정이면 웹훅 자체가 동작 불가 — 503 으로 명시.
+    if (
+      !TELEGRAM_BETA_BOT_TOKEN ||
+      !TELEGRAM_BETA_WEBHOOK_SECRET ||
+      !TELEGRAM_BETA_ADMIN_CHAT_ID
+    ) {
+      res.status(503).send("telegram webhook not configured");
+      return;
+    }
+    // 시크릿 헤더 검증 — 불일치면 즉시 401.
+    const secret = req.headers["x-telegram-bot-api-secret-token"];
+    if (secret !== TELEGRAM_BETA_WEBHOOK_SECRET) {
+      res.status(401).send("unauthorized");
+      return;
+    }
+
+    try {
+      const body = (req.body || {}) as { callback_query?: TgCallbackQuery };
+      const cq = body.callback_query;
+      // 콜백 쿼리 외 업데이트(메시지 등)는 무시하고 200.
+      if (!cq || typeof cq.id !== "string") {
+        res.status(200).send("ok");
+        return;
+      }
+
+      const fromId = cq.from?.id != null ? String(cq.from.id) : "";
+      const chatId =
+        cq.message?.chat?.id != null ? String(cq.message.chat.id) : "";
+      const messageId =
+        typeof cq.message?.message_id === "number" ? cq.message.message_id : 0;
+
+      // 관리자(chat/from) 아니면 무영향 처리.
+      if (
+        fromId !== TELEGRAM_BETA_ADMIN_CHAT_ID &&
+        chatId !== TELEGRAM_BETA_ADMIN_CHAT_ID
+      ) {
+        await tgAnswerCallbackQuery(cq.id, "권한 없음");
+        res.status(200).send("ok");
+        return;
+      }
+
+      const raw = typeof cq.data === "string" ? cq.data : "";
+      const sep = raw.indexOf(":");
+      const action = sep >= 0 ? raw.slice(0, sep) : raw;
+      const id = sep >= 0 ? raw.slice(sep + 1) : "";
+      if (!id) {
+        await tgAnswerCallbackQuery(cq.id, "잘못된 요청");
+        res.status(200).send("ok");
+        return;
+      }
+
+      if (action === "sel") {
+        await handleTgSelect(cq.id, chatId, messageId, id);
+      } else if (action === "skip") {
+        await handleTgSkip(cq.id, chatId, messageId, id);
+      } else if (action === "pro") {
+        await handleTgProGrant(cq.id, chatId, messageId, id);
+      } else {
+        await tgAnswerCallbackQuery(cq.id, "알 수 없는 작업");
+      }
+    } catch (err) {
+      console.error("[betaTelegramWebhook] 처리 실패:", err);
+    }
+    // 텔레그램 재전송 폭주 방지 — 어떤 경우에도 200.
+    res.status(200).send("ok");
   },
 );
