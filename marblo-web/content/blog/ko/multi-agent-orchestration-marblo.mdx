@@ -9,24 +9,684 @@ author: "Marblo"
 
 ## 에이전트 한 명 vs 군단
 
-대부분의 AI 코딩 도구는 에이전트 한 명을 붙여 줍니다. 빠르게 한 가지 일을 처리하기엔 좋지만, 규모가 커지면 병목이 됩니다. **여러 에이전트를 동시에** 굴리면 독립적인 작업을 병렬로 밀어붙일 수 있습니다 — 단, 누가 뭘 하는지 통제할 수단이 있어야 합니다.
+대부분의 AI 코딩 도구는 에이전트 **한 명**을 붙여 줍니다. 개발자가 프롬프트를 던지면 에이전트가 파일을 고치고, 개발자는 그 결과를 확인한 뒤 다음 지시를 내립니다. 빠르게 한 가지 일을 처리하기엔 훌륭하지만, 작업의 규모가 커지는 순간 이 1:1 구조는 곧바로 병목이 됩니다. 에이전트가 긴 리팩터링을 도는 동안 개발자는 사실상 대기 상태가 되고, 대기하는 시간만큼 처리량은 한 명분에 묶입니다.
 
-## 마블로의 접근
+**여러 에이전트를 동시에** 굴리면 이야기가 달라집니다. 서로 의존하지 않는 작업을 병렬로 밀어붙일 수 있고, 한 명이 막혀 있는 동안에도 다른 작업은 계속 전진합니다. 문제는 단 하나 — **누가 지금 무엇을 하고 있는지 통제할 수단**이 없으면, 병렬성은 곧 혼돈이 된다는 점입니다. 세 개의 에이전트가 같은 파일을 서로 모른 채 건드리고, 완료 여부가 흩어지고, 무엇이 리뷰를 기다리는지 알 수 없게 됩니다. 오케스트레이션은 바로 이 "병렬로 밀어붙이되 통제 가능한 상태를 유지한다"는 긴장을 풀어내는 기술입니다.
 
-마블로는 **중앙 오케스트레이터**가 이종 AI 에이전트(Claude, GPT/Codex, Antigravity)를 물리적/논리적으로 나눠 태스크를 할당합니다. 각 모델의 강점에 맞춰 역할을 배치합니다.
+## 오케스트레이션이란 무엇인가
 
-- **Claude** — 백엔드 구현
-- **GPT/Codex** — 프론트엔드
-- **Antigravity** — 테스트
+오케스트레이션(orchestration)은 오케스트라 지휘에서 온 말입니다. 연주자 각자는 자기 악보를 연주하지만, 지휘자가 없으면 합주가 되지 않습니다. 소프트웨어에서도 마찬가지입니다. 에이전트 여러 명을 띄우는 것 자체는 어렵지 않습니다. 진짜 어려운 일은 **큰 목표를 잘게 나누고, 각 조각을 적절한 연주자에게 맡기고, 선후 관계를 지키며, 결과를 다시 하나로 합치는 것**입니다.
 
-## 칸반으로 보는 진행 상황
+마블로가 정의하는 오케스트레이션은 네 가지 책임으로 이뤄집니다.
 
-여러 에이전트가 동시에 일하면 "지금 뭐가 되고 있는지"가 흐려지기 쉽습니다. 마블로는 작업을 **칸반 보드**(TODO → IN_PROGRESS → REVIEW → DONE)로 시각화해, 각 에이전트의 상태·할당된 태스크·완료 여부를 실시간으로 추적합니다.
+1. **분할(decomposition)** — 하나의 큰 목표를 독립적으로 처리 가능한 태스크로 쪼갭니다.
+2. **할당(assignment)** — 각 태스크를 그 일을 가장 잘할 에이전트에게 배정합니다.
+3. **의존성 관리(dependency management)** — "A가 끝나야 B를 시작할 수 있다"는 순서를 강제합니다.
+4. **수렴(convergence)** — 병렬로 흩어진 결과를 리뷰 지점 하나로 모아 검수하고 병합합니다.
+
+이 네 가지를 사람이 머릿속으로만 관리하면 에이전트 두세 명에서 이미 한계에 부딪힙니다. 마블로는 이것을 **중앙 오케스트레이터 + 칸반 보드 + 의존성 그래프**라는 구체적인 구조로 구현합니다.
+
+## 마블로의 접근 — 중앙 오케스트레이터
+
+마블로의 중심에는 **중앙 오케스트레이터**가 있습니다. 오케스트레이터는 이종(異種) AI 에이전트 — **Claude, GPT/Codex, Antigravity** — 를 물리적/논리적으로 나눠 태스크를 할당하는 지휘자입니다. 각 모델은 잘하는 결이 다르기 때문에, 역할을 강점에 맞춰 배치하는 것이 핵심입니다.
+
+- **Claude** — 백엔드 구현, 복잡한 로직, 긴 컨텍스트가 필요한 리팩터링
+- **GPT/Codex** — 프론트엔드, UI 컴포넌트, 반복적 코드 생성
+- **Antigravity** — 테스트 작성, 검증, 엣지 케이스 채우기
+
+이 배치는 고정된 규칙이 아니라 출발점입니다. 한 에이전트가 특정 작업에서 막히면, 오케스트레이터는 같은 문제를 다른 모델에게 다시 던져 볼 수 있습니다. 특정 벤더에 묶이지 않는다는 점은 도구 선택의 자유이자, 모델 생태계가 빠르게 바뀌는 시대의 안전장치이기도 합니다.
+
+<Diagram caption="오케스트레이터가 하나의 목표를 세 갈래로 나눠, 각 모델의 강점에 맞는 이종 에이전트에게 동시에 분배합니다.">
+  <svg
+    viewBox="0 0 640 340"
+    role="img"
+    aria-label="중앙 오케스트레이터가 목표를 나눠 백엔드는 Claude, 프론트엔드는 Codex, 테스트는 Antigravity 에이전트에게 동시에 분배하는 팬아웃 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mao-fanout"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="232"
+      y="24"
+      width="176"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="49"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="16"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      오케스트레이터
+    </text>
+    <text
+      x="320"
+      y="69"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      분할 · 할당 · 의존성 · 수렴
+    </text>
+    <line
+      x1="320"
+      y1="84"
+      x2="112"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-fanout)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="320"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-fanout)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="528"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-fanout)"
+    />
+    <rect
+      x="24"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <text
+      x="112"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      백엔드 · API
+    </text>
+    <rect
+      x="232"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <text
+      x="320"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      프론트엔드 · UI
+    </text>
+    <rect
+      x="440"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      Antigravity
+    </text>
+    <text
+      x="528"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      테스트 · 검증
+    </text>
+  </svg>
+</Diagram>
+
+## 태스크 분할과 의존성 그래프
+
+병렬 실행의 진짜 어려움은 "동시에 돌리는 것"이 아니라 **"어떤 것을 동시에 돌려도 되는지 아는 것"** 입니다. 모든 태스크가 서로 독립적이라면 문제가 없지만, 현실의 작업에는 순서가 있습니다. 데이터베이스 스키마가 확정되지 않으면 API 엔드포인트를 완성할 수 없고, API가 없으면 프론트엔드 폼이 붙을 곳이 없으며, 이 둘이 없으면 통합 테스트는 의미가 없습니다.
+
+마블로의 오케스트레이터는 태스크를 **의존성 그래프(DAG, 방향성 비순환 그래프)** 로 관리합니다. 각 태스크는 자신이 시작되기 전에 끝나 있어야 할 선행 태스크를 명시하고, 오케스트레이터는 선행이 모두 DONE이 된 태스크만 다음 에이전트가 집어 갈 수 있도록 게이트를 겁니다. 덕분에 개발자는 "지금 무엇을 먼저 시켜야 하지?"를 손으로 조율하지 않아도, **동시에 가능한 것은 자동으로 병렬화되고, 순서가 필요한 것은 자동으로 직렬화**됩니다.
+
+<Diagram caption="태스크 사이의 선후 관계를 그래프로 관리합니다. 화살표는 '선행이 끝나야 시작 가능'을 뜻하고, 색은 배정된 에이전트를 나타냅니다.">
+  <svg
+    viewBox="0 0 640 360"
+    role="img"
+    aria-label="DB 스키마에서 시작해 API 엔드포인트와 인증 미들웨어로 갈라지고, 다시 프론트 폼과 통합 테스트로 수렴하는 태스크 의존성 그래프. 각 노드는 배정된 에이전트 색으로 구분됨"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mao-dep"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="24"
+      y="152"
+      width="168"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="108"
+      y="178"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      DB 스키마
+    </text>
+    <text
+      x="108"
+      y="196"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <rect
+      x="236"
+      y="60"
+      width="168"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      API 엔드포인트
+    </text>
+    <text
+      x="320"
+      y="104"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <rect
+      x="236"
+      y="244"
+      width="168"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="270"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      인증 미들웨어
+    </text>
+    <text
+      x="320"
+      y="288"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <rect
+      x="448"
+      y="60"
+      width="168"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="532"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      프론트 폼
+    </text>
+    <text
+      x="532"
+      y="104"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <rect
+      x="448"
+      y="244"
+      width="168"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="532"
+      y="270"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      통합 테스트
+    </text>
+    <text
+      x="532"
+      y="288"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#38bdf8"
+    >
+      Antigravity
+    </text>
+    <line
+      x1="192"
+      y1="168"
+      x2="234"
+      y2="98"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-dep)"
+    />
+    <line
+      x1="192"
+      y1="192"
+      x2="234"
+      y2="262"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-dep)"
+    />
+    <line
+      x1="404"
+      y1="88"
+      x2="446"
+      y2="88"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-dep)"
+    />
+    <line
+      x1="404"
+      y1="104"
+      x2="446"
+      y2="256"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-dep)"
+    />
+    <line
+      x1="404"
+      y1="272"
+      x2="446"
+      y2="272"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-dep)"
+    />
+  </svg>
+</Diagram>
+
+위 그래프에서 **DB 스키마**는 어떤 선행도 없으므로 가장 먼저 시작됩니다. 이것이 끝나면 **API 엔드포인트**와 **인증 미들웨어**가 동시에 열려 서로 다른 에이전트가 병렬로 집어 갑니다. 마지막 **통합 테스트**는 두 선행이 모두 끝나야 비로소 시작됩니다. 개발자가 순서를 일일이 지시하지 않아도, 그래프의 형태가 곧 실행 계획이 됩니다.
+
+## 병렬 진행과 칸반 가시성
+
+의존성 그래프가 "무엇을 언제 시작할 수 있는가"를 정한다면, **칸반 보드**는 "지금 실제로 무엇이 진행 중인가"를 보여 줍니다. 여러 에이전트가 동시에 일하면 "지금 뭐가 되고 있는지"가 흐려지기 쉽습니다. 마블로는 모든 작업을 **TODO → IN_PROGRESS → REVIEW → DONE** 의 흐름으로 시각화해, 각 에이전트의 상태·할당된 태스크·완료 여부를 실시간으로 추적합니다.
+
+시간 축으로 펼쳐 보면 병렬성이 더 뚜렷하게 드러납니다. 아래 타임라인은 세 에이전트가 각자의 레인에서 어떻게 겹쳐 일하고, 의존성 때문에 어떻게 시작이 어긋나며, 마지막에 어떻게 리뷰 게이트 하나로 수렴하는지를 보여 줍니다.
+
+<Diagram caption="세 에이전트가 각자의 레인에서 병렬로 일합니다. 의존성 때문에 시작이 어긋나지만, 결과는 REVIEW 게이트 한 곳으로 모여 사람이 검수합니다.">
+  <svg
+    viewBox="0 0 680 280"
+    role="img"
+    aria-label="Claude·Codex·Antigravity 세 에이전트의 작업이 시간 축에서 겹쳐 진행되다가 오른쪽 REVIEW 게이트로 수렴하는 병렬 진행 타임라인"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <text
+      x="16"
+      y="34"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      시간 →
+    </text>
+    <rect
+      x="16"
+      y="60"
+      width="110"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#818cf8"
+      strokeWidth="1.5"
+    />
+    <text
+      x="71"
+      y="85"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <rect
+      x="16"
+      y="120"
+      width="110"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="71"
+      y="145"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <rect
+      x="16"
+      y="180"
+      width="110"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#38bdf8"
+      strokeWidth="1.5"
+    />
+    <text
+      x="71"
+      y="205"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      Antigravity
+    </text>
+    <rect
+      x="142"
+      y="64"
+      width="120"
+      height="32"
+      rx="6"
+      fill="#818cf8"
+      fillOpacity="0.22"
+      stroke="#818cf8"
+      strokeWidth="1.5"
+    />
+    <text
+      x="202"
+      y="85"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      DB 스키마
+    </text>
+    <rect
+      x="270"
+      y="64"
+      width="150"
+      height="32"
+      rx="6"
+      fill="#818cf8"
+      fillOpacity="0.22"
+      stroke="#818cf8"
+      strokeWidth="1.5"
+    />
+    <text
+      x="345"
+      y="85"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      API 엔드포인트
+    </text>
+    <rect
+      x="142"
+      y="124"
+      width="180"
+      height="32"
+      rx="6"
+      fill="#34d399"
+      fillOpacity="0.22"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="232"
+      y="145"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      인증 미들웨어
+    </text>
+    <rect
+      x="430"
+      y="124"
+      width="150"
+      height="32"
+      rx="6"
+      fill="#34d399"
+      fillOpacity="0.22"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="505"
+      y="145"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      프론트 폼
+    </text>
+    <rect
+      x="450"
+      y="184"
+      width="130"
+      height="32"
+      rx="6"
+      fill="#38bdf8"
+      fillOpacity="0.22"
+      stroke="#38bdf8"
+      strokeWidth="1.5"
+    />
+    <text
+      x="515"
+      y="205"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      통합 테스트
+    </text>
+    <line
+      x1="600"
+      y1="52"
+      x2="600"
+      y2="232"
+      stroke="#fbbf24"
+      strokeWidth="2"
+      strokeDasharray="5 5"
+    />
+    <text
+      x="600"
+      y="46"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#fbbf24"
+    >
+      REVIEW
+    </text>
+  </svg>
+</Diagram>
+
+## REVIEW 게이트 — 사람이 통제를 유지하는 지점
+
+병렬성을 극대화하면서도 통제력을 잃지 않는 비결은 **검수 지점을 한 곳으로 모으는 것**입니다. 에이전트가 코드를 완성하면 태스크는 자동으로 병합되는 것이 아니라 **REVIEW** 상태로 넘어옵니다. 여기서 사람이 개입합니다. 개발자는 변경 내용을 확인하고, 괜찮으면 DONE으로, 부족하면 코멘트와 함께 되돌려 보냅니다.
+
+이 구조가 중요한 이유는, 여러 에이전트가 동시에 움직여도 **의사결정과 책임은 여전히 사람에게 있기** 때문입니다. 마블로의 오케스트레이션은 "사람을 대체하는 자동화"가 아니라 "사람이 감당할 수 있는 범위를 넓히는 증폭"입니다. 열 개의 태스크가 동시에 굴러가도 검수의 관문은 REVIEW 한 곳이므로, 개발자는 전체를 놓치지 않고 흐름을 통제합니다.
 
 ## 로컬 실행과 MCP
 
-모든 에이전트는 사용자 머신에서 로컬로 실행되고, **MCP를 네이티브로 지원**해 같은 도구·컨텍스트를 공유합니다. 각 모델은 본인의 API 키 또는 구독으로 돌아가므로, 마블로는 오케스트레이션 레이어에 집중합니다.
+모든 에이전트는 사용자 머신에서 **로컬로 실행**됩니다. 코드가 마블로의 서버로 업로드되지 않으므로, 사내 코드베이스처럼 외부 반출이 민감한 환경에서도 안심하고 쓸 수 있습니다. 소스가 로컬에 머무른다는 점은 보안·규정 측면에서 결정적인 차이를 만듭니다.
+
+그리고 마블로는 **MCP(Model Context Protocol)** 를 네이티브로 지원합니다. MCP는 에이전트가 파일 시스템·데이터베이스·외부 API 같은 도구에 접근하는 표준 통로입니다. 여러 에이전트가 같은 도구 집합을 공유하기 때문에, 각 에이전트가 저마다 다른 방식으로 환경에 붙는 혼란 없이 **일관된 컨텍스트 위에서** 협업합니다. 오케스트레이터가 태스크를 배정할 때, 그 태스크가 접근해야 할 도구와 컨텍스트도 함께 전달되는 셈입니다.
+
+## BYO 모델 — 비용은 어디로 청구되는가
+
+마블로의 과금을 이해하려면 두 가지 비용을 분리해서 봐야 합니다. 첫째는 **AI 사용료**입니다. 각 에이전트는 사용자 본인의 API 키 또는 구독으로 실행됩니다(BYO, Bring Your Own Model). Claude는 Anthropic 계정, GPT/Codex는 OpenAI 계정에 각각 청구되며, 이 비용은 마블로를 거치지 않고 사용자가 해당 제공사와 직접 정산합니다. 둘째는 **오케스트레이션 비용**, 즉 마블로 구독료입니다. 이것은 여러 에이전트를 나누고, 할당하고, 추적하고, 안전하게 병합하도록 통합 지휘하는 값이며 AI 사용료를 포함하지 않습니다.
+
+이 분리 덕분에 사용자는 원하는 모델을 자유롭게 고르고, 상황에 따라 갈아 끼우고, AI 지출을 각 제공사에서 직접 통제하면서, 마블로에는 오직 지휘 레이어에 대한 값만 지불합니다. 모델 생태계가 빠르게 바뀌는 지금, 특정 벤더에 종속되지 않는다는 점은 그 자체로 하나의 전략입니다.
+
+## 흔한 오해와 안티패턴
+
+오케스트레이션을 처음 접하면 몇 가지 오해에 빠지기 쉽습니다.
+
+- **"에이전트를 많이 띄울수록 빠르다"** — 아닙니다. 의존성으로 묶인 태스크를 아무리 많은 에이전트에 나눠도, 임계 경로(critical path)보다 빨라지지 않습니다. 병렬화가 효과를 내는 것은 서로 독립적인 작업이 충분히 많을 때뿐입니다.
+- **"오케스트레이터가 알아서 다 한다"** — 오케스트레이터는 분할·할당·추적을 자동화하지만, 목표를 정의하고 결과를 검수하는 것은 여전히 사람입니다. REVIEW 게이트를 건너뛰면 통제력을 잃습니다.
+- **"모델은 하나로 통일하는 게 낫다"** — 하나의 모델만 쓰면 그 모델의 약점이 곧 시스템 전체의 약점이 됩니다. 이종 구성은 강점을 조합하고 실패 지점을 분산하는 안전장치입니다.
 
 ## 정리
 
-오케스트레이션의 요점은 "많이 굴리는 것"이 아니라 "많이 굴리면서도 통제 가능한 상태를 유지하는 것"입니다. 중앙 조율 + 칸반 가시성 + 로컬 실행이 그 삼각형을 이룹니다.
+오케스트레이션의 요점은 "많이 굴리는 것"이 아니라 **"많이 굴리면서도 통제 가능한 상태를 유지하는 것"** 입니다. 마블로는 이것을 네 개의 축으로 구현합니다.
+
+1. **중앙 오케스트레이터** — 목표를 태스크로 나누고 강점에 맞춰 배정합니다.
+2. **의존성 그래프** — 동시에 가능한 것은 병렬화하고, 순서가 필요한 것은 직렬화합니다.
+3. **칸반 가시성** — 병렬로 흩어진 진행 상황을 한 화면으로 수렴시킵니다.
+4. **REVIEW 게이트** — 검수와 책임을 사람 손에 남겨 통제력을 유지합니다.
+
+여기에 로컬 실행과 BYO 모델이 더해져, 보안을 지키면서도 벤더에 종속되지 않는 오케스트레이션 환경이 완성됩니다. 한 명의 개발자가 팀 규모의 처리량을 내되, 무슨 일이 일어나는지 놓치지 않는 것 — 그것이 마블로가 그리는 멀티에이전트 오케스트레이션의 실전 구조입니다.
+
+[다운로드 페이지](/ko/download)에서 macOS·Windows용 앱을 받아 바로 시작할 수 있습니다. 준비물은 실행하고 싶은 모델의 API 키 또는 구독뿐입니다.

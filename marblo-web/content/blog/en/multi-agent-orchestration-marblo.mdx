@@ -9,24 +9,684 @@ author: "Marblo"
 
 ## One agent vs. an army
 
-Most AI coding tools give you a single agent. That's great for quickly handling one thing, but it becomes a bottleneck at scale. Running **many agents at once** lets you push independent work in parallel — as long as you have a way to control who is doing what.
+Most AI coding tools give you a **single agent**. You send a prompt, the agent edits files, you check the result and issue the next instruction. That's great for quickly handling one thing — but the moment the work grows, this one-to-one loop becomes a bottleneck. While the agent grinds through a long refactor, the developer effectively waits, and throughput stays capped at one agent's worth of progress.
 
-## Marblo's approach
+Running **many agents at once** changes the story. You can push independent work in parallel, and while one agent is stuck, the others keep moving forward. There's just one catch — without a way to **control who is doing what**, parallelism quickly turns into chaos. Three agents touch the same file without knowing about each other, completion state scatters, and you lose track of what's waiting for review. Orchestration is precisely the discipline that resolves this tension: _run a lot while staying in control_.
 
-In Marblo, a **central orchestrator** partitions heterogeneous AI agents (Claude, GPT/Codex, Antigravity) physically and logically, then assigns tasks. Roles are placed according to each model's strengths.
+## What orchestration actually means
 
-- **Claude** — backend implementation
-- **GPT/Codex** — frontend
-- **Antigravity** — testing
+The word comes from conducting an orchestra. Each player reads their own part, but without a conductor there is no ensemble. Software is the same. Spinning up several agents is not the hard part. The hard part is **breaking a large goal into pieces, handing each piece to the right player, respecting the ordering between them, and merging the results back into one whole.**
 
-## Progress on a kanban board
+Orchestration in Marblo rests on four responsibilities:
 
-When many agents work at once, "what's happening right now" easily gets blurry. Marblo visualizes work on a **kanban board** (TODO → IN_PROGRESS → REVIEW → DONE), tracking each agent's state, assigned task, and completion in real time.
+1. **Decomposition** — split one large goal into tasks that can be worked independently.
+2. **Assignment** — route each task to the agent best suited to it.
+3. **Dependency management** — enforce ordering such as "B can't start until A is done."
+4. **Convergence** — funnel the parallel results back into a single review point to inspect and merge.
+
+Keep all four of these in your head alone and you hit the ceiling at two or three agents. Marblo turns them into concrete structure: a **central orchestrator + a kanban board + a dependency graph.**
+
+## Marblo's approach — the central orchestrator
+
+At the center of Marblo sits a **central orchestrator**. It partitions heterogeneous AI agents — **Claude, GPT/Codex, Antigravity** — physically and logically, then assigns tasks. Because each model is good at different things, the key is to place roles according to strengths.
+
+- **Claude** — backend implementation, complex logic, long-context refactors
+- **GPT/Codex** — frontend, UI components, repetitive code generation
+- **Antigravity** — writing tests, verification, filling in edge cases
+
+This layout is a starting point, not a fixed rule. When one agent gets stuck on a task, the orchestrator can throw the same problem at a different model. Not being tied to a single vendor is both a matter of freedom and a safeguard in an era when the model ecosystem shifts fast.
+
+<Diagram caption="The orchestrator splits one goal into three and hands each part to the heterogeneous agent whose strengths fit it best — all at the same time.">
+  <svg
+    viewBox="0 0 640 340"
+    role="img"
+    aria-label="A central orchestrator splitting one goal three ways and distributing it to heterogeneous agents at once — backend to Claude, frontend to Codex, testing to Antigravity"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mao-fanout"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="232"
+      y="24"
+      width="176"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="49"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="16"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Orchestrator
+    </text>
+    <text
+      x="320"
+      y="69"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      split · assign · order · converge
+    </text>
+    <line
+      x1="320"
+      y1="84"
+      x2="112"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-fanout)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="320"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-fanout)"
+    />
+    <line
+      x1="320"
+      y1="84"
+      x2="528"
+      y2="230"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-fanout)"
+    />
+    <rect
+      x="24"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <text
+      x="112"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      backend · API
+    </text>
+    <rect
+      x="232"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <text
+      x="320"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      frontend · UI
+    </text>
+    <rect
+      x="440"
+      y="236"
+      width="176"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      Antigravity
+    </text>
+    <text
+      x="528"
+      y="287"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      testing · verification
+    </text>
+  </svg>
+</Diagram>
+
+## Task decomposition and the dependency graph
+
+The real difficulty of parallel execution isn't "running things at once" — it's **knowing which things are safe to run at once.** If every task were independent, there would be no problem. But real work has ordering. You can't finish the API endpoints before the database schema is settled; the frontend form has nowhere to attach without the API; and integration tests are meaningless without both.
+
+Marblo's orchestrator manages tasks as a **dependency graph (a DAG — a directed acyclic graph).** Each task declares which predecessors must be DONE before it can start, and the orchestrator gates a task so the next agent can only pick it up once all its predecessors are complete. As a result, the developer never hand-schedules "what should I run first?" — **what can run together is parallelized automatically, and what needs ordering is serialized automatically.**
+
+<Diagram caption="Ordering between tasks is managed as a graph. An arrow means 'can't start until the predecessor is done,' and color marks the assigned agent.">
+  <svg
+    viewBox="0 0 640 360"
+    role="img"
+    aria-label="A task dependency graph starting from DB schema, branching into API endpoints and auth middleware, then converging into frontend form and integration tests. Each node is colored by its assigned agent"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mao-dep"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="24"
+      y="152"
+      width="168"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="108"
+      y="178"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      DB schema
+    </text>
+    <text
+      x="108"
+      y="196"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <rect
+      x="236"
+      y="60"
+      width="168"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      API endpoints
+    </text>
+    <text
+      x="320"
+      y="104"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <rect
+      x="236"
+      y="244"
+      width="168"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="270"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Auth middleware
+    </text>
+    <text
+      x="320"
+      y="288"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <rect
+      x="448"
+      y="60"
+      width="168"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="532"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Frontend form
+    </text>
+    <text
+      x="532"
+      y="104"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <rect
+      x="448"
+      y="244"
+      width="168"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="532"
+      y="270"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Integration tests
+    </text>
+    <text
+      x="532"
+      y="288"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#38bdf8"
+    >
+      Antigravity
+    </text>
+    <line
+      x1="192"
+      y1="168"
+      x2="234"
+      y2="98"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-dep)"
+    />
+    <line
+      x1="192"
+      y1="192"
+      x2="234"
+      y2="262"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-dep)"
+    />
+    <line
+      x1="404"
+      y1="88"
+      x2="446"
+      y2="88"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-dep)"
+    />
+    <line
+      x1="404"
+      y1="104"
+      x2="446"
+      y2="256"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-dep)"
+    />
+    <line
+      x1="404"
+      y1="272"
+      x2="446"
+      y2="272"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mao-dep)"
+    />
+  </svg>
+</Diagram>
+
+In the graph above, **DB schema** has no predecessors, so it starts first. Once it's done, **API endpoints** and **auth middleware** both open at once and different agents pick them up in parallel. The final **integration tests** can only begin after both of its predecessors are complete. The developer never dictates the order step by step — the _shape_ of the graph is the execution plan.
+
+## Parallel progress and kanban visibility
+
+If the dependency graph decides "what can start when," the **kanban board** shows "what is actually in progress right now." When many agents work at once, "what's happening" easily gets blurry. Marblo visualizes all work as a flow of **TODO → IN_PROGRESS → REVIEW → DONE**, tracking each agent's state, assigned task, and completion in real time.
+
+Laid out on a time axis, the parallelism becomes even clearer. The timeline below shows how three agents overlap in their own lanes, how dependencies stagger their starts, and how everything finally converges into a single review gate.
+
+<Diagram caption="Three agents work in parallel, each in its own lane. Dependencies stagger their starts, but the results converge at a single REVIEW gate for a human to inspect.">
+  <svg
+    viewBox="0 0 680 280"
+    role="img"
+    aria-label="A parallel-progress timeline where the work of Claude, Codex, and Antigravity overlaps along a time axis and then converges into a REVIEW gate on the right"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <text
+      x="16"
+      y="34"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      time →
+    </text>
+    <rect
+      x="16"
+      y="60"
+      width="110"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#818cf8"
+      strokeWidth="1.5"
+    />
+    <text
+      x="71"
+      y="85"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Claude
+    </text>
+    <rect
+      x="16"
+      y="120"
+      width="110"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="71"
+      y="145"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Codex
+    </text>
+    <rect
+      x="16"
+      y="180"
+      width="110"
+      height="40"
+      rx="8"
+      fill="#27272a"
+      stroke="#38bdf8"
+      strokeWidth="1.5"
+    />
+    <text
+      x="71"
+      y="205"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      Antigravity
+    </text>
+    <rect
+      x="142"
+      y="64"
+      width="120"
+      height="32"
+      rx="6"
+      fill="#818cf8"
+      fillOpacity="0.22"
+      stroke="#818cf8"
+      strokeWidth="1.5"
+    />
+    <text
+      x="202"
+      y="85"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      DB schema
+    </text>
+    <rect
+      x="270"
+      y="64"
+      width="150"
+      height="32"
+      rx="6"
+      fill="#818cf8"
+      fillOpacity="0.22"
+      stroke="#818cf8"
+      strokeWidth="1.5"
+    />
+    <text
+      x="345"
+      y="85"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      API endpoints
+    </text>
+    <rect
+      x="142"
+      y="124"
+      width="180"
+      height="32"
+      rx="6"
+      fill="#34d399"
+      fillOpacity="0.22"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="232"
+      y="145"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      Auth middleware
+    </text>
+    <rect
+      x="430"
+      y="124"
+      width="150"
+      height="32"
+      rx="6"
+      fill="#34d399"
+      fillOpacity="0.22"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="505"
+      y="145"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      Frontend form
+    </text>
+    <rect
+      x="450"
+      y="184"
+      width="130"
+      height="32"
+      rx="6"
+      fill="#38bdf8"
+      fillOpacity="0.22"
+      stroke="#38bdf8"
+      strokeWidth="1.5"
+    />
+    <text
+      x="515"
+      y="205"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      Integration tests
+    </text>
+    <line
+      x1="600"
+      y1="52"
+      x2="600"
+      y2="232"
+      stroke="#fbbf24"
+      strokeWidth="2"
+      strokeDasharray="5 5"
+    />
+    <text
+      x="600"
+      y="46"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#fbbf24"
+    >
+      REVIEW
+    </text>
+  </svg>
+</Diagram>
+
+## The REVIEW gate — where the human stays in control
+
+The trick to maximizing parallelism without losing control is to **funnel all inspection into one place.** When an agent finishes its code, the task doesn't merge automatically — it moves to **REVIEW**. Here the human steps in. The developer inspects the change and, if it's good, moves it to DONE; if it falls short, sends it back with comments.
+
+This matters because even with many agents moving at once, **the decisions and the accountability still belong to the human.** Marblo's orchestration isn't "automation that replaces people" — it's amplification that widens the range one person can handle. Ten tasks can be in flight simultaneously, but the gate of inspection is a single REVIEW column, so the developer stays in control of the whole flow without dropping anything.
 
 ## Local execution and MCP
 
-Every agent runs locally on your machine and **supports MCP natively**, sharing the same tools and context. Each model runs on your own API key or subscription, so Marblo focuses on the orchestration layer.
+Every agent runs **locally on your machine.** Your code is never uploaded to a Marblo server, so you can use it with confidence even where exfiltration is sensitive — on an internal codebase, for instance. Keeping the source local makes a decisive difference for security and compliance.
+
+Marblo also supports **MCP (Model Context Protocol)** natively. MCP is the standard channel through which an agent reaches tools like the file system, databases, and external APIs. Because multiple agents share the same tool set, they collaborate **on a consistent context** without the confusion of each agent attaching to the environment in its own way. When the orchestrator assigns a task, the tools and context that task needs travel with it.
+
+## BYO model — where the cost goes
+
+To understand Marblo's pricing, separate two costs. The first is the **AI usage cost.** Each agent runs on your own API key or subscription (BYO — Bring Your Own Model). Claude bills to your Anthropic account, GPT/Codex to your OpenAI account, and that cost settles directly with the provider without passing through Marblo. The second is the **orchestration cost** — the Marblo subscription. That's the price for the unified command that splits, assigns, tracks, and safely merges across many agents, and it does not include the AI usage cost.
+
+Because the two are separated, you're free to choose whatever model you want, swap it out as circumstances change, and control your AI spend directly with each provider — while paying Marblo only for the command layer. In an era when the model ecosystem shifts fast, not being locked to a single vendor is a strategy in itself.
+
+## Common misconceptions and anti-patterns
+
+Newcomers to orchestration tend to fall into a few traps.
+
+- **"The more agents you spin up, the faster it goes."** Not so. No matter how many agents you split dependency-bound tasks across, you can't beat the critical path. Parallelization only pays off when there is enough genuinely independent work.
+- **"The orchestrator handles everything."** The orchestrator automates decomposition, assignment, and tracking — but defining the goal and inspecting the results is still the human's job. Skip the REVIEW gate and you lose control.
+- **"It's better to standardize on one model."** Use a single model and its weakness becomes the whole system's weakness. A heterogeneous setup combines strengths and spreads out points of failure.
 
 ## Takeaway
 
-The point of orchestration isn't "run a lot" — it's "run a lot while staying in control." Central coordination + kanban visibility + local execution form that triangle.
+The point of orchestration isn't "run a lot" — it's **"run a lot while staying in control."** Marblo implements that along four axes:
+
+1. **Central orchestrator** — splits the goal into tasks and assigns by strength.
+2. **Dependency graph** — parallelizes what can run together, serializes what needs ordering.
+3. **Kanban visibility** — converges scattered parallel progress into a single screen.
+4. **REVIEW gate** — keeps inspection and accountability in human hands.
+
+Add local execution and BYO models, and you get an orchestration environment that protects security while staying vendor-neutral. One developer producing a team's worth of throughput — without losing sight of what's happening — is the practical structure of multi-agent orchestration that Marblo is after.
+
+Grab the macOS/Windows app from the [download page](/en/download) and start right away. All you need is the API key or subscription for the model you want to run.
