@@ -30,21 +30,27 @@ extraResources:
   # from process.resourcesPath at boot when app.isPackaged. Ticket QvaYPAjA.
   - from: "build-resources/oauth-config.json"
     to: "oauth-config.json"
+  # 공개 Firebase Web config. dist-mcp 옆(Resources/dist-mcp/)에 놓아 번들된
+  # index.js 가 import.meta.url 기준 sibling 으로 self-load 한다. 패키지 앱의
+  # marblo MCP child 프로세스 env 엔 Firebase 설정이 없어(dev 만 .env/vite)
+  # 이 파일이 없으면 getAuth 가 auth/invalid-api-key 로 크래시→-32000.
+  # scripts/write-firebase-config.mjs 가 생성(gitignore). 티켓 MRJKgyJ4C1qPhj2Ui3vJ.
+  - from: "build-resources/firebase-config.json"
+    to: "dist-mcp/firebase-config.json"
 
 afterSign: scripts/notarize.js
 
 mac:
-  # Universal (x64 + arm64 merged via lipo) so a single DMG/zip runs natively on
-  # BOTH Intel and Apple Silicon Macs. Previously we shipped arm64-only, which
-  # Intel users could not launch (M5). Universal keeps latest-mac.yml + .blockmap
-  # single-arch, so electron-updater stays intact — unlike building x64 and arm64
-  # separately, where two latest-mac.yml can overwrite each other and break auto
-  # update. Tradeoff: ~2x build time and bundle size. P0-7 runs the signed build.
+  # arm64 전용. universal(x64+arm64) 은 @electron/universal 병합 단계가
+  # "Detected unique file ... not covered by allowList" 로 실패해 .dmg 가 산출되지
+  # 않는다. 다운로드 페이지도 이미 Marblo-<ver>-arm64.dmg 패턴을 가리키고 있어
+  # arm64 단일 아키가 배포 현실과 일치한다. Intel 지원은 별도 트랙(추후 allowList
+  # 보정 또는 x64 개별 빌드)으로 분리한다.
   target:
     - target: dmg
-      arch: universal
+      arch: arm64
     - target: zip
-      arch: universal
+      arch: arm64
   category: public.app-category.developer-tools
   icon: resources/icon.icns
   hardenedRuntime: true

@@ -1,6 +1,6 @@
 {
   "name": "marblo-v3",
-  "version": "3.0.9",
+  "version": "3.0.12",
   "description": "Marblo v3.0 - Desktop App",
   "repository": {
     "type": "git",
@@ -19,7 +19,7 @@
     "prebuild": "npm run build:mcp",
     "build": "tsc -p electron/tsconfig.json && node scripts/check-firebase-env.mjs && vite build",
     "prebuild:electron": "npm run build:mcp",
-    "build:electron": "tsc -p electron/tsconfig.json && node scripts/check-firebase-env.mjs && vite build && node scripts/write-oauth-config.mjs",
+    "build:electron": "tsc -p electron/tsconfig.json && node scripts/check-firebase-env.mjs && vite build && node scripts/write-oauth-config.mjs && node scripts/write-firebase-config.mjs",
     "build:mac": "npm run build:electron && electron-builder --mac",
     "build:win": "npm run build:electron && electron-builder --win",
     "build:linux": "npm run build:electron && electron-builder --linux",
@@ -28,7 +28,7 @@
     "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "build:mcp": "tsc -p electron/mcp-server/tsconfig.json && node scripts/write-mcp-pkg.mjs",
+    "build:mcp": "tsc -p electron/mcp-server/tsconfig.json && node scripts/bundle-mcp.mjs && node scripts/write-mcp-pkg.mjs",
     "mcp": "node dist-mcp/index.js",
     "relock": "bash scripts/relock.sh",
     "sync": "bash scripts/sync-and-rebuild.sh",
