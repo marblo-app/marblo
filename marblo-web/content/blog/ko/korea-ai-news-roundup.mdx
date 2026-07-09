@@ -9,24 +9,493 @@ author: "Marblo"
 
 ## 신호 대 잡음
 
-AI 소식은 하루가 멀다 하고 쏟아집니다. 전부 좇으면 시간만 녹습니다. 개발자 관점에서 실제로 일에 영향을 주는 축은 크게 셋입니다 — **모델**, **도구**, **프로토콜**.
+AI 소식은 하루가 멀다 하고 쏟아집니다. 새 모델, 새 에이전트, 새 벤치마크, 새 논쟁 — 전부 좇으면 정작 코드 짤 시간이 사라집니다. 그렇다고 완전히 등을 돌리면, 반년 뒤 남들이 당연하게 쓰는 도구를 나만 모르고 있습니다. 그래서 문제는 "얼마나 볼까"가 아니라 **"무엇을 걸러 낼까"** 입니다.
+
+개발자 관점에서 실제로 일에 영향을 주는 축은 크게 셋입니다 — **모델**, **도구**, **프로토콜**. 이 세 가지로 필터를 세워 두면, 대부분의 뉴스는 "지금 나와 상관없음"으로 빠르게 분류됩니다. 남는 소수만 깊게 보면 됩니다. 이 글은 그 세 축을 기준으로 무엇을·어디서·어떻게 챙길지를 정리합니다.
+
+<Diagram caption="쏟아지는 AI 뉴스를 모델·도구·프로토콜 세 축으로 먼저 분류하면, 대부분은 지금 나와 상관없음으로 빠르게 걸러집니다.">
+  <svg
+    viewBox="0 0 640 320"
+    role="img"
+    aria-label="쏟아지는 AI 뉴스를 모델·도구·프로토콜 세 축으로 나눠 분류하는 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-axis"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="232"
+      y="24"
+      width="176"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="57"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="16"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      쏟아지는 AI 뉴스
+    </text>
+    <line
+      x1="320"
+      y1="80"
+      x2="112"
+      y2="214"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-axis)"
+    />
+    <line
+      x1="320"
+      y1="80"
+      x2="320"
+      y2="214"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-axis)"
+    />
+    <line
+      x1="320"
+      y1="80"
+      x2="528"
+      y2="214"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-axis)"
+    />
+    <rect
+      x="24"
+      y="220"
+      width="176"
+      height="80"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="253"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="16"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      모델
+    </text>
+    <text
+      x="112"
+      y="278"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      무엇이 좋아졌나
+    </text>
+    <rect
+      x="232"
+      y="220"
+      width="176"
+      height="80"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="253"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="16"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      도구
+    </text>
+    <text
+      x="320"
+      y="278"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      무엇으로 일하나
+    </text>
+    <rect
+      x="440"
+      y="220"
+      width="176"
+      height="80"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="253"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="16"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      프로토콜
+    </text>
+    <text
+      x="528"
+      y="278"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      어떻게 연결되나
+    </text>
+  </svg>
+</Diagram>
+
+## 왜 하필 세 축인가
+
+세 축은 **변화의 결이 서로 다릅니다.** 모델은 자주 바뀌지만 갈아 끼우기 쉽고, 프로토콜은 드물게 바뀌지만 한 번 자리 잡으면 오래 갑니다. 도구는 그 중간입니다. 뉴스마다 "유용하게 남아 있는 기간", 즉 반감기가 다르다는 뜻이고, 그래서 챙기는 우선순위도 축마다 달라야 합니다. 어제 나온 모델 소식은 다음 달이면 낡을 수 있지만, 표준 하나가 자리 잡는 흐름은 몇 년을 갑니다.
+
+<Diagram caption="세 축은 뉴스의 반감기가 다릅니다. 모델은 자주 바뀌지만 짧게 유효하고, 프로토콜은 드물게 바뀌지만 가장 오래 갑니다.">
+  <svg
+    viewBox="0 0 640 240"
+    role="img"
+    aria-label="모델·도구·프로토콜 순으로 뉴스의 관련성이 유지되는 기간이 길어지는 것을 막대 길이로 표현한 그림"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <text
+      x="24"
+      y="28"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fill="#a1a1aa"
+    >
+      막대 길이 = 소식이 유용하게 남아 있는 대략의 기간
+    </text>
+    <text
+      x="24"
+      y="80"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      모델
+    </text>
+    <rect x="130" y="58" width="150" height="34" rx="6" fill="#818cf8" />
+    <text
+      x="142"
+      y="80"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#18181b"
+    >
+      수 주 ~ 수 개월
+    </text>
+    <text
+      x="24"
+      y="140"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      도구
+    </text>
+    <rect x="130" y="118" width="300" height="34" rx="6" fill="#34d399" />
+    <text
+      x="142"
+      y="140"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#18181b"
+    >
+      수 개월 ~ 1년+
+    </text>
+    <text
+      x="24"
+      y="200"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      프로토콜
+    </text>
+    <rect x="130" y="178" width="486" height="34" rx="6" fill="#38bdf8" />
+    <text
+      x="142"
+      y="200"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#18181b"
+    >
+      수 년 — 가장 오래 감
+    </text>
+  </svg>
+</Diagram>
 
 ## 1) 모델 — "무엇이 좋아졌나"
 
-새 모델이 나오면 벤치마크 점수보다 **내 워크플로에서 실제로 나아졌는지**를 봅니다. 코드 생성 품질, 긴 컨텍스트 처리, 도구 호출(툴 유즈) 안정성 같은 실사용 지표가 핵심입니다. 마케팅 수치보다 직접 돌려본 결과가 항상 낫습니다.
+새 모델이 나오면 벤치마크 점수부터 눈에 들어옵니다. 하지만 점수는 참고치일 뿐입니다. 정작 중요한 건 **내 워크플로에서 실제로 나아졌는지**입니다. 확인할 만한 실사용 지표는 대략 이렇습니다.
+
+- **코드 생성 품질** — 내가 자주 쓰는 언어·프레임워크에서 실제로 덜 틀리는가.
+- **긴 컨텍스트 처리** — 큰 파일이나 여러 파일을 넘겨도 앞부분을 잊지 않는가.
+- **도구 호출(툴 유즈) 안정성** — 함수·MCP 도구를 정확한 인자로 부르는가, 헛것을 부르지 않는가.
+- **응답 속도와 비용** — 같은 품질이면 더 빠르고 싼 쪽이 결국 이깁니다.
+
+마케팅 수치보다 직접 돌려본 결과가 항상 낫습니다. 새 모델 소식을 봤다면, 벤치마크 표를 외우는 대신 **어제 실패했던 실제 작업 하나**를 다시 던져 보세요. 그 한 번이 리더보드 열 줄보다 정확합니다. 특히 모델은 반감기가 짧은 축이므로, 버전 번호를 외우는 데 에너지를 쓰기보다 "지금 손에 있는 문제를 더 잘 푸는가"만 확인하고 넘어가는 편이 효율적입니다.
 
 ## 2) 도구 — "무엇으로 일하나"
 
-에디터 통합, CLI 에이전트, 리뷰 자동화 같은 도구는 생산성에 직접 영향을 줍니다. 새 도구를 볼 때는 "이게 기존 흐름을 대체하나, 아니면 하나 더 늘리나"를 먼저 판단하면 도입 실패를 줄일 수 있습니다.
+에디터 통합, CLI 에이전트, 코드 리뷰 자동화, 터미널 기반 오케스트레이터 같은 도구는 생산성에 직접 붙습니다. 모델이 "엔진"이라면 도구는 "차체"입니다. 좋은 엔진도 차체가 나쁘면 제대로 굴릴 수 없습니다.
+
+새 도구를 볼 때 던질 질문은 하나로 충분합니다 — **"이게 기존 흐름을 대체하나, 아니면 하나 더 늘리나?"** 대체라면 도입 비용이 낮고 이득이 분명합니다. 하나 더 늘리는 쪽이라면, 늘어난 맥락 전환 비용이 그 도구의 이득을 넘어서지는 않는지 따져야 합니다. 도구는 쌓을수록 좋은 게 아니라, **줄일수록 좋을 때가 많습니다.**
+
+특히 요즘은 "에이전트를 여러 개 동시에 돌리는" 부류의 도구가 빠르게 늘고 있습니다. 이런 도구를 볼 때는 화려한 데모가 아니라, **결과를 어떻게 검수하고 병합하는지**를 보세요. 병렬 실행 자체는 이제 흔합니다. 진짜 차이는 여러 에이전트의 결과를 잃지 않고 통제 가능한 상태로 모으는 레이어에서 납니다.
 
 ## 3) 프로토콜 — "어떻게 연결되나"
 
-개별 기능보다 오래 가는 건 **표준**입니다. 예컨대 MCP(Model Context Protocol)처럼 AI를 도구·데이터에 연결하는 열린 표준은, 한 번 익혀 두면 여러 클라이언트에서 재사용됩니다. 표준을 따르는 도구를 고르면 락인 위험이 줄어듭니다.
+개별 기능보다 오래 가는 건 **표준**입니다. 대표적인 예가 **MCP(Model Context Protocol)** 입니다. MCP는 AI를 파일·데이터베이스·외부 API 같은 도구에 연결하는 열린 표준으로, 한 번 익혀 두면 여러 클라이언트에서 재사용됩니다. 특정 앱에서만 통하는 연결 방식과 달리, 표준은 앱이 바뀌어도 살아남습니다.
 
-## 실천 팁
+표준을 따르는 도구를 고르면 **락인 위험**이 줄어듭니다. 오늘 쓰는 에디터가 내년에 시들해져도, 표준 위에 쌓아 둔 연결·설정·워크플로는 다음 도구로 옮겨 갈 수 있기 때문입니다. 그래서 프로토콜 소식은 당장 화려하지 않아도 우선순위를 높게 둘 가치가 있습니다. 앞서 본 반감기 그림에서처럼, 파급이 가장 오래 가는 축이니까요.
+
+## 어디서 챙길까 — 출처의 위계
+
+뉴스는 출처에 따라 신뢰도가 다릅니다. 같은 소식이라도 어디서 왔느냐로 검증 순서를 정하면 헛발질이 줄어듭니다.
+
+- **1차 출처(가장 믿을 만함)** — 공식 릴리스 노트, 벤더의 공식 문서, 표준 명세(스펙) 원문. 해석이 섞이지 않은 원본입니다.
+- **2차 출처(맥락 보강)** — 벤더 엔지니어링 블로그, 상세한 기술 분석 글. 배경과 한계를 이해하는 데 좋습니다.
+- **3차 출처(조기 경보)** — 개발자 커뮤니티, 소셜 타임라인. 무엇이 뜨는지 빨리 알려 주지만 **과장과 오해가 섞이기 쉽습니다.**
+
+실전 규칙은 간단합니다. **3차에서 발견하고, 1차에서 확인합니다.** 커뮤니티에서 화제가 된 소식이라도, 공식 문서나 스펙 원문으로 뒷받침되기 전까지는 "소문" 칸에 둡니다. 특히 성능 주장, 가격, 출시일은 반드시 1차 출처로 확인하세요. 숫자는 전달 과정에서 가장 쉽게 뒤틀립니다.
+
+## 어떻게 거를까 — 주간 트리아지 루틴
+
+상시 알림은 집중을 갉아먹습니다. 뉴스는 **몰아서, 정해진 시간에** 처리하는 편이 낫습니다. 주 1회 30분이면 충분한 루틴을 예로 들면 이렇습니다.
+
+<Diagram caption="주 1회 30분 루틴 — 모아 두었다가 세 축으로 분류하고, 작은 실험을 거쳐 도입 여부를 정합니다.">
+  <svg
+    viewBox="0 0 720 180"
+    role="img"
+    aria-label="모아두기에서 세 축 분류, 작은 실험을 거쳐 도입 또는 보류로 이어지는 주간 뉴스 트리아지 4단계 흐름"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-routine"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="20"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="95"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      모아두기
+    </text>
+    <text
+      x="95"
+      y="110"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      링크만 던져둠
+    </text>
+    <rect
+      x="195"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="270"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      세 축 분류
+    </text>
+    <text
+      x="270"
+      y="110"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      대부분 해당 없음
+    </text>
+    <rect
+      x="370"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#fbbf24"
+      strokeWidth="1.5"
+    />
+    <text
+      x="445"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      작은 실험
+    </text>
+    <text
+      x="445"
+      y="110"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      실제 작업 하나
+    </text>
+    <rect
+      x="545"
+      y="54"
+      width="150"
+      height="72"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="620"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      도입 · 보류
+    </text>
+    <text
+      x="620"
+      y="110"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      보류도 결론
+    </text>
+    <line
+      x1="170"
+      y1="90"
+      x2="193"
+      y2="90"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-routine)"
+    />
+    <line
+      x1="345"
+      y1="90"
+      x2="368"
+      y2="90"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-routine)"
+    />
+    <line
+      x1="520"
+      y1="90"
+      x2="543"
+      y2="90"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-routine)"
+    />
+  </svg>
+</Diagram>
+
+1. **모아두기** — 한 주 동안 눈에 띈 소식을 한 곳에 링크만 던져 둡니다. 그 자리에서 읽지 않습니다.
+2. **세 축으로 분류** — 정해진 시간에 열어, 모델·도구·프로토콜 중 어디에 해당하는지(혹은 셋 다 아닌지) 태그를 붙입니다. 대부분은 "해당 없음"으로 빠집니다.
+3. **작은 실험** — 남은 소수만 실제 작업 하나에 붙여 봅니다. 5분 안에 가치가 안 보이면 접습니다.
+4. **도입 또는 보류** — 실험이 통과한 것만 워크플로에 반영하고, 나머지는 기록만 남깁니다. 보류도 하나의 결론입니다.
+
+이 루틴의 핵심은 **"읽기"와 "판단"을 분리**하는 데 있습니다. 발견하는 순간 판단하려 들면 매번 흐름이 끊깁니다. 모아 두었다가 한꺼번에 판단하면, 비슷한 소식끼리 묶여 비교가 쉬워지고 과대평가도 줄어듭니다.
+
+## 흔한 함정
+
+- **FOMO 기반 도입** — "남들 다 쓴다"는 이유만으로 도입하면, 정작 내 문제는 안 풀면서 맥락만 늘어납니다.
+- **벤치마크 맹신** — 리더보드 1위가 내 코드베이스에서도 1위라는 보장은 없습니다. 도메인·언어·데이터가 다릅니다.
+- **버전 노이즈** — 소수점 업데이트까지 전부 좇으면 지칩니다. 판을 바꾸는 변화만 챙겨도 충분합니다.
+- **출처 건너뛰기** — 요약의 요약만 보다 보면 원래 주장과 멀어집니다. 중요한 건 원문으로 돌아가세요.
+
+## 실천 팁 요약
 
 - 주 1회 정해진 시간에만 몰아서 훑기 — 상시 알림은 끄기.
+- 모든 소식을 세 축(모델·도구·프로토콜)으로 먼저 태깅하기.
 - 새 모델·도구는 **작은 실제 작업**에 붙여 보고 판단하기.
+- 성능·가격·출시일 같은 숫자는 반드시 1차 출처로 확인하기.
 - 표준(프로토콜) 소식은 우선순위 높게 챙기기 — 파급이 오래 갑니다.
 
-마블로도 이 원칙 위에 있습니다. 이종 모델을 동시에 쓰고, MCP를 네이티브로 지원하며, 모든 실행을 로컬에서 처리합니다. 도구는 바뀌어도 "표준 위에서 조율한다"는 축은 유지됩니다.
+## 마블로와의 연결
+
+마블로도 이 원칙 위에 서 있습니다. 이종 모델을 동시에 쓰기 때문에 **특정 모델 뉴스 하나에 휘둘리지 않고**, 상황에 맞는 모델을 골라 끼웁니다. MCP를 네이티브로 지원해 **프로토콜이라는 오래 가는 축** 위에 워크플로를 얹고, 모든 실행을 로컬에서 처리해 소스가 밖으로 나가지 않습니다. 도구와 모델은 계속 바뀌겠지만, "표준 위에서 여러 에이전트를 조율한다"는 축은 그대로 유지됩니다. 뉴스를 거르는 기준과 마블로가 설계된 기준이, 사실 같은 방향을 보고 있는 셈입니다.
