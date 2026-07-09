@@ -2,7 +2,7 @@
 title: "Getting Started with MCP — the Open Standard for Connecting AI Agents to Tools and Data"
 description: "What the Model Context Protocol (MCP) is, why it matters, and how Marblo uses it — in a five-minute read."
 date: "2026-06-18"
-updated: "2026-07-02"
+updated: "2026-07-09"
 category: "mcp"
 locales: ["ko", "en"]
 author: "Marblo"
@@ -10,15 +10,572 @@ author: "Marblo"
 
 ## What is MCP?
 
-**MCP (Model Context Protocol)** is an open standard for connecting AI models to external tools and data sources. It was introduced by Anthropic and is now adopted by a range of AI clients. The core idea is simple: expose "tools an AI can use" through a standard interface, and any MCP-compatible client can use them as-is.
+**MCP (Model Context Protocol)** is an open standard for connecting AI models to external tools and data sources. Anthropic introduced it in late 2024 and released it as open source, and it is now adopted by a range of AI clients. The core idea is simple: expose "tools an AI can use" through a standard interface, and any MCP-compatible client can use them as-is.
 
-Just as REST APIs standardized service-to-service integration, MCP standardizes the **AI ↔ tool** connection. Wrap a filesystem, database, internal API, or search index once as an MCP server, and multiple agents can share it.
+Just as REST APIs standardized service-to-service integration, MCP standardizes the **AI ↔ tool** connection. Wrap a filesystem, database, internal API, or search index once as an MCP server, and multiple agents can share it. The side that builds a tool and the side that uses it talk over the same contract (the protocol), so they interoperate without knowing anything about each other's internals.
 
-## Why it matters
+A useful analogy: MCP is like **USB-C for AI**. It used to be that every device needed its own proprietary cable; once a standard port arrived, one cable plugged into everything. MCP does the same thing for "the port where an AI meets the outside world" — it unifies it into a single spec.
 
-- **Reusability**: build a tool as an MCP server once instead of re-wiring it per client.
-- **Isolation**: each server exposes only its own scope, which keeps access easy to control.
-- **Composability**: attach several MCP servers to extend an agent's capabilities like Lego bricks.
+## Why a standard was needed — the M×N problem
+
+Before MCP, every AI application wired up the tools it needed **by hand, every time**. If there are M clients and N tools or data sources you want to connect, you end up hand-writing roughly **M×N separate integrations**. Editor A talks to GitHub one way, editor B another way, and every time a new data source appears, every editor has to integrate it again. Integrations fragment, and the same work gets rebuilt team by team.
+
+MCP turns that into **M+N**. A tool provider builds an MCP server **once**, a client implements an MCP client **once**, and after that any server meshes with any client over the shared standard. When a new tool appears, you add one server, and every MCP-aware client can use it immediately. That leverage is the biggest payoff of standardization.
+
+## The shape of MCP — hosts, clients, and servers
+
+MCP has three roles. The vocabulary is easy to mix up, so pinning it down once makes everything after it easier.
+
+- **Host**: the application the user faces. Marblo, the Claude desktop app, and various AI editors are hosts. The model and the clients live inside the host.
+- **Client**: a connector inside the host that maintains a **1:1 connection with exactly one server**. Three servers means three clients.
+- **Server**: a process that exposes actual tools, data, and prompts in a standard shape. Servers exist per capability — a filesystem server, a GitHub server, a database server.
+
+Messages travel as **JSON-RPC 2.0** — requests, responses, and notifications in well-defined envelopes. Because of that, a server written in any language is interpreted identically by any client.
+
+<Diagram caption="Clients inside the host connect 1:1 to each MCP server, and each server exposes real resources — files, a DB, an API — in a standard shape.">
+  <svg
+    viewBox="0 0 640 380"
+    role="img"
+    aria-label="A model and three clients inside the host application each connect one-to-one with a filesystem, database, and GitHub MCP server, and each server binds to a real resource such as local files, a SQL database, or the GitHub API"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mcparch"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="20"
+      y="20"
+      width="600"
+      height="120"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="40"
+      y="44"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#a1a1aa"
+    >
+      Host application (Marblo · AI editor)
+    </text>
+    <rect
+      x="40"
+      y="58"
+      width="150"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="115"
+      y="93"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      AI model
+    </text>
+    <rect
+      x="230"
+      y="58"
+      width="110"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="285"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Client A
+    </text>
+    <text
+      x="285"
+      y="104"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      1:1
+    </text>
+    <rect
+      x="350"
+      y="58"
+      width="110"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="405"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Client B
+    </text>
+    <text
+      x="405"
+      y="104"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      1:1
+    </text>
+    <rect
+      x="470"
+      y="58"
+      width="110"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="525"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Client C
+    </text>
+    <text
+      x="525"
+      y="104"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      1:1
+    </text>
+    <line
+      x1="285"
+      y1="118"
+      x2="285"
+      y2="214"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <line
+      x1="405"
+      y1="118"
+      x2="405"
+      y2="214"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <line
+      x1="525"
+      y1="118"
+      x2="525"
+      y2="214"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <text
+      x="415"
+      y="168"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      JSON-RPC 2.0 (stdio · HTTP)
+    </text>
+    <rect
+      x="230"
+      y="220"
+      width="110"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="285"
+      y="253"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      File server
+    </text>
+    <rect
+      x="350"
+      y="220"
+      width="110"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="405"
+      y="253"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      DB server
+    </text>
+    <rect
+      x="470"
+      y="220"
+      width="110"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="525"
+      y="253"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      GitHub server
+    </text>
+    <line
+      x1="285"
+      y1="276"
+      x2="285"
+      y2="320"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <line
+      x1="405"
+      y1="276"
+      x2="405"
+      y2="320"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <line
+      x1="525"
+      y1="276"
+      x2="525"
+      y2="320"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <rect
+      x="230"
+      y="326"
+      width="350"
+      height="44"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="405"
+      y="353"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      Real resources — local files · SQL DB · GitHub API
+    </text>
+  </svg>
+</Diagram>
+
+## What an MCP server exposes — tools, resources, prompts
+
+An MCP server offers three kinds of capabilities (primitives) in a standardized form.
+
+- **Tools**: functions the model **calls to execute**. They expose actions with side effects — `write_file`, `query_sql`, `create_issue`. Each tool carries a name, a description, and an input schema (JSON Schema), so the model can decide on its own when to call it and with what arguments.
+- **Resources**: data the model **reads in**. File contents, documents, DB records — material to inject as context, identified by URI. If tools are "verbs," resources are closer to "nouns."
+- **Prompts**: **reusable prompt templates** the server prepares ahead of time. A canned request like "review this code" that a user can pull up like a slash command.
+
+When a server declares these, the client — right after connecting — asks "what tools, resources, and prompts does this server have?" (discovery) and hands that list to the model. So you don't hardcode tools into your code; swap the server and the model's available capabilities change wholesale.
+
+## How a tool call actually flows
+
+The most common primitive is the **tool call**. Tracing one real call in order makes the MCP picture click.
+
+1. The user asks, "find files in this folder that still have TODOs."
+2. The model looks at the tool list the server exposed and decides to call the `search_files` tool with suitable arguments.
+3. The client wraps that call as a **JSON-RPC request** and sends it to the server.
+4. The server does the actual work (scanning the directory) and returns the result as a response.
+5. The client puts the result into the model's context, and the model composes a human-readable answer on top of it.
+
+<Diagram caption="The five steps of one tool call. The model picks a tool, the client sends the request to the server, and the execution result returns to the context.">
+  <svg
+    viewBox="0 0 640 300"
+    role="img"
+    aria-label="Starting from a user request, the model selects a tool, the client sends a JSON-RPC request to the server to execute it, and the result returns to the model context in a round-trip tool call flow"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-toolcall"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="20"
+      y="120"
+      width="120"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="80"
+      y="155"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      User
+    </text>
+    <rect
+      x="180"
+      y="120"
+      width="120"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="240"
+      y="155"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      Model
+    </text>
+    <rect
+      x="340"
+      y="120"
+      width="120"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="400"
+      y="155"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Client
+    </text>
+    <rect
+      x="500"
+      y="120"
+      width="120"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="560"
+      y="148"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      Server
+    </text>
+    <text
+      x="560"
+      y="166"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      runs tool
+    </text>
+    <line
+      x1="140"
+      y1="140"
+      x2="178"
+      y2="140"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <text
+      x="159"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      ① ask
+    </text>
+    <line
+      x1="300"
+      y1="140"
+      x2="338"
+      y2="140"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <text
+      x="319"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      ② pick tool
+    </text>
+    <line
+      x1="460"
+      y1="140"
+      x2="498"
+      y2="140"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <text
+      x="479"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      ③ JSON-RPC
+    </text>
+    <line
+      x1="498"
+      y1="165"
+      x2="462"
+      y2="165"
+      stroke="#34d399"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <line
+      x1="338"
+      y1="165"
+      x2="302"
+      y2="165"
+      stroke="#34d399"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <text
+      x="400"
+      y="205"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      ④ result returns to context
+    </text>
+    <line
+      x1="178"
+      y1="165"
+      x2="142"
+      y2="165"
+      stroke="#34d399"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <text
+      x="159"
+      y="205"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      ⑤ answer
+    </text>
+  </svg>
+</Diagram>
+
+The key point is that the model never has to know the server's internals. It only knows "there is a tool with this name and schema" and calls it — whether that tool scans local files or hits a remote API is irrelevant. Because implementation and use are separated by the protocol, the same tool keeps working when you move it to a different model or a different client.
 
 ## A minimal example
 
@@ -35,10 +592,323 @@ MCP servers usually talk over stdio or HTTP. You register a server in the client
 }
 ```
 
-With that in place, the agent gains tools to read and write in that directory.
+With that in place, the agent gains tools to read and write in that directory. The `command` and `args` say how to launch the server process — the example above uses `npx` to fetch and run the filesystem server package, passing the directory to grant access to as an argument. The client spawns this process as a child and exchanges JSON-RPC messages over its standard input/output (stdio).
+
+## Understanding the config structure
+
+In practice you rarely attach just one server. List as many entries as you need under `mcpServers`, and each entry becomes a separate server process and a separate bundle of tools.
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/repo"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "..." }
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgres://..."]
+    }
+  }
+}
+```
+
+Each server exposes only its own slice of capability. The filesystem server offers file read/write, the GitHub server offers issue and PR tools, the Postgres server offers SQL queries. Injecting secrets like tokens through `env` keeps them in the server process only, so credentials never get mixed into the model's prompt.
+
+<Diagram caption="One config file declares several servers. Each entry is an independent process with its own permission scope — attach as many as you need, like Lego bricks.">
+  <svg
+    viewBox="0 0 640 320"
+    role="img"
+    aria-label="Under an mcpServers config block, three entries — filesystem, github, postgres — are listed, and each maps to a separate server process with its own tool bundle and permission scope"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-config"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="220"
+      y="20"
+      width="200"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="45"
+      textAnchor="middle"
+      fontFamily="ui-monospace, SFMono-Regular, monospace"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      mcpServers
+    </text>
+    <text
+      x="320"
+      y="64"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      server list in the config
+    </text>
+    <line
+      x1="320"
+      y1="76"
+      x2="112"
+      y2="126"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <line
+      x1="320"
+      y1="76"
+      x2="320"
+      y2="126"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <line
+      x1="320"
+      y1="76"
+      x2="528"
+      y2="126"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <rect
+      x="24"
+      y="132"
+      width="176"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="165"
+      textAnchor="middle"
+      fontFamily="ui-monospace, SFMono-Regular, monospace"
+      fontSize="13"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      filesystem
+    </text>
+    <rect
+      x="232"
+      y="132"
+      width="176"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="165"
+      textAnchor="middle"
+      fontFamily="ui-monospace, SFMono-Regular, monospace"
+      fontSize="13"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      github
+    </text>
+    <rect
+      x="440"
+      y="132"
+      width="176"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="165"
+      textAnchor="middle"
+      fontFamily="ui-monospace, SFMono-Regular, monospace"
+      fontSize="13"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      postgres
+    </text>
+    <line
+      x1="112"
+      y1="188"
+      x2="112"
+      y2="232"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <line
+      x1="320"
+      y1="188"
+      x2="320"
+      y2="232"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <line
+      x1="528"
+      y1="188"
+      x2="528"
+      y2="232"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <rect
+      x="24"
+      y="238"
+      width="176"
+      height="64"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      read · write files
+    </text>
+    <text
+      x="112"
+      y="285"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      /repo scope only
+    </text>
+    <rect
+      x="232"
+      y="238"
+      width="176"
+      height="64"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      issue · PR tools
+    </text>
+    <text
+      x="320"
+      y="285"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      within token scope
+    </text>
+    <rect
+      x="440"
+      y="238"
+      width="176"
+      height="64"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      SQL queries
+    </text>
+    <text
+      x="528"
+      y="285"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      connection scope
+    </text>
+  </svg>
+</Diagram>
+
+## stdio or HTTP — choosing a transport
+
+MCP standardizes two **transports** for carrying messages.
+
+- **stdio**: the client launches the server as a **local child process** and exchanges JSON-RPC over standard input/output. Setup is simple and latency is low, which suits tools that run inside your own machine — a local filesystem, a local DB. Most people start here.
+- **HTTP**: the server runs **remotely** and the client connects over the network. For an internal service shared by many users, or a server wrapping an already-deployed API, HTTP is the natural fit.
+
+What to pick comes down to "where does the server run?" A resource inside your machine → stdio; a remote resource the team shares → HTTP. That one criterion usually settles it.
+
+## Why it matters
+
+- **Reusability**: build a tool as an MCP server once instead of re-wiring it per client. One internal tool server your team builds is used as-is by every developer's every agent.
+- **Isolation**: each server exposes only its own scope, which keeps access easy to control. Allow the file server only a specific directory, the DB server only a specific connection — keep the boundary narrow.
+- **Composability**: attach several MCP servers to extend an agent's capabilities like Lego bricks. Attach files + GitHub + DB together and a single agent can read code, open issues, and query data in one smooth chain.
+
+## Security — keep the trust boundary narrow
+
+Since you are handing the model powerful tools, always stay conscious of **permission scope** when using MCP. A few principles cut the risk sharply.
+
+- **Least privilege**: grant a server only what it truly needs. For a file server, the working directory rather than the repo root; for a DB, start from a read-only connection.
+- **Isolate secrets**: inject tokens and keys into the server process only (via `env`, as above), and keep them out of prompts and logs.
+- **Only trusted servers**: attaching an arbitrary MCP server is like running arbitrary code. Register only servers of known provenance, and put a human-confirmation step in front of high-impact tools (delete, deploy, payment).
 
 ## Marblo and MCP
 
-Marblo supports **MCP natively**. When you run multiple AI agents at once, you can configure them to share the same set of MCP servers, keeping tools and context consistent. Everything runs locally, so sensitive data never leaves your machine.
+Marblo supports **MCP natively**. When you run multiple AI agents at once, you can configure them to share the same set of MCP servers, keeping tools and context consistent. If every agent had its own scattered tools, results would drift apart; on a shared MCP layer, the state a backend agent produces is picked up by a frontend agent through the same tools.
 
-In the next post, we look at orchestration — assigning roles across several agents.
+Everything also runs **locally**, so sensitive data never leaves your machine. Use stdio-based local servers and an agent fleet collaborates while source code and data stay on your machine. Paired with the BYO-model structure, this is especially valuable in environments where compliance and security are sensitive.
+
+## Next steps
+
+Once the MCP picture is clear, there are two paths forward. One is **orchestration — assigning roles across several agents**, where backend, frontend, and test agents mesh on top of a shared MCP layer. The other is **building your own MCP server to expose internal tools** — wrap your team's tools once and every agent uses them immediately. To start, paste the filesystem example above as-is and watch, with your own eyes, the round-trip of an agent calling a tool.

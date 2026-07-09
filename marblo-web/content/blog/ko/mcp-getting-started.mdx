@@ -2,7 +2,7 @@
 title: "MCP 시작하기 — AI 에이전트를 도구·데이터에 연결하는 열린 표준"
 description: "Model Context Protocol(MCP)이 무엇이고 왜 중요한지, 그리고 마블로에서 MCP를 어떻게 활용하는지 5분 만에 정리합니다."
 date: "2026-06-18"
-updated: "2026-07-02"
+updated: "2026-07-09"
 category: "mcp"
 locales: ["ko", "en"]
 author: "Marblo"
@@ -10,15 +10,572 @@ author: "Marblo"
 
 ## MCP가 뭔가요?
 
-**MCP(Model Context Protocol)** 는 AI 모델을 외부 도구·데이터 소스에 연결하기 위한 열린 표준입니다. Anthropic이 공개했고, 지금은 여러 AI 클라이언트가 채택하고 있습니다. 핵심 아이디어는 단순합니다 — "AI가 쓸 수 있는 도구"를 표준 인터페이스로 노출하면, 어떤 MCP 호환 클라이언트든 그 도구를 그대로 쓸 수 있다는 것.
+**MCP(Model Context Protocol)** 는 AI 모델을 외부 도구·데이터 소스에 연결하기 위한 열린 표준입니다. Anthropic이 2024년 말 공개하며 오픈소스로 풀었고, 지금은 여러 AI 클라이언트가 채택하고 있습니다. 핵심 아이디어는 단순합니다 — "AI가 쓸 수 있는 도구"를 표준 인터페이스로 노출하면, 어떤 MCP 호환 클라이언트든 그 도구를 그대로 쓸 수 있다는 것.
 
-REST API가 서비스 간 연결을 표준화했듯, MCP는 **AI ↔ 도구** 연결을 표준화합니다. 한 번 MCP 서버로 감싸 두면, 파일시스템·데이터베이스·사내 API·검색 등 무엇이든 여러 에이전트가 공유해서 씁니다.
+REST API가 서비스 간 연결을 표준화했듯, MCP는 **AI ↔ 도구** 연결을 표준화합니다. 한 번 MCP 서버로 감싸 두면, 파일시스템·데이터베이스·사내 API·검색 등 무엇이든 여러 에이전트가 공유해서 씁니다. 도구를 만드는 쪽과 도구를 쓰는 쪽이 같은 약속(프로토콜) 위에서 대화하므로, 서로를 몰라도 곧바로 붙습니다.
 
-## 왜 중요한가
+비유하자면 MCP는 **AI 세계의 USB-C** 같은 것입니다. 예전에는 기기마다 전용 충전 케이블이 필요했지만, 표준 포트가 생기자 케이블 하나로 모든 기기를 꽂을 수 있게 됐습니다. MCP도 마찬가지로, "AI가 외부 세계와 만나는 포트"를 하나의 규격으로 통일합니다.
 
-- **재사용성**: 도구를 한 번 MCP 서버로 만들면 클라이언트마다 다시 붙일 필요가 없습니다.
-- **격리**: 각 서버가 자기 권한 범위만 노출하므로 통제가 쉽습니다.
-- **조합**: 여러 MCP 서버를 붙여 에이전트의 능력을 레고처럼 확장합니다.
+## 왜 표준이 필요했나 — M×N 문제
+
+MCP가 등장하기 전에는, AI 애플리케이션마다 필요한 도구를 **직접, 매번 새로** 붙였습니다. 클라이언트가 M개, 붙이고 싶은 도구·데이터 소스가 N개라면, 이론상 **M×N개의 개별 연동**을 손으로 짜야 합니다. 에디터 A는 깃허브 연동을 이렇게, 에디터 B는 저렇게 각자 구현하고, 새 데이터 소스가 생기면 모든 에디터가 다시 붙이는 식입니다. 연동이 파편화되고, 같은 일을 팀마다 다시 만드는 낭비가 생깁니다.
+
+MCP는 이 문제를 **M+N**으로 바꿉니다. 도구 제공자는 MCP 서버를 **한 번** 만들고, 클라이언트는 MCP 클라이언트를 **한 번** 구현하면, 그 뒤로는 어느 서버든 어느 클라이언트든 표준 위에서 곧바로 맞물립니다. 새 도구가 나오면 서버 하나만 추가하면 되고, 그 도구는 MCP를 아는 모든 클라이언트가 즉시 쓸 수 있습니다. 이것이 표준화가 주는 가장 큰 이득입니다.
+
+## MCP의 구조 — 호스트·클라이언트·서버
+
+MCP는 세 가지 역할로 나뉩니다. 용어가 헷갈리기 쉬우니 한 번 정리해 두면 이후가 편합니다.
+
+- **호스트(Host)**: 사용자가 마주하는 애플리케이션. 마블로, Claude 데스크톱, 각종 AI 에디터가 여기에 해당합니다. 호스트 안에 모델과 클라이언트가 들어 있습니다.
+- **클라이언트(Client)**: 호스트 안에서 **서버 하나와 1:1로 연결**을 유지하는 커넥터입니다. 서버가 셋이면 클라이언트도 셋입니다.
+- **서버(Server)**: 실제 도구·데이터·프롬프트를 표준 형태로 노출하는 프로세스. 파일시스템 서버, 깃허브 서버, 데이터베이스 서버처럼 기능별로 존재합니다.
+
+메시지는 **JSON-RPC 2.0** 형식으로 오갑니다. 요청(request)·응답(response)·알림(notification)이라는 잘 정의된 봉투에 담겨 흐르기 때문에, 어떤 언어로 서버를 짜든 클라이언트가 동일하게 해석할 수 있습니다.
+
+<Diagram caption="호스트 안의 클라이언트가 각 MCP 서버와 1:1로 연결되고, 서버는 파일·DB·API 같은 실제 리소스를 표준 형태로 노출합니다.">
+  <svg
+    viewBox="0 0 640 380"
+    role="img"
+    aria-label="호스트 애플리케이션 안의 모델과 세 개의 클라이언트가 각각 파일시스템·데이터베이스·깃허브 MCP 서버와 1대1로 연결되고, 각 서버는 로컬 파일·SQL DB·깃허브 API 같은 실제 리소스에 붙는 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-mcparch"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="20"
+      y="20"
+      width="600"
+      height="120"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="40"
+      y="44"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#a1a1aa"
+    >
+      호스트 애플리케이션 (마블로 · AI 에디터)
+    </text>
+    <rect
+      x="40"
+      y="58"
+      width="150"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="115"
+      y="93"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="15"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      AI 모델
+    </text>
+    <rect
+      x="230"
+      y="58"
+      width="110"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="285"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      클라이언트
+    </text>
+    <text
+      x="285"
+      y="104"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      A
+    </text>
+    <rect
+      x="350"
+      y="58"
+      width="110"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="405"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      클라이언트
+    </text>
+    <text
+      x="405"
+      y="104"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      B
+    </text>
+    <rect
+      x="470"
+      y="58"
+      width="110"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="525"
+      y="86"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      클라이언트
+    </text>
+    <text
+      x="525"
+      y="104"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      C
+    </text>
+    <line
+      x1="285"
+      y1="118"
+      x2="285"
+      y2="214"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <line
+      x1="405"
+      y1="118"
+      x2="405"
+      y2="214"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <line
+      x1="525"
+      y1="118"
+      x2="525"
+      y2="214"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <text
+      x="415"
+      y="168"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      JSON-RPC 2.0 (stdio · HTTP)
+    </text>
+    <rect
+      x="230"
+      y="220"
+      width="110"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="285"
+      y="253"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      파일 서버
+    </text>
+    <rect
+      x="350"
+      y="220"
+      width="110"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="405"
+      y="253"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      DB 서버
+    </text>
+    <rect
+      x="470"
+      y="220"
+      width="110"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="525"
+      y="253"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      깃허브 서버
+    </text>
+    <line
+      x1="285"
+      y1="276"
+      x2="285"
+      y2="320"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <line
+      x1="405"
+      y1="276"
+      x2="405"
+      y2="320"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <line
+      x1="525"
+      y1="276"
+      x2="525"
+      y2="320"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-mcparch)"
+    />
+    <rect
+      x="230"
+      y="326"
+      width="350"
+      height="44"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="405"
+      y="353"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      실제 리소스 — 로컬 파일 · SQL DB · 깃허브 API
+    </text>
+  </svg>
+</Diagram>
+
+## MCP 서버가 노출하는 것 — 도구·리소스·프롬프트
+
+MCP 서버는 세 종류의 능력(primitive)을 표준화된 형태로 내놓습니다.
+
+- **도구(Tools)**: 모델이 **호출해 실행**하는 함수입니다. `파일_쓰기`, `SQL_질의`, `이슈_생성`처럼 부작용(side effect)이 있는 동작을 노출합니다. 각 도구는 이름·설명·입력 스키마(JSON Schema)를 갖고 있어, 모델이 언제 어떤 인자로 부를지 스스로 판단할 수 있습니다.
+- **리소스(Resources)**: 모델이 **읽어 들이는** 데이터입니다. 파일 내용, 문서, DB 레코드처럼 컨텍스트로 주입할 재료를 URI로 식별해 제공합니다. 도구가 "동사"라면 리소스는 "명사"에 가깝습니다.
+- **프롬프트(Prompts)**: 서버가 미리 준비해 둔 **재사용 가능한 프롬프트 템플릿**입니다. "이 코드 리뷰해 줘" 같은 정형화된 요청을, 사용자가 슬래시 명령처럼 꺼내 쓸 수 있게 합니다.
+
+이 세 가지를 서버가 선언해 두면, 클라이언트는 연결 직후 "이 서버가 무슨 도구·리소스·프롬프트를 갖고 있는지"를 물어보고(discovery), 그 목록을 모델에게 넘깁니다. 그래서 도구를 코드에 하드코딩하지 않아도, 서버만 갈아 끼우면 모델이 쓸 수 있는 능력이 통째로 바뀝니다.
+
+## 툴 콜은 실제로 어떻게 흐르나
+
+가장 자주 쓰이는 것은 **도구 호출(tool call)** 입니다. 실제 한 번의 호출이 어떻게 흐르는지 순서대로 따라가 보면 MCP의 그림이 또렷해집니다.
+
+1. 사용자가 "이 폴더에서 TODO가 남은 파일을 찾아 줘"라고 요청합니다.
+2. 모델이 서버가 노출한 도구 목록을 보고, `파일_검색` 도구를 적절한 인자와 함께 호출하기로 결정합니다.
+3. 클라이언트가 그 호출을 **JSON-RPC 요청**으로 감싸 해당 서버로 보냅니다.
+4. 서버가 실제 작업(디렉터리 스캔)을 수행하고 결과를 응답으로 돌려줍니다.
+5. 클라이언트가 결과를 모델의 컨텍스트에 넣고, 모델이 그 위에서 사람이 읽을 답을 만듭니다.
+
+<Diagram caption="한 번의 툴 콜이 흐르는 5단계. 모델이 도구를 고르면 클라이언트가 요청을 서버로 보내고, 실행 결과가 다시 컨텍스트로 돌아옵니다.">
+  <svg
+    viewBox="0 0 640 300"
+    role="img"
+    aria-label="사용자 요청에서 시작해 모델이 도구를 선택하고, 클라이언트가 JSON-RPC 요청을 서버로 보내 실행한 뒤 결과가 다시 모델 컨텍스트로 돌아오는 툴 콜 왕복 흐름"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-toolcall"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="20"
+      y="120"
+      width="120"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="80"
+      y="155"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      사용자
+    </text>
+    <rect
+      x="180"
+      y="120"
+      width="120"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="240"
+      y="155"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      모델
+    </text>
+    <rect
+      x="340"
+      y="120"
+      width="120"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="400"
+      y="155"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      클라이언트
+    </text>
+    <rect
+      x="500"
+      y="120"
+      width="120"
+      height="60"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="560"
+      y="148"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="14"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      서버
+    </text>
+    <text
+      x="560"
+      y="166"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      도구 실행
+    </text>
+    <line
+      x1="140"
+      y1="140"
+      x2="178"
+      y2="140"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <text
+      x="159"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      ① 요청
+    </text>
+    <line
+      x1="300"
+      y1="140"
+      x2="338"
+      y2="140"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <text
+      x="319"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      ② 도구 선택
+    </text>
+    <line
+      x1="460"
+      y1="140"
+      x2="498"
+      y2="140"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <text
+      x="479"
+      y="112"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      ③ JSON-RPC
+    </text>
+    <line
+      x1="498"
+      y1="165"
+      x2="462"
+      y2="165"
+      stroke="#34d399"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <line
+      x1="338"
+      y1="165"
+      x2="302"
+      y2="165"
+      stroke="#34d399"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <text
+      x="400"
+      y="205"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      ④ 결과가 컨텍스트로 복귀
+    </text>
+    <line
+      x1="178"
+      y1="165"
+      x2="142"
+      y2="165"
+      stroke="#34d399"
+      strokeWidth="2"
+      markerEnd="url(#arrow-toolcall)"
+    />
+    <text
+      x="159"
+      y="205"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      ⑤ 답변
+    </text>
+  </svg>
+</Diagram>
+
+여기서 중요한 점은, 모델이 서버 내부 구현을 전혀 몰라도 된다는 것입니다. 모델은 "이런 이름과 스키마의 도구가 있다"만 알고 호출하며, 그 도구가 로컬 파일을 뒤지든 원격 API를 때리든 상관하지 않습니다. 구현과 사용이 프로토콜로 분리돼 있기 때문에, 같은 도구를 다른 모델·다른 클라이언트로 그대로 옮겨도 동작합니다.
 
 ## 가장 작은 예시
 
@@ -35,10 +592,323 @@ MCP 서버는 보통 stdio 또는 HTTP로 통신합니다. 클라이언트 설�
 }
 ```
 
-이렇게 등록하면 에이전트가 해당 디렉터리를 읽고 쓸 수 있는 도구를 얻습니다.
+이렇게 등록하면 에이전트가 해당 디렉터리를 읽고 쓸 수 있는 도구를 얻습니다. `command`와 `args`는 서버 프로세스를 어떻게 띄울지를 말해 줍니다 — 위 예시는 `npx`로 파일시스템 서버 패키지를 내려받아 실행하고, 접근을 허용할 디렉터리를 인자로 넘깁니다. 클라이언트는 이 프로세스를 자식으로 띄우고 그 표준 입출력(stdio)으로 JSON-RPC 메시지를 주고받습니다.
+
+## 설정 구조 이해하기
+
+실전에서는 서버를 하나만 붙이지 않습니다. `mcpServers` 아래에 필요한 만큼 항목을 나열하면, 각 항목이 별도의 서버 프로세스이자 별도의 도구 묶음이 됩니다.
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/repo"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "..." }
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgres://..."]
+    }
+  }
+}
+```
+
+각 서버는 자기 몫의 능력만 노출합니다. 파일시스템 서버는 파일 읽기·쓰기를, 깃허브 서버는 이슈·PR 도구를, 포스트그레스 서버는 SQL 질의를 내놓습니다. `env`로 토큰 같은 비밀값을 서버 프로세스에만 주입하므로, 자격 증명이 모델의 프롬프트에 섞여 들어가지 않습니다.
+
+<Diagram caption="하나의 설정 파일이 여러 서버를 선언합니다. 각 항목은 독립 프로세스이자 독립 권한 범위이며, 필요한 만큼 레고처럼 붙입니다.">
+  <svg
+    viewBox="0 0 640 320"
+    role="img"
+    aria-label="mcpServers 설정 블록 아래에 filesystem·github·postgres 세 항목이 나열되고, 각 항목이 별도의 서버 프로세스와 그에 대응하는 도구 묶음·권한 범위로 이어지는 설정 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-config"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="220"
+      y="20"
+      width="200"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#6366f1"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="45"
+      textAnchor="middle"
+      fontFamily="ui-monospace, SFMono-Regular, monospace"
+      fontSize="14"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      mcpServers
+    </text>
+    <text
+      x="320"
+      y="64"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="11"
+      fill="#a1a1aa"
+    >
+      설정 파일의 서버 목록
+    </text>
+    <line
+      x1="320"
+      y1="76"
+      x2="112"
+      y2="126"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <line
+      x1="320"
+      y1="76"
+      x2="320"
+      y2="126"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <line
+      x1="320"
+      y1="76"
+      x2="528"
+      y2="126"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <rect
+      x="24"
+      y="132"
+      width="176"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="165"
+      textAnchor="middle"
+      fontFamily="ui-monospace, SFMono-Regular, monospace"
+      fontSize="13"
+      fontWeight="600"
+      fill="#818cf8"
+    >
+      filesystem
+    </text>
+    <rect
+      x="232"
+      y="132"
+      width="176"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="165"
+      textAnchor="middle"
+      fontFamily="ui-monospace, SFMono-Regular, monospace"
+      fontSize="13"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      github
+    </text>
+    <rect
+      x="440"
+      y="132"
+      width="176"
+      height="56"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="165"
+      textAnchor="middle"
+      fontFamily="ui-monospace, SFMono-Regular, monospace"
+      fontSize="13"
+      fontWeight="600"
+      fill="#38bdf8"
+    >
+      postgres
+    </text>
+    <line
+      x1="112"
+      y1="188"
+      x2="112"
+      y2="232"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <line
+      x1="320"
+      y1="188"
+      x2="320"
+      y2="232"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <line
+      x1="528"
+      y1="188"
+      x2="528"
+      y2="232"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-config)"
+    />
+    <rect
+      x="24"
+      y="238"
+      width="176"
+      height="64"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="112"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      파일 읽기 · 쓰기
+    </text>
+    <text
+      x="112"
+      y="285"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      /repo 범위만
+    </text>
+    <rect
+      x="232"
+      y="238"
+      width="176"
+      height="64"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="320"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      이슈 · PR 도구
+    </text>
+    <text
+      x="320"
+      y="285"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      토큰 권한 내
+    </text>
+    <rect
+      x="440"
+      y="238"
+      width="176"
+      height="64"
+      rx="8"
+      fill="#18181b"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="528"
+      y="266"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      SQL 질의
+    </text>
+    <text
+      x="528"
+      y="285"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      연결 문자열 범위
+    </text>
+  </svg>
+</Diagram>
+
+## stdio냐 HTTP냐 — 트랜스포트 고르기
+
+MCP는 메시지를 나르는 **트랜스포트(transport)** 로 두 가지를 표준화합니다.
+
+- **stdio**: 클라이언트가 서버를 **로컬 자식 프로세스**로 띄우고, 표준 입출력으로 JSON-RPC를 주고받습니다. 설정도 간단하고 지연도 낮아, 로컬 파일시스템·로컬 DB처럼 내 컴퓨터 안에서 도는 도구에 잘 맞습니다. 대부분의 시작점이 여기입니다.
+- **HTTP**: 서버가 **원격에서** 돌고, 클라이언트가 네트워크로 붙습니다. 여러 사용자가 공유하는 사내 서비스, 이미 배포돼 있는 API를 감싼 서버라면 HTTP가 자연스럽습니다.
+
+무엇을 고를지는 "서버가 어디서 도느냐"로 결정됩니다. 내 머신 안의 자원이면 stdio, 팀이 공유하는 원격 자원이면 HTTP — 이 기준 하나면 대개 충분합니다.
+
+## 왜 중요한가
+
+- **재사용성**: 도구를 한 번 MCP 서버로 만들면 클라이언트마다 다시 붙일 필요가 없습니다. 팀이 만든 사내 도구 서버 하나를, 모든 개발자의 모든 에이전트가 그대로 씁니다.
+- **격리**: 각 서버가 자기 권한 범위만 노출하므로 통제가 쉽습니다. 파일 서버에는 특정 디렉터리만, DB 서버에는 특정 연결만 허용하는 식으로 경계를 좁게 유지할 수 있습니다.
+- **조합**: 여러 MCP 서버를 붙여 에이전트의 능력을 레고처럼 확장합니다. 파일 + 깃허브 + DB를 한꺼번에 붙이면, 코드를 읽고 이슈를 만들고 데이터를 조회하는 일을 한 에이전트가 매끄럽게 이어서 합니다.
+
+## 보안 — 신뢰 경계를 좁게
+
+강력한 도구를 모델에 쥐여 주는 일인 만큼, MCP를 쓸 때는 **권한 범위**를 항상 의식해야 합니다. 몇 가지 원칙만 지켜도 위험이 크게 줄어듭니다.
+
+- **최소 권한**: 서버에 꼭 필요한 만큼만 허용합니다. 파일 서버라면 저장소 루트가 아니라 작업 디렉터리만, DB라면 읽기 전용 연결부터 시작합니다.
+- **비밀값 격리**: 토큰·키는 위 예시의 `env`처럼 서버 프로세스에만 주입하고, 프롬프트나 로그에 남기지 않습니다.
+- **신뢰할 수 있는 서버만**: 임의의 MCP 서버를 붙이는 것은 임의의 코드를 실행하는 것과 같습니다. 출처가 분명한 서버만 등록하고, 부작용이 큰 도구(삭제·배포·결제)는 사람 확인 단계를 둡니다.
 
 ## 마블로와 MCP
 
-마블로는 **MCP를 네이티브로 지원**합니다. 여러 AI 에이전트를 동시에 운용할 때, 같은 MCP 서버 집합을 공유하도록 구성할 수 있어 도구·컨텍스트를 일관되게 유지합니다. 모든 실행은 로컬에서 이뤄지므로 민감한 데이터가 외부로 나가지 않습니다.
+마블로는 **MCP를 네이티브로 지원**합니다. 여러 AI 에이전트를 동시에 운용할 때, 같은 MCP 서버 집합을 공유하도록 구성할 수 있어 도구·컨텍스트를 일관되게 유지합니다. 에이전트마다 도구가 제각각이면 결과가 흩어지지만, 공유 MCP 계층 위에서는 백엔드 에이전트가 만든 상태를 프론트엔드 에이전트가 같은 도구로 이어받습니다.
 
-다음 글에서는 여러 에이전트에게 역할을 나눠 배치하는 오케스트레이션을 다룹니다.
+또한 모든 실행이 **로컬에서** 이뤄지므로 민감한 데이터가 외부로 나가지 않습니다. stdio 기반의 로컬 서버를 그대로 쓰면, 소스 코드와 데이터가 사용자 머신을 떠나지 않는 상태에서 에이전트 군단이 협업합니다. 이 점은 BYO 모델 구조와 맞물려, 규정·보안이 민감한 환경에서 특히 값집니다.
+
+## 다음 단계
+
+MCP의 그림이 잡혔다면, 다음은 두 갈래입니다. 하나는 **여러 에이전트에게 역할을 나눠 배치하는 오케스트레이션** — 공유 MCP 계층 위에서 백엔드·프론트엔드·테스트 에이전트가 어떻게 맞물리는지를 다룹니다. 다른 하나는 **직접 MCP 서버를 만들어 사내 도구를 노출하는 것** — 팀만의 도구를 한 번 감싸면 모든 에이전트가 즉시 씁니다. 우선은 위 파일시스템 예시를 그대로 붙여, 에이전트가 도구를 호출하는 왕복을 눈으로 확인해 보길 권합니다.
