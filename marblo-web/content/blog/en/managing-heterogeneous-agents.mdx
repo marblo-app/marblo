@@ -9,30 +9,241 @@ author: "Marblo"
 
 ## The conclusion first
 
-The heart of running heterogeneous agents is **"place by strength, and draw clear boundaries."** Splitting models with different characters across roles raises both throughput and quality more than running many copies of the same model.
+The heart of running heterogeneous agents is **"place by strength, and draw clear boundaries."** Running more copies of the same model can increase capacity, but it does not automatically increase judgment. Splitting models with different characters across roles can raise both throughput and quality when the work is routed deliberately.
+
+In Marblo, heterogeneous agents do not mean "several chat windows open at once." They mean an operating model: an orchestrator breaks a goal into tasks, assigns each task to agents such as Claude, Codex, and Antigravity, and tracks progress on a kanban board until a human reviews the result. Agents can move in parallel, but responsibility stays visible. The developer still owns the final decision; the board keeps the fleet from becoming a pile of disconnected conversations.
 
 ## Why heterogeneous
 
-Each model is good at a different grain of work. Give everything to one model, and its weakness becomes the whole system's bottleneck. Mixing models lets them cover each other's gaps — as long as it's clear who owns what.
+Each model is good at a different grain of work. Give everything to one model, and its weakness becomes the whole system's bottleneck. Mixing models lets them cover each other's gaps, as long as it is clear who owns what, how far each agent may edit, and when the result must return for review.
+
+A backend domain change often needs long-context reasoning and careful handling of contracts. A frontend component pass rewards fast pattern matching, local consistency, and repetitive editing. Testing and verification require a different posture again: do not trust the implementer's intended path; look for edge cases, missing states, and regressions. One agent can attempt all three, but then one model's habits shape design, implementation, and verification at the same time.
+
+Heterogeneous orchestration distributes that influence. Claude can be placed where long context, architectural explanation, and backend reasoning matter. Codex can be placed where the codebase pattern, UI surface, types, and focused refactors matter. Antigravity can be placed where execution, reproduction, and verification reports matter. That does not mean a product guarantees a fixed capability just because of the model name. It means the operator uses different model tendencies as a practical starting point for routing work.
+
+<Diagram caption='The useful distinction is not the model name by itself; it is the kind of work being routed across design, implementation, and verification.'>
+  <svg
+    viewBox="0 0 720 360"
+    role="img"
+    aria-label="A strength matrix placing Claude on long context and backend design, Codex on UI and code pattern work, and Antigravity on tests and verification loops"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <rect x="24" y="28" width="672" height="304" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="52" y="66" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="17" fontWeight="700" fill="#e4e4e7">
+      Strength matrix
+    </text>
+    <text x="52" y="92" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      Roles are defaults for routing, not permanent rules.
+    </text>
+    <line x1="52" y1="122" x2="668" y2="122" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="190" y="150" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#818cf8">
+      Claude
+    </text>
+    <text x="360" y="150" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#34d399">
+      Codex
+    </text>
+    <text x="530" y="150" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#38bdf8">
+      Antigravity
+    </text>
+    <rect x="84" y="172" width="212" height="52" rx="8" fill="#27272a" stroke="#818cf8" strokeWidth="1.5" />
+    <text x="190" y="195" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fontWeight="600" fill="#e4e4e7">
+      Long context · design review
+    </text>
+    <text x="190" y="213" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      backend flow, API contracts, docs
+    </text>
+    <rect x="254" y="232" width="212" height="52" rx="8" fill="#27272a" stroke="#34d399" strokeWidth="1.5" />
+    <text x="360" y="255" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fontWeight="600" fill="#e4e4e7">
+      Code patterns · UI iteration
+    </text>
+    <text x="360" y="273" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      components, types, small refactors
+    </text>
+    <rect x="424" y="172" width="212" height="52" rx="8" fill="#27272a" stroke="#38bdf8" strokeWidth="1.5" />
+    <text x="530" y="195" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fontWeight="600" fill="#e4e4e7">
+      Execute · test · disprove
+    </text>
+    <text x="530" y="213" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      reproduce, regressions, reports
+    </text>
+  </svg>
+</Diagram>
 
 ## An example placement
 
 Marblo uses this split as a default shape:
 
-- **Claude** — backend implementation: complex logic and long-context work.
-- **GPT/Codex** — frontend: UI composition and repetitive component work.
-- **Antigravity** — testing: verifying the code that was written.
+- **Claude** — backend implementation and design review: complex logic, long context, API contracts, and explanatory documentation.
+- **Codex** — frontend and code work: UI components, types, hooks, state management, and consistent application of existing patterns.
+- **Antigravity** — testing and verification: running the code, reproducing failures, checking edge cases, and reporting what actually passed.
 
-This split is a **starting point**, not a fixed rule. Adjust it to the project.
+This split is a **starting point**, not a fixed rule. Adjust it to the project. In a data-heavy system, Claude may take more schema and domain reasoning while Codex handles transformation code and type safety. In a design-system cleanup, Codex may cover the broad component surface while Antigravity checks rendering, accessibility, and regression paths. In a difficult bug hunt, Antigravity may first narrow the reproduction steps before Claude or Codex receives the fix task.
+
+Good placement is not "give everything to the smartest model." Good placement is a structure where failure can be diagnosed. If the result breaks, you should be able to tell whether the backend contract was wrong, the UI misunderstood the contract, or the test failed to reflect the user path. That is why role output matters as much as model strength. Claude should leave design decisions and reasons. Codex should leave changed files and UI impact. Antigravity should leave commands, results, and residual risk.
+
+## Design the routing before starting
+
+Heterogeneous work becomes messy when tasks are divided only after agents are already running. Start by breaking the goal into units with explicit inputs and outputs. "Improve settings" is too broad. "Extend the settings store type," "add the settings form component," and "verify failed-save states" are better because each task hints at ownership, files, and verification.
+
+Three routing criteria are useful. First, ask how much context the task requires. If the agent must read product decisions, several API contracts, and historical tradeoffs, route it to an agent that handles long context well. Second, ask how wide the edit surface is. If the work repeats an established pattern across components or types, route it to an agent strong at code editing and local consistency. Third, ask what the failure cost is. Release verification, migrations, authentication, payments, and other sensitive paths deserve a separate verification agent rather than only the implementer's own check.
+
+<Diagram caption='The orchestrator reads the task shape first, then routes design, implementation, and verification to the agents that match those responsibilities.'>
+  <svg
+    viewBox="0 0 760 380"
+    role="img"
+    aria-label="An orchestrator analyzing a task, routing design to Claude, implementation to Codex, verification to Antigravity, and collecting outputs for human review"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-routing-en" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="36" y="36" width="164" height="72" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="118" y="66" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="700" fill="#e4e4e7">
+      Goal input
+    </text>
+    <text x="118" y="88" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      requirements · limits · scope
+    </text>
+    <line x1="200" y1="72" x2="286" y2="72" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-en)" />
+    <rect x="288" y="36" width="184" height="72" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="380" y="66" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="700" fill="#e4e4e7">
+      Orchestrator
+    </text>
+    <text x="380" y="88" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      split · dependencies · ownership
+    </text>
+    <line x1="380" y1="108" x2="184" y2="210" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-en)" />
+    <line x1="380" y1="108" x2="380" y2="210" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-en)" />
+    <line x1="380" y1="108" x2="576" y2="210" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-en)" />
+    <rect x="76" y="216" width="216" height="64" rx="8" fill="#27272a" stroke="#818cf8" strokeWidth="1.5" />
+    <text x="184" y="242" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#818cf8">
+      Claude: design/backend
+    </text>
+    <text x="184" y="263" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      contracts, flows, risky decisions
+    </text>
+    <rect x="272" y="216" width="216" height="64" rx="8" fill="#27272a" stroke="#34d399" strokeWidth="1.5" />
+    <text x="380" y="242" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#34d399">
+      Codex: implementation/UI
+    </text>
+    <text x="380" y="263" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      components, types, patterns
+    </text>
+    <rect x="468" y="216" width="216" height="64" rx="8" fill="#27272a" stroke="#38bdf8" strokeWidth="1.5" />
+    <text x="576" y="242" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#38bdf8">
+      Antigravity: verification
+    </text>
+    <text x="576" y="263" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      run, reproduce, regressions
+    </text>
+    <line x1="184" y1="280" x2="380" y2="322" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-en)" />
+    <line x1="380" y1="280" x2="380" y2="318" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-en)" />
+    <line x1="576" y1="280" x2="380" y2="322" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-en)" />
+    <rect x="292" y="316" width="176" height="42" rx="8" fill="#18181b" stroke="#fbbf24" strokeWidth="1.5" />
+    <text x="380" y="342" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#fbbf24">
+      Human review
+    </text>
+  </svg>
+</Diagram>
 
 ## Draw clear boundaries
 
-The most common failure in heterogeneous work is **two agents editing the same file at once**. Split tasks by file or module so ownership doesn't overlap, and when needed, run them in parallel inside isolated workspaces.
+The most common failure in heterogeneous work is **two agents editing the same file at once**. Different models do not automatically produce richer results; they can also produce more complicated conflicts. If one agent changes a type while another builds a UI against the old version of that type, both outputs may look reasonable in isolation and still break when combined.
+
+The simplest rule is ownership by file and module. A backend agent owns `api/` and domain models. A frontend agent owns `components/`, hooks, and stores. A verification agent owns tests, commands, and reports. Reality is messier, so boundaries sometimes overlap. When they do, distinguish "direct edit" from "request." If a frontend agent discovers that an API type should change, it is often safer to create a backend task and connect the dependency than to edit the backend contract directly.
+
+Isolated worktrees matter for the same reason. Parallel work should not mean several agents modifying the same directory at the same time. Each agent should produce a change in its own workspace, then bring that result back through review. That keeps one failed attempt from contaminating the entire working tree. Marblo's task board and worktree-based workflow are designed to make that discipline practical rather than theoretical.
 
 ## Coordinate from the center
 
-Even if each agent runs well independently, you only stay in control when you can see **who is doing what** in one place. A central orchestrator assigns tasks, and a kanban board reflects state.
+Even if each agent runs well independently, you only stay in control when you can see **who is doing what** in one place. The central orchestrator assigns tasks, and the kanban board reflects state. The board is not just a list. It is the operating contract: TODO means not started, IN_PROGRESS means an agent is actively working, REVIEW means a human needs to inspect the result, and DONE means the result has cleared the team's standard for completion.
+
+Without central coordination, every added agent increases the developer's cognitive load. Three agents producing three long logs force the developer to reconstruct state from memory. A board changes the questions. What is blocked right now? What is waiting for review? Are two tasks touching the same file? Did anything get marked complete without an independent verification step?
+
+Good orchestration is not a way to trust agents less. It is a way to make their work more usable. When you split tasks, collect outputs, and make verification a separate step, the human reviewer can focus on decision points instead of reading every token of every agent conversation.
+
+<Diagram caption='In fleet operation, the number of agents matters less than ownership and review flow. Parallel work stays isolated, then converges in REVIEW.'>
+  <svg
+    viewBox="0 0 760 420"
+    role="img"
+    aria-label="Multiple agents working in isolated worktrees, then sending results into a review column before the work is completed"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-fleet-en" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="28" y="34" width="704" height="60" rx="8" fill="#18181b" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="380" y="60" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="700" fill="#e4e4e7">
+      One project, several isolated worktrees
+    </text>
+    <text x="380" y="80" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      Ownership stays separate; review and merge judgment return to the center.
+    </text>
+    <rect x="52" y="136" width="178" height="112" rx="8" fill="#27272a" stroke="#818cf8" strokeWidth="1.5" />
+    <text x="141" y="164" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#818cf8">
+      Claude worktree
+    </text>
+    <text x="141" y="190" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#e4e4e7">
+      backend/service
+    </text>
+    <text x="141" y="211" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      API contract, domain logic
+    </text>
+    <rect x="291" y="136" width="178" height="112" rx="8" fill="#27272a" stroke="#34d399" strokeWidth="1.5" />
+    <text x="380" y="164" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#34d399">
+      Codex worktree
+    </text>
+    <text x="380" y="190" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#e4e4e7">
+      frontend/components
+    </text>
+    <text x="380" y="211" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      UI, state, type wiring
+    </text>
+    <rect x="530" y="136" width="178" height="112" rx="8" fill="#27272a" stroke="#38bdf8" strokeWidth="1.5" />
+    <text x="619" y="164" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#38bdf8">
+      Antigravity worktree
+    </text>
+    <text x="619" y="190" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#e4e4e7">
+      tests/verification
+    </text>
+    <text x="619" y="211" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      execution, regressions, report
+    </text>
+    <line x1="141" y1="248" x2="300" y2="314" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fleet-en)" />
+    <line x1="380" y1="248" x2="380" y2="310" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fleet-en)" />
+    <line x1="619" y1="248" x2="460" y2="314" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fleet-en)" />
+    <rect x="278" y="312" width="204" height="72" rx="8" fill="#27272a" stroke="#fbbf24" strokeWidth="1.5" />
+    <text x="380" y="342" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="700" fill="#fbbf24">
+      REVIEW
+    </text>
+    <text x="380" y="364" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      summary · conflicts · verification result
+    </text>
+  </svg>
+</Diagram>
+
+## Make verification a separate role
+
+The most underrated role in a multi-model team is verification. The implementer should still run tests, but that is not enough. Implementers tend to check the path they intended to build. A separate verification agent can ask a different class of questions: What if this input is empty? Is the old data still compatible? Does the button label overflow on mobile width? Is the failure state visible to the user?
+
+Placing Antigravity in the verification role does not mean quality is guaranteed by the name alone. In Marblo's workflow, the key is to give the verification agent explicit commands, expected outcomes, and a reporting format for failures. "Check that the build passes" is weaker than "run the static build with the Node 22 absolute path, and if MDX compilation fails, report the file and line." Verification tasks should be short and concrete; their review value increases when they are separate from the implementation task.
+
+Verification output is also an artifact. Instead of only writing "passed," the agent should record which command ran, what was checked manually, and what risk remains. Then a reviewer can judge confidence without replaying the entire conversation.
+
+## Operational rules: split small, review fast
+
+A heterogeneous agent fleet slows down when tasks are too large. If one agent holds a large chunk for a long time, other agents either wait or guess. If tasks are too tiny, orchestration overhead dominates. A good task is large enough for one agent to understand, change, and verify, but small enough that ownership and review remain clear.
+
+Review should not be delayed. Agent outputs get harder to read as they pile up. A task that sits in REVIEW for too long becomes the real bottleneck. The human does not need to rewrite every implementation detail, but they do need to decide whether the output satisfies the requirement, whether it conflicts with other work, and whether verification is strong enough. When that decision is late, parallelism turns into a queue.
+
+In practice, five rules help. First, each task states the editable scope. Second, shared files get dependencies before work starts. Third, verification tasks go to an agent different from the implementer. Fourth, completion reports include problem, approach, changes, verification, and remaining risk. Fifth, human review stays in the loop even when the model sounds confident.
 
 ## Takeaway
 
-Heterogeneous orchestration isn't "using many models" — it's "putting each model in its right place." Placement, boundaries, central coordination — those three are the backbone of managing it.
+Heterogeneous orchestration is not "using many models." It is "putting each model in its right place." The reason to run Claude, Codex, and Antigravity together is not to collect names. It is that design, implementation, and verification require different kinds of judgment.
+
+Placement, boundaries, and central coordination are the backbone of management. Placement uses strengths. Boundaries reduce collisions. Central coordination keeps the human from losing the state of the system. Add isolated worktrees and a clear REVIEW step, and one developer can operate several agents as a team. Marblo's goal is not a scene where agents replace the human; it is a workflow where the human has clearer command over a productive agent fleet.

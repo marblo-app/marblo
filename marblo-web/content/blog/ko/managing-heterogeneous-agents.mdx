@@ -9,30 +9,241 @@ author: "Marblo"
 
 ## 결론부터
 
-이종(異種) 에이전트 운용의 핵심은 **"강점에 맞게 배치하고, 경계를 명확히 하는 것"** 입니다. 같은 모델 여러 개보다, 성격이 다른 모델을 역할별로 나누면 전체 처리량과 품질이 함께 올라갑니다.
+이종(異種) 에이전트 운용의 핵심은 **"강점에 맞게 배치하고, 경계를 명확히 하는 것"** 입니다. 같은 모델 여러 개를 단순히 늘리는 것보다, 성격이 다른 모델을 역할별로 나누면 전체 처리량과 품질이 함께 올라갑니다. 중요한 것은 모델 이름을 외우는 일이 아니라, 어떤 종류의 작업이 어떤 사고방식을 요구하는지 먼저 나누는 일입니다.
+
+마블로에서 이종 에이전트는 "한 화면에 여러 챗봇을 띄우는 기능"이 아닙니다. 오케스트레이터가 목표를 태스크로 쪼개고, 각 태스크를 Claude, Codex, Antigravity 같은 서로 다른 에이전트에 배치하며, 칸반 보드에서 상태와 리뷰 흐름을 계속 추적하는 운영 방식입니다. 에이전트는 동시에 움직이지만, 책임은 흩어지지 않습니다. 사람이 마지막 판단권을 갖고, 보드는 진행 상황을 하나의 시스템으로 묶습니다.
 
 ## 왜 이종인가
 
-모델마다 잘하는 결이 다릅니다. 하나의 모델에 전부 맡기면 그 모델의 약점이 전체의 병목이 됩니다. 여러 모델을 섞으면 서로의 약점을 덮을 수 있습니다 — 단, 누가 무엇을 담당하는지가 분명해야 합니다.
+모델마다 잘하는 결이 다릅니다. 하나의 모델에 전부 맡기면 그 모델의 약점이 전체의 병목이 됩니다. 여러 모델을 섞으면 서로의 약점을 덮을 수 있습니다. 다만 이것은 자동으로 좋아지는 전략이 아닙니다. 누가 무엇을 담당하는지, 어디까지 수정할 수 있는지, 언제 사람에게 리뷰를 요청해야 하는지가 분명해야 합니다.
+
+예를 들어 백엔드 도메인 모델을 바꾸는 작업은 긴 맥락과 조심스러운 추론이 필요합니다. UI 컴포넌트 확장은 기존 패턴을 읽고 빠르게 반복하는 능력이 중요합니다. 테스트와 검증은 구현자의 의도를 그대로 믿지 않고, 경계 조건과 실패 사례를 따로 찾아내야 합니다. 이 세 작업을 모두 같은 에이전트에게 맡길 수는 있지만, 그럴수록 한 모델의 습관이 설계, 구현, 검증을 모두 지배합니다.
+
+이종 운용은 이 지배력을 분산합니다. Claude는 긴 문맥을 읽고 복잡한 설계나 백엔드 흐름을 정리하는 역할에 배치할 수 있습니다. Codex는 코드베이스의 패턴을 따라 UI, 타입, 리팩터링 작업을 빠르게 처리하는 역할에 어울립니다. Antigravity는 작성된 결과를 실행하고, 실패를 재현하고, 검증 루프를 닫는 역할에 둘 수 있습니다. 이것은 제품이 특정 모델의 내부 능력을 보장한다는 뜻이 아니라, 운영자가 모델별로 다른 성향을 고려해 작업을 나누는 실무적 출발점입니다.
+
+<Diagram caption='모델 이름보다 중요한 것은 작업 성격입니다. 설계, 구현, 검증을 같은 축에서 보지 않고 서로 다른 강점으로 배치합니다.'>
+  <svg
+    viewBox="0 0 720 360"
+    role="img"
+    aria-label="Claude는 긴 맥락과 백엔드 설계, Codex는 UI와 코드 패턴 반복, Antigravity는 테스트와 검증 루프에 배치하는 강점 매트릭스"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <rect x="24" y="28" width="672" height="304" rx="8" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="52" y="66" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="17" fontWeight="700" fill="#e4e4e7">
+      강점 매트릭스
+    </text>
+    <text x="52" y="92" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fill="#a1a1aa">
+      역할은 고정 규칙이 아니라 태스크 라우팅의 기본값입니다.
+    </text>
+    <line x1="52" y1="122" x2="668" y2="122" stroke="#3f3f46" strokeWidth="1.5" />
+    <text x="190" y="150" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#818cf8">
+      Claude
+    </text>
+    <text x="360" y="150" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#34d399">
+      Codex
+    </text>
+    <text x="530" y="150" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#38bdf8">
+      Antigravity
+    </text>
+    <rect x="84" y="172" width="212" height="52" rx="8" fill="#27272a" stroke="#818cf8" strokeWidth="1.5" />
+    <text x="190" y="195" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fontWeight="600" fill="#e4e4e7">
+      긴 컨텍스트 · 설계 검토
+    </text>
+    <text x="190" y="213" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      백엔드 흐름, API 계약, 문서화
+    </text>
+    <rect x="254" y="232" width="212" height="52" rx="8" fill="#27272a" stroke="#34d399" strokeWidth="1.5" />
+    <text x="360" y="255" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fontWeight="600" fill="#e4e4e7">
+      코드 패턴 · UI 반복
+    </text>
+    <text x="360" y="273" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      컴포넌트, 타입, 작은 리팩터링
+    </text>
+    <rect x="424" y="172" width="212" height="52" rx="8" fill="#27272a" stroke="#38bdf8" strokeWidth="1.5" />
+    <text x="530" y="195" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="12" fontWeight="600" fill="#e4e4e7">
+      실행 · 테스트 · 반증
+    </text>
+    <text x="530" y="213" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      재현, 회귀 확인, 검증 보고
+    </text>
+  </svg>
+</Diagram>
 
 ## 강점별 배치의 예
 
 마블로는 다음과 같은 분담을 기본형으로 씁니다.
 
-- **Claude** — 백엔드 구현: 복잡한 로직과 긴 컨텍스트 처리에 배치.
-- **GPT/Codex** — 프론트엔드: UI 구성과 반복적 컴포넌트 작업.
-- **Antigravity** — 테스트: 작성된 코드를 검증하는 역할.
+- **Claude** — 백엔드 구현과 설계 검토: 복잡한 로직, 긴 컨텍스트, API 계약, 문서화가 필요한 작업에 배치합니다.
+- **Codex** — 프론트엔드와 코드 작업: 기존 패턴을 읽고 UI 컴포넌트, 타입, 훅, 상태 관리 변경을 일관되게 적용하는 작업에 배치합니다.
+- **Antigravity** — 테스트와 검증: 작성된 코드를 실행하고, 실패를 재현하고, 경계 조건을 확인하는 역할에 배치합니다.
 
-이 분담은 고정이 아니라 **출발점**입니다. 프로젝트 성격에 맞춰 조정하세요.
+이 분담은 고정이 아니라 **출발점**입니다. 프로젝트 성격에 맞춰 조정해야 합니다. 데이터 파이프라인이 중심인 프로젝트라면 Claude가 스키마와 도메인 추론을 더 많이 맡고, Codex는 변환 코드와 타입 안정성을 정리할 수 있습니다. 디자인 시스템을 대규모로 정리하는 프로젝트라면 Codex가 컴포넌트 표면을 넓게 다루고, Antigravity가 렌더링과 접근성 회귀를 확인하는 편이 낫습니다. 복잡한 버그를 추적하는 상황에서는 Antigravity가 재현 조건을 먼저 좁히고, 그 결과를 Claude나 Codex가 수정 태스크로 이어받을 수 있습니다.
+
+좋은 배치는 "가장 똑똑한 모델에게 전부 맡기기"가 아닙니다. 좋은 배치는 실패했을 때 원인을 추적할 수 있는 배치입니다. 백엔드 계약이 틀렸는지, UI가 계약을 잘못 해석했는지, 테스트가 실제 사용자 흐름과 동떨어졌는지를 구분할 수 있어야 합니다. 그래서 모델별 강점보다 더 중요한 것이 역할별 산출물입니다. Claude는 설계 결정과 변경 이유를 남기고, Codex는 수정 파일과 UI 영향 범위를 남기고, Antigravity는 실행 명령과 검증 결과를 남겨야 합니다.
+
+## 태스크 라우팅을 먼저 설계한다
+
+이종 운용은 작업을 시작한 뒤 즉흥적으로 나누면 쉽게 꼬입니다. 먼저 큰 목표를 작은 태스크로 나누고, 각 태스크의 입력과 출력을 적어야 합니다. "설정 화면 개선"은 너무 넓습니다. "설정 저장소 타입 확장", "설정 폼 컴포넌트 추가", "저장 실패 상태 테스트"처럼 역할과 파일 경계가 보이는 단위가 좋습니다.
+
+라우팅 기준은 세 가지입니다. 첫째, 태스크가 요구하는 맥락의 길이입니다. 긴 제품 설명, 다수의 API 계약, 기존 의사결정 히스토리를 읽어야 한다면 긴 문맥을 잘 다루는 에이전트에게 보냅니다. 둘째, 변경 표면입니다. 같은 패턴을 여러 컴포넌트나 타입에 반복 적용해야 한다면 코드 편집과 로컬 검증에 강한 에이전트가 적합합니다. 셋째, 실패 비용입니다. 릴리즈 전 검증, 마이그레이션, 결제나 인증 같은 민감한 경로는 구현자와 별도의 검증 에이전트를 붙이는 편이 낫습니다.
+
+<Diagram caption='오케스트레이터는 태스크의 성격을 먼저 읽고, 설계·구현·검증 경로로 나누어 각 에이전트에 라우팅합니다.'>
+  <svg
+    viewBox="0 0 760 380"
+    role="img"
+    aria-label="오케스트레이터가 태스크를 분석한 뒤 설계는 Claude, 구현은 Codex, 검증은 Antigravity로 라우팅하고 결과를 리뷰로 모으는 흐름"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-routing-ko" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="36" y="36" width="164" height="72" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="118" y="66" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="700" fill="#e4e4e7">
+      목표 입력
+    </text>
+    <text x="118" y="88" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      요구사항 · 제약 · 범위
+    </text>
+    <line x1="200" y1="72" x2="286" y2="72" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-ko)" />
+    <rect x="288" y="36" width="184" height="72" rx="8" fill="#27272a" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="380" y="66" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="700" fill="#e4e4e7">
+      오케스트레이터
+    </text>
+    <text x="380" y="88" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      분해 · 의존성 · 소유권
+    </text>
+    <line x1="380" y1="108" x2="184" y2="210" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-ko)" />
+    <line x1="380" y1="108" x2="380" y2="210" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-ko)" />
+    <line x1="380" y1="108" x2="576" y2="210" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-ko)" />
+    <rect x="76" y="216" width="216" height="64" rx="8" fill="#27272a" stroke="#818cf8" strokeWidth="1.5" />
+    <text x="184" y="242" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#818cf8">
+      Claude: 설계/백엔드
+    </text>
+    <text x="184" y="263" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      계약, 흐름, 위험한 결정
+    </text>
+    <rect x="272" y="216" width="216" height="64" rx="8" fill="#27272a" stroke="#34d399" strokeWidth="1.5" />
+    <text x="380" y="242" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#34d399">
+      Codex: 구현/UI
+    </text>
+    <text x="380" y="263" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      컴포넌트, 타입, 패턴 적용
+    </text>
+    <rect x="468" y="216" width="216" height="64" rx="8" fill="#27272a" stroke="#38bdf8" strokeWidth="1.5" />
+    <text x="576" y="242" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#38bdf8">
+      Antigravity: 검증
+    </text>
+    <text x="576" y="263" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      실행, 재현, 회귀 확인
+    </text>
+    <line x1="184" y1="280" x2="380" y2="322" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-ko)" />
+    <line x1="380" y1="280" x2="380" y2="318" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-ko)" />
+    <line x1="576" y1="280" x2="380" y2="322" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-routing-ko)" />
+    <rect x="292" y="316" width="176" height="42" rx="8" fill="#18181b" stroke="#fbbf24" strokeWidth="1.5" />
+    <text x="380" y="342" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#fbbf24">
+      사람 리뷰
+    </text>
+  </svg>
+</Diagram>
 
 ## 경계를 명확히 하기
 
-이종 운용에서 가장 흔한 실패는 **두 에이전트가 같은 파일을 동시에 건드리는 것**입니다. 태스크를 파일·모듈 단위로 나눠 소유권을 겹치지 않게 하고, 필요하면 격리된 작업 공간에서 병렬 진행합니다.
+이종 운용에서 가장 흔한 실패는 **두 에이전트가 같은 파일을 동시에 건드리는 것**입니다. 모델이 다르기 때문에 결과가 더 풍부해지는 것이 아니라, 충돌이 더 복잡해질 수 있습니다. 한 에이전트가 타입을 바꾸는 동안 다른 에이전트가 같은 타입을 기준으로 UI를 만들면, 둘 다 맞는 것처럼 보이지만 합치면 깨질 수 있습니다.
+
+가장 단순한 규칙은 파일과 모듈 단위 소유권입니다. 백엔드 에이전트는 `api/`와 도메인 모델을 맡고, 프론트엔드 에이전트는 `components/`와 `stores/`를 맡고, 검증 에이전트는 테스트와 실행 리포트를 맡는 식입니다. 물론 현실에서는 경계가 겹칩니다. 그럴 때는 "직접 수정"과 "요청"을 구분해야 합니다. 프론트엔드 에이전트가 API 타입 변경이 필요하다고 판단하면, 해당 파일을 직접 고치기보다 백엔드 태스크를 새로 만들고 의존성을 연결하는 편이 안전합니다.
+
+격리된 워크트리도 중요합니다. 병렬 작업은 같은 디렉터리에서 동시에 파일을 만지는 방식이 아니라, 각 에이전트가 자기 작업 공간에서 변경을 만들고 리뷰 단계에서 합치는 방식이어야 합니다. 그래야 한 에이전트의 실패가 전체 작업 디렉터리를 오염시키지 않습니다. 마블로의 태스크 보드와 워크트리 기반 운영은 이 원칙을 실무 흐름으로 만들기 위한 장치입니다.
 
 ## 중앙에서 조율한다
 
-각 에이전트가 독립적으로 잘 돌아도, **누가 무엇을 하고 있는지**를 한곳에서 봐야 통제됩니다. 중앙 오케스트레이터가 태스크를 할당하고, 칸반 보드가 상태를 비춥니다.
+각 에이전트가 독립적으로 잘 돌아도, **누가 무엇을 하고 있는지**를 한곳에서 봐야 통제됩니다. 중앙 오케스트레이터는 태스크를 할당하고, 칸반 보드는 상태를 비춥니다. 이때 보드는 단순한 목록이 아니라 운영 계약입니다. TODO는 아직 착수하지 않은 일, IN_PROGRESS는 에이전트가 실제로 수정 중인 일, REVIEW는 사람이 봐야 하는 일, DONE은 합쳐도 된다고 판단한 일입니다.
+
+중앙 조율이 없으면 에이전트 수가 늘수록 사람의 인지 비용도 같이 늘어납니다. 세 명의 에이전트가 각각 긴 로그를 남기면, 개발자는 세 개의 대화를 번갈아 읽으며 기억으로 상태를 맞춰야 합니다. 반대로 보드가 있으면 질문이 단순해집니다. 지금 막힌 태스크는 무엇인가? 리뷰 대기 중인 결과는 무엇인가? 같은 파일을 건드리는 작업이 있는가? 어떤 변경이 검증 없이 끝난 것으로 표시됐는가?
+
+좋은 오케스트레이션은 에이전트를 덜 믿는 태도가 아니라, 에이전트가 낸 결과를 더 잘 사용할 수 있게 만드는 태도입니다. 작업을 나누고, 산출물을 모으고, 검증을 별도 단계로 분리하면 사람은 모든 로그를 읽는 대신 중요한 결정 지점을 볼 수 있습니다.
+
+<Diagram caption='플릿 운영에서는 에이전트 수보다 소유권과 리뷰 흐름이 중요합니다. 병렬 작업은 각자 분리되고, 결과는 REVIEW에서 다시 모입니다.'>
+  <svg
+    viewBox="0 0 760 420"
+    role="img"
+    aria-label="격리된 워크트리에서 여러 에이전트가 병렬로 작업하고, 결과가 리뷰 열에 모인 뒤 완료로 이동하는 플릿 분담 구조"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker id="arrow-fleet-ko" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect x="28" y="34" width="704" height="60" rx="8" fill="#18181b" stroke="#6366f1" strokeWidth="1.5" />
+    <text x="380" y="60" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="15" fontWeight="700" fill="#e4e4e7">
+      한 프로젝트, 여러 격리 워크트리
+    </text>
+    <text x="380" y="80" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      소유권은 분리하고, 리뷰와 병합 판단은 중앙으로 모읍니다.
+    </text>
+    <rect x="52" y="136" width="178" height="112" rx="8" fill="#27272a" stroke="#818cf8" strokeWidth="1.5" />
+    <text x="141" y="164" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#818cf8">
+      Claude 워크트리
+    </text>
+    <text x="141" y="190" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#e4e4e7">
+      backend/service
+    </text>
+    <text x="141" y="211" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      API 계약, 도메인 로직
+    </text>
+    <rect x="291" y="136" width="178" height="112" rx="8" fill="#27272a" stroke="#34d399" strokeWidth="1.5" />
+    <text x="380" y="164" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#34d399">
+      Codex 워크트리
+    </text>
+    <text x="380" y="190" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#e4e4e7">
+      frontend/components
+    </text>
+    <text x="380" y="211" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      UI, 상태, 타입 연결
+    </text>
+    <rect x="530" y="136" width="178" height="112" rx="8" fill="#27272a" stroke="#38bdf8" strokeWidth="1.5" />
+    <text x="619" y="164" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fontWeight="700" fill="#38bdf8">
+      Antigravity 워크트리
+    </text>
+    <text x="619" y="190" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#e4e4e7">
+      tests/verification
+    </text>
+    <text x="619" y="211" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      실행, 회귀, 리포트
+    </text>
+    <line x1="141" y1="248" x2="300" y2="314" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fleet-ko)" />
+    <line x1="380" y1="248" x2="380" y2="310" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fleet-ko)" />
+    <line x1="619" y1="248" x2="460" y2="314" stroke="#6366f1" strokeWidth="2" markerEnd="url(#arrow-fleet-ko)" />
+    <rect x="278" y="312" width="204" height="72" rx="8" fill="#27272a" stroke="#fbbf24" strokeWidth="1.5" />
+    <text x="380" y="342" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="14" fontWeight="700" fill="#fbbf24">
+      REVIEW
+    </text>
+    <text x="380" y="364" textAnchor="middle" fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="11" fill="#a1a1aa">
+      변경 요약 · 충돌 확인 · 검증 결과
+    </text>
+  </svg>
+</Diagram>
+
+## 검증을 별도 역할로 둔다
+
+여러 모델을 쓰는 팀에서 가장 과소평가되는 역할은 검증입니다. 구현자가 스스로 테스트를 돌리는 것은 필요하지만 충분하지 않습니다. 구현자는 보통 자신이 의도한 경로를 먼저 확인합니다. 별도의 검증 에이전트는 다른 질문을 던질 수 있습니다. "이 입력이 비어 있으면 어떻게 되는가?", "이전 데이터와 호환되는가?", "모바일 폭에서 버튼 텍스트가 넘치지 않는가?", "실패 상태가 사용자에게 보이는가?" 같은 질문입니다.
+
+Antigravity를 검증 역할에 배치한다는 말은 제품 이름만으로 품질을 보장한다는 뜻이 아닙니다. 마블로 운영에서는 검증 에이전트에게 실행 명령, 기대 결과, 실패 시 보고 형식을 명확히 주는 것이 핵심입니다. 예를 들어 "빌드가 통과하는지 확인"보다 "Node 22 절대경로로 정적 빌드를 실행하고, MDX 컴파일 실패가 있으면 파일명과 라인을 보고하라"가 훨씬 좋습니다. 검증 태스크는 짧고 명확할수록 좋고, 구현 태스크와 분리될수록 리뷰 가치가 올라갑니다.
+
+검증 결과도 산출물입니다. 단순히 "성공"이라고 적는 대신 어떤 명령을 실행했는지, 무엇을 수동으로 확인했는지, 남은 리스크가 무엇인지 기록해야 합니다. 그러면 리뷰어는 로그를 처음부터 읽지 않아도 변경의 신뢰도를 판단할 수 있습니다.
+
+## 운영 규칙: 작게 나누고, 빨리 리뷰한다
+
+이종 에이전트 플릿은 태스크가 너무 크면 느려집니다. 한 에이전트가 큰 덩어리를 오래 붙잡고 있으면, 다른 에이전트는 그 결과를 기다리거나 추측해야 합니다. 반대로 태스크가 너무 작으면 오케스트레이션 비용이 커집니다. 좋은 단위는 한 에이전트가 독립적으로 이해하고, 수정하고, 검증 보고를 남길 수 있는 크기입니다.
+
+리뷰도 늦추면 안 됩니다. 에이전트 결과는 쌓일수록 읽기 어려워집니다. REVIEW 열에 오래 머문 태스크는 사실상 병목입니다. 사람은 모든 구현 세부사항을 다시 작성할 필요는 없지만, 산출물이 요구사항을 만족하는지, 다른 태스크와 충돌하지 않는지, 검증이 충분한지는 판단해야 합니다. 이 판단이 늦어지면 병렬성은 대기열로 변합니다.
+
+실무에서는 다음 원칙이 유용합니다. 첫째, 각 태스크는 "수정 가능한 범위"를 명시합니다. 둘째, 공유 파일을 바꾸는 태스크는 의존성을 먼저 세웁니다. 셋째, 검증 태스크는 구현 태스크와 다른 에이전트에게 맡깁니다. 넷째, 완료 보고에는 문제, 접근, 변경, 검증, 남은 리스크를 포함합니다. 다섯째, 모델이 확신을 보이더라도 사람 리뷰를 생략하지 않습니다.
 
 ## 정리
 
-이종 오케스트레이션은 "많은 모델을 쓰는 것"이 아니라 "각 모델을 제 자리에 두는 것"입니다. 배치 · 경계 · 중앙 조율 — 이 셋이 관리의 뼈대입니다.
+이종 오케스트레이션은 "많은 모델을 쓰는 것"이 아니라 "각 모델을 제 자리에 두는 것"입니다. Claude, Codex, Antigravity를 함께 쓰는 이유는 이름을 늘리기 위해서가 아닙니다. 설계, 구현, 검증이 서로 다른 종류의 판단을 요구하기 때문입니다.
+
+배치, 경계, 중앙 조율이 관리의 뼈대입니다. 배치는 강점을 살리고, 경계는 충돌을 줄이며, 중앙 조율은 사람이 전체 상태를 잃지 않게 합니다. 여기에 격리된 워크트리와 명확한 리뷰 단계가 더해지면, 한 명의 개발자도 여러 에이전트를 팀처럼 운용할 수 있습니다. 마블로가 목표로 하는 것은 에이전트가 사람을 대체하는 장면이 아니라, 사람이 더 명확한 지휘권을 갖고 에이전트 플릿을 생산적으로 사용하는 장면입니다.
