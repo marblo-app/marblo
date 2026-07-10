@@ -1,6 +1,5 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import * as crypto from "crypto";
 import { BigQuery } from "@google-cloud/bigquery";
 import {
   enforce as enforceRateLimit,
@@ -10,6 +9,7 @@ import {
 } from "./rateLimit";
 import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
 import { redactSecrets } from "./redact";
+import { verifyTossWebhook, verifyPaddleSignature } from "./webhookVerify";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -104,62 +104,9 @@ export const cancelPaddleSubscription = functions.https.onCall(
 
 // ─── Webhook signature verification (H1) ─────────────────────────
 //
-// 위조된 웹훅으로 구독 상태를 조작하는 것을 막는다. 서명은 반드시 원본
-// 바이트(req.rawBody)에 대해 계산해야 한다 — JSON.parse 후 재직렬화하면
-// 키 순서/공백이 달라져 HMAC 이 깨진다. 비교는 timing-safe 하게 한다.
-
-/** 길이까지 포함해 timing-safe 한 hex 문자열 비교. */
-function timingSafeEqualHex(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, "utf8");
-  const bufB = Buffer.from(b, "utf8");
-  if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
-}
-
-/**
- * Toss 웹훅 서명 검증. 백엔드(payment_service.verify_webhook)와 동일 스킴:
- * HMAC-SHA256(secret, `${timestamp}.${rawBody}`) hex, 헤더
- * x-toss-webhook-signature / x-toss-webhook-timestamp.
- */
-function verifyTossWebhook(
-  signature: string,
-  timestamp: string,
-  rawBody: Buffer | undefined,
-): boolean {
-  if (!TOSS_WEBHOOK_SECRET || !signature || !timestamp || !rawBody)
-    return false;
-  const message = `${timestamp}.${rawBody.toString("utf8")}`;
-  const expected = crypto
-    .createHmac("sha256", TOSS_WEBHOOK_SECRET)
-    .update(message)
-    .digest("hex");
-  return timingSafeEqualHex(signature, expected);
-}
-
-/**
- * Paddle Billing 웹훅 서명 검증. 헤더 형식: `ts=<unix>;h1=<hmac-hex>`.
- * HMAC-SHA256(secret, `${ts}:${rawBody}`) 를 h1 과 비교 (Paddle 공식 스킴).
- */
-function verifyPaddleSignature(
-  signatureHeader: string,
-  rawBody: Buffer | undefined,
-): boolean {
-  if (!PADDLE_WEBHOOK_SECRET || !signatureHeader || !rawBody) return false;
-  const parts = Object.fromEntries(
-    signatureHeader.split(";").map((kv) => {
-      const idx = kv.indexOf("=");
-      return [kv.slice(0, idx).trim(), kv.slice(idx + 1).trim()];
-    }),
-  );
-  const ts = parts["ts"];
-  const h1 = parts["h1"];
-  if (!ts || !h1) return false;
-  const expected = crypto
-    .createHmac("sha256", PADDLE_WEBHOOK_SECRET)
-    .update(`${ts}:${rawBody.toString("utf8")}`)
-    .digest("hex");
-  return timingSafeEqualHex(h1, expected);
-}
+// 위조된 웹훅으로 구독 상태를 조작하는 것을 막는다. 검증 로직은
+// webhookVerify.ts 로 추출해 단위 테스트(tests/webhookVerify.test.mjs)로
+// 커버한다 — 시크릿은 아래 호출부에서 env 상수로 주입한다.
 
 // ─── Paddle Webhook ──────────────────────────────────────────────
 export const paddleWebhook = functions.https.onRequest(async (req, res) => {
@@ -171,7 +118,7 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
   // H1: 서명 검증. 기존 코드는 헤더 '존재'만 확인해(`!signature && SECRET`)
   // 아무 값이나 넣으면 통과했다 — 서명 값 자체를 HMAC 으로 검증한다.
   const signature = (req.headers["paddle-signature"] as string) || "";
-  if (!verifyPaddleSignature(signature, req.rawBody)) {
+  if (!verifyPaddleSignature(signature, req.rawBody, PADDLE_WEBHOOK_SECRET)) {
     res.status(401).send("Invalid webhook signature");
     return;
   }
@@ -451,7 +398,14 @@ export const tossWebhook = functions.https.onRequest(async (req, res) => {
     (req.headers["x-toss-webhook-signature"] as string) || "";
   const tossTimestamp =
     (req.headers["x-toss-webhook-timestamp"] as string) || "";
-  if (!verifyTossWebhook(tossSignature, tossTimestamp, req.rawBody)) {
+  if (
+    !verifyTossWebhook(
+      tossSignature,
+      tossTimestamp,
+      req.rawBody,
+      TOSS_WEBHOOK_SECRET,
+    )
+  ) {
     res.status(401).send("Invalid webhook signature");
     return;
   }
@@ -712,7 +666,43 @@ export const confirmLecturePayment = functions.https.onCall(
     if (!userId)
       throw new functions.https.HttpsError("unauthenticated", "Login required");
 
-    // Confirm with TossPayments
+    // 주문 소유권/금액/멱등을 PG confirm 전에 검증한다(confirmTossPayment 와 동일
+    // 방어). orderId 는 클라이언트가 넘기고 열거 가능하므로, 소유권 확인이 없으면
+    // 인증된 사용자가 남의 주문을 확정해 강의를 자기 계정에 붙일 수 있다. 또한
+    // confirm 전에 검증해야 실패 시 불필요한 결제승인을 하지 않는다.
+    const orderDoc = await db.collection("pendingOrders").doc(orderId).get();
+    if (!orderDoc.exists) {
+      throw new functions.https.HttpsError("not-found", "Order not found");
+    }
+    const order = orderDoc.data()!;
+    if (order.userId !== userId) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "본인의 주문만 확인할 수 있습니다.",
+      );
+    }
+    if (typeof amount === "number" && order.amount !== amount) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "결제 금액이 일치하지 않습니다.",
+      );
+    }
+
+    // 멱등: 이미 이 강의를 구매했으면 재확정하지 않는다(중복 구매행/쿠폰 방지).
+    const existingPurchase = await db
+      .collection("lecturePurchases")
+      .where("userId", "==", userId)
+      .where("lectureSlug", "==", order.lectureSlug)
+      .limit(1)
+      .get();
+    if (!existingPurchase.empty) {
+      throw new functions.https.HttpsError(
+        "already-exists",
+        "Already purchased this lecture",
+      );
+    }
+
+    // Confirm with TossPayments (금액은 서버가 보관한 주문 금액을 신뢰).
     const response = await fetch(
       "https://api.tosspayments.com/v1/payments/confirm",
       {
@@ -723,7 +713,7 @@ export const confirmLecturePayment = functions.https.onCall(
           )}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ paymentKey, orderId, amount }),
+        body: JSON.stringify({ paymentKey, orderId, amount: order.amount }),
       },
     );
 
@@ -734,13 +724,6 @@ export const confirmLecturePayment = functions.https.onCall(
         error.message || "Payment confirmation failed",
       );
     }
-
-    // Get pending order
-    const orderDoc = await db.collection("pendingOrders").doc(orderId).get();
-    if (!orderDoc.exists) {
-      throw new functions.https.HttpsError("not-found", "Order not found");
-    }
-    const order = orderDoc.data()!;
 
     // Create lecture purchase
     await db.collection("lecturePurchases").add({
