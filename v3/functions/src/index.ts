@@ -10,6 +10,17 @@ import {
 import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
 import { redactSecrets } from "./redact";
 import { verifyTossWebhook, verifyPaddleSignature } from "./webhookVerify";
+import {
+  PLAN_PRICES_KRW,
+  applyCouponDiscount,
+  nextPeriodEnd,
+  billingChargeDocId,
+  billingOrderId,
+  selectDueForCharge,
+  applyChargeSuccess,
+  applyChargeFailure,
+  type SubscriptionSnapshot,
+} from "./billing";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -39,11 +50,7 @@ const DISCORD_INVITE_URL = process.env.DISCORD_INVITE_URL || ""; // 설정 시�
 const SITE_BASE = "https://marblo.app";
 const FOUNDER_COURSE_COUPON = "FOUNDER50"; // 강의 50% 할인 쿠폰 코드
 
-const PLAN_PRICES_KRW: Record<string, number> = {
-  pro: 19000,
-  team: 29000,
-  team_plus: 290000, // per-team floor (5 seats incl.)
-};
+// PLAN_PRICES_KRW 는 ./billing 로 이관(단일소스). import 참조.
 
 // Map Paddle Price IDs to plan types (set in Firebase environment config)
 const PADDLE_PRICE_TO_PLAN: Record<string, string> = {
@@ -451,13 +458,199 @@ export const tossWebhook = functions.https.onRequest(async (req, res) => {
 // 정기결제 (Billing Key) Functions
 // ============================================
 
-// 빌링키 발급
+// ─── 정기결제 청구 헬퍼(멱등) ────────────────────────────────────────
+// Toss 빌링 청구 1회. billingCharges/{userId}_{cycleAnchorMs} claim 문서 +
+// 결정적 orderId 로 "같은 사이클 중복청구"를 이중으로 막는다. 첫 청구·수동
+// 청구·갱신 크론이 전부 이 헬퍼를 공유한다. amount<=0(쿠폰 전액할인/무료)은
+// 실 PG 호출 없이 comped 처리.
+const STALE_PENDING_MS = 15 * 60 * 1000; // 크래시 잔재 pending 재청구 허용 임계
+
+type ChargeResult =
+  | { status: "charged"; paymentKey: string }
+  | { status: "comped" }
+  | { status: "skipped" }
+  | { status: "failed"; error: string };
+
+// Firestore Timestamp/Date/number/string 을 ms 로 정규화(비교용).
+function tsToMillis(x: unknown): number | null {
+  if (x instanceof admin.firestore.Timestamp) return x.toMillis();
+  if (x instanceof Date) return x.getTime();
+  if (typeof x === "number") return x;
+  if (typeof x === "string") {
+    const t = new Date(x).getTime();
+    return Number.isNaN(t) ? null : t;
+  }
+  return null;
+}
+
+async function chargeSubscriptionIdempotent(params: {
+  userId: string;
+  billingKey: string;
+  customerKey: string;
+  amount: number;
+  planType: string;
+  cycleAnchorMs: number;
+  reason: "first" | "renewal" | "manual";
+}): Promise<ChargeResult> {
+  const { userId, billingKey, customerKey, amount, planType, cycleAnchorMs } =
+    params;
+  const docId = billingChargeDocId(userId, cycleAnchorMs);
+  const orderId = billingOrderId(userId, cycleAnchorMs);
+  const chargeRef = db.collection("billingCharges").doc(docId);
+
+  // 1) 트랜잭션으로 청구권 claim — 이미 성공/진행중이면 재청구하지 않는다.
+  const proceed = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(chargeRef);
+    if (snap.exists) {
+      const data = snap.data() || {};
+      const st = data.status as string | undefined;
+      if (st === "succeeded" || st === "comped") return false;
+      if (st === "pending") {
+        // 진행 중이면 중복 방지 위해 대기. 단, 오래된 pending 은 크래시 잔재로
+        // 보고 재시도 허용(결정적 orderId 덕에 실 성공분은 PG 가 재청구 거절).
+        const updatedMs = tsToMillis(data.updatedAt);
+        if (updatedMs != null && Date.now() - updatedMs < STALE_PENDING_MS) {
+          return false;
+        }
+      }
+      // status === "failed" 또는 stale pending → 재청구 허용.
+    }
+    tx.set(
+      chargeRef,
+      {
+        userId,
+        orderId,
+        amount,
+        planType,
+        reason: params.reason,
+        status: "pending",
+        cycleAnchorMs,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return true;
+  });
+
+  if (!proceed) return { status: "skipped" };
+
+  // 2) 금액 0 이하 → 실 결제 없이 comped(쿠폰 전액할인/무료 플랜).
+  if (amount <= 0) {
+    await chargeRef.update({
+      status: "comped",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return { status: "comped" };
+  }
+
+  // 3) 실제 Toss 빌링 청구.
+  try {
+    const response = await fetch(
+      `https://api.tosspayments.com/v1/billing/${billingKey}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
+            "base64",
+          )}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customerKey,
+          amount,
+          orderId,
+          orderName: `Marblo ${planType} 구독`,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      const msg = String(error?.message || `HTTP ${response.status}`).slice(
+        0,
+        500,
+      );
+      await chargeRef.update({
+        status: "failed",
+        error: msg,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { status: "failed", error: msg };
+    }
+
+    const responseData = await response.json();
+    await chargeRef.update({
+      status: "succeeded",
+      paymentKey: responseData.paymentKey || null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return { status: "charged", paymentKey: responseData.paymentKey };
+  } catch (err) {
+    const msg = (err instanceof Error ? err.message : String(err)).slice(
+      0,
+      500,
+    );
+    await chargeRef.update({
+      status: "failed",
+      error: msg,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return { status: "failed", error: msg };
+  }
+}
+
+// 첫 청구용 쿠폰 검증·할인 계산. 유효하지 않으면 정가로 폴백(throw 하지 않음 —
+// 쿠폰 문제로 결제 자체가 깨지면 안 됨). 반환된 appliedCoupon 은 청구 성공
+// 후에만 소진 기록한다.
+async function resolveFirstChargeAmount(
+  userId: string,
+  baseAmount: number,
+  couponCode: unknown,
+): Promise<{
+  finalAmount: number;
+  appliedCoupon: { code: string } | null;
+}> {
+  if (!couponCode || typeof couponCode !== "string") {
+    return { finalAmount: baseAmount, appliedCoupon: null };
+  }
+  const couponDoc = await db.collection("coupons").doc(couponCode).get();
+  if (!couponDoc.exists)
+    return { finalAmount: baseAmount, appliedCoupon: null };
+  const c = couponDoc.data()!;
+  const notExpired = !c.expiresAt || c.expiresAt.toDate() >= new Date();
+  const underMax = !(c.usedCount >= c.maxUses);
+  const already = await db
+    .collection("couponRedemptions")
+    .where("couponCode", "==", couponCode)
+    .where("userId", "==", userId)
+    .limit(1)
+    .get();
+  if (!notExpired || !underMax || !already.empty) {
+    return { finalAmount: baseAmount, appliedCoupon: null };
+  }
+  const { finalAmount } = applyCouponDiscount(baseAmount, c);
+  return { finalAmount, appliedCoupon: { code: couponCode } };
+}
+
+// 빌링키 발급 + 첫 결제 청구(원자적). 청구 실패 시 구독을 active 로 만들지
+// 않는다 — GAP A(₩0 무료 활성) 방지의 핵심.
 export const issueBillingKey = functions.https.onCall(async (data, context) => {
-  const { authKey, customerKey, plan } = data;
+  const { authKey, customerKey, plan, coupon } = data;
   const userId = context.auth?.uid;
   if (!userId)
     throw new functions.https.HttpsError("unauthenticated", "Login required");
 
+  const planType = plan || "pro";
+  const baseAmount = PLAN_PRICES_KRW[planType];
+  if (!baseAmount) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      `Plan '${planType}' is not chargeable`,
+    );
+  }
+
+  // 1) 빌링키 발급.
   const response = await fetch(
     "https://api.tosspayments.com/v1/billing/authorizations/issue",
     {
@@ -483,33 +676,75 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   const responseData = await response.json();
   const billingKey = responseData.billingKey;
 
-  // Save subscription to Firestore
-  const now = new Date();
-  const periodEnd = new Date(now);
-  periodEnd.setMonth(periodEnd.getMonth() + 1);
+  // 2) 쿠폰 할인(첫 청구에만 적용).
+  const { finalAmount, appliedCoupon } = await resolveFirstChargeAmount(
+    userId,
+    baseAmount,
+    coupon,
+  );
 
+  // 3) 첫 결제 청구(멱등). 실패 시 구독 active 처리 없이 throw(원자적).
+  const cycleAnchorMs = Date.now();
+  const charge = await chargeSubscriptionIdempotent({
+    userId,
+    billingKey,
+    customerKey,
+    amount: finalAmount,
+    planType,
+    cycleAnchorMs,
+    reason: "first",
+  });
+  if (charge.status === "failed") {
+    throw new functions.https.HttpsError(
+      "internal",
+      `첫 결제에 실패했습니다: ${charge.error}`,
+    );
+  }
+
+  // 4) 청구 성공/comped → 구독 active 저장 + 쿠폰 소진 기록.
+  const now = new Date(cycleAnchorMs);
+  const periodEnd = nextPeriodEnd(now);
   await db
     .collection("subscriptions")
     .doc(userId)
     .set(
       {
         userId,
-        planType: plan || "pro",
+        planType,
         status: "active",
         paymentProvider: "toss",
         tossBillingKey: billingKey,
         tossCustomerKey: customerKey,
+        tossPaymentKey: charge.status === "charged" ? charge.paymentKey : null,
         currentPeriodStart: now,
         currentPeriodEnd: periodEnd,
+        billingFailedCount: 0,
+        nextRetryAt: null,
+        couponCode: appliedCoupon?.code || null,
         createdAt: now,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
 
-  return { success: true, billingKey };
+  if (appliedCoupon) {
+    await db
+      .collection("coupons")
+      .doc(appliedCoupon.code)
+      .update({ usedCount: admin.firestore.FieldValue.increment(1) });
+    await db.collection("couponRedemptions").add({
+      couponCode: appliedCoupon.code,
+      userId,
+      redeemedAt: new Date(),
+      context: "subscription_first_charge",
+    });
+  }
+
+  return { success: true, billingKey, charged: charge.status };
 });
 
-// 빌링키로 정기결제 실행
+// 빌링키로 정기결제 실행(수동 트리거). 갱신 크론과 동일한 멱등 헬퍼를 공유해
+// 같은 사이클 중복청구를 막는다.
 export const chargeBillingKey = functions.https.onCall(
   async (_data, context) => {
     // C1: 인증 필수 + 결제 파라미터는 전부 서버에서 유도한다.
@@ -540,53 +775,44 @@ export const chargeBillingKey = functions.https.onCall(
       );
     }
 
-    const billingKey = sub.tossBillingKey as string;
-    const customerKey = sub.tossCustomerKey as string;
-    // orderId 도 서버 생성 — 클라이언트가 통제하지 못하게 한다.
-    const orderId = `sub_${userId}_${Date.now()}`;
-    const orderName = `Marblo ${planType} 구독`;
+    // 사이클 앵커 = 현재 만료 경계(없으면 now). 같은 주기 재호출은 멱등하게 skip.
+    const cycleAnchorMs = tsToMillis(sub.currentPeriodEnd) ?? Date.now();
+    const charge = await chargeSubscriptionIdempotent({
+      userId,
+      billingKey: sub.tossBillingKey as string,
+      customerKey: sub.tossCustomerKey as string,
+      amount,
+      planType,
+      cycleAnchorMs,
+      reason: "manual",
+    });
 
-    const response = await fetch(
-      `https://api.tosspayments.com/v1/billing/${billingKey}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64",
-          )}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          customerKey,
-          amount,
-          orderId,
-          orderName,
-        }),
-      },
-    );
-
-    if (!response.ok) {
-      const error = await response.json();
+    if (charge.status === "failed") {
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "Failed to charge billing key",
+        charge.error || "Failed to charge billing key",
       );
     }
 
-    const responseData = await response.json();
-
-    // Update subscription period
-    const now = new Date();
-    const periodEnd = new Date(now);
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
-
-    await db.collection("subscriptions").doc(userId).update({
-      currentPeriodStart: now,
-      currentPeriodEnd: periodEnd,
-      status: "active",
+    // 성공/comped/skipped → 구독 기간 연장(멱등 재적용 안전).
+    const success = applyChargeSuccess(Date.now());
+    await subRef.update({
+      status: success.status,
+      currentPeriodStart: success.currentPeriodStart,
+      currentPeriodEnd: success.currentPeriodEnd,
+      billingFailedCount: 0,
+      nextRetryAt: null,
+      ...(charge.status === "charged"
+        ? { tossPaymentKey: charge.paymentKey }
+        : {}),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return { success: true, paymentKey: responseData.paymentKey };
+    return {
+      success: true,
+      paymentKey: charge.status === "charged" ? charge.paymentKey : null,
+      charged: charge.status,
+    };
   },
 );
 
@@ -2961,6 +3187,110 @@ export const scheduledReconcilePaddle = functions.pubsub
   .onRun(async () => {
     const result = await reconcilePaddlePending();
     console.log("[Recon Paddle]", JSON.stringify(result));
+    return null;
+  });
+
+// ─── 정기결제 갱신 크론(GAP A) ────────────────────────────────────────
+// 매일 04:30 KST. active/past_due 토스 구독 중 만료 도래분을 chargeBillingKey
+// 헬퍼로 청구한다. 성공 → 기간 연장(멱등), 실패 → past_due/재시도 백오프,
+// 누적 실패 MAX 도달 → 해지(free 강등). 복합 인덱스 회피를 위해 paymentProvider
+// 단일 동등 쿼리 + 코드 필터(reconcilePaddlePending 선례).
+export const scheduledChargeSubscriptions = functions.pubsub
+  .schedule("30 4 * * *")
+  .timeZone("Asia/Seoul")
+  .onRun(async () => {
+    const nowMs = Date.now();
+    const result = {
+      scanned: 0,
+      due: 0,
+      charged: 0,
+      comped: 0,
+      extended: 0,
+      failed: 0,
+      suspended: 0,
+      skipped: 0,
+    };
+    const snap = await db
+      .collection("subscriptions")
+      .where("paymentProvider", "==", "toss")
+      .get();
+    result.scanned = snap.size;
+
+    for (const doc of snap.docs) {
+      const sub = doc.data();
+      const currentPeriodEndMs = tsToMillis(sub.currentPeriodEnd);
+      const snapshot: SubscriptionSnapshot = {
+        paymentProvider: sub.paymentProvider,
+        status: sub.status,
+        planType: sub.planType,
+        tossBillingKey: sub.tossBillingKey,
+        tossCustomerKey: sub.tossCustomerKey,
+        founderGrant: sub.founderGrant === true,
+        currentPeriodEndMs,
+        billingFailedCount: sub.billingFailedCount || 0,
+        nextRetryAtMs: tsToMillis(sub.nextRetryAt),
+      };
+      if (!selectDueForCharge(snapshot, nowMs)) continue;
+      result.due++;
+
+      const planType = sub.planType || "pro";
+      const amount = PLAN_PRICES_KRW[planType];
+      if (!amount) {
+        result.skipped++;
+        continue;
+      }
+
+      // 사이클 앵커 = 만료 경계(currentPeriodEndMs 는 selectDueForCharge 통과로
+      // 반드시 number). 같은 사이클 중복청구를 멱등 문서가 막는다.
+      const cycleAnchorMs = currentPeriodEndMs as number;
+      const charge = await chargeSubscriptionIdempotent({
+        userId: doc.id,
+        billingKey: sub.tossBillingKey as string,
+        customerKey: sub.tossCustomerKey as string,
+        amount,
+        planType,
+        cycleAnchorMs,
+        reason: "renewal",
+      });
+
+      if (charge.status === "failed") {
+        const f = applyChargeFailure(snapshot, nowMs);
+        await doc.ref.update({
+          status: f.status,
+          billingFailedCount: f.billingFailedCount,
+          nextRetryAt:
+            f.nextRetryAtMs != null
+              ? admin.firestore.Timestamp.fromMillis(f.nextRetryAtMs)
+              : null,
+          ...(f.planType ? { planType: f.planType } : {}),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        if (f.status === "canceled") result.suspended++;
+        else result.failed++;
+        continue;
+      }
+
+      // charged/comped/skipped(이미 succeeded) → 기간 연장. skipped 도 연장해야
+      // "청구 성공했으나 직전 실행이 기간갱신 전 죽은" 구독의 무한 재선정을 막는다.
+      const s = applyChargeSuccess(nowMs);
+      await doc.ref.update({
+        status: s.status,
+        currentPeriodStart: s.currentPeriodStart,
+        currentPeriodEnd: s.currentPeriodEnd,
+        billingFailedCount: 0,
+        nextRetryAt: null,
+        ...(charge.status === "charged"
+          ? { tossPaymentKey: charge.paymentKey }
+          : {}),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      result.extended++;
+      if (charge.status === "charged") result.charged++;
+      else if (charge.status === "comped") result.comped++;
+      else result.skipped++;
+    }
+
+    console.log("[Billing Cron]", JSON.stringify(result));
     return null;
   });
 

@@ -89,8 +89,11 @@ export default function CheckoutSuccessPage() {
           await confirm({ paymentKey, orderId, amount: Number(amountParam) });
           fireLecturePurchase(orderId, amountParam);
         } else if (authKey && customerKey && plan) {
+          // 쿠폰 코드를 첫 청구까지 전달(빈 문자열이면 미적용). checkout 페이지가
+          // successUrl 에 &coupon= 로 실어 보낸다.
+          const coupon = searchParams.get('coupon') || undefined;
           const issue = httpsCallable(functions, 'issueBillingKey');
-          await issue({ authKey, customerKey, plan });
+          await issue({ authKey, customerKey, plan, coupon });
         }
         setSuccess(true);
       } catch (err) {
