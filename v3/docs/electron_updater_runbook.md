@@ -2,7 +2,7 @@
 
 운영자가 데스크탑 앱 릴리스 / 핫픽스 배포 시 따를 절차.
 
-마지막 점검: 2026-06-30 KST. GitHub 릴리스(피드) repo는 `melocream/marblo-releases`로 확정.
+마지막 점검: 2026-07-10 KST. GitHub 릴리스(피드) repo는 `melocream/marblo-releases`로 확정.
 
 ---
 
@@ -52,7 +52,25 @@ grep -R -E "^(version|path|sha512|url):" /tmp/marblo-updater-feed
 - private 소스 repo는 익명 사용자에게 `releases/latest`가 404 → 공개 유저 앱의 feed로 절대 쓰지 않는다. 그래서 PUBLIC `marblo-releases`로 일치시킨다.
 - 위 §1 검증은 `REPO=melocream/marblo-releases` 기준으로 수행한다.
 
-실제 GitHub Release 기반 구버전 -> 핫픽스 수신 리허설은 P0-12b(`nzDieNhedP5sWnagJY3e`)에서 P0-7 완료 후 수행한다.
+2026-07-10 점검 결과 (P0-12b `nzDieNhedP5sWnagJY3e`):
+
+- `gh repo view melocream/marblo-releases --json nameWithOwner,visibility,defaultBranchRef,url`: `visibility=PUBLIC`, default branch `master`.
+- `gh release list --repo melocream/marblo-releases --limit 10`: Latest는 `v3.0.12 (mac arm64) — MCP 패키징 근본수정 2/2`, tag `v3.0.12`, published `2026-07-09T06:26:16Z`.
+- `gh release view v3.0.12 --repo melocream/marblo-releases`: `isDraft=false`, `isPrerelease=false`.
+- v3.0.12 자산: `latest-mac.yml`, `latest.yml`, `Marblo-3.0.12-arm64-mac.zip`, `Marblo-3.0.12-arm64-mac.zip.blockmap`, `Marblo-3.0.12-arm64.dmg`, `Marblo-3.0.12-arm64.dmg.blockmap`, `Marblo-Setup-3.0.12.exe`, `Marblo-Setup-3.0.12.exe.blockmap`.
+- `latest-linux.yml` / Linux 자산은 v3.0.12 릴리스에 없음.
+- `latest-mac.yml`: `version=3.0.12`, `path=Marblo-3.0.12-arm64-mac.zip`. 실제 다운로드 자산 대조 결과:
+  - `Marblo-3.0.12-arm64-mac.zip`: size `230034563` OK, sha512 `jnCrQDm91jT02XDI4tBFUZDcibTPa9fwfRX52qEj2aIMb0TDdl1Tu6pPAn0PjlVftF4V4wvScD7E8bbofiSGDQ==` OK.
+  - `Marblo-3.0.12-arm64.dmg`: size `239697428` OK, sha512 `zjSOGyQ+doV4Z90NLT87u+CYI92tseA9yIJgk5d0pgIRSeZpUkssFTGtEPiSkKPtNkZ8tNGP4o2h0d6yAABIVA==` OK.
+- `latest.yml`: `version=3.0.12`, `path=Marblo-Setup-3.0.12.exe`. 실제 다운로드 자산 대조 결과:
+  - `Marblo-Setup-3.0.12.exe`: size `197940168` OK, sha512 `1+KQCp++d0rEJNIEQurVoS2D96IAMxFSQaL0P/BNOVLuSWy/aPAJJKs13nENQzG9K0OgzWsVs7CoMAjh56JQjw==` OK.
+- mac ZIP 내부 `Marblo.app` 검증:
+  - `codesign --verify --deep --strict --verbose=4 /tmp/marblo-updater-zip/Marblo.app`: valid on disk, satisfies Designated Requirement.
+  - `codesign -dv --verbose=4 /tmp/marblo-updater-zip/Marblo.app`: `Authority=Developer ID Application: HYPEMARC Inc. (7T8JPRY7AD)`, hardened runtime flag present, `Notarization Ticket=stapled`.
+  - `spctl -a -vvv -t execute /tmp/marblo-updater-zip/Marblo.app`: accepted, source `Notarized Developer ID`.
+- 참고: DMG 컨테이너 자체는 `spctl -a -vvv -t open --context context:primary-signature Marblo-3.0.12-arm64.dmg`에서 `rejected / source=no usable signature`. 앱 번들은 서명/공증/staple OK이므로 updater 적용 대상인 ZIP 경로는 유효하지만, DMG 컨테이너 서명까지 요구하는 배포 정책이면 별도 보강이 필요하다.
+- 구버전 후보: `v3.0.11` 릴리스는 확인되지 않았고, 공개 repo에는 `v3.0.9` 및 `v3.0.8` 릴리스가 존재한다. `v3.0.9`는 mac `latest-mac.yml`, zip, dmg만 있고 blockmap이 없으며, `v3.0.8`은 mac/Windows 자산이 있다.
+- 중요: v3.0.12 release name/body에는 `[HOTFIX]` 태그가 없다. 현재 코드의 핫픽스 자동 다운로드/강제 재시작 분기(`Updater.isHotfix`)는 release name 또는 notes의 `[HOTFIX]`, 또는 channel `hotfix`가 필요하다. 따라서 공개 v3.0.12 그대로는 구버전 앱이 업데이트를 감지하더라도 일반 업데이트 경로로 동작하며, "핫픽스 자동수신" 실측에는 `[HOTFIX]`가 포함된 새 공개 릴리스 또는 리허설 전용 feed/channel이 필요하다.
 
 ## 2. 일반 릴리스
 
@@ -146,6 +164,36 @@ open "dist/mac-arm64/Marblo.app"
 - update-available/downloaded 수신:
 - 재시작 후 버전:
 ```
+
+### 4-1. v3.0.12 기준 수동 QA 절차
+
+2026-07-10 기준 v3.0.12는 public 최신 릴리스이고 feed/checksum/앱 서명/공증은 통과했지만, `[HOTFIX]` 태그가 없어 핫픽스 자동 다운로드 분기를 트리거하지 않는다. 실제 "구버전 -> 핫픽스 자동수신"을 QA하려면 아래 둘 중 하나로 진행한다.
+
+옵션 A: production hotfix 릴리스로 검증
+
+1. 배포 책임자 승인을 받고 `melocream/marblo-releases`에 현재 최신보다 높은 patch 버전을 `[HOTFIX]` title 또는 notes로 공개한다.
+2. 테스트 Mac에서 기존 설치본을 백업하고 `/Applications/Marblo.app`를 제거한다.
+3. 공개 repo에 존재하는 구버전 DMG를 설치한다. 현재 후보는 `v3.0.9` 또는 `v3.0.8`이며, `v3.0.11`은 공개 repo에서 확인되지 않았다.
+4. 앱을 실행하고 개발자 콘솔 또는 앱 로그에서 `updater:check`가 실행되는지 확인한다. 필요하면 UI의 수동 업데이트 체크 액션을 사용한다.
+5. 기대 결과:
+   - `update-available` 이벤트의 `version`이 hotfix 버전이다.
+   - release name 또는 notes의 `[HOTFIX]`로 `downloadUpdate()`가 자동 시작된다.
+   - `download-progress` 이벤트가 증가한다.
+   - `update-downloaded` 후 renderer로 `forceInstallInMs=300000` 상태가 전달된다.
+   - 사용자가 즉시 재시작을 누르거나 5분 grace가 지나면 `quitAndInstall()`이 실행된다.
+   - 재실행 후 앱 버전이 hotfix 버전으로 상승한다.
+6. 실패 시 확인 순서:
+   - `latest-mac.yml`의 `version`, `path`, `sha512`, `size`가 실제 ZIP과 일치하는지 재검증.
+   - release title/body에 `[HOTFIX]`가 정확히 포함됐는지 확인.
+   - runtime feed가 `melocream/marblo-releases`인지 확인. local override 환경 변수(`MARBLO_UPDATER_OWNER`, `MARBLO_UPDATER_REPO`, `MARBLO_UPDATER_CHANNEL`)가 남아 있으면 제거한다.
+   - 앱 번들이 Developer ID로 서명되고 notarization ticket이 stapled인지 `codesign -dv --verbose=4`와 `spctl -a -vvv -t execute`로 확인한다.
+
+옵션 B: 리허설 전용 feed/channel로 검증
+
+1. production 최신 릴리스에 영향을 주지 않도록 별도 public repo 또는 `hotfix` channel feed를 준비한다.
+2. 구버전 앱 실행 환경에만 `MARBLO_UPDATER_REPO` 또는 `MARBLO_UPDATER_CHANNEL=hotfix` override를 설정한다.
+3. `latest-mac.yml`과 자산은 production과 같은 방식으로 올리고, release title/body 또는 channel 중 하나가 핫픽스 조건을 만족하게 한다.
+4. 옵션 A의 4~6번과 동일하게 이벤트, 자동 다운로드, `forceInstallInMs`, 재시작 후 버전 상승을 확인한다.
 
 ## 5. 배포 후 모니터링
 
