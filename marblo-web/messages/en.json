@@ -246,6 +246,12 @@
       "monthly": "Monthly subscription · renews by automatic monthly payment",
       "annual": "Annual subscription · renews automatically every year"
     },
+    "billing": {
+      "monthly": "Monthly",
+      "annual": "Annual",
+      "monthsFree": "2 months free",
+      "toggleAria": "Toggle annual billing"
+    },
     "subscribe": "Subscribe",
     "current": "Current Plan",
     "most_popular": "Most Popular",

@@ -246,6 +246,12 @@
       "monthly": "월 구독 · 매달 자동결제로 갱신",
       "annual": "연 구독 · 매년 자동갱신"
     },
+    "billing": {
+      "monthly": "월간",
+      "annual": "연간",
+      "monthsFree": "2개월 무료",
+      "toggleAria": "연간 결제로 전환"
+    },
     "subscribe": "구독하기",
     "current": "현재 플랜",
     "most_popular": "가장 인기",

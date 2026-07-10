@@ -246,6 +246,12 @@
       "monthly": "月額サブスクリプション · 毎月の自動決済で更新",
       "annual": "年額サブスクリプション · 毎年自動更新"
     },
+    "billing": {
+      "monthly": "月額",
+      "annual": "年額",
+      "monthsFree": "2ヶ月無料",
+      "toggleAria": "年額請求に切り替え"
+    },
     "subscribe": "登録する",
     "current": "現在のプラン",
     "most_popular": "一番人気",

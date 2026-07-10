@@ -105,23 +105,13 @@ export default function PricingSection() {
             !isAnnual ? "text-white" : "text-zinc-500"
           }`}
         >
-          {locale === "ko"
-            ? "\uC6D4\uAC04"
-            : locale === "ja"
-            ? "\u6708\u984D"
-            : "Monthly"}
+          {t("billing.monthly")}
         </span>
         <button
           type="button"
           role="switch"
           aria-checked={isAnnual}
-          aria-label={
-            locale === "ko"
-              ? "연간 결제로 전환"
-              : locale === "ja"
-              ? "年額請求に切り替え"
-              : "Toggle annual billing"
-          }
+          aria-label={t("billing.toggleAria")}
           onClick={() => setIsAnnual(!isAnnual)}
           className={`relative w-14 h-7 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
             isAnnual ? "bg-indigo-600" : "bg-zinc-700"
@@ -138,19 +128,11 @@ export default function PricingSection() {
             isAnnual ? "text-white" : "text-zinc-500"
           }`}
         >
-          {locale === "ko"
-            ? "\uC5F0\uAC04"
-            : locale === "ja"
-            ? "\u5E74\u984D"
-            : "Annual"}
+          {t("billing.annual")}
         </span>
         {isAnnual && (
           <span className="text-xs bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full font-medium">
-            {locale === "ko"
-              ? "2\uAC1C\uC6D4 \uBB34\uB8CC"
-              : locale === "ja"
-              ? "2\u30F6\u6708\u7121\u6599"
-              : "2 months free"}
+            {t("billing.monthsFree")}
           </span>
         )}
       </div>
