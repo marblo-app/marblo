@@ -554,7 +554,9 @@
     "coming_soon": "출시 준비 중 · 공개 시 알림",
     "notify_heading": "강의가 곧 공개됩니다",
     "notify_subtitle": "강의는 현재 제작 중입니다. 지금은 마블로 베타에 참여해 직접 사용해보실 수 있어요 — 정식 공개 시 가장 먼저 안내드립니다.",
-    "notify_beta_cta": "먼저 베타 신청하고 마블로 써보기"
+    "notify_beta_cta": "먼저 베타 신청하고 마블로 써보기",
+    "completed": "완료",
+    "resume": "이어보기"
   },
   "footer": {
     "company": "마블로",

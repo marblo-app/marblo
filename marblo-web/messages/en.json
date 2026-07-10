@@ -554,7 +554,9 @@
     "coming_soon": "In production · Notify me at launch",
     "notify_heading": "Launching soon",
     "notify_subtitle": "This course is currently in production. In the meantime, join the Marblo beta and start using it now — you'll be first to know when it launches.",
-    "notify_beta_cta": "Join the beta & try Marblo first"
+    "notify_beta_cta": "Join the beta & try Marblo first",
+    "completed": "Completed",
+    "resume": "Resume"
   },
   "footer": {
     "company": "Marblo",
