@@ -202,6 +202,13 @@ export default function PricingSection() {
                       {t("team_plus.note")}
                     </p>
                   )}
+                  {plan !== "free" && (
+                    <p className="text-xs text-zinc-300 mt-3 rounded-lg border border-zinc-700/70 bg-zinc-800/40 px-3 py-2 leading-relaxed">
+                      {isAnnual
+                        ? t("autoRenew.annual")
+                        : t("autoRenew.monthly")}
+                    </p>
+                  )}
                 </div>
               )}
 

@@ -67,6 +67,11 @@ export default function CheckoutPage() {
         : planInfo.monthly
       : 0;
   const finalAmount = Math.max(0, baseAmount - discount);
+  const baseAmountLabel = `\u20A9${baseAmount.toLocaleString()}`;
+  const autoRenewNotice =
+    billing === "annual"
+      ? t("annualAutoRenewNotice", { amount: baseAmountLabel })
+      : t("monthlyAutoRenewNotice", { amount: baseAmountLabel });
 
   // Validate query params
   const isValid = isLecture ? !!lectureInfo : !!planInfo;
@@ -327,6 +332,17 @@ export default function CheckoutPage() {
                   (billing === "annual" ? t("annual") : t("monthly"))}
               </span>
             </div>
+
+            {!isLecture && (
+              <div className="rounded-lg bg-zinc-800/40 border border-zinc-700/60 px-3 py-3 text-sm text-zinc-300 leading-relaxed">
+                <p className="font-medium text-zinc-100">
+                  {autoRenewNotice}
+                </p>
+                <p className="mt-1 text-xs text-zinc-400">
+                  {t("cancelNotice")}
+                </p>
+              </div>
+            )}
 
             {/* Payment consent gate (PIPA — 결제대행사 제3자 제공 동의) */}
             <label className="flex items-start gap-2.5 mt-4 cursor-pointer select-none">

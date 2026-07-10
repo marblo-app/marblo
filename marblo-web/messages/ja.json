@@ -242,6 +242,10 @@
       ]
     },
     "annual_discount": "年間支払いで2ヶ月無料",
+    "autoRenew": {
+      "monthly": "月額サブスクリプション · 毎月の自動決済で更新",
+      "annual": "年額サブスクリプション · 毎年自動更新"
+    },
     "subscribe": "登録する",
     "current": "現在のプラン",
     "most_popular": "一番人気",
@@ -494,6 +498,9 @@
     "orderSummary": "注文概要",
     "monthly": "/月",
     "annual": "/年",
+    "monthlyAutoRenewNotice": "毎月{amount}が自動決済され、解約するまで更新されます",
+    "annualAutoRenewNotice": "毎年{amount}が自動決済され、解約するまで更新されます",
+    "cancelNotice": "サブスクリプションの解約はカスタマーサポートへお問い合わせください。",
     "lectureTitle": "講座",
     "invalidPlan": "無効なプランです。料金ページからプランを選択してください。",
     "invalidLecture": "無効な講座です。講座ページから再度選択してください。",

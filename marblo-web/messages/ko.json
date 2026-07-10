@@ -242,6 +242,10 @@
       ]
     },
     "annual_discount": "연간 결제 시 2개월 무료",
+    "autoRenew": {
+      "monthly": "월 구독 · 매달 자동결제로 갱신",
+      "annual": "연 구독 · 매년 자동갱신"
+    },
     "subscribe": "구독하기",
     "current": "현재 플랜",
     "most_popular": "가장 인기",
@@ -494,6 +498,9 @@
     "orderSummary": "주문 요약",
     "monthly": "/월",
     "annual": "/년",
+    "monthlyAutoRenewNotice": "매달 {amount} 자동결제, 해지 전까지 갱신",
+    "annualAutoRenewNotice": "매년 {amount} 자동결제, 해지 전까지 갱신",
+    "cancelNotice": "구독 해지는 고객지원 문의로 요청할 수 있습니다.",
     "lectureTitle": "강의",
     "invalidPlan": "유효하지 않은 플랜입니다. 가격 페이지에서 플랜을 선택해 주세요.",
     "invalidLecture": "유효하지 않은 강의입니다. 강의 페이지에서 다시 선택해 주세요.",

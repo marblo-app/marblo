@@ -242,6 +242,10 @@
       ]
     },
     "annual_discount": "2 months free with annual billing",
+    "autoRenew": {
+      "monthly": "Monthly subscription · renews by automatic monthly payment",
+      "annual": "Annual subscription · renews automatically every year"
+    },
     "subscribe": "Subscribe",
     "current": "Current Plan",
     "most_popular": "Most Popular",
@@ -494,6 +498,9 @@
     "orderSummary": "Order Summary",
     "monthly": "/mo",
     "annual": "/year",
+    "monthlyAutoRenewNotice": "{amount} will be charged automatically every month and renew until canceled",
+    "annualAutoRenewNotice": "{amount} will be charged automatically every year and renew until canceled",
+    "cancelNotice": "To cancel your subscription, contact customer support.",
     "lectureTitle": "Lecture",
     "invalidPlan": "Invalid plan. Please select a plan from the pricing page.",
     "invalidLecture": "Invalid lecture. Please select a lecture from the lectures page.",
