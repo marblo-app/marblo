@@ -2,6 +2,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import Image from "next/image";
 import HeroScreenshot from "@/components/HeroScreenshot";
+import HeroConstellation from "@/components/HeroConstellation";
 import { Check, X, Minus } from "lucide-react";
 import FeatureSection from "@/components/FeatureSection";
 import BetaTester50Section from "@/components/BetaTester50Section";
@@ -177,7 +178,8 @@ export default function HomePage() {
       {/* Hero */}
       <section className="py-28 px-4 text-center relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-indigo-600/5 to-transparent" />
-        <div className="max-w-4xl mx-auto relative">
+        <HeroConstellation />
+        <div className="max-w-4xl mx-auto relative z-10">
           <span className="inline-block bg-indigo-500/10 text-indigo-400 text-sm font-medium px-4 py-1.5 rounded-full mb-6 border border-indigo-500/30">
             {t("hero.badge")}
           </span>
