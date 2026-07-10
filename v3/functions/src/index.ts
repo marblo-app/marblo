@@ -9,7 +9,12 @@ import {
 } from "./rateLimit";
 import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
 import { redactSecrets } from "./redact";
-import { verifyTossWebhook, verifyPaddleSignature } from "./webhookVerify";
+import {
+  verifyPaddleSignature,
+  classifyTossPaymentResponse,
+  resolveTossWebhookAction,
+  type TossPaymentQueryResult,
+} from "./webhookVerify";
 import {
   PLAN_PRICES_KRW,
   applyCouponDiscount,
@@ -38,7 +43,6 @@ const PADDLE_API_BASE = "https://api.paddle.com";
 
 const TOSS_SECRET_KEY = process.env.TOSS_SECRET_KEY!;
 const TOSS_API_BASE = "https://api.tosspayments.com/v1";
-const TOSS_WEBHOOK_SECRET = process.env.TOSS_WEBHOOK_SECRET || "";
 
 // ─── SendGrid (파운더 접근 안내 이메일) ──────────────────────────────
 // 전부 선택값 — 미설정 시 발송만 스킵하고 배포·선정은 정상 동작한다.
@@ -393,56 +397,96 @@ export const confirmTossPayment = functions.https.onCall(
 );
 
 // ─── TossPayments Webhook ────────────────────────────────────────
+// H1(재수정): Toss 결제 웹훅(PAYMENT_STATUS_CHANGED)은 서명 헤더가 없다 — HMAC
+// 서명은 정산/셀러 웹훅(payout.changed) 전용(`tosspayments-webhook-signature`).
+// 따라서 서명으로는 검증할 수 없고, body 의 status 를 신뢰하면 위조 요청으로
+// 임의 구독을 canceled/past_due 로 바꿀 수 있다. 위조 방지의 정석은 body 를
+// 믿지 않고 paymentKey 로 Payment 조회 API 를 재호출해 Toss 가 알려주는 실제
+// status 로만 구독을 바꾸는 것. 위조·유령 paymentKey 는 재조회에서 실제 상태
+// 불일치 또는 404(미존재)로 무해화된다.
+//
+// PAYMENT_STATUS_CHANGED 검증용 재조회. GET /v1/payments/{paymentKey} 를
+// Basic 인증으로 호출한다. 성공(2xx+status) → { status }, 실패/미존재(404)/
+// 미설정/네트워크오류 → null 을 돌려 호출부가 "구독 변경 안 함"으로 안전
+// 처리하게 한다. body 의 status 는 절대 참조하지 않는다.
+async function fetchTossPaymentStatus(
+  paymentKey: string,
+): Promise<TossPaymentQueryResult> {
+  if (!TOSS_SECRET_KEY) return null;
+  try {
+    const res = await fetch(
+      `${TOSS_API_BASE}/payments/${encodeURIComponent(paymentKey)}`,
+      {
+        headers: {
+          Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
+            "base64",
+          )}`,
+        },
+      },
+    );
+    const body = res.ok
+      ? ((await res.json().catch(() => null)) as unknown)
+      : null;
+    return classifyTossPaymentResponse(res.ok, body);
+  } catch (err) {
+    console.warn("[tossWebhook] payment re-query error:", err);
+    return null;
+  }
+}
+
 export const tossWebhook = functions.https.onRequest(async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).send("Method Not Allowed");
     return;
   }
 
-  // H1: 서명 검증. 기존엔 검증이 전무해 위조 PAYMENT_STATUS_CHANGED 로
-  // 임의 구독을 canceled/past_due 로 바꿀 수 있었다.
-  const tossSignature =
-    (req.headers["x-toss-webhook-signature"] as string) || "";
-  const tossTimestamp =
-    (req.headers["x-toss-webhook-timestamp"] as string) || "";
-  if (
-    !verifyTossWebhook(
-      tossSignature,
-      tossTimestamp,
-      req.rawBody,
-      TOSS_WEBHOOK_SECRET,
-    )
-  ) {
-    res.status(401).send("Invalid webhook signature");
-    return;
-  }
-
-  const { eventType, data: eventData } = req.body;
+  const { eventType, data: eventData } = req.body ?? {};
 
   switch (eventType) {
     case "PAYMENT_STATUS_CHANGED": {
-      const { paymentKey, status } = eventData;
+      // body.status 는 신뢰하지 않는다 — paymentKey 로 재조회한 실제 status 만 사용.
+      const paymentKey =
+        typeof eventData?.paymentKey === "string" ? eventData.paymentKey : "";
+      if (!paymentKey) {
+        // 재조회 식별자가 없으면 검증 불가 → 안전 무시.
+        console.warn(
+          "[tossWebhook] PAYMENT_STATUS_CHANGED without paymentKey; ignoring",
+        );
+        break;
+      }
 
+      const query = await fetchTossPaymentStatus(paymentKey);
+      const action = resolveTossWebhookAction(query);
+      if (!query) {
+        // 재조회 실패/미존재(위조 포함) → 구독 변경 없이 무시(+로그).
+        console.warn(
+          "[tossWebhook] payment re-query failed or not found; no subscription change",
+        );
+        break;
+      }
+      if (action.type === "none") break;
+
+      // 재조회로 확인된 실제 상태가 해지/부분취소일 때만 구독을 조회·변경.
+      // 멱등: 동일 상태 재수신은 같은 값 write → 무해(scheduledReconcileToss·
+      // 갱신 크론과 컬렉션이 달라 충돌 없음).
       const snap = await db
         .collection("subscriptions")
         .where("tossPaymentKey", "==", paymentKey)
         .limit(1)
         .get();
-
-      if (!snap.empty) {
-        const docRef = snap.docs[0].ref;
-        if (status === "CANCELED" || status === "EXPIRED") {
-          await docRef.update({
-            status: "canceled",
-            planType: "free",
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        } else if (status === "PARTIAL_CANCELED") {
-          await docRef.update({
-            status: "past_due",
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
+      if (snap.empty) break;
+      const docRef = snap.docs[0].ref;
+      if (action.type === "cancel") {
+        await docRef.update({
+          status: "canceled",
+          planType: "free",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } else if (action.type === "past_due") {
+        await docRef.update({
+          status: "past_due",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
       }
       break;
     }

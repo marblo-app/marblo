@@ -1,20 +1,26 @@
-// Unit tests for the payment webhook signature verification (H1 defense).
+// Unit tests for the payment webhook trust logic.
 // Imports the COMPILED module so the test tracks the real implementation
 // (no logic drift). Build first, then run:
 //   cd v3/functions && npm run build && node tests/webhookVerify.test.mjs
 //
-// Covers the acceptance from ticket 0E3zUE8EOcjZay7jJcyf:
-//   - valid signature passes
-//   - missing signature / timestamp / body / secret is rejected
-//   - wrong signature is rejected (forged webhook → 401 upstream)
-//   - tampered body is rejected (HMAC computed on original bytes)
-//   - wrong timestamp is rejected (timestamp is part of the signed message)
+// Covers:
+//   - Toss (ticket XJ2xFetkFSJnhu53ptyx): PAYMENT_STATUS_CHANGED has NO
+//     signature header. Verification is by RE-QUERYING the Payment API and
+//     acting only on Toss's real status. Tests the pure decision functions:
+//       * re-query response → normalized result (success / !ok=404 / missing)
+//       * real status → subscription action (cancel / past_due / none)
+//       * re-query failure (null) → no change
+//       * FORGED body is harmless — action depends only on the re-queried
+//         status, never on what the webhook body claimed
+//   - Paddle: real HMAC signature `ts=..;h1=..` over original bytes.
 
 import crypto from "node:crypto";
 import {
-  verifyTossWebhook,
   verifyPaddleSignature,
   timingSafeEqualHex,
+  classifyTossPaymentResponse,
+  subscriptionActionForTossStatus,
+  resolveTossWebhookAction,
 } from "../lib/webhookVerify.js";
 
 let passed = 0;
@@ -28,61 +34,110 @@ function assert(cond, msg) {
   }
 }
 
-// ─── Toss: HMAC-SHA256(secret, `${ts}.${rawBody}`) hex ──────────────
-const TOSS_SECRET = "test_toss_webhook_secret";
-const tossTs = "1720000000000";
-const tossBody = Buffer.from(
-  JSON.stringify({
-    eventType: "PAYMENT_STATUS_CHANGED",
-    data: { status: "CANCELED" },
-  }),
+// ─── Toss re-query: HTTP response → normalized result ────────────────
+assert(
+  JSON.stringify(classifyTossPaymentResponse(true, { status: "DONE" })) ===
+    JSON.stringify({ status: "DONE" }),
+  "toss requery: 2xx + status → { status }",
 );
-const tossSig = crypto
-  .createHmac("sha256", TOSS_SECRET)
-  .update(`${tossTs}.${tossBody.toString("utf8")}`)
-  .digest("hex");
+assert(
+  JSON.stringify(classifyTossPaymentResponse(true, { status: "CANCELED" })) ===
+    JSON.stringify({ status: "CANCELED" }),
+  "toss requery: reflects real CANCELED status",
+);
+assert(
+  classifyTossPaymentResponse(false, { status: "CANCELED" }) === null,
+  "toss requery: non-2xx (e.g. 404 not-found/forged key) → null (safe ignore)",
+);
+assert(
+  classifyTossPaymentResponse(true, null) === null,
+  "toss requery: 2xx but null body → null",
+);
+assert(
+  classifyTossPaymentResponse(true, {}) === null,
+  "toss requery: 2xx but missing status → null",
+);
+assert(
+  classifyTossPaymentResponse(true, { status: 123 }) === null,
+  "toss requery: 2xx but non-string status → null",
+);
 
+// ─── Toss real status → subscription action ─────────────────────────
 assert(
-  verifyTossWebhook(tossSig, tossTs, tossBody, TOSS_SECRET) === true,
-  "toss: valid signature passes",
+  subscriptionActionForTossStatus("CANCELED").type === "cancel",
+  "toss action: CANCELED → cancel",
 );
 assert(
-  verifyTossWebhook("", tossTs, tossBody, TOSS_SECRET) === false,
-  "toss: missing signature rejected",
+  subscriptionActionForTossStatus("EXPIRED").type === "cancel",
+  "toss action: EXPIRED → cancel",
 );
 assert(
-  verifyTossWebhook(tossSig, "", tossBody, TOSS_SECRET) === false,
-  "toss: missing timestamp rejected",
+  subscriptionActionForTossStatus("PARTIAL_CANCELED").type === "past_due",
+  "toss action: PARTIAL_CANCELED → past_due",
 );
 assert(
-  verifyTossWebhook(tossSig, tossTs, undefined, TOSS_SECRET) === false,
-  "toss: missing rawBody rejected",
+  subscriptionActionForTossStatus("DONE").type === "none",
+  "toss action: DONE → none (no change)",
 );
 assert(
-  verifyTossWebhook(tossSig, tossTs, tossBody, "") === false,
-  "toss: empty secret rejected (unconfigured = closed)",
+  subscriptionActionForTossStatus("READY").type === "none",
+  "toss action: READY → none",
 );
 assert(
-  verifyTossWebhook("deadbeef".repeat(8), tossTs, tossBody, TOSS_SECRET) ===
-    false,
-  "toss: wrong signature rejected",
+  subscriptionActionForTossStatus("IN_PROGRESS").type === "none",
+  "toss action: IN_PROGRESS → none",
 );
 assert(
-  verifyTossWebhook(
-    tossSig,
-    tossTs,
-    Buffer.from(tossBody.toString("utf8").replace("CANCELED", "DONE")),
-    TOSS_SECRET,
-  ) === false,
-  "toss: tampered body rejected",
+  subscriptionActionForTossStatus("WAITING_FOR_DEPOSIT").type === "none",
+  "toss action: WAITING_FOR_DEPOSIT → none",
 );
 assert(
-  verifyTossWebhook(tossSig, "1720000009999", tossBody, TOSS_SECRET) === false,
-  "toss: wrong timestamp rejected (ts is part of signed message)",
+  subscriptionActionForTossStatus("canceled").type === "cancel",
+  "toss action: case-insensitive (lowercase canceled → cancel)",
 );
 assert(
-  verifyTossWebhook(tossSig, tossTs, tossBody, "wrong_secret") === false,
-  "toss: wrong secret rejected",
+  subscriptionActionForTossStatus("").type === "none",
+  "toss action: empty → none",
+);
+assert(
+  subscriptionActionForTossStatus("SOMETHING_NEW").type === "none",
+  "toss action: unknown status → none (fail closed = no change)",
+);
+
+// ─── resolveTossWebhookAction: null (re-query failed) → none ─────────
+assert(
+  resolveTossWebhookAction(null).type === "none",
+  "toss resolve: re-query failed/absent (null) → none (no subscription change)",
+);
+assert(
+  resolveTossWebhookAction({ status: "CANCELED" }).type === "cancel",
+  "toss resolve: verified CANCELED → cancel",
+);
+assert(
+  resolveTossWebhookAction({ status: "PARTIAL_CANCELED" }).type === "past_due",
+  "toss resolve: verified PARTIAL_CANCELED → past_due",
+);
+
+// ─── Forgery is harmless: decision uses ONLY the re-queried status ───
+// The handler feeds resolveTossWebhookAction the RE-QUERIED result, never the
+// body's claimed status. Simulate the handler's decision to prove that a
+// forged body cannot drive the subscription change.
+function decide(bodyClaimedStatus /* deliberately ignored */, requeryResult) {
+  // handler ignores bodyClaimedStatus entirely; only requeryResult matters
+  void bodyClaimedStatus;
+  return resolveTossWebhookAction(requeryResult);
+}
+assert(
+  decide("CANCELED", { status: "DONE" }).type === "none",
+  "forgery: body claims CANCELED but Toss says DONE → none (no downgrade)",
+);
+assert(
+  decide("DONE", { status: "CANCELED" }).type === "cancel",
+  "forgery: body claims DONE but Toss says CANCELED → cancel (real state wins)",
+);
+assert(
+  decide("CANCELED", null).type === "none",
+  "forgery: body claims CANCELED but re-query 404/failed → none (ghost key harmless)",
 );
 
 // ─── Paddle: header `ts=<unix>;h1=<hmac>`, HMAC(secret, `${ts}:${body}`) ──
