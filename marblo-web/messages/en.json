@@ -651,11 +651,55 @@
     "items": [
       {
         "q": "What is Marblo?",
-        "a": "Marblo is a desktop app that orchestrates multiple AI coding agents simultaneously on a single kanban board. A central orchestrator splits tasks, assigns them to each agent, and tracks progress in real time. It runs on macOS and Windows."
+        "a": "Marblo is a desktop app that orchestrates multiple AI coding agents simultaneously on a single kanban board. A central orchestrator splits large work into tickets, assigns them to heterogeneous agents, tracks progress on the board, and puts a human REVIEW gate before anything merges. Beyond just launching several agents, it aims to be a control plane for AI-native teams — tracking tickets, progress, code changes, and reviews in one place — and it runs locally on macOS and Windows."
+      },
+      {
+        "q": "How is this different from just using a single CLI or IDE plugin like Claude or Codex?",
+        "a": "A single CLI or IDE plugin is a tool for talking to one agent at a time. Marblo works at the team level on top of that: ① it orchestrates heterogeneous agents — Claude, GPT/Codex, Antigravity — at once, ② it traces work end to end from ticket → agent → PR → diff, ③ it runs agents in isolated git worktrees for safe parallelism, and ④ it keeps a human REVIEW gate before merge. Running agents concurrently is commodity; Marblo's edge is the tracking, decision, and safe-merge layer on top."
+      },
+      {
+        "q": "What does the orchestrator actually do?",
+        "a": "The orchestrator is the central agent that directs the team. It breaks large work into file- or module-scoped tickets, assigns each to the best-suited agent, tracks status on the kanban board, and decides the next step when an agent is blocked or finished. You set the direction and just check results at REVIEW."
       },
       {
         "q": "Which AI agents does it support?",
-        "a": "It runs heterogeneous agents — Claude, GPT/Codex, and Antigravity — at the same time, assigning roles such as backend, frontend, and testing to fit each model's strengths."
+        "a": "It runs heterogeneous agents — Claude, GPT/Codex, and Antigravity — at the same time. It isn't locked to one vendor, and it assigns roles such as backend, frontend, and testing to fit each model's strengths."
+      },
+      {
+        "q": "How are model roles assigned?",
+        "a": "Agents are placed by the nature of the work — a top model for complex design, a lighter and cheaper model for repetitive, simple tasks. Everything runs on your own key or subscription (bring your own model), so you decide which model goes where."
+      },
+      {
+        "q": "How do I create tickets and the kanban board?",
+        "a": "Define work as a ticket and it lands in the board's TODO column. A ticket can carry a description, an assigned role, and dependencies, and if you describe a goal to the orchestrator it can break large work into several tickets automatically. Agents then claim the tickets and start working."
+      },
+      {
+        "q": "How do I track progress?",
+        "a": "Each task moves along the kanban board (TODO → IN_PROGRESS → REVIEW → DONE), and you can watch each agent's state and activity log in real time. You can see at a glance which ticket sits with which agent and what it's doing right now."
+      },
+      {
+        "q": "Won't multiple agents collide editing the same file?",
+        "a": "When needed, Marblo runs agents in isolated git worktrees so parallel work doesn't step on each other's files. Tasks are split by file or module so ownership doesn't overlap, and each agent's work is merged safely after review."
+      },
+      {
+        "q": "How do I review the PRs and code changes (diffs) agents produce?",
+        "a": "When an agent finishes, it opens its result as a PR and the ticket moves to the REVIEW stage. You inspect the changed code (the diff) and approve it or request changes. Only changes that pass the human REVIEW gate get merged, so even amid automation the final decision stays with you."
+      },
+      {
+        "q": "How do I move between agents to keep an eye on them?",
+        "a": "On the board you move between agents and terminals quickly with the arrow keys and look right into what each agent is doing. It's designed so you can run many agents at once yet switch easily and never lose the thread."
+      },
+      {
+        "q": "What is MCP and why does it matter?",
+        "a": "MCP (Model Context Protocol) is an open standard for connecting AI to tools like files, databases, and APIs. Marblo supports MCP natively, so multiple agents share the same tools and context consistently — and collaboration state like tickets and the kanban board flows through MCP too."
+      },
+      {
+        "q": "Is my code safe?",
+        "a": "Every agent runs locally on your machine, so your code is not sent to Marblo's servers. Repository, terminal, and file access all happen inside that local boundary, which matters when handling sensitive code and data."
+      },
+      {
+        "q": "Do you collect telemetry or usage data?",
+        "a": "Your code and file contents are never sent to or collected by Marblo's servers. We handle only anonymous, non-identifying metrics to improve the product, and any detailed telemetry or third-party sharing is opt-in — active only when you turn it on."
       },
       {
         "q": "How much does it cost?",
@@ -666,24 +710,12 @@
         "a": "Yes. Each agent runs on your own API key or subscription. The Marblo fee is the orchestration cost of directing those agents and does not include AI usage fees (bring your own model)."
       },
       {
-        "q": "Does it work on both Mac and Windows?",
-        "a": "Yes. Marblo ships as a desktop app for macOS and Windows, and you can get the installer from the download page."
+        "q": "Does it work on both Mac and Windows? Does it update automatically?",
+        "a": "Yes. Marblo ships as a desktop app for macOS and Windows. When a new version is released the app checks for and applies the update automatically, so you stay on the latest build."
       },
       {
-        "q": "What is MCP and why does it matter?",
-        "a": "MCP (Model Context Protocol) is an open standard for connecting AI to tools like files, databases, and APIs. Marblo supports MCP natively, so multiple agents share the same tools and context consistently."
-      },
-      {
-        "q": "Is my code safe?",
-        "a": "Every agent runs locally on your machine, so your code is not sent to external servers. That local boundary matters when handling sensitive code and data."
-      },
-      {
-        "q": "Won't multiple agents collide editing the same file?",
-        "a": "When needed, Marblo runs agents in isolated git worktrees so parallel work doesn't step on each other's files. Tasks are split by file or module so ownership doesn't overlap."
-      },
-      {
-        "q": "How do I track progress?",
-        "a": "Define work as tickets, assign them to agents, and watch each agent's state and completion on a kanban board (TODO → IN_PROGRESS → REVIEW → DONE). A person checks the result at the REVIEW stage."
+        "q": "How do I get started?",
+        "a": "Download and install the app from the download page, then connect the repository (folder) you want to work in. Create your first ticket, assign an agent, and you're orchestrating right away — and you can try it immediately on the Free plan."
       },
       {
         "q": "Where do I download it?",
