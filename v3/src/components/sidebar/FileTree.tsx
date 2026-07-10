@@ -765,6 +765,8 @@ export function FileTree() {
   const findByPathOrRemote = useProjectStore((s) => s.findByPathOrRemote);
   const createProject = useProjectStore((s) => s.createProject);
   const currentProject = useProjectStore((s) => s.currentProject);
+  const projects = useProjectStore((s) => s.projects);
+  const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
 
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
@@ -1397,6 +1399,18 @@ export function FileTree() {
     ],
   );
 
+  const startInlineProjectCreation = useCallback(
+    (path: string, remoteUrl: string | null) => {
+      const folderName = basename(path) || "new-project";
+      setNewProjectName(folderName);
+      setPendingFolderPath(path);
+      setPendingGitRemoteUrl(remoteUrl);
+      setFolderChoice(null);
+      setShowNewProject(true);
+    },
+    [],
+  );
+
   // ---------- Project setup handlers (existing logic) ----------
   const handleSelectDirectory = useCallback(async () => {
     const dir = await window.electronAPI.fs.selectDirectory();
@@ -1411,23 +1425,29 @@ export function FileTree() {
       return;
     }
 
+    if (projectsHydrated && projects.length === 0) {
+      startInlineProjectCreation(dir, remoteUrl);
+      return;
+    }
+
     // Unregistered folder: don't auto-open the register banner. Offer a choice
     // — register as a project (existing flow), or just browse read-only.
     setFolderChoice({ path: dir, remoteUrl });
-  }, [setRootPath, findByPathOrRemote, setCurrentProject]);
+  }, [
+    setRootPath,
+    findByPathOrRemote,
+    setCurrentProject,
+    projectsHydrated,
+    projects.length,
+    startInlineProjectCreation,
+  ]);
 
   // "Register as a project" branch of the folder-choice banner → hand off to
   // the existing inline new-project banner with the picked folder prefilled.
   const handleChooseRegister = useCallback(() => {
     if (!folderChoice) return;
-    const { path, remoteUrl } = folderChoice;
-    const folderName = basename(path) || "new-project";
-    setNewProjectName(folderName);
-    setPendingFolderPath(path);
-    setPendingGitRemoteUrl(remoteUrl);
-    setFolderChoice(null);
-    setShowNewProject(true);
-  }, [folderChoice]);
+    startInlineProjectCreation(folderChoice.path, folderChoice.remoteUrl);
+  }, [folderChoice, startInlineProjectCreation]);
 
   // "Browse (read-only)" branch → the root was already switched to the folder in
   // handleSelectDirectory, so we only remember it in recents. No project bind.
@@ -1448,6 +1468,7 @@ export function FileTree() {
       };
       if (pendingGitRemoteUrl) data.gitRemoteUrl = pendingGitRemoteUrl;
       const id = await createProject(data);
+      setRootPath(pendingFolderPath);
       setCurrentProject({
         id,
         ...data,
@@ -1468,6 +1489,7 @@ export function FileTree() {
     pendingFolderPath,
     pendingGitRemoteUrl,
     createProject,
+    setRootPath,
     setCurrentProject,
   ]);
 
