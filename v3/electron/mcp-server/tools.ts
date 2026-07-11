@@ -33,8 +33,10 @@ import {
 import {
   applyProjection,
   resolveDependentIfReady,
+  computeTaskProjection,
   type ApplyProjectionInput,
 } from "./projection.js";
+import { selectProjectId, looksLikeFirestoreId } from "./project-resolve.js";
 import {
   validateTaskBodyInput,
   taskBodyStorageFields,
@@ -202,6 +204,92 @@ function resolveProject(projectId?: string): string {
     );
   }
   return "";
+}
+
+/** True if a project document with this id exists (best-effort; on read error
+ * we assume it exists so a transient Firestore blip can't block a create). */
+async function projectExists(projectId: string): Promise<boolean> {
+  if (!projectId) return false;
+  try {
+    const snap = await getDoc(doc(db, "projects", projectId));
+    return snap.exists();
+  } catch (err) {
+    console.warn(`[MCP] projectExists(${projectId}) read failed:`, err);
+    return true;
+  }
+}
+
+/** Resolve a friendly project name (e.g. "마블로") to a real Firestore project
+ * id by matching the projects collection `name` field. Returns null when no
+ * unambiguous match exists. Best-effort — any read error yields null. */
+async function resolveProjectNameToId(name: string): Promise<string | null> {
+  try {
+    const snap = await getDocs(
+      query(collection(db, "projects"), where("name", "==", name)),
+    );
+    if (snap.size === 1) return snap.docs[0].id;
+    return null;
+  } catch (err) {
+    console.warn(`[MCP] resolveProjectNameToId("${name}") failed:`, err);
+    return null;
+  }
+}
+
+interface ResolvedCreateProject {
+  projectId: string;
+  warning?: string;
+}
+
+/**
+ * W7 — project resolution for create_task / create_tasks_bulk that actually
+ * RESPECTS an explicit project_id instead of silently dropping it (the old
+ * resolveProject always returned the bound DEFAULT_PROJECT). Rules:
+ *   • explicit valid Firestore id → use it IF the project exists (else warn +
+ *     fall back to the bound project so the task isn't filed into a phantom);
+ *   • explicit friendly name → resolve via the projects collection, else warn +
+ *     fall back to the bound project;
+ *   • no explicit id → the bound project.
+ * The fallback is deliberate: a task on the bound project is at least visible,
+ * whereas a ghost project id makes it vanish from every board.
+ */
+async function resolveProjectForCreate(
+  projectId?: string,
+): Promise<ResolvedCreateProject> {
+  const sel = selectProjectId(projectId, DEFAULT_PROJECT);
+
+  if (sel.source === "explicit") {
+    // Explicit valid id — honor it only if the project actually exists.
+    if (await projectExists(sel.projectId)) {
+      return { projectId: sel.projectId };
+    }
+    return {
+      projectId: DEFAULT_PROJECT,
+      warning:
+        `project_id="${sel.projectId}" does not match any known project — ` +
+        `filed under the bound project (${DEFAULT_PROJECT}) instead.`,
+    };
+  }
+
+  if (sel.friendlyName) {
+    const resolved = await resolveProjectNameToId(sel.friendlyName);
+    if (resolved) return { projectId: resolved };
+    return { projectId: sel.projectId, warning: sel.warning };
+  }
+
+  return { projectId: sel.projectId, warning: sel.warning };
+}
+
+/** Seed the projection field on a freshly-created task so the board's
+ * projection-driven view shows it immediately (W7 — no lag between create and
+ * board visibility). Pure computation; caller writes it with the doc. */
+function seedProjectionForCreate(
+  taskId: string,
+  now: Timestamp,
+): Record<string, unknown> {
+  return computeTaskProjection(undefined, "TODO", taskId, now, {
+    lastAgentId: "",
+    lastActivitySummary: "created",
+  }) as unknown as Record<string, unknown>;
 }
 
 interface TaskDoc {
@@ -927,7 +1015,10 @@ export function registerTools(server: McpServer): void {
       context,
       scope,
     }) => {
-      const projectId = resolveProject(project_id);
+      // W7: honor an explicit project_id (valid id or resolvable name) instead
+      // of silently filing under the bound project → no more ghost tasks.
+      const resolvedProject = await resolveProjectForCreate(project_id);
+      const projectId = resolvedProject.projectId;
       if (!projectId) {
         return text(
           "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter.\n" +
@@ -942,6 +1033,10 @@ export function registerTools(server: McpServer): void {
       const now = Timestamp.now();
       const deps = depends_on ?? [];
 
+      // Pre-generate the doc id so we can seed projection.currentStatus in the
+      // SAME write — the board's projection view then shows the task instantly
+      // (W7: no create→visible lag).
+      const ref = doc(collection(db, "tasks"));
       const data: Record<string, unknown> = {
         title,
         ...taskBodyStorageFields(bodyInput),
@@ -960,16 +1055,18 @@ export function registerTools(server: McpServer): void {
         updatedAt: now,
         projectId,
         contextId: resolveContextForWrite(),
+        projection: seedProjectionForCreate(ref.id, now),
       };
       const missionContextError = applyMissionContextTags(data);
       if (missionContextError) return text(`Error: ${missionContextError}`);
 
-      const ref = await addDoc(collection(db, "tasks"), data);
+      await setDoc(ref, data);
+      const notes2 = [warning, resolvedProject.warning].filter(Boolean);
       return text(
-        `Task created successfully!\nID: ${
-          ref.id
-        }\nTitle: ${title}\nRole: ${role}\nPriority: ${priority ?? 0}` +
-          (warning ? `\n⚠️ ${warning}` : ""),
+        `Task created successfully!\nID: ${ref.id}\nTitle: ${title}\nRole: ${role}\nPriority: ${
+          priority ?? 0
+        }\nProject: ${projectId}` +
+          (notes2.length ? `\n⚠️ ${notes2.join("\n⚠️ ")}` : ""),
       );
     },
   );
@@ -1002,6 +1099,23 @@ export function registerTools(server: McpServer): void {
             "In Electron: agents get this automatically. For external CLI: set MARBLO_PROJECT in MCP config.",
         );
       }
+
+      // W7: pre-resolve any distinct per-task project_id overrides once (validity
+      // + existence checked). A valid, existing project id is honored so a bulk
+      // create can target another project; an invalid/unknown one falls back to
+      // the bound project (never a ghost). Cache keyed by raw arg to avoid
+      // re-reading Firestore per task.
+      const projectCache = new Map<string, string>();
+      const resolveTaskProject = async (raw: unknown): Promise<string> => {
+        const key = typeof raw === "string" ? raw.trim() : "";
+        if (!key || !looksLikeFirestoreId(key)) return project;
+        if (key === project) return project;
+        const cached = projectCache.get(key);
+        if (cached) return cached;
+        const resolved = (await resolveProjectForCreate(key)).projectId;
+        projectCache.set(key, resolved);
+        return resolved;
+      };
 
       // Phase 1: Build alias map (symbolic name → array index)
       const aliasMap: Record<string, number> = {};
@@ -1095,9 +1209,9 @@ export function registerTools(server: McpServer): void {
             createdAt: now,
             updatedAt: now,
           };
-          // Always use the resolved project (Firestore doc ID from MARBLO_PROJECT env)
-          // Ignore per-task project_id overrides — they cause ID mismatch with the board
-          data.projectId = project;
+          // W7: honor a valid per-task project_id override (existing project),
+          // else fall back to the bound project — never a ghost id.
+          data.projectId = await resolveTaskProject(t.project_id);
           data.contextId = resolveContextForWrite();
           const missionContextError = applyMissionContextTags(data);
           if (missionContextError) {
@@ -1110,7 +1224,10 @@ export function registerTools(server: McpServer): void {
           }
 
           try {
-            const ref = await addDoc(collection(db, "tasks"), data);
+            // Pre-generate id + seed projection so the board shows it instantly.
+            const ref = doc(collection(db, "tasks"));
+            data.projection = seedProjectionForCreate(ref.id, now);
+            await setDoc(ref, data);
             indexToId[i] = ref.id;
             results.push(
               `  [${ref.id}] ${data.title} (role=${data.role}, priority=${data.priority})`,

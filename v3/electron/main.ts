@@ -30,6 +30,8 @@ import {
   resolveWatchdogConfig,
   buildRespawnDispatch,
   type WatchdogTicket,
+  type StaleReviewTicket,
+  type PendingInstruction,
 } from "./agent-watchdog";
 import { OrchestratorManager } from "./orchestrator-manager";
 import { installBundledHarness } from "./bundle-installer";
@@ -817,6 +819,297 @@ const agentWatchdog = new AgentWatchdog(
           console.error("[AgentWatchdog] recordRecovery write failed:", err);
         }
       })();
+    },
+
+    // ── W3: false-positive-respawn guards ──────────────────────
+    isTaskStillRecoverable: async (taskId) => {
+      try {
+        const { app, authReady } = getMissionFirebaseApp();
+        await authReady;
+        const db = getFirestore(app);
+        const snap = await fbGetDoc(fbDoc(db, "tasks", taskId));
+        if (!snap.exists()) return false;
+        const status = (snap.data() as { status?: string }).status ?? "";
+        // Recoverable only while still in active work — REVIEW/DONE/FAILED/
+        // BLOCKED means someone/something already closed it out.
+        return status === "CLAIMED" || status === "IN_PROGRESS";
+      } catch (err) {
+        console.error("[AgentWatchdog] isTaskStillRecoverable failed:", err);
+        return true; // read blip → don't cancel recovery on our own error
+      }
+    },
+    hasLiveWorkerForTask: (ticket) => {
+      // A DIFFERENT (not the ticket's recorded agentId) non-dead agent bound to
+      // this task — by currentTaskId OR sitting in the task's isolated worktree.
+      // This is the identity match: dispatch's name hint ≠ the real live
+      // agentId, so the original worker can be alive under another id while the
+      // recorded agentId looks dead. Excluding the ticket's own agentId keeps
+      // the normal nudge/respawn of the bound worker intact (else a silent-but-
+      // alive bound agent would always match itself and never get nudged).
+      return agentManager.listAgents().some((a) => {
+        if (a.id === ticket.agentId) return false;
+        if (a.status === "stopped" || a.status === "error") return false;
+        if (a.currentTaskId && a.currentTaskId === ticket.taskId) return true;
+        return !!a.cwd && a.cwd.includes(ticket.taskId);
+      });
+    },
+    probeFreshness: async (ticket) => {
+      // Original worker demonstrably alive if its isolated worktree was touched
+      // (file write / commit) within the freshness grace. Codifies the
+      // watchdog_falsepositive_check_mtimes lesson as a real gate.
+      const graceMs = resolveWatchdogConfig().freshnessGraceMs;
+      const cwd = ticket.cwd;
+      if (!cwd) return null;
+      try {
+        if (!fs.existsSync(cwd)) return null;
+        let newest = 0;
+        // Cheap probe: the worktree dir mtime + .git/index mtime (bumped by any
+        // add/commit) + HEAD. Avoids walking the whole tree.
+        for (const rel of [".", ".git/index", ".git/HEAD", ".git/logs/HEAD"]) {
+          try {
+            const st = fs.statSync(path.join(cwd, rel));
+            newest = Math.max(newest, st.mtimeMs);
+          } catch {
+            /* missing path — skip */
+          }
+        }
+        if (newest === 0) return null;
+        const ageMs = Date.now() - newest;
+        return {
+          fresh: ageMs <= graceMs,
+          reason: `worktree touched ${Math.round(ageMs / 1000)}s ago`,
+        };
+      } catch (err) {
+        console.error("[AgentWatchdog] probeFreshness failed:", err);
+        return null;
+      }
+    },
+
+    // ── W6: cross-host / scope guard ───────────────────────────
+    probeScopeHost: async (ticket) => {
+      try {
+        const { app, authReady } = getMissionFirebaseApp();
+        await authReady;
+        const db = getFirestore(app);
+        const snap = await fbGetDoc(fbDoc(db, "tasks", ticket.taskId));
+        if (!snap.exists()) return { action: "proceed", reason: "" };
+        const data = snap.data() as {
+          scope?: unknown;
+          description?: unknown;
+          comment?: unknown;
+        };
+        const scope = Array.isArray(data.scope) ? (data.scope as string[]) : [];
+        const constraintText = `${String(data.description ?? "")}\n${String(
+          data.comment ?? "",
+        )}`;
+        // Host constraint: a Windows-only task (C:\… cwd or explicit Windows
+        // note) must not respawn on this darwin host.
+        const wantsWindows =
+          /[A-Za-z]:\\/.test(constraintText) ||
+          /\bwindows\b/i.test(constraintText) ||
+          /C:\/Users\//i.test(constraintText);
+        if (wantsWindows && process.platform !== "win32") {
+          return {
+            action: "redispatch",
+            reason: `task carries a Windows host constraint but this host is ${process.platform}`,
+          };
+        }
+        // Scope-file existence: if the task names scope files and NONE exist in
+        // the resolved cwd, this is a mis-routed empty worktree — don't write
+        // orphan code here.
+        const cwd = ticket.cwd;
+        if (scope.length > 0 && cwd && fs.existsSync(cwd)) {
+          const anyPresent = scope.some((rel) => {
+            try {
+              return fs.existsSync(path.join(cwd, rel));
+            } catch {
+              return false;
+            }
+          });
+          if (!anyPresent) {
+            return {
+              action: "redispatch",
+              reason: `none of ${scope.length} scope file(s) exist under ${cwd} — mis-routed worktree`,
+            };
+          }
+        }
+        return { action: "proceed", reason: "" };
+      } catch (err) {
+        console.error("[AgentWatchdog] probeScopeHost failed:", err);
+        return { action: "proceed", reason: "" }; // fail open — don't block on our error
+      }
+    },
+    redispatchToOriginHost: async (ticket, reason) => {
+      try {
+        const { app, authReady } = getMissionFirebaseApp();
+        await authReady;
+        const db = getFirestore(app);
+        await fbAddDoc(fbCollection(db, "activities"), {
+          taskId: ticket.taskId,
+          agentId: "watchdog",
+          message: `🚫 [Watchdog misroute] ${reason}. 이 호스트에서 스폰하지 않고 원 호스트 재디스패치를 요청합니다 (고아코드 방지).`,
+          createdAt: fbTimestamp.now(),
+          source: "watchdog",
+        });
+        // Park the ticket as BLOCKED(force) so the origin host / orchestrator
+        // picks it up instead of this host looping respawns.
+        await fbUpdateDoc(fbDoc(db, "tasks", ticket.taskId), {
+          status: "BLOCKED",
+          updatedAt: fbTimestamp.now(),
+        });
+      } catch (err) {
+        console.error("[AgentWatchdog] redispatchToOriginHost failed:", err);
+      }
+    },
+
+    // ── W4: real escalation before dead-end ────────────────────
+    rerouteForTicket: async (ticket) => {
+      // One re-route to the OTHER CLI family (claude↔gpt) before giving up — the
+      // three respawns may all have failed for a model/host reason.
+      try {
+        const cur = (ticket.model ?? "").toLowerCase();
+        const alt =
+          cur.includes("gpt") || cur.includes("codex") ? "claude" : "gpt";
+        const res = await bridgeServer.dispatchTask(
+          buildRespawnDispatch({ ...ticket, model: alt }, null),
+        );
+        return res?.success !== false;
+      } catch (err) {
+        console.error("[AgentWatchdog] rerouteForTicket failed:", err);
+        return false;
+      }
+    },
+    escalate: (ticket, detail) => {
+      const msg = `🚨 [Watchdog] 태스크 ${ticket.taskId} "${
+        ticket.title ?? ""
+      }" 자동복구 소진 — ${detail}. 사람 개입이 필요합니다.`;
+      // Orchestrator PTY nudge (project-scoped, best-effort).
+      try {
+        orchestrators.get(ticket.projectId)?.injectMessage(msg);
+      } catch (err) {
+        console.error("[AgentWatchdog] escalate orch nudge failed:", err);
+      }
+      // Telegram outbound (best-effort).
+      try {
+        void telegramPoller.sendMessage(ticket.projectId, msg);
+      } catch (err) {
+        console.error("[AgentWatchdog] escalate telegram failed:", err);
+      }
+    },
+
+    // ── W5: stale-REVIEW sweep ─────────────────────────────────
+    listStaleReviewCandidates: async () => {
+      const { app, authReady } = getMissionFirebaseApp();
+      await authReady;
+      const db = getFirestore(app);
+      // Cross-project: every REVIEW ticket, dead-assignee filtered downstream.
+      const snap = await fbGetDocs(
+        fbQuery(fbCollection(db, "tasks"), fbWhere("status", "==", "REVIEW")),
+      );
+      const out: StaleReviewTicket[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        if (data.missionId) return; // mission review owned by the conductor
+        const projection = data.projection as
+          | { lastAgentId?: unknown; lastActivityAt?: unknown }
+          | undefined;
+        const assigneeAgentId =
+          (typeof projection?.lastAgentId === "string" &&
+            projection.lastAgentId) ||
+          (typeof data.claimedBy === "string"
+            ? (data.claimedBy as string)
+            : null) ||
+          null;
+        // Assignee is "dead" when no live local agent carries that id. A foreign
+        // (another host / antigravity) assignee is likewise absent locally, so
+        // it is treated as dead here — surfaced for the orchestrator to re-route.
+        const live = assigneeAgentId
+          ? agentManager.getAgent(assigneeAgentId)
+          : null;
+        const assigneeDead =
+          !live || live.status === "stopped" || live.status === "error";
+        const ts = projection?.lastActivityAt as
+          | { toMillis?: () => number }
+          | undefined;
+        out.push({
+          taskId: d.id,
+          projectId: typeof data.projectId === "string" ? data.projectId : "",
+          title: typeof data.title === "string" ? data.title : undefined,
+          role: typeof data.role === "string" ? data.role : undefined,
+          assigneeAgentId,
+          assigneeDead,
+          lastActivityAtMs:
+            typeof ts?.toMillis === "function" ? ts.toMillis() : null,
+        });
+      });
+      return out;
+    },
+    escalateStaleReview: (ticket, detail) => {
+      const msg = `🕒 [Watchdog] REVIEW 방치 감지 — ${detail}. 리뷰/머지 또는 재배정이 필요합니다.`;
+      try {
+        orchestrators.get(ticket.projectId)?.injectMessage(msg);
+      } catch (err) {
+        console.error("[AgentWatchdog] escalateStaleReview orch failed:", err);
+      }
+      try {
+        void telegramPoller.sendMessage(ticket.projectId, msg);
+      } catch (err) {
+        console.error("[AgentWatchdog] escalateStaleReview tg failed:", err);
+      }
+    },
+
+    // ── W2: undelivered pending-instruction fallback ───────────
+    listUndeliveredInstructions: async () => {
+      const { app, authReady } = getMissionFirebaseApp();
+      await authReady;
+      const db = getFirestore(app);
+      const snap = await fbGetDocs(
+        fbQuery(
+          fbCollection(db, "pendingInstructions"),
+          fbWhere("isDelivered", "==", false),
+        ),
+      );
+      const out: PendingInstruction[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const targetAgentId =
+          typeof data.targetAgentId === "string" ? data.targetAgentId : "";
+        const message = typeof data.message === "string" ? data.message : "";
+        if (!targetAgentId || !message) return;
+        const ts = data.createdAt as { toMillis?: () => number } | undefined;
+        out.push({
+          docId: d.id,
+          targetAgentId,
+          message,
+          createdAtMs: typeof ts?.toMillis === "function" ? ts.toMillis() : 0,
+        });
+      });
+      return out;
+    },
+    deliverInstructionDirect: (agentId, message) => {
+      const a = agentManager.getAgent(agentId);
+      if (!a || a.status === "stopped" || a.status === "error") return false;
+      try {
+        ptyManager.writeAndSubmit(a.ptySessionId, message);
+        return true;
+      } catch (err) {
+        console.error("[AgentWatchdog] deliverInstructionDirect failed:", err);
+        return false;
+      }
+    },
+    markInstructionDelivered: async (docId) => {
+      try {
+        const { app, authReady } = getMissionFirebaseApp();
+        await authReady;
+        const db = getFirestore(app);
+        await fbUpdateDoc(fbDoc(db, "pendingInstructions", docId), {
+          isDelivered: true,
+          deliveredAt: fbTimestamp.now(),
+          deliveredVia: "watchdog-fallback",
+        });
+      } catch (err) {
+        console.error("[AgentWatchdog] markInstructionDelivered failed:", err);
+      }
     },
   },
   resolveWatchdogConfig(),

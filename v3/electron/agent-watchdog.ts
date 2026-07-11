@@ -76,7 +76,17 @@ export interface WatchdogAgentHealth {
   currentTaskId: string | null;
 }
 
-export type RecoveryPhase = "nudge" | "respawn" | "recovered" | "exhausted";
+export type RecoveryPhase =
+  | "nudge"
+  | "respawn"
+  | "recovered"
+  | "exhausted"
+  | "stand-down" // W3: original worker is alive/fresh — recovery skipped
+  | "reroute" // W4: re-routed to another model/host before giving up
+  | "escalated" // W4: real human/orchestrator notification fired
+  | "misroute" // W6: scope/host guard blocked an orphan spawn
+  | "review-stale" // W5: a dead-assignee REVIEW ticket surfaced
+  | "pending-fallback"; // W2: an undelivered instruction force-delivered via PTY
 
 export interface WatchdogDeps {
   /** Active tickets in CLAIMED/IN_PROGRESS. Recovery-only: the implementation
@@ -94,9 +104,93 @@ export interface WatchdogDeps {
     phase: RecoveryPhase,
     detail: string,
   ) => void;
+
+  // ── W3: false-positive-respawn guards (all optional; absent → legacy behavior)
+  /** Re-fetch the ticket's CURRENT status and report whether it is still
+   * recoverable (i.e. NOT already REVIEW/DONE/FAILED/BLOCKED). Closes the race
+   * where a ticket was CLAIMED/IN_PROGRESS at list time but the worker finished
+   * mid-sweep — respawning it would double-work a done ticket. */
+  isTaskStillRecoverable?: (taskId: string) => Promise<boolean>;
+  /** Probe whether the ORIGINAL worker is demonstrably still alive: a recent
+   * commit / add_activity / worktree mtime inside the freshness grace. Codifies
+   * the watchdog_falsepositive_check_mtimes lesson as an actual gate. null when
+   * it can't be determined (→ no opinion). */
+  probeFreshness?: (
+    ticket: WatchdogTicket,
+  ) => Promise<{ fresh: boolean; reason: string } | null>;
+  /** True when SOME live agent is already bound to this task (currentTaskId or
+   * isolated worktree) — even under a different name than the ticket's recorded
+   * agentId. Prevents a duplicate spawn when dispatch's name hint ≠ the real
+   * live agentId. */
+  hasLiveWorkerForTask?: (ticket: WatchdogTicket) => boolean;
+
+  // ── W6: cross-host / scope guard (optional) ─────────────────
+  /** Probe, for a respawn about to land on THIS host, whether the ticket's
+   * scope files exist in the resolved cwd and the host constraint (e.g. a
+   * Windows cwd in the description) matches. Returns the action to take. null →
+   * no opinion (proceed). */
+  probeScopeHost?: (ticket: WatchdogTicket) => Promise<{
+    action: "proceed" | "redispatch" | "block";
+    reason: string;
+  } | null>;
+  /** Hand a mis-routed ticket back to its origin host (add_activity diagnostic +
+   * BLOCKED(force) request). Called when probeScopeHost says redispatch/block. */
+  redispatchToOriginHost?: (
+    ticket: WatchdogTicket,
+    reason: string,
+  ) => Promise<void>;
+
+  // ── W4: real escalation before dead-end (optional) ──────────
+  /** Try ONCE to re-route a budget-exhausted ticket to a different model/host
+   * before giving up. Returns true if a re-route dispatch actually fired. */
+  rerouteForTicket?: (ticket: WatchdogTicket) => Promise<boolean>;
+  /** Fire a REAL escalation (orchestrator PTY nudge + Telegram) when a ticket
+   * genuinely needs human attention. Replaces the old log-only dead-end. */
+  escalate?: (ticket: WatchdogTicket, detail: string) => void;
+
+  // ── W5: stale-REVIEW sweep (optional) ───────────────────────
+  /** List REVIEW tickets whose assignee agent is dead/foreign, with the age of
+   * their last review activity — cross-project. The watchdog otherwise excludes
+   * REVIEW entirely, so a dead antigravity assignee waits forever. */
+  listStaleReviewCandidates?: () => Promise<StaleReviewTicket[]>;
+  /** Surface a stale REVIEW ticket to the orchestrator / human. */
+  escalateStaleReview?: (ticket: StaleReviewTicket, detail: string) => void;
+
+  // ── W2: undelivered pending-instruction fallback (optional) ──
+  /** List pending instructions still undelivered (isDelivered==false), with age
+   * and target agent. */
+  listUndeliveredInstructions?: () => Promise<PendingInstruction[]>;
+  /** Directly write an instruction to a locally-hosted agent's PTY (the
+   * reuse_agent path that works when the Firestore listener didn't). Returns
+   * false when the agent isn't hosted here / not writable. */
+  deliverInstructionDirect?: (agentId: string, message: string) => boolean;
+  /** Flip a pending instruction's isDelivered flag after a direct delivery. */
+  markInstructionDelivered?: (docId: string) => Promise<void>;
+
   /** Injectable clock (epoch-ms) for deterministic tests. */
   now?: () => number;
   logger?: (msg: string, meta?: Record<string, unknown>) => void;
+}
+
+/** W5 — a REVIEW ticket whose assignee looks dead/foreign. */
+export interface StaleReviewTicket {
+  taskId: string;
+  projectId: string;
+  title?: string;
+  role?: string;
+  assigneeAgentId: string | null;
+  /** True when the assignee agent is gone / stopped / on another host. */
+  assigneeDead: boolean;
+  /** epoch-ms of the last review-related activity, or null. */
+  lastActivityAtMs: number | null;
+}
+
+/** W2 — an undelivered cross-machine instruction. */
+export interface PendingInstruction {
+  docId: string;
+  targetAgentId: string;
+  message: string;
+  createdAtMs: number;
 }
 
 export interface WatchdogConfig {
@@ -123,6 +217,15 @@ export interface WatchdogConfig {
   /** Exponential-backoff base / ceiling between respawns (ms). */
   backoffBaseMs: number;
   backoffMaxMs: number;
+  /** W3: how recently the original worker must have committed/logged/touched its
+   * worktree to count as "alive" and cancel a respawn. */
+  freshnessGraceMs: number;
+  /** W5: how long a dead-assignee REVIEW ticket may sit before it's surfaced,
+   * and the minimum gap between re-surfacing the same ticket. */
+  reviewStaleMs: number;
+  /** W2: how long a pending instruction may stay undelivered before the
+   * watchdog force-delivers it via direct PTY write. */
+  pendingFallbackMs: number;
 }
 
 export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
@@ -136,6 +239,9 @@ export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
   maxRespawns: 3,
   backoffBaseMs: 5_000,
   backoffMaxMs: 120_000,
+  freshnessGraceMs: 180_000, // 3 min — a live worker commits/logs within this
+  reviewStaleMs: 14_400_000, // 4 h — dead-assignee REVIEW grace before surfacing
+  pendingFallbackMs: 45_000, // 45 s — undelivered instruction → PTY-direct
 };
 
 function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
@@ -171,6 +277,21 @@ export function resolveWatchdogConfig(
       d.backoffBaseMs,
     ),
     backoffMaxMs: intEnv(env, "MARBLO_WATCHDOG_BACKOFF_MAX_MS", d.backoffMaxMs),
+    freshnessGraceMs: intEnv(
+      env,
+      "MARBLO_WATCHDOG_FRESHNESS_MS",
+      d.freshnessGraceMs,
+    ),
+    reviewStaleMs: intEnv(
+      env,
+      "MARBLO_WATCHDOG_REVIEW_STALE_MS",
+      d.reviewStaleMs,
+    ),
+    pendingFallbackMs: intEnv(
+      env,
+      "MARBLO_WATCHDOG_PENDING_FALLBACK_MS",
+      d.pendingFallbackMs,
+    ),
   };
 }
 
@@ -185,6 +306,87 @@ interface RecoveryState {
   stuckAtActivityMs: number;
   /** Respawn budget spent — stop touching the ticket. */
   exhausted: boolean;
+  /** W4: a model/host re-route was already attempted once (so exhaustion only
+   * escalates to a human AFTER a re-route, and the re-route can't loop). */
+  rerouted: boolean;
+}
+
+/** W3 — interpret the false-positive-respawn guards. Pure: given the three
+ * "someone else is handling it / already done" signals, decide whether to stand
+ * down instead of nudging/respawning. Any true signal cancels recovery. */
+export function evaluateRespawnGuard(input: {
+  /** Result of isTaskStillRecoverable (undefined when the probe wasn't run). */
+  stillRecoverable?: boolean;
+  /** Result of probeFreshness (undefined when not run / no opinion). */
+  fresh?: boolean;
+  freshReason?: string;
+  /** Result of hasLiveWorkerForTask. */
+  liveWorkerBound?: boolean;
+}): { standDown: boolean; reason: string } {
+  if (input.stillRecoverable === false) {
+    return {
+      standDown: true,
+      reason:
+        "bound task already terminal (REVIEW/DONE/…) — nothing to recover",
+    };
+  }
+  if (input.liveWorkerBound === true) {
+    return {
+      standDown: true,
+      reason: "a live agent is already bound to this task — no duplicate spawn",
+    };
+  }
+  if (input.fresh === true) {
+    return {
+      standDown: true,
+      reason: `original worker is fresh (${input.freshReason ?? "recent activity"}) — stand down`,
+    };
+  }
+  return { standDown: false, reason: "" };
+}
+
+/** W6 — interpret the scope/host probe. Pure. */
+export function interpretScopeHostProbe(
+  probe: { action: "proceed" | "redispatch" | "block"; reason: string } | null,
+): {
+  blockSpawn: boolean;
+  action: "proceed" | "redispatch" | "block";
+  reason: string;
+} {
+  if (!probe || probe.action === "proceed") {
+    return {
+      blockSpawn: false,
+      action: "proceed",
+      reason: probe?.reason ?? "",
+    };
+  }
+  return { blockSpawn: true, action: probe.action, reason: probe.reason };
+}
+
+/** W5 — select the REVIEW tickets that are genuinely stale: assignee dead AND
+ * last activity older than the threshold. Pure filter over the candidate list.
+ * A REVIEW with a live assignee, or one that was just submitted, is excluded so
+ * normal review flow isn't flagged as noise. */
+export function selectStaleReviews(
+  candidates: StaleReviewTicket[],
+  now: number,
+  thresholdMs: number,
+): StaleReviewTicket[] {
+  return candidates.filter((c) => {
+    if (!c.assigneeDead) return false;
+    const age = now - (c.lastActivityAtMs ?? 0);
+    return age >= thresholdMs;
+  });
+}
+
+/** W2 — select undelivered instructions old enough to force-deliver via direct
+ * PTY write. Pure filter. */
+export function selectStalePendingForFallback(
+  list: PendingInstruction[],
+  now: number,
+  thresholdMs: number,
+): PendingInstruction[] {
+  return list.filter((p) => now - p.createdAtMs >= thresholdMs);
 }
 
 function buildBoardNudge(ticket: WatchdogTicket): string {
@@ -280,6 +482,12 @@ export class AgentWatchdog {
     string,
     { atMs: number; baselineActivityMs: number }
   >();
+  /** W5: last epoch-ms each REVIEW ticket was surfaced, so re-surfacing is rate
+   * limited to once per reviewStaleMs instead of every sweep. */
+  private reviewEscalatedAt = new Map<string, number>();
+  /** W2: pending-instruction doc ids already force-delivered this process, so a
+   * fallback isn't attempted twice while the isDelivered flip propagates. */
+  private pendingAttempted = new Set<string>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private sweeping = false;
 
@@ -322,6 +530,8 @@ export class AgentWatchdog {
     }
     this.states.clear();
     this.firstSeen.clear();
+    this.reviewEscalatedAt.clear();
+    this.pendingAttempted.clear();
     this.log("stopped");
   }
 
@@ -352,10 +562,137 @@ export class AgentWatchdog {
       for (const taskId of [...this.firstSeen.keys()]) {
         if (!seen.has(taskId)) this.firstSeen.delete(taskId);
       }
+      // W2 + W5 run alongside the active-ticket sweep. Isolated so a failure in
+      // one never aborts the others (all best-effort).
+      await this.sweepPendingInstructions();
+      await this.sweepStaleReviews();
     } catch (err) {
       this.log("sweep failed (best-effort)", { err: String(err) });
     } finally {
       this.sweeping = false;
+    }
+  }
+
+  /**
+   * W2 — undelivered pending-instruction fallback. The Firestore listener→PTY
+   * delivery depends on an attached listener; a turn-ended idle session can miss
+   * it, stranding the orchestrator's follow-up for 25-50 min (reuse_agent's
+   * direct PTY write always worked). Here the watchdog force-delivers any
+   * instruction that has stayed undelivered past pendingFallbackMs by writing it
+   * straight to the locally-hosted agent's PTY, then flips isDelivered.
+   */
+  private async sweepPendingInstructions(): Promise<void> {
+    if (
+      !this.deps.listUndeliveredInstructions ||
+      !this.deps.deliverInstructionDirect
+    ) {
+      return;
+    }
+    let list: PendingInstruction[] = [];
+    try {
+      list = await this.deps.listUndeliveredInstructions();
+    } catch (err) {
+      this.log("listUndeliveredInstructions failed (best-effort)", {
+        err: String(err),
+      });
+      return;
+    }
+    const now = this.now();
+    const stale = selectStalePendingForFallback(
+      list,
+      now,
+      this.cfg.pendingFallbackMs,
+    );
+    for (const p of stale) {
+      if (this.pendingAttempted.has(p.docId)) continue;
+      let delivered = false;
+      try {
+        delivered = this.deps.deliverInstructionDirect(
+          p.targetAgentId,
+          p.message,
+        );
+      } catch (err) {
+        this.log("deliverInstructionDirect threw (best-effort)", {
+          docId: p.docId,
+          err: String(err),
+        });
+      }
+      if (!delivered) continue; // agent not hosted here — leave for its host
+      this.pendingAttempted.add(p.docId);
+      try {
+        await this.deps.markInstructionDelivered?.(p.docId);
+      } catch (err) {
+        this.log("markInstructionDelivered threw (best-effort)", {
+          docId: p.docId,
+          err: String(err),
+        });
+      }
+      this.log("pending-fallback delivered", {
+        docId: p.docId,
+        agentId: p.targetAgentId,
+        ageMs: now - p.createdAtMs,
+      });
+    }
+  }
+
+  /**
+   * W5 — stale-REVIEW sweep. The main sweep excludes REVIEW as terminal, so a
+   * ticket whose reviewer/assignee died (a foreign antigravity assignee, or a
+   * reaped agent) waits forever. This surfaces REVIEW tickets whose assignee is
+   * dead AND whose last review activity is older than reviewStaleMs, rate-
+   * limited to once per reviewStaleMs per ticket.
+   */
+  private async sweepStaleReviews(): Promise<void> {
+    if (
+      !this.deps.listStaleReviewCandidates ||
+      !this.deps.escalateStaleReview
+    ) {
+      return;
+    }
+    let candidates: StaleReviewTicket[] = [];
+    try {
+      candidates = await this.deps.listStaleReviewCandidates();
+    } catch (err) {
+      this.log("listStaleReviewCandidates failed (best-effort)", {
+        err: String(err),
+      });
+      return;
+    }
+    const now = this.now();
+    const stale = selectStaleReviews(candidates, now, this.cfg.reviewStaleMs);
+    const liveIds = new Set(stale.map((s) => s.taskId));
+    // Drop cooldown memory for tickets no longer stale (reviewed / reassigned).
+    for (const id of [...this.reviewEscalatedAt.keys()]) {
+      if (!liveIds.has(id)) this.reviewEscalatedAt.delete(id);
+    }
+    for (const rev of stale) {
+      const last = this.reviewEscalatedAt.get(rev.taskId);
+      // Rate-limit ONLY re-surfacing (a prior escalation exists). The first
+      // surface must always fire — `now - 0` would spuriously look "recent".
+      if (last !== undefined && now - last < this.cfg.reviewStaleMs) continue;
+      this.reviewEscalatedAt.set(rev.taskId, now);
+      const ageH = Math.round(
+        (now - (rev.lastActivityAtMs ?? now)) / 3_600_000,
+      );
+      const detail =
+        `REVIEW ${rev.taskId} "${rev.title ?? ""}" assignee ` +
+        `${rev.assigneeAgentId ?? "(none)"} is dead/foreign and no review ` +
+        `activity for ~${ageH}h — needs review/merge or re-routing`;
+      this.deps.escalateStaleReview(rev, detail);
+      this.deps.recordRecovery?.(
+        {
+          taskId: rev.taskId,
+          projectId: rev.projectId,
+          status: "CLAIMED",
+          role: rev.role ?? "backend",
+          agentId: rev.assigneeAgentId,
+          lastActivityAtMs: rev.lastActivityAtMs,
+          title: rev.title,
+        },
+        "review-stale",
+        detail,
+      );
+      this.log("review-stale surfaced", { taskId: rev.taskId, ageH });
     }
   }
 
@@ -433,9 +770,61 @@ export class AgentWatchdog {
       cooldownUntilMs: 0,
       stuckAtActivityMs: 0,
       exhausted: false,
+      rerouted: false,
     };
     if (!state) this.states.set(ticket.taskId, st);
     if (now < st.cooldownUntilMs) return;
+
+    // ── W3: false-positive-respawn guard ──────────────────────
+    // Before ANY recovery action, confirm the ticket really needs it. Even when
+    // the recorded agentId looks dead/silent, the ORIGINAL worker may be alive
+    // under a different name and actively committing (the web-guide-page 3/3
+    // exhausted false alarm). Ask the injected probes; if any says "handled",
+    // stand down and drop the accrued budget so a later genuine stall starts
+    // fresh. Guards are optional — absent deps ⇒ legacy behavior.
+    if (
+      this.deps.isTaskStillRecoverable ||
+      this.deps.probeFreshness ||
+      this.deps.hasLiveWorkerForTask
+    ) {
+      const stillRecoverable = this.deps.isTaskStillRecoverable
+        ? await this.deps.isTaskStillRecoverable(ticket.taskId)
+        : undefined;
+      const liveWorkerBound = this.deps.hasLiveWorkerForTask
+        ? this.deps.hasLiveWorkerForTask(ticket)
+        : undefined;
+      // Only pay for the freshness probe if the cheaper signals didn't already
+      // decide to stand down.
+      let fresh: boolean | undefined;
+      let freshReason: string | undefined;
+      if (
+        stillRecoverable !== false &&
+        liveWorkerBound !== true &&
+        this.deps.probeFreshness
+      ) {
+        const p = await this.deps.probeFreshness(ticket);
+        if (p) {
+          fresh = p.fresh;
+          freshReason = p.reason;
+        }
+      }
+      const guard = evaluateRespawnGuard({
+        stillRecoverable,
+        fresh,
+        freshReason,
+        liveWorkerBound,
+      });
+      if (guard.standDown) {
+        this.states.delete(ticket.taskId);
+        this.deps.recordRecovery?.(ticket, "stand-down", guard.reason);
+        this.log("stand-down (false-positive guard)", {
+          taskId: ticket.taskId,
+          agentId: ticket.agentId,
+          reason: guard.reason,
+        });
+        return;
+      }
+    }
 
     // A born-dead ticket (never produced first activity) skips nudging — a
     // worker that never started won't answer — and respawns directly.
@@ -443,19 +832,107 @@ export class AgentWatchdog {
       dead || noFirstActivity || st.nudges >= this.cfg.maxNudges;
     if (mustRespawn) {
       if (st.respawns >= this.cfg.maxRespawns) {
+        // ── W4: real escalation instead of a log-only dead-end ──
+        // Before declaring "needs human attention", try ONE model/host re-route
+        // (the exhausted attempts may all have failed for a host/model reason,
+        // not a genuinely-broken ticket). Only after that — or if no re-route is
+        // wired — fire a REAL escalation (orch PTY nudge + Telegram).
+        if (!st.rerouted && this.deps.rerouteForTicket) {
+          let rerouted = false;
+          try {
+            rerouted = await this.deps.rerouteForTicket(ticket);
+          } catch (err) {
+            this.log("reroute threw (best-effort)", {
+              taskId: ticket.taskId,
+              err: String(err),
+            });
+          }
+          st.rerouted = true;
+          if (rerouted) {
+            // Give the re-routed worker a fresh first-activity window + backoff
+            // before it can be judged stuck again.
+            st.cooldownUntilMs = now + this.cfg.backoffMaxMs;
+            st.stuckAtActivityMs = lastActiveMs;
+            this.firstSeen.set(ticket.taskId, {
+              atMs: now,
+              baselineActivityMs: lastActiveMs,
+            });
+            this.deps.recordRecovery?.(
+              ticket,
+              "reroute",
+              `respawn budget spent — re-routed to an alternate model/host once ` +
+                `before escalating`,
+            );
+            this.log("reroute", { taskId: ticket.taskId });
+            return;
+          }
+          // reroute didn't fire → fall through to escalate immediately.
+        }
         st.exhausted = true;
-        this.deps.recordRecovery?.(
-          ticket,
-          "exhausted",
-          `respawn budget spent (${st.respawns}/${this.cfg.maxRespawns}) — ` +
-            `giving up; needs human attention`,
-        );
+        const escalateDetail =
+          `respawn budget spent (${st.respawns}/${this.cfg.maxRespawns})` +
+          (st.rerouted ? " + re-route" : "") +
+          ` — needs human attention`;
+        this.deps.recordRecovery?.(ticket, "exhausted", escalateDetail);
+        // The actual wake: orch PTY + Telegram (no-op if unwired).
+        this.deps.escalate?.(ticket, escalateDetail);
+        if (this.deps.escalate) {
+          this.deps.recordRecovery?.(
+            ticket,
+            "escalated",
+            "orchestrator + Telegram notified",
+          );
+        }
         this.log("exhausted — giving up", {
           taskId: ticket.taskId,
           agentId: ticket.agentId,
           respawns: st.respawns,
+          rerouted: st.rerouted,
         });
         return;
+      }
+
+      // ── W6: cross-host / scope guard ──────────────────────────
+      // Before a respawn LANDS on this host, verify the ticket's scope files
+      // exist in the resolved cwd and the host constraint matches. A mis-route
+      // (music_composer/stock_analysis into an empty macOS worktree) must NOT
+      // write orphan code — hand it back to the origin host instead.
+      if (this.deps.probeScopeHost) {
+        let probe = null;
+        try {
+          probe = await this.deps.probeScopeHost(ticket);
+        } catch (err) {
+          this.log("probeScopeHost threw (best-effort)", {
+            taskId: ticket.taskId,
+            err: String(err),
+          });
+        }
+        const verdict = interpretScopeHostProbe(probe);
+        if (verdict.blockSpawn) {
+          try {
+            await this.deps.redispatchToOriginHost?.(ticket, verdict.reason);
+          } catch (err) {
+            this.log("redispatchToOriginHost threw (best-effort)", {
+              taskId: ticket.taskId,
+              err: String(err),
+            });
+          }
+          // Park the ticket so we don't respawn-loop on the wrong host; the
+          // origin host / orchestrator now owns it.
+          st.exhausted = true;
+          this.deps.recordRecovery?.(
+            ticket,
+            "misroute",
+            `${verdict.action}: ${verdict.reason} — handed back to origin host, ` +
+              `no spawn on this host (orphan-code guard)`,
+          );
+          this.log("misroute — spawn blocked", {
+            taskId: ticket.taskId,
+            action: verdict.action,
+            reason: verdict.reason,
+          });
+          return;
+        }
       }
       const reason = dead
         ? "dead"

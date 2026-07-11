@@ -2368,7 +2368,16 @@ export class BridgeServer {
 
       const nextStatus = params.status as AgentStatus;
       const nextTaskId = nextStatus === "working" ? undefined : null;
-      this.agentManager.setStatus(agent.id, nextStatus);
+      // W1: a demote to idle here is the worker reporting its bound task
+      // terminal (submit_for_review / update_task_status). Route it through
+      // markTurnComplete so the trailing render flush of the finishing turn
+      // can't re-promote the agent to `working` and strand the slot at
+      // [working]. Any other transition uses the plain setStatus path.
+      if (nextStatus === "idle") {
+        this.agentManager.markTurnComplete(agent.id);
+      } else {
+        this.agentManager.setStatus(agent.id, nextStatus);
+      }
       this.syncAgentStatus(agent.id, nextStatus, nextTaskId);
       console.log(
         `[BridgeServer] Set agent "${agent.name}" status → ${params.status}`,
