@@ -77,6 +77,18 @@ export default function Footer() {
               </li>
               <li>
                 <Link
+                  href={`/${locale}/guide`}
+                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                >
+                  {locale === "ko"
+                    ? "시작 가이드"
+                    : locale === "ja"
+                    ? "スタートガイド"
+                    : "Getting Started"}
+                </Link>
+              </li>
+              <li>
+                <Link
                   href={`/${locale}/bugs`}
                   className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
                 >

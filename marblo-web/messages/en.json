@@ -11,7 +11,8 @@
     "logout": "Log out",
     "privacy": "Privacy",
     "blog": "Blog",
-    "faq": "FAQ"
+    "faq": "FAQ",
+    "guide": "Guide"
   },
   "hero": {
     "title": "One developer.\nAn entire team's output.",
@@ -737,5 +738,129 @@
         "a": "Get the macOS/Windows app from the download page. You can start right away on the Free plan."
       }
     ]
+  },
+  "guide": {
+    "meta": {
+      "title": "Marblo Getting Started Guide — From Install to Your First Mission",
+      "description": "A step-by-step guide to installing the Marblo desktop app and running your first mission with AI agents. On first launch the required CLIs install automatically — then just authenticate, pick a folder to auto-register your project and auto-start the orchestrator, run your first mission, and set up billing.",
+      "breadcrumbHome": "Home",
+      "breadcrumbGuide": "Getting Started",
+      "eyebrow": "Getting Started",
+      "heading": "Get started with Marblo",
+      "subheading": "A step-by-step guide from install to your first mission, in the order a new user should follow. Use the table of contents on the left to jump to any step.",
+      "tocTitle": "On this page",
+      "stepLabel": "Step {num} of {total}",
+      "stepNav": "Step navigation",
+      "prev": "Previous",
+      "next": "Next",
+      "copy": "Copy",
+      "copied": "Copied",
+      "screenshotComing": "Screenshot coming soon"
+    },
+    "install": {
+      "title": "Download, install & first launch",
+      "intro": "First, download and install the Marblo desktop app. macOS and Windows are supported, and the agent CLIs you need install automatically on first launch.",
+      "download": {
+        "title": "Get the app from the download page",
+        "body": "On the download page, grab the latest build for your operating system (macOS or Windows). Apple Silicon and Intel Macs, and Windows 10/11, are supported.",
+        "cta": "Open download page",
+        "alt": "The Marblo download page showing macOS and Windows build options"
+      },
+      "run": {
+        "title": "Install and launch for the first time",
+        "body": "Run the installer you downloaded. On macOS, open the .dmg and drag Marblo into your Applications folder; on Windows, follow the installer prompts.",
+        "warn": "On first launch you may see a macOS Gatekeeper or Windows SmartScreen warning. On macOS, choose 'Open Anyway' under System Settings > Privacy & Security; on Windows, choose 'More info > Run anyway'. The builds are properly signed.",
+        "alt": "The Marblo welcome screen shown on first launch"
+      },
+      "autocli": {
+        "title": "Required CLIs & Marblo MCP install automatically",
+        "body": "On first launch, Marblo automatically installs the required agent CLIs (Claude Code · Codex · Antigravity) and the Marblo MCP. There's no need to install anything from a Harness tab — just wait a moment for the install to finish.",
+        "note": "There's nothing to install yourself. In the next step you only need to log in (authenticate) to each CLI, and you're ready to go.",
+        "alt": "Marblo automatically installing the required CLIs and MCP on first launch"
+      }
+    },
+    "auth": {
+      "title": "Authenticate the CLIs (log in)",
+      "intro": "Because the required CLIs install automatically, your only setup task is to log in (authenticate) to each CLI.",
+      "claude": {
+        "title": "Log in to Claude Code",
+        "body": "Run the command below in a terminal and follow the prompt to sign in with your Anthropic account in the browser."
+      },
+      "codex": {
+        "title": "Log in to Codex",
+        "body": "Log in to Codex the same way, authenticating with your OpenAI account."
+      },
+      "antigravity": {
+        "title": "Authenticate Antigravity",
+        "body": "Authenticate Antigravity as well. Follow the sign-in prompt that appears the first time you use it to log in with your account.",
+        "note": "You only need to authenticate the CLIs you'll actually use. To run multiple agents at once, authenticate all of them."
+      },
+      "verify": {
+        "title": "Verify authentication",
+        "body": "Once you're signed in, each CLI switches to an authenticated state. If the status doesn't update, try restarting the app.",
+        "tip": "Credentials are stored locally by each CLI — Marblo never stores your account password or API keys, and everything runs on your own machine."
+      }
+    },
+    "project": {
+      "title": "Pick a folder — project auto-registers",
+      "intro": "Just pick the code folder you want to work in — with no confirmation step, the project registers automatically and the orchestrator starts alongside it.",
+      "add": {
+        "title": "Pick a folder = zero-click registration",
+        "body": "Select a local folder and Marblo registers it as a project right away. There's no 'Do you want to register?' confirmation click — picking the folder is all it takes. You can switch between registered projects from the sidebar.",
+        "tip": "A git repository is recommended. Marblo runs multiple agents safely in parallel using isolated git worktrees and tracks changes as diffs.",
+        "alt": "Picking a folder in Marblo auto-registers it as a project with zero clicks"
+      },
+      "orchestrator": {
+        "title": "The orchestrator auto-starts",
+        "body": "Once the project is registered, the orchestrator starts automatically and opens a dedicated terminal session. It analyzes your request, breaks it into tickets, and spawns agents with an assigned role (frontend, backend, etc.) and model (Claude, GPT/Codex, Antigravity).",
+        "note": "We recommend running a small task with a single agent first to get comfortable with the flow, then scaling up to multiple agents at once.",
+        "alt": "The orchestrator auto-starting the moment a project is registered"
+      }
+    },
+    "mission": {
+      "title": "Run your first mission / flow",
+      "intro": "Now it's time to give real work. Hand your first mission to the orchestrator.",
+      "create": {
+        "title": "Write a mission",
+        "body": "Describe the feature you want to build or the bug you want to fix in plain language to the orchestrator. It breaks this down into tickets on the kanban board.",
+        "alt": "A mission broken down into tickets on the kanban board"
+      },
+      "run": {
+        "title": "Run & track progress",
+        "body": "While agents work through tickets in parallel, you can track progress in real time on the kanban board. Each agent's terminal output is available in its own tab."
+      },
+      "review": {
+        "title": "The review gate",
+        "body": "Finished tickets move to the REVIEW state. A human confirms the changes and approves them before they're merged.",
+        "warn": "Always review the diff before merging an agent's changes. Marblo places a human REVIEW gate before merge so unintended changes don't land automatically."
+      }
+    },
+    "billing": {
+      "title": "Billing & plans",
+      "intro": "Marblo is free to start, and you can upgrade to Pro when you need more.",
+      "plans": {
+        "title": "Explore the plans",
+        "body": "The Free plan gives you the core features at no cost. Pro is a monthly subscription with additional features. See the pricing page for the differences.",
+        "note": "Usage fees for the agent CLIs (Claude, Codex, Antigravity) are billed separately to each provider account and are independent of your Marblo subscription.",
+        "cta": "See pricing"
+      },
+      "manage": {
+        "title": "Manage your subscription",
+        "body": "After signing in, view and manage your subscription status and billing history from your account.",
+        "cta": "Go to my account"
+      }
+    },
+    "faq": {
+      "title": "FAQ & help",
+      "intro": "If you get stuck, the resources below can help.",
+      "links": {
+        "title": "Learn more",
+        "body": "Find answers to common questions in the FAQ, and report a bug if something goes wrong. Take a look at the Founder program too.",
+        "faq": "Read the FAQ",
+        "founders": "Founder program",
+        "bugs": "Report a bug",
+        "download": "Download"
+      }
+    }
   }
 }

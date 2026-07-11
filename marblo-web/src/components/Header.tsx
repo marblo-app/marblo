@@ -61,6 +61,12 @@ export default function Header() {
               {t("download")}
             </Link>
             <Link
+              href={`/${locale}/guide`}
+              className="text-zinc-400 hover:text-white transition"
+            >
+              {t("guide")}
+            </Link>
+            <Link
               href={`/${locale}/lectures`}
               className="text-zinc-400 hover:text-white transition"
             >
@@ -147,6 +153,13 @@ export default function Header() {
               className="text-zinc-400 hover:text-white transition"
             >
               {t("download")}
+            </Link>
+            <Link
+              href={`/${locale}/guide`}
+              onClick={closeMobile}
+              className="text-zinc-400 hover:text-white transition"
+            >
+              {t("guide")}
             </Link>
             <Link
               href={`/${locale}/lectures`}

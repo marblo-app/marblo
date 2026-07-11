@@ -6,6 +6,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const locales = ["ko", "en", "ja"];
   const pages = [
     "",
+    "/guide",
     "/lectures",
     "/lectures/marblo-v3-masterclass",
     "/pricing",
