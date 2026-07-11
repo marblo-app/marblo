@@ -1288,14 +1288,19 @@ function requireAdmin(context: functions.https.CallableContext): void {
   }
 }
 
-async function grantFounderProTotalInternal(
+// 구독 doc 를 Pro/active 로 upsert 한다. 기간(currentPeriodEnd)은 기존 값과
+// targetEnd 중 더 나중을 유지 — 멱등: 이미 더 긴 기간이 있으면 절대 줄이지 않는다.
+// 베타 선정(1개월)·예외승인(3개월)·인터뷰(6개월) 부여가 전부 이 경로로 수렴한다.
+// paymentProvider="founder_grant" 로 표기해 갱신 크론(scheduledChargeSubscriptions,
+// paymentProvider=="toss" 만 대상)에서 제외되고, 만료는 scheduledExpireBetaGrants
+// 가 처리한다(1회성 부여, 자동 갱신 없음).
+async function upsertProSubscription(
   userId: string,
-  totalMonths: number,
+  targetEnd: Date,
   reason: string,
   grantStartedAt: Date,
 ): Promise<Date> {
   const now = new Date();
-  const targetEnd = addMonths(grantStartedAt, totalMonths);
   const subRef = db.collection("subscriptions").doc(userId);
   const snap = await subRef.get();
   const data = snap.data();
@@ -1323,6 +1328,31 @@ async function grantFounderProTotalInternal(
   }
   await subRef.set(payload, { merge: true });
   return periodEnd;
+}
+
+async function grantFounderProTotalInternal(
+  userId: string,
+  totalMonths: number,
+  reason: string,
+  grantStartedAt: Date,
+): Promise<Date> {
+  return upsertProSubscription(
+    userId,
+    addMonths(grantStartedAt, totalMonths),
+    reason,
+    grantStartedAt,
+  );
+}
+
+// 이메일로 Firebase Auth 계정의 uid 를 찾는다. 미가입/조회 실패는 null(비-throw) —
+// 선정(이메일 기준)은 가입 이전에도 일어나므로 uid 부재가 정상 흐름이다.
+async function lookupUidByEmail(email: string): Promise<string | null> {
+  try {
+    const user = await admin.auth().getUserByEmail(email);
+    return user.uid;
+  } catch {
+    return null;
+  }
 }
 
 // ─── 파운더 접근 안내 이메일 (SendGrid) ──────────────────────────────
@@ -1551,6 +1581,10 @@ async function markFounderSelectedInternal(
   email: string;
   emailSent: boolean;
   betaExpiresAt: string;
+  // 승인=Pro 부여. uid 를 즉시 찾아 구독을 만들었으면 true(subscriptionUid 세팅),
+  // 아직 미가입이면 false — 가입 시 grantBetaProOnSignup 이 뒤늦게 부여한다.
+  subscriptionGranted: boolean;
+  subscriptionUid: string | null;
 }> {
   const email = normalizeEmail(rawEmail);
   const ref = db.collection(FOUNDERS_COLLECTION).doc(email);
@@ -1592,11 +1626,39 @@ async function markFounderSelectedInternal(
     { merge: true },
   );
 
+  // 승인 = Pro 부여. 베타 유저가 즉시 Pro 기능을 쓰려면 subscriptions/{uid}
+  // (planType=pro, active) doc 이 있어야 한다(앱 subscriptionStore 게이팅). 이메일로
+  // 계정을 찾아 구독을 materialize 한다. 아직 미가입(선정→다운로드 예정)이면 uid 가
+  // 없으므로 founders/{email}.betaExpiresAt 를 SoT 로 남기고, 가입하는 순간
+  // grantBetaProOnSignup(auth onCreate) 이 뒤늦게 부여한다. 멱등: upsertProSubscription
+  // 이 기존 기간을 줄이지 않으므로 중복 승인/재선정도 이중부여가 아니다.
+  let subscriptionUid: string | null = null;
+  const uid = await lookupUidByEmail(email);
+  if (uid) {
+    await upsertProSubscription(
+      uid,
+      betaExpiresAt,
+      "beta_selected",
+      betaStartedAt,
+    );
+    subscriptionUid = uid;
+    await ref.set(
+      {
+        proSubscriptionUid: uid,
+        proSubscriptionEnd: admin.firestore.Timestamp.fromDate(betaExpiresAt),
+        proSubscriptionGrantedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+
   return {
     ok: true,
     email,
     emailSent,
     betaExpiresAt: betaExpiresAt.toISOString(),
+    subscriptionGranted: subscriptionUid !== null,
+    subscriptionUid,
   };
 }
 
@@ -3615,10 +3677,13 @@ async function handleTgSelect(
   const result = await markFounderSelectedInternal(email);
   await tgAnswerCallbackQuery(cqId, "선정 완료");
   if (messageId) {
+    const proNote = result.subscriptionGranted
+      ? "Pro 즉시부여"
+      : "Pro 가입시 자동부여";
     await tgEditMessageText(
       chatId,
       messageId,
-      `✅ 선정 (1개월, 접근이메일 ${
+      `✅ 선정 (1개월, ${proNote}, 접근이메일 ${
         result.emailSent ? "발송" : "발송 스킵"
       }) — ${email}\n처리: ${new Date().toISOString()}`,
     );
@@ -3802,3 +3867,91 @@ export const betaTelegramWebhook = functions.https.onRequest(
     res.status(200).send("ok");
   },
 );
+
+// ─── 트리거: 신규 가입 → 선정된 베타 파운더면 Pro 구독 materialize ─────
+//
+// 선정(markFounderSelected/텔레그램 [선정])은 이메일 기준이라, 유저가 아직
+// 미가입이면 uid 가 없어 subscriptions/{uid} 를 만들 수 없다. 선정 후 접근 이메일을
+// 받고 유저가 가입하는 것이 일반적 순서이므로, 가입하는 순간 이 트리거가
+// founders/{email} 을 조회해 베타/예외 부여 창(window)만큼 Pro 를 부여한다.
+// (선정 시점에 이미 계정이 있으면 markFounderSelectedInternal 이 즉시 부여하고,
+//  이 트리거는 그 케이스에서 발화하지 않는다 — 둘이 시점만 다른 동일 부여.)
+// non-throwing: 부여 실패가 가입 자체를 깨면 안 된다.
+export const grantBetaProOnSignup = functions.auth
+  .user()
+  .onCreate(async (user) => {
+    try {
+      if (!user.email) return;
+      const email = normalizeEmail(user.email);
+      const snap = await db.collection(FOUNDERS_COLLECTION).doc(email).get();
+      if (!snap.exists) return;
+      const fd = snap.data() || {};
+      // 선정 기준 = getMyFounderAccess 와 동일(rejected 아님 + accessGrantedAt 존재).
+      if (fd.status === "rejected" || !fd.accessGrantedAt) return;
+
+      const now = new Date();
+      const betaEnd =
+        fd.betaExpiresAt && typeof fd.betaExpiresAt.toDate === "function"
+          ? fd.betaExpiresAt.toDate()
+          : null;
+      const proEnd =
+        fd.proExpiresAt && typeof fd.proExpiresAt.toDate === "function"
+          ? fd.proExpiresAt.toDate()
+          : null;
+      // 부여 창 = 베타(1개월)·예외(3/6개월) 종료일 중 더 나중. 둘 다 과거면 스킵.
+      const windowEnd =
+        proEnd && (!betaEnd || proEnd > betaEnd) ? proEnd : betaEnd;
+      if (!windowEnd || windowEnd <= now) return;
+
+      await upsertProSubscription(user.uid, windowEnd, "beta_signup", now);
+      await snap.ref.set(
+        {
+          proSubscriptionUid: user.uid,
+          proSubscriptionEnd: admin.firestore.Timestamp.fromDate(windowEnd),
+          proSubscriptionGrantedAt:
+            admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.warn("[grantBetaProOnSignup] 부여 실패:", user.uid, err);
+    }
+  });
+
+// ─── 스케줄: 만료된 베타/파운더 부여(founder_grant) → free 강등 ────────
+//
+// 베타 Pro 는 1회성(자동 갱신 없음, scheduledChargeSubscriptions 는 toss 만 대상).
+// currentPeriodEnd 경과 후 아무도 status 를 내리지 않으면 영구 Pro 가 되므로, 이
+// 스윕이 만료된 founder_grant 구독의 status 를 canceled 로 내린다. 앱 getPlan 은
+// status!=='active' → free 이고 실시간 리스너로 즉시 반영되므로 별도 앱 변경 불필요.
+// 복합 인덱스 회피: paymentProvider 단일 동등 쿼리 + 코드 필터(기존 크론 선례).
+export const scheduledExpireBetaGrants = functions.pubsub
+  .schedule("15 4 * * *")
+  .timeZone("Asia/Seoul")
+  .onRun(async () => {
+    const nowMs = Date.now();
+    const snap = await db
+      .collection("subscriptions")
+      .where("paymentProvider", "==", "founder_grant")
+      .get();
+    let expired = 0;
+    for (const doc of snap.docs) {
+      const sub = doc.data();
+      if (sub.status !== "active") continue;
+      const endMs = tsToMillis(sub.currentPeriodEnd);
+      if (endMs == null || endMs > nowMs) continue;
+      await doc.ref.set(
+        {
+          status: "canceled",
+          canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      expired++;
+    }
+    console.log(
+      `[expireBetaGrants] scanned=${snap.size} expired→canceled=${expired}`,
+    );
+    return null;
+  });
