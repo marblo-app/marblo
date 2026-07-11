@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   ArrowRight,
   ChevronRight,
-  ImageIcon,
   Info,
   Lightbulb,
 } from "lucide-react";
@@ -22,6 +21,7 @@ import GuideSidebar, {
   type GuideSidebarSection,
 } from "@/components/guide/GuideSidebar";
 import CopyButton from "@/components/guide/CopyButton";
+import GuideShot from "@/components/guide/GuideShot";
 
 export async function generateMetadata({
   params,
@@ -117,22 +117,16 @@ function renderBlock(
     }
 
     case "shot":
-      // Placeholder slot — real screenshots are dropped in later by the team.
-      // Renders alt text + a "coming soon" label instead of a broken <img>.
+      // Hand-authored SVG mockups of the desktop app UI live under
+      // /public/images/guide. GuideShot renders the real asset and falls back
+      // to the original dashed "coming soon" placeholder on load error.
       return (
-        <figure
+        <GuideShot
           key={key}
-          data-screenshot-src={block.src}
-          className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-700 bg-zinc-900/40 px-6 py-10 text-center"
-        >
-          <ImageIcon className="h-7 w-7 text-zinc-600" aria-hidden />
-          <figcaption className="text-sm text-zinc-500">
-            {t(block.altKey)}
-          </figcaption>
-          <span className="text-xs text-zinc-600">
-            {t("meta.screenshotComing")}
-          </span>
-        </figure>
+          src={block.src}
+          alt={t(block.altKey)}
+          comingLabel={t("meta.screenshotComing")}
+        />
       );
 
     case "links":

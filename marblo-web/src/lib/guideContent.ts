@@ -95,7 +95,7 @@ export const GUIDE_STEPS: GuideStep[] = [
           },
           {
             kind: "shot",
-            src: "/images/guide/install-download.png",
+            src: "/images/guide/install-download.svg",
             altKey: "install.download.alt",
           },
         ],
@@ -108,7 +108,7 @@ export const GUIDE_STEPS: GuideStep[] = [
           { kind: "callout", variant: "warn", key: "install.run.warn" },
           {
             kind: "shot",
-            src: "/images/guide/install-run.png",
+            src: "/images/guide/install-run.svg",
             altKey: "install.run.alt",
           },
         ],
@@ -121,7 +121,7 @@ export const GUIDE_STEPS: GuideStep[] = [
           { kind: "callout", variant: "note", key: "install.autocli.note" },
           {
             kind: "shot",
-            src: "/images/guide/install-autocli.png",
+            src: "/images/guide/install-autocli.svg",
             altKey: "install.autocli.alt",
           },
         ],
@@ -186,7 +186,7 @@ export const GUIDE_STEPS: GuideStep[] = [
           { kind: "callout", variant: "tip", key: "project.add.tip" },
           {
             kind: "shot",
-            src: "/images/guide/project-add.png",
+            src: "/images/guide/project-add.svg",
             altKey: "project.add.alt",
           },
         ],
@@ -203,7 +203,7 @@ export const GUIDE_STEPS: GuideStep[] = [
           },
           {
             kind: "shot",
-            src: "/images/guide/project-orchestrator.png",
+            src: "/images/guide/project-orchestrator.svg",
             altKey: "project.orchestrator.alt",
           },
         ],
@@ -223,7 +223,7 @@ export const GUIDE_STEPS: GuideStep[] = [
           { kind: "text", key: "mission.create.body" },
           {
             kind: "shot",
-            src: "/images/guide/mission-create.png",
+            src: "/images/guide/mission-create.svg",
             altKey: "mission.create.alt",
           },
         ],
