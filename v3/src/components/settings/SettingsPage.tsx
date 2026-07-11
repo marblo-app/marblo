@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
+import { useUiStore } from "../../stores/uiStore";
 import { useTranslation } from "../../lib/i18n";
 import { BillingPage } from "./BillingPage";
 import { TeamManagement } from "./TeamManagement";
@@ -68,6 +69,17 @@ export function SettingsPage() {
   const currentProject = useProjectStore((s) => s.currentProject);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
+
+  // Deep-link from the Upgrade modal (or any caller) to a specific section,
+  // e.g. Billing. Consume the latch whenever it appears so the sub-tab is
+  // selected even if this page is already mounted.
+  const pendingSettingsSection = useUiStore((s) => s.pendingSettingsSection);
+  const consumeSettingsSection = useUiStore((s) => s.consumeSettingsSection);
+  useEffect(() => {
+    if (!pendingSettingsSection) return;
+    setActiveTab(pendingSettingsSection as SettingsTab);
+    consumeSettingsSection();
+  }, [pendingSettingsSection, consumeSettingsSection]);
 
   const plan = getPlan();
 

@@ -1,11 +1,12 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
-import type { PlanType, PlanLimits, Subscription } from "../types/subscription";
+import type { PlanType, Subscription } from "../types/subscription";
 import {
   subscribeToDocument,
   getDocument,
   convertTimestamps,
 } from "./firestore";
+import { getPlanLimits } from "../lib/planLimits";
 import { t } from "../lib/i18n";
 
 const COLLECTION = "subscriptions";
@@ -16,63 +17,17 @@ function toSubscription(raw: Record<string, unknown>): Subscription {
 }
 
 // ─── Plan Limits ─────────────────────────────────────────────────
-// 마스터플랜 §2.2 SKU 기능 매트릭스 기준.
-// Pro부터 프로젝트/에이전트 무제한 (개인 무제한 정액).
-// 동시 에이전트 throttle(Free 2 / Pro 5)은 lib/planLimits.ts에서 별도 관리.
-const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
-  free: {
-    maxProjects: 1,
-    maxAgents: 2,
-    hasFlowEditor: false,
-    hasTeamCollab: false,
-    hasOrchestrator: false,
-    hasPrioritySupport: false,
-  },
-  pro: {
-    maxProjects: Infinity,
-    maxAgents: Infinity,
-    hasFlowEditor: true,
-    hasTeamCollab: false,
-    hasOrchestrator: true,
-    hasPrioritySupport: false,
-  },
-  team: {
-    maxProjects: Infinity,
-    maxAgents: Infinity,
-    hasFlowEditor: true,
-    hasTeamCollab: true,
-    hasOrchestrator: true,
-    hasPrioritySupport: false, // Team Plus부터 우선 지원
-  },
-  team_plus: {
-    maxProjects: Infinity,
-    maxAgents: Infinity,
-    hasFlowEditor: true,
-    hasTeamCollab: true,
-    hasOrchestrator: true,
-    hasPrioritySupport: true,
-  },
-  enterprise: {
-    maxProjects: Infinity,
-    maxAgents: Infinity,
-    hasFlowEditor: true,
-    hasTeamCollab: true,
-    hasOrchestrator: true,
-    hasPrioritySupport: true,
-  },
-};
-
-export function getPlanLimits(planType: PlanType): PlanLimits {
-  return PLAN_LIMITS[planType];
-}
+// 값 단일소스는 lib/planLimits.ts. 여기서는 재수출만 한다 (drift 방지).
+// 프로젝트/에이전트 수 한도와 feature 매트릭스가 전부 그쪽에 있다.
+export { getPlanLimits } from "../lib/planLimits";
 
 // ─── Feature Gating ──────────────────────────────────────────────
 export function canUseFeature(
   subscription: Subscription | null,
-  feature: string
+  feature: string,
 ): boolean {
   const plan = subscription?.planType ?? "free";
-  const limits = PLAN_LIMITS[plan];
+  const limits = getPlanLimits(plan);
 
   switch (feature) {
     case "flowEditor":
@@ -101,7 +56,7 @@ export const PLAN_PRICES_KRW: Record<Exclude<PlanType, "free">, number> = {
 
 // ─── Subscription CRUD ───────────────────────────────────────────
 export async function getSubscription(
-  userId: string
+  userId: string,
 ): Promise<Subscription | null> {
   const raw = await getDocument<Record<string, unknown>>(COLLECTION, userId);
   return raw ? toSubscription(raw) : null;
@@ -109,14 +64,14 @@ export async function getSubscription(
 
 export function subscribeToSubscription(
   userId: string,
-  callback: (sub: Subscription | null) => void
+  callback: (sub: Subscription | null) => void,
 ): () => void {
   return subscribeToDocument<Record<string, unknown>>(
     COLLECTION,
     userId,
     (raw) => {
       callback(raw ? toSubscription(raw) : null);
-    }
+    },
   );
 }
 
@@ -172,7 +127,7 @@ export function loadPaddleSDK(): Promise<void> {
 export async function openPaddleCheckout(
   userId: string,
   priceId: string,
-  email?: string
+  email?: string,
 ): Promise<void> {
   await loadPaddleSDK();
 
@@ -195,7 +150,7 @@ export async function openPaddleCheckout(
 export async function cancelPaddleSubscription(userId: string): Promise<void> {
   const fn = httpsCallable<{ userId: string }, { success: boolean }>(
     functions,
-    "cancelPaddleSubscription"
+    "cancelPaddleSubscription",
   );
   await fn({ userId });
 }
@@ -203,7 +158,7 @@ export async function cancelPaddleSubscription(userId: string): Promise<void> {
 // ─── TossPayments (국내 결제) ────────────────────────────────────
 export async function createTossCheckout(
   userId: string,
-  planType: PlanType
+  planType: PlanType,
 ): Promise<{ paymentKey: string; orderId: string; amount: number }> {
   const fn = httpsCallable<
     { userId: string; planType: PlanType },
@@ -217,7 +172,7 @@ export async function createTossCheckout(
 export async function confirmTossPayment(
   orderId: string,
   paymentKey: string,
-  amount: number
+  amount: number,
 ): Promise<void> {
   const fn = httpsCallable<
     { orderId: string; paymentKey: string; amount: number },

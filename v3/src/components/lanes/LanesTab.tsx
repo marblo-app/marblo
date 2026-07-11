@@ -5,6 +5,7 @@ import { useEditorStore } from "../../stores/editorStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useAgentStore } from "../../stores/agentStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
+import { useUiStore } from "../../stores/uiStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useAgentSessionMap } from "../../stores/agentSessionMap";
@@ -197,6 +198,9 @@ export function LanesTab() {
     const spawnCheck = checkAgentSpawn(plan, agents);
     if (!spawnCheck.allowed) {
       setError(spawnCheck.reason ?? t("lanes.error.agentLimit"));
+      // Free hit the fair-use agent cap → also open the upgrade modal
+      // (routes to Settings → Billing).
+      useUiStore.getState().showUpgrade("agents", "pro");
       throw new Error("agent limit reached");
     }
     // 레인마다 구별되는 contextId 를 규약("lane:<laneId>")대로 부여한다. task 생성

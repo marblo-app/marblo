@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Subscription, PlanType } from "../types/subscription";
 import { subscribeToDocument, convertTimestamps } from "../services/firestore";
+import { planCanUse } from "../lib/planLimits";
 
 const COLLECTION = "subscriptions";
 const DATE_FIELDS = ["currentPeriodStart", "currentPeriodEnd", "createdAt"];
@@ -9,63 +10,9 @@ function toSubscription(raw: Record<string, unknown>): Subscription {
   return convertTimestamps<Subscription>(raw, DATE_FIELDS);
 }
 
-// Feature gates by plan. 마스터플랜 §2.2 SKU 기능 매트릭스 기준.
-// 신규 feature 추가 시 5개 tier 전부 명시 (TS Record가 누락 컴파일 에러).
-const PLAN_FEATURES: Record<PlanType, Set<string>> = {
-  free: new Set(["board", "terminal", "editor"]),
-  pro: new Set([
-    "board",
-    "terminal",
-    "editor",
-    "agents",
-    "flows",
-    "missions",
-    "unlimited_projects",
-  ]),
-  team: new Set([
-    "board",
-    "terminal",
-    "editor",
-    "agents",
-    "flows",
-    "missions",
-    "unlimited_projects",
-    "team_members",
-    "priority_support",
-  ]),
-  team_plus: new Set([
-    "board",
-    "terminal",
-    "editor",
-    "agents",
-    "flows",
-    "missions",
-    "unlimited_projects",
-    "team_members",
-    "priority_support",
-    "sso",
-    "audit_logs",
-    "slack_support",
-  ]),
-  enterprise: new Set([
-    "board",
-    "terminal",
-    "editor",
-    "agents",
-    "flows",
-    "missions",
-    "unlimited_projects",
-    "team_members",
-    "priority_support",
-    "sso",
-    "audit_logs",
-    "slack_support",
-    "saml",
-    "on_prem",
-    "sla",
-    "dedicated_manager",
-  ]),
-};
+// Feature gating is single-sourced in lib/planLimits.ts (PLAN_FEATURES). This
+// store just resolves the current plan and defers the lookup to `planCanUse`,
+// so numbers (planLimits) and features stay in one place — no drift.
 
 interface SubscriptionState {
   subscription: Subscription | null;
@@ -96,7 +43,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       (doc) => {
         const subscription = doc ? toSubscription(doc) : null;
         set({ subscription, loading: false });
-      }
+      },
     );
   },
 
@@ -107,7 +54,6 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   },
 
   canUse: (feature: string) => {
-    const plan = get().getPlan();
-    return PLAN_FEATURES[plan]?.has(feature) ?? false;
+    return planCanUse(get().getPlan(), feature);
   },
 }));

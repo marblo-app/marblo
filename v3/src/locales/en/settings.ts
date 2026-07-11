@@ -66,6 +66,8 @@ export const settings: Record<keyof typeof koSettings, string> = {
   "settings.upgrade.feature.teamCollab": "Team collaboration",
   "settings.upgrade.feature.orchestrator": "Orchestrator",
   "settings.upgrade.feature.prioritySupport": "Priority support",
+  "settings.upgrade.feature.projects": "More projects",
+  "settings.upgrade.feature.agents": "Unlimited agents",
 
   // ── Privacy settings (PrivacySettings) ───────────────────
   "settings.privacy.heading": "Privacy",

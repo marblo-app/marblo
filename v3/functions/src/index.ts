@@ -1797,6 +1797,84 @@ export const sendApplyConfirmOnWaitlist = functions.firestore
     }
   });
 
+// ═══════════════════════════════════════════════════════════════════
+// Project-count plan enforcement (서버측 방어)
+// ═══════════════════════════════════════════════════════════════════
+// 클라이언트 게이팅(projectStore.createProject / FileTree)을 직접 Firestore
+// write 로 우회하는 것을 서버에서 되돌린다. Free 플랜 소유자가 한도(1개)를 넘겨
+// 프로젝트를 만들면 초과분(가장 최근 것)을 삭제한다. 유료 플랜은 무제한이라
+// 손대지 않는다. 트리거 재시도 폭주 방지를 위해 절대 throw 하지 않는다.
+//
+// 값은 src/lib/planLimits.ts(PLAN_LIMITS.maxProjects)와 정합을 맞춘다.
+// (functions 는 렌더러 src 를 import 하지 않으므로 여기서 상수를 재선언한다 —
+//  drift 시 두 곳을 함께 갱신할 것.)
+const PROJECT_LIMIT_BY_PLAN: Record<string, number> = {
+  free: 1,
+  // pro / team / team_plus / enterprise = 무제한 (미정의 → 아래에서 skip)
+};
+
+function millisOf(v: unknown): number {
+  // Firestore Timestamp | Date | number 를 모두 ms 로. 값 없으면 0(=가장 오래된
+  // 것으로 취급 → 정당한 첫 프로젝트를 우선 보존).
+  if (!v) return 0;
+  if (typeof v === "number") return v;
+  if (v instanceof Date) return v.getTime();
+  const ts = v as { toMillis?: () => number; seconds?: number };
+  if (typeof ts.toMillis === "function") return ts.toMillis();
+  if (typeof ts.seconds === "number") return ts.seconds * 1000;
+  return 0;
+}
+
+export const enforceProjectLimit = functions.firestore
+  .document("projects/{projectId}")
+  .onCreate(async (snap) => {
+    try {
+      const data = snap.data() || {};
+      const ownerId = typeof data.ownerId === "string" ? data.ownerId : "";
+      if (!ownerId) return;
+
+      // 소유자 플랜 조회. subscriptions/{uid} 가 status=active 일 때만 유료로 인정
+      // (렌더러 getPlan() 과 동일 규칙).
+      const subSnap = await db.collection("subscriptions").doc(ownerId).get();
+      const sub = subSnap.exists ? subSnap.data() || {} : {};
+      const plan =
+        sub.status === "active" && typeof sub.planType === "string"
+          ? (sub.planType as string)
+          : "free";
+
+      const limit = PROJECT_LIMIT_BY_PLAN[plan];
+      if (limit === undefined) return; // 무제한 플랜 → 방어 불필요
+
+      // 이 소유자의 모든 프로젝트를 createdAt 오름차순으로 정렬해, 앞의 `limit`
+      // 개만 유효로 본다. 방금 생성된 이 문서가 초과분이면 삭제한다. (오래된 것을
+      // 보존하므로 동시 생성/우회 시도에도 정당한 프로젝트가 살아남는다.)
+      const owned = await db
+        .collection("projects")
+        .where("ownerId", "==", ownerId)
+        .get();
+      if (owned.size <= limit) return; // 한도 이내
+
+      const sorted = owned.docs.slice().sort((a, b) => {
+        const am = millisOf(a.get("createdAt"));
+        const bm = millisOf(b.get("createdAt"));
+        if (am !== bm) return am - bm;
+        // createdAt 동률이면 문서 id 로 안정 정렬.
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+      const allowedIds = new Set(sorted.slice(0, limit).map((d) => d.id));
+      if (allowedIds.has(snap.id)) return; // 이 문서는 유효 범위 내
+
+      await snap.ref.delete();
+      console.warn(
+        `[enforceProjectLimit] ${plan} 한도(${limit}) 초과 프로젝트 삭제: ` +
+          `owner=${ownerId} project=${snap.id} (owned=${owned.size})`,
+      );
+    } catch (err) {
+      // 트리거 재시도 폭주 방지 — 모든 에러를 삼킨다.
+      console.warn("[enforceProjectLimit] 처리 실패:", snap.id, err);
+    }
+  });
+
 function parseFounderSurveyAnswers(raw: unknown): FounderSurveyAnswers {
   if (!raw || typeof raw !== "object") {
     throw new functions.https.HttpsError(

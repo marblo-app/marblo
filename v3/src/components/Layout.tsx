@@ -17,6 +17,7 @@ import { WorktreeTab } from "./tabs/WorktreeTab";
 import { WorkHistoryTab } from "./work-history/WorkHistoryTab";
 import { SettingsPage } from "./settings/SettingsPage";
 import { PlanGate } from "./settings/PlanGate";
+import { UpgradeModal } from "./settings/UpgradeModal";
 import { OrchestratorChat } from "./orchestrator/OrchestratorChat";
 import { ChatToastHost } from "./chat/ChatToastHost";
 import { BugReportNoticeToast } from "./chat/BugReportNoticeToast";
@@ -39,6 +40,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { useEditorStore } from "../stores/editorStore";
 import { useActivityStreamStore } from "../stores/activityStreamStore";
 import { useNavigationStore } from "../stores/navigationStore";
+import { useUiStore } from "../stores/uiStore";
 
 function GatedFlowsTab() {
   return (
@@ -146,6 +148,17 @@ export function Layout() {
       consumeJump();
     }
   }, [pendingJump, consumeJump]);
+
+  // Global upgrade modal + Settings-section routing (uiStore). When a plan
+  // limit is hit anywhere, `showUpgrade` sets `upgradeModal`; the modal's CTA
+  // requests the Billing section, which switches us to the Settings tab (the
+  // SettingsPage then selects the Billing sub-tab and clears the latch).
+  const upgradeModal = useUiStore((s) => s.upgradeModal);
+  const hideUpgrade = useUiStore((s) => s.hideUpgrade);
+  const pendingSettingsSection = useUiStore((s) => s.pendingSettingsSection);
+  useEffect(() => {
+    if (pendingSettingsSection) setActiveTab("settings");
+  }, [pendingSettingsSection]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
@@ -458,6 +471,18 @@ export function Layout() {
       )}
       {showHarnessStore && (
         <HarnessStore onClose={() => setShowHarnessStore(false)} />
+      )}
+
+      {/* Global plan-limit upgrade modal — triggered from anywhere (agent /
+          project limits) via uiStore.showUpgrade. Rendered once here so store
+          code (agentStore/projectStore/FileTree) can open it without holding
+          its own modal instance. Its CTA routes to Settings → Billing. */}
+      {upgradeModal && (
+        <UpgradeModal
+          feature={upgradeModal.feature}
+          requiredPlan={upgradeModal.requiredPlan}
+          onClose={hideUpgrade}
+        />
       )}
     </div>
   );

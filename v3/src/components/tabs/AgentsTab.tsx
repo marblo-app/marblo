@@ -7,6 +7,7 @@ import { useTaskStore } from "../../stores/taskStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
+import { useUiStore } from "../../stores/uiStore";
 import { useAuth } from "../../hooks/useAuth";
 import { checkAgentSpawn } from "../../lib/planLimits";
 import type { Agent, ModelType } from "../../types/agent";
@@ -78,10 +79,9 @@ export function AgentsTab() {
     const plan = useSubscriptionStore.getState().getPlan();
     const check = checkAgentSpawn(plan, agents);
     if (!check.allowed) {
-      // Inline alert is the simplest blocking UI from a callback. A toast
-      // would be nicer but Marblo doesn't have one yet; the message is
-      // also visible in the agent-store error state for the dashboard.
-      alert(check.reason ?? t("agents.tab.limitReached"));
+      // Free hit the fair-use agent cap → open the upgrade modal (routes to
+      // Settings → Billing) instead of a dead-end alert.
+      useUiStore.getState().showUpgrade("agents", "pro");
       return;
     }
     const agentData = {
@@ -170,7 +170,7 @@ export function AgentsTab() {
           loading={loading}
           onAddAgent={() => {
             if (atLimit) {
-              alert(throttle.reason ?? t("agents.tab.limitReached"));
+              useUiStore.getState().showUpgrade("agents", "pro");
               return;
             }
             setShowAddModal(true);

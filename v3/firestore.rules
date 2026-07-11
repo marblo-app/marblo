@@ -60,6 +60,11 @@ service cloud.firestore {
     }
 
     // ===== Projects =====
+    // 플랜별 프로젝트 수 한도(Free=1) 서버 방어:
+    //   Firestore 규칙은 소유자의 기존 프로젝트 개수를 셀 수 없으므로(집계 불가),
+    //   개수 한도는 functions 의 onCreate 트리거 `enforceProjectLimit` 가 강제한다
+    //   — Free 소유자가 2번째+ 프로젝트를 직접 write 로 만들면 즉시 삭제된다.
+    //   여기서는 소유자/멤버 무결성만 검사한다(우회 write 도 ownerId 위조는 불가).
     match /projects/{projectId} {
       allow read: if isAuthenticated()
         && request.auth.uid in resource.data.members;

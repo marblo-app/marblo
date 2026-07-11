@@ -64,6 +64,8 @@ export const settings = {
   "settings.upgrade.feature.teamCollab": "팀 협업",
   "settings.upgrade.feature.orchestrator": "오케스트레이터",
   "settings.upgrade.feature.prioritySupport": "우선 지원",
+  "settings.upgrade.feature.projects": "프로젝트 추가",
+  "settings.upgrade.feature.agents": "무제한 에이전트",
 
   // ── Privacy settings (PrivacySettings) ───────────────────
   "settings.privacy.heading": "Privacy",

@@ -1,12 +1,8 @@
-import { useState } from "react";
-import { useAuth } from "../../hooks/useAuth";
 import type { PlanType } from "../../types/subscription";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
-import {
-  openPaddleCheckout,
-  getPlanLimits,
-} from "../../services/billingService";
+import { getPlanLimits } from "../../services/billingService";
+import { useUiStore } from "../../stores/uiStore";
 
 interface UpgradeModalProps {
   feature: string;
@@ -37,6 +33,8 @@ const FEATURE_LABEL_KEYS: Record<string, MessageKey> = {
   teamCollab: "settings.upgrade.feature.teamCollab",
   orchestrator: "settings.upgrade.feature.orchestrator",
   prioritySupport: "settings.upgrade.feature.prioritySupport",
+  projects: "settings.upgrade.feature.projects",
+  agents: "settings.upgrade.feature.agents",
 };
 
 export function UpgradeModal({
@@ -45,29 +43,19 @@ export function UpgradeModal({
   onClose,
 }: UpgradeModalProps) {
   const { t } = useTranslation();
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
+  const openSettingsSection = useUiStore((s) => s.openSettingsSection);
 
   const requiredLimits = getPlanLimits(requiredPlan);
   const featureLabelKey = FEATURE_LABEL_KEYS[feature];
   const featureLabel = featureLabelKey ? t(featureLabelKey) : feature;
 
-  const handleUpgrade = async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const priceId =
-        import.meta.env[`VITE_PADDLE_${requiredPlan.toUpperCase()}_PRICE_ID`] ||
-        "";
-      await openPaddleCheckout(user.uid, priceId, user.email || undefined);
-      onClose();
-    } catch (err) {
-      if ((err as Error).message !== "결제 취소") {
-        console.error("Checkout 실패:", err);
-      }
-    } finally {
-      setLoading(false);
-    }
+  // Route to the in-app subscription page (Settings → Billing) rather than a
+  // direct Paddle popup. BillingPage owns plan selection + the Toss checkout
+  // path (Korea/beta launch is Toss-first). Layout switches to the Settings tab
+  // when a section is requested; SettingsPage selects the Billing sub-tab.
+  const handleUpgrade = () => {
+    openSettingsSection("billing");
+    onClose();
   };
 
   return (
@@ -173,14 +161,11 @@ export function UpgradeModal({
           </button>
           <button
             onClick={handleUpgrade}
-            disabled={loading}
-            className="flex-1 rounded bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="flex-1 rounded bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
-            {loading
-              ? t("settings.upgrade.processing")
-              : t("settings.upgrade.upgradeTo", {
-                  plan: PLAN_NAMES[requiredPlan],
-                })}
+            {t("settings.upgrade.upgradeTo", {
+              plan: PLAN_NAMES[requiredPlan],
+            })}
           </button>
         </div>
       </div>

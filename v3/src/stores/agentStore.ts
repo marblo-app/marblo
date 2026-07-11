@@ -8,6 +8,7 @@ import {
 import * as agentService from "../services/agentService";
 import { useProjectStore } from "./projectStore";
 import { useSubscriptionStore } from "./subscriptionStore";
+import { useUiStore } from "./uiStore";
 import { checkAgentSpawn } from "../lib/planLimits";
 import { t } from "../lib/i18n";
 
@@ -97,6 +98,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (!check.allowed) {
         const msg = check.reason ?? t("common.agentLimitReached");
         set({ error: msg });
+        // Surface the upgrade path (Free hit the fair-use agent cap).
+        useUiStore.getState().showUpgrade("agents", "pro");
         throw new Error(msg);
       }
       const id = await agentService.createAgent(data);
@@ -155,6 +158,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (!check.allowed) {
         const msg = check.reason ?? t("common.agentLimitReached");
         set({ error: msg });
+        useUiStore.getState().showUpgrade("agents", "pro");
         throw new Error(msg);
       }
       const projectId = useProjectStore.getState().currentProject?.id;

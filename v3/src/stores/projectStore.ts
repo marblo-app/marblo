@@ -6,6 +6,8 @@ import {
   convertTimestamps,
 } from "../services/firestore";
 import * as projectService from "../services/projectService";
+import { useSubscriptionStore } from "./subscriptionStore";
+import { checkProjectCreate, ProjectLimitError } from "../lib/planLimits";
 
 const COLLECTION = "projects";
 const DATE_FIELDS = ["createdAt", "updatedAt"];
@@ -102,6 +104,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   createProject: async (data) => {
+    // Plan gate (choke point): block a Free user's 2nd+ project regardless of
+    // which UI path called us. The UI catches ProjectLimitError to open the
+    // UpgradeModal; the server (enforceProjectLimit trigger) re-validates in
+    // case a client bypasses this check with a direct Firestore write.
+    const plan = useSubscriptionStore.getState().getPlan();
+    const check = checkProjectCreate(plan, get().projects.length);
+    if (!check.allowed) {
+      const err = new ProjectLimitError(check);
+      set({ error: err.message });
+      throw err;
+    }
     try {
       const id = await projectService.createProject(data);
       return id;
@@ -168,8 +181,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           } else if (nextCurrent) {
             // Sync current project with latest data
             const updated = projects.find((p) => p.id === nextCurrent!.id);
-            nextCurrent =
-              updated || (projects.length > 0 ? projects[0] : null);
+            nextCurrent = updated || (projects.length > 0 ? projects[0] : null);
           }
 
           // Cold-start: first snapshot empty → likely transient (cold cache /

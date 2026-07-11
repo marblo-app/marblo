@@ -31,6 +31,9 @@ import {
   saveRecentFolder,
 } from "../../lib/recentFolders";
 import { useAuth } from "../../hooks/useAuth";
+import { useSubscriptionStore } from "../../stores/subscriptionStore";
+import { useUiStore } from "../../stores/uiStore";
+import { checkProjectCreate, ProjectLimitError } from "../../lib/planLimits";
 import { useTranslation, t as translate } from "../../lib/i18n";
 import { FileTreeContextMenu, ContextMenuItem } from "./FileTreeContextMenu";
 import { FileTreeConfirmDialog } from "./FileTreeConfirmDialog";
@@ -768,6 +771,24 @@ export function FileTree() {
   const projects = useProjectStore((s) => s.projects);
   const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
 
+  // Plan gate for project creation (Free = 1 project). The gate is evaluated at
+  // click-time against the live project count; when blocked it opens the global
+  // upgrade modal (uiStore) — the same modal the agent-limit path uses.
+  const getPlan = useSubscriptionStore((s) => s.getPlan);
+
+  // Returns true when another project may be created under the current plan;
+  // otherwise opens the global UpgradeModal and returns false. Used to gate
+  // every create entry point (zero-click auto-register, inline banner, register
+  // choice) before touching Firestore.
+  const ensureProjectQuota = useCallback((): boolean => {
+    const check = checkProjectCreate(getPlan(), projects.length);
+    if (!check.allowed) {
+      useUiStore.getState().showUpgrade("projects", "pro");
+      return false;
+    }
+    return true;
+  }, [getPlan, projects.length]);
+
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
   const currentProjectWorktrees = useMemo(
@@ -1440,6 +1461,13 @@ export function FileTree() {
         });
         return true;
       } catch (err) {
+        // Plan limit hit (shouldn't happen on the first project, but the store
+        // is the choke point) → surface the upgrade path, treat as "handled" so
+        // the caller doesn't fall through to the inline banner.
+        if (err instanceof ProjectLimitError) {
+          useUiStore.getState().showUpgrade("projects", "pro");
+          return true;
+        }
         console.error("Failed to auto-register first project:", err);
         return false;
       }
@@ -1488,8 +1516,14 @@ export function FileTree() {
   // the existing inline new-project banner with the picked folder prefilled.
   const handleChooseRegister = useCallback(() => {
     if (!folderChoice) return;
+    // Free plan already at its project cap → offer upgrade instead of opening
+    // the register banner. (Browse read-only stays available.)
+    if (!ensureProjectQuota()) {
+      setFolderChoice(null);
+      return;
+    }
     startInlineProjectCreation(folderChoice.path, folderChoice.remoteUrl);
-  }, [folderChoice, startInlineProjectCreation]);
+  }, [folderChoice, ensureProjectQuota, startInlineProjectCreation]);
 
   // "Browse (read-only)" branch → the root was already switched to the folder in
   // handleSelectDirectory, so we only remember it in recents. No project bind.
@@ -1501,6 +1535,14 @@ export function FileTree() {
 
   const handleCreateInlineProject = useCallback(async () => {
     if (!newProjectName.trim() || !user || !pendingFolderPath) return;
+    // Gate before writing: Free plan at its project cap → upgrade path instead.
+    if (!ensureProjectQuota()) {
+      setShowNewProject(false);
+      setNewProjectName("");
+      setPendingFolderPath(null);
+      setPendingGitRemoteUrl(null);
+      return;
+    }
     try {
       const data: Omit<Project, "id" | "createdAt" | "updatedAt"> = {
         name: newProjectName.trim(),
@@ -1518,7 +1560,12 @@ export function FileTree() {
         updatedAt: new Date(),
       });
     } catch (err) {
-      console.error("Failed to create project:", err);
+      // Choke-point gate raced ahead of us (e.g. concurrent create) → upgrade.
+      if (err instanceof ProjectLimitError) {
+        useUiStore.getState().showUpgrade("projects", "pro");
+      } else {
+        console.error("Failed to create project:", err);
+      }
     } finally {
       setShowNewProject(false);
       setNewProjectName("");
@@ -1530,6 +1577,7 @@ export function FileTree() {
     user,
     pendingFolderPath,
     pendingGitRemoteUrl,
+    ensureProjectQuota,
     createProject,
     setRootPath,
     setCurrentProject,
