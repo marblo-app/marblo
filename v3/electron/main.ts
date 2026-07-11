@@ -305,6 +305,7 @@ interface AppState {
   lastRootPath?: string;
   wasOrchestratorRunning?: boolean;
   modelPreset?: string;
+  demoCellValues?: Record<string, Record<string, string>>;
   // Project windows open at last quit, so a full restart can reopen them all
   // (the single lastProjectId/lastRootPath above only covers one window).
   windows?: Array<{ rootPath?: string; projectId?: string }>;
@@ -313,6 +314,11 @@ interface AppState {
   // boot-restore / reap can be machine-scoped on a shared account (see
   // getMachineId / stampAgentMachineOwnership). Never auto-changes.
   machineId?: string;
+  // Port the shared static server (production) bound last launch. Reused on the
+  // next launch so the app origin (http://127.0.0.1:<port>) stays stable and
+  // Firebase auth persistence (origin-scoped localStorage) survives a restart.
+  // Falls back to a random free port if the saved one is taken.
+  staticServerPort?: number;
 }
 
 function readAppState(): AppState {
@@ -333,6 +339,81 @@ function writeAppState(state: AppState): void {
   const existing = readAppState();
   const merged = { ...existing, ...state };
   fs.writeFileSync(APP_STATE_FILE, JSON.stringify(merged, null, 2), "utf-8");
+}
+
+const DEFAULT_DEMO_CELL_SCOPE = "default";
+const MAX_DEMO_CELL_SCOPE_LENGTH = 120;
+const MAX_DEMO_CELL_KEY_LENGTH = 120;
+const MAX_DEMO_CELL_VALUE_LENGTH = 20_000;
+const MAX_DEMO_CELL_COUNT = 2_000;
+
+function normalizeDemoCellScope(value: unknown): string {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_DEMO_CELL_SCOPE;
+  }
+  if (typeof value !== "string") {
+    throw new Error("demo cell scope must be a string");
+  }
+  const scope = value.trim();
+  if (!scope) return DEFAULT_DEMO_CELL_SCOPE;
+  if (scope.length > MAX_DEMO_CELL_SCOPE_LENGTH) {
+    throw new Error(
+      `demo cell scope must be ${MAX_DEMO_CELL_SCOPE_LENGTH} characters or fewer`,
+    );
+  }
+  return scope;
+}
+
+function normalizeDemoCellValues(value: unknown): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("demo cell values must be a string map");
+  }
+
+  const entries = Object.entries(value);
+  if (entries.length > MAX_DEMO_CELL_COUNT) {
+    throw new Error(
+      `demo cell values cannot exceed ${MAX_DEMO_CELL_COUNT} cells`,
+    );
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [cellKey, cellValue] of entries) {
+    const key = cellKey.trim();
+    if (!key) throw new Error("demo cell key cannot be empty");
+    if (key.length > MAX_DEMO_CELL_KEY_LENGTH) {
+      throw new Error(
+        `demo cell key must be ${MAX_DEMO_CELL_KEY_LENGTH} characters or fewer`,
+      );
+    }
+    if (typeof cellValue !== "string") {
+      throw new Error("demo cell value must be a string");
+    }
+    if (cellValue.length > MAX_DEMO_CELL_VALUE_LENGTH) {
+      throw new Error(
+        `demo cell value must be ${MAX_DEMO_CELL_VALUE_LENGTH} characters or fewer`,
+      );
+    }
+    normalized[key] = cellValue;
+  }
+
+  return normalized;
+}
+
+function readDemoCellValues(scope: string): Record<string, string> {
+  return { ...(readAppState().demoCellValues?.[scope] ?? {}) };
+}
+
+function writeDemoCellValues(
+  scope: string,
+  values: Record<string, string>,
+): void {
+  const state = readAppState();
+  writeAppState({
+    demoCellValues: {
+      ...(state.demoCellValues ?? {}),
+      [scope]: values,
+    },
+  });
 }
 
 // --- Machine identity (shared-account multi-machine safety) ---
@@ -506,6 +587,108 @@ const agentManager = new AgentManager(
 
 let mainWindow: BrowserWindow | null = null; // First window — fallback for things lacking owner
 const allWindows = new Set<BrowserWindow>();
+
+// --- Shared static server (production) -------------------------------------
+// Every window MUST load from ONE stable origin (http://127.0.0.1:<port>).
+// Firebase auth persistence (localStorage / IndexedDB) is keyed by web origin,
+// and the origin includes the port. The old code spun up a fresh
+// http.createServer on `listen(0)` (a random free port) INSIDE createWindow,
+// so each window got a different origin — a newly opened window (e.g. "새 창"
+// / a detached Board pop-out) could not see the first window's persisted
+// session and fell back to the login screen. A single shared server keeps the
+// origin identical across every window, and by reusing the persisted port it
+// keeps it stable across app launches too (so a restart no longer forces
+// re-login). See src/lib/firebase.ts for the origin-scoped persistence chain.
+let staticServer: http.Server | null = null;
+let staticServerStart: Promise<number> | null = null;
+
+function buildStaticServer(): http.Server {
+  const distPath = path.join(__dirname, "../dist");
+  return http.createServer((req, res) => {
+    let filePath = path.join(
+      distPath,
+      req.url === "/" ? "index.html" : req.url || "index.html",
+    );
+    // SPA fallback: if the requested file doesn't exist, serve index.html.
+    if (!fs.existsSync(filePath)) {
+      filePath = path.join(distPath, "index.html");
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      ".html": "text/html",
+      ".js": "application/javascript",
+      ".css": "text/css",
+      ".json": "application/json",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".svg": "image/svg+xml",
+      ".ico": "image/x-icon",
+      ".woff": "font/woff",
+      ".woff2": "font/woff2",
+      ".ttf": "font/ttf",
+    };
+    res.writeHead(200, {
+      "Content-Type": mimeTypes[ext] || "application/octet-stream",
+    });
+    fs.createReadStream(filePath).pipe(res);
+  });
+}
+
+// Start (once) the shared static server and resolve its port. Idempotent — all
+// callers share one Promise, so concurrent createWindow() calls during session
+// restore converge on the same origin. Prefers the port persisted last launch;
+// on EADDRINUSE (or any bind error) it retries once on a random free port.
+function startStaticServer(): Promise<number> {
+  if (staticServerStart) return staticServerStart;
+  staticServerStart = new Promise<number>((resolve) => {
+    const preferredPort = readAppState().staticServerPort ?? 0;
+
+    const bind = (port: number, allowFallback: boolean) => {
+      const server = buildStaticServer();
+      const onError = (err: NodeJS.ErrnoException) => {
+        server.removeListener("listening", onListening);
+        try {
+          server.close();
+        } catch {
+          /* not yet listening */
+        }
+        if (allowFallback) {
+          console.warn(
+            `[Marblo] static port ${port} unavailable (${err.code}); ` +
+              "retrying on a random free port (auth persistence resets this launch)",
+          );
+          bind(0, false);
+        } else {
+          console.error("[Marblo] Shared static server failed to start:", err);
+          resolve(0);
+        }
+      };
+      const onListening = () => {
+        server.removeListener("error", onError);
+        // Keep a benign handler so a later runtime error can't crash the app.
+        server.on("error", (e) =>
+          console.error("[Marblo] Static server runtime error:", e),
+        );
+        const addr = server.address();
+        const boundPort = typeof addr === "object" && addr ? addr.port : 0;
+        staticServer = server;
+        // Persist so the next launch reuses the same origin.
+        if (boundPort) writeAppState({ staticServerPort: boundPort });
+        console.log(
+          `[Marblo] Shared static server on http://127.0.0.1:${boundPort}`,
+        );
+        resolve(boundPort);
+      };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(port, "127.0.0.1");
+    };
+
+    // Only allow the fallback path when we actually asked for a specific port.
+    bind(preferredPort, preferredPort !== 0);
+  });
+  return staticServerStart;
+}
 
 /** Broadcast an IPC event to all open windows */
 function broadcast(channel: string, ...args: unknown[]): void {
@@ -2102,45 +2285,15 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
     win.loadURL(`http://localhost:5173${detachedQuery}`);
     // DevTools disabled by default for performance — open manually with Cmd+Option+I
   } else {
-    // Serve from localhost so Firebase Auth redirects can return to an
-    // authorized http://127.0.0.1 origin instead of file://.
-    // file:// protocol causes auth/unauthorized-domain error
-    const distPath = path.join(__dirname, "../dist");
-    const server = http.createServer((req, res) => {
-      let filePath = path.join(
-        distPath,
-        req.url === "/" ? "index.html" : req.url || "index.html",
-      );
-      // SPA fallback: if file doesn't exist, serve index.html
-      if (!fs.existsSync(filePath)) {
-        filePath = path.join(distPath, "index.html");
-      }
-      const ext = path.extname(filePath).toLowerCase();
-      const mimeTypes: Record<string, string> = {
-        ".html": "text/html",
-        ".js": "application/javascript",
-        ".css": "text/css",
-        ".json": "application/json",
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".svg": "image/svg+xml",
-        ".ico": "image/x-icon",
-        ".woff": "font/woff",
-        ".woff2": "font/woff2",
-        ".ttf": "font/ttf",
-      };
-      res.writeHead(200, {
-        "Content-Type": mimeTypes[ext] || "application/octet-stream",
-      });
-      fs.createReadStream(filePath).pipe(res);
-    });
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address();
-      const port = typeof addr === "object" && addr ? addr.port : 0;
-      console.log(`[Marblo] Static server on http://127.0.0.1:${port}`);
+    // Serve from the SHARED static server so every window loads from one stable
+    // http://127.0.0.1:<port> origin (Firebase Auth requires an authorized
+    // http origin rather than file://, and origin-scoped auth persistence must
+    // be identical across windows — see startStaticServer). The server outlives
+    // individual windows and is closed on app quit, not on window close.
+    startStaticServer().then((port) => {
+      if (win.isDestroyed()) return;
       win.loadURL(`http://127.0.0.1:${port}${detachedQuery}`);
     });
-    win.on("closed", () => server.close());
   }
 
   // Only the FIRST window becomes mainWindow. Don't overwrite on subsequent
@@ -4343,6 +4496,55 @@ ipcMain.handle("appState:save", (_event, state: Partial<AppState>) => {
   return { success: true };
 });
 
+ipcMain.handle("demoCells:load", (_event, scope?: unknown) => {
+  try {
+    const normalizedScope = normalizeDemoCellScope(scope);
+    return {
+      success: true,
+      values: readDemoCellValues(normalizedScope),
+    };
+  } catch (err) {
+    return {
+      success: false,
+      values: {},
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+ipcMain.handle(
+  "demoCells:save",
+  (_event, payload: { scope?: unknown; values?: unknown }) => {
+    try {
+      if (typeof payload !== "object" || payload === null) {
+        throw new Error("demo cell payload must be an object");
+      }
+      const scope = normalizeDemoCellScope(payload.scope);
+      const values = normalizeDemoCellValues(payload.values);
+      writeDemoCellValues(scope, values);
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  },
+);
+
+ipcMain.handle("demoCells:clear", (_event, scope?: unknown) => {
+  try {
+    const normalizedScope = normalizeDemoCellScope(scope);
+    writeDemoCellValues(normalizedScope, {});
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
 // --- Harness IPC Handlers ---
 
 ipcMain.handle("harness:list", () => {
@@ -4579,6 +4781,12 @@ app.on("before-quit", () => {
   fsManager.stopAllWatching();
   agentWatchdog.stop();
   missionBundle?.dispose();
+  // Shared static server outlives individual windows — close it only here.
+  try {
+    staticServer?.close();
+  } catch {
+    /* already closed */
+  }
 });
 
 app.on("activate", () => {
