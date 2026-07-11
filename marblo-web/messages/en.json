@@ -178,7 +178,7 @@
       "description": "Individual developers trying Marblo for the first time",
       "features": [
         "1 Project",
-        "2 Agents",
+        "5 Agents",
         "Kanban Board",
         "Terminal + Code Editor",
         "MCP Integration"
@@ -192,9 +192,9 @@
       "description": "Solo developers who want to work like a team",
       "features": [
         "Unlimited Projects",
+        "Orchestrator · Flow Editor",
         "Unlimited Agents (BYOK — you pay API costs)",
         "Mission pipelines (coming soon)",
-        "Priority Support",
         "All Free features included"
       ]
     },
@@ -261,11 +261,11 @@
       "items": [
         {
           "q": "What is included in the Free plan?",
-          "a": "The Free plan includes 1 project, 2 agents, the kanban board, the terminal and code editor, and MCP integration — free forever. It is enough to get a first feel for Marblo."
+          "a": "The Free plan includes 1 project, 5 agents, the kanban board, the terminal and code editor, and MCP integration — free forever. It is enough to get a first feel for Marblo."
         },
         {
           "q": "How much is Pro and what is different?",
-          "a": "The Pro plan is ₩19,000/month (about $15). It includes unlimited projects, unlimited agents, and priority support, plus everything in Free."
+          "a": "The Pro plan is ₩19,000/month (about $15). It includes unlimited projects, unlimited agents (fair use · BYOK), and the orchestrator, plus everything in Free. Priority support is available from Team Plus and up."
         },
         {
           "q": "Are there separate AI usage fees?",
@@ -719,7 +719,7 @@
       },
       {
         "q": "How much does it cost?",
-        "a": "The Free plan is ₩0/month with core features; the Pro plan is ₩19,000/month (about $15) with unlimited projects and agents plus priority support. Team and Enterprise plans are also available."
+        "a": "The Free plan is ₩0/month with core features; the Pro plan is ₩19,000/month (about $15) with unlimited projects and agents (fair use). Priority support starts at Team Plus; Team and Enterprise plans are also available."
       },
       {
         "q": "Are there separate AI usage fees?",
