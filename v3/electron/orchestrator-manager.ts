@@ -11,6 +11,7 @@ import {
 } from "./agent-config";
 import { contextForKind } from "./mcp-server/context";
 import { YOLO_FLAG } from "./telegram-channels";
+import { looksLikeLoginScreen } from "./harness-manager";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
@@ -556,8 +557,14 @@ export class OrchestratorManager {
             ].join(" ");
 
       let sent = false;
+      // Login-screen backstop: the orchestrator is always claude. If it boots
+      // into `claude login` (unauthenticated), suppress the boot prompt rather
+      // than typing it into the login menu (which navigates the menu and exits
+      // Claude cleanly → dead PTY). checkSpawnAuthGate at the IPC layer
+      // normally prevents this; this is the defense-in-depth backstop.
+      let authBlocked = false;
       const sendPrompt = () => {
-        if (sent) return;
+        if (sent || authBlocked) return;
         if (this.session?.ptySessionId !== ptySessionId) return;
         sent = true;
         this.ptyManager.writeAndSubmit(ptySessionId, initialPrompt);
@@ -578,10 +585,21 @@ export class OrchestratorManager {
         /Loaded \d+ MCP tool/i, // MCP tools loaded — only after trust granted
       ];
       this.ptyManager.onData(ptySessionId, (data) => {
-        if (sent) return;
+        if (sent || authBlocked) return;
         outputBuffer += data;
         if (outputBuffer.length > 4096)
           outputBuffer = outputBuffer.slice(-4096);
+        // Login-screen backstop — never inject the boot prompt into a
+        // `claude login` menu; surface an error the UI can act on instead.
+        if (looksLikeLoginScreen(outputBuffer)) {
+          authBlocked = true;
+          console.error(
+            "[Orchestrator] Login prompt detected — suppressing boot prompt " +
+              "(claude needs auth: run `claude login`).",
+          );
+          this.setStatus("error");
+          return;
+        }
         for (const pattern of readinessPatterns) {
           if (pattern.test(outputBuffer)) {
             // Wait for the input prompt to fully render before sending.

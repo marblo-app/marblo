@@ -106,6 +106,12 @@ export function AgentsTab() {
         projectId,
         data.assignedTaskId,
       );
+      // Spawn blocked: this model's CLI is not installed / not logged in.
+      // Open the CLI setup gate rather than attaching an empty terminal.
+      if (result?.needsAuth) {
+        window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        return;
+      }
       // 에이전트 실행 즉시 터미널 탭 자동 연결 (출력 유실 방지)
       const MODEL_ICONS: Record<string, string> = {
         claude: "🟣",

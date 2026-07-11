@@ -25,6 +25,7 @@ import { HarnessStore } from "./harness/HarnessStore";
 import { GuideTab } from "./guide/GuideTab";
 import { ActivityStreamPanel } from "./activity/ActivityStreamPanel";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
+import { CliSetupGate } from "./onboarding/CliSetupGate";
 import { UpdateBanner } from "./UpdateBanner";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
 import { useAgentReconnect } from "../hooks/useAgentReconnect";
@@ -205,6 +206,19 @@ export function Layout() {
       window.electronAPI.off("terminal:new");
     };
   }, [createSession]);
+
+  // Bridge the main-process login-screen backstop to the CLI setup gate: when
+  // agent-manager detects an agent booting into a login prompt (unauthenticated
+  // claude/codex), it sends agent:needsAuth — open the gate so the user gets
+  // the install/login guidance instead of a silently dead agent.
+  useEffect(() => {
+    window.electronAPI.on("agent:needsAuth", () => {
+      window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+    });
+    return () => {
+      window.electronAPI.off("agent:needsAuth");
+    };
+  }, []);
 
   // Listen for agent:deleted events from bridge server → delete from Firestore
   useEffect(() => {
@@ -416,6 +430,11 @@ export function Layout() {
             and doesn't squeeze the orchestrator/terminal stacks. */}
         <ActivityStreamPanel />
       </div>
+
+      {/* First-run CLI setup gate — shows when the required CLI (claude) isn't
+          installed/logged-in, and re-opens when a spawn is blocked. An
+          already-set-up user never sees it. */}
+      <CliSetupGate />
 
       {/* PIPA consent — auto-shows on first launch / policy version bump */}
       <PrivacyConsentGate />

@@ -491,7 +491,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         success: boolean;
         error?: string;
       }>,
-    cliAuthCheck: (model: "claude" | "codex") =>
+    cliAuthCheck: (model: "claude" | "codex" | "antigravity") =>
       ipcRenderer.invoke("harness:cliAuthCheck", { model }) as Promise<{
         installed: boolean;
         authenticated: boolean;

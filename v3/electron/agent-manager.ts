@@ -12,6 +12,7 @@ import {
 } from "./agent-config";
 import { mainTelemetry } from "./telemetry";
 import { encodeClaudeProjectDir } from "./claude-paths";
+import { looksLikeLoginScreen } from "./harness-manager";
 
 export type ModelType =
   | "claude"
@@ -417,8 +418,19 @@ export class AgentManager {
         launchConfig.skillContent,
       );
       let sent = false;
+      // Set once if the CLI boots into an interactive login prompt — blocks
+      // BOTH the readiness path and the blind fallback from typing the
+      // instruction into the login menu (which historically navigated the menu
+      // and exited the CLI cleanly, leaving a dead PTY). Watched for
+      // claude/codex (gated pre-spawn) AND antigravity (ungated pre-spawn, but
+      // its OAuth flow still needs the backstop). See looksLikeLoginScreen.
+      let authBlocked = false;
+      const watchLoginScreen =
+        params.model === "claude" ||
+        params.model === "gpt" ||
+        params.model === "antigravity";
       const sendPrompt = () => {
-        if (sent) return;
+        if (sent || authBlocked) return;
         sent = true;
         // Split text and \r so Claude Code registers Enter as a discrete
         // keystroke (single-chunk write gets paste-buffered, leaving the
@@ -427,6 +439,21 @@ export class AgentManager {
         console.log(
           `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`,
         );
+      };
+      const handleLoginScreen = () => {
+        if (authBlocked || sent) return;
+        authBlocked = true;
+        console.error(
+          `[Agent:${params.id}] Login prompt detected for ${params.model} — ` +
+            `suppressing prompt injection (CLI needs auth / login).`,
+        );
+        this.setStatus(params.id, "error");
+        // Surface to the renderer so it can open the CLI setup gate instead of
+        // the agent silently dying at a login screen.
+        this.getMainWindow?.()?.webContents.send("agent:needsAuth", {
+          agentId: params.id,
+          model: params.model,
+        });
       };
 
       // Watch PTY output for CLI readiness indicators
@@ -468,11 +495,19 @@ export class AgentManager {
       const dismissed = new Set<RegExp>();
 
       this.ptyManager.onData(ptySessionId, (data) => {
-        if (sent) return;
+        if (sent || authBlocked) return;
         outputBuffer += data;
         // Only keep last 4KB to avoid memory growth
         if (outputBuffer.length > 4096)
           outputBuffer = outputBuffer.slice(-4096);
+
+        // Login-screen backstop: if the CLI booted into an interactive login
+        // prompt, stop here — never fall through to the readiness patterns or
+        // the blind fallback and type into the menu.
+        if (watchLoginScreen && looksLikeLoginScreen(outputBuffer)) {
+          handleLoginScreen();
+          return;
+        }
 
         for (const dlg of activeMatchers) {
           if (dismissed.has(dlg.pattern)) continue;

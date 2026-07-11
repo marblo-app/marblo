@@ -142,6 +142,11 @@ export function useAgentReconnect() {
         rootPath,
         priorId,
       );
+      if (result?.needsAuth) {
+        setOrchestratorStatus("stopped");
+        window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        return;
+      }
       if (result) {
         setSession(result.sessionId, result.ptySessionId);
         setOrchestratorStatus("running");

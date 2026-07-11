@@ -80,6 +80,13 @@ export function useOrchestratorAutoLaunch() {
           fixedRoot,
           resumeId,
         );
+        // Blocked on CLI auth — surface the setup gate rather than auto-looping
+        // a spawn that will keep hitting the login prompt.
+        if (result?.needsAuth) {
+          setStatus("stopped");
+          window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+          return;
+        }
         if (result) {
           setSession(result.sessionId, result.ptySessionId);
           setStatus("running");

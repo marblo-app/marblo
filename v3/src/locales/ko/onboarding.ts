@@ -278,6 +278,34 @@ export const onboarding = {
   "onboarding.wizard.saving": "저장 중...",
   "onboarding.wizard.save": "설정 저장",
 
+  // — CliSetupGate (first-run CLI install/login gate) —
+  "onboarding.cliGate.title": "시작하기 전에 — CLI 설치 · 로그인",
+  "onboarding.cliGate.subtitle":
+    "오케스트레이터와 에이전트를 실행하려면 아래 CLI가 설치·로그인되어 있어야 합니다.",
+  "onboarding.cliGate.required": "필수",
+  "onboarding.cliGate.optional": "선택",
+  "onboarding.cliGate.claudeDesc":
+    "오케스트레이터와 Claude 에이전트 실행에 필요합니다.",
+  "onboarding.cliGate.codexDesc": "Codex(GPT) 에이전트 실행에 필요합니다.",
+  "onboarding.cliGate.agyDesc":
+    "선택: Antigravity(agy) 에이전트를 쓰려면 설치하세요.",
+  "onboarding.cliGate.installFail": "설치 실패",
+  "onboarding.cliGate.manualHint":
+    "자동 설치가 실패했습니다. 터미널에서 아래 명령을 직접 실행하세요:",
+  "onboarding.cliGate.checking": "확인 중…",
+  "onboarding.cliGate.ready": "준비 완료",
+  "onboarding.cliGate.notInstalled": "미설치",
+  "onboarding.cliGate.needsLogin": "로그인 필요",
+  "onboarding.cliGate.install": "설치",
+  "onboarding.cliGate.installing": "설치 중…",
+  "onboarding.cliGate.loginHint":
+    "터미널에서 아래 명령을 실행해 로그인한 뒤 '다시 확인'을 누르세요:",
+  "onboarding.cliGate.copy": "복사",
+  "onboarding.cliGate.copied": "복사됨",
+  "onboarding.cliGate.recheck": "다시 확인",
+  "onboarding.cliGate.continue": "계속",
+  "onboarding.cliGate.skip": "나중에",
+
   // — LoginPage (auth) —
   "onboarding.login.signupSubtitle": "새 계정을 만드세요",
   "onboarding.login.loginSubtitle": "계정에 로그인하세요",

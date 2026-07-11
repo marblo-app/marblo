@@ -95,7 +95,14 @@ interface AgentAPI {
     resumeSessionId?: string,
     projectId?: string,
     taskId?: string,
-  ) => Promise<{ id: string; ptySessionId: string; status: string }>;
+  ) => Promise<{
+    id: string;
+    ptySessionId: string;
+    status: string;
+    /** Present (with empty id/ptySessionId) when the spawn was blocked
+     * because the CLI is not installed / not logged in. */
+    needsAuth?: { model: string; action: string; installed: boolean };
+  }>;
   stop: (id: string) => Promise<void>;
   restart: (
     id: string,
@@ -256,6 +263,9 @@ interface OrchestratorSessionAPI {
     sessionId: string;
     ptySessionId: string;
     status: string;
+    /** Present (with empty sessionId/ptySessionId) when the orchestrator
+     * spawn was blocked because claude is not installed / not logged in. */
+    needsAuth?: { model: string; action: string; installed: boolean };
   }>;
   stop: () => Promise<void>;
   status: () => Promise<string>;
@@ -543,7 +553,9 @@ interface HarnessAPI {
   versions: () => Promise<Record<string, HarnessVersionInfo>>;
   install: (id: string) => Promise<{ success: boolean; error?: string }>;
   uninstall: (id: string) => Promise<{ success: boolean; error?: string }>;
-  cliAuthCheck: (model: "claude" | "codex") => Promise<CliAuthResult>;
+  cliAuthCheck: (
+    model: "claude" | "codex" | "antigravity",
+  ) => Promise<CliAuthResult>;
 }
 
 type ConnectionAccessMode = "read" | "write" | "pr" | "commit";

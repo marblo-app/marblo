@@ -1411,6 +1411,42 @@ export function FileTree() {
     [],
   );
 
+  // Zero-click first-project registration: the picked folder immediately
+  // becomes a project (name = folder basename) with no confirm banner. This is
+  // the new-user path — useOrchestratorAutoLaunch keys off currentProject's
+  // folderPath and auto-starts the orchestrator, so it reads as
+  // "pick folder → orchestrator boots". If the CLI isn't installed/logged in,
+  // CliSetupGate + the spawn guard take over the auth flow. Requires a signed-in
+  // user (createProject needs ownerId); returns false so the caller can fall
+  // back to the inline banner when there's no user or the write fails.
+  const autoRegisterFirstProject = useCallback(
+    async (dir: string, remoteUrl: string | null): Promise<boolean> => {
+      if (!user) return false;
+      try {
+        const data: Omit<Project, "id" | "createdAt" | "updatedAt"> = {
+          name: basename(dir) || "new-project",
+          ownerId: user.uid,
+          members: [user.uid],
+          folderPath: dir,
+        };
+        if (remoteUrl) data.gitRemoteUrl = remoteUrl;
+        const id = await createProject(data);
+        setRootPath(dir);
+        setCurrentProject({
+          id,
+          ...data,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        return true;
+      } catch (err) {
+        console.error("Failed to auto-register first project:", err);
+        return false;
+      }
+    },
+    [user, createProject, setRootPath, setCurrentProject],
+  );
+
   // ---------- Project setup handlers (existing logic) ----------
   const handleSelectDirectory = useCallback(async () => {
     const dir = await window.electronAPI.fs.selectDirectory();
@@ -1426,12 +1462,17 @@ export function FileTree() {
     }
 
     if (projectsHydrated && projects.length === 0) {
+      // First user (no projects yet): register with one click — the folder
+      // pick alone. Fall back to the inline confirm banner if not signed in or
+      // the auto-register write fails.
+      if (await autoRegisterFirstProject(dir, remoteUrl)) return;
       startInlineProjectCreation(dir, remoteUrl);
       return;
     }
 
-    // Unregistered folder: don't auto-open the register banner. Offer a choice
-    // — register as a project (existing flow), or just browse read-only.
+    // Unregistered folder for an existing user: don't auto-open the register
+    // banner. Offer a choice — register as a project (existing flow), or just
+    // browse read-only. (Zero-click is intentionally first-user only.)
     setFolderChoice({ path: dir, remoteUrl });
   }, [
     setRootPath,
@@ -1439,6 +1480,7 @@ export function FileTree() {
     setCurrentProject,
     projectsHydrated,
     projects.length,
+    autoRegisterFirstProject,
     startInlineProjectCreation,
   ]);
 

@@ -23,6 +23,11 @@ const HOME = os.homedir();
 const CLAUDE_DIR = path.join(HOME, ".claude");
 const CLAUDE_JSON = path.join(HOME, ".claude.json");
 const CODEX_DIR = path.join(HOME, ".codex");
+// Antigravity (agy) shares the user's ~/.gemini. Its OAuth token lands in
+// ~/.gemini/antigravity-cli/antigravity-oauth-token (agy) and/or
+// ~/.gemini/oauth_creds.json (the shared Google login).
+const GEMINI_DIR = path.join(HOME, ".gemini");
+const AGY_CLI_DIR = path.join(GEMINI_DIR, "antigravity-cli");
 
 export type InstallStatus =
   | "installed"
@@ -768,7 +773,7 @@ export function scheduleHarnessUpdates(
 // surface a "login required" badge with the exact command to run instead of
 // silently hanging.
 
-export type CliAuthModel = "claude" | "codex";
+export type CliAuthModel = "claude" | "codex" | "antigravity";
 
 export interface CliAuthResult {
   /** Binary present on PATH. */
@@ -857,6 +862,20 @@ function codexAuthenticated(): boolean {
 }
 
 /**
+ * Non-interactive signals that Antigravity (agy) is logged in. agy shares the
+ * user's ~/.gemini (Google account), so a completed OAuth leaves an
+ * antigravity-oauth-token and/or the shared oauth_creds.json. An API key in
+ * the environment also authenticates non-interactively.
+ */
+function antigravityAuthenticated(): boolean {
+  if (envHasValue("GOOGLE_API_KEY", "GEMINI_API_KEY")) return true;
+  if (fileExists(path.join(AGY_CLI_DIR, "antigravity-oauth-token")))
+    return true;
+  if (fileExists(path.join(GEMINI_DIR, "oauth_creds.json"))) return true;
+  return false;
+}
+
+/**
  * Live-probe install + login state for a required CLI. Fast and
  * non-interactive: PATH lookup + env/file checks, with a single guarded
  * keychain existence check on macOS for Claude. Never spawns the CLI itself.
@@ -890,10 +909,125 @@ export async function probeCliAuth(
       ? { installed: true, authenticated: true }
       : { installed: true, authenticated: false, action: "codex login" };
   }
+  if (model === "antigravity") {
+    if (!isBinaryOnPath("agy")) {
+      return {
+        installed: false,
+        authenticated: false,
+        action: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+      };
+    }
+    // agy completes login by running `agy` once (opens the OAuth browser flow).
+    return antigravityAuthenticated()
+      ? { installed: true, authenticated: true }
+      : { installed: true, authenticated: false, action: "agy" };
+  }
   // Exhaustive guard for an unexpected model value.
   return {
     installed: false,
     authenticated: false,
     action: `unknown model: ${String(model)}`,
   };
+}
+
+// ── Pre-spawn auth gate ────────────────────────────────────────────
+//
+// Agent/orchestrator spawn entry points call this BEFORE launching a CLI so an
+// unauthenticated `claude` / `codex` never gets spawned into its interactive
+// login prompt (which no readiness pattern matches → the 10s blind fallback
+// then types the instruction into the login menu and the CLI exits cleanly,
+// leaving a dead PTY with no explanation). Only claude/codex are gated —
+// gemini/antigravity/custom/local have no probe, so they pass through
+// unchanged (backstopped by looksLikeLoginScreen at the readiness loop).
+
+/** Map an AgentManager ModelType to the CLI auth model, or null if ungated. */
+export function modelToCliAuth(model: string): CliAuthModel | null {
+  if (model === "claude") return "claude";
+  if (model === "gpt" || model === "codex") return "codex";
+  return null;
+}
+
+export interface SpawnAuthGate {
+  /** true = safe to spawn (ready, or an ungated model). */
+  ok: boolean;
+  /** The gated CLI model, or null for ungated models (gemini/agy/custom). */
+  model: CliAuthModel | null;
+  installed: boolean;
+  authenticated: boolean;
+  /** Concrete next command (install or login) when blocked. */
+  action?: string;
+  reason?: "not-installed" | "not-authenticated";
+}
+
+/**
+ * Live-probe whether it's safe to spawn `model`. Non-interactive and fast
+ * (delegates to probeCliAuth). Ungated models short-circuit to ok:true.
+ */
+export async function checkSpawnAuthGate(
+  model: string,
+): Promise<SpawnAuthGate> {
+  const cliModel = modelToCliAuth(model);
+  if (!cliModel) {
+    return { ok: true, model: null, installed: true, authenticated: true };
+  }
+  const r = await probeCliAuth(cliModel);
+  if (!r.installed) {
+    return {
+      ok: false,
+      model: cliModel,
+      installed: false,
+      authenticated: false,
+      action: r.action,
+      reason: "not-installed",
+    };
+  }
+  if (!r.authenticated) {
+    return {
+      ok: false,
+      model: cliModel,
+      installed: true,
+      authenticated: false,
+      action: r.action,
+      reason: "not-authenticated",
+    };
+  }
+  return { ok: true, model: cliModel, installed: true, authenticated: true };
+}
+
+// ── Login-screen detection (readiness-loop backstop) ───────────────
+//
+// Defense-in-depth for the readiness loops in agent-manager /
+// orchestrator-manager. If a CLI *does* boot into an interactive login prompt
+// (e.g. a spawn path that bypassed checkSpawnAuthGate, or auth that lapsed
+// between probe and spawn), these signatures let the loop recognise it and
+// SUPPRESS the blind-fallback keystrokes rather than typing the instruction
+// into the login menu. Verified against live PTY captures (QA
+// vj7ZvHphYOIhsNd340ad): codex shows "Sign in with ChatGPT" / "Welcome to
+// Codex"; claude's `claude login` shows a "Select login method" menu.
+//
+// These are only ever tested against a freshly-spawned CLI's BOOT output
+// (before any instruction is sent), so an agent "discussing" these phrases in
+// chat can't trip them — the buffer is closed to further matching once the
+// prompt is sent.
+export const LOGIN_SCREEN_PATTERNS: RegExp[] = [
+  /Sign in with ChatGPT/i, // codex login menu
+  /Welcome to Codex/i, // codex first-run when logged out
+  /Provide (an )?API key/i, // codex/claude API-key entry
+  /Device Code/i, // codex device-code login
+  /Select login method/i, // claude login menu
+  /Log ?in (with|to) (your )?(Claude|Anthropic)/i, // claude login
+  /Claude account with subscription/i, // claude login option
+  /Anthropic Console account/i, // claude login option
+  // Antigravity (agy) / gemini OAuth flow — the CLI blocks on a browser
+  // sign-in spinner. Distinctive to the auth handshake, so it won't trip on
+  // ordinary boot output. Lets the readiness backstop suppress blind typing
+  // for an unauthenticated agy spawn even though agy is ungated pre-spawn.
+  /Waiting for authentication/i, // agy/gemini OAuth spinner
+  /Sign in with Google/i, // agy/gemini login
+  /How would you like to authenticate/i, // gemini auth-type dialog
+];
+
+/** Whether freshly-booted CLI output looks like an interactive login prompt. */
+export function looksLikeLoginScreen(buffer: string): boolean {
+  return LOGIN_SCREEN_PATTERNS.some((re) => re.test(buffer));
 }

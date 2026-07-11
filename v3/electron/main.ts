@@ -9,7 +9,6 @@ import {
   shell,
   safeStorage,
   Notification,
-  session,
 } from "electron";
 import path from "path";
 import fs from "fs";
@@ -42,6 +41,7 @@ import {
   scheduleHarnessUpdates,
   getCatalogVersions,
   probeCliAuth,
+  checkSpawnAuthGate,
   type CliAuthModel,
 } from "./harness-manager";
 import { FlowRunner } from "./flow-engine/flow-runner";
@@ -2983,6 +2983,27 @@ ipcMain.handle(
     event,
     { agent, cwd, initialPrompt, resumeSessionId, projectId, taskId },
   ) => {
+    // Pre-spawn auth gate (claude/codex). Block an unauthenticated spawn before
+    // any worktree/PTY side effects so the CLI never boots into its login
+    // prompt. Ungated models (gemini/agy/custom) pass through. Resume launches
+    // are gated too — a lapsed login should still surface, not hang.
+    const agentGate = await checkSpawnAuthGate(agent.model);
+    if (!agentGate.ok) {
+      console.warn(
+        `[agent:launch] Blocked "${agent.name}" — ${agentGate.model} ${agentGate.reason} (action: ${agentGate.action})`,
+      );
+      return {
+        id: "",
+        ptySessionId: "",
+        status: "blocked",
+        needsAuth: {
+          model: agentGate.model ?? agent.model,
+          action: agentGate.action ?? "",
+          installed: agentGate.installed,
+        },
+      };
+    }
+
     let launchCwd = cwd;
     try {
       const prep = await worktreeCoordinator.prepare({
@@ -3613,6 +3634,28 @@ ipcMain.handle(
     const port = bridgeServer.getPort();
     // Resolve '~' to actual home directory
     const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
+
+    // Pre-spawn auth gate — the orchestrator is always claude. If claude is
+    // not installed / not logged in, DON'T spawn it into an interactive login
+    // prompt (which would hang the readiness loop and dump the boot prompt
+    // into the login menu). Return a needsAuth marker so the renderer can open
+    // the CLI setup gate instead of silently failing. (QA vj7ZvHphYOIhsNd340ad)
+    const orchGate = await checkSpawnAuthGate("claude");
+    if (!orchGate.ok) {
+      console.warn(
+        `[orchestratorSession:launch] Blocked — claude ${orchGate.reason} (action: ${orchGate.action})`,
+      );
+      return {
+        sessionId: "",
+        ptySessionId: "",
+        status: "blocked",
+        needsAuth: {
+          model: "claude",
+          action: orchGate.action ?? "claude login",
+          installed: orchGate.installed,
+        },
+      };
+    }
 
     // Store enabledModels per-project (not as global env var) so two
     // concurrent windows don't race and overwrite each other's preset.

@@ -143,6 +143,13 @@ export default memo(function OrchestratorPanel() {
         cwd,
         resumeSessionId,
       );
+      // Spawn blocked: claude not installed / not logged in. Open the CLI
+      // setup gate instead of leaving the orchestrator dead with no reason.
+      if (result?.needsAuth) {
+        setStatus("stopped");
+        window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        return;
+      }
       if (result) {
         setSession(result.sessionId, result.ptySessionId);
         setStatus("running");
