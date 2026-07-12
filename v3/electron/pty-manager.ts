@@ -2,6 +2,7 @@ import * as pty from "node-pty";
 import fs from "fs";
 import os from "os";
 import { detectDangerousCommand, type DangerMatch } from "./danger-command";
+import { collectDescendants, readProcTree } from "./proc-tree";
 
 /**
  * A pseudo-terminal MASTER fd that node-pty opens at spawn but neither exposes
@@ -592,15 +593,35 @@ export class PtyManager {
    * Signalling the GROUP (a NEGATIVE pid) takes the whole subtree down
    * deterministically with the orchestrator.
    *
+   * Group kill alone is NOT enough (ticket cgzUJYRv): Codex spawns its marblo
+   * MCP server (`dist-mcp/index.js`) DETACHED into its OWN process group, so a
+   * `kill(-pgid)` scoped to the PTY child's group never reaches it — it survives
+   * teardown, reparents to launchd (ppid=1), and piles up as an orphan. So we
+   * ALSO walk the ppid subtree (captured here, while the CLI is still alive and
+   * the detached grandchild is still a ppid-descendant) and signal each pid
+   * DIRECTLY by its positive pid. In-group pids get signalled twice — harmless
+   * (idempotent, ESRCH-safe); the point is the out-of-group ones.
+   *
    * Scope (critical): pgid === pid means `-pid` targets ONLY this PTY's own
    * subtree. The Electron main process and every OTHER agent/orchestrator PTY
    * live in different process groups (each its own setsid session), so they are
-   * untouched. The `pid > 1` / integer guard is load-bearing: `process.kill(-0)`
+   * untouched. The positive-pid signals are likewise confined to descendants of
+   * THIS pty child. The `pid > 1` / integer guard is load-bearing: `process.kill(-0)`
    * would signal the CALLER's entire group (Electron + all agents) and `-1`
    * would broadcast system-wide — never allow either.
    */
   private killProcessTree(pid: number | undefined): void {
     if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 1) return;
+
+    // Snapshot the ppid subtree NOW, before any signal — once the CLI dies its
+    // detached MCP grandchild reparents to launchd and is no longer reachable by
+    // walking down from `pid`. win32 has no process groups / ps -Ao; skip there.
+    const descendants =
+      process.platform === "win32"
+        ? []
+        : collectDescendants(readProcTree(), pid).filter(
+            (d) => Number.isInteger(d) && d > 1,
+          );
 
     // Graceful first: SIGTERM the group so the Telegram poller runs its own
     // shutdown (release the getUpdates long-poll, remove its pidfile) — this is
@@ -610,15 +631,30 @@ export class PtyManager {
     } catch {
       // ESRCH (group already gone) / EPERM — nothing left to signal.
     }
+    for (const d of descendants) {
+      try {
+        process.kill(d, "SIGTERM");
+      } catch {
+        // Already gone / not ours — nothing to signal.
+      }
+    }
 
-    // Escalate: SIGKILL anything still alive in the group after the poller's
-    // graceful-exit budget. Same negative-pid scoping; unref so a pending sweep
-    // never keeps the event loop (or app shutdown) alive.
+    // Escalate: SIGKILL anything still alive in the group AND any straggling
+    // descendant (e.g. Codex's detached dist-mcp) after the poller's graceful-
+    // exit budget. Same scoping; unref so a pending sweep never keeps the event
+    // loop (or app shutdown) alive.
     const sweep = setTimeout(() => {
       try {
         process.kill(-pid, "SIGKILL");
       } catch {
         // Group already reaped — expected on the happy path.
+      }
+      for (const d of descendants) {
+        try {
+          process.kill(d, "SIGKILL");
+        } catch {
+          // Descendant already reaped — expected on the happy path.
+        }
       }
     }, PtyManager.TREE_KILL_ESCALATE_MS);
     sweep.unref?.();

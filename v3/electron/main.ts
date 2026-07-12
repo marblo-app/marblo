@@ -18,6 +18,11 @@ import http from "http";
 import { execSync, spawn } from "node:child_process";
 import dotenv from "dotenv";
 import { PtyManager, isBusySignal } from "./pty-manager";
+import {
+  startMcpOrphanReaper,
+  stopMcpOrphanReaper,
+  reapOrphanedMcpChildren,
+} from "./mcp-orphan-reaper";
 import { PendingInstructionListener } from "./pending-instruction-listener";
 import { FsManager } from "./fs-manager";
 import { AgentManager, serializeAgent } from "./agent-manager";
@@ -523,6 +528,12 @@ const ptyManager = new PtyManager();
 // died without a clean teardown — belt-and-suspenders against macOS
 // kern.tty.ptmx_max exhaustion (posix_spawnp failed on new terminals/agents).
 ptyManager.startReaper();
+// Periodic sweep to SIGKILL orphaned per-agent marblo MCP servers
+// (`dist-mcp/index.js`) whose CLI exited without them — e.g. Codex's detached
+// MCP child, or any agent that completed/crashed on its own. Explicit kills are
+// already handled by PtyManager.killProcessTree; this catches the natural-exit
+// orphans that reparent to launchd (ppid=1) and would otherwise accumulate.
+startMcpOrphanReaper();
 const fsManager = new FsManager();
 // Bridges the cross-machine `pendingInstructions` Firestore queue to local
 // PTYs. attach/detach is driven by agent spawn / stop lifecycle below.
@@ -1650,9 +1661,7 @@ function refreshWorkPowerSaveBlocker(): void {
 
   if (nextRefCount > 0) {
     if (workPowerSaveBlockerId === null) {
-      workPowerSaveBlockerId = powerSaveBlocker.start(
-        "prevent-app-suspension",
-      );
+      workPowerSaveBlockerId = powerSaveBlocker.start("prevent-app-suspension");
       console.log(
         `[PowerSave] Started prevent-app-suspension blocker id=${workPowerSaveBlockerId} sources=${sources.join(",")}`,
       );
@@ -1672,7 +1681,9 @@ function stopWorkPowerSaveBlocker(reason: string): void {
     if (powerSaveBlocker.isStarted(id)) {
       powerSaveBlocker.stop(id);
     }
-    console.log(`[PowerSave] Stopped prevent-app-suspension blocker (${reason})`);
+    console.log(
+      `[PowerSave] Stopped prevent-app-suspension blocker (${reason})`,
+    );
   } catch (err) {
     console.warn("[PowerSave] Failed to stop blocker:", err);
   }
@@ -5046,6 +5057,9 @@ app.on("window-all-closed", () => {
     agentManager.stopAll();
     pendingListener.detachAll();
     ptyManager.killAll();
+    // Reap any dist-mcp orphaned by earlier natural exits, then stop the sweep.
+    stopMcpOrphanReaper();
+    reapOrphanedMcpChildren();
     fsManager.stopAllWatching();
     agentWatchdog.stop();
     missionBundle?.dispose();
@@ -5071,6 +5085,9 @@ app.on("before-quit", () => {
   agentManager.stopAll();
   pendingListener.detachAll();
   ptyManager.killAll();
+  // Reap any dist-mcp orphaned by earlier natural exits, then stop the sweep.
+  stopMcpOrphanReaper();
+  reapOrphanedMcpChildren();
   fsManager.stopAllWatching();
   agentWatchdog.stop();
   missionBundle?.dispose();
