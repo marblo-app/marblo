@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   initializeAuth,
   indexedDBLocalPersistence,
@@ -96,7 +96,25 @@ if (isPackagedLoopbackAuth) {
   }
 }
 
-export const app = initializeApp(firebaseConfig);
+// ★설정부재 방어 (P3-11). 렌더러 config 는 빌드타임 VITE_FIREBASE_* env 에서만
+// 온다. 정상 서명빌드엔 반드시 채워지므로 이 가드는 오빌드(env 누락) 한정으로만
+// 발화한다 — 정상 빌드엔 무영향. apiKey 가 비면 아래 initializeAuth 가 모듈 로드
+// 도중 auth/invalid-api-key 로 크래시해 화면 전체가 백지가 되고 원인이 불명확해진다.
+// 그 전에 명확한 에러로 즉시 중단시켜 진단을 쉽게 한다 (MCP firebase.ts 의 apiKey
+// 부재 방어와 동일 취지, 티켓 MRJKgyJ4C1qPhj2Ui3vJ).
+if (!firebaseConfig.apiKey) {
+  throw new Error(
+    "[firebase] VITE_FIREBASE_* env 가 빌드에 주입되지 않았습니다 " +
+      "(apiKey 비어있음). 이 렌더러 번들은 Firebase 설정 없이 빌드됐습니다 — " +
+      "vite build 시 .env(VITE_FIREBASE_API_KEY 등)를 확인하세요.",
+  );
+}
+
+// ★getApps() 가드 (P3-11). HMR·중복 모듈 eval 시 initializeApp 재호출이
+// "Firebase: Firebase App named '[DEFAULT]' already exists" 로 throw 하는 것을
+// 막는다 (MCP firebase.ts 의 getApps 패턴과 동일). 이미 초기화됐으면 기존 앱을
+// 재사용한다. 첫 로드(정상 경로)에선 getApps().length === 0 이라 동작 무변화.
+export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 // initializeAuth(getAuth 대신): persistence 를 명시적 폴백 배열로 지정한다.
 // 패키징 앱은 electron main 의 http.createServer 로 127.0.0.1:랜덤포트 static
