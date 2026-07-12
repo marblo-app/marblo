@@ -15,8 +15,11 @@ import {
   deleteDoc,
   query,
   where,
+  orderBy,
+  limit as fsLimit,
   Timestamp,
   type QueryConstraint,
+  type QuerySnapshot,
 } from "firebase/firestore";
 import { db } from "./firebase.js";
 import {
@@ -74,6 +77,22 @@ type TaskStatus =
   | "BLOCKED"
   | "FAILED"
   | "DONE";
+
+// The 7-member TaskStatus value domain. Used to validate untrusted `status`
+// strings before any transition/force logic (see update_task_status, P2-2).
+const TASK_STATUS_VALUES: readonly TaskStatus[] = [
+  "TODO",
+  "CLAIMED",
+  "IN_PROGRESS",
+  "REVIEW",
+  "BLOCKED",
+  "FAILED",
+  "DONE",
+];
+const TASK_STATUS_SET: ReadonlySet<string> = new Set(TASK_STATUS_VALUES);
+function isTaskStatus(s: string): s is TaskStatus {
+  return TASK_STATUS_SET.has(s);
+}
 
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   // CLAIMED → TODO is the manual claim-recall path (renderer's
@@ -612,6 +631,12 @@ function truncateResult(result: unknown): string {
 // MCP 도구 결과는 호출 세션의 컨텍스트에 끝까지 잔존한다(오케/에이전트 비용의 큰
 // 축). list 도구가 무제한 덤프하면 컨텍스트가 불어나므로 기본 cap 을 둔다.
 const LIST_LIMIT_DEFAULT = 50;
+// search_tasks matches keywords with an in-memory substring scan, so the read
+// window must be larger than the display `limit` or search would only ever look
+// at the newest `limit` tasks. This caps the worst-case read (previously the
+// whole `tasks` collection, per P2-5) while keeping search usefully broad: the
+// newest SEARCH_SCAN_CAP tasks are scanned, up to `limit` matches returned.
+const SEARCH_SCAN_CAP = 500;
 const TITLE_MAX = 80;
 function truncTitle(title: unknown, max = TITLE_MAX): string {
   const s = typeof title === "string" ? title : String(title ?? "");
@@ -626,6 +651,45 @@ function capLines(lines: string[], limit: number, hint: string): string {
 }
 function isTerminalTaskStatus(s: unknown): boolean {
   return s === "DONE" || s === "FAILED";
+}
+
+/**
+ * Run a read-bounding query (base equality filters + an orderBy/limit tail) and
+ * fall back to the unbounded query (base filters only) if Firestore rejects it
+ * for a missing composite index. Once the indexes in firestore.indexes.json are
+ * deployed this bounds Firestore reads to O(limit); until then it degrades to
+ * the previous full-collection read instead of hard-failing.
+ *
+ * P2-5 (ENG-REVIEW-2026-07-12): the list/search/activity tools used to read the
+ * entire collection every call and only truncate the rendered text. This pushes
+ * the `limit` into the query. The graceful fallback also neutralizes the P3-12
+ * "requires an index" hard-fail risk. Callers keep their in-memory filter/sort,
+ * so the ORDER of returned rows is unchanged — only the volume read shrinks.
+ */
+async function boundedGetDocs(
+  collectionName: string,
+  baseConstraints: QueryConstraint[],
+  boundConstraints: QueryConstraint[],
+  label: string,
+): Promise<QuerySnapshot> {
+  try {
+    return await getDocs(
+      query(
+        collection(db, collectionName),
+        ...baseConstraints,
+        ...boundConstraints,
+      ),
+    );
+  } catch (err) {
+    console.warn(
+      `[MCP] ${label}: bounded query failed (likely a missing composite ` +
+        `index) — falling back to an unbounded read. Deploy ` +
+        `firestore.indexes.json to bound this. ${
+          (err as Error)?.message ?? String(err)
+        }`,
+    );
+    return getDocs(query(collection(db, collectionName), ...baseConstraints));
+  }
 }
 
 // ── 완료 보고(completion report) 규약 ──
@@ -676,8 +740,16 @@ async function fetchRecentActivityMessages(
   taskId: string,
   window = 20,
 ): Promise<string[]> {
-  const q = query(collection(db, "activities"), where("taskId", "==", taskId));
-  const snap = await getDocs(q);
+  // P2-5: push the "newest `window`" slice into the query (orderBy desc + limit)
+  // so a long-lived task's full activity history is never read into memory. The
+  // in-memory sort+slice below is kept so the index-missing fallback path still
+  // returns the newest `window` entries.
+  const snap = await boundedGetDocs(
+    "activities",
+    [where("taskId", "==", taskId)],
+    [orderBy("createdAt", "desc"), fsLimit(window)],
+    "fetchRecentActivityMessages",
+  );
   return snap.docs
     .map(
       (d) =>
@@ -838,8 +910,17 @@ export function registerTools(server: McpServer): void {
         constraints.push(where("contextId", "==", contextId));
       if (role) constraints.push(where("role", "==", role));
 
-      const q = query(collection(db, "tasks"), ...constraints);
-      const snap = await getDocs(q);
+      // P2-5: bound the read to the display limit, ordered by the primary sort
+      // key (priority desc). The in-memory sort below still applies the
+      // terminal-first refinement + deleted/context filters over the fetched
+      // window, so the ORDER of returned rows is unchanged.
+      const rowLimit = limit ?? LIST_LIMIT_DEFAULT;
+      const snap = await boundedGetDocs(
+        "tasks",
+        constraints,
+        [orderBy("priority", "desc"), fsLimit(rowLimit)],
+        "get_all_tasks",
+      );
 
       if (snap.empty) return text("No tasks found.");
 
@@ -868,7 +949,7 @@ export function registerTools(server: McpServer): void {
       return text(
         capLines(
           lines,
-          limit ?? LIST_LIMIT_DEFAULT,
+          rowLimit,
           "raise limit or filter by role; completed tasks are at the tail",
         ),
       );
@@ -913,13 +994,27 @@ export function registerTools(server: McpServer): void {
       const constraints: QueryConstraint[] = [
         where("status", "==", "TODO"),
         where("role", "==", role),
+        // P2-5: push the dependency-readiness filter into the query so bounding
+        // by priority can't crowd ready tasks out of the window with
+        // higher-priority-but-blocked tasks. This mirrors the in-memory
+        // `.filter(t => t.dependsOnCompleted)` below exactly (missing field →
+        // falsy → excluded on both sides).
+        where("dependsOnCompleted", "==", true),
       ];
       if (projectId) constraints.push(where("projectId", "==", projectId));
       if (contextId && !filterContextInMemory)
         constraints.push(where("contextId", "==", contextId));
 
-      const q = query(collection(db, "tasks"), ...constraints);
-      const snap = await getDocs(q);
+      // P2-5: bound the read to the display limit, ordered by priority desc (the
+      // exact in-memory sort key). In-memory filters (deleted/claimedBy/context)
+      // and the sort below still run over the fetched window unchanged.
+      const rowLimit = limit ?? LIST_LIMIT_DEFAULT;
+      const snap = await boundedGetDocs(
+        "tasks",
+        constraints,
+        [orderBy("priority", "desc"), fsLimit(rowLimit)],
+        "get_available_tasks",
+      );
 
       const tasks = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }) as TaskDoc)
@@ -951,9 +1046,7 @@ export function registerTools(server: McpServer): void {
           t.priority
         })${deps}`;
       });
-      return text(
-        capLines(lines, limit ?? LIST_LIMIT_DEFAULT, "raise limit to see more"),
-      );
+      return text(capLines(lines, rowLimit, "raise limit to see more"));
     },
     { userFacing: false },
   );
@@ -1330,7 +1423,21 @@ export function registerTools(server: McpServer): void {
       const task = await fetchTask(task_id);
       if (!task) return text(`Error: Task ${task_id} not found.`);
 
-      const newStatus = status as TaskStatus;
+      // P2-2: Validate the status VALUE against the 7-member TaskStatus domain
+      // BEFORE the force branch. force=true is an escape hatch for *transition
+      // rules* only — it must never let an out-of-domain string ("Done",
+      // "banana", wrong case) reach applyProjection, which would write it
+      // verbatim to tasks/{id} + projection.currentStatus + mission
+      // statusCounts, silently corrupting the board and hiding the task from
+      // every exact-match feed (get_available_tasks, watchdog scans).
+      if (!isTaskStatus(status)) {
+        return text(
+          `Error: Invalid status "${status}". Valid values: ${TASK_STATUS_VALUES.join(
+            ", ",
+          )}`,
+        );
+      }
+      const newStatus: TaskStatus = status;
       if (!force && !canTransition(task.status, newStatus)) {
         const validTargets = VALID_TRANSITIONS[task.status] ?? [];
         return text(
@@ -1736,21 +1843,34 @@ export function registerTools(server: McpServer): void {
       const constraints: QueryConstraint[] = [where("taskId", "==", task_id)];
       if (pm_only) constraints.push(where("type", "==", "pm"));
 
-      const q = query(collection(db, "activities"), ...constraints);
-      const snap = await getDocs(q);
+      // P2-5: push the newest-`limit` slice into the query (orderBy desc +
+      // limit) so a long-lived task's entire activity log is never read into
+      // memory. The in-memory sort below keeps both paths (bounded + fallback)
+      // newest-first, which also makes the "older entries hidden" cap hint
+      // accurate.
+      const rowLimit = limit ?? 30;
+      const snap = await boundedGetDocs(
+        "activities",
+        constraints,
+        [orderBy("createdAt", "desc"), fsLimit(rowLimit)],
+        "get_task_activities",
+      );
 
       if (snap.empty)
         return text(pm_only ? "No PM feedback found." : "No activities found.");
 
-      const lines = snap.docs.map((d) => {
-        const a = d.data();
-        const ts = a.createdAt?.toDate?.()?.toISOString?.() || "unknown";
-        const agent = a.agentId || "system";
-        return `[${ts}] ${agent}: ${a.message}`;
-      });
-      return text(
-        capLines(lines, limit ?? 30, "raise limit for older entries"),
-      );
+      const lines = snap.docs
+        .map((d) => d.data())
+        .sort(
+          (a, b) =>
+            (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0),
+        )
+        .map((a) => {
+          const ts = a.createdAt?.toDate?.()?.toISOString?.() || "unknown";
+          const agent = a.agentId || "system";
+          return `[${ts}] ${agent}: ${a.message}`;
+        });
+      return text(capLines(lines, rowLimit, "raise limit for older entries"));
     },
     { userFacing: false },
   );
@@ -1995,8 +2115,18 @@ export function registerTools(server: McpServer): void {
       const constraints: QueryConstraint[] = [];
       if (projectId) constraints.push(where("projectId", "==", projectId));
 
-      const q = query(collection(db, "tasks"), ...constraints);
-      const snap = await getDocs(q);
+      // P2-5: bound the scan to the newest SEARCH_SCAN_CAP tasks (orderBy
+      // createdAt desc + limit) instead of the entire collection. Substring
+      // matching stays in memory over this window; matches in tasks older than
+      // the window are not returned (documented scaling tradeoff). Falls back to
+      // an unbounded read if the composite index is missing.
+      const scanLimit = Math.max(limit ?? LIST_LIMIT_DEFAULT, SEARCH_SCAN_CAP);
+      const snap = await boundedGetDocs(
+        "tasks",
+        constraints,
+        [orderBy("createdAt", "desc"), fsLimit(scanLimit)],
+        "search_tasks",
+      );
 
       const lowerKeyword = keyword.toLowerCase();
       const matches = snap.docs.filter((d) => {
