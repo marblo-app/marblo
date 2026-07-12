@@ -862,5 +862,71 @@
         "download": "다운로드"
       }
     }
+  },
+  "account": {
+    "title": "내 계정",
+    "plan": {
+      "free": "Free 플랜",
+      "pro": "Pro 플랜",
+      "team": "Team 플랜",
+      "team_plus": "Team Plus 플랜",
+      "enterprise": "Enterprise 플랜"
+    },
+    "status": {
+      "active": "이용 중",
+      "trialing": "체험 중",
+      "past_due": "결제 실패",
+      "canceled": "해지됨"
+    },
+    "subscription": {
+      "title": "구독 관리"
+    },
+    "links": {
+      "lectures": "내 강의",
+      "privacy": "개인정보 설정"
+    },
+    "logout": "로그아웃"
+  },
+  "subscription": {
+    "title": "구독 관리",
+    "subtitle": "현재 플랜과 결제 상태를 확인하고 관리하세요.",
+    "current_plan": "현재 플랜",
+    "plan": {
+      "free": "Free",
+      "pro": "Pro",
+      "team": "Team",
+      "team_plus": "Team Plus",
+      "enterprise": "Enterprise"
+    },
+    "status": {
+      "active": "이용 중",
+      "trialing": "체험 중",
+      "past_due": "결제 실패 · 재시도 예정",
+      "canceled": "해지됨"
+    },
+    "upgrade": "업그레이드",
+    "next_renewal": "다음 갱신일",
+    "period_end_canceled": "이용 종료일",
+    "payment_method": "결제 수단",
+    "change_plan": {
+      "title": "플랜 변경",
+      "desc": "요금제 페이지에서 다른 플랜으로 업그레이드하거나 변경할 수 있습니다."
+    },
+    "history": {
+      "title": "결제 내역",
+      "current_period": "현재 청구 주기",
+      "coming_soon": "상세 결제 내역(영수증)은 곧 제공될 예정입니다. 지금은 현재 청구 주기만 표시됩니다."
+    },
+    "cancel": {
+      "title": "구독 해지",
+      "desc": "해지하면 현재 청구 주기가 끝난 뒤 자동 갱신이 중단되고 Free 플랜으로 전환됩니다.",
+      "button": "구독 해지하기",
+      "confirm": "정말 구독을 해지하시겠어요? 이 작업은 되돌릴 수 없습니다.",
+      "confirm_yes": "네, 해지합니다",
+      "confirm_no": "취소",
+      "error": "해지 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+    },
+    "app_hint": "데스크탑 앱에서도 계정 메뉴를 통해 구독 상태를 확인할 수 있습니다.",
+    "back_to_account": "계정으로 돌아가기"
   }
 }

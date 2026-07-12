@@ -268,7 +268,7 @@ export const GUIDE_STEPS: GuideStep[] = [
           { kind: "text", key: "billing.manage.body" },
           {
             kind: "links",
-            items: [{ key: "billing.manage.cta", href: "/my/lectures" }],
+            items: [{ key: "billing.manage.cta", href: "/my/subscription" }],
           },
         ],
       },

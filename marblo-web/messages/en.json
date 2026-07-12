@@ -862,5 +862,71 @@
         "download": "Download"
       }
     }
+  },
+  "account": {
+    "title": "My Account",
+    "plan": {
+      "free": "Free plan",
+      "pro": "Pro plan",
+      "team": "Team plan",
+      "team_plus": "Team Plus plan",
+      "enterprise": "Enterprise plan"
+    },
+    "status": {
+      "active": "Active",
+      "trialing": "Trial",
+      "past_due": "Payment failed",
+      "canceled": "Canceled"
+    },
+    "subscription": {
+      "title": "Manage subscription"
+    },
+    "links": {
+      "lectures": "My lectures",
+      "privacy": "Privacy settings"
+    },
+    "logout": "Sign out"
+  },
+  "subscription": {
+    "title": "Subscription",
+    "subtitle": "Review and manage your current plan and billing status.",
+    "current_plan": "Current plan",
+    "plan": {
+      "free": "Free",
+      "pro": "Pro",
+      "team": "Team",
+      "team_plus": "Team Plus",
+      "enterprise": "Enterprise"
+    },
+    "status": {
+      "active": "Active",
+      "trialing": "Trial",
+      "past_due": "Payment failed · retry scheduled",
+      "canceled": "Canceled"
+    },
+    "upgrade": "Upgrade",
+    "next_renewal": "Next renewal",
+    "period_end_canceled": "Access ends on",
+    "payment_method": "Payment method",
+    "change_plan": {
+      "title": "Change plan",
+      "desc": "Upgrade or switch to a different plan on the pricing page."
+    },
+    "history": {
+      "title": "Billing history",
+      "current_period": "Current billing period",
+      "coming_soon": "Detailed billing history (receipts) is coming soon. For now, only the current billing period is shown."
+    },
+    "cancel": {
+      "title": "Cancel subscription",
+      "desc": "Canceling stops auto-renewal at the end of the current billing period and reverts you to the Free plan.",
+      "button": "Cancel subscription",
+      "confirm": "Are you sure you want to cancel? This cannot be undone.",
+      "confirm_yes": "Yes, cancel",
+      "confirm_no": "Keep subscription",
+      "error": "Something went wrong while canceling. Please try again shortly."
+    },
+    "app_hint": "You can also view your subscription status from the account menu in the desktop app.",
+    "back_to_account": "Back to account"
   }
 }

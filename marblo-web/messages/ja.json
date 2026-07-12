@@ -862,5 +862,71 @@
         "download": "ダウンロード"
       }
     }
+  },
+  "account": {
+    "title": "マイアカウント",
+    "plan": {
+      "free": "Free プラン",
+      "pro": "Pro プラン",
+      "team": "Team プラン",
+      "team_plus": "Team Plus プラン",
+      "enterprise": "Enterprise プラン"
+    },
+    "status": {
+      "active": "利用中",
+      "trialing": "トライアル中",
+      "past_due": "決済失敗",
+      "canceled": "解約済み"
+    },
+    "subscription": {
+      "title": "サブスクリプション管理"
+    },
+    "links": {
+      "lectures": "マイ講座",
+      "privacy": "プライバシー設定"
+    },
+    "logout": "ログアウト"
+  },
+  "subscription": {
+    "title": "サブスクリプション",
+    "subtitle": "現在のプランと決済状況を確認・管理できます。",
+    "current_plan": "現在のプラン",
+    "plan": {
+      "free": "Free",
+      "pro": "Pro",
+      "team": "Team",
+      "team_plus": "Team Plus",
+      "enterprise": "Enterprise"
+    },
+    "status": {
+      "active": "利用中",
+      "trialing": "トライアル中",
+      "past_due": "決済失敗 · 再試行予定",
+      "canceled": "解約済み"
+    },
+    "upgrade": "アップグレード",
+    "next_renewal": "次回更新日",
+    "period_end_canceled": "利用終了日",
+    "payment_method": "決済手段",
+    "change_plan": {
+      "title": "プラン変更",
+      "desc": "料金プランページで他のプランへのアップグレードや変更ができます。"
+    },
+    "history": {
+      "title": "決済履歴",
+      "current_period": "現在の請求期間",
+      "coming_soon": "詳細な決済履歴（領収書）は近日提供予定です。現在は請求期間のみ表示しています。"
+    },
+    "cancel": {
+      "title": "サブスクリプション解約",
+      "desc": "解約すると現在の請求期間の終了後に自動更新が停止し、Free プランに移行します。",
+      "button": "サブスクリプションを解約",
+      "confirm": "本当に解約しますか？この操作は取り消せません。",
+      "confirm_yes": "はい、解約します",
+      "confirm_no": "キャンセル",
+      "error": "解約処理中にエラーが発生しました。しばらくしてからもう一度お試しください。"
+    },
+    "app_hint": "デスクトップアプリのアカウントメニューからもサブスクリプション状況を確認できます。",
+    "back_to_account": "アカウントに戻る"
   }
 }
