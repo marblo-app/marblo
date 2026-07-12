@@ -22,7 +22,9 @@ import {
   RefreshCw,
   Video,
   ClipboardList,
+  BarChart3,
 } from "lucide-react";
+import AnalyticsPanel from "./AnalyticsPanel";
 
 // 신청 목록 항목 (getFounderWaitlist 함수 응답; 날짜는 ISO 문자열).
 type WaitlistEntry = {
@@ -132,7 +134,7 @@ const BUG_STATUS_LABEL: Record<BugReportStatus, string> = {
 };
 
 const BUG_STATUS_ORDER: BugReportStatus[] = ["new", "triaged", "resolved"];
-type AdminTab = "waitlist" | "founders" | "candidates" | "bugs";
+type AdminTab = "waitlist" | "founders" | "candidates" | "bugs" | "analytics";
 
 const ADMIN_TABS: Array<{
   id: AdminTab;
@@ -143,6 +145,7 @@ const ADMIN_TABS: Array<{
   { id: "founders", label: "파운더 현황", icon: Award },
   { id: "candidates", label: "인터뷰 후보", icon: Video },
   { id: "bugs", label: "버그 신고", icon: Bug },
+  { id: "analytics", label: "사업 분석", icon: BarChart3 },
 ];
 
 // V2 루브릭 5차원 정의 (BETA-INCENTIVE-MODEL-V2 §5). 가중치는 총점 계산과 표시용.
@@ -768,7 +771,11 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 py-16 px-4">
-      <div className="max-w-4xl mx-auto space-y-8">
+      <div
+        className={`${
+          activeTab === "analytics" ? "max-w-6xl" : "max-w-4xl"
+        } mx-auto space-y-8`}
+      >
         {/* Header */}
         <header>
           <div className="flex items-center gap-3 mb-2">
@@ -797,14 +804,16 @@ export default function AdminPage() {
           {ADMIN_TABS.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
-            const count =
+            const count: number | null =
               tab.id === "waitlist"
                 ? entries.length
                 : tab.id === "founders"
                 ? founders.length
                 : tab.id === "candidates"
                 ? topItems.length
-                : bugReports.length;
+                : tab.id === "bugs"
+                ? bugReports.length
+                : null;
             const hasError =
               (tab.id === "waitlist" && !!listError) ||
               (tab.id === "founders" && !!foundersError) ||
@@ -827,7 +836,7 @@ export default function AdminPage() {
                   <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-xs text-red-200">
                     오류
                   </span>
-                ) : (
+                ) : count !== null ? (
                   <span
                     className={`rounded px-1.5 py-0.5 text-xs ${
                       active
@@ -837,7 +846,7 @@ export default function AdminPage() {
                   >
                     {count}
                   </span>
-                )}
+                ) : null}
               </button>
             );
           })}
@@ -1441,6 +1450,9 @@ export default function AdminPage() {
             )}
           </section>
         )}
+
+        {/* 사업 분석 대시보드 */}
+        {activeTab === "analytics" && <AnalyticsPanel />}
       </div>
 
       {/* 버그 신고 상세 모달 */}
