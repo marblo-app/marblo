@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   AgentWatchdog,
   evaluateRespawnGuard,
+  isRecoverableWatchdogStatus,
   interpretScopeHostProbe,
   selectStaleReviews,
   selectStalePendingForFallback,
@@ -77,6 +78,7 @@ describe("selectStaleReviews (W5)", () => {
     assigneeAgentId: "a1",
     assigneeDead: true,
     lastActivityAtMs: 0,
+    awaitingHumanApproval: false,
   };
   it("keeps only dead-assignee reviews past the threshold", () => {
     const now = 100_000_000;
@@ -92,6 +94,33 @@ describe("selectStaleReviews (W5)", () => {
     ];
     const out = selectStaleReviews(list, now, 10_000).map((r) => r.taskId);
     expect(out).toEqual(["stale"]);
+  });
+
+  it("excludes human-approval REVIEW tickets from stale handling", () => {
+    const now = 100_000_000;
+    const out = selectStaleReviews(
+      [
+        {
+          ...base,
+          taskId: "human-review",
+          awaitingHumanApproval: true,
+          lastActivityAtMs: now - 999_999,
+        },
+      ],
+      now,
+      10_000,
+    );
+    expect(out).toEqual([]);
+  });
+});
+
+describe("isRecoverableWatchdogStatus", () => {
+  it("only allows active work statuses", () => {
+    expect(isRecoverableWatchdogStatus("CLAIMED")).toBe(true);
+    expect(isRecoverableWatchdogStatus("IN_PROGRESS")).toBe(true);
+    for (const status of ["REVIEW", "DONE", "FAILED", "BLOCKED", "TODO"]) {
+      expect(isRecoverableWatchdogStatus(status)).toBe(false);
+    }
   });
 });
 
@@ -300,6 +329,7 @@ describe("W5 — stale REVIEW sweep", () => {
         title: "old review",
         assigneeAgentId: "ghost",
         assigneeDead: true,
+        awaitingHumanApproval: false,
         lastActivityAtMs: now - DEFAULT_WATCHDOG_CONFIG.reviewStaleMs - 1,
       },
       {
@@ -307,6 +337,7 @@ describe("W5 — stale REVIEW sweep", () => {
         projectId: "p",
         assigneeAgentId: "alive",
         assigneeDead: false,
+        awaitingHumanApproval: false,
         lastActivityAtMs: now - DEFAULT_WATCHDOG_CONFIG.reviewStaleMs - 1,
       },
     ];
@@ -324,6 +355,45 @@ describe("W5 — stale REVIEW sweep", () => {
     // Second sweep at the same clock → rate-limited, no re-surface.
     await h.wd.tickOnce();
     expect(escalateStaleReview).toHaveBeenCalledOnce();
+  });
+
+  it("does not respawn or notify when 10+ human-approval REVIEW tickets accumulate", async () => {
+    const now = 5_000_000;
+    const escalateStaleReview = vi.fn();
+    const candidates: StaleReviewTicket[] = Array.from(
+      { length: 12 },
+      (_, i) => ({
+        taskId: `review-${i}`,
+        projectId: "p",
+        title: `review ${i}`,
+        assigneeAgentId: `ghost-${i}`,
+        assigneeDead: true,
+        awaitingHumanApproval: true,
+        lastActivityAtMs: now - DEFAULT_WATCHDOG_CONFIG.reviewStaleMs - 1,
+      }),
+    );
+    const reviewTickets = candidates.map((c) =>
+      ticket({
+        taskId: c.taskId,
+        status: "REVIEW" as unknown as WatchdogTicket["status"],
+        agentId: c.assigneeAgentId,
+        lastActivityAtMs: c.lastActivityAtMs,
+      }),
+    );
+    const h = makeHarness({
+      extraDeps: {
+        now: () => now,
+        listActiveTickets: async () => reviewTickets,
+        listStaleReviewCandidates: async () => candidates,
+        escalateStaleReview,
+      },
+    });
+
+    await h.wd.tickOnce();
+
+    expect(h.respawn).not.toHaveBeenCalled();
+    expect(escalateStaleReview).not.toHaveBeenCalled();
+    expect(h.records).toEqual([]);
   });
 });
 

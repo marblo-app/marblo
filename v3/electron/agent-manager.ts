@@ -1246,6 +1246,7 @@ export class AgentManager {
     if (!agent) return;
     if (agent.status === "stopped" || agent.status === "error") return;
     agent.turnCompletedAt = Date.now();
+    agent.currentTaskId = null;
     // Demote directly (bypass setStatus's working-clear path) so the marker
     // set above survives the transition to idle.
     if (agent.status !== "idle") {

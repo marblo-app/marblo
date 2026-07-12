@@ -33,6 +33,12 @@ import type { ModelType } from "./agent-manager";
 
 export type WatchdogTicketStatus = "CLAIMED" | "IN_PROGRESS";
 
+export function isRecoverableWatchdogStatus(
+  status: unknown,
+): status is WatchdogTicketStatus {
+  return status === "CLAIMED" || status === "IN_PROGRESS";
+}
+
 export interface WatchdogTicket {
   taskId: string;
   projectId: string;
@@ -148,12 +154,12 @@ export interface WatchdogDeps {
    * genuinely needs human attention. Replaces the old log-only dead-end. */
   escalate?: (ticket: WatchdogTicket, detail: string) => void;
 
-  // ── W5: stale-REVIEW sweep (optional) ───────────────────────
-  /** List REVIEW tickets whose assignee agent is dead/foreign, with the age of
-   * their last review activity — cross-project. The watchdog otherwise excludes
-   * REVIEW entirely, so a dead antigravity assignee waits forever. */
+  // ── W5: stale non-human REVIEW sweep (optional) ─────────────
+  /** List REVIEW tickets whose non-human review owner is dead/foreign, with
+   * the age of their last review activity — cross-project. Normal REVIEW means
+   * human approval pending and must stay out of stuck/stale recovery. */
   listStaleReviewCandidates?: () => Promise<StaleReviewTicket[]>;
-  /** Surface a stale REVIEW ticket to the orchestrator / human. */
+  /** Surface a stale non-human REVIEW ticket to the orchestrator / human. */
   escalateStaleReview?: (ticket: StaleReviewTicket, detail: string) => void;
 
   // ── W2: undelivered pending-instruction fallback (optional) ──
@@ -183,6 +189,10 @@ export interface StaleReviewTicket {
   assigneeDead: boolean;
   /** epoch-ms of the last review-related activity, or null. */
   lastActivityAtMs: number | null;
+  /** REVIEW normally means "waiting for human approval"; those tickets must
+   * not be treated as stuck/stale agent work. Only explicit non-human review
+   * ownership may opt into stale-review escalation. */
+  awaitingHumanApproval?: boolean;
 }
 
 /** W2 — an undelivered cross-machine instruction. */
@@ -365,14 +375,15 @@ export function interpretScopeHostProbe(
 
 /** W5 — select the REVIEW tickets that are genuinely stale: assignee dead AND
  * last activity older than the threshold. Pure filter over the candidate list.
- * A REVIEW with a live assignee, or one that was just submitted, is excluded so
- * normal review flow isn't flagged as noise. */
+ * A human-approval REVIEW, a REVIEW with a live assignee, or one that was just
+ * submitted is excluded so normal review flow isn't flagged as noise. */
 export function selectStaleReviews(
   candidates: StaleReviewTicket[],
   now: number,
   thresholdMs: number,
 ): StaleReviewTicket[] {
   return candidates.filter((c) => {
+    if (c.awaitingHumanApproval !== false) return false;
     if (!c.assigneeDead) return false;
     const age = now - (c.lastActivityAtMs ?? 0);
     return age >= thresholdMs;
@@ -544,6 +555,7 @@ export class AgentWatchdog {
       const tickets = await this.deps.listActiveTickets();
       const seen = new Set<string>();
       for (const ticket of tickets) {
+        if (!isRecoverableWatchdogStatus(ticket.status)) continue;
         seen.add(ticket.taskId);
         try {
           await this.inspect(ticket);
@@ -636,11 +648,11 @@ export class AgentWatchdog {
   }
 
   /**
-   * W5 — stale-REVIEW sweep. The main sweep excludes REVIEW as terminal, so a
-   * ticket whose reviewer/assignee died (a foreign antigravity assignee, or a
-   * reaped agent) waits forever. This surfaces REVIEW tickets whose assignee is
-   * dead AND whose last review activity is older than reviewStaleMs, rate-
-   * limited to once per reviewStaleMs per ticket.
+   * W5 — stale non-human REVIEW sweep. The main sweep excludes REVIEW as
+   * terminal, and normal REVIEW is a human approval gate. This only surfaces
+   * explicit non-human review ownership whose assignee is dead AND whose last
+   * review activity is older than reviewStaleMs, rate-limited to once per
+   * reviewStaleMs per ticket.
    */
   private async sweepStaleReviews(): Promise<void> {
     if (
@@ -698,6 +710,7 @@ export class AgentWatchdog {
 
   /** Inspect one ticket and, if stuck, take the next recovery step. */
   private async inspect(ticket: WatchdogTicket): Promise<void> {
+    if (!isRecoverableWatchdogStatus(ticket.status)) return;
     // ★ Recovery-only: never touch a ticket with no bound agent.
     if (!ticket.agentId) return;
 

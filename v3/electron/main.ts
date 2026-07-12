@@ -1252,9 +1252,21 @@ const agentWatchdog = new AgentWatchdog(
             ? (data.claimedBy as string)
             : null) ||
           null;
-        // Assignee is "dead" when no live local agent carries that id. A foreign
-        // (another host / antigravity) assignee is likewise absent locally, so
-        // it is treated as dead here — surfaced for the orchestrator to re-route.
+        // REVIEW is normally a human approval/merge gate, not active agent work.
+        // Only explicit non-human review owners opt into stale-review surfacing.
+        const reviewPolicy = data.reviewPolicy as
+          | { owner?: unknown; autoMergeWhenGreen?: unknown }
+          | undefined;
+        const reviewOwner =
+          (typeof reviewPolicy?.owner === "string" && reviewPolicy.owner) ||
+          (typeof data.reviewOwner === "string"
+            ? (data.reviewOwner as string)
+            : "human");
+        const awaitingHumanApproval =
+          reviewOwner !== "agent" && reviewOwner !== "orchestrator";
+        // Assignee is "dead" when no live local agent carries that id. This is
+        // only actionable for the non-human review owners above; normal human
+        // REVIEW tickets remain excluded by awaitingHumanApproval.
         const live = assigneeAgentId
           ? agentManager.getAgent(assigneeAgentId)
           : null;
@@ -1272,6 +1284,7 @@ const agentWatchdog = new AgentWatchdog(
           assigneeDead,
           lastActivityAtMs:
             typeof ts?.toMillis === "function" ? ts.toMillis() : null,
+          awaitingHumanApproval,
         });
       });
       return out;
