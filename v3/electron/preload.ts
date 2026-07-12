@@ -400,6 +400,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("settings:setApiKey", { provider, key }),
     deleteApiKey: (provider: string) =>
       ipcRenderer.invoke("settings:deleteApiKey", { provider }),
+    getPowerSave: () =>
+      ipcRenderer.invoke("settings:getPowerSave") as Promise<{
+        preventSleepWhileWorking: boolean;
+        active: boolean;
+        refCount: number;
+        sources: string[];
+      }>,
+    setPowerSave: (preventSleepWhileWorking: boolean) =>
+      ipcRenderer.invoke("settings:setPowerSave", {
+        preventSleepWhileWorking,
+      }) as Promise<{
+        success: boolean;
+        error?: string;
+        preventSleepWhileWorking?: boolean;
+        active?: boolean;
+        refCount?: number;
+        sources?: string[];
+      }>,
   },
   code: {
     format: (content: string, filePath: string) =>
@@ -476,11 +494,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
         lastProjectId?: string;
         lastRootPath?: string;
         wasOrchestratorRunning?: boolean;
+        preventSleepWhileWorking?: boolean;
       }>,
     save: (state: {
       lastProjectId?: string;
       lastRootPath?: string;
       wasOrchestratorRunning?: boolean;
+      preventSleepWhileWorking?: boolean;
     }) => ipcRenderer.invoke("appState:save", state),
   },
   system: {

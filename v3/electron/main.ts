@@ -5,6 +5,7 @@ import {
   ipcMain,
   dialog,
   powerMonitor,
+  powerSaveBlocker,
   clipboard,
   shell,
   safeStorage,
@@ -322,6 +323,9 @@ interface AppState {
   // Firebase auth persistence (origin-scoped localStorage) survives a restart.
   // Falls back to a random free port if the saved one is taken.
   staticServerPort?: number;
+  // Keep background orchestrator / agent / Telegram work alive while active.
+  // Defaults to true; false means never hold a powerSaveBlocker.
+  preventSleepWhileWorking?: boolean;
 }
 
 function readAppState(): AppState {
@@ -343,6 +347,13 @@ function writeAppState(state: AppState): void {
   const merged = { ...existing, ...state };
   fs.writeFileSync(APP_STATE_FILE, JSON.stringify(merged, null, 2), "utf-8");
 }
+
+type WorkPowerSaveSource = "orchestrator" | "agent" | "telegram-poller";
+
+let preventSleepWhileWorking =
+  readAppState().preventSleepWhileWorking !== false;
+let workPowerSaveBlockerId: number | null = null;
+let workPowerSaveRefCount = 0;
 
 const DEFAULT_DEMO_CELL_SCOPE = "default";
 const MAX_DEMO_CELL_SCOPE_LENGTH = 120;
@@ -527,6 +538,7 @@ let missionBundle: BuiltMissionEngine | null = null;
 const agentManager = new AgentManager(
   ptyManager,
   (agentId, status) => {
+    refreshWorkPowerSaveBlocker();
     // Claim machine ownership of this agent's doc — AgentManager only ever
     // tracks agents THIS machine launched, so any agentId here is ours. Stamps
     // once per session; enables machine-scoped boot-restore / reap on a shared
@@ -1347,6 +1359,7 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
     ptyManager,
     agentManager.getConfigGenerator(),
     (status) => {
+      refreshWorkPowerSaveBlocker();
       // Route status to the owner window only (multi-window: each window
       // tracks its own orchestrator). Broadcast as fallback when owner is
       // unknown (e.g., scratch instance from getAnyOrchestrator).
@@ -1587,10 +1600,66 @@ const telegramPoller = new TelegramPoller({
     if (mission && mission.isRunning()) return mission;
     return null;
   },
+  onLoopActivityChange: () => refreshWorkPowerSaveBlocker(),
 });
 bridgeServer.setSendTelegramMessage((projectId, text, chatId) =>
   telegramPoller.sendMessage(projectId, text, chatId),
 );
+
+function collectWorkPowerSaveSources(): WorkPowerSaveSource[] {
+  const sources: WorkPowerSaveSource[] = [];
+  const hasRunningOrchestrator = [
+    ...orchestrators.values(),
+    ...missionOrchestrators.values(),
+  ].some((manager) => {
+    const status = manager.getStatus();
+    return status === "starting" || status === "running";
+  });
+  if (hasRunningOrchestrator) sources.push("orchestrator");
+
+  const hasWorkingAgent = agentManager
+    .listAgents()
+    .some((agent) => agent.status === "working");
+  if (hasWorkingAgent) sources.push("agent");
+
+  if (telegramPoller.hasActiveLoops()) sources.push("telegram-poller");
+  return sources;
+}
+
+function refreshWorkPowerSaveBlocker(): void {
+  const sources = preventSleepWhileWorking ? collectWorkPowerSaveSources() : [];
+  const nextRefCount = sources.length;
+  workPowerSaveRefCount = nextRefCount;
+
+  if (nextRefCount > 0) {
+    if (workPowerSaveBlockerId === null) {
+      workPowerSaveBlockerId = powerSaveBlocker.start(
+        "prevent-app-suspension",
+      );
+      console.log(
+        `[PowerSave] Started prevent-app-suspension blocker id=${workPowerSaveBlockerId} sources=${sources.join(",")}`,
+      );
+    }
+    return;
+  }
+
+  stopWorkPowerSaveBlocker("idle");
+}
+
+function stopWorkPowerSaveBlocker(reason: string): void {
+  if (workPowerSaveBlockerId === null) return;
+  const id = workPowerSaveBlockerId;
+  workPowerSaveBlockerId = null;
+  workPowerSaveRefCount = 0;
+  try {
+    if (powerSaveBlocker.isStarted(id)) {
+      powerSaveBlocker.stop(id);
+    }
+    console.log(`[PowerSave] Stopped prevent-app-suspension blocker (${reason})`);
+  } catch (err) {
+    console.warn("[PowerSave] Failed to stop blocker:", err);
+  }
+}
 
 // Periodic Telegram channel-health sweep timer. Hoisted to module scope (set in
 // app.whenReady) so quit handlers can clear it — otherwise, even though it's
@@ -1663,6 +1732,7 @@ function createMissionOrchestratorInstance(
     ptyManager,
     agentManager.getConfigGenerator(),
     (status) => {
+      refreshWorkPowerSaveBlocker();
       const ownerId = missionOrchestratorOwners.get(projectId);
       if (ownerId !== undefined) {
         sendToOwner(ownerId, "missionOrchestrator:statusChanged", { status });
@@ -4463,6 +4533,37 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle("settings:getPowerSave", () => {
+  return {
+    preventSleepWhileWorking,
+    active: workPowerSaveBlockerId !== null,
+    refCount: workPowerSaveRefCount,
+    sources: collectWorkPowerSaveSources(),
+  };
+});
+
+ipcMain.handle(
+  "settings:setPowerSave",
+  (_event, settings: { preventSleepWhileWorking?: unknown }) => {
+    if (typeof settings.preventSleepWhileWorking !== "boolean") {
+      return {
+        success: false,
+        error: "preventSleepWhileWorking must be a boolean",
+      };
+    }
+    preventSleepWhileWorking = settings.preventSleepWhileWorking;
+    writeAppState({ preventSleepWhileWorking });
+    refreshWorkPowerSaveBlocker();
+    return {
+      success: true,
+      preventSleepWhileWorking,
+      active: workPowerSaveBlockerId !== null,
+      refCount: workPowerSaveRefCount,
+      sources: collectWorkPowerSaveSources(),
+    };
+  },
+);
+
 // --- App State IPC ---
 // --- Bridge Message Injection IPC ---
 ipcMain.handle(
@@ -4653,6 +4754,10 @@ ipcMain.handle("appState:load", () => readAppState());
 
 ipcMain.handle("appState:save", (_event, state: Partial<AppState>) => {
   writeAppState(state);
+  if (typeof state.preventSleepWhileWorking === "boolean") {
+    preventSleepWhileWorking = state.preventSleepWhileWorking;
+    refreshWorkPowerSaveBlocker();
+  }
   return { success: true };
 });
 
@@ -4919,6 +5024,7 @@ app.on("window-all-closed", () => {
     fsManager.stopAllWatching();
     agentWatchdog.stop();
     missionBundle?.dispose();
+    stopWorkPowerSaveBlocker("window-all-closed");
     app.quit();
   }
   // macOS: keep managers alive so agents/orchestrator persist across window close/reopen
@@ -4943,6 +5049,7 @@ app.on("before-quit", () => {
   fsManager.stopAllWatching();
   agentWatchdog.stop();
   missionBundle?.dispose();
+  stopWorkPowerSaveBlocker("before-quit");
   // Shared static server outlives individual windows — close it only here.
   try {
     staticServer?.close();

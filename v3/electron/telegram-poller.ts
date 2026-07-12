@@ -132,6 +132,8 @@ export interface TelegramPollerDeps {
   sleepImpl?: (ms: number) => Promise<void>;
   /** Injectable logger (tests). Defaults to console. */
   logger?: Pick<Console, "log" | "warn" | "error">;
+  /** Called when the registered poll-loop set changes. */
+  onLoopActivityChange?: () => void;
 }
 
 /** Result of an outbound sendMessage — never carries the bot token. */
@@ -246,10 +248,14 @@ export class TelegramPoller {
     if (this.loops.has(projectId)) return;
     const handle: LoopHandle = { stop: false, done: Promise.resolve() };
     this.loops.set(projectId, handle);
+    this.deps.onLoopActivityChange?.();
     handle.done = this.runLoop(projectId, handle).finally(() => {
       // Only delete if this exact handle is still the registered one (a
       // stop→restart could have replaced it).
-      if (this.loops.get(projectId) === handle) this.loops.delete(projectId);
+      if (this.loops.get(projectId) === handle) {
+        this.loops.delete(projectId);
+        this.deps.onLoopActivityChange?.();
+      }
     });
     this.log.log(`[TelegramPoller] started poll loop for project ${projectId}`);
   }
@@ -259,6 +265,7 @@ export class TelegramPoller {
     if (!handle) return;
     handle.stop = true;
     this.loops.delete(projectId);
+    this.deps.onLoopActivityChange?.();
     // Drop any pending-reply nudge timers for this project so they don't fire
     // (or keep the process alive) after the loop is gone.
     this.clearPendingReply(projectId);
@@ -731,6 +738,11 @@ export class TelegramPoller {
   /** True if a poll loop is currently registered for the project (tests). */
   hasLoop(projectId: string): boolean {
     return this.loops.has(projectId);
+  }
+
+  /** True if any project currently has a registered poll loop. */
+  hasActiveLoops(): boolean {
+    return this.loops.size > 0;
   }
 
   /** Last inbound chatId recorded for the project, or undefined (tests). */
