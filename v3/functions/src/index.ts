@@ -3955,3 +3955,526 @@ export const scheduledExpireBetaGrants = functions.pubsub
     );
     return null;
   });
+
+// ============================================
+// Admin Analytics Dashboard (v1) — 크로스유저 집계
+// ============================================
+// 기획: docs/analytics-dashboard-plan.md
+//
+// 기존 getCostSummary/getCostLogs 는 전부 `WHERE userId = @uid` 자기조회라
+// 어드민 전체 집계가 불가능하다. 아래 콜러블은 그 uid 필터를 제거/그룹바이한
+// requireAdmin 게이트 전용 집계기다.
+//
+// 프라이버시(§5): PII(이메일·이름·전화·개별 uid) 절대 미노출. 집계·카운트·비율만
+// 반환하고 개별 row 는 내리지 않는다. events/task_outcomes/heartbeats 는 익명
+// clientId 공간이므로 개인 식별을 시도하지 않는다.
+//
+// 데이터 세계 분리(§0):
+//   (A) 사업 데이터 = Firestore(subscriptions/founders/waitlist) + BQ cost_logs
+//       — 항상 켜짐, 식별 가능(신뢰축).
+//   (B) 익명 제품사용 = BQ events/task_outcomes/agent_heartbeats
+//       — 기본 OFF + 옵트인/도그푸드만 송신 → 프로덕션 희소(6/22 이후 공백).
+//       콜러블은 빈 구간도 안전 처리하고, 표본 크기를 함께 반환해 UI 가
+//       "옵트인 N 기준" 라벨을 달 수 있게 한다.
+
+// 조회 기간(일)을 안전하게 파싱한다. 기본 30, 상한 365(BQ 스캔·비용 가드).
+function parseAnalyticsDays(data: unknown, def = 30): number {
+  const raw = (data as { days?: unknown } | null | undefined)?.days;
+  const n = Number(raw ?? def);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "days must be a positive integer",
+    );
+  }
+  return Math.min(n, 365);
+}
+
+// BQ 집계 행을 { key → count } 분포로 접는다(빈 결과 안전).
+function foldDistribution(
+  rows: Array<Record<string, unknown>>,
+  keyCol: string,
+  countCol = "n",
+): Array<{ key: string; count: number }> {
+  return rows.map((r) => ({
+    key: r[keyCol] == null || r[keyCol] === "" ? "(none)" : String(r[keyCol]),
+    count: toNumber(r[countCol] as number | string | undefined),
+  }));
+}
+
+/**
+ * getAdminBusinessSummary — 사업 KPI(🟢 Firestore, 항상 켜짐·식별 가능).
+ *
+ * subscriptions/founders/waitlist 를 카운트/비율로만 집계하고, agents 라이브
+ * 로스터 + 롤링 비용을 덧붙인다. 이메일 등 PII 는 절대 select 하지 않는다.
+ *
+ * params: { days?: number } — 신규 가입/이탈 윈도우(기본 30).
+ * returns: {
+ *   rangeDays, generatedAt,
+ *   subscriptions: { total, byStatus, byPlanActive, byProviderActive,
+ *     paidProActive, founderGrantActive, newInWindow, churnedInWindow,
+ *     pastDue, proConversionRateVsSubscribers, proConversionRateVsWaitlist },
+ *   founders: { total, accessGranted, interviewCompleted, feedbackSubmitted },
+ *   waitlist: { total, newInWindow },
+ *   agents: { liveCount, byStatus, rollingTotalCost, rollingTotalTokens },
+ * }
+ */
+export const getAdminBusinessSummary = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const cutoffMs = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+
+    // ── 구독(subscriptions) — 티어/상태/제공자 분포 + 전환·이탈 ────────────
+    const subSnap = await db.collection("subscriptions").limit(10000).get();
+    const byStatus: Record<string, number> = {};
+    const byPlanActive: Record<string, number> = {};
+    const byProviderActive: Record<string, number> = {};
+    let paidProActive = 0;
+    let founderGrantActive = 0;
+    let newInWindow = 0;
+    let churnedInWindow = 0;
+    let pastDue = 0;
+    const PAID_PRO_PLANS = new Set(["pro", "team", "team_plus"]);
+
+    for (const doc of subSnap.docs) {
+      const v = doc.data() as Record<string, unknown>;
+      const status = typeof v.status === "string" ? v.status : "unknown";
+      const plan = typeof v.planType === "string" ? v.planType : "unknown";
+      const provider =
+        typeof v.paymentProvider === "string" ? v.paymentProvider : "unknown";
+
+      byStatus[status] = (byStatus[status] || 0) + 1;
+      if (status === "past_due") pastDue++;
+
+      if (status === "active") {
+        byPlanActive[plan] = (byPlanActive[plan] || 0) + 1;
+        byProviderActive[provider] = (byProviderActive[provider] || 0) + 1;
+        if (PAID_PRO_PLANS.has(plan) && provider !== "founder_grant") {
+          paidProActive++;
+        }
+        if (provider === "founder_grant") founderGrantActive++;
+      }
+
+      const createdMs = tsToMillis(v.createdAt);
+      if (createdMs != null && createdMs >= cutoffMs) newInWindow++;
+      const canceledMs = tsToMillis(v.canceledAt);
+      if (
+        (status === "canceled" || status === "past_due") &&
+        canceledMs != null &&
+        canceledMs >= cutoffMs
+      ) {
+        churnedInWindow++;
+      }
+    }
+
+    // ── 파운더(founders) ────────────────────────────────────────────────
+    const founderSnap = await db
+      .collection(FOUNDERS_COLLECTION)
+      .limit(10000)
+      .get();
+    let accessGranted = 0;
+    let interviewCompleted = 0;
+    let feedbackSubmitted = 0;
+    for (const doc of founderSnap.docs) {
+      const v = doc.data() as Record<string, unknown>;
+      if (v.accessGrantedAt != null) accessGranted++;
+      if (v.interviewCompleted === true) interviewCompleted++;
+      if (v.feedbackSubmittedAt != null || v.feedbackId != null) {
+        feedbackSubmitted++;
+      }
+    }
+
+    // ── 대기자(waitlist) — 이메일 미노출, 카운트만 ────────────────────────
+    const waitlistTotalSnap = await db
+      .collection("betatester50_waitlist")
+      .count()
+      .get();
+    const waitlistTotal = waitlistTotalSnap.data().count;
+    // 신규 신청(윈도우) — createdAt 인덱스 존재(getFounderWaitlist orderBy 선례).
+    const waitlistNewSnap = await db
+      .collection("betatester50_waitlist")
+      .where("createdAt", ">=", admin.firestore.Timestamp.fromMillis(cutoffMs))
+      .count()
+      .get();
+    const waitlistNewInWindow = waitlistNewSnap.data().count;
+
+    // ── 에이전트 라이브 로스터 + 롤링 비용 ──────────────────────────────
+    // ⚠️ agents/<id> 는 라이브 상태 doc(가변, 스폰당 불변 로그 아님) — 전체
+    // 스폰 이력이 아니라 "현재 로스터 + 롤링 누적비용"만 신뢰 가능(§1.5).
+    const agentSnap = await db.collection("agents").limit(10000).get();
+    const agentsByStatus: Record<string, number> = {};
+    let rollingTotalCost = 0;
+    let rollingTotalTokens = 0;
+    for (const doc of agentSnap.docs) {
+      const v = doc.data() as Record<string, unknown>;
+      const status = typeof v.status === "string" ? v.status : "unknown";
+      agentsByStatus[status] = (agentsByStatus[status] || 0) + 1;
+      rollingTotalCost += toNumber(v.totalCost as number | undefined);
+      const t =
+        (v.totalTokens as number | undefined) ??
+        ((v.totalInputTokens as number | undefined) ?? 0) +
+          ((v.totalOutputTokens as number | undefined) ?? 0);
+      rollingTotalTokens += toNumber(t as number | undefined);
+    }
+
+    // Pro 전환율(§2.1). "활성 사용자" 정확 분모는 익명 BQ 라 계정단위 불가 →
+    // 신뢰 가능한 식별 분모(구독 총계·대기자)로 두 개의 비율을 명시 반환한다.
+    const proConversionRateVsSubscribers =
+      subSnap.size > 0 ? paidProActive / subSnap.size : 0;
+    const proConversionRateVsWaitlist =
+      waitlistTotal > 0 ? paidProActive / waitlistTotal : 0;
+
+    return {
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      subscriptions: {
+        total: subSnap.size,
+        byStatus,
+        byPlanActive,
+        byProviderActive,
+        paidProActive,
+        founderGrantActive,
+        pastDue,
+        newInWindow,
+        churnedInWindow,
+        proConversionRateVsSubscribers,
+        proConversionRateVsWaitlist,
+      },
+      founders: {
+        total: founderSnap.size,
+        accessGranted,
+        interviewCompleted,
+        feedbackSubmitted,
+      },
+      waitlist: {
+        total: waitlistTotal,
+        newInWindow: waitlistNewInWindow,
+      },
+      agents: {
+        liveCount: agentSnap.size,
+        byStatus: agentsByStatus,
+        rollingTotalCost,
+        rollingTotalTokens,
+      },
+    };
+  },
+);
+
+/**
+ * getAdminUsageSummary — 제품 사용/활성(🟡 BQ events + task_outcomes).
+ *
+ * userId 필터 없이 전체 집계. userId 컬럼은 익명 clientId 공간이므로 개인 식별을
+ * 하지 않고, DISTINCT 카운트(표본 크기)만 노출한다. 표본이 옵트인/도그푸드
+ * 편향임을 UI 가 라벨할 수 있도록 sampleClientCount 를 함께 반환한다.
+ * 6/22 이후 데이터 공백이어도 전부 빈 배열/0 으로 안전 반환.
+ *
+ * params: { days?: number } (기본 30)
+ */
+export const getAdminUsageSummary = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const outcomesTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_TASK_OUTCOMES_TABLE}\``;
+    const since = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+
+    // DAU(일별 고유 clientId) + 일별 총 이벤트(히스토리 사용량)
+    const activeByDayQuery = `
+      SELECT
+        FORMAT_DATE('%F', DATE(timestamp)) AS date,
+        COUNT(DISTINCT userId) AS dau,
+        COUNT(*) AS events
+      FROM ${eventsTable}
+      WHERE timestamp >= ${since}
+      GROUP BY date
+      ORDER BY date ASC
+    `;
+    // WAU + 윈도우 전체 표본 크기(고유 clientId)
+    const sampleQuery = `
+      SELECT
+        COUNT(DISTINCT userId) AS sampleClients,
+        COUNT(DISTINCT IF(
+          timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY),
+          userId, NULL)) AS wau
+      FROM ${eventsTable}
+      WHERE timestamp >= ${since}
+    `;
+    // 상위 이벤트 랭킹
+    const topEventsQuery = `
+      SELECT COALESCE(event, '(none)') AS event, COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE timestamp >= ${since}
+      GROUP BY event
+      ORDER BY n DESC
+      LIMIT 25
+    `;
+    // 에이전트 스폰수(일별·역할별·모델별)
+    const spawnsByDayQuery = `
+      SELECT FORMAT_DATE('%F', DATE(timestamp)) AS date, COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE event = 'agent:spawned' AND timestamp >= ${since}
+      GROUP BY date ORDER BY date ASC
+    `;
+    const spawnsByRoleQuery = `
+      SELECT role AS key, COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE event = 'agent:spawned' AND timestamp >= ${since}
+      GROUP BY role ORDER BY n DESC
+    `;
+    const spawnsByModelQuery = `
+      SELECT model AS key, COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE event = 'agent:spawned' AND timestamp >= ${since}
+      GROUP BY model ORDER BY n DESC
+    `;
+    // 태스크 성공률·완료시간(task_outcomes 전체)
+    const taskSummaryQuery = `
+      SELECT
+        COUNT(*) AS total,
+        COUNTIF(success = true) AS succeeded,
+        AVG(durationMs) AS avgDurationMs
+      FROM ${outcomesTable}
+      WHERE completedAt >= FORMAT_TIMESTAMP('%FT%TZ', ${since})
+    `;
+
+    const params = { days: rangeDays };
+    const q = (query: string) =>
+      bigquery.query({ query, params, location: BQ_LOCATION });
+
+    const [
+      [activeByDayRows],
+      [sampleRows],
+      [topEventsRows],
+      [spawnsByDayRows],
+      [spawnsByRoleRows],
+      [spawnsByModelRows],
+      [taskSummaryRows],
+    ] = await Promise.all([
+      q(activeByDayQuery),
+      q(sampleQuery),
+      q(topEventsQuery),
+      q(spawnsByDayQuery),
+      q(spawnsByRoleQuery),
+      q(spawnsByModelQuery),
+      q(taskSummaryQuery),
+    ]);
+
+    const activeByDay = (activeByDayRows as Array<Record<string, unknown>>).map(
+      (r) => ({
+        date: String(r.date ?? ""),
+        dau: toNumber(r.dau as number | string | undefined),
+        events: toNumber(r.events as number | string | undefined),
+      }),
+    );
+    const sample = (sampleRows as Array<Record<string, unknown>>)[0] ?? {};
+    const taskRow =
+      (taskSummaryRows as Array<Record<string, unknown>>)[0] ?? {};
+    const taskTotal = toNumber(taskRow.total as number | string | undefined);
+    const taskSucceeded = toNumber(
+      taskRow.succeeded as number | string | undefined,
+    );
+
+    return {
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      // 표본 신뢰도 라벨링(§0-B, T0-3): 옵트인/도그푸드 편향 표본 크기.
+      sampleClientCount: toNumber(
+        sample.sampleClients as number | string | undefined,
+      ),
+      wau: toNumber(sample.wau as number | string | undefined),
+      activeByDay,
+      topEvents: foldDistribution(
+        topEventsRows as Array<Record<string, unknown>>,
+        "event",
+      ),
+      spawnsByDay: (spawnsByDayRows as Array<Record<string, unknown>>).map(
+        (r) => ({
+          date: String(r.date ?? ""),
+          count: toNumber(r.n as number | string | undefined),
+        }),
+      ),
+      spawnsByRole: foldDistribution(
+        spawnsByRoleRows as Array<Record<string, unknown>>,
+        "key",
+      ),
+      spawnsByModel: foldDistribution(
+        spawnsByModelRows as Array<Record<string, unknown>>,
+        "key",
+      ),
+      tasks: {
+        total: taskTotal,
+        succeeded: taskSucceeded,
+        successRate: taskTotal > 0 ? taskSucceeded / taskTotal : 0,
+        avgDurationMs: toNumber(
+          taskRow.avgDurationMs as number | string | undefined,
+        ),
+      },
+    };
+  },
+);
+
+/**
+ * getAdminModelSummary — 모델 선정/라우팅 지표(🟡 BQ).
+ *
+ * (1) cost_logs 모델별 비용(admin 버전 = getCostSummary 의 uid 필터 제거)
+ * (2) 일별 총비용(히스토리 비용/사용)
+ * (3) task_outcomes 모델×role 성공률·완료시간·평균비용 + 비용대비효율
+ * (4) events.metadata(JSON STRING) 의 dispatch:decision 라우팅 결정 분포
+ *
+ * params: { days?: number } (기본 30)
+ */
+export const getAdminModelSummary = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
+    const outcomesTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_TASK_OUTCOMES_TABLE}\``;
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const sinceTs = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+
+    // (1) 모델별 비용(전체 사용자 — uid 필터 제거)
+    const costByModelQuery = `
+      SELECT
+        COALESCE(model, '(none)') AS model,
+        SUM(COALESCE(inputTokens, 0) + COALESCE(outputTokens, 0) +
+            COALESCE(cacheReadTokens, 0) + COALESCE(cacheWriteTokens, 0))
+          AS totalTokens,
+        SUM(COALESCE(totalCost, 0)) AS cost,
+        COUNT(*) AS n
+      FROM ${costTable}
+      WHERE timestamp >= ${sinceTs}
+      GROUP BY model
+      ORDER BY cost DESC
+    `;
+    // (2) 일별 총비용(히스토리)
+    const costByDayQuery = `
+      SELECT
+        FORMAT_DATE('%F', DATE(timestamp)) AS date,
+        SUM(COALESCE(totalCost, 0)) AS cost
+      FROM ${costTable}
+      WHERE timestamp >= ${sinceTs}
+      GROUP BY date
+      ORDER BY date ASC
+    `;
+    // (3) task_outcomes 모델×role 성공률·완료시간·평균비용
+    const modelRoleQuery = `
+      SELECT
+        COALESCE(model, '(none)') AS model,
+        COALESCE(role, '(none)') AS role,
+        COUNT(*) AS total,
+        COUNTIF(success = true) AS succeeded,
+        AVG(durationMs) AS avgDurationMs,
+        AVG(totalCost) AS avgCost
+      FROM ${outcomesTable}
+      WHERE completedAt >= FORMAT_TIMESTAMP('%FT%TZ', ${sinceTs})
+      GROUP BY model, role
+      ORDER BY total DESC
+    `;
+    // (4) dispatch:decision 라우팅 결정 분포(metadata JSON STRING 파싱)
+    const routingSelectedQuery = `
+      SELECT JSON_VALUE(metadata, '$.selectedModel') AS key, COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
+      GROUP BY key ORDER BY n DESC
+    `;
+    const routingReasonQuery = `
+      SELECT JSON_VALUE(metadata, '$.decisionReason') AS key, COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
+      GROUP BY key ORDER BY n DESC
+    `;
+    const routingReuseQuery = `
+      SELECT JSON_VALUE(metadata, '$.reuseVsSpawn') AS key, COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
+      GROUP BY key ORDER BY n DESC
+    `;
+    const routingModeQuery = `
+      SELECT JSON_VALUE(metadata, '$.modelSelectionMode') AS key, COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
+      GROUP BY key ORDER BY n DESC
+    `;
+
+    const params = { days: rangeDays };
+    const q = (query: string) =>
+      bigquery.query({ query, params, location: BQ_LOCATION });
+
+    const [
+      [costByModelRows],
+      [costByDayRows],
+      [modelRoleRows],
+      [routingSelectedRows],
+      [routingReasonRows],
+      [routingReuseRows],
+      [routingModeRows],
+    ] = await Promise.all([
+      q(costByModelQuery),
+      q(costByDayQuery),
+      q(modelRoleQuery),
+      q(routingSelectedQuery),
+      q(routingReasonQuery),
+      q(routingReuseQuery),
+      q(routingModeQuery),
+    ]);
+
+    const costByModel = (costByModelRows as Array<Record<string, unknown>>).map(
+      (r) => ({
+        model: String(r.model ?? "(none)"),
+        totalTokens: toNumber(r.totalTokens as number | string | undefined),
+        cost: toNumber(r.cost as number | string | undefined),
+        count: toNumber(r.n as number | string | undefined),
+      }),
+    );
+
+    const modelRoleStats = (
+      modelRoleRows as Array<Record<string, unknown>>
+    ).map((r) => {
+      const total = toNumber(r.total as number | string | undefined);
+      const succeeded = toNumber(r.succeeded as number | string | undefined);
+      const avgCost = toNumber(r.avgCost as number | string | undefined);
+      const successRate = total > 0 ? succeeded / total : 0;
+      return {
+        model: String(r.model ?? "(none)"),
+        role: String(r.role ?? "(none)"),
+        total,
+        succeeded,
+        successRate,
+        avgDurationMs: toNumber(r.avgDurationMs as number | string | undefined),
+        avgCost,
+        // 비용대비효율(성공률 ÷ 평균비용). 평균비용 0/미기록이면 null.
+        costEfficiency: avgCost > 0 ? successRate / avgCost : null,
+      };
+    });
+
+    return {
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      costByModel,
+      costByDay: (costByDayRows as Array<Record<string, unknown>>).map((r) => ({
+        date: String(r.date ?? ""),
+        cost: toNumber(r.cost as number | string | undefined),
+      })),
+      modelRoleStats,
+      routing: {
+        bySelectedModel: foldDistribution(
+          routingSelectedRows as Array<Record<string, unknown>>,
+          "key",
+        ),
+        byDecisionReason: foldDistribution(
+          routingReasonRows as Array<Record<string, unknown>>,
+          "key",
+        ),
+        byReuseVsSpawn: foldDistribution(
+          routingReuseRows as Array<Record<string, unknown>>,
+          "key",
+        ),
+        byModelSelectionMode: foldDistribution(
+          routingModeRows as Array<Record<string, unknown>>,
+          "key",
+        ),
+      },
+    };
+  },
+);
