@@ -18,6 +18,17 @@ on:
           - mac
           - win
           - linux
+      dogfood:
+        # Internal/dogfood build: injects VITE_FIRST_PARTY_TELEMETRY=1 so the
+        # first-party analytics gate (lib/telemetry/firstPartyGate.ts) initializes
+        # ON. Leave FALSE for anything an external/beta user could receive.
+        # PIPA (제15조): external builds must transmit no analytics without opt-in,
+        # so this is opt-in-only, gated to workflow_dispatch, and can never fire on
+        # a tag/release build (see the "Enable first-party telemetry" step guard).
+        description: "Internal dogfood build (enables first-party telemetry). Leave false for external release."
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -206,6 +217,28 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }}
           EOF
+
+      # First-party telemetry (Firebase Functions → BigQuery) is OFF by default;
+      # firstPartyGate.ts only opts a build in when VITE_FIRST_PARTY_TELEMETRY=1 is
+      # inlined by Vite at build time. Append that flag ONLY for opt-in internal
+      # dogfood builds. Triple-guarded so it can never reach an external release:
+      #   1. workflow_dispatch only (never push/PR/tag),
+      #   2. the explicit `dogfood=true` input,
+      #   3. not a tag ref (the `release` job — the sole path that publishes to
+      #      melocream/marblo-releases / the auto-updater — runs on refs/tags/v*).
+      # Any external/beta artifact therefore ships with the flag UNSET → gate OFF →
+      # PIPA (제15조: 침묵은 동의가 아니다) upheld.
+      - name: Enable first-party telemetry (internal/dogfood builds only)
+        if: >-
+          steps.guard.outputs.build == 'true'
+          && github.event_name == 'workflow_dispatch'
+          && github.event.inputs.dogfood == 'true'
+          && !startsWith(github.ref, 'refs/tags/')
+        working-directory: v3
+        shell: bash
+        run: |
+          echo "VITE_FIRST_PARTY_TELEMETRY=1" >> .env
+          echo "::notice::Internal dogfood build — first-party telemetry ENABLED (VITE_FIRST_PARTY_TELEMETRY=1)."
 
       - name: Build app
         if: steps.guard.outputs.build == 'true'
