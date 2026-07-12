@@ -137,6 +137,79 @@ describe("ptyMirrorStore", () => {
     expect(usePtyMirrorStore.getState().getLines("nope")).toEqual([]);
   });
 
+  it("release deletes the buffer and clears the attached flag", () => {
+    usePtyMirrorStore.getState().attach("s1");
+    usePtyMirrorStore.getState().ingest("s1", "hi\n");
+    expect(usePtyMirrorStore.getState().attached["s1"]).toBe(true);
+
+    usePtyMirrorStore.getState().release("s1");
+
+    expect(usePtyMirrorStore.getState().attached["s1"]).toBeUndefined();
+    expect(usePtyMirrorStore.getState().buffers["s1"]).toBeUndefined();
+    expect(usePtyMirrorStore.getState().getLines("s1")).toEqual([]);
+  });
+
+  it("release calls pty.removeListeners for the session", () => {
+    const removed: string[] = [];
+    (
+      window as unknown as {
+        electronAPI?: {
+          pty?: {
+            onData?: (id: string, cb: (data: string) => void) => void;
+            removeListeners?: (id: string) => void;
+          };
+        };
+      }
+    ).electronAPI = {
+      pty: {
+        onData: () => {},
+        removeListeners: (id: string) => removed.push(id),
+      },
+    };
+
+    usePtyMirrorStore.getState().attach("s1");
+    usePtyMirrorStore.getState().release("s1");
+    expect(removed).toEqual(["s1"]);
+  });
+
+  it("attach after release RE-registers the IPC listener (dead-mirror recovery)", () => {
+    // P2-7: a destructive removeListeners (project switch / tab close) kills the
+    // mirror's listener. release() clears `attached` so the next attach()
+    // re-registers instead of early-returning into a permanently dead mirror.
+    const registrations: Record<string, number> = {};
+    (
+      window as unknown as {
+        electronAPI?: {
+          pty?: {
+            onData?: (id: string, cb: (data: string) => void) => void;
+            removeListeners?: (id: string) => void;
+          };
+        };
+      }
+    ).electronAPI = {
+      pty: {
+        onData: (sessionId: string) => {
+          registrations[sessionId] = (registrations[sessionId] ?? 0) + 1;
+        },
+        removeListeners: () => {},
+      },
+    };
+
+    usePtyMirrorStore.getState().attach("s1");
+    expect(registrations["s1"]).toBe(1);
+
+    usePtyMirrorStore.getState().release("s1");
+    usePtyMirrorStore.getState().attach("s1");
+
+    // detach would keep attached=true and NOT re-register; release must.
+    expect(registrations["s1"]).toBe(2);
+    expect(usePtyMirrorStore.getState().attached["s1"]).toBe(true);
+  });
+
+  it("release on unknown session is a no-op (no throw)", () => {
+    expect(() => usePtyMirrorStore.getState().release("nope")).not.toThrow();
+  });
+
   it("attach drains pty.replay() into the buffer (past output on mount)", async () => {
     // Without this, MiniTerminal stays blank until the next live chunk —
     // an agent that's currently idle looks "not connected".

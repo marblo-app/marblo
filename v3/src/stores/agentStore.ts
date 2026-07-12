@@ -6,6 +6,8 @@ import {
   convertTimestamps,
 } from "../services/firestore";
 import * as agentService from "../services/agentService";
+import { usePtyMirrorStore } from "./ptyMirrorStore";
+import { getSessionIdForAgent } from "./agentSessionMap";
 import { useProjectStore } from "./projectStore";
 import { useSubscriptionStore } from "./subscriptionStore";
 import { useUiStore } from "./uiStore";
@@ -138,6 +140,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       await window.electronAPI.agent.remove(id).catch(() => {});
       // Delete from Firestore
       await agentService.deleteAgent(id);
+      // Fleet 프리뷰 미러 회수 — 삭제된 에이전트의 버퍼/attached/리스너가 앱
+      // 수명 내내 누적되지 않게(P2-8). 세션 id 는 launch 시 매핑되며 없으면
+      // 결정적 `agent-${id}` fallback.
+      usePtyMirrorStore.getState().release(getSessionIdForAgent(id));
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to delete agent",
@@ -277,12 +283,51 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   clearError: () => set({ error: null }),
 }));
 
-// ── Agent sync status listener ──────────────────────────────
-// Bridge Server sends 'agent:syncStatus' when dispatch_task changes an agent's
-// status. We update Firestore so the real-time subscription picks it up in the UI.
-if (typeof window !== "undefined" && window.electronAPI?.agent?.onSyncStatus) {
-  window.electronAPI.agent.onSyncStatus(
-    ({ agentName, status, currentTaskId }) => {
+// ── Agent status listeners (module-level IPC bridge) ─────────────────
+// Registered once per renderer window. Two channels feed Firestore:
+//
+//   • agent:syncStatus  — Bridge Server BROADCASTS to every window when
+//     dispatch_task changes an agent's status (bridge-server.ts). If each
+//     window wrote, N popout windows would issue N identical (idempotent)
+//     Firestore writes → quota waste (P2-6). So only the LEADER window (the
+//     main, non-popout window) performs the write.
+//   • agent:statusChanged — main SCOPES this to the owning project's window(s)
+//     (main.ts:538 sendToProject), i.e. delivery already dedupes to the window
+//     showing that project. That window writes. Leader-gating THIS would drop
+//     the write whenever a popout — not the main window — owns the agent's
+//     project, so it is intentionally left project-scoped, not leader-gated.
+//
+// Tradeoff noted: popout windows inherit the main window's project on creation,
+// so in the dominant topology the leader (main) does hold the synced agent and
+// the write lands. A popout that later switches to a *different* project than
+// main is the rare edge where a syncStatus write could be skipped; the status
+// re-syncs on the next event (recoverable, matches the P2 rating).
+//
+// HMR: Vite re-evaluates this module on save. Without teardown each reload
+// stacks another ipcRenderer.on, multiplying every Firestore write. The
+// import.meta.hot.dispose below clears both channels via the generic off()
+// (off(channel) === ipcRenderer.removeAllListeners(channel)) before re-eval —
+// no dedicated preload removal path is required.
+
+// Leader = the single main window. Popouts (Board/Code/History detached tabs)
+// launch with --marblo-new-window. Absent API (unit tests / SSR) → treat as
+// leader so the write still happens in non-Electron contexts.
+function isLeaderWindow(): boolean {
+  if (typeof window === "undefined") return false;
+  const isNew = window.electronAPI?.window?.isNewWindow?.();
+  return isNew !== true;
+}
+
+function registerAgentStatusListeners(): void {
+  if (typeof window === "undefined") return;
+  const agentApi = window.electronAPI?.agent;
+  if (!agentApi) return;
+
+  if (agentApi.onSyncStatus) {
+    agentApi.onSyncStatus(({ agentName, status, currentTaskId }) => {
+      // Broadcast channel — only the leader window writes (see header note).
+      if (!isLeaderWindow()) return;
+
       const updates: Partial<{
         status: AgentStatus;
         currentTaskId: string | null;
@@ -306,38 +351,44 @@ if (typeof window !== "undefined" && window.electronAPI?.agent?.onSyncStatus) {
           );
         });
       }
-    },
-  );
+    });
+  }
+
+  // AgentManager emits 'agent:statusChanged' when a PTY transitions
+  // (launch → idle, exit → stopped, restart-fail → error). On app restart the
+  // reconnect path re-spawns the PTY and emits this so the renderer can sync
+  // Firestore back to "idle". Without it, auto-reconnected agents stayed
+  // visible as their pre-quit status and looked dead though the PTY was alive.
+  //
+  // agentId here is the Firestore doc id, so we update the doc directly instead
+  // of name-matching like onSyncStatus does above.
+  if (agentApi.onStatusChange) {
+    agentApi.onStatusChange(({ agentId, status }) => {
+      if (!agentId) return;
+      agentService
+        .updateAgent(agentId, { status: status as AgentStatus })
+        .catch((err) => {
+          // Non-fatal: doc may not exist yet (race with Firestore subscribe)
+          // or may have been deleted. Log for visibility only.
+          console.warn(
+            "[AgentStore] Failed to sync PTY status to Firestore:",
+            agentId,
+            status,
+            err,
+          );
+        });
+    });
+  }
 }
 
-// ── Agent PTY status listener ──────────────────────────────
-// AgentManager broadcasts 'agent:statusChanged' when a PTY transitions
-// (launch → idle, exit → stopped, restart-fail → error). On app restart
-// the reconnect path re-spawns the PTY and emits this so the renderer can
-// sync Firestore back to "idle". Without this, agents that auto-reconnected
-// stayed visible as their pre-quit status (often "stopped"/"working") and
-// looked dead even though the PTY was alive.
-//
-// agentId here is the Firestore doc id (same as AgentManager's internal id
-// for agents that were created through the normal UI path), so we update
-// the doc directly instead of name-matching like onSyncStatus does above.
-if (
-  typeof window !== "undefined" &&
-  window.electronAPI?.agent?.onStatusChange
-) {
-  window.electronAPI.agent.onStatusChange(({ agentId, status }) => {
-    if (!agentId) return;
-    agentService
-      .updateAgent(agentId, { status: status as AgentStatus })
-      .catch((err) => {
-        // Non-fatal: doc may not exist yet (race with Firestore subscribe)
-        // or may have been deleted. Log for visibility only.
-        console.warn(
-          "[AgentStore] Failed to sync PTY status to Firestore:",
-          agentId,
-          status,
-          err,
-        );
-      });
+registerAgentStatusListeners();
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    if (typeof window === "undefined") return;
+    // Drop this module's listeners so the re-evaluated module re-registers
+    // exactly once instead of stacking a second handler on each channel.
+    window.electronAPI?.off?.("agent:syncStatus");
+    window.electronAPI?.off?.("agent:statusChanged");
   });
 }

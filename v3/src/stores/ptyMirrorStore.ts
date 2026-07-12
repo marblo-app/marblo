@@ -37,6 +37,11 @@ interface PtyMirrorState {
 
   attach: (sessionId: string, capacity?: number) => void;
   detach: (sessionId: string) => void;
+  // detach 와 달리 "세션이 영구 종료됐다"는 신호. buffers[id]·attached[id]·
+  // 해당 세션의 ipcRenderer 리스너·pending/timer 를 전부 회수한다. PTY exit /
+  // agent delete / 프로젝트 전환(detachAllSessions 가 removeListeners 로 미러
+  // 리스너를 이미 destructive 하게 제거하는 지점)에서 호출.
+  release: (sessionId: string) => void;
   reset: (sessionId: string) => void;
   // 외부에서 직접 데이터 주입 (test 용 + replay 흐름에서 활용).
   ingest: (sessionId: string, chunk: string) => void;
@@ -76,7 +81,7 @@ const flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function scheduleFlush(
   sessionId: string,
-  apply: (sessionId: string) => void
+  apply: (sessionId: string) => void,
 ): void {
   if (flushTimers.has(sessionId)) return;
   const timer = setTimeout(() => {
@@ -182,6 +187,49 @@ export const usePtyMirrorStore = create<PtyMirrorState>((set, get) => {
         flushTimers.delete(sessionId);
       }
       pendingChunks.delete(sessionId);
+    },
+
+    release: (sessionId) => {
+      // detach 가 남겨두는 것들(buffer + attached 플래그 + 등록된 리스너)을
+      // 전부 회수한다. "이 세션은 다시 안 그린다"가 확정된 지점 전용:
+      //   - PTY exit / agent delete (세션 자체가 사라짐)
+      //   - 프로젝트 전환: terminalStore 가 pty.removeListeners 로 미러 리스너를
+      //     이미 제거했는데 attached=true 로 남으면 다음 attach()가 109에서
+      //     early-return → 데드 미러. 여기서 attached 를 지워야 재마운트 시
+      //     리스너가 재등록된다.
+      //
+      // attached 플래그를 지우는 것과 리스너 제거는 한 쌍이어야 한다(불변식:
+      // attached==true ⟺ 리스너 등록됨). 플래그만 지우고 리스너를 남기면 세션
+      // id 재사용(agent restart) 시 attach()가 두 번째 리스너를 얹어 중복
+      // 미러가 된다. 그래서 removeListeners 를 함께 부른다 — release 시점엔 PTY
+      // 가 이미 죽었거나 채널을 통째로 접는 지점이라 destructive 제거가 안전.
+      const t = flushTimers.get(sessionId);
+      if (t) {
+        clearTimeout(t);
+        flushTimers.delete(sessionId);
+      }
+      pendingChunks.delete(sessionId);
+
+      const api =
+        typeof window !== "undefined"
+          ? (
+              window as unknown as {
+                electronAPI?: {
+                  pty?: { removeListeners?: (id: string) => void };
+                };
+              }
+            ).electronAPI
+          : undefined;
+      api?.pty?.removeListeners?.(sessionId);
+
+      set((s) => {
+        if (!(sessionId in s.buffers) && !(sessionId in s.attached)) return s;
+        const buffers = { ...s.buffers };
+        const attached = { ...s.attached };
+        delete buffers[sessionId];
+        delete attached[sessionId];
+        return { buffers, attached };
+      });
     },
 
     reset: (sessionId) => {
