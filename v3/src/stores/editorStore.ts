@@ -116,7 +116,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
 
     try {
-      const content = await window.electronAPI.fs.readFile(filePath);
+      const content = await window.electronAPI.fs.readFile(
+        get().rootPath ?? "",
+        filePath,
+      );
       const name = getFileName(filePath);
       const language = getLanguage(name);
 
@@ -177,7 +180,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!file || !file.isModified) return;
 
     try {
-      await window.electronAPI.fs.writeFile(filePath, file.content);
+      await window.electronAPI.fs.writeFile(
+        get().rootPath ?? "",
+        filePath,
+        file.content,
+      );
       set({
         // Re-read openFiles: content may have changed during the async write.
         openFiles: get().openFiles.map((f) =>

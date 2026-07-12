@@ -521,9 +521,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   fs: {
     readTree: (rootPath: string) => ipcRenderer.invoke("fs:readTree", rootPath),
-    readFile: (filePath: string) => ipcRenderer.invoke("fs:readFile", filePath),
-    writeFile: (filePath: string, content: string) =>
-      ipcRenderer.invoke("fs:writeFile", { filePath, content }),
+    readFile: (rootPath: string, filePath: string) =>
+      ipcRenderer.invoke("fs:readFile", { rootPath, filePath }),
+    writeFile: (rootPath: string, filePath: string, content: string) =>
+      ipcRenderer.invoke("fs:writeFile", { rootPath, filePath, content }),
     gitStatus: (rootPath: string) =>
       ipcRenderer.invoke("fs:gitStatus", rootPath),
     gitDiff: (filePath: string) => ipcRenderer.invoke("fs:gitDiff", filePath),
@@ -551,8 +552,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("fs:copy", { rootPath, fromPath, toPath }),
     revealInFinder: (targetPath: string) =>
       ipcRenderer.invoke("fs:revealInFinder", targetPath),
-    readFileBase64: (filePath: string): Promise<string> =>
-      ipcRenderer.invoke("fs:readFileBase64", filePath),
+    readFileBase64: (rootPath: string, filePath: string): Promise<string> =>
+      ipcRenderer.invoke("fs:readFileBase64", { rootPath, filePath }),
     // Electron 32+ removed File.path; webUtils.getPathForFile is the supported
     // way to resolve a dropped file's absolute path (called from preload).
     getPathForFile: (file: File): string => webUtils.getPathForFile(file),

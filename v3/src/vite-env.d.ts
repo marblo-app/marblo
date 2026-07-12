@@ -14,8 +14,12 @@ interface FileNode {
 
 interface FsAPI {
   readTree: (rootPath: string) => Promise<FileNode[]>;
-  readFile: (filePath: string) => Promise<string>;
-  writeFile: (filePath: string, content: string) => Promise<void>;
+  readFile: (rootPath: string, filePath: string) => Promise<string>;
+  writeFile: (
+    rootPath: string,
+    filePath: string,
+    content: string,
+  ) => Promise<void>;
   gitStatus: (rootPath: string) => Promise<Record<string, string>>;
   gitDiff: (
     filePath: string,
@@ -48,7 +52,7 @@ interface FsAPI {
     toPath: string,
   ) => Promise<{ success: boolean; fromPath: string; toPath: string }>;
   revealInFinder: (targetPath: string) => Promise<{ success: boolean }>;
-  readFileBase64: (filePath: string) => Promise<string>;
+  readFileBase64: (rootPath: string, filePath: string) => Promise<string>;
   getPathForFile: (file: File) => string;
   importPaths: (args: {
     rootPath: string;

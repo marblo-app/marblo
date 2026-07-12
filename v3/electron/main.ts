@@ -605,12 +605,34 @@ let staticServerStart: Promise<number> | null = null;
 function buildStaticServer(): http.Server {
   const distPath = path.join(__dirname, "../dist");
   return http.createServer((req, res) => {
-    let filePath = path.join(
-      distPath,
-      req.url === "/" ? "index.html" : req.url || "index.html",
+    // Strip query string / fragment and percent-decode before touching the fs,
+    // so `/index.html?v=1` and `%2e%2e` are handled correctly.
+    const rawPath = (req.url || "/").split(/[?#]/, 1)[0];
+    let urlPath: string;
+    try {
+      urlPath = decodeURIComponent(rawPath);
+    } catch {
+      urlPath = rawPath;
+    }
+    let filePath = path.normalize(
+      path.join(distPath, urlPath === "/" ? "index.html" : urlPath),
     );
-    // SPA fallback: if the requested file doesn't exist, serve index.html.
-    if (!fs.existsSync(filePath)) {
+    // Path-traversal guard: reject anything that escapes distPath (e.g.
+    // `GET /../../../.marblo/bridge-token`) with 403 rather than serving it.
+    if (!filePath.startsWith(distPath + path.sep)) {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
+    // Serve only regular files; SPA-fallback to index.html for missing paths
+    // and for directories (a dir path would make createReadStream throw EISDIR).
+    let isFile = false;
+    try {
+      isFile = fs.statSync(filePath).isFile();
+    } catch {
+      isFile = false;
+    }
+    if (!isFile) {
       filePath = path.join(distPath, "index.html");
     }
     const ext = path.extname(filePath).toLowerCase();
@@ -630,7 +652,15 @@ function buildStaticServer(): http.Server {
     res.writeHead(200, {
       "Content-Type": mimeTypes[ext] || "application/octet-stream",
     });
-    fs.createReadStream(filePath).pipe(res);
+    const stream = fs.createReadStream(filePath);
+    // Without this, a stream error (e.g. TOCTOU delete between statSync and
+    // open, or EISDIR) is an uncaught exception that crashes the main process
+    // and white-screens every window. Headers are already sent, so just end.
+    stream.on("error", () => {
+      if (!res.headersSent) res.writeHead(404);
+      res.end();
+    });
+    stream.pipe(res);
   });
 }
 
@@ -2698,13 +2728,28 @@ ipcMain.handle("fs:readTree", (_event, rootPath: string) => {
   return fsManager.readTree(rootPath);
 });
 
-ipcMain.handle("fs:readFile", (_event, filePath: string) => {
-  return fsManager.readFile(filePath);
-});
+ipcMain.handle(
+  "fs:readFile",
+  (_event, { rootPath, filePath }: { rootPath: string; filePath: string }) => {
+    // Containment guard, symmetric with the mutation handlers below — blocks
+    // reads of arbitrary absolute paths (e.g. ~/.ssh/config) via this IPC.
+    fsGuard(rootPath, filePath);
+    return fsManager.readFile(filePath);
+  },
+);
 
 ipcMain.handle(
   "fs:writeFile",
-  (_event, { filePath, content }: { filePath: string; content: string }) => {
+  (
+    _event,
+    {
+      rootPath,
+      filePath,
+      content,
+    }: { rootPath: string; filePath: string; content: string },
+  ) => {
+    // Containment guard — blocks writes of arbitrary absolute paths.
+    fsGuard(rootPath, filePath);
     fsManager.writeFile(filePath, content);
   },
 );
@@ -2817,10 +2862,18 @@ ipcMain.handle(
 
 // Read a file as base64 — used by the Code tab's ImagePreview to render raster
 // images (png/jpg/webp/…), whose bytes are meaningless as utf-8 text.
-ipcMain.handle("fs:readFileBase64", async (_event, filePath: string) => {
-  const buf = await fs.promises.readFile(filePath);
-  return buf.toString("base64");
-});
+ipcMain.handle(
+  "fs:readFileBase64",
+  async (
+    _event,
+    { rootPath, filePath }: { rootPath: string; filePath: string },
+  ) => {
+    // Containment guard, symmetric with the mutation handlers.
+    fsGuard(rootPath, filePath);
+    const buf = await fs.promises.readFile(filePath);
+    return buf.toString("base64");
+  },
+);
 
 // Import external OS files (e.g. dragged from Finder) into a project directory.
 // srcPaths are arbitrary absolute paths; destDir must live under rootPath

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { imageMime, isSvgFile, svgDataUrl } from "../../lib/imageFiles";
+import { useEditorStore } from "../../stores/editorStore";
 import { CodeEditor } from "./CodeEditor";
 
 interface ImagePreviewProps {
@@ -39,7 +40,7 @@ export function ImagePreview({
     setDataUrl(null);
     setError(null);
     window.electronAPI.fs
-      .readFileBase64(filePath)
+      .readFileBase64(useEditorStore.getState().rootPath ?? "", filePath)
       .then((b64) => {
         if (alive) setDataUrl(`data:${imageMime(filePath)};base64,${b64}`);
       })
