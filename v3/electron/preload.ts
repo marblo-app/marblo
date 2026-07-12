@@ -57,6 +57,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
       accessToken?: string;
       error?: string;
     }> => ipcRenderer.invoke("auth:googleLoopback"),
+    syncAgentCustomToken: (
+      customToken: string,
+    ): Promise<{ ok: boolean; uid?: string; error?: string }> =>
+      ipcRenderer.invoke("auth:syncAgentCustomToken", { customToken }),
+    clearAgentCustomToken: (): Promise<{
+      ok: boolean;
+      error?: string;
+    }> => ipcRenderer.invoke("auth:clearAgentCustomToken"),
   },
   // Resolved Claude Code binary used to launch agents (path + version).
   claude: {

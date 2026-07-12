@@ -21,7 +21,7 @@ import {
   type QueryConstraint,
   type QuerySnapshot,
 } from "firebase/firestore";
-import { db } from "./firebase.js";
+import { db, getCurrentAuthUid } from "./firebase.js";
 import {
   resolveContext,
   resolveContextForWrite,
@@ -3443,12 +3443,13 @@ export function registerTools(server: McpServer): void {
         );
       }
 
+      const callerUid = getCurrentAuthUid();
       const ref = await addDoc(collection(db, "pendingInstructions"), {
         projectId,
         taskId: task_id ?? null,
         targetAgentId: target_agent_id,
         message,
-        fromUserId: from_user_id || "",
+        fromUserId: from_user_id || callerUid || "",
         fromUserName: from_user_name || "",
         sourceType: source_type || "other",
         isDelivered: false,

@@ -1032,6 +1032,9 @@ function getMCPServerEnv(
   if (process.env.MARBLO_BRIDGE_TOKEN) {
     env.MARBLO_BRIDGE_TOKEN = process.env.MARBLO_BRIDGE_TOKEN;
   }
+  if (process.env.MARBLO_FIREBASE_CUSTOM_TOKEN) {
+    env.MARBLO_FIREBASE_CUSTOM_TOKEN = process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
+  }
 
   // Agent ID for audit trail logging
   if (agentId) {

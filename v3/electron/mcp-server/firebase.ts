@@ -2,7 +2,11 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-import { getAuth, signInAnonymously } from "firebase/auth";
+import {
+  getAuth,
+  signInAnonymously,
+  signInWithCustomToken,
+} from "firebase/auth";
 
 type FirebaseWebConfig = {
   apiKey: string;
@@ -82,9 +86,39 @@ const app =
   getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 export const db = getFirestore(app);
 
-// MCP 서버는 별도 프로세스로 실행되어 Firebase Auth 컨텍스트가 없음.
-// 익명 인증으로 Firestore 보안 규칙의 isAuthenticated() 체크를 통과.
+// MCP 서버는 별도 프로세스로 실행되어 renderer Firebase Auth 컨텍스트가 없음.
+// main 이 전달한 custom token 이 있으면 실제 사용자 uid 로 로그인하고, 없으면
+// 기존 익명 인증으로 fallback 해 배포 전/로그인 전 경로를 보존한다.
 const auth = getAuth(app);
+
+export function getCurrentAuthUid(): string | null {
+  return auth.currentUser?.uid ?? null;
+}
+
+function getFirebaseAuthErrorCode(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+  }
+
+  return "unknown";
+}
+
+async function signInWithCustomTokenOrAnonymousFallback(
+  customToken: string,
+): Promise<void> {
+  try {
+    await signInWithCustomToken(auth, customToken);
+  } catch (err) {
+    console.error(
+      `[MCP] Firebase custom-token auth failed; falling back to anonymous (code=${getFirebaseAuthErrorCode(
+        err,
+      )})`,
+      err,
+    );
+    await signInAnonymously(auth);
+  }
+}
 
 // 인증이 네트워크 지연 등으로 영영 settle 되지 않아도 서버 기동을 막지 않도록
 // 타임아웃 가드를 둔다. 만료되면 경고만 남기고 진행하며, 이후 Firestore 호출은
@@ -117,9 +151,16 @@ export const authReady: Promise<void> = new Promise<void>((resolve) => {
   // 인증이 먼저 끝나면 이 타이머가 프로세스 종료를 막지 않게 unref.
   if (typeof timer.unref === "function") timer.unref();
 
-  signInAnonymously(auth)
+  const customToken = process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
+  const signIn = customToken
+    ? signInWithCustomTokenOrAnonymousFallback(customToken)
+    : signInAnonymously(auth);
+
+  signIn
     .then(() => {
-      console.error("[MCP] Firebase anonymous auth OK");
+      console.error(
+        `[MCP] Firebase auth OK (anonymous=${auth.currentUser?.isAnonymous ?? "unknown"})`,
+      );
     })
     .catch((err) => {
       console.error("[MCP] Firebase anonymous auth failed:", err);

@@ -3,19 +3,18 @@ import {
   getAuth,
   onAuthStateChanged,
   signInAnonymously,
+  signInWithCustomToken,
   type Auth,
 } from "firebase/auth";
 import { initializeFirestore } from "firebase/firestore";
 
 // Main 프로세스 전용 firebase 인스턴스 — pending-instruction-listener / mcp-server
-// 와 같은 패턴 (별도 named app + anonymous auth).
+// 와 같은 패턴 (별도 named app).
 //
 // Auth 주의:
-//   - missions 룰은 firestore.rules 에서 isAuthenticated 만 검사 (v3.1 hardening
-//     까지 한시적). isProjectMember 로 다시 좁히면 main 의 anon uid 가 members
-//     리스트에 없으므로 write 가 모두 실패한다. 그 시점에는 renderer 가 id token
-//     을 IPC 로 전달하고 main 이 signInWithCustomToken 으로 갈아끼우는 흐름이 필요.
-//   - tasks/agents 룰은 isAuthenticated 만 검사하므로 anon auth 로 충분.
+//   - renderer 가 Cloud Function 에서 받은 custom token 을 IPC 로 전달하면
+//     main 이 실제 사용자 uid 로 signInWithCustomToken 한다.
+//   - token 이 아직 없으면 기존 익명 인증을 유지해 배포 전/로그인 전 회귀를 막는다.
 
 const APP_NAME = "mission-engine";
 const AUTH_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000];
@@ -39,7 +38,24 @@ function getFirebaseAuthErrorCode(error: unknown): string {
   return "unknown";
 }
 
-function startAnonymousAuth(auth: Auth): Promise<void> {
+async function signInWithCustomTokenOrAnonymousFallback(
+  auth: Auth,
+  customToken: string,
+): Promise<void> {
+  try {
+    await signInWithCustomToken(auth, customToken);
+  } catch (error) {
+    console.error(
+      `[MissionEngine] custom-token auth failed; falling back to anonymous (code=${getFirebaseAuthErrorCode(
+        error,
+      )})`,
+      error,
+    );
+    await signInAnonymously(auth);
+  }
+}
+
+function startMainFirebaseAuth(auth: Auth): Promise<void> {
   return new Promise((resolve) => {
     let done = false;
     let attempt = 0;
@@ -56,7 +72,9 @@ function startAnonymousAuth(auth: Auth): Promise<void> {
       }
       unsubscribe?.();
 
-      console.log("[MissionEngine] anonymous firebase auth OK");
+      console.log(
+        `[MissionEngine] firebase auth OK (anonymous=${auth.currentUser?.isAnonymous ?? "unknown"})`,
+      );
       resolve();
     };
 
@@ -74,14 +92,26 @@ function startAnonymousAuth(auth: Auth): Promise<void> {
 
       attempt += 1;
       try {
-        await signInAnonymously(auth);
+        const customToken = process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
+        if (customToken) {
+          await signInWithCustomTokenOrAnonymousFallback(auth, customToken);
+        } else {
+          await signInAnonymously(auth);
+          const lateCustomToken = process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
+          if (lateCustomToken && auth.currentUser?.isAnonymous) {
+            await signInWithCustomTokenOrAnonymousFallback(
+              auth,
+              lateCustomToken,
+            );
+          }
+        }
         finish();
       } catch (error) {
         if (done) return;
 
         const delayMs = getAnonymousAuthRetryDelayMs(attempt);
         console.error(
-          `[MissionEngine] anonymous firebase auth failed (attempt ${attempt}; retrying in ${delayMs}ms; code=${getFirebaseAuthErrorCode(
+          `[MissionEngine] firebase auth failed (attempt ${attempt}; retrying in ${delayMs}ms; code=${getFirebaseAuthErrorCode(
             error,
           )})`,
           error,
@@ -153,7 +183,7 @@ export function getMissionFirebaseApp(): {
   // self-heal after transient network or Electron net stack startup failures.
   const authReady = isTestMode
     ? Promise.resolve()
-    : startAnonymousAuth(getAuth(app));
+    : startMainFirebaseAuth(getAuth(app));
 
   cached = { app, authReady };
   return cached;

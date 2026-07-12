@@ -16,8 +16,20 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/projects/$(projectId)).data;
     }
 
+    function taskExists(taskId) {
+      return exists(/databases/$(database)/documents/tasks/$(taskId));
+    }
+
+    function getTask(taskId) {
+      return get(/databases/$(database)/documents/tasks/$(taskId)).data;
+    }
+
     function isProjectMember(projectId) {
       return request.auth.uid in getProject(projectId).members;
+    }
+
+    function isTaskProjectMember(taskId) {
+      return taskExists(taskId) && isProjectMember(getTask(taskId).projectId);
     }
 
     function isProjectOwner(projectId) {
@@ -76,36 +88,39 @@ service cloud.firestore {
     }
 
     // ===== Tasks =====
-    // ⚠️ 의도적으로 isAuthenticated() 만 검사한다 (아직 isProjectMember 미적용).
-    // tasks 는 렌더러(실 사용자 auth) 뿐 아니라 MCP 서버/오케스트레이터가
-    // *익명 인증 client SDK* 로 read/write 한다 (firebase-admin 아님:
-    // electron/mcp-server/firebase.ts 의 signInAnonymously). 익명 uid 는
-    // project.members 에 없으므로 isProjectMember 로 좁히면 에이전트 task
-    // 파이프라인(get_available_tasks / claim_task / create / update)이 전부
-    // PERMISSION_DENIED 로 깨진다.
-    // missions 블록과 동일한 custom-token 마이그레이션(렌더러 id token → main/MCP
-    // signInWithCustomToken) 이후에 chatMessages/taskComments 처럼 일괄 하드닝
-    // 예정. 보안 티켓 a7iz1slr 참조.
+    // 크로스테넌트 누출 차단: renderer, Electron main, MCP 서버 모두 실제 사용자
+    // uid 로 인증한 뒤 자기 프로젝트 task 만 읽고 쓸 수 있다.
     match /tasks/{taskId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow read: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
+      allow create: if isAuthenticated()
+        && isProjectMember(request.resource.data.projectId);
+      allow update: if isAuthenticated()
+        && isProjectMember(resource.data.projectId)
+        && request.resource.data.projectId == resource.data.projectId;
+      allow delete: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
     }
 
     // ===== Agents =====
     match /agents/{agentId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow read: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
+      allow create: if isAuthenticated()
+        && isProjectMember(request.resource.data.projectId);
+      allow update: if isAuthenticated()
+        && isProjectMember(resource.data.projectId)
+        && request.resource.data.projectId == resource.data.projectId;
+      allow delete: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
     }
 
     // ===== Activities =====
     match /activities/{activityId} {
-      // activities reference taskId, need to resolve projectId via task
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow read: if isAuthenticated()
+        && isTaskProjectMember(resource.data.taskId);
+      allow create: if isAuthenticated()
+        && isTaskProjectMember(request.resource.data.taskId);
       allow update: if false;
       allow delete: if false;
     }
@@ -116,19 +131,26 @@ service cloud.firestore {
     // undelivered entries (isDelivered == false) and injects them into the
     // PTY's stdin, then flips isDelivered to true.
     match /pendingInstructions/{instId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow read: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
+      allow create: if isAuthenticated()
+        && isProjectMember(request.resource.data.projectId)
+        && request.resource.data.fromUserId == request.auth.uid;
       // Only the delivery-marking transition is allowed: message and routing
       // fields must remain immutable. This prevents a malicious client from
       // rewriting another user's pending instruction in-flight.
       allow update: if isAuthenticated()
+        && isProjectMember(resource.data.projectId)
         && request.resource.data.projectId == resource.data.projectId
         && request.resource.data.taskId == resource.data.taskId
         && request.resource.data.targetAgentId == resource.data.targetAgentId
         && request.resource.data.message == resource.data.message
         && request.resource.data.fromUserId == resource.data.fromUserId
+        && request.resource.data.fromUserName == resource.data.fromUserName
         && request.resource.data.sourceType == resource.data.sourceType
-        && request.resource.data.createdAt == resource.data.createdAt;
+        && request.resource.data.createdAt == resource.data.createdAt
+        && resource.data.isDelivered == false
+        && request.resource.data.isDelivered == true;
       allow delete: if false;
     }
 
@@ -167,10 +189,15 @@ service cloud.firestore {
 
     // ===== Flows =====
     match /flows/{flowId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow read: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
+      allow create: if isAuthenticated()
+        && isProjectMember(request.resource.data.projectId);
+      allow update: if isAuthenticated()
+        && isProjectMember(resource.data.projectId)
+        && request.resource.data.projectId == resource.data.projectId;
+      allow delete: if isAuthenticated()
+        && isProjectMember(resource.data.projectId);
     }
 
     // ===== Missions (Phase 3) =====

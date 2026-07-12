@@ -36,6 +36,30 @@ const BQ_DATASET = "marblo_telemetry";
 const BQ_EVENTS_TABLE = "events";
 const BQ_COST_TABLE = "cost_logs";
 
+// ═══════════════════════════════════════════════════════════════════
+// Agent Firebase Auth
+// ═══════════════════════════════════════════════════════════════════
+
+export const issueAgentCustomToken = functions.https.onCall(
+  async (_data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다.",
+      );
+    }
+
+    const customToken = await admin
+      .auth()
+      .createCustomToken(context.auth.uid, { marbloAgentAuth: true });
+
+    return {
+      customToken,
+      uid: context.auth.uid,
+    };
+  },
+);
+
 // ─── Config ──────────────────────────────────────────────────────
 const PADDLE_API_KEY = process.env.PADDLE_API_KEY!;
 const PADDLE_WEBHOOK_SECRET = process.env.PADDLE_WEBHOOK_SECRET!;

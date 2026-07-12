@@ -669,6 +669,10 @@ interface AuthAPI {
     accessToken?: string;
     error?: string;
   }>;
+  syncAgentCustomToken: (
+    customToken: string,
+  ) => Promise<{ ok: boolean; uid?: string; error?: string }>;
+  clearAgentCustomToken: () => Promise<{ ok: boolean; error?: string }>;
 }
 
 /** Account-global rate-limit reading for one provider. null fields = no
@@ -725,4 +729,10 @@ interface ElectronAPI {
 
 interface Window {
   electronAPI: ElectronAPI;
+}
+
+declare module "@sentry/electron/renderer" {
+  export function init(opts: Record<string, unknown>): void;
+  export function captureException(err: unknown): void;
+  export function captureMessage(msg: string): void;
 }

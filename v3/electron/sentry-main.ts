@@ -141,10 +141,7 @@ export async function initMainSentry(
       tracesSampleRate: 0.1,
       // Never attach automatic PII (IP, cookies, etc.).
       sendDefaultPii: false,
-      beforeSend: (event) =>
-        scrubMainEvent(event) as ReturnType<
-          NonNullable<Parameters<typeof Sentry.init>[0]["beforeSend"]>
-        >,
+      beforeSend: (event: unknown): unknown => scrubMainEvent(event),
     });
     initialized = true;
     return true;

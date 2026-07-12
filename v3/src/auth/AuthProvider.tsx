@@ -1,6 +1,7 @@
 import { createContext, useEffect, useState, type ReactNode } from "react";
 import {
   onAuthStateChanged,
+  onIdTokenChanged,
   getRedirectResult,
   signInWithPopup,
   signInWithRedirect,
@@ -17,6 +18,10 @@ import {
 } from "firebase/auth";
 import { auth, isPackagedLoopbackAuth } from "../lib/firebase";
 import { t } from "../lib/i18n";
+import {
+  clearAgentFirebaseAuth,
+  syncAgentFirebaseAuth,
+} from "../services/agentAuthService";
 
 export interface AuthContextType {
   user: User | null;
@@ -163,7 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(result.user);
           setLoading(false);
         })
-        .catch((e) => {
+        .catch((e: unknown) => {
           const code = (e as { code?: string })?.code ?? "?";
           console.error(`[auth] getRedirectResult: error code=${code}`, e);
           settled = true;
@@ -181,6 +186,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(timeout);
       unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    if (window.electronAPI?.testMode?.bypassAuth) return;
+
+    const unsubscribe = onIdTokenChanged(auth, (firebaseUser) => {
+      if (!firebaseUser) {
+        clearAgentFirebaseAuth().catch((e: unknown) => {
+          console.warn("[auth] agent Firebase auth clear failed", e);
+        });
+        return;
+      }
+
+      syncAgentFirebaseAuth(firebaseUser)
+        .then(() => {
+          console.info("[auth] agent Firebase auth synced");
+        })
+        .catch((e: unknown) => {
+          console.error("[auth] agent Firebase auth sync failed", e);
+        });
+    });
+
+    return unsubscribe;
   }, []);
 
   // Packaged app (B안, ticket QvaYPAjAW822I0IDiwwZ): the app is served from the

@@ -81,6 +81,10 @@ import {
   type MergeHistoryRecord,
 } from "./worktree-ipc";
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
+import {
+  clearAgentCustomToken,
+  syncAgentCustomToken,
+} from "./firebase-auth-sync";
 import { buildLaneContextId, isLaneContextId } from "./mcp-server/context";
 import {
   getTelegramChannelConfig,
@@ -2751,6 +2755,14 @@ ipcMain.handle("harness:cliVersions", () => {
 ipcMain.handle("auth:googleLoopback", () => {
   return runGoogleLoopbackOAuth();
 });
+
+ipcMain.handle(
+  "auth:syncAgentCustomToken",
+  (_event, input: { customToken?: unknown }) =>
+    syncAgentCustomToken(input?.customToken),
+);
+
+ipcMain.handle("auth:clearAgentCustomToken", () => clearAgentCustomToken());
 
 // --- Board IPC Handlers ---
 interface BoardWorktreeDiffArgs {

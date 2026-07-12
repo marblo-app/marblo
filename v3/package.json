@@ -34,6 +34,7 @@
     "lint:fix": "eslint . --fix",
     "build:mcp": "tsc -p electron/mcp-server/tsconfig.json && node scripts/bundle-mcp.mjs && node scripts/write-mcp-pkg.mjs",
     "mcp": "node dist-mcp/index.js",
+    "backfill:project-members": "node scripts/backfill-project-members.mjs",
     "relock": "bash scripts/relock.sh",
     "sync": "bash scripts/sync-and-rebuild.sh",
     "test": "vitest run",

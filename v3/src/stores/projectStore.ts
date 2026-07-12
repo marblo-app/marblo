@@ -16,6 +16,16 @@ function toProject(raw: Record<string, unknown>): Project {
   return convertTimestamps<Project>(raw, DATE_FIELDS);
 }
 
+function ensureOwnerMember(
+  data: Omit<Project, "id" | "createdAt" | "updatedAt">,
+): Omit<Project, "id" | "createdAt" | "updatedAt"> {
+  if (data.members.includes(data.ownerId)) return data;
+  return {
+    ...data,
+    members: [data.ownerId, ...data.members],
+  };
+}
+
 // Cold-start race: the very first onSnapshot can arrive empty before Firestore
 // has hydrated / the auth token has propagated to the SDK (a permission error is
 // collapsed to [] by subscribeToCollection). Re-arm the listener a few times with
@@ -116,7 +126,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       throw err;
     }
     try {
-      const id = await projectService.createProject(data);
+      const id = await projectService.createProject(ensureOwnerMember(data));
       return id;
     } catch (err) {
       set({
