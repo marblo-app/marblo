@@ -44,6 +44,36 @@ interface OrchResumeLock {
   updatedAt: number;
 }
 
+type OrchestratorMcpEnv = Record<string, string>;
+
+function codexTomlEnvLine(key: string, value: string): string {
+  return `${key} = ${JSON.stringify(value)}`;
+}
+
+function patchCodexMarbloMcpEnv(
+  configPath: string,
+  env: OrchestratorMcpEnv,
+): void {
+  const configContent = fs.readFileSync(configPath, "utf-8");
+  const envEntries = Object.entries(env)
+    .map(([key, value]) => codexTomlEnvLine(key, value))
+    .join("\n");
+  if (!envEntries) return;
+
+  const withoutExistingEnv = configContent
+    .replace(
+      /\n?\[mcp_servers\.marblo\.env\]\n[\s\S]*?(?=\n\[|$)/,
+      "",
+    )
+    .trimEnd();
+
+  fs.writeFileSync(
+    configPath,
+    `${withoutExistingEnv}\n\n[mcp_servers.marblo.env]\n${envEntries}\n`,
+    "utf-8",
+  );
+}
+
 // NOTE: Telegram is NO LONGER owned by any orchestrator. The getUpdates poller
 // is owned directly by electron main (telegram-poller.ts), exactly one per
 // project, so no orchestrator carries `--channels` and there is no per-project
@@ -450,6 +480,11 @@ export class OrchestratorManager {
       }
     }
 
+    const context =
+      this.kind === "mission"
+        ? (this.currentMissionId ?? "")
+        : contextForKind(this.kind);
+
     // Inject MARBLO_BRIDGE_PORT into PTY env AND MCP config
     launchConfig.env.MARBLO_BRIDGE_PORT = String(bridgePort);
     // Per-session bearer token for the bridge's authenticated endpoints. The
@@ -460,38 +495,40 @@ export class OrchestratorManager {
     if (bridgeToken) {
       launchConfig.env.MARBLO_BRIDGE_TOKEN = bridgeToken;
     }
+    if (context) {
+      launchConfig.env.MARBLO_CONTEXT = context;
+    }
+
+    const mcpEnvPatch: OrchestratorMcpEnv = {
+      MARBLO_BRIDGE_PORT: String(bridgePort),
+      MARBLO_PROJECT: projectId,
+    };
+    if (bridgeToken) {
+      mcpEnvPatch.MARBLO_BRIDGE_TOKEN = bridgeToken;
+    }
+    if (context) {
+      mcpEnvPatch.MARBLO_CONTEXT = context;
+    }
 
     // Also patch the MCP config file so the MCP server (node process)
     // gets MARBLO_BRIDGE_PORT — needed for spawn_agent tool
     try {
-      const configContent = fs.readFileSync(
-        launchConfig.mcpConfigPath,
-        "utf-8",
-      );
-      const config = JSON.parse(configContent);
-      if (config.mcpServers?.marblo?.env) {
-        config.mcpServers.marblo.env.MARBLO_BRIDGE_PORT = String(bridgePort);
-        if (bridgeToken) {
-          config.mcpServers.marblo.env.MARBLO_BRIDGE_TOKEN = bridgeToken;
-        }
-        config.mcpServers.marblo.env.MARBLO_PROJECT = projectId;
-        // 미션 오케는 MARBLO_CONTEXT 를 '운전 중인 미션 id' 로 스코프해야 MCP 서버가
-        // create_task/add_activity 를 missionId 로 태깅하고 mission_step_done 을
-        // 그 미션 보고로 해석한다. contextForKind("mission") 은 ""(미설정)이라 그것만
-        // 쓰면 미션 스코프가 배달되지 않아 mission_step_done 이 거부된다. 미션 전환 시
-        // stop+relaunch 하므로 launch 시점의 currentMissionId 가 곧 그 미션이다.
-        const context =
-          this.kind === "mission"
-            ? (this.currentMissionId ?? "")
-            : contextForKind(this.kind);
-        if (context) {
-          config.mcpServers.marblo.env.MARBLO_CONTEXT = context;
-        }
-        fs.writeFileSync(
+      if (launchConfig.model === "gpt") {
+        patchCodexMarbloMcpEnv(launchConfig.mcpConfigPath, mcpEnvPatch);
+      } else {
+        const configContent = fs.readFileSync(
           launchConfig.mcpConfigPath,
-          JSON.stringify(config, null, 2),
           "utf-8",
         );
+        const config = JSON.parse(configContent);
+        if (config.mcpServers?.marblo?.env) {
+          Object.assign(config.mcpServers.marblo.env, mcpEnvPatch);
+          fs.writeFileSync(
+            launchConfig.mcpConfigPath,
+            JSON.stringify(config, null, 2),
+            "utf-8",
+          );
+        }
       }
     } catch (e) {
       // Best-effort, but NOT silent: a failed patch here means the MCP config
