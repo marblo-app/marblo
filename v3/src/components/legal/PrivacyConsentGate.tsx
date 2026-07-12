@@ -7,13 +7,14 @@
  *   2. If consent.version doesn't match CURRENT_POLICY_VERSION → show modal.
  *   3. User clicks 허용/나중에 → save flags → modal closes.
  *   4. Whenever consent flips (modal save or Settings toggle), drive
- *      Sentry init/teardown to match. (GA4 is not used in the app — the
- *      website uses it separately under its own consent.)
+ *      Sentry and first-party telemetry gates to match. (GA4 is not used in
+ *      the app — the website uses it separately under its own consent.)
  */
 import { useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { usePrivacyConsentStore } from "../../stores/privacyConsentStore";
 import { maybeInitSentry } from "../../lib/telemetry/sentry";
+import { setTelemetryEnabled } from "../../services/telemetryService";
 import { PrivacyConsentModal } from "./PrivacyConsentModal";
 
 export function PrivacyConsentGate() {
@@ -21,6 +22,9 @@ export function PrivacyConsentGate() {
   const needsPrompt = usePrivacyConsentStore((s) => s.needsPrompt);
   const hasLoaded = usePrivacyConsentStore((s) => s.hasLoaded);
   const sentryConsent = usePrivacyConsentStore((s) => s.consent.sentry);
+  const firstPartyTelemetry = usePrivacyConsentStore(
+    (s) => s.consent.firstPartyTelemetry,
+  );
   const load = usePrivacyConsentStore((s) => s.load);
 
   // Load consent the first time we have a uid.
@@ -39,6 +43,10 @@ export function PrivacyConsentGate() {
   useEffect(() => {
     maybeInitSentry(sentryConsent).catch(() => {});
   }, [sentryConsent]);
+
+  useEffect(() => {
+    setTelemetryEnabled(firstPartyTelemetry);
+  }, [firstPartyTelemetry]);
 
   // Never surface the blocking modal before consent has been read at least once.
   // The store defaults needsPrompt=true (fail-safe); showing that default during

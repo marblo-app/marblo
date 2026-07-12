@@ -1,9 +1,8 @@
 import { where, type Unsubscribe } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import type { Task, TaskStatus } from "../types/task";
-import telemetry, { getClientId } from "./telemetryService";
+import telemetry, { getClientId, isTelemetryEnabled } from "./telemetryService";
 import { functions } from "../lib/firebase";
-import { firstPartyTelemetryDefaultEnabled } from "../lib/telemetry/firstPartyGate";
 import {
   getDocument,
   queryDocuments,
@@ -191,11 +190,11 @@ export async function updateTaskStatus(
     // over the family enum ("claude") for ML training fidelity.
     const outcomeModel = agentSnap?.detectedModelId ?? agentSnap?.model ?? null;
 
-    // Log task outcome to BigQuery for ML training data — first-party
-    // telemetry, gated OFF by default for the local-only 6/23 build (PIPA).
+    // Log task outcome to BigQuery for ML training data — de-identified
+    // first-party telemetry, gated by the kill-switch and user opt-out.
     // The Firestore task writes above are core product data and stay; only
     // this analytics send is gated. See lib/telemetry/firstPartyGate.ts.
-    if (firstPartyTelemetryDefaultEnabled()) {
+    if (isTelemetryEnabled()) {
       logTaskOutcomeFn({
         outcome: {
           clientId: getClientId(),

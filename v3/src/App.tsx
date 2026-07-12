@@ -17,13 +17,12 @@ import {
 import telemetry from "./services/telemetryService";
 import { t, hasChosenLocale } from "./lib/i18n";
 
-// First-party telemetry is OFF by default (local-only build, PIPA) — the
-// initial enabled-state is resolved from the build flag in telemetryService
-// (see lib/telemetry/firstPartyGate.ts). VITE_DISABLE_TELEMETRY=1 is the hard
-// kill-switch: it force-disables here too, overriding any opt-in, and keeps
-// Cloud Function calls (logTelemetryBatch/logHeartbeat) from ever firing.
+// First-party telemetry is ON by default for de-identified operational metrics.
+// VITE_DISABLE_TELEMETRY=1 is the hard kill-switch: it force-disables here too,
+// overriding any runtime preference, and keeps Cloud Function calls
+// (logTelemetryBatch/logHeartbeat) from ever firing.
 if (import.meta.env.VITE_DISABLE_TELEMETRY === "1") {
-  setTelemetryEnabled(false);
+  setTelemetryEnabled(false, { persist: false });
   console.warn(
     "[DIAG] Telemetry DISABLED — no logTelemetryBatch/logHeartbeat calls",
   );

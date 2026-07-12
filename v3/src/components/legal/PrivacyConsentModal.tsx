@@ -94,7 +94,14 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
     }
     setSubmitting(true);
     try {
-      await save(user.uid, flags, "ko");
+      await save(
+        user.uid,
+        {
+          firstPartyTelemetry: true,
+          ...flags,
+        },
+        "ko",
+      );
     } catch (err) {
       // Fail-open: Firestore write 실패해도 모달은 닫는다. store.save 가
       // local state 까지 안 채웠다면 다음 부팅 때 다시 묻힐 뿐 — 사용자
@@ -118,7 +125,13 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
       // on every launch (only when policy version bumps).
       await save(
         user.uid,
-        { sentry: false, ga4: false, mixpanel: false, overseasTransfer: false },
+        {
+          firstPartyTelemetry: true,
+          sentry: false,
+          ga4: false,
+          mixpanel: false,
+          overseasTransfer: false,
+        },
         "ko",
       );
     } catch (err) {

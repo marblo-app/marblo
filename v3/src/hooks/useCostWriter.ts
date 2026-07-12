@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { httpsCallable } from "firebase/functions";
 import { doc, updateDoc, increment, serverTimestamp } from "firebase/firestore";
 import { functions, db } from "../lib/firebase";
-import { firstPartyTelemetryDefaultEnabled } from "../lib/telemetry/firstPartyGate";
+import { isTelemetryEnabled } from "../services/telemetryService";
 
 const logCostBatch = httpsCallable(functions, "logCostBatch");
 
@@ -25,19 +25,18 @@ const logCostBatch = httpsCallable(functions, "logCostBatch");
 export function useCostWriter() {
   useEffect(() => {
     if (!window.electronAPI?.agent?.onCostUpdate) return;
-    // External cost writes (Firestore agents/<id> roll-ups + BigQuery
-    // logCostBatch) are first-party telemetry — OFF by default for the
-    // local-only 6/23 build (PIPA). No analytics leaves the device unless
-    // opted in via build flag / consent. See lib/telemetry/firstPartyGate.ts.
-    if (!firstPartyTelemetryDefaultEnabled()) {
-      console.info(
-        "[CostWriter] first-party telemetry OFF (local-only build) — skipping Firestore/BigQuery cost writes",
-      );
-      return;
-    }
-
     window.electronAPI.agent.offCostUpdate?.();
     window.electronAPI.agent.onCostUpdate((data) => {
+      // External cost writes (Firestore agents/<id> roll-ups + BigQuery
+      // logCostBatch) are first-party telemetry. Respect the build kill-switch
+      // and the user's runtime opt-out without unregistering the IPC listener.
+      if (!isTelemetryEnabled()) {
+        console.info(
+          "[CostWriter] first-party telemetry OFF — skipping Firestore/BigQuery cost writes",
+        );
+        return;
+      }
+
       // 1. Firestore — agents/<id> rolling totals (atomic increment).
       // Important: do NOT write back agent.model. The cost tracker
       // detects the precise model id from session metadata (e.g.

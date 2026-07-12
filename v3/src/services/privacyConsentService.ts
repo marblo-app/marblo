@@ -3,6 +3,7 @@
  *
  * Schema (`users/<uid>.privacyConsent`):
  *   {
+ *     firstPartyTelemetry: boolean, // de-identified first-party analytics
  *     sentry: boolean,        // crash reports → Sentry (US-hosted)
  *     ga4: boolean,           // usage analytics → GA4 (US-hosted)
  *     mixpanel: boolean,      // product funnel → Mixpanel (Q4 activation)
@@ -12,8 +13,8 @@
  *     locale: string,         // 'ko' | 'en' | 'ja' for re-display in user lang
  *   }
  *
- * Default state when the user has not yet been prompted: every flag false.
- * PIPA 제15조 옵트인 정설 — silence is not consent.
+ * Default state when the user has not yet been prompted: first-party
+ * de-identified analytics true; third-party / overseas flags false.
  */
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
@@ -46,6 +47,7 @@ function logFirestoreError(label: string, err: unknown, uid: string): void {
 export const CURRENT_POLICY_VERSION = "2026-06-01";
 
 export type ConsentFlags = {
+  firstPartyTelemetry: boolean;
   sentry: boolean;
   ga4: boolean;
   mixpanel: boolean;
@@ -59,6 +61,7 @@ export interface PrivacyConsent extends ConsentFlags {
 }
 
 export const DEFAULT_CONSENT: PrivacyConsent = {
+  firstPartyTelemetry: true,
   sentry: false,
   ga4: false,
   mixpanel: false,
@@ -69,6 +72,7 @@ export const DEFAULT_CONSENT: PrivacyConsent = {
 };
 
 interface RawConsent {
+  firstPartyTelemetry?: boolean;
   sentry?: boolean;
   ga4?: boolean;
   mixpanel?: boolean;
@@ -98,6 +102,7 @@ export type GetConsentResult =
 function toConsent(raw: RawConsent | undefined): PrivacyConsent {
   if (!raw) return DEFAULT_CONSENT;
   return {
+    firstPartyTelemetry: raw.firstPartyTelemetry !== false,
     sentry: !!raw.sentry,
     ga4: !!raw.ga4,
     mixpanel: !!raw.mixpanel,

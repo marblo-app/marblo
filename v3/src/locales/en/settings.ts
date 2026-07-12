@@ -82,7 +82,10 @@ export const settings: Record<keyof typeof koSettings, string> = {
   // ── Privacy settings (PrivacySettings) ───────────────────
   "settings.privacy.heading": "Privacy",
   "settings.privacy.optInDescription":
-    "Sending data to the external third party (Sentry) is opt-in. All Marblo features work normally if you decline.",
+    "De-identified usage analytics is on by default and can be turned off anytime. External third-party sends (Sentry) remain opt-in.",
+  "settings.privacy.firstParty.label": "Usage analytics (de-identified)",
+  "settings.privacy.firstParty.hint":
+    "Only anonymous install ID and aggregate metrics go to our GCP (BigQuery). Account UID, code, and input text are excluded.",
   "settings.privacy.sentry.label": "Anonymous crash reports (Sentry)",
   "settings.privacy.sentry.hint": "PII is auto-masked in stack traces.",
   "settings.privacy.bigquery.label": "First-party quality metrics (BigQuery)",

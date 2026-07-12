@@ -50,12 +50,24 @@ interface TelemetryPayload {
   retryOf?: string;
 }
 
-// First-party telemetry (Firebase Functions → BigQuery) is OFF by default.
-// The 6/23 build ships local-only (PIPA): no analytics leaves the device
-// without an explicit opt-in. Enabled only when the build flag is set; the
-// in-app consent toggle flips this at runtime via setTelemetryEnabled() (dev8).
-// See lib/telemetry/firstPartyGate.ts for the policy.
-let telemetryEnabled = firstPartyTelemetryDefaultEnabled();
+const TELEMETRY_ENABLED_KEY = "marblo.telemetry.enabled";
+
+function readPersistedTelemetryEnabled(): boolean | null {
+  try {
+    const raw = localStorage.getItem(TELEMETRY_ENABLED_KEY);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+  } catch {
+    // Storage may be unavailable; fall back to the build-time default.
+  }
+  return null;
+}
+
+// First-party telemetry (Firebase Functions → BigQuery) is ON by default for
+// de-identified operational metrics, unless the hard kill-switch is set or the
+// user has opted out. See lib/telemetry/firstPartyGate.ts for the policy.
+let telemetryEnabled =
+  readPersistedTelemetryEnabled() ?? firstPartyTelemetryDefaultEnabled();
 const eventQueue: TelemetryPayload[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -65,8 +77,23 @@ const MAX_QUEUE_SIZE = 50;
 const logTelemetryBatch = httpsCallable(functions, "logTelemetryBatch");
 const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
-export function setTelemetryEnabled(enabled: boolean) {
-  telemetryEnabled = enabled;
+export function setTelemetryEnabled(
+  enabled: boolean,
+  options: { persist?: boolean } = {},
+) {
+  const next = firstPartyTelemetryDefaultEnabled() && enabled;
+  telemetryEnabled = next;
+  if (options.persist !== false) {
+    try {
+      localStorage.setItem(TELEMETRY_ENABLED_KEY, String(enabled));
+    } catch {
+      // Best-effort preference persistence only.
+    }
+  }
+}
+
+export function isTelemetryEnabled(): boolean {
+  return telemetryEnabled;
 }
 
 const CLIENT_ID_KEY = "marblo.telemetry.clientId";
@@ -100,9 +127,8 @@ export function getClientId(): string {
  * keys and drops free-text user-input keys (prompt/message/…); on top of that
  * we explicitly drop the few account identifiers scrub.ts doesn't know about
  * (senderId/userId/uid/email in metadata). The result is de-identified —
- * defense-in-depth for the 1st-party sink. Note: as of the 6/23 local-only
- * build that sink is OFF by default (see firstPartyGate.ts); scrubbing stays
- * always-on so that even an opted-in build never ships PII.
+ * defense-in-depth for the 1st-party sink. Scrubbing stays always-on so that
+ * default-on or opted-in paths never ship PII.
  *
  * Applied at the single logTelemetry() choke point, so it also covers events
  * injected from the main process via the App.tsx IPC bridge.

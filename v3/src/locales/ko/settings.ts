@@ -79,7 +79,10 @@ export const settings = {
   // ── Privacy settings (PrivacySettings) ───────────────────
   "settings.privacy.heading": "Privacy",
   "settings.privacy.optInDescription":
-    "외부 제3자(Sentry) 송신은 옵트인입니다. 거부해도 마블로 모든 기능은 정상 작동합니다.",
+    "비식별 사용 분석은 기본 켜짐이며 언제든 끌 수 있습니다. 외부 제3자(Sentry) 송신은 옵트인입니다.",
+  "settings.privacy.firstParty.label": "사용 분석 (비식별)",
+  "settings.privacy.firstParty.hint":
+    "익명 설치 ID와 집계 지표만 자체 GCP(BigQuery)에 수집. 계정 UID·코드·입력 텍스트 제외.",
   "settings.privacy.sentry.label": "익명 크래시 리포트 (Sentry)",
   "settings.privacy.sentry.hint": "스택 트레이스에서 PII 자동 마스킹.",
   "settings.privacy.bigquery.label": "자체 운영 품질 지표 (BigQuery)",

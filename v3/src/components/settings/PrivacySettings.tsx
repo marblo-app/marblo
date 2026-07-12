@@ -21,6 +21,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { usePrivacyConsentStore } from "../../stores/privacyConsentStore";
 import type { ConsentFlags } from "../../services/privacyConsentService";
 import { maybeInitSentry } from "../../lib/telemetry/sentry";
+import { setTelemetryEnabled } from "../../services/telemetryService";
 import { useTranslation, t } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 import { PrivacyPolicyPage } from "../legal/PrivacyPolicyPage";
@@ -30,6 +31,11 @@ const ROWS: {
   labelKey: MessageKey;
   hintKey: MessageKey;
 }[] = [
+  {
+    id: "firstPartyTelemetry",
+    labelKey: "settings.privacy.firstParty.label",
+    hintKey: "settings.privacy.firstParty.hint",
+  },
   {
     id: "sentry",
     labelKey: "settings.privacy.sentry.label",
@@ -58,14 +64,23 @@ export function PrivacySettings() {
     maybeInitSentry(consent.sentry).catch(() => {});
   }, [consent.sentry]);
 
+  // Drive first-party analytics from the persisted user preference.
+  useEffect(() => {
+    setTelemetryEnabled(consent.firstPartyTelemetry);
+  }, [consent.firstPartyTelemetry]);
+
   const toggle = async (id: keyof ConsentFlags) => {
     if (!user) return;
     setError(null);
     const next = !consent[id];
     // Optimistic UI
     patchLocal({ [id]: next } as Partial<ConsentFlags>);
+    if (id === "firstPartyTelemetry") {
+      setTelemetryEnabled(next);
+    }
     setBusyKey(id);
     const flags: ConsentFlags = {
+      firstPartyTelemetry: consent.firstPartyTelemetry,
       sentry: consent.sentry,
       ga4: consent.ga4,
       mixpanel: consent.mixpanel,
@@ -86,6 +101,9 @@ export function PrivacySettings() {
     } catch (err) {
       // Roll back optimistic UI on failure
       patchLocal({ [id]: !next } as Partial<ConsentFlags>);
+      if (id === "firstPartyTelemetry") {
+        setTelemetryEnabled(!next);
+      }
       setError(err instanceof Error ? err.message : t("settings.saveFailed"));
     } finally {
       setBusyKey(null);
