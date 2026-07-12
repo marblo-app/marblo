@@ -392,6 +392,18 @@ interface SystemAPI {
   offWake: () => void;
 }
 
+interface SentryBridgeAPI {
+  /** Initialize the main-process Sentry SDK (native crashes + IPC transport).
+   * Driven by the renderer only after opt-in + DSN present. Idempotent; the
+   * main side no-ops without a DSN. Resolves { ok } — false means not
+   * initialized (missing DSN or SDK load failure). */
+  initMain: (opts: {
+    dsn?: string;
+    release?: string;
+    environment?: string;
+  }) => Promise<{ ok: boolean }>;
+}
+
 interface WorktreeStatus {
   branch: string;
   baseRef: string;
@@ -702,6 +714,7 @@ interface ElectronAPI {
   system: SystemAPI;
   connection: ConnectionAPI;
   updater: UpdaterAPI;
+  sentry: SentryBridgeAPI;
 }
 
 interface Window {

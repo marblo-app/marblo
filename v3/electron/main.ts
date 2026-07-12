@@ -66,6 +66,7 @@ import {
 import { CostTracker } from "./cost-tracker";
 import { getAccountRateLimits } from "./account-usage";
 import { mainTelemetry } from "./telemetry";
+import { initMainSentry } from "./sentry-main";
 import {
   buildMissionEngine,
   type BuiltMissionEngine,
@@ -4524,6 +4525,26 @@ ipcMain.handle("modelPreset:get", () => {
     "recommended"
   );
 });
+
+// --- Sentry (main-process crash/error capture) ---
+//
+// Consent-gated + DSN-gated. The renderer drives this over IPC ONLY after the
+// user opts in (privacyConsentStore) and only when VITE_SENTRY_DSN is set —
+// so with no consent or no DSN nothing here ever runs (PIPA + regression-safe).
+// DSN/release/environment are the renderer's single source of truth (inlined
+// from import.meta.env at build time); we forward them here so main doesn't
+// need its own env plumbing. initMainSentry is idempotent and no-ops without a
+// DSN. See electron/sentry-main.ts and src/lib/telemetry/sentry.ts.
+ipcMain.handle(
+  "sentry:init-main",
+  async (
+    _e,
+    opts: { dsn?: string; release?: string; environment?: string },
+  ) => {
+    const ok = await initMainSentry(opts || {});
+    return { ok };
+  },
+);
 
 // --- Subscription plans (patent claim 8 — 구독제 vs 토큰단위 구분) ---
 //

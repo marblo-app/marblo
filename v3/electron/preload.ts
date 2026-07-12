@@ -1,4 +1,10 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+// Sets up the @sentry/electron renderer↔main IPC bridge for this (sandboxed,
+// contextIsolated) preload. Inert until BOTH the main and renderer SDKs are
+// initialized — which only happens after the user opts in AND a DSN is
+// configured (see src/lib/telemetry/sentry.ts). No network on the no-consent
+// path. Required because we use a custom preload; the SDK cannot auto-inject.
+import "@sentry/electron/preload";
 
 const isNewWindow = process.argv.includes("--marblo-new-window=1");
 
@@ -376,6 +382,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     offEvent: () => {
       ipcRenderer.removeAllListeners("telemetry:event");
     },
+  },
+  // Sentry: consent-gated crash/error capture. The renderer calls initMain
+  // ONLY after the user opts in AND VITE_SENTRY_DSN is set; main inits the
+  // @sentry/electron/main SDK (idempotent, no-op without a DSN).
+  sentry: {
+    initMain: (opts: {
+      dsn?: string;
+      release?: string;
+      environment?: string;
+    }) =>
+      ipcRenderer.invoke("sentry:init-main", opts) as Promise<{ ok: boolean }>,
   },
   settings: {
     getApiKeys: () => ipcRenderer.invoke("settings:getApiKeys"),
