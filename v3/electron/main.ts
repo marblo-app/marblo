@@ -1589,6 +1589,12 @@ bridgeServer.setSendTelegramMessage((projectId, text, chatId) =>
   telegramPoller.sendMessage(projectId, text, chatId),
 );
 
+// Periodic Telegram channel-health sweep timer. Hoisted to module scope (set in
+// app.whenReady) so quit handlers can clear it — otherwise, even though it's
+// unref'd, it keeps polling every 4 min with no windows open after
+// window-all-closed on macOS. See setInterval below.
+let telegramHealthTimer: ReturnType<typeof setInterval> | null = null;
+
 function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
   const roots: WorktreeProjectRoot[] = [];
   const addRoot = (
@@ -2322,6 +2328,18 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
     // individual windows and is closed on app quit, not on window close.
     startStaticServer().then((port) => {
       if (win.isDestroyed()) return;
+      // port === 0 means the shared static server failed to bind (see
+      // startStaticServer's resolve(0) path). Loading http://127.0.0.1:0 would
+      // just render a silent blank window, so surface the failure instead.
+      if (!port) {
+        dialog.showErrorBox(
+          "Marblo — 시작 실패",
+          "내부 웹 서버를 시작하지 못했습니다. 이미 실행 중인 다른 Marblo 인스턴스가 " +
+            "포트를 점유하고 있거나 로컬 방화벽/보안 소프트웨어가 127.0.0.1 바인딩을 " +
+            "차단하고 있을 수 있습니다.\n\n앱을 완전히 종료한 뒤 다시 실행해 주세요.",
+        );
+        return;
+      }
       win.loadURL(`http://127.0.0.1:${port}${detachedQuery}`);
     });
   }
@@ -2517,6 +2535,27 @@ function restoreWindowSession(): void {
 }
 
 // --- PTY IPC Handlers ---
+
+// Owner-scoping guard for renderer-supplied PTY ids. ptyOwners maps a PTY sid
+// to the webContents that owns it (set at create / restore / onPtyReady). We
+// accept mutating ops (write/writeAndSubmit/kill/resize) only from the owning
+// window so one window can't drive — or kill — another window's PTY via a
+// guessed/leaked sid. Untracked sids (legacy paths that never registered an
+// owner) are allowed to avoid regressing existing sessions — same permissive
+// fallback posture as sendToOwner. Same-trust app, so this is defence-in-depth,
+// not a hard security boundary.
+function isPtyCallerOwner(senderId: number, id: string): boolean {
+  const owner = ptyOwners.get(id);
+  return owner === undefined || owner === senderId;
+}
+
+// pty:create spawns a PTY with a renderer-supplied command/args. This is a
+// CONSCIOUS trust decision: the terminal exists to run arbitrary user commands,
+// so the bridge's ALLOWED_SPAWN_COMMANDS allowlist (which gates the *remote*
+// RCE surface) is deliberately NOT applied here. The renderer is same-origin,
+// same-OS-user, first-party code; an attacker who can call this IPC already has
+// in-process code execution. Guarding it would only break the feature. If the
+// renderer ever loads untrusted remote content this decision must be revisited.
 ipcMain.handle("pty:create", (event, { id, name, command, args, cwd }) => {
   const session = ptyManager.create(id, name, command, args, cwd);
   ptyOwners.set(id, event.sender.id);
@@ -2528,7 +2567,8 @@ ipcMain.handle("pty:create", (event, { id, name, command, args, cwd }) => {
 });
 
 // pty:write uses ipcMain.on (one-way) — keystrokes shouldn't pay invoke's round-trip cost
-ipcMain.on("pty:write", (_event, { id, data }) => {
+ipcMain.on("pty:write", (event, { id, data }) => {
+  if (!isPtyCallerOwner(event.sender.id, id)) return;
   ptyManager.write(id, data);
 });
 
@@ -2539,18 +2579,20 @@ ipcMain.on("pty:write", (_event, { id, data }) => {
 ipcMain.on(
   "pty:writeAndSubmit",
   (
-    _event,
+    event,
     {
       id,
       data,
       bracketedPaste,
     }: { id: string; data: string; bracketedPaste?: boolean },
   ) => {
+    if (!isPtyCallerOwner(event.sender.id, id)) return;
     ptyManager.writeAndSubmit(id, data, undefined, bracketedPaste);
   },
 );
 
-ipcMain.handle("pty:resize", (_event, { id, cols, rows }) => {
+ipcMain.handle("pty:resize", (event, { id, cols, rows }) => {
+  if (!isPtyCallerOwner(event.sender.id, id)) return;
   // Discard any pre-resize buffered output. The PTY was spawned at 80x24
   // and the TUI (Gemini Ink, Codex/Claude TUI variants) rendered its
   // initial frame at those dimensions. Once we resize, the CLI receives
@@ -2573,7 +2615,8 @@ ipcMain.handle("pty:resize", (_event, { id, cols, rows }) => {
   ptyManager.resize(id, cols, rows);
 });
 
-ipcMain.handle("pty:kill", (_event, { id }) => {
+ipcMain.handle("pty:kill", (event, { id }) => {
+  if (!isPtyCallerOwner(event.sender.id, id)) return;
   ptyManager.kill(id);
 });
 
@@ -4751,7 +4794,7 @@ app.whenReady().then(async () => {
   // deaf poller). Only probes active channels; no-op when none are configured.
   // unref'd so it never keeps the process alive on quit. Also reconciles poller
   // loops so a crashed loop is revived and a newly-active channel gets one.
-  const telegramHealthTimer = setInterval(
+  telegramHealthTimer = setInterval(
     () => {
       void runTelegramChannelHealthCheck("interval", {
         onReport: emitTelegramHealth,
@@ -4803,6 +4846,7 @@ app.on("window-all-closed", () => {
     // Non-macOS: full cleanup and quit
     kanbanBridge.detach();
     stopAllOrchestrators();
+    if (telegramHealthTimer) clearInterval(telegramHealthTimer);
     void telegramPoller.stopAll();
     bridgeServer.stop();
     agentManager.stopAll();
@@ -4826,6 +4870,7 @@ app.on("before-quit", () => {
   // Full cleanup when actually quitting (Cmd+Q)
   kanbanBridge.detach();
   stopAllOrchestrators();
+  if (telegramHealthTimer) clearInterval(telegramHealthTimer);
   void telegramPoller.stopAll();
   bridgeServer.stop();
   agentManager.stopAll();
