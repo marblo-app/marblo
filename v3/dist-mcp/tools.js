@@ -28,12 +28,49 @@ const TASK_STATUS_SET = new Set(TASK_STATUS_VALUES);
 function isTaskStatus(s) {
     return TASK_STATUS_SET.has(s);
 }
+// The dispatchable worker-role domain. Mirrors
+// electron/orchestrator/task-decomposer.ts `VALID_ROLES` and the on-disk
+// skills/<role>_agent.md set. A task written with a role no worker claims
+// (a typo like "backedn", or a non-worker label) sits in TODO forever —
+// invisible to get_available_tasks and every dispatch/watchdog feed — so we
+// reject it at create time (P3-13) instead of stranding it silently. NOTE:
+// "orchestrator" is a coordinator singleton, not a claimable task role, and is
+// deliberately excluded.
+const TASK_ROLE_VALUES = ["backend", "frontend", "test", "devops"];
+const TASK_ROLE_SET = new Set(TASK_ROLE_VALUES);
+function isTaskRole(r) {
+    return TASK_ROLE_SET.has(r);
+}
+// Priority domain: integer 1 (low) – 5 (urgent). 0 is the reserved
+// "unprioritized" default for tasks created without an explicit priority (it
+// sorts last under the priority-desc dispatch order). Explicit inputs are
+// range-checked (P3-13) so a fat-fingered 50 / -1 / 3.5 can't skew that sort.
+const TASK_PRIORITY_MIN = 1;
+const TASK_PRIORITY_MAX = 5;
+function isValidPriority(p) {
+    return (Number.isInteger(p) && p >= TASK_PRIORITY_MIN && p <= TASK_PRIORITY_MAX);
+}
+// Task status transition rules for the MCP / board write path.
+//
+// P3-10: this inline table is the authoritative transition set for MCP writes,
+// and is kept byte-identical to the renderer's ENFORCEMENT copy in
+// src/services/stateMachine.ts (imported by taskService.ts `assertTransition`).
+// The two MUST stay in lockstep — an edge legal here but not there (or the
+// reverse) lets the board UI and the MCP backend disagree on what a task may do
+// next. Edit one, edit the other.
+//
+// Do NOT confuse this with electron/mcp-server/state-machine.ts, which holds an
+// older, STRICTER table (e.g. TODO→CLAIMED only) plus a getAction() map. That
+// file currently has no importers in the tree — it is dormant, not the source
+// of truth. This table is intentionally a superset of it: the extra edges
+// (TODO→DONE direct-complete, CLAIMED→REVIEW/DONE, IN_PROGRESS→DONE, …) are
+// deliberate MCP affordances the orchestrator relies on, annotated below.
+//
+// CLAIMED → TODO is the manual claim-recall path (renderer's `unclaimTask`).
+// TODO → DONE is the direct-complete path for logical / never-claimed tasks
+// (orchestrator closes an internal sub-task out without a claim cycle) — no
+// force=true needed.
 const VALID_TRANSITIONS = {
-    // CLAIMED → TODO is the manual claim-recall path (renderer's
-    // `unclaimTask`). Kept in sync with src/services/stateMachine.ts.
-    // TODO → DONE is the direct-complete path for logical / never-claimed tasks
-    // (orchestrator closes an internal sub-task out without a claim cycle) — no
-    // force=true needed.
     TODO: ["CLAIMED", "IN_PROGRESS", "DONE"],
     CLAIMED: ["IN_PROGRESS", "REVIEW", "DONE", "FAILED", "TODO"],
     IN_PROGRESS: ["REVIEW", "DONE", "BLOCKED", "FAILED"],
@@ -277,6 +314,19 @@ async function bindTaskToDispatchedAgent(taskId, agentId) {
     }
     // Already progressed (or the projection write aborted) — rebind the real
     // worker without touching status (respect the reassign guard; never regress).
+    //
+    // P3-9: this bare updateDoc is intentionally last-writer-wins on claimedBy —
+    // and, unlike claim_task, has NO `claimedBy == null` precondition. That is by
+    // design, not an oversight: a dispatch/reuse bind's whole purpose is to
+    // OVERWRITE a stale assignee left by a previous (now-dead) owner, so a
+    // null-precondition would defeat it (a re-dispatched in-flight task would
+    // never rebind to its new real worker). Safe because binds run only from the
+    // single orchestrator writer — no two agents bind the same task concurrently —
+    // and dispatch is serialized per-taskId by withTaskLock, while the
+    // get_available_tasks `!claimedBy` guard keeps a bound-but-still-TODO task out
+    // of the claim feed. If binding ever becomes multi-writer, promote this to a
+    // runTransaction that re-reads and refuses to stomp a claimedBy still owned by
+    // a *live* agent.
     await updateDoc(doc(db, "tasks", taskId), extraTaskFields);
 }
 function nonEmptyString(value) {
@@ -812,6 +862,15 @@ export function registerTools(server) {
             return text("Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter.\n" +
                 "In Electron: agents get this automatically. For external CLI: set MARBLO_PROJECT in MCP config.");
         }
+        // P3-13: reject an out-of-domain role/priority before the write. A typo'd
+        // role produces a task no agent ever claims (stranded in TODO forever);
+        // an out-of-range priority skews the dispatch sort.
+        if (!isTaskRole(role)) {
+            return text(`Error: Invalid role "${role}". Valid roles: ${TASK_ROLE_VALUES.join(", ")}. A task with an unrecognized role is never dispatched (no agent claims it).`);
+        }
+        if (priority !== undefined && !isValidPriority(priority)) {
+            return text(`Error: Invalid priority ${priority}. Use an integer ${TASK_PRIORITY_MIN}-${TASK_PRIORITY_MAX} (higher = more urgent), or omit for unprioritized.`);
+        }
         const bodyInput = { goal, changes, acceptance, notes, description };
         const { error, warning } = validateTaskBodyInput(bodyInput);
         if (error)
@@ -945,6 +1004,25 @@ export function registerTools(server) {
                 }
                 if (depError) {
                     results.push(`  [FAILED] ${t.title || `task #${i}`} — ${depError}`);
+                    continue;
+                }
+                // P3-13: validate an EXPLICIT role/priority per item (a missing role
+                // still defaults to "backend" below — unchanged). Reject typo'd roles
+                // (would strand the task in TODO) and out-of-range priorities, failing
+                // just that item like a depError rather than the whole batch.
+                const roleRaw = t.role;
+                if (roleRaw !== undefined &&
+                    roleRaw !== null &&
+                    roleRaw !== "" &&
+                    !isTaskRole(String(roleRaw))) {
+                    results.push(`  [FAILED] ${t.title || `task #${i}`} — invalid role '${String(roleRaw)}' (valid: ${TASK_ROLE_VALUES.join(", ")})`);
+                    continue;
+                }
+                const prioRaw = t.priority;
+                if (prioRaw !== undefined &&
+                    prioRaw !== null &&
+                    !isValidPriority(Number(prioRaw))) {
+                    results.push(`  [FAILED] ${t.title || `task #${i}`} — invalid priority '${String(prioRaw)}' (use integer ${TASK_PRIORITY_MIN}-${TASK_PRIORITY_MAX})`);
                     continue;
                 }
                 const now = Timestamp.now();
