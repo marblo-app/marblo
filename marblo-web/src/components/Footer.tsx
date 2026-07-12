@@ -30,7 +30,7 @@ export default function Footer() {
           {/* Brand */}
           <div>
             <h3 className="text-lg font-bold text-white mb-2">Marblo</h3>
-            <p className="text-zinc-500 text-sm">{t("description")}</p>
+            <p className="text-zinc-400 text-sm">{t("description")}</p>
           </div>
 
           {/* Product */}
@@ -42,7 +42,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/#features`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
                     ? "기능"
@@ -54,7 +54,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/pricing`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
                     ? "가격"
@@ -66,7 +66,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/download`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
                     ? "다운로드"
@@ -78,7 +78,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/guide`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
                     ? "시작 가이드"
@@ -90,7 +90,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/bugs`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
                     ? "버그 신고"
@@ -111,7 +111,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/lectures`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
                     ? "전체 강의"
@@ -123,7 +123,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/lectures/marblo-v3-masterclass`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {locale === "ko"
                     ? "마블로 v3 마스터클래스"
@@ -144,7 +144,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/legal/terms`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {t("terms")}
                 </Link>
@@ -152,7 +152,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/legal/privacy`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {t("privacy")}
                 </Link>
@@ -160,7 +160,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/legal/refund`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {t("refund")}
                 </Link>
@@ -168,7 +168,7 @@ export default function Footer() {
               <li>
                 <Link
                   href={`/${locale}/legal/business`}
-                  className="text-zinc-500 hover:text-zinc-300 text-sm block mb-2"
+                  className="text-zinc-400 hover:text-white text-sm block mb-2"
                 >
                   {t("business_info")}
                 </Link>
@@ -182,18 +182,18 @@ export default function Footer() {
           <p className="text-zinc-300 text-sm font-semibold mb-3">
             {t("biz_company_name")}
           </p>
-          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5 text-xs text-zinc-500">
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5 text-xs text-zinc-400">
             {businessRows.map(([label, value]) => (
               <div key={label} className="flex gap-2">
-                <dt className="text-zinc-600 shrink-0">{label}:</dt>
-                <dd className="text-zinc-400">{value}</dd>
+                <dt className="text-zinc-400 shrink-0">{label}:</dt>
+                <dd className="text-zinc-200">{value}</dd>
               </div>
             ))}
           </dl>
         </div>
 
         <div className="border-t border-zinc-800/50 pt-8 text-center">
-          <p className="text-zinc-600 text-sm">{t("copyright")}</p>
+          <p className="text-zinc-400 text-sm">{t("copyright")}</p>
         </div>
       </div>
     </footer>
