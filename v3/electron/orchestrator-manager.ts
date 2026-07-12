@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { encodeClaudeProjectDir, claudeProjectDir } from "./claude-paths";
+import type { ModelType } from "./agent-manager";
 import { PtyManager, type DangerEvent } from "./pty-manager";
 import {
   AgentConfigGenerator,
@@ -61,10 +62,7 @@ function patchCodexMarbloMcpEnv(
   if (!envEntries) return;
 
   const withoutExistingEnv = configContent
-    .replace(
-      /\n?\[mcp_servers\.marblo\.env\]\n[\s\S]*?(?=\n\[|$)/,
-      "",
-    )
+    .replace(/\n?\[mcp_servers\.marblo\.env\]\n[\s\S]*?(?=\n\[|$)/, "")
     .trimEnd();
 
   fs.writeFileSync(
@@ -99,6 +97,12 @@ export interface OrchestratorSession {
   // freshly-detected one). Tracked so we can release the cross-process resume
   // lock on exit/stop. Undefined until a session id is known.
   claudeSessionId?: string;
+}
+
+export interface OrchestratorLaunchOptions {
+  modelOverride?: ModelType;
+  handoffPrompt?: string;
+  handoffMode?: "wait" | "takeover";
 }
 
 /**
@@ -226,6 +230,7 @@ export class OrchestratorManager {
     rootPath: string;
     bridgePort: number;
   } | null = null;
+  private lastLaunchOptions?: OrchestratorLaunchOptions;
   private lastOnPtyReady?: (ptySessionId: string) => void;
   // crash auto-restart 가 동일 미션 세션을 이어가도록 마지막 ownerMissionId 보관.
   private lastOwnerMissionId: string | null = null;
@@ -335,6 +340,7 @@ export class OrchestratorManager {
     onPtyReady?: (ptySessionId: string) => void,
     resumeSessionId?: string, // specific session ID or 'latest' for --continue
     ownerMissionId?: string, // kind="mission" 운전 대상 미션 id (세션 store 키잉용)
+    launchOptions?: OrchestratorLaunchOptions,
   ): OrchestratorSession {
     // Stop existing session if any
     if (this.session) {
@@ -344,6 +350,7 @@ export class OrchestratorManager {
     // Store args for auto-restart
     this.lastLaunchArgs = { projectId, rootPath, bridgePort };
     this.lastOnPtyReady = onPtyReady;
+    this.lastLaunchOptions = launchOptions;
     this.stopRequested = false;
     // stop() 이 null 로 리셋하므로 그 다음에 설정한다. crash auto-restart 는 같은
     // 미션 컨텍스트를 유지해야 하므로 lastOwnerMissionId 로도 보관해 재주입한다.
@@ -394,7 +401,8 @@ export class OrchestratorManager {
     // only constructs the launchConfig for that binary; the orchestrator's
     // actual readiness/prompt/session wiring for non-claude models is a
     // separate follow-up (backlog IUj7YTFqJVZvi9AbtTPf).
-    const orchestratorModel = resolveOrchestratorModel();
+    const orchestratorModel: ModelType =
+      launchOptions?.modelOverride ?? resolveOrchestratorModel();
     const launchConfig = this.configGenerator.getLaunchConfig(
       {
         id: sessionId,
@@ -605,7 +613,7 @@ export class OrchestratorManager {
       // Enter to register as a discrete keystroke. Readiness detection
       // mirrors agent-manager so we send only after the CLI is actually
       // accepting input.
-      const initialPrompt =
+      const baseInitialPrompt =
         this.kind === "mission"
           ? [
               "You are the Marblo Mission Orchestrator (B-mode, orchestrator-driven).",
@@ -618,6 +626,9 @@ export class OrchestratorManager {
               `Read the orchestrator skill file: use get_agent_skill("orchestrator")`,
               "Wait for user instructions.",
             ].join(" ");
+      const initialPrompt = launchOptions?.handoffPrompt
+        ? `${baseInitialPrompt}\n\n${launchOptions.handoffPrompt}`
+        : baseInitialPrompt;
 
       let sent = false;
       // Login-screen backstop: the orchestrator is always claude. If it boots
@@ -770,6 +781,7 @@ export class OrchestratorManager {
             this.lastOnPtyReady,
             resumeTarget,
             ownerMission,
+            this.lastLaunchOptions,
           );
         }, delay);
       } else {

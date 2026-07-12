@@ -271,6 +271,23 @@ interface OrchestratorSessionAPI {
      * spawn was blocked because claude is not installed / not logged in. */
     needsAuth?: { model: string; action: string; installed: boolean };
   }>;
+  switch: (args: {
+    projectId: string;
+    rootPath: string;
+    targetModel: string;
+    mode: "wait" | "takeover";
+    resume: "fresh" | "previous";
+  }) => Promise<{
+    sessionId: string;
+    ptySessionId: string;
+    status: string;
+    handoffSummary: {
+      activeMissionCount: number;
+      inFlightTaskCount: number;
+      unresolvedDecisionCount: number;
+    };
+    needsAuth?: { model: string; action: string; installed: boolean };
+  }>;
   stop: () => Promise<void>;
   status: () => Promise<string>;
   listSessions: (rootPath: string) => Promise<

@@ -944,6 +944,7 @@ export async function probeCliAuth(
 export function modelToCliAuth(model: string): CliAuthModel | null {
   if (model === "claude") return "claude";
   if (model === "gpt" || model === "codex") return "codex";
+  if (model === "antigravity") return "antigravity";
   return null;
 }
 

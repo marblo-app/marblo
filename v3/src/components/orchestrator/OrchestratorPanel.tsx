@@ -1,8 +1,19 @@
-import { useRef, useCallback, useState, useEffect, memo } from "react";
+import {
+  useRef,
+  useCallback,
+  useState,
+  useEffect,
+  memo,
+  type ChangeEvent,
+} from "react";
 import { useTranslation } from "../../lib/i18n";
-import { useOrchestratorStore } from "../../stores/orchestratorStore";
+import {
+  useOrchestratorStore,
+  type OrchestratorModel,
+} from "../../stores/orchestratorStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEditorStore } from "../../stores/editorStore";
+import { useTaskStore } from "../../stores/taskStore";
 import { upsertOrchestratorAgentDoc } from "../../services/orchestratorAgentDoc";
 import OrchestratorTerminal from "./OrchestratorTerminal";
 
@@ -36,6 +47,12 @@ interface SessionInfo {
   agentId?: string;
 }
 
+const MODEL_OPTIONS: Array<{ value: OrchestratorModel; label: string }> = [
+  { value: "claude", label: "Claude" },
+  { value: "codex", label: "Codex" },
+  { value: "antigravity", label: "Antigravity" },
+];
+
 export default memo(function OrchestratorPanel() {
   const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -49,6 +66,14 @@ export default memo(function OrchestratorPanel() {
   const setSession = useOrchestratorStore((s) => s.setSession);
   const setStatus = useOrchestratorStore((s) => s.setStatus);
   const clear = useOrchestratorStore((s) => s.clear);
+  const selectedModel = useOrchestratorStore((s) => s.selectedModel);
+  const runningModel = useOrchestratorStore((s) => s.runningModel);
+  const switchStatus = useOrchestratorStore((s) => s.switchStatus);
+  const lastHandoffSummary = useOrchestratorStore((s) => s.lastHandoffSummary);
+  const setSelectedModel = useOrchestratorStore((s) => s.setSelectedModel);
+  const setSwitchStatus = useOrchestratorStore((s) => s.setSwitchStatus);
+  const setHandoffSummary = useOrchestratorStore((s) => s.setHandoffSummary);
+  const tasks = useTaskStore((s) => s.tasks);
 
   // Resolved Claude Code build that agents actually launch with. Shown in the
   // header so a stale shadowing install (old model list) is immediately visible.
@@ -67,8 +92,27 @@ export default memo(function OrchestratorPanel() {
   }, []);
   const [panelHeight, setPanelHeight] = useState(computeDefaultHeight);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
+  const [showSwitchConfirm, setShowSwitchConfirm] = useState(false);
+  const [pendingSwitchModel, setPendingSwitchModel] =
+    useState<OrchestratorModel | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const draggingRef = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    window.electronAPI.orchestratorModel
+      .get()
+      .then((model) => {
+        if (!alive) return;
+        const normalized =
+          model === "codex" || model === "antigravity" ? model : "claude";
+        setSelectedModel(normalized);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [setSelectedModel]);
 
   const handleDragStart = useCallback(
     (e: React.MouseEvent) => {
@@ -129,7 +173,12 @@ export default memo(function OrchestratorPanel() {
   if (!currentProject) return null;
 
   const isRunning = status === "running" || status === "starting";
+  const isSwitching = switchStatus !== "idle" && switchStatus !== "error";
   const height = isCollapsed ? COLLAPSED_HEIGHT : panelHeight;
+  const activeTaskCount = tasks.filter((task) =>
+    ["CLAIMED", "IN_PROGRESS", "BLOCKED", "REVIEW"].includes(task.status),
+  ).length;
+  const targetSwitchModel = pendingSwitchModel ?? selectedModel;
 
   const handleStartWithSession = async (resumeSessionId?: string) => {
     setShowSessionPicker(false);
@@ -138,6 +187,7 @@ export default memo(function OrchestratorPanel() {
     const cwd = rootPath || "~";
     try {
       setStatus("starting");
+      await window.electronAPI.orchestratorModel.set(selectedModel);
       const result = await window.electronAPI.orchestratorSession.launch(
         projectId,
         cwd,
@@ -151,7 +201,7 @@ export default memo(function OrchestratorPanel() {
         return;
       }
       if (result) {
-        setSession(result.sessionId, result.ptySessionId);
+        setSession(result.sessionId, result.ptySessionId, selectedModel);
         setStatus("running");
 
         // Upsert the single canonical orchestrator agent doc (stable ID
@@ -168,6 +218,76 @@ export default memo(function OrchestratorPanel() {
     } catch (err) {
       console.error("[Orchestrator] Manual launch failed:", err);
       setStatus("error");
+    }
+  };
+
+  const handleModelChange = (e: ChangeEvent<HTMLSelectElement>) => {
+    e.stopPropagation();
+    const next = e.target.value as OrchestratorModel;
+    setSelectedModel(next);
+    if (!isRunning) {
+      window.electronAPI.orchestratorModel.set(next).catch(() => {});
+      return;
+    }
+    if (next === runningModel) return;
+    setPendingSwitchModel(next);
+    setShowSwitchConfirm(true);
+  };
+
+  const handleCancelSwitch = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (runningModel) setSelectedModel(runningModel);
+    setPendingSwitchModel(null);
+    setShowSwitchConfirm(false);
+    setSwitchStatus("idle");
+  };
+
+  const handleSwitch = async (
+    mode: "wait" | "takeover",
+    e?: React.MouseEvent,
+  ) => {
+    e?.stopPropagation();
+    if (!currentProject || !isRunning || isSwitching) return;
+    const targetModel = targetSwitchModel;
+    const projectId = currentProject.id;
+    const cwd = rootPath || "~";
+    try {
+      setSwitchStatus("snapshotting");
+      setShowSwitchConfirm(false);
+      const result = await window.electronAPI.orchestratorSession.switch({
+        projectId,
+        rootPath: cwd,
+        targetModel,
+        mode,
+        resume: "fresh",
+      });
+      if (result?.needsAuth) {
+        setSwitchStatus("error");
+        if (runningModel) setSelectedModel(runningModel);
+        window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        return;
+      }
+      setSwitchStatus("starting");
+      setHandoffSummary(result.handoffSummary);
+      setSession(result.sessionId, result.ptySessionId, targetModel);
+      setStatus("running");
+      setSelectedModel(targetModel);
+      setPendingSwitchModel(null);
+      await window.electronAPI.orchestratorModel.set(targetModel);
+
+      try {
+        await upsertOrchestratorAgentDoc(projectId, "working");
+      } catch (err) {
+        console.warn("[Orchestrator] virtual agent doc upsert failed:", err);
+      }
+    } catch (err) {
+      console.error("[Orchestrator] Switch failed:", err);
+      setSwitchStatus("error");
+      if (runningModel) setSelectedModel(runningModel);
+    } finally {
+      if (useOrchestratorStore.getState().switchStatus !== "error") {
+        setSwitchStatus("idle");
+      }
     }
   };
 
@@ -262,7 +382,11 @@ export default memo(function OrchestratorPanel() {
         {isRunning ? (
           <>
             <span className="text-[#6c7086]">
-              {status === "running" ? "Claude Code" : "Starting..."}
+              {isSwitching
+                ? "Switching..."
+                : status === "running"
+                  ? `${MODEL_OPTIONS.find((m) => m.value === (runningModel ?? selectedModel))?.label ?? "Claude"} Code`
+                  : "Starting..."}
             </span>
             {claudeVersion && (
               <span
@@ -272,9 +396,63 @@ export default memo(function OrchestratorPanel() {
                 v{claudeVersion}
               </span>
             )}
+            <div className="relative ml-1" onClick={(e) => e.stopPropagation()}>
+              <select
+                value={selectedModel}
+                onChange={handleModelChange}
+                disabled={isSwitching}
+                className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa] disabled:opacity-60"
+                title="Switch orchestrator model"
+              >
+                {MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {showSwitchConfirm && (
+                <div className="absolute bottom-full right-0 z-50 mb-1 w-80 rounded-md border border-[#313244] bg-[#1e1e2e] p-3 text-xs shadow-lg">
+                  <div className="mb-1 font-medium text-[#cdd6f4]">
+                    Switch orchestrator to{" "}
+                    {MODEL_OPTIONS.find((m) => m.value === targetSwitchModel)
+                      ?.label ?? "Claude"}
+                  </div>
+                  <div className="mb-3 text-[11px] leading-4 text-[#a6adc8]">
+                    Snapshot will include active missions and board work.
+                    {activeTaskCount > 0
+                      ? ` ${activeTaskCount} active board item(s) detected.`
+                      : " No active board item is loaded in this window."}
+                    {lastHandoffSummary
+                      ? ` Last handoff: ${lastHandoffSummary.activeMissionCount} mission(s), ${lastHandoffSummary.inFlightTaskCount} task(s).`
+                      : ""}
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={(e) => handleCancelSwitch(e)}
+                      className="rounded px-2 py-1 text-[#a6adc8] hover:bg-[#313244]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={(e) => handleSwitch("takeover", e)}
+                      className="rounded border border-[#45475a] px-2 py-1 text-[#f9e2af] hover:bg-[#45475a]"
+                    >
+                      Take over now
+                    </button>
+                    <button
+                      onClick={(e) => handleSwitch("wait", e)}
+                      className="rounded bg-[#89b4fa]/20 px-2 py-1 text-[#89b4fa] hover:bg-[#89b4fa]/30"
+                    >
+                      Switch and wait
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
             {/* Stop button */}
             <button
               onClick={handleStop}
+              disabled={isSwitching}
               className="ml-1 rounded px-1.5 py-0.5 text-[#f38ba8] hover:bg-[#f38ba8]/20 transition-colors"
               title="Stop orchestrator"
             >
@@ -304,6 +482,19 @@ export default memo(function OrchestratorPanel() {
             </span>
             {/* Start button + session picker toggle */}
             <div className="relative ml-2 flex items-center gap-1">
+              <select
+                value={selectedModel}
+                onClick={(e) => e.stopPropagation()}
+                onChange={handleModelChange}
+                className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa]"
+                title="Orchestrator model"
+              >
+                {MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               <button
                 onClick={handleManualStart}
                 className="rounded bg-[#89b4fa]/20 px-2.5 py-0.5 text-[#89b4fa] hover:bg-[#89b4fa]/30 transition-colors"

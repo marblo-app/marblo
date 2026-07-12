@@ -358,6 +358,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
         rootPath,
         resumeSessionId,
       }),
+    switch: (args: {
+      projectId: string;
+      rootPath: string;
+      targetModel: string;
+      mode: "wait" | "takeover";
+      resume: "fresh" | "previous";
+    }) => ipcRenderer.invoke("orchestratorSession:switch", args),
     stop: () => ipcRenderer.invoke("orchestratorSession:stop"),
     status: () => ipcRenderer.invoke("orchestratorSession:status"),
     listSessions: (rootPath: string) =>

@@ -25,7 +25,7 @@ import {
 } from "./mcp-orphan-reaper";
 import { PendingInstructionListener } from "./pending-instruction-listener";
 import { FsManager } from "./fs-manager";
-import { AgentManager, serializeAgent } from "./agent-manager";
+import { AgentManager, serializeAgent, type ModelType } from "./agent-manager";
 import { Updater } from "./updater";
 import { selectPersistableWindows } from "./windowSession";
 import { TaskDecomposer } from "./orchestrator/task-decomposer";
@@ -40,6 +40,18 @@ import {
   type PendingInstruction,
 } from "./agent-watchdog";
 import { OrchestratorManager } from "./orchestrator-manager";
+import {
+  buildOrchestratorHandoffSnapshot,
+  formatHandoffPrompt,
+  type OrchestratorSwitchMode,
+  type OrchestratorSwitchResumeMode,
+  type RawHandoffDoc,
+} from "./orchestrator-handoff";
+import {
+  runOrchestratorSwitch,
+  type OrchestratorSwitchArgs,
+  type OrchestratorSwitchResult,
+} from "./orchestrator-switch";
 import { installBundledHarness } from "./bundle-installer";
 import { runGoogleLoopbackOAuth } from "./google-oauth";
 import {
@@ -2110,6 +2122,13 @@ function normalizeOrchestratorModelSetting(value: unknown): string {
   if (raw === "claude" || raw === "codex" || raw === "antigravity") {
     return raw;
   }
+  return "claude";
+}
+
+function normalizeOrchestratorModelType(value: unknown): ModelType {
+  const normalized = normalizeOrchestratorModelSetting(value);
+  if (normalized === "codex") return "gpt";
+  if (normalized === "antigravity") return "antigravity";
   return "claude";
 }
 
@@ -4303,6 +4322,157 @@ ipcMain.handle(
 );
 
 // --- Orchestrator Session IPC Handlers ---
+
+const orchestratorSwitchLocks = new Map<
+  string,
+  Promise<OrchestratorSwitchResult>
+>();
+
+function firestoreDocsToRaw(
+  snap: Awaited<ReturnType<typeof fbGetDocs>>,
+): RawHandoffDoc[] {
+  return snap.docs.map((d) => ({
+    id: d.id,
+    data: d.data() as Record<string, unknown>,
+  }));
+}
+
+async function buildSwitchHandoffSnapshot(
+  args: OrchestratorSwitchArgs,
+  resolvedRootPath: string,
+  targetModel: ModelType,
+) {
+  const { app: missionApp, authReady } = getMissionFirebaseApp();
+  await authReady;
+  const db = getFirestore(missionApp);
+  const current = orchestrators.get(args.projectId)?.getSession() ?? null;
+  const resumeSessionId =
+    args.resume === "previous"
+      ? (getAnyOrchestrator().resolveOrchestratorResumeId(resolvedRootPath) ??
+        "new")
+      : "new";
+  const [missionSnap, taskSnap] = await Promise.all([
+    fbGetDocs(
+      fbQuery(
+        fbCollection(db, "missions"),
+        fbWhere("projectId", "==", args.projectId),
+      ),
+    ),
+    fbGetDocs(
+      fbQuery(
+        fbCollection(db, "tasks"),
+        fbWhere("projectId", "==", args.projectId),
+      ),
+    ),
+  ]);
+
+  return buildOrchestratorHandoffSnapshot({
+    projectId: args.projectId,
+    rootPath: resolvedRootPath,
+    from: {
+      ptySessionId: current?.ptySessionId ?? null,
+      claudeSessionId: current?.claudeSessionId,
+      model: current?.launchConfig?.model,
+    },
+    targetModel,
+    resumeSessionId,
+    missions: firestoreDocsToRaw(missionSnap),
+    tasks: firestoreDocsToRaw(taskSnap),
+  });
+}
+
+ipcMain.handle(
+  "orchestratorSession:switch",
+  async (
+    event,
+    rawArgs: {
+      projectId: string;
+      rootPath: string;
+      targetModel: string;
+      mode?: OrchestratorSwitchMode;
+      resume?: OrchestratorSwitchResumeMode;
+    },
+  ): Promise<OrchestratorSwitchResult> => {
+    const projectId = rawArgs.projectId;
+    if (!projectId || !rawArgs.rootPath) {
+      throw new Error("projectId and rootPath required");
+    }
+    const existing = orchestratorSwitchLocks.get(projectId);
+    if (existing) return existing;
+
+    const resolvedRootPath =
+      rawArgs.rootPath === "~" ? os.homedir() : rawArgs.rootPath;
+    const targetModel = normalizeOrchestratorModelType(rawArgs.targetModel);
+    const args: OrchestratorSwitchArgs = {
+      projectId,
+      rootPath: resolvedRootPath,
+      targetModel,
+      mode: rawArgs.mode === "takeover" ? "takeover" : "wait",
+      resume: rawArgs.resume === "previous" ? "previous" : "fresh",
+    };
+    const senderId = event.sender.id;
+    const port = bridgeServer.getPort();
+
+    const op = runOrchestratorSwitch(args, {
+      buildSnapshot: (switchArgs) =>
+        buildSwitchHandoffSnapshot(switchArgs, resolvedRootPath, targetModel),
+      checkAuth: async (model) => {
+        const gate = await checkSpawnAuthGate(model);
+        return {
+          ok: gate.ok,
+          model: gate.model,
+          action: gate.action,
+          installed: gate.installed,
+        };
+      },
+      detachPending: (pid) => pendingListener.detach(`orch-${pid}`),
+      stopCurrent: (pid) => {
+        const current = orchestrators.get(pid);
+        if (current) current.stop();
+      },
+      launchNew: async (switchArgs, snapshot) => {
+        const orch = getOrchestrator(projectId);
+        orchestratorOwners.set(projectId, senderId);
+        const handoffPrompt = formatHandoffPrompt(snapshot, switchArgs.mode);
+        const session = orch.launch(
+          projectId,
+          resolvedRootPath,
+          port,
+          (sid) => {
+            ptyOwners.set(sid, senderId);
+            setupPtyForwarding(sid);
+            hookOrchestratorActivity(sid, projectId);
+          },
+          snapshot.to.resumeSessionId,
+          undefined,
+          {
+            modelOverride: targetModel,
+            handoffPrompt,
+            handoffMode: switchArgs.mode,
+          },
+        );
+        return {
+          sessionId: session.sessionId,
+          ptySessionId: session.ptySessionId,
+          status: session.status,
+        };
+      },
+      injectHandoff: async (_session, snapshot, mode) => {
+        if (snapshot.to.resumeSessionId === "new") return;
+        const orch = orchestrators.get(projectId);
+        if (!orch) return;
+        await orch.injectMessage(formatHandoffPrompt(snapshot, mode));
+      },
+      attachPending: (pid, ptySessionId) =>
+        pendingListener.attach(`orch-${pid}`, ptySessionId),
+    }).finally(() => {
+      orchestratorSwitchLocks.delete(projectId);
+    });
+
+    orchestratorSwitchLocks.set(projectId, op);
+    return op;
+  },
+);
 
 ipcMain.handle(
   "orchestratorSession:launch",
