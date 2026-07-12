@@ -29,10 +29,19 @@ export function UsagePage() {
   const currentProject = useProjectStore((s) => s.currentProject);
   const agents = useAgentStore((s) => s.agents);
   const ownedAgents = useAgentStore((s) => s.ownedAgents);
+  const agentsLoading = useAgentStore((s) => s.loading);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
   const subscribeToOwnedAgents = useAgentStore((s) => s.subscribeToOwnedAgents);
   const { user } = useAuth();
-  const { summary, loadCosts, trend, weekly, loadSummary } = useCostStore();
+  const {
+    summary,
+    loadCosts,
+    trend,
+    weekly,
+    loadSummary,
+    loading: costsLoading,
+    summaryLoading,
+  } = useCostStore();
   const projectId = currentProject?.id || "";
   const ownerId = user?.uid || "";
 
@@ -143,7 +152,10 @@ export function UsagePage() {
 
       {/* Per-model & per-agent (reused) */}
       <Section title={t("usage.section.byModelAgent")}>
-        <UsageDashboard agents={agents} />
+        <UsageDashboard
+          agents={agents}
+          loading={agentsLoading || costsLoading || summaryLoading}
+        />
       </Section>
 
       {/* Rate-limit status — account-global (all owned agents), not per-project */}

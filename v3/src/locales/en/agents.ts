@@ -24,6 +24,12 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.usage.level.low": "Low",
   "agents.usage.level.medium": "Medium",
   "agents.usage.level.high": "High",
+  "agents.usage.hiddenNotice":
+    "Totals include every agent, including hidden rows.",
+  "agents.usage.showOlder": "Show {count} older",
+  "agents.usage.hideOlder": "Hide older",
+  "agents.usage.noVisibleAgents":
+    "No active agents or usage from the last 7 days.",
 
   // ── Guide: CLI comparison table ─────────────────────────────
   "agents.guide.cliCompare.title": "AI CLI Comparison",

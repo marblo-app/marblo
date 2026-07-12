@@ -22,6 +22,11 @@ export const agents = {
   "agents.usage.level.low": "낮음",
   "agents.usage.level.medium": "보통",
   "agents.usage.level.high": "높음",
+  "agents.usage.hiddenNotice": "집계/합계는 숨긴 에이전트까지 포함합니다.",
+  "agents.usage.showOlder": "오래된 항목 {count}개 더 보기",
+  "agents.usage.hideOlder": "오래된 항목 접기",
+  "agents.usage.noVisibleAgents":
+    "최근 7일 사용량 또는 활성 에이전트가 없습니다.",
 
   // ── Guide: CLI comparison table ─────────────────────────────
   "agents.guide.cliCompare.title": "AI CLI 비교",

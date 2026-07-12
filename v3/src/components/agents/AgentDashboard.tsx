@@ -279,6 +279,7 @@ const PLAN_DEFAULTS: Record<string, string> = {
   gemini: "Pro",
   antigravity: "Pro",
 };
+const RECENT_AGENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 function planLabelFor(model: string, agents: Agent[]): string {
   const detected = agents.map((a) => a.detectedPlanType).find(Boolean);
@@ -292,13 +293,45 @@ function formatTokens(n: number): string {
   return `${n}`;
 }
 
-export function UsageDashboard({ agents }: { agents: Agent[] }) {
+function timeValue(value: unknown): number {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return new Date(value).getTime() || 0;
+  if (typeof value === "object" && "toDate" in value) {
+    const maybeTimestamp = value as { toDate?: () => Date };
+    if (typeof maybeTimestamp.toDate === "function") {
+      return maybeTimestamp.toDate().getTime();
+    }
+  }
+  return 0;
+}
+
+function lastUsageTime(agent: Agent): number {
+  return Math.max(timeValue(agent.costUpdatedAt), timeValue(agent.createdAt));
+}
+
+function isActiveOrRecentAgent(agent: Agent, now: number): boolean {
+  if (agent.status !== "stopped") return true;
+  const lastSeen = lastUsageTime(agent);
+  return lastSeen > 0 && now - lastSeen <= RECENT_AGENT_WINDOW_MS;
+}
+
+export function UsageDashboard({
+  agents,
+  loading = false,
+}: {
+  agents: Agent[];
+  loading?: boolean;
+}) {
   const { t } = useTranslation();
+  const [showOlderAgents, setShowOlderAgents] = useState(false);
   // Cost source priority: live Firestore-backed agent.* fields (updated by
   // useCostWriter on every cost:update) → BigQuery historical via costStore
   // → empty. The Firestore path works without Cloud Functions deployed.
   const { summary } = useCostStore();
   const bqByAgent = summary?.byAgent || {};
+  const now = Date.now();
 
   // Group agents by model
   const byModel: Record<string, Agent[]> = {};
@@ -329,6 +362,18 @@ export function UsageDashboard({ agents }: { agents: Agent[] }) {
     return null;
   };
 
+  if (loading && agents.length === 0) {
+    return (
+      <div className="py-8 text-center text-sm text-gray-500">
+        {t("agents.dashboard.loading")}
+      </div>
+    );
+  }
+
+  const hiddenAgentCount = agents.filter(
+    (agent) => !isActiveOrRecentAgent(agent, now),
+  ).length;
+
   return (
     <div className="space-y-4">
       {Object.entries(byModel).map(([model, modelAgents]) => {
@@ -337,6 +382,10 @@ export function UsageDashboard({ agents }: { agents: Agent[] }) {
           icon: "⚪",
           noteKey: "",
         };
+        const displayAgents = showOlderAgents
+          ? modelAgents
+          : modelAgents.filter((agent) => isActiveOrRecentAgent(agent, now));
+        const hiddenInModel = modelAgents.length - displayAgents.length;
 
         // Aggregate tokens/cost for this model group
         const modelTotals = modelAgents.reduce(
@@ -427,36 +476,57 @@ export function UsageDashboard({ agents }: { agents: Agent[] }) {
 
             {/* Per-agent breakdown */}
             <div className="space-y-1.5">
-              {modelAgents.map((agent) => {
-                const d = costFor(agent);
-                const agentTokens = d
-                  ? d.inputTokens +
-                    d.outputTokens +
-                    (d.cacheReadTokens || 0) +
-                    (d.cacheWriteTokens || 0)
-                  : 0;
-                const barBase = totalTokens;
-                const barValue = agentTokens;
-                const barPct = barBase > 0 ? (barValue / barBase) * 100 : 0;
+              {displayAgents
+                .slice()
+                .sort((a, b) => lastUsageTime(b) - lastUsageTime(a))
+                .map((agent) => {
+                  const d = costFor(agent);
+                  const agentTokens = d
+                    ? d.inputTokens +
+                      d.outputTokens +
+                      (d.cacheReadTokens || 0) +
+                      (d.cacheWriteTokens || 0)
+                    : 0;
+                  const barBase = totalTokens;
+                  const barPct =
+                    barBase > 0 ? (agentTokens / barBase) * 100 : 0;
 
-                return (
-                  <div key={agent.id} className="flex items-center gap-3">
-                    <span className="text-xs text-gray-400 truncate w-28">
-                      {agent.name}
-                    </span>
-                    <div className="flex-1 h-2 rounded-full bg-gray-700 overflow-hidden">
-                      <div
-                        className="h-2 rounded-full bg-blue-500 transition-all duration-500"
-                        style={{ width: `${barPct}%` }}
-                      />
+                  return (
+                    <div key={agent.id} className="flex items-center gap-3">
+                      <span className="text-xs text-gray-400 truncate w-28">
+                        {agent.name}
+                      </span>
+                      <div className="flex-1 h-2 rounded-full bg-gray-700 overflow-hidden">
+                        <div
+                          className="h-2 rounded-full bg-blue-500 transition-all duration-500"
+                          style={{ width: `${barPct}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-mono text-gray-400 w-20 text-right">
+                        {formatTokens(agentTokens)}
+                      </span>
                     </div>
-                    <span className="text-xs font-mono text-gray-400 w-20 text-right">
-                      {formatTokens(agentTokens)}
-                    </span>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              {displayAgents.length === 0 && modelAgents.length > 0 && (
+                <div className="rounded border border-dashed border-gray-700 py-3 text-center text-xs text-gray-500">
+                  {t("agents.usage.noVisibleAgents")}
+                </div>
+              )}
             </div>
+
+            {hiddenInModel > 0 && (
+              <div className="flex items-center justify-between text-[10px] text-gray-500">
+                <span>{t("agents.usage.hiddenNotice")}</span>
+                <button
+                  type="button"
+                  onClick={() => setShowOlderAgents(true)}
+                  className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 transition-colors hover:border-gray-500 hover:text-gray-100"
+                >
+                  {t("agents.usage.showOlder", { count: hiddenInModel })}
+                </button>
+              </div>
+            )}
 
             <p className="text-[10px] text-gray-600">
               {info.noteKey ? t(info.noteKey) : ""}
@@ -464,6 +534,18 @@ export function UsageDashboard({ agents }: { agents: Agent[] }) {
           </div>
         );
       })}
+
+      {showOlderAgents && hiddenAgentCount > 0 && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setShowOlderAgents(false)}
+            className="rounded border border-gray-700 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:border-gray-500 hover:text-gray-100"
+          >
+            {t("agents.usage.hideOlder")}
+          </button>
+        </div>
+      )}
 
       {/* Empty state */}
       {agents.length === 0 && (

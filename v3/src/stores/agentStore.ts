@@ -15,7 +15,7 @@ import { checkAgentSpawn } from "../lib/planLimits";
 import { t } from "../lib/i18n";
 
 const COLLECTION = "agents";
-const DATE_FIELDS = ["createdAt"];
+const DATE_FIELDS = ["createdAt", "costUpdatedAt"];
 
 function toAgent(raw: Record<string, unknown>): Agent {
   return convertTimestamps<Agent>(raw, DATE_FIELDS);
