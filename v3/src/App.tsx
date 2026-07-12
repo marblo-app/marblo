@@ -223,7 +223,10 @@ function AppContent() {
     import.meta.env.VITE_DISABLE_FB_LISTENERS !== "1";
   useEffect(() => {
     if (!user) return;
-    const isNewWindow = window.electronAPI.window.isNewWindow();
+    // Optional-chained: if the preload bridge failed to attach, degrade
+    // gracefully (treat as not-a-new-window) instead of throwing and
+    // white-screening the app. Matches every other electronAPI access here.
+    const isNewWindow = window.electronAPI?.window?.isNewWindow() ?? false;
     // Don't auto-grab project[0] for an explicitly-opened new window. Whether
     // the window shows the folder picker or reconnects to its previous project
     // (after a sleep/wake renderer reload) is decided by useSessionRestore —

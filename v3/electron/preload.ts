@@ -4,7 +4,22 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 // initialized — which only happens after the user opts in AND a DSN is
 // configured (see src/lib/telemetry/sentry.ts). No network on the no-consent
 // path. Required because we use a custom preload; the SDK cannot auto-inject.
-import "@sentry/electron/preload";
+//
+// GUARDED: this MUST NOT be a bare top-level `import`. A sandboxed preload
+// (Electron's default) can't `require` an unbundled node_modules package, and
+// if @sentry/electron isn't packaged the require throws — either way the throw
+// would abort this module BEFORE exposeInMainWorld runs, leaving
+// window.electronAPI undefined and white-screening the whole app on launch.
+// Sentry is dead weight without a DSN anyway, so a failure here is non-fatal.
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require("@sentry/electron/preload");
+} catch (err) {
+  console.warn(
+    "[preload] @sentry/electron/preload unavailable — skipping Sentry renderer bridge",
+    err,
+  );
+}
 
 const isNewWindow = process.argv.includes("--marblo-new-window=1");
 
