@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useProjectStore } from "../../stores/projectStore";
+import { useOrchestratorStore } from "../../stores/orchestratorStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useUiStore } from "../../stores/uiStore";
 import { useTranslation } from "../../lib/i18n";
@@ -324,15 +325,58 @@ const PRESETS = [
   },
 ];
 
+type OrchestratorModel = "claude" | "codex" | "antigravity";
+
+const ORCHESTRATOR_MODELS: Array<{
+  id: OrchestratorModel;
+  label: string;
+  desc: string;
+}> = [
+  {
+    id: "claude",
+    label: "Claude",
+    desc: "Highest quality; uses Claude weekly limits. Default.",
+  },
+  {
+    id: "codex",
+    label: "Codex (GPT)",
+    desc: "Good for saving Claude quota; uses OpenAI/Codex limits.",
+  },
+  {
+    id: "antigravity",
+    label: "Antigravity",
+    desc: "Google agy CLI path; uses Antigravity/Gemini limits.",
+  },
+];
+
 function ModelPresetSection() {
   const { t } = useTranslation();
   const [current, setCurrent] = useState("recommended");
+  const [orchestratorModel, setOrchestratorModel] =
+    useState<OrchestratorModel>("claude");
   const [saving, setSaving] = useState(false);
+  const [savingOrchestratorModel, setSavingOrchestratorModel] = useState(false);
+  const [orchestratorModelSaved, setOrchestratorModelSaved] = useState(false);
+  const orchestratorStatus = useOrchestratorStore((s) => s.status);
+  const isOrchestratorRunning =
+    orchestratorStatus === "running" || orchestratorStatus === "starting";
 
   useEffect(() => {
     window.electronAPI.modelPreset
       .get()
       .then(setCurrent)
+      .catch(() => {});
+    window.electronAPI.orchestratorModel
+      .get()
+      .then((model) => {
+        if (
+          model === "claude" ||
+          model === "codex" ||
+          model === "antigravity"
+        ) {
+          setOrchestratorModel(model);
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -348,8 +392,65 @@ function ModelPresetSection() {
     }
   };
 
+  const handleOrchestratorModelChange = async (
+    model: OrchestratorModel,
+  ) => {
+    setSavingOrchestratorModel(true);
+    setOrchestratorModelSaved(false);
+    try {
+      await window.electronAPI.orchestratorModel.set(model);
+      setOrchestratorModel(model);
+      setOrchestratorModelSaved(true);
+    } catch {
+      /* ignore */
+    } finally {
+      setSavingOrchestratorModel(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
+      <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+        <h3 className="mb-1 text-sm font-medium text-gray-200">
+          {t("settings.orchestratorModel.heading")}
+        </h3>
+        <p className="mb-4 text-xs text-gray-500">
+          {t("settings.orchestratorModel.help")}
+        </p>
+        <label className="mb-2 block text-xs font-medium text-gray-400">
+          {t("settings.orchestratorModel.label")}
+        </label>
+        <select
+          value={orchestratorModel}
+          disabled={savingOrchestratorModel}
+          onChange={(e) =>
+            handleOrchestratorModelChange(e.target.value as OrchestratorModel)
+          }
+          className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+        >
+          {ORCHESTRATOR_MODELS.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.label}
+            </option>
+          ))}
+        </select>
+        <p className="mt-2 text-xs text-gray-500">
+          {
+            ORCHESTRATOR_MODELS.find((m) => m.id === orchestratorModel)
+              ?.desc
+          }
+        </p>
+        <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          {isOrchestratorRunning
+            ? t("settings.orchestratorModel.restartRunning")
+            : t("settings.orchestratorModel.restartStopped")}
+        </div>
+        {orchestratorModelSaved && (
+          <p className="mt-2 text-xs text-green-400">
+            {t("settings.orchestratorModel.saved")}
+          </p>
+        )}
+      </div>
       <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
         <h3 className="mb-1 text-sm font-medium text-gray-200">
           {t("settings.models.heading")}

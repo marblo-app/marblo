@@ -60,6 +60,7 @@ import {
   saveAgyConversationLabel,
   getAgyConversationId,
   resolveClaudeBinary,
+  resolveOrchestratorModel,
   resolveAllHarnessVersions,
   preflightNodeSpawn,
 } from "./agent-config";
@@ -306,6 +307,7 @@ interface AppState {
   lastRootPath?: string;
   wasOrchestratorRunning?: boolean;
   modelPreset?: string;
+  orchestratorModel?: string;
   demoCellValues?: Record<string, Record<string, string>>;
   // Project windows open at last quit, so a full restart can reopen them all
   // (the single lastProjectId/lastRootPath above only covers one window).
@@ -1999,6 +2001,31 @@ kanbanBridge.attach();
 // Restore model preset from app state
 const savedPreset = readAppState().modelPreset;
 if (savedPreset) process.env.MARBLO_MODEL_PRESET = savedPreset;
+
+const INITIAL_ORCHESTRATOR_MODEL_ENV =
+  process.env.MARBLO_ORCHESTRATOR_MODEL?.trim() || "";
+
+function normalizeOrchestratorModelSetting(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!raw) return "claude";
+  if (raw === "gpt") return "codex";
+  if (raw === "claude" || raw === "codex" || raw === "antigravity") {
+    return raw;
+  }
+  return "claude";
+}
+
+function applyStoredOrchestratorModelEnv(): string {
+  if (INITIAL_ORCHESTRATOR_MODEL_ENV) {
+    process.env.MARBLO_ORCHESTRATOR_MODEL = INITIAL_ORCHESTRATOR_MODEL_ENV;
+    return INITIAL_ORCHESTRATOR_MODEL_ENV;
+  }
+  const stored = normalizeOrchestratorModelSetting(
+    readAppState().orchestratorModel,
+  );
+  process.env.MARBLO_ORCHESTRATOR_MODEL = stored;
+  return stored;
+}
 
 /** Recreate LLM provider with current stored keys and update FlowRunner */
 function refreshLLMProvider(): void {
@@ -4177,23 +4204,25 @@ ipcMain.handle(
     const port = bridgeServer.getPort();
     // Resolve '~' to actual home directory
     const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
+    applyStoredOrchestratorModelEnv();
+    const orchestratorModel = resolveOrchestratorModel();
 
-    // Pre-spawn auth gate — the orchestrator is always claude. If claude is
-    // not installed / not logged in, DON'T spawn it into an interactive login
+    // Pre-spawn auth gate. If the selected CLI is not installed / logged in,
+    // DON'T spawn it into an interactive login
     // prompt (which would hang the readiness loop and dump the boot prompt
     // into the login menu). Return a needsAuth marker so the renderer can open
     // the CLI setup gate instead of silently failing. (QA vj7ZvHphYOIhsNd340ad)
-    const orchGate = await checkSpawnAuthGate("claude");
+    const orchGate = await checkSpawnAuthGate(orchestratorModel);
     if (!orchGate.ok) {
       console.warn(
-        `[orchestratorSession:launch] Blocked — claude ${orchGate.reason} (action: ${orchGate.action})`,
+        `[orchestratorSession:launch] Blocked — ${orchestratorModel} ${orchGate.reason} (action: ${orchGate.action})`,
       );
       return {
         sessionId: "",
         ptySessionId: "",
         status: "blocked",
         needsAuth: {
-          model: "claude",
+          model: orchGate.model ?? orchestratorModel,
           action: orchGate.action ?? "claude login",
           installed: orchGate.installed,
         },
@@ -4524,6 +4553,20 @@ ipcMain.handle("modelPreset:get", () => {
     readAppState().modelPreset ||
     "recommended"
   );
+});
+
+ipcMain.handle("orchestratorModel:set", (_event, model: string) => {
+  const normalized = normalizeOrchestratorModelSetting(model);
+  writeAppState({ orchestratorModel: normalized });
+  console.log(`[Main] Orchestrator model set to: ${normalized}`);
+  return { success: true };
+});
+
+ipcMain.handle("orchestratorModel:get", () => {
+  if (INITIAL_ORCHESTRATOR_MODEL_ENV) {
+    return normalizeOrchestratorModelSetting(INITIAL_ORCHESTRATOR_MODEL_ENV);
+  }
+  return normalizeOrchestratorModelSetting(readAppState().orchestratorModel);
 });
 
 // --- Sentry (main-process crash/error capture) ---

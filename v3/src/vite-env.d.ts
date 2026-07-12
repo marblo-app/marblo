@@ -344,6 +344,11 @@ interface ModelPresetAPI {
   set: (preset: string) => Promise<{ success: boolean }>;
 }
 
+interface OrchestratorModelAPI {
+  get: () => Promise<string>;
+  set: (model: string) => Promise<{ success: boolean }>;
+}
+
 interface SubscriptionPlanEntry {
   modelPrefix: string;
   monthlyFlatUsd: number;
@@ -707,6 +712,7 @@ interface ElectronAPI {
   settings: SettingsAPI;
   code: CodeAPI;
   modelPreset: ModelPresetAPI;
+  orchestratorModel: OrchestratorModelAPI;
   subscriptionPlans: SubscriptionPlansAPI;
   clipboard: ClipboardAPI;
   bridge: BridgeAPI;

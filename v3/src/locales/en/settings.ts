@@ -23,6 +23,16 @@ export const settings: Record<keyof typeof koSettings, string> = {
   "settings.models.heading": "Agent Model Preset",
   "settings.models.help":
     "Sets which models the orchestrator uses when spawning new agents. Tasks tagged with a specific model pick it directly; everything else follows the preset distribution.",
+  "settings.orchestratorModel.heading": "Orchestrator Model",
+  "settings.orchestratorModel.help":
+    "Choose which CLI runs the orchestrator itself. If MARBLO_ORCHESTRATOR_MODEL is set in the environment, the environment wins.",
+  "settings.orchestratorModel.label": "Runtime model",
+  "settings.orchestratorModel.restartRunning":
+    "The orchestrator is currently running. Stop and start it again for this change to apply.",
+  "settings.orchestratorModel.restartStopped":
+    "This applies on the next orchestrator start. Electron main does not hot reload, so rebuild/restart the app before runtime verification.",
+  "settings.orchestratorModel.saved":
+    "Saved. Applies after the next orchestrator restart.",
   "settings.language.heading": "Language",
   "settings.language.help": "Switch the UI language. Takes effect immediately.",
   "settings.language.korean": "한국어",

@@ -21,6 +21,15 @@ export const settings = {
   "settings.models.heading": "Agent Model Preset",
   "settings.models.help":
     "오케스트레이터가 새 에이전트를 스폰할 때 어떤 모델을 사용할지 결정합니다. 태스크에 특정 tags가 있으면 최적 모델이 자동 선택되고, 없으면 프리셋 비율로 배분됩니다.",
+  "settings.orchestratorModel.heading": "오케스트레이터 모델",
+  "settings.orchestratorModel.help":
+    "오케스트레이터 자체를 어떤 CLI로 실행할지 선택합니다. 환경변수 MARBLO_ORCHESTRATOR_MODEL이 있으면 환경변수가 우선합니다.",
+  "settings.orchestratorModel.label": "실행 모델",
+  "settings.orchestratorModel.restartRunning":
+    "현재 오케스트레이터가 실행 중입니다. 변경사항은 오케스트레이터를 중지한 뒤 다시 시작하면 적용됩니다.",
+  "settings.orchestratorModel.restartStopped":
+    "변경사항은 다음 오케스트레이터 시작부터 적용됩니다. Electron main 변경은 HMR이 안 되므로 런타임 검증은 앱 재빌드/재시작 후 확인하세요.",
+  "settings.orchestratorModel.saved": "저장됨. 다음 오케스트레이터 재시작 후 적용됩니다.",
   "settings.language.heading": "Language / 언어",
   "settings.language.help": "UI 언어를 변경합니다. 변경 즉시 적용됩니다.",
   "settings.language.korean": "한국어",

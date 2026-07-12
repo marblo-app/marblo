@@ -415,6 +415,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
         success: boolean;
       }>,
   },
+  orchestratorModel: {
+    get: () => ipcRenderer.invoke("orchestratorModel:get") as Promise<string>,
+    set: (model: string) =>
+      ipcRenderer.invoke("orchestratorModel:set", model) as Promise<{
+        success: boolean;
+      }>,
+  },
   // Patent claim 8 (구독제 vs 토큰단위 과금): user declares which models
   // are on a subscription plan via this IPC. Stored at
   // ~/.marblo/subscription-plans.json so cost-tracker (which runs in
