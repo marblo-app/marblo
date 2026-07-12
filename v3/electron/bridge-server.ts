@@ -448,7 +448,30 @@ export interface DispatchTaskResponse {
  *   POST /dispatch-task        — smart dispatch: reuse/restart/spawn/logical
  *   POST /kill-agent           — stop and remove an agent
  *   POST /notify-orchestrator  — send a message to the orchestrator PTY
+ *   POST /inject-message       — inject a PM instruction into an agent/orch PTY
  *   GET  /health               — health check
+ *
+ * ── Threat model (P3-3) — ACCEPTED residual risk, documented, not a hole ──
+ * Command-bearing endpoints (/spawn-agent, /dispatch-task, /inject-message, …)
+ * are protected by the strongest controls available to a localhost helper:
+ *   - bind 127.0.0.1 only + non-loopback Host header rejected (isLoopbackHost)
+ *     → no remote or DNS-rebinding reach;
+ *   - per-boot 256-bit bearer token, constant-time compared, fail-closed
+ *     (checkAuthToken) → a browser/web page with no local FS access can never
+ *     obtain the token (discovery files are 0600, same-OS-user only);
+ *   - spawn command allowlist (ALLOWED_SPAWN_COMMANDS, shell metachars/args
+ *     rejected) + 1 MiB body cap.
+ * The ONE risk these cannot remove: any process running as the SAME OS user can
+ * read the 0600 token file and then legitimately call these endpoints — and
+ * because every agent/orchestrator runs YOLO (--dangerously-skip-permissions,
+ * see orchestrator-manager launch()), an injected instruction executes without
+ * a confirm prompt. That is effectively same-user RCE. We ACCEPT it: on a
+ * single-user desktop, a same-user process already has full ambient authority
+ * (it can write ~/.zshrc, spawn `claude` itself, etc.), so the bridge grants no
+ * privilege the caller didn't already have. Defense-in-depth against an
+ * injected *destructive* command is the PtyManager dangerous-command guard,
+ * which the orchestrator PTY runs in BLOCK mode (not warn-only) — see
+ * setBlockDangerousForSession / danger-command.ts.
  */
 export class BridgeServer {
   private server: http.Server | null = null;

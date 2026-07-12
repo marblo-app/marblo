@@ -28,6 +28,9 @@ describe("OrchestratorManager concurrent-resume lock", () => {
   function locksPath(): string {
     return path.join(sessionsDir(), "marblo-orch-locks.json");
   }
+  function mutexPath(): string {
+    return locksPath() + ".lock";
+  }
   function readLocks(): Record<
     string,
     { ptySessionId: string; kind: string; pid: number; updatedAt: number }
@@ -149,6 +152,37 @@ describe("OrchestratorManager concurrent-resume lock", () => {
     const mgr = makeManager();
     expect(mgr.acquireResumeLock(rootPath, SID, "pty-new")).toBe(true);
     expect(readLocks()[SID].ptySessionId).toBe("pty-new");
+  });
+
+  // ── P3-5: exclusive-lockfile mutex around the RMW ─────────────────────
+  it("releases the mutex lockfile after a successful acquire (no leak)", () => {
+    const mgr = makeManager();
+    expect(mgr.acquireResumeLock(rootPath, SID, "pty-1")).toBe(true);
+    expect(fs.existsSync(mutexPath())).toBe(false);
+  });
+
+  it("fails safe to FRESH when a live peer holds the mutex mid-RMW", () => {
+    // A fresh mutex file = another process is inside its critical section.
+    fs.writeFileSync(mutexPath(), "");
+    const mgr = makeManager();
+    // Even though the session itself is free, we refuse rather than race the
+    // read-modify-write (TOCTOU → double --resume → blank PTY).
+    expect(mgr.acquireResumeLock(rootPath, SID, "pty-mine")).toBe(false);
+    // No lock was written, and the peer's mutex is left intact.
+    expect(fs.existsSync(locksPath())).toBe(false);
+    expect(fs.existsSync(mutexPath())).toBe(true);
+  });
+
+  it("reclaims a STALE mutex left by a crashed process and proceeds", () => {
+    fs.writeFileSync(mutexPath(), "");
+    // Backdate the mutex well beyond the 15s staleness backstop.
+    const old = new Date(Date.now() - 60 * 1000);
+    fs.utimesSync(mutexPath(), old, old);
+    const mgr = makeManager();
+    expect(mgr.acquireResumeLock(rootPath, SID, "pty-mine")).toBe(true);
+    expect(readLocks()[SID].pid).toBe(process.pid);
+    // Reclaimed then released — no leak.
+    expect(fs.existsSync(mutexPath())).toBe(false);
   });
 
   it("release removes only a lock we own, never a foreign one", () => {

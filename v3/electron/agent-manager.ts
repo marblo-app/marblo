@@ -119,6 +119,12 @@ export interface AgentInstance {
    * fast-fail. Carried into the auto-restart so the relaunch pins opus, and
    * acts as the once-only guard so the downgrade can't loop. */
   claudeModelOverride?: string;
+  /** P3-4: epoch-ms the agent entered a TERMINAL state (stopped/error) with no
+   * pending auto-restart. null while live or mid-restart. The periodic pruner
+   * uses it as a backstop to evict long-dead map entries that cleanup_agents
+   * never reaped (e.g. the orchestrator never calling it). Reset to null on any
+   * revival. */
+  terminalSince: number | null;
 }
 
 /**
@@ -160,6 +166,15 @@ export function serializeAgent(agent: AgentInstance): SerializableAgent {
  * sending follow-up instructions), short enough that genuinely abandoned
  * sessions don't stay "working" forever. */
 const IDLE_INACTIVITY_MS = 300_000; // 5 min
+
+// P3-4: backstop pruning of dead (stopped/error) entries the primary reaper
+// (cleanup_agents → remove) never reclaimed — e.g. the orchestrator never
+// calling cleanup_agents, or a naturally-completed agent whose Firestore doc was
+// never deleted. The map otherwise grows for the app's whole (multi-day)
+// lifetime. TTL is generous so a user can still revive a stopped agent via
+// "+ New Session" long after it died; only truly-abandoned entries are evicted.
+const DEAD_ENTRY_TTL_MS = 30 * 60 * 1000; // 30 min terminal → prunable
+const DEAD_ENTRY_SWEEP_MS = 5 * 60 * 1000; // sweep cadence
 
 /**
  * Build the prompt that gets typed into the freshly-spawned CLI.
@@ -249,6 +264,10 @@ export function composeInitialPrompt(
 
 export class AgentManager {
   private agents: Map<string, AgentInstance> = new Map();
+  // P3-4: periodic backstop that evicts long-dead map entries. Started in the
+  // constructor, cleared in stopAll() (called on before-quit). .unref()'d so it
+  // never keeps the process alive on its own.
+  private pruneTimer: ReturnType<typeof setInterval> | null = null;
   private ptyManager: PtyManager;
   private configGenerator: AgentConfigGenerator;
   private onStatusChange?: (agentId: string, status: AgentStatus) => void;
@@ -296,6 +315,40 @@ export class AgentManager {
     this.onRestartAttempt = onRestartAttempt;
     this.onRestartFailed = onRestartFailed;
     this.getMainWindow = getMainWindow;
+
+    // P3-4: start the dead-entry pruner. Idempotent guard so re-entry can't
+    // stack intervals.
+    if (!this.pruneTimer) {
+      this.pruneTimer = setInterval(
+        () => this.pruneDeadEntries(),
+        DEAD_ENTRY_SWEEP_MS
+      );
+      this.pruneTimer.unref?.();
+    }
+  }
+
+  /**
+   * P3-4 backstop: evict map entries that have been TERMINAL (stopped/error)
+   * longer than DEAD_ENTRY_TTL_MS. cleanup_agents (→ remove) is still the
+   * primary reaper and Firestore docs are left untouched; this only bounds the
+   * in-memory `agents` map so it can't grow unbounded across the app's lifetime
+   * when cleanup_agents is never called. Live / restarting agents (terminalSince
+   * === null) are never touched.
+   */
+  private pruneDeadEntries(): void {
+    const now = Date.now();
+    for (const [id, agent] of this.agents) {
+      if (agent.status !== "stopped" && agent.status !== "error") continue;
+      if (agent.terminalSince === null) continue;
+      if (now - agent.terminalSince < DEAD_ENTRY_TTL_MS) continue;
+      this.clearAgentTimers(agent);
+      this.agents.delete(id);
+      console.log(
+        `[AgentManager] Pruned dead entry ${agent.name} (${id}, ${agent.status} for ${Math.round(
+          (now - agent.terminalSince) / 60000
+        )}min) — backstop reaper (P3-4).`
+      );
+    }
   }
 
   /** Inject session resolver (from OrchestratorManager) after construction */
@@ -775,6 +828,7 @@ export class AgentManager {
       onPtyReady: params.onPtyReady,
       lastPtyActivity: Date.now(),
       turnCompletedAt: null,
+      terminalSince: null,
       topClaudeModel,
       claudeModelOverride: params.claudeModelOverride,
     };
@@ -908,6 +962,7 @@ export class AgentManager {
         exitCode !== 0 && runtimeMs >= GRACEFUL_LIFETIME_MS;
       if (agent.stopRequested || exitCode === 0 || isGracefulCompletion) {
         agent.status = "stopped";
+        agent.terminalSince = Date.now(); // P3-4: pruner backstop clock
         this.configGenerator.cleanup(params.id);
         this.onStatusChange?.(params.id, "stopped");
         mainTelemetry.agentStopped(
@@ -985,6 +1040,7 @@ export class AgentManager {
       } else {
         // Max restarts exceeded OR fast-fail budget burned → error state
         agent.status = "error";
+        agent.terminalSince = Date.now(); // P3-4: pruner backstop clock
         this.configGenerator.cleanup(params.id);
         this.onStatusChange?.(params.id, "error");
         this.onRestartFailed?.(agent.id, exitCode);
@@ -1094,6 +1150,7 @@ export class AgentManager {
     this.ptyManager.kill(agent.ptySessionId);
     this.configGenerator.cleanup(agentId);
     agent.status = "stopped";
+    agent.terminalSince = Date.now(); // P3-4: pruner backstop clock
     agent.restartCount = 0;
     this.onStatusChange?.(agentId, "stopped");
     mainTelemetry.agentStopped(this.getMainWindow?.() ?? null, agentId, 0);
@@ -1168,6 +1225,9 @@ export class AgentManager {
     // filtered out upstream by shouldPromoteOnPtyOutput, so anything that
     // reaches here as `working` is real work.
     if (status === "working") agent.turnCompletedAt = null;
+    // P3-4: any transition back to a live state clears the terminal clock so a
+    // revived agent isn't pruned by the backstop reaper.
+    if (status !== "stopped" && status !== "error") agent.terminalSince = null;
     agent.status = status;
     this.onStatusChange?.(agentId, status);
   }
@@ -1254,6 +1314,7 @@ export class AgentManager {
       heartbeatTimer: null,
       lastPtyActivity: Date.now(),
       turnCompletedAt: null,
+      terminalSince: null,
     };
     this.agents.set(agent.id, instance);
     // Same PTY-activity hook as launch() — reconnected agents need
@@ -1295,6 +1356,10 @@ export class AgentManager {
   }
 
   stopAll(): void {
+    if (this.pruneTimer) {
+      clearInterval(this.pruneTimer);
+      this.pruneTimer = null;
+    }
     for (const [id] of this.agents) {
       this.stop(id);
     }

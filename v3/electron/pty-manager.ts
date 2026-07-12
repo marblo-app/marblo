@@ -89,6 +89,14 @@ export class PtyManager {
   // non-isolated paths (e.g. the orchestrator, which drives the main checkout).
   private dangerListeners: Array<(e: DangerEvent) => void> = [];
   private blockDangerous = false;
+  // Per-session block opt-in (P3-3). The global `blockDangerous` flag would
+  // block EVERY writeAndSubmit — including worker dispatch instructions that
+  // merely MENTION a dangerous command in their task text — which is a
+  // regression for the worktree-isolated workers the danger module deliberately
+  // leaves in warn-only mode. Instead the non-isolated orchestrator PTY opts its
+  // own session into blocking (see setBlockDangerousForSession), so high-severity
+  // commands aimed at the main checkout are actually dropped, not just logged.
+  private blockDangerousSessions: Set<string> = new Set();
 
   /**
    * Subscribe to dangerous-command detections. Returns an unsubscribe fn.
@@ -108,6 +116,23 @@ export class PtyManager {
    */
   setBlockDangerous(block: boolean): void {
     this.blockDangerous = block;
+  }
+
+  /**
+   * Per-session variant of the block policy (P3-3). When enabled for a session
+   * id, a detected high-severity command targeting THAT session is BLOCKED even
+   * while the global policy stays warn-only. Used by the orchestrator (which
+   * drives the non-isolated main checkout) to enforce blocking on just its own
+   * PTY without affecting worktree-isolated workers. Cleared automatically on
+   * session teardown (kill / stale-replace); safe to call before the session
+   * exists (the id is matched at write time).
+   */
+  setBlockDangerousForSession(sessionId: string, block: boolean): void {
+    if (block) {
+      this.blockDangerousSessions.add(sessionId);
+    } else {
+      this.blockDangerousSessions.delete(sessionId);
+    }
   }
 
   private emitDanger(e: DangerEvent): void {
@@ -258,7 +283,9 @@ export class PtyManager {
     // the PTY. Warn always; block high-severity only when policy is enabled.
     const match = detectDangerousCommand(text);
     if (match.matched) {
-      const blocked = this.blockDangerous && match.severity === "high";
+      const blocked =
+        match.severity === "high" &&
+        (this.blockDangerous || this.blockDangerousSessions.has(id));
       console.warn(
         `[PtyManager] dangerous command detected (${match.severity}: ${
           match.pattern
@@ -414,6 +441,7 @@ export class PtyManager {
       // socket closes, so the child signal is covered.
       this.destroyProcess(session.process, session.orphanFds);
       this.sessions.delete(id);
+      this.blockDangerousSessions.delete(id);
     }
   }
 

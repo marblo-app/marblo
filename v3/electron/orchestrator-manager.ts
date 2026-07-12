@@ -30,6 +30,13 @@ const ORCH_BACKOFF_MAX_MS = 30000;
 // TTL only as a backstop against PID reuse after an uncaught crash.
 const ORCH_RESUME_LOCK_TTL_MS = 10 * 60 * 1000;
 
+// Staleness backstop for the exclusive lockfile that serializes the resume-lock
+// read-modify-write (P3-5). The critical section is microseconds, so any mutex
+// file older than this was almost certainly abandoned by a crashed process
+// mid-RMW and is safe to reclaim. Kept well above the critical-section time and
+// well below ORCH_RESUME_LOCK_TTL_MS.
+const ORCH_LOCK_MUTEX_STALE_MS = 15 * 1000;
+
 interface OrchResumeLock {
   ptySessionId: string;
   kind: string;
@@ -486,8 +493,17 @@ export class OrchestratorManager {
           "utf-8",
         );
       }
-    } catch {
-      // Ignore — config patching is best-effort
+    } catch (e) {
+      // Best-effort, but NOT silent: a failed patch here means the MCP config
+      // file never receives MARBLO_BRIDGE_TOKEN/PORT, so the orchestrator's MCP
+      // node calls spawn_agent / dispatch_task against the bridge and 401s with
+      // no obvious cause (P3-6). Surface the failure so a broken dispatch is
+      // traceable to the token/port injection instead of looking like an auth bug.
+      console.warn(
+        `[Orchestrator:${this.kind}] MCP config patch failed (bridge token/port not injected → spawn_agent/dispatch_task may 401): ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
     }
 
     // Merge env
@@ -508,6 +524,16 @@ export class OrchestratorManager {
       rootPath,
       mergedEnv,
     );
+
+    // P3-3: enforce (not just log) the dangerous-command guard on THIS PTY. The
+    // orchestrator drives the non-isolated MAIN checkout under YOLO
+    // (--dangerously-skip-permissions), so a high-severity command injected into
+    // its stdin (boot prompt / conductor grant / telegram relay) would run
+    // unguarded. Blocking is scoped to this session id so worktree-isolated
+    // workers stay in warn-only mode (their task text may legitimately mention
+    // such commands). Cleared automatically when the PTY is killed on
+    // stop()/relaunch. onDanger (wired in the constructor) still records + logs.
+    this.ptyManager.setBlockDangerousForSession(ptySessionId, true);
 
     // Notify caller IMMEDIATELY so they can register data listeners
     onPtyReady?.(ptySessionId);
@@ -1146,26 +1172,95 @@ export class OrchestratorManager {
     return OrchestratorManager.isPidAlive(lock.pid);
   }
 
+  private getOrchLockMutexPath(rootPath: string): string {
+    return this.getOrchLocksPath(rootPath) + ".lock";
+  }
+
+  /**
+   * Acquire the cross-process mutex guarding the resume-locks read-modify-write
+   * (P3-5). `fs.openSync(path, "wx")` is an atomic create-exclusive: at most one
+   * process across all worktrees can hold it at a time. Returns the open fd on
+   * success, or null when a DIFFERENT live process currently holds it (the
+   * caller then treats that as contention and starts fresh — the fail-safe that
+   * avoids a double `--resume`/blank PTY). A mutex file older than
+   * ORCH_LOCK_MUTEX_STALE_MS is assumed abandoned by a crashed process and is
+   * reclaimed once.
+   */
+  private acquireLockMutex(rootPath: string): number | null {
+    const mutexPath = this.getOrchLockMutexPath(rootPath);
+    try {
+      return fs.openSync(mutexPath, "wx");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return null;
+      // EEXIST → either a live holder mid-RMW, or a mutex left by a crash.
+      // Reclaim ONLY if stale, so we never yank the lock from a live holder.
+      try {
+        const age = Date.now() - fs.statSync(mutexPath).mtimeMs;
+        if (age > ORCH_LOCK_MUTEX_STALE_MS) {
+          fs.unlinkSync(mutexPath);
+          return fs.openSync(mutexPath, "wx");
+        }
+      } catch {
+        /* stat/unlink raced another reclaimer — fall through to contention */
+      }
+      return null;
+    }
+  }
+
+  private releaseLockMutex(fd: number | null, rootPath: string): void {
+    if (fd === null) return;
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* best-effort */
+    }
+    try {
+      fs.unlinkSync(this.getOrchLockMutexPath(rootPath));
+    } catch {
+      /* best-effort */
+    }
+  }
+
   /**
    * Try to claim the resume lock for `claudeSessionId`. Returns false when a
    * different, still-running orchestrator already holds it — the caller then
    * starts a fresh session instead of double-attaching (which blanks the PTY).
+   *
+   * P3-5: the read → isForeignLiveLock → write sequence is a non-atomic RMW.
+   * Two orchestrators (typically in separate worktrees) launching at once could
+   * both read before either writes, both see no live lock, and both `--resume`
+   * the same session → both PTYs blank. We serialize the RMW behind an exclusive
+   * lockfile (acquireLockMutex). The pid-liveness + TTL logic in the JSON stays
+   * the source of truth for OWNERSHIP; the mutex only makes the update atomic.
+   * On genuine contention (mutex held by a live peer) we fail safe to "taken"
+   * so the caller starts fresh — never a double-resume.
    */
   private acquireResumeLock(
     rootPath: string,
     claudeSessionId: string,
     ptySessionId: string,
   ): boolean {
-    const locks = this.readOrchLocks(rootPath);
-    if (this.isForeignLiveLock(locks[claudeSessionId])) return false;
-    locks[claudeSessionId] = {
-      ptySessionId,
-      kind: this.kind,
-      pid: process.pid,
-      updatedAt: Date.now(),
-    };
-    this.writeOrchLocks(rootPath, locks);
-    return true;
+    const mutexFd = this.acquireLockMutex(rootPath);
+    if (mutexFd === null) {
+      console.warn(
+        `[Orchestrator:${this.kind}] resume-lock mutex contended — starting a FRESH session (TOCTOU guard).`,
+      );
+      return false;
+    }
+    try {
+      const locks = this.readOrchLocks(rootPath);
+      if (this.isForeignLiveLock(locks[claudeSessionId])) return false;
+      locks[claudeSessionId] = {
+        ptySessionId,
+        kind: this.kind,
+        pid: process.pid,
+        updatedAt: Date.now(),
+      };
+      this.writeOrchLocks(rootPath, locks);
+      return true;
+    } finally {
+      this.releaseLockMutex(mutexFd, rootPath);
+    }
   }
 
   /** Release our resume lock for `claudeSessionId` (only if we still hold it). */

@@ -38,6 +38,7 @@ describe("OrchestratorManager session reconnect", () => {
   function makeManager(kind = "board"): OrchestratorManager {
     const ptyManager = {
       onDanger: vi.fn(() => vi.fn()),
+      setBlockDangerousForSession: vi.fn(),
     };
     const mgr = new OrchestratorManager(
       ptyManager as never,
@@ -163,6 +164,7 @@ describe("OrchestratorManager session reconnect", () => {
         create: vi.fn(),
         onData: vi.fn(),
         onDanger: vi.fn(() => vi.fn()),
+        setBlockDangerousForSession: vi.fn(),
         onExit: vi.fn(),
         writeAndSubmit: vi.fn(),
         kill: vi.fn(),
@@ -486,6 +488,7 @@ describe("OrchestratorManager session reconnect", () => {
         ),
         onData: vi.fn(),
         onDanger: vi.fn(() => vi.fn()),
+        setBlockDangerousForSession: vi.fn(),
         onExit: vi.fn((ptyId: string, cb: (code: number) => void) => {
           exitCbs.set(ptyId, cb);
         }),

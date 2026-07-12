@@ -241,3 +241,65 @@ describe("AgentManager — N2 heartbeat timer release", () => {
     expect(telemetry.heartbeat.mock.calls.length).toBe(before);
   });
 });
+
+// ─────────────── P3-4: dead-entry pruning backstop (slow leak) ──────────────
+
+describe("AgentManager — P3-4 dead-entry pruning backstop", () => {
+  const TTL_MS = 30 * 60 * 1000;
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  function launchOne(am: AgentManager, id = "ag1") {
+    return am.launch({
+      id,
+      name: id,
+      model: "claude",
+      role: "backend",
+      command: "claude",
+      cwd: "/tmp/marblo-test",
+    });
+  }
+
+  it("evicts a terminal (stopped) entry only after the TTL", () => {
+    const am = new AgentManager(new PtyManager());
+    launchOne(am);
+    am.stop("ag1"); // → stopped, terminalSince stamped
+    expect(am.getAgent("ag1")?.status).toBe("stopped");
+
+    // Before the TTL a periodic sweep leaves it in place (still revivable).
+    vi.advanceTimersByTime(TTL_MS - 60_000);
+    expect(am.getAgent("ag1")).not.toBeNull();
+
+    // Past the TTL the next sweep reclaims the map slot.
+    vi.advanceTimersByTime(2 * 60_000);
+    expect(am.getAgent("ag1")).toBeNull();
+
+    am.stopAll();
+  });
+
+  it("never prunes a live agent no matter how long it runs", () => {
+    const am = new AgentManager(new PtyManager());
+    launchOne(am); // idle, terminalSince === null
+
+    vi.advanceTimersByTime(2 * TTL_MS);
+    expect(am.getAgent("ag1")).not.toBeNull();
+
+    am.stopAll();
+  });
+
+  it("stopAll() clears the pruner interval so it can't fire post-quit", () => {
+    const am = new AgentManager(new PtyManager());
+    launchOne(am);
+    am.stop("ag1");
+    am.stopAll(); // clears the sweep interval
+
+    // With the interval cleared, advancing well past the TTL is inert — no
+    // throw, and the (already-stopped) entry stays exactly as stopAll left it.
+    expect(() => vi.advanceTimersByTime(3 * TTL_MS)).not.toThrow();
+  });
+});

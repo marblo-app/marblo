@@ -167,6 +167,85 @@ describe("PtyManager.writeAndSubmit serialization", () => {
   });
 });
 
+describe("PtyManager — per-session dangerous-command blocking (P3-3)", () => {
+  // High-severity command from danger-command.ts. `rm -rf /tmp/x` matches
+  // isRmRf; it must be DROPPED (never written) only for sessions opted into
+  // blocking, and pass through (warn-only) everywhere else so worktree-isolated
+  // workers aren't regressed.
+  const DANGER = "rm -rf /tmp/x";
+  const MEDIUM = "sudo apt-get update"; // medium severity — never blocked
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    spawned.length = 0;
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  async function flush(): Promise<void> {
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  it("warn-only by default: a dangerous command is still written (not blocked)", async () => {
+    const pm = new PtyManager();
+    pm.create("pty-1", "worker");
+    const proc = spawned[0] as FakePtyInst;
+    pm.writeAndSubmit("pty-1", DANGER, DELAY_MS);
+    await flush();
+    expect(proc.written).toEqual([`\x1b[200~${DANGER}\x1b[201~`]);
+  });
+
+  it("blocks a high-severity command for a session opted into blocking", async () => {
+    const pm = new PtyManager();
+    pm.create("orch-1", "Orchestrator");
+    const proc = spawned[0] as FakePtyInst;
+    pm.setBlockDangerousForSession("orch-1", true);
+    pm.writeAndSubmit("orch-1", DANGER, DELAY_MS);
+    await flush();
+    expect(proc.written).toEqual([]); // dropped
+  });
+
+  it("does NOT block other sessions (scoped to the opted-in id only)", async () => {
+    const pm = new PtyManager();
+    pm.create("orch-1", "Orchestrator");
+    pm.create("worker-1", "worker");
+    const orch = spawned[0] as FakePtyInst;
+    const worker = spawned[1] as FakePtyInst;
+    pm.setBlockDangerousForSession("orch-1", true);
+    pm.writeAndSubmit("orch-1", DANGER, DELAY_MS);
+    pm.writeAndSubmit("worker-1", DANGER, DELAY_MS);
+    await flush();
+    expect(orch.written).toEqual([]); // blocked
+    expect(worker.written).toEqual([`\x1b[200~${DANGER}\x1b[201~`]); // warn-only
+  });
+
+  it("blocks high but NOT medium severity even when the session is opted in", async () => {
+    const pm = new PtyManager();
+    pm.create("orch-1", "Orchestrator");
+    const proc = spawned[0] as FakePtyInst;
+    pm.setBlockDangerousForSession("orch-1", true);
+    pm.writeAndSubmit("orch-1", MEDIUM, DELAY_MS);
+    await flush();
+    expect(proc.written).toEqual([`\x1b[200~${MEDIUM}\x1b[201~`]); // medium passes
+  });
+
+  it("clears the per-session opt-in on kill (no stale block leaks to a reused id)", async () => {
+    const pm = new PtyManager();
+    pm.create("orch-1", "Orchestrator");
+    pm.setBlockDangerousForSession("orch-1", true);
+    pm.kill("orch-1");
+    // Reuse the same id for a fresh session that never opted in.
+    pm.create("orch-1", "Orchestrator");
+    const proc = spawned[spawned.length - 1] as FakePtyInst;
+    pm.writeAndSubmit("orch-1", DANGER, DELAY_MS);
+    await flush();
+    expect(proc.written).toEqual([`\x1b[200~${DANGER}\x1b[201~`]); // not blocked
+  });
+});
+
 describe("PtyManager.kill — process-group tree reaping", () => {
   // Root cause (Telegram channel handoff, ticket EDcb8mflwAUMcJDrv5EV):
   // node-pty's own .kill() only signals the single child pid (SIGHUP), so a
