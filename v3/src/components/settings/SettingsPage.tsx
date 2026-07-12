@@ -325,7 +325,7 @@ const PRESETS = [
   },
 ];
 
-type OrchestratorModel = "claude" | "codex" | "antigravity";
+type OrchestratorModel = "claude" | "codex";
 
 const ORCHESTRATOR_MODELS: Array<{
   id: OrchestratorModel;
@@ -342,18 +342,17 @@ const ORCHESTRATOR_MODELS: Array<{
     label: "Codex (GPT)",
     desc: "Good for saving Claude quota; uses OpenAI/Codex limits.",
   },
-  {
-    id: "antigravity",
-    label: "Antigravity",
-    desc: "Google agy CLI path; uses Antigravity/Gemini limits.",
-  },
 ];
+
+const ORCHESTRATOR_ENV_MODEL = {
+  label: "기타(env)",
+  desc: "MARBLO_ORCHESTRATOR_MODEL is set to a model outside the UI choices.",
+};
 
 function ModelPresetSection() {
   const { t } = useTranslation();
   const [current, setCurrent] = useState("recommended");
-  const [orchestratorModel, setOrchestratorModel] =
-    useState<OrchestratorModel>("claude");
+  const [orchestratorModel, setOrchestratorModel] = useState<string>("claude");
   const [saving, setSaving] = useState(false);
   const [savingOrchestratorModel, setSavingOrchestratorModel] = useState(false);
   const [orchestratorModelSaved, setOrchestratorModelSaved] = useState(false);
@@ -369,11 +368,7 @@ function ModelPresetSection() {
     window.electronAPI.orchestratorModel
       .get()
       .then((model) => {
-        if (
-          model === "claude" ||
-          model === "codex" ||
-          model === "antigravity"
-        ) {
+        if (model) {
           setOrchestratorModel(model);
         }
       })
@@ -392,9 +387,7 @@ function ModelPresetSection() {
     }
   };
 
-  const handleOrchestratorModelChange = async (
-    model: OrchestratorModel,
-  ) => {
+  const handleOrchestratorModelChange = async (model: OrchestratorModel) => {
     setSavingOrchestratorModel(true);
     setOrchestratorModelSaved(false);
     try {
@@ -433,12 +426,15 @@ function ModelPresetSection() {
               {model.label}
             </option>
           ))}
+          {!ORCHESTRATOR_MODELS.some((m) => m.id === orchestratorModel) && (
+            <option value={orchestratorModel} disabled>
+              {ORCHESTRATOR_ENV_MODEL.label}
+            </option>
+          )}
         </select>
         <p className="mt-2 text-xs text-gray-500">
-          {
-            ORCHESTRATOR_MODELS.find((m) => m.id === orchestratorModel)
-              ?.desc
-          }
+          {ORCHESTRATOR_MODELS.find((m) => m.id === orchestratorModel)?.desc ??
+            ORCHESTRATOR_ENV_MODEL.desc}
         </p>
         <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
           {isOrchestratorRunning
