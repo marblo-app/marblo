@@ -8,6 +8,8 @@ import {
 } from "react";
 import { useTranslation } from "../../lib/i18n";
 import {
+  ORCHESTRATOR_MODEL_OPTIONS,
+  isOrchestratorModel,
   useOrchestratorStore,
   type OrchestratorModel,
 } from "../../stores/orchestratorStore";
@@ -46,12 +48,6 @@ interface SessionInfo {
   label?: string;
   agentId?: string;
 }
-
-const MODEL_OPTIONS: Array<{ value: OrchestratorModel; label: string }> = [
-  { value: "claude", label: "Claude" },
-  { value: "codex", label: "Codex" },
-  { value: "antigravity", label: "Antigravity" },
-];
 
 export default memo(function OrchestratorPanel() {
   const { t } = useTranslation();
@@ -104,9 +100,7 @@ export default memo(function OrchestratorPanel() {
       .get()
       .then((model) => {
         if (!alive) return;
-        const normalized =
-          model === "codex" || model === "antigravity" ? model : "claude";
-        setSelectedModel(normalized);
+        setSelectedModel(isOrchestratorModel(model) ? model : "claude");
       })
       .catch(() => {});
     return () => {
@@ -385,7 +379,7 @@ export default memo(function OrchestratorPanel() {
               {isSwitching
                 ? "Switching..."
                 : status === "running"
-                  ? `${MODEL_OPTIONS.find((m) => m.value === (runningModel ?? selectedModel))?.label ?? "Claude"} Code`
+                  ? `${ORCHESTRATOR_MODEL_OPTIONS.find((m) => m.value === (runningModel ?? selectedModel))?.label ?? "Claude"} Code`
                   : "Starting..."}
             </span>
             {claudeVersion && (
@@ -404,7 +398,7 @@ export default memo(function OrchestratorPanel() {
                 className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa] disabled:opacity-60"
                 title="Switch orchestrator model"
               >
-                {MODEL_OPTIONS.map((option) => (
+                {ORCHESTRATOR_MODEL_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -414,8 +408,9 @@ export default memo(function OrchestratorPanel() {
                 <div className="absolute bottom-full right-0 z-50 mb-1 w-80 rounded-md border border-[#313244] bg-[#1e1e2e] p-3 text-xs shadow-lg">
                   <div className="mb-1 font-medium text-[#cdd6f4]">
                     Switch orchestrator to{" "}
-                    {MODEL_OPTIONS.find((m) => m.value === targetSwitchModel)
-                      ?.label ?? "Claude"}
+                    {ORCHESTRATOR_MODEL_OPTIONS.find(
+                      (m) => m.value === targetSwitchModel,
+                    )?.label ?? "Claude"}
                   </div>
                   <div className="mb-3 text-[11px] leading-4 text-[#a6adc8]">
                     Snapshot will include active missions and board work.
@@ -489,7 +484,7 @@ export default memo(function OrchestratorPanel() {
                 className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa]"
                 title="Orchestrator model"
               >
-                {MODEL_OPTIONS.map((option) => (
+                {ORCHESTRATOR_MODEL_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>

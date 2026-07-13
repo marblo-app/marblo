@@ -1,7 +1,19 @@
 import { create } from "zustand";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
-export type OrchestratorModel = "claude" | "codex" | "antigravity";
+export const ORCHESTRATOR_MODEL_OPTIONS = [
+  { value: "claude", label: "Claude" },
+  { value: "codex", label: "Codex" },
+] as const;
+
+export type OrchestratorModel =
+  (typeof ORCHESTRATOR_MODEL_OPTIONS)[number]["value"];
+
+export function isOrchestratorModel(
+  model: unknown,
+): model is OrchestratorModel {
+  return ORCHESTRATOR_MODEL_OPTIONS.some((option) => option.value === model);
+}
 export type OrchestratorSwitchStatus =
   | "idle"
   | "snapshotting"
