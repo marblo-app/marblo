@@ -415,15 +415,22 @@ export class OrchestratorManager {
 
     // ── YOLO(권한 스킵) 보장 ────────────────────────────────────────────
     // 오케스트레이터는 샌드박스가 아닌 MAIN 체크아웃을 운전하므로 무인 실행을 위해
-    // 욜로(--dangerously-skip-permissions)를 문다. buildCLICommand 가 이미 넣지만
-    // 존재를 한 번 더 보장한다.
+    // 모델별 unattended 플래그를 문다. Claude/Antigravity 는
+    // --dangerously-skip-permissions 를 지원하지만 Codex 는 같은 문자열을
+    // unknown argument 로 보고 exit code 2 로 종료한다. Codex 의 unattended
+    // 설정은 AgentConfigGenerator 의 -c approval_policy/sandbox_mode 로 이미
+    // 구성되므로 여기서는 해당 플래그를 추가하지 않는다.
     //
     // ★Telegram: 오케는 더 이상 `--channels plugin:telegram` 을 물지 않는다. 봇당
     // 단일 소비자인 getUpdates 폴러는 electron main(telegram-poller.ts)이 프로젝트당
     // 정확히 1개만 소유하며, 오케 churn(재기동/resume/handover)과 무관하게 돈다.
     // 그래서 여기서의 채널 플래그 주입·단일 소유자 게이팅·토큰 env 주입은 전부 제거됐다
     // (ticket vw38IB2VcmOIOlFV51Wa).
-    if (!launchConfig.args.includes(YOLO_FLAG)) {
+    if (
+      (launchConfig.model === "claude" ||
+        launchConfig.model === "antigravity") &&
+      !launchConfig.args.includes(YOLO_FLAG)
+    ) {
       launchConfig.args.unshift(YOLO_FLAG);
     }
 
