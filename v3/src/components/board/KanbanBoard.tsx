@@ -8,6 +8,7 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from "@dnd-kit/core";
+import { RefreshCw } from "lucide-react";
 import type { Task, TaskStatus, AgentRole } from "../../types/task";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
@@ -45,6 +46,7 @@ export function KanbanBoard() {
   const tasks = useTaskStore((s) => s.tasks);
   const loading = useTaskStore((s) => s.loading);
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
+  const refreshTasks = useTaskStore((s) => s.refreshTasks);
 
   const canUse = useSubscriptionStore((s) => s.canUse);
 
@@ -103,6 +105,13 @@ export function KanbanBoard() {
       console.error("Failed to update task status:", err);
     }
   }, []);
+
+  const handleRefreshBoard = useCallback(() => {
+    if (!currentProject || loading) return;
+    refreshTasks(currentProject.id).catch((err) => {
+      console.error("Failed to refresh board tasks:", err);
+    });
+  }, [currentProject, loading, refreshTasks]);
 
   // Subscribe to tasks when project changes
   useEffect(() => {
@@ -235,6 +244,17 @@ export function KanbanBoard() {
         <span className="text-xs text-gray-500">
           {filteredTasks.length} task{filteredTasks.length !== 1 ? "s" : ""}
         </span>
+
+        <button
+          type="button"
+          onClick={handleRefreshBoard}
+          disabled={loading}
+          title={loading ? "Refreshing board..." : "Refresh board"}
+          aria-label={loading ? "Refreshing board" : "Refresh board"}
+          className="flex h-8 w-8 items-center justify-center rounded border border-gray-600 bg-gray-800 text-gray-300 hover:border-gray-500 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </button>
 
         {/* AI Decompose button */}
         {canUse("orchestrator") && (

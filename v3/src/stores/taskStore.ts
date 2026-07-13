@@ -15,11 +15,23 @@ interface TaskState {
 
   fetchTasks: (projectId: string) => Promise<void>;
   subscribeToTasks: (projectId: string) => () => void;
+  refreshTasks: (projectId: string) => Promise<void>;
   createTask: (data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
   updateTask: (id: string, data: Partial<Task>) => Promise<void>;
   updateTaskStatus: (id: string, status: TaskStatus) => Promise<void>;
   setFilter: (filter: Partial<TaskFilter>) => void;
   getFilteredTasks: () => Task[];
+}
+
+interface ActiveTaskSubscription {
+  projectId: string;
+  unsubscribe: () => void;
+}
+
+let activeTaskSubscription: ActiveTaskSubscription | null = null;
+
+function unsubscribeActiveTaskSubscription(): void {
+  activeTaskSubscription?.unsubscribe();
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({
@@ -41,10 +53,46 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   subscribeToTasks: (projectId: string) => {
+    unsubscribeActiveTaskSubscription();
     set({ loading: true });
-    return subscribeToTasksService(projectId, (tasks) => {
+    let isActive = true;
+    const unsubscribeService = subscribeToTasksService(projectId, (tasks) => {
+      if (!isActive) return;
       set({ tasks, loading: false });
     });
+
+    const unsubscribe = () => {
+      if (!isActive) return;
+      isActive = false;
+      unsubscribeService();
+      if (activeTaskSubscription?.unsubscribe === unsubscribe) {
+        activeTaskSubscription = null;
+      }
+    };
+
+    activeTaskSubscription = { projectId, unsubscribe };
+    return () => {
+      if (activeTaskSubscription?.projectId === projectId) {
+        activeTaskSubscription.unsubscribe();
+        return;
+      }
+      unsubscribe();
+    };
+  },
+
+  refreshTasks: async (projectId: string) => {
+    unsubscribeActiveTaskSubscription();
+    get().subscribeToTasks(projectId);
+    try {
+      const tasks = await taskService.getTasks(projectId);
+      if (activeTaskSubscription?.projectId === projectId) {
+        set({ tasks, loading: false });
+      }
+    } catch {
+      if (activeTaskSubscription?.projectId === projectId) {
+        set({ loading: false });
+      }
+    }
   },
 
   createTask: async (data) => {
