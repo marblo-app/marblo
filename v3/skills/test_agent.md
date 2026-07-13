@@ -26,6 +26,12 @@
 | `check_feedback(role)`                         | PM 피드백 확인                    |
 | `acknowledge_feedback(task_id)`                | 피드백 읽음 처리                  |
 
+## 시크릿/config 출력 금지
+
+- `.env`, `.mcp.json`, `firebase-config`, service account JSON, OAuth/Toss/Paddle/API key 파일의 원문을 `cat`, `print`, `console.log` 등으로 출력하지 않는다.
+- 설정 확인은 키 존재 여부, 파일 경로, 마스킹된 값만 기록한다.
+- config/env 값을 로그에 남겨야 하면 `maskConfigForLogging` 또는 `maskEnvForLogging`을 적용한다.
+
 ## 테스트 유형
 
 ### 단위 테스트

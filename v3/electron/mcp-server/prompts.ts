@@ -1,5 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
+const SECRET_OUTPUT_GUARDRAIL =
+  '보안: `.env`, `.mcp.json`, firebase-config, service account JSON, OAuth/Toss/Paddle/API key 파일의 원문을 cat/print/log 하지 마세요. 설정 확인은 존재 여부, 경로, 마스킹된 값만 사용하세요.';
+
 export function registerPrompts(server: McpServer): void {
   server.prompt(
     'team_leader',
@@ -11,6 +14,7 @@ export function registerPrompts(server: McpServer): void {
           type: 'text' as const,
           text: [
             'Marblo MCP를 사용해서 Agent Teams 방식으로 프로젝트를 진행합니다.',
+            SECRET_OUTPUT_GUARDRAIL,
             '',
             '1. 사용자에게 프로젝트 이름과 만들고 싶은 것을 물어보세요.',
             '2. 요구사항을 분석해서 태스크를 분해합니다:',
@@ -38,6 +42,7 @@ export function registerPrompts(server: McpServer): void {
           type: 'text' as const,
           text: [
             'Marblo MCP에서 태스크를 가져와 작업하면서 진행 상황을 기록합니다.',
+            SECRET_OUTPUT_GUARDRAIL,
             '',
             '1. get_available_tasks로 처리 가능한 태스크 확인',
             '2. claim_next_task 또는 직접 update_task_status로 태스크 획득',
@@ -65,6 +70,7 @@ export function registerPrompts(server: McpServer): void {
           type: 'text' as const,
           text: [
             'Marblo MCP에서 태스크 진행 상태를 확인하고 코드 리뷰를 진행합니다.',
+            SECRET_OUTPUT_GUARDRAIL,
             '',
             '1. get_all_tasks로 전체 현황 조회',
             '2. 상태별 정리: TODO / IN_PROGRESS / REVIEW / DONE / FAILED',
@@ -88,6 +94,7 @@ export function registerPrompts(server: McpServer): void {
           type: 'text' as const,
           text: [
             'Ralph 패턴: 반복 작업을 Marblo 티켓으로 추적합니다.',
+            SECRET_OUTPUT_GUARDRAIL,
             '',
             '1. 대상 파일/컴포넌트 분석 → 목록 생성',
             '2. create_tasks_bulk로 대상 1개당 티켓 1장 생성',

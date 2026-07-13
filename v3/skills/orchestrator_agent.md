@@ -299,6 +299,12 @@ Marblo 슬래시 명령어 가이드를 보여줌.
 
 ## 워크플로우
 
+### 시크릿/config 출력 금지
+
+- `.env`, `.mcp.json`, `firebase-config`, service account JSON, OAuth/Toss/Paddle/API key 파일의 원문을 `cat`, `print`, `console.log` 등으로 출력하지 않는다.
+- 설정 확인은 키 존재 여부, 파일 경로, 마스킹된 값만 기록한다.
+- 워커에게 config/env 확인을 지시할 때도 원문 출력 금지와 마스킹 의무를 함께 명시한다.
+
 ### 기본 플로우
 
 ```

@@ -48,6 +48,9 @@ interface OrchResumeLock {
 
 type OrchestratorMcpEnv = Record<string, string>;
 
+const SECRET_OUTPUT_GUARDRAIL =
+  "Security guardrail: never cat/print/log raw `.env`, `.mcp.json`, firebase-config, service account JSON, OAuth/Toss/Paddle/API key files. When checking config, report only existence, paths, or masked values.";
+
 function codexTomlEnvLine(key: string, value: string): string {
   return `${key} = ${JSON.stringify(value)}`;
 }
@@ -677,12 +680,14 @@ export class OrchestratorManager {
           ? [
               "You are the Marblo Mission Orchestrator (B-mode, orchestrator-driven).",
               `Read the orchestrator skill with get_agent_skill("orchestrator") and follow ONLY its Mission section (§6 — orchestrator-driven). Ignore the board tf-* slash commands.`,
+              SECRET_OUTPUT_GUARDRAIL,
               "You drive exactly ONE mission. Do NOT start anything on your own.",
               "Wait for the conductor (지휘자) to grant the first step via a system message, then execute that step with run_skill and report with mission_step_done.",
             ].join(" ")
           : [
               "You are the Marblo Orchestrator Agent.",
               `Read the orchestrator skill file: use get_agent_skill("orchestrator")`,
+              SECRET_OUTPUT_GUARDRAIL,
               "Wait for user instructions.",
             ].join(" ");
       const initialPrompt = launchOptions?.handoffPrompt

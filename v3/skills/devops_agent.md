@@ -63,6 +63,9 @@ Electron 앱 빌드, 패키징, CI/CD 파이프라인, 배포를 담당한다.
 - CI/CD에서는 GitHub Secrets 사용
 - 절대로 소스 코드에 시크릿 하드코딩 금지
 - Firebase 서비스 계정 키는 CI 시크릿으로만
+- `.env`, `.mcp.json`, `firebase-config`, service account JSON, OAuth/Toss/Paddle/API key 파일의 원문을 `cat`, `print`, `console.log` 등으로 출력하지 않는다.
+- 설정 확인은 키 존재 여부, 파일 경로, 마스킹된 값만 기록한다.
+- config/env 값을 로그에 남겨야 하면 `maskConfigForLogging` 또는 `maskEnvForLogging`을 적용한다.
 
 ## Scope 규칙
 

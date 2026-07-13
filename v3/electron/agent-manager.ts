@@ -167,6 +167,12 @@ export function serializeAgent(agent: AgentInstance): SerializableAgent {
  * sessions don't stay "working" forever. */
 const IDLE_INACTIVITY_MS = 300_000; // 5 min
 
+const SECRET_OUTPUT_GUARDRAIL = [
+  "[보안 가드레일]",
+  "- `.env`, `.mcp.json`, firebase-config, service account JSON, OAuth/Toss/Paddle/API key 파일의 원문을 cat/print/log 하지 마세요.",
+  "- 설정 확인이 필요하면 키 존재 여부, 파일 경로, 마스킹된 값만 보고하세요. 값 자체를 출력해야 하는 로그에는 maskConfigForLogging/maskEnvForLogging 계열 마스킹을 적용하세요.",
+].join("\n");
+
 // P3-4: backstop pruning of dead (stopped/error) entries the primary reaper
 // (cleanup_agents → remove) never reclaimed — e.g. the orchestrator never
 // calling cleanup_agents, or a naturally-completed agent whose Firestore doc was
@@ -256,6 +262,8 @@ export function composeInitialPrompt(
   return [
     "[역할 스킬 — 아래 워크플로우와 도구 사용 규칙을 따르세요]",
     skillContent.trim(),
+    "",
+    SECRET_OUTPUT_GUARDRAIL,
     "",
     "[작업 지시]",
     sanitized,

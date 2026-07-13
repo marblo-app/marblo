@@ -21,6 +21,8 @@ describe("composeInitialPrompt", () => {
       "[역할 스킬 — 아래 워크플로우와 도구 사용 규칙을 따르세요]",
     );
     expect(out).toContain("[작업 지시]");
+    expect(out).toContain("[보안 가드레일]");
+    expect(out).toContain("maskConfigForLogging/maskEnvForLogging");
     // Claude keeps the MCP prefix in the instruction (claude-cli expects
     // mcp__server__tool naming convention).
     expect(out).toContain("Use mcp__marblo__claim_task to grab it.");
@@ -50,6 +52,7 @@ describe("composeInitialPrompt", () => {
       SKILL,
     );
     expect(out).toContain("[역할 스킬");
+    expect(out).toContain(".env");
     expect(out).toContain("Submit via submit_for_review.");
   });
 

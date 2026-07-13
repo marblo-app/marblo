@@ -1,5 +1,5 @@
 const SENSITIVE_KEY_PATTERN =
-  /(?:api[_-]?key|token|secret|password|credential|authorization|bearer|auth[_-]?token)/i;
+  /(?:api[_-]?key|private[_-]?key|token|secret|password|credential|authorization|bearer|auth[_-]?token|service[_-]?account)/i;
 
 export function maskSensitiveValue(value: string): string {
   if (value.length === 0) return "";
