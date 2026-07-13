@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy, limit as fsLimit, Timestamp, } from "firebase/firestore";
-import { db } from "./firebase.js";
+import { db, getCurrentAuthUid } from "./firebase.js";
 import { resolveContext, resolveContextForWrite, resolveMissionContextForWrite, contextReadFilter, isLaneContextId, isOrchestratorAgentId, isTaskInReadContext, buildMissionStepReportedEvent, } from "./context.js";
 import { applyProjection, resolveDependentIfReady, computeTaskProjection, } from "./projection.js";
 import { selectProjectId, looksLikeFirestoreId } from "./project-resolve.js";
@@ -2518,12 +2518,13 @@ export function registerTools(server) {
         if (!projectId) {
             return text("Error: projectId could not be resolved. Pass project_id or set MARBLO_PROJECT.");
         }
+        const callerUid = getCurrentAuthUid();
         const ref = await addDoc(collection(db, "pendingInstructions"), {
             projectId,
             taskId: task_id ?? null,
             targetAgentId: target_agent_id,
             message,
-            fromUserId: from_user_id || "",
+            fromUserId: from_user_id || callerUid || "",
             fromUserName: from_user_name || "",
             sourceType: source_type || "other",
             isDelivered: false,
