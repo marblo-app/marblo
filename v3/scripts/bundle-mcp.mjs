@@ -29,31 +29,38 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const distMcpDir = fileURLToPath(new URL("../dist-mcp/", import.meta.url));
-const entry = path.join(distMcpDir, "index.js");
-// 입력==출력 을 피하려 임시 파일로 뽑은 뒤 원자적으로 교체한다.
-const tmp = path.join(distMcpDir, "index.bundle.mjs");
+async function bundleMcpEntry(filename) {
+  const entry = path.join(distMcpDir, filename);
+  // 입력==출력 을 피하려 임시 파일로 뽑은 뒤 원자적으로 교체한다.
+  const tmp = path.join(distMcpDir, `${filename}.bundle.mjs`);
 
-await build({
-  entryPoints: [entry],
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  target: "node20",
-  outfile: tmp,
-  // ESM 번들 안의 CJS 의존성(@grpc/grpc-js 등)이 부르는 require() 를 실제 require
-  // 로 연결. 이게 없으면 esbuild 의 __require shim 이 런타임에 throw 한다.
-  banner: {
-    js: "import{createRequire as ___marbloCreateRequire}from'module';const require=___marbloCreateRequire(import.meta.url);",
-  },
-  logLevel: "warning",
-});
+  await build({
+    entryPoints: [entry],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node20",
+    outfile: tmp,
+    // ESM 번들 안의 CJS 의존성(@grpc/grpc-js 등)이 부르는 require() 를 실제 require
+    // 로 연결. 이게 없으면 esbuild 의 __require shim 이 런타임에 throw 한다.
+    banner: {
+      js: "import{createRequire as ___marbloCreateRequire}from'module';const require=___marbloCreateRequire(import.meta.url);",
+    },
+    logLevel: "warning",
+  });
 
-renameSync(tmp, entry);
-// tsc 가 남긴 개별 소스맵은 번들과 어긋나므로 제거(번들은 맵 없이 출력).
-try {
-  rmSync(path.join(distMcpDir, "index.js.map"), { force: true });
-} catch {
-  /* best-effort */
+  renameSync(tmp, entry);
+  // tsc 가 남긴 개별 소스맵은 번들과 어긋나므로 제거(번들은 맵 없이 출력).
+  try {
+    rmSync(path.join(distMcpDir, `${filename}.map`), { force: true });
+  } catch {
+    /* best-effort */
+  }
 }
 
-console.log("[bundle-mcp] dist-mcp/index.js self-contained ESM 번들 완료");
+await bundleMcpEntry("index.js");
+await bundleMcpEntry("cli-fallback.js");
+
+console.log(
+  "[bundle-mcp] dist-mcp/index.js + cli-fallback.js self-contained ESM 번들 완료",
+);

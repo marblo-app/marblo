@@ -11,6 +11,10 @@ import {
   orchestratorCommandForModel,
 } from "./agent-config";
 import { contextForKind } from "./mcp-server/context";
+import {
+  CODEX_ORCH_REQUIRED_MCP_TOOL_COUNT,
+  CODEX_ORCH_REQUIRED_MCP_TOOLS,
+} from "./mcp-server/tool-surface";
 import { YOLO_FLAG } from "./telegram-channels";
 import { looksLikeLoginScreen } from "./harness-manager";
 import { maskConfigForLogging } from "./config-redaction";
@@ -48,6 +52,16 @@ interface OrchResumeLock {
 
 type OrchestratorMcpEnv = Record<string, string>;
 
+interface CodexMarbloSurfaceReport {
+  codexHome: string;
+  configPath: string;
+  marbloMcpConfigured: boolean;
+  tfPromptCount: number;
+  requiredTfPromptsPresent: boolean;
+  fallbackCliPresent: boolean;
+  fallbackCliPath: string;
+}
+
 const SECRET_OUTPUT_GUARDRAIL =
   "Security guardrail: never cat/print/log raw `.env`, `.mcp.json`, firebase-config, service account JSON, OAuth/Toss/Paddle/API key files. When checking config, report only existence, paths, or masked values.";
 
@@ -76,26 +90,91 @@ function patchCodexMarbloMcpEnv(
   );
 }
 
-function assertCodexMarbloSurface(configPath: string): void {
+function inspectCodexMarbloSurface(
+  configPath: string,
+): CodexMarbloSurfaceReport {
   const codexHome = path.dirname(configPath);
-  const configContent = fs.readFileSync(configPath, "utf-8");
-  if (!configContent.includes("[mcp_servers.marblo]")) {
+  const configContent = fs.existsSync(configPath)
+    ? fs.readFileSync(configPath, "utf-8")
+    : "";
+  const promptsDir = path.join(codexHome, "prompts");
+  const tfPromptNames =
+    fs.existsSync(promptsDir) && fs.statSync(promptsDir).isDirectory()
+      ? fs
+          .readdirSync(promptsDir)
+          .filter((entry) => entry.startsWith("tf-") && entry.endsWith(".md"))
+      : [];
+  const requiredTfPromptsPresent = [
+    "tf-add.md",
+    "tf-start.md",
+    "tf-status.md",
+  ].every((entry) => tfPromptNames.includes(entry));
+  const fallbackCliPath = path.join(
+    codexHome,
+    "bin",
+    os.platform() === "win32" ? "marblo-fallback.cmd" : "marblo-fallback",
+  );
+  return {
+    codexHome,
+    configPath,
+    marbloMcpConfigured: configContent.includes("[mcp_servers.marblo]"),
+    tfPromptCount: tfPromptNames.length,
+    requiredTfPromptsPresent,
+    fallbackCliPresent: fs.existsSync(fallbackCliPath),
+    fallbackCliPath,
+  };
+}
+
+function assertCodexMarbloSurface(
+  configPath: string,
+): CodexMarbloSurfaceReport {
+  const report = inspectCodexMarbloSurface(configPath);
+  if (!report.marbloMcpConfigured) {
     throw new Error(
       `Codex config is missing [mcp_servers.marblo]: ${configPath}`,
     );
   }
 
-  const promptsDir = path.join(codexHome, "prompts");
-  const hasTfPrompts =
-    fs.existsSync(promptsDir) &&
-    fs
-      .readdirSync(promptsDir)
-      .some((entry) => entry.startsWith("tf-") && entry.endsWith(".md"));
-  if (!hasTfPrompts) {
+  if (!report.requiredTfPromptsPresent) {
     console.warn(
-      `[Orchestrator] Codex CODEX_HOME has no tf-* prompts: ${promptsDir}`,
+      `[Orchestrator] Codex CODEX_HOME missing required tf prompts: ${path.join(
+        report.codexHome,
+        "prompts",
+      )}`,
     );
   }
+  if (!report.fallbackCliPresent) {
+    console.warn(
+      `[Orchestrator] Codex fallback CLI wrapper missing: ${report.fallbackCliPath}`,
+    );
+  }
+  return report;
+}
+
+function buildCodexBootHealthSummary(input: {
+  projectId: string;
+  contextId: string;
+  bridgeConnected: boolean;
+  surface: CodexMarbloSurfaceReport | null;
+}): string {
+  const surface = input.surface;
+  return [
+    "Marblo boot health summary:",
+    `- Marblo MCP connected: ${surface?.marbloMcpConfigured ? "yes" : "no"}`,
+    `- Marblo MCP config present: ${surface?.marbloMcpConfigured ? "yes" : "no"}`,
+    `- Bridge connected: ${input.bridgeConnected ? "yes" : "no"}`,
+    `- Project ID: ${input.projectId || "(none)"}`,
+    `- Context ID: ${input.contextId || "(none)"}`,
+    `- Available Marblo MCP tool count: ${CODEX_ORCH_REQUIRED_MCP_TOOL_COUNT} expected minimum; replace with the actual visible count in your first response.`,
+    `- Required Marblo MCP tools: ${CODEX_ORCH_REQUIRED_MCP_TOOLS.join(", ")}`,
+    `- Codex tf prompts: ${surface?.tfPromptCount ?? 0} (required present: ${
+      surface?.requiredTfPromptsPresent ? "yes" : "no"
+    })`,
+    `- Fallback CLI: ${surface?.fallbackCliPresent ? "yes" : "no"}${
+      surface ? ` (${surface.fallbackCliPath})` : ""
+    }`,
+    "Do not print env values, tokens, config file contents, or raw .mcp.json/.env data.",
+  ].join("\n");
 }
 
 // NOTE: Telegram is NO LONGER owned by any orchestrator. The getUpdates poller
@@ -611,9 +690,10 @@ export class OrchestratorManager {
         }`,
       );
     }
-    if (launchConfig.model === "gpt") {
-      assertCodexMarbloSurface(launchConfig.mcpConfigPath);
-    }
+    const codexSurface =
+      launchConfig.model === "gpt"
+        ? assertCodexMarbloSurface(launchConfig.mcpConfigPath)
+        : null;
 
     // Merge env
     const mergedEnv: Record<string, string> = {
@@ -677,21 +757,51 @@ export class OrchestratorManager {
       // Enter to register as a discrete keystroke. Readiness detection
       // mirrors agent-manager so we send only after the CLI is actually
       // accepting input.
+      const codexBootHealth =
+        launchConfig.model === "gpt"
+          ? buildCodexBootHealthSummary({
+              projectId,
+              contextId: context,
+              bridgeConnected: Boolean(bridgePort),
+              surface: codexSurface,
+            })
+          : "";
+      const codexOrchestratorInstructions =
+        launchConfig.model === "gpt"
+          ? [
+              "Codex orchestrator startup requirements:",
+              "1. In your first response, print the Marblo boot health summary below.",
+              "2. Count the Marblo MCP tools actually visible to you. If the required tools are not callable, report Marblo MCP connected: no and use the fallback CLI only.",
+              "3. Never grep source files to reconstruct create_task, add_activity, or dispatch_task behavior.",
+              "4. For /tf-add, use create_task; if the user explicitly asks to spawn, then dispatch_task with the created task id.",
+              "5. For /tf-start, use one create_tasks_bulk call, then dispatch_task for ready tasks.",
+              "6. For /tf-status, use get_all_tasks and summarize counts/status.",
+              "7. If MCP is missing, use the fallback CLI path shown below for create-task, add-activity, and dispatch-task.",
+              "",
+              codexBootHealth,
+            ].join("\n")
+          : "";
       const baseInitialPrompt =
         this.kind === "mission"
           ? [
               "You are the Marblo Mission Orchestrator (B-mode, orchestrator-driven).",
               `Read the orchestrator skill with get_agent_skill("orchestrator") and follow ONLY its Mission section (§6 — orchestrator-driven). Ignore the board tf-* slash commands.`,
               SECRET_OUTPUT_GUARDRAIL,
+              codexOrchestratorInstructions,
               "You drive exactly ONE mission. Do NOT start anything on your own.",
               "Wait for the conductor (지휘자) to grant the first step via a system message, then execute that step with run_skill and report with mission_step_done.",
-            ].join(" ")
+            ]
+              .filter(Boolean)
+              .join(" ")
           : [
               "You are the Marblo Orchestrator Agent.",
               `Read the orchestrator skill file: use get_agent_skill("orchestrator")`,
               SECRET_OUTPUT_GUARDRAIL,
+              codexOrchestratorInstructions,
               "Wait for user instructions.",
-            ].join(" ");
+            ]
+              .filter(Boolean)
+              .join(" ");
       const initialPrompt = launchOptions?.handoffPrompt
         ? `${baseInitialPrompt}\n\n${launchOptions.handoffPrompt}`
         : baseInitialPrompt;
@@ -723,6 +833,8 @@ export class OrchestratorManager {
         /\? for shortcuts/, // Claude Code: footer help (only in input prompt)
         /Type your message/i, // Input prompt placeholder
         /Loaded \d+ MCP tool/i, // MCP tools loaded — only after trust granted
+        /Ask Codex/i,
+        /Enter to send/i,
       ];
       this.ptyManager.onData(ptySessionId, (data) => {
         if (sent || authBlocked) return;

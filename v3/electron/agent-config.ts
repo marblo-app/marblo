@@ -5,6 +5,7 @@ import crypto from "crypto";
 import { execFileSync } from "child_process";
 import { ModelType } from "./agent-manager";
 import { maskEnvForLogging } from "./config-redaction";
+import { CODEX_ORCH_REQUIRED_MCP_TOOLS } from "./mcp-server/tool-surface";
 
 export interface ResolvedCli {
   /** Absolute path to the binary, or the bare name if resolution failed. */
@@ -76,7 +77,7 @@ export function resolveClaudeBinary(): ResolvedCli {
             command: path.join(
               process.env.APPDATA || path.join(home, "AppData", "Roaming"),
               "npm",
-              "claude.cmd"
+              "claude.cmd",
             ),
             source: "npm-global",
             native: false,
@@ -114,7 +115,7 @@ export function resolveClaudeBinary(): ResolvedCli {
   const logSkip = (
     candidate: ClaudeBinaryCandidate,
     reason: string,
-    detail?: string
+    detail?: string,
   ) => {
     console.warn("[claude-resolver] candidate skipped", {
       command: candidate.command,
@@ -277,7 +278,7 @@ let _nodePreflight: NodeSpawnPreflight | null = null;
  *  찍게 해 실행가능성과 버전을 동시에 확인한다. */
 function verifyNodeCandidate(
   command: string,
-  extraEnv: Record<string, string>
+  extraEnv: Record<string, string>,
 ): { ok: boolean; version: string; error?: string } {
   try {
     const out = execFileSync(
@@ -287,7 +288,7 @@ function verifyNodeCandidate(
         timeout: 5000,
         encoding: "utf-8",
         env: { ...process.env, ...extraEnv },
-      }
+      },
     ).trim();
     const version = out.match(/\d+\.\d+\.\d+/)?.[0] || "";
     if (!version) {
@@ -328,7 +329,7 @@ export function resolveNodeBinary(): ResolvedNode {
         home,
         ".nvm/versions/node",
         process.version,
-        "bin/node"
+        "bin/node",
       ),
       source: "nvm-current",
       env: {},
@@ -477,8 +478,8 @@ export function resolveOrchestratorModel(): ModelType {
   }
   console.warn(
     `[orchestrator-model] unsupported MARBLO_ORCHESTRATOR_MODEL=${JSON.stringify(
-      raw
-    )} → falling back to ${JSON.stringify(DEFAULT_ORCHESTRATOR_MODEL)}`
+      raw,
+    )} → falling back to ${JSON.stringify(DEFAULT_ORCHESTRATOR_MODEL)}`,
   );
   return DEFAULT_ORCHESTRATOR_MODEL;
 }
@@ -599,7 +600,7 @@ function logTopModelFallback(f: TopModelFallback): void {
  *   resolveClaudeBinary().version(실제 설치본)을 쓴다.
  */
 export function resolveTopClaudeModelDetailed(
-  installedVersion?: string
+  installedVersion?: string,
 ): TopModelResolution {
   const raw = (process.env.MARBLO_TOP_CLAUDE_MODEL || DEFAULT_TOP_CLAUDE_MODEL)
     .trim()
@@ -693,7 +694,7 @@ export function resolveSimpleCodexReasoning(): string {
 export type TaskComplexity = "simple" | "standard" | "complex";
 export function modelTierForComplexity(
   model: ModelType,
-  complexity: TaskComplexity | undefined
+  complexity: TaskComplexity | undefined,
 ): { claudeModel?: string; codexReasoning?: string } {
   if (!complexity) return {}; // override 없음 → 기본 상속
   if (model === "claude") {
@@ -829,7 +830,7 @@ export interface LaunchConfig {
 export function claudeSessionArgs(
   resumeSessionId: string | undefined,
   newSessionId: string,
-  pinFreshSession: boolean
+  pinFreshSession: boolean,
 ): { args: string[]; sessionId?: string } {
   const wantResume = !!resumeSessionId && resumeSessionId !== "new";
   const resumeIsLatest = resumeSessionId === "latest";
@@ -939,7 +940,7 @@ function getEnrichedPath(): string {
           path.join(home, ".local", "bin"),
           path.join(
             process.env.APPDATA || path.join(home, "AppData", "Roaming"),
-            "npm"
+            "npm",
           ),
         ]
       : [
@@ -986,7 +987,7 @@ function getMCPServerEnv(
   projectDir: string,
   marbloProjectId?: string,
   agentId?: string,
-  marbloContextId?: string
+  marbloContextId?: string,
 ): Record<string, string> {
   const env: Record<string, string> = {
     PATH: getEnrichedPath(),
@@ -1056,7 +1057,7 @@ function getAgyLabelsPath(): string {
     os.homedir(),
     ".gemini",
     "antigravity-cli",
-    "marblo-agy-labels.json"
+    "marblo-agy-labels.json",
   );
 }
 
@@ -1078,7 +1079,7 @@ function readAgyLabels(): Record<string, AgyLabelEntry> {
 export function saveAgyConversationLabel(
   agentId: string,
   conversationUuid: string,
-  label: string
+  label: string,
 ): void {
   const labels = readAgyLabels();
   labels[agentId] = {
@@ -1108,7 +1109,7 @@ export function getAgyConversationId(agentId: string): string | null {
     ".gemini",
     "antigravity-cli",
     "conversations",
-    `${entry.conversationUuid}.pb`
+    `${entry.conversationUuid}.pb`,
   );
   return fs.existsSync(pbPath) ? entry.conversationUuid : null;
 }
@@ -1117,7 +1118,7 @@ function buildMCPServerEntry(
   projectDir: string,
   marbloProjectId?: string,
   agentId?: string,
-  marbloContextId?: string
+  marbloContextId?: string,
 ): MCPServerEntry {
   // PATH 의 첫 node 를 믿지 않고 검증된 node 를 pin 한다. Electron 번들이면
   // ELECTRON_RUN_AS_NODE=1 가 함께 필요하므로 node.env 를 마지막에 머지해
@@ -1189,7 +1190,7 @@ function readGlobalClaudeMcpServers(): Record<string, MCPServerEntry> {
 /** 역할별로 화이트리스트할 글로벌 서버 이름 목록을 고른다. */
 function whitelistNamesForRole(
   role: string,
-  availableNames: string[]
+  availableNames: string[],
 ): string[] {
   const r = (role || "").toLowerCase();
   // 오케/리더: 글로벌 전체 보존(현행 byte-동등).
@@ -1203,7 +1204,7 @@ function whitelistNamesForRole(
  * 주입되므로 여기서 제외하며, 글로벌에 정의되지 않은 이름은 조용히 건너뛴다.
  */
 function selectWhitelistedGlobalServers(
-  role: string
+  role: string,
 ): Record<string, MCPServerEntry> {
   const global = readGlobalClaudeMcpServers();
   const names = whitelistNamesForRole(role, Object.keys(global));
@@ -1222,13 +1223,17 @@ function stripFrontmatter(content: string): string {
 
 function frontmatterValue(content: string, key: string): string {
   const match = content.match(
-    new RegExp(`^${key}:\\s*(?:"([^"]*)"|'([^']*)'|([^\\r\\n]*))`, "m")
+    new RegExp(`^${key}:\\s*(?:"([^"]*)"|'([^']*)'|([^\\r\\n]*))`, "m"),
   );
   return (match?.[1] || match?.[2] || match?.[3] || "").trim();
 }
 
 function yamlString(value: string): string {
   return JSON.stringify(value.replace(/\r?\n/g, " "));
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function discoverTfSkillDirs(projectDir: string): Array<{
@@ -1279,7 +1284,7 @@ export class AgentConfigGenerator {
     marbloContextId?: string,
     // 역할별 MCP 화이트리스트(claude strict 경로) 선택용. 미지정이면 기본
     // 워커 화이트리스트가 적용된다.
-    role?: string
+    role?: string,
   ): string {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
@@ -1287,7 +1292,7 @@ export class AgentConfigGenerator {
       projectDir,
       marbloProjectId,
       agentId,
-      marbloContextId
+      marbloContextId,
     );
 
     switch (model) {
@@ -1313,7 +1318,7 @@ export class AgentConfigGenerator {
   generateSkillFile(
     agentId: string,
     role: string,
-    _projectDir: string
+    _projectDir: string,
   ): string {
     const safeRole = role.replace(/[^a-zA-Z0-9_]/g, "");
     const skillSource = path.join(SKILLS_DIR, `${safeRole}_agent.md`);
@@ -1354,7 +1359,7 @@ export class AgentConfigGenerator {
     // 기반 resolver 대신 이 모델 id 로 --model 을 핀한다(예: fable5 실패 → "opus").
     claudeModelOverride?: string,
     // Optional MCP context. Quick Lane agents use lane:<id> for board isolation.
-    marbloContextId?: string
+    marbloContextId?: string,
   ): LaunchConfig {
     const mcpConfigPath = this.generateMCPConfig(
       agent.id,
@@ -1362,7 +1367,7 @@ export class AgentConfigGenerator {
       projectDir,
       marbloProjectId,
       marbloContextId,
-      agent.role
+      agent.role,
     );
     const skillPath = this.generateSkillFile(agent.id, agent.role, projectDir);
     const skillContent =
@@ -1382,7 +1387,7 @@ export class AgentConfigGenerator {
         pinClaudeSession,
         complexity,
         claudeModelOverride,
-        marbloContextId
+        marbloContextId,
       );
 
     return {
@@ -1414,7 +1419,7 @@ export class AgentConfigGenerator {
       const sessionsRoot = path.join(
         CONFIG_DIR,
         `codex-home-${agentId}`,
-        "sessions"
+        "sessions",
       );
       return this.hasAnyFileBelow(sessionsRoot, ".jsonl");
     }
@@ -1423,7 +1428,7 @@ export class AgentConfigGenerator {
         CONFIG_DIR,
         `gemini-home-${agentId}`,
         ".gemini",
-        "tmp"
+        "tmp",
       );
       return this.hasAnyFileBelow(geminiTmp, null);
     }
@@ -1489,7 +1494,7 @@ export class AgentConfigGenerator {
   private generateClaudeConfig(
     agentId: string,
     mcpEntry: MCPServerEntry,
-    role?: string
+    role?: string,
   ): string {
     // strict 경로 전제: 글로벌 머지가 차단되므로, 이 역할이 실제 쓰는 글로벌
     // 서버를 여기에 명시 포함해야 기능이 보존된다(화이트리스트). marblo 는 항상
@@ -1514,7 +1519,7 @@ export class AgentConfigGenerator {
 
   private generateGeminiConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry
+    mcpEntry: MCPServerEntry,
   ): string {
     // Per-agent isolation strategy for Gemini CLI (verified against v0.43):
     //
@@ -1598,7 +1603,7 @@ export class AgentConfigGenerator {
     if (fs.existsSync(userSettingsPath)) {
       try {
         preserved = JSON.parse(
-          fs.readFileSync(userSettingsPath, "utf-8")
+          fs.readFileSync(userSettingsPath, "utf-8"),
         ) as Record<string, unknown>;
         delete (preserved as Record<string, unknown>).mcpServers;
       } catch {
@@ -1641,7 +1646,7 @@ export class AgentConfigGenerator {
 
   private generateAntigravityConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry
+    mcpEntry: MCPServerEntry,
   ): string {
     // Antigravity (agy) CLI — agy 1.0.2 / v1.20+ 기준.
     //
@@ -1666,7 +1671,7 @@ export class AgentConfigGenerator {
     //   거의 idempotent 라 실제 충돌은 드묾). 다중 인스턴스 격리는 별도 트랙.
     const agyConfigHome = getAntigravityConfigHome();
     const globalConfigPaths = ANTIGRAVITY_MCP_CONFIG_RELATIVE_PATHS.map(
-      (parts) => path.join(agyConfigHome, ...parts)
+      (parts) => path.join(agyConfigHome, ...parts),
     );
 
     // agy launches MCP servers from this shared global config. Older code used
@@ -1694,7 +1699,7 @@ export class AgentConfigGenerator {
       if (fs.existsSync(globalConfigPath)) {
         try {
           existing = JSON.parse(
-            fs.readFileSync(globalConfigPath, "utf-8")
+            fs.readFileSync(globalConfigPath, "utf-8"),
           ) as Record<string, unknown>;
         } catch (err) {
           parseError = err;
@@ -1707,7 +1712,7 @@ export class AgentConfigGenerator {
         console.warn(
           `[agy] ${globalConfigPath} parse failed (${errorMessage(
             parseError,
-          )}); leaving file untouched, MCP disabled for this path.`
+          )}); leaving file untouched, MCP disabled for this path.`,
         );
         mergeResults.push({
           globalConfigPath,
@@ -1737,7 +1742,7 @@ export class AgentConfigGenerator {
         fs.writeFileSync(
           globalConfigPath,
           JSON.stringify(merged, null, 2),
-          "utf-8"
+          "utf-8",
         );
         mergeResults.push({
           globalConfigPath,
@@ -1758,7 +1763,7 @@ export class AgentConfigGenerator {
         });
       } catch (err) {
         console.warn(
-          `[agy] ${globalConfigPath} write failed (${err}); MCP disabled for this path.`
+          `[agy] ${globalConfigPath} write failed (${err}); MCP disabled for this path.`,
         );
         mergeResults.push({
           globalConfigPath,
@@ -1798,9 +1803,9 @@ export class AgentConfigGenerator {
           createdAt: Date.now(),
         },
         null,
-        2
+        2,
       ),
-      "utf-8"
+      "utf-8",
     );
     this.trackFile(agentId, sentinelPath);
     return sentinelPath;
@@ -1809,7 +1814,7 @@ export class AgentConfigGenerator {
   private generateGPTConfig(
     agentId: string,
     mcpEntry: MCPServerEntry,
-    projectDir: string
+    projectDir: string,
   ): string {
     // Codex CLI reads config from `$CODEX_HOME/config.toml` (TOML, not JSON)
     // with `[mcp_servers.<name>]` sections. Each agent gets an ISOLATED
@@ -1870,7 +1875,17 @@ export class AgentConfigGenerator {
       }
     }
 
-    this.generateCodexTfPrompts(agentId, codexHome, projectDir);
+    const fallbackCommand = this.generateCodexFallbackWrapper(
+      agentId,
+      codexHome,
+      mcpEntry,
+    );
+    this.generateCodexTfPrompts(
+      agentId,
+      codexHome,
+      projectDir,
+      fallbackCommand,
+    );
 
     // Auto-trust the agent's working directory so Codex doesn't show its
     // "Do you trust the contents of this directory?" interactive dialog
@@ -1893,7 +1908,7 @@ export class AgentConfigGenerator {
         trustEntries.push(
           `[projects.${JSON.stringify(candidate)}]`,
           'trust_level = "trusted"',
-          ""
+          "",
         );
       }
     }
@@ -1929,19 +1944,29 @@ export class AgentConfigGenerator {
   private generateCodexTfPrompts(
     agentId: string,
     codexHome: string,
-    projectDir: string
+    projectDir: string,
+    fallbackCommand: string,
   ): void {
     const promptDir = path.join(codexHome, "prompts");
     const skills = discoverTfSkillDirs(projectDir);
-    if (skills.length === 0) return;
+    const allSkills = new Map(skills.map((skill) => [skill.name, skill]));
+    for (const name of ["tf-add", "tf-start", "tf-status"]) {
+      if (!allSkills.has(name)) {
+        allSkills.set(name, { name, skillPath: "" });
+      }
+    }
 
     fs.mkdirSync(promptDir, { recursive: true });
-    for (const skill of skills) {
+    for (const skill of Array.from(allSkills.values()).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
       let raw = "";
-      try {
-        raw = fs.readFileSync(skill.skillPath, "utf-8");
-      } catch {
-        continue;
+      if (skill.skillPath) {
+        try {
+          raw = fs.readFileSync(skill.skillPath, "utf-8");
+        } catch {
+          raw = "";
+        }
       }
 
       const description =
@@ -1949,29 +1974,162 @@ export class AgentConfigGenerator {
         `Run the Marblo /${skill.name} workflow`;
       const argumentHint = frontmatterValue(raw, "argument-hint");
       const body = stripFrontmatter(raw);
-      const prompt = [
-        "---",
-        `description: ${yamlString(description)}`,
-        ...(argumentHint ? [`argument-hint: ${yamlString(argumentHint)}`] : []),
-        "---",
-        "",
-        `You are executing the Marblo /${skill.name} workflow inside Codex CLI.`,
-        "Follow the workflow below exactly. Use Marblo MCP tools for task, agent, and activity operations.",
-        "If the workflow mentions Claude-specific slash command mechanics, interpret the included instructions directly in Codex.",
-        "",
-        "User arguments:",
-        "$ARGUMENTS",
-        "",
-        `# Marblo /${skill.name} workflow`,
-        "",
-        body,
-        "",
-      ].join("\n");
+      const prompt =
+        this.codexTfPromptOverride(skill.name, description, fallbackCommand) ??
+        [
+          "---",
+          `description: ${yamlString(description)}`,
+          ...(argumentHint
+            ? [`argument-hint: ${yamlString(argumentHint)}`]
+            : []),
+          "---",
+          "",
+          `You are executing the Marblo /${skill.name} workflow inside Codex CLI.`,
+          "Follow the workflow below exactly. Use Marblo MCP tools for task, agent, and activity operations.",
+          "If the workflow mentions Claude-specific slash command mechanics, interpret the included instructions directly in Codex.",
+          "If Marblo MCP tools are not visible, do not grep source. Use the fallback CLI shown in the boot health summary.",
+          "",
+          "User arguments:",
+          "$ARGUMENTS",
+          "",
+          `# Marblo /${skill.name} workflow`,
+          "",
+          body,
+          "",
+        ].join("\n");
 
       const promptPath = path.join(promptDir, `${skill.name}.md`);
       fs.writeFileSync(promptPath, prompt, "utf-8");
       this.trackFile(agentId, promptPath);
     }
+  }
+
+  private generateCodexFallbackWrapper(
+    agentId: string,
+    codexHome: string,
+    mcpEntry: MCPServerEntry,
+  ): string {
+    const binDir = path.join(codexHome, "bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    const fallbackPath = path.join(
+      path.dirname(getMCPServerPath()),
+      "cli-fallback.js",
+    );
+    const isWindows = os.platform() === "win32";
+    const wrapperPath = path.join(
+      binDir,
+      isWindows ? "marblo-fallback.cmd" : "marblo-fallback",
+    );
+
+    if (isWindows) {
+      const envLines = Object.entries(mcpEntry.env ?? {}).map(
+        ([key, value]) => `set "${key}=${value}"`,
+      );
+      const content = [
+        "@echo off",
+        ...envLines,
+        `"${mcpEntry.command}" "${fallbackPath}" %*`,
+        "",
+      ].join("\r\n");
+      fs.writeFileSync(wrapperPath, content, "utf-8");
+    } else {
+      const envLines = Object.entries(mcpEntry.env ?? {}).map(
+        ([key, value]) => `export ${key}=${shellQuote(value)}`,
+      );
+      const content = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        ...envLines,
+        `exec ${shellQuote(mcpEntry.command)} ${shellQuote(fallbackPath)} "$@"`,
+        "",
+      ].join("\n");
+      fs.writeFileSync(wrapperPath, content, "utf-8");
+      try {
+        fs.chmodSync(wrapperPath, 0o700);
+      } catch {
+        // Best-effort; Codex can still run it via bash <path> if chmod fails.
+      }
+    }
+
+    this.trackFile(agentId, wrapperPath);
+    return wrapperPath;
+  }
+
+  private codexTfPromptOverride(
+    name: string,
+    description: string,
+    fallbackCommand: string,
+  ): string | null {
+    const requiredTools = CODEX_ORCH_REQUIRED_MCP_TOOLS.join(", ");
+    const common = [
+      "---",
+      `description: ${yamlString(description)}`,
+      'argument-hint: "task request / plan / filters"',
+      "---",
+      "",
+      `# Marblo /${name} for Codex`,
+      "",
+      "Use Marblo MCP tools directly. Required Marblo tools:",
+      requiredTools,
+      "",
+      "If those tools are not visible, do not inspect source files to reconstruct behavior.",
+      `Use this fallback CLI instead: ${fallbackCommand}`,
+      "Pass JSON payloads with a here-doc so shell quoting stays safe.",
+      "",
+      "User arguments:",
+      "$ARGUMENTS",
+      "",
+    ];
+
+    if (name === "tf-add") {
+      return [
+        ...common,
+        "Workflow:",
+        "1. Convert the user arguments into one structured task.",
+        "2. Call create_task with title, goal or description, role, priority, acceptance, changes, notes, scope, and project_id only when needed.",
+        "3. Report the created task id.",
+        '4. If the user explicitly asks to spawn/dispatch an agent, call dispatch_task with that task_id. If they ask for Codex, pass model="codex".',
+        "",
+        "Fallback equivalents:",
+        `${fallbackCommand} create-task --json '<task-json>'`,
+        `${fallbackCommand} dispatch-task --json '<dispatch-json>'`,
+        "",
+      ].join("\n");
+    }
+
+    if (name === "tf-start") {
+      return [
+        ...common,
+        "Workflow:",
+        "1. Convert the accepted plan or PRD into a single create_tasks_bulk call. Do not create tasks one by one unless bulk creation fails validation.",
+        "2. Use aliases or returned task ids to dispatch ready tasks with dispatch_task.",
+        '3. Prefer complexity="standard" unless the task is clearly simple or complex. If the user specifies Codex, pass model="codex".',
+        "4. Summarize task ids and dispatch results.",
+        "",
+        "Fallback equivalents:",
+        "Bulk creation requires MCP. If MCP is missing, create each validated task with:",
+        `${fallbackCommand} create-task --json '<task-json>'`,
+        "Then dispatch each created id with:",
+        `${fallbackCommand} dispatch-task --json '<dispatch-json>'`,
+        "",
+      ].join("\n");
+    }
+
+    if (name === "tf-status") {
+      return [
+        ...common,
+        "Workflow:",
+        "1. Call get_all_tasks, filtered by project/role only if the user asked.",
+        "2. Summarize counts by status plus active blockers and recently claimed/in-progress work.",
+        "3. Keep the answer concise and avoid dumping completed-task tails unless asked.",
+        "",
+        "Fallback note:",
+        "The fallback CLI intentionally does not reimplement status reads. If MCP is missing, print the boot health diagnostic and ask the user to reconnect Marblo MCP.",
+        "",
+      ].join("\n");
+    }
+
+    return null;
   }
 
   private safeRealpath(p: string): string | null {
@@ -1984,7 +2142,7 @@ export class AgentConfigGenerator {
 
   private generateCustomConfig(
     agentId: string,
-    mcpEntry: MCPServerEntry
+    mcpEntry: MCPServerEntry,
   ): string {
     // Generic MCP config — same structure, custom CLI may or may not use it
     const config = {
@@ -2016,7 +2174,7 @@ export class AgentConfigGenerator {
     pinFreshClaudeSession = false,
     complexity?: TaskComplexity,
     claudeModelOverride?: string,
-    marbloContextId?: string
+    marbloContextId?: string,
   ): {
     command: string;
     args: string[];
@@ -2028,7 +2186,7 @@ export class AgentConfigGenerator {
       projectDir,
       marbloProjectId,
       agentId,
-      marbloContextId
+      marbloContextId,
     );
     // Normalize resume signals: "new" means force-fresh, "latest" means
     // "pick the most recent" (CLI-specific syntax), anything else is a
@@ -2050,7 +2208,7 @@ export class AgentConfigGenerator {
         const { args: sessionArgs, sessionId } = claudeSessionArgs(
           resumeSessionId,
           crypto.randomUUID(),
-          pinFreshClaudeSession
+          pinFreshClaudeSession,
         );
         // complexity 기반 모델 핀(--model). 미지정(오케 경로)이면 기본 모델 상속.
         // 결정 우선순위:
@@ -2158,7 +2316,7 @@ export class AgentConfigGenerator {
           "-c",
           'approval_policy="never"',
           "-c",
-          'sandbox_mode="danger-full-access"'
+          'sandbox_mode="danger-full-access"',
         );
         // complexity 기반 reasoning effort(모델은 사용자 config 유지). 미지정이면
         // override 안 함. complex→high, standard→medium, simple→low.
