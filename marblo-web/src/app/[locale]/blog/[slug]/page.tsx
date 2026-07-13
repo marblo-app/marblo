@@ -9,6 +9,12 @@ import { SITE_URL, buildBlogAlternates } from "@/lib/seo";
 import { buildBlogPostingSchema, buildBreadcrumbSchema } from "@/lib/schema";
 import Comments from "@/components/Comments";
 
+type MdxNode = {
+  type?: string;
+  name?: string;
+  children?: MdxNode[];
+};
+
 const OG_LOCALE: Record<string, string> = {
   ko: "ko_KR",
   en: "en_US",
@@ -81,6 +87,29 @@ function Diagram({
       <figcaption className={FIGCAPTION_CLS}>{caption}</figcaption>
     </figure>
   );
+}
+
+function remarkUnwrapSvgTextParagraphs() {
+  return (tree: MdxNode) => {
+    function visit(node: MdxNode) {
+      if (!node.children) return;
+
+      if (
+        node.type === "mdxJsxFlowElement" &&
+        (node.name === "text" || node.name === "tspan")
+      ) {
+        node.children = node.children.flatMap((child) =>
+          child.type === "paragraph" && child.children
+            ? child.children
+            : [child]
+        );
+      }
+
+      for (const child of node.children) visit(child);
+    }
+
+    visit(tree);
+  };
 }
 
 // Dark-theme prose renderers. Tailwind v4 here has no typography plugin, so MDX
@@ -227,7 +256,15 @@ export default async function BlogPostPage({
       </header>
 
       <div className="text-[1.05rem]">
-        <MDXRemote source={post.content} components={mdxComponents} />
+        <MDXRemote
+          source={post.content}
+          components={mdxComponents}
+          options={{
+            mdxOptions: {
+              remarkPlugins: [remarkUnwrapSvgTextParagraphs],
+            },
+          }}
+        />
       </div>
 
       <footer className="mt-14 border-t border-zinc-800 pt-8">
