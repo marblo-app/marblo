@@ -344,6 +344,12 @@ jobs:
           hdiutil verify "${dmg_path}"
           spctl --assess --type open --context context:primary-signature --verbose=4 "${dmg_path}"
 
+      - name: Smoke packaged macOS app boot
+        if: steps.guard.outputs.build == 'true' && matrix.platform == 'mac'
+        working-directory: v3
+        shell: bash
+        run: npm run smoke:packaged:mac
+
       - name: Upload artifacts
         if: steps.guard.outputs.build == 'true'
         uses: actions/upload-artifact@v4

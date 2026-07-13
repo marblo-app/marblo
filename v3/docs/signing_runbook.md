@@ -166,6 +166,28 @@ CI는 Windows를 **무서명 nsis `.exe`**로 산출한다(`build.yml`에 `WIN_C
 
 **실무 규칙:** 서명/공증/notarize.js/electron-builder.yml의 mac 서명 관련을 건드린 PR은, 머지 전 또는 직후 **반드시 `workflow_dispatch platform=mac`을 한 번 돌려** 실서명 경로가 초록인지 확인한다. PR 초록만 믿지 말 것.
 
+### 5-1. ★ preload 변경 PR 검증 — 패키지 `.app` 실기동 필수
+
+`v3/electron/preload.ts`를 건드린 PR은 Vite 렌더러 경로만으로 검증하지 않는다. preload는 패키지 앱의 sandboxed preload 컨텍스트에서 별도 실행되므로, top-level `require`/`import`가 throw하면 `contextBridge.exposeInMainWorld`까지 도달하지 못해 `window.electronAPI`가 통째로 사라지고 앱이 화이트스크린으로 보일 수 있다.
+
+필수 체크:
+
+- [ ] electron-builder가 만든 패키지 `.app`을 실제 실행한다. 개발 서버/Vite 렌더러 테스트만으로 대체 금지.
+- [ ] 부팅 후 빈/흰 화면이 아니다.
+- [ ] DevTools 또는 자동 스모크에서 `window.electronAPI`가 object로 노출되는지 확인한다.
+- [ ] 최소 핵심 bridge(`electronAPI.pty.create`, `electronAPI.agent.launch`, `electronAPI.window.isNewWindow`)가 함수로 존재하는지 확인한다.
+
+자동 경로:
+
+```bash
+cd v3
+npm run build:electron
+npx electron-builder --mac --arm64 --publish never
+npm run smoke:packaged:mac
+```
+
+CI의 mac 빌드도 electron-builder 직후 `npm run smoke:packaged:mac`을 실행한다. 이 스모크는 패키지 `.app`을 직접 띄운 뒤 렌더러가 비어 있지 않은지, 그리고 `window.electronAPI`/핵심 bridge가 노출됐는지 assert한다.
+
 ---
 
 ## 6. ★ GitHub Release 발행 — 서명 빌드를 자동업데이트 피드로 싣기
