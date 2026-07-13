@@ -3409,7 +3409,9 @@ export function registerTools(server: McpServer): void {
       from_user_id: z
         .string()
         .optional()
-        .describe("User ID who initiated the instruction"),
+        .describe(
+          "Deprecated/ignored. The server records the authenticated Firebase uid.",
+        ),
       from_user_name: z
         .string()
         .optional()
@@ -3421,7 +3423,6 @@ export function registerTools(server: McpServer): void {
       message,
       project_id,
       source_type,
-      from_user_id,
       from_user_name,
     }) => {
       // Resolve project: prefer the task's projectId (authoritative), then
@@ -3444,12 +3445,15 @@ export function registerTools(server: McpServer): void {
       }
 
       const callerUid = getCurrentAuthUid();
+      if (!callerUid) {
+        return text("Error: Firebase auth is not ready for send_instruction.");
+      }
       const ref = await addDoc(collection(db, "pendingInstructions"), {
         projectId,
         taskId: task_id ?? null,
         targetAgentId: target_agent_id,
         message,
-        fromUserId: from_user_id || callerUid || "",
+        fromUserId: callerUid,
         fromUserName: from_user_name || "",
         sourceType: source_type || "other",
         isDelivered: false,
