@@ -52,7 +52,7 @@ interface OrchResumeLock {
 
 type OrchestratorMcpEnv = Record<string, string>;
 
-interface CodexMarbloSurfaceReport {
+export interface CodexMarbloSurfaceReport {
   codexHome: string;
   configPath: string;
   marbloMcpConfigured: boolean;
@@ -151,7 +151,7 @@ function assertCodexMarbloSurface(
   return report;
 }
 
-function buildCodexBootHealthSummary(input: {
+export function buildCodexBootHealthSummary(input: {
   projectId: string;
   contextId: string;
   bridgeConnected: boolean;
@@ -159,22 +159,32 @@ function buildCodexBootHealthSummary(input: {
 }): string {
   const surface = input.surface;
   return [
-    "Marblo boot health summary:",
-    `- Marblo MCP connected: ${surface?.marbloMcpConfigured ? "yes" : "no"}`,
-    `- Marblo MCP config present: ${surface?.marbloMcpConfigured ? "yes" : "no"}`,
-    `- Bridge connected: ${input.bridgeConnected ? "yes" : "no"}`,
-    `- Project ID: ${input.projectId || "(none)"}`,
-    `- Context ID: ${input.contextId || "(none)"}`,
-    `- Available Marblo MCP tool count: ${CODEX_ORCH_REQUIRED_MCP_TOOL_COUNT} expected minimum; replace with the actual visible count in your first response.`,
-    `- Required Marblo MCP tools: ${CODEX_ORCH_REQUIRED_MCP_TOOLS.join(", ")}`,
-    `- Codex tf prompts: ${surface?.tfPromptCount ?? 0} (required present: ${
-      surface?.requiredTfPromptsPresent ? "yes" : "no"
-    })`,
-    `- Fallback CLI: ${surface?.fallbackCliPresent ? "yes" : "no"}${
-      surface ? ` (${surface.fallbackCliPath})` : ""
-    }`,
-    "Do not print env values, tokens, config file contents, or raw .mcp.json/.env data.",
+    `mcp=${surface?.marbloMcpConfigured ? "yes" : "no"}`,
+    `bridge=${input.bridgeConnected ? "yes" : "no"}`,
+    `project=${input.projectId ? "set" : "missing"}`,
+    `context=${input.contextId || "none"}`,
+    `requiredTools=${CODEX_ORCH_REQUIRED_MCP_TOOL_COUNT}`,
+    `tfPrompts=${surface?.tfPromptCount ?? 0}`,
+    `requiredTfPrompts=${surface?.requiredTfPromptsPresent ? "yes" : "no"}`,
+    `fallback=${surface?.fallbackCliPresent ? "yes" : "no"}`,
   ].join("\n");
+}
+
+export function buildCodexBootInstructions(input: {
+  surface: CodexMarbloSurfaceReport | null;
+}): string {
+  const fallbackLine =
+    input.surface?.fallbackCliPresent && input.surface.fallbackCliPath
+      ? `If Marblo MCP tools are unavailable, use fallback CLI: ${input.surface.fallbackCliPath}`
+      : "If Marblo MCP tools are unavailable, report it briefly and ask for operator action.";
+  return [
+    "Codex orchestrator startup:",
+    'First call get_agent_skill("orchestrator") and follow that skill.',
+    `Required Marblo tools: ${CODEX_ORCH_REQUIRED_MCP_TOOLS.join(", ")}.`,
+    "For /tf-add use create_task; for /tf-start use create_tasks_bulk then dispatch_task; for /tf-status use get_all_tasks.",
+    fallbackLine,
+    "Do not inspect source files to reconstruct Marblo tool behavior. Do not print env values, tokens, config contents, or raw .mcp.json/.env data.",
+  ].join(" ");
 }
 
 // NOTE: Telegram is NO LONGER owned by any orchestrator. The getUpdates poller
@@ -757,29 +767,21 @@ export class OrchestratorManager {
       // Enter to register as a discrete keystroke. Readiness detection
       // mirrors agent-manager so we send only after the CLI is actually
       // accepting input.
-      const codexBootHealth =
-        launchConfig.model === "gpt"
-          ? buildCodexBootHealthSummary({
+      if (launchConfig.model === "gpt") {
+        console.info(
+          `[Orchestrator:${this.kind}] Codex boot health: ${buildCodexBootHealthSummary(
+            {
               projectId,
               contextId: context,
               bridgeConnected: Boolean(bridgePort),
               surface: codexSurface,
-            })
-          : "";
+            },
+          )}`,
+        );
+      }
       const codexOrchestratorInstructions =
         launchConfig.model === "gpt"
-          ? [
-              "Codex orchestrator startup requirements:",
-              "1. In your first response, print the Marblo boot health summary below.",
-              "2. Count the Marblo MCP tools actually visible to you. If the required tools are not callable, report Marblo MCP connected: no and use the fallback CLI only.",
-              "3. Never grep source files to reconstruct create_task, add_activity, or dispatch_task behavior.",
-              "4. For /tf-add, use create_task; if the user explicitly asks to spawn, then dispatch_task with the created task id.",
-              "5. For /tf-start, use one create_tasks_bulk call, then dispatch_task for ready tasks.",
-              "6. For /tf-status, use get_all_tasks and summarize counts/status.",
-              "7. If MCP is missing, use the fallback CLI path shown below for create-task, add-activity, and dispatch-task.",
-              "",
-              codexBootHealth,
-            ].join("\n")
+          ? buildCodexBootInstructions({ surface: codexSurface })
           : "";
       const baseInitialPrompt =
         this.kind === "mission"
@@ -821,7 +823,10 @@ export class OrchestratorManager {
         this.setStatus("running");
         // 부팅 프롬프트의 제출 사이클(text→150ms→CR+재시도 ~2s)이 끝난 뒤에야
         // conductor grant 주입을 허용한다 → 같은 PTY 동시 write 인터리브 제거.
-        setTimeout(() => this.resolveBootGate(), 3500);
+        setTimeout(
+          () => this.resolveBootGate(),
+          launchConfig.model === "gpt" ? 1500 : 3500,
+        );
       };
 
       let outputBuffer = "";
@@ -835,6 +840,8 @@ export class OrchestratorManager {
         /Loaded \d+ MCP tool/i, // MCP tools loaded — only after trust granted
         /Ask Codex/i,
         /Enter to send/i,
+        /Explain this codebase/i,
+        /esc to interrupt/i,
       ];
       this.ptyManager.onData(ptySessionId, (data) => {
         if (sent || authBlocked) return;
@@ -858,14 +865,17 @@ export class OrchestratorManager {
         for (const pattern of readinessPatterns) {
           if (pattern.test(outputBuffer)) {
             // Wait for the input prompt to fully render before sending.
-            setTimeout(sendPrompt, 1500);
+            setTimeout(sendPrompt, launchConfig.model === "gpt" ? 250 : 1500);
             return;
           }
         }
       });
 
-      // Fallback: send after 10s even if no readiness pattern matched.
-      setTimeout(sendPrompt, 10000);
+      // Fallback: send after a model-specific timeout even if no readiness
+      // pattern matched. Codex gets a shorter backstop because its project dir
+      // is pre-trusted in config.toml; keeping Claude at 10s preserves the
+      // existing trust/auth-dialog safety margin.
+      setTimeout(sendPrompt, launchConfig.model === "gpt" ? 3500 : 10000);
     }
 
     // Detect new session and auto-label it.

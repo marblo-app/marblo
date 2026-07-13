@@ -5,6 +5,8 @@ import path from "path";
 import {
   OrchestratorManager,
   ORCHESTRATOR_PROMPT_SIGNATURE,
+  buildCodexBootHealthSummary,
+  buildCodexBootInstructions,
   firstUserMessageStartsWith,
   isOrchestratorSession,
 } from "../../electron/orchestrator-manager";
@@ -605,5 +607,45 @@ describe("OrchestratorManager session reconnect", () => {
       const relaunch = createCalls[createCalls.length - 1];
       expect(relaunch.args).not.toContain("--resume");
     });
+  });
+});
+
+describe("Codex orchestrator boot prompt", () => {
+  const surface = {
+    codexHome: "/tmp/codex-home-orch",
+    configPath: "/tmp/codex-home-orch/config.toml",
+    marbloMcpConfigured: true,
+    tfPromptCount: 14,
+    requiredTfPromptsPresent: true,
+    fallbackCliPresent: true,
+    fallbackCliPath: "/tmp/codex-home-orch/bin/marblo-fallback",
+  };
+
+  it("keeps startup instructions slim while preserving MCP, tf, and fallback guidance", () => {
+    const prompt = buildCodexBootInstructions({ surface });
+
+    expect(prompt).toContain('get_agent_skill("orchestrator")');
+    expect(prompt).toContain("create_task");
+    expect(prompt).toContain("create_tasks_bulk");
+    expect(prompt).toContain("dispatch_task");
+    expect(prompt).toContain(surface.fallbackCliPath);
+    expect(prompt).not.toMatch(/first response/i);
+    expect(prompt).not.toMatch(/boot health summary/i);
+    expect(prompt).not.toMatch(/Count the Marblo MCP tools/i);
+  });
+
+  it("keeps health summary diagnostic-only and compact", () => {
+    const summary = buildCodexBootHealthSummary({
+      projectId: "project-1",
+      contextId: "board",
+      bridgeConnected: true,
+      surface,
+    });
+
+    expect(summary).toContain("mcp=yes");
+    expect(summary).toContain("bridge=yes");
+    expect(summary).toContain("requiredTools=");
+    expect(summary).not.toContain(surface.fallbackCliPath);
+    expect(summary.split("\n").length).toBeLessThanOrEqual(8);
   });
 });
