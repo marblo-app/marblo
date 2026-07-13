@@ -15,6 +15,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { createDeferredSnapshotScheduler } from './firestoreScheduler';
 
 // Firestore Timestamp → Date 변환
 export function toDate(value: unknown): Date {
@@ -107,13 +108,6 @@ export async function deleteDocument(
   await firestoreDeleteDoc(ref);
 }
 
-// 실시간 리스너 (컬렉션 쿼리)
-// Defer Firestore state updates to idle time — no timeout so it only runs
-// when the main thread is truly idle (not during typing/IME composition)
-const deferUpdate = typeof requestIdleCallback !== 'undefined'
-  ? (fn: () => void) => requestIdleCallback(fn)
-  : (fn: () => void) => setTimeout(fn, 0);
-
 export function subscribeToCollection<T>(
   collectionName: string,
   constraints: QueryConstraint[],
@@ -121,13 +115,19 @@ export function subscribeToCollection<T>(
 ): Unsubscribe {
   const ref = collection(db, collectionName);
   const q = query(ref, ...constraints);
-  return onSnapshot(q, (snapshot) => {
+  const scheduler = createDeferredSnapshotScheduler();
+  const unsubscribe = onSnapshot(q, (snapshot) => {
     const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as T);
-    deferUpdate(() => callback(items));
+    scheduler.schedule(() => callback(items));
   }, (error) => {
     console.error(`[Firestore] subscribeToCollection(${collectionName}) error:`, error);
+    scheduler.cancel();
     callback([]);
   });
+  return () => {
+    scheduler.cancel();
+    unsubscribe();
+  };
 }
 
 // 실시간 리스너 (단일 문서)
@@ -137,12 +137,17 @@ export function subscribeToDocument<T>(
   callback: (item: T | null) => void,
 ): Unsubscribe {
   const ref = doc(db, collectionName, docId);
-  return onSnapshot(ref, (snapshot) => {
+  const scheduler = createDeferredSnapshotScheduler();
+  const unsubscribe = onSnapshot(ref, (snapshot) => {
     if (!snapshot.exists()) {
-      deferUpdate(() => callback(null));
+      scheduler.schedule(() => callback(null));
       return;
     }
     const item = { id: snapshot.id, ...snapshot.data() } as T;
-    deferUpdate(() => callback(item));
+    scheduler.schedule(() => callback(item));
   });
+  return () => {
+    scheduler.cancel();
+    unsubscribe();
+  };
 }
