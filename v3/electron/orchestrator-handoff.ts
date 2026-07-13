@@ -85,6 +85,26 @@ export interface BuildHandoffInput {
   now?: number;
 }
 
+export interface ResolveSwitchHandoffResumeInput {
+  resume: OrchestratorSwitchResumeMode;
+  targetModel: string;
+  hasSavedGptSession: () => boolean;
+  resolvePreviousNonGptSession: () => string | null | undefined;
+}
+
+export function resolveSwitchHandoffResumeSessionId({
+  resume,
+  targetModel,
+  hasSavedGptSession,
+  resolvePreviousNonGptSession,
+}: ResolveSwitchHandoffResumeInput): "new" | string {
+  if (resume !== "previous") return "new";
+  if (targetModel === "gpt") {
+    return hasSavedGptSession() ? "latest" : "new";
+  }
+  return resolvePreviousNonGptSession() ?? "new";
+}
+
 const ACTIVE_MISSION_STATUSES = new Set([
   "planning",
   "active",

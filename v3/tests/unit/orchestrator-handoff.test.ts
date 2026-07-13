@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildOrchestratorHandoffSnapshot,
   formatHandoffPrompt,
+  resolveSwitchHandoffResumeSessionId,
   sanitizeHandoffValue,
 } from "../../electron/orchestrator-handoff";
 
@@ -142,5 +143,42 @@ describe("orchestrator handoff snapshot", () => {
       accessToken: "[redacted]",
       nested: { password: "[redacted]" },
     });
+  });
+
+  it("falls back to a new Codex switch session when no saved session exists", () => {
+    const resumeSessionId = resolveSwitchHandoffResumeSessionId({
+      resume: "previous",
+      targetModel: "gpt",
+      hasSavedGptSession: () => false,
+      resolvePreviousNonGptSession: () => {
+        throw new Error("non-gpt resolver should not run for Codex");
+      },
+    });
+
+    expect(resumeSessionId).toBe("new");
+  });
+
+  it("uses Codex latest only when the isolated orchestrator home has a saved session", () => {
+    const resumeSessionId = resolveSwitchHandoffResumeSessionId({
+      resume: "previous",
+      targetModel: "gpt",
+      hasSavedGptSession: () => true,
+      resolvePreviousNonGptSession: () => null,
+    });
+
+    expect(resumeSessionId).toBe("latest");
+  });
+
+  it("keeps non-Codex switch resume resolution on the orchestrator labels", () => {
+    const resumeSessionId = resolveSwitchHandoffResumeSessionId({
+      resume: "previous",
+      targetModel: "claude",
+      hasSavedGptSession: () => {
+        throw new Error("Codex saved-session check should not run for Claude");
+      },
+      resolvePreviousNonGptSession: () => "claude-session-1",
+    });
+
+    expect(resumeSessionId).toBe("claude-session-1");
   });
 });

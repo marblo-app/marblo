@@ -43,6 +43,7 @@ import { OrchestratorManager } from "./orchestrator-manager";
 import {
   buildOrchestratorHandoffSnapshot,
   formatHandoffPrompt,
+  resolveSwitchHandoffResumeSessionId,
   type OrchestratorSwitchMode,
   type OrchestratorSwitchResumeMode,
   type RawHandoffDoc,
@@ -4420,13 +4421,16 @@ async function buildSwitchHandoffSnapshot(
   await authReady;
   const db = getFirestore(missionApp);
   const current = orchestrators.get(args.projectId)?.getSession() ?? null;
-  const resumeSessionId =
-    args.resume === "previous" && targetModel === "gpt"
-      ? "latest"
-      : args.resume === "previous"
-        ? (getAnyOrchestrator().resolveOrchestratorResumeId(resolvedRootPath) ??
-          "new")
-        : "new";
+  const resumeSessionId = resolveSwitchHandoffResumeSessionId({
+    resume: args.resume,
+    targetModel,
+    hasSavedGptSession: () =>
+      agentManager
+        .getConfigGenerator()
+        .hasSavedSession(`orchestrator-${args.projectId}`, "gpt"),
+    resolvePreviousNonGptSession: () =>
+      getAnyOrchestrator().resolveOrchestratorResumeId(resolvedRootPath),
+  });
   const [missionSnap, taskSnap] = await Promise.all([
     fbGetDocs(
       fbQuery(

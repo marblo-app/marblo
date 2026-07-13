@@ -567,7 +567,6 @@ export class OrchestratorManager {
     try {
       if (launchConfig.model === "gpt") {
         patchCodexMarbloMcpEnv(launchConfig.mcpConfigPath, mcpEnvPatch);
-        assertCodexMarbloSurface(launchConfig.mcpConfigPath);
       } else {
         const configContent = fs.readFileSync(
           launchConfig.mcpConfigPath,
@@ -611,6 +610,9 @@ export class OrchestratorManager {
           e instanceof Error ? e.message : String(e)
         }`,
       );
+    }
+    if (launchConfig.model === "gpt") {
+      assertCodexMarbloSurface(launchConfig.mcpConfigPath);
     }
 
     // Merge env
