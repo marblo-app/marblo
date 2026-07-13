@@ -11,9 +11,18 @@ interface Props {
   isHighlighted: boolean;
   onSelect: () => void;
   onDoubleClick: () => void;
+  onKill?: () => void;
+  isDeleting?: boolean;
 }
 
-function AgentRowImpl({ row, isHighlighted, onSelect, onDoubleClick }: Props) {
+function AgentRowImpl({
+  row,
+  isHighlighted,
+  onSelect,
+  onDoubleClick,
+  onKill,
+  isDeleting = false,
+}: Props) {
   const { t } = useTranslation();
   // Defense-in-depth: row.vendor/status 는 AgentListPanel 에서 normalize 되지만,
   // 미래에 다른 호출 경로가 생기거나 신규 vendor/status 등록이 누락되어도
@@ -82,6 +91,26 @@ function AgentRowImpl({ row, isHighlighted, onSelect, onDoubleClick }: Props) {
       <span className="text-[11px] text-[#6c7086] tabular-nums w-14 text-right">
         {row.lastActivityLabel}
       </span>
+
+      {row.isAgent && onKill && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onKill();
+          }}
+          disabled={isDeleting}
+          className="rounded border border-[#f38ba8]/30 bg-[#f38ba8]/10 px-2 py-0.5 text-[10px] font-medium text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-50"
+          title={
+            row.status === "stopped"
+              ? "Remove this stopped agent"
+              : "Kill this agent session"
+          }
+        >
+          {isDeleting ? "…" : row.status === "stopped" ? "정리" : "Kill"}
+        </button>
+      )}
 
       <span
         aria-hidden

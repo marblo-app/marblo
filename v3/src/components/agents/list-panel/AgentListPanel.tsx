@@ -17,6 +17,8 @@ const DEFAULT_HEIGHT = 320;
 const MIN_HEIGHT = 180;
 const MAX_HEIGHT = 800;
 const HEIGHT_STORAGE_KEY = "marblo:v3:agentListPanel:height";
+const KILL_ALL_LABEL = "전체 삭제";
+const CLEANUP_STOPPED_LABEL = "stopped 정리";
 
 function formatAge(date?: Date): string {
   // Defensive: Firestore docs occasionally arrive with a Timestamp instead
@@ -50,11 +52,14 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
   const restartAgent = useAgentStore((s) => s.restartAgent);
   const updateAgent = useAgentStore((s) => s.updateAgent);
+  const stopAgent = useAgentStore((s) => s.stopAgent);
+  const deleteAgent = useAgentStore((s) => s.deleteAgent);
   const sessions = useTerminalStore((s) => s.sessions);
   const createTerminalSession = useTerminalStore((s) => s.createSession);
   const requestJump = useNavigationStore((s) => s.requestJump);
   const projectId = useProjectStore((s) => s.currentProject?.id) ?? "";
   const [startingId, setStartingId] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(() => new Set());
   // Single-select focus model (Claude /agents style). When set, the panel
   // body switches from the row list to a fullscreen-in-panel FocusView for
   // that agent. null = list view.
@@ -133,7 +138,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
       console.error("[AgentListPanel] Failed to spawn terminal:", err);
       terminalSpawnCounter--;
     }
-  }, [createTerminalSession]);
+  }, [createTerminalSession, setFocusedId]);
 
   // Subscribe to agents independently. Without this, the panel only shows
   // data when another consumer (AgentsTab / TeamDashboard) has activated
@@ -222,13 +227,112 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
     [realAgents],
   );
 
+  const activeAgents = useMemo(
+    () => realAgents.filter((a) => a.status !== "stopped"),
+    [realAgents],
+  );
+  const stoppedAgents = useMemo(
+    () => realAgents.filter((a) => a.status === "stopped"),
+    [realAgents],
+  );
+
+  const setDeleting = useCallback((ids: string[], isDeleting: boolean) => {
+    setDeletingIds((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => {
+        if (isDeleting) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+      });
+      return next;
+    });
+  }, []);
+
+  const handleKillAgent = useCallback(
+    async (row: AgentRowData) => {
+      if (!row.isAgent) return;
+      const actionLabel = row.status === "stopped" ? "remove" : "kill";
+      const confirmed = window.confirm(
+        row.status === "stopped"
+          ? `Remove stopped agent "${row.displayName}"?`
+          : `Kill agent "${row.displayName}"?`,
+      );
+      if (!confirmed) return;
+
+      setDeleting([row.id], true);
+      try {
+        if (row.status === "stopped") {
+          await deleteAgent(row.id);
+        } else {
+          await stopAgent(row.id);
+        }
+        if (focusedId === row.id) {
+          setFocusedId(null);
+        }
+      } catch (err) {
+        console.error(`[AgentListPanel] ${actionLabel} failed:`, err);
+      } finally {
+        setDeleting([row.id], false);
+      }
+    },
+    [deleteAgent, focusedId, setDeleting, setFocusedId, stopAgent],
+  );
+
+  const handleKillAllAgents = useCallback(async () => {
+    if (activeAgents.length === 0) return;
+    const confirmed = window.confirm(
+      `Kill ${activeAgents.length} active agent${
+        activeAgents.length === 1 ? "" : "s"
+      }?`,
+    );
+    if (!confirmed) return;
+
+    const ids = activeAgents.map((agent) => agent.id);
+    setDeleting(ids, true);
+    try {
+      await Promise.all(ids.map((id) => stopAgent(id)));
+      if (focusedId && ids.includes(focusedId)) {
+        setFocusedId(null);
+      }
+    } catch (err) {
+      console.error("[AgentListPanel] kill all failed:", err);
+    } finally {
+      setDeleting(ids, false);
+    }
+  }, [activeAgents, focusedId, setDeleting, setFocusedId, stopAgent]);
+
+  const handleCleanupStoppedAgents = useCallback(async () => {
+    if (stoppedAgents.length === 0) return;
+    const confirmed = window.confirm(
+      `Remove ${stoppedAgents.length} stopped agent${
+        stoppedAgents.length === 1 ? "" : "s"
+      }?`,
+    );
+    if (!confirmed) return;
+
+    const ids = stoppedAgents.map((agent) => agent.id);
+    setDeleting(ids, true);
+    try {
+      await Promise.all(ids.map((id) => deleteAgent(id)));
+      if (focusedId && ids.includes(focusedId)) {
+        setFocusedId(null);
+      }
+    } catch (err) {
+      console.error("[AgentListPanel] cleanup stopped failed:", err);
+    } finally {
+      setDeleting(ids, false);
+    }
+  }, [deleteAgent, focusedId, setDeleting, setFocusedId, stoppedAgents]);
+
   // When the focused row disappears (agent deleted, terminal closed, etc.)
   // bounce back to the list rather than rendering a stale empty FocusView.
   useEffect(() => {
     if (focusedId && !rows.some((r) => r.id === focusedId)) {
       setFocusedId(null);
     }
-  }, [focusedId, rows]);
+  }, [focusedId, rows, setFocusedId]);
 
   // Initialize / clamp the keyboard highlight. When list re-mounts (after
   // returning from FocusView, or rows change), keep the highlight on the
@@ -280,7 +384,7 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
         if (id) setFocusedId(id);
       }
     },
-    [rows, highlightedId],
+    [rows, highlightedId, setFocusedId],
   );
 
   const focusedIndex = focusedId
@@ -373,6 +477,22 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
           )}
         </span>
         <div className="flex items-center gap-1">
+          <button
+            onClick={handleKillAllAgents}
+            disabled={activeAgents.length === 0}
+            className="rounded px-2 py-0.5 text-[10px] text-[#f38ba8] hover:text-[#fab387] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            title="Kill all active agents"
+          >
+            {KILL_ALL_LABEL}
+          </button>
+          <button
+            onClick={handleCleanupStoppedAgents}
+            disabled={stoppedAgents.length === 0}
+            className="rounded px-2 py-0.5 text-[10px] text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            title="Remove stopped agents from the list"
+          >
+            {CLEANUP_STOPPED_LABEL}
+          </button>
           <button
             onClick={handleSpawnTerminal}
             className="rounded px-2 py-0.5 text-[10px] text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] transition-colors"
@@ -486,6 +606,8 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
                         setFocusedId(row.id);
                       }}
                       onDoubleClick={() => handleDoubleClick(row)}
+                      onKill={() => handleKillAgent(row)}
+                      isDeleting={deletingIds.has(row.id)}
                     />
                   </div>
                 ))}
