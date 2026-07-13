@@ -63,7 +63,6 @@ export function makeNodeContext(
     inputs: {},
     flowState: {
       runId: 'test-run',
-      projectId: 'test-project',
       flowId: 'test-flow',
       status: 'running',
       currentNodeIds: [],

@@ -68,7 +68,6 @@ import {
 import { FlowRunner } from "./flow-engine/flow-runner";
 import { KanbanBridge } from "./flow-engine/kanban-bridge";
 import { createLLMProvider } from "./flow-engine/llm-provider";
-import { ensureFirebaseCustomTokenAuth as ensureFlowFirebaseCustomTokenAuth } from "./flow-engine/firebase-auth";
 import type { Flow, FlowEvent, HumanInput } from "./flow-engine/types";
 import {
   findReconnectCandidates,
@@ -103,7 +102,6 @@ import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
 import {
   clearAgentCustomToken,
   syncAgentCustomToken,
-  waitForAgentCustomToken,
 } from "./firebase-auth-sync";
 import { buildLaneContextId, isLaneContextId } from "./mcp-server/context";
 import {
@@ -943,15 +941,6 @@ const bridgeServer = new BridgeServer(
   ptyBuffers,
   worktreeCoordinator,
 );
-
-async function ensureAgentFirebaseTokenReady(reason: string): Promise<void> {
-  const result = await waitForAgentCustomToken(reason);
-  if (!result.ok) {
-    throw new Error(result.error || `Agent Firebase auth token is not ready: ${reason}`);
-  }
-}
-
-bridgeServer.setAuthReadyGate(ensureAgentFirebaseTokenReady);
 
 // ── Agent health watchdog (native orchestrator self-recovery) ──
 // Periodically inspects CLAIMED/IN_PROGRESS board tickets whose assigned worker
@@ -1901,13 +1890,6 @@ function ensureMissionOrchestratorLaunched(
   rootPathHint?: string,
   missionId?: string,
 ): OrchestratorManager {
-  if (!process.env.MARBLO_FIREBASE_CUSTOM_TOKEN) {
-    const reason =
-      "Mission orchestrator launch blocked: agent Firebase custom token is not ready.";
-    console.error(`[Mission] ${reason}`);
-    throw new Error(reason);
-  }
-
   let manager = missionOrchestrators.get(projectId);
   if (!manager) {
     manager = createMissionOrchestratorInstance(projectId);
@@ -2089,10 +2071,7 @@ import {
 } from "firebase/firestore";
 import { applyProjection } from "./mcp-server/projection";
 
-function getFlowFirebase(): {
-  db: ReturnType<typeof getFirestore>;
-  authReady: Promise<void>;
-} {
+function getFlowDb() {
   const config = {
     apiKey:
       process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || "",
@@ -2119,14 +2098,10 @@ function getFlowFirebase(): {
   const fbApp =
     existingApps.find((a) => a.name === "flow-engine") ||
     initFirebaseApp(config, "flow-engine");
-  return {
-    db: getFirestore(fbApp),
-    authReady: ensureFlowFirebaseCustomTokenAuth(fbApp, "FlowEngine"),
-  };
+  return getFirestore(fbApp);
 }
 
-const flowFirebase = getFlowFirebase();
-const flowDb = flowFirebase.db;
+const flowDb = getFlowDb();
 
 // --- Cost Tracking ---
 const costTracker = new CostTracker((agentId, cost) => {
@@ -2204,12 +2179,8 @@ let llmProvider = createLLMProvider({
   openaiApiKey: storedKeys.openai,
   googleApiKey: storedKeys.google,
 });
-const flowRunner = new FlowRunner(flowDb, llmProvider, flowFirebase.authReady);
-const kanbanBridge = new KanbanBridge(
-  flowDb,
-  flowRunner,
-  flowFirebase.authReady,
-);
+const flowRunner = new FlowRunner(flowDb, llmProvider);
+const kanbanBridge = new KanbanBridge(flowDb, flowRunner);
 kanbanBridge.attach();
 
 // Restore model preset from app state
@@ -2300,9 +2271,7 @@ flowRunner.on("event", (event: FlowEvent) => {
   const output = result.output as Record<string, unknown> | null;
   if (!output?.delegated) return;
 
-  void handleAgentDelegation(event.nodeId, output).catch((err) => {
-    console.error("[Flow:AgentDelegation] Failed:", err);
-  });
+  handleAgentDelegation(event.nodeId, output);
 });
 
 /**
@@ -2329,10 +2298,10 @@ function getDefaultCommand(model: string): string {
  * In both cases, the KanbanBridge handles flow resumption when the
  * Firestore task is marked DONE externally.
  */
-async function handleAgentDelegation(
+function handleAgentDelegation(
   nodeId: string,
   output: Record<string, unknown>,
-): Promise<void> {
+): void {
   const connectionMode = output.connectionMode as string;
   const resolvedTask = (output.task as string) || "";
 
@@ -2360,9 +2329,6 @@ async function handleAgentDelegation(
     const model = spawnConfig.model as "claude" | "gemini" | "gpt" | "custom";
 
     try {
-      await ensureAgentFirebaseTokenReady(
-        `flow agent delegation node=${nodeId} role=${spawnConfig.role}`,
-      );
       const instance = agentManager.launch({
         id: agentId,
         name: spawnConfig.name,
@@ -3787,21 +3753,6 @@ ipcMain.handle(
     event,
     { agent, cwd, initialPrompt, resumeSessionId, projectId, taskId },
   ) => {
-    try {
-      await ensureAgentFirebaseTokenReady(
-        `agent launch name=${agent.name} role=${agent.role}`,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[agent:launch] Blocked "${agent.name}" — ${message}`);
-      return {
-        id: "",
-        ptySessionId: "",
-        status: "blocked",
-        error: message,
-      };
-    }
-
     // Pre-spawn auth gate (claude/codex). Block an unauthenticated spawn before
     // any worktree/PTY side effects so the CLI never boots into its login
     // prompt. Ungated models (gemini/agy/custom) pass through. Resume launches
@@ -4347,9 +4298,6 @@ ipcMain.handle(
     // ensureMissionOrchestratorLaunched 호출 전에 set 해야 새로 launch 되는
     // 경우 forwarding 이 곧장 이 창으로 향한다.
     missionOrchestratorOwners.set(projectId, event.sender.id);
-    await ensureAgentFirebaseTokenReady(
-      `mission orchestrator launch project=${projectId}`,
-    );
     // 패널·엔진 공용 단일 launch 경로 — forwarding + resume + rootPath 포함.
     // missionId 를 넘기면 그 미션 세션에 종속(다르면 전환). 패널이 선택 미션을
     // 전달하므로 카드 선택 시 오케가 그 미션으로 바뀐다.

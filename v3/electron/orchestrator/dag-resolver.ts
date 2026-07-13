@@ -12,7 +12,6 @@ import {
   Timestamp,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { ensureFirebaseCustomTokenAuth } from './firebase-auth.js';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -44,15 +43,10 @@ export interface DAGStatus {
 
 export class DAGResolver {
   private db;
-  private authReady: Promise<void>;
 
-  constructor(
-    db?: ReturnType<typeof getFirestore>,
-    authReady?: Promise<void>,
-  ) {
+  constructor(db?: ReturnType<typeof getFirestore>) {
     if (db) {
       this.db = db;
-      this.authReady = authReady ?? Promise.resolve();
     } else {
       const app = getApps().length === 0
         ? initializeApp({
@@ -65,7 +59,6 @@ export class DAGResolver {
           })
         : getApps()[0];
       this.db = getFirestore(app);
-      this.authReady = ensureFirebaseCustomTokenAuth(app, 'DAGResolver');
     }
   }
 
@@ -75,53 +68,27 @@ export class DAGResolver {
    * Returns an unsubscribe function.
    */
   watch(projectId: string, onTaskReady: (task: Task) => void): () => void {
-    let innerUnsubscribe: Unsubscribe | null = null;
-    let cancelled = false;
+    const q = query(
+      collection(this.db, 'tasks'),
+      where('projectId', '==', projectId),
+    );
 
-    void this.authReady
-      .then(() => {
-        if (cancelled) return;
-
-        const q = query(
-          collection(this.db, 'tasks'),
-          where('projectId', '==', projectId),
-        );
-
-        innerUnsubscribe = onSnapshot(
-          q,
-          async (snapshot) => {
-            for (const change of snapshot.docChanges()) {
-              if (change.type === 'modified') {
-                const data = change.doc.data();
-                if (data.status === 'DONE') {
-                  // A task just completed — resolve dependents
-                  const readyTasks = await this.resolve(change.doc.id);
-                  for (const task of readyTasks) {
-                    onTaskReady(task);
-                  }
-                }
-              }
+    const unsubscribe: Unsubscribe = onSnapshot(q, async (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        if (change.type === 'modified') {
+          const data = change.doc.data();
+          if (data.status === 'DONE') {
+            // A task just completed — resolve dependents
+            const readyTasks = await this.resolve(change.doc.id);
+            for (const task of readyTasks) {
+              onTaskReady(task);
             }
-          },
-          (error) => {
-            console.error(
-              `[DAGResolver] tasks listener failed for projectId=${projectId}:`,
-              error,
-            );
-          },
-        );
-      })
-      .catch((error) => {
-        console.error(
-          `[DAGResolver] Firebase auth failed before watching projectId=${projectId}:`,
-          error,
-        );
-      });
+          }
+        }
+      }
+    });
 
-    return () => {
-      cancelled = true;
-      innerUnsubscribe?.();
-    };
+    return unsubscribe;
   }
 
   /**
@@ -130,8 +97,6 @@ export class DAGResolver {
    * Returns the list of newly unblocked tasks.
    */
   async resolve(completedTaskId: string): Promise<Task[]> {
-    await this.authReady;
-
     // Find all tasks that depend on the completed task
     const q = query(
       collection(this.db, 'tasks'),
@@ -182,8 +147,6 @@ export class DAGResolver {
    * Get the full DAG status for a project, categorized by state.
    */
   async getDAGStatus(projectId: string): Promise<DAGStatus> {
-    await this.authReady;
-
     const q = query(
       collection(this.db, 'tasks'),
       where('projectId', '==', projectId),
@@ -249,8 +212,6 @@ export class DAGResolver {
    * Identify bottleneck tasks: in-progress tasks that block the most other tasks.
    */
   async findBottlenecks(projectId: string): Promise<Task[]> {
-    await this.authReady;
-
     const q = query(
       collection(this.db, 'tasks'),
       where('projectId', '==', projectId),
@@ -296,8 +257,6 @@ export class DAGResolver {
   // ── Helpers ──────────────────────────────────────────────────
 
   private async areAllDepsCompleted(depIds: string[]): Promise<boolean> {
-    await this.authReady;
-
     if (depIds.length === 0) return true;
 
     for (const depId of depIds) {

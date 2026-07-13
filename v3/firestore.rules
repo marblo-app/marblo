@@ -200,33 +200,25 @@ service cloud.firestore {
         && isProjectMember(resource.data.projectId);
     }
 
-    // ===== Flow Runs =====
-    match /flowRuns/{runId} {
-      allow read: if isAuthenticated()
-        && isProjectMember(resource.data.projectId);
-      allow create: if isAuthenticated()
-        && isProjectMember(request.resource.data.projectId);
-      allow update: if isAuthenticated()
-        && isProjectMember(resource.data.projectId)
-        && request.resource.data.projectId == resource.data.projectId;
-      allow delete: if isAuthenticated()
-        && isProjectMember(resource.data.projectId);
-    }
-
     // ===== Missions (Phase 3) =====
-    // MissionEngine now authenticates with a user-scoped custom token issued
-    // after renderer login. Missions must therefore stay tenant-scoped by
-    // project.members instead of the old broad isAuthenticated() relaxation.
+    // 현재 룰: tasks / agents 패턴과 동일하게 isAuthenticated 만 검사.
+    //
+    // 한시 완화 이유 (Step 5b, 2026-05-13):
+    //   MissionEngine 이 Electron main process 안에서 자체 firebase app
+    //   (anonymous auth) 으로 missions doc 을 read/update 한다.
+    //   isProjectMember 강제 시 main 의 anon uid 가 project.members 에 없어
+    //   engine 의 write 가 전부 실패한다.
+    //
+    // v3.1 hardening 에서 다시 좁힐 계획:
+    //   1. Renderer 가 user id token 을 IPC 로 main 에 전달.
+    //   2. Main 이 signInWithCustomToken (Cloud Function 발급) 로 갈아끼움.
+    //   3. 동시에 tasks / agents 도 isProjectMember 강제로 일괄 hardening.
+    // 자세한 내용: v3/docs/MISSIONS-PROGRESS.md 보안 critical 체크리스트.
     match /missions/{missionId} {
-      allow read: if isAuthenticated()
-        && isProjectMember(resource.data.projectId);
-      allow create: if isAuthenticated()
-        && isProjectMember(request.resource.data.projectId);
-      allow update: if isAuthenticated()
-        && isProjectMember(resource.data.projectId)
-        && request.resource.data.projectId == resource.data.projectId;
-      allow delete: if isAuthenticated()
-        && isProjectMember(resource.data.projectId);
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
     }
 
     // ===== Cost Logs (Phase 3) =====

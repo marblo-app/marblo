@@ -27,20 +27,14 @@ interface BridgedTask {
 export class KanbanBridge {
   private db: Firestore;
   private runner: FlowRunner;
-  private authReady: Promise<void>;
   private bridgedTasks: Map<string, BridgedTask> = new Map(); // key: "runId:nodeId"
   private flowCache: Map<string, Flow> = new Map();
   private taskListeners: Unsubscribe[] = [];
   private disposed = false;
 
-  constructor(
-    db: Firestore,
-    runner: FlowRunner,
-    authReady: Promise<void> = Promise.resolve(),
-  ) {
+  constructor(db: Firestore, runner: FlowRunner) {
     this.db = db;
     this.runner = runner;
-    this.authReady = authReady;
   }
 
   /**
@@ -77,71 +71,43 @@ export class KanbanBridge {
    * the bridge resumes the waiting flow node.
    */
   watchKanbanForFlow(flowId: string, runId: string): Unsubscribe {
-    let innerUnsub: Unsubscribe | null = null;
-    let cancelled = false;
-    const outerUnsub = (): void => {
-      cancelled = true;
-      if (innerUnsub) innerUnsub();
-    };
+    const q = query(
+      collection(this.db, 'tasks'),
+      where('flowId', '==', flowId),
+    );
 
-    void this.authReady
-      .then(() => {
-        if (this.disposed || cancelled) return;
-        const q = query(
-          collection(this.db, 'tasks'),
-          where('flowId', '==', flowId),
-        );
+    const unsub = onSnapshot(q, (snapshot) => {
+      if (this.disposed) return;
 
-        innerUnsub = onSnapshot(
-          q,
-          (snapshot) => {
-            if (this.disposed) return;
+      for (const change of snapshot.docChanges()) {
+        if (change.type !== 'modified') continue;
 
-            for (const change of snapshot.docChanges()) {
-              if (change.type !== 'modified') continue;
+        const data = change.doc.data();
+        if (data.status !== 'DONE') continue;
 
-              const data = change.doc.data();
-              if (data.status !== 'DONE') continue;
+        const nodeId = data.flowNodeId as string | undefined;
+        if (!nodeId) continue;
 
-              const nodeId = data.flowNodeId as string | undefined;
-              if (!nodeId) continue;
+        // Check if this node is waiting for completion
+        const key = `${runId}:${nodeId}`;
+        const bridged = this.bridgedTasks.get(key);
+        if (!bridged) continue;
 
-              // Check if this node is waiting for completion
-              const key = `${runId}:${nodeId}`;
-              const bridged = this.bridgedTasks.get(key);
-              if (!bridged) continue;
+        // Task marked DONE → resume the flow at this node
+        this.runner.resume(runId, {
+          nodeId,
+          approved: true,
+          data: { taskId: change.doc.id, completedViaKanban: true },
+        }).catch(() => {
+          // Non-fatal: flow may have already moved past this node
+        });
 
-              // Task marked DONE → resume the flow at this node
-              this.runner
-                .resume(runId, {
-                  nodeId,
-                  approved: true,
-                  data: { taskId: change.doc.id, completedViaKanban: true },
-                })
-                .catch(() => {
-                  // Non-fatal: flow may have already moved past this node
-                });
+        this.bridgedTasks.delete(key);
+      }
+    });
 
-              this.bridgedTasks.delete(key);
-            }
-          },
-          (error) => {
-            console.error(
-              `[KanbanBridge] tasks listener failed for flowId=${flowId}:`,
-              error,
-            );
-          },
-        );
-      })
-      .catch((error) => {
-        console.error(
-          `[KanbanBridge] Firebase auth failed before watching flowId=${flowId}:`,
-          error,
-        );
-      });
-
-    this.taskListeners.push(outerUnsub);
-    return outerUnsub;
+    this.taskListeners.push(unsub);
+    return unsub;
   }
 
   // ── Private ────────────────────────────────────────────────
@@ -178,7 +144,6 @@ export class KanbanBridge {
     const title = node.data.label || `Flow task: ${node.id}`;
 
     try {
-      await this.authReady;
       const taskData = {
         projectId: flow.projectId,
         title,
@@ -211,8 +176,8 @@ export class KanbanBridge {
           runId,
         });
       }
-    } catch (error) {
-      console.error('[KanbanBridge] failed to create linked task:', error);
+    } catch {
+      // Non-fatal: log but don't crash the flow
     }
   }
 
@@ -267,17 +232,13 @@ export class KanbanBridge {
     for (const bridged of this.bridgedTasks.values()) {
       if (bridged.flowId === flowId && bridged.nodeId === nodeId) {
         try {
-          await this.authReady;
           const ref = doc(this.db, 'tasks', bridged.taskId);
           await updateDoc(ref, {
             status,
             updatedAt: Timestamp.now(),
           });
-        } catch (error) {
-          console.error(
-            `[KanbanBridge] failed to update linked task ${bridged.taskId}:`,
-            error,
-          );
+        } catch {
+          // Non-fatal
         }
         return;
       }

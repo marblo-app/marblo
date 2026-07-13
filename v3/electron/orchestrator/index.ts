@@ -13,7 +13,6 @@ import { DAGResolver, type Task, type DAGStatus } from './dag-resolver.js';
 import { DAGGenerator, type DecomposedTask } from './dag-generator.js';
 import { FlowGenerator, type Flow } from './flow-generator.js';
 import type { LLMConfig } from './llm-client.js';
-import { ensureFirebaseCustomTokenAuth } from './firebase-auth.js';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -37,15 +36,12 @@ export class OrchestratorService {
   private dagGenerator: DAGGenerator;
   private flowGenerator: FlowGenerator;
   private db;
-  private authReady: Promise<void>;
   private config: OrchestratorConfig;
 
   constructor(config?: OrchestratorConfig) {
     this.config = config ?? {};
 
-    // Initialize Firebase. This package is not currently instantiated by main,
-    // but keep it fail-closed for future wiring: every Firestore operation
-    // below awaits custom-token auth before touching tasks.
+    // Initialize Firebase
     const app = getApps().length === 0
       ? initializeApp({
           apiKey: process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || '',
@@ -57,11 +53,10 @@ export class OrchestratorService {
         })
       : getApps()[0];
     this.db = getFirestore(app);
-    this.authReady = ensureFirebaseCustomTokenAuth(app, 'OrchestratorService');
 
     this.decomposer = new TaskDecomposer(config?.llm);
     this.router = new AutoRouter();
-    this.resolver = new DAGResolver(this.db, this.authReady);
+    this.resolver = new DAGResolver(this.db);
     this.dagGenerator = new DAGGenerator();
     this.flowGenerator = new FlowGenerator(config?.llm);
   }
@@ -75,8 +70,6 @@ export class OrchestratorService {
     agents?: Agent[],
     context?: string,
   ): Promise<OrchestrateResult> {
-    await this.authReady;
-
     // Step 1: Decompose requirement into tasks + DAG
     const decomposition = await this.decomposer.decompose(requirement, context);
 
@@ -122,8 +115,6 @@ export class OrchestratorService {
     agents?: Agent[],
     onTaskReady?: (task: Task) => void,
   ): Promise<() => void> {
-    await this.authReady;
-
     // Get current status and route any ready tasks
     const status = await this.resolver.getDAGStatus(projectId);
 
@@ -141,7 +132,6 @@ export class OrchestratorService {
 
         const agent = this.router.route(decomposed, agents);
         if (agent) {
-          await this.authReady;
           await updateDoc(doc(this.db, 'tasks', readyTask.id), {
             status: 'CLAIMED',
             claimedBy: agent.id,
@@ -168,7 +158,6 @@ export class OrchestratorService {
 
         const agent = this.router.route(decomposed, agents);
         if (agent) {
-          await this.authReady;
           await updateDoc(doc(this.db, 'tasks', task.id), {
             status: 'CLAIMED',
             claimedBy: agent.id,
@@ -195,7 +184,6 @@ export class OrchestratorService {
    * Get DAG status for a project.
    */
   async getDAGStatus(projectId: string): Promise<DAGStatus> {
-    await this.authReady;
     return this.resolver.getDAGStatus(projectId);
   }
 
@@ -203,7 +191,6 @@ export class OrchestratorService {
    * Find bottleneck tasks in a project.
    */
   async findBottlenecks(projectId: string): Promise<Task[]> {
-    await this.authReady;
     return this.resolver.findBottlenecks(projectId);
   }
 
@@ -237,8 +224,6 @@ export class OrchestratorService {
     decomposition: DecompositionResult,
     projectId: string,
   ): Promise<string[]> {
-    await this.authReady;
-
     const taskIds: string[] = [];
     const indexToId: Record<number, string> = {};
 

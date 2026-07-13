@@ -28,20 +28,14 @@ import type {
 export class FlowRunner extends EventEmitter {
   private db: Firestore;
   private llmProvider?: LLMProvider;
-  private authReady: Promise<void>;
   private states: Map<string, FlowExecutionState> = new Map();
   private flows: Map<string, Flow> = new Map();
   private humanResolvers: Map<string, (input: HumanInput) => void> = new Map();
 
-  constructor(
-    db: Firestore,
-    llmProvider?: LLMProvider,
-    authReady: Promise<void> = Promise.resolve(),
-  ) {
+  constructor(db: Firestore, llmProvider?: LLMProvider) {
     super();
     this.db = db;
     this.llmProvider = llmProvider;
-    this.authReady = authReady;
   }
 
   /**
@@ -52,7 +46,6 @@ export class FlowRunner extends EventEmitter {
 
     const state: FlowExecutionState = {
       runId,
-      projectId: flow.projectId,
       flowId: flow.id,
       status: 'running',
       currentNodeIds: [],
@@ -426,10 +419,8 @@ export class FlowRunner extends EventEmitter {
 
   private async persistState(state: FlowExecutionState): Promise<void> {
     try {
-      await this.authReady;
       const ref = doc(this.db, 'flowRuns', state.runId);
       const data = {
-        projectId: state.projectId,
         flowId: state.flowId,
         status: state.status,
         currentNodeIds: state.currentNodeIds,
@@ -445,12 +436,8 @@ export class FlowRunner extends EventEmitter {
       } else {
         await setDoc(ref, data);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(
-        `[FlowRunner] Failed to persist flowRuns/${state.runId} ` +
-          `(projectId=${state.projectId}, status=${state.status}): ${message}`,
-      );
+    } catch {
+      // Non-fatal: log but don't crash the flow
     }
   }
 

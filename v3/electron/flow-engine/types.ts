@@ -49,7 +49,6 @@ export type FlowRunStatus = 'running' | 'paused' | 'completed' | 'failed' | 'can
 
 export interface FlowExecutionState {
   runId: string;
-  projectId: string;
   flowId: string;
   status: FlowRunStatus;
   currentNodeIds: string[];

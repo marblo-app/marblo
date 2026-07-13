@@ -119,7 +119,8 @@ registerTools(server);
 registerPrompts(server);
 
 async function main() {
-  // Firebase custom-token 인증 대기. 실패/타임아웃 시 fail-closed 로 서버 시작을 중단한다.
+  // Firebase 익명 인증 대기 (Firestore 접근 전 권장) — 단, authReady 는 절대
+  // reject 하지 않고 타임아웃 가드(~10s)가 걸려 있어 인증 지연/실패에도 서버는 기동된다.
   await authReady;
 
   startBridgePortRefresher();
