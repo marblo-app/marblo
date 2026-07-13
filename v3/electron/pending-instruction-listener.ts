@@ -12,6 +12,7 @@ import {
   type DocumentSnapshot,
 } from "firebase/firestore";
 import { PtyManager } from "./pty-manager";
+import { ensureMainFirebaseCustomTokenAuth } from "./firebase-main-auth";
 
 const NAMED_APP = "pending-instruction-listener";
 
@@ -47,7 +48,10 @@ export function claimDeliveryOnce(
   return true;
 }
 
-function getDb(): Firestore {
+function getPendingInstructionFirebase(): {
+  db: Firestore;
+  authReady: Promise<void>;
+} {
   const config = {
     apiKey:
       process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || "",
@@ -74,7 +78,13 @@ function getDb(): Firestore {
   const fbApp: FirebaseApp =
     existing.find((a) => a.name === NAMED_APP) ||
     initializeApp(config, NAMED_APP);
-  return getFirestore(fbApp);
+  return {
+    db: getFirestore(fbApp),
+    authReady: ensureMainFirebaseCustomTokenAuth(
+      fbApp,
+      "PendingInstructionListener",
+    ),
+  };
 }
 
 /**
@@ -93,6 +103,7 @@ function getDb(): Firestore {
  */
 export class PendingInstructionListener {
   private db: Firestore;
+  private authReady: Promise<void>;
   private unsubscribers: Map<string, Unsubscribe> = new Map();
   private ptyManager: PtyManager;
   // 프로세스 수명 멱등 가드 — 이미 PTY 로 주입한 지시 doc id 집합. re-attach
@@ -100,7 +111,9 @@ export class PendingInstructionListener {
   private deliveredDocIds: Set<string> = new Set();
 
   constructor(ptyManager: PtyManager) {
-    this.db = getDb();
+    const { db, authReady } = getPendingInstructionFirebase();
+    this.db = db;
+    this.authReady = authReady;
     this.ptyManager = ptyManager;
   }
 
@@ -111,6 +124,25 @@ export class PendingInstructionListener {
    */
   attach(agentId: string, ptySessionId: string): void {
     if (this.unsubscribers.has(agentId)) return;
+
+    const pendingUnsubscribe = (): void => {};
+    this.unsubscribers.set(agentId, pendingUnsubscribe);
+
+    void this.attachAfterAuth(agentId, ptySessionId).catch((err) => {
+      this.unsubscribers.delete(agentId);
+      console.error(
+        `[PendingInstructionListener] failed to attach agent=${agentId} after Firebase auth:`,
+        err,
+      );
+    });
+  }
+
+  private async attachAfterAuth(
+    agentId: string,
+    ptySessionId: string,
+  ): Promise<void> {
+    await this.authReady;
+    if (!this.unsubscribers.has(agentId)) return;
 
     const q = query(
       collection(this.db, "pendingInstructions"),
@@ -141,8 +173,9 @@ export class PendingInstructionListener {
         }
       },
       (err) => {
-        console.warn(
-          `[PendingInstructionListener] subscribe error for agent ${agentId}:`,
+        console.error(
+          `[PendingInstructionListener] Firestore subscribe failed for agent=${agentId}. ` +
+            "pendingInstructions delivery is disabled until listener reattach succeeds:",
           err,
         );
       },

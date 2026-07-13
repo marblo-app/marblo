@@ -560,6 +560,10 @@ export class BridgeServer {
       ) => void)
     | null = null;
 
+  // Main wires this to the renderer→main custom-token sync state. Every new
+  // agent process must inherit MARBLO_FIREBASE_CUSTOM_TOKEN before spawn.
+  private authReadyGate: (reason: string) => Promise<void> = async () => {};
+
   // Outbound Telegram sender — main wires this to the electron-owned
   // TelegramPoller.sendMessage (the poller holds the bot token + last-inbound
   // chat). The send_telegram_message MCP tool POSTs /send-telegram-message and
@@ -634,6 +638,10 @@ export class BridgeServer {
     ) => void,
   ): void {
     this.dispatchMetaHook = hook;
+  }
+
+  setAuthReadyGate(gate: (reason: string) => Promise<void>): void {
+    this.authReadyGate = gate;
   }
 
   /** Wire the outbound Telegram sender (main → TelegramPoller.sendMessage). */
@@ -2176,6 +2184,10 @@ export class BridgeServer {
   private async spawnNewAgent(
     params: SpawnAgentRequest,
   ): Promise<SpawnAgentResponse> {
+    await this.authReadyGate(
+      `bridge spawn-agent name=${params.name} role=${params.role}`,
+    );
+
     // M2 — per-plan concurrency cap at the single spawn chokepoint, so EVERY
     // new-agent path (HTTP /spawn-agent, dispatch Step 3, resolver) is gated,
     // not just dispatch. Orchestrator / internal / system-flagged spawns are

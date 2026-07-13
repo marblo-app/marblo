@@ -41,10 +41,29 @@ const MEMBER_ID = "member-user";
 const MEMBER_EMAIL = "member@test.com";
 const OUTSIDER_ID = "outsider-user";
 const OUTSIDER_EMAIL = "outsider@test.com";
+// anonymous 세션. fail-closed 전환 이후 project.members 에 없으면 거부되어야 한다.
+const LEGACY_ANON_ID = "legacy-anon-user";
 const PROJECT_ID = "test-project";
+const OTHER_PROJECT_ID = "other-project";
 
 function getContext(uid: string, email: string): RulesTestContext {
   return testEnv.authenticatedContext(uid, { email });
+}
+
+// custom-token 로 로그인한 실제 사용자 세션(sign_in_provider == 'custom').
+// 하드닝된 isProjectMember 경로를 타야 한다.
+function getCustomTokenContext(uid: string, email: string): RulesTestContext {
+  return testEnv.authenticatedContext(uid, {
+    email,
+    firebase: { sign_in_provider: "custom" },
+  });
+}
+
+// anonymous 세션(sign_in_provider == 'anonymous'). 전역 유예 없이 멤버십 룰을 타야 한다.
+function legacyAnonContext(): RulesTestContext {
+  return testEnv.authenticatedContext(LEGACY_ANON_ID, {
+    firebase: { sign_in_provider: "anonymous" },
+  });
 }
 
 function unauthContext(): RulesTestContext {
@@ -78,6 +97,13 @@ beforeEach(async () => {
       name: "Test Project",
       ownerId: OWNER_ID,
       members: [OWNER_ID, ADMIN_ID, MEMBER_ID],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await setDoc(doc(db, "projects", OTHER_PROJECT_ID), {
+      name: "Other Project",
+      ownerId: OUTSIDER_ID,
+      members: [OUTSIDER_ID],
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -138,6 +164,33 @@ beforeEach(async () => {
       name: "Test Flow",
       status: "draft",
       createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // 미션
+    await setDoc(doc(db, "missions", "mission-1"), {
+      projectId: PROJECT_ID,
+      title: "Test Mission",
+      status: "RUNNING",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await setDoc(doc(db, "missions", "other-mission-1"), {
+      projectId: OTHER_PROJECT_ID,
+      title: "Other Mission",
+      status: "RUNNING",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // 플로우 실행 상태
+    await setDoc(doc(db, "flowRuns", "flow-run-1"), {
+      projectId: PROJECT_ID,
+      flowId: "flow-1",
+      status: "running",
+      currentNodeIds: [],
+      nodeResults: {},
+      startedAt: new Date(),
       updatedAt: new Date(),
     });
 
@@ -316,6 +369,56 @@ describe("projects collection", () => {
 // ===== Tasks =====
 
 describe("tasks collection", () => {
+  it("custom-token 프로젝트 멤버는 태스크 read/create/update/delete가 가능하다", async () => {
+    const db = getCustomTokenContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "tasks", "task-1")));
+    await assertSucceeds(
+      addDoc(collection(db, "tasks"), {
+        projectId: PROJECT_ID,
+        title: "Custom token task",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db, "tasks", "task-1"), { title: "Custom token update" }),
+    );
+    await assertSucceeds(deleteDoc(doc(db, "tasks", "task-1")));
+  });
+
+  it("fail-closed: anonymous 클라이언트는 태스크 read/create/update/delete가 거부된다", async () => {
+    const db = legacyAnonContext().firestore();
+    await assertFails(getDoc(doc(db, "tasks", "task-1")));
+    await assertFails(
+      addDoc(collection(db, "tasks"), {
+        projectId: PROJECT_ID,
+        title: "Anonymous task",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db, "tasks", "task-1"), { title: "Anonymous update" }),
+    );
+    await assertFails(deleteDoc(doc(db, "tasks", "task-1")));
+  });
+
+  it("custom-token 외부인(비멤버)은 태스크 접근이 거부된다", async () => {
+    const db = getCustomTokenContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "tasks", "task-1")));
+    await assertFails(
+      addDoc(collection(db, "tasks"), {
+        projectId: PROJECT_ID,
+        title: "Hacked via custom token",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
   it("프로젝트 멤버는 태스크를 읽을 수 있다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(getDoc(doc(db, "tasks", "task-1")));
@@ -403,6 +506,13 @@ describe("tasks collection", () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
       updateDoc(doc(db, "tasks", "task-1"), { title: "Updated" }),
+    );
+  });
+
+  it("프로젝트 멤버라도 태스크 projectId 변경은 거부된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "tasks", "task-1"), { projectId: "other-project" }),
     );
   });
 
@@ -586,6 +696,72 @@ describe("taskComments collection", () => {
 // ===== Pending Instructions =====
 
 describe("pendingInstructions collection", () => {
+  it("custom-token 프로젝트 멤버는 pending instruction을 읽고 생성할 수 있다", async () => {
+    const db = getCustomTokenContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      getDoc(doc(db, "pendingInstructions", "pending-inst-1")),
+    );
+    await assertSucceeds(
+      addDoc(collection(db, "pendingInstructions"), {
+        projectId: PROJECT_ID,
+        taskId: "task-1",
+        targetAgentId: "agent-1",
+        message: "custom token instruction",
+        fromUserId: MEMBER_ID,
+        fromUserName: "member",
+        sourceType: "chat",
+        isDelivered: false,
+        createdAt: new Date(),
+        deliveredAt: null,
+      }),
+    );
+  });
+
+  it("fail-closed: anonymous 클라이언트는 pending instruction read/create/전달표시 update가 거부된다", async () => {
+    const db = legacyAnonContext().firestore();
+    await assertFails(
+      getDoc(doc(db, "pendingInstructions", "pending-inst-1")),
+    );
+    await assertFails(
+      addDoc(collection(db, "pendingInstructions"), {
+        projectId: PROJECT_ID,
+        taskId: "task-1",
+        targetAgentId: "agent-1",
+        message: "anonymous instruction",
+        fromUserId: LEGACY_ANON_ID,
+        fromUserName: "anonymous",
+        sourceType: "chat",
+        isDelivered: false,
+        createdAt: new Date(),
+        deliveredAt: null,
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db, "pendingInstructions", "pending-inst-1"), {
+        isDelivered: true,
+        deliveredAt: new Date(),
+      }),
+    );
+  });
+
+  it("custom-token 외부인은 pending instruction 생성 불가", async () => {
+    const db = getCustomTokenContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "pendingInstructions"), {
+        projectId: PROJECT_ID,
+        taskId: "task-1",
+        targetAgentId: "agent-1",
+        message: "hacked via custom token",
+        fromUserId: OUTSIDER_ID,
+        fromUserName: "outsider",
+        sourceType: "chat",
+        isDelivered: false,
+        createdAt: new Date(),
+        deliveredAt: null,
+      }),
+    );
+  });
+
   it("프로젝트 멤버는 pending instruction을 생성할 수 있다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
@@ -668,6 +844,26 @@ describe("pendingInstructions collection", () => {
     );
   });
 
+  it("delivery 마킹은 isDelivered false→true 전환 없이는 거부된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "pendingInstructions", "pending-inst-1"), {
+        deliveredAt: new Date(),
+      }),
+    );
+  });
+
+  it("pending instruction projectId 변조는 거부된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "pendingInstructions", "pending-inst-1"), {
+        projectId: "other-project",
+        isDelivered: true,
+        deliveredAt: new Date(),
+      }),
+    );
+  });
+
   it("외부인은 delivery 마킹을 할 수 없다", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
     await assertFails(
@@ -716,6 +912,44 @@ describe("pendingInstructions collection", () => {
 // ===== Agents =====
 
 describe("agents collection", () => {
+  it("custom-token 프로젝트 멤버는 에이전트 read/create/update/delete가 가능하다", async () => {
+    const db = getCustomTokenContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "agents", "agent-1")));
+    await assertSucceeds(
+      addDoc(collection(db, "agents"), {
+        projectId: PROJECT_ID,
+        ownerId: MEMBER_ID,
+        name: "Custom token agent",
+        model: "claude",
+        status: "idle",
+        createdAt: new Date(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db, "agents", "agent-1"), { status: "working" }),
+    );
+    await assertSucceeds(deleteDoc(doc(db, "agents", "agent-1")));
+  });
+
+  it("fail-closed: anonymous 클라이언트는 에이전트 read/create/update/delete가 거부된다", async () => {
+    const db = legacyAnonContext().firestore();
+    await assertFails(getDoc(doc(db, "agents", "agent-1")));
+    await assertFails(
+      addDoc(collection(db, "agents"), {
+        projectId: PROJECT_ID,
+        ownerId: LEGACY_ANON_ID,
+        name: "Anonymous agent",
+        model: "claude",
+        status: "idle",
+        createdAt: new Date(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db, "agents", "agent-1"), { status: "working" }),
+    );
+    await assertFails(deleteDoc(doc(db, "agents", "agent-1")));
+  });
+
   it("프로젝트 멤버는 에이전트를 읽을 수 있다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(getDoc(doc(db, "agents", "agent-1")));
@@ -739,11 +973,56 @@ describe("agents collection", () => {
       }),
     );
   });
+
+  it("프로젝트 멤버라도 에이전트 projectId 변경은 거부된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "agents", "agent-1"), { projectId: "other-project" }),
+    );
+  });
 });
 
 // ===== Flows =====
 
 describe("flows collection", () => {
+  it("custom-token 프로젝트 멤버는 플로우 read/create/update/delete가 가능하다", async () => {
+    const db = getCustomTokenContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "flows", "flow-1")));
+    await assertSucceeds(
+      addDoc(collection(db, "flows"), {
+        projectId: PROJECT_ID,
+        name: "Custom token flow",
+        status: "draft",
+        createdBy: MEMBER_ID,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db, "flows", "flow-1"), { status: "active" }),
+    );
+    await assertSucceeds(deleteDoc(doc(db, "flows", "flow-1")));
+  });
+
+  it("fail-closed: anonymous 클라이언트는 플로우 read/create/update/delete가 거부된다", async () => {
+    const db = legacyAnonContext().firestore();
+    await assertFails(getDoc(doc(db, "flows", "flow-1")));
+    await assertFails(
+      addDoc(collection(db, "flows"), {
+        projectId: PROJECT_ID,
+        name: "Anonymous flow",
+        status: "draft",
+        createdBy: LEGACY_ANON_ID,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db, "flows", "flow-1"), { status: "active" }),
+    );
+    await assertFails(deleteDoc(doc(db, "flows", "flow-1")));
+  });
+
   it("프로젝트 멤버는 플로우를 읽을 수 있다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(getDoc(doc(db, "flows", "flow-1")));
@@ -763,6 +1042,147 @@ describe("flows collection", () => {
         status: "draft",
         createdBy: MEMBER_ID,
         createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("프로젝트 멤버라도 플로우 projectId 변경은 거부된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "flows", "flow-1"), { projectId: "other-project" }),
+    );
+  });
+});
+
+// ===== Missions =====
+
+describe("missions collection", () => {
+  it("custom-token 프로젝트 멤버는 미션 read/create/update/delete가 가능하다", async () => {
+    const db = getCustomTokenContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "missions", "mission-1")));
+    await assertSucceeds(
+      addDoc(collection(db, "missions"), {
+        projectId: PROJECT_ID,
+        title: "Member Mission",
+        status: "RUNNING",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db, "missions", "mission-1"), { status: "DONE" }),
+    );
+    await assertSucceeds(deleteDoc(doc(db, "missions", "mission-1")));
+  });
+
+  it("custom-token 외부인은 타 프로젝트 미션을 읽거나 생성할 수 없다", async () => {
+    const db = getCustomTokenContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "missions", "mission-1")));
+    await assertFails(
+      addDoc(collection(db, "missions"), {
+        projectId: PROJECT_ID,
+        title: "Cross tenant mission",
+        status: "RUNNING",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("프로젝트 멤버라도 다른 프로젝트 미션 read/update/delete는 거부된다", async () => {
+    const db = getCustomTokenContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "missions", "other-mission-1")));
+    await assertFails(
+      updateDoc(doc(db, "missions", "other-mission-1"), { status: "DONE" }),
+    );
+    await assertFails(deleteDoc(doc(db, "missions", "other-mission-1")));
+  });
+
+  it("미션 update에서 projectId 변경은 거부된다", async () => {
+    const db = getCustomTokenContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "missions", "mission-1"), {
+        projectId: OTHER_PROJECT_ID,
+      }),
+    );
+  });
+
+  it("missions에는 구버전 anonymous 유예가 적용되지 않는다", async () => {
+    const db = legacyAnonContext().firestore();
+    await assertFails(getDoc(doc(db, "missions", "mission-1")));
+    await assertFails(
+      addDoc(collection(db, "missions"), {
+        projectId: PROJECT_ID,
+        title: "Legacy anonymous mission",
+        status: "RUNNING",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+});
+
+// ===== Flow Runs =====
+
+describe("flowRuns collection", () => {
+  it("프로젝트 멤버는 플로우 실행 상태를 읽을 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "flowRuns", "flow-run-1")));
+  });
+
+  it("외부인은 타 프로젝트 플로우 실행 상태를 읽을 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "flowRuns", "flow-run-1")));
+  });
+
+  it("프로젝트 멤버는 플로우 실행 상태를 생성할 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, "flowRuns", "flow-run-new"), {
+        projectId: PROJECT_ID,
+        flowId: "flow-1",
+        status: "running",
+        currentNodeIds: [],
+        nodeResults: {},
+        startedAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("외부인은 타 프로젝트 플로우 실행 상태를 생성할 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(doc(db, "flowRuns", "flow-run-hacked"), {
+        projectId: PROJECT_ID,
+        flowId: "flow-1",
+        status: "running",
+        currentNodeIds: [],
+        nodeResults: {},
+        startedAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("프로젝트 멤버는 같은 projectId 유지 시 플로우 실행 상태를 수정할 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "flowRuns", "flow-run-1"), {
+        status: "completed",
+        currentNodeIds: [],
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  it("프로젝트 멤버라도 flowRuns projectId 변경은 거부된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "flowRuns", "flow-run-1"), {
+        projectId: "other-project",
         updatedAt: new Date(),
       }),
     );
@@ -996,6 +1416,44 @@ describe("couponRedemptions collection", () => {
 // ===== Activities =====
 
 describe("activities collection", () => {
+  it("custom-token 프로젝트 멤버는 활동 로그를 읽고 생성할 수 있다", async () => {
+    const db = getCustomTokenContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "activities", "activity-1")));
+    await assertSucceeds(
+      addDoc(collection(db, "activities"), {
+        taskId: "task-1",
+        agentId: "agent-1",
+        message: "Custom token activity",
+        createdAt: new Date(),
+      }),
+    );
+  });
+
+  it("fail-closed: anonymous 클라이언트는 활동 로그 read/create가 거부된다", async () => {
+    const db = legacyAnonContext().firestore();
+    await assertFails(getDoc(doc(db, "activities", "activity-1")));
+    await assertFails(
+      addDoc(collection(db, "activities"), {
+        taskId: "task-1",
+        agentId: "agent-1",
+        message: "Anonymous activity",
+        createdAt: new Date(),
+      }),
+    );
+  });
+
+  it("custom-token 외부인은 활동 로그 생성 불가", async () => {
+    const db = getCustomTokenContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "activities"), {
+        taskId: "task-1",
+        agentId: "agent-1",
+        message: "Hacked activity via custom token",
+        createdAt: new Date(),
+      }),
+    );
+  });
+
   it("프로젝트 멤버는 활동 로그를 읽을 수 있다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(getDoc(doc(db, "activities", "activity-1")));

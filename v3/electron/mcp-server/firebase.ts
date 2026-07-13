@@ -2,11 +2,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-import {
-  getAuth,
-  signInAnonymously,
-  signInWithCustomToken,
-} from "firebase/auth";
+import { getAuth, signInWithCustomToken } from "firebase/auth";
 
 type FirebaseWebConfig = {
   apiKey: string;
@@ -87,8 +83,8 @@ const app =
 export const db = getFirestore(app);
 
 // MCP 서버는 별도 프로세스로 실행되어 renderer Firebase Auth 컨텍스트가 없음.
-// main 이 전달한 custom token 이 있으면 실제 사용자 uid 로 로그인하고, 없으면
-// 기존 익명 인증으로 fallback 해 배포 전/로그인 전 경로를 보존한다.
+// main 이 전달한 custom token 으로만 실제 사용자 uid 로그인을 허용한다.
+// 토큰이 없거나 만료/거부되면 fail-closed 로 서버 시작을 중단한다.
 const auth = getAuth(app);
 
 export function getCurrentAuthUid(): string | null {
@@ -104,69 +100,58 @@ function getFirebaseAuthErrorCode(error: unknown): string {
   return "unknown";
 }
 
-async function signInWithCustomTokenOrAnonymousFallback(
-  customToken: string,
-): Promise<void> {
+async function signInWithRequiredCustomToken(): Promise<void> {
+  const customToken = process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
+  if (!customToken) {
+    throw new Error("Missing MARBLO_FIREBASE_CUSTOM_TOKEN");
+  }
+
   try {
     await signInWithCustomToken(auth, customToken);
   } catch (err) {
-    console.error(
-      `[MCP] Firebase custom-token auth failed; falling back to anonymous (code=${getFirebaseAuthErrorCode(
+    throw new Error(
+      `Firebase custom-token auth failed (code=${getFirebaseAuthErrorCode(
         err,
-      )})`,
+      )}); refusing anonymous fallback`,
     );
-    await signInAnonymously(auth);
   }
 }
 
-// 인증이 네트워크 지연 등으로 영영 settle 되지 않아도 서버 기동을 막지 않도록
-// 타임아웃 가드를 둔다. 만료되면 경고만 남기고 진행하며, 이후 Firestore 호출은
-// 각 호출 지점의 try/catch 로 개별 처리된다(인증 미완료 시 보안규칙에서 거절될 뿐
-// 프로세스는 살아 있음).
+// 인증이 네트워크 지연 등으로 영영 settle 되지 않으면 서버를 시작하지 않는다.
+// Firestore rules 가 project membership 을 강제하므로, 인증 실패를 anonymous 로
+// 완화하면 cross-tenant 하드닝을 우회하는 fail-open 이 된다.
 const AUTH_TIMEOUT_MS = 10_000;
 
 // 주의: 반드시 stderr 로만 출력. stdio MCP transport 가 stdout 으로 JSONRPC
 // 프레임을 주고받기 때문에 console.log 로 한 줄이라도 흘리면 strict 클라이언트
 // (Codex 등) 가 initialize response 를 파싱 못하고 connection 을 끊음.
-// authReady 는 절대 reject 하지 않는다(항상 void 로 resolve) — main() 의
-// `await authReady` 가 인증 실패/지연으로 서버 기동을 멈추지 않게 하기 위함.
-export const authReady: Promise<void> = new Promise<void>((resolve) => {
-  let settled = false;
-  const finish = (): void => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    resolve();
-  };
-
-  const timer = setTimeout(() => {
-    if (settled) return;
+export const authReady: Promise<void> = (async () => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      signInWithRequiredCustomToken(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new Error(
+              `Firebase custom-token auth timed out after ${AUTH_TIMEOUT_MS}ms`,
+            ),
+          );
+        }, AUTH_TIMEOUT_MS);
+        if (typeof timer.unref === "function") timer.unref();
+      }),
+    ]);
     console.error(
-      `[MCP] Firebase anonymous auth timed out after ${AUTH_TIMEOUT_MS}ms; ` +
-        "starting server anyway (Firestore calls will be handled individually)",
+      `[MCP] Firebase custom-token auth OK (uid=${auth.currentUser?.uid ?? "unknown"})`,
     );
-    finish();
-  }, AUTH_TIMEOUT_MS);
-  // 인증이 먼저 끝나면 이 타이머가 프로세스 종료를 막지 않게 unref.
-  if (typeof timer.unref === "function") timer.unref();
-
-  const customToken = process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
-  const signIn = customToken
-    ? signInWithCustomTokenOrAnonymousFallback(customToken)
-    : signInAnonymously(auth);
-
-  signIn
-    .then(() => {
-      console.error(
-        `[MCP] Firebase auth OK (anonymous=${auth.currentUser?.isAnonymous ?? "unknown"})`,
-      );
-    })
-    .catch((err) => {
-      console.error(
-        `[MCP] Firebase anonymous auth failed (code=${getFirebaseAuthErrorCode(
-          err,
-        )})`,
-      );
-    })
-    .finally(finish);
-});
+  } catch (err) {
+    console.error(
+      `[MCP] Firebase custom-token auth failed; refusing to start (code=${getFirebaseAuthErrorCode(
+        err,
+      )})`,
+    );
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+})();
