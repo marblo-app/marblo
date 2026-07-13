@@ -270,13 +270,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const loginWithGoogle = async () => {
-    // In the packaged app (built bundle + IPC bridge present) take the
-    // system-browser loopback path. Vite dev (import.meta.env.DEV) keeps the
-    // existing in-window redirect/popup flow so dev login never regresses.
-    if (
-      !import.meta.env.DEV &&
-      typeof window.electronAPI?.auth?.googleLoopback === "function"
-    ) {
+    // Prefer the system-browser loopback OAuth whenever the Electron IPC bridge
+    // is present — in BOTH the packaged app AND Vite dev (inside Electron).
+    // Previously dev was gated onto the in-window signInWithRedirect flow, but
+    // that flow silently fails in Electron/Chromium: it round-trips through the
+    // Firebase auth handler and returns with NO credential and NO error, never
+    // reaching the Google account chooser (third-party storage partitioning —
+    // verified via CDP network/console trace). The loopback flow is origin-
+    // independent and already the proven path for packaged. Web (no electronAPI)
+    // still falls through to the redirect flow below.
+    if (typeof window.electronAPI?.auth?.googleLoopback === "function") {
       setError(null);
       return loginWithGoogleLoopback();
     }
