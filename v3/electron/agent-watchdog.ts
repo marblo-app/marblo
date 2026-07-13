@@ -52,6 +52,9 @@ export interface WatchdogTicket {
   /** epoch-ms of the ticket's last board activity (projection.lastActivityAt),
    * or null if never recorded. */
   lastActivityAtMs: number | null;
+  /** epoch-ms when the active assignment/status began, used only when no
+   * activity projection exists yet (spawned but never reached first MCP call). */
+  activeSinceMs?: number | null;
   /** Short title used to build the continuation instruction on respawn. */
   title?: string;
   /** Resolved working directory of the original dispatch (the agent's actual
@@ -92,6 +95,8 @@ export type RecoveryPhase =
   | "escalated" // W4: real human/orchestrator notification fired
   | "misroute" // W6: scope/host guard blocked an orphan spawn
   | "review-stale" // W5: a dead-assignee REVIEW ticket surfaced
+  | "in-progress-reset" // orphaned IN_PROGRESS reset to TODO for re-claim
+  | "in-progress-stall" // orphaned IN_PROGRESS surfaced when reset is unwired
   | "pending-fallback"; // W2: an undelivered instruction force-delivered via PTY
 
 export interface WatchdogDeps {
@@ -153,6 +158,18 @@ export interface WatchdogDeps {
   /** Fire a REAL escalation (orchestrator PTY nudge + Telegram) when a ticket
    * genuinely needs human attention. Replaces the old log-only dead-end. */
   escalate?: (ticket: WatchdogTicket, detail: string) => void;
+  /** Reset an orphaned IN_PROGRESS ticket to TODO so another agent can reclaim
+   * it. Called only after the recorded owner is gone and board activity is
+   * stale / absent. */
+  resetStalledInProgress?: (
+    ticket: WatchdogTicket,
+    detail: string,
+  ) => Promise<boolean>;
+  /** Surface an orphaned IN_PROGRESS stall when reset is not wired or fails. */
+  escalateStalledInProgress?: (
+    ticket: WatchdogTicket,
+    detail: string,
+  ) => void;
 
   // ── W5: stale non-human REVIEW sweep (optional) ─────────────
   /** List REVIEW tickets whose non-human review owner is dead/foreign, with
@@ -236,6 +253,9 @@ export interface WatchdogConfig {
   /** W2: how long a pending instruction may stay undelivered before the
    * watchdog force-delivers it via direct PTY write. */
   pendingFallbackMs: number;
+  /** IN_PROGRESS-only: owner disappeared AND no board activity for this long
+   * before resetting to TODO / notifying the orchestrator. */
+  inProgressOrphanResetMs: number;
 }
 
 export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
@@ -252,6 +272,7 @@ export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
   freshnessGraceMs: 180_000, // 3 min — a live worker commits/logs within this
   reviewStaleMs: 14_400_000, // 4 h — dead-assignee REVIEW grace before surfacing
   pendingFallbackMs: 45_000, // 45 s — undelivered instruction → PTY-direct
+  inProgressOrphanResetMs: 90_000, // 90 s — active work owner gone + quiet
 };
 
 function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
@@ -301,6 +322,11 @@ export function resolveWatchdogConfig(
       env,
       "MARBLO_WATCHDOG_PENDING_FALLBACK_MS",
       d.pendingFallbackMs,
+    ),
+    inProgressOrphanResetMs: intEnv(
+      env,
+      "MARBLO_WATCHDOG_IN_PROGRESS_ORPHAN_RESET_MS",
+      d.inProgressOrphanResetMs,
     ),
   };
 }
@@ -398,6 +424,44 @@ export function selectStalePendingForFallback(
   thresholdMs: number,
 ): PendingInstruction[] {
   return list.filter((p) => now - p.createdAtMs >= thresholdMs);
+}
+
+export function detectOrphanedInProgressStall(
+  ticket: WatchdogTicket,
+  input: {
+    ownerMissing: boolean;
+    now: number;
+    thresholdMs: number;
+  },
+): { stalled: boolean; detail: string } {
+  if (ticket.status !== "IN_PROGRESS" || !input.ownerMissing) {
+    return { stalled: false, detail: "" };
+  }
+
+  if (ticket.lastActivityAtMs === null) {
+    const ageBase = ticket.activeSinceMs ?? 0;
+    const ageMs = input.now - ageBase;
+    if (ageMs >= input.thresholdMs) {
+      return {
+        stalled: true,
+        detail:
+          `assigned agent ${ticket.agentId ?? "(none)"} is missing and ` +
+          `IN_PROGRESS has no activity log for ${Math.round(ageMs / 1000)}s`,
+      };
+    }
+    return { stalled: false, detail: "" };
+  }
+
+  const idleMs = input.now - ticket.lastActivityAtMs;
+  if (idleMs >= input.thresholdMs) {
+    return {
+      stalled: true,
+      detail:
+        `assigned agent ${ticket.agentId ?? "(none)"} is missing and ` +
+        `IN_PROGRESS has been inactive for ${Math.round(idleMs / 1000)}s`,
+    };
+  }
+  return { stalled: false, detail: "" };
 }
 
 function buildBoardNudge(ticket: WatchdogTicket): string {
@@ -837,6 +901,59 @@ export class AgentWatchdog {
         });
         return;
       }
+    }
+
+    const orphanedInProgress = detectOrphanedInProgressStall(ticket, {
+      ownerMissing: health === null,
+      now,
+      thresholdMs: this.cfg.inProgressOrphanResetMs,
+    });
+    const canHandleOrphan =
+      !!this.deps.resetStalledInProgress ||
+      !!this.deps.escalateStalledInProgress;
+    if (orphanedInProgress.stalled && canHandleOrphan) {
+      let reset = false;
+      if (this.deps.resetStalledInProgress) {
+        try {
+          reset = await this.deps.resetStalledInProgress(
+            ticket,
+            orphanedInProgress.detail,
+          );
+        } catch (err) {
+          this.log("resetStalledInProgress threw (best-effort)", {
+            taskId: ticket.taskId,
+            err: String(err),
+          });
+        }
+      }
+      if (reset) {
+        this.states.delete(ticket.taskId);
+        this.firstSeen.delete(ticket.taskId);
+        this.deps.recordRecovery?.(
+          ticket,
+          "in-progress-reset",
+          `${orphanedInProgress.detail} → reset to TODO for re-claim`,
+        );
+        this.log("in-progress orphan reset", {
+          taskId: ticket.taskId,
+          agentId: ticket.agentId,
+        });
+        return;
+      }
+      this.deps.escalateStalledInProgress?.(
+        ticket,
+        `${orphanedInProgress.detail} — reset unavailable`,
+      );
+      this.deps.recordRecovery?.(
+        ticket,
+        "in-progress-stall",
+        `${orphanedInProgress.detail} — orchestrator notified`,
+      );
+      this.log("in-progress orphan surfaced", {
+        taskId: ticket.taskId,
+        agentId: ticket.agentId,
+      });
+      return;
     }
 
     // A born-dead ticket (never produced first activity) skips nudging — a

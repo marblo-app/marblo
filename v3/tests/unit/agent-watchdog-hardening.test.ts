@@ -5,6 +5,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   AgentWatchdog,
+  detectOrphanedInProgressStall,
   evaluateRespawnGuard,
   isRecoverableWatchdogStatus,
   interpretScopeHostProbe,
@@ -147,6 +148,36 @@ describe("selectStalePendingForFallback (W2)", () => {
   });
 });
 
+describe("detectOrphanedInProgressStall", () => {
+  it("flags missing-owner IN_PROGRESS with no activity log after threshold", () => {
+    const out = detectOrphanedInProgressStall(
+      ticket({
+        lastActivityAtMs: null,
+        activeSinceMs: 1_000,
+      }),
+      {
+        ownerMissing: true,
+        now: 121_000,
+        thresholdMs: 90_000,
+      },
+    );
+    expect(out.stalled).toBe(true);
+    expect(out.detail).toMatch(/no activity log/);
+  });
+
+  it("does not flag REVIEW/human gate statuses", () => {
+    const out = detectOrphanedInProgressStall(
+      { ...ticket(), status: "CLAIMED" },
+      {
+        ownerMissing: true,
+        now: 121_000,
+        thresholdMs: 90_000,
+      },
+    );
+    expect(out.stalled).toBe(false);
+  });
+});
+
 // ── Integration through tickOnce() ─────────────────────────────────────────
 
 const AGENT = "agent-x";
@@ -270,6 +301,61 @@ describe("W3 — false-positive respawn guard through tickOnce", () => {
     expect(nudge).toHaveBeenCalledOnce();
     expect(h.respawn).not.toHaveBeenCalled();
     expect(h.records.some((r) => r.phase === "nudge")).toBe(true);
+  });
+});
+
+describe("IN_PROGRESS orphan reset through tickOnce", () => {
+  it("resets a missing-owner IN_PROGRESS task once board activity is stale", async () => {
+    const reset = vi.fn(async () => true);
+    const escalate = vi.fn();
+    const h = makeHarness({
+      cfg: { inProgressOrphanResetMs: 90_000 },
+      extraDeps: {
+        resetStalledInProgress: reset,
+        escalateStalledInProgress: escalate,
+      },
+    });
+    h.tickets[0] = ticket({
+      status: "IN_PROGRESS",
+      lastActivityAtMs: h.clock.ms - 91_000,
+    });
+
+    await h.wd.tickOnce();
+
+    expect(reset).toHaveBeenCalledOnce();
+    expect(reset).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: TASK, status: "IN_PROGRESS" }),
+      expect.stringMatching(/inactive/),
+    );
+    expect(escalate).not.toHaveBeenCalled();
+    expect(h.respawn).not.toHaveBeenCalled();
+    expect(h.records.some((r) => r.phase === "in-progress-reset")).toBe(true);
+  });
+
+  it("surfaces a no-activity IN_PROGRESS orphan when reset is unavailable", async () => {
+    const escalate = vi.fn();
+    const h = makeHarness({
+      cfg: { inProgressOrphanResetMs: 90_000 },
+      extraDeps: {
+        resetStalledInProgress: async () => false,
+        escalateStalledInProgress: escalate,
+      },
+    });
+    h.tickets[0] = ticket({
+      status: "IN_PROGRESS",
+      lastActivityAtMs: null,
+      activeSinceMs: h.clock.ms - 91_000,
+    });
+
+    await h.wd.tickOnce();
+
+    expect(escalate).toHaveBeenCalledOnce();
+    expect(escalate).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: TASK, status: "IN_PROGRESS" }),
+      expect.stringMatching(/no activity log/),
+    );
+    expect(h.respawn).not.toHaveBeenCalled();
+    expect(h.records.some((r) => r.phase === "in-progress-stall")).toBe(true);
   });
 });
 

@@ -950,6 +950,11 @@ const bridgeServer = new BridgeServer(
 // never claims TODO tickets. Mission tickets are excluded here because the
 // conductor's own report-watchdog (conductor-driver.ts) already owns them.
 // Started/stopped in the app lifecycle below.
+function watchdogMillis(value: unknown): number | null {
+  const ts = value as { toMillis?: () => number } | undefined;
+  return typeof ts?.toMillis === "function" ? ts.toMillis() : null;
+}
+
 const agentWatchdog = new AgentWatchdog(
   {
     listActiveTickets: async (): Promise<WatchdogTicket[]> => {
@@ -977,9 +982,12 @@ const agentWatchdog = new AgentWatchdog(
             ? (data.claimedBy as string)
             : null) ||
           null;
-        const ts = projection?.lastActivityAt as
-          | { toMillis?: () => number }
-          | undefined;
+        const lastActivityAtMs = watchdogMillis(projection?.lastActivityAt);
+        const activeSinceMs =
+          lastActivityAtMs ??
+          watchdogMillis(data.claimedAt) ??
+          watchdogMillis(data.updatedAt) ??
+          watchdogMillis(data.createdAt);
         // Persisted at dispatch time (bridge-server persistDispatchMeta) so a
         // respawn restores the original cwd + model + complexity instead of
         // re-resolving them (fresh base worktree + claude→gpt re-selection).
@@ -998,8 +1006,8 @@ const agentWatchdog = new AgentWatchdog(
           status: data.status as "CLAIMED" | "IN_PROGRESS",
           role: typeof data.role === "string" ? data.role : "backend",
           agentId: agentId || null,
-          lastActivityAtMs:
-            typeof ts?.toMillis === "function" ? ts.toMillis() : null,
+          lastActivityAtMs,
+          activeSinceMs,
           title: typeof data.title === "string" ? data.title : undefined,
           cwd: typeof meta?.cwd === "string" && meta.cwd ? meta.cwd : undefined,
           model:
@@ -1249,6 +1257,71 @@ const agentWatchdog = new AgentWatchdog(
         void telegramPoller.sendMessage(ticket.projectId, msg);
       } catch (err) {
         console.error("[AgentWatchdog] escalate telegram failed:", err);
+      }
+    },
+    resetStalledInProgress: async (ticket, detail) => {
+      try {
+        const { app, authReady } = getMissionFirebaseApp();
+        await authReady;
+        const db = getFirestore(app);
+        await applyProjection(db, ticket.taskId, {
+          newStatus: "TODO",
+          lastAgentId: "watchdog",
+          lastActivitySummary: "watchdog reset orphaned IN_PROGRESS to TODO",
+          extraTaskFields: {
+            claimedBy: null,
+            claimedAt: null,
+            comment: `Watchdog reset: ${detail}`,
+          },
+          activityPayload: {
+            agentId: "watchdog",
+            message:
+              `🔁 [Watchdog IN_PROGRESS reset] ${detail}. ` +
+              `TODO로 되돌려 재클레임 가능하게 했습니다.`,
+          },
+          validateFrom: (from) => from === "IN_PROGRESS",
+          validateTask: (task) => {
+            const projection = task.projection as
+              | { lastAgentId?: unknown }
+              | undefined;
+            const claimedBy =
+              typeof task.claimedBy === "string" ? task.claimedBy : null;
+            const projectedAgent =
+              typeof projection?.lastAgentId === "string"
+                ? projection.lastAgentId
+                : null;
+            return (
+              task.status === "IN_PROGRESS" &&
+              (claimedBy === ticket.agentId ||
+                projectedAgent === ticket.agentId)
+            );
+          },
+        });
+        return true;
+      } catch (err) {
+        console.error("[AgentWatchdog] resetStalledInProgress failed:", err);
+        return false;
+      }
+    },
+    escalateStalledInProgress: (ticket, detail) => {
+      const msg = `⚠️ [Watchdog] IN_PROGRESS 태스크 ${ticket.taskId} "${
+        ticket.title ?? ""
+      }" 담당 에이전트 부재/무활동 감지 — ${detail}. 재배정 또는 수동 리셋이 필요합니다.`;
+      try {
+        orchestrators.get(ticket.projectId)?.injectMessage(msg);
+      } catch (err) {
+        console.error(
+          "[AgentWatchdog] escalateStalledInProgress orch failed:",
+          err,
+        );
+      }
+      try {
+        void telegramPoller.sendMessage(ticket.projectId, msg);
+      } catch (err) {
+        console.error(
+          "[AgentWatchdog] escalateStalledInProgress tg failed:",
+          err,
+        );
       }
     },
 
@@ -1995,6 +2068,7 @@ import {
   getDocs as fbGetDocs,
   Timestamp as fbTimestamp,
 } from "firebase/firestore";
+import { applyProjection } from "./mcp-server/projection";
 
 function getFlowDb() {
   const config = {
