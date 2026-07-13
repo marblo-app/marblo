@@ -5,6 +5,7 @@ import HeroScreenshot from "@/components/HeroScreenshot";
 import HeroConstellation from "@/components/HeroConstellation";
 import { Check, X, Minus } from "lucide-react";
 import FeatureSection from "@/components/FeatureSection";
+import FeatureVideoSection from "@/components/FeatureVideoSection";
 import BetaTester50Section from "@/components/BetaTester50Section";
 import {
   buildSoftwareApplicationSchema,
@@ -208,6 +209,8 @@ export default function HomePage() {
           <HeroScreenshot />
         </div>
       </section>
+
+      <FeatureVideoSection />
 
       {/* Beta Tester 50 — inline waitlist signup */}
       <BetaTester50Section />

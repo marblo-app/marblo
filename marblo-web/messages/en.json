@@ -22,6 +22,13 @@
     "badge": "AI Agent Orchestration Platform",
     "clickToEnlarge": "Click to enlarge"
   },
+  "featureVideo": {
+    "badge": "Feature video",
+    "title": "See what Marblo can do",
+    "subtitle": "Watch how the kanban board, agent execution, and task workflow connect in a real Marblo session.",
+    "playLabel": "Play the Marblo feature video",
+    "iframeTitle": "Marblo feature video"
+  },
   "value": {
     "title": "Not one agent.\nCommand an army.",
     "subtitle": "Cursor and Copilot give you one agent.\nMarblo runs multiple agents in parallel — delivering 10x faster results.",

@@ -22,6 +22,13 @@
     "badge": "AIエージェント・オーケストレーション・プラットフォーム",
     "clickToEnlarge": "クリックして拡大"
   },
+  "featureVideo": {
+    "badge": "機能紹介動画",
+    "title": "Marbloの機能をご覧ください",
+    "subtitle": "カンバンボード、エージェント実行、タスクの流れが実際にどうつながるのかを動画で確認できます。",
+    "playLabel": "Marbloの機能紹介動画を再生",
+    "iframeTitle": "Marblo機能紹介動画"
+  },
   "value": {
     "title": "エージェント1体ではない。\n軍団を運用する。",
     "subtitle": "CursorやCopilotはエージェント1体。\nMarbloは複数のエージェントを同時運用し、10倍速い成果を生み出します。",
