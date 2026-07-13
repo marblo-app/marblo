@@ -13,6 +13,7 @@ import {
 import { contextForKind } from "./mcp-server/context";
 import { YOLO_FLAG } from "./telegram-channels";
 import { looksLikeLoginScreen } from "./harness-manager";
+import { maskConfigForLogging } from "./config-redaction";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
@@ -535,13 +536,30 @@ export class OrchestratorManager {
           launchConfig.mcpConfigPath,
           "utf-8",
         );
-        const config = JSON.parse(configContent);
+        const config = JSON.parse(configContent) as {
+          mcpServers?: {
+            marblo?: {
+              env?: Record<string, string>;
+            };
+          };
+        };
         if (config.mcpServers?.marblo?.env) {
           Object.assign(config.mcpServers.marblo.env, mcpEnvPatch);
           fs.writeFileSync(
             launchConfig.mcpConfigPath,
             JSON.stringify(config, null, 2),
             "utf-8",
+          );
+          console.info(
+            `[Orchestrator:${this.kind}] MCP config patched`,
+            maskConfigForLogging({
+              configPath: launchConfig.mcpConfigPath,
+              mcpServers: {
+                marblo: {
+                  env: config.mcpServers.marblo.env,
+                },
+              },
+            }),
           );
         }
       }

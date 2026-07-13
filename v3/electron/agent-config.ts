@@ -4,6 +4,7 @@ import os from "os";
 import crypto from "crypto";
 import { execFileSync } from "child_process";
 import { ModelType } from "./agent-manager";
+import { maskEnvForLogging } from "./config-redaction";
 
 export interface ResolvedCli {
   /** Absolute path to the binary, or the bare name if resolution failed. */
@@ -1704,7 +1705,9 @@ export class AgentConfigGenerator {
         // 사용자의 손상된 JSON 을 함부로 덮어쓰지 않는다. 다른 config path 는
         // 계속 시도하되, sentinel 에 실패 경로를 남겨 디버그 가능하게 한다.
         console.warn(
-          `[agy] ${globalConfigPath} parse failed (${parseError}); leaving file untouched, MCP disabled for this path.`
+          `[agy] ${globalConfigPath} parse failed (${errorMessage(
+            parseError,
+          )}); leaving file untouched, MCP disabled for this path.`
         );
         mergeResults.push({
           globalConfigPath,
@@ -1745,6 +1748,7 @@ export class AgentConfigGenerator {
           globalConfigPath,
           command: mcpEntry.command,
           args: mcpEntry.args,
+          env: maskEnvForLogging(marbloEnv),
           envKeys: Object.keys(marbloEnv).sort(),
           hasAgentId: !!marbloEnv.MARBLO_AGENT_ID,
           hasProject: !!marbloEnv.MARBLO_PROJECT,
@@ -1784,6 +1788,7 @@ export class AgentConfigGenerator {
           marbloServer: {
             command: mcpEntry.command,
             args: mcpEntry.args,
+            env: maskEnvForLogging(marbloEnv),
             envKeys: Object.keys(marbloEnv).sort(),
             hasAgentId: !!marbloEnv.MARBLO_AGENT_ID,
             hasProject: !!marbloEnv.MARBLO_PROJECT,

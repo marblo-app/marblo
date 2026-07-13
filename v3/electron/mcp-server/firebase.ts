@@ -114,7 +114,6 @@ async function signInWithCustomTokenOrAnonymousFallback(
       `[MCP] Firebase custom-token auth failed; falling back to anonymous (code=${getFirebaseAuthErrorCode(
         err,
       )})`,
-      err,
     );
     await signInAnonymously(auth);
   }
@@ -163,7 +162,11 @@ export const authReady: Promise<void> = new Promise<void>((resolve) => {
       );
     })
     .catch((err) => {
-      console.error("[MCP] Firebase anonymous auth failed:", err);
+      console.error(
+        `[MCP] Firebase anonymous auth failed (code=${getFirebaseAuthErrorCode(
+          err,
+        )})`,
+      );
     })
     .finally(finish);
 });

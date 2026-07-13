@@ -20,6 +20,14 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function firebaseAuthErrorCode(err: unknown): string {
+  if (typeof err === "object" && err !== null && "code" in err) {
+    const code = (err as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+  }
+  return "unknown";
+}
+
 async function signInMissionAppWithAnonymousFallback(
   customToken: string,
 ): Promise<MissionSignInResult> {
@@ -31,8 +39,9 @@ async function signInMissionAppWithAnonymousFallback(
     return { uid: credential.user.uid, customTokenAccepted: true };
   } catch (err) {
     console.error(
-      "[FirebaseAuthSync] custom-token auth failed; falling back to anonymous",
-      err,
+      `[FirebaseAuthSync] custom-token auth failed; falling back to anonymous (code=${firebaseAuthErrorCode(
+        err,
+      )})`,
     );
     const credential = await signInAnonymously(auth);
     return { uid: credential.user.uid, customTokenAccepted: false };

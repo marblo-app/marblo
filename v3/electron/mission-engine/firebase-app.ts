@@ -49,7 +49,6 @@ async function signInWithCustomTokenOrAnonymousFallback(
       `[MissionEngine] custom-token auth failed; falling back to anonymous (code=${getFirebaseAuthErrorCode(
         error,
       )})`,
-      error,
     );
     await signInAnonymously(auth);
   }
@@ -60,7 +59,7 @@ function startMainFirebaseAuth(auth: Auth): Promise<void> {
     let done = false;
     let attempt = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let unsubscribe: (() => void) | undefined;
+    let unsubscribe = (): void => {};
 
     const finish = (): void => {
       if (done) return;
@@ -70,7 +69,7 @@ function startMainFirebaseAuth(auth: Auth): Promise<void> {
         clearTimeout(retryTimer);
         retryTimer = null;
       }
-      unsubscribe?.();
+      unsubscribe();
 
       console.log(
         `[MissionEngine] firebase auth OK (anonymous=${auth.currentUser?.isAnonymous ?? "unknown"})`,
