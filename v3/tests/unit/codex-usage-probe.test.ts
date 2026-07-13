@@ -63,6 +63,42 @@ describe("parseRateLimitsReadResponse", () => {
     expect(snap!.primaryResetAt).toBe(1780650953);
   });
 
+  it("reads rateLimitsByLimitId entries even when the limit id is versioned", () => {
+    const snap = parseRateLimitsReadResponse(
+      rpc({
+        rateLimitsByLimitId: {
+          "gpt-5-codex": {
+            primary: { usedPercent: 21, resetsAt: 1780650953 },
+            secondary: { usedPercent: 64, resetsAt: 1781149096 },
+            planType: "plus",
+          },
+        },
+      }),
+      REQ_ID,
+    );
+    expect(snap).not.toBeNull();
+    expect(snap!.primaryPercent).toBe(21);
+    expect(snap!.secondaryPercent).toBe(64);
+  });
+
+  it("accepts snake_case status-style windows for Codex weekly limits", () => {
+    const snap = parseRateLimitsReadResponse(
+      rpc({
+        rateLimits: {
+          five_hour: { used_percent: 3, resets_at: 1780650953 },
+          seven_day: { used_percent: 42, resets_at: 1781149096 },
+          plan_type: "pro",
+        },
+      }),
+      REQ_ID,
+    );
+    expect(snap).not.toBeNull();
+    expect(snap!.planType).toBe("pro");
+    expect(snap!.primaryPercent).toBe(3);
+    expect(snap!.secondaryPercent).toBe(42);
+    expect(snap!.secondaryResetAt).toBe(1781149096);
+  });
+
   it("keeps a single populated window and nulls the missing one", () => {
     const snap = parseRateLimitsReadResponse(
       rpc({

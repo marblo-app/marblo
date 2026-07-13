@@ -174,6 +174,21 @@ function readGptRateLimitFromRollouts(): RateLimitInfo | null {
   return info;
 }
 
+function mergeRateLimitInfo(
+  primary: RateLimitInfo | null,
+  fallback: RateLimitInfo | null,
+): RateLimitInfo | null {
+  if (!primary) return fallback;
+  if (!fallback) return primary;
+  return {
+    planType: primary.planType ?? fallback.planType,
+    primaryPercent: primary.primaryPercent ?? fallback.primaryPercent,
+    primaryResetAt: primary.primaryResetAt ?? fallback.primaryResetAt,
+    secondaryPercent: primary.secondaryPercent ?? fallback.secondaryPercent,
+    secondaryResetAt: primary.secondaryResetAt ?? fallback.secondaryResetAt,
+  };
+}
+
 /**
  * Account-global Codex (gpt) plan utilization, or null when there's no
  * information. Uses the headless app-server probe first so the value appears
@@ -188,7 +203,14 @@ export async function getAccountGptRateLimit(): Promise<RateLimitInfo | null> {
   gptInFlight = (async () => {
     try {
       const snap = await probeCodexUsage();
-      const info = snap ? snapToInfo(snap) : readGptRateLimitFromRollouts();
+      const probed = snap ? snapToInfo(snap) : null;
+      const needsRolloutFill =
+        !probed ||
+        probed.primaryPercent === null ||
+        probed.secondaryPercent === null;
+      const info = needsRolloutFill
+        ? mergeRateLimitInfo(probed, readGptRateLimitFromRollouts())
+        : probed;
       gptCache = { at: Date.now(), info };
       return info;
     } finally {

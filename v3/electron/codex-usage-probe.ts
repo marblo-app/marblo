@@ -39,6 +39,21 @@ function pctOrNull(v: unknown): number | null {
   return n === null ? null : Math.min(100, Math.max(0, n));
 }
 
+function pickNumber(...values: unknown[]): number | null {
+  for (const v of values) {
+    const n = numOrNull(v);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+function pickString(...values: unknown[]): string | null {
+  for (const v of values) {
+    if (typeof v === "string" && v.trim().length > 0) return v;
+  }
+  return null;
+}
+
 function resetEpochSeconds(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return Math.floor(v);
   if (typeof v === "string") {
@@ -119,8 +134,16 @@ interface WindowReading {
 function readWindow(v: unknown): WindowReading {
   if (!isRecord(v)) return { percent: null, resetAt: null };
   return {
-    percent: pctOrNull(v.usedPercent),
-    resetAt: resetEpochSeconds(v.resetsAt),
+    percent: pctOrNull(
+      pickNumber(
+        v.usedPercent,
+        v.used_percent,
+        v.percentUsed,
+        v.percent_used,
+        v.used,
+      ),
+    ),
+    resetAt: resetEpochSeconds(v.resetsAt ?? v.resets_at ?? v.resetAt),
   };
 }
 
@@ -129,7 +152,22 @@ function rateLimitsFromResult(result: unknown): unknown {
   if (isRecord(result.rateLimits)) return result.rateLimits;
   const byId = result.rateLimitsByLimitId;
   if (!isRecord(byId)) return null;
-  return isRecord(byId.codex) ? byId.codex : null;
+  if (isRecord(byId.codex)) return byId.codex;
+  for (const value of Object.values(byId)) {
+    if (!isRecord(value)) continue;
+    if (
+      isRecord(value.primary) ||
+      isRecord(value.secondary) ||
+      isRecord(value.fiveHour) ||
+      isRecord(value.five_hour) ||
+      isRecord(value.sevenDay) ||
+      isRecord(value.seven_day) ||
+      isRecord(value.weekly)
+    ) {
+      return value;
+    }
+  }
+  return null;
 }
 
 export function parseRateLimitsReadResponse(
@@ -141,12 +179,23 @@ export function parseRateLimitsReadResponse(
   }
   const rateLimits = rateLimitsFromResult(obj.result);
   if (!isRecord(rateLimits)) return null;
-  const primary = readWindow(rateLimits.primary);
-  const secondary = readWindow(rateLimits.secondary);
+  const primary = readWindow(
+    rateLimits.primary ?? rateLimits.fiveHour ?? rateLimits.five_hour,
+  );
+  const secondary = readWindow(
+    rateLimits.secondary ??
+      rateLimits.sevenDay ??
+      rateLimits.seven_day ??
+      rateLimits.weekly,
+  );
   if (primary.percent === null && secondary.percent === null) return null;
   return {
-    planType:
-      typeof rateLimits.planType === "string" ? rateLimits.planType : null,
+    planType: pickString(
+      rateLimits.planType,
+      rateLimits.plan_type,
+      rateLimits.subscriptionType,
+      rateLimits.subscription_type,
+    ),
     primaryPercent: primary.percent,
     primaryResetAt: primary.resetAt,
     secondaryPercent: secondary.percent,
