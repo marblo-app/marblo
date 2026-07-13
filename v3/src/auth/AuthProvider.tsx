@@ -63,6 +63,15 @@ const AUTH_BUILD_TAG = "google-login=redirect-v3-idb-heartbeat-fix";
 // it (a real navigation tears down this renderer well before then).
 const REDIRECT_NAV_WATCHDOG_MS = 8_000;
 
+async function syncAgentFirebaseAuthForUser(
+  firebaseUser: User,
+  source: string,
+  forceRefreshIdToken = false,
+): Promise<void> {
+  await syncAgentFirebaseAuth(firebaseUser, { forceRefreshIdToken });
+  console.info(`[auth] agent Firebase auth synced (${source})`);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -158,16 +167,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then((result) => {
           if (!result) {
             console.info("[auth] getRedirectResult: no pending redirect");
-            return;
-          }
-          console.info("[auth] getRedirectResult: signed in via redirect");
-          settled = true;
-          clearTimeout(timeout);
-          setError(null);
-          setInitDegraded(false);
-          setUser(result.user);
-          setLoading(false);
-        })
+          return;
+        }
+        console.info("[auth] getRedirectResult: signed in via redirect");
+        settled = true;
+        clearTimeout(timeout);
+        setError(null);
+        setInitDegraded(false);
+        setUser(result.user);
+        setLoading(false);
+        syncAgentFirebaseAuthForUser(result.user, "redirect result", true).catch(
+          (e: unknown) => {
+            console.error("[auth] agent Firebase auth sync failed", e);
+          },
+        );
+      })
         .catch((e: unknown) => {
           const code = (e as { code?: string })?.code ?? "?";
           console.error(`[auth] getRedirectResult: error code=${code}`, e);
@@ -199,10 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      syncAgentFirebaseAuth(firebaseUser)
-        .then(() => {
-          console.info("[auth] agent Firebase auth synced");
-        })
+      syncAgentFirebaseAuthForUser(firebaseUser, "id-token observer")
         .catch((e: unknown) => {
           console.error("[auth] agent Firebase auth sync failed", e);
         });
@@ -252,11 +263,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // A sub-second elapsed here is the proof the fix took; a ~30000ms elapsed
       // followed by network-request-failed means the guard did not apply.
       const t0 = Date.now();
-      await signInWithCredential(auth, credential);
+      const credentialResult = await signInWithCredential(auth, credential);
       console.info(
         `[auth] loginWithGoogle: loopback signInWithCredential ok (${
           Date.now() - t0
         }ms)`,
+      );
+      await syncAgentFirebaseAuthForUser(
+        credentialResult.user,
+        "google loopback",
+        true,
       );
     } catch (e) {
       const code = (e as { code?: string })?.code ?? "?";
@@ -358,7 +374,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithGithub = async () => {
     try {
       setError(null);
-      await signInWithPopup(auth, githubProvider);
+      const credentialResult = await signInWithPopup(auth, githubProvider);
+      await syncAgentFirebaseAuthForUser(
+        credentialResult.user,
+        "github popup",
+        true,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : t("auth.error.github"));
     }
@@ -367,7 +388,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithEmail = async (email: string, password: string) => {
     try {
       setError(null);
-      await signInWithEmailAndPassword(auth, email, password);
+      const credentialResult = await signInWithEmailAndPassword(
+        auth,
+        email,
+        password,
+      );
+      await syncAgentFirebaseAuthForUser(
+        credentialResult.user,
+        "email login",
+        true,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : t("auth.error.email"));
     }
@@ -376,7 +406,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signupWithEmail = async (email: string, password: string) => {
     try {
       setError(null);
-      await createUserWithEmailAndPassword(auth, email, password);
+      const credentialResult = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password,
+      );
+      await syncAgentFirebaseAuthForUser(
+        credentialResult.user,
+        "email signup",
+        true,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : t("auth.error.signup"));
     }

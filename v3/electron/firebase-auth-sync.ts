@@ -8,6 +8,7 @@ import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
 interface AuthSyncResult {
   ok: boolean;
   uid?: string;
+  customTokenAccepted?: boolean;
   error?: string;
 }
 
@@ -62,8 +63,17 @@ export async function syncAgentCustomToken(
     const result = await signInMissionAppWithAnonymousFallback(customToken);
     if (!result.customTokenAccepted) {
       delete process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
+      console.warn(
+        `[FirebaseAuthSync] custom-token auth rejected; anonymous fallback uid=${result.uid}`,
+      );
+    } else {
+      console.info(`[FirebaseAuthSync] custom-token auth OK uid=${result.uid}`);
     }
-    return { ok: true, uid: result.uid };
+    return {
+      ok: true,
+      uid: result.uid,
+      customTokenAccepted: result.customTokenAccepted,
+    };
   } catch (err) {
     delete process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
     return { ok: false, error: errorMessage(err) };

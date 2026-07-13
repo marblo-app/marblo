@@ -27,7 +27,31 @@ import {
   type SubscriptionSnapshot,
 } from "./billing";
 
-admin.initializeApp();
+function getFirebaseProjectId(): string | undefined {
+  if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
+  if (process.env.GCP_PROJECT) return process.env.GCP_PROJECT;
+
+  const rawConfig = process.env.FIREBASE_CONFIG;
+  if (!rawConfig) return undefined;
+
+  try {
+    const parsed = JSON.parse(rawConfig) as { projectId?: unknown };
+    return typeof parsed.projectId === "string" ? parsed.projectId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const firebaseProjectId = getFirebaseProjectId();
+const customTokenServiceAccountId =
+  process.env.CUSTOM_TOKEN_SERVICE_ACCOUNT_ID ||
+  (firebaseProjectId ? `${firebaseProjectId}@appspot.gserviceaccount.com` : "");
+
+admin.initializeApp(
+  customTokenServiceAccountId
+    ? { serviceAccountId: customTokenServiceAccountId }
+    : undefined,
+);
 const db = admin.firestore();
 const BQ_LOCATION = "US";
 const bigquery = new BigQuery({ location: BQ_LOCATION });
@@ -49,9 +73,25 @@ export const issueAgentCustomToken = functions.https.onCall(
       );
     }
 
-    const customToken = await admin
-      .auth()
-      .createCustomToken(context.auth.uid, { marbloAgentAuth: true });
+    let customToken: string;
+    try {
+      customToken = await admin
+        .auth()
+        .createCustomToken(context.auth.uid, { marbloAgentAuth: true });
+    } catch (err) {
+      const code =
+        typeof err === "object" &&
+        err !== null &&
+        "code" in err &&
+        typeof (err as { code?: unknown }).code === "string"
+          ? (err as { code: string }).code
+          : "unknown";
+      console.error(`[issueAgentCustomToken] createCustomToken failed (${code})`);
+      throw new functions.https.HttpsError(
+        "internal",
+        `Agent custom token signing failed (${code}).`,
+      );
+    }
 
     return {
       customToken,

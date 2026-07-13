@@ -9,6 +9,8 @@ import {
 import { initializeFirestore } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
 
+export const FIREBASE_FUNCTIONS_REGION = "us-central1";
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -151,4 +153,4 @@ export const auth = initializeAuth(app, {
 // ignoreUndefinedProperties: mission engine 등에서 partial patch 시
 // optional 필드가 undefined 로 새어 들어가도 addDoc/updateDoc 가 실패하지 않도록.
 export const db = initializeFirestore(app, { ignoreUndefinedProperties: true });
-export const functions = getFunctions(app);
+export const functions = getFunctions(app, FIREBASE_FUNCTIONS_REGION);
