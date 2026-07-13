@@ -2,6 +2,7 @@ import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import {
   getAuth,
   onAuthStateChanged,
+  signInAnonymously,
   signInWithCustomToken,
   type Auth,
 } from "firebase/auth";
@@ -13,15 +14,15 @@ import { initializeFirestore } from "firebase/firestore";
 // Auth 주의:
 //   - renderer 가 Cloud Function 에서 받은 custom token 을 IPC 로 전달하면
 //     main 이 실제 사용자 uid 로 signInWithCustomToken 한다.
-//   - token 이 아직 없으면 익명 인증으로 폴백하지 않고 fail-closed 한다.
+//   - token 이 아직 없으면 기존 익명 인증을 유지해 배포 전/로그인 전 회귀를 막는다.
 
 const APP_NAME = "mission-engine";
-const AUTH_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000];
+const AUTH_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000];
 const MAX_AUTH_RETRY_DELAY_MS = 30_000;
 
 let cached: { app: FirebaseApp; authReady: Promise<void> } | null = null;
 
-function getCustomTokenAuthRetryDelayMs(attempt: number): number {
+function getAnonymousAuthRetryDelayMs(attempt: number): number {
   return Math.min(
     AUTH_RETRY_DELAYS_MS[attempt - 1] ?? MAX_AUTH_RETRY_DELAY_MS,
     MAX_AUTH_RETRY_DELAY_MS,
@@ -37,7 +38,7 @@ function getFirebaseAuthErrorCode(error: unknown): string {
   return "unknown";
 }
 
-async function signInWithCustomTokenOnly(
+async function signInWithCustomTokenOrAnonymousFallback(
   auth: Auth,
   customToken: string,
 ): Promise<void> {
@@ -45,12 +46,12 @@ async function signInWithCustomTokenOnly(
     await signInWithCustomToken(auth, customToken);
   } catch (error) {
     console.error(
-      `[MissionEngine] custom-token auth failed (code=${getFirebaseAuthErrorCode(
+      `[MissionEngine] custom-token auth failed; falling back to anonymous (code=${getFirebaseAuthErrorCode(
         error,
-      )}); fail-closed`,
+      )})`,
       error,
     );
-    throw error;
+    await signInAnonymously(auth);
   }
 }
 
@@ -72,37 +73,18 @@ function startMainFirebaseAuth(auth: Auth): Promise<void> {
       unsubscribe?.();
 
       console.log(
-        `[MissionEngine] firebase custom-token auth OK (uid=${auth.currentUser?.uid ?? "unknown"})`,
+        `[MissionEngine] firebase auth OK (anonymous=${auth.currentUser?.isAnonymous ?? "unknown"})`,
       );
       resolve();
     };
 
-    const fail = (error: unknown): void => {
-      if (done) return;
-      done = true;
-
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = null;
-      }
-      unsubscribe?.();
-
-      console.error(
-        `[MissionEngine] firebase custom-token auth unavailable; continuing fail-closed (code=${getFirebaseAuthErrorCode(
-          error,
-        )})`,
-        error,
-      );
-      resolve();
-    };
-
-    if (auth.currentUser && !auth.currentUser.isAnonymous) {
+    if (auth.currentUser) {
       finish();
       return;
     }
 
     unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user && !user.isAnonymous) finish();
+      if (user) finish();
     });
 
     const attemptSignIn = async (): Promise<void> => {
@@ -112,29 +94,24 @@ function startMainFirebaseAuth(auth: Auth): Promise<void> {
       try {
         const customToken = process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
         if (customToken) {
-          await signInWithCustomTokenOnly(auth, customToken);
-          finish();
-          return;
+          await signInWithCustomTokenOrAnonymousFallback(auth, customToken);
+        } else {
+          await signInAnonymously(auth);
+          const lateCustomToken = process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
+          if (lateCustomToken && auth.currentUser?.isAnonymous) {
+            await signInWithCustomTokenOrAnonymousFallback(
+              auth,
+              lateCustomToken,
+            );
+          }
         }
-
-        throw new Error("Missing MARBLO_FIREBASE_CUSTOM_TOKEN");
+        finish();
       } catch (error) {
         if (done) return;
 
-        if (attempt >= AUTH_RETRY_DELAYS_MS.length) {
-          console.error(
-            `[MissionEngine] firebase custom-token auth failed after ${attempt} attempts; fail-closed (code=${getFirebaseAuthErrorCode(
-              error,
-            )})`,
-            error,
-          );
-          fail(error);
-          return;
-        }
-
-        const delayMs = getCustomTokenAuthRetryDelayMs(attempt);
+        const delayMs = getAnonymousAuthRetryDelayMs(attempt);
         console.error(
-          `[MissionEngine] firebase custom-token auth not ready (attempt ${attempt}; retrying in ${delayMs}ms; code=${getFirebaseAuthErrorCode(
+          `[MissionEngine] firebase auth failed (attempt ${attempt}; retrying in ${delayMs}ms; code=${getFirebaseAuthErrorCode(
             error,
           )})`,
           error,
@@ -199,10 +176,11 @@ export function getMissionFirebaseApp(): {
     initializeFirestore(app, { ignoreUndefinedProperties: true });
   }
 
-  // Electron main uses in-memory auth persistence, so each startup needs a
-  // fresh custom-token sign-in. authReady never signs in anonymously; if the
-  // token is missing or rejected, callers continue fail-closed and Firestore
-  // rules deny access until syncAgentCustomToken signs the app in.
+  // Electron main uses in-memory auth persistence, so each startup normally
+  // needs a fresh anonymous sign-in. Firestore callers await authReady; while
+  // offline this may wait indefinitely, but those callers would otherwise hit
+  // permission-denied until auth recovers, so retrying here lets the session
+  // self-heal after transient network or Electron net stack startup failures.
   const authReady = isTestMode
     ? Promise.resolve()
     : startMainFirebaseAuth(getAuth(app));
