@@ -73,6 +73,28 @@ function patchCodexMarbloMcpEnv(
   );
 }
 
+function assertCodexMarbloSurface(configPath: string): void {
+  const codexHome = path.dirname(configPath);
+  const configContent = fs.readFileSync(configPath, "utf-8");
+  if (!configContent.includes("[mcp_servers.marblo]")) {
+    throw new Error(
+      `Codex config is missing [mcp_servers.marblo]: ${configPath}`,
+    );
+  }
+
+  const promptsDir = path.join(codexHome, "prompts");
+  const hasTfPrompts =
+    fs.existsSync(promptsDir) &&
+    fs
+      .readdirSync(promptsDir)
+      .some((entry) => entry.startsWith("tf-") && entry.endsWith(".md"));
+  if (!hasTfPrompts) {
+    console.warn(
+      `[Orchestrator] Codex CODEX_HOME has no tf-* prompts: ${promptsDir}`,
+    );
+  }
+}
+
 // NOTE: Telegram is NO LONGER owned by any orchestrator. The getUpdates poller
 // is owned directly by electron main (telegram-poller.ts), exactly one per
 // project, so no orchestrator carries `--channels` and there is no per-project
@@ -382,11 +404,15 @@ export class OrchestratorManager {
 
     this.setStatus("starting");
 
+    const orchestratorModel: ModelType =
+      launchOptions?.modelOverride ?? resolveOrchestratorModel();
+
     // Determine resume mode.
     // board (default kind) 는 기존대로 rootPath 에 세션 있으면 auto-resume.
     // 다른 kind (mission 등) 는 board 와 같은 세션을 동시에 resume 하면 충돌
     // (PTY 가 비어 보이는 증상) → 명시적 resumeSessionId 가 주어진 경우에만 resume.
-    const allowAutoResume = this.kind === "board";
+    const allowAutoResume =
+      this.kind === "board" && orchestratorModel === "claude";
     const shouldResume =
       resumeSessionId || (allowAutoResume && this.hasClaudeSession(rootPath));
     console.log(
@@ -402,8 +428,12 @@ export class OrchestratorManager {
     // only constructs the launchConfig for that binary; the orchestrator's
     // actual readiness/prompt/session wiring for non-claude models is a
     // separate follow-up (backlog IUj7YTFqJVZvi9AbtTPf).
-    const orchestratorModel: ModelType =
-      launchOptions?.modelOverride ?? resolveOrchestratorModel();
+    const nonClaudeResumeSessionId =
+      orchestratorModel === "claude" ||
+      !resumeSessionId ||
+      resumeSessionId === "new"
+        ? undefined
+        : resumeSessionId;
     const launchConfig = this.configGenerator.getLaunchConfig(
       {
         id: sessionId,
@@ -412,6 +442,9 @@ export class OrchestratorManager {
         command: orchestratorCommandForModel(orchestratorModel),
       },
       rootPath,
+      undefined,
+      projectId,
+      nonClaudeResumeSessionId,
     );
 
     // ── YOLO(권한 스킵) 보장 ────────────────────────────────────────────
@@ -478,7 +511,7 @@ export class OrchestratorManager {
     // boot prompt — the old `shouldResume` gate skipped the prompt whenever a
     // resume was *requested* even if no session was actually resumed.
     let resumedSessionId: string | null = null;
-    if (resumeCandidate) {
+    if (resumeCandidate && launchConfig.model === "claude") {
       if (this.acquireResumeLock(rootPath, resumeCandidate, ptySessionId)) {
         launchConfig.args.push("--resume", resumeCandidate);
         resumedSessionId = resumeCandidate;
@@ -531,6 +564,7 @@ export class OrchestratorManager {
     try {
       if (launchConfig.model === "gpt") {
         patchCodexMarbloMcpEnv(launchConfig.mcpConfigPath, mcpEnvPatch);
+        assertCodexMarbloSurface(launchConfig.mcpConfigPath);
       } else {
         const configContent = fs.readFileSync(
           launchConfig.mcpConfigPath,
@@ -690,7 +724,10 @@ export class OrchestratorManager {
           outputBuffer = outputBuffer.slice(-4096);
         // Login-screen backstop — never inject the boot prompt into a
         // `claude login` menu; surface an error the UI can act on instead.
-        if (looksLikeLoginScreen(outputBuffer)) {
+        if (
+          launchConfig.model === "claude" &&
+          looksLikeLoginScreen(outputBuffer)
+        ) {
           authBlocked = true;
           console.error(
             "[Orchestrator] Login prompt detected — suppressing boot prompt " +
@@ -742,12 +779,14 @@ export class OrchestratorManager {
     // raw readdir (no summary filter, matching the agent detector) and
     // retry over ~40s so a slow-booting session still gets labeled.
     const existingRawIds = new Set(this.listRawSessionIds(rootPath));
-    this.detectAndLabelNewSession(
-      rootPath,
-      ptySessionId,
-      existingRawIds,
-      labelTarget,
-    );
+    if (launchConfig.model === "claude") {
+      this.detectAndLabelNewSession(
+        rootPath,
+        ptySessionId,
+        existingRawIds,
+        labelTarget,
+      );
+    }
 
     // Monitor PTY exit — auto-restart on crash
     this.ptyManager.onExit(ptySessionId, (exitCode) => {
@@ -795,10 +834,14 @@ export class OrchestratorManager {
           // 어느 쪽도 복원 불가(genuinely 없음)면 "new"(fresh) — "latest" 로 약한
           // 라벨 resolver 를 다시 타며 엉뚱/blank 세션을 집을 여지를 없앤다.
           const ownerMission = this.lastOwnerMissionId ?? undefined;
+          const restartModel =
+            this.lastLaunchOptions?.modelOverride ?? resolveOrchestratorModel();
           const resumeTarget =
-            this.kind === "mission" && ownerMission
-              ? (this.resolveMissionResumeId(rp, ownerMission) ?? "new")
-              : (this.resolveOrchestratorResumeId(rp) ?? "new");
+            restartModel === "gpt"
+              ? "latest"
+              : this.kind === "mission" && ownerMission
+                ? (this.resolveMissionResumeId(rp, ownerMission) ?? "new")
+                : (this.resolveOrchestratorResumeId(rp) ?? "new");
           this.launch(
             pId,
             rp,

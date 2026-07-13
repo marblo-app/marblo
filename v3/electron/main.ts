@@ -4421,10 +4421,12 @@ async function buildSwitchHandoffSnapshot(
   const db = getFirestore(missionApp);
   const current = orchestrators.get(args.projectId)?.getSession() ?? null;
   const resumeSessionId =
-    args.resume === "previous"
-      ? (getAnyOrchestrator().resolveOrchestratorResumeId(resolvedRootPath) ??
-        "new")
-      : "new";
+    args.resume === "previous" && targetModel === "gpt"
+      ? "latest"
+      : args.resume === "previous"
+        ? (getAnyOrchestrator().resolveOrchestratorResumeId(resolvedRootPath) ??
+          "new")
+        : "new";
   const [missionSnap, taskSnap] = await Promise.all([
     fbGetDocs(
       fbQuery(
