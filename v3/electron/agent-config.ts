@@ -1927,6 +1927,11 @@ export class AgentConfigGenerator {
       `command = ${JSON.stringify(mcpEntry.command)}`,
       `args = ${JSON.stringify(mcpEntry.args)}`,
       "tool_timeout_sec = 60",
+      // Defense-in-depth: Codex 의 MCP startup timeout 기본값(~10s)은 marblo MCP
+      // 서버가 Firebase 인증 지연(최대 ~10s)을 겪는 경우 경계에 걸린다. 서버가
+      // 이제 인증 전에 핸드셰이크를 응답하므로 여유는 충분하나, 콜드 스타트/느린
+      // 디스크에서도 Codex 가 서버를 실패 처리하지 않도록 startup 여유를 넓힌다.
+      "startup_timeout_sec = 30",
     ];
     if (envEntries) {
       tomlSections.push("", "[mcp_servers.marblo.env]", envEntries);

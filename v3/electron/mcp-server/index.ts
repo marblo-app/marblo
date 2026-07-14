@@ -119,15 +119,24 @@ registerTools(server);
 registerPrompts(server);
 
 async function main() {
-  // Firebase 익명 인증 대기 (Firestore 접근 전 권장) — 단, authReady 는 절대
-  // reject 하지 않고 타임아웃 가드(~10s)가 걸려 있어 인증 지연/실패에도 서버는 기동된다.
-  await authReady;
-
-  startBridgePortRefresher();
-
+  // ★ stdio transport 를 먼저 connect 한다 — MCP 핸드셰이크(initialize →
+  // tools/list)를 즉시 응답하기 위함. 예전엔 이 connect 가 `await authReady`
+  // (Firebase 익명 인증, 최대 ~10s) 뒤에 있어, 인증이 느리거나 오프라인일 때
+  // 핸드셰이크가 Codex 의 MCP startup timeout(현행 Codex CLI 기본 ~10s) 경계 밖
+  // 에서 응답 → Codex 가 marblo 서버를 실패 처리하고 32개 도구 전부 tool_search
+  // 인덱스에 미등록되었다(반면 fallback CLI 의 health 는 authReady 이전에 반환돼
+  // 항상 OK 로 보여 진짜 실패를 가렸다). 인증은 이제 tools.ts 의 각 도구 호출부
+  // (auditedTool)에서 개별적으로 await 하므로, Firestore 접근은 여전히 인증 완료를
+  // 기다리되 도구 노출(discovery)은 인증에 막히지 않는다.
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Marblo MCP Server v3.0 started (stdio)");
+
+  startBridgePortRefresher();
+
+  // 인증은 백그라운드에서 진행/대기 — 핸드셰이크를 절대 막지 않는다. authReady 는
+  // reject 하지 않고 ~10s 타임아웃 가드가 있어 실패/지연에도 여기서 멈추지 않는다.
+  await authReady;
 }
 
 main().catch((err) => {

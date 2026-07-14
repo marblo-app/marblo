@@ -21,7 +21,7 @@ import {
   type QueryConstraint,
   type QuerySnapshot,
 } from "firebase/firestore";
-import { db, getCurrentAuthUid } from "./firebase.js";
+import { authReady, db, getCurrentAuthUid } from "./firebase.js";
 import {
   resolveContext,
   resolveContextForWrite,
@@ -878,10 +878,18 @@ export function registerTools(server: McpServer): void {
     opts: { userFacing?: boolean } = {},
   ): void {
     const userFacing = opts.userFacing ?? true;
+    // 모든 도구 핸들러는 Firestore 접근 전 인증 완료를 기다린다. MCP 핸드셰이크는
+    // 인증에 막히지 않도록 index.ts 에서 connect 를 먼저 하므로(도구 discovery 는
+    // 인증 무관), 실제 인증 보장은 여기 각 호출부에서 authReady 를 await 해 유지한다.
+    // authReady 는 정상 시 즉시 resolve 되고 reject 하지 않는다.
     if (!userFacing) {
       // 사용자 액티비티 스트림에 노출하지 않는 read-only 조회 툴.
       // 감사 로그 자체를 쓰지 않는다 — 시스템 페이로드(스킬 본문 등) 노이즈 방지.
-      originalTool(name, description, schema, handler);
+      const gatedHandler = (async (...args: unknown[]) => {
+        await authReady;
+        return (handler as unknown as (...a: unknown[]) => unknown)(...args);
+      }) as unknown as ToolCallback<Args>;
+      originalTool(name, description, schema, gatedHandler);
       return;
     }
     // ToolCallback<Args> is a deferred conditional type while Args is generic,
@@ -891,6 +899,8 @@ export function registerTools(server: McpServer): void {
       ...args: unknown[]
     ) => Promise<{ content?: Array<{ text?: string }> }>;
     const wrapped = (async (...args: unknown[]) => {
+      // Firestore 접근 전 인증 완료 대기 (discovery 는 인증 무관, 실행은 인증 보장).
+      await authReady;
       const start = Date.now();
       let success = true;
       let resultText = "";
