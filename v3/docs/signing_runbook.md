@@ -1,7 +1,7 @@
 # 데스크톱 앱 서명·공증 실전 런북 (직접 해보기)
 
 > 대상: Marblo Electron 앱(`v3/`)의 배포 빌드를 **처음부터 직접 서명·공증**하려는 사람.
-> 작성: 2026-06-22 (개정: 2026-06-26 — 발행처 marblo-releases 반영, win 서명 훅 추가). 파이프라인 = `.github/workflows/build.yml`(Build & Release), 패키징 = `v3/electron-builder.yml`, mac 공증 훅 = `v3/scripts/notarize.js`, win 서명 훅 = `v3/scripts/win-sign.js`.
+> 작성: 2026-06-22 (개정: 2026-06-26 — 발행처 marblo-releases 반영, win 서명 훅 추가 / 2026-07-14 — 3.0.14~3.0.15 라운드 교훈 반영: dmg 공증 오판(§1-6a), dev↔패키지 env 갭(§5-2), 구버전 실행 함정(§5-3)). 파이프라인 = `.github/workflows/build.yml`(Build & Release), 패키징 = `v3/electron-builder.yml`, mac 공증 훅 = `v3/scripts/notarize.js`, win 서명 훅 = `v3/scripts/win-sign.js`.
 >
 > **이 문서와 [`code_signing_setup.md`](./code_signing_setup.md)의 역할 분담**
 >
@@ -107,6 +107,26 @@ xcrun stapler validate "/path/to/Marblo.app"        # → The validate action wo
 
 `spctl`이 `rejected`거나 `source=Unnotarized`면 공증이 안 붙은 것 → §3 트러블슈팅.
 
+### 1-6a. ★ 공증 검증 오판 — `.dmg`를 검사하지 마라 (3.0.14 라운드)
+
+위 명령들의 대상은 전부 **`.app`**이다. **`.dmg`에 대고 돌리면 "실패처럼 보이는 정상"이 나온다** — 실제로 3.0.14 라운드에서 이걸 공증 실패로 오판해 멀쩡한 빌드를 재빌드했다.
+
+| 명령                           | `.dmg` 대상 출력                   | 판정                                                                                               |
+| ------------------------------ | ---------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `codesign -dv <dmg>`           | `code object is not signed at all` | ✅ **정상** — dmg는 코드서명 대상이 아니다. 서명·공증·스테이플은 **안에 들어있는 `.app`**에 붙는다 |
+| `xcrun stapler validate <dmg>` | 실패                               | ✅ **정상** — 같은 이유. 티켓은 `.app`에 스테이플된다                                              |
+
+**진짜 검증은 dmg를 마운트해 `.app`을 꺼낸 뒤 `.app`에 대고** 한다:
+
+```bash
+hdiutil attach "Marblo-<버전>-arm64.dmg"
+spctl -a -vvv --type exec "/Volumes/Marblo <버전>/Marblo.app"   # → accepted / source=Notarized Developer ID
+xcrun stapler validate "/Volumes/Marblo <버전>/Marblo.app"      # → The validate action worked!
+hdiutil detach "/Volumes/Marblo <버전>"
+```
+
+이 둘이 통과하면 공증은 **정상**이다. dmg 자체의 `codesign`/`stapler` 결과는 무시한다.
+
 ---
 
 ## 2. (참고) electron-updater 릴리스
@@ -125,6 +145,9 @@ xcrun stapler validate "/path/to/Marblo.app"        # → The validate action wo
 | `The job was not started because ... payment ... failed` / `spending limit`                            | GitHub Actions 과금 한도 초과. **macOS 러너는 분당 과금이 Linux의 10배** → 한도 빨리 소진. 잡이 아예 0개로 안 뜸                                                       | repo/조직 **Settings → Billing & plans** → 결제수단 확인 + **spending limit 상향**. 한도 회복 후 재실행                                                                                    |
 | `spctl --assess` → `rejected` / `source=Unnotarized` (로컬)                                            | 공증 스텝이 스킵됐거나(자격증명 누락) PR 빌드 산출물을 검증 중                                                                                                         | push/`workflow_dispatch` 산출물인지 확인. 자격증명 누락이면 §1-3 시크릿 점검. PR 산출물은 애초에 무서명·무공증(§5)                                                                         |
 | `notarize.js`: `Skipping notarization: missing APPLE_ID, ...`                                          | 자격증명 시크릿 일부 누락. 비-PR mac 빌드에서는 `MARBLO_REQUIRE_MAC_NOTARIZATION=true`라 스킵이 아니라 **빌드 실패**로 전환됨                                          | §1-3의 5개 시크릿 전부 등록됐는지 확인. (PR 빌드에서는 의도적으로 스킵 — 정상)                                                                                                             |
+| `codesign -dv <dmg>` → `code object is not signed at all` / `stapler validate <dmg>` 실패 (로컬)       | **오판이다 — 정상 출력.** dmg는 코드서명 대상이 아니며, 서명·공증·스테이플은 안에 든 `.app`에 붙는다. 3.0.14 라운드에서 이걸 공증 실패로 읽고 멀쩡한 빌드를 재빌드함   | dmg를 마운트해 `.app`을 꺼낸 뒤 `.app`에 대고 검증: `spctl -a -vvv --type exec <app>` → accepted/Notarized Developer ID + `stapler validate <app>` (§1-6a)                                 |
+| **새 빌드인데 UI/기능이 없다** (설치 후 실행했는데 이번 변경이 안 보임)                                | 90%는 **구버전이 실행 중**. macOS는 dmg 재설치 시 기존 `/Applications/Marblo.app`을 지우지 않는다. "빌드 실패"가 아님                                                  | 빌드 번들 grep으로 빌드 정상부터 확정 → About 버전 확인 → Cmd+Q 완전종료 + `/Applications/Marblo.app` 삭제 + dmg 재설치 (§5-3)                                                             |
+| 패키지 앱에서만 `auth/invalid-api-key` / MCP `-32000` (dev·에뮬·유닛은 초록)                           | 메인 프로세스에 env가 없다. Vite `import.meta.env`는 **렌더러만** 빌드타임 인라인 → 메인이 `process.env.*`로 읽는 config(Firebase apiKey·OAuth·MCP)가 패키지에서만 빔  | 번들 `firebase-config.json`(`Resources/dist-mcp/`)을 메인 부팅 시 `process.env`에 주입. 검증은 반드시 실 `.app` + DevTools 콘솔로 (§5-2)                                                   |
 
 > `MARBLO_REQUIRE_MAC_NOTARIZATION`: 비-PR mac 빌드에서 `true`로 세팅(`build.yml` L274). 자격증명이 빠지면 `notarize.js`가 조용히 넘어가지 않고 **에러를 던져 빌드를 빨갛게** 만든다 → "서명/공증 빼먹고 통과"를 구조적으로 차단.
 
@@ -141,10 +164,13 @@ CI는 Windows를 **무서명 nsis `.exe`**로 산출한다(`build.yml`에 `WIN_C
 1. CI Artifacts에서 무서명 `Marblo-Setup-<버전>.exe` 다운로드 (`marblo-win-x64`)
 2. KoreaSSL EV USB 토큰을 서명용 Windows 머신에 연결, 토큰 드라이버/SafeNet 설치
 3. `signtool`로 서명 (타임스탬프 필수):
+
    ```cmd
    signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a "Marblo-Setup-<버전>.exe"
    ```
+
    - 서명 중 토큰 **PIN 입력 프롬프트**가 뜬다(자동화 불가 → 수동 경로인 이유).
+
 4. 서명 검증:
    ```cmd
    signtool verify /pa /v "Marblo-Setup-<버전>.exe"
@@ -187,6 +213,60 @@ npm run smoke:packaged:mac
 ```
 
 CI의 mac 빌드도 electron-builder 직후 `npm run smoke:packaged:mac`을 실행한다. 이 스모크는 패키지 `.app`을 직접 띄운 뒤 렌더러가 비어 있지 않은지, 그리고 `window.electronAPI`/핵심 bridge가 노출됐는지 assert한다.
+
+### 5-2. ★★ dev↔패키지 env 갭 — 메인 프로세스엔 `.env`가 없다 (가장 잘 터지는 함정)
+
+> **dev·워크트리에서 잘 되는 것은 패키지 앱이 동작한다는 증거가 아니다.** 이 갭이 3.0.14~3.0.15 라운드에서만 두 번 터졌다.
+
+**원인 구조:**
+
+- dev/워크트리에는 `v3/.env`가 있어 메인 프로세스가 `process.env.*`를 읽으면 값이 나온다.
+- **패키지 앱에는 `.env`가 동봉되지 않는다.** Vite의 `import.meta.env`는 **렌더러 번들에만** 빌드타임 인라인되므로 렌더러는 멀쩡하다.
+- 결과: **메인 프로세스가 `process.env.*`로 config를 읽는 경로만 패키지에서 조용히 빈값이 된다** — Firebase apiKey, OAuth, MCP config 등.
+
+**실사례 2건:**
+
+| 증상                       | 진짜 원인                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------- |
+| 오케스트레이터 전환 무반응 | 메인 프로세스 Firebase config 부재 → `buildSwitchHandoffSnapshot`이 `auth/invalid-api-key`로 실패 |
+| 패키지 MCP `-32000`        | 같은 뿌리 — firebase env 부재 ([#353](https://github.com/melocream/marblo/pull/353))              |
+
+**fix 패턴:** env 파일이 아니라 **번들 리소스**를 config 단일 출처로 삼는다 — 빌드 때 `build-resources/`에 config를 굽고(`scripts/write-*-config.mjs`), 런타임에 `process.resourcesPath`에서 읽는다.
+
+레포의 현재 배선 상태를 구분해서 알아둘 것 (`electron-builder.yml` `extraResources`):
+
+| config                 | 번들 위치                     | 읽는 주체                                                                  | 상태                                                                 |
+| ---------------------- | ----------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `oauth-config.json`    | `Resources/oauth-config.json` | **메인** (`main.ts`)                                                       | ✅ 배선됨 — `process.resourcesPath`에서 부팅 시 로드                 |
+| `firebase-config.json` | `Resources/dist-mcp/`         | **MCP child** (번들 `index.js`가 `import.meta.url` 기준 sibling self-load) | ✅ 배선됨 ([#353](https://github.com/melocream/marblo/pull/353) fix) |
+| `firebase-config.json` | 〃 (같은 파일 재사용)         | **메인 프로세스**                                                          | ⚠️ **미배선** — 오케 전환 무반응의 진짜 원인                         |
+
+즉 **MCP child는 이미 해결됐지만 메인 프로세스는 아직 Firebase config를 안 읽는다.** 권장 fix는 `oauth-config.json`의 선례를 그대로 따라 **메인 부팅 시 `Resources/dist-mcp/firebase-config.json`을 읽어 `process.env`에 주입**하는 것이다(코드 변경 필요 — 이 문서 시점 기준 미구현).
+
+**★ 검증 규칙 (이게 핵심):**
+
+- 패키지 이슈는 **dev·에뮬레이터·유닛테스트로 확증 금지.** 실제로 PR #454가 에뮬 검증을 통과했지만 **오진**이었다 — 에뮬엔 env가 있어서 재현 자체가 안 됐다.
+- 반드시 **실 `.app` 마운트 + DevTools 콘솔**로 확인한다. 실 콘솔만이 결정적 증거다.
+- 배포 전 최소 게이트:
+  - [ ] **클린 env**(`.env` 없는 셸)에서 메인 config 스모크 통과
+  - [ ] **실 `.app`**에서 핵심 흐름 — 로그인 / 오케 전환 / MCP / 스폰 — **콘솔 에러 0**
+
+관련 메모리: [packaged_mainproc_firebase_config_orch_switch], [packaged_mcp_minus32000_two_layers].
+
+### 5-3. ★ 설치 검증 함정 — "새 빌드인데 기능이 없다"의 90%는 구버전 실행
+
+macOS는 dmg를 재설치해도 **기존 `/Applications/Marblo.app`을 지우지 않는다.** 그래서 새 빌드를 설치한 것 같은데 이번 변경이 안 보이는 일이 생긴다. **여기서 "빌드 실패"로 단정하지 말 것** — 대개 설치/런타임 문제지 빌드 문제가 아니다.
+
+**진단 순서 (이 순서대로):**
+
+1. **빌드 번들 grep으로 빌드 정상부터 확정** — 나오면 빌드는 정상이고 설치/런타임 문제로 범위가 좁혀진다.
+   ```bash
+   grep -rl '<UI 고유문자열>' v3/dist/assets/*.js
+   ```
+2. **About 버전 확인** — 실행 중인 앱이 몇 버전인지.
+3. **완전 재설치** — Cmd+Q로 **완전 종료** → `/Applications/Marblo.app` **삭제** → dmg 재설치.
+
+> ⚠️ **`git show` 경로 함정:** `git show <커밋>:v3/src/...` 처럼 **repo 루트 기준 경로**를 써야 한다. `v3/` 서브디렉토리에서 실행해도 마찬가지다 — `v3/`를 빼면 빈 결과가 나오고, 이걸 "코드가 없다"로 오판하기 쉽다.
 
 ---
 
@@ -372,9 +452,11 @@ npm run build:electron → npx electron-builder --win --x64 (win.sign 훅) → g
 - [ ] repo Secrets 5종 등록: `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD` / `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` (§1-3)
 - [ ] Actions → Build & Release → Run workflow → platform=mac (§1-4)
 - [ ] `Verify macOS notarization smoke` 스텝 초록 확인 (§1-5)
-- [ ] 로컬 `spctl --assess` / `stapler validate` 재검증 (§1-6)
+- [ ] 로컬 `spctl --assess` / `stapler validate` 재검증 — **`.dmg` 아니라 `.app`에 대고** (§1-6, §1-6a)
 - [ ] Windows: 무서명 .exe 다운 → USB 토큰 signtool 수동 서명 (§4)
 - [ ] PR 초록만 믿지 말고 push/dispatch로 서명경로 실검증 (§5)
+- [ ] **클린 env에서 메인 config 스모크** + **실 `.app`에서 로그인·오케전환·MCP·스폰 콘솔에러 0** — dev/에뮬 통과는 증거 아님 (§5-2)
+- [ ] "기능이 없다" 싶으면 빌드 실패 단정 전 — 번들 grep → About 버전 → 완전종료+`/Applications/Marblo.app` 삭제 후 재설치 (§5-3)
 - [ ] 발행처 = `melocream/marblo-releases` (공개) 확인 + ⚠️ updater.ts 기본 피드(`marblo`)와 불일치 해소 (§6-0)
 - [ ] mac: `GH_TOKEN`(env) 설정 후 `electron-builder --mac --arm64 --publish always` (§6-1)
 - [ ] win: 빌드-후-서명 함정 회피 — `win.sign` 훅으로 빌드 도중 서명(권장) / 차선은 latest.yml 재계산 (§6-2)
