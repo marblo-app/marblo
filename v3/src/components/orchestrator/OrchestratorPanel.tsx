@@ -22,6 +22,7 @@ import OrchestratorTerminal from "./OrchestratorTerminal";
 const MIN_HEIGHT = 80;
 const MAX_HEIGHT = 600;
 const COLLAPSED_HEIGHT = 36;
+const SWITCH_CLIENT_TIMEOUT_MS = 60_000;
 
 // Default panel height scales with the window — ~1/3 of the viewport gives
 // Claude Code's TUI enough rows to render without full-frame redraws, while
@@ -39,6 +40,31 @@ function computeDefaultHeight(): number {
       Math.round(window.innerHeight * DEFAULT_HEIGHT_RATIO),
     ),
   );
+}
+
+async function withSwitchClientTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `orchestrator switch timed out after ${timeoutMs}ms in renderer`,
+              ),
+            ),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 interface SessionInfo {
@@ -241,20 +267,41 @@ export default memo(function OrchestratorPanel() {
     e?: React.MouseEvent,
   ) => {
     e?.stopPropagation();
-    if (!currentProject || !isRunning || isSwitching) return;
+    if (!currentProject || !isRunning || isSwitching) {
+      console.warn("[Orchestrator] Switch ignored by renderer guard", {
+        hasProject: Boolean(currentProject),
+        isRunning,
+        isSwitching,
+        switchStatus,
+        mode,
+        selectedModel,
+        runningModel,
+        pendingSwitchModel,
+      });
+      return;
+    }
     const targetModel = targetSwitchModel;
     const projectId = currentProject.id;
     const cwd = rootPath || "~";
     try {
-      setSwitchStatus("snapshotting");
-      setShowSwitchConfirm(false);
-      const result = await window.electronAPI.orchestratorSession.switch({
+      console.info("[Orchestrator] Switch requested", {
         projectId,
-        rootPath: cwd,
         targetModel,
         mode,
-        resume: "fresh",
+        runningModel,
       });
+      setSwitchStatus("snapshotting");
+      setShowSwitchConfirm(false);
+      const result = await withSwitchClientTimeout(
+        window.electronAPI.orchestratorSession.switch({
+          projectId,
+          rootPath: cwd,
+          targetModel,
+          mode,
+          resume: "fresh",
+        }),
+        SWITCH_CLIENT_TIMEOUT_MS,
+      );
       if (result?.needsAuth) {
         setSwitchStatus("error");
         if (runningModel) setSelectedModel(runningModel);
@@ -430,12 +477,14 @@ export default memo(function OrchestratorPanel() {
                     </button>
                     <button
                       onClick={(e) => handleSwitch("takeover", e)}
+                      disabled={isSwitching}
                       className="rounded border border-[#45475a] px-2 py-1 text-[#f9e2af] hover:bg-[#45475a]"
                     >
                       Take over now
                     </button>
                     <button
                       onClick={(e) => handleSwitch("wait", e)}
+                      disabled={isSwitching}
                       className="rounded bg-[#89b4fa]/20 px-2 py-1 text-[#89b4fa] hover:bg-[#89b4fa]/30"
                     >
                       Switch and wait

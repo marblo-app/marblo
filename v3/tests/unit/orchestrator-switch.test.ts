@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildOrchestratorHandoffSnapshot } from "../../electron/orchestrator-handoff";
-import { runOrchestratorSwitch } from "../../electron/orchestrator-switch";
+import {
+  OrchestratorSwitchStepTimeoutError,
+  runOrchestratorSwitch,
+} from "../../electron/orchestrator-switch";
 import type {
   OrchestratorSwitchArgs,
   OrchestratorSwitchDeps,
@@ -99,5 +102,73 @@ describe("runOrchestratorSwitch", () => {
       "inject",
       "attach",
     ]);
+  });
+
+  it("times out snapshot before stopping the current orchestrator", async () => {
+    vi.useFakeTimers();
+    try {
+      const stopCurrent = vi.fn();
+      const launchNew = vi.fn();
+      const switchPromise = runOrchestratorSwitch(args(), {
+        buildSnapshot: vi.fn(() => new Promise(() => {})),
+        checkAuth: vi.fn(),
+        detachPending: vi.fn(),
+        stopCurrent,
+        launchNew,
+        injectHandoff: vi.fn(),
+        attachPending: vi.fn(),
+        stepTimeoutMs: 1000,
+      });
+      const rejection = expect(switchPromise).rejects.toBeInstanceOf(
+        OrchestratorSwitchStepTimeoutError,
+      );
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await rejection;
+
+      expect(stopCurrent).not.toHaveBeenCalled();
+      expect(launchNew).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not wedge a launched switch when handoff injection hangs", async () => {
+    vi.useFakeTimers();
+    try {
+      const attachPending = vi.fn();
+      const onWarning = vi.fn();
+      const switchPromise = runOrchestratorSwitch(args(), {
+        buildSnapshot: vi.fn(async () => snapshot()),
+        checkAuth: vi.fn(async () => ({
+          ok: true,
+          model: "codex",
+          installed: true,
+        })),
+        detachPending: vi.fn(),
+        stopCurrent: vi.fn(),
+        launchNew: vi.fn(async () => ({
+          sessionId: "orch-project-1",
+          ptySessionId: "pty-new",
+          status: "starting",
+        })),
+        injectHandoff: vi.fn(() => new Promise(() => {})),
+        attachPending,
+        injectTimeoutMs: 1000,
+        onWarning,
+      });
+
+      await vi.advanceTimersByTimeAsync(1000);
+      const result = await switchPromise;
+
+      expect(result.ptySessionId).toBe("pty-new");
+      expect(attachPending).toHaveBeenCalledWith("project-1", "pty-new");
+      expect(onWarning).toHaveBeenCalledWith(
+        expect.stringContaining("handoff injection timed out"),
+        expect.any(OrchestratorSwitchStepTimeoutError),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

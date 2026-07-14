@@ -49,7 +49,9 @@ import {
   type RawHandoffDoc,
 } from "./orchestrator-handoff";
 import {
+  OrchestratorSwitchStepTimeoutError,
   runOrchestratorSwitch,
+  type OrchestratorSwitchStage,
   type OrchestratorSwitchArgs,
   type OrchestratorSwitchResult,
 } from "./orchestrator-switch";
@@ -4398,10 +4400,26 @@ ipcMain.handle(
 
 // --- Orchestrator Session IPC Handlers ---
 
-const orchestratorSwitchLocks = new Map<
-  string,
-  Promise<OrchestratorSwitchResult>
->();
+const ORCHESTRATOR_SWITCH_STEP_TIMEOUT_MS = 25_000;
+const ORCHESTRATOR_SWITCH_INJECT_TIMEOUT_MS = 10_000;
+const ORCHESTRATOR_SWITCH_STALE_LOCK_MS =
+  ORCHESTRATOR_SWITCH_STEP_TIMEOUT_MS * 2 + 5_000;
+
+interface OrchestratorSwitchLock {
+  promise: Promise<OrchestratorSwitchResult>;
+  startedAt: number;
+  targetModel: ModelType;
+  mode: OrchestratorSwitchMode;
+  stage: OrchestratorSwitchStage | "queued";
+}
+
+const orchestratorSwitchLocks = new Map<string, OrchestratorSwitchLock>();
+
+function describeSwitchLock(lock: OrchestratorSwitchLock): string {
+  return `target=${lock.targetModel}, mode=${lock.mode}, stage=${lock.stage}, ageMs=${
+    Date.now() - lock.startedAt
+  }`;
+}
 
 function firestoreDocsToRaw(
   snap: Awaited<ReturnType<typeof fbGetDocs>>,
@@ -4477,8 +4495,6 @@ ipcMain.handle(
     if (!projectId || !rawArgs.rootPath) {
       throw new Error("projectId and rootPath required");
     }
-    const existing = orchestratorSwitchLocks.get(projectId);
-    if (existing) return existing;
 
     const resolvedRootPath =
       rawArgs.rootPath === "~" ? os.homedir() : rawArgs.rootPath;
@@ -4490,8 +4506,33 @@ ipcMain.handle(
       mode: rawArgs.mode === "takeover" ? "takeover" : "wait",
       resume: rawArgs.resume === "previous" ? "previous" : "fresh",
     };
+    const existing = orchestratorSwitchLocks.get(projectId);
+    if (existing) {
+      const ageMs = Date.now() - existing.startedAt;
+      if (ageMs < ORCHESTRATOR_SWITCH_STALE_LOCK_MS) {
+        console.warn(
+          `[orchestratorSession:switch] Existing switch in flight for project ${projectId}; reusing (${describeSwitchLock(
+            existing,
+          )})`,
+        );
+        return existing.promise;
+      }
+      console.error(
+        `[orchestratorSession:switch] Dropping stale switch lock for project ${projectId}; previous ${describeSwitchLock(
+          existing,
+        )}`,
+      );
+      orchestratorSwitchLocks.delete(projectId);
+    }
     const senderId = event.sender.id;
     const port = bridgeServer.getPort();
+    const lock: OrchestratorSwitchLock = {
+      promise: new Promise<OrchestratorSwitchResult>(() => {}),
+      startedAt: Date.now(),
+      targetModel,
+      mode: args.mode,
+      stage: "queued",
+    };
 
     const op = runOrchestratorSwitch(args, {
       buildSnapshot: (switchArgs) =>
@@ -4545,11 +4586,43 @@ ipcMain.handle(
       },
       attachPending: (pid, ptySessionId) =>
         pendingListener.attach(`orch-${pid}`, ptySessionId),
-    }).finally(() => {
-      orchestratorSwitchLocks.delete(projectId);
-    });
+      stepTimeoutMs: ORCHESTRATOR_SWITCH_STEP_TIMEOUT_MS,
+      injectTimeoutMs: ORCHESTRATOR_SWITCH_INJECT_TIMEOUT_MS,
+      onStage: (stage) => {
+        lock.stage = stage;
+        console.info(
+          `[orchestratorSession:switch] project=${projectId} stage=${stage} target=${targetModel} mode=${args.mode}`,
+        );
+      },
+      onWarning: (message, error) => {
+        console.warn(`[orchestratorSession:switch] ${message}`, error);
+      },
+    })
+      .catch((error: unknown) => {
+        if (error instanceof OrchestratorSwitchStepTimeoutError) {
+          console.error(
+            `[orchestratorSession:switch] Timeout at ${error.step} for project ${projectId}; lock will be released`,
+          );
+        } else {
+          console.error(
+            `[orchestratorSession:switch] Failed for project ${projectId}; lock will be released`,
+            error,
+          );
+        }
+        throw error;
+      })
+      .finally(() => {
+        const current = orchestratorSwitchLocks.get(projectId);
+        if (current?.promise === op) {
+          orchestratorSwitchLocks.delete(projectId);
+        }
+      });
+    lock.promise = op;
 
-    orchestratorSwitchLocks.set(projectId, op);
+    console.info(
+      `[orchestratorSession:switch] Starting switch project=${projectId} target=${targetModel} mode=${args.mode} resume=${args.resume}`,
+    );
+    orchestratorSwitchLocks.set(projectId, lock);
     return op;
   },
 );

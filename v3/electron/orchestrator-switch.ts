@@ -25,6 +25,27 @@ export interface OrchestratorSwitchResult extends OrchestratorSwitchSession {
   handoffSummary: HandoffSummary;
 }
 
+export type OrchestratorSwitchStage =
+  | "buildSnapshot"
+  | "checkAuth"
+  | "detachPending"
+  | "stopCurrent"
+  | "launchNew"
+  | "injectHandoff"
+  | "attachPending";
+
+export class OrchestratorSwitchStepTimeoutError extends Error {
+  readonly step: OrchestratorSwitchStage;
+  readonly timeoutMs: number;
+
+  constructor(step: OrchestratorSwitchStage, timeoutMs: number) {
+    super(`orchestrator switch ${step} timed out after ${timeoutMs}ms`);
+    this.name = "OrchestratorSwitchStepTimeoutError";
+    this.step = step;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 export interface OrchestratorSwitchDeps {
   buildSnapshot: (
     args: OrchestratorSwitchArgs,
@@ -47,15 +68,66 @@ export interface OrchestratorSwitchDeps {
     mode: OrchestratorSwitchMode,
   ) => Promise<void>;
   attachPending: (projectId: string, ptySessionId: string) => void;
+  stepTimeoutMs?: number;
+  injectTimeoutMs?: number;
+  onStage?: (stage: OrchestratorSwitchStage) => void;
+  onWarning?: (message: string, error?: unknown) => void;
+}
+
+function isPositiveTimeout(timeoutMs: number | undefined): timeoutMs is number {
+  return (
+    typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+  );
+}
+
+async function withSwitchStepTimeout<T>(
+  step: OrchestratorSwitchStage,
+  promise: Promise<T>,
+  timeoutMs: number | undefined,
+): Promise<T> {
+  if (!isPositiveTimeout(timeoutMs)) return promise;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new OrchestratorSwitchStepTimeoutError(step, timeoutMs)),
+          timeoutMs,
+        );
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function markStage(
+  deps: OrchestratorSwitchDeps,
+  stage: OrchestratorSwitchStage,
+): void {
+  deps.onStage?.(stage);
 }
 
 export async function runOrchestratorSwitch(
   args: OrchestratorSwitchArgs,
   deps: OrchestratorSwitchDeps,
 ): Promise<OrchestratorSwitchResult> {
-  const snapshot = await deps.buildSnapshot(args);
+  markStage(deps, "buildSnapshot");
+  const snapshot = await withSwitchStepTimeout(
+    "buildSnapshot",
+    deps.buildSnapshot(args),
+    deps.stepTimeoutMs,
+  );
   const handoffSummary = summarizeHandoff(snapshot);
-  const gate = await deps.checkAuth(args.targetModel);
+  markStage(deps, "checkAuth");
+  const gate = await withSwitchStepTimeout(
+    "checkAuth",
+    deps.checkAuth(args.targetModel),
+    deps.stepTimeoutMs,
+  );
 
   if (!gate.ok) {
     return {
@@ -71,14 +143,37 @@ export async function runOrchestratorSwitch(
     };
   }
 
+  markStage(deps, "detachPending");
   deps.detachPending(args.projectId);
+  markStage(deps, "stopCurrent");
   deps.stopCurrent(args.projectId);
-  const session = await deps.launchNew(args, snapshot);
+  markStage(deps, "launchNew");
+  const session = await withSwitchStepTimeout(
+    "launchNew",
+    deps.launchNew(args, snapshot),
+    deps.stepTimeoutMs,
+  );
   if (session.needsAuth) {
     return { ...session, handoffSummary };
   }
 
-  await deps.injectHandoff(session, snapshot, args.mode);
+  markStage(deps, "injectHandoff");
+  try {
+    await withSwitchStepTimeout(
+      "injectHandoff",
+      deps.injectHandoff(session, snapshot, args.mode),
+      deps.injectTimeoutMs ?? deps.stepTimeoutMs,
+    );
+  } catch (error) {
+    if (!(error instanceof OrchestratorSwitchStepTimeoutError)) {
+      throw error;
+    }
+    deps.onWarning?.(
+      `orchestrator switch handoff injection timed out; continuing with launched session ${session.ptySessionId}`,
+      error,
+    );
+  }
+  markStage(deps, "attachPending");
   deps.attachPending(args.projectId, session.ptySessionId);
 
   return {
