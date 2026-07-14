@@ -581,15 +581,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
           planType: string | null;
           primaryPercent: number | null;
           primaryResetAt: number | null;
+          primaryWindowDurationMins?: number | null;
           secondaryPercent: number | null;
           secondaryResetAt: number | null;
+          secondaryWindowDurationMins?: number | null;
         } | null;
         gpt: {
           planType: string | null;
           primaryPercent: number | null;
           primaryResetAt: number | null;
+          primaryWindowDurationMins?: number | null;
           secondaryPercent: number | null;
           secondaryResetAt: number | null;
+          secondaryWindowDurationMins?: number | null;
         } | null;
       }>,
   },

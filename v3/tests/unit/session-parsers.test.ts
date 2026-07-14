@@ -217,8 +217,41 @@ describe("parseSessionDelta — codex (cumulative watermark)", () => {
       planType: "pro",
       primaryPercent: 12,
       primaryResetAt: 111,
+      primaryWindowDurationMins: 300,
       secondaryPercent: 34,
       secondaryResetAt: 222,
+      secondaryWindowDurationMins: 10080,
+    });
+  });
+
+  it("classifies primary-only weekly rate-limit events by window duration", () => {
+    const withRl = JSON.stringify({
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: null,
+        rate_limits: {
+          plan_type: "prolite",
+          primary: {
+            used_percent: 11,
+            window_duration_mins: 10080,
+            resets_at: 333,
+          },
+          secondary: null,
+        },
+      },
+    });
+    const { newState } = parseSessionDelta(
+      "codex",
+      [meta, withRl],
+      newParseState(),
+    );
+    expect(newState.rateLimit).toMatchObject({
+      planType: "prolite",
+      primaryPercent: null,
+      secondaryPercent: 11,
+      secondaryResetAt: 333,
+      secondaryWindowDurationMins: 10080,
     });
   });
 });

@@ -698,8 +698,10 @@ interface RateLimitSnapshot {
   planType: string | null;
   primaryPercent: number | null;
   primaryResetAt: number | null;
+  primaryWindowDurationMins?: number | null;
   secondaryPercent: number | null;
   secondaryResetAt: number | null;
+  secondaryWindowDurationMins?: number | null;
 }
 
 interface UsageAPI {

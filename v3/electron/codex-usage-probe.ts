@@ -7,9 +7,10 @@
  *
  *   codex app-server --stdio
  *   → {"id":1,"method":"initialize",...}
- *   → {"id":2,"method":"account/rateLimits/read","params":{}}
+ *   → {"method":"initialized"}
+ *   → {"id":2,"method":"account/rateLimits/read","params":null}
  *
- * Verified against codex-cli 0.142.2. The request sends no model message and
+ * Verified against codex-cli 0.144.1. The request sends no model message and
  * only reads the current account plan utilization.
  */
 
@@ -129,10 +130,13 @@ function buildProbeEnv(): NodeJS.ProcessEnv | null {
 interface WindowReading {
   percent: number | null;
   resetAt: number | null;
+  windowDurationMins: number | null;
 }
 
 function readWindow(v: unknown): WindowReading {
-  if (!isRecord(v)) return { percent: null, resetAt: null };
+  if (!isRecord(v)) {
+    return { percent: null, resetAt: null, windowDurationMins: null };
+  }
   return {
     percent: pctOrNull(
       pickNumber(
@@ -144,7 +148,37 @@ function readWindow(v: unknown): WindowReading {
       ),
     ),
     resetAt: resetEpochSeconds(v.resetsAt ?? v.resets_at ?? v.resetAt),
+    windowDurationMins: pickNumber(
+      v.windowDurationMins,
+      v.window_duration_mins,
+      v.windowMinutes,
+      v.window_minutes,
+    ),
   };
+}
+
+function classifyWindows(
+  first: WindowReading,
+  second: WindowReading,
+): { primary: WindowReading; secondary: WindowReading } {
+  if (
+    first.windowDurationMins !== null &&
+    second.windowDurationMins !== null &&
+    first.windowDurationMins > second.windowDurationMins
+  ) {
+    return { primary: second, secondary: first };
+  }
+  if (
+    first.windowDurationMins !== null &&
+    second.percent === null &&
+    first.windowDurationMins >= 7 * 24 * 60
+  ) {
+    return {
+      primary: { percent: null, resetAt: null, windowDurationMins: null },
+      secondary: first,
+    };
+  }
+  return { primary: first, secondary: second };
 }
 
 function rateLimitsFromResult(result: unknown): unknown {
@@ -179,15 +213,16 @@ export function parseRateLimitsReadResponse(
   }
   const rateLimits = rateLimitsFromResult(obj.result);
   if (!isRecord(rateLimits)) return null;
-  const primary = readWindow(
+  const rawPrimary = readWindow(
     rateLimits.primary ?? rateLimits.fiveHour ?? rateLimits.five_hour,
   );
-  const secondary = readWindow(
+  const rawSecondary = readWindow(
     rateLimits.secondary ??
       rateLimits.sevenDay ??
       rateLimits.seven_day ??
       rateLimits.weekly,
   );
+  const { primary, secondary } = classifyWindows(rawPrimary, rawSecondary);
   if (primary.percent === null && secondary.percent === null) return null;
   return {
     planType: pickString(
@@ -198,8 +233,10 @@ export function parseRateLimitsReadResponse(
     ),
     primaryPercent: primary.percent,
     primaryResetAt: primary.resetAt,
+    primaryWindowDurationMins: primary.windowDurationMins,
     secondaryPercent: secondary.percent,
     secondaryResetAt: secondary.resetAt,
+    secondaryWindowDurationMins: secondary.windowDurationMins,
     capturedAt: Date.now(),
   };
 }
@@ -277,9 +314,15 @@ export function probeCodexUsage(
           child.stdin?.write(
             JSON.stringify({
               jsonrpc: "2.0",
+              method: "initialized",
+            }) + "\n",
+          );
+          child.stdin?.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
               id: rateLimitsId,
               method: "account/rateLimits/read",
-              params: {},
+              params: null,
             }) + "\n",
           );
         } catch {

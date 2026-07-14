@@ -543,6 +543,74 @@ function fmtReset(epochSeconds: number, t: Translate): string {
   return t("usage.reset.minutes", { n: Math.max(1, Math.round(ms / 60_000)) });
 }
 
+type RateLimitWindowKind = "fiveHour" | "weekly";
+
+function windowKindByDuration(
+  durationMins: number | null | undefined,
+): RateLimitWindowKind | null {
+  if (typeof durationMins !== "number" || !Number.isFinite(durationMins)) {
+    return null;
+  }
+  if (Math.abs(durationMins - 10080) <= 60) return "weekly";
+  if (Math.abs(durationMins - 300) <= 60) return "fiveHour";
+  if (durationMins >= 7 * 24 * 60) return "weekly";
+  return "fiveHour";
+}
+
+function readAccountWindow(
+  acct: RateLimitSnapshot | null | undefined,
+  kind: RateLimitWindowKind,
+): { percent: number; resetAt?: number } | null {
+  if (!acct) return null;
+  const primaryKind = windowKindByDuration(acct.primaryWindowDurationMins);
+  const secondaryKind = windowKindByDuration(acct.secondaryWindowDurationMins);
+  if (primaryKind === kind && typeof acct.primaryPercent === "number") {
+    return {
+      percent: acct.primaryPercent,
+      resetAt: acct.primaryResetAt ?? undefined,
+    };
+  }
+  if (secondaryKind === kind && typeof acct.secondaryPercent === "number") {
+    return {
+      percent: acct.secondaryPercent,
+      resetAt: acct.secondaryResetAt ?? undefined,
+    };
+  }
+  if (
+    primaryKind === null &&
+    secondaryKind === null &&
+    kind === "fiveHour" &&
+    typeof acct.primaryPercent === "number"
+  ) {
+    return {
+      percent: acct.primaryPercent,
+      resetAt: acct.primaryResetAt ?? undefined,
+    };
+  }
+  if (
+    primaryKind === null &&
+    secondaryKind === null &&
+    kind === "weekly" &&
+    typeof acct.secondaryPercent === "number"
+  ) {
+    return {
+      percent: acct.secondaryPercent,
+      resetAt: acct.secondaryResetAt ?? undefined,
+    };
+  }
+  if (
+    secondaryKind === null &&
+    kind === "weekly" &&
+    typeof acct.secondaryPercent === "number"
+  ) {
+    return {
+      percent: acct.secondaryPercent,
+      resetAt: acct.secondaryResetAt ?? undefined,
+    };
+  }
+  return null;
+}
+
 /** 단일 한도 윈도우(5h / 주간) 게이지. percent = 사용%, 표기는 "남음" 기준. */
 function WindowGauge({
   label,
@@ -691,26 +759,21 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
               : model === "gpt"
                 ? account?.gpt
                 : null;
+          const accountLive = readAccountWindow(acct, "fiveHour");
+          const accountWeekly = readAccountWindow(acct, "weekly");
           const live =
-            typeof acct?.primaryPercent === "number"
-              ? acct.primaryPercent
-              : typeof rep?.rateLimitPercent === "number"
-                ? rep.rateLimitPercent
-                : undefined;
-          const liveReset =
-            typeof acct?.primaryPercent === "number"
-              ? (acct.primaryResetAt ?? undefined)
-              : rep?.rateLimitResetAt;
+            accountLive?.percent ??
+            (typeof rep?.rateLimitPercent === "number"
+              ? rep.rateLimitPercent
+              : undefined);
+          const liveReset = accountLive?.resetAt ?? rep?.rateLimitResetAt;
           const weekly =
-            typeof acct?.secondaryPercent === "number"
-              ? acct.secondaryPercent
-              : typeof rep?.rateLimitWeeklyPercent === "number"
-                ? rep.rateLimitWeeklyPercent
-                : undefined;
+            accountWeekly?.percent ??
+            (typeof rep?.rateLimitWeeklyPercent === "number"
+              ? rep.rateLimitWeeklyPercent
+              : undefined);
           const weeklyReset =
-            typeof acct?.secondaryPercent === "number"
-              ? (acct.secondaryResetAt ?? undefined)
-              : rep?.rateLimitWeeklyResetAt;
+            accountWeekly?.resetAt ?? rep?.rateLimitWeeklyResetAt;
           const headline = typeof weekly === "number" ? weekly : live;
           const hasData =
             typeof live === "number" || typeof weekly === "number";

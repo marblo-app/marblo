@@ -40,6 +40,8 @@ describe("parseRateLimitsReadResponse", () => {
     expect(snap!.secondaryPercent).toBe(15);
     expect(snap!.primaryResetAt).toBe(1780650953);
     expect(snap!.secondaryResetAt).toBe(1781149096);
+    expect(snap!.primaryWindowDurationMins).toBe(300);
+    expect(snap!.secondaryWindowDurationMins).toBe(10080);
     expect(snap!.capturedAt).toBeGreaterThan(0);
   });
 
@@ -54,7 +56,7 @@ describe("parseRateLimitsReadResponse", () => {
           },
         },
       }),
-      REQ_ID
+      REQ_ID,
     );
     expect(snap).not.toBeNull();
     expect(snap!.planType).toBe("pro");
@@ -108,11 +110,61 @@ describe("parseRateLimitsReadResponse", () => {
           planType: "plus",
         },
       }),
-      REQ_ID
+      REQ_ID,
     );
     expect(snap!.primaryPercent).toBe(33);
     expect(snap!.secondaryPercent).toBeNull();
     expect(snap!.secondaryResetAt).toBeNull();
+  });
+
+  it("classifies a single prolite weekly primary window by duration", () => {
+    const snap = parseRateLimitsReadResponse(
+      rpc({
+        rateLimits: {
+          limitId: "codex",
+          primary: {
+            usedPercent: 11,
+            windowDurationMins: 10080,
+            resetsAt: 1784510639,
+          },
+          secondary: null,
+          planType: "prolite",
+        },
+      }),
+      REQ_ID,
+    );
+    expect(snap).not.toBeNull();
+    expect(snap!.planType).toBe("prolite");
+    expect(snap!.primaryPercent).toBeNull();
+    expect(snap!.secondaryPercent).toBe(11);
+    expect(snap!.secondaryResetAt).toBe(1784510639);
+    expect(snap!.secondaryWindowDurationMins).toBe(10080);
+  });
+
+  it("classifies windows by duration even when app-server order changes", () => {
+    const snap = parseRateLimitsReadResponse(
+      rpc({
+        rateLimits: {
+          primary: {
+            usedPercent: 77,
+            windowDurationMins: 10080,
+            resetsAt: 222,
+          },
+          secondary: {
+            usedPercent: 9,
+            windowDurationMins: 300,
+            resetsAt: 111,
+          },
+          planType: "plus",
+        },
+      }),
+      REQ_ID,
+    );
+    expect(snap).not.toBeNull();
+    expect(snap!.primaryPercent).toBe(9);
+    expect(snap!.primaryResetAt).toBe(111);
+    expect(snap!.secondaryPercent).toBe(77);
+    expect(snap!.secondaryResetAt).toBe(222);
   });
 
   it("accepts an ISO-string resetsAt and converts to epoch seconds", () => {
@@ -124,7 +176,7 @@ describe("parseRateLimitsReadResponse", () => {
           secondary: null,
         },
       }),
-      REQ_ID
+      REQ_ID,
     );
     expect(snap!.primaryResetAt).toBe(Math.floor(Date.parse(iso) / 1000));
   });
@@ -137,7 +189,7 @@ describe("parseRateLimitsReadResponse", () => {
           secondary: { usedPercent: -5 },
         },
       }),
-      REQ_ID
+      REQ_ID,
     );
     expect(snap!.primaryPercent).toBe(100);
     expect(snap!.secondaryPercent).toBe(0);
@@ -146,7 +198,7 @@ describe("parseRateLimitsReadResponse", () => {
   it("tolerates a non-string planType", () => {
     const snap = parseRateLimitsReadResponse(
       rpc(camelResult({ planType: 42 })),
-      REQ_ID
+      REQ_ID,
     );
     expect(snap!.planType).toBeNull();
     expect(snap!.primaryPercent).toBe(1);
@@ -156,21 +208,21 @@ describe("parseRateLimitsReadResponse", () => {
     expect(
       parseRateLimitsReadResponse(
         rpc({ rateLimits: { primary: null, secondary: null } }),
-        REQ_ID
-      )
+        REQ_ID,
+      ),
     ).toBeNull();
     expect(
       parseRateLimitsReadResponse(
         rpc({ rateLimits: { primary: {}, secondary: {} } }),
-        REQ_ID
-      )
+        REQ_ID,
+      ),
     ).toBeNull();
   });
 
   it("returns null when the result has no rate-limit payload", () => {
     expect(parseRateLimitsReadResponse(rpc({}), REQ_ID)).toBeNull();
     expect(
-      parseRateLimitsReadResponse(rpc({ rateLimits: 7 }), REQ_ID)
+      parseRateLimitsReadResponse(rpc({ rateLimits: 7 }), REQ_ID),
     ).toBeNull();
   });
 
@@ -179,17 +231,17 @@ describe("parseRateLimitsReadResponse", () => {
     expect(
       parseRateLimitsReadResponse(
         { jsonrpc: "2.0", id: REQ_ID, error: { code: -32000, message: "no" } },
-        REQ_ID
-      )
+        REQ_ID,
+      ),
     ).toBeNull();
   });
 
   it("returns null when the response id does not match the request id", () => {
     expect(
-      parseRateLimitsReadResponse(rpc(camelResult(), 1), REQ_ID)
+      parseRateLimitsReadResponse(rpc(camelResult(), 1), REQ_ID),
     ).toBeNull();
     expect(
-      parseRateLimitsReadResponse(rpc(camelResult(), 99), REQ_ID)
+      parseRateLimitsReadResponse(rpc(camelResult(), 99), REQ_ID),
     ).toBeNull();
   });
 

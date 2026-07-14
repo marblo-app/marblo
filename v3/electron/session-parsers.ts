@@ -44,8 +44,10 @@ export interface RateLimitInfo {
   planType: string | null; // e.g. "plus", "pro"
   primaryPercent: number | null; // short (~5h) window used %
   primaryResetAt: number | null; // epoch seconds
+  primaryWindowDurationMins?: number | null;
   secondaryPercent: number | null; // weekly window used %
   secondaryResetAt: number | null;
+  secondaryWindowDurationMins?: number | null;
 }
 
 export interface ParseState {
@@ -84,7 +86,7 @@ export function newParseState(): ParseState {
  * has no known format) — callers fall back to PTY parsing for those.
  */
 export function formatForModel(
-  model: string | null | undefined
+  model: string | null | undefined,
 ): SessionFormat | null {
   switch (model) {
     case "claude":
@@ -101,7 +103,7 @@ export function formatForModel(
 export function parseSessionDelta(
   format: SessionFormat,
   lines: string[],
-  state: ParseState
+  state: ParseState,
 ): ParseDelta {
   switch (format) {
     case "claude":
@@ -123,7 +125,7 @@ type LineUsage = (entry: unknown) => {
 function parseLineSummed(
   lines: string[],
   state: ParseState,
-  extract: LineUsage
+  extract: LineUsage,
 ): ParseDelta {
   const delta: TokenTotals = { ...ZERO };
   let model = state.model;
@@ -166,6 +168,69 @@ function parseLineSummed(
 
 function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+function numOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function pctOrNull(v: unknown): number | null {
+  const n = numOrNull(v);
+  return n === null ? null : Math.min(100, Math.max(0, n));
+}
+
+function readWindowDurationMins(v: Record<string, unknown>): number | null {
+  return numOrNull(
+    v.windowDurationMins ??
+      v.window_duration_mins ??
+      v.windowMinutes ??
+      v.window_minutes,
+  );
+}
+
+function classifyRateLimitWindows(
+  first: {
+    percent: number | null;
+    resetAt: number | null;
+    windowDurationMins: number | null;
+  },
+  second: {
+    percent: number | null;
+    resetAt: number | null;
+    windowDurationMins: number | null;
+  },
+  previous: RateLimitInfo | null,
+): Omit<RateLimitInfo, "planType"> {
+  let primary = first;
+  let secondary = second;
+  if (
+    first.windowDurationMins !== null &&
+    second.windowDurationMins !== null &&
+    first.windowDurationMins > second.windowDurationMins
+  ) {
+    primary = second;
+    secondary = first;
+  } else if (
+    first.windowDurationMins !== null &&
+    second.percent === null &&
+    first.windowDurationMins >= 7 * 24 * 60
+  ) {
+    primary = { percent: null, resetAt: null, windowDurationMins: null };
+    secondary = first;
+  }
+
+  return {
+    primaryPercent: primary.percent ?? previous?.primaryPercent ?? null,
+    primaryResetAt: primary.resetAt ?? previous?.primaryResetAt ?? null,
+    primaryWindowDurationMins:
+      primary.windowDurationMins ?? previous?.primaryWindowDurationMins ?? null,
+    secondaryPercent: secondary.percent ?? previous?.secondaryPercent ?? null,
+    secondaryResetAt: secondary.resetAt ?? previous?.secondaryResetAt ?? null,
+    secondaryWindowDurationMins:
+      secondary.windowDurationMins ??
+      previous?.secondaryWindowDurationMins ??
+      null,
+  };
 }
 
 function claudeLineUsage(entry: unknown): ReturnType<LineUsage> {
@@ -235,8 +300,8 @@ function parseCodexCumulative(lines: string[], state: ParseState): ParseDelta {
         info?: { total_token_usage?: Record<string, unknown> | null } | null;
         rate_limits?: {
           plan_type?: string;
-          primary?: { used_percent?: number; resets_at?: number } | null;
-          secondary?: { used_percent?: number; resets_at?: number } | null;
+          primary?: Record<string, unknown> | null;
+          secondary?: Record<string, unknown> | null;
         } | null;
       };
     };
@@ -253,27 +318,31 @@ function parseCodexCumulative(lines: string[], state: ParseState): ParseDelta {
       // carrying prior values forward field-by-field.
       const rl = e.payload.rate_limits;
       if (rl) {
+        const primary = rl.primary ?? null;
+        const secondary = rl.secondary ?? null;
+        const windows = classifyRateLimitWindows(
+          {
+            percent: primary ? pctOrNull(primary.used_percent) : null,
+            resetAt: primary ? numOrNull(primary.resets_at) : null,
+            windowDurationMins: primary
+              ? readWindowDurationMins(primary)
+              : null,
+          },
+          {
+            percent: secondary ? pctOrNull(secondary.used_percent) : null,
+            resetAt: secondary ? numOrNull(secondary.resets_at) : null,
+            windowDurationMins: secondary
+              ? readWindowDurationMins(secondary)
+              : null,
+          },
+          rateLimit,
+        );
         rateLimit = {
           planType:
             typeof rl.plan_type === "string"
               ? rl.plan_type
-              : rateLimit?.planType ?? null,
-          primaryPercent:
-            typeof rl.primary?.used_percent === "number"
-              ? rl.primary.used_percent
-              : rateLimit?.primaryPercent ?? null,
-          primaryResetAt:
-            typeof rl.primary?.resets_at === "number"
-              ? rl.primary.resets_at
-              : rateLimit?.primaryResetAt ?? null,
-          secondaryPercent:
-            typeof rl.secondary?.used_percent === "number"
-              ? rl.secondary.used_percent
-              : rateLimit?.secondaryPercent ?? null,
-          secondaryResetAt:
-            typeof rl.secondary?.resets_at === "number"
-              ? rl.secondary.resets_at
-              : rateLimit?.secondaryResetAt ?? null,
+              : (rateLimit?.planType ?? null),
+          ...windows,
         };
       }
       const total = e.payload.info?.total_token_usage;

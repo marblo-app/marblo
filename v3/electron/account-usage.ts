@@ -60,8 +60,10 @@ function snapToInfo(s: ClaudeUsageSnapshot): RateLimitInfo {
     planType: s.planType,
     primaryPercent: s.primaryPercent,
     primaryResetAt: s.primaryResetAt,
+    primaryWindowDurationMins: s.primaryWindowDurationMins ?? null,
     secondaryPercent: s.secondaryPercent,
     secondaryResetAt: s.secondaryResetAt,
+    secondaryWindowDurationMins: s.secondaryWindowDurationMins ?? null,
   };
 }
 
@@ -184,8 +186,16 @@ function mergeRateLimitInfo(
     planType: primary.planType ?? fallback.planType,
     primaryPercent: primary.primaryPercent ?? fallback.primaryPercent,
     primaryResetAt: primary.primaryResetAt ?? fallback.primaryResetAt,
+    primaryWindowDurationMins:
+      primary.primaryWindowDurationMins ??
+      fallback.primaryWindowDurationMins ??
+      null,
     secondaryPercent: primary.secondaryPercent ?? fallback.secondaryPercent,
     secondaryResetAt: primary.secondaryResetAt ?? fallback.secondaryResetAt,
+    secondaryWindowDurationMins:
+      primary.secondaryWindowDurationMins ??
+      fallback.secondaryWindowDurationMins ??
+      null,
   };
 }
 
