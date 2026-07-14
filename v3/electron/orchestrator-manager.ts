@@ -65,6 +65,12 @@ export interface CodexMarbloSurfaceReport {
 const SECRET_OUTPUT_GUARDRAIL =
   "Security guardrail: never cat/print/log raw `.env`, `.mcp.json`, firebase-config, service account JSON, OAuth/Toss/Paddle/API key files. When checking config, report only existence, paths, or masked values.";
 
+const BOARD_ORCHESTRATOR_ONBOARDING =
+  "Opening reply for a new board orchestrator session: greet the user first in a friendly way, mention tf skill examples such as /tf-add, /tf-start, and /tf-status, and say: 작업 요청하시면 보드에 티켓 생성하고 에이전트 스폰해드릴게요. Do not show boot diagnostics or internal startup logs as the opening reply.";
+
+const BOARD_ORCHESTRATOR_ROUTING_GATE =
+  "Routing gate for every user turn: A) work, artifacts, code changes, execution, or multi-step requests => create_task or create_tasks_bulk, then dispatch_task to a physical Marblo agent and leave a board ticket. Do not solve these inline. B) questions, status checks, approvals, or clarifications => answer directly with no ticket. If ambiguous, prefer A. Never use Claude Code's native Task tool or logical subagents for A; route through physical dispatch_task. Codex orchestrators must also avoid inline execution for A. Only trivial read-only checks may stay in the orchestrator session.";
+
 function codexTomlEnvLine(key: string, value: string): string {
   return `${key} = ${JSON.stringify(value)}`;
 }
@@ -180,6 +186,8 @@ export function buildCodexBootInstructions(input: {
   return [
     "Codex orchestrator startup:",
     'First call get_agent_skill("orchestrator") and follow that skill.',
+    BOARD_ORCHESTRATOR_ONBOARDING,
+    BOARD_ORCHESTRATOR_ROUTING_GATE,
     `Required Marblo tools: ${CODEX_ORCH_REQUIRED_MCP_TOOLS.join(", ")}.`,
     "For /tf-add use create_task; for /tf-start use create_tasks_bulk then dispatch_task; for /tf-status use get_all_tasks.",
     fallbackLine,
@@ -327,6 +335,10 @@ export function isOrchestratorSession(
   return firstUserMessageStartsWith(p, ORCHESTRATOR_PROMPT_SIGNATURE);
 }
 
+function withBoardRoutingGate(text: string): string {
+  return `[Marblo routing gate]\n${BOARD_ORCHESTRATOR_ROUTING_GATE}\n\n${text}`;
+}
+
 /**
  * Manages the single orchestrator Claude Code session.
  * One orchestrator per app — it supervises agents via MCP tools.
@@ -436,12 +448,14 @@ export class OrchestratorManager {
    */
   injectMessage(text: string): Promise<void> {
     const expectPty = this.session?.ptySessionId;
+    const injectedText =
+      this.kind === "board" ? withBoardRoutingGate(text) : text;
     this.injectChain = this.injectChain.then(async () => {
       await this.bootGate;
       const cur = this.session?.ptySessionId;
       // 게이트 대기 중 세션이 바뀌거나(미션 전환) 멈췄으면 주입 취소.
       if (!cur || cur !== expectPty) return;
-      this.ptyManager.writeAndSubmit(cur, text);
+      this.ptyManager.writeAndSubmit(cur, injectedText);
       // 다음 주입이 이 메시지의 제출 사이클과 겹치지 않도록 여유를 둔다(직렬화).
       await new Promise((r) => setTimeout(r, 2500));
     });
@@ -799,6 +813,10 @@ export class OrchestratorManager {
               "You are the Marblo Orchestrator Agent.",
               `Read the orchestrator skill file: use get_agent_skill("orchestrator")`,
               SECRET_OUTPUT_GUARDRAIL,
+              launchConfig.model === "gpt" ? "" : BOARD_ORCHESTRATOR_ONBOARDING,
+              launchConfig.model === "gpt"
+                ? ""
+                : BOARD_ORCHESTRATOR_ROUTING_GATE,
               codexOrchestratorInstructions,
               "Wait for user instructions.",
             ]
