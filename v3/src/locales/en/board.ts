@@ -9,10 +9,15 @@ export const board: Record<keyof typeof koBoard, string> = {
   // KanbanBoard
   "board.aiBreakdown": "AI Breakdown",
 
-  // KanbanBoard — no-project empty state (clickable CTA → folder select)
-  "board.noProjects.title": "No projects",
-  "board.noProjects.desc": "Open a project to start using the board.",
-  "board.noProjects.cta": "Open folder · Create project",
+  // KanbanBoard — no-project empty state (clickable CTA → folder select).
+  // Framed as the onboarding entry point: connecting a folder auto-creates the
+  // project and boots the orchestrator.
+  "board.noProjects.title": "Connect a folder to begin",
+  "board.noProjects.desc":
+    "Connecting a folder auto-creates the project and opens the orchestrator's first chat.",
+  "board.noProjects.cta": "Connect folder · Start",
+  "board.noProjects.hint":
+    "Connecting a folder is the first step of onboarding.",
 
   // KanbanColumn — empty column
   "board.column.noTasks": "No tasks",

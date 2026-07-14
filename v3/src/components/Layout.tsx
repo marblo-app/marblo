@@ -27,7 +27,9 @@ import { GuideTab } from "./guide/GuideTab";
 import { ActivityStreamPanel } from "./activity/ActivityStreamPanel";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
 import { CliSetupGate } from "./onboarding/CliSetupGate";
+import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
 import { UpdateBanner } from "./UpdateBanner";
+import { useProjectSetup } from "../hooks/useProjectSetup";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
 import { useAgentReconnect } from "../hooks/useAgentReconnect";
 import { useAgentSessionMapSync } from "../hooks/useAgentSessionMapSync";
@@ -318,6 +320,21 @@ export function Layout() {
   const findByFolderPath = useProjectStore((s) => s.findByFolderPath);
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
 
+  // Project setup flow (folder pick → auto-register / choose / inline create).
+  // Hosted here at the always-present Layout so the board / agents no-project
+  // CTAs work in any UI state — collapsed sidebar, or the commands/chat panels
+  // where FileTree (the old listener host) isn't mounted. The board / agents
+  // empty states dispatch `marblo:select-folder`; this single listener handles
+  // every trigger, so there's no duplicate-listener drift.
+  const projectSetup = useProjectSetup();
+  const { handleSelectDirectory } = projectSetup;
+  useEffect(() => {
+    const onSelectFolder = () => void handleSelectDirectory();
+    window.addEventListener("marblo:select-folder", onSelectFolder);
+    return () =>
+      window.removeEventListener("marblo:select-folder", onSelectFolder);
+  }, [handleSelectDirectory]);
+
   // New window, restore still in flight: hold off the folder picker until we
   // know whether this is a fresh new window or one reconnecting after a
   // sleep/wake renderer reload — otherwise a woken window flashes the picker
@@ -394,6 +411,12 @@ export function Layout() {
           is available / downloading / downloaded. Hotfix releases show
           a forced-restart countdown. */}
       <UpdateBanner />
+
+      {/* Project-setup prompts (register-or-browse choice, name-your-project).
+          Rendered here so they surface no matter which panel / sidebar state
+          triggered the folder pick. Silent on the zero-click first-user happy
+          path, which auto-registers without a banner. */}
+      <ProjectSetupBanners {...projectSetup} />
 
       {/* Main body */}
       <div className="flex flex-1 overflow-hidden">

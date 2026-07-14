@@ -10,7 +10,6 @@ import {
 import { createPortal } from "react-dom";
 import { useEditorStore } from "../../stores/editorStore";
 import { useProjectStore } from "../../stores/projectStore";
-import type { Project } from "../../types/project";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useNavigationStore } from "../../stores/navigationStore";
@@ -30,10 +29,6 @@ import {
   loadRecentFolders,
   saveRecentFolder,
 } from "../../lib/recentFolders";
-import { useAuth } from "../../hooks/useAuth";
-import { useSubscriptionStore } from "../../stores/subscriptionStore";
-import { useUiStore } from "../../stores/uiStore";
-import { checkProjectCreate, ProjectLimitError } from "../../lib/planLimits";
 import { useTranslation, t as translate } from "../../lib/i18n";
 import { FileTreeContextMenu, ContextMenuItem } from "./FileTreeContextMenu";
 import { FileTreeConfirmDialog } from "./FileTreeConfirmDialog";
@@ -763,31 +758,9 @@ export function FileTree() {
   const cutToClipboard = useFileTreeStore((s) => s.cutToClipboard);
   const clearClipboard = useFileTreeStore((s) => s.clearClipboard);
 
-  const { user } = useAuth();
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
   const findByPathOrRemote = useProjectStore((s) => s.findByPathOrRemote);
-  const createProject = useProjectStore((s) => s.createProject);
   const currentProject = useProjectStore((s) => s.currentProject);
-  const projects = useProjectStore((s) => s.projects);
-  const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
-
-  // Plan gate for project creation (Free = 1 project). The gate is evaluated at
-  // click-time against the live project count; when blocked it opens the global
-  // upgrade modal (uiStore) — the same modal the agent-limit path uses.
-  const getPlan = useSubscriptionStore((s) => s.getPlan);
-
-  // Returns true when another project may be created under the current plan;
-  // otherwise opens the global UpgradeModal and returns false. Used to gate
-  // every create entry point (zero-click auto-register, inline banner, register
-  // choice) before touching Firestore.
-  const ensureProjectQuota = useCallback((): boolean => {
-    const check = checkProjectCreate(getPlan(), projects.length);
-    if (!check.allowed) {
-      useUiStore.getState().showUpgrade("projects", "pro");
-      return false;
-    }
-    return true;
-  }, [getPlan, projects.length]);
 
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
@@ -852,7 +825,13 @@ export function FileTree() {
   const [recentMenuPosition, setRecentMenuPosition] =
     useState<WorktreeMenuPosition | null>(null);
   useEffect(() => {
-    setRecentFolders(loadRecentFolders());
+    const reload = () => setRecentFolders(loadRecentFolders());
+    reload();
+    // The project-setup flow now lives at Layout level (useProjectSetup); its
+    // "browse read-only" branch persists a recent folder and fires this event
+    // so our dropdown stays in sync without owning that logic.
+    window.addEventListener("marblo:recents-changed", reload);
+    return () => window.removeEventListener("marblo:recents-changed", reload);
   }, []);
 
   const updateRecentMenuPosition = useCallback(() => {
@@ -870,23 +849,6 @@ export function FileTree() {
     if (!showRecentMenu) return;
     updateRecentMenuPosition();
   }, [showRecentMenu, updateRecentMenuPosition]);
-
-  const [showNewProject, setShowNewProject] = useState(false);
-  const [newProjectName, setNewProjectName] = useState("");
-  const [pendingFolderPath, setPendingFolderPath] = useState<string | null>(
-    null,
-  );
-  const [pendingGitRemoteUrl, setPendingGitRemoteUrl] = useState<string | null>(
-    null,
-  );
-  // When an unregistered folder is picked we present a choice (register as a
-  // project vs. read-only browse) instead of jumping straight to the register
-  // banner. Holds the picked path + its git remote until the user chooses.
-  const [folderChoice, setFolderChoice] = useState<{
-    path: string;
-    remoteUrl: string | null;
-  } | null>(null);
-  const newProjectInputRef = useRef<HTMLInputElement>(null);
 
   // Monotonic load token: only the most recent load may apply its result, so a
   // rapid worktree switch (or a forced refresh issued mid-load) can never be
@@ -972,13 +934,6 @@ export function FileTree() {
       window.electronAPI.fs.offFileChange?.();
     };
   }, [rootPath, loadTree]);
-
-  useEffect(() => {
-    if (showNewProject && newProjectInputRef.current) {
-      newProjectInputRef.current.focus();
-      newProjectInputRef.current.select();
-    }
-  }, [showNewProject]);
 
   // Auto-dismiss error toast
   useEffect(() => {
@@ -1420,187 +1375,6 @@ export function FileTree() {
     ],
   );
 
-  const startInlineProjectCreation = useCallback(
-    (path: string, remoteUrl: string | null) => {
-      const folderName = basename(path) || "new-project";
-      setNewProjectName(folderName);
-      setPendingFolderPath(path);
-      setPendingGitRemoteUrl(remoteUrl);
-      setFolderChoice(null);
-      setShowNewProject(true);
-    },
-    [],
-  );
-
-  // Zero-click first-project registration: the picked folder immediately
-  // becomes a project (name = folder basename) with no confirm banner. This is
-  // the new-user path — useOrchestratorAutoLaunch keys off currentProject's
-  // folderPath and auto-starts the orchestrator, so it reads as
-  // "pick folder → orchestrator boots". If the CLI isn't installed/logged in,
-  // CliSetupGate + the spawn guard take over the auth flow. Requires a signed-in
-  // user (createProject needs ownerId); returns false so the caller can fall
-  // back to the inline banner when there's no user or the write fails.
-  const autoRegisterFirstProject = useCallback(
-    async (dir: string, remoteUrl: string | null): Promise<boolean> => {
-      if (!user) return false;
-      try {
-        const data: Omit<Project, "id" | "createdAt" | "updatedAt"> = {
-          name: basename(dir) || "new-project",
-          ownerId: user.uid,
-          members: [user.uid],
-          folderPath: dir,
-        };
-        if (remoteUrl) data.gitRemoteUrl = remoteUrl;
-        const id = await createProject(data);
-        setRootPath(dir);
-        setCurrentProject({
-          id,
-          ...data,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
-        return true;
-      } catch (err) {
-        // Plan limit hit (shouldn't happen on the first project, but the store
-        // is the choke point) → surface the upgrade path, treat as "handled" so
-        // the caller doesn't fall through to the inline banner.
-        if (err instanceof ProjectLimitError) {
-          useUiStore.getState().showUpgrade("projects", "pro");
-          return true;
-        }
-        console.error("Failed to auto-register first project:", err);
-        return false;
-      }
-    },
-    [user, createProject, setRootPath, setCurrentProject],
-  );
-
-  // ---------- Project setup handlers (existing logic) ----------
-  const handleSelectDirectory = useCallback(async () => {
-    const dir = await window.electronAPI.fs.selectDirectory();
-    if (!dir) return;
-
-    setRootPath(dir);
-
-    const remoteUrl = await window.electronAPI.fs.gitRemoteUrl(dir);
-    const existing = findByPathOrRemote(dir, remoteUrl);
-    if (existing) {
-      setCurrentProject(existing);
-      return;
-    }
-
-    if (projectsHydrated && projects.length === 0) {
-      // First user (no projects yet): register with one click — the folder
-      // pick alone. Fall back to the inline confirm banner if not signed in or
-      // the auto-register write fails.
-      if (await autoRegisterFirstProject(dir, remoteUrl)) return;
-      startInlineProjectCreation(dir, remoteUrl);
-      return;
-    }
-
-    // Unregistered folder for an existing user: don't auto-open the register
-    // banner. Offer a choice — register as a project (existing flow), or just
-    // browse read-only. (Zero-click is intentionally first-user only.)
-    setFolderChoice({ path: dir, remoteUrl });
-  }, [
-    setRootPath,
-    findByPathOrRemote,
-    setCurrentProject,
-    projectsHydrated,
-    projects.length,
-    autoRegisterFirstProject,
-    startInlineProjectCreation,
-  ]);
-
-  // Shared "open a project" entry point — the board / agents no-project empty
-  // states dispatch `marblo:select-folder` so their CTA runs the exact same
-  // folder-pick + auto-register flow as the sidebar's "Select folder" button,
-  // instead of duplicating (and drifting from) that logic.
-  useEffect(() => {
-    const onSelectFolder = () => void handleSelectDirectory();
-    window.addEventListener("marblo:select-folder", onSelectFolder);
-    return () =>
-      window.removeEventListener("marblo:select-folder", onSelectFolder);
-  }, [handleSelectDirectory]);
-
-  // "Register as a project" branch of the folder-choice banner → hand off to
-  // the existing inline new-project banner with the picked folder prefilled.
-  const handleChooseRegister = useCallback(() => {
-    if (!folderChoice) return;
-    // Free plan already at its project cap → offer upgrade instead of opening
-    // the register banner. (Browse read-only stays available.)
-    if (!ensureProjectQuota()) {
-      setFolderChoice(null);
-      return;
-    }
-    startInlineProjectCreation(folderChoice.path, folderChoice.remoteUrl);
-  }, [folderChoice, ensureProjectQuota, startInlineProjectCreation]);
-
-  // "Browse (read-only)" branch → the root was already switched to the folder in
-  // handleSelectDirectory, so we only remember it in recents. No project bind.
-  const handleChooseBrowse = useCallback(() => {
-    if (!folderChoice) return;
-    setRecentFolders(saveRecentFolder(folderChoice.path));
-    setFolderChoice(null);
-  }, [folderChoice]);
-
-  const handleCreateInlineProject = useCallback(async () => {
-    if (!newProjectName.trim() || !user || !pendingFolderPath) return;
-    // Gate before writing: Free plan at its project cap → upgrade path instead.
-    if (!ensureProjectQuota()) {
-      setShowNewProject(false);
-      setNewProjectName("");
-      setPendingFolderPath(null);
-      setPendingGitRemoteUrl(null);
-      return;
-    }
-    try {
-      const data: Omit<Project, "id" | "createdAt" | "updatedAt"> = {
-        name: newProjectName.trim(),
-        ownerId: user.uid,
-        members: [user.uid],
-        folderPath: pendingFolderPath,
-      };
-      if (pendingGitRemoteUrl) data.gitRemoteUrl = pendingGitRemoteUrl;
-      const id = await createProject(data);
-      setRootPath(pendingFolderPath);
-      setCurrentProject({
-        id,
-        ...data,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-    } catch (err) {
-      // Choke-point gate raced ahead of us (e.g. concurrent create) → upgrade.
-      if (err instanceof ProjectLimitError) {
-        useUiStore.getState().showUpgrade("projects", "pro");
-      } else {
-        console.error("Failed to create project:", err);
-      }
-    } finally {
-      setShowNewProject(false);
-      setNewProjectName("");
-      setPendingFolderPath(null);
-      setPendingGitRemoteUrl(null);
-    }
-  }, [
-    newProjectName,
-    user,
-    pendingFolderPath,
-    pendingGitRemoteUrl,
-    ensureProjectQuota,
-    createProject,
-    setRootPath,
-    setCurrentProject,
-  ]);
-
-  const handleCancelInlineProject = useCallback(() => {
-    setShowNewProject(false);
-    setNewProjectName("");
-    setPendingFolderPath(null);
-    setPendingGitRemoteUrl(null);
-  }, []);
-
   // Switch the tree root to another worktree (main or task). Selection is
   // cleared because paths from the previous root no longer exist in the new one.
   const handleSwitchRoot = useCallback(
@@ -1634,9 +1408,9 @@ export function FileTree() {
   ]);
 
   // ---------- Open Folder (v1: read-only browse, no project/task binding) ----
-  // Switch the tree root to an arbitrary local folder. Unlike
-  // handleSelectDirectory above, this does NOT create/bind a project or look up
-  // git — it's a plain "browse this folder" entry point. Reuses the existing
+  // Switch the tree root to an arbitrary local folder. Unlike the project-setup
+  // flow (useProjectSetup), this does NOT create/bind a project or look up git —
+  // it's a plain "browse this folder" entry point. Reuses the existing
   // fs.selectDirectory IPC (showOpenDialog → openDirectory).
   const openFolderPath = useCallback(
     (path: string) => {
@@ -1695,7 +1469,9 @@ export function FileTree() {
           {t("sidebar.tree.openProject")}
         </p>
         <button
-          onClick={handleSelectDirectory}
+          onClick={() =>
+            window.dispatchEvent(new CustomEvent("marblo:select-folder"))
+          }
           className="mt-2 rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
         >
           {t("sidebar.tree.selectFolder")}
@@ -1710,87 +1486,9 @@ export function FileTree() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Folder-open choice banner — shown when an unregistered folder is
-          picked: register it as a project, or just browse it read-only. */}
-      {folderChoice && (
-        <div className="border-b border-blue-500/30 bg-blue-500/10 px-3 py-2">
-          <p className="mb-1 text-[11px] font-medium text-blue-400">
-            {t("sidebar.tree.openFolder")}
-          </p>
-          <p
-            className="mb-2 truncate text-[10px] text-gray-400"
-            title={folderChoice.path}
-          >
-            {folderChoice.path}
-          </p>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleChooseRegister}
-              className="rounded bg-blue-600 px-2 py-1 text-[11px] text-white hover:bg-blue-500"
-            >
-              {t("sidebar.tree.registerProject")}
-            </button>
-            <button
-              onClick={handleChooseBrowse}
-              className="rounded bg-gray-700 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-600"
-            >
-              {t("sidebar.tree.browseReadonly")}
-            </button>
-            <button
-              onClick={() => setFolderChoice(null)}
-              className="ml-auto rounded px-2 py-1 text-[11px] text-gray-400 hover:text-gray-200"
-              title={t("sidebar.tree.cancel")}
-            >
-              {t("sidebar.tree.cancel")}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Inline project creation banner */}
-      {showNewProject && (
-        <div className="border-b border-blue-500/30 bg-blue-500/10 px-3 py-2">
-          <p className="mb-1 text-[11px] font-medium text-blue-400">
-            {t("sidebar.tree.newProject")}
-          </p>
-          <div className="flex items-center gap-1">
-            <input
-              ref={newProjectInputRef}
-              type="text"
-              value={newProjectName}
-              onChange={(e) => setNewProjectName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCreateInlineProject();
-                if (e.key === "Escape") handleCancelInlineProject();
-              }}
-              className="flex-1 rounded border border-gray-600 bg-gray-700 px-2 py-1 text-xs text-gray-200 focus:border-blue-500 focus:outline-none"
-              placeholder={t("sidebar.tree.projectNamePlaceholder")}
-            />
-            <button
-              onClick={handleCreateInlineProject}
-              className="rounded bg-blue-600 px-2 py-1 text-[11px] text-white hover:bg-blue-500"
-              title={t("sidebar.tree.create")}
-            >
-              <svg
-                className="h-3.5 w-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-            </button>
-          </div>
-          <p className="mt-1 text-[10px] text-gray-500">
-            {t("sidebar.tree.createHint")}
-          </p>
-        </div>
-      )}
+      {/* The folder-choice / name-your-project banners now render at Layout
+          level (ProjectSetupBanners) so the flow works from any panel state,
+          including a collapsed sidebar. */}
 
       {/* Project path header + toolbar */}
       <div className="flex flex-col border-b border-gray-700">
@@ -1823,7 +1521,9 @@ export function FileTree() {
               own zone, divided from the worktree switch and file-ops below. */}
           <div ref={recentMenuRef} className="relative flex items-center">
             <button
-              onClick={handleSelectDirectory}
+              onClick={() =>
+                window.dispatchEvent(new CustomEvent("marblo:select-folder"))
+              }
               className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
               title={t("sidebar.tree.openFolder")}
             >
@@ -2025,7 +1725,9 @@ export function FileTree() {
                 {t("sidebar.tree.strayRootToMain")}
               </button>
               <button
-                onClick={handleSelectDirectory}
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent("marblo:select-folder"))
+                }
                 className="rounded bg-gray-700 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-600"
               >
                 {t("sidebar.tree.strayRootPick")}

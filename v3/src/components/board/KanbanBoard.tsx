@@ -190,9 +190,28 @@ export function KanbanBoard() {
     }
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
-        <div className="text-center">
-          <p className="text-lg font-medium">{t("board.noProjects.title")}</p>
-          <p className="mt-1 text-sm text-gray-500">
+        <div className="max-w-sm text-center">
+          {/* Folder-connect is the first onboarding step: the pick auto-creates
+              the project and boots the orchestrator, so lead with it visually. */}
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
+            <svg
+              className="h-7 w-7"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+              />
+            </svg>
+          </div>
+          <p className="text-lg font-medium text-gray-200">
+            {t("board.noProjects.title")}
+          </p>
+          <p className="mx-auto mt-1.5 text-sm text-gray-500">
             {t("board.noProjects.desc")}
           </p>
           <button
@@ -200,10 +219,13 @@ export function KanbanBoard() {
             onClick={() =>
               window.dispatchEvent(new CustomEvent("marblo:select-folder"))
             }
-            className="mt-4 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+            className="mt-5 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-500"
           >
             {t("board.noProjects.cta")}
           </button>
+          <p className="mt-3 text-xs text-gray-600">
+            {t("board.noProjects.hint")}
+          </p>
         </div>
       </div>
     );

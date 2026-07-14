@@ -8,10 +8,14 @@ export const board = {
   // KanbanBoard
   "board.aiBreakdown": "AI 분해",
 
-  // KanbanBoard — no-project empty state (clickable CTA → folder select)
-  "board.noProjects.title": "프로젝트 없음",
-  "board.noProjects.desc": "프로젝트를 열어 보드를 시작하세요.",
-  "board.noProjects.cta": "폴더 열기 · 프로젝트 생성",
+  // KanbanBoard — no-project empty state (clickable CTA → folder select).
+  // Framed as the onboarding entry point: connecting a folder auto-creates the
+  // project and boots the orchestrator.
+  "board.noProjects.title": "폴더를 연결해 시작하세요",
+  "board.noProjects.desc":
+    "폴더를 연결하면 프로젝트가 자동으로 만들어지고, 오케스트레이터가 첫 대화를 엽니다.",
+  "board.noProjects.cta": "폴더 연결 · 시작하기",
+  "board.noProjects.hint": "폴더 연결이 온보딩의 첫걸음입니다.",
 
   // KanbanColumn — empty column
   "board.column.noTasks": "태스크 없음",

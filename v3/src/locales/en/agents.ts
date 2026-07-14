@@ -243,5 +243,5 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.noProject.title": "No project selected",
   "agents.noProject.desc":
     "Agents belong to a project. Open or create a project folder first.",
-  "agents.noProject.cta": "Open folder · Create project",
+  "agents.noProject.cta": "Connect folder · Start",
 };
