@@ -23,16 +23,22 @@ import {
   Video,
   ClipboardList,
   BarChart3,
+  Ban,
 } from "lucide-react";
 import AnalyticsPanel from "./AnalyticsPanel";
 
 // 신청 목록 항목 (getFounderWaitlist 함수 응답; 날짜는 ISO 문자열).
+// 서버가 정규화 이메일 기준으로 중복 신청을 1건(최신)으로 접어서 내려준다.
+// duplicateCount = 접히기 전 신청 수(2 이상이면 중복 신청자).
 type WaitlistEntry = {
   id: string;
   email: string;
+  normalizedEmail?: string | null;
   locale?: string | null;
   source?: string | null;
   createdAt?: string | null;
+  status?: string | null;
+  duplicateCount?: number;
 };
 
 // V2 루브릭 5차원 점수 (가중치: specificity·usageEvidence ×2).
@@ -229,7 +235,7 @@ type CallableError = { code?: string; message?: string };
 
 function mapError(
   err: CallableError,
-  kind: "select" | "interview" | "list" | "resend" | "review"
+  kind: "select" | "reject" | "interview" | "list" | "resend" | "review"
 ): string {
   const code = err?.code || "";
   if (code === "functions/permission-denied") {
@@ -302,6 +308,14 @@ export default function AdminPage() {
   const [selecting, setSelecting] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [rowError, setRowError] = useState<Record<string, string>>({});
+
+  // Per-row "선정 안 함"(반려) 진행 상태, keyed by entry id
+  const [rejecting, setRejecting] = useState<Record<string, boolean>>({});
+
+  // 반려 목록 보기 토글 — 반려는 실수할 수 있으니 되돌릴 진입점이 필요하다.
+  // 켜면 getFounderWaitlist(includeRejected) 로 반려 항목까지 받아 '재선정' 노출.
+  const [showRejected, setShowRejected] = useState(false);
+  const [rejectedCount, setRejectedCount] = useState(0);
 
   // 파운더 현황 state
   const [founders, setFounders] = useState<FounderEntry[]>([]);
@@ -407,13 +421,14 @@ export default function AdminPage() {
       setListLoading(true);
       setListError(null);
       try {
-        const fn = httpsCallable<unknown, { items: WaitlistEntry[] }>(
-          getFunctions(app, "us-central1"),
-          "getFounderWaitlist"
-        );
-        const res = await fn({});
+        const fn = httpsCallable<
+          { includeRejected: boolean },
+          { items: WaitlistEntry[]; rejectedCount?: number }
+        >(getFunctions(app, "us-central1"), "getFounderWaitlist");
+        const res = await fn({ includeRejected: showRejected });
         if (cancelled) return;
         setEntries(res.data.items || []);
+        setRejectedCount(res.data.rejectedCount ?? 0);
       } catch (err: unknown) {
         if (cancelled) return;
         setListError(mapError(err as CallableError, "list"));
@@ -425,7 +440,7 @@ export default function AdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, showRejected]);
 
   useEffect(() => {
     if (!user) return;
@@ -662,6 +677,14 @@ export default function AdminPage() {
       const fn = httpsCallable(functions, "markFounderSelected");
       await fn({ email: entry.email });
       setSelected((s) => ({ ...s, [entry.id]: true }));
+      // 반려됐던 항목을 '재선정' 한 경우: 백엔드가 신청 doc 의 rejected 마킹을
+      // 풀어주므로 로컬 상태도 되돌려 배지/버튼이 즉시 정상으로 보이게 한다.
+      setEntries((prev) =>
+        prev.map((e) => (e.id === entry.id ? { ...e, status: null } : e))
+      );
+      setRejectedCount((c) =>
+        entry.status === "rejected" ? Math.max(0, c - 1) : c
+      );
       setFounders((prev) => {
         const email = normalizeEmail(entry.email);
         let found = false;
@@ -694,6 +717,59 @@ export default function AdminPage() {
       setSelecting((s) => ({ ...s, [entry.id]: false }));
     }
   }, []);
+
+  // 선정 안 함(반려) — markFounderRejected. 신청을 rejected 로 내려 목록에서 빼고,
+  // 이미 선정된 이메일이면 베타 grant 까지 회수한다. 되돌리려면 다시 '선정'.
+  // 성공 시 해당 행을 목록에서 제거(낙관적 갱신) + 파운더 현황 배지도 rejected 로.
+  const handleReject = useCallback(
+    async (entry: WaitlistEntry) => {
+      const email = normalizeEmail(entry.email);
+      const isSelectedFounder = selectedFounderEmails.has(email);
+      const warning = isSelectedFounder
+        ? `\n\n⚠️ 이미 선정된 파운더입니다. 반려하면 베타 접근과 Pro 부여가 즉시 회수됩니다.`
+        : "";
+      if (
+        !window.confirm(
+          `${entry.email} 님을 선정 안 함(반려) 처리할까요?${warning}\n\n반려하면 대기자 목록에서 빠지고 재선정 대상에서 제외됩니다.`
+        )
+      ) {
+        return;
+      }
+      setRejecting((s) => ({ ...s, [entry.id]: true }));
+      setRowError((e) => {
+        const next = { ...e };
+        delete next[entry.id];
+        return next;
+      });
+      try {
+        const functions = getFunctions(app, "us-central1");
+        const fn = httpsCallable(functions, "markFounderRejected");
+        await fn({ email: entry.email });
+        // 반려 목록 보기 중이면 행을 없애지 않고 '반려됨' 으로 표시해 되돌릴 수
+        // 있게 남긴다. 기본 목록에서는 제거(반려 = 목록서 빠짐).
+        setEntries((prev) =>
+          showRejected
+            ? prev.map((e) =>
+                e.id === entry.id ? { ...e, status: "rejected" } : e
+              )
+            : prev.filter((e) => e.id !== entry.id)
+        );
+        setSelected((s) => ({ ...s, [entry.id]: false }));
+        setRejectedCount((c) => c + 1);
+        setFounders((prev) =>
+          prev.map((f) =>
+            normalizeEmail(f.email) === email ? { ...f, status: "rejected" } : f
+          )
+        );
+      } catch (err: unknown) {
+        const message = mapError(err as CallableError, "reject");
+        setRowError((e) => ({ ...e, [entry.id]: message }));
+      } finally {
+        setRejecting((s) => ({ ...s, [entry.id]: false }));
+      }
+    },
+    [selectedFounderEmails, showRejected]
+  );
 
   // 접근 안내 이메일 재발송 (resendFounderAccessEmail).
   const handleResend = useCallback(async (email: string) => {
@@ -861,9 +937,25 @@ export default function AdminPage() {
                 <h2 className="text-lg font-semibold">대기자 명단</h2>
               </div>
               {!listLoading && !listError && (
-                <span className="text-sm text-zinc-400">
-                  총 {entries.length}명
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-zinc-400">
+                    총 {entries.length}명
+                  </span>
+                  {/* 반려 되돌림 진입점 — 반려는 실수할 수 있으므로 목록을
+                      열어 '재선정' 할 수 있어야 한다. */}
+                  <label className="inline-flex items-center gap-1.5 text-sm text-zinc-400 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showRejected}
+                      onChange={(e) => setShowRejected(e.target.checked)}
+                      className="accent-indigo-500"
+                    />
+                    반려 포함
+                    {!showRejected && rejectedCount > 0 && (
+                      <span className="text-zinc-500">({rejectedCount})</span>
+                    )}
+                  </label>
+                </div>
               )}
             </div>
 
@@ -894,16 +986,29 @@ export default function AdminPage() {
                   <tbody>
                     {entries.map((entry) => {
                       const isSelecting = !!selecting[entry.id];
+                      const isRejecting = !!rejecting[entry.id];
                       const isSelected =
                         !!selected[entry.id] ||
                         selectedFounderEmails.has(normalizeEmail(entry.email));
                       const err = rowError[entry.id];
+                      const dupes = entry.duplicateCount ?? 1;
+                      const isRejected = entry.status === "rejected";
                       return (
                         <tr
                           key={entry.id}
                           className="border-b border-zinc-800/60 last:border-0 align-top"
                         >
-                          <td className="py-3 pr-4 break-all">{entry.email}</td>
+                          <td className="py-3 pr-4 break-all">
+                            {entry.email}
+                            {dupes > 1 && (
+                              <span
+                                title={`동일 이메일로 ${dupes}건 신청 — 최신 1건만 표시`}
+                                className="ml-2 inline-flex items-center rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400 align-middle"
+                              >
+                                중복 {dupes}건
+                              </span>
+                            )}
+                          </td>
                           <td className="py-3 pr-4 text-zinc-400">
                             {entry.source || "—"}
                           </td>
@@ -911,23 +1016,55 @@ export default function AdminPage() {
                             {formatDate(entry.createdAt)}
                           </td>
                           <td className="py-3 text-right">
-                            {isSelected ? (
-                              <span className="inline-flex items-center gap-1.5 text-green-400 text-sm font-medium">
-                                <Check className="w-4 h-4" />
-                                선정됨
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => handleSelect(entry)}
-                                disabled={isSelecting}
-                                className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg text-sm font-medium transition"
-                              >
-                                {isSelecting && (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                )}
-                                선정
-                              </button>
-                            )}
+                            <div className="inline-flex items-center justify-end gap-2">
+                              {isRejected && (
+                                <span className="inline-flex items-center gap-1.5 text-red-400/80 text-xs font-medium">
+                                  <Ban className="w-3.5 h-3.5" />
+                                  반려됨
+                                </span>
+                              )}
+                              {isSelected && !isRejected ? (
+                                <span className="inline-flex items-center gap-1.5 text-green-400 text-sm font-medium">
+                                  <Check className="w-4 h-4" />
+                                  선정됨
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => handleSelect(entry)}
+                                  disabled={isSelecting || isRejecting}
+                                  title={
+                                    isRejected
+                                      ? "반려를 되돌리고 베타 접근·Pro 를 다시 부여합니다"
+                                      : undefined
+                                  }
+                                  className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg text-sm font-medium transition"
+                                >
+                                  {isSelecting && (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  )}
+                                  {isRejected ? "재선정" : "선정"}
+                                </button>
+                              )}
+                              {/* 선정됨 상태에서도 노출 — 반려 시 grant 회수 경로.
+                                  이미 반려된 행에는 숨긴다(되돌리기만 남김). */}
+                              {!isRejected && (
+                                <button
+                                  onClick={() => handleReject(entry)}
+                                  disabled={isSelecting || isRejecting}
+                                  title={
+                                    isSelected
+                                      ? "반려하면 베타 접근·Pro 부여가 즉시 회수됩니다"
+                                      : "반려하면 대기자 목록에서 빠집니다"
+                                  }
+                                  className="inline-flex items-center gap-1.5 border border-zinc-700 hover:border-red-500/60 hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-400 px-3 py-1.5 rounded-lg text-sm font-medium transition"
+                                >
+                                  {isRejecting && (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  )}
+                                  선정 안 함
+                                </button>
+                              )}
+                            </div>
                             {err && (
                               <p className="mt-1.5 text-xs text-red-400 max-w-[16rem] ml-auto">
                                 {err}

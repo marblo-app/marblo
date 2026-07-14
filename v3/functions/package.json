@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "serve": "firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "deploy": "firebase deploy --only functions",
+    "test:reject": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderReject.test.mjs'"
   },
   "engines": {
     "node": "20"

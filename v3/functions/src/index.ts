@@ -1315,6 +1315,9 @@ const FOUNDER_INTERVIEW_MIN_TOTAL = 14;
 const FOUNDER_FIELD_MAX = 5000;
 const FOUNDER_FEEDBACK_COLLECTION = "founder_feedback";
 const FOUNDERS_COLLECTION = "founders";
+// 신청 목록 조회/반려 매칭이 스캔하는 최대 신청 수. 이메일 정규화 기준으로
+// 매칭·중복제거하려면 doc 을 읽어봐야 해서 쿼리 필터 대신 스캔 상한을 둔다.
+const WAITLIST_SCAN_LIMIT = 1000;
 
 interface FounderSurveyAnswers {
   q1: string;
@@ -1358,12 +1361,70 @@ function requireAdmin(context: functions.https.CallableContext): void {
 // paymentProvider="founder_grant" 로 표기해 갱신 크론(scheduledChargeSubscriptions,
 // paymentProvider=="toss" 만 대상)에서 제외되고, 만료는 scheduledExpireBetaGrants
 // 가 처리한다(1회성 부여, 자동 갱신 없음).
+// ─── 유료/grant 판정 ────────────────────────────────────────────────
+//
+// 이 구독 doc 하나를 두고 두 방향의 질문이 오간다. 판정식이 하나면 한쪽을
+// 고칠 때 반대쪽이 반드시 과교정되므로(실제로 그랬다) 셋으로 나눈다.
+//   1) hasPaymentEvidence  — "결제한 흔적이 있나" (해지 후에도 남는다)
+//   2) isLivePaidSubscription — "지금 돈 내고 있나" (부여/보존 판정)
+//   3) isFounderGrantSubscription — "이건 무료 grant 인가" (회수 판정)
+
+// 결제 흔적. ★"현재 유료" 가 아니다 — cancelTossSubscription 과 결제실패 강등은
+// status 만 canceled/free 로 내리고 paymentProvider="toss" 와 tossBillingKey 를
+// 그대로 남긴다. 그래서 이 함수만으로 "건드리지 마" 판정을 하면 해지·실효한
+// 前결제자가 영구히 유료로 오판돼 파운더로 뽑혀도 Pro 를 못 받는다.
+function hasPaymentEvidence(sub: Record<string, unknown> | undefined): boolean {
+  if (!sub) return false;
+  if (typeof sub.tossBillingKey === "string" && sub.tossBillingKey) return true;
+  if (typeof sub.tossCustomerKey === "string" && sub.tossCustomerKey) {
+    return true;
+  }
+  if (
+    typeof sub.paddleSubscriptionId === "string" &&
+    sub.paddleSubscriptionId
+  ) {
+    return true;
+  }
+  return sub.paymentProvider === "toss" || sub.paymentProvider === "paddle";
+}
+
+// 무료 파운더 grant 인가. founderGrant 플래그가 authoritative 마커다 —
+// 결제 흔적(옛 billingKey)보다 우선한다. 안 그러면 "해지했다가 grant 를 받은"
+// doc 이 stale billingKey 때문에 유료로 오판돼 반려해도 회수되지 않는다.
+function isFounderGrantSubscription(
+  sub: Record<string, unknown> | undefined,
+): boolean {
+  if (!sub) return false;
+  return sub.founderGrant === true || sub.paymentProvider === "founder_grant";
+}
+
+// 지금 살아있는 유료 구독인가 = 결제 흔적 AND 현역 status.
+// 이게 true 인 구독만 "건드리지 말 것"(grant 로 덮어쓰기 금지) 대상이다.
+// past_due 도 현역 — 재시도 중인 결제라 grant 로 덮으면 과금이 끊긴다.
+function isLivePaidSubscription(
+  sub: Record<string, unknown> | undefined,
+): boolean {
+  if (!sub) return false;
+  if (isFounderGrantSubscription(sub)) return false;
+  if (sub.status !== "active" && sub.status !== "past_due") return false;
+  return hasPaymentEvidence(sub);
+}
+
+// grant 부여 결과. ★granted 를 반드시 호출부에 돌려준다 — 예전엔 "uid 를 찾았다"
+// 를 곧 "부여했다" 로 계산해서, 부여가 스킵돼도 어드민에 성공으로 보고하는
+// 조용한 실패가 있었다.
+type ProGrantOutcome = {
+  granted: boolean;
+  periodEnd: Date;
+  skippedReason: "live_paid" | null;
+};
+
 async function upsertProSubscription(
   userId: string,
   targetEnd: Date,
   reason: string,
   grantStartedAt: Date,
-): Promise<Date> {
+): Promise<ProGrantOutcome> {
   const now = new Date();
   const subRef = db.collection("subscriptions").doc(userId);
   const snap = await subRef.get();
@@ -1374,6 +1435,29 @@ async function upsertProSubscription(
       : null;
   const periodEnd =
     existingEnd && existingEnd > targetEnd ? existingEnd : targetEnd;
+
+  // ★ 현역 유료 구독은 결제 정체성을 절대 덮어쓰지 않는다.
+  //
+  // 예전엔 paymentProvider 를 무조건 founder_grant 로 stomp 했는데, 돈 내던
+  // 유저가 파운더로 선정되면:
+  //   1) billing.selectDueForCharge 가 paymentProvider!=="toss" 와
+  //      founderGrant===true 양쪽으로 걸러서 재과금이 영구 정지되고(무료 영구),
+  //   2) 반려/만료 로직이 그 doc 을 grant 로 오인해 취소·기간절단까지 한다.
+  // 유료 유저는 이미 Pro 라 grant 로 덮어쓸 이유 자체가 없다. 파운더 자격은
+  // founders/{email} doc 이 SoT 로 들고 있으므로 구독은 건드리지 않는다.
+  //
+  // ★ 단 "현역"(active/past_due) 일 때만. 해지·실효한 前결제자는 billingKey 가
+  // 남아있을 뿐 지금 Pro 가 아니므로 정상적으로 grant 를 부여해야 한다.
+  if (isLivePaidSubscription(data)) {
+    console.log(
+      `[upsertProSubscription] 현역 유료 구독(${userId}, status=${data?.status}) — grant(${reason}) 로 덮어쓰지 않고 결제 유지`,
+    );
+    return {
+      granted: false,
+      periodEnd: existingEnd ?? periodEnd,
+      skippedReason: "live_paid",
+    };
+  }
 
   const payload: Record<string, unknown> = {
     userId,
@@ -1391,7 +1475,7 @@ async function upsertProSubscription(
     payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
   }
   await subRef.set(payload, { merge: true });
-  return periodEnd;
+  return { granted: true, periodEnd, skippedReason: null };
 }
 
 async function grantFounderProTotalInternal(
@@ -1400,12 +1484,13 @@ async function grantFounderProTotalInternal(
   reason: string,
   grantStartedAt: Date,
 ): Promise<Date> {
-  return upsertProSubscription(
+  const outcome = await upsertProSubscription(
     userId,
     addMonths(grantStartedAt, totalMonths),
     reason,
     grantStartedAt,
   );
+  return outcome.periodEnd;
 }
 
 // 이메일로 Firebase Auth 계정의 uid 를 찾는다. 미가입/조회 실패는 null(비-throw) —
@@ -1653,6 +1738,22 @@ async function lookupFounderLocale(email: string): Promise<string> {
   return "ko";
 }
 
+// 신청 doc 의 email 은 클라가 직접 쓴 원문이라 대소문자/공백이 섞여 있다.
+// 정규화 기준으로 매칭해야 중복 신청(동일 이메일 여러 건)까지 함께 잡힌다.
+// 쿼리 필터로는 정규화 비교가 안 돼서 스캔 후 필터한다(어드민 저빈도 액션).
+async function findWaitlistDocsByEmail(
+  email: string,
+): Promise<FirebaseFirestore.QueryDocumentSnapshot[]> {
+  const snap = await db
+    .collection("betatester50_waitlist")
+    .limit(WAITLIST_SCAN_LIMIT)
+    .get();
+  return snap.docs.filter((d) => {
+    const v = d.data() as Record<string, unknown>;
+    return typeof v.email === "string" && normalizeEmail(v.email) === email;
+  });
+}
+
 // 파운더 선정 핵심 로직 (내부) — waitlist 이메일을 founders 로 승격.
 // accessGrantedAt 이 1개월 베타 시작 기준. resetWindow=true 면 베타 기간 재시작.
 // markFounderSelected onCall 과 Telegram 승인 웹훅 양쪽에서 재사용한다.
@@ -1664,9 +1765,13 @@ async function markFounderSelectedInternal(
   email: string;
   emailSent: boolean;
   betaExpiresAt: string;
-  // 승인=Pro 부여. uid 를 즉시 찾아 구독을 만들었으면 true(subscriptionUid 세팅),
-  // 아직 미가입이면 false — 가입 시 grantBetaProOnSignup 이 뒤늦게 부여한다.
+  // 승인=Pro 부여. 실제로 구독을 부여했을 때만 true.
+  //  - 미가입(uid 없음) → false. 가입 시 grantBetaProOnSignup 이 뒤늦게 부여.
+  //  - 이미 현역 유료 구독 → false + skippedReason="live_paid" (덮어쓰면 과금이
+  //    끊기므로 정상 스킵. 이미 Pro 라 접근엔 문제 없음)
+  // ★"uid 를 찾았다"를 "부여했다"로 계산하면 조용한 실패가 된다.
   subscriptionGranted: boolean;
+  subscriptionSkippedReason: string | null;
   subscriptionUid: string | null;
 }> {
   const email = normalizeEmail(rawEmail);
@@ -1683,7 +1788,22 @@ async function markFounderSelectedInternal(
   if (!snap.exists) {
     update.selectedAt = admin.firestore.FieldValue.serverTimestamp();
   }
-  if (!snap.exists || !snap.data()?.accessGrantedAt || resetWindow) {
+  // 반려됐던 파운더의 재선정은 "새 선정" 으로 본다.
+  // markFounderRejected 가 betaExpiresAt 를 즉시만료(now)로 박아두기 때문에,
+  // accessGrantedAt 이 남아있다는 이유로 기존 값을 유지하면 status 만 selected 로
+  // 바뀌고 만료일은 과거 그대로 = 어드민 UI 는 "선정됨" 인데 실제 접근은 만료인
+  // 허위표시가 된다. 어드민 UI 는 resetWindow 를 보내지 않으므로(기본 false)
+  // 백엔드가 스스로 리셋해야 텔레그램 승인 경로까지 함께 복구된다.
+  const wasRejected = snap.data()?.status === "rejected";
+  if (wasRejected) {
+    update.rejectedAt = admin.firestore.FieldValue.delete();
+  }
+  if (
+    !snap.exists ||
+    !snap.data()?.accessGrantedAt ||
+    resetWindow ||
+    wasRejected
+  ) {
     update.accessGrantedAt = admin.firestore.FieldValue.serverTimestamp();
     update.betaExpiresAt = admin.firestore.Timestamp.fromDate(betaExpiresAt);
   } else {
@@ -1696,6 +1816,20 @@ async function markFounderSelectedInternal(
     }
   }
   await ref.set(update, { merge: true });
+
+  // 반려 되돌림 — 선정은 반려의 역방향이므로 신청 doc 의 rejected 마킹도 푼다.
+  // 안 풀면 재선정된 사람이 대기자 기본 목록에서 계속 빠져 "반려됨" 으로 보인다
+  // (markFounderRejected 가 붙인 마킹과 대칭).
+  for (const doc of await findWaitlistDocsByEmail(email)) {
+    if (doc.data().status !== "rejected") continue;
+    await doc.ref.set(
+      {
+        status: admin.firestore.FieldValue.delete(),
+        rejectedAt: admin.firestore.FieldValue.delete(),
+      },
+      { merge: true },
+    );
+  }
 
   // 선정 직후 접근 안내 이메일 자동 발송. 이메일 실패가 선정을 깨면 안 되므로
   // sendFounderAccessEmail 은 non-throwing 이고 결과만 기록한다.
@@ -1716,23 +1850,34 @@ async function markFounderSelectedInternal(
   // grantBetaProOnSignup(auth onCreate) 이 뒤늦게 부여한다. 멱등: upsertProSubscription
   // 이 기존 기간을 줄이지 않으므로 중복 승인/재선정도 이중부여가 아니다.
   let subscriptionUid: string | null = null;
+  let subscriptionGranted = false;
+  // 부여를 건너뛴 이유(있으면). "이미 현역 유료라 Pro 를 덧씌울 필요 없음" 은
+  // 실패가 아니라 정상 스킵이지만, 어드민이 성공/스킵을 구분할 수 있어야 한다.
+  let subscriptionSkippedReason: string | null = null;
   const uid = await lookupUidByEmail(email);
   if (uid) {
-    await upsertProSubscription(
+    const outcome = await upsertProSubscription(
       uid,
       betaExpiresAt,
       "beta_selected",
       betaStartedAt,
     );
     subscriptionUid = uid;
-    await ref.set(
-      {
-        proSubscriptionUid: uid,
-        proSubscriptionEnd: admin.firestore.Timestamp.fromDate(betaExpiresAt),
-        proSubscriptionGrantedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+    subscriptionGranted = outcome.granted;
+    subscriptionSkippedReason = outcome.skippedReason;
+    // 실제로 부여했을 때만 grant 흔적을 남긴다 — 현역 유료 구독을 스킵해놓고
+    // proSubscriptionUid 를 박으면 회수 로직이 유료 구독을 grant 로 오인한다.
+    if (outcome.granted) {
+      await ref.set(
+        {
+          proSubscriptionUid: uid,
+          proSubscriptionEnd: admin.firestore.Timestamp.fromDate(betaExpiresAt),
+          proSubscriptionGrantedAt:
+            admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
   }
 
   return {
@@ -1740,7 +1885,8 @@ async function markFounderSelectedInternal(
     email,
     emailSent,
     betaExpiresAt: betaExpiresAt.toISOString(),
-    subscriptionGranted: subscriptionUid !== null,
+    subscriptionGranted,
+    subscriptionSkippedReason,
     subscriptionUid,
   };
 }
@@ -1759,6 +1905,119 @@ export const markFounderSelected = functions.https.onCall(
     }
     const resetWindow = data?.resetWindow === true;
     return markFounderSelectedInternal(email, resetWindow);
+  },
+);
+
+// 파운더 반려 (관리자용) — markFounderSelected 의 역방향.
+//
+// 1) betatester50_waitlist 의 해당 이메일 신청을 전부 status="rejected" 로 마킹
+//    → getFounderWaitlist 기본 목록에서 빠져 재선정 대상에서 제외된다.
+// 2) 이미 선정된 이메일이면 founders/{email} grant 를 회수한다.
+//    status="rejected" 는 getMyFounderAccess/submitFounderFeedback 이 이미 쓰는
+//    게이트 값이라 그대로 재사용하고, betaExpiresAt 도 즉시 만료로 당겨 이중으로 막는다.
+// 3) 부여했던 Pro 구독은 scheduledExpireBetaGrants 와 동일하게 status="canceled".
+//    ★ paymentProvider==="founder_grant" 인 구독만 건드린다 — 유료(toss) 결제자가
+//    파운더로도 선정됐던 경우 반려가 유료 구독까지 취소하면 안 된다.
+async function revokeFounderGrant(
+  email: string,
+): Promise<{ founderRevoked: boolean; subscriptionRevoked: boolean }> {
+  const ref = db.collection(FOUNDERS_COLLECTION).doc(email);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { founderRevoked: false, subscriptionRevoked: false };
+  }
+
+  const fd = snap.data() ?? {};
+  await ref.set(
+    {
+      status: "rejected",
+      rejectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      betaExpiresAt: admin.firestore.Timestamp.fromDate(new Date()),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  // 구독 회수 — 선정 시 기록해둔 proSubscriptionUid 우선, 없으면 이메일로 재조회.
+  const uid =
+    typeof fd.proSubscriptionUid === "string" && fd.proSubscriptionUid
+      ? fd.proSubscriptionUid
+      : await lookupUidByEmail(email);
+  let subscriptionRevoked = false;
+  if (uid) {
+    const subRef = db.collection("subscriptions").doc(uid);
+    const subSnap = await subRef.get();
+    const sub = subSnap.data();
+    // 무료 grant 만 회수한다. 판정은 founderGrant 마커가 authoritative —
+    // 결제 흔적(옛 billingKey)으로 판정하면 "해지했다가 grant 를 받은" 유저의
+    // 무료 Pro 가 stale billingKey 때문에 회수되지 않는다(어드민엔 "즉시 회수"
+    // 라고 해놓고 안 회수 = 약속 위반). 반대로 현역 유료 구독은 애초에
+    // founderGrant 마커가 없으므로(stomp 를 막았다) 여기 걸리지 않는다.
+    if (subSnap.exists && isFounderGrantSubscription(sub)) {
+      // 레거시 경보: stomp 를 막기 전에 유료 구독이 grant 로 덮인 doc 이라면
+      // 결제 흔적이 남아있다. 회수는 하되(무료 grant 로 보이므로) 사람이
+      // 확인할 수 있게 남긴다 — 필드만으론 "해지후 grant" 와 구분 불가.
+      if (hasPaymentEvidence(sub)) {
+        console.warn(
+          `[markFounderRejected] ★결제 흔적이 남은 grant doc 회수 (uid=${uid}) — 과거 stomp 로 유료구독이 grant 로 덮인 건이면 수동 확인 필요`,
+        );
+      }
+      if (sub?.status === "active") {
+        await subRef.set(
+          {
+            status: "canceled",
+            canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+            currentPeriodEnd: admin.firestore.Timestamp.fromDate(new Date()),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
+      subscriptionRevoked = true;
+    } else if (subSnap.exists) {
+      console.log(
+        `[markFounderRejected] grant 아님 — 구독 보존(취소하지 않음). status=${sub?.status}, paymentProvider=${sub?.paymentProvider}`,
+      );
+    }
+  }
+  return { founderRevoked: true, subscriptionRevoked };
+}
+
+export const markFounderRejected = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const email =
+      typeof data?.email === "string" ? normalizeEmail(data.email) : "";
+    if (!email) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "email required",
+      );
+    }
+
+    const targets = await findWaitlistDocsByEmail(email);
+    for (const doc of targets) {
+      await doc.ref.set(
+        {
+          status: "rejected",
+          rejectedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
+
+    const { founderRevoked, subscriptionRevoked } =
+      await revokeFounderGrant(email);
+    console.log(
+      `[markFounderRejected] email=${email} waitlist=${targets.length} founderRevoked=${founderRevoked} subRevoked=${subscriptionRevoked}`,
+    );
+    return {
+      ok: true as const,
+      email,
+      waitlistRejected: targets.length,
+      founderRevoked,
+      subscriptionRevoked,
+    };
   },
 );
 
@@ -2572,25 +2831,66 @@ export const getWaitlistCount = functions.https.onCall(async () => {
 });
 
 // 신청 목록(어드민) — betatester50_waitlist 직접 클라 조회 차단 대체.
+//
+// 동일인이 여러 번 신청하면 doc 이 여러 개 생긴다(클라가 직접 쓰므로 중복 방지 없음).
+// 정규화 이메일 기준으로 1건(최신)만 남기고 접어서 내려준다 — 어드민이 같은 사람을
+// 두 번 선정하는 실수를 막는다. status="rejected"(markFounderRejected) 는 기본 제외.
 export const getFounderWaitlist = functions.https.onCall(
-  async (_data, context) => {
+  async (data, context) => {
     requireAdmin(context);
+    const includeRejected = data?.includeRejected === true;
     const snap = await db
       .collection("betatester50_waitlist")
       .orderBy("createdAt", "desc")
-      .limit(1000)
+      .limit(WAITLIST_SCAN_LIMIT)
       .get();
-    const items = snap.docs.map((d) => {
+
+    // createdAt desc 정렬이므로 각 이메일의 첫 등장이 최신 신청 = 대표 항목.
+    const byEmail = new Map<
+      string,
+      {
+        id: string;
+        email: string;
+        normalizedEmail: string;
+        locale: string | null;
+        source: string | null;
+        createdAt: string | null;
+        status: string | null;
+        duplicateCount: number;
+      }
+    >();
+    for (const d of snap.docs) {
       const v = d.data() as Record<string, unknown>;
-      return {
+      const email = typeof v.email === "string" ? v.email : "";
+      if (!email) continue;
+      const normalizedEmail = normalizeEmail(email);
+      const existing = byEmail.get(normalizedEmail);
+      if (existing) {
+        existing.duplicateCount++;
+        // 중복 중 하나라도 반려면 그 이메일은 반려로 본다(반려는 전 신청에 일괄
+        // 적용되지만, 반려 후 재신청한 doc 이 섞여도 안전하게 걸러지도록).
+        if (v.status === "rejected") {
+          existing.status = "rejected";
+        }
+        continue;
+      }
+      byEmail.set(normalizedEmail, {
         id: d.id,
-        email: typeof v.email === "string" ? v.email : "",
+        email,
+        normalizedEmail,
         locale: typeof v.locale === "string" ? v.locale : null,
         source: typeof v.source === "string" ? v.source : null,
         createdAt: tsToIso(v.createdAt),
-      };
-    });
-    return { items };
+        status: typeof v.status === "string" ? v.status : null,
+        duplicateCount: 1,
+      });
+    }
+
+    const all = [...byEmail.values()];
+    const items = includeRejected
+      ? all
+      : all.filter((i) => i.status !== "rejected");
+    return { items, rejectedCount: all.length - items.length };
   },
 );
 
