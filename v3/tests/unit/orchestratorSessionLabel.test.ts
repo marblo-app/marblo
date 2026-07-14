@@ -150,7 +150,7 @@ describe("OrchestratorManager session reconnect", () => {
   });
 
   describe("launch MCP env context", () => {
-    function writeMcpConfig(filePath: string): void {
+    function writeClaudeMcpConfig(filePath: string): void {
       fs.writeFileSync(
         filePath,
         JSON.stringify({ mcpServers: { marblo: { env: {} } } }),
@@ -158,9 +158,27 @@ describe("OrchestratorManager session reconnect", () => {
       );
     }
 
+    function writeCodexMcpConfig(filePath: string): void {
+      fs.writeFileSync(
+        filePath,
+        [
+          "[mcp_servers.marblo]",
+          'command = "/Applications/Marblo.app/Contents/MacOS/Marblo"',
+          'args = ["dist-mcp/index.js"]',
+          "",
+          "[mcp_servers.marblo.env]",
+          'ELECTRON_RUN_AS_NODE = "1"',
+          'MARBLO_AGENT_ID = "existing-agent"',
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+    }
+
     function makeLaunchManager(
       kind: string,
       mcpConfigPath: string,
+      model: LaunchConfig["model"] = "claude",
     ): OrchestratorManager {
       const ptyManager = {
         create: vi.fn(),
@@ -172,8 +190,8 @@ describe("OrchestratorManager session reconnect", () => {
         kill: vi.fn(),
       };
       const launchConfig: LaunchConfig = {
-        model: "claude",
-        command: "claude",
+        model,
+        command: model === "gpt" ? "codex" : "claude",
         args: [],
         env: {},
         mcpConfigPath,
@@ -202,14 +220,37 @@ describe("OrchestratorManager session reconnect", () => {
       return config.mcpServers.marblo.env;
     }
 
+    function readCodexMcpEnv(
+      filePath: string,
+    ): Record<string, string | undefined> {
+      const config = fs.readFileSync(filePath, "utf-8");
+      const match =
+        /\[mcp_servers\.marblo\.env\]\n([\s\S]*?)(?=\n\[|$)/.exec(config);
+      if (!match) return {};
+      const env: Record<string, string | undefined> = {};
+      for (const line of match[1].split("\n")) {
+        const lineMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(
+          line.trim(),
+        );
+        if (!lineMatch) continue;
+        const [, key, rawValue] = lineMatch;
+        const value = JSON.parse(rawValue) as unknown;
+        if (typeof value === "string") {
+          env[key] = value;
+        }
+      }
+      return env;
+    }
+
     it("injects MARBLO_CONTEXT=board for board orchestrators", () => {
       const mcpConfigPath = path.join(tmpHome, "board-mcp.json");
-      writeMcpConfig(mcpConfigPath);
+      writeClaudeMcpConfig(mcpConfigPath);
       const mgr = makeLaunchManager("board", mcpConfigPath);
 
       mgr.launch("project-1", rootPath, 12345, undefined, "new");
 
       expect(readMcpEnv(mcpConfigPath)).toMatchObject({
+        ELECTRON_RUN_AS_NODE: "1",
         MARBLO_BRIDGE_PORT: "12345",
         MARBLO_PROJECT: "project-1",
         MARBLO_CONTEXT: "board",
@@ -218,16 +259,33 @@ describe("OrchestratorManager session reconnect", () => {
 
     it("leaves MARBLO_CONTEXT unset for non-board orchestrators", () => {
       const mcpConfigPath = path.join(tmpHome, "mission-mcp.json");
-      writeMcpConfig(mcpConfigPath);
+      writeClaudeMcpConfig(mcpConfigPath);
       const mgr = makeLaunchManager("mission", mcpConfigPath);
 
       mgr.launch("project-1", rootPath, 12345, undefined, "new");
 
       expect(readMcpEnv(mcpConfigPath)).toMatchObject({
+        ELECTRON_RUN_AS_NODE: "1",
         MARBLO_BRIDGE_PORT: "12345",
         MARBLO_PROJECT: "project-1",
       });
       expect(readMcpEnv(mcpConfigPath).MARBLO_CONTEXT).toBeUndefined();
+    });
+
+    it("patches codex TOML env without stripping existing Electron node mode", () => {
+      const mcpConfigPath = path.join(tmpHome, "codex-config.toml");
+      writeCodexMcpConfig(mcpConfigPath);
+      const mgr = makeLaunchManager("board", mcpConfigPath, "gpt");
+
+      mgr.launch("project-1", rootPath, 12345, undefined, "new");
+
+      expect(readCodexMcpEnv(mcpConfigPath)).toMatchObject({
+        ELECTRON_RUN_AS_NODE: "1",
+        MARBLO_AGENT_ID: "existing-agent",
+        MARBLO_BRIDGE_PORT: "12345",
+        MARBLO_PROJECT: "project-1",
+        MARBLO_CONTEXT: "board",
+      });
     });
   });
 

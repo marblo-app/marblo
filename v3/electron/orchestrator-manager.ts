@@ -75,12 +75,40 @@ function codexTomlEnvLine(key: string, value: string): string {
   return `${key} = ${JSON.stringify(value)}`;
 }
 
+function parseCodexTomlEnvBlock(block: string): OrchestratorMcpEnv {
+  const env: OrchestratorMcpEnv = {};
+  for (const line of block.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(trimmed);
+    if (!match) continue;
+    const [, key, rawValue] = match;
+    try {
+      const value = JSON.parse(rawValue) as unknown;
+      if (typeof value === "string") {
+        env[key] = value;
+      }
+    } catch {
+      env[key] = rawValue.replace(/^"(.*)"$/, "$1");
+    }
+  }
+  return env;
+}
+
 function patchCodexMarbloMcpEnv(
   configPath: string,
   env: OrchestratorMcpEnv,
 ): void {
   const configContent = fs.readFileSync(configPath, "utf-8");
-  const envEntries = Object.entries(env)
+  const existingEnvMatch =
+    /\n?\[mcp_servers\.marblo\.env\]\n([\s\S]*?)(?=\n\[|$)/.exec(
+      configContent,
+    );
+  const existingEnv = existingEnvMatch
+    ? parseCodexTomlEnvBlock(existingEnvMatch[1])
+    : {};
+  const mergedEnv = { ...existingEnv, ...env };
+  const envEntries = Object.entries(mergedEnv)
     .map(([key, value]) => codexTomlEnvLine(key, value))
     .join("\n");
   if (!envEntries) return;
@@ -655,6 +683,7 @@ export class OrchestratorManager {
     }
 
     const mcpEnvPatch: OrchestratorMcpEnv = {
+      ELECTRON_RUN_AS_NODE: "1",
       MARBLO_BRIDGE_PORT: String(bridgePort),
       MARBLO_PROJECT: projectId,
     };
