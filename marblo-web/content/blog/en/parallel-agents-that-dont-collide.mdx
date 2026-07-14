@@ -1,0 +1,44 @@
+---
+title: "Six Agents Charging at Once — Without Stepping on Each Other"
+description: "Anyone who's run agents in parallel knows the real problem isn't speed — it's collision. Here's why giving each agent its own worktree is the game-changer, told as a story."
+date: "2026-07-14"
+category: "product"
+locales: ["ko", "en", "ja"]
+author: "Marblo"
+---
+
+I remember the first time I ran two agents in the same folder at once. It was a disaster.
+
+One was fixing the payment API. The other, right beside it, switched branches. In the blink of an eye, half a day of the first agent's uncommitted work vanished. No error message. That day I learned something: **the real enemy of parallel work isn't speed — it's collision.**
+
+## Speed is easy. Not stepping on each other is hard
+
+Spinning up several agents is trivial. Open six terminal tabs and you're done. The problem is that those six all touch the same codebase.
+
+One runs `git checkout` and reverts the next one's files. One touches staging and tangles the next one's commits. It's six people trying to remodel the same room at the same time. Someone always steps in wet paint.
+
+So most people quietly give up on parallelism. Wait for one to finish, then the next. Back to a queue. You spin up six agents and, in practice, work one at a time. Feels a little hollow, doesn't it?
+
+## The day six actually moved at once
+
+I won't forget how it felt to watch six agents charge forward — _truly_ at once — in Marblo for the first time.
+
+One on the backend API, one on the frontend form, one on tests, the rest on separate modules. Six cards flushed to IN_PROGRESS on the board at the same moment. And nobody stepped on anybody.
+
+The trick is simple. Marblo spawns any agent that risks a collision into **its own isolated worktree** — its own folder, its own branch. Agent A can rip a file half apart and nothing happens in B's world. Six parallel universes running side by side, yet sharing one history. (Curious how? I dug down to the repository level in [Parallel work without collisions using worktree isolation](/en/blog/worktree-isolation-for-agents).)
+
+## The game-changer wasn't speed — it was peace of mind
+
+Honestly, the number that changed me wasn't throughput. It was **calm.** That was the real thing.
+
+Being able to let six agents loose without flinching at who might erase whose work. Handing a risky refactor to one agent, knowing that if it fails I just throw that one worktree away. Knowing main is always clean. With that safety, I could finally **split work more boldly.**
+
+Lose the fear and the scale grows. People running two agents start running six; people running six start running ten. Parallelism only becomes real once nobody can get stepped on.
+
+## And then it converges again
+
+Of course, parallel universes are useless if they stay forked forever. The commits piling up in each worktree rise as PRs, a human reviews them at the REVIEW stage, and they merge back into a single `main`. Scatter to run, converge at the end. Worktrees that finished with no changes clean themselves up.
+
+Push in parallel, but never lose control. The moment that stops being a slogan and becomes a **daily feeling**, the whole way you work changes.
+
+Handing work to six agents, trusting they won't collide, and going to sleep. Want to feel it? [Apply to the Founder beta](/en/founders) now and you'll be among the first.
