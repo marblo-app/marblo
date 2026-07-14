@@ -1439,7 +1439,11 @@ interface FounderEmailContent {
   text: string;
 }
 
-function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
+// export 는 테스트의 dry 렌더용. 트리거가 아니므로(=__endpoint 없음)
+// firebase-functions 의 배포 discovery 는 이 export 를 건너뛴다.
+export function buildFounderAccessEmail(
+  locale: FounderLocale,
+): FounderEmailContent {
   const downloadUrl = `${SITE_BASE}/${locale}/download`;
   const feedbackUrl = `${SITE_BASE}/${locale}/beta-survey`;
   const coupon = FOUNDER_COURSE_COUPON;
@@ -1447,10 +1451,15 @@ function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
 
   if (locale === "en") {
     const discordHtml = hasDiscord
-      ? `<p><a href="${DISCORD_INVITE_URL}" style="color:#4f46e5;font-weight:600">Join the Founders Discord →</a></p>`
+      ? `<p>Talk with other founders in real time, get product updates first, and share bugs or feedback directly with the team.</p>
+        <p><a href="${DISCORD_INVITE_URL}" style="color:#4f46e5;font-weight:600">Join the Founders Discord →</a></p>`
       : `<p style="color:#666">A separate Discord invite will follow shortly.</p>`;
     const discordText = hasDiscord
-      ? `Join the Founders Discord: ${DISCORD_INVITE_URL}`
+      ? [
+          `Join the Founders Discord: ${DISCORD_INVITE_URL}`,
+          "   Talk with other founders in real time, get product updates first,",
+          "   and share bugs or feedback directly with the team.",
+        ].join("\n")
       : `A separate Discord invite will follow shortly.`;
     return {
       subject: "🎉 You're a Marblo Founder — Access Details Inside",
@@ -1487,10 +1496,15 @@ function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
 
   if (locale === "ja") {
     const discordHtml = hasDiscord
-      ? `<p><a href="${DISCORD_INVITE_URL}" style="color:#4f46e5;font-weight:600">ファウンダー Discord に参加する →</a></p>`
+      ? `<p>他のファウンダーとリアルタイムで交流し、製品アップデートをいち早く受け取り、バグやフィードバックをチームに直接お寄せいただけます。</p>
+        <p><a href="${DISCORD_INVITE_URL}" style="color:#4f46e5;font-weight:600">ファウンダー Discord に参加する →</a></p>`
       : `<p style="color:#666">Discord の招待は追ってご案内します。</p>`;
     const discordText = hasDiscord
-      ? `ファウンダー Discord: ${DISCORD_INVITE_URL}`
+      ? [
+          `ファウンダー Discord: ${DISCORD_INVITE_URL}`,
+          "   他のファウンダーとリアルタイムで交流し、製品アップデートをいち早く受け取り、",
+          "   バグやフィードバックをチームに直接お寄せいただけます。",
+        ].join("\n")
       : `Discord の招待は追ってご案内します。`;
     return {
       subject: "🎉 Marblo ファウンダーに選ばれました — アクセス案内",
@@ -1527,10 +1541,15 @@ function buildFounderAccessEmail(locale: FounderLocale): FounderEmailContent {
 
   // 기본: 한국어
   const discordHtml = hasDiscord
-    ? `<p><a href="${DISCORD_INVITE_URL}" style="color:#4f46e5;font-weight:600">파운더 디스코드 참여하기 →</a></p>`
+    ? `<p>다른 파운더들과 실시간으로 이야기 나누고, 제품 업데이트를 가장 먼저 받아보고, 버그·피드백을 팀에 바로 전해 주세요.</p>
+      <p><a href="${DISCORD_INVITE_URL}" style="color:#4f46e5;font-weight:600">파운더 디스코드 참여하기 →</a></p>`
     : `<p style="color:#666">디스코드 초대는 곧 별도로 안내드리겠습니다.</p>`;
   const discordText = hasDiscord
-    ? `파운더 디스코드: ${DISCORD_INVITE_URL}`
+    ? [
+        `파운더 디스코드: ${DISCORD_INVITE_URL}`,
+        "   다른 파운더들과 실시간으로 이야기 나누고, 제품 업데이트를 가장 먼저 받아보고,",
+        "   버그·피드백을 팀에 바로 전해 주세요.",
+      ].join("\n")
     : `디스코드 초대는 곧 별도로 안내드리겠습니다.`;
   return {
     subject: "🎉 마블로 파운더로 선정되셨습니다 — 접근 안내",
