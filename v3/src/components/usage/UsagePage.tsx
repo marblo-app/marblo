@@ -13,6 +13,7 @@ import {
   CONNECTED_RATE_LIMIT_PACKAGES,
   getRateLimitProviderModels,
 } from "./rateLimitProviders";
+import { resolveRateLimitWindows } from "./rateLimitWindows";
 
 /**
  * Top-level Usage tab. Surfaces what used to be buried two levels deep
@@ -543,74 +544,6 @@ function fmtReset(epochSeconds: number, t: Translate): string {
   return t("usage.reset.minutes", { n: Math.max(1, Math.round(ms / 60_000)) });
 }
 
-type RateLimitWindowKind = "fiveHour" | "weekly";
-
-function windowKindByDuration(
-  durationMins: number | null | undefined,
-): RateLimitWindowKind | null {
-  if (typeof durationMins !== "number" || !Number.isFinite(durationMins)) {
-    return null;
-  }
-  if (Math.abs(durationMins - 10080) <= 60) return "weekly";
-  if (Math.abs(durationMins - 300) <= 60) return "fiveHour";
-  if (durationMins >= 7 * 24 * 60) return "weekly";
-  return "fiveHour";
-}
-
-function readAccountWindow(
-  acct: RateLimitSnapshot | null | undefined,
-  kind: RateLimitWindowKind,
-): { percent: number; resetAt?: number } | null {
-  if (!acct) return null;
-  const primaryKind = windowKindByDuration(acct.primaryWindowDurationMins);
-  const secondaryKind = windowKindByDuration(acct.secondaryWindowDurationMins);
-  if (primaryKind === kind && typeof acct.primaryPercent === "number") {
-    return {
-      percent: acct.primaryPercent,
-      resetAt: acct.primaryResetAt ?? undefined,
-    };
-  }
-  if (secondaryKind === kind && typeof acct.secondaryPercent === "number") {
-    return {
-      percent: acct.secondaryPercent,
-      resetAt: acct.secondaryResetAt ?? undefined,
-    };
-  }
-  if (
-    primaryKind === null &&
-    secondaryKind === null &&
-    kind === "fiveHour" &&
-    typeof acct.primaryPercent === "number"
-  ) {
-    return {
-      percent: acct.primaryPercent,
-      resetAt: acct.primaryResetAt ?? undefined,
-    };
-  }
-  if (
-    primaryKind === null &&
-    secondaryKind === null &&
-    kind === "weekly" &&
-    typeof acct.secondaryPercent === "number"
-  ) {
-    return {
-      percent: acct.secondaryPercent,
-      resetAt: acct.secondaryResetAt ?? undefined,
-    };
-  }
-  if (
-    secondaryKind === null &&
-    kind === "weekly" &&
-    typeof acct.secondaryPercent === "number"
-  ) {
-    return {
-      percent: acct.secondaryPercent,
-      resetAt: acct.secondaryResetAt ?? undefined,
-    };
-  }
-  return null;
-}
-
 /** 단일 한도 윈도우(5h / 주간) 게이지. percent = 사용%, 표기는 "남음" 기준. */
 function WindowGauge({
   label,
@@ -759,24 +692,13 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
               : model === "gpt"
                 ? account?.gpt
                 : null;
-          const accountLive = readAccountWindow(acct, "fiveHour");
-          const accountWeekly = readAccountWindow(acct, "weekly");
-          const live =
-            accountLive?.percent ??
-            (typeof rep?.rateLimitPercent === "number"
-              ? rep.rateLimitPercent
-              : undefined);
-          const liveReset = accountLive?.resetAt ?? rep?.rateLimitResetAt;
-          const weekly =
-            accountWeekly?.percent ??
-            (typeof rep?.rateLimitWeeklyPercent === "number"
-              ? rep.rateLimitWeeklyPercent
-              : undefined);
-          const weeklyReset =
-            accountWeekly?.resetAt ?? rep?.rateLimitWeeklyResetAt;
+          // Account snapshot is canonical. When it is duration-aware, the set
+          // of windows it carries is authoritative — a stale per-agent doc must
+          // not resurrect a window (e.g. a bogus 5h gauge on a weekly-only
+          // Codex `prolite` plan). resolveRateLimitWindows encodes that gate.
+          const { live, liveReset, weekly, weeklyReset, weeklyOnly, hasData } =
+            resolveRateLimitWindows(acct, rep);
           const headline = typeof weekly === "number" ? weekly : live;
-          const hasData =
-            typeof live === "number" || typeof weekly === "number";
           return (
             <div
               key={model}
@@ -816,6 +738,13 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
                   percent={weekly}
                   resetAt={weeklyReset}
                 />
+              )}
+              {weeklyOnly && (
+                // 5h 창 자체가 없는 플랜(예: Codex prolite) — 빈 5h 게이지를
+                // 그리는 대신 주간 전용임을 명시한다.
+                <p className="mt-2 text-[11px] leading-snug text-gray-500">
+                  {t("usage.rateLimit.weeklyOnly")}
+                </p>
               )}
               {!hasData && (
                 // 유효한 percent 가 없으면 스테일 빨강 게이지 대신 우아하게 표기.

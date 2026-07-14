@@ -41,6 +41,8 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.rateLimit.noUsage": "No usage",
   "usage.rateLimit.window.5h": "5 hours",
   "usage.rateLimit.window.weekly": "Weekly (7 days)",
+  "usage.rateLimit.weeklyOnly":
+    "This plan has a weekly (7-day) limit only · no 5-hour window",
   "usage.rateLimit.resetSuffix": "resets {time}",
   "usage.rateLimit.note.claude":
     "Max plan: 5-hour/weekly limits (managed by the CLI) · Pro: daily limit",

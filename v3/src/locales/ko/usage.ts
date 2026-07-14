@@ -40,6 +40,8 @@ export const usage = {
   "usage.rateLimit.noUsage": "사용 없음",
   "usage.rateLimit.window.5h": "5시간",
   "usage.rateLimit.window.weekly": "주간(7일)",
+  "usage.rateLimit.weeklyOnly":
+    "이 플랜은 주간(7일) 한도만 제공합니다 · 5시간 한도 없음",
   "usage.rateLimit.resetSuffix": "{time} 리셋",
   "usage.rateLimit.note.claude":
     "Max 구독: 5시간/주간 한도 (CLI 자체 관리) · Pro: 일일 제한",
