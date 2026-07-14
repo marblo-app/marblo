@@ -700,7 +700,7 @@ describe("dispatchTask — complex stages (§5)", () => {
     expect(res.stageAgentIds?.length).toBe(2);
   });
 
-  it("a simple stage routes to a logical sub-agent (no spawn for that stage)", async () => {
+  it("a simple stage uses the default physical cheap-tier dispatch", async () => {
     const { bridge } = makeBridge();
     const res = await bridge.dispatchTask(
       dispatch({
@@ -715,9 +715,9 @@ describe("dispatchTask — complex stages (§5)", () => {
       }),
     );
     expect(res.action).toBe("staged");
-    // The simple stage is logical (no agentId), so only the complex stage
-    // contributes an agent id.
-    expect(res.stageAgentIds?.length).toBe(1);
+    // Simple stages now default to physical dispatch too, so both stages
+    // contribute agent ids.
+    expect(res.stageAgentIds?.length).toBe(2);
   });
 
   it("stages are IGNORED when complexity is not complex (single dispatch)", async () => {
@@ -737,10 +737,10 @@ describe("dispatchTask — complex stages (§5)", () => {
   });
 });
 
-// ── SPAWN-MODEL-ALLOCATION §B: simple cheap 물리스폰 opt-in (isolate) ──
+// ── SPAWN-MODEL-ALLOCATION §B v2: simple physical default, logical opt-in ──
 
-describe("dispatchTask — simple isolate (§B)", () => {
-  it("simple WITHOUT isolate → logical sub-agent (no physical spawn)", async () => {
+describe("dispatchTask — simple physical default (§B)", () => {
+  it("simple WITHOUT useLogical → physical spawn on cheap tier", async () => {
     const { bridge, am } = makeBridge();
     const res = await bridge.dispatchTask(
       dispatch({
@@ -750,11 +750,11 @@ describe("dispatchTask — simple isolate (§B)", () => {
         model: "claude",
       }),
     );
-    expect(res.action).toBe("logical");
-    expect(am.launchCalls).toBe(0);
+    expect(res.action).toBe("spawned");
+    expect(am.launchCalls).toBe(1);
   });
 
-  it("simple WITH isolate=true → physical spawn (action=spawned)", async () => {
+  it("simple WITH useLogical=true → logical sub-agent (no physical spawn)", async () => {
     const { bridge, am } = makeBridge();
     const res = await bridge.dispatchTask(
       dispatch({
@@ -762,11 +762,27 @@ describe("dispatchTask — simple isolate (§B)", () => {
         taskId: "isoTask00002",
         complexity: "simple",
         model: "claude",
+        useLogical: true,
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.action).toBe("logical");
+    expect(am.launchCalls).toBe(0);
+  });
+
+  it("legacy isolate=true remains physical (action=spawned)", async () => {
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask(
+      dispatch({
+        projectId: "px",
+        taskId: "isoTask00004",
+        complexity: "simple",
+        model: "claude",
         isolate: true,
       }),
     );
     expect(res.success).toBe(true);
-    expect(res.action).toBe("spawned"); // logical 단락을 건너뜀
+    expect(res.action).toBe("spawned");
     expect(am.launchCalls).toBe(1);
   });
 
@@ -798,7 +814,7 @@ describe("dispatchTask — simple→antigravity routing (§C)", () => {
     else process.env.MARBLO_AGY_SIMPLE_BIAS = savedBias;
   });
 
-  it("simple+isolate + bias → antigravity 로 스폰(complexity 가 scoreModels 까지 전달)", async () => {
+  it("simple physical default + bias → antigravity 로 스폰(complexity 가 scoreModels 까지 전달)", async () => {
     process.env.MARBLO_AGY_SIMPLE_BIAS = "100";
     const { bridge, am } = makeBridge();
     const res = await bridge.dispatchTask(
@@ -806,7 +822,6 @@ describe("dispatchTask — simple→antigravity routing (§C)", () => {
         projectId: "px",
         taskId: "agyTask00001",
         complexity: "simple",
-        isolate: true,
         enabledModels: [
           "claude",
           "antigravity",
@@ -819,7 +834,7 @@ describe("dispatchTask — simple→antigravity routing (§C)", () => {
     expect(spawned.some((a) => a.model === "antigravity")).toBe(true);
   });
 
-  it("명시 model 힌트는 bias 보다 우선(simple+isolate, model=claude → claude)", async () => {
+  it("명시 model 힌트는 bias 보다 우선(simple physical default, model=claude → claude)", async () => {
     process.env.MARBLO_AGY_SIMPLE_BIAS = "100";
     const { bridge, am } = makeBridge();
     const res = await bridge.dispatchTask(
@@ -827,7 +842,6 @@ describe("dispatchTask — simple→antigravity routing (§C)", () => {
         projectId: "px",
         taskId: "agyTask00002",
         complexity: "simple",
-        isolate: true,
         model: "claude",
         enabledModels: [
           "claude",

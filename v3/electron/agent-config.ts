@@ -658,7 +658,7 @@ export function resolveTopCodexReasoning(): string {
   return ["low", "medium", "high"].includes(r) ? r : "high";
 }
 
-/** 기본 cheap Claude 모델 — simple 물리스폰(isolate)에서 사용. */
+/** 기본 cheap Claude 모델 — simple 기본 물리 스폰에서 사용. */
 export const DEFAULT_SIMPLE_CLAUDE_MODEL = "sonnet";
 
 /** simple(저난도) 에서 쓸 cheap Claude 모델. env MARBLO_SIMPLE_CLAUDE_MODEL,
@@ -690,7 +690,7 @@ export function resolveSimpleCodexReasoning(): string {
 // ★결정1: complex/simple 만 resolver 를 탄다. env 미설정 시 simple=sonnet/low,
 // standard=opus(리터럴, 무변동). complex 는 DEFAULT_TOP_CLAUDE_MODEL="fable"
 // 정책으로 CLI 자격 충족 시 fable5, 미달이면 opus 폴백(티켓 XL3NhdW). simple 모델은
-// dispatch_task isolate=true(물리 cheap 스폰)일 때 비로소 실제로 쓰인다(§B).
+// dispatch_task 기본 물리 스폰에서 비용 폭발을 막는 cheap tier 로 쓰인다(§B v2).
 export type TaskComplexity = "simple" | "standard" | "complex";
 export function modelTierForComplexity(
   model: ModelType,
@@ -2108,7 +2108,7 @@ export class AgentConfigGenerator {
         "Workflow:",
         "1. Convert the accepted plan or PRD into a single create_tasks_bulk call. Do not create tasks one by one unless bulk creation fails validation.",
         "2. Use aliases or returned task ids to dispatch ready tasks with dispatch_task.",
-        '3. Prefer complexity="standard" unless the task is clearly simple or complex. If the user specifies Codex, pass model="codex".',
+        '3. Prefer complexity="standard" unless the task is clearly simple or complex. complexity="simple" still creates a physical board-tracked agent on the cheap tier; use use_logical=true only for explicit internal handling. If the user specifies Codex, pass model="codex".',
         "4. Summarize task ids and dispatch results.",
         "",
         "Fallback equivalents:",

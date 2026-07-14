@@ -32,6 +32,7 @@ interface DispatchTaskPayload {
   name?: unknown;
   cwd?: unknown;
   tags?: unknown;
+  use_logical?: unknown;
 }
 
 interface BridgeDispatchResponse {
@@ -288,6 +289,7 @@ async function dispatchTask(): Promise<void> {
       nameHint: optionalString(payload.name),
       cwd: optionalString(payload.cwd),
       tags: stringArray(payload.tags),
+      useLogical: payload.use_logical === true,
       projectId: process.env.MARBLO_PROJECT || "",
       parentAgentId: process.env.MARBLO_AGENT_ID || "",
       contextId: process.env.MARBLO_CONTEXT || "",

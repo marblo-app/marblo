@@ -2694,7 +2694,7 @@ export function registerTools(server: McpServer): void {
   // ── dispatch_task — Smart agent dispatch (reuse/restart/spawn/logical)
   auditedTool(
     "dispatch_task",
-    "Smart agent dispatch: automatically decides whether to reuse an idle agent, restart a stopped one, spawn a new one, or recommend a logical (internal) sub-agent. Preferred over manual spawn_agent/reuse_agent calls.",
+    "Smart agent dispatch: by default creates/uses a physical agent and board-tracked task, including complexity='simple'. Logical/internal sub-agents are explicit opt-in only via use_logical=true. Preferred over manual spawn_agent/reuse_agent calls.",
     {
       role: z.string().describe("Agent role (backend/frontend/test/devops)"),
       instruction: z.string().describe("Instruction to send to the agent"),
@@ -2704,7 +2704,7 @@ export function registerTools(server: McpServer): void {
         .optional()
         .describe(
           "Task difficulty — also picks the agent model tier (cost/quality). " +
-            "'simple' = internal sub-agent + cheaper model; 'standard' (default) = " +
+            "'simple' = physical agent + board task using cheap tier (claude sonnet / codex low); 'standard' (default) = " +
             "top model (claude opus / gpt-5.5 medium); 'complex' = physical agent + " +
             "top reasoning (claude opus / gpt-5.5 high). Set per task difficulty.",
         ),
@@ -2753,10 +2753,13 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          "★simple 전용 opt-in 물리스폰(기본 off). 기본은 complexity='simple' 이면 " +
-            "logical(오케 내부 서브에이전트)로 단락되는데, true 면 그 단락을 건너뛰고 " +
-            "cheap 모델(claude=sonnet, gpt=low)로 격리 worktree 물리 에이전트를 스폰한다. " +
-            "격리·병렬이 필요한 저난도 작업용. complexity!=='simple' 면 무시됨.",
+          "Deprecated compatibility flag. simple도 기본으로 cheap 모델(claude=sonnet, gpt=low) 물리 에이전트+보드 티켓 경로를 탄다. 논리 서브에이전트가 필요하면 use_logical=true를 사용한다.",
+        ),
+      use_logical: z
+        .boolean()
+        .optional()
+        .describe(
+          "명시적 opt-in 논리 서브에이전트 모드. true이고 complexity='simple'일 때만 오케 내부 logical 처리로 단락한다. 기본 false: simple도 물리 에이전트+보드 티켓.",
         ),
     },
     async ({
@@ -2771,6 +2774,7 @@ export function registerTools(server: McpServer): void {
       mix,
       stages,
       isolate,
+      use_logical,
     }) => {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
@@ -2900,9 +2904,9 @@ export function registerTools(server: McpServer): void {
         effectiveStages = undefined;
       }
 
-      // §B: isolate(simple cheap 물리스폰)는 simple 전용 opt-in. complexity!=="simple"
-      // 면 무시 + 경고(조용히 삼키지 않음). bridge 도 같은 가드를 둔다(simple 이 아니면
-      // 어차피 logical 단락을 안 타므로 isolate 가 무의미).
+      // §B(v2): simple 은 기본 물리 스폰이다. 논리 서브에이전트는 use_logical
+      // 명시 opt-in만 허용한다. isolate 는 호환용으로만 남아 있으며 라우팅을
+      // 바꾸지 않는다.
       let effectiveIsolate = isolate;
       if (isolate && complexity !== "simple") {
         console.warn(
@@ -2911,6 +2915,15 @@ export function registerTools(server: McpServer): void {
           }' (simple 전용).`,
         );
         effectiveIsolate = undefined;
+      }
+      const effectiveUseLogical =
+        complexity === "simple" && use_logical === true;
+      if (use_logical && complexity !== "simple") {
+        console.warn(
+          `[dispatch_task] use_logical ignored — complexity='${
+            complexity || "standard"
+          }' (simple 전용).`,
+        );
       }
 
       try {
@@ -2931,6 +2944,7 @@ export function registerTools(server: McpServer): void {
               mix: effectiveMix,
               stages: effectiveStages,
               isolate: effectiveIsolate,
+              useLogical: effectiveUseLogical,
               projectId: process.env.MARBLO_PROJECT || "",
               // Forward parent agent id for owner fallback when projectId
               // is empty (external Claude Code → Marblo MCP path).

@@ -383,11 +383,13 @@ export interface DispatchTaskRequest {
    * `progress-tracking` enable the same guard for MCP callers whose schema has
    * not yet grown this explicit flag. */
   requireTrackedModel?: boolean;
-  /** simple 물리스폰 opt-in(§B). 기본 false 면 complexity==="simple" 은 종전대로
-   * action="logical"(내부 서브에이전트)로 단락된다. true 면 logical 단락을 건너뛰고
-   * cheap 모델(claude=resolveSimpleClaudeModel/기본 sonnet, gpt=low)로 격리 worktree
-   * 물리 에이전트를 스폰한다 — 격리·병렬이 필요한 저난도 작업용. simple 이 아니면 무시. */
+  /** Deprecated compatibility flag. simple 작업도 기본으로 물리 에이전트 +
+   * 보드 티켓 경로를 탄다. 논리 서브에이전트는 useLogical=true 로만 opt-in. */
   isolate?: boolean;
+  /** Explicit opt-in for orchestrator-internal logical handling. Default false:
+   * even complexity==="simple" spawns/reuses a physical agent and gets board
+   * tracking. */
+  useLogical?: boolean;
   /** 모델 믹스(SPAWN-MODEL-ALLOCATION-V2 §4) — complex 전용 opt-in. 발동 시 Claude
    * 최상위 + Codex high 2-spawn. "cross-check"=교차검증(기본), "split-role"=역할분담.
    * complexity!=="complex" 면 무시(+경고). 미지정이면 단일 디스패치(무변동). */
@@ -1533,7 +1535,7 @@ export class BridgeServer {
       instruction,
       complexity = "standard",
       tags = [],
-      isolate = false,
+      useLogical = false,
     } = params;
     // Fold "codex"/"agy" aliases onto canonical ids so an explicit model
     // request matches the right agents during reuse scoring AND spawns the
@@ -1557,16 +1559,14 @@ export class BridgeServer {
       params.taskId,
     );
 
-    // Step 0: Logical agent for simple tasks — unless isolate=true(§B), which
-    // opts a simple task into a real isolated worktree spawn on a cheap model
-    // (claude=resolveSimpleClaudeModel/sonnet, gpt=low). Default(!isolate) keeps
-    // the cheapest path: an internal sub-agent that runs in the orchestrator's
-    // own context with no extra process.
-    if (complexity === "simple" && !isolate) {
+    // Step 0: Logical agent is now explicit opt-in only. The default for simple
+    // tasks is the normal physical path below, which guarantees board tracking
+    // and still uses the cheap simple model tier (claude=sonnet, codex=low).
+    if (complexity === "simple" && useLogical) {
       return {
         success: true,
         action: "logical",
-        reason: `Simple task — use internal sub-agent (complexity='simple')`,
+        reason: `Simple task — logical sub-agent explicitly requested (useLogical=true)`,
         taskId: params.taskId ?? null,
       };
     }
