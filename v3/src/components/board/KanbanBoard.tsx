@@ -191,10 +191,19 @@ export function KanbanBoard() {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
         <div className="text-center">
-          <p className="text-lg font-medium">No Projects</p>
+          <p className="text-lg font-medium">{t("board.noProjects.title")}</p>
           <p className="mt-1 text-sm text-gray-500">
-            Create a project to start using the board.
+            {t("board.noProjects.desc")}
           </p>
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("marblo:select-folder"))
+            }
+            className="mt-4 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+          >
+            {t("board.noProjects.cta")}
+          </button>
         </div>
       </div>
     );

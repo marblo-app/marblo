@@ -310,6 +310,12 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.recheck": "Re-check",
   "onboarding.cliGate.continue": "Continue",
   "onboarding.cliGate.skip": "Later",
+  "onboarding.cliGate.outdated": "Outdated (v{from} → v{to})",
+  "onboarding.cliGate.updateHint":
+    "Update to the latest version with the command below:",
+  "onboarding.cliGate.runLogin": "Run sign-in",
+  "onboarding.cliGate.runLoginHint":
+    "Runs in a terminal · detected automatically when done",
 
   "onboarding.login.or": "or",
   "onboarding.login.email": "Email",

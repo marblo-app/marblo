@@ -228,4 +228,10 @@ export const agents = {
   "agents.tab.plan": "플랜",
   "agents.tab.atLimitHint":
     "한도 도달 — 업그레이드 또는 기존 에이전트 정지 필요",
+
+  // ── No-project empty state (agents tab reached with no project selected) ──
+  "agents.noProject.title": "선택된 프로젝트가 없습니다",
+  "agents.noProject.desc":
+    "에이전트는 프로젝트에 속합니다. 먼저 프로젝트 폴더를 열거나 생성하세요.",
+  "agents.noProject.cta": "폴더 열기 · 프로젝트 생성",
 };

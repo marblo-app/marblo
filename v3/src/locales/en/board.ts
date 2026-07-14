@@ -9,6 +9,16 @@ export const board: Record<keyof typeof koBoard, string> = {
   // KanbanBoard
   "board.aiBreakdown": "AI Breakdown",
 
+  // KanbanBoard — no-project empty state (clickable CTA → folder select)
+  "board.noProjects.title": "No projects",
+  "board.noProjects.desc": "Open a project to start using the board.",
+  "board.noProjects.cta": "Open folder · Create project",
+
+  // KanbanColumn — empty column
+  "board.column.noTasks": "No tasks",
+  "board.column.dropHere": "Drop here",
+  "board.column.todoHint": "+ Start with New Task",
+
   // TaskCard — presence + assignee
   "board.presence.online": "Online",
   "board.presence.idle": "Idle",

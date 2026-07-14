@@ -238,4 +238,10 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.tab.activeCount": "Active agents {active} / {limit}",
   "agents.tab.plan": "plan",
   "agents.tab.atLimitHint": "Limit reached — upgrade or stop an existing agent",
+
+  // ── No-project empty state (agents tab reached with no project selected) ──
+  "agents.noProject.title": "No project selected",
+  "agents.noProject.desc":
+    "Agents belong to a project. Open or create a project folder first.",
+  "agents.noProject.cta": "Open folder · Create project",
 };

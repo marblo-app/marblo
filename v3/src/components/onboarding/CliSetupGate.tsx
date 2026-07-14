@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
+import { useTerminalStore } from "../../stores/terminalStore";
+import {
+  autoInstallComplete,
+  requiredInstalled as computeRequiredInstalled,
+  resolveGateVisibility,
+} from "../../lib/cliSetupGate";
 
 /**
  * First-run CLI setup gate.
@@ -46,6 +52,14 @@ const ROWS: CliRow[] = [
   },
 ];
 
+/** Command that installs/updates each CLI to the latest published version.
+ * Reused by the version-check advisory when an installed CLI is behind. */
+const UPDATE_CMD: Record<Model, string> = {
+  claude: "npm install -g @anthropic-ai/claude-code",
+  codex: "npm install -g @openai/codex",
+  antigravity: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+};
+
 type CliState = CliAuthResult & { checking: boolean };
 
 function isReady(s: CliState | undefined): boolean {
@@ -70,7 +84,25 @@ export function CliSetupGate() {
   );
   const [copied, setCopied] = useState<string | null>(null);
   const [ready, setReady] = useState(false); // required set (claude+codex) satisfied
+  const [loginRunning, setLoginRunning] = useState(false); // sign-in launched in a terminal
+  // Local↔latest CLI versions (keyed by row id). Advisory only — used to warn
+  // when an installed CLI is behind so an outdated build isn't silently passed
+  // through the auth-only gate. Never blocks readiness.
+  const [versions, setVersions] = useState<Record<string, HarnessVersionInfo>>(
+    {},
+  );
   const autoRunRef = useRef(false); // one auto-install pass per mount
+
+  // Non-blocking version probe (npm view under the hood). Fire-and-forget so a
+  // slow/offline lookup never stalls the gate or the readiness spinner.
+  const refreshVersions = useCallback(() => {
+    window.electronAPI.harness
+      .versions()
+      .then((v) => setVersions(v))
+      .catch(() => {
+        /* advisory only — ignore failures */
+      });
+  }, []);
 
   const probe = useCallback(async (model: Model, id: string) => {
     setStates((prev) => ({
@@ -142,6 +174,7 @@ export function CliSetupGate() {
     if (autoRunRef.current) return;
     autoRunRef.current = true;
     let cancelled = false;
+    refreshVersions(); // fire-and-forget; result renders when it arrives
     (async () => {
       const first = await probeAll();
       if (cancelled) return;
@@ -154,6 +187,9 @@ export function CliSetupGate() {
       }
 
       let requiredReady = first.requiredReady;
+      // Latest per-row probe results (refreshed after an auto-install pass) —
+      // the source for the install-complete (FT-8) and re-prompt (FT-6) checks.
+      let latest = first.results;
       const missing = ROWS.filter(
         (r) =>
           r.required &&
@@ -161,18 +197,30 @@ export function CliSetupGate() {
           first.results[r.id]?.installed === false,
       );
       if (!autoDone && missing.length > 0) {
-        try {
-          localStorage.setItem(AUTO_INSTALL_KEY, "1");
-        } catch {
-          /* best effort */
-        }
         setVisible(true); // show progress while auto-installing
         for (const row of missing) {
           if (cancelled) return;
           await runInstall(row);
         }
         if (cancelled) return;
-        requiredReady = (await probeAll()).requiredReady;
+        const reprobe = await probeAll();
+        requiredReady = reprobe.requiredReady;
+        latest = reprobe.results;
+        // Only mark auto-install "done" once every previously-missing CLI is
+        // actually installed. On failure we leave the flag unset so the next
+        // launch retries the auto-install rather than silently giving up (FT-8).
+        if (
+          autoInstallComplete(
+            missing.map((r) => r.id),
+            latest,
+          )
+        ) {
+          try {
+            localStorage.setItem(AUTO_INSTALL_KEY, "1");
+          } catch {
+            /* best effort */
+          }
+        }
       }
 
       if (cancelled) return;
@@ -182,12 +230,31 @@ export function CliSetupGate() {
       } catch {
         /* private mode — treat as not dismissed */
       }
-      if (!requiredReady && !dismissed) setVisible(true);
+
+      // A prior "Later" is honored only while the required CLIs are at least
+      // installed. If one is still missing the user can't launch anything, so
+      // re-surface the gate and clear the stale dismissal — the next run keeps
+      // behaving like a first run until install succeeds (FT-6). Login-only
+      // gaps (installed but not authed) still respect the dismissal.
+      const requiredIds = ROWS.filter((r) => r.required).map((r) => r.id);
+      const decision = resolveGateVisibility({
+        requiredReady,
+        requiredInstalled: computeRequiredInstalled(requiredIds, latest),
+        dismissed,
+      });
+      if (decision.clearDismissed) {
+        try {
+          localStorage.removeItem(DISMISSED_KEY);
+        } catch {
+          /* best effort */
+        }
+      }
+      if (decision.visible) setVisible(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [probeAll, runInstall]);
+  }, [probeAll, runInstall, refreshVersions]);
 
   // Re-open on demand — the spawn guard dispatches this when a launch is
   // blocked (orchestrator/agent), and agent-manager's login-screen backstop
@@ -195,11 +262,12 @@ export function CliSetupGate() {
   useEffect(() => {
     const onOpen = () => {
       void probeAll();
+      refreshVersions();
       setVisible(true);
     };
     window.addEventListener("marblo:open-cli-setup", onOpen);
     return () => window.removeEventListener("marblo:open-cli-setup", onOpen);
-  }, [probeAll]);
+  }, [probeAll, refreshVersions]);
 
   const handleCopy = useCallback(async (cmd: string) => {
     try {
@@ -219,6 +287,60 @@ export function CliSetupGate() {
     }
     setVisible(false);
   }, []);
+
+  // One-click sign-in: spawn a real terminal tab, type the CLI's login command,
+  // and hide the gate so the user can complete the interactive OAuth flow. The
+  // auto-recheck effect below polls until the required set is authenticated, so
+  // no manual "Re-check" click is needed. Copy/Re-check remain as fallbacks.
+  const launchLogin = useCallback(async (row: CliRow, cmd: string) => {
+    if (!cmd) return;
+    const label = labelFor(row.model);
+    try {
+      const term = useTerminalStore.getState();
+      const id = await term.createSession(label);
+      term.openTerminalForSession(id, label);
+      setLoginRunning(true);
+      setVisible(false); // reveal the terminal so the user can finish sign-in
+      // Let the shell print its prompt before typing, so the command isn't
+      // swallowed by a not-yet-interactive shell.
+      setTimeout(() => {
+        window.electronAPI.pty.writeAndSubmit(id, cmd).catch(() => {
+          /* PTY closed — user can still type it themselves */
+        });
+      }, 700);
+    } catch {
+      /* terminal spawn failed — user can still copy/run the command manually */
+    }
+  }, []);
+
+  // Auto re-check while a sign-in is running in a terminal: poll the auth probe
+  // and re-check when the window regains focus (user returns from the browser
+  // OAuth flow). As soon as the required set is authenticated we stop — the
+  // gate is already hidden, so sign-in "just works" without a manual re-check.
+  useEffect(() => {
+    if (!loginRunning) return;
+    let stopped = false;
+    let ticks = 0;
+    const MAX_TICKS = 150; // ~6min backstop — then fall back to manual Re-check
+    const tick = async () => {
+      const { requiredReady } = await probeAll();
+      if (!stopped && requiredReady) setLoginRunning(false);
+    };
+    const interval = window.setInterval(() => {
+      if (++ticks > MAX_TICKS) {
+        setLoginRunning(false); // cleanup below clears the interval
+        return;
+      }
+      void tick();
+    }, 2500);
+    const onFocus = () => void tick();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [loginRunning, probeAll]);
 
   if (!visible) return null;
 
@@ -312,12 +434,24 @@ export function CliSetupGate() {
                   </div>
                 )}
 
-                {/* Installed but not authed → login command + copy */}
+                {/* Installed but not authed → one-click "Run sign-in" (spawns a
+                    terminal and runs the login command), with copy as fallback. */}
                 {s && !s.checking && s.installed && !s.authenticated && cmd && (
                   <div className="mt-3">
                     <p className="text-xs text-[#a6adc8]">
                       {t("onboarding.cliGate.loginHint")}
                     </p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <button
+                        onClick={() => void launchLogin(row, cmd)}
+                        className="rounded-md bg-[#89b4fa] px-3 py-1.5 text-xs font-medium text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
+                      >
+                        {t("onboarding.cliGate.runLogin")}
+                      </button>
+                      <span className="text-[10px] text-[#7f849c]">
+                        {t("onboarding.cliGate.runLoginHint")}
+                      </span>
+                    </div>
                     <CommandBox
                       cmd={cmd}
                       copied={copied}
@@ -326,6 +460,31 @@ export function CliSetupGate() {
                     />
                   </div>
                 )}
+
+                {/* Installed but outdated → advisory + update command (FT-5).
+                    Advisory only: never blocks the ready gate. */}
+                {s &&
+                  !s.checking &&
+                  s.installed &&
+                  versions[row.id]?.updateState === "outdated" && (
+                    <div className="mt-3 rounded-md border border-[#f9e2af]/30 bg-[#f9e2af]/10 p-2.5">
+                      <p className="text-xs font-medium text-[#f9e2af]">
+                        {t("onboarding.cliGate.outdated", {
+                          from: versions[row.id]?.localVersion ?? "?",
+                          to: versions[row.id]?.latestVersion ?? "?",
+                        })}
+                      </p>
+                      <p className="mt-1 text-xs text-[#a6adc8]">
+                        {t("onboarding.cliGate.updateHint")}
+                      </p>
+                      <CommandBox
+                        cmd={UPDATE_CMD[row.model]}
+                        copied={copied}
+                        onCopy={handleCopy}
+                        t={t}
+                      />
+                    </div>
+                  )}
               </div>
             );
           })}
@@ -333,7 +492,10 @@ export function CliSetupGate() {
 
         <div className="flex items-center justify-between gap-3 border-t border-[#313244] px-6 py-4">
           <button
-            onClick={() => void probeAll()}
+            onClick={() => {
+              void probeAll();
+              refreshVersions();
+            }}
             disabled={anyChecking}
             className="rounded-md border border-[#45475a] px-3 py-1.5 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-60"
           >

@@ -139,6 +139,33 @@ export function AgentsTab() {
   const throttle = checkAgentSpawn(planForBadge, agents);
   const atLimit = !throttle.allowed;
 
+  // No project selected → "Add agent" (header, empty-state, and the terminal
+  // panel's "+ Spawn agent" that routes here) would open a modal gated on
+  // `user && projectId` and silently no-op. Show a dedicated CTA that opens a
+  // project first (same folder-pick flow as the sidebar), so there's no
+  // dead-end. Placed after all hooks to keep hook order stable.
+  if (!projectId) {
+    return (
+      <div className="flex h-full items-center justify-center p-6 text-center text-gray-400">
+        <div>
+          <p className="text-lg font-medium">{t("agents.noProject.title")}</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-gray-500">
+            {t("agents.noProject.desc")}
+          </p>
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("marblo:select-folder"))
+            }
+            className="mt-4 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+          >
+            {t("agents.noProject.cta")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col">
       {throttle.limit > 0 && (

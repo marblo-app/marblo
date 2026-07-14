@@ -8,6 +8,16 @@ export const board = {
   // KanbanBoard
   "board.aiBreakdown": "AI 분해",
 
+  // KanbanBoard — no-project empty state (clickable CTA → folder select)
+  "board.noProjects.title": "프로젝트 없음",
+  "board.noProjects.desc": "프로젝트를 열어 보드를 시작하세요.",
+  "board.noProjects.cta": "폴더 열기 · 프로젝트 생성",
+
+  // KanbanColumn — empty column
+  "board.column.noTasks": "태스크 없음",
+  "board.column.dropHere": "여기에 놓기",
+  "board.column.todoHint": "+ 새 태스크로 시작",
+
   // TaskCard — presence + assignee
   "board.presence.online": "온라인",
   "board.presence.idle": "유휴",

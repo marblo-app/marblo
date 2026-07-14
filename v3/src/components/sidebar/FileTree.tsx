@@ -1512,6 +1512,17 @@ export function FileTree() {
     startInlineProjectCreation,
   ]);
 
+  // Shared "open a project" entry point — the board / agents no-project empty
+  // states dispatch `marblo:select-folder` so their CTA runs the exact same
+  // folder-pick + auto-register flow as the sidebar's "Select folder" button,
+  // instead of duplicating (and drifting from) that logic.
+  useEffect(() => {
+    const onSelectFolder = () => void handleSelectDirectory();
+    window.addEventListener("marblo:select-folder", onSelectFolder);
+    return () =>
+      window.removeEventListener("marblo:select-folder", onSelectFolder);
+  }, [handleSelectDirectory]);
+
   // "Register as a project" branch of the folder-choice banner → hand off to
   // the existing inline new-project banner with the picked folder prefilled.
   const handleChooseRegister = useCallback(() => {

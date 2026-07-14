@@ -305,6 +305,12 @@ export const onboarding = {
   "onboarding.cliGate.recheck": "다시 확인",
   "onboarding.cliGate.continue": "계속",
   "onboarding.cliGate.skip": "나중에",
+  "onboarding.cliGate.outdated": "구버전 (v{from} → v{to})",
+  "onboarding.cliGate.updateHint":
+    "아래 명령으로 최신 버전으로 업데이트하세요:",
+  "onboarding.cliGate.runLogin": "인증 실행",
+  "onboarding.cliGate.runLoginHint":
+    "터미널에서 자동 실행 · 완료되면 자동 인식됩니다",
 
   // — LoginPage (auth) —
   "onboarding.login.signupSubtitle": "새 계정을 만드세요",
