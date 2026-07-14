@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { useTerminalStore } from "../../stores/terminalStore";
+import { useProjectStore } from "../../stores/projectStore";
 import {
   autoInstallComplete,
   requiredInstalled as computeRequiredInstalled,
@@ -18,13 +19,22 @@ import {
  *
  * This is a real, mounted gate (Layout renders it as an overlay). It live-probes
  * install + login state via harness.cliAuthCheck — the SAME probe the spawn
- * guard uses — for the REQUIRED set (claude + codex) and the OPTIONAL
- * Antigravity (agy). On first run it AUTO-INSTALLS any missing required CLI in
- * the background (no click); on failure it falls back to the manual
- * `npm install -g …` command. Login is always manual: copy the command, run it,
- * then re-check without a restart.
+ * guard uses — for the REQUIRED set (claude only) and the OPTIONAL Codex (GPT)
+ * and Antigravity (agy). On mount it AUTO-INSTALLS any missing auto-installable
+ * CLI in the background (no click); on failure it falls back to the manual
+ * `npm install -g …` command. Login is one-click ("Run sign-in" spawns a
+ * terminal and runs the login command) with copy/re-check as fallbacks.
  *
- * An already-set-up user (claude + codex installed & authed) never sees it.
+ * Orchestrator-first onboarding: the gate does NOT block the empty board before
+ * a project/folder is connected — it stays quiet and only auto-installs in the
+ * background. The blocking overlay surfaces at orchestrator-launch time (via the
+ * `marblo:open-cli-setup` event from useOrchestratorAutoLaunch's needsAuth
+ * branch, the spawn guard, and the agent:needsAuth backstop), i.e. exactly when
+ * Claude auth is actually needed. When Claude becomes authenticated the gate
+ * emits `marblo:cli-auth-ready` so the orchestrator auto-launch resumes with no
+ * manual re-check.
+ *
+ * An already-set-up user (claude installed & authed) never sees it.
  */
 
 const DISMISSED_KEY = "marblo.cliSetupGateDismissed";
@@ -41,9 +51,14 @@ interface CliRow {
   autoInstall: boolean;
 }
 
+// Claude is the ONLY required CLI: it powers the orchestrator, which is the
+// hub of the orchestrator-first onboarding flow (folder → project → orchestrator).
+// Codex is secondary here (it runs spawned Codex/GPT agents) — a codex-only
+// orchestrator is a separate follow-up — so it's optional and never blocks the
+// gate. It still auto-installs in the background (autoInstall) for convenience.
 const ROWS: CliRow[] = [
   { id: "cli-claude-code", model: "claude", required: true, autoInstall: true },
-  { id: "cli-codex", model: "codex", required: true, autoInstall: true },
+  { id: "cli-codex", model: "codex", required: false, autoInstall: true },
   {
     id: "cli-antigravity",
     model: "antigravity",
@@ -92,6 +107,14 @@ export function CliSetupGate() {
     {},
   );
   const autoRunRef = useRef(false); // one auto-install pass per mount
+
+  // Orchestrator-first onboarding: before a project/folder is connected the gate
+  // must not block the empty board. We keep a live ref (the auto-install pass is
+  // async and a folder may be connected mid-flight) so the blocking overlay is
+  // only auto-shown once a project exists; auto-install still runs silently.
+  const hasProject = useProjectStore((s) => !!s.currentProject?.folderPath);
+  const hasProjectRef = useRef(hasProject);
+  hasProjectRef.current = hasProject;
 
   // Non-blocking version probe (npm view under the hood). Fire-and-forget so a
   // slow/offline lookup never stalls the gate or the readiness spinner.
@@ -190,14 +213,16 @@ export function CliSetupGate() {
       // Latest per-row probe results (refreshed after an auto-install pass) —
       // the source for the install-complete (FT-8) and re-prompt (FT-6) checks.
       let latest = first.results;
+      // Auto-install every auto-installable CLI that's missing — including the
+      // now-optional Codex — so the fleet is ready without a click. Optional
+      // rows install silently; only Claude (required) can gate visibility.
       const missing = ROWS.filter(
-        (r) =>
-          r.required &&
-          r.autoInstall &&
-          first.results[r.id]?.installed === false,
+        (r) => r.autoInstall && first.results[r.id]?.installed === false,
       );
       if (!autoDone && missing.length > 0) {
-        setVisible(true); // show progress while auto-installing
+        // Only surface install progress once a project is connected — before
+        // that, install silently so the empty board isn't blocked.
+        if (hasProjectRef.current) setVisible(true);
         for (const row of missing) {
           if (cancelled) return;
           await runInstall(row);
@@ -249,7 +274,10 @@ export function CliSetupGate() {
           /* best effort */
         }
       }
-      if (decision.visible) setVisible(true);
+      // Orchestrator-first: never auto-block the empty board. With a project
+      // connected, the orchestrator auto-launch fires `marblo:open-cli-setup`
+      // when Claude auth is actually needed — that path always shows the gate.
+      if (decision.visible && hasProjectRef.current) setVisible(true);
     })();
     return () => {
       cancelled = true;
@@ -341,6 +369,21 @@ export function CliSetupGate() {
       window.removeEventListener("focus", onFocus);
     };
   }, [loginRunning, probeAll]);
+
+  // When the required set (Claude) transitions to ready — via one-click sign-in,
+  // manual Re-check, or auto-install completing — auto-dismiss the gate and emit
+  // `marblo:cli-auth-ready` so useOrchestratorAutoLaunch resumes the launch. This
+  // is the "authenticate → orchestrator opens automatically, no manual re-check"
+  // step of the orchestrator-first flow. Guarded on the false→true edge so it
+  // fires once and never on an already-ready mount's steady state.
+  const prevReadyRef = useRef(false);
+  useEffect(() => {
+    if (ready && !prevReadyRef.current) {
+      setVisible(false);
+      window.dispatchEvent(new CustomEvent("marblo:cli-auth-ready"));
+    }
+    prevReadyRef.current = ready;
+  }, [ready]);
 
   if (!visible) return null;
 

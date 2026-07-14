@@ -286,12 +286,13 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   // — CliSetupGate (first-run CLI install/login gate) —
   "onboarding.cliGate.title": "Before you start — install & sign in",
   "onboarding.cliGate.subtitle":
-    "The orchestrator and agents need these CLIs installed and signed in to run.",
+    "Sign in to Claude Code first to open the orchestrator. Codex and others are optional.",
   "onboarding.cliGate.required": "Required",
   "onboarding.cliGate.optional": "Optional",
   "onboarding.cliGate.claudeDesc":
     "Required to run the orchestrator and Claude agents.",
-  "onboarding.cliGate.codexDesc": "Required to run Codex (GPT) agents.",
+  "onboarding.cliGate.codexDesc":
+    "Optional: install to run Codex (GPT) agents.",
   "onboarding.cliGate.agyDesc":
     "Optional: install to use Antigravity (agy) agents.",
   "onboarding.cliGate.installFail": "Install failed",

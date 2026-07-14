@@ -444,8 +444,9 @@ export function Layout() {
         <ActivityStreamPanel />
       </div>
 
-      {/* First-run CLI setup gate — shows when the required CLI (claude) isn't
-          installed/logged-in, and re-opens when a spawn is blocked. An
+      {/* CLI setup gate — orchestrator-first: stays quiet on the empty board
+          (auto-installs in the background) and surfaces at orchestrator-launch
+          time when Claude auth is needed, or when a spawn is blocked. An
           already-set-up user never sees it. */}
       <CliSetupGate />
 

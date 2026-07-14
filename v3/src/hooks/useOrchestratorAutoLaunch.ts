@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useProjectStore } from "../stores/projectStore";
 import { useOrchestratorStore } from "../stores/orchestratorStore";
 import {
@@ -51,63 +51,77 @@ export function useOrchestratorAutoLaunch() {
   const setSession = useOrchestratorStore((s) => s.setSession);
   const setStatus = useOrchestratorStore((s) => s.setStatus);
 
+  const tryAutoConnect = useCallback(async () => {
+    const projectId = currentProject?.id;
+    if (!projectId || !fixedRoot) return;
+
+    // One-time legacy cleanup: drop the per-launch orchestrator-<timestamp>
+    // docs that accumulated before the stable-ID migration. Best-effort —
+    // a failure here must not block auto-reconnect.
+    cleanupLegacyOrchestratorDocs(projectId).catch(() => undefined);
+
+    try {
+      // Resolve the prior orchestrator session via label OR content
+      // signature (works even when marblo-labels.json is missing, which is
+      // the common case). Fall back to "new" only when there is genuinely
+      // no prior orchestrator session.
+      const priorId =
+        await window.electronAPI.orchestratorSession.resolvePrevious(fixedRoot);
+      const resumeId = priorId ?? "new";
+
+      setStatus("starting");
+      const result = await window.electronAPI.orchestratorSession.launch(
+        projectId,
+        fixedRoot,
+        resumeId,
+      );
+      // Blocked on CLI auth — surface the setup gate (Claude-first) rather than
+      // auto-looping a spawn that will keep hitting the login prompt. Release
+      // the auto-connect latch so that once the user authenticates, the gate's
+      // `marblo:cli-auth-ready` event can resume the launch without a restart.
+      if (result?.needsAuth) {
+        setStatus("stopped");
+        autoConnectRef.current = false;
+        window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        return;
+      }
+      if (result) {
+        setSession(result.sessionId, result.ptySessionId);
+        setStatus("running");
+        // Mirror the manual-Start path: upsert the canonical orchestrator
+        // agent doc so the Activity feed's agentId filter accepts events
+        // emitted by this auto-reconnected session.
+        upsertOrchestratorAgentDoc(projectId, "working").catch(() => undefined);
+        console.debug(
+          priorId
+            ? `[Orchestrator] Auto-reconnected: ${priorId}`
+            : `[Orchestrator] Auto-started fresh session (no prior session)`,
+        );
+      }
+    } catch {
+      // No previous session or launch failed — user starts manually
+      setStatus("stopped");
+    }
+  }, [currentProject?.id, fixedRoot, setSession, setStatus]);
+
   useEffect(() => {
     if (autoConnectRef.current || !currentProject?.id || !fixedRoot) return;
     autoConnectRef.current = true;
+    void tryAutoConnect();
+  }, [currentProject?.id, fixedRoot, tryAutoConnect]);
 
-    const projectId = currentProject.id;
-
-    const tryAutoConnect = async () => {
-      // One-time legacy cleanup: drop the per-launch orchestrator-<timestamp>
-      // docs that accumulated before the stable-ID migration. Best-effort —
-      // a failure here must not block auto-reconnect.
-      cleanupLegacyOrchestratorDocs(projectId).catch(() => undefined);
-
-      try {
-        // Resolve the prior orchestrator session via label OR content
-        // signature (works even when marblo-labels.json is missing, which is
-        // the common case). Fall back to "new" only when there is genuinely
-        // no prior orchestrator session.
-        const priorId =
-          await window.electronAPI.orchestratorSession.resolvePrevious(
-            fixedRoot,
-          );
-        const resumeId = priorId ?? "new";
-
-        setStatus("starting");
-        const result = await window.electronAPI.orchestratorSession.launch(
-          projectId,
-          fixedRoot,
-          resumeId,
-        );
-        // Blocked on CLI auth — surface the setup gate rather than auto-looping
-        // a spawn that will keep hitting the login prompt.
-        if (result?.needsAuth) {
-          setStatus("stopped");
-          window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
-          return;
-        }
-        if (result) {
-          setSession(result.sessionId, result.ptySessionId);
-          setStatus("running");
-          // Mirror the manual-Start path: upsert the canonical orchestrator
-          // agent doc so the Activity feed's agentId filter accepts events
-          // emitted by this auto-reconnected session.
-          upsertOrchestratorAgentDoc(projectId, "working").catch(
-            () => undefined,
-          );
-          console.debug(
-            priorId
-              ? `[Orchestrator] Auto-reconnected: ${priorId}`
-              : `[Orchestrator] Auto-started fresh session (no prior session)`,
-          );
-        }
-      } catch {
-        // No previous session or launch failed — user starts manually
-        setStatus("stopped");
-      }
+  // Resume auto-launch after the CLI setup gate reports Claude just became
+  // authenticated. The needsAuth branch above released the latch, so a fresh
+  // launch attempt here opens the orchestrator with no manual re-check — the
+  // orchestrator-first onboarding flow (folder → project → auth → orchestrator).
+  useEffect(() => {
+    const onAuthReady = () => {
+      if (autoConnectRef.current || !currentProject?.id || !fixedRoot) return;
+      autoConnectRef.current = true;
+      void tryAutoConnect();
     };
-
-    tryAutoConnect();
-  }, [currentProject?.id, fixedRoot, setSession, setStatus]);
+    window.addEventListener("marblo:cli-auth-ready", onAuthReady);
+    return () =>
+      window.removeEventListener("marblo:cli-auth-ready", onAuthReady);
+  }, [currentProject?.id, fixedRoot, tryAutoConnect]);
 }

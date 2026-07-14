@@ -281,12 +281,13 @@ export const onboarding = {
   // — CliSetupGate (first-run CLI install/login gate) —
   "onboarding.cliGate.title": "시작하기 전에 — CLI 설치 · 로그인",
   "onboarding.cliGate.subtitle":
-    "오케스트레이터와 에이전트를 실행하려면 아래 CLI가 설치·로그인되어 있어야 합니다.",
+    "오케스트레이터를 열려면 먼저 Claude Code 구독 인증(로그인)이 필요합니다. Codex 등은 선택입니다.",
   "onboarding.cliGate.required": "필수",
   "onboarding.cliGate.optional": "선택",
   "onboarding.cliGate.claudeDesc":
     "오케스트레이터와 Claude 에이전트 실행에 필요합니다.",
-  "onboarding.cliGate.codexDesc": "Codex(GPT) 에이전트 실행에 필요합니다.",
+  "onboarding.cliGate.codexDesc":
+    "선택: Codex(GPT) 에이전트를 쓰려면 설치·로그인하세요.",
   "onboarding.cliGate.agyDesc":
     "선택: Antigravity(agy) 에이전트를 쓰려면 설치하세요.",
   "onboarding.cliGate.installFail": "설치 실패",
