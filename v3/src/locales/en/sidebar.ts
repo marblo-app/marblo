@@ -46,6 +46,7 @@ export const sidebar: Record<keyof typeof koSidebar, string> = {
   "sidebar.tree.selectFolder": "Select folder",
   // Folder-open choice banner
   "sidebar.tree.openFolder": "Open folder",
+  "sidebar.tree.openFolderMore": "More folder options",
   "sidebar.tree.registerProject": "Register as project",
   "sidebar.tree.browseReadonly": "Browse (read-only)",
   "sidebar.tree.cancel": "Cancel",

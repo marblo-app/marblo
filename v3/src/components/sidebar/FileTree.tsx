@@ -827,9 +827,8 @@ export function FileTree() {
   useEffect(() => {
     const reload = () => setRecentFolders(loadRecentFolders());
     reload();
-    // The project-setup flow now lives at Layout level (useProjectSetup); its
-    // "browse read-only" branch persists a recent folder and fires this event
-    // so our dropdown stays in sync without owning that logic.
+    // Stay in sync if any other surface persists a recent folder and fires this
+    // event. (Our own dropdown updates its list directly via openFolderPath.)
     window.addEventListener("marblo:recents-changed", reload);
     return () => window.removeEventListener("marblo:recents-changed", reload);
   }, []);
@@ -1439,6 +1438,17 @@ export function FileTree() {
     [openFolderPath, findByPathOrRemote, setCurrentProject],
   );
 
+  // Browse a folder read-only WITHOUT registering it as a project — the
+  // demoted, non-blocking alternative to the primary "Open Folder" button,
+  // which now auto-registers + boots the orchestrator on pick. Switches the
+  // tree root only; no project bind, no git lookup. Lives in the Open Folder
+  // dropdown so it stays out of the one-click happy path.
+  const handleBrowseReadonly = useCallback(async () => {
+    setShowRecentMenu(false);
+    const dir = await window.electronAPI.fs.selectDirectory();
+    if (dir) openFolderPath(dir);
+  }, [openFolderPath]);
+
   const handleRefresh = useCallback(() => {
     if (!rootPath) return;
     // Force a real re-read that bypasses dedupe, so the user always gets the
@@ -1516,9 +1526,11 @@ export function FileTree() {
             </span>
           )}
           <span className="flex-1" />
-          {/* Open Folder — single unified entry point: pick a folder (registers
-              or browses, via the choice banner), with a recents dropdown. Its
-              own zone, divided from the worktree switch and file-ops below. */}
+          {/* Open Folder — primary button auto-registers the picked folder as a
+              project and boots the orchestrator (one click). The chevron opens a
+              dropdown with the non-blocking "browse read-only" alternative and a
+              recents list. Its own zone, divided from the worktree switch and
+              file-ops below. */}
           <div ref={recentMenuRef} className="relative flex items-center">
             <button
               onClick={() =>
@@ -1541,38 +1553,35 @@ export function FileTree() {
                 />
               </svg>
             </button>
-            {recentFolders.length > 0 && (
-              <button
-                ref={recentButtonRef}
-                onClick={() => setShowRecentMenu((v) => !v)}
-                className={`rounded p-0.5 hover:bg-gray-700 hover:text-gray-300 ${
-                  showRecentMenu ? "text-gray-300" : "text-gray-500"
-                }`}
-                title={t("sidebar.tree.recentFolders")}
-                aria-haspopup="menu"
-                aria-expanded={showRecentMenu}
+            <button
+              ref={recentButtonRef}
+              onClick={() => setShowRecentMenu((v) => !v)}
+              className={`rounded p-0.5 hover:bg-gray-700 hover:text-gray-300 ${
+                showRecentMenu ? "text-gray-300" : "text-gray-500"
+              }`}
+              title={t("sidebar.tree.openFolderMore")}
+              aria-haspopup="menu"
+              aria-expanded={showRecentMenu}
+            >
+              <svg
+                className="h-3 w-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
               >
-                <svg
-                  className="h-3 w-3"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </button>
-            )}
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </button>
             {/* Body portal + position:fixed (left-anchored, viewport-clamped via
                 calculateWorktreeMenuPosition) so the menu can't be clipped by
                 the narrow, overflow-hidden sidebar — same fix as #146/#147 for
                 the worktree switch. */}
             {showRecentMenu &&
-              recentFolders.length > 0 &&
               recentMenuPosition &&
               createPortal(
                 <div
@@ -1585,23 +1594,36 @@ export function FileTree() {
                   }}
                   role="menu"
                 >
-                  <div className="px-2 pb-1 text-[9px] font-bold uppercase tracking-wide text-gray-500">
-                    {t("sidebar.tree.recentFolders")}
-                  </div>
-                  {recentFolders.map((path) => (
-                    <button
-                      key={path}
-                      onClick={() => handleOpenRecent(path)}
-                      className="block w-full truncate px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
-                      title={path}
-                      role="menuitem"
-                    >
-                      {folderLabel(path)}
-                      <span className="ml-1 text-[9px] text-gray-500">
-                        {path}
-                      </span>
-                    </button>
-                  ))}
+                  {/* Non-blocking secondary action: browse a folder read-only
+                      without registering it as a project. */}
+                  <button
+                    onClick={handleBrowseReadonly}
+                    className="block w-full truncate px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
+                    role="menuitem"
+                  >
+                    {t("sidebar.tree.browseReadonly")}
+                  </button>
+                  {recentFolders.length > 0 && (
+                    <>
+                      <div className="mt-1 border-t border-gray-700 px-2 pb-1 pt-1 text-[9px] font-bold uppercase tracking-wide text-gray-500">
+                        {t("sidebar.tree.recentFolders")}
+                      </div>
+                      {recentFolders.map((path) => (
+                        <button
+                          key={path}
+                          onClick={() => handleOpenRecent(path)}
+                          className="block w-full truncate px-2 py-1 text-left text-[11px] text-gray-300 hover:bg-gray-700"
+                          title={path}
+                          role="menuitem"
+                        >
+                          {folderLabel(path)}
+                          <span className="ml-1 text-[9px] text-gray-500">
+                            {path}
+                          </span>
+                        </button>
+                      ))}
+                    </>
+                  )}
                 </div>,
                 document.body,
               )}

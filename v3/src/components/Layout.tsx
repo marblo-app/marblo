@@ -316,11 +316,8 @@ export function Layout() {
   }, [attachSession, currentProject]);
 
   const ActiveTabComponent = tabComponents[activeTab];
-  const setRootPath = useEditorStore((s) => s.setRootPath);
-  const findByFolderPath = useProjectStore((s) => s.findByFolderPath);
-  const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
 
-  // Project setup flow (folder pick → auto-register / choose / inline create).
+  // Project setup flow (folder pick → zero-click auto-register / inline create).
   // Hosted here at the always-present Layout so the board / agents no-project
   // CTAs work in any UI state — collapsed sidebar, or the commands/chat panels
   // where FileTree (the old listener host) isn't mounted. The board / agents
@@ -355,16 +352,13 @@ export function Layout() {
     );
   }
 
-  // New window: show folder picker prompt
+  // New window: show folder picker prompt. Reuses the same unified flow as
+  // every other "Open Folder" trigger (useProjectSetup.handleSelectDirectory)
+  // so picking a folder here auto-registers a project (named after the folder)
+  // and boots the orchestrator in one click — no re-prompt, no name-confirm
+  // step. Once handleSelectDirectory sets rootPath, this branch stops matching
+  // and the full Layout (with any fallback banner) takes over on re-render.
   if (isNewWindow && !rootPath) {
-    const handleSelectFolder = async () => {
-      const dir = await window.electronAPI.fs.selectDirectory();
-      if (!dir) return;
-      setRootPath(dir);
-      const existing = findByFolderPath(dir);
-      if (existing) setCurrentProject(existing);
-    };
-
     return (
       <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
         <Header onNavigateToSettings={() => setActiveTab("settings")} />
@@ -374,7 +368,7 @@ export function Layout() {
             <h1 className="text-2xl font-bold text-gray-100">Marblo</h1>
             <p className="text-gray-400">{t("common.selectFolderPrompt")}</p>
             <button
-              onClick={handleSelectFolder}
+              onClick={() => void handleSelectDirectory()}
               className="rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
             >
               Open Folder

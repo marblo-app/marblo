@@ -2,17 +2,18 @@ import { t } from "../../lib/i18n";
 import type { ProjectSetup } from "../../hooks/useProjectSetup";
 
 /**
- * The folder-choice + inline-create banners for the project-setup flow. Split
- * out of FileTree so they render at the always-mounted Layout level: the flow
- * can be triggered (via `marblo:select-folder`) with the sidebar collapsed or
- * on a non-files panel, so its follow-up prompts must not live inside FileTree.
+ * The inline name-your-project banner for the project-setup flow. Split out of
+ * FileTree so it renders at the always-mounted Layout level: the flow can be
+ * triggered (via `marblo:select-folder`) with the sidebar collapsed or on a
+ * non-files panel, so its follow-up prompt must not live inside FileTree.
+ *
+ * The happy path is silent — picking a folder auto-registers a project (named
+ * after the folder) and boots the orchestrator with no banner at all. This
+ * inline banner is only the fallback shown when auto-register can't run (not
+ * signed in) or the write fails.
  */
 export function ProjectSetupBanners(props: ProjectSetup) {
   const {
-    folderChoice,
-    handleChooseRegister,
-    handleChooseBrowse,
-    dismissFolderChoice,
     showNewProject,
     newProjectName,
     setNewProjectName,
@@ -21,47 +22,10 @@ export function ProjectSetupBanners(props: ProjectSetup) {
     handleCancelInlineProject,
   } = props;
 
-  if (!folderChoice && !showNewProject) return null;
+  if (!showNewProject) return null;
 
   return (
     <div className="flex-shrink-0">
-      {/* Folder-open choice banner — shown when an unregistered folder is
-          picked: register it as a project, or just browse it read-only. */}
-      {folderChoice && (
-        <div className="border-b border-blue-500/30 bg-blue-500/10 px-3 py-2">
-          <p className="mb-1 text-[11px] font-medium text-blue-400">
-            {t("sidebar.tree.openFolder")}
-          </p>
-          <p
-            className="mb-2 truncate text-[10px] text-gray-400"
-            title={folderChoice.path}
-          >
-            {folderChoice.path}
-          </p>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleChooseRegister}
-              className="rounded bg-blue-600 px-2 py-1 text-[11px] text-white hover:bg-blue-500"
-            >
-              {t("sidebar.tree.registerProject")}
-            </button>
-            <button
-              onClick={handleChooseBrowse}
-              className="rounded bg-gray-700 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-600"
-            >
-              {t("sidebar.tree.browseReadonly")}
-            </button>
-            <button
-              onClick={dismissFolderChoice}
-              className="ml-auto rounded px-2 py-1 text-[11px] text-gray-400 hover:text-gray-200"
-              title={t("sidebar.tree.cancel")}
-            >
-              {t("sidebar.tree.cancel")}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Inline project creation banner */}
       {showNewProject && (
         <div className="border-b border-blue-500/30 bg-blue-500/10 px-3 py-2">

@@ -5,7 +5,6 @@ import { useProjectStore } from "../stores/projectStore";
 import { useSubscriptionStore } from "../stores/subscriptionStore";
 import { useUiStore } from "../stores/uiStore";
 import { checkProjectCreate, ProjectLimitError } from "../lib/planLimits";
-import { saveRecentFolder } from "../lib/recentFolders";
 import type { Project } from "../types/project";
 
 function basename(p: string): string {
@@ -28,17 +27,12 @@ function basename(p: string): string {
  * to the caller via the returned state — see ProjectSetupBanners.
  */
 export interface ProjectSetup {
-  /** Full folder-pick → auto-register / choose / inline-create flow. */
+  /** Full folder-pick → auto-register (zero-click) flow, with an inline
+   * name-your-project banner as the not-signed-in / write-failed fallback. */
   handleSelectDirectory: () => Promise<void>;
 
-  // Folder-open choice banner (existing user picks an unregistered folder).
-  folderChoice: { path: string; remoteUrl: string | null } | null;
-  handleChooseRegister: () => void;
-  handleChooseBrowse: () => void;
-  dismissFolderChoice: () => void;
-
-  // Inline "name your project" banner (first-user auto-register fallback, or
-  // the "register" branch of the choice banner).
+  // Inline "name your project" banner — the fallback shown only when the
+  // zero-click auto-register can't run (no signed-in user) or its write fails.
   showNewProject: boolean;
   newProjectName: string;
   setNewProjectName: (name: string) => void;
@@ -54,13 +48,8 @@ export function useProjectSetup(): ProjectSetup {
   const findByPathOrRemote = useProjectStore((s) => s.findByPathOrRemote);
   const createProject = useProjectStore((s) => s.createProject);
   const projects = useProjectStore((s) => s.projects);
-  const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
 
-  const [folderChoice, setFolderChoice] = useState<{
-    path: string;
-    remoteUrl: string | null;
-  } | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [pendingFolderPath, setPendingFolderPath] = useState<string | null>(
@@ -94,21 +83,22 @@ export function useProjectSetup(): ProjectSetup {
       setNewProjectName(folderName);
       setPendingFolderPath(path);
       setPendingGitRemoteUrl(remoteUrl);
-      setFolderChoice(null);
       setShowNewProject(true);
     },
     [],
   );
 
-  // Zero-click first-project registration: the picked folder immediately
-  // becomes a project (name = folder basename) with no confirm banner. This is
-  // the new-user path — useOrchestratorAutoLaunch keys off currentProject's
-  // folderPath and auto-starts the orchestrator, so it reads as
-  // "pick folder → orchestrator boots". If the CLI isn't installed/logged in,
-  // CliSetupGate + the spawn guard take over the auth flow. Requires a signed-in
-  // user (createProject needs ownerId); returns false so the caller can fall
-  // back to the inline banner when there's no user or the write fails.
-  const autoRegisterFirstProject = useCallback(
+  // Zero-click registration (the default for EVERY user, not just the first):
+  // the picked folder immediately becomes a project (name = folder basename)
+  // with no confirm banner and no name-your-project step. useOrchestratorAutoLaunch
+  // keys off currentProject's folderPath and auto-starts the orchestrator, so it
+  // reads as "pick folder → orchestrator boots". If the CLI isn't installed /
+  // logged in, CliSetupGate + the spawn guard take over the auth flow. The plan
+  // choke point (createProject) throws ProjectLimitError for a Free user over cap
+  // → we surface the upgrade path. Requires a signed-in user (createProject needs
+  // ownerId); returns false so the caller can fall back to the inline name banner
+  // when there's no user or the write fails.
+  const autoRegisterProject = useCallback(
     async (dir: string, remoteUrl: string | null): Promise<boolean> => {
       if (!user) return false;
       try {
@@ -129,14 +119,14 @@ export function useProjectSetup(): ProjectSetup {
         });
         return true;
       } catch (err) {
-        // Plan limit hit (shouldn't happen on the first project, but the store
-        // is the choke point) → surface the upgrade path, treat as "handled" so
-        // the caller doesn't fall through to the inline banner.
+        // Plan limit hit (Free user over their project cap; the store is the
+        // choke point) → surface the upgrade path, treat as "handled" so the
+        // caller doesn't fall through to the inline banner.
         if (err instanceof ProjectLimitError) {
           useUiStore.getState().showUpgrade("projects", "pro");
           return true;
         }
-        console.error("Failed to auto-register first project:", err);
+        console.error("Failed to auto-register project:", err);
         return false;
       }
     },
@@ -150,59 +140,34 @@ export function useProjectSetup(): ProjectSetup {
     setRootPath(dir);
 
     const remoteUrl = await window.electronAPI.fs.gitRemoteUrl(dir);
+
+    // Duplicate guard: this folder (or a project sharing its git remote) is
+    // already registered → open it, never create a second project. This is the
+    // deterministic common case; a genuinely ambiguous conflict is rare and
+    // still resolves to an existing project here rather than prompting.
     const existing = findByPathOrRemote(dir, remoteUrl);
     if (existing) {
       setCurrentProject(existing);
       return;
     }
 
-    if (projectsHydrated && projects.length === 0) {
-      // First user (no projects yet): register with one click — the folder
-      // pick alone. Fall back to the inline confirm banner if not signed in or
-      // the auto-register write fails.
-      if (await autoRegisterFirstProject(dir, remoteUrl)) return;
-      startInlineProjectCreation(dir, remoteUrl);
-      return;
-    }
-
-    // Unregistered folder for an existing user: don't auto-open the register
-    // banner. Offer a choice — register as a project (existing flow), or just
-    // browse read-only. (Zero-click is intentionally first-user only.)
-    setFolderChoice({ path: dir, remoteUrl });
+    // Default happy path for EVERY user (new or returning): the folder pick
+    // alone registers a project named after the folder, and setCurrentProject
+    // boots the orchestrator — zero extra clicks, no register-or-browse choice
+    // and no name-confirm step. Browsing a folder read-only without registering
+    // is still available as a non-blocking secondary action in the FileTree
+    // "Open Folder" menu, and the name can be changed afterwards via the
+    // FileTree project rename. Fall back to the inline name banner only when
+    // auto-register can't run (not signed in) or the write fails.
+    if (await autoRegisterProject(dir, remoteUrl)) return;
+    startInlineProjectCreation(dir, remoteUrl);
   }, [
     setRootPath,
     findByPathOrRemote,
     setCurrentProject,
-    projectsHydrated,
-    projects.length,
-    autoRegisterFirstProject,
+    autoRegisterProject,
     startInlineProjectCreation,
   ]);
-
-  // "Register as a project" branch of the folder-choice banner → hand off to
-  // the inline new-project banner with the picked folder prefilled.
-  const handleChooseRegister = useCallback(() => {
-    if (!folderChoice) return;
-    // Free plan already at its project cap → offer upgrade instead of opening
-    // the register banner. (Browse read-only stays available.)
-    if (!ensureProjectQuota()) {
-      setFolderChoice(null);
-      return;
-    }
-    startInlineProjectCreation(folderChoice.path, folderChoice.remoteUrl);
-  }, [folderChoice, ensureProjectQuota, startInlineProjectCreation]);
-
-  // "Browse (read-only)" branch → the root was already switched to the folder in
-  // handleSelectDirectory, so we only remember it in recents. No project bind.
-  // Notify FileTree (which owns the recents dropdown) to reload its list.
-  const handleChooseBrowse = useCallback(() => {
-    if (!folderChoice) return;
-    saveRecentFolder(folderChoice.path);
-    window.dispatchEvent(new CustomEvent("marblo:recents-changed"));
-    setFolderChoice(null);
-  }, [folderChoice]);
-
-  const dismissFolderChoice = useCallback(() => setFolderChoice(null), []);
 
   const handleCreateInlineProject = useCallback(async () => {
     if (!newProjectName.trim() || !user || !pendingFolderPath) return;
@@ -263,10 +228,6 @@ export function useProjectSetup(): ProjectSetup {
 
   return {
     handleSelectDirectory,
-    folderChoice,
-    handleChooseRegister,
-    handleChooseBrowse,
-    dismissFolderChoice,
     showNewProject,
     newProjectName,
     setNewProjectName,

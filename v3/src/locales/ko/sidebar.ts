@@ -43,6 +43,7 @@ export const sidebar = {
   "sidebar.tree.selectFolder": "폴더 선택",
   // Folder-open choice banner
   "sidebar.tree.openFolder": "폴더 열기",
+  "sidebar.tree.openFolderMore": "폴더 열기 옵션 더보기",
   "sidebar.tree.registerProject": "프로젝트로 등록",
   "sidebar.tree.browseReadonly": "둘러보기 (읽기전용)",
   "sidebar.tree.cancel": "취소",
