@@ -28,11 +28,12 @@ export function useFlowExecution(): FlowExecutionResult {
   const flowStartTimeRef = useRef<number>(0);
   const nodeStartTimesRef = useRef<Record<string, number>>({});
   const nodeCountRef = useRef<number>(0);
+  const totalNodeCountRef = useRef<number>(0);
 
-  // Keep ref in sync for use in event handler
-  useEffect(() => {
-    runIdRef.current = runId;
-  }, [runId]);
+  const setActiveRunId = useCallback((nextRunId: string | null) => {
+    runIdRef.current = nextRunId;
+    setRunId(nextRunId);
+  }, []);
 
   // Set up event listener
   useEffect(() => {
@@ -41,6 +42,11 @@ export function useFlowExecution(): FlowExecutionResult {
 
     const handleEvent = (event: FlowEvent) => {
       switch (event.type) {
+        case 'flow:started':
+          setActiveRunId(event.runId);
+          telemetry.flowStarted(event.runId, totalNodeCountRef.current);
+          break;
+
         case 'node:start':
           setNodeStatuses((prev) => ({ ...prev, [event.nodeId]: 'running' }));
           nodeStartTimesRef.current[event.nodeId] = Date.now();
@@ -76,6 +82,7 @@ export function useFlowExecution(): FlowExecutionResult {
         }
 
         case 'flow:paused':
+          setActiveRunId(event.runId);
           setExecutionState('paused');
           if (event.pendingNodeId) {
             setPendingHumanNodeId(event.pendingNodeId);
@@ -83,11 +90,13 @@ export function useFlowExecution(): FlowExecutionResult {
           break;
 
         case 'flow:resumed':
+          setActiveRunId(event.runId);
           setExecutionState('running');
           setPendingHumanNodeId(null);
           break;
 
         case 'flow:completed': {
+          setActiveRunId(event.runId);
           setExecutionState('completed');
           setPendingHumanNodeId(null);
           const completedDuration = Date.now() - flowStartTimeRef.current;
@@ -98,6 +107,7 @@ export function useFlowExecution(): FlowExecutionResult {
         }
 
         case 'flow:failed': {
+          setActiveRunId(event.runId);
           setExecutionState('failed');
           setPendingHumanNodeId(null);
           const failedDuration = Date.now() - flowStartTimeRef.current;
@@ -108,11 +118,11 @@ export function useFlowExecution(): FlowExecutionResult {
         }
 
         case 'flow:cancelled':
+          setActiveRunId(null);
           setExecutionState('idle');
           setPendingHumanNodeId(null);
           setNodeStatuses({});
           setNodeResults({});
-          setRunId(null);
           break;
       }
     };
@@ -122,7 +132,7 @@ export function useFlowExecution(): FlowExecutionResult {
     return () => {
       api.offEvent();
     };
-  }, []);
+  }, [setActiveRunId]);
 
   const run = useCallback(async (flow: Flow) => {
     const api = window.electronAPI?.flow;
@@ -132,21 +142,22 @@ export function useFlowExecution(): FlowExecutionResult {
     setNodeStatuses({});
     setNodeResults({});
     setPendingHumanNodeId(null);
+    setActiveRunId(null);
     setExecutionState('running');
 
     flowStartTimeRef.current = Date.now();
     nodeStartTimesRef.current = {};
     nodeCountRef.current = 0;
+    totalNodeCountRef.current = flow.nodes?.length ?? 0;
 
     try {
       const result = await api.run(flow);
-      setRunId(result.runId);
-      telemetry.flowStarted(result.runId, flow.nodes?.length ?? 0);
+      setActiveRunId(result.runId);
     } catch (err) {
       setExecutionState('failed');
       console.error('Failed to start flow:', err);
     }
-  }, []);
+  }, [setActiveRunId]);
 
   const pause = useCallback(async () => {
     const api = window.electronAPI?.flow;
@@ -183,11 +194,11 @@ export function useFlowExecution(): FlowExecutionResult {
 
   const reset = useCallback(() => {
     setExecutionState('idle');
-    setRunId(null);
+    setActiveRunId(null);
     setNodeStatuses({});
     setNodeResults({});
     setPendingHumanNodeId(null);
-  }, []);
+  }, [setActiveRunId]);
 
   return {
     run,

@@ -313,6 +313,7 @@ interface OrchestratorSessionAPI {
 }
 
 type FlowEvent =
+  | { type: "flow:started"; runId: string; state: unknown }
   | { type: "node:start"; nodeId: string }
   | { type: "node:complete"; nodeId: string; result: unknown }
   | { type: "node:error"; nodeId: string; error: string }

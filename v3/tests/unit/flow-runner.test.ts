@@ -7,6 +7,20 @@ import type { FlowEvent } from '../../electron/flow-engine/types';
 // Get mock Firestore
 const db = getFirestore();
 
+function waitForFlowEvent<T extends FlowEvent['type']>(
+  events: FlowEvent[],
+  type: T,
+): Promise<Extract<FlowEvent, { type: T }>> {
+  return new Promise(resolve => {
+    const check = () => {
+      const event = events.find((e): e is Extract<FlowEvent, { type: T }> => e.type === type);
+      if (event) resolve(event);
+      else setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
 describe('FlowRunner', () => {
   let runner: FlowRunner;
 
@@ -265,6 +279,43 @@ describe('FlowRunner', () => {
   });
 
   describe('human node interaction', () => {
+    it('emits runId before blocking on human input and resumes with that runId', async () => {
+      const flow = makeFlow(
+        [
+          makeNode('in', 'input', { data: 'test' }),
+          makeNode('human', 'human', { prompt: 'Approve?', description: 'Review' }),
+          makeNode('out', 'output'),
+        ],
+        [makeEdge('in', 'human'), makeEdge('human', 'out')],
+      );
+
+      const events: FlowEvent[] = [];
+      runner.on('event', (e: FlowEvent) => events.push(e));
+
+      let runSettled = false;
+      const runPromise = runner.run(flow).finally(() => {
+        runSettled = true;
+      });
+
+      const startedEvent = await waitForFlowEvent(events, 'flow:started');
+      expect(startedEvent.runId).toBeTruthy();
+
+      const pausedEvent = await waitForFlowEvent(events, 'flow:paused');
+      expect(pausedEvent.runId).toBe(startedEvent.runId);
+      expect(runSettled).toBe(false);
+
+      await runner.resume(startedEvent.runId, {
+        nodeId: 'human',
+        approved: true,
+        data: { comment: 'Approved from started runId' },
+      });
+
+      const state = await runPromise;
+      expect(state.status).toBe('completed');
+      expect(state.runId).toBe(startedEvent.runId);
+      expect(state.nodeResults['out'].status).toBe('success');
+    });
+
     it('pauses at human node and resumes with approval', async () => {
       const flow = makeFlow(
         [

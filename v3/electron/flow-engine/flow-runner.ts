@@ -56,6 +56,7 @@ export class FlowRunner extends EventEmitter {
     this.states.set(runId, state);
     this.flows.set(runId, flow);
     await this.persistState(state);
+    this.emit('event', { type: 'flow:started', runId, state } satisfies FlowEvent);
 
     try {
       // Build execution layers

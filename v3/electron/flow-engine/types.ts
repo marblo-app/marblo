@@ -74,6 +74,7 @@ export interface LLMProvider {
 // ── Events ───────────────────────────────────────────────────
 
 export type FlowEvent =
+  | { type: 'flow:started'; runId: string; state: FlowExecutionState }
   | { type: 'node:start'; nodeId: string }
   | { type: 'node:complete'; nodeId: string; result: NodeExecutionResult }
   | { type: 'node:error'; nodeId: string; error: string }
