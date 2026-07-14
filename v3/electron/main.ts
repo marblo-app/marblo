@@ -89,6 +89,7 @@ import { CostTracker } from "./cost-tracker";
 import { getAccountRateLimits } from "./account-usage";
 import { mainTelemetry } from "./telemetry";
 import { initMainSentry } from "./sentry-main";
+import { loadPackagedMainFirebaseConfigEnv } from "./firebase-config-env";
 import {
   buildMissionEngine,
   type BuiltMissionEngine,
@@ -150,6 +151,22 @@ interface ConnectionCheckResult {
 
 // .env 파일에서 Firebase 환경변수 로드 (Electron 메인 프로세스용)
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
+const firebaseConfigEnvResult = loadPackagedMainFirebaseConfigEnv({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+});
+if (firebaseConfigEnvResult.status === "loaded") {
+  console.log(
+    `[Main] packaged Firebase config loaded for main process (path=${firebaseConfigEnvResult.configPath}; keys=${firebaseConfigEnvResult.injectedKeys.length}; apiKeyPresent=${firebaseConfigEnvResult.apiKeyPresent})`,
+  );
+} else if (
+  firebaseConfigEnvResult.status === "missing" ||
+  firebaseConfigEnvResult.status === "invalid"
+) {
+  console.warn(
+    `[Main] packaged Firebase config unavailable for main process (status=${firebaseConfigEnvResult.status}; path=${firebaseConfigEnvResult.configPath})`,
+  );
+}
 
 // Packaged app has no `.env`, so the Google 로그인 loopback OAuth values
 // (ticket QvaYPAjAW822I0IDiwwZ) would be empty and the flow would fail before
