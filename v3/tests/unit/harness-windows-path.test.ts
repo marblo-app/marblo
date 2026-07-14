@@ -1,0 +1,153 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import * as actualFs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+type SpawnCall = {
+  command: string;
+  args: string[];
+};
+
+const ENV_KEYS = ["APPDATA", "OPENAI_API_KEY", "PATH", "PATHEXT"] as const;
+
+type EnvSnapshot = Record<(typeof ENV_KEYS)[number], string | undefined>;
+
+function snapshotEnv(): EnvSnapshot {
+  return Object.fromEntries(
+    ENV_KEYS.map((key) => [key, process.env[key]]),
+  ) as EnvSnapshot;
+}
+
+function restoreEnv(snapshot: EnvSnapshot): void {
+  for (const key of ENV_KEYS) {
+    const value = snapshot[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
+function makeHome(): string {
+  return actualFs.realpathSync(
+    actualFs.mkdtempSync(path.join(os.tmpdir(), "marblo-win-path-")),
+  );
+}
+
+function writeFile(filePath: string, content: string): void {
+  actualFs.mkdirSync(path.dirname(filePath), { recursive: true });
+  actualFs.writeFileSync(filePath, content, "utf-8");
+}
+
+function touchWindowsShim(home: string, binary: string): string {
+  const binDir = path.join(home, "AppData", "Roaming", "npm");
+  const shim = path.join(binDir, `${binary}.cmd`);
+  writeFile(shim, "@echo off\r\n");
+  return shim;
+}
+
+async function loadHarnessWithWindowsMocks(spawnCalls: SpawnCall[]) {
+  vi.resetModules();
+  vi.doMock("path", async () => {
+    const actual = await vi.importActual<typeof import("path")>("path");
+    const mocked = { ...actual, delimiter: ";" };
+    return { ...mocked, default: mocked };
+  });
+  vi.doMock("os", async () => ({
+    ...(await vi.importActual<typeof import("os")>("os")),
+    default: {
+      ...(await vi.importActual<typeof import("os")>("os")),
+      homedir: () => currentHome,
+    },
+    homedir: () => currentHome,
+  }));
+  vi.doMock("child_process", async () => {
+    const spawn = vi.fn((command: string, args: string[]) => {
+      spawnCalls.push({ command, args });
+      const child = new EventEmitter() as ReturnType<
+        typeof import("node:child_process").spawn
+      >;
+      child.stdout = new EventEmitter() as typeof child.stdout;
+      child.stderr = new EventEmitter() as typeof child.stderr;
+      child.kill = vi.fn() as typeof child.kill;
+      queueMicrotask(() => child.emit("close", 0));
+      return child;
+    });
+    return { spawn };
+  });
+  return await import("../../electron/harness-manager");
+}
+
+let currentHome = "";
+
+describe("harness manager Windows PATH handling", () => {
+  let env: EnvSnapshot;
+  let platformDescriptor: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    env = snapshotEnv();
+    platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", {
+      configurable: true,
+      value: "win32",
+    });
+    currentHome = makeHome();
+    process.env.APPDATA = path.join(currentHome, "AppData", "Roaming");
+    process.env.PATHEXT = ".CMD;.EXE";
+    delete process.env.OPENAI_API_KEY;
+  });
+
+  afterEach(() => {
+    restoreEnv(env);
+    if (platformDescriptor) {
+      Object.defineProperty(process, "platform", platformDescriptor);
+    }
+    actualFs.rmSync(currentHome, { recursive: true, force: true });
+    vi.doUnmock("path");
+    vi.doUnmock("os");
+    vi.doUnmock("child_process");
+    vi.resetModules();
+  });
+
+  it("finds codex.cmd on a semicolon-delimited Windows PATH", async () => {
+    const codexShim = touchWindowsShim(currentHome, "codex");
+    process.env.PATH = `C:\\Program Files\\nodejs;${path.dirname(codexShim)}`;
+    writeFile(
+      path.join(currentHome, ".codex", "auth.json"),
+      JSON.stringify({ tokens: { access_token: "test-token" } }),
+    );
+
+    const { probeCliAuth } = await loadHarnessWithWindowsMocks([]);
+
+    await expect(probeCliAuth("codex")).resolves.toEqual({
+      installed: true,
+      authenticated: true,
+    });
+  });
+
+  it("runs npm.cmd through cmd.exe for global installs and post-install hooks", async () => {
+    const npmShim = touchWindowsShim(currentHome, "npm");
+    const codexShim = touchWindowsShim(currentHome, "codex");
+    process.env.PATH = `C:\\Program Files\\nodejs;${path.dirname(npmShim)}`;
+    const spawnCalls: SpawnCall[] = [];
+    const { installPackage } = await loadHarnessWithWindowsMocks(spawnCalls);
+
+    await installPackage("cli-codex");
+
+    expect(spawnCalls[0]).toEqual({
+      command: "cmd.exe",
+      args: ["/c", npmShim, "install", "-g", "@openai/codex"],
+    });
+    expect(spawnCalls[1]).toEqual({
+      command: "cmd.exe",
+      args: ["/c", codexShim, "features", "enable", "goals"],
+    });
+  });
+
+  it("skips the bash shell installer on Windows with a clear message", async () => {
+    const { installPackage } = await loadHarnessWithWindowsMocks([]);
+
+    await expect(installPackage("cli-antigravity")).rejects.toThrow(
+      /Windows에서는 bash 기반 shell 인스톨러를 자동 실행하지 않습니다/,
+    );
+  });
+});

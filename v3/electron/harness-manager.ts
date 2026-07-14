@@ -7,7 +7,7 @@
  *   - bundled:    no-op (handled by bundle-installer)
  *   - manual:     no-op (UI shows instructions only)
  *   - npm-global: `npm install -g <package>` for CLI binaries (Codex,
- *                 Gemini, etc.) — detection via PATH `which <binary>`
+ *                 Gemini, etc.) — detection via PATH/PATHEXT
  */
 import fs from "fs";
 import os from "os";
@@ -65,38 +65,62 @@ function writeClaudeJsonAtomic(data: object): void {
 /** Build a PATH that includes common binary locations Electron may miss. */
 function getEnrichedPathForDetection(): string {
   const basePath = process.env.PATH || "";
-  const extras = [
-    "/opt/homebrew/bin",
-    "/opt/homebrew/sbin",
-    "/usr/local/bin",
-    "/usr/bin",
-    "/bin",
-    "/usr/sbin",
-    "/sbin",
-    path.join(HOME, ".npm-global/bin"),
-    path.join(HOME, ".npm/bin"),
-    path.join(HOME, ".bun/bin"),
-    path.join(HOME, ".local/bin"),
-    path.join(HOME, ".cargo/bin"),
-    path.join(HOME, ".deno/bin"),
-    path.join(HOME, ".volta/bin"),
-  ];
-  return [...new Set([...basePath.split(":"), ...extras])].join(":");
+  const extras =
+    process.platform === "win32"
+      ? [
+          path.join(HOME, ".local", "bin"),
+          path.join(
+            process.env.APPDATA || path.join(HOME, "AppData", "Roaming"),
+            "npm",
+          ),
+        ]
+      : [
+          "/opt/homebrew/bin",
+          "/opt/homebrew/sbin",
+          "/usr/local/bin",
+          "/usr/bin",
+          "/bin",
+          "/usr/sbin",
+          "/sbin",
+          path.join(HOME, ".npm-global/bin"),
+          path.join(HOME, ".npm/bin"),
+          path.join(HOME, ".bun/bin"),
+          path.join(HOME, ".local/bin"),
+          path.join(HOME, ".cargo/bin"),
+          path.join(HOME, ".deno/bin"),
+          path.join(HOME, ".volta/bin"),
+        ];
+  return [...new Set([...basePath.split(path.delimiter), ...extras])].join(
+    path.delimiter,
+  );
+}
+
+function getPathDirs(enrichedPath: string): string[] {
+  return enrichedPath.split(path.delimiter).filter(Boolean);
+}
+
+function candidateBinaryNames(binary: string): string[] {
+  if (process.platform !== "win32" || path.extname(binary)) return [binary];
+  const pathext = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((ext) => ext.trim().toLowerCase())
+    .filter(Boolean);
+  const extensions = ["", ".exe", ".cmd", ".bat", ".ps1", ...pathext];
+  return [...new Set(extensions)].map((ext) => `${binary}${ext}`);
+}
+
+function commandForSpawn(
+  command: string,
+  args: string[],
+): { command: string; args: string[] } {
+  if (process.platform === "win32" && /\.(cmd|bat)$/i.test(command)) {
+    return { command: "cmd.exe", args: ["/c", command, ...args] };
+  }
+  return { command, args };
 }
 
 function isBinaryOnPath(binary: string): boolean {
-  const enrichedPath = getEnrichedPathForDetection();
-  for (const dir of enrichedPath.split(":")) {
-    if (!dir) continue;
-    try {
-      const candidate = path.join(dir, binary);
-      // fs.existsSync follows symlinks — good enough for this check.
-      if (fileExists(candidate)) return true;
-    } catch {
-      // ignore
-    }
-  }
-  return false;
+  return Boolean(findBinaryPath(binary));
 }
 
 export function detectStatus(pkg: HarnessPackage): InstallStatus {
@@ -141,7 +165,11 @@ function runCommand(
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
-    const child = spawn(cmd, args, { cwd, env: process.env });
+    const resolved = commandForSpawn(cmd, args);
+    const child = spawn(resolved.command, resolved.args, {
+      cwd,
+      env: process.env,
+    });
     let timer: ReturnType<typeof setTimeout> | null = null;
     if (timeoutMs && timeoutMs > 0) {
       timer = setTimeout(() => {
@@ -209,7 +237,9 @@ async function runPostInstallExec(
       }>((resolve) => {
         let stdout = "";
         let stderr = "";
-        const child = spawn(step.command, step.args, { env });
+        const executable = findBinaryPath(step.command) || step.command;
+        const command = commandForSpawn(executable, step.args);
+        const child = spawn(command.command, command.args, { env });
         child.stdout.on("data", (d) => (stdout += d.toString()));
         child.stderr.on("data", (d) => (stderr += d.toString()));
         child.on("close", (code) =>
@@ -244,6 +274,11 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
   if (!strategy.source) {
     throw new Error("shell install requires installer URL in source");
   }
+  if (process.platform === "win32") {
+    throw new Error(
+      "Windows에서는 bash 기반 shell 인스톨러를 자동 실행하지 않습니다. Antigravity(agy)는 현재 macOS/Linux 자동 설치만 지원하므로 Windows용 공식 설치 안내에 따라 수동 설치 후 다시 시도하세요.",
+    );
+  }
   let url: URL;
   try {
     url = new URL(strategy.source);
@@ -268,7 +303,7 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
   // Pre-flight: bash + curl on PATH? Both are universal on macOS/Linux
   // but we still check to give a clean error message rather than a cryptic
   // ENOENT on spawn.
-  const pathDirs = enrichedPath.split(":").filter(Boolean);
+  const pathDirs = getPathDirs(enrichedPath);
   const hasBin = (name: string) =>
     pathDirs.some((dir) => fileExists(path.join(dir, name)));
   if (!hasBin("bash")) {
@@ -384,15 +419,7 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
   const enrichedPath = getEnrichedPathForDetection();
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: enrichedPath };
   // Pre-flight: does npm exist at all?
-  let npmPath = "";
-  for (const dir of enrichedPath.split(":")) {
-    if (!dir) continue;
-    const candidate = path.join(dir, "npm");
-    if (fileExists(candidate)) {
-      npmPath = candidate;
-      break;
-    }
-  }
+  const npmPath = findBinaryPath("npm");
   if (!npmPath) {
     throw new Error(
       "npm을 찾을 수 없습니다. Node.js / npm 설치 후 다시 시도하세요. (https://nodejs.org)",
@@ -405,7 +432,12 @@ async function installNpmGlobal(strategy: InstallStrategy): Promise<void> {
   }>((resolve) => {
     let stdout = "";
     let stderr = "";
-    const child = spawn(npmPath, ["install", "-g", strategy.source!], { env });
+    const command = commandForSpawn(npmPath, [
+      "install",
+      "-g",
+      strategy.source!,
+    ]);
+    const child = spawn(command.command, command.args, { env });
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
@@ -537,10 +569,11 @@ export interface UpdateOutcome {
 
 function findBinaryPath(binary: string): string {
   const enrichedPath = getEnrichedPathForDetection();
-  for (const dir of enrichedPath.split(":")) {
-    if (!dir) continue;
-    const candidate = path.join(dir, binary);
-    if (fileExists(candidate)) return candidate;
+  for (const dir of getPathDirs(enrichedPath)) {
+    for (const name of candidateBinaryNames(binary)) {
+      const candidate = path.join(dir, name);
+      if (fileExists(candidate)) return candidate;
+    }
   }
   return "";
 }
@@ -944,7 +977,6 @@ export async function probeCliAuth(
 export function modelToCliAuth(model: string): CliAuthModel | null {
   if (model === "claude") return "claude";
   if (model === "gpt" || model === "codex") return "codex";
-  if (model === "antigravity") return "antigravity";
   return null;
 }
 

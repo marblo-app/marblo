@@ -433,6 +433,69 @@ const MODEL_BINARY: Partial<Record<ModelType, string>> = {
   antigravity: "agy",
 };
 
+function candidateBinaryNames(binary: string): string[] {
+  if (os.platform() !== "win32" || path.extname(binary)) return [binary];
+  const pathext = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((ext) => ext.trim().toLowerCase())
+    .filter(Boolean);
+  const extensions = ["", ".exe", ".cmd", ".bat", ".ps1", ...pathext];
+  return [...new Set(extensions)].map((ext) => `${binary}${ext}`);
+}
+
+function execCliVersion(command: string): string {
+  if (os.platform() === "win32" && /\.(cmd|bat)$/i.test(command)) {
+    return execFileSync("cmd.exe", ["/c", command, "--version"], {
+      timeout: 5000,
+      encoding: "utf-8",
+    }).trim();
+  }
+  if (os.platform() === "win32" && /\.ps1$/i.test(command)) {
+    return execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        command,
+        "--version",
+      ],
+      {
+        timeout: 5000,
+        encoding: "utf-8",
+      },
+    ).trim();
+  }
+  return execFileSync(command, ["--version"], {
+    timeout: 5000,
+    encoding: "utf-8",
+  }).trim();
+}
+
+function ptyCommandForCli(
+  command: string,
+  args: string[],
+): { command: string; args: string[] } {
+  if (os.platform() === "win32" && /\.(cmd|bat)$/i.test(command)) {
+    return { command: "cmd.exe", args: ["/c", command, ...args] };
+  }
+  if (os.platform() === "win32" && /\.ps1$/i.test(command)) {
+    return {
+      command: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        command,
+        ...args,
+      ],
+    };
+  }
+  return { command, args };
+}
+
 // ── 오케스트레이터 부팅 모델 추상화 ─────────────────────────────────
 //
 // 워커는 이미 멀티모델(getLaunchConfig 모델분기 + MODEL_BINARY + resolveHarnessCli)
@@ -735,24 +798,24 @@ export function resolveHarnessCli(model: ModelType): ResolvedCli {
 
   let resolved: ResolvedCli = { command: binary || model, version: "" };
   if (binary) {
-    for (const dir of getEnrichedPath().split(":")) {
+    for (const dir of getEnrichedPath().split(path.delimiter)) {
       if (!dir) continue;
-      const candidate = path.join(dir, binary);
-      try {
-        const real = fs.realpathSync(candidate);
-        if (isStray(real)) continue;
-        const out = execFileSync(candidate, ["--version"], {
-          timeout: 5000,
-          encoding: "utf-8",
-        }).trim();
-        const v = out.match(/\d+\.\d+\.\d+/)?.[0];
-        if (v) {
-          resolved = { command: candidate, version: v };
-          break;
+      for (const name of candidateBinaryNames(binary)) {
+        const candidate = path.join(dir, name);
+        try {
+          const real = fs.realpathSync(candidate);
+          if (isStray(real)) continue;
+          const out = execCliVersion(candidate);
+          const v = out.match(/\d+\.\d+\.\d+/)?.[0];
+          if (v) {
+            resolved = { command: candidate, version: v };
+            break;
+          }
+        } catch {
+          // Missing / non-executable / stray — keep scanning.
         }
-      } catch {
-        // Missing / non-executable / stray — keep scanning.
       }
+      if (resolved.command !== (binary || model)) break;
     }
   }
   _harnessCliResolved.set(model, resolved);
@@ -2283,9 +2346,15 @@ export class AgentConfigGenerator {
           // "latest" 로 고정). 양쪽 분기를 명시적으로 "latest" 로 통일.
           geminiArgs.push("--resume", "latest");
         }
+        const geminiCommand =
+          os.platform() === "win32" &&
+          (!baseCommand || baseCommand === "gemini")
+            ? resolveHarnessCli("gemini").command
+            : baseCommand || "gemini";
+        const geminiLaunch = ptyCommandForCli(geminiCommand, geminiArgs);
         return {
-          command: baseCommand || "gemini",
-          args: geminiArgs,
+          command: geminiLaunch.command,
+          args: geminiLaunch.args,
           env: {
             ...env,
             GEMINI_CLI_HOME: geminiHome,
@@ -2335,10 +2404,16 @@ export class AgentConfigGenerator {
         // which exits with "gpt: illegal option -- c" on our flag set. The
         // user's intent is the Codex CLI; honor that even with stale docs.
         const codexCommand =
-          !baseCommand || baseCommand === "gpt" ? "codex" : baseCommand;
+          os.platform() === "win32" &&
+          (!baseCommand || baseCommand === "gpt" || baseCommand === "codex")
+            ? resolveHarnessCli("gpt").command
+            : !baseCommand || baseCommand === "gpt"
+              ? "codex"
+              : baseCommand;
+        const codexLaunch = ptyCommandForCli(codexCommand, codexArgs);
         return {
-          command: codexCommand,
-          args: codexArgs,
+          command: codexLaunch.command,
+          args: codexLaunch.args,
           env: { ...env, CODEX_HOME: path.dirname(mcpConfigPath) },
         };
       }
@@ -2389,10 +2464,18 @@ export class AgentConfigGenerator {
         // and fall back to the real CLI binary `agy`. Mirrors the same
         // defensive logic for gpt → codex below.
         const agyCommand =
-          !baseCommand || baseCommand === "antigravity" ? "agy" : baseCommand;
+          os.platform() === "win32" &&
+          (!baseCommand ||
+            baseCommand === "antigravity" ||
+            baseCommand === "agy")
+            ? resolveHarnessCli("antigravity").command
+            : !baseCommand || baseCommand === "antigravity"
+              ? "agy"
+              : baseCommand;
+        const agyLaunch = ptyCommandForCli(agyCommand, agyArgs);
         return {
-          command: agyCommand,
-          args: agyArgs,
+          command: agyLaunch.command,
+          args: agyLaunch.args,
           env: {
             ...env,
             // 미래 agy 가 MCP 를 채널로 받게 되면 활용 — 현재는 no-op.
