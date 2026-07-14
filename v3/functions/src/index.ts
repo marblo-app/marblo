@@ -1557,7 +1557,7 @@ export function buildFounderAccessEmail(
         <p>Please submit the beta survey here: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
         Thoughtful survey responses that pass rubric review earn <strong>3 months of Pro free</strong>. A small set of top responses may be invited to a video interview; completing it extends Pro to <strong>6 months total</strong>.</p>
         <h2 style="font-size:17px;margin:24px 0 8px">3. 50% off the course</h2>
-        <p>Use coupon code <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> at checkout for <strong>50% off</strong> the Marblo course — double the 25% early-bird discount.</p>
+        <p>The Marblo course is coming soon. When it launches, coupon code <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> gets you <strong>50% off</strong> — double the 25% early-bird discount. Hold on to the code until then.</p>
         <h2 style="font-size:17px;margin:24px 0 8px">4. Community</h2>
         ${discordHtml}
       `),
@@ -1572,7 +1572,7 @@ export function buildFounderAccessEmail(
         "   Thoughtful responses that pass rubric review earn 3 months of Pro free.",
         "   Top responses may be invited to a video interview; completion extends Pro to 6 months total.",
         "",
-        `3. 50% off the course — coupon code: ${coupon} (double the 25% early-bird discount).`,
+        `3. 50% off the course — the course is coming soon. At launch, coupon code: ${coupon} gets you 50% off (double the 25% early-bird discount).`,
         "",
         `4. ${discordText}`,
       ].join("\n"),
@@ -1602,7 +1602,7 @@ export function buildFounderAccessEmail(
         <p>ベータアンケートはこちら: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
         ルーブリック審査を通過した丁寧な回答には <strong>Pro 3ヶ月無料</strong> を付与します。上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を <strong>合計6ヶ月</strong> に延長します。</p>
         <h2 style="font-size:17px;margin:24px 0 8px">3. 講座 50% 割引</h2>
-        <p>チェックアウトでクーポンコード <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> を入力すると講座が <strong>50% OFF</strong> — アーリーバード 25% の2倍です。</p>
+        <p>講座は近日公開予定です。公開時にクーポンコード <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> をご利用いただくと <strong>50% OFF</strong> — アーリーバード 25% の2倍です。公開までコードを大切に保管してください。</p>
         <h2 style="font-size:17px;margin:24px 0 8px">4. コミュニティ</h2>
         ${discordHtml}
       `),
@@ -1617,7 +1617,7 @@ export function buildFounderAccessEmail(
         "   ルーブリック審査を通過した丁寧な回答には Pro 3ヶ月無料を付与します。",
         "   上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を合計6ヶ月に延長します。",
         "",
-        `3. 講座 50% 割引 — クーポンコード: ${coupon}（アーリーバード 25% の2倍）。`,
+        `3. 講座 50% 割引 — 講座は近日公開予定です。公開時にクーポンコード: ${coupon} で 50% OFF（アーリーバード 25% の2倍）。`,
         "",
         `4. ${discordText}`,
       ].join("\n"),
@@ -1647,7 +1647,7 @@ export function buildFounderAccessEmail(
       <p>베타 설문은 여기에서 제출해 주세요: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
       루브릭 검토를 통과한 성실 응답에는 <strong>Pro 3개월</strong>을 무료로 드립니다. 상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 <strong>총 6개월</strong>로 연장합니다.</p>
       <h2 style="font-size:17px;margin:24px 0 8px">3. 강의 50% 할인 쿠폰</h2>
-      <p>체크아웃에서 쿠폰 코드 <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> 를 입력하시면 강의가 <strong>50% 할인</strong>됩니다 — 얼리버드 25%의 2배 혜택입니다.</p>
+      <p>강의는 곧 공개 예정입니다. 출시되면 쿠폰 코드 <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> 로 <strong>50% 할인</strong>해 드립니다 — 얼리버드 25%의 2배 혜택입니다. 출시까지 코드를 잘 보관해 주세요.</p>
       <h2 style="font-size:17px;margin:24px 0 8px">4. 커뮤니티</h2>
       ${discordHtml}
     `),
@@ -1662,7 +1662,7 @@ export function buildFounderAccessEmail(
       "   루브릭 검토를 통과한 성실 응답에는 Pro 3개월을 무료로 드립니다.",
       "   상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 총 6개월로 연장합니다.",
       "",
-      `3. 강의 50% 할인 — 쿠폰 코드: ${coupon} (얼리버드 25%의 2배).`,
+      `3. 강의 50% 할인 — 강의는 곧 공개 예정입니다. 출시 시 쿠폰 코드: ${coupon} 로 50% 할인(얼리버드 25%의 2배).`,
       "",
       `4. ${discordText}`,
     ].join("\n"),

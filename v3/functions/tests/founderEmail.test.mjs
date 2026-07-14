@@ -9,6 +9,9 @@
 //   - DISCORD_INVITE_URL unset → fallback text only, no link (no leak).
 //   - No regression on the other four sections (welcome / download /
 //     survey / course coupon).
+//   - The course coupon section promises the discount at launch and never
+//     implies the code works at checkout today (ticket cKpzwznYcj6ZpyiK9GrT):
+//     course payments are not live and coupons/FOUNDER50 is not seeded.
 //
 // DISCORD_INVITE_URL is captured in a module-level const at import time, so
 // the two states need two processes: the parent runs the "link" suite, then
@@ -33,10 +36,14 @@ function assert(cond, msg) {
 
 // Per-locale expectations. `context` is the sentence added alongside the
 // invite link; `fallback` is the copy shown when the env is unset.
+// `courseSoon` is the launch-gated coupon copy; `courseBanned` are phrasings
+// that would imply the code already works at checkout.
 const LOCALES = {
   en: {
     context: "Talk with other founders in real time",
     fallback: "A separate Discord invite will follow shortly.",
+    courseSoon: "coming soon",
+    courseBanned: ["at checkout"],
     sections: [
       "1. Get the beta",
       "2. Survey after your 1-month beta",
@@ -52,6 +59,8 @@ const LOCALES = {
   ja: {
     context: "他のファウンダーとリアルタイムで交流し",
     fallback: "Discord の招待は追ってご案内します。",
+    courseSoon: "近日公開予定",
+    courseBanned: ["チェックアウトで"],
     sections: [
       "1. ベータ版を入手",
       "2. 1ヶ月ベータ後のアンケート",
@@ -67,6 +76,8 @@ const LOCALES = {
   ko: {
     context: "다른 파운더들과 실시간으로 이야기 나누고",
     fallback: "디스코드 초대는 곧 별도로 안내드리겠습니다.",
+    courseSoon: "곧 공개 예정",
+    courseBanned: ["체크아웃에서"],
     sections: [
       "1. 베타 접근",
       "2. 1개월 베타 후 설문",
@@ -113,6 +124,16 @@ function assertNoRegression(locale, spec, { html, text, subject }) {
       content.includes("FOUNDER50"),
       `${locale}: ${kind} keeps the course coupon code`,
     );
+    assert(
+      content.includes(spec.courseSoon),
+      `${locale}: ${kind} gates the course coupon on launch ("${spec.courseSoon}")`,
+    );
+    for (const banned of spec.courseBanned) {
+      assert(
+        !content.includes(banned),
+        `${locale}: ${kind} drops the redeem-now phrasing "${banned}"`,
+      );
+    }
   }
 }
 
