@@ -72,12 +72,10 @@ interface TgUpdate {
 
 /** Minimal shape of a live orchestrator the poller injects inbound text into. */
 export interface InboundTarget {
-  injectMessage(text: string): Promise<void>;
+  injectMessage(text: string): Promise<boolean>;
   /**
-   * Whether the orchestrator is still live. Optional; when present the poller
-   * re-checks it AFTER injectMessage — injectMessage resolves without error
-   * even when it silently skips the write (session stopped/changed mid-boot),
-   * so this recheck keeps at-least-once honest across a boot-fail race.
+   * Whether the orchestrator is still live. Diagnostics only; offset
+   * advancement is based on injectMessage's actual write result.
    */
   isRunning?(): boolean;
   /** Token-free target metadata for handoff diagnostics and health. */
@@ -432,7 +430,13 @@ export class TelegramPoller {
       `도구를 호출하지 않고 일반 텍스트로만 답하면 사용자에게 전달되지 않습니다.`;
 
     try {
-      await orch.injectMessage(injected);
+      const wrote = await orch.injectMessage(injected);
+      if (!wrote) {
+        this.log.warn(
+          `[TelegramPoller] project=${projectId} injectMessage did not write to a live PTY; holding offset for redelivery.`,
+        );
+        return false;
+      }
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
       this.log.warn(
@@ -440,11 +444,6 @@ export class TelegramPoller {
       );
       return false; // hold offset — retry delivery
     }
-    // injectMessage resolves even when it silently skipped the write because the
-    // session stopped/changed while queued behind the boot gate. If the
-    // orchestrator is no longer running, treat it as undelivered and hold the
-    // offset so the message is redelivered once one is live again.
-    if (orch.isRunning && !orch.isRunning()) return false;
     // Only remember the chat once we actually delivered — this becomes the
     // default outbound reply target.
     this.lastChatId.set(projectId, chatId);
@@ -525,12 +524,20 @@ export class TelegramPoller {
         `위 텔레그램 메시지에 아직 답하지 않았습니다. 답할 내용이 있으면 ` +
         `marblo MCP 의 send_telegram_message 도구를 호출해 답장하세요(projectId="${projectId}"). ` +
         `답이 필요 없으면 무시해도 됩니다.`;
-      void Promise.resolve(orch.injectMessage(reminder)).catch((err) => {
-        const raw = err instanceof Error ? err.message : String(err);
-        this.log.warn(
-          `[TelegramPoller] project=${projectId} nudge injectMessage failed: ${raw}`,
-        );
-      });
+      void Promise.resolve(orch.injectMessage(reminder))
+        .then((wrote) => {
+          if (!wrote) {
+            this.log.warn(
+              `[TelegramPoller] project=${projectId} nudge injectMessage did not write to a live PTY`,
+            );
+          }
+        })
+        .catch((err) => {
+          const raw = err instanceof Error ? err.message : String(err);
+          this.log.warn(
+            `[TelegramPoller] project=${projectId} nudge injectMessage failed: ${raw}`,
+          );
+        });
       this.log.log(
         `[TelegramPoller] project=${projectId} nudged orchestrator to reply to inbound update ${pending.updateId}.`,
       );

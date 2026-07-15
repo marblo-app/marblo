@@ -63,7 +63,7 @@ export function isBusySignal(data: string): boolean {
 
 export class PtyManager {
   private sessions: Map<string, PtySession> = new Map();
-  private writeAndSubmitQueues: Map<string, Promise<void>> = new Map();
+  private writeAndSubmitQueues: Map<string, Promise<boolean>> = new Map();
 
   // --- PTY master-fd leak guard ---
   // node-pty (1.1.0) opens TWO /dev/ptmx master devices per spawn on macOS: the
@@ -276,9 +276,9 @@ export class PtyManager {
     text: string,
     delayMs = 150,
     bracketedPaste = true,
-  ): void {
+  ): Promise<boolean> {
     const session = this.sessions.get(id);
-    if (!session) return;
+    if (!session) return Promise.resolve(false);
 
     // Safety guard: screen the payload for dangerous commands before it reaches
     // the PTY. Warn always; block high-severity only when policy is enabled.
@@ -293,32 +293,35 @@ export class PtyManager {
         }) for ${id}${blocked ? " — BLOCKED" : ""}`,
       );
       this.emitDanger({ sessionId: id, text, match, blocked });
-      if (blocked) return;
+      if (blocked) return Promise.resolve(false);
     }
 
-    const previous = this.writeAndSubmitQueues.get(id) ?? Promise.resolve();
+    const previous = this.writeAndSubmitQueues.get(id) ?? Promise.resolve(true);
     const next = previous
       .catch(() => {
         // Keep later writes moving even if an earlier queued submit failed.
+        return false;
       })
       .then(() =>
         this.performWriteAndSubmit(id, session, text, delayMs, bracketedPaste),
       );
 
-    this.writeAndSubmitQueues.set(id, next);
-    void next
+    const guarded = next
       .catch((err: unknown) => {
         console.error(
           `[PtyManager] writeAndSubmit failed for ${id}: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
+        return false;
       })
       .finally(() => {
-        if (this.writeAndSubmitQueues.get(id) === next) {
+        if (this.writeAndSubmitQueues.get(id) === guarded) {
           this.writeAndSubmitQueues.delete(id);
         }
       });
+    this.writeAndSubmitQueues.set(id, guarded);
+    return guarded;
   }
 
   private async performWriteAndSubmit(
@@ -327,8 +330,8 @@ export class PtyManager {
     text: string,
     delayMs: number,
     bracketedPaste: boolean,
-  ): Promise<void> {
-    if (this.sessions.get(id) !== session) return;
+  ): Promise<boolean> {
+    if (this.sessions.get(id) !== session) return false;
 
     if (bracketedPaste) {
       session.process.write(`\x1b[200~${text}\x1b[201~`);
@@ -344,7 +347,7 @@ export class PtyManager {
     // trusting one gap, send the CR, watch the PTY for a submit signal, and
     // resend the CR if the agent didn't react.
     await this.sleep(delayMs);
-    await this.submitWithRetry(id, session, 0);
+    return this.submitWithRetry(id, session, 0);
   }
 
   // Max number of CR (Enter) keystrokes to send before giving up.
@@ -362,8 +365,8 @@ export class PtyManager {
     id: string,
     session: PtySession,
     attempt: number,
-  ): Promise<void> {
-    if (this.sessions.get(id) !== session) return Promise.resolve();
+  ): Promise<boolean> {
+    if (this.sessions.get(id) !== session) return Promise.resolve(false);
 
     return new Promise((resolve) => {
       let reacted = false;
@@ -383,11 +386,11 @@ export class PtyManager {
               }`,
             );
           }
-          resolve();
+          resolve(true);
           return;
         }
         if (this.sessions.get(id) !== session) {
-          resolve();
+          resolve(false);
           return;
         }
         if (attempt + 1 < PtyManager.SUBMIT_MAX_ATTEMPTS) {
@@ -401,7 +404,12 @@ export class PtyManager {
           console.error(
             `[PtyManager] Enter still not registered for ${id} after ${PtyManager.SUBMIT_MAX_ATTEMPTS} attempts — message may be sitting unsubmitted in the composer`,
           );
-          resolve();
+          // The text payload was already written to the PTY. Reporting false
+          // here would make at-least-once callers redeliver the same text into
+          // the composer, creating duplicate inbound messages. Treat this as a
+          // write delivery and let TelegramPoller's unanswered-reply nudge flag
+          // a stuck orchestrator turn if no send_telegram_message follows.
+          resolve(true);
         }
       }, PtyManager.SUBMIT_VERIFY_MS);
     });

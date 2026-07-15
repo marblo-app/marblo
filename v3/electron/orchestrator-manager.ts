@@ -25,6 +25,7 @@ export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 const ORCH_MAX_RESTARTS = 3;
 const ORCH_BACKOFF_BASE_MS = 2000;
 const ORCH_BACKOFF_MAX_MS = 30000;
+const INJECT_BOOT_GATE_STABILITY_ATTEMPTS = 5;
 
 // --- Concurrent-resume guard ---
 // Two orchestrator instances — e.g. two worktrees in the fleet, which are
@@ -412,7 +413,7 @@ export class OrchestratorManager {
   // bootGate 는 그 제출 직후 일정 시간 뒤 resolve 된다.
   private bootGate: Promise<void> = Promise.resolve();
   private resolveBootGate: () => void = () => {};
-  private injectChain: Promise<void> = Promise.resolve();
+  private injectChain: Promise<boolean> = Promise.resolve(true);
 
   // --- Safety guard (MVP-P0-1) ---
   // The orchestrator drives the MAIN checkout (not a sandboxed worktree), so a
@@ -474,20 +475,59 @@ export class OrchestratorManager {
    *   - injectChain: 직전 주입의 제출이 끝난 뒤에(직렬화)
    * writeAndSubmit 한다. 게이트는 launch 마다 새로 걸린다.
    */
-  injectMessage(text: string): Promise<void> {
-    const expectPty = this.session?.ptySessionId;
+  injectMessage(text: string): Promise<boolean> {
+    const expectPty = this.session?.ptySessionId ?? null;
+    const expectMissionId = this.currentMissionId;
     const injectedText =
       this.kind === "board" ? withBoardRoutingGate(text) : text;
-    this.injectChain = this.injectChain.then(async () => {
-      await this.bootGate;
-      const cur = this.session?.ptySessionId;
-      // 게이트 대기 중 세션이 바뀌거나(미션 전환) 멈췄으면 주입 취소.
-      if (!cur || cur !== expectPty) return;
-      this.ptyManager.writeAndSubmit(cur, injectedText);
-      // 다음 주입이 이 메시지의 제출 사이클과 겹치지 않도록 여유를 둔다(직렬화).
-      await new Promise((r) => setTimeout(r, 2500));
-    });
-    return this.injectChain;
+    const next = this.injectChain
+      .catch(() => false)
+      .then(async (): Promise<boolean> => {
+        const stableGate = await this.waitForStableBootGate();
+        if (!stableGate) return false;
+        const cur = this.session?.ptySessionId ?? null;
+        const status = this.session?.status ?? "stopped";
+        // 게이트 대기 중 세션이 사라졌거나 멈췄으면 호출부가 offset 을 보류할 수
+        // 있게 false 를 반환한다. 절대 조용한 성공으로 가장하지 않는다.
+        if (!cur || (status !== "starting" && status !== "running")) {
+          return false;
+        }
+        // 미션이 바뀌었으면 낡은 grant 를 새 미션 오케스트레이터에 흘리지
+        // 않는다. ensureMissionOrchestratorLaunched(main.ts) 는 missionId 변경
+        // 시 같은 매니저를 동기 stop() -> launch() 하므로 이 창이 실제로 열린다.
+        // 조용한 성공으로 가장하지 않고 false 를 반환해 호출부가 보류/재시도하게
+        // 한다.
+        if (this.currentMissionId !== expectMissionId) {
+          return false;
+        }
+        // 같은 미션(또는 board)인데 PTY 만 바뀐 경우(오케 전환/재시작)는 유실보다
+        // 재해석 전달이 옳다. waitForStableBootGate 가 새 세션의 부팅 제출 사이클
+        // 종료를 보장하므로 boot prompt 와 인터리브되지 않는다.
+        if (expectPty && cur !== expectPty) {
+          console.warn(
+            `[OrchestratorManager:${this.kind}] injectMessage PTY changed while queued; routing to current PTY ${cur}.`,
+          );
+        }
+        const wrote = await this.ptyManager.writeAndSubmit(cur, injectedText);
+        if (!wrote) return false;
+        // 다음 주입이 이 메시지의 제출 사이클과 겹치지 않도록 여유를 둔다(직렬화).
+        await new Promise((r) => setTimeout(r, 2500));
+        return true;
+      });
+    this.injectChain = next;
+    return next;
+  }
+
+  private async waitForStableBootGate(): Promise<boolean> {
+    for (let i = 0; i < INJECT_BOOT_GATE_STABILITY_ATTEMPTS; i += 1) {
+      const gate = this.bootGate;
+      await gate;
+      if (this.bootGate === gate) return true;
+    }
+    console.warn(
+      `[OrchestratorManager:${this.kind}] injectMessage boot gate kept changing; holding delivery for retry.`,
+    );
+    return false;
   }
 
   launch(
@@ -520,7 +560,7 @@ export class OrchestratorManager {
     this.bootGate = new Promise<void>((resolve) => {
       this.resolveBootGate = resolve;
     });
-    this.injectChain = Promise.resolve();
+    this.injectChain = Promise.resolve(true);
 
     // Stable, project-scoped ID. Used as MARBLO_AGENT_ID, MCP config filename,
     // and the Firestore agents/* doc key — so the renderer can upsert one

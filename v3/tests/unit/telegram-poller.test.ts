@@ -7,6 +7,13 @@ import {
   type InboundTarget,
   type TelegramPollerDeps,
 } from "../../electron/telegram-poller";
+import {
+  OrchestratorManager,
+  type OrchestratorSession,
+  type OrchestratorStatus,
+} from "../../electron/orchestrator-manager";
+import type { AgentConfigGenerator } from "../../electron/agent-config";
+import type { PtyManager } from "../../electron/pty-manager";
 
 const TOKEN = "123456789:AAHfakeBotTokenForTestsOnly_abcdEFGH";
 const PROJECT = "proj1";
@@ -109,6 +116,111 @@ function readOffsets(): Record<string, number> {
   }
 }
 
+interface InjectManagerInternals {
+  session: OrchestratorSession | null;
+  bootGate: Promise<void>;
+  resolveBootGate: () => void;
+  injectChain: Promise<boolean>;
+  currentMissionId: string | null;
+}
+
+interface WriteRecord {
+  id: string;
+  text: string;
+  afterReplacementBootGate: boolean;
+}
+
+function asInjectInternals(
+  manager: OrchestratorManager,
+): InjectManagerInternals {
+  return manager as unknown as InjectManagerInternals;
+}
+
+function makeInjectManagerHarness(kind: "board" | "mission" = "board"): {
+  target: InboundTarget;
+  writes: WriteRecord[];
+  launchSession: (
+    ptySessionId: string,
+    status?: OrchestratorStatus,
+    ownerMissionId?: string | null,
+  ) => void;
+  stopSession: () => void;
+  markRunningAndReleaseBootGate: () => void;
+  setReplacementBootGateReleased: () => void;
+} {
+  const writes: WriteRecord[] = [];
+  let replacementBootGateReleased = false;
+  const fakePty = {
+    onDanger: () => {},
+    writeAndSubmit: async (id: string, text: string): Promise<boolean> => {
+      writes.push({
+        id,
+        text,
+        afterReplacementBootGate: replacementBootGateReleased,
+      });
+      return true;
+    },
+  } as unknown as PtyManager;
+  const manager = new OrchestratorManager(
+    fakePty,
+    {} as unknown as AgentConfigGenerator,
+    undefined,
+    kind,
+  );
+  const internals = asInjectInternals(manager);
+
+  const launchSession = (
+    ptySessionId: string,
+    status: OrchestratorStatus = "starting",
+    ownerMissionId: string | null = null,
+  ): void => {
+    let resolveBootGate = (): void => {};
+    internals.bootGate = new Promise<void>((resolve) => {
+      resolveBootGate = resolve;
+    });
+    internals.resolveBootGate = resolveBootGate;
+    internals.injectChain = Promise.resolve(true);
+    internals.currentMissionId = ownerMissionId;
+    internals.session = {
+      sessionId: `session-${ptySessionId}`,
+      ptySessionId,
+      status,
+      projectId: PROJECT,
+      rootPath: tmpDir,
+    };
+  };
+
+  const stopSession = (): void => {
+    internals.session = null;
+    internals.resolveBootGate();
+  };
+
+  return {
+    target: {
+      injectMessage: (text) => manager.injectMessage(text),
+      isRunning: () => manager.isRunning(),
+      describe: () => {
+        const session = manager.getSession();
+        return {
+          kind,
+          ptySessionId: session?.ptySessionId ?? null,
+          status: manager.getStatus(),
+        };
+      },
+    },
+    writes,
+    launchSession,
+    stopSession,
+    markRunningAndReleaseBootGate: () => {
+      if (internals.session) internals.session.status = "running";
+      internals.resolveBootGate();
+    },
+    setReplacementBootGateReleased: () => {
+      replacementBootGateReleased = true;
+    },
+  };
+}
+
 /** Base deps every test overrides selectively. */
 function baseDeps(
   fetchImpl: typeof fetch,
@@ -167,6 +279,7 @@ describe("TelegramPoller inbound routing", () => {
     const target: InboundTarget = {
       injectMessage: async (t) => {
         injected.push(t);
+        return true;
       },
     };
     // Serve the batch only while offset is unacked (< 501); empty afterward.
@@ -201,6 +314,7 @@ describe("TelegramPoller inbound routing", () => {
     const oldTarget: InboundTarget = {
       injectMessage: async (t) => {
         oldInjects.push(t);
+        return true;
       },
       isRunning: () => active === "old",
       describe: () => ({
@@ -212,6 +326,7 @@ describe("TelegramPoller inbound routing", () => {
     const newTarget: InboundTarget = {
       injectMessage: async (t) => {
         newInjects.push(t);
+        return true;
       },
       isRunning: () => active === "new",
       describe: () => ({
@@ -272,12 +387,11 @@ describe("TelegramPoller inbound routing", () => {
     expect(readOffsets()[PROJECT]).toBe(1102);
   });
 
-  it("holds the offset when injectMessage silently skipped (orchestrator no longer running)", async () => {
-    // Orchestrator resolves as live, injectMessage resolves without error, but
-    // the session was stopped mid-boot so isRunning() is now false → the write
-    // was skipped. The poller must NOT advance the offset (at-least-once).
+  it("holds the offset when injectMessage reports that no PTY write happened", async () => {
+    // Orchestrator resolves as live, but injectMessage reports that no PTY write
+    // happened. The poller must NOT advance the offset (at-least-once).
     const target: InboundTarget = {
-      injectMessage: async () => {},
+      injectMessage: async () => false,
       isRunning: () => false,
     };
     const { fetchImpl, calls } = makeFetch({
@@ -297,11 +411,180 @@ describe("TelegramPoller inbound routing", () => {
     expect(poller.getLastChatId(PROJECT)).toBeUndefined(); // never recorded
   });
 
+  it("delivers board switch-window inbound to the replacement PTY after its boot gate and preserves the routing gate", async () => {
+    const harness = makeInjectManagerHarness("board");
+    harness.launchSession("pty-old");
+    let injectAttempts = 0;
+    const target: InboundTarget = {
+      injectMessage: (text) => {
+        injectAttempts += 1;
+        return harness.target.injectMessage(text);
+      },
+      isRunning: harness.target.isRunning,
+      describe: harness.target.describe,
+    };
+    let served = false;
+    const { fetchImpl, calls } = makeFetch({
+      updatesFor: (offset) => {
+        if (!served && offset === undefined) {
+          served = true;
+          return [messageUpdate(3000, "during switch")];
+        }
+        return [];
+      },
+    });
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, { resolveOrchestrator: () => target }),
+    );
+    poller.start();
+
+    await waitFor(() => injectAttempts === 1);
+    harness.stopSession();
+    harness.launchSession("pty-new");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.writes).toHaveLength(0);
+
+    harness.setReplacementBootGateReleased();
+    harness.markRunningAndReleaseBootGate();
+    await waitFor(() => harness.writes.length === 1, 5000);
+    await waitFor(() => readOffsets()[PROJECT] === 3001, 5000);
+    await poller.stopAll();
+
+    expect(injectAttempts).toBe(1);
+    expect(calls.some((c) => c.body?.offset === 3001)).toBe(true);
+    expect(harness.writes).toEqual([
+      expect.objectContaining({
+        id: "pty-new",
+        afterReplacementBootGate: true,
+      }),
+    ]);
+    expect(harness.writes[0]?.text).toMatch(
+      /^\[Marblo routing gate\]\nRouting gate for every user turn:/,
+    );
+    expect(harness.writes[0]?.text).toContain("during switch");
+    expect(poller.getLastChatId(PROJECT)).toBe(CHAT);
+    expect(poller.getRouteHealth(PROJECT)).toMatchObject({
+      lastDeliveredUpdateId: 3000,
+      lastDeliveredTarget: {
+        kind: "board",
+        ptySessionId: "pty-new",
+        status: "running",
+      },
+      lastChatIdKnown: true,
+    });
+  });
+
+  it("does not leak a queued mission grant into a different owner mission after manager reuse", async () => {
+    const harness = makeInjectManagerHarness("mission");
+    harness.launchSession("pty-A", "starting", "mission-A");
+
+    const delivered = harness.target.injectMessage("grant for mission A");
+    harness.stopSession();
+    harness.launchSession("pty-B", "starting", "mission-B");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.writes).toHaveLength(0);
+
+    harness.setReplacementBootGateReleased();
+    harness.markRunningAndReleaseBootGate();
+    await expect(delivered).resolves.toBe(false);
+
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it("does not write to a same-id replacement PTY until the replacement boot gate resolves", async () => {
+    const harness = makeInjectManagerHarness();
+    harness.launchSession("pty-reused");
+    let injectAttempts = 0;
+    const target: InboundTarget = {
+      injectMessage: (text) => {
+        injectAttempts += 1;
+        return harness.target.injectMessage(text);
+      },
+      isRunning: harness.target.isRunning,
+      describe: harness.target.describe,
+    };
+    const { fetchImpl } = makeFetch({
+      updatesFor: (offset) =>
+        offset === undefined || offset < 3003
+          ? [messageUpdate(3002, "same pty replacement")]
+          : [],
+    });
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, { resolveOrchestrator: () => target }),
+    );
+    poller.start();
+
+    await waitFor(() => injectAttempts === 1);
+    harness.stopSession();
+    harness.launchSession("pty-reused");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.writes).toHaveLength(0);
+
+    harness.setReplacementBootGateReleased();
+    harness.markRunningAndReleaseBootGate();
+    await waitFor(() => harness.writes.length === 1, 5000);
+    await waitFor(() => readOffsets()[PROJECT] === 3003, 5000);
+    await poller.stopAll();
+
+    expect(injectAttempts).toBe(1);
+    expect(harness.writes).toEqual([
+      expect.objectContaining({
+        id: "pty-reused",
+        afterReplacementBootGate: true,
+      }),
+    ]);
+  });
+
+  it("holds the offset when a queued injectMessage resumes after the session dies without replacement", async () => {
+    const harness = makeInjectManagerHarness();
+    harness.launchSession("pty-old");
+    let injectAttempts = 0;
+    const target: InboundTarget = {
+      injectMessage: (text) => {
+        injectAttempts += 1;
+        return harness.target.injectMessage(text);
+      },
+      isRunning: harness.target.isRunning,
+      describe: harness.target.describe,
+    };
+    const { fetchImpl, calls } = makeFetch({
+      updatesFor: () => [messageUpdate(3002, "lost session")],
+    });
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, { resolveOrchestrator: () => target }),
+    );
+    poller.start();
+
+    await waitFor(() => injectAttempts === 1);
+    harness.stopSession();
+    await waitFor(
+      () => calls.filter((c) => c.method === "getUpdates").length >= 2,
+      5000,
+    );
+    await poller.stopAll();
+
+    expect(harness.writes).toHaveLength(0);
+    expect(readOffsets()[PROJECT]).toBeUndefined();
+    expect(poller.getLastChatId(PROJECT)).toBeUndefined();
+    expect(poller.getRouteHealth(PROJECT)).toMatchObject({
+      lastDeliveredUpdateId: null,
+      lastDeliveredTarget: null,
+      lastChatIdKnown: false,
+    });
+  });
+
   it("drops inbound from a chat not on a non-empty allowlist (advances offset)", async () => {
     const injected: string[] = [];
     const target: InboundTarget = {
       injectMessage: async (t) => {
         injected.push(t);
+        return true;
       },
     };
     const { fetchImpl } = makeFetch({
@@ -522,6 +805,7 @@ describe("TelegramPoller un-replied nudge (spec A)", () => {
     const target: InboundTarget = {
       injectMessage: async (t) => {
         injects.push(t);
+        return true;
       },
       isRunning: () => true,
     };
@@ -561,6 +845,7 @@ describe("TelegramPoller un-replied nudge (spec A)", () => {
     const target: InboundTarget = {
       injectMessage: async (t) => {
         injects.push(t);
+        return true;
       },
       isRunning: () => true,
     };
