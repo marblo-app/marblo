@@ -119,7 +119,7 @@ import {
   runTelegramChannelHealthCheck,
   type ChannelHealthReport,
 } from "./telegram-health";
-import { TelegramPoller } from "./telegram-poller";
+import { TelegramPoller, type InboundTarget } from "./telegram-poller";
 import {
   getProjectConnection,
   upsertProjectConnection,
@@ -1728,9 +1728,13 @@ bridgeServer.setMissionOrchestratorLookup(
 const telegramPoller = new TelegramPoller({
   resolveOrchestrator: (projectId: string) => {
     const board = orchestrators.get(projectId);
-    if (board && board.isRunning()) return board;
+    if (board && board.isRunning()) {
+      return telegramInboundTarget(board, "board");
+    }
     const mission = missionOrchestrators.get(projectId);
-    if (mission && mission.isRunning()) return mission;
+    if (mission && mission.isRunning()) {
+      return telegramInboundTarget(mission, "mission");
+    }
     return null;
   },
   onLoopActivityChange: () => refreshWorkPowerSaveBlocker(),
@@ -1738,6 +1742,36 @@ const telegramPoller = new TelegramPoller({
 bridgeServer.setSendTelegramMessage((projectId, text, chatId) =>
   telegramPoller.sendMessage(projectId, text, chatId),
 );
+
+function telegramInboundTarget(
+  manager: OrchestratorManager,
+  kind: "board" | "mission",
+): InboundTarget {
+  return {
+    injectMessage: (text) => manager.injectMessage(text),
+    isRunning: () => manager.isRunning(),
+    describe: () => {
+      const session = manager.getSession();
+      return {
+        kind,
+        ptySessionId: session?.ptySessionId ?? null,
+        status: manager.getStatus(),
+      };
+    },
+  };
+}
+
+function logTelegramRouteHealth(projectId: string, reason: string): void {
+  const health = telegramPoller.getRouteHealth(projectId);
+  const target = health.lastDeliveredTarget;
+  console.info(
+    `[TelegramPoller:${reason}] project=${projectId} loop=${health.loopRunning ? "running" : "stopped"} ` +
+      `lastChatIdKnown=${health.lastChatIdKnown} pendingReply=${health.pendingReply} ` +
+      `lastDeliveredUpdateId=${health.lastDeliveredUpdateId ?? "none"} ` +
+      `lastTarget=${target ? `${target.kind}:${target.ptySessionId ?? "unknown"}:${target.status}` : "none"} ` +
+      `unanswered=${health.reliability.unanswered} sendFailures=${health.reliability.sendFailures}`,
+  );
+}
 
 function collectWorkPowerSaveSources(): WorkPowerSaveSource[] {
   const sources: WorkPowerSaveSource[] = [];
@@ -1947,6 +1981,7 @@ function ensureMissionOrchestratorLaunched(
       if (ownerId !== undefined) ptyOwners.set(sid, ownerId);
       setupPtyForwarding(sid);
       hookOrchestratorActivity(sid, projectId);
+      logTelegramRouteHealth(projectId, "mission-launch-pty-ready");
     },
     resumeId,
     missionId,
@@ -4565,8 +4600,10 @@ ipcMain.handle(
       },
       detachPending: (pid) => pendingListener.detach(`orch-${pid}`),
       stopCurrent: (pid) => {
+        logTelegramRouteHealth(pid, "switch-before-stop");
         const current = orchestrators.get(pid);
         if (current) current.stop();
+        logTelegramRouteHealth(pid, "switch-after-stop");
       },
       launchNew: async (switchArgs, snapshot) => {
         const orch = getOrchestrator(projectId);
@@ -4580,6 +4617,7 @@ ipcMain.handle(
             ptyOwners.set(sid, senderId);
             setupPtyForwarding(sid);
             hookOrchestratorActivity(sid, projectId);
+            logTelegramRouteHealth(projectId, "switch-new-pty-ready");
           },
           snapshot.to.resumeSessionId,
           undefined,
@@ -4601,8 +4639,10 @@ ipcMain.handle(
         if (!orch) return;
         await orch.injectMessage(formatHandoffPrompt(snapshot, mode));
       },
-      attachPending: (pid, ptySessionId) =>
-        pendingListener.attach(`orch-${pid}`, ptySessionId),
+      attachPending: (pid, ptySessionId) => {
+        pendingListener.attach(`orch-${pid}`, ptySessionId);
+        logTelegramRouteHealth(pid, "switch-after-attach");
+      },
       stepTimeoutMs: ORCHESTRATOR_SWITCH_STEP_TIMEOUT_MS,
       injectTimeoutMs: ORCHESTRATOR_SWITCH_INJECT_TIMEOUT_MS,
       onStage: (stage) => {
@@ -4703,6 +4743,7 @@ ipcMain.handle(
         // pendingInstructions with targetAgentId = `orch-${projectId}`.
         // This listener on the hosting machine picks it up and injects.
         pendingListener.attach(`orch-${projectId}`, sid);
+        logTelegramRouteHealth(projectId, "launch-pty-ready");
       },
       resumeSessionId,
     );

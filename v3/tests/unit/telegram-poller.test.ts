@@ -193,6 +193,85 @@ describe("TelegramPoller inbound routing", () => {
     expect(poller.getLastChatId(PROJECT)).toBe(CHAT);
   });
 
+  it("routes the next inbound to the newly resolved orchestrator after a switch and preserves last chat", async () => {
+    const oldInjects: string[] = [];
+    const newInjects: string[] = [];
+    let active: "old" | "new" = "old";
+    let afterSwitchUpdateAvailable = false;
+    const oldTarget: InboundTarget = {
+      injectMessage: async (t) => {
+        oldInjects.push(t);
+      },
+      isRunning: () => active === "old",
+      describe: () => ({
+        kind: "board",
+        ptySessionId: "pty-old",
+        status: active === "old" ? "running" : "stopped",
+      }),
+    };
+    const newTarget: InboundTarget = {
+      injectMessage: async (t) => {
+        newInjects.push(t);
+      },
+      isRunning: () => active === "new",
+      describe: () => ({
+        kind: "board",
+        ptySessionId: "pty-new",
+        status: active === "new" ? "running" : "stopped",
+      }),
+    };
+    const { fetchImpl } = makeFetch({
+      updatesFor: (offset) => {
+        if (offset === undefined || offset < 1101) {
+          return [messageUpdate(1100, "before switch")];
+        }
+        if (afterSwitchUpdateAvailable && offset < 1102) {
+          return [messageUpdate(1101, "after switch")];
+        }
+        return [];
+      },
+    });
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        resolveOrchestrator: () => (active === "old" ? oldTarget : newTarget),
+      }),
+    );
+    poller.start();
+
+    await waitFor(() => oldInjects.length === 1);
+    expect(poller.getRouteHealth(PROJECT)).toMatchObject({
+      loopRunning: true,
+      lastChatIdKnown: true,
+      lastDeliveredUpdateId: 1100,
+      lastDeliveredTarget: {
+        kind: "board",
+        ptySessionId: "pty-old",
+        status: "running",
+      },
+    });
+
+    active = "new";
+    afterSwitchUpdateAvailable = true;
+    await waitFor(() => newInjects.length === 1);
+    await poller.stopAll();
+
+    expect(oldInjects).toHaveLength(1);
+    expect(newInjects).toHaveLength(1);
+    expect(newInjects[0]).toContain("after switch");
+    expect(poller.getLastChatId(PROJECT)).toBe(CHAT);
+    expect(poller.getRouteHealth(PROJECT)).toMatchObject({
+      loopRunning: false,
+      lastChatIdKnown: true,
+      lastDeliveredUpdateId: 1101,
+      lastDeliveredTarget: {
+        kind: "board",
+        ptySessionId: "pty-new",
+        status: "running",
+      },
+    });
+    expect(readOffsets()[PROJECT]).toBe(1102);
+  });
+
   it("holds the offset when injectMessage silently skipped (orchestrator no longer running)", async () => {
     // Orchestrator resolves as live, injectMessage resolves without error, but
     // the session was stopped mid-boot so isRunning() is now false → the write

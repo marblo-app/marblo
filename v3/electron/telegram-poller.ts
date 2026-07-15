@@ -80,6 +80,14 @@ export interface InboundTarget {
    * so this recheck keeps at-least-once honest across a boot-fail race.
    */
   isRunning?(): boolean;
+  /** Token-free target metadata for handoff diagnostics and health. */
+  describe?(): InboundTargetDescriptor;
+}
+
+export interface InboundTargetDescriptor {
+  kind: string;
+  ptySessionId: string | null;
+  status: string;
 }
 
 export interface TelegramPollerDeps {
@@ -156,6 +164,17 @@ export interface ReliabilityStats {
   sendFailures: number;
 }
 
+export interface TelegramRouteHealth {
+  projectId: string;
+  loopRunning: boolean;
+  lastChatIdKnown: boolean;
+  pendingReply: boolean;
+  lastInboundAt: number | null;
+  lastDeliveredUpdateId: number | null;
+  lastDeliveredTarget: InboundTargetDescriptor | null;
+  reliability: ReliabilityStats;
+}
+
 const DEFAULT_OFFSET_FILE = path.join(
   os.homedir(),
   ".marblo",
@@ -206,6 +225,15 @@ export class TelegramPoller {
   private readonly pendingReplies = new Map<string, PendingReply>();
   /** Per-project reliability counters (spec C). */
   private readonly stats = new Map<string, ReliabilityStats>();
+  /** Last successful inbound delivery route, token-free for logs/health. */
+  private readonly lastDelivered = new Map<
+    string,
+    {
+      at: number;
+      updateId: number;
+      target: InboundTargetDescriptor;
+    }
+  >();
   private readonly log: Pick<Console, "log" | "warn" | "error">;
 
   constructor(deps: TelegramPollerDeps) {
@@ -420,6 +448,15 @@ export class TelegramPoller {
     // Only remember the chat once we actually delivered — this becomes the
     // default outbound reply target.
     this.lastChatId.set(projectId, chatId);
+    const target = describeTarget(orch);
+    this.lastDelivered.set(projectId, {
+      at: Date.now(),
+      updateId: update.update_id,
+      target,
+    });
+    this.log.log(
+      `[TelegramPoller] project=${projectId} delivered inbound update ${update.update_id} to ${target.kind} pty=${target.ptySessionId ?? "unknown"} status=${target.status}; lastChatIdKnown=true.`,
+    );
     // Track this inbound as awaiting a send_telegram_message reply so we can
     // nudge the orchestrator once if it finishes its turn without answering.
     this.armReplyTracking(projectId, update.update_id);
@@ -618,6 +655,25 @@ export class TelegramPoller {
     return { ...(this.stats.get(projectId) ?? emptyStats()) };
   }
 
+  /**
+   * Token-free health snapshot for switch/takeover diagnostics. This lets the
+   * switch path prove which PTY will receive Telegram inbound without exposing
+   * bot credentials or chat contents.
+   */
+  getRouteHealth(projectId: string): TelegramRouteHealth {
+    const delivered = this.lastDelivered.get(projectId);
+    return {
+      projectId,
+      loopRunning: this.loops.has(projectId),
+      lastChatIdKnown: this.lastChatId.has(projectId),
+      pendingReply: this.pendingReplies.has(projectId),
+      lastInboundAt: delivered?.at ?? null,
+      lastDeliveredUpdateId: delivered?.updateId ?? null,
+      lastDeliveredTarget: delivered?.target ?? null,
+      reliability: this.getReliabilityStats(projectId),
+    };
+  }
+
   private bumpUnanswered(projectId: string): void {
     const s = this.stats.get(projectId) ?? emptyStats();
     s.unanswered += 1;
@@ -760,6 +816,24 @@ export class TelegramPoller {
 
 function emptyStats(): ReliabilityStats {
   return { unanswered: 0, sendFailures: 0 };
+}
+
+function describeTarget(target: InboundTarget): InboundTargetDescriptor {
+  try {
+    return (
+      target.describe?.() ?? {
+        kind: "orchestrator",
+        ptySessionId: null,
+        status: target.isRunning?.() === false ? "stopped" : "running",
+      }
+    );
+  } catch {
+    return {
+      kind: "orchestrator",
+      ptySessionId: null,
+      status: "unknown",
+    };
+  }
 }
 
 /**
