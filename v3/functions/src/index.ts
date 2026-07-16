@@ -4628,7 +4628,7 @@ export const getAdminUsageSummary = functions.https.onCall(
         COUNTIF(success = true) AS succeeded,
         AVG(durationMs) AS avgDurationMs
       FROM ${outcomesTable}
-      WHERE completedAt >= FORMAT_TIMESTAMP('%FT%TZ', ${since})
+      WHERE completedAt >= ${since}
     `;
 
     const params = { days: rangeDays };
@@ -4760,7 +4760,7 @@ export const getAdminModelSummary = functions.https.onCall(
         AVG(durationMs) AS avgDurationMs,
         AVG(totalCost) AS avgCost
       FROM ${outcomesTable}
-      WHERE completedAt >= FORMAT_TIMESTAMP('%FT%TZ', ${sinceTs})
+      WHERE completedAt >= ${sinceTs}
       GROUP BY model, role
       ORDER BY total DESC
     `;
