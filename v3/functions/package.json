@@ -5,8 +5,9 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
+    "check:deploy-env": "node scripts/check-deploy-env.mjs",
     "serve": "firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions",
+    "deploy": "firebase deploy --only functions --project marblo-2253d",
     "test:reject": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderReject.test.mjs'"
   },
   "engines": {

@@ -9,7 +9,6 @@ import {
   RefreshCw,
   TrendingUp,
   Users,
-  CreditCard,
   Activity,
   Cpu,
   ShieldOff,
@@ -147,12 +146,6 @@ function fmtCost(n: number | undefined | null): string {
   if (n < 0.01) return `$${n.toFixed(4)}`;
   if (n < 100) return `$${n.toFixed(2)}`;
   return `$${Math.round(n).toLocaleString("en-US")}`;
-}
-function fmtTokens(n: number | undefined | null): string {
-  if (n == null || !isFinite(n) || n === 0) return "0";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return `${Math.round(n)}`;
 }
 function fmtDuration(ms: number | undefined | null): string {
   if (ms == null || !isFinite(ms) || ms === 0) return "—";
@@ -456,7 +449,9 @@ function SectionHeader({
 // 콜러블 에러 → 사용자 메시지.
 function mapErr(err: CallableError): string {
   if (err?.code === "functions/permission-denied")
-    return "어드민 권한이 없습니다 (ADMIN_UID 미설정 또는 계정 불일치).";
+    return "어드민 권한이 없습니다. 로그인 계정이 관리자 UID와 일치하지 않습니다.";
+  if (err?.code === "functions/failed-precondition")
+    return "어드민 분석 서버 설정 오류입니다. ADMIN_UID 또는 BigQuery 설정을 서버 로그에서 확인해야 합니다.";
   if (err?.code === "functions/invalid-argument")
     return "잘못된 기간 파라미터입니다.";
   return err?.message || "데이터를 불러오지 못했습니다.";

@@ -13,6 +13,9 @@ import { dirname, resolve } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const functionsSource = readFileSync(resolve(__dirname, "../src/index.ts"), "utf8");
 const rulesSource = readFileSync(resolve(__dirname, "../../firestore.rules"), "utf8");
+const firebaseConfig = JSON.parse(
+  readFileSync(resolve(__dirname, "../../firebase.json"), "utf8"),
+);
 
 const cases = [
   [
@@ -36,18 +39,38 @@ const cases = [
     },
   ],
   [
-    "requireAdmin remains ADMIN_UID backed",
+    "requireAdmin distinguishes missing ADMIN_UID from uid mismatch",
     () => {
       const guardStart = functionsSource.indexOf("function requireAdmin");
-      const guardEnd = functionsSource.indexOf("// Pro 구독", guardStart);
+      const guardEnd = functionsSource.indexOf("// 구독 doc", guardStart);
       if (guardStart < 0 || guardEnd < 0) return false;
 
       const body = functionsSource.slice(guardStart, guardEnd);
       return (
         body.includes("process.env.ADMIN_UID") &&
+        body.includes('"failed-precondition"') &&
+        body.includes("Admin configuration is missing.") &&
         body.includes("context.auth?.uid !== adminUid") &&
-        body.includes('"permission-denied"')
+        body.includes('"permission-denied"') &&
+        body.indexOf('"failed-precondition"') < body.indexOf('"permission-denied"')
       );
+    },
+  ],
+  [
+    "functions predeploy checks env before build",
+    () => {
+      const functionsConfig = firebaseConfig.functions?.find?.(
+        (entry) => entry.source === "functions",
+      );
+      const predeploy = functionsConfig?.predeploy;
+      if (!Array.isArray(predeploy)) return false;
+      const envGateIndex = predeploy.findIndex((cmd) =>
+        String(cmd).includes("run check:deploy-env"),
+      );
+      const buildIndex = predeploy.findIndex((cmd) =>
+        String(cmd).includes("run build"),
+      );
+      return envGateIndex >= 0 && buildIndex > envGateIndex;
     },
   ],
   [

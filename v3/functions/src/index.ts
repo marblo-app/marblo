@@ -1349,8 +1349,18 @@ function addMonths(base: Date, months: number): Date {
 }
 
 function requireAdmin(context: functions.https.CallableContext): void {
-  const adminUid = process.env.ADMIN_UID;
-  if (!adminUid || context.auth?.uid !== adminUid) {
+  const adminUid = process.env.ADMIN_UID?.trim();
+  if (!adminUid) {
+    functions.logger.warn(
+      "[requireAdmin] ADMIN_UID is not configured; rejecting admin callable as server misconfiguration.",
+    );
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Admin configuration is missing.",
+    );
+  }
+
+  if (context.auth?.uid !== adminUid) {
     throw new functions.https.HttpsError("permission-denied", "Admin only");
   }
 }
