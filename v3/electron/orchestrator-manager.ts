@@ -585,13 +585,40 @@ export class OrchestratorManager {
     // board (default kind) 는 기존대로 rootPath 에 세션 있으면 auto-resume.
     // 다른 kind (mission 등) 는 board 와 같은 세션을 동시에 resume 하면 충돌
     // (PTY 가 비어 보이는 증상) → 명시적 resumeSessionId 가 주어진 경우에만 resume.
+    let effectiveResumeSessionId = resumeSessionId;
+    if (orchestratorModel === "gpt") {
+      const hasSavedCodexSession = this.configGenerator.hasSavedSession(
+        sessionId,
+        "gpt",
+      );
+      if (!effectiveResumeSessionId || effectiveResumeSessionId === "latest") {
+        if (hasSavedCodexSession) {
+          effectiveResumeSessionId = "latest";
+        } else if (effectiveResumeSessionId === "latest") {
+          console.log(
+            `[Orchestrator:${this.kind}] Codex resume requested but no saved session exists for ${sessionId}; starting new`,
+          );
+          effectiveResumeSessionId = undefined;
+        }
+      } else if (
+        effectiveResumeSessionId !== "new" &&
+        !hasSavedCodexSession
+      ) {
+        console.warn(
+          `[Orchestrator:${this.kind}] Codex resume requested for "${effectiveResumeSessionId}" but no saved session exists for ${sessionId}; starting new`,
+        );
+        effectiveResumeSessionId = undefined;
+      }
+    }
+
     const allowAutoResume =
       this.kind === "board" && orchestratorModel === "claude";
     const shouldResume =
-      resumeSessionId || (allowAutoResume && this.hasClaudeSession(rootPath));
+      effectiveResumeSessionId ||
+      (allowAutoResume && this.hasClaudeSession(rootPath));
     console.log(
       `[Orchestrator:${this.kind}] rootPath=${rootPath}, resumeSessionId=${
-        resumeSessionId || "auto"
+        effectiveResumeSessionId || "auto"
       }, shouldResume=${!!shouldResume}`,
     );
 
@@ -604,10 +631,10 @@ export class OrchestratorManager {
     // separate follow-up (backlog IUj7YTFqJVZvi9AbtTPf).
     const nonClaudeResumeSessionId =
       orchestratorModel === "claude" ||
-      !resumeSessionId ||
-      resumeSessionId === "new"
+      !effectiveResumeSessionId ||
+      effectiveResumeSessionId === "new"
         ? undefined
-        : resumeSessionId;
+        : effectiveResumeSessionId;
     const launchConfig = this.configGenerator.getLaunchConfig(
       {
         id: sessionId,
@@ -654,18 +681,26 @@ export class OrchestratorManager {
     // Resolve the concrete session id we intend to resume (if any). A null
     // candidate means "no prior session matched" → start fresh.
     let resumeCandidate: string | null = null;
-    if (resumeSessionId && resumeSessionId !== "new") {
+    if (
+      launchConfig.model === "claude" &&
+      effectiveResumeSessionId &&
+      effectiveResumeSessionId !== "new"
+    ) {
       resumeCandidate = this.resolveSessionId(
         rootPath,
-        resumeSessionId,
+        effectiveResumeSessionId,
         labelTarget,
       );
       if (!resumeCandidate) {
         console.log(
-          `[Orchestrator] No matching orchestrator session found for "${resumeSessionId}", starting new`,
+          `[Orchestrator] No matching orchestrator session found for "${effectiveResumeSessionId}", starting new`,
         );
       }
-    } else if (!resumeSessionId && shouldResume) {
+    } else if (
+      launchConfig.model === "claude" &&
+      !effectiveResumeSessionId &&
+      shouldResume
+    ) {
       // Auto-continue latest orchestrator session (kind-scoped label)
       resumeCandidate = this.resolveSessionId(rootPath, "latest", labelTarget);
       if (!resumeCandidate) {
@@ -685,15 +720,17 @@ export class OrchestratorManager {
     // boot prompt — the old `shouldResume` gate skipped the prompt whenever a
     // resume was *requested* even if no session was actually resumed.
     let resumedSessionId: string | null = null;
+    let resumedCliSessionId: string | null = null;
     if (resumeCandidate && launchConfig.model === "claude") {
       if (this.acquireResumeLock(rootPath, resumeCandidate, ptySessionId)) {
         launchConfig.args.push("--resume", resumeCandidate);
         resumedSessionId = resumeCandidate;
+        resumedCliSessionId = resumeCandidate;
         console.log(
           `[Orchestrator:${
             this.kind
           }] Resuming session: ${resumeCandidate} (requested: ${
-            resumeSessionId ?? "auto"
+            effectiveResumeSessionId ?? "auto"
           })`,
         );
       } else {
@@ -701,6 +738,15 @@ export class OrchestratorManager {
           `[Orchestrator:${this.kind}] Session ${resumeCandidate} is already attached by another live orchestrator instance — starting a FRESH session to avoid a blank PTY (concurrent --resume guard).`,
         );
       }
+    } else if (launchConfig.model === "gpt" && nonClaudeResumeSessionId) {
+      resumedCliSessionId = nonClaudeResumeSessionId;
+      console.log(
+        `[Orchestrator:${this.kind}] Resuming Codex session: ${
+          nonClaudeResumeSessionId === "latest"
+            ? "latest (--last)"
+            : nonClaudeResumeSessionId
+        } (requested: ${resumeSessionId ?? "auto"})`,
+      );
     }
 
     const context =
@@ -833,7 +879,7 @@ export class OrchestratorManager {
     // Send initial prompt only for NEW sessions (not resumed ones). Gate on
     // whether we ACTUALLY resumed (lock acquired + session matched), not on the
     // mere request — a fall-back-to-fresh must still send the boot prompt.
-    if (resumedSessionId) {
+    if (resumedCliSessionId) {
       // Resumed session — just mark as running after CLI boots
       setTimeout(() => {
         if (this.session?.ptySessionId === ptySessionId) {

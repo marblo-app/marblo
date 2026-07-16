@@ -43,6 +43,7 @@ import { OrchestratorManager } from "./orchestrator-manager";
 import {
   buildOrchestratorHandoffSnapshot,
   formatHandoffPrompt,
+  resolveRestartResumeSessionId,
   resolveSwitchHandoffResumeSessionId,
   type OrchestratorSwitchMode,
   type OrchestratorSwitchResumeMode,
@@ -3855,6 +3856,22 @@ ipcMain.handle(
         console.log(
           `[agent:launch] agy resolve 'latest' for "${agent.name}" → ${resolvedSessionId}`,
         );
+      } else if (agent.model === "gpt" || agent.model === "gemini") {
+        // Codex/Gemini sessions live in this agent's isolated home, NOT in
+        // ~/.claude — so the Claude resolver below must not run for them.
+        // It matches on agentId/label, so an agent that once ran as Claude
+        // and was switched to Codex still has a Claude label bearing its id;
+        // resolving it here would emit `codex resume <claude-uuid>`, which
+        // exits 1 ("No saved session found with ID ..."). Pass the native
+        // "latest" sentinel instead, and only when a session actually exists.
+        resolvedSessionId = agentManager
+          .getConfigGenerator()
+          .hasSavedSession(agent.id, agent.model)
+          ? "latest"
+          : "new";
+        console.log(
+          `[agent:launch] Resolved 'latest' for "${agent.name}" (${agent.model}) → ${resolvedSessionId}`,
+        );
       } else {
         // Stateless file-IO — any orchestrator instance reads the same on-disk
         // session metadata, so we don't need a project-specific instance here.
@@ -4808,9 +4825,28 @@ ipcMain.handle(
 // is missing (the common case). Returns a concrete session id or null.
 ipcMain.handle(
   "orchestratorSession:resolvePrevious",
-  (_event, rootPath: string) => {
+  (_event, rootPath: string, projectId?: string) => {
     const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
-    return getAnyOrchestrator().resolveOrchestratorResumeId(resolvedPath);
+    // Session identity is per-CLI, so this must be model-aware. Codex keeps
+    // its sessions in the isolated CODEX_HOME and resumes via the native
+    // `codex resume --last` ("latest" sentinel) — handing it a Claude uuid
+    // from the ~/.claude store makes it exit 1 on launch. See
+    // resolveRestartResumeSessionId.
+    applyStoredOrchestratorModelEnv();
+    return resolveRestartResumeSessionId({
+      targetModel: resolveOrchestratorModel(),
+      // Without a projectId we cannot inspect the isolated home; assume a
+      // session exists and let `--last` decide — it boots a fresh session on
+      // an empty home rather than failing.
+      hasSavedGptSession: () =>
+        projectId
+          ? agentManager
+              .getConfigGenerator()
+              .hasSavedSession(`orchestrator-${projectId}`, "gpt")
+          : true,
+      resolvePreviousNonGptSession: () =>
+        getAnyOrchestrator().resolveOrchestratorResumeId(resolvedPath),
+    });
   },
 );
 

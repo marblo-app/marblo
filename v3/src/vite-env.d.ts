@@ -299,7 +299,10 @@ interface OrchestratorSessionAPI {
       agentId?: string;
     }[]
   >;
-  resolvePrevious: (rootPath: string) => Promise<string | null>;
+  resolvePrevious: (
+    rootPath: string,
+    projectId?: string,
+  ) => Promise<string | null>;
   onStatusChange: (callback: (data: { status: string }) => void) => void;
   onAgentSpawned: (
     callback: (data: {

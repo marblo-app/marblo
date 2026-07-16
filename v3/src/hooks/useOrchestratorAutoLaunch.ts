@@ -66,7 +66,10 @@ export function useOrchestratorAutoLaunch() {
       // the common case). Fall back to "new" only when there is genuinely
       // no prior orchestrator session.
       const priorId =
-        await window.electronAPI.orchestratorSession.resolvePrevious(fixedRoot);
+        await window.electronAPI.orchestratorSession.resolvePrevious(
+          fixedRoot,
+          projectId,
+        );
       const resumeId = priorId ?? "new";
 
       setStatus("starting");

@@ -369,8 +369,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     status: () => ipcRenderer.invoke("orchestratorSession:status"),
     listSessions: (rootPath: string) =>
       ipcRenderer.invoke("orchestratorSession:listSessions", rootPath),
-    resolvePrevious: (rootPath: string): Promise<string | null> =>
-      ipcRenderer.invoke("orchestratorSession:resolvePrevious", rootPath),
+    // projectId lets main check the per-orchestrator isolated CODEX_HOME
+    // before proposing a Codex resume.
+    resolvePrevious: (
+      rootPath: string,
+      projectId?: string,
+    ): Promise<string | null> =>
+      ipcRenderer.invoke(
+        "orchestratorSession:resolvePrevious",
+        rootPath,
+        projectId,
+      ),
     onStatusChange: (callback: (data: { status: string }) => void) => {
       ipcRenderer.on("orchestrator:statusChanged", (_event, data) =>
         callback(data),

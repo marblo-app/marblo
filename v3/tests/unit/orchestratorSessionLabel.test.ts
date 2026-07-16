@@ -179,6 +179,7 @@ describe("OrchestratorManager session reconnect", () => {
       kind: string,
       mcpConfigPath: string,
       model: LaunchConfig["model"] = "claude",
+      hasSavedSession = false,
     ): OrchestratorManager {
       const ptyManager = {
         create: vi.fn(),
@@ -199,6 +200,7 @@ describe("OrchestratorManager session reconnect", () => {
       };
       const configGenerator = {
         getLaunchConfig: vi.fn(() => launchConfig),
+        hasSavedSession: vi.fn(() => hasSavedSession),
         cleanup: vi.fn(),
       };
       return new OrchestratorManager(
@@ -211,6 +213,68 @@ describe("OrchestratorManager session reconnect", () => {
         undefined,
         kind,
       );
+    }
+
+    function makeInspectableLaunchManager(
+      kind: string,
+      mcpConfigPath: string,
+      model: LaunchConfig["model"],
+      hasSavedSession: boolean,
+    ): {
+      mgr: OrchestratorManager;
+      ptyManager: {
+        create: ReturnType<typeof vi.fn>;
+        onData: ReturnType<typeof vi.fn>;
+        onDanger: ReturnType<typeof vi.fn>;
+        setBlockDangerousForSession: ReturnType<typeof vi.fn>;
+        onExit: ReturnType<typeof vi.fn>;
+        writeAndSubmit: ReturnType<typeof vi.fn>;
+        kill: ReturnType<typeof vi.fn>;
+      };
+    } {
+      const ptyManager = {
+        create: vi.fn(),
+        onData: vi.fn(),
+        onDanger: vi.fn(() => vi.fn()),
+        setBlockDangerousForSession: vi.fn(),
+        onExit: vi.fn(),
+        writeAndSubmit: vi.fn(),
+        kill: vi.fn(),
+      };
+      const configGenerator = {
+        getLaunchConfig: vi.fn(
+          (
+            _agent: unknown,
+            _projectDir: string,
+            _initialPrompt?: string,
+            _marbloProjectId?: string,
+            resume?: string,
+          ) => ({
+            model,
+            command: model === "gpt" ? "codex" : "claude",
+            args:
+              model === "gpt" && resume && resume !== "new"
+                ? ["resume", resume === "latest" ? "--last" : resume]
+                : ([] as string[]),
+            env: {} as Record<string, string>,
+            mcpConfigPath,
+            skillContent: "",
+          }),
+        ),
+        hasSavedSession: vi.fn(() => hasSavedSession),
+        cleanup: vi.fn(),
+      };
+      const mgr = new OrchestratorManager(
+        ptyManager as unknown as ConstructorParameters<
+          typeof OrchestratorManager
+        >[0],
+        configGenerator as unknown as ConstructorParameters<
+          typeof OrchestratorManager
+        >[1],
+        undefined,
+        kind,
+      );
+      return { mgr, ptyManager };
     }
 
     function readMcpEnv(filePath: string): Record<string, string | undefined> {
@@ -286,6 +350,35 @@ describe("OrchestratorManager session reconnect", () => {
         MARBLO_PROJECT: "project-1",
         MARBLO_CONTEXT: "board",
       });
+    });
+
+    it("resumes Codex with the native resume subcommand and skips the boot prompt", async () => {
+      const mcpConfigPath = path.join(tmpHome, "codex-resume-config.toml");
+      writeCodexMcpConfig(mcpConfigPath);
+      const { mgr, ptyManager } = makeInspectableLaunchManager(
+        "board",
+        mcpConfigPath,
+        "gpt",
+        true,
+      );
+
+      const session = mgr.launch(
+        "project-1",
+        rootPath,
+        12345,
+        undefined,
+        "latest",
+        undefined,
+        { modelOverride: "gpt" },
+      );
+
+      expect(session.launchConfig.args.slice(0, 2)).toEqual([
+        "resume",
+        "--last",
+      ]);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(ptyManager.writeAndSubmit).not.toHaveBeenCalled();
+      expect(mgr.getStatus()).toBe("running");
     });
   });
 
@@ -523,7 +616,27 @@ describe("OrchestratorManager session reconnect", () => {
       args: string[];
     }
 
-    function makeRestartManager(kind = "board"): {
+    function writeRestartCodexMcpConfig(filePath: string): void {
+      fs.writeFileSync(
+        filePath,
+        [
+          "[mcp_servers.marblo]",
+          'command = "/Applications/Marblo.app/Contents/MacOS/Marblo"',
+          'args = ["dist-mcp/index.js"]',
+          "",
+          "[mcp_servers.marblo.env]",
+          'ELECTRON_RUN_AS_NODE = "1"',
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+    }
+
+    function makeRestartManager(
+      kind = "board",
+      model: LaunchConfig["model"] = "claude",
+      hasSavedSession = false,
+    ): {
       mgr: OrchestratorManager;
       createCalls: CreateCall[];
       exitCbs: Map<string, (code: number) => void>;
@@ -533,13 +646,17 @@ describe("OrchestratorManager session reconnect", () => {
       const exitCbs = new Map<string, (code: number) => void>();
       const mcpConfigPath = path.join(
         sessionsDir(),
-        `${kind}-restart-mcp.json`,
+        `${kind}-restart-mcp.${model === "gpt" ? "toml" : "json"}`,
       );
-      fs.writeFileSync(
-        mcpConfigPath,
-        JSON.stringify({ mcpServers: { marblo: { env: {} } } }),
-        "utf-8",
-      );
+      if (model === "gpt") {
+        writeRestartCodexMcpConfig(mcpConfigPath);
+      } else {
+        fs.writeFileSync(
+          mcpConfigPath,
+          JSON.stringify({ mcpServers: { marblo: { env: {} } } }),
+          "utf-8",
+        );
+      }
       const ptyManager = {
         create: vi.fn(
           (ptyId: string, _name: string, _cmd: string, args: string[]) => {
@@ -558,14 +675,26 @@ describe("OrchestratorManager session reconnect", () => {
       // Fresh launch config per call so --resume args never accumulate across
       // relaunches (each launch must own its own args array).
       const configGenerator = {
-        getLaunchConfig: vi.fn(() => ({
-          model: "claude",
-          command: "claude",
-          args: [] as string[],
-          env: {} as Record<string, string>,
-          mcpConfigPath,
-          skillContent: "",
-        })),
+        getLaunchConfig: vi.fn(
+          (
+            _agent: unknown,
+            _projectDir: string,
+            _initialPrompt?: string,
+            _marbloProjectId?: string,
+            resume?: string,
+          ) => ({
+            model,
+            command: model === "gpt" ? "codex" : "claude",
+            args:
+              model === "gpt" && resume && resume !== "new"
+                ? ["resume", resume === "latest" ? "--last" : resume]
+                : ([] as string[]),
+            env: {} as Record<string, string>,
+            mcpConfigPath,
+            skillContent: "",
+          }),
+        ),
+        hasSavedSession: vi.fn(() => hasSavedSession),
         cleanup: vi.fn(),
       };
       const mgr = new OrchestratorManager(
@@ -664,6 +793,32 @@ describe("OrchestratorManager session reconnect", () => {
 
       const relaunch = createCalls[createCalls.length - 1];
       expect(relaunch.args).not.toContain("--resume");
+    });
+
+    it("restarts Codex with native resume --last instead of a fresh boot", async () => {
+      const { mgr, createCalls, exitCbs } = makeRestartManager(
+        "board",
+        "gpt",
+        true,
+      );
+      const { ptySessionId: firstPty } = mgr.launch(
+        "proj-x",
+        rootPath,
+        4567,
+        undefined,
+        "latest",
+        undefined,
+        { modelOverride: "gpt" },
+      );
+      expect(createCalls[0].args.slice(0, 2)).toEqual(["resume", "--last"]);
+
+      exitCbs.get(firstPty)?.(1);
+      await vi.advanceTimersByTimeAsync(2100);
+
+      const relaunch = createCalls[createCalls.length - 1];
+      expect(relaunch.ptyId).not.toBe(firstPty);
+      expect(relaunch.args.slice(0, 2)).toEqual(["resume", "--last"]);
+      expect(relaunch.args).not.toContain("latest");
     });
   });
 });

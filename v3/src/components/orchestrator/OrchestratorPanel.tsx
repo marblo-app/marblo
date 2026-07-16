@@ -341,7 +341,10 @@ export default memo(function OrchestratorPanel() {
     const cwd = rootPath || "~";
     try {
       const priorId =
-        await window.electronAPI.orchestratorSession.resolvePrevious(cwd);
+        await window.electronAPI.orchestratorSession.resolvePrevious(
+          cwd,
+          currentProject?.id,
+        );
       if (priorId) {
         handleStartWithSession(priorId);
         return;

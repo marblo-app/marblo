@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildOrchestratorHandoffSnapshot,
   formatHandoffPrompt,
+  resolveRestartResumeSessionId,
   resolveSwitchHandoffResumeSessionId,
   sanitizeHandoffValue,
 } from "../../electron/orchestrator-handoff";
@@ -180,5 +181,65 @@ describe("orchestrator handoff snapshot", () => {
     });
 
     expect(resumeSessionId).toBe("claude-session-1");
+  });
+});
+
+describe("resolveRestartResumeSessionId", () => {
+  // Regression: the restart path (stop→start, cold boot, wake-reconnect) used
+  // to call resolveOrchestratorResumeId unconditionally — a Claude-only
+  // resolver that scans ~/.claude/projects. On a project that had ever run a
+  // Claude orchestrator it handed the stored CLAUDE uuid to a Codex launch,
+  // producing `codex resume <claude-uuid>`. Verified against codex-cli
+  // 0.144.5: that exits 1 immediately with
+  //   "ERROR: No saved session found with ID <uuid>"
+  // i.e. the orchestrator died on every restart. Codex sessions live in the
+  // isolated CODEX_HOME, never in ~/.claude — so the Claude resolver must
+  // never run for Codex.
+  it("never hands a Claude session id to a Codex restart", () => {
+    const resumeSessionId = resolveRestartResumeSessionId({
+      targetModel: "gpt",
+      hasSavedGptSession: () => true,
+      resolvePreviousNonGptSession: () =>
+        "62676abb-3e4e-4089-9f94-9429a683175a",
+    });
+
+    // Must be the Codex-native sentinel, NOT the Claude uuid.
+    expect(resumeSessionId).toBe("latest");
+  });
+
+  it("returns null for Codex when the isolated home has no saved session", () => {
+    // `codex resume --last` on an empty home boots a fresh session fine, but
+    // null lets the caller distinguish "nothing to resume" and skip resuming.
+    const resumeSessionId = resolveRestartResumeSessionId({
+      targetModel: "gpt",
+      hasSavedGptSession: () => false,
+      resolvePreviousNonGptSession: () => {
+        throw new Error("non-gpt resolver should not run for Codex");
+      },
+    });
+
+    expect(resumeSessionId).toBeNull();
+  });
+
+  it("keeps Claude restart resolution on the orchestrator session store", () => {
+    const resumeSessionId = resolveRestartResumeSessionId({
+      targetModel: "claude",
+      hasSavedGptSession: () => {
+        throw new Error("Codex saved-session check should not run for Claude");
+      },
+      resolvePreviousNonGptSession: () => "claude-session-1",
+    });
+
+    expect(resumeSessionId).toBe("claude-session-1");
+  });
+
+  it("returns null for Claude when no prior session exists", () => {
+    const resumeSessionId = resolveRestartResumeSessionId({
+      targetModel: "claude",
+      hasSavedGptSession: () => false,
+      resolvePreviousNonGptSession: () => null,
+    });
+
+    expect(resumeSessionId).toBeNull();
   });
 });

@@ -105,6 +105,46 @@ export function resolveSwitchHandoffResumeSessionId({
   return resolvePreviousNonGptSession() ?? "new";
 }
 
+export interface ResolveRestartResumeInput {
+  targetModel: string;
+  hasSavedGptSession: () => boolean;
+  resolvePreviousNonGptSession: () => string | null | undefined;
+}
+
+/**
+ * Prior-session id for a RESTART (stop→start, cold boot, wake-reconnect), or
+ * null when there is nothing to resume.
+ *
+ * Session identity is per-CLI, so resolution must be model-aware:
+ *
+ *  - Claude keys sessions by uuid under `~/.claude/projects/<encoded>` and is
+ *    resumed by `--resume <uuid>`, so it needs a concrete id.
+ *  - Codex keeps its sessions in the per-orchestrator isolated CODEX_HOME
+ *    (`codex-home-orchestrator-<projectId>`) and is resumed by the native
+ *    `codex resume --last`, for which "latest" is the sentinel. Because that
+ *    home is scoped to this one orchestrator, "--last" is unambiguously
+ *    *this* orchestrator's own last session.
+ *
+ * Passing a Claude uuid to Codex is not a no-op — `codex resume <unknown-id>`
+ * exits 1 with "No saved session found with ID ...", so the orchestrator died
+ * on every restart. Keep the Claude resolver strictly off the Codex path.
+ *
+ * Mirrors resolveSwitchHandoffResumeSessionId (the switch path, which was
+ * already model-aware — which is why switching worked while restarting did
+ * not), but returns null rather than "new" so callers can tell "no prior
+ * session" apart from "resume this" and pick their own fallback.
+ */
+export function resolveRestartResumeSessionId({
+  targetModel,
+  hasSavedGptSession,
+  resolvePreviousNonGptSession,
+}: ResolveRestartResumeInput): string | null {
+  if (targetModel === "gpt") {
+    return hasSavedGptSession() ? "latest" : null;
+  }
+  return resolvePreviousNonGptSession() ?? null;
+}
+
 const ACTIVE_MISSION_STATUSES = new Set([
   "planning",
   "active",

@@ -132,7 +132,10 @@ export function useAgentReconnect() {
       // Resolve via label OR content signature so wake-reconnect works even
       // without a labels file (the common case).
       const priorId =
-        await window.electronAPI.orchestratorSession.resolvePrevious(rootPath);
+        await window.electronAPI.orchestratorSession.resolvePrevious(
+          rootPath,
+          currentProject.id,
+        );
       if (!priorId) {
         setOrchestratorStatus("stopped");
         return;
