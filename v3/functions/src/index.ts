@@ -51,7 +51,7 @@ const customTokenServiceAccountId =
 admin.initializeApp(
   customTokenServiceAccountId
     ? { serviceAccountId: customTokenServiceAccountId }
-    : undefined,
+    : undefined
 );
 const db = admin.firestore();
 const BQ_LOCATION = "US";
@@ -70,7 +70,7 @@ export const issueAgentCustomToken = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
 
@@ -88,11 +88,11 @@ export const issueAgentCustomToken = functions.https.onCall(
           ? (err as { code: string }).code
           : "unknown";
       console.error(
-        `[issueAgentCustomToken] createCustomToken failed (${code})`,
+        `[issueAgentCustomToken] createCustomToken failed (${code})`
       );
       throw new functions.https.HttpsError(
         "internal",
-        `Agent custom token signing failed (${code}).`,
+        `Agent custom token signing failed (${code}).`
       );
     }
 
@@ -100,7 +100,7 @@ export const issueAgentCustomToken = functions.https.onCall(
       customToken,
       uid: context.auth.uid,
     };
-  },
+  }
 );
 
 // ─── Config ──────────────────────────────────────────────────────
@@ -139,7 +139,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
 
@@ -149,7 +149,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
     if (!subSnap.exists || !subSnap.data()?.paddleSubscriptionId) {
       throw new functions.https.HttpsError(
         "not-found",
-        "구독 정보를 찾을 수 없습니다.",
+        "구독 정보를 찾을 수 없습니다."
       );
     }
 
@@ -164,7 +164,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ effective_from: "next_billing_period" }),
-      },
+      }
     );
 
     if (!response.ok) {
@@ -172,12 +172,12 @@ export const cancelPaddleSubscription = functions.https.onCall(
       console.error("Paddle cancel failed:", error);
       throw new functions.https.HttpsError(
         "internal",
-        "구독 취소에 실패했습니다.",
+        "구독 취소에 실패했습니다."
       );
     }
 
     return { success: true };
-  },
+  }
 );
 
 // ─── Webhook signature verification (H1) ─────────────────────────
@@ -263,12 +263,12 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
         if (data.current_billing_period) {
           if (data.current_billing_period.starts_at) {
             update.currentPeriodStart = admin.firestore.Timestamp.fromDate(
-              new Date(data.current_billing_period.starts_at),
+              new Date(data.current_billing_period.starts_at)
             );
           }
           if (data.current_billing_period.ends_at) {
             update.currentPeriodEnd = admin.firestore.Timestamp.fromDate(
-              new Date(data.current_billing_period.ends_at),
+              new Date(data.current_billing_period.ends_at)
             );
           }
         }
@@ -340,7 +340,7 @@ export const createTossCheckout = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
 
@@ -349,7 +349,7 @@ export const createTossCheckout = functions.https.onCall(
     if (!amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "유효하지 않은 플랜입니다.",
+        "유효하지 않은 플랜입니다."
       );
     }
 
@@ -365,7 +365,7 @@ export const createTossCheckout = functions.https.onCall(
     });
 
     return { orderId, amount, planType };
-  },
+  }
 );
 
 // ─── Confirm Toss Payment ────────────────────────────────────────
@@ -374,7 +374,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
 
@@ -388,7 +388,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (!orderSnap.exists) {
       throw new functions.https.HttpsError(
         "not-found",
-        "주문을 찾을 수 없습니다.",
+        "주문을 찾을 수 없습니다."
       );
     }
 
@@ -401,13 +401,13 @@ export const confirmTossPayment = functions.https.onCall(
     if (order.userId !== context.auth.uid) {
       throw new functions.https.HttpsError(
         "permission-denied",
-        "본인의 주문만 확인할 수 있습니다.",
+        "본인의 주문만 확인할 수 있습니다."
       );
     }
     if (order.amount !== amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "결제 금액이 일치하지 않습니다.",
+        "결제 금액이 일치하지 않습니다."
       );
     }
 
@@ -427,7 +427,7 @@ export const confirmTossPayment = functions.https.onCall(
       console.error("TossPayments confirm failed:", error);
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "결제 승인에 실패했습니다.",
+        error.message || "결제 승인에 실패했습니다."
       );
     }
 
@@ -460,7 +460,7 @@ export const confirmTossPayment = functions.https.onCall(
     });
 
     return { success: true };
-  },
+  }
 );
 
 // ─── TossPayments Webhook ────────────────────────────────────────
@@ -477,7 +477,7 @@ export const confirmTossPayment = functions.https.onCall(
 // 미설정/네트워크오류 → null 을 돌려 호출부가 "구독 변경 안 함"으로 안전
 // 처리하게 한다. body 의 status 는 절대 참조하지 않는다.
 async function fetchTossPaymentStatus(
-  paymentKey: string,
+  paymentKey: string
 ): Promise<TossPaymentQueryResult> {
   if (!TOSS_SECRET_KEY) return null;
   try {
@@ -486,10 +486,10 @@ async function fetchTossPaymentStatus(
       {
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64",
+            "base64"
           )}`,
         },
-      },
+      }
     );
     const body = res.ok
       ? ((await res.json().catch(() => null)) as unknown)
@@ -517,7 +517,7 @@ export const tossWebhook = functions.https.onRequest(async (req, res) => {
       if (!paymentKey) {
         // 재조회 식별자가 없으면 검증 불가 → 안전 무시.
         console.warn(
-          "[tossWebhook] PAYMENT_STATUS_CHANGED without paymentKey; ignoring",
+          "[tossWebhook] PAYMENT_STATUS_CHANGED without paymentKey; ignoring"
         );
         break;
       }
@@ -527,7 +527,7 @@ export const tossWebhook = functions.https.onRequest(async (req, res) => {
       if (!query) {
         // 재조회 실패/미존재(위조 포함) → 구독 변경 없이 무시(+로그).
         console.warn(
-          "[tossWebhook] payment re-query failed or not found; no subscription change",
+          "[tossWebhook] payment re-query failed or not found; no subscription change"
         );
         break;
       }
@@ -639,7 +639,7 @@ async function chargeSubscriptionIdempotent(params: {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return true;
   });
@@ -663,7 +663,7 @@ async function chargeSubscriptionIdempotent(params: {
         method: "POST",
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64",
+            "base64"
           )}`,
           "Content-Type": "application/json",
         },
@@ -673,14 +673,14 @@ async function chargeSubscriptionIdempotent(params: {
           orderId,
           orderName: `Marblo ${planType} 구독`,
         }),
-      },
+      }
     );
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       const msg = String(error?.message || `HTTP ${response.status}`).slice(
         0,
-        500,
+        500
       );
       await chargeRef.update({
         status: "failed",
@@ -700,7 +700,7 @@ async function chargeSubscriptionIdempotent(params: {
   } catch (err) {
     const msg = (err instanceof Error ? err.message : String(err)).slice(
       0,
-      500,
+      500
     );
     await chargeRef.update({
       status: "failed",
@@ -717,7 +717,7 @@ async function chargeSubscriptionIdempotent(params: {
 async function resolveFirstChargeAmount(
   userId: string,
   baseAmount: number,
-  couponCode: unknown,
+  couponCode: unknown
 ): Promise<{
   finalAmount: number;
   appliedCoupon: { code: string } | null;
@@ -757,7 +757,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   if (!baseAmount) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      `Plan '${planType}' is not chargeable`,
+      `Plan '${planType}' is not chargeable`
     );
   }
 
@@ -768,19 +768,19 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
       method: "POST",
       headers: {
         Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-          "base64",
+          "base64"
         )}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ authKey, customerKey }),
-    },
+    }
   );
 
   if (!response.ok) {
     const error = await response.json();
     throw new functions.https.HttpsError(
       "internal",
-      error.message || "Failed to issue billing key",
+      error.message || "Failed to issue billing key"
     );
   }
 
@@ -791,7 +791,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   const { finalAmount, appliedCoupon } = await resolveFirstChargeAmount(
     userId,
     baseAmount,
-    coupon,
+    coupon
   );
 
   // 3) 첫 결제 청구(멱등). 실패 시 구독 active 처리 없이 throw(원자적).
@@ -808,7 +808,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   if (charge.status === "failed") {
     throw new functions.https.HttpsError(
       "internal",
-      `첫 결제에 실패했습니다: ${charge.error}`,
+      `첫 결제에 실패했습니다: ${charge.error}`
     );
   }
 
@@ -835,7 +835,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
         createdAt: now,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
 
   if (appliedCoupon) {
@@ -873,7 +873,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (!subSnap.exists || !sub?.tossBillingKey || !sub?.tossCustomerKey) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "No billing key registered for this account",
+        "No billing key registered for this account"
       );
     }
 
@@ -882,7 +882,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (!amount) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        `Plan '${planType}' is not chargeable`,
+        `Plan '${planType}' is not chargeable`
       );
     }
 
@@ -901,7 +901,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (charge.status === "failed") {
       throw new functions.https.HttpsError(
         "internal",
-        charge.error || "Failed to charge billing key",
+        charge.error || "Failed to charge billing key"
       );
     }
 
@@ -924,7 +924,7 @@ export const chargeBillingKey = functions.https.onCall(
       paymentKey: charge.status === "charged" ? charge.paymentKey : null,
       charged: charge.status,
     };
-  },
+  }
 );
 
 // 토스 정기결제 취소
@@ -940,7 +940,7 @@ export const cancelTossSubscription = functions.https.onCall(
     });
 
     return { success: true };
-  },
+  }
 );
 
 // ============================================
@@ -965,7 +965,7 @@ export const createLectureOrder = functions.https.onCall(
     if (!existingPurchase.empty) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "Already purchased this lecture",
+        "Already purchased this lecture"
       );
     }
 
@@ -992,7 +992,7 @@ export const createLectureOrder = functions.https.onCall(
     });
 
     return { orderId, amount, orderName };
-  },
+  }
 );
 
 // 강의 단건결제 확인
@@ -1015,13 +1015,13 @@ export const confirmLecturePayment = functions.https.onCall(
     if (order.userId !== userId) {
       throw new functions.https.HttpsError(
         "permission-denied",
-        "본인의 주문만 확인할 수 있습니다.",
+        "본인의 주문만 확인할 수 있습니다."
       );
     }
     if (typeof amount === "number" && order.amount !== amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "결제 금액이 일치하지 않습니다.",
+        "결제 금액이 일치하지 않습니다."
       );
     }
 
@@ -1035,7 +1035,7 @@ export const confirmLecturePayment = functions.https.onCall(
     if (!existingPurchase.empty) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "Already purchased this lecture",
+        "Already purchased this lecture"
       );
     }
 
@@ -1046,19 +1046,19 @@ export const confirmLecturePayment = functions.https.onCall(
         method: "POST",
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64",
+            "base64"
           )}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ paymentKey, orderId, amount: order.amount }),
-      },
+      }
     );
 
     if (!response.ok) {
       const error = await response.json();
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "Payment confirmation failed",
+        error.message || "Payment confirmation failed"
       );
     }
 
@@ -1078,7 +1078,7 @@ export const confirmLecturePayment = functions.https.onCall(
     await issueLectureCouponInternal(userId);
 
     return { success: true };
-  },
+  }
 );
 
 // ============================================
@@ -1091,7 +1091,7 @@ export const validateCoupon = functions.https.onCall(async (data, context) => {
   if (!code)
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Coupon code required",
+      "Coupon code required"
     );
 
   // Rate limit: stops brute-force code guessing. Per-uid (5/min, 30/5min)
@@ -1103,14 +1103,14 @@ export const validateCoupon = functions.https.onCall(async (data, context) => {
   if (!uidCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`,
+      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`
     );
   }
   const ipCheck = await enforceRateLimit(ipKey, COUPON_RULES_IP);
   if (!ipCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`,
+      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`
     );
   }
 
@@ -1165,19 +1165,19 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
   const ip = extractIp(context.rawRequest);
   const uidCheck = await enforceRateLimit(
     `coupon:uid:${userId}`,
-    COUPON_RULES_UID,
+    COUPON_RULES_UID
   );
   if (!uidCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`,
+      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`
     );
   }
   const ipCheck = await enforceRateLimit(`coupon:ip:${ip}`, COUPON_RULES_IP);
   if (!ipCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`,
+      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`
     );
   }
 
@@ -1194,7 +1194,7 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
   switch (coupon.type) {
     case "discount":
       discountAmount = Math.round(
-        (baseAmount * (coupon.discountPercent || 0)) / 100,
+        (baseAmount * (coupon.discountPercent || 0)) / 100
       );
       finalAmount = baseAmount - discountAmount;
       break;
@@ -1235,7 +1235,7 @@ export const createCouponBatch = functions.https.onCall(
     if (!Array.isArray(coupons) || coupons.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Coupons array required",
+        "Coupons array required"
       );
     }
 
@@ -1257,7 +1257,7 @@ export const createCouponBatch = functions.https.onCall(
 
     await batch.commit();
     return { created: coupons.length };
-  },
+  }
 );
 
 // 강의 구매 → 앱 쿠폰 자동 발급 (내부 함수)
@@ -1291,7 +1291,7 @@ export const issueLectureCoupon = functions.https.onCall(
 
     await issueLectureCouponInternal(userId);
     return { couponCode: "LECTURE2026" };
-  },
+  }
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1355,11 +1355,11 @@ function requireAdmin(context: functions.https.CallableContext): void {
   const adminUid = process.env.ADMIN_UID?.trim();
   if (!adminUid) {
     functions.logger.warn(
-      "[requireAdmin] ADMIN_UID is not configured; rejecting admin callable as server misconfiguration.",
+      "[requireAdmin] ADMIN_UID is not configured; rejecting admin callable as server misconfiguration."
     );
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "Admin configuration is missing.",
+      "Admin configuration is missing."
     );
   }
 
@@ -1405,7 +1405,7 @@ function hasPaymentEvidence(sub: Record<string, unknown> | undefined): boolean {
 // 결제 흔적(옛 billingKey)보다 우선한다. 안 그러면 "해지했다가 grant 를 받은"
 // doc 이 stale billingKey 때문에 유료로 오판돼 반려해도 회수되지 않는다.
 function isFounderGrantSubscription(
-  sub: Record<string, unknown> | undefined,
+  sub: Record<string, unknown> | undefined
 ): boolean {
   if (!sub) return false;
   return sub.founderGrant === true || sub.paymentProvider === "founder_grant";
@@ -1415,7 +1415,7 @@ function isFounderGrantSubscription(
 // 이게 true 인 구독만 "건드리지 말 것"(grant 로 덮어쓰기 금지) 대상이다.
 // past_due 도 현역 — 재시도 중인 결제라 grant 로 덮으면 과금이 끊긴다.
 function isLivePaidSubscription(
-  sub: Record<string, unknown> | undefined,
+  sub: Record<string, unknown> | undefined
 ): boolean {
   if (!sub) return false;
   if (isFounderGrantSubscription(sub)) return false;
@@ -1436,7 +1436,7 @@ async function upsertProSubscription(
   userId: string,
   targetEnd: Date,
   reason: string,
-  grantStartedAt: Date,
+  grantStartedAt: Date
 ): Promise<ProGrantOutcome> {
   const now = new Date();
   const subRef = db.collection("subscriptions").doc(userId);
@@ -1466,7 +1466,7 @@ async function upsertProSubscription(
     // 트랜잭션 안에서 판정해 결제 생성과 grant 생성의 race 에서도 stomp 하지 않는다.
     if (isLivePaidSubscription(data)) {
       console.log(
-        `[upsertProSubscription] 현역 유료 구독(${userId}, status=${data?.status}) — grant(${reason}) 로 덮어쓰지 않고 결제 유지`,
+        `[upsertProSubscription] 현역 유료 구독(${userId}, status=${data?.status}) — grant(${reason}) 로 덮어쓰지 않고 결제 유지`
       );
       return {
         granted: false,
@@ -1499,13 +1499,13 @@ async function grantFounderProTotalInternal(
   userId: string,
   totalMonths: number,
   reason: string,
-  grantStartedAt: Date,
+  grantStartedAt: Date
 ): Promise<Date> {
   const outcome = await upsertProSubscription(
     userId,
     addMonths(grantStartedAt, totalMonths),
     reason,
-    grantStartedAt,
+    grantStartedAt
   );
   return outcome.periodEnd;
 }
@@ -1525,7 +1525,7 @@ function laterDate(a: Date | null, b: Date | null): Date | null {
 }
 
 function resolveFounderGrantWindowEnd(
-  founder: Record<string, unknown>,
+  founder: Record<string, unknown>
 ): Date | null {
   const betaEnd = timestampToDate(founder.betaExpiresAt);
   const proEnd = timestampToDate(founder.proExpiresAt);
@@ -1535,7 +1535,9 @@ function resolveFounderGrantWindowEnd(
   // Legacy selected docs may have accessGrantedAt but no betaExpiresAt. The
   // intended base grant is one month from access grant, so reconstruct it.
   const accessGrantedAt = timestampToDate(founder.accessGrantedAt);
-  return accessGrantedAt ? addMonths(accessGrantedAt, FOUNDER_BETA_MONTHS) : null;
+  return accessGrantedAt
+    ? addMonths(accessGrantedAt, FOUNDER_BETA_MONTHS)
+    : null;
 }
 
 type FounderGrantMaterializationResult = {
@@ -1550,7 +1552,7 @@ async function materializeFounderProGrantForUid(
   founder: Record<string, unknown>,
   uid: string,
   reason: string,
-  grantStartedAt: Date,
+  grantStartedAt: Date
 ): Promise<FounderGrantMaterializationResult> {
   const windowEnd = resolveFounderGrantWindowEnd(founder);
   if (!windowEnd || windowEnd <= new Date()) {
@@ -1566,7 +1568,7 @@ async function materializeFounderProGrantForUid(
     uid,
     windowEnd,
     reason,
-    grantStartedAt,
+    grantStartedAt
   );
 
   // 실제 founder_grant 구독을 만들었을 때만 grant 흔적을 남긴다. 현역 유료 구독
@@ -1576,10 +1578,9 @@ async function materializeFounderProGrantForUid(
       {
         proSubscriptionUid: uid,
         proSubscriptionEnd: admin.firestore.Timestamp.fromDate(windowEnd),
-        proSubscriptionGrantedAt:
-          admin.firestore.FieldValue.serverTimestamp(),
+        proSubscriptionGrantedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
   }
 
@@ -1625,7 +1626,7 @@ interface FounderEmailContent {
 // export 는 테스트의 dry 렌더용. 트리거가 아니므로(=__endpoint 없음)
 // firebase-functions 의 배포 discovery 는 이 export 를 건너뛴다.
 export function buildFounderAccessEmail(
-  locale: FounderLocale,
+  locale: FounderLocale
 ): FounderEmailContent {
   const downloadUrl = `${SITE_BASE}/${locale}/download`;
   const feedbackUrl = `${SITE_BASE}/${locale}/beta-survey`;
@@ -1778,7 +1779,7 @@ export function buildFounderAccessEmail(
 //
 // export 는 테스트의 dry 렌더용(트리거 아님 → 배포 discovery 스킵).
 export function buildFounderSurveyOfferEmail(
-  locale: FounderLocale,
+  locale: FounderLocale
 ): FounderEmailContent {
   const feedbackUrl = `${SITE_BASE}/${locale}/beta-survey`;
 
@@ -1862,7 +1863,7 @@ function founderHtmlShell(inner: string): string {
  */
 async function sendFounderAccessEmail(
   email: string,
-  locale: string,
+  locale: string
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
@@ -1903,18 +1904,18 @@ async function sendFounderAccessEmail(
  */
 async function sendFounderSurveyOfferEmail(
   email: string,
-  locale: string,
+  locale: string
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
       console.warn(
         "[founder-email] RESEND_API_KEY 미설정 — 설문 리마인더 발송 스킵:",
-        maskEmailForLog(email),
+        maskEmailForLog(email)
       );
       return false;
     }
     const content = buildFounderSurveyOfferEmail(
-      normalizeFounderLocale(locale),
+      normalizeFounderLocale(locale)
     );
     const resp = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -1940,7 +1941,7 @@ async function sendFounderSurveyOfferEmail(
     console.warn(
       "[founder-email] 설문 리마인더 발송 실패:",
       maskEmailForLog(email),
-      err,
+      err
     );
     return false;
   }
@@ -1981,7 +1982,7 @@ async function lookupFounderLocale(email: string): Promise<string> {
 // 정규화 기준으로 매칭해야 중복 신청(동일 이메일 여러 건)까지 함께 잡힌다.
 // 쿼리 필터로는 정규화 비교가 안 돼서 스캔 후 필터한다(어드민 저빈도 액션).
 async function findWaitlistDocsByEmail(
-  email: string,
+  email: string
 ): Promise<FirebaseFirestore.QueryDocumentSnapshot[]> {
   const snap = await db
     .collection("betatester50_waitlist")
@@ -1998,7 +1999,7 @@ async function findWaitlistDocsByEmail(
 // markFounderSelected onCall 과 Telegram 승인 웹훅 양쪽에서 재사용한다.
 async function markFounderSelectedInternal(
   rawEmail: string,
-  resetWindow = false,
+  resetWindow = false
 ): Promise<{
   ok: true;
   email: string;
@@ -2066,7 +2067,7 @@ async function markFounderSelectedInternal(
         status: admin.firestore.FieldValue.delete(),
         rejectedAt: admin.firestore.FieldValue.delete(),
       },
-      { merge: true },
+      { merge: true }
     );
   }
 
@@ -2079,7 +2080,7 @@ async function markFounderSelectedInternal(
       accessEmailSent: emailSent,
       accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true },
+    { merge: true }
   );
 
   // 승인 = Pro 부여. 베타 유저가 즉시 Pro 기능을 쓰려면 subscriptions/{uid}
@@ -2109,7 +2110,7 @@ async function markFounderSelectedInternal(
       founderForGrant,
       uid,
       "beta_selected",
-      betaStartedAt,
+      betaStartedAt
     );
     subscriptionUid = outcome.uid;
     subscriptionGranted = outcome.granted;
@@ -2136,12 +2137,12 @@ export const markFounderSelected = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required",
+        "email required"
       );
     }
     const resetWindow = data?.resetWindow === true;
     return markFounderSelectedInternal(email, resetWindow);
-  },
+  }
 );
 
 // 파운더 반려 (관리자용) — markFounderSelected 의 역방향.
@@ -2155,7 +2156,7 @@ export const markFounderSelected = functions.https.onCall(
 //    ★ paymentProvider==="founder_grant" 인 구독만 건드린다 — 유료(toss) 결제자가
 //    파운더로도 선정됐던 경우 반려가 유료 구독까지 취소하면 안 된다.
 async function revokeFounderGrant(
-  email: string,
+  email: string
 ): Promise<{ founderRevoked: boolean; subscriptionRevoked: boolean }> {
   const ref = db.collection(FOUNDERS_COLLECTION).doc(email);
   const snap = await ref.get();
@@ -2171,7 +2172,7 @@ async function revokeFounderGrant(
       betaExpiresAt: admin.firestore.Timestamp.fromDate(new Date()),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true },
+    { merge: true }
   );
 
   // 구독 회수 — 선정 시 기록해둔 proSubscriptionUid 우선, 없으면 이메일로 재조회.
@@ -2195,7 +2196,7 @@ async function revokeFounderGrant(
       // 확인할 수 있게 남긴다 — 필드만으론 "해지후 grant" 와 구분 불가.
       if (hasPaymentEvidence(sub)) {
         console.warn(
-          `[markFounderRejected] ★결제 흔적이 남은 grant doc 회수 (uid=${uid}) — 과거 stomp 로 유료구독이 grant 로 덮인 건이면 수동 확인 필요`,
+          `[markFounderRejected] ★결제 흔적이 남은 grant doc 회수 (uid=${uid}) — 과거 stomp 로 유료구독이 grant 로 덮인 건이면 수동 확인 필요`
         );
       }
       if (sub?.status === "active") {
@@ -2206,13 +2207,13 @@ async function revokeFounderGrant(
             currentPeriodEnd: admin.firestore.Timestamp.fromDate(new Date()),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true },
+          { merge: true }
         );
       }
       subscriptionRevoked = true;
     } else if (subSnap.exists) {
       console.log(
-        `[markFounderRejected] grant 아님 — 구독 보존(취소하지 않음). status=${sub?.status}, paymentProvider=${sub?.paymentProvider}`,
+        `[markFounderRejected] grant 아님 — 구독 보존(취소하지 않음). status=${sub?.status}, paymentProvider=${sub?.paymentProvider}`
       );
     }
   }
@@ -2227,7 +2228,7 @@ export const markFounderRejected = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required",
+        "email required"
       );
     }
 
@@ -2238,14 +2239,15 @@ export const markFounderRejected = functions.https.onCall(
           status: "rejected",
           rejectedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
     }
 
-    const { founderRevoked, subscriptionRevoked } =
-      await revokeFounderGrant(email);
+    const { founderRevoked, subscriptionRevoked } = await revokeFounderGrant(
+      email
+    );
     console.log(
-      `[markFounderRejected] email=${email} waitlist=${targets.length} founderRevoked=${founderRevoked} subRevoked=${subscriptionRevoked}`,
+      `[markFounderRejected] email=${email} waitlist=${targets.length} founderRevoked=${founderRevoked} subRevoked=${subscriptionRevoked}`
     );
     return {
       ok: true as const,
@@ -2254,7 +2256,7 @@ export const markFounderRejected = functions.https.onCall(
       founderRevoked,
       subscriptionRevoked,
     };
-  },
+  }
 );
 
 // 파운더 접근 안내 이메일 재발송 (관리자용) — /admin 에서 수동 재발송용.
@@ -2266,7 +2268,7 @@ export const resendFounderAccessEmail = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required",
+        "email required"
       );
     }
     const locale = await lookupFounderLocale(email);
@@ -2277,10 +2279,10 @@ export const resendFounderAccessEmail = functions.https.onCall(
         accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return { ok: true, emailSent };
-  },
+  }
 );
 
 // ─── 설문 회신 오퍼 이메일: audience 산출 + dry-run 발송 (관리자용) ────
@@ -2351,7 +2353,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
       for (const target of audience) {
         const ok = await sendFounderSurveyOfferEmail(
           target.email,
-          target.locale,
+          target.locale
         );
         if (ok) {
           sent += 1;
@@ -2362,7 +2364,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
                 admin.firestore.FieldValue.serverTimestamp(),
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             },
-            { merge: true },
+            { merge: true }
           );
         } else {
           failed += 1;
@@ -2375,7 +2377,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
         acc[a.locale] = (acc[a.locale] ?? 0) + 1;
         return acc;
       },
-      {},
+      {}
     );
 
     return {
@@ -2395,7 +2397,501 @@ export const previewFounderSurveyOffer = functions.https.onCall(
       sent,
       failed,
     };
-  },
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════
+// 파운더 선정자 활성화 리포트 + 미활성자 팔로업 (티켓 WjGoowu1rjLH4K2PNIXb)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 배경: 2차까지 ~35명 선정(founders, accessGrantedAt 존재)인데 활성 구독은
+// 11명뿐. "나머지는 다운로드를 안 받은 건가?"를 데이터로 규명한다.
+//
+// 조인 모델(식별 가능한 신호만):
+//   · 선정 = founders/{email}, status!=="rejected" && accessGrantedAt 존재.
+//   · 계정존재(=로그인 이력 있음) = admin.auth().getUserByEmail 성공.
+//     (waitlist 신청은 Firestore 직접쓰기라 Auth 계정을 만들지 않는다 — 계정
+//      존재는 실제 로그인이 1회 이상 발생했다는 뜻.)
+//   · 활성 구독 = subscriptions/{uid}, status==="active" && 기간 미만료.
+//   ★한계: 앱 다운로드-only(로그인 안 함) 흔적은 logHeartbeat 익명 clientId(BQ)라
+//    email/uid 로 조인 불가. 그래서 "미다운로드"와 "다운로드했으나 미로그인"은
+//    식별 데이터로 분해할 수 없어 둘 다 no_account(계정 없음)로 합산 보고한다.
+//
+// 세그먼트(FounderSegment):
+//   active         — 계정 O + 활성 구독 O            → 팔로업 불필요
+//   sub_expired    — 계정 O + 구독 doc 존재하나 만료/취소 → 재활성 팔로업(계정 O)
+//   account_no_sub — 계정 O + 구독 doc 자체가 없음(grant 미부여) → 재활성 팔로업(계정 O)
+//   no_account     — 계정 X (미가입=미다운로드/미로그인)          → 다운로드 팔로업
+
+type FounderSegment =
+  | "active"
+  | "sub_expired"
+  | "account_no_sub"
+  | "no_account";
+
+// 순수 분류기(테스트용 export). 부수효과 없음.
+export function classifyFounderActivation(opts: {
+  hasAccount: boolean;
+  subExists: boolean;
+  subStatus: string | null;
+  subPeriodEndMs: number | null;
+  nowMs: number;
+}): FounderSegment {
+  const { hasAccount, subExists, subStatus, subPeriodEndMs, nowMs } = opts;
+  const activeSub =
+    subExists &&
+    subStatus === "active" &&
+    (subPeriodEndMs == null || subPeriodEndMs > nowMs);
+  if (activeSub) return "active";
+  if (!hasAccount) return "no_account";
+  if (subExists) return "sub_expired";
+  return "account_no_sub";
+}
+
+// 팔로업 메일 세그먼트(2종) — 계정 유무로 갈린다.
+//   download  — ④ 계정없음(미가입): 다운로드+온보딩 유도. ★실제 발송 대상.
+//   activated — ③ 계정O·구독미부여였던 유저용 "Pro 활성화" 안내(선택).
+// ★grant 백필(별도 티켓 bi1zzeidtqm6sxzgguyP, PR#468) 라이브 실행 완료 →
+//  ③은 전원 active founder_grant 구독으로 materialize 됨(2026-07-17 실측 ③=0).
+//  따라서 activated 세그먼트는 현재 사실상 비어 있고, 발송 대상은 ④뿐이다.
+// ★사장님 결정: download 메일은 ④에게만. ③에겐 절대 다운로드 메일 금지.
+type FollowupSegment = "download" | "activated";
+function toFollowupSegment(seg: FounderSegment): FollowupSegment | null {
+  if (seg === "no_account") return "download";
+  if (seg === "sub_expired" || seg === "account_no_sub") return "activated";
+  return null; // active → 팔로업 대상 아님
+}
+
+// 미활성 선정자 1인의 내부 분류 레코드(이메일 포함 — 로그/응답에 원문 노출 금지).
+interface FounderActivationRecord {
+  email: string;
+  segment: FounderSegment;
+}
+
+// founders + Auth + subscriptions 를 교차해 선정자 전원을 분류한다(내부 전용).
+// 저빈도 어드민 액션이라 per-email Auth lookup(35건 규모)로 충분하다.
+async function computeFounderActivation(): Promise<FounderActivationRecord[]> {
+  const snap = await db.collection(FOUNDERS_COLLECTION).limit(10000).get();
+  const nowMs = Date.now();
+  const out: FounderActivationRecord[] = [];
+  for (const doc of snap.docs) {
+    const v = doc.data() as Record<string, unknown>;
+    // 선정 기준 = getMyFounderAccess/grantBetaProOnSignup 과 동일.
+    if (v.status === "rejected" || v.accessGrantedAt == null) continue;
+    const email = normalizeEmail(
+      typeof v.email === "string" ? v.email : doc.id
+    );
+    const uid = await lookupUidByEmail(email);
+    let subExists = false;
+    let subStatus: string | null = null;
+    let subPeriodEndMs: number | null = null;
+    if (uid) {
+      const sub = await db.collection("subscriptions").doc(uid).get();
+      if (sub.exists) {
+        subExists = true;
+        const sv = sub.data() as Record<string, unknown>;
+        subStatus = typeof sv.status === "string" ? sv.status : null;
+        subPeriodEndMs = tsToMillis(sv.currentPeriodEnd);
+      }
+    }
+    out.push({
+      email,
+      segment: classifyFounderActivation({
+        hasAccount: !!uid,
+        subExists,
+        subStatus,
+        subPeriodEndMs,
+        nowMs,
+      }),
+    });
+  }
+  return out;
+}
+
+// 이메일 도메인 분포(집계) — 개인식별 방지: count<2 도메인은 (other)로 묶는다.
+function domainDistribution(emails: string[]): Record<string, number> {
+  const raw: Record<string, number> = {};
+  for (const e of emails) {
+    const dom = e.includes("@") ? e.split("@").pop() || "(none)" : "(none)";
+    raw[dom] = (raw[dom] || 0) + 1;
+  }
+  const out: Record<string, number> = {};
+  let other = 0;
+  for (const [dom, n] of Object.entries(raw)) {
+    if (n < 2) other += n;
+    else out[dom] = n;
+  }
+  if (other > 0) out["(other)"] = other;
+  return out;
+}
+
+/**
+ * getFounderActivationReport — 선정자 활성화 현황(어드민, 읽기전용).
+ *
+ * PII 미노출: 이메일 원문은 절대 반환하지 않고 카운트/세그먼트/도메인집계만 낸다.
+ * "35 선정 vs 11 활성"의 실제 내역을 라이브로 재현 가능한 리포트.
+ */
+export const getFounderActivationReport = functions.https.onCall(
+  async (_data, context) => {
+    requireAdmin(context);
+    const records = await computeFounderActivation();
+    const bySegment: Record<FounderSegment, number> = {
+      active: 0,
+      sub_expired: 0,
+      account_no_sub: 0,
+      no_account: 0,
+    };
+    for (const r of records) bySegment[r.segment]++;
+    const inactive = records.filter((r) => r.segment !== "active");
+    return {
+      generatedAt: new Date().toISOString(),
+      totalSelected: records.length,
+      active: bySegment.active,
+      inactive: inactive.length,
+      bySegment,
+      followupTargets: {
+        // ④ 계정 X(다운로드/온보딩 유도) — ★실제 발송 대상.
+        download: bySegment.no_account,
+        // ③ 계정 O·구독 미부여 — grant 백필로 대체(별도 티켓). 안내 메일은 opt-in.
+        activated: bySegment.sub_expired + bySegment.account_no_sub,
+      },
+      inactiveDomainDistribution: domainDistribution(
+        inactive.map((r) => r.email)
+      ),
+    };
+  }
+);
+
+// ─── 미활성 선정자 팔로업 메일 (Resend) ──────────────────────────────
+//
+// 세그먼트별 본문:
+//   download  — ④ 선정됐지만 아직 시작 전(계정 없음): 다운로드+로그인 유도.
+//   activated — ③ 로그인은 했으나 Pro 미부여였던 유저. grant 백필(별도 티켓)이
+//               Pro 를 이미 부여했으므로 "다운로드 유도"가 아니라 "Pro 활성화됐어요,
+//               앱을 열어 바로 쓰세요" 안내. downloadUrl 은 앱 열기용(재설치 아님).
+// sendFounderAccessEmail 과 동일 정책: 반드시 non-throwing, RESEND_API_KEY
+// 미설정 시 스킵(false).
+
+// export 는 테스트/초안 dry 렌더용(buildFounderAccessEmail 과 동일 — 트리거가
+// 아니라 배포 discovery 가 건너뛴다).
+export function buildFounderFollowupEmail(
+  locale: FounderLocale,
+  segment: FollowupSegment
+): FounderEmailContent {
+  const downloadUrl = `${SITE_BASE}/${locale}/download`;
+  const support = "support@marblo.app";
+
+  if (segment === "download") {
+    if (locale === "en") {
+      return {
+        subject:
+          "Your Marblo Founder seat is still open — let's get you started",
+        html: founderHtmlShell(`
+          <h1 style="font-size:22px;margin:0 0 16px">Your Founder seat is waiting 🚀</h1>
+          <p>You were selected as a Marblo Founder, but it looks like you haven't started yet. Your access is still open — nothing has expired.</p>
+          <p><strong>Two steps to activate:</strong></p>
+          <p>1. Download Marblo: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a><br/>
+          2. Sign in with this email — your Founder Pro switches on automatically on first sign-in.</p>
+          <p>Founders shape Marblo from day one. We'd love to see you on the inside soon.</p>
+          <p style="color:#666">Any trouble or questions? Just reply to this email, or reach us at ${support}.</p>
+        `),
+        text: [
+          "Your Founder seat is still open 🚀",
+          "",
+          "Hi! You were selected as a Marblo Founder but haven't started yet.",
+          "Your access is still open — nothing has expired.",
+          "",
+          "Two steps to get started:",
+          `1. Download Marblo: ${downloadUrl}`,
+          "2. Sign in with this email — Founder Pro switches on automatically on first sign-in.",
+          "",
+          "Founders shape Marblo from day one. We'd love to see you on the inside soon.",
+          "",
+          `Any trouble or questions? Reply to this email, or reach us at ${support}.`,
+        ].join("\n"),
+      };
+    }
+    if (locale === "ja") {
+      return {
+        subject: "Marblo ファウンダーの席はまだ空いています — はじめましょう",
+        html: founderHtmlShell(`
+          <h1 style="font-size:22px;margin:0 0 16px">ファウンダーの席をご用意しています 🚀</h1>
+          <p>あなたは Marblo ファウンダーに選ばれましたが、まだ開始されていないようです。アクセスは有効なまま、何も期限切れになっていません。</p>
+          <p><strong>2ステップで有効化:</strong></p>
+          <p>1. Marblo をダウンロード: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a><br/>
+          2. このメールアドレスでサインイン — 初回サインインでファウンダー Pro が自動的に有効になります。</p>
+          <p>ファウンダーは初日から Marblo を形づくる存在です。中でお会いできるのを楽しみにしています。</p>
+          <p style="color:#666">うまくいかない場合やご不明な点があれば、このメールにご返信いただくか ${support} までご連絡ください。</p>
+        `),
+        text: [
+          "ファウンダーの席はまだ空いています 🚀",
+          "",
+          "こんにちは！あなたは Marblo ファウンダーに選ばれましたが、まだ開始されていないようです。",
+          "アクセスは有効なまま、何も期限切れになっていません。",
+          "",
+          "2ステップではじめられます:",
+          `1. Marblo をダウンロード: ${downloadUrl}`,
+          "2. このメールでサインイン — 初回サインインでファウンダー Pro が自動的に有効になります。",
+          "",
+          "ファウンダーは初日から Marblo を形づくる存在です。中でお会いできるのを楽しみにしています。",
+          "",
+          `お困りの際やご不明な点があれば、このメールに返信するか ${support} まで。`,
+        ].join("\n"),
+      };
+    }
+    return {
+      subject: "🚀 마블로 파운더 자리가 아직 기다리고 있어요",
+      html: founderHtmlShell(`
+        <h1 style="font-size:22px;margin:0 0 16px">파운더 자리가 그대로 열려 있어요 🚀</h1>
+        <p>안녕하세요! 마블로 파운더로 선정되셨는데 아직 시작 전이신 것 같아요. 파운더 접근 권한은 그대로 열려 있고, 아무것도 만료되지 않았어요.</p>
+        <p><strong>두 단계면 바로 시작할 수 있어요:</strong></p>
+        <p>1. 마블로 다운로드: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a><br/>
+        2. 이 이메일 주소로 로그인 — 첫 로그인과 동시에 파운더 Pro가 자동으로 켜집니다.</p>
+        <p>파운더는 마블로를 처음부터 함께 만들어가는 분들이에요. 안에서 곧 뵙기를 기대할게요.</p>
+        <p style="color:#666">잘 안 되거나 궁금한 점이 있으면 이 메일에 그대로 답장하시거나 ${support} 로 알려주세요.</p>
+      `),
+      text: [
+        "파운더 자리가 그대로 열려 있어요 🚀",
+        "",
+        "안녕하세요! 마블로 파운더로 선정되셨는데 아직 시작 전이신 것 같아요.",
+        "파운더 접근 권한은 그대로 열려 있고, 아무것도 만료되지 않았어요.",
+        "",
+        "두 단계면 바로 시작할 수 있어요:",
+        `1. 마블로 다운로드: ${downloadUrl}`,
+        "2. 이 이메일 주소로 로그인 — 첫 로그인과 동시에 파운더 Pro가 자동으로 켜집니다.",
+        "",
+        "파운더는 마블로를 처음부터 함께 만들어가는 분들이에요. 안에서 곧 뵙기를 기대할게요.",
+        "",
+        `잘 안 되거나 궁금한 점이 있으면 이 메일에 그대로 답장하시거나 ${support} 로 알려주세요.`,
+      ].join("\n"),
+    };
+  }
+
+  // segment === "activated" — grant 백필로 Pro 가 이미 부여된 유저 안내.
+  if (locale === "en") {
+    return {
+      subject: "🎉 Your Marblo Founder Pro is now active",
+      html: founderHtmlShell(`
+        <h1 style="font-size:22px;margin:0 0 16px">Your Founder Pro is now active 🎉</h1>
+        <p>Good news — we've activated your Marblo Founder Pro plan. It's live on your account now, so there's nothing you need to do.</p>
+        <p><a href="${downloadUrl}" style="color:#4f46e5">Open Marblo</a> and your Pro features are ready to go.</p>
+        <p style="color:#666">If Pro doesn't show up, just reply to this email or reach ${support} — we'll sort it out right away.</p>
+      `),
+      text: [
+        "Your Founder Pro is now active.",
+        "",
+        "Good news — we've activated your Marblo Founder Pro plan. It's live on your account now, nothing to do.",
+        "",
+        `Open Marblo and your Pro features are ready: ${downloadUrl}`,
+        "",
+        `If Pro doesn't show up, reply here or reach ${support}.`,
+      ].join("\n"),
+    };
+  }
+  if (locale === "ja") {
+    return {
+      subject: "🎉 Marblo ファウンダー Pro が有効になりました",
+      html: founderHtmlShell(`
+        <h1 style="font-size:22px;margin:0 0 16px">ファウンダー Pro が有効になりました 🎉</h1>
+        <p>朗報です — あなたの Marblo ファウンダー Pro プランを有効化しました。すでにアカウントに反映されているので、追加の操作は必要ありません。</p>
+        <p><a href="${downloadUrl}" style="color:#4f46e5">Marblo を開く</a>と、Pro 機能がすぐにお使いいただけます。</p>
+        <p style="color:#666">Pro が表示されない場合は、このメールにご返信いただくか ${support} までご連絡ください。すぐに対応します。</p>
+      `),
+      text: [
+        "ファウンダー Pro が有効になりました。",
+        "",
+        "朗報です — あなたの Marblo ファウンダー Pro プランを有効化しました。すでに反映済みで、追加の操作は不要です。",
+        "",
+        `Marblo を開くと Pro 機能がすぐ使えます: ${downloadUrl}`,
+        "",
+        `表示されない場合は、このメールに返信するか ${support} まで。`,
+      ].join("\n"),
+    };
+  }
+  return {
+    subject: "🎉 마블로 파운더 Pro가 활성화됐어요",
+    html: founderHtmlShell(`
+      <h1 style="font-size:22px;margin:0 0 16px">파운더 Pro가 활성화됐어요 🎉</h1>
+      <p>좋은 소식이에요 — 마블로 파운더 Pro 플랜을 활성화해 드렸어요. 이미 계정에 반영돼 있으니 따로 하실 일은 없습니다.</p>
+      <p><a href="${downloadUrl}" style="color:#4f46e5">마블로를 열면</a> Pro 기능을 바로 쓰실 수 있어요.</p>
+      <p style="color:#666">혹시 Pro가 안 보이면 이 메일에 회신하시거나 ${support} 로 알려주세요. 바로 처리해 드릴게요.</p>
+    `),
+    text: [
+      "파운더 Pro가 활성화됐어요.",
+      "",
+      "좋은 소식이에요 — 마블로 파운더 Pro 플랜을 활성화해 드렸어요. 이미 계정에 반영돼 있어 따로 하실 일은 없습니다.",
+      "",
+      `마블로를 열면 Pro 기능을 바로 쓸 수 있어요: ${downloadUrl}`,
+      "",
+      `혹시 Pro가 안 보이면 ${support} 로 알려주세요.`,
+    ].join("\n"),
+  };
+}
+
+/** 팔로업 메일 발송. 반드시 non-throwing(sendFounderAccessEmail 과 동일 정책). */
+async function sendFounderFollowupEmail(
+  email: string,
+  locale: string,
+  segment: FollowupSegment
+): Promise<boolean> {
+  try {
+    if (!RESEND_API_KEY) {
+      console.warn(
+        "[founder-followup] RESEND_API_KEY 미설정 — 발송 스킵:",
+        segment
+      );
+      return false;
+    }
+    const content = buildFounderFollowupEmail(
+      normalizeFounderLocale(locale),
+      segment
+    );
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
+        to: [email],
+        subject: content.subject,
+        html: content.html,
+        text: content.text,
+      }),
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      console.warn(`[founder-followup] resend HTTP ${resp.status}: ${body}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("[founder-followup] 발송 실패:", segment, err);
+    return false;
+  }
+}
+
+// 팔로업 재발송 쿨다운(일). 같은 사람에게 반복 발송 방지.
+const FOUNDER_FOLLOWUP_COOLDOWN_DAYS = 7;
+// 실발송을 켜려면 반드시 이 확인 문자열을 명시(오발송 방지 2차 게이트).
+const FOUNDER_FOLLOWUP_CONFIRM = "SEND-FOLLOWUP";
+
+/**
+ * sendFounderFollowupEmails — 미활성 선정자 배치 팔로업(어드민).
+ *
+ * ★기본 dryRun=true — 발송하지 않고 대상 카운트/세그먼트/도메인집계만 반환한다.
+ * ★실발송은 dryRun===false 이고 confirm==="SEND-FOLLOWUP" 일 때만. 승인 전까지
+ *  절대 켜지지 않는다. PII(이메일 원문)는 어떤 경우에도 반환하지 않는다.
+ *
+ * ★사장님 결정(2026-07-17): 실제 발송 대상은 ④ 계정없음(download)뿐. ③ 계정O·
+ *  구독미부여는 별도 티켓(bi1zzeidtqm6sxzgguyP) grant 백필로 Pro 가 자동 부여되므로
+ *  다운로드 메일에서 제외한다. 그래서 segment 기본값은 "download"(④만) — ③에게
+ *  "Pro 활성화" 안내를 보내려면 segment:"activated" 를 명시적으로 opt-in 해야 한다.
+ *
+ * params: {
+ *   dryRun?: boolean=true,
+ *   segment?: "download"|"activated"|"all"="download",  // 기본 ④만
+ *   cooldownDays?: number=7,
+ *   confirm?: string,   // 실발송 시 "SEND-FOLLOWUP" 필수
+ *   limit?: number,     // 배치 상한(안전장치)
+ * }
+ */
+export const sendFounderFollowupEmails = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const dryRun = data?.dryRun !== false; // 기본 true
+    // 기본 세그먼트 = "download"(④ 계정없음)만. ③(activated)은 명시 opt-in.
+    const segmentFilter =
+      data?.segment === "activated" || data?.segment === "all"
+        ? (data.segment as "activated" | "all")
+        : "download";
+    const cooldownDays =
+      typeof data?.cooldownDays === "number" && data.cooldownDays >= 0
+        ? data.cooldownDays
+        : FOUNDER_FOLLOWUP_COOLDOWN_DAYS;
+    const limit =
+      typeof data?.limit === "number" && data.limit > 0
+        ? Math.floor(data.limit)
+        : Infinity;
+
+    // 대상 산출: 미활성 선정자 → 팔로업 세그먼트 매핑.
+    const records = await computeFounderActivation();
+    const nowMs = Date.now();
+    const cooldownMs = cooldownDays * 24 * 60 * 60 * 1000;
+
+    const eligible: Array<{ email: string; fseg: FollowupSegment }> = [];
+    let skippedCooldown = 0;
+    for (const r of records) {
+      const fseg = toFollowupSegment(r.segment);
+      if (!fseg) continue; // active
+      if (segmentFilter !== "all" && fseg !== segmentFilter) continue;
+      // 쿨다운: founders/{email}.founderFollowupSentAt 최근 발송 제외.
+      const doc = await db.collection(FOUNDERS_COLLECTION).doc(r.email).get();
+      const lastMs = tsToMillis(doc.data()?.founderFollowupSentAt);
+      if (lastMs != null && nowMs - lastMs < cooldownMs) {
+        skippedCooldown++;
+        continue;
+      }
+      eligible.push({ email: r.email, fseg });
+    }
+
+    const countBy = (fs: FollowupSegment) =>
+      eligible.filter((e) => e.fseg === fs).length;
+    const preview = {
+      dryRun,
+      totalSelected: records.length,
+      eligibleTotal: eligible.length,
+      segmentFilter,
+      eligibleBySegment: {
+        download: countBy("download"),
+        activated: countBy("activated"),
+      },
+      skippedCooldown,
+      cooldownDays,
+      domainDistribution: domainDistribution(eligible.map((e) => e.email)),
+    };
+
+    if (dryRun) {
+      return { ...preview, sent: 0, note: "dry-run: 발송하지 않음" };
+    }
+
+    // ── 실발송 경로 — 2차 게이트 ──────────────────────────────────────
+    if (data?.confirm !== FOUNDER_FOLLOWUP_CONFIRM) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        `실발송하려면 confirm="${FOUNDER_FOLLOWUP_CONFIRM}" 필요(오발송 방지). ` +
+          "그 전에 dryRun 으로 대상을 확인하고 사장님 승인을 받으세요."
+      );
+    }
+
+    let sent = 0;
+    let failed = 0;
+    const sentBySegment: Record<FollowupSegment, number> = {
+      download: 0,
+      activated: 0,
+    };
+    for (const { email, fseg } of eligible) {
+      if (sent + failed >= limit) break;
+      const locale = await lookupFounderLocale(email);
+      const ok = await sendFounderFollowupEmail(email, locale, fseg);
+      if (ok) {
+        sent++;
+        sentBySegment[fseg]++;
+        await db.collection(FOUNDERS_COLLECTION).doc(email).set(
+          {
+            founderFollowupSent: true,
+            founderFollowupSegment: fseg,
+            founderFollowupSentAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } else {
+        failed++;
+      }
+    }
+    return { ...preview, sent, failed, sentBySegment };
+  }
 );
 
 // ─── 신청 접수 확인 이메일 (Resend) ──────────────────────────────────
@@ -2477,13 +2973,13 @@ function buildApplyConfirmEmail(locale: FounderLocale): FounderEmailContent {
  */
 async function sendApplyConfirmEmail(
   email: string,
-  locale: string,
+  locale: string
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
       console.warn(
         "[apply-confirm-email] RESEND_API_KEY 미설정 — 발송 스킵:",
-        email,
+        email
       );
       return false;
     }
@@ -2537,14 +3033,14 @@ export const sendApplyConfirmOnWaitlist = functions.firestore
             confirmEmailSent: emailSent,
             confirmEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true },
+          { merge: true }
         )
         .catch((err) =>
           console.warn(
             "[apply-confirm-email] 발송 흔적 기록 실패:",
             snap.id,
-            err,
-          ),
+            err
+          )
         );
     } catch (err) {
       // 트리거 재시도 폭주 방지 — 모든 에러를 삼킨다.
@@ -2622,7 +3118,7 @@ export const enforceProjectLimit = functions.firestore
       await snap.ref.delete();
       console.warn(
         `[enforceProjectLimit] ${plan} 한도(${limit}) 초과 프로젝트 삭제: ` +
-          `owner=${ownerId} project=${snap.id} (owned=${owned.size})`,
+          `owner=${ownerId} project=${snap.id} (owned=${owned.size})`
       );
     } catch (err) {
       // 트리거 재시도 폭주 방지 — 모든 에러를 삼킨다.
@@ -2634,7 +3130,7 @@ function parseFounderSurveyAnswers(raw: unknown): FounderSurveyAnswers {
   if (!raw || typeof raw !== "object") {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "설문 답변이 필요합니다.",
+      "설문 답변이 필요합니다."
     );
   }
   const answers = raw as Record<string, unknown>;
@@ -2655,7 +3151,7 @@ function parseFounderSurveyAnswers(raw: unknown): FounderSurveyAnswers {
   if (missing.length > 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      `필수 7문항을 모두 입력해 주세요. 누락: ${missing.join(", ")}`,
+      `필수 7문항을 모두 입력해 주세요. 누락: ${missing.join(", ")}`
     );
   }
   return parsed;
@@ -2665,7 +3161,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
   if (!raw || typeof raw !== "object") {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "rubricScore is required",
+      "rubricScore is required"
     );
   }
   const input = raw as Record<string, unknown>;
@@ -2679,7 +3175,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
     ) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        `${key} must be an integer from 0 to 3`,
+        `${key} must be an integer from 0 to 3`
       );
     }
     return value;
@@ -2703,7 +3199,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
   ) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      `rubricScore.total must equal ${total}`,
+      `rubricScore.total must equal ${total}`
     );
   }
 
@@ -2718,7 +3214,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
 }
 
 async function getFounderFeedbackBySelector(
-  selector: unknown,
+  selector: unknown
 ): Promise<admin.firestore.DocumentSnapshot | null> {
   if (!selector || typeof selector !== "object") return null;
   const data = selector as Record<string, unknown>;
@@ -2742,7 +3238,7 @@ async function getFounderFeedbackBySelector(
       ? (x as { toMillis: () => number }).toMillis()
       : 0;
   return snap.docs.reduce((a, b) =>
-    toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a,
+    toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a
   );
 }
 
@@ -2754,14 +3250,14 @@ export const submitFounderFeedback = functions.https.onCall(
     if (!uid || !token?.email) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
     // 무료 Pro 부여 경계 — 이메일 소유권 위조 방지를 위해 인증된 이메일만 허용.
     if (token.email_verified !== true) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "이메일 인증이 완료된 계정만 제출할 수 있습니다.",
+        "이메일 인증이 완료된 계정만 제출할 수 있습니다."
       );
     }
     const email = normalizeEmail(token.email);
@@ -2776,14 +3272,14 @@ export const submitFounderFeedback = functions.https.onCall(
       if (!s.exists || s.data()?.status === "rejected") {
         throw new functions.https.HttpsError(
           "permission-denied",
-          "선정된 파운더가 아닙니다. 선정 안내 이메일의 계정으로 로그인했는지 확인해 주세요.",
+          "선정된 파운더가 아닙니다. 선정 안내 이메일의 계정으로 로그인했는지 확인해 주세요."
         );
       }
       const fd = s.data()!;
       if (fd.feedbackSubmittedAt) {
         throw new functions.https.HttpsError(
           "already-exists",
-          "이미 설문을 제출하셨습니다.",
+          "이미 설문을 제출하셨습니다."
         );
       }
       const granted =
@@ -2793,14 +3289,14 @@ export const submitFounderFeedback = functions.https.onCall(
       if (!granted) {
         throw new functions.https.HttpsError(
           "failed-precondition",
-          "접근 권한이 아직 부여되지 않았습니다.",
+          "접근 권한이 아직 부여되지 않았습니다."
         );
       }
       betaExpiresAt =
         fd.betaExpiresAt && typeof fd.betaExpiresAt.toDate === "function"
           ? fd.betaExpiresAt
           : admin.firestore.Timestamp.fromDate(
-              addMonths(granted, FOUNDER_BETA_MONTHS),
+              addMonths(granted, FOUNDER_BETA_MONTHS)
             );
       tx.set(
         fRef,
@@ -2810,7 +3306,7 @@ export const submitFounderFeedback = functions.https.onCall(
           feedbackSubmittedAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
     });
 
@@ -2818,7 +3314,7 @@ export const submitFounderFeedback = functions.https.onCall(
       email,
       userId: uid,
       locale: normalizeFounderLocale(
-        typeof data?.locale === "string" ? data.locale : "ko",
+        typeof data?.locale === "string" ? data.locale : "ko"
       ),
       answers,
       rubricScore: null,
@@ -2841,7 +3337,7 @@ export const submitFounderFeedback = functions.https.onCall(
         proGrantedMonths: 0,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
 
     return {
@@ -2852,7 +3348,7 @@ export const submitFounderFeedback = functions.https.onCall(
         ? (betaExpiresAt as admin.firestore.Timestamp).toDate().toISOString()
         : null,
     };
-  },
+  }
 );
 
 // 내 파운더 선정 상태(본인 조회) — founders 컬렉션은 클라 직접 read 차단이라
@@ -2865,7 +3361,7 @@ export const getMyFounderAccess = functions.https.onCall(
     if (!uid || !token?.email) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다.",
+        "로그인이 필요합니다."
       );
     }
     const email = normalizeEmail(token.email);
@@ -2886,7 +3382,7 @@ export const getMyFounderAccess = functions.https.onCall(
       betaExpiresAt,
       feedbackSubmitted,
     };
-  },
+  }
 );
 
 // 루브릭 채점 및 Pro 3개월 지급 확정 (관리자용).
@@ -2904,7 +3400,7 @@ export const reviewFounderFeedback = functions.https.onCall(
     if (!userId || !email) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "feedback is missing userId or email",
+        "feedback is missing userId or email"
       );
     }
 
@@ -2928,7 +3424,7 @@ export const reviewFounderFeedback = functions.https.onCall(
         userId,
         FOUNDER_PRO_MONTHS,
         "founder_survey_rubric",
-        grantStartedAt,
+        grantStartedAt
       );
     } else {
       proExpiresAt =
@@ -2969,7 +3465,7 @@ export const reviewFounderFeedback = functions.https.onCall(
             : null,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
 
     return {
@@ -2981,7 +3477,7 @@ export const reviewFounderFeedback = functions.https.onCall(
         : existingGranted,
       proExpiresAt: proExpiresAt?.toISOString() ?? null,
     };
-  },
+  }
 );
 
 // 루브릭 상위 응답자 조회 (관리자용). 복합 인덱스 부담을 줄이기 위해 점수 필터는
@@ -3041,7 +3537,7 @@ export const listTopFounderFeedback = functions.https.onCall(
       })
       .slice(0, limit);
     return { items };
-  },
+  }
 );
 
 // 인터뷰 요청 마킹 (관리자용). 점수만으로 자동 선정하지 않고 운영자 명시 호출만 허용.
@@ -3058,7 +3554,7 @@ export const requestFounderInterview = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "feedback is missing email",
+        "feedback is missing email"
       );
     }
     await feedbackSnap.ref.set(
@@ -3067,7 +3563,7 @@ export const requestFounderInterview = functions.https.onCall(
         interviewRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     await db.collection(FOUNDERS_COLLECTION).doc(email).set(
       {
@@ -3076,10 +3572,10 @@ export const requestFounderInterview = functions.https.onCall(
         interviewRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return { ok: true, feedbackId: feedbackSnap.id };
-  },
+  }
 );
 
 // 인터뷰 완료 마킹 (관리자용) — 요청받은 사용자의 Pro를 총 6개월로 연장.
@@ -3097,7 +3593,7 @@ export const markFounderInterviewed = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "feedback is missing email",
+        "feedback is missing email"
       );
     }
     const fRef = db.collection(FOUNDERS_COLLECTION).doc(email);
@@ -3110,24 +3606,24 @@ export const markFounderInterviewed = functions.https.onCall(
       typeof feedback.userId === "string"
         ? feedback.userId
         : typeof f.userId === "string"
-          ? f.userId
-          : "";
+        ? f.userId
+        : "";
     if (!uid) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "설문 제출 전이라 계정이 연결되지 않았습니다. 설문 제출 후 진행하세요.",
+        "설문 제출 전이라 계정이 연결되지 않았습니다. 설문 제출 후 진행하세요."
       );
     }
     if (feedback.interviewCompleted === true || f.interviewCompleted === true) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "이미 인터뷰 보상이 적용되었습니다.",
+        "이미 인터뷰 보상이 적용되었습니다."
       );
     }
     if (feedback.interviewRequested !== true && f.interviewRequested !== true) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "인터뷰 요청 대상자만 완료 처리할 수 있습니다.",
+        "인터뷰 요청 대상자만 완료 처리할 수 있습니다."
       );
     }
     const grantStartedAt =
@@ -3139,7 +3635,7 @@ export const markFounderInterviewed = functions.https.onCall(
       uid,
       FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
       "founder_interview",
-      grantStartedAt,
+      grantStartedAt
     );
     await feedbackSnap.ref.set(
       {
@@ -3149,7 +3645,7 @@ export const markFounderInterviewed = functions.https.onCall(
         proExpiresAt: admin.firestore.Timestamp.fromDate(periodEnd),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     await fRef.set(
       {
@@ -3161,14 +3657,14 @@ export const markFounderInterviewed = functions.https.onCall(
         proExpiresAt: admin.firestore.Timestamp.fromDate(periodEnd),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return {
       ok: true,
       proMonths: FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
       currentPeriodEnd: periodEnd.toISOString(),
     };
-  },
+  }
 );
 
 // Timestamp → ISO 문자열(없거나 형식이 아니면 null). 어드민 read 함수 공용.
@@ -3251,7 +3747,7 @@ export const getFounderWaitlist = functions.https.onCall(
       ? all
       : all.filter((i) => i.status !== "rejected");
     return { items, rejectedCount: all.length - items.length };
-  },
+  }
 );
 
 // 파운더 현황(어드민) — founders 컬렉션 전체 요약. 상태·시각·Pro개월 등.
@@ -3292,7 +3788,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required",
+        "email required"
       );
     }
     // orderBy 제거 — (email + createdAt) 복합 인덱스 없이 동작하도록 클라이언트 정렬.
@@ -3310,7 +3806,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
         ? (x as { toMillis: () => number }).toMillis()
         : 0;
     const latest = snap.docs.reduce((a, b) =>
-      toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a,
+      toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a
     );
     const v = latest.data() as Record<string, unknown>;
     const a = (v.answers as Record<string, unknown>) || {};
@@ -3344,7 +3840,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
         createdAt: tsToIso(v.createdAt),
       },
     };
-  },
+  }
 );
 
 // ─── In-app Bug Reports (사용자 버그 신고) ─────────────────────
@@ -3363,7 +3859,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
   if (!uid) {
     throw new functions.https.HttpsError(
       "unauthenticated",
-      "로그인이 필요합니다.",
+      "로그인이 필요합니다."
     );
   }
   // 이메일은 서버가 토큰에서 각인(클라 입력 불신). 인증 이메일 없으면 null.
@@ -3379,7 +3875,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
   if (!description) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "버그 설명을 입력해 주세요.",
+      "버그 설명을 입력해 주세요."
     );
   }
 
@@ -3397,7 +3893,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
     recentLogs: redactSecrets(str(ctxIn.recentLogs, BUG_REPORT_CTX_FIELD_MAX)),
     route: str(ctxIn.route, 500),
     agentSnapshot: redactSecrets(
-      str(ctxIn.agentSnapshot, BUG_REPORT_CTX_FIELD_MAX),
+      str(ctxIn.agentSnapshot, BUG_REPORT_CTX_FIELD_MAX)
     ),
   };
 
@@ -3412,7 +3908,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
     if (now - lastAt < BUG_REPORT_MIN_INTERVAL_MS) {
       throw new functions.https.HttpsError(
         "resource-exhausted",
-        "잠시 후 다시 시도해 주세요.",
+        "잠시 후 다시 시도해 주세요."
       );
     }
     const dayStart = typeof d.dayStartMs === "number" ? d.dayStartMs : 0;
@@ -3420,12 +3916,12 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
     const dayCount = dayRolledOver
       ? 0
       : typeof d.dayCount === "number"
-        ? d.dayCount
-        : 0;
+      ? d.dayCount
+      : 0;
     if (dayCount >= BUG_REPORT_DAILY_MAX) {
       throw new functions.https.HttpsError(
         "resource-exhausted",
-        "하루 제출 한도를 초과했습니다. 내일 다시 시도해 주세요.",
+        "하루 제출 한도를 초과했습니다. 내일 다시 시도해 주세요."
       );
     }
     tx.set(
@@ -3436,7 +3932,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
         dayCount: dayCount + 1,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
   });
 
@@ -3499,7 +3995,7 @@ export const updateBugReportStatus = functions.https.onCall(
     if (!(BUG_REPORT_STATUSES as readonly string[]).includes(status)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "유효하지 않은 상태값입니다.",
+        "유효하지 않은 상태값입니다."
       );
     }
     const ref = db.collection("bugReports").doc(id);
@@ -3507,7 +4003,7 @@ export const updateBugReportStatus = functions.https.onCall(
     if (!snap.exists) {
       throw new functions.https.HttpsError(
         "not-found",
-        "신고를 찾을 수 없습니다.",
+        "신고를 찾을 수 없습니다."
       );
     }
     await ref.set(
@@ -3516,10 +4012,10 @@ export const updateBugReportStatus = functions.https.onCall(
         triagedBy: context.auth?.uid ?? null,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
     return { ok: true };
-  },
+  }
 );
 
 // ─── Telemetry → BigQuery ─────────────────────────────────────
@@ -3653,14 +4149,14 @@ export const logTelemetryBatch = functions.https.onCall(
     if (!Array.isArray(events) || events.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "events array required",
+        "events array required"
       );
     }
 
     if (events.length > 100) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Max 100 events per batch",
+        "Max 100 events per batch"
       );
     }
 
@@ -3710,7 +4206,7 @@ export const logTelemetryBatch = functions.https.onCall(
     await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
 
     return { inserted: rows.length };
-  },
+  }
 );
 
 interface CostRow {
@@ -3769,7 +4265,7 @@ export const logCostBatch = functions.https.onCall(async (data, context) => {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "entries array required",
+      "entries array required"
     );
   }
 
@@ -3809,7 +4305,7 @@ export const getCostLogs = functions.https.onCall(async (data, context) => {
   if (!projectId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "projectId required",
+      "projectId required"
     );
   }
 
@@ -3844,7 +4340,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
   if (!projectId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "projectId required",
+      "projectId required"
     );
   }
 
@@ -3852,7 +4348,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
   if (!Number.isInteger(requestedDays) || requestedDays <= 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "days must be a positive integer",
+      "days must be a positive integer"
     );
   }
 
@@ -3939,7 +4435,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
 
   const weeklyTotalTokens = weeklyByModel.reduce(
     (total, row) => total + row.totalTokens,
-    0,
+    0
   );
   const weeklyCost = weeklyByModel.reduce((total, row) => total + row.cost, 0);
 
@@ -3965,7 +4461,7 @@ export const logTaskOutcome = functions.https.onCall(async (data, context) => {
   if (!d || !d.taskId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "outcome with taskId required",
+      "outcome with taskId required"
     );
   }
 
@@ -4015,14 +4511,14 @@ export const logHeartbeat = functions.https.onCall(async (data, context) => {
   if (!Array.isArray(beats) || beats.length === 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "beats array required",
+      "beats array required"
     );
   }
 
   if (beats.length > 50) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Max 50 beats per batch",
+      "Max 50 beats per batch"
     );
   }
 
@@ -4059,7 +4555,7 @@ export const logFlowExecution = functions.https.onCall(
     if (!d || !d.flowId || !d.runId) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "execution with flowId and runId required",
+        "execution with flowId and runId required"
       );
     }
 
@@ -4089,7 +4585,7 @@ export const logFlowExecution = functions.https.onCall(
       .insert([row]);
 
     return { inserted: 1 };
-  },
+  }
 );
 
 // ============================================
@@ -4231,7 +4727,7 @@ export const triggerReconcile = functions.https.onCall(
     const provider = (data?.provider as string) || "toss";
     if (provider === "paddle") return reconcilePaddlePending();
     return reconcileTossPending();
-  },
+  }
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4268,7 +4764,7 @@ interface TgCallbackQuery {
 // 텔레그램 Bot API 호출(공통) — 토큰 없으면 스킵, 절대 throw 하지 않음.
 async function tgCall(
   method: string,
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown>
 ): Promise<void> {
   if (!TELEGRAM_BETA_BOT_TOKEN) return;
   try {
@@ -4278,7 +4774,7 @@ async function tgCall(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      },
+      }
     );
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
@@ -4293,7 +4789,7 @@ async function tgCall(
 // 사용자 입력을 그대로 담으므로 parse_mode 없이 평문 전송(포맷 400/인젝션 회피).
 async function tgSend(
   text: string,
-  inlineKeyboard?: TgInlineKeyboard,
+  inlineKeyboard?: TgInlineKeyboard
 ): Promise<void> {
   if (!TELEGRAM_BETA_ADMIN_CHAT_ID) return;
   const payload: Record<string, unknown> = {
@@ -4316,7 +4812,7 @@ async function tgAnswerCallbackQuery(id: string, text: string): Promise<void> {
 async function tgEditMessageText(
   chatId: string | number,
   messageId: number,
-  text: string,
+  text: string
 ): Promise<void> {
   await tgCall("editMessageText", {
     chat_id: chatId,
@@ -4394,7 +4890,7 @@ async function handleTgSelect(
   cqId: string,
   chatId: string,
   messageId: number,
-  docId: string,
+  docId: string
 ): Promise<void> {
   const snap = await db.collection("betatester50_waitlist").doc(docId).get();
   if (!snap.exists) {
@@ -4428,7 +4924,7 @@ async function handleTgSelect(
       messageId,
       `✅ 선정 (1개월, ${proNote}, 접근이메일 ${
         result.emailSent ? "발송" : "발송 스킵"
-      }) — ${email}\n처리: ${new Date().toISOString()}`,
+      }) — ${email}\n처리: ${new Date().toISOString()}`
     );
   }
 }
@@ -4438,7 +4934,7 @@ async function handleTgSkip(
   cqId: string,
   chatId: string,
   messageId: number,
-  docId: string,
+  docId: string
 ): Promise<void> {
   const ref = db.collection("betatester50_waitlist").doc(docId);
   const snap = await ref.get();
@@ -4455,14 +4951,14 @@ async function handleTgSkip(
       skipped: true,
       skippedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true },
+    { merge: true }
   );
   await tgAnswerCallbackQuery(cqId, "스킵 처리됨");
   if (messageId) {
     await tgEditMessageText(
       chatId,
       messageId,
-      `⏭️ 스킵됨 — 처리: ${new Date().toISOString()}`,
+      `⏭️ 스킵됨 — 처리: ${new Date().toISOString()}`
     );
   }
 }
@@ -4472,7 +4968,7 @@ async function handleTgProGrant(
   cqId: string,
   chatId: string,
   messageId: number,
-  docId: string,
+  docId: string
 ): Promise<void> {
   const ref = db.collection(FOUNDER_FEEDBACK_COLLECTION).doc(docId);
   const snap = await ref.get();
@@ -4497,7 +4993,7 @@ async function handleTgProGrant(
       await tgEditMessageText(
         chatId,
         messageId,
-        `⭐ 이미 Pro 부여됨 (${existingGranted}개월) — ${email}`,
+        `⭐ 이미 Pro 부여됨 (${existingGranted}개월) — ${email}`
       );
     }
     return;
@@ -4506,7 +5002,7 @@ async function handleTgProGrant(
     userId,
     FOUNDER_PRO_MONTHS,
     "telegram_override",
-    new Date(),
+    new Date()
   );
   await ref.set(
     {
@@ -4516,7 +5012,7 @@ async function handleTgProGrant(
       reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true },
+    { merge: true }
   );
   await db
     .collection(FOUNDERS_COLLECTION)
@@ -4527,14 +5023,14 @@ async function handleTgProGrant(
         proExpiresAt: admin.firestore.Timestamp.fromDate(proExpiresAt),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true },
+      { merge: true }
     );
   await tgAnswerCallbackQuery(cqId, "Pro 3개월 부여 완료");
   if (messageId) {
     await tgEditMessageText(
       chatId,
       messageId,
-      `⭐ Pro 3개월 부여 (예외승인) — ${email}\n처리: ${new Date().toISOString()}`,
+      `⭐ Pro 3개월 부여 (예외승인) — ${email}\n처리: ${new Date().toISOString()}`
     );
   }
 }
@@ -4608,7 +5104,7 @@ export const betaTelegramWebhook = functions.https.onRequest(
     }
     // 텔레그램 재전송 폭주 방지 — 어떤 경우에도 200.
     res.status(200).send("ok");
-  },
+  }
 );
 
 // ─── 트리거: 신규 가입 → 선정된 베타 파운더면 Pro 구독 materialize ─────
@@ -4637,7 +5133,7 @@ export const grantBetaProOnSignup = functions.auth
         fd,
         user.uid,
         "beta_signup",
-        new Date(),
+        new Date()
       );
     } catch (err) {
       console.warn("[grantBetaProOnSignup] 부여 실패:", user.uid, err);
@@ -4672,12 +5168,12 @@ export const scheduledExpireBetaGrants = functions.pubsub
           canceledAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        { merge: true }
       );
       expired++;
     }
     console.log(
-      `[expireBetaGrants] scanned=${snap.size} expired→canceled=${expired}`,
+      `[expireBetaGrants] scanned=${snap.size} expired→canceled=${expired}`
     );
     return null;
   });
@@ -4710,7 +5206,7 @@ function parseAnalyticsDays(data: unknown, def = 30): number {
   if (!Number.isInteger(n) || n <= 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "days must be a positive integer",
+      "days must be a positive integer"
     );
   }
   return Math.min(n, 365);
@@ -4720,7 +5216,7 @@ function parseAnalyticsDays(data: unknown, def = 30): number {
 function foldDistribution(
   rows: Array<Record<string, unknown>>,
   keyCol: string,
-  countCol = "n",
+  countCol = "n"
 ): Array<{ key: string; count: number }> {
   return rows.map((r) => ({
     key: r[keyCol] == null || r[keyCol] === "" ? "(none)" : String(r[keyCol]),
@@ -4741,7 +5237,7 @@ function dayKeyFromMs(ms: number): string {
 
 function makeBusinessTrendBuckets(
   rangeDays: number,
-  nowMs: number,
+  nowMs: number
 ): Array<{ date: string; active: number; new: number; churned: number }> {
   const todayStartMs = startOfUtcDay(nowMs);
   const firstDayMs = todayStartMs - (rangeDays - 1) * DAY_MS;
@@ -4760,9 +5256,13 @@ function isPaidPlan(plan: string): boolean {
 function isCurrentActiveSubscription(
   status: string,
   currentPeriodEndMs: number | null,
-  nowMs: number,
+  nowMs: number
 ): boolean {
-  return status === "active" && currentPeriodEndMs != null && currentPeriodEndMs > nowMs;
+  return (
+    status === "active" &&
+    currentPeriodEndMs != null &&
+    currentPeriodEndMs > nowMs
+  );
 }
 
 function activeAtDayEnd(
@@ -4770,9 +5270,10 @@ function activeAtDayEnd(
   createdMs: number | null,
   canceledMs: number | null,
   currentPeriodEndMs: number | null,
-  dayEndMs: number,
+  dayEndMs: number
 ): boolean {
-  if (currentPeriodEndMs == null || currentPeriodEndMs <= dayEndMs) return false;
+  if (currentPeriodEndMs == null || currentPeriodEndMs <= dayEndMs)
+    return false;
   if (createdMs != null && createdMs > dayEndMs) return false;
   if (status === "active") return true;
   return canceledMs != null && canceledMs > dayEndMs;
@@ -4794,7 +5295,7 @@ type ConsecutiveBillingMetrics = {
 };
 
 function computeConsecutiveBillingMetrics(
-  rows: ChargeLedgerRow[],
+  rows: ChargeLedgerRow[]
 ): ConsecutiveBillingMetrics {
   const byUser = new Map<string, ChargeLedgerRow[]>();
   for (const row of rows) {
@@ -4929,7 +5430,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
             createdMs,
             canceledMs,
             currentPeriodEndMs,
-            dayEndMs,
+            dayEndMs
           )
         ) {
           trendByDay[i].active++;
@@ -5047,7 +5548,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
         rollingTotalTokens,
       },
     };
-  },
+  }
 );
 
 /**
@@ -5154,14 +5655,14 @@ export const getAdminUsageSummary = functions.https.onCall(
         date: String(r.date ?? ""),
         dau: toNumber(r.dau as number | string | undefined),
         events: toNumber(r.events as number | string | undefined),
-      }),
+      })
     );
     const sample = (sampleRows as Array<Record<string, unknown>>)[0] ?? {};
     const taskRow =
       (taskSummaryRows as Array<Record<string, unknown>>)[0] ?? {};
     const taskTotal = toNumber(taskRow.total as number | string | undefined);
     const taskSucceeded = toNumber(
-      taskRow.succeeded as number | string | undefined,
+      taskRow.succeeded as number | string | undefined
     );
 
     return {
@@ -5169,38 +5670,38 @@ export const getAdminUsageSummary = functions.https.onCall(
       generatedAt: new Date().toISOString(),
       // 표본 신뢰도 라벨링(§0-B, T0-3): 옵트인/도그푸드 편향 표본 크기.
       sampleClientCount: toNumber(
-        sample.sampleClients as number | string | undefined,
+        sample.sampleClients as number | string | undefined
       ),
       wau: toNumber(sample.wau as number | string | undefined),
       activeByDay,
       topEvents: foldDistribution(
         topEventsRows as Array<Record<string, unknown>>,
-        "event",
+        "event"
       ),
       spawnsByDay: (spawnsByDayRows as Array<Record<string, unknown>>).map(
         (r) => ({
           date: String(r.date ?? ""),
           count: toNumber(r.n as number | string | undefined),
-        }),
+        })
       ),
       spawnsByRole: foldDistribution(
         spawnsByRoleRows as Array<Record<string, unknown>>,
-        "key",
+        "key"
       ),
       spawnsByModel: foldDistribution(
         spawnsByModelRows as Array<Record<string, unknown>>,
-        "key",
+        "key"
       ),
       tasks: {
         total: taskTotal,
         succeeded: taskSucceeded,
         successRate: taskTotal > 0 ? taskSucceeded / taskTotal : 0,
         avgDurationMs: toNumber(
-          taskRow.avgDurationMs as number | string | undefined,
+          taskRow.avgDurationMs as number | string | undefined
         ),
       },
     };
-  },
+  }
 );
 
 /**
@@ -5314,7 +5815,7 @@ export const getAdminModelSummary = functions.https.onCall(
         totalTokens: toNumber(r.totalTokens as number | string | undefined),
         cost: toNumber(r.cost as number | string | undefined),
         count: toNumber(r.n as number | string | undefined),
-      }),
+      })
     );
 
     const modelRoleStats = (
@@ -5349,21 +5850,21 @@ export const getAdminModelSummary = functions.https.onCall(
       routing: {
         bySelectedModel: foldDistribution(
           routingSelectedRows as Array<Record<string, unknown>>,
-          "key",
+          "key"
         ),
         byDecisionReason: foldDistribution(
           routingReasonRows as Array<Record<string, unknown>>,
-          "key",
+          "key"
         ),
         byReuseVsSpawn: foldDistribution(
           routingReuseRows as Array<Record<string, unknown>>,
-          "key",
+          "key"
         ),
         byModelSelectionMode: foldDistribution(
           routingModeRows as Array<Record<string, unknown>>,
-          "key",
+          "key"
         ),
       },
     };
-  },
+  }
 );
