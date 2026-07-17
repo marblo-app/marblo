@@ -1437,55 +1437,59 @@ async function upsertProSubscription(
 ): Promise<ProGrantOutcome> {
   const now = new Date();
   const subRef = db.collection("subscriptions").doc(userId);
-  const snap = await subRef.get();
-  const data = snap.data();
-  const existingEnd =
-    data?.currentPeriodEnd && typeof data.currentPeriodEnd.toDate === "function"
-      ? data.currentPeriodEnd.toDate()
-      : null;
-  const periodEnd =
-    existingEnd && existingEnd > targetEnd ? existingEnd : targetEnd;
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(subRef);
+    const data = snap.data();
+    const existingEnd =
+      data?.currentPeriodEnd &&
+      typeof data.currentPeriodEnd.toDate === "function"
+        ? data.currentPeriodEnd.toDate()
+        : null;
+    const periodEnd =
+      existingEnd && existingEnd > targetEnd ? existingEnd : targetEnd;
 
-  // ★ 현역 유료 구독은 결제 정체성을 절대 덮어쓰지 않는다.
-  //
-  // 예전엔 paymentProvider 를 무조건 founder_grant 로 stomp 했는데, 돈 내던
-  // 유저가 파운더로 선정되면:
-  //   1) billing.selectDueForCharge 가 paymentProvider!=="toss" 와
-  //      founderGrant===true 양쪽으로 걸러서 재과금이 영구 정지되고(무료 영구),
-  //   2) 반려/만료 로직이 그 doc 을 grant 로 오인해 취소·기간절단까지 한다.
-  // 유료 유저는 이미 Pro 라 grant 로 덮어쓸 이유 자체가 없다. 파운더 자격은
-  // founders/{email} doc 이 SoT 로 들고 있으므로 구독은 건드리지 않는다.
-  //
-  // ★ 단 "현역"(active/past_due) 일 때만. 해지·실효한 前결제자는 billingKey 가
-  // 남아있을 뿐 지금 Pro 가 아니므로 정상적으로 grant 를 부여해야 한다.
-  if (isLivePaidSubscription(data)) {
-    console.log(
-      `[upsertProSubscription] 현역 유료 구독(${userId}, status=${data?.status}) — grant(${reason}) 로 덮어쓰지 않고 결제 유지`,
-    );
-    return {
-      granted: false,
-      periodEnd: existingEnd ?? periodEnd,
-      skippedReason: "live_paid",
+    // ★ 현역 유료 구독은 결제 정체성을 절대 덮어쓰지 않는다.
+    //
+    // 예전엔 paymentProvider 를 무조건 founder_grant 로 stomp 했는데, 돈 내던
+    // 유저가 파운더로 선정되면:
+    //   1) billing.selectDueForCharge 가 paymentProvider!=="toss" 와
+    //      founderGrant===true 양쪽으로 걸러서 재과금이 영구 정지되고(무료 영구),
+    //   2) 반려/만료 로직이 그 doc 을 grant 로 오인해 취소·기간절단까지 한다.
+    // 유료 유저는 이미 Pro 라 grant 로 덮어쓸 이유 자체가 없다. 파운더 자격은
+    // founders/{email} doc 이 SoT 로 들고 있으므로 구독은 건드리지 않는다.
+    //
+    // ★ 단 "현역"(active/past_due) 일 때만. 해지·실효한 前결제자는 billingKey 가
+    // 남아있을 뿐 지금 Pro 가 아니므로 정상적으로 grant 를 부여해야 한다.
+    // 트랜잭션 안에서 판정해 결제 생성과 grant 생성의 race 에서도 stomp 하지 않는다.
+    if (isLivePaidSubscription(data)) {
+      console.log(
+        `[upsertProSubscription] 현역 유료 구독(${userId}, status=${data?.status}) — grant(${reason}) 로 덮어쓰지 않고 결제 유지`,
+      );
+      return {
+        granted: false,
+        periodEnd: existingEnd ?? periodEnd,
+        skippedReason: "live_paid",
+      };
+    }
+
+    const payload: Record<string, unknown> = {
+      userId,
+      planType: "pro",
+      status: "active",
+      paymentProvider: "founder_grant",
+      founderGrant: true,
+      founderGrantReason: reason,
+      founderGrantStartedAt: admin.firestore.Timestamp.fromDate(grantStartedAt),
+      currentPeriodEnd: admin.firestore.Timestamp.fromDate(periodEnd),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-  }
-
-  const payload: Record<string, unknown> = {
-    userId,
-    planType: "pro",
-    status: "active",
-    paymentProvider: "founder_grant",
-    founderGrant: true,
-    founderGrantReason: reason,
-    founderGrantStartedAt: admin.firestore.Timestamp.fromDate(grantStartedAt),
-    currentPeriodEnd: admin.firestore.Timestamp.fromDate(periodEnd),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  };
-  if (!snap.exists) {
-    payload.currentPeriodStart = admin.firestore.Timestamp.fromDate(now);
-    payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
-  }
-  await subRef.set(payload, { merge: true });
-  return { granted: true, periodEnd, skippedReason: null };
+    if (!snap.exists) {
+      payload.currentPeriodStart = admin.firestore.Timestamp.fromDate(now);
+      payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+    tx.set(subRef, payload, { merge: true });
+    return { granted: true, periodEnd, skippedReason: null };
+  });
 }
 
 async function grantFounderProTotalInternal(
@@ -1501,6 +1505,87 @@ async function grantFounderProTotalInternal(
     grantStartedAt,
   );
   return outcome.periodEnd;
+}
+
+function timestampToDate(value: unknown): Date | null {
+  if (value && typeof (value as { toDate?: unknown }).toDate === "function") {
+    return (value as { toDate: () => Date }).toDate();
+  }
+  if (value instanceof Date) return value;
+  return null;
+}
+
+function laterDate(a: Date | null, b: Date | null): Date | null {
+  if (!a) return b;
+  if (!b) return a;
+  return a > b ? a : b;
+}
+
+function resolveFounderGrantWindowEnd(
+  founder: Record<string, unknown>,
+): Date | null {
+  const betaEnd = timestampToDate(founder.betaExpiresAt);
+  const proEnd = timestampToDate(founder.proExpiresAt);
+  const explicitWindowEnd = laterDate(betaEnd, proEnd);
+  if (explicitWindowEnd) return explicitWindowEnd;
+
+  // Legacy selected docs may have accessGrantedAt but no betaExpiresAt. The
+  // intended base grant is one month from access grant, so reconstruct it.
+  const accessGrantedAt = timestampToDate(founder.accessGrantedAt);
+  return accessGrantedAt ? addMonths(accessGrantedAt, FOUNDER_BETA_MONTHS) : null;
+}
+
+type FounderGrantMaterializationResult = {
+  granted: boolean;
+  uid: string;
+  windowEnd: Date | null;
+  skippedReason: ProGrantOutcome["skippedReason"] | "window_expired";
+};
+
+async function materializeFounderProGrantForUid(
+  founderRef: admin.firestore.DocumentReference,
+  founder: Record<string, unknown>,
+  uid: string,
+  reason: string,
+  grantStartedAt: Date,
+): Promise<FounderGrantMaterializationResult> {
+  const windowEnd = resolveFounderGrantWindowEnd(founder);
+  if (!windowEnd || windowEnd <= new Date()) {
+    return {
+      granted: false,
+      uid,
+      windowEnd,
+      skippedReason: "window_expired",
+    };
+  }
+
+  const outcome = await upsertProSubscription(
+    uid,
+    windowEnd,
+    reason,
+    grantStartedAt,
+  );
+
+  // 실제 founder_grant 구독을 만들었을 때만 grant 흔적을 남긴다. 현역 유료 구독
+  // 스킵을 성공처럼 기록하면 반려/만료 경로가 유료 구독을 grant 로 오인한다.
+  if (outcome.granted) {
+    await founderRef.set(
+      {
+        proSubscriptionUid: uid,
+        proSubscriptionEnd: admin.firestore.Timestamp.fromDate(windowEnd),
+        proSubscriptionGrantedAt:
+          admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+
+  return {
+    granted: outcome.granted,
+    uid,
+    windowEnd,
+    skippedReason: outcome.skippedReason,
+  };
 }
 
 // 이메일로 Firebase Auth 계정의 uid 를 찾는다. 미가입/조회 실패는 null(비-throw) —
@@ -1866,28 +1951,25 @@ async function markFounderSelectedInternal(
   let subscriptionSkippedReason: string | null = null;
   const uid = await lookupUidByEmail(email);
   if (uid) {
-    const outcome = await upsertProSubscription(
+    const existingFounder = snap.data() || {};
+    const founderForGrant: Record<string, unknown> = {
+      ...existingFounder,
+      ...update,
+      betaExpiresAt: admin.firestore.Timestamp.fromDate(betaExpiresAt),
+    };
+    founderForGrant.accessGrantedAt = update.accessGrantedAt
+      ? admin.firestore.Timestamp.fromDate(betaStartedAt)
+      : existingFounder.accessGrantedAt;
+    const outcome = await materializeFounderProGrantForUid(
+      ref,
+      founderForGrant,
       uid,
-      betaExpiresAt,
       "beta_selected",
       betaStartedAt,
     );
-    subscriptionUid = uid;
+    subscriptionUid = outcome.uid;
     subscriptionGranted = outcome.granted;
     subscriptionSkippedReason = outcome.skippedReason;
-    // 실제로 부여했을 때만 grant 흔적을 남긴다 — 현역 유료 구독을 스킵해놓고
-    // proSubscriptionUid 를 박으면 회수 로직이 유료 구독을 grant 로 오인한다.
-    if (outcome.granted) {
-      await ref.set(
-        {
-          proSubscriptionUid: uid,
-          proSubscriptionEnd: admin.firestore.Timestamp.fromDate(betaExpiresAt),
-          proSubscriptionGrantedAt:
-            admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-    }
   }
 
   return {
@@ -4282,29 +4364,12 @@ export const grantBetaProOnSignup = functions.auth
       // 선정 기준 = getMyFounderAccess 와 동일(rejected 아님 + accessGrantedAt 존재).
       if (fd.status === "rejected" || !fd.accessGrantedAt) return;
 
-      const now = new Date();
-      const betaEnd =
-        fd.betaExpiresAt && typeof fd.betaExpiresAt.toDate === "function"
-          ? fd.betaExpiresAt.toDate()
-          : null;
-      const proEnd =
-        fd.proExpiresAt && typeof fd.proExpiresAt.toDate === "function"
-          ? fd.proExpiresAt.toDate()
-          : null;
-      // 부여 창 = 베타(1개월)·예외(3/6개월) 종료일 중 더 나중. 둘 다 과거면 스킵.
-      const windowEnd =
-        proEnd && (!betaEnd || proEnd > betaEnd) ? proEnd : betaEnd;
-      if (!windowEnd || windowEnd <= now) return;
-
-      await upsertProSubscription(user.uid, windowEnd, "beta_signup", now);
-      await snap.ref.set(
-        {
-          proSubscriptionUid: user.uid,
-          proSubscriptionEnd: admin.firestore.Timestamp.fromDate(windowEnd),
-          proSubscriptionGrantedAt:
-            admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
+      await materializeFounderProGrantForUid(
+        snap.ref,
+        fd,
+        user.uid,
+        "beta_signup",
+        new Date(),
       );
     } catch (err) {
       console.warn("[grantBetaProOnSignup] 부여 실패:", user.uid, err);

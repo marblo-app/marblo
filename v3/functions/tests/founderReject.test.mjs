@@ -79,6 +79,7 @@ async function createUser(uid, email) {
 const reject = (data, ctx) => mod.markFounderRejected.run(data, ctx);
 const waitlist = (data, ctx) => mod.getFounderWaitlist.run(data, ctx);
 const select = (data, ctx) => mod.markFounderSelected.run(data, ctx);
+const grantOnSignup = (user) => mod.grantBetaProOnSignup.run(user);
 // 앱이 실제로 베타 접근을 판정할 때 쓰는 게이트 — 복구 여부를 이걸로 단언한다.
 const myAccess = (data, ctx) => mod.getMyFounderAccess.run(data, ctx);
 
@@ -376,6 +377,112 @@ const DAY = 86400000;
     "★레거시 stomp(founderGrant=true) 반려 → 무료 grant 회수됨",
   );
   check(res.subscriptionRevoked === true, "레거시 stomp 회수 보고");
+}
+
+// ─── 시나리오 2e: ★선정 → 가입(onCreate) 도 Pro grant materialize ───────
+{
+  await wipe();
+  const email = "selected-then-signup@example.com";
+  await db
+    .collection("betatester50_waitlist")
+    .add({ email, createdAt: ts(new Date()) });
+
+  const selected = await select({ email }, ADMIN_CTX);
+  check(
+    selected.subscriptionGranted === false && selected.subscriptionUid === null,
+    "선정 시점 미가입이면 즉시 구독 부여는 스킵",
+  );
+
+  const uid = await createUser("uid-selected-then-signup", email);
+  await grantOnSignup({ uid, email });
+
+  const sub = (await db.collection("subscriptions").doc(uid).get()).data();
+  check(
+    sub.paymentProvider === "founder_grant" && sub.status === "active",
+    "★★선정→가입: auth onCreate 가 founder_grant 구독 생성",
+  );
+  const founder = (await db.collection("founders").doc(email).get()).data();
+  check(
+    founder.proSubscriptionUid === uid,
+    "선정→가입: founders doc 에 proSubscriptionUid 기록",
+  );
+}
+
+// ─── 시나리오 2f: ★가입 → 선정(callable) 도 Pro grant materialize ───────
+{
+  await wipe();
+  const email = "signup-then-selected@example.com";
+  const uid = await createUser("uid-signup-then-selected", email);
+  await db
+    .collection("betatester50_waitlist")
+    .add({ email, createdAt: ts(new Date()) });
+
+  const res = await select({ email }, ADMIN_CTX);
+  const sub = (await db.collection("subscriptions").doc(uid).get()).data();
+  check(
+    res.subscriptionGranted === true && res.subscriptionUid === uid,
+    "★★가입→선정: callable 응답이 구독 부여를 정직 보고",
+  );
+  check(
+    sub.paymentProvider === "founder_grant" && sub.status === "active",
+    "★★가입→선정: founder_grant 구독 생성",
+  );
+}
+
+// ─── 시나리오 2g: ★가입 트리거도 현역 유료 구독을 stomp 하지 않음 ───────
+{
+  await wipe();
+  const email = "paid-selected-then-signup@example.com";
+  const uid = await createUser("uid-paid-selected-then-signup", email);
+  const paidEnd = new Date(Date.now() + 30 * DAY);
+  await db.collection("founders").doc(email).set({
+    email,
+    status: "selected",
+    accessGrantedAt: ts(new Date()),
+    betaExpiresAt: ts(new Date(Date.now() + 30 * DAY)),
+  });
+  await db.collection("subscriptions").doc(uid).set({
+    userId: uid,
+    planType: "pro",
+    status: "active",
+    paymentProvider: "toss",
+    tossBillingKey: "REDACTED",
+    currentPeriodEnd: ts(paidEnd),
+  });
+
+  await grantOnSignup({ uid, email });
+
+  const sub = (await db.collection("subscriptions").doc(uid).get()).data();
+  const founder = (await db.collection("founders").doc(email).get()).data();
+  check(
+    sub.paymentProvider === "toss" && sub.founderGrant !== true,
+    "★가입 트리거: 현역 유료 구독 paymentProvider/founderGrant 보존",
+  );
+  check(
+    founder.proSubscriptionUid === undefined,
+    "★가입 트리거: 유료 스킵을 proSubscriptionUid 로 기록하지 않음",
+  );
+}
+
+// ─── 시나리오 2h: ★레거시 selected doc 의 누락된 betaExpiresAt 복구 ─────
+{
+  await wipe();
+  const email = "legacy-missing-window@example.com";
+  const uid = await createUser("uid-legacy-missing-window", email);
+  await db.collection("founders").doc(email).set({
+    email,
+    status: "selected",
+    accessGrantedAt: ts(new Date(Date.now() - DAY)),
+  });
+
+  await grantOnSignup({ uid, email });
+
+  const sub = (await db.collection("subscriptions").doc(uid).get()).data();
+  check(
+    sub.paymentProvider === "founder_grant" &&
+      sub.currentPeriodEnd.toMillis() > Date.now(),
+    "★betaExpiresAt 누락 legacy 선정자도 accessGrantedAt+1개월로 grant 복구",
+  );
 }
 
 // ─── 시나리오 3: getFounderWaitlist 중복제거 + rejected 제외 ─────────

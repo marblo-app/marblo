@@ -8,6 +8,7 @@
     "check:deploy-env": "node scripts/check-deploy-env.mjs",
     "serve": "firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions --project marblo-2253d",
+    "backfill:founder-grants": "node scripts/backfill-founder-pro-grants.mjs",
     "test:reject": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderReject.test.mjs'"
   },
   "engines": {
