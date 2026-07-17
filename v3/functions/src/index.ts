@@ -114,9 +114,15 @@ const TOSS_API_BASE = "https://api.tosspayments.com/v1";
 // ─── SendGrid (파운더 접근 안내 이메일) ──────────────────────────────
 // 전부 선택값 — 미설정 시 발송만 스킵하고 배포·선정은 정상 동작한다.
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const FOUNDER_FROM_EMAIL =
-  process.env.FOUNDER_FROM_EMAIL || "founders@marblo.app";
+// ★모든 아웃바운드 이메일 발신·답장·푸터 문의처는 team@marblo.app 로 단일화
+// (사장님 지시 2026-07-17, cf memory marblo_outbound_email_team_address).
+// 이전 founders@/support@ 혼재를 하나로 통일. env override 는 유지하되 기본값을 team@ 로.
+// ⚠️ ESP(Resend) 에 team@marblo.app 이 verified sender 로 등록돼 있어야 실발송이 통과한다.
+const FOUNDER_FROM_EMAIL = process.env.FOUNDER_FROM_EMAIL || "team@marblo.app";
 const FOUNDER_FROM_NAME = process.env.FOUNDER_FROM_NAME || "Marblo";
+// 답장 주소도 team@marblo.app 로 고정(수신함 일원화).
+const FOUNDER_REPLY_TO = process.env.FOUNDER_REPLY_TO || "team@marblo.app";
+const FOUNDER_SUPPORT_EMAIL = "team@marblo.app";
 const DISCORD_INVITE_URL = process.env.DISCORD_INVITE_URL || ""; // 설정 시에만 초대 링크 노출
 const SITE_BASE = "https://marblo.app";
 const FOUNDER_COURSE_COUPON = "FOUNDER50"; // 강의 50% 할인 쿠폰 코드
@@ -1852,8 +1858,41 @@ function founderHtmlShell(inner: string): string {
   <div style="max-width:560px;margin:0 auto;padding:32px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a;background:#ffffff">
     ${inner}
     <hr style="border:none;border-top:1px solid #eee;margin:32px 0 16px"/>
-    <p style="font-size:12px;color:#999;margin:0">Marblo · support@marblo.app</p>
+    <p style="font-size:12px;color:#999;margin:0">Marblo · ${FOUNDER_SUPPORT_EMAIL}</p>
   </div></body></html>`;
+}
+
+/**
+ * Resend 공통 발송 경로. 모든 파운더 계열 이메일이 여기로 모여
+ * From/Reply-To 를 team@marblo.app 로 단일화한다(단일소스).
+ * ★non-throwing 은 호출부 try/catch 책임 — 여기선 HTTP 실패만 false 로 흡수.
+ */
+async function postResendEmail(
+  to: string,
+  content: FounderEmailContent,
+  logPrefix: string
+): Promise<boolean> {
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
+      reply_to: [FOUNDER_REPLY_TO],
+      to: [to],
+      subject: content.subject,
+      html: content.html,
+      text: content.text,
+    }),
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    console.warn(`[${logPrefix}] resend HTTP ${resp.status}: ${body}`);
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -1871,26 +1910,7 @@ async function sendFounderAccessEmail(
       return false;
     }
     const content = buildFounderAccessEmail(normalizeFounderLocale(locale));
-    const resp = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
-        to: [email],
-        subject: content.subject,
-        html: content.html,
-        text: content.text,
-      }),
-    });
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      console.warn(`[founder-email] resend HTTP ${resp.status}: ${body}`);
-      return false;
-    }
-    return true;
+    return await postResendEmail(email, content, "founder-email");
   } catch (err) {
     console.warn("[founder-email] 발송 실패:", email, err);
     return false;
@@ -1917,26 +1937,7 @@ async function sendFounderSurveyOfferEmail(
     const content = buildFounderSurveyOfferEmail(
       normalizeFounderLocale(locale)
     );
-    const resp = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
-        to: [email],
-        subject: content.subject,
-        html: content.html,
-        text: content.text,
-      }),
-    });
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      console.warn(`[founder-email] resend HTTP ${resp.status}: ${body}`);
-      return false;
-    }
-    return true;
+    return await postResendEmail(email, content, "founder-email");
   } catch (err) {
     console.warn(
       "[founder-email] 설문 리마인더 발송 실패:",
@@ -2285,6 +2286,9 @@ export const resendFounderAccessEmail = functions.https.onCall(
   }
 );
 
+// 설문 오퍼 이메일 재발송 쿨다운(일). 같은 사람에게 반복 발송 방지.
+const FOUNDER_SURVEY_OFFER_COOLDOWN_DAYS = 14;
+
 // ─── 설문 회신 오퍼 이메일: audience 산출 + dry-run 발송 (관리자용) ────
 //
 // ★1차 채널=이메일(사장님 채널 피벗). 이 콜러블은 "설문 회신 시 Pro 최대 3개월"
@@ -2300,6 +2304,11 @@ export const resendFounderAccessEmail = functions.https.onCall(
 // ★실발송은 confirmSend===true AND env FOUNDER_SURVEY_EMAIL_SEND_ENABLED==="true"
 // 이중 게이트를 모두 통과할 때만. 사장님 승인 전까지 env 를 켜지 않는다.
 // 보고는 집계 + 마스킹 샘플만(PII 원문 대량 노출 금지).
+//
+// ★쿨다운(중복 발송 방지): 최근 FOUNDER_SURVEY_OFFER_COOLDOWN_DAYS 안에
+//   surveyOfferEmailSentAt 이 찍힌 대상은 audience 에서 제외(cooledDown 로 집계).
+//   재발송이 필요하면 data.ignoreCooldown===true 로만 해제(승인 후 의도적 재캠페인).
+//   sendFounderFollowupEmails 의 쿨다운과 동일한 안전장치.
 export const previewFounderSurveyOffer = functions.https.onCall(
   async (data, context) => {
     requireAdmin(context);
@@ -2311,6 +2320,9 @@ export const previewFounderSurveyOffer = functions.https.onCall(
     const sendEnabled =
       process.env.FOUNDER_SURVEY_EMAIL_SEND_ENABLED === "true";
     const willSend = confirmSend && sendEnabled;
+    const ignoreCooldown = data?.ignoreCooldown === true;
+    const now = Date.now();
+    const cooldownMs = FOUNDER_SURVEY_OFFER_COOLDOWN_DAYS * 86400000;
 
     const snap = await db.collection(FOUNDERS_COLLECTION).limit(limit).get();
 
@@ -2319,6 +2331,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
     let selectedNotRejected = 0;
     let alreadySubmitted = 0;
     let noAccountNotSubmitted = 0;
+    let cooledDown = 0;
 
     for (const doc of snap.docs) {
       scanned += 1;
@@ -2339,6 +2352,16 @@ export const previewFounderSurveyOffer = functions.https.onCall(
         typeof v.proSubscriptionUid === "string" && !!v.proSubscriptionUid;
       if (!hasAccount) {
         noAccountNotSubmitted += 1;
+        continue;
+      }
+      // 쿨다운: 최근 발송자는 제외(ignoreCooldown 으로만 해제).
+      const lastSent = timestampToDate(v.surveyOfferEmailSentAt);
+      if (
+        !ignoreCooldown &&
+        lastSent &&
+        now - lastSent.getTime() < cooldownMs
+      ) {
+        cooledDown += 1;
         continue;
       }
       const locale =
@@ -2379,19 +2402,33 @@ export const previewFounderSurveyOffer = functions.https.onCall(
       },
       {}
     );
+    // 도메인 집계(개수만 — PII 원문 아님). 발송 규모/스팸필터 사전 점검용.
+    const domainBreakdown = audience.reduce<Record<string, number>>(
+      (acc, a) => {
+        const at = a.email.lastIndexOf("@");
+        const domain = at >= 0 ? a.email.slice(at + 1) : "(invalid)";
+        acc[domain] = (acc[domain] ?? 0) + 1;
+        return acc;
+      },
+      {}
+    );
 
     return {
       ok: true,
       dryRun: !willSend,
       sendGate: { confirmSend, sendEnabled },
+      cooldownDays: FOUNDER_SURVEY_OFFER_COOLDOWN_DAYS,
+      ignoreCooldown,
       counts: {
         scanned,
         selectedNotRejected,
         alreadySubmitted,
         audience: audience.length,
         noAccountNotSubmitted,
+        cooledDown,
       },
       localeBreakdown,
+      domainBreakdown,
       // PII 보호: 마스킹된 표본만 노출(최대 10건).
       sampleMasked: audience.slice(0, 10).map((a) => maskEmailForLog(a.email)),
       sent,
@@ -2579,7 +2616,7 @@ export function buildFounderFollowupEmail(
   segment: FollowupSegment
 ): FounderEmailContent {
   const downloadUrl = `${SITE_BASE}/${locale}/download`;
-  const support = "support@marblo.app";
+  const support = FOUNDER_SUPPORT_EMAIL;
 
   if (segment === "download") {
     if (locale === "en") {
@@ -2746,26 +2783,7 @@ async function sendFounderFollowupEmail(
       normalizeFounderLocale(locale),
       segment
     );
-    const resp = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
-        to: [email],
-        subject: content.subject,
-        html: content.html,
-        text: content.text,
-      }),
-    });
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      console.warn(`[founder-followup] resend HTTP ${resp.status}: ${body}`);
-      return false;
-    }
-    return true;
+    return await postResendEmail(email, content, "founder-followup");
   } catch (err) {
     console.warn("[founder-followup] 발송 실패:", segment, err);
     return false;
@@ -2984,26 +3002,7 @@ async function sendApplyConfirmEmail(
       return false;
     }
     const content = buildApplyConfirmEmail(normalizeFounderLocale(locale));
-    const resp = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
-        to: [email],
-        subject: content.subject,
-        html: content.html,
-        text: content.text,
-      }),
-    });
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      console.warn(`[apply-confirm-email] resend HTTP ${resp.status}: ${body}`);
-      return false;
-    }
-    return true;
+    return await postResendEmail(email, content, "apply-confirm-email");
   } catch (err) {
     console.warn("[apply-confirm-email] 발송 실패:", email, err);
     return false;
