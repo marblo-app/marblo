@@ -24,6 +24,7 @@ import {
   selectDueForCharge,
   applyChargeSuccess,
   applyChargeFailure,
+  hasPaymentEvidence as hasBillingPaymentEvidence,
   type SubscriptionSnapshot,
 } from "./billing";
 
@@ -4460,6 +4461,115 @@ function foldDistribution(
   }));
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function startOfUtcDay(ms: number): number {
+  const d = new Date(ms);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+function dayKeyFromMs(ms: number): string {
+  return new Date(startOfUtcDay(ms)).toISOString().slice(0, 10);
+}
+
+function makeBusinessTrendBuckets(
+  rangeDays: number,
+  nowMs: number,
+): Array<{ date: string; active: number; new: number; churned: number }> {
+  const todayStartMs = startOfUtcDay(nowMs);
+  const firstDayMs = todayStartMs - (rangeDays - 1) * DAY_MS;
+  return Array.from({ length: rangeDays }, (_, i) => ({
+    date: new Date(firstDayMs + i * DAY_MS).toISOString().slice(0, 10),
+    active: 0,
+    new: 0,
+    churned: 0,
+  }));
+}
+
+function isPaidPlan(plan: string): boolean {
+  return plan === "pro" || plan === "team" || plan === "team_plus";
+}
+
+function isCurrentActiveSubscription(
+  status: string,
+  currentPeriodEndMs: number | null,
+  nowMs: number,
+): boolean {
+  return status === "active" && currentPeriodEndMs != null && currentPeriodEndMs > nowMs;
+}
+
+function activeAtDayEnd(
+  status: string,
+  createdMs: number | null,
+  canceledMs: number | null,
+  currentPeriodEndMs: number | null,
+  dayEndMs: number,
+): boolean {
+  if (currentPeriodEndMs == null || currentPeriodEndMs <= dayEndMs) return false;
+  if (createdMs != null && createdMs > dayEndMs) return false;
+  if (status === "active") return true;
+  return canceledMs != null && canceledMs > dayEndMs;
+}
+
+type ChargeLedgerRow = {
+  userId: string;
+  status: string;
+  cycleAnchorMs: number;
+};
+
+type ConsecutiveBillingMetrics = {
+  tossOnly: true;
+  subscribers: number;
+  maxCycleCount: number;
+  averageCycleCount: number;
+  byCycleCount: Record<string, number>;
+  paddleGap: string;
+};
+
+function computeConsecutiveBillingMetrics(
+  rows: ChargeLedgerRow[],
+): ConsecutiveBillingMetrics {
+  const byUser = new Map<string, ChargeLedgerRow[]>();
+  for (const row of rows) {
+    const existing = byUser.get(row.userId) || [];
+    existing.push(row);
+    byUser.set(row.userId, existing);
+  }
+
+  const byCycleCount: Record<string, number> = {};
+  let subscribers = 0;
+  let totalCycleCount = 0;
+  let maxCycleCount = 0;
+
+  for (const charges of byUser.values()) {
+    charges.sort((a, b) => a.cycleAnchorMs - b.cycleAnchorMs);
+    let currentStreak = 0;
+    for (const charge of charges) {
+      if (charge.status === "succeeded") {
+        currentStreak++;
+      } else if (charge.status === "failed") {
+        currentStreak = 0;
+      }
+    }
+    if (currentStreak < 2) continue;
+    subscribers++;
+    totalCycleCount += currentStreak;
+    maxCycleCount = Math.max(maxCycleCount, currentStreak);
+    const bucket = currentStreak >= 6 ? "6+" : String(currentStreak);
+    byCycleCount[bucket] = (byCycleCount[bucket] || 0) + 1;
+  }
+
+  return {
+    tossOnly: true,
+    subscribers,
+    maxCycleCount,
+    averageCycleCount: subscribers > 0 ? totalCycleCount / subscribers : 0,
+    byCycleCount,
+    paddleGap:
+      "billingCharges is populated by Toss billing-key charges; Paddle cycles are not represented in this ledger yet.",
+  };
+}
+
 /**
  * getAdminBusinessSummary — 사업 KPI(🟢 Firestore, 항상 켜짐·식별 가능).
  *
@@ -4471,6 +4581,7 @@ function foldDistribution(
  *   rangeDays, generatedAt,
  *   subscriptions: { total, byStatus, byPlanActive, byProviderActive,
  *     paidProActive, founderGrantActive, newInWindow, churnedInWindow,
+ *     activeCurrent, paidCurrent, trendByDay, consecutiveBilling,
  *     pastDue, proConversionRateVsSubscribers, proConversionRateVsWaitlist },
  *   founders: { total, accessGranted, interviewCompleted, feedbackSubmitted },
  *   waitlist: { total, newInWindow },
@@ -4481,7 +4592,11 @@ export const getAdminBusinessSummary = functions.https.onCall(
   async (data, context) => {
     requireAdmin(context);
     const rangeDays = parseAnalyticsDays(data);
-    const cutoffMs = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    const cutoffMs = nowMs - rangeDays * DAY_MS;
+    const trendByDay = makeBusinessTrendBuckets(rangeDays, nowMs);
+    const trendIndex = new Map(trendByDay.map((d, i) => [d.date, i]));
+    const firstTrendDayMs = startOfUtcDay(nowMs) - (rangeDays - 1) * DAY_MS;
 
     // ── 구독(subscriptions) — 티어/상태/제공자 분포 + 전환·이탈 ────────────
     const subSnap = await db.collection("subscriptions").limit(10000).get();
@@ -4493,7 +4608,9 @@ export const getAdminBusinessSummary = functions.https.onCall(
     let newInWindow = 0;
     let churnedInWindow = 0;
     let pastDue = 0;
-    const PAID_PRO_PLANS = new Set(["pro", "team", "team_plus"]);
+    let activeCurrent = 0;
+    let paidCurrent = 0;
+    let paddleActiveCurrent = 0;
 
     for (const doc of subSnap.docs) {
       const v = doc.data() as Record<string, unknown>;
@@ -4501,6 +4618,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
       const plan = typeof v.planType === "string" ? v.planType : "unknown";
       const provider =
         typeof v.paymentProvider === "string" ? v.paymentProvider : "unknown";
+      const currentPeriodEndMs = tsToMillis(v.currentPeriodEnd);
 
       byStatus[status] = (byStatus[status] || 0) + 1;
       if (status === "past_due") pastDue++;
@@ -4508,14 +4626,23 @@ export const getAdminBusinessSummary = functions.https.onCall(
       if (status === "active") {
         byPlanActive[plan] = (byPlanActive[plan] || 0) + 1;
         byProviderActive[provider] = (byProviderActive[provider] || 0) + 1;
-        if (PAID_PRO_PLANS.has(plan) && provider !== "founder_grant") {
+        if (isPaidPlan(plan) && hasBillingPaymentEvidence(v)) {
           paidProActive++;
         }
         if (provider === "founder_grant") founderGrantActive++;
       }
+      if (isCurrentActiveSubscription(status, currentPeriodEndMs, nowMs)) {
+        activeCurrent++;
+        if (isPaidPlan(plan) && hasBillingPaymentEvidence(v)) paidCurrent++;
+        if (provider === "paddle") paddleActiveCurrent++;
+      }
 
       const createdMs = tsToMillis(v.createdAt);
-      if (createdMs != null && createdMs >= cutoffMs) newInWindow++;
+      if (createdMs != null && createdMs >= cutoffMs) {
+        newInWindow++;
+        const idx = trendIndex.get(dayKeyFromMs(createdMs));
+        if (idx != null) trendByDay[idx].new++;
+      }
       const canceledMs = tsToMillis(v.canceledAt);
       if (
         (status === "canceled" || status === "past_due") &&
@@ -4523,8 +4650,40 @@ export const getAdminBusinessSummary = functions.https.onCall(
         canceledMs >= cutoffMs
       ) {
         churnedInWindow++;
+        const idx = trendIndex.get(dayKeyFromMs(canceledMs));
+        if (idx != null) trendByDay[idx].churned++;
+      }
+
+      for (let i = 0; i < trendByDay.length; i++) {
+        const dayEndMs = firstTrendDayMs + i * DAY_MS + DAY_MS - 1;
+        if (
+          activeAtDayEnd(
+            status,
+            createdMs,
+            canceledMs,
+            currentPeriodEndMs,
+            dayEndMs,
+          )
+        ) {
+          trendByDay[i].active++;
+        }
       }
     }
+
+    const chargeSnap = await db.collection("billingCharges").limit(10000).get();
+    const chargeRows: ChargeLedgerRow[] = [];
+    for (const doc of chargeSnap.docs) {
+      const v = doc.data() as Record<string, unknown>;
+      const userId = typeof v.userId === "string" ? v.userId : "";
+      const status = typeof v.status === "string" ? v.status : "";
+      const cycleAnchorMs =
+        typeof v.cycleAnchorMs === "number"
+          ? v.cycleAnchorMs
+          : tsToMillis(v.createdAt);
+      if (!userId || !status || cycleAnchorMs == null) continue;
+      chargeRows.push({ userId, status, cycleAnchorMs });
+    }
+    const consecutiveBilling = computeConsecutiveBillingMetrics(chargeRows);
 
     // ── 파운더(founders) ────────────────────────────────────────────────
     const founderSnap = await db
@@ -4593,9 +4752,14 @@ export const getAdminBusinessSummary = functions.https.onCall(
         byProviderActive,
         paidProActive,
         founderGrantActive,
+        activeCurrent,
+        paidCurrent,
+        paddleActiveCurrent,
         pastDue,
         newInWindow,
         churnedInWindow,
+        trendByDay,
+        consecutiveBilling,
         proConversionRateVsSubscribers,
         proConversionRateVsWaitlist,
       },

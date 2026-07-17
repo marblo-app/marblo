@@ -28,9 +28,21 @@ type BusinessSummary = {
     byProviderActive: Record<string, number>;
     paidProActive: number;
     founderGrantActive: number;
+    activeCurrent?: number;
+    paidCurrent?: number;
+    paddleActiveCurrent?: number;
     pastDue: number;
     newInWindow: number;
     churnedInWindow: number;
+    trendByDay?: { date: string; active: number; new: number; churned: number }[];
+    consecutiveBilling?: {
+      tossOnly: true;
+      subscribers: number;
+      maxCycleCount: number;
+      averageCycleCount: number;
+      byCycleCount: Record<string, number>;
+      paddleGap: string;
+    };
     proConversionRateVsSubscribers: number;
     proConversionRateVsWaitlist: number;
   };
@@ -398,6 +410,131 @@ function LineChart({
   );
 }
 
+function TwoLineChart({
+  data,
+  first,
+  second,
+  emptyLabel,
+}: {
+  data: { date: string; first: number; second: number }[];
+  first: { label: string; color: string; format?: (n: number) => string };
+  second: { label: string; color: string; format?: (n: number) => string };
+  emptyLabel?: string;
+}) {
+  const clean = data.filter(
+    (d) => d && isFinite(d.first) && isFinite(d.second)
+  );
+  const allZero = clean.every((d) => d.first === 0 && d.second === 0);
+  if (clean.length === 0 || allZero) return <EmptyState label={emptyLabel} />;
+
+  const W = 640;
+  const H = 180;
+  const padL = 8;
+  const padR = 8;
+  const padT = 12;
+  const padB = 22;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const max = Math.max(
+    ...clean.flatMap((d) => [d.first, d.second]),
+    1
+  );
+  const n = clean.length;
+  const x = (i: number) =>
+    padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const y = (v: number) => padT + innerH - (v / max) * innerH;
+  const points = (key: "first" | "second") =>
+    clean.map((d, i) => `${x(i)},${y(d[key])}`).join(" ");
+  const labelIdx = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
+  const fmtFirst = first.format || fmtInt;
+  const fmtSecond = second.format || fmtInt;
+
+  return (
+    <div className="w-full">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full"
+        role="img"
+        preserveAspectRatio="none"
+        style={{ height: 180 }}
+      >
+        {[0, 0.5, 1].map((g) => (
+          <line
+            key={g}
+            x1={padL}
+            x2={W - padR}
+            y1={padT + innerH - g * innerH}
+            y2={padT + innerH - g * innerH}
+            stroke="#2c2c2a"
+            strokeWidth={1}
+          />
+        ))}
+        <polyline
+          points={points("first")}
+          fill="none"
+          stroke={first.color}
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        <polyline
+          points={points("second")}
+          fill="none"
+          stroke={second.color}
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {clean.map((d, i) => (
+          <rect
+            key={i}
+            x={x(i) - innerW / (2 * Math.max(n, 1))}
+            y={padT}
+            width={innerW / Math.max(n, 1)}
+            height={innerH}
+            fill="transparent"
+          >
+            <title>{`${fmtDay(d.date)} · ${first.label} ${fmtFirst(
+              d.first
+            )} · ${second.label} ${fmtSecond(d.second)}`}</title>
+          </rect>
+        ))}
+        {labelIdx.map((i) => (
+          <text
+            key={i}
+            x={x(i)}
+            y={H - 6}
+            fontSize={11}
+            fill={INK_MUTED}
+            textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
+          >
+            {fmtDay(clean[i].date)}
+          </text>
+        ))}
+      </svg>
+      <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+        <span>범위 최대 {fmtInt(max)}</span>
+        <span className="inline-flex items-center gap-3">
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ backgroundColor: first.color }}
+            />
+            {first.label}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ backgroundColor: second.color }}
+            />
+            {second.label}
+          </span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // 옵트인 표본 배지.
 function SampleBadge({ n }: { n: number }) {
   return (
@@ -528,7 +665,10 @@ export default function AnalyticsPanel() {
   }, []);
 
   useEffect(() => {
-    load(days);
+    const id = window.setTimeout(() => {
+      void load(days);
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [days, load]);
 
   const anyLoading = biz.loading || usage.loading || model.loading;
@@ -536,6 +676,14 @@ export default function AnalyticsPanel() {
   const b = biz.data;
   const u = usage.data;
   const m = model.data;
+  const consecutiveBilling = b?.subscriptions.consecutiveBilling ?? {
+    tossOnly: true as const,
+    subscribers: 0,
+    maxCycleCount: 0,
+    averageCycleCount: 0,
+    byCycleCount: {},
+    paddleGap: "",
+  };
 
   const tierRows = useMemo(
     () =>
@@ -562,6 +710,19 @@ export default function AnalyticsPanel() {
             ([key, value]) => ({ key, value })
           )
         : [],
+    [b]
+  );
+  const consecutiveRows = useMemo(
+    () =>
+      b
+        ? Object.entries(
+            b.subscriptions.consecutiveBilling?.byCycleCount || {}
+          ).map(([key, value]) => ({ key, value }))
+        : [],
+    [b]
+  );
+  const subscriptionTrend = useMemo(
+    () => b?.subscriptions.trendByDay || [],
     [b]
   );
 
@@ -642,7 +803,7 @@ export default function AnalyticsPanel() {
           <ErrorBox msg={biz.error} />
         ) : b ? (
           <>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
               <StatCard
                 label="대기자(가입)"
                 value={fmtInt(b.waitlist.total)}
@@ -656,18 +817,26 @@ export default function AnalyticsPanel() {
                 )} · 인터뷰 ${fmtInt(b.founders.interviewCompleted)}`}
               />
               <StatCard
-                label="유료 Pro 구독"
+                label="활성 구독자"
+                value={fmtInt(b.subscriptions.activeCurrent)}
+                sub="active · 만료일 미래"
+                accent={STATUS_GOOD}
+              />
+              <StatCard
+                label="유료 Pro(active)"
                 value={fmtInt(b.subscriptions.paidProActive)}
-                sub={`무료부여 ${fmtInt(b.subscriptions.founderGrantActive)}`}
+                sub={`현재 ${fmtInt(
+                  b.subscriptions.paidCurrent
+                )} · 무료부여 ${fmtInt(b.subscriptions.founderGrantActive)}`}
                 accent={SERIES}
               />
               <StatCard
-                label="Pro 전환율"
-                value={fmtPct(b.subscriptions.proConversionRateVsSubscribers)}
-                sub={`대기자 대비 ${fmtPct(
-                  b.subscriptions.proConversionRateVsWaitlist
-                )}`}
-                accent={STATUS_GOOD}
+                label="연속 구독자"
+                value={fmtInt(consecutiveBilling.subscribers)}
+                sub={`Toss 평균 ${consecutiveBilling.averageCycleCount.toFixed(
+                  1
+                )}회`}
+                accent={SERIES_2}
               />
               <StatCard
                 label="이탈(Churn)"
@@ -711,6 +880,53 @@ export default function AnalyticsPanel() {
                   data={providerRows}
                   colorMap={PROVIDER_COLOR}
                   emptyLabel="활성 결제 구독이 없습니다."
+                />
+              </Panel>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <Panel
+                title="활성 구독자 추이"
+                note="status=active · currentPeriodEnd 미래"
+              >
+                <LineChart
+                  data={subscriptionTrend.map((d) => ({
+                    date: d.date,
+                    value: d.active,
+                  }))}
+                  color={STATUS_GOOD}
+                  emptyLabel="활성 구독자 추이 데이터가 없습니다."
+                />
+              </Panel>
+              <Panel title="성장/이탈 추이" note="신규 구독 doc · canceled/past_due">
+                <TwoLineChart
+                  data={subscriptionTrend.map((d) => ({
+                    date: d.date,
+                    first: d.new,
+                    second: d.churned,
+                  }))}
+                  first={{ label: "성장", color: SERIES_2 }}
+                  second={{ label: "이탈", color: STATUS_CRIT }}
+                  emptyLabel="성장/이탈 이벤트가 없습니다."
+                />
+              </Panel>
+              <Panel
+                title="연속 청구 사이클"
+                note={`Toss billingCharges 기준 · Paddle ${fmtInt(
+                  b.subscriptions.paddleActiveCurrent
+                )}건은 원장 공백`}
+              >
+                <BarList
+                  data={consecutiveRows}
+                  color={SERIES_2}
+                  labelMap={{
+                    "2": "2회",
+                    "3": "3회",
+                    "4": "4회",
+                    "5": "5회",
+                    "6+": "6회 이상",
+                  }}
+                  emptyLabel="연속 succeeded 청구가 없습니다."
                 />
               </Panel>
             </div>

@@ -16,6 +16,7 @@ import {
   selectDueForCharge,
   applyChargeSuccess,
   applyChargeFailure,
+  hasPaymentEvidence,
 } from "../lib/billing.js";
 
 let passed = 0;
@@ -137,6 +138,20 @@ assert(
     T0
   ),
   "past_due + 재시도 시각 지남 → 대상"
+);
+
+// ── 결제 증거 판정 ────────────────────────────────────────────────────
+assert(
+  hasPaymentEvidence({ tossBillingKey: "bk_1" }),
+  "Toss billingKey → 결제 증거 있음"
+);
+assert(
+  hasPaymentEvidence({ paddleSubscriptionId: "sub_1" }),
+  "Paddle subscriptionId → 결제 증거 있음"
+);
+assert(
+  !hasPaymentEvidence({ tossBillingKey: "", paddleSubscriptionId: null }),
+  "빈 결제 식별자 → 결제 증거 없음"
 );
 
 // ── 성공 상태전이 ─────────────────────────────────────────────────────

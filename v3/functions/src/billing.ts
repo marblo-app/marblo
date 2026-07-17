@@ -93,6 +93,25 @@ export interface SubscriptionSnapshot {
   nextRetryAtMs?: number | null;
 }
 
+export interface PaymentEvidenceSnapshot {
+  tossBillingKey?: unknown;
+  paddleSubscriptionId?: unknown;
+}
+
+function hasNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+export function hasPaymentEvidence(
+  sub: PaymentEvidenceSnapshot | null | undefined
+): boolean {
+  if (!sub) return false;
+  return (
+    hasNonEmptyString(sub.tossBillingKey) ||
+    hasNonEmptyString(sub.paddleSubscriptionId)
+  );
+}
+
 export function selectDueForCharge(
   sub: SubscriptionSnapshot,
   nowMs: number
