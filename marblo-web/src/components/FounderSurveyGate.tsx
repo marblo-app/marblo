@@ -17,8 +17,10 @@ import FounderSurveyPromptModal from "./FounderSurveyPromptModal";
  * 로그인한 "선정 파운더 중 아직 설문 미회신"인 사용자에게만 "설문 회신 시 Pro
  * 최대 3개월" 안내 팝업을 띄운다.
  *
- * 노출 판정은 getMyFounderAccess({hasAccess, feedbackSubmitted}) + localStorage
- * dismiss 정책(founderSurveyPrompt.ts)이 담당한다. 심사·지급은 기존 백엔드
+ * 노출 판정은 getMyFounderAccess({hasAccess, feedbackSubmitted}) + 세션 단위
+ * dismiss 정책(founderSurveyPrompt.ts)이 담당한다. 설문 완료(feedbackSubmitted)
+ * 전까지는 매 방문마다 다시 노출되고, 같은 세션 내 dismiss 만 억제한다.
+ * 심사·지급은 기존 백엔드
  * (submitFounderFeedback → reviewFounderFeedback)가 그대로 처리 — 이 게이트는
  * 노출/유도만 담당한다.
  *
@@ -56,7 +58,6 @@ export default function FounderSurveyGate() {
             hasAccess: data?.hasAccess === true,
             feedbackSubmitted: data?.feedbackSubmitted === true,
             uid: user.uid,
-            now: Date.now(),
           })
         );
       } catch {
@@ -72,7 +73,7 @@ export default function FounderSurveyGate() {
   }, []);
 
   const handleDismiss = () => {
-    if (uid) recordFounderSurveyPromptDismissed(uid, Date.now());
+    if (uid) recordFounderSurveyPromptDismissed(uid);
     setShow(false);
   };
 

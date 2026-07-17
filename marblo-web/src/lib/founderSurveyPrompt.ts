@@ -15,33 +15,24 @@ export function isFounderSurveyPromptOpen(): boolean {
 // dismiss 상태는 uid 별로 저장 — 다른 계정으로 로그인하면 다시 판단한다.
 const DISMISS_KEY_PREFIX = "founder-survey-prompt:";
 
-// 재노출 규칙: 한 번 닫으면 쿨다운 동안 억제하되, 오퍼 가치가 크고 베타 창이
-// 한정적이라 최대 횟수까지는 쿨다운 후 다시 부드럽게 넛지한다. 그 뒤엔 영구 중단.
-const REPROMPT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7일
-const MAX_PROMPTS = 3;
-
-interface DismissRecord {
-  dismissedAt: number;
-  count: number;
-}
+// 재노출 정책(사장님 지시): 설문을 완료(feedbackSubmitted=true)하기 전까지는
+// "방문(세션)당 1회, 매 접속마다" 계속 넛지한다. 즉 닫아도 다음 접속 때 또 뜬다.
+// 구현: dismiss 상태를 sessionStorage 에만 저장 → 같은 세션(탭) 안에서는 다시
+// 안 뜨지만(스팸 방지), 새 세션/재접속이면 sessionStorage 가 비어 다시 노출된다.
+// 영구 localStorage 쿨다운/최대횟수 상한은 제거 — 완료 여부만이 영구 중단 조건.
 
 function keyFor(uid: string): string {
   return `${DISMISS_KEY_PREFIX}${uid}`;
 }
 
-function readRecord(uid: string): DismissRecord | null {
-  if (typeof window === "undefined") return null;
+/** 이번 세션(탭)에서 이미 닫았는지. sessionStorage 라 새 방문이면 false. */
+function wasDismissedThisSession(uid: string): boolean {
+  if (typeof window === "undefined") return false;
   try {
-    const raw = window.localStorage.getItem(keyFor(uid));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<DismissRecord>;
-    if (typeof parsed?.dismissedAt !== "number") return null;
-    return {
-      dismissedAt: parsed.dismissedAt,
-      count: typeof parsed.count === "number" ? parsed.count : 1,
-    };
+    return window.sessionStorage.getItem(keyFor(uid)) === "1";
   } catch {
-    return null;
+    // sessionStorage 접근 불가(프라이버시 모드 등) → 억제 정보 없음 = 노출 쪽.
+    return false;
   }
 }
 
@@ -49,40 +40,30 @@ function readRecord(uid: string): DismissRecord | null {
  * 지금 이 파운더에게 팝업을 보여줄지. 노출 조건:
  *   1) 환경 플래그 ON (isFounderSurveyPromptOpen)
  *   2) 선정된 파운더(hasAccess) AND 아직 미회신(!feedbackSubmitted)
- *   3) dismiss 쿨다운이 지났고 최대 노출 횟수를 넘지 않음
+ *   3) 이번 세션에서 아직 닫지 않음(닫으면 이 세션 동안만 억제, 다음 접속 재노출)
  * 판정은 순수 함수라 SSR/CSR 어디서든 안전(window 없으면 false).
  */
 export function shouldShowFounderSurveyPrompt(params: {
   hasAccess: boolean;
   feedbackSubmitted: boolean;
   uid: string;
-  now: number;
 }): boolean {
-  const { hasAccess, feedbackSubmitted, uid, now } = params;
+  const { hasAccess, feedbackSubmitted, uid } = params;
   if (!isFounderSurveyPromptOpen()) return false;
   if (!hasAccess || feedbackSubmitted) return false;
   if (typeof window === "undefined") return false;
-
-  const record = readRecord(uid);
-  if (!record) return true;
-  if (record.count >= MAX_PROMPTS) return false;
-  return now - record.dismissedAt >= REPROMPT_COOLDOWN_MS;
+  return !wasDismissedThisSession(uid);
 }
 
-/** 사용자가 팝업을 닫음 — dismiss 시각과 누적 노출 횟수를 기록. */
-export function recordFounderSurveyPromptDismissed(
-  uid: string,
-  now: number
-): void {
+/**
+ * 사용자가 팝업을 닫음 — 이번 세션 동안만 억제하도록 sessionStorage 에 표시.
+ * 다음 방문(새 세션/재접속)에는 세션 저장소가 비어 다시 노출된다.
+ */
+export function recordFounderSurveyPromptDismissed(uid: string): void {
   if (typeof window === "undefined") return;
-  const prev = readRecord(uid);
-  const next: DismissRecord = {
-    dismissedAt: now,
-    count: (prev?.count ?? 0) + 1,
-  };
   try {
-    window.localStorage.setItem(keyFor(uid), JSON.stringify(next));
+    window.sessionStorage.setItem(keyFor(uid), "1");
   } catch {
-    // 저장 실패는 무시 — 최악의 경우 다음 로드에서 다시 노출될 뿐이다.
+    // 저장 실패는 무시 — 최악의 경우 같은 세션에서 한 번 더 노출될 뿐이다.
   }
 }
