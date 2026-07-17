@@ -4168,7 +4168,10 @@ export const logTelemetryBatch = functions.https.onCall(
     const rows = events.map((e) => ({
       event: e.event,
       userId: e.clientId || "anon",
-      appVersion: e.appVersion || "3.0.0",
+      // Record the client-supplied version verbatim, or null when absent. The
+      // old "3.0.0" fallback masked every event as a single stale version and
+      // made per-release analysis impossible; null honestly means "unknown".
+      appVersion: e.appVersion || null,
       projectId: e.projectId || null,
       agentId: e.agentId || null,
       taskId: e.taskId || null,

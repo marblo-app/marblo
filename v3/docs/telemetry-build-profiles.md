@@ -1,5 +1,14 @@
 # 텔레메트리 빌드 프로파일 — ON/OFF 매트릭스
 
+> **⚠️ 2026-07-17 업데이트 (프로덕션 ON 승인, 티켓 aIaYFswyCRNdHbxm9g8O)**
+> 아래 문서는 **폐기된 모델**(기본 OFF + `VITE_FIRST_PARTY_TELEMETRY=1` 도그푸드 opt-in)을
+> 설명한다. **PR#397** 이후 `firstPartyGate.ts` 는 **모든 빌드에서 default-ON** 이며
+> `VITE_FIRST_PARTY_TELEMETRY` 플래그는 어떤 소스에서도 읽히지 않는 **no-op(폐기)** 다.
+> CEO 승인(2026-07-17)으로 실사용자 프로덕션 텔레메트리를 켠다 — **비식별 1차 집계만**
+> (익명 install id, PII scrub, 3rd-party 공유는 여전히 옵트인). 유일한 하드 OFF 는
+> `VITE_DISABLE_TELEMETRY=1`, 사용자 옵트아웃은 런타임 `setTelemetryEnabled(false)`.
+> 도그푸드 npm 스크립트/CI 스텝은 이제 일반 빌드와 동일하게 동작한다(레거시 잔존).
+
 - **작성**: 2026-07-12, devops 에이전트 (티켓 A4y1TvJxzYBGN07KPidi)
 - **배경**: [docs/telemetry-ingestion-investigation.md](../../docs/telemetry-ingestion-investigation.md)
 - **한 줄**: first-party 텔레메트리(Firebase Functions → BigQuery: heartbeat/event/cost)는

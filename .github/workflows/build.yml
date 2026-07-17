@@ -218,17 +218,14 @@ jobs:
           VITE_FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }}
           EOF
 
-      # First-party telemetry (Firebase Functions → BigQuery) is OFF by default;
-      # firstPartyGate.ts only opts a build in when VITE_FIRST_PARTY_TELEMETRY=1 is
-      # inlined by Vite at build time. Append that flag ONLY for opt-in internal
-      # dogfood builds. Triple-guarded so it can never reach an external release:
-      #   1. workflow_dispatch only (never push/PR/tag),
-      #   2. the explicit `dogfood=true` input,
-      #   3. not a tag ref (the `release` job — the sole path that publishes to
-      #      melocream/marblo-releases / the auto-updater — runs on refs/tags/v*).
-      # Any external/beta artifact therefore ships with the flag UNSET → gate OFF →
-      # PIPA (제15조: 침묵은 동의가 아니다) upheld.
-      - name: Enable first-party telemetry (internal/dogfood builds only)
+      # LEGACY NO-OP (kept for build-profile parity). First-party telemetry is now
+      # ON by default for ALL builds (production real-users included) — CEO-approved
+      # 2026-07-17, gate flipped in PR#397. firstPartyGate.ts no longer reads
+      # VITE_FIRST_PARTY_TELEMETRY, so appending it here changes nothing; dogfood and
+      # release builds behave identically. De-identified 1st-party aggregate only;
+      # the hard opt-out is VITE_DISABLE_TELEMETRY=1. Retained to avoid churning the
+      # workflow_dispatch input; safe to delete in a later cleanup.
+      - name: Enable first-party telemetry (legacy no-op — default is ON)
         if: >-
           steps.guard.outputs.build == 'true'
           && github.event_name == 'workflow_dispatch'

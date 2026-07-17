@@ -13,6 +13,11 @@
  * uid, and the telemetryService scrubber strips account/user identifiers and
  * free-text inputs before any external send.
  *
+ * Production real-users ON — approved 2026-07-17 (CEO), de-identified 1st-party
+ * aggregate only (DAU/MAU/retention). This default was already flipped ON in
+ * PR#397; the earlier build-time `VITE_FIRST_PARTY_TELEMETRY` opt-in flag no
+ * longer gates anything and is retired. Third-party sharing stays opt-in.
+ *
  * Two ways to turn first-party telemetry off:
  *   1. Build flag `VITE_DISABLE_TELEMETRY=1` — hard kill-switch.
  *   2. Runtime user opt-out via telemetryService.setTelemetryEnabled(false).

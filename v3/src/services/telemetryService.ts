@@ -41,6 +41,11 @@ interface TelemetryPayload {
   nodeType?: string;
   nodeCount?: number;
   metadata?: Record<string, unknown>;
+  // Installed app version (e.g. "3.0.16"). Populated centrally at the flush
+  // choke point from the build-time __APP_VERSION__ constant — callers don't
+  // set it. Lets BigQuery slice metrics per release instead of the old server
+  // "3.0.0" fallback. See flushTelemetry / getAppVersion below.
+  appVersion?: string;
   // ML-ready columns mirrored from BigQuery `events` schema. The IPC bridge
   // in App.tsx passes these through verbatim, so adding them here keeps
   // type-safety on the renderer-side helper.
@@ -48,6 +53,18 @@ interface TelemetryPayload {
   promptLength?: number;
   parentAgentId?: string;
   retryOf?: string;
+}
+
+/**
+ * Installed app version, read from the Vite build-time constant __APP_VERSION__
+ * (injected from package.json — identical to Electron's app.getVersion()). This
+ * avoids a main-process IPC round-trip; every telemetry path already flows
+ * through this renderer module. Undefined only in non-Vite contexts (e.g. unit
+ * tests), in which case events ship without appVersion and the server records
+ * null rather than a misleading version.
+ */
+function getAppVersion(): string | undefined {
+  return typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : undefined;
 }
 
 const TELEMETRY_ENABLED_KEY = "marblo.telemetry.enabled";
@@ -214,9 +231,10 @@ async function flushTelemetry() {
   if (!auth.currentUser) return;
 
   const clientId = getClientId();
+  const appVersion = getAppVersion();
   const batch = eventQueue
     .splice(0, MAX_QUEUE_SIZE)
-    .map((e) => ({ ...e, clientId }));
+    .map((e) => ({ ...e, clientId, appVersion }));
 
   try {
     await logTelemetryBatch({ events: batch });
