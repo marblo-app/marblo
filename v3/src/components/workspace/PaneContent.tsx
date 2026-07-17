@@ -12,30 +12,20 @@ import { UsagePage } from "../usage/UsagePage";
 import { GuideTab } from "../guide/GuideTab";
 import { PlanGate } from "../settings/PlanGate";
 import { BrowserPane } from "./BrowserPane";
-import { DiffSurface } from "./DiffSurface";
 
 /**
  * Renders a single pane's content by kind. Reuses the existing tab components
- * verbatim so the Workspace shell inherits all their behavior; the only
- * shell-specific wiring is the code pane, which injects DiffSurface (diff-A +
- * inline comments) in place of the plain DiffViewer.
+ * verbatim so the Workspace shell inherits all their behavior. The code pane's
+ * diff-A surface (DiffSurface + inline comments) is now CodeTab's default diff
+ * for every user, so the shell just renders <CodeTab /> and inherits it — one
+ * source of truth shared with the legacy Layout.
  */
 export const PaneContent = memo(function PaneContent({ pane }: { pane: Pane }) {
   switch (pane.kind) {
     case "board":
       return <BoardTab />;
     case "code":
-      return (
-        <CodeTab
-          renderDiff={(p) => (
-            <DiffSurface
-              filePath={p.filePath}
-              language={p.language}
-              currentContent={p.currentContent}
-            />
-          )}
-        />
-      );
+      return <CodeTab />;
     case "agents":
       return <AgentsTab />;
     case "flows":

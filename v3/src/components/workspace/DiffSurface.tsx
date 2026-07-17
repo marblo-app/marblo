@@ -10,7 +10,8 @@ import {
 } from "../../services/orchestratorInstructionService";
 
 /**
- * Diff-A surface for the Workspace shell.
+ * Diff-A surface — the default Code tab diff for ALL users (both the legacy
+ * Layout and the opt-in Workspace shell), promoted from shell-only.
  *
  * Same full-width diff view as the legacy DiffViewer (layout A: editor at full
  * width, diff toggled per tab), PLUS inline review comments:
@@ -19,7 +20,8 @@ import {
  *    local-first / cross-machine pattern (no new IPC) — see
  *    orchestratorInstructionService.
  *
- * Kept separate from DiffViewer so the legacy Code tab (flag OFF) is untouched.
+ * The legacy DiffViewer (components/code/DiffViewer) is retained as a fallback
+ * component but is no longer wired as the default.
  */
 interface DiffSurfaceProps {
   filePath: string;
@@ -106,24 +108,24 @@ export function DiffSurface({
         ${t("workspace.diff.commentOn")} · ${escapeHtml(filePath)}:${lineNumber}
       </div>
       <textarea rows="2" placeholder="${escapeAttr(
-        t("workspace.diff.commentPlaceholder")
+        t("workspace.diff.commentPlaceholder"),
       )}" style="width:100%;box-sizing:border-box;background:#0b0f19;color:#e5e7eb;border:1px solid #374151;border-radius:4px;padding:6px;font-size:12px;resize:vertical;outline:none;"></textarea>
       <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;">
         <button data-action="cancel" style="font-size:11px;padding:3px 10px;border-radius:4px;background:transparent;color:#9ca3af;border:1px solid #374151;cursor:pointer;">${escapeHtml(
-          t("common.cancel")
+          t("common.cancel"),
         )}</button>
         <button data-action="send" style="font-size:11px;padding:3px 10px;border-radius:4px;background:#2563eb;color:#fff;border:0;cursor:pointer;">${escapeHtml(
-          t("workspace.diff.sendToOrchestrator")
+          t("workspace.diff.sendToOrchestrator"),
         )}</button>
       </div>
     `;
 
     const textarea = dom.querySelector("textarea") as HTMLTextAreaElement;
     const cancelBtn = dom.querySelector(
-      '[data-action="cancel"]'
+      '[data-action="cancel"]',
     ) as HTMLButtonElement;
     const sendBtn = dom.querySelector(
-      '[data-action="send"]'
+      '[data-action="send"]',
     ) as HTMLButtonElement;
 
     cancelBtn.addEventListener("click", () => clearZone());
@@ -148,8 +150,8 @@ export function DiffSurface({
         result === "local"
           ? "workspace.diff.sentLocal"
           : result === "queued"
-          ? "workspace.diff.sentQueued"
-          : "workspace.diff.sentFailed";
+            ? "workspace.diff.sentQueued"
+            : "workspace.diff.sentFailed";
       setToast(t(toastKey));
       window.setTimeout(() => setToast(null), 3500);
     });
@@ -240,7 +242,7 @@ function formatComment(
   filePath: string,
   line: number,
   lineText: string,
-  comment: string
+  comment: string,
 ): string {
   const snippet = lineText.trim();
   const lines = [`[Code review] ${filePath}:${line}`];

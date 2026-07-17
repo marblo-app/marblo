@@ -5,7 +5,7 @@ import { useWorktreeStore } from "../../stores/worktreeStore";
 import { EditorTabs } from "../code/EditorTabs";
 import { CodeEditor } from "../code/CodeEditor";
 import { ImagePreview } from "../code/ImagePreview";
-import { DiffViewer } from "../code/DiffViewer";
+import { DiffSurface } from "../workspace/DiffSurface";
 import { isImageFile } from "../../lib/imageFiles";
 import { isActiveOngoingWorktree } from "../../lib/worktreeHygiene";
 import { useTranslation } from "../../lib/i18n";
@@ -18,9 +18,11 @@ export interface DiffRenderProps {
 
 interface CodeTabProps {
   /**
-   * Optional override for the diff view. Defaults to the plain DiffViewer so
-   * the legacy Layout (workspace mode OFF) is byte-for-byte unchanged. The
-   * Workspace shell passes DiffSurface here to enable inline review comments.
+   * Optional override for the diff view. Defaults to DiffSurface (diff-A:
+   * full-width diff + Monaco inline review comments routed to the orchestrator)
+   * for ALL users, regardless of workspace mode. Callers that need the plain
+   * legacy DiffViewer can inject it here; the Workspace shell relies on the
+   * default so there is a single source of truth for the diff experience.
    */
   renderDiff?: (props: DiffRenderProps) => JSX.Element;
 }
@@ -157,7 +159,7 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
                 currentContent: activeFile.content,
               })
             ) : (
-              <DiffViewer
+              <DiffSurface
                 filePath={activeFile.path}
                 language={activeFile.language}
                 currentContent={activeFile.content}
