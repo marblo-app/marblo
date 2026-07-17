@@ -35,6 +35,7 @@ import { useAgentReconnect } from "../hooks/useAgentReconnect";
 import { useAgentSessionMapSync } from "../hooks/useAgentSessionMapSync";
 import { useTerminalRestore } from "../hooks/useTerminalRestore";
 import { useSessionRestore } from "../hooks/useSessionRestore";
+import { useActiveWorktreeSync } from "../hooks/useActiveWorktreeSync";
 import { useCostWriter } from "../hooks/useCostWriter";
 import { usePresenceHeartbeat } from "../hooks/usePresenceHeartbeat";
 import { useTerminalStore } from "../stores/terminalStore";
@@ -185,6 +186,10 @@ export function Layout() {
   // Restore last session (rootPath + project) on startup
   const { isNewWindow, restoreSettled } = useSessionRestore();
   const rootPath = useEditorStore((s) => s.rootPath);
+
+  // Keep worktreeViewStore.activeWorktreeId reconciled with rootPath (the
+  // strangler seam for the "activeWorktree" concept — see useActiveWorktreeSync).
+  useActiveWorktreeSync();
 
   // Auto-launch orchestrator when project is selected
   useOrchestratorAutoLaunch();

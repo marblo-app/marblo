@@ -61,6 +61,20 @@ export function Sidebar({
     };
   }, []);
 
+  // "이 워크트리 보기" (viewWorktree) nudges the sidebar to its Files panel — and
+  // opens it if the user had collapsed it — so a file-tree root switch is never
+  // invisible. A single window-level listener with clean teardown; it keys off
+  // no path, so it holds no resources across worktree switches.
+  useEffect(() => {
+    const onRevealFiles = () => {
+      setActivePanel("files");
+      if (!isOpen) onToggle();
+    };
+    window.addEventListener("marblo:reveal-files", onRevealFiles);
+    return () =>
+      window.removeEventListener("marblo:reveal-files", onRevealFiles);
+  }, [isOpen, onToggle]);
+
   if (!isOpen) {
     return (
       <button

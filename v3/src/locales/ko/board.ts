@@ -27,6 +27,9 @@ export const board = {
   "board.presence.idle": "유휴",
   "board.presence.offline": "오프라인",
   "board.taskCard.switchCodeRoot": "Code 탭 루트를 {path}(으)로 전환",
+  "board.taskCard.viewWorktreeTip":
+    "이 워크트리 보기 · 좌측 파일트리 전환 + 담당 에이전트 선택 ({branch})",
+  "board.taskCard.viewingWorktree": "지금 이 워크트리를 보는 중",
   "board.taskCard.assignee": "담당자 {status}",
   "board.taskCard.unassigned": "미배정",
 
@@ -37,6 +40,10 @@ export const board = {
   "board.section.notes": "제약·주의",
 
   // TaskDetailModal
+  "board.taskDetail.viewWorktree": "이 워크트리 보기",
+  "board.taskDetail.viewingWorktree": "지금 이 워크트리를 보는 중",
+  "board.taskDetail.viewWorktreeTip":
+    "좌측 파일트리를 이 워크트리로 전환하고 담당 에이전트를 선택합니다 ({branch})",
   "board.taskDetail.viewTerminal": "{name} 터미널 보기",
   "board.taskDetail.connect": "(연결)",
   "board.taskDetail.edit": "수정",

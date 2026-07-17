@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useProjectStore } from "../../stores/projectStore";
-import { useEditorStore } from "../../stores/editorStore";
+import { viewWorktree } from "../../lib/viewWorktree";
 import { subscribeToMergeHistory } from "../../services/mergeHistoryService";
 import type { MergeHistoryEntry } from "../../types/mergeHistory";
 import type {
@@ -422,10 +422,6 @@ export function WorktreeTab() {
   const archiveOverrides = useWorktreeStore((s) => s.archiveOverrides);
   const setWorktreeArchived = useWorktreeStore((s) => s.setWorktreeArchived);
   const projects = useProjectStore((s) => s.projects);
-  const currentProject = useProjectStore((s) => s.currentProject);
-  const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
-  const setRootPath = useEditorStore((s) => s.setRootPath);
-  const closeAllFiles = useEditorStore((s) => s.closeAllFiles);
   const { t } = useTranslation();
 
   const [projectFilter, setProjectFilter] = useState<string>("all");
@@ -559,16 +555,11 @@ export function WorktreeTab() {
   const noMatches = !loading && worktrees.length > 0 && groups.length === 0;
 
   const openWorktree = (worktree: Worktree) => {
-    const project = projects.find((p) => p.id === worktree.projectId);
-    if (project && currentProject?.id !== project.id) {
-      setCurrentProject(project);
-    }
-    closeAllFiles();
-    setRootPath(worktree.path);
-    const codeTab = Array.from(document.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Code",
-    );
-    codeTab?.click();
+    // Worktrees-tab "Open" = open the checkout in the Code editor. Route through
+    // the sanctioned viewWorktree action (project bind + rootPath switch + files
+    // reveal + proper Code-tab jump) instead of the old DOM hack that
+    // synthesised a click on the "Code" tab button.
+    viewWorktree(worktree, { switchToCodeTab: true });
   };
 
   const handleAction = async (worktree: Worktree, action: RowAction) => {

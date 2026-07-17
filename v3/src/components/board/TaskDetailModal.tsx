@@ -20,8 +20,15 @@ import { useAgentFocusStore } from "../../stores/agentFocusStore";
 import { getSessionIdForAgent } from "../../stores/agentSessionMap";
 import { useProjectStore } from "../../stores/projectStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
+import { useEditorStore } from "../../stores/editorStore";
 import { useAuth } from "../../hooks/useAuth";
 import { useTranslation } from "../../lib/i18n";
+import {
+  findTaskWorktree,
+  resolveTaskAgentId,
+  sameWorktreePath,
+} from "../../lib/taskWorktree";
+import { viewWorktree } from "../../lib/viewWorktree";
 import { TaskBodySections, hasAnyBody } from "./TaskBodySections";
 import { DiffViewer } from "./DiffViewer";
 import type { Worktree } from "../../types/worktree";
@@ -84,17 +91,6 @@ const MODEL_ICONS: Record<string, string> = {
   local: "⚫",
   custom: "⚪",
 };
-
-function findTaskWorktree(worktrees: Worktree[], task: Task): Worktree | null {
-  return (
-    worktrees.find((worktree) => worktree.taskId === task.id) ??
-    worktrees.find((worktree) =>
-      worktree.path.split(/[\\/]+/).includes(task.id),
-    ) ??
-    worktrees.find((worktree) => worktree.branch.includes(task.id)) ??
-    null
-  );
-}
 
 function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
@@ -278,6 +274,66 @@ function AgentTerminalButton({
   );
 }
 
+/**
+ * "이 워크트리 보기" — the sanctioned entry point that switches the left file
+ * tree to this task's worktree and selects its agent in the bottom panel,
+ * WITHOUT a full-pane takeover (the current main tab stays put). Closes the
+ * modal so the sidebar file tree behind it becomes visible.
+ */
+function ViewWorktreeButton({
+  worktree,
+  agentId,
+  onClose,
+}: {
+  worktree: Worktree;
+  agentId: string | null;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const rootPath = useEditorStore((s) => s.rootPath);
+  const viewing = sameWorktreePath(rootPath, worktree.path);
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        viewWorktree(worktree, { focusAgentId: agentId });
+        onClose();
+      }}
+      className={`flex items-center gap-2 rounded border px-3 py-2 text-sm transition-colors ${
+        viewing
+          ? "border-purple-500/50 bg-purple-500/20 text-purple-200"
+          : "border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20"
+      }`}
+      title={
+        viewing
+          ? t("board.taskDetail.viewingWorktree")
+          : t("board.taskDetail.viewWorktreeTip", { branch: worktree.branch })
+      }
+    >
+      <svg
+        className="h-4 w-4"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+        />
+      </svg>
+      {viewing
+        ? t("board.taskDetail.viewingWorktree")
+        : t("board.taskDetail.viewWorktree")}
+      <span className="font-mono text-xs text-purple-400/80">
+        {worktree.branch}
+      </span>
+    </button>
+  );
+}
+
 interface TaskDetailModalProps {
   task: Task;
   onClose: () => void;
@@ -289,6 +345,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const currentProject = useProjectStore((s) => s.currentProject);
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+  const agents = useAgentStore((s) => s.agents);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [detailTab, setDetailTab] = useState<DetailTab>("comments");
@@ -675,6 +732,16 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
 
           {/* Assign Agent */}
           <AgentAssign taskId={task.id} claimedBy={task.claimedBy} />
+
+          {/* View this task's worktree — switches the left file tree + selects
+              the agent in the bottom panel, no full-pane takeover. */}
+          {taskWorktree && (
+            <ViewWorktreeButton
+              worktree={taskWorktree}
+              agentId={resolveTaskAgentId(agents, task)}
+              onClose={onClose}
+            />
+          )}
 
           {/* Open Agent Terminal */}
           <AgentTerminalButton claimedBy={task.claimedBy} onClose={onClose} />

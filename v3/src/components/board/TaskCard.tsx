@@ -7,6 +7,8 @@ import { getPresenceStatus, type PresenceStatus } from "../../types/user";
 import { useAgentStore } from "../../stores/agentStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
+import { resolveTaskAgentId, sameWorktreePath } from "../../lib/taskWorktree";
+import { viewWorktree } from "../../lib/viewWorktree";
 import { usePresence } from "../../hooks/usePresence";
 import { isLaneTask, isMissionTask } from "../../lib/laneContext";
 import { useTranslation } from "../../lib/i18n";
@@ -167,9 +169,14 @@ function TaskCardContent({
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
   const statusPill = useWorktreeStore((s) => s.statusPill);
-  const setRootPath = useEditorStore((s) => s.setRootPath);
+  const rootPath = useEditorStore((s) => s.rootPath);
   const matchingWorktree = worktrees.find((wt) => wt.taskId === task.id);
   const matchingPill = matchingWorktree ? statusPill(matchingWorktree) : null;
+  // Is the file tree currently rooted at this task's worktree? Derived from the
+  // authoritative rootPath (drift-free), used to show the button's active state.
+  const viewingThisWorktree = matchingWorktree
+    ? sameWorktreePath(rootPath, matchingWorktree.path)
+    : false;
 
   const isBlocked = task.status === "BLOCKED";
   const isFailed = task.status === "FAILED";
@@ -320,13 +327,27 @@ function TaskCardContent({
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
-                setRootPath(matchingWorktree.path);
+                // "이 워크트리 보기": switch the left file tree to this worktree
+                // and select its agent in the bottom panel — staying on the
+                // board (no full-pane takeover), via the sanctioned action.
+                viewWorktree(matchingWorktree, {
+                  focusAgentId: resolveTaskAgentId(agents, task),
+                });
               }}
-              className="min-w-0 max-w-[11rem] truncate rounded px-1.5 py-0.5 font-mono text-xs text-blue-300 hover:bg-blue-500/10 hover:text-blue-200"
-              title={t("board.taskCard.switchCodeRoot", {
-                path: matchingWorktree.path,
-              })}
+              className={`inline-flex min-w-0 max-w-[11rem] items-center gap-1 truncate rounded px-1.5 py-0.5 font-mono text-xs ${
+                viewingThisWorktree
+                  ? "bg-blue-500/20 text-blue-200 ring-1 ring-inset ring-blue-500/40"
+                  : "text-blue-300 hover:bg-blue-500/10 hover:text-blue-200"
+              }`}
+              title={
+                viewingThisWorktree
+                  ? t("board.taskCard.viewingWorktree")
+                  : t("board.taskCard.viewWorktreeTip", {
+                      branch: matchingWorktree.branch,
+                    })
+              }
             >
+              <span aria-hidden>{viewingThisWorktree ? "👁" : "⎇"}</span>
               {matchingWorktree.branch}
             </button>
           </>

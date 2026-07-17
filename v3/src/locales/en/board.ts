@@ -29,6 +29,9 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.presence.idle": "Idle",
   "board.presence.offline": "Offline",
   "board.taskCard.switchCodeRoot": "Switch Code tab root to {path}",
+  "board.taskCard.viewWorktreeTip":
+    "View this worktree · switch the file tree + select its agent ({branch})",
+  "board.taskCard.viewingWorktree": "Currently viewing this worktree",
   "board.taskCard.assignee": "Assignee {status}",
   "board.taskCard.unassigned": "Unassigned",
 
@@ -39,6 +42,10 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.section.notes": "Notes & Constraints",
 
   // TaskDetailModal
+  "board.taskDetail.viewWorktree": "View this worktree",
+  "board.taskDetail.viewingWorktree": "Currently viewing this worktree",
+  "board.taskDetail.viewWorktreeTip":
+    "Switch the left file tree to this worktree and select its agent ({branch})",
   "board.taskDetail.viewTerminal": "View {name} terminal",
   "board.taskDetail.connect": "(connect)",
   "board.taskDetail.edit": "Edit",
