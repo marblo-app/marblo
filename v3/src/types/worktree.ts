@@ -23,6 +23,8 @@ export interface Worktree {
   head?: string;
   createdAt: string | null;
   stale?: boolean;
+  /** Full hygiene verdict (merged / idleDays / stale) from the main process. */
+  staleInfo?: WorktreeStaleInfo;
   status?: WorktreeStatus;
 }
 

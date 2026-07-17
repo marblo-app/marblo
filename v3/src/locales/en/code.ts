@@ -13,4 +13,5 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.diffLoading": "Loading diff...",
   "code.saveFailed": "Failed to save {name} — changes were not written to disk",
   "code.saveFailedDismiss": "Dismiss save error",
+  "code.rootArchivedHint": "{count} archived · manage in the Worktrees tab",
 };

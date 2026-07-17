@@ -1,4 +1,8 @@
 import type { Worktree } from "../types/worktree";
+import {
+  isActiveOngoingWorktree,
+  type ArchiveOverrides,
+} from "./worktreeHygiene";
 
 /**
  * Pure helpers backing the FileTree sidebar header.
@@ -242,20 +246,28 @@ export interface RootSwitch {
  *  1. belong to a task — `taskId != null`. This is the load-bearing filter:
  *     ad-hoc branches (e.g. `.claude/worktrees/feat/*`) have no inferred taskId,
  *     so they drop out here regardless of the stale heuristic.
- *  2. aren't stale. `stale` is computed in the electron main process
- *     (`merged into base` or `idle > N days`, see {@link WorktreeStaleInfo}) and
- *     acts as a *secondary* guard. We keep taskId as the primary signal so a
- *     recently-touched task worktree is never hidden just because the stale
- *     verdict is aggressive.
+ *  2. aren't archived. A worktree is archived when it is merged / idle-stale
+ *     (the auto verdict computed in the electron main process, see
+ *     {@link WorktreeStaleInfo}) OR the user manually archived it — unless the
+ *     user manually restored it. This delegates to
+ *     {@link isActiveOngoingWorktree} so the switcher, the Code-tab Root
+ *     dropdown, and the Worktrees tab all agree on what "active/ongoing" means.
+ *
+ * `overrides` defaults to `{}` so existing callers (and the auto verdict alone)
+ * keep working unchanged.
  */
-export function isActiveTaskWorktree(worktree: Worktree): boolean {
-  return worktree.taskId != null && !worktree.stale;
+export function isActiveTaskWorktree(
+  worktree: Worktree,
+  overrides: ArchiveOverrides = {},
+): boolean {
+  return isActiveOngoingWorktree(worktree, overrides);
 }
 
 export function resolveRootSwitch(
   rootPath: string | null,
   worktrees: Worktree[],
   projectRootPath: string | null,
+  overrides: ArchiveOverrides = {},
 ): RootSwitch | null {
   // Locate this machine's main checkout (symlink-tolerant, keyed off taskId —
   // see findMainWorktree) and fall back to the project folder path. mainPath is
@@ -270,7 +282,7 @@ export function resolveRootSwitch(
   // isActiveTaskWorktree).
   const toTasks: RootSwitchTarget[] = worktrees
     .filter((w) => !samePath(w.path, mainPath))
-    .filter(isActiveTaskWorktree)
+    .filter((w) => isActiveTaskWorktree(w, overrides))
     .map((w) => ({
       path: w.path,
       label: w.branch || basename(w.path),

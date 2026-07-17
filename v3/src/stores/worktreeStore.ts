@@ -5,13 +5,27 @@ import type {
   WorktreeStatusPill,
 } from "../types/worktree";
 import { t } from "../lib/i18n";
+import {
+  loadArchiveOverrides,
+  persistArchiveOverrides,
+  setOverride,
+  type ArchiveOverrides,
+} from "../lib/worktreeHygiene";
 
 interface WorktreeState {
   worktrees: Worktree[];
   loading: boolean;
   lastError: string | null;
+  /**
+   * User archive/restore overrides, keyed by worktree path. Persisted to
+   * localStorage so hiding a worktree (or restoring an auto-archived one)
+   * survives reloads. See {@link ../lib/worktreeHygiene}.
+   */
+  archiveOverrides: ArchiveOverrides;
 
   refresh: () => Promise<void>;
+  /** Archive (hide) or restore (show) a worktree by its key (path). */
+  setWorktreeArchived: (key: string, archived: boolean) => void;
   rebase: (path: string, baseRef: string) => Promise<void>;
   merge: (args: {
     repoRoot: string;
@@ -34,11 +48,11 @@ interface WorktreeState {
   remove: (
     repoRoot: string,
     path: string,
-    deleteBranch?: boolean
+    deleteBranch?: boolean,
   ) => Promise<void>;
   cleanupStale: (
     repoRoot: string,
-    maxIdleDays?: number
+    maxIdleDays?: number,
   ) => Promise<{
     removed: string[];
     failed: { path: string; error: string }[];
@@ -55,7 +69,7 @@ function errorMessage(err: unknown): string {
 
 function assertActionResult(
   result: unknown,
-  fallbackMessage: string
+  fallbackMessage: string,
 ): asserts result {
   if (!result || typeof result !== "object") return;
   if ("ok" in result && result.ok === false) {
@@ -67,8 +81,8 @@ function assertActionResult(
       "error" in result && typeof result.error === "string"
         ? result.error
         : conflicts
-        ? `${fallbackMessage}: ${conflicts}`
-        : fallbackMessage;
+          ? `${fallbackMessage}: ${conflicts}`
+          : fallbackMessage;
     throw new Error(error);
   }
   if ("success" in result && result.success === false) {
@@ -89,7 +103,7 @@ function inferTaskId(projectId: string, worktreePath: string): string | null {
 
 function normalizeWorktree(
   group: WorktreeProjectGroup,
-  item: WorktreeProjectGroup["worktrees"][number]
+  item: WorktreeProjectGroup["worktrees"][number],
 ): Worktree {
   const taskId = inferTaskId(group.projectId, item.path);
   return {
@@ -104,6 +118,9 @@ function normalizeWorktree(
     head: item.head,
     createdAt: null,
     stale: item.stale ?? item.staleInfo?.stale ?? false,
+    // Carry the full hygiene verdict so the renderer can distinguish
+    // "merged" (aggressive auto-archive) from "idle-stale" and label each.
+    staleInfo: item.staleInfo,
     status: item.status,
   };
 }
@@ -129,13 +146,24 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
   worktrees: [],
   loading: false,
   lastError: null,
+  archiveOverrides: loadArchiveOverrides(),
+
+  setWorktreeArchived: (key, archived) => {
+    const next = setOverride(
+      get().archiveOverrides,
+      key,
+      archived ? "archived" : "active",
+    );
+    persistArchiveOverrides(next);
+    set({ archiveOverrides: next });
+  },
 
   refresh: async () => {
     set({ loading: true, lastError: null });
     try {
       const groups = await window.electronAPI.worktree.list();
       const worktrees = groups.flatMap((group) =>
-        group.worktrees.map((item) => normalizeWorktree(group, item))
+        group.worktrees.map((item) => normalizeWorktree(group, item)),
       );
       set({ worktrees, loading: false });
     } catch (err) {
@@ -160,7 +188,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
     try {
       const result = await window.electronAPI.worktree.cleanupStale(
         repoRoot,
-        maxIdleDays
+        maxIdleDays,
       );
       await get().refresh();
       return result;
@@ -208,7 +236,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
 
   getWorktreesByProject: (projectId) => {
     return get().worktrees.filter(
-      (worktree) => worktree.projectId === projectId
+      (worktree) => worktree.projectId === projectId,
     );
   },
 
@@ -219,7 +247,7 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
         groups[worktree.projectId].push(worktree);
         return groups;
       },
-      {}
+      {},
     );
   },
 

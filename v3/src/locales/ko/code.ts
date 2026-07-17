@@ -14,4 +14,5 @@ export const code = {
   "code.diffLoading": "Diff 로딩 중...",
   "code.saveFailed": "{name} 저장 실패 — 디스크에 기록되지 않았습니다",
   "code.saveFailedDismiss": "저장 실패 알림 닫기",
+  "code.rootArchivedHint": "{count}개 아카이브됨 · Worktrees 탭에서 관리",
 };

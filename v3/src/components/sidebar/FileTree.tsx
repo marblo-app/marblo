@@ -764,6 +764,7 @@ export function FileTree() {
 
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+  const archiveOverrides = useWorktreeStore((s) => s.archiveOverrides);
   const currentProjectWorktrees = useMemo(
     () => filterWorktreesByProject(worktrees, currentProject?.id),
     [worktrees, currentProject?.id],
@@ -789,8 +790,14 @@ export function FileTree() {
         rootPath,
         currentProjectWorktrees,
         currentProject?.folderPath ?? null,
+        archiveOverrides,
       ),
-    [rootPath, currentProjectWorktrees, currentProject?.folderPath],
+    [
+      rootPath,
+      currentProjectWorktrees,
+      currentProject?.folderPath,
+      archiveOverrides,
+    ],
   );
 
   // Defensive guard: the tree root is the shared ~/.marblo/worktrees container

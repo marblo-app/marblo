@@ -85,4 +85,24 @@ export const worktree: Record<keyof typeof koWorktree, string> = {
     "{removed} cleaned, {failed} failed — {detail}",
   "worktree.msg.cleanupDone": "{removed} stale worktree(s) cleaned",
   "worktree.error.cleanupFailed": "stale cleanup failed",
+
+  // Archive (hide) / restore — default view shows active/ongoing only
+  "worktree.archivedToggleLabel": "🗄 Archived ({count})",
+  "worktree.archivedToggleTip":
+    "Merged/stale (auto) or manually-archived worktrees — hidden from the default list. Restore them here",
+  "worktree.action.archive":
+    "Archive this worktree (hide from the default list)",
+  "worktree.action.restore": "Restore from archive (show in the default list)",
+  "worktree.archiveAction": "Archive",
+  "worktree.restoreAction": "Restore",
+  "worktree.msg.archived": "{branch} archived",
+  "worktree.msg.restored": "{branch} restored",
+  "worktree.archivedEmptyTitle": "No archived worktrees.",
+  "worktree.archivedEmptyHint":
+    "Merged or long-idle worktrees move here automatically.",
+  "worktree.archivedReason.merged": "merged",
+  "worktree.archivedReason.stale": "stale",
+  "worktree.archivedReason.mergedTip":
+    "Auto-archived — already merged into base",
+  "worktree.archivedReason.staleTip": "Auto-archived — long idle",
 };

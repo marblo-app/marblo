@@ -9,6 +9,11 @@ import type {
   WorktreeStatusPill,
   WorktreeStatusTone,
 } from "../../types/worktree";
+import {
+  archiveReason,
+  isWorktreeArchived,
+  worktreeKey,
+} from "../../lib/worktreeHygiene";
 import { t, useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 
@@ -62,7 +67,7 @@ function ConflictSummary({ worktree }: { worktree: Worktree }) {
   return <span className="text-gray-500">{t("worktree.conflict.none")}</span>;
 }
 
-type RowAction = "rebase" | "merge" | "resolve" | "open" | "delete";
+type RowAction = "rebase" | "merge" | "resolve" | "open" | "archive" | "delete";
 
 function ActionButton({
   children,
@@ -99,10 +104,12 @@ function ActionButton({
 
 function RowActions({
   worktree,
+  archived,
   busyAction,
   onAction,
 }: {
   worktree: Worktree;
+  archived: boolean;
   busyAction: RowAction | null;
   onAction: (worktree: Worktree, action: RowAction) => void;
 }) {
@@ -151,6 +158,15 @@ function RowActions({
       </ActionButton>
       <ActionButton
         disabled={disabled}
+        title={
+          archived ? t("worktree.action.restore") : t("worktree.action.archive")
+        }
+        onClick={() => onAction(worktree, "archive")}
+      >
+        {archived ? t("worktree.restoreAction") : t("worktree.archiveAction")}
+      </ActionButton>
+      <ActionButton
+        disabled={disabled}
         title={t("worktree.action.removeCleanup")}
         tone="danger"
         onClick={() => onAction(worktree, "delete")}
@@ -161,14 +177,41 @@ function RowActions({
   );
 }
 
+function ArchiveReasonBadge({ worktree }: { worktree: Worktree }) {
+  const { t } = useTranslation();
+  const reason = archiveReason(worktree);
+  if (!reason) return null;
+  const isMerged = reason === "merged";
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+        isMerged
+          ? "border border-sky-500/30 bg-sky-500/15 text-sky-300"
+          : "border border-amber-500/30 bg-amber-500/15 text-amber-300"
+      }`}
+      title={
+        isMerged
+          ? t("worktree.archivedReason.mergedTip")
+          : t("worktree.archivedReason.staleTip")
+      }
+    >
+      {isMerged
+        ? t("worktree.archivedReason.merged")
+        : t("worktree.archivedReason.stale")}
+    </span>
+  );
+}
+
 function WorktreeRow({
   worktree,
   pill,
+  archived,
   busyAction,
   onAction,
 }: {
   worktree: Worktree;
   pill: WorktreeStatusPill;
+  archived: boolean;
   busyAction: RowAction | null;
   onAction: (worktree: Worktree, action: RowAction) => void;
 }) {
@@ -208,7 +251,7 @@ function WorktreeRow({
         </span>
       </div>
 
-      {/* 보조 행: ▲ahead ▼behind / 충돌수 / 액션 */}
+      {/* 보조 행: ▲ahead ▼behind / 충돌수 / 아카이브 사유 / 액션 */}
       <div className="mt-1.5 flex items-center gap-3 pl-0.5 text-xs text-gray-400">
         <span className="flex items-center gap-2 font-mono">
           <span title={t("worktree.row.aheadTip")}>▲{ahead}</span>
@@ -217,9 +260,11 @@ function WorktreeRow({
         <span>
           <ConflictSummary worktree={worktree} />
         </span>
+        {archived && <ArchiveReasonBadge worktree={worktree} />}
         <span className="ml-auto">
           <RowActions
             worktree={worktree}
+            archived={archived}
             busyAction={busyAction}
             onAction={onAction}
           />
@@ -374,6 +419,8 @@ export function WorktreeTab() {
   const remove = useWorktreeStore((s) => s.remove);
   const cleanupStale = useWorktreeStore((s) => s.cleanupStale);
   const statusPill = useWorktreeStore((s) => s.statusPill);
+  const archiveOverrides = useWorktreeStore((s) => s.archiveOverrides);
+  const setWorktreeArchived = useWorktreeStore((s) => s.setWorktreeArchived);
   const projects = useProjectStore((s) => s.projects);
   const currentProject = useProjectStore((s) => s.currentProject);
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
@@ -386,6 +433,9 @@ export function WorktreeTab() {
     "all",
   );
   const [mergeableOnly, setMergeableOnly] = useState(false);
+  // 아카이브 뷰: 기본은 활성/온고잉만. 켜면 아카이브(머지/stale/수동보관)된 것만
+  // 보여주고 각 행에서 복원 가능.
+  const [archivedView, setArchivedView] = useState(false);
   // 예외 뷰: 자동머지 안 되고 사람이 봐야 하는 것만 (충돌/머지불가 or stale).
   // 자율성 다이얼 L1에서 clean+mergeable은 자동머지되므로 예외가 아님.
   const [exceptionsOnly, setExceptionsOnly] = useState(false);
@@ -437,6 +487,14 @@ export function WorktreeTab() {
   // 필터 적용 후 프로젝트별 그룹.
   const groups = useMemo(() => {
     const filtered = worktrees.filter((wt) => {
+      // Base layer: the default view shows only active/ongoing worktrees;
+      // archived (merged / stale / manually-archived) ones move to the archive
+      // view. This is what collapses a 100+-worktree project to just the live
+      // work.
+      const isArchived = isWorktreeArchived(wt, archiveOverrides);
+      if (archivedView ? !isArchived : isArchived) {
+        return false;
+      }
       if (projectFilter !== "all" && wt.projectId !== projectFilter) {
         return false;
       }
@@ -470,6 +528,8 @@ export function WorktreeTab() {
     statusFilter,
     mergeableOnly,
     exceptionsOnly,
+    archivedView,
+    archiveOverrides,
     statusPill,
     projectName,
   ]);
@@ -486,6 +546,13 @@ export function WorktreeTab() {
   const staleWorktrees = useMemo(
     () => worktrees.filter((wt) => wt.stale),
     [worktrees],
+  );
+
+  // 아카이브된 워크트리 수 — 토글 배지에 표시.
+  const archivedCount = useMemo(
+    () =>
+      worktrees.filter((wt) => isWorktreeArchived(wt, archiveOverrides)).length,
+    [worktrees, archiveOverrides],
   );
 
   const isEmpty = !loading && worktrees.length === 0;
@@ -511,6 +578,19 @@ export function WorktreeTab() {
     if (action === "open") {
       openWorktree(worktree);
       setActionMessage(t("worktree.msg.opened", { branch: worktree.branch }));
+      return;
+    }
+
+    // Archive/restore is a local-only view toggle (no git/IPC) — flip the
+    // persisted override and surface a confirmation banner.
+    if (action === "archive") {
+      const wasArchived = isWorktreeArchived(worktree, archiveOverrides);
+      setWorktreeArchived(worktreeKey(worktree), !wasArchived);
+      setActionMessage(
+        wasArchived
+          ? t("worktree.msg.restored", { branch: worktree.branch })
+          : t("worktree.msg.archived", { branch: worktree.branch }),
+      );
       return;
     }
 
@@ -671,6 +751,19 @@ export function WorktreeTab() {
 
         <button
           type="button"
+          onClick={() => setArchivedView((v) => !v)}
+          title={t("worktree.archivedToggleTip")}
+          className={`rounded border px-2 py-1 text-xs transition ${
+            archivedView
+              ? "border-gray-400/50 bg-gray-500/15 text-gray-200"
+              : "border-gray-700 text-gray-300 hover:bg-gray-800"
+          }`}
+        >
+          {t("worktree.archivedToggleLabel", { count: archivedCount })}
+        </button>
+
+        <button
+          type="button"
           onClick={() => setHistoryView((v) => !v)}
           title={t("worktree.historyToggleTip")}
           className={`rounded border px-2 py-1 text-xs transition ${
@@ -771,6 +864,17 @@ export function WorktreeTab() {
               </p>
             </div>
           </div>
+        ) : archivedView && groups.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
+              <p className="text-sm text-gray-300">
+                {t("worktree.archivedEmptyTitle")}
+              </p>
+              <p className="mt-1 text-xs text-gray-500">
+                {t("worktree.archivedEmptyHint")}
+              </p>
+            </div>
+          </div>
         ) : noMatches ? (
           <div className="flex h-full items-center justify-center text-sm text-gray-500">
             {t("worktree.noMatches")}
@@ -790,6 +894,7 @@ export function WorktreeTab() {
                       key={wt.id}
                       worktree={wt}
                       pill={statusPill(wt)}
+                      archived={isWorktreeArchived(wt, archiveOverrides)}
                       busyAction={busy?.id === wt.id ? busy.action : null}
                       onAction={handleAction}
                     />

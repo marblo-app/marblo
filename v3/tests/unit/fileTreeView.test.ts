@@ -249,6 +249,33 @@ describe("resolveRootSwitch", () => {
     expect(sw?.toTasks.map((t) => t.path)).toEqual(["/repo/.worktrees/a"]);
   });
 
+  it("excludes a manually-archived task worktree via overrides", () => {
+    const sw = resolveRootSwitch("/repo", [main, taskA, taskB], "/repo", {
+      "/repo/.worktrees/a": "archived",
+    });
+    expect(sw?.toTasks.map((t) => t.path)).toEqual(["/repo/.worktrees/b"]);
+  });
+
+  it("re-includes a merged worktree that was manually restored via overrides", () => {
+    const mergedTask = wt({
+      id: "merged",
+      path: "/repo/.worktrees/merged",
+      repoRoot: "/repo",
+      branch: "marblo/merged",
+      taskId: "T7",
+      stale: true,
+    });
+    // Auto-archived (stale) → hidden by default…
+    expect(
+      resolveRootSwitch("/repo", [main, mergedTask], "/repo")?.toTasks ?? [],
+    ).toEqual([]);
+    // …but a manual "active" override brings it back.
+    const sw = resolveRootSwitch("/repo", [main, mergedTask], "/repo", {
+      "/repo/.worktrees/merged": "active",
+    });
+    expect(sw?.toTasks.map((t) => t.path)).toEqual(["/repo/.worktrees/merged"]);
+  });
+
   it("excludes worktrees with no taskId (ad-hoc feat/fix branches)", () => {
     const adhoc = wt({
       id: "adhoc",
@@ -423,6 +450,24 @@ describe("isActiveTaskWorktree", () => {
 
   it("rejects a stale worktree even with a taskId", () => {
     expect(isActiveTaskWorktree(wt({ taskId: "T1", stale: true }))).toBe(false);
+  });
+
+  it("respects a manual archive override", () => {
+    const active = wt({
+      path: "/repo/.worktrees/x",
+      taskId: "T1",
+      stale: false,
+    });
+    expect(
+      isActiveTaskWorktree(active, { "/repo/.worktrees/x": "archived" }),
+    ).toBe(false);
+  });
+
+  it("respects a manual restore override on a stale worktree", () => {
+    const stale = wt({ path: "/repo/.worktrees/y", taskId: "T1", stale: true });
+    expect(
+      isActiveTaskWorktree(stale, { "/repo/.worktrees/y": "active" }),
+    ).toBe(true);
   });
 });
 

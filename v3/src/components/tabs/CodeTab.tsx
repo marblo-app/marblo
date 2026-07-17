@@ -7,6 +7,7 @@ import { CodeEditor } from "../code/CodeEditor";
 import { ImagePreview } from "../code/ImagePreview";
 import { DiffViewer } from "../code/DiffViewer";
 import { isImageFile } from "../../lib/imageFiles";
+import { isActiveOngoingWorktree } from "../../lib/worktreeHygiene";
 import { useTranslation } from "../../lib/i18n";
 
 export function CodeTab() {
@@ -22,6 +23,7 @@ export function CodeTab() {
   const currentProject = useProjectStore((s) => s.currentProject);
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+  const archiveOverrides = useWorktreeStore((s) => s.archiveOverrides);
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath);
   const projectRootPath = currentProject?.folderPath ?? null;
@@ -35,11 +37,38 @@ export function CodeTab() {
       );
   }, [currentProject, worktrees]);
 
-  const selectedRoot = projectWorktrees.some(
+  // Only active/ongoing task worktrees belong in the dropdown — merged/idle
+  // (auto-archived) and manually-archived ones are hidden so the list stays
+  // usable even when a project has accumulated 100+ worktrees. The currently
+  // selected root is always kept visible (below) so switching *away* from an
+  // archived worktree still works.
+  const activeWorktrees = useMemo(
+    () =>
+      projectWorktrees.filter((worktree) =>
+        isActiveOngoingWorktree(worktree, archiveOverrides),
+      ),
+    [projectWorktrees, archiveOverrides],
+  );
+
+  const selectedWorktree = projectWorktrees.find(
     (worktree) => worktree.path === rootPath,
-  )
-    ? (rootPath ?? "")
-    : "__project__";
+  );
+
+  // The dropdown's options: active worktrees, plus the current selection if it
+  // happens to be an archived one (so the <select> value stays valid).
+  const visibleWorktrees = useMemo(() => {
+    if (
+      selectedWorktree &&
+      !activeWorktrees.some((w) => w.path === selectedWorktree.path)
+    ) {
+      return [...activeWorktrees, selectedWorktree];
+    }
+    return activeWorktrees;
+  }, [activeWorktrees, selectedWorktree]);
+
+  const archivedCount = projectWorktrees.length - activeWorktrees.length;
+
+  const selectedRoot = selectedWorktree ? (rootPath ?? "") : "__project__";
 
   useEffect(() => {
     refreshWorktrees().catch(() => {});
@@ -67,12 +96,17 @@ export function CodeTab() {
               ? `Project root · ${projectRootPath}`
               : "Project root"}
           </option>
-          {projectWorktrees.map((worktree) => (
+          {visibleWorktrees.map((worktree) => (
             <option key={worktree.id} value={worktree.path}>
               {worktree.taskId ? `${worktree.taskId} · ` : ""}
               {worktree.branch} · {worktree.path}
             </option>
           ))}
+          {archivedCount > 0 && (
+            <option disabled value="__archived_hint__">
+              {t("code.rootArchivedHint", { count: archivedCount })}
+            </option>
+          )}
         </select>
       </div>
 

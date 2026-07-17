@@ -82,4 +82,22 @@ export const worktree = {
   "worktree.msg.cleanupPartial": "{removed}개 정리, {failed}개 실패 — {detail}",
   "worktree.msg.cleanupDone": "stale 워크트리 {removed}개 정리 완료",
   "worktree.error.cleanupFailed": "stale cleanup 실패",
+
+  // Archive (숨김) / restore — 기본 뷰는 활성/온고잉만, 아카이브는 별도 뷰
+  "worktree.archivedToggleLabel": "🗄 아카이브 ({count})",
+  "worktree.archivedToggleTip":
+    "머지/stale(자동) 또는 수동 보관된 워크트리 — 기본 목록에서 숨겨집니다. 여기서 복원 가능",
+  "worktree.action.archive": "이 워크트리를 아카이브(기본 목록에서 숨김)",
+  "worktree.action.restore": "아카이브 해제(기본 목록에 다시 표시)",
+  "worktree.archiveAction": "보관",
+  "worktree.restoreAction": "복원",
+  "worktree.msg.archived": "{branch} 아카이브됨",
+  "worktree.msg.restored": "{branch} 복원됨",
+  "worktree.archivedEmptyTitle": "아카이브된 워크트리가 없습니다.",
+  "worktree.archivedEmptyHint":
+    "머지되거나 오래 무활동이면 자동으로 여기로 이동합니다.",
+  "worktree.archivedReason.merged": "머지됨",
+  "worktree.archivedReason.stale": "stale",
+  "worktree.archivedReason.mergedTip": "이미 base에 머지되어 자동 아카이브됨",
+  "worktree.archivedReason.staleTip": "장기 무활동으로 자동 아카이브됨",
 };
