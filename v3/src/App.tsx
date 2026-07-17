@@ -4,6 +4,8 @@ import { LanguageFirstRun } from "./components/onboarding/LanguageFirstRun";
 import { useAuth } from "./hooks/useAuth";
 import { LoginPage } from "./auth";
 import { Layout } from "./components/Layout";
+import { WorkspaceShell } from "./components/workspace/WorkspaceShell";
+import { useWorkspaceModeStore } from "./stores/workspaceModeStore";
 import { DetachedLayout, type DetachedView } from "./components/DetachedLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BrandLoader } from "./components/BrandLoader";
@@ -24,7 +26,7 @@ import { t, hasChosenLocale } from "./lib/i18n";
 if (import.meta.env.VITE_DISABLE_TELEMETRY === "1") {
   setTelemetryEnabled(false, { persist: false });
   console.warn(
-    "[DIAG] Telemetry DISABLED — no logTelemetryBatch/logHeartbeat calls",
+    "[DIAG] Telemetry DISABLED — no logTelemetryBatch/logHeartbeat calls"
   );
 }
 
@@ -115,14 +117,14 @@ if (typeof PerformanceObserver !== "undefined") {
     const p95 = dur[Math.floor(dur.length * 0.95)] ?? dur[dur.length - 1];
     const max = dur[dur.length - 1];
     const avgInDel = (inDel.reduce((a, b) => a + b, 0) / inDel.length).toFixed(
-      0,
+      0
     );
     console.warn(
       `[INP-5s] count=${samples.length} p50=${p50?.toFixed(
-        0,
+        0
       )}ms p95=${p95?.toFixed(0)}ms max=${max?.toFixed(
-        0,
-      )}ms | avgInputDelay=${avgInDel}ms`,
+        0
+      )}ms | avgInputDelay=${avgInDel}ms`
     );
   }, 5000);
 
@@ -137,7 +139,7 @@ if (typeof PerformanceObserver !== "undefined") {
       console.warn(
         `[MAIN-BUSY] ${drift.toFixed(0)}ms drift (target 100ms, actual ${(
           now - lastSched
-        ).toFixed(0)}ms)`,
+        ).toFixed(0)}ms)`
       );
     }
     lastSched = now;
@@ -188,8 +190,8 @@ if (typeof PerformanceObserver !== "undefined") {
       if (total > 5) {
         console.warn(
           `[IPC-FREQ] ${(elapsed / 1000).toFixed(
-            1,
-          )}s window | total=${total} | ${parts.join(" ")}`,
+            1
+          )}s window | total=${total} | ${parts.join(" ")}`
         );
       }
     }, 1000);
@@ -210,11 +212,12 @@ function AppContent() {
   const subscribeToProjects = useProjectStore((s) => s.subscribeToProjects);
   const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
   const setAutoSelectFirstProject = useProjectStore(
-    (s) => s.setAutoSelectFirstProject,
+    (s) => s.setAutoSelectFirstProject
   );
   const subscribeToSubscription = useSubscriptionStore(
-    (s) => s.subscribeToSubscription,
+    (s) => s.subscribeToSubscription
   );
+  const workspaceMode = useWorkspaceModeStore((s) => s.enabled);
 
   // DIAGNOSTIC TEST: Firebase realtime listeners suspected of causing typing
   // input delay (React reconciliation triggered by snapshot updates competing
@@ -236,7 +239,7 @@ function AppContent() {
 
     if (!FIREBASE_LISTENERS_ENABLED) {
       console.warn(
-        "[DIAG] Firebase listeners DISABLED via VITE_DISABLE_FB_LISTENERS=1 — projects/subscription will not sync",
+        "[DIAG] Firebase listeners DISABLED via VITE_DISABLE_FB_LISTENERS=1 — projects/subscription will not sync"
       );
       return;
     }
@@ -313,6 +316,12 @@ function AppContent() {
     return <DetachedLayout view={detachedView} />;
   }
 
+  // Opt-in Workspace shell (default OFF). When OFF this is exactly <Layout />
+  // as before — no behavioral change. Detached pop-out windows above always
+  // use the legacy DetachedLayout regardless of this flag.
+  if (workspaceMode) {
+    return <WorkspaceShell />;
+  }
   return <Layout />;
 }
 
@@ -321,7 +330,7 @@ function App() {
   // when the user has never made an explicit choice. Detached pop-out windows
   // skip it — they inherit the main window's already-persisted locale.
   const [needsLocaleChoice, setNeedsLocaleChoice] = useState(
-    () => resolveDetachedView() === null && !hasChosenLocale(),
+    () => resolveDetachedView() === null && !hasChosenLocale()
   );
 
   return (

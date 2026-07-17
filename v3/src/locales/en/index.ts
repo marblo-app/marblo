@@ -35,6 +35,7 @@ import { workHistory } from "./workHistory";
 import { deploy } from "./deploy";
 import { code } from "./code";
 import { terminal } from "./terminal";
+import { workspace } from "./workspace";
 
 export const en: Record<MessageKey, string> = {
   ...header,
@@ -64,4 +65,5 @@ export const en: Record<MessageKey, string> = {
   ...deploy,
   ...code,
   ...terminal,
+  ...workspace,
 };

@@ -10,7 +10,22 @@ import { isImageFile } from "../../lib/imageFiles";
 import { isActiveOngoingWorktree } from "../../lib/worktreeHygiene";
 import { useTranslation } from "../../lib/i18n";
 
-export function CodeTab() {
+export interface DiffRenderProps {
+  filePath: string;
+  language: string;
+  currentContent: string;
+}
+
+interface CodeTabProps {
+  /**
+   * Optional override for the diff view. Defaults to the plain DiffViewer so
+   * the legacy Layout (workspace mode OFF) is byte-for-byte unchanged. The
+   * Workspace shell passes DiffSurface here to enable inline review comments.
+   */
+  renderDiff?: (props: DiffRenderProps) => JSX.Element;
+}
+
+export function CodeTab({ renderDiff }: CodeTabProps = {}) {
   const { t } = useTranslation();
   const openFiles = useEditorStore((s) => s.openFiles);
   const activeFilePath = useEditorStore((s) => s.activeFilePath);
@@ -135,11 +150,19 @@ export function CodeTab() {
       <div className="flex-1 overflow-hidden">
         {activeFile ? (
           showDiff ? (
-            <DiffViewer
-              filePath={activeFile.path}
-              language={activeFile.language}
-              currentContent={activeFile.content}
-            />
+            renderDiff ? (
+              renderDiff({
+                filePath: activeFile.path,
+                language: activeFile.language,
+                currentContent: activeFile.content,
+              })
+            ) : (
+              <DiffViewer
+                filePath={activeFile.path}
+                language={activeFile.language}
+                currentContent={activeFile.content}
+              />
+            )
           ) : isImageFile(activeFile.path) ? (
             <ImagePreview
               filePath={activeFile.path}

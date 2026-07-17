@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
+import { useWorkspaceModeStore } from "../../stores/workspaceModeStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useOrchestratorStore } from "../../stores/orchestratorStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
@@ -97,8 +98,8 @@ export function SettingsPage() {
               plan === "team"
                 ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
                 : plan === "pro"
-                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                  : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
+                ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
             }`}
           >
             {plan.toUpperCase()} {t("header.planBadge.suffix")}
@@ -204,6 +205,49 @@ function ProfileSection() {
           </div>
         </div>
       </div>
+
+      <WorkspaceModeSection />
+    </div>
+  );
+}
+
+function WorkspaceModeSection() {
+  const { t } = useTranslation();
+  const enabled = useWorkspaceModeStore((s) => s.enabled);
+  const setEnabled = useWorkspaceModeStore((s) => s.setEnabled);
+
+  return (
+    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="mb-1 text-sm font-medium text-gray-200">
+            {t("workspace.settings.heading")}
+          </h3>
+          <p className="text-xs leading-relaxed text-gray-500">
+            {t("workspace.settings.help")}
+          </p>
+        </div>
+        {/* Toggle switch */}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label={t("workspace.settings.toggleLabel")}
+          onClick={() => setEnabled(!enabled)}
+          className={`relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+            enabled ? "bg-blue-600" : "bg-gray-600"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+              enabled ? "translate-x-5" : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </div>
+      <p className="mt-2 text-xs font-medium text-gray-400">
+        {enabled ? t("workspace.settings.on") : t("workspace.settings.off")}
+      </p>
     </div>
   );
 }
@@ -523,7 +567,7 @@ function SubscriptionPlansSection() {
 
   const update = (i: number, patch: Partial<SubscriptionPlanEntry>) => {
     setPlans((prev) =>
-      prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)),
+      prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p))
     );
   };
 

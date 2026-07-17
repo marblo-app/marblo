@@ -38,6 +38,7 @@ import { workHistory } from "./workHistory";
 import { deploy } from "./deploy";
 import { code } from "./code";
 import { terminal } from "./terminal";
+import { workspace } from "./workspace";
 
 export const ko = {
   ...header,
@@ -67,6 +68,7 @@ export const ko = {
   ...deploy,
   ...code,
   ...terminal,
+  ...workspace,
 };
 
 export type MessageKey = keyof typeof ko;
