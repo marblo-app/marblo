@@ -87,7 +87,9 @@ export const issueAgentCustomToken = functions.https.onCall(
         typeof (err as { code?: unknown }).code === "string"
           ? (err as { code: string }).code
           : "unknown";
-      console.error(`[issueAgentCustomToken] createCustomToken failed (${code})`);
+      console.error(
+        `[issueAgentCustomToken] createCustomToken failed (${code})`,
+      );
       throw new functions.https.HttpsError(
         "internal",
         `Agent custom token signing failed (${code}).`,
@@ -1765,6 +1767,84 @@ export function buildFounderAccessEmail(
   };
 }
 
+// ─── 설문 회신 유도 리마인더 이메일 (Resend) ────────────────────────
+//
+// 초기 접근 안내(buildFounderAccessEmail)와 별개로, "베타는 활성화했지만 아직
+// 설문 미회신"인 파운더에게 "성실 설문 회신 시 운영자 검토 후 Pro 최대 3개월"을
+// 다시 안내하는 전용 리마인더. ★1차 채널은 이메일(사장님 채널 피벗): 인앱 팝업은
+// 앱을 여는 활성 사용자만 닿기 때문. 이 메일의 대상은 "활성화 O, 설문 X"이고,
+// 미활성 선정자 팔로업(별도 티켓 WjGoowu1rjLH4K2PNIXb)과 audience 가 겹치지 않게
+// feedbackSubmittedAt==null AND 활성 신호로 세그먼트한다(중복 발송 방지).
+//
+// export 는 테스트의 dry 렌더용(트리거 아님 → 배포 discovery 스킵).
+export function buildFounderSurveyOfferEmail(
+  locale: FounderLocale,
+): FounderEmailContent {
+  const feedbackUrl = `${SITE_BASE}/${locale}/beta-survey`;
+
+  if (locale === "en") {
+    return {
+      subject: "Your Marblo beta survey — up to 3 months of Pro",
+      html: founderHtmlShell(`
+        <h1 style="font-size:22px;margin:0 0 16px">Got 5 minutes? Earn up to 3 months of Pro</h1>
+        <p>Thanks for trying the Marblo beta. When you're ready, please share a thoughtful 7-question survey about your experience.</p>
+        <p><a href="${feedbackUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none">Answer the survey →</a></p>
+        <p style="color:#666;font-size:13px">Responses that pass rubric review earn <strong>3 months of Pro free</strong>. Submitting alone isn't an automatic grant, and any active paid subscription you have is never affected.</p>
+      `),
+      text: [
+        "Got 5 minutes? Earn up to 3 months of Pro",
+        "",
+        "Thanks for trying the Marblo beta. When you're ready, please share a thoughtful 7-question survey about your experience.",
+        "",
+        `Answer the survey: ${feedbackUrl}`,
+        "",
+        "Responses that pass rubric review earn 3 months of Pro free. Submitting alone isn't an automatic grant, and any active paid subscription you have is never affected.",
+      ].join("\n"),
+    };
+  }
+
+  if (locale === "ja") {
+    return {
+      subject: "Marblo ベータアンケート — Pro 最大3ヶ月",
+      html: founderHtmlShell(`
+        <h1 style="font-size:22px;margin:0 0 16px">5分でPro最大3ヶ月</h1>
+        <p>Marblo ベータのお試しありがとうございます。よろしければ、7問の誠実なアンケートで体験をお聞かせください。</p>
+        <p><a href="${feedbackUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none">アンケートに回答する →</a></p>
+        <p style="color:#666;font-size:13px">ルーブリック審査を通過した回答には <strong>Pro 3ヶ月無料</strong> を付与します。提出だけで自動付与されるわけではなく、現在お支払い中のサブスクリプションには影響しません。</p>
+      `),
+      text: [
+        "5分でPro最大3ヶ月",
+        "",
+        "Marblo ベータのお試しありがとうございます。よろしければ、7問の誠実なアンケートで体験をお聞かせください。",
+        "",
+        `アンケートに回答する: ${feedbackUrl}`,
+        "",
+        "ルーブリック審査を通過した回答には Pro 3ヶ月無料を付与します。提出だけで自動付与されるわけではなく、現在お支払い中のサブスクリプションには影響しません。",
+      ].join("\n"),
+    };
+  }
+
+  // 기본: 한국어
+  return {
+    subject: "마블로 베타 설문 — Pro 최대 3개월",
+    html: founderHtmlShell(`
+      <h1 style="font-size:22px;margin:0 0 16px">5분이면 Pro 최대 3개월</h1>
+      <p>마블로 베타를 사용해 주셔서 감사합니다. 준비되시면 7문항 성실 설문으로 사용 경험을 들려주세요.</p>
+      <p><a href="${feedbackUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none">설문 회신하기 →</a></p>
+      <p style="color:#666;font-size:13px">루브릭 검토를 통과한 응답에는 <strong>Pro 3개월</strong>을 무료로 드립니다. 제출만으로 자동 지급되지는 않으며, 현재 결제 중인 구독은 절대 영향받지 않습니다.</p>
+    `),
+    text: [
+      "5분이면 Pro 최대 3개월",
+      "",
+      "마블로 베타를 사용해 주셔서 감사합니다. 준비되시면 7문항 성실 설문으로 사용 경험을 들려주세요.",
+      "",
+      `설문 회신하기: ${feedbackUrl}`,
+      "",
+      "루브릭 검토를 통과한 응답에는 Pro 3개월을 무료로 드립니다. 제출만으로 자동 지급되지는 않으며, 현재 결제 중인 구독은 절대 영향받지 않습니다.",
+    ].join("\n"),
+  };
+}
+
 // 공통 HTML 래퍼 (간단·인라인 스타일).
 function founderHtmlShell(inner: string): string {
   return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f6f6f6">
@@ -1814,6 +1894,69 @@ async function sendFounderAccessEmail(
     console.warn("[founder-email] 발송 실패:", email, err);
     return false;
   }
+}
+
+/**
+ * 설문 회신 유도 리마인더 이메일 발송. sendFounderAccessEmail 과 동일 규약
+ * (non-throwing, RESEND_API_KEY 없으면 스킵). 대상 세그먼트 판정은 호출부가
+ * 책임진다(여기선 단일 발송만).
+ */
+async function sendFounderSurveyOfferEmail(
+  email: string,
+  locale: string,
+): Promise<boolean> {
+  try {
+    if (!RESEND_API_KEY) {
+      console.warn(
+        "[founder-email] RESEND_API_KEY 미설정 — 설문 리마인더 발송 스킵:",
+        maskEmailForLog(email),
+      );
+      return false;
+    }
+    const content = buildFounderSurveyOfferEmail(
+      normalizeFounderLocale(locale),
+    );
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `${FOUNDER_FROM_NAME} <${FOUNDER_FROM_EMAIL}>`,
+        to: [email],
+        subject: content.subject,
+        html: content.html,
+        text: content.text,
+      }),
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      console.warn(`[founder-email] resend HTTP ${resp.status}: ${body}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn(
+      "[founder-email] 설문 리마인더 발송 실패:",
+      maskEmailForLog(email),
+      err,
+    );
+    return false;
+  }
+}
+
+// 로그/보고용 이메일 마스킹 — PII 대량 노출 금지. a***@ex***.com 형태.
+function maskEmailForLog(email: string): string {
+  const at = email.indexOf("@");
+  if (at <= 0) return "***";
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  const dot = domain.lastIndexOf(".");
+  const tld = dot >= 0 ? domain.slice(dot) : "";
+  const dname = dot >= 0 ? domain.slice(0, dot) : domain;
+  const maskPart = (s: string): string => (s.length <= 1 ? "*" : `${s[0]}***`);
+  return `${maskPart(local)}@${maskPart(dname)}${tld}`;
 }
 
 // waitlist 에서 해당 이메일의 locale 을 조회(없으면 'ko').
@@ -2137,6 +2280,121 @@ export const resendFounderAccessEmail = functions.https.onCall(
       { merge: true },
     );
     return { ok: true, emailSent };
+  },
+);
+
+// ─── 설문 회신 오퍼 이메일: audience 산출 + dry-run 발송 (관리자용) ────
+//
+// ★1차 채널=이메일(사장님 채널 피벗). 이 콜러블은 "설문 회신 시 Pro 최대 3개월"
+// 리마인더를 보낼 대상을 산출하고, 기본 dry-run 으로 미리보기만 한다.
+//
+// 대상 세그먼트(중복 발송 방지):
+//   audience   = 선정(accessGrantedAt) · 미반려 · 계정연결(proSubscriptionUid) ·
+//                설문 미회신(feedbackSubmittedAt 없음)  → 이 캠페인이 보낼 대상
+//   noAccount  = 선정 · 미회신 · 계정 미연결  → 미활성 팔로업(WjGoowu…) 담당,
+//                여기선 제외해 audience 가 겹치지 않게 한다
+//   submitted  = 이미 설문 회신  → 대상 아님
+//
+// ★실발송은 confirmSend===true AND env FOUNDER_SURVEY_EMAIL_SEND_ENABLED==="true"
+// 이중 게이트를 모두 통과할 때만. 사장님 승인 전까지 env 를 켜지 않는다.
+// 보고는 집계 + 마스킹 샘플만(PII 원문 대량 노출 금지).
+export const previewFounderSurveyOffer = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const limit =
+      typeof data?.limit === "number" && Number.isInteger(data.limit)
+        ? Math.min(Math.max(data.limit, 1), 2000)
+        : 1000;
+    const confirmSend = data?.confirmSend === true;
+    const sendEnabled =
+      process.env.FOUNDER_SURVEY_EMAIL_SEND_ENABLED === "true";
+    const willSend = confirmSend && sendEnabled;
+
+    const snap = await db.collection(FOUNDERS_COLLECTION).limit(limit).get();
+
+    const audience: { email: string; locale: string }[] = [];
+    let scanned = 0;
+    let selectedNotRejected = 0;
+    let alreadySubmitted = 0;
+    let noAccountNotSubmitted = 0;
+
+    for (const doc of snap.docs) {
+      scanned += 1;
+      const v = doc.data() as Record<string, unknown>;
+      const email = typeof v.email === "string" ? v.email : doc.id;
+      const rejected = v.status === "rejected";
+      const selected = !!v.accessGrantedAt && !rejected;
+      if (!selected) continue;
+      selectedNotRejected += 1;
+
+      const submitted = !!v.feedbackSubmittedAt;
+      if (submitted) {
+        alreadySubmitted += 1;
+        continue;
+      }
+      // 미회신. 계정 연결 여부로 세그먼트 분기.
+      const hasAccount =
+        typeof v.proSubscriptionUid === "string" && !!v.proSubscriptionUid;
+      if (!hasAccount) {
+        noAccountNotSubmitted += 1;
+        continue;
+      }
+      const locale =
+        typeof v.locale === "string" ? normalizeFounderLocale(v.locale) : "ko";
+      audience.push({ email: normalizeEmail(email), locale });
+    }
+
+    // 발송(이중 게이트 통과 시에만).
+    let sent = 0;
+    let failed = 0;
+    if (willSend) {
+      for (const target of audience) {
+        const ok = await sendFounderSurveyOfferEmail(
+          target.email,
+          target.locale,
+        );
+        if (ok) {
+          sent += 1;
+          await db.collection(FOUNDERS_COLLECTION).doc(target.email).set(
+            {
+              surveyOfferEmailSent: true,
+              surveyOfferEmailSentAt:
+                admin.firestore.FieldValue.serverTimestamp(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+        } else {
+          failed += 1;
+        }
+      }
+    }
+
+    const localeBreakdown = audience.reduce<Record<string, number>>(
+      (acc, a) => {
+        acc[a.locale] = (acc[a.locale] ?? 0) + 1;
+        return acc;
+      },
+      {},
+    );
+
+    return {
+      ok: true,
+      dryRun: !willSend,
+      sendGate: { confirmSend, sendEnabled },
+      counts: {
+        scanned,
+        selectedNotRejected,
+        alreadySubmitted,
+        audience: audience.length,
+        noAccountNotSubmitted,
+      },
+      localeBreakdown,
+      // PII 보호: 마스킹된 표본만 노출(최대 10건).
+      sampleMasked: audience.slice(0, 10).map((a) => maskEmailForLog(a.email)),
+      sent,
+      failed,
+    };
   },
 );
 
@@ -2618,7 +2876,16 @@ export const getMyFounderAccess = functions.https.onCall(
       fd && fd.status !== "rejected" ? tsToIso(fd.accessGrantedAt) : null;
     const betaExpiresAt =
       fd && fd.status !== "rejected" ? tsToIso(fd.betaExpiresAt) : null;
-    return { hasAccess: !!accessGrantedAt, accessGrantedAt, betaExpiresAt };
+    // 설문 회신 여부 — 인앱 "설문 회신 시 Pro 연장" 팝업을 "미회신 파운더"로만
+    // 게이팅하려면 이 신호가 필요하다. feedbackSubmittedAt 은 submitFounderFeedback
+    // 이 제출 시점에 원자적으로 마킹한다(제출·심사·지급 어느 단계든 true 유지).
+    const feedbackSubmitted = !!(fd && fd.feedbackSubmittedAt);
+    return {
+      hasAccess: !!accessGrantedAt,
+      accessGrantedAt,
+      betaExpiresAt,
+      feedbackSubmitted,
+    };
   },
 );
 

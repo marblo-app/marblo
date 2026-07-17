@@ -324,6 +324,15 @@
     "dismiss_aria": "Dismiss promotional banner",
     "email_invalid": "Please enter a valid email address"
   },
+  "founderSurveyPrompt": {
+    "badge": "Founders only",
+    "title": "Up to 3 months of Pro for your survey",
+    "body": "Tried the beta? Leave a thoughtful 7-question survey. If it passes operator review, we'll extend your Marblo Pro free for up to 3 months.",
+    "note": "Submitting alone isn't an automatic grant — responses go through a 21-point rubric review. Active paid subscriptions are never affected.",
+    "cta": "Answer the survey",
+    "later": "Later",
+    "dismiss_aria": "Dismiss survey prompt"
+  },
   "foundation50": {
     "badge": "Founders open · selective",
     "title": "Recruiting Marblo Founders",
