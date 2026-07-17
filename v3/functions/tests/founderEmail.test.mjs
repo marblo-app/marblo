@@ -44,6 +44,8 @@ const LOCALES = {
     fallback: "A separate Discord invite will follow shortly.",
     courseSoon: "coming soon",
     courseBanned: ["at checkout"],
+    betaTotal: "up to 3 months total, including your 1-month beta",
+    offerHeadline: "Extend your beta to up to 3 months total",
     sections: [
       "1. Get the beta",
       "2. Survey after your 1-month beta",
@@ -61,6 +63,8 @@ const LOCALES = {
     fallback: "Discord の招待は追ってご案内します。",
     courseSoon: "近日公開予定",
     courseBanned: ["チェックアウトで"],
+    betaTotal: "ベータ1ヶ月を含む最大3ヶ月まで",
+    offerHeadline: "5分でベータ最大3ヶ月まで",
     sections: [
       "1. ベータ版を入手",
       "2. 1ヶ月ベータ後のアンケート",
@@ -78,6 +82,8 @@ const LOCALES = {
     fallback: "디스코드 초대는 곧 별도로 안내드리겠습니다.",
     courseSoon: "곧 공개 예정",
     courseBanned: ["체크아웃에서"],
+    betaTotal: "기존 베타 1개월 포함, 총 3개월",
+    offerHeadline: "5분이면 베타를 최대 3개월까지",
     sections: [
       "1. 베타 접근",
       "2. 1개월 베타 후 설문",
@@ -125,6 +131,10 @@ function assertNoRegression(locale, spec, { html, text, subject }) {
       `${locale}: ${kind} keeps the course coupon code`,
     );
     assert(
+      content.includes(spec.betaTotal),
+      `${locale}: ${kind} makes the survey Pro period total, not additive`,
+    );
+    assert(
       content.includes(spec.courseSoon),
       `${locale}: ${kind} gates the course coupon on launch ("${spec.courseSoon}")`,
     );
@@ -137,10 +147,32 @@ function assertNoRegression(locale, spec, { html, text, subject }) {
   }
 }
 
+function assertSurveyOfferCopy(locale, spec, content) {
+  for (const body of [
+    ["html", content.html],
+    ["text", content.text],
+  ]) {
+    const [kind, rendered] = body;
+    assert(
+      rendered.includes(spec.offerHeadline),
+      `${locale}: survey offer ${kind} headline avoids additive Pro phrasing`,
+    );
+    assert(
+      rendered.includes(spec.betaTotal),
+      `${locale}: survey offer ${kind} states the 3-month period includes the beta month`,
+    );
+    assert(
+      rendered.includes(`https://marblo.app/${locale}/beta-survey`),
+      `${locale}: survey offer ${kind} keeps the survey link`,
+    );
+  }
+}
+
 if (!FALLBACK_MODE) {
   // ─── Suite 1: DISCORD_INVITE_URL set → link + context rendered ───
   process.env.DISCORD_INVITE_URL = INVITE;
-  const { buildFounderAccessEmail } = await import("../lib/index.js");
+  const { buildFounderAccessEmail, buildFounderSurveyOfferEmail } =
+    await import("../lib/index.js");
 
   console.log("founder email — DISCORD_INVITE_URL set");
   for (const [locale, spec] of Object.entries(LOCALES)) {
@@ -166,6 +198,11 @@ if (!FALLBACK_MODE) {
       `${locale}: text drops the fallback copy when the invite is set`,
     );
     assertNoRegression(locale, spec, content);
+    assertSurveyOfferCopy(
+      locale,
+      spec,
+      buildFounderSurveyOfferEmail(locale),
+    );
   }
 
   // Unknown locales fall back to Korean, and must still get the link.
@@ -195,7 +232,8 @@ if (!FALLBACK_MODE) {
   process.exit(failed === 0 ? 0 : 1);
 } else {
   // Child: no DISCORD_INVITE_URL → fallback copy, and no link anywhere.
-  const { buildFounderAccessEmail } = await import("../lib/index.js");
+  const { buildFounderAccessEmail, buildFounderSurveyOfferEmail } =
+    await import("../lib/index.js");
 
   console.log("\nfounder email — DISCORD_INVITE_URL unset (fallback)");
   for (const [locale, spec] of Object.entries(LOCALES)) {
@@ -213,6 +251,11 @@ if (!FALLBACK_MODE) {
     assert(!html.includes("discord.gg"), `${locale}: html renders no link`);
     assert(!text.includes("discord.gg"), `${locale}: text renders no link`);
     assertNoRegression(locale, spec, content);
+    assertSurveyOfferCopy(
+      locale,
+      spec,
+      buildFounderSurveyOfferEmail(locale),
+    );
   }
 
   console.log(`fallback suite: ${passed} passed, ${failed} failed`);

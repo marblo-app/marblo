@@ -1660,7 +1660,7 @@ export function buildFounderAccessEmail(
         <p>Download Marblo here: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
         <h2 style="font-size:17px;margin:24px 0 8px">2. Survey after your 1-month beta</h2>
         <p>Please submit the beta survey here: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
-        Thoughtful survey responses that pass rubric review earn <strong>3 months of Pro free</strong>. A small set of top responses may be invited to a video interview; completing it extends Pro to <strong>6 months total</strong>.</p>
+        Thoughtful survey responses that pass rubric review extend your beta to <strong>up to 3 months total, including your 1-month beta</strong>. A small set of top responses may be invited to a video interview; completing it extends Pro to <strong>6 months total</strong>.</p>
         <h2 style="font-size:17px;margin:24px 0 8px">3. 50% off the course</h2>
         <p>The Marblo course is coming soon. When it launches, coupon code <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> gets you <strong>50% off</strong> — double the 25% early-bird discount. Hold on to the code until then.</p>
         <h2 style="font-size:17px;margin:24px 0 8px">4. Community</h2>
@@ -1674,7 +1674,7 @@ export function buildFounderAccessEmail(
         `1. Get the beta: ${downloadUrl}`,
         "",
         `2. Beta survey: ${feedbackUrl}`,
-        "   Thoughtful responses that pass rubric review earn 3 months of Pro free.",
+        "   Thoughtful responses that pass rubric review extend your beta to up to 3 months total, including your 1-month beta.",
         "   Top responses may be invited to a video interview; completion extends Pro to 6 months total.",
         "",
         `3. 50% off the course — the course is coming soon. At launch, coupon code: ${coupon} gets you 50% off (double the 25% early-bird discount).`,
@@ -1705,7 +1705,7 @@ export function buildFounderAccessEmail(
         <p>こちらからダウンロード: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
         <h2 style="font-size:17px;margin:24px 0 8px">2. 1ヶ月ベータ後のアンケート</h2>
         <p>ベータアンケートはこちら: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
-        ルーブリック審査を通過した丁寧な回答には <strong>Pro 3ヶ月無料</strong> を付与します。上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を <strong>合計6ヶ月</strong> に延長します。</p>
+        ルーブリック審査を通過した丁寧な回答は、<strong>ベータ1ヶ月を含む最大3ヶ月まで</strong> Pro を延長します。上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を <strong>合計6ヶ月</strong> に延長します。</p>
         <h2 style="font-size:17px;margin:24px 0 8px">3. 講座 50% 割引</h2>
         <p>講座は近日公開予定です。公開時にクーポンコード <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> をご利用いただくと <strong>50% OFF</strong> — アーリーバード 25% の2倍です。公開までコードを大切に保管してください。</p>
         <h2 style="font-size:17px;margin:24px 0 8px">4. コミュニティ</h2>
@@ -1719,7 +1719,7 @@ export function buildFounderAccessEmail(
         `1. ベータ版を入手: ${downloadUrl}`,
         "",
         `2. ベータアンケート: ${feedbackUrl}`,
-        "   ルーブリック審査を通過した丁寧な回答には Pro 3ヶ月無料を付与します。",
+        "   ルーブリック審査を通過した丁寧な回答は、ベータ1ヶ月を含む最大3ヶ月まで Pro を延長します。",
         "   上位回答者の一部にはビデオインタビューを依頼し、完了すると Pro を合計6ヶ月に延長します。",
         "",
         `3. 講座 50% 割引 — 講座は近日公開予定です。公開時にクーポンコード: ${coupon} で 50% OFF（アーリーバード 25% の2倍）。`,
@@ -1750,7 +1750,7 @@ export function buildFounderAccessEmail(
       <p>여기에서 마블로를 다운로드하세요: <a href="${downloadUrl}" style="color:#4f46e5">${downloadUrl}</a></p>
       <h2 style="font-size:17px;margin:24px 0 8px">2. 1개월 베타 후 설문</h2>
       <p>베타 설문은 여기에서 제출해 주세요: <a href="${feedbackUrl}" style="color:#4f46e5">${feedbackUrl}</a><br/>
-      루브릭 검토를 통과한 성실 응답에는 <strong>Pro 3개월</strong>을 무료로 드립니다. 상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 <strong>총 6개월</strong>로 연장합니다.</p>
+      루브릭 검토를 통과한 성실 응답은 <strong>베타 1개월을 최대 3개월까지</strong> 연장해 드립니다(기존 베타 1개월 포함, 총 3개월). 상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 <strong>총 6개월</strong>로 연장합니다.</p>
       <h2 style="font-size:17px;margin:24px 0 8px">3. 강의 50% 할인 쿠폰</h2>
       <p>강의는 곧 공개 예정입니다. 출시되면 쿠폰 코드 <strong style="font-family:monospace;background:#f1f1f1;padding:2px 6px;border-radius:4px">${coupon}</strong> 로 <strong>50% 할인</strong>해 드립니다 — 얼리버드 25%의 2배 혜택입니다. 출시까지 코드를 잘 보관해 주세요.</p>
       <h2 style="font-size:17px;margin:24px 0 8px">4. 커뮤니티</h2>
@@ -1764,7 +1764,7 @@ export function buildFounderAccessEmail(
       `1. 베타 접근(다운로드): ${downloadUrl}`,
       "",
       `2. 베타 설문: ${feedbackUrl}`,
-      "   루브릭 검토를 통과한 성실 응답에는 Pro 3개월을 무료로 드립니다.",
+      "   루브릭 검토를 통과한 성실 응답은 베타 1개월을 최대 3개월까지 연장해 드립니다(기존 베타 1개월 포함, 총 3개월).",
       "   상위 응답자 일부에게는 화상 인터뷰를 별도로 요청하며, 완료 시 Pro를 총 6개월로 연장합니다.",
       "",
       `3. 강의 50% 할인 — 강의는 곧 공개 예정입니다. 출시 시 쿠폰 코드: ${coupon} 로 50% 할인(얼리버드 25%의 2배).`,
@@ -1777,8 +1777,8 @@ export function buildFounderAccessEmail(
 // ─── 설문 회신 유도 리마인더 이메일 (Resend) ────────────────────────
 //
 // 초기 접근 안내(buildFounderAccessEmail)와 별개로, "베타는 활성화했지만 아직
-// 설문 미회신"인 파운더에게 "성실 설문 회신 시 운영자 검토 후 Pro 최대 3개월"을
-// 다시 안내하는 전용 리마인더. ★1차 채널은 이메일(사장님 채널 피벗): 인앱 팝업은
+// 설문 미회신"인 파운더에게 "성실 설문 회신 시 운영자 검토 후 기존 베타 1개월 포함
+// 총 3개월까지 연장"을 다시 안내하는 전용 리마인더. ★1차 채널은 이메일(사장님 채널 피벗): 인앱 팝업은
 // 앱을 여는 활성 사용자만 닿기 때문. 이 메일의 대상은 "활성화 O, 설문 X"이고,
 // 미활성 선정자 팔로업(별도 티켓 WjGoowu1rjLH4K2PNIXb)과 audience 가 겹치지 않게
 // feedbackSubmittedAt==null AND 활성 신호로 세그먼트한다(중복 발송 방지).
@@ -1791,63 +1791,63 @@ export function buildFounderSurveyOfferEmail(
 
   if (locale === "en") {
     return {
-      subject: "Your Marblo beta survey — up to 3 months of Pro",
+      subject: "Your Marblo beta survey — extend beta to 3 months total",
       html: founderHtmlShell(`
-        <h1 style="font-size:22px;margin:0 0 16px">Got 5 minutes? Earn up to 3 months of Pro</h1>
+        <h1 style="font-size:22px;margin:0 0 16px">Got 5 minutes? Extend your beta to up to 3 months total</h1>
         <p>Thanks for trying the Marblo beta. When you're ready, please share a thoughtful 7-question survey about your experience.</p>
         <p><a href="${feedbackUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none">Answer the survey →</a></p>
-        <p style="color:#666;font-size:13px">Responses that pass rubric review earn <strong>3 months of Pro free</strong>. Submitting alone isn't an automatic grant, and any active paid subscription you have is never affected.</p>
+        <p style="color:#666;font-size:13px">Responses that pass rubric review extend your beta to <strong>up to 3 months total, including your 1-month beta</strong>. Submitting alone isn't an automatic grant, and any active paid subscription you have is never affected.</p>
       `),
       text: [
-        "Got 5 minutes? Earn up to 3 months of Pro",
+        "Got 5 minutes? Extend your beta to up to 3 months total",
         "",
         "Thanks for trying the Marblo beta. When you're ready, please share a thoughtful 7-question survey about your experience.",
         "",
         `Answer the survey: ${feedbackUrl}`,
         "",
-        "Responses that pass rubric review earn 3 months of Pro free. Submitting alone isn't an automatic grant, and any active paid subscription you have is never affected.",
+        "Responses that pass rubric review extend your beta to up to 3 months total, including your 1-month beta. Submitting alone isn't an automatic grant, and any active paid subscription you have is never affected.",
       ].join("\n"),
     };
   }
 
   if (locale === "ja") {
     return {
-      subject: "Marblo ベータアンケート — Pro 最大3ヶ月",
+      subject: "Marblo ベータアンケート — ベータ最大3ヶ月まで",
       html: founderHtmlShell(`
-        <h1 style="font-size:22px;margin:0 0 16px">5分でPro最大3ヶ月</h1>
+        <h1 style="font-size:22px;margin:0 0 16px">5分でベータ最大3ヶ月まで</h1>
         <p>Marblo ベータのお試しありがとうございます。よろしければ、7問の誠実なアンケートで体験をお聞かせください。</p>
         <p><a href="${feedbackUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none">アンケートに回答する →</a></p>
-        <p style="color:#666;font-size:13px">ルーブリック審査を通過した回答には <strong>Pro 3ヶ月無料</strong> を付与します。提出だけで自動付与されるわけではなく、現在お支払い中のサブスクリプションには影響しません。</p>
+        <p style="color:#666;font-size:13px">ルーブリック審査を通過した回答は、<strong>ベータ1ヶ月を含む最大3ヶ月まで</strong> Pro を延長します。提出だけで自動付与されるわけではなく、現在お支払い中のサブスクリプションには影響しません。</p>
       `),
       text: [
-        "5分でPro最大3ヶ月",
+        "5分でベータ最大3ヶ月まで",
         "",
         "Marblo ベータのお試しありがとうございます。よろしければ、7問の誠実なアンケートで体験をお聞かせください。",
         "",
         `アンケートに回答する: ${feedbackUrl}`,
         "",
-        "ルーブリック審査を通過した回答には Pro 3ヶ月無料を付与します。提出だけで自動付与されるわけではなく、現在お支払い中のサブスクリプションには影響しません。",
+        "ルーブリック審査を通過した回答は、ベータ1ヶ月を含む最大3ヶ月まで Pro を延長します。提出だけで自動付与されるわけではなく、現在お支払い中のサブスクリプションには影響しません。",
       ].join("\n"),
     };
   }
 
   // 기본: 한국어
   return {
-    subject: "마블로 베타 설문 — Pro 최대 3개월",
+    subject: "마블로 베타 설문 — 베타 최대 3개월까지",
     html: founderHtmlShell(`
-      <h1 style="font-size:22px;margin:0 0 16px">5분이면 Pro 최대 3개월</h1>
+      <h1 style="font-size:22px;margin:0 0 16px">5분이면 베타를 최대 3개월까지</h1>
       <p>마블로 베타를 사용해 주셔서 감사합니다. 준비되시면 7문항 성실 설문으로 사용 경험을 들려주세요.</p>
       <p><a href="${feedbackUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none">설문 회신하기 →</a></p>
-      <p style="color:#666;font-size:13px">루브릭 검토를 통과한 응답에는 <strong>Pro 3개월</strong>을 무료로 드립니다. 제출만으로 자동 지급되지는 않으며, 현재 결제 중인 구독은 절대 영향받지 않습니다.</p>
+      <p style="color:#666;font-size:13px">루브릭 검토를 통과한 응답은 <strong>베타 1개월을 최대 3개월까지</strong> 연장해 드립니다(기존 베타 1개월 포함, 총 3개월). 제출만으로 자동 지급되지는 않으며, 현재 결제 중인 구독은 절대 영향받지 않습니다.</p>
     `),
     text: [
-      "5분이면 Pro 최대 3개월",
+      "5분이면 베타를 최대 3개월까지",
       "",
       "마블로 베타를 사용해 주셔서 감사합니다. 준비되시면 7문항 성실 설문으로 사용 경험을 들려주세요.",
       "",
       `설문 회신하기: ${feedbackUrl}`,
       "",
-      "루브릭 검토를 통과한 응답에는 Pro 3개월을 무료로 드립니다. 제출만으로 자동 지급되지는 않으며, 현재 결제 중인 구독은 절대 영향받지 않습니다.",
+      "루브릭 검토를 통과한 응답은 베타 1개월을 최대 3개월까지 연장해 드립니다(기존 베타 1개월 포함, 총 3개월). 제출만으로 자동 지급되지는 않으며, 현재 결제 중인 구독은 절대 영향받지 않습니다.",
     ].join("\n"),
   };
 }
@@ -2291,8 +2291,8 @@ const FOUNDER_SURVEY_OFFER_COOLDOWN_DAYS = 14;
 
 // ─── 설문 회신 오퍼 이메일: audience 산출 + dry-run 발송 (관리자용) ────
 //
-// ★1차 채널=이메일(사장님 채널 피벗). 이 콜러블은 "설문 회신 시 Pro 최대 3개월"
-// 리마인더를 보낼 대상을 산출하고, 기본 dry-run 으로 미리보기만 한다.
+// ★1차 채널=이메일(사장님 채널 피벗). 이 콜러블은 "설문 회신 시 기존 베타 1개월
+// 포함 총 3개월까지 연장" 리마인더를 보낼 대상을 산출하고, 기본 dry-run 으로 미리보기만 한다.
 //
 // 대상 세그먼트(중복 발송 방지):
 //   audience   = 선정(accessGrantedAt) · 미반려 · 계정연결(proSubscriptionUid) ·
