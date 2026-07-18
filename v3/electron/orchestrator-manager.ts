@@ -25,6 +25,15 @@ export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 const ORCH_MAX_RESTARTS = 3;
 const ORCH_BACKOFF_BASE_MS = 2000;
 const ORCH_BACKOFF_MAX_MS = 30000;
+// A crash that happens more than this long after the PREVIOUS crash is treated
+// as an INDEPENDENT failure and gets a fresh restart budget — it is not part of
+// a crash loop. Sized comfortably above the max backoff (30s) plus a short
+// unhealthy uptime, so a genuine crash loop (dies again within seconds of every
+// restart) stays inside one budget while a once-in-a-while crash resets it.
+// Without this, restartCount only ever reset in stop(), so a long-lived
+// orchestrator's 4th LIFETIME crash exhausted the budget and permanently
+// disabled auto-recovery even though every crash had recovered fine.
+const ORCH_CRASH_LOOP_WINDOW_MS = 60_000;
 const INJECT_BOOT_GATE_STABILITY_ATTEMPTS = 5;
 
 // --- Concurrent-resume guard ---
@@ -102,9 +111,7 @@ function patchCodexMarbloMcpEnv(
 ): void {
   const configContent = fs.readFileSync(configPath, "utf-8");
   const existingEnvMatch =
-    /\n?\[mcp_servers\.marblo\.env\]\n([\s\S]*?)(?=\n\[|$)/.exec(
-      configContent,
-    );
+    /\n?\[mcp_servers\.marblo\.env\]\n([\s\S]*?)(?=\n\[|$)/.exec(configContent);
   const existingEnv = existingEnvMatch
     ? parseCodexTomlEnvBlock(existingEnvMatch[1])
     : {};
@@ -380,6 +387,10 @@ export class OrchestratorManager {
   // --- Auto-restart state ---
   private stopRequested = false;
   private restartCount = 0;
+  // Wall-clock of the most recent crash, used to distinguish a crash LOOP
+  // (rapid, keeps the budget) from INDEPENDENT crashes across a healthy run
+  // (resets the budget). See ORCH_CRASH_LOOP_WINDOW_MS / registerCrashForRestart.
+  private lastCrashAt: number | null = null;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private lastLaunchArgs: {
     projectId: string;
@@ -600,10 +611,7 @@ export class OrchestratorManager {
           );
           effectiveResumeSessionId = undefined;
         }
-      } else if (
-        effectiveResumeSessionId !== "new" &&
-        !hasSavedCodexSession
-      ) {
+      } else if (effectiveResumeSessionId !== "new" && !hasSavedCodexSession) {
         console.warn(
           `[Orchestrator:${this.kind}] Codex resume requested for "${effectiveResumeSessionId}" but no saved session exists for ${sessionId}; starting new`,
         );
@@ -1065,15 +1073,21 @@ export class OrchestratorManager {
         return;
       }
 
-      // Crash detected — attempt auto-restart with backoff
-      if (this.restartCount < ORCH_MAX_RESTARTS && this.lastLaunchArgs) {
+      // Crash detected — attempt auto-restart with backoff, but only within the
+      // crash-LOOP budget. registerCrashForRestart resets the budget first when
+      // this crash is independent of the previous one (healthy run in between),
+      // so an occasional crash never permanently disables auto-recovery.
+      const attempt = this.registerCrashForRestart(Date.now());
+      if (attempt !== null && this.lastLaunchArgs) {
+        // Back off on the PRE-increment attempt number so the first restart of a
+        // loop waits ORCH_BACKOFF_BASE_MS (attempt 1 → 2^0), matching the prior
+        // schedule exactly (2s, 4s, 8s).
         const delay = Math.min(
-          ORCH_BACKOFF_BASE_MS * Math.pow(2, this.restartCount),
+          ORCH_BACKOFF_BASE_MS * Math.pow(2, attempt - 1),
           ORCH_BACKOFF_MAX_MS,
         );
-        this.restartCount++;
         console.log(
-          `[Orchestrator] Crash (exit ${exitCode}). Restart ${this.restartCount}/${ORCH_MAX_RESTARTS} in ${delay}ms`,
+          `[Orchestrator] Crash (exit ${exitCode}). Restart ${attempt}/${ORCH_MAX_RESTARTS} in ${delay}ms`,
         );
 
         this.restartTimer = setTimeout(() => {
@@ -1131,6 +1145,43 @@ export class OrchestratorManager {
     return this.session;
   }
 
+  /**
+   * Record a crash and decide whether an auto-restart is still in budget.
+   *
+   * ORCH_MAX_RESTARTS guards against a crash LOOP — a session that dies again
+   * within seconds of every restart — NOT against independent crashes spread
+   * across a long healthy run. If the previous crash was more than
+   * ORCH_CRASH_LOOP_WINDOW_MS ago, this crash is independent: reset the budget
+   * before counting it, so a once-in-a-while crash never permanently disables
+   * auto-recovery. (Before this, restartCount only ever reset in stop(), so a
+   * long-lived orchestrator's 4th LIFETIME crash hit the cap and it went
+   * permanently to "error" despite every crash having recovered fine.)
+   *
+   * Returns the 1-based restart attempt number when a restart is in budget, or
+   * null when the crash-loop budget is exhausted (give up). Mutates
+   * restartCount and lastCrashAt. Pass Date.now() so the clock is injectable
+   * from tests.
+   */
+  private registerCrashForRestart(now: number): number | null {
+    if (
+      this.lastCrashAt !== null &&
+      now - this.lastCrashAt > ORCH_CRASH_LOOP_WINDOW_MS
+    ) {
+      if (this.restartCount > 0) {
+        console.log(
+          `[Orchestrator] ${Math.round(
+            (now - this.lastCrashAt) / 1000,
+          )}s since last crash — independent failure, resetting restart budget`,
+        );
+      }
+      this.restartCount = 0;
+    }
+    this.lastCrashAt = now;
+    if (this.restartCount >= ORCH_MAX_RESTARTS) return null;
+    this.restartCount += 1;
+    return this.restartCount;
+  }
+
   stop(): void {
     if (!this.session) return;
 
@@ -1147,6 +1198,7 @@ export class OrchestratorManager {
     this.setStatus("stopped");
     this.session = null;
     this.restartCount = 0;
+    this.lastCrashAt = null;
     this.currentMissionId = null;
     // 대기 중이던 injectMessage 들이 영영 매달리지 않게 게이트를 푼다 — 세션이
     // null 이라 실제 write 는 스킵된다.

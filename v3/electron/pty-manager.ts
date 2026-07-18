@@ -176,6 +176,16 @@ export class PtyManager {
       console.warn(
         `[PtyManager] create() reusing live id "${id}" — destroying stale PTY first (fd-leak guard)`,
       );
+      // Take down the stale child's whole process SUBTREE, not just the direct
+      // child. destroyProcess() only .destroy()s node-pty — which SIGHUPs the
+      // direct child and releases the master fd — but never reaches DETACHED
+      // grandchildren (Codex's out-of-group marblo MCP `dist-mcp/index.js`, the
+      // bun-wrapped Telegram poller). Without a group/subtree signal those
+      // reparent to launchd and pile up as orphans (MCP -32000 / getUpdates 409),
+      // exactly the leak kill() already guards against. A caller re-create()ing a
+      // live deterministic id (e.g. `agent-<id>`) without an intervening kill()
+      // hits this path, so mirror kill(): subtree-signal first, then release fd.
+      this.killProcessTree(stale.process.pid);
       this.destroyProcess(stale.process, stale.orphanFds);
       this.sessions.delete(id);
     }

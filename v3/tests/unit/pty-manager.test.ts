@@ -329,9 +329,25 @@ describe("PtyManager — master-fd leak guard (ticket s8HmkKIPzpMohBdth1mT)", ()
   // leaves the map entry, or a paused stream all leak the master fd, which
   // accumulates against macOS kern.tty.ptmx_max (511) until openpty() returns
   // ENXIO and every new agent/terminal spawn dies with "posix_spawnp failed".
+  //
+  // create()-reuse now also subtree-signals the stale child (Fix A), so this
+  // block spies process.kill (never signal for real) and fakes timers (so the
+  // group-kill escalation timer scheduled on reuse is discarded, not fired at a
+  // real pid). useRealTimers() in afterEach drops any pending fake timer; it also
+  // composes with tests that install their own inner spy/timers (LIFO restore).
+  let killSpy: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
+    vi.useFakeTimers();
     spawned.length = 0;
     spawnControl.nextError = null;
+    killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementation(() => true as unknown as boolean);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    killSpy.mockRestore();
   });
 
   it("destroys the stale live PTY when create() reuses the same id (no fd leak on relaunch)", () => {
@@ -347,6 +363,28 @@ describe("PtyManager — master-fd leak guard (ticket s8HmkKIPzpMohBdth1mT)", ()
     expect(first.destroyed).toBe(1);
     expect(second.destroyed).toBe(0);
     expect(pm.listSessions()).toEqual([{ id: "agent-7", name: "worker" }]);
+  });
+
+  it("takes down the stale child's whole process GROUP on create()-reuse (detached MCP/poller can't orphan)", () => {
+    // Root cause (Fix A): before this, create()-reuse only ran destroyProcess —
+    // .destroy() SIGHUPs the DIRECT child and frees the fd, but never reaches a
+    // detached grandchild (Codex's out-of-group marblo MCP, the bun Telegram
+    // poller). Those reparented to launchd and piled up (MCP -32000 / 409). Now
+    // reuse mirrors kill(): signal the whole subtree first.
+    const pm = new PtyManager();
+    pm.create("agent-9", "worker");
+    const first = spawned[0] as FakePtyInst;
+    first.pid = 7777;
+
+    // Reuse the SAME live id WITHOUT an intervening kill() — the orphan-prone path.
+    pm.create("agent-9", "worker");
+
+    // Graceful group SIGTERM scoped to the stale child's own group (-pid)…
+    expect(killSpy).toHaveBeenCalledWith(-7777, "SIGTERM");
+    // …and the fd is still released (leak guard preserved).
+    expect(first.destroyed).toBe(1);
+    // New pty owns the id.
+    expect(pm.listSessions()).toEqual([{ id: "agent-9", name: "worker" }]);
   });
 
   it("releases the master fd on child self-exit and evicts the session", () => {
