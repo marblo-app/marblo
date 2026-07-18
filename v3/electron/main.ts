@@ -2650,10 +2650,19 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
   }
   allWindows.add(win);
 
+  // Capture the webContents id NOW, while the window is alive. The "closed"
+  // event fires AFTER the native window and its webContents are destroyed, so
+  // reading win.webContents in that handler throws "Object has been destroyed"
+  // (FATAL at main.js:2228 → this line). An isDestroyed() guard is the wrong
+  // fix here: inside "closed" it is always true, which would silently turn the
+  // whole cleanup block below into dead code and leak every per-window map.
+  const senderId = win.webContents.id;
+
   win.on("closed", () => {
     allWindows.delete(win);
-    // Best-effort cleanup of per-window state.
-    const closedSenderId = win.webContents.id;
+    // Best-effort cleanup of per-window state. Keyed by the id captured above —
+    // never re-read it off the destroyed window.
+    const closedSenderId = senderId;
     for (const [sid, ownerId] of ptyOwners) {
       if (ownerId === closedSenderId) ptyOwners.delete(sid);
     }
@@ -2664,6 +2673,13 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
         // left running with no place to send output.
         orchestrators.get(pid)?.stop();
       }
+    }
+    // Mission orchestrators are owned per-window too (missionOrchestratorOwners
+    // is populated on mission:start). Without this the map keeps accumulating
+    // dead webContents ids, and owner lookups for those projects silently fall
+    // back to mainWindow forever.
+    for (const [pid, ownerId] of missionOrchestratorOwners) {
+      if (ownerId === closedSenderId) missionOrchestratorOwners.delete(pid);
     }
     // Close this window's fs watcher (created in fs:watch handler).
     fsManager.stopWatching(`win-${closedSenderId}`);
