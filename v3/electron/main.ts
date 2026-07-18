@@ -1869,6 +1869,23 @@ function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
 const recordMergeHistory = async (
   record: MergeHistoryRecord,
 ): Promise<void> => {
+  // Single capture, fed to both sinks (ticket cZBlOnkg). (1) ML sink first: a
+  // synchronous IPC send to the renderer's gated telemetry choke point — routed
+  // to BigQuery `events` as task:merged for routing-data collection. Emitted
+  // before the awaited Firestore write so a slow authReady never delays it; the
+  // renderer honors the telemetry opt-out. (2) Audit sink: the append-only
+  // merge_history doc below, now enriched with the same de-identified diff
+  // features so the "완료 이력" view can show change size without a re-`git show`.
+  mainTelemetry.taskMerged(mainWindow, {
+    taskId: record.taskId ?? null,
+    projectId: record.projectId,
+    mode: record.mode,
+    filesChanged: record.filesChanged,
+    linesAdded: record.linesAdded,
+    linesDeleted: record.linesDeleted,
+    changeType: record.changeType,
+  });
+
   const { app, authReady } = getMissionFirebaseApp();
   await authReady;
   const db = getFirestore(app);
@@ -1882,6 +1899,11 @@ const recordMergeHistory = async (
     mode: record.mode,
     mergedAt: fbTimestamp.fromDate(record.mergedAt),
     createdAt: fbTimestamp.now(),
+    // De-identified diff features (counts + path-category only; no raw diff).
+    filesChanged: record.filesChanged ?? null,
+    linesAdded: record.linesAdded ?? null,
+    linesDeleted: record.linesDeleted ?? null,
+    changeType: record.changeType ?? null,
   });
 };
 

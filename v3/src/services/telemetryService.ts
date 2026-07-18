@@ -19,7 +19,10 @@ export type TelemetryEvent =
   | "session:started"
   | "session:ended"
   | "chat:message_sent"
-  | "chat:active_users";
+  | "chat:active_users"
+  // Merge-outcome label emitted from the main process at the merge chokepoint
+  // (electron/main.ts recordMergeHistory). Routed to BigQuery `events`.
+  | "task:merged";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -53,6 +56,12 @@ interface TelemetryPayload {
   promptLength?: number;
   parentAgentId?: string;
   retryOf?: string;
+  // Diff-derived merge features (task:merged). Mirror the BigQuery `events`
+  // schema so the IPC bridge stays type-safe passing them through. taskType
+  // holds the path-derived change category for merge events.
+  filesChanged?: number;
+  linesChanged?: number;
+  taskType?: string;
 }
 
 /**

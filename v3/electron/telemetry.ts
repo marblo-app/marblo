@@ -156,6 +156,42 @@ export const mainTelemetry = {
   // choke point(firstPartyTelemetryDefaultEnabled opt-in 게이트 + scrub PII)를
   // 통과한 뒤에야 외부로 나간다 — 동의 OFF 면 외부송신 0. 페이로드는 비식별:
   // 프롬프트 원문·파일경로·키를 절대 싣지 않는다(id/모델명/점수/사유 문자열만).
+  // ── 머지 결과 스냅샷 (MERGE-OUTCOME-TELEMETRY, ticket cZBlOnkg) ─────
+  //
+  // 태스크가 squash-merge 로 base 에 착륙한 시점의 결과 라벨. audit 웨지
+  // (merge_history)와 동일한 단일 캡처 지점(recordMergeHistory)에서 파생특징을
+  // 한 번 계산해 이 이벤트로 ML 싱크(BigQuery events)에도 흘린다 — 중복 캡처
+  // 없음. taskId 로 task_outcomes / cost_logs 와 join → "이 모델·역할·복잡도의
+  // 태스크가 결국 머지됐나, diff 규모는 얼마였나" 라벨을 완성한다.
+  //
+  // 게이트·PII: 다른 이벤트와 동일하게 렌더러 logTelemetry choke point(opt-in
+  // 게이트 + scrub)를 통과해야 외부로 나간다. 페이로드는 비식별 — 원문 diff/
+  // 코드/파일경로 없이 개수·라인±·경로파생 카테고리만 싣는다.
+  taskMerged(win: BrowserWindow | null, payload: TaskMergedPayload) {
+    // taskId 는 ML join key — 없으면(ad-hoc 워크트리 머지) 학습가치 0 이라 skip.
+    if (!payload.taskId) return;
+    const linesAdded = payload.linesAdded ?? 0;
+    const linesDeleted = payload.linesDeleted ?? 0;
+    sendTelemetry(win, "task:merged", {
+      taskId: payload.taskId,
+      projectId: payload.projectId,
+      success: true,
+      // events 테이블에 이미 존재하는 first-class ML 컬럼으로 적재.
+      filesChanged: payload.filesChanged,
+      linesChanged: linesAdded + linesDeleted,
+      // 경로파생 coarse 카테고리(docs/test/config/code/mixed) — bug-fix vs
+      // feature 는 커밋 의미가 필요해 의도적으로 수집 안 함.
+      taskType: payload.changeType,
+      // 머지 고유 파생필드는 metadata(JSON)로 접는다(dispatch:decision 패턴).
+      metadata: {
+        mergeMode: payload.mode,
+        linesAdded,
+        linesDeleted,
+        changeType: payload.changeType,
+      },
+    });
+  },
+
   dispatchDecision(
     win: BrowserWindow | null,
     payload: DispatchDecisionPayload,
@@ -180,6 +216,20 @@ export const mainTelemetry = {
     });
   },
 };
+
+/** task:merged 이벤트 페이로드. 비식별 — 개수·라인±·경로파생 카테고리만. */
+export interface TaskMergedPayload {
+  /** ML join key. null 이면 emit skip(ad-hoc 워크트리 머지). */
+  taskId: string | null;
+  projectId: string;
+  mode: "manual" | "auto";
+  /** 변경 파일 수(numstat). git show 실패 시 undefined. */
+  filesChanged?: number;
+  linesAdded?: number;
+  linesDeleted?: number;
+  /** 경로파생 coarse 카테고리(docs/test/config/code/mixed/unknown). */
+  changeType?: string;
+}
 
 /** dispatch:decision 이벤트 페이로드. 비식별 — id/모델명/점수/사유만. */
 export interface DispatchDecisionPayload {

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { parseDiffNumstat, type DiffStat } from "./merge-features";
 
 export interface GitResult {
   code: number;
@@ -580,6 +581,26 @@ export class WorktreeManager {
       insertions,
       deletions,
     };
+  }
+
+  /**
+   * De-identified diff stats for a single (squash-merged) commit landed on
+   * base, via `git show --numstat`. `--format=` drops the commit header so only
+   * numstat lines remain; `-M` folds renames. Returns null on any git failure —
+   * merge-outcome telemetry treats missing stats as "unknown" and never fails
+   * the merge over it. Privacy gate: only counts + paths, never diff text.
+   */
+  async mergedCommitDiffStat(
+    repoRoot: string,
+    sha: string,
+  ): Promise<DiffStat | null> {
+    const res = await this.runGit(
+      ["show", "--numstat", "--format=", "-M", sha],
+      repoRoot,
+      { timeoutMs: 15_000 },
+    );
+    if (res.code !== 0) return null;
+    return parseDiffNumstat(res.stdout);
   }
 
   async remove(

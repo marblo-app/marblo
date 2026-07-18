@@ -7,6 +7,7 @@ import type {
   WorktreeManager,
   WorktreeStatus,
 } from "./worktree-manager";
+import { classifyChangeType } from "./merge-features";
 
 export interface WorktreeProjectRoot {
   projectId: string;
@@ -79,6 +80,14 @@ export interface MergeHistoryRecord {
   headSha: string;
   mode: MergeMode;
   mergedAt: Date;
+  // De-identified diff features derived ONCE at this chokepoint (privacy gate:
+  // counts + path-category only, never raw diff). Fed to BOTH the audit doc and
+  // the ML merge-outcome telemetry so the merge is captured a single time. Left
+  // undefined when `git show` on the squashed sha failed.
+  filesChanged?: number;
+  linesAdded?: number;
+  linesDeleted?: number;
+  changeType?: string;
 }
 
 /**
@@ -356,7 +365,21 @@ export function registerWorktreeIpc(
     // Append-only audit record on success — fire-and-forget so a Firestore
     // hiccup never fails or stalls the merge. Needs projectId + the sha that
     // the manager captured before teardown; skip silently if either is absent.
-    if (result.ok && recordMergeHistory && parsed.projectId && result.mergedSha) {
+    if (
+      result.ok &&
+      recordMergeHistory &&
+      parsed.projectId &&
+      result.mergedSha
+    ) {
+      // Single-source merge capture (ticket cZBlOnkg): compute de-identified
+      // diff features ONCE here, then hand them to recordMergeHistory which
+      // feeds BOTH the audit trail (merge_history) and the ML sink
+      // (task:merged → BigQuery events). No duplicate capture, no raw diff.
+      const stat = await worktreeManager.mergedCommitDiffStat(
+        parsed.repoRoot,
+        result.mergedSha,
+      );
+      const changeType = stat ? classifyChangeType(stat.paths) : undefined;
       void recordMergeHistory({
         projectId: parsed.projectId,
         taskId: parsed.taskId,
@@ -366,6 +389,10 @@ export function registerWorktreeIpc(
         headSha: result.mergedSha,
         mode: parsed.mode ?? "manual",
         mergedAt: new Date(),
+        filesChanged: stat?.filesChanged,
+        linesAdded: stat?.linesAdded,
+        linesDeleted: stat?.linesDeleted,
+        changeType,
       }).catch((err) => {
         console.error("[MergeHistory] record failed:", err);
       });

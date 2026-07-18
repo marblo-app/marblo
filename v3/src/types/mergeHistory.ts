@@ -21,4 +21,12 @@ export interface MergeHistoryEntry {
   /** "manual" = human clicked Merge; "auto" = orchestrator auto-merge. */
   mode: MergeMode;
   mergedAt: Date;
+  // De-identified diff features captured at merge time (counts + path category
+  // only — never raw diff). Optional: absent on pre-existing rows and whenever
+  // `git show` on the squashed commit failed. Same values feed the BigQuery
+  // task:merged ML label (ticket cZBlOnkg).
+  filesChanged?: number;
+  linesAdded?: number;
+  linesDeleted?: number;
+  changeType?: string;
 }
