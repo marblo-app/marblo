@@ -107,6 +107,36 @@ export function where(field: string, op: string, value: unknown) {
   return { type: "where", field, op, value };
 }
 
+// Atomic numeric add, matching firebase/firestore's FieldValue.increment().
+// applyUpdate() resolves the sentinel against the stored value, so tests
+// exercise real accumulate semantics — a sentinel that merely got stored
+// verbatim would make per-task cost/retry rollups look correct while
+// accumulating nothing.
+const INCREMENT = Symbol.for("mock.increment");
+
+interface IncrementSentinel {
+  [INCREMENT]: true;
+  by: number;
+}
+
+function isIncrement(value: unknown): value is IncrementSentinel {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<symbol, unknown>)[INCREMENT] === true
+  );
+}
+
+export function increment(by: number): IncrementSentinel {
+  return { [INCREMENT]: true, by };
+}
+
+function resolveValue(existing: unknown, value: unknown): unknown {
+  if (!isIncrement(value)) return value;
+  const base = typeof existing === "number" ? existing : 0;
+  return base + value.by;
+}
+
 // Apply a Firestore-style update: keys containing "." are nested field paths
 // (e.g. "projection.statusCounts"), everything else is a shallow top-level set.
 function applyUpdate(
@@ -116,7 +146,7 @@ function applyUpdate(
   const next = { ...existing };
   for (const [key, value] of Object.entries(data)) {
     if (!key.includes(".")) {
-      next[key] = value;
+      next[key] = resolveValue(next[key], value);
       continue;
     }
     const parts = key.split(".");
@@ -126,7 +156,8 @@ function applyUpdate(
       cursor[p] = { ...((cursor[p] as Record<string, unknown>) ?? {}) };
       cursor = cursor[p] as Record<string, unknown>;
     }
-    cursor[parts[parts.length - 1]] = value;
+    const leaf = parts[parts.length - 1];
+    cursor[leaf] = resolveValue(cursor[leaf], value);
   }
   return next;
 }

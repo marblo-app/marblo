@@ -3,6 +3,7 @@ import { httpsCallable } from "firebase/functions";
 import { doc, updateDoc, increment, serverTimestamp } from "firebase/firestore";
 import { functions, db } from "../lib/firebase";
 import { isTelemetryEnabled } from "../services/telemetryService";
+import { recordTaskCost } from "../services/taskRollups";
 
 const logCostBatch = httpsCallable(functions, "logCostBatch");
 
@@ -74,6 +75,21 @@ export function useCostWriter() {
             `[CostWriter] Firestore update skipped for agent=${data.agentId}:`,
             err?.code || err?.message || err,
           );
+        });
+      }
+
+      // 1b. Firestore — tasks/<id> per-task rollups. The agent doc totals
+      // above are LIFETIME sums across every task an agent ever touched, which
+      // is why task_outcomes.totalCost was 0/NULL in 29/29 BigQuery rows: it
+      // read a number that answers a different question. data.taskId is the
+      // agent's currentTaskId — the same stamp that gives cost_logs its 98.6%
+      // join rate — so these deltas attribute cleanly to one ticket. Buffered
+      // and flushed on an interval; see services/taskRollups.ts.
+      if (data.taskId) {
+        recordTaskCost(data.taskId, {
+          cost: data.totalCost,
+          inputTokens: data.inputTokens,
+          outputTokens: data.outputTokens,
         });
       }
 

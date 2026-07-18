@@ -1036,7 +1036,8 @@ export class AgentManager {
         mainTelemetry.agentRestarted(
           this.getMainWindow?.() ?? null,
           agent.id,
-          agent.restartCount
+          agent.restartCount,
+          agent.currentTaskId
         );
         console.log(
           `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`
@@ -1055,7 +1056,8 @@ export class AgentManager {
         mainTelemetry.agentCrashed(
           this.getMainWindow?.() ?? null,
           agent.id,
-          exitCode
+          exitCode,
+          agent.currentTaskId
         );
         if (fastFailExceeded) {
           console.error(

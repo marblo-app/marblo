@@ -1,8 +1,6 @@
 import { where, type Unsubscribe } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
 import type { Task, TaskStatus } from "../types/task";
-import telemetry, { getClientId, isTelemetryEnabled } from "./telemetryService";
-import { functions } from "../lib/firebase";
+import telemetry from "./telemetryService";
 import {
   getDocument,
   queryDocuments,
@@ -14,17 +12,10 @@ import {
   convertTimestamps,
 } from "./firestore";
 import { assertTransition } from "./stateMachine";
-
-/** Subset of agents/<id> doc we care about for task-outcome enrichment. */
-interface AgentCostSnapshot {
-  model?: string;
-  detectedModelId?: string;
-  totalCost?: number;
-  totalInputTokens?: number;
-  totalOutputTokens?: number;
-}
-
-const logTaskOutcomeFn = httpsCallable(functions, "logTaskOutcome");
+import {
+  observeTaskSnapshot,
+  resetTaskOutcomeObserver,
+} from "./taskOutcomeReporter";
 
 const COLLECTION = "tasks";
 const DATE_FIELDS = ["claimedAt", "createdAt", "updatedAt"];
@@ -93,14 +84,26 @@ export function subscribeToTasks(
   projectId: string,
   callback: (tasks: Task[]) => void,
 ): Unsubscribe {
-  return subscribeToCollection<Record<string, unknown>>(
+  const unsubscribe = subscribeToCollection<Record<string, unknown>>(
     COLLECTION,
     [where("projectId", "==", projectId)],
-    (docs) =>
-      callback(
-        docs.map(toTask).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)),
-      ),
+    (docs) => {
+      const tasks = docs
+        .map(toTask)
+        .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+      // ML label choke point. Runs off the snapshot rather than the mutation
+      // helpers below because agents change status through the MCP server,
+      // which writes Firestore directly and never calls into this module —
+      // that gap is why task_outcomes had 29 rows against 216 dispatches.
+      // See services/taskOutcomeReporter.ts.
+      observeTaskSnapshot(tasks);
+      callback(tasks);
+    },
   );
+  return () => {
+    resetTaskOutcomeObserver();
+    unsubscribe();
+  };
 }
 
 export async function claimTask(
@@ -170,61 +173,13 @@ export async function updateTaskStatus(
       ? Date.now() - new Date(task.claimedAt).getTime()
       : undefined;
     telemetry.taskCompleted(taskId, durationMs, task.claimedBy ?? undefined);
-
-    // Pull model + cumulative cost from the agent doc so the outcome row
-    // carries actual signal instead of nulls. This is best-effort; if the
-    // agent doc is missing (e.g. orchestrator session) we still log with
-    // nulls so the success / duration row lands.
-    let agentSnap: AgentCostSnapshot | null = null;
-    if (task.claimedBy) {
-      try {
-        agentSnap = await getDocument<AgentCostSnapshot>(
-          "agents",
-          task.claimedBy,
-        );
-      } catch {
-        agentSnap = null;
-      }
-    }
-    // Prefer the cost-tracker-detected versioned id (e.g. "claude-opus-4-7")
-    // over the family enum ("claude") for ML training fidelity.
-    const outcomeModel = agentSnap?.detectedModelId ?? agentSnap?.model ?? null;
-
-    // Log task outcome to BigQuery for ML training data — de-identified
-    // first-party telemetry, gated by the kill-switch and user opt-out.
-    // The Firestore task writes above are core product data and stay; only
-    // this analytics send is gated. See lib/telemetry/firstPartyGate.ts.
-    if (isTelemetryEnabled()) {
-      logTaskOutcomeFn({
-        outcome: {
-          clientId: getClientId(),
-          taskId,
-          projectId: task.projectId,
-          taskType: null, // TODO: derive from task metadata when available
-          taskComplexity: task.priority, // use priority as proxy for now
-          role: task.role,
-          model: outcomeModel,
-          scopeFileCount: task.scope?.length ?? 0,
-          success: true,
-          durationMs: durationMs ?? null,
-          // Cumulative-at-completion. NOT per-task delta — for that, join
-          // BigQuery cost_logs by taskId. Still useful as a noisy signal
-          // ("agent in this state had spent N total when it finished").
-          totalInputTokens: agentSnap?.totalInputTokens ?? null,
-          totalOutputTokens: agentSnap?.totalOutputTokens ?? null,
-          totalCost: agentSnap?.totalCost ?? null,
-          retriesCount: 0,
-          createdAt:
-            task.createdAt instanceof Date
-              ? task.createdAt.toISOString()
-              : new Date().toISOString(),
-          completedAt: new Date().toISOString(),
-        },
-      }).catch((err) => {
-        console.warn("[TaskOutcome] Failed to log outcome:", err);
-      });
-    }
   }
+
+  // NOTE: the task_outcomes ML row is NOT written here. It used to be, which
+  // meant only UI-driven completions were ever labelled — agents report status
+  // through the MCP server, which writes Firestore directly and never reaches
+  // this function. Reporting now hangs off the tasks subscription so every
+  // writer is covered exactly once; see services/taskOutcomeReporter.ts.
 
   // 태스크 상태 전이(REVIEW/DONE) 는 audit_logs → 우측 ActivityStreamPanel
   // 로만 노출한다. 팀 채팅(messages) 컬렉션에는 푸시하지 않는다 — 채팅은

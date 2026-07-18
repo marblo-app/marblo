@@ -2,6 +2,7 @@ import { httpsCallable } from "firebase/functions";
 import { auth, functions } from "../lib/firebase";
 import { scrubValue } from "../lib/telemetry/scrub";
 import { firstPartyTelemetryDefaultEnabled } from "../lib/telemetry/firstPartyGate";
+import { recordTaskRetry } from "./taskRollups";
 
 export type TelemetryEvent =
   | "agent:spawned"
@@ -183,6 +184,16 @@ export function logTelemetry(payload: TelemetryPayload) {
   // every telemetry path (convenience helpers + IPC bridge) flows through here.
   const clean = anonymize(payload);
 
+  // Attribute the restart to its task. This is the only place the signal is
+  // observable in the renderer: the main process emits agent:restarted over
+  // the telemetry IPC bridge, which lands here verbatim rather than through
+  // the helper below. Turning it into a durable per-task counter is what makes
+  // task_outcomes.retriesCount a real number instead of the hardcoded 0.
+  // Fire-and-forget; a failed counter write must never drop the event itself.
+  if (clean.event === "agent:restarted" && clean.taskId) {
+    void recordTaskRetry(clean.taskId);
+  }
+
   // Route heartbeats to separate queue/table
   if (clean.event === "agent:heartbeat") {
     heartbeatQueue.push(clean);
@@ -289,12 +300,23 @@ export const telemetry = {
     });
   },
 
-  agentCrashed(agentId: string, exitCode: number) {
-    logTelemetry({ event: "agent:crashed", agentId, exitCode, success: false });
+  agentCrashed(agentId: string, exitCode: number, taskId?: string) {
+    logTelemetry({
+      event: "agent:crashed",
+      agentId,
+      taskId,
+      exitCode,
+      success: false,
+    });
   },
 
-  agentRestarted(agentId: string, attempt: number) {
-    logTelemetry({ event: "agent:restarted", agentId, metadata: { attempt } });
+  agentRestarted(agentId: string, attempt: number, taskId?: string) {
+    logTelemetry({
+      event: "agent:restarted",
+      agentId,
+      taskId,
+      metadata: { attempt },
+    });
   },
 
   taskCreated(

@@ -40,12 +40,30 @@ export const mainTelemetry = {
     sendTelemetry(win, "agent:stopped", { agentId, exitCode });
   },
 
-  agentCrashed(win: BrowserWindow | null, agentId: string, exitCode: number) {
-    sendTelemetry(win, "agent:crashed", { agentId, exitCode });
+  // `taskId` is the agent's currentTaskId at crash/restart time. Without it
+  // these events were observable only per-agent: BigQuery held 820 crashes and
+  // 987 restarts with taskId attached to exactly 0 of them, so "this model
+  // kept dying on this task" — one of the strongest quality signals we have —
+  // could never be joined back to the task it was about
+  // (docs/research/routing-slm-data-collection.md §3.3). Same stamp the cost
+  // tracker uses, which already achieves a 98.6% join rate. Null for agents
+  // not bound to a board task (one-off / orchestrator sessions).
+  agentCrashed(
+    win: BrowserWindow | null,
+    agentId: string,
+    exitCode: number,
+    taskId?: string | null,
+  ) {
+    sendTelemetry(win, "agent:crashed", { agentId, exitCode, taskId });
   },
 
-  agentRestarted(win: BrowserWindow | null, agentId: string, attempt: number) {
-    sendTelemetry(win, "agent:restarted", { agentId, attempt });
+  agentRestarted(
+    win: BrowserWindow | null,
+    agentId: string,
+    attempt: number,
+    taskId?: string | null,
+  ) {
+    sendTelemetry(win, "agent:restarted", { agentId, attempt, taskId });
   },
 
   tokenUsage(
