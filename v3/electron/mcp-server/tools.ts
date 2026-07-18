@@ -59,6 +59,11 @@ import {
   STALE_TERMINAL_REAP_MS,
 } from "./agent-reap.js";
 import {
+  OPEN_TASK_STATUSES,
+  mergeListedTasks,
+  compareTasksForListing,
+} from "./task-listing.js";
+import {
   formatCompletionReport,
   resolveCompletionReport,
   type CompletionSummary,
@@ -937,7 +942,7 @@ export function registerTools(server: McpServer): void {
   // 1. get_all_tasks
   auditedTool(
     "get_all_tasks",
-    "List tasks (open/non-terminal first, completed hidden at the tail). Filter by project/role; all_projects=true to span projects. Capped to `limit` (default 50) to keep results lean — raise limit or filter to see more.",
+    "List tasks. EVERY open (non-terminal) task is listed before any completed one — open tasks are never crowded out by completed ones, whatever the limit. Completed tasks fill the leftover row budget as a tail. Filter by project/role; all_projects=true to span projects. Capped to `limit` (default 50) to keep results lean — raise limit or filter to see more.",
     {
       project_id: z.string().optional().describe("Project ID"),
       role: z
@@ -974,34 +979,56 @@ export function registerTools(server: McpServer): void {
         constraints.push(where("contextId", "==", contextId));
       if (role) constraints.push(where("role", "==", role));
 
-      // P2-5: bound the read to the display limit, ordered by the primary sort
-      // key (priority desc). The in-memory sort below still applies the
-      // terminal-first refinement + deleted/context filters over the fetched
-      // window, so the ORDER of returned rows is unchanged.
+      // P2-5 bounded the read with `orderBy(priority) + limit`, but bounding by
+      // priority while the display rule is "open first" drops open tasks out of
+      // the *window*, not just out of the ordering: with 613 DONE vs 68 open on
+      // this board the priority window was all DONE and freshly created tickets
+      // never appeared at any limit (the collection is bigger than the 500 cap).
+      //
+      // So make openness a query predicate: page the (small, bounded) set of open
+      // tasks first, then spend whatever row budget is left on a completed tail.
+      // Both reads stay bounded, and boundedGetDocs still degrades to an
+      // unbounded read if a composite index is missing rather than hard-failing.
       const rowLimit = limit ?? LIST_LIMIT_DEFAULT;
-      const snap = await boundedGetDocs(
-        "tasks",
-        constraints,
-        [orderBy("priority", "desc"), fsLimit(rowLimit)],
-        "get_all_tasks",
+      const readDocs = async (
+        extra: QueryConstraint[],
+        bound: QueryConstraint[],
+        label: string,
+      ): Promise<TaskDoc[]> => {
+        const snap = await boundedGetDocs(
+          "tasks",
+          [...constraints, ...extra],
+          bound,
+          label,
+        );
+        return snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }) as TaskDoc)
+          .filter((t) => !t.deleted)
+          .filter(
+            (t) => !filterContextInMemory || isTaskInReadContext(t, contextId),
+          );
+      };
+
+      const openDocs = await readDocs(
+        [where("status", "in", [...OPEN_TASK_STATUSES])],
+        [fsLimit(rowLimit)],
+        "get_all_tasks:open",
       );
+      // Only pay for the completed tail when there is room to render it. This
+      // query is intentionally NOT status-filtered so it reuses the existing
+      // (projectId, …, priority DESC) indexes; mergeListedTasks drops the open
+      // rows it re-reads.
+      const tailRoom = Math.max(0, rowLimit - openDocs.length);
+      const terminalDocs = tailRoom
+        ? await readDocs(
+            [],
+            [orderBy("priority", "desc"), fsLimit(rowLimit)],
+            "get_all_tasks:done",
+          )
+        : [];
 
-      if (snap.empty) return text("No tasks found.");
-
-      // 열린(비terminal) task 를 먼저, 같은 그룹 내에선 priority 내림차순. 완료/실패
-      // 다수가 컨텍스트를 먹던 것을 cap 으로 꼬리에서 잘라낸다.
-      const docs = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }) as TaskDoc)
-        .filter((t) => !t.deleted)
-        .filter(
-          (t) => !filterContextInMemory || isTaskInReadContext(t, contextId),
-        )
-        .sort((a, b) => {
-          const ta = isTerminalTaskStatus(a.status) ? 1 : 0;
-          const tb = isTerminalTaskStatus(b.status) ? 1 : 0;
-          if (ta !== tb) return ta - tb; // open first
-          return (b.priority ?? 0) - (a.priority ?? 0);
-        });
+      const docs = mergeListedTasks(openDocs, terminalDocs, rowLimit);
+      if (docs.length === 0) return text("No tasks found.");
       const lines = docs.map((t) => {
         const claimed = t.claimedBy ? ` → ${t.claimedBy}` : "";
         const proj = all_projects ? ` project=${t.projectId || "(none)"}` : "";
@@ -1014,7 +1041,7 @@ export function registerTools(server: McpServer): void {
         capLines(
           lines,
           rowLimit,
-          "raise limit or filter by role; completed tasks are at the tail",
+          "raise limit or filter by role; every open task is listed before any completed one",
         ),
       );
     },
@@ -1097,7 +1124,10 @@ export function registerTools(server: McpServer): void {
         // those, but a falsy check covers both null and undefined.
         .filter((t) => !t.claimedBy)
         .filter((t) => t.dependsOnCompleted)
-        .sort((a, b) => b.priority - a.priority);
+        // normalizePriority, not `b.priority - a.priority`: a few legacy docs
+        // store priority as a label string ("high"), and a comparator that
+        // returns NaN leaves the surrounding run in an unspecified order.
+        .sort(compareTasksForListing);
 
       if (tasks.length === 0)
         return text(`No available tasks for role '${role}'.`);
