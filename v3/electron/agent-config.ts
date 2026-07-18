@@ -1453,6 +1453,36 @@ export class AgentConfigGenerator {
         marbloContextId,
       );
 
+    // ── Telegram 폴러 경합 차단 (에이전트 claude 세션) ─────────────────────
+    // telegram 플러그인이 유저 전역(~/.claude/settings.json enabledPlugins)으로
+    // 켜진 claude 세션은 텔레그램 MCP 폴러(bun server.ts, getUpdates)를 띄우는데,
+    // 봇 토큰당 폴러는 단 1개만 허용되고(bot.pid PID락 + 409 Conflict) 플러그인은
+    // 살아있는 기존 폴러도 무조건 SIGTERM 으로 뺏는다("replacing stale poller"
+    // last-wins). 이런 세션은 --channels 없이 떠서 인바운드를 아무에게도 배달하지
+    // 않으면서(claude 코어의 "channel notifications skipped" 경로) 업데이트를
+    // 소비·유실만 하는 순수 도둑이다. #301(vw38IB2V) 이후 getUpdates 의 정당한
+    // 단독 소유자는 electron main 의 telegram-poller.ts 이므로, Marblo 가 스폰하는
+    // 어떤 claude 세션도 플러그인 폴러를 띄워선 안 된다.
+    //
+    // 현행 claude(2.1.214 실측)는 --strict-mcp-config 가 플러그인 MCP 서버까지
+    // 차단해 에이전트 폴러 스폰이 이미 없지만, 그 시맨틱은 과거 한 번 바뀌며
+    // 강탈 사고를 낸 전력이 있어(이 티켓의 발단) launch 인자 레벨에서 불변식을
+    // 명시 고정한다(belt-and-braces). 부수 효과로 에이전트에 불필요한 telegram
+    // 스킬 노출도 사라진다. --settings 인라인 override 는 enabledPlugins 를
+    // deep-merge 하므로(실측: superpowers 스킬 14개 생존 + telegram 만 제거)
+    // 다른 플러그인엔 무영향이고, 전역 MCP 서버(github/playwright/filesystem/
+    // context7)는 애초에 per-agent --mcp-config 화이트리스트로 주입되는 별개
+    // 경로라 영향 자체가 불가능하다. 플러그인 캐시(server.ts)를 건드리지 않으므로
+    // 플러그인 업데이트에도 revert 되지 않는다. 티켓 pyp7odpPQ6emCWLmUrBz.
+    if (agent.model === "claude" && agent.role !== "orchestrator") {
+      args.push(
+        "--settings",
+        JSON.stringify({
+          enabledPlugins: { "telegram@claude-plugins-official": false },
+        }),
+      );
+    }
+
     return {
       model: agent.model,
       command,
