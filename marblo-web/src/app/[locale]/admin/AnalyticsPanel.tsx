@@ -99,11 +99,27 @@ type ModelSummary = {
     avgCost: number;
     costEfficiency: number | null;
   }[];
+  outcomeByModel: {
+    model: string;
+    total: number;
+    succeeded: number;
+    successRate: number;
+    totalCost: number;
+    avgCost: number;
+    reworkCount: number;
+    retriedTasks: number;
+  }[];
   routing: {
     bySelectedModel: KeyCount[];
     byDecisionReason: KeyCount[];
     byReuseVsSpawn: KeyCount[];
     byModelSelectionMode: KeyCount[];
+    scoreBuckets: {
+      model: string;
+      scoreBucket: string;
+      reuseVsSpawn: string;
+      count: number;
+    }[];
   };
 };
 
@@ -545,6 +561,19 @@ function SampleBadge({ n }: { n: number }) {
   );
 }
 
+function ThinLabelNotice() {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/30 p-3 text-xs text-amber-200">
+      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <p>
+        SLM 라우팅 학습 라벨은 준비중입니다. 현재 task_outcomes는 success 상수와
+        비용 0 라벨 결함 때문에 얇게 보일 수 있으며, 3.0.17 이후 수정된 라벨이
+        축적되면서 성공률·비용·재작업 지표가 채워집니다.
+      </p>
+    </div>
+  );
+}
+
 // 섹션 헤더 (신뢰도 배지 포함).
 function SectionHeader({
   icon: Icon,
@@ -614,6 +643,9 @@ export default function AnalyticsPanel() {
     loading: true,
     error: null,
   });
+  const [modelView, setModelView] = useState<"overview" | "routing">(
+    "overview"
+  );
 
   const load = useCallback(async (d: number) => {
     const fns = getFunctions(app, "us-central1");
@@ -1069,153 +1101,164 @@ export default function AnalyticsPanel() {
 
       {/* ── 모델 준비 (🟡) ────────────────────────────────────────── */}
       <div className="space-y-4">
-        <SectionHeader icon={Cpu} title="모델 선정·라우팅" trust="yellow" />
+        <SectionHeader icon={Cpu} title="모델 선정·라우팅" trust="yellow">
+          <div className="flex overflow-hidden rounded-lg border border-zinc-700">
+            {[
+              ["overview", "비용/성과"],
+              ["routing", "SLM/라우팅"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setModelView(key as "overview" | "routing")}
+                className={`px-3 py-1.5 text-xs font-medium transition ${
+                  modelView === key
+                    ? "bg-indigo-600 text-white"
+                    : "bg-zinc-950 text-zinc-400 hover:bg-zinc-800"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </SectionHeader>
         {model.loading ? (
           <LoadingBox />
         ) : model.error ? (
           <ErrorBox msg={model.error} />
         ) : m ? (
           <>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Panel title="모델별 비용" note={`${days}일 누적 (cost_logs)`}>
-                <BarList
-                  data={m.costByModel.map((c) => ({
-                    key: c.model,
-                    value: c.cost,
-                  }))}
-                  format={fmtCost}
-                  emptyLabel="비용 데이터가 없습니다."
-                />
-              </Panel>
-              <Panel title="일별 비용 추이">
-                <LineChart
-                  data={m.costByDay.map((d) => ({
-                    date: d.date,
-                    value: d.cost,
-                  }))}
-                  format={fmtCost}
-                  emptyLabel="비용 데이터가 없습니다."
-                />
-              </Panel>
-            </div>
+            <ThinLabelNotice />
 
-            <Panel
-              title="모델 × 역할 성공률·효율"
-              note="성공률·평균비용·비용대비효율 (task_outcomes)"
-            >
-              {m.modelRoleStats.length === 0 ? (
-                <EmptyState label="모델×역할 데이터가 없습니다." />
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-zinc-800 text-left text-zinc-500">
-                        <th className="py-2 pr-4 font-medium">모델</th>
-                        <th className="py-2 pr-4 font-medium">역할</th>
-                        <th className="py-2 pr-4 font-medium text-right">
-                          건수
-                        </th>
-                        <th className="py-2 pr-4 font-medium">성공률</th>
-                        <th className="py-2 pr-4 font-medium text-right">
-                          평균시간
-                        </th>
-                        <th className="py-2 pr-4 font-medium text-right">
-                          평균비용
-                        </th>
-                        <th className="py-2 font-medium text-right">효율</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {m.modelRoleStats.slice(0, 40).map((r, i) => (
-                        <tr
-                          key={`${r.model}-${r.role}-${i}`}
-                          className="border-b border-zinc-800/60 last:border-0"
-                        >
-                          <td className="py-2 pr-4 text-zinc-200">{r.model}</td>
-                          <td className="py-2 pr-4 text-zinc-400">{r.role}</td>
-                          <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
-                            {fmtInt(r.total)}
-                          </td>
-                          <td className="py-2 pr-4">
-                            <div className="flex items-center gap-2">
-                              <div className="h-1.5 w-16 overflow-hidden rounded bg-zinc-900">
-                                <div
-                                  className="h-full rounded"
-                                  style={{
-                                    width: `${Math.round(
-                                      r.successRate * 100
-                                    )}%`,
-                                    backgroundColor:
-                                      r.successRate >= 0.7
-                                        ? STATUS_GOOD
-                                        : r.successRate >= 0.4
-                                        ? STATUS_WARN
-                                        : STATUS_CRIT,
-                                  }}
-                                />
-                              </div>
-                              <span className="tabular-nums text-zinc-300">
-                                {fmtPct(r.successRate)}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
-                            {fmtDuration(r.avgDurationMs)}
-                          </td>
-                          <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
-                            {fmtCost(r.avgCost)}
-                          </td>
-                          <td className="py-2 text-right tabular-nums text-zinc-300">
-                            {r.costEfficiency == null
-                              ? "—"
-                              : r.costEfficiency.toFixed(1)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {modelView === "overview" ? (
+              <>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <Panel title="모델별 비용" note={`${days}일 누적 (cost_logs)`}>
+                    <BarList
+                      data={m.costByModel.map((c) => ({
+                        key: c.model,
+                        value: c.cost,
+                      }))}
+                      format={fmtCost}
+                      emptyLabel="비용 데이터가 없습니다."
+                    />
+                  </Panel>
+                  <Panel title="일별 비용 추이">
+                    <LineChart
+                      data={m.costByDay.map((d) => ({
+                        date: d.date,
+                        value: d.cost,
+                      }))}
+                      format={fmtCost}
+                      emptyLabel="비용 데이터가 없습니다."
+                    />
+                  </Panel>
                 </div>
-              )}
-            </Panel>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
-              <Panel title="라우팅 — 선택 모델">
-                <BarList
-                  data={m.routing.bySelectedModel.map((e) => ({
-                    key: e.key,
-                    value: e.count,
-                  }))}
-                  emptyLabel="라우팅 결정 데이터가 없습니다."
-                />
-              </Panel>
-              <Panel title="라우팅 — 결정 사유">
-                <BarList
-                  data={m.routing.byDecisionReason.map((e) => ({
-                    key: e.key,
-                    value: e.count,
-                  }))}
-                  emptyLabel="결정 사유 데이터가 없습니다."
-                />
-              </Panel>
-              <Panel title="라우팅 — 재사용 vs 스폰">
-                <BarList
-                  data={m.routing.byReuseVsSpawn.map((e) => ({
-                    key: e.key,
-                    value: e.count,
-                  }))}
-                  emptyLabel="데이터가 없습니다."
-                />
-              </Panel>
-              <Panel title="라우팅 — 선정 모드">
-                <BarList
-                  data={m.routing.byModelSelectionMode.map((e) => ({
-                    key: e.key,
-                    value: e.count,
-                  }))}
-                  emptyLabel="데이터가 없습니다."
-                />
-              </Panel>
-            </div>
+                <Panel
+                  title="모델 × 역할 성공률·효율"
+                  note="성공률·평균비용·비용대비효율 (task_outcomes)"
+                >
+                  {m.modelRoleStats.length === 0 ? (
+                    <EmptyState label="라벨 준비중입니다. 3.0.17 이후 task_outcomes가 축적되면 채워집니다." />
+                  ) : (
+                    <ModelRoleTable rows={m.modelRoleStats} />
+                  )}
+                </Panel>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <StatCard
+                    label="라우팅 결정"
+                    value={fmtInt(
+                      m.routing.byReuseVsSpawn.reduce(
+                        (sum, r) => sum + r.count,
+                        0
+                      )
+                    )}
+                    sub="dispatch:decision"
+                  />
+                  <StatCard
+                    label="선택 모델"
+                    value={fmtInt(m.routing.bySelectedModel.length)}
+                    sub="모델 종류"
+                  />
+                  <StatCard
+                    label="Outcome 모델"
+                    value={fmtInt(m.outcomeByModel.length)}
+                    sub="task_outcomes"
+                  />
+                  <StatCard
+                    label="재작업"
+                    value={fmtInt(
+                      m.outcomeByModel.reduce(
+                        (sum, r) => sum + r.reworkCount,
+                        0
+                      )
+                    )}
+                    sub="retriesCount 합계"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                  <Panel title="선택 모델">
+                    <BarList
+                      data={m.routing.bySelectedModel.map((e) => ({
+                        key: e.key,
+                        value: e.count,
+                      }))}
+                      emptyLabel="라우팅 결정 데이터가 없습니다. 라벨 준비중/3.0.17 이후 축적 상태입니다."
+                    />
+                  </Panel>
+                  <Panel title="결정 사유">
+                    <BarList
+                      data={m.routing.byDecisionReason.map((e) => ({
+                        key: e.key,
+                        value: e.count,
+                      }))}
+                      emptyLabel="결정 사유 데이터가 없습니다."
+                    />
+                  </Panel>
+                  <Panel title="재사용 vs 스폰">
+                    <BarList
+                      data={m.routing.byReuseVsSpawn.map((e) => ({
+                        key: e.key,
+                        value: e.count,
+                      }))}
+                      colorMap={{
+                        reuse: STATUS_GOOD,
+                        restart: STATUS_WARN,
+                        spawn: SERIES,
+                      }}
+                      emptyLabel="데이터가 없습니다."
+                    />
+                  </Panel>
+                  <Panel title="선정 모드">
+                    <BarList
+                      data={m.routing.byModelSelectionMode.map((e) => ({
+                        key: e.key,
+                        value: e.count,
+                      }))}
+                      emptyLabel="데이터가 없습니다."
+                    />
+                  </Panel>
+                </div>
+
+                <Panel
+                  title="매칭점수 분포"
+                  note="perModelScores[].total + reuse/restart agentScore 버킷"
+                >
+                  <RoutingScoreTable rows={m.routing.scoreBuckets} />
+                </Panel>
+
+                <Panel
+                  title="모델별 Outcome"
+                  note="성공·비용·재작업 라벨은 준비중이며 3.0.17 이후 축적분부터 해석 가능"
+                >
+                  <OutcomeByModelTable rows={m.outcomeByModel} />
+                </Panel>
+              </>
+            )}
           </>
         ) : null}
       </div>
@@ -1235,6 +1278,172 @@ export default function AnalyticsPanel() {
         </div>
       </div>
     </section>
+  );
+}
+
+function ModelRoleTable({
+  rows,
+}: {
+  rows: ModelSummary["modelRoleStats"];
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-zinc-800 text-left text-zinc-500">
+            <th className="py-2 pr-4 font-medium">모델</th>
+            <th className="py-2 pr-4 font-medium">역할</th>
+            <th className="py-2 pr-4 font-medium text-right">건수</th>
+            <th className="py-2 pr-4 font-medium">성공률</th>
+            <th className="py-2 pr-4 font-medium text-right">평균시간</th>
+            <th className="py-2 pr-4 font-medium text-right">평균비용</th>
+            <th className="py-2 font-medium text-right">효율</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 40).map((r, i) => (
+            <tr
+              key={`${r.model}-${r.role}-${i}`}
+              className="border-b border-zinc-800/60 last:border-0"
+            >
+              <td className="py-2 pr-4 text-zinc-200">{r.model}</td>
+              <td className="py-2 pr-4 text-zinc-400">{r.role}</td>
+              <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                {fmtInt(r.total)}
+              </td>
+              <td className="py-2 pr-4">
+                <div className="flex items-center gap-2">
+                  <div className="h-1.5 w-16 overflow-hidden rounded bg-zinc-900">
+                    <div
+                      className="h-full rounded"
+                      style={{
+                        width: `${Math.round(r.successRate * 100)}%`,
+                        backgroundColor:
+                          r.successRate >= 0.7
+                            ? STATUS_GOOD
+                            : r.successRate >= 0.4
+                            ? STATUS_WARN
+                            : STATUS_CRIT,
+                      }}
+                    />
+                  </div>
+                  <span className="tabular-nums text-zinc-300">
+                    {fmtPct(r.successRate)}
+                  </span>
+                </div>
+              </td>
+              <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                {fmtDuration(r.avgDurationMs)}
+              </td>
+              <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                {fmtCost(r.avgCost)}
+              </td>
+              <td className="py-2 text-right tabular-nums text-zinc-300">
+                {r.costEfficiency == null ? "—" : r.costEfficiency.toFixed(1)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RoutingScoreTable({
+  rows,
+}: {
+  rows: ModelSummary["routing"]["scoreBuckets"];
+}) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState label="매칭점수 데이터가 없습니다. dispatch:decision 축적 후 표시됩니다." />
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-zinc-800 text-left text-zinc-500">
+            <th className="py-2 pr-4 font-medium">모델</th>
+            <th className="py-2 pr-4 font-medium">점수 버킷</th>
+            <th className="py-2 pr-4 font-medium">경로</th>
+            <th className="py-2 font-medium text-right">건수</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 60).map((r, i) => (
+            <tr
+              key={`${r.model}-${r.scoreBucket}-${r.reuseVsSpawn}-${i}`}
+              className="border-b border-zinc-800/60 last:border-0"
+            >
+              <td className="py-2 pr-4 text-zinc-200">{r.model}</td>
+              <td className="py-2 pr-4 text-zinc-400">{r.scoreBucket}</td>
+              <td className="py-2 pr-4 text-zinc-400">{r.reuseVsSpawn}</td>
+              <td className="py-2 text-right tabular-nums text-zinc-300">
+                {fmtInt(r.count)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function OutcomeByModelTable({
+  rows,
+}: {
+  rows: ModelSummary["outcomeByModel"];
+}) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState label="모델별 outcome 데이터가 없습니다. 라벨 준비중/3.0.17 이후 축적 상태입니다." />
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-zinc-800 text-left text-zinc-500">
+            <th className="py-2 pr-4 font-medium">모델</th>
+            <th className="py-2 pr-4 font-medium text-right">태스크</th>
+            <th className="py-2 pr-4 font-medium">성공률</th>
+            <th className="py-2 pr-4 font-medium text-right">총비용</th>
+            <th className="py-2 pr-4 font-medium text-right">평균비용</th>
+            <th className="py-2 pr-4 font-medium text-right">재작업</th>
+            <th className="py-2 font-medium text-right">재시도 태스크</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 40).map((r) => (
+            <tr
+              key={r.model}
+              className="border-b border-zinc-800/60 last:border-0"
+            >
+              <td className="py-2 pr-4 text-zinc-200">{r.model}</td>
+              <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                {fmtInt(r.total)}
+              </td>
+              <td className="py-2 pr-4 text-zinc-300">
+                {fmtPct(r.successRate)}
+              </td>
+              <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                {fmtCost(r.totalCost)}
+              </td>
+              <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                {fmtCost(r.avgCost)}
+              </td>
+              <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                {fmtInt(r.reworkCount)}
+              </td>
+              <td className="py-2 text-right tabular-nums text-zinc-300">
+                {fmtInt(r.retriedTasks)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

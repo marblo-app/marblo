@@ -5267,6 +5267,10 @@ function isCurrentActiveSubscription(
   );
 }
 
+function adminAnalyticsExcludedUid(): string {
+  return process.env.ADMIN_UID?.trim() || "__marblo_no_admin_uid__";
+}
+
 function activeAtDayEnd(
   status: string,
   createdMs: number | null,
@@ -5381,8 +5385,12 @@ export const getAdminBusinessSummary = functions.https.onCall(
     let activeCurrent = 0;
     let paidCurrent = 0;
     let paddleActiveCurrent = 0;
+    let subscriptionsTotal = 0;
+    const excludedAdminUid = adminAnalyticsExcludedUid();
 
     for (const doc of subSnap.docs) {
+      if (doc.id === excludedAdminUid) continue;
+      subscriptionsTotal++;
       const v = doc.data() as Record<string, unknown>;
       const status = typeof v.status === "string" ? v.status : "unknown";
       const plan = typeof v.planType === "string" ? v.planType : "unknown";
@@ -5445,6 +5453,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
     for (const doc of chargeSnap.docs) {
       const v = doc.data() as Record<string, unknown>;
       const userId = typeof v.userId === "string" ? v.userId : "";
+      if (userId === excludedAdminUid) continue;
       const status = typeof v.status === "string" ? v.status : "";
       const cycleAnchorMs =
         typeof v.cycleAnchorMs === "number"
@@ -5508,7 +5517,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
     // Pro 전환율(§2.1). "활성 사용자" 정확 분모는 익명 BQ 라 계정단위 불가 →
     // 신뢰 가능한 식별 분모(구독 총계·대기자)로 두 개의 비율을 명시 반환한다.
     const proConversionRateVsSubscribers =
-      subSnap.size > 0 ? paidProActive / subSnap.size : 0;
+      subscriptionsTotal > 0 ? paidProActive / subscriptionsTotal : 0;
     const proConversionRateVsWaitlist =
       waitlistTotal > 0 ? paidProActive / waitlistTotal : 0;
 
@@ -5516,7 +5525,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
       rangeDays,
       generatedAt: new Date().toISOString(),
       subscriptions: {
-        total: subSnap.size,
+        total: subscriptionsTotal,
         byStatus,
         byPlanActive,
         byProviderActive,
@@ -5736,6 +5745,7 @@ export const getAdminModelSummary = functions.https.onCall(
         COUNT(*) AS n
       FROM ${costTable}
       WHERE timestamp >= ${sinceTs}
+        AND (userId IS NULL OR userId != @excludedAdminUid)
       GROUP BY model
       ORDER BY cost DESC
     `;
@@ -5746,6 +5756,7 @@ export const getAdminModelSummary = functions.https.onCall(
         SUM(COALESCE(totalCost, 0)) AS cost
       FROM ${costTable}
       WHERE timestamp >= ${sinceTs}
+        AND (userId IS NULL OR userId != @excludedAdminUid)
       GROUP BY date
       ORDER BY date ASC
     `;
@@ -5761,6 +5772,20 @@ export const getAdminModelSummary = functions.https.onCall(
       FROM ${outcomesTable}
       WHERE completedAt >= ${sinceTs}
       GROUP BY model, role
+      ORDER BY total DESC
+    `;
+    const outcomeByModelQuery = `
+      SELECT
+        COALESCE(model, '(none)') AS model,
+        COUNT(*) AS total,
+        COUNTIF(success = true) AS succeeded,
+        SUM(COALESCE(totalCost, 0)) AS totalCost,
+        AVG(totalCost) AS avgCost,
+        SUM(COALESCE(retriesCount, 0)) AS reworkCount,
+        COUNTIF(COALESCE(retriesCount, 0) > 0) AS retriedTasks
+      FROM ${outcomesTable}
+      WHERE completedAt >= ${sinceTs}
+      GROUP BY model
       ORDER BY total DESC
     `;
     // (4) dispatch:decision 라우팅 결정 분포(metadata JSON STRING 파싱)
@@ -5788,8 +5813,50 @@ export const getAdminModelSummary = functions.https.onCall(
       WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
       GROUP BY key ORDER BY n DESC
     `;
+    const routingScoreBucketsQuery = `
+      WITH decisions AS (
+        SELECT
+          COALESCE(model, JSON_VALUE(metadata, '$.selectedModel'), '(none)') AS selectedModel,
+          JSON_VALUE(metadata, '$.reuseVsSpawn') AS reuseVsSpawn,
+          SAFE_CAST(JSON_VALUE(metadata, '$.agentScore') AS FLOAT64) AS agentScore,
+          JSON_QUERY_ARRAY(metadata, '$.perModelScores') AS scores
+        FROM ${eventsTable}
+        WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
+      ),
+      expanded AS (
+        SELECT
+          COALESCE(JSON_VALUE(score, '$.model'), selectedModel, '(none)') AS model,
+          COALESCE(
+            SAFE_CAST(JSON_VALUE(score, '$.total') AS FLOAT64),
+            agentScore
+          ) AS score,
+          COALESCE(reuseVsSpawn, '(none)') AS reuseVsSpawn
+        FROM decisions
+        LEFT JOIN UNNEST(
+          IF(scores IS NULL OR ARRAY_LENGTH(scores) = 0, [CAST(NULL AS STRING)], scores)
+        ) AS score
+      )
+      SELECT
+        model,
+        CASE
+          WHEN score IS NULL THEN '(missing)'
+          WHEN score < 50 THEN '<50'
+          WHEN score < 100 THEN '50-99'
+          WHEN score < 150 THEN '100-149'
+          WHEN score < 200 THEN '150-199'
+          ELSE '200+'
+        END AS scoreBucket,
+        reuseVsSpawn,
+        COUNT(*) AS n
+      FROM expanded
+      GROUP BY model, scoreBucket, reuseVsSpawn
+      ORDER BY model ASC, scoreBucket ASC, reuseVsSpawn ASC
+    `;
 
-    const params = { days: rangeDays };
+    const params = {
+      days: rangeDays,
+      excludedAdminUid: adminAnalyticsExcludedUid(),
+    };
     const q = (query: string) =>
       bigquery.query({ query, params, location: BQ_LOCATION });
 
@@ -5797,18 +5864,22 @@ export const getAdminModelSummary = functions.https.onCall(
       [costByModelRows],
       [costByDayRows],
       [modelRoleRows],
+      [outcomeByModelRows],
       [routingSelectedRows],
       [routingReasonRows],
       [routingReuseRows],
       [routingModeRows],
+      [routingScoreBucketRows],
     ] = await Promise.all([
       q(costByModelQuery),
       q(costByDayQuery),
       q(modelRoleQuery),
+      q(outcomeByModelQuery),
       q(routingSelectedQuery),
       q(routingReasonQuery),
       q(routingReuseQuery),
       q(routingModeQuery),
+      q(routingScoreBucketsQuery),
     ]);
 
     const costByModel = (costByModelRows as Array<Record<string, unknown>>).map(
@@ -5840,6 +5911,23 @@ export const getAdminModelSummary = functions.https.onCall(
       };
     });
 
+    const outcomeByModel = (
+      outcomeByModelRows as Array<Record<string, unknown>>
+    ).map((r) => {
+      const total = toNumber(r.total as number | string | undefined);
+      const succeeded = toNumber(r.succeeded as number | string | undefined);
+      return {
+        model: String(r.model ?? "(none)"),
+        total,
+        succeeded,
+        successRate: total > 0 ? succeeded / total : 0,
+        totalCost: toNumber(r.totalCost as number | string | undefined),
+        avgCost: toNumber(r.avgCost as number | string | undefined),
+        reworkCount: toNumber(r.reworkCount as number | string | undefined),
+        retriedTasks: toNumber(r.retriedTasks as number | string | undefined),
+      };
+    });
+
     return {
       rangeDays,
       generatedAt: new Date().toISOString(),
@@ -5849,6 +5937,7 @@ export const getAdminModelSummary = functions.https.onCall(
         cost: toNumber(r.cost as number | string | undefined),
       })),
       modelRoleStats,
+      outcomeByModel,
       routing: {
         bySelectedModel: foldDistribution(
           routingSelectedRows as Array<Record<string, unknown>>,
@@ -5866,6 +5955,14 @@ export const getAdminModelSummary = functions.https.onCall(
           routingModeRows as Array<Record<string, unknown>>,
           "key"
         ),
+        scoreBuckets: (
+          routingScoreBucketRows as Array<Record<string, unknown>>
+        ).map((r) => ({
+          model: String(r.model ?? "(none)"),
+          scoreBucket: String(r.scoreBucket ?? "(missing)"),
+          reuseVsSpawn: String(r.reuseVsSpawn ?? "(none)"),
+          count: toNumber(r.n as number | string | undefined),
+        })),
       },
     };
   }
