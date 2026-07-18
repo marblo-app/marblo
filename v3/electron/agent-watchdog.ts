@@ -253,8 +253,12 @@ export interface WatchdogConfig {
   /** W2: how long a pending instruction may stay undelivered before the
    * watchdog force-delivers it via direct PTY write. */
   pendingFallbackMs: number;
-  /** IN_PROGRESS-only: owner disappeared AND no board activity for this long
-   * before resetting to TODO / notifying the orchestrator. */
+  /** Owner missing from the LOCAL registry AND no board activity for this
+   * long before the watchdog may treat it as dead at all (respawn for CLAIMED,
+   * reset-to-TODO / orchestrator notify for IN_PROGRESS). Must exceed the real
+   * agent reporting cadence: workers post add_activity every 2–11 min while
+   * actively working (2026-07-18 실측), so anything shorter converts a mere
+   * "hosted elsewhere / attribution drift" miss into a destructive reset. */
   inProgressOrphanResetMs: number;
 }
 
@@ -272,7 +276,10 @@ export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
   freshnessGraceMs: 180_000, // 3 min — a live worker commits/logs within this
   reviewStaleMs: 14_400_000, // 4 h — dead-assignee REVIEW grace before surfacing
   pendingFallbackMs: 45_000, // 45 s — undelivered instruction → PTY-direct
-  inProgressOrphanResetMs: 90_000, // 90 s — active work owner gone + quiet
+  inProgressOrphanResetMs: 900_000, // 15 min — 3× graceMs and beyond the
+  // 2–11 min add_activity cadence measured on live workers. The old 90 s
+  // default reset actively-working agents' tickets to TODO within one silent
+  // stretch (watchdog-false-death, 2026-07-18).
 };
 
 function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
@@ -780,17 +787,44 @@ export class AgentWatchdog {
 
     const health = this.deps.getAgentHealth(ticket.agentId);
     const now = this.now();
-    const dead =
-      health === null ||
-      health.status === "stopped" ||
-      health.status === "error";
+    // "Missing" means "not registered in THIS process's AgentManager" — which
+    // is NOT proof of death. The worker may be hosted by another app instance
+    // or host, or its board attribution may drift from the local registry id
+    // (e.g. a codex worker posting under a self-chosen agent_id). The 2026-07-18
+    // false-death storm was exactly this: a stale Electron instance's watchdog
+    // judged every other instance's live worker "missing" and respawn/reset-
+    // stormed the whole board while the workers kept posting add_activity.
+    const missing = health === null;
+    const terminalLocal =
+      health !== null &&
+      (health.status === "stopped" || health.status === "error");
 
-    // Freshest signal of life: board activity OR raw PTY output.
-    const lastActiveMs = Math.max(
-      ticket.lastActivityAtMs ?? 0,
-      health?.lastPtyActivityMs ?? 0,
-    );
-    const silent = !dead && now - lastActiveMs > this.cfg.graceMs;
+    // Board activity (projection.lastActivityAt, bumped by every add_activity)
+    // is the cross-instance heartbeat: it lives in Firestore, so it is visible
+    // no matter which app instance/host runs the worker. When the ticket has
+    // no activity projection yet (fresh bind), fall back to the assignment
+    // start so a just-dispatched foreign-hosted worker isn't instantly
+    // "inactive since epoch".
+    const lastBoardMs = ticket.lastActivityAtMs ?? ticket.activeSinceMs ?? 0;
+    // Freshest overall signal of life: board activity OR raw local PTY output.
+    const lastActiveMs = Math.max(lastBoardMs, health?.lastPtyActivityMs ?? 0);
+    // ★ Single source of liveness: a fresh BOARD heartbeat VETOES any
+    // local-registry death verdict — an agent that just reported progress is
+    // alive no matter what the in-memory map says. Deliberately board-only:
+    // a locally-confirmed stopped/error PTY may have produced output moments
+    // before dying, so local PTY freshness must not veto a terminal state.
+    const boardFresh = now - lastBoardMs <= this.cfg.graceMs;
+    // Dead only when locally CONFIRMED terminal (this process owned the PTY and
+    // saw it stop/error), or missing AND inactive past the orphan grace. A
+    // merely-missing worker with sub-grace inactivity gets no action at all —
+    // its host instance is responsible for it.
+    const dead =
+      !boardFresh &&
+      (terminalLocal ||
+        (missing && now - lastActiveMs >= this.cfg.inProgressOrphanResetMs));
+    // Silence-based nudging only applies to locally-hosted, live agents — a
+    // nudge writes to the local PTY, which a missing worker doesn't have.
+    const silent = !dead && !missing && now - lastActiveMs > this.cfg.graceMs;
 
     // First-activity heartbeat: record when we first saw this ticket (with the
     // dispatch-baseline activity), then flag it "born dead" if it's still alive
@@ -807,8 +841,12 @@ export class AgentWatchdog {
         baselineActivityMs: lastActiveMs,
       });
     }
+    // Born-dead detection is only meaningful for a LOCALLY-hosted worker (we
+    // can see its PTY booted but produced nothing). A missing worker is judged
+    // solely by the inactivity gates above — never by this window.
     const noFirstActivity =
       !dead &&
+      !missing &&
       !!seenAt &&
       now - seenAt.atMs >= this.cfg.firstActivityGraceMs &&
       lastActiveMs <= seenAt.baselineActivityMs;

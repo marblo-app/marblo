@@ -587,3 +587,109 @@ describe("AgentWatchdog — lifecycle", () => {
     expect(list).toHaveBeenCalledTimes(3); // no more sweeps after stop
   });
 });
+
+// ── False-death guard (watchdog-false-death, 2026-07-18) ─────────────────
+//
+// Regression lock for the storm where a watchdog whose LOCAL AgentManager
+// didn't host the workers (stale second instance / codex agent_id drift)
+// judged actively-reporting agents "missing/dead" and respawn+reset-stormed
+// the board. Core invariants:
+//   1. 활동 중인 에이전트(신선한 board activity)는 절대 dead 판정하지 않는다 —
+//      로컬 레지스트리가 뭐라 하든 board heartbeat 가 거부권을 가진다.
+//   2. 로컬 부재(missing)는 죽음의 증거가 아니다 — orphan grace 를 넘긴
+//      무활동이 겹칠 때만 복구를 시작한다.
+//   3. orphan grace 기본값은 실측 보고 주기(2–11분)보다 길어야 한다.
+describe("AgentWatchdog — false-death guard (활동 중인 에이전트 보호)", () => {
+  it("missing locally + board activity seconds old → NO action at all", async () => {
+    // The exact storm shape: agent hosted by another instance posted
+    // add_activity 3s ago; this instance's registry has no such id.
+    const h = makeHarness();
+    h.health.set(AGENT, null);
+    h.tickets[0].lastActivityAtMs = h.clock.ms - 3_000;
+    await h.wd.tickOnce();
+    expect(h.nudge).not.toHaveBeenCalled();
+    expect(h.respawn).not.toHaveBeenCalled();
+    expect(h.records).toHaveLength(0);
+  });
+
+  it("missing + activity past grace but under orphan grace → still hands off", async () => {
+    const h = makeHarness({ inProgressOrphanResetMs: 100_000 });
+    h.health.set(AGENT, null);
+    // 20s stale — silent by graceMs(10s) standards, but a missing worker has
+    // no local PTY to nudge and isn't confirmably dead yet.
+    h.tickets[0].lastActivityAtMs = h.clock.ms - 20_000;
+    await h.wd.tickOnce();
+    expect(h.nudge).not.toHaveBeenCalled();
+    expect(h.respawn).not.toHaveBeenCalled();
+  });
+
+  it("missing + inactivity beyond orphan grace → recovery finally proceeds", async () => {
+    const h = makeHarness({ inProgressOrphanResetMs: 100_000 });
+    h.health.set(AGENT, null);
+    h.tickets[0].lastActivityAtMs = h.clock.ms - 101_000;
+    await h.wd.tickOnce();
+    expect(h.respawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("locally-stopped agent + fresh board activity → heartbeat vetoes respawn", async () => {
+    // Ticket attribution may lag a rebind: the recorded id is a stopped shell
+    // while the real (renamed) worker keeps posting. Fresh board activity must
+    // win over the stale terminal record.
+    const h = makeHarness();
+    h.health.set(AGENT, {
+      status: "stopped",
+      lastPtyActivityMs: 0,
+      currentTaskId: TASK,
+    });
+    h.tickets[0].lastActivityAtMs = h.clock.ms - 3_000;
+    await h.wd.tickOnce();
+    expect(h.respawn).not.toHaveBeenCalled();
+    expect(h.nudge).not.toHaveBeenCalled();
+  });
+
+  it("IN_PROGRESS reset never fires while board activity is under the orphan grace", async () => {
+    const reset = vi.fn(async () => true);
+    const clock = { ms: 10_000_000 };
+    const tickets = [
+      ticket({
+        status: "IN_PROGRESS",
+        // 182s stale — the exact inactivity that reset live tickets under the
+        // old 90s default (실측 2026-07-18 08:13:26Z).
+        lastActivityAtMs: 10_000_000 - 182_000,
+      }),
+    ];
+    const wd = new AgentWatchdog(
+      {
+        listActiveTickets: async () => tickets,
+        getAgentHealth: () => null, // missing from THIS instance's registry
+        nudgeAgent: () => true,
+        respawnForTicket: async () => true,
+        resetStalledInProgress: reset,
+        now: () => clock.ms,
+        logger: () => {},
+      },
+      { ...DEFAULT_WATCHDOG_CONFIG }, // real defaults — the regression target
+    );
+    await wd.tickOnce();
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it("default orphan grace is 15 min — beyond the measured 2–11 min reporting cadence", () => {
+    expect(DEFAULT_WATCHDOG_CONFIG.inProgressOrphanResetMs).toBe(900_000);
+    expect(DEFAULT_WATCHDOG_CONFIG.inProgressOrphanResetMs).toBeGreaterThanOrEqual(
+      3 * DEFAULT_WATCHDOG_CONFIG.graceMs,
+    );
+  });
+
+  it("born-dead detection never fires for a merely-missing worker", async () => {
+    // firstActivityGraceMs elapsing must not flag a foreign-hosted worker as
+    // born-dead — that window only measures a LOCALLY visible idle PTY.
+    const h = makeHarness({ inProgressOrphanResetMs: 1_000_000 });
+    h.health.set(AGENT, null);
+    h.tickets[0].lastActivityAtMs = h.clock.ms - 20_000;
+    await h.wd.tickOnce(); // arms firstSeen
+    h.clock.ms += DEFAULT_WATCHDOG_CONFIG.firstActivityGraceMs + 60_000;
+    await h.wd.tickOnce();
+    expect(h.respawn).not.toHaveBeenCalled();
+  });
+});

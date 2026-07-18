@@ -648,6 +648,22 @@ function workerAgentId(rawId: string): string {
 }
 const WORKER_AGENT_ID = workerAgentId(MARBLO_AGENT_ID);
 
+/**
+ * 보드 귀속(claimedBy / projection.lastAgentId)용 id — env 의 실 워커 id 우선.
+ *
+ * 모델이 도구 인자에 자칭 id 를 지어내는 경우가 실제로 있다(2026-07-18: codex
+ * 워커가 agent_id="codex-frontend" 로 add_activity 를 호출 → lastAgentId 가
+ * AgentManager 에 존재하지 않는 id 로 오염 → 워치독 getAgentHealth 가 null 을
+ * 받아 살아있는 워커를 missing/dead 로 오판). 스폰 시 주입되는
+ * MARBLO_AGENT_ID(WORKER_AGENT_ID)가 이 프로세스의 단일 진실이므로, 그것이
+ * 있으면 param 을 무시하고 항상 env id 로 귀속한다. env 가 오케/unknown 인
+ * 프로세스(오케가 대리 기록하는 경우)에서만 param 기반 귀속으로 폴백한다.
+ * activity 로그의 표시용 author 는 기존대로 param 우선을 유지한다.
+ */
+function attributionAgentId(paramId?: string): string {
+  return WORKER_AGENT_ID || workerAgentId(paramId || MARBLO_AGENT_ID);
+}
+
 function auditLog(entry: {
   projectId: string;
   agentId: string;
@@ -1527,11 +1543,17 @@ export function registerTools(server: McpServer): void {
 
       // Status update + Firestore projection in one transaction (Layer A).
       // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
+      // 귀속은 env-first(attributionAgentId) — 모델이 지어낸 agent_id 가
+      // claimedBy/lastAgentId 를 오염시키면 워치독이 워커를 못 찾는다.
+      const claimAttribution = attributionAgentId(agent_id) || agent_id;
       await applyProjection(db, task_id, {
         newStatus: "CLAIMED",
-        lastAgentId: agent_id,
-        lastActivitySummary: `claimed by ${agent_id}`,
-        extraTaskFields: { claimedBy: agent_id, claimedAt: Timestamp.now() },
+        lastAgentId: claimAttribution,
+        lastActivitySummary: `claimed by ${claimAttribution}`,
+        extraTaskFields: {
+          claimedBy: claimAttribution,
+          claimedAt: Timestamp.now(),
+        },
         // Re-check inside the transaction — closes the claim race the
         // outside-the-txn `task.status !== "TODO"` check above can't.
         validateFrom: (s) => s === "TODO",
@@ -1761,7 +1783,7 @@ export function registerTools(server: McpServer): void {
         try {
           await applyProjection(db, task_id, {
             newStatus: "IN_PROGRESS",
-            lastAgentId: workerAgentId(resolvedAgentId),
+            lastAgentId: attributionAgentId(agent_id),
             lastActivitySummary: message,
             validateFrom: (s) => s === "CLAIMED",
           });
@@ -1778,11 +1800,13 @@ export function registerTools(server: McpServer): void {
       // Activity doc + Firestore projection (lastActivity*) in one transaction.
       // Status is advanced by the promotion block above, not here. Spec:
       // docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
-      // 작업자 귀속(lastAgentId)에는 오케/unknown 을 빼서(workerAgentId) 직전
-      // 실제 작업자를 보존하되, activity 로그 자체의 agentId 는 누가 남겼는지
-      // 보여주려 resolvedAgentId 그대로 유지한다.
+      // 작업자 귀속(lastAgentId)은 env-first(attributionAgentId) — 모델이
+      // 지어낸 agent_id 로 귀속이 오염되면 워치독이 실 워커를 못 찾아 dead 로
+      // 오판한다. 오케/unknown 은 "" 로 떨어져 직전 실제 작업자를 보존.
+      // activity 로그 자체의 agentId 는 누가 남겼는지 보여주려
+      // resolvedAgentId 그대로 유지한다.
       await applyProjection(db, task_id, {
-        lastAgentId: workerAgentId(resolvedAgentId),
+        lastAgentId: attributionAgentId(agent_id),
         lastActivitySummary: message,
         activityPayload: { agentId: resolvedAgentId, message },
       });
