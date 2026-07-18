@@ -345,6 +345,8 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const currentProject = useProjectStore((s) => s.currentProject);
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+  const ensureFreshWorktrees = useWorktreeStore((s) => s.ensureFresh);
+  const worktreesLoading = useWorktreeStore((s) => s.loading);
   const agents = useAgentStore((s) => s.agents);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [comments, setComments] = useState<TaskComment[]>([]);
@@ -388,6 +390,13 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
     setDiffError(null);
     setDiffLoading(false);
   }, [task.id]);
+
+  // Opening a ticket is the moment the user expects its worktree to exist —
+  // don't resolve against a boot-time snapshot (worktrees are created mid-
+  // session by agent dispatch). TTL-gated, so repeated opens are free.
+  useEffect(() => {
+    ensureFreshWorktrees().catch(() => {});
+  }, [task.id, ensureFreshWorktrees]);
 
   const loadDiff = async () => {
     if (diffLoading) return;
@@ -734,13 +743,35 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
           <AgentAssign taskId={task.id} claimedBy={task.claimedBy} />
 
           {/* View this task's worktree — switches the left file tree + selects
-              the agent in the bottom panel, no full-pane takeover. */}
-          {taskWorktree && (
+              the agent in the bottom panel, no full-pane takeover. When no
+              worktree matches, say so instead of rendering nothing: a silent
+              miss reads as "the feature doesn't exist". */}
+          {taskWorktree ? (
             <ViewWorktreeButton
               worktree={taskWorktree}
               agentId={resolveTaskAgentId(agents, task)}
               onClose={onClose}
             />
+          ) : (
+            <div
+              className="flex items-center gap-2 rounded border border-gray-700/60 bg-gray-800/40 px-3 py-2 text-xs text-gray-500"
+              title={t("board.taskDetail.noWorktreeTip")}
+            >
+              <span>
+                {worktreesLoading
+                  ? t("board.taskDetail.worktreeSearching")
+                  : t("board.taskDetail.noWorktree")}
+              </span>
+              {!worktreesLoading && (
+                <button
+                  type="button"
+                  onClick={() => refreshWorktrees().catch(() => {})}
+                  className="rounded px-1.5 py-0.5 text-gray-400 underline decoration-dotted underline-offset-2 hover:text-gray-200 transition-colors"
+                >
+                  {t("board.taskDetail.worktreeRefind")}
+                </button>
+              )}
+            </div>
           )}
 
           {/* Open Agent Terminal */}

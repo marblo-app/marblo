@@ -2,6 +2,10 @@
 
 ## Completed
 
+### 워크트리 UX 미표시 근본수정 — 스토어 1회성 스냅샷 → ensureFresh (2026-07-18, PR #489, 티켓 ZHCW4yX6)
+"이 워크트리 보기" 버튼(#476)이 재빌드 후에도 안 보이던 P0. 라이브 CDP 실측으로 근본원인 확정: TaskCard 모듈 레벨 `didRequestWorktrees` 플래그 때문에 worktreeStore.refresh() 가 부팅 시 1회만 실행 → 세션 중 생성된 워크트리는 스토어에 없음 → findTaskWorktree null → 버튼 조용히 미렌더 (열린 태스크 63개 전원 매칭 실패 실측). 수정: TTL 60s `ensureFresh` + refresh in-flight 공유(1회 실측 20~26s/681 워크트리), 카드/모달 오픈 시 재조회, 매칭 실패 시 "연결된 워크트리 없음·다시 찾기" 폴백 UI. 워크트리 정리(#475)는 정상 동작 확인: git 등록 681개 → 루트 셀렉터 노출 59개. short-traiding-ai 저장소에 stale 워크트리 645개 등록 — 물리 삭제는 별도 결정 필요.
+**수정 파일:** v3/src/stores/worktreeStore.ts, v3/src/components/board/TaskCard.tsx, v3/src/components/board/TaskDetailModal.tsx, v3/src/locales/{ko,en}/board.ts, v3/tests/unit/{taskWorktree,worktreeStore}.test.ts
+
 ### v4.12 — WebGL renderer 재활성화 + CSS containment (실제 latency fix) (2026-04-30)
 사용자 Performance profile Bottom-up 분석 결과:
 

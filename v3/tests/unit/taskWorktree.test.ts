@@ -114,6 +114,58 @@ describe("findTaskWorktree", () => {
       ),
     ).toBeNull();
   });
+
+  // 회귀 (2026-07-18, 티켓 ZHCW4yX6): "이 워크트리 보기" 버튼이 어디에도 안 뜸.
+  // 원인은 매칭 로직이 아니라 *스테일 스냅샷* — 앱 시작 시 1회만 refresh 되던
+  // worktreeStore 가 세션 중 생성된 워크트리를 영영 모르는 채로, findTaskWorktree
+  // 가 그 빠진 목록을 검색해 null 을 돌려줬다. 여기서는 실측과 동일한 데이터
+  // 모양으로 (1) 스냅샷에 없으면 null (증상), (2) 갱신된 목록에선 매칭됨(치유)을
+  // 함께 고정한다. 갱신 정책 자체는 worktreeStore.test.ts 의 ensureFresh 테스트가 가드.
+  it("regression: worktree created after a stale snapshot only matches once the refreshed list is searched", () => {
+    const projectId = "GFB8JnJrrX6AgahqmGB3";
+    const staleSnapshot = [
+      wt({
+        id: "done-task-wt",
+        taskId: "dFoOMkZFjejrrUR6hThX",
+        projectId,
+        path: `/Users/u/.marblo/worktrees/${projectId}/dFoOMkZFjejrrUR6hThX`,
+        branch: "marblo/frontend-claude-ol7x-dFoOMkZF",
+      }),
+    ];
+    const openTask = task({ id: "ZHCW4yX6fzjo9WXKjciQ" });
+
+    // 증상: 스냅샷엔 (이미 DONE 인) 남의 워크트리뿐 → null → 버튼 미렌더.
+    expect(findTaskWorktree(staleSnapshot, openTask)).toBeNull();
+
+    // 치유: 갱신된 목록에 세션 중 생성된 워크트리가 들어오면 즉시 매칭.
+    const refreshed = [
+      ...staleSnapshot,
+      wt({
+        id: "new-wt",
+        taskId: "ZHCW4yX6fzjo9WXKjciQ",
+        projectId,
+        path: `/Users/u/.marblo/worktrees/${projectId}/ZHCW4yX6fzjo9WXKjciQ`,
+        branch: "marblo/worktree-ux-missing-ZHCW4yX6",
+      }),
+    ];
+    expect(findTaskWorktree(refreshed, openTask)?.id).toBe("new-wt");
+  });
+
+  // 실측에서 확인된 taskId=null 오염 케이스: 한 저장소를 두 프로젝트가 공유하면
+  // inferTaskId(projectId, path) 가 실패해 taskId 가 null 로 들어온다. 그래도
+  // 경로 세그먼트 폴백이 살아 있어야 버튼이 뜬다.
+  it("regression: taskId=null (projectId not in path) still matches via the path-segment fallback", () => {
+    const polluted = wt({
+      id: "cross-project",
+      taskId: null,
+      projectId: "uVJL1vnoiCpqbCUbFxTd",
+      path: "/Users/u/.marblo/worktrees/9jl1Axydz5QOxEHk8gdk/task-B",
+      branch: "fix/whatever",
+    });
+    expect(findTaskWorktree([polluted], task({ id: "task-B" }))?.id).toBe(
+      "cross-project",
+    );
+  });
 });
 
 describe("resolveTaskAgentId", () => {

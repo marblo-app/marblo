@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "../../types/task";
@@ -7,7 +7,11 @@ import { getPresenceStatus, type PresenceStatus } from "../../types/user";
 import { useAgentStore } from "../../stores/agentStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
-import { resolveTaskAgentId, sameWorktreePath } from "../../lib/taskWorktree";
+import {
+  findTaskWorktree,
+  resolveTaskAgentId,
+  sameWorktreePath,
+} from "../../lib/taskWorktree";
 import { viewWorktree } from "../../lib/viewWorktree";
 import { usePresence } from "../../hooks/usePresence";
 import { isLaneTask, isMissionTask } from "../../lib/laneContext";
@@ -93,8 +97,6 @@ const WORKTREE_PILL_TONE: Record<WorktreeStatusTone, string> = {
   idle: "bg-gray-500/15 text-gray-300 border-gray-500/30",
 };
 
-let didRequestWorktrees = false;
-
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
   if (seconds < 60) return "just now";
@@ -167,10 +169,16 @@ function TaskCardContent({
   const roleColor = ROLE_COLORS[task.role] ?? "bg-gray-500/20 text-gray-400";
   const roleIcon = ROLE_ICONS[task.role] ?? "📋";
   const worktrees = useWorktreeStore((s) => s.worktrees);
-  const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+  const ensureFreshWorktrees = useWorktreeStore((s) => s.ensureFresh);
   const statusPill = useWorktreeStore((s) => s.statusPill);
   const rootPath = useEditorStore((s) => s.rootPath);
-  const matchingWorktree = worktrees.find((wt) => wt.taskId === task.id);
+  // Same resolver as the detail modal (explicit taskId → path → branch), so
+  // the card and the modal agree on whether a worktree exists for this task.
+  const taskId = task.id;
+  const matchingWorktree = useMemo(
+    () => findTaskWorktree(worktrees, { id: taskId }),
+    [worktrees, taskId],
+  );
   const matchingPill = matchingWorktree ? statusPill(matchingWorktree) : null;
   // Is the file tree currently rooted at this task's worktree? Derived from the
   // authoritative rootPath (drift-free), used to show the button's active state.
@@ -193,11 +201,22 @@ function TaskCardContent({
     task.updatedAt instanceof Date ? task.updatedAt.getTime() : 0;
   const pulsing = usePulseOnChange(updatedKey);
 
+  // The worktree list must not be a boot-time snapshot: worktrees are created
+  // *during* the session (agent dispatch), and a card whose worktree is
+  // missing from a stale list silently loses its "이 워크트리 보기" affordance.
+  // ensureFresh is TTL+in-flight gated, so a board full of cards mounting at
+  // once still costs at most one worktree:list IPC per minute.
   useEffect(() => {
-    if (didRequestWorktrees) return;
-    didRequestWorktrees = true;
-    refreshWorktrees().catch(() => {});
-  }, [refreshWorktrees]);
+    ensureFreshWorktrees().catch(() => {});
+  }, [ensureFreshWorktrees]);
+
+  // A claimed task without a matching worktree is the "worktree was created
+  // after our snapshot" signature (claim → spawn → worktree add) — re-check.
+  const missingClaimedWorktree = Boolean(task.claimedBy) && !matchingWorktree;
+  useEffect(() => {
+    if (!missingClaimedWorktree) return;
+    ensureFreshWorktrees().catch(() => {});
+  }, [missingClaimedWorktree, task.status, ensureFreshWorktrees]);
 
   // Resolve the claimant agent → owner userId so we can show whose machine
   // is currently hosting the agent and whether that teammate is online.

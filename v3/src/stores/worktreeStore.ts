@@ -17,6 +17,11 @@ interface WorktreeState {
   loading: boolean;
   lastError: string | null;
   /**
+   * Epoch ms of the last *successful* refresh, or null before the first one.
+   * Freshness gate for {@link ensureFresh}.
+   */
+  lastRefreshedAt: number | null;
+  /**
    * User archive/restore overrides, keyed by worktree path. Persisted to
    * localStorage so hiding a worktree (or restoring an auto-archived one)
    * survives reloads. See {@link ../lib/worktreeHygiene}.
@@ -24,6 +29,14 @@ interface WorktreeState {
   archiveOverrides: ArchiveOverrides;
 
   refresh: () => Promise<void>;
+  /**
+   * Refresh unless the list is younger than `maxAgeMs`. A full refresh walks
+   * every registered worktree with several git subprocesses each (measured
+   * ~20s at 681 worktrees), so callers that merely want "not a stale
+   * snapshot" — card mounts, ticket modal opens — must use this instead of
+   * refresh(). Concurrent callers share the same in-flight refresh.
+   */
+  ensureFresh: (maxAgeMs?: number) => Promise<void>;
   /** Archive (hide) or restore (show) a worktree by its key (path). */
   setWorktreeArchived: (key: string, archived: boolean) => void;
   rebase: (path: string, baseRef: string) => Promise<void>;
@@ -142,10 +155,22 @@ export function statusPill(worktree: Worktree): WorktreeStatusPill {
   return { icon: "⚪", label: t("common.worktree.idle"), tone: "idle" };
 }
 
+/**
+ * Default freshness window for {@link WorktreeState.ensureFresh}. Card mounts
+ * and modal opens arrive in bursts; anything younger than this is served from
+ * the store as-is.
+ */
+export const WORKTREE_FRESH_TTL_MS = 60_000;
+
+// Shared in-flight refresh so a burst of ensureFresh()/refresh() callers
+// (every TaskCard mounting at once) collapses into a single worktree:list IPC.
+let inflightRefresh: Promise<void> | null = null;
+
 export const useWorktreeStore = create<WorktreeState>((set, get) => ({
   worktrees: [],
   loading: false,
   lastError: null,
+  lastRefreshedAt: null,
   archiveOverrides: loadArchiveOverrides(),
 
   setWorktreeArchived: (key, archived) => {
@@ -159,17 +184,33 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
   },
 
   refresh: async () => {
-    set({ loading: true, lastError: null });
-    try {
-      const groups = await window.electronAPI.worktree.list();
-      const worktrees = groups.flatMap((group) =>
-        group.worktrees.map((item) => normalizeWorktree(group, item)),
-      );
-      set({ worktrees, loading: false });
-    } catch (err) {
-      set({ loading: false, lastError: errorMessage(err) });
-      throw err;
+    if (inflightRefresh) return inflightRefresh;
+    const run = (async () => {
+      set({ loading: true, lastError: null });
+      try {
+        const groups = await window.electronAPI.worktree.list();
+        const worktrees = groups.flatMap((group) =>
+          group.worktrees.map((item) => normalizeWorktree(group, item)),
+        );
+        set({ worktrees, loading: false, lastRefreshedAt: Date.now() });
+      } catch (err) {
+        set({ loading: false, lastError: errorMessage(err) });
+        throw err;
+      }
+    })();
+    inflightRefresh = run.finally(() => {
+      inflightRefresh = null;
+    });
+    return inflightRefresh;
+  },
+
+  ensureFresh: async (maxAgeMs = WORKTREE_FRESH_TTL_MS) => {
+    if (inflightRefresh) return inflightRefresh;
+    const { lastRefreshedAt } = get();
+    if (lastRefreshedAt !== null && Date.now() - lastRefreshedAt < maxAgeMs) {
+      return;
     }
+    return get().refresh();
   },
 
   remove: async (repoRoot, path, deleteBranch) => {

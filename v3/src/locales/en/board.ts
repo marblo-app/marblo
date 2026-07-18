@@ -46,6 +46,11 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.taskDetail.viewingWorktree": "Currently viewing this worktree",
   "board.taskDetail.viewWorktreeTip":
     "Switch the left file tree to this worktree and select its agent ({branch})",
+  "board.taskDetail.noWorktree": "No linked worktree",
+  "board.taskDetail.noWorktreeTip":
+    "No worktree matches this task id (not in any worktree's taskId, path, or branch). If it was just created, hit Re-find.",
+  "board.taskDetail.worktreeSearching": "Checking worktrees...",
+  "board.taskDetail.worktreeRefind": "Re-find",
   "board.taskDetail.viewTerminal": "View {name} terminal",
   "board.taskDetail.connect": "(connect)",
   "board.taskDetail.edit": "Edit",
