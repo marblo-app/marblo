@@ -11,7 +11,8 @@
     "backfill:founder-grants": "node scripts/backfill-founder-pro-grants.mjs",
     "test:reject": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderReject.test.mjs'",
     "test:followup": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderFollowup.test.mjs'",
-    "test:survey-offer": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderSurveyOffer.test.mjs'"
+    "test:survey-offer": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderSurveyOffer.test.mjs'",
+    "test:marketing": "tsc src/marketingContacts.ts src/marketingContacts.test.ts --outDir .test-out/marketing --module commonjs --target es2020 --esModuleInterop --strict && node --test .test-out/marketing/marketingContacts.test.js"
   },
   "engines": {
     "node": "20"

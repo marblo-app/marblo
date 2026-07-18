@@ -28,6 +28,7 @@ delete process.env.RESEND_API_KEY;
 const ADMIN_CTX = { auth: { uid: "admin-uid-test", token: {} } };
 
 const admin = (await import("firebase-admin")).default;
+const { createHash } = await import("node:crypto");
 const mod = await import("../lib/index.js");
 const db = admin.firestore();
 
@@ -44,7 +45,12 @@ function check(cond, msg) {
 }
 
 async function wipe() {
-  for (const col of ["betatester50_waitlist", "founders", "subscriptions"]) {
+  for (const col of [
+    "betatester50_waitlist",
+    "founders",
+    "subscriptions",
+    "marketing_contacts",
+  ]) {
     const snap = await db.collection(col).get();
     await Promise.all(snap.docs.map((d) => d.ref.delete()));
   }
@@ -55,6 +61,39 @@ async function wipe() {
 
 const ts = (d) => admin.firestore.Timestamp.fromDate(d);
 const DAY = 86400000;
+
+// marketing_contacts 동의 게이트(#488) — 발송 함수가 emailable(granted+구독중)
+// 컨택트만 eligible 로 집계한다. 시딩 없으면 전원 skippedNoConsent 라
+// 기존 시나리오의 eligible 수가 전부 0 이 된다 → 대상 이메일에 granted
+// 컨택트를 함께 시딩한다. contactId = sha256(normalize(email)).
+const contactIdOf = (email) =>
+  createHash("sha256").update(email.trim().toLowerCase(), "utf8").digest("hex");
+
+async function seedGrantedContact(email) {
+  const cid = contactIdOf(email);
+  await db
+    .collection("marketing_contacts")
+    .doc(cid)
+    .set({
+      uid: null,
+      normalizedEmailHash: cid,
+      emailEnc: null,
+      emailDomain: email.split("@")[1] ?? "",
+      source: "manual",
+      locale: "ko",
+      emailMarketingConsent: {
+        status: "granted",
+        source: "test_seed",
+        version: "v1",
+        consentedAt: null,
+        revokedAt: null,
+        legalBasis: "explicit_opt_in",
+      },
+      unsubscribe: { status: "subscribed", tokenHash: null, unsubscribedAt: null },
+      segments: [],
+      lifecycleStage: "founder",
+    });
+}
 const report = (ctx = ADMIN_CTX) => mod.getFounderActivationReport.run({}, ctx);
 const followup = (data, ctx = ADMIN_CTX) =>
   mod.sendFounderFollowupEmails.run(data, ctx);
@@ -177,6 +216,15 @@ async function seedFour() {
     email: "f@example.com",
     status: "selected",
   });
+  // 발송 대상 후보 전원에 마케팅 수신동의(granted) 컨택트 시딩 — 동의 게이트 통과용.
+  for (const email of [
+    "a@example.com",
+    "b@example.com",
+    "c@example.com",
+    "d@example.com",
+  ]) {
+    await seedGrantedContact(email);
+  }
 }
 
 {
@@ -280,6 +328,48 @@ async function seedFour() {
   check(
     r2.eligibleTotal === 3,
     `cooldownDays=0 → eligible=3 (got ${r2.eligibleTotal})`,
+  );
+}
+
+// ─── 시나리오 4.5: 동의 게이트(#488) — granted 아니면 발송 제외 ─────
+{
+  await seedFour();
+  // d(④ download 대상)의 consent 를 pending 으로 강등 — waitlist 백필과 동일
+  // 상태. isEmailable 은 granted 만 통과시켜야 한다(COMPLIANCE-AUDIT D2).
+  await db
+    .collection("marketing_contacts")
+    .doc(contactIdOf("d@example.com"))
+    .set(
+      {
+        emailMarketingConsent: {
+          status: "pending",
+          source: "backfill_waitlist",
+          version: "",
+          consentedAt: null,
+          revokedAt: null,
+          legalBasis: "none",
+        },
+      },
+      { merge: true },
+    );
+  const r = await followup({ segment: "download" });
+  check(
+    r.eligibleTotal === 0,
+    `consent=pending → eligible 제외 (got ${r.eligibleTotal})`,
+  );
+  check(
+    r.skippedNoConsent === 1,
+    `skippedNoConsent=1 (got ${r.skippedNoConsent})`,
+  );
+  // 컨택트 자체가 없어도 발송 불가(no_contact) — 컨택트 삭제 후 재확인.
+  await db
+    .collection("marketing_contacts")
+    .doc(contactIdOf("d@example.com"))
+    .delete();
+  const r2 = await followup({ segment: "download" });
+  check(
+    r2.eligibleTotal === 0 && r2.skippedNoConsent === 1,
+    `컨택트 없음 → no_contact 로 발송 제외 (got eligible=${r2.eligibleTotal}, skipped=${r2.skippedNoConsent})`,
   );
 }
 

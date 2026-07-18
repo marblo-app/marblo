@@ -2,6 +2,17 @@
 
 ## Completed
 
+### marketing_contacts SoT — Firestore 운영 SoT + BigQuery 분석 미러 (2026-07-18)
+이메일 마케팅 데이터 기반 구현 (티켓 kKgzB91jskKwAgxT5Ukp, 감사 qFEzBLhBCpGIBnJJg9Xg 후속).
+- Firestore `marketing_contacts/{sha256(email)}`: 암호화 이메일(AES-256-GCM)·수신동의(emailMarketingConsent, legalBasis 구분)·unsubscribe·구독/파운더 미러·segments·lifecycleStage. consent_events 감사로그. push_tokens 는 스키마만.
+- ★사장님 정정(2026-07-18): waitlist 41명은 consent=**pending**(발송 제외)으로 적재 — 폼 체크박스가 활동/인용 동의라 마케팅 수신동의 아님(COMPLIANCE-AUDIT D2). granted 는 explicit_opt_in 재동의 후에만. 백필 직후 emailable 0 이 정상.
+- write 훅 4개(auth onCreate 실가입만·waitlist·founders·subscriptions) + 어드민 백필(backfillMarketingContacts, dryRun 기본). ★Auth 4,954 중 custom-token 에이전트 제외(실가입 ~34).
+- one-click unsubscribe(RFC 8058, HMAC stateless 토큰) + 마케팅 발송 게이트(sendFounderFollowupEmails·previewFounderSurveyOffer 에 skippedNoConsent) + List-Unsubscribe 헤더/푸터.
+- BQ 미러: marblo_marketing.contacts_daily(일1회 04:45 KST, snapshot_date 파티션) + contacts_latest 뷰. BQ 엔 평문/암호문 이메일 미적재.
+- 신규 env: MARKETING_EMAIL_ENC_KEY, MARKETING_UNSUB_SECRET (이름만, 값 비커밋).
+**신규 파일:** v3/functions/src/marketingContacts.ts, v3/functions/src/marketingContacts.test.ts, v3/docs/MARKETING_CONTACTS.md
+**수정 파일:** v3/functions/src/index.ts, v3/functions/package.json, v3/firestore.rules
+
 ### 워크트리 UX 미표시 근본수정 — 스토어 1회성 스냅샷 → ensureFresh (2026-07-18, PR #489, 티켓 ZHCW4yX6)
 "이 워크트리 보기" 버튼(#476)이 재빌드 후에도 안 보이던 P0. 라이브 CDP 실측으로 근본원인 확정: TaskCard 모듈 레벨 `didRequestWorktrees` 플래그 때문에 worktreeStore.refresh() 가 부팅 시 1회만 실행 → 세션 중 생성된 워크트리는 스토어에 없음 → findTaskWorktree null → 버튼 조용히 미렌더 (열린 태스크 63개 전원 매칭 실패 실측). 수정: TTL 60s `ensureFresh` + refresh in-flight 공유(1회 실측 20~26s/681 워크트리), 카드/모달 오픈 시 재조회, 매칭 실패 시 "연결된 워크트리 없음·다시 찾기" 폴백 UI. 워크트리 정리(#475)는 정상 동작 확인: git 등록 681개 → 루트 셀렉터 노출 59개. short-traiding-ai 저장소에 stale 워크트리 645개 등록 — 물리 삭제는 별도 결정 필요.
 **수정 파일:** v3/src/stores/worktreeStore.ts, v3/src/components/board/TaskCard.tsx, v3/src/components/board/TaskDetailModal.tsx, v3/src/locales/{ko,en}/board.ts, v3/tests/unit/{taskWorktree,worktreeStore}.test.ts

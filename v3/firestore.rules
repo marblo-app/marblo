@@ -438,5 +438,22 @@ service cloud.firestore {
     match /bugReportThrottle/{uid} {
       allow read, write: if false;
     }
+
+    // ===== Marketing Contacts (이메일 마케팅 SoT) =====
+    // 암호화 이메일·수신동의·unsubscribe 상태. 전적으로 Cloud Functions
+    // (Admin SDK, 규칙 우회) 전용 — 클라이언트 직접 접근 전면 차단.
+    // consent_events 는 동의/철회 감사로그(append-only, 역시 서버 전용).
+    match /marketing_contacts/{contactId} {
+      allow read, write: if false;
+      match /consent_events/{eventId} {
+        allow read, write: if false;
+      }
+    }
+
+    // ===== Push Tokens (푸시 마케팅 — 현재는 스키마 예약만, 적재는 후속) =====
+    // uid·deviceId·tokenHash·pushMarketingConsent. 서버 전용.
+    match /push_tokens/{tokenId} {
+      allow read, write: if false;
+    }
   }
 }

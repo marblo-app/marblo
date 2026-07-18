@@ -993,6 +993,55 @@ describe("couponRedemptions collection", () => {
   });
 });
 
+// ===== Marketing Contacts (#488 — 서버 전용 SoT) =====
+
+describe("marketing_contacts collection", () => {
+  const CONTACT_ID = "a".repeat(64); // sha256 hex 형태의 docId
+
+  it("클라이언트에서 마케팅 컨택트를 읽거나 쓸 수 없다 (인증 여부 무관)", async () => {
+    for (const db of [
+      getContext(ADMIN_ID, ADMIN_EMAIL).firestore(),
+      unauthContext().firestore(),
+    ]) {
+      await assertFails(getDoc(doc(db, "marketing_contacts", CONTACT_ID)));
+      await assertFails(
+        setDoc(doc(db, "marketing_contacts", CONTACT_ID), {
+          emailMarketingConsent: { status: "granted" },
+        }),
+      );
+      await assertFails(
+        deleteDoc(doc(db, "marketing_contacts", CONTACT_ID)),
+      );
+    }
+  });
+
+  it("consent_events 감사로그도 클라이언트 접근 전면 차단", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(
+      getDoc(doc(db, "marketing_contacts", CONTACT_ID, "consent_events", "e1")),
+    );
+    await assertFails(
+      addDoc(
+        collection(db, "marketing_contacts", CONTACT_ID, "consent_events"),
+        { type: "granted", channel: "email" },
+      ),
+    );
+  });
+});
+
+describe("push_tokens collection", () => {
+  it("클라이언트에서 푸시 토큰을 읽거나 쓸 수 없다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "push_tokens", `${OWNER_ID}_device1`)));
+    await assertFails(
+      setDoc(doc(db, "push_tokens", `${OWNER_ID}_device1`), {
+        uid: OWNER_ID,
+        tokenHash: "h",
+      }),
+    );
+  });
+});
+
 // ===== Activities =====
 
 describe("activities collection", () => {
