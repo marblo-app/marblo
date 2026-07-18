@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { httpsCallable, getFunctions } from "firebase/functions";
 import app from "@/lib/firebase";
 import {
@@ -13,14 +13,29 @@ import {
   Cpu,
   ShieldOff,
   Info,
+  X,
+  UserMinus,
 } from "lucide-react";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
 type KeyCount = { key: string; count: number };
 
+// 운영자(존킴) 자기계정 제외 현황. 서버는 제외 "건수"만 내려준다(uid 미노출).
+type AdminExcludedFirestore = {
+  subscriptions: number;
+  billingCharges: number;
+  founders: number;
+  agents: number;
+};
+type AdminExcludedTelemetry = {
+  uidFiltered: boolean;
+  clientIdCount: number;
+};
+
 type BusinessSummary = {
   rangeDays: number;
   generatedAt: string;
+  adminExcluded?: AdminExcludedFirestore;
   subscriptions: {
     total: number;
     byStatus: Record<string, number>;
@@ -34,7 +49,12 @@ type BusinessSummary = {
     pastDue: number;
     newInWindow: number;
     churnedInWindow: number;
-    trendByDay?: { date: string; active: number; new: number; churned: number }[];
+    trendByDay?: {
+      date: string;
+      active: number;
+      new: number;
+      churned: number;
+    }[];
     consecutiveBilling?: {
       tossOnly: true;
       subscribers: number;
@@ -64,6 +84,7 @@ type BusinessSummary = {
 type UsageSummary = {
   rangeDays: number;
   generatedAt: string;
+  adminExcluded?: AdminExcludedTelemetry;
   sampleClientCount: number;
   wau: number;
   activeByDay: { date: string; dau: number; events: number }[];
@@ -82,6 +103,7 @@ type UsageSummary = {
 type ModelSummary = {
   rangeDays: number;
   generatedAt: string;
+  adminExcluded?: AdminExcludedTelemetry;
   costByModel: {
     model: string;
     totalTokens: number;
@@ -121,6 +143,49 @@ type ModelSummary = {
       count: number;
     }[];
   };
+};
+
+// ── 드릴다운 (getAdminDrilldown) ────────────────────────────────────────────
+// 서버가 스코프별로 다른 모양을 내리지 않고 아래 제네릭 봉투 하나로 통일한다 —
+// 모달이 스코프 분기 없이 그대로 렌더한다.
+type DrilldownFormat = "int" | "cost" | "pct" | "duration";
+
+type DrilldownScope =
+  | "usage:day"
+  | "spawn:day"
+  | "cost:day"
+  | "subscription:day"
+  | "segment:event"
+  | "segment:model"
+  | "segment:role"
+  | "segment:plan"
+  | "segment:status"
+  | "segment:provider";
+
+type DrilldownRequest = {
+  scope: DrilldownScope;
+  days: number;
+  date?: string;
+  key?: string;
+};
+
+type DrilldownResult = {
+  scope: string;
+  date: string | null;
+  key: string | null;
+  rangeDays: number;
+  generatedAt: string;
+  title: string;
+  note: string;
+  stats: { label: string; value: number; format: DrilldownFormat }[];
+  breakdowns: {
+    title: string;
+    rows: KeyCount[];
+    format: DrilldownFormat;
+  }[];
+  trend: { date: string; value: number }[] | null;
+  trendLabel: string | null;
+  trendFormat: DrilldownFormat;
 };
 
 type CallableError = { code?: string; message?: string };
@@ -254,6 +319,7 @@ function EmptyState({ label }: { label?: string }) {
 }
 
 // 가로 막대 리스트 — 단일 측정을 카테고리별로. 직접 값 라벨(색만으로 식별 금지).
+// onDrill 이 있으면 각 행이 버튼이 되어 세그먼트 드릴다운을 연다("그 외" 제외).
 function BarList({
   data,
   color,
@@ -262,6 +328,8 @@ function BarList({
   format = fmtInt,
   emptyLabel,
   maxRows = 12,
+  onDrill,
+  showShare,
 }: {
   data: { key: string; value: number }[];
   color?: string;
@@ -270,10 +338,13 @@ function BarList({
   format?: (n: number) => string;
   emptyLabel?: string;
   maxRows?: number;
+  onDrill?: (key: string) => void;
+  showShare?: boolean;
 }) {
   const rows = data.filter((d) => d && isFinite(d.value));
   if (rows.length === 0) return <EmptyState label={emptyLabel} />;
   const max = Math.max(...rows.map((d) => d.value), 1);
+  const total = rows.reduce((a, b) => a + b.value, 0);
   const shown = rows.slice(0, maxRows);
   const rest = rows.slice(maxRows);
   const restTotal = rest.reduce((a, b) => a + b.value, 0);
@@ -291,12 +362,17 @@ function BarList({
           ? `그 외 ${rest.length}종`
           : labelMap?.[d.key] || d.key;
         const pct = Math.max((d.value / max) * 100, d.value > 0 ? 2 : 0);
-        return (
-          <li key={d.key} title={`${label}: ${format(d.value)}`}>
+        const share = total > 0 ? d.value / total : 0;
+        const drillable = !!onDrill && !isOther;
+        const body = (
+          <>
             <div className="mb-0.5 flex items-baseline justify-between gap-2">
               <span className="truncate text-xs text-zinc-300">{label}</span>
               <span className="shrink-0 text-xs font-medium tabular-nums text-zinc-400">
                 {format(d.value)}
+                {showShare && (
+                  <span className="ml-1.5 text-zinc-600">{fmtPct(share)}</span>
+                )}
               </span>
             </div>
             <div className="h-2 w-full overflow-hidden rounded bg-zinc-900">
@@ -305,6 +381,22 @@ function BarList({
                 style={{ width: `${pct}%`, backgroundColor: barColor }}
               />
             </div>
+          </>
+        );
+        return (
+          <li key={d.key} title={`${label}: ${format(d.value)}`}>
+            {drillable ? (
+              <button
+                type="button"
+                onClick={() => onDrill(d.key)}
+                className="w-full rounded text-left transition hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                aria-label={`${label} 상세 분해 보기`}
+              >
+                {body}
+              </button>
+            ) : (
+              body
+            )}
           </li>
         );
       })}
@@ -312,17 +404,42 @@ function BarList({
   );
 }
 
+// 시계열에서 값 라벨을 붙일 인덱스를 고른다.
+// 포인트가 적으면 전부, 많으면 겹치지 않게 최대/최소/끝점만 — 라벨이 서로
+// 밟으면 안 붙이느니만 못하다.
+function pickLabelIndices(values: number[]): Set<number> {
+  const n = values.length;
+  if (n === 0) return new Set();
+  if (n <= 12) return new Set(values.map((_, i) => i));
+  let maxI = 0;
+  let minI = 0;
+  for (let i = 1; i < n; i++) {
+    if (values[i] > values[maxI]) maxI = i;
+    if (values[i] < values[minI]) minI = i;
+  }
+  const picked = new Set([maxI, n - 1]);
+  // 최소점은 최대/끝점과 충분히 떨어져 있을 때만(라벨 충돌 방지).
+  const gap = Math.max(2, Math.floor(n / 12));
+  if (Math.abs(minI - maxI) > gap && Math.abs(minI - (n - 1)) > gap) {
+    picked.add(minI);
+  }
+  return picked;
+}
+
 // 시계열 라인/영역 차트 — 단일 시리즈, 인라인 SVG. 빈/단일점 안전.
+// onDrill 이 있으면 각 데이터 포인트가 클릭 가능한 히트 타깃이 된다.
 function LineChart({
   data,
   color = SERIES,
   format = fmtInt,
   emptyLabel,
+  onDrill,
 }: {
   data: { date: string; value: number }[];
   color?: string;
   format?: (n: number) => string;
   emptyLabel?: string;
+  onDrill?: (date: string) => void;
 }) {
   const clean = data.filter((d) => d && isFinite(d.value));
   const allZero = clean.every((d) => d.value === 0);
@@ -332,7 +449,7 @@ function LineChart({
   const H = 180;
   const padL = 8;
   const padR = 8;
-  const padT = 12;
+  const padT = 20; // 값 라벨이 상단으로 나가지 않도록 여유.
   const padB = 22;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -341,6 +458,7 @@ function LineChart({
   const x = (i: number) =>
     padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const y = (v: number) => padT + innerH - (v / max) * innerH;
+  const labelIndices = pickLabelIndices(clean.map((d) => d.value));
 
   const linePts = clean.map((d, i) => `${x(i)},${y(d.value)}`).join(" ");
   const areaPts =
@@ -358,7 +476,7 @@ function LineChart({
         viewBox={`0 0 ${W} ${H}`}
         className="w-full"
         role="img"
-        preserveAspectRatio="none"
+        preserveAspectRatio="xMidYMid meet"
         style={{ height: 180 }}
       >
         <defs>
@@ -393,15 +511,32 @@ function LineChart({
             {n <= 45 && (
               <circle cx={x(i)} cy={y(d.value)} r={2.5} fill={color} />
             )}
-            {/* hover hit target + 네이티브 툴팁 */}
+            {/* 값 라벨 — 색·툴팁에만 의존하지 않고 수치를 직접 노출 */}
+            {labelIndices.has(i) && (
+              <text
+                x={x(i)}
+                y={y(d.value) - 7}
+                fontSize={10}
+                fontWeight={600}
+                fill="#d4d4d8"
+                textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
+              >
+                {format(d.value)}
+              </text>
+            )}
+            {/* hover hit target + 네이티브 툴팁 (+ 클릭 시 드릴다운) */}
             <rect
               x={x(i) - innerW / (2 * Math.max(n, 1))}
               y={padT}
               width={innerW / Math.max(n, 1)}
               height={innerH}
               fill="transparent"
+              onClick={onDrill ? () => onDrill(d.date) : undefined}
+              style={onDrill ? { cursor: "pointer" } : undefined}
             >
-              <title>{`${fmtDay(d.date)} · ${format(d.value)}`}</title>
+              <title>{`${fmtDay(d.date)} · ${format(d.value)}${
+                onDrill ? " (클릭: 상세 분해)" : ""
+              }`}</title>
             </rect>
           </g>
         ))}
@@ -431,14 +566,16 @@ function TwoLineChart({
   first,
   second,
   emptyLabel,
+  onDrill,
 }: {
   data: { date: string; first: number; second: number }[];
   first: { label: string; color: string; format?: (n: number) => string };
   second: { label: string; color: string; format?: (n: number) => string };
   emptyLabel?: string;
+  onDrill?: (date: string) => void;
 }) {
   const clean = data.filter(
-    (d) => d && isFinite(d.first) && isFinite(d.second)
+    (d) => d && isFinite(d.first) && isFinite(d.second),
   );
   const allZero = clean.every((d) => d.first === 0 && d.second === 0);
   if (clean.length === 0 || allZero) return <EmptyState label={emptyLabel} />;
@@ -447,14 +584,11 @@ function TwoLineChart({
   const H = 180;
   const padL = 8;
   const padR = 8;
-  const padT = 12;
+  const padT = 20; // 값 라벨 여유.
   const padB = 22;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
-  const max = Math.max(
-    ...clean.flatMap((d) => [d.first, d.second]),
-    1
-  );
+  const max = Math.max(...clean.flatMap((d) => [d.first, d.second]), 1);
   const n = clean.length;
   const x = (i: number) =>
     padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
@@ -464,6 +598,15 @@ function TwoLineChart({
   const labelIdx = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
   const fmtFirst = first.format || fmtInt;
   const fmtSecond = second.format || fmtInt;
+  // 두 시리즈가 겹치므로 값 라벨은 각 시리즈의 피크 하나씩만 — 그 이상은
+  // 서로 밟는다.
+  const peak = (key: "first" | "second") => {
+    let best = 0;
+    for (let i = 1; i < n; i++) if (clean[i][key] > clean[best][key]) best = i;
+    return clean[best][key] > 0 ? best : -1;
+  };
+  const firstPeak = peak("first");
+  const secondPeak = peak("second");
 
   return (
     <div className="w-full">
@@ -471,7 +614,7 @@ function TwoLineChart({
         viewBox={`0 0 ${W} ${H}`}
         className="w-full"
         role="img"
-        preserveAspectRatio="none"
+        preserveAspectRatio="xMidYMid meet"
         style={{ height: 180 }}
       >
         {[0, 0.5, 1].map((g) => (
@@ -501,6 +644,27 @@ function TwoLineChart({
           strokeLinejoin="round"
           strokeLinecap="round"
         />
+        {/* 값 라벨 — 시리즈별 피크만 직접 노출 */}
+        {[
+          { i: firstPeak, key: "first" as const, s: first, f: fmtFirst },
+          { i: secondPeak, key: "second" as const, s: second, f: fmtSecond },
+        ]
+          .filter((p) => p.i >= 0)
+          .map((p) => (
+            <text
+              key={p.key}
+              x={x(p.i)}
+              y={y(clean[p.i][p.key]) - 7}
+              fontSize={10}
+              fontWeight={600}
+              fill={p.s.color}
+              textAnchor={
+                p.i === 0 ? "start" : p.i === n - 1 ? "end" : "middle"
+              }
+            >
+              {p.f(clean[p.i][p.key])}
+            </text>
+          ))}
         {clean.map((d, i) => (
           <rect
             key={i}
@@ -509,10 +673,14 @@ function TwoLineChart({
             width={innerW / Math.max(n, 1)}
             height={innerH}
             fill="transparent"
+            onClick={onDrill ? () => onDrill(d.date) : undefined}
+            style={onDrill ? { cursor: "pointer" } : undefined}
           >
             <title>{`${fmtDay(d.date)} · ${first.label} ${fmtFirst(
-              d.first
-            )} · ${second.label} ${fmtSecond(d.second)}`}</title>
+              d.first,
+            )} · ${second.label} ${fmtSecond(d.second)}${
+              onDrill ? " (클릭: 상세 분해)" : ""
+            }`}</title>
           </rect>
         ))}
         {labelIdx.map((i) => (
@@ -593,11 +761,11 @@ function SectionHeader({
           t: "🟢 항상 켜짐·식별",
         }
       : trust === "yellow"
-      ? {
-          c: "text-amber-300 bg-amber-950/30 border-amber-900/40",
-          t: "🟡 옵트인 표본",
-        }
-      : { c: "text-zinc-400 bg-zinc-900 border-zinc-800", t: "🔴 소스 없음" };
+        ? {
+            c: "text-amber-300 bg-amber-950/30 border-amber-900/40",
+            t: "🟡 옵트인 표본",
+          }
+        : { c: "text-zinc-400 bg-zinc-900 border-zinc-800", t: "🔴 소스 없음" };
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="flex items-center gap-2">
@@ -609,6 +777,273 @@ function SectionHeader({
       </div>
       {children}
     </div>
+  );
+}
+
+// 드릴다운 포맷 토큰 → 포매터.
+function formatterFor(f: DrilldownFormat): (n: number) => string {
+  if (f === "cost") return fmtCost;
+  if (f === "pct") return fmtPct;
+  if (f === "duration") return fmtDuration;
+  return fmtInt;
+}
+
+const RANGE_PRESETS = [7, 30, 90];
+
+// 기간 컨트롤 — 7/30/90 프리셋 + 커스텀 일수.
+// 서버(getAdmin*)는 "최근 N일" 파라미터만 받으므로 커스텀도 일수 입력이다.
+function RangeControl({
+  days,
+  onChange,
+  disabled,
+}: {
+  days: number;
+  onChange: (d: number) => void;
+  disabled?: boolean;
+}) {
+  // days 는 이 컴포넌트의 핸들러를 통해서만 바뀌므로 effect 로 되동기화할 필요가
+  // 없다 — 각 핸들러에서 draft 를 같이 갱신한다.
+  const [customOpen, setCustomOpen] = useState(!RANGE_PRESETS.includes(days));
+  const [draft, setDraft] = useState(String(days));
+
+  const commit = () => {
+    const n = Number(draft);
+    // 서버 상한 365(BQ 스캔 가드)와 동일하게 클램프한다.
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+      setDraft(String(days));
+      return;
+    }
+    const clamped = Math.min(Math.max(Math.round(n), 1), 365);
+    setDraft(String(clamped));
+    if (clamped !== days) onChange(clamped);
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex overflow-hidden rounded-lg border border-zinc-700">
+        {RANGE_PRESETS.map((d) => (
+          <button
+            key={d}
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              setCustomOpen(false);
+              setDraft(String(d));
+              onChange(d);
+            }}
+            className={`px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 ${
+              days === d && !customOpen
+                ? "bg-indigo-600 text-white"
+                : "bg-zinc-950 text-zinc-400 hover:bg-zinc-800"
+            }`}
+          >
+            {d}일
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setCustomOpen(true)}
+          className={`px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 ${
+            customOpen
+              ? "bg-indigo-600 text-white"
+              : "bg-zinc-950 text-zinc-400 hover:bg-zinc-800"
+          }`}
+        >
+          커스텀
+        </button>
+      </div>
+      {customOpen && (
+        <label className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-sm text-zinc-400">
+          <span className="text-xs text-zinc-500">최근</span>
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={draft}
+            disabled={disabled}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commit();
+              }
+            }}
+            className="w-16 bg-transparent text-right tabular-nums text-zinc-200 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+            aria-label="조회 기간(일)"
+          />
+          <span className="text-xs text-zinc-500">일 (최대 365)</span>
+        </label>
+      )}
+    </div>
+  );
+}
+
+// 드릴다운 모달 — 제네릭 봉투를 그대로 렌더. 스코프별 분기 없음.
+function DrilldownModal({
+  request,
+  state,
+  onClose,
+}: {
+  request: DrilldownRequest;
+  state: Loaded<DrilldownResult>;
+  onClose: () => void;
+}) {
+  // Esc 로 닫기 + 열려 있는 동안 배경 스크롤 잠금.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  const d = state.data;
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/70 p-4 sm:p-8"
+      role="dialog"
+      aria-modal="true"
+      aria-label="상세 분해"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-3xl rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-800 p-4">
+          <div className="min-w-0">
+            <h3 className="truncate text-base font-semibold text-zinc-100">
+              {d?.title || "상세 분해"}
+            </h3>
+            <p className="mt-0.5 text-xs text-zinc-500">
+              {d?.note ||
+                `${request.scope}${request.date ? ` · ${request.date}` : ""}${
+                  request.key ? ` · ${request.key}` : ""
+                }`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-lg border border-zinc-700 p-1.5 text-zinc-400 transition hover:text-zinc-200"
+            aria-label="닫기"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 p-4">
+          {state.loading ? (
+            <LoadingBox />
+          ) : state.error ? (
+            <ErrorBox msg={state.error} />
+          ) : d ? (
+            <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {d.stats.map((s) => (
+                  <StatCard
+                    key={s.label}
+                    label={s.label}
+                    value={formatterFor(s.format)(s.value)}
+                  />
+                ))}
+              </div>
+
+              {d.trend && d.trend.length > 0 && (
+                <Panel title={d.trendLabel || "추이"}>
+                  <LineChart
+                    data={d.trend}
+                    format={formatterFor(d.trendFormat)}
+                    color={d.trendFormat === "cost" ? SERIES_2 : SERIES}
+                    emptyLabel="추이 데이터가 없습니다."
+                  />
+                </Panel>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {d.breakdowns.map((b) => (
+                  <Panel key={b.title} title={b.title}>
+                    <BarList
+                      data={b.rows.map((r) => ({
+                        key: r.key,
+                        value: r.count,
+                      }))}
+                      format={formatterFor(b.format)}
+                      showShare
+                      emptyLabel="데이터가 없습니다."
+                    />
+                  </Panel>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 운영자(관리자 계정) 제외 현황 고지.
+// KPI 를 "고객 지표"로 읽으려면 운영자 본인 활동이 빠졌는지가 전제다.
+// ⚠️ 서버는 uid/clientId 값을 내리지 않는다 — 건수만 표시한다.
+function AdminExclusionNote({
+  biz,
+  usage,
+  model,
+}: {
+  biz: BusinessSummary | null;
+  usage: UsageSummary | null;
+  model: ModelSummary | null;
+}) {
+  const fs = biz?.adminExcluded;
+  const tel = usage?.adminExcluded ?? model?.adminExcluded;
+  if (!fs && !tel) return null;
+
+  const fsTotal = fs
+    ? fs.subscriptions + fs.billingCharges + fs.founders + fs.agents
+    : 0;
+  const parts: string[] = [];
+  if (fs) {
+    parts.push(
+      fsTotal > 0
+        ? `사업 데이터에서 관리자 소유 ${fmtInt(fsTotal)}건 제외(구독 ${fmtInt(
+            fs.subscriptions,
+          )} · 청구 ${fmtInt(fs.billingCharges)} · 파운더 ${fmtInt(
+            fs.founders,
+          )} · 에이전트 ${fmtInt(fs.agents)})`
+        : "사업 데이터에 관리자 소유 문서 없음",
+    );
+  }
+  if (tel) {
+    if (!tel.uidFiltered) {
+      parts.push("⚠️ ADMIN_UID 미설정 — 운영자 제외가 적용되지 않았습니다");
+    } else if (tel.clientIdCount > 0) {
+      parts.push(
+        `텔레메트리에서 관리자 클라이언트 ${fmtInt(
+          tel.clientIdCount,
+        )}개 제외(cost_logs 역참조 추정)`,
+      );
+    } else {
+      parts.push(
+        "텔레메트리는 익명 clientId 라 운영자 식별분이 없어 제외분 0 " +
+          "(비용 지출은 uid 기준 정확 제외)",
+      );
+    }
+  }
+
+  return (
+    <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+      <UserMinus className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span>운영자 자기계정 제외: {parts.join(" · ")}.</span>
+    </p>
   );
 }
 
@@ -644,22 +1079,61 @@ export default function AnalyticsPanel() {
     error: null,
   });
   const [modelView, setModelView] = useState<"overview" | "routing">(
-    "overview"
+    "overview",
   );
+  // 드릴다운 — 열려 있는 요청과 그 응답.
+  const [drill, setDrill] = useState<DrilldownRequest | null>(null);
+  const [drillState, setDrillState] = useState<Loaded<DrilldownResult>>({
+    data: null,
+    loading: false,
+    error: null,
+  });
+  const drillSeq = useRef(0);
+
+  const openDrill = useCallback((req: DrilldownRequest) => {
+    const seq = drillSeq.current + 1;
+    drillSeq.current = seq;
+    setDrill(req);
+    setDrillState({ data: null, loading: true, error: null });
+    const fns = getFunctions(app, "us-central1");
+    const call = httpsCallable<DrilldownRequest, DrilldownResult>(
+      fns,
+      "getAdminDrilldown",
+    );
+    call(req)
+      .then((r) => {
+        if (drillSeq.current !== seq) return;
+        setDrillState({ data: r.data, loading: false, error: null });
+      })
+      .catch((e) => {
+        if (drillSeq.current !== seq) return;
+        setDrillState({
+          data: null,
+          loading: false,
+          error: mapErr(e as CallableError),
+        });
+      });
+  }, []);
+
+  const closeDrill = useCallback(() => {
+    drillSeq.current += 1;
+    setDrill(null);
+    setDrillState({ data: null, loading: false, error: null });
+  }, []);
 
   const load = useCallback(async (d: number) => {
     const fns = getFunctions(app, "us-central1");
     const callBiz = httpsCallable<{ days: number }, BusinessSummary>(
       fns,
-      "getAdminBusinessSummary"
+      "getAdminBusinessSummary",
     );
     const callUsage = httpsCallable<{ days: number }, UsageSummary>(
       fns,
-      "getAdminUsageSummary"
+      "getAdminUsageSummary",
     );
     const callModel = httpsCallable<{ days: number }, ModelSummary>(
       fns,
-      "getAdminModelSummary"
+      "getAdminModelSummary",
     );
 
     setBiz((s) => ({ ...s, loading: true, error: null }));
@@ -674,7 +1148,7 @@ export default function AnalyticsPanel() {
           data: null,
           loading: false,
           error: mapErr(e as CallableError),
-        })
+        }),
       );
     callUsage({ days: d })
       .then((r) => setUsage({ data: r.data, loading: false, error: null }))
@@ -683,7 +1157,7 @@ export default function AnalyticsPanel() {
           data: null,
           loading: false,
           error: mapErr(e as CallableError),
-        })
+        }),
       );
     callModel({ days: d })
       .then((r) => setModel({ data: r.data, loading: false, error: null }))
@@ -692,7 +1166,7 @@ export default function AnalyticsPanel() {
           data: null,
           loading: false,
           error: mapErr(e as CallableError),
-        })
+        }),
       );
   }, []);
 
@@ -721,41 +1195,41 @@ export default function AnalyticsPanel() {
     () =>
       b
         ? Object.entries(b.subscriptions.byPlanActive || {}).map(
-            ([key, value]) => ({ key, value })
+            ([key, value]) => ({ key, value }),
           )
         : [],
-    [b]
+    [b],
   );
   const statusRows = useMemo(
     () =>
       b
         ? Object.entries(b.subscriptions.byStatus || {}).map(
-            ([key, value]) => ({ key, value })
+            ([key, value]) => ({ key, value }),
           )
         : [],
-    [b]
+    [b],
   );
   const providerRows = useMemo(
     () =>
       b
         ? Object.entries(b.subscriptions.byProviderActive || {}).map(
-            ([key, value]) => ({ key, value })
+            ([key, value]) => ({ key, value }),
           )
         : [],
-    [b]
+    [b],
   );
   const consecutiveRows = useMemo(
     () =>
       b
         ? Object.entries(
-            b.subscriptions.consecutiveBilling?.byCycleCount || {}
+            b.subscriptions.consecutiveBilling?.byCycleCount || {},
           ).map(([key, value]) => ({ key, value }))
         : [],
-    [b]
+    [b],
   );
   const subscriptionTrend = useMemo(
     () => b?.subscriptions.trendByDay || [],
-    [b]
+    [b],
   );
 
   // 퍼널: 신청 → 선정 → 활성(옵트인) → Pro. 활성은 익명 표본이라 라벨 구분.
@@ -791,21 +1265,7 @@ export default function AnalyticsPanel() {
           {u && <SampleBadge n={u.sampleClientCount} />}
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex overflow-hidden rounded-lg border border-zinc-700">
-            {[7, 30, 90].map((d) => (
-              <button
-                key={d}
-                onClick={() => setDays(d)}
-                className={`px-3 py-1.5 text-sm font-medium transition ${
-                  days === d
-                    ? "bg-indigo-600 text-white"
-                    : "bg-zinc-950 text-zinc-400 hover:bg-zinc-800"
-                }`}
-              >
-                {d}일
-              </button>
-            ))}
-          </div>
+          <RangeControl days={days} onChange={setDays} disabled={anyLoading} />
           <button
             onClick={() => load(days)}
             disabled={anyLoading}
@@ -823,8 +1283,11 @@ export default function AnalyticsPanel() {
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         모든 지표는 익명·집계치입니다(개별 PII 없음). 제품 사용(🟡)은 텔레메트리
         옵트인/도그푸드 표본이라 편향될 수 있고, 2026-06-22 이후 구간은 공백일
-        수 있습니다.
+        수 있습니다. 차트의 데이터 포인트·막대를 클릭하면 해당 날/세그먼트
+        분해를 볼 수 있습니다.
       </p>
+
+      <AdminExclusionNote biz={b} usage={u} model={m} />
 
       {/* ── 사업 (🟢) ─────────────────────────────────────────────── */}
       <div className="space-y-4">
@@ -845,7 +1308,7 @@ export default function AnalyticsPanel() {
                 label="활성 파운더"
                 value={fmtInt(b.founders.accessGranted)}
                 sub={`설문 ${fmtInt(
-                  b.founders.feedbackSubmitted
+                  b.founders.feedbackSubmitted,
                 )} · 인터뷰 ${fmtInt(b.founders.interviewCompleted)}`}
               />
               <StatCard
@@ -858,7 +1321,7 @@ export default function AnalyticsPanel() {
                 label="유료 Pro(active)"
                 value={fmtInt(b.subscriptions.paidProActive)}
                 sub={`현재 ${fmtInt(
-                  b.subscriptions.paidCurrent
+                  b.subscriptions.paidCurrent,
                 )} · 무료부여 ${fmtInt(b.subscriptions.founderGrantActive)}`}
                 accent={SERIES}
               />
@@ -866,7 +1329,7 @@ export default function AnalyticsPanel() {
                 label="연속 구독자"
                 value={fmtInt(consecutiveBilling.subscribers)}
                 sub={`Toss 평균 ${consecutiveBilling.averageCycleCount.toFixed(
-                  1
+                  1,
                 )}회`}
                 accent={SERIES_2}
               />
@@ -886,15 +1349,19 @@ export default function AnalyticsPanel() {
                 note={`활성 구독 ${fmtInt(
                   Object.values(b.subscriptions.byPlanActive || {}).reduce(
                     (a, c) => a + c,
-                    0
-                  )
+                    0,
+                  ),
                 )}건`}
               >
                 <BarList
                   data={tierRows}
                   colorMap={TIER_COLOR}
                   labelMap={TIER_LABEL}
+                  showShare
                   emptyLabel="활성 구독이 없습니다."
+                  onDrill={(key) =>
+                    openDrill({ scope: "segment:plan", key, days })
+                  }
                 />
               </Panel>
               <Panel
@@ -904,14 +1371,22 @@ export default function AnalyticsPanel() {
                 <BarList
                   data={statusRows}
                   colorMap={SUB_STATUS_COLOR}
+                  showShare
                   emptyLabel="구독 데이터가 없습니다."
+                  onDrill={(key) =>
+                    openDrill({ scope: "segment:status", key, days })
+                  }
                 />
               </Panel>
               <Panel title="결제 수단 (active)">
                 <BarList
                   data={providerRows}
                   colorMap={PROVIDER_COLOR}
+                  showShare
                   emptyLabel="활성 결제 구독이 없습니다."
+                  onDrill={(key) =>
+                    openDrill({ scope: "segment:provider", key, days })
+                  }
                 />
               </Panel>
             </div>
@@ -928,9 +1403,15 @@ export default function AnalyticsPanel() {
                   }))}
                   color={STATUS_GOOD}
                   emptyLabel="활성 구독자 추이 데이터가 없습니다."
+                  onDrill={(date) =>
+                    openDrill({ scope: "subscription:day", date, days })
+                  }
                 />
               </Panel>
-              <Panel title="성장/이탈 추이" note="신규 구독 doc · canceled/past_due">
+              <Panel
+                title="성장/이탈 추이"
+                note="신규 구독 doc · canceled/past_due"
+              >
                 <TwoLineChart
                   data={subscriptionTrend.map((d) => ({
                     date: d.date,
@@ -940,12 +1421,15 @@ export default function AnalyticsPanel() {
                   first={{ label: "성장", color: SERIES_2 }}
                   second={{ label: "이탈", color: STATUS_CRIT }}
                   emptyLabel="성장/이탈 이벤트가 없습니다."
+                  onDrill={(date) =>
+                    openDrill({ scope: "subscription:day", date, days })
+                  }
                 />
               </Panel>
               <Panel
                 title="연속 청구 사이클"
                 note={`Toss billingCharges 기준 · Paddle ${fmtInt(
-                  b.subscriptions.paddleActiveCurrent
+                  b.subscriptions.paddleActiveCurrent,
                 )}건은 원장 공백`}
               >
                 <BarList
@@ -976,7 +1460,7 @@ export default function AnalyticsPanel() {
                     return funnel.map((f) => {
                       const pct = Math.max(
                         (f.value / fmax) * 100,
-                        f.value > 0 ? 3 : 0
+                        f.value > 0 ? 3 : 0,
                       );
                       const color = f.trust === "yellow" ? STATUS_WARN : SERIES;
                       return (
@@ -1050,6 +1534,9 @@ export default function AnalyticsPanel() {
                     value: d.dau,
                   }))}
                   emptyLabel="활성 데이터가 없습니다 (텔레메트리 공백)."
+                  onDrill={(date) =>
+                    openDrill({ scope: "usage:day", date, days })
+                  }
                 />
               </Panel>
               <Panel title="에이전트 스폰 추이" note="agent:spawned 일별">
@@ -1060,6 +1547,9 @@ export default function AnalyticsPanel() {
                   }))}
                   color={SERIES_2}
                   emptyLabel="스폰 이벤트가 없습니다."
+                  onDrill={(date) =>
+                    openDrill({ scope: "spawn:day", date, days })
+                  }
                 />
               </Panel>
             </div>
@@ -1071,7 +1561,11 @@ export default function AnalyticsPanel() {
                     key: e.key,
                     value: e.count,
                   }))}
+                  showShare
                   emptyLabel="이벤트 데이터가 없습니다."
+                  onDrill={(key) =>
+                    openDrill({ scope: "segment:event", key, days })
+                  }
                 />
               </Panel>
               <Panel title="스폰 — 역할별">
@@ -1081,7 +1575,11 @@ export default function AnalyticsPanel() {
                     value: e.count,
                   }))}
                   color={SERIES_2}
+                  showShare
                   emptyLabel="스폰 데이터가 없습니다."
+                  onDrill={(key) =>
+                    openDrill({ scope: "segment:role", key, days })
+                  }
                 />
               </Panel>
               <Panel title="스폰 — 모델별">
@@ -1091,7 +1589,11 @@ export default function AnalyticsPanel() {
                     value: e.count,
                   }))}
                   color={SERIES_2}
+                  showShare
                   emptyLabel="스폰 데이터가 없습니다."
+                  onDrill={(key) =>
+                    openDrill({ scope: "segment:model", key, days })
+                  }
                 />
               </Panel>
             </div>
@@ -1132,14 +1634,21 @@ export default function AnalyticsPanel() {
             {modelView === "overview" ? (
               <>
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <Panel title="모델별 비용" note={`${days}일 누적 (cost_logs)`}>
+                  <Panel
+                    title="모델별 비용"
+                    note={`${days}일 누적 (cost_logs)`}
+                  >
                     <BarList
                       data={m.costByModel.map((c) => ({
                         key: c.model,
                         value: c.cost,
                       }))}
                       format={fmtCost}
+                      showShare
                       emptyLabel="비용 데이터가 없습니다."
+                      onDrill={(key) =>
+                        openDrill({ scope: "segment:model", key, days })
+                      }
                     />
                   </Panel>
                   <Panel title="일별 비용 추이">
@@ -1150,6 +1659,9 @@ export default function AnalyticsPanel() {
                       }))}
                       format={fmtCost}
                       emptyLabel="비용 데이터가 없습니다."
+                      onDrill={(date) =>
+                        openDrill({ scope: "cost:day", date, days })
+                      }
                     />
                   </Panel>
                 </div>
@@ -1161,7 +1673,10 @@ export default function AnalyticsPanel() {
                   {m.modelRoleStats.length === 0 ? (
                     <EmptyState label="라벨 준비중입니다. 3.0.17 이후 task_outcomes가 축적되면 채워집니다." />
                   ) : (
-                    <ModelRoleTable rows={m.modelRoleStats} />
+                    <ModelRoleTable
+                      rows={m.modelRoleStats}
+                      onDrill={(scope, key) => openDrill({ scope, key, days })}
+                    />
                   )}
                 </Panel>
               </>
@@ -1173,8 +1688,8 @@ export default function AnalyticsPanel() {
                     value={fmtInt(
                       m.routing.byReuseVsSpawn.reduce(
                         (sum, r) => sum + r.count,
-                        0
-                      )
+                        0,
+                      ),
                     )}
                     sub="dispatch:decision"
                   />
@@ -1193,8 +1708,8 @@ export default function AnalyticsPanel() {
                     value={fmtInt(
                       m.outcomeByModel.reduce(
                         (sum, r) => sum + r.reworkCount,
-                        0
-                      )
+                        0,
+                      ),
                     )}
                     sub="retriesCount 합계"
                   />
@@ -1207,7 +1722,11 @@ export default function AnalyticsPanel() {
                         key: e.key,
                         value: e.count,
                       }))}
+                      showShare
                       emptyLabel="라우팅 결정 데이터가 없습니다. 라벨 준비중/3.0.17 이후 축적 상태입니다."
+                      onDrill={(key) =>
+                        openDrill({ scope: "segment:model", key, days })
+                      }
                     />
                   </Panel>
                   <Panel title="결정 사유">
@@ -1216,6 +1735,7 @@ export default function AnalyticsPanel() {
                         key: e.key,
                         value: e.count,
                       }))}
+                      showShare
                       emptyLabel="결정 사유 데이터가 없습니다."
                     />
                   </Panel>
@@ -1230,6 +1750,7 @@ export default function AnalyticsPanel() {
                         restart: STATUS_WARN,
                         spawn: SERIES,
                       }}
+                      showShare
                       emptyLabel="데이터가 없습니다."
                     />
                   </Panel>
@@ -1239,6 +1760,7 @@ export default function AnalyticsPanel() {
                         key: e.key,
                         value: e.count,
                       }))}
+                      showShare
                       emptyLabel="데이터가 없습니다."
                     />
                   </Panel>
@@ -1277,14 +1799,24 @@ export default function AnalyticsPanel() {
           </p>
         </div>
       </div>
+
+      {drill && (
+        <DrilldownModal
+          request={drill}
+          state={drillState}
+          onClose={closeDrill}
+        />
+      )}
     </section>
   );
 }
 
 function ModelRoleTable({
   rows,
+  onDrill,
 }: {
   rows: ModelSummary["modelRoleStats"];
+  onDrill?: (scope: "segment:model" | "segment:role", key: string) => void;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -1306,8 +1838,32 @@ function ModelRoleTable({
               key={`${r.model}-${r.role}-${i}`}
               className="border-b border-zinc-800/60 last:border-0"
             >
-              <td className="py-2 pr-4 text-zinc-200">{r.model}</td>
-              <td className="py-2 pr-4 text-zinc-400">{r.role}</td>
+              <td className="py-2 pr-4 text-zinc-200">
+                {onDrill ? (
+                  <button
+                    type="button"
+                    onClick={() => onDrill("segment:model", r.model)}
+                    className="rounded underline decoration-dotted underline-offset-2 transition hover:text-indigo-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  >
+                    {r.model}
+                  </button>
+                ) : (
+                  r.model
+                )}
+              </td>
+              <td className="py-2 pr-4 text-zinc-400">
+                {onDrill ? (
+                  <button
+                    type="button"
+                    onClick={() => onDrill("segment:role", r.role)}
+                    className="rounded underline decoration-dotted underline-offset-2 transition hover:text-indigo-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  >
+                    {r.role}
+                  </button>
+                ) : (
+                  r.role
+                )}
+              </td>
               <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
                 {fmtInt(r.total)}
               </td>
@@ -1322,8 +1878,8 @@ function ModelRoleTable({
                           r.successRate >= 0.7
                             ? STATUS_GOOD
                             : r.successRate >= 0.4
-                            ? STATUS_WARN
-                            : STATUS_CRIT,
+                              ? STATUS_WARN
+                              : STATUS_CRIT,
                       }}
                     />
                   </div>
