@@ -5214,6 +5214,125 @@ function parseAnalyticsDays(data: unknown, def = 30): number {
   return Math.min(n, 365);
 }
 
+// 드릴다운 대상 날짜(YYYY-MM-DD, UTC)를 안전하게 파싱한다.
+function parseAnalyticsDate(data: unknown): string {
+  const raw = (data as { date?: unknown } | null | undefined)?.date;
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(s) ||
+    Number.isNaN(Date.parse(`${s}T00:00:00Z`))
+  ) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "date must be YYYY-MM-DD"
+    );
+  }
+  return s;
+}
+
+// 드릴다운 세그먼트 키. 빈 값/과길이는 거절(BQ 파라미터로만 들어가므로 인젝션은
+// 불가하지만, 무의미한 스캔을 막는다).
+function parseSegmentKey(data: unknown): string {
+  const raw = (data as { key?: unknown } | null | undefined)?.key;
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (!s || s.length > 200) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "key is required (max 200 chars)"
+    );
+  }
+  return s;
+}
+
+// ── 운영자(어드민) 자기계정 제외 ───────────────────────────────────────────────
+// 대시보드는 "고객 지표"를 봐야 하는데 도그푸드 표본이 30 수준이라(§0-B) 운영자
+// 본인 활동이 그대로 KPI 를 오염시킨다. 아래 헬퍼로 어드민 uid 를 집계에서 뺀다.
+//
+// ⚠️ ADMIN_UID 는 절대 응답/로그로 반환하지 않는다. 제외 "건수"만 노출한다.
+//
+// 소스별 제외 가능성(§0 데이터 세계 분리):
+//   - Firestore subscriptions/agents/founders + BQ cost_logs → uid 를 직접
+//     보관하므로 정확히 제외 가능.
+//   - BQ events/task_outcomes → userId 컬럼이 익명 clientId 라 uid 로는 못
+//     지운다. 단 cost_logs(uid 보유) 와 agentId 가 같은 공간이라, 어드민이
+//     소유한 agentId 로 events 를 역참조하면 어드민 clientId 를 유추할 수 있다.
+//     그 유추분만 제외한다(실패해도 대시보드는 살아야 하므로 fail-open).
+function getAdminExclusionUid(): string | null {
+  const uid = process.env.ADMIN_UID?.trim();
+  return uid ? uid : null;
+}
+
+// 어드민 uid 가 소유한 agentId → events.userId(익명 clientId) 역참조.
+// 실패(권한/테이블 공백/스키마 드리프트)하면 빈 배열 — 제외를 포기하고 계속한다.
+async function resolveAdminClientIds(rangeDays: number): Promise<string[]> {
+  const adminUid = getAdminExclusionUid();
+  if (!adminUid) return [];
+  const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+  const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
+  // 조회 윈도우보다 넉넉히 뒤로 본다 — 어드민 clientId 는 윈도우 밖에서 이미
+  // 확정돼 있을 수 있고, 놓치면 제외가 통째로 새어나간다.
+  const lookbackDays = Math.min(Math.max(rangeDays, 90), 365);
+  const query = `
+    SELECT DISTINCT e.userId AS clientId
+    FROM ${eventsTable} AS e
+    JOIN (
+      SELECT DISTINCT agentId
+      FROM ${costTable}
+      WHERE userId = @adminUid
+        AND agentId IS NOT NULL
+        AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
+    ) AS c
+    ON e.agentId = c.agentId
+    WHERE e.userId IS NOT NULL
+      AND e.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
+    LIMIT 100
+  `;
+  try {
+    const [rows] = await bigquery.query({
+      query,
+      params: { adminUid, lookbackDays },
+      location: BQ_LOCATION,
+    });
+    return (rows as Array<Record<string, unknown>>)
+      .map((r) => String(r.clientId ?? ""))
+      .filter((s) => s.length > 0);
+  } catch (err) {
+    // uid 는 로그에도 남기지 않는다.
+    console.warn(
+      "[analytics] admin clientId resolution failed; proceeding without " +
+        "telemetry self-exclusion:",
+      (err as Error)?.message
+    );
+    return [];
+  }
+}
+
+// 익명 텔레메트리 테이블용 제외 절 + 파라미터. clientId 가 하나도 없으면
+// 빈 절을 돌려준다(빈 ARRAY 파라미터 타입 이슈 회피).
+function adminClientExclusion(clientIds: string[]): {
+  clause: string;
+  params: Record<string, unknown>;
+} {
+  if (clientIds.length === 0) return { clause: "", params: {} };
+  return {
+    clause: " AND userId NOT IN UNNEST(@excludeClients)",
+    params: { excludeClients: clientIds },
+  };
+}
+
+// cost_logs 는 실제 uid 를 보관 → 정확 제외.
+function adminUidExclusion(): {
+  clause: string;
+  params: Record<string, unknown>;
+} {
+  const adminUid = getAdminExclusionUid();
+  if (!adminUid) return { clause: "", params: {} };
+  return {
+    clause: " AND userId != @adminUid",
+    params: { adminUid },
+  };
+}
+
 // BQ 집계 행을 { key → count } 분포로 접는다(빈 결과 안전).
 function foldDistribution(
   rows: Array<Record<string, unknown>>,
@@ -5362,6 +5481,14 @@ export const getAdminBusinessSummary = functions.https.onCall(
   async (data, context) => {
     requireAdmin(context);
     const rangeDays = parseAnalyticsDays(data);
+    const adminUid = getAdminExclusionUid();
+    // 제외 건수만 집계(uid 자체는 절대 반환하지 않는다).
+    const adminExcluded = {
+      subscriptions: 0,
+      billingCharges: 0,
+      founders: 0,
+      agents: 0,
+    };
     const nowMs = Date.now();
     const cutoffMs = nowMs - rangeDays * DAY_MS;
     const trendByDay = makeBusinessTrendBuckets(rangeDays, nowMs);
@@ -5383,6 +5510,11 @@ export const getAdminBusinessSummary = functions.https.onCall(
     let paddleActiveCurrent = 0;
 
     for (const doc of subSnap.docs) {
+      // subscriptions doc id == uid → 운영자 본인 구독은 KPI 에서 제외한다.
+      if (adminUid && doc.id === adminUid) {
+        adminExcluded.subscriptions++;
+        continue;
+      }
       const v = doc.data() as Record<string, unknown>;
       const status = typeof v.status === "string" ? v.status : "unknown";
       const plan = typeof v.planType === "string" ? v.planType : "unknown";
@@ -5445,6 +5577,10 @@ export const getAdminBusinessSummary = functions.https.onCall(
     for (const doc of chargeSnap.docs) {
       const v = doc.data() as Record<string, unknown>;
       const userId = typeof v.userId === "string" ? v.userId : "";
+      if (adminUid && userId === adminUid) {
+        adminExcluded.billingCharges++;
+        continue;
+      }
       const status = typeof v.status === "string" ? v.status : "";
       const cycleAnchorMs =
         typeof v.cycleAnchorMs === "number"
@@ -5465,6 +5601,11 @@ export const getAdminBusinessSummary = functions.https.onCall(
     let feedbackSubmitted = 0;
     for (const doc of founderSnap.docs) {
       const v = doc.data() as Record<string, unknown>;
+      // founders doc id 는 이메일 — 계정 연결(proSubscriptionUid)로만 식별된다.
+      if (adminUid && v.proSubscriptionUid === adminUid) {
+        adminExcluded.founders++;
+        continue;
+      }
       if (v.accessGrantedAt != null) accessGranted++;
       if (v.interviewCompleted === true) interviewCompleted++;
       if (v.feedbackSubmittedAt != null || v.feedbackId != null) {
@@ -5495,6 +5636,10 @@ export const getAdminBusinessSummary = functions.https.onCall(
     let rollingTotalTokens = 0;
     for (const doc of agentSnap.docs) {
       const v = doc.data() as Record<string, unknown>;
+      if (adminUid && v.ownerId === adminUid) {
+        adminExcluded.agents++;
+        continue;
+      }
       const status = typeof v.status === "string" ? v.status : "unknown";
       agentsByStatus[status] = (agentsByStatus[status] || 0) + 1;
       rollingTotalCost += toNumber(v.totalCost as number | undefined);
@@ -5507,16 +5652,22 @@ export const getAdminBusinessSummary = functions.https.onCall(
 
     // Pro 전환율(§2.1). "활성 사용자" 정확 분모는 익명 BQ 라 계정단위 불가 →
     // 신뢰 가능한 식별 분모(구독 총계·대기자)로 두 개의 비율을 명시 반환한다.
+    // 분모도 운영자 제외분을 뺀 값이어야 비율이 왜곡되지 않는다.
+    const subscriptionTotal = subSnap.size - adminExcluded.subscriptions;
+    const founderTotal = founderSnap.size - adminExcluded.founders;
+    const agentTotal = agentSnap.size - adminExcluded.agents;
     const proConversionRateVsSubscribers =
-      subSnap.size > 0 ? paidProActive / subSnap.size : 0;
+      subscriptionTotal > 0 ? paidProActive / subscriptionTotal : 0;
     const proConversionRateVsWaitlist =
       waitlistTotal > 0 ? paidProActive / waitlistTotal : 0;
 
     return {
       rangeDays,
       generatedAt: new Date().toISOString(),
+      // 운영자 자기계정 제외 — 제외 "건수"만(uid 미노출). UI 라벨용.
+      adminExcluded,
       subscriptions: {
-        total: subSnap.size,
+        total: subscriptionTotal,
         byStatus,
         byPlanActive,
         byProviderActive,
@@ -5534,7 +5685,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
         proConversionRateVsWaitlist,
       },
       founders: {
-        total: founderSnap.size,
+        total: founderTotal,
         accessGranted,
         interviewCompleted,
         feedbackSubmitted,
@@ -5544,7 +5695,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
         newInWindow: waitlistNewInWindow,
       },
       agents: {
-        liveCount: agentSnap.size,
+        liveCount: agentTotal,
         byStatus: agentsByStatus,
         rollingTotalCost,
         rollingTotalTokens,
@@ -5570,6 +5721,9 @@ export const getAdminUsageSummary = functions.https.onCall(
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
     const outcomesTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_TASK_OUTCOMES_TABLE}\``;
     const since = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+    // 운영자 자기활동 제외 — cost_logs 로 역참조한 어드민 clientId 만 뺀다.
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const ex = adminClientExclusion(adminClientIds);
 
     // DAU(일별 고유 clientId) + 일별 총 이벤트(히스토리 사용량)
     const activeByDayQuery = `
@@ -5578,7 +5732,7 @@ export const getAdminUsageSummary = functions.https.onCall(
         COUNT(DISTINCT userId) AS dau,
         COUNT(*) AS events
       FROM ${eventsTable}
-      WHERE timestamp >= ${since}
+      WHERE timestamp >= ${since}${ex.clause}
       GROUP BY date
       ORDER BY date ASC
     `;
@@ -5590,13 +5744,13 @@ export const getAdminUsageSummary = functions.https.onCall(
           timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY),
           userId, NULL)) AS wau
       FROM ${eventsTable}
-      WHERE timestamp >= ${since}
+      WHERE timestamp >= ${since}${ex.clause}
     `;
     // 상위 이벤트 랭킹
     const topEventsQuery = `
       SELECT COALESCE(event, '(none)') AS event, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE timestamp >= ${since}
+      WHERE timestamp >= ${since}${ex.clause}
       GROUP BY event
       ORDER BY n DESC
       LIMIT 25
@@ -5605,19 +5759,19 @@ export const getAdminUsageSummary = functions.https.onCall(
     const spawnsByDayQuery = `
       SELECT FORMAT_DATE('%F', DATE(timestamp)) AS date, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'agent:spawned' AND timestamp >= ${since}
+      WHERE event = 'agent:spawned' AND timestamp >= ${since}${ex.clause}
       GROUP BY date ORDER BY date ASC
     `;
     const spawnsByRoleQuery = `
       SELECT role AS key, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'agent:spawned' AND timestamp >= ${since}
+      WHERE event = 'agent:spawned' AND timestamp >= ${since}${ex.clause}
       GROUP BY role ORDER BY n DESC
     `;
     const spawnsByModelQuery = `
       SELECT model AS key, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'agent:spawned' AND timestamp >= ${since}
+      WHERE event = 'agent:spawned' AND timestamp >= ${since}${ex.clause}
       GROUP BY model ORDER BY n DESC
     `;
     // 태스크 성공률·완료시간(task_outcomes 전체)
@@ -5627,10 +5781,10 @@ export const getAdminUsageSummary = functions.https.onCall(
         COUNTIF(success = true) AS succeeded,
         AVG(durationMs) AS avgDurationMs
       FROM ${outcomesTable}
-      WHERE completedAt >= ${since}
+      WHERE completedAt >= ${since}${ex.clause}
     `;
 
-    const params = { days: rangeDays };
+    const params = { days: rangeDays, ...ex.params };
     const q = (query: string) =>
       bigquery.query({ query, params, location: BQ_LOCATION });
 
@@ -5670,6 +5824,11 @@ export const getAdminUsageSummary = functions.https.onCall(
     return {
       rangeDays,
       generatedAt: new Date().toISOString(),
+      // 운영자 제외 현황 — clientId 값은 노출하지 않고 개수만.
+      adminExcluded: {
+        uidFiltered: getAdminExclusionUid() != null,
+        clientIdCount: adminClientIds.length,
+      },
       // 표본 신뢰도 라벨링(§0-B, T0-3): 옵트인/도그푸드 편향 표본 크기.
       sampleClientCount: toNumber(
         sample.sampleClients as number | string | undefined
@@ -5724,8 +5883,13 @@ export const getAdminModelSummary = functions.https.onCall(
     const outcomesTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_TASK_OUTCOMES_TABLE}\``;
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
     const sinceTs = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+    // 운영자 제외: cost_logs 는 실제 uid 보유 → 정확 제외.
+    // events/task_outcomes 는 익명 clientId → 역참조로 추정된 것만 제외.
+    const uidEx = adminUidExclusion();
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const clientEx = adminClientExclusion(adminClientIds);
 
-    // (1) 모델별 비용(전체 사용자 — uid 필터 제거)
+    // (1) 모델별 비용(전체 사용자 — 자기조회 uid 필터 제거, 운영자만 제외)
     const costByModelQuery = `
       SELECT
         COALESCE(model, '(none)') AS model,
@@ -5735,7 +5899,7 @@ export const getAdminModelSummary = functions.https.onCall(
         SUM(COALESCE(totalCost, 0)) AS cost,
         COUNT(*) AS n
       FROM ${costTable}
-      WHERE timestamp >= ${sinceTs}
+      WHERE timestamp >= ${sinceTs}${uidEx.clause}
       GROUP BY model
       ORDER BY cost DESC
     `;
@@ -5745,7 +5909,7 @@ export const getAdminModelSummary = functions.https.onCall(
         FORMAT_DATE('%F', DATE(timestamp)) AS date,
         SUM(COALESCE(totalCost, 0)) AS cost
       FROM ${costTable}
-      WHERE timestamp >= ${sinceTs}
+      WHERE timestamp >= ${sinceTs}${uidEx.clause}
       GROUP BY date
       ORDER BY date ASC
     `;
@@ -5759,39 +5923,28 @@ export const getAdminModelSummary = functions.https.onCall(
         AVG(durationMs) AS avgDurationMs,
         AVG(totalCost) AS avgCost
       FROM ${outcomesTable}
-      WHERE completedAt >= ${sinceTs}
+      WHERE completedAt >= ${sinceTs}${clientEx.clause}
       GROUP BY model, role
       ORDER BY total DESC
     `;
     // (4) dispatch:decision 라우팅 결정 분포(metadata JSON STRING 파싱)
-    const routingSelectedQuery = `
-      SELECT JSON_VALUE(metadata, '$.selectedModel') AS key, COUNT(*) AS n
+    const routingQuery = (jsonPath: string) => `
+      SELECT JSON_VALUE(metadata, '${jsonPath}') AS key, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
-      GROUP BY key ORDER BY n DESC
-    `;
-    const routingReasonQuery = `
-      SELECT JSON_VALUE(metadata, '$.decisionReason') AS key, COUNT(*) AS n
-      FROM ${eventsTable}
-      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
-      GROUP BY key ORDER BY n DESC
-    `;
-    const routingReuseQuery = `
-      SELECT JSON_VALUE(metadata, '$.reuseVsSpawn') AS key, COUNT(*) AS n
-      FROM ${eventsTable}
-      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
-      GROUP BY key ORDER BY n DESC
-    `;
-    const routingModeQuery = `
-      SELECT JSON_VALUE(metadata, '$.modelSelectionMode') AS key, COUNT(*) AS n
-      FROM ${eventsTable}
-      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
+      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}${clientEx.clause}
       GROUP BY key ORDER BY n DESC
     `;
 
-    const params = { days: rangeDays };
-    const q = (query: string) =>
-      bigquery.query({ query, params, location: BQ_LOCATION });
+    // 쿼리마다 참조하는 제외 파라미터가 달라(uid vs clientId) 공용 params 를
+    // 쓰면 미참조 파라미터가 섞인다 — 쿼리별로 명시 전달한다.
+    const q = (query: string, extra: Record<string, unknown>) =>
+      bigquery.query({
+        query,
+        params: { days: rangeDays, ...extra },
+        location: BQ_LOCATION,
+      });
+    const qCost = (query: string) => q(query, uidEx.params);
+    const qClient = (query: string) => q(query, clientEx.params);
 
     const [
       [costByModelRows],
@@ -5802,13 +5955,13 @@ export const getAdminModelSummary = functions.https.onCall(
       [routingReuseRows],
       [routingModeRows],
     ] = await Promise.all([
-      q(costByModelQuery),
-      q(costByDayQuery),
-      q(modelRoleQuery),
-      q(routingSelectedQuery),
-      q(routingReasonQuery),
-      q(routingReuseQuery),
-      q(routingModeQuery),
+      qCost(costByModelQuery),
+      qCost(costByDayQuery),
+      qClient(modelRoleQuery),
+      qClient(routingQuery("$.selectedModel")),
+      qClient(routingQuery("$.decisionReason")),
+      qClient(routingQuery("$.reuseVsSpawn")),
+      qClient(routingQuery("$.modelSelectionMode")),
     ]);
 
     const costByModel = (costByModelRows as Array<Record<string, unknown>>).map(
@@ -5843,6 +5996,10 @@ export const getAdminModelSummary = functions.https.onCall(
     return {
       rangeDays,
       generatedAt: new Date().toISOString(),
+      adminExcluded: {
+        uidFiltered: getAdminExclusionUid() != null,
+        clientIdCount: adminClientIds.length,
+      },
       costByModel,
       costByDay: (costByDayRows as Array<Record<string, unknown>>).map((r) => ({
         date: String(r.date ?? ""),
@@ -5867,6 +6024,762 @@ export const getAdminModelSummary = functions.https.onCall(
           "key"
         ),
       },
+    };
+  }
+);
+
+// ============================================
+// Admin Analytics Drilldown — 차트 클릭 → 상세 분해
+// ============================================
+// 대시보드의 모든 차트는 집계치라 "왜 이 날 튀었나"를 답하지 못한다. 이 콜러블은
+// (a) 특정 날(UTC) 또는 (b) 특정 세그먼트(이벤트/모델/역할/플랜 등) 하나를
+// 받아 그 조각만 다시 분해한다.
+//
+// 응답은 스코프마다 다른 필드를 만들지 않고 아래 제네릭 봉투 하나로 통일한다 —
+// 프론트 모달이 스코프별 분기 없이 그대로 렌더할 수 있게 하기 위함(§UI).
+//
+// 프라이버시: 상위 집계와 동일 규칙. 개별 row·PII·uid·clientId 는 절대 내리지
+// 않고 카테고리 카운트만 반환한다. 운영자(ADMIN_UID) 자기활동은 동일하게 제외.
+
+type DrilldownFormat = "int" | "cost" | "pct" | "duration";
+
+type DrilldownStat = {
+  label: string;
+  value: number;
+  format: DrilldownFormat;
+};
+
+type DrilldownBreakdown = {
+  title: string;
+  rows: Array<{ key: string; count: number }>;
+  format: DrilldownFormat;
+};
+
+type DrilldownResult = {
+  scope: string;
+  date: string | null;
+  key: string | null;
+  rangeDays: number;
+  generatedAt: string;
+  title: string;
+  note: string;
+  stats: DrilldownStat[];
+  breakdowns: DrilldownBreakdown[];
+  trend: Array<{ date: string; value: number }> | null;
+  trendLabel: string | null;
+  trendFormat: DrilldownFormat;
+};
+
+const DRILLDOWN_SCOPES = [
+  "usage:day",
+  "spawn:day",
+  "cost:day",
+  "subscription:day",
+  "segment:event",
+  "segment:model",
+  "segment:role",
+  "segment:plan",
+  "segment:status",
+  "segment:provider",
+] as const;
+
+type DrilldownScope = typeof DRILLDOWN_SCOPES[number];
+
+function parseDrilldownScope(data: unknown): DrilldownScope {
+  const raw = (data as { scope?: unknown } | null | undefined)?.scope;
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (!(DRILLDOWN_SCOPES as readonly string[]).includes(s)) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      `scope must be one of: ${DRILLDOWN_SCOPES.join(", ")}`
+    );
+  }
+  return s as DrilldownScope;
+}
+
+/**
+ * getAdminDrilldown — 차트 데이터포인트/막대 클릭 시의 상세 분해.
+ *
+ * params:
+ *   { scope: "usage:day" | "spawn:day" | "cost:day" | "subscription:day",
+ *     date: "YYYY-MM-DD" }                       — 해당 날(UTC) 분해
+ *   { scope: "segment:*", key: string, days?: number }  — 해당 세그먼트 분해
+ */
+export const getAdminDrilldown = functions.https.onCall(
+  async (data, context): Promise<DrilldownResult> => {
+    requireAdmin(context);
+    const scope = parseDrilldownScope(data);
+    const rangeDays = parseAnalyticsDays(data);
+    const isDayScope = scope.endsWith(":day");
+    const date = isDayScope ? parseAnalyticsDate(data) : null;
+    const key = isDayScope ? null : parseSegmentKey(data);
+
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const outcomesTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_TASK_OUTCOMES_TABLE}\``;
+    const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
+
+    // 날짜 스코프는 [자정, 다음날 자정) UTC 반개구간 — 파티션 프루닝 유지.
+    const dayWindow = (col: string) =>
+      `${col} >= TIMESTAMP(@date) AND ${col} < TIMESTAMP_ADD(TIMESTAMP(@date), INTERVAL 1 DAY)`;
+    const sinceTs = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+
+    const uidEx = adminUidExclusion();
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const clientEx = adminClientExclusion(adminClientIds);
+
+    // 스코프마다 참조하는 파라미터가 달라서(@date vs @days vs @key vs 제외절)
+    // 후보를 모아두고 쿼리 본문이 실제로 참조하는 것만 넘긴다 — 미참조
+    // 파라미터를 섞어 보내지 않기 위함.
+    const runQuery = async (
+      query: string,
+      extra: Record<string, unknown>
+    ): Promise<Array<Record<string, unknown>>> => {
+      const candidates: Record<string, unknown> = {
+        ...(date != null ? { date } : {}),
+        days: rangeDays,
+        ...extra,
+      };
+      const params: Record<string, unknown> = {};
+      for (const [name, value] of Object.entries(candidates)) {
+        if (value !== undefined && query.includes(`@${name}`)) {
+          params[name] = value;
+        }
+      }
+      const [rows] = await bigquery.query({
+        query,
+        params,
+        location: BQ_LOCATION,
+      });
+      return rows as Array<Record<string, unknown>>;
+    };
+
+    const base = {
+      scope,
+      date,
+      key,
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      trend: null as DrilldownResult["trend"],
+      trendLabel: null as string | null,
+      trendFormat: "int" as DrilldownFormat,
+    };
+
+    // ── (a) 하루 분해 — events ─────────────────────────────────────────────
+    if (scope === "usage:day" || scope === "spawn:day") {
+      const spawnOnly = scope === "spawn:day";
+      const eventFilter = spawnOnly ? " AND event = 'agent:spawned'" : "";
+      const where = `WHERE ${dayWindow("timestamp")}${eventFilter}${
+        clientEx.clause
+      }`;
+
+      const dist = (col: string, limit = 25) => `
+        SELECT COALESCE(CAST(${col} AS STRING), '(none)') AS key, COUNT(*) AS n
+        FROM ${eventsTable}
+        ${where}
+        GROUP BY key ORDER BY n DESC LIMIT ${limit}
+      `;
+      const totalsQuery = `
+        SELECT
+          COUNT(*) AS events,
+          COUNT(DISTINCT userId) AS clients,
+          COUNT(DISTINCT agentId) AS agents,
+          COUNT(DISTINCT projectId) AS projects
+        FROM ${eventsTable}
+        ${where}
+      `;
+      const hourQuery = `
+        SELECT FORMAT_TIMESTAMP('%H시', timestamp) AS key, COUNT(*) AS n
+        FROM ${eventsTable}
+        ${where}
+        GROUP BY key ORDER BY key ASC
+      `;
+
+      const [totals, byHour, byEvent, byRole, byModel, byVersion] =
+        await Promise.all([
+          runQuery(totalsQuery, clientEx.params),
+          runQuery(hourQuery, clientEx.params),
+          // spawn:day 는 event 가 agent:spawned 하나로 고정 — 분해할 게 없다.
+          spawnOnly
+            ? Promise.resolve([] as Array<Record<string, unknown>>)
+            : runQuery(dist("event"), clientEx.params),
+          runQuery(dist("role"), clientEx.params),
+          runQuery(dist("model"), clientEx.params),
+          runQuery(dist("appVersion"), clientEx.params),
+        ]);
+
+      const t = totals[0] ?? {};
+      return {
+        ...base,
+        title: `${date} · ${spawnOnly ? "에이전트 스폰" : "제품 사용"} 분해`,
+        note: "UTC 기준 하루 · 익명 텔레메트리(옵트인 표본)",
+        stats: [
+          {
+            label: spawnOnly ? "스폰 수" : "총 이벤트",
+            value: toNumber(t.events as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "고유 클라이언트",
+            value: toNumber(t.clients as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "고유 에이전트",
+            value: toNumber(t.agents as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "고유 프로젝트",
+            value: toNumber(t.projects as number | string | undefined),
+            format: "int",
+          },
+        ],
+        breakdowns: [
+          ...(spawnOnly
+            ? []
+            : [
+                {
+                  title: "이벤트별",
+                  rows: foldDistribution(byEvent, "key"),
+                  format: "int" as DrilldownFormat,
+                },
+              ]),
+          {
+            title: "역할별",
+            rows: foldDistribution(byRole, "key"),
+            format: "int",
+          },
+          {
+            title: "모델별",
+            rows: foldDistribution(byModel, "key"),
+            format: "int",
+          },
+          {
+            title: "앱 버전별",
+            rows: foldDistribution(byVersion, "key"),
+            format: "int",
+          },
+          {
+            title: "시간대별 (UTC)",
+            rows: foldDistribution(byHour, "key"),
+            format: "int",
+          },
+        ],
+      };
+    }
+
+    // ── (a) 하루 분해 — cost_logs ─────────────────────────────────────────
+    if (scope === "cost:day") {
+      const where = `WHERE ${dayWindow("timestamp")}${uidEx.clause}`;
+      const totalsQuery = `
+        SELECT
+          SUM(COALESCE(totalCost, 0)) AS cost,
+          SUM(COALESCE(inputTokens, 0) + COALESCE(outputTokens, 0) +
+              COALESCE(cacheReadTokens, 0) + COALESCE(cacheWriteTokens, 0))
+            AS tokens,
+          COUNT(*) AS calls,
+          COUNT(DISTINCT userId) AS users
+        FROM ${costTable}
+        ${where}
+      `;
+      const costBy = (col: string) => `
+        SELECT COALESCE(CAST(${col} AS STRING), '(none)') AS key,
+               SUM(COALESCE(totalCost, 0)) AS n
+        FROM ${costTable}
+        ${where}
+        GROUP BY key ORDER BY n DESC LIMIT 25
+      `;
+      const hourQuery = `
+        SELECT FORMAT_TIMESTAMP('%H시', timestamp) AS key,
+               SUM(COALESCE(totalCost, 0)) AS n
+        FROM ${costTable}
+        ${where}
+        GROUP BY key ORDER BY key ASC
+      `;
+
+      const [totals, byModel, byTaskType, byHour] = await Promise.all([
+        runQuery(totalsQuery, uidEx.params),
+        runQuery(costBy("model"), uidEx.params),
+        runQuery(costBy("taskType"), uidEx.params),
+        runQuery(hourQuery, uidEx.params),
+      ]);
+
+      const t = totals[0] ?? {};
+      return {
+        ...base,
+        title: `${date} · 비용 분해`,
+        note: "UTC 기준 하루 · cost_logs(운영자 제외)",
+        stats: [
+          {
+            label: "총 비용",
+            value: toNumber(t.cost as number | string | undefined),
+            format: "cost",
+          },
+          {
+            label: "총 토큰",
+            value: toNumber(t.tokens as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "호출 수",
+            value: toNumber(t.calls as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "지출 사용자",
+            value: toNumber(t.users as number | string | undefined),
+            format: "int",
+          },
+        ],
+        breakdowns: [
+          {
+            title: "모델별 비용",
+            rows: foldDistribution(byModel, "key"),
+            format: "cost",
+          },
+          {
+            title: "태스크 유형별 비용",
+            rows: foldDistribution(byTaskType, "key"),
+            format: "cost",
+          },
+          {
+            title: "시간대별 비용 (UTC)",
+            rows: foldDistribution(byHour, "key"),
+            format: "cost",
+          },
+        ],
+      };
+    }
+
+    // ── (a) 하루 분해 — 구독(Firestore) ───────────────────────────────────
+    if (scope === "subscription:day") {
+      const dayStartMs = Date.parse(`${date}T00:00:00Z`);
+      const dayEndMs = dayStartMs + DAY_MS;
+      const adminUid = getAdminExclusionUid();
+      const snap = await db.collection("subscriptions").limit(10000).get();
+
+      const newByPlan: Record<string, number> = {};
+      const newByProvider: Record<string, number> = {};
+      const churnedByPlan: Record<string, number> = {};
+      const churnedByProvider: Record<string, number> = {};
+      let newCount = 0;
+      let churnedCount = 0;
+      let activeAtEnd = 0;
+
+      const bump = (m: Record<string, number>, k: string) => {
+        m[k] = (m[k] || 0) + 1;
+      };
+
+      for (const doc of snap.docs) {
+        if (adminUid && doc.id === adminUid) continue;
+        const v = doc.data() as Record<string, unknown>;
+        const status = typeof v.status === "string" ? v.status : "unknown";
+        const plan = typeof v.planType === "string" ? v.planType : "unknown";
+        const provider =
+          typeof v.paymentProvider === "string" ? v.paymentProvider : "unknown";
+        const createdMs = tsToMillis(v.createdAt);
+        const canceledMs = tsToMillis(v.canceledAt);
+        const periodEndMs = tsToMillis(v.currentPeriodEnd);
+
+        if (
+          createdMs != null &&
+          createdMs >= dayStartMs &&
+          createdMs < dayEndMs
+        ) {
+          newCount++;
+          bump(newByPlan, plan);
+          bump(newByProvider, provider);
+        }
+        if (
+          (status === "canceled" || status === "past_due") &&
+          canceledMs != null &&
+          canceledMs >= dayStartMs &&
+          canceledMs < dayEndMs
+        ) {
+          churnedCount++;
+          bump(churnedByPlan, plan);
+          bump(churnedByProvider, provider);
+        }
+        if (
+          activeAtDayEnd(
+            status,
+            createdMs,
+            canceledMs,
+            periodEndMs,
+            dayEndMs - 1
+          )
+        ) {
+          activeAtEnd++;
+        }
+      }
+
+      const toRows = (m: Record<string, number>) =>
+        Object.entries(m)
+          .map(([k, count]) => ({ key: k, count }))
+          .sort((a, b) => b.count - a.count);
+
+      return {
+        ...base,
+        title: `${date} · 구독 변동 분해`,
+        note: "UTC 기준 하루 · Firestore subscriptions(운영자 제외)",
+        stats: [
+          { label: "신규", value: newCount, format: "int" },
+          { label: "이탈", value: churnedCount, format: "int" },
+          { label: "순증", value: newCount - churnedCount, format: "int" },
+          { label: "당일 마감 활성", value: activeAtEnd, format: "int" },
+        ],
+        breakdowns: [
+          { title: "신규 — 플랜별", rows: toRows(newByPlan), format: "int" },
+          {
+            title: "신규 — 결제수단별",
+            rows: toRows(newByProvider),
+            format: "int",
+          },
+          {
+            title: "이탈 — 플랜별",
+            rows: toRows(churnedByPlan),
+            format: "int",
+          },
+          {
+            title: "이탈 — 결제수단별",
+            rows: toRows(churnedByProvider),
+            format: "int",
+          },
+        ],
+      };
+    }
+
+    // ── (b) 세그먼트 분해 — 구독(Firestore) ───────────────────────────────
+    if (
+      scope === "segment:plan" ||
+      scope === "segment:status" ||
+      scope === "segment:provider"
+    ) {
+      const adminUid = getAdminExclusionUid();
+      const snap = await db.collection("subscriptions").limit(10000).get();
+      const nowMs = Date.now();
+      const cutoffMs = nowMs - rangeDays * DAY_MS;
+      const trendBuckets = makeBusinessTrendBuckets(rangeDays, nowMs);
+      const firstTrendDayMs = startOfUtcDay(nowMs) - (rangeDays - 1) * DAY_MS;
+
+      const byStatus: Record<string, number> = {};
+      const byPlan: Record<string, number> = {};
+      const byProvider: Record<string, number> = {};
+      let matched = 0;
+      let newInWindow = 0;
+      let churnedInWindow = 0;
+      let activeCurrent = 0;
+
+      const bump = (m: Record<string, number>, k: string) => {
+        m[k] = (m[k] || 0) + 1;
+      };
+
+      for (const doc of snap.docs) {
+        if (adminUid && doc.id === adminUid) continue;
+        const v = doc.data() as Record<string, unknown>;
+        const status = typeof v.status === "string" ? v.status : "unknown";
+        const plan = typeof v.planType === "string" ? v.planType : "unknown";
+        const provider =
+          typeof v.paymentProvider === "string" ? v.paymentProvider : "unknown";
+
+        const field =
+          scope === "segment:plan"
+            ? plan
+            : scope === "segment:status"
+            ? status
+            : provider;
+        if (field !== key) continue;
+
+        matched++;
+        bump(byStatus, status);
+        bump(byPlan, plan);
+        bump(byProvider, provider);
+
+        const createdMs = tsToMillis(v.createdAt);
+        const canceledMs = tsToMillis(v.canceledAt);
+        const periodEndMs = tsToMillis(v.currentPeriodEnd);
+        if (createdMs != null && createdMs >= cutoffMs) newInWindow++;
+        if (
+          (status === "canceled" || status === "past_due") &&
+          canceledMs != null &&
+          canceledMs >= cutoffMs
+        ) {
+          churnedInWindow++;
+        }
+        if (isCurrentActiveSubscription(status, periodEndMs, nowMs)) {
+          activeCurrent++;
+        }
+        for (let i = 0; i < trendBuckets.length; i++) {
+          const dayEndMs = firstTrendDayMs + i * DAY_MS + DAY_MS - 1;
+          if (
+            activeAtDayEnd(status, createdMs, canceledMs, periodEndMs, dayEndMs)
+          ) {
+            trendBuckets[i].active++;
+          }
+        }
+      }
+      const toRows = (m: Record<string, number>) =>
+        Object.entries(m)
+          .map(([k, count]) => ({ key: k, count }))
+          .sort((a, b) => b.count - a.count);
+
+      const label =
+        scope === "segment:plan"
+          ? "플랜"
+          : scope === "segment:status"
+          ? "상태"
+          : "결제수단";
+
+      return {
+        ...base,
+        title: `${label} "${key}" 분해`,
+        note: `Firestore subscriptions · 최근 ${rangeDays}일 창(운영자 제외)`,
+        stats: [
+          { label: "해당 구독 수", value: matched, format: "int" },
+          { label: "현재 활성", value: activeCurrent, format: "int" },
+          { label: `신규(${rangeDays}일)`, value: newInWindow, format: "int" },
+          {
+            label: `이탈(${rangeDays}일)`,
+            value: churnedInWindow,
+            format: "int",
+          },
+        ],
+        breakdowns: [
+          { title: "상태 분포", rows: toRows(byStatus), format: "int" },
+          { title: "플랜 분포", rows: toRows(byPlan), format: "int" },
+          { title: "결제수단 분포", rows: toRows(byProvider), format: "int" },
+        ],
+        trend: trendBuckets.map((d) => ({ date: d.date, value: d.active })),
+        trendLabel: "활성 구독 추이",
+        trendFormat: "int",
+      };
+    }
+
+    // ── (b) 세그먼트 분해 — 이벤트/역할(events + task_outcomes) ───────────
+    if (scope === "segment:event" || scope === "segment:role") {
+      const isEvent = scope === "segment:event";
+      const match = isEvent ? "event = @key" : "role = @key";
+      const where = `WHERE ${match} AND timestamp >= ${sinceTs}${clientEx.clause}`;
+      const params = { key, ...clientEx.params };
+
+      const totalsQuery = `
+        SELECT COUNT(*) AS n, COUNT(DISTINCT userId) AS clients,
+               COUNT(DISTINCT agentId) AS agents
+        FROM ${eventsTable} ${where}
+      `;
+      const trendQuery = `
+        SELECT FORMAT_DATE('%F', DATE(timestamp)) AS date, COUNT(*) AS n
+        FROM ${eventsTable} ${where}
+        GROUP BY date ORDER BY date ASC
+      `;
+      const dist = (col: string) => `
+        SELECT COALESCE(CAST(${col} AS STRING), '(none)') AS key, COUNT(*) AS n
+        FROM ${eventsTable} ${where}
+        GROUP BY key ORDER BY n DESC LIMIT 25
+      `;
+      const outcomesQuery = `
+        SELECT COUNT(*) AS total, COUNTIF(success = true) AS succeeded,
+               AVG(durationMs) AS avgDurationMs
+        FROM ${outcomesTable}
+        WHERE role = @key AND completedAt >= ${sinceTs}${clientEx.clause}
+      `;
+
+      const [totals, trendRows, byModel, byVersion, bySecond, outcomeRows] =
+        await Promise.all([
+          runQuery(totalsQuery, params),
+          runQuery(trendQuery, params),
+          runQuery(dist("model"), params),
+          runQuery(dist("appVersion"), params),
+          runQuery(dist(isEvent ? "role" : "event"), params),
+          isEvent
+            ? Promise.resolve([] as Array<Record<string, unknown>>)
+            : runQuery(outcomesQuery, params),
+        ]);
+
+      const t = totals[0] ?? {};
+      const o = outcomeRows[0] ?? {};
+      const outcomeTotal = toNumber(o.total as number | string | undefined);
+      const outcomeOk = toNumber(o.succeeded as number | string | undefined);
+
+      return {
+        ...base,
+        title: `${isEvent ? "이벤트" : "역할"} "${key}" 분해`,
+        note: `최근 ${rangeDays}일 · 익명 텔레메트리(옵트인 표본)`,
+        stats: [
+          {
+            label: "발생 수",
+            value: toNumber(t.n as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "고유 클라이언트",
+            value: toNumber(t.clients as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "고유 에이전트",
+            value: toNumber(t.agents as number | string | undefined),
+            format: "int",
+          },
+          ...(isEvent
+            ? []
+            : [
+                {
+                  label: "태스크 성공률",
+                  value: outcomeTotal > 0 ? outcomeOk / outcomeTotal : 0,
+                  format: "pct" as DrilldownFormat,
+                },
+                {
+                  label: "평균 완료시간",
+                  value: toNumber(
+                    o.avgDurationMs as number | string | undefined
+                  ),
+                  format: "duration" as DrilldownFormat,
+                },
+              ]),
+        ],
+        breakdowns: [
+          {
+            title: "모델별",
+            rows: foldDistribution(byModel, "key"),
+            format: "int",
+          },
+          {
+            title: isEvent ? "역할별" : "이벤트별",
+            rows: foldDistribution(bySecond, "key"),
+            format: "int",
+          },
+          {
+            title: "앱 버전별",
+            rows: foldDistribution(byVersion, "key"),
+            format: "int",
+          },
+        ],
+        trend: (trendRows as Array<Record<string, unknown>>).map((r) => ({
+          date: String(r.date ?? ""),
+          value: toNumber(r.n as number | string | undefined),
+        })),
+        trendLabel: "일별 발생 추이",
+        trendFormat: "int",
+      };
+    }
+
+    // ── (b) 세그먼트 분해 — 모델(cost_logs + task_outcomes + events) ──────
+    // scope === "segment:model"
+    const costWhere = `WHERE model = @key AND timestamp >= ${sinceTs}${uidEx.clause}`;
+    const costParams = { key, ...uidEx.params };
+    const clientParams = { key, ...clientEx.params };
+
+    const costTotalsQuery = `
+      SELECT SUM(COALESCE(totalCost, 0)) AS cost,
+             SUM(COALESCE(inputTokens, 0) + COALESCE(outputTokens, 0) +
+                 COALESCE(cacheReadTokens, 0) + COALESCE(cacheWriteTokens, 0))
+               AS tokens,
+             COUNT(*) AS calls
+      FROM ${costTable} ${costWhere}
+    `;
+    const costTrendQuery = `
+      SELECT FORMAT_DATE('%F', DATE(timestamp)) AS date,
+             SUM(COALESCE(totalCost, 0)) AS n
+      FROM ${costTable} ${costWhere}
+      GROUP BY date ORDER BY date ASC
+    `;
+    const costByTaskTypeQuery = `
+      SELECT COALESCE(taskType, '(none)') AS key,
+             SUM(COALESCE(totalCost, 0)) AS n
+      FROM ${costTable} ${costWhere}
+      GROUP BY key ORDER BY n DESC LIMIT 25
+    `;
+    const modelOutcomesQuery = `
+      SELECT COUNT(*) AS total, COUNTIF(success = true) AS succeeded,
+             AVG(durationMs) AS avgDurationMs
+      FROM ${outcomesTable}
+      WHERE model = @key AND completedAt >= ${sinceTs}${clientEx.clause}
+    `;
+    const outcomesByRoleQuery = `
+      SELECT COALESCE(role, '(none)') AS key, COUNT(*) AS n
+      FROM ${outcomesTable}
+      WHERE model = @key AND completedAt >= ${sinceTs}${clientEx.clause}
+      GROUP BY key ORDER BY n DESC LIMIT 25
+    `;
+    const spawnsByRoleQuery = `
+      SELECT COALESCE(role, '(none)') AS key, COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE event = 'agent:spawned' AND model = @key
+        AND timestamp >= ${sinceTs}${clientEx.clause}
+      GROUP BY key ORDER BY n DESC LIMIT 25
+    `;
+
+    const [
+      costTotals,
+      costTrend,
+      costByTaskType,
+      modelOutcomes,
+      outcomesByRole,
+      spawnsByRole,
+    ] = await Promise.all([
+      runQuery(costTotalsQuery, costParams),
+      runQuery(costTrendQuery, costParams),
+      runQuery(costByTaskTypeQuery, costParams),
+      runQuery(modelOutcomesQuery, clientParams),
+      runQuery(outcomesByRoleQuery, clientParams),
+      runQuery(spawnsByRoleQuery, clientParams),
+    ]);
+
+    const ct = costTotals[0] ?? {};
+    const mo = modelOutcomes[0] ?? {};
+    const moTotal = toNumber(mo.total as number | string | undefined);
+    const moOk = toNumber(mo.succeeded as number | string | undefined);
+
+    return {
+      ...base,
+      title: `모델 "${key}" 분해`,
+      note: `최근 ${rangeDays}일 · cost_logs(운영자 제외) + task_outcomes`,
+      stats: [
+        {
+          label: "총 비용",
+          value: toNumber(ct.cost as number | string | undefined),
+          format: "cost",
+        },
+        {
+          label: "총 토큰",
+          value: toNumber(ct.tokens as number | string | undefined),
+          format: "int",
+        },
+        {
+          label: "태스크 성공률",
+          value: moTotal > 0 ? moOk / moTotal : 0,
+          format: "pct",
+        },
+        {
+          label: "평균 완료시간",
+          value: toNumber(mo.avgDurationMs as number | string | undefined),
+          format: "duration",
+        },
+      ],
+      breakdowns: [
+        {
+          title: "태스크 유형별 비용",
+          rows: foldDistribution(costByTaskType, "key"),
+          format: "cost",
+        },
+        {
+          title: "역할별 태스크 수",
+          rows: foldDistribution(outcomesByRole, "key"),
+          format: "int",
+        },
+        {
+          title: "역할별 스폰 수",
+          rows: foldDistribution(spawnsByRole, "key"),
+          format: "int",
+        },
+      ],
+      trend: costTrend.map((r) => ({
+        date: String(r.date ?? ""),
+        value: toNumber(r.n as number | string | undefined),
+      })),
+      trendLabel: "일별 비용 추이",
+      trendFormat: "cost",
     };
   }
 );
