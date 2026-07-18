@@ -137,3 +137,64 @@ destroyed, `server.ts:671`)에서 스스로 shutdown 한다. claude 가 MCP 연�
   본 PR 은 정적 실증 기반 근본원인 분류 + correct-by-construction 최소보강이며,
   머지 후 재빌드된 앱에서 장시간 세션으로 (c) webhook 자동치유와
   `telegram:health` 표면화를 관측 검증할 것.
+
+## 7. 봇 토큰 소유권 규칙 (2026-07-18, 티켓 kYC4pGM7S4k6967qs8uO)
+
+> §1–6 은 폴러가 claude MCP 소유이던 시절 기준이다. #301(e3250ec) 이후 getUpdates
+> 폴러는 **electron main(telegram-poller.ts) 단독 소유**이며, 이 섹션이 현행 규칙이다.
+
+### 규칙: 1 봇 = 1 프로젝트
+
+Telegram getUpdates 는 **봇당 단일 소비자**다(두 번째 long-poll 이 첫 번째를
+409 로 강탈). 따라서 **같은 봇 토큰을 여러 프로젝트에 연결하는 것은 설정
+오류**로 취급한다 — "하나의 봇으로 여러 프로젝트 알림"을 지원하려면 폴 루프
+1개가 인바운드를 프로젝트별로 라우팅해야 하는데, chatId 만으로는 대상
+프로젝트를 구분할 수 없어 라우팅이 모호해진다. 지원하지 않는다.
+
+강제 지점 (이중 방어):
+
+- **설정 단계 차단**: `telegram-channels.setConfigFromLocalSettings` 가 다른
+  활성 프로젝트가 이미 쓰는 토큰이면 `enabled` 를 강등하고
+  `preflight.issues`/`canEnable=false` 로 프론트 토글을 잠근다
+  (`findTokenConflicts`).
+- **런타임 dedup**: `telegram-poller.syncActiveChannels` 가 루프를 projectId 가
+  아니라 **토큰 기준으로 dedup** 한다. 레거시/수동편집 데이터로 같은 토큰의
+  활성 프로젝트가 2개 이상이어도 결정적 승자(기존 루프 우선 → 사전순) 1개만
+  폴링하고, 나머지는 경고와 함께 보류된다. 서로 409 를 주고받는 상태는
+  구조적으로 발생하지 않는다.
+
+### 플러그인 config 브릿지 제거 (409 잔존원인의 실체)
+
+과거 빌드는 오케를 `--channels plugin:telegram` 으로 띄우기 위해 봇 토큰을
+`~/.claude/channels/telegram/.env` 로 실체화했다. #301 이후 이 브릿지는 용도를
+잃었지만 실체화된 토큰이 남아, 이 머신의 **모든** claude 플러그인 호스트
+(Cursor 의 MCP 호스트, `--strict-mcp-config` 없는 인터랙티브 claude 세션)가
+그 토큰으로 자체 getUpdates 폴러(bun server.ts)를 부팅해 electron main 폴러를
+409 로 강탈하고, 받은 메시지를 배달 없이 소비-유실했다 (2026-07-18 실측:
+Cursor mcp-process → bun 폴러가 점유, marblo 오프셋 파일 정지).
+
+현행 동작:
+
+- 마블로는 봇 토큰을 `~/.marblo/telegram-channels.json` 밖으로 **절대
+  실체화하지 않는다**.
+- 저장/삭제/폴러 기동 시 `neutralizePluginConfig` 가 플러그인 .env 의
+  `TELEGRAM_BOT_TOKEN` 을 제거(다른 키 보존)하고 access.json 을
+  `dmPolicy=disabled` 로 중화한다 — 외부 플러그인 폴러는 부팅 즉시 종료된다.
+  단, **이미 떠 있는** 외부 폴러는 재시작 전까지 토큰을 쥐고 있다(수동 종료
+  필요 — 사장님 게이트).
+
+### 409 진단 로그
+
+409 가 나면 폴러는 바닥 로그만 찍지 않고 5분 스로틀로 진단 라인을 남긴다
+(`maybeDiagnose409`): ① 같은 토큰을 쓰는 다른 마블로 프로젝트, ② 플러그인
+상태 디렉토리의 토큰 일치 여부 + `bot.pid` 프로세스 생존 여부(외부 폴러 지목),
+③ webhook 케이스(기동 프로브가 자가치유)를 안내한다. 토큰은 항상 SHA-256
+해시 앞 8자리로만 표기된다.
+
+### 검증 (이 티켓)
+
+- `tests/unit/telegram-channels.test.ts` — 브릿지 제거(실체화 0·잔존 토큰
+  정리·비소유 필드 보존), 토큰 소유권 차단(강등·issues·레거시 이중활성 표시).
+- `tests/unit/telegram-poller.test.ts` — 토큰 dedup(결정적 승자·기존 루프
+  유지·상이 토큰 공존), 기동 정리 호출, 409 진단(점유자 지목·스로틀·토큰
+  비노출).

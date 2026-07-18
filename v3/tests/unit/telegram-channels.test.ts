@@ -149,7 +149,11 @@ describe("access.json 보안 불변식", () => {
   });
 });
 
-describe("공식 플러그인 config 브릿지 (~/.claude/channels/telegram)", () => {
+describe("플러그인 config 정리 — 브릿지 제거 (티켓 kYC4pGM7S4k6967qs8uO)", () => {
+  // 과거 빌드는 활성 채널의 봇 토큰을 ~/.claude/channels/telegram/.env 로
+  // 실체화했고, 그 토큰으로 외부 claude/Cursor 플러그인 폴러가 부팅해 electron
+  // main 폴러의 getUpdates 를 409 로 강탈했다. 이제 토큰은 절대 실체화되지
+  // 않고, 남아 있던 실체화는 저장/삭제/기동 시 제거된다.
   let ctx: ReturnType<typeof makeStore>;
   const OWNER = "1584537551";
   beforeEach(() => {
@@ -167,143 +171,169 @@ describe("공식 플러그인 config 브릿지 (~/.claude/channels/telegram)", (
   function readEnv(): string {
     return fs.readFileSync(ctx.store.getPluginEnvPath(), "utf-8");
   }
-
-  it("활성 연결 시 .env + access.json 을 생성한다", () => {
-    ctx.store.setConfigFromLocalSettings({
-      projectId: "p1",
-      botToken: GOOD_TOKEN,
-      chatId: OWNER,
-      enabled: true,
-    });
-    expect(fs.existsSync(ctx.store.getPluginEnvPath())).toBe(true);
-    expect(fs.existsSync(ctx.store.getPluginAccessPath())).toBe(true);
-    expect(readEnv()).toContain(`TELEGRAM_BOT_TOKEN=${GOOD_TOKEN}`);
-    const access = readAccess();
-    expect(access.dmPolicy).toBe("allowlist");
-    expect(access.allowFrom).toEqual([OWNER]);
-  });
-
-  it(".env·access.json 은 chmod 600, 디렉토리는 700", () => {
-    ctx.store.setConfigFromLocalSettings({
-      projectId: "p1",
-      botToken: GOOD_TOKEN,
-      chatId: OWNER,
-      enabled: true,
-    });
-    expect(fs.statSync(ctx.store.getPluginEnvPath()).mode & 0o777).toBe(0o600);
-    expect(fs.statSync(ctx.store.getPluginAccessPath()).mode & 0o777).toBe(
-      0o600,
+  /** 과거 빌드가 실체화해 둔 것처럼 플러그인 파일을 만들어 둔다. */
+  function seedLegacyMaterialization(extraEnv = ""): void {
+    fs.mkdirSync(ctx.store.getPluginDir(), { recursive: true });
+    fs.writeFileSync(
+      ctx.store.getPluginEnvPath(),
+      `TELEGRAM_BOT_TOKEN=${GOOD_TOKEN}\n${extraEnv}`,
     );
-    expect(fs.statSync(ctx.store.getPluginDir()).mode & 0o777).toBe(0o700);
-  });
+    fs.writeFileSync(
+      ctx.store.getPluginAccessPath(),
+      JSON.stringify({
+        dmPolicy: "allowlist",
+        allowFrom: [OWNER],
+        groups: { "-100999": { requireMention: true, allowFrom: [] } },
+        pending: {},
+        ackReaction: "👀",
+      }),
+    );
+  }
 
-  it("멱등 — 같은 입력 재저장 시 동일 결과", () => {
-    const input = {
-      projectId: "p1",
-      botToken: GOOD_TOKEN,
-      chatId: OWNER,
-      enabled: true,
-    };
-    ctx.store.setConfigFromLocalSettings(input);
-    const env1 = readEnv();
-    const access1 = readAccess();
-    ctx.store.setConfigFromLocalSettings(input);
-    expect(readEnv()).toBe(env1);
-    expect(readAccess()).toEqual(access1);
-  });
-
-  it("비활성화 시 .env 토큰을 제거하고 access 를 disabled 로 중화", () => {
+  it("★활성 저장해도 봇 토큰을 플러그인 디렉토리에 실체화하지 않는다", () => {
     ctx.store.setConfigFromLocalSettings({
       projectId: "p1",
       botToken: GOOD_TOKEN,
       chatId: OWNER,
       enabled: true,
     });
-    ctx.store.setConfigFromLocalSettings({ projectId: "p1", enabled: false });
-    // .env 는 다른 키가 없으므로 삭제된다(토큰 노출 제거).
+    expect(fs.existsSync(ctx.store.getPluginEnvPath())).toBe(false);
+    expect(fs.existsSync(ctx.store.getPluginAccessPath())).toBe(false);
+    // 마블로 store 쪽 채널은 정상 활성이다(폴러는 electron main 이 소유).
+    expect(ctx.store.isActive("p1")).toBe(true);
+  });
+
+  it("과거 실체화된 토큰은 저장 시 제거되고 access 는 중화된다", () => {
+    seedLegacyMaterialization();
+    ctx.store.setConfigFromLocalSettings({
+      projectId: "p1",
+      botToken: GOOD_TOKEN,
+      chatId: OWNER,
+      enabled: true,
+    });
+    // 토큰만 있던 .env 는 파일째 삭제된다.
     expect(fs.existsSync(ctx.store.getPluginEnvPath())).toBe(false);
     const access = readAccess();
     expect(access.dmPolicy).toBe("disabled");
     expect(access.allowFrom).toEqual([]);
-  });
-
-  it("삭제(remove) 시 플러그인 토큰 정리", () => {
-    ctx.store.setConfigFromLocalSettings({
-      projectId: "p1",
-      botToken: GOOD_TOKEN,
-      chatId: OWNER,
-      enabled: true,
-    });
-    ctx.store.remove("p1");
-    expect(fs.existsSync(ctx.store.getPluginEnvPath())).toBe(false);
-  });
-
-  it("access.json 의 소유하지 않는 필드(groups·delivery 옵션)를 보존", () => {
-    // 활성화로 파일 생성 후, 플러그인/skill 이 쓴 것처럼 필드를 덧붙인다.
-    ctx.store.setConfigFromLocalSettings({
-      projectId: "p1",
-      botToken: GOOD_TOKEN,
-      chatId: OWNER,
-      enabled: true,
-    });
-    const p = ctx.store.getPluginAccessPath();
-    const cur = JSON.parse(fs.readFileSync(p, "utf-8"));
-    cur.groups = { "-100999": { requireMention: true, allowFrom: [] } };
-    cur.ackReaction = "👀";
-    fs.writeFileSync(p, JSON.stringify(cur, null, 2));
-    // 재저장 — 소유 필드만 갱신되고 나머지는 보존되어야 한다.
-    ctx.store.setConfigFromLocalSettings({
-      projectId: "p1",
-      botToken: GOOD_TOKEN,
-      chatId: OWNER,
-      enabled: true,
-    });
-    const after = readAccess();
-    expect(after.groups).toEqual({
+    // 소유하지 않는 필드는 보존.
+    expect(access.groups).toEqual({
       "-100999": { requireMention: true, allowFrom: [] },
     });
-    expect(after.ackReaction).toBe("👀");
-    expect(after.dmPolicy).toBe("allowlist");
+    expect(access.ackReaction).toBe("👀");
   });
 
-  it(".env 의 다른 키는 비활성화해도 보존(토큰만 제거)", () => {
-    ctx.store.setConfigFromLocalSettings({
-      projectId: "p1",
-      botToken: GOOD_TOKEN,
-      chatId: OWNER,
-      enabled: true,
-    });
-    const envPath = ctx.store.getPluginEnvPath();
-    fs.appendFileSync(envPath, "TELEGRAM_ACCESS_MODE=static\n");
-    ctx.store.setConfigFromLocalSettings({ projectId: "p1", enabled: false });
+  it(".env 의 다른 키는 보존하고 토큰만 제거한다", () => {
+    seedLegacyMaterialization("TELEGRAM_ACCESS_MODE=static\n");
+    ctx.store.neutralizePluginConfig();
     const env = readEnv();
     expect(env).toContain("TELEGRAM_ACCESS_MODE=static");
     expect(env).not.toContain("TELEGRAM_BOT_TOKEN");
   });
 
-  it("ensurePluginConfig — 파일이 지워져도 저장된 config 로부터 복구", () => {
+  it("neutralizePluginConfig 는 실제 토큰 제거 여부를 보고한다(멱등)", () => {
+    seedLegacyMaterialization();
+    expect(ctx.store.neutralizePluginConfig().tokenRemoved).toBe(true);
+    expect(ctx.store.neutralizePluginConfig().tokenRemoved).toBe(false);
+  });
+
+  it("플러그인 파일이 아예 없으면 no-op — 새로 만들지 않는다", () => {
+    expect(ctx.store.neutralizePluginConfig().tokenRemoved).toBe(false);
+    expect(fs.existsSync(ctx.store.getPluginEnvPath())).toBe(false);
+    expect(fs.existsSync(ctx.store.getPluginAccessPath())).toBe(false);
+  });
+
+  it("삭제(remove) 시에도 플러그인 토큰 정리", () => {
     ctx.store.setConfigFromLocalSettings({
       projectId: "p1",
       botToken: GOOD_TOKEN,
       chatId: OWNER,
       enabled: true,
     });
-    fs.rmSync(ctx.store.getPluginDir(), { recursive: true, force: true });
+    seedLegacyMaterialization();
+    ctx.store.remove("p1");
     expect(fs.existsSync(ctx.store.getPluginEnvPath())).toBe(false);
-    ctx.store.ensurePluginConfig("p1");
-    expect(fs.existsSync(ctx.store.getPluginEnvPath())).toBe(true);
-    expect(readEnv()).toContain(`TELEGRAM_BOT_TOKEN=${GOOD_TOKEN}`);
   });
+});
 
-  it("비활성(chatId 없음) 저장은 플러그인 파일을 만들지 않는다", () => {
+describe("토큰 소유권 규칙 — 1 봇 = 1 프로젝트 (getUpdates 단일 소비자)", () => {
+  const TOKEN_B = "987654321:BBHfakeOtherBotTokenForTests_ijklMNOP";
+  let ctx: ReturnType<typeof makeStore>;
+  beforeEach(() => {
+    ctx = makeStore();
     ctx.store.setConfigFromLocalSettings({
       projectId: "p1",
       botToken: GOOD_TOKEN,
-      chatId: "",
+      chatId: GOOD_CHAT,
       enabled: true,
     });
-    expect(fs.existsSync(ctx.store.getPluginEnvPath())).toBe(false);
-    expect(fs.existsSync(ctx.store.getPluginAccessPath())).toBe(false);
+  });
+  afterEach(() => {
+    fs.rmSync(ctx.dir, { recursive: true, force: true });
+  });
+
+  it("★다른 활성 프로젝트가 쓰는 토큰으로는 활성화가 강등 차단된다", () => {
+    const status = ctx.store.setConfigFromLocalSettings({
+      projectId: "p2",
+      botToken: GOOD_TOKEN,
+      chatId: GOOD_CHAT,
+      enabled: true,
+    });
+    expect(status.enabled).toBe(false);
+    expect(status.canEnable).toBe(false);
+    expect(status.active).toBe(false);
+    expect(status.preflight.issues.join(" ")).toContain("p1");
+    // 기존 소유자 p1 은 계속 활성.
+    expect(ctx.store.isActive("p1")).toBe(true);
+    // 인바운드 화이트리스트도 비어 있다(비활성이므로 전부 차단).
+    expect(ctx.store.getAccess("p2")?.allowedChatIds).toEqual([]);
+  });
+
+  it("서로 다른 토큰이면 두 프로젝트 모두 활성 가능", () => {
+    const status = ctx.store.setConfigFromLocalSettings({
+      projectId: "p2",
+      botToken: TOKEN_B,
+      chatId: GOOD_CHAT,
+      enabled: true,
+    });
+    expect(status.enabled).toBe(true);
+    expect(ctx.store.isActive("p1")).toBe(true);
+    expect(ctx.store.isActive("p2")).toBe(true);
+  });
+
+  it("기존 소유자가 비활성화되면 같은 토큰으로 활성화 가능", () => {
+    ctx.store.setConfigFromLocalSettings({ projectId: "p1", enabled: false });
+    const status = ctx.store.setConfigFromLocalSettings({
+      projectId: "p2",
+      botToken: GOOD_TOKEN,
+      chatId: GOOD_CHAT,
+      enabled: true,
+    });
+    expect(status.enabled).toBe(true);
+    expect(ctx.store.isActive("p2")).toBe(true);
+  });
+
+  it("findTokenConflicts — 자기 자신과 비활성 프로젝트는 충돌이 아니다", () => {
+    expect(ctx.store.findTokenConflicts("p1", GOOD_TOKEN)).toEqual([]);
+    expect(ctx.store.findTokenConflicts("p2", GOOD_TOKEN)).toEqual(["p1"]);
+    expect(ctx.store.findTokenConflicts("p2", TOKEN_B)).toEqual([]);
+    expect(ctx.store.findTokenConflicts("p2", null)).toEqual([]);
+  });
+
+  it("레거시로 이미 둘 다 활성인 경우: 상태에 충돌을 표시하되 active 는 유지(승자 선정은 폴러 dedup 몫)", () => {
+    // 설정 경로를 우회해 config 파일을 직접 조작(과거 데이터 재현).
+    const raw = JSON.parse(
+      fs.readFileSync(ctx.store.getConfigPath(), "utf-8"),
+    );
+    raw.p2 = { ...raw.p1, projectId: "p2" };
+    fs.writeFileSync(ctx.store.getConfigPath(), JSON.stringify(raw));
+    const s1 = ctx.store.getStatus("p1");
+    const s2 = ctx.store.getStatus("p2");
+    expect(s1.canEnable).toBe(false);
+    expect(s2.canEnable).toBe(false);
+    expect(s1.preflight.issues.join(" ")).toContain("p2");
+    expect(s1.active).toBe(true);
+    expect(s2.active).toBe(true);
   });
 });
 

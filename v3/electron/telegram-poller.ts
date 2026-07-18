@@ -30,6 +30,7 @@
  * token NEVER appears in a log, error, or return value (scrubToken).
  */
 
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -45,6 +46,8 @@ import {
   getTelegramChannelConfig,
   isTelegramChannelActive,
   getTelegramChannelAccess,
+  neutralizeTelegramPluginConfig,
+  getTelegramPluginStateDir,
 } from "./telegram-channels";
 
 // ─── Telegram update shapes (only the fields we read) ─────────────────────
@@ -140,6 +143,21 @@ export interface TelegramPollerDeps {
   logger?: Pick<Console, "log" | "warn" | "error">;
   /** Called when the registered poll-loop set changes. */
   onLoopActivityChange?: () => void;
+  /**
+   * Directory the official claude telegram plugin reads its state from
+   * (`.env` with the bot token, `bot.pid` of a booted plugin poller). Used by
+   * the 409 diagnosis to name the external holder. Default: channel store's
+   * plugin dir (~/.claude/channels/telegram).
+   */
+  pluginStateDir?: string;
+  /**
+   * Startup cleanup of a bot token a past build materialized into the plugin
+   * state dir (see telegram-channels neutralizePluginConfig). Default: the
+   * channel store's neutralizer; injectable for tests.
+   */
+  neutralizePluginConfig?: () => { tokenRemoved: boolean };
+  /** Min interval (ms) between full 409 diagnosis logs per project. Default 300000. */
+  diag409ThrottleMs?: number;
 }
 
 /** Result of an outbound sendMessage — never carries the bot token. */
@@ -185,6 +203,7 @@ const DEFAULT_NUDGE_IDLE_DEBOUNCE_MS = 6000;
 const DEFAULT_NUDGE_MAX_GRACE_MS = 120000;
 const DEFAULT_SEND_MAX_RETRIES = 2;
 const DEFAULT_SEND_BACKOFF_MS = 500;
+const DEFAULT_DIAG_409_THROTTLE_MS = 300_000;
 
 interface LoopHandle {
   /** Set true to ask the loop to exit at its next checkpoint. */
@@ -233,6 +252,10 @@ export class TelegramPoller {
     }
   >();
   private readonly log: Pick<Console, "log" | "warn" | "error">;
+  /** Last full-409-diagnosis time per project (throttles the loud log). */
+  private readonly lastDiag409At = new Map<string, number>();
+  /** Token-conflict groups already warned about (log once per set change). */
+  private readonly warnedTokenConflicts = new Set<string>();
 
   constructor(deps: TelegramPollerDeps) {
     this.deps = deps;
@@ -243,6 +266,25 @@ export class TelegramPoller {
 
   /** Load persisted offsets and start loops for all active channels. */
   start(): void {
+    // A past build materialized the bot token into the claude plugin state dir
+    // (~/.claude/channels/telegram/.env), which let ANY claude plugin host on
+    // this machine (Cursor MCP, non-strict interactive sessions) boot its own
+    // getUpdates poller with our token and 409-evict this one. Clean it up
+    // before we start polling.
+    try {
+      const neutralize =
+        this.deps.neutralizePluginConfig ?? neutralizeTelegramPluginConfig;
+      if (neutralize().tokenRemoved) {
+        this.log.warn(
+          `[TelegramPoller] removed a stale bot token materialized in the claude ` +
+            `telegram plugin state dir — external plugin pollers (Cursor/claude ` +
+            `sessions) can no longer boot with our token and steal getUpdates. ` +
+            `An already-running external poller keeps its token until it restarts.`,
+        );
+      }
+    } catch {
+      /* cleanup is best-effort; polling must start regardless */
+    }
     this.loadOffsets();
     this.syncActiveChannels();
   }
@@ -252,9 +294,48 @@ export class TelegramPoller {
    * loop for every newly-active project, stop loops whose channel went
    * inactive. Idempotent — safe to call on channel config changes, on
    * powerMonitor resume, and after each health sweep.
+   *
+   * ★Loops are deduped BY TOKEN, not just by project: Telegram getUpdates is
+   * single-consumer per bot, so two projects (mis)configured with the same bot
+   * token would 409-evict each other forever. The settings path blocks that at
+   * save time (telegram-channels findTokenConflicts); this is the runtime
+   * defense for legacy/hand-edited data — one deterministic winner polls, the
+   * rest are held off with a loud diagnostic.
    */
   syncActiveChannels(): void {
-    const active = new Set(this.listActiveProjectIds());
+    const byToken = new Map<string, string[]>();
+    for (const projectId of this.listActiveProjectIds()) {
+      const token = this.getToken(projectId);
+      if (!token) continue; // no token → loop would exit immediately anyway
+      const group = byToken.get(token);
+      if (group) group.push(projectId);
+      else byToken.set(token, [projectId]);
+    }
+
+    const active = new Set<string>();
+    for (const [token, group] of byToken) {
+      if (group.length === 1) {
+        active.add(group[0]);
+        continue;
+      }
+      // Same bot token on 2+ projects: exactly one may poll. Prefer a project
+      // whose loop is already running (no churn), else the lexicographic first
+      // (deterministic across restarts).
+      const sorted = [...group].sort();
+      const winner = sorted.find((p) => this.loops.has(p)) ?? sorted[0];
+      active.add(winner);
+      const signature = `${tokenHash(token)}:${sorted.join(",")}`;
+      if (!this.warnedTokenConflicts.has(signature)) {
+        this.warnedTokenConflicts.add(signature);
+        this.log.warn(
+          `[TelegramPoller] projects [${sorted.join(", ")}] share ONE bot token ` +
+            `(hash=${tokenHash(token)}). Telegram getUpdates is single-consumer per ` +
+            `bot, so only project=${winner} polls; the others get no inbound until ` +
+            `each project is given its own bot in the Telegram channel settings.`,
+        );
+      }
+    }
+
     for (const projectId of active) {
       if (!this.loops.has(projectId)) this.startLoop(projectId);
     }
@@ -371,6 +452,11 @@ export class TelegramPoller {
             token,
           )}`,
         );
+        // 409 means ANOTHER consumer holds this bot's getUpdates. Don't just
+        // flap silently — say who is plausibly holding it (throttled).
+        if (err instanceof TelegramHttpError && err.status === 409) {
+          this.maybeDiagnose409(projectId, token);
+        }
         await this.sleep(errorBackoff, ctrl);
         continue;
       }
@@ -389,6 +475,87 @@ export class TelegramPoller {
         }
         this.setOffset(projectId, update.update_id + 1);
       }
+    }
+  }
+
+  // ── 409 diagnosis ────────────────────────────────────────────────────
+
+  /**
+   * A getUpdates 409 means some OTHER consumer is long-polling this bot. Log
+   * one actionable, token-free diagnosis naming the plausible holders instead
+   * of an endless bare "HTTP 409" flap. Throttled per project because the 409
+   * recurs every errorBackoff while the conflict persists. Holders checked:
+   *   1. another Marblo project configured with the same bot token (runtime
+   *      dedup in syncActiveChannels should prevent this; named if seen);
+   *   2. an external claude/Cursor telegram plugin poller booted from the
+   *      plugin state dir's .env (token match + bot.pid liveness);
+   *   3. a registered webhook (self-healed by the start probe; mentioned so
+   *      the reader knows it's already covered).
+   */
+  private maybeDiagnose409(projectId: string, token: string): void {
+    const throttle = this.deps.diag409ThrottleMs ?? DEFAULT_DIAG_409_THROTTLE_MS;
+    const last = this.lastDiag409At.get(projectId) ?? 0;
+    const nowMs = Date.now();
+    if (nowMs - last < throttle) return;
+    this.lastDiag409At.set(projectId, nowMs);
+
+    const parts: string[] = [];
+
+    // (1) another Marblo project sharing this token.
+    let sameTokenProjects: string[] = [];
+    try {
+      sameTokenProjects = this.listActiveProjectIds().filter(
+        (p) => p !== projectId && this.getToken(p) === token,
+      );
+    } catch {
+      /* diagnosis is best-effort */
+    }
+    parts.push(
+      sameTokenProjects.length > 0
+        ? `another Marblo project shares this bot token: [${sameTokenProjects
+            .sort()
+            .join(", ")}] — give each project its own bot in the Telegram channel settings`
+        : `no other Marblo project uses this token`,
+    );
+
+    // (2) external plugin poller booted from the plugin state dir.
+    const pluginDir = this.pluginStateDir();
+    const holder = probePluginHolder(pluginDir, token);
+    if (holder.tokenMatch) {
+      const pid =
+        holder.pid !== null
+          ? `pid=${holder.pid} (${holder.pidAlive ? "ALIVE" : "dead"})`
+          : "pid unknown";
+      parts.push(
+        `the claude telegram plugin state dir (${pluginDir}) holds THIS bot's token, ` +
+          `${pid} — an external plugin poller (Cursor MCP / a non-strict claude session) ` +
+          `is likely polling with our token; remove the telegram plugin/MCP entry from ` +
+          `that host or stop that process. Marblo no longer writes this token and cleans ` +
+          `it on startup, but a poller that already booted keeps it until restarted`,
+      );
+    } else {
+      parts.push(
+        `plugin state dir (${pluginDir}) does not hold this token` +
+          (holder.pid !== null && holder.pidAlive
+            ? ` (but a plugin poller pid=${holder.pid} is alive — with a different/older token)`
+            : ``),
+      );
+    }
+
+    this.log.warn(
+      `[TelegramPoller] project=${projectId} getUpdates 409 diagnosis — Telegram ` +
+        `allows exactly ONE getUpdates consumer per bot (token hash=${tokenHash(token)}), ` +
+        `and someone else holds it. ${parts.join(". ")}. ` +
+        `(A registered webhook also 409s getUpdates; the start-time probe auto-heals that case.)`,
+    );
+  }
+
+  private pluginStateDir(): string {
+    if (this.deps.pluginStateDir) return this.deps.pluginStateDir;
+    try {
+      return getTelegramPluginStateDir();
+    } catch {
+      return path.join(os.homedir(), ".claude", "channels", "telegram");
     }
   }
 
@@ -823,6 +990,60 @@ export class TelegramPoller {
 
 function emptyStats(): ReliabilityStats {
   return { unanswered: 0, sendFailures: 0 };
+}
+
+/** Short, log-safe fingerprint of a bot token (never the token itself). */
+function tokenHash(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex").slice(0, 8);
+}
+
+/** What the claude telegram plugin state dir says about who holds the bot. */
+interface PluginHolderInfo {
+  /** The plugin .env holds exactly this bot's token. */
+  tokenMatch: boolean;
+  /** bot.pid contents (a booted plugin poller records its pid there). */
+  pid: number | null;
+  /** Whether that pid is a live process right now. */
+  pidAlive: boolean;
+}
+
+/**
+ * Best-effort, read-only probe of the claude telegram plugin state dir for the
+ * 409 diagnosis: does its .env hold THIS bot's token, and is the plugin poller
+ * whose pid is recorded in bot.pid still alive? Never throws; never returns
+ * secret material.
+ */
+function probePluginHolder(dir: string, token: string): PluginHolderInfo {
+  const info: PluginHolderInfo = { tokenMatch: false, pid: null, pidAlive: false };
+  try {
+    const raw = fs.readFileSync(path.join(dir, ".env"), "utf-8");
+    for (const line of raw.split("\n")) {
+      const m = line.match(/^TELEGRAM_BOT_TOKEN=(.*)$/);
+      if (m && m[1].trim() === token) info.tokenMatch = true;
+    }
+  } catch {
+    /* no .env → no plugin holder */
+  }
+  try {
+    const pid = parseInt(
+      fs.readFileSync(path.join(dir, "bot.pid"), "utf-8").trim(),
+      10,
+    );
+    if (Number.isFinite(pid) && pid > 0) {
+      info.pid = pid;
+      try {
+        process.kill(pid, 0);
+        info.pidAlive = true;
+      } catch (err) {
+        // EPERM = alive but not ours; ESRCH = dead.
+        info.pidAlive =
+          (err as NodeJS.ErrnoException | null)?.code === "EPERM";
+      }
+    }
+  } catch {
+    /* no bot.pid */
+  }
+  return info;
 }
 
 function describeTarget(target: InboundTarget): InboundTargetDescriptor {

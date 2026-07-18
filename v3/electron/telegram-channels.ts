@@ -37,7 +37,7 @@ export const YOLO_FLAG = "--dangerously-skip-permissions";
 
 /** Claude Code 채널 플러그인 식별자(텔레그램). 참고용 상수 — 오케스트레이터는 더
  * 이상 `--channels` 로 이 플러그인을 물지 않는다(폴러는 electron main 이 소유,
- * ticket vw38IB2VcmOIOlFV51Wa). 플러그인 config 브릿지(materializePluginConfig)의
+ * ticket vw38IB2VcmOIOlFV51Wa). 플러그인 config 정리(neutralizePluginConfig)의
  * 대상 디렉토리 정체성만 문서화한다. */
 export const TELEGRAM_CHANNEL_PLUGIN =
   "plugin:telegram@claude-plugins-official";
@@ -136,18 +136,19 @@ const DEFAULT_ACCESS_FILE = "telegram-access.json";
 /** 권한/비밀 파일 권한 — 소유자 read/write 만(0600). */
 const ACCESS_FILE_MODE = 0o600;
 
-// ─── 공식 텔레그램 플러그인 config 브릿지 ─────────────────────────────
-// 오케를 --channels plugin:telegram@claude-plugins-official 로 띄우면 공식
-// 플러그인(bun server.ts)은 ~/.claude/channels/telegram/{.env,access.json} 을
-// 읽는다. 마블로 store 는 ~/.marblo/telegram-*.json 에만 쓰므로 브릿지가 없으면
-// 플러그인 디렉토리 자체가 없어 부팅 즉시 종료(TELEGRAM_BOT_TOKEN 미설정 exit)
-// → getUpdates 폴러 미동작 → 메시지 적체. 로컬 설정 저장/스폰 시점에 마블로
-// 데이터로부터 플러그인 config 를 materialize 해 이 갭을 메운다.
+// ─── 공식 텔레그램 플러그인 config 정리 (브릿지 제거됨) ────────────────
+// 과거에는 오케를 --channels plugin:telegram 으로 띄우기 위해 마블로 봇 토큰을
+// ~/.claude/channels/telegram/.env 로 실체화(materialize)했다. #301 이후 폴러는
+// electron main 단독 소유가 되어 이 브릿지는 용도를 잃었는데, 실체화된 토큰은
+// 남아서 역효과만 냈다: 이 머신의 **모든** claude 플러그인 호스트(Cursor MCP,
+// strict 없는 인터랙티브 세션)가 그 .env 를 읽고 자체 getUpdates 폴러를 부팅해
+// electron main 폴러를 409 로 강탈한다 — 그리고 받은 메시지를 배달 없이 버린다
+// (티켓 kYC4pGM7S4k6967qs8uO 실측: Cursor mcp-process → bun server.ts 가 점유).
 //
-// ★access.json 출처 가드와 동일 정신: 플러그인 config 생성/정리도 로컬 설정
-// 경로(setConfigFromLocalSettings·remove)와, 이미 로컬에 저장된 config 를 그대로
-// 읽는 스폰-직전 보장 경로(ensureTelegramPluginConfig)에서만 일어난다. 텔레그램
-// 인바운드는 이 코드에 도달하지 않는다(읽기 함수만 노출).
+// 그래서 이제 이 모듈은 플러그인 config 를 **만들지 않고 치운다**: 저장/삭제/앱
+// 기동 시마다 .env 의 TELEGRAM_BOT_TOKEN 을 제거하고(다른 키는 보존) access.json
+// 이 있으면 dmPolicy=disabled 로 중화한다. 봇 토큰은 ~/.marblo 밖으로 나가지
+// 않는다. 텔레그램 인바운드는 여전히 이 코드에 도달하지 않는다(읽기 함수만 노출).
 
 /** 공식 플러그인이 상태를 읽는 기본 디렉토리(TELEGRAM_STATE_DIR 미설정 시). */
 const DEFAULT_PLUGIN_DIR = path.join(
@@ -268,8 +269,13 @@ export class TelegramChannelStore {
     const requestedEnabled = input.enabled ?? existing?.enabled ?? false;
 
     const preflight = preflightChannel({ botToken, chatId });
-    // chatId/토큰 유효하지 않으면 활성 불가 — 요청과 무관하게 강등(방어선).
-    const enabled = requestedEnabled && preflight.ok;
+    // ★토큰 소유권 규칙(1 봇 = 1 프로젝트): getUpdates 는 봇당 단일 소비자라
+    // 같은 토큰으로 두 프로젝트가 활성이면 두 폴 루프가 서로를 409 로 강탈한다.
+    // 다른 활성 프로젝트가 이미 이 토큰을 쓰고 있으면 활성화를 강등 차단한다.
+    const tokenConflicts = this.findTokenConflicts(input.projectId, botToken);
+    // chatId/토큰 유효하지 않거나 토큰이 다른 활성 프로젝트와 겹치면 활성 불가 —
+    // 요청과 무관하게 강등(방어선).
+    const enabled = requestedEnabled && preflight.ok && !tokenConflicts.length;
 
     const merged: TelegramChannelConfig = {
       projectId: input.projectId,
@@ -297,9 +303,9 @@ export class TelegramChannelStore {
       LOCAL_SETTINGS_ORIGIN,
     );
 
-    // 공식 플러그인 config(~/.claude/channels/telegram) 브릿지 동기화.
-    // 활성이면 .env+access.json 생성, 비활성이면 토큰 제거·정리(멱등).
-    this.materializePluginConfig(merged);
+    // 공식 플러그인 config(~/.claude/channels/telegram)에 토큰이 실체화되어
+    // 있으면 치운다(브릿지 제거 — 모듈 상단 주석 참고). 멱등.
+    this.neutralizePluginConfig();
 
     return this.getStatus(input.projectId);
   }
@@ -318,17 +324,8 @@ export class TelegramChannelStore {
       delete access[projectId];
       this.writeAccessMap(access);
     }
-    // 플러그인 config 도 정리(토큰 제거·allowlist 비활성). 채널이 다른 프로젝트로
-    // 남아 있을 수 있으나, 이 삭제 프로젝트가 마지막 활성이었다면 토큰을 지운다.
-    // materialize 는 비활성 config 를 받으면 .env 삭제 + access disabled 로 정리한다.
-    this.materializePluginConfig({
-      projectId,
-      botToken: null,
-      chatId: null,
-      enabled: false,
-      inboundCapability: "trigger",
-      updatedAt: now(),
-    });
+    // 플러그인 config 도 정리(토큰 제거·access 중화).
+    this.neutralizePluginConfig();
     return had;
   }
 
@@ -341,15 +338,46 @@ export class TelegramChannelStore {
       botToken: cfg?.botToken ?? null,
       chatId: cfg?.chatId ?? null,
     });
+    // 토큰 소유권 규칙(1 봇 = 1 프로젝트) 위반은 issues 로 표시하고 토글을
+    // 잠근다(canEnable=false). active 는 건드리지 않는다 — 레거시로 이미 두
+    // 프로젝트가 활성인 경우 승자 선정은 폴러의 토큰 dedup 이 담당한다.
+    const conflicts = this.findTokenConflicts(projectId, cfg?.botToken ?? null);
+    if (conflicts.length > 0) {
+      preflight.issues.push(
+        `이 봇 토큰은 이미 다른 프로젝트(${conflicts.join(", ")})의 활성 채널이 ` +
+          `사용 중입니다. 텔레그램 getUpdates 는 봇당 1개 소비자만 허용하므로 ` +
+          `프로젝트마다 별도의 봇을 만들어 연결하세요.`,
+      );
+    }
     return {
       projectId,
       enabled: cfg?.enabled ?? false,
       hasBotToken: preflight.hasBotToken,
       hasChatId: preflight.hasChatId,
       preflight,
-      canEnable: preflight.ok,
+      canEnable: preflight.ok && conflicts.length === 0,
       active: (cfg?.enabled ?? false) && preflight.ok,
     };
+  }
+
+  /**
+   * 이 프로젝트가 아닌 다른 **활성(enabled)** 프로젝트 중 같은 봇 토큰을 쓰는
+   * projectId 목록. getUpdates 는 봇당 단일 소비자라 이 목록이 비어야만 활성화
+   * 가능하다(1 봇 = 1 프로젝트 규칙).
+   */
+  findTokenConflicts(
+    selfProjectId: string,
+    botToken: string | null,
+  ): string[] {
+    const token = normalizeSecret(botToken);
+    if (!token) return [];
+    return Object.values(this.readConfigs())
+      .filter(
+        (c) =>
+          c.projectId !== selfProjectId && c.enabled && c.botToken === token,
+      )
+      .map((c) => c.projectId)
+      .sort();
   }
 
   /** 스폰에 채널 플래그를 주입해야 하는가(enabled && 프리플라이트 통과). */
@@ -393,55 +421,25 @@ export class TelegramChannelStore {
     return this.readAccess()[projectId] ?? null;
   }
 
-  // ── 공식 플러그인 config 브릿지 (~/.claude/channels/telegram) ────────
+  // ── 공식 플러그인 config 정리 (~/.claude/channels/telegram) ──────────
 
   /**
-   * projectId 의 현재 저장된 로컬 config 로부터 플러그인 config 를 다시 만든다.
-   * 오케 스폰 직전 강건성 보장용 — 이미 로컬에 저장된(=로컬 설정 경로로만 쓰인)
-   * config 를 그대로 읽어 materialize 하므로 인바운드 쓰기 경로가 아니다.
+   * 플러그인 상태 디렉토리에 실체화된 마블로 봇 토큰을 치운다(브릿지 제거 —
+   * 모듈 상단 주석 참고).
+   *   - .env 의 TELEGRAM_BOT_TOKEN 을 제거한다. 다른 env 키가 남으면 토큰만
+   *     지우고 재기록, 아니면 파일 삭제. 파일이 없으면 no-op.
+   *   - access.json 이 있으면 dmPolicy='disabled'·allowFrom=[] 로 중화하고
+   *     소유하지 않는 필드(groups·pending·delivery 옵션)는 보존한다. 없으면
+   *     새로 만들지 않는다.
+   * 멱등. 반환값 tokenRemoved 는 이번 호출이 실제로 토큰을 지웠는지 — 호출자
+   * (폴러 기동 정리)가 "잔존 토큰을 발견·제거했다"를 로그로 알리는 데 쓴다.
    */
-  ensurePluginConfig(projectId: string): void {
-    const cfg = this.getConfig(projectId);
-    if (!cfg) return;
-    this.materializePluginConfig(cfg);
-  }
-
-  /**
-   * 마블로 채널 config 를 공식 플러그인이 읽는 파일 형식으로 실체화한다.
-   *   - 활성(enabled && 프리플라이트 통과 && 토큰/chatId 유효):
-   *       .env(TELEGRAM_BOT_TOKEN=<token>) + access.json(dmPolicy=allowlist,
-   *       allowFrom=[chatId]) 를 0600 으로 원자 기록, 디렉토리는 0700.
-   *   - 비활성/무효: .env 삭제(토큰 제거)하고, access.json 이 있으면 dmPolicy=
-   *       'disabled'·allowFrom=[] 로 중화(없으면 새로 만들지 않음).
-   * 멱등 — 같은 입력이면 같은 결과. 기존 파일의 소유하지 않는 필드(groups·pending·
-   * delivery 옵션·기타 env 키)는 보존한다.
-   */
-  private materializePluginConfig(cfg: TelegramChannelConfig): void {
-    const preflight = preflightChannel({
-      botToken: cfg.botToken,
-      chatId: cfg.chatId,
-    });
-    const active =
-      cfg.enabled && preflight.ok && !!cfg.botToken && !!cfg.chatId;
-
-    if (active) {
-      fs.mkdirSync(this.pluginDir, { recursive: true, mode: PLUGIN_DIR_MODE });
-      // 디렉토리가 이미 느슨한 권한으로 있었을 수 있으니 명시적 chmod.
-      try {
-        fs.chmodSync(this.pluginDir, PLUGIN_DIR_MODE);
-      } catch {
-        // Windows 등에서 chmod 무의미하면 무시(플러그인도 동일).
-      }
-      this.writePluginEnv(cfg.botToken!);
-      this.writePluginAccess([cfg.chatId!]);
-      return;
-    }
-
-    // 비활성 — 토큰을 제거하고(있으면) access 를 중화한다.
+  neutralizePluginConfig(): { tokenRemoved: boolean } {
+    let tokenRemoved = false;
     const envPath = this.getPluginEnvPath();
     const parsed = readEnvFile(envPath);
-    if (parsed !== null) {
-      // 다른 env 키가 남아 있으면 토큰만 지우고 재기록, 아니면 파일 삭제.
+    if (parsed !== null && PLUGIN_TOKEN_KEY in parsed) {
+      tokenRemoved = true;
       delete parsed[PLUGIN_TOKEN_KEY];
       if (Object.keys(parsed).length > 0) {
         atomicWriteText(envPath, serializeEnv(parsed), ACCESS_FILE_MODE);
@@ -456,7 +454,10 @@ export class TelegramChannelStore {
     // access.json 은 이미 존재할 때만 중화(없으면 새로 만들지 않는다).
     const accessPath = this.getPluginAccessPath();
     const existing = readPluginAccessFile(accessPath);
-    if (existing !== null) {
+    if (
+      existing !== null &&
+      (existing.dmPolicy !== "disabled" || existing.allowFrom.length > 0)
+    ) {
       const neutralized: PluginAccess = {
         ...existing,
         dmPolicy: "disabled",
@@ -464,47 +465,7 @@ export class TelegramChannelStore {
       };
       atomicWriteJson(accessPath, neutralized, ACCESS_FILE_MODE);
     }
-  }
-
-  /** .env 에 TELEGRAM_BOT_TOKEN 을 설정(기존 다른 키 보존)하고 0600 원자 기록. */
-  private writePluginEnv(botToken: string): void {
-    const envPath = this.getPluginEnvPath();
-    const parsed = readEnvFile(envPath) ?? {};
-    parsed[PLUGIN_TOKEN_KEY] = botToken;
-    atomicWriteText(envPath, serializeEnv(parsed), ACCESS_FILE_MODE);
-  }
-
-  /**
-   * access.json 을 dmPolicy=allowlist + allowFrom 로 기록. 기존 파일이 있으면
-   * groups·pending·delivery 옵션 등 소유하지 않는 필드를 보존한다. 0600 원자 기록.
-   */
-  private writePluginAccess(allowFrom: string[]): void {
-    const accessPath = this.getPluginAccessPath();
-    const existing = readPluginAccessFile(accessPath);
-    const next: PluginAccess = {
-      // 소유하지 않는 필드는 기존값 보존, 없으면 플러그인 기본값.
-      groups: existing?.groups ?? {},
-      pending: existing?.pending ?? {},
-      ...(existing?.mentionPatterns !== undefined
-        ? { mentionPatterns: existing.mentionPatterns }
-        : {}),
-      ...(existing?.ackReaction !== undefined
-        ? { ackReaction: existing.ackReaction }
-        : {}),
-      ...(existing?.replyToMode !== undefined
-        ? { replyToMode: existing.replyToMode }
-        : {}),
-      ...(existing?.textChunkLimit !== undefined
-        ? { textChunkLimit: existing.textChunkLimit }
-        : {}),
-      ...(existing?.chunkMode !== undefined
-        ? { chunkMode: existing.chunkMode }
-        : {}),
-      // 우리가 소유하는 필드.
-      dmPolicy: "allowlist",
-      allowFrom,
-    };
-    atomicWriteJson(accessPath, next, ACCESS_FILE_MODE);
+    return { tokenRemoved };
   }
 }
 
@@ -760,11 +721,27 @@ export function getTelegramChannelAccess(
 }
 
 /**
- * 오케 스폰 직전 강건성 보장 — projectId 의 채널이 활성이면 공식 플러그인 config
- * (~/.claude/channels/telegram/{.env,access.json})가 존재하도록 보장한다. 이미
- * 저장된 로컬 config 로부터만 materialize 하므로 인바운드 쓰기 경로가 아니다.
- * config 가 없으면 no-op. orchestrator-manager 가 채널 플래그 주입 직전 호출한다.
+ * 플러그인 상태 디렉토리(~/.claude/channels/telegram)에 실체화된 마블로 봇
+ * 토큰을 치운다(브릿지 제거 — 모듈 상단 주석 참고). telegram-poller 가 기동 시
+ * 호출해 과거 빌드가 남긴 토큰을 정리한다 — 외부 claude/Cursor 플러그인 폴러가
+ * 우리 토큰으로 부팅해 getUpdates 를 409 강탈하는 경로를 원천 차단.
  */
-export function ensureTelegramPluginConfig(projectId: string): void {
-  getTelegramChannelStore().ensurePluginConfig(projectId);
+export function neutralizeTelegramPluginConfig(): { tokenRemoved: boolean } {
+  return getTelegramChannelStore().neutralizePluginConfig();
+}
+
+/**
+ * 다른 활성 프로젝트가 이 토큰을 이미 쓰는지(1 봇 = 1 프로젝트 규칙 위반) —
+ * 위반 projectId 목록. telegram-poller 의 409 진단이 사용한다.
+ */
+export function findTelegramTokenConflicts(
+  selfProjectId: string,
+  botToken: string | null,
+): string[] {
+  return getTelegramChannelStore().findTokenConflicts(selfProjectId, botToken);
+}
+
+/** 플러그인 상태 디렉토리 절대경로(기본 store 기준) — 폴러 409 진단용. */
+export function getTelegramPluginStateDir(): string {
+  return getTelegramChannelStore().getPluginDir();
 }

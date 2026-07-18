@@ -238,6 +238,9 @@ function baseDeps(
     idleBackoffMs: 5,
     errorBackoffMs: 5,
     logger: quietLogger,
+    // 기본값이 실제 ~/.claude/channels/telegram 을 건드리지 않도록 tmp 로 격리.
+    pluginStateDir: path.join(tmpDir, "plugin"),
+    neutralizePluginConfig: () => ({ tokenRemoved: false }),
     ...over,
   };
 }
@@ -878,5 +881,217 @@ describe("TelegramPoller un-replied nudge (spec A)", () => {
     expect(injects.filter((t) => t.includes(NUDGE_PHRASE))).toHaveLength(1);
     expect(poller.getReliabilityStats(PROJECT).unanswered).toBe(1);
     expect(poller.hasPendingReply(PROJECT)).toBe(false);
+  });
+});
+
+// ── 409 잔존원인 회귀 (티켓 kYC4pGM7S4k6967qs8uO) ────────────────────────
+
+/** warn 을 캡처하는 로거. */
+function warnCapture(): {
+  logger: Pick<Console, "log" | "warn" | "error">;
+  warns: string[];
+} {
+  const warns: string[] = [];
+  return {
+    warns,
+    logger: {
+      log: () => {},
+      warn: (m: unknown) => warns.push(String(m)),
+      error: () => {},
+    },
+  };
+}
+
+const TOKEN_B = "987654321:BBHfakeOtherBotTokenForTests_ijklMNOP";
+
+describe("토큰 기준 루프 dedup — 같은 봇을 두 프로젝트가 폴링하지 않는다", () => {
+  it("★같은 토큰의 두 프로젝트 중 결정적 승자 1개만 폴 루프를 얻는다", async () => {
+    const { fetchImpl } = makeFetch({ updatesFor: () => [] });
+    const { logger, warns } = warnCapture();
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        listActiveProjectIds: () => ["pB", "pA"],
+        getToken: () => TOKEN,
+        logger,
+      }),
+    );
+    poller.start();
+    await waitFor(() => poller.hasLoop("pA"));
+    expect(poller.hasLoop("pA")).toBe(true); // 사전순 첫 프로젝트가 승자
+    expect(poller.hasLoop("pB")).toBe(false);
+    const conflictWarn = warns.find((w) => w.includes("share ONE bot token"));
+    expect(conflictWarn).toBeDefined();
+    expect(conflictWarn).toContain("pA");
+    expect(conflictWarn).toContain("pB");
+    expect(conflictWarn).toContain("single-consumer");
+    expect(conflictWarn).not.toContain(TOKEN); // 토큰 원문 비노출
+    await poller.stopAll();
+  });
+
+  it("이미 돌고 있는 루프가 있으면 그 프로젝트가 승자로 유지된다(churn 방지)", async () => {
+    const { fetchImpl } = makeFetch({ updatesFor: () => [] });
+    let ids = ["pB"];
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        listActiveProjectIds: () => ids,
+        getToken: () => TOKEN,
+      }),
+    );
+    poller.start();
+    await waitFor(() => poller.hasLoop("pB"));
+    // 사전순으로 앞서는 pA 가 나중에 활성화돼도 기존 루프 pB 를 뺏지 않는다.
+    ids = ["pA", "pB"];
+    poller.syncActiveChannels();
+    expect(poller.hasLoop("pB")).toBe(true);
+    expect(poller.hasLoop("pA")).toBe(false);
+    await poller.stopAll();
+  });
+
+  it("서로 다른 토큰이면 두 프로젝트 모두 폴 루프를 얻는다", async () => {
+    const { fetchImpl } = makeFetch({ updatesFor: () => [] });
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        listActiveProjectIds: () => ["pA", "pB"],
+        getToken: (p) => (p === "pA" ? TOKEN : TOKEN_B),
+      }),
+    );
+    poller.start();
+    await waitFor(() => poller.hasLoop("pA") && poller.hasLoop("pB"));
+    expect(poller.hasLoop("pA")).toBe(true);
+    expect(poller.hasLoop("pB")).toBe(true);
+    await poller.stopAll();
+  });
+});
+
+describe("기동 시 플러그인 토큰 정리 (외부 폴러 부팅 차단)", () => {
+  it("start() 가 neutralizePluginConfig 를 호출하고, 토큰을 지웠으면 경고를 남긴다", async () => {
+    const { fetchImpl } = makeFetch({ updatesFor: () => [] });
+    const { logger, warns } = warnCapture();
+    let calls = 0;
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        listActiveProjectIds: () => [],
+        neutralizePluginConfig: () => {
+          calls++;
+          return { tokenRemoved: true };
+        },
+        logger,
+      }),
+    );
+    poller.start();
+    expect(calls).toBe(1);
+    expect(warns.some((w) => w.includes("stale bot token"))).toBe(true);
+    await poller.stopAll();
+  });
+
+  it("지울 토큰이 없으면 조용히 지나간다", async () => {
+    const { fetchImpl } = makeFetch({ updatesFor: () => [] });
+    const { logger, warns } = warnCapture();
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, { listActiveProjectIds: () => [], logger }),
+    );
+    poller.start();
+    expect(warns).toHaveLength(0);
+    await poller.stopAll();
+  });
+});
+
+describe("getUpdates 409 진단 — 누가 토큰을 잡고 있는지 지목한다", () => {
+  /** getUpdates 가 항상 HTTP 409 를 돌려주는 fetch 스텁. */
+  function make409Fetch(): {
+    fetchImpl: typeof fetch;
+    getUpdatesCalls: () => number;
+  } {
+    let n = 0;
+    const fetchImpl = (async (url: string) => {
+      await new Promise((r) => setTimeout(r, 0));
+      const method = url.split("/").pop() ?? "";
+      if (method === "getUpdates") {
+        n++;
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            ok: false,
+            error_code: 409,
+            description: "Conflict: terminated by other getUpdates request",
+          }),
+        } as unknown as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          result: { url: "", pending_update_count: 0 },
+        }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+    return { fetchImpl, getUpdatesCalls: () => n };
+  }
+
+  it("★플러그인 .env 토큰 일치 + 살아있는 pid + 토큰공유 프로젝트를 모두 지목하고, 토큰 원문은 없다", async () => {
+    // 외부 플러그인 폴러가 우리 토큰으로 부팅해 둔 상태를 재현.
+    const pluginDir = path.join(tmpDir, "plugin");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginDir, ".env"),
+      `TELEGRAM_BOT_TOKEN=${TOKEN}\n`,
+    );
+    fs.writeFileSync(path.join(pluginDir, "bot.pid"), String(process.pid));
+
+    const { fetchImpl, getUpdatesCalls } = make409Fetch();
+    const { logger, warns } = warnCapture();
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        // "zz-copy" 는 사전순으로 뒤라 dedup 승자는 PROJECT — 하지만 진단은
+        // 토큰을 공유하는 다른 프로젝트로 zz-copy 를 지목해야 한다.
+        listActiveProjectIds: () => [PROJECT, "zz-copy"],
+        getToken: () => TOKEN,
+        pluginStateDir: pluginDir,
+        logger,
+      }),
+    );
+    poller.start();
+    await waitFor(() => getUpdatesCalls() >= 3);
+    await poller.stopAll();
+
+    // 일반 에러 라인은 매번, 상세 진단은 스로틀로 1회만.
+    expect(
+      warns.some((w) => w.includes("getUpdates error: HTTP 409")),
+    ).toBe(true);
+    const diags = warns.filter((w) => w.includes("409 diagnosis"));
+    expect(diags).toHaveLength(1);
+    const diag = diags[0];
+    expect(diag).toContain("ONE getUpdates consumer per bot");
+    expect(diag).toContain("zz-copy"); // 토큰 공유 프로젝트 지목
+    expect(diag).toContain("holds THIS bot's token"); // 플러그인 .env 일치
+    expect(diag).toContain(`pid=${process.pid} (ALIVE)`); // 점유 프로세스 생존
+    expect(diag).not.toContain(TOKEN); // 토큰 원문 비노출
+    await poller.stopAll();
+  });
+
+  it("플러그인 .env 가 다른 토큰이면 일치로 지목하지 않는다", async () => {
+    const pluginDir = path.join(tmpDir, "plugin");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginDir, ".env"),
+      `TELEGRAM_BOT_TOKEN=${TOKEN_B}\n`,
+    );
+    const { fetchImpl, getUpdatesCalls } = make409Fetch();
+    const { logger, warns } = warnCapture();
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, { pluginStateDir: pluginDir, logger }),
+    );
+    poller.start();
+    await waitFor(() => getUpdatesCalls() >= 2);
+    await poller.stopAll();
+
+    const diag = warns.find((w) => w.includes("409 diagnosis"));
+    expect(diag).toBeDefined();
+    expect(diag).toContain("does not hold this token");
+    expect(diag).toContain("no other Marblo project uses this token");
+    expect(diag).not.toContain(TOKEN);
+    expect(diag).not.toContain(TOKEN_B);
   });
 });
