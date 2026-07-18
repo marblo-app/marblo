@@ -51,7 +51,7 @@ const customTokenServiceAccountId =
 admin.initializeApp(
   customTokenServiceAccountId
     ? { serviceAccountId: customTokenServiceAccountId }
-    : undefined
+    : undefined,
 );
 const db = admin.firestore();
 const BQ_LOCATION = "US";
@@ -70,7 +70,7 @@ export const issueAgentCustomToken = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
 
@@ -88,11 +88,11 @@ export const issueAgentCustomToken = functions.https.onCall(
           ? (err as { code: string }).code
           : "unknown";
       console.error(
-        `[issueAgentCustomToken] createCustomToken failed (${code})`
+        `[issueAgentCustomToken] createCustomToken failed (${code})`,
       );
       throw new functions.https.HttpsError(
         "internal",
-        `Agent custom token signing failed (${code}).`
+        `Agent custom token signing failed (${code}).`,
       );
     }
 
@@ -100,7 +100,7 @@ export const issueAgentCustomToken = functions.https.onCall(
       customToken,
       uid: context.auth.uid,
     };
-  }
+  },
 );
 
 // ─── Config ──────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
 
@@ -155,7 +155,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
     if (!subSnap.exists || !subSnap.data()?.paddleSubscriptionId) {
       throw new functions.https.HttpsError(
         "not-found",
-        "구독 정보를 찾을 수 없습니다."
+        "구독 정보를 찾을 수 없습니다.",
       );
     }
 
@@ -170,7 +170,7 @@ export const cancelPaddleSubscription = functions.https.onCall(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ effective_from: "next_billing_period" }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -178,12 +178,12 @@ export const cancelPaddleSubscription = functions.https.onCall(
       console.error("Paddle cancel failed:", error);
       throw new functions.https.HttpsError(
         "internal",
-        "구독 취소에 실패했습니다."
+        "구독 취소에 실패했습니다.",
       );
     }
 
     return { success: true };
-  }
+  },
 );
 
 // ─── Webhook signature verification (H1) ─────────────────────────
@@ -269,12 +269,12 @@ export const paddleWebhook = functions.https.onRequest(async (req, res) => {
         if (data.current_billing_period) {
           if (data.current_billing_period.starts_at) {
             update.currentPeriodStart = admin.firestore.Timestamp.fromDate(
-              new Date(data.current_billing_period.starts_at)
+              new Date(data.current_billing_period.starts_at),
             );
           }
           if (data.current_billing_period.ends_at) {
             update.currentPeriodEnd = admin.firestore.Timestamp.fromDate(
-              new Date(data.current_billing_period.ends_at)
+              new Date(data.current_billing_period.ends_at),
             );
           }
         }
@@ -346,7 +346,7 @@ export const createTossCheckout = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
 
@@ -355,7 +355,7 @@ export const createTossCheckout = functions.https.onCall(
     if (!amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "유효하지 않은 플랜입니다."
+        "유효하지 않은 플랜입니다.",
       );
     }
 
@@ -371,7 +371,7 @@ export const createTossCheckout = functions.https.onCall(
     });
 
     return { orderId, amount, planType };
-  }
+  },
 );
 
 // ─── Confirm Toss Payment ────────────────────────────────────────
@@ -380,7 +380,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
 
@@ -394,7 +394,7 @@ export const confirmTossPayment = functions.https.onCall(
     if (!orderSnap.exists) {
       throw new functions.https.HttpsError(
         "not-found",
-        "주문을 찾을 수 없습니다."
+        "주문을 찾을 수 없습니다.",
       );
     }
 
@@ -407,13 +407,13 @@ export const confirmTossPayment = functions.https.onCall(
     if (order.userId !== context.auth.uid) {
       throw new functions.https.HttpsError(
         "permission-denied",
-        "본인의 주문만 확인할 수 있습니다."
+        "본인의 주문만 확인할 수 있습니다.",
       );
     }
     if (order.amount !== amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "결제 금액이 일치하지 않습니다."
+        "결제 금액이 일치하지 않습니다.",
       );
     }
 
@@ -433,7 +433,7 @@ export const confirmTossPayment = functions.https.onCall(
       console.error("TossPayments confirm failed:", error);
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "결제 승인에 실패했습니다."
+        error.message || "결제 승인에 실패했습니다.",
       );
     }
 
@@ -466,7 +466,7 @@ export const confirmTossPayment = functions.https.onCall(
     });
 
     return { success: true };
-  }
+  },
 );
 
 // ─── TossPayments Webhook ────────────────────────────────────────
@@ -483,7 +483,7 @@ export const confirmTossPayment = functions.https.onCall(
 // 미설정/네트워크오류 → null 을 돌려 호출부가 "구독 변경 안 함"으로 안전
 // 처리하게 한다. body 의 status 는 절대 참조하지 않는다.
 async function fetchTossPaymentStatus(
-  paymentKey: string
+  paymentKey: string,
 ): Promise<TossPaymentQueryResult> {
   if (!TOSS_SECRET_KEY) return null;
   try {
@@ -492,10 +492,10 @@ async function fetchTossPaymentStatus(
       {
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64"
+            "base64",
           )}`,
         },
-      }
+      },
     );
     const body = res.ok
       ? ((await res.json().catch(() => null)) as unknown)
@@ -523,7 +523,7 @@ export const tossWebhook = functions.https.onRequest(async (req, res) => {
       if (!paymentKey) {
         // 재조회 식별자가 없으면 검증 불가 → 안전 무시.
         console.warn(
-          "[tossWebhook] PAYMENT_STATUS_CHANGED without paymentKey; ignoring"
+          "[tossWebhook] PAYMENT_STATUS_CHANGED without paymentKey; ignoring",
         );
         break;
       }
@@ -533,7 +533,7 @@ export const tossWebhook = functions.https.onRequest(async (req, res) => {
       if (!query) {
         // 재조회 실패/미존재(위조 포함) → 구독 변경 없이 무시(+로그).
         console.warn(
-          "[tossWebhook] payment re-query failed or not found; no subscription change"
+          "[tossWebhook] payment re-query failed or not found; no subscription change",
         );
         break;
       }
@@ -645,7 +645,7 @@ async function chargeSubscriptionIdempotent(params: {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
     return true;
   });
@@ -669,7 +669,7 @@ async function chargeSubscriptionIdempotent(params: {
         method: "POST",
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64"
+            "base64",
           )}`,
           "Content-Type": "application/json",
         },
@@ -679,14 +679,14 @@ async function chargeSubscriptionIdempotent(params: {
           orderId,
           orderName: `Marblo ${planType} 구독`,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       const msg = String(error?.message || `HTTP ${response.status}`).slice(
         0,
-        500
+        500,
       );
       await chargeRef.update({
         status: "failed",
@@ -706,7 +706,7 @@ async function chargeSubscriptionIdempotent(params: {
   } catch (err) {
     const msg = (err instanceof Error ? err.message : String(err)).slice(
       0,
-      500
+      500,
     );
     await chargeRef.update({
       status: "failed",
@@ -723,7 +723,7 @@ async function chargeSubscriptionIdempotent(params: {
 async function resolveFirstChargeAmount(
   userId: string,
   baseAmount: number,
-  couponCode: unknown
+  couponCode: unknown,
 ): Promise<{
   finalAmount: number;
   appliedCoupon: { code: string } | null;
@@ -763,7 +763,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   if (!baseAmount) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      `Plan '${planType}' is not chargeable`
+      `Plan '${planType}' is not chargeable`,
     );
   }
 
@@ -774,19 +774,19 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
       method: "POST",
       headers: {
         Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-          "base64"
+          "base64",
         )}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ authKey, customerKey }),
-    }
+    },
   );
 
   if (!response.ok) {
     const error = await response.json();
     throw new functions.https.HttpsError(
       "internal",
-      error.message || "Failed to issue billing key"
+      error.message || "Failed to issue billing key",
     );
   }
 
@@ -797,7 +797,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   const { finalAmount, appliedCoupon } = await resolveFirstChargeAmount(
     userId,
     baseAmount,
-    coupon
+    coupon,
   );
 
   // 3) 첫 결제 청구(멱등). 실패 시 구독 active 처리 없이 throw(원자적).
@@ -814,7 +814,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
   if (charge.status === "failed") {
     throw new functions.https.HttpsError(
       "internal",
-      `첫 결제에 실패했습니다: ${charge.error}`
+      `첫 결제에 실패했습니다: ${charge.error}`,
     );
   }
 
@@ -841,7 +841,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
         createdAt: now,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
 
   if (appliedCoupon) {
@@ -879,7 +879,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (!subSnap.exists || !sub?.tossBillingKey || !sub?.tossCustomerKey) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "No billing key registered for this account"
+        "No billing key registered for this account",
       );
     }
 
@@ -888,7 +888,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (!amount) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        `Plan '${planType}' is not chargeable`
+        `Plan '${planType}' is not chargeable`,
       );
     }
 
@@ -907,7 +907,7 @@ export const chargeBillingKey = functions.https.onCall(
     if (charge.status === "failed") {
       throw new functions.https.HttpsError(
         "internal",
-        charge.error || "Failed to charge billing key"
+        charge.error || "Failed to charge billing key",
       );
     }
 
@@ -930,7 +930,7 @@ export const chargeBillingKey = functions.https.onCall(
       paymentKey: charge.status === "charged" ? charge.paymentKey : null,
       charged: charge.status,
     };
-  }
+  },
 );
 
 // 토스 정기결제 취소
@@ -946,7 +946,7 @@ export const cancelTossSubscription = functions.https.onCall(
     });
 
     return { success: true };
-  }
+  },
 );
 
 // ============================================
@@ -971,7 +971,7 @@ export const createLectureOrder = functions.https.onCall(
     if (!existingPurchase.empty) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "Already purchased this lecture"
+        "Already purchased this lecture",
       );
     }
 
@@ -998,7 +998,7 @@ export const createLectureOrder = functions.https.onCall(
     });
 
     return { orderId, amount, orderName };
-  }
+  },
 );
 
 // 강의 단건결제 확인
@@ -1021,13 +1021,13 @@ export const confirmLecturePayment = functions.https.onCall(
     if (order.userId !== userId) {
       throw new functions.https.HttpsError(
         "permission-denied",
-        "본인의 주문만 확인할 수 있습니다."
+        "본인의 주문만 확인할 수 있습니다.",
       );
     }
     if (typeof amount === "number" && order.amount !== amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "결제 금액이 일치하지 않습니다."
+        "결제 금액이 일치하지 않습니다.",
       );
     }
 
@@ -1041,7 +1041,7 @@ export const confirmLecturePayment = functions.https.onCall(
     if (!existingPurchase.empty) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "Already purchased this lecture"
+        "Already purchased this lecture",
       );
     }
 
@@ -1052,19 +1052,19 @@ export const confirmLecturePayment = functions.https.onCall(
         method: "POST",
         headers: {
           Authorization: `Basic ${Buffer.from(TOSS_SECRET_KEY + ":").toString(
-            "base64"
+            "base64",
           )}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ paymentKey, orderId, amount: order.amount }),
-      }
+      },
     );
 
     if (!response.ok) {
       const error = await response.json();
       throw new functions.https.HttpsError(
         "internal",
-        error.message || "Payment confirmation failed"
+        error.message || "Payment confirmation failed",
       );
     }
 
@@ -1084,7 +1084,7 @@ export const confirmLecturePayment = functions.https.onCall(
     await issueLectureCouponInternal(userId);
 
     return { success: true };
-  }
+  },
 );
 
 // ============================================
@@ -1097,7 +1097,7 @@ export const validateCoupon = functions.https.onCall(async (data, context) => {
   if (!code)
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Coupon code required"
+      "Coupon code required",
     );
 
   // Rate limit: stops brute-force code guessing. Per-uid (5/min, 30/5min)
@@ -1109,14 +1109,14 @@ export const validateCoupon = functions.https.onCall(async (data, context) => {
   if (!uidCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`
+      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`,
     );
   }
   const ipCheck = await enforceRateLimit(ipKey, COUPON_RULES_IP);
   if (!ipCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`
+      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`,
     );
   }
 
@@ -1171,19 +1171,19 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
   const ip = extractIp(context.rawRequest);
   const uidCheck = await enforceRateLimit(
     `coupon:uid:${userId}`,
-    COUPON_RULES_UID
+    COUPON_RULES_UID,
   );
   if (!uidCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`
+      `Too many attempts. Try again in ${uidCheck.retryAfter}s.`,
     );
   }
   const ipCheck = await enforceRateLimit(`coupon:ip:${ip}`, COUPON_RULES_IP);
   if (!ipCheck.allowed) {
     throw new functions.https.HttpsError(
       "resource-exhausted",
-      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`
+      `Too many attempts from this network. Try again in ${ipCheck.retryAfter}s.`,
     );
   }
 
@@ -1200,7 +1200,7 @@ export const applyCoupon = functions.https.onCall(async (data, context) => {
   switch (coupon.type) {
     case "discount":
       discountAmount = Math.round(
-        (baseAmount * (coupon.discountPercent || 0)) / 100
+        (baseAmount * (coupon.discountPercent || 0)) / 100,
       );
       finalAmount = baseAmount - discountAmount;
       break;
@@ -1241,7 +1241,7 @@ export const createCouponBatch = functions.https.onCall(
     if (!Array.isArray(coupons) || coupons.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Coupons array required"
+        "Coupons array required",
       );
     }
 
@@ -1263,7 +1263,7 @@ export const createCouponBatch = functions.https.onCall(
 
     await batch.commit();
     return { created: coupons.length };
-  }
+  },
 );
 
 // 강의 구매 → 앱 쿠폰 자동 발급 (내부 함수)
@@ -1297,7 +1297,7 @@ export const issueLectureCoupon = functions.https.onCall(
 
     await issueLectureCouponInternal(userId);
     return { couponCode: "LECTURE2026" };
-  }
+  },
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1361,11 +1361,11 @@ function requireAdmin(context: functions.https.CallableContext): void {
   const adminUid = process.env.ADMIN_UID?.trim();
   if (!adminUid) {
     functions.logger.warn(
-      "[requireAdmin] ADMIN_UID is not configured; rejecting admin callable as server misconfiguration."
+      "[requireAdmin] ADMIN_UID is not configured; rejecting admin callable as server misconfiguration.",
     );
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "Admin configuration is missing."
+      "Admin configuration is missing.",
     );
   }
 
@@ -1411,7 +1411,7 @@ function hasPaymentEvidence(sub: Record<string, unknown> | undefined): boolean {
 // 결제 흔적(옛 billingKey)보다 우선한다. 안 그러면 "해지했다가 grant 를 받은"
 // doc 이 stale billingKey 때문에 유료로 오판돼 반려해도 회수되지 않는다.
 function isFounderGrantSubscription(
-  sub: Record<string, unknown> | undefined
+  sub: Record<string, unknown> | undefined,
 ): boolean {
   if (!sub) return false;
   return sub.founderGrant === true || sub.paymentProvider === "founder_grant";
@@ -1421,7 +1421,7 @@ function isFounderGrantSubscription(
 // 이게 true 인 구독만 "건드리지 말 것"(grant 로 덮어쓰기 금지) 대상이다.
 // past_due 도 현역 — 재시도 중인 결제라 grant 로 덮으면 과금이 끊긴다.
 function isLivePaidSubscription(
-  sub: Record<string, unknown> | undefined
+  sub: Record<string, unknown> | undefined,
 ): boolean {
   if (!sub) return false;
   if (isFounderGrantSubscription(sub)) return false;
@@ -1442,7 +1442,7 @@ async function upsertProSubscription(
   userId: string,
   targetEnd: Date,
   reason: string,
-  grantStartedAt: Date
+  grantStartedAt: Date,
 ): Promise<ProGrantOutcome> {
   const now = new Date();
   const subRef = db.collection("subscriptions").doc(userId);
@@ -1472,7 +1472,7 @@ async function upsertProSubscription(
     // 트랜잭션 안에서 판정해 결제 생성과 grant 생성의 race 에서도 stomp 하지 않는다.
     if (isLivePaidSubscription(data)) {
       console.log(
-        `[upsertProSubscription] 현역 유료 구독(${userId}, status=${data?.status}) — grant(${reason}) 로 덮어쓰지 않고 결제 유지`
+        `[upsertProSubscription] 현역 유료 구독(${userId}, status=${data?.status}) — grant(${reason}) 로 덮어쓰지 않고 결제 유지`,
       );
       return {
         granted: false,
@@ -1505,13 +1505,13 @@ async function grantFounderProTotalInternal(
   userId: string,
   totalMonths: number,
   reason: string,
-  grantStartedAt: Date
+  grantStartedAt: Date,
 ): Promise<Date> {
   const outcome = await upsertProSubscription(
     userId,
     addMonths(grantStartedAt, totalMonths),
     reason,
-    grantStartedAt
+    grantStartedAt,
   );
   return outcome.periodEnd;
 }
@@ -1531,7 +1531,7 @@ function laterDate(a: Date | null, b: Date | null): Date | null {
 }
 
 function resolveFounderGrantWindowEnd(
-  founder: Record<string, unknown>
+  founder: Record<string, unknown>,
 ): Date | null {
   const betaEnd = timestampToDate(founder.betaExpiresAt);
   const proEnd = timestampToDate(founder.proExpiresAt);
@@ -1558,7 +1558,7 @@ async function materializeFounderProGrantForUid(
   founder: Record<string, unknown>,
   uid: string,
   reason: string,
-  grantStartedAt: Date
+  grantStartedAt: Date,
 ): Promise<FounderGrantMaterializationResult> {
   const windowEnd = resolveFounderGrantWindowEnd(founder);
   if (!windowEnd || windowEnd <= new Date()) {
@@ -1574,7 +1574,7 @@ async function materializeFounderProGrantForUid(
     uid,
     windowEnd,
     reason,
-    grantStartedAt
+    grantStartedAt,
   );
 
   // 실제 founder_grant 구독을 만들었을 때만 grant 흔적을 남긴다. 현역 유료 구독
@@ -1586,7 +1586,7 @@ async function materializeFounderProGrantForUid(
         proSubscriptionEnd: admin.firestore.Timestamp.fromDate(windowEnd),
         proSubscriptionGrantedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
   }
 
@@ -1632,7 +1632,7 @@ interface FounderEmailContent {
 // export 는 테스트의 dry 렌더용. 트리거가 아니므로(=__endpoint 없음)
 // firebase-functions 의 배포 discovery 는 이 export 를 건너뛴다.
 export function buildFounderAccessEmail(
-  locale: FounderLocale
+  locale: FounderLocale,
 ): FounderEmailContent {
   const downloadUrl = `${SITE_BASE}/${locale}/download`;
   const feedbackUrl = `${SITE_BASE}/${locale}/beta-survey`;
@@ -1785,7 +1785,7 @@ export function buildFounderAccessEmail(
 //
 // export 는 테스트의 dry 렌더용(트리거 아님 → 배포 discovery 스킵).
 export function buildFounderSurveyOfferEmail(
-  locale: FounderLocale
+  locale: FounderLocale,
 ): FounderEmailContent {
   const feedbackUrl = `${SITE_BASE}/${locale}/beta-survey`;
 
@@ -1870,7 +1870,7 @@ function founderHtmlShell(inner: string): string {
 async function postResendEmail(
   to: string,
   content: FounderEmailContent,
-  logPrefix: string
+  logPrefix: string,
 ): Promise<boolean> {
   const resp = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -1902,7 +1902,7 @@ async function postResendEmail(
  */
 async function sendFounderAccessEmail(
   email: string,
-  locale: string
+  locale: string,
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
@@ -1924,25 +1924,25 @@ async function sendFounderAccessEmail(
  */
 async function sendFounderSurveyOfferEmail(
   email: string,
-  locale: string
+  locale: string,
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
       console.warn(
         "[founder-email] RESEND_API_KEY 미설정 — 설문 리마인더 발송 스킵:",
-        maskEmailForLog(email)
+        maskEmailForLog(email),
       );
       return false;
     }
     const content = buildFounderSurveyOfferEmail(
-      normalizeFounderLocale(locale)
+      normalizeFounderLocale(locale),
     );
     return await postResendEmail(email, content, "founder-email");
   } catch (err) {
     console.warn(
       "[founder-email] 설문 리마인더 발송 실패:",
       maskEmailForLog(email),
-      err
+      err,
     );
     return false;
   }
@@ -1983,7 +1983,7 @@ async function lookupFounderLocale(email: string): Promise<string> {
 // 정규화 기준으로 매칭해야 중복 신청(동일 이메일 여러 건)까지 함께 잡힌다.
 // 쿼리 필터로는 정규화 비교가 안 돼서 스캔 후 필터한다(어드민 저빈도 액션).
 async function findWaitlistDocsByEmail(
-  email: string
+  email: string,
 ): Promise<FirebaseFirestore.QueryDocumentSnapshot[]> {
   const snap = await db
     .collection("betatester50_waitlist")
@@ -2000,7 +2000,7 @@ async function findWaitlistDocsByEmail(
 // markFounderSelected onCall 과 Telegram 승인 웹훅 양쪽에서 재사용한다.
 async function markFounderSelectedInternal(
   rawEmail: string,
-  resetWindow = false
+  resetWindow = false,
 ): Promise<{
   ok: true;
   email: string;
@@ -2068,7 +2068,7 @@ async function markFounderSelectedInternal(
         status: admin.firestore.FieldValue.delete(),
         rejectedAt: admin.firestore.FieldValue.delete(),
       },
-      { merge: true }
+      { merge: true },
     );
   }
 
@@ -2081,7 +2081,7 @@ async function markFounderSelectedInternal(
       accessEmailSent: emailSent,
       accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true }
+    { merge: true },
   );
 
   // 승인 = Pro 부여. 베타 유저가 즉시 Pro 기능을 쓰려면 subscriptions/{uid}
@@ -2111,7 +2111,7 @@ async function markFounderSelectedInternal(
       founderForGrant,
       uid,
       "beta_selected",
-      betaStartedAt
+      betaStartedAt,
     );
     subscriptionUid = outcome.uid;
     subscriptionGranted = outcome.granted;
@@ -2138,12 +2138,12 @@ export const markFounderSelected = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required"
+        "email required",
       );
     }
     const resetWindow = data?.resetWindow === true;
     return markFounderSelectedInternal(email, resetWindow);
-  }
+  },
 );
 
 // 파운더 반려 (관리자용) — markFounderSelected 의 역방향.
@@ -2157,7 +2157,7 @@ export const markFounderSelected = functions.https.onCall(
 //    ★ paymentProvider==="founder_grant" 인 구독만 건드린다 — 유료(toss) 결제자가
 //    파운더로도 선정됐던 경우 반려가 유료 구독까지 취소하면 안 된다.
 async function revokeFounderGrant(
-  email: string
+  email: string,
 ): Promise<{ founderRevoked: boolean; subscriptionRevoked: boolean }> {
   const ref = db.collection(FOUNDERS_COLLECTION).doc(email);
   const snap = await ref.get();
@@ -2173,7 +2173,7 @@ async function revokeFounderGrant(
       betaExpiresAt: admin.firestore.Timestamp.fromDate(new Date()),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true }
+    { merge: true },
   );
 
   // 구독 회수 — 선정 시 기록해둔 proSubscriptionUid 우선, 없으면 이메일로 재조회.
@@ -2197,7 +2197,7 @@ async function revokeFounderGrant(
       // 확인할 수 있게 남긴다 — 필드만으론 "해지후 grant" 와 구분 불가.
       if (hasPaymentEvidence(sub)) {
         console.warn(
-          `[markFounderRejected] ★결제 흔적이 남은 grant doc 회수 (uid=${uid}) — 과거 stomp 로 유료구독이 grant 로 덮인 건이면 수동 확인 필요`
+          `[markFounderRejected] ★결제 흔적이 남은 grant doc 회수 (uid=${uid}) — 과거 stomp 로 유료구독이 grant 로 덮인 건이면 수동 확인 필요`,
         );
       }
       if (sub?.status === "active") {
@@ -2208,13 +2208,13 @@ async function revokeFounderGrant(
             currentPeriodEnd: admin.firestore.Timestamp.fromDate(new Date()),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true }
+          { merge: true },
         );
       }
       subscriptionRevoked = true;
     } else if (subSnap.exists) {
       console.log(
-        `[markFounderRejected] grant 아님 — 구독 보존(취소하지 않음). status=${sub?.status}, paymentProvider=${sub?.paymentProvider}`
+        `[markFounderRejected] grant 아님 — 구독 보존(취소하지 않음). status=${sub?.status}, paymentProvider=${sub?.paymentProvider}`,
       );
     }
   }
@@ -2229,7 +2229,7 @@ export const markFounderRejected = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required"
+        "email required",
       );
     }
 
@@ -2240,15 +2240,14 @@ export const markFounderRejected = functions.https.onCall(
           status: "rejected",
           rejectedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true }
+        { merge: true },
       );
     }
 
-    const { founderRevoked, subscriptionRevoked } = await revokeFounderGrant(
-      email
-    );
+    const { founderRevoked, subscriptionRevoked } =
+      await revokeFounderGrant(email);
     console.log(
-      `[markFounderRejected] email=${email} waitlist=${targets.length} founderRevoked=${founderRevoked} subRevoked=${subscriptionRevoked}`
+      `[markFounderRejected] email=${email} waitlist=${targets.length} founderRevoked=${founderRevoked} subRevoked=${subscriptionRevoked}`,
     );
     return {
       ok: true as const,
@@ -2257,7 +2256,7 @@ export const markFounderRejected = functions.https.onCall(
       founderRevoked,
       subscriptionRevoked,
     };
-  }
+  },
 );
 
 // 파운더 접근 안내 이메일 재발송 (관리자용) — /admin 에서 수동 재발송용.
@@ -2269,7 +2268,7 @@ export const resendFounderAccessEmail = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required"
+        "email required",
       );
     }
     const locale = await lookupFounderLocale(email);
@@ -2280,10 +2279,10 @@ export const resendFounderAccessEmail = functions.https.onCall(
         accessEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
     return { ok: true, emailSent };
-  }
+  },
 );
 
 // 설문 오퍼 이메일 재발송 쿨다운(일). 같은 사람에게 반복 발송 방지.
@@ -2376,7 +2375,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
       for (const target of audience) {
         const ok = await sendFounderSurveyOfferEmail(
           target.email,
-          target.locale
+          target.locale,
         );
         if (ok) {
           sent += 1;
@@ -2387,7 +2386,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
                 admin.firestore.FieldValue.serverTimestamp(),
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             },
-            { merge: true }
+            { merge: true },
           );
         } else {
           failed += 1;
@@ -2400,7 +2399,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
         acc[a.locale] = (acc[a.locale] ?? 0) + 1;
         return acc;
       },
-      {}
+      {},
     );
     // 도메인 집계(개수만 — PII 원문 아님). 발송 규모/스팸필터 사전 점검용.
     const domainBreakdown = audience.reduce<Record<string, number>>(
@@ -2410,7 +2409,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
         acc[domain] = (acc[domain] ?? 0) + 1;
         return acc;
       },
-      {}
+      {},
     );
 
     return {
@@ -2434,7 +2433,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
       sent,
       failed,
     };
-  }
+  },
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2461,10 +2460,7 @@ export const previewFounderSurveyOffer = functions.https.onCall(
 //   no_account     — 계정 X (미가입=미다운로드/미로그인)          → 다운로드 팔로업
 
 type FounderSegment =
-  | "active"
-  | "sub_expired"
-  | "account_no_sub"
-  | "no_account";
+  "active" | "sub_expired" | "account_no_sub" | "no_account";
 
 // 순수 분류기(테스트용 export). 부수효과 없음.
 export function classifyFounderActivation(opts: {
@@ -2516,7 +2512,7 @@ async function computeFounderActivation(): Promise<FounderActivationRecord[]> {
     // 선정 기준 = getMyFounderAccess/grantBetaProOnSignup 과 동일.
     if (v.status === "rejected" || v.accessGrantedAt == null) continue;
     const email = normalizeEmail(
-      typeof v.email === "string" ? v.email : doc.id
+      typeof v.email === "string" ? v.email : doc.id,
     );
     const uid = await lookupUidByEmail(email);
     let subExists = false;
@@ -2593,10 +2589,10 @@ export const getFounderActivationReport = functions.https.onCall(
         activated: bySegment.sub_expired + bySegment.account_no_sub,
       },
       inactiveDomainDistribution: domainDistribution(
-        inactive.map((r) => r.email)
+        inactive.map((r) => r.email),
       ),
     };
-  }
+  },
 );
 
 // ─── 미활성 선정자 팔로업 메일 (Resend) ──────────────────────────────
@@ -2613,7 +2609,7 @@ export const getFounderActivationReport = functions.https.onCall(
 // 아니라 배포 discovery 가 건너뛴다).
 export function buildFounderFollowupEmail(
   locale: FounderLocale,
-  segment: FollowupSegment
+  segment: FollowupSegment,
 ): FounderEmailContent {
   const downloadUrl = `${SITE_BASE}/${locale}/download`;
   const support = FOUNDER_SUPPORT_EMAIL;
@@ -2769,19 +2765,19 @@ export function buildFounderFollowupEmail(
 async function sendFounderFollowupEmail(
   email: string,
   locale: string,
-  segment: FollowupSegment
+  segment: FollowupSegment,
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
       console.warn(
         "[founder-followup] RESEND_API_KEY 미설정 — 발송 스킵:",
-        segment
+        segment,
       );
       return false;
     }
     const content = buildFounderFollowupEmail(
       normalizeFounderLocale(locale),
-      segment
+      segment,
     );
     return await postResendEmail(email, content, "founder-followup");
   } catch (err) {
@@ -2879,7 +2875,7 @@ export const sendFounderFollowupEmails = functions.https.onCall(
       throw new functions.https.HttpsError(
         "failed-precondition",
         `실발송하려면 confirm="${FOUNDER_FOLLOWUP_CONFIRM}" 필요(오발송 방지). ` +
-          "그 전에 dryRun 으로 대상을 확인하고 사장님 승인을 받으세요."
+          "그 전에 dryRun 으로 대상을 확인하고 사장님 승인을 받으세요.",
       );
     }
 
@@ -2902,14 +2898,14 @@ export const sendFounderFollowupEmails = functions.https.onCall(
             founderFollowupSegment: fseg,
             founderFollowupSentAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true }
+          { merge: true },
         );
       } else {
         failed++;
       }
     }
     return { ...preview, sent, failed, sentBySegment };
-  }
+  },
 );
 
 // ─── 신청 접수 확인 이메일 (Resend) ──────────────────────────────────
@@ -2991,13 +2987,13 @@ function buildApplyConfirmEmail(locale: FounderLocale): FounderEmailContent {
  */
 async function sendApplyConfirmEmail(
   email: string,
-  locale: string
+  locale: string,
 ): Promise<boolean> {
   try {
     if (!RESEND_API_KEY) {
       console.warn(
         "[apply-confirm-email] RESEND_API_KEY 미설정 — 발송 스킵:",
-        email
+        email,
       );
       return false;
     }
@@ -3032,14 +3028,14 @@ export const sendApplyConfirmOnWaitlist = functions.firestore
             confirmEmailSent: emailSent,
             confirmEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
           },
-          { merge: true }
+          { merge: true },
         )
         .catch((err) =>
           console.warn(
             "[apply-confirm-email] 발송 흔적 기록 실패:",
             snap.id,
-            err
-          )
+            err,
+          ),
         );
     } catch (err) {
       // 트리거 재시도 폭주 방지 — 모든 에러를 삼킨다.
@@ -3117,7 +3113,7 @@ export const enforceProjectLimit = functions.firestore
       await snap.ref.delete();
       console.warn(
         `[enforceProjectLimit] ${plan} 한도(${limit}) 초과 프로젝트 삭제: ` +
-          `owner=${ownerId} project=${snap.id} (owned=${owned.size})`
+          `owner=${ownerId} project=${snap.id} (owned=${owned.size})`,
       );
     } catch (err) {
       // 트리거 재시도 폭주 방지 — 모든 에러를 삼킨다.
@@ -3129,7 +3125,7 @@ function parseFounderSurveyAnswers(raw: unknown): FounderSurveyAnswers {
   if (!raw || typeof raw !== "object") {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "설문 답변이 필요합니다."
+      "설문 답변이 필요합니다.",
     );
   }
   const answers = raw as Record<string, unknown>;
@@ -3150,7 +3146,7 @@ function parseFounderSurveyAnswers(raw: unknown): FounderSurveyAnswers {
   if (missing.length > 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      `필수 7문항을 모두 입력해 주세요. 누락: ${missing.join(", ")}`
+      `필수 7문항을 모두 입력해 주세요. 누락: ${missing.join(", ")}`,
     );
   }
   return parsed;
@@ -3160,7 +3156,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
   if (!raw || typeof raw !== "object") {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "rubricScore is required"
+      "rubricScore is required",
     );
   }
   const input = raw as Record<string, unknown>;
@@ -3174,7 +3170,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
     ) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        `${key} must be an integer from 0 to 3`
+        `${key} must be an integer from 0 to 3`,
       );
     }
     return value;
@@ -3198,7 +3194,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
   ) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      `rubricScore.total must equal ${total}`
+      `rubricScore.total must equal ${total}`,
     );
   }
 
@@ -3213,7 +3209,7 @@ function parseFounderRubricScore(raw: unknown): FounderRubricScore {
 }
 
 async function getFounderFeedbackBySelector(
-  selector: unknown
+  selector: unknown,
 ): Promise<admin.firestore.DocumentSnapshot | null> {
   if (!selector || typeof selector !== "object") return null;
   const data = selector as Record<string, unknown>;
@@ -3237,7 +3233,7 @@ async function getFounderFeedbackBySelector(
       ? (x as { toMillis: () => number }).toMillis()
       : 0;
   return snap.docs.reduce((a, b) =>
-    toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a
+    toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a,
   );
 }
 
@@ -3249,14 +3245,14 @@ export const submitFounderFeedback = functions.https.onCall(
     if (!uid || !token?.email) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
     // 무료 Pro 부여 경계 — 이메일 소유권 위조 방지를 위해 인증된 이메일만 허용.
     if (token.email_verified !== true) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "이메일 인증이 완료된 계정만 제출할 수 있습니다."
+        "이메일 인증이 완료된 계정만 제출할 수 있습니다.",
       );
     }
     const email = normalizeEmail(token.email);
@@ -3271,14 +3267,14 @@ export const submitFounderFeedback = functions.https.onCall(
       if (!s.exists || s.data()?.status === "rejected") {
         throw new functions.https.HttpsError(
           "permission-denied",
-          "선정된 파운더가 아닙니다. 선정 안내 이메일의 계정으로 로그인했는지 확인해 주세요."
+          "선정된 파운더가 아닙니다. 선정 안내 이메일의 계정으로 로그인했는지 확인해 주세요.",
         );
       }
       const fd = s.data()!;
       if (fd.feedbackSubmittedAt) {
         throw new functions.https.HttpsError(
           "already-exists",
-          "이미 설문을 제출하셨습니다."
+          "이미 설문을 제출하셨습니다.",
         );
       }
       const granted =
@@ -3288,14 +3284,14 @@ export const submitFounderFeedback = functions.https.onCall(
       if (!granted) {
         throw new functions.https.HttpsError(
           "failed-precondition",
-          "접근 권한이 아직 부여되지 않았습니다."
+          "접근 권한이 아직 부여되지 않았습니다.",
         );
       }
       betaExpiresAt =
         fd.betaExpiresAt && typeof fd.betaExpiresAt.toDate === "function"
           ? fd.betaExpiresAt
           : admin.firestore.Timestamp.fromDate(
-              addMonths(granted, FOUNDER_BETA_MONTHS)
+              addMonths(granted, FOUNDER_BETA_MONTHS),
             );
       tx.set(
         fRef,
@@ -3305,7 +3301,7 @@ export const submitFounderFeedback = functions.https.onCall(
           feedbackSubmittedAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true }
+        { merge: true },
       );
     });
 
@@ -3313,7 +3309,7 @@ export const submitFounderFeedback = functions.https.onCall(
       email,
       userId: uid,
       locale: normalizeFounderLocale(
-        typeof data?.locale === "string" ? data.locale : "ko"
+        typeof data?.locale === "string" ? data.locale : "ko",
       ),
       answers,
       rubricScore: null,
@@ -3336,7 +3332,7 @@ export const submitFounderFeedback = functions.https.onCall(
         proGrantedMonths: 0,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
 
     return {
@@ -3347,7 +3343,7 @@ export const submitFounderFeedback = functions.https.onCall(
         ? (betaExpiresAt as admin.firestore.Timestamp).toDate().toISOString()
         : null,
     };
-  }
+  },
 );
 
 // 내 파운더 선정 상태(본인 조회) — founders 컬렉션은 클라 직접 read 차단이라
@@ -3360,7 +3356,7 @@ export const getMyFounderAccess = functions.https.onCall(
     if (!uid || !token?.email) {
       throw new functions.https.HttpsError(
         "unauthenticated",
-        "로그인이 필요합니다."
+        "로그인이 필요합니다.",
       );
     }
     const email = normalizeEmail(token.email);
@@ -3381,7 +3377,7 @@ export const getMyFounderAccess = functions.https.onCall(
       betaExpiresAt,
       feedbackSubmitted,
     };
-  }
+  },
 );
 
 // 루브릭 채점 및 Pro 3개월 지급 확정 (관리자용).
@@ -3399,7 +3395,7 @@ export const reviewFounderFeedback = functions.https.onCall(
     if (!userId || !email) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "feedback is missing userId or email"
+        "feedback is missing userId or email",
       );
     }
 
@@ -3423,7 +3419,7 @@ export const reviewFounderFeedback = functions.https.onCall(
         userId,
         FOUNDER_PRO_MONTHS,
         "founder_survey_rubric",
-        grantStartedAt
+        grantStartedAt,
       );
     } else {
       proExpiresAt =
@@ -3464,7 +3460,7 @@ export const reviewFounderFeedback = functions.https.onCall(
             : null,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true }
+        { merge: true },
       );
 
     return {
@@ -3476,7 +3472,7 @@ export const reviewFounderFeedback = functions.https.onCall(
         : existingGranted,
       proExpiresAt: proExpiresAt?.toISOString() ?? null,
     };
-  }
+  },
 );
 
 // 루브릭 상위 응답자 조회 (관리자용). 복합 인덱스 부담을 줄이기 위해 점수 필터는
@@ -3536,7 +3532,7 @@ export const listTopFounderFeedback = functions.https.onCall(
       })
       .slice(0, limit);
     return { items };
-  }
+  },
 );
 
 // 인터뷰 요청 마킹 (관리자용). 점수만으로 자동 선정하지 않고 운영자 명시 호출만 허용.
@@ -3553,7 +3549,7 @@ export const requestFounderInterview = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "feedback is missing email"
+        "feedback is missing email",
       );
     }
     await feedbackSnap.ref.set(
@@ -3562,7 +3558,7 @@ export const requestFounderInterview = functions.https.onCall(
         interviewRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
     await db.collection(FOUNDERS_COLLECTION).doc(email).set(
       {
@@ -3571,10 +3567,10 @@ export const requestFounderInterview = functions.https.onCall(
         interviewRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
     return { ok: true, feedbackId: feedbackSnap.id };
-  }
+  },
 );
 
 // 인터뷰 완료 마킹 (관리자용) — 요청받은 사용자의 Pro를 총 6개월로 연장.
@@ -3592,7 +3588,7 @@ export const markFounderInterviewed = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "feedback is missing email"
+        "feedback is missing email",
       );
     }
     const fRef = db.collection(FOUNDERS_COLLECTION).doc(email);
@@ -3605,24 +3601,24 @@ export const markFounderInterviewed = functions.https.onCall(
       typeof feedback.userId === "string"
         ? feedback.userId
         : typeof f.userId === "string"
-        ? f.userId
-        : "";
+          ? f.userId
+          : "";
     if (!uid) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "설문 제출 전이라 계정이 연결되지 않았습니다. 설문 제출 후 진행하세요."
+        "설문 제출 전이라 계정이 연결되지 않았습니다. 설문 제출 후 진행하세요.",
       );
     }
     if (feedback.interviewCompleted === true || f.interviewCompleted === true) {
       throw new functions.https.HttpsError(
         "already-exists",
-        "이미 인터뷰 보상이 적용되었습니다."
+        "이미 인터뷰 보상이 적용되었습니다.",
       );
     }
     if (feedback.interviewRequested !== true && f.interviewRequested !== true) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "인터뷰 요청 대상자만 완료 처리할 수 있습니다."
+        "인터뷰 요청 대상자만 완료 처리할 수 있습니다.",
       );
     }
     const grantStartedAt =
@@ -3634,7 +3630,7 @@ export const markFounderInterviewed = functions.https.onCall(
       uid,
       FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
       "founder_interview",
-      grantStartedAt
+      grantStartedAt,
     );
     await feedbackSnap.ref.set(
       {
@@ -3644,7 +3640,7 @@ export const markFounderInterviewed = functions.https.onCall(
         proExpiresAt: admin.firestore.Timestamp.fromDate(periodEnd),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
     await fRef.set(
       {
@@ -3656,14 +3652,14 @@ export const markFounderInterviewed = functions.https.onCall(
         proExpiresAt: admin.firestore.Timestamp.fromDate(periodEnd),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
     return {
       ok: true,
       proMonths: FOUNDER_INTERVIEW_TOTAL_PRO_MONTHS,
       currentPeriodEnd: periodEnd.toISOString(),
     };
-  }
+  },
 );
 
 // Timestamp → ISO 문자열(없거나 형식이 아니면 null). 어드민 read 함수 공용.
@@ -3746,7 +3742,7 @@ export const getFounderWaitlist = functions.https.onCall(
       ? all
       : all.filter((i) => i.status !== "rejected");
     return { items, rejectedCount: all.length - items.length };
-  }
+  },
 );
 
 // 파운더 현황(어드민) — founders 컬렉션 전체 요약. 상태·시각·Pro개월 등.
@@ -3787,7 +3783,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
     if (!email) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "email required"
+        "email required",
       );
     }
     // orderBy 제거 — (email + createdAt) 복합 인덱스 없이 동작하도록 클라이언트 정렬.
@@ -3805,7 +3801,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
         ? (x as { toMillis: () => number }).toMillis()
         : 0;
     const latest = snap.docs.reduce((a, b) =>
-      toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a
+      toMillis(b.data().createdAt) > toMillis(a.data().createdAt) ? b : a,
     );
     const v = latest.data() as Record<string, unknown>;
     const a = (v.answers as Record<string, unknown>) || {};
@@ -3839,7 +3835,7 @@ export const getFounderFeedbackByEmail = functions.https.onCall(
         createdAt: tsToIso(v.createdAt),
       },
     };
-  }
+  },
 );
 
 // ─── In-app Bug Reports (사용자 버그 신고) ─────────────────────
@@ -3858,7 +3854,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
   if (!uid) {
     throw new functions.https.HttpsError(
       "unauthenticated",
-      "로그인이 필요합니다."
+      "로그인이 필요합니다.",
     );
   }
   // 이메일은 서버가 토큰에서 각인(클라 입력 불신). 인증 이메일 없으면 null.
@@ -3874,7 +3870,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
   if (!description) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "버그 설명을 입력해 주세요."
+      "버그 설명을 입력해 주세요.",
     );
   }
 
@@ -3892,7 +3888,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
     recentLogs: redactSecrets(str(ctxIn.recentLogs, BUG_REPORT_CTX_FIELD_MAX)),
     route: str(ctxIn.route, 500),
     agentSnapshot: redactSecrets(
-      str(ctxIn.agentSnapshot, BUG_REPORT_CTX_FIELD_MAX)
+      str(ctxIn.agentSnapshot, BUG_REPORT_CTX_FIELD_MAX),
     ),
   };
 
@@ -3907,7 +3903,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
     if (now - lastAt < BUG_REPORT_MIN_INTERVAL_MS) {
       throw new functions.https.HttpsError(
         "resource-exhausted",
-        "잠시 후 다시 시도해 주세요."
+        "잠시 후 다시 시도해 주세요.",
       );
     }
     const dayStart = typeof d.dayStartMs === "number" ? d.dayStartMs : 0;
@@ -3915,12 +3911,12 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
     const dayCount = dayRolledOver
       ? 0
       : typeof d.dayCount === "number"
-      ? d.dayCount
-      : 0;
+        ? d.dayCount
+        : 0;
     if (dayCount >= BUG_REPORT_DAILY_MAX) {
       throw new functions.https.HttpsError(
         "resource-exhausted",
-        "하루 제출 한도를 초과했습니다. 내일 다시 시도해 주세요."
+        "하루 제출 한도를 초과했습니다. 내일 다시 시도해 주세요.",
       );
     }
     tx.set(
@@ -3931,7 +3927,7 @@ export const submitBugReport = functions.https.onCall(async (data, context) => {
         dayCount: dayCount + 1,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
   });
 
@@ -3994,7 +3990,7 @@ export const updateBugReportStatus = functions.https.onCall(
     if (!(BUG_REPORT_STATUSES as readonly string[]).includes(status)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "유효하지 않은 상태값입니다."
+        "유효하지 않은 상태값입니다.",
       );
     }
     const ref = db.collection("bugReports").doc(id);
@@ -4002,7 +3998,7 @@ export const updateBugReportStatus = functions.https.onCall(
     if (!snap.exists) {
       throw new functions.https.HttpsError(
         "not-found",
-        "신고를 찾을 수 없습니다."
+        "신고를 찾을 수 없습니다.",
       );
     }
     await ref.set(
@@ -4011,10 +4007,10 @@ export const updateBugReportStatus = functions.https.onCall(
         triagedBy: context.auth?.uid ?? null,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
     return { ok: true };
-  }
+  },
 );
 
 // ─── Telemetry → BigQuery ─────────────────────────────────────
@@ -4148,14 +4144,14 @@ export const logTelemetryBatch = functions.https.onCall(
     if (!Array.isArray(events) || events.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "events array required"
+        "events array required",
       );
     }
 
     if (events.length > 100) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Max 100 events per batch"
+        "Max 100 events per batch",
       );
     }
 
@@ -4208,7 +4204,7 @@ export const logTelemetryBatch = functions.https.onCall(
     await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert(rows);
 
     return { inserted: rows.length };
-  }
+  },
 );
 
 interface CostRow {
@@ -4267,7 +4263,7 @@ export const logCostBatch = functions.https.onCall(async (data, context) => {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "entries array required"
+      "entries array required",
     );
   }
 
@@ -4307,7 +4303,7 @@ export const getCostLogs = functions.https.onCall(async (data, context) => {
   if (!projectId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "projectId required"
+      "projectId required",
     );
   }
 
@@ -4342,7 +4338,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
   if (!projectId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "projectId required"
+      "projectId required",
     );
   }
 
@@ -4350,7 +4346,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
   if (!Number.isInteger(requestedDays) || requestedDays <= 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "days must be a positive integer"
+      "days must be a positive integer",
     );
   }
 
@@ -4437,7 +4433,7 @@ export const getCostSummary = functions.https.onCall(async (data, context) => {
 
   const weeklyTotalTokens = weeklyByModel.reduce(
     (total, row) => total + row.totalTokens,
-    0
+    0,
   );
   const weeklyCost = weeklyByModel.reduce((total, row) => total + row.cost, 0);
 
@@ -4463,7 +4459,7 @@ export const logTaskOutcome = functions.https.onCall(async (data, context) => {
   if (!d || !d.taskId) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "outcome with taskId required"
+      "outcome with taskId required",
     );
   }
 
@@ -4513,14 +4509,14 @@ export const logHeartbeat = functions.https.onCall(async (data, context) => {
   if (!Array.isArray(beats) || beats.length === 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "beats array required"
+      "beats array required",
     );
   }
 
   if (beats.length > 50) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "Max 50 beats per batch"
+      "Max 50 beats per batch",
     );
   }
 
@@ -4557,7 +4553,7 @@ export const logFlowExecution = functions.https.onCall(
     if (!d || !d.flowId || !d.runId) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "execution with flowId and runId required"
+        "execution with flowId and runId required",
       );
     }
 
@@ -4587,7 +4583,7 @@ export const logFlowExecution = functions.https.onCall(
       .insert([row]);
 
     return { inserted: 1 };
-  }
+  },
 );
 
 // ============================================
@@ -4729,7 +4725,7 @@ export const triggerReconcile = functions.https.onCall(
     const provider = (data?.provider as string) || "toss";
     if (provider === "paddle") return reconcilePaddlePending();
     return reconcileTossPending();
-  }
+  },
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4752,8 +4748,7 @@ const TELEGRAM_BETA_WEBHOOK_SECRET =
   process.env.TELEGRAM_BETA_WEBHOOK_SECRET || "";
 
 type TgInlineButton =
-  | { text: string; callback_data: string }
-  | { text: string; url: string };
+  { text: string; callback_data: string } | { text: string; url: string };
 type TgInlineKeyboard = TgInlineButton[][];
 
 interface TgCallbackQuery {
@@ -4766,7 +4761,7 @@ interface TgCallbackQuery {
 // 텔레그램 Bot API 호출(공통) — 토큰 없으면 스킵, 절대 throw 하지 않음.
 async function tgCall(
   method: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Promise<void> {
   if (!TELEGRAM_BETA_BOT_TOKEN) return;
   try {
@@ -4776,7 +4771,7 @@ async function tgCall(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      }
+      },
     );
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
@@ -4791,7 +4786,7 @@ async function tgCall(
 // 사용자 입력을 그대로 담으므로 parse_mode 없이 평문 전송(포맷 400/인젝션 회피).
 async function tgSend(
   text: string,
-  inlineKeyboard?: TgInlineKeyboard
+  inlineKeyboard?: TgInlineKeyboard,
 ): Promise<void> {
   if (!TELEGRAM_BETA_ADMIN_CHAT_ID) return;
   const payload: Record<string, unknown> = {
@@ -4814,7 +4809,7 @@ async function tgAnswerCallbackQuery(id: string, text: string): Promise<void> {
 async function tgEditMessageText(
   chatId: string | number,
   messageId: number,
-  text: string
+  text: string,
 ): Promise<void> {
   await tgCall("editMessageText", {
     chat_id: chatId,
@@ -4892,7 +4887,7 @@ async function handleTgSelect(
   cqId: string,
   chatId: string,
   messageId: number,
-  docId: string
+  docId: string,
 ): Promise<void> {
   const snap = await db.collection("betatester50_waitlist").doc(docId).get();
   if (!snap.exists) {
@@ -4926,7 +4921,7 @@ async function handleTgSelect(
       messageId,
       `✅ 선정 (1개월, ${proNote}, 접근이메일 ${
         result.emailSent ? "발송" : "발송 스킵"
-      }) — ${email}\n처리: ${new Date().toISOString()}`
+      }) — ${email}\n처리: ${new Date().toISOString()}`,
     );
   }
 }
@@ -4936,7 +4931,7 @@ async function handleTgSkip(
   cqId: string,
   chatId: string,
   messageId: number,
-  docId: string
+  docId: string,
 ): Promise<void> {
   const ref = db.collection("betatester50_waitlist").doc(docId);
   const snap = await ref.get();
@@ -4953,14 +4948,14 @@ async function handleTgSkip(
       skipped: true,
       skippedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true }
+    { merge: true },
   );
   await tgAnswerCallbackQuery(cqId, "스킵 처리됨");
   if (messageId) {
     await tgEditMessageText(
       chatId,
       messageId,
-      `⏭️ 스킵됨 — 처리: ${new Date().toISOString()}`
+      `⏭️ 스킵됨 — 처리: ${new Date().toISOString()}`,
     );
   }
 }
@@ -4970,7 +4965,7 @@ async function handleTgProGrant(
   cqId: string,
   chatId: string,
   messageId: number,
-  docId: string
+  docId: string,
 ): Promise<void> {
   const ref = db.collection(FOUNDER_FEEDBACK_COLLECTION).doc(docId);
   const snap = await ref.get();
@@ -4995,7 +4990,7 @@ async function handleTgProGrant(
       await tgEditMessageText(
         chatId,
         messageId,
-        `⭐ 이미 Pro 부여됨 (${existingGranted}개월) — ${email}`
+        `⭐ 이미 Pro 부여됨 (${existingGranted}개월) — ${email}`,
       );
     }
     return;
@@ -5004,7 +4999,7 @@ async function handleTgProGrant(
     userId,
     FOUNDER_PRO_MONTHS,
     "telegram_override",
-    new Date()
+    new Date(),
   );
   await ref.set(
     {
@@ -5014,7 +5009,7 @@ async function handleTgProGrant(
       reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
-    { merge: true }
+    { merge: true },
   );
   await db
     .collection(FOUNDERS_COLLECTION)
@@ -5025,14 +5020,14 @@ async function handleTgProGrant(
         proExpiresAt: admin.firestore.Timestamp.fromDate(proExpiresAt),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
   await tgAnswerCallbackQuery(cqId, "Pro 3개월 부여 완료");
   if (messageId) {
     await tgEditMessageText(
       chatId,
       messageId,
-      `⭐ Pro 3개월 부여 (예외승인) — ${email}\n처리: ${new Date().toISOString()}`
+      `⭐ Pro 3개월 부여 (예외승인) — ${email}\n처리: ${new Date().toISOString()}`,
     );
   }
 }
@@ -5106,7 +5101,7 @@ export const betaTelegramWebhook = functions.https.onRequest(
     }
     // 텔레그램 재전송 폭주 방지 — 어떤 경우에도 200.
     res.status(200).send("ok");
-  }
+  },
 );
 
 // ─── 트리거: 신규 가입 → 선정된 베타 파운더면 Pro 구독 materialize ─────
@@ -5135,7 +5130,7 @@ export const grantBetaProOnSignup = functions.auth
         fd,
         user.uid,
         "beta_signup",
-        new Date()
+        new Date(),
       );
     } catch (err) {
       console.warn("[grantBetaProOnSignup] 부여 실패:", user.uid, err);
@@ -5170,12 +5165,12 @@ export const scheduledExpireBetaGrants = functions.pubsub
           canceledAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true }
+        { merge: true },
       );
       expired++;
     }
     console.log(
-      `[expireBetaGrants] scanned=${snap.size} expired→canceled=${expired}`
+      `[expireBetaGrants] scanned=${snap.size} expired→canceled=${expired}`,
     );
     return null;
   });
@@ -5208,17 +5203,135 @@ function parseAnalyticsDays(data: unknown, def = 30): number {
   if (!Number.isInteger(n) || n <= 0) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "days must be a positive integer"
+      "days must be a positive integer",
     );
   }
   return Math.min(n, 365);
+}
+
+// 드릴다운 대상 날짜(YYYY-MM-DD, UTC)를 안전하게 파싱한다.
+function parseAnalyticsDate(data: unknown): string {
+  const raw = (data as { date?: unknown } | null | undefined)?.date;
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(s) ||
+    Number.isNaN(Date.parse(`${s}T00:00:00Z`))
+  ) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "date must be YYYY-MM-DD",
+    );
+  }
+  return s;
+}
+
+// 드릴다운 세그먼트 키. 빈 값/과길이는 거절(BQ 파라미터로만 들어가므로 인젝션은
+// 불가하지만, 무의미한 스캔을 막는다).
+function parseSegmentKey(data: unknown): string {
+  const raw = (data as { key?: unknown } | null | undefined)?.key;
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (!s || s.length > 200) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "key is required (max 200 chars)",
+    );
+  }
+  return s;
+}
+
+// ── 운영자(어드민) 자기계정 제외 ───────────────────────────────────────────────
+// 대시보드는 "고객 지표"를 봐야 하는데 도그푸드 표본이 30 수준이라(§0-B) 운영자
+// 본인 활동이 그대로 KPI 를 오염시킨다. 아래 헬퍼로 어드민 uid 를 집계에서 뺀다.
+//
+// ⚠️ ADMIN_UID 는 절대 응답/로그로 반환하지 않는다. 제외 "건수"만 노출한다.
+//
+// 소스별 제외 가능성(§0 데이터 세계 분리):
+//   - Firestore subscriptions/agents/founders + BQ cost_logs → uid 를 직접
+//     보관하므로 정확히 제외 가능.
+//   - BQ events/task_outcomes → userId 컬럼이 익명 clientId 라 uid 로는 못
+//     지운다. 단 cost_logs(uid 보유) 와 agentId 가 같은 공간이라, 어드민이
+//     소유한 agentId 로 events 를 역참조하면 어드민 clientId 를 유추할 수 있다.
+//     그 유추분만 제외한다(실패해도 대시보드는 살아야 하므로 fail-open).
+function getAdminExclusionUid(): string | null {
+  const uid = process.env.ADMIN_UID?.trim();
+  return uid ? uid : null;
+}
+
+// 어드민 uid 가 소유한 agentId → events.userId(익명 clientId) 역참조.
+// 실패(권한/테이블 공백/스키마 드리프트)하면 빈 배열 — 제외를 포기하고 계속한다.
+async function resolveAdminClientIds(rangeDays: number): Promise<string[]> {
+  const adminUid = getAdminExclusionUid();
+  if (!adminUid) return [];
+  const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+  const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
+  // 조회 윈도우보다 넉넉히 뒤로 본다 — 어드민 clientId 는 윈도우 밖에서 이미
+  // 확정돼 있을 수 있고, 놓치면 제외가 통째로 새어나간다.
+  const lookbackDays = Math.min(Math.max(rangeDays, 90), 365);
+  const query = `
+    SELECT DISTINCT e.userId AS clientId
+    FROM ${eventsTable} AS e
+    JOIN (
+      SELECT DISTINCT agentId
+      FROM ${costTable}
+      WHERE userId = @adminUid
+        AND agentId IS NOT NULL
+        AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
+    ) AS c
+    ON e.agentId = c.agentId
+    WHERE e.userId IS NOT NULL
+      AND e.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
+    LIMIT 100
+  `;
+  try {
+    const [rows] = await bigquery.query({
+      query,
+      params: { adminUid, lookbackDays },
+      location: BQ_LOCATION,
+    });
+    return (rows as Array<Record<string, unknown>>)
+      .map((r) => String(r.clientId ?? ""))
+      .filter((s) => s.length > 0);
+  } catch {
+    // uid 와 원시 에러 메시지는 로그에도 남기지 않는다.
+    console.warn(
+      "[analytics] admin clientId resolution failed; proceeding without " +
+        "telemetry self-exclusion",
+    );
+    return [];
+  }
+}
+
+// 익명 텔레메트리 테이블용 제외 절 + 파라미터. clientId 가 하나도 없으면
+// 빈 절을 돌려준다(빈 ARRAY 파라미터 타입 이슈 회피).
+function adminClientExclusion(clientIds: string[]): {
+  clause: string;
+  params: Record<string, unknown>;
+} {
+  if (clientIds.length === 0) return { clause: "", params: {} };
+  return {
+    clause: " AND (userId IS NULL OR userId NOT IN UNNEST(@excludeClients))",
+    params: { excludeClients: clientIds },
+  };
+}
+
+// cost_logs 는 실제 uid 를 보관 → 정확 제외.
+function adminUidExclusion(): {
+  clause: string;
+  params: Record<string, unknown>;
+} {
+  const adminUid = getAdminExclusionUid();
+  if (!adminUid) return { clause: "", params: {} };
+  return {
+    clause: " AND (userId IS NULL OR userId != @adminUid)",
+    params: { adminUid },
+  };
 }
 
 // BQ 집계 행을 { key → count } 분포로 접는다(빈 결과 안전).
 function foldDistribution(
   rows: Array<Record<string, unknown>>,
   keyCol: string,
-  countCol = "n"
+  countCol = "n",
 ): Array<{ key: string; count: number }> {
   return rows.map((r) => ({
     key: r[keyCol] == null || r[keyCol] === "" ? "(none)" : String(r[keyCol]),
@@ -5239,7 +5352,7 @@ function dayKeyFromMs(ms: number): string {
 
 function makeBusinessTrendBuckets(
   rangeDays: number,
-  nowMs: number
+  nowMs: number,
 ): Array<{ date: string; active: number; new: number; churned: number }> {
   const todayStartMs = startOfUtcDay(nowMs);
   const firstDayMs = todayStartMs - (rangeDays - 1) * DAY_MS;
@@ -5258,7 +5371,7 @@ function isPaidPlan(plan: string): boolean {
 function isCurrentActiveSubscription(
   status: string,
   currentPeriodEndMs: number | null,
-  nowMs: number
+  nowMs: number,
 ): boolean {
   return (
     status === "active" &&
@@ -5267,16 +5380,12 @@ function isCurrentActiveSubscription(
   );
 }
 
-function adminAnalyticsExcludedUid(): string {
-  return process.env.ADMIN_UID?.trim() || "__marblo_no_admin_uid__";
-}
-
 function activeAtDayEnd(
   status: string,
   createdMs: number | null,
   canceledMs: number | null,
   currentPeriodEndMs: number | null,
-  dayEndMs: number
+  dayEndMs: number,
 ): boolean {
   if (currentPeriodEndMs == null || currentPeriodEndMs <= dayEndMs)
     return false;
@@ -5301,7 +5410,7 @@ type ConsecutiveBillingMetrics = {
 };
 
 function computeConsecutiveBillingMetrics(
-  rows: ChargeLedgerRow[]
+  rows: ChargeLedgerRow[],
 ): ConsecutiveBillingMetrics {
   const byUser = new Map<string, ChargeLedgerRow[]>();
   for (const row of rows) {
@@ -5366,6 +5475,14 @@ export const getAdminBusinessSummary = functions.https.onCall(
   async (data, context) => {
     requireAdmin(context);
     const rangeDays = parseAnalyticsDays(data);
+    const adminUid = getAdminExclusionUid();
+    // 제외 건수만 집계(uid 자체는 절대 반환하지 않는다).
+    const adminExcluded = {
+      subscriptions: 0,
+      billingCharges: 0,
+      founders: 0,
+      agents: 0,
+    };
     const nowMs = Date.now();
     const cutoffMs = nowMs - rangeDays * DAY_MS;
     const trendByDay = makeBusinessTrendBuckets(rangeDays, nowMs);
@@ -5385,12 +5502,13 @@ export const getAdminBusinessSummary = functions.https.onCall(
     let activeCurrent = 0;
     let paidCurrent = 0;
     let paddleActiveCurrent = 0;
-    let subscriptionsTotal = 0;
-    const excludedAdminUid = adminAnalyticsExcludedUid();
 
     for (const doc of subSnap.docs) {
-      if (doc.id === excludedAdminUid) continue;
-      subscriptionsTotal++;
+      // subscriptions doc id == uid → 운영자 본인 구독은 KPI 에서 제외한다.
+      if (adminUid && doc.id === adminUid) {
+        adminExcluded.subscriptions++;
+        continue;
+      }
       const v = doc.data() as Record<string, unknown>;
       const status = typeof v.status === "string" ? v.status : "unknown";
       const plan = typeof v.planType === "string" ? v.planType : "unknown";
@@ -5440,7 +5558,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
             createdMs,
             canceledMs,
             currentPeriodEndMs,
-            dayEndMs
+            dayEndMs,
           )
         ) {
           trendByDay[i].active++;
@@ -5453,7 +5571,10 @@ export const getAdminBusinessSummary = functions.https.onCall(
     for (const doc of chargeSnap.docs) {
       const v = doc.data() as Record<string, unknown>;
       const userId = typeof v.userId === "string" ? v.userId : "";
-      if (userId === excludedAdminUid) continue;
+      if (adminUid && userId === adminUid) {
+        adminExcluded.billingCharges++;
+        continue;
+      }
       const status = typeof v.status === "string" ? v.status : "";
       const cycleAnchorMs =
         typeof v.cycleAnchorMs === "number"
@@ -5474,6 +5595,11 @@ export const getAdminBusinessSummary = functions.https.onCall(
     let feedbackSubmitted = 0;
     for (const doc of founderSnap.docs) {
       const v = doc.data() as Record<string, unknown>;
+      // founders doc id 는 이메일 — 계정 연결(proSubscriptionUid)로만 식별된다.
+      if (adminUid && v.proSubscriptionUid === adminUid) {
+        adminExcluded.founders++;
+        continue;
+      }
       if (v.accessGrantedAt != null) accessGranted++;
       if (v.interviewCompleted === true) interviewCompleted++;
       if (v.feedbackSubmittedAt != null || v.feedbackId != null) {
@@ -5504,6 +5630,10 @@ export const getAdminBusinessSummary = functions.https.onCall(
     let rollingTotalTokens = 0;
     for (const doc of agentSnap.docs) {
       const v = doc.data() as Record<string, unknown>;
+      if (adminUid && v.ownerId === adminUid) {
+        adminExcluded.agents++;
+        continue;
+      }
       const status = typeof v.status === "string" ? v.status : "unknown";
       agentsByStatus[status] = (agentsByStatus[status] || 0) + 1;
       rollingTotalCost += toNumber(v.totalCost as number | undefined);
@@ -5516,16 +5646,22 @@ export const getAdminBusinessSummary = functions.https.onCall(
 
     // Pro 전환율(§2.1). "활성 사용자" 정확 분모는 익명 BQ 라 계정단위 불가 →
     // 신뢰 가능한 식별 분모(구독 총계·대기자)로 두 개의 비율을 명시 반환한다.
+    // 분모도 운영자 제외분을 뺀 값이어야 비율이 왜곡되지 않는다.
+    const subscriptionTotal = subSnap.size - adminExcluded.subscriptions;
+    const founderTotal = founderSnap.size - adminExcluded.founders;
+    const agentTotal = agentSnap.size - adminExcluded.agents;
     const proConversionRateVsSubscribers =
-      subscriptionsTotal > 0 ? paidProActive / subscriptionsTotal : 0;
+      subscriptionTotal > 0 ? paidProActive / subscriptionTotal : 0;
     const proConversionRateVsWaitlist =
       waitlistTotal > 0 ? paidProActive / waitlistTotal : 0;
 
     return {
       rangeDays,
       generatedAt: new Date().toISOString(),
+      // 운영자 자기계정 제외 — 제외 "건수"만(uid 미노출). UI 라벨용.
+      adminExcluded,
       subscriptions: {
-        total: subscriptionsTotal,
+        total: subscriptionTotal,
         byStatus,
         byPlanActive,
         byProviderActive,
@@ -5543,7 +5679,7 @@ export const getAdminBusinessSummary = functions.https.onCall(
         proConversionRateVsWaitlist,
       },
       founders: {
-        total: founderSnap.size,
+        total: founderTotal,
         accessGranted,
         interviewCompleted,
         feedbackSubmitted,
@@ -5553,13 +5689,13 @@ export const getAdminBusinessSummary = functions.https.onCall(
         newInWindow: waitlistNewInWindow,
       },
       agents: {
-        liveCount: agentSnap.size,
+        liveCount: agentTotal,
         byStatus: agentsByStatus,
         rollingTotalCost,
         rollingTotalTokens,
       },
     };
-  }
+  },
 );
 
 /**
@@ -5579,6 +5715,9 @@ export const getAdminUsageSummary = functions.https.onCall(
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
     const outcomesTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_TASK_OUTCOMES_TABLE}\``;
     const since = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+    // 운영자 자기활동 제외 — cost_logs 로 역참조한 어드민 clientId 만 뺀다.
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const ex = adminClientExclusion(adminClientIds);
 
     // DAU(일별 고유 clientId) + 일별 총 이벤트(히스토리 사용량)
     const activeByDayQuery = `
@@ -5587,7 +5726,7 @@ export const getAdminUsageSummary = functions.https.onCall(
         COUNT(DISTINCT userId) AS dau,
         COUNT(*) AS events
       FROM ${eventsTable}
-      WHERE timestamp >= ${since}
+      WHERE timestamp >= ${since}${ex.clause}
       GROUP BY date
       ORDER BY date ASC
     `;
@@ -5599,13 +5738,13 @@ export const getAdminUsageSummary = functions.https.onCall(
           timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY),
           userId, NULL)) AS wau
       FROM ${eventsTable}
-      WHERE timestamp >= ${since}
+      WHERE timestamp >= ${since}${ex.clause}
     `;
     // 상위 이벤트 랭킹
     const topEventsQuery = `
       SELECT COALESCE(event, '(none)') AS event, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE timestamp >= ${since}
+      WHERE timestamp >= ${since}${ex.clause}
       GROUP BY event
       ORDER BY n DESC
       LIMIT 25
@@ -5614,19 +5753,19 @@ export const getAdminUsageSummary = functions.https.onCall(
     const spawnsByDayQuery = `
       SELECT FORMAT_DATE('%F', DATE(timestamp)) AS date, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'agent:spawned' AND timestamp >= ${since}
+      WHERE event = 'agent:spawned' AND timestamp >= ${since}${ex.clause}
       GROUP BY date ORDER BY date ASC
     `;
     const spawnsByRoleQuery = `
       SELECT role AS key, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'agent:spawned' AND timestamp >= ${since}
+      WHERE event = 'agent:spawned' AND timestamp >= ${since}${ex.clause}
       GROUP BY role ORDER BY n DESC
     `;
     const spawnsByModelQuery = `
       SELECT model AS key, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'agent:spawned' AND timestamp >= ${since}
+      WHERE event = 'agent:spawned' AND timestamp >= ${since}${ex.clause}
       GROUP BY model ORDER BY n DESC
     `;
     // 태스크 성공률·완료시간(task_outcomes 전체)
@@ -5636,10 +5775,10 @@ export const getAdminUsageSummary = functions.https.onCall(
         COUNTIF(success = true) AS succeeded,
         AVG(durationMs) AS avgDurationMs
       FROM ${outcomesTable}
-      WHERE completedAt >= ${since}
+      WHERE completedAt >= ${since}${ex.clause}
     `;
 
-    const params = { days: rangeDays };
+    const params = { days: rangeDays, ...ex.params };
     const q = (query: string) =>
       bigquery.query({ query, params, location: BQ_LOCATION });
 
@@ -5666,53 +5805,58 @@ export const getAdminUsageSummary = functions.https.onCall(
         date: String(r.date ?? ""),
         dau: toNumber(r.dau as number | string | undefined),
         events: toNumber(r.events as number | string | undefined),
-      })
+      }),
     );
     const sample = (sampleRows as Array<Record<string, unknown>>)[0] ?? {};
     const taskRow =
       (taskSummaryRows as Array<Record<string, unknown>>)[0] ?? {};
     const taskTotal = toNumber(taskRow.total as number | string | undefined);
     const taskSucceeded = toNumber(
-      taskRow.succeeded as number | string | undefined
+      taskRow.succeeded as number | string | undefined,
     );
 
     return {
       rangeDays,
       generatedAt: new Date().toISOString(),
+      // 운영자 제외 현황 — clientId 값은 노출하지 않고 개수만.
+      adminExcluded: {
+        uidFiltered: getAdminExclusionUid() != null,
+        clientIdCount: adminClientIds.length,
+      },
       // 표본 신뢰도 라벨링(§0-B, T0-3): 옵트인/도그푸드 편향 표본 크기.
       sampleClientCount: toNumber(
-        sample.sampleClients as number | string | undefined
+        sample.sampleClients as number | string | undefined,
       ),
       wau: toNumber(sample.wau as number | string | undefined),
       activeByDay,
       topEvents: foldDistribution(
         topEventsRows as Array<Record<string, unknown>>,
-        "event"
+        "event",
       ),
       spawnsByDay: (spawnsByDayRows as Array<Record<string, unknown>>).map(
         (r) => ({
           date: String(r.date ?? ""),
           count: toNumber(r.n as number | string | undefined),
-        })
+        }),
       ),
       spawnsByRole: foldDistribution(
         spawnsByRoleRows as Array<Record<string, unknown>>,
-        "key"
+        "key",
       ),
       spawnsByModel: foldDistribution(
         spawnsByModelRows as Array<Record<string, unknown>>,
-        "key"
+        "key",
       ),
       tasks: {
         total: taskTotal,
         succeeded: taskSucceeded,
         successRate: taskTotal > 0 ? taskSucceeded / taskTotal : 0,
         avgDurationMs: toNumber(
-          taskRow.avgDurationMs as number | string | undefined
+          taskRow.avgDurationMs as number | string | undefined,
         ),
       },
     };
-  }
+  },
 );
 
 /**
@@ -5733,8 +5877,13 @@ export const getAdminModelSummary = functions.https.onCall(
     const outcomesTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_TASK_OUTCOMES_TABLE}\``;
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
     const sinceTs = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+    // 운영자 제외: cost_logs 는 실제 uid 보유 → 정확 제외.
+    // events/task_outcomes 는 익명 clientId → 역참조로 추정된 것만 제외.
+    const uidEx = adminUidExclusion();
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const clientEx = adminClientExclusion(adminClientIds);
 
-    // (1) 모델별 비용(전체 사용자 — uid 필터 제거)
+    // (1) 모델별 비용(전체 사용자 — 자기조회 uid 필터 제거, 운영자만 제외)
     const costByModelQuery = `
       SELECT
         COALESCE(model, '(none)') AS model,
@@ -5744,8 +5893,7 @@ export const getAdminModelSummary = functions.https.onCall(
         SUM(COALESCE(totalCost, 0)) AS cost,
         COUNT(*) AS n
       FROM ${costTable}
-      WHERE timestamp >= ${sinceTs}
-        AND (userId IS NULL OR userId != @excludedAdminUid)
+      WHERE timestamp >= ${sinceTs}${uidEx.clause}
       GROUP BY model
       ORDER BY cost DESC
     `;
@@ -5755,8 +5903,7 @@ export const getAdminModelSummary = functions.https.onCall(
         FORMAT_DATE('%F', DATE(timestamp)) AS date,
         SUM(COALESCE(totalCost, 0)) AS cost
       FROM ${costTable}
-      WHERE timestamp >= ${sinceTs}
-        AND (userId IS NULL OR userId != @excludedAdminUid)
+      WHERE timestamp >= ${sinceTs}${uidEx.clause}
       GROUP BY date
       ORDER BY date ASC
     `;
@@ -5770,7 +5917,7 @@ export const getAdminModelSummary = functions.https.onCall(
         AVG(durationMs) AS avgDurationMs,
         AVG(totalCost) AS avgCost
       FROM ${outcomesTable}
-      WHERE completedAt >= ${sinceTs}
+      WHERE completedAt >= ${sinceTs}${clientEx.clause}
       GROUP BY model, role
       ORDER BY total DESC
     `;
@@ -5784,33 +5931,15 @@ export const getAdminModelSummary = functions.https.onCall(
         SUM(COALESCE(retriesCount, 0)) AS reworkCount,
         COUNTIF(COALESCE(retriesCount, 0) > 0) AS retriedTasks
       FROM ${outcomesTable}
-      WHERE completedAt >= ${sinceTs}
+      WHERE completedAt >= ${sinceTs}${clientEx.clause}
       GROUP BY model
       ORDER BY total DESC
     `;
     // (4) dispatch:decision 라우팅 결정 분포(metadata JSON STRING 파싱)
-    const routingSelectedQuery = `
-      SELECT JSON_VALUE(metadata, '$.selectedModel') AS key, COUNT(*) AS n
+    const routingQuery = (jsonPath: string) => `
+      SELECT JSON_VALUE(metadata, '${jsonPath}') AS key, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
-      GROUP BY key ORDER BY n DESC
-    `;
-    const routingReasonQuery = `
-      SELECT JSON_VALUE(metadata, '$.decisionReason') AS key, COUNT(*) AS n
-      FROM ${eventsTable}
-      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
-      GROUP BY key ORDER BY n DESC
-    `;
-    const routingReuseQuery = `
-      SELECT JSON_VALUE(metadata, '$.reuseVsSpawn') AS key, COUNT(*) AS n
-      FROM ${eventsTable}
-      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
-      GROUP BY key ORDER BY n DESC
-    `;
-    const routingModeQuery = `
-      SELECT JSON_VALUE(metadata, '$.modelSelectionMode') AS key, COUNT(*) AS n
-      FROM ${eventsTable}
-      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
+      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}${clientEx.clause}
       GROUP BY key ORDER BY n DESC
     `;
     const routingScoreBucketsQuery = `
@@ -5821,7 +5950,7 @@ export const getAdminModelSummary = functions.https.onCall(
           SAFE_CAST(JSON_VALUE(metadata, '$.agentScore') AS FLOAT64) AS agentScore,
           JSON_QUERY_ARRAY(metadata, '$.perModelScores') AS scores
         FROM ${eventsTable}
-        WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}
+        WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}${clientEx.clause}
       ),
       expanded AS (
         SELECT
@@ -5853,12 +5982,16 @@ export const getAdminModelSummary = functions.https.onCall(
       ORDER BY model ASC, scoreBucket ASC, reuseVsSpawn ASC
     `;
 
-    const params = {
-      days: rangeDays,
-      excludedAdminUid: adminAnalyticsExcludedUid(),
-    };
-    const q = (query: string) =>
-      bigquery.query({ query, params, location: BQ_LOCATION });
+    // 쿼리마다 참조하는 제외 파라미터가 달라(uid vs clientId) 공용 params 를
+    // 쓰면 미참조 파라미터가 섞인다 — 쿼리별로 명시 전달한다.
+    const q = (query: string, extra: Record<string, unknown>) =>
+      bigquery.query({
+        query,
+        params: { days: rangeDays, ...extra },
+        location: BQ_LOCATION,
+      });
+    const qCost = (query: string) => q(query, uidEx.params);
+    const qClient = (query: string) => q(query, clientEx.params);
 
     const [
       [costByModelRows],
@@ -5871,15 +6004,15 @@ export const getAdminModelSummary = functions.https.onCall(
       [routingModeRows],
       [routingScoreBucketRows],
     ] = await Promise.all([
-      q(costByModelQuery),
-      q(costByDayQuery),
-      q(modelRoleQuery),
-      q(outcomeByModelQuery),
-      q(routingSelectedQuery),
-      q(routingReasonQuery),
-      q(routingReuseQuery),
-      q(routingModeQuery),
-      q(routingScoreBucketsQuery),
+      qCost(costByModelQuery),
+      qCost(costByDayQuery),
+      qClient(modelRoleQuery),
+      qClient(outcomeByModelQuery),
+      qClient(routingQuery("$.selectedModel")),
+      qClient(routingQuery("$.decisionReason")),
+      qClient(routingQuery("$.reuseVsSpawn")),
+      qClient(routingQuery("$.modelSelectionMode")),
+      qClient(routingScoreBucketsQuery),
     ]);
 
     const costByModel = (costByModelRows as Array<Record<string, unknown>>).map(
@@ -5888,7 +6021,7 @@ export const getAdminModelSummary = functions.https.onCall(
         totalTokens: toNumber(r.totalTokens as number | string | undefined),
         cost: toNumber(r.cost as number | string | undefined),
         count: toNumber(r.n as number | string | undefined),
-      })
+      }),
     );
 
     const modelRoleStats = (
@@ -5931,6 +6064,10 @@ export const getAdminModelSummary = functions.https.onCall(
     return {
       rangeDays,
       generatedAt: new Date().toISOString(),
+      adminExcluded: {
+        uidFiltered: getAdminExclusionUid() != null,
+        clientIdCount: adminClientIds.length,
+      },
       costByModel,
       costByDay: (costByDayRows as Array<Record<string, unknown>>).map((r) => ({
         date: String(r.date ?? ""),
@@ -5941,19 +6078,19 @@ export const getAdminModelSummary = functions.https.onCall(
       routing: {
         bySelectedModel: foldDistribution(
           routingSelectedRows as Array<Record<string, unknown>>,
-          "key"
+          "key",
         ),
         byDecisionReason: foldDistribution(
           routingReasonRows as Array<Record<string, unknown>>,
-          "key"
+          "key",
         ),
         byReuseVsSpawn: foldDistribution(
           routingReuseRows as Array<Record<string, unknown>>,
-          "key"
+          "key",
         ),
         byModelSelectionMode: foldDistribution(
           routingModeRows as Array<Record<string, unknown>>,
-          "key"
+          "key",
         ),
         scoreBuckets: (
           routingScoreBucketRows as Array<Record<string, unknown>>
@@ -5965,5 +6102,761 @@ export const getAdminModelSummary = functions.https.onCall(
         })),
       },
     };
+  },
+);
+
+// ============================================
+// Admin Analytics Drilldown — 차트 클릭 → 상세 분해
+// ============================================
+// 대시보드의 모든 차트는 집계치라 "왜 이 날 튀었나"를 답하지 못한다. 이 콜러블은
+// (a) 특정 날(UTC) 또는 (b) 특정 세그먼트(이벤트/모델/역할/플랜 등) 하나를
+// 받아 그 조각만 다시 분해한다.
+//
+// 응답은 스코프마다 다른 필드를 만들지 않고 아래 제네릭 봉투 하나로 통일한다 —
+// 프론트 모달이 스코프별 분기 없이 그대로 렌더할 수 있게 하기 위함(§UI).
+//
+// 프라이버시: 상위 집계와 동일 규칙. 개별 row·PII·uid·clientId 는 절대 내리지
+// 않고 카테고리 카운트만 반환한다. 운영자(ADMIN_UID) 자기활동은 동일하게 제외.
+
+type DrilldownFormat = "int" | "cost" | "pct" | "duration";
+
+type DrilldownStat = {
+  label: string;
+  value: number;
+  format: DrilldownFormat;
+};
+
+type DrilldownBreakdown = {
+  title: string;
+  rows: Array<{ key: string; count: number }>;
+  format: DrilldownFormat;
+};
+
+type DrilldownResult = {
+  scope: string;
+  date: string | null;
+  key: string | null;
+  rangeDays: number;
+  generatedAt: string;
+  title: string;
+  note: string;
+  stats: DrilldownStat[];
+  breakdowns: DrilldownBreakdown[];
+  trend: Array<{ date: string; value: number }> | null;
+  trendLabel: string | null;
+  trendFormat: DrilldownFormat;
+};
+
+const DRILLDOWN_SCOPES = [
+  "usage:day",
+  "spawn:day",
+  "cost:day",
+  "subscription:day",
+  "segment:event",
+  "segment:model",
+  "segment:role",
+  "segment:plan",
+  "segment:status",
+  "segment:provider",
+] as const;
+
+type DrilldownScope = (typeof DRILLDOWN_SCOPES)[number];
+
+function parseDrilldownScope(data: unknown): DrilldownScope {
+  const raw = (data as { scope?: unknown } | null | undefined)?.scope;
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (!(DRILLDOWN_SCOPES as readonly string[]).includes(s)) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      `scope must be one of: ${DRILLDOWN_SCOPES.join(", ")}`,
+    );
   }
+  return s as DrilldownScope;
+}
+
+/**
+ * getAdminDrilldown — 차트 데이터포인트/막대 클릭 시의 상세 분해.
+ *
+ * params:
+ *   { scope: "usage:day" | "spawn:day" | "cost:day" | "subscription:day",
+ *     date: "YYYY-MM-DD" }                       — 해당 날(UTC) 분해
+ *   { scope: "segment:*", key: string, days?: number }  — 해당 세그먼트 분해
+ */
+export const getAdminDrilldown = functions.https.onCall(
+  async (data, context): Promise<DrilldownResult> => {
+    requireAdmin(context);
+    const scope = parseDrilldownScope(data);
+    const rangeDays = parseAnalyticsDays(data);
+    const isDayScope = scope.endsWith(":day");
+    const date = isDayScope ? parseAnalyticsDate(data) : null;
+    const key = isDayScope ? null : parseSegmentKey(data);
+
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const outcomesTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_TASK_OUTCOMES_TABLE}\``;
+    const costTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_COST_TABLE}\``;
+
+    // 날짜 스코프는 [자정, 다음날 자정) UTC 반개구간 — 파티션 프루닝 유지.
+    const dayWindow = (col: string) =>
+      `${col} >= TIMESTAMP(@date) AND ${col} < TIMESTAMP_ADD(TIMESTAMP(@date), INTERVAL 1 DAY)`;
+    const sinceTs = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+
+    const uidEx = adminUidExclusion();
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const clientEx = adminClientExclusion(adminClientIds);
+
+    // 스코프마다 참조하는 파라미터가 달라서(@date vs @days vs @key vs 제외절)
+    // 후보를 모아두고 쿼리 본문이 실제로 참조하는 것만 넘긴다 — 미참조
+    // 파라미터를 섞어 보내지 않기 위함.
+    const runQuery = async (
+      query: string,
+      extra: Record<string, unknown>,
+    ): Promise<Array<Record<string, unknown>>> => {
+      const candidates: Record<string, unknown> = {
+        ...(date != null ? { date } : {}),
+        days: rangeDays,
+        ...extra,
+      };
+      const params: Record<string, unknown> = {};
+      for (const [name, value] of Object.entries(candidates)) {
+        if (value !== undefined && query.includes(`@${name}`)) {
+          params[name] = value;
+        }
+      }
+      const [rows] = await bigquery.query({
+        query,
+        params,
+        location: BQ_LOCATION,
+      });
+      return rows as Array<Record<string, unknown>>;
+    };
+
+    const base = {
+      scope,
+      date,
+      key,
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      trend: null as DrilldownResult["trend"],
+      trendLabel: null as string | null,
+      trendFormat: "int" as DrilldownFormat,
+    };
+
+    // ── (a) 하루 분해 — events ─────────────────────────────────────────────
+    if (scope === "usage:day" || scope === "spawn:day") {
+      const spawnOnly = scope === "spawn:day";
+      const eventFilter = spawnOnly ? " AND event = 'agent:spawned'" : "";
+      const where = `WHERE ${dayWindow("timestamp")}${eventFilter}${
+        clientEx.clause
+      }`;
+
+      const dist = (col: string, limit = 25) => `
+        SELECT COALESCE(CAST(${col} AS STRING), '(none)') AS key, COUNT(*) AS n
+        FROM ${eventsTable}
+        ${where}
+        GROUP BY key ORDER BY n DESC LIMIT ${limit}
+      `;
+      const totalsQuery = `
+        SELECT
+          COUNT(*) AS events,
+          COUNT(DISTINCT userId) AS clients,
+          COUNT(DISTINCT agentId) AS agents,
+          COUNT(DISTINCT projectId) AS projects
+        FROM ${eventsTable}
+        ${where}
+      `;
+      const hourQuery = `
+        SELECT FORMAT_TIMESTAMP('%H시', timestamp) AS key, COUNT(*) AS n
+        FROM ${eventsTable}
+        ${where}
+        GROUP BY key ORDER BY key ASC
+      `;
+
+      const [totals, byHour, byEvent, byRole, byModel, byVersion] =
+        await Promise.all([
+          runQuery(totalsQuery, clientEx.params),
+          runQuery(hourQuery, clientEx.params),
+          // spawn:day 는 event 가 agent:spawned 하나로 고정 — 분해할 게 없다.
+          spawnOnly
+            ? Promise.resolve([] as Array<Record<string, unknown>>)
+            : runQuery(dist("event"), clientEx.params),
+          runQuery(dist("role"), clientEx.params),
+          runQuery(dist("model"), clientEx.params),
+          runQuery(dist("appVersion"), clientEx.params),
+        ]);
+
+      const t = totals[0] ?? {};
+      return {
+        ...base,
+        title: `${date} · ${spawnOnly ? "에이전트 스폰" : "제품 사용"} 분해`,
+        note: "UTC 기준 하루 · 익명 텔레메트리(옵트인 표본)",
+        stats: [
+          {
+            label: spawnOnly ? "스폰 수" : "총 이벤트",
+            value: toNumber(t.events as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "고유 클라이언트",
+            value: toNumber(t.clients as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "고유 에이전트",
+            value: toNumber(t.agents as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "고유 프로젝트",
+            value: toNumber(t.projects as number | string | undefined),
+            format: "int",
+          },
+        ],
+        breakdowns: [
+          ...(spawnOnly
+            ? []
+            : [
+                {
+                  title: "이벤트별",
+                  rows: foldDistribution(byEvent, "key"),
+                  format: "int" as DrilldownFormat,
+                },
+              ]),
+          {
+            title: "역할별",
+            rows: foldDistribution(byRole, "key"),
+            format: "int",
+          },
+          {
+            title: "모델별",
+            rows: foldDistribution(byModel, "key"),
+            format: "int",
+          },
+          {
+            title: "앱 버전별",
+            rows: foldDistribution(byVersion, "key"),
+            format: "int",
+          },
+          {
+            title: "시간대별 (UTC)",
+            rows: foldDistribution(byHour, "key"),
+            format: "int",
+          },
+        ],
+      };
+    }
+
+    // ── (a) 하루 분해 — cost_logs ─────────────────────────────────────────
+    if (scope === "cost:day") {
+      const where = `WHERE ${dayWindow("timestamp")}${uidEx.clause}`;
+      const totalsQuery = `
+        SELECT
+          SUM(COALESCE(totalCost, 0)) AS cost,
+          SUM(COALESCE(inputTokens, 0) + COALESCE(outputTokens, 0) +
+              COALESCE(cacheReadTokens, 0) + COALESCE(cacheWriteTokens, 0))
+            AS tokens,
+          COUNT(*) AS calls,
+          COUNT(DISTINCT userId) AS users
+        FROM ${costTable}
+        ${where}
+      `;
+      const costBy = (col: string) => `
+        SELECT COALESCE(CAST(${col} AS STRING), '(none)') AS key,
+               SUM(COALESCE(totalCost, 0)) AS n
+        FROM ${costTable}
+        ${where}
+        GROUP BY key ORDER BY n DESC LIMIT 25
+      `;
+      const hourQuery = `
+        SELECT FORMAT_TIMESTAMP('%H시', timestamp) AS key,
+               SUM(COALESCE(totalCost, 0)) AS n
+        FROM ${costTable}
+        ${where}
+        GROUP BY key ORDER BY key ASC
+      `;
+
+      const [totals, byModel, byTaskType, byHour] = await Promise.all([
+        runQuery(totalsQuery, uidEx.params),
+        runQuery(costBy("model"), uidEx.params),
+        runQuery(costBy("taskType"), uidEx.params),
+        runQuery(hourQuery, uidEx.params),
+      ]);
+
+      const t = totals[0] ?? {};
+      return {
+        ...base,
+        title: `${date} · 비용 분해`,
+        note: "UTC 기준 하루 · cost_logs(운영자 제외)",
+        stats: [
+          {
+            label: "총 비용",
+            value: toNumber(t.cost as number | string | undefined),
+            format: "cost",
+          },
+          {
+            label: "총 토큰",
+            value: toNumber(t.tokens as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "호출 수",
+            value: toNumber(t.calls as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "지출 사용자",
+            value: toNumber(t.users as number | string | undefined),
+            format: "int",
+          },
+        ],
+        breakdowns: [
+          {
+            title: "모델별 비용",
+            rows: foldDistribution(byModel, "key"),
+            format: "cost",
+          },
+          {
+            title: "태스크 유형별 비용",
+            rows: foldDistribution(byTaskType, "key"),
+            format: "cost",
+          },
+          {
+            title: "시간대별 비용 (UTC)",
+            rows: foldDistribution(byHour, "key"),
+            format: "cost",
+          },
+        ],
+      };
+    }
+
+    // ── (a) 하루 분해 — 구독(Firestore) ───────────────────────────────────
+    if (scope === "subscription:day") {
+      const dayStartMs = Date.parse(`${date}T00:00:00Z`);
+      const dayEndMs = dayStartMs + DAY_MS;
+      const adminUid = getAdminExclusionUid();
+      const snap = await db.collection("subscriptions").limit(10000).get();
+
+      const newByPlan: Record<string, number> = {};
+      const newByProvider: Record<string, number> = {};
+      const churnedByPlan: Record<string, number> = {};
+      const churnedByProvider: Record<string, number> = {};
+      let newCount = 0;
+      let churnedCount = 0;
+      let activeAtEnd = 0;
+
+      const bump = (m: Record<string, number>, k: string) => {
+        m[k] = (m[k] || 0) + 1;
+      };
+
+      for (const doc of snap.docs) {
+        if (adminUid && doc.id === adminUid) continue;
+        const v = doc.data() as Record<string, unknown>;
+        const status = typeof v.status === "string" ? v.status : "unknown";
+        const plan = typeof v.planType === "string" ? v.planType : "unknown";
+        const provider =
+          typeof v.paymentProvider === "string" ? v.paymentProvider : "unknown";
+        const createdMs = tsToMillis(v.createdAt);
+        const canceledMs = tsToMillis(v.canceledAt);
+        const periodEndMs = tsToMillis(v.currentPeriodEnd);
+
+        if (
+          createdMs != null &&
+          createdMs >= dayStartMs &&
+          createdMs < dayEndMs
+        ) {
+          newCount++;
+          bump(newByPlan, plan);
+          bump(newByProvider, provider);
+        }
+        if (
+          (status === "canceled" || status === "past_due") &&
+          canceledMs != null &&
+          canceledMs >= dayStartMs &&
+          canceledMs < dayEndMs
+        ) {
+          churnedCount++;
+          bump(churnedByPlan, plan);
+          bump(churnedByProvider, provider);
+        }
+        if (
+          activeAtDayEnd(
+            status,
+            createdMs,
+            canceledMs,
+            periodEndMs,
+            dayEndMs - 1,
+          )
+        ) {
+          activeAtEnd++;
+        }
+      }
+
+      const toRows = (m: Record<string, number>) =>
+        Object.entries(m)
+          .map(([k, count]) => ({ key: k, count }))
+          .sort((a, b) => b.count - a.count);
+
+      return {
+        ...base,
+        title: `${date} · 구독 변동 분해`,
+        note: "UTC 기준 하루 · Firestore subscriptions(운영자 제외)",
+        stats: [
+          { label: "신규", value: newCount, format: "int" },
+          { label: "이탈", value: churnedCount, format: "int" },
+          { label: "순증", value: newCount - churnedCount, format: "int" },
+          { label: "당일 마감 활성", value: activeAtEnd, format: "int" },
+        ],
+        breakdowns: [
+          { title: "신규 — 플랜별", rows: toRows(newByPlan), format: "int" },
+          {
+            title: "신규 — 결제수단별",
+            rows: toRows(newByProvider),
+            format: "int",
+          },
+          {
+            title: "이탈 — 플랜별",
+            rows: toRows(churnedByPlan),
+            format: "int",
+          },
+          {
+            title: "이탈 — 결제수단별",
+            rows: toRows(churnedByProvider),
+            format: "int",
+          },
+        ],
+      };
+    }
+
+    // ── (b) 세그먼트 분해 — 구독(Firestore) ───────────────────────────────
+    if (
+      scope === "segment:plan" ||
+      scope === "segment:status" ||
+      scope === "segment:provider"
+    ) {
+      const adminUid = getAdminExclusionUid();
+      const snap = await db.collection("subscriptions").limit(10000).get();
+      const nowMs = Date.now();
+      const cutoffMs = nowMs - rangeDays * DAY_MS;
+      const trendBuckets = makeBusinessTrendBuckets(rangeDays, nowMs);
+      const firstTrendDayMs = startOfUtcDay(nowMs) - (rangeDays - 1) * DAY_MS;
+
+      const byStatus: Record<string, number> = {};
+      const byPlan: Record<string, number> = {};
+      const byProvider: Record<string, number> = {};
+      let matched = 0;
+      let newInWindow = 0;
+      let churnedInWindow = 0;
+      let activeCurrent = 0;
+
+      const bump = (m: Record<string, number>, k: string) => {
+        m[k] = (m[k] || 0) + 1;
+      };
+
+      for (const doc of snap.docs) {
+        if (adminUid && doc.id === adminUid) continue;
+        const v = doc.data() as Record<string, unknown>;
+        const status = typeof v.status === "string" ? v.status : "unknown";
+        const plan = typeof v.planType === "string" ? v.planType : "unknown";
+        const provider =
+          typeof v.paymentProvider === "string" ? v.paymentProvider : "unknown";
+
+        const field =
+          scope === "segment:plan"
+            ? plan
+            : scope === "segment:status"
+              ? status
+              : provider;
+        if (field !== key) continue;
+
+        matched++;
+        bump(byStatus, status);
+        bump(byPlan, plan);
+        bump(byProvider, provider);
+
+        const createdMs = tsToMillis(v.createdAt);
+        const canceledMs = tsToMillis(v.canceledAt);
+        const periodEndMs = tsToMillis(v.currentPeriodEnd);
+        if (createdMs != null && createdMs >= cutoffMs) newInWindow++;
+        if (
+          (status === "canceled" || status === "past_due") &&
+          canceledMs != null &&
+          canceledMs >= cutoffMs
+        ) {
+          churnedInWindow++;
+        }
+        if (isCurrentActiveSubscription(status, periodEndMs, nowMs)) {
+          activeCurrent++;
+        }
+        for (let i = 0; i < trendBuckets.length; i++) {
+          const dayEndMs = firstTrendDayMs + i * DAY_MS + DAY_MS - 1;
+          if (
+            activeAtDayEnd(status, createdMs, canceledMs, periodEndMs, dayEndMs)
+          ) {
+            trendBuckets[i].active++;
+          }
+        }
+      }
+      const toRows = (m: Record<string, number>) =>
+        Object.entries(m)
+          .map(([k, count]) => ({ key: k, count }))
+          .sort((a, b) => b.count - a.count);
+
+      const label =
+        scope === "segment:plan"
+          ? "플랜"
+          : scope === "segment:status"
+            ? "상태"
+            : "결제수단";
+
+      return {
+        ...base,
+        title: `${label} "${key}" 분해`,
+        note: `Firestore subscriptions · 최근 ${rangeDays}일 창(운영자 제외)`,
+        stats: [
+          { label: "해당 구독 수", value: matched, format: "int" },
+          { label: "현재 활성", value: activeCurrent, format: "int" },
+          { label: `신규(${rangeDays}일)`, value: newInWindow, format: "int" },
+          {
+            label: `이탈(${rangeDays}일)`,
+            value: churnedInWindow,
+            format: "int",
+          },
+        ],
+        breakdowns: [
+          { title: "상태 분포", rows: toRows(byStatus), format: "int" },
+          { title: "플랜 분포", rows: toRows(byPlan), format: "int" },
+          { title: "결제수단 분포", rows: toRows(byProvider), format: "int" },
+        ],
+        trend: trendBuckets.map((d) => ({ date: d.date, value: d.active })),
+        trendLabel: "활성 구독 추이",
+        trendFormat: "int",
+      };
+    }
+
+    // ── (b) 세그먼트 분해 — 이벤트/역할(events + task_outcomes) ───────────
+    if (scope === "segment:event" || scope === "segment:role") {
+      const isEvent = scope === "segment:event";
+      const match = isEvent ? "event = @key" : "role = @key";
+      const where = `WHERE ${match} AND timestamp >= ${sinceTs}${clientEx.clause}`;
+      const params = { key, ...clientEx.params };
+
+      const totalsQuery = `
+        SELECT COUNT(*) AS n, COUNT(DISTINCT userId) AS clients,
+               COUNT(DISTINCT agentId) AS agents
+        FROM ${eventsTable} ${where}
+      `;
+      const trendQuery = `
+        SELECT FORMAT_DATE('%F', DATE(timestamp)) AS date, COUNT(*) AS n
+        FROM ${eventsTable} ${where}
+        GROUP BY date ORDER BY date ASC
+      `;
+      const dist = (col: string) => `
+        SELECT COALESCE(CAST(${col} AS STRING), '(none)') AS key, COUNT(*) AS n
+        FROM ${eventsTable} ${where}
+        GROUP BY key ORDER BY n DESC LIMIT 25
+      `;
+      const outcomesQuery = `
+        SELECT COUNT(*) AS total, COUNTIF(success = true) AS succeeded,
+               AVG(durationMs) AS avgDurationMs
+        FROM ${outcomesTable}
+        WHERE role = @key AND completedAt >= ${sinceTs}${clientEx.clause}
+      `;
+
+      const [totals, trendRows, byModel, byVersion, bySecond, outcomeRows] =
+        await Promise.all([
+          runQuery(totalsQuery, params),
+          runQuery(trendQuery, params),
+          runQuery(dist("model"), params),
+          runQuery(dist("appVersion"), params),
+          runQuery(dist(isEvent ? "role" : "event"), params),
+          isEvent
+            ? Promise.resolve([] as Array<Record<string, unknown>>)
+            : runQuery(outcomesQuery, params),
+        ]);
+
+      const t = totals[0] ?? {};
+      const o = outcomeRows[0] ?? {};
+      const outcomeTotal = toNumber(o.total as number | string | undefined);
+      const outcomeOk = toNumber(o.succeeded as number | string | undefined);
+
+      return {
+        ...base,
+        title: `${isEvent ? "이벤트" : "역할"} "${key}" 분해`,
+        note: `최근 ${rangeDays}일 · 익명 텔레메트리(옵트인 표본)`,
+        stats: [
+          {
+            label: "발생 수",
+            value: toNumber(t.n as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "고유 클라이언트",
+            value: toNumber(t.clients as number | string | undefined),
+            format: "int",
+          },
+          {
+            label: "고유 에이전트",
+            value: toNumber(t.agents as number | string | undefined),
+            format: "int",
+          },
+          ...(isEvent
+            ? []
+            : [
+                {
+                  label: "태스크 성공률",
+                  value: outcomeTotal > 0 ? outcomeOk / outcomeTotal : 0,
+                  format: "pct" as DrilldownFormat,
+                },
+                {
+                  label: "평균 완료시간",
+                  value: toNumber(
+                    o.avgDurationMs as number | string | undefined,
+                  ),
+                  format: "duration" as DrilldownFormat,
+                },
+              ]),
+        ],
+        breakdowns: [
+          {
+            title: "모델별",
+            rows: foldDistribution(byModel, "key"),
+            format: "int",
+          },
+          {
+            title: isEvent ? "역할별" : "이벤트별",
+            rows: foldDistribution(bySecond, "key"),
+            format: "int",
+          },
+          {
+            title: "앱 버전별",
+            rows: foldDistribution(byVersion, "key"),
+            format: "int",
+          },
+        ],
+        trend: (trendRows as Array<Record<string, unknown>>).map((r) => ({
+          date: String(r.date ?? ""),
+          value: toNumber(r.n as number | string | undefined),
+        })),
+        trendLabel: "일별 발생 추이",
+        trendFormat: "int",
+      };
+    }
+
+    // ── (b) 세그먼트 분해 — 모델(cost_logs + task_outcomes + events) ──────
+    // scope === "segment:model"
+    const costWhere = `WHERE model = @key AND timestamp >= ${sinceTs}${uidEx.clause}`;
+    const costParams = { key, ...uidEx.params };
+    const clientParams = { key, ...clientEx.params };
+
+    const costTotalsQuery = `
+      SELECT SUM(COALESCE(totalCost, 0)) AS cost,
+             SUM(COALESCE(inputTokens, 0) + COALESCE(outputTokens, 0) +
+                 COALESCE(cacheReadTokens, 0) + COALESCE(cacheWriteTokens, 0))
+               AS tokens,
+             COUNT(*) AS calls
+      FROM ${costTable} ${costWhere}
+    `;
+    const costTrendQuery = `
+      SELECT FORMAT_DATE('%F', DATE(timestamp)) AS date,
+             SUM(COALESCE(totalCost, 0)) AS n
+      FROM ${costTable} ${costWhere}
+      GROUP BY date ORDER BY date ASC
+    `;
+    const costByTaskTypeQuery = `
+      SELECT COALESCE(taskType, '(none)') AS key,
+             SUM(COALESCE(totalCost, 0)) AS n
+      FROM ${costTable} ${costWhere}
+      GROUP BY key ORDER BY n DESC LIMIT 25
+    `;
+    const modelOutcomesQuery = `
+      SELECT COUNT(*) AS total, COUNTIF(success = true) AS succeeded,
+             AVG(durationMs) AS avgDurationMs
+      FROM ${outcomesTable}
+      WHERE model = @key AND completedAt >= ${sinceTs}${clientEx.clause}
+    `;
+    const outcomesByRoleQuery = `
+      SELECT COALESCE(role, '(none)') AS key, COUNT(*) AS n
+      FROM ${outcomesTable}
+      WHERE model = @key AND completedAt >= ${sinceTs}${clientEx.clause}
+      GROUP BY key ORDER BY n DESC LIMIT 25
+    `;
+    const spawnsByRoleQuery = `
+      SELECT COALESCE(role, '(none)') AS key, COUNT(*) AS n
+      FROM ${eventsTable}
+      WHERE event = 'agent:spawned' AND model = @key
+        AND timestamp >= ${sinceTs}${clientEx.clause}
+      GROUP BY key ORDER BY n DESC LIMIT 25
+    `;
+
+    const [
+      costTotals,
+      costTrend,
+      costByTaskType,
+      modelOutcomes,
+      outcomesByRole,
+      spawnsByRole,
+    ] = await Promise.all([
+      runQuery(costTotalsQuery, costParams),
+      runQuery(costTrendQuery, costParams),
+      runQuery(costByTaskTypeQuery, costParams),
+      runQuery(modelOutcomesQuery, clientParams),
+      runQuery(outcomesByRoleQuery, clientParams),
+      runQuery(spawnsByRoleQuery, clientParams),
+    ]);
+
+    const ct = costTotals[0] ?? {};
+    const mo = modelOutcomes[0] ?? {};
+    const moTotal = toNumber(mo.total as number | string | undefined);
+    const moOk = toNumber(mo.succeeded as number | string | undefined);
+
+    return {
+      ...base,
+      title: `모델 "${key}" 분해`,
+      note: `최근 ${rangeDays}일 · cost_logs(운영자 제외) + task_outcomes`,
+      stats: [
+        {
+          label: "총 비용",
+          value: toNumber(ct.cost as number | string | undefined),
+          format: "cost",
+        },
+        {
+          label: "총 토큰",
+          value: toNumber(ct.tokens as number | string | undefined),
+          format: "int",
+        },
+        {
+          label: "태스크 성공률",
+          value: moTotal > 0 ? moOk / moTotal : 0,
+          format: "pct",
+        },
+        {
+          label: "평균 완료시간",
+          value: toNumber(mo.avgDurationMs as number | string | undefined),
+          format: "duration",
+        },
+      ],
+      breakdowns: [
+        {
+          title: "태스크 유형별 비용",
+          rows: foldDistribution(costByTaskType, "key"),
+          format: "cost",
+        },
+        {
+          title: "역할별 태스크 수",
+          rows: foldDistribution(outcomesByRole, "key"),
+          format: "int",
+        },
+        {
+          title: "역할별 스폰 수",
+          rows: foldDistribution(spawnsByRole, "key"),
+          format: "int",
+        },
+      ],
+      trend: costTrend.map((r) => ({
+        date: String(r.date ?? ""),
+        value: toNumber(r.n as number | string | undefined),
+      })),
+      trendLabel: "일별 비용 추이",
+      trendFormat: "cost",
+    };
+  },
 );
