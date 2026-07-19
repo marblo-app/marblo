@@ -2,8 +2,17 @@
 
 ## Completed
 
+### 리소스 수명주기 회수 — 유령 에이전트·워크트리 무한누적 재발 차단 (2026-07-19, PR #501, 티켓 sypMRW27)
+
+agents 1,057문서·워크트리 696개 누적 사고(워치독 폭주 #491·조회 지연 #495·오케 즉사·보드 31기 오표시)의 재발 방지 정책. 근본원인 2가지 봉합: ① Firestore status 쓰기가 렌더러 경유뿐이라 앱 종료/크래시 시 stopped 가 영영 안 써짐 → main 이 stopped/error 를 직접 확정 기록. ② cleanup_agents 가 브릿지 메모리만 스캔해 이전 인스턴스 유령을 구조적으로 못 잡음 → machineId+instancePid(pid 생존검사) 소유권 판별 스윕(부팅+60s·10분 주기)으로 죽은 인스턴스 문서만 stopped 마킹. 타 머신·무스탬프 legacy·살아있는 pid(동일 머신 dev+prod 동시구동)는 불가촉, kill/삭제 없음. 워크트리는 DONE/FAILED 태스크 스윕(6h, 조회 20건 캡+회전 커서)으로 기존 dirty/unpushed 보존 가드 재사용 회수. 누적 가시화: agents 500/워크트리 100 임계치 초과 시 Notification(24h dedupe). 유닛 24개(10회 재시작 시뮬레이션 유령 0 수렴 포함)+기존 reap 보존 16개 통과. ※기존 legacy 유령 1,000여 건 1회성 청소는 별도 티켓(5492HUZy).
+※main 머지(#497·#499) 정합: 워크트리 터미널 스윕은 main 프로세스에서 reap 하므로 #497 이 IPC(worktree:remove/cleanupStale)에 건 `onWorktreesRemoved` 통지를 타지 않는다 → 스윕 종료 시 동일 핸들러 `invalidateRemovedWorktreeRoots` 를 직접 재사용(중복 호출 없음: 한 삭제는 두 경로 중 하나만 탄다). 없으면 스윕이 지운 워크트리를 rootPath 로 쓰던 창이 죽은 경로를 app-state.json 에 그대로 영속 — 티켓 피해사례 (c) 재발. #499 fail-closed 는 무훼손: `/reclaim-ghosts` 는 bearer 게이트 하위에 배치, 호출부는 `bridgeHeaders` 사용, cleanup_agents 는 `auditedTool` 래퍼의 `ensureAuthenticated()` 게이트를 그대로 상속(익명 폴백 신설 없음).
+**신규 파일:** v3/electron/agent-lifecycle-reclaim.ts, v3/tests/unit/agent-lifecycle-reclaim.test.ts
+**수정 파일:** v3/electron/{main,bridge-server,worktree-manager}.ts, v3/electron/mcp-server/tools.ts
+
 ### 파일트리 홈버튼이 메인 아닌 다른 워크트리로 이동 — 근본수정 (2026-07-19, 티켓 xjUVJw6z)
+
 사장님 라이브 증상 "다른 워크트리 보기 → 파일트리 홈버튼 누르면 메인이 아니라 다른 워크트리로 감".
+
 - **실측으로 근본원인 특정**: 라이브 repo 실제 열거(16개)를 실제 `findMainWorktree` 에 7개 런타임 조합으로 통과시켜 측정. `findMainWorktree` 에는 "메인"의 실체 근거가 없었다 — `taskId==null` 필터 + folderPath 매칭 + repoRoot 매칭 후 **검증 없이 `mains[0]` 반환**.
   - `inferTaskId` 는 경로에 projectId 가 있어야 taskId 를 뽑는다. 그룹 projectId 가 경로와 다르면 **전 엔트리 taskId=null** → 16개 전부 "메인 후보" (실측: 후보 1개 → 16개).
   - `path === repoRoot` 선호는 불건전: repoRoot 는 git 의 메인 워크트리가 아니라 `collectWorktreeProjectRoots` 가 넘긴 **오케스트레이터 세션 rootPath** (main.ts:1855-1863) 라 흔히 태스크 워크트리다 → 그 워크트리가 "메인"으로 당선.
@@ -12,60 +21,70 @@
 - **조용한 오동작 제거** (#489·#307 계열 재발 방지): 메인을 특정 못하면 엉뚱한 곳으로 보내지 않고 `resolveLocalMainTarget` 이 실패 사유(`no-worktrees`/`ambiguous`)를 반환, 사이드바 헤더에 명시적 경고 배너 표시. 홈버튼은 클릭 시점에 재해석하는 `onGoMain` 을 타므로 절대 조용히 이동하지 않는다.
 - **#495 회귀 가설은 기각**: 경량 열거와 full refresh 는 동일한 `inferTaskId` 를 쓰고 판정에 쓰이는 필드 누락이 없다. #495 는 원인이 아니라 같은 결함을 한 경로 더 노출시켰을 뿐 — 회귀 테스트는 요구대로 경량 경로까지 포함.
 - **검증**: 신규 15테스트 전부 통과. 구 로직으로 되돌리면 그중 5개가 실패함을 양방향 확인(경량 경로 E2E 포함) — 무의미한 테스트 아님. tsc 통과. 전체 유닛 스위트 기존 실패 6파일은 baseline 과 동일(환경 의존), 신규 실패 0. electron 메인 프로세스 무수정.
-**신규 파일:** v3/tests/unit/fileTreeMainResolution.test.ts
-**수정 파일:** v3/src/lib/fileTreeView.ts, v3/src/stores/worktreeStore.ts, v3/src/types/worktree.ts, v3/src/components/sidebar/FileTree.tsx, v3/src/locales/{ko,en}/sidebar.ts
+  **신규 파일:** v3/tests/unit/fileTreeMainResolution.test.ts
+  **수정 파일:** v3/src/lib/fileTreeView.ts, v3/src/stores/worktreeStore.ts, v3/src/types/worktree.ts, v3/src/components/sidebar/FileTree.tsx, v3/src/locales/{ko,en}/sidebar.ts
+
 ### MCP 익명 폴백 제거 — fail-closed 정합 + bridge 자가 재인증 (2026-07-19, PR #499, 티켓 etTRzsjq)
+
 [P0·보안] MCP 서버가 custom-token 인증 실패 시 signInAnonymously 로 조용히 진행 → fail-closed firestore.rules 아래서 전 Firestore 도구가 PERMISSION_DENIED 로만 보이는 무증상 마비 (2026-07-19 실측: 브릿지 경로만 동작, 복구는 앱 재시작뿐). 익명 세션도 missions CRUD/users read/audit_logs 등 접근 가능해 보안상으로도 나빴음(실측).
+
 - mcp-server/firebase.ts: 익명 폴백 완전 제거, 인증 상태 머신 + `ensureAuthenticated()` 게이트. 미인증 시 bridge `POST /agent-custom-token`(신설)으로 신선한 토큰 받아 자가 재인증(single-flight+10s 쿨다운) — **앱 재시작 없는 복구 경로**. 실패 시 "룰/멤버십 문제가 아니라 MCP 인증 문제" 명시 에러. opt-in: `MARBLO_MCP_ALLOW_UNAUTHENTICATED=1`(테스트용)
 - firebase-auth-sync.ts: 거부 시 ok:false 정직 반환(예전엔 ok:true 라 renderer 오인 — 티켓 7qohuvyF 뿌리), env 토큰은 검증 성공 시에만 설정. `issueFreshAgentCustomToken()` — mission app 실사용자 세션에서만 발급(익명 409), 발급 시 env 갱신으로 이후 spawn 에이전트도 신선한 토큰 상속
 - mission-engine/firebase-app.ts(제3의 동일 패턴): 무효 토큰 코드면 env 정리 후 missions 전용 익명 베이스라인 유지(룰 한시완화 의존), 네트워크 에러는 재시도 루프
 - 검증: typecheck·eslint·신규 유닛 15건 통과, dist-mcp 스모크(핸드셰이크 173ms 무회귀, 무토큰 호출 시 명시 에러). 라이브 E2E 는 앱 재시작 필요 — 승인 대기. UI 가시화는 티켓 7qohuvyFNHRJFQP5SubV 소관
-**신규 파일:** v3/tests/unit/{mcp-auth-gate,firebase-auth-sync}.test.ts
-**수정 파일:** v3/electron/mcp-server/{firebase,tools,cli-fallback}.ts, v3/electron/{firebase-auth-sync,bridge-server}.ts, v3/electron/mission-engine/firebase-app.ts, v3/tests/unit/mcp-task-agent-id.test.ts
+  **신규 파일:** v3/tests/unit/{mcp-auth-gate,firebase-auth-sync}.test.ts
+  **수정 파일:** v3/electron/mcp-server/{firebase,tools,cli-fallback}.ts, v3/electron/{firebase-auth-sync,bridge-server}.ts, v3/electron/mission-engine/firebase-app.ts, v3/tests/unit/mcp-task-agent-id.test.ts
 
 ### 워크트리 조회 성능 — ensureFresh 20~26s 블로킹 제거 (2026-07-18, 티켓 yJgz7s03)
-사장님 라이브 증상 "워크트리보기 버튼 누르려니 티켓 화면이 느려짐"의 근본수정. 프로파일링 실측(재현 18.8s/670개, PR#489 실측 20~26s와 일치)으로 병목 특정: 열거(`git worktree list`)는 0.17s뿐이고, **워크트리 1개당 git spawn 7회 × 670개 = 4,686회를 무제한 Promise.all 로 동시 실행**하는 프로세스 폭주가 원인 (비경합 시 명령당 18ms → 경합 시 1~5s).
+
+사장님 라이브 증상 "워크트리보기 버튼 누르려니 티켓 화면이 느려짐"의 근본수정. 프로파일링 실측(재현 18.8s/670개, PR#489 실측 20~~26s와 일치)으로 병목 특정: 열거(`git worktree list`)는 0.17s뿐이고, **워크트리 1개당 git spawn 7회 × 670개 = 4,686회를 무제한 Promise.all 로 동시 실행**하는 프로세스 폭주가 원인 (비경합 시 명령당 18ms → 경합 시 1~~5s).
+
 - `worktree:listLight` IPC 신설(열거만): ensureFresh(카드/모달 경로)가 이걸 타서 **18.8s → 0.17s**. HEAD 미변경 워크트리는 기존 status 보존 병합, HEAD 이동 시 낡은 status 폐기(오표시 방지). PR#489 정확성(세션 중 생성 워크트리 버튼 노출) 유지 — TTL 60s 그대로.
 - full refresh(WorktreeTab): 동시성 16 제한 + ahead=0(merged) 워크트리의 diff/merge-tree 생략 → **18.8s → 13.5s**, spawn 3,906회, 동시 프로세스 658→16 (시스템 전체 끌어내림 제거).
 - 남은 근본원인: short-traiding-ai 에 stale 워크트리 645개 등록(merged 391) — 물리 삭제는 파괴적이라 사장님 승인 대기 (12s 하한은 이 데이터 정리 없인 못 내림).
-**수정 파일:** v3/electron/{worktree-ipc,worktree-manager,preload}.ts, v3/src/stores/worktreeStore.ts, v3/src/types/worktree.ts, v3/src/vite-env.d.ts, v3/tests/unit/{worktreeStore,worktree-manager}.test.ts
+  **수정 파일:** v3/electron/{worktree-ipc,worktree-manager,preload}.ts, v3/src/stores/worktreeStore.ts, v3/src/types/worktree.ts, v3/src/vite-env.d.ts, v3/tests/unit/{worktreeStore,worktree-manager}.test.ts
 
 ### marketing_contacts SoT — Firestore 운영 SoT + BigQuery 분석 미러 (2026-07-18)
+
 이메일 마케팅 데이터 기반 구현 (티켓 kKgzB91jskKwAgxT5Ukp, 감사 qFEzBLhBCpGIBnJJg9Xg 후속).
+
 - Firestore `marketing_contacts/{sha256(email)}`: 암호화 이메일(AES-256-GCM)·수신동의(emailMarketingConsent, legalBasis 구분)·unsubscribe·구독/파운더 미러·segments·lifecycleStage. consent_events 감사로그. push_tokens 는 스키마만.
 - ★사장님 정정(2026-07-18): waitlist 41명은 consent=**pending**(발송 제외)으로 적재 — 폼 체크박스가 활동/인용 동의라 마케팅 수신동의 아님(COMPLIANCE-AUDIT D2). granted 는 explicit_opt_in 재동의 후에만. 백필 직후 emailable 0 이 정상.
 - write 훅 4개(auth onCreate 실가입만·waitlist·founders·subscriptions) + 어드민 백필(backfillMarketingContacts, dryRun 기본). ★Auth 4,954 중 custom-token 에이전트 제외(실가입 ~34).
 - one-click unsubscribe(RFC 8058, HMAC stateless 토큰) + 마케팅 발송 게이트(sendFounderFollowupEmails·previewFounderSurveyOffer 에 skippedNoConsent) + List-Unsubscribe 헤더/푸터.
 - BQ 미러: marblo_marketing.contacts_daily(일1회 04:45 KST, snapshot_date 파티션) + contacts_latest 뷰. BQ 엔 평문/암호문 이메일 미적재.
 - 신규 env: MARKETING_EMAIL_ENC_KEY, MARKETING_UNSUB_SECRET (이름만, 값 비커밋).
-**신규 파일:** v3/functions/src/marketingContacts.ts, v3/functions/src/marketingContacts.test.ts, v3/docs/MARKETING_CONTACTS.md
-**수정 파일:** v3/functions/src/index.ts, v3/functions/package.json, v3/firestore.rules
+  **신규 파일:** v3/functions/src/marketingContacts.ts, v3/functions/src/marketingContacts.test.ts, v3/docs/MARKETING_CONTACTS.md
+  **수정 파일:** v3/functions/src/index.ts, v3/functions/package.json, v3/firestore.rules
 
 ### 워크트리 UX 미표시 근본수정 — 스토어 1회성 스냅샷 → ensureFresh (2026-07-18, PR #489, 티켓 ZHCW4yX6)
+
 "이 워크트리 보기" 버튼(#476)이 재빌드 후에도 안 보이던 P0. 라이브 CDP 실측으로 근본원인 확정: TaskCard 모듈 레벨 `didRequestWorktrees` 플래그 때문에 worktreeStore.refresh() 가 부팅 시 1회만 실행 → 세션 중 생성된 워크트리는 스토어에 없음 → findTaskWorktree null → 버튼 조용히 미렌더 (열린 태스크 63개 전원 매칭 실패 실측). 수정: TTL 60s `ensureFresh` + refresh in-flight 공유(1회 실측 20~26s/681 워크트리), 카드/모달 오픈 시 재조회, 매칭 실패 시 "연결된 워크트리 없음·다시 찾기" 폴백 UI. 워크트리 정리(#475)는 정상 동작 확인: git 등록 681개 → 루트 셀렉터 노출 59개. short-traiding-ai 저장소에 stale 워크트리 645개 등록 — 물리 삭제는 별도 결정 필요.
 **수정 파일:** v3/src/stores/worktreeStore.ts, v3/src/components/board/TaskCard.tsx, v3/src/components/board/TaskDetailModal.tsx, v3/src/locales/{ko,en}/board.ts, v3/tests/unit/{taskWorktree,worktreeStore}.test.ts
 
 ### v4.12 — WebGL renderer 재활성화 + CSS containment (실제 latency fix) (2026-04-30)
+
 사용자 Performance profile Bottom-up 분석 결과:
 
-| 항목 | Self time | 비중 |
-|---|---|---|
-| Paint | 24.1ms | 11.8% |
-| Layout | 20.5ms | 10.0% |
-| Match case (CSS selector) | 16.3ms | - |
-| Commit | 13.6ms | 6.7% |
-| Pre-paint | 13.6ms | 6.7% |
-| Recalculate style | 13.3ms | 6.5% |
-| Layerize | 13.2ms | 6.4% |
-| **합계 (rendering pipeline)** | **~115ms** | - |
-| pointerover (Total) | 38.2ms | 18.6% |
-| **showCursorOverlay (우리 코드)** | **2.8ms** | **1.4%** |
+| 항목                              | Self time  | 비중     |
+| --------------------------------- | ---------- | -------- |
+| Paint                             | 24.1ms     | 11.8%    |
+| Layout                            | 20.5ms     | 10.0%    |
+| Match case (CSS selector)         | 16.3ms     | -        |
+| Commit                            | 13.6ms     | 6.7%     |
+| Pre-paint                         | 13.6ms     | 6.7%     |
+| Recalculate style                 | 13.3ms     | 6.5%     |
+| Layerize                          | 13.2ms     | 6.4%     |
+| **합계 (rendering pipeline)**     | **~115ms** | -        |
+| pointerover (Total)               | 38.2ms     | 18.6%    |
+| **showCursorOverlay (우리 코드)** | **2.8ms**  | **1.4%** |
 
 **진단:** 우리 IME 패치는 무관 (2.8ms). 진짜 비용은 **브라우저 렌더링 파이프라인** — xterm DOM renderer가 cell 업데이트 → 무거운 React/Tailwind 트리 전체에 layout/style/paint cascade → ~115ms.
 
 **v4.12 수정 — 두 가지 동시 적용:**
 
 1. **WebGL renderer 재활성화 (`TerminalView`/`OrchestratorTerminal`).** xterm WebGL addon → grid를 GPU에서 렌더 → DOM layout/paint 거의 0. 358c623에서 disable했지만 IME 패치 검증된 지금은 안전.
+
 ```typescript
 const webglAddon = new WebglAddon();
 webglAddon.onContextLoss(() => webglAddon.dispose());
@@ -73,17 +92,21 @@ terminal.loadAddon(webglAddon);
 ```
 
 2. **CSS containment 두 wrapper에 추가.**
+
 ```css
 contain: layout style paint;
 ```
+
 xterm 영역 변경이 부모 React/Tailwind 트리 invalidation 안 일으킴. 8a5be31에서 시도했지만 다른 변경과 묶여서 revert됨; 단독 시도.
 
 **예상 효과:**
+
 - WebGL: Layout/Paint/Style ~80ms 감소 가능
 - Containment: cascade 차단으로 추가 감소
 - 합쳐서 avgInputDelay 150ms → 50ms 미만 가능성
 
 **Risk:**
+
 - WebGL: 358c623에서 DOM이 IME에 더 좋다 가정했지만 그건 다른 context. 그래도 visual artifact 가능성 있음.
 - contain:strict는 예전에 회귀 — `layout style paint` (less aggressive) 사용.
 
@@ -92,7 +115,9 @@ xterm 영역 변경이 부모 React/Tailwind 트리 invalidation 안 일으킴. 
 **수정 파일:** `v3/src/components/terminal/TerminalView.tsx`, `v3/src/components/orchestrator/OrchestratorTerminal.tsx`
 
 ### 한글 IME 패치 v4.11 — strip 완전 제거 (Performance bottleneck 발견) (2026-04-30)
+
 사용자 Performance profile에서 결정적 단서: textarea (compose strip 적용된 element)가 **slow source로 잡힘**. HTML inspector 출력:
+
 ```
 <textarea class="xterm-helper-textarea" style="pointer-events: auto; inset: auto auto 2px 4px; width: 62.6145px; height: 15px; ... transition: opacity 120ms ease-out;">
 ```
@@ -107,6 +132,7 @@ xterm 영역 변경이 부모 React/Tailwind 트리 invalidation 안 일으킴. 
 4. **Cursor 위치 overlay (compositionView)는 유지.** 매 compositionupdate마다 cursor 위치에 char 표시. 사용자가 보는 visual feedback은 overlay 단독.
 
 **효과:**
+
 - 매 keystroke의 textarea style recalc + paint 비용 제거
 - Helper container의 큰 layout invalidation surface 제거
 - 사용자 visual은 overlay로 충분 (cursor 위치에서 zero-latency)
@@ -117,7 +143,9 @@ xterm 영역 변경이 부모 React/Tailwind 트리 invalidation 안 일으킴. 
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v4.10 — strip opaque bg + cursor CSS 강화 (2026-04-30)
+
 v4.9 결과: 사용자 비디오 분석 (`화면 기록 2026-04-30 오후 4.00.19.mov`, ffmpeg로 101프레임 추출):
+
 - ❌ 좌하단 strip이 transparent라서 Claude Code의 "bypass permissions on" 텍스트랑 시각적으로 겹침. 사용자가 "한장소에서 겹쳤다가 생성"으로 인지.
 - ❌ Composition 중 cursor block이 prompt에 여전히 보임. v4.9의 `visibility: hidden` CSS가 xterm DOM renderer의 cell-background-based cursor styling을 충분히 override 못 함.
 
@@ -139,7 +167,9 @@ xterm DOM renderer는 cursor를 별도 element가 아니라 cell의 `background-
   outline: none !important;
   border: none !important;
 }
-.xterm.ime-composing .xterm-cursor-blink { animation: none !important; }
+.xterm.ime-composing .xterm-cursor-blink {
+  animation: none !important;
+}
 ```
 
 **v4.10 수정 2 — Strip background opaque:**
@@ -151,17 +181,24 @@ Strip background를 `transparent` → terminal background color (`opts.theme.bac
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v4.9 — xterm cursor 숨김 + z-index 1000 (2026-04-30)
+
 v4.8 결과: ✅ overlay 매 jamo마다 갱신됨. ❌ 사용자 보고: "커서 오버랩이 아직도 있어". xterm cursor가 overlay 뒤로 보임. z-index 100이 충분하지 않거나 stacking context 차이.
 
 **v4.9 수정:**
 
 1. **CSS 주입으로 cursor 숨김.** `<style>` 태그 1회 주입, terminal element에 `ime-composing` 클래스 토글:
+
 ```css
-.xterm.ime-composing .xterm-cursor { visibility: hidden !important; }
-.xterm.ime-composing .xterm-cursor-blink { animation: none !important; }
+.xterm.ime-composing .xterm-cursor {
+  visibility: hidden !important;
+}
+.xterm.ime-composing .xterm-cursor-blink {
+  animation: none !important;
+}
 ```
 
 2. **Class 라이프사이클:**
+
    - `compositionstart` → 클래스 추가
    - `onWriteParsed`에서 grid 업데이트 시 → 클래스 제거 (단, `_isComposing === false`일 때만 — fast typing 중엔 유지)
    - `fadeFallbackTimer` (400ms) → 동일 로직으로 제거
@@ -169,6 +206,7 @@ v4.8 결과: ✅ overlay 매 jamo마다 갱신됨. ❌ 사용자 보고: "커서
 3. **Overlay z-index 100 → 1000.** Stacking context 충돌 회피 강화.
 
 **시각적 효과:**
+
 - Composition 중: xterm cursor 안 보임, overlay만 cursor 위치에 char 표시
 - Grid 업데이트 시: 클래스 제거되며 xterm cursor 자연스럽게 advanced 위치에 등장 (xterm이 buffer.x 이미 advance했음)
 - 결과: char 등장 + cursor advance가 동시에 일어나는 정상 터미널 타이핑 흐름
@@ -180,7 +218,9 @@ v4.8 결과: ✅ overlay 매 jamo마다 갱신됨. ❌ 사용자 보고: "커서
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v4.8 — composition 중 실시간 overlay 갱신 (2026-04-30)
+
 v4.7 결과: ✅ overlay 작동, ✅ "그전보다는 좋아짐". ❌ 두 이슈:
+
 1. **마지막 글자가 다음 키 누를 때까지 grid에 안 보임.** v4.7은 compositionend 시점에만 overlay 표시 → IME가 음절 commit하기 전엔 cursor에 char 안 보임. macOS Hangul IME는 syllable이 "완성"되어도 다음 키(스페이스/다른 글자) 없이는 commit 안 함.
 2. **Cursor가 overlay 뒤로 살짝 보임.** z-index 6이 부족.
 
@@ -189,10 +229,10 @@ v4.7 결과: ✅ overlay 작동, ✅ "그전보다는 좋아짐". ❌ 두 이슈
 1. **compositionupdate에서 overlay 갱신.** ev.data (현재 composition 문자열, "ㅎ" → "하" → "한")로 매번 overlay 업데이트. 사용자가 cursor 위치에서 char 빌드업 진행을 실시간으로 봄. compositionend 기다리지 않음.
 
 ```typescript
-helper.compositionupdate = function(ev) {
+helper.compositionupdate = function (ev) {
   // ... position tracking ...
   if (ev.data) {
-    showCursorOverlay(ev.data);  // 매 jamo마다 cursor에 즉시 갱신
+    showCursorOverlay(ev.data); // 매 jamo마다 cursor에 즉시 갱신
   }
 };
 ```
@@ -202,6 +242,7 @@ helper.compositionupdate = function(ev) {
 **효과:** 사용자가 ㅎ 누르는 순간 cursor 위치에 ㅎ 등장. ㅏ 누르면 즉시 하로 갱신. ㄴ 누르면 한. **PTY 왕복 없이 모든 in-progress char가 cursor에 zero-latency 표시.** 마지막 음절도 (commit 전) cursor 위치에 visible 유지.
 
 **라이프사이클:**
+
 - compositionstart → overlay/strip 둘 다 visible 준비
 - compositionupdate → overlay에 ev.data 갱신 (cursor 위치)
 - compositionend → overlay에 committed char 표시 (showCursorOverlay 다시 호출, redundant이지만 safe)
@@ -212,11 +253,13 @@ helper.compositionupdate = function(ev) {
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v4.7 — cursor 위치 overlay (real-time 체감) (2026-04-30)
+
 v4.6 결과: ✅ strip 좌하단은 OK. ❌ "스트리밍 채팅창에 스트리밍 되는게 여전히 크게 느려, 실시간성이 안나옴". 원인: PTY 왕복 + main thread contention (~150ms). Strip은 좌하단이라 사용자 시선이 cursor 위치에 있을 때 strip 못 봄.
 
 **v4.7 컨셉:** xterm의 unused `_compositionView`를 cursor 위치 overlay로 재활용. compositionend 시 cursor 위치에 committed char를 즉시 DOM overlay로 표시. xterm grid는 건드리지 않음 (local echo 충돌 회피). Grid 업데이트 시 (onWriteParsed) overlay fade.
 
 **구현:**
+
 ```typescript
 const showCursorOverlay = (input) => {
   const buffer = helper._bufferService.buffer;
@@ -258,9 +301,11 @@ terminal.onWriteParsed(() => {
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v4.6 — onWriteParsed 동기화 fade-out (2026-04-30)
+
 v4.5 결과: ✅ visual bug 사라짐. ❌ "타이밍에 맞춰 스트리밍 안 되고 멈췄다 생성". 측정: avgInputDelay 122-154ms, MAIN-BUSY 100ms drift (main thread 100ms 막힘, 50ms threshold라 LONGTASK엔 안 잡힘).
 
 **진단:** v4.5 fade-out이 130ms 고정 timer라서 PTY echo 도착 시점 (50-200ms 가변)과 동기화 안 됨. 결과:
+
 - compositionend → strip fade 시작
 - 130ms 후 strip 사라짐
 - 추가 50-100ms 후 grid에 char 등장
@@ -276,11 +321,11 @@ terminal.onWriteParsed(() => {
   if (pendingFade) {
     pendingFade = false;
     if (fadeFallbackTimer !== null) clearTimeout(fadeFallbackTimer);
-    triggerFadeOut();  // 130ms transition
+    triggerFadeOut(); // 130ms transition
   }
 });
 
-helper.compositionend = function() {
+helper.compositionend = function () {
   // ... sync finalize, PTY 전송 ...
   pendingFade = true;
   fadeFallbackTimer = window.setTimeout(() => triggerFadeOut(), 400);
@@ -288,6 +333,7 @@ helper.compositionend = function() {
 ```
 
 **작동 원리:**
+
 - compositionend → strip 그대로 visible 유지 (`pendingFade = true`)
 - PTY echo가 grid에 도착 → xterm parse → `onWriteParsed` fire → strip fade 시작
 - → strip 사라지는 시점 = grid에 char 등장 시점. 시각적 gap 없음.
@@ -300,11 +346,13 @@ helper.compositionend = function() {
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v4.5 — local echo 제거 + fade-out streaming (2026-04-30)
+
 v4.4 결과: ✅ 폰트/크기 OK, ✅ streaming 체감 좋음. ❌ "조금 앞으로 갔다가 다시 채워지는 느낌" + 기존 텍스트 안 지워지는 듯한 visual 버그.
 
 **진단:** Local echo (`terminal.write(input)` at compositionend)가 Claude Code 같은 TUI 앱과 충돌. Claude Code는 매 input마다 prompt area를 redraw — 우리 local echo가 grid에 char 쓰고 cursor 전진, 그 후 Claude Code의 redraw가 cursor reposition + line clear + prompt 재출력. 결과: char가 잠깐 보였다가 살짝 다른 위치로 이동하는 느낌, 또는 중복된 흔적.
 
 **v4.5 변경:**
+
 1. **Local echo 제거.** `terminal.write(input)` 한 줄 삭제. PTY 전송만 함. Claude Code의 redraw가 grid를 자연스럽게 처리.
 2. **Strip fade-out 애니메이션.** compositionstart 시 `transition: opacity 120ms ease-out` 적용. compositionend 시 `opacity: 0` 설정 → CSS가 부드럽게 fade. 130ms 후 모든 inline style reset (xterm `_syncTextArea` 인계).
 3. **Fade timer race fix.** fast typing 시 fade-out timer가 다음 composition 스타일을 덮어쓰는 race 방지 — `compositionstart`에서 pending timer cancel.
@@ -316,9 +364,11 @@ v4.4 결과: ✅ 폰트/크기 OK, ✅ streaming 체감 좋음. ❌ "조금 앞�
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v4.4 — local echo (streaming) + visual 축소 (2026-04-30)
+
 v4.3 결과: ✅ functional bug fix됨 (텍스트 정상 입력). ❌ 폰트 너무 큼 (bypass permission UI 침범), ❌ latency 여전. 사용자 요청: terminal 폰트와 동일하게, 더 아래로, **PTY 왕복 기다리지 않고 한글자 만들어지는 속도에 맞춰 streaming**.
 
 **v4.4 수정 1 — Visual 축소:**
+
 - 폰트 크기: terminal 동일 (1.3× 제거)
 - Strip 높이: 1× cell (1.5× 제거)
 - 위치: bottom 2px, left 4px (corner 가깝게)
@@ -330,8 +380,8 @@ v4.3 결과: ✅ functional bug fix됨 (텍스트 정상 입력). ❌ 폰트 너
 
 ```typescript
 if (input.length > 0) {
-  terminal.write(input);                              // 즉시 grid 렌더 (local echo)
-  this._coreService.triggerDataEvent(input, true);    // PTY 전송
+  terminal.write(input); // 즉시 grid 렌더 (local echo)
+  this._coreService.triggerDataEvent(input, true); // PTY 전송
 }
 ```
 
@@ -344,9 +394,11 @@ if (input.length > 0) {
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v4.3 — 동기 compositionend + visual 정리 (2026-04-30)
+
 v4.2 결과: strip에 한글자만 표시는 해결됐으나 **functional bug**: "지금 작성된 컨텐츠의 연결이 안되고 이상하게 입력됨". 사용자는 visual 변경도 요청 — 검은 배경 제거, 폰트 크게, padding 더.
 
 **진단 (functional bug):** v4.2의 compositionstart에서 textarea.value 클리어한 게 원인. xterm 원본 compositionend는 setTimeout(0) 비동기 패턴 사용 (waitForPropagation). 빠른 타이핑 시:
+
 1. compositionend (음절1) → finalize setTimeout 큐잉 (start/end position 캡처)
 2. 사용자 다음 키 입력 → compositionstart (음절2) 큐잉
 3. 만약 compositionend 핸들러 실행 중 키 입력이 큐에 들어오면, compositionstart가 finalize setTimeout 보다 먼저 처리됨
@@ -354,11 +406,13 @@ v4.2 결과: strip에 한글자만 표시는 해결됐으나 **functional bug**:
 5. finalize setTimeout fire → textarea.value 읽음 → 이미 비워졌거나 새 음절로 교체됨 → **잘못된 데이터 또는 빈 데이터 PTY로 전송**
 
 **v4.3 수정:**
+
 - **compositionend를 완전히 동기화** — original `compositionend`/`_finalizeComposition` 호출 안 함. setTimeout 패턴 제거. Chromium은 compositionend 시점에 textarea.value 업데이트 완료되므로 sync read 안전.
 - compositionstart의 textarea clear 제거. compositionend에서 sync clear.
 - `_coreService.triggerDataEvent`을 직접 호출 (helper의 private field).
 
 **Visual 변경 (사용자 요청):**
+
 - 검은 배경 제거 (`background: transparent`)
 - 폰트 크기 1.3× (13px → 17px)
 - 높이 1.5× cell (여유 padding)
@@ -370,6 +424,7 @@ v4.2 결과: strip에 한글자만 표시는 해결됐으나 **functional bug**:
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v4.2 — textarea 누적 fix + 위치 미세조정 (2026-04-30)
+
 v4.1 결과: 좌하단 strip 보이고 latency 개선 (avgInputDelay 138-271ms → 88-162ms, p95 spike 800-2896ms → 192-344ms). 사용자 보고: ✅ "끊기는 느낌 나아짐", "속도 개선됨", "시각적 분산효과로 체감 latency 줄어듦". ❌ 두 가지 이슈:
 
 1. **strip에 텍스트 누적** — "한" + "국" 타이핑 시 strip이 "한국" 표시 (이전 syllable 안 사라짐). 지운 텍스트도 남음.
@@ -386,6 +441,7 @@ v4.1 결과: 좌하단 strip 보이고 latency 개선 (avgInputDelay 138-271ms �
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v4.1 — helpers container fix + key event 차단 (2026-04-30)
+
 v4 결과: 좌하단 compose strip 안 보임 + 체감 더 부드러움 + "끊기는" 느낌 남음.
 
 **진단 1 (compose strip 안 보임):** `.xterm-helpers` 컨테이너가 `position: absolute; top: 0`만 있고 width/height 정의 안 됨 → content-sized로 작은 영역이 됨. textarea의 `bottom: 8px; left: 8px`는 이 작은 컨테이너 기준이라 의도한 좌하단 위치가 아님.
@@ -401,11 +457,13 @@ v4 결과: 좌하단 compose strip 안 보임 + 체감 더 부드러움 + "끊�
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`, `v3/src/components/terminal/TerminalView.tsx`, `v3/src/components/orchestrator/OrchestratorTerminal.tsx`
 
 ### 한글 IME 패치 v4 — textarea를 터미널 하단-왼쪽 compose strip으로 (2026-04-30)
+
 v3 결과: textarea가 cursor 위치에 visible 상태로 있어서 **기존 터미널 cursor/텍스트와 시각적으로 겹침**. 사용자 보고: "커서가 텍스트를 가리는 것 같다".
 
 **v4 컨셉:** Cursor (VSCode-fork 에디터) 제품의 chat input이 한글 in-progress를 채팅창 하단-왼쪽 별도 영역에 표시하는 패턴 차용. composition 중에만 textarea를 터미널 하단-왼쪽 고정 위치로 이동.
 
 **구현 변경 (compositionstart):**
+
 - `left: 8px`, `bottom: 8px`, `top/right: auto` → 터미널 하단-왼쪽 8px 인셋
 - `width: cellW × 12` (한글 ~6자 여유), `height: cellH`
 - `background: rgba(15, 15, 25, 0.92)`, `border-radius: 3px`, `box-shadow` → distinct compose strip 모양
@@ -422,17 +480,20 @@ v3 결과: textarea가 cursor 위치에 visible 상태로 있어서 **기존 터
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts`
 
 ### 한글 IME 패치 v3 — textarea visible 방식 (Cursor 패턴 차용) (2026-04-30)
+
 v2에서도 "한자리에서 멈춰서 작성되다가 넘어가는" 체감 답답함 남음. 원인: composition view가 heavy React/Tailwind 트리 안에 있고, compositionend → PTY 왕복 → xterm grid render 동안 main thread 경합.
 
 **v3 컨셉:** xterm의 hidden textarea를 composition 중에만 visible하게 만들어서 OS IME의 native in-textarea 렌더링이 그대로 visual feedback이 됨. xterm의 composition view는 사용 안 함. Cursor의 채팅창이 빠른 이유 (OS가 직접 그림 → React/DOM 트리 우회)와 구조적으로 동일.
 
 **구현 (`v3/src/lib/xtermIMEPatch.ts`):**
+
 - `updateCompositionElements`: hard no-op (onRender에서도 안 돔)
 - `compositionstart`: textarea에 inline style 적용 — opacity 1, z-index 5, terminal 폰트/색 매칭, caret 투명, width = cellW × 4 (CJK 2글자 여유)
 - `compositionupdate`: position tracking만 (textarea value는 OS IME가 직접 씀)
 - `compositionend`: textarea inline style 제거 → CSS default로 복귀 (opacity 0, width 0). 다음 `_syncTextArea` render 때 정상 위치로 reset. 그 다음 원래 compositionend (`_finalizeComposition`) 호출
 
 **v2와 트레이드오프:**
+
 - v2: xterm composition view 사용 → DOM mutation 매 keystroke (cell-dim positioning) → 작지만 React 트리 안에서 발생
 - v3: textarea OS-native rendering → 우리 React 트리에 zero mutation → 이론상 더 빠름. 폰트 미스매치 시 visual flicker 위험.
 
@@ -441,11 +502,13 @@ v2에서도 "한자리에서 멈춰서 작성되다가 넘어가는" 체감 답�
 **수정 파일:** `v3/src/lib/xtermIMEPatch.ts` (메서드 4개 모두 교체)
 
 ### 한글 IME 패치 v2 — visual feedback 복구 + layout flush 제거 (2026-04-30)
+
 v1 (composition view 렌더링 제거) 결과: 시각적 stuck 느낌은 사라졌으나 **타이핑 중 in-progress char가 아예 안 보여서** "stuck → 갑자기 등장" UX regression. INP variability도 증가 (worst avgInputDelay 271ms로 상승).
 
 **원인:** xterm의 textarea는 `opacity: 0` + `z-index: -5`. OS IME가 textarea에 char를 직접 쓰지만 사용자는 못 봄. xterm이 자체 `_compositionView`로 visual feedback 제공하던 걸 v1이 비활성화함.
 
 **v2 수정 (`v3/src/lib/xtermIMEPatch.ts`):** `updateCompositionElements`를 layout-free 버전으로 **완전 교체** (no-op이 아니라 cell-dimension 기반 positioning으로 재구현):
+
 - composition view에 textContent 쓰고 `.active` 붙임 → user가 ㅎ→하→한 진행 봄
 - position은 `renderService.dimensions.css.cell` (이미 캐시됨) 사용 → no rect read
 - textarea size는 `text.length × cellW × 2` (CJK 폭) 추정 → no rect read
@@ -459,6 +522,7 @@ v1 (composition view 렌더링 제거) 결과: 시각적 stuck 느낌은 사라�
 **수정 파일:** `v3/src/components/terminal/TerminalView.tsx`, `v3/src/components/orchestrator/OrchestratorTerminal.tsx`
 
 ### Phase 0 PRD v1.1 — Sprint A 코드베이스 검증 반영 (2026-04-29)
+
 v3 코드베이스 사전 점검 결과를 PRD에 반영. 기존 부분 추상화 발견(`flow-engine/types.ts:LLMProvider`, `flow-engine/llm-provider.ts:createLLMProvider`, `pty-manager.ts:PtyManager`, `fs-manager.ts:FsManager`, `mcp-server/`)으로 Sprint A 작업량 3-4일 → 2-3일 단축. 두 LLM 클라이언트(`orchestrator/llm-client.ts` ↔ `flow-engine/llm-provider.ts`) 통합은 Sprint A 범위 외로 명시. 선결 조건(현재 INP/터미널 perf 수정 commit 정리, MM TerminalView 정리, `feat/adapter-foundation` 브랜치) 명문화.
 
 **진행 결정:** 현재 진행 중인 INP/터미널 perf 수정 작업(13개 modified files)을 먼저 commit 정리 + main 머지 후, 별도 브랜치에서 Sprint A 착수.
@@ -466,9 +530,11 @@ v3 코드베이스 사전 점검 결과를 PRD에 반영. 기존 부분 추상�
 **수정 파일:** `docs/03_marblo_phase0_foundation_prd.md` (v1.0 → v1.1)
 
 ### Phase 0 PRD 작성 — 6월 런칭 + Enterprise In-place 토대 (2026-04-29)
+
 Core PRD v1.0의 Week 1-4 모노레포 빅뱅 마이그레이션 계획을 솔로 capacity + 6월 hard deadline에 맞춰 **in-place 점진적 준비**로 재설계. Phase 0(2026-05) must-do는 3개 Sprint로 한정.
 
 **전략 결정:**
+
 - 모노레포 마이그레이션, Gateway Agent, Control Plane, OPA, PII Scanner, Helm 등 Enterprise 본 기능은 첫 PoC 계약 이후로 **명시적 deferred**
 - 5월에는 v3 in-place에서 인터페이스/훅/이벤트 토대만 추출 (총 6-9일 작업)
 - Sprint A: Adapter 인터페이스 (LLM/MCP/FS/Terminal) — 3-4일
@@ -479,17 +545,20 @@ Core PRD v1.0의 Week 1-4 모노레포 빅뱅 마이그레이션 계획을 솔�
 **신규 파일:** `docs/03_marblo_phase0_foundation_prd.md`
 
 ### React event delegation 우회 + CSS containment (2026-04-29)
+
 사용자 핵심 단서: **VS Code와 Cursor 터미널은 같은 Mac mini에서 정상**. 둘 다 xterm.js + Electron인데 우리만 느림 → 하드웨어/Electron/xterm 자체 baseline 아님. **Marblo 고유 코드의 회귀**.
 
 **가설:** 우리만 갖고 있는 것 = Firebase 리스너, React + Zustand 다중 store, **React 17+ root 이벤트 위임**, Tailwind. 이 중 가장 의심스러운 것은 React event delegation. 매 keystroke마다 xterm의 hidden textarea 이벤트가 React root container까지 bubble되어 synthetic event system이 fiber tree를 walk함. event당 비용은 작지만 빠른 타이핑 시 inputDelay로 누적.
 
 **수정:**
+
 1. `OrchestratorTerminal` / `TerminalView` wrapper에 keyboard·composition 이벤트 `stopPropagation()` 핸들러 추가. xterm 자체 listener는 textarea에 직접 bind되어 있어 정상 동작 (bubble 단계에서 wrapper 도달 후 차단).
 2. wrapper element에 `contain: strict` 추가. 터미널 layout/paint 영역을 격리해서 부모 트리(Sidebar, Header 등)의 invalidation 영향 차단.
 
 **수정 파일:** `v3/src/components/orchestrator/OrchestratorTerminal.tsx`, `v3/src/components/terminal/TerminalView.tsx`
 
 ### PTY data setImmediate batching 롤백 — INP 회귀 제거 (2026-04-29)
+
 사용자 보고: "처음 최적화했을 때(WebGL + scrollToBottom)보다 지금이 더 느려졌다", 일반 native 터미널은 정상 → 우리 코드의 회귀.
 
 **원인:** main.ts의 `setupPtyForwarding`에 추가한 same-tick `setImmediate` coalescing이 매 PTY chunk마다 1 Node tick의 latency를 추가하고, 같은 tick에 모인 chunk들을 join하면서 xterm refresh 1회당 처리량 증가 → 다음 keystroke의 inputDelay 상승.
@@ -499,12 +568,13 @@ Core PRD v1.0의 Week 1-4 모노레포 빅뱅 마이그레이션 계획을 솔�
 **수정 파일:** `v3/electron/main.ts`
 
 ### Terminal iframe 격리 시도 후 롤백 — 효과 없음 확정 (2026-04-30)
+
 한글 IME 100-200ms inputDelay 해결을 위해 xterm을 iframe 안으로 격리 시도. iframe 안에 PerformanceObserver 설치해서 직접 측정한 결과:
 
-| 측정 위치 | p50 | avgInputDelay |
-|---|---|---|
-| 부모 직접 마운트 (이전) | 144-160ms | 130-160ms |
-| **iframe 격리 (시도)** | **184-200ms** | **142-171ms** |
+| 측정 위치               | p50           | avgInputDelay |
+| ----------------------- | ------------- | ------------- |
+| 부모 직접 마운트 (이전) | 144-160ms     | 130-160ms     |
+| **iframe 격리 (시도)**  | **184-200ms** | **142-171ms** |
 
 iframe 약간 더 느림 → 격리 효과 없음 확정. 이유: iframe element의 `getBoundingClientRect`는 viewport 좌표 반환을 위해 부모 layout flush까지 강제. iframe 안 element도 동일. 즉 layout 격리 자체가 안 됨.
 
@@ -513,6 +583,7 @@ iframe 약간 더 느림 → 격리 효과 없음 확정. 이유: iframe element
 **최종 결론:** 이번 세션에서 한글 IME inputDelay ~150ms는 xterm.js + Marblo의 React/Tailwind 트리에서 fundamental baseline. monkey-patch, iframe 격리, contain CSS, event delegation bypass 모두 효과 없음. 영어 입력은 정상 작동.
 
 ### Canvas2D 렌더러 시도 후 WebGL 복귀 (2026-04-29)
+
 WebGL → Canvas2D 전환했으나 INP inputDelay 80-260ms로 동일. **렌더러 선택이 병목이 아님**을 확정. Canvas는 사용자 체감상 약간 더 느림. WebGL로 복귀.
 
 **결론:** 남은 100-200ms inputDelay는 xterm.js + Electron의 Mac mini 환경 baseline. 우리가 코드로 잘라낼 수 있는 영역 종료. 누적 9단계 최적화로 264ms → 150-200ms 개선 달성. 추가 절감하려면 Electron 의존성 자체를 떠나거나 더 빠른 하드웨어 필요.
@@ -522,6 +593,7 @@ WebGL → Canvas2D 전환했으나 INP inputDelay 80-260ms로 동일. **렌더�
 **수정 파일:** `v3/src/components/orchestrator/OrchestratorTerminal.tsx`, `v3/src/components/terminal/TerminalView.tsx`
 
 ### cursorBlink off — RAF queue 압력 감소 (2026-04-29)
+
 PTY IPC 60Hz throttle 시도(미적용 후 롤백 — per-frame xterm refresh 비용 증가로 presentation latency 악화 → INP 더 나빠짐). 진단 데이터 재해석: `LONGTASK` 부재 + `inputDelay` 100-300ms 패턴은 50ms 미만 task가 다수 누적되는 시나리오. 그 중 하나로 cursorBlink의 500ms 주기 RAF refresh 제거.
 
 **수정:** OrchestratorTerminal과 TerminalView의 `cursorBlink: true → false`. cursor는 stationary로 표시. 입력 시 cursor 위치는 정상 갱신.
@@ -529,6 +601,7 @@ PTY IPC 60Hz throttle 시도(미적용 후 롤백 — per-frame xterm refresh �
 **수정 파일:** `v3/src/components/orchestrator/OrchestratorTerminal.tsx`, `v3/src/components/terminal/TerminalView.tsx`
 
 ### INP 진단 도구 강화 (2026-04-29)
+
 "멈췄다 한꺼번에 써지는" 타이핑 패턴은 main thread가 200-300ms 블록되는 long task 문제. 정확한 원인 추적용 PerformanceObserver 강화.
 
 1. **`[LONGTASK]` 옵저버 강화**: `entry.attribution`을 함께 출력 — 어느 script/container가 멈춤을 일으켰는지 판별 가능.
@@ -537,11 +610,13 @@ PTY IPC 60Hz throttle 시도(미적용 후 롤백 — per-frame xterm refresh �
 **수정 파일:** `v3/src/App.tsx`
 
 ### xterm 패키지 마이그레이션 — WebGL 호환성 확보 (2026-04-29)
+
 WebGL addon이 `Cannot read properties of undefined (reading 'createElement')` 에러로 silent fallback DOM 모드로 동작 중이던 문제 수정.
 
 **원인:** `xterm@5.3.0`(구 패키지명) ↔ `@xterm/addon-webgl@0.19.0`(신 패키지, @xterm/xterm@6 가정) 간 internal API 불일치.
 
 **수정:**
+
 - `xterm` → `@xterm/xterm@^5.5.0` (신 namespace, v5 라인) 마이그레이션
 - `@xterm/addon-webgl` 0.19 → 0.18 (peer @xterm/xterm@^5.0.0)
 - import 경로: `xterm` → `@xterm/xterm`, `xterm/css/xterm.css` → `@xterm/xterm/css/xterm.css`
@@ -550,6 +625,7 @@ WebGL addon이 `Cannot read properties of undefined (reading 'createElement')` �
 **수정 파일:** `v3/package.json`, `v3/src/components/orchestrator/OrchestratorTerminal.tsx`, `v3/src/components/terminal/TerminalView.tsx`
 
 ### Orchestrator 터미널 INP 추가 최적화 — store 구독 granular + PTY IPC 배치 (2026-04-29)
+
 INP 264ms 스파이크 추가 개선. 출력 burst 시 IPC 이벤트 폭주 + Zustand 전체 store 구독으로 인한 React 재렌더링이 paint 블록의 주범.
 
 1. **OrchestratorPanel granular Zustand selectors**: `const { ... } = useOrchestratorStore()` (전체 구독) → 슬라이스별 `useOrchestratorStore((s) => s.X)` 7개. 임의 store 변경 시마다 발생하던 재렌더링 차단.
@@ -558,6 +634,7 @@ INP 264ms 스파이크 추가 개선. 출력 burst 시 IPC 이벤트 폭주 + Zu
 **수정 파일:** `v3/src/components/orchestrator/OrchestratorPanel.tsx`, `v3/electron/main.ts`
 
 ### Orchestrator 터미널 타이핑 딜레이 추가 최적화 — IPC 단방향 + replay 즉시 라이브 + fit 디바운스 (2026-04-29)
+
 WebGL + scrollToBottom 제거에 이어 잔여 레이턴시 제거.
 
 1. **pty:write IPC 단방향화**: `ipcRenderer.invoke` → `ipcRenderer.send`, `ipcMain.handle` → `ipcMain.on`. 키 입력당 Promise round-trip(약 1-3ms) 제거. preload는 호환성 위해 `Promise.resolve()` 즉시 반환.
@@ -567,11 +644,13 @@ WebGL + scrollToBottom 제거에 이어 잔여 레이턴시 제거.
 **수정 파일:** `v3/electron/preload.ts`, `v3/electron/main.ts`, `v3/src/components/orchestrator/OrchestratorTerminal.tsx`
 
 ### dev 모드 remote-debugging-port 동적 할당 (2026-04-29)
+
 재시작 시 `bind() failed: Address already in use (48)` 에러 제거. 9222 하드코딩 → 0(OS 자동 할당)으로 변경. 이전 Electron 프로세스가 macOS TIME_WAIT로 포트를 잡고 있어도 충돌 없음.
 
 **수정 파일:** `v3/electron/main.ts`
 
 ### Orchestrator/Terminal 타이핑 딜레이 개선 — WebGL 렌더러 + scrollToBottom 제거 (2026-04-29)
+
 xterm.js DOM 렌더러로 인한 타이핑 지연 해결. Claude Code 출력 burst 시에도 입력 echo가 즉각 표시되도록 개선.
 
 1. **WebGL 렌더러 도입**: `@xterm/addon-webgl@^0.19.0` 추가, OrchestratorTerminal·TerminalView에서 `terminal.open()` 직후 loadAddon. WebGL 미지원 환경은 try/catch로 DOM fallback. `onContextLoss` 핸들러로 GPU context 손실 대비.
@@ -582,6 +661,7 @@ xterm.js DOM 렌더러로 인한 타이핑 지연 해결. Claude Code 출력 bur
 **수정 파일:** `v3/package.json`, `v3/src/components/orchestrator/OrchestratorTerminal.tsx`, `v3/src/components/terminal/TerminalView.tsx`
 
 ### BigQuery 텔레메트리 ML 준비도 Phase 1 (2026-04-19)
+
 ML 기반 자동화(모델 선택, 프로세스 최적화, 비용 예측, 이상 탐지)를 위한 데이터 파이프라인 기반 구축.
 
 1. **BigQuery 스키마 확장**: events에 10개 ML 컬럼 추가, cost_logs에 4개 컬럼 추가, 신규 3개 테이블(agent_heartbeats, task_outcomes, flow_executions) 생성
@@ -594,19 +674,23 @@ ML 기반 자동화(모델 선택, 프로세스 최적화, 비용 예측, 이상
 **수정 파일:** `v3/functions/src/index.ts`, `v3/src/services/telemetryService.ts`, `v3/src/hooks/useFlowExecution.ts`, `v3/src/App.tsx`, `v3/electron/telemetry.ts`, `v3/electron/main.ts`, `v3/electron/agent-manager.ts`, `v3/src/hooks/useCostWriter.ts`, `v3/src/services/taskService.ts`, `v3/src/vite-env.d.ts`
 
 ### BigQuery 텔레메트리 ML 준비도 감사 문서 (2026-04-19)
+
 현재 파이프라인 분석, 4가지 ML 목표별 갭 분석, 스키마 확장안, 4단계 로드맵 문서 작성.
 
 **신규 파일:** `docs/bigquery-ml-readiness.md`
 
 ## In Progress
+
 - Phase 2: 데이터 축적 + 기초 분석 (BigQuery ML 대시보드, baseline 수립)
 
 ## Remaining / TODO
+
 - Phase 3: ML 모델 학습 + 추론 (모델 추천기, 비용 예측기, 이상 탐지)
 - Phase 4: 프로세스 자동화 통합 (추천→자동 배정, 피드백 루프)
 - ~~Cloud Functions 배포~~ (2026-04-19 완료, 20개 함수 전체 배포 성공)
 
 ## Issues / Tech Debt
+
 - `task_outcomes.taskType`이 아직 null로 기록됨 — 태스크 메타데이터에 taskType 필드 추가 필요
 - `task_outcomes.model`이 null — 에이전트 컨텍스트에서 모델 정보를 task 완료 시점에 전달하는 로직 필요
 - heartbeat의 `tokensAccumulated`/`costAccumulated`가 0으로 고정 — CostTracker의 누적값을 연동해야 정확한 값 전달 가능

@@ -3186,7 +3186,7 @@ export function registerTools(server: McpServer): void {
   // ── cleanup_agents — Batch reap of dead-PTY + terminal-task agents
   auditedTool(
     "cleanup_agents",
-    "Clean up stale agents: those whose PTY died (stopped/error) AND those still alive but bound to a terminal (DONE/FAILED) task and PTY-idle past the grace window. Optionally filter by role. Returns list of cleaned agents with reasons.",
+    "Clean up stale agents: those whose PTY died (stopped/error), those still alive but bound to a terminal (DONE/FAILED) task and PTY-idle past the grace window, AND ghost Firestore docs left at working/idle by dead Electron instances (ownership-gated; marked stopped, never deleted). Optionally filter by role. Returns list of cleaned agents with reasons.",
     {
       role: z.string().optional().describe("Only clean agents with this role"),
     },
@@ -3281,10 +3281,42 @@ export function registerTools(server: McpServer): void {
           }
         }
 
+        // Pass 3 — Firestore ghost docs from dead Electron instances. The two
+        // passes above only see the bridge's in-memory agents; docs a previous
+        // instance left at status=working are invisible to them (the 28-ghost
+        // incident). The bridge delegates to main's ownership-gated sweep
+        // (machineId + pid liveness — other machines / live instances are
+        // never touched; docs are marked stopped, never deleted).
+        let ghostNote = "";
+        try {
+          const ghostResp = await fetch(
+            `http://127.0.0.1:${bridgePort}/reclaim-ghosts`,
+            {
+              method: "POST",
+              headers: bridgeHeaders({ "Content-Type": "application/json" }),
+              body: "{}",
+            },
+          );
+          const ghost = (await ghostResp.json()) as {
+            success: boolean;
+            reclaimed?: Array<{ name: string; reason: string }>;
+          };
+          if (ghost.success && ghost.reclaimed && ghost.reclaimed.length > 0) {
+            ghostNote = `\nAlso reclaimed ${
+              ghost.reclaimed.length
+            } ghost doc(s) left by dead instances (marked stopped): ${ghost.reclaimed
+              .map((g) => g.name)
+              .join(", ")}`;
+          }
+        } catch {
+          // Older bridge without the endpoint / transient failure — the
+          // in-memory cleanup result below still stands on its own.
+        }
+
         if (candidates.length === 0) {
           const roleNote = role ? ` for role '${role}'` : "";
           return text(
-            `No reapable agents found${roleNote} (no stopped/error agents and no live agents on terminal tasks). Nothing to clean up.`,
+            `No reapable agents found${roleNote} (no stopped/error agents and no live agents on terminal tasks). Nothing to clean up.${ghostNote}`,
           );
         }
 
@@ -3320,7 +3352,7 @@ export function registerTools(server: McpServer): void {
         }
 
         return text(
-          `Cleaned up ${results.length} agent(s): ${results.join(", ")}`,
+          `Cleaned up ${results.length} agent(s): ${results.join(", ")}${ghostNote}`,
         );
       } catch (err: unknown) {
         return text(

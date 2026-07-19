@@ -575,6 +575,12 @@ export class BridgeServer {
         chatId?: string,
       ) => Promise<{ ok: boolean; chatId?: string; error?: string }>)
     | null = null;
+  private ghostReclaim:
+    | (() => Promise<{
+        scanned: number;
+        reclaimed: Array<{ id: string; name: string; reason: string }>;
+      }>)
+    | null = null;
 
   constructor(
     agentManager: AgentManager,
@@ -592,6 +598,19 @@ export class BridgeServer {
     lookup: (projectId: string) => OrchestratorManager | null,
   ): void {
     this.orchestratorLookup = lookup;
+  }
+
+  // Ghost-doc reclaim hook (main's runGhostReclaimSweep). Lets cleanup_agents
+  // reach agents that exist only as Firestore docs of a dead previous Electron
+  // instance — invisible to the in-memory passes above. Ownership/liveness
+  // gating lives in agent-lifecycle-reclaim.ts; this is just the transport.
+  setGhostReclaim(
+    fn: () => Promise<{
+      scanned: number;
+      reclaimed: Array<{ id: string; name: string; reason: string }>;
+    }>,
+  ): void {
+    this.ghostReclaim = fn;
   }
 
   setMissionOrchestratorLookup(
@@ -805,6 +824,11 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/reap-worktree") {
           this.handleReapWorktree(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/reclaim-ghosts") {
+          this.handleReclaimGhosts(res);
           return;
         }
 
@@ -2554,6 +2578,34 @@ export class BridgeServer {
           });
         });
     });
+  }
+
+  // ── POST /reclaim-ghosts ─────────────────────────────────────
+  //
+  // On-demand run of main's ghost-doc reclaim sweep (agent-lifecycle-reclaim):
+  // marks this machine's dead-instance agent docs `stopped`. cleanup_agents
+  // calls this as its Firestore pass — the in-memory passes structurally
+  // cannot see agents a previous Electron instance left behind.
+  private handleReclaimGhosts(res: http.ServerResponse): void {
+    const send = (code: number, payload: unknown) => {
+      res.writeHead(code, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(payload));
+    };
+    if (!this.ghostReclaim) {
+      send(200, {
+        success: false,
+        error: "ghost reclaim not wired",
+      });
+      return;
+    }
+    this.ghostReclaim()
+      .then((result) => send(200, { success: true, ...result }))
+      .catch((e) =>
+        send(200, {
+          success: false,
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
   }
 
   // ── POST /inject-message ───────────────────────────────────

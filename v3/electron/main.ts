@@ -368,6 +368,9 @@ interface AppState {
   // boot-restore / reap can be machine-scoped on a shared account (see
   // getMachineId / stampAgentMachineOwnership). Never auto-changes.
   machineId?: string;
+  // epoch-ms of the last resource-accumulation warning (agents/worktrees over
+  // threshold), persisted so the 24h alert dedupe survives restarts.
+  lastAccumulationAlertAt?: number;
   // Port the shared static server (production) bound last launch. Reused on the
   // next launch so the app origin (http://127.0.0.1:<port>) stays stable and
   // Firebase auth persistence (origin-scoped localStorage) survives a restart.
@@ -517,6 +520,9 @@ function getMachineId(): string {
 // authed path WorktreeCoordinator uses for tasks/agents. The `agents` rule is
 // isAuthenticated-only, so anon auth is sufficient; the unauthenticated
 // flow-engine app would be rejected.
+// Boot time of THIS Electron main process — stamped onto agent docs alongside
+// the pid so a doc can be traced to a specific instance incarnation.
+const instanceStartedAtMs = Date.now();
 const stampedMachineAgentIds = new Set<string>();
 function stampAgentMachineOwnership(agentId: string): void {
   if (!agentId || stampedMachineAgentIds.has(agentId)) return;
@@ -528,7 +534,15 @@ function stampAgentMachineOwnership(agentId: string): void {
       const db = getFirestore(app);
       await fbSetDoc(
         fbDoc(db, "agents", agentId),
-        { machineId: getMachineId() },
+        {
+          machineId: getMachineId(),
+          // Instance identity for the ghost reclaim (agent-lifecycle-reclaim):
+          // lets the sweep distinguish "my dead previous instance's doc"
+          // (reclaimable) from "another live Electron on this machine"
+          // (untouchable — pid still alive).
+          instancePid: process.pid,
+          instanceStartedAt: instanceStartedAtMs,
+        },
         { merge: true },
       );
     } catch (err) {
@@ -541,6 +555,324 @@ function stampAgentMachineOwnership(agentId: string): void {
       );
     }
   })();
+}
+
+// --- Resource lifecycle reclaim (ghost agent docs + stale task worktrees) ---
+// 2026-07-19 incident: agents/ grew to 1,057 docs — 28 stuck at status=working
+// from previous instances — because terminal status writes flowed only through
+// the renderer (dead exactly when agents die) and cleanup_agents only scans
+// AgentManager memory. See agent-lifecycle-reclaim.ts for the decision rules.
+
+// Finalize a terminal agent status straight from MAIN. The renderer's
+// agent:statusChanged listener is the normal writer, but it no longer exists
+// when the last window closed or the app is tearing down — exactly the paths
+// that strand docs at `working`. Terminal statuses only (stopped/error): they
+// are low-volume and idempotent alongside the renderer's own write. App-quit's
+// in-flight writes may still be cut off — the boot ghost sweep is the backstop.
+function finalizeAgentStatusInFirestore(
+  agentId: string,
+  status: "stopped" | "error",
+): void {
+  void (async () => {
+    try {
+      const { app: fbApp, authReady } = getMissionFirebaseApp();
+      await authReady;
+      const db = getFirestore(fbApp);
+      await fbSetDoc(
+        fbDoc(db, "agents", agentId),
+        { status, updatedAt: fbTimestamp.now() },
+        { merge: true },
+      );
+    } catch (err) {
+      console.warn(
+        "[LifecycleReclaim] terminal status finalize failed:",
+        agentId,
+        status,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  })();
+}
+
+/** pid liveness ON THIS MACHINE. EPERM = exists but not ours → alive. */
+function isPidAliveOnThisMachine(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+const GHOST_RECLAIM_BOOT_DELAY_MS = 60_000; // let agent:reconnect repopulate memory first
+const GHOST_RECLAIM_INTERVAL_MS = 10 * 60_000;
+const WORKTREE_SWEEP_INTERVAL_MS = 6 * 60 * 60_000;
+// Firestore-read cap per worktree sweep so a large backlog (696 trees at the
+// time of writing) can't turn one sweep into hundreds of task lookups. The
+// backlog drains across sweeps; steady-state counts fit in one.
+const WORKTREE_SWEEP_TASK_LOOKUP_CAP = 20;
+// Rotating scan offset (per app run) so capped sweeps cover the whole backlog
+// over time instead of re-checking the same head of the list.
+let worktreeSweepCursor = 0;
+
+interface GhostReclaimSweepResult {
+  scanned: number;
+  reclaimed: Array<{ id: string; name: string; reason: string }>;
+}
+
+// Mark this machine's ghost agent docs (previous/dead instances) stopped.
+// Never kills a process, never deletes a doc, preserves currentTaskId; docs of
+// other machines / other live instances are untouchable by the decision gate.
+async function runGhostReclaimSweep(): Promise<GhostReclaimSweepResult> {
+  const { app: fbApp, authReady } = getMissionFirebaseApp();
+  await authReady;
+  const db = getFirestore(fbApp);
+  const snap = await fbGetDocs(
+    fbQuery(
+      fbCollection(db, "agents"),
+      fbWhere("machineId", "==", getMachineId()),
+    ),
+  );
+  const now = Date.now();
+  const reclaimed: GhostReclaimSweepResult["reclaimed"] = [];
+  const docs: Array<{ id: string; data: Record<string, unknown> }> = [];
+  snap.forEach((d) => docs.push({ id: d.id, data: d.data() }));
+  for (const { id, data } of docs) {
+    const decision = evaluateGhostReclaim({
+      status: data.status,
+      machineId: typeof data.machineId === "string" ? data.machineId : null,
+      instancePid:
+        typeof data.instancePid === "number" ? data.instancePid : null,
+      role: typeof data.role === "string" ? data.role : null,
+      lastTouchedAtMs:
+        watchdogMillis(data.updatedAt) ?? watchdogMillis(data.createdAt),
+      thisMachineId: getMachineId(),
+      thisPid: process.pid,
+      inMemory: !!agentManager.getAgent(id),
+      isPidAlive: isPidAliveOnThisMachine,
+      now,
+    });
+    if (!decision.reclaim) continue;
+    try {
+      await fbSetDoc(
+        fbDoc(db, "agents", id),
+        { status: "stopped", updatedAt: fbTimestamp.now() },
+        { merge: true },
+      );
+      const name = typeof data.name === "string" ? data.name : id;
+      reclaimed.push({ id, name, reason: decision.reason });
+      console.log(
+        `[LifecycleReclaim] ghost reclaimed: ${name} — ${decision.reason}`,
+      );
+    } catch (err) {
+      console.warn(
+        "[LifecycleReclaim] ghost mark-stopped failed:",
+        id,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return { scanned: docs.length, reclaimed };
+}
+
+interface WorktreeSweepResult {
+  /** Task worktree dirs currently on disk (pre-sweep). */
+  total: number;
+  checked: number;
+  removed: string[];
+  preserved: number;
+}
+
+// Reap worktrees whose task is already terminal (DONE/FAILED) — the catch-all
+// for every path the DONE-time /reap-worktree trigger misses (board-UI status
+// changes, app-quit races, other projects). Reuses the manager's work-loss
+// guard: dirty / unmerged-unpushed trees are always preserved.
+async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
+  const root = worktreeManager.getWorktreesRoot();
+  const candidates: Array<{ taskId: string; path: string }> = [];
+  try {
+    for (const proj of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!proj.isDirectory()) continue;
+      const projPath = path.join(root, proj.name);
+      let taskDirs: fs.Dirent[];
+      try {
+        taskDirs = fs.readdirSync(projPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const t of taskDirs) {
+        if (!t.isDirectory()) continue;
+        const wtPath = path.join(projPath, t.name);
+        // Only the canonical <root>/<projectId>/<taskId> layout is sweepable.
+        if (parseWorktreeTaskPath(root, wtPath, path.sep)) {
+          candidates.push({ taskId: t.name, path: wtPath });
+        }
+      }
+    }
+  } catch {
+    return { total: 0, checked: 0, removed: [], preserved: 0 };
+  }
+
+  const result: WorktreeSweepResult = {
+    total: candidates.length,
+    checked: 0,
+    removed: [],
+    preserved: 0,
+  };
+  if (candidates.length === 0) return result;
+
+  const { app: fbApp, authReady } = getMissionFirebaseApp();
+  await authReady;
+  const db = getFirestore(fbApp);
+
+  // Rotate the scan start across sweeps: with a large backlog and a per-sweep
+  // lookup cap, a fixed readdir order would re-check the same first N trees
+  // forever and starve the tail.
+  const start = worktreeSweepCursor % candidates.length;
+  const ordered = candidates.slice(start).concat(candidates.slice(0, start));
+
+  for (const c of ordered) {
+    if (result.checked >= WORKTREE_SWEEP_TASK_LOOKUP_CAP) break;
+
+    // Live-agent guard: any in-memory agent working out of this tree defers it.
+    const busy = agentManager
+      .listAgents()
+      .some(
+        (a) =>
+          a.status !== "stopped" &&
+          a.status !== "error" &&
+          !!a.cwd &&
+          (a.cwd === c.path || a.cwd.startsWith(c.path + path.sep)),
+      );
+    if (busy) continue;
+
+    result.checked++;
+    let taskStatus: string | null = null;
+    try {
+      const td = await fbGetDoc(fbDoc(db, "tasks", c.taskId));
+      taskStatus = td.exists()
+        ? ((td.data() as { status?: string }).status ?? null)
+        : null;
+    } catch {
+      continue; // lookup failure → preserve
+    }
+    if (!isWorktreeSweepEligibleTaskStatus(taskStatus)) continue;
+
+    // The worktree's own .git file names the main repo — no project registry
+    // needed, works for every repo that ever created trees here.
+    let repoRoot: string | null = null;
+    try {
+      repoRoot = deriveRepoRootFromGitFile(
+        fs.readFileSync(path.join(c.path, ".git"), "utf-8"),
+      );
+    } catch {
+      repoRoot = null;
+    }
+    if (!repoRoot || !fs.existsSync(repoRoot)) continue;
+
+    try {
+      const res = await worktreeManager.reap(repoRoot, c.path, {});
+      if (res.removed) {
+        result.removed.push(c.path);
+        console.log(
+          `[LifecycleReclaim] worktree reaped: ${c.path} — ${res.reason}`,
+        );
+      } else {
+        result.preserved++;
+      }
+    } catch (err) {
+      console.warn(
+        "[LifecycleReclaim] worktree reap failed:",
+        c.path,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  worktreeSweepCursor = start + result.checked;
+  // Reuse #497's cause-side invalidation instead of duplicating it. The IPC
+  // paths (worktree:remove / cleanupStale) already notify on removal, but this
+  // sweep reaps from the main process and never goes through them — without
+  // this call an open window rooted at a swept tree keeps a dead rootPath and
+  // that path is persisted to app-state.json at quit (ticket failure mode (c):
+  // "삭제된 워크트리 rootPath 로 오케 즉사"). No double-fire risk: a given
+  // removal travels exactly one of the two routes, and the handler no-ops when
+  // no window matches.
+  if (result.removed.length > 0) invalidateRemovedWorktreeRoots(result.removed);
+  return result;
+}
+
+// Accumulation visibility (fix 4): count, warn past thresholds, never delete.
+async function reportAccumulation(worktreeCount: number | null): Promise<void> {
+  let agentDocs: number | null = null;
+  try {
+    const { app: fbApp, authReady } = getMissionFirebaseApp();
+    await authReady;
+    const db = getFirestore(fbApp);
+    const agg = await fbGetCountFromServer(fbCollection(db, "agents"));
+    agentDocs = agg.data().count;
+  } catch {
+    agentDocs = null;
+  }
+  console.log(
+    `[LifecycleReclaim] accumulation: agents=${agentDocs ?? "?"} worktrees=${
+      worktreeCount ?? "?"
+    }`,
+  );
+  const decision = evaluateAccumulationAlert({
+    counts: { agentDocs, worktrees: worktreeCount },
+    lastAlertAtMs: readAppState().lastAccumulationAlertAt ?? null,
+    now: Date.now(),
+  });
+  if (!decision.alert || !decision.message) return;
+  writeAppState({ lastAccumulationAlertAt: Date.now() });
+  console.warn("[LifecycleReclaim]", decision.message);
+  try {
+    if (Notification.isSupported()) {
+      new Notification({
+        title: "Marblo 리소스 누적 경고",
+        body: decision.message,
+      }).show();
+    }
+  } catch {
+    /* notification is best-effort */
+  }
+}
+
+// One full pass: ghosts, then worktrees, then the accumulation report.
+// Overlap-guarded so a slow sweep can't stack on the next timer tick.
+let lifecycleSweepRunning = false;
+async function runLifecycleReclaimSweep(trigger: string): Promise<void> {
+  if (lifecycleSweepRunning) return;
+  lifecycleSweepRunning = true;
+  try {
+    const ghosts = await runGhostReclaimSweep().catch((err) => {
+      console.warn(
+        "[LifecycleReclaim] ghost sweep failed:",
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    });
+    const wt = await runWorktreeTerminalSweep().catch((err) => {
+      console.warn(
+        "[LifecycleReclaim] worktree sweep failed:",
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    });
+    console.log(
+      `[LifecycleReclaim] sweep(${trigger}): scanned ${
+        ghosts?.scanned ?? 0
+      } own docs, reclaimed ${ghosts?.reclaimed.length ?? 0} ghost(s); ` +
+        `worktrees ${
+          wt
+            ? `${wt.removed.length} reaped / ${wt.preserved} preserved / ${wt.total} on disk`
+            : "skipped"
+        }`,
+    );
+    await reportAccumulation(wt ? wt.total - wt.removed.length : null);
+  } finally {
+    lifecycleSweepRunning = false;
+  }
 }
 
 // Disable QUIC protocol — prevents ERR_QUIC_PROTOCOL_ERROR with Firestore in Electron
@@ -600,6 +932,12 @@ const agentManager = new AgentManager(
     // once per session; enables machine-scoped boot-restore / reap on a shared
     // account (see stampAgentMachineOwnership / agent:reconnect).
     stampAgentMachineOwnership(agentId);
+    // Terminal statuses are ALSO written from main (renderer-independent) so a
+    // crash/force-kill/normal-exit can't strand the doc at `working` when no
+    // window is alive to sync it (agent-lifecycle-reclaim fix 1).
+    if (status === "stopped" || status === "error") {
+      finalizeAgentStatusInFirestore(agentId, status);
+    }
     // Free the pending-instruction listener once the agent is fully gone.
     // "error" is transient (auto-restart may follow), only "stopped" is final.
     if (status === "stopped") {
@@ -1023,6 +1361,9 @@ const bridgeServer = new BridgeServer(
   ptyBuffers,
   worktreeCoordinator,
 );
+// cleanup_agents' Firestore pass — reaches ghost docs of dead previous
+// instances that the bridge's in-memory agent list cannot see.
+bridgeServer.setGhostReclaim(() => runGhostReclaimSweep());
 
 // ── Agent health watchdog (native orchestrator self-recovery) ──
 // Periodically inspects CLAIMED/IN_PROGRESS board tickets whose assigned worker
@@ -1056,8 +1397,7 @@ const agentWatchdog = new AgentWatchdog(
         // Mission tickets are recovered by the conductor's report-watchdog.
         if (data.missionId) return;
         const projection = data.projection as
-          | { lastAgentId?: unknown; lastActivityAt?: unknown }
-          | undefined;
+          { lastAgentId?: unknown; lastActivityAt?: unknown } | undefined;
         const agentId =
           (typeof projection?.lastAgentId === "string" &&
             projection.lastAgentId) ||
@@ -1075,8 +1415,7 @@ const agentWatchdog = new AgentWatchdog(
         // respawn restores the original cwd + model + complexity instead of
         // re-resolving them (fresh base worktree + claude→gpt re-selection).
         const meta = data.dispatchMeta as
-          | { cwd?: unknown; model?: unknown; complexity?: unknown }
-          | undefined;
+          { cwd?: unknown; model?: unknown; complexity?: unknown } | undefined;
         const metaComplexity =
           meta?.complexity === "simple" ||
           meta?.complexity === "standard" ||
@@ -1365,8 +1704,7 @@ const agentWatchdog = new AgentWatchdog(
           validateFrom: (from) => from === "IN_PROGRESS",
           validateTask: (task) => {
             const projection = task.projection as
-              | { lastAgentId?: unknown }
-              | undefined;
+              { lastAgentId?: unknown } | undefined;
             const claimedBy =
               typeof task.claimedBy === "string" ? task.claimedBy : null;
             const projectedAgent =
@@ -1422,8 +1760,7 @@ const agentWatchdog = new AgentWatchdog(
         const data = d.data() as Record<string, unknown>;
         if (data.missionId) return; // mission review owned by the conductor
         const projection = data.projection as
-          | { lastAgentId?: unknown; lastActivityAt?: unknown }
-          | undefined;
+          { lastAgentId?: unknown; lastActivityAt?: unknown } | undefined;
         const assigneeAgentId =
           (typeof projection?.lastAgentId === "string" &&
             projection.lastAgentId) ||
@@ -1434,8 +1771,7 @@ const agentWatchdog = new AgentWatchdog(
         // REVIEW is normally a human approval/merge gate, not active agent work.
         // Only explicit non-human review owners opt into stale-review surfacing.
         const reviewPolicy = data.reviewPolicy as
-          | { owner?: unknown; autoMergeWhenGreen?: unknown }
-          | undefined;
+          { owner?: unknown; autoMergeWhenGreen?: unknown } | undefined;
         const reviewOwner =
           (typeof reviewPolicy?.owner === "string" && reviewPolicy.owner) ||
           (typeof data.reviewOwner === "string"
@@ -1452,8 +1788,7 @@ const agentWatchdog = new AgentWatchdog(
         const assigneeDead =
           !live || live.status === "stopped" || live.status === "error";
         const ts = projection?.lastActivityAt as
-          | { toMillis?: () => number }
-          | undefined;
+          { toMillis?: () => number } | undefined;
         out.push({
           taskId: d.id,
           projectId: typeof data.projectId === "string" ? data.projectId : "",
@@ -1833,10 +2168,18 @@ function logTelegramRouteHealth(projectId: string, reason: string): void {
   const health = telegramPoller.getRouteHealth(projectId);
   const target = health.lastDeliveredTarget;
   console.info(
-    `[TelegramPoller:${reason}] project=${projectId} loop=${health.loopRunning ? "running" : "stopped"} ` +
+    `[TelegramPoller:${reason}] project=${projectId} loop=${
+      health.loopRunning ? "running" : "stopped"
+    } ` +
       `lastChatIdKnown=${health.lastChatIdKnown} pendingReply=${health.pendingReply} ` +
       `lastDeliveredUpdateId=${health.lastDeliveredUpdateId ?? "none"} ` +
-      `lastTarget=${target ? `${target.kind}:${target.ptySessionId ?? "unknown"}:${target.status}` : "none"} ` +
+      `lastTarget=${
+        target
+          ? `${target.kind}:${target.ptySessionId ?? "unknown"}:${
+              target.status
+            }`
+          : "none"
+      } ` +
       `unanswered=${health.reliability.unanswered} sendFailures=${health.reliability.sendFailures}`,
   );
 }
@@ -1870,7 +2213,9 @@ function refreshWorkPowerSaveBlocker(): void {
     if (workPowerSaveBlockerId === null) {
       workPowerSaveBlockerId = powerSaveBlocker.start("prevent-app-suspension");
       console.log(
-        `[PowerSave] Started prevent-app-suspension blocker id=${workPowerSaveBlockerId} sources=${sources.join(",")}`,
+        `[PowerSave] Started prevent-app-suspension blocker id=${workPowerSaveBlockerId} sources=${sources.join(
+          ",",
+        )}`,
       );
     }
     return;
@@ -2214,8 +2559,16 @@ import {
   query as fbQuery,
   where as fbWhere,
   getDocs as fbGetDocs,
+  getCountFromServer as fbGetCountFromServer,
   Timestamp as fbTimestamp,
 } from "firebase/firestore";
+import {
+  evaluateGhostReclaim,
+  evaluateAccumulationAlert,
+  parseWorktreeTaskPath,
+  deriveRepoRootFromGitFile,
+  isWorktreeSweepEligibleTaskStatus,
+} from "./agent-lifecycle-reclaim";
 import { applyProjection } from "./mcp-server/projection";
 
 function getFlowDb() {
@@ -3622,8 +3975,7 @@ async function checkProjectConnectionHealth(
   );
 
   let repoView:
-    | { defaultBranch?: string; viewerPermission?: string }
-    | undefined;
+    { defaultBranch?: string; viewerPermission?: string } | undefined;
   if (repoSlug && ghAuthed) {
     const repo = await runConnectionCheckCommand(
       "gh",
@@ -4391,11 +4743,7 @@ ipcMain.handle(
         );
       } else {
         const model = agentData.model as
-          | "claude"
-          | "gemini"
-          | "gpt"
-          | "antigravity"
-          | "custom";
+          "claude" | "gemini" | "gpt" | "antigravity" | "custom";
         if (model === "antigravity") {
           // agy 는 marblo-agy-labels.json 에 저장된 concrete conversation
           // UUID 를 직접 넘긴다 → buildCLICommand 가 --conversation <UUID>
@@ -4438,11 +4786,7 @@ ipcMain.handle(
           id: agentData.id,
           name: agentData.name,
           model: agentData.model as
-            | "claude"
-            | "gemini"
-            | "gpt"
-            | "antigravity"
-            | "custom",
+            "claude" | "gemini" | "gpt" | "antigravity" | "custom",
           role: agentData.role,
           command: agentData.command,
           cwd: rootPath,
@@ -4645,9 +4989,9 @@ interface OrchestratorSwitchLock {
 const orchestratorSwitchLocks = new Map<string, OrchestratorSwitchLock>();
 
 function describeSwitchLock(lock: OrchestratorSwitchLock): string {
-  return `target=${lock.targetModel}, mode=${lock.mode}, stage=${lock.stage}, ageMs=${
-    Date.now() - lock.startedAt
-  }`;
+  return `target=${lock.targetModel}, mode=${lock.mode}, stage=${
+    lock.stage
+  }, ageMs=${Date.now() - lock.startedAt}`;
 }
 
 function firestoreDocsToRaw(
@@ -5621,6 +5965,27 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error("[Main] Agent watchdog startup failed:", err);
   }
+
+  // Resource lifecycle reclaim: one delayed boot pass (after agent:reconnect
+  // had a chance to repopulate AgentManager memory), then periodic ghost
+  // sweeps and slower full sweeps. All timers unref'd — never block quit.
+  const bootSweepTimer = setTimeout(() => {
+    void runLifecycleReclaimSweep("boot");
+  }, GHOST_RECLAIM_BOOT_DELAY_MS);
+  bootSweepTimer.unref?.();
+  const ghostSweepTimer = setInterval(() => {
+    void runGhostReclaimSweep().catch((err) =>
+      console.warn(
+        "[LifecycleReclaim] periodic ghost sweep failed:",
+        err instanceof Error ? err.message : err,
+      ),
+    );
+  }, GHOST_RECLAIM_INTERVAL_MS);
+  ghostSweepTimer.unref?.();
+  const fullSweepTimer = setInterval(() => {
+    void runLifecycleReclaimSweep("interval");
+  }, WORKTREE_SWEEP_INTERVAL_MS);
+  fullSweepTimer.unref?.();
 });
 
 function stopAllOrchestrators(): void {

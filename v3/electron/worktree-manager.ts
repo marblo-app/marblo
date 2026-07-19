@@ -251,6 +251,12 @@ export class WorktreeManager {
       opts?.worktreesRoot ?? path.join(os.homedir(), ".marblo", "worktrees");
   }
 
+  /** Root that holds every task worktree (`<root>/<projectId>/<taskId>`).
+   * Exposed for the lifecycle sweep, which enumerates it directly. */
+  getWorktreesRoot(): string {
+    return this.worktreesRoot;
+  }
+
   /**
    * Single choke-point for git. Never rejects — always resolves a GitResult.
    * With `opts.timeoutMs`, a hung process is SIGKILLed and resolved as a
