@@ -3,7 +3,11 @@
 import { collection, doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
 import { db, ensureAuthenticated } from "./firebase.js";
 import { resolveContextForWrite, isLaneContextId } from "./context.js";
-import { applyProjection, type TaskStatus } from "./projection.js";
+import {
+  applyProjection,
+  areDependenciesComplete,
+  type TaskStatus,
+} from "./projection.js";
 import { selectProjectId } from "./project-resolve.js";
 import {
   taskBodyStorageFields,
@@ -178,7 +182,8 @@ async function createTask(): Promise<void> {
     priority,
     status: "TODO" satisfies TaskStatus,
     dependsOn,
-    dependsOnCompleted: dependsOn.length === 0,
+    // tools.ts create_task 와 동일 — 이미 DONE 인 선행을 걸었을 때의 플래그 고착 방지.
+    dependsOnCompleted: await areDependenciesComplete(db, dependsOn),
     claimedBy: null,
     claimedAt: null,
     scope: stringArray(payload.scope),

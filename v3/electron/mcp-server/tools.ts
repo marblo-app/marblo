@@ -36,6 +36,8 @@ import {
 import {
   applyProjection,
   resolveDependentIfReady,
+  areDependenciesComplete,
+  isDependencyGateOpen,
   computeTaskProjection,
   type ApplyProjectionInput,
 } from "./projection.js";
@@ -1401,7 +1403,10 @@ export function registerTools(server: McpServer): void {
         priority: priority ?? 0,
         status: "TODO",
         dependsOn: deps,
-        dependsOnCompleted: deps.length === 0,
+        // 선행의 **현재** status 로 시드한다. `deps.length === 0` 로만 시드하면
+        // 이미 DONE 인 task 를 의존으로 걸었을 때 flip 을 촉발할 DONE 전이가
+        // 영영 없어 플래그가 false 로 고착 → dispatch/claim 영구 차단(P0).
+        dependsOnCompleted: await areDependenciesComplete(db, deps),
         claimedBy: null,
         claimedAt: null,
         scope: scope ?? [],
@@ -1592,7 +1597,10 @@ export function registerTools(server: McpServer): void {
             priority: (t.priority as number) ?? 0,
             status: "TODO",
             dependsOn: deps,
-            dependsOnCompleted: deps.length === 0,
+            // create_task 와 동일 이유 — 이미 DONE 인 선행을 건 경우의 플래그
+            // 고착 방지. 같은 배치 안의 forward reference 는 아직 TODO 이므로
+            // 자연히 false 로 시드되고, 그 선행이 DONE 될 때 정상 flip 된다.
+            dependsOnCompleted: await areDependenciesComplete(db, deps),
             claimedBy: null,
             claimedAt: null,
             scope: (t.scope as string[]) || [],
@@ -1675,7 +1683,10 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      if (!task.dependsOnCompleted) {
+      // 플래그는 fast-path 캐시일 뿐 — false 면 라이브 재검사 후 판정한다
+      // (edge-trigger 고착으로 영구 차단되던 P0). 라이브로 충족이면 플래그도
+      // 자가치유해 get_available_tasks 쿼리 필터에도 다시 잡히게 한다.
+      if (!(await isDependencyGateOpen(db, task, { heal: true }))) {
         return text("Error: Task dependencies are not yet met.");
       }
 
@@ -2502,7 +2513,9 @@ export function registerTools(server: McpServer): void {
         `Depends on: ${
           task.dependsOn?.length ? task.dependsOn.join(", ") : "(none)"
         }`,
-        `Dependencies met: ${task.dependsOnCompleted}`,
+        // 게이트와 **같은 판정기**로 표시한다. 저장 플래그를 그대로 찍으면
+        // get_task_dependencies(라이브 판정) 와 답이 갈려 진단이 꼬인다.
+        `Dependencies met: ${await isDependencyGateOpen(db, task)}`,
         `Scope: ${task.scope?.length ? task.scope.join(", ") : "(none)"}`,
         `Comment: ${task.comment || "(none)"}`,
         `PR URL: ${task.prUrl || "(none)"}`,
@@ -3038,7 +3051,11 @@ export function registerTools(server: McpServer): void {
             missionContextId,
           );
           if (missionContextError) return text(`Error: ${missionContextError}`);
-          if (!task.dependsOnCompleted) {
+          // claim_task 와 동일 판정기 — 저장 플래그가 stale false 여도 선행이
+          // 실제로 전부 DONE 이면 통과시키고 플래그를 자가치유한다. 이 게이트가
+          // 플래그를 그대로 믿던 탓에, 이미 DONE 인 선행을 건 후행 태스크가
+          // 조회 API 는 "충족"인데 dispatch 만 BLOCKED 로 되돌렸다.
+          if (!(await isDependencyGateOpen(db, task, { heal: true }))) {
             // Mark BLOCKED so it surfaces in the kanban board, then refuse
             // to dispatch. Best-effort — failing to mark is not fatal.
             // Route through applyProjection (not a raw updateDoc) so

@@ -301,6 +301,66 @@ export async function applyProjection(
 // 읽은 dependsOnCompleted 가 이미 true 면(=race 의 패자) 아무 write 도 안 하고
 // unblocked=false 를 돌려준다. 모든 의존의 DONE 여부도 같은 트랜잭션 스냅샷으로
 // 확인해 TOCTOU 를 닫는다 (applyProjection 의 bug_005 가드와 같은 결).
+// ── Level-triggered dependency gate (edge-trigger 고착 버그 수정) ──
+//
+// `dependsOnCompleted` 는 아래 resolveDependentIfReady 로만 flip 되고, 그 호출부는
+// "선행이 DONE 으로 **전이**하는 순간" 뿐이다 = edge-trigger. 그래서 이미 DONE 인
+// task 를 depends_on 으로 걸고 후행을 새로 만들면 flip 을 촉발할 전이가 영영 없어
+// 플래그가 false 로 고착된다 → dispatch/claim 게이트가 영구 차단(P0).
+//
+// 반면 get_task_dependencies 는 선행 문서의 status 를 매번 읽는 **level-trigger**
+// 판정이라 "충족"이라 답한다 — 조회 API 와 게이트가 갈리는 모순의 정체다.
+//
+// 아래 두 함수가 그 level-trigger 판정을 단일 소스로 제공한다. 게이트는 플래그를
+// 캐시로만 쓰고, false 일 때는 라이브로 재검사한다.
+
+/** 선행 의존이 전부 DONE 인가 (라이브 판정). 없는 문서는 미완료로 본다. */
+export async function areDependenciesComplete(
+  db: Firestore,
+  deps: string[],
+): Promise<boolean> {
+  for (const depId of deps) {
+    const snap = await getDoc(doc(db, "tasks", depId));
+    if (!snap.exists()) return false;
+    if ((snap.data() as { status?: string }).status !== "DONE") return false;
+  }
+  return true;
+}
+
+/**
+ * 의존성 게이트가 열려 있는가 — 조회 API 와 게이트가 **같은 답**을 내도록 하는
+ * 단일 판정기. 저장된 플래그는 fast-path 캐시일 뿐이고, false 면 라이브 재검사한다.
+ *
+ * `heal: true` 면 라이브로 충족인데 플래그만 stale false 인 문서를 그 자리에서
+ * 고쳐 쓴다(resolveDependentIfReady 의 멱등 트랜잭션 재사용) — 이미 고착된 기존
+ * 티켓을 별도 마이그레이션 없이 구제한다. 쓰기 실패는 판정에 영향 없다(best-effort).
+ */
+export async function isDependencyGateOpen(
+  db: Firestore,
+  task: {
+    id: string;
+    dependsOn?: string[] | null;
+    dependsOnCompleted?: boolean;
+  },
+  opts: { heal?: boolean } = {},
+): Promise<boolean> {
+  if (task.dependsOnCompleted) return true;
+  const deps = task.dependsOn ?? [];
+  // 의존이 없는데 플래그가 false = 손상된 문서. 의존이 없으므로 게이트는 열린다.
+  if (deps.length === 0) return true;
+  if (!(await areDependenciesComplete(db, deps))) return false;
+
+  if (opts.heal) {
+    try {
+      // completedTaskId 없이(=""), 모든 선행을 트랜잭션 안에서 재확인시킨다.
+      await resolveDependentIfReady(db, task.id, "");
+    } catch (err) {
+      console.error("[dependency gate] flag heal failed:", err);
+    }
+  }
+  return true;
+}
+
 export interface DependencyResolution {
   /** 이 호출이 후행 task 를 막 unblock 했는가(=notify 를 보내야 하는가). */
   unblocked: boolean;
