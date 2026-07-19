@@ -158,6 +158,19 @@ interface NotifyOrchestratorRequest {
   contextId?: string;
 }
 
+interface ValidateOrchestratorSessionRequest {
+  /** Project ID forwarded by the MCP server's MARBLO_PROJECT env. */
+  projectId?: string;
+  /** Same routing context used by /notify-orchestrator. */
+  contextId?: string;
+  /** PTY session id injected into the orchestrator's MCP env at launch. */
+  ptySessionId?: string;
+  /** Diagnostics only; never trusted as authority. */
+  agentId?: string;
+  /** Diagnostics only; included so bridge logs can name the blocked tool. */
+  toolName?: string;
+}
+
 /**
  * 3-way context → orchestrator routing target for /notify-orchestrator.
  * Mirrors src/lib/laneContext.ts (the renderer's single source of truth);
@@ -181,6 +194,42 @@ export function resolveNotifyTarget(
   const isLaneContext = ctx === "lane" || ctx.startsWith("lane:");
   const isMissionContext = ctx !== "" && ctx !== "board" && !isLaneContext;
   return isMissionContext ? "mission" : "board";
+}
+
+export function validateOrchestratorSessionIdentity(input: {
+  expectedPtySessionId?: string;
+  currentSession?: { ptySessionId: string; status: string } | null;
+}): { valid: boolean; reason: string; currentPtySessionId?: string } {
+  const expectedPtySessionId = input.expectedPtySessionId ?? "";
+  if (!expectedPtySessionId) {
+    return {
+      valid: false,
+      reason: "missing orchestrator PTY session id",
+    };
+  }
+
+  const session = input.currentSession;
+  if (!session || (session.status !== "starting" && session.status !== "running")) {
+    return {
+      valid: false,
+      reason: "orchestrator session is not running",
+      currentPtySessionId: session?.ptySessionId,
+    };
+  }
+
+  if (session.ptySessionId !== expectedPtySessionId) {
+    return {
+      valid: false,
+      reason: "stale orchestrator PTY session",
+      currentPtySessionId: session.ptySessionId,
+    };
+  }
+
+  return {
+    valid: true,
+    reason: "current orchestrator PTY session",
+    currentPtySessionId: session.ptySessionId,
+  };
 }
 
 const IMPORTANT_TASK_UPDATE_STATUSES = new Set(["DONE", "FAILED", "BLOCKED"]);
@@ -802,6 +851,14 @@ export class BridgeServer {
           return;
         }
 
+        if (
+          req.method === "POST" &&
+          req.url === "/validate-orchestrator-session"
+        ) {
+          this.handleValidateOrchestratorSession(req, res);
+          return;
+        }
+
         if (req.method === "POST" && req.url === "/reuse-agent") {
           this.handleReuseAgent(req, res);
           return;
@@ -1297,6 +1354,70 @@ export class BridgeServer {
           }),
         );
       }
+    });
+  }
+
+  // ── POST /validate-orchestrator-session ───────────────────────
+
+  private handleValidateOrchestratorSession(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      let params: ValidateOrchestratorSessionRequest;
+      try {
+        params = JSON.parse(body) as ValidateOrchestratorSessionRequest;
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            success: false,
+            valid: false,
+            error: `Invalid JSON: ${
+              err instanceof Error ? err.message : "parse error"
+            }`,
+          }),
+        );
+        return;
+      }
+
+      const projectId = params.projectId ?? "";
+      const contextId = params.contextId ?? "";
+      const target = resolveNotifyTarget(contextId);
+      const orch =
+        target === "mission"
+          ? this.missionOrchestratorLookup(projectId)
+          : this.orchestratorLookup(projectId);
+      const validation = validateOrchestratorSessionIdentity({
+        expectedPtySessionId: params.ptySessionId,
+        currentSession: orch?.getSession(),
+      });
+
+      if (!validation.valid) {
+        console.warn(
+          `[BridgeServer] Rejected stale ${target} orchestrator MCP write ` +
+            `(project=${projectId || "missing"}, context=${
+              contextId || "board"
+            }, agent=${params.agentId || "unknown"}, tool=${
+              params.toolName || "unknown"
+            }): ${validation.reason}`,
+        );
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          success: true,
+          target,
+          valid: validation.valid,
+          reason: validation.reason,
+          currentPtySessionId: validation.currentPtySessionId,
+        }),
+      );
     });
   }
 

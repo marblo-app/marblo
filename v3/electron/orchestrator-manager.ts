@@ -812,7 +812,9 @@ export class OrchestratorManager {
       ELECTRON_RUN_AS_NODE: "1",
       MARBLO_BRIDGE_PORT: String(bridgePort),
       MARBLO_PROJECT: projectId,
+      MARBLO_ORCHESTRATOR_PTY_SESSION_ID: ptySessionId,
     };
+    launchConfig.env.MARBLO_ORCHESTRATOR_PTY_SESSION_ID = ptySessionId;
     if (bridgeToken) {
       mcpEnvPatch.MARBLO_BRIDGE_TOKEN = bridgeToken;
     }

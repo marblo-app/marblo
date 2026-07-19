@@ -631,6 +631,8 @@ async function ensureTaskMissionContext(
 // ── Audit Logging ─────────────────────────────────────────────
 
 const MARBLO_AGENT_ID = process.env.MARBLO_AGENT_ID || "unknown";
+const MARBLO_ORCHESTRATOR_PTY_SESSION_ID =
+  process.env.MARBLO_ORCHESTRATOR_PTY_SESSION_ID || "";
 
 /**
  * 작업자 귀속(claimedBy / projection.lastAgentId)에 쓸 agent id.
@@ -647,6 +649,88 @@ function workerAgentId(rawId: string): string {
   return rawId;
 }
 const WORKER_AGENT_ID = workerAgentId(MARBLO_AGENT_ID);
+
+interface OrchestratorSessionValidationResponse {
+  success?: boolean;
+  valid?: boolean;
+  reason?: string;
+}
+
+const ORCHESTRATOR_LIVE_GUARDED_TOOLS = new Set([
+  "create_task",
+  "create_tasks_bulk",
+  "claim_task",
+  "update_task_status",
+  "add_activity",
+  "submit_for_review",
+  "acknowledge_feedback",
+  "spawn_agent",
+  "delete_task",
+  "reuse_agent",
+  "dispatch_task",
+  "kill_agent",
+  "cleanup_agents",
+  "create_flow",
+  "update_flow",
+  "add_pending_instruction",
+  "mark_instruction_delivered",
+  "run_skill",
+  "mission_step_done",
+  "send_telegram_message",
+]);
+
+async function validateLiveOrchestratorToolCall(
+  toolName: string,
+): Promise<string | null> {
+  if (!ORCHESTRATOR_LIVE_GUARDED_TOOLS.has(toolName)) return null;
+  if (!isOrchestratorAgentId(MARBLO_AGENT_ID)) return null;
+
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) {
+    return (
+      `Error: Refusing ${toolName}: orchestrator session liveness cannot be ` +
+      "validated because MARBLO_BRIDGE_PORT is missing."
+    );
+  }
+  if (!MARBLO_ORCHESTRATOR_PTY_SESSION_ID) {
+    return (
+      `Error: Refusing ${toolName}: orchestrator session liveness cannot be ` +
+      "validated because MARBLO_ORCHESTRATOR_PTY_SESSION_ID is missing."
+    );
+  }
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${bridgePort}/validate-orchestrator-session`,
+      {
+        method: "POST",
+        headers: bridgeHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          projectId: process.env.MARBLO_PROJECT || "",
+          contextId: process.env.MARBLO_CONTEXT || "",
+          ptySessionId: MARBLO_ORCHESTRATOR_PTY_SESSION_ID,
+          agentId: MARBLO_AGENT_ID,
+          toolName,
+        }),
+      },
+    );
+    if (!response.ok) {
+      return `Error: Refusing ${toolName}: orchestrator session validation failed with HTTP ${response.status}.`;
+    }
+    const data =
+      (await response.json()) as OrchestratorSessionValidationResponse;
+    if (!data.valid) {
+      return `Error: Refusing ${toolName}: ${
+        data.reason || "stale orchestrator session"
+      }.`;
+    }
+    return null;
+  } catch (err) {
+    return `Error: Refusing ${toolName}: orchestrator session validation failed (${
+      err instanceof Error ? err.message : String(err)
+    }).`;
+  }
+}
 
 /**
  * 보드 귀속(claimedBy / projection.lastAgentId)용 id — env 의 실 워커 id 우선.
@@ -929,6 +1013,12 @@ export function registerTools(server: McpServer): void {
       let resultText = "";
 
       try {
+        const orchestratorGuardError =
+          await validateLiveOrchestratorToolCall(name);
+        if (orchestratorGuardError) {
+          resultText = orchestratorGuardError;
+          return text(orchestratorGuardError);
+        }
         const result = await invoke(...args);
         resultText = result?.content?.[0]?.text || "";
         return result;

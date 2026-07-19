@@ -15,6 +15,7 @@ import {
   isAllowedSpawnCommand,
   bearerTokenMatches,
   ALLOWED_SPAWN_COMMANDS,
+  validateOrchestratorSessionIdentity,
 } from "../../electron/bridge-server";
 
 describe("isLoopbackHost — DNS-rebinding defense", () => {
@@ -94,5 +95,49 @@ describe("bearerTokenMatches — auth gate", () => {
 
   it("fails closed when no token is configured", () => {
     expect(bearerTokenMatches(`Bearer ${token}`, "")).toBe(false);
+  });
+});
+
+describe("validateOrchestratorSessionIdentity — stale orchestrator guard", () => {
+  it("accepts only the currently registered orchestrator PTY", () => {
+    expect(
+      validateOrchestratorSessionIdentity({
+        expectedPtySessionId: "pty-new",
+        currentSession: { ptySessionId: "pty-new", status: "running" },
+      }),
+    ).toMatchObject({ valid: true });
+
+    expect(
+      validateOrchestratorSessionIdentity({
+        expectedPtySessionId: "pty-old",
+        currentSession: { ptySessionId: "pty-new", status: "running" },
+      }),
+    ).toMatchObject({
+      valid: false,
+      reason: "stale orchestrator PTY session",
+      currentPtySessionId: "pty-new",
+    });
+  });
+
+  it("fails closed when the caller has no PTY identity or no live session exists", () => {
+    expect(
+      validateOrchestratorSessionIdentity({
+        expectedPtySessionId: "",
+        currentSession: { ptySessionId: "pty-new", status: "running" },
+      }),
+    ).toMatchObject({
+      valid: false,
+      reason: "missing orchestrator PTY session id",
+    });
+
+    expect(
+      validateOrchestratorSessionIdentity({
+        expectedPtySessionId: "pty-old",
+        currentSession: null,
+      }),
+    ).toMatchObject({
+      valid: false,
+      reason: "orchestrator session is not running",
+    });
   });
 });
