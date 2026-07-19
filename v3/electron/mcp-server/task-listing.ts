@@ -16,6 +16,28 @@
  * here), then spend any leftover row budget on completed tasks as a tail.
  */
 
+/**
+ * How many open rows the Firestore page may read, independent of the caller's
+ * `limit`.
+ *
+ * PR#486 made openness a query predicate but still bounded that query with the
+ * caller's `rowLimit`. Firestore applies `limit` BEFORE the in-memory predicates
+ * `get_all_tasks` still has to run (soft-delete, `contextId` scope), so the row
+ * budget was spent on rows that were then thrown away — the *same* membership
+ * bug one layer down. Measured on board evx9sK8lc6OX3vYEP4Ld (2026-07-19): 57
+ * open tickets, `limit` default 50 → Firestore returned 50, the in-memory
+ * filters cut them to 37, and the 13-row shortfall was backfilled with DONE
+ * rows. The caller saw a full-looking 50-row board that was missing 20 open
+ * tickets with no indication anything had been dropped.
+ *
+ * Fetching the whole open set instead is both correct and cheap: the set is
+ * small and bounded by definition (57 of ~1000 docs here), and it is the only
+ * way the priority sort can be meaningful — sorting an arbitrary Firestore page
+ * of 50 unordered open docs never yielded "the top 50 by priority" either.
+ * 500 is Firestore's per-query maximum.
+ */
+export const OPEN_FETCH_CAP = 500;
+
 /** Statuses that are still actionable. Complement of TERMINAL_TASK_STATUSES. */
 export const OPEN_TASK_STATUSES = [
   "TODO",
@@ -89,14 +111,45 @@ export function mergeListedTasks<T extends { id: string; status?: unknown }>(
   terminalDocs: T[],
   rowLimit: number,
 ): T[] {
+  return summarizeListing(openDocs, terminalDocs, rowLimit).rows;
+}
+
+/** `mergeListedTasks` plus the counts needed to describe what was withheld. */
+export interface ListingSummary<T> {
+  /** Open rows (all of them) followed by whatever completed tail fits. */
+  rows: T[];
+  /** Open rows that exist after filtering — may exceed `rowLimit`. */
+  openTotal: number;
+  /** Open rows the caller's `rowLimit` will hide when `rows` is rendered. */
+  openHidden: number;
+}
+
+/**
+ * Same merge as `mergeListedTasks`, but also reports how many open rows the
+ * caller's limit will hide.
+ *
+ * Silent truncation is what made this bug invisible for a week: a short board
+ * and a truncated board looked identical, so the orchestrator treated a partial
+ * list as the whole board. Callers render the count so "there is more" is
+ * always stated rather than inferred.
+ */
+export function summarizeListing<T extends { id: string; status?: unknown }>(
+  openDocs: T[],
+  terminalDocs: T[],
+  rowLimit: number,
+): ListingSummary<T> {
   const open = openDocs.filter((t) => !isTerminalStatus(t.status));
   const seen = new Set(open.map((t) => t.id));
   const tail = terminalDocs.filter(
     (t) => isTerminalStatus(t.status) && !seen.has(t.id),
   );
   const room = Math.max(0, rowLimit - open.length);
-  return [
-    ...open.sort(compareTasksForListing),
-    ...tail.sort(compareTasksForListing).slice(0, room),
-  ];
+  return {
+    rows: [
+      ...open.sort(compareTasksForListing),
+      ...tail.sort(compareTasksForListing).slice(0, room),
+    ],
+    openTotal: open.length,
+    openHidden: Math.max(0, open.length - rowLimit),
+  };
 }

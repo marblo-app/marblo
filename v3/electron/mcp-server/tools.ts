@@ -60,9 +60,11 @@ import {
 } from "./agent-reap.js";
 import {
   OPEN_TASK_STATUSES,
-  mergeListedTasks,
+  OPEN_FETCH_CAP,
+  summarizeListing,
   compareTasksForListing,
 } from "./task-listing.js";
+import { staleBuildNotice } from "./build-info.js";
 import {
   formatCompletionReport,
   resolveCompletionReport,
@@ -813,6 +815,32 @@ function isTerminalTaskStatus(s: unknown): boolean {
 }
 
 /**
+ * Prepend a stale-build warning to a tool result when this process is serving
+ * code older than the bundle on disk.
+ *
+ * Ticket SsHpTM43EqqPTM1ZWQVA: PR#486 shipped and the bug kept reproducing for
+ * a week because a long-lived MCP process keeps running the bundle it loaded at
+ * spawn, and nothing anywhere said so. The check rides on tool results because
+ * that is the one channel the orchestrator always reads; `staleBuildNotice`
+ * self-throttles to ~30min and fails closed to null, so a healthy server pays
+ * one cached stat and adds nothing to its output.
+ */
+async function withStaleBuildNotice<T>(result: T): Promise<T> {
+  const notice = await staleBuildNotice();
+  if (!notice) return result;
+  const r = result as { content?: Array<{ type?: string; text?: string }> };
+  const first = r?.content?.[0];
+  if (!first || typeof first.text !== "string") return result;
+  return {
+    ...(r as object),
+    content: [
+      { ...first, text: `${notice}\n\n${first.text}` },
+      ...r.content!.slice(1),
+    ],
+  } as T;
+}
+
+/**
  * Run a read-bounding query (base equality filters + an orderBy/limit tail) and
  * fall back to the unbounded query (base filters only) if Firestore rejects it
  * for a missing composite index. Once the indexes in firestore.indexes.json are
@@ -994,7 +1022,10 @@ export function registerTools(server: McpServer): void {
       // 감사 로그 자체를 쓰지 않는다 — 시스템 페이로드(스킬 본문 등) 노이즈 방지.
       const gatedHandler = (async (...args: unknown[]) => {
         await ensureAuthenticated();
-        return (handler as unknown as (...a: unknown[]) => unknown)(...args);
+        const result = await (
+          handler as unknown as (...a: unknown[]) => unknown
+        )(...args);
+        return withStaleBuildNotice(result);
       }) as unknown as ToolCallback<Args>;
       originalTool(name, description, schema, gatedHandler);
       return;
@@ -1019,7 +1050,9 @@ export function registerTools(server: McpServer): void {
           resultText = orchestratorGuardError;
           return text(orchestratorGuardError);
         }
-        const result = await invoke(...args);
+        const result = (await withStaleBuildNotice(
+          await invoke(...args),
+        )) as Awaited<ReturnType<typeof invoke>>;
         resultText = result?.content?.[0]?.text || "";
         return result;
       } catch (err) {
@@ -1117,14 +1150,21 @@ export function registerTools(server: McpServer): void {
           );
       };
 
+      // Bound the open page by the size of the open SET, not by the caller's
+      // rowLimit. Firestore applies `limit` before the in-memory soft-delete /
+      // context filters below, so bounding by rowLimit spent the row budget on
+      // rows that were then discarded — open tickets vanished and the gap was
+      // backfilled with DONE (ticket SsHpTM43EqqPTM1ZWQVA: 57 open, limit 50,
+      // 37 rendered). Reading the whole open set also makes the priority sort
+      // meaningful; an arbitrary page of 50 was never "the top 50".
       const openDocs = await readDocs(
         [where("status", "in", [...OPEN_TASK_STATUSES])],
-        [fsLimit(rowLimit)],
+        [fsLimit(OPEN_FETCH_CAP)],
         "get_all_tasks:open",
       );
       // Only pay for the completed tail when there is room to render it. This
       // query is intentionally NOT status-filtered so it reuses the existing
-      // (projectId, …, priority DESC) indexes; mergeListedTasks drops the open
+      // (projectId, …, priority DESC) indexes; summarizeListing drops the open
       // rows it re-reads.
       const tailRoom = Math.max(0, rowLimit - openDocs.length);
       const terminalDocs = tailRoom
@@ -1135,7 +1175,8 @@ export function registerTools(server: McpServer): void {
           )
         : [];
 
-      const docs = mergeListedTasks(openDocs, terminalDocs, rowLimit);
+      const listing = summarizeListing(openDocs, terminalDocs, rowLimit);
+      const docs = listing.rows;
       if (docs.length === 0) return text("No tasks found.");
       const lines = docs.map((t) => {
         const claimed = t.claimedBy ? ` → ${t.claimedBy}` : "";
@@ -1145,11 +1186,16 @@ export function registerTools(server: McpServer): void {
           t.id
         }${proj}${ctx})${claimed}`;
       });
+      // State the open-row count explicitly. A truncated board and a short
+      // board used to render identically, so the orchestrator read a partial
+      // list as the whole board — that silence is what hid this bug.
       return text(
         capLines(
           lines,
           rowLimit,
-          "raise limit or filter by role; every open task is listed before any completed one",
+          listing.openHidden > 0
+            ? `${listing.openHidden} of ${listing.openTotal} OPEN tasks are hidden by limit=${rowLimit} — raise limit or filter by role to see them all`
+            : `${listing.openTotal} open tasks shown in full; the rest are completed`,
         ),
       );
     },

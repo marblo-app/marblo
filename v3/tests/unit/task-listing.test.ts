@@ -6,6 +6,8 @@ import {
   normalizePriority,
   compareTasksForListing,
   mergeListedTasks,
+  summarizeListing,
+  OPEN_FETCH_CAP,
 } from "../../electron/mcp-server/task-listing";
 
 type Row = { id: string; status: string; priority: unknown };
@@ -111,5 +113,59 @@ describe("mergeListedTasks — the get_all_tasks membership regression", () => {
 
   it("returns an empty list when there is nothing to show", () => {
     expect(mergeListedTasks([], [], 50)).toEqual([]);
+  });
+});
+
+describe("summarizeListing — silent truncation (ticket SsHpTM43)", () => {
+  // The board that still reproduced after PR#486: 57 open tickets, default
+  // limit 50. Firestore's limit ran before the in-memory soft-delete/context
+  // filters, so 50 fetched rows became 37 open rows and the shortfall was
+  // backfilled with DONE — a full-looking board missing 20 open tickets.
+  const open = (n: number): Row[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `open-${i}`,
+      status: "TODO",
+      priority: 1,
+    }));
+  const done = (n: number): Row[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `done-${i}`,
+      status: "DONE",
+      priority: 5,
+    }));
+
+  it("reports how many open rows the limit will hide", () => {
+    const s = summarizeListing(open(57), done(457), 50);
+    expect(s.openTotal).toBe(57);
+    expect(s.openHidden).toBe(7);
+  });
+
+  it("never backfills completed rows while open rows are being withheld", () => {
+    // This is the regression that made the bug invisible: a DONE row must never
+    // occupy a slot that an unrendered open row was entitled to.
+    const s = summarizeListing(open(57), done(457), 50);
+    expect(s.rows.every((r) => !isTerminalStatus(r.status))).toBe(true);
+  });
+
+  it("reports nothing hidden when every open row fits", () => {
+    const s = summarizeListing(open(10), done(457), 50);
+    expect(s.openHidden).toBe(0);
+    expect(s.openTotal).toBe(10);
+    expect(s.rows).toHaveLength(50); // leftover budget goes to the DONE tail
+  });
+
+  it("counts open rows after terminal rows are excluded", () => {
+    const s = summarizeListing([...open(5), ...done(3)], done(10), 50);
+    expect(s.openTotal).toBe(5);
+  });
+
+  it("agrees with mergeListedTasks", () => {
+    expect(summarizeListing(open(20), done(100), 50).rows).toEqual(
+      mergeListedTasks(open(20), done(100), 50),
+    );
+  });
+
+  it("caps the open page at Firestore's per-query maximum", () => {
+    expect(OPEN_FETCH_CAP).toBe(500);
   });
 });

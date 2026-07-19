@@ -6,6 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { authReady } from "./firebase.js";
 import { registerTools } from "./tools.js";
 import { registerPrompts } from "./prompts.js";
+import { bakedBuildStamp, entryPath, formatBootBanner } from "./build-info.js";
 
 // ── 전역 안전망 ──────────────────────────────────────────────────────────────
 // 단일 unhandledRejection / uncaughtException 로 MCP 프로세스가 죽으면 클라이언트
@@ -131,6 +132,12 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Marblo MCP Server v3.0 started (stdio)");
+  // Which build is this process actually running? Without this line a stale
+  // process is indistinguishable from a current one — the failure that let
+  // PR#486 look unapplied for a week while 23 orphaned servers kept serving
+  // pre-fix code (ticket SsHpTM43EqqPTM1ZWQVA). stderr only: stdout carries the
+  // JSONRPC frames.
+  console.error(formatBootBanner(bakedBuildStamp(), entryPath()));
 
   startBridgePortRefresher();
 
