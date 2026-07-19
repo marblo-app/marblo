@@ -171,10 +171,124 @@ export class FsManager {
   }
 
   /**
-   * Get git diff for a specific file
+   * Run a git command, rejecting on non-zero exit.
+   *
+   * Deliberately NOT the resolve-empty-on-error shape `getGitStatus` uses: the
+   * worktree-diff collection path must be able to tell "this worktree has no
+   * changes" apart from "we failed to find out". Swallowing the failure into an
+   * empty list is what made a broken collection render as an honest-looking
+   * "변경 없음" (ticket F2WGGGVthmg7lN490PDy).
+   */
+  private git(args: string[], cwd: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let proc;
+      try {
+        proc = spawn("git", args, { cwd });
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      let out = "";
+      let errOut = "";
+      proc.stdout.on("data", (d) => {
+        out += d.toString();
+      });
+      proc.stderr.on("data", (d) => {
+        errOut += d.toString();
+      });
+      proc.on("error", reject);
+      proc.on("close", (code) => {
+        if (code === 0) resolve(out);
+        else
+          reject(
+            new Error(
+              `git ${args[0]} exited ${code}${errOut.trim() ? `: ${errOut.trim()}` : ""}`,
+            ),
+          );
+      });
+    });
+  }
+
+  /**
+   * Everything a worktree changed relative to its base branch — the file set
+   * behind "이 워크트리 보기".
+   *
+   * ── Why merge-base and not HEAD ──────────────────────────────────────────────
+   * `git status` only sees the working tree, so a worktree whose agent already
+   * committed reports zero changed files. Measured on the live checkout: 36 of
+   * 50 worktrees were in exactly that state, which is why the diff auto-open
+   * (PR#493) opened nothing for most worktrees. Diffing against
+   * `merge-base(baseRef, HEAD)` instead gives one baseline that covers committed
+   * AND uncommitted work in a single set, and it is stable while base moves on.
+   *
+   * Untracked files are unioned in separately — `git diff` never reports them,
+   * but a brand-new file an agent wrote is a change the user expects to see.
+   *
+   * On-demand only: this runs for ONE worktree when the user clicks it, never as
+   * part of enumeration. It does not reintroduce the per-worktree status sweep
+   * that PR#495/#498 removed for performance.
+   */
+  async getWorktreeChanges(
+    rootPath: string,
+    baseRef: string,
+  ): Promise<{
+    baseSha: string;
+    files: Array<{ relPath: string; status: string }>;
+  }> {
+    // merge-base pins the fork point, so later commits on base don't show up as
+    // this worktree's changes. Fall back to the ref itself for a detached or
+    // otherwise unrelated history rather than failing the whole collection.
+    let baseSha: string;
+    try {
+      baseSha = (
+        await this.git(["merge-base", baseRef, "HEAD"], rootPath)
+      ).trim();
+    } catch {
+      baseSha = (await this.git(["rev-parse", baseRef], rootPath)).trim();
+    }
+
+    const nameStatus = await this.git(
+      ["diff", "--name-status", "--no-renames", baseSha],
+      rootPath,
+    );
+    const untracked = await this.git(
+      ["ls-files", "--others", "--exclude-standard"],
+      rootPath,
+    );
+
+    const files = new Map<string, string>();
+    for (const line of nameStatus.split("\n")) {
+      if (!line.trim()) continue;
+      // "<status>\t<path>" — --no-renames keeps this to a single path column.
+      const tab = line.indexOf("\t");
+      if (tab === -1) continue;
+      const status = line.slice(0, tab).trim();
+      const relPath = line.slice(tab + 1).trim();
+      if (relPath) files.set(relPath, status);
+    }
+    for (const line of untracked.split("\n")) {
+      const relPath = line.trim();
+      // A tracked-and-modified path wins over the untracked listing.
+      if (relPath && !files.has(relPath)) files.set(relPath, "??");
+    }
+
+    return {
+      baseSha,
+      files: [...files].map(([relPath, status]) => ({ relPath, status })),
+    };
+  }
+
+  /**
+   * Get git diff for a specific file.
+   *
+   * `baseSha` selects the baseline the file is compared against. Omitted it
+   * stays HEAD (the working-tree-edit case every existing caller wants); the
+   * worktree diff passes the merge-base from {@link getWorktreeChanges} so
+   * already-committed work still renders as a diff instead of an empty one.
    */
   async getGitDiff(
-    filePath: string
+    filePath: string,
+    baseSha?: string,
   ): Promise<{ original: string; modified: string }> {
     const dir = path.dirname(filePath);
     return new Promise((resolve) => {
@@ -182,8 +296,11 @@ export class FsManager {
         // Get the original version from git
         const proc = spawn(
           "git",
-          ["show", `HEAD:${path.relative(this.findGitRoot(dir), filePath)}`],
-          { cwd: dir }
+          [
+            "show",
+            `${baseSha ?? "HEAD"}:${path.relative(this.findGitRoot(dir), filePath)}`,
+          ],
+          { cwd: dir },
         );
         let original = "";
 
@@ -337,7 +454,7 @@ export class FsManager {
   watchDirectory(
     token: string,
     rootPath: string,
-    callback: (event: string, filePath: string) => void
+    callback: (event: string, filePath: string) => void,
   ): void {
     const existing = this.watchers.get(token);
     if (existing) existing.close();
@@ -354,7 +471,7 @@ export class FsManager {
             if (parts.some((p) => DEFAULT_IGNORES.has(p))) return;
             callback(eventType, fullPath);
           }
-        }
+        },
       );
       this.watchers.set(token, watcher);
     } catch {

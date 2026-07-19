@@ -636,7 +636,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("fs:writeFile", { rootPath, filePath, content }),
     gitStatus: (rootPath: string) =>
       ipcRenderer.invoke("fs:gitStatus", rootPath),
-    gitDiff: (filePath: string) => ipcRenderer.invoke("fs:gitDiff", filePath),
+    // Everything the worktree changed vs. its base branch (committed +
+    // uncommitted + untracked), on-demand for a single worktree.
+    gitWorktreeChanges: (rootPath: string, baseRef: string) =>
+      ipcRenderer.invoke("fs:gitWorktreeChanges", { rootPath, baseRef }),
+    gitDiff: (filePath: string, baseSha?: string) =>
+      ipcRenderer.invoke("fs:gitDiff", filePath, baseSha),
     gitRemoteUrl: (rootPath: string) =>
       ipcRenderer.invoke("fs:gitRemoteUrl", rootPath),
     selectDirectory: () => ipcRenderer.invoke("fs:selectDirectory"),

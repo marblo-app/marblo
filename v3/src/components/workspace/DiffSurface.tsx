@@ -3,6 +3,7 @@ import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { useTranslation } from "../../lib/i18n";
 import { useProjectStore } from "../../stores/projectStore";
+import { useWorktreeDiffStore } from "../../stores/worktreeDiffStore";
 import { useAuth } from "../../hooks/useAuth";
 import {
   routeInstructionToOrchestrator,
@@ -59,12 +60,23 @@ export function DiffSurface({
     userName: user?.displayName ?? "User",
   };
 
+  // Baseline for THIS file. When it is part of a worktree diff auto-open, use
+  // that collection's merge-base so already-committed work still renders as a
+  // diff — against the default HEAD baseline a committed file reads as
+  // identical and the surface shows an empty diff. Any other file (a normal
+  // working-tree edit) keeps the HEAD baseline.
+  const baseSha = useWorktreeDiffStore((s) =>
+    s.state.kind === "opened" && s.state.files.some((f) => f.path === filePath)
+      ? s.state.baseSha
+      : undefined,
+  );
+
   // Load the git baseline for the diff.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     window.electronAPI.fs
-      .gitDiff(filePath)
+      .gitDiff(filePath, baseSha)
       .then((result) => {
         if (!cancelled) {
           setOriginal(result.original);
@@ -80,7 +92,7 @@ export function DiffSurface({
     return () => {
       cancelled = true;
     };
-  }, [filePath]);
+  }, [filePath, baseSha]);
 
   const clearZone = () => {
     const ed = editorRef.current;

@@ -24,6 +24,13 @@ export type WorktreeDiffState =
       worktreePath: string;
       openedPath: string;
       files: WorktreeChangedFile[];
+      /**
+       * merge-base(baseRef, HEAD) — the baseline these files were collected
+       * against, handed to the diff surface so *committed* work renders as a
+       * diff. Undefined on the legacy `gitStatus` fallback path, where the
+       * baseline is HEAD.
+       */
+      baseSha?: string;
     }
   /**
    * Working tree is clean but the branch has commits vs. its base — the agent

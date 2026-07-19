@@ -21,8 +21,21 @@ interface FsAPI {
     content: string,
   ) => Promise<void>;
   gitStatus: (rootPath: string) => Promise<Record<string, string>>;
+  /**
+   * Changed files for one worktree vs. merge-base(baseRef, HEAD) — committed,
+   * uncommitted and untracked in a single set. Optional: a renderer running
+   * against an older preload (dev HMR) falls back to `gitStatus`.
+   */
+  gitWorktreeChanges?: (
+    rootPath: string,
+    baseRef: string,
+  ) => Promise<{
+    baseSha: string;
+    files: Array<{ relPath: string; status: string }>;
+  }>;
   gitDiff: (
     filePath: string,
+    baseSha?: string,
   ) => Promise<{ original: string; modified: string }>;
   gitRemoteUrl: (rootPath: string) => Promise<string | null>;
   selectDirectory: () => Promise<string | null>;

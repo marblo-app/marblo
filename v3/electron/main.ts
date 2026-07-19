@@ -1404,7 +1404,8 @@ const agentWatchdog = new AgentWatchdog(
         // Mission tickets are recovered by the conductor's report-watchdog.
         if (data.missionId) return;
         const projection = data.projection as
-          { lastAgentId?: unknown; lastActivityAt?: unknown } | undefined;
+          | { lastAgentId?: unknown; lastActivityAt?: unknown }
+          | undefined;
         const agentId =
           (typeof projection?.lastAgentId === "string" &&
             projection.lastAgentId) ||
@@ -1422,7 +1423,8 @@ const agentWatchdog = new AgentWatchdog(
         // respawn restores the original cwd + model + complexity instead of
         // re-resolving them (fresh base worktree + claude→gpt re-selection).
         const meta = data.dispatchMeta as
-          { cwd?: unknown; model?: unknown; complexity?: unknown } | undefined;
+          | { cwd?: unknown; model?: unknown; complexity?: unknown }
+          | undefined;
         const metaComplexity =
           meta?.complexity === "simple" ||
           meta?.complexity === "standard" ||
@@ -1711,7 +1713,8 @@ const agentWatchdog = new AgentWatchdog(
           validateFrom: (from) => from === "IN_PROGRESS",
           validateTask: (task) => {
             const projection = task.projection as
-              { lastAgentId?: unknown } | undefined;
+              | { lastAgentId?: unknown }
+              | undefined;
             const claimedBy =
               typeof task.claimedBy === "string" ? task.claimedBy : null;
             const projectedAgent =
@@ -1767,7 +1770,8 @@ const agentWatchdog = new AgentWatchdog(
         const data = d.data() as Record<string, unknown>;
         if (data.missionId) return; // mission review owned by the conductor
         const projection = data.projection as
-          { lastAgentId?: unknown; lastActivityAt?: unknown } | undefined;
+          | { lastAgentId?: unknown; lastActivityAt?: unknown }
+          | undefined;
         const assigneeAgentId =
           (typeof projection?.lastAgentId === "string" &&
             projection.lastAgentId) ||
@@ -1778,7 +1782,8 @@ const agentWatchdog = new AgentWatchdog(
         // REVIEW is normally a human approval/merge gate, not active agent work.
         // Only explicit non-human review owners opt into stale-review surfacing.
         const reviewPolicy = data.reviewPolicy as
-          { owner?: unknown; autoMergeWhenGreen?: unknown } | undefined;
+          | { owner?: unknown; autoMergeWhenGreen?: unknown }
+          | undefined;
         const reviewOwner =
           (typeof reviewPolicy?.owner === "string" && reviewPolicy.owner) ||
           (typeof data.reviewOwner === "string"
@@ -1795,7 +1800,8 @@ const agentWatchdog = new AgentWatchdog(
         const assigneeDead =
           !live || live.status === "stopped" || live.status === "error";
         const ts = projection?.lastActivityAt as
-          { toMillis?: () => number } | undefined;
+          | { toMillis?: () => number }
+          | undefined;
         out.push({
           taskId: d.id,
           projectId: typeof data.projectId === "string" ? data.projectId : "",
@@ -3659,9 +3665,25 @@ ipcMain.handle("fs:gitStatus", async (_event, rootPath: string) => {
   return fsManager.getGitStatus(rootPath);
 });
 
-ipcMain.handle("fs:gitDiff", async (_event, filePath: string) => {
-  return fsManager.getGitDiff(filePath);
-});
+// Changed-file set for a worktree, relative to merge-base(baseRef, HEAD) — the
+// collection behind "이 워크트리 보기". Errors propagate to the renderer on
+// purpose: a failed collection must not be indistinguishable from "no changes".
+ipcMain.handle(
+  "fs:gitWorktreeChanges",
+  async (
+    _event,
+    { rootPath, baseRef }: { rootPath: string; baseRef: string },
+  ) => {
+    return fsManager.getWorktreeChanges(rootPath, baseRef);
+  },
+);
+
+ipcMain.handle(
+  "fs:gitDiff",
+  async (_event, filePath: string, baseSha?: string) => {
+    return fsManager.getGitDiff(filePath, baseSha);
+  },
+);
 
 ipcMain.handle("fs:gitRemoteUrl", async (_event, rootPath: string) => {
   return fsManager.getGitRemoteUrl(rootPath);
@@ -4042,7 +4064,8 @@ async function checkProjectConnectionHealth(
   );
 
   let repoView:
-    { defaultBranch?: string; viewerPermission?: string } | undefined;
+    | { defaultBranch?: string; viewerPermission?: string }
+    | undefined;
   if (repoSlug && ghAuthed) {
     const repo = await runConnectionCheckCommand(
       "gh",
@@ -4810,7 +4833,11 @@ ipcMain.handle(
         );
       } else {
         const model = agentData.model as
-          "claude" | "gemini" | "gpt" | "antigravity" | "custom";
+          | "claude"
+          | "gemini"
+          | "gpt"
+          | "antigravity"
+          | "custom";
         if (model === "antigravity") {
           // agy 는 marblo-agy-labels.json 에 저장된 concrete conversation
           // UUID 를 직접 넘긴다 → buildCLICommand 가 --conversation <UUID>
@@ -4853,7 +4880,11 @@ ipcMain.handle(
           id: agentData.id,
           name: agentData.name,
           model: agentData.model as
-            "claude" | "gemini" | "gpt" | "antigravity" | "custom",
+            | "claude"
+            | "gemini"
+            | "gpt"
+            | "antigravity"
+            | "custom",
           role: agentData.role,
           command: agentData.command,
           cwd: rootPath,

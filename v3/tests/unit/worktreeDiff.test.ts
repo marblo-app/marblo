@@ -2,13 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.stubGlobal("window", {});
 
-const { openWorktreeDiff, toChangedFiles } = await import(
-  "../../src/lib/worktreeDiff"
-);
+const { openWorktreeDiff, toChangedFiles, fromChangedEntries } =
+  await import("../../src/lib/worktreeDiff");
 const { useEditorStore } = await import("../../src/stores/editorStore");
-const { useWorktreeDiffStore } = await import(
-  "../../src/stores/worktreeDiffStore"
-);
+const { useWorktreeDiffStore } =
+  await import("../../src/stores/worktreeDiffStore");
 
 import type { Worktree } from "../../src/types/worktree";
 
@@ -55,6 +53,21 @@ function installFs(opts: {
   };
 }
 
+/** Preload that also exposes the merge-base collection (the current shape). */
+function installWorktreeChanges(opts: {
+  gitStatus: () => Promise<Record<string, string>>;
+  changes: () => Promise<{
+    baseSha: string;
+    files: Array<{ relPath: string; status: string }>;
+  }>;
+  readFile?: (root: string, p: string) => Promise<string>;
+}) {
+  installFs(opts);
+  (
+    window as unknown as { electronAPI: { fs: Record<string, unknown> } }
+  ).electronAPI.fs.gitWorktreeChanges = vi.fn(opts.changes);
+}
+
 beforeEach(() => {
   useEditorStore.setState({
     rootPath: WT,
@@ -91,6 +104,38 @@ describe("toChangedFiles", () => {
     expect(files[0].path).toBe(`${WT}/new.ts`);
     expect(files[0].relPath).toBe("new.ts");
     expect(files[0].openable).toBe(true);
+  });
+});
+
+describe("fromChangedEntries", () => {
+  it("marks deletions unopenable and sorts openable files first", () => {
+    const files = fromChangedEntries(
+      [
+        { relPath: "z.ts", status: "M" },
+        { relPath: "gone.ts", status: "D" },
+        { relPath: "a.ts", status: "??" },
+      ],
+      WT,
+    );
+
+    expect(files.map((f) => f.relPath)).toEqual(["a.ts", "z.ts", "gone.ts"]);
+    expect(files.map((f) => f.openable)).toEqual([true, true, false]);
+  });
+
+  it("builds absolute paths under the worktree root", () => {
+    const files = fromChangedEntries(
+      [{ relPath: "src/a.ts", status: "A" }],
+      WT,
+    );
+    expect(files[0].path).toBe(`${WT}/src/a.ts`);
+  });
+
+  it("tolerates a root that already ends in a separator", () => {
+    const files = fromChangedEntries(
+      [{ relPath: "a.ts", status: "M" }],
+      `${WT}/`,
+    );
+    expect(files[0].path).toBe(`${WT}/a.ts`);
   });
 });
 
@@ -197,14 +242,87 @@ describe("openWorktreeDiff", () => {
     expect(useEditorStore.getState().showDiff).toBe(false);
   });
 
+  it("opens a worktree whose agent already committed (merge-base collection)", async () => {
+    // 티켓 F2WGGGVthmg7lN490PDy — 라이브 실측 50개 중 36개가 이 상태였다.
+    // 워킹트리는 깨끗한데 브랜치엔 커밋이 있는 경우, gitStatus 만 보던 구
+    // 경로는 0건을 받아 아무것도 못 열었다. merge-base 수집은 열어야 한다.
+    installWorktreeChanges({
+      gitStatus: async () => ({}),
+      changes: async () => ({
+        baseSha: "base123",
+        files: [
+          { relPath: "src/a.ts", status: "M" },
+          { relPath: "src/new.ts", status: "A" },
+        ],
+      }),
+    });
+
+    await openWorktreeDiff(worktree());
+
+    const editor = useEditorStore.getState();
+    expect(editor.activeFilePath).toBe(`${WT}/src/a.ts`);
+    expect(editor.showDiff).toBe(true);
+
+    const state = useWorktreeDiffStore.getState().state;
+    expect(state.kind).toBe("opened");
+    // The baseline must ride along, or DiffSurface diffs against HEAD and a
+    // committed file renders as an empty diff — the second half of the bug.
+    if (state.kind === "opened") {
+      expect(state.baseSha).toBe("base123");
+      expect(state.files).toHaveLength(2);
+    }
+  });
+
+  it("reports a failed collection as an error, never as 'no changes'", async () => {
+    // 수집 실패를 "변경 없음" 으로 표시하면 사용자를 속인다. 이 티켓의 근본
+    // 증상이 정확히 그것이었다.
+    installWorktreeChanges({
+      gitStatus: async () => ({}),
+      changes: async () => {
+        throw new Error("git merge-base exited 128");
+      },
+    });
+
+    await openWorktreeDiff(worktree());
+
+    const state = useWorktreeDiffStore.getState().state;
+    expect(state.kind).toBe("error");
+    if (state.kind === "error") expect(state.message).toContain("merge-base");
+    expect(useEditorStore.getState().showDiff).toBe(false);
+  });
+
+  it("reports clean only when the merge-base collection is genuinely empty", async () => {
+    installWorktreeChanges({
+      gitStatus: async () => ({}),
+      changes: async () => ({ baseSha: "base123", files: [] }),
+    });
+
+    await openWorktreeDiff(worktree());
+
+    expect(useWorktreeDiffStore.getState().state.kind).toBe("clean");
+  });
+
+  it("falls back to gitStatus when the preload predates gitWorktreeChanges", async () => {
+    installFs({ gitStatus: async () => ({ [`${WT}/a.ts`]: "M" }) });
+
+    await openWorktreeDiff(worktree());
+
+    const state = useWorktreeDiffStore.getState().state;
+    expect(state.kind).toBe("opened");
+    // No merge-base available on the legacy path — HEAD stays the baseline.
+    if (state.kind === "opened") expect(state.baseSha).toBeUndefined();
+  });
+
   it("lets the newer click win when two worktrees are opened back to back", async () => {
     const stale = useWorktreeDiffStore.getState().nextRequest();
     // A newer request has since started...
     useWorktreeDiffStore.getState().nextRequest();
 
-    useWorktreeDiffStore
-      .getState()
-      .settle(stale, { kind: "clean", worktreeId: "old", worktreePath: "/old" });
+    useWorktreeDiffStore.getState().settle(stale, {
+      kind: "clean",
+      worktreeId: "old",
+      worktreePath: "/old",
+    });
 
     expect(useWorktreeDiffStore.getState().state.kind).toBe("idle");
   });
