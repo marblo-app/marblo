@@ -40,7 +40,7 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
   const clearSaveError = useEditorStore((s) => s.clearSaveError);
   const currentProject = useProjectStore((s) => s.currentProject);
   const worktrees = useWorktreeStore((s) => s.worktrees);
-  const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+  const ensureFreshWorktrees = useWorktreeStore((s) => s.ensureFresh);
   const archiveOverrides = useWorktreeStore((s) => s.archiveOverrides);
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath);
@@ -88,9 +88,15 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
 
   const selectedRoot = selectedWorktree ? (rootPath ?? "") : "__project__";
 
+  // Light (topology-only) refresh with a TTL. The tab remounts on every tab
+  // switch, and the full worktree:list sweep it used to fire here spawns up to
+  // 7 git subprocesses per worktree — measured 12–26s of disk-saturating storm
+  // at ~680 registered worktrees, dragging the whole app (ticket HruNFJpj).
+  // The dropdown only needs enumeration; archived-filter verdicts come from
+  // the persisted verdict cache (see lib/worktreeVerdictCache).
   useEffect(() => {
-    refreshWorktrees().catch(() => {});
-  }, [refreshWorktrees]);
+    ensureFreshWorktrees().catch(() => {});
+  }, [ensureFreshWorktrees]);
 
   const handleRootChange = (value: string) => {
     const nextRoot = value === "__project__" ? projectRootPath : value;

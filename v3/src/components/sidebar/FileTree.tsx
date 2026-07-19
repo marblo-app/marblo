@@ -763,7 +763,7 @@ export function FileTree() {
   const currentProject = useProjectStore((s) => s.currentProject);
 
   const worktrees = useWorktreeStore((s) => s.worktrees);
-  const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+  const ensureFreshWorktrees = useWorktreeStore((s) => s.ensureFresh);
   const archiveOverrides = useWorktreeStore((s) => s.archiveOverrides);
   const currentProjectWorktrees = useMemo(
     () => filterWorktreesByProject(worktrees, currentProject?.id),
@@ -906,9 +906,12 @@ export function FileTree() {
   }, []);
 
   // Keep the worktree list fresh so the header can name the current root.
+  // Light (topology-only) with a TTL: naming the root needs enumeration, never
+  // the full worktree:list sweep (12–26s process storm at ~680 worktrees —
+  // ticket HruNFJpj); archived-filter verdicts ride the persisted cache.
   useEffect(() => {
-    refreshWorktrees().catch(() => {});
-  }, [refreshWorktrees]);
+    ensureFreshWorktrees().catch(() => {});
+  }, [ensureFreshWorktrees]);
 
   useEffect(() => {
     if (!rootPath) return;

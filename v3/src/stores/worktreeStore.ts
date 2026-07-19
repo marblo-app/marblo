@@ -13,6 +13,12 @@ import {
   setOverride,
   type ArchiveOverrides,
 } from "../lib/worktreeHygiene";
+import {
+  buildVerdictCache,
+  cachedVerdictFor,
+  loadVerdictCache,
+  saveVerdictCache,
+} from "../lib/worktreeVerdictCache";
 
 interface WorktreeState {
   worktrees: Worktree[];
@@ -185,13 +191,22 @@ let inflightLight: Promise<void> | null = null;
  * from the previous snapshot when the worktree's HEAD is unchanged. A moved
  * HEAD means new commits — the old merge status is provably outdated, so it
  * is dropped (pill degrades to ⚪ idle) until the next full refresh().
+ *
+ * When the in-memory snapshot has no verdict (cold start — the store now
+ * light-refreshes on Code tab / FileTree mounts and never runs the full sweep
+ * itself), the persisted verdict cache fills in stale/staleInfo for an
+ * unmoved HEAD so the archived-worktree filter keeps working across reloads.
  */
 function normalizeLightWorktree(
   group: WorktreeLightGroup,
   item: WorktreeLightItem,
   prev: Worktree | undefined,
+  verdicts: ReturnType<typeof loadVerdictCache>,
 ): Worktree {
   const carry = prev !== undefined && prev.head === item.head;
+  const cached = carry
+    ? null
+    : cachedVerdictFor(verdicts, item.path, item.head);
   return {
     id: `${group.projectId}:${item.path}`,
     taskId: inferTaskId(group.projectId, item.path),
@@ -203,8 +218,8 @@ function normalizeLightWorktree(
     repoRoot: group.repoRoot,
     head: item.head,
     createdAt: prev?.createdAt ?? null,
-    stale: carry ? prev.stale : false,
-    staleInfo: carry ? prev.staleInfo : undefined,
+    stale: carry ? prev.stale : (cached?.stale ?? false),
+    staleInfo: carry ? prev.staleInfo : cached?.staleInfo,
     status: carry ? prev.status : undefined,
   };
 }
@@ -236,6 +251,10 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
           group.worktrees.map((item) => normalizeWorktree(group, item)),
         );
         set({ worktrees, loading: false, lastRefreshedAt: Date.now() });
+        // Persist the sweep's hygiene verdicts so light refreshes (Code tab /
+        // FileTree mounts) can keep filtering archived worktrees without ever
+        // re-running the 12–26s sweep themselves.
+        saveVerdictCache(buildVerdictCache(worktrees));
       } catch (err) {
         set({ loading: false, lastError: errorMessage(err) });
         throw err;
@@ -260,12 +279,14 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
         // Snapshot AFTER the await so a full refresh that landed meanwhile
         // contributes its fresh statuses to the carry-over.
         const prevById = new Map(get().worktrees.map((w) => [w.id, w]));
+        const verdicts = loadVerdictCache();
         const worktrees = groups.flatMap((group) =>
           group.worktrees.map((item) =>
             normalizeLightWorktree(
               group,
               item,
               prevById.get(`${group.projectId}:${item.path}`),
+              verdicts,
             ),
           ),
         );
