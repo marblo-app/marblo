@@ -2,6 +2,7 @@ import type { Worktree } from "../types/worktree";
 import {
   isActiveOngoingWorktree,
   type ArchiveOverrides,
+  type ArchiveSignals,
 } from "./worktreeHygiene";
 
 /**
@@ -336,14 +337,17 @@ export interface RootSwitch {
  *     {@link isActiveOngoingWorktree} so the switcher, the Code-tab Root
  *     dropdown, and the Worktrees tab all agree on what "active/ongoing" means.
  *
- * `overrides` defaults to `{}` so existing callers (and the auto verdict alone)
- * keep working unchanged.
+ * `overrides` and `signals` both default to empty so existing callers (and the
+ * auto verdict alone) keep working unchanged. Passing `signals` additionally
+ * hides worktrees whose ticket is DONE and pins visible any worktree an agent
+ * is currently working in — see {@link ArchiveSignals}.
  */
 export function isActiveTaskWorktree(
   worktree: Worktree,
   overrides: ArchiveOverrides = {},
+  signals: ArchiveSignals = {},
 ): boolean {
-  return isActiveOngoingWorktree(worktree, overrides);
+  return isActiveOngoingWorktree(worktree, overrides, signals);
 }
 
 export function resolveRootSwitch(
@@ -351,6 +355,7 @@ export function resolveRootSwitch(
   worktrees: Worktree[],
   projectRootPath: string | null,
   overrides: ArchiveOverrides = {},
+  signals: ArchiveSignals = {},
 ): RootSwitch | null {
   // Locate this machine's main checkout (symlink-tolerant, keyed off taskId —
   // see findMainWorktree) and fall back to the project folder path. mainPath is
@@ -365,7 +370,7 @@ export function resolveRootSwitch(
   // isActiveTaskWorktree).
   const toTasks: RootSwitchTarget[] = worktrees
     .filter((w) => !samePath(w.path, mainPath))
-    .filter((w) => isActiveTaskWorktree(w, overrides))
+    .filter((w) => isActiveTaskWorktree(w, overrides, signals))
     .map((w) => ({
       path: w.path,
       label: w.branch || basename(w.path),

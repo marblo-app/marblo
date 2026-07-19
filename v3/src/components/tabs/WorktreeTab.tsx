@@ -13,7 +13,10 @@ import {
   archiveReason,
   isWorktreeArchived,
   worktreeKey,
+  type ArchiveReason,
+  type ArchiveSignals,
 } from "../../lib/worktreeHygiene";
+import { useArchiveSignals } from "../../hooks/useArchiveSignals";
 import { t, useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 
@@ -177,27 +180,45 @@ function RowActions({
   );
 }
 
-function ArchiveReasonBadge({ worktree }: { worktree: Worktree }) {
+/** Badge styling + copy per auto-archive reason. */
+const ARCHIVE_REASON_STYLE: Record<
+  ArchiveReason,
+  { className: string; labelKey: MessageKey; tipKey: MessageKey }
+> = {
+  merged: {
+    className: "border-sky-500/30 bg-sky-500/15 text-sky-300",
+    labelKey: "worktree.archivedReason.merged",
+    tipKey: "worktree.archivedReason.mergedTip",
+  },
+  done: {
+    className: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300",
+    labelKey: "worktree.archivedReason.done",
+    tipKey: "worktree.archivedReason.doneTip",
+  },
+  stale: {
+    className: "border-amber-500/30 bg-amber-500/15 text-amber-300",
+    labelKey: "worktree.archivedReason.stale",
+    tipKey: "worktree.archivedReason.staleTip",
+  },
+};
+
+function ArchiveReasonBadge({
+  worktree,
+  signals,
+}: {
+  worktree: Worktree;
+  signals: ArchiveSignals;
+}) {
   const { t } = useTranslation();
-  const reason = archiveReason(worktree);
+  const reason = archiveReason(worktree, signals);
   if (!reason) return null;
-  const isMerged = reason === "merged";
+  const style = ARCHIVE_REASON_STYLE[reason];
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-        isMerged
-          ? "border border-sky-500/30 bg-sky-500/15 text-sky-300"
-          : "border border-amber-500/30 bg-amber-500/15 text-amber-300"
-      }`}
-      title={
-        isMerged
-          ? t("worktree.archivedReason.mergedTip")
-          : t("worktree.archivedReason.staleTip")
-      }
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${style.className}`}
+      title={t(style.tipKey)}
     >
-      {isMerged
-        ? t("worktree.archivedReason.merged")
-        : t("worktree.archivedReason.stale")}
+      {t(style.labelKey)}
     </span>
   );
 }
@@ -206,12 +227,14 @@ function WorktreeRow({
   worktree,
   pill,
   archived,
+  signals,
   busyAction,
   onAction,
 }: {
   worktree: Worktree;
   pill: WorktreeStatusPill;
   archived: boolean;
+  signals: ArchiveSignals;
   busyAction: RowAction | null;
   onAction: (worktree: Worktree, action: RowAction) => void;
 }) {
@@ -260,7 +283,9 @@ function WorktreeRow({
         <span>
           <ConflictSummary worktree={worktree} />
         </span>
-        {archived && <ArchiveReasonBadge worktree={worktree} />}
+        {archived && (
+          <ArchiveReasonBadge worktree={worktree} signals={signals} />
+        )}
         <span className="ml-auto">
           <RowActions
             worktree={worktree}
@@ -420,6 +445,7 @@ export function WorktreeTab() {
   const cleanupStale = useWorktreeStore((s) => s.cleanupStale);
   const statusPill = useWorktreeStore((s) => s.statusPill);
   const archiveOverrides = useWorktreeStore((s) => s.archiveOverrides);
+  const archiveSignals = useArchiveSignals();
   const setWorktreeArchived = useWorktreeStore((s) => s.setWorktreeArchived);
   const projects = useProjectStore((s) => s.projects);
   const { t } = useTranslation();
@@ -487,7 +513,11 @@ export function WorktreeTab() {
       // archived (merged / stale / manually-archived) ones move to the archive
       // view. This is what collapses a 100+-worktree project to just the live
       // work.
-      const isArchived = isWorktreeArchived(wt, archiveOverrides);
+      const isArchived = isWorktreeArchived(
+        wt,
+        archiveOverrides,
+        archiveSignals,
+      );
       if (archivedView ? !isArchived : isArchived) {
         return false;
       }
@@ -526,6 +556,7 @@ export function WorktreeTab() {
     exceptionsOnly,
     archivedView,
     archiveOverrides,
+    archiveSignals,
     statusPill,
     projectName,
   ]);
@@ -547,8 +578,10 @@ export function WorktreeTab() {
   // 아카이브된 워크트리 수 — 토글 배지에 표시.
   const archivedCount = useMemo(
     () =>
-      worktrees.filter((wt) => isWorktreeArchived(wt, archiveOverrides)).length,
-    [worktrees, archiveOverrides],
+      worktrees.filter((wt) =>
+        isWorktreeArchived(wt, archiveOverrides, archiveSignals),
+      ).length,
+    [worktrees, archiveOverrides, archiveSignals],
   );
 
   const isEmpty = !loading && worktrees.length === 0;
@@ -575,7 +608,11 @@ export function WorktreeTab() {
     // Archive/restore is a local-only view toggle (no git/IPC) — flip the
     // persisted override and surface a confirmation banner.
     if (action === "archive") {
-      const wasArchived = isWorktreeArchived(worktree, archiveOverrides);
+      const wasArchived = isWorktreeArchived(
+        worktree,
+        archiveOverrides,
+        archiveSignals,
+      );
       setWorktreeArchived(worktreeKey(worktree), !wasArchived);
       setActionMessage(
         wasArchived
@@ -885,7 +922,12 @@ export function WorktreeTab() {
                       key={wt.id}
                       worktree={wt}
                       pill={statusPill(wt)}
-                      archived={isWorktreeArchived(wt, archiveOverrides)}
+                      archived={isWorktreeArchived(
+                        wt,
+                        archiveOverrides,
+                        archiveSignals,
+                      )}
+                      signals={archiveSignals}
                       busyAction={busy?.id === wt.id ? busy.action : null}
                       onAction={handleAction}
                     />

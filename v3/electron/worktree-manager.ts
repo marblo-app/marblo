@@ -100,11 +100,26 @@ export interface StaleInfo {
   idleDays: number;
   /** Cleanup candidate: merged OR idle past the threshold. */
   stale: boolean;
+  /**
+   * Branch carries commits that exist ONLY here — not in base, and not on a
+   * remote-tracking ref. Removing or hiding such a worktree can strand work no
+   * one else can see, so it vetoes auto-archive at ANY idle threshold (see
+   * `archiveSafetyBlocker` in src/lib/worktreeHygiene).
+   *
+   * True when the branch is unmerged AND either it is ahead of its upstream or
+   * it has no upstream at all (never pushed → every commit is local-only).
+   * `false` for a merged branch: base already carries the work.
+   *
+   * Optional so a verdict produced before this field existed (persisted cache,
+   * older main process) reads as "not known to be unpushed" rather than
+   * fabricating a safety guarantee — callers pair it with the other blockers.
+   */
+  unpushed?: boolean;
 }
 
 /** Options for stale detection. `now` is injectable for deterministic tests. */
 export interface StaleOptions {
-  /** Idle days that mark a worktree stale even when unmerged. Default 14. */
+  /** Idle days that mark a worktree stale even when unmerged. Default 5. */
   maxIdleDays?: number;
   /** Reference "now" for idleDays math. Defaults to the wall clock. */
   now?: Date;
@@ -175,7 +190,36 @@ export interface ReapOptions {
 }
 
 const STALE_MS_PER_DAY = 24 * 60 * 60 * 1000;
-const DEFAULT_MAX_IDLE_DAYS = 14;
+
+/**
+ * Idle days after which an unmerged worktree counts as stale (auto-archive
+ * candidate). Lowered 14 → 5 (ticket MT2ny8ng).
+ *
+ * ── Why 5 ────────────────────────────────────────────────────────────────────
+ * At 14 days the filter barely bit: measured over 135 live worktrees, only 15
+ * unmerged ones cleared it while 55 sat in the 4–13 day band — visible, and
+ * uniformly dead. The idle histogram has no natural cliff inside the approved
+ * 3–5 day range, so the tie-break is the work week, not the data: idleDays
+ * counts from the last COMMIT, so a branch committed Thursday and picked back
+ * up Monday reads as 4 days idle. A 4-day threshold hides live work across an
+ * ordinary weekend; 5 clears it. Hence the top of the approved range.
+ *
+ * Crossing this threshold is necessary but NOT sufficient to hide a worktree —
+ * dirty / unpushed / busy each veto it outright. See `archiveSafetyBlocker`.
+ */
+const DEFAULT_MAX_IDLE_DAYS = 5;
+
+/**
+ * The pre-MT2ny8ng threshold, kept as a distinct band rather than deleted.
+ *
+ * The renderer can only enforce the `dirty` veto where it actually has a
+ * `status` probe, and the light (topology-only) path deliberately has none —
+ * probing dirtiness per worktree is exactly the per-worktree-spawn pattern #511
+ * removed (measured: 2 repo-level spawns 52ms vs 135 status spawns 960ms).
+ * So the newly aggressive 5–13 day band only archives when cleanliness is
+ * *known*; at 14+ the legacy behaviour stands unchanged. See `isAutoArchived`.
+ */
+export const LEGACY_MAX_IDLE_DAYS = 14;
 
 /**
  * Timeout for the pre-create `git fetch origin` (WORKTREE-SPEC §3 최신 base).
@@ -241,6 +285,35 @@ export function provisionNodeModules(
       );
     }
   }
+}
+
+/**
+ * Does this branch carry commits that live ONLY in this worktree?
+ *
+ * Derived from `git for-each-ref`'s `%(upstream)` / `%(upstream:track)` fields,
+ * so it is computable for every branch in one repo-level spawn.
+ *
+ *  - merged into base        → false. Base already has the work; nothing to strand.
+ *  - no upstream configured  → true.  Never pushed, so every commit beyond base
+ *                                     exists on this disk and nowhere else.
+ *  - "[ahead N]" / "[gone]"  → true.  Local commits the remote does not have,
+ *                                     or a remote branch that has been deleted.
+ *  - "" or "[behind N]" only → false. Everything local is on the remote; a PR
+ *                                     or the remote branch carries it.
+ *
+ * Exported for direct unit testing of the parse — the `[ahead 1, behind 2]`
+ * shape is the one a naive `includes("ahead")` check gets right by luck and a
+ * whitespace split gets wrong.
+ */
+export function computeUnpushed(
+  merged: boolean,
+  upstream: string,
+  track: string,
+): boolean {
+  if (merged) return false;
+  if (!upstream.trim()) return true;
+  const t = track.trim();
+  return t.includes("ahead") || t.includes("gone");
 }
 
 export class WorktreeManager {
@@ -1012,8 +1085,9 @@ export class WorktreeManager {
 
   /**
    * Stale-hygiene verdict for a worktree (WORKTREE-SPEC §4): merged into base,
-   * how many whole days idle, and the combined `stale` flag
-   * (`merged || idleDays >= maxIdleDays`, default maxIdleDays=14).
+   * how many whole days idle, the combined `stale` flag
+   * (`merged || idleDays >= maxIdleDays`, default maxIdleDays=5), and whether
+   * the branch holds unpushed local commits.
    */
   async staleInfo(
     worktreePath: string,
@@ -1032,7 +1106,43 @@ export class WorktreeManager {
       if (idleDays < 0) idleDays = 0;
     }
     const stale = merged || idleDays >= maxIdleDays;
-    return { merged, idleDays, stale };
+    return {
+      merged,
+      idleDays,
+      stale,
+      unpushed: await this.isUnpushed(worktreePath, merged),
+    };
+  }
+
+  /**
+   * {@link computeUnpushed} for a single worktree. The batched path reads the
+   * upstream fields straight out of `for-each-ref`; here there is no batch to
+   * ride on, so ask git for this branch's tracking state directly.
+   *
+   * On any git error this returns `true` — "cannot prove the work is on a
+   * remote" must read as unsafe, matching how `isMergedIntoBase` refuses to
+   * claim "merged" it cannot prove. A fabricated `false` would hand the
+   * archive filter a safety guarantee nobody checked.
+   */
+  private async isUnpushed(
+    worktreePath: string,
+    merged: boolean,
+  ): Promise<boolean> {
+    if (merged) return false;
+    const upstream = await this.runGit(
+      ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+      worktreePath,
+    );
+    // Non-zero here is the ordinary "no upstream configured" answer, not a
+    // malfunction — either way the branch was never pushed.
+    if (upstream.code !== 0 || !upstream.stdout.trim()) return true;
+    const ahead = await this.runGit(
+      ["rev-list", "--count", "@{upstream}..HEAD"],
+      worktreePath,
+    );
+    if (ahead.code !== 0) return true;
+    const n = parseInt(ahead.stdout.trim(), 10);
+    return !Number.isFinite(n) || n > 0;
   }
 
   /**
@@ -1068,10 +1178,18 @@ export class WorktreeManager {
     const maxIdleDays = opts?.maxIdleDays ?? DEFAULT_MAX_IDLE_DAYS;
     const now = opts?.now ?? new Date();
 
+    // One spawn, three facts per branch. `upstream:track` reports "[ahead N]" /
+    // "[ahead N, behind M]" / "[gone]" / "" — and an empty *upstream* field means
+    // no tracking branch is configured at all. Both feed `unpushed` below, so the
+    // safety signal costs zero extra spawns: the field list grows, the process
+    // count does not (the #511 budget this must not regress).
+    //
+    // TAB-delimited because a ref name can contain spaces and `[ahead 1, behind 2]`
+    // certainly does; splitting on whitespace would corrupt every tracked branch.
     const tips = await this.runGit(
       [
         "for-each-ref",
-        "--format=%(objectname) %(committerdate:unix)",
+        "--format=%(objectname)%09%(committerdate:unix)%09%(upstream)%09%(upstream:track)",
         "refs/heads",
       ],
       repoRoot,
@@ -1097,8 +1215,8 @@ export class WorktreeManager {
 
     const out = new Map<string, StaleInfo>();
     for (const line of tips.stdout.split("\n")) {
-      const [sha, unix] = line.trim().split(/\s+/);
-      if (!sha) continue;
+      const [sha, unix, upstream, track] = line.split("\t");
+      if (!sha?.trim()) continue;
       const seconds = Number(unix);
       let idleDays = 0;
       if (Number.isFinite(seconds)) {
@@ -1107,11 +1225,12 @@ export class WorktreeManager {
         );
         if (idleDays < 0) idleDays = 0;
       }
-      const merged = mergedShas.has(sha);
-      out.set(sha, {
+      const merged = mergedShas.has(sha.trim());
+      out.set(sha.trim(), {
         merged,
         idleDays,
         stale: merged || idleDays >= maxIdleDays,
+        unpushed: computeUnpushed(merged, upstream ?? "", track ?? ""),
       });
     }
     return out;
@@ -1124,6 +1243,17 @@ export class WorktreeManager {
    * skipped — it is "merged" by definition and cannot be `git worktree remove`d.
    * Never throws on a single failure: each failure is collected in `failed` so
    * one stuck worktree doesn't block the rest.
+   *
+   * ★ This DELETES — worktree and branch both. It therefore does NOT inherit the
+   * archive threshold. Archiving hides and is one click to undo; deletion is
+   * final, so the two must not share a default: lowering the archive threshold
+   * 14 → 5 (ticket MT2ny8ng) would otherwise have quadrupled the reach of this
+   * destructive sweep as a silent side effect of a UI-visibility change. Callers
+   * that genuinely want a tighter deletion window must pass `maxIdleDays`
+   * explicitly and say so.
+   *
+   * Unpushed branches are skipped outright: their commits exist on this disk and
+   * nowhere else, so `deleteBranch: true` would destroy the only copy.
    */
   async cleanupStale(
     repoRoot: string,
@@ -1134,13 +1264,18 @@ export class WorktreeManager {
     const realRepoRoot = fs.existsSync(repoRoot)
       ? fs.realpathSync(repoRoot)
       : repoRoot;
+    const deleteOpts: StaleOptions = {
+      ...opts,
+      maxIdleDays: opts?.maxIdleDays ?? LEGACY_MAX_IDLE_DAYS,
+    };
 
     const removed: string[] = [];
     const failed: { path: string; error: string }[] = [];
     for (const wt of worktrees) {
       if (wt.path === realRepoRoot) continue; // never touch the main worktree
-      const info = await this.staleInfo(wt.path, baseRef, opts);
+      const info = await this.staleInfo(wt.path, baseRef, deleteOpts);
       if (!info.stale) continue;
+      if (info.unpushed) continue; // local-only commits — deleting loses them
       try {
         await this.remove(repoRoot, wt.path, { deleteBranch: true });
         removed.push(wt.path);

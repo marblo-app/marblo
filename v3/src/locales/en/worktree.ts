@@ -102,7 +102,9 @@ export const worktree: Record<keyof typeof koWorktree, string> = {
     "Merged or long-idle worktrees move here automatically.",
   "worktree.archivedReason.merged": "merged",
   "worktree.archivedReason.stale": "stale",
+  "worktree.archivedReason.done": "done",
   "worktree.archivedReason.mergedTip":
     "Auto-archived — already merged into base",
   "worktree.archivedReason.staleTip": "Auto-archived — long idle",
+  "worktree.archivedReason.doneTip": "Auto-archived — its ticket is DONE",
 };

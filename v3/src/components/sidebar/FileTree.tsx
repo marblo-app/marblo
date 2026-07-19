@@ -22,6 +22,7 @@ import {
   isStrayWorktreeContainerRoot,
   treeSignature,
 } from "../../lib/fileTreeView";
+import { useArchiveSignals } from "../../hooks/useArchiveSignals";
 import type {
   WorktreeMenuPosition,
   MainResolutionFailure,
@@ -775,6 +776,7 @@ export function FileTree() {
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const ensureFreshWorktrees = useWorktreeStore((s) => s.ensureFresh);
   const archiveOverrides = useWorktreeStore((s) => s.archiveOverrides);
+  const archiveSignals = useArchiveSignals();
   const currentProjectWorktrees = useMemo(
     () => filterWorktreesByProject(worktrees, currentProject?.id),
     [worktrees, currentProject?.id],
@@ -801,12 +803,14 @@ export function FileTree() {
         currentProjectWorktrees,
         currentProject?.folderPath ?? null,
         archiveOverrides,
+        archiveSignals,
       ),
     [
       rootPath,
       currentProjectWorktrees,
       currentProject?.folderPath,
       archiveOverrides,
+      archiveSignals,
     ],
   );
 
@@ -826,9 +830,8 @@ export function FileTree() {
 
   // Set when a "home" click could not identify the main worktree. Rendered in
   // the header so the failure is visible rather than a dead/misdirecting button.
-  const [mainResetError, setMainResetError] = useState<
-    MainResolutionFailure | null
-  >(null);
+  const [mainResetError, setMainResetError] =
+    useState<MainResolutionFailure | null>(null);
 
   const [showWorktreeMenu, setShowWorktreeMenu] = useState(false);
   const worktreeMenuRef = useRef<HTMLDivElement>(null);

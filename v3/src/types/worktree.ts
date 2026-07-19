@@ -41,6 +41,15 @@ export interface WorktreeStaleInfo {
   merged: boolean;
   idleDays: number;
   stale: boolean;
+  /**
+   * Branch holds commits that exist only in this worktree (unmerged AND either
+   * ahead of its upstream or never pushed at all). Vetoes auto-archive at any
+   * threshold — see `archiveSafetyBlocker` in lib/worktreeHygiene.
+   *
+   * Optional: verdicts from a persisted cache or an older main process predate
+   * the field. Absent means "not known to be unpushed", never "known safe".
+   */
+  unpushed?: boolean;
 }
 
 export interface WorktreeListItem {

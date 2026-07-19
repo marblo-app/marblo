@@ -12,6 +12,7 @@ import {
   countUnknownVerdicts,
   isActiveOngoingWorktree,
 } from "../../lib/worktreeHygiene";
+import { useArchiveSignals } from "../../hooks/useArchiveSignals";
 import { useTranslation } from "../../lib/i18n";
 
 export interface DiffRenderProps {
@@ -45,6 +46,7 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const ensureFreshWorktrees = useWorktreeStore((s) => s.ensureFresh);
   const archiveOverrides = useWorktreeStore((s) => s.archiveOverrides);
+  const archiveSignals = useArchiveSignals();
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath);
   const projectRootPath = currentProject?.folderPath ?? null;
@@ -66,9 +68,9 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
   const activeWorktrees = useMemo(
     () =>
       projectWorktrees.filter((worktree) =>
-        isActiveOngoingWorktree(worktree, archiveOverrides),
+        isActiveOngoingWorktree(worktree, archiveOverrides, archiveSignals),
       ),
-    [projectWorktrees, archiveOverrides],
+    [projectWorktrees, archiveOverrides, archiveSignals],
   );
 
   const selectedWorktree = projectWorktrees.find(

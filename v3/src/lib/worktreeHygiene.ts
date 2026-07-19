@@ -27,7 +27,114 @@ export type ArchiveOverride = "archived" | "active";
 export type ArchiveOverrides = Record<string, ArchiveOverride>;
 
 /** Why a worktree is auto-archived — used to label the archived view. */
-export type ArchiveReason = "merged" | "stale";
+export type ArchiveReason = "merged" | "done" | "stale";
+
+/** Why a worktree is held OUT of the archive despite an archive signal. */
+export type ArchiveBlocker = "dirty" | "unpushed" | "busy";
+
+/**
+ * Renderer-side signals the hygiene verdict cannot carry, resolved once per
+ * render from stores that already hold them — never per worktree.
+ *
+ * Both are keyed by task id because the worktree path encodes it
+ * (`~/.marblo/worktrees/<projectId>/<taskId>`), which the store already
+ * reverses into `Worktree.taskId`. Building each Set is one pass over data the
+ * renderer is subscribed to anyway: zero git spawns, zero IPC, no per-worktree
+ * lookup. Doing this per worktree instead is the trap #511 dug out of.
+ */
+export interface ArchiveSignals {
+  /**
+   * Tasks whose ticket is DONE. Their worktrees are finished work regardless of
+   * how recently someone touched them — a meaning-level signal, strictly better
+   * than the idle clock it supplements.
+   */
+  doneTaskIds?: ReadonlySet<string>;
+  /** Tasks an agent is actively attached to. Their worktrees are in use. */
+  busyTaskIds?: ReadonlySet<string>;
+}
+
+const NO_SIGNALS: ArchiveSignals = {};
+
+/**
+ * Idle threshold the renderer trusts without a cleanliness probe.
+ *
+ * Mirrors `LEGACY_MAX_IDLE_DAYS` in electron/worktree-manager. Kept as a
+ * literal rather than imported because this module is renderer-side and must
+ * not pull in main-process code; the pairing is asserted by unit test.
+ */
+export const LEGACY_IDLE_ARCHIVE_DAYS = 14;
+
+/**
+ * Why a worktree must NOT be auto-archived, or null when nothing blocks it.
+ *
+ * ★ This is the invariant that outranks every count target in this module.
+ * Archiving hides a worktree from the root selectors; a user who cannot see
+ * their uncommitted work has, for practical purposes, lost it. So each of these
+ * vetoes auto-archive at ANY idle threshold and against EVERY archive signal,
+ * `merged` and DONE-ticket included:
+ *
+ *  - **dirty**    uncommitted changes; they exist nowhere but this disk.
+ *  - **unpushed** commits neither in base nor on a remote (see StaleInfo).
+ *  - **busy**     an agent is working in it right now.
+ *
+ * Measured over 135 live worktrees when the threshold dropped 14 → 5: 10 dirty
+ * worktrees would have been newly hidden, and every one of them was *also*
+ * fully pushed (`ahead == 0`) — so the unpushed veto does not cover the dirty
+ * case. They are independent guards and both are load-bearing.
+ *
+ * Only a **manual** override may hide a blocked worktree; the user hiding their
+ * own work on purpose is a choice, not an accident. See {@link isWorktreeArchived}.
+ */
+export function archiveSafetyBlocker(
+  worktree: Worktree,
+  signals: ArchiveSignals = NO_SIGNALS,
+): ArchiveBlocker | null {
+  if (worktree.status?.dirty === true) return "dirty";
+  if (worktree.staleInfo?.unpushed === true) return "unpushed";
+  if (worktree.agentId != null) return "busy";
+  if (worktree.taskId != null && signals.busyTaskIds?.has(worktree.taskId)) {
+    return "busy";
+  }
+  return null;
+}
+
+/** Whether this worktree's ticket is DONE — finished work, whatever the clock says. */
+function hasDoneTicket(worktree: Worktree, signals: ArchiveSignals): boolean {
+  return (
+    worktree.taskId != null &&
+    signals.doneTaskIds?.has(worktree.taskId) === true
+  );
+}
+
+/**
+ * Whether the idle clock alone says "archive".
+ *
+ * Two bands, because the renderer's evidence is uneven. `dirty` is only known
+ * where a `status` probe ran — the full `worktree:list` sweep. The light path
+ * has none by design: probing dirtiness per worktree is the per-worktree-spawn
+ * pattern #511 removed (2 repo-level spawns / 52ms vs 135 status spawns /
+ * 960ms measured), so restoring it to serve this feature would undo that fix.
+ *
+ * So the newly aggressive band only fires on positive evidence:
+ *  - `idleDays >= 14` — the pre-existing threshold, unchanged behaviour.
+ *  - `idleDays >= 5`  — only when `status` is present, i.e. we can actually see
+ *    whether it is dirty. With no status the worktree stays visible.
+ *
+ * The honest cost: on a profile that has never opened the Worktrees tab, 5–13
+ * day worktrees keep showing. They are still reached by the `merged` and
+ * DONE-ticket signals, which need no probe — and showing one row too many is
+ * the failure we choose over hiding live work.
+ */
+function isIdleArchived(worktree: Worktree): boolean {
+  const idleDays = worktree.staleInfo?.idleDays;
+  if (idleDays === undefined) {
+    // No idle number to band on — fall back to whatever verdict we were handed
+    // (a legacy preload or cached entry carrying only the flat flag).
+    return worktree.staleInfo?.stale === true || worktree.stale === true;
+  }
+  if (idleDays >= LEGACY_IDLE_ARCHIVE_DAYS) return true;
+  return worktree.staleInfo?.stale === true && worktree.status !== undefined;
+}
 
 const STORAGE_KEY = "marblo.worktree.archiveOverrides.v1";
 
@@ -63,52 +170,68 @@ export function countUnknownVerdicts(worktrees: Worktree[]): number {
 }
 
 /**
- * Auto-archive verdict straight from the electron main hygiene computation: a
- * worktree is auto-archived once it is merged into base (landed) or has gone
- * stale (idle beyond the threshold).
+ * Auto-archive verdict: is this worktree finished or dormant enough to hide?
  *
- * `stale` already folds in `merged` (`stale = merged || idle >= N`), but we
- * check `merged` explicitly too so a future change to the idle threshold can't
- * accidentally un-hide a merged-and-landed worktree, and so {@link archiveReason}
- * can distinguish the two.
+ * Three signals archive, in descending order of how much they actually mean:
+ *  1. **DONE ticket** — the task this worktree exists for is closed. Meaning,
+ *     not time: a worktree touched an hour ago whose ticket shipped is done,
+ *     and no idle threshold will ever say so. Needs `signals.doneTaskIds`.
+ *  2. **merged** — the branch landed in base.
+ *  3. **idle** — dormant past the threshold. See {@link isIdleArchived} for why
+ *     this one is banded rather than a single number.
+ *
+ * ★ Every one of them is subordinate to {@link archiveSafetyBlocker}. A dirty,
+ * unpushed, or busy worktree is never auto-archived, however finished it looks
+ * — a DONE ticket does not make uncommitted changes in its worktree disposable,
+ * and neither does a merged branch. Getting the count down is not worth hiding
+ * work from the person who wrote it.
  *
  * An {@link isVerdictUnknown} worktree is NOT auto-archived — hiding work we
  * cannot judge risks hiding live work, which is worse than showing one row too
  * many. Unknown is reported separately rather than quietly folded into either
  * answer.
  */
-export function isAutoArchived(worktree: Worktree): boolean {
-  return (
-    worktree.staleInfo?.merged === true ||
-    worktree.staleInfo?.stale === true ||
-    worktree.stale === true
-  );
+export function isAutoArchived(
+  worktree: Worktree,
+  signals: ArchiveSignals = NO_SIGNALS,
+): boolean {
+  if (archiveSafetyBlocker(worktree, signals) !== null) return false;
+  if (hasDoneTicket(worktree, signals)) return true;
+  if (worktree.staleInfo?.merged === true) return true;
+  return isIdleArchived(worktree);
 }
 
 /** The reason a worktree is auto-archived, or null when it is active. */
-export function archiveReason(worktree: Worktree): ArchiveReason | null {
+export function archiveReason(
+  worktree: Worktree,
+  signals: ArchiveSignals = NO_SIGNALS,
+): ArchiveReason | null {
+  if (archiveSafetyBlocker(worktree, signals) !== null) return null;
+  if (hasDoneTicket(worktree, signals)) return "done";
   if (worktree.staleInfo?.merged === true) return "merged";
-  if (worktree.staleInfo?.stale === true || worktree.stale === true) {
-    return "stale";
-  }
+  if (isIdleArchived(worktree)) return "stale";
   return null;
 }
 
 /**
  * Whether a worktree is archived — i.e. hidden from the default active/ongoing
  * views. A manual override always wins over the auto verdict:
- *  - "active"   → user restored it: show even if merged/stale.
- *  - "archived" → user archived it: hide even if active.
+ *  - "active"   → user restored it: show even if merged/stale/DONE.
+ *  - "archived" → user archived it: hide even if active, and even if a safety
+ *    blocker would have vetoed the automatic verdict. Deliberately hiding your
+ *    own dirty worktree is a choice; the guard exists to stop the machine from
+ *    doing it behind your back, not to overrule you.
  * With no override, fall back to the auto verdict.
  */
 export function isWorktreeArchived(
   worktree: Worktree,
   overrides: ArchiveOverrides,
+  signals: ArchiveSignals = NO_SIGNALS,
 ): boolean {
   const override = overrides[worktreeKey(worktree)];
   if (override === "active") return false;
   if (override === "archived") return true;
-  return isAutoArchived(worktree);
+  return isAutoArchived(worktree, signals);
 }
 
 /**
@@ -119,8 +242,11 @@ export function isWorktreeArchived(
 export function isActiveOngoingWorktree(
   worktree: Worktree,
   overrides: ArchiveOverrides,
+  signals: ArchiveSignals = NO_SIGNALS,
 ): boolean {
-  return worktree.taskId != null && !isWorktreeArchived(worktree, overrides);
+  return (
+    worktree.taskId != null && !isWorktreeArchived(worktree, overrides, signals)
+  );
 }
 
 /**

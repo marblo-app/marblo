@@ -98,6 +98,8 @@ export const worktree = {
     "머지되거나 오래 무활동이면 자동으로 여기로 이동합니다.",
   "worktree.archivedReason.merged": "머지됨",
   "worktree.archivedReason.stale": "stale",
+  "worktree.archivedReason.done": "완료",
   "worktree.archivedReason.mergedTip": "이미 base에 머지되어 자동 아카이브됨",
   "worktree.archivedReason.staleTip": "장기 무활동으로 자동 아카이브됨",
+  "worktree.archivedReason.doneTip": "티켓이 DONE 이라 자동 아카이브됨",
 };
