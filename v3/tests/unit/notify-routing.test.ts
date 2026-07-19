@@ -138,4 +138,37 @@ describe("shouldInjectOrchestratorNotification — quiet progress gate", () => {
       ),
     ).toBe(true);
   });
+
+  // 2026-07-19 회귀: 막힌 에이전트가 사용자에게 질문하고 idle 로 죽어도 오케가
+  // 몇 턴 뒤에야 인지했다. 질문성 activity 는 BLOCKED 전이가 없어도 즉시 보여야 한다.
+  it("injects [질문] activity even without a BLOCKED transition", () => {
+    expect(
+      shouldInjectOrchestratorNotification(
+        '[Task Activity] "팝업 조사" progress update (backend, id=t1, agent=a1): [질문] 필요한 것: 팝업 실제 문구 / 이유: 문구 없이는 원인 특정 불가',
+      ),
+    ).toBe(true);
+  });
+
+  it("injects natural-phrasing question activities (마커 누락 안전망)", () => {
+    for (const body of [
+      "라이브 관측값 확인 필요 — 재현 여부를 모르겠음",
+      "제품 판단 필요: 이 케이스를 에러로 볼지",
+      "needs clarification on the expected payload shape",
+      "awaiting answer before touching the merge path",
+    ]) {
+      expect(
+        shouldInjectOrchestratorNotification(
+          `[Task Activity] "T" progress update (backend, id=t1, agent=a1): ${body}`,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("still suppresses ordinary progress that merely contains a question mark", () => {
+    expect(
+      shouldInjectOrchestratorNotification(
+        '[Task Activity] "Build API" progress update (backend, id=t1, agent=a1): 캐시를 쓸까 고민했지만 그냥 직접 조회로 구현함?',
+      ),
+    ).toBe(false);
+  });
 });

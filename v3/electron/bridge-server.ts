@@ -65,6 +65,16 @@ export function withCompletionFooter(
     `- 정상 완료 / 리뷰 가능: submit_for_review(task_id="${taskId}", pr_url?, summary?) — summary 에 {problem,approach,changes,verification,pr} 를 주면 위 보고를 자동 기록한다.`,
     `- 실패 / 반려: update_task_status(task_id="${taskId}", status="FAILED", comment="이유")`,
     "완료/실패/차단 같은 중요 이벤트만 오케스트레이터 PTY 로 자동 주입된다.",
+    // 막힘 규약: 대상만 사용자→오케로 바꾼다. "묻지 말고 추측하라"가 아니다 —
+    // 근거 없는 추측 수정은 '머지됨≠동작함' 오판을 낳으므로 질문 자체는 옳다.
+    // 문제는 ①대상이 사용자 ②질문 후 전면 정지 ③오케에 안 보임, 이 셋뿐이다.
+    "",
+    "[막혔을 때 — 사용자에게 직접 묻지 말 것]",
+    "- 근거가 없으면 추측으로 고치지 마라. 모르면 묻는 게 맞다. 단 물어볼 대상은 사용자가 아니라 오케스트레이터다.",
+    `- 질문·확인 요청: add_activity(task_id="${taskId}", message="[질문] 필요한 것: ... / 이유: ... / 못 받으면 막히는 범위: ...") — "[질문]" 표기가 있어야 오케 PTY 로 즉시 전달된다.`,
+    `- 그 미지 때문에 진행이 실제로 멈추면: update_task_status(task_id="${taskId}", status="BLOCKED", comment="무엇을 기다리는지") — BLOCKED 도 즉시 전달된다.`,
+    "- ★질문했다고 작업 전체를 멈추지 마라. 그 미지와 무관하게 진행 가능한 잔여 작업은 계속하고, 답이 오면 막혔던 부분을 이어서 한다.",
+    "- 사용자만 답할 수 있는 것(스크린샷, 라이브 관측값, 제품 판단)이라도 오케에 보고하면 오케가 판단해 답하거나 사장님께 모아 전달한다.",
   ].join("\n");
   return instruction + footer;
 }
@@ -237,10 +247,23 @@ export function validateOrchestratorSessionIdentity(input: {
 
 const IMPORTANT_TASK_UPDATE_STATUSES = new Set(["DONE", "FAILED", "BLOCKED"]);
 
-function mentionsStuckOrBlocked(message: string): boolean {
+/**
+ * A blocked agent idles silently unless this returns true — `[Task Activity]`
+ * is otherwise dropped below. An agent that asks a question but forgets the
+ * BLOCKED transition used to vanish from the orchestrator's view entirely
+ * (2026-07-19: project-missing-popup, homebutton-regression both idled for
+ * several turns). The "[질문]" marker is what the dispatch footer mandates;
+ * the natural-phrasing patterns are the safety net for when it's omitted.
+ */
+function mentionsBlockedOrNeedsInput(message: string): boolean {
   return (
     /\b(stuck|blocked|blocker|blocking)\b/i.test(message) ||
-    /막힘|차단|블로커/.test(message)
+    /막힘|차단|블로커/.test(message) ||
+    /\[질문\]/.test(message) ||
+    /\b(needs?|awaiting|waiting for)\s+(input|clarification|confirmation|answer)\b/i.test(
+      message,
+    ) ||
+    /확인 필요|답변 필요|판단 필요|확인 부탁|알려주세요/.test(message)
   );
 }
 
@@ -255,7 +278,7 @@ function mentionsStuckOrBlocked(message: string): boolean {
 export function shouldInjectOrchestratorNotification(message: string): boolean {
   const trimmed = message.trim();
   if (!trimmed) return false;
-  if (mentionsStuckOrBlocked(trimmed)) return true;
+  if (mentionsBlockedOrNeedsInput(trimmed)) return true;
 
   if (trimmed.startsWith("[Task Activity]")) {
     return false;
@@ -1511,8 +1534,15 @@ export class BridgeServer {
           return;
         }
 
-        // Write instruction to agent's PTY stdin (split for discrete Enter)
-        this.ptyManager.writeAndSubmit(agent.ptySessionId, params.instruction);
+        // Write instruction to agent's PTY stdin (split for discrete Enter).
+        // Footer carries both the completion protocol and the "막혔을 때" rule
+        // (report to the orchestrator, never ask the user directly). The
+        // dispatch/spawn paths already append it; reuse used to skip it, so a
+        // reused agent knew how to work but not how to report or unblock.
+        this.ptyManager.writeAndSubmit(
+          agent.ptySessionId,
+          withCompletionFooter(params.instruction, params.taskId),
+        );
 
         // Rebind the agent to the new task so currentTaskId reverse-map views
         // (LanesTab, ActivityStreamPanel) and the agent doc point at the task it
@@ -1703,7 +1733,9 @@ export class BridgeServer {
       rateLimits = await getAccountRateLimits();
     } catch (err) {
       console.warn(
-        `[BridgeServer] auto-mix usage 프로브 실패 — 무동작 폴백: ${String(err)}`,
+        `[BridgeServer] auto-mix usage 프로브 실패 — 무동작 폴백: ${String(
+          err,
+        )}`,
       );
     }
 
