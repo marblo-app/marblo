@@ -32,6 +32,7 @@ interface EditorState {
   saveFile: (filePath: string) => Promise<void>;
   clearSaveError: () => void;
   toggleDiff: () => void;
+  setShowDiff: (show: boolean) => void;
   // FileTree sync — call after file operations on disk
   handlePathRenamed: (fromPath: string, toPath: string) => void;
   handlePathRemoved: (targetPath: string) => void;
@@ -218,6 +219,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   toggleDiff: () => {
     set((s) => ({ showDiff: !s.showDiff }));
+  },
+
+  // Explicit set, for callers that need a known end state rather than a flip —
+  // the worktree diff auto-open must land on "diff shown" regardless of what
+  // the toggle happened to be. Skips the set when unchanged.
+  setShowDiff: (show: boolean) => {
+    set((s) => (s.showDiff === show ? s : { showDiff: show }));
   },
 
   handlePathRenamed: (fromPath: string, toPath: string) => {

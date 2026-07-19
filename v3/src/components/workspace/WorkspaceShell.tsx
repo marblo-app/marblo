@@ -59,6 +59,9 @@ export function WorkspaceShell() {
     else if (pendingJump.type === "code") {
       addPane("code");
       consumeJump();
+    } else if (pendingJump.type === "worktrees") {
+      addPane("worktrees");
+      consumeJump();
     }
   }, [pendingJump, consumeJump, addPane]);
 

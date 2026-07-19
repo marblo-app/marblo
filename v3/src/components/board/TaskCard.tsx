@@ -346,9 +346,10 @@ function TaskCardContent({
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
-                // "이 워크트리 보기": switch the left file tree to this worktree
-                // and select its agent in the bottom panel — staying on the
-                // board (no full-pane takeover), via the sanctioned action.
+                // "이 워크트리 보기": switch the left file tree to this
+                // worktree, select its agent in the bottom panel, and open its
+                // diff on the Code surface — all three in one click, all three
+                // on the same worktree, via the sanctioned action.
                 viewWorktree(matchingWorktree, {
                   focusAgentId: resolveTaskAgentId(agents, task),
                 });

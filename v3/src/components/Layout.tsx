@@ -149,6 +149,10 @@ export function Layout() {
       // here to avoid leaving a stale latch.
       setActiveTab("code");
       consumeJump();
+    } else if (pendingJump.type === "worktrees") {
+      // Same shape as "code": nothing downstream consumes it, so clear here.
+      setActiveTab("worktrees");
+      consumeJump();
     }
   }, [pendingJump, consumeJump]);
 

@@ -4,6 +4,8 @@ import { useProjectStore } from "../stores/projectStore";
 import { useAgentFocusStore } from "../stores/agentFocusStore";
 import { useNavigationStore } from "../stores/navigationStore";
 import { useWorktreeViewStore } from "../stores/worktreeViewStore";
+import { useWorktreeDiffStore } from "../stores/worktreeDiffStore";
+import { openWorktreeDiff } from "./worktreeDiff";
 
 export interface ViewWorktreeOptions {
   /**
@@ -17,7 +19,9 @@ export interface ViewWorktreeOptions {
    * flow deliberately keeps the current main tab (Board / 오케 중심 / 기능탭) —
    * only the file tree + agent selection change (no full-pane takeover). The
    * Worktrees-tab "Open" action passes true to preserve its "open in Code"
-   * behaviour.
+   * behaviour. Note {@link ViewWorktreeOptions.openDiff} (default true) also
+   * brings the Code surface forward — a diff nobody can see is not shown — so
+   * this flag only matters when `openDiff` is explicitly off.
    */
   switchToCodeTab?: boolean;
   /**
@@ -25,6 +29,15 @@ export interface ViewWorktreeOptions {
    * file-tree switch is never invisible. Default true.
    */
   revealFileTree?: boolean;
+  /**
+   * Open the worktree's diff on the Code surface — list its changed files, open
+   * one, and put the editor in diff mode ({@link openWorktreeDiff}). Default
+   * **true**: "이 워크트리 보기" switched the file tree and the agent selection
+   * but left the diff behind, so the one action only synced two of the three
+   * surfaces. Bringing the Code surface forward is what makes the diff visible,
+   * so this implies the tab/pane jump below.
+   */
+  openDiff?: boolean;
 }
 
 /**
@@ -33,10 +46,15 @@ export interface ViewWorktreeOptions {
  * "Code" tab button, `document.querySelectorAll("button")…click()`).
  *
  * ── Minimal blast radius (the "activeWorktree" scope) ────────────────────────
- * Only three things change: the bound project (so the sidebar resolves the
- * right worktree list), `editorStore.rootPath` (the file tree), and
- * `agentFocusStore` (the bottom panel selection). The active main tab is left
- * alone unless `switchToCodeTab` is set. `activeWorktreeId` follows rootPath via
+ * Four things change, and they must all land on the *same* worktree — a click
+ * that moves the file tree but leaves the diff or the agent selection pointing
+ * at the previous worktree is a misfire, not a partial success. Those four: the
+ * bound project (so the sidebar resolves the right worktree list),
+ * `editorStore.rootPath` (the file tree), `agentFocusStore` (the bottom panel
+ * selection), and the Code-surface diff ({@link openWorktreeDiff}, which reads
+ * the rootPath set here and re-checks it before touching the editor, so a
+ * slower git status can't land on a root the user already left).
+ * `activeWorktreeId` follows rootPath via
  * the central reconciler ({@link useActiveWorktreeSync}); we also set it here
  * optimistically for instant button feedback.
  *
@@ -56,6 +74,7 @@ export function viewWorktree(
     focusAgentId,
     switchToCodeTab = false,
     revealFileTree = true,
+    openDiff = true,
   } = options;
 
   // Bind the worktree's project so the FileTree's worktree list + header
@@ -85,8 +104,22 @@ export function viewWorktree(
     useAgentFocusStore.getState().setFocusedAgent(focusAgentId);
   }
 
-  if (switchToCodeTab) {
+  // Bring the Code surface forward. Both shells already handle this jump —
+  // legacy Layout switches the active tab, the Workspace shell adds a code pane
+  // — so the diff becomes visible in either without a shell-specific branch.
+  if (switchToCodeTab || openDiff) {
     useNavigationStore.getState().requestJump({ type: "code" });
+  }
+
+  if (openDiff) {
+    // Fire-and-forget: viewWorktree stays synchronous for its callers. Every
+    // failure mode inside lands in worktreeDiffStore as a rendered banner, so
+    // nothing is lost by not awaiting.
+    void openWorktreeDiff(worktree);
+  } else {
+    // Clear any previous worktree's diff verdict so a stale banner can't
+    // describe a worktree we are no longer looking at.
+    useWorktreeDiffStore.getState().reset();
   }
 
   if (revealFileTree && typeof window !== "undefined") {

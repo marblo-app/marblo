@@ -6,6 +6,7 @@ import { EditorTabs } from "../code/EditorTabs";
 import { CodeEditor } from "../code/CodeEditor";
 import { ImagePreview } from "../code/ImagePreview";
 import { DiffSurface } from "../workspace/DiffSurface";
+import { WorktreeDiffBanner } from "../code/WorktreeDiffBanner";
 import { isImageFile } from "../../lib/imageFiles";
 import { isActiveOngoingWorktree } from "../../lib/worktreeHygiene";
 import { useTranslation } from "../../lib/i18n";
@@ -129,6 +130,12 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
 
       {/* Editor tabs */}
       <EditorTabs />
+
+      {/* Verdict of the "이 워크트리 보기" diff auto-open — the changed-file
+          strip when it opened, and an explicit reason when it could not. Both
+          shells render CodeTab, so this covers legacy Layout and the Workspace
+          shell alike. */}
+      <WorktreeDiffBanner />
 
       {/* Save failure — a swallowed write error means the edit never hit disk */}
       {saveError && (

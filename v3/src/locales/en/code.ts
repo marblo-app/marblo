@@ -14,4 +14,16 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.saveFailed": "Failed to save {name} — changes were not written to disk",
   "code.saveFailedDismiss": "Dismiss save error",
   "code.rootArchivedHint": "{count} archived · manage in the Worktrees tab",
+
+  "code.worktreeDiff.loading": "Checking worktree changes...",
+  "code.worktreeDiff.changedCount": "{count} changed",
+  "code.worktreeDiff.deletedFile": "{path} — deleted, cannot be opened",
+  "code.worktreeDiff.clean":
+    "This worktree has no changes (identical to its base).",
+  "code.worktreeDiff.committedOnly":
+    "No uncommitted changes — this branch has {count} file(s) changed against its base, all already committed.",
+  "code.worktreeDiff.viewFullDiff": "View full diff",
+  "code.worktreeDiff.deletionsOnly":
+    "All {count} change(s) are deletions — no file left on disk to diff.",
+  "code.worktreeDiff.error": "Could not open the worktree diff: {message}",
 };

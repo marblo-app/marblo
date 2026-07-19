@@ -13,7 +13,11 @@ import { create } from "zustand";
 export type JumpTarget =
   | { type: "task"; id: string }
   | { type: "agent"; id: string }
-  | { type: "code" };
+  | { type: "code" }
+  // Worktrees surface — the escape hatch from the Code tab's per-file diff to
+  // the whole-branch diff, for work the agent already committed (which the
+  // per-file working-tree diff cannot show). Both shells handle it.
+  | { type: "worktrees" };
 
 interface NavigationState {
   pendingJump: JumpTarget | null;
