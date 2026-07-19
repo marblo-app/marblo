@@ -53,6 +53,30 @@ interface WorktreeState {
    * (ticket yJgz7s03). Concurrent callers share the same in-flight fetch.
    */
   ensureFresh: (maxAgeMs?: number) => Promise<void>;
+  /**
+   * Resolve ONE worktree on demand: run `select` against the current snapshot
+   * and, only on a miss, re-enumerate (light) once and select again. Returns
+   * null when it genuinely isn't there — callers must surface that as a
+   * failure, never as an empty-but-fine result (ticket F2WGGGVthmg7lN490PDy).
+   *
+   * `select` takes the whole list rather than a per-item predicate so callers
+   * keep their *ordered* matching rules (findTaskWorktree tries taskId → path
+   * → branch in priority order; a plain `.find(predicate)` would return
+   * whichever candidate happens to sit earliest in the array).
+   *
+   * ── Why the escalation is refreshLight(), never refresh() ──────────────────
+   * Both IPCs enumerate the identical set — `worktree:list` and
+   * `worktree:listLight` each come from `worktreeManager.list(repoRoot)` over
+   * the same project roots. The full list only *adds* per-worktree status +
+   * staleInfo probes (~61ms × N; measured 9.4s sequential and 12–26s under
+   * spawn contention at 160 worktrees). So the sweep cannot find a worktree
+   * the light path missed — on the miss path it buys nothing and pays
+   * everything. Callers that need `status` for the one resolved worktree ask
+   * `worktree:status` for that path alone.
+   */
+  resolveWorktree: (
+    select: (worktrees: Worktree[]) => Worktree | null,
+  ) => Promise<Worktree | null>;
   /** Archive (hide) or restore (show) a worktree by its key (path). */
   setWorktreeArchived: (key: string, archived: boolean) => void;
   rebase: (path: string, baseRef: string) => Promise<void>;
@@ -334,6 +358,17 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
       return;
     }
     return get().refreshLight();
+  },
+
+  resolveWorktree: async (select) => {
+    const hit = select(get().worktrees);
+    if (hit) return hit;
+    // Miss → one cheap re-enumeration. Not TTL-gated: the caller is acting on
+    // an explicit click and a miss is exactly the case where the snapshot is
+    // suspect (the worktree may have been created seconds ago). Concurrent
+    // callers still share `inflightLight`.
+    await get().refreshLight();
+    return select(get().worktrees);
   },
 
   remove: async (repoRoot, path, deleteBranch) => {

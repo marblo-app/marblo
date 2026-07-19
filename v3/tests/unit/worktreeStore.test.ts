@@ -57,13 +57,13 @@ describe("statusPill — danger (🔴 충돌)", () => {
   });
   it("conflicts 비어있지 않으면 mergeable=true 라도 danger", () => {
     const p = statusPill(
-      wt({ status: makeStatus({ mergeable: true, conflicts: ["a.ts"] }) })
+      wt({ status: makeStatus({ mergeable: true, conflicts: ["a.ts"] }) }),
     );
     expect(p.tone).toBe("danger");
   });
   it("danger 가 stale 보다 우선 (충돌+stale → danger)", () => {
     const p = statusPill(
-      wt({ stale: true, status: makeStatus({ mergeable: false }) })
+      wt({ stale: true, status: makeStatus({ mergeable: false }) }),
     );
     expect(p.tone).toBe("danger");
   });
@@ -77,7 +77,7 @@ describe("statusPill — warning (⚠️ stale)", () => {
   });
   it("stale 가 behind 보다 우선 (stale+behind → warning)", () => {
     const p = statusPill(
-      wt({ stale: true, status: makeStatus({ behind: 3 }) })
+      wt({ stale: true, status: makeStatus({ behind: 3 }) }),
     );
     expect(p.tone).toBe("warning");
   });
@@ -307,6 +307,167 @@ describe("ensureFresh — 스테일 스냅샷 회귀 가드 (listLight 경로)",
   });
 });
 
+/**
+ * resolveWorktree — 실패 경로 풀스윕 회귀 가드 (티켓 jSVKHpBzjvWUQHlmXBU0).
+ *
+ * #495 가 조회를 0.144s 로 줄였지만 TaskDetailModal 은 라이트 스냅샷 miss 시
+ * refresh()(풀스윕)로 폴백했다. 실측: status() 1개당 61ms × 160개 → 순차 9.4s,
+ * 스폰 경합 시 12~26s. 그런데 두 IPC 는 같은 worktreeManager.list 열거를
+ * 쓰므로 풀스윕이 라이트가 못 찾은 워크트리를 찾아낼 방법은 애초에 없다 —
+ * miss 경로에서 얻는 것 없이 값만 다 치르는 구조였다.
+ */
+describe("resolveWorktree — 단건 on-demand 해소", () => {
+  type LightGroup = {
+    projectId: string;
+    repoRoot: string;
+    baseRef: string;
+    worktrees: { path: string; branch: string; head: string }[];
+  };
+
+  const PROJECT = "GFB8JnJrrX6AgahqmGB3";
+  const listMock = vi.fn();
+  const listLightMock = vi.fn<() => Promise<LightGroup[]>>();
+
+  function lightGroup(paths: string[]): LightGroup[] {
+    return [
+      {
+        projectId: PROJECT,
+        repoRoot: "/repo",
+        baseRef: "origin/main",
+        worktrees: paths.map((path) => ({
+          path,
+          branch: `marblo/${path.split("/").pop()}`,
+          head: "abc123",
+        })),
+      },
+    ];
+  }
+
+  const selectTask = (id: string) => (worktrees: Worktree[]) =>
+    findTaskWorktree(worktrees, { id });
+
+  beforeEach(() => {
+    listMock.mockReset();
+    listLightMock.mockReset();
+    vi.stubGlobal("window", {
+      electronAPI: {
+        worktree: { list: listMock, listLight: listLightMock },
+      },
+    });
+    useWorktreeStore.setState({
+      worktrees: [],
+      loading: false,
+      lastError: null,
+      lastRefreshedAt: null,
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("스냅샷에 이미 있으면 IPC 를 아예 안 탄다", async () => {
+    listLightMock.mockResolvedValue(lightGroup([`/w/${PROJECT}/task-a`]));
+    await useWorktreeStore.getState().refreshLight();
+    listLightMock.mockClear();
+
+    const found = await useWorktreeStore
+      .getState()
+      .resolveWorktree(selectTask("task-a"));
+    expect(found?.taskId).toBe("task-a");
+    expect(listLightMock).not.toHaveBeenCalled();
+    expect(listMock).not.toHaveBeenCalled();
+  });
+
+  it("★miss 는 경량 재열거 1회로만 승격한다 — 풀스윕 worktree:list 호출 금지", async () => {
+    listLightMock.mockResolvedValueOnce(lightGroup([`/w/${PROJECT}/task-a`]));
+    await useWorktreeStore.getState().refreshLight();
+    listLightMock.mockClear();
+
+    // 방금 디스패치된 워크트리 — 스냅샷엔 없고 재열거하면 나온다.
+    listLightMock.mockResolvedValueOnce(
+      lightGroup([`/w/${PROJECT}/task-a`, `/w/${PROJECT}/task-new`]),
+    );
+    const found = await useWorktreeStore
+      .getState()
+      .resolveWorktree(selectTask("task-new"));
+
+    expect(found?.taskId).toBe("task-new");
+    expect(listLightMock).toHaveBeenCalledTimes(1);
+    expect(listMock).not.toHaveBeenCalled();
+  });
+
+  it("재열거 후에도 없으면 null — 조용히 성공한 척하지 않는다", async () => {
+    listLightMock.mockResolvedValue(lightGroup([`/w/${PROJECT}/task-a`]));
+    const found = await useWorktreeStore
+      .getState()
+      .resolveWorktree(selectTask("task-ghost"));
+
+    expect(found).toBeNull();
+    expect(listLightMock).toHaveBeenCalledTimes(1);
+    expect(listMock).not.toHaveBeenCalled();
+  });
+
+  it("miss 재열거가 실패하면 throw — 호출자가 '워크트리 없음'으로 위장할 수 없다", async () => {
+    listLightMock.mockRejectedValueOnce(new Error("ipc down"));
+    await expect(
+      useWorktreeStore.getState().resolveWorktree(selectTask("task-a")),
+    ).rejects.toThrow("ipc down");
+  });
+
+  it("TTL 로 게이트되지 않는다 — 방금 경량 조회했어도 miss 면 다시 열거한다", async () => {
+    listLightMock.mockResolvedValueOnce(lightGroup([]));
+    await useWorktreeStore.getState().ensureFresh();
+    expect(useWorktreeStore.getState().lastRefreshedAt).not.toBeNull();
+    listLightMock.mockClear();
+
+    listLightMock.mockResolvedValueOnce(lightGroup([`/w/${PROJECT}/task-new`]));
+    const found = await useWorktreeStore
+      .getState()
+      .resolveWorktree(selectTask("task-new"));
+
+    expect(found?.taskId).toBe("task-new");
+    expect(listLightMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("select 의 우선순위(taskId > 경로 > 브랜치)를 리스트 순서가 뒤집지 못한다", async () => {
+    // 브랜치에만 id 가 있는 워크트리가 배열 앞에 오고, 경로로 매칭되는
+    // 워크트리가 뒤에 온다. per-item predicate 였다면 앞의 것이 이겼을 것.
+    useWorktreeStore.setState({
+      worktrees: [
+        {
+          id: "p:/w/other",
+          taskId: null,
+          projectId: PROJECT,
+          agentId: null,
+          branch: "marblo/task-a-followup",
+          baseRef: "origin/main",
+          path: "/w/other",
+          repoRoot: "/repo",
+          createdAt: null,
+        } as Worktree,
+        {
+          id: `p:/w/${PROJECT}/task-a`,
+          taskId: "task-a",
+          projectId: PROJECT,
+          agentId: null,
+          branch: "marblo/whatever",
+          baseRef: "origin/main",
+          path: `/w/${PROJECT}/task-a`,
+          repoRoot: "/repo",
+          createdAt: null,
+        } as Worktree,
+      ],
+    });
+
+    const found = await useWorktreeStore
+      .getState()
+      .resolveWorktree(selectTask("task-a"));
+    expect(found?.path).toBe(`/w/${PROJECT}/task-a`);
+    expect(listLightMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("statusPill — 현재 동작 고정(잠재 갭 문서화)", () => {
   // statusPill 은 `dirty`(uncommitted) 를 무시한다. 미커밋 변경이 있어도
   // ahead>0·mergeable 이면 "머지 가능"으로 보인다. 실제 squash-merge 전엔
@@ -314,7 +475,7 @@ describe("statusPill — 현재 동작 고정(잠재 갭 문서화)", () => {
   // 회귀 가드로 고정해 둔다.
   it("dirty=true 여도 ahead>0·mergeable 이면 ready (dirty 무시 — 현 동작)", () => {
     const p = statusPill(
-      wt({ status: makeStatus({ ahead: 2, behind: 0, dirty: true }) })
+      wt({ status: makeStatus({ ahead: 2, behind: 0, dirty: true }) }),
     );
     expect(p.tone).toBe("ready");
   });

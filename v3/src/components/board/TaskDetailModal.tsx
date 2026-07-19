@@ -344,7 +344,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
   const worktrees = useWorktreeStore((s) => s.worktrees);
-  const refreshWorktrees = useWorktreeStore((s) => s.refresh);
+  const resolveWorktree = useWorktreeStore((s) => s.resolveWorktree);
   const ensureFreshWorktrees = useWorktreeStore((s) => s.ensureFresh);
   const worktreesLoading = useWorktreeStore((s) => s.loading);
   const agents = useAgentStore((s) => s.agents);
@@ -364,6 +364,11 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   );
   const [editPriority, setEditPriority] = useState(task.priority);
   const [deleting, setDeleting] = useState(false);
+  // Outcome of an explicit "다시 찾기" click. "idle" is *not* a result — it
+  // means the user hasn't asked yet — so a re-find that comes back empty must
+  // land on its own state rather than reverting to the generic "no worktree"
+  // line, which reads as "nothing happened".
+  const [refind, setRefind] = useState<"idle" | "missed" | "error">("idle");
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const nextStatuses = getNextStatuses(task.status);
@@ -389,7 +394,19 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
     setDiff(null);
     setDiffError(null);
     setDiffLoading(false);
+    setRefind("idle");
   }, [task.id]);
+
+  // Re-find: resolve this one worktree on demand. A miss and an IPC failure are
+  // distinct outcomes and both are shown — neither may look like "no worktree,
+  // as expected".
+  const handleRefind = () => {
+    setRefind("idle");
+    resolveWorktree((list) => findTaskWorktree(list, task)).then(
+      (worktree) => setRefind(worktree ? "idle" : "missed"),
+      () => setRefind("error"),
+    );
+  };
 
   // Opening a ticket is the moment the user expects its worktree to exist —
   // don't resolve against a boot-time snapshot (worktrees are created mid-
@@ -404,18 +421,15 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
     setDiffLoading(true);
     setDiffError(null);
     try {
-      let worktree = findTaskWorktree(
-        useWorktreeStore.getState().worktrees,
-        task,
+      // Snapshot miss escalates to a single light re-enumeration (~0.14s), not
+      // the full status sweep this used to call: the sweep enumerates the very
+      // same worktrees and only adds per-worktree status probes, so it could
+      // never find one the light path missed — it just spent 9.4–26s failing,
+      // on precisely the path the user hits when a ticket's worktree is
+      // missing (ticket jSVKHpBzjvWUQHlmXBU0).
+      const worktree = await resolveWorktree((list) =>
+        findTaskWorktree(list, task),
       );
-
-      if (!worktree) {
-        await refreshWorktrees();
-        worktree = findTaskWorktree(
-          useWorktreeStore.getState().worktrees,
-          task,
-        );
-      }
 
       if (!worktree) {
         throw new Error(t("board.taskDetail.worktreeNotFound"));
@@ -757,15 +771,25 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
               className="flex items-center gap-2 rounded border border-gray-700/60 bg-gray-800/40 px-3 py-2 text-xs text-gray-500"
               title={t("board.taskDetail.noWorktreeTip")}
             >
-              <span>
+              <span
+                className={
+                  !worktreesLoading && refind === "error"
+                    ? "text-red-400"
+                    : undefined
+                }
+              >
                 {worktreesLoading
                   ? t("board.taskDetail.worktreeSearching")
-                  : t("board.taskDetail.noWorktree")}
+                  : refind === "missed"
+                    ? t("board.taskDetail.worktreeStillMissing")
+                    : refind === "error"
+                      ? t("board.taskDetail.worktreeRefindFailed")
+                      : t("board.taskDetail.noWorktree")}
               </span>
               {!worktreesLoading && (
                 <button
                   type="button"
-                  onClick={() => refreshWorktrees().catch(() => {})}
+                  onClick={handleRefind}
                   className="rounded px-1.5 py-0.5 text-gray-400 underline decoration-dotted underline-offset-2 hover:text-gray-200 transition-colors"
                 >
                   {t("board.taskDetail.worktreeRefind")}

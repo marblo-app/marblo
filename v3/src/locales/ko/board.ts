@@ -49,6 +49,8 @@ export const board = {
     "이 태스크 ID와 매칭되는 워크트리가 없습니다 (워크트리의 taskId·경로·브랜치 어디에도 태스크 ID가 없음). 방금 생성됐다면 다시 찾기를 누르세요.",
   "board.taskDetail.worktreeSearching": "워크트리 확인 중...",
   "board.taskDetail.worktreeRefind": "다시 찾기",
+  "board.taskDetail.worktreeStillMissing": "다시 찾아봤지만 없음",
+  "board.taskDetail.worktreeRefindFailed": "워크트리 조회 실패",
   "board.taskDetail.viewTerminal": "{name} 터미널 보기",
   "board.taskDetail.connect": "(연결)",
   "board.taskDetail.edit": "수정",

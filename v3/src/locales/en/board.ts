@@ -51,6 +51,8 @@ export const board: Record<keyof typeof koBoard, string> = {
     "No worktree matches this task id (not in any worktree's taskId, path, or branch). If it was just created, hit Re-find.",
   "board.taskDetail.worktreeSearching": "Checking worktrees...",
   "board.taskDetail.worktreeRefind": "Re-find",
+  "board.taskDetail.worktreeStillMissing": "Re-checked — still none",
+  "board.taskDetail.worktreeRefindFailed": "Worktree lookup failed",
   "board.taskDetail.viewTerminal": "View {name} terminal",
   "board.taskDetail.connect": "(connect)",
   "board.taskDetail.edit": "Edit",
