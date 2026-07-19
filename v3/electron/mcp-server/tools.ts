@@ -41,7 +41,12 @@ import {
   computeTaskProjection,
   type ApplyProjectionInput,
 } from "./projection.js";
-import { selectProjectId, looksLikeFirestoreId } from "./project-resolve.js";
+import {
+  selectProjectId,
+  looksLikeFirestoreId,
+  checkProjectLock,
+  type ProjectLockFailure,
+} from "./project-resolve.js";
 import {
   validateTaskBodyInput,
   validateTaskBodySections,
@@ -262,18 +267,65 @@ function emitMissionStepReport(event: MissionStepReportedEvent): void {
 // Firestore document IDs are 20-char alphanumeric strings
 const FIRESTORE_ID_RE = /^[A-Za-z0-9]{15,}$/;
 
-function resolveProject(projectId?: string): string {
-  // Always prefer the injected DEFAULT_PROJECT (Firestore document ID from Electron)
+/**
+ * Non-throwing project resolution for paths that must never fail — currently
+ * only the audit-log tagging in `auditedTool`'s `finally` block, which runs
+ * after the tool has already produced its result and just needs a best-effort
+ * label. Every caller-facing path goes through `enforceProjectLock` instead.
+ *
+ * NOTE: this deliberately keeps the old "default wins" behavior. It is NOT a
+ * query resolver — do not reintroduce it into a tool handler, or `project_id`
+ * becomes silently ignored again (ticket IuucvLemDFvbh4UYmL1o).
+ */
+function resolveProjectForAudit(projectId?: string): string {
   if (DEFAULT_PROJECT) return DEFAULT_PROJECT;
-  // Only accept explicit project_id if it looks like a Firestore document ID
   if (projectId && FIRESTORE_ID_RE.test(projectId)) return projectId;
-  // Reject human-readable names like "stockai-platform" — they cause projectId mismatch
-  if (projectId) {
-    console.warn(
-      `[MCP] Ignoring non-Firestore project_id="${projectId}". Use MARBLO_PROJECT env var.`,
-    );
-  }
   return "";
+}
+
+/**
+ * Thrown when a `project_id` argument names a project other than the one this
+ * orchestrator session is bound to. Thrown rather than returned as `text()` on
+ * purpose: a refusal must not be mistakable for a (possibly empty) result set.
+ */
+class ProjectLockError extends Error {
+  readonly reason: ProjectLockFailure;
+  constructor(message: string, reason: ProjectLockFailure) {
+    super(message);
+    this.name = "ProjectLockError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * Resolve `project_id` for a read/query tool under governance decision B:
+ * honor the argument, but refuse loudly when it points somewhere other than the
+ * bound session project. Returns the project id to filter by ("" only when no
+ * project context exists at all, which preserves the previous unfiltered read).
+ *
+ * @throws ProjectLockError on a cross-project or unidentifiable project_id.
+ */
+async function enforceProjectLock(
+  toolName: string,
+  projectId?: string,
+): Promise<string> {
+  const arg = (projectId ?? "").trim();
+
+  // Only pay for a Firestore name lookup when the argument is actually a name.
+  const nameResolvedTo =
+    arg && !FIRESTORE_ID_RE.test(arg)
+      ? await resolveProjectNameToId(arg)
+      : undefined;
+
+  const outcome = checkProjectLock({
+    explicit: arg,
+    bound: DEFAULT_PROJECT,
+    nameResolvedTo,
+    toolName,
+  });
+
+  if (!outcome.ok) throw new ProjectLockError(outcome.message, outcome.reason);
+  return outcome.projectId;
 }
 
 /** True if a project document with this id exists (best-effort; on read error
@@ -1065,7 +1117,7 @@ export function registerTools(server: McpServer): void {
       } finally {
         const duration = Date.now() - start;
         const params = (args[0] || {}) as Record<string, unknown>;
-        const projectId = resolveProject(
+        const projectId = resolveProjectForAudit(
           params.project_id as string | undefined,
         );
 
@@ -1088,7 +1140,12 @@ export function registerTools(server: McpServer): void {
     "get_all_tasks",
     "List tasks. EVERY open (non-terminal) task is listed before any completed one — open tasks are never crowded out by completed ones, whatever the limit. Completed tasks fill the leftover row budget as a tail. Filter by project/role; all_projects=true to span projects. Capped to `limit` (default 50) to keep results lean — raise limit or filter to see more.",
     {
-      project_id: z.string().optional().describe("Project ID"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+        ),
       role: z
         .string()
         .optional()
@@ -1114,7 +1171,22 @@ export function registerTools(server: McpServer): void {
         .describe("Max rows to return (default 50; open tasks shown first)"),
     },
     async ({ project_id, role, all_projects, all_contexts, limit }) => {
-      const projectId = all_projects ? "" : resolveProject(project_id);
+      // all_projects deliberately drops the project filter (its Firestore-rules
+      // behavior is a designed refusal, not a bug — see PR#508). But combining
+      // it with an explicit project_id is a contradiction, and honoring
+      // all_projects while quietly dropping project_id would be exactly the
+      // silent ignore this tool is being fixed for. Refuse instead.
+      if (all_projects && (project_id ?? "").trim()) {
+        throw new ProjectLockError(
+          `all_projects=true 와 project_id="${project_id}" 를 함께 줄 수 없습니다.\n` +
+            `해야 할 일 — 한 프로젝트만 볼 거면 all_projects 를 빼고, ` +
+            `전체를 볼 거면 project_id 를 빼세요.`,
+          "mismatch",
+        );
+      }
+      const projectId = all_projects
+        ? ""
+        : await enforceProjectLock("get_all_tasks", project_id);
       const contextId = contextReadFilter(!!all_contexts);
       const filterContextInMemory = contextId === "board";
       const constraints: QueryConstraint[] = [];
@@ -1211,7 +1283,12 @@ export function registerTools(server: McpServer): void {
     "Get TODO tasks available for the given role. Returns tasks whose dependencies are satisfied.",
     {
       role: z.string().describe("Agent role (backend/frontend/test/devops)"),
-      project_id: z.string().optional().describe("Project ID"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+        ),
       limit: z
         .number()
         .int()
@@ -1221,7 +1298,10 @@ export function registerTools(server: McpServer): void {
         .describe("Max rows (default 50)"),
     },
     async ({ role, project_id, limit }) => {
-      const projectId = resolveProject(project_id);
+      const projectId = await enforceProjectLock(
+        "get_available_tasks",
+        project_id,
+      );
       // Context scope — mirror get_all_tasks so the board orchestrator's
       // dispatch feed only surfaces its own context. Only the board orch sets
       // MARBLO_CONTEXT="board" (orchestrator-manager → contextForKind), so it
@@ -1341,7 +1421,12 @@ export function registerTools(server: McpServer): void {
         .array(z.string())
         .optional()
         .describe("Task IDs this depends on"),
-      project_id: z.string().optional().describe("Project ID"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+        ),
       context: z.string().optional().describe("Environment constraints"),
       scope: z.array(z.string()).optional().describe("File paths to modify"),
     },
@@ -1459,7 +1544,7 @@ export function registerTools(server: McpServer): void {
       if (normalized.error) return text(normalized.error);
       const taskList = normalized.tasks ?? [];
 
-      const project = resolveProject("");
+      const project = DEFAULT_PROJECT;
       if (!project) {
         return text(
           "Error: No project context. Set MARBLO_PROJECT env var or include project_id in each task.\n" +
@@ -2239,10 +2324,15 @@ export function registerTools(server: McpServer): void {
     "Check for tasks that have unread PM feedback. Filter by role and optionally by project.",
     {
       role: z.string().describe("Agent role (backend/frontend/test/devops)"),
-      project_id: z.string().optional().describe("Project ID"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+        ),
     },
     async ({ role, project_id }) => {
-      const projectId = resolveProject(project_id);
+      const projectId = await enforceProjectLock("check_feedback", project_id);
       const constraints: QueryConstraint[] = [
         where("role", "==", role),
         where("hasPmFeedback", "==", true),
@@ -2392,7 +2482,7 @@ export function registerTools(server: McpServer): void {
         // doc id so this write is idempotent — the renderer's
         // onAgentSpawned listener also writes the same doc, both writers
         // converge on the same id without creating duplicates.
-        const projectId = resolveProject(undefined);
+        const projectId = DEFAULT_PROJECT;
         if (projectId && result.agentId) {
           await setDoc(
             doc(db, "agents", result.agentId),
@@ -2459,7 +2549,12 @@ export function registerTools(server: McpServer): void {
     "Search tasks by keyword in title or description. Optionally filter by project.",
     {
       keyword: z.string().describe("Search keyword"),
-      project_id: z.string().optional().describe("Project ID"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+        ),
       limit: z
         .number()
         .int()
@@ -2469,7 +2564,7 @@ export function registerTools(server: McpServer): void {
         .describe("Max rows (default 50)"),
     },
     async ({ keyword, project_id, limit }) => {
-      const projectId = resolveProject(project_id);
+      const projectId = await enforceProjectLock("search_tasks", project_id);
       const constraints: QueryConstraint[] = [];
       if (projectId) constraints.push(where("projectId", "==", projectId));
 
@@ -2760,16 +2855,26 @@ export function registerTools(server: McpServer): void {
       project_id: z
         .string()
         .optional()
-        .describe("Project ID (only used for Firestore fallback)"),
+        .describe(
+          "Project ID. Honored on both the bridge and Firestore-fallback paths, and locked to this orchestrator session's project: a different project is refused with an error.",
+        ),
     },
     async ({ project_id }) => {
+      // Enforce the lock BEFORE the bridge branch: the bridge path reads
+      // MARBLO_PROJECT directly and never looked at project_id at all, so a
+      // cross-project argument was dropped even harder here than in the
+      // Firestore fallback below.
+      const lockedProjectId = await enforceProjectLock(
+        "get_agents",
+        project_id,
+      );
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
 
       // Try Bridge first — real-time data from AgentManager. Pass our
       // project so multi-window mode returns only this project's agents.
       if (bridgePort) {
         try {
-          const projectId = process.env.MARBLO_PROJECT || "";
+          const projectId = lockedProjectId;
           const url = projectId
             ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
                 projectId,
@@ -2812,7 +2917,7 @@ export function registerTools(server: McpServer): void {
       }
 
       // Firestore fallback
-      const projectId = resolveProject(project_id);
+      const projectId = lockedProjectId;
       const constraints: QueryConstraint[] = [];
       if (projectId) constraints.push(where("projectId", "==", projectId));
 
@@ -3031,7 +3136,7 @@ export function registerTools(server: McpServer): void {
       let dispatchTaskId = task_id;
 
       if (missionContextId && !dispatchTaskId) {
-        const projectId = resolveProject(undefined);
+        const projectId = DEFAULT_PROJECT;
         if (!projectId) {
           return text(
             "Error: No project context. Set MARBLO_PROJECT env var before dispatching a mission task.",
@@ -3236,7 +3341,7 @@ export function registerTools(server: McpServer): void {
             result.action === "mixed") &&
           result.agentId
         ) {
-          const projectId = resolveProject(undefined);
+          const projectId = DEFAULT_PROJECT;
           if (projectId) {
             try {
               await setDoc(
@@ -3594,10 +3699,15 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe("FlowEdge[] as JSON string (default: [])"),
-      project_id: z.string().optional().describe("Project ID"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+        ),
     },
     async ({ name, description, nodes, edges, project_id }) => {
-      const projectId = resolveProject(project_id);
+      const projectId = await enforceProjectLock("create_flow", project_id);
 
       let parsedNodes: unknown[];
       let parsedEdges: unknown[];
@@ -3637,10 +3747,15 @@ export function registerTools(server: McpServer): void {
     "get_flows",
     "Get all flows for a project. Returns id, name, status, and node count.",
     {
-      project_id: z.string().optional().describe("Project ID"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+        ),
     },
     async ({ project_id }) => {
-      const projectId = resolveProject(project_id);
+      const projectId = await enforceProjectLock("get_flows", project_id);
       const constraints: QueryConstraint[] = [];
       if (projectId) constraints.push(where("projectId", "==", projectId));
 
@@ -3754,18 +3869,31 @@ export function registerTools(server: McpServer): void {
       source_type,
       from_user_name,
     }) => {
-      // Resolve project: prefer the task's projectId (authoritative), then
-      // the explicit project_id arg, then MARBLO_PROJECT env. Missing
-      // projectId is rejected because the security rules require it for
-      // future per-project scoping.
+      // Resolve project: the task's own projectId is authoritative, but an
+      // explicit project_id that disagrees with it used to be dropped without a
+      // word — the caller believed they had pinned the project when they had
+      // not. Validate the argument against the task instead of ignoring it.
       let projectId = "";
       if (task_id) {
         const task = await fetchTask(task_id);
         if (!task) return text(`Error: Task ${task_id} not found.`);
         projectId = task.projectId;
+        const arg = (project_id ?? "").trim();
+        if (arg && arg !== projectId) {
+          throw new ProjectLockError(
+            `project_id="${arg}" 가 task ${task_id} 의 실제 프로젝트` +
+              `(${projectId})와 다릅니다.\n` +
+              `해야 할 일 — project_id 를 생략해 태스크의 프로젝트를 따르거나, ` +
+              `의도한 프로젝트의 태스크 ID 를 넘기세요.`,
+            "mismatch",
+          );
+        }
       }
       if (!projectId) {
-        projectId = resolveProject(project_id);
+        projectId = await enforceProjectLock(
+          "add_pending_instruction",
+          project_id,
+        );
       }
       if (!projectId) {
         return text(

@@ -14,13 +14,17 @@
 #### 절대 금지
 
 - ❌ `get_all_tasks(all_projects=true)` — 사용자가 "전체 프로젝트" 라고 명시적으로 요청한 경우에만 허용
-- ❌ `project_id` 검증 없이 임의 티켓 클레임/배정/상태변경
+- ❌ `project_id` 확인 없이 임의 티켓 클레임/배정/상태변경 (조회는 서버가 락을 강제하지만, 어떤 티켓을 고르는지는 여전히 네 책임이다)
 - ❌ "유사해 보이는" 다른 프로젝트 티켓을 현재 작업에 끼워넣기
 
 #### 필수 절차 (모든 티켓 흐름 공통)
 
 1. **프로젝트 확정 우선** — 첫 액션 전 현재 프로젝트(`marblo-v3`, `marblo-web` 등)를 한 번 명시한다. cwd / 마블로 활성 프로젝트 기반 추론이 가능하면 결과를 같이 표시.
-2. **조회는 프로젝트 필터** — `get_all_tasks`, `get_available_tasks`, `get_flows`, `search_tasks` 호출 시 `project_id` 를 명시하거나 default project filter 에 의존 (`all_projects` 절대 `true` 금지). 명시했다면 반환된 모든 항목의 `project` 필드가 일치하는지 검증.
+2. **조회는 프로젝트 필터** — `get_all_tasks`, `get_available_tasks`, `get_flows`, `search_tasks`, `check_feedback`, `get_agents` 호출 시 `project_id` 를 명시하거나 생략해 세션 기본 프로젝트에 의존 (`all_projects` 절대 `true` 금지).
+   - `project_id` 는 **서버가 강제한다** — 현재 오케 세션에 바인딩된 프로젝트와 다른 값을 넘기면 조용히 무시되지 않고 명시적 에러로 거부된다. 즉 프로젝트 락은 네 검증에 의존하는 규율이 아니라 서버가 보장하는 불변식이다.
+   - 따라서 "반환 항목의 project 필드를 일일이 대조" 하는 절차는 더 이상 락의 근거가 아니다. 표시용으로는 계속 project 를 보여주되(3항), 락 자체는 서버가 책임진다.
+   - `all_projects=true` 와 `project_id` 를 함께 주면 모순이므로 거부된다. 둘 중 하나만 써라.
+   - ⚠️ 이력: 2026-07-20 이전에는 `project_id` 인자가 실제로 **읽히지 않았다**(`resolveProject` 가 인자를 무시하고 세션 기본값만 사용). 그 시기의 "명시 + 대조" 절차는 실질 보장이 아니었고, 결과가 맞았던 건 기본값이 우연히 현재 프로젝트였기 때문이다. 지금은 인자가 실제로 반영된다.
 3. **티켓 출력에 project 표기** — 사용자에게 보여줄 때 `[{project}] {title} ({status})` 형식. project 가 안 보이는 표시는 출력하지 않는다.
 4. **배정 직전 컨펌 한 줄** — `dispatch_task` 직전 `"프로젝트 {X} 의 티켓 {N}개를 배정합니다. 맞습니까?"` 한 줄 컨펌. 동의 답 (`yes/응/맞다`) 후에만 진행.
 5. **교차 프로젝트 거부** — 사용자가 "다른 프로젝트도 같이" 라고 명시하지 않으면, 다른 프로젝트 티켓을 결과/제안에 포함하지 않는다.
@@ -105,7 +109,7 @@ B안에서 너는 미션의 **운전자**다. 엔진은 **스텝 순서·품질 
 - **진행은 타임라인에 내레이션.** 매 진행 단계를 `add_activity` 로 미션 타임라인에 기록한다
   (예: "react-1 에 로그인 폼 위임 — 완료되면 /review 돌릴게"). 타임라인은 사용자가 보는 **단일 서사**다.
 - **스텝을 마치면 보고 후 대기.** 스텝 완료/실패 시 반드시 `mission_step_done(stepIndex?,
-  result:{success, output?, error?})` 로 **지휘자에 보고**하고 **다음 허가를 기다린다.** 스스로 다음
+result:{success, output?, error?})` 로 **지휘자에 보고**하고 **다음 허가를 기다린다.** 스스로 다음
   스텝(예: `/qa` 생략하고 `/ship`)으로 넘어가지 않는다 — **순서·게이트는 지휘자 권한**이다. 게이트는
   결정적으로 검증된다(예: dispatch 한 task 전부 DONE 인가, `/ship` 은 PR URL 이 존재하는가).
   실패 시 `result.success=false` 와 `error` 로 원인을 보고한다. retry/escalate/continue 판단은 지휘자가 한다.
@@ -123,7 +127,6 @@ B안에서 너는 미션의 **운전자**다. 엔진은 **스텝 순서·품질 
 #### 지휘자가 grant 한 step type 별 행동
 
 1. **`gstack` 스텝**
-
    - 지휘자가 허가한 슬래시 명령만 실행한다. 예: `/investigate`, `/review`, `/qa`, `/ship`.
    - 실행은 오케스트레이터 세션에서 `run_skill(skill="/...", args?, mission_id?)` 로 직접 수행한다.
      `run_skill` allowlist 와 `args` injection 가드는 5번과 동일하게 적용한다.
@@ -133,7 +136,6 @@ B안에서 너는 미션의 **운전자**다. 엔진은 **스텝 순서·품질 
      `mission_step_done(result:{success:false, error:"실패 원인"})` 로 보고한다.
 
 2. **`fix` 스텝**
-
    - 지휘자가 준 `goal` 을 구현 가능한 작업으로 쪼개고, 필요한 경우 `create_task` 로 티켓을 만든다.
    - 생성한 티켓은 즉시 `dispatch_task(role, instruction, task_id?, tags?, complexity?)` 로 배정한다.
      MCP 컨텍스트가 `missionId` 를 자동 태깅하므로 별도 mission 인자를 만들지 않는다.
@@ -145,7 +147,6 @@ B안에서 너는 미션의 **운전자**다. 엔진은 **스텝 순서·품질 
      `mission_step_done(result:{success:false, error:"실패 원인"})` 로 보고한다.
 
 3. **`dispatch` 스텝**
-
    - 지휘자가 준 `goal` 을 역할별 instruction 으로 분해하고, 필요하면 `create_task` 로 추적 티켓을 만든다.
    - 모든 배정은 기본적으로 `dispatch_task` 로 수행한다. 보드 룰의 `task_id` footer 의무와 tags/model
      선택 규칙은 그대로 따른다.
@@ -188,7 +189,6 @@ B안에서 너는 미션의 **운전자**다. 엔진은 **스텝 순서·품질 
    모든 `dispatch_task` 호출 시 태스크 내용에서 tags를 반드시 도출할 것:
 
    주력 fleet 은 **Claude Code / Codex / Antigravity 3종** (Gemini 는 제외됨):
-
    - 복잡한 코딩/리팩토링: `tags=["architecture", "multi-file", "coding"]` → Claude
    - 리서치/분석/문서: `tags=["research", "analysis", "documentation"]` → Antigravity (agy)
    - 단순 수정/빠른 작업: `tags=["simple-fix", "quick-edit"]` → Codex
@@ -200,7 +200,6 @@ B안에서 너는 미션의 **운전자**다. 엔진은 **스텝 순서·품질 
 4. **사용자 모델 지정 우선 (강제)**:
    사용자가 특정 모델로 작업하라고 요청하면 (예: "코덱스 써", "use codex", "agy로 해줘"),
    `dispatch_task`의 `model` 파라미터를 명시적으로 지정해서 그 모델을 강제할 것:
-
    - 코덱스 / Codex 요청 → `model="codex"` (또는 `"gpt"` — **둘은 동일한 OpenAI Codex CLI**.
      별도의 "gpt" CLI 는 없으며, 내부 모델 id 가 `gpt` 일 뿐 실제 실행 바이너리는 `codex` 다.
      `"codex"` / `"gpt"` 어느 쪽을 넘겨도 dispatch 가 자동으로 정규화한다.)
