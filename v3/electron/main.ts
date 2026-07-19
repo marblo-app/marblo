@@ -28,10 +28,12 @@ import { FsManager } from "./fs-manager";
 import { AgentManager, serializeAgent, type ModelType } from "./agent-manager";
 import { Updater } from "./updater";
 import {
+  isPathUnder,
   resolveRestoreRoots,
   scrubRemovedRoots,
   selectPersistableWindows,
 } from "./windowSession";
+import { describeRootPathFailure, diagnoseRootPath } from "./rootPathHealth";
 import { TaskDecomposer } from "./orchestrator/task-decomposer";
 import type { DecomposedTask } from "./orchestrator/dag-generator";
 import { BridgeServer, withCompletionFooter } from "./bridge-server";
@@ -1218,22 +1220,129 @@ function persistWindowSession(): void {
   writeAppState({ windows });
 }
 
-// A window whose rootPath just vanished is otherwise a SILENT failure: the PTY
-// guard in PtyManager.create now throws instead of spawning a shell that dies
-// in ~6ms, but nothing in the UI renders that throw. Show it once per path —
-// a removed worktree can invalidate several windows at once, and one modal per
-// window would be worse than the bug.
+/** Paths already reported this session — see notifyRootPathMissing below. */
 const notifiedMissingRoots = new Set<string>();
-function notifyRootPathMissing(rootPath: string): void {
+
+/**
+ * Best surviving root to offer as a way out of `deadRootPath`.
+ *
+ * Same order as resolveRestoreRoots / scrubRemovedRoots so the three agree:
+ * a live window on the SAME project first (its main checkout), then the global
+ * lastRootPath, then any other live window. Every candidate is existence-checked
+ * — offering a second dead path would be worse than offering nothing.
+ *
+ * The last rung matters for the caller that has no window of its own (the
+ * lastRootPath scrub): without it that caller can only ever rediscover the dead
+ * path it is trying to replace.
+ */
+function pickFallbackRoot(
+  deadRootPath: string,
+  windowKey?: number,
+): string | undefined {
+  const usable = (p: string | undefined): p is string =>
+    !!p && p !== deadRootPath && fs.existsSync(p);
+
+  const projectId =
+    windowKey !== undefined
+      ? windowRestore.get(windowKey)?.projectId
+      : undefined;
+  if (projectId) {
+    for (const [key, entry] of windowRestore) {
+      if (key === windowKey || entry.projectId !== projectId) continue;
+      if (usable(entry.rootPath)) return entry.rootPath;
+    }
+  }
+
+  const last = readAppState().lastRootPath;
+  if (usable(last)) return last;
+
+  for (const [key, entry] of windowRestore) {
+    if (key === windowKey) continue;
+    if (usable(entry.rootPath)) return entry.rootPath;
+  }
+  return undefined;
+}
+
+/** Point a window at `rootPath` and tell its renderer to follow (see below). */
+function repointWindowRoot(
+  windowKey: number | undefined,
+  rootPath: string,
+  removedRootPath: string,
+): void {
+  if (windowKey === undefined) return;
+  const entry = windowRestore.get(windowKey);
+  if (entry) windowRestore.set(windowKey, { ...entry, rootPath });
+  persistWindowSession();
+  sendToOwner(windowKey, "window:rootPathInvalidated", {
+    removedRootPath,
+    rootPath,
+  });
+}
+
+// A window whose rootPath is unusable is otherwise a SILENT failure: the PTY
+// guard in PtyManager.create throws instead of spawning a shell that dies in
+// ~6ms, but nothing in the UI renders that throw.
+//
+// This used to be a bare showErrorBox that asserted the folder had been DELETED.
+// That was wrong for the two most common causes and it hid them: a reaped agent
+// worktree is a normal lifecycle event whose project root is still there, and a
+// foreign-OS path from Firestore `projects.folderPath` was never on this machine
+// at all. Both rendered as "사라졌습니다" with an OK button, every boot, so the
+// user learned to dismiss the one signal that something was actually wrong.
+// Now we name the cause and offer the way out. Shown once per path per session —
+// one removed worktree can invalidate several windows at once.
+function notifyRootPathMissing(rootPath: string, ownerKey?: number): void {
   if (notifiedMissingRoots.has(rootPath)) return;
   notifiedMissingRoots.add(rootPath);
-  dialog.showErrorBox(
-    "Marblo — 작업 폴더가 사라졌습니다",
-    `이 창이 보고 있던 폴더가 더 이상 존재하지 않습니다:\n\n${rootPath}\n\n` +
-      "git 워크트리가 정리되면서 삭제된 경로일 수 있습니다. 오케스트레이터와 " +
-      "터미널은 이 폴더에서 실행할 수 없어 시작하지 않았습니다.\n\n" +
-      "남아 있는 폴더를 다시 열어 주세요.",
-  );
+
+  // Callers that have no window of their own (orchestrator handlers, cold-start
+  // restore) still need the recovery buttons to DO something — fall back to the
+  // window the user is looking at, then to the primary one.
+  const windowKey =
+    ownerKey ??
+    BrowserWindow.getFocusedWindow()?.webContents.id ??
+    mainWindow?.webContents.id;
+
+  const fallbackRootPath = pickFallbackRoot(rootPath, windowKey);
+  const diagnosis = diagnoseRootPath(rootPath, {
+    homeDir: os.homedir(),
+    ...(fallbackRootPath ? { fallbackRootPath } : {}),
+  });
+  const msg = describeRootPathFailure(diagnosis);
+
+  const PICK = "다른 폴더 열기";
+  const CLOSE = "닫기";
+  const buttons = [
+    ...(msg.fallbackLabel ? [msg.fallbackLabel] : []),
+    PICK,
+    CLOSE,
+  ];
+
+  dialog
+    .showMessageBox({
+      type: "warning",
+      title: msg.title,
+      message: msg.title,
+      detail: msg.body,
+      buttons,
+      defaultId: 0,
+      cancelId: buttons.length - 1,
+      noLink: true,
+    })
+    .then(({ response }) => {
+      const choice = buttons[response];
+      if (choice === PICK) {
+        // The picker lives in the renderer (useProjectSetup) — it owns project
+        // registration, which main can't do on its own.
+        if (windowKey !== undefined)
+          sendToOwner(windowKey, "window:requestFolderPicker", { rootPath });
+        return;
+      }
+      if (choice !== CLOSE && diagnosis.fallbackRootPath) {
+        repointWindowRoot(windowKey, diagnosis.fallbackRootPath, rootPath);
+      }
+    })
+    .catch(() => {});
 }
 
 // Cause-side invalidation: a worktree we just removed may be the rootPath of an
@@ -1241,6 +1350,25 @@ function notifyRootPathMissing(rootPath: string): void {
 // immediately — otherwise the dead path is written to app-state.json at quit and
 // faithfully reopened on the next launch, so the failure survives a restart.
 function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
+  // The global single slot has to be scrubbed too, and FIRST. It is the
+  // cold-start fallback for the primary window and the source of
+  // `defaultRootPath` below, so leaving a reaped worktree in it means every
+  // dead window falls back onto another dead path — which is exactly how a
+  // reaped worktree survived #501 and kept the popup coming back each boot.
+  // (#501 scrubbed `windows[]` only; `lastRootPath` was read but never fixed.)
+  const lastRootPath = readAppState().lastRootPath;
+  if (lastRootPath && removedPaths.some((r) => isPathUnder(lastRootPath, r))) {
+    const replacement = pickFallbackRoot(lastRootPath);
+    // Explicit `undefined` survives the spread in writeAppState and is then
+    // dropped by JSON.stringify — i.e. the key is genuinely cleared, not left
+    // holding the dead path.
+    writeAppState({ lastRootPath: replacement });
+    console.warn(
+      `[Window] Worktree removed — global lastRootPath "${lastRootPath}" cleared` +
+        (replacement ? ` in favour of "${replacement}"` : " (no fallback)"),
+    );
+  }
+
   const scrubs = scrubRemovedRoots(windowRestore.entries(), removedPaths, {
     exists: (p) => fs.existsSync(p),
     defaultRootPath: readAppState().lastRootPath,
@@ -3401,7 +3529,9 @@ ipcMain.handle("pty:create", (event, { id, name, command, args, cwd }) => {
     // name the real cause — this is the "터미널이 그냥 안 열림" case.
     const code = (err as NodeJS.ErrnoException)?.code;
     if ((code === "ENOENT" || code === "ENOTDIR") && cwd) {
-      notifyRootPathMissing(cwd);
+      // Pass the caller's window so the dialog can offer to repoint THAT window
+      // (and so its renderer, not some other one, gets the folder picker).
+      notifyRootPathMissing(cwd, event.sender.id);
     }
     throw err;
   }

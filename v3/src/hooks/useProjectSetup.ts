@@ -169,6 +169,28 @@ export function useProjectSetup(): ProjectSetup {
     startInlineProjectCreation,
   ]);
 
+  // Main-process recovery actions for a dead rootPath (see notifyRootPathMissing
+  // / invalidateRemovedWorktreeRoots in electron/main.ts).
+  //
+  // Until now main sent "window:rootPathInvalidated" and NOTHING listened: main
+  // repointed its own restore record, but the live window kept the dead root, so
+  // the very next PTY spawn failed and re-raised the popup. Scrubbing what gets
+  // persisted was never enough on its own — the open window has to follow.
+  useEffect(() => {
+    window.electronAPI.on("window:rootPathInvalidated", (payload: unknown) => {
+      const next = (payload as { rootPath?: string } | undefined)?.rootPath;
+      // No replacement → drop to the folder picker rather than sit on a lie.
+      setRootPath(next ?? null);
+    });
+    window.electronAPI.on("window:requestFolderPicker", () => {
+      void handleSelectDirectory();
+    });
+    return () => {
+      window.electronAPI.off("window:rootPathInvalidated");
+      window.electronAPI.off("window:requestFolderPicker");
+    };
+  }, [setRootPath, handleSelectDirectory]);
+
   const handleCreateInlineProject = useCallback(async () => {
     if (!newProjectName.trim() || !user || !pendingFolderPath) return;
     // Gate before writing: Free plan at its project cap → upgrade path instead.

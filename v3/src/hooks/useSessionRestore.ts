@@ -7,6 +7,7 @@ import {
   type PerWindowRestore,
   type GlobalRestore,
 } from "../lib/sessionRestore";
+import { canBeGlobalRoot, isForeignPlatformPath } from "../lib/rootPathScope";
 
 /**
  * Restores the last active rootPath + project on app startup / renderer reload.
@@ -148,11 +149,17 @@ export function useSessionRestore() {
   // reload). Mirrors the global appState.save below but keyed by webContents.id
   // so multiple open windows each reconnect to their OWN project after wake.
   // Skips empty values so a transient null on reload never wipes the record.
+  // A worktree root is fine to keep here (it gets scrubbed when reaped), but a
+  // foreign-OS path never is: it can't become valid on this machine, so
+  // persisting it just guarantees a dead window on the next launch.
   useEffect(() => {
     if (!rootPath && !currentProject) return;
+    const restorableRoot =
+      rootPath && !isForeignPlatformPath(rootPath) ? rootPath : null;
+    if (!restorableRoot && !currentProject) return;
     window.electronAPI.window
       .registerRestore({
-        ...(rootPath ? { rootPath } : {}),
+        ...(restorableRoot ? { rootPath: restorableRoot } : {}),
         ...(currentProject ? { projectId: currentProject.id } : {}),
       })
       .catch(() => {});
@@ -160,11 +167,20 @@ export function useSessionRestore() {
 
   // Save state whenever rootPath or currentProject changes (global app-state —
   // the primary window's cold-start fallback).
+  //
+  // Only DURABLE roots go in the global slot (canBeGlobalRoot). Viewing an agent
+  // worktree ("이 워크트리 보기") used to overwrite it with a per-task path that
+  // the sweep reaps minutes later, leaving the cold-start fallback — and every
+  // other window's fallback target — pointing at a deleted directory. The
+  // per-window record above still takes the worktree, and gets scrubbed when the
+  // worktree is removed; the global one has no such owner, so it must not.
   useEffect(() => {
     if (!rootPath && !currentProject) return;
+    const persistableRoot = canBeGlobalRoot(rootPath) ? rootPath : null;
+    if (!persistableRoot && !currentProject) return;
     window.electronAPI.appState
       .save({
-        ...(rootPath ? { lastRootPath: rootPath } : {}),
+        ...(persistableRoot ? { lastRootPath: persistableRoot } : {}),
         ...(currentProject ? { lastProjectId: currentProject.id } : {}),
       })
       .catch(() => {});

@@ -470,6 +470,13 @@ export function registerWorktreeIpc(
       parsed.branch,
     );
 
+    // A successful merge tears the worktree down (squashMergeToBase step (c)),
+    // so it invalidates any window rooted there exactly like an explicit
+    // remove/cleanup does — and merging the worktree you are CURRENTLY viewing
+    // is the single most likely way to hit that. This path never notified, so
+    // the window silently kept a deleted root until the next PTY spawn failed.
+    if (result.ok) onWorktreesRemoved?.([parsed.path]);
+
     // Append-only audit record on success — fire-and-forget so a Firestore
     // hiccup never fails or stalls the merge. Needs projectId + the sha that
     // the manager captured before teardown; skip silently if either is absent.
