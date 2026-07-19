@@ -38,18 +38,37 @@ function getFirebaseAuthErrorCode(error: unknown): string {
   return "unknown";
 }
 
-async function signInWithCustomTokenOrAnonymousFallback(
+// 토큰 자체가 무효(만료 포함)라 재시도가 무의미한 auth 에러 코드들.
+// 네트워크성 에러는 여기 해당하지 않으므로 상위 재시도 루프가 처리한다.
+const TOKEN_REJECTED_CODES = new Set([
+  "auth/invalid-custom-token",
+  "auth/custom-token-mismatch",
+]);
+
+async function signInWithCustomTokenOrAnonymousBaseline(
   auth: Auth,
   customToken: string,
 ): Promise<void> {
   try {
     await signInWithCustomToken(auth, customToken);
   } catch (error) {
+    const code = getFirebaseAuthErrorCode(error);
+    if (!TOKEN_REJECTED_CODES.has(code)) {
+      // 네트워크 등 일시 장애 — 익명으로 갈아타지 않고 상위 루프가 같은 토큰으로
+      // 재시도하게 던진다.
+      throw error;
+    }
+    // 토큰이 무효로 확정된 경우: 죽은 토큰이 spawn 되는 에이전트들에게 상속되지
+    // 않도록 env 에서 제거하고, missions 컬렉션 전용 익명 베이스라인으로 내려간다
+    // (missions 룰은 isAuthenticated 만 검사하는 한시 완화 상태 — firestore.rules
+    // 참조). 무증상이 되지 않도록: renderer 의 syncAgentCustomToken 경로는 거부를
+    // ok:false 로 정직하게 반환하며(firebase-auth-sync.ts), 여기는 startup 잔존
+    // 토큰 처리 전용이다.
     console.error(
-      `[MissionEngine] custom-token auth failed; falling back to anonymous (code=${getFirebaseAuthErrorCode(
-        error,
-      )})`,
+      `[MissionEngine] custom-token REJECTED (code=${code}); clearing bad token from env, ` +
+        "using anonymous baseline (missions-only access) until renderer re-syncs a fresh token",
     );
+    delete process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
     await signInAnonymously(auth);
   }
 }
@@ -93,12 +112,12 @@ function startMainFirebaseAuth(auth: Auth): Promise<void> {
       try {
         const customToken = process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
         if (customToken) {
-          await signInWithCustomTokenOrAnonymousFallback(auth, customToken);
+          await signInWithCustomTokenOrAnonymousBaseline(auth, customToken);
         } else {
           await signInAnonymously(auth);
           const lateCustomToken = process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
           if (lateCustomToken && auth.currentUser?.isAnonymous) {
-            await signInWithCustomTokenOrAnonymousFallback(
+            await signInWithCustomTokenOrAnonymousBaseline(
               auth,
               lateCustomToken,
             );

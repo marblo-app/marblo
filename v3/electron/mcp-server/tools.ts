@@ -21,7 +21,7 @@ import {
   type QueryConstraint,
   type QuerySnapshot,
 } from "firebase/firestore";
-import { authReady, db, getCurrentAuthUid } from "./firebase.js";
+import { db, ensureAuthenticated, getCurrentAuthUid } from "./firebase.js";
 import {
   resolveContext,
   resolveContextForWrite,
@@ -899,15 +899,17 @@ export function registerTools(server: McpServer): void {
     opts: { userFacing?: boolean } = {},
   ): void {
     const userFacing = opts.userFacing ?? true;
-    // 모든 도구 핸들러는 Firestore 접근 전 인증 완료를 기다린다. MCP 핸드셰이크는
-    // 인증에 막히지 않도록 index.ts 에서 connect 를 먼저 하므로(도구 discovery 는
-    // 인증 무관), 실제 인증 보장은 여기 각 호출부에서 authReady 를 await 해 유지한다.
-    // authReady 는 정상 시 즉시 resolve 되고 reject 하지 않는다.
+    // 모든 도구 핸들러는 실행 전 ensureAuthenticated() 인증 게이트를 거친다.
+    // MCP 핸드셰이크는 인증에 막히지 않도록 index.ts 에서 connect 를 먼저 하므로
+    // (도구 discovery 는 인증 무관), 실제 인증 보장은 여기 각 호출부가 담당한다.
+    // 정상 로그인 시 즉시 통과. 미인증이면 bridge 재인증을 시도하고, 실패 시
+    // '인증 실패'를 명시한 McpAuthError 를 던진다 — 익명으로 조용히 진행해
+    // PERMISSION_DENIED 로 둔갑하던 무증상 마비를 제거(티켓 etTRzsjqSr3S60xS5Wva).
     if (!userFacing) {
       // 사용자 액티비티 스트림에 노출하지 않는 read-only 조회 툴.
       // 감사 로그 자체를 쓰지 않는다 — 시스템 페이로드(스킬 본문 등) 노이즈 방지.
       const gatedHandler = (async (...args: unknown[]) => {
-        await authReady;
+        await ensureAuthenticated();
         return (handler as unknown as (...a: unknown[]) => unknown)(...args);
       }) as unknown as ToolCallback<Args>;
       originalTool(name, description, schema, gatedHandler);
@@ -920,8 +922,8 @@ export function registerTools(server: McpServer): void {
       ...args: unknown[]
     ) => Promise<{ content?: Array<{ text?: string }> }>;
     const wrapped = (async (...args: unknown[]) => {
-      // Firestore 접근 전 인증 완료 대기 (discovery 는 인증 무관, 실행은 인증 보장).
-      await authReady;
+      // Firestore 접근 전 인증 게이트 (discovery 는 인증 무관, 실행은 인증 보장).
+      await ensureAuthenticated();
       const start = Date.now();
       let success = true;
       let resultText = "";

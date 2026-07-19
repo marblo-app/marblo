@@ -4,9 +4,18 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { doc, setDoc, __resetStore } from "../mocks/firebase-firestore";
 
+// firebase.ts 는 이제 익명 폴백 없이 custom token 으로만 로그인한다. 테스트
+// 프로세스가 (에이전트 env 로부터) 실제 토큰을 상속받았어도 mock 경로만 타도록
+// 지우고, 인증 게이트는 명시적 opt-in 으로 통과시킨다 — import 전에 실행돼야
+// 하므로 vi.hoisted 를 쓴다.
+vi.hoisted(() => {
+  delete process.env.MARBLO_FIREBASE_CUSTOM_TOKEN;
+  process.env.MARBLO_MCP_ALLOW_UNAUTHENTICATED = "1";
+});
+
 vi.mock("firebase/auth", () => ({
   getAuth: () => ({}),
-  signInAnonymously: () => Promise.resolve(),
+  signInWithCustomToken: () => Promise.resolve({ user: { uid: "test-user" } }),
 }));
 
 import { registerTools } from "../../electron/mcp-server/tools";

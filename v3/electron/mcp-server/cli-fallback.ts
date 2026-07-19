@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { collection, doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
-import { authReady, db } from "./firebase.js";
+import { db, ensureAuthenticated } from "./firebase.js";
 import { resolveContextForWrite, isLaneContextId } from "./context.js";
 import { applyProjection, type TaskStatus } from "./projection.js";
 import { selectProjectId } from "./project-resolve.js";
@@ -333,7 +333,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  await authReady;
+  // 인증 게이트 — 미인증이면 bridge 재인증 시도 후, 실패 시 명시적 에러로 종료
+  // (익명 폴백 없음, mcp-server/firebase.ts 참조).
+  await ensureAuthenticated();
   if (command === "create-task") {
     await createTask();
     return;

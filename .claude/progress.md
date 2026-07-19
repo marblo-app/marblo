@@ -2,6 +2,15 @@
 
 ## Completed
 
+### MCP 익명 폴백 제거 — fail-closed 정합 + bridge 자가 재인증 (2026-07-19, PR #499, 티켓 etTRzsjq)
+[P0·보안] MCP 서버가 custom-token 인증 실패 시 signInAnonymously 로 조용히 진행 → fail-closed firestore.rules 아래서 전 Firestore 도구가 PERMISSION_DENIED 로만 보이는 무증상 마비 (2026-07-19 실측: 브릿지 경로만 동작, 복구는 앱 재시작뿐). 익명 세션도 missions CRUD/users read/audit_logs 등 접근 가능해 보안상으로도 나빴음(실측).
+- mcp-server/firebase.ts: 익명 폴백 완전 제거, 인증 상태 머신 + `ensureAuthenticated()` 게이트. 미인증 시 bridge `POST /agent-custom-token`(신설)으로 신선한 토큰 받아 자가 재인증(single-flight+10s 쿨다운) — **앱 재시작 없는 복구 경로**. 실패 시 "룰/멤버십 문제가 아니라 MCP 인증 문제" 명시 에러. opt-in: `MARBLO_MCP_ALLOW_UNAUTHENTICATED=1`(테스트용)
+- firebase-auth-sync.ts: 거부 시 ok:false 정직 반환(예전엔 ok:true 라 renderer 오인 — 티켓 7qohuvyF 뿌리), env 토큰은 검증 성공 시에만 설정. `issueFreshAgentCustomToken()` — mission app 실사용자 세션에서만 발급(익명 409), 발급 시 env 갱신으로 이후 spawn 에이전트도 신선한 토큰 상속
+- mission-engine/firebase-app.ts(제3의 동일 패턴): 무효 토큰 코드면 env 정리 후 missions 전용 익명 베이스라인 유지(룰 한시완화 의존), 네트워크 에러는 재시도 루프
+- 검증: typecheck·eslint·신규 유닛 15건 통과, dist-mcp 스모크(핸드셰이크 173ms 무회귀, 무토큰 호출 시 명시 에러). 라이브 E2E 는 앱 재시작 필요 — 승인 대기. UI 가시화는 티켓 7qohuvyFNHRJFQP5SubV 소관
+**신규 파일:** v3/tests/unit/{mcp-auth-gate,firebase-auth-sync}.test.ts
+**수정 파일:** v3/electron/mcp-server/{firebase,tools,cli-fallback}.ts, v3/electron/{firebase-auth-sync,bridge-server}.ts, v3/electron/mission-engine/firebase-app.ts, v3/tests/unit/mcp-task-agent-id.test.ts
+
 ### 워크트리 조회 성능 — ensureFresh 20~26s 블로킹 제거 (2026-07-18, 티켓 yJgz7s03)
 사장님 라이브 증상 "워크트리보기 버튼 누르려니 티켓 화면이 느려짐"의 근본수정. 프로파일링 실측(재현 18.8s/670개, PR#489 실측 20~26s와 일치)으로 병목 특정: 열거(`git worktree list`)는 0.17s뿐이고, **워크트리 1개당 git spawn 7회 × 670개 = 4,686회를 무제한 Promise.all 로 동시 실행**하는 프로세스 폭주가 원인 (비경합 시 명령당 18ms → 경합 시 1~5s).
 - `worktree:listLight` IPC 신설(열거만): ensureFresh(카드/모달 경로)가 이걸 타서 **18.8s → 0.17s**. HEAD 미변경 워크트리는 기존 status 보존 병합, HEAD 이동 시 낡은 status 폐기(오표시 방지). PR#489 정확성(세션 중 생성 워크트리 버튼 노출) 유지 — TTL 60s 그대로.

@@ -27,6 +27,7 @@ import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import { resolveTopClaudeModelDetailed } from "./agent-config";
 import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
 import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
+import { issueFreshAgentCustomToken } from "./firebase-auth-sync";
 import type { WorktreeCoordinator } from "./worktree-coordinator";
 
 /**
@@ -817,6 +818,11 @@ export class BridgeServer {
           return;
         }
 
+        if (req.method === "POST" && req.url === "/agent-custom-token") {
+          this.handleAgentCustomToken(res);
+          return;
+        }
+
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Not found" }));
       });
@@ -905,6 +911,48 @@ export class BridgeServer {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ agents }));
+  }
+
+  // ── POST /agent-custom-token — MCP 자가 재인증용 신선한 토큰 발급 ──────────
+  // MCP 서버(별도 프로세스)가 상속받은 custom token 이 만료/거부됐을 때 앱
+  // 재시작 없이 재인증할 수 있는 유일한 경로 (티켓 etTRzsjqSr3S60xS5Wva).
+  // mission app 이 실사용자로 로그인돼 있을 때만 issueAgentCustomToken callable
+  // 로 새 토큰을 발급한다 — 익명/미로그인 상태에선 409 로 거부.
+  // 상단의 bearer 토큰 게이트(isAuthorized)가 이미 이 라우트를 보호한다:
+  // 토큰 파일은 0600 이라 같은 OS 사용자 프로세스만 접근 가능 — spawn 된
+  // 에이전트가 env 로 custom token 을 상속받는 기존 신뢰 경계와 동일하다.
+
+  private handleAgentCustomToken(res: http.ServerResponse): void {
+    void issueFreshAgentCustomToken()
+      .then((result) => {
+        if (!result.ok) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: result.error ?? "custom token issue failed",
+            }),
+          );
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            success: true,
+            customToken: result.customToken,
+            uid: result.uid,
+          }),
+        );
+      })
+      .catch((err: unknown) => {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      });
   }
 
   // ── POST /spawn-agent ───────────────────────────────────────
