@@ -242,7 +242,10 @@ interface MissionOrchestratorAPI {
   /** 미션 스코프 중지 — 그 미션에 바인딩된 오케만 stop (main 가드가
    * getOwnerMissionId 일치할 때만). 무관한 오케는 보존하므로 무조건 호출 안전. */
   stopForMission: (projectId: string, missionId: string) => Promise<void>;
-  resolvePrevious: (rootPath: string) => Promise<string | null>;
+  resolvePrevious: (
+    rootPath: string,
+    projectId?: string,
+  ) => Promise<string | null>;
   onStatusChange: (callback: (data: { status: string }) => void) => void;
   removeStatusListener: () => void;
   onNeedsInput: (
@@ -263,6 +266,9 @@ interface OrchestratorSessionAPI {
     projectId: string,
     rootPath: string,
     resumeSessionId?: string,
+    /** 이번 launch 의 명시 모델(패널 Start). 생략 시 main 이
+     * 프로젝트별 저장 모델 → 전역 설정 순으로 결정. */
+    model?: string,
   ) => Promise<{
     sessionId: string;
     ptySessionId: string;
@@ -366,8 +372,9 @@ interface ModelPresetAPI {
 }
 
 interface OrchestratorModelAPI {
-  get: () => Promise<string>;
-  set: (model: string) => Promise<{ success: boolean }>;
+  /** projectId 를 주면 그 프로젝트의 재시작 연속성 모델 우선. */
+  get: (projectId?: string) => Promise<string>;
+  set: (model: string, projectId?: string) => Promise<{ success: boolean }>;
 }
 
 interface SubscriptionPlanEntry {

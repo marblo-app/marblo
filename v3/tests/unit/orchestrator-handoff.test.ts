@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildOrchestratorHandoffSnapshot,
   formatHandoffPrompt,
+  resolveEffectiveOrchestratorModelSetting,
   resolveRestartResumeSessionId,
   resolveSwitchHandoffResumeSessionId,
   sanitizeHandoffValue,
@@ -241,5 +242,48 @@ describe("resolveRestartResumeSessionId", () => {
     });
 
     expect(resumeSessionId).toBeNull();
+  });
+});
+
+describe("resolveEffectiveOrchestratorModelSetting", () => {
+  // 라이브 사고 (2026-07-18, 0zV1apB3CvIiabHlYHxQ): 전역 orchestratorModel 이
+  // 마지막으로 만진 프로젝트의 값으로 덮여, 앱 재시작 시 claude 대화를 가진
+  // 프로젝트가 codex 로 부팅돼 fresh 세션이 떴다("껐다 켜면 연결 안 됨").
+  // 프로젝트별 저장 모델이 전역보다 우선해야 재시작 연속성이 지켜진다.
+  it("prefers the per-project model over the global setting on restart", () => {
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        perProject: "claude",
+        globalSetting: "codex",
+      }),
+    ).toBe("claude");
+  });
+
+  it("lets an explicit launch request (panel Start) override the per-project memory", () => {
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        explicit: "codex",
+        perProject: "claude",
+        globalSetting: "claude",
+      }),
+    ).toBe("codex");
+  });
+
+  it("boot env override wins everything (dev escape hatch)", () => {
+    expect(
+      resolveEffectiveOrchestratorModelSetting({
+        envOverride: "antigravity",
+        explicit: "codex",
+        perProject: "claude",
+        globalSetting: "codex",
+      }),
+    ).toBe("antigravity");
+  });
+
+  it("falls back global → claude when nothing else is known", () => {
+    expect(
+      resolveEffectiveOrchestratorModelSetting({ globalSetting: "codex" }),
+    ).toBe("codex");
+    expect(resolveEffectiveOrchestratorModelSetting({})).toBe("claude");
   });
 });

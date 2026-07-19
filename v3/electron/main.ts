@@ -47,6 +47,7 @@ import { OrchestratorManager } from "./orchestrator-manager";
 import {
   buildOrchestratorHandoffSnapshot,
   formatHandoffPrompt,
+  resolveEffectiveOrchestratorModelSetting,
   resolveRestartResumeSessionId,
   resolveSwitchHandoffResumeSessionId,
   type OrchestratorSwitchMode,
@@ -359,6 +360,12 @@ interface AppState {
   wasOrchestratorRunning?: boolean;
   modelPreset?: string;
   orchestratorModel?: string;
+  // 프로젝트별 오케 모델 (restart 연속성). 전역 orchestratorModel 은 마지막으로
+  // 만진 프로젝트의 값으로 덮여 재시작 시 다른 프로젝트 오케까지 그 모델로
+  // 부팅시켰다 — claude 대화를 가진 프로젝트가 codex 로 떠 "세션 연결 안 됨"
+  // 이 되는 라이브 사고(0zV1apB3CvIiabHlYHxQ)의 직접 원인. launch 성공 시마다
+  // 기록되며, 재시작/reconnect 는 이 값을 전역보다 우선한다.
+  orchestratorModelByProject?: Record<string, string>;
   demoCellValues?: Record<string, Record<string, string>>;
   // Project windows open at last quit, so a full restart can reopen them all
   // (the single lastProjectId/lastRootPath above only covers one window).
@@ -2401,13 +2408,39 @@ function ensureMissionOrchestratorLaunched(
     }
   }
   const rootPath = resolveMissionRootPath(projectId, rootPathHint);
+  // 모델 결정은 board launch 와 동일한 프로젝트별 우선순위. resume 해석은
+  // 모델 인지가 필수 — claude 전용 resolver(~/.claude 스캔)를 codex 에 태우면
+  // claude uuid 가 `codex resume <uuid>` 로 넘어가 exit 1 즉사하거나(혼재
+  // 프로젝트), 항상 null → 매 재시작 fresh(순수 codex)가 된다. (56C9L5DP 흡수)
+  const missionModel = normalizeOrchestratorModelType(
+    applyOrchestratorModelEnvForProject(projectId),
+  );
   // resume 결정:
   //  - missionId 알면: 그 미션의 세션이 있으면 resume(스텝→스텝 / 앱 재시작 이어가기),
   //    없으면 "new"(새 미션 = fresh 세션 + 초기 프롬프트).
-  //  - missionId 미상(렌더러 부팅 reconnect): 기존처럼 직전 mission 세션 resume.
-  const resumeId = missionId
-    ? (manager.resolveMissionResumeId(rootPath, missionId) ?? "new")
-    : (manager.resolveOrchestratorResumeId(rootPath) ?? "new");
+  //  - missionId 미상(렌더러 부팅 reconnect): 직전 mission 세션 resume.
+  //  - gpt: codex rollout id 는 저장하지 않으므로 격리 CODEX_HOME 에 세션이
+  //    실재하고 (미션 지정 시) 그 미션이 마지막 소유자로 마킹된 경우에만
+  //    "latest"(`codex resume --last`), 아니면 "new".
+  let resumeId: string;
+  if (missionModel === "gpt") {
+    const hasSavedCodexSession = agentManager
+      .getConfigGenerator()
+      .hasSavedSession(`orchestrator-mission-${projectId}`, "gpt");
+    const missionOwnsLast = missionId
+      ? manager.hasGptMissionMarker(rootPath, missionId)
+      : true;
+    resumeId = hasSavedCodexSession && missionOwnsLast ? "latest" : "new";
+    if (resumeId === "new" && hasSavedCodexSession && missionId) {
+      console.log(
+        `[MissionOrchestrator] Saved codex session belongs to another mission — starting fresh for mission ${missionId}`,
+      );
+    }
+  } else {
+    resumeId = missionId
+      ? (manager.resolveMissionResumeId(rootPath, missionId) ?? "new")
+      : (manager.resolveOrchestratorResumeId(rootPath) ?? "new");
+  }
   manager.launch(
     projectId,
     rootPath,
@@ -2423,6 +2456,7 @@ function ensureMissionOrchestratorLaunched(
     },
     resumeId,
     missionId,
+    { modelOverride: missionModel },
   );
   return manager;
 }
@@ -2707,16 +2741,49 @@ function normalizeOrchestratorModelType(value: unknown): ModelType {
   return "claude";
 }
 
-function applyStoredOrchestratorModelEnv(): string {
-  if (INITIAL_ORCHESTRATOR_MODEL_ENV) {
-    process.env.MARBLO_ORCHESTRATOR_MODEL = INITIAL_ORCHESTRATOR_MODEL_ENV;
-    return INITIAL_ORCHESTRATOR_MODEL_ENV;
-  }
-  const stored = normalizeOrchestratorModelSetting(
-    readAppState().orchestratorModel,
+/** 프로젝트별 저장 모델 (없으면 null). 반환값은 정규화된 설정 문자열. */
+function readProjectOrchestratorModel(projectId?: string): string | null {
+  if (!projectId) return null;
+  const stored = readAppState().orchestratorModelByProject?.[projectId];
+  return stored ? normalizeOrchestratorModelSetting(stored) : null;
+}
+
+/** 프로젝트별 오케 모델 기록 — launch/switch 성공 경로에서 호출. */
+function saveProjectOrchestratorModel(projectId: string, model: string): void {
+  if (!projectId) return;
+  const normalized = normalizeOrchestratorModelSetting(model);
+  const map = { ...(readAppState().orchestratorModelByProject ?? {}) };
+  if (map[projectId] === normalized) return;
+  map[projectId] = normalized;
+  writeAppState({ orchestratorModelByProject: map });
+  console.log(
+    `[Main] Orchestrator model for project ${projectId} recorded: ${normalized}`,
   );
-  process.env.MARBLO_ORCHESTRATOR_MODEL = stored;
-  return stored;
+}
+
+/**
+ * 이 프로젝트의 오케 launch/resolve 가 사용할 모델을 결정하고
+ * MARBLO_ORCHESTRATOR_MODEL env 에 반영한다 (agent-config 의
+ * resolveOrchestratorModel 이 env 를 읽으므로). 우선순위:
+ * 부팅 env 오버라이드 > 이번 launch 의 명시 요청(패널 Start) >
+ * 프로젝트별 저장 모델(재시작 연속성) > 전역 설정.
+ */
+function applyOrchestratorModelEnvForProject(
+  projectId?: string,
+  explicitModel?: string,
+): string {
+  const effective = resolveEffectiveOrchestratorModelSetting({
+    envOverride: INITIAL_ORCHESTRATOR_MODEL_ENV,
+    explicit: explicitModel
+      ? normalizeOrchestratorModelSetting(explicitModel)
+      : null,
+    perProject: readProjectOrchestratorModel(projectId),
+    globalSetting: normalizeOrchestratorModelSetting(
+      readAppState().orchestratorModel,
+    ),
+  });
+  process.env.MARBLO_ORCHESTRATOR_MODEL = effective;
+  return effective;
 }
 
 /** Recreate LLM provider with current stored keys and update FlowRunner */
@@ -4939,8 +5006,26 @@ ipcMain.handle(
 // manager 인스턴스만 보장하고 launch 는 하지 않는다 (파일 스캔만 수행).
 ipcMain.handle(
   "missionOrchestrator:resolvePrevious",
-  async (_event, rootPath: string): Promise<string | null> => {
+  async (
+    _event,
+    rootPath: string,
+    projectId?: string,
+  ): Promise<string | null> => {
     const resolved = rootPath === "~" ? os.homedir() : rootPath;
+    // 모델 인지 필수: claude 전용 resolver 가 codex 프로젝트에서 claude uuid 를
+    // 돌려주면 `codex resume <uuid>` 즉사로 이어진다. gpt 는 격리 CODEX_HOME 의
+    // 세션 실재 여부만으로 "latest"/null 을 판정한다.
+    const targetModel = normalizeOrchestratorModelType(
+      applyOrchestratorModelEnvForProject(projectId),
+    );
+    if (targetModel === "gpt") {
+      if (!projectId) return null;
+      return agentManager
+        .getConfigGenerator()
+        .hasSavedSession(`orchestrator-mission-${projectId}`, "gpt")
+        ? "latest"
+        : null;
+    }
     // 임시 manager — 파일 기반 resolve 만 하므로 map 에 보관/ launch 불필요.
     const probe = createMissionOrchestratorInstance("__resolve_probe__");
     try {
@@ -5148,6 +5233,8 @@ ipcMain.handle(
             handoffMode: switchArgs.mode,
           },
         );
+        // 스위치로 모델이 바뀌면 이 프로젝트의 재시작 연속성도 새 모델을 따른다.
+        saveProjectOrchestratorModel(projectId, targetModel);
         return {
           sessionId: session.sessionId,
           ptySessionId: session.ptySessionId,
@@ -5207,11 +5294,20 @@ ipcMain.handle(
 
 ipcMain.handle(
   "orchestratorSession:launch",
-  async (event, { projectId, rootPath, resumeSessionId, enabledModels }) => {
+  async (
+    event,
+    { projectId, rootPath, resumeSessionId, enabledModels, model },
+  ) => {
     const port = bridgeServer.getPort();
     // Resolve '~' to actual home directory
     const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
-    applyStoredOrchestratorModelEnv();
+    // 모델 결정: 명시 요청(패널 Start) > 프로젝트별 저장(재시작 연속성) > 전역.
+    // 전역값만 쓰면 마지막으로 만진 프로젝트의 모델이 다른 프로젝트의 재시작에
+    // 적용돼 claude 대화를 가진 프로젝트가 codex fresh 로 부팅된다(라이브 사고).
+    applyOrchestratorModelEnvForProject(
+      projectId,
+      typeof model === "string" ? model : undefined,
+    );
     const orchestratorModel = resolveOrchestratorModel();
 
     // Pre-spawn auth gate. If the selected CLI is not installed / logged in,
@@ -5267,7 +5363,15 @@ ipcMain.handle(
         logTelegramRouteHealth(projectId, "launch-pty-ready");
       },
       resumeSessionId,
+      undefined,
+      // env 는 전역이라 동시 다중 창 launch 가 서로의 모델을 덮을 수 있다 —
+      // 이 launch 가 결정한 모델을 명시적으로 고정한다.
+      { modelOverride: orchestratorModel },
     );
+
+    // 재시작 연속성: 이 프로젝트 오케가 실제로 뜬 모델을 기록. 다음 앱 재시작의
+    // auto-reconnect(모델 미명시)는 전역 대신 이 값을 따른다.
+    saveProjectOrchestratorModel(projectId, orchestratorModel);
 
     return {
       sessionId: session.sessionId,
@@ -5335,8 +5439,9 @@ ipcMain.handle(
     // its sessions in the isolated CODEX_HOME and resumes via the native
     // `codex resume --last` ("latest" sentinel) — handing it a Claude uuid
     // from the ~/.claude store makes it exit 1 on launch. See
-    // resolveRestartResumeSessionId.
-    applyStoredOrchestratorModelEnv();
+    // resolveRestartResumeSessionId. 모델은 launch 와 같은 프로젝트별
+    // 우선순위로 결정해야 resolve/launch 가 서로 다른 모델을 보지 않는다.
+    applyOrchestratorModelEnvForProject(projectId);
     return resolveRestartResumeSessionId({
       targetModel: resolveOrchestratorModel(),
       // Without a projectId we cannot inspect the isolated home; assume a
@@ -5613,18 +5718,28 @@ ipcMain.handle("modelPreset:get", () => {
   );
 });
 
-ipcMain.handle("orchestratorModel:set", (_event, model: string) => {
-  const normalized = normalizeOrchestratorModelSetting(model);
-  writeAppState({ orchestratorModel: normalized });
-  console.log(`[Main] Orchestrator model set to: ${normalized}`);
-  return { success: true };
-});
+ipcMain.handle(
+  "orchestratorModel:set",
+  (_event, model: string, projectId?: string) => {
+    const normalized = normalizeOrchestratorModelSetting(model);
+    writeAppState({ orchestratorModel: normalized });
+    // projectId 가 오면 그 프로젝트의 재시작 연속성도 이 선택을 따르게 기록.
+    if (projectId) saveProjectOrchestratorModel(projectId, normalized);
+    console.log(`[Main] Orchestrator model set to: ${normalized}`);
+    return { success: true };
+  },
+);
 
-ipcMain.handle("orchestratorModel:get", () => {
+ipcMain.handle("orchestratorModel:get", (_event, projectId?: string) => {
   if (INITIAL_ORCHESTRATOR_MODEL_ENV) {
     return normalizeOrchestratorModelSetting(INITIAL_ORCHESTRATOR_MODEL_ENV);
   }
-  return normalizeOrchestratorModelSetting(readAppState().orchestratorModel);
+  // 프로젝트별 저장 모델(그 프로젝트 오케가 마지막으로 돈 모델)이 있으면 그걸
+  // 보여준다 — 전역값은 다른 프로젝트가 마지막으로 만진 값일 수 있다.
+  return (
+    readProjectOrchestratorModel(projectId) ??
+    normalizeOrchestratorModelSetting(readAppState().orchestratorModel)
+  );
 });
 
 // --- Sentry (main-process crash/error capture) ---

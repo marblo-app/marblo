@@ -22,6 +22,13 @@ import { maskConfigForLogging } from "./config-redaction";
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
 // --- Auto-restart constants ---
+// Codex 세션 소유권 마커. codex 는 concrete rollout id 로 resume 하지 않고
+// 격리 CODEX_HOME 의 `resume --last` 로만 이어가므로, orch store 에는 세션
+// uuid 대신 "이 kind/미션이 이 home 의 마지막 codex 세션 소유자" 라는 마커를
+// 남긴다. claude 경로의 isResumableSession 은 이 값을 항상 거부하므로(실재
+// .jsonl 아님) claude resolver 로 새어 들어갈 수 없다.
+export const GPT_SESSION_MARKER = "gpt-latest";
+
 const ORCH_MAX_RESTARTS = 3;
 const ORCH_BACKOFF_BASE_MS = 2000;
 const ORCH_BACKOFF_MAX_MS = 30000;
@@ -622,11 +629,25 @@ export class OrchestratorManager {
           );
           effectiveResumeSessionId = undefined;
         }
-      } else if (effectiveResumeSessionId !== "new" && !hasSavedCodexSession) {
-        console.warn(
-          `[Orchestrator:${this.kind}] Codex resume requested for "${effectiveResumeSessionId}" but no saved session exists for ${sessionId}; starting new`,
-        );
-        effectiveResumeSessionId = undefined;
+      } else if (effectiveResumeSessionId !== "new") {
+        // Concrete id under codex. Marblo never persists codex rollout ids
+        // (codex is resumed via `resume --last` against its isolated home),
+        // so any concrete id reaching here was minted by ANOTHER CLI — a
+        // claude uuid from a model-unaware resolver. `codex resume
+        // <unknown-id>` exits 1 ("No saved session found") → 오케 즉사.
+        // Never pass it through: resume this home's own last session when
+        // one exists, else start fresh. (0zV1apB3CvIiabHlYHxQ / 56C9L5DP)
+        if (hasSavedCodexSession) {
+          console.warn(
+            `[Orchestrator:${this.kind}] Discarding non-codex resume id "${effectiveResumeSessionId}" for ${sessionId} → resuming latest saved codex session instead`,
+          );
+          effectiveResumeSessionId = "latest";
+        } else {
+          console.warn(
+            `[Orchestrator:${this.kind}] Discarding non-codex resume id "${effectiveResumeSessionId}" for ${sessionId}; no saved codex session — starting new`,
+          );
+          effectiveResumeSessionId = undefined;
+        }
       }
     }
 
@@ -910,6 +931,14 @@ export class OrchestratorManager {
       launchConfig,
       claudeSessionId: resumedSessionId ?? undefined,
     };
+
+    // Codex 세션은 rollout id 를 우리가 저장하지 않으므로(resume 은 항상
+    // `--last`), 대신 "이 미션이 이 codex home 의 마지막 세션 소유자" 라는
+    // 마커를 orch store 에 남긴다. 재시작 시 같은 미션이면 `latest` 로
+    // 이어가고, 다른(새) 미션이면 fresh 로 뜨는 미션 단위 연속성의 근거.
+    if (launchConfig.model === "gpt" && this.kind === "mission") {
+      this.saveOrchSessionId(rootPath, GPT_SESSION_MARKER);
+    }
 
     // Send initial prompt only for NEW sessions (not resumed ones). Gate on
     // whether we ACTUALLY resumed (lock acquired + session matched), not on the
@@ -1766,6 +1795,20 @@ export class OrchestratorManager {
       this.readOrchStore(rootPath)[`mission:${missionId}`]?.sessionId;
     if (stored && this.isResumableSession(rootPath, stored)) return stored;
     return null;
+  }
+
+  /**
+   * gpt(codex) 미션 연속성 판정: 이 미션이 codex home 의 마지막 세션 소유자로
+   * 마킹돼 있으면 true → 호출부가 "latest"(`codex resume --last`) 로 이어간다.
+   * 다른 미션 소유거나 마커가 없으면 false → fresh. codex 는 rollout id 를
+   * 우리가 저장하지 않으므로 이 마커가 미션 단위 resume 근거의 전부다.
+   */
+  hasGptMissionMarker(rootPath: string, missionId: string): boolean {
+    if (this.kind !== "mission" || !missionId) return false;
+    return (
+      this.readOrchStore(rootPath)[`mission:${missionId}`]?.sessionId ===
+      GPT_SESSION_MARKER
+    );
   }
 
   /** True if `id` is a real, resumable session (exists, not a summary stub). */

@@ -309,8 +309,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ),
     // 직전 mission 오케스트레이터 세션 id (kind=mission) — 없으면 null. 부팅 시
     // 자동 재연결(resume) 여부 판단용. board 의 resolvePrevious 와 동일 패턴.
-    resolvePrevious: (rootPath: string): Promise<string | null> =>
-      ipcRenderer.invoke("missionOrchestrator:resolvePrevious", rootPath),
+    // projectId 를 주면 main 이 프로젝트별 모델(codex 등)을 인지해 해석한다.
+    resolvePrevious: (
+      rootPath: string,
+      projectId?: string,
+    ): Promise<string | null> =>
+      ipcRenderer.invoke(
+        "missionOrchestrator:resolvePrevious",
+        rootPath,
+        projectId,
+      ),
     onStatusChange: (callback: (data: { status: string }) => void) => {
       ipcRenderer.on("missionOrchestrator:statusChanged", (_event, data) =>
         callback(data),
@@ -355,11 +363,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ) => ipcRenderer.invoke("orchestrator:createTasks", tasks),
   },
   orchestratorSession: {
-    launch: (projectId: string, rootPath: string, resumeSessionId?: string) =>
+    // model: 이번 launch 의 명시 모델(패널 Start). 생략하면 main 이 프로젝트별
+    // 저장 모델(재시작 연속성) → 전역 설정 순으로 결정한다.
+    launch: (
+      projectId: string,
+      rootPath: string,
+      resumeSessionId?: string,
+      model?: string,
+    ) =>
       ipcRenderer.invoke("orchestratorSession:launch", {
         projectId,
         rootPath,
         resumeSessionId,
+        model,
       }),
     switch: (args: {
       projectId: string;
@@ -476,9 +492,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       }>,
   },
   orchestratorModel: {
-    get: () => ipcRenderer.invoke("orchestratorModel:get") as Promise<string>,
-    set: (model: string) =>
-      ipcRenderer.invoke("orchestratorModel:set", model) as Promise<{
+    // projectId 를 주면 그 프로젝트의 오케가 마지막으로 돈 모델을 우선 반환/기록
+    // (재시작 연속성). 생략하면 레거시 전역값.
+    get: (projectId?: string) =>
+      ipcRenderer.invoke("orchestratorModel:get", projectId) as Promise<string>,
+    set: (model: string, projectId?: string) =>
+      ipcRenderer.invoke("orchestratorModel:set", model, projectId) as Promise<{
         success: boolean;
       }>,
   },

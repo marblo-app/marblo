@@ -145,6 +145,44 @@ export function resolveRestartResumeSessionId({
   return resolvePreviousNonGptSession() ?? null;
 }
 
+export interface EffectiveOrchestratorModelInput {
+  /** MARBLO_ORCHESTRATOR_MODEL passed at app boot — dev override, wins all. */
+  envOverride?: string | null;
+  /** Model the renderer explicitly requested for THIS launch (panel Start). */
+  explicit?: string | null;
+  /** Model this project's orchestrator last ran with (restart continuity). */
+  perProject?: string | null;
+  /** Global app-state setting (legacy single value). */
+  globalSetting?: string | null;
+}
+
+/**
+ * Which model an orchestrator (re)launch should use.
+ *
+ * The restart-continuity contract: resuming a session only makes sense on the
+ * model that owns it. The global `orchestratorModel` app-state is a single
+ * value shared by every project, so "start project B on codex" used to flip
+ * project A's next restart to codex too — A's claude conversation exists but
+ * codex can't see it, so A boots a FRESH codex session and the user reads it
+ * as "껐다 켜면 오케 세션 연결이 안 된다" (live incident 2026-07-18, ticket
+ * 0zV1apB3CvIiabHlYHxQ). Per-project memory must therefore outrank the global
+ * setting, and an explicit user choice for this launch outranks both.
+ *
+ * Inputs are raw setting strings ("claude" | "codex" | "antigravity" | ...);
+ * normalization/validation stays with the caller.
+ */
+export function resolveEffectiveOrchestratorModelSetting({
+  envOverride,
+  explicit,
+  perProject,
+  globalSetting,
+}: EffectiveOrchestratorModelInput): string {
+  if (envOverride) return envOverride;
+  if (explicit) return explicit;
+  if (perProject) return perProject;
+  return globalSetting || "claude";
+}
+
 const ACTIVE_MISSION_STATUSES = new Set([
   "planning",
   "active",

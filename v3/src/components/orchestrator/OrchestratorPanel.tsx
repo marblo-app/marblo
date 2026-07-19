@@ -122,8 +122,10 @@ export default memo(function OrchestratorPanel() {
 
   useEffect(() => {
     let alive = true;
+    // 프로젝트별 모델 우선(재시작 연속성) — 전역값은 다른 프로젝트가 마지막으로
+    // 만진 값일 수 있어 셀렉터 표시가 실제 뜰 모델과 어긋난다.
     window.electronAPI.orchestratorModel
-      .get()
+      .get(currentProject?.id)
       .then((model) => {
         if (!alive) return;
         setSelectedModel(isOrchestratorModel(model) ? model : "claude");
@@ -132,7 +134,7 @@ export default memo(function OrchestratorPanel() {
     return () => {
       alive = false;
     };
-  }, [setSelectedModel]);
+  }, [setSelectedModel, currentProject?.id]);
 
   const handleDragStart = useCallback(
     (e: React.MouseEvent) => {
@@ -207,11 +209,14 @@ export default memo(function OrchestratorPanel() {
     const cwd = rootPath || "~";
     try {
       setStatus("starting");
-      await window.electronAPI.orchestratorModel.set(selectedModel);
+      await window.electronAPI.orchestratorModel.set(selectedModel, projectId);
+      // 명시 모델을 launch 에 함께 전달 — main 의 프로젝트별 저장 모델보다
+      // 이번 사용자 선택이 우선하게 한다.
       const result = await window.electronAPI.orchestratorSession.launch(
         projectId,
         cwd,
         resumeSessionId,
+        selectedModel,
       );
       // Spawn blocked: claude not installed / not logged in. Open the CLI
       // setup gate instead of leaving the orchestrator dead with no reason.
@@ -246,7 +251,9 @@ export default memo(function OrchestratorPanel() {
     const next = e.target.value as OrchestratorModel;
     setSelectedModel(next);
     if (!isRunning) {
-      window.electronAPI.orchestratorModel.set(next).catch(() => {});
+      window.electronAPI.orchestratorModel
+        .set(next, currentProject?.id)
+        .catch(() => {});
       return;
     }
     if (next === runningModel) return;
@@ -314,7 +321,7 @@ export default memo(function OrchestratorPanel() {
       setStatus("running");
       setSelectedModel(targetModel);
       setPendingSwitchModel(null);
-      await window.electronAPI.orchestratorModel.set(targetModel);
+      await window.electronAPI.orchestratorModel.set(targetModel, projectId);
 
       try {
         await upsertOrchestratorAgentDoc(projectId, "working");

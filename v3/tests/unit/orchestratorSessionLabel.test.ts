@@ -392,6 +392,90 @@ describe("OrchestratorManager session reconnect", () => {
       expect(ptyManager.writeAndSubmit).not.toHaveBeenCalled();
       expect(mgr.getStatus()).toBe("running");
     });
+
+    // 라이브 사고(0zV1apB3CvIiabHlYHxQ) 회귀 가드: claude uuid 가 codex 에
+    // concrete id 로 넘어오면 `codex resume <uuid>` 는 exit 1 즉사한다. 저장된
+    // codex 세션이 "있어도" 통과시키면 안 된다 — #464 이후 남아있던 구멍.
+    it("discards a non-codex concrete resume id under gpt → resumes --last instead (saved session exists)", () => {
+      const mcpConfigPath = path.join(tmpHome, "codex-guard-config.toml");
+      writeCodexMcpConfig(mcpConfigPath);
+      const { mgr, ptyManager } = makeInspectableLaunchManager(
+        "board",
+        mcpConfigPath,
+        "gpt",
+        true, // hasSavedSession
+      );
+
+      const claudeUuid = "c85a033d-077d-49fc-9201-ae14964a6d18";
+      const session = mgr.launch(
+        "project-1",
+        rootPath,
+        12345,
+        undefined,
+        claudeUuid,
+        undefined,
+        { modelOverride: "gpt" },
+      );
+
+      expect(session.launchConfig.args).not.toContain(claudeUuid);
+      expect(session.launchConfig.args.slice(0, 2)).toEqual([
+        "resume",
+        "--last",
+      ]);
+      const ptyArgs = ptyManager.create.mock.calls[0][3] as string[];
+      expect(ptyArgs).not.toContain(claudeUuid);
+    });
+
+    it("discards a non-codex concrete resume id under gpt → fresh when no saved codex session", () => {
+      const mcpConfigPath = path.join(tmpHome, "codex-guard-fresh.toml");
+      writeCodexMcpConfig(mcpConfigPath);
+      const { mgr, ptyManager } = makeInspectableLaunchManager(
+        "board",
+        mcpConfigPath,
+        "gpt",
+        false, // no saved session
+      );
+
+      const claudeUuid = "c85a033d-077d-49fc-9201-ae14964a6d18";
+      const session = mgr.launch(
+        "project-1",
+        rootPath,
+        12345,
+        undefined,
+        claudeUuid,
+        undefined,
+        { modelOverride: "gpt" },
+      );
+
+      expect(session.launchConfig.args).not.toContain("resume");
+      expect(session.launchConfig.args).not.toContain(claudeUuid);
+      const ptyArgs = ptyManager.create.mock.calls[0][3] as string[];
+      expect(ptyArgs).not.toContain(claudeUuid);
+    });
+
+    it("marks gpt mission ownership in the orch store (marker, not a claude uuid)", () => {
+      const mcpConfigPath = path.join(tmpHome, "codex-mission-config.toml");
+      writeCodexMcpConfig(mcpConfigPath);
+      const { mgr } = makeInspectableLaunchManager(
+        "mission",
+        mcpConfigPath,
+        "gpt",
+        false,
+      );
+
+      mgr.launch("project-1", rootPath, 12345, undefined, "new", "mission-1", {
+        modelOverride: "gpt",
+      });
+
+      const store = JSON.parse(fs.readFileSync(storePath(), "utf-8"));
+      expect(store["mission:mission-1"]?.sessionId).toBe("gpt-latest");
+      // 같은 미션만 소유자로 판정, 다른 미션은 fresh 로 가야 한다.
+      expect(mgr.hasGptMissionMarker(rootPath, "mission-1")).toBe(true);
+      expect(mgr.hasGptMissionMarker(rootPath, "mission-2")).toBe(false);
+      // 마커는 claude resume 경로(resolveMissionResumeId)로 절대 새지 않는다 —
+      // 실재 .jsonl 이 아니므로 isResumableSession 이 거부한다.
+      expect(mgr.resolveMissionResumeId(rootPath, "mission-1")).toBeNull();
+    });
   });
 
   describe("detectAndLabelNewSession (poll → signature → label)", () => {

@@ -2,6 +2,9 @@
 
 ## Completed
 
+### 코덱스 오케 재시작 세션 재연결 근본수정 — 프로젝트별 모델 연속성 (2026-07-18, PR #496, 티켓 0zV1apB3)
+#464 이후에도 재현된 "코덱스 껐다 켜면 오케 연결 안 됨" 근본 3개 수정 (56C9L5DPI1ux488ZP5Ax 흡수). 라이브 실증으로 증상 정밀화: 즉사가 아니라 전역 orchestratorModel 이 마지막 프로젝트 값으로 덮여 claude 프로젝트가 재시작 시 codex fresh 로 부팅되던 것. 수정: ① `orchestratorModelByProject` 프로젝트별 모델 영속화(명시 요청 > 프로젝트별 > 전역, 전 오케 launch 에 modelOverride 명시) ② 미션 resume 경로 모델 인지화(gpt 는 CODEX_HOME 세션 실재 + `gpt-latest` 미션 소유 마커) ③ launch() gpt 가드 봉인(non-latest concrete id 를 codex 에 절대 미전달). 검증: 라이브 codex-cli 0.144.5 재시작 연속성(codeword 회상, 같은 rollout append) + 실 argv 단위테스트 7건 신규, 무회귀(기존 실패 33건은 HEAD 동일 선행결함).
+**수정 파일:** v3/electron/{main,orchestrator-manager,orchestrator-handoff,preload}.ts, v3/src/components/orchestrator/OrchestratorPanel.tsx, v3/src/vite-env.d.ts, v3/tests/unit/{orchestrator-handoff,orchestratorSessionLabel}.test.ts
 ### 리소스 수명주기 회수 — 유령 에이전트·워크트리 무한누적 재발 차단 (2026-07-19, PR #501, 티켓 sypMRW27)
 
 agents 1,057문서·워크트리 696개 누적 사고(워치독 폭주 #491·조회 지연 #495·오케 즉사·보드 31기 오표시)의 재발 방지 정책. 근본원인 2가지 봉합: ① Firestore status 쓰기가 렌더러 경유뿐이라 앱 종료/크래시 시 stopped 가 영영 안 써짐 → main 이 stopped/error 를 직접 확정 기록. ② cleanup_agents 가 브릿지 메모리만 스캔해 이전 인스턴스 유령을 구조적으로 못 잡음 → machineId+instancePid(pid 생존검사) 소유권 판별 스윕(부팅+60s·10분 주기)으로 죽은 인스턴스 문서만 stopped 마킹. 타 머신·무스탬프 legacy·살아있는 pid(동일 머신 dev+prod 동시구동)는 불가촉, kill/삭제 없음. 워크트리는 DONE/FAILED 태스크 스윕(6h, 조회 20건 캡+회전 커서)으로 기존 dirty/unpushed 보존 가드 재사용 회수. 누적 가시화: agents 500/워크트리 100 임계치 초과 시 Notification(24h dedupe). 유닛 24개(10회 재시작 시뮬레이션 유령 0 수렴 포함)+기존 reap 보존 16개 통과. ※기존 legacy 유령 1,000여 건 1회성 청소는 별도 티켓(5492HUZy).
