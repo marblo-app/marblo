@@ -22,6 +22,15 @@ export interface Worktree {
   repoRoot: string;
   head?: string;
   createdAt: string | null;
+  /**
+   * True when this entry is the repo's **main working tree** (as opposed to a
+   * linked worktree). Stamped from the enumeration order in the store's
+   * normalizers — `git worktree list` documents that "the main worktree is
+   * listed first" — so main-detection rests on git's own answer instead of
+   * guessing from path shape. Optional only for defensive back-compat with
+   * snapshots built before this field existed; see `findMainWorktree`.
+   */
+  isMain?: boolean;
   stale?: boolean;
   /** Full hygiene verdict (merged / idleDays / stale) from the main process. */
   staleInfo?: WorktreeStaleInfo;

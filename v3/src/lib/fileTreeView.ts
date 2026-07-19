@@ -87,15 +87,101 @@ export function findMainWorktree(
   worktrees: Worktree[],
   projectRootPath: string | null,
 ): Worktree | null {
-  const mains = worktrees.filter((w) => w.taskId == null);
-  if (mains.length === 0) return null;
-  if (projectRootPath) {
-    const byProject = mains.find((w) => samePath(w.path, projectRootPath));
-    if (byProject) return byProject;
+  const resolved = resolveMainWorktree(worktrees, projectRootPath);
+  return resolved.ok ? resolved.worktree : null;
+}
+
+/**
+ * Why a "home" target could not be determined. Surfaced to the UI so an
+ * unresolvable main is *visible* instead of silently redirecting the user
+ * somewhere wrong — the failure mode this module has now regressed into twice
+ * (#307's dead home button, and the home-goes-to-another-worktree report this
+ * resolution was written for).
+ */
+export type MainResolutionFailure =
+  /** No worktrees are known for this project yet (list not loaded / empty). */
+  | "no-worktrees"
+  /**
+   * Several candidates and nothing distinguishes one as main — git's `isMain`
+   * flag is absent (pre-flag snapshot) and no candidate matches the project
+   * folder. Previously this silently returned `mains[0]`.
+   */
+  | "ambiguous";
+
+export type MainResolution =
+  | { ok: true; worktree: Worktree }
+  | { ok: false; reason: MainResolutionFailure };
+
+/**
+ * Resolve the repo's main working tree, or say why it can't be.
+ *
+ * Resolution order, strongest evidence first:
+ *
+ *  1. `isMain` — git's own answer, stamped from `git worktree list` order by
+ *     the store's normalizers (both the full and the light/#495 path). This is
+ *     the only *authoritative* signal and it short-circuits everything below.
+ *  2. The entry matching `projectRootPath` among taskId-less candidates —
+ *     a path preference, kept for snapshots that predate `isMain`.
+ *  3. A single remaining candidate — unambiguous by construction.
+ *
+ * What it deliberately does NOT do any more:
+ *
+ *  - Match `path === repoRoot`. `repoRoot` is not git's main worktree; it is
+ *    whatever session root the main process reported (an orchestrator session
+ *    rootPath, which is frequently a *task worktree*). That comparison actively
+ *    elected task worktrees as "main".
+ *  - Fall back to `mains[0]`. With the projectId absent from the worktree paths
+ *    `inferTaskId` returns null for *every* entry, so that index was an
+ *    arbitrary worktree presented as the home target with no evidence at all.
+ */
+export function resolveMainWorktree(
+  worktrees: Worktree[],
+  projectRootPath: string | null,
+): MainResolution {
+  if (worktrees.length === 0) return { ok: false, reason: "no-worktrees" };
+
+  // (1) Authoritative: git listed this entry first. Duplicate groups (same
+  // projectId enumerated under two repoRoots) can flag the same path twice, so
+  // prefer the project-folder match before falling back to the first flag.
+  const flagged = worktrees.filter((w) => w.isMain);
+  if (flagged.length > 0) {
+    const byProject = projectRootPath
+      ? flagged.find((w) => samePath(w.path, projectRootPath))
+      : undefined;
+    return { ok: true, worktree: byProject ?? flagged[0] };
   }
-  const byRepoRoot = mains.find((w) => samePath(w.path, w.repoRoot));
-  if (byRepoRoot) return byRepoRoot;
-  return mains[0];
+
+  // (2)/(3) Pre-flag snapshot: fall back to path evidence only.
+  const candidates = worktrees.filter((w) => w.taskId == null);
+  if (candidates.length === 0) return { ok: false, reason: "ambiguous" };
+  if (projectRootPath) {
+    const byProject = candidates.find((w) => samePath(w.path, projectRootPath));
+    if (byProject) return { ok: true, worktree: byProject };
+  }
+  if (candidates.length === 1) return { ok: true, worktree: candidates[0] };
+  return { ok: false, reason: "ambiguous" };
+}
+
+/**
+ * The "home" target, or why there isn't one.
+ *
+ * Mirrors {@link resolveLocalMainPath} but keeps the failure explicit: when no
+ * main worktree can be identified we fall back to the Firestore
+ * `projectRootPath` *only when it exists locally as a known root*, and
+ * otherwise report the failure instead of navigating somewhere arbitrary.
+ */
+export function resolveLocalMainTarget(
+  worktrees: Worktree[],
+  projectRootPath: string | null,
+): { ok: true; path: string } | { ok: false; reason: MainResolutionFailure } {
+  const resolved = resolveMainWorktree(worktrees, projectRootPath);
+  if (resolved.ok) return { ok: true, path: resolved.worktree.path };
+  // No local main entry — the Firestore project folder is the only remaining
+  // candidate. It is a *foreign-machine* path as often as not (folderPath is
+  // written by whichever machine registered the project), so it is a fallback,
+  // never a preference.
+  if (projectRootPath) return { ok: true, path: projectRootPath };
+  return { ok: false, reason: resolved.reason };
 }
 
 /**
@@ -108,11 +194,8 @@ export function resolveLocalMainPath(
   worktrees: Worktree[],
   projectRootPath: string | null,
 ): string | null {
-  return (
-    findMainWorktree(worktrees, projectRootPath)?.path ??
-    projectRootPath ??
-    null
-  );
+  const target = resolveLocalMainTarget(worktrees, projectRootPath);
+  return target.ok ? target.path : null;
 }
 
 export function filterWorktreesByProject(

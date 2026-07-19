@@ -11,6 +11,10 @@ export const sidebar: Record<keyof typeof koSidebar, string> = {
   "sidebar.tree.folderName": "Folder name",
   // Worktree switch
   "sidebar.tree.toMain": "To main worktree",
+  "sidebar.tree.mainUnresolvedNoWorktrees":
+    "Couldn't find the main worktree — the worktree list hasn't loaded yet. Refresh and try again.",
+  "sidebar.tree.mainUnresolvedAmbiguous":
+    "The main worktree couldn't be identified, so nothing was switched. This guard exists to avoid sending you to an unrelated worktree — check the project folder path.",
   "sidebar.tree.toTask": "To task worktree",
   "sidebar.tree.toOtherTask": "To another task worktree",
   // File-op errors (toast)

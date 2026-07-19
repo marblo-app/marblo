@@ -130,9 +130,25 @@ function inferTaskId(projectId: string, worktreePath: string): string | null {
   return parts[projectIndex + 1] ?? null;
 }
 
+/**
+ * Is this the repo's main working tree?
+ *
+ * `git worktree list` documents that the main worktree is listed first and the
+ * linked worktrees follow, and `worktreeManager.list` preserves that order — so
+ * the enumeration index IS git's answer. Stamping it here (identically on the
+ * full and the light path) is what lets `findMainWorktree` stop inferring
+ * "main" from path shape, which mis-fires whenever the projectId is absent from
+ * the worktree path or the group's repoRoot is an orchestrator session root
+ * that happens to be a worktree.
+ */
+function isMainByEnumerationOrder(index: number): boolean {
+  return index === 0;
+}
+
 function normalizeWorktree(
   group: WorktreeProjectGroup,
   item: WorktreeProjectGroup["worktrees"][number],
+  index: number,
 ): Worktree {
   const taskId = inferTaskId(group.projectId, item.path);
   return {
@@ -146,6 +162,7 @@ function normalizeWorktree(
     repoRoot: group.repoRoot,
     head: item.head,
     createdAt: null,
+    isMain: isMainByEnumerationOrder(index),
     stale: item.stale ?? item.staleInfo?.stale ?? false,
     // Carry the full hygiene verdict so the renderer can distinguish
     // "merged" (aggressive auto-archive) from "idle-stale" and label each.
@@ -201,6 +218,7 @@ function normalizeLightWorktree(
   group: WorktreeLightGroup,
   item: WorktreeLightItem,
   prev: Worktree | undefined,
+  index: number,
   verdicts: ReturnType<typeof loadVerdictCache>,
 ): Worktree {
   const carry = prev !== undefined && prev.head === item.head;
@@ -218,6 +236,9 @@ function normalizeLightWorktree(
     repoRoot: group.repoRoot,
     head: item.head,
     createdAt: prev?.createdAt ?? null,
+    // Stamped from enumeration order, never carried over from `prev`: the light
+    // path re-enumerates every time, so index 0 is always current truth.
+    isMain: isMainByEnumerationOrder(index),
     stale: carry ? prev.stale : (cached?.stale ?? false),
     staleInfo: carry ? prev.staleInfo : cached?.staleInfo,
     status: carry ? prev.status : undefined,
@@ -248,7 +269,9 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
       try {
         const groups = await window.electronAPI.worktree.list();
         const worktrees = groups.flatMap((group) =>
-          group.worktrees.map((item) => normalizeWorktree(group, item)),
+          group.worktrees.map((item, index) =>
+            normalizeWorktree(group, item, index),
+          ),
         );
         set({ worktrees, loading: false, lastRefreshedAt: Date.now() });
         // Persist the sweep's hygiene verdicts so light refreshes (Code tab /
@@ -281,11 +304,12 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
         const prevById = new Map(get().worktrees.map((w) => [w.id, w]));
         const verdicts = loadVerdictCache();
         const worktrees = groups.flatMap((group) =>
-          group.worktrees.map((item) =>
+          group.worktrees.map((item, index) =>
             normalizeLightWorktree(
               group,
               item,
               prevById.get(`${group.projectId}:${item.path}`),
+              index,
               verdicts,
             ),
           ),

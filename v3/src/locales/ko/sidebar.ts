@@ -9,6 +9,10 @@ export const sidebar = {
   "sidebar.tree.folderName": "폴더 이름",
   // Worktree switch
   "sidebar.tree.toMain": "메인 워크트리로",
+  "sidebar.tree.mainUnresolvedNoWorktrees":
+    "메인 워크트리를 찾지 못했습니다 — 워크트리 목록이 아직 로드되지 않았습니다. 새로고침 후 다시 시도하세요.",
+  "sidebar.tree.mainUnresolvedAmbiguous":
+    "메인 워크트리를 특정할 수 없어 이동하지 않았습니다. 엉뚱한 워크트리로 보내지 않기 위한 안전장치입니다 — 프로젝트 폴더 경로를 확인하세요.",
   "sidebar.tree.toTask": "작업 워크트리로",
   "sidebar.tree.toOtherTask": "다른 작업 워크트리로",
   // File-op errors (toast)

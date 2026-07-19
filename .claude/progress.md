@@ -2,6 +2,18 @@
 
 ## Completed
 
+### 파일트리 홈버튼이 메인 아닌 다른 워크트리로 이동 — 근본수정 (2026-07-19, 티켓 xjUVJw6z)
+사장님 라이브 증상 "다른 워크트리 보기 → 파일트리 홈버튼 누르면 메인이 아니라 다른 워크트리로 감".
+- **실측으로 근본원인 특정**: 라이브 repo 실제 열거(16개)를 실제 `findMainWorktree` 에 7개 런타임 조합으로 통과시켜 측정. `findMainWorktree` 에는 "메인"의 실체 근거가 없었다 — `taskId==null` 필터 + folderPath 매칭 + repoRoot 매칭 후 **검증 없이 `mains[0]` 반환**.
+  - `inferTaskId` 는 경로에 projectId 가 있어야 taskId 를 뽑는다. 그룹 projectId 가 경로와 다르면 **전 엔트리 taskId=null** → 16개 전부 "메인 후보" (실측: 후보 1개 → 16개).
+  - `path === repoRoot` 선호는 불건전: repoRoot 는 git 의 메인 워크트리가 아니라 `collectWorktreeProjectRoots` 가 넘긴 **오케스트레이터 세션 rootPath** (main.ts:1855-1863) 라 흔히 태스크 워크트리다 → 그 워크트리가 "메인"으로 당선.
+  - `Project.folderPath` 는 optional 이고 Firestore 에 **등록한 머신의 경로**가 박혀 다른 머신에선 null/불일치 → 마지막 안전망도 소멸.
+- **수정**: git 을 권위로 삼는다. `git worktree list` 는 메인 워크트리를 항상 첫 엔트리로 반환하므로, 스토어 정규화 시점에 열거 순서를 `isMain` 으로 각인 (full·light(#495) 양 경로 동일). `findMainWorktree` 는 `isMain` 우선, 휴리스틱은 구 스냅샷 폴백으로 격하, `path === repoRoot` 선호와 `mains[0]` 추측은 **제거**.
+- **조용한 오동작 제거** (#489·#307 계열 재발 방지): 메인을 특정 못하면 엉뚱한 곳으로 보내지 않고 `resolveLocalMainTarget` 이 실패 사유(`no-worktrees`/`ambiguous`)를 반환, 사이드바 헤더에 명시적 경고 배너 표시. 홈버튼은 클릭 시점에 재해석하는 `onGoMain` 을 타므로 절대 조용히 이동하지 않는다.
+- **#495 회귀 가설은 기각**: 경량 열거와 full refresh 는 동일한 `inferTaskId` 를 쓰고 판정에 쓰이는 필드 누락이 없다. #495 는 원인이 아니라 같은 결함을 한 경로 더 노출시켰을 뿐 — 회귀 테스트는 요구대로 경량 경로까지 포함.
+- **검증**: 신규 15테스트 전부 통과. 구 로직으로 되돌리면 그중 5개가 실패함을 양방향 확인(경량 경로 E2E 포함) — 무의미한 테스트 아님. tsc 통과. 전체 유닛 스위트 기존 실패 6파일은 baseline 과 동일(환경 의존), 신규 실패 0. electron 메인 프로세스 무수정.
+**신규 파일:** v3/tests/unit/fileTreeMainResolution.test.ts
+**수정 파일:** v3/src/lib/fileTreeView.ts, v3/src/stores/worktreeStore.ts, v3/src/types/worktree.ts, v3/src/components/sidebar/FileTree.tsx, v3/src/locales/{ko,en}/sidebar.ts
 ### MCP 익명 폴백 제거 — fail-closed 정합 + bridge 자가 재인증 (2026-07-19, PR #499, 티켓 etTRzsjq)
 [P0·보안] MCP 서버가 custom-token 인증 실패 시 signInAnonymously 로 조용히 진행 → fail-closed firestore.rules 아래서 전 Firestore 도구가 PERMISSION_DENIED 로만 보이는 무증상 마비 (2026-07-19 실측: 브릿지 경로만 동작, 복구는 앱 재시작뿐). 익명 세션도 missions CRUD/users read/audit_logs 등 접근 가능해 보안상으로도 나빴음(실측).
 - mcp-server/firebase.ts: 익명 폴백 완전 제거, 인증 상태 머신 + `ensureAuthenticated()` 게이트. 미인증 시 bridge `POST /agent-custom-token`(신설)으로 신선한 토큰 받아 자가 재인증(single-flight+10s 쿨다운) — **앱 재시작 없는 복구 경로**. 실패 시 "룰/멤버십 문제가 아니라 MCP 인증 문제" 명시 에러. opt-in: `MARBLO_MCP_ALLOW_UNAUTHENTICATED=1`(테스트용)

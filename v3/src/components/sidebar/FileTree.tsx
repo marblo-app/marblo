@@ -18,11 +18,14 @@ import {
   filterWorktreesByProject,
   calculateWorktreeMenuPosition,
   resolveRootSwitch,
-  resolveLocalMainPath,
+  resolveLocalMainTarget,
   isStrayWorktreeContainerRoot,
   treeSignature,
 } from "../../lib/fileTreeView";
-import type { WorktreeMenuPosition } from "../../lib/fileTreeView";
+import type {
+  WorktreeMenuPosition,
+  MainResolutionFailure,
+} from "../../lib/fileTreeView";
 import type { RootSwitchTarget } from "../../lib/fileTreeView";
 import {
   folderLabel,
@@ -526,6 +529,12 @@ interface WorktreeSwitchProps {
   menuRef: React.RefObject<HTMLDivElement>;
   portalMenuRef: React.RefObject<HTMLDivElement>;
   onSwitch: (path: string) => void;
+  /**
+   * "Home" action. Deliberately NOT `onSwitch(toMain)`: it re-resolves main at
+   * click time and refuses to navigate when main is unidentifiable, so the
+   * button can never quietly land the user on some other worktree.
+   */
+  onGoMain: () => void;
 }
 
 // Compact header control: jump the file tree root to the MAIN worktree, or to a
@@ -539,6 +548,7 @@ function WorktreeSwitch({
   menuRef,
   portalMenuRef,
   onSwitch,
+  onGoMain,
 }: WorktreeSwitchProps) {
   const { t } = useTranslation();
   if (toMain) {
@@ -547,9 +557,9 @@ function WorktreeSwitch({
     return (
       <div className="relative flex items-center" ref={menuRef}>
         <button
-          onClick={() => onSwitch(toMain)}
+          onClick={onGoMain}
           className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-          title={t("sidebar.tree.toMain")}
+          title={`${t("sidebar.tree.toMain")}\n${toMain}`}
         >
           <svg
             className="h-3.5 w-3.5"
@@ -813,6 +823,12 @@ export function FileTree() {
       ),
     [rootPath, currentProjectWorktrees, currentProject?.folderPath],
   );
+
+  // Set when a "home" click could not identify the main worktree. Rendered in
+  // the header so the failure is visible rather than a dead/misdirecting button.
+  const [mainResetError, setMainResetError] = useState<
+    MainResolutionFailure | null
+  >(null);
 
   const [showWorktreeMenu, setShowWorktreeMenu] = useState(false);
   const worktreeMenuRef = useRef<HTMLDivElement>(null);
@@ -1396,18 +1412,24 @@ export function FileTree() {
     [rootPath, setRootPath, setSelected],
   );
 
-  // Reset the tree root to this machine's main checkout — the canonical local
-  // main path (git-realpath'd worktree entry, else the project folder). Used by
-  // the stray-container guard so "home" always lands on a valid local root
-  // instead of a foreign/stale path.
+  // Reset the tree root to this machine's main checkout — git's own main
+  // worktree (the `isMain`-flagged entry), else the project folder. When main
+  // cannot be identified we surface it instead of navigating: sending "home" to
+  // an arbitrary worktree is the exact silent misbehaviour this guard exists to
+  // prevent.
   const handleResetToMain = useCallback(() => {
-    const mainPath = resolveLocalMainPath(
+    const target = resolveLocalMainTarget(
       currentProjectWorktrees,
       currentProject?.folderPath ?? null,
     );
-    if (!mainPath || mainPath === rootPath) return;
+    if (!target.ok) {
+      setMainResetError(target.reason);
+      return;
+    }
+    setMainResetError(null);
+    if (target.path === rootPath) return;
     setSelected(null);
-    setRootPath(mainPath);
+    setRootPath(target.path);
   }, [
     currentProjectWorktrees,
     currentProject?.folderPath,
@@ -1649,6 +1671,7 @@ export function FileTree() {
                 menuRef={worktreeMenuRef}
                 portalMenuRef={worktreePortalMenuRef}
                 onSwitch={handleSwitchRoot}
+                onGoMain={handleResetToMain}
               />
               <span className="mx-0.5 h-3.5 w-px bg-gray-700" />
             </>
@@ -1719,6 +1742,19 @@ export function FileTree() {
         >
           {rootView?.fullPath ?? rootPath}
         </div>
+
+        {/* "Home" could not identify the main worktree. Shown instead of
+            navigating: silently landing on an arbitrary worktree is the bug
+            this path keeps regressing into. */}
+        {mainResetError && (
+          <div className="mx-2 mb-1 rounded bg-amber-500/10 px-2 py-1 text-[10px] leading-relaxed text-amber-400">
+            {t(
+              mainResetError === "no-worktrees"
+                ? "sidebar.tree.mainUnresolvedNoWorktrees"
+                : "sidebar.tree.mainUnresolvedAmbiguous",
+            )}
+          </div>
+        )}
       </div>
 
       {/* Tree content */}
