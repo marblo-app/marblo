@@ -5790,15 +5790,20 @@ export const getAdminUsageSummary = functions.https.onCall(
     // 운영자 자기활동 제외 — cost_logs 로 역참조한 어드민 clientId 만 뺀다.
     const adminClientIds = await resolveAdminClientIds(rangeDays);
     const ex = adminClientExclusion(adminClientIds);
+    // BQ events/task_outcomes 의 timestamp/completedAt 은 STRING 으로 적재돼
+    // 있어 TIMESTAMP 리터럴과 직접 비교하면 타입 불일치로 쿼리가 실패한다.
+    // SAFE_CAST 로 감싸 비교·DATE() 추출이 동작하게 한다(파싱 실패는 NULL→제외).
+    const eventTs = "SAFE_CAST(timestamp AS TIMESTAMP)";
+    const completedAtTs = "SAFE_CAST(completedAt AS TIMESTAMP)";
 
     // DAU(일별 고유 clientId) + 일별 총 이벤트(히스토리 사용량)
     const activeByDayQuery = `
       SELECT
-        FORMAT_DATE('%F', DATE(timestamp)) AS date,
+        FORMAT_DATE('%F', DATE(${eventTs})) AS date,
         COUNT(DISTINCT userId) AS dau,
         COUNT(*) AS events
       FROM ${eventsTable}
-      WHERE timestamp >= ${since}${ex.clause}
+      WHERE ${eventTs} >= ${since}${ex.clause}
       GROUP BY date
       ORDER BY date ASC
     `;
@@ -5807,37 +5812,37 @@ export const getAdminUsageSummary = functions.https.onCall(
       SELECT
         COUNT(DISTINCT userId) AS sampleClients,
         COUNT(DISTINCT IF(
-          timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY),
+          ${eventTs} >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY),
           userId, NULL)) AS wau
       FROM ${eventsTable}
-      WHERE timestamp >= ${since}${ex.clause}
+      WHERE ${eventTs} >= ${since}${ex.clause}
     `;
     // 상위 이벤트 랭킹
     const topEventsQuery = `
       SELECT COALESCE(event, '(none)') AS event, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE timestamp >= ${since}${ex.clause}
+      WHERE ${eventTs} >= ${since}${ex.clause}
       GROUP BY event
       ORDER BY n DESC
       LIMIT 25
     `;
     // 에이전트 스폰수(일별·역할별·모델별)
     const spawnsByDayQuery = `
-      SELECT FORMAT_DATE('%F', DATE(timestamp)) AS date, COUNT(*) AS n
+      SELECT FORMAT_DATE('%F', DATE(${eventTs})) AS date, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'agent:spawned' AND timestamp >= ${since}${ex.clause}
+      WHERE event = 'agent:spawned' AND ${eventTs} >= ${since}${ex.clause}
       GROUP BY date ORDER BY date ASC
     `;
     const spawnsByRoleQuery = `
       SELECT role AS key, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'agent:spawned' AND timestamp >= ${since}${ex.clause}
+      WHERE event = 'agent:spawned' AND ${eventTs} >= ${since}${ex.clause}
       GROUP BY role ORDER BY n DESC
     `;
     const spawnsByModelQuery = `
       SELECT model AS key, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'agent:spawned' AND timestamp >= ${since}${ex.clause}
+      WHERE event = 'agent:spawned' AND ${eventTs} >= ${since}${ex.clause}
       GROUP BY model ORDER BY n DESC
     `;
     // 태스크 성공률·완료시간(task_outcomes 전체)
@@ -5847,7 +5852,7 @@ export const getAdminUsageSummary = functions.https.onCall(
         COUNTIF(success = true) AS succeeded,
         AVG(durationMs) AS avgDurationMs
       FROM ${outcomesTable}
-      WHERE completedAt >= ${since}${ex.clause}
+      WHERE ${completedAtTs} >= ${since}${ex.clause}
     `;
 
     const params = { days: rangeDays, ...ex.params };
@@ -5954,6 +5959,10 @@ export const getAdminModelSummary = functions.https.onCall(
     const uidEx = adminUidExclusion();
     const adminClientIds = await resolveAdminClientIds(rangeDays);
     const clientEx = adminClientExclusion(adminClientIds);
+    // cost_logs/events 의 timestamp, task_outcomes 의 completedAt 은 STRING 적재라
+    // TIMESTAMP 비교 전 SAFE_CAST 필요(위 getAdminUsageSummary 와 동일 사유).
+    const tsCast = "SAFE_CAST(timestamp AS TIMESTAMP)";
+    const completedAtTs = "SAFE_CAST(completedAt AS TIMESTAMP)";
 
     // (1) 모델별 비용(전체 사용자 — 자기조회 uid 필터 제거, 운영자만 제외)
     const costByModelQuery = `
@@ -5965,17 +5974,17 @@ export const getAdminModelSummary = functions.https.onCall(
         SUM(COALESCE(totalCost, 0)) AS cost,
         COUNT(*) AS n
       FROM ${costTable}
-      WHERE timestamp >= ${sinceTs}${uidEx.clause}
+      WHERE ${tsCast} >= ${sinceTs}${uidEx.clause}
       GROUP BY model
       ORDER BY cost DESC
     `;
     // (2) 일별 총비용(히스토리)
     const costByDayQuery = `
       SELECT
-        FORMAT_DATE('%F', DATE(timestamp)) AS date,
+        FORMAT_DATE('%F', DATE(${tsCast})) AS date,
         SUM(COALESCE(totalCost, 0)) AS cost
       FROM ${costTable}
-      WHERE timestamp >= ${sinceTs}${uidEx.clause}
+      WHERE ${tsCast} >= ${sinceTs}${uidEx.clause}
       GROUP BY date
       ORDER BY date ASC
     `;
@@ -5989,7 +5998,7 @@ export const getAdminModelSummary = functions.https.onCall(
         AVG(durationMs) AS avgDurationMs,
         AVG(totalCost) AS avgCost
       FROM ${outcomesTable}
-      WHERE completedAt >= ${sinceTs}${clientEx.clause}
+      WHERE ${completedAtTs} >= ${sinceTs}${clientEx.clause}
       GROUP BY model, role
       ORDER BY total DESC
     `;
@@ -6003,7 +6012,7 @@ export const getAdminModelSummary = functions.https.onCall(
         SUM(COALESCE(retriesCount, 0)) AS reworkCount,
         COUNTIF(COALESCE(retriesCount, 0) > 0) AS retriedTasks
       FROM ${outcomesTable}
-      WHERE completedAt >= ${sinceTs}${clientEx.clause}
+      WHERE ${completedAtTs} >= ${sinceTs}${clientEx.clause}
       GROUP BY model
       ORDER BY total DESC
     `;
@@ -6011,7 +6020,7 @@ export const getAdminModelSummary = functions.https.onCall(
     const routingQuery = (jsonPath: string) => `
       SELECT JSON_VALUE(metadata, '${jsonPath}') AS key, COUNT(*) AS n
       FROM ${eventsTable}
-      WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}${clientEx.clause}
+      WHERE event = 'dispatch:decision' AND ${tsCast} >= ${sinceTs}${clientEx.clause}
       GROUP BY key ORDER BY n DESC
     `;
     const routingScoreBucketsQuery = `
@@ -6022,7 +6031,7 @@ export const getAdminModelSummary = functions.https.onCall(
           SAFE_CAST(JSON_VALUE(metadata, '$.agentScore') AS FLOAT64) AS agentScore,
           JSON_QUERY_ARRAY(metadata, '$.perModelScores') AS scores
         FROM ${eventsTable}
-        WHERE event = 'dispatch:decision' AND timestamp >= ${sinceTs}${clientEx.clause}
+        WHERE event = 'dispatch:decision' AND ${tsCast} >= ${sinceTs}${clientEx.clause}
       ),
       expanded AS (
         SELECT
