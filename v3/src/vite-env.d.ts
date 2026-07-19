@@ -467,6 +467,14 @@ interface WorktreeProjectGroup {
   worktrees: WorktreeListItem[];
 }
 
+/** Topology-only group from `worktree:listLight` — no status/staleInfo. */
+interface WorktreeLightGroup {
+  projectId: string;
+  repoRoot: string;
+  baseRef: string;
+  worktrees: { path: string; branch: string; head: string }[];
+}
+
 interface WorktreeMergeArgs {
   repoRoot: string;
   path: string;
@@ -486,6 +494,8 @@ interface WorktreeResolveArgs extends WorktreeMergeArgs {
 
 interface WorktreeAPI {
   list: () => Promise<WorktreeProjectGroup[]>;
+  /** Enumeration without per-worktree git probes (~0.17s vs ~20s at 681). */
+  listLight?: () => Promise<WorktreeLightGroup[]>;
   refresh: () => Promise<WorktreeProjectGroup[]>;
   status: (path: string, baseRef: string) => Promise<WorktreeStatus>;
   remove: (

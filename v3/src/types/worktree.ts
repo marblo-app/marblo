@@ -52,6 +52,20 @@ export interface WorktreeProjectGroup {
   worktrees: WorktreeListItem[];
 }
 
+/** Topology-only entry from `worktree:listLight` — no status/staleInfo. */
+export interface WorktreeLightItem {
+  path: string;
+  branch: string;
+  head: string;
+}
+
+export interface WorktreeLightGroup {
+  projectId: string;
+  repoRoot: string;
+  baseRef: string;
+  worktrees: WorktreeLightItem[];
+}
+
 export type WorktreeStatusTone =
   | "danger"
   | "warning"

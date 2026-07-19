@@ -270,6 +270,34 @@ describe("WorktreeManager.status — counts & diff", () => {
     expect(s2.behind).toBe(1);
     expect(s2.dirty).toBe(true);
   });
+
+  it("ahead=0 (merged/미분기) 워크트리는 diff/merge-tree 서브프로세스를 건너뛴다 — 티켓 yJgz7s03 스폰 절감", async () => {
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "mergedwt0001",
+      slug: "merged",
+    });
+    // 커밋 없음 → HEAD 는 base 의 조상 그대로 (ahead=0). 미커밋 변경만 남긴다.
+    fs.writeFileSync(path.join(info.path, "scratch.txt"), "wip\n");
+
+    const spy = vi.spyOn(
+      mgr as unknown as { runGit: (args: string[]) => unknown },
+      "runGit",
+    );
+    const s = await mgr.status(info.path, "main");
+    expect(s.ahead).toBe(0);
+    // 결과 자체는 full 경로와 동일한 의미: 머지할 게 없으니 trivially clean.
+    expect(s.mergeable).toBe(true);
+    expect(s.conflicts).toEqual([]);
+    expect(s.filesChanged).toBe(0);
+    expect(s.dirty).toBe(true); // status --porcelain 은 여전히 수행
+
+    const calls = spy.mock.calls.map((c) => (c[0] as string[]).join(" "));
+    expect(calls.some((c) => c.startsWith("diff --numstat"))).toBe(false);
+    expect(calls.some((c) => c.startsWith("merge-tree"))).toBe(false);
+    spy.mockRestore();
+  });
 });
 
 describe("WorktreeManager.status — mergeability", () => {

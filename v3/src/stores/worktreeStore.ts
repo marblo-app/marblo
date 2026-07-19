@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import type {
   Worktree,
+  WorktreeLightGroup,
+  WorktreeLightItem,
   WorktreeProjectGroup,
   WorktreeStatusPill,
 } from "../types/worktree";
@@ -30,11 +32,19 @@ interface WorktreeState {
 
   refresh: () => Promise<void>;
   /**
-   * Refresh unless the list is younger than `maxAgeMs`. A full refresh walks
-   * every registered worktree with several git subprocesses each (measured
-   * ~20s at 681 worktrees), so callers that merely want "not a stale
-   * snapshot" — card mounts, ticket modal opens — must use this instead of
-   * refresh(). Concurrent callers share the same in-flight refresh.
+   * Topology-only refresh via `worktree:listLight` (one `git worktree list`
+   * per repo, measured ~0.17s at 681 worktrees vs ~19–26s for the full
+   * status sweep). Existing per-worktree status/staleInfo is carried over
+   * when a worktree's HEAD is unchanged, and dropped when it moved (the old
+   * status is provably outdated); a later full refresh() re-hydrates it.
+   */
+  refreshLight: () => Promise<void>;
+  /**
+   * Refresh unless the list is younger than `maxAgeMs`. Uses the light
+   * (topology-only) refresh: its callers — card mounts, ticket modal opens —
+   * only need "does this task's worktree exist?", never the merge status,
+   * and the full sweep's ~20s process storm was freezing the ticket screen
+   * (ticket yJgz7s03). Concurrent callers share the same in-flight fetch.
    */
   ensureFresh: (maxAgeMs?: number) => Promise<void>;
   /** Archive (hide) or restore (show) a worktree by its key (path). */
@@ -165,6 +175,39 @@ export const WORKTREE_FRESH_TTL_MS = 60_000;
 // Shared in-flight refresh so a burst of ensureFresh()/refresh() callers
 // (every TaskCard mounting at once) collapses into a single worktree:list IPC.
 let inflightRefresh: Promise<void> | null = null;
+// Separate slot for the light (topology-only) fetch: a light fetch must not
+// satisfy a full refresh() — it carries no status — but either one satisfies
+// ensureFresh().
+let inflightLight: Promise<void> | null = null;
+
+/**
+ * Normalize a light (topology-only) entry, carrying status/staleInfo over
+ * from the previous snapshot when the worktree's HEAD is unchanged. A moved
+ * HEAD means new commits — the old merge status is provably outdated, so it
+ * is dropped (pill degrades to ⚪ idle) until the next full refresh().
+ */
+function normalizeLightWorktree(
+  group: WorktreeLightGroup,
+  item: WorktreeLightItem,
+  prev: Worktree | undefined,
+): Worktree {
+  const carry = prev !== undefined && prev.head === item.head;
+  return {
+    id: `${group.projectId}:${item.path}`,
+    taskId: inferTaskId(group.projectId, item.path),
+    projectId: group.projectId,
+    agentId: null,
+    branch: item.branch,
+    baseRef: group.baseRef,
+    path: item.path,
+    repoRoot: group.repoRoot,
+    head: item.head,
+    createdAt: prev?.createdAt ?? null,
+    stale: carry ? prev.stale : false,
+    staleInfo: carry ? prev.staleInfo : undefined,
+    status: carry ? prev.status : undefined,
+  };
+}
 
 export const useWorktreeStore = create<WorktreeState>((set, get) => ({
   worktrees: [],
@@ -204,13 +247,48 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
     return inflightRefresh;
   },
 
+  refreshLight: async () => {
+    if (inflightLight) return inflightLight;
+    const run = (async () => {
+      set({ loading: true, lastError: null });
+      try {
+        // Fall back to the full list when the preload predates listLight
+        // (dev HMR / renderer newer than main) — slower but never wrong.
+        const api = window.electronAPI.worktree;
+        const groups: (WorktreeLightGroup | WorktreeProjectGroup)[] =
+          api.listLight ? await api.listLight() : await api.list();
+        // Snapshot AFTER the await so a full refresh that landed meanwhile
+        // contributes its fresh statuses to the carry-over.
+        const prevById = new Map(get().worktrees.map((w) => [w.id, w]));
+        const worktrees = groups.flatMap((group) =>
+          group.worktrees.map((item) =>
+            normalizeLightWorktree(
+              group,
+              item,
+              prevById.get(`${group.projectId}:${item.path}`),
+            ),
+          ),
+        );
+        set({ worktrees, loading: false, lastRefreshedAt: Date.now() });
+      } catch (err) {
+        set({ loading: false, lastError: errorMessage(err) });
+        throw err;
+      }
+    })();
+    inflightLight = run.finally(() => {
+      inflightLight = null;
+    });
+    return inflightLight;
+  },
+
   ensureFresh: async (maxAgeMs = WORKTREE_FRESH_TTL_MS) => {
     if (inflightRefresh) return inflightRefresh;
+    if (inflightLight) return inflightLight;
     const { lastRefreshedAt } = get();
     if (lastRefreshedAt !== null && Date.now() - lastRefreshedAt < maxAgeMs) {
       return;
     }
-    return get().refresh();
+    return get().refreshLight();
   },
 
   remove: async (repoRoot, path, deleteBranch) => {

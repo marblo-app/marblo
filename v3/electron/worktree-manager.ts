@@ -530,6 +530,26 @@ export class WorktreeManager {
     const st = await this.runGit(["status", "--porcelain"], worktreePath);
     const dirty = st.stdout.trim().length > 0;
 
+    // ahead === 0 (trusted count) ⇒ HEAD is an ancestor of baseRef: the
+    // three-dot diff is empty and merge-tree is trivially conflict-free, so
+    // both subprocesses below are pure overhead. At 600+ registered worktrees
+    // — most of them already merged — skipping them cuts a full worktree:list
+    // sweep by two git spawns per merged worktree.
+    if (ab.code === 0 && ahead === 0) {
+      return {
+        branch,
+        baseRef,
+        ahead,
+        behind,
+        dirty,
+        mergeable: true,
+        conflicts: [],
+        filesChanged: 0,
+        insertions: 0,
+        deletions: 0,
+      };
+    }
+
     const ns = await this.runGit(
       ["diff", "--numstat", `${baseRef}...HEAD`],
       worktreePath,

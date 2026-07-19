@@ -29,6 +29,21 @@ export interface WorktreeProjectGroup {
   worktrees: WorktreeListItem[];
 }
 
+/**
+ * Topology-only variant of {@link WorktreeProjectGroup}: enumeration without
+ * per-worktree status/staleInfo. Served by `worktree:listLight` for callers
+ * that only need existence (board cards / ticket modal resolving "does this
+ * task have a worktree?"). Measured at 681 registered worktrees: full list
+ * ≈ 19–26s (7 git spawns per worktree), light list ≈ 0.17s (one
+ * `git worktree list` + baseRef per repo).
+ */
+export interface WorktreeLightGroup {
+  projectId: string;
+  repoRoot: string;
+  baseRef: string;
+  worktrees: WorktreeInfo[];
+}
+
 interface WorktreeStatusArgs {
   path: string;
   baseRef: string;
@@ -253,6 +268,35 @@ function parseResolveArgs(args: unknown): WorktreeResolveArgs {
   };
 }
 
+/**
+ * Cap on concurrent per-worktree status probes during a full list. Each probe
+ * is up to 7 short git subprocesses; unbounded Promise.all at 681 worktrees
+ * launches them all at once (measured: ~4,700 competing spawns, individual
+ * commands ballooning from ~18ms uncontended to 1–5s) and the process storm
+ * drags the whole machine — including the renderer. 16 saturates the disk
+ * already (measured 12.2s; 32 → 12.9s), without the system-wide stall.
+ */
+const STATUS_PROBE_CONCURRENCY = 16;
+
+/** Map with at most `limit` callbacks in flight (order-preserving). */
+async function mapBounded<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        results[i] = await fn(items[i]);
+      }
+    }),
+  );
+  return results;
+}
+
 function uniqueProjectRoots(
   roots: WorktreeProjectRoot[],
 ): WorktreeProjectRoot[] {
@@ -286,8 +330,10 @@ export function registerWorktreeIpc(
         const realRepoRoot = fs.existsSync(repoRoot)
           ? fs.realpathSync(repoRoot)
           : repoRoot;
-        const items = await Promise.all(
-          worktrees.map(async (worktree) => {
+        const items = await mapBounded(
+          worktrees,
+          STATUS_PROBE_CONCURRENCY,
+          async (worktree) => {
             const status = await worktreeManager.status(worktree.path, baseRef);
             if (worktree.path === realRepoRoot) {
               return { ...worktree, status, stale: false };
@@ -297,15 +343,31 @@ export function registerWorktreeIpc(
               baseRef,
             );
             return { ...worktree, status, stale: staleInfo.stale, staleInfo };
-          }),
+          },
         );
         return { projectId, repoRoot, baseRef, worktrees: items };
       }),
     );
   };
 
+  // Topology only — no per-worktree git probes. This is the ensureFresh()
+  // path behind board cards / the ticket modal, where the only question is
+  // "does a worktree exist for this task?" and the full sweep's 19–26s cost
+  // (ticket yJgz7s03) is pure waste.
+  const listWorktreesLight = async (): Promise<WorktreeLightGroup[]> => {
+    const roots = uniqueProjectRoots(getProjectRoots());
+    return Promise.all(
+      roots.map(async ({ projectId, repoRoot }) => {
+        const baseRef = await worktreeManager.resolveBaseRef(repoRoot);
+        const worktrees = await worktreeManager.list(repoRoot);
+        return { projectId, repoRoot, baseRef, worktrees };
+      }),
+    );
+  };
+
   ipcMain.handle("worktree:list", listWorktrees);
   ipcMain.handle("worktree:refresh", listWorktrees);
+  ipcMain.handle("worktree:listLight", listWorktreesLight);
 
   ipcMain.handle("worktree:status", async (_event, args: unknown) => {
     const parsed = parseStatusArgs(args);

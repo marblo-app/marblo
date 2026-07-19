@@ -2,6 +2,13 @@
 
 ## Completed
 
+### 워크트리 조회 성능 — ensureFresh 20~26s 블로킹 제거 (2026-07-18, 티켓 yJgz7s03)
+사장님 라이브 증상 "워크트리보기 버튼 누르려니 티켓 화면이 느려짐"의 근본수정. 프로파일링 실측(재현 18.8s/670개, PR#489 실측 20~26s와 일치)으로 병목 특정: 열거(`git worktree list`)는 0.17s뿐이고, **워크트리 1개당 git spawn 7회 × 670개 = 4,686회를 무제한 Promise.all 로 동시 실행**하는 프로세스 폭주가 원인 (비경합 시 명령당 18ms → 경합 시 1~5s).
+- `worktree:listLight` IPC 신설(열거만): ensureFresh(카드/모달 경로)가 이걸 타서 **18.8s → 0.17s**. HEAD 미변경 워크트리는 기존 status 보존 병합, HEAD 이동 시 낡은 status 폐기(오표시 방지). PR#489 정확성(세션 중 생성 워크트리 버튼 노출) 유지 — TTL 60s 그대로.
+- full refresh(WorktreeTab): 동시성 16 제한 + ahead=0(merged) 워크트리의 diff/merge-tree 생략 → **18.8s → 13.5s**, spawn 3,906회, 동시 프로세스 658→16 (시스템 전체 끌어내림 제거).
+- 남은 근본원인: short-traiding-ai 에 stale 워크트리 645개 등록(merged 391) — 물리 삭제는 파괴적이라 사장님 승인 대기 (12s 하한은 이 데이터 정리 없인 못 내림).
+**수정 파일:** v3/electron/{worktree-ipc,worktree-manager,preload}.ts, v3/src/stores/worktreeStore.ts, v3/src/types/worktree.ts, v3/src/vite-env.d.ts, v3/tests/unit/{worktreeStore,worktree-manager}.test.ts
+
 ### marketing_contacts SoT — Firestore 운영 SoT + BigQuery 분석 미러 (2026-07-18)
 이메일 마케팅 데이터 기반 구현 (티켓 kKgzB91jskKwAgxT5Ukp, 감사 qFEzBLhBCpGIBnJJg9Xg 후속).
 - Firestore `marketing_contacts/{sha256(email)}`: 암호화 이메일(AES-256-GCM)·수신동의(emailMarketingConsent, legalBasis 구분)·unsubscribe·구독/파운더 미러·segments·lifecycleStage. consent_events 감사로그. push_tokens 는 스키마만.
