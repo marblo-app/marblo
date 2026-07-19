@@ -241,6 +241,9 @@ function baseDeps(
     // 기본값이 실제 ~/.claude/channels/telegram 을 건드리지 않도록 tmp 로 격리.
     pluginStateDir: path.join(tmpDir, "plugin"),
     neutralizePluginConfig: () => ({ tokenRemoved: false }),
+    // 기본값이 실제 ~/.marblo 채널 스토어를 읽지 않도록 격리(공유 없음 = 접두 없음).
+    listChatIdSharers: () => [],
+    getProjectLabel: () => null,
     ...over,
   };
 }
@@ -647,6 +650,67 @@ describe("TelegramPoller outbound sendMessage", () => {
     expect(res.ok).toBe(true);
     expect(res.chatId).toBe(CHAT);
     expect(sent[0]).toMatchObject({ chat_id: CHAT, text: "hi there" });
+  });
+
+  it("chatId 공유 시 발신에 [프로젝트명] 접두를 붙인다 (응답 구분)", async () => {
+    const sent: Record<string, unknown>[] = [];
+    const { fetchImpl } = makeFetch({
+      onSend: (body) => {
+        sent.push(body);
+        return { ok: true };
+      },
+    });
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        listActiveProjectIds: () => [],
+        listChatIdSharers: () => ["otherProj"],
+        getProjectLabel: () => "Marblo",
+      }),
+    );
+    const res = await poller.sendMessage(PROJECT, "done!", CHAT);
+    expect(res.ok).toBe(true);
+    expect(sent[0]).toMatchObject({ chat_id: CHAT, text: "[Marblo] done!" });
+  });
+
+  it("chatId 공유인데 프로젝트명이 없으면 projectId 앞 8자로 폴백한다", async () => {
+    const sent: Record<string, unknown>[] = [];
+    const { fetchImpl } = makeFetch({
+      onSend: (body) => {
+        sent.push(body);
+        return { ok: true };
+      },
+    });
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        listActiveProjectIds: () => [],
+        listChatIdSharers: () => ["otherProj"],
+        getProjectLabel: () => null,
+      }),
+    );
+    await poller.sendMessage(PROJECT, "hi", CHAT);
+    expect(sent[0]).toMatchObject({
+      chat_id: CHAT,
+      text: `[${PROJECT.slice(0, 8)}] hi`,
+    });
+  });
+
+  it("chatId 를 공유하지 않으면 접두 없이 원문 그대로 보낸다 (무회귀)", async () => {
+    const sent: Record<string, unknown>[] = [];
+    const { fetchImpl } = makeFetch({
+      onSend: (body) => {
+        sent.push(body);
+        return { ok: true };
+      },
+    });
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        listActiveProjectIds: () => [],
+        listChatIdSharers: () => [],
+        getProjectLabel: () => "Marblo",
+      }),
+    );
+    await poller.sendMessage(PROJECT, "plain", CHAT);
+    expect(sent[0]).toMatchObject({ chat_id: CHAT, text: "plain" });
   });
 
   it("fails clearly when there is no token for the project", async () => {

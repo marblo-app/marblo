@@ -48,7 +48,9 @@ import {
   getTelegramChannelAccess,
   neutralizeTelegramPluginConfig,
   getTelegramPluginStateDir,
+  listTelegramChatIdSharers,
 } from "./telegram-channels";
+import { getTelegramProjectLabel } from "./telegram-channel-sync";
 
 // ─── Telegram update shapes (only the fields we read) ─────────────────────
 
@@ -158,6 +160,18 @@ export interface TelegramPollerDeps {
   neutralizePluginConfig?: () => { tokenRemoved: boolean };
   /** Min interval (ms) between full 409 diagnosis logs per project. Default 300000. */
   diag409ThrottleMs?: number;
+  /**
+   * Other ENABLED projects configured to send into the same chatId (channel
+   * store's listChatIdSharers by default). Non-empty ⇒ replies from several
+   * projects land in ONE chat, so outbound gets a `[project] ` prefix to tell
+   * the orchestrators apart. Injectable for tests.
+   */
+  listChatIdSharers?: (projectId: string, chatId: string) => string[];
+  /**
+   * Human label for the outbound prefix (project name). Default: the
+   * channel-sync label cache; null falls back to a short projectId.
+   */
+  getProjectLabel?: (projectId: string) => string | null;
 }
 
 /** Result of an outbound sendMessage — never carries the bot token. */
@@ -778,6 +792,13 @@ export class TelegramPoller {
       return { ok: false, error: "message text is empty" };
     }
 
+    // chatId 공유 구분 접두: 같은 대화방으로 발신하는 다른 활성 프로젝트가
+    // 있으면 어느 프로젝트(오케)의 응답인지 구분할 수 없다 — `[프로젝트명] `
+    // 접두를 자동 부착한다. 공유가 없으면 원문 그대로(단일 프로젝트 무회귀).
+    const outboundText = this.chatIdSharers(projectId, target).length
+      ? `[${this.projectLabel(projectId)}] ${text}`
+      : text;
+
     const maxRetries = this.deps.sendMaxRetries ?? DEFAULT_SEND_MAX_RETRIES;
     const baseBackoff = this.deps.sendBackoffMs ?? DEFAULT_SEND_BACKOFF_MS;
 
@@ -786,7 +807,7 @@ export class TelegramPoller {
         const resp = await telegramApi(
           token,
           "sendMessage",
-          { chat_id: target, text },
+          { chat_id: target, text: outboundText },
           { fetchImpl: this.deps.fetchImpl },
         );
         if (!resp.ok) {
@@ -905,6 +926,30 @@ export class TelegramPoller {
     } catch {
       return [];
     }
+  }
+
+  /** Other enabled projects sending into the same chat (prefix trigger). */
+  private chatIdSharers(projectId: string, chatId: string): string[] {
+    if (this.deps.listChatIdSharers)
+      return this.deps.listChatIdSharers(projectId, chatId);
+    try {
+      return listTelegramChatIdSharers(projectId, chatId);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Outbound prefix label — project name, else a short projectId stub. */
+  private projectLabel(projectId: string): string {
+    try {
+      const label =
+        this.deps.getProjectLabel?.(projectId) ??
+        getTelegramProjectLabel(projectId);
+      if (label && label.trim()) return label.trim();
+    } catch {
+      /* label lookup is cosmetic — fall through to the stub */
+    }
+    return projectId.slice(0, 8);
   }
 
   private nudgeIdleDebounceMs(): number {

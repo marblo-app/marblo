@@ -117,6 +117,10 @@ import {
   type TelegramChannelInput,
 } from "./telegram-channels";
 import {
+  pushTelegramChannelMetaOne,
+  syncTelegramChannelMeta,
+} from "./telegram-channel-sync";
+import {
   runTelegramChannelHealthCheck,
   type ChannelHealthReport,
 } from "./telegram-health";
@@ -2969,8 +2973,17 @@ ipcMain.handle("auth:googleLoopback", () => {
 
 ipcMain.handle(
   "auth:syncAgentCustomToken",
-  (_event, input: { customToken?: unknown }) =>
-    syncAgentCustomToken(input?.customToken),
+  async (_event, input: { customToken?: unknown }) => {
+    const result = await syncAgentCustomToken(input?.customToken);
+    // 실사용자 uid 인증이 성립한 순간이 텔레그램 채널 메타 동기화가 가능해지는
+    // 순간이다(projects 의 isProjectMember 규칙 통과). pull 로 다른 기기의
+    // 채널 메타를 복원하고 push 리컨사일로 이 기기의 설정을 업로드한다.
+    // fail-soft — 실패해도 로그인/로컬 채널에는 영향 없음.
+    if (result.ok && result.customTokenAccepted) {
+      void syncTelegramChannelMeta(getMachineId()).catch(() => undefined);
+    }
+    return result;
+  },
 );
 
 ipcMain.handle("auth:clearAgentCustomToken", () => clearAgentCustomToken());
@@ -3743,6 +3756,9 @@ ipcMain.handle("telegramChannel:set", (_event, input: TelegramChannelInput) => {
   // 채널 활성/비활성 변화를 폴러에 반영한다(활성 → getUpdates 루프 시작,
   // 비활성 → 정지). syncActiveChannels 는 멱등이라 안전하다.
   telegramPoller.syncActiveChannels();
+  // 기기 간 이어짐: 채널 메타(토큰 미포함)를 프로젝트 문서로 push — 다른
+  // 기기가 복원할 수 있게 한다. fire-and-forget·fail-soft.
+  void pushTelegramChannelMetaOne(input.projectId, getMachineId());
   return status;
 });
 
@@ -3754,6 +3770,8 @@ ipcMain.handle("telegramChannel:remove", (_event, projectId: string) => {
   const removed = removeTelegramChannel(projectId);
   // 채널 삭제 → 해당 프로젝트 폴러 루프 정지.
   telegramPoller.syncActiveChannels();
+  // 원격 메타도 삭제 전파 — 다른 기기에서 제거된 채널이 좀비 복원되는 것 방지.
+  void pushTelegramChannelMetaOne(projectId, getMachineId());
   return removed;
 });
 
@@ -5431,6 +5449,12 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error("[Main] Telegram poller start failed:", err);
   }
+
+  // 텔레그램 채널 메타 기기 간 동기화(기동 시 1회): 다른 기기가 push 한 메타를
+  // 복원하고(토큰 없음·비활성 — 사용자가 토큰 재입력 시 복구), 이 기기의 기존
+  // 채널 메타를 업로드한다. custom-token 인증 전(익명)이면 조용히 스킵되고,
+  // 인증이 성립하는 auth:syncAgentCustomToken 시점에 다시 돈다. fail-soft.
+  void syncTelegramChannelMeta(getMachineId()).catch(() => undefined);
 
   // --- powerMonitor: notify renderer on system wake ---
   powerMonitor.on("resume", () => {

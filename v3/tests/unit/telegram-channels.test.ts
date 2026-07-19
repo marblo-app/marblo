@@ -369,3 +369,214 @@ describe("isTelegramChannelActive (스폰 게이팅 신호)", () => {
     expect(YOLO_FLAG).toBe("--dangerously-skip-permissions");
   });
 });
+
+describe("기기 간 동기화 — 클라우드 메타 복원 (티켓 SwAhQrt76lmFjQ1yD5NS)", () => {
+  // 채널 설정이 머신 로컬에만 있어 기기 변경 시 통째 유실되던 사고의 근본수정.
+  // 토큰은 절대 동기화되지 않는다 — 메타만 복원하고 "토큰 재입력"으로 유도한다.
+  let ctx: ReturnType<typeof makeStore>;
+  beforeEach(() => {
+    ctx = makeStore();
+  });
+  afterEach(() => {
+    fs.rmSync(ctx.dir, { recursive: true, force: true });
+  });
+
+  const REMOTE_META = {
+    chatId: GOOD_CHAT,
+    enabled: true, // 원래 기기에서는 활성이었음
+    inboundCapability: "trigger" as const,
+    hasBotToken: true,
+    updatedAt: 1_000,
+  };
+
+  it("로컬 레코드가 없으면 materialize — 토큰 없음·enabled=false 강제·복원 표식", () => {
+    expect(ctx.store.applyRemoteMeta("p1", REMOTE_META)).toBe(true);
+    const cfg = ctx.store.getConfig("p1");
+    expect(cfg?.botToken).toBeNull();
+    expect(cfg?.chatId).toBe(GOOD_CHAT);
+    expect(cfg?.enabled).toBe(false); // 원격이 활성이라도 자동 활성화 금지
+    expect(cfg?.restoredFromSync).toBe(true);
+    expect(ctx.store.isActive("p1")).toBe(false);
+  });
+
+  it("복원 상태의 status 는 '토큰만 다시 입력' 안내를 띄운다", () => {
+    ctx.store.applyRemoteMeta("p1", REMOTE_META);
+    const status = ctx.store.getStatus("p1");
+    expect(status.canEnable).toBe(false);
+    expect(status.preflight.issues.join(" ")).toContain("다른 기기");
+    expect(status.preflight.issues.join(" ")).toContain("봇 토큰");
+  });
+
+  it("★로컬 레코드가 있으면 원격 메타를 채택하지 않는다 (원격 변조 차단)", () => {
+    ctx.store.setConfigFromLocalSettings({
+      projectId: "p1",
+      botToken: GOOD_TOKEN,
+      chatId: GOOD_CHAT,
+      enabled: true,
+    });
+    const applied = ctx.store.applyRemoteMeta("p1", {
+      ...REMOTE_META,
+      chatId: "999999", // 공격자가 프로젝트 문서에서 chatId 를 바꿔치기해도
+      updatedAt: Date.now() + 1_000_000,
+    });
+    expect(applied).toBe(false);
+    expect(ctx.store.getConfig("p1")?.chatId).toBe(GOOD_CHAT); // 로컬 승리
+  });
+
+  it("★복원은 access.json(권한 파일)을 절대 만들지 않는다", () => {
+    ctx.store.applyRemoteMeta("p1", REMOTE_META);
+    expect(ctx.store.getAccess("p1")).toBeNull();
+    expect(fs.existsSync(ctx.store.getAccessPath())).toBe(false);
+  });
+
+  it("토큰을 다시 넣어 저장하면 복원 표식이 해제되고 채널이 복구된다", () => {
+    ctx.store.applyRemoteMeta("p1", REMOTE_META);
+    const status = ctx.store.setConfigFromLocalSettings({
+      projectId: "p1",
+      botToken: GOOD_TOKEN,
+      enabled: true,
+    });
+    expect(status.active).toBe(true);
+    const cfg = ctx.store.getConfig("p1");
+    expect(cfg?.restoredFromSync).toBeUndefined();
+    expect(cfg?.chatId).toBe(GOOD_CHAT); // 복원된 chatId 가 그대로 이어짐
+    expect(ctx.store.getAccess("p1")?.allowedChatIds).toEqual([GOOD_CHAT]);
+  });
+
+  it("토큰 없이 메타만 고쳐 저장하면 복원 표식·안내가 유지된다", () => {
+    ctx.store.applyRemoteMeta("p1", REMOTE_META);
+    ctx.store.setConfigFromLocalSettings({ projectId: "p1", chatId: "12345" });
+    expect(ctx.store.getConfig("p1")?.restoredFromSync).toBe(true);
+  });
+
+  it("빈 메타(chatId·토큰흔적 없음)는 복원하지 않는다", () => {
+    expect(
+      ctx.store.applyRemoteMeta("p1", {
+        chatId: null,
+        enabled: false,
+        inboundCapability: "trigger",
+        hasBotToken: false,
+        updatedAt: 0,
+      }),
+    ).toBe(false);
+    expect(ctx.store.getConfig("p1")).toBeNull();
+  });
+
+  it("buildRemoteMeta 는 토큰을 어떤 형태로도 싣지 않는다", () => {
+    ctx.store.setConfigFromLocalSettings({
+      projectId: "p1",
+      botToken: GOOD_TOKEN,
+      chatId: GOOD_CHAT,
+      enabled: true,
+    });
+    const meta = ctx.store.buildRemoteMeta("p1", "machine-A");
+    expect(meta).not.toBeNull();
+    expect(meta?.hasBotToken).toBe(true);
+    expect(meta?.chatId).toBe(GOOD_CHAT);
+    expect(JSON.stringify(meta)).not.toContain(GOOD_TOKEN);
+    expect(ctx.store.buildRemoteMeta("없는프로젝트")).toBeNull();
+  });
+});
+
+describe("chatId 중복 가드 — 경고 + 접두 판정 (차단 아님)", () => {
+  let ctx: ReturnType<typeof makeStore>;
+  beforeEach(() => {
+    ctx = makeStore();
+  });
+  afterEach(() => {
+    fs.rmSync(ctx.dir, { recursive: true, force: true });
+  });
+
+  const SHARED_CHAT = "1584537551";
+  const TOKEN_A = "111111111:AAHfakeBotTokenForTestsOnly_aaaaAAAA";
+  const TOKEN_B = "222222222:AAHfakeBotTokenForTestsOnly_bbbbBBBB";
+
+  function enableTwoSharers(): void {
+    ctx.store.setConfigFromLocalSettings({
+      projectId: "projA",
+      botToken: TOKEN_A,
+      chatId: SHARED_CHAT,
+      enabled: true,
+    });
+    ctx.store.setConfigFromLocalSettings({
+      projectId: "projB",
+      botToken: TOKEN_B,
+      chatId: SHARED_CHAT,
+      enabled: true,
+    });
+  }
+
+  it("같은 chatId 의 다른 활성 프로젝트를 찾는다 (자기 자신·비활성 제외)", () => {
+    enableTwoSharers();
+    ctx.store.setConfigFromLocalSettings({
+      projectId: "projC",
+      botToken: "333333333:AAHfakeBotTokenForTestsOnly_ccccCCCC",
+      chatId: SHARED_CHAT,
+      enabled: false, // 비활성은 발신하지 않으므로 제외
+    });
+    expect(ctx.store.listChatIdSharers("projA", SHARED_CHAT)).toEqual([
+      "projB",
+    ]);
+    expect(ctx.store.listChatIdSharers("projB", SHARED_CHAT)).toEqual([
+      "projA",
+    ]);
+    expect(ctx.store.listChatIdSharers("projA", "other")).toEqual([]);
+  });
+
+  it("★중복이라도 활성화를 차단하지 않는다 — 무회귀 (경고 issue 만)", () => {
+    enableTwoSharers();
+    const status = ctx.store.getStatus("projB");
+    expect(status.active).toBe(true); // 현행 라이브 3채널 패턴이 그대로 동작
+    expect(status.canEnable).toBe(true);
+    expect(status.preflight.issues.join(" ")).toContain("projA");
+    expect(status.preflight.issues.join(" ")).toContain("접두");
+  });
+
+  it("공유가 없으면 경고 issue 도 없다", () => {
+    ctx.store.setConfigFromLocalSettings({
+      projectId: "projA",
+      botToken: TOKEN_A,
+      chatId: SHARED_CHAT,
+      enabled: true,
+    });
+    expect(ctx.store.getStatus("projA").preflight.issues).toHaveLength(0);
+  });
+});
+
+describe("설정 유실 흔적 안내 — 조용히 넘기지 않는다", () => {
+  let ctx: ReturnType<typeof makeStore>;
+  beforeEach(() => {
+    ctx = makeStore();
+  });
+  afterEach(() => {
+    fs.rmSync(ctx.dir, { recursive: true, force: true });
+  });
+
+  it("설정은 없는데 폴러 오프셋 흔적이 있으면 유실 안내 issue 를 띄운다", () => {
+    // 폴러가 남긴 오프셋 파일(과거 수신 기록)을 흉내낸다.
+    fs.writeFileSync(
+      path.join(ctx.dir, "telegram-poller-offsets.json"),
+      JSON.stringify({ p1: 42 }),
+    );
+    expect(ctx.store.hasPollerTrace("p1")).toBe(true);
+    const status = ctx.store.getStatus("p1");
+    expect(status.preflight.issues.join(" ")).toContain("유실");
+    // 흔적조차 없는 프로젝트는 그냥 빈 상태(추가 안내 없음).
+    const fresh = ctx.store.getStatus("neverUsed");
+    expect(fresh.preflight.issues.join(" ")).not.toContain("유실");
+  });
+
+  it("설정이 있으면 흔적 안내를 띄우지 않는다", () => {
+    fs.writeFileSync(
+      path.join(ctx.dir, "telegram-poller-offsets.json"),
+      JSON.stringify({ p1: 42 }),
+    );
+    ctx.store.setConfigFromLocalSettings({
+      projectId: "p1",
+      botToken: GOOD_TOKEN,
+      chatId: GOOD_CHAT,
+      enabled: true,
+    });
+    expect(ctx.store.getStatus("p1").preflight.issues).toHaveLength(0);
+  });
+});

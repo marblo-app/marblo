@@ -76,6 +76,29 @@ export interface TelegramChannelConfig {
   inboundCapability: InboundCapability;
   /** 마지막 갱신 epoch ms. */
   updatedAt: number;
+  /**
+   * 클라우드 메타(다른 기기에서 push된 telegramChannel 필드)로부터 복원된
+   * 레코드 표식. 복원 레코드는 봇 토큰이 없고 enabled=false 로 강제된다 —
+   * 사용자가 로컬 설정 경로로 토큰을 다시 넣어 저장하면 해제된다.
+   */
+  restoredFromSync?: boolean;
+}
+
+/**
+ * 기기 간 동기화되는 채널 메타 — Firestore projects/{projectId} 문서의
+ * `telegramChannel` 필드에 실리는 형태. ★봇 토큰(및 그 해시)은 절대 포함하지
+ * 않는다: 토큰은 기기 로컬(~/.marblo)에만 산다. hasBotToken 은 "원래 기기에는
+ * 토큰이 있었다"는 사실만 전달해 새 기기 UI 가 '토큰만 다시 입력' 안내를 띄우게
+ * 한다.
+ */
+export interface RemoteTelegramChannelMeta {
+  chatId: string | null;
+  enabled: boolean;
+  inboundCapability: InboundCapability;
+  hasBotToken: boolean;
+  updatedAt: number;
+  /** 이 메타를 push 한 기기의 machineId(진단용). */
+  updatedByMachineId?: string;
 }
 
 /** set 입력 — projectId 만 필수, 나머지는 부분 지정(기존값과 병합). */
@@ -132,6 +155,12 @@ const DEFAULT_STORE_DIR = path.join(os.homedir(), ".marblo");
 const DEFAULT_STORE_FILE = "telegram-channels.json";
 /** 권한 파일 — chmod 600 로 보호. */
 const DEFAULT_ACCESS_FILE = "telegram-access.json";
+/**
+ * 폴러 오프셋 파일 이름 — telegram-poller 의 DEFAULT_OFFSET_FILE 과 같은 파일.
+ * 스토어는 이 파일을 "이전에 이 프로젝트로 텔레그램을 쓴 흔적" 판정에만
+ * 읽기 전용으로 참조한다(설정 유실을 조용히 넘기지 않기 위한 안내용).
+ */
+const POLLER_OFFSET_FILE = "telegram-poller-offsets.json";
 
 /** 권한/비밀 파일 권한 — 소유자 read/write 만(0600). */
 const ACCESS_FILE_MODE = 0o600;
@@ -193,14 +222,21 @@ type StoredAccess = Record<string, ChannelAccess>;
 export class TelegramChannelStore {
   private configPath: string;
   private accessPath: string;
-  /** 공식 플러그인이 읽는 상태 디렉토리(브릿지 대상). 테스트는 tmp 로 주입한다. */
+  /** 공식 플러그인이 읽는 상태 디렉토리(브릿지 대상). 테스트는 tmp 로 격리 주입한다. */
   private pluginDir: string;
+  /** 폴러 오프셋 파일(읽기 전용 — 과거 사용 흔적 판정용). */
+  private offsetPath: string;
 
-  constructor(opts?: { storeDir?: string; pluginDir?: string }) {
+  constructor(opts?: {
+    storeDir?: string;
+    pluginDir?: string;
+    offsetFilePath?: string;
+  }) {
     const dir = opts?.storeDir ?? DEFAULT_STORE_DIR;
     this.configPath = path.join(dir, DEFAULT_STORE_FILE);
     this.accessPath = path.join(dir, DEFAULT_ACCESS_FILE);
     this.pluginDir = opts?.pluginDir ?? DEFAULT_PLUGIN_DIR;
+    this.offsetPath = opts?.offsetFilePath ?? path.join(dir, POLLER_OFFSET_FILE);
   }
 
   /** 설정 파일 절대경로(진단용). */
@@ -284,6 +320,11 @@ export class TelegramChannelStore {
       enabled,
       inboundCapability,
       updatedAt: now(),
+      // 복원 표식은 토큰이 다시 채워지는 순간 해제된다 — 그 전까지는 유지해
+      // "토큰만 다시 입력하세요" 안내(getStatus issues)가 계속 뜨게 한다.
+      ...(existing?.restoredFromSync && !botToken
+        ? { restoredFromSync: true }
+        : {}),
     };
 
     const all = this.readConfigs();
@@ -329,6 +370,92 @@ export class TelegramChannelStore {
     return had;
   }
 
+  // ── 기기 간 동기화 (클라우드 메타 ← / →) ──────────────────────────
+
+  /**
+   * 로컬 설정을 기기 간 동기화용 메타로 투영한다(push 용). ★토큰은 어떤
+   * 형태(원문·해시)로도 싣지 않는다 — hasBotToken 불리언만.
+   */
+  buildRemoteMeta(
+    projectId: string,
+    machineId?: string,
+  ): RemoteTelegramChannelMeta | null {
+    const cfg = this.getConfig(projectId);
+    if (!cfg) return null;
+    return {
+      chatId: cfg.chatId,
+      enabled: cfg.enabled,
+      inboundCapability: cfg.inboundCapability,
+      hasBotToken: !!cfg.botToken,
+      updatedAt: cfg.updatedAt,
+      ...(machineId ? { updatedByMachineId: machineId } : {}),
+    };
+  }
+
+  /**
+   * 다른 기기가 push 한 클라우드 메타를 이 기기에 materialize 한다(pull 용).
+   *
+   * ★보안 경계 — 원격 데이터는 이 기기의 어떤 것도 활성화하지 못한다:
+   *   - **로컬 레코드가 없는 프로젝트만** 생성한다. 로컬 레코드가 있으면(=이
+   *     기기가 토큰을 쥔 권위자이거나 이미 복원됨) 원격 메타를 채택하지 않는다
+   *     — 프로젝트 문서를 쓸 수 있는 타 멤버가 내 기기의 chatId/enabled 를
+   *     원격에서 바꿔치기하는 경로를 차단.
+   *   - 생성 레코드는 botToken=null·enabled=false 강제 + restoredFromSync 표식.
+   *     활성화는 사용자가 로컬 설정 경로(setConfigFromLocalSettings)로 토큰을
+   *     재입력·저장해야만 가능하다.
+   *   - access.json(권한 파일)은 절대 건드리지 않는다 — 그 파일의 유일한 쓰기
+   *     경로는 여전히 가드된 로컬 설정 경로뿐이다.
+   *
+   * 반환: 실제로 레코드를 만들었으면 true.
+   */
+  applyRemoteMeta(projectId: string, meta: RemoteTelegramChannelMeta): boolean {
+    if (!projectId || this.getConfig(projectId)) return false;
+    const chatId = normalizeId(meta.chatId ?? null);
+    // chatId 도 hasBotToken 흔적도 없는 빈 메타는 복원할 게 없다.
+    if (!chatId && !meta.hasBotToken) return false;
+    const all = this.readConfigs();
+    all[projectId] = {
+      projectId,
+      botToken: null,
+      chatId,
+      enabled: false,
+      inboundCapability:
+        meta.inboundCapability === "read" ? "read" : "trigger",
+      updatedAt: now(),
+      restoredFromSync: true,
+    };
+    this.writeConfigs(all);
+    return true;
+  }
+
+  /**
+   * 같은 chatId 로 발신하도록 설정된 **다른 활성(enabled) 프로젝트** 목록.
+   * 한 대화방에 여러 프로젝트 응답이 섞이는 상황의 판정 근거 — 등록 단계
+   * 경고(getStatus issues)와 발신 접두([프로젝트]) 부착이 이걸 쓴다.
+   * 차단이 아니라 구분 수단인 이유: 개인 chatId 하나로 여러 프로젝트 봇을
+   * 받는 것은 합법 사용 패턴이다(현행 라이브 채널 3개가 실제 그 형태).
+   */
+  listChatIdSharers(selfProjectId: string, chatId: string | null): string[] {
+    const chat = normalizeId(chatId);
+    if (!chat) return [];
+    return Object.values(this.readConfigs())
+      .filter(
+        (c) => c.projectId !== selfProjectId && c.enabled && c.chatId === chat,
+      )
+      .map((c) => c.projectId)
+      .sort();
+  }
+
+  /**
+   * 이 프로젝트로 텔레그램을 쓴 과거 흔적(폴러 오프셋 기록)이 있는가 —
+   * 채널 설정이 없는데 흔적만 남은 상태는 "기기 변경/유실"의 강한 신호라
+   * getStatus 가 명시적 안내 issue 를 띄우는 데 쓴다. 읽기 전용·절대 throw 안 함.
+   */
+  hasPollerTrace(projectId: string): boolean {
+    const offsets = readJsonMap<unknown>(this.offsetPath);
+    return projectId in offsets;
+  }
+
   // ── 상태/프리플라이트 ─────────────────────────────────────────────
 
   /** projectId 의 합성 상태(프론트 토글 잠금/표시용). 레코드 없으면 빈 상태. */
@@ -347,6 +474,36 @@ export class TelegramChannelStore {
         `이 봇 토큰은 이미 다른 프로젝트(${conflicts.join(", ")})의 활성 채널이 ` +
           `사용 중입니다. 텔레그램 getUpdates 는 봇당 1개 소비자만 허용하므로 ` +
           `프로젝트마다 별도의 봇을 만들어 연결하세요.`,
+      );
+    }
+    // 기기 변경 복원 안내: 다른 기기의 클라우드 메타에서 복원된 레코드는 봇
+    // 토큰이 없다(보안상 토큰은 동기화되지 않음). 무엇을 다시 넣어야 하는지
+    // 명시한다 — 비차단 정보성 issue (canEnable 은 preflight 가 이미 잠금).
+    if (cfg?.restoredFromSync && !cfg.botToken) {
+      preflight.issues.push(
+        "다른 기기에서 쓰던 채널 설정을 복원했습니다. 보안상 봇 토큰은 기기 간 " +
+          "동기화되지 않으니, BotFather 의 봇 토큰만 다시 입력하고 저장한 뒤 " +
+          "활성화하면 채널이 복구됩니다.",
+      );
+    }
+    // 설정 유실 안내: 레코드는 없는데 과거 폴러 오프셋 흔적이 남아 있으면
+    // "잘 쓰다가 끊긴" 상태다 — 조용히 넘기지 않고 명시적으로 알린다.
+    if (!cfg && this.hasPollerTrace(projectId)) {
+      preflight.issues.push(
+        "이 프로젝트에서 텔레그램 채널을 사용한 흔적(수신 기록)이 있지만 채널 " +
+          "설정이 없습니다. 기기 변경 등으로 설정이 유실됐을 수 있습니다 — " +
+          "봇 토큰과 chatId 를 다시 등록하면 알림이 복구됩니다.",
+      );
+    }
+    // chatId 공유 안내: 같은 대화방으로 발신하는 다른 활성 프로젝트가 있으면
+    // 응답이 섞인다. 차단하지 않고(합법 패턴·무회귀) 구분 수단을 알린다 —
+    // 실제 발신 시 폴러가 [프로젝트] 접두를 자동 부착한다.
+    const chatSharers = this.listChatIdSharers(projectId, cfg?.chatId ?? null);
+    if (chatSharers.length > 0) {
+      preflight.issues.push(
+        `이 chatId 는 다른 프로젝트(${chatSharers.join(", ")})의 활성 채널도 ` +
+          `사용 중입니다. 같은 대화방에 여러 프로젝트의 응답이 도착하므로, ` +
+          `구분을 위해 발신 메시지에 [프로젝트명] 접두가 자동으로 붙습니다.`,
       );
     }
     return {
@@ -728,6 +885,36 @@ export function getTelegramChannelAccess(
  */
 export function neutralizeTelegramPluginConfig(): { tokenRemoved: boolean } {
   return getTelegramChannelStore().neutralizePluginConfig();
+}
+
+/**
+ * 클라우드 메타를 이 기기에 materialize(pull). 로컬 레코드가 없는 프로젝트만
+ * 생성하며 enabled=false 강제 — 자세한 보안 경계는 applyRemoteMeta 주석 참고.
+ */
+export function applyRemoteTelegramChannelMeta(
+  projectId: string,
+  meta: RemoteTelegramChannelMeta,
+): boolean {
+  return getTelegramChannelStore().applyRemoteMeta(projectId, meta);
+}
+
+/** 로컬 설정의 동기화용 투영(push). 토큰 미포함 보장. 레코드 없으면 null. */
+export function buildRemoteTelegramChannelMeta(
+  projectId: string,
+  machineId?: string,
+): RemoteTelegramChannelMeta | null {
+  return getTelegramChannelStore().buildRemoteMeta(projectId, machineId);
+}
+
+/**
+ * 같은 chatId 로 발신하는 다른 활성 프로젝트 목록 — 발신 접두([프로젝트])
+ * 부착 판정에 telegram-poller 가 사용한다.
+ */
+export function listTelegramChatIdSharers(
+  selfProjectId: string,
+  chatId: string | null,
+): string[] {
+  return getTelegramChannelStore().listChatIdSharers(selfProjectId, chatId);
 }
 
 /**
