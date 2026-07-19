@@ -42,6 +42,27 @@ export function worktreeKey(worktree: Pick<Worktree, "path">): string {
 }
 
 /**
+ * Whether the hygiene pass reached NO verdict for this worktree — git could not
+ * judge it (detached HEAD, failed probe) or the data path that supplies
+ * verdicts is broken.
+ *
+ * This is a first-class third state, not a synonym for "active". Treating it as
+ * "active" is what let a dead verdict pipeline masquerade as a working filter:
+ * the light refresh never seeded the verdict cache, so every worktree looked
+ * un-stale and all 160 stayed in the dropdown while the filter reported itself
+ * healthy (ticket NaviULZe). Callers surface the count (see CodeTab) so the
+ * same class of regression is loud instead of silent.
+ */
+export function isVerdictUnknown(worktree: Worktree): boolean {
+  return worktree.staleInfo === undefined && worktree.stale === undefined;
+}
+
+/** How many of `worktrees` carry no hygiene verdict at all. */
+export function countUnknownVerdicts(worktrees: Worktree[]): number {
+  return worktrees.filter(isVerdictUnknown).length;
+}
+
+/**
  * Auto-archive verdict straight from the electron main hygiene computation: a
  * worktree is auto-archived once it is merged into base (landed) or has gone
  * stale (idle beyond the threshold).
@@ -50,6 +71,11 @@ export function worktreeKey(worktree: Pick<Worktree, "path">): string {
  * check `merged` explicitly too so a future change to the idle threshold can't
  * accidentally un-hide a merged-and-landed worktree, and so {@link archiveReason}
  * can distinguish the two.
+ *
+ * An {@link isVerdictUnknown} worktree is NOT auto-archived — hiding work we
+ * cannot judge risks hiding live work, which is worse than showing one row too
+ * many. Unknown is reported separately rather than quietly folded into either
+ * answer.
  */
 export function isAutoArchived(worktree: Worktree): boolean {
   return (

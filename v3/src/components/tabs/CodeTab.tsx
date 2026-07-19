@@ -8,7 +8,10 @@ import { ImagePreview } from "../code/ImagePreview";
 import { DiffSurface } from "../workspace/DiffSurface";
 import { WorktreeDiffBanner } from "../code/WorktreeDiffBanner";
 import { isImageFile } from "../../lib/imageFiles";
-import { isActiveOngoingWorktree } from "../../lib/worktreeHygiene";
+import {
+  countUnknownVerdicts,
+  isActiveOngoingWorktree,
+} from "../../lib/worktreeHygiene";
 import { useTranslation } from "../../lib/i18n";
 
 export interface DiffRenderProps {
@@ -86,6 +89,16 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
 
   const archivedCount = projectWorktrees.length - activeWorktrees.length;
 
+  // Worktrees git could not judge. They stay listed (hiding unjudged work is
+  // worse than one extra row), but the count is shown rather than swallowed —
+  // a filter with no evidence should look broken, not look empty. When the
+  // verdict path died this would have read "판정 불가 160" instead of quietly
+  // listing all of them (ticket NaviULZe).
+  const unknownCount = useMemo(
+    () => countUnknownVerdicts(projectWorktrees),
+    [projectWorktrees],
+  );
+
   const selectedRoot = selectedWorktree ? (rootPath ?? "") : "__project__";
 
   // Light (topology-only) refresh with a TTL. The tab remounts on every tab
@@ -129,6 +142,11 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
           {archivedCount > 0 && (
             <option disabled value="__archived_hint__">
               {t("code.rootArchivedHint", { count: archivedCount })}
+            </option>
+          )}
+          {unknownCount > 0 && (
+            <option disabled value="__unknown_hint__">
+              {t("code.rootUnknownHint", { count: unknownCount })}
             </option>
           )}
         </select>

@@ -228,15 +228,24 @@ let inflightRefresh: Promise<void> | null = null;
 let inflightLight: Promise<void> | null = null;
 
 /**
- * Normalize a light (topology-only) entry, carrying status/staleInfo over
- * from the previous snapshot when the worktree's HEAD is unchanged. A moved
- * HEAD means new commits — the old merge status is provably outdated, so it
- * is dropped (pill degrades to ⚪ idle) until the next full refresh().
+ * Normalize a light entry. `status` is carried over from the previous snapshot
+ * when the worktree's HEAD is unchanged; a moved HEAD means new commits, so the
+ * old merge status is provably outdated and is dropped (pill degrades to ⚪
+ * idle) until the next full refresh().
  *
- * When the in-memory snapshot has no verdict (cold start — the store now
- * light-refreshes on Code tab / FileTree mounts and never runs the full sweep
- * itself), the persisted verdict cache fills in stale/staleInfo for an
- * unmoved HEAD so the archived-worktree filter keeps working across reloads.
+ * The hygiene verdict (stale/staleInfo) resolves in strict freshness order:
+ *
+ *  1. **the light payload itself** — `worktree:listLight` now computes verdicts
+ *     in a batched repo-level probe, so this is a verdict for the CURRENT head,
+ *     fresher than anything carried or cached;
+ *  2. **carry-over** from the previous snapshot at an unmoved HEAD;
+ *  3. **the persisted cache**, likewise HEAD-guarded;
+ *  4. **unknown** — all sources silent.
+ *
+ * ★ Unknown is left `undefined`, NOT `false`. Collapsing "no verdict" into "not
+ * stale" is exactly what silently killed the archived filter: with the cache
+ * never seeded, every worktree read as active and all 160 stayed in every
+ * dropdown (ticket NaviULZe). Absence of evidence is not evidence of activity.
  */
 function normalizeLightWorktree(
   group: WorktreeLightGroup,
@@ -246,9 +255,13 @@ function normalizeLightWorktree(
   verdicts: ReturnType<typeof loadVerdictCache>,
 ): Worktree {
   const carry = prev !== undefined && prev.head === item.head;
-  const cached = carry
-    ? null
-    : cachedVerdictFor(verdicts, item.path, item.head);
+  const fresh = item.staleInfo !== undefined || item.stale !== undefined;
+  const cached = cachedVerdictFor(verdicts, item.path, item.head);
+  const verdict: Pick<Worktree, "stale" | "staleInfo"> = fresh
+    ? { stale: item.stale ?? item.staleInfo?.stale, staleInfo: item.staleInfo }
+    : carry
+      ? { stale: prev.stale, staleInfo: prev.staleInfo }
+      : { stale: cached?.stale, staleInfo: cached?.staleInfo };
   return {
     id: `${group.projectId}:${item.path}`,
     taskId: inferTaskId(group.projectId, item.path),
@@ -263,8 +276,7 @@ function normalizeLightWorktree(
     // Stamped from enumeration order, never carried over from `prev`: the light
     // path re-enumerates every time, so index 0 is always current truth.
     isMain: isMainByEnumerationOrder(index),
-    stale: carry ? prev.stale : (cached?.stale ?? false),
-    staleInfo: carry ? prev.staleInfo : cached?.staleInfo,
+    ...verdict,
     status: carry ? prev.status : undefined,
   };
 }
@@ -339,6 +351,14 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
           ),
         );
         set({ worktrees, loading: false, lastRefreshedAt: Date.now() });
+        // Seed the persisted cache from the light path too. Before this, the
+        // ONLY writer was the full sweep in refresh() — and no mount path calls
+        // it, so on any profile that never opened the Worktrees tab the cache
+        // key was never created, every verdict read as undefined, and the
+        // archived filter silently passed all 160 worktrees through to every
+        // dropdown (ticket NaviULZe). A single writer that nothing on the hot
+        // path invokes is not a cache; it is a dead branch.
+        saveVerdictCache(buildVerdictCache(worktrees));
       } catch (err) {
         set({ loading: false, lastError: errorMessage(err) });
         throw err;

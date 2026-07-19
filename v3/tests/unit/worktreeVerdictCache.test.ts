@@ -5,6 +5,12 @@ import {
   loadVerdictCache,
   saveVerdictCache,
 } from "../../src/lib/worktreeVerdictCache";
+import {
+  archiveReason,
+  countUnknownVerdicts,
+  isVerdictUnknown,
+  isWorktreeArchived,
+} from "../../src/lib/worktreeHygiene";
 import { useWorktreeStore } from "../../src/stores/worktreeStore";
 import type { Worktree, WorktreeStatus } from "../../src/types/worktree";
 
@@ -227,7 +233,145 @@ describe("verdict cache — worktreeStore 통합 (콜드스타트 아카이브 �
     await useWorktreeStore.getState().refreshLight();
 
     const restored = useWorktreeStore.getState().worktrees[0];
-    expect(restored.stale).toBe(false);
+    // ★ NaviULZe: '판정 없음' 은 undefined(unknown) 이지 false(안 stale)가 아니다.
+    // 예전에는 false 로 눌러담았고, 그래서 캐시가 통째로 비었을 때도 필터가
+    // '전부 active' 라고 자신있게 답하며 160개를 그대로 통과시켰다.
+    expect(restored.stale).toBeUndefined();
     expect(restored.staleInfo).toBeUndefined();
+  });
+});
+
+/**
+ * 티켓 NaviULZe — 진범은 '캐시를 쓰는 쪽' 이 아니라 '쓰는(write) 쪽' 이었다.
+ * saveVerdictCache 호출부가 full refresh() 단 하나뿐인데 마운트 경로는 전부
+ * light 라, Worktrees 탭을 한 번도 안 연 프로필에서는 캐시 키가 영영 생기지
+ * 않았다. 아래는 (a) light 응답이 verdict 를 실어오면 콜드 캐시에서도 필터가
+ * 살아있고, (b) light 경로가 캐시를 시딩한다는 것을 고정한다.
+ */
+describe("verdict 시딩 — light 경로 (NaviULZe)", () => {
+  const PROJECT = "proj1";
+  const listMock = vi.fn();
+  const listLightMock = vi.fn();
+  let backing: Record<string, string>;
+
+  beforeEach(() => {
+    listMock.mockReset();
+    listLightMock.mockReset();
+    backing = stubLocalStorage();
+    vi.stubGlobal("window", {
+      electronAPI: {
+        worktree: { list: listMock, listLight: listLightMock },
+      },
+    });
+    useWorktreeStore.setState({
+      worktrees: [],
+      loading: false,
+      lastError: null,
+      lastRefreshedAt: null,
+    });
+  });
+
+  function lightGroup(worktrees: unknown[]) {
+    return [
+      {
+        projectId: PROJECT,
+        repoRoot: "/repo",
+        baseRef: "origin/main",
+        worktrees,
+      },
+    ];
+  }
+
+  it("★캐시가 완전히 빈 상태에서도 light 응답의 verdict 로 아카이브가 판정된다", async () => {
+    expect(backing["marblo.worktree.verdicts.v1"]).toBeUndefined();
+
+    listLightMock.mockResolvedValueOnce(
+      lightGroup([
+        {
+          path: `/w/${PROJECT}/merged-task`,
+          branch: "marblo/merged-task",
+          head: "aaa",
+          stale: true,
+          staleInfo: { merged: true, idleDays: 2, stale: true },
+        },
+        {
+          path: `/w/${PROJECT}/live-task`,
+          branch: "marblo/live-task",
+          head: "bbb",
+          stale: false,
+          staleInfo: { merged: false, idleDays: 0, stale: false },
+        },
+      ]),
+    );
+    await useWorktreeStore.getState().refreshLight();
+
+    const [merged, live] = useWorktreeStore.getState().worktrees;
+    expect(isWorktreeArchived(merged, {})).toBe(true);
+    expect(isWorktreeArchived(live, {})).toBe(false);
+    expect(archiveReason(merged)).toBe("merged");
+  });
+
+  it("★light refresh 가 verdict 캐시를 시딩한다 (예전엔 full refresh 만 썼다)", async () => {
+    listLightMock.mockResolvedValueOnce(
+      lightGroup([
+        {
+          path: `/w/${PROJECT}/merged-task`,
+          branch: "marblo/merged-task",
+          head: "aaa",
+          stale: true,
+          staleInfo: { merged: true, idleDays: 2, stale: true },
+        },
+      ]),
+    );
+    await useWorktreeStore.getState().refreshLight();
+
+    const persisted = loadVerdictCache();
+    expect(persisted[`/w/${PROJECT}/merged-task`]).toEqual({
+      head: "aaa",
+      stale: true,
+      staleInfo: { merged: true, idleDays: 2, stale: true },
+    });
+  });
+
+  it("verdict 없는 light 응답(구 preload)은 unknown 으로 남고 숨기지 않는다", async () => {
+    listLightMock.mockResolvedValueOnce(
+      lightGroup([
+        { path: `/w/${PROJECT}/t1`, branch: "marblo/t1", head: "ccc" },
+      ]),
+    );
+    await useWorktreeStore.getState().refreshLight();
+
+    const [wt0] = useWorktreeStore.getState().worktrees;
+    expect(isVerdictUnknown(wt0)).toBe(true);
+    // 판정 불가를 아카이브로 취급하면 살아있는 작업까지 숨는다 — 보이게 둔다.
+    expect(isWorktreeArchived(wt0, {})).toBe(false);
+    expect(countUnknownVerdicts(useWorktreeStore.getState().worktrees)).toBe(1);
+  });
+
+  it("light 의 최신 verdict 가 오래된 캐시보다 우선한다 (같은 HEAD, 판정이 뒤집힌 경우)", async () => {
+    saveVerdictCache({
+      [`/w/${PROJECT}/t1`]: {
+        head: "ddd",
+        stale: false,
+        staleInfo: { merged: false, idleDays: 0, stale: false },
+      },
+    });
+
+    listLightMock.mockResolvedValueOnce(
+      lightGroup([
+        {
+          path: `/w/${PROJECT}/t1`,
+          branch: "marblo/t1",
+          head: "ddd",
+          stale: true,
+          staleInfo: { merged: true, idleDays: 1, stale: true },
+        },
+      ]),
+    );
+    await useWorktreeStore.getState().refreshLight();
+
+    const [wt0] = useWorktreeStore.getState().worktrees;
+    expect(wt0.staleInfo).toEqual({ merged: true, idleDays: 1, stale: true });
+    expect(isWorktreeArchived(wt0, {})).toBe(true);
   });
 });

@@ -14,6 +14,7 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.saveFailed": "Failed to save {name} — changes were not written to disk",
   "code.saveFailedDismiss": "Dismiss save error",
   "code.rootArchivedHint": "{count} archived · manage in the Worktrees tab",
+  "code.rootUnknownHint": "{count} unjudged · hygiene status unavailable",
 
   "code.worktreeDiff.loading": "Checking worktree changes...",
   "code.worktreeDiff.changedCount": "{count} changed",

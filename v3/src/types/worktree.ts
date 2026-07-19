@@ -61,11 +61,20 @@ export interface WorktreeProjectGroup {
   worktrees: WorktreeListItem[];
 }
 
-/** Topology-only entry from `worktree:listLight` — no status/staleInfo. */
+/**
+ * Entry from `worktree:listLight` — topology plus the batched hygiene verdict,
+ * but no per-worktree `status` (that still costs the full sweep).
+ *
+ * `stale` / `staleInfo` are absent when git could not judge this worktree
+ * (detached HEAD, failed probe, or a preload predating the batched verdict).
+ * Absent means UNKNOWN — see `isVerdictUnknown` in lib/worktreeHygiene.
+ */
 export interface WorktreeLightItem {
   path: string;
   branch: string;
   head: string;
+  stale?: boolean;
+  staleInfo?: WorktreeStaleInfo;
 }
 
 export interface WorktreeLightGroup {

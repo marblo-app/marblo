@@ -37,11 +37,22 @@ export interface WorktreeProjectGroup {
  * ≈ 19–26s (7 git spawns per worktree), light list ≈ 0.17s (one
  * `git worktree list` + baseRef per repo).
  */
+export interface WorktreeLightItem extends WorktreeInfo {
+  /**
+   * Hygiene verdict from the batched (repo-level) `staleInfoByHead` probe —
+   * `undefined` when git could not answer for this worktree (detached HEAD, or
+   * a failed probe). Undefined means UNKNOWN, never "active": the renderer must
+   * not read its absence as a clean bill of health (ticket NaviULZe).
+   */
+  stale?: boolean;
+  staleInfo?: StaleInfo;
+}
+
 export interface WorktreeLightGroup {
   projectId: string;
   repoRoot: string;
   baseRef: string;
-  worktrees: WorktreeInfo[];
+  worktrees: WorktreeLightItem[];
 }
 
 interface WorktreeStatusArgs {
@@ -355,17 +366,42 @@ export function registerWorktreeIpc(
     );
   };
 
-  // Topology only — no per-worktree git probes. This is the ensureFresh()
+  // Topology only — no per-WORKTREE git probes. This is the ensureFresh()
   // path behind board cards / the ticket modal, where the only question is
   // "does a worktree exist for this task?" and the full sweep's 19–26s cost
   // (ticket yJgz7s03) is pure waste.
+  //
+  // It does carry the hygiene verdict, because the renderer's archived filter
+  // has no other source and went dead without it (ticket NaviULZe: 160
+  // worktrees in every dropdown). The verdict comes from the batched
+  // repo-level probe — two `for-each-ref` spawns per REPO, measured 0.035s at
+  // 145 worktrees / 510 branches — not the per-worktree probes that made the
+  // full sweep unaffordable in the first place.
   const listWorktreesLight = async (): Promise<WorktreeLightGroup[]> => {
     const roots = uniqueProjectRoots(getProjectRoots());
     return Promise.all(
       roots.map(async ({ projectId, repoRoot }) => {
         const baseRef = await worktreeManager.resolveBaseRef(repoRoot);
         const worktrees = await worktreeManager.list(repoRoot);
-        return { projectId, repoRoot, baseRef, worktrees };
+        const verdicts = await worktreeManager.staleInfoByHead(
+          repoRoot,
+          baseRef,
+        );
+        // The main working tree is "merged" by definition and must never be
+        // flagged stale — same carve-out the full sweep applies.
+        const realRepoRoot = fs.existsSync(repoRoot)
+          ? fs.realpathSync(repoRoot)
+          : repoRoot;
+        const items: WorktreeLightItem[] = worktrees.map((worktree) => {
+          if (worktree.path === realRepoRoot) {
+            return { ...worktree, stale: false };
+          }
+          const staleInfo = verdicts.get(worktree.head);
+          // No verdict → leave both fields undefined. Unknown stays unknown.
+          if (!staleInfo) return worktree;
+          return { ...worktree, stale: staleInfo.stale, staleInfo };
+        });
+        return { projectId, repoRoot, baseRef, worktrees: items };
       }),
     );
   };

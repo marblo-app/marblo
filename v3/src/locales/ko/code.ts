@@ -15,6 +15,7 @@ export const code = {
   "code.saveFailed": "{name} 저장 실패 — 디스크에 기록되지 않았습니다",
   "code.saveFailedDismiss": "저장 실패 알림 닫기",
   "code.rootArchivedHint": "{count}개 아카이브됨 · Worktrees 탭에서 관리",
+  "code.rootUnknownHint": "{count}개 판정 불가 · 정리 상태를 확인할 수 없음",
 
   // "이 워크트리 보기" diff 자동 표시 결과. diff 가 안 뜨는 경우마다 이유를
   // 밝힌다 — 조용히 아무것도 안 하면 버그와 구분되지 않는다.

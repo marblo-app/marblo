@@ -1036,6 +1036,88 @@ export class WorktreeManager {
   }
 
   /**
+   * The same {@link staleInfo} verdict for EVERY branch in the repo, computed
+   * in two repo-level git spawns instead of the two-per-worktree probes
+   * `staleInfo()` runs — keyed by the branch tip's commit sha, which is exactly
+   * the `head` {@link list} reports for a worktree with that branch checked out.
+   *
+   * ── Why ──────────────────────────────────────────────────────────────────
+   * `staleInfo()` per worktree is what makes the full sweep unaffordable: at
+   * ~680 registered worktrees it is ~1360 git spawns, part of the measured
+   * 12–26s subprocess storm (tickets yJgz7s03 / HruNFJpj). The light list was
+   * introduced to escape that cost — but light carries no verdict, so the
+   * renderer's archived-worktree filter (#475) lost its evidence entirely and
+   * every worktree stayed visible (ticket NaviULZe). Batching restores the
+   * evidence without restoring the cost: `for-each-ref` answers for all
+   * branches at once, measured 0.035s at 145 worktrees / 510 branches.
+   *
+   * ── Fail-closed ──────────────────────────────────────────────────────────
+   * On any git failure this returns an EMPTY map, never a map of "not merged /
+   * not stale" verdicts. An absent verdict is "unknown" to callers; a
+   * fabricated negative one would silently un-archive the whole repo — which is
+   * precisely the failure this method exists to fix.
+   *
+   * A detached-HEAD worktree has no branch ref, so its sha is simply absent —
+   * unknown, by the same rule.
+   */
+  async staleInfoByHead(
+    repoRoot: string,
+    baseRef: string,
+    opts?: StaleOptions,
+  ): Promise<Map<string, StaleInfo>> {
+    const maxIdleDays = opts?.maxIdleDays ?? DEFAULT_MAX_IDLE_DAYS;
+    const now = opts?.now ?? new Date();
+
+    const tips = await this.runGit(
+      [
+        "for-each-ref",
+        "--format=%(objectname) %(committerdate:unix)",
+        "refs/heads",
+      ],
+      repoRoot,
+    );
+    if (tips.code !== 0) return new Map();
+
+    const mergedRes = await this.runGit(
+      [
+        "for-each-ref",
+        `--merged=${baseRef}`,
+        "--format=%(objectname)",
+        "refs/heads",
+      ],
+      repoRoot,
+    );
+    if (mergedRes.code !== 0) return new Map();
+    const mergedShas = new Set(
+      mergedRes.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    );
+
+    const out = new Map<string, StaleInfo>();
+    for (const line of tips.stdout.split("\n")) {
+      const [sha, unix] = line.trim().split(/\s+/);
+      if (!sha) continue;
+      const seconds = Number(unix);
+      let idleDays = 0;
+      if (Number.isFinite(seconds)) {
+        idleDays = Math.floor(
+          (now.getTime() - seconds * 1000) / STALE_MS_PER_DAY,
+        );
+        if (idleDays < 0) idleDays = 0;
+      }
+      const merged = mergedShas.has(sha);
+      out.set(sha, {
+        merged,
+        idleDays,
+        stale: merged || idleDays >= maxIdleDays,
+      });
+    }
+    return out;
+  }
+
+  /**
    * Bulk-remove every stale worktree under `repoRoot` (WORKTREE-SPEC §4 일괄
    * cleanup). Reuses list() + staleInfo() to decide, then remove() with
    * deleteBranch:true. The main working tree (path === repoRoot) is always

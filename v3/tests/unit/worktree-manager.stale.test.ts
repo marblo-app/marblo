@@ -214,3 +214,102 @@ describe("WorktreeManager.cleanupStale", () => {
     expect(git(["branch", "--list", merged.branch], repoRoot)).toBe("");
   });
 });
+
+/**
+ * 티켓 NaviULZe — 라이트 경로에는 verdict 가 없어 아카이브 필터(#475)가 근거를
+ * 잃고 무력화됐다. staleInfoByHead 는 그 근거를 '워크트리당 2 spawn' 이 아니라
+ * '리포당 2 spawn' 으로 복원한다(#498/#495 성능 유지). 아래는 배치 결과가
+ * 워크트리별 staleInfo() 와 동일하다는 것과, 실패 시 '전부 안 stale' 을
+ * 날조하지 않는다는 것을 고정한다.
+ */
+describe("WorktreeManager.staleInfoByHead — 배치 verdict", () => {
+  it("머지된 워크트리와 살아있는 워크트리를 구분한다 (staleInfo() 와 동일 판정)", async () => {
+    const { repoRoot, mgr } = makeRepo();
+
+    const merged = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "batchmerged1",
+      slug: "merged",
+    });
+    fs.writeFileSync(path.join(merged.path, "m.ts"), "x\n");
+    git(["add", "."], merged.path);
+    git(["commit", "-m", "m"], merged.path);
+    git(["merge", "--no-ff", merged.branch, "-m", "merge m"], repoRoot);
+
+    const active = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "batchactive1",
+      slug: "active",
+    });
+    fs.writeFileSync(path.join(active.path, "a.ts"), "x\n");
+    git(["add", "."], active.path);
+    git(["commit", "-m", "a"], active.path);
+
+    const byHead = await mgr.staleInfoByHead(repoRoot, "main");
+    const list = await mgr.list(repoRoot);
+    const headOf = (p: string) => list.find((w) => w.path === p)!.head;
+
+    expect(byHead.get(headOf(merged.path))?.merged).toBe(true);
+    expect(byHead.get(headOf(merged.path))?.stale).toBe(true);
+    expect(byHead.get(headOf(active.path))?.merged).toBe(false);
+    expect(byHead.get(headOf(active.path))?.stale).toBe(false);
+
+    // 배치 판정이 워크트리별 판정과 어긋나면 안 된다 — 성능만 다르고 답은 같아야.
+    for (const wt of [merged.path, active.path]) {
+      const one = await mgr.staleInfo(wt, "main");
+      expect(byHead.get(headOf(wt))).toEqual(one);
+    }
+  });
+
+  it("오래 idle 한 브랜치를 stale 로 판정한다 (maxIdleDays 경계)", async () => {
+    const { repoRoot, mgr } = makeRepo();
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "batchidle001",
+      slug: "idle",
+    });
+    fs.writeFileSync(path.join(info.path, "i.ts"), "x\n");
+    git(["add", "."], info.path);
+    git(["commit", "-m", "i"], info.path);
+
+    const list = await mgr.list(repoRoot);
+    const head = list.find((w) => w.path === info.path)!.head;
+
+    // 커밋 직후 = idle 0일 → 미머지이므로 stale 아님
+    const fresh = await mgr.staleInfoByHead(repoRoot, "main");
+    expect(fresh.get(head)?.stale).toBe(false);
+
+    // now 를 20일 뒤로 밀면 idle 20 >= 14 → stale
+    const later = await mgr.staleInfoByHead(repoRoot, "main", {
+      now: new Date(Date.now() + 20 * DAY_MS),
+    });
+    expect(later.get(head)?.idleDays).toBeGreaterThanOrEqual(14);
+    expect(later.get(head)?.stale).toBe(true);
+  });
+
+  it("★git 이 답하지 못하면 빈 맵을 주고, '전부 안 stale' 을 날조하지 않는다", async () => {
+    const { mgr } = makeRepo();
+    // 리포가 아닌 경로 → for-each-ref 실패
+    const out = await mgr.staleInfoByHead(os.tmpdir(), "main");
+    expect(out.size).toBe(0);
+  });
+
+  it("존재하지 않는 baseRef 로도 '전부 머지됨' 을 날조하지 않는다", async () => {
+    const { repoRoot, mgr } = makeRepo();
+    await mgr.create({
+      repoRoot,
+      projectId: "p",
+      taskId: "batchnobase1",
+      slug: "nobase",
+    });
+    const out = await mgr.staleInfoByHead(
+      repoRoot,
+      "refs/heads/does-not-exist",
+    );
+    // --merged=<없는 ref> 는 실패한다 → 판정 없음(빈 맵). merged:true 를 뿌리면 안 된다.
+    for (const v of out.values()) expect(v.merged).toBe(false);
+  });
+});
