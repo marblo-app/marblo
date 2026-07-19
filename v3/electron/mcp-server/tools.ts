@@ -44,6 +44,7 @@ import {
 import { selectProjectId, looksLikeFirestoreId } from "./project-resolve.js";
 import {
   validateTaskBodyInput,
+  validateTaskBodySections,
   taskBodyStorageFields,
   composeTaskBody,
 } from "./task-body.js";
@@ -1436,7 +1437,11 @@ export function registerTools(server: McpServer): void {
   // 4. create_tasks_bulk
   auditedTool(
     "create_tasks_bulk",
-    "Create multiple tasks at once. Pass tasks_json (JSON string) or tasks (array). Each item: title, goal, changes[], acceptance[], notes?, role, priority?, depends_on?, context?, scope?, alias?. Use structured fields (goal/changes/acceptance), not a single description blob. depends_on supports TASK-NNN (1-based index), alias, or UUID.",
+    "Create multiple tasks at once. Pass tasks_json (JSON string) or tasks (array). Each item: title, goal, changes[], acceptance[], notes?, role, priority?, depends_on?, context?, scope?, alias?. Use structured fields (goal/changes/acceptance), not a single description blob. " +
+      'TYPES — changes/acceptance/notes/depends_on/scope MUST be arrays of strings, never a bare string: use ["한 줄"], not "한 줄". ' +
+      `priority is an INTEGER ${TASK_PRIORITY_MIN}-${TASK_PRIORITY_MAX} (higher = more urgent), not a label — "P0"/"high" are rejected; P0-style urgency maps to ${TASK_PRIORITY_MAX}. Omit for unprioritized. ` +
+      "role is one of backend/frontend/test/devops. depends_on supports TASK-NNN (1-based index), alias, or UUID. " +
+      "A malformed item fails on its own and the rest of the batch still gets created.",
     {
       tasks_json: z
         .string()
@@ -1497,6 +1502,21 @@ export function registerTools(server: McpServer): void {
         for (const { task: t, index: i } of chunk) {
           let resolvedDeps: string[] | null = null;
           let depError: string | null = null;
+          // 티켓 20GMXojE9iHf5giBckOR: depends_on 은 무검증 캐스팅이라 문자열이
+          // 오면 아래 for..of 가 글자 단위로 순회해 쓰레기 dep id 를 만든다.
+          // 조용히 잘못된 의존성을 심느니 그 항목만 명시적으로 실패시킨다.
+          if (
+            t.depends_on !== undefined &&
+            t.depends_on !== null &&
+            !Array.isArray(t.depends_on)
+          ) {
+            results.push(
+              `  [FAILED] ${
+                (t.title as string) || `task #${i}`
+              } — depends_on 은 문자열 배열이어야 합니다 (받은 값: ${typeof t.depends_on}). 예: "depends_on": ["TASK-001"]`,
+            );
+            continue;
+          }
           const rawDeps = t.depends_on as string[] | undefined;
 
           if (rawDeps && rawDeps.length > 0) {
@@ -1578,6 +1598,25 @@ export function registerTools(server: McpServer): void {
               } — invalid priority '${String(
                 prioRaw,
               )}' (use integer ${TASK_PRIORITY_MIN}-${TASK_PRIORITY_MAX})`,
+            );
+            continue;
+          }
+
+          // 티켓 20GMXojE9iHf5giBckOR: changes/acceptance/notes 는 아래에서
+          // `as string[]` 로 무검증 캐스팅돼 taskBodyStorageFields 로 넘어간다.
+          // 호출자가 문자열을 주면 예전엔 nonEmpty() 안에서 TypeError 가 나
+          // 배치 전체가 죽었다 — role/priority 와 같은 자리에서 걸러, 잘못된
+          // 항목만 실패시키고 나머지는 계속 생성한다.
+          const sectionError = validateTaskBodySections({
+            changes: t.changes as string[] | undefined,
+            acceptance: t.acceptance as string[] | undefined,
+            notes: t.notes as string[] | undefined,
+          });
+          if (sectionError) {
+            results.push(
+              `  [FAILED] ${
+                (t.title as string) || `task #${i}`
+              } — ${sectionError}`,
             );
             continue;
           }

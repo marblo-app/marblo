@@ -5,6 +5,7 @@ import {
   hasStructuredBody,
   validateTaskBodyInput,
   taskBodyStorageFields,
+  validateTaskBodySections,
 } from "../../electron/mcp-server/task-body";
 
 describe("composeTaskBody", () => {
@@ -116,5 +117,61 @@ describe("taskBodyStorageFields", () => {
     expect(taskBodyStorageFields({ description: "  hi  " })).toEqual({
       description: "hi",
     });
+  });
+});
+
+// 티켓 20GMXojE9iHf5giBckOR — create_tasks_bulk 가 "(arr ?? []).map is not a
+// function" 으로 배치 전체를 죽이던 버그. MCP 입력은 Record<string, unknown>
+// 이라 tools.ts 가 `as string[]` 로 무검증 캐스팅했고, 호출자가 섹션 필드를
+// 문자열로 주면 nonEmpty() 안에서 TypeError 가 나 핸들러 밖으로 튀었다.
+describe("섹션 필드가 배열이 아닐 때 (MCP 무검증 캐스팅 방어)", () => {
+  const badShapes: Array<[string, unknown]> = [
+    ["문자열", "한 줄짜리 변경사항"],
+    ["숫자", 42],
+    ["객체", { a: 1 }],
+  ];
+
+  for (const [label, value] of badShapes) {
+    it(`hasStructuredBody 가 ${label} 에 대해 throw 하지 않는다`, () => {
+      expect(() =>
+        hasStructuredBody({ changes: value } as never),
+      ).not.toThrow();
+    });
+
+    it(`taskBodyStorageFields 가 ${label} 에 대해 throw 하지 않는다`, () => {
+      expect(() =>
+        taskBodyStorageFields({ goal: "G", notes: value } as never),
+      ).not.toThrow();
+    });
+  }
+
+  it("문자열은 한 줄짜리 섹션으로 해석한다(명백한 의도)", () => {
+    expect(
+      taskBodyStorageFields({ goal: "G", changes: "한 줄" } as never),
+    ).toMatchObject({ changes: ["한 줄"] });
+  });
+
+  it("배열 안의 비문자열 원소는 버린다", () => {
+    expect(
+      taskBodyStorageFields({ goal: "G", changes: ["ok", 5, null] } as never),
+    ).toMatchObject({ changes: ["ok"] });
+  });
+});
+
+describe("validateTaskBodySections", () => {
+  it("정상 입력은 통과", () => {
+    expect(validateTaskBodySections({ goal: "G", changes: ["a"] })).toBeNull();
+  });
+
+  it("배열이어야 할 필드가 문자열이면 필드명과 기대 타입을 알려준다", () => {
+    const err = validateTaskBodySections({ changes: "문자열" } as never);
+    expect(err).toContain("changes");
+    expect(err).toMatch(/배열|array/);
+  });
+
+  it("여러 필드가 잘못돼도 첫 필드를 지목한다", () => {
+    expect(validateTaskBodySections({ acceptance: 1 } as never)).toContain(
+      "acceptance",
+    );
   });
 });

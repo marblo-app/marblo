@@ -17,8 +17,53 @@ export interface TaskBodyFields {
   description?: string;
 }
 
-function nonEmpty(arr: string[] | undefined): string[] {
-  return (arr ?? []).map((s) => s.trim()).filter((s) => s.length > 0);
+/** 섹션 필드로 허용되는 입력 형태. MCP 경계에서 오는 값은 실제로는 unknown 이라
+ * 선언 타입을 믿을 수 없다 — validateTaskBodySections 로 먼저 거르되, 여기서도
+ * 절대 throw 하지 않는다. */
+export const SECTION_ARRAY_FIELDS = ["changes", "acceptance", "notes"] as const;
+
+/**
+ * 섹션 배열 정규화. 입력이 배열이 아니어도 **절대 throw 하지 않는다.**
+ *
+ * 티켓 20GMXojE9iHf5giBckOR: tools.ts 의 create_tasks_bulk 는 MCP 로 들어온
+ * Record<string, unknown> 을 `as string[]` 로 무검증 캐스팅해 넘긴다. 호출자가
+ * changes 를 문자열로 주면 여기서 "(arr ?? []).map is not a function" TypeError 가
+ * 났고, per-item try/catch 가 없어 배치 전체가 죽었다. 한 항목의 타입 실수가
+ * 나머지 49건을 날리는 건 어떤 경우에도 옳지 않으므로 이 함수는 안전망으로
+ * 남긴다 — 사용자에게 보이는 계약은 validateTaskBodySections 가 강제한다.
+ */
+function nonEmpty(arr: unknown): string[] {
+  // 문자열 한 개는 한 줄짜리 섹션이라는 뜻으로 받는다(명백한 의도).
+  const list = Array.isArray(arr) ? arr : typeof arr === "string" ? [arr] : [];
+  return list
+    .filter((s): s is string => typeof s === "string")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * 섹션 필드의 타입 계약 검증. 위반이면 **필드명과 기대 타입을 담은 실행 가능한**
+ * 메시지를, 정상이면 null 을 돌려준다. tools.ts 의 role/priority 검증과 같은
+ * 자리에서 per-item 으로 호출해, 잘못된 항목만 실패시키고 배치는 계속하게 한다.
+ */
+export function validateTaskBodySections(t: TaskBodyFields): string | null {
+  for (const field of SECTION_ARRAY_FIELDS) {
+    const v = (t as Record<string, unknown>)[field];
+    if (v === undefined || v === null) continue;
+    if (Array.isArray(v)) {
+      const bad = v.findIndex((s) => typeof s !== "string");
+      if (bad >= 0) {
+        return `${field}[${bad}] 는 문자열이어야 합니다 (받은 값: ${typeof v[bad]}). ${field} 는 문자열 배열입니다 — 예: "${field}": ["첫 항목", "둘째 항목"]`;
+      }
+      continue;
+    }
+    return `${field} 는 문자열 배열이어야 합니다 (받은 값: ${typeof v}). 예: "${field}": ["첫 항목", "둘째 항목"]${
+      typeof v === "string"
+        ? ` — 한 줄이면 ["${String(v).slice(0, 40)}"] 처럼 배열로 감싸세요.`
+        : ""
+    }`;
+  }
+  return null;
 }
 
 /** 구조화 섹션 중 하나라도 내용이 있으면 true. */
