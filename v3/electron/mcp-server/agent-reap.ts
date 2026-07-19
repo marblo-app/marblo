@@ -13,8 +13,9 @@
  * deliberately conservative (requirement: never misjudge a genuinely-working
  * agent):
  *
- *   1. The agent must be bound to a task (`currentTaskId`). With no task we
- *      cannot prove its work is done, so we never reap it here.
+ *   1. The agent must name a task — either a live binding (`currentTaskId`) or
+ *      the retained `lastTaskId` of a turn it reported complete. With no task
+ *      at all we cannot prove its work is done, so we never reap it here.
  *   2. That task must be terminal (DONE/FAILED). This is the load-bearing
  *      signal — a live task means live work, full stop.
  *   3. The agent must have been PTY-silent for at least `staleMs`. This keeps
@@ -25,6 +26,29 @@
  * (`working` vs `idle`) is intentionally NOT a gate: a zombie can keep emitting
  * spinner noise and stay `working` indefinitely, which is exactly the case the
  * old status-only filter missed.
+ *
+ * ── Why `lastTaskId` exists (2026-07-19, load average 44) ──────────────────
+ *
+ * Gate 1 originally accepted only `currentTaskId`. But `markTurnComplete` —
+ * which runs on the worker's completion report, the very event that makes an
+ * agent reapable — CLEARS `currentTaskId`. So the moment an agent qualified for
+ * reaping it also lost the evidence proving it, and the gate could never match:
+ * an agent that finished *cleanly* became permanently unreapable, while only
+ * ones that died messily were collectable. A reporter saw 11 of 13 agents
+ * stranded and `cleanup_agents` insisting "no reapable agents found" while the
+ * 12-core box sat at load average 44; hand-killing 11 agents brought it to 1.85.
+ *
+ * AgentManager therefore retains the id in `lastTaskId` when it releases the
+ * binding, and gate 1 accepts either. Note this does NOT loosen gate 2 — the
+ * named task's board status is still re-read and still has to be terminal. We
+ * are recovering evidence that was being thrown away, not lowering the bar.
+ *
+ * Deliberately NOT reaped: an agent that is merely unbound and quiet, with no
+ * completion report behind it. "Idle and nobody claims it" is not proof of
+ * finished work — it also describes an agent still starting up, one whose
+ * binding was never set, and (before the status fix) one that was simply
+ * thinking. Reaping on absence of evidence is how live sessions get killed, so
+ * cleanup_agents reports those as suspects instead of killing them.
  */
 
 /** Task statuses that mean the task is closed and its agent has no live work. */
@@ -53,9 +77,16 @@ export interface AgentReapInput {
   /** The task this agent is currently bound to, or null if unbound. */
   currentTaskId: string | null;
   /**
-   * Status of the task named by `currentTaskId`, as read from the board.
-   * `null`/`undefined` when the task could not be resolved (missing doc /
-   * lookup failure) — treated as non-terminal (preserve).
+   * The task this agent was LAST bound to, retained after `markTurnComplete`
+   * released the binding on the agent's completion report. Used only when
+   * `currentTaskId` is null — see the header note. null when the agent never
+   * had a binding (never dispatched a task), which stays unreapable.
+   */
+  lastTaskId?: string | null;
+  /**
+   * Status of the task named by `currentTaskId ?? lastTaskId`, as read from the
+   * board. `null`/`undefined` when the task could not be resolved (missing doc
+   * / lookup failure) — treated as non-terminal (preserve).
    */
   taskStatus: string | null | undefined;
   /** epoch-ms of the agent's most recent PTY output. */
@@ -82,11 +113,17 @@ export function evaluateTerminalTaskReap(
   const {
     role,
     currentTaskId,
+    lastTaskId,
     taskStatus,
     lastPtyActivity,
     now,
     staleMs = STALE_TERMINAL_REAP_MS,
   } = input;
+
+  // Prefer the live binding; fall back to the binding retained across a
+  // completion report. Both name a task whose board status gate 2 re-checks.
+  const taskId = currentTaskId ?? lastTaskId ?? null;
+  const viaCompletedTurn = !currentTaskId && !!lastTaskId;
 
   // The orchestrator is a permanent coordinator, never a finished worker. No
   // terminal-task + idle combination should ever reap it — preserve before any
@@ -98,19 +135,19 @@ export function evaluateTerminalTaskReap(
     };
   }
 
-  if (!currentTaskId) {
+  if (!taskId) {
     return {
       reap: false,
-      reason: "no connected task — cannot prove work done",
+      reason: "no connected or completed task — cannot prove work done",
     };
   }
+
+  const label = viaCompletedTurn ? "completed task" : "connected task";
 
   if (!isTerminalTaskStatus(taskStatus)) {
     return {
       reap: false,
-      reason: `connected task ${currentTaskId} is ${
-        taskStatus ?? "unknown"
-      } (not terminal)`,
+      reason: `${label} ${taskId} is ${taskStatus ?? "unknown"} (not terminal)`,
     };
   }
 
@@ -118,7 +155,7 @@ export function evaluateTerminalTaskReap(
   if (idleMs < staleMs) {
     return {
       reap: false,
-      reason: `connected task ${currentTaskId} ${taskStatus} but agent active ${Math.round(
+      reason: `${label} ${taskId} ${taskStatus} but agent active ${Math.round(
         idleMs / 1000,
       )}s ago (< ${Math.round(staleMs / 1000)}s grace)`,
     };
@@ -126,7 +163,7 @@ export function evaluateTerminalTaskReap(
 
   return {
     reap: true,
-    reason: `connected task ${currentTaskId} ${taskStatus}; PTY idle ${Math.round(
+    reason: `${label} ${taskId} ${taskStatus}; PTY idle ${Math.round(
       idleMs / 1000,
     )}s ≥ ${Math.round(staleMs / 1000)}s`,
   };

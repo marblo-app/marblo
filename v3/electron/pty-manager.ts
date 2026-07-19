@@ -64,6 +64,8 @@ export function isBusySignal(data: string): boolean {
 export class PtyManager {
   private sessions: Map<string, PtySession> = new Map();
   private writeAndSubmitQueues: Map<string, Promise<boolean>> = new Map();
+  /** Per-session "a new turn was submitted" listeners — see onSubmit(). */
+  private submitListeners: Map<string, Array<() => void>> = new Map();
 
   // --- PTY master-fd leak guard ---
   // node-pty (1.1.0) opens TWO /dev/ptmx master devices per spawn on macOS: the
@@ -282,10 +284,48 @@ export class PtyManager {
     return session;
   }
 
+  /**
+   * Subscribe to "a new turn was submitted on this session".
+   *
+   * Turn boundaries are anchored on INPUT, not output. Output tells you the
+   * terminal is painting — a finished CLI sitting at its prompt repaints its
+   * spinner and status line forever, which is precisely why output-derived
+   * `working` never released (see agent-status-reconcile.ts). Input that ends
+   * in a submit is the one unambiguous "new work starts now" signal, and it is
+   * the same signal whether it came from dispatch, a nudge, a Telegram forward,
+   * or a human typing into the terminal tab — so AgentManager gets a correct
+   * turn start without every caller having to remember to announce one.
+   */
+  onSubmit(id: string, callback: () => void): void {
+    const list = this.submitListeners.get(id) ?? [];
+    list.push(callback);
+    this.submitListeners.set(id, list);
+  }
+
+  private emitSubmit(id: string): void {
+    const list = this.submitListeners.get(id);
+    if (!list) return;
+    for (const cb of list) {
+      try {
+        cb();
+      } catch (err) {
+        console.error(
+          `[PtyManager] onSubmit listener threw for ${id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+  }
+
   write(id: string, data: string): void {
     const session = this.sessions.get(id);
     if (session) {
       session.process.write(data);
+      // Raw keystroke path (human typing in the terminal tab). Only a CR/LF
+      // means the composed line was actually submitted — bare characters,
+      // arrow keys and the like are still mid-composition, not a new turn.
+      if (data.includes("\r") || data.includes("\n")) this.emitSubmit(id);
     }
   }
 
@@ -333,6 +373,16 @@ export class PtyManager {
       this.emitDanger({ sessionId: id, text, match, blocked });
       if (blocked) return Promise.resolve(false);
     }
+
+    // Every accepted writeAndSubmit IS a submitted turn (dispatch / reuse /
+    // nudge / Telegram forward / pending instruction). Announce it SYNCHRONOUSLY
+    // here rather than at flush time: submits queue behind one another, and a
+    // turn that is announced only when its bytes reach the PTY leaves a window
+    // where the agent still looks finished — so trailing repaint from the
+    // PREVIOUS turn could be mistaken for this one, or the promotion arrives
+    // late. Accepting the instruction is the moment the turn begins. Blocked
+    // payloads returned above, so they never get here.
+    this.emitSubmit(id);
 
     const previous = this.writeAndSubmitQueues.get(id) ?? Promise.resolve(true);
     const next = previous
@@ -489,6 +539,7 @@ export class PtyManager {
       this.destroyProcess(session.process, session.orphanFds);
       this.sessions.delete(id);
       this.blockDangerousSessions.delete(id);
+      this.submitListeners.delete(id);
     }
   }
 
@@ -732,6 +783,7 @@ export class PtyManager {
         // process and silently dropping every subsequent write()/writeAndSubmit().
         if (this.sessions.get(id) === session) {
           this.sessions.delete(id);
+          this.submitListeners.delete(id);
         }
         // The child is gone. node-pty MAY release the master fd via its own
         // exit→socket-destroy timeout, but that path is best-effort on macOS

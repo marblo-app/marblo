@@ -209,7 +209,10 @@ export function validateOrchestratorSessionIdentity(input: {
   }
 
   const session = input.currentSession;
-  if (!session || (session.status !== "starting" && session.status !== "running")) {
+  if (
+    !session ||
+    (session.status !== "starting" && session.status !== "running")
+  ) {
     return {
       valid: false,
       reason: "orchestrator session is not running",
@@ -987,6 +990,10 @@ export class BridgeServer {
         // terminal (DONE/FAILED) even while their PTY still reports working —
         // gated on PTY-silence via lastPtyActivity (see agent-reap.ts).
         currentTaskId: a.currentTaskId,
+        // Retained across markTurnComplete's binding release, so a cleanly
+        // completed agent stays reapable. Without it the completion report
+        // erased the only evidence the reaper could match on — see agent-reap.ts.
+        lastTaskId: a.lastTaskId,
         lastPtyActivity: a.lastPtyActivity,
       }));
 

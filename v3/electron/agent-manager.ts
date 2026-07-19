@@ -15,6 +15,7 @@ import { encodeClaudeProjectDir } from "./claude-paths";
 import {
   shouldPromoteOnPtyOutput,
   shouldDemoteCompletedTurn,
+  shouldDemoteAbandonedTurn,
 } from "./agent-status-reconcile";
 import { looksLikeLoginScreen } from "./harness-manager";
 
@@ -82,6 +83,20 @@ export interface AgentInstance {
   command: string;
   cwd: string;
   currentTaskId: string | null;
+  /**
+   * The last task this agent was bound to, RETAINED after the binding is
+   * released. Audit-only — never used to decide whether the agent is free.
+   *
+   * Why it has to exist: `markTurnComplete` clears `currentTaskId` the instant
+   * a worker reports its task terminal, but the reaper's gate required a
+   * `currentTaskId` to prove the agent's work was finished. So the completion
+   * report destroyed the only evidence that made the agent reapable, and every
+   * agent that reported cleanly became permanently unreapable — 11 of 13
+   * stranded, `cleanup_agents` answering "no reapable agents found" while the
+   * box sat at load average 44. Keeping the id here lets the reaper re-check
+   * that task's board status without resurrecting the binding.
+   */
+  lastTaskId: string | null;
   launchConfig?: LaunchConfig;
   // --- Auto-restart fields ---
   restartCount: number;
@@ -98,17 +113,23 @@ export interface AgentInstance {
   heartbeatTimer: ReturnType<typeof setInterval> | null;
   /** Stored so auto-restart can re-register PTY forwarding */
   onPtyReady?: (ptySessionId: string) => void;
-  /** epoch-ms of the most recent PTY output activity. Used to derive
-   * working/idle automatically — bumped on every onData chunk, polled by
-   * the heartbeat to drop back to idle after IDLE_INACTIVITY_MS of silence. */
+  /** epoch-ms of the most recent PTY output activity. Bumped on every onData
+   * chunk. A HINT ONLY — silence does not mean idle (a reasoning agent emits
+   * nothing), so this now feeds only the wedged-turn backstop
+   * (ABANDONED_TURN_MS) and the reaper's post-completion grace window, never a
+   * routine working→idle demotion. */
   lastPtyActivity: number;
-  /** W1 (status reconcile): epoch-ms the agent's bound task last went terminal
-   * (submit_for_review / update_task_status → REVIEW·DONE·FAILED·BLOCKED). Set
-   * by markTurnComplete; drives shouldPromoteOnPtyOutput / shouldDemoteCompleted
-   * Turn so the trailing render flush of a finished turn doesn't strand the slot
-   * at `[working]`. Cleared the moment a genuinely new turn promotes the agent
-   * to `working` (dispatch/route/nudge), so real follow-up work is never
-   * suppressed. null when the agent has no just-completed turn. */
+  /**
+   * epoch-ms the agent reported its turn finished (submit_for_review /
+   * update_task_status → REVIEW·DONE·FAILED·BLOCKED), set by markTurnComplete.
+   * null while a turn is open.
+   *
+   * This is the AUTHORITATIVE turn boundary — the agent's own statement that it
+   * is done, which no amount of terminal repaint can contradict. While it is
+   * set, output cannot promote the agent to `working`. It is cleared only by a
+   * real turn start (noteTurnStart, fired on submitted input) or an explicit
+   * promotion, so genuine follow-up work is never suppressed.
+   */
   turnCompletedAt: number | null;
   /** Claude only: the --model id this launch actually used (resolver result or
    * runtime-downgrade override). Lets the fast-fail handler detect a Fable5
@@ -160,12 +181,11 @@ export function serializeAgent(agent: AgentInstance): SerializableAgent {
   };
 }
 
-/** Inactivity window after which an "auto-working" agent drops back to
- * idle. Long enough that agy / claude pausing to think or wait for user
- * input doesn't flip them to idle (which would make the orchestrator stop
- * sending follow-up instructions), short enough that genuinely abandoned
- * sessions don't stay "working" forever. */
-const IDLE_INACTIVITY_MS = 300_000; // 5 min
+// NOTE: the old IDLE_INACTIVITY_MS (5 min of PTY silence ⇒ idle) is gone. It
+// assumed a busy agent keeps talking, but an agent that is reasoning is silent,
+// so the rule reported live work as free. Demotion is now driven by the agent's
+// own completion report, with ABANDONED_TURN_MS (agent-status-reconcile.ts) as
+// the only silence-based backstop. See that file's header for the full model.
 
 const SECRET_OUTPUT_GUARDRAIL = [
   "[보안 가드레일]",
@@ -248,7 +268,7 @@ export const STARTUP_DIALOG_MATCHERS: StartupDialogMatcher[] = [
 export function composeInitialPrompt(
   model: ModelType,
   instruction: string,
-  skillContent?: string
+  skillContent?: string,
 ): string {
   const isClaude = model === "claude";
   const sanitized = isClaude
@@ -283,12 +303,12 @@ export class AgentManager {
     rootPath: string,
     sessionId: string,
     label: string,
-    agentId: string
+    agentId: string,
   ) => void;
   private onRestartAttempt?: (
     agentId: string,
     attempt: number,
-    maxAttempts: number
+    maxAttempts: number,
   ) => void;
   private onRestartFailed?: (agentId: string, exitCode: number) => void;
   private getMainWindow?: () => BrowserWindow | null;
@@ -296,7 +316,7 @@ export class AgentManager {
     rootPath: string,
     requested: string,
     filterLabel?: string,
-    filterAgentId?: string
+    filterAgentId?: string,
   ) => string | null;
 
   constructor(
@@ -306,15 +326,15 @@ export class AgentManager {
       rootPath: string,
       sessionId: string,
       label: string,
-      agentId: string
+      agentId: string,
     ) => void,
     onRestartAttempt?: (
       agentId: string,
       attempt: number,
-      maxAttempts: number
+      maxAttempts: number,
     ) => void,
     onRestartFailed?: (agentId: string, exitCode: number) => void,
-    getMainWindow?: () => BrowserWindow | null
+    getMainWindow?: () => BrowserWindow | null,
   ) {
     this.ptyManager = ptyManager;
     this.configGenerator = new AgentConfigGenerator();
@@ -329,7 +349,7 @@ export class AgentManager {
     if (!this.pruneTimer) {
       this.pruneTimer = setInterval(
         () => this.pruneDeadEntries(),
-        DEAD_ENTRY_SWEEP_MS
+        DEAD_ENTRY_SWEEP_MS,
       );
       this.pruneTimer.unref?.();
     }
@@ -353,8 +373,8 @@ export class AgentManager {
       this.agents.delete(id);
       console.log(
         `[AgentManager] Pruned dead entry ${agent.name} (${id}, ${agent.status} for ${Math.round(
-          (now - agent.terminalSince) / 60000
-        )}min) — backstop reaper (P3-4).`
+          (now - agent.terminalSince) / 60000,
+        )}min) — backstop reaper (P3-4).`,
       );
     }
   }
@@ -365,8 +385,8 @@ export class AgentManager {
       rootPath: string,
       requested: string,
       filterLabel?: string,
-      filterAgentId?: string
-    ) => string | null
+      filterAgentId?: string,
+    ) => string | null,
   ) {
     this.resolveSessionId = resolver;
   }
@@ -392,7 +412,7 @@ export class AgentManager {
       console.log(
         `[Agent:${params.id}] Resolved 'latest' → ${
           resolvedResumeId ?? "none (new session)"
-        }`
+        }`,
       );
     }
     const isResume =
@@ -425,7 +445,7 @@ export class AgentManager {
       params.complexity,
       // 런타임 강등 재시작 시 forced --model(예: fable5 실패 → "opus", §3.4-3).
       params.claudeModelOverride,
-      params.contextId
+      params.contextId,
     );
 
     // 모델 할당 v2 텔레메트리 + 폴백 표식(§8.1/§8.4). modelResolution 은 complex
@@ -440,7 +460,7 @@ export class AgentManager {
         params.model,
         params.complexity ?? "",
         resolution.model,
-        params.id
+        params.id,
       );
       if (resolution.fallback) {
         mainTelemetry.topModelFallback(
@@ -449,14 +469,14 @@ export class AgentManager {
           resolution.fallback.requested,
           resolution.fallback.installed,
           resolution.fallback.fallbackTo,
-          params.id
+          params.id,
         );
       }
     }
 
     if (isResume) {
       console.log(
-        `[Agent:${params.id}] Resuming session: ${resolvedResumeId} (model=${params.model})`
+        `[Agent:${params.id}] Resuming session: ${resolvedResumeId} (model=${params.model})`,
       );
     }
 
@@ -475,7 +495,7 @@ export class AgentManager {
       launchConfig.command,
       launchConfig.args,
       params.cwd,
-      mergedEnv
+      mergedEnv,
     );
 
     // Notify caller IMMEDIATELY so they can register data listeners
@@ -488,7 +508,7 @@ export class AgentManager {
       const prompt = composeInitialPrompt(
         params.model,
         launchConfig.initialPrompt,
-        launchConfig.skillContent
+        launchConfig.skillContent,
       );
       let sent = false;
       // Set once if the CLI boots into an interactive login prompt — blocks
@@ -510,7 +530,7 @@ export class AgentManager {
         // CR inside the message body without submitting).
         this.ptyManager.writeAndSubmit(ptySessionId, prompt);
         console.log(
-          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`
+          `[Agent:${params.id}] Initial prompt sent (${prompt.length} chars)`,
         );
       };
       const handleLoginScreen = () => {
@@ -518,7 +538,7 @@ export class AgentManager {
         authBlocked = true;
         console.error(
           `[Agent:${params.id}] Login prompt detected for ${params.model} — ` +
-            `suppressing prompt injection (CLI needs auth / login).`
+            `suppressing prompt injection (CLI needs auth / login).`,
         );
         this.setStatus(params.id, "error");
         // Surface to the renderer so it can open the CLI setup gate instead of
@@ -563,7 +583,7 @@ export class AgentManager {
       // doesn't get applied to claude agents (false positive on a chat
       // message containing the same words).
       const activeMatchers = STARTUP_DIALOG_MATCHERS.filter(
-        (m) => !m.applies || m.applies.includes(params.model)
+        (m) => !m.applies || m.applies.includes(params.model),
       );
       const dismissed = new Set<RegExp>();
 
@@ -587,7 +607,7 @@ export class AgentManager {
           if (dlg.pattern.test(outputBuffer)) {
             dismissed.add(dlg.pattern);
             console.log(
-              `[Agent:${params.id}] Dismissing blocking dialog: ${dlg.label}`
+              `[Agent:${params.id}] Dismissing blocking dialog: ${dlg.label}`,
             );
             // Small delay so the TUI is in steady state when we type.
             setTimeout(() => {
@@ -646,7 +666,7 @@ export class AgentManager {
           rootPath,
           launchConfig.claudeSessionId,
           agentName,
-          agentId
+          agentId,
         );
       } else {
         // Fallback for the rare unresolved `--resume latest` (no concrete id to
@@ -659,7 +679,7 @@ export class AgentManager {
             os.homedir(),
             ".claude",
             "projects",
-            encodedPath
+            encodedPath,
           );
           const files = fs.existsSync(sessionsDir)
             ? fs
@@ -671,7 +691,7 @@ export class AgentManager {
         } catch (err) {
           console.error(
             `[AgentManager] Failed to read existing session files for rootPath="${rootPath}":`,
-            err
+            err,
           );
           existingIds = new Set();
         }
@@ -683,7 +703,7 @@ export class AgentManager {
               os.homedir(),
               ".claude",
               "projects",
-              encodedPath
+              encodedPath,
             );
             if (!fs.existsSync(sessionsDir)) return;
             const currentFiles = fs
@@ -691,7 +711,7 @@ export class AgentManager {
               .filter((f: string) => f.endsWith(".jsonl"))
               .map((f: string) => f.replace(".jsonl", ""));
             const newId = currentFiles.find(
-              (id: string) => !existingIds.has(id)
+              (id: string) => !existingIds.has(id),
             );
             if (newId) {
               this.onSessionDetected!(rootPath, newId, agentName, agentId);
@@ -699,7 +719,7 @@ export class AgentManager {
           } catch (err) {
             console.error(
               `[AgentManager] Failed to detect new session file for agent="${agentId}" rootPath="${rootPath}":`,
-              err
+              err,
             );
           }
         }, 5000);
@@ -749,7 +769,7 @@ export class AgentManager {
         os.homedir(),
         ".gemini",
         "antigravity-cli",
-        "conversations"
+        "conversations",
       );
       // agy migrated from a flat .pb store to per-conversation SQLite (.db);
       // both formats still appear, so snapshot/scan UUID basenames from either
@@ -761,12 +781,12 @@ export class AgentManager {
             fs
               .readdirSync(conversationsDir)
               .filter((f: string) => f.endsWith(".pb") || f.endsWith(".db"))
-              .map((f: string) => f.replace(/\.(pb|db)$/, ""))
+              .map((f: string) => f.replace(/\.(pb|db)$/, "")),
           );
         } catch (err) {
           console.error(
             `[AgentManager] Failed to snapshot agy conversations for agent="${agentId}":`,
-            err
+            err,
           );
           return new Set();
         }
@@ -787,7 +807,7 @@ export class AgentManager {
       setTimeout(() => {
         try {
           const newIds = Array.from(listConvIds()).filter(
-            (id: string) => !existingIds.has(id)
+            (id: string) => !existingIds.has(id),
           );
           // Race ambiguity: if >1 conversation appeared in the window (parallel
           // spawn, user's own terminal session), we can't tell which is ours.
@@ -799,17 +819,17 @@ export class AgentManager {
               .map((id: string) => ({ id, mtime: convMtime(id) }))
               .sort(
                 (a: { mtime: number }, b: { mtime: number }) =>
-                  b.mtime - a.mtime
+                  b.mtime - a.mtime,
               )[0].id;
             console.warn(
-              `[AgentManager] agy: ${newIds.length} new conversations detected during agent="${agentId}" window, picking newest=${chosenId}`
+              `[AgentManager] agy: ${newIds.length} new conversations detected during agent="${agentId}" window, picking newest=${chosenId}`,
             );
           }
           this.onSessionDetected!(rootPath, chosenId, agentName, agentId);
         } catch (err) {
           console.error(
             `[AgentManager] Failed to detect agy conversation for agent="${agentId}":`,
-            err
+            err,
           );
         }
       }, 35000);
@@ -825,6 +845,7 @@ export class AgentManager {
       command: params.command,
       cwd: params.cwd,
       currentTaskId: params.currentTaskId ?? null,
+      lastTaskId: params.currentTaskId ?? null,
       launchConfig,
       restartCount: 0,
       fastFailCount: 0,
@@ -855,16 +876,19 @@ export class AgentManager {
     // instruction, so no follow-up was ever sent.
     //
     // Hook every PTY output chunk: bump lastPtyActivity, and promote idle→
-    // working on the first byte. The heartbeat below polls inactivity and
-    // demotes working→idle after IDLE_INACTIVITY_MS of silence.
+    // working on the first byte of an OPEN turn. Demotion is not handled here
+    // (nor by silence) — it follows the agent's completion report; see the
+    // heartbeat below and agent-status-reconcile.ts.
     this.ptyManager.onData(ptySessionId, () => {
       const agent = this.agents.get(params.id);
       if (!agent || agent !== instance) return;
       agent.lastPtyActivity = Date.now();
-      // W1: suppress the trailing render flush of a just-completed turn from
-      // re-promoting the agent to `working` (which stranded the slot at
-      // [working] until the 5-min heartbeat). shouldPromoteOnPtyOutput returns
-      // false inside the post-completion settle window.
+      // Output NEVER starts a turn — it only continues one. While a completion
+      // report stands, these bytes are the finished turn's repaint (trailing
+      // flush, then the idle prompt's spinner/cursor forever), and promoting on
+      // them is what stranded agents at [working] with nothing able to reap
+      // them. A real new turn arrives as INPUT and clears the marker via
+      // noteTurnStart, which re-opens promotion.
       if (
         shouldPromoteOnPtyOutput({
           status: agent.status,
@@ -875,6 +899,16 @@ export class AgentManager {
       ) {
         this.setStatus(params.id, "working");
       }
+    });
+
+    // Input side of the turn boundary: any submitted instruction — from
+    // dispatch, reuse, a nudge, or a human typing in the terminal tab — opens a
+    // new turn, so the completed-turn marker is cleared and the next output
+    // byte can legitimately promote the agent back to `working`.
+    this.ptyManager.onSubmit(ptySessionId, () => {
+      const agent = this.agents.get(params.id);
+      if (!agent || agent !== instance) return;
+      this.noteTurnStart(params.id);
     });
 
     // Telemetry: agent spawned — prefer MARBLO_PROJECT from launchConfig (always set by agent-config)
@@ -896,7 +930,7 @@ export class AgentManager {
       params.role || "backend",
       spawnProjectId,
       promptHash,
-      promptLength
+      promptLength,
     );
 
     // Start heartbeat for anomaly detection (ML-4)
@@ -904,19 +938,17 @@ export class AgentManager {
       const win = this.getMainWindow?.() ?? null;
       const agent = this.agents.get(params.id);
       if (!agent || agent.stopRequested) return;
-      // Auto-demote working→idle after IDLE_INACTIVITY_MS of PTY silence.
-      // Guard against error/stopped — those are terminal states owned by
-      // exit/explicit-stop and shouldn't be flipped back to idle.
+      // Demotion is driven by the agent's own completion report, NOT by PTY
+      // silence. An agent that is reasoning emits nothing for minutes at a
+      // time; the old "silent for 5 min ⇒ idle" rule therefore reported live
+      // work as free, which both misled the orchestrator and exposed a
+      // thinking agent to any idleness-gated reaper. Silence is not evidence
+      // of idleness — see agent-status-reconcile.ts.
       if (
-        agent.status === "working" &&
-        Date.now() - agent.lastPtyActivity > IDLE_INACTIVITY_MS
-      ) {
-        this.setStatus(params.id, "idle");
-      } else if (
-        // W1: a completed turn whose slot didn't free (a trailing chunk promoted
-        // it to `working` in the race just before /set-agent-status landed) —
-        // demote on the SHORT settle window instead of waiting 5 min so the slot
-        // frees promptly and the orchestrator stops seeing a phantom [working].
+        // A completed turn whose slot didn't free (a trailing chunk promoted it
+        // to `working` in the race just before /set-agent-status landed) —
+        // demote on the SHORT settle window so the slot frees promptly and the
+        // orchestrator stops seeing a phantom [working].
         shouldDemoteCompletedTurn({
           status: agent.status,
           stopRequested: agent.stopRequested,
@@ -925,6 +957,25 @@ export class AgentManager {
           now: Date.now(),
         })
       ) {
+        this.setStatus(params.id, "idle");
+      } else if (
+        // Backstop only: no completion report and mute for far longer than any
+        // plausible inference pause ⇒ presumed wedged. Deliberately generous
+        // (45 min vs the old 5) because demoting live work is the expensive
+        // mistake and demoting a wedged agent late is the cheap one.
+        shouldDemoteAbandonedTurn({
+          status: agent.status,
+          stopRequested: agent.stopRequested,
+          turnCompletedAt: agent.turnCompletedAt,
+          lastPtyActivity: agent.lastPtyActivity,
+          now: Date.now(),
+        })
+      ) {
+        console.warn(
+          `[Agent:${params.id}] no completion report and PTY mute for ${Math.round(
+            (Date.now() - agent.lastPtyActivity) / 60000,
+          )}min — presuming wedged turn, demoting to idle.`,
+        );
         this.setStatus(params.id, "idle");
       }
       const hbProjectId =
@@ -976,11 +1027,11 @@ export class AgentManager {
         mainTelemetry.agentStopped(
           this.getMainWindow?.() ?? null,
           params.id,
-          exitCode
+          exitCode,
         );
         if (isGracefulCompletion) {
           console.log(
-            `[Agent:${agent.id}] Graceful completion (exit ${exitCode} after ${runtimeMs}ms) — marking stopped, not restarting.`
+            `[Agent:${agent.id}] Graceful completion (exit ${exitCode} after ${runtimeMs}ms) — marking stopped, not restarting.`,
           );
         }
         return;
@@ -992,7 +1043,7 @@ export class AgentManager {
       if (wasFastFail) {
         agent.fastFailCount++;
         console.warn(
-          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`
+          `[Agent:${agent.id}] Fast-fail (exit ${exitCode} after ${runtimeMs}ms). fastFail=${agent.fastFailCount}/${FAST_FAIL_MAX}`,
         );
 
         // §3.4-3 2차 안전망: Fable5 가 런타임에서 빠르게 실패(미지원 모델 오류
@@ -1012,10 +1063,10 @@ export class AgentManager {
             "claude-fable-5",
             "runtime",
             FALLBACK_TOP_CLAUDE_MODEL,
-            agent.id
+            agent.id,
           );
           console.warn(
-            `[Agent:${agent.id}] Fable5 runtime fast-fail — downgrading to ${FALLBACK_TOP_CLAUDE_MODEL} on restart (§3.4-3).`
+            `[Agent:${agent.id}] Fable5 runtime fast-fail — downgrading to ${FALLBACK_TOP_CLAUDE_MODEL} on restart (§3.4-3).`,
           );
         }
       }
@@ -1029,7 +1080,7 @@ export class AgentManager {
       if (agent.restartCount < MAX_RESTARTS && !fastFailExceeded) {
         const delay = Math.min(
           BACKOFF_BASE_MS * Math.pow(2, agent.restartCount),
-          BACKOFF_MAX_MS
+          BACKOFF_MAX_MS,
         );
         agent.restartCount++;
         this.onRestartAttempt?.(agent.id, agent.restartCount, MAX_RESTARTS);
@@ -1037,10 +1088,10 @@ export class AgentManager {
           this.getMainWindow?.() ?? null,
           agent.id,
           agent.restartCount,
-          agent.currentTaskId
+          agent.currentTaskId,
         );
         console.log(
-          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`
+          `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`,
         );
 
         agent.restartTimer = setTimeout(() => {
@@ -1057,15 +1108,15 @@ export class AgentManager {
           this.getMainWindow?.() ?? null,
           agent.id,
           exitCode,
-          agent.currentTaskId
+          agent.currentTaskId,
         );
         if (fastFailExceeded) {
           console.error(
-            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`
+            `[Agent:${agent.id}] Aborting auto-restart — agent exited within ${FAST_FAIL_WINDOW_MS}ms ${agent.fastFailCount}x. Likely a missing binary or bad config (command="${agent.command}"). Verify the CLI is on PATH and check the agent's launch args.`,
           );
         } else {
           console.error(
-            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`
+            `[Agent:${agent.id}] Max restarts (${MAX_RESTARTS}) exceeded. Exit code: ${exitCode}`,
           );
         }
       }
@@ -1093,7 +1144,7 @@ export class AgentManager {
     this.agents.delete(agentId);
 
     console.log(
-      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`
+      `[Agent:${agentId}] Performing auto-restart (attempt ${restartCount})`,
     );
 
     // Re-launch with resume
@@ -1104,11 +1155,11 @@ export class AgentManager {
         agent.cwd,
         "latest",
         agent.name,
-        agent.id
+        agent.id,
       );
       resolvedSessionId = resolved ?? "new";
       console.log(
-        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`
+        `[Agent:${agent.id}] Auto-restart resolved 'latest' → ${resolvedSessionId}`,
       );
     }
 
@@ -1248,14 +1299,18 @@ export class AgentManager {
    * worker reports its bound task terminal via submit_for_review /
    * update_task_status). Stamps `turnCompletedAt` BEFORE demoting so the
    * trailing render flush that follows can't re-promote the agent to `working`
-   * (shouldPromoteOnPtyOutput suppresses it within the settle window).
-   * Idempotent — safe to call repeatedly.
+   * (shouldPromoteOnPtyOutput suppresses output-driven promotion for as long as
+   * the completion report stands). Idempotent — safe to call repeatedly.
    */
   markTurnComplete(agentId: string): void {
     const agent = this.agents.get(agentId);
     if (!agent) return;
     if (agent.status === "stopped" || agent.status === "error") return;
     agent.turnCompletedAt = Date.now();
+    // Retain the binding for the reaper BEFORE releasing it. Clearing
+    // currentTaskId without this is what made every cleanly-completed agent
+    // unreapable (see AgentInstance.lastTaskId).
+    if (agent.currentTaskId) agent.lastTaskId = agent.currentTaskId;
     agent.currentTaskId = null;
     // Demote directly (bypass setStatus's working-clear path) so the marker
     // set above survives the transition to idle.
@@ -1269,6 +1324,27 @@ export class AgentManager {
     const agent = this.agents.get(agentId);
     if (!agent) return;
     agent.currentTaskId = taskId;
+    if (taskId) agent.lastTaskId = taskId;
+  }
+
+  /**
+   * A new turn was submitted to this agent — clear the completed-turn marker so
+   * the agent can be promoted to `working` again.
+   *
+   * Wired to PtyManager.onSubmit, so it fires for EVERY way work arrives:
+   * dispatch, reuse_agent, a nudge, a Telegram forward, or a human pressing
+   * Enter in the terminal tab. That last one matters — without an input-side
+   * signal, manual terminal use after a completion report would leave the agent
+   * pinned at `idle` while it was genuinely working.
+   *
+   * Does not itself set `working`; the first output byte does that (promotion is
+   * now unblocked). Ignored for terminal agents.
+   */
+  noteTurnStart(agentId: string): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    if (agent.status === "stopped" || agent.status === "error") return;
+    agent.turnCompletedAt = null;
   }
 
   getAgentByName(name: string): AgentInstance | null {
@@ -1316,6 +1392,7 @@ export class AgentManager {
       command: agent.command,
       cwd: agent.cwd,
       currentTaskId: null,
+      lastTaskId: null,
       restartCount: 0,
       fastFailCount: 0,
       spawnedAt: Date.now(),
@@ -1345,8 +1422,14 @@ export class AgentManager {
         this.setStatus(agent.id, "working");
       }
     });
+    // Input side of the turn boundary — same as launch().
+    this.ptyManager.onSubmit(agent.ptySessionId, () => {
+      const a = this.agents.get(agent.id);
+      if (!a || a !== instance) return;
+      this.noteTurnStart(agent.id);
+    });
     console.log(
-      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`
+      `[AgentManager] Registered reconnected agent: ${agent.name} (${agent.id})`,
     );
   }
 
@@ -1362,7 +1445,7 @@ export class AgentManager {
   listAgentsByProject(projectId: string | undefined): AgentInstance[] {
     if (!projectId) return this.listAgents();
     return Array.from(this.agents.values()).filter(
-      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId
+      (a) => a.launchConfig?.env?.MARBLO_PROJECT === projectId,
     );
   }
 

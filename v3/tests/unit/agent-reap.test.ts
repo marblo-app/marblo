@@ -41,6 +41,117 @@ describe("isTerminalTaskStatus", () => {
   });
 });
 
+/**
+ * ★★ THE TEST THAT MATTERS MOST.
+ *
+ * This change widens what can be reaped, and reaping kills a live CLI process —
+ * an over-reap destroys the user's in-flight work, while an under-reap only
+ * leaves a process to clean up later. Proving we DON'T kill live agents is
+ * therefore more important than proving we do kill dead ones.
+ *
+ * Below: every shape of genuinely-live agent we could plausibly encounter,
+ * asserted to survive. If a future widening of the gate breaks one of these,
+ * that is a data-loss bug, not a test that needs updating.
+ */
+describe("★ over-reap safety — no live agent is ever reaped", () => {
+  const LIVE_TASK_STATUSES = ["TODO", "CLAIMED", "IN_PROGRESS", "REVIEW"];
+
+  it("never reaps an agent on a live task, at ANY silence duration", () => {
+    // The critical interaction with the status fix: a reasoning agent is
+    // PTY-silent. Silence must never, on its own, make an agent reapable.
+    const silences = [0, 60_000, 5 * 60 * 1000, 60 * 60 * 1000, 86_400_000];
+    for (const taskStatus of LIVE_TASK_STATUSES) {
+      for (const silentMs of silences) {
+        const d = evaluateTerminalTaskReap({
+          currentTaskId: "t-live",
+          taskStatus,
+          lastPtyActivity: NOW - silentMs,
+          now: NOW,
+        });
+        expect(
+          d.reap,
+          `reaped a live ${taskStatus} agent silent for ${silentMs}ms`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("never reaps on an unresolvable task status, however long it has been quiet", () => {
+    // A board lookup failure must fail SAFE. Treating "I couldn't check" as
+    // "it's done" would reap live agents during any Firestore hiccup.
+    for (const taskStatus of [null, undefined, "", "WEIRD_NEW_STATUS"]) {
+      for (const taskId of [
+        { currentTaskId: "t", lastTaskId: null },
+        { currentTaskId: null, lastTaskId: "t" },
+      ]) {
+        const d = evaluateTerminalTaskReap({
+          ...taskId,
+          taskStatus,
+          lastPtyActivity: NOW - 86_400_000,
+          now: NOW,
+        });
+        expect(d.reap).toBe(false);
+      }
+    }
+  });
+
+  it("never reaps an agent that has no task evidence at all", () => {
+    // "Unbound and quiet" is NOT proof of finished work — it also describes an
+    // agent still starting up, or one whose binding was never recorded. The
+    // ticket proposed reaping these; we deliberately report them instead.
+    for (const silentMs of [0, 60 * 60 * 1000, 86_400_000]) {
+      const d = evaluateTerminalTaskReap({
+        currentTaskId: null,
+        lastTaskId: null,
+        taskStatus: null,
+        lastPtyActivity: NOW - silentMs,
+        now: NOW,
+      });
+      expect(d.reap).toBe(false);
+    }
+  });
+
+  it("never reaps the orchestrator under any combination", () => {
+    for (const taskStatus of [...LIVE_TASK_STATUSES, "DONE", "FAILED", null]) {
+      for (const binding of [
+        { currentTaskId: "t", lastTaskId: null },
+        { currentTaskId: null, lastTaskId: "t" },
+        { currentTaskId: null, lastTaskId: null },
+      ]) {
+        const d = evaluateTerminalTaskReap({
+          role: "orchestrator",
+          ...binding,
+          taskStatus,
+          lastPtyActivity: NOW - 86_400_000,
+          now: NOW,
+        });
+        expect(d.reap).toBe(false);
+      }
+    }
+  });
+
+  it("requires BOTH terminal status and past-grace silence — never just one", () => {
+    // Terminal task but still emitting → preserve.
+    expect(
+      evaluateTerminalTaskReap({
+        currentTaskId: "t",
+        taskStatus: "DONE",
+        lastPtyActivity: WITHIN_GRACE,
+        now: NOW,
+      }).reap,
+    ).toBe(false);
+    // Long silent but task still live → preserve.
+    expect(
+      evaluateTerminalTaskReap({
+        currentTaskId: "t",
+        taskStatus: "IN_PROGRESS",
+        lastPtyActivity: PAST_GRACE,
+        now: NOW,
+      }).reap,
+    ).toBe(false);
+  });
+});
+
 describe("evaluateTerminalTaskReap — reap branch", () => {
   it("reaps an agent on a DONE task that has been PTY-idle past the grace window", () => {
     const d = evaluateTerminalTaskReap({
@@ -98,15 +209,19 @@ describe("evaluateTerminalTaskReap — preserve branch (never misjudge live work
     expect(d.reason).toContain("grace");
   });
 
-  it("preserves an unbound agent (no connected task)", () => {
+  it("preserves an unbound agent with no completed turn behind it", () => {
+    // No currentTaskId AND no lastTaskId — this agent has never been bound to
+    // anything, so nothing proves its work is done. taskStatus is irrelevant
+    // here (there is no task to have that status).
     const d = evaluateTerminalTaskReap({
       currentTaskId: null,
+      lastTaskId: null,
       taskStatus: "DONE",
       lastPtyActivity: PAST_GRACE,
       now: NOW,
     });
     expect(d.reap).toBe(false);
-    expect(d.reason).toContain("no connected task");
+    expect(d.reason).toContain("no connected or completed task");
   });
 
   it("preserves when the task status could not be resolved (null/unknown)", () => {
@@ -133,6 +248,99 @@ describe("evaluateTerminalTaskReap — preserve branch (never misjudge live work
     expect(evaluateTerminalTaskReap({ ...base, staleMs: 1_000 }).reap).toBe(
       true,
     );
+  });
+});
+
+describe("evaluateTerminalTaskReap — reaping a cleanly-completed agent (the load-44 bug)", () => {
+  // Regression: markTurnComplete clears currentTaskId on the worker's own
+  // completion report — the very event that makes the agent reapable. The gate
+  // required currentTaskId, so an agent that finished CLEANLY became
+  // permanently unreapable: 11 of 13 stranded, cleanup_agents answering "no
+  // reapable agents found" while a 12-core box sat at load average 44.
+  // lastTaskId retains the evidence the binding release used to destroy.
+
+  it("reaps an agent whose RETAINED task is DONE and PTY has gone quiet", () => {
+    const d = evaluateTerminalTaskReap({
+      currentTaskId: null, // cleared by markTurnComplete
+      lastTaskId: "t-reported-done",
+      taskStatus: "DONE",
+      lastPtyActivity: PAST_GRACE,
+      now: NOW,
+    });
+    expect(d.reap).toBe(true);
+    expect(d.reason).toContain("t-reported-done");
+    expect(d.reason).toContain("completed task");
+  });
+
+  it("still re-checks the board — a retained task that is NOT terminal is preserved", () => {
+    // The fallback recovers evidence; it does not lower the bar. If the task
+    // the agent reported on is somehow back in flight, the agent stays.
+    for (const taskStatus of ["IN_PROGRESS", "REVIEW", "TODO", "BLOCKED"]) {
+      const d = evaluateTerminalTaskReap({
+        currentTaskId: null,
+        lastTaskId: "t-reopened",
+        taskStatus,
+        lastPtyActivity: PAST_GRACE,
+        now: NOW,
+      });
+      expect(d.reap).toBe(false);
+      expect(d.reason).toContain("not terminal");
+    }
+  });
+
+  it("preserves a retained-task agent that is still emitting (within grace)", () => {
+    // Just reported DONE and still writing its closing summary — reaping here
+    // would rug-pull it mid-sentence.
+    const d = evaluateTerminalTaskReap({
+      currentTaskId: null,
+      lastTaskId: "t-just-reported",
+      taskStatus: "DONE",
+      lastPtyActivity: WITHIN_GRACE,
+      now: NOW,
+    });
+    expect(d.reap).toBe(false);
+    expect(d.reason).toContain("grace");
+  });
+
+  it("preserves when the retained task can't be resolved", () => {
+    for (const taskStatus of [null, undefined, "MYSTERY"]) {
+      const d = evaluateTerminalTaskReap({
+        currentTaskId: null,
+        lastTaskId: "t-gone",
+        taskStatus,
+        lastPtyActivity: PAST_GRACE,
+        now: NOW,
+      });
+      expect(d.reap).toBe(false);
+    }
+  });
+
+  it("prefers the LIVE binding over the retained one", () => {
+    // Agent finished t-old, then got dispatched t-new which is still running.
+    // Reaping on the stale retained id would kill an actively working agent.
+    const d = evaluateTerminalTaskReap({
+      currentTaskId: "t-new",
+      lastTaskId: "t-old",
+      taskStatus: "IN_PROGRESS", // status of t-new, the live one
+      lastPtyActivity: PAST_GRACE,
+      now: NOW,
+    });
+    expect(d.reap).toBe(false);
+    expect(d.reason).toContain("t-new");
+    expect(d.reason).not.toContain("t-old");
+  });
+
+  it("never reaps the orchestrator via the retained-task path either", () => {
+    const d = evaluateTerminalTaskReap({
+      role: "orchestrator",
+      currentTaskId: null,
+      lastTaskId: "t-done",
+      taskStatus: "DONE",
+      lastPtyActivity: NOW - STALE_TERMINAL_REAP_MS * 100,
+      now: NOW,
+    });
+    expect(d.reap).toBe(false);
+    expect(d.reason).toContain("orchestrator");
   });
 });
 

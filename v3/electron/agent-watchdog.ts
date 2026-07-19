@@ -166,10 +166,7 @@ export interface WatchdogDeps {
     detail: string,
   ) => Promise<boolean>;
   /** Surface an orphaned IN_PROGRESS stall when reset is not wired or fails. */
-  escalateStalledInProgress?: (
-    ticket: WatchdogTicket,
-    detail: string,
-  ) => void;
+  escalateStalledInProgress?: (ticket: WatchdogTicket, detail: string) => void;
 
   // ── W5: stale non-human REVIEW sweep (optional) ─────────────
   /** List REVIEW tickets whose non-human review owner is dead/foreign, with
@@ -265,7 +262,13 @@ export interface WatchdogConfig {
 export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
   enabled: true,
   intervalMs: 60_000,
-  graceMs: 300_000, // 5 min — matches agent-manager IDLE_INACTIVITY_MS
+  // 5 min. NOTE: this used to be described as matching agent-manager's
+  // IDLE_INACTIVITY_MS, which no longer exists — PTY silence no longer demotes
+  // an agent to idle, because a reasoning agent is silent (see
+  // agent-status-reconcile.ts). The watchdog judges liveness by BOARD activity
+  // (add_activity / commits), not PTY status, so this window is independent and
+  // is left unchanged here deliberately.
+  graceMs: 300_000,
   firstActivityGraceMs: 180_000, // 3 min — a spawned worker should have logged
   // its first board activity / real PTY work well within this window.
   nudgeIntervalMs: 120_000,

@@ -8,8 +8,10 @@ import { describe, it, expect } from "vitest";
 import {
   shouldPromoteOnPtyOutput,
   shouldDemoteCompletedTurn,
+  shouldDemoteAbandonedTurn,
   isTurnEndingStatus,
   TURN_COMPLETE_SETTLE_MS,
+  ABANDONED_TURN_MS,
 } from "../../electron/agent-status-reconcile";
 
 const NOW = 1_000_000_000_000;
@@ -38,12 +40,41 @@ describe("shouldPromoteOnPtyOutput", () => {
     ).toBe(false);
   });
 
-  it("resumes promoting once the settle window elapses (genuine new work)", () => {
+  // CHANGED 2026-07-19: promotion used to resume once the 12s settle window
+  // elapsed. That merely delayed the stranding — a finished CLI repaints its
+  // prompt spinner forever, so the first chunk after 12s put the agent back at
+  // [working] permanently, with nothing able to reap it (11 of 13 agents
+  // stranded, load average 44). Output never starts a turn now; only submitted
+  // INPUT does, via noteTurnStart clearing turnCompletedAt.
+  it("keeps suppressing promotion long after the settle window (repaint is not work)", () => {
     expect(
       shouldPromoteOnPtyOutput({
         status: "idle",
         stopRequested: false,
         turnCompletedAt: NOW - TURN_COMPLETE_SETTLE_MS - 1,
+        now: NOW,
+      }),
+    ).toBe(false);
+    // An hour of spinner noise still isn't a new turn.
+    expect(
+      shouldPromoteOnPtyOutput({
+        status: "idle",
+        stopRequested: false,
+        turnCompletedAt: NOW - 3_600_000,
+        now: NOW,
+      }),
+    ).toBe(false);
+  });
+
+  it("promotes again once a new turn is submitted (marker cleared)", () => {
+    // noteTurnStart sets turnCompletedAt back to null on submitted input —
+    // dispatch, reuse, a nudge, or a human pressing Enter. Real follow-up work
+    // must flip to `working` immediately.
+    expect(
+      shouldPromoteOnPtyOutput({
+        status: "idle",
+        stopRequested: false,
+        turnCompletedAt: null,
         now: NOW,
       }),
     ).toBe(true);
@@ -118,6 +149,90 @@ describe("shouldDemoteCompletedTurn", () => {
         }),
       ).toBe(false);
     }
+  });
+});
+
+/**
+ * ★ The safety-critical direction. Reporting live work as `idle` is worse than
+ * reporting finished work as `working`: the orchestrator hands the "free" agent
+ * more work, and any idleness-gated reaper kills a session that is mid-thought,
+ * destroying the user's in-flight work. These tests exist to make that
+ * regression impossible to reintroduce quietly.
+ */
+describe("a reasoning agent is NEVER demoted for being silent", () => {
+  // An agent doing long inference, a large file read, or a slow MCP round-trip
+  // emits NOTHING. The old rule (5 min of PTY silence ⇒ idle) called that idle.
+  const silences: Array<[string, number]> = [
+    ["30 seconds", 30_000],
+    ["5 minutes (the old demotion threshold)", 5 * 60 * 1000],
+    ["10 minutes", 10 * 60 * 1000],
+    ["44 minutes (just under the wedged backstop)", 44 * 60 * 1000],
+  ];
+
+  for (const [label, silentMs] of silences) {
+    it(`stays working after ${label} of PTY silence with an open turn`, () => {
+      const input = {
+        status: "working" as const,
+        stopRequested: false,
+        turnCompletedAt: null, // no completion report ⇒ turn is still open
+        lastPtyActivity: NOW - silentMs,
+        now: NOW,
+      };
+      expect(shouldDemoteCompletedTurn(input)).toBe(false);
+      expect(shouldDemoteAbandonedTurn(input)).toBe(false);
+    });
+  }
+
+  it("demotes only past the wedged-turn backstop, and says so", () => {
+    expect(
+      shouldDemoteAbandonedTurn({
+        status: "working",
+        stopRequested: false,
+        turnCompletedAt: null,
+        lastPtyActivity: NOW - ABANDONED_TURN_MS - 1,
+        now: NOW,
+      }),
+    ).toBe(true);
+    // The backstop must stay far above any plausible inference pause.
+    expect(ABANDONED_TURN_MS).toBeGreaterThanOrEqual(30 * 60 * 1000);
+  });
+
+  it("leaves the completed-turn path to shouldDemoteCompletedTurn", () => {
+    // A reported-complete agent is not "abandoned" — it's done. Only one
+    // function should own that transition, or the backstop's warning log fires
+    // on every normal completion.
+    expect(
+      shouldDemoteAbandonedTurn({
+        status: "working",
+        stopRequested: false,
+        turnCompletedAt: NOW - 60_000,
+        lastPtyActivity: NOW - ABANDONED_TURN_MS - 1,
+        now: NOW,
+      }),
+    ).toBe(false);
+  });
+
+  it("never touches a stop-requested or already-terminal agent", () => {
+    for (const status of ["idle", "stopped", "error"] as const) {
+      expect(
+        shouldDemoteAbandonedTurn({
+          status,
+          stopRequested: false,
+          turnCompletedAt: null,
+          lastPtyActivity: NOW - ABANDONED_TURN_MS - 1,
+          now: NOW,
+        }),
+      ).toBe(false);
+    }
+    expect(
+      shouldDemoteAbandonedTurn({
+        status: "working",
+        stopRequested: true,
+        turnCompletedAt: null,
+        lastPtyActivity: NOW - ABANDONED_TURN_MS - 1,
+        now: NOW,
+      }),
+    ).toBe(false);
   });
 });
 

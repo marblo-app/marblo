@@ -3408,6 +3408,7 @@ export function registerTools(server: McpServer): void {
             status: string;
             contextId?: string;
             currentTaskId?: string | null;
+            lastTaskId?: string | null;
             lastPtyActivity?: number;
           }>;
         };
@@ -3444,16 +3445,31 @@ export function registerTools(server: McpServer): void {
         // never misjudged — see agent-reap.ts.
         const now = Date.now();
         const seen = new Set(candidates.map((c) => c.agent.id));
+        // Agents we deliberately do NOT kill but do surface: alive, unbound,
+        // and with no completed turn behind them. Absence of evidence is not
+        // evidence of being finished, so these are reported for a human to
+        // judge rather than reaped (see agent-reap.ts header).
+        const suspects: string[] = [];
         for (const a of data.agents) {
           if (seen.has(a.id)) continue;
           if (a.status === "stopped" || a.status === "error") continue;
           if (role && a.role !== role) continue;
           if (!inScope(a)) continue;
-          if (!a.currentTaskId) continue;
+
+          // Live binding first, else the binding retained across the agent's
+          // completion report. markTurnComplete clears currentTaskId, so
+          // requiring it here made every cleanly-finished agent unreapable.
+          const taskId = a.currentTaskId || a.lastTaskId || null;
+          if (!taskId) {
+            if (a.role !== "orchestrator") {
+              suspects.push(`${a.name} (${a.status}, never bound to a task)`);
+            }
+            continue;
+          }
 
           let taskStatus: string | null = null;
           try {
-            const task = await fetchTask(a.currentTaskId);
+            const task = await fetchTask(taskId);
             taskStatus = task?.status ?? null;
           } catch {
             // Lookup failure → treat as non-terminal (preserve). evaluate()
@@ -3462,7 +3478,8 @@ export function registerTools(server: McpServer): void {
 
           const decision = evaluateTerminalTaskReap({
             role: a.role,
-            currentTaskId: a.currentTaskId,
+            currentTaskId: a.currentTaskId ?? null,
+            lastTaskId: a.lastTaskId ?? null,
             taskStatus,
             lastPtyActivity: a.lastPtyActivity ?? now,
             now,
@@ -3472,6 +3489,12 @@ export function registerTools(server: McpServer): void {
             candidates.push({ agent: a, reason: `stale: ${decision.reason}` });
           }
         }
+        const suspectNote =
+          suspects.length > 0
+            ? `\nNot reaped (no completed turn to prove they're done — check manually): ${suspects.join(
+                ", ",
+              )}`
+            : "";
 
         // Pass 3 — Firestore ghost docs from dead Electron instances. The two
         // passes above only see the bridge's in-memory agents; docs a previous
@@ -3508,7 +3531,7 @@ export function registerTools(server: McpServer): void {
         if (candidates.length === 0) {
           const roleNote = role ? ` for role '${role}'` : "";
           return text(
-            `No reapable agents found${roleNote} (no stopped/error agents and no live agents on terminal tasks). Nothing to clean up.${ghostNote}`,
+            `No reapable agents found${roleNote} (no stopped/error agents and no live agents on terminal tasks). Nothing to clean up.${suspectNote}${ghostNote}`,
           );
         }
 
@@ -3544,7 +3567,9 @@ export function registerTools(server: McpServer): void {
         }
 
         return text(
-          `Cleaned up ${results.length} agent(s): ${results.join(", ")}${ghostNote}`,
+          `Cleaned up ${results.length} agent(s): ${results.join(
+            ", ",
+          )}${suspectNote}${ghostNote}`,
         );
       } catch (err: unknown) {
         return text(
