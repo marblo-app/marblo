@@ -17,14 +17,4 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.settings.toggleLabel": "Use the new Workspace shell",
   "workspace.settings.on": "On",
   "workspace.settings.off": "Off",
-
-  // Diff-A inline comments
-  "workspace.diff.gutterHint":
-    "Click a line's gutter to comment to the orchestrator",
-  "workspace.diff.commentOn": "Comment",
-  "workspace.diff.commentPlaceholder": "Review comment for this line…",
-  "workspace.diff.sendToOrchestrator": "Send to orchestrator",
-  "workspace.diff.sentLocal": "Sent to the orchestrator",
-  "workspace.diff.sentQueued": "Queued (the orchestrator host will receive it)",
-  "workspace.diff.sentFailed": "Send failed — try again later",
 };

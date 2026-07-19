@@ -15,13 +15,4 @@ export const workspace = {
   "workspace.settings.toggleLabel": "새 워크스페이스 셸 사용",
   "workspace.settings.on": "켜짐",
   "workspace.settings.off": "꺼짐",
-
-  // Diff-A inline comments
-  "workspace.diff.gutterHint": "줄 여백을 클릭해 오케스트레이터에게 코멘트",
-  "workspace.diff.commentOn": "코멘트",
-  "workspace.diff.commentPlaceholder": "이 줄에 대한 리뷰 코멘트…",
-  "workspace.diff.sendToOrchestrator": "오케에 전송",
-  "workspace.diff.sentLocal": "오케스트레이터에 전송됨",
-  "workspace.diff.sentQueued": "대기열에 등록됨 (오케 호스트가 수신)",
-  "workspace.diff.sentFailed": "전송 실패 — 나중에 다시 시도하세요",
 };

@@ -39,6 +39,7 @@ import { deploy } from "./deploy";
 import { code } from "./code";
 import { terminal } from "./terminal";
 import { workspace } from "./workspace";
+import { diffComment } from "./diffComment";
 
 export const ko = {
   ...header,
@@ -69,6 +70,7 @@ export const ko = {
   ...code,
   ...terminal,
   ...workspace,
+  ...diffComment,
 };
 
 export type MessageKey = keyof typeof ko;

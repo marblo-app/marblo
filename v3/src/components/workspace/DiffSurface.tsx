@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { useTranslation } from "../../lib/i18n";
-import { useProjectStore } from "../../stores/projectStore";
 import { useWorktreeDiffStore } from "../../stores/worktreeDiffStore";
-import { useAuth } from "../../hooks/useAuth";
+import { useOrchestratorDiffComment } from "../../hooks/useOrchestratorDiffComment";
 import {
-  routeInstructionToOrchestrator,
-  type RouteResult,
-} from "../../services/orchestratorInstructionService";
+  buildRangeFromLines,
+  formatRangeLabel,
+  type DiffCommentRange,
+} from "../../lib/diffComment";
 
 /**
  * Diff-A surface — the default Code tab diff for ALL users (both the legacy
@@ -36,29 +36,23 @@ export function DiffSurface({
   currentContent,
 }: DiffSurfaceProps) {
   const { t } = useTranslation();
-  const currentProject = useProjectStore((s) => s.currentProject);
-  const { user } = useAuth();
+  const { send, toast } = useOrchestratorDiffComment();
 
   const [original, setOriginal] = useState<string>("");
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState<string | null>(null);
 
   const editorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
   const monacoRef = useRef<Parameters<DiffOnMount>[1] | null>(null);
   const zoneIdRef = useRef<string | null>(null);
   const disposablesRef = useRef<Array<{ dispose: () => void }>>([]);
 
-  // Keep routing inputs fresh for the (once-registered) view-zone handler.
-  const routeCtxRef = useRef({
-    projectId: currentProject?.id ?? "",
-    userId: user?.uid,
-    userName: user?.displayName ?? "User",
-  });
-  routeCtxRef.current = {
-    projectId: currentProject?.id ?? "",
-    userId: user?.uid,
-    userName: user?.displayName ?? "User",
-  };
+  // Monaco handlers are registered once on mount, so they must not close over
+  // render-scoped values. Both are reached through refs refreshed every render.
+  const filePathRef = useRef(filePath);
+  filePathRef.current = filePath;
+  const openCommentZoneRef = useRef<(start: number, end: number) => void>(
+    () => {},
+  );
 
   // Baseline for THIS file. When it is part of a worktree diff auto-open, use
   // that collection's merge-base so already-committed work still renders as a
@@ -103,11 +97,23 @@ export function DiffSurface({
     zoneIdRef.current = null;
   };
 
-  const openCommentZone = (lineNumber: number) => {
+  /**
+   * Open the composer for a line RANGE. The gutter path passes the same line
+   * twice (unchanged behaviour); the context-menu path passes the current
+   * selection, so a comment can quote several lines at once.
+   */
+  const openCommentZone = (startLine: number, endLine: number) => {
     const ed = editorRef.current;
     if (!ed) return;
     const modified = ed.getModifiedEditor();
-    const lineText = modified.getModel()?.getLineContent(lineNumber) ?? "";
+    const model = modified.getModel();
+    const lastLine = endLine;
+    const range: DiffCommentRange = buildRangeFromLines(
+      filePathRef.current,
+      startLine,
+      endLine,
+      (line) => model?.getLineContent(line) ?? "",
+    );
 
     clearZone();
 
@@ -117,17 +123,17 @@ export function DiffSurface({
       "background:#111827;border-left:2px solid #3b82f6;padding:8px 12px;font-family:inherit;";
     dom.innerHTML = `
       <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">
-        ${t("workspace.diff.commentOn")} · ${escapeHtml(filePath)}:${lineNumber}
+        ${t("diff.comment.on")} · ${escapeHtml(formatRangeLabel(range))}
       </div>
       <textarea rows="2" placeholder="${escapeAttr(
-        t("workspace.diff.commentPlaceholder"),
+        t("diff.comment.placeholder"),
       )}" style="width:100%;box-sizing:border-box;background:#0b0f19;color:#e5e7eb;border:1px solid #374151;border-radius:4px;padding:6px;font-size:12px;resize:vertical;outline:none;"></textarea>
       <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;">
         <button data-action="cancel" style="font-size:11px;padding:3px 10px;border-radius:4px;background:transparent;color:#9ca3af;border:1px solid #374151;cursor:pointer;">${escapeHtml(
           t("common.cancel"),
         )}</button>
         <button data-action="send" style="font-size:11px;padding:3px 10px;border-radius:4px;background:#2563eb;color:#fff;border:0;cursor:pointer;">${escapeHtml(
-          t("workspace.diff.sendToOrchestrator"),
+          t("diff.comment.send"),
         )}</button>
       </div>
     `;
@@ -146,31 +152,13 @@ export function DiffSurface({
       if (!comment) return;
       sendBtn.disabled = true;
       sendBtn.textContent = t("orchestrator.sending");
-      const { projectId, userId, userName } = routeCtxRef.current;
-      const message = formatComment(filePath, lineNumber, lineText, comment);
-      let result: RouteResult = "failed";
-      if (projectId) {
-        result = await routeInstructionToOrchestrator({
-          projectId,
-          message,
-          fromUserId: userId,
-          fromUserName: userName,
-        });
-      }
       clearZone();
-      const toastKey =
-        result === "local"
-          ? "workspace.diff.sentLocal"
-          : result === "queued"
-            ? "workspace.diff.sentQueued"
-            : "workspace.diff.sentFailed";
-      setToast(t(toastKey));
-      window.setTimeout(() => setToast(null), 3500);
+      void send(range, comment);
     });
 
     modified.changeViewZones((acc) => {
       zoneIdRef.current = acc.addZone({
-        afterLineNumber: lineNumber,
+        afterLineNumber: lastLine,
         heightInLines: 4,
         domNode: dom,
       });
@@ -178,6 +166,7 @@ export function DiffSurface({
     // Focus after the zone lays out.
     window.setTimeout(() => textarea.focus(), 0);
   };
+  openCommentZoneRef.current = openCommentZone;
 
   const handleMount: DiffOnMount = (diffEditor, monaco) => {
     editorRef.current = diffEditor;
@@ -192,10 +181,27 @@ export function DiffSurface({
         e.target.type === MT.GUTTER_LINE_NUMBERS
       ) {
         const line = e.target.position?.lineNumber;
-        if (line) openCommentZone(line);
+        if (line) openCommentZoneRef.current(line, line);
       }
     });
     disposablesRef.current.push(d1);
+
+    // Select code → right-click → "Comment to orchestrator". The gutter path
+    // above still works; this one exists because it is *visible* (a gutter
+    // click is an invisible affordance) and because it can quote a range.
+    const d2 = modified.addAction({
+      id: "marblo.commentToOrchestrator",
+      label: t("diff.comment.action"),
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 0,
+      run: (ed) => {
+        const sel = ed.getSelection();
+        if (!sel) return;
+        // A collapsed selection (plain right-click) comments on that one line.
+        openCommentZoneRef.current(sel.startLineNumber, sel.endLineNumber);
+      },
+    });
+    disposablesRef.current.push(d2);
   };
 
   // Lifecycle cleanup: drop the open zone + listeners when the file changes or
@@ -239,7 +245,7 @@ export function DiffSurface({
         }}
       />
       <div className="pointer-events-none absolute right-3 top-2 rounded bg-gray-800/90 px-2 py-1 text-[10px] text-gray-400">
-        {t("workspace.diff.gutterHint")}
+        {t("diff.comment.hintGutter")}
       </div>
       {toast && (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded bg-gray-800 px-3 py-1.5 text-xs text-gray-100 shadow-lg ring-1 ring-gray-700">
@@ -248,19 +254,6 @@ export function DiffSurface({
       )}
     </div>
   );
-}
-
-function formatComment(
-  filePath: string,
-  line: number,
-  lineText: string,
-  comment: string,
-): string {
-  const snippet = lineText.trim();
-  const lines = [`[Code review] ${filePath}:${line}`];
-  if (snippet) lines.push(`> ${snippet}`);
-  lines.push("", comment);
-  return lines.join("\n");
 }
 
 function escapeHtml(s: string): string {

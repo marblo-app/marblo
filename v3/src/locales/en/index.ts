@@ -36,6 +36,7 @@ import { deploy } from "./deploy";
 import { code } from "./code";
 import { terminal } from "./terminal";
 import { workspace } from "./workspace";
+import { diffComment } from "./diffComment";
 
 export const en: Record<MessageKey, string> = {
   ...header,
@@ -66,4 +67,5 @@ export const en: Record<MessageKey, string> = {
   ...code,
   ...terminal,
   ...workspace,
+  ...diffComment,
 };
