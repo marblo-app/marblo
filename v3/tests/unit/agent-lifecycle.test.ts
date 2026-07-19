@@ -110,6 +110,14 @@ vi.mock("../../electron/agent-config", () => ({
 
 import { PtyManager } from "../../electron/pty-manager";
 import { AgentManager } from "../../electron/agent-manager";
+import fs from "fs";
+import os from "os";
+import path from "path";
+
+// A REAL directory: PtyManager.create() now rejects a cwd that does not exist,
+// because a pty spawned into a deleted directory dies in ~6ms with no error
+// (ticket 4xSVtpGzt5NJE4FISfmj). These tests only need *some* valid cwd.
+const TEST_CWD = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-test-"));
 
 type FakePtyInst = InstanceType<typeof FakePty>;
 
@@ -184,7 +192,7 @@ describe("AgentManager — N2 heartbeat timer release", () => {
       model: "claude",
       role: "backend",
       command: "claude",
-      cwd: "/tmp/marblo-test",
+      cwd: TEST_CWD,
       // no initialPrompt → skips the readiness watcher; only the heartbeat
       // interval is scheduled, keeping the timer assertions unambiguous.
     });
@@ -261,7 +269,7 @@ describe("AgentManager — P3-4 dead-entry pruning backstop", () => {
       model: "claude",
       role: "backend",
       command: "claude",
-      cwd: "/tmp/marblo-test",
+      cwd: TEST_CWD,
     });
   }
 

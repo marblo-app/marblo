@@ -318,6 +318,11 @@ export function registerWorktreeIpc(
   getProjectRoots: ProjectRootProvider = defaultProjectRootProvider,
   spawnResolver?: WorktreeResolverSpawner,
   recordMergeHistory?: MergeHistoryRecorder,
+  // Called with the worktree paths a removal just deleted. Open windows may be
+  // rooted at one of them; main.ts uses this to re-point them before the dead
+  // path gets persisted to app-state.json. Removal succeeds regardless — this
+  // is a notification, not a gate.
+  onWorktreesRemoved?: (paths: string[]) => void,
 ): void {
   const listWorktrees = async (): Promise<WorktreeProjectGroup[]> => {
     const roots = uniqueProjectRoots(getProjectRoots());
@@ -379,6 +384,7 @@ export function registerWorktreeIpc(
     await worktreeManager.remove(parsed.repoRoot, parsed.path, {
       deleteBranch: parsed.deleteBranch,
     });
+    onWorktreesRemoved?.([parsed.path]);
     return { success: true };
   });
 
@@ -394,12 +400,16 @@ export function registerWorktreeIpc(
     "worktree:cleanupStale",
     async (_event, args: unknown): Promise<CleanupStaleResult> => {
       const parsed = parseCleanupStaleArgs(args);
-      return worktreeManager.cleanupStale(
+      const result = await worktreeManager.cleanupStale(
         parsed.repoRoot,
         parsed.maxIdleDays !== undefined
           ? { maxIdleDays: parsed.maxIdleDays }
           : undefined,
       );
+      // Bulk hygiene is the highest-volume source of dead window roots — it can
+      // remove hundreds of worktrees in one call.
+      if (result.removed.length > 0) onWorktreesRemoved?.(result.removed);
+      return result;
     },
   );
 

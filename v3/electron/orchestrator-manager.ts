@@ -433,6 +433,17 @@ export class OrchestratorManager {
   private dangerWarnings: DangerEvent[] = [];
   private static readonly MAX_DANGER_WARNINGS = 100;
 
+  // Called when a launch/relaunch is abandoned because rootPath is gone. The
+  // status alone ("error") does not say WHY, and this failure mode is otherwise
+  // invisible — the shell dies before printing anything. main.ts wires this to
+  // a user-facing notice so a removed worktree reads as a removed worktree.
+  private onRootPathMissing?: (rootPath: string) => void;
+
+  /** Register the rootPath-missing notice sink (see {@link onRootPathMissing}). */
+  setRootPathMissingHandler(handler: (rootPath: string) => void): void {
+    this.onRootPathMissing = handler;
+  }
+
   constructor(
     ptyManager: PtyManager,
     configGenerator: AgentConfigGenerator,
@@ -851,15 +862,31 @@ export class OrchestratorManager {
     // Prevent nested Claude Code sessions
     delete mergedEnv.CLAUDECODE;
 
-    // Create PTY
-    this.ptyManager.create(
-      ptySessionId,
-      "Orchestrator",
-      launchConfig.command,
-      launchConfig.args,
-      rootPath,
-      mergedEnv,
-    );
+    // Create PTY. create() now rejects a missing/non-directory cwd up front
+    // (it used to spawn a shell that died in ~6ms with no error). Surface that
+    // as an error status + explicit notice rather than letting it escape as an
+    // unhandled rejection through the IPC boundary.
+    try {
+      this.ptyManager.create(
+        ptySessionId,
+        "Orchestrator",
+        launchConfig.command,
+        launchConfig.args,
+        rootPath,
+        mergedEnv,
+      );
+    } catch (err) {
+      this.setStatus("error");
+      this.configGenerator.cleanup(sessionId);
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "ENOENT" || code === "ENOTDIR") {
+        console.error(
+          `[Orchestrator] Cannot launch in "${rootPath}" — the directory is gone.`,
+        );
+        this.onRootPathMissing?.(rootPath);
+      }
+      throw err;
+    }
 
     // P3-3: enforce (not just log) the dangerous-command guard on THIS PTY. The
     // orchestrator drives the non-isolated MAIN checkout under YOLO
@@ -1070,6 +1097,29 @@ export class OrchestratorManager {
         }
         this.setStatus("stopped");
         this.configGenerator.cleanup(sessionId);
+        return;
+      }
+
+      // Root gone → NOT a crash we can retry out of. A shell spawned into a
+      // deleted directory exits 1 in milliseconds without ever running the
+      // harness, so restarting into the same rootPath just burns the budget in
+      // 14s and lands on a silent "error" status. This is the common shape now
+      // that windows can point at `~/.marblo/worktrees/**` trees that are later
+      // removed. Stop immediately and name the actual cause instead.
+      if (!fs.existsSync(rootPath)) {
+        if (this.restartTimer) {
+          clearTimeout(this.restartTimer);
+          this.restartTimer = null;
+        }
+        if (this.session?.claudeSessionId) {
+          this.releaseResumeLock(rootPath, this.session.claudeSessionId);
+        }
+        this.setStatus("error");
+        this.configGenerator.cleanup(sessionId);
+        console.error(
+          `[Orchestrator] Working directory no longer exists — not restarting: "${rootPath}" (exit ${exitCode}). Reopen the project on a path that still exists.`,
+        );
+        this.onRootPathMissing?.(rootPath);
         return;
       }
 

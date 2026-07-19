@@ -27,7 +27,11 @@ import { PendingInstructionListener } from "./pending-instruction-listener";
 import { FsManager } from "./fs-manager";
 import { AgentManager, serializeAgent, type ModelType } from "./agent-manager";
 import { Updater } from "./updater";
-import { selectPersistableWindows } from "./windowSession";
+import {
+  resolveRestoreRoots,
+  scrubRemovedRoots,
+  selectPersistableWindows,
+} from "./windowSession";
 import { TaskDecomposer } from "./orchestrator/task-decomposer";
 import type { DecomposedTask } from "./orchestrator/dag-generator";
 import { BridgeServer, withCompletionFooter } from "./bridge-server";
@@ -869,6 +873,60 @@ function persistWindowSession(): void {
   writeAppState({ windows });
 }
 
+// A window whose rootPath just vanished is otherwise a SILENT failure: the PTY
+// guard in PtyManager.create now throws instead of spawning a shell that dies
+// in ~6ms, but nothing in the UI renders that throw. Show it once per path —
+// a removed worktree can invalidate several windows at once, and one modal per
+// window would be worse than the bug.
+const notifiedMissingRoots = new Set<string>();
+function notifyRootPathMissing(rootPath: string): void {
+  if (notifiedMissingRoots.has(rootPath)) return;
+  notifiedMissingRoots.add(rootPath);
+  dialog.showErrorBox(
+    "Marblo — 작업 폴더가 사라졌습니다",
+    `이 창이 보고 있던 폴더가 더 이상 존재하지 않습니다:\n\n${rootPath}\n\n` +
+      "git 워크트리가 정리되면서 삭제된 경로일 수 있습니다. 오케스트레이터와 " +
+      "터미널은 이 폴더에서 실행할 수 없어 시작하지 않았습니다.\n\n" +
+      "남아 있는 폴더를 다시 열어 주세요.",
+  );
+}
+
+// Cause-side invalidation: a worktree we just removed may be the rootPath of an
+// OPEN window. Repoint those windows (see scrubRemovedRoots) and re-persist
+// immediately — otherwise the dead path is written to app-state.json at quit and
+// faithfully reopened on the next launch, so the failure survives a restart.
+function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
+  const scrubs = scrubRemovedRoots(windowRestore.entries(), removedPaths, {
+    exists: (p) => fs.existsSync(p),
+    defaultRootPath: readAppState().lastRootPath,
+  });
+  if (scrubs.length === 0) return;
+
+  for (const { key, rootPath, removedRootPath } of scrubs) {
+    const entry = windowRestore.get(key);
+    if (!entry) continue;
+    if (rootPath) {
+      windowRestore.set(key, { ...entry, rootPath });
+      console.warn(
+        `[Window] Worktree removed — repointing window ${key} from "${removedRootPath}" to "${rootPath}"`,
+      );
+    } else {
+      // No live fallback. Drop the root so the window reconnects to the folder
+      // picker rather than to a directory that no longer exists.
+      const { rootPath: _dead, ...rest } = entry;
+      windowRestore.set(key, rest);
+      console.warn(
+        `[Window] Worktree removed — window ${key} has no surviving root (was "${removedRootPath}")`,
+      );
+    }
+    sendToOwner(key, "window:rootPathInvalidated", {
+      removedRootPath,
+      rootPath,
+    });
+  }
+  persistWindowSession();
+}
+
 function getProjectForSender(senderId: number): string | undefined {
   return windowProjects.get(senderId);
 }
@@ -1493,7 +1551,7 @@ const orchestratorOwners = new Map<string, number>(); // projectId → webConten
 const projectEnabledModels = new Map<string, string[]>();
 
 function createOrchestratorInstance(projectId: string): OrchestratorManager {
-  return new OrchestratorManager(
+  const orchestrator = new OrchestratorManager(
     ptyManager,
     agentManager.getConfigGenerator(),
     (status) => {
@@ -1520,6 +1578,11 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
       }
     },
   );
+  // "error" alone doesn't say WHY, and a dead rootPath produces no output at
+  // all — the shell never starts. Name the cause instead of leaving the user
+  // with an orchestrator that just won't attach.
+  orchestrator.setRootPathMissingHandler(notifyRootPathMissing);
+  return orchestrator;
 }
 
 function getOrchestrator(projectId: string): OrchestratorManager {
@@ -1917,12 +1980,13 @@ registerWorktreeIpc(
   collectWorktreeProjectRoots,
   undefined,
   recordMergeHistory,
+  invalidateRemovedWorktreeRoots,
 );
 
 function createMissionOrchestratorInstance(
   projectId: string,
 ): OrchestratorManager {
-  return new OrchestratorManager(
+  const orchestrator = new OrchestratorManager(
     ptyManager,
     agentManager.getConfigGenerator(),
     (status) => {
@@ -1936,6 +2000,8 @@ function createMissionOrchestratorInstance(
     },
     "mission", // kind — board orchestrator 와 sessionId / MCP config 분리
   );
+  orchestrator.setRootPathMissingHandler(notifyRootPathMissing);
+  return orchestrator;
 }
 
 // 미션 오케스트레이터의 프로젝트 루트 해석. 엔진(ensureSession) 경로는 mission
@@ -2832,11 +2898,29 @@ function restoreWindowSession(): void {
   // Dedupe on read too — an app-state.json written by an older build (before
   // detached windows were excluded) can hold the same project many times.
   // selectPersistableWindows collapses those so we never reopen duplicates.
-  const saved = selectPersistableWindows(readAppState().windows ?? []).slice(
-    0,
-    10,
-  ); // sanity cap — never spawn a runaway number of windows
+  const state = readAppState();
+  const persistable = selectPersistableWindows(state.windows ?? []);
+
+  // Drop / re-point windows whose folder died while the app was closed —
+  // typically a git worktree cleaned up between sessions. Opening a window on a
+  // path that no longer exists produces no error of its own; it just yields a
+  // window where nothing can spawn. See resolveRestoreRoots.
+  const { windows: resolved, dropped } = resolveRestoreRoots(
+    persistable,
+    (p) => fs.existsSync(p),
+    state.lastRootPath ? { defaultRootPath: state.lastRootPath } : undefined,
+  );
+  for (const w of dropped) {
+    console.warn(
+      `[Window] Saved window root no longer exists and has no fallback — not reopening: "${w.rootPath}"`,
+    );
+  }
+  const saved = resolved.slice(0, 10); // sanity cap — never spawn a runaway number of windows
   if (saved.length === 0) {
+    // Every saved root is gone. Tell the user why they're back at the folder
+    // picker instead of on their projects, then open one empty window.
+    const firstDead = dropped[0]?.rootPath;
+    if (firstDead) notifyRootPathMissing(firstDead);
     createWindow();
     return;
   }
@@ -2848,7 +2932,15 @@ function restoreWindowSession(): void {
       rootPath: w.rootPath,
       projectId: w.projectId,
     });
+    if (w.fellBackFrom) {
+      console.warn(
+        `[Window] Saved root "${w.fellBackFrom}" no longer exists — reopening on "${w.rootPath}" instead`,
+      );
+    }
   });
+  // Re-persist so the substituted roots replace the dead ones on disk right
+  // away, rather than only if the user happens to touch a window before quit.
+  persistWindowSession();
 }
 
 // --- PTY IPC Handlers ---
@@ -2874,7 +2966,19 @@ function isPtyCallerOwner(senderId: number, id: string): boolean {
 // in-process code execution. Guarding it would only break the feature. If the
 // renderer ever loads untrusted remote content this decision must be revisited.
 ipcMain.handle("pty:create", (event, { id, name, command, args, cwd }) => {
-  const session = ptyManager.create(id, name, command, args, cwd);
+  let session;
+  try {
+    session = ptyManager.create(id, name, command, args, cwd);
+  } catch (err) {
+    // A dead cwd now throws here instead of spawning a shell that exits in 6ms.
+    // Rejecting alone would surface as a bare console error in the renderer, so
+    // name the real cause — this is the "터미널이 그냥 안 열림" case.
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if ((code === "ENOENT" || code === "ENOTDIR") && cwd) {
+      notifyRootPathMissing(cwd);
+    }
+    throw err;
+  }
   ptyOwners.set(id, event.sender.id);
 
   // Use same buffer-then-live pattern as agents (survives React StrictMode)

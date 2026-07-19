@@ -164,6 +164,36 @@ export class PtyManager {
         ? "powershell.exe"
         : process.env.SHELL || "/bin/zsh");
     const shellArgs = args || [];
+    const spawnCwd = cwd || os.homedir();
+
+    // cwd guard: a pty spawned into a DELETED directory does not throw. The
+    // native fork succeeds, then the shell fails its own chdir and exits 1
+    // within ~6ms — no exception, no error dialog, just a terminal that never
+    // appears. Worse, OrchestratorManager reads that exit as a crash and
+    // re-launches into the same dead path on a 2s/4s/8s backoff before giving
+    // up silently. The path goes stale routinely now that "이 워크트리 보기"
+    // points windows at `~/.marblo/worktrees/**` trees that later get removed
+    // (#476/#489), so validate BEFORE spawning and fail loudly instead. Checked
+    // ahead of the stale-session teardown below so a doomed create() can never
+    // take down a healthy PTY that already holds this id.
+    let cwdStat: fs.Stats | undefined;
+    try {
+      cwdStat = fs.statSync(spawnCwd);
+    } catch {
+      /* missing / unreadable — reported below */
+    }
+    if (!cwdStat?.isDirectory()) {
+      const reason = cwdStat ? "is not a directory" : "does not exist";
+      const e: NodeJS.ErrnoException = new Error(
+        `PTY working directory ${reason}: "${spawnCwd}". The shell would exit immediately with no error. If this was a git worktree it has likely been removed — reopen the project on its main checkout.`,
+      );
+      e.code = cwdStat ? "ENOTDIR" : "ENOENT";
+      e.path = spawnCwd;
+      console.error(
+        `[PtyManager] Refusing to spawn "${shell}" for session "${id}" — cwd ${reason}: "${spawnCwd}"`,
+      );
+      throw e;
+    }
 
     // fd-leak guard: PTY ids are deterministic and reused verbatim on
     // restart/relaunch/reuse. If a LIVE session still occupies this id (a
@@ -202,7 +232,7 @@ export class PtyManager {
         name: "xterm-256color",
         cols: 80,
         rows: 24,
-        cwd: cwd || os.homedir(),
+        cwd: spawnCwd,
         env: env || (process.env as Record<string, string>),
       });
     } catch (err) {
@@ -232,9 +262,7 @@ export class PtyManager {
         throw e;
       }
       console.error(
-        `[PtyManager] Failed to spawn shell="${shell}" cwd="${
-          cwd || os.homedir()
-        }":`,
+        `[PtyManager] Failed to spawn shell="${shell}" cwd="${spawnCwd}":`,
         err,
       );
       throw err;

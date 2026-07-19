@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "fs";
+import os from "os";
+import path from "path";
 
 const { FakePty, spawned, spawnControl } = vi.hoisted(() => {
   class FakePty {
@@ -535,3 +537,92 @@ describe.runIf(posix)(
     });
   },
 );
+
+/**
+ * Regression: a PTY spawned into a DELETED directory used to fail silently.
+ *
+ * node-pty's fork succeeds even when cwd is gone — the error surfaces inside
+ * the child, which fails its own chdir and exits 1 in ~6ms. Measured: a live
+ * checkout kept the shell alive past 2000ms; a removed worktree self-destructed
+ * in 6ms with exit=1. No exception reached the caller, so OrchestratorManager
+ * read the instant exit as a crash and relaunched into the same dead path on a
+ * 2s/4s/8s backoff before giving up — no error, no dialog, just an
+ * orchestrator that never attached. create() now validates cwd up front.
+ */
+describe("PtyManager.create cwd validation", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    spawned.length = 0;
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pty-cwd-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("throws ENOENT instead of spawning a shell that dies instantly", () => {
+    const pm = new PtyManager();
+    const missing = path.join(tmpDir, "removed-worktree");
+
+    expect(() =>
+      pm.create("pty-missing", "orch", undefined, [], missing),
+    ).toThrow(/does not exist/);
+    // The point of the guard: nothing was spawned, so there is no 6ms exit for
+    // the orchestrator to misread as a crash.
+    expect(spawned).toHaveLength(0);
+    expect(pm.listSessions().map((s) => s.id)).not.toContain("pty-missing");
+  });
+
+  it("tags the error with ENOENT and the offending path", () => {
+    const pm = new PtyManager();
+    const missing = path.join(tmpDir, "gone");
+    try {
+      pm.create("pty-missing-2", "orch", undefined, [], missing);
+      expect.unreachable("create() should have thrown");
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      expect(e.code).toBe("ENOENT");
+      expect(e.path).toBe(missing);
+    }
+  });
+
+  it("rejects a cwd that exists but is a file, with ENOTDIR", () => {
+    const pm = new PtyManager();
+    const file = path.join(tmpDir, "not-a-dir");
+    fs.writeFileSync(file, "");
+
+    try {
+      pm.create("pty-file-cwd", "orch", undefined, [], file);
+      expect.unreachable("create() should have thrown");
+    } catch (err) {
+      expect((err as NodeJS.ErrnoException).code).toBe("ENOTDIR");
+    }
+    expect(spawned).toHaveLength(0);
+  });
+
+  it("spawns normally when cwd exists", () => {
+    const pm = new PtyManager();
+    expect(() =>
+      pm.create("pty-ok", "orch", undefined, [], tmpDir),
+    ).not.toThrow();
+    expect(spawned).toHaveLength(1);
+  });
+
+  it("leaves an existing live PTY on the same id untouched when cwd is dead", () => {
+    // The guard runs BEFORE the stale-session teardown in create(). Ordering
+    // matters: ids are reused verbatim on relaunch, so validating late would
+    // let a doomed create() destroy a healthy PTY and then throw, leaving the
+    // window with neither the old terminal nor a new one.
+    const pm = new PtyManager();
+    pm.create("pty-reused", "orch", undefined, [], tmpDir);
+    const live = spawned[0] as FakePtyInst;
+
+    expect(() =>
+      pm.create("pty-reused", "orch", undefined, [], path.join(tmpDir, "gone")),
+    ).toThrow();
+
+    expect(live.destroyed).toBe(0);
+    expect(pm.listSessions().map((s) => s.id)).toContain("pty-reused");
+  });
+});

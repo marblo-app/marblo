@@ -113,6 +113,14 @@ vi.mock("../../electron/agent-config", () => ({
 
 import { PtyManager } from "../../electron/pty-manager";
 import { AgentManager } from "../../electron/agent-manager";
+import fs from "fs";
+import os from "os";
+import path from "path";
+
+// A REAL directory: PtyManager.create() now rejects a cwd that does not exist,
+// because a pty spawned into a deleted directory dies in ~6ms with no error
+// (ticket 4xSVtpGzt5NJE4FISfmj). These tests only need *some* valid cwd.
+const TEST_CWD = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-test-"));
 
 type FakePtyInst = InstanceType<typeof FakePty>;
 
@@ -135,7 +143,7 @@ describe("AgentManager — Fable5 runtime downgrade (§3.4-3)", () => {
       model: "claude",
       role: "backend",
       command: "claude",
-      cwd: "/tmp/marblo-test",
+      cwd: TEST_CWD,
       complexity: "complex",
     });
   }
@@ -190,7 +198,7 @@ describe("AgentManager — Fable5 runtime downgrade (§3.4-3)", () => {
       model: "claude",
       role: "backend",
       command: "claude",
-      cwd: "/tmp/marblo-test",
+      cwd: TEST_CWD,
       complexity: "standard",
     });
     (spawned[0] as FakePtyInst).emitExit(1);

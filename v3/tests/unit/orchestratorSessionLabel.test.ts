@@ -10,6 +10,7 @@ import {
   firstUserMessageStartsWith,
   isOrchestratorSession,
 } from "../../electron/orchestrator-manager";
+import { encodeClaudeProjectDir } from "../../electron/claude-paths";
 import type { LaunchConfig } from "../../electron/agent-config";
 
 /**
@@ -25,11 +26,19 @@ import type { LaunchConfig } from "../../electron/agent-config";
 describe("OrchestratorManager session reconnect", () => {
   let tmpHome: string;
   let homedirSpy: ReturnType<typeof vi.spyOn>;
-  const rootPath = "/proj/marblo-x";
-  const encoded = rootPath.replace(/\//g, "-");
+  // A REAL directory. The crash auto-restart path now refuses to relaunch into
+  // a rootPath that no longer exists (ticket 4xSVtpGzt5NJE4FISfmj) — a shell
+  // spawned there dies in ~6ms with no error, so retrying it 3x was pure noise.
+  // These tests exercise the RESTART logic, so their root has to exist.
+  let rootPath: string;
 
   function sessionsDir(): string {
-    return path.join(tmpHome, ".claude", "projects", encoded);
+    return path.join(
+      tmpHome,
+      ".claude",
+      "projects",
+      encodeClaudeProjectDir(rootPath),
+    );
   }
   function labelsPath(): string {
     return path.join(sessionsDir(), "marblo-labels.json");
@@ -97,6 +106,7 @@ describe("OrchestratorManager session reconnect", () => {
 
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "orch-label-"));
+    rootPath = fs.mkdtempSync(path.join(os.tmpdir(), "orch-root-"));
     fs.mkdirSync(sessionsDir(), { recursive: true });
     homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
     vi.useFakeTimers();
@@ -105,6 +115,7 @@ describe("OrchestratorManager session reconnect", () => {
     vi.useRealTimers();
     homedirSpy.mockRestore();
     fs.rmSync(tmpHome, { recursive: true, force: true });
+    fs.rmSync(rootPath, { recursive: true, force: true });
   });
 
   describe("firstUserMessageStartsWith", () => {
@@ -288,8 +299,9 @@ describe("OrchestratorManager session reconnect", () => {
       filePath: string,
     ): Record<string, string | undefined> {
       const config = fs.readFileSync(filePath, "utf-8");
-      const match =
-        /\[mcp_servers\.marblo\.env\]\n([\s\S]*?)(?=\n\[|$)/.exec(config);
+      const match = /\[mcp_servers\.marblo\.env\]\n([\s\S]*?)(?=\n\[|$)/.exec(
+        config,
+      );
       if (!match) return {};
       const env: Record<string, string | undefined> = {};
       for (const line of match[1].split("\n")) {
