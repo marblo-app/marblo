@@ -19,7 +19,11 @@ import {
   deriveSegments,
   contactToBqRow,
   toIsoOrNull,
+  mergeEmailConsent,
+  decideMarketingConsentSync,
+  UNKNOWN_CONSENT,
   type ContactFlags,
+  type EmailMarketingConsent,
 } from "./marketingContacts";
 
 const KEY = Buffer.alloc(32, 7).toString("base64"); // 테스트 전용 고정 키
@@ -74,7 +78,7 @@ test("unsubscribe 토큰: 파생·검증 stateless, 위조 거부", () => {
   // 다른 컨택트의 토큰은 통하지 않는다
   const otherToken = unsubscribeTokenForContact(
     contactIdForEmail("other@example.com"),
-    SECRET
+    SECRET,
   );
   assert.ok(!verifyUnsubscribeToken(cid, otherToken, SECRET));
 });
@@ -95,7 +99,11 @@ const consentOf = (status: "granted" | "pending" | "revoked" | "unknown") => ({
   revokedAt: null,
   legalBasis: "explicit_opt_in" as const,
 });
-const subscribed = { status: "subscribed" as const, tokenHash: null, unsubscribedAt: null };
+const subscribed = {
+  status: "subscribed" as const,
+  tokenHash: null,
+  unsubscribedAt: null,
+};
 const unsubscribed = {
   status: "unsubscribed" as const,
   tokenHash: "h",
@@ -105,25 +113,45 @@ const unsubscribed = {
 test("isEmailable: consent granted + not unsubscribed 만 발송 가능", () => {
   assert.equal(isEmailable(null).reason, "no_contact");
   assert.equal(
-    isEmailable({ emailMarketingConsent: consentOf("unknown"), unsubscribe: subscribed, emailEnc: "e" }).reason,
-    "consent_not_granted"
+    isEmailable({
+      emailMarketingConsent: consentOf("unknown"),
+      unsubscribe: subscribed,
+      emailEnc: "e",
+    }).reason,
+    "consent_not_granted",
   );
   assert.equal(
-    isEmailable({ emailMarketingConsent: consentOf("revoked"), unsubscribe: subscribed, emailEnc: "e" }).reason,
-    "consent_not_granted"
+    isEmailable({
+      emailMarketingConsent: consentOf("revoked"),
+      unsubscribe: subscribed,
+      emailEnc: "e",
+    }).reason,
+    "consent_not_granted",
   );
   // ★pending(waitlist 재동의 대상 풀)은 발송 불가 — COMPLIANCE-AUDIT D2 정정 반영
   assert.equal(
-    isEmailable({ emailMarketingConsent: consentOf("pending"), unsubscribe: subscribed, emailEnc: "e" }).reason,
-    "consent_not_granted"
+    isEmailable({
+      emailMarketingConsent: consentOf("pending"),
+      unsubscribe: subscribed,
+      emailEnc: "e",
+    }).reason,
+    "consent_not_granted",
   );
   assert.equal(
-    isEmailable({ emailMarketingConsent: consentOf("granted"), unsubscribe: unsubscribed, emailEnc: "e" }).reason,
-    "unsubscribed"
+    isEmailable({
+      emailMarketingConsent: consentOf("granted"),
+      unsubscribe: unsubscribed,
+      emailEnc: "e",
+    }).reason,
+    "unsubscribed",
   );
   assert.equal(
-    isEmailable({ emailMarketingConsent: consentOf("granted"), unsubscribe: subscribed, emailEnc: "e" }).ok,
-    true
+    isEmailable({
+      emailMarketingConsent: consentOf("granted"),
+      unsubscribe: subscribed,
+      emailEnc: "e",
+    }).ok,
+    true,
   );
 });
 
@@ -137,11 +165,18 @@ test("lifecycle/segments 파생", () => {
     hasActiveFounderGrant: false,
   };
   assert.equal(deriveLifecycleStage(base), "lead");
-  assert.equal(deriveLifecycleStage({ ...base, hasAuthAccount: true }), "signup");
+  assert.equal(
+    deriveLifecycleStage({ ...base, hasAuthAccount: true }),
+    "signup",
+  );
   assert.equal(deriveLifecycleStage({ ...base, isFounder: true }), "founder");
   assert.equal(
-    deriveLifecycleStage({ ...base, isFounder: true, hasActivePaidSubscription: true }),
-    "subscriber"
+    deriveLifecycleStage({
+      ...base,
+      isFounder: true,
+      hasActivePaidSubscription: true,
+    }),
+    "subscriber",
   );
   assert.deepEqual(
     deriveSegments({
@@ -150,7 +185,7 @@ test("lifecycle/segments 파생", () => {
       isFounder: true,
       hasActiveFounderGrant: true,
     }),
-    ["waitlist", "auth_user", "founder", "beta_active"]
+    ["waitlist", "auth_user", "founder", "beta_active"],
   );
   assert.deepEqual(deriveSegments({ ...base, founderRejected: true }), [
     "waitlist",
@@ -172,13 +207,18 @@ test("contactToBqRow: 평문 이메일·emailEnc 를 구조적으로 배제", ()
       locale: "ko",
       signupAt: new Date("2026-01-02T03:04:05Z"),
       founderStatus: "selected",
-      subscription: { plan: "pro", status: "active", provider: "toss", periodEnd: null },
+      subscription: {
+        plan: "pro",
+        status: "active",
+        provider: "toss",
+        periodEnd: null,
+      },
       emailMarketingConsent: consentOf("granted"),
       unsubscribe: subscribed,
       segments: ["waitlist", "founder"],
       lifecycleStage: "founder",
     },
-    "2026-07-18"
+    "2026-07-18",
   );
   const json = JSON.stringify(row);
   assert.ok(!json.includes("secret.user")); // 평문 local part 없음
@@ -196,7 +236,252 @@ test("toIsoOrNull: Timestamp 유사체·Date·number·null 처리", () => {
   assert.equal(toIsoOrNull(0), "1970-01-01T00:00:00.000Z");
   assert.equal(
     toIsoOrNull({ toMillis: () => 1000 }),
-    "1970-01-01T00:00:01.000Z"
+    "1970-01-01T00:00:01.000Z",
   );
   assert.equal(toIsoOrNull({ seconds: 2 }), "1970-01-01T00:00:02.000Z");
+});
+
+// ─── mergeEmailConsent (동의 병합 단일 판정) ──────────────────────────
+const NOW = new Date("2026-07-20T00:00:00Z");
+const GRANT = {
+  source: "web_privacy_consent",
+  version: "2026-07-14",
+  legalBasis: "explicit_opt_in" as const,
+  consentedAt: null,
+};
+const PENDING = { source: "waitlist_form", detail: "activity agreement only" };
+const REVOKE = { source: "web_privacy_consent", detail: "unchecked" };
+
+const withStatus = (
+  status: "granted" | "pending" | "revoked" | "unknown",
+): EmailMarketingConsent => ({
+  status,
+  source: "prev",
+  version: "2026-01-01",
+  consentedAt: status === "granted" ? NOW : null,
+  revokedAt: null,
+  legalBasis: status === "granted" ? "explicit_opt_in" : "none",
+});
+
+test("mergeEmailConsent grant: unknown/pending 만 granted 로 승격", () => {
+  const fromUnknown = mergeEmailConsent(UNKNOWN_CONSENT, { grant: GRANT }, NOW);
+  assert.equal(fromUnknown.consent.status, "granted");
+  assert.equal(fromUnknown.consent.legalBasis, "explicit_opt_in");
+  assert.equal(fromUnknown.event?.type, "granted");
+
+  const fromPending = mergeEmailConsent(
+    withStatus("pending"),
+    { grant: GRANT },
+    NOW,
+  );
+  assert.equal(fromPending.consent.status, "granted");
+  assert.equal(fromPending.event?.type, "granted");
+
+  // 이미 granted → 변화 없음 + 이벤트 없음(멱등, 중복 감사기록 방지)
+  const already = mergeEmailConsent(
+    withStatus("granted"),
+    { grant: GRANT },
+    NOW,
+  );
+  assert.equal(already.consent.status, "granted");
+  assert.equal(already.event, null);
+  assert.equal(already.consent.source, "prev"); // 기존 동의 증빙 보존
+});
+
+test("★mergeEmailConsent: revoked 는 grant 로 절대 되살아나지 않는다", () => {
+  const r = mergeEmailConsent(withStatus("revoked"), { grant: GRANT }, NOW);
+  assert.equal(r.consent.status, "revoked");
+  assert.equal(r.event, null);
+});
+
+test("mergeEmailConsent revoke: granted/pending → revoked, revokedAt 기록", () => {
+  const fromGranted = mergeEmailConsent(
+    withStatus("granted"),
+    { revoke: REVOKE },
+    NOW,
+  );
+  assert.equal(fromGranted.consent.status, "revoked");
+  assert.equal(fromGranted.consent.revokedAt, NOW);
+  assert.equal(fromGranted.consent.consentedAt, NOW); // 동의 시점은 감사용으로 보존
+  assert.equal(fromGranted.event?.type, "revoked");
+
+  const fromPending = mergeEmailConsent(
+    withStatus("pending"),
+    { revoke: REVOKE },
+    NOW,
+  );
+  assert.equal(fromPending.consent.status, "revoked");
+
+  // unknown 은 철회할 것이 없다 — noop
+  const fromUnknown = mergeEmailConsent(
+    UNKNOWN_CONSENT,
+    { revoke: REVOKE },
+    NOW,
+  );
+  assert.equal(fromUnknown.consent.status, "unknown");
+  assert.equal(fromUnknown.event, null);
+});
+
+test("★mergeEmailConsent: 철회가 동의를 이긴다(같은 요청에 둘 다 와도 revoke)", () => {
+  const r = mergeEmailConsent(
+    withStatus("granted"),
+    { grant: GRANT, revoke: REVOKE },
+    NOW,
+  );
+  assert.equal(r.consent.status, "revoked");
+  assert.equal(r.event?.type, "revoked");
+});
+
+test("mergeEmailConsent pending: unknown 만 편입, granted 를 강등하지 않음", () => {
+  assert.equal(
+    mergeEmailConsent(UNKNOWN_CONSENT, { pending: PENDING }, NOW).consent
+      .status,
+    "pending",
+  );
+  assert.equal(
+    mergeEmailConsent(withStatus("granted"), { pending: PENDING }, NOW).consent
+      .status,
+    "granted",
+  );
+  assert.equal(
+    mergeEmailConsent(withStatus("revoked"), { pending: PENDING }, NOW).consent
+      .status,
+    "revoked",
+  );
+});
+
+test("mergeEmailConsent: 요청이 없으면 현재 상태 그대로(base 없으면 unknown)", () => {
+  assert.equal(mergeEmailConsent(null, {}, NOW).consent.status, "unknown");
+  assert.equal(mergeEmailConsent(undefined, {}, NOW).event, null);
+  assert.equal(
+    mergeEmailConsent(withStatus("granted"), {}, NOW).consent.status,
+    "granted",
+  );
+});
+
+// ─── decideMarketingConsentSync (users/{uid} write → 무엇을 할 것인가) ─
+const userDoc = (marketing: boolean, version = "2026-07-14") => ({
+  webPrivacyConsent: {
+    collectionUse: true,
+    overseasTransfer: true,
+    marketing,
+    version,
+    locale: "ko",
+    acceptedAt: NOW,
+  },
+});
+
+test("decideMarketingConsentSync: 마케팅 체크 → grant(버전·로케일·동의시각 전달)", () => {
+  const a = decideMarketingConsentSync(null, userDoc(true));
+  assert.equal(a.kind, "grant");
+  if (a.kind === "grant") {
+    assert.equal(a.version, "2026-07-14");
+    assert.equal(a.locale, "ko");
+    assert.equal(a.consentedAt, NOW);
+  }
+});
+
+test("★decideMarketingConsentSync: 미체크는 건드리지 않는다(승격도 철회도 없음)", () => {
+  // 가입 시 마케팅 미체크 — granted 인 적이 없으므로 revoke 대상이 아니다
+  const a = decideMarketingConsentSync(null, userDoc(false));
+  assert.equal(a.kind, "none");
+  if (a.kind === "none") assert.equal(a.reason, "never_opted_in");
+
+  // 계속 미체크로 다른 필드만 갱신 — 여전히 none
+  const b = decideMarketingConsentSync(userDoc(false), userDoc(false));
+  assert.equal(b.kind, "none");
+});
+
+test("decideMarketingConsentSync: true→false 전이만 revoke", () => {
+  const a = decideMarketingConsentSync(userDoc(true), userDoc(false));
+  assert.equal(a.kind, "revoke");
+});
+
+test("decideMarketingConsentSync: consent 레코드 없으면 no_consent_record", () => {
+  const a = decideMarketingConsentSync(null, { someOtherField: 1 });
+  assert.equal(a.kind, "none");
+  if (a.kind === "none") assert.equal(a.reason, "no_consent_record");
+
+  // ★앱의 privacyConsent(텔레메트리 스키마)는 마케팅 동의 소스가 아니다
+  const b = decideMarketingConsentSync(null, {
+    privacyConsent: { firstPartyTelemetry: true, marketing: true },
+  });
+  assert.equal(b.kind, "none");
+  if (b.kind === "none") assert.equal(b.reason, "no_consent_record");
+});
+
+test("decideMarketingConsentSync: 멱등 — 동의 유지 상태의 무관한 write 는 unchanged", () => {
+  const a = decideMarketingConsentSync(userDoc(true), userDoc(true));
+  assert.equal(a.kind, "none");
+  if (a.kind === "none") assert.equal(a.reason, "unchanged");
+
+  // 단 정책 버전이 오르면(재동의) 다시 grant 를 흘려보낸다
+  const b = decideMarketingConsentSync(
+    userDoc(true),
+    userDoc(true, "2027-01-01"),
+  );
+  assert.equal(b.kind, "grant");
+});
+
+test("★순서 무관: saveConsent 가 auth onCreate 보다 나중이어도 granted 로 수렴", () => {
+  // 순서 A — auth onCreate 먼저(동의 정보 없이 컨택트 생성) → saveConsent 나중
+  let consentA = mergeEmailConsent(null, {}, NOW).consent; // onCreate: grant 요청 없음
+  assert.equal(consentA.status, "unknown");
+  const actionA = decideMarketingConsentSync(null, userDoc(true));
+  assert.equal(actionA.kind, "grant");
+  consentA = mergeEmailConsent(consentA, { grant: GRANT }, NOW).consent;
+  assert.equal(consentA.status, "granted");
+
+  // 순서 B — saveConsent 먼저(컨택트를 granted 로 생성) → auth onCreate 나중
+  let consentB = mergeEmailConsent(null, { grant: GRANT }, NOW).consent;
+  assert.equal(consentB.status, "granted");
+  consentB = mergeEmailConsent(consentB, {}, NOW).consent; // 뒤늦은 onCreate
+  assert.equal(consentB.status, "granted");
+
+  // 두 순서의 최종 상태가 같고, 둘 다 발송 가능
+  assert.equal(consentA.status, consentB.status);
+  for (const c of [consentA, consentB]) {
+    assert.equal(
+      isEmailable({
+        emailMarketingConsent: c,
+        unsubscribe: subscribed,
+        emailEnc: "e",
+      }).ok,
+      true,
+    );
+  }
+});
+
+test("★철회 우선 불변식: 수신거부한 사람은 재동의해도 발송 불가", () => {
+  // unsubscribe 링크로 수신거부 → 이후 설정에서 마케팅을 다시 체크한 경우.
+  // consent 는 granted 로 갈 수 있어도 unsubscribe 가 이겨 발송 불가여야 한다.
+  const consent = mergeEmailConsent(
+    withStatus("pending"),
+    { grant: GRANT },
+    NOW,
+  ).consent;
+  assert.equal(consent.status, "granted");
+  const verdict = isEmailable({
+    emailMarketingConsent: consent,
+    unsubscribe: unsubscribed,
+    emailEnc: "e",
+  });
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.reason, "unsubscribed");
+});
+
+test("★revoke 후에는 isEmailable=false", () => {
+  const consent = mergeEmailConsent(
+    withStatus("granted"),
+    { revoke: REVOKE },
+    NOW,
+  ).consent;
+  assert.equal(
+    isEmailable({
+      emailMarketingConsent: consent,
+      unsubscribe: subscribed,
+      emailEnc: "e",
+    }).ok,
+    false,
+  );
 });

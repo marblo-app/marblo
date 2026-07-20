@@ -32,6 +32,9 @@ import {
   deriveLifecycleStage,
   deriveSegments,
   contactToBqRow,
+  mergeEmailConsent,
+  decideMarketingConsentSync,
+  type UserDocRaw,
   type ContactFlags,
   type ContactSource,
   type ContactSubscription,
@@ -1908,7 +1911,7 @@ async function postResendEmail(
   content: FounderEmailContent,
   logPrefix: string,
   // 마케팅 메일용 추가 헤더(List-Unsubscribe 등). transactional 은 생략.
-  extraHeaders?: Record<string, string>
+  extraHeaders?: Record<string, string>,
 ): Promise<boolean> {
   const resp = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -1984,7 +1987,7 @@ async function sendFounderSurveyOfferEmail(
       email,
       delivery ? withUnsubscribeFooter(content, delivery) : content,
       "founder-email",
-      delivery?.headers
+      delivery?.headers,
     );
   } catch (err) {
     console.warn(
@@ -2516,7 +2519,10 @@ export const previewFounderSurveyOffer = functions.https.onCall(
 //   no_account     — 계정 X (미가입=미다운로드/미로그인)          → 다운로드 팔로업
 
 type FounderSegment =
-  "active" | "sub_expired" | "account_no_sub" | "no_account";
+  | "active"
+  | "sub_expired"
+  | "account_no_sub"
+  | "no_account";
 
 // 순수 분류기(테스트용 export). 부수효과 없음.
 export function classifyFounderActivation(opts: {
@@ -2841,7 +2847,7 @@ async function sendFounderFollowupEmail(
       email,
       delivery ? withUnsubscribeFooter(content, delivery) : content,
       "founder-followup",
-      delivery?.headers
+      delivery?.headers,
     );
   } catch (err) {
     console.warn("[founder-followup] 발송 실패:", segment, err);
@@ -4820,7 +4826,8 @@ const TELEGRAM_BETA_WEBHOOK_SECRET =
   process.env.TELEGRAM_BETA_WEBHOOK_SECRET || "";
 
 type TgInlineButton =
-  { text: string; callback_data: string } | { text: string; url: string };
+  | { text: string; callback_data: string }
+  | { text: string; url: string };
 type TgInlineKeyboard = TgInlineButton[][];
 
 interface TgCallbackQuery {
@@ -6962,7 +6969,7 @@ function isRealSignupUser(user: admin.auth.UserRecord): boolean {
 }
 
 function marketingContactRef(
-  contactId: string
+  contactId: string,
 ): admin.firestore.DocumentReference {
   return db.collection(MARKETING_CONTACTS_COLLECTION).doc(contactId);
 }
@@ -6992,6 +6999,15 @@ interface MarketingContactUpsertInput {
     source: string;
     detail: string;
   } | null;
+  /**
+   * 동의 철회(granted|pending → revoked). 설정 화면에서 마케팅 동의를 끄는
+   * 경로가 여기로 온다. ★철회는 동의를 이긴다 — 같은 요청에 grantConsent 가
+   * 함께 와도 revoke 가 적용된다(mergeEmailConsent).
+   */
+  revokeConsent?: {
+    source: string;
+    detail: string;
+  } | null;
   /** consent_events.actor — "system" | "backfill" | admin uid 등 */
   actor: string;
 }
@@ -7001,6 +7017,7 @@ interface MarketingContactUpsertResult {
   created: boolean;
   consentGranted: boolean;
   consentPending: boolean;
+  consentRevoked: boolean;
 }
 
 /**
@@ -7014,7 +7031,7 @@ interface MarketingContactUpsertResult {
  *    키 설정 후 백필 재실행으로 채움).
  */
 async function upsertMarketingContact(
-  input: MarketingContactUpsertInput
+  input: MarketingContactUpsertInput,
 ): Promise<MarketingContactUpsertResult> {
   const normalized = normalizeMarketingEmail(input.email);
   if (!normalized || !normalized.includes("@")) {
@@ -7028,44 +7045,21 @@ async function upsertMarketingContact(
     : null;
 
   // ── consent 병합 ──
-  const baseConsent: EmailMarketingConsent = existing?.emailMarketingConsent ?? {
-    status: "unknown",
-    source: "",
-    version: "",
-    consentedAt: null,
-    revokedAt: null,
-    legalBasis: "none",
-  };
-  let consent = baseConsent;
-  let consentGranted = false;
-  let consentPending = false;
-  if (
-    input.grantConsent &&
-    (baseConsent.status === "unknown" || baseConsent.status === "pending")
-  ) {
-    consent = {
-      status: "granted",
-      source: input.grantConsent.source,
-      version: input.grantConsent.version,
-      consentedAt:
-        input.grantConsent.consentedAt ??
-        admin.firestore.FieldValue.serverTimestamp(),
-      revokedAt: null,
-      legalBasis: input.grantConsent.legalBasis,
-    };
-    consentGranted = true;
-  } else if (input.markPending && baseConsent.status === "unknown") {
-    // 재동의 대상 풀 편입 — 발송 가능 상태가 아니다(isEmailable 은 granted 만).
-    consent = {
-      status: "pending",
-      source: input.markPending.source,
-      version: "",
-      consentedAt: null,
-      revokedAt: null,
-      legalBasis: "none",
-    };
-    consentPending = true;
-  }
+  // 판정은 순수 모듈(mergeEmailConsent)이 단독으로 한다 — 우선순위·불변식은
+  // 거기서 단위테스트된다. 여기서는 serverTimestamp 센티넬만 주입한다.
+  const merged = mergeEmailConsent(
+    existing?.emailMarketingConsent,
+    {
+      grant: input.grantConsent,
+      pending: input.markPending,
+      revoke: input.revokeConsent,
+    },
+    admin.firestore.FieldValue.serverTimestamp(),
+  );
+  const consent = merged.consent;
+  const consentGranted = merged.event?.type === "granted";
+  const consentPending = merged.event?.type === "pending_init";
+  const consentRevoked = merged.event?.type === "revoked";
 
   // ── unsubscribe 초기화(기존 값 보존) ──
   const unsubscribe = existing?.unsubscribe ?? {
@@ -7097,7 +7091,7 @@ async function upsertMarketingContact(
   const founderStatus =
     input.founderStatus !== undefined
       ? input.founderStatus
-      : existing?.founderStatus ?? null;
+      : (existing?.founderStatus ?? null);
   const subscription: ContactSubscription = input.subscription ??
     existing?.subscription ?? {
       plan: null,
@@ -7139,44 +7133,42 @@ async function upsertMarketingContact(
     segments: deriveSegments(flags),
     lifecycleStage: deriveLifecycleStage(flags),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    ...(existing ? {} : {
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    }),
+    ...(existing
+      ? {}
+      : {
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        }),
   };
   await ref.set(docPatch, { merge: true });
 
-  if (consentGranted || consentPending) {
+  // 상태가 실제로 바뀐 경우에만 감사 이벤트를 남긴다(멱등 — 재실행해도 중복 없음).
+  if (merged.event) {
     await ref
       .collection(CONSENT_EVENTS_SUBCOLLECTION)
-      .add(
-        consentGranted
-          ? {
-              type: "granted",
-              channel: "email",
-              source: input.grantConsent?.source ?? "",
-              actor: input.actor,
-              detail: `legalBasis=${input.grantConsent?.legalBasis ?? "none"} version=${input.grantConsent?.version ?? ""}`,
-              at: admin.firestore.FieldValue.serverTimestamp(),
-            }
-          : {
-              type: "pending_init",
-              channel: "email",
-              source: input.markPending?.source ?? "",
-              actor: input.actor,
-              detail: input.markPending?.detail ?? "",
-              at: admin.firestore.FieldValue.serverTimestamp(),
-            }
-      )
+      .add({
+        type: merged.event.type,
+        channel: "email",
+        source: merged.event.source,
+        actor: input.actor,
+        detail: merged.event.detail,
+        at: admin.firestore.FieldValue.serverTimestamp(),
+      })
       .catch((err) =>
         console.warn(
           "[marketing-contacts] consent_events 기록 실패:",
           contactId.slice(0, 8),
-          err
-        )
+          err,
+        ),
       );
   }
 
-  return { contactId, created: !existing, consentGranted, consentPending };
+  return {
+    contactId,
+    created: !existing,
+    consentGranted,
+    consentPending,
+    consentRevoked,
+  };
 }
 
 /**
@@ -7185,19 +7177,19 @@ async function upsertMarketingContact(
  * 게이트 조회 실패도 발송 불가로 처리한다(오발송보다 미발송이 낫다).
  */
 async function marketingEmailGate(
-  email: string
+  email: string,
 ): Promise<{ ok: boolean; reason: string }> {
   try {
     const snap = await marketingContactRef(contactIdForEmail(email)).get();
     const verdict = isEmailable(
-      snap.exists ? (snap.data() as MarketingContactDoc) : null
+      snap.exists ? (snap.data() as MarketingContactDoc) : null,
     );
     return { ok: verdict.ok, reason: verdict.reason };
   } catch (err) {
     console.warn(
       "[marketing-contacts] 게이트 조회 실패 — 발송 차단:",
       maskEmailForLog(email),
-      err
+      err,
     );
     return { ok: false, reason: "gate_error" };
   }
@@ -7218,7 +7210,7 @@ function marketingEmailDelivery(email: string): {
   const url = buildUnsubscribeUrl(
     FUNCTIONS_BASE_URL,
     contactId,
-    MARKETING_UNSUB_SECRET
+    MARKETING_UNSUB_SECRET,
   );
   return {
     headers: {
@@ -7233,7 +7225,7 @@ function marketingEmailDelivery(email: string): {
 /** 마케팅 메일 본문에 수신거부 푸터를 덧붙인다(HTML 은 </body> 직전 삽입 시도). */
 function withUnsubscribeFooter(
   content: FounderEmailContent,
-  delivery: { footerHtml: string; footerText: string }
+  delivery: { footerHtml: string; footerText: string },
 ): FounderEmailContent {
   const html = content.html.includes("</body>")
     ? content.html.replace("</body>", `${delivery.footerHtml}</body>`)
@@ -7267,8 +7259,74 @@ export const syncMarketingContactOnAuthCreate = functions.auth
       console.warn(
         "[marketing-contacts] auth onCreate 훅 실패:",
         user.uid,
-        err
+        err,
       );
+    }
+  });
+
+// ─── write 훅 1b: users/{uid} 마케팅 동의 → 컨택트 consent 동기화 ─────
+//
+// ★이 훅이 "가입 시 받은 동의"를 발송 게이트까지 잇는 유일한 경로다.
+// 가입 폼(marblo-web signup)과 설정 화면(my/privacy)이 둘 다
+// users/{uid}.webPrivacyConsent 에 저장하므로 두 경로가 여기로 수렴한다.
+//
+// ★순서 무관(핵심): auth onCreate 훅과 가입 폼의 saveConsent 는 실행 순서가
+// 보장되지 않는다. 어느 쪽이 먼저여도 최종 상태는 granted 로 수렴한다.
+//   - onCreate 먼저: 컨택트가 unknown 으로 생성 → 이 훅이 unknown→granted 승격
+//   - saveConsent 먼저: 이 훅이 컨택트를 granted 로 생성 → 뒤늦은 onCreate 는
+//     grantConsent 없이 upsert 하므로 mergeEmailConsent 가 granted 를 보존
+//
+// ★PIPA: marketing 이 false 인 사용자는 절대 건드리지 않는다(승격도, 철회도).
+// true→false 전이만 철회로 본다. 철회는 되돌릴 수 없는 방향으로만 적용된다.
+export const syncMarketingConsentOnUserWrite = functions.firestore
+  .document("users/{uid}")
+  .onWrite(async (change, context) => {
+    const uid = context.params.uid as string;
+    try {
+      if (!change.after.exists) return; // 삭제는 미러하지 않음(감사 이력 보존)
+      const action = decideMarketingConsentSync(
+        change.before.exists ? (change.before.data() as UserDocRaw) : null,
+        change.after.data() as UserDocRaw,
+      );
+      if (action.kind === "none") return;
+
+      // 이메일은 users 문서가 아니라 Auth 를 SoT 로 삼는다(문서에 email 필드가
+      // 없을 수 있고, 있어도 클라이언트가 쓰는 값이라 신뢰하지 않는다).
+      // 에이전트 custom-token 계정은 isRealSignupUser 가 걸러낸다.
+      const user = await admin.auth().getUser(uid);
+      if (!isRealSignupUser(user)) return;
+
+      if (action.kind === "grant") {
+        await upsertMarketingContact({
+          email: user.email as string,
+          uid,
+          source: "auth_signup",
+          locale: action.locale,
+          grantConsent: {
+            source: "web_privacy_consent",
+            version: action.version,
+            legalBasis: "explicit_opt_in",
+            consentedAt: action.consentedAt,
+          },
+          actor: "system:userConsent_onWrite",
+        });
+      } else {
+        await upsertMarketingContact({
+          email: user.email as string,
+          uid,
+          source: "auth_signup",
+          revokeConsent: {
+            source: "web_privacy_consent",
+            detail: "user unchecked marketing consent in webPrivacyConsent",
+          },
+          actor: "system:userConsent_onWrite",
+        });
+      }
+    } catch (err) {
+      // auth/user-not-found 는 정상 케이스(계정 삭제 후 남은 문서 write 등).
+      const code = (err as { code?: string }).code;
+      if (code === "auth/user-not-found") return;
+      console.warn("[marketing-contacts] users onWrite 훅 실패:", uid, err);
     }
   });
 
@@ -7276,8 +7334,11 @@ export const syncMarketingContactOnAuthCreate = functions.auth
 // ★waitlist 폼의 agreed=true 는 "활동/인용 동의"이지 마케팅 수신동의가 아니다
 // (marblo-web/docs/COMPLIANCE-AUDIT.md D2, PIPA Med — 처리방침 링크·수집목적
 // 미명시). 따라서 granted 로 승격하지 않고 pending(재동의 대상 풀)으로만
-// 적재한다. 폼에 마케팅 전용 체크박스가 붙으면 grantConsent(explicit_opt_in)
-// 경로로 전환할 것.
+// 적재한다.
+// ★waitlist 폼에는 아직 마케팅 전용 체크박스가 없다 — 붙기 전까지 pending 이
+// 정답이다. 가입 폼(users/{uid}.webPrivacyConsent)의 마케팅 체크박스는 훅 1b
+// (syncMarketingConsentOnUserWrite)가 explicit_opt_in 으로 처리한다. 그쪽
+// 경로를 이 훅에 끌어오지 말 것 — 동의의 출처가 다르다.
 export const syncMarketingContactOnWaitlistCreate = functions.firestore
   .document("betatester50_waitlist/{docId}")
   .onCreate(async (snap) => {
@@ -7330,7 +7391,7 @@ export const syncMarketingContactOnFounderWrite = functions.firestore
       console.warn(
         "[marketing-contacts] founders 훅 실패:",
         context.params.email,
-        err
+        err,
       );
     }
   });
@@ -7367,7 +7428,7 @@ export const syncMarketingContactOnSubscriptionWrite = functions.firestore
       console.warn(
         "[marketing-contacts] subscriptions 훅 실패:",
         context.params.uid,
-        err
+        err,
       );
     }
   });
@@ -7384,12 +7445,12 @@ export const backfillMarketingContacts = functions.https.onCall(
     if (!dryRun && !parseEncKey(MARKETING_EMAIL_ENC_KEY)) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "MARKETING_EMAIL_ENC_KEY(base64 32B)가 설정돼야 실적재 가능 — 이메일은 암호화 저장만 허용"
+        "MARKETING_EMAIL_ENC_KEY(base64 32B)가 설정돼야 실적재 가능 — 이메일은 암호화 저장만 허용",
       );
     }
     if (!MARKETING_UNSUB_SECRET) {
       console.warn(
-        "[marketing-backfill] MARKETING_UNSUB_SECRET 미설정 — unsubscribe tokenHash 없이 적재됨(시크릿 설정 후 재실행 권장)"
+        "[marketing-backfill] MARKETING_UNSUB_SECRET 미설정 — unsubscribe tokenHash 없이 적재됨(시크릿 설정 후 재실행 권장)",
       );
     }
 
@@ -7451,11 +7512,13 @@ export const backfillMarketingContacts = functions.https.onCall(
     }
 
     const uniqueEmails = new Set<string>();
-    for (const u of realUsers) uniqueEmails.add(normalizeMarketingEmail(u.email));
+    for (const u of realUsers)
+      uniqueEmails.add(normalizeMarketingEmail(u.email));
     for (const w of waitlistRows) {
       uniqueEmails.add(normalizeMarketingEmail(w.email as string));
     }
-    for (const f of founderRows) uniqueEmails.add(normalizeMarketingEmail(f.email));
+    for (const f of founderRows)
+      uniqueEmails.add(normalizeMarketingEmail(f.email));
 
     const stats = {
       dryRun,
@@ -7553,10 +7616,10 @@ export const backfillMarketingContacts = functions.https.onCall(
     }
 
     console.log(
-      `[marketing-backfill] done: unique=${stats.uniqueEmails} created=${stats.created} updated=${stats.updated} granted=${stats.consentGranted} pending=${stats.consentPending}`
+      `[marketing-backfill] done: unique=${stats.uniqueEmails} created=${stats.created} updated=${stats.updated} granted=${stats.consentGranted} pending=${stats.consentPending}`,
     );
     return stats;
-  }
+  },
 );
 
 // ─── one-click unsubscribe (RFC 8058) ────────────────────────────────
@@ -7580,8 +7643,8 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
           .status(400)
           .send(
             UNSUB_PAGE(
-              "<h1 style=\"font-size:20px\">링크가 유효하지 않습니다</h1><p>수신거부 링크가 만료됐거나 잘못됐어요. team@marblo.app 으로 회신 주시면 수동으로 처리해 드립니다.</p><p style=\"color:#666\">This unsubscribe link is invalid. Reply to team@marblo.app and we'll handle it manually.</p>"
-            )
+              '<h1 style="font-size:20px">링크가 유효하지 않습니다</h1><p>수신거부 링크가 만료됐거나 잘못됐어요. team@marblo.app 으로 회신 주시면 수동으로 처리해 드립니다.</p><p style="color:#666">This unsubscribe link is invalid. Reply to team@marblo.app and we\'ll handle it manually.</p>',
+            ),
           );
         return;
       }
@@ -7592,8 +7655,8 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
           .status(200)
           .send(
             UNSUB_PAGE(
-              `<h1 style="font-size:20px">마케팅 이메일 수신거부</h1><p>버튼을 누르면 마블로의 마케팅 이메일을 더 이상 받지 않습니다. (서비스·결제 관련 필수 안내는 계속 발송될 수 있어요.)</p><form method="POST" action="${action}"><button type="submit" style="background:#111;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:15px;cursor:pointer">수신거부 / Unsubscribe</button></form>`
-            )
+              `<h1 style="font-size:20px">마케팅 이메일 수신거부</h1><p>버튼을 누르면 마블로의 마케팅 이메일을 더 이상 받지 않습니다. (서비스·결제 관련 필수 안내는 계속 발송될 수 있어요.)</p><form method="POST" action="${action}"><button type="submit" style="background:#111;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:15px;cursor:pointer">수신거부 / Unsubscribe</button></form>`,
+            ),
           );
         return;
       }
@@ -7626,7 +7689,7 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
               },
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             },
-            { merge: true }
+            { merge: true },
           );
           await ref
             .collection(CONSENT_EVENTS_SUBCOLLECTION)
@@ -7642,8 +7705,8 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
               console.warn(
                 "[unsubscribe] consent_events 기록 실패:",
                 contactId.slice(0, 8),
-                err
-              )
+                err,
+              ),
             );
         }
       }
@@ -7652,8 +7715,8 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
         .status(200)
         .send(
           UNSUB_PAGE(
-            "<h1 style=\"font-size:20px\">수신거부가 완료됐습니다</h1><p>마케팅 이메일을 더 이상 보내지 않습니다. 언제든 team@marblo.app 으로 연락 주세요.</p><p style=\"color:#666\">You've been unsubscribed from Marblo marketing emails.</p>"
-          )
+            '<h1 style="font-size:20px">수신거부가 완료됐습니다</h1><p>마케팅 이메일을 더 이상 보내지 않습니다. 언제든 team@marblo.app 으로 연락 주세요.</p><p style="color:#666">You\'ve been unsubscribed from Marblo marketing emails.</p>',
+          ),
         );
     } catch (err) {
       console.warn("[unsubscribe] 처리 실패:", err);
@@ -7661,11 +7724,11 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
         .status(500)
         .send(
           UNSUB_PAGE(
-            "<h1 style=\"font-size:20px\">일시적인 오류가 발생했습니다</h1><p>잠시 후 다시 시도하거나 team@marblo.app 으로 회신해 주세요.</p>"
-          )
+            '<h1 style="font-size:20px">일시적인 오류가 발생했습니다</h1><p>잠시 후 다시 시도하거나 team@marblo.app 으로 회신해 주세요.</p>',
+          ),
         );
     }
-  }
+  },
 );
 
 // ─── BigQuery 미러: marblo_marketing.contacts_daily (+ contacts_latest 뷰) ──
@@ -7701,7 +7764,11 @@ async function mirrorMarketingContactsToBqInternal(): Promise<{
 
   const snap = await db.collection(MARKETING_CONTACTS_COLLECTION).get();
   const rows = snap.docs.map((d) =>
-    contactToBqRow(d.id, d.data() as Partial<MarketingContactDoc>, snapshotDate)
+    contactToBqRow(
+      d.id,
+      d.data() as Partial<MarketingContactDoc>,
+      snapshotDate,
+    ),
   );
 
   // 같은 날 재실행 멱등: 해당 파티션 선삭제 후 적재.
@@ -7726,7 +7793,7 @@ async function mirrorMarketingContactsToBqInternal(): Promise<{
   });
 
   console.log(
-    `[marketing-bq-mirror] snapshot=${snapshotDate} rows=${rows.length}`
+    `[marketing-bq-mirror] snapshot=${snapshotDate} rows=${rows.length}`,
   );
   return { snapshotDate, rows: rows.length };
 }
@@ -7748,5 +7815,5 @@ export const mirrorMarketingContactsToBq = functions.https.onCall(
   async (_data, context) => {
     requireAdmin(context);
     return mirrorMarketingContactsToBqInternal();
-  }
+  },
 );

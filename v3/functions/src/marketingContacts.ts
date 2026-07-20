@@ -173,16 +173,13 @@ export function encryptEmail(email: string, keyBase64: string): string {
   const key = parseEncKey(keyBase64);
   if (!key) {
     throw new Error(
-      "MARKETING_EMAIL_ENC_KEY must be base64-encoded 32 bytes (value not logged)"
+      "MARKETING_EMAIL_ENC_KEY must be base64-encoded 32 bytes (value not logged)",
     );
   }
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const normalized = normalizeMarketingEmail(email);
-  const ct = Buffer.concat([
-    cipher.update(normalized, "utf8"),
-    cipher.final(),
-  ]);
+  const ct = Buffer.concat([cipher.update(normalized, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return [
     EMAIL_ENC_VERSION,
@@ -196,18 +193,20 @@ export function decryptEmail(emailEnc: string, keyBase64: string): string {
   const key = parseEncKey(keyBase64);
   if (!key) {
     throw new Error(
-      "MARKETING_EMAIL_ENC_KEY must be base64-encoded 32 bytes (value not logged)"
+      "MARKETING_EMAIL_ENC_KEY must be base64-encoded 32 bytes (value not logged)",
     );
   }
   const parts = emailEnc.split(":");
   if (parts.length !== 4 || parts[0] !== EMAIL_ENC_VERSION) {
-    throw new Error(`unsupported emailEnc format (expected ${EMAIL_ENC_VERSION})`);
+    throw new Error(
+      `unsupported emailEnc format (expected ${EMAIL_ENC_VERSION})`,
+    );
   }
   const [, ivB64, tagB64, ctB64] = parts;
   const decipher = createDecipheriv(
     "aes-256-gcm",
     key,
-    Buffer.from(ivB64, "base64")
+    Buffer.from(ivB64, "base64"),
   );
   decipher.setAuthTag(Buffer.from(tagB64, "base64"));
   return Buffer.concat([
@@ -221,7 +220,7 @@ export function decryptEmail(emailEnc: string, keyBase64: string): string {
 // 평문 토큰은 저장하지 않는다 — 링크 생성 시 파생, 검증 시 재계산.
 export function unsubscribeTokenForContact(
   contactId: string,
-  secret: string
+  secret: string,
 ): string {
   if (!secret) throw new Error("MARKETING_UNSUB_SECRET is not configured");
   return createHmac("sha256", secret)
@@ -232,7 +231,7 @@ export function unsubscribeTokenForContact(
 export function verifyUnsubscribeToken(
   contactId: string,
   token: string,
-  secret: string
+  secret: string,
 ): boolean {
   if (!secret || !token || !contactId) return false;
   const expected = unsubscribeTokenForContact(contactId, secret);
@@ -245,11 +244,11 @@ export function verifyUnsubscribeToken(
 export function buildUnsubscribeUrl(
   functionsBaseUrl: string,
   contactId: string,
-  secret: string
+  secret: string,
 ): string {
   const token = unsubscribeTokenForContact(contactId, secret);
   return `${functionsBaseUrl}/unsubscribeMarketingEmail?c=${encodeURIComponent(
-    contactId
+    contactId,
   )}&t=${encodeURIComponent(token)}`;
 }
 
@@ -268,7 +267,7 @@ export function isEmailable(
   contact: Pick<
     MarketingContactDoc,
     "emailMarketingConsent" | "unsubscribe" | "emailEnc"
-  > | null
+  > | null,
 ): EmailableVerdict {
   if (!contact) return { ok: false, reason: "no_contact" };
   if (contact.unsubscribe?.status === "unsubscribed") {
@@ -278,6 +277,206 @@ export function isEmailable(
     return { ok: false, reason: "consent_not_granted" };
   }
   return { ok: true, reason: "ok" };
+}
+
+// ─── consent 병합 (upsert·훅의 단일 판정) ───────────────────────────
+/**
+ * 컨택트 consent 전이 요청. 셋 다 "요청"일 뿐이며 실제 적용 여부는
+ * mergeEmailConsent 가 현재 상태를 보고 판정한다.
+ */
+export interface ConsentMergeRequest {
+  /** 명시적 마케팅 수신동의 부여 (unknown|pending 일 때만 적용) */
+  grant?: {
+    source: string;
+    version: string;
+    legalBasis: EmailMarketingConsent["legalBasis"];
+    consentedAt?: unknown | null;
+  } | null;
+  /** 재동의 대상 풀 편입 (unknown 일 때만 적용) — 발송 불가 상태 유지 */
+  pending?: { source: string; detail: string } | null;
+  /** 동의 철회 (granted|pending 일 때 적용) */
+  revoke?: { source: string; detail: string } | null;
+}
+
+export interface ConsentMergeResult {
+  consent: EmailMarketingConsent;
+  /** 실제로 상태가 바뀐 경우에만 non-null — consent_events 에 기록할 항목 */
+  event: { type: ConsentEvent["type"]; source: string; detail: string } | null;
+}
+
+export const UNKNOWN_CONSENT: EmailMarketingConsent = {
+  status: "unknown",
+  source: "",
+  version: "",
+  consentedAt: null,
+  revokedAt: null,
+  legalBasis: "none",
+};
+
+/**
+ * consent 병합의 단일 판정기. 훅 5개·백필·설정 변경이 전부 여기로 수렴한다.
+ *
+ * 우선순위와 불변식:
+ *  1. ★철회가 동의를 이긴다 — revoke 요청이 있으면 grant 요청은 무시한다.
+ *     (같은 write 에서 둘 다 오는 일은 없지만, 오면 안전한 쪽으로 접는다.)
+ *  2. grant: unknown|pending → granted. ★revoked 는 절대 되살리지 않는다 —
+ *     재동의는 revoked 상태를 명시적으로 지우는 별도 경로에서만.
+ *  3. pending: unknown → pending. granted 를 pending 으로 강등하지 않는다.
+ *  4. 그 외에는 현재 상태 그대로(멱등) — event 도 null 이라 중복 기록이 없다.
+ *
+ * `now` 는 타임스탬프 값을 주입받는다(운영: serverTimestamp 센티넬, 테스트: Date).
+ */
+export function mergeEmailConsent(
+  base: EmailMarketingConsent | null | undefined,
+  request: ConsentMergeRequest,
+  now: unknown,
+): ConsentMergeResult {
+  const current = base ?? UNKNOWN_CONSENT;
+
+  if (
+    request.revoke &&
+    (current.status === "granted" || current.status === "pending")
+  ) {
+    return {
+      consent: {
+        status: "revoked",
+        source: request.revoke.source,
+        version: current.version,
+        consentedAt: current.consentedAt,
+        revokedAt: now,
+        legalBasis: current.legalBasis,
+      },
+      event: {
+        type: "revoked",
+        source: request.revoke.source,
+        detail: request.revoke.detail,
+      },
+    };
+  }
+
+  if (
+    request.grant &&
+    !request.revoke &&
+    (current.status === "unknown" || current.status === "pending")
+  ) {
+    return {
+      consent: {
+        status: "granted",
+        source: request.grant.source,
+        version: request.grant.version,
+        consentedAt: request.grant.consentedAt ?? now,
+        revokedAt: null,
+        legalBasis: request.grant.legalBasis,
+      },
+      event: {
+        type: "granted",
+        source: request.grant.source,
+        detail: `legalBasis=${request.grant.legalBasis} version=${request.grant.version}`,
+      },
+    };
+  }
+
+  if (request.pending && !request.revoke && current.status === "unknown") {
+    return {
+      consent: {
+        status: "pending",
+        source: request.pending.source,
+        version: "",
+        consentedAt: null,
+        revokedAt: null,
+        legalBasis: "none",
+      },
+      event: {
+        type: "pending_init",
+        source: request.pending.source,
+        detail: request.pending.detail,
+      },
+    };
+  }
+
+  return { consent: current, event: null };
+}
+
+// ─── users/{uid}.webPrivacyConsent → 마케팅 동의 동기화 판정 ──────────
+/**
+ * ★마케팅 수신동의의 유일한 소스는 users/{uid}.webPrivacyConsent.marketing 이다.
+ *
+ * 데스크탑 앱이 쓰는 users/{uid}.privacyConsent 는 텔레메트리 동의
+ * (firstPartyTelemetry/sentry/ga4/mixpanel/overseasTransfer) 스키마로,
+ * marketing 필드 자체가 없다 — 읽지 않는다. waitlist 의 agreed 도 마찬가지로
+ * 마케팅 동의가 아니다(COMPLIANCE-AUDIT.md D2).
+ */
+export interface WebPrivacyConsentRaw {
+  marketing?: unknown;
+  version?: unknown;
+  locale?: unknown;
+  acceptedAt?: unknown;
+}
+
+export interface UserDocRaw {
+  webPrivacyConsent?: WebPrivacyConsentRaw;
+  [key: string]: unknown;
+}
+
+export type MarketingConsentSyncAction =
+  | {
+      kind: "none";
+      reason: "no_consent_record" | "unchanged" | "never_opted_in";
+    }
+  | {
+      kind: "grant";
+      version: string;
+      locale: string;
+      consentedAt: unknown | null;
+    }
+  | { kind: "revoke"; reason: "opted_out" };
+
+/**
+ * users/{uid} write 를 보고 마케팅 컨택트에 무엇을 해야 하는지 판정한다.
+ *
+ * ★"동의를 안 한 사람"과 "동의를 철회한 사람"을 구분한다. marketing 이 처음부터
+ * false 인 사람(가입 시 체크 안 함)은 revoke 대상이 아니다 — 애초에 granted 인
+ * 적이 없으므로 아무것도 하지 않는다(never_opted_in). true→false 전이만 철회다.
+ *
+ * ★멱등: marketing 이 그대로면(둘 다 true, 또는 acceptedAt 만 갱신) unchanged 로
+ * 접어 users 문서의 무관한 필드 갱신마다 컨택트를 다시 쓰지 않는다. 단 동의 문안
+ * 버전이 오르면(재동의) grant 를 다시 흘려보낸다.
+ */
+export function decideMarketingConsentSync(
+  before: UserDocRaw | null | undefined,
+  after: UserDocRaw | null | undefined,
+): MarketingConsentSyncAction {
+  const afterConsent = after?.webPrivacyConsent;
+  if (!afterConsent) return { kind: "none", reason: "no_consent_record" };
+
+  const beforeConsent = before?.webPrivacyConsent;
+  const wasMarketing = beforeConsent?.marketing === true;
+  const isMarketing = afterConsent.marketing === true;
+
+  if (!isMarketing) {
+    // 동의한 적 없는 사람은 건드리지 않는다 — granted 로 올리지도, revoke 하지도 않음.
+    return wasMarketing
+      ? { kind: "revoke", reason: "opted_out" }
+      : { kind: "none", reason: "never_opted_in" };
+  }
+
+  const version =
+    typeof afterConsent.version === "string" ? afterConsent.version : "";
+  const beforeVersion =
+    typeof beforeConsent?.version === "string" ? beforeConsent.version : "";
+  // 이미 동의 상태 그대로이고 버전도 같으면 재적용 불필요(멱등).
+  if (wasMarketing && version === beforeVersion) {
+    return { kind: "none", reason: "unchanged" };
+  }
+
+  const locale =
+    typeof afterConsent.locale === "string" ? afterConsent.locale : "ko";
+  return {
+    kind: "grant",
+    version,
+    locale,
+    consentedAt: afterConsent.acceptedAt ?? null,
+  };
 }
 
 // ─── lifecycle·세그먼트 파생 ────────────────────────────────────────
@@ -354,7 +553,7 @@ export function toIsoOrNull(v: unknown): string | null {
 export function contactToBqRow(
   contactId: string,
   data: Partial<MarketingContactDoc>,
-  snapshotDate: string
+  snapshotDate: string,
 ): MarketingContactBqRow {
   const consent = data.emailMarketingConsent;
   const sub = data.subscription;
