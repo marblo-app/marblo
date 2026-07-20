@@ -192,19 +192,16 @@ export default function PricingSection() {
                           : t("autoRenew.monthly")}
                       </p>
                       {/* 토스 계약과정 FAQ §3(무형재화): 서비스 제공기간이 상품
-                          설명에서 명확히 확인되어야 한다. 한 결제가 사는 기간의
-                          근거는 v3/functions/src/billing.ts 의 nextPeriodEnd()
-                          = +1개월, 그리고 selectDueForCharge 가 만료 전 선청구를
-                          막으므로 사전결제 예약기간은 0 이다.
-                          연간은 백엔드 청구가 아직 없어 제공기간을 단정할 수
-                          없으므로 여기서 쓰지 않는다. 연간 문구는 연간 청구
-                          구현과 같은 PR 에 들어간다(티켓 b8ggw6Th) — 사이트가
-                          사실 아닌 것을 주장하는 창을 만들지 않기 위해서다. */}
-                      {!isAnnual && (
-                        <p className="mt-1 text-zinc-400">
-                          {t("servicePeriod.monthly")}
-                        </p>
-                      )}
+                          설명에서 명확히 확인되어야 한다. 근거는
+                          v3/functions/src/billing.ts 의 nextPeriodEnd() =
+                          월간 +1개월 / 연간 +12개월, 그리고
+                          selectDueForCharge 가 만료 전 선청구를 막으므로
+                          사전결제 예약기간은 0 이다. */}
+                      <p className="mt-1 text-zinc-400">
+                        {isAnnual
+                          ? t("servicePeriod.annual")
+                          : t("servicePeriod.monthly")}
+                      </p>
                     </div>
                   )}
                 </div>

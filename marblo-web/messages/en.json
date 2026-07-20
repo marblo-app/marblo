@@ -254,7 +254,8 @@
       "annual": "Annual subscription · renews automatically every year"
     },
     "servicePeriod": {
-      "monthly": "Maximum service period: 1 month from the payment date"
+      "monthly": "Maximum service period: 1 month from the payment date",
+      "annual": "Service period: 12 months (1 year) from the payment date"
     },
     "billing": {
       "monthly": "Monthly",
