@@ -253,6 +253,9 @@
       "monthly": "Monthly subscription · renews by automatic monthly payment",
       "annual": "Annual subscription · renews automatically every year"
     },
+    "servicePeriod": {
+      "monthly": "Maximum service period: 1 month from the payment date"
+    },
     "billing": {
       "monthly": "Monthly",
       "annual": "Annual",
@@ -522,6 +525,7 @@
     "monthly": "/mo",
     "annual": "/year",
     "monthlyAutoRenewNotice": "{amount} will be charged automatically every month and renew until canceled",
+    "monthlyServicePeriodNotice": "Maximum service period: 1 month from the payment date (through the day before the next payment date). It renews automatically each month until you cancel.",
     "annualAutoRenewNotice": "{amount} will be charged automatically every year and renew until canceled",
     "cancelNotice": "To cancel your subscription, contact customer support.",
     "lectureTitle": "Lecture",

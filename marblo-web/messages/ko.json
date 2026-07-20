@@ -253,6 +253,9 @@
       "monthly": "월 구독 · 매달 자동결제로 갱신",
       "annual": "연 구독 · 매년 자동갱신"
     },
+    "servicePeriod": {
+      "monthly": "최대 서비스 제공기간: 결제일로부터 1개월"
+    },
     "billing": {
       "monthly": "월간",
       "annual": "연간",
@@ -522,6 +525,7 @@
     "monthly": "/월",
     "annual": "/년",
     "monthlyAutoRenewNotice": "매달 {amount} 자동결제, 해지 전까지 갱신",
+    "monthlyServicePeriodNotice": "최대 서비스 제공기간: 결제일로부터 1개월(다음 결제일 전일까지). 해지하지 않으면 매월 자동 갱신됩니다.",
     "annualAutoRenewNotice": "매년 {amount} 자동결제, 해지 전까지 갱신",
     "cancelNotice": "구독 해지는 고객지원 문의로 요청할 수 있습니다.",
     "lectureTitle": "강의",
