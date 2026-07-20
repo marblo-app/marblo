@@ -19,6 +19,12 @@ import {
 import { useArchiveSignals } from "../../hooks/useArchiveSignals";
 import { t, useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
+import {
+  initialWorktreeProjectFilter,
+  nextWorktreeProjectFilter,
+  WORKTREE_PROJECT_FILTER_ALL,
+  WORKTREE_PROJECT_FILTER_LOADING,
+} from "./worktreeProjectFilter";
 
 const TONE_CLASSES: Record<WorktreeStatusTone, string> = {
   danger: "bg-red-500/15 text-red-300 border border-red-500/30",
@@ -448,9 +454,15 @@ export function WorktreeTab() {
   const archiveSignals = useArchiveSignals();
   const setWorktreeArchived = useWorktreeStore((s) => s.setWorktreeArchived);
   const projects = useProjectStore((s) => s.projects);
+  const currentProjectId = useProjectStore((s) => s.currentProject?.id ?? null);
   const { t } = useTranslation();
 
-  const [projectFilter, setProjectFilter] = useState<string>("all");
+  const [projectFilter, setProjectFilter] = useState<string>(
+    () =>
+      initialWorktreeProjectFilter(
+        useProjectStore.getState().currentProject?.id,
+      ),
+  );
   const [statusFilter, setStatusFilter] = useState<WorktreeStatusTone | "all">(
     "all",
   );
@@ -477,6 +489,12 @@ export function WorktreeTab() {
     refresh().catch(() => {});
   }, [refresh]);
 
+  useEffect(() => {
+    setProjectFilter((currentFilter) =>
+      nextWorktreeProjectFilter(currentFilter, currentProjectId),
+    );
+  }, [currentProjectId]);
+
   // 완료 이력은 뷰가 켜졌을 때만 구독 (on-demand 리스너).
   useEffect(() => {
     if (!historyView) return;
@@ -494,7 +512,7 @@ export function WorktreeTab() {
   // 프로젝트 필터를 완료 이력에도 적용 (이력은 이미 최신순 정렬됨).
   const historyEntries = useMemo(
     () =>
-      projectFilter === "all"
+      projectFilter === WORKTREE_PROJECT_FILTER_ALL
         ? history
         : history.filter((e) => e.projectId === projectFilter),
     [history, projectFilter],
@@ -521,7 +539,10 @@ export function WorktreeTab() {
       if (archivedView ? !isArchived : isArchived) {
         return false;
       }
-      if (projectFilter !== "all" && wt.projectId !== projectFilter) {
+      if (
+        projectFilter !== WORKTREE_PROJECT_FILTER_ALL &&
+        wt.projectId !== projectFilter
+      ) {
         return false;
       }
       if (statusFilter !== "all" && statusPill(wt).tone !== statusFilter) {
@@ -584,8 +605,14 @@ export function WorktreeTab() {
     [worktrees, archiveOverrides, archiveSignals],
   );
 
-  const isEmpty = !loading && worktrees.length === 0;
-  const noMatches = !loading && worktrees.length > 0 && groups.length === 0;
+  const waitingForDefaultProject =
+    projectFilter === WORKTREE_PROJECT_FILTER_LOADING;
+  const isEmpty = !waitingForDefaultProject && !loading && worktrees.length === 0;
+  const noMatches =
+    !waitingForDefaultProject &&
+    !loading &&
+    worktrees.length > 0 &&
+    groups.length === 0;
 
   const openWorktree = (worktree: Worktree) => {
     // Worktrees-tab "Open" = open the checkout in the Code editor. Route through
@@ -732,7 +759,12 @@ export function WorktreeTab() {
           onChange={(e) => setProjectFilter(e.target.value)}
           className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-200"
         >
-          <option value="all">All projects</option>
+          {projectFilter === WORKTREE_PROJECT_FILTER_LOADING ? (
+            <option value={WORKTREE_PROJECT_FILTER_LOADING} disabled>
+              Loading project...
+            </option>
+          ) : null}
+          <option value={WORKTREE_PROJECT_FILTER_ALL}>All projects</option>
           {projectOptions.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
@@ -850,7 +882,11 @@ export function WorktreeTab() {
 
       {/* 본문 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {historyView ? (
+        {waitingForDefaultProject ? (
+          <div className="flex h-full items-center justify-center text-sm text-gray-500">
+            {t("worktree.loading")}
+          </div>
+        ) : historyView ? (
           historyLoading && history.length === 0 ? (
             <div className="flex h-full items-center justify-center text-sm text-gray-500">
               {t("worktree.history.loading")}
