@@ -17,6 +17,7 @@ import {
   where,
   orderBy,
   limit as fsLimit,
+  waitForPendingWrites,
   Timestamp,
   type QueryConstraint,
   type QuerySnapshot,
@@ -84,6 +85,14 @@ import {
   worktreeAttributionCwd,
   type LedgerEventKind,
 } from "./ledger.js";
+import {
+  LedgerSpool,
+  defaultSpoolDir,
+  formatSpoolStatus,
+  requireServerAck,
+  spoolNotice,
+  type SpoolNotice,
+} from "./ledger-spool.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -822,9 +831,10 @@ function attributionAgentId(paramId?: string): string {
  * ★모르는 값은 null 로 남는다. 추측해서 채우지 않는다 — 판별 불가한 것을 확실한
  * 것처럼 보이게 만드는 게 감사에서는 가장 나쁘다.
  *
- * NOTE(§7): 실패가 여전히 console.error 한 줄로 삼켜진다. 규제 원장으로는 치명적
- * 이지만(네트워크 30분 단절 = 흔적 없는 공백) 그 수정은 로컬 스풀 + 재시도라
- * 후속 L1 슬라이스 담당이다. 이 티켓은 스키마만 확정하고 동작을 바꾸지 않는다.
+ * L1(§7): 실패는 더 이상 console.error 한 줄로 삼켜지지 않는다. 모든 이벤트가
+ * 로컬 스풀 큐를 지나며(ledger-spool.ts), 쓰기가 실패하면 디스크에 보관됐다가
+ * 복구 시 **순서를 보존해** 재적재된다. `enqueue()` 는 동기라 이 함수는 여전히
+ * fire-and-forget 이고 MCP 툴 호출을 막지 않는다.
  */
 function auditLog(entry: {
   projectId: string;
@@ -846,12 +856,75 @@ function auditLog(entry: {
     cwd: worktreeAttributionCwd(process.env, process.cwd()),
     homeDir: os.homedir(),
   });
-  addDoc(collection(db, "audit_logs"), {
-    ...event,
-    createdAt: Timestamp.now(),
-  }).catch((err) => {
-    console.error("[Audit] Failed to write audit log:", err);
+  // 동기 반환 — 스풀이 툴 호출을 막지 않는다.
+  ledgerSpool().enqueue(event);
+}
+
+// ── 감사 원장 스풀 (L1, §7) ──────────────────────────────────────
+
+let spoolSingleton: LedgerSpool | null = null;
+
+/**
+ * 이 프로세스의 스풀. **프로세스당 하나**이고, 그래서 프로세스 내 전역 순서를
+ * 보장한다.
+ *
+ * ★L3(체인)와의 정합: L3 의 해시 체인 단위는 `(projectId, agentId)`(§6)인데 한
+ * 프로세스가 여러 projectId 의 이벤트를 낼 수 있으므로(cross-project-create 계열
+ * 툴) 둘은 동치가 아니라 **포함** 관계다 — 프로세스 전역 순서가 보존되면 그
+ * 부분열인 각 체인의 순서도 자동으로 보존된다. 즉 스풀 순서는 체인 seq 의 상위
+ * 보장이고, L3 는 `seq` 를 **enqueue 시점**에 매기기만 하면 된다(write 시점에
+ * 매기면 안 된다 — 스풀은 30분 뒤에 재적재될 수 있어 write 순서 ≠ 발생 순서다).
+ */
+function ledgerSpool(): LedgerSpool {
+  if (spoolSingleton) return spoolSingleton;
+  spoolSingleton = new LedgerSpool({
+    dir: defaultSpoolDir(),
+    agentId: attributionAgentId(),
+    sink: async (rec) => {
+      // addDoc(자동 id)이 아니라 로컬 생성 id 로 setDoc 한다 — ack 만 유실되고
+      // 실제로는 성공했던 쓰기를 재시도해도 중복 문서가 생기지 않는다. 원장에서
+      // 같은 사건이 두 건으로 보이면 그 자체가 감사 증거의 오염이다.
+      // 룰상 create 는 isAuthenticated 라 클라이언트 지정 id 도 통과한다
+      // (firestore.rules `match /audit_logs/{logId}`).
+      //
+      // ★쓰기 전체를 시간 상한으로 감싼다. 오프라인일 때 Firestore 의 쓰기
+      // 프로미스는 resolve 도 reject 도 하지 않아 영원히 매달린다 — 실제 dist-mcp
+      // 번들로 권한 거부를 재현해 확인했다(ledger-spool.ts 상단 "라이브 실측").
+      // 상한이 없으면 배수 루프가 첫 레코드에서 멈춘 채 실패를 영원히 관측하지
+      // 못하고, 그게 이 티켓이 없애려는 조용한 유실 그 자체다.
+      await requireServerAck(async () => {
+        await setDoc(doc(collection(db, "audit_logs"), rec.id), {
+          ...rec.event,
+          // ★발생 시각이지 적재 시각이 아니다. 재적재분에 지금 시각을 찍으면 원장이
+          // "그때 일어난 일"을 "지금 일어난 일"로 기록하게 된다.
+          createdAt: Timestamp.fromMillis(rec.occurredAtMs),
+        });
+        // 이중 안전장치: 쓰기가 로컬에서 먼저 resolve 되는 경로가 생기더라도
+        // 백엔드 ack 까지 확인한다. 이미 ack 됐으면 즉시 resolve 라 비용이 없다.
+        await waitForPendingWrites(db);
+      });
+    },
+    onNotice: (n) => {
+      lastSpoolNotice = n;
+    },
   });
+  return spoolSingleton;
+}
+
+let lastSpoolNotice: SpoolNotice | null = null;
+
+/** 기동 시 이전 프로세스가 남긴 스풀을 복원한다(순서 보존 재적재). */
+export async function restoreLedgerSpool(): Promise<number> {
+  try {
+    return await ledgerSpool().restore();
+  } catch (err) {
+    console.error(
+      `[Audit] 스풀 복원 실패: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return 0;
+  }
 }
 
 function sanitizeParams(
@@ -913,7 +986,16 @@ function isTerminalTaskStatus(s: unknown): boolean {
  * one cached stat and adds nothing to its output.
  */
 async function withStaleBuildNotice<T>(result: T): Promise<T> {
-  const notice = await staleBuildNotice();
+  // 프로세스 수준 경고 두 종을 같은 채널로 붙인다: stale build(이 프로세스가 낡은
+  // 번들을 돌리고 있다) + 감사 원장 스풀(감사 기록이 원장에 못 들어가고 있다).
+  // 툴 결과는 오케/에이전트가 항상 읽는 유일한 채널이라, 관측돼야 할 프로세스
+  // 상태를 여기 태운다.
+  //
+  // ★스풀 경고는 스로틀하지 않는다 — 상한에 닿는 순간이 가장 시끄러워야 한다.
+  // 조용해지면 이 티켓이 없애려던 조용한 유실이 자리만 옮겨 되살아난다.
+  const notice = [await staleBuildNotice(), spoolNotice(ledgerSpool().status())]
+    .filter(Boolean)
+    .join("\n");
   if (!notice) return result;
   const r = result as { content?: Array<{ type?: string; text?: string }> };
   const first = r?.content?.[0];
@@ -1543,7 +1625,9 @@ export function registerTools(server: McpServer): void {
       await setDoc(ref, data);
       const notes2 = [warning, resolvedProject.warning].filter(Boolean);
       return text(
-        `Task created successfully!\nID: ${ref.id}\nTitle: ${title}\nRole: ${role}\nPriority: ${
+        `Task created successfully!\nID: ${
+          ref.id
+        }\nTitle: ${title}\nRole: ${role}\nPriority: ${
           priority ?? 0
         }\nProject: ${projectId}` +
           (notes2.length ? `\n⚠️ ${notes2.join("\n⚠️ ")}` : ""),
@@ -1697,9 +1781,9 @@ export function registerTools(server: McpServer): void {
             results.push(
               `  [FAILED] ${
                 (t.title as string) || `task #${i}`
-              } — invalid role '${String(roleRaw)}' (valid: ${TASK_ROLE_VALUES.join(
-                ", ",
-              )})`,
+              } — invalid role '${String(
+                roleRaw,
+              )}' (valid: ${TASK_ROLE_VALUES.join(", ")})`,
             );
             continue;
           }
@@ -4328,5 +4412,38 @@ export function registerTools(server: McpServer): void {
         );
       }
     },
+  );
+
+  // ── 감사 원장 스풀 상태 (L1, §7) ──
+  //
+  // 후속 L2(룰 조이기)의 라이브 검증이 이 툴을 직접 쓴다. `audit_logs` 를
+  // isProjectMember() 로 조이면 쓰는 쪽이 MCP 서버(에이전트 프로세스)인데, 이들이
+  // project.members 소속 uid 로 인증하는지 확인 없이 조이면 전원의 감사 기록이
+  // permission-denied 로 죽는다. 이 툴이 그 실패를 **보이게** 만드는 계기판이다
+  // (§9 — 이 순서 자체가 안전장치).
+  //
+  // userFacing:false: read-only 진단이라 활동 스트림에 노이즈를 만들지 않는다.
+  // 스풀 상태를 묻는 행위가 다시 감사 이벤트를 낳는 되먹임도 피한다.
+  auditedTool(
+    "get_ledger_spool_status",
+    "Audit-ledger spool health for THIS MCP process: how many audit events are stuck, why the last write failed, and whether any were dropped past the cap. Use it to tell 'no record' apart from 'did not happen' — a non-zero dropped count means the ledger has a real gap.",
+    {},
+    async () => {
+      const status = ledgerSpool().status();
+      const lines = [formatSpoolStatus(status, Date.now())];
+      if (lastSpoolNotice) {
+        lines.push(
+          `\n마지막 알림(${lastSpoolNotice.kind}): ${lastSpoolNotice.message}`,
+        );
+      }
+      // ★"모른다"를 "괜찮다"로 답하지 않는다(§15). 이 툴이 답하는 범위를 명시한다.
+      lines.push(
+        `\n범위: 이 MCP 프로세스(agent=${attributionAgentId()})가 기동한 이후만 관측합니다. ` +
+          `이전 기동분은 디스크 스풀로 복원된 것에 한해 포함됩니다. ` +
+          `다른 에이전트 프로세스의 스풀은 여기서 보이지 않습니다.`,
+      );
+      return text(lines.join("\n"));
+    },
+    { userFacing: false },
   );
 }

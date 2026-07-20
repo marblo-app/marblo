@@ -4,7 +4,7 @@ import path from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { authReady } from "./firebase.js";
-import { registerTools } from "./tools.js";
+import { registerTools, restoreLedgerSpool } from "./tools.js";
 import { registerPrompts } from "./prompts.js";
 import { bakedBuildStamp, entryPath, formatBootBanner } from "./build-info.js";
 
@@ -144,6 +144,11 @@ async function main() {
   // 인증은 백그라운드에서 진행/대기 — 핸드셰이크를 절대 막지 않는다. authReady 는
   // reject 하지 않고 ~10s 타임아웃 가드가 있어 실패/지연에도 여기서 멈추지 않는다.
   await authReady;
+
+  // 이전 기동에서 원장에 못 들어간 감사 이벤트를 순서 보존해 재적재한다(L1, §7).
+  // 인증 뒤에 돌리되 await 하지 않는다 — 재적재가 서버 기동을 막으면 안 된다.
+  // 실패해도 스풀은 그대로 남고 백오프 재시도가 이어진다.
+  void restoreLedgerSpool();
 }
 
 main().catch((err) => {
