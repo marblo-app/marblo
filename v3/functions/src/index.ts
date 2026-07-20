@@ -53,6 +53,7 @@ import {
   hasPaymentEvidence as hasBillingPaymentEvidence,
   type SubscriptionSnapshot,
 } from "./billing";
+import { resolveEntitledPlan } from "./entitlement";
 
 function getFirebaseProjectId(): string | undefined {
   if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
@@ -972,19 +973,50 @@ export const chargeBillingKey = functions.https.onCall(
   },
 );
 
-// 토스 정기결제 취소
+// 토스 정기결제 취소 = "다음 결제를 멈춘다". 이미 결제한 기간은 끝까지 쓴다.
+//
+// ★해지(cancel)와 중도 환불(refund)은 다른 행위다. 여기서는 환불하지 않으므로
+// 접근권도 즉시 끊지 않는다 — 그 둘을 뭉개면 "접근은 끊고 환불도 안 하는" 최악의
+// 조합이 된다(이 함수의 원래 버그).
+//
+// 다음 결제가 실제로 멈추는 근거: 토스 정기결제는 pull 모델이라 토스 쪽에
+// recurring 객체가 없고, 우리가 billingKey 로 매 사이클 직접 청구한다. 그 청구
+// 대상 선정(billing.ts selectDueForCharge)이 status==="active"|"past_due" 만
+// 통과시키므로, status="canceled" 를 쓰는 순간 청구는 멈춘다. 그래서 status 를
+// active 로 남기는 설계(= cancelAtPeriodEnd 플래그)를 쓰면 안 된다 — 기간 말에
+// 해지한 사용자가 다시 청구된다.
+//
+// 잔여 기간의 접근권은 currentPeriodEnd 를 함께 보는 entitlement.ts 규칙이
+// 부여한다(렌더러/functions 공통).
 export const cancelTossSubscription = functions.https.onCall(
   async (_data, context) => {
     const userId = context.auth?.uid;
     if (!userId)
       throw new functions.https.HttpsError("unauthenticated", "Login required");
 
-    await db.collection("subscriptions").doc(userId).update({
+    const subRef = db.collection("subscriptions").doc(userId);
+    const snap = await subRef.get();
+    if (!snap.exists)
+      throw new functions.https.HttpsError(
+        "not-found",
+        "No subscription to cancel",
+      );
+
+    await subRef.update({
       status: "canceled",
-      canceledAt: new Date(),
+      canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return { success: true };
+    // 사용자에게 "언제까지 쓸 수 있는지"를 돌려준다. 기간이 기록돼 있지 않은
+    // 레거시 문서는 잔여 기간을 줄 근거가 없으므로 즉시 종료로 안내한다(없는
+    // 기간을 지어내지 않는다).
+    const accessUntilMs = tsToMillis(snap.get("currentPeriodEnd"));
+    return {
+      success: true,
+      accessUntil:
+        accessUntilMs != null ? new Date(accessUntilMs).toISOString() : null,
+    };
   },
 );
 
@@ -3157,14 +3189,20 @@ export const enforceProjectLimit = functions.firestore
       const ownerId = typeof data.ownerId === "string" ? data.ownerId : "";
       if (!ownerId) return;
 
-      // 소유자 플랜 조회. subscriptions/{uid} 가 status=active 일 때만 유료로 인정
-      // (렌더러 getPlan() 과 동일 규칙).
+      // 소유자 플랜 조회. 판정은 entitlement.ts 단일 규칙에 위임한다 — 렌더러
+      // getPlan() 과 **같은 규칙**이어야 하고(그 일치는 v3 유닛테스트가 강제),
+      // status 단독으로 보면 해지한 사용자의 잔여 결제 기간 중에 이 트리거가
+      // 프로젝트를 삭제해 버린다.
       const subSnap = await db.collection("subscriptions").doc(ownerId).get();
       const sub = subSnap.exists ? subSnap.data() || {} : {};
-      const plan =
-        sub.status === "active" && typeof sub.planType === "string"
-          ? (sub.planType as string)
-          : "free";
+      const plan = resolveEntitledPlan(
+        {
+          status: typeof sub.status === "string" ? sub.status : null,
+          planType: typeof sub.planType === "string" ? sub.planType : null,
+          currentPeriodEndMs: tsToMillis(sub.currentPeriodEnd),
+        },
+        Date.now(),
+      );
 
       const limit = PROJECT_LIMIT_BY_PLAN[plan];
       if (limit === undefined) return; // 무제한 플랜 → 방어 불필요

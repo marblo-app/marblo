@@ -2,9 +2,26 @@ import { create } from "zustand";
 import type { Subscription, PlanType } from "../types/subscription";
 import { subscribeToDocument, convertTimestamps } from "../services/firestore";
 import { planCanUse } from "../lib/planLimits";
+import { resolveEntitledPlan } from "../lib/entitlement";
 
 const COLLECTION = "subscriptions";
 const DATE_FIELDS = ["currentPeriodStart", "currentPeriodEnd", "createdAt"];
+
+// convertTimestamps 가 Date 로 바꿔주지만, 레거시 문서는 필드가 아예 없거나
+// Firestore Timestamp 가 그대로 남아 있을 수 있다. 판정 함수에 넘기기 전에 ms 로
+// 정규화하고, 해석 불가한 값은 null(=기간 미상)로 떨어뜨린다.
+function toMillis(value: unknown): number | null {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const ts = value as { toMillis?: () => number; seconds?: number };
+  if (typeof ts.toMillis === "function") return ts.toMillis();
+  if (typeof ts.seconds === "number") return ts.seconds * 1000;
+  return null;
+}
 
 function toSubscription(raw: Record<string, unknown>): Subscription {
   return convertTimestamps<Subscription>(raw, DATE_FIELDS);
@@ -49,8 +66,18 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
   getPlan: () => {
     const { subscription } = get();
-    if (!subscription || subscription.status !== "active") return "free";
-    return subscription.planType;
+    // 판정은 lib/entitlement.ts 단일 규칙에 위임한다. status 단독으로 보면
+    // 해지 즉시 free 로 떨어져 이미 결제한 잔여 기간이 소멸한다(P0). functions
+    // 측 동일 규칙과의 일치는 tests/unit/subscription-entitlement.test.ts 가
+    // 강제한다.
+    return resolveEntitledPlan(
+      {
+        status: subscription?.status,
+        planType: subscription?.planType,
+        currentPeriodEndMs: toMillis(subscription?.currentPeriodEnd),
+      },
+      Date.now(),
+    ) as PlanType;
   },
 
   canUse: (feature: string) => {
