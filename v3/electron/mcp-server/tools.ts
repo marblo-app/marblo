@@ -78,7 +78,14 @@ import {
   resolveCompletionReport,
   type CompletionSummary,
 } from "./completion-report.js";
+import {
+  buildLedgerEvent,
+  readAgentRuntimeContext,
+  worktreeAttributionCwd,
+  type LedgerEventKind,
+} from "./ledger.js";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 
@@ -805,6 +812,20 @@ function attributionAgentId(paramId?: string): string {
   return WORKER_AGENT_ID || workerAgentId(paramId || MARBLO_AGENT_ID);
 }
 
+/**
+ * 감사 원장 한 건을 적재한다(`audit_logs`).
+ *
+ * 신규 귀속 필드(actorUid/model/tier/instructionHash/taskId/worktreeId/kind)는
+ * ledger.ts 의 순수 함수가 조립한다 — 여기서는 프로세스 맥락(인증 uid, cwd, home,
+ * env)만 넘긴다. 스키마는 스펙 §5, 분류는 §15.
+ *
+ * ★모르는 값은 null 로 남는다. 추측해서 채우지 않는다 — 판별 불가한 것을 확실한
+ * 것처럼 보이게 만드는 게 감사에서는 가장 나쁘다.
+ *
+ * NOTE(§7): 실패가 여전히 console.error 한 줄로 삼켜진다. 규제 원장으로는 치명적
+ * 이지만(네트워크 30분 단절 = 흔적 없는 공백) 그 수정은 로컬 스풀 + 재시도라
+ * 후속 L1 슬라이스 담당이다. 이 티켓은 스키마만 확정하고 동작을 바꾸지 않는다.
+ */
 function auditLog(entry: {
   projectId: string;
   agentId: string;
@@ -813,9 +834,20 @@ function auditLog(entry: {
   result: string;
   duration: number;
   success: boolean;
+  kind?: LedgerEventKind;
 }): void {
-  addDoc(collection(db, "audit_logs"), {
+  const event = buildLedgerEvent({
     ...entry,
+    actorUid: getCurrentAuthUid(),
+    runtime: readAgentRuntimeContext(),
+    // 에이전트 CLI 는 워크트리를 cwd 로 스폰되고(bridge-server: cwd=worktreePath)
+    // MCP 서버는 그 cwd 를 상속한다. 그래서 cwd 가 워크트리 귀속의 근거가 된다.
+    // MARBLO_PROJECT_ROOT 를 폴백으로 두지 않는 이유는 worktreeAttributionCwd 참조.
+    cwd: worktreeAttributionCwd(process.env, process.cwd()),
+    homeDir: os.homedir(),
+  });
+  addDoc(collection(db, "audit_logs"), {
+    ...event,
     createdAt: Timestamp.now(),
   }).catch((err) => {
     console.error("[Audit] Failed to write audit log:", err);
