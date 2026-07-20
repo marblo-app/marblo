@@ -20,12 +20,28 @@ export function ProjectSetupBanners(props: ProjectSetup) {
     newProjectInputRef,
     handleCreateInlineProject,
     handleCancelInlineProject,
+    recoveryNotice,
+    dismissRecoveryNotice,
   } = props;
 
-  if (!showNewProject) return null;
+  if (!showNewProject && !recoveryNotice) return null;
 
   return (
     <div className="flex-shrink-0">
+      {recoveryNotice && (
+        <div className="flex items-center justify-between gap-3 border-b border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200">
+          <span className="min-w-0 truncate">{recoveryNotice}</span>
+          <button
+            type="button"
+            onClick={dismissRecoveryNotice}
+            className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-emerald-200 hover:bg-emerald-500/20"
+            aria-label="Dismiss notice"
+          >
+            x
+          </button>
+        </div>
+      )}
+
       {/* Inline project creation banner */}
       {showNewProject && (
         <div className="border-b border-blue-500/30 bg-blue-500/10 px-3 py-2">

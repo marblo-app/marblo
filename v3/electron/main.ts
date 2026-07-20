@@ -1222,6 +1222,7 @@ function persistWindowSession(): void {
 
 /** Paths already reported this session — see notifyRootPathMissing below. */
 const notifiedMissingRoots = new Set<string>();
+const notifiedWorktreeFallbacks = new Set<string>();
 
 /**
  * Best surviving root to offer as a way out of `deadRootPath`.
@@ -1268,6 +1269,7 @@ function repointWindowRoot(
   windowKey: number | undefined,
   rootPath: string,
   removedRootPath: string,
+  opts?: { notice?: string },
 ): void {
   if (windowKey === undefined) return;
   const entry = windowRestore.get(windowKey);
@@ -1276,6 +1278,7 @@ function repointWindowRoot(
   sendToOwner(windowKey, "window:rootPathInvalidated", {
     removedRootPath,
     rootPath,
+    ...(opts?.notice ? { notice: opts.notice } : {}),
   });
 }
 
@@ -1292,9 +1295,6 @@ function repointWindowRoot(
 // Now we name the cause and offer the way out. Shown once per path per session —
 // one removed worktree can invalidate several windows at once.
 function notifyRootPathMissing(rootPath: string, ownerKey?: number): void {
-  if (notifiedMissingRoots.has(rootPath)) return;
-  notifiedMissingRoots.add(rootPath);
-
   // Callers that have no window of their own (orchestrator handlers, cold-start
   // restore) still need the recovery buttons to DO something — fall back to the
   // window the user is looking at, then to the primary one.
@@ -1308,6 +1308,33 @@ function notifyRootPathMissing(rootPath: string, ownerKey?: number): void {
     homeDir: os.homedir(),
     ...(fallbackRootPath ? { fallbackRootPath } : {}),
   });
+
+  if (
+    diagnosis.failure === "worktree-removed" &&
+    diagnosis.fallbackRootPath &&
+    fs.existsSync(diagnosis.fallbackRootPath)
+  ) {
+    const shouldNotify = !notifiedWorktreeFallbacks.has(rootPath);
+    notifiedWorktreeFallbacks.add(rootPath);
+    repointWindowRoot(
+      windowKey,
+      diagnosis.fallbackRootPath,
+      rootPath,
+      shouldNotify
+        ? {
+            notice: "작업 워크트리가 정리되어 프로젝트 루트로 돌아왔습니다.",
+          }
+        : undefined,
+    );
+    console.warn(
+      `[Window] Removed worktree root "${rootPath}" recovered without modal via "${diagnosis.fallbackRootPath}"`,
+    );
+    return;
+  }
+
+  if (notifiedMissingRoots.has(rootPath)) return;
+  notifiedMissingRoots.add(rootPath);
+
   const msg = describeRootPathFailure(diagnosis);
 
   const PICK = "다른 폴더 열기";
@@ -1378,6 +1405,8 @@ function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
   for (const { key, rootPath, removedRootPath } of scrubs) {
     const entry = windowRestore.get(key);
     if (!entry) continue;
+    const shouldNotify = !notifiedWorktreeFallbacks.has(removedRootPath);
+    notifiedWorktreeFallbacks.add(removedRootPath);
     if (rootPath) {
       windowRestore.set(key, { ...entry, rootPath });
       console.warn(
@@ -1395,6 +1424,11 @@ function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
     sendToOwner(key, "window:rootPathInvalidated", {
       removedRootPath,
       rootPath,
+      ...(rootPath && shouldNotify
+        ? {
+            notice: "작업 워크트리가 정리되어 프로젝트 루트로 돌아왔습니다.",
+          }
+        : {}),
     });
   }
   persistWindowSession();

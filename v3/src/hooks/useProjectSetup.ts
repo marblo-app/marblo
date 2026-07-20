@@ -39,6 +39,11 @@ export interface ProjectSetup {
   newProjectInputRef: React.RefObject<HTMLInputElement>;
   handleCreateInlineProject: () => Promise<void>;
   handleCancelInlineProject: () => void;
+
+  // Non-blocking recovery notice from main when a normal worktree cleanup
+  // silently falls back to the project root.
+  recoveryNotice: string | null;
+  dismissRecoveryNotice: () => void;
 }
 
 export function useProjectSetup(): ProjectSetup {
@@ -58,6 +63,7 @@ export function useProjectSetup(): ProjectSetup {
   const [pendingGitRemoteUrl, setPendingGitRemoteUrl] = useState<string | null>(
     null,
   );
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const newProjectInputRef = useRef<HTMLInputElement>(null);
 
   // Autofocus the name field whenever the inline banner opens.
@@ -178,9 +184,13 @@ export function useProjectSetup(): ProjectSetup {
   // persisted was never enough on its own — the open window has to follow.
   useEffect(() => {
     window.electronAPI.on("window:rootPathInvalidated", (payload: unknown) => {
-      const next = (payload as { rootPath?: string } | undefined)?.rootPath;
+      const data = payload as
+        | { rootPath?: string; notice?: string }
+        | undefined;
+      const next = data?.rootPath;
       // No replacement → drop to the folder picker rather than sit on a lie.
       setRootPath(next ?? null);
+      if (data?.notice) setRecoveryNotice(data.notice);
     });
     window.electronAPI.on("window:requestFolderPicker", () => {
       void handleSelectDirectory();
@@ -190,6 +200,12 @@ export function useProjectSetup(): ProjectSetup {
       window.electronAPI.off("window:requestFolderPicker");
     };
   }, [setRootPath, handleSelectDirectory]);
+
+  useEffect(() => {
+    if (!recoveryNotice) return;
+    const timer = window.setTimeout(() => setRecoveryNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [recoveryNotice]);
 
   const handleCreateInlineProject = useCallback(async () => {
     if (!newProjectName.trim() || !user || !pendingFolderPath) return;
@@ -256,5 +272,7 @@ export function useProjectSetup(): ProjectSetup {
     newProjectInputRef,
     handleCreateInlineProject,
     handleCancelInlineProject,
+    recoveryNotice,
+    dismissRecoveryNotice: () => setRecoveryNotice(null),
   };
 }
