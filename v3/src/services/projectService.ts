@@ -1,10 +1,16 @@
 import { where, arrayUnion, arrayRemove } from "firebase/firestore";
 import type { Project } from "../types/project";
 import {
+  buildMachinePathEntry,
+  machineKeyFor,
+  type ProjectMachinePath,
+} from "../lib/projectPaths";
+import {
   getDocument,
   queryDocuments,
   createDocument,
   updateDocument,
+  mergeDocument,
   deleteDocument,
   toTimestamp,
   convertTimestamps,
@@ -109,6 +115,33 @@ export async function updateProject(
 
 export async function deleteProject(projectId: string): Promise<void> {
   await deleteDocument(COLLECTION, projectId);
+}
+
+/**
+ * 이 기기의 폴더 경로 칸만 기록한다 (티켓 sHyHC9RoutYHDt97UOEm).
+ *
+ * ★다른 기기의 칸을 절대 건드리지 않는다. `setDoc(merge:true)` 는 중첩 맵을
+ * **재귀 병합**하므로 `folderPaths` 아래 내 키 하나만 보내면 형제 키(다른
+ * 기기들)는 서버에서 그대로 보존된다. 맵 전체를 read-modify-write 하면 두
+ * 기기가 동시에 등록할 때 서로의 칸을 날릴 수 있어 그 방식은 쓰지 않는다.
+ * (#494 의 telegramChannel 병합과 같은 방식)
+ *
+ * 레거시 단일 `folderPath` 필드는 **의도적으로 건드리지 않는다** — 아직
+ * 마이그레이션하지 않은 다른 기기나 구버전 클라이언트가 그 값에 의존하고
+ * 있을 수 있다. 새 필드가 권위자이고 레거시는 읽기 전용 유물로 남는다.
+ */
+export async function setProjectFolderPathForMachine(
+  projectId: string,
+  machineId: string,
+  path: string,
+  platform: string,
+): Promise<ProjectMachinePath> {
+  const entry = buildMachinePathEntry(machineId, path, platform, Date.now());
+  await mergeDocument(COLLECTION, projectId, {
+    folderPaths: { [machineKeyFor(machineId)]: entry },
+    updatedAt: toTimestamp(new Date()),
+  });
+  return entry;
 }
 
 export async function addMember(

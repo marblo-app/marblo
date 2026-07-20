@@ -13,9 +13,9 @@ import {
   type QueryConstraint,
   type DocumentData,
   type Unsubscribe,
-} from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { createDeferredSnapshotScheduler } from './firestoreScheduler';
+} from "firebase/firestore";
+import { db } from "../lib/firebase";
+import { createDeferredSnapshotScheduler } from "./firestoreScheduler";
 
 // Firestore Timestamp → Date 변환
 export function toDate(value: unknown): Date {
@@ -89,6 +89,24 @@ export async function setDocument(
   await firestoreSetDoc(ref, data);
 }
 
+/**
+ * 문서 병합 기록 (setDoc merge:true).
+ *
+ * ★`updateDocument` 와 결정적으로 다르다: `updateDoc` 에 중첩 객체를 주면 그
+ * 맵을 **통째로 교체**하지만, `setDoc(merge:true)` 는 **재귀 병합**해서 보내지
+ * 않은 하위 키를 보존한다. 기기별 프로젝트 경로(`folderPaths`)처럼 여러 기기가
+ * 각자 자기 칸만 써야 하는 맵에는 반드시 이쪽을 써야 한다 — 그러지 않으면 한
+ * 기기가 경로를 정할 때 다른 기기의 칸이 사라진다(티켓 sHyHC9RoutYHDt97UOEm).
+ */
+export async function mergeDocument(
+  collectionName: string,
+  docId: string,
+  data: DocumentData,
+): Promise<void> {
+  const ref = doc(db, collectionName, docId);
+  await firestoreSetDoc(ref, data, { merge: true });
+}
+
 // 문서 수정
 export async function updateDocument(
   collectionName: string,
@@ -116,14 +134,21 @@ export function subscribeToCollection<T>(
   const ref = collection(db, collectionName);
   const q = query(ref, ...constraints);
   const scheduler = createDeferredSnapshotScheduler();
-  const unsubscribe = onSnapshot(q, (snapshot) => {
-    const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as T);
-    scheduler.schedule(() => callback(items));
-  }, (error) => {
-    console.error(`[Firestore] subscribeToCollection(${collectionName}) error:`, error);
-    scheduler.cancel();
-    callback([]);
-  });
+  const unsubscribe = onSnapshot(
+    q,
+    (snapshot) => {
+      const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as T);
+      scheduler.schedule(() => callback(items));
+    },
+    (error) => {
+      console.error(
+        `[Firestore] subscribeToCollection(${collectionName}) error:`,
+        error,
+      );
+      scheduler.cancel();
+      callback([]);
+    },
+  );
   return () => {
     scheduler.cancel();
     unsubscribe();

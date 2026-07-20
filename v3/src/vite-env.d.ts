@@ -39,6 +39,8 @@ interface FsAPI {
   ) => Promise<{ original: string; modified: string }>;
   gitRemoteUrl: (rootPath: string) => Promise<string | null>;
   selectDirectory: () => Promise<string | null>;
+  /** 디렉터리 존재 확인(읽기 전용). 레거시 경로 마이그레이션 소유권 판정용. */
+  pathExists: (targetPath: string) => Promise<boolean>;
   watch: (rootPath: string) => Promise<void>;
   onFileChange: (callback: (event: string, filePath: string) => void) => void;
   offFileChange: () => void;
@@ -748,6 +750,11 @@ interface UsageAPI {
 
 interface ElectronAPI {
   platform: string;
+  /**
+   * 이 기기의 안정적 식별자(app-state.json 의 machineId). 프로젝트 폴더 경로를
+   * 기기별로 저장하기 위해 렌더러에 노출한다 — 티켓 sHyHC9RoutYHDt97UOEm.
+   */
+  getMachineId: () => Promise<string>;
   testMode: TestModeAPI;
   window: WindowAPI;
   auth: AuthAPI;

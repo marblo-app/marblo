@@ -25,6 +25,10 @@ const isNewWindow = process.argv.includes("--marblo-new-window=1");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   platform: process.platform,
+  // 이 기기의 안정적 식별자. 프로젝트 폴더 경로를 기기별 칸에 저장하려면
+  // 렌더러가 자기 machineId 를 알아야 한다(티켓 sHyHC9RoutYHDt97UOEm).
+  // app-state.json 에 이미 있는 값이라 새로 만들지 않는다.
+  getMachineId: () => ipcRenderer.invoke("app:getMachineId"),
   // Test hatch — main process 에서 MARBLO_TEST_BYPASS_AUTH=1 로 launch 한
   // 경우에만 true. Playwright e2e 가 Firebase Auth 게이트를 우회해서 메인
   // UI 까지 도달하기 위해 AuthProvider 가 이 플래그를 본다. Production
@@ -645,6 +649,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     gitRemoteUrl: (rootPath: string) =>
       ipcRenderer.invoke("fs:gitRemoteUrl", rootPath),
     selectDirectory: () => ipcRenderer.invoke("fs:selectDirectory"),
+    pathExists: (targetPath: string): Promise<boolean> =>
+      ipcRenderer.invoke("fs:pathExists", targetPath),
     watch: (rootPath: string) => ipcRenderer.invoke("fs:watch", rootPath),
     onFileChange: (callback: (event: string, filePath: string) => void) => {
       ipcRenderer.on("fs:change", (_event, ev, fp) =>

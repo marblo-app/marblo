@@ -3853,6 +3853,29 @@ ipcMain.handle("fs:gitRemoteUrl", async (_event, rootPath: string) => {
   return fsManager.getGitRemoteUrl(rootPath);
 });
 
+// 이 기기의 안정적 식별자를 렌더러에 넘긴다. 프로젝트 폴더 경로를 기기별로
+// 저장하려면(티켓 sHyHC9RoutYHDt97UOEm) 렌더러가 자기 machineId 를 알아야
+// 한다. 읽기 전용이고 app-state.json 의 기존 값을 그대로 돌려준다.
+ipcMain.handle("app:getMachineId", () => getMachineId());
+
+// 디렉터리 존재 확인(읽기 전용). 레거시 단일 folderPath 를 이 기기 칸으로
+// 마이그레이션할 때, **그 경로가 실제로 이 기기에 있을 때만** 소유권을
+// 주장하기 위해 쓴다 — 같은 OS 를 쓰는 형제 기기(맥미니↔맥북)는 경로 모양
+// 으로 구분할 수 없어서, 존재 여부가 유일하게 믿을 수 있는 단서다.
+// (티켓 sHyHC9RoutYHDt97UOEm)
+ipcMain.handle("fs:pathExists", (_event, targetPath: string) => {
+  try {
+    return (
+      typeof targetPath === "string" &&
+      !!targetPath &&
+      fs.existsSync(targetPath) &&
+      fs.statSync(targetPath).isDirectory()
+    );
+  } catch {
+    return false;
+  }
+});
+
 ipcMain.handle("fs:watch", (event, rootPath: string) => {
   // Each window gets its own watcher keyed by its webContents id, so opening
   // a folder in window B no longer kills window A's watcher (they used to

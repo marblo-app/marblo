@@ -52,6 +52,9 @@ export function useProjectSetup(): ProjectSetup {
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
   const findByPathOrRemote = useProjectStore((s) => s.findByPathOrRemote);
   const createProject = useProjectStore((s) => s.createProject);
+  const setFolderPathForThisMachine = useProjectStore(
+    (s) => s.setFolderPathForThisMachine,
+  );
   const projects = useProjectStore((s) => s.projects);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
 
@@ -116,6 +119,14 @@ export function useProjectSetup(): ProjectSetup {
         };
         if (remoteUrl) data.gitRemoteUrl = remoteUrl;
         const id = await createProject(data);
+        // 이 기기의 경로 칸도 함께 기록한다 — 레거시 단일 folderPath 는 구버전
+        // 클라이언트를 위해 그대로 두고, 새 기기가 붙을 때는 이 칸이 권위자다.
+        // fail-soft: 실패해도 레거시 필드로 이 기기에서는 정상 동작한다.
+        try {
+          await setFolderPathForThisMachine(id, dir);
+        } catch (err) {
+          console.error("Failed to record this machine's folder path:", err);
+        }
         setRootPath(dir);
         setCurrentProject({
           id,
@@ -136,7 +147,13 @@ export function useProjectSetup(): ProjectSetup {
         return false;
       }
     },
-    [user, createProject, setRootPath, setCurrentProject],
+    [
+      user,
+      createProject,
+      setFolderPathForThisMachine,
+      setRootPath,
+      setCurrentProject,
+    ],
   );
 
   const handleSelectDirectory = useCallback(async () => {
@@ -153,7 +170,27 @@ export function useProjectSetup(): ProjectSetup {
     // still resolves to an existing project here rather than prompting.
     const existing = findByPathOrRemote(dir, remoteUrl);
     if (existing) {
-      setCurrentProject(existing);
+      // ★기기 간 경로 충돌의 근본 해소 지점 (티켓 sHyHC9RoutYHDt97UOEm).
+      // 다른 기기(예: 윈도우 PC)가 등록한 프로젝트를 여기서 git remote 로
+      // 매칭했다면, 이 기기에는 경로 칸이 없어 folderPath 가 undefined 다.
+      // 사용자가 방금 자기 로컬 클론을 골랐으므로 그 경로를 **내 칸에만**
+      // 기록한다 — 다음 부팅부터 own 으로 해결되고, 상대 기기의 칸은 그대로
+      // 남아 반대 방향으로 깨지지 않는다.
+      if (existing.folderPath !== dir) {
+        try {
+          await setFolderPathForThisMachine(existing.id, dir);
+        } catch (err) {
+          // 경로 기록 실패가 프로젝트 열기를 막아선 안 된다(fail-soft).
+          console.error("Failed to record this machine's folder path:", err);
+        }
+      }
+      // `existing` 은 쓰기 이전의 스냅샷이라 folderPath 가 아직 비어 있다.
+      // 스토어가 낙관적으로 갱신한 최신본을 다시 집어야 오케 자동기동이
+      // 방금 고른 경로를 본다.
+      const refreshed =
+        useProjectStore.getState().projects.find((p) => p.id === existing.id) ??
+        existing;
+      setCurrentProject(refreshed);
       return;
     }
 
@@ -171,6 +208,7 @@ export function useProjectSetup(): ProjectSetup {
     setRootPath,
     findByPathOrRemote,
     setCurrentProject,
+    setFolderPathForThisMachine,
     autoRegisterProject,
     startInlineProjectCreation,
   ]);
@@ -226,6 +264,12 @@ export function useProjectSetup(): ProjectSetup {
       };
       if (pendingGitRemoteUrl) data.gitRemoteUrl = pendingGitRemoteUrl;
       const id = await createProject(data);
+      // autoRegisterProject 와 같은 이유로 이 기기의 경로 칸을 기록한다.
+      try {
+        await setFolderPathForThisMachine(id, pendingFolderPath);
+      } catch (err) {
+        console.error("Failed to record this machine's folder path:", err);
+      }
       setRootPath(pendingFolderPath);
       setCurrentProject({
         id,
@@ -253,6 +297,7 @@ export function useProjectSetup(): ProjectSetup {
     pendingGitRemoteUrl,
     ensureProjectQuota,
     createProject,
+    setFolderPathForThisMachine,
     setRootPath,
     setCurrentProject,
   ]);
