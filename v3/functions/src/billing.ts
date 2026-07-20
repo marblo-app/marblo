@@ -9,11 +9,44 @@
 
 // ─── 플랜 가격(단일소스) ──────────────────────────────────────────────
 // index.ts 가 여기서 import 한다 — 가격이 두 곳에 흩어지지 않게 단일화.
+// ★여기 있는 건 **월정가**다. 연간 청구액은 planAmountKRW() 로만 구한다 —
+// PLAN_PRICES_KRW[plan] 을 그대로 청구하면 연간 구독자에게 한 달치를 받는다
+// (이 파일이 고친 원버그가 정확히 그것이었다).
 export const PLAN_PRICES_KRW: Record<string, number> = {
   pro: 19000,
   team: 29000,
   team_plus: 290000, // per-team floor (5 seats incl.)
 };
+
+// ─── 결제 주기 ────────────────────────────────────────────────────────
+// 와이어 정본은 "annual" 이다 — PricingSection 이 `&billing=annual` 로 링크하고
+// checkout 페이지가 successUrl 에 그대로 실어 보낸다. src/types/payment.ts 의
+// BillingCycle 은 "yearly" 를 쓰므로 둘 다 받아 정규화한다(미지정=monthly).
+export type BillingCycle = "monthly" | "annual";
+
+// 연간 = 월 × 10 (2개월 무료). marblo-web PricingSection.tsx / checkout
+// page.tsx / src/types/payment.ts PAYMENT_PLANS 의 동일 공식과 일치해야 한다.
+export const ANNUAL_MONTH_MULTIPLIER = 10;
+
+export function normalizeBillingCycle(raw: unknown): BillingCycle {
+  return raw === "annual" || raw === "yearly" ? "annual" : "monthly";
+}
+
+/**
+ * 이 (플랜, 주기) 조합의 실청구액. 알 수 없는 플랜이면 undefined.
+ *
+ * ★표시가와 실청구액의 단일 진실. 체크아웃 화면·issueBillingKey·수동청구·
+ * 갱신 크론이 전부 이 함수만 쓴다 — 한 곳이라도 PLAN_PRICES_KRW 를 직접
+ * 읽으면 표시/청구 불일치가 다시 생긴다.
+ */
+export function planAmountKRW(
+  planType: string,
+  cycle: BillingCycle,
+): number | undefined {
+  const monthly = PLAN_PRICES_KRW[planType];
+  if (!monthly) return undefined;
+  return cycle === "annual" ? monthly * ANNUAL_MONTH_MULTIPLIER : monthly;
+}
 
 // ─── 재시도/유예 정책 상수 ────────────────────────────────────────────
 // 청구 실패 시 past_due 로 두고 RETRY_INTERVAL_DAYS 간격으로 재시도하되,
@@ -33,13 +66,13 @@ export interface CouponLike {
 
 export function applyCouponDiscount(
   baseAmount: number,
-  coupon: CouponLike | null | undefined
+  coupon: CouponLike | null | undefined,
 ): { finalAmount: number; discountAmount: number } {
   if (!coupon) return { finalAmount: baseAmount, discountAmount: 0 };
   switch (coupon.type) {
     case "discount": {
       const discountAmount = Math.round(
-        (baseAmount * (coupon.discountPercent || 0)) / 100
+        (baseAmount * (coupon.discountPercent || 0)) / 100,
       );
       return {
         finalAmount: Math.max(0, baseAmount - discountAmount),
@@ -55,10 +88,23 @@ export function applyCouponDiscount(
 }
 
 // ─── 기간 계산 ────────────────────────────────────────────────────────
-// 한 결제 주기 = 1개월. setMonth 로 월경계를 넘긴다(기존 issueBillingKey 와 동일).
-export function nextPeriodEnd(from: Date): Date {
+// 한 결제 주기 = 월간 1개월 / 연간 12개월. setMonth 로 월경계를 넘긴다.
+//
+// ★서비스 제공기간 상한: 토스 가이드는 제공기간이 1년을 초과하면 결제 서비스
+// 이용이 불가라고 명시한다. 연간을 12개월(=365/366일)로 두는 이유가 그것이다 —
+// "13개월" 이나 "365일+α" 로 파는 상품을 만들면 안 된다.
+//
+// ★윤년/월말 주의: setMonth 는 존재하지 않는 날짜를 다음 달로 넘긴다.
+// 1/31 + 1개월 = 3/2 또는 3/3(2월 길이에 따라). 이건 기존 월간 동작 그대로이며
+// 사용자에게 불리하지 않다(항상 앞으로 간다). 연간은 setMonth(+12) 를 쓰므로
+// 2/29 + 12개월 = 3/1 이 된다 — 윤일 결제자가 하루 손해보지 않도록 평년의
+// 2/29 는 3/1 로 밀리는 게 맞다(2/28 로 당기면 하루를 뺏는 것).
+export function nextPeriodEnd(
+  from: Date,
+  cycle: BillingCycle = "monthly",
+): Date {
   const d = new Date(from);
-  d.setMonth(d.getMonth() + 1);
+  d.setMonth(d.getMonth() + (cycle === "annual" ? 12 : 1));
   return d;
 }
 
@@ -68,7 +114,7 @@ export function nextPeriodEnd(from: Date): Date {
 // 쓴다 — 크론이 중복 실행돼도 같은 사이클이면 같은 ID → claim 이 막는다.
 export function billingChargeDocId(
   userId: string,
-  cycleAnchorMs: number
+  cycleAnchorMs: number,
 ): string {
   return `${userId}_${cycleAnchorMs}`;
 }
@@ -85,6 +131,8 @@ export interface SubscriptionSnapshot {
   paymentProvider?: string;
   status?: string;
   planType?: string;
+  /** 구독 문서에 저장된 결제 주기. 레거시 문서(필드 부재)는 월간으로 읽는다. */
+  billingCycle?: string;
   tossBillingKey?: string | null;
   tossCustomerKey?: string | null;
   founderGrant?: boolean;
@@ -103,7 +151,7 @@ function hasNonEmptyString(value: unknown): boolean {
 }
 
 export function hasPaymentEvidence(
-  sub: PaymentEvidenceSnapshot | null | undefined
+  sub: PaymentEvidenceSnapshot | null | undefined,
 ): boolean {
   if (!sub) return false;
   return (
@@ -112,9 +160,14 @@ export function hasPaymentEvidence(
   );
 }
 
+// ★주기(billingCycle)는 "언제 청구할지"에 관여하지 않는다 — 만료 경계
+// currentPeriodEnd 가 이미 주기를 반영해 계산돼 있기 때문이다(연간이면 12개월
+// 뒤에 찍힌다). 주기가 관여하는 곳은 "얼마를 청구할지"(planAmountKRW)와
+// "다음 경계를 언제로 둘지"(applyChargeSuccess)뿐이다. 여기서 주기를 다시
+// 보면 이중 반영이 된다.
 export function selectDueForCharge(
   sub: SubscriptionSnapshot,
-  nowMs: number
+  nowMs: number,
 ): boolean {
   // 무료 파운더 grant·비-토스 구독은 절대 청구하지 않는다.
   if (sub.founderGrant === true) return false;
@@ -137,22 +190,32 @@ export function selectDueForCharge(
 }
 
 // ─── 청구 성공 후 상태(순수) ──────────────────────────────────────────
-// now 앵커로 다음 주기를 부여한다(now+1개월). 크론 다운으로 여러 주기 밀렸을
-// 때 과거로 소급해 여러 번 청구되는 catch-up 폭주를 피하려고 now 기준으로 둔다.
+// now 앵커로 다음 주기를 부여한다(월간 now+1개월 / 연간 now+12개월). 크론
+// 다운으로 여러 주기 밀렸을 때 과거로 소급해 여러 번 청구되는 catch-up 폭주를
+// 피하려고 now 기준으로 둔다.
+//
+// ★주기 유지: billingCycle 을 그대로 되돌려 호출부가 문서에 다시 쓴다. 연간
+// 구독자가 갱신 한 번에 월간으로 바뀌면 다음 해에 ₩19,000 만 받고 1년을 주게
+// 된다 — 주기는 청구액과 기간 양쪽을 동시에 결정하므로 반드시 함께 흘러야 한다.
 export interface ChargeSuccessState {
   status: "active";
   currentPeriodStart: Date;
   currentPeriodEnd: Date;
+  billingCycle: BillingCycle;
   billingFailedCount: 0;
   nextRetryAtMs: null;
 }
 
-export function applyChargeSuccess(nowMs: number): ChargeSuccessState {
+export function applyChargeSuccess(
+  nowMs: number,
+  cycle: BillingCycle = "monthly",
+): ChargeSuccessState {
   const start = new Date(nowMs);
   return {
     status: "active",
     currentPeriodStart: start,
-    currentPeriodEnd: nextPeriodEnd(start),
+    currentPeriodEnd: nextPeriodEnd(start, cycle),
+    billingCycle: cycle,
     billingFailedCount: 0,
     nextRetryAtMs: null,
   };
@@ -169,7 +232,7 @@ export interface ChargeFailureState {
 
 export function applyChargeFailure(
   sub: SubscriptionSnapshot,
-  nowMs: number
+  nowMs: number,
 ): ChargeFailureState {
   const count = (sub.billingFailedCount || 0) + 1;
   if (count >= MAX_BILLING_RETRIES) {

@@ -95,6 +95,43 @@ describe("resolveEntitledPlan — 자발 해지는 기간 말 종료 (P0 회귀)
       ).toBe(plan);
     }
   });
+
+  // ★연간 구독(티켓 b8ggw6ThNhxMRst5G0QZ): 이 티켓이 결제 주기를 도입하면서
+  // 연간 구독자의 currentPeriodEnd 는 12개월 뒤로 찍힌다. #533 이 확립한 원칙
+  // ("status=canceled 여도 currentPeriodEnd 까지는 유료")이 연간에도 그대로
+  // 적용되는지 못박는다 — 연 ₩190,000 을 내고 한 달 뒤 해지한 사용자가 남은
+  // 11개월을 잃으면 월간 버그보다 12배 큰 사고다.
+  it("★연간 해지자는 남은 개월 전체가 유료로 유지된다 (#533 원칙의 연간 적용)", () => {
+    // 결제 후 1개월 시점에 해지 → 약 11개월(334일) 남음
+    const remaining = 334 * DAY;
+    expect(
+      resolve({
+        status: "canceled",
+        planType: "pro",
+        currentPeriodEndMs: NOW + remaining,
+      }),
+    ).toBe("pro");
+
+    // 잔여 기간 내내 유료 — 중간 어느 지점을 찍어도 강등되지 않는다.
+    for (const elapsed of [1, 30, 100, 200, 333]) {
+      expect(
+        resolve({
+          status: "canceled",
+          planType: "pro",
+          currentPeriodEndMs: NOW + remaining - elapsed * DAY,
+        }),
+      ).toBe("pro");
+    }
+
+    // 그리고 만기가 지나면 free — 연간이라고 무한정 주지 않는다.
+    expect(
+      resolve({
+        status: "canceled",
+        planType: "pro",
+        currentPeriodEndMs: NOW - DAY,
+      }),
+    ).toBe("free");
+  });
 });
 
 describe("resolveEntitledPlan — 레거시/누락 데이터", () => {

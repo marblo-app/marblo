@@ -527,6 +527,7 @@
     "monthlyAutoRenewNotice": "毎月{amount}が自動決済され、解約するまで更新されます",
     "monthlyServicePeriodNotice": "最大サービス提供期間：決済日から1か月（次回決済日の前日まで）。解約するまで毎月自動更新されます。",
     "annualAutoRenewNotice": "毎年{amount}が自動決済され、解約するまで更新されます",
+    "annualServicePeriod": "サービス提供期間: 決済日から12ヶ月(1年)。毎年同じ日に自動更新され、更新時に再び12ヶ月が提供されます。",
     "cancelNotice": "サブスクリプションの解約はカスタマーサポートへお問い合わせください。",
     "lectureTitle": "講座",
     "invalidPlan": "無効なプランです。料金ページからプランを選択してください。",

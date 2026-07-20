@@ -527,6 +527,7 @@
     "monthlyAutoRenewNotice": "{amount} will be charged automatically every month and renew until canceled",
     "monthlyServicePeriodNotice": "Maximum service period: 1 month from the payment date (through the day before the next payment date). It renews automatically each month until you cancel.",
     "annualAutoRenewNotice": "{amount} will be charged automatically every year and renew until canceled",
+    "annualServicePeriod": "Service period: 12 months (1 year) from the payment date. It renews automatically on the same date each year, providing another 12 months.",
     "cancelNotice": "To cancel your subscription, contact customer support.",
     "lectureTitle": "Lecture",
     "invalidPlan": "Invalid plan. Please select a plan from the pricing page.",

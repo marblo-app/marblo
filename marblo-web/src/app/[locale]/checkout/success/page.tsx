@@ -92,8 +92,14 @@ export default function CheckoutSuccessPage() {
           // 쿠폰 코드를 첫 청구까지 전달(빈 문자열이면 미적용). checkout 페이지가
           // successUrl 에 &coupon= 로 실어 보낸다.
           const coupon = searchParams.get('coupon') || undefined;
+          // ★결제 주기도 함께 전달한다. checkout 페이지가 successUrl 에
+          // &billing= 로 이미 실어 보내고 있었는데 여기서 흘리고 있었다 — 그래서
+          // 연간을 고른 사용자에게 ₩190,000 을 보여주고 서버는 주기를 모른 채
+          // ₩19,000·1개월을 청구했다. 서버가 최종 정규화하므로
+          // (normalizeBillingCycle) 값이 없거나 이상해도 월간으로 안전하게 떨어진다.
+          const billing = searchParams.get('billing') || undefined;
           const issue = httpsCallable(functions, 'issueBillingKey');
-          await issue({ authKey, customerKey, plan, coupon });
+          await issue({ authKey, customerKey, plan, coupon, billing });
         }
         setSuccess(true);
       } catch (err) {

@@ -339,11 +339,15 @@ export default function CheckoutPage() {
                   {autoRenewNotice}
                 </p>
                 {/* 토스 계약과정 FAQ §3(무형재화) — 최대 서비스 제공기간 명시.
-                    근거: billing.ts 의 nextPeriodEnd() = +1개월, selectDueForCharge
-                    가 만료 전 선청구를 막아 사전결제 예약기간 0.
-                    연간은 백엔드 청구 미구현이라 제공기간을 쓰지 않는다 — 연간
-                    구현과 같은 PR 에서 추가된다(티켓 b8ggw6Th). */}
-                {billing !== "annual" && (
+                    근거: billing.ts 의 nextPeriodEnd() = 월간 +1개월 / 연간
+                    +12개월, selectDueForCharge 가 만료 전 선청구를 막아
+                    사전결제 예약기간 0. 연간은 12개월 — 1년을 초과하는
+                    제공기간은 토스에서 결제 이용이 불가하다. */}
+                {billing === "annual" ? (
+                  <p className="mt-1 text-xs text-zinc-300">
+                    {t("annualServicePeriod")}
+                  </p>
+                ) : (
                   <p className="mt-1 text-xs text-zinc-300">
                     {t("monthlyServicePeriodNotice")}
                   </p>

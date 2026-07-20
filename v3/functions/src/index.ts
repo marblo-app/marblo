@@ -42,7 +42,8 @@ import {
   type EmailMarketingConsent,
 } from "./marketingContacts";
 import {
-  PLAN_PRICES_KRW,
+  planAmountKRW,
+  normalizeBillingCycle,
   applyCouponDiscount,
   nextPeriodEnd,
   billingChargeDocId,
@@ -390,8 +391,15 @@ export const createTossCheckout = functions.https.onCall(
       );
     }
 
-    const { planType } = data as { planType: string };
-    const amount = PLAN_PRICES_KRW[planType];
+    const { planType, billing } = data as {
+      planType: string;
+      billing?: string;
+    };
+    // 현재 호출부가 없는 경로지만(구독은 issueBillingKey 를 탄다) 여기서 월정가를
+    // 직접 읽어두면 나중에 배선될 때 같은 버그가 되살아난다 — 금액은 예외 없이
+    // planAmountKRW 로만 구한다.
+    const billingCycle = normalizeBillingCycle(billing);
+    const amount = planAmountKRW(planType, billingCycle);
     if (!amount) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -405,12 +413,13 @@ export const createTossCheckout = functions.https.onCall(
     await db.collection("pendingOrders").doc(orderId).set({
       userId,
       planType,
+      billingCycle,
       amount,
       status: "pending",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return { orderId, amount, planType };
+    return { orderId, amount, planType, billingCycle };
   },
 );
 
@@ -793,13 +802,16 @@ async function resolveFirstChargeAmount(
 // 빌링키 발급 + 첫 결제 청구(원자적). 청구 실패 시 구독을 active 로 만들지
 // 않는다 — GAP A(₩0 무료 활성) 방지의 핵심.
 export const issueBillingKey = functions.https.onCall(async (data, context) => {
-  const { authKey, customerKey, plan, coupon } = data;
+  const { authKey, customerKey, plan, coupon, billing } = data;
   const userId = context.auth?.uid;
   if (!userId)
     throw new functions.https.HttpsError("unauthenticated", "Login required");
 
   const planType = plan || "pro";
-  const baseAmount = PLAN_PRICES_KRW[planType];
+  // ★결제 주기를 여기서 받아 금액·기간 양쪽에 반영한다. 이 인자가 없던 시절엔
+  // 연간을 고른 사용자에게 ₩190,000 을 보여주고 ₩19,000·1개월을 청구했다.
+  const billingCycle = normalizeBillingCycle(billing);
+  const baseAmount = planAmountKRW(planType, billingCycle);
   if (!baseAmount) {
     throw new functions.https.HttpsError(
       "failed-precondition",
@@ -860,7 +872,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
 
   // 4) 청구 성공/comped → 구독 active 저장 + 쿠폰 소진 기록.
   const now = new Date(cycleAnchorMs);
-  const periodEnd = nextPeriodEnd(now);
+  const periodEnd = nextPeriodEnd(now, billingCycle);
   await db
     .collection("subscriptions")
     .doc(userId)
@@ -868,6 +880,7 @@ export const issueBillingKey = functions.https.onCall(async (data, context) => {
       {
         userId,
         planType,
+        billingCycle,
         status: "active",
         paymentProvider: "toss",
         tossBillingKey: billingKey,
@@ -924,7 +937,10 @@ export const chargeBillingKey = functions.https.onCall(
     }
 
     const planType: string = sub.planType || "pro";
-    const amount = PLAN_PRICES_KRW[planType];
+    // 주기는 구독 문서에서 읽는다(클라이언트 입력 아님) — 연간 구독자는 연간가로
+    // 청구하고 연간 기간을 다시 부여해야 주기가 유지된다.
+    const billingCycle = normalizeBillingCycle(sub.billingCycle);
+    const amount = planAmountKRW(planType, billingCycle);
     if (!amount) {
       throw new functions.https.HttpsError(
         "failed-precondition",
@@ -952,11 +968,12 @@ export const chargeBillingKey = functions.https.onCall(
     }
 
     // 성공/comped/skipped → 구독 기간 연장(멱등 재적용 안전).
-    const success = applyChargeSuccess(Date.now());
+    const success = applyChargeSuccess(Date.now(), billingCycle);
     await subRef.update({
       status: success.status,
       currentPeriodStart: success.currentPeriodStart,
       currentPeriodEnd: success.currentPeriodEnd,
+      billingCycle: success.billingCycle,
       billingFailedCount: 0,
       nextRetryAt: null,
       ...(charge.status === "charged"
@@ -4760,6 +4777,7 @@ export const scheduledChargeSubscriptions = functions.pubsub
         paymentProvider: sub.paymentProvider,
         status: sub.status,
         planType: sub.planType,
+        billingCycle: sub.billingCycle,
         tossBillingKey: sub.tossBillingKey,
         tossCustomerKey: sub.tossCustomerKey,
         founderGrant: sub.founderGrant === true,
@@ -4771,7 +4789,10 @@ export const scheduledChargeSubscriptions = functions.pubsub
       result.due++;
 
       const planType = sub.planType || "pro";
-      const amount = PLAN_PRICES_KRW[planType];
+      // 갱신 주기는 구독 문서가 단일 진실 — 연간 구독자는 매년 연간가로만
+      // 청구된다. 레거시 문서(billingCycle 부재)는 월간으로 읽혀 기존 동작 유지.
+      const billingCycle = normalizeBillingCycle(sub.billingCycle);
+      const amount = planAmountKRW(planType, billingCycle);
       if (!amount) {
         result.skipped++;
         continue;
@@ -4809,11 +4830,12 @@ export const scheduledChargeSubscriptions = functions.pubsub
 
       // charged/comped/skipped(이미 succeeded) → 기간 연장. skipped 도 연장해야
       // "청구 성공했으나 직전 실행이 기간갱신 전 죽은" 구독의 무한 재선정을 막는다.
-      const s = applyChargeSuccess(nowMs);
+      const s = applyChargeSuccess(nowMs, billingCycle);
       await doc.ref.update({
         status: s.status,
         currentPeriodStart: s.currentPeriodStart,
         currentPeriodEnd: s.currentPeriodEnd,
+        billingCycle: s.billingCycle,
         billingFailedCount: 0,
         nextRetryAt: null,
         ...(charge.status === "charged"
