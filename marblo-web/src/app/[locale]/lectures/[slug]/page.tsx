@@ -16,10 +16,7 @@ import {
   Monitor,
   Rocket,
   BookOpen,
-  Users,
-  Star,
   Shield,
-  Gift,
   ArrowRight,
   Layers,
   Sparkles,
@@ -27,7 +24,7 @@ import {
 } from 'lucide-react';
 import {
   lectures as staticLectures,
-  LECTURE_PACKAGES,
+  comingSoonLabel,
   type LectureData,
 } from '@/data/lectures';
 
@@ -177,7 +174,11 @@ export default function LectureDetailPage() {
   const packages = [
     {
       key: 'earlybird' as const,
-      badge: locale === 'ko' ? '한정 300석' : locale === 'ja' ? '限定300席' : 'Limited 300 seats',
+      // 판매 신호 제거: 전환 전에는 badge '한정 300석', 제목이 데이터의 '얼리버드'였다.
+      // 한정수량·얼리버드는 사전예약으로 읽히므로 중립적 구성명으로 '표시만' 바꾼다
+      // (LECTURE_PACKAGES 데이터는 그대로). 되돌리기: @/data/lectures 상단 참조.
+      badge: '',
+      displayLabel: locale === 'ko' ? '기본 구성' : locale === 'ja' ? '基本構成' : 'Standard Edition',
       highlighted: true,
       features: locale === 'ko'
         ? ['전체 8모듈 15.5시간 강의', '완성 소스코드 2개 프로젝트', '디스코드 커뮤니티 액세스', '마블로 Pro 6개월 무료 쿠폰', '마블로 초기 앰배서더 인증서', '평생 업데이트 무료']
@@ -187,19 +188,16 @@ export default function LectureDetailPage() {
     },
     {
       key: 'proBudle' as const,
-      badge: locale === 'ko' ? '최고 가치' : locale === 'ja' ? '最高価値' : 'Best Value',
+      badge: '',
+      displayLabel: locale === 'ko' ? '프로 번들 구성' : locale === 'ja' ? 'プロバンドル構成' : 'Pro Bundle Edition',
       highlighted: false,
       features: locale === 'ko'
-        ? ['얼리버드 전체 포함', '마블로 Pro 1년 무료 쿠폰', '에이전트 스킬 템플릿 5종', 'PRD + 태스크 템플릿 5종', '월간 라이브 Q&A']
+        ? ['기본 구성 전체 포함', '마블로 Pro 1년 무료 쿠폰', '에이전트 스킬 템플릿 5종', 'PRD + 태스크 템플릿 5종', '월간 라이브 Q&A']
         : locale === 'ja'
-          ? ['アーリーバード全内容を含む', 'Marblo Pro 1年間無料クーポン', 'エージェントスキルテンプレート5種', 'PRD＋タスクテンプレート5種', '月間ライブQ&A']
-          : ['Everything in Early Bird', 'Marblo Pro 1-year free coupon', '5 agent skill templates', '5 PRD + task templates', 'Monthly live Q&A'],
+          ? ['基本構成の全内容を含む', 'Marblo Pro 1年間無料クーポン', 'エージェントスキルテンプレート5種', 'PRD＋タスクテンプレート5種', '月間ライブQ&A']
+          : ['Everything in Standard Edition', 'Marblo Pro 1-year free coupon', '5 agent skill templates', '5 PRD + task templates', 'Monthly live Q&A'],
     },
   ];
-
-  const discount = lecture.originalPrice
-    ? Math.round((1 - lecture.price / lecture.originalPrice) * 100)
-    : 0;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
@@ -219,11 +217,12 @@ export default function LectureDetailPage() {
             </span>
           </div>
 
-          {/* Bestseller badge */}
-          <div className="inline-flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-full px-4 py-1.5 mb-5">
-            <Star className="w-4 h-4 text-amber-400" />
-            <span className="text-sm text-amber-300 font-medium">
-              {locale === 'ko' ? '베스트셀러' : locale === 'ja' ? 'ベストセラー' : 'Bestseller'}
+          {/* 출시 예정 뱃지 — 전환 전에는 '베스트셀러' 뱃지였다. 판매 중 신호를
+              지운다. 되돌리기: @/data/lectures 상단 '출시 예정 전환' 블록 참조 */}
+          <div className="inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-400/30 rounded-full px-4 py-1.5 mb-5">
+            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <span className="text-sm text-indigo-300 font-medium">
+              {t('coming_soon')}
             </span>
           </div>
 
@@ -290,32 +289,21 @@ export default function LectureDetailPage() {
           <div className="h-1.5 bg-gradient-to-r from-indigo-600 to-violet-600" />
           <div className="p-8 md:p-10">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-              {/* Price info */}
+              {/* 상태 정보 — 전환 전에는 가격 정보(정가 취소선 + 얼리버드 예정가 +
+                  % OFF + 'Pro 6개월 무료 쿠폰 포함')였다. 가격과 사전예약 문구를
+                  함께 내려 결제를 받는 것처럼 보이지 않게 한다.
+                  되돌리기: @/data/lectures 상단 '출시 예정 전환' 블록 참조 */}
               <div>
-                <div className="flex items-baseline gap-3 mb-2">
-                  {lecture.originalPrice && (
-                    <span className="text-lg text-zinc-500 line-through">
-                      {'\u20A9'}{lecture.originalPrice.toLocaleString()}
-                    </span>
-                  )}
-                  <span className="text-4xl font-bold text-white">
-                    {'\u20A9'}{lecture.price.toLocaleString()}
-                  </span>
-                  {lecture.originalPrice && (
-                    <span className="bg-red-500/20 text-red-400 px-2.5 py-1 rounded-full text-sm font-semibold">
-                      {discount}% OFF
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-zinc-500">
-                  {locale === 'ko' ? '얼리버드 예정가' : locale === 'ja' ? 'アーリーバード予定価格' : 'Early bird (planned)'}
+                <p className="text-2xl md:text-3xl font-bold text-white mb-2">
+                  {t('notify_heading')}
                 </p>
-                <div className="flex items-center gap-2 mt-3">
-                  <Gift className="w-4 h-4 text-emerald-400" />
-                  <span className="text-emerald-300 text-sm font-medium">
-                    {locale === 'ko' ? 'Pro 6개월 무료 쿠폰 포함' : locale === 'ja' ? 'Pro 6ヶ月無料クーポン付き' : 'Includes Pro 6-month free coupon'}
-                  </span>
-                </div>
+                <p className="text-sm text-zinc-400 leading-relaxed max-w-md">
+                  {locale === 'ko'
+                    ? '강의는 현재 제작 중입니다. 아직 판매를 시작하지 않았으며, 가격과 공개 일정은 준비되는 대로 안내드립니다.'
+                    : locale === 'ja'
+                      ? '本講座は現在制作中です。まだ販売は開始しておらず、価格と公開時期は準備でき次第ご案内します。'
+                      : 'This course is still in production. It is not on sale yet — pricing and launch date will be announced when ready.'}
+                </p>
               </div>
 
               {/* CTA */}
@@ -616,23 +604,25 @@ export default function LectureDetailPage() {
         </div>
       </section>
 
-      {/* ===================== PRICING PACKAGES ===================== */}
+      {/* ===================== 구성 안내 (출시 예정) =====================
+           전환 전에는 '패키지 선택 / Choose Your Package' 가격 카드였다.
+           가격·보너스·한정수량 뱃지를 함께 내려 결제를 받는 것처럼 보이지
+           않게 한다. 되돌리기: @/data/lectures 상단 블록 참조 */}
       <section className="py-24">
         <div className="max-w-6xl mx-auto px-4">
           <h2 className="text-3xl font-bold text-center mb-4">
-            {locale === 'ko' ? '패키지 선택' : locale === 'ja' ? 'パッケージを選ぶ' : 'Choose Your Package'}
+            {locale === 'ko' ? '구성 안내' : locale === 'ja' ? '構成のご案内' : "What's Planned"}
           </h2>
           <p className="text-zinc-400 text-center mb-12">
             {locale === 'ko'
-              ? '모든 패키지에 전체 강의가 포함됩니다'
+              ? '공개 시 제공 예정인 구성입니다. 가격과 판매 시작일은 준비되는 대로 안내드립니다.'
               : locale === 'ja'
-                ? '全パッケージに全講座が含まれます'
-                : 'All packages include the complete course'}
+                ? '公開時に提供予定の構成です。価格と販売開始日は準備でき次第ご案内します。'
+                : 'What each edition is planned to include. Pricing and sale date will be announced when ready.'}
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
             {packages.map((pkg) => {
-              const pkgData = LECTURE_PACKAGES[pkg.key];
               const isEarlyBird = pkg.key === 'earlybird';
               return (
                 <div
@@ -656,10 +646,10 @@ export default function LectureDetailPage() {
                   )}
 
                   <h3 className="text-xl font-bold mb-2">
-                    {locale === 'ko' ? pkgData.label : pkgData.label_en}
+                    {pkg.displayLabel}
                   </h3>
-                  <div className="text-3xl font-bold mb-6">
-                    {'\u20A9'}{pkgData.price.toLocaleString()}
+                  <div className="text-sm font-semibold text-zinc-400 mb-6">
+                    {comingSoonLabel(locale)}
                   </div>
 
                   <ul className="space-y-3 mb-8">
@@ -675,15 +665,6 @@ export default function LectureDetailPage() {
                       );
                     })}
                   </ul>
-
-                  {pkgData.bonus && (
-                    <div className="mb-6 flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                      <Gift className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                      <span className="text-amber-300 text-xs font-medium">
-                        {locale === 'ko' ? pkgData.bonus : pkgData.bonus_en}
-                      </span>
-                    </div>
-                  )}
 
                   <a
                     href="#lecture-notify"
@@ -716,19 +697,6 @@ export default function LectureDetailPage() {
             <p className="text-zinc-400 text-lg mb-8 max-w-2xl mx-auto">
               {t('notify_subtitle')}
             </p>
-            <div className="flex items-center justify-center gap-4 mb-8">
-              <span className="text-sm text-zinc-500">
-                {locale === 'ko' ? '얼리버드 예정가' : locale === 'ja' ? 'アーリーバード予定価格' : 'Early bird (planned)'}
-              </span>
-              {lecture.originalPrice && (
-                <span className="text-xl text-zinc-500 line-through">
-                  {'\u20A9'}{lecture.originalPrice.toLocaleString()}
-                </span>
-              )}
-              <span className="text-4xl font-bold text-white">
-                {'\u20A9'}{lecture.price.toLocaleString()}
-              </span>
-            </div>
             <Link
               href={`/${locale}/founders`}
               className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white px-10 py-4 rounded-2xl text-lg font-bold transition-all shadow-lg shadow-indigo-600/25 hover:shadow-indigo-500/40 hover:scale-105"
@@ -750,23 +718,9 @@ export default function LectureDetailPage() {
           <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="hidden sm:block">
               <p className="text-sm text-zinc-400 truncate max-w-md">{title}</p>
-              <div className="flex items-center gap-3">
-                {lecture.originalPrice && (
-                  <span className="text-sm text-zinc-500 line-through">
-                    {'\u20A9'}{lecture.originalPrice.toLocaleString()}
-                  </span>
-                )}
-                <span className="text-xl font-bold text-white">
-                  {'\u20A9'}{lecture.price.toLocaleString()}
-                </span>
-              </div>
+              <p className="text-sm text-zinc-500">{t('coming_soon')}</p>
             </div>
             <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto justify-between sm:justify-end">
-              <div className="sm:hidden">
-                <span className="text-xl font-bold text-white">
-                  {'\u20A9'}{lecture.price.toLocaleString()}
-                </span>
-              </div>
               <a
                 href="#lecture-notify"
                 className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg shadow-indigo-600/25"

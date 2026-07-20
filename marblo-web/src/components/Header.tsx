@@ -8,6 +8,7 @@ import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { Menu, X } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import LanguageToggle from "./LanguageToggle";
+import { comingSoonLabel } from "@/data/lectures";
 
 export default function Header() {
   const t = useTranslations("nav");
@@ -68,9 +69,14 @@ export default function Header() {
             </Link>
             <Link
               href={`/${locale}/lectures`}
-              className="text-zinc-400 hover:text-white transition"
+              className="text-zinc-400 hover:text-white transition inline-flex items-center gap-1.5"
             >
               {t("lectures")}
+              {/* 출시 예정 뱃지 — 강의는 판매 전이라 카테고리 상태를 명시한다.
+                  되돌리기: src/data/lectures.ts 상단 블록 참조 */}
+              <span className="text-[10px] leading-none font-medium text-zinc-500 border border-zinc-700 rounded-full px-1.5 py-0.5">
+                {comingSoonLabel(locale)}
+              </span>
             </Link>
             <Link
               href={`/${locale}/blog`}
@@ -164,9 +170,12 @@ export default function Header() {
             <Link
               href={`/${locale}/lectures`}
               onClick={closeMobile}
-              className="text-zinc-400 hover:text-white transition"
+              className="text-zinc-400 hover:text-white transition inline-flex items-center gap-1.5"
             >
               {t("lectures")}
+              <span className="text-[10px] leading-none font-medium text-zinc-500 border border-zinc-700 rounded-full px-1.5 py-0.5">
+                {comingSoonLabel(locale)}
+              </span>
             </Link>
             <Link
               href={`/${locale}/blog`}

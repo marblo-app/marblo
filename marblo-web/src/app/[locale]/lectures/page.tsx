@@ -6,8 +6,12 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Clock, BookOpen, Play, Star, ArrowRight, Zap, Sparkles } from 'lucide-react';
-import { lectures as staticLectures, type LectureData } from '@/data/lectures';
+import { Clock, BookOpen, Play, ArrowRight, Zap, Sparkles } from 'lucide-react';
+import {
+  lectures as staticLectures,
+  comingSoonLabel,
+  type LectureData,
+} from '@/data/lectures';
 
 function formatHours(seconds: number): string {
   return (seconds / 3600).toFixed(1);
@@ -109,10 +113,6 @@ export default function LecturesPage() {
                     : locale === 'ja'
                       ? '上級'
                       : 'Advanced';
-            const discount = lecture.originalPrice
-              ? Math.round((1 - lecture.price / lecture.originalPrice) * 100)
-              : 0;
-
             return (
               <Link
                 key={lecture.slug}
@@ -134,15 +134,13 @@ export default function LecturesPage() {
                     </div>
                   )}
 
-                  {/* Bestseller badge */}
+                  {/* 출시 예정 뱃지 — 전환 전에는 '베스트셀러' 뱃지였다. 판매 중으로
+                      읽히는 신호를 지우고 아래 Coming Soon 카드와 같은 상태로 보이게
+                      한다. 되돌리기: @/data/lectures 상단 '출시 예정 전환' 블록 참조 */}
                   <div className="absolute top-3 left-3 z-10">
-                    <div className="flex items-center gap-1.5 bg-amber-500 text-black px-3 py-1 rounded-full text-xs font-bold shadow-lg">
-                      <Star className="w-3 h-3" />
-                      {locale === 'ko'
-                        ? '베스트셀러'
-                        : locale === 'ja'
-                          ? 'ベストセラー'
-                          : 'Bestseller'}
+                    <div className="flex items-center gap-1.5 bg-zinc-900/80 backdrop-blur text-zinc-300 px-3 py-1 rounded-full text-xs font-semibold shadow-lg">
+                      <Sparkles className="w-3 h-3" />
+                      {comingSoonLabel(locale)}
                     </div>
                   </div>
                   {/* Level badge */}
@@ -182,23 +180,17 @@ export default function LecturesPage() {
                     </div>
                   </div>
 
-                  {/* Price row */}
+                  {/* 상태 행 — 전환 전에는 가격 행(정가 취소선 + 판매가 + 할인율)이었다.
+                      가격만 지우고 구매 동선을 남기면 '품절'로 읽히므로 함께 내린다.
+                      되돌리기: @/data/lectures 상단 '출시 예정 전환' 블록 참조 */}
                   <div className="flex items-center justify-between pt-4 border-t border-zinc-700/50">
-                    <div className="flex items-center gap-3">
-                      {lecture.originalPrice && (
-                        <span className="text-sm text-zinc-500 line-through">
-                          {'\u20A9'}{lecture.originalPrice.toLocaleString()}
-                        </span>
-                      )}
-                      <span className="text-xl font-bold text-white">
-                        {'\u20A9'}{lecture.price.toLocaleString()}
-                      </span>
-                      {lecture.originalPrice && (
-                        <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-semibold">
-                          {discount}%
-                        </span>
-                      )}
-                    </div>
+                    <span className="text-sm font-medium text-zinc-400">
+                      {locale === 'ko'
+                        ? '공개 시 알림'
+                        : locale === 'ja'
+                          ? '公開時に通知'
+                          : 'Notify me at launch'}
+                    </span>
                     <ArrowRight className="w-5 h-5 text-zinc-600 group-hover:text-indigo-400 transition-colors" />
                   </div>
                 </div>

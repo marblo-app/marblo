@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
+import { comingSoonLabel } from "@/data/lectures";
 
 export default function Footer() {
   const t = useTranslations("footer");
@@ -102,10 +103,15 @@ export default function Footer() {
             </ul>
           </div>
 
-          {/* Lectures */}
+          {/* Lectures — 강의는 아직 판매 전(출시 예정)이라 섹션 제목 옆에
+              상태를 명시한다. 링크·라우트는 그대로 유지.
+              되돌리기: src/data/lectures.ts 상단 "출시 예정 전환" 블록 참조 */}
           <div>
-            <h4 className="text-sm font-semibold text-zinc-300 mb-3">
+            <h4 className="text-sm font-semibold text-zinc-300 mb-3 flex items-center gap-1.5">
               {lecturesLabel}
+              <span className="text-[10px] leading-none font-medium text-zinc-500 border border-zinc-700 rounded-full px-1.5 py-0.5">
+                {comingSoonLabel(locale)}
+              </span>
             </h4>
             <ul>
               <li>

@@ -413,7 +413,12 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Lecture Bundle */}
+      {/* 강의 (출시 예정) — 전환 전에는 "강의 + 앱 번들" 판매 섹션으로,
+          가격(₩149,000 / $99 / ¥14,800)과 "강의 구매 시 Pro 50% 할인 쿠폰"
+          혜택 칩이 노출됐다. 강의는 아직 판매하지 않으므로(checkout 가드가
+          결제 진입을 차단) 가격·구매 문구를 함께 내리고 출시 예정 상태만
+          알린다. 되돌리기: marblo-web/src/data/lectures.ts 상단
+          "출시 예정 전환" 블록 참조(원래 가격 값도 거기 적어뒀다). */}
       <section className="py-24 px-4 bg-zinc-900/30">
         <div className="max-w-4xl mx-auto">
           <h2 className="text-3xl md:text-4xl font-bold text-center mb-4">
@@ -429,11 +434,8 @@ export default function HomePage() {
                   {t("bundle.lecture_title")}
                 </h3>
                 <p className="text-zinc-400 mb-4">{t("bundle.lecture_desc")}</p>
-                <div className="text-3xl font-bold text-white mb-2">
-                  {t("bundle.lecture_price")}
-                </div>
-                <div className="inline-block bg-green-500/20 text-green-400 text-sm font-medium px-3 py-1 rounded-full">
-                  {t("bundle.bundle_benefit")}
+                <div className="inline-block bg-zinc-800 text-zinc-300 text-sm font-medium px-3 py-1 rounded-full">
+                  {t("bundle.lecture_status")}
                 </div>
               </div>
               <div>

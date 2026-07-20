@@ -141,13 +141,12 @@
     }
   },
   "bundle": {
-    "title": "Lecture + App Bundle",
-    "subtitle": "Purchase the AI agent development course and receive a Pro plan discount coupon",
+    "title": "AI Agent Course (Coming Soon)",
+    "subtitle": "Our AI agent development course is in production. We'll let you know the moment it launches.",
     "lecture_title": "Marblo v3: AI Agent Army Workspace",
     "lecture_desc": "From multi-agent setup to production deployment — learn AI agent orchestration through real-world projects",
-    "lecture_price": "$99",
-    "bundle_benefit": "50% off Pro plan coupon included with course purchase",
-    "cta": "View Course"
+    "cta": "Preview the course",
+    "lecture_status": "Coming soon · Notify me at launch"
   },
   "social": {
     "title": "What Developers Say",

@@ -37,6 +37,47 @@ export interface LectureData {
   status: "published" | "draft";
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 강의 "출시 예정" 전환 (토스 심사 / 티켓 Nj4zsTsJHAAqSM2wuH0X)
+//
+// 왜: 강의 콘텐츠가 미준비라 checkout 가드
+// (src/app/[locale]/checkout/page.tsx 의 `type === "lecture"` useEffect)가
+// 강의 결제 진입을 전부 막고 있다. 그런데 화면에는 가격(₩149,000·₩249,000)이
+// 그대로 노출돼 있어, 토스 심사 가이드 §2 "품절 상품은 심사 불가" 에 걸린다
+// (가격이 붙었는데 살 수 없는 카테고리 = 품절로 읽힘).
+//
+// 무엇을: 가격·할인율·"얼리버드/한정 300석/베스트셀러" 같은 판매·사전예약
+// 문구를 화면에서 전부 내리고 "출시 예정"으로만 노출한다. 출시 알림 이메일
+// 수집(→ /founders 베타 신청)은 결제가 아니므로 유지한다.
+//
+// 데이터·라우트는 지우지 않는다. 아래 price/originalPrice/LECTURE_PACKAGES 는
+// 그대로 두고 "표시만" 끈 것이므로, 콘텐츠가 준비되면 아래 절차로 되돌린다.
+//
+// ▶ 되돌리는 방법 (강의 판매 재개 시)
+//   1. `git log --grep="toss-lectures-coming-soon"` 로 이 전환 커밋을 찾아
+//      `git revert` — 아래 4개 지점의 가격/구매 UI 가 한 번에 복구된다.
+//      · src/app/[locale]/lectures/page.tsx           (목록 카드 가격/뱃지)
+//      · src/app/[locale]/lectures/[slug]/page.tsx    (히어로 가격박스·패키지
+//                                                      카드·최종 CTA·스티키바)
+//      · src/app/[locale]/page.tsx + messages/*.json  (메인 번들 섹션 가격)
+//   2. 그 다음 checkout 가드(위 useEffect)를 제거해야 실결제가 열린다.
+//      가드가 남아 있으면 구매 버튼이 다시 상세로 튕긴다.
+//   3. messages/*.json 의 `home.bundle.lecture_price` 를 복원한다.
+//      전환 전 값 — ko "₩149,000" / en "$99" / ja "¥14,800"
+//   ★ 심사 기간(10~14일) 중에는 되돌리지 말 것. 가이드 §10 은 심사 중
+//     판매상태 변경(품절→판매)을 반려 사유로 명시한다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 강의 카테고리가 "출시 예정" 상태인지. 위 전환 블록 참조. */
+export const LECTURES_COMING_SOON = true;
+
+/** 로케일별 "출시 예정" 라벨. 목록의 기존 Coming Soon 카드와 문구를 맞춘다. */
+export function comingSoonLabel(locale: string): string {
+  if (locale === "ko") return "출시 예정";
+  if (locale === "ja") return "近日公開";
+  return "Coming Soon";
+}
+
 export const LECTURE_PACKAGES = {
   earlybird: {
     price: 149000,
