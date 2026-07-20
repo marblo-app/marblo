@@ -219,7 +219,7 @@ export default function PricingSection() {
                     href={`/${locale}/download`}
                     className="block w-full text-center py-3 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 transition font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
                   >
-                    {t("subscribe")}
+                    {t("free_cta")}
                   </Link>
                 ) : (
                   <Link
