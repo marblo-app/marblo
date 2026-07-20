@@ -212,6 +212,29 @@ export function DiffViewer({
     setDraft("");
   }, [composer, draft, files, send, sending]);
 
+  const cancelComposer = useCallback(() => {
+    setComposer(null);
+    setDraft("");
+    setSending(false);
+  }, []);
+
+  const handleComposerKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelComposer();
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void submitComment();
+      }
+    },
+    [cancelComposer, submitComment],
+  );
+
   if (loading) {
     return (
       <div className="rounded border border-gray-700/60 bg-gray-900/50 px-3 py-4 text-center text-xs text-gray-500">
@@ -306,7 +329,7 @@ export function DiffViewer({
         return (
           <div
             key={file.id}
-            className="overflow-hidden rounded border border-gray-700/60 bg-gray-900/60"
+            className="min-w-0 overflow-hidden rounded border border-gray-700/60 bg-gray-900/60"
           >
             <button
               type="button"
@@ -331,7 +354,7 @@ export function DiffViewer({
             {!isCollapsed && (
               <pre
                 onContextMenu={(e) => handleContextMenu(e, file.id)}
-                className="max-h-96 overflow-auto bg-gray-950/70 py-2 font-mono text-[11px] leading-snug"
+                className="max-h-96 w-full max-w-full overflow-auto bg-gray-950/70 py-2 font-mono text-[11px] leading-snug"
               >
                 {file.lines.map((line, index) => (
                   <div
@@ -373,14 +396,19 @@ export function DiffViewer({
 
       {composer && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-black/50 p-4"
           // DiffViewer renders inside TaskDetailModal; keep our clicks and keys
           // from reaching the host modal's close handlers.
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+            }
+          }}
         >
-          <div className="w-full max-w-lg rounded border border-gray-600 bg-gray-900 p-3 shadow-xl">
-            <div className="mb-2 truncate font-mono text-[11px] text-gray-400">
+          <div className="w-full max-w-lg min-w-0 rounded border border-gray-600 bg-gray-900 p-3 shadow-xl">
+            <div className="mb-2 min-w-0 truncate font-mono text-[11px] text-gray-400">
               {t("diff.comment.on")} · {composerLabel}
             </div>
             <textarea
@@ -388,22 +416,14 @@ export function DiffViewer({
               rows={4}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.stopPropagation();
-                  setComposer(null);
-                }
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  void submitComment();
-                }
-              }}
+              onKeyDown={handleComposerKeyDown}
               placeholder={t("diff.comment.placeholder")}
               className="w-full resize-y rounded border border-gray-700 bg-gray-950 p-2 text-xs text-gray-100 outline-none focus:border-blue-500"
             />
             <div className="mt-2 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setComposer(null)}
+                onClick={cancelComposer}
                 className="rounded border border-gray-600 px-3 py-1 text-xs text-gray-300 hover:bg-gray-800"
               >
                 {t("common.cancel")}

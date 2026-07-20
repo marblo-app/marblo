@@ -120,7 +120,7 @@ export function DiffSurface({
     const dom = document.createElement("div");
     dom.className = "marblo-diff-comment-zone";
     dom.style.cssText =
-      "background:#111827;border-left:2px solid #3b82f6;padding:8px 12px;font-family:inherit;";
+      "position:sticky;left:12px;z-index:10;width:min(520px,calc(100vw - 48px));max-width:calc(100% - 24px);box-sizing:border-box;background:#111827;border:1px solid #374151;border-left:2px solid #3b82f6;border-radius:6px;padding:8px 12px;font-family:inherit;box-shadow:0 12px 28px rgba(0,0,0,.35);pointer-events:auto;";
     dom.innerHTML = `
       <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">
         ${t("diff.comment.on")} · ${escapeHtml(formatRangeLabel(range))}
@@ -146,20 +146,40 @@ export function DiffSurface({
       '[data-action="send"]',
     ) as HTMLButtonElement;
 
-    cancelBtn.addEventListener("click", () => clearZone());
-    sendBtn.addEventListener("click", async () => {
+    const stopEditorEvent = (event: Event) => event.stopPropagation();
+    dom.addEventListener("mousedown", stopEditorEvent);
+    dom.addEventListener("click", stopEditorEvent);
+
+    const cancelComment = () => clearZone();
+    const submitComment = async () => {
       const comment = textarea.value.trim();
-      if (!comment) return;
+      if (!comment || sendBtn.disabled) return;
       sendBtn.disabled = true;
       sendBtn.textContent = t("orchestrator.sending");
       clearZone();
       void send(range, comment);
+    };
+
+    textarea.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelComment();
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        void submitComment();
+      }
     });
+    cancelBtn.addEventListener("click", () => clearZone());
+    sendBtn.addEventListener("click", () => void submitComment());
 
     modified.changeViewZones((acc) => {
       zoneIdRef.current = acc.addZone({
         afterLineNumber: lastLine,
-        heightInLines: 4,
+        heightInLines: 6,
         domNode: dom,
       });
     });
