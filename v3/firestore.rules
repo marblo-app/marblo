@@ -230,10 +230,29 @@ service cloud.firestore {
     }
 
     // ===== Audit Logs (Phase 4) =====
+    //
+    // 불변 원장. 단, update 를 통째로 막으면 **멱등 재시도가 불가능**해진다.
+    //
+    // L1(#522)은 ack 만 유실된 쓰기를 재시도해도 중복 문서가 생기지 않도록 문서 id
+    // 를 로컬에서 1회 생성해 setDoc 으로 재사용한다. 그런데 첫 시도가 실제로는
+    // 서버에 닿았고 ack 만 유실된 경우, 같은 id 로의 재시도는 Firestore 가 update
+    // 로 판정한다 → `update: if false` 에 걸려 permission-denied → 스풀이 그 레코드
+    // 에서 영원히 고착한다(실측: 1s/2s/4s/9s/24s 백오프마다 PERMISSION_DENIED 반복).
+    //
+    // ★그래서 "동일 내용 재쓰기"만 허용한다. 어떤 필드도 바뀔 수 없으므로 불변성은
+    // 그대로다 — 관측 가능한 상태 변화가 원천적으로 불가능한 no-op 만 통과한다.
+    // 불변성과 멱등 재시도는 모순이 아니다: 모순처럼 보인 건 "동일 내용의 재확인"을
+    // "변경"과 같은 범주로 취급했기 때문이다.
+    //
+    // 성립 조건: 재시도 페이로드가 결정적으로 동일해야 한다. L1 이 createdAt 을
+    // serverTimestamp 가 아니라 Timestamp.fromMillis(occurredAtMs) 로 쓰기 때문에
+    // 성립한다. ★이후 이 컬렉션에 서버 생성 값(serverTimestamp/request.time 등)을
+    // 추가하면 이 등식이 깨져 고착이 되살아난다.
     match /audit_logs/{logId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
-      allow update: if false;
+      allow update: if isAuthenticated()
+        && request.resource.data == resource.data;
       allow delete: if false;
     }
 

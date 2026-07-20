@@ -92,6 +92,7 @@ import {
   requireServerAck,
   spoolNotice,
   type SpoolNotice,
+  type SpoolRecord,
 } from "./ledger-spool.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -875,11 +876,83 @@ let spoolSingleton: LedgerSpool | null = null;
  * 보장이고, L3 는 `seq` 를 **enqueue 시점**에 매기기만 하면 된다(write 시점에
  * 매기면 안 된다 — 스풀은 30분 뒤에 재적재될 수 있어 write 순서 ≠ 발생 순서다).
  */
+/**
+ * Firestore 에러 코드를 꺼낸다. FirebaseError 는 `code: "permission-denied"`
+ * 형태를 갖는다. 코드가 없으면 메시지로 폴백하지 않는다 — 문자열 매칭은 로케일·
+ * SDK 버전에 따라 조용히 깨지고, 그 결과가 "재시도 가능"으로 오분류되면 정확히
+ * L1.6 고착이 재발한다.
+ */
+function firestoreErrorCode(err: unknown): string | null {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : null;
+}
+
+/**
+ * 이 실패가 재시도로 풀리지 않는 종류인가.
+ *
+ * 권한·인자 오류는 백오프로 회복되지 않는다. 반면 unavailable/deadline-exceeded
+ * 및 ack 타임아웃(코드 없는 우리 Error)은 시간이 지나면 풀리므로 재시도가 맞다.
+ * ★분류를 틀리면 방향에 따라 결과가 다르다: 터미널을 재시도 가능으로 보면 큐가
+ * 영구 고착하고(L1.6), 반대로 보면 회복 가능한 것을 미해결로 내린다. 그래서
+ * 화이트리스트가 아니라 **명시된 터미널 코드만** 터미널로 본다.
+ */
+const TERMINAL_FIRESTORE_CODES = new Set([
+  // 기존 문서에 setDoc → update 판정 → 룰 거부. 이 티켓의 원인 그 자체다.
+  "permission-denied",
+  "unauthenticated",
+  "invalid-argument",
+  "failed-precondition",
+  "not-found",
+]);
+
+function isTerminalLedgerError(err: unknown): boolean {
+  const code = firestoreErrorCode(err);
+  return code !== null && TERMINAL_FIRESTORE_CODES.has(code);
+}
+
+/**
+ * 레코드가 이미 원장에 있는지 확인한다. **최선 노력이고, 실패는 "미상"이다.**
+ *
+ * ★L2 가 audit_logs read 를 isProjectMember() 로 조이면 이 읽기는 정상적으로
+ * 거부된다. 특히 오버플로/미해결 마커는 projectId 가 "" 라 영원히 확인 불가다.
+ * 그래서 읽기 실패를 "없음"으로 반올림하지 않고 null(미상)을 돌려준다 —
+ * 확인 불가를 유실로 단정하면 멀쩡한 기록을 유실로 보고하게 된다.
+ *
+ * 존재만으로 판정하지 않고 **동일성**까지 본다: 같은 id 에 다른 내용이 있다면
+ * 그건 우리 쓰기가 아니므로 성공으로 처리하면 안 된다.
+ */
+async function verifyLedgerRecord(rec: SpoolRecord): Promise<boolean | null> {
+  try {
+    const snap = await getDoc(doc(collection(db, "audit_logs"), rec.id));
+    if (!snap.exists()) return false;
+    const data = snap.data() as Record<string, unknown>;
+    const createdAt = data.createdAt as { toMillis?: () => number } | undefined;
+    const sameInstant =
+      typeof createdAt?.toMillis === "function"
+        ? createdAt.toMillis() === rec.occurredAtMs
+        : false;
+    return (
+      sameInstant &&
+      data.toolName === rec.event.toolName &&
+      data.agentId === rec.event.agentId &&
+      data.projectId === rec.event.projectId
+    );
+  } catch {
+    // 읽기 권한 없음·오프라인 등. "모른다"를 "없다"로 답하지 않는다.
+    return null;
+  }
+}
+
 function ledgerSpool(): LedgerSpool {
   if (spoolSingleton) return spoolSingleton;
   spoolSingleton = new LedgerSpool({
     dir: defaultSpoolDir(),
-    agentId: attributionAgentId(),
+    // ★스풀 정체는 **프로세스 정체**이지 보드 담당자 귀속이 아니다.
+    // attributionAgentId() 는 오케 id 를 의도적으로 "" 로 떨어뜨리는 함수라
+    // (보드에서 오케가 다수 task 의 담당자로 표시되는 것을 막기 위해),
+    // 그걸 여기 쓰면 오케 프로세스의 스풀이 전부 unknown.spool.json 이 되고
+    // tombstone 의 agentId 도 "" 가 된다 — 원장에서 귀속은 핵심 필드다.
+    agentId: MARBLO_AGENT_ID,
     sink: async (rec) => {
       // addDoc(자동 id)이 아니라 로컬 생성 id 로 setDoc 한다 — ack 만 유실되고
       // 실제로는 성공했던 쓰기를 재시도해도 중복 문서가 생기지 않는다. 원장에서
@@ -904,6 +977,8 @@ function ledgerSpool(): LedgerSpool {
         await waitForPendingWrites(db);
       });
     },
+    isTerminal: isTerminalLedgerError,
+    verify: verifyLedgerRecord,
     onNotice: (n) => {
       lastSpoolNotice = n;
     },
@@ -4438,7 +4513,9 @@ export function registerTools(server: McpServer): void {
       }
       // ★"모른다"를 "괜찮다"로 답하지 않는다(§15). 이 툴이 답하는 범위를 명시한다.
       lines.push(
-        `\n범위: 이 MCP 프로세스(agent=${attributionAgentId()})가 기동한 이후만 관측합니다. ` +
+        // 프로세스 정체를 그대로 보여준다 — attributionAgentId() 는 오케 id 를 ""
+        // 로 떨어뜨리므로 여기 쓰면 "agent=" 라는 빈 값이 나온다.
+        `\n범위: 이 MCP 프로세스(agent=${MARBLO_AGENT_ID})가 기동한 이후만 관측합니다. ` +
           `이전 기동분은 디스크 스풀로 복원된 것에 한해 포함됩니다. ` +
           `다른 에이전트 프로세스의 스풀은 여기서 보이지 않습니다.`,
       );

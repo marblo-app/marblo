@@ -467,3 +467,230 @@ describe("경로 규약", () => {
     ).toBe("/tmp/x");
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// L1.6 회귀 — 불변성 룰 vs 멱등 재시도
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * ack 만 유실된 쓰기를 재시도하면 같은 문서 id 로 setDoc 하게 되고, Firestore 는
+ * 그걸 update 로 판정한다. `allow update: if false` 였을 때 이 재시도는 영원히
+ * permission-denied 를 받았고 스풀이 그 레코드에서 고착했다(pending=1 영구).
+ *
+ * 아래 테스트들이 지키는 성질:
+ *  1. 권한 거부는 **재시도 루프를 돌지 않는다** (고착 금지)
+ *  2. 확인 결과 이미 원장에 있으면 **성공 처리**한다 (중복 문서 미생성)
+ *  3. 확인 불가는 "없음"이 아니라 **미상**으로 남는다 (L2 read 조이기 대비)
+ *  4. 한 건이 막혀도 **뒤따르는 이벤트는 계속 적재된다**
+ *  5. 진짜 재시도 가능한 실패는 **여전히 재시도**한다 (회귀 방지의 반대편)
+ */
+describe("L1.6 — 터미널 실패(권한 거부)는 큐를 고착시키지 않는다", () => {
+  /** permission-denied 를 흉내내는 FirebaseError 형태의 에러. */
+  const denied = () =>
+    Object.assign(new Error("PERMISSION_DENIED"), {
+      code: "permission-denied",
+    });
+  const isTerminal = (e: unknown) =>
+    (e as { code?: string })?.code === "permission-denied";
+
+  it("★ack 유실 후 재시도: 확인 결과 이미 원장에 있으면 성공 처리하고 큐를 비운다", async () => {
+    const verified: string[] = [];
+    const { spool, sched } = spoolWith({
+      // 첫 시도가 서버에 닿았지만 ack 이 유실된 상황 → 재시도는 update 로 거부된다.
+      sink: async () => {
+        throw denied();
+      },
+      isTerminal,
+      verify: async (rec) => {
+        verified.push(rec.id);
+        return true; // 확인해 보니 이미 있다
+      },
+    });
+
+    spool.enqueue(evt(1));
+    await spool.settled();
+
+    expect(verified).toEqual(["id-1"]);
+    // 고착하지 않는다: 대기 0, 재시도 예약 0.
+    expect(spool.status().pending).toBe(0);
+    expect(sched.count).toBe(0);
+    // 중복 문서를 만들지 않았다 — 성공 처리했을 뿐 다시 쓰지 않았다.
+    expect(spool.status().ackRecoveredCount).toBe(1);
+    expect(spool.status().unresolvedCount).toBe(0);
+    // 실패가 있었다는 사실 자체는 지워지지 않는다.
+    expect(spool.status().everDegraded).toBe(true);
+  });
+
+  it("★확인 결과 원장에 없으면 '확인된 유실'로 남긴다 — 성공으로 반올림하지 않는다", async () => {
+    const { spool, sched } = spoolWith({
+      sink: async () => {
+        throw denied();
+      },
+      isTerminal,
+      verify: async () => false,
+    });
+
+    spool.enqueue(evt(1));
+    await spool.settled();
+
+    const s = spool.status();
+    expect(s.pending).toBe(0); // 고착 금지
+    expect(sched.count).toBe(0); // 무한 재시도 금지
+    expect(s.unresolvedCount).toBe(1);
+    expect(s.unresolvedConfirmedMissing).toBe(1);
+    expect(s.unresolvedUnknown).toBe(0);
+    expect(s.ackRecoveredCount).toBe(0);
+  });
+
+  it("★확인 자체가 불가능하면(L2 read 조이기) '유실'이 아니라 '미상'으로 남긴다", async () => {
+    const { spool } = spoolWith({
+      sink: async () => {
+        throw denied();
+      },
+      isTerminal,
+      // L2 가 audit_logs read 를 isProjectMember() 로 조이면 이렇게 된다.
+      verify: async () => {
+        throw new Error("permission-denied on read");
+      },
+    });
+
+    spool.enqueue(evt(1));
+    await spool.settled();
+
+    const s = spool.status();
+    expect(s.unresolvedCount).toBe(1);
+    // ★핵심: 확인 불가를 유실로 단정하지 않는다.
+    expect(s.unresolvedConfirmedMissing).toBe(0);
+    expect(s.unresolvedUnknown).toBe(1);
+    expect(formatSpoolStatus(s, 1_000_000)).toContain("확인하지 못했습니다");
+  });
+
+  it("verify 를 아예 주지 않아도 고착하지 않는다 (미상으로 남긴다)", async () => {
+    const { spool, sched } = spoolWith({
+      sink: async () => {
+        throw denied();
+      },
+      isTerminal,
+    });
+
+    spool.enqueue(evt(1));
+    await spool.settled();
+
+    expect(spool.status().pending).toBe(0);
+    expect(sched.count).toBe(0);
+    expect(spool.status().unresolvedUnknown).toBe(1);
+  });
+
+  it("★한 건이 거부돼도 뒤따르는 이벤트는 계속 원장에 들어간다", async () => {
+    // 이게 회귀의 진짜 심각도였다: ack 하나 유실 → 그 뒤 모든 감사 이벤트 정지.
+    const written: SpoolRecord[] = [];
+    const { spool } = spoolWith({
+      sink: async (rec) => {
+        if (rec.event.toolName === "tool_1") throw denied();
+        written.push(rec);
+      },
+      isTerminal,
+      verify: async () => false,
+    });
+
+    spool.enqueue(evt(1));
+    spool.enqueue(evt(2));
+    spool.enqueue(evt(3));
+    await spool.settled();
+
+    // 2, 3 은 정상 적재됐다. 마커도 함께 적재된다(새 id 라 create 로 통과).
+    expect(written.map((r) => r.event.toolName)).toContain("tool_2");
+    expect(written.map((r) => r.event.toolName)).toContain("tool_3");
+    expect(spool.status().pending).toBe(0);
+    expect(spool.status().unresolvedCount).toBe(1);
+  });
+
+  it("★원장에 미해결 마커가 남는다 — 공백 사실이 로컬 상태에만 갇히지 않는다", async () => {
+    const written: SpoolRecord[] = [];
+    const { spool } = spoolWith({
+      sink: async (rec) => {
+        if (rec.event.toolName === "tool_1") throw denied();
+        written.push(rec);
+      },
+      isTerminal,
+      verify: async () => false,
+    });
+
+    spool.enqueue(evt(1));
+    await spool.settled();
+
+    const marker = written.find(
+      (r) => r.event.toolName === "ledger:spool_unresolved",
+    );
+    expect(marker).toBeDefined();
+    expect(marker!.event.kind).toBe("lifecycle");
+    expect(marker!.event.success).toBe(false);
+    expect(marker!.event.params).toMatchObject({
+      unresolvedCount: 1,
+      confirmedMissing: true,
+    });
+    // 귀속이 살아 있어야 한다 — 원장에서 agentId 는 핵심 필드다.
+    expect(marker!.event.agentId).toBe(AGENT);
+  });
+
+  it("★재시도 가능한 실패는 여전히 재시도한다 (반대편 회귀 방지)", async () => {
+    const { spool, state, written, sched } = spoolWith({ isTerminal });
+    state.fail = true;
+
+    spool.enqueue(evt(1));
+    await spool.settled();
+
+    // 네트워크 실패는 코드가 없으니 터미널이 아니다 → 큐에 남고 재시도가 걸린다.
+    expect(spool.status().pending).toBe(1);
+    expect(spool.status().unresolvedCount).toBe(0);
+    expect(sched.count).toBe(1);
+
+    state.fail = false;
+    sched.fire();
+    await spool.settled();
+
+    expect(written.map((r) => r.event.toolName)).toEqual(["tool_1"]);
+    expect(spool.status().pending).toBe(0);
+  });
+
+  it("미해결분은 재기동해도 큐로 되돌아오지 않는다 (같은 이유로 또 막히지 않게)", async () => {
+    const { spool } = spoolWith({
+      sink: async () => {
+        throw denied();
+      },
+      isTerminal,
+      verify: async () => false,
+    });
+    spool.enqueue(evt(1));
+    await spool.settled();
+    expect(spool.status().unresolvedCount).toBe(1);
+
+    // 새 프로세스가 같은 스풀 파일을 읽는다.
+    const { spool: next, written } = spoolWith({ agentId: AGENT });
+    const restored = await next.restore();
+    await next.settled();
+
+    expect(restored).toBe(0); // 큐로 되돌리지 않는다
+    expect(written).toEqual([]); // 재시도하지 않는다
+    expect(next.status().unresolvedCount).toBe(1); // 증거는 남는다
+    expect(next.status().everDegraded).toBe(true);
+  });
+
+  it("미해결분이 있으면 큐가 비어도 상태를 '정상'이라 답하지 않는다", async () => {
+    const { spool } = spoolWith({
+      sink: async () => {
+        throw denied();
+      },
+      isTerminal,
+      verify: async () => false,
+    });
+    spool.enqueue(evt(1));
+    await spool.settled();
+
+    const s = spool.status();
+    expect(s.pending).toBe(0);
+    // ★"대기 0건"만 보고 정상이라 읽히면 안 된다.
+    expect(formatSpoolStatus(s, 1_000_000)).toContain("원장 미적재");
+    expect(spoolNotice(s)).toContain("원장에 넣지 못했습니다");
+  });
+});

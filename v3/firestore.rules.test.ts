@@ -1009,9 +1009,7 @@ describe("marketing_contacts collection", () => {
           emailMarketingConsent: { status: "granted" },
         }),
       );
-      await assertFails(
-        deleteDoc(doc(db, "marketing_contacts", CONTACT_ID)),
-      );
+      await assertFails(deleteDoc(doc(db, "marketing_contacts", CONTACT_ID)));
     }
   });
 
@@ -1039,6 +1037,99 @@ describe("push_tokens collection", () => {
         tokenHash: "h",
       }),
     );
+  });
+});
+
+// ===== Audit Logs (불변 원장 + 멱등 재시도) =====
+
+/**
+ * 이 describe 가 지키는 성질은 하나다: **불변성을 유지한 채 멱등 재시도가 가능한가.**
+ *
+ * L1(#522) 은 ack 만 유실된 쓰기를 재시도해도 중복 문서가 안 생기게 문서 id 를
+ * 로컬에서 1회 생성해 setDoc 으로 재사용한다. 그 재시도가 기존 문서에 닿으면
+ * Firestore 는 update 로 판정한다 — `update: if false` 였을 때 스풀이 그 레코드에서
+ * 영원히 고착했다(L1.6 회귀).
+ *
+ * 아래 두 테스트가 짝이다. 하나만 보면 룰을 잘못 되돌리기 쉽다:
+ *  - 동일 내용 재쓰기는 **성공**해야 한다 (멱등 재시도 성립)
+ *  - 한 글자라도 다르면 **실패**해야 한다 (불변성 유지)
+ */
+describe("audit_logs collection", () => {
+  const LOG_ID = "audit-idempotent-1";
+  // 재시도 페이로드는 결정적으로 동일해야 한다 — createdAt 이 serverTimestamp 가
+  // 아니라 발생 시각에서 유도된 고정 Timestamp 인 이유(ledger-spool.ts).
+  const OCCURRED_AT = new Date("2026-07-20T00:00:00.000Z");
+  const auditDoc = () => ({
+    projectId: PROJECT_ID,
+    agentId: "agent-1",
+    toolName: "add_activity",
+    params: { taskId: "task-1" },
+    result: "ok",
+    duration: 12,
+    success: true,
+    kind: "tool",
+    actorUid: OWNER_ID,
+    createdAt: OCCURRED_AT,
+  });
+
+  it("인증 사용자는 감사 로그를 생성할 수 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(setDoc(doc(db, "audit_logs", LOG_ID), auditDoc()));
+  });
+
+  it("★동일 내용 재쓰기는 성공한다 — ack 유실 후 멱등 재시도가 성립해야 한다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(setDoc(doc(db, "audit_logs", LOG_ID), auditDoc()));
+    // 같은 id, 같은 내용으로 두 번 더 — 스풀 재시도가 하는 것과 정확히 같은 호출.
+    await assertSucceeds(setDoc(doc(db, "audit_logs", LOG_ID), auditDoc()));
+    await assertSucceeds(setDoc(doc(db, "audit_logs", LOG_ID), auditDoc()));
+  });
+
+  it("★내용이 다르면 실패한다 — 불변성은 그대로다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(setDoc(doc(db, "audit_logs", LOG_ID), auditDoc()));
+
+    // 결과 위조
+    await assertFails(
+      setDoc(doc(db, "audit_logs", LOG_ID), {
+        ...auditDoc(),
+        result: "조작된 결과",
+      }),
+    );
+    // 성공/실패 뒤집기
+    await assertFails(
+      setDoc(doc(db, "audit_logs", LOG_ID), { ...auditDoc(), success: false }),
+    );
+    // 발생 시각 옮기기
+    await assertFails(
+      setDoc(doc(db, "audit_logs", LOG_ID), {
+        ...auditDoc(),
+        createdAt: new Date("2026-07-19T00:00:00.000Z"),
+      }),
+    );
+    // 귀속 바꿔치기
+    await assertFails(
+      setDoc(doc(db, "audit_logs", LOG_ID), {
+        ...auditDoc(),
+        actorUid: OUTSIDER_ID,
+      }),
+    );
+    // 필드 삭제(부분 쓰기로 원장을 깎아내기)
+    await assertFails(
+      updateDoc(doc(db, "audit_logs", LOG_ID), { result: "다른 값" }),
+    );
+  });
+
+  it("감사 로그는 삭제할 수 없다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertSucceeds(setDoc(doc(db, "audit_logs", LOG_ID), auditDoc()));
+    await assertFails(deleteDoc(doc(db, "audit_logs", LOG_ID)));
+  });
+
+  it("미인증 사용자는 감사 로그를 읽거나 쓸 수 없다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDoc(doc(db, "audit_logs", LOG_ID)));
+    await assertFails(setDoc(doc(db, "audit_logs", LOG_ID), auditDoc()));
   });
 });
 
