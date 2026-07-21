@@ -12,6 +12,9 @@
 - **권한:** 모든 콜러블 `requireAdmin(context)` — `ADMIN_UID` env 와 `context.auth.uid` 일치만 허용. 불일치/미설정 시 `HttpsError('permission-denied', 'Admin only')`. 클라는 이 에러로 어드민 여부 판정(기존 /admin 패턴 재사용).
   - ⚠️ **배포 전 `ADMIN_UID` env 확인 필수** — 미설정이면 전 콜러블 차단(파운더 봇 런북과 동일).
 - **파라미터:** `{ days?: number }` — 조회 기간(일). 기본 30, 양의 정수만, 상한 365(BQ 스캔 가드). 위반 시 `HttpsError('invalid-argument')`.
+  - **`includeAdmin?: boolean`** — 운영자(존킴) 자기활동 포함 토글. **기본 `false`(제외)**, `true` 면 전체 포함. `getAdminUsageSummary`·`getAdminModelSummary`·`getAdminDrilldown`·`getAdminOnboardingFunnel` 에 적용(텔레메트리/비용 계열). `getAdminBusinessSummary`(Firestore)는 항상 제외라 무관.
+    - ★**하위호환:** 구버전 functions 는 이 param 을 무시(기존=항상 제외), 신규 functions 는 param 이 없으면 `false`(제외)로 기존 동작 유지. 어느 방향 배포순서든 안전.
+    - ★**포함/제외 비교:** 토글을 켜고/끄며 두 수치를 대조한다. 제외 모드에서도 `adminExcluded.clientIdCount` 로 "제외 시 몇 개가 빠지는지"를 노출한다.
 - **BQ location:** `US` 고정(`BQ_LOCATION`). 과거 us-central1 조회 500 버그 회피.
 - **프라이버시(§5 준수):**
   - PII(이메일·이름·전화·개별 uid) 미노출. 집계·카운트·비율만 반환. 개별 row 안 내림.
@@ -97,8 +100,9 @@
   generatedAt: string;
   // 운영자 제외 현황(값 미노출). uidFiltered=false 면 ADMIN_UID 미설정 → UI 가 경고.
   adminExcluded: {
+    applied: boolean; // 이번 응답에 제외가 실제 적용됐는지(=!includeAdmin). false 면 전체 포함.
     uidFiltered: boolean;
-    clientIdCount: number;
+    clientIdCount: number; // 제외 대상(=포함 시 추가로 잡히는) 관리자 clientId 수. 포함 모드에서도 계속 노출(비교용).
   }
   sampleClientCount: number; // 윈도우 내 고유 clientId 수 = 표본 크기(옵트인 라벨용)
   wau: number; // 최근 7일 고유 clientId
@@ -277,6 +281,72 @@
 | `segment:plan/status/provider` | Firestore `subscriptions`                | 상태/플랜/결제수단 교차 + 활성 추이       |
 
 > 날짜 경계는 **UTC 반개구간** `[TIMESTAMP(@date), +1 DAY)` — 상위 차트의 `FORMAT_DATE('%F', DATE(timestamp))` 와 같은 기준이고 파티션 프루닝도 유지된다. 모달 캡션이 "UTC 기준"을 명시한다.
+
+---
+
+## 5. `getAdminOnboardingFunnel` — 온보딩 "첫 10분" 활성화 퍼널 (🟡 BQ, 옵트인 표본)
+
+소스: BQ `events` (온보딩·auth·spawn·crash 이벤트만 IN 절로 좁혀 단일 스캔). 티켓 `zvTXXZj1`.
+배경: `docs/beta-churn-root-cause-analysis-2026-07-21.md`(퍼널 정의) · `docs/onboarding-telemetry-live-verify-3018-2026-07-21.md`(이벤트 페이로드 실 스키마).
+
+**Request:** `{ days?: number, includeAdmin?: boolean }`
+
+**Response:**
+
+```ts
+{
+  rangeDays: number;
+  generatedAt: string;
+  adminExcluded: {
+    applied: boolean;
+    uidFiltered: boolean;
+    clientIdCount: number;
+  }
+  // 본선 6단계 — 각 단계 "도달 고유 clientId"(clients)와 이벤트 발생량(events).
+  // ★엄격 순차 아님(도달 기준). dropFromPrev 는 직전 단계 대비 감소(≥0 clamp).
+  //   비단조(folder_connected=0 인데 orchestrator_opened>0=resume 경로)면 drop=0.
+  // isMaxDrop = 최대 이탈 구간 1곳(★22→6 같은 활성화 절벽).
+  steps: {
+    key: "first_run" |
+      "login_attempt" |
+      "login_success" |
+      "folder_connected" |
+      "orchestrator_opened" |
+      "agent_spawned";
+    event: string; // 소스 이벤트명
+    label: string;
+    clients: number;
+    events: number;
+    dropFromPrev: number | null; // 첫 단계=null
+    dropRateFromPrev: number | null; // dropFromPrev / prev.clients
+    isMaxDrop: boolean;
+  }
+  [];
+  // 실패-분기(퍼널 밖 이탈 사유) — errorCategory 로 세분.
+  // ★orchestrator_blocked 는 cli_auth vs launch_error 로 분해된다.
+  failureBranches: {
+    key: "loginFailed" |
+      "folderConnectFailed" |
+      "orchestratorBlocked" |
+      "agentCrashed";
+    event: string;
+    label: string;
+    clients: number;
+    events: number;
+    byCategory: {
+      key: string;
+      count: number;
+      clients: number;
+    }
+    []; // count 내림차순
+  }
+  [];
+  note: string; // 측정 방법·한계(auth-gated flush, 비단조 resume) 고지 문자열
+}
+```
+
+> 페이로드 매핑(실 스키마): `orchestrator_blocked` 의 reason·`agent:crashed` 의 errorCategory·`login_failed` 의 code 는 전부 events 테이블 **top-level `errorCategory` 컬럼**(metadata 아님). `folder_connected.mode`·`orchestrator_opened.resumed`·`login.method` 는 `metadata` JSON.
+> 순수 집계·이탈 계산은 `v3/functions/src/adminAnalytics.ts`(`buildOnboardingFunnel`)로 분리 — `npm run test:admin-analytics`(node:test, devDep 무추가)로 단위검증.
 
 ---
 

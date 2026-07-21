@@ -10,6 +10,14 @@ import {
 import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
 import { redactSecrets } from "./redact";
 import {
+  parseIncludeAdmin,
+  EMPTY_EXCLUSION,
+  buildOnboardingFunnel,
+  ONBOARDING_FUNNEL_STEPS,
+  ONBOARDING_FAILURE_EVENTS,
+  type ReasonRow,
+} from "./adminAnalytics";
+import {
   verifyPaddleSignature,
   classifyTossPaymentResponse,
   resolveTossWebhookAction,
@@ -5855,8 +5863,13 @@ export const getAdminUsageSummary = functions.https.onCall(
     const outcomesTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_TASK_OUTCOMES_TABLE}\``;
     const since = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
     // 운영자 자기활동 제외 — cost_logs 로 역참조한 어드민 clientId 만 뺀다.
+    // includeAdmin(기본 false)=제외, true=포함. 포함 모드에서도 clientId 는 계속
+    // 해석해서 "제외했다면 몇 개가 빠졌을지"를 adminExcluded 로 노출한다(두 수치 비교).
+    const includeAdmin = parseIncludeAdmin(data);
     const adminClientIds = await resolveAdminClientIds(rangeDays);
-    const ex = adminClientExclusion(adminClientIds);
+    const ex = includeAdmin
+      ? EMPTY_EXCLUSION
+      : adminClientExclusion(adminClientIds);
     // BQ events/task_outcomes 의 timestamp/completedAt 은 STRING 으로 적재돼
     // 있어 TIMESTAMP 리터럴과 직접 비교하면 타입 불일치로 쿼리가 실패한다.
     // SAFE_CAST 로 감싸 비교·DATE() 추출이 동작하게 한다(파싱 실패는 NULL→제외).
@@ -5963,7 +5976,9 @@ export const getAdminUsageSummary = functions.https.onCall(
       rangeDays,
       generatedAt: new Date().toISOString(),
       // 운영자 제외 현황 — clientId 값은 노출하지 않고 개수만.
+      // applied=이번 응답에 실제로 제외가 적용됐는지(토글 상태). false 면 전체 포함.
       adminExcluded: {
+        applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
         clientIdCount: adminClientIds.length,
       },
@@ -6004,6 +6019,122 @@ export const getAdminUsageSummary = functions.https.onCall(
 );
 
 /**
+ * getAdminOnboardingFunnel — 온보딩 "첫 10분" 활성화 퍼널(🟡 BQ events).
+ *
+ * app:first_run → auth:login_attempt → auth:login_success →
+ * onboarding:folder_connected → onboarding:orchestrator_opened → agent:spawned
+ * 의 단계별 "도달 고유 clientId"와 인접 단계 이탈을 집계하고, 실패-분기
+ * (login_failed / folder_connect_failed / orchestrator_blocked / agent:crashed)를
+ * errorCategory 로 분해한다(★orchestrator_blocked 의 cli_auth vs launch_error 등).
+ *
+ * 측정·한계는 buildOnboardingFunnel 의 note 참조(엄격 순차 아님, auth-gated flush).
+ * 익명 clientId 공간 — 개인 식별/PII 미노출, 카운트만. 운영자 제외는 상위 콜러블과
+ * 동일하게 includeAdmin(기본 false=제외) 토글을 따른다.
+ *
+ * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
+ */
+export const getAdminOnboardingFunnel = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const since = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+    const includeAdmin = parseIncludeAdmin(data);
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const ex = includeAdmin
+      ? EMPTY_EXCLUSION
+      : adminClientExclusion(adminClientIds);
+    // events.timestamp 는 STRING 적재 → 비교 전 SAFE_CAST(위 콜러블과 동일 사유).
+    const eventTs = "SAFE_CAST(timestamp AS TIMESTAMP)";
+
+    // 관심 이벤트 전체(본선 6단계 + 실패 4종). 파티션/스캔 최소화를 위해 IN 절로
+    // 좁힌 뒤 단일 스캔에서 단계별 (distinct clientId, 이벤트수)를 한 번에 뽑는다.
+    const funnelEventNames = [
+      ...ONBOARDING_FUNNEL_STEPS.map((s) => s.event),
+      ...ONBOARDING_FAILURE_EVENTS.map((f) => f.event),
+    ];
+    const inList = funnelEventNames.map((_, i) => `@ev${i}`).join(", ");
+    const eventParams: Record<string, unknown> = {};
+    funnelEventNames.forEach((name, i) => {
+      eventParams[`ev${i}`] = name;
+    });
+
+    // d_<col> = 도달 고유 clientId, n_<col> = 이벤트 발생량. col 은 순수 모듈의
+    // step.key / failure.col 규약과 1:1 로 맞춘다(buildOnboardingFunnel 이 읽는 키).
+    const countCols = [
+      // 본선 단계는 step.key 를 컬럼 접두로 쓴다(buildOnboardingFunnel 의 d_<key>).
+      ...ONBOARDING_FUNNEL_STEPS.map((s) => ({ col: s.key, event: s.event })),
+      ...ONBOARDING_FAILURE_EVENTS.map((f) => ({ col: f.col, event: f.event })),
+    ];
+    const countSelects = countCols
+      .map(
+        ({ col, event }) =>
+          `COUNT(DISTINCT IF(event = '${event}', userId, NULL)) AS d_${col},\n` +
+          `        COUNTIF(event = '${event}') AS n_${col}`,
+      )
+      .join(",\n        ");
+
+    const funnelQuery = `
+      SELECT
+        ${countSelects}
+      FROM ${eventsTable}
+      WHERE ${eventTs} >= ${since}
+        AND event IN (${inList})${ex.clause}
+    `;
+
+    // 실패 이벤트의 errorCategory 분해(cli_auth / launch_error / crash 카테고리 등).
+    const failureInList = ONBOARDING_FAILURE_EVENTS.map(
+      (_, i) => `@fev${i}`,
+    ).join(", ");
+    const failureParams: Record<string, unknown> = {};
+    ONBOARDING_FAILURE_EVENTS.forEach((f, i) => {
+      failureParams[`fev${i}`] = f.event;
+    });
+    const reasonQuery = `
+      SELECT
+        event,
+        COALESCE(errorCategory, '(none)') AS category,
+        COUNT(*) AS n,
+        COUNT(DISTINCT userId) AS clients
+      FROM ${eventsTable}
+      WHERE ${eventTs} >= ${since}
+        AND event IN (${failureInList})${ex.clause}
+      GROUP BY event, category
+      ORDER BY n DESC
+    `;
+
+    const [[funnelRows], [reasonRows]] = await Promise.all([
+      bigquery.query({
+        query: funnelQuery,
+        params: { days: rangeDays, ...eventParams, ...ex.params },
+        location: BQ_LOCATION,
+      }),
+      bigquery.query({
+        query: reasonQuery,
+        params: { days: rangeDays, ...failureParams, ...ex.params },
+        location: BQ_LOCATION,
+      }),
+    ]);
+
+    const funnel = buildOnboardingFunnel(
+      (funnelRows as Array<Record<string, unknown>>)[0],
+      reasonRows as ReasonRow[],
+    );
+
+    return {
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      adminExcluded: {
+        applied: !includeAdmin,
+        uidFiltered: getAdminExclusionUid() != null,
+        clientIdCount: adminClientIds.length,
+      },
+      ...funnel,
+    };
+  },
+);
+
+/**
  * getAdminModelSummary — 모델 선정/라우팅 지표(🟡 BQ).
  *
  * (1) cost_logs 모델별 비용(admin 버전 = getCostSummary 의 uid 필터 제거)
@@ -6023,9 +6154,13 @@ export const getAdminModelSummary = functions.https.onCall(
     const sinceTs = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
     // 운영자 제외: cost_logs 는 실제 uid 보유 → 정확 제외.
     // events/task_outcomes 는 익명 clientId → 역참조로 추정된 것만 제외.
-    const uidEx = adminUidExclusion();
+    // includeAdmin(기본 false)=제외, true=포함(두 제외절 모두 비활성).
+    const includeAdmin = parseIncludeAdmin(data);
+    const uidEx = includeAdmin ? EMPTY_EXCLUSION : adminUidExclusion();
     const adminClientIds = await resolveAdminClientIds(rangeDays);
-    const clientEx = adminClientExclusion(adminClientIds);
+    const clientEx = includeAdmin
+      ? EMPTY_EXCLUSION
+      : adminClientExclusion(adminClientIds);
     // cost_logs/events 의 timestamp, task_outcomes 의 completedAt 은 STRING 적재라
     // TIMESTAMP 비교 전 SAFE_CAST 필요(위 getAdminUsageSummary 와 동일 사유).
     const tsCast = "SAFE_CAST(timestamp AS TIMESTAMP)";
@@ -6213,6 +6348,7 @@ export const getAdminModelSummary = functions.https.onCall(
       rangeDays,
       generatedAt: new Date().toISOString(),
       adminExcluded: {
+        applied: !includeAdmin,
         uidFiltered: getAdminExclusionUid() != null,
         clientIdCount: adminClientIds.length,
       },
@@ -6348,9 +6484,14 @@ export const getAdminDrilldown = functions.https.onCall(
       `${col} >= TIMESTAMP(@date) AND ${col} < TIMESTAMP_ADD(TIMESTAMP(@date), INTERVAL 1 DAY)`;
     const sinceTs = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
 
-    const uidEx = adminUidExclusion();
+    // includeAdmin(기본 false)=제외, true=포함. 상위 차트 토글과 같은 값을 받아
+    // 드릴다운도 동일 모집단을 분해하게 한다.
+    const includeAdmin = parseIncludeAdmin(data);
+    const uidEx = includeAdmin ? EMPTY_EXCLUSION : adminUidExclusion();
     const adminClientIds = await resolveAdminClientIds(rangeDays);
-    const clientEx = adminClientExclusion(adminClientIds);
+    const clientEx = includeAdmin
+      ? EMPTY_EXCLUSION
+      : adminClientExclusion(adminClientIds);
 
     // 스코프마다 참조하는 파라미터가 달라서(@date vs @days vs @key vs 제외절)
     // 후보를 모아두고 쿼리 본문이 실제로 참조하는 것만 넘긴다 — 미참조

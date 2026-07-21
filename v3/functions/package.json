@@ -13,7 +13,8 @@
     "test:followup": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderFollowup.test.mjs'",
     "test:survey-offer": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderSurveyOffer.test.mjs'",
     "test:consent-sync": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/marketingConsentSync.test.mjs'",
-    "test:marketing": "tsc src/marketingContacts.ts src/marketingContacts.test.ts --outDir .test-out/marketing --module commonjs --target es2020 --esModuleInterop --strict && node --test .test-out/marketing/marketingContacts.test.js"
+    "test:marketing": "tsc src/marketingContacts.ts src/marketingContacts.test.ts --outDir .test-out/marketing --module commonjs --target es2020 --esModuleInterop --strict && node --test .test-out/marketing/marketingContacts.test.js",
+    "test:admin-analytics": "tsc src/adminAnalytics.ts src/adminAnalytics.test.ts --outDir .test-out/admin --module commonjs --target es2020 --esModuleInterop --strict && node --test .test-out/admin/adminAnalytics.test.js"
   },
   "engines": {
     "node": "20"

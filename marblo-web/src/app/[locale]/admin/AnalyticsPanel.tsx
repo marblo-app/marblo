@@ -28,8 +28,39 @@ type AdminExcludedFirestore = {
   agents: number;
 };
 type AdminExcludedTelemetry = {
+  // 이번 응답에 운영자 제외가 실제로 적용됐는지(includeAdmin 토글 상태의 반영).
+  // 구버전 functions 는 이 필드를 안 내려주므로 optional — 없으면 제외로 간주.
+  applied?: boolean;
   uidFiltered: boolean;
   clientIdCount: number;
+};
+
+// ── 온보딩 "첫 10분" 퍼널 (getAdminOnboardingFunnel) ─────────────────────────
+type OnboardingFunnelStep = {
+  key: string;
+  event: string;
+  label: string;
+  clients: number;
+  events: number;
+  dropFromPrev: number | null;
+  dropRateFromPrev: number | null;
+  isMaxDrop: boolean;
+};
+type OnboardingFailureBranch = {
+  key: string;
+  event: string;
+  label: string;
+  clients: number;
+  events: number;
+  byCategory: { key: string; count: number; clients: number }[];
+};
+type OnboardingFunnel = {
+  rangeDays: number;
+  generatedAt: string;
+  adminExcluded?: AdminExcludedTelemetry;
+  steps: OnboardingFunnelStep[];
+  failureBranches: OnboardingFailureBranch[];
+  note: string;
 };
 
 type BusinessSummary = {
@@ -167,6 +198,8 @@ type DrilldownRequest = {
   days: number;
   date?: string;
   key?: string;
+  // 상위 차트 토글과 같은 값으로 드릴다운도 동일 모집단을 분해한다(기본 제외).
+  includeAdmin?: boolean;
 };
 
 type DrilldownResult = {
@@ -575,7 +608,7 @@ function TwoLineChart({
   onDrill?: (date: string) => void;
 }) {
   const clean = data.filter(
-    (d) => d && isFinite(d.first) && isFinite(d.second),
+    (d) => d && isFinite(d.first) && isFinite(d.second)
   );
   const allZero = clean.every((d) => d.first === 0 && d.second === 0);
   if (clean.length === 0 || allZero) return <EmptyState label={emptyLabel} />;
@@ -677,7 +710,7 @@ function TwoLineChart({
             style={onDrill ? { cursor: "pointer" } : undefined}
           >
             <title>{`${fmtDay(d.date)} · ${first.label} ${fmtFirst(
-              d.first,
+              d.first
             )} · ${second.label} ${fmtSecond(d.second)}${
               onDrill ? " (클릭: 상세 분해)" : ""
             }`}</title>
@@ -761,11 +794,11 @@ function SectionHeader({
           t: "🟢 항상 켜짐·식별",
         }
       : trust === "yellow"
-        ? {
-            c: "text-amber-300 bg-amber-950/30 border-amber-900/40",
-            t: "🟡 옵트인 표본",
-          }
-        : { c: "text-zinc-400 bg-zinc-900 border-zinc-800", t: "🔴 소스 없음" };
+      ? {
+          c: "text-amber-300 bg-amber-950/30 border-amber-900/40",
+          t: "🟡 옵트인 표본",
+        }
+      : { c: "text-zinc-400 bg-zinc-900 border-zinc-800", t: "🔴 소스 없음" };
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="flex items-center gap-2">
@@ -1015,28 +1048,43 @@ function AdminExclusionNote({
     parts.push(
       fsTotal > 0
         ? `사업 데이터에서 관리자 소유 ${fmtInt(fsTotal)}건 제외(구독 ${fmtInt(
-            fs.subscriptions,
+            fs.subscriptions
           )} · 청구 ${fmtInt(fs.billingCharges)} · 파운더 ${fmtInt(
-            fs.founders,
+            fs.founders
           )} · 에이전트 ${fmtInt(fs.agents)})`
-        : "사업 데이터에 관리자 소유 문서 없음",
+        : "사업 데이터에 관리자 소유 문서 없음"
     );
   }
   if (tel) {
+    // applied 미제공(구버전 functions)이면 제외로 간주(기존 하드코딩 동작).
+    const excluding = tel.applied !== false;
     if (!tel.uidFiltered) {
       parts.push("⚠️ ADMIN_UID 미설정 — 운영자 제외가 적용되지 않았습니다");
+    } else if (!excluding) {
+      // 포함(토글 ON) 모드 — 전체 수치. 제외 시 얼마가 빠지는지 함께 안내(비교).
+      parts.push(
+        tel.clientIdCount > 0
+          ? `🟠 텔레메트리 전체 포함 중(운영자 미제외) — 제외 시 관리자 클라이언트 ${fmtInt(
+              tel.clientIdCount
+            )}개가 빠집니다`
+          : "🟠 텔레메트리 전체 포함 중(운영자 미제외)"
+      );
     } else if (tel.clientIdCount > 0) {
       parts.push(
         `텔레메트리에서 관리자 클라이언트 ${fmtInt(
-          tel.clientIdCount,
-        )}개 제외(cost_logs 역참조 추정)`,
+          tel.clientIdCount
+        )}개 제외(cost_logs 역참조 추정)`
       );
     } else {
       parts.push(
         "텔레메트리는 익명 clientId 라 운영자 식별분이 없어 제외분 0 " +
-          "(비용 지출은 uid 기준 정확 제외)",
+          "(비용 지출은 uid 기준 정확 제외)"
       );
     }
+    // ★blind spot 상시 고지 — cost_logs 무흔적 세션은 존킴이라도 못 잡음.
+    parts.push(
+      "제외기 한계: cost_logs 흔적 있는 세션만 잡아 무토큰·dev·크래시 세션은 외부로 샐 수 있음"
+    );
   }
 
   return (
@@ -1055,14 +1103,135 @@ function mapErr(err: CallableError): string {
     return "어드민 분석 서버 설정 오류입니다. ADMIN_UID 또는 BigQuery 설정을 서버 로그에서 확인해야 합니다.";
   if (err?.code === "functions/invalid-argument")
     return "잘못된 기간 파라미터입니다.";
+  // 신규 콜러블이 아직 배포 전(web 선배포)일 때의 안내 — 나머지 섹션은 정상.
+  if (err?.code === "functions/not-found" || err?.code === "functions/internal")
+    return "이 지표는 Cloud Functions 배포 후 표시됩니다(신규 함수 미배포).";
   return err?.message || "데이터를 불러오지 못했습니다.";
 }
 
 // 개별 콜러블 로딩 결과 래퍼.
 type Loaded<T> = { data: T | null; loading: boolean; error: string | null };
 
+// ── 온보딩 첫10분 퍼널 시각화 ────────────────────────────────────────────────
+// 단계별 "도달 고유 clientId"를 세로 막대로, 인접 단계 이탈을 화살표로 표기한다.
+// ★최대 이탈 구간(isMaxDrop)은 붉게 강조 — 22→6 같은 활성화 절벽이 눈에 띄게.
+function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
+  const steps = funnel.steps;
+  const maxClients = Math.max(1, ...steps.map((s) => s.clients));
+  const hasAny = steps.some((s) => s.clients > 0 || s.events > 0);
+  const failuresWithData = funnel.failureBranches.filter(
+    (f) => f.clients > 0 || f.events > 0
+  );
+
+  if (!hasAny) {
+    return (
+      <EmptyState label="온보딩 퍼널 이벤트가 없습니다 (해당 기간 미발화 또는 텔레메트리 공백)." />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Panel
+        title="단계별 도달 (고유 clientId)"
+        note="app:first_run → 로그인 → 폴더연결 → 오케오픈 → 스폰 · 인접 단계 감소 = 이탈"
+      >
+        <div className="space-y-1">
+          {steps.map((s, i) => {
+            const widthPct = Math.round((s.clients / maxClients) * 100);
+            const drop = s.dropFromPrev;
+            const showDrop = i > 0 && drop != null && drop > 0;
+            return (
+              <div key={s.key}>
+                {showDrop && (
+                  <div
+                    className={`flex items-center gap-1.5 py-0.5 pl-1 text-xs ${
+                      s.isMaxDrop
+                        ? "font-semibold text-red-400"
+                        : "text-zinc-500"
+                    }`}
+                  >
+                    <span>↓</span>
+                    <span className="tabular-nums">
+                      −{fmtInt(drop)}
+                      {s.dropRateFromPrev != null &&
+                        ` (−${fmtPct(s.dropRateFromPrev)})`}
+                    </span>
+                    {s.isMaxDrop && <span>· 최대 이탈 구간</span>}
+                  </div>
+                )}
+                <div className="flex items-center gap-3">
+                  <div className="w-40 shrink-0 text-xs text-zinc-400">
+                    {s.label}
+                  </div>
+                  <div className="relative h-7 flex-1 overflow-hidden rounded bg-zinc-900">
+                    <div
+                      className="h-full rounded"
+                      style={{
+                        width: `${Math.max(widthPct, s.clients > 0 ? 2 : 0)}%`,
+                        backgroundColor: s.isMaxDrop ? STATUS_CRIT : SERIES,
+                      }}
+                    />
+                    <div className="absolute inset-0 flex items-center gap-2 px-2">
+                      <span className="text-xs font-semibold tabular-nums text-zinc-100">
+                        {fmtInt(s.clients)}명
+                      </span>
+                      <span
+                        className="text-[11px] tabular-nums"
+                        style={{ color: INK_MUTED }}
+                      >
+                        · {fmtInt(s.events)} 이벤트
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
+
+      {failuresWithData.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {failuresWithData.map((f) => (
+            <Panel
+              key={f.key}
+              title={`실패 분기 · ${f.label}`}
+              note={`${fmtInt(f.clients)} clientId · ${fmtInt(
+                f.events
+              )}건 · 사유(errorCategory)별`}
+            >
+              {f.byCategory.length > 0 ? (
+                <BarList
+                  data={f.byCategory.map((c) => ({
+                    key: c.key,
+                    value: c.count,
+                  }))}
+                  color={STATUS_WARN}
+                  showShare
+                  emptyLabel="사유 데이터가 없습니다."
+                />
+              ) : (
+                <EmptyState label="사유(errorCategory) 미기록." />
+              )}
+            </Panel>
+          ))}
+        </div>
+      )}
+
+      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>{funnel.note}</span>
+      </p>
+    </div>
+  );
+}
+
 export default function AnalyticsPanel() {
   const [days, setDays] = useState(30);
+  // 운영자(존킴) 포함 토글. 기본 false = 제외(고객 지표). ON = 전체 포함.
+  // ★blind spot: 제외기는 cost_logs 에 흔적 있는 세션만 존킴으로 잡는다 —
+  // 무토큰/dev/크래시 세션은 존킴이라도 '외부'로 샌다(툴팁에 명시, 오분해 방지).
+  const [includeAdmin, setIncludeAdmin] = useState(false);
   const [biz, setBiz] = useState<Loaded<BusinessSummary>>({
     data: null,
     loading: true,
@@ -1078,8 +1247,13 @@ export default function AnalyticsPanel() {
     loading: true,
     error: null,
   });
+  const [onbFunnel, setOnbFunnel] = useState<Loaded<OnboardingFunnel>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const [modelView, setModelView] = useState<"overview" | "routing">(
-    "overview",
+    "overview"
   );
   // 드릴다운 — 열려 있는 요청과 그 응답.
   const [drill, setDrill] = useState<DrilldownRequest | null>(null);
@@ -1090,30 +1264,35 @@ export default function AnalyticsPanel() {
   });
   const drillSeq = useRef(0);
 
-  const openDrill = useCallback((req: DrilldownRequest) => {
-    const seq = drillSeq.current + 1;
-    drillSeq.current = seq;
-    setDrill(req);
-    setDrillState({ data: null, loading: true, error: null });
-    const fns = getFunctions(app, "us-central1");
-    const call = httpsCallable<DrilldownRequest, DrilldownResult>(
-      fns,
-      "getAdminDrilldown",
-    );
-    call(req)
-      .then((r) => {
-        if (drillSeq.current !== seq) return;
-        setDrillState({ data: r.data, loading: false, error: null });
-      })
-      .catch((e) => {
-        if (drillSeq.current !== seq) return;
-        setDrillState({
-          data: null,
-          loading: false,
-          error: mapErr(e as CallableError),
+  const openDrill = useCallback(
+    (req: DrilldownRequest) => {
+      // 드릴다운도 상위 차트 토글과 동일 모집단을 분해하도록 includeAdmin 주입.
+      const fullReq = { ...req, includeAdmin };
+      const seq = drillSeq.current + 1;
+      drillSeq.current = seq;
+      setDrill(fullReq);
+      setDrillState({ data: null, loading: true, error: null });
+      const fns = getFunctions(app, "us-central1");
+      const call = httpsCallable<DrilldownRequest, DrilldownResult>(
+        fns,
+        "getAdminDrilldown"
+      );
+      call(fullReq)
+        .then((r) => {
+          if (drillSeq.current !== seq) return;
+          setDrillState({ data: r.data, loading: false, error: null });
+        })
+        .catch((e) => {
+          if (drillSeq.current !== seq) return;
+          setDrillState({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          });
         });
-      });
-  }, []);
+    },
+    [includeAdmin]
+  );
 
   const closeDrill = useCallback(() => {
     drillSeq.current += 1;
@@ -1121,24 +1300,31 @@ export default function AnalyticsPanel() {
     setDrillState({ data: null, loading: false, error: null });
   }, []);
 
-  const load = useCallback(async (d: number) => {
+  const load = useCallback(async (d: number, inc: boolean) => {
     const fns = getFunctions(app, "us-central1");
+    // 사업(Firestore)은 항상 운영자 제외(별도 doc-id 기반) — includeAdmin 무관.
     const callBiz = httpsCallable<{ days: number }, BusinessSummary>(
       fns,
-      "getAdminBusinessSummary",
+      "getAdminBusinessSummary"
     );
-    const callUsage = httpsCallable<{ days: number }, UsageSummary>(
-      fns,
-      "getAdminUsageSummary",
-    );
-    const callModel = httpsCallable<{ days: number }, ModelSummary>(
-      fns,
-      "getAdminModelSummary",
-    );
+    // 텔레메트리 계열은 includeAdmin 토글을 그대로 전달.
+    const callUsage = httpsCallable<
+      { days: number; includeAdmin: boolean },
+      UsageSummary
+    >(fns, "getAdminUsageSummary");
+    const callModel = httpsCallable<
+      { days: number; includeAdmin: boolean },
+      ModelSummary
+    >(fns, "getAdminModelSummary");
+    const callFunnel = httpsCallable<
+      { days: number; includeAdmin: boolean },
+      OnboardingFunnel
+    >(fns, "getAdminOnboardingFunnel");
 
     setBiz((s) => ({ ...s, loading: true, error: null }));
     setUsage((s) => ({ ...s, loading: true, error: null }));
     setModel((s) => ({ ...s, loading: true, error: null }));
+    setOnbFunnel((s) => ({ ...s, loading: true, error: null }));
 
     // 각 콜러블 독립 처리 — 하나 실패해도 나머지는 렌더.
     callBiz({ days: d })
@@ -1148,36 +1334,48 @@ export default function AnalyticsPanel() {
           data: null,
           loading: false,
           error: mapErr(e as CallableError),
-        }),
+        })
       );
-    callUsage({ days: d })
+    callUsage({ days: d, includeAdmin: inc })
       .then((r) => setUsage({ data: r.data, loading: false, error: null }))
       .catch((e) =>
         setUsage({
           data: null,
           loading: false,
           error: mapErr(e as CallableError),
-        }),
+        })
       );
-    callModel({ days: d })
+    callModel({ days: d, includeAdmin: inc })
       .then((r) => setModel({ data: r.data, loading: false, error: null }))
       .catch((e) =>
         setModel({
           data: null,
           loading: false,
           error: mapErr(e as CallableError),
-        }),
+        })
+      );
+    // 신규 콜러블 — functions 미배포(web 선배포) 시 not-found 로 실패할 수 있으나
+    // 독립 catch 라 나머지 섹션은 정상 렌더된다(배포순서 soft-fail).
+    callFunnel({ days: d, includeAdmin: inc })
+      .then((r) => setOnbFunnel({ data: r.data, loading: false, error: null }))
+      .catch((e) =>
+        setOnbFunnel({
+          data: null,
+          loading: false,
+          error: mapErr(e as CallableError),
+        })
       );
   }, []);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
-      void load(days);
+      void load(days, includeAdmin);
     }, 0);
     return () => window.clearTimeout(id);
-  }, [days, load]);
+  }, [days, includeAdmin, load]);
 
-  const anyLoading = biz.loading || usage.loading || model.loading;
+  const anyLoading =
+    biz.loading || usage.loading || model.loading || onbFunnel.loading;
 
   const b = biz.data;
   const u = usage.data;
@@ -1195,41 +1393,41 @@ export default function AnalyticsPanel() {
     () =>
       b
         ? Object.entries(b.subscriptions.byPlanActive || {}).map(
-            ([key, value]) => ({ key, value }),
+            ([key, value]) => ({ key, value })
           )
         : [],
-    [b],
+    [b]
   );
   const statusRows = useMemo(
     () =>
       b
         ? Object.entries(b.subscriptions.byStatus || {}).map(
-            ([key, value]) => ({ key, value }),
+            ([key, value]) => ({ key, value })
           )
         : [],
-    [b],
+    [b]
   );
   const providerRows = useMemo(
     () =>
       b
         ? Object.entries(b.subscriptions.byProviderActive || {}).map(
-            ([key, value]) => ({ key, value }),
+            ([key, value]) => ({ key, value })
           )
         : [],
-    [b],
+    [b]
   );
   const consecutiveRows = useMemo(
     () =>
       b
         ? Object.entries(
-            b.subscriptions.consecutiveBilling?.byCycleCount || {},
+            b.subscriptions.consecutiveBilling?.byCycleCount || {}
           ).map(([key, value]) => ({ key, value }))
         : [],
-    [b],
+    [b]
   );
   const subscriptionTrend = useMemo(
     () => b?.subscriptions.trendByDay || [],
-    [b],
+    [b]
   );
 
   // 퍼널: 신청 → 선정 → 활성(옵트인) → Pro. 활성은 익명 표본이라 라벨 구분.
@@ -1265,9 +1463,29 @@ export default function AnalyticsPanel() {
           {u && <SampleBadge n={u.sampleClientCount} />}
         </div>
         <div className="flex items-center gap-2">
+          <label
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-400 transition hover:text-zinc-200"
+            title={
+              "운영자(존킴) 자기활동 제외 토글 · 기본=제외(고객 지표).\n" +
+              "⚠️ 제외기는 cost_logs 에 흔적 있는 세션만 존킴으로 잡습니다 — " +
+              "무토큰·dev·크래시 세션은 존킴 것이라도 '외부'로 계상될 수 있어 " +
+              "외부 수치가 과대계상될 수 있습니다(오분해 주의)."
+            }
+          >
+            <input
+              type="checkbox"
+              checked={includeAdmin}
+              disabled={anyLoading}
+              onChange={(e) => setIncludeAdmin(e.target.checked)}
+              className="h-3.5 w-3.5 accent-indigo-500"
+            />
+            <UserMinus className="h-3.5 w-3.5" />
+            운영자 포함
+            <Info className="h-3 w-3 text-zinc-600" />
+          </label>
           <RangeControl days={days} onChange={setDays} disabled={anyLoading} />
           <button
-            onClick={() => load(days)}
+            onClick={() => load(days, includeAdmin)}
             disabled={anyLoading}
             className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-400 transition hover:text-zinc-200 disabled:opacity-50"
             aria-label="새로고침"
@@ -1308,7 +1526,7 @@ export default function AnalyticsPanel() {
                 label="활성 파운더"
                 value={fmtInt(b.founders.accessGranted)}
                 sub={`설문 ${fmtInt(
-                  b.founders.feedbackSubmitted,
+                  b.founders.feedbackSubmitted
                 )} · 인터뷰 ${fmtInt(b.founders.interviewCompleted)}`}
               />
               <StatCard
@@ -1321,7 +1539,7 @@ export default function AnalyticsPanel() {
                 label="유료 Pro(active)"
                 value={fmtInt(b.subscriptions.paidProActive)}
                 sub={`현재 ${fmtInt(
-                  b.subscriptions.paidCurrent,
+                  b.subscriptions.paidCurrent
                 )} · 무료부여 ${fmtInt(b.subscriptions.founderGrantActive)}`}
                 accent={SERIES}
               />
@@ -1329,7 +1547,7 @@ export default function AnalyticsPanel() {
                 label="연속 구독자"
                 value={fmtInt(consecutiveBilling.subscribers)}
                 sub={`Toss 평균 ${consecutiveBilling.averageCycleCount.toFixed(
-                  1,
+                  1
                 )}회`}
                 accent={SERIES_2}
               />
@@ -1349,8 +1567,8 @@ export default function AnalyticsPanel() {
                 note={`활성 구독 ${fmtInt(
                   Object.values(b.subscriptions.byPlanActive || {}).reduce(
                     (a, c) => a + c,
-                    0,
-                  ),
+                    0
+                  )
                 )}건`}
               >
                 <BarList
@@ -1429,7 +1647,7 @@ export default function AnalyticsPanel() {
               <Panel
                 title="연속 청구 사이클"
                 note={`Toss billingCharges 기준 · Paddle ${fmtInt(
-                  b.subscriptions.paddleActiveCurrent,
+                  b.subscriptions.paddleActiveCurrent
                 )}건은 원장 공백`}
               >
                 <BarList
@@ -1460,7 +1678,7 @@ export default function AnalyticsPanel() {
                     return funnel.map((f) => {
                       const pct = Math.max(
                         (f.value / fmax) * 100,
-                        f.value > 0 ? 3 : 0,
+                        f.value > 0 ? 3 : 0
                       );
                       const color = f.trust === "yellow" ? STATUS_WARN : SERIES;
                       return (
@@ -1601,6 +1819,22 @@ export default function AnalyticsPanel() {
         ) : null}
       </div>
 
+      {/* ── 온보딩 첫10분 퍼널 (🟡) ───────────────────────────────── */}
+      <div className="space-y-4">
+        <SectionHeader
+          icon={Activity}
+          title="온보딩 첫 10분 퍼널 (활성화)"
+          trust="yellow"
+        />
+        {onbFunnel.loading ? (
+          <LoadingBox />
+        ) : onbFunnel.error ? (
+          <ErrorBox msg={onbFunnel.error} />
+        ) : onbFunnel.data ? (
+          <OnboardingFunnelView funnel={onbFunnel.data} />
+        ) : null}
+      </div>
+
       {/* ── 모델 준비 (🟡) ────────────────────────────────────────── */}
       <div className="space-y-4">
         <SectionHeader icon={Cpu} title="모델 선정·라우팅" trust="yellow">
@@ -1688,8 +1922,8 @@ export default function AnalyticsPanel() {
                     value={fmtInt(
                       m.routing.byReuseVsSpawn.reduce(
                         (sum, r) => sum + r.count,
-                        0,
-                      ),
+                        0
+                      )
                     )}
                     sub="dispatch:decision"
                   />
@@ -1708,8 +1942,8 @@ export default function AnalyticsPanel() {
                     value={fmtInt(
                       m.outcomeByModel.reduce(
                         (sum, r) => sum + r.reworkCount,
-                        0,
-                      ),
+                        0
+                      )
                     )}
                     sub="retriesCount 합계"
                   />
@@ -1878,8 +2112,8 @@ function ModelRoleTable({
                           r.successRate >= 0.7
                             ? STATUS_GOOD
                             : r.successRate >= 0.4
-                              ? STATUS_WARN
-                              : STATUS_CRIT,
+                            ? STATUS_WARN
+                            : STATUS_CRIT,
                       }}
                     />
                   </div>
