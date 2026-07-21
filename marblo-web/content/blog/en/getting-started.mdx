@@ -1,0 +1,424 @@
+---
+title: "Marblo Getting Started — From Download to Your First Finished Agent"
+description: "A hands-on guide for developers opening Marblo for the first time. ★Before you start: you need your own paid Claude subscription (or API key) and Node.js. Download → Install → Node.js → CLI auth → Connect a folder → First spawn → First completed task — clearing the three walls that stop most people."
+date: "2026-07-21"
+category: "product"
+locales: ["ko", "en", "ja"]
+author: "Marblo"
+---
+
+When most people open Marblo for the first time, they close it **without ever spawning a single agent**. Not because the product is bad, but because they hit three walls **before** they ever see the value. This guide names those three walls up front and walks you past each one, all the way to **the moment your first agent finishes a ticket end to end**.
+
+It's written developer-first, but it includes the Node.js install step so that **someone new to AI tooling can also get through it alone**.
+
+## ★Before you start — let's be honest (BYOK)
+
+Marblo runs agents **on your own AI account**. This is called BYOK (Bring Your Own Key). So to start you need **two things**, and without both you'll get stuck at the first spawn.
+
+<Diagram caption="The three unannounced walls on the way to your first spawn. Following only the in-app prompts, it's easy to get silently stuck at wall ①, ②, or ③. This guide covers how to clear each one.">
+  <svg
+    viewBox="0 0 640 300"
+    role="img"
+    aria-label="A setup path from Download and Install, through Node.js install (wall 1), CLI auth and paid subscription (wall 2), and past a free-account pass-through crash (wall 3), to Connect a folder and First completion. Walls 1, 2, and 3 are highlighted."
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-walls-en"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="20"
+      y="118"
+      width="120"
+      height="64"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="80"
+      y="146"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Download
+    </text>
+    <text
+      x="80"
+      y="164"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      · Install
+    </text>
+    <rect
+      x="168"
+      y="118"
+      width="120"
+      height="64"
+      rx="8"
+      fill="#2a2015"
+      stroke="#f59e0b"
+      strokeWidth="1.5"
+    />
+    <text
+      x="228"
+      y="140"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="700"
+      fill="#fbbf24"
+    >
+      Wall ①
+    </text>
+    <text
+      x="228"
+      y="160"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      Node.js
+    </text>
+    <text
+      x="228"
+      y="175"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      / npm missing
+    </text>
+    <rect
+      x="316"
+      y="118"
+      width="120"
+      height="64"
+      rx="8"
+      fill="#2a2015"
+      stroke="#f59e0b"
+      strokeWidth="1.5"
+    />
+    <text
+      x="376"
+      y="140"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="700"
+      fill="#fbbf24"
+    >
+      Wall ②·③
+    </text>
+    <text
+      x="376"
+      y="160"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      CLI auth
+    </text>
+    <text
+      x="376"
+      y="175"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      + paid plan
+    </text>
+    <rect
+      x="464"
+      y="118"
+      width="76"
+      height="64"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="502"
+      y="146"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      Connect
+    </text>
+    <text
+      x="502"
+      y="164"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      folder
+    </text>
+    <rect
+      x="556"
+      y="118"
+      width="72"
+      height="64"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="592"
+      y="146"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      First
+    </text>
+    <text
+      x="592"
+      y="164"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      finish
+    </text>
+    <line
+      x1="140"
+      y1="150"
+      x2="166"
+      y2="150"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-walls-en)"
+    />
+    <line
+      x1="288"
+      y1="150"
+      x2="314"
+      y2="150"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-walls-en)"
+    />
+    <line
+      x1="436"
+      y1="150"
+      x2="462"
+      y2="150"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-walls-en)"
+    />
+    <line
+      x1="540"
+      y1="150"
+      x2="554"
+      y2="150"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-walls-en)"
+    />
+    <text
+      x="320"
+      y="238"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      Wall ① no Node.js · Wall ② no paid Claude auth · Wall ③ free account
+      passes, then first spawn crashes
+    </text>
+  </svg>
+</Diagram>
+
+### Requirement 1 — your own paid Claude subscription (or API key)
+
+The agents Marblo spawns run on the Claude Code CLI, and **Claude Code only actually works with a paid plan (Claude Pro or higher) or an Anthropic API key**. If you run `claude login` with a free account, the login itself succeeds, but **the first task silently fails** (that's wall ③).
+
+![Claude pricing table. Claude Code is not on the Free plan — it's only on the paid Pro/Max plans.](/images/guide/first-run/wall2b-claude-pricing.png)
+
+- **Smoothest path**: if you already use Claude Pro (or Max), just run `claude login`.
+- **API key also works**: get an `ANTHROPIC_API_KEY` and it runs without a subscription. You pay per usage.
+- If you'll use Codex, OpenAI is the same — a paid ChatGPT subscription or an `OPENAI_API_KEY`.
+
+> The point: signing in to Marblo is free, but **the cost of actually running agents comes out of your AI account.** Start without knowing this and you'll get stuck at the first spawn.
+
+### Requirement 2 — Node.js / npm
+
+The agent CLIs (Claude Code · Codex) install as npm packages, so your machine needs **Node.js and npm**. If you're a developer you probably already have them; if not, you'll install them in five minutes in **Step 2** below.
+
+To check what you have right now, type this in a terminal:
+
+```bash
+node -v && npm -v
+```
+
+If version numbers appear (e.g. `v20.11.0` / `10.2.4`), you're ready. If you see `command not found`, go to Step 2.
+
+## Step 0 — Founder approval & app download
+
+Right now Marblo ships the desktop app **only to founders (selected beta users)**. So if you go straight to the download page, you'll see a **sign-in / apply** prompt instead of the app.
+
+![Marblo download page. A signed-out new visitor sees "Sign in to download — Marblo Desktop is available to selected founders," with Log in and Sign up buttons.](/images/guide/first-run/en/01-download-login-gate.png)
+
+Here's the order:
+
+1. Apply on the [Founders page](/en/founders) with a one-line email (it's reviewed and selected, not first-come).
+2. If selected, access instructions arrive by email.
+3. While signed in, open the [download page](/en/download) — only then can you grab the macOS (Apple Silicon · Intel) or Windows build.
+
+> 🎥 **Video slot A** — Getting the founder email → signing in → the download button unlocking. (A web screen outside the app, so it can be captured live.)
+
+## Step 1 — Install and first launch
+
+Run the file you downloaded.
+
+- **macOS**: open the `.dmg` and drag Marblo into your **Applications** folder.
+- **Windows**: run the installer as-is.
+
+![Marblo app first-launch screen.](/images/guide/install-run.svg)
+
+On first launch you may see a macOS **Gatekeeper** or Windows **SmartScreen** warning. It's a properly signed and notarized build, so get past it like this:
+
+- **macOS**: `System Settings > Privacy & Security` → **"Open Anyway"**.
+- **Windows**: `More info > Run anyway`.
+
+> 🎥 **Video slot B** — Clearing the Gatekeeper/SmartScreen warning on first launch and the app opening.
+
+## Step 2 — Install Node.js / npm (Wall ①)
+
+If `node -v` gave you `command not found`, fix it here. **If you already have it, skip this step.**
+
+1. Go to [nodejs.org](https://nodejs.org/en).
+2. Click the green **"Get Node.js®"** button (the LTS version, e.g. v24.x) to download the installer.
+3. Run the installer as-is. npm comes bundled with Node.js.
+
+![nodejs.org home page. The green "Get Node.js®" download button and the latest LTS version indicator at the bottom.](/images/guide/first-run/en/wall1-nodejs.png)
+
+When it's done, **open a new terminal** and check again:
+
+```bash
+node -v && npm -v
+```
+
+If both version numbers appear, you've cleared wall ①.
+
+> **Why is this needed?** Marblo auto-installs the agent CLIs with `npm install -g`. Without npm, that auto-install fails and the app tells you "npm not found. Install Node.js / npm and try again." Installing Node.js first skips that detour entirely.
+
+## Step 3 — Confirm CLI auto-install & authenticate (Walls ②·③)
+
+This is **where new users get stuck most often**. Stay calm; there are only two things to do: (a) confirm the CLIs are installed, and (b) **authenticate with your own paid account**.
+
+### 3-1. The required CLIs auto-install
+
+On first launch, Marblo **auto-installs** Claude Code · Codex · the Marblo MCP in the background. You don't need to install anything by hand from the Harness tab. (If you installed Node.js in Step 2, this auto-install quietly succeeds.)
+
+![Marblo first-launch screen auto-installing the required CLIs and MCP.](/images/guide/install-autocli.svg)
+
+### 3-2. ★Authenticate — this is where a paid account is required
+
+When you try to open the orchestrator, Marblo shows a **CLI auth gate**. Click "Run authentication" and a terminal tab opens with the login command auto-typed. If you'd rather type it yourself:
+
+```bash
+claude login
+```
+
+When the browser opens, sign in with **your own Anthropic account**. If you'll also use Codex:
+
+```bash
+codex login
+```
+
+> ⚠️ **This is wall ②·③.** The gate only says "sign in," which makes it look like a free login is enough. But:
+>
+> - **Signing in alone isn't enough** — the account you signed in with needs a **paid entitlement (Claude Pro/Max or API credit)**.
+> - Sign in with a free account and the gate passes you as "ready," but **the first spawn dies within 2 seconds** (wall ③, pass-through crash). When that happens, don't ask "why did it die?" — check **Requirement 1 (a paid subscription/API key) in "Before you start — BYOK"** at the top.
+
+Once authentication finishes, each CLI flips to an "authenticated" state. If the state doesn't update, restart the app.
+
+> 🎥 **Video slot C** — The CLI auth gate → clicking "Run authentication" → `claude login` in the terminal → browser sign-in → flipping to "authenticated." (The key moment of getting started.)
+
+## Step 4 — Connect a folder → orchestrator opens automatically
+
+Once you're authenticated, it's the easy road. Just **pick one project folder** and Marblo auto-registers it (zero clicks) and **opens the orchestrator automatically**.
+
+![Adding a project folder in Marblo.](/images/guide/project-add.svg)
+
+The orchestrator is your command center. When the folder connects, it greets you and suggests "what ticket should I create / which agent should I attach."
+
+![The orchestrator opening automatically after you connect a folder.](/images/guide/project-orchestrator.svg)
+
+> 🎥 **Video slot D** — Picking a folder once → the orchestrator opening automatically and greeting you.
+
+## Step 5 — Your first agent spawn
+
+Just tell the orchestrator what you want in natural language. For example:
+
+> "Create a ticket to add an installation section to the README, and attach an agent."
+
+The orchestrator creates the ticket and **spawns a physical agent (a standalone CLI process)**. The spawned agent reads and writes actual code in its own terminal tab.
+
+At this moment **walls ②·③ are tested again**. With auth and a paid entitlement in place, the agent stays alive and starts working. If it dies within 2 seconds into an "error" card → re-check the paid entitlement from Step 3.
+
+> 🎥 **Video slot E** — A one-line instruction to the orchestrator → ticket created → an agent tab spawning and actually starting to move.
+
+## Step 6 — First completed task (the value moment)
+
+When the agent finishes, it moves the ticket to **REVIEW**. You check the result (diff, change summary) and approve. The ticket flipping to **DONE** is Marblo's **core value moment** — the point where your role shifts from someone who types to someone who delegates and reviews.
+
+![Creating a mission (task) in the orchestrator.](/images/guide/mission-create.svg)
+
+If you got here, congratulations. You've cleared all three walls that stop most people, and **watched an agent finish a ticket end to end** with your own eyes.
+
+> 🎥 **Video slot F** — The agent moving work to REVIEW → the user checking the diff → approving → DONE. (Completion = the value moment, the climax of the video.)
+
+## Stuck? — Three-wall troubleshooting
+
+| Symptom                                                     | Which wall                         | Fix                                                                                                     |
+| ----------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| App says "npm not found"                                    | Wall ① (no Node.js)                | Install Node.js via Step 2, open a new terminal, retry                                                  |
+| Auth gate won't go away / keeps asking to "sign in"         | Wall ② (not authenticated)         | Complete `claude login` fully. Sign in via the browser, then restart the app                            |
+| Signed in, but the agent dies within 2 seconds (error card) | Wall ③ (free-account pass-through) | Check that the account you signed in with has **Claude Pro/Max or API credit**. Free accounts stop here |
+| App won't open on first launch (warning dialog)             | Install                            | Get past Gatekeeper/SmartScreen per Step 1                                                              |
+| Still stuck                                                 | —                                  | Tell us via [Report a bug](/en/bugs). Where you got stuck shapes the next version                       |
+
+## Next steps
+
+Once you've reached your first completion, the next move is running **multiple agents at once**. Assign roles to backend, frontend, and test agents, and tie dependent tickets into a DAG — Marblo runs them in parallel while respecting order.
+
+- [What is Marblo](/en/blog/what-is-marblo) — the orchestrator-centric big picture
+- [One developer, many agents](/en/blog/one-dev-many-agents) — how to work at team scale, solo
+- [Parallel agents that don't collide](/en/blog/parallel-agents-that-dont-collide) — running many agents at once with worktree isolation
+
+Get the two requirements (a paid Claude account + Node.js) in place and Marblo handles most of the rest automatically. You just have to clear the three walls.

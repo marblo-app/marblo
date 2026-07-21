@@ -1,0 +1,424 @@
+---
+title: "Marblo はじめてガイド — ダウンロードから最初のエージェント完了まで"
+description: "はじめて Marblo を開く開発者のための実践ガイド。★はじめる前に：自分の有料 Claude サブスクリプション（または API キー）と Node.js が必要です。ダウンロード → インストール → Node.js → CLI 認証 → フォルダ接続 → 初回スポーン → 初回完了まで、多くの人がつまずく三つの壁を一つずつ越えます。"
+date: "2026-07-21"
+category: "product"
+locales: ["ko", "en", "ja"]
+author: "Marblo"
+---
+
+はじめて Marblo を開いた人の多くは、**エージェントを一度もスポーンできないまま**アプリを閉じます。製品が悪いからではなく、価値を見る**前に**三つの壁にぶつかるからです。この記事はその三つの壁を先に伝え、一つずつ越えて、**最初のエージェントがチケットを最後まで完了する瞬間**まで案内する実践ガイドです。
+
+開発者を第一の読者としつつ、Node.js のインストール手順まで含めているので、**AI ツールがはじめての方でも一人で最後まで**進めます。
+
+## ★ はじめる前に — 正直にお伝えします（BYOK）
+
+Marblo は**あなた自身の AI アカウントで**エージェントを動かします。これを BYOK（Bring Your Own Key）と呼びます。そのため始めるには**二つの準備物**が必要で、どちらも無いと初回スポーンでつまずきます。
+
+<Diagram caption="初回スポーンまでの道に立つ三つの「未告知の壁」。アプリの案内だけをたどると、壁 ①・②・③ で静かに止まりやすいのです。このガイドは各壁の越え方を扱います。">
+  <svg
+    viewBox="0 0 640 300"
+    role="img"
+    aria-label="ダウンロード・インストールから始まり、Node.js インストール（壁1）、CLI 認証と有料サブスクリプション（壁2）、無資格アカウント通過後のクラッシュ（壁3）を経て、フォルダ接続と初回完了に至るセットアップ経路。壁 1・2・3 を強調した流れ図。"
+    style={{ width: "100%", height: "auto" }}
+  >
+    <defs>
+      <marker
+        id="arrow-walls-ja"
+        markerWidth="10"
+        markerHeight="10"
+        refX="8"
+        refY="3"
+        orient="auto"
+      >
+        <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1" />
+      </marker>
+    </defs>
+    <rect
+      x="20"
+      y="118"
+      width="120"
+      height="64"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="80"
+      y="146"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      ダウンロード
+    </text>
+    <text
+      x="80"
+      y="164"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="13"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      · 導入
+    </text>
+    <rect
+      x="168"
+      y="118"
+      width="120"
+      height="64"
+      rx="8"
+      fill="#2a2015"
+      stroke="#f59e0b"
+      strokeWidth="1.5"
+    />
+    <text
+      x="228"
+      y="140"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="700"
+      fill="#fbbf24"
+    >
+      壁 ①
+    </text>
+    <text
+      x="228"
+      y="160"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      Node.js
+    </text>
+    <text
+      x="228"
+      y="175"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      / npm 不在
+    </text>
+    <rect
+      x="316"
+      y="118"
+      width="120"
+      height="64"
+      rx="8"
+      fill="#2a2015"
+      stroke="#f59e0b"
+      strokeWidth="1.5"
+    />
+    <text
+      x="376"
+      y="140"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="700"
+      fill="#fbbf24"
+    >
+      壁 ②·③
+    </text>
+    <text
+      x="376"
+      y="160"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#e4e4e7"
+    >
+      CLI 認証
+    </text>
+    <text
+      x="376"
+      y="175"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="10"
+      fill="#a1a1aa"
+    >
+      + 有料契約
+    </text>
+    <rect
+      x="464"
+      y="118"
+      width="76"
+      height="64"
+      rx="8"
+      fill="#27272a"
+      stroke="#3f3f46"
+      strokeWidth="1.5"
+    />
+    <text
+      x="502"
+      y="146"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      フォルダ
+    </text>
+    <text
+      x="502"
+      y="164"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#e4e4e7"
+    >
+      接続
+    </text>
+    <rect
+      x="556"
+      y="118"
+      width="72"
+      height="64"
+      rx="8"
+      fill="#27272a"
+      stroke="#34d399"
+      strokeWidth="1.5"
+    />
+    <text
+      x="592"
+      y="146"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      初回
+    </text>
+    <text
+      x="592"
+      y="164"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fontWeight="600"
+      fill="#34d399"
+    >
+      完了
+    </text>
+    <line
+      x1="140"
+      y1="150"
+      x2="166"
+      y2="150"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-walls-ja)"
+    />
+    <line
+      x1="288"
+      y1="150"
+      x2="314"
+      y2="150"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-walls-ja)"
+    />
+    <line
+      x1="436"
+      y1="150"
+      x2="462"
+      y2="150"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-walls-ja)"
+    />
+    <line
+      x1="540"
+      y1="150"
+      x2="554"
+      y2="150"
+      stroke="#6366f1"
+      strokeWidth="2"
+      markerEnd="url(#arrow-walls-ja)"
+    />
+    <text
+      x="320"
+      y="238"
+      textAnchor="middle"
+      fontFamily="ui-sans-serif, system-ui, sans-serif"
+      fontSize="12"
+      fill="#a1a1aa"
+    >
+      壁 ① Node.js 不在 · 壁 ② 有料 Claude 未認証 · 壁 ③
+      無料アカウントで通過後、初回スポーンでクラッシュ
+    </text>
+  </svg>
+</Diagram>
+
+### 準備物 1 — 自分の有料 Claude サブスクリプション（または API キー）
+
+Marblo がスポーンするエージェントは Claude Code CLI で動きます。そして **Claude Code は有料プラン（Claude Pro 以上）または Anthropic API キーがないと**実際には動作しません。無料アカウントで `claude login` をするとログイン自体は通りますが、**最初の作業で静かに失敗**します（これが壁 ③ です）。
+
+![Claude の料金表。Claude Code は Free プランには無く、Pro・Max など有料プランでのみ提供される。](/images/guide/first-run/wall2b-claude-pricing.png)
+
+- **最もスムーズな道**：すでに Claude Pro（または Max）を使っているなら、そのまま `claude login` すれば OK です。
+- **API キーでも可**：`ANTHROPIC_API_KEY` を発行して使えば、サブスクリプション無しでも動きます。使った分だけ課金されます。
+- Codex を使うなら OpenAI 側も同じです — 有料 ChatGPT サブスクリプションまたは `OPENAI_API_KEY`。
+
+> 要点：Marblo へのログインは無料ですが、**エージェントを実際に動かす費用はあなたの AI アカウントから出ます。** これを知らずに始めると初回スポーンでつまずきます。
+
+### 準備物 2 — Node.js / npm
+
+エージェント CLI（Claude Code · Codex）は npm パッケージとしてインストールされます。そのため PC に **Node.js と npm** が必要です。開発者ならすでに入っている可能性が高いですが、無ければ下の **Step 2** で 5 分でインストールします。
+
+今あるか確認するには、ターミナルで次を打ちます：
+
+```bash
+node -v && npm -v
+```
+
+バージョン番号（例：`v20.11.0` / `10.2.4`）が出れば準備完了です。`command not found` が出たら Step 2 へ。
+
+## Step 0 — ファウンダー承認 & アプリのダウンロード
+
+現在 Marblo はデスクトップアプリを **ファウンダー（選ばれたベータユーザー）にのみ**配布しています。そのためダウンロードページに直接行くと、アプリの代わりに**ログイン／申請の案内**が表示されます。
+
+![Marblo のダウンロードページ。未ログインの新規訪問者には「Sign in to download — Marblo Desktop は選ばれたファウンダーに提供されます」という案内と Log in・Sign up ボタンが表示される。](/images/guide/first-run/en/01-download-login-gate.png)
+
+順序はこうです。
+
+1. [ファウンダー申請](/ja/founders)でメール一行で申請します（先着ではなく審査のうえ選定）。
+2. 選ばれるとアクセス案内がメールで届きます。
+3. ログインした状態で[ダウンロードページ](/ja/download)を開くと、そこで初めて macOS（Apple Silicon · Intel）・Windows 用ビルドを入手できます。
+
+> 🎥 **動画スロット A** — ファウンダーメールを受け取る → ログイン → ダウンロードボタンが解放される流れ。（アプリ外の Web 画面なので実キャプチャ可能）
+
+## Step 1 — インストールと初回起動
+
+ダウンロードしたファイルを実行します。
+
+- **macOS**：`.dmg` を開き、Marblo を**アプリケーション**フォルダにドラッグします。
+- **Windows**：インストーラーをそのまま進めます。
+
+![Marblo アプリの初回起動画面。](/images/guide/install-run.svg)
+
+初回起動時に macOS の **Gatekeeper** または Windows の **SmartScreen** 警告が出ることがあります。正式に署名・公証されたビルドなので、次のように進めます。
+
+- **macOS**：`システム設定 > プライバシーとセキュリティ` で **「このまま開く」**。
+- **Windows**：`詳細情報 > 実行`。
+
+> 🎥 **動画スロット B** — 初回起動で Gatekeeper/SmartScreen の警告を越え、アプリが立ち上がる瞬間。
+
+## Step 2 — Node.js / npm をインストール（壁 ①）
+
+`node -v` が `command not found` だったら、ここで解決します。**すでにある場合はこの手順を飛ばしてください。**
+
+1. [nodejs.org](https://nodejs.org/en) にアクセスします。
+2. 緑色の **「Get Node.js®」** ボタン（LTS バージョン、例：v24.x）を押してインストーラーを入手します。
+3. インストーラーをそのまま進めます。npm は Node.js に同梱されています。
+
+![nodejs.org のトップ画面。緑色の「Get Node.js®」ダウンロードボタンと、下部の最新 LTS バージョン表示。](/images/guide/first-run/en/wall1-nodejs.png)
+
+インストールが終わったら **ターミナルを開き直して**もう一度確認します：
+
+```bash
+node -v && npm -v
+```
+
+両方のバージョン番号が出れば、壁 ① を越えたことになります。
+
+> **なぜ必要？** Marblo はエージェント CLI を `npm install -g` で自動インストールします。npm が無いとその自動インストールが失敗し、アプリは「npm が見つかりません。Node.js / npm をインストールしてから再試行してください」と知らせます。Node.js を先に入れておけば、この回り道をまるごと省けます。
+
+## Step 3 — CLI の自動インストール確認 & 認証（壁 ②·③）
+
+ここが **新規ユーザーが最もつまずく場所**です。落ち着いて二つだけ行います：(a) CLI が入ったか確認、(b) **自分の有料アカウントで認証**。
+
+### 3-1. 必須 CLI は自動インストールされます
+
+初回起動時に Marblo が Claude Code · Codex · Marblo MCP を**バックグラウンドで自動インストール**します。ハーネスタブから手動で入れる必要はありません。（Step 2 で Node.js を先に入れていれば、この自動インストールは静かに成功します。）
+
+![Marblo 初回起動時に必須 CLI と MCP が自動インストールされる進行画面。](/images/guide/install-autocli.svg)
+
+### 3-2. ★ 認証 — ここで有料アカウントが必要です
+
+オーケストレーターを開こうとすると、Marblo が **CLI 認証ゲート**を表示します。「認証を実行」を押すとターミナルタブが開き、ログインコマンドが自動で入力されます。自分で打つ場合は：
+
+```bash
+claude login
+```
+
+ブラウザが開いたら、**自分の Anthropic アカウント**でログインします。Codex も使うなら：
+
+```bash
+codex login
+```
+
+> ⚠️ **ここが壁 ②·③ です。** ゲートの文言は「ログイン」としか言わないため、無料ログインで足りるように見えます。しかし：
+>
+> - **ログインだけでは足りません** — ログインしたアカウントに **有料資格（Claude Pro/Max または API クレジット）** が必要です。
+> - 無料アカウントでログインするとゲートは「準備完了」で通しますが、**初回スポーンでエージェントが 2 秒で死にます**（壁 ③、無資格通過後のクラッシュ）。そのときは「なぜ死んだ？」ではなく、冒頭 **「はじめる前に — BYOK」の準備物 1（有料サブスクリプション／API キー）**を確認してください。
+
+認証が終わると各 CLI が「認証済み」状態に変わります。状態が更新されなければアプリを再起動してください。
+
+> 🎥 **動画スロット C** — CLI 認証ゲート → 「認証を実行」クリック → ターミナルで `claude login` → ブラウザログイン → 「認証済み」に変わる一連の流れ。（はじめての核心の瞬間）
+
+## Step 4 — フォルダ接続 → オーケストレーターが自動で開く
+
+認証まで終われば、あとは楽な道です。作業する **プロジェクトフォルダを一つ選ぶ**だけで、Marblo がそのフォルダを自動登録し（クリック 0 回）、**オーケストレーターを自動で開きます。**
+
+![Marblo でプロジェクトフォルダを追加する画面。](/images/guide/project-add.svg)
+
+オーケストレーターはあなたの司令塔です。フォルダが接続されると、あいさつとともに「どんなチケットを作りますか／どのエージェントを付けますか」を提案します。
+
+![フォルダを接続するとオーケストレーターが自動で開く画面。](/images/guide/project-orchestrator.svg)
+
+> 🎥 **動画スロット D** — フォルダを一度選ぶ → オーケストレーターが自動で開き、あいさつする瞬間。
+
+## Step 5 — 最初のエージェントをスポーン
+
+オーケストレーターにやりたいことを自然言語で伝えるだけです。例えば：
+
+> 「README にインストール方法のセクションを追加するチケットを作って、エージェントを付けて。」
+
+オーケストレーターがチケットを作り、**物理エージェント（独立した CLI プロセス）をスポーン**します。スポーンされたエージェントは自分のターミナルタブで実際にコードを読み書きします。
+
+この瞬間、**壁 ②·③ が再び試されます**。認証と有料資格がそろっていれば、エージェントは生きて作業を始めます。もし 2 秒で「error」カードになって死ぬなら → Step 3 の有料資格をもう一度確認してください。
+
+> 🎥 **動画スロット E** — オーケストレーターへの一行指示 → チケット生成 → エージェントタブがスポーンして実際に動き始める場面。
+
+## Step 6 — 初回作業の完了（価値の瞬間）
+
+エージェントが作業を終えると、チケットを **REVIEW** に移します。あなたは結果（差分、変更サマリー）を確認して承認します。チケットが **DONE** に移るこの瞬間が、Marblo の **核心的な価値の瞬間**です — 自分でタイプする人から、仕事を任せてレビューする人へと役割が変わる地点です。
+
+![オーケストレーターでミッション（作業）を作る画面。](/images/guide/mission-create.svg)
+
+ここまで来たらおめでとうございます。多くの人が越えられない三つの壁をすべて越え、**エージェントがチケットを最後まで完了するのを自分の目で**見たのです。
+
+> 🎥 **動画スロット F** — エージェントが作業を REVIEW に上げる → ユーザーが差分を確認 → 承認 → DONE。（完了＝価値の瞬間、動画のクライマックス）
+
+## つまずいたら？ — 三つの壁トラブルシューティング
+
+| 症状                                                          | どの壁か             | 解決                                                                                                        |
+| ------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| アプリが「npm が見つかりません」と言う                        | 壁 ①（Node.js 不在） | Step 2 で Node.js をインストール後、ターミナルを開き直して再試行                                            |
+| 認証ゲートが消えない／「ログインが必要」を繰り返す            | 壁 ②（未認証）       | `claude login` を最後まで完了。ブラウザでログイン後、アプリを再起動                                         |
+| ログインは済んだのにエージェントが 2 秒で死ぬ（error カード） | 壁 ③（無資格通過）   | ログインしたアカウントに **Claude Pro/Max または API クレジット**があるか確認。無料アカウントはここで止まる |
+| 初回起動でアプリが開かない（警告ダイアログ）                  | インストール         | Gatekeeper/SmartScreen を Step 1 の通りに越える                                                             |
+| それでもつまずく                                              | —                    | [バグ報告](/ja/bugs)で教えてください。どこでつまずいたかが次のバージョンを作ります                          |
+
+## 次のステップ
+
+初回完了まで来たら、次は **複数のエージェントを同時に**動かすことです。バックエンド・フロントエンド・テストのエージェントに役割を分けて配置し、依存関係のあるチケットを DAG でつなげば、Marblo が順序を守りながら並列で動かします。
+
+- [Marblo とは](/ja/blog/what-is-marblo) — オーケストレーター中心の全体像
+- [一人の開発者、複数のエージェント](/ja/blog/one-dev-many-agents) — 一人でチーム規模の仕事をする方法
+- [衝突しない並列エージェント](/ja/blog/parallel-agents-that-dont-collide) — ワークツリー分離で複数エージェントを同時に動かす
+
+二つの準備物（有料 Claude アカウント + Node.js）さえそろえれば、残りはほとんど Marblo が自動で処理します。あとは三つの壁を越えるだけです。
