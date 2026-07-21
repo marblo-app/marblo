@@ -5,6 +5,7 @@ import {
   cleanupLegacyOrchestratorDocs,
   upsertOrchestratorAgentDoc,
 } from "../services/orchestratorAgentDoc";
+import telemetry from "../services/telemetryService";
 
 /**
  * - Stops the orchestrator when project/folder changes or unmounts.
@@ -83,12 +84,18 @@ export function useOrchestratorAutoLaunch() {
       // the auto-connect latch so that once the user authenticates, the gate's
       // `marblo:cli-auth-ready` event can resume the launch without a restart.
       if (result?.needsAuth) {
+        // ★첫 스폰 실패 사유의 최상단 후보: 오케 자동오픈이 CLI 미설치/미인증에
+        // 막힘. 근본원인 분석 22→6(−73%)에서 "시도했으나 CLI 미설치"를 정확히
+        // 잡는 지점 — 이게 없으면 "시도조차 안 함"과 구분 불가.
+        telemetry.orchestratorBlocked("cli_auth");
         setStatus("stopped");
         autoConnectRef.current = false;
         window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
         return;
       }
       if (result) {
+        // 첫 에이전트(오케스트레이터)가 실제로 뜬 순간. resumed=이전 세션 재접속.
+        telemetry.orchestratorOpened(!!priorId);
         setSession(result.sessionId, result.ptySessionId);
         setStatus("running");
         // Mirror the manual-Start path: upsert the canonical orchestrator
@@ -102,7 +109,10 @@ export function useOrchestratorAutoLaunch() {
         );
       }
     } catch {
-      // No previous session or launch failed — user starts manually
+      // No previous session or launch failed — user starts manually. Distinct
+      // from cli_auth: an exception here means the launch itself threw (spawn
+      // env, resolve error) rather than a clean needsAuth signal.
+      telemetry.orchestratorBlocked("launch_error");
       setStatus("stopped");
     }
   }, [currentProject?.id, fixedRoot, setSession, setStatus]);

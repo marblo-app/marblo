@@ -48,13 +48,28 @@ export const mainTelemetry = {
   // (docs/research/routing-slm-data-collection.md §3.3). Same stamp the cost
   // tracker uses, which already achieves a 98.6% join rate. Null for agents
   // not bound to a board task (one-off / orchestrator sessions).
+  // errorCategory/errorMessage fill the churn-analysis §5-4 gap: every
+  // agent:crashed row in BigQuery had these NULL, so "왜 죽었나(인증? CLI 경로?
+  // spawn env?)" was unanswerable — the exact question behind the 22→6 첫스폰
+  // 붕괴. The manager already computes the coarse classification (fast-fail =
+  // 바이너리 부재/설정 오류 vs runtime crash = 재시작 예산 소진); we now ship it.
+  // Both columns already exist first-class in the events schema, and the
+  // renderer telemetry choke point scrubs the (short) message for paths/emails.
   agentCrashed(
     win: BrowserWindow | null,
     agentId: string,
     exitCode: number,
     taskId?: string | null,
+    errorCategory?: string,
+    errorMessage?: string,
   ) {
-    sendTelemetry(win, "agent:crashed", { agentId, exitCode, taskId });
+    sendTelemetry(win, "agent:crashed", {
+      agentId,
+      exitCode,
+      taskId,
+      errorCategory,
+      errorMessage,
+    });
   },
 
   agentRestarted(

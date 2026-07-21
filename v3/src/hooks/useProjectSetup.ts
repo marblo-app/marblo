@@ -5,6 +5,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { useSubscriptionStore } from "../stores/subscriptionStore";
 import { useUiStore } from "../stores/uiStore";
 import { checkProjectCreate, ProjectLimitError } from "../lib/planLimits";
+import telemetry from "../services/telemetryService";
 import type { Project } from "../types/project";
 
 function basename(p: string): string {
@@ -134,6 +135,8 @@ export function useProjectSetup(): ProjectSetup {
           createdAt: new Date(),
           updatedAt: new Date(),
         });
+        // Onboarding funnel: "폴더 연결" 도달(신규 자동등록). 경로는 싣지 않음.
+        telemetry.folderConnected("new", !!remoteUrl);
         return true;
       } catch (err) {
         // Plan limit hit (Free user over their project cap; the store is the
@@ -144,6 +147,10 @@ export function useProjectSetup(): ProjectSetup {
           return true;
         }
         console.error("Failed to auto-register project:", err);
+        // Folder was picked but the project write failed — a real onboarding
+        // drop-off distinct from "not signed in" (which returns false without
+        // throwing and falls through to the inline name banner).
+        telemetry.folderConnectFailed("write_error");
         return false;
       }
     },
@@ -191,6 +198,8 @@ export function useProjectSetup(): ProjectSetup {
         useProjectStore.getState().projects.find((p) => p.id === existing.id) ??
         existing;
       setCurrentProject(refreshed);
+      // Onboarding funnel: existing project opened (returning user / re-pick).
+      telemetry.folderConnected("existing", !!remoteUrl);
       return;
     }
 
@@ -277,12 +286,16 @@ export function useProjectSetup(): ProjectSetup {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      // Onboarding funnel: folder connected via the inline name-your-project
+      // fallback banner (the non-zero-click path).
+      telemetry.folderConnected("inline", !!pendingGitRemoteUrl);
     } catch (err) {
       // Choke-point gate raced ahead of us (e.g. concurrent create) → upgrade.
       if (err instanceof ProjectLimitError) {
         useUiStore.getState().showUpgrade("projects", "pro");
       } else {
         console.error("Failed to create project:", err);
+        telemetry.folderConnectFailed("write_error");
       }
     } finally {
       setShowNewProject(false);

@@ -1104,11 +1104,24 @@ export class AgentManager {
         this.configGenerator.cleanup(params.id);
         this.onStatusChange?.(params.id, "error");
         this.onRestartFailed?.(agent.id, exitCode);
+        // §5-4 갭 메우기: 지금 계산된 분류를 크래시 이벤트에 실어 보낸다.
+        //   fast_fail_config = FAST_FAIL_WINDOW 내 반복 즉사 → 바이너리 부재/
+        //     잘못된 command/설정 오류(= CLI 미설치·모델 설정 오류 계열).
+        //   runtime_crash = 정상 기동 후 재시작 예산(MAX_RESTARTS) 소진.
+        // errorMessage 는 짧게(사유 + exit + command 이름)만 — 원문 stderr 없음.
+        const errorCategory = fastFailExceeded
+          ? "fast_fail_config"
+          : "runtime_crash";
+        const errorMessage = fastFailExceeded
+          ? `fast-fail x${agent.fastFailCount} (exit ${exitCode}, command=${agent.command})`
+          : `max restarts (${MAX_RESTARTS}) exceeded (exit ${exitCode})`;
         mainTelemetry.agentCrashed(
           this.getMainWindow?.() ?? null,
           agent.id,
           exitCode,
           agent.currentTaskId,
+          errorCategory,
+          errorMessage,
         );
         if (fastFailExceeded) {
           console.error(

@@ -23,7 +23,23 @@ export type TelemetryEvent =
   | "chat:active_users"
   // Merge-outcome label emitted from the main process at the merge chokepoint
   // (electron/main.ts recordMergeHistory). Routed to BigQuery `events`.
-  | "task:merged";
+  | "task:merged"
+  // ── "첫 10분" 활성화 퍼널 (ONBOARDING-FIRST10-INSTRUMENT, ticket ixQUBdhx) ──
+  // 베타 이탈 근본원인 분석(docs/beta-churn-root-cause-analysis-2026-07-21.md)이
+  // 최대 이탈 = 앱실행→첫스폰 22→6(−73%) 인데 그 구간(로그인·폴더연결·오케
+  // 자동오픈·첫스폰)이 미계측이라 "왜 죽는지" 데이터가 없다고 판정했다. 아래
+  // 이벤트는 그 구간의 도달 + 실패/이탈 사유를 채운다. 전부 기존 logTelemetry
+  // choke point(비식별 scrub + firstParty 게이트)를 통과해 BigQuery `events`
+  // 테이블의 같은 경로로 적재된다 — 새 파이프라인 없음, 서버 변경 없음(서버
+  // logTelemetryBatch 는 event 문자열을 화이트리스트 없이 그대로 적재).
+  | "app:first_run"
+  | "auth:login_attempt"
+  | "auth:login_success"
+  | "auth:login_failed"
+  | "onboarding:folder_connected"
+  | "onboarding:folder_connect_failed"
+  | "onboarding:orchestrator_opened"
+  | "onboarding:orchestrator_blocked";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -63,6 +79,17 @@ interface TelemetryPayload {
   filesChanged?: number;
   linesChanged?: number;
   taskType?: string;
+  // Crash / failure reason columns. Both already exist first-class in the
+  // BigQuery `events` schema (functions/src/index.ts TelemetryRow) but were
+  // never populated by the renderer — the churn analysis §5-4 flagged every
+  // agent:crashed row as errorCategory/errorMessage NULL, so "왜(인증? CLI
+  // 경로? spawn env?)" was unanswerable. agent:crashed now carries the coarse
+  // classification the main process already computes (fast_fail_config vs
+  // runtime_crash), and auth:login_failed / onboarding:*_blocked reuse the same
+  // columns for their failure reason. errorMessage stays short + scrubbed —
+  // never raw stderr/prompt text.
+  errorCategory?: string;
+  errorMessage?: string;
 }
 
 /**
@@ -300,13 +327,25 @@ export const telemetry = {
     });
   },
 
-  agentCrashed(agentId: string, exitCode: number, taskId?: string) {
+  agentCrashed(
+    agentId: string,
+    exitCode: number,
+    taskId?: string,
+    errorCategory?: string,
+    errorMessage?: string,
+  ) {
     logTelemetry({
       event: "agent:crashed",
       agentId,
       taskId,
       exitCode,
       success: false,
+      // §5-4 갭 메우기: 크래시가 "왜" 났는지. main 프로세스가 이미 계산하는
+      // coarse 분류(fast_fail_config = 바이너리 부재/설정 오류, runtime_crash =
+      // 재시작 예산 소진)를 그대로 싣는다. 원인 상세 문자열은 짧게 유지하고
+      // scrub 를 거친다(경로/이메일 마스킹).
+      errorCategory,
+      errorMessage,
     });
   },
 
@@ -434,6 +473,84 @@ export const telemetry = {
       event: "chat:active_users",
       projectId,
       metadata: { count },
+    });
+  },
+
+  // ── "첫 10분" 활성화 퍼널 헬퍼 (ticket ixQUBdhx) ──────────────────
+  //
+  // ★전송 한계(정직성): logTelemetry 는 flushTelemetry 에서 auth.currentUser
+  // 가 있을 때만 서버로 나간다(anti-abuse). 그래서 아래 로그인-이전 이벤트
+  // (app:first_run / login_attempt / login_failed)는 큐에 쌓였다가 "다음
+  // 성공적 로그인" 시점에 함께 flush 된다. 즉 로그인을 한 번이라도 성공시킨
+  // 유저의 초기 마찰(실패 후 재시도 성공)은 잡히지만, 끝내 로그인에 성공
+  // 못 한 유저의 실패는 전송되지 않는다 — 이건 auth-gated 싱크의 구조적
+  // 한계이며 §5-2 맹점을 완전히는 못 메운다(보고서에 명시).
+
+  /** 이 설치에서 앱이 처음 실행된 시점(1회). GA4 다운로드 수와 규모(magnitude)
+   *  대사(reconcile)용 — 개인 조인은 clientId≠user_pseudo_id 라 불가, 집계만. */
+  appFirstRun(platform: string) {
+    logTelemetry({ event: "app:first_run", metadata: { platform } });
+  },
+
+  /** 사용자가 로그인 방식을 트리거한 시점. method = google|email|signup|github. */
+  loginAttempt(method: string) {
+    logTelemetry({ event: "auth:login_attempt", metadata: { method } });
+  },
+
+  loginSuccess(method: string, isNewUser?: boolean) {
+    logTelemetry({
+      event: "auth:login_success",
+      success: true,
+      metadata: { method, isNewUser },
+    });
+  },
+
+  /** 로그인 실패. code = Firebase 에러코드(auth/network-request-failed 등) —
+   *  ★원문 메시지가 아닌 코드만(메시지엔 이메일이 섞일 수 있음). §5-2 최대맹점. */
+  loginFailed(method: string, code: string) {
+    logTelemetry({
+      event: "auth:login_failed",
+      success: false,
+      errorCategory: code,
+      metadata: { method },
+    });
+  },
+
+  /** 폴더 픽 → 프로젝트 등록 성공(온보딩 "폴더 연결" 도달).
+   *  mode = existing(기존 열기) | new(신규 자동등록) | inline(이름 배너 경유). */
+  folderConnected(mode: string, hasGitRemote: boolean) {
+    logTelemetry({
+      event: "onboarding:folder_connected",
+      success: true,
+      metadata: { mode, hasGitRemote },
+    });
+  },
+
+  /** 폴더 연결 실패. reason = write_error(등록 쓰기 실패) 등. 경로는 절대 싣지 않음. */
+  folderConnectFailed(reason: string) {
+    logTelemetry({
+      event: "onboarding:folder_connect_failed",
+      success: false,
+      errorCategory: reason,
+    });
+  },
+
+  /** 오케스트레이터 자동오픈 성공(첫 에이전트가 뜬 순간). resumed = 이전 세션 재접속 여부. */
+  orchestratorOpened(resumed: boolean) {
+    logTelemetry({
+      event: "onboarding:orchestrator_opened",
+      success: true,
+      metadata: { resumed },
+    });
+  },
+
+  /** 오케 자동오픈이 막힌 시점 = "첫 스폰을 시도했으나 실패". ★22→6 의 핵심 사유.
+   *  reason = cli_auth(CLI 미설치/미인증) | launch_error(런치 예외). */
+  orchestratorBlocked(reason: string) {
+    logTelemetry({
+      event: "onboarding:orchestrator_blocked",
+      success: false,
+      errorCategory: reason,
     });
   },
 

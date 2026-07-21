@@ -22,6 +22,16 @@ import {
   clearAgentFirebaseAuth,
   syncAgentFirebaseAuth,
 } from "../services/agentAuthService";
+import telemetry from "../services/telemetryService";
+
+/** Firebase error → coarse code for telemetry. We ship the CODE only
+ *  (auth/network-request-failed …), never the message — messages can embed the
+ *  email the user typed. See churn analysis §5-2: login failure is the biggest
+ *  measurement blind spot, but the reason must stay de-identified. */
+function authErrorCode(e: unknown): string {
+  const code = (e as { code?: string })?.code;
+  return typeof code === "string" && code ? code : "unknown";
+}
 
 export interface AuthContextType {
   user: User | null;
@@ -167,24 +177,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then((result) => {
           if (!result) {
             console.info("[auth] getRedirectResult: no pending redirect");
-          return;
-        }
-        console.info("[auth] getRedirectResult: signed in via redirect");
-        settled = true;
-        clearTimeout(timeout);
-        setError(null);
-        setInitDegraded(false);
-        setUser(result.user);
-        setLoading(false);
-        syncAgentFirebaseAuthForUser(result.user, "redirect result", true).catch(
-          (e: unknown) => {
+            return;
+          }
+          console.info("[auth] getRedirectResult: signed in via redirect");
+          telemetry.loginSuccess("google");
+          settled = true;
+          clearTimeout(timeout);
+          setError(null);
+          setInitDegraded(false);
+          setUser(result.user);
+          setLoading(false);
+          syncAgentFirebaseAuthForUser(
+            result.user,
+            "redirect result",
+            true,
+          ).catch((e: unknown) => {
             console.error("[auth] agent Firebase auth sync failed", e);
-          },
-        );
-      })
+          });
+        })
         .catch((e: unknown) => {
           const code = (e as { code?: string })?.code ?? "?";
           console.error(`[auth] getRedirectResult: error code=${code}`, e);
+          telemetry.loginFailed("google", authErrorCode(e));
           settled = true;
           clearTimeout(timeout);
           setError(e instanceof Error ? e.message : t("auth.error.google"));
@@ -213,10 +227,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      syncAgentFirebaseAuthForUser(firebaseUser, "id-token observer")
-        .catch((e: unknown) => {
+      syncAgentFirebaseAuthForUser(firebaseUser, "id-token observer").catch(
+        (e: unknown) => {
           console.error("[auth] agent Firebase auth sync failed", e);
-        });
+        },
+      );
     });
 
     return unsubscribe;
@@ -246,6 +261,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error(
           `[auth] loginWithGoogle: loopback failed — ${result.error ?? "unknown"}`,
         );
+        telemetry.loginFailed("google", "loopback/no-token");
         setError(result.error || t("auth.error.google"));
         return;
       }
@@ -269,6 +285,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           Date.now() - t0
         }ms)`,
       );
+      telemetry.loginSuccess("google");
       await syncAgentFirebaseAuthForUser(
         credentialResult.user,
         "google loopback",
@@ -281,11 +298,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         `[auth] loginWithGoogle: loopback caught code=${code} message=${message}`,
         e,
       );
+      telemetry.loginFailed("google", authErrorCode(e));
       setError(e instanceof Error ? e.message : t("auth.error.google"));
     }
   };
 
   const loginWithGoogle = async () => {
+    // The single entry point for both Google paths (loopback + web redirect) —
+    // record the attempt once here so login_attempt↔success/failed reconcile.
+    telemetry.loginAttempt("google");
     // Prefer the system-browser loopback OAuth whenever the Electron IPC bridge
     // is present — in BOTH the packaged app AND Vite dev (inside Electron).
     // Previously dev was gated onto the in-window signInWithRedirect flow, but
@@ -315,6 +336,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error(
         "[auth] loginWithGoogle: VITE_FIREBASE_AUTH_DOMAIN is empty",
       );
+      telemetry.loginFailed("google", "no-auth-domain");
       setError(t("auth.error.google"));
       return;
     }
@@ -349,6 +371,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           "[auth] loginWithGoogle: no navigation within " +
             `${REDIRECT_NAV_WATCHDOG_MS}ms — redirect appears stuck`,
         );
+        telemetry.loginFailed("google", "redirect-stuck");
         setError(t("auth.error.google"));
       }, REDIRECT_NAV_WATCHDOG_MS);
 
@@ -367,25 +390,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       navigated = true;
       const code = (e as { code?: string })?.code ?? "?";
       console.error(`[auth] loginWithGoogle: caught code=${code}`, e);
+      telemetry.loginFailed("google", authErrorCode(e));
       setError(e instanceof Error ? e.message : t("auth.error.google"));
     }
   };
 
   const loginWithGithub = async () => {
+    telemetry.loginAttempt("github");
     try {
       setError(null);
       const credentialResult = await signInWithPopup(auth, githubProvider);
+      telemetry.loginSuccess("github");
       await syncAgentFirebaseAuthForUser(
         credentialResult.user,
         "github popup",
         true,
       );
     } catch (e) {
+      telemetry.loginFailed("github", authErrorCode(e));
       setError(e instanceof Error ? e.message : t("auth.error.github"));
     }
   };
 
   const loginWithEmail = async (email: string, password: string) => {
+    telemetry.loginAttempt("email");
     try {
       setError(null);
       const credentialResult = await signInWithEmailAndPassword(
@@ -393,17 +421,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
         password,
       );
+      telemetry.loginSuccess("email");
       await syncAgentFirebaseAuthForUser(
         credentialResult.user,
         "email login",
         true,
       );
     } catch (e) {
+      telemetry.loginFailed("email", authErrorCode(e));
       setError(e instanceof Error ? e.message : t("auth.error.email"));
     }
   };
 
   const signupWithEmail = async (email: string, password: string) => {
+    telemetry.loginAttempt("signup");
     try {
       setError(null);
       const credentialResult = await createUserWithEmailAndPassword(
@@ -411,12 +442,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
         password,
       );
+      telemetry.loginSuccess("signup", true);
       await syncAgentFirebaseAuthForUser(
         credentialResult.user,
         "email signup",
         true,
       );
     } catch (e) {
+      telemetry.loginFailed("signup", authErrorCode(e));
       setError(e instanceof Error ? e.message : t("auth.error.signup"));
     }
   };
