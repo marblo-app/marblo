@@ -457,11 +457,8 @@ export function WorktreeTab() {
   const currentProjectId = useProjectStore((s) => s.currentProject?.id ?? null);
   const { t } = useTranslation();
 
-  const [projectFilter, setProjectFilter] = useState<string>(
-    () =>
-      initialWorktreeProjectFilter(
-        useProjectStore.getState().currentProject?.id,
-      ),
+  const [projectFilter, setProjectFilter] = useState<string>(() =>
+    initialWorktreeProjectFilter(useProjectStore.getState().currentProject?.id),
   );
   const [statusFilter, setStatusFilter] = useState<WorktreeStatusTone | "all">(
     "all",
@@ -496,20 +493,27 @@ export function WorktreeTab() {
   }, [currentProjectId]);
 
   // 완료 이력은 뷰가 켜졌을 때만 구독 (on-demand 리스너).
+  // ★현재 프로젝트로 스코프한다: merge_history read 룰이 isProjectMember 로 조여지면
+  // unscoped(orderBy-only) 쿼리는 permission-denied 로 통째 거부된다(#406/#428 패턴).
+  // where(projectId==) + orderBy mergedAt 은 firestore.indexes.json 의
+  // (projectId, mergedAt DESC) 복합인덱스로 서빙된다. 크로스프로젝트 이력은 단일
+  // 쿼리로 못 읽고 원래 불필요 — auditService 와 동일한 스코프 패턴.
   useEffect(() => {
     if (!historyView) return;
+    if (!currentProjectId) return;
     setHistoryLoading(true);
     const unsub = subscribeToMergeHistory(
       (entries) => {
         setHistory(entries);
         setHistoryLoading(false);
       },
-      { maxResults: 200 },
+      { projectId: currentProjectId, maxResults: 200 },
     );
     return () => unsub();
-  }, [historyView]);
+  }, [historyView, currentProjectId]);
 
-  // 프로젝트 필터를 완료 이력에도 적용 (이력은 이미 최신순 정렬됨).
+  // 이력은 이미 현재 프로젝트로 스코프+최신순 정렬됨. 프로젝트 필터는 워크트리 목록에만
+  // 의미가 있고(로컬 git 출처라 크로스프로젝트 가능), 이력은 항상 현재 프로젝트를 보여준다.
   const historyEntries = useMemo(
     () =>
       projectFilter === WORKTREE_PROJECT_FILTER_ALL
@@ -607,7 +611,8 @@ export function WorktreeTab() {
 
   const waitingForDefaultProject =
     projectFilter === WORKTREE_PROJECT_FILTER_LOADING;
-  const isEmpty = !waitingForDefaultProject && !loading && worktrees.length === 0;
+  const isEmpty =
+    !waitingForDefaultProject && !loading && worktrees.length === 0;
   const noMatches =
     !waitingForDefaultProject &&
     !loading &&

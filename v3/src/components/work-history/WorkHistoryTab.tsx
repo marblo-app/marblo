@@ -265,8 +265,10 @@ export function WorkHistoryTab() {
   }, [trackedTasks, activitiesMap]);
 
   // 머지 이력(taskId → 최신 entry) — diff 의 git 좌표(repoRoot/headSha) 출처.
-  // 인덱스가 이미 있는 cross-project 경로로 구독하고 projectId 는 클라에서 필터
-  // (WorktreeTab 과 동일한 안전 경로 — 새 composite 인덱스 불필요).
+  // ★현재 프로젝트로 스코프해 구독한다: merge_history read 룰이 isProjectMember 로
+  // 조여지면 unscoped(orderBy-only) 쿼리는 permission-denied 로 통째 거부된다
+  // (#406/#428 패턴). where(projectId==) + orderBy mergedAt 은 firestore.indexes.json
+  // 의 (projectId, mergedAt DESC) 복합인덱스로 서빙된다 — auditService 와 동일 패턴.
   const [mergeByTask, setMergeByTask] = useState<
     Record<string, MergeHistoryEntry>
   >({});
@@ -280,13 +282,13 @@ export function WorkHistoryTab() {
       (entries) => {
         const map: Record<string, MergeHistoryEntry> = {};
         for (const entry of entries) {
-          if (entry.projectId !== projectId) continue;
-          // entries 는 최신순 — taskId 당 첫(=가장 최근) 항목만.
+          // entries 는 쿼리에서 이미 현재 프로젝트로 스코프됨 + 최신순 →
+          // taskId 당 첫(=가장 최근) 항목만.
           if (entry.taskId && !map[entry.taskId]) map[entry.taskId] = entry;
         }
         setMergeByTask(map);
       },
-      { maxResults: 200 },
+      { projectId, maxResults: 200 },
     );
     return () => unsub();
   }, [currentProject?.id]);
