@@ -390,6 +390,30 @@ describe("AgentWatchdog — first-activity heartbeat", () => {
     ).toBe(true);
   });
 
+  it("PTY repaint does not count as first activity when board activity stays at dispatch baseline", async () => {
+    const h = makeHarness(cfg);
+    h.health.set(AGENT, {
+      status: "working",
+      lastPtyActivityMs: h.clock.ms,
+      currentTaskId: TASK,
+    });
+    h.tickets[0].lastActivityAtMs = h.clock.ms;
+
+    await h.wd.tickOnce();
+
+    h.clock.ms += 30_001;
+    h.health.set(AGENT, {
+      status: "working",
+      lastPtyActivityMs: h.clock.ms,
+      currentTaskId: TASK,
+    });
+    // Board activity did not move past the dispatch baseline.
+    await h.wd.tickOnce();
+
+    expect(h.nudge).not.toHaveBeenCalled();
+    expect(h.respawn).toHaveBeenCalledTimes(1);
+  });
+
   it("does NOT fire before the first-activity window elapses", async () => {
     const h = makeHarness(cfg);
     h.health.set(AGENT, {

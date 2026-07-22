@@ -832,18 +832,15 @@ export class AgentWatchdog {
     const silent = !dead && !missing && now - lastActiveMs > this.cfg.graceMs;
 
     // First-activity heartbeat: record when we first saw this ticket (with the
-    // dispatch-baseline activity), then flag it "born dead" if it's still alive
-    // but produced ZERO new activity beyond that baseline within the window.
-    // This catches a spawned worker that died before its first MCP call while
-    // its PTY shell (and the dispatch's fresh timestamps) kept it looking
-    // active — silence-from-grace alone can't, because the clock starts fresh
-    // at dispatch. A never-started worker won't answer a nudge, so it escalates
-    // straight to respawn below.
+    // dispatch-baseline BOARD activity), then flag it "born dead" if it's still
+    // alive but produced ZERO new board activity beyond that baseline within
+    // the window. Deliberately board-only: a blocked CLI can keep repainting
+    // PTY bytes forever while never calling add_activity / submit_for_review.
     const seenAt = this.firstSeen.get(ticket.taskId);
     if (!seenAt) {
       this.firstSeen.set(ticket.taskId, {
         atMs: now,
-        baselineActivityMs: lastActiveMs,
+        baselineActivityMs: lastBoardMs,
       });
     }
     // Born-dead detection is only meaningful for a LOCALLY-hosted worker (we
@@ -854,7 +851,7 @@ export class AgentWatchdog {
       !missing &&
       !!seenAt &&
       now - seenAt.atMs >= this.cfg.firstActivityGraceMs &&
-      lastActiveMs <= seenAt.baselineActivityMs;
+      lastBoardMs <= seenAt.baselineActivityMs;
 
     const state = this.states.get(ticket.taskId);
 
@@ -1028,7 +1025,7 @@ export class AgentWatchdog {
             st.stuckAtActivityMs = lastActiveMs;
             this.firstSeen.set(ticket.taskId, {
               atMs: now,
-              baselineActivityMs: lastActiveMs,
+              baselineActivityMs: lastBoardMs,
             });
             this.deps.recordRecovery?.(
               ticket,
@@ -1136,7 +1133,7 @@ export class AgentWatchdog {
       // short backoff span (each tick still sees the stale baseline as stuck).
       this.firstSeen.set(ticket.taskId, {
         atMs: now,
-        baselineActivityMs: lastActiveMs,
+        baselineActivityMs: lastBoardMs,
       });
       this.deps.recordRecovery?.(
         ticket,

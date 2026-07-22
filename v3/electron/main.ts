@@ -2203,6 +2203,34 @@ bridgeServer.setDispatchMetaHook((taskId, meta) => {
   })();
 });
 
+bridgeServer.setTaskAgentActivityHook(async (taskId, agentId) => {
+  const { app, authReady } = getMissionFirebaseApp();
+  await authReady;
+  const db = getFirestore(app);
+  const snap = await fbGetDoc(fbDoc(db, "tasks", taskId));
+  if (!snap.exists()) return { hasBoardActivity: false };
+  const data = snap.data() as {
+    projection?: {
+      lastAgentId?: unknown;
+      lastActivitySummary?: unknown;
+    };
+  };
+  const projection = data.projection;
+  const lastAgentId =
+    typeof projection?.lastAgentId === "string"
+      ? projection.lastAgentId
+      : "";
+  const summary =
+    typeof projection?.lastActivitySummary === "string"
+      ? projection.lastActivitySummary.trim()
+      : "";
+  const isDispatchBaseline = summary.startsWith("dispatched to ");
+  return {
+    hasBoardActivity:
+      lastAgentId === agentId && summary !== "" && !isDispatchBaseline,
+  };
+});
+
 // When the bridge spawns an agent (via MCP /spawn-agent or /dispatch-task),
 // route its PTY output to the project-owning window and emit agent:spawned
 // scoped to that project. This keeps multi-window spawns isolated.

@@ -34,6 +34,7 @@ interface FakeInstanceInit {
   projectId?: string;
   currentTaskId?: string | null;
   restartCount?: number;
+  spawnedAt?: number;
 }
 
 function makeInstance(init: FakeInstanceInit): AgentInstance & {
@@ -49,6 +50,7 @@ function makeInstance(init: FakeInstanceInit): AgentInstance & {
     cwd: init.cwd ?? "/repo",
     currentTaskId: init.currentTaskId ?? null,
     restartCount: init.restartCount ?? 0,
+    spawnedAt: init.spawnedAt ?? Date.now(),
     // projectId is what our FakeAgentManager filters on (real code reads
     // launchConfig.env.MARBLO_PROJECT; we keep the fake simple).
     projectId: init.projectId,
@@ -91,6 +93,11 @@ class FakeAgentManager {
   setCurrentTask(id: string, taskId: string | null): void {
     const a = this.agents.get(id);
     if (a) a.currentTaskId = taskId;
+  }
+
+  setDispatchReason(id: string, dispatchReason: string | null): void {
+    const a = this.agents.get(id);
+    if (a) a.dispatchReason = dispatchReason;
   }
 
   restart(id: string): AgentInstance | null {
@@ -510,6 +517,88 @@ describe("dispatchTask — per-task uniqueness (L3)", () => {
       expect.objectContaining({ sid: "pty-a6b01b58" }),
     );
     expect(pty.writes.some((w) => w.sid === "pty-9cc0601b")).toBe(false);
+  });
+
+  it("does NOT route to a task-bound worker with no board activity after first-activity grace", async () => {
+    const { bridge, am, pty } = makeBridge();
+    const taskId = "bornDead0001";
+    am.seed(
+      makeInstance({
+        id: "agy-dead",
+        role: "backend",
+        status: "working",
+        model: "antigravity",
+        cwd: path.join("/wt", "px", taskId),
+        projectId: "px",
+        currentTaskId: taskId,
+        spawnedAt: Date.now() - 181_000,
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId, model: "claude" }),
+    );
+
+    expect(res.action).toBe("spawned");
+    expect(res.model).toBe("claude");
+    expect(am.launchCalls).toBe(1);
+    expect(pty.writes.some((w) => w.sid === "pty-agy-dead")).toBe(false);
+  });
+
+  it("keeps routing to an older task-bound worker that has board activity evidence", async () => {
+    const { bridge, am, pty } = makeBridge();
+    const taskId = "liveBound0001";
+    bridge.setTaskAgentActivityHook((lookupTaskId, agentId) => ({
+      hasBoardActivity: lookupTaskId === taskId && agentId === "live-worker",
+    }));
+    am.seed(
+      makeInstance({
+        id: "live-worker",
+        role: "backend",
+        status: "working",
+        model: "claude",
+        cwd: path.join("/wt", "px", taskId),
+        projectId: "px",
+        currentTaskId: taskId,
+        spawnedAt: Date.now() - 600_000,
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId }),
+    );
+
+    expect(res.action).toBe("reused");
+    expect(res.agentId).toBe("live-worker");
+    expect(am.launchCalls).toBe(0);
+    expect(pty.writes.some((w) => w.sid === "pty-live-worker")).toBe(true);
+  });
+
+  it("explicit model reroute breaks the task-bound short-circuit when the bound worker is another model", async () => {
+    const { bridge, am, pty } = makeBridge();
+    const taskId = "rerouteTask01";
+    bridge.setTaskAgentActivityHook(() => ({ hasBoardActivity: true }));
+    am.seed(
+      makeInstance({
+        id: "agy-bound",
+        role: "backend",
+        status: "working",
+        model: "antigravity",
+        cwd: path.join("/wt", "px", taskId),
+        projectId: "px",
+        currentTaskId: taskId,
+        spawnedAt: Date.now() - 600_000,
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({ projectId: "px", taskId, model: "gpt" }),
+    );
+
+    expect(res.action).toBe("spawned");
+    expect(res.model).toBe("gpt");
+    expect(am.launchCalls).toBe(1);
+    expect(pty.writes.some((w) => w.sid === "pty-agy-bound")).toBe(false);
   });
 });
 
