@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useTaskStore } from "../../stores/taskStore";
 import { viewWorktree } from "../../lib/viewWorktree";
 import { subscribeToMergeHistory } from "../../services/mergeHistoryService";
+import type { Task } from "../../types/task";
 import type { MergeHistoryEntry } from "../../types/mergeHistory";
 import type {
   Worktree,
@@ -46,6 +48,33 @@ const STATUS_OPTIONS: {
   { value: "danger", labelKey: "worktree.filter.danger" },
   { value: "idle", labelKey: "worktree.filter.idle" },
 ];
+
+interface WorktreeTitleMeta {
+  title: string;
+  subtitle: string | null;
+  titleTip: string;
+}
+
+function resolveWorktreeTitle(
+  taskById: Map<string, Task>,
+  input: { taskId: string | null; branch: string },
+): WorktreeTitleMeta {
+  const task = input.taskId ? taskById.get(input.taskId) : null;
+  if (task) {
+    return {
+      title: task.title,
+      subtitle: input.taskId,
+      titleTip: `${task.title} · ${input.taskId}`,
+    };
+  }
+
+  const title = input.branch || input.taskId || "(ad-hoc)";
+  return {
+    title,
+    subtitle: input.taskId,
+    titleTip: input.taskId ? `${title} · ${input.taskId}` : title,
+  };
+}
 
 function StatusPill({ pill }: { pill: WorktreeStatusPill }) {
   return (
@@ -231,6 +260,7 @@ function ArchiveReasonBadge({
 
 function WorktreeRow({
   worktree,
+  titleMeta,
   pill,
   archived,
   signals,
@@ -238,6 +268,7 @@ function WorktreeRow({
   onAction,
 }: {
   worktree: Worktree;
+  titleMeta: WorktreeTitleMeta;
   pill: WorktreeStatusPill;
   archived: boolean;
   signals: ArchiveSignals;
@@ -255,12 +286,16 @@ function WorktreeRow({
     <div className="rounded-lg border border-gray-800 bg-gray-800/40 px-3 py-2">
       {/* 메인 행: 제목 / 에이전트 / 브랜치 / +ins/-del / 상태 pill */}
       <div className="flex items-center gap-3">
-        <span
-          className="min-w-0 flex-1 truncate text-sm text-gray-100"
-          title={worktree.taskId ?? undefined}
-        >
-          {worktree.taskId ?? <span className="text-gray-500">(ad-hoc)</span>}
-        </span>
+        <div className="min-w-0 flex-1" title={titleMeta.titleTip}>
+          <div className="truncate text-sm font-semibold text-gray-100">
+            {titleMeta.title}
+          </div>
+          {titleMeta.subtitle && (
+            <div className="truncate font-mono text-[10px] text-gray-500">
+              {titleMeta.subtitle}
+            </div>
+          )}
+        </div>
         <span className="w-24 flex-shrink-0 truncate text-xs text-gray-400">
           {worktree.agentId ?? "—"}
         </span>
@@ -341,9 +376,11 @@ function MergeModeBadge({ mode }: { mode: MergeHistoryEntry["mode"] }) {
 function MergeHistoryRow({
   entry,
   projectLabel,
+  titleMeta,
 }: {
   entry: MergeHistoryEntry;
   projectLabel: string;
+  titleMeta: WorktreeTitleMeta;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -391,11 +428,15 @@ function MergeHistoryRow({
         >
           {projectLabel}
         </span>
-        <span
-          className="min-w-0 flex-1 truncate text-sm text-gray-100"
-          title={entry.taskId ?? undefined}
-        >
-          {entry.taskId ?? <span className="text-gray-500">(ad-hoc)</span>}
+        <span className="min-w-0 flex-1" title={titleMeta.titleTip}>
+          <span className="block truncate text-sm font-semibold text-gray-100">
+            {titleMeta.title}
+          </span>
+          {titleMeta.subtitle && (
+            <span className="block truncate font-mono text-[10px] text-gray-500">
+              {titleMeta.subtitle}
+            </span>
+          )}
         </span>
         <span
           className="w-44 flex-shrink-0 truncate font-mono text-xs text-blue-300"
@@ -455,6 +496,8 @@ export function WorktreeTab() {
   const setWorktreeArchived = useWorktreeStore((s) => s.setWorktreeArchived);
   const projects = useProjectStore((s) => s.projects);
   const currentProjectId = useProjectStore((s) => s.currentProject?.id ?? null);
+  const tasks = useTaskStore((s) => s.tasks);
+  const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
   const { t } = useTranslation();
 
   const [projectFilter, setProjectFilter] = useState<string>(() =>
@@ -485,6 +528,12 @@ export function WorktreeTab() {
   useEffect(() => {
     refresh().catch(() => {});
   }, [refresh]);
+
+  useEffect(() => {
+    if (!currentProjectId) return;
+    const unsub = subscribeToTasks(currentProjectId);
+    return () => unsub();
+  }, [currentProjectId, subscribeToTasks]);
 
   useEffect(() => {
     setProjectFilter((currentFilter) =>
@@ -520,6 +569,11 @@ export function WorktreeTab() {
         ? history
         : history.filter((e) => e.projectId === projectFilter),
     [history, projectFilter],
+  );
+
+  const taskById = useMemo(
+    () => new Map(tasks.map((task) => [task.id, task])),
+    [tasks],
   );
 
   // projectId → 사람이 읽는 이름. 미등록 프로젝트는 id 그대로.
@@ -914,6 +968,10 @@ export function WorktreeTab() {
                   key={entry.id}
                   entry={entry}
                   projectLabel={projectName(entry.projectId)}
+                  titleMeta={resolveWorktreeTitle(taskById, {
+                    taskId: entry.taskId,
+                    branch: entry.branch,
+                  })}
                 />
               ))}
             </div>
@@ -962,6 +1020,7 @@ export function WorktreeTab() {
                     <WorktreeRow
                       key={wt.id}
                       worktree={wt}
+                      titleMeta={resolveWorktreeTitle(taskById, wt)}
                       pill={statusPill(wt)}
                       archived={isWorktreeArchived(
                         wt,
