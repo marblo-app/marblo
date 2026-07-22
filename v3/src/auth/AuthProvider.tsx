@@ -16,7 +16,8 @@ import {
   GithubAuthProvider,
   type User,
 } from "firebase/auth";
-import { auth, isPackagedLoopbackAuth } from "../lib/firebase";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { auth, db, isPackagedLoopbackAuth } from "../lib/firebase";
 import { t } from "../lib/i18n";
 import {
   clearAgentFirebaseAuth,
@@ -37,12 +38,25 @@ export interface AuthContextType {
   user: User | null;
   loading: boolean;
   error: string | null;
-  loginWithGoogle: () => Promise<void>;
+  loginWithGoogle: (options?: AuthMarketingConsentOptions) => Promise<void>;
   loginWithGithub: () => Promise<void>;
-  loginWithEmail: (email: string, password: string) => Promise<void>;
-  signupWithEmail: (email: string, password: string) => Promise<void>;
+  loginWithEmail: (
+    email: string,
+    password: string,
+    options?: AuthMarketingConsentOptions,
+  ) => Promise<void>;
+  signupWithEmail: (
+    email: string,
+    password: string,
+    options?: AuthMarketingConsentOptions,
+  ) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
+}
+
+export interface AuthMarketingConsentOptions {
+  marketingEmailConsent?: boolean;
+  locale?: string;
 }
 
 export const AuthContext = createContext<AuthContextType | null>(null);
@@ -72,6 +86,42 @@ const AUTH_BUILD_TAG = "google-login=redirect-v3-idb-heartbeat-fix";
 // dead, silent button. Generous so a slow-but-successful navigation never trips
 // it (a real navigation tears down this renderer well before then).
 const REDIRECT_NAV_WATCHDOG_MS = 8_000;
+const MARKETING_CONSENT_VERSION = "2026-07-22";
+const MARKETING_CONSENT_REDIRECT_KEY = "marblo:authMarketingConsentPending";
+
+function rememberMarketingConsentForRedirect(
+  options?: AuthMarketingConsentOptions,
+): void {
+  try {
+    if (options?.marketingEmailConsent) {
+      localStorage.setItem(
+        MARKETING_CONSENT_REDIRECT_KEY,
+        JSON.stringify({ locale: options.locale ?? "ko" }),
+      );
+    } else {
+      localStorage.removeItem(MARKETING_CONSENT_REDIRECT_KEY);
+    }
+  } catch {
+    // Best-effort only. Loopback/email paths do not need this.
+  }
+}
+
+function consumeMarketingConsentFromRedirect():
+  | AuthMarketingConsentOptions
+  | undefined {
+  try {
+    const raw = localStorage.getItem(MARKETING_CONSENT_REDIRECT_KEY);
+    localStorage.removeItem(MARKETING_CONSENT_REDIRECT_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as { locale?: unknown };
+    return {
+      marketingEmailConsent: true,
+      locale: typeof parsed.locale === "string" ? parsed.locale : "ko",
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 async function syncAgentFirebaseAuthForUser(
   firebaseUser: User,
@@ -80,6 +130,33 @@ async function syncAgentFirebaseAuthForUser(
 ): Promise<void> {
   await syncAgentFirebaseAuth(firebaseUser, { forceRefreshIdToken });
   console.info(`[auth] agent Firebase auth synced (${source})`);
+}
+
+async function grantMarketingConsentForUser(
+  firebaseUser: User,
+  method: string,
+  options?: AuthMarketingConsentOptions,
+): Promise<void> {
+  if (!options?.marketingEmailConsent) return;
+
+  try {
+    await setDoc(
+      doc(db, "users", firebaseUser.uid),
+      {
+        webPrivacyConsent: {
+          marketing: true,
+          version: MARKETING_CONSENT_VERSION,
+          acceptedAt: serverTimestamp(),
+          locale: options.locale ?? "ko",
+        },
+      },
+      { merge: true },
+    );
+    telemetry.marketingConsentGranted("auth_screen", method);
+  } catch (e) {
+    const code = (e as { code?: string })?.code ?? "unknown";
+    console.warn(`[auth] marketing consent grant failed code=${code}`);
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -174,13 +251,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // 패키징에서 loading 은 onAuthStateChanged/authStateReady/timeout 이 해제한다.
     if (!isPackagedLoopbackAuth) {
       getRedirectResult(auth)
-        .then((result) => {
+        .then(async (result) => {
           if (!result) {
             console.info("[auth] getRedirectResult: no pending redirect");
             return;
           }
           console.info("[auth] getRedirectResult: signed in via redirect");
           telemetry.loginSuccess("google");
+          await grantMarketingConsentForUser(
+            result.user,
+            "google",
+            consumeMarketingConsentFromRedirect(),
+          );
           settled = true;
           clearTimeout(timeout);
           setError(null);
@@ -243,7 +325,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // instead run a system-browser loopback OAuth flow in the main process (RFC
   // 8252 + PKCE), get back a Google id_token, and finish here with
   // signInWithCredential. onAuthStateChanged then picks up the signed-in user.
-  const loginWithGoogleLoopback = async () => {
+  const loginWithGoogleLoopback = async (
+    options?: AuthMarketingConsentOptions,
+  ) => {
     console.info(`[auth] loginWithGoogle: loopback path (${AUTH_BUILD_TAG})`);
     // Pre-check the client id for a precise, actionable error. Main also guards
     // and returns its own message, but this catches the common misconfiguration
@@ -286,6 +370,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }ms)`,
       );
       telemetry.loginSuccess("google");
+      await grantMarketingConsentForUser(
+        credentialResult.user,
+        "google",
+        options,
+      );
       await syncAgentFirebaseAuthForUser(
         credentialResult.user,
         "google loopback",
@@ -303,7 +392,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = async (options?: AuthMarketingConsentOptions) => {
     // The single entry point for both Google paths (loopback + web redirect) —
     // record the attempt once here so login_attempt↔success/failed reconcile.
     telemetry.loginAttempt("google");
@@ -318,7 +407,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // still falls through to the redirect flow below.
     if (typeof window.electronAPI?.auth?.googleLoopback === "function") {
       setError(null);
-      return loginWithGoogleLoopback();
+      return loginWithGoogleLoopback(options);
     }
 
     const authDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN;
@@ -347,6 +436,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let navigated = false;
 
     try {
+      rememberMarketingConsentForRedirect(options);
       // Force a redirect-capable, reliably-writable persistence BEFORE
       // navigating. On the packaged 127.0.0.1 origin IndexedDB can be left in a
       // hung state (ticket Oq63rrnxMYv6fdeNeani); if signInWithRedirect's
@@ -387,6 +477,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         "[auth] loginWithGoogle: signInWithRedirect resolved (navigating)",
       );
     } catch (e) {
+      rememberMarketingConsentForRedirect(undefined);
       navigated = true;
       const code = (e as { code?: string })?.code ?? "?";
       console.error(`[auth] loginWithGoogle: caught code=${code}`, e);
@@ -412,7 +503,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loginWithEmail = async (email: string, password: string) => {
+  const loginWithEmail = async (
+    email: string,
+    password: string,
+    options?: AuthMarketingConsentOptions,
+  ) => {
     telemetry.loginAttempt("email");
     try {
       setError(null);
@@ -422,6 +517,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       );
       telemetry.loginSuccess("email");
+      await grantMarketingConsentForUser(
+        credentialResult.user,
+        "email",
+        options,
+      );
       await syncAgentFirebaseAuthForUser(
         credentialResult.user,
         "email login",
@@ -433,7 +533,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signupWithEmail = async (email: string, password: string) => {
+  const signupWithEmail = async (
+    email: string,
+    password: string,
+    options?: AuthMarketingConsentOptions,
+  ) => {
     telemetry.loginAttempt("signup");
     try {
       setError(null);
@@ -443,6 +547,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       );
       telemetry.loginSuccess("signup", true);
+      await grantMarketingConsentForUser(
+        credentialResult.user,
+        "signup",
+        options,
+      );
       await syncAgentFirebaseAuthForUser(
         credentialResult.user,
         "email signup",

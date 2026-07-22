@@ -47,7 +47,9 @@ export type TelemetryEvent =
   // 어휘(cli_auth/launch_error)를 재사용해 두 신호가 조인 가능하게 유지한다.
   | "onboarding:cli_setup_step"
   | "onboarding:survey_cli_fail"
-  | "onboarding:survey_first_project";
+  | "onboarding:survey_first_project"
+  | "onboarding:marketing_consent_shown"
+  | "onboarding:marketing_consent_granted";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -592,6 +594,21 @@ export const telemetry = {
     logTelemetry({
       event: "onboarding:survey_first_project",
       metadata: { rating },
+    });
+  },
+
+  marketingConsentShown(surface: string) {
+    logTelemetry({
+      event: "onboarding:marketing_consent_shown",
+      metadata: { surface },
+    });
+  },
+
+  marketingConsentGranted(surface: string, method: string) {
+    logTelemetry({
+      event: "onboarding:marketing_consent_granted",
+      success: true,
+      metadata: { surface, method },
     });
   },
 

@@ -358,6 +358,10 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.login.or": "or",
   "onboarding.login.email": "Email",
   "onboarding.login.password": "Password",
+  "onboarding.login.marketingConsentLabel":
+    "Receive Marblo news and update emails (optional)",
+  "onboarding.login.marketingConsentHint":
+    "Get product news, updates, and beta notices from team@marblo.app. You can sign up and use Marblo without agreeing.",
   "onboarding.login.signupButton": "Sign up",
   "onboarding.login.loginButton": "Log in",
   "onboarding.login.haveAccount": "Already have an account?",

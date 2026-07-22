@@ -359,6 +359,10 @@ export const onboarding = {
   "onboarding.login.or": "또는",
   "onboarding.login.email": "이메일",
   "onboarding.login.password": "비밀번호",
+  "onboarding.login.marketingConsentLabel":
+    "마블로 소식·업데이트 이메일 수신 동의 (선택)",
+  "onboarding.login.marketingConsentHint":
+    "team@marblo.app 발신 제품 소식, 업데이트, 베타 안내를 받을 수 있습니다. 동의하지 않아도 가입과 이용에는 영향이 없습니다.",
   "onboarding.login.signupButton": "회원가입",
   "onboarding.login.loginButton": "로그인",
   "onboarding.login.haveAccount": "이미 계정이 있나요?",

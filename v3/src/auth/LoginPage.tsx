@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useTranslation } from "../lib/i18n";
+import telemetry from "../services/telemetryService";
 
 export function LoginPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const {
     loginWithGoogle,
     loginWithEmail,
@@ -15,13 +16,23 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignup, setIsSignup] = useState(false);
+  const [marketingEmailConsent, setMarketingEmailConsent] = useState(false);
+
+  useEffect(() => {
+    telemetry.marketingConsentShown("auth_screen");
+  }, []);
+
+  const marketingConsentOptions = {
+    marketingEmailConsent,
+    locale,
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSignup) {
-      await signupWithEmail(email, password);
+      await signupWithEmail(email, password, marketingConsentOptions);
     } else {
-      await loginWithEmail(email, password);
+      await loginWithEmail(email, password, marketingConsentOptions);
     }
   };
 
@@ -50,11 +61,30 @@ export function LoginPage() {
           </div>
         )}
 
+        <label
+          htmlFor="marketing-email-consent"
+          className="mb-4 flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-left"
+        >
+          <input
+            id="marketing-email-consent"
+            type="checkbox"
+            checked={marketingEmailConsent}
+            onChange={(e) => setMarketingEmailConsent(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-xs leading-5 text-gray-600">
+            <span className="block font-medium text-gray-700">
+              {t("onboarding.login.marketingConsentLabel")}
+            </span>
+            {t("onboarding.login.marketingConsentHint")}
+          </span>
+        </label>
+
         {/* Social Login */}
         <div className="space-y-3">
           <button
             type="button"
-            onClick={loginWithGoogle}
+            onClick={() => void loginWithGoogle(marketingConsentOptions)}
             className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24">
