@@ -8,8 +8,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   parseIncludeAdmin,
+  parseMetricMode,
+  metricCountExpr,
   coerceNumber,
   buildOnboardingFunnel,
+  buildActivationHeadline,
   ONBOARDING_FUNNEL_STEPS,
   ONBOARDING_FAILURE_EVENTS,
 } from "./adminAnalytics";
@@ -27,6 +30,39 @@ test("parseIncludeAdmin only true for boolean true (hardening)", () => {
   // 문자열/숫자 truthy 는 받지 않는다 — 콜러블은 실제 boolean 을 보낸다.
   assert.equal(parseIncludeAdmin({ includeAdmin: "true" }), false);
   assert.equal(parseIncludeAdmin({ includeAdmin: 1 }), false);
+});
+
+// ── parseMetricMode ────────────────────────────────────────────────────────
+test("parseMetricMode defaults to 'events' (backward compat) when absent", () => {
+  assert.equal(parseMetricMode(undefined), "events");
+  assert.equal(parseMetricMode(null), "events");
+  assert.equal(parseMetricMode({}), "events");
+  // 알 수 없는 값은 'events' 로 폴백(하위호환).
+  assert.equal(parseMetricMode({ metricMode: "nope" }), "events");
+  assert.equal(parseMetricMode({ metricMode: 1 }), "events");
+});
+
+test("parseMetricMode selects 'clients' only for exact string", () => {
+  assert.equal(parseMetricMode({ metricMode: "clients" }), "clients");
+  assert.equal(parseMetricMode({ metricMode: "events" }), "events");
+});
+
+// ── metricCountExpr ────────────────────────────────────────────────────────
+test("metricCountExpr maps mode → SQL count expression", () => {
+  assert.equal(metricCountExpr("events"), "COUNT(*)");
+  assert.equal(metricCountExpr("clients"), "COUNT(DISTINCT userId)");
+  assert.equal(
+    metricCountExpr("clients", "sessionId"),
+    "COUNT(DISTINCT sessionId)"
+  );
+});
+
+test("metricCountExpr rejects unsafe distinct column (injection guard)", () => {
+  assert.throws(() => metricCountExpr("clients", "userId; DROP TABLE x"));
+  assert.throws(() => metricCountExpr("clients", "1bad"));
+  assert.throws(() => metricCountExpr("clients", "a b"));
+  // events 모드는 distinctCol 을 안 쓰므로 검증 대상 아님.
+  assert.equal(metricCountExpr("events", "anything at all"), "COUNT(*)");
 });
 
 // ── coerceNumber ───────────────────────────────────────────────────────────
@@ -156,4 +192,97 @@ test("funnel: failure branches decompose errorCategory (cli_auth vs launch_error
   // null category → "(none)".
   const loginFailed = branches.loginFailed;
   assert.equal(loginFailed.byCategory[0].key, "(none)");
+});
+
+// ── 스폰 이후 활성화 단계 ──────────────────────────────────────────────────
+test("funnel: post-spawn activation steps read injected scalars, tagged 'activation'", () => {
+  const row = {
+    d_first_run: 22,
+    d_login_attempt: 20,
+    d_login_success: 18,
+    d_folder_connected: 8,
+    d_orchestrator_opened: 8,
+    d_agent_spawned: 8,
+    n_agent_spawned: 30,
+    // 활성화 단계 — index.ts 가 별도 subquery 로 주입하는 스칼라.
+    d_task_completed: 5,
+    n_task_completed: 12,
+    d_core_experience: 4, // 스폰 2회+
+    d_retained_7d: 2, // 7일내 2세션/2프로젝트
+  };
+  const f = buildOnboardingFunnel(row, []);
+  const byKey = Object.fromEntries(f.steps.map((s) => [s.key, s]));
+
+  assert.equal(byKey.task_completed.clients, 5);
+  assert.equal(byKey.task_completed.events, 12);
+  assert.equal(byKey.task_completed.kind, "activation");
+  assert.equal(byKey.core_experience.clients, 4);
+  assert.equal(byKey.core_experience.kind, "activation");
+  assert.equal(byKey.retained_7d.clients, 2);
+  assert.equal(byKey.retained_7d.kind, "activation");
+
+  // reach 본선은 kind='reach'.
+  assert.equal(byKey.first_run.kind, "reach");
+  assert.equal(byKey.agent_spawned.kind, "reach");
+});
+
+test("funnel: max-drop stays within reach steps, never an activation step", () => {
+  // agent_spawned(20) → task_completed(1) 은 drop 19 로 최대치지만 activation 이라
+  // isMaxDrop 후보에서 제외 — 본선 최대 이탈(login_success 18 → folder 3 = 15)이 남는다.
+  const row = {
+    d_first_run: 22,
+    d_login_attempt: 21,
+    d_login_success: 18,
+    d_folder_connected: 3,
+    d_orchestrator_opened: 21,
+    d_agent_spawned: 20,
+    d_task_completed: 1,
+    d_core_experience: 1,
+    d_retained_7d: 0,
+  };
+  const f = buildOnboardingFunnel(row, []);
+  const byKey = Object.fromEntries(f.steps.map((s) => [s.key, s]));
+  // drop 값 자체는 activation 에도 계산된다(참고용).
+  assert.equal(byKey.task_completed.dropFromPrev, 19);
+  // 그러나 최대 이탈 플래그는 reach 안에서만.
+  const flagged = f.steps.filter((s) => s.isMaxDrop);
+  assert.equal(flagged.length, 1);
+  assert.equal(flagged[0].key, "folder_connected");
+  assert.equal(flagged[0].kind, "reach");
+});
+
+// ── buildActivationHeadline (★가입 후 30분내 첫 티켓 완료 비율) ──────────────
+test("headline: rate = activated / signup base, 30min window", () => {
+  const h = buildActivationHeadline({ d_activated_30m: 3, d_signup_base: 12 });
+  assert.equal(h.activatedClients, 3);
+  assert.equal(h.baseClients, 12);
+  assert.equal(h.rate, 3 / 12);
+  assert.equal(h.windowMinutes, 30);
+  assert.match(h.label, /30분/);
+});
+
+test("headline: base 0 yields null rate (no divide-by-zero)", () => {
+  const h = buildActivationHeadline({ d_activated_30m: 0, d_signup_base: 0 });
+  assert.equal(h.activatedClients, 0);
+  assert.equal(h.baseClients, 0);
+  assert.equal(h.rate, null);
+});
+
+test("headline: absent row is all-zero, null rate; custom window respected", () => {
+  const h = buildActivationHeadline(undefined, 60);
+  assert.equal(h.activatedClients, 0);
+  assert.equal(h.baseClients, 0);
+  assert.equal(h.rate, null);
+  assert.equal(h.windowMinutes, 60);
+  assert.match(h.label, /60분/);
+});
+
+test("funnel: result carries headline built from same row", () => {
+  const f = buildOnboardingFunnel(
+    { d_activated_30m: 4, d_signup_base: 10 },
+    []
+  );
+  assert.equal(f.headline.activatedClients, 4);
+  assert.equal(f.headline.baseClients, 10);
+  assert.equal(f.headline.rate, 0.4);
 });

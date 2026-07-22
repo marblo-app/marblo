@@ -15,6 +15,7 @@ import {
   Info,
   X,
   UserMinus,
+  Hash,
 } from "lucide-react";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
@@ -40,11 +41,20 @@ type OnboardingFunnelStep = {
   key: string;
   event: string;
   label: string;
+  kind: "reach" | "activation";
   clients: number;
   events: number;
   dropFromPrev: number | null;
   dropRateFromPrev: number | null;
   isMaxDrop: boolean;
+};
+// ★헤드라인 — 가입 후 30분 내 첫 티켓 완료 활성화율.
+type ActivationHeadline = {
+  activatedClients: number;
+  baseClients: number;
+  rate: number | null;
+  windowMinutes: number;
+  label: string;
 };
 type OnboardingFailureBranch = {
   key: string;
@@ -60,6 +70,7 @@ type OnboardingFunnel = {
   adminExcluded?: AdminExcludedTelemetry;
   steps: OnboardingFunnelStep[];
   failureBranches: OnboardingFailureBranch[];
+  headline?: ActivationHeadline;
   note: string;
 };
 
@@ -112,9 +123,13 @@ type BusinessSummary = {
   };
 };
 
+// 분포 렌즈 — 'events'(발생 총량, 기본) vs 'clients'(고유 사용자 수).
+type MetricMode = "events" | "clients";
+
 type UsageSummary = {
   rangeDays: number;
   generatedAt: string;
+  metricMode?: MetricMode;
   adminExcluded?: AdminExcludedTelemetry;
   sampleClientCount: number;
   wau: number;
@@ -1129,11 +1144,32 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
     );
   }
 
+  const headline = funnel.headline;
+
   return (
     <div className="space-y-4">
+      {/* ★헤드라인 활성화 지표 — 가입 후 30분 내 첫 티켓 완료 비율. */}
+      {headline && (
+        <div className="rounded-xl border border-indigo-800/60 bg-indigo-950/30 p-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-indigo-200">
+              <Activity className="h-4 w-4" />
+              핵심 활성화율
+            </div>
+            <div className="text-2xl font-bold tabular-nums text-indigo-100">
+              {headline.rate != null ? fmtPct(headline.rate) : "—"}
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-indigo-300/80">{headline.label}</p>
+          <p className="mt-0.5 text-[11px] tabular-nums text-indigo-400/70">
+            {fmtInt(headline.activatedClients)} / {fmtInt(headline.baseClients)}
+            명 (분자=활성화 · 분모=가입)
+          </p>
+        </div>
+      )}
       <Panel
         title="단계별 도달 (고유 clientId)"
-        note="app:first_run → 로그인 → 폴더연결 → 오케오픈 → 스폰 · 인접 단계 감소 = 이탈"
+        note="app:first_run → 로그인 → 폴더연결 → 오케오픈 → 스폰 → (활성화) 첫 티켓 완료·핵심경험·7일 잔존 · 인접 단계 감소 = 이탈"
       >
         <div className="space-y-1">
           {steps.map((s, i) => {
@@ -1160,27 +1196,38 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
                   </div>
                 )}
                 <div className="flex items-center gap-3">
-                  <div className="w-40 shrink-0 text-xs text-zinc-400">
-                    {s.label}
+                  <div className="flex w-40 shrink-0 items-center gap-1 text-xs text-zinc-400">
+                    <span>{s.label}</span>
+                    {s.kind === "activation" && (
+                      <span className="rounded bg-emerald-900/50 px-1 text-[9px] font-medium text-emerald-300">
+                        활성화
+                      </span>
+                    )}
                   </div>
                   <div className="relative h-7 flex-1 overflow-hidden rounded bg-zinc-900">
                     <div
                       className="h-full rounded"
                       style={{
                         width: `${Math.max(widthPct, s.clients > 0 ? 2 : 0)}%`,
-                        backgroundColor: s.isMaxDrop ? STATUS_CRIT : SERIES,
+                        backgroundColor: s.isMaxDrop
+                          ? STATUS_CRIT
+                          : s.kind === "activation"
+                          ? SERIES_2
+                          : SERIES,
                       }}
                     />
                     <div className="absolute inset-0 flex items-center gap-2 px-2">
                       <span className="text-xs font-semibold tabular-nums text-zinc-100">
                         {fmtInt(s.clients)}명
                       </span>
-                      <span
-                        className="text-[11px] tabular-nums"
-                        style={{ color: INK_MUTED }}
-                      >
-                        · {fmtInt(s.events)} 이벤트
-                      </span>
+                      {s.events > 0 && (
+                        <span
+                          className="text-[11px] tabular-nums"
+                          style={{ color: INK_MUTED }}
+                        >
+                          · {fmtInt(s.events)} 이벤트
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1232,6 +1279,9 @@ export default function AnalyticsPanel() {
   // ★blind spot: 제외기는 cost_logs 에 흔적 있는 세션만 존킴으로 잡는다 —
   // 무토큰/dev/크래시 세션은 존킴이라도 '외부'로 샌다(툴팁에 명시, 오분해 방지).
   const [includeAdmin, setIncludeAdmin] = useState(false);
+  // 분포 렌즈 토글(상위이벤트·스폰별). 기본 'events'(발생 총량, 하위호환).
+  // 'clients' = 고유 사용자 수(COUNT(DISTINCT clientId)) — "몇 명이 했나".
+  const [metricMode, setMetricMode] = useState<MetricMode>("events");
   const [biz, setBiz] = useState<Loaded<BusinessSummary>>({
     data: null,
     loading: true,
@@ -1300,79 +1350,84 @@ export default function AnalyticsPanel() {
     setDrillState({ data: null, loading: false, error: null });
   }, []);
 
-  const load = useCallback(async (d: number, inc: boolean) => {
-    const fns = getFunctions(app, "us-central1");
-    // 사업(Firestore)은 항상 운영자 제외(별도 doc-id 기반) — includeAdmin 무관.
-    const callBiz = httpsCallable<{ days: number }, BusinessSummary>(
-      fns,
-      "getAdminBusinessSummary"
-    );
-    // 텔레메트리 계열은 includeAdmin 토글을 그대로 전달.
-    const callUsage = httpsCallable<
-      { days: number; includeAdmin: boolean },
-      UsageSummary
-    >(fns, "getAdminUsageSummary");
-    const callModel = httpsCallable<
-      { days: number; includeAdmin: boolean },
-      ModelSummary
-    >(fns, "getAdminModelSummary");
-    const callFunnel = httpsCallable<
-      { days: number; includeAdmin: boolean },
-      OnboardingFunnel
-    >(fns, "getAdminOnboardingFunnel");
+  const load = useCallback(
+    async (d: number, inc: boolean, mode: MetricMode) => {
+      const fns = getFunctions(app, "us-central1");
+      // 사업(Firestore)은 항상 운영자 제외(별도 doc-id 기반) — includeAdmin 무관.
+      const callBiz = httpsCallable<{ days: number }, BusinessSummary>(
+        fns,
+        "getAdminBusinessSummary"
+      );
+      // 텔레메트리 계열은 includeAdmin 토글을 그대로 전달. usage 는 metricMode 도.
+      const callUsage = httpsCallable<
+        { days: number; includeAdmin: boolean; metricMode: MetricMode },
+        UsageSummary
+      >(fns, "getAdminUsageSummary");
+      const callModel = httpsCallable<
+        { days: number; includeAdmin: boolean },
+        ModelSummary
+      >(fns, "getAdminModelSummary");
+      const callFunnel = httpsCallable<
+        { days: number; includeAdmin: boolean },
+        OnboardingFunnel
+      >(fns, "getAdminOnboardingFunnel");
 
-    setBiz((s) => ({ ...s, loading: true, error: null }));
-    setUsage((s) => ({ ...s, loading: true, error: null }));
-    setModel((s) => ({ ...s, loading: true, error: null }));
-    setOnbFunnel((s) => ({ ...s, loading: true, error: null }));
+      setBiz((s) => ({ ...s, loading: true, error: null }));
+      setUsage((s) => ({ ...s, loading: true, error: null }));
+      setModel((s) => ({ ...s, loading: true, error: null }));
+      setOnbFunnel((s) => ({ ...s, loading: true, error: null }));
 
-    // 각 콜러블 독립 처리 — 하나 실패해도 나머지는 렌더.
-    callBiz({ days: d })
-      .then((r) => setBiz({ data: r.data, loading: false, error: null }))
-      .catch((e) =>
-        setBiz({
-          data: null,
-          loading: false,
-          error: mapErr(e as CallableError),
-        })
-      );
-    callUsage({ days: d, includeAdmin: inc })
-      .then((r) => setUsage({ data: r.data, loading: false, error: null }))
-      .catch((e) =>
-        setUsage({
-          data: null,
-          loading: false,
-          error: mapErr(e as CallableError),
-        })
-      );
-    callModel({ days: d, includeAdmin: inc })
-      .then((r) => setModel({ data: r.data, loading: false, error: null }))
-      .catch((e) =>
-        setModel({
-          data: null,
-          loading: false,
-          error: mapErr(e as CallableError),
-        })
-      );
-    // 신규 콜러블 — functions 미배포(web 선배포) 시 not-found 로 실패할 수 있으나
-    // 독립 catch 라 나머지 섹션은 정상 렌더된다(배포순서 soft-fail).
-    callFunnel({ days: d, includeAdmin: inc })
-      .then((r) => setOnbFunnel({ data: r.data, loading: false, error: null }))
-      .catch((e) =>
-        setOnbFunnel({
-          data: null,
-          loading: false,
-          error: mapErr(e as CallableError),
-        })
-      );
-  }, []);
+      // 각 콜러블 독립 처리 — 하나 실패해도 나머지는 렌더.
+      callBiz({ days: d })
+        .then((r) => setBiz({ data: r.data, loading: false, error: null }))
+        .catch((e) =>
+          setBiz({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          })
+        );
+      callUsage({ days: d, includeAdmin: inc, metricMode: mode })
+        .then((r) => setUsage({ data: r.data, loading: false, error: null }))
+        .catch((e) =>
+          setUsage({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          })
+        );
+      callModel({ days: d, includeAdmin: inc })
+        .then((r) => setModel({ data: r.data, loading: false, error: null }))
+        .catch((e) =>
+          setModel({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          })
+        );
+      // 신규 콜러블 — functions 미배포(web 선배포) 시 not-found 로 실패할 수 있으나
+      // 독립 catch 라 나머지 섹션은 정상 렌더된다(배포순서 soft-fail).
+      callFunnel({ days: d, includeAdmin: inc })
+        .then((r) =>
+          setOnbFunnel({ data: r.data, loading: false, error: null })
+        )
+        .catch((e) =>
+          setOnbFunnel({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          })
+        );
+    },
+    []
+  );
 
   useEffect(() => {
     const id = window.setTimeout(() => {
-      void load(days, includeAdmin);
+      void load(days, includeAdmin, metricMode);
     }, 0);
     return () => window.clearTimeout(id);
-  }, [days, includeAdmin, load]);
+  }, [days, includeAdmin, metricMode, load]);
 
   const anyLoading =
     biz.loading || usage.loading || model.loading || onbFunnel.loading;
@@ -1463,6 +1518,38 @@ export default function AnalyticsPanel() {
           {u && <SampleBadge n={u.sampleClientCount} />}
         </div>
         <div className="flex items-center gap-2">
+          {/* 분포 렌즈 세그먼트 — 이벤트 수 vs 고유 사용자 수(상위이벤트·스폰별). */}
+          <div
+            className="flex overflow-hidden rounded-lg border border-zinc-700"
+            title={
+              "상위이벤트·스폰(역할/모델)별 분포를 세는 기준.\n" +
+              "이벤트 = 발생 총량(COUNT(*)) · 고유 사용자 = 몇 명이 했나" +
+              "(COUNT(DISTINCT clientId)).\n" +
+              "DAU·스폰 추이·태스크 지표는 이 토글과 무관합니다."
+            }
+          >
+            {(
+              [
+                ["events", "이벤트", Hash],
+                ["clients", "고유 사용자", Users],
+              ] as const
+            ).map(([mode, label, Icon]) => (
+              <button
+                key={mode}
+                onClick={() => setMetricMode(mode)}
+                disabled={anyLoading}
+                aria-pressed={metricMode === mode}
+                className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs transition disabled:opacity-50 ${
+                  metricMode === mode
+                    ? "bg-indigo-600 text-white"
+                    : "bg-zinc-950 text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
           <label
             className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-400 transition hover:text-zinc-200"
             title={
@@ -1485,7 +1572,7 @@ export default function AnalyticsPanel() {
           </label>
           <RangeControl days={days} onChange={setDays} disabled={anyLoading} />
           <button
-            onClick={() => load(days, includeAdmin)}
+            onClick={() => load(days, includeAdmin, metricMode)}
             disabled={anyLoading}
             className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-400 transition hover:text-zinc-200 disabled:opacity-50"
             aria-label="새로고침"
@@ -1773,7 +1860,14 @@ export default function AnalyticsPanel() {
             </div>
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <Panel title="상위 이벤트">
+              <Panel
+                title="상위 이벤트"
+                note={
+                  (u.metricMode ?? "events") === "clients"
+                    ? "단위: 고유 사용자 수(clientId)"
+                    : "단위: 이벤트 발생 수"
+                }
+              >
                 <BarList
                   data={u.topEvents.map((e) => ({
                     key: e.key,
@@ -1786,7 +1880,14 @@ export default function AnalyticsPanel() {
                   }
                 />
               </Panel>
-              <Panel title="스폰 — 역할별">
+              <Panel
+                title="스폰 — 역할별"
+                note={
+                  (u.metricMode ?? "events") === "clients"
+                    ? "단위: 고유 사용자 수(clientId)"
+                    : "단위: 스폰 발생 수"
+                }
+              >
                 <BarList
                   data={u.spawnsByRole.map((e) => ({
                     key: e.key,
@@ -1800,7 +1901,14 @@ export default function AnalyticsPanel() {
                   }
                 />
               </Panel>
-              <Panel title="스폰 — 모델별">
+              <Panel
+                title="스폰 — 모델별"
+                note={
+                  (u.metricMode ?? "events") === "clients"
+                    ? "단위: 고유 사용자 수(clientId)"
+                    : "단위: 스폰 발생 수"
+                }
+              >
                 <BarList
                   data={u.spawnsByModel.map((e) => ({
                     key: e.key,

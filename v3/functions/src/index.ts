@@ -11,6 +11,8 @@ import { reconcileTossPending, reconcilePaddlePending } from "./reconciliation";
 import { redactSecrets } from "./redact";
 import {
   parseIncludeAdmin,
+  parseMetricMode,
+  metricCountExpr,
   EMPTY_EXCLUSION,
   buildOnboardingFunnel,
   ONBOARDING_FUNNEL_STEPS,
@@ -5866,6 +5868,11 @@ export const getAdminUsageSummary = functions.https.onCall(
     // includeAdmin(기본 false)=제외, true=포함. 포함 모드에서도 clientId 는 계속
     // 해석해서 "제외했다면 몇 개가 빠졌을지"를 adminExcluded 로 노출한다(두 수치 비교).
     const includeAdmin = parseIncludeAdmin(data);
+    // 분포 렌즈 — 'events'(COUNT(*), 기본) vs 'clients'(COUNT(DISTINCT userId)).
+    // 상위이벤트·스폰(역할/모델)별 3개 분포에만 적용한다(DAU/스폰추이/태스크는
+    // 이미 고정 의미라 무관). userId = 익명 clientId, 개인식별 아님(카운트만).
+    const metricMode = parseMetricMode(data);
+    const metricExpr = metricCountExpr(metricMode, "userId");
     const adminClientIds = await resolveAdminClientIds(rangeDays);
     const ex = includeAdmin
       ? EMPTY_EXCLUSION
@@ -5897,16 +5904,17 @@ export const getAdminUsageSummary = functions.https.onCall(
       FROM ${eventsTable}
       WHERE ${eventTs} >= ${since}${ex.clause}
     `;
-    // 상위 이벤트 랭킹
+    // 상위 이벤트 랭킹 — metricMode 로 count 식 결정(events=COUNT(*),
+    // clients=COUNT(DISTINCT userId)). clients 모드에선 정렬도 같은 식 기준.
     const topEventsQuery = `
-      SELECT COALESCE(event, '(none)') AS event, COUNT(*) AS n
+      SELECT COALESCE(event, '(none)') AS event, ${metricExpr} AS n
       FROM ${eventsTable}
       WHERE ${eventTs} >= ${since}${ex.clause}
       GROUP BY event
       ORDER BY n DESC
       LIMIT 25
     `;
-    // 에이전트 스폰수(일별·역할별·모델별)
+    // 에이전트 스폰수(일별=고정 COUNT(*) 추이; 역할별·모델별=metricMode 적용)
     const spawnsByDayQuery = `
       SELECT FORMAT_DATE('%F', DATE(${eventTs})) AS date, COUNT(*) AS n
       FROM ${eventsTable}
@@ -5914,13 +5922,13 @@ export const getAdminUsageSummary = functions.https.onCall(
       GROUP BY date ORDER BY date ASC
     `;
     const spawnsByRoleQuery = `
-      SELECT role AS key, COUNT(*) AS n
+      SELECT role AS key, ${metricExpr} AS n
       FROM ${eventsTable}
       WHERE event = 'agent:spawned' AND ${eventTs} >= ${since}${ex.clause}
       GROUP BY role ORDER BY n DESC
     `;
     const spawnsByModelQuery = `
-      SELECT model AS key, COUNT(*) AS n
+      SELECT model AS key, ${metricExpr} AS n
       FROM ${eventsTable}
       WHERE event = 'agent:spawned' AND ${eventTs} >= ${since}${ex.clause}
       GROUP BY model ORDER BY n DESC
@@ -5975,6 +5983,8 @@ export const getAdminUsageSummary = functions.https.onCall(
     return {
       rangeDays,
       generatedAt: new Date().toISOString(),
+      // 분포(상위이벤트·스폰역할·스폰모델)에 적용된 렌즈 — web 이 세그먼트 라벨링.
+      metricMode,
       // 운영자 제외 현황 — clientId 값은 노출하지 않고 개수만.
       // applied=이번 응답에 실제로 제외가 적용됐는지(토글 상태). false 면 전체 포함.
       adminExcluded: {
@@ -6047,12 +6057,22 @@ export const getAdminOnboardingFunnel = functions.https.onCall(
     // events.timestamp 는 STRING 적재 → 비교 전 SAFE_CAST(위 콜러블과 동일 사유).
     const eventTs = "SAFE_CAST(timestamp AS TIMESTAMP)";
 
-    // 관심 이벤트 전체(본선 6단계 + 실패 4종). 파티션/스캔 최소화를 위해 IN 절로
-    // 좁힌 뒤 단일 스캔에서 단계별 (distinct clientId, 이벤트수)를 한 번에 뽑는다.
-    const funnelEventNames = [
-      ...ONBOARDING_FUNNEL_STEPS.map((s) => s.event),
-      ...ONBOARDING_FAILURE_EVENTS.map((f) => f.event),
-    ];
+    // 단일 스캔으로 정확히 뽑히는 단계 = reach 본선 + task_completed(단순 event
+    // distinct). core_experience(스폰≥2)·retained_7d(7일내 2세션/2프로젝트)는
+    // per-client HAVING/시간창이라 단일 스캔으론 못 구한다 — 아래 별도 subquery 로
+    // 스칼라를 뽑아 funnel row 에 주입한다(순수 빌더는 d_<key> 만 읽으므로 무관).
+    const scanSteps = ONBOARDING_FUNNEL_STEPS.filter(
+      (s) => s.kind === "reach" || s.key === "task_completed",
+    );
+
+    // 관심 이벤트(스캔 단계 + 실패 4종, 중복 제거). 파티션/스캔 최소화를 위해 IN
+    // 절로 좁힌 뒤 단일 스캔에서 단계별 (distinct clientId, 이벤트수)를 뽑는다.
+    const funnelEventNames = Array.from(
+      new Set([
+        ...scanSteps.map((s) => s.event),
+        ...ONBOARDING_FAILURE_EVENTS.map((f) => f.event),
+      ]),
+    );
     const inList = funnelEventNames.map((_, i) => `@ev${i}`).join(", ");
     const eventParams: Record<string, unknown> = {};
     funnelEventNames.forEach((name, i) => {
@@ -6062,8 +6082,8 @@ export const getAdminOnboardingFunnel = functions.https.onCall(
     // d_<col> = 도달 고유 clientId, n_<col> = 이벤트 발생량. col 은 순수 모듈의
     // step.key / failure.col 규약과 1:1 로 맞춘다(buildOnboardingFunnel 이 읽는 키).
     const countCols = [
-      // 본선 단계는 step.key 를 컬럼 접두로 쓴다(buildOnboardingFunnel 의 d_<key>).
-      ...ONBOARDING_FUNNEL_STEPS.map((s) => ({ col: s.key, event: s.event })),
+      // 스캔 단계는 step.key 를 컬럼 접두로 쓴다(buildOnboardingFunnel 의 d_<key>).
+      ...scanSteps.map((s) => ({ col: s.key, event: s.event })),
       ...ONBOARDING_FAILURE_EVENTS.map((f) => ({ col: f.col, event: f.event })),
     ];
     const countSelects = countCols
@@ -6103,23 +6123,117 @@ export const getAdminOnboardingFunnel = functions.https.onCall(
       ORDER BY n DESC
     `;
 
-    const [[funnelRows], [reasonRows]] = await Promise.all([
-      bigquery.query({
-        query: funnelQuery,
-        params: { days: rangeDays, ...eventParams, ...ex.params },
-        location: BQ_LOCATION,
-      }),
-      bigquery.query({
-        query: reasonQuery,
-        params: { days: rangeDays, ...failureParams, ...ex.params },
-        location: BQ_LOCATION,
-      }),
-    ]);
+    // ── 스폰 이후 활성화 스칼라(per-client 집계 — 단일 스캔 밖) ──
+    // (a) core_experience: agent:spawned 를 2회+ 한 고유 clientId 수(반복 사용).
+    const coreExpQuery = `
+      SELECT COUNT(*) AS d_core_experience
+      FROM (
+        SELECT userId
+        FROM ${eventsTable}
+        WHERE event = 'agent:spawned'
+          AND ${eventTs} >= ${since}
+          AND userId IS NOT NULL${ex.clause}
+        GROUP BY userId
+        HAVING COUNT(*) >= 2
+      )
+    `;
+    // (b) retained_7d: 첫 활동 후 7일 내 2번째 세션(sessionId≥2) 또는 2번째
+    //     프로젝트(projectId≥2)에 도달한 고유 clientId 수(초기 잔존). win 을 한 번
+    //     걸러(제외절 포함) firstSeen 과 조인 — bare userId 는 win 스캔에서 해석된다.
+    const retainedQuery = `
+      WITH win AS (
+        SELECT userId, ${eventTs} AS ts, sessionId, projectId
+        FROM ${eventsTable}
+        WHERE ${eventTs} >= ${since}
+          AND userId IS NOT NULL${ex.clause}
+      ),
+      firstSeen AS (
+        SELECT userId, MIN(ts) AS first_seen FROM win GROUP BY userId
+      )
+      SELECT COUNT(*) AS d_retained_7d
+      FROM (
+        SELECT w.userId
+        FROM win w
+        JOIN firstSeen f ON f.userId = w.userId
+        WHERE w.ts <= TIMESTAMP_ADD(f.first_seen, INTERVAL 7 DAY)
+        GROUP BY w.userId
+        HAVING COUNT(DISTINCT w.sessionId) >= 2
+            OR COUNT(DISTINCT w.projectId) >= 2
+      )
+    `;
+    // (c) ★헤드라인: 가입(로그인 성공) 후 30분 내 첫 티켓 완료 활성화율.
+    //     분모=가입 고유 clientId, 분자=첫 task:completed 가 가입±30분 창에 든 clientId.
+    const headlineQuery = `
+      WITH signup AS (
+        SELECT userId, MIN(${eventTs}) AS signup_ts
+        FROM ${eventsTable}
+        WHERE event = 'auth:login_success'
+          AND ${eventTs} >= ${since}
+          AND userId IS NOT NULL${ex.clause}
+        GROUP BY userId
+      ),
+      firstTask AS (
+        SELECT userId, MIN(${eventTs}) AS task_ts
+        FROM ${eventsTable}
+        WHERE event = 'task:completed'
+          AND ${eventTs} >= ${since}
+          AND userId IS NOT NULL${ex.clause}
+        GROUP BY userId
+      )
+      SELECT
+        COUNT(DISTINCT s.userId) AS d_signup_base,
+        COUNT(DISTINCT IF(
+          t.task_ts IS NOT NULL
+          AND t.task_ts >= s.signup_ts
+          AND t.task_ts <= TIMESTAMP_ADD(s.signup_ts, INTERVAL 30 MINUTE),
+          s.userId, NULL)) AS d_activated_30m
+      FROM signup s
+      LEFT JOIN firstTask t ON t.userId = s.userId
+    `;
 
-    const funnel = buildOnboardingFunnel(
-      (funnelRows as Array<Record<string, unknown>>)[0],
-      reasonRows as ReasonRow[],
-    );
+    const [[funnelRows], [reasonRows], [coreRows], [retainedRows], [headRows]] =
+      await Promise.all([
+        bigquery.query({
+          query: funnelQuery,
+          params: { days: rangeDays, ...eventParams, ...ex.params },
+          location: BQ_LOCATION,
+        }),
+        bigquery.query({
+          query: reasonQuery,
+          params: { days: rangeDays, ...failureParams, ...ex.params },
+          location: BQ_LOCATION,
+        }),
+        bigquery.query({
+          query: coreExpQuery,
+          params: { days: rangeDays, ...ex.params },
+          location: BQ_LOCATION,
+        }),
+        bigquery.query({
+          query: retainedQuery,
+          params: { days: rangeDays, ...ex.params },
+          location: BQ_LOCATION,
+        }),
+        bigquery.query({
+          query: headlineQuery,
+          params: { days: rangeDays, ...ex.params },
+          location: BQ_LOCATION,
+        }),
+      ]);
+
+    // 단일 스캔 row 에 per-client 활성화 스칼라를 병합(순수 빌더가 d_<key> 로 읽는다).
+    const coreRow = (coreRows as Array<Record<string, unknown>>)[0] ?? {};
+    const retainedRow =
+      (retainedRows as Array<Record<string, unknown>>)[0] ?? {};
+    const headRow = (headRows as Array<Record<string, unknown>>)[0] ?? {};
+    const funnelRow: Record<string, unknown> = {
+      ...((funnelRows as Array<Record<string, unknown>>)[0] ?? {}),
+      d_core_experience: coreRow.d_core_experience,
+      d_retained_7d: retainedRow.d_retained_7d,
+      d_activated_30m: headRow.d_activated_30m,
+      d_signup_base: headRow.d_signup_base,
+    };
+
+    const funnel = buildOnboardingFunnel(funnelRow, reasonRows as ReasonRow[]);
 
     return {
       rangeDays,
