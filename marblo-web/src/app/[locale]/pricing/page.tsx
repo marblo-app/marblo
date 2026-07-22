@@ -1,13 +1,29 @@
 import type { Metadata } from "next";
 import { useTranslations, useLocale } from "next-intl";
+import { getTranslations } from "next-intl/server";
 import PricingSection from "@/components/PricingSection";
 import { buildFAQPageSchema, buildProductOffersSchema } from "@/lib/schema";
 
-export const metadata: Metadata = {
-  title: "Pricing",
-  description:
-    "Simple pricing plans for Marblo AI Agent Workspace. Free, Pro, Team, and Enterprise.",
-};
+// Locale-aware metadata. The title segment reuses the existing nav label
+// (가격 / Pricing / 料金) so Korean/Japanese search sees a localized <title>
+// ("가격 | 마블로") instead of the previous hardcoded English "Pricing".
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const t = await getTranslations({ locale, namespace: "nav" });
+  const descriptions: Record<string, string> = {
+    ko: "마블로 요금제 — Free(무료)·Pro·Team·Enterprise. 여러 AI 에이전트를 칸반 보드에서 동시에 운용하는 데스크톱 워크스페이스의 가격을 확인하세요.",
+    en: "Marblo pricing — Free, Pro, Team, and Enterprise plans for the desktop workspace that runs multiple AI agents simultaneously on a kanban board.",
+    ja: "Marblo料金 — Free・Pro・Team・Enterprise。複数のAIエージェントをカンバンボードで同時運用するデスクトップワークスペースの価格。",
+  };
+  return {
+    title: t("pricing"),
+    description: descriptions[locale] ?? descriptions.en,
+  };
+}
 
 export default function PricingPage() {
   const t = useTranslations("pricing");

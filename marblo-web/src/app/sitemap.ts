@@ -14,6 +14,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/founders",
     "/blog",
     "/faq",
+    // Policy pages — real, indexable, trust-building routes that were missing
+    // from the sitemap. Low priority (support content, not conversion pages).
+    // /legal/business (사업자정보) is intentionally omitted here.
+    "/legal/privacy",
+    "/legal/terms",
+    "/legal/refund",
   ];
 
   // Per-page hreflang cluster shared across every locale entry for that page.
@@ -26,6 +32,26 @@ export default function sitemap(): MetadataRoute.Sitemap {
     return languages;
   };
 
+  // Priority reflects real business importance, not page depth. The home page
+  // is the primary entry (1.0); conversion pages (pricing/download/founders/
+  // guide/blog/faq) sit at 0.8. Lectures are "출시 예정"(coming soon) — genuine
+  // content but not yet a conversion path, so they must NOT outrank core pages
+  // (previously 0.9). Policy pages are support content (0.3).
+  const priorityFor = (page: string): number => {
+    if (page === "") return 1.0;
+    if (page.startsWith("/legal")) return 0.3;
+    if (page.includes("/lectures")) return 0.5;
+    return 0.8;
+  };
+
+  const changeFrequencyFor = (
+    page: string
+  ): "weekly" | "monthly" | "yearly" => {
+    if (page === "") return "weekly";
+    if (page.startsWith("/legal")) return "yearly";
+    return "monthly";
+  };
+
   const entries: MetadataRoute.Sitemap = [];
 
   for (const locale of locales) {
@@ -33,8 +59,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
       entries.push({
         url: `${baseUrl}/${locale}${page}`,
         lastModified: new Date(),
-        changeFrequency: page === "" ? "weekly" : "monthly",
-        priority: page === "" ? 1.0 : page.includes("lectures") ? 0.9 : 0.8,
+        changeFrequency: changeFrequencyFor(page),
+        priority: priorityFor(page),
         alternates: {
           languages: languagesFor(page),
         },

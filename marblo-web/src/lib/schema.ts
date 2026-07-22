@@ -48,6 +48,9 @@ export function buildOrganizationSchema(opts?: { sameAs?: string[] }) {
     "@type": "Organization",
     "@id": ORG_ID,
     name: "Marblo",
+    // Localized brand names so search engines resolve Hangul/Katakana brand
+    // queries ("마블로", "マブロ") to this same entity as the Latin "Marblo".
+    alternateName: ["마블로", "マブロ"],
     legalName: "HYPEMARC",
     url: SITE_URL,
     logo: {
@@ -68,6 +71,7 @@ export function buildWebSiteSchema() {
     "@id": WEBSITE_ID,
     url: SITE_URL,
     name: "Marblo",
+    alternateName: ["마블로", "マブロ"],
     description: ORG_DESCRIPTION.en,
     inLanguage: ["ko", "en", "ja"],
     publisher: { "@id": ORG_ID },

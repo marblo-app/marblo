@@ -19,6 +19,15 @@ const nextConfig: NextConfig = {
         destination: "/:locale/founders/:path*",
         permanent: true,
       },
+      // The founder survey moved to /beta-survey. The old /founders/feedback
+      // route was a client-side JS redirect, which search engines crawl as a
+      // thin 200 page (soft-404 / "page with redirect" noise). Serve a real
+      // 308 at the routing layer instead so no crawlable page is emitted.
+      {
+        source: "/:locale/founders/feedback",
+        destination: "/:locale/beta-survey",
+        permanent: true,
+      },
     ];
   },
 };
