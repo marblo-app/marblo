@@ -74,6 +74,8 @@ export interface WatchdogTicket {
    * `dispatchMeta.complexity`. Restored on respawn so the claude `--model` tier
    * (sonnet/opus) / codex reasoning level matches the original. */
   complexity?: "simple" | "standard" | "complex";
+  /** Human-readable dispatch decision reason, persisted with dispatchMeta. */
+  dispatchReason?: string;
 }
 
 export type WatchdogAgentLiveStatus = "idle" | "working" | "error" | "stopped";

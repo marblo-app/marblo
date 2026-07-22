@@ -64,6 +64,8 @@ export interface AgentLaunchParams {
   complexity?: TaskComplexity;
   /** Board task currently bound to this agent, when launched by dispatch/spawn. */
   currentTaskId?: string | null;
+  /** Short dispatch decision reason retained for lifecycle telemetry joins. */
+  dispatchReason?: string | null;
   /** MARBLO_CONTEXT injected into this agent's MCP process, e.g. lane:<id>. */
   contextId?: string;
   /** claude 런타임 강등 재시작(§3.4-3)용 모델 override. 설정되면 complexity
@@ -83,6 +85,7 @@ export interface AgentInstance {
   command: string;
   cwd: string;
   currentTaskId: string | null;
+  dispatchReason: string | null;
   /**
    * The last task this agent was bound to, RETAINED after the binding is
    * released. Audit-only — never used to decide whether the agent is free.
@@ -166,6 +169,7 @@ export interface SerializableAgent {
   ptySessionId: string;
   status: AgentStatus;
   currentTaskId: string | null;
+  dispatchReason: string | null;
 }
 
 /** Map an AgentInstance to a plain, IPC-cloneable object. */
@@ -178,6 +182,7 @@ export function serializeAgent(agent: AgentInstance): SerializableAgent {
     ptySessionId: agent.ptySessionId,
     status: agent.status,
     currentTaskId: agent.currentTaskId,
+    dispatchReason: agent.dispatchReason,
   };
 }
 
@@ -846,6 +851,7 @@ export class AgentManager {
       cwd: params.cwd,
       currentTaskId: params.currentTaskId ?? null,
       lastTaskId: params.currentTaskId ?? null,
+      dispatchReason: params.dispatchReason ?? null,
       launchConfig,
       restartCount: 0,
       fastFailCount: 0,
@@ -1089,6 +1095,8 @@ export class AgentManager {
           agent.id,
           agent.restartCount,
           agent.currentTaskId,
+          agent.model,
+          agent.dispatchReason,
         );
         console.log(
           `[Agent:${agent.id}] Crash detected (exit ${exitCode}). Restart ${agent.restartCount}/${MAX_RESTARTS} in ${delay}ms`,
@@ -1120,6 +1128,8 @@ export class AgentManager {
           agent.id,
           exitCode,
           agent.currentTaskId,
+          agent.model,
+          agent.dispatchReason,
           errorCategory,
           errorMessage,
         );
@@ -1340,6 +1350,12 @@ export class AgentManager {
     if (taskId) agent.lastTaskId = taskId;
   }
 
+  setDispatchReason(agentId: string, dispatchReason: string | null): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    agent.dispatchReason = dispatchReason;
+  }
+
   /**
    * A new turn was submitted to this agent — clear the completed-turn marker so
    * the agent can be promoted to `working` again.
@@ -1406,6 +1422,7 @@ export class AgentManager {
       cwd: agent.cwd,
       currentTaskId: null,
       lastTaskId: null,
+      dispatchReason: null,
       restartCount: 0,
       fastFailCount: 0,
       spawnedAt: Date.now(),

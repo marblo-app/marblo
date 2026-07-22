@@ -88,6 +88,36 @@ describe("telemetryService external send", () => {
     expect(ev.appVersion).toBe("9.9.9");
   });
 
+  it("folds lifecycle outcome labels into metadata for BigQuery", async () => {
+    const { logTelemetry, telemetry } = await import(
+      "../../src/services/telemetryService"
+    );
+
+    logTelemetry({
+      event: "agent:went_stale",
+      taskId: "task-1",
+      agentId: "agent-1",
+      model: "antigravity",
+      role: "backend",
+      outcome: "stale",
+      dispatchReason: "Scored 3 model(s) -> antigravity. Spawned new agent.",
+    });
+    await telemetry.flush();
+
+    const sent = callableSpy.mock.calls[0][0] as {
+      events: Array<Record<string, unknown>>;
+    };
+    expect(sent.events[0]).toMatchObject({
+      taskId: "task-1",
+      model: "antigravity",
+      metadata: {
+        outcome: "stale",
+        dispatchReason:
+          "Scored 3 model(s) -> antigravity. Spawned new agent.",
+      },
+    });
+  });
+
   it("sends 0 external events after a runtime opt-out", async () => {
     const { telemetry, setTelemetryEnabled } =
       await import("../../src/services/telemetryService");

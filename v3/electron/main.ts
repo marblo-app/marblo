@@ -1585,7 +1585,12 @@ const agentWatchdog = new AgentWatchdog(
         // respawn restores the original cwd + model + complexity instead of
         // re-resolving them (fresh base worktree + claude→gpt re-selection).
         const meta = data.dispatchMeta as
-          | { cwd?: unknown; model?: unknown; complexity?: unknown }
+          | {
+              cwd?: unknown;
+              model?: unknown;
+              complexity?: unknown;
+              dispatchReason?: unknown;
+            }
           | undefined;
         const metaComplexity =
           meta?.complexity === "simple" ||
@@ -1608,6 +1613,10 @@ const agentWatchdog = new AgentWatchdog(
               ? meta.model
               : undefined,
           complexity: metaComplexity,
+          dispatchReason:
+            typeof meta?.dispatchReason === "string" && meta.dispatchReason
+              ? meta.dispatchReason
+              : undefined,
         });
       });
       return out;
@@ -1656,6 +1665,22 @@ const agentWatchdog = new AgentWatchdog(
       }
     },
     recordRecovery: (ticket, phase, detail) => {
+      if (phase === "respawn") {
+        mainTelemetry.agentWentStale(mainWindow, {
+          taskId: ticket.taskId,
+          agentId: ticket.agentId,
+          model: ticket.model ?? null,
+          role: ticket.role,
+          dispatchReason: ticket.dispatchReason ?? null,
+          errorCategory: "agent_stale",
+          errorMessage: detail,
+          metadata: {
+            phase,
+            status: ticket.status,
+            projectId: ticket.projectId,
+          },
+        });
+      }
       // Board-visible audit WITHOUT bumping projection.lastActivityAt (which
       // would mask the watchdog's own silence detection). Best-effort, fire
       // and forget — never blocks or breaks a sweep.
@@ -2162,6 +2187,7 @@ bridgeServer.setDispatchMetaHook((taskId, meta) => {
             cwd: meta.cwd,
             model: meta.model,
             complexity: meta.complexity ?? null,
+            dispatchReason: meta.dispatchReason ?? null,
             updatedAt: fbTimestamp.now(),
           },
         },

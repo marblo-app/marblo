@@ -60,6 +60,8 @@ export const mainTelemetry = {
     agentId: string,
     exitCode: number,
     taskId?: string | null,
+    model?: string | null,
+    dispatchReason?: string | null,
     errorCategory?: string,
     errorMessage?: string,
   ) {
@@ -67,6 +69,9 @@ export const mainTelemetry = {
       agentId,
       exitCode,
       taskId,
+      model,
+      dispatchReason,
+      outcome: "crashed",
       errorCategory,
       errorMessage,
     });
@@ -77,8 +82,53 @@ export const mainTelemetry = {
     agentId: string,
     attempt: number,
     taskId?: string | null,
+    model?: string | null,
+    dispatchReason?: string | null,
   ) {
-    sendTelemetry(win, "agent:restarted", { agentId, attempt, taskId });
+    sendTelemetry(win, "agent:restarted", {
+      agentId,
+      attempt,
+      taskId,
+      model,
+      dispatchReason,
+      outcome: "crashed",
+    });
+  },
+
+  agentSpawnFailed(
+    win: BrowserWindow | null,
+    payload: AgentLifecycleOutcomePayload,
+  ) {
+    sendTelemetry(win, "agent:spawn_failed", {
+      agentId: payload.agentId,
+      taskId: payload.taskId,
+      model: payload.model,
+      role: payload.role,
+      dispatchReason: payload.dispatchReason,
+      outcome: "spawn_failed",
+      success: false,
+      errorCategory: payload.errorCategory,
+      errorMessage: payload.errorMessage,
+      metadata: payload.metadata,
+    });
+  },
+
+  agentWentStale(
+    win: BrowserWindow | null,
+    payload: AgentLifecycleOutcomePayload,
+  ) {
+    sendTelemetry(win, "agent:went_stale", {
+      agentId: payload.agentId,
+      taskId: payload.taskId,
+      model: payload.model,
+      role: payload.role,
+      dispatchReason: payload.dispatchReason,
+      outcome: "stale",
+      success: false,
+      errorCategory: payload.errorCategory,
+      errorMessage: payload.errorMessage,
+      metadata: payload.metadata,
+    });
   },
 
   tokenUsage(
@@ -285,4 +335,15 @@ export interface DispatchDecisionPayload {
   explicitModel: boolean;
   /** reuse/restart 경로에서 선택된 기존 에이전트의 매칭 점수. */
   agentScore?: number;
+}
+
+export interface AgentLifecycleOutcomePayload {
+  taskId?: string | null;
+  agentId?: string | null;
+  model?: string | null;
+  role?: string | null;
+  dispatchReason?: string | null;
+  errorCategory?: string;
+  errorMessage?: string;
+  metadata?: Record<string, unknown>;
 }

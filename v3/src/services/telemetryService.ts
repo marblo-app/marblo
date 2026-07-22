@@ -6,9 +6,11 @@ import { recordTaskRetry } from "./taskRollups";
 
 export type TelemetryEvent =
   | "agent:spawned"
+  | "agent:spawn_failed"
   | "agent:stopped"
   | "agent:crashed"
   | "agent:restarted"
+  | "agent:went_stale"
   | "agent:heartbeat"
   | "task:created"
   | "task:status_changed"
@@ -110,6 +112,8 @@ interface TelemetryPayload {
   // never raw stderr/prompt text.
   errorCategory?: string;
   errorMessage?: string;
+  dispatchReason?: string;
+  outcome?: "completed" | "crashed" | "stale" | "spawn_failed" | "blocked";
 }
 
 /**
@@ -230,6 +234,15 @@ export function logTelemetry(payload: TelemetryPayload) {
   // De-identify before anything is queued or sent. Single guarantee point —
   // every telemetry path (convenience helpers + IPC bridge) flows through here.
   const clean = anonymize(payload);
+  if (clean.outcome !== undefined || clean.dispatchReason !== undefined) {
+    clean.metadata = {
+      ...(clean.metadata ?? {}),
+      ...(clean.outcome !== undefined ? { outcome: clean.outcome } : {}),
+      ...(clean.dispatchReason !== undefined
+        ? { dispatchReason: clean.dispatchReason }
+        : {}),
+    };
+  }
 
   // Attribute the restart to its task. This is the only place the signal is
   // observable in the renderer: the main process emits agent:restarted over
@@ -351,6 +364,8 @@ export const telemetry = {
     agentId: string,
     exitCode: number,
     taskId?: string,
+    model?: string,
+    dispatchReason?: string,
     errorCategory?: string,
     errorMessage?: string,
   ) {
@@ -358,8 +373,11 @@ export const telemetry = {
       event: "agent:crashed",
       agentId,
       taskId,
+      model,
       exitCode,
       success: false,
+      outcome: "crashed",
+      dispatchReason,
       // §5-4 갭 메우기: 크래시가 "왜" 났는지. main 프로세스가 이미 계산하는
       // coarse 분류(fast_fail_config = 바이너리 부재/설정 오류, runtime_crash =
       // 재시작 예산 소진)를 그대로 싣는다. 원인 상세 문자열은 짧게 유지하고
@@ -369,11 +387,20 @@ export const telemetry = {
     });
   },
 
-  agentRestarted(agentId: string, attempt: number, taskId?: string) {
+  agentRestarted(
+    agentId: string,
+    attempt: number,
+    taskId?: string,
+    model?: string,
+    dispatchReason?: string,
+  ) {
     logTelemetry({
       event: "agent:restarted",
       agentId,
       taskId,
+      model,
+      outcome: "crashed",
+      dispatchReason,
       metadata: { attempt },
     });
   },
@@ -405,6 +432,7 @@ export const telemetry = {
       fromStatus,
       toStatus,
       agentId,
+      ...(toStatus === "BLOCKED" ? { outcome: "blocked" as const } : {}),
     });
   },
 
@@ -415,6 +443,7 @@ export const telemetry = {
       durationMs,
       agentId,
       success: true,
+      outcome: "completed",
     });
   },
 

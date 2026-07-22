@@ -136,6 +136,8 @@ export interface SpawnAgentRequest {
   /** 작업 난이도 — claude(--model sonnet/opus)·codex(reasoning low/med/high) 모델/
    * 레벨 선택용. dispatch_task 가 전달. 미지정이면 기본 모델 유지. */
   complexity?: "simple" | "standard" | "complex";
+  /** Short routing decision reason retained for lifecycle outcome telemetry. */
+  dispatchReason?: string;
 }
 
 interface SpawnAgentResponse {
@@ -634,7 +636,12 @@ export class BridgeServer {
   private dispatchMetaHook:
     | ((
         taskId: string,
-        meta: { cwd: string; model: string; complexity?: string },
+        meta: {
+          cwd: string;
+          model: string;
+          complexity?: string;
+          dispatchReason?: string | null;
+        },
       ) => void)
     | null = null;
 
@@ -727,7 +734,12 @@ export class BridgeServer {
   setDispatchMetaHook(
     hook: (
       taskId: string,
-      meta: { cwd: string; model: string; complexity?: string },
+      meta: {
+        cwd: string;
+        model: string;
+        complexity?: string;
+        dispatchReason?: string | null;
+      },
     ) => void,
   ): void {
     this.dispatchMetaHook = hook;
@@ -1628,6 +1640,7 @@ export class BridgeServer {
         cwd: agent.cwd,
         model: agent.model,
         complexity,
+        dispatchReason: agent.dispatchReason,
       });
     } catch (err) {
       console.warn("[BridgeServer] persistDispatchMeta failed:", err);
@@ -1891,6 +1904,7 @@ export class BridgeServer {
         effectiveInstruction,
       );
       this.agentManager.setStatus(fullAgent.id, "working");
+      this.agentManager.setDispatchReason(fullAgent.id, candidate.reason);
       this.syncAgentStatus(fullAgent.id, "working", params.taskId);
 
       console.log(
@@ -1968,6 +1982,7 @@ export class BridgeServer {
       );
       if (restarted) {
         this.agentManager.setStatus(restarted.id, "working");
+        this.agentManager.setDispatchReason(restarted.id, best.reason);
         this.syncAgentStatus(restarted.id, "working", params.taskId);
 
         console.log(
@@ -2044,6 +2059,9 @@ export class BridgeServer {
     // spawnNewAgent appends the completion footer once, using the worktree
     // coordinator's resolved taskId (the caller's, or a freshly created ad-hoc
     // task). Passing the already-footered effectiveInstruction would double it.
+    const spawnDecisionReason = model
+      ? `Explicit model '${model}' requested — scoring bypassed. Spawned new ${selectedModel} agent.`
+      : `Scored ${eligibleModels.length} model(s) → ${selectedModel} (${modelSelection?.mode}). Spawned new agent.`;
     const spawnResult = await this.spawnNewAgent({
       name: agentName,
       model: selectedModel,
@@ -2058,9 +2076,25 @@ export class BridgeServer {
       system: params.system,
       // complexity → claude(--model)·codex(reasoning) 모델/레벨 선택.
       complexity,
+      dispatchReason: spawnDecisionReason,
     });
 
     if (!spawnResult.success) {
+      mainTelemetry.agentSpawnFailed(this.mainWindow, {
+        taskId: params.taskId ?? null,
+        agentId: spawnResult.agentId ?? null,
+        model: selectedModel,
+        role,
+        dispatchReason: spawnDecisionReason,
+        errorCategory: "spawn_failed",
+        errorMessage: spawnResult.error || "Failed to spawn agent",
+        metadata: {
+          complexity,
+          tags,
+          explicitModel: !!model,
+          eligibleModels: eligibleModels as string[],
+        },
+      });
       return {
         success: false,
         error: spawnResult.error || "Failed to spawn agent",
@@ -2092,9 +2126,7 @@ export class BridgeServer {
       selectedModel,
       perModelScores: modelSelection?.scores ?? [],
       modelSelectionMode: modelSelection?.mode,
-      decisionReason: model
-        ? `Explicit model '${model}' requested — scoring bypassed. Spawned new ${selectedModel} agent.`
-        : `Scored ${eligibleModels.length} model(s) → ${selectedModel} (${modelSelection?.mode}). Spawned new agent.`,
+      decisionReason: spawnDecisionReason,
       reuseVsSpawn: "spawn",
       explicitModel: !!model,
     });
@@ -2471,6 +2503,7 @@ export class BridgeServer {
       command: params.command || this.getDefaultCommand(params.model),
       cwd,
       currentTaskId: prep.taskId ?? params.taskId ?? null,
+      dispatchReason: params.dispatchReason ?? null,
       initialPrompt,
       projectId: params.projectId,
       complexity: params.complexity,
