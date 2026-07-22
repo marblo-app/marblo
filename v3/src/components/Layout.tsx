@@ -28,6 +28,7 @@ import { ActivityStreamPanel } from "./activity/ActivityStreamPanel";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
 import { CliSetupGate } from "./onboarding/CliSetupGate";
 import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
+import { FirstProjectSurvey } from "./onboarding/FirstProjectSurvey";
 import { UpdateBanner } from "./UpdateBanner";
 import { useProjectSetup } from "../hooks/useProjectSetup";
 import { useOrchestratorAutoLaunch } from "../hooks/useOrchestratorAutoLaunch";
@@ -475,6 +476,9 @@ export function Layout() {
           time when Claude auth is needed, or when a spawn is blocked. An
           already-set-up user never sees it. */}
       <CliSetupGate />
+
+      {/* First project completion micro-survey */}
+      <FirstProjectSurvey />
 
       {/* PIPA consent — auto-shows on first launch / policy version bump */}
       <PrivacyConsentGate />

@@ -45,7 +45,9 @@ export type TelemetryEvent =
   // 그 사이의 최대 사각인 "CLI 연결(설치·터미널 로그인·인증확인)" 구간을
   // 단계 해상도로 채운다. errorCategory 는 orchestrator_blocked 와 동일한
   // 어휘(cli_auth/launch_error)를 재사용해 두 신호가 조인 가능하게 유지한다.
-  | "onboarding:cli_setup_step";
+  | "onboarding:cli_setup_step"
+  | "onboarding:survey_cli_fail"
+  | "onboarding:survey_first_project";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -139,7 +141,7 @@ const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
 export function setTelemetryEnabled(
   enabled: boolean,
-  options: { persist?: boolean } = {},
+  options: { persist?: boolean } = {}
 ) {
   const next = firstPartyTelemetryDefaultEnabled() && enabled;
   telemetryEnabled = next;
@@ -312,7 +314,7 @@ export const telemetry = {
     name: string,
     model: string,
     role: string,
-    projectId?: string,
+    projectId?: string
   ) {
     logTelemetry({
       event: "agent:spawned",
@@ -338,7 +340,7 @@ export const telemetry = {
     exitCode: number,
     taskId?: string,
     errorCategory?: string,
-    errorMessage?: string,
+    errorMessage?: string
   ) {
     logTelemetry({
       event: "agent:crashed",
@@ -368,7 +370,7 @@ export const telemetry = {
     taskId: string,
     projectId: string,
     role: string,
-    priority?: number,
+    priority?: number
   ) {
     logTelemetry({
       event: "task:created",
@@ -383,7 +385,7 @@ export const telemetry = {
     taskId: string,
     fromStatus: string,
     toStatus: string,
-    agentId?: string,
+    agentId?: string
   ) {
     logTelemetry({
       event: "task:status_changed",
@@ -412,7 +414,7 @@ export const telemetry = {
     flowId: string,
     nodeType: string,
     durationMs: number,
-    success: boolean,
+    success: boolean
   ) {
     logTelemetry({
       event: "flow:node_executed",
@@ -427,7 +429,7 @@ export const telemetry = {
     flowId: string,
     status: string,
     durationMs: number,
-    nodeCount: number,
+    nodeCount: number
   ) {
     logTelemetry({
       event: "flow:completed",
@@ -445,7 +447,7 @@ export const telemetry = {
     tokensInput: number,
     tokensOutput: number,
     cost: number,
-    projectId?: string,
+    projectId?: string
   ) {
     logTelemetry({
       event: "token:usage",
@@ -569,13 +571,27 @@ export const telemetry = {
   cliSetupStep(
     step: "notice" | "connect" | "project",
     phase: "enter" | "success" | "fail",
-    reason?: string,
+    reason?: string
   ) {
     logTelemetry({
       event: "onboarding:cli_setup_step",
       success: phase !== "fail",
       metadata: { step, phase },
       ...(reason ? { errorCategory: reason } : {}),
+    });
+  },
+
+  surveyCliFail(reason: string) {
+    logTelemetry({
+      event: "onboarding:survey_cli_fail",
+      metadata: { reason },
+    });
+  },
+
+  surveyFirstProject(rating: number) {
+    logTelemetry({
+      event: "onboarding:survey_first_project",
+      metadata: { rating },
     });
   },
 

@@ -10,6 +10,7 @@ import {
   requiredInstalled as computeRequiredInstalled,
   resolveGateVisibility,
 } from "../../lib/cliSetupGate";
+import { CliFailSurvey } from "./CliFailSurvey";
 
 /**
  * First-run CLI setup gate.
@@ -110,17 +111,18 @@ function labelFor(model: Model): string {
   return model === "claude"
     ? "Claude Code"
     : model === "codex"
-      ? "Codex (GPT)"
-      : "Antigravity (agy)";
+    ? "Codex (GPT)"
+    : "Antigravity (agy)";
 }
 
 export function CliSetupGate() {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
+  const [showSurvey, setShowSurvey] = useState(false);
   const [states, setStates] = useState<Record<string, CliState>>({});
   const [installing, setInstalling] = useState<string | null>(null);
   const [installErrors, setInstallErrors] = useState<Record<string, string>>(
-    {},
+    {}
   );
   const [copied, setCopied] = useState<string | null>(null);
   const [ready, setReady] = useState(false); // required set (claude+codex) satisfied
@@ -129,7 +131,7 @@ export function CliSetupGate() {
   // when an installed CLI is behind so an outdated build isn't silently passed
   // through the auth-only gate. Never blocks readiness.
   const [versions, setVersions] = useState<Record<string, HarnessVersionInfo>>(
-    {},
+    {}
   );
   const autoRunRef = useRef(false); // one auto-install pass per mount
 
@@ -137,7 +139,7 @@ export function CliSetupGate() {
   const [step, setStep] = useState<WizardStep>("notice");
   const [seeding, setSeeding] = useState(false); // sample-PRD write in flight
   const [seedMsg, setSeedMsg] = useState<{ ok: boolean; text: string } | null>(
-    null,
+    null
   );
 
   // Orchestrator-first onboarding: before a project/folder is connected the gate
@@ -207,10 +209,10 @@ export function CliSetupGate() {
     await Promise.all(
       ROWS.map(async (r) => {
         results[r.id] = await probe(r.model, r.id);
-      }),
+      })
     );
     const requiredReady = ROWS.filter((r) => r.required).every(
-      (r) => results[r.id]?.installed && results[r.id]?.authenticated,
+      (r) => results[r.id]?.installed && results[r.id]?.authenticated
     );
     setReady(requiredReady);
     return { results, requiredReady };
@@ -241,7 +243,7 @@ export function CliSetupGate() {
         await probe(row.model, row.id);
       }
     },
-    [probe, t],
+    [probe, t]
   );
 
   // First-run: probe, then auto-install any missing REQUIRED CLI (once), then
@@ -271,7 +273,7 @@ export function CliSetupGate() {
       // now-optional Codex — so the fleet is ready without a click. Optional
       // rows install silently; only Claude (required) can gate visibility.
       const missing = ROWS.filter(
-        (r) => r.autoInstall && first.results[r.id]?.installed === false,
+        (r) => r.autoInstall && first.results[r.id]?.installed === false
       );
       if (!autoDone && missing.length > 0) {
         // Only surface install progress once a project is connected — before
@@ -291,7 +293,7 @@ export function CliSetupGate() {
         if (
           autoInstallComplete(
             missing.map((r) => r.id),
-            latest,
+            latest
           )
         ) {
           try {
@@ -362,16 +364,27 @@ export function CliSetupGate() {
   }, []);
 
   const dismiss = useCallback(() => {
+    // CLI-fail drop-off: dismissing the connect step before Claude is authed is
+    // the same "couldn't connect the CLI" failure orchestratorBlocked reports —
+    // log it with the same cli_auth vocabulary so both funnels line up, then
+    // surface the 5-second "무엇이 어려우셨나요?" survey once before closing.
+    // Any other dismiss (notice, or a connected/ready project step) just closes.
+    if (step === "connect" && !ready) {
+      telemetry.cliSetupStep("connect", "fail", "cli_auth");
+      let surveyDone = false;
+      try {
+        surveyDone = localStorage.getItem("marblo.survey.cli_fail") === "1";
+      } catch {}
+      if (!surveyDone) {
+        setShowSurvey(true);
+        return;
+      }
+    }
+
     try {
       localStorage.setItem(DISMISSED_KEY, "1");
     } catch {
       /* private mode — best effort */
-    }
-    // Drop-off signal: dismissing the connect step before Claude is authed is
-    // the same "couldn't connect the CLI" failure orchestratorBlocked reports —
-    // reuse its cli_auth label so both funnels line up.
-    if (step === "connect" && !ready) {
-      telemetry.cliSetupStep("connect", "fail", "cli_auth");
     }
     setVisible(false);
   }, [step, ready]);
@@ -416,7 +429,7 @@ export function CliSetupGate() {
         await window.electronAPI.fs.writeFile(
           root,
           "PRD.md",
-          t("onboarding.cliGate.prdContent"),
+          t("onboarding.cliGate.prdContent")
         );
       }
       const editor = useEditorStore.getState();
@@ -429,6 +442,16 @@ export function CliSetupGate() {
       setSeeding(false);
     }
   }, [t]);
+
+  const finishDismiss = useCallback(() => {
+    try {
+      localStorage.setItem(DISMISSED_KEY, "1");
+    } catch {
+      /* private mode — best effort */
+    }
+    setShowSurvey(false);
+    setVisible(false);
+  }, []);
 
   // One-click sign-in: spawn a real terminal tab, type the CLI's login command,
   // and hide the gate so the user can complete the interactive OAuth flow. The
@@ -533,6 +556,16 @@ export function CliSetupGate() {
 
   if (!visible) return null;
 
+  if (showSurvey) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
+        <div className="w-full max-w-md rounded-xl border border-[#313244] bg-[#1e1e2e] shadow-2xl">
+          <CliFailSurvey onComplete={finishDismiss} />
+        </div>
+      </div>
+    );
+  }
+
   const anyChecking = ROWS.some((r) => states[r.id]?.checking);
 
   const currentIndex = steps.indexOf(step);
@@ -540,14 +573,14 @@ export function CliSetupGate() {
     step === "notice"
       ? t("onboarding.cliGate.notice.title")
       : step === "project"
-        ? t("onboarding.cliGate.project.title")
-        : t("onboarding.cliGate.title");
+      ? t("onboarding.cliGate.project.title")
+      : t("onboarding.cliGate.title");
   const headerSubtitle =
     step === "notice"
       ? t("onboarding.cliGate.notice.body")
       : step === "project"
-        ? t("onboarding.cliGate.project.body")
-        : t("onboarding.cliGate.subtitle");
+      ? t("onboarding.cliGate.project.body")
+      : t("onboarding.cliGate.subtitle");
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
@@ -565,8 +598,8 @@ export function CliSetupGate() {
                       active
                         ? "bg-[#89b4fa] text-[#1e1e2e]"
                         : done
-                          ? "bg-[#a6e3a1] text-[#1e1e2e]"
-                          : "bg-[#313244] text-[#7f849c]"
+                        ? "bg-[#a6e3a1] text-[#1e1e2e]"
+                        : "bg-[#313244] text-[#7f849c]"
                     }`}
                   >
                     {done ? "✓" : i + 1}
@@ -694,8 +727,8 @@ export function CliSetupGate() {
                       {row.model === "claude"
                         ? t("onboarding.cliGate.claudeDesc")
                         : row.model === "codex"
-                          ? t("onboarding.cliGate.codexDesc")
-                          : t("onboarding.cliGate.agyDesc")}
+                        ? t("onboarding.cliGate.codexDesc")
+                        : t("onboarding.cliGate.agyDesc")}
                     </p>
                   </div>
                   <StatusBadge state={s} installing={isInstalling} t={t} />
