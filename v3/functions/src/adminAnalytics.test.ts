@@ -15,6 +15,17 @@ import {
   buildActivationHeadline,
   ONBOARDING_FUNNEL_STEPS,
   ONBOARDING_FAILURE_EVENTS,
+  safeRate,
+  computeNpsFromStars,
+  buildBetaExitGauges,
+  BETA_EXIT_TARGETS,
+  buildCliSetupSummary,
+  buildDemoFunnel,
+  buildConsentSummary,
+  buildReuseSummary,
+  buildSpawnHealth,
+  foldKeyCounts,
+  buildKpiCockpit,
 } from "./adminAnalytics";
 
 // ── parseIncludeAdmin ──────────────────────────────────────────────────────
@@ -53,7 +64,7 @@ test("metricCountExpr maps mode → SQL count expression", () => {
   assert.equal(metricCountExpr("clients"), "COUNT(DISTINCT userId)");
   assert.equal(
     metricCountExpr("clients", "sessionId"),
-    "COUNT(DISTINCT sessionId)"
+    "COUNT(DISTINCT sessionId)",
   );
 });
 
@@ -280,9 +291,356 @@ test("headline: absent row is all-zero, null rate; custom window respected", () 
 test("funnel: result carries headline built from same row", () => {
   const f = buildOnboardingFunnel(
     { d_activated_30m: 4, d_signup_base: 10 },
-    []
+    [],
   );
   assert.equal(f.headline.activatedClients, 4);
   assert.equal(f.headline.baseClients, 10);
   assert.equal(f.headline.rate, 0.4);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// KPI 코크핏 — 베타종료 게이지 · NPS · 신규 온보딩 이벤트 · 리텐션 · 스폰 헬스
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── safeRate ────────────────────────────────────────────────────────────────
+test("safeRate: divides, returns null on zero denominator (no 0% mislead)", () => {
+  assert.equal(safeRate(3, 12), 0.25);
+  assert.equal(safeRate("8", "10"), 0.8);
+  assert.equal(safeRate(5, 0), null);
+  assert.equal(safeRate(0, 0), null);
+  assert.equal(safeRate("junk", 10), 0); // 분자 junk → 0/10 = 0
+});
+
+// ── computeNpsFromStars ──────────────────────────────────────────────────────
+test("nps: 5=promoter, 4=passive, 1-3=detractor; nps=(pro-det)/total*100", () => {
+  // 5점×6, 4점×2, 3점×1, 1점×1 = total 10. pro=6 det=2 → nps=(6-2)/10*100=40.
+  const r = computeNpsFromStars([
+    { rating: 5, count: 6 },
+    { rating: 4, count: 2 },
+    { rating: 3, count: 1 },
+    { rating: 1, count: 1 },
+  ]);
+  assert.equal(r.total, 10);
+  assert.equal(r.promoters, 6);
+  assert.equal(r.passives, 2);
+  assert.equal(r.detractors, 2);
+  assert.equal(r.nps, 40);
+  assert.equal(r.avgRating, (5 * 6 + 4 * 2 + 3 * 1 + 1 * 1) / 10);
+  assert.equal(r.byStar["5"], 6);
+  assert.equal(r.byStar["2"], 0);
+});
+
+test("nps: no responses → nps/avg null, all star buckets 0", () => {
+  const r = computeNpsFromStars([]);
+  assert.equal(r.total, 0);
+  assert.equal(r.nps, null);
+  assert.equal(r.avgRating, null);
+  assert.equal(r.byStar["1"], 0);
+  assert.equal(r.byStar["5"], 0);
+});
+
+test("nps: out-of-range stars ignored, BQ int64-as-string coerced", () => {
+  const r = computeNpsFromStars([
+    { rating: 0, count: 5 }, // 무시
+    { rating: 6, count: 5 }, // 무시
+    { rating: "5", count: "3" }, // 문자열 좌표 → promoter 3
+    { rating: 2, count: -1 }, // count<=0 무시
+  ]);
+  assert.equal(r.total, 3);
+  assert.equal(r.promoters, 3);
+  assert.equal(r.nps, 100);
+});
+
+// ── buildBetaExitGauges ──────────────────────────────────────────────────────
+test("gauges: 6 gauges in flow order, targets from strategy memo", () => {
+  const nps = computeNpsFromStars([]);
+  const gauges = buildBetaExitGauges({}, nps);
+  assert.equal(gauges.length, 6);
+  assert.deepEqual(
+    gauges.map((g) => g.key),
+    [
+      "cli_auth_success",
+      "first_project_run",
+      "first_ticket_completed",
+      "retention_7d",
+      "satisfaction_nps",
+      "activation_30m",
+    ],
+  );
+  assert.equal(gauges[0].target, BETA_EXIT_TARGETS.cli_auth_success);
+  assert.equal(gauges[0].target, 0.8);
+  assert.equal(gauges[1].target, 0.6);
+  assert.equal(gauges[2].target, 0.5);
+  assert.equal(gauges[3].target, 0.3);
+  assert.equal(gauges[4].target, 40);
+  assert.equal(gauges[4].unit, "nps");
+});
+
+test("gauges: empty row → all rate gauges null (데이터 대기), not met", () => {
+  const gauges = buildBetaExitGauges({}, computeNpsFromStars([]));
+  for (const g of gauges) {
+    assert.equal(g.current, null);
+    assert.equal(g.met, false);
+  }
+});
+
+test("gauges: rate = numerator/denominator, met when >= target", () => {
+  const row = {
+    d_cli_connect_enter: 10,
+    d_cli_connect_success: 9, // 0.9 >= 0.8 → met
+    d_signup_base: 20,
+    d_cli_project_success: 10, // 0.5 < 0.6 → not met
+    d_task_completed: 12, // 0.6 >= 0.5 → met
+    d_retained_7d: 4, // 0.2 < 0.3 → not met
+    d_activated_30m: 8, // 0.4 >= 0.3 → met
+  };
+  const gauges = buildBetaExitGauges(row, computeNpsFromStars([]));
+  const byKey = Object.fromEntries(gauges.map((g) => [g.key, g]));
+  assert.equal(byKey.cli_auth_success.current, 0.9);
+  assert.equal(byKey.cli_auth_success.met, true);
+  assert.equal(byKey.cli_auth_success.numerator, 9);
+  assert.equal(byKey.cli_auth_success.denominator, 10);
+  assert.equal(byKey.first_project_run.current, 0.5);
+  assert.equal(byKey.first_project_run.met, false);
+  assert.equal(byKey.first_ticket_completed.current, 0.6);
+  assert.equal(byKey.first_ticket_completed.met, true);
+  assert.equal(byKey.retention_7d.met, false);
+  assert.equal(byKey.activation_30m.met, true);
+});
+
+test("gauges: nps gauge reads NpsResult, met at >= 40", () => {
+  const nps = computeNpsFromStars([
+    { rating: 5, count: 5 },
+    { rating: 1, count: 1 },
+  ]); // (5-1)/6*100 = 67
+  const gauges = buildBetaExitGauges({}, nps);
+  const npsGauge = gauges.find((g) => g.key === "satisfaction_nps");
+  assert.ok(npsGauge);
+  assert.equal(npsGauge?.current, 67);
+  assert.equal(npsGauge?.met, true);
+  assert.equal(npsGauge?.numerator, 6);
+});
+
+// ── buildCliSetupSummary ─────────────────────────────────────────────────────
+test("cliSetup: groups by step, aggregates enter/success/fail, successRate", () => {
+  const rows = [
+    { step: "connect", phase: "enter", clients: 10, events: 12 },
+    { step: "connect", phase: "success", clients: 7, events: 7 },
+    { step: "connect", phase: "fail", clients: 3, events: 5 },
+    { step: "project", phase: "enter", clients: 7, events: 7 },
+    { step: "project", phase: "success", clients: 6, events: 6 },
+    { step: "notice", phase: "enter", clients: 12, events: 12 },
+  ];
+  const out = buildCliSetupSummary(rows);
+  // 항상 3 스텝 고정 순서(notice, connect, project).
+  assert.deepEqual(
+    out.map((s) => s.step),
+    ["notice", "connect", "project"],
+  );
+  const connect = out.find((s) => s.step === "connect");
+  assert.equal(connect?.clients.enter, 10);
+  assert.equal(connect?.clients.success, 7);
+  assert.equal(connect?.clients.fail, 3);
+  assert.equal(connect?.events.fail, 5);
+  assert.equal(connect?.successRate, 0.7);
+  // notice 는 success 없음 → successRate null 아님? enter 12, success 0 → 0.
+  const notice = out.find((s) => s.step === "notice");
+  assert.equal(notice?.successRate, 0);
+});
+
+test("cliSetup: empty rows → 3 zeroed steps, null successRate (enter 0)", () => {
+  const out = buildCliSetupSummary([]);
+  assert.equal(out.length, 3);
+  for (const s of out) {
+    assert.equal(s.clients.enter, 0);
+    assert.equal(s.successRate, null);
+  }
+});
+
+test("cliSetup: unknown phase/step ignored (schema drift guard)", () => {
+  const out = buildCliSetupSummary([
+    { step: "connect", phase: "bogus", clients: 99, events: 99 },
+    { step: "", phase: "enter", clients: 99, events: 99 },
+  ]);
+  const connect = out.find((s) => s.step === "connect");
+  assert.equal(connect?.clients.enter, 0);
+});
+
+// ── buildDemoFunnel ──────────────────────────────────────────────────────────
+test("demo: completion & cta rates against started clients", () => {
+  const d = buildDemoFunnel({
+    startedClients: 20,
+    completedClients: 12,
+    ctaClients: 5,
+    startedEvents: 25,
+    completedEvents: 12,
+    ctaEvents: 5,
+  });
+  assert.equal(d.completionRate, 0.6);
+  assert.equal(d.ctaRate, 0.25);
+  assert.equal(d.startedEvents, 25);
+});
+
+test("demo: zero started → null rates", () => {
+  const d = buildDemoFunnel({
+    startedClients: 0,
+    completedClients: 0,
+    ctaClients: 0,
+    startedEvents: 0,
+    completedEvents: 0,
+    ctaEvents: 0,
+  });
+  assert.equal(d.completionRate, null);
+  assert.equal(d.ctaRate, null);
+});
+
+// ── buildConsentSummary ──────────────────────────────────────────────────────
+test("consent: grant rate = granted/shown; zero shown → null", () => {
+  assert.equal(
+    buildConsentSummary({
+      shownClients: 10,
+      grantedClients: 4,
+      shownEvents: 10,
+      grantedEvents: 4,
+    }).grantRate,
+    0.4,
+  );
+  assert.equal(
+    buildConsentSummary({
+      shownClients: 0,
+      grantedClients: 0,
+      shownEvents: 0,
+      grantedEvents: 0,
+    }).grantRate,
+    null,
+  );
+});
+
+// ── foldKeyCounts ────────────────────────────────────────────────────────────
+test("foldKeyCounts: sorts desc, null/empty key → (none)", () => {
+  const out = foldKeyCounts([
+    { key: "cli_missing", count: 2 },
+    { key: "cli_auth", count: 9 },
+    { key: null, count: 1 },
+  ]);
+  assert.deepEqual(out, [
+    { key: "cli_auth", count: 9 },
+    { key: "cli_missing", count: 2 },
+    { key: "(none)", count: 1 },
+  ]);
+});
+
+// ── buildReuseSummary ────────────────────────────────────────────────────────
+test("reuse: second-session rate & DAU/WAU stickiness", () => {
+  const r = buildReuseSummary({
+    weeklyActiveProjects: 8,
+    weeklyCompletedTasks: 42,
+    secondSessionClients: 6,
+    signupBase: 20,
+    avgDau: 4,
+    wau: 16,
+  });
+  assert.equal(r.weeklyActiveProjects, 8);
+  assert.equal(r.weeklyCompletedTasks, 42);
+  assert.equal(r.secondSessionRate, 0.3);
+  assert.equal(r.stickiness, 0.25);
+});
+
+test("reuse: zero base/wau → null rates (no divide-by-zero)", () => {
+  const r = buildReuseSummary({
+    weeklyActiveProjects: 0,
+    weeklyCompletedTasks: 0,
+    secondSessionClients: 0,
+    signupBase: 0,
+    avgDau: 0,
+    wau: 0,
+  });
+  assert.equal(r.secondSessionRate, null);
+  assert.equal(r.stickiness, null);
+});
+
+// ── buildSpawnHealth ─────────────────────────────────────────────────────────
+test("spawn: successRate = completed/(completed+crashed), restart excluded from base", () => {
+  const s = buildSpawnHealth({
+    spawned: 40,
+    crashed: 8,
+    restarted: 6,
+    completed: 32,
+  });
+  // 32/(32+8)=0.8
+  assert.equal(s.successRate, 0.8);
+  assert.equal(s.crashRate, 0.2); // 8/40
+  assert.equal(s.avgRestartPerSpawn, 6 / 40);
+});
+
+test("spawn: zero spawned/outcomes → null rates", () => {
+  const s = buildSpawnHealth({
+    spawned: 0,
+    crashed: 0,
+    restarted: 0,
+    completed: 0,
+  });
+  assert.equal(s.successRate, null);
+  assert.equal(s.crashRate, null);
+  assert.equal(s.avgRestartPerSpawn, null);
+});
+
+// ── buildKpiCockpit (전체 조립) ──────────────────────────────────────────────
+test("cockpit: assembles gauges, onboarding events, reuse, spawn health", () => {
+  const result = buildKpiCockpit({
+    gaugeRow: {
+      d_cli_connect_enter: 10,
+      d_cli_connect_success: 8,
+      d_signup_base: 20,
+      d_cli_project_success: 12,
+      d_task_completed: 10,
+      d_retained_7d: 6,
+      d_activated_30m: 6,
+    },
+    starRatingRows: [
+      { rating: 5, count: 4 },
+      { rating: 1, count: 1 },
+    ],
+    cliSetupRows: [
+      { step: "connect", phase: "enter", clients: 10, events: 10 },
+      { step: "connect", phase: "success", clients: 8, events: 8 },
+    ],
+    cliFailReasonRows: [{ key: "cli_auth", count: 3 }],
+    demo: {
+      startedClients: 10,
+      completedClients: 6,
+      ctaClients: 2,
+      startedEvents: 10,
+      completedEvents: 6,
+      ctaEvents: 2,
+    },
+    consent: {
+      shownClients: 10,
+      grantedClients: 5,
+      shownEvents: 10,
+      grantedEvents: 5,
+    },
+    reuse: {
+      weeklyActiveProjects: 3,
+      weeklyCompletedTasks: 20,
+      secondSessionClients: 5,
+      signupBase: 20,
+      avgDau: 3,
+      wau: 12,
+    },
+    spawn: { spawned: 30, crashed: 5, restarted: 3, completed: 25 },
+  });
+
+  assert.equal(result.betaExitGauges.length, 6);
+  assert.equal(result.onboardingEvents.cliSetup.length, 3);
+  assert.equal(result.onboardingEvents.survey.nps.total, 5);
+  assert.equal(
+    result.onboardingEvents.survey.cliFailReasons[0].key,
+    "cli_auth",
+  );
+  assert.equal(result.onboardingEvents.demo.completionRate, 0.6);
+  assert.equal(result.onboardingEvents.consent.grantRate, 0.5);
+  assert.equal(result.reuse.secondSessionRate, 0.25);
+  assert.equal(result.spawnHealth.successRate, 25 / 30);
+  assert.match(result.note, /3\.0\.19/);
 });

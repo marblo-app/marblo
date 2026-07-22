@@ -17,7 +17,10 @@ import {
   buildOnboardingFunnel,
   ONBOARDING_FUNNEL_STEPS,
   ONBOARDING_FAILURE_EVENTS,
+  buildKpiCockpit,
+  buildCliSetupSummary,
   type ReasonRow,
+  type CliSetupStepRow,
 } from "./adminAnalytics";
 import {
   verifyPaddleSignature,
@@ -6249,6 +6252,330 @@ export const getAdminOnboardingFunnel = functions.https.onCall(
 );
 
 /**
+ * getAdminKpiCockpit — 지표기반 베타종료 게이지 + 신규 온보딩 이벤트(설문·데모·
+ * 동의·CLI셋업) + 재사용/리텐션 + 스폰 헬스(🟡 BQ events).
+ *
+ * mDzHRyX4(온보딩 퍼널) 위에 확장한 별도 콜러블 — 기존 콜러블은 손대지 않아
+ * 하위호환을 유지한다. 순수 조립은 adminAnalytics.buildKpiCockpit 이 담당하고,
+ * 여기선 BQ 스칼라/분포만 뽑아 넘긴다.
+ *
+ * ★신규 온보딩 이벤트(onboarding:cli_setup_step·survey_first_project·survey_cli_fail·
+ * demo_started/completed/cta_click·marketing_consent_shown/granted)는 3.0.19 렌더러
+ * 빌드+실사용 전엔 값 0 — 쿼리는 미발화여도 안전하게 0/빈배열을 돌려준다(구조 먼저).
+ *
+ * 익명 clientId 공간 — PII/uid/clientId 미노출, 카운트/비율만. 운영자 제외는 상위
+ * 콜러블과 동일하게 includeAdmin(기본 false=제외) 토글을 따른다.
+ *
+ * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
+ */
+export const getAdminKpiCockpit = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const since = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+    const week = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)";
+    const includeAdmin = parseIncludeAdmin(data);
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const ex = includeAdmin
+      ? EMPTY_EXCLUSION
+      : adminClientExclusion(adminClientIds);
+    // events.timestamp 는 STRING 적재 → 비교 전 SAFE_CAST(위 콜러블과 동일 사유).
+    const eventTs = "SAFE_CAST(timestamp AS TIMESTAMP)";
+
+    // ── (1) 헤드라인: 가입(login_success) 후 30분내 첫 티켓 완료 활성화율 ──
+    // 게이지 분모(d_signup_base) + 분자(d_activated_30m). getAdminOnboardingFunnel
+    // 의 headlineQuery 와 동일 로직(단일 소스 오브 트루스는 순수 빌더 쪽 규약).
+    const headlineQuery = `
+      WITH signup AS (
+        SELECT userId, MIN(${eventTs}) AS signup_ts
+        FROM ${eventsTable}
+        WHERE event = 'auth:login_success'
+          AND ${eventTs} >= ${since}
+          AND userId IS NOT NULL${ex.clause}
+        GROUP BY userId
+      ),
+      firstTask AS (
+        SELECT userId, MIN(${eventTs}) AS task_ts
+        FROM ${eventsTable}
+        WHERE event = 'task:completed'
+          AND ${eventTs} >= ${since}
+          AND userId IS NOT NULL${ex.clause}
+        GROUP BY userId
+      )
+      SELECT
+        COUNT(DISTINCT s.userId) AS d_signup_base,
+        COUNT(DISTINCT IF(
+          t.task_ts IS NOT NULL
+          AND t.task_ts >= s.signup_ts
+          AND t.task_ts <= TIMESTAMP_ADD(s.signup_ts, INTERVAL 30 MINUTE),
+          s.userId, NULL)) AS d_activated_30m
+      FROM signup s
+      LEFT JOIN firstTask t ON t.userId = s.userId
+    `;
+
+    // ── (2) 7일 잔존: 첫 활동 후 7일내 2세션/2프로젝트 도달 고유 clientId ──
+    const retainedQuery = `
+      WITH win AS (
+        SELECT userId, ${eventTs} AS ts, sessionId, projectId
+        FROM ${eventsTable}
+        WHERE ${eventTs} >= ${since}
+          AND userId IS NOT NULL${ex.clause}
+      ),
+      firstSeen AS (
+        SELECT userId, MIN(ts) AS first_seen FROM win GROUP BY userId
+      )
+      SELECT COUNT(*) AS d_retained_7d
+      FROM (
+        SELECT w.userId
+        FROM win w
+        JOIN firstSeen f ON f.userId = w.userId
+        WHERE w.ts <= TIMESTAMP_ADD(f.first_seen, INTERVAL 7 DAY)
+        GROUP BY w.userId
+        HAVING COUNT(DISTINCT w.sessionId) >= 2
+            OR COUNT(DISTINCT w.projectId) >= 2
+      )
+    `;
+
+    // ── (3) 활동 스캔(단일): 첫티켓 완료 distinct + 스폰 헬스 카운트 ──
+    const activityQuery = `
+      SELECT
+        COUNT(DISTINCT IF(event = 'task:completed', userId, NULL))
+          AS d_task_completed,
+        COUNTIF(event = 'task:completed') AS n_task_completed,
+        COUNTIF(event = 'agent:spawned') AS n_spawned,
+        COUNTIF(event = 'agent:crashed') AS n_crashed,
+        COUNTIF(event = 'agent:restarted') AS n_restarted
+      FROM ${eventsTable}
+      WHERE ${eventTs} >= ${since}
+        AND event IN ('task:completed', 'agent:spawned',
+                      'agent:crashed', 'agent:restarted')${ex.clause}
+    `;
+
+    // ── (4) CLI 셋업 위저드 단계 분해(step×phase). metadata 는 JSON STRING ──
+    // 게이지의 CLI 인증 성공률·첫프로젝트 실행률도 이 분해에서 파생한다(별도 쿼리
+    // 안 돌리고 buildCliSetupSummary 결과에서 connect/project 단계 값을 뽑아 씀).
+    const cliSetupQuery = `
+      SELECT
+        JSON_VALUE(metadata, '$.step') AS step,
+        JSON_VALUE(metadata, '$.phase') AS phase,
+        COUNT(DISTINCT userId) AS clients,
+        COUNT(*) AS events
+      FROM ${eventsTable}
+      WHERE event = 'onboarding:cli_setup_step'
+        AND ${eventTs} >= ${since}${ex.clause}
+      GROUP BY step, phase
+    `;
+
+    // ── (5) 첫프로젝트 설문 별점 분포(survey_first_project.metadata.rating) ──
+    const starRatingQuery = `
+      SELECT
+        JSON_VALUE(metadata, '$.rating') AS rating,
+        COUNT(*) AS count
+      FROM ${eventsTable}
+      WHERE event = 'onboarding:survey_first_project'
+        AND ${eventTs} >= ${since}${ex.clause}
+      GROUP BY rating
+    `;
+
+    // ── (6) CLI 실패 마이크로설문 사유(survey_cli_fail.metadata.reason) ──
+    const cliFailQuery = `
+      SELECT
+        COALESCE(JSON_VALUE(metadata, '$.reason'), '(none)') AS key,
+        COUNT(*) AS count
+      FROM ${eventsTable}
+      WHERE event = 'onboarding:survey_cli_fail'
+        AND ${eventTs} >= ${since}${ex.clause}
+      GROUP BY key
+      ORDER BY count DESC
+    `;
+
+    // ── (7) 데모 퍼널 + 마케팅 동의(단일 스캔) ──
+    const demoConsentQuery = `
+      SELECT
+        COUNT(DISTINCT IF(event = 'onboarding:demo_started', userId, NULL))
+          AS demo_started_clients,
+        COUNTIF(event = 'onboarding:demo_started') AS demo_started_events,
+        COUNT(DISTINCT IF(event = 'onboarding:demo_completed', userId, NULL))
+          AS demo_completed_clients,
+        COUNTIF(event = 'onboarding:demo_completed') AS demo_completed_events,
+        COUNT(DISTINCT IF(event = 'onboarding:demo_cta_click', userId, NULL))
+          AS demo_cta_clients,
+        COUNTIF(event = 'onboarding:demo_cta_click') AS demo_cta_events,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:marketing_consent_shown', userId, NULL))
+          AS consent_shown_clients,
+        COUNTIF(event = 'onboarding:marketing_consent_shown')
+          AS consent_shown_events,
+        COUNT(DISTINCT IF(
+          event = 'onboarding:marketing_consent_granted', userId, NULL))
+          AS consent_granted_clients,
+        COUNTIF(event = 'onboarding:marketing_consent_granted')
+          AS consent_granted_events
+      FROM ${eventsTable}
+      WHERE ${eventTs} >= ${since}
+        AND event IN ('onboarding:demo_started', 'onboarding:demo_completed',
+                      'onboarding:demo_cta_click',
+                      'onboarding:marketing_consent_shown',
+                      'onboarding:marketing_consent_granted')${ex.clause}
+    `;
+
+    // ── (8) 재사용(주간): 활성 프로젝트·완료 티켓·WAU(최근 7일 창) ──
+    const weeklyQuery = `
+      SELECT
+        COUNT(DISTINCT projectId) AS weekly_active_projects,
+        COUNTIF(event = 'task:completed') AS weekly_completed_tasks,
+        COUNT(DISTINCT userId) AS wau
+      FROM ${eventsTable}
+      WHERE ${eventTs} >= ${week}${ex.clause}
+    `;
+
+    // ── (9) 2번째 세션/프로젝트 도달(윈도우 전체) + 평균 DAU ──
+    const secondSessionQuery = `
+      SELECT COUNT(*) AS d_second_session
+      FROM (
+        SELECT userId
+        FROM ${eventsTable}
+        WHERE ${eventTs} >= ${since}
+          AND userId IS NOT NULL${ex.clause}
+        GROUP BY userId
+        HAVING COUNT(DISTINCT sessionId) >= 2
+            OR COUNT(DISTINCT projectId) >= 2
+      )
+    `;
+    const avgDauQuery = `
+      SELECT AVG(dau) AS avg_dau
+      FROM (
+        SELECT FORMAT_DATE('%F', DATE(${eventTs})) AS d,
+               COUNT(DISTINCT userId) AS dau
+        FROM ${eventsTable}
+        WHERE ${eventTs} >= ${since}${ex.clause}
+        GROUP BY d
+      )
+    `;
+
+    // 대부분 쿼리는 @days(윈도우)+제외절 파라미터를 참조한다. 단 weeklyQuery 는
+    // 고정 7일 창(@days 미참조)이라, 미참조 파라미터를 넘기면 BQ 가 거부하므로
+    // (위 getAdminModelSummary 의 uid/client 분리와 동일 사유) 제외절 파라미터만
+    // 넘긴다.
+    const daysParams = { days: rangeDays, ...ex.params };
+    const q = (query: string) =>
+      bigquery.query({ query, params: daysParams, location: BQ_LOCATION });
+    const qNoDays = (query: string) =>
+      bigquery.query({ query, params: ex.params, location: BQ_LOCATION });
+
+    const [
+      [headRows],
+      [retainedRows],
+      [activityRows],
+      [cliSetupRows],
+      [starRows],
+      [cliFailRows],
+      [demoConsentRows],
+      [weeklyRows],
+      [secondSessionRows],
+      [avgDauRows],
+    ] = await Promise.all([
+      q(headlineQuery),
+      q(retainedQuery),
+      q(activityQuery),
+      q(cliSetupQuery),
+      q(starRatingQuery),
+      q(cliFailQuery),
+      q(demoConsentQuery),
+      qNoDays(weeklyQuery),
+      q(secondSessionQuery),
+      q(avgDauQuery),
+    ]);
+
+    const first = (rows: unknown): Record<string, unknown> =>
+      (rows as Array<Record<string, unknown>>)[0] ?? {};
+    const headRow = first(headRows);
+    const retainedRow = first(retainedRows);
+    const activityRow = first(activityRows);
+    const demoConsentRow = first(demoConsentRows);
+    const weeklyRow = first(weeklyRows);
+    const secondSessionRow = first(secondSessionRows);
+    const avgDauRow = first(avgDauRows);
+
+    // CLI 셋업 단계 요약 → 게이지의 CLI 인증/첫프로젝트 분자·분모 파생.
+    const cliRows = (cliSetupRows as Array<Record<string, unknown>>).map(
+      (r) => ({
+        step: r.step,
+        phase: r.phase,
+        clients: r.clients,
+        events: r.events,
+      }),
+    ) as CliSetupStepRow[];
+    const cliSummary = buildCliSetupSummary(cliRows);
+    const connect = cliSummary.find((s) => s.step === "connect");
+    const project = cliSummary.find((s) => s.step === "project");
+
+    // 게이지 분자/분모 스칼라 묶음(순수 빌더가 d_<col> 로 읽는다).
+    const gaugeRow: Record<string, unknown> = {
+      d_signup_base: headRow.d_signup_base,
+      d_activated_30m: headRow.d_activated_30m,
+      d_task_completed: activityRow.d_task_completed,
+      d_retained_7d: retainedRow.d_retained_7d,
+      d_cli_connect_enter: connect?.clients.enter ?? 0,
+      d_cli_connect_success: connect?.clients.success ?? 0,
+      d_cli_project_success: project?.clients.success ?? 0,
+    };
+
+    const cockpit = buildKpiCockpit({
+      gaugeRow,
+      starRatingRows: (starRows as Array<Record<string, unknown>>).map((r) => ({
+        rating: r.rating,
+        count: r.count,
+      })),
+      cliSetupRows: cliRows,
+      cliFailReasonRows: (cliFailRows as Array<Record<string, unknown>>).map(
+        (r) => ({ key: r.key, count: r.count }),
+      ),
+      demo: {
+        startedClients: demoConsentRow.demo_started_clients,
+        completedClients: demoConsentRow.demo_completed_clients,
+        ctaClients: demoConsentRow.demo_cta_clients,
+        startedEvents: demoConsentRow.demo_started_events,
+        completedEvents: demoConsentRow.demo_completed_events,
+        ctaEvents: demoConsentRow.demo_cta_events,
+      },
+      consent: {
+        shownClients: demoConsentRow.consent_shown_clients,
+        grantedClients: demoConsentRow.consent_granted_clients,
+        shownEvents: demoConsentRow.consent_shown_events,
+        grantedEvents: demoConsentRow.consent_granted_events,
+      },
+      reuse: {
+        weeklyActiveProjects: weeklyRow.weekly_active_projects,
+        weeklyCompletedTasks: weeklyRow.weekly_completed_tasks,
+        secondSessionClients: secondSessionRow.d_second_session,
+        signupBase: headRow.d_signup_base,
+        avgDau: avgDauRow.avg_dau,
+        wau: weeklyRow.wau,
+      },
+      spawn: {
+        spawned: activityRow.n_spawned,
+        crashed: activityRow.n_crashed,
+        restarted: activityRow.n_restarted,
+        completed: activityRow.n_task_completed,
+      },
+    });
+
+    return {
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      adminExcluded: {
+        applied: !includeAdmin,
+        uidFiltered: getAdminExclusionUid() != null,
+        clientIdCount: adminClientIds.length,
+      },
+      ...cockpit,
+    };
+  },
+);
+
+/**
  * getAdminModelSummary — 모델 선정/라우팅 지표(🟡 BQ).
  *
  * (1) cost_logs 모델별 비용(admin 버전 = getCostSummary 의 uid 필터 제거)
@@ -7965,7 +8292,9 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
       }
 
       if (req.method === "GET") {
-        const action = `?c=${encodeURIComponent(contactId)}&t=${encodeURIComponent(token)}`;
+        const action = `?c=${encodeURIComponent(
+          contactId,
+        )}&t=${encodeURIComponent(token)}`;
         res
           .status(200)
           .send(
@@ -8013,7 +8342,9 @@ export const unsubscribeMarketingEmail = functions.https.onRequest(
               channel: "email",
               source: "unsubscribe_link",
               actor: "unsubscribe_link",
-              detail: `method=${req.method} oneClick=${req.body?.["List-Unsubscribe"] === "One-Click"}`,
+              detail: `method=${req.method} oneClick=${
+                req.body?.["List-Unsubscribe"] === "One-Click"
+              }`,
               at: admin.firestore.FieldValue.serverTimestamp(),
             })
             .catch((err) =>

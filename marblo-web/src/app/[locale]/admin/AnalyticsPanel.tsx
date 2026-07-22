@@ -16,6 +16,8 @@ import {
   X,
   UserMinus,
   Hash,
+  Gauge,
+  Star,
 } from "lucide-react";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
@@ -71,6 +73,87 @@ type OnboardingFunnel = {
   steps: OnboardingFunnelStep[];
   failureBranches: OnboardingFailureBranch[];
   headline?: ActivationHeadline;
+  note: string;
+};
+
+// ── KPI 코크핏 (getAdminKpiCockpit) — 지표기반 베타종료 게이지 + 신규 온보딩 ──
+// 이벤트(설문·데모·동의·CLI셋업) + 재사용/리텐션 + 스폰 헬스. 서버 순수 빌더
+// (adminAnalytics.buildKpiCockpit)의 응답 shape 미러. ★신규 이벤트는 3.0.19 전 값 0.
+type BetaExitGauge = {
+  key: string;
+  label: string;
+  unit: "rate" | "nps"; // rate=0~1 비율, nps=-100~100 점수
+  current: number | null; // 분모/응답 0 이면 null ('데이터 대기')
+  target: number;
+  met: boolean;
+  numerator: number;
+  denominator: number;
+};
+type CliSetupPhaseCounts = { enter: number; success: number; fail: number };
+type CliSetupStepSummary = {
+  step: string;
+  label: string;
+  clients: CliSetupPhaseCounts;
+  events: CliSetupPhaseCounts;
+  successRate: number | null;
+};
+type NpsResult = {
+  total: number;
+  promoters: number;
+  passives: number;
+  detractors: number;
+  nps: number | null;
+  avgRating: number | null;
+  byStar: Record<string, number>;
+};
+type KpiCockpit = {
+  rangeDays: number;
+  generatedAt: string;
+  adminExcluded?: AdminExcludedTelemetry;
+  betaExitGauges: BetaExitGauge[];
+  onboardingEvents: {
+    cliSetup: CliSetupStepSummary[];
+    survey: {
+      nps: NpsResult;
+      cliFailReasons: KeyCount[];
+    };
+    demo: {
+      startedClients: number;
+      completedClients: number;
+      ctaClients: number;
+      startedEvents: number;
+      completedEvents: number;
+      ctaEvents: number;
+      completionRate: number | null;
+      ctaRate: number | null;
+    };
+    consent: {
+      shownClients: number;
+      grantedClients: number;
+      shownEvents: number;
+      grantedEvents: number;
+      grantRate: number | null;
+    };
+  };
+  reuse: {
+    weeklyActiveProjects: number;
+    weeklyCompletedTasks: number;
+    secondSessionClients: number;
+    signupBase: number;
+    secondSessionRate: number | null;
+    avgDau: number;
+    wau: number;
+    stickiness: number | null;
+  };
+  spawnHealth: {
+    spawned: number;
+    crashed: number;
+    restarted: number;
+    completed: number;
+    successRate: number | null;
+    crashRate: number | null;
+    avgRestartPerSpawn: number | null;
+  };
   note: string;
 };
 
@@ -1273,6 +1356,371 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
   );
 }
 
+// ── 베타종료 게이지 카드 ─────────────────────────────────────────────────────
+// 현재값 vs 목표를 선형 게이지로. 목표 마커(눈금)를 트랙 위에 표시하고, 달성 시
+// 초록·미달 주황·데이터공백(current=null) 회색으로 상태를 색+텍스트로 이중표기한다.
+// nps 단위는 -100~100 을 0~1 로 정규화해 같은 트랙에 그린다.
+function GaugeCard({ gauge }: { gauge: BetaExitGauge }) {
+  const isNps = gauge.unit === "nps";
+  // 정규화(0~1). rate 는 그대로, nps 는 (-100~100)→(0~1).
+  const norm = (v: number) => (isNps ? (v + 100) / 200 : v);
+  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+  const hasData = gauge.current != null;
+  const fill = hasData ? clamp01(norm(gauge.current as number)) : 0;
+  const targetPos = clamp01(norm(gauge.target));
+  const valueText = !hasData
+    ? "—"
+    : isNps
+    ? String(Math.round(gauge.current as number))
+    : fmtPct(gauge.current);
+  const targetText = isNps ? String(gauge.target) : fmtPct(gauge.target);
+  const color = !hasData ? INK_MUTED : gauge.met ? STATUS_GOOD : STATUS_WARN;
+  const statusText = !hasData ? "데이터 대기" : gauge.met ? "달성" : "미달";
+  const subText = isNps
+    ? `유효응답 ${fmtInt(gauge.numerator)}명`
+    : `${fmtInt(gauge.numerator)} / ${fmtInt(gauge.denominator)}명`;
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-medium text-zinc-400">{gauge.label}</p>
+        <span
+          className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
+          style={{ color, backgroundColor: `${color}1f` }}
+        >
+          {statusText}
+        </span>
+      </div>
+      <div className="mt-1 flex items-baseline gap-1.5">
+        <span
+          className="text-2xl font-bold tabular-nums"
+          style={{ color: hasData ? color : INK_MUTED }}
+        >
+          {valueText}
+        </span>
+        <span className="text-xs text-zinc-500">목표 {targetText}</span>
+      </div>
+      {/* 게이지 트랙 + 목표 마커 */}
+      <div className="relative mt-2 h-2.5 w-full overflow-hidden rounded bg-zinc-900">
+        <div
+          className="h-full rounded"
+          style={{ width: `${fill * 100}%`, backgroundColor: color }}
+        />
+        {/* 목표 눈금 — 트랙 위 세로선(오버플로 방지 위해 트랙 밖에 절대배치) */}
+      </div>
+      <div className="relative h-0">
+        <span
+          className="absolute top-[-14px] block h-3.5 w-0.5 bg-zinc-400"
+          style={{ left: `calc(${targetPos * 100}% - 1px)` }}
+          title={`목표 ${targetText}`}
+        />
+      </div>
+      <p className="mt-1.5 text-[11px] tabular-nums text-zinc-500">{subText}</p>
+    </div>
+  );
+}
+
+// CLI 셋업 위저드 단계별 성공/실패 미니 리스트.
+function CliSetupList({ steps }: { steps: CliSetupStepSummary[] }) {
+  const hasAny = steps.some(
+    (s) => s.clients.enter > 0 || s.clients.success > 0 || s.clients.fail > 0
+  );
+  if (!hasAny) {
+    return (
+      <EmptyState label="CLI 셋업 이벤트가 없습니다 (3.0.19 이후 발화)." />
+    );
+  }
+  return (
+    <ul className="space-y-2.5">
+      {steps.map((s) => {
+        const enter = Math.max(1, s.clients.enter);
+        const successPct = Math.round((s.clients.success / enter) * 100);
+        const failPct = Math.round((s.clients.fail / enter) * 100);
+        return (
+          <li key={s.step}>
+            <div className="mb-0.5 flex items-baseline justify-between gap-2">
+              <span className="text-xs text-zinc-300">{s.label}</span>
+              <span className="text-xs tabular-nums text-zinc-500">
+                진입 {fmtInt(s.clients.enter)} · 성공률{" "}
+                {s.successRate == null ? "—" : fmtPct(s.successRate)}
+              </span>
+            </div>
+            <div className="flex h-2.5 w-full overflow-hidden rounded bg-zinc-900">
+              <div
+                className="h-full"
+                style={{
+                  width: `${successPct}%`,
+                  backgroundColor: STATUS_GOOD,
+                }}
+                title={`성공 ${fmtInt(s.clients.success)}`}
+              />
+              <div
+                className="h-full"
+                style={{ width: `${failPct}%`, backgroundColor: STATUS_CRIT }}
+                title={`실패 ${fmtInt(s.clients.fail)}`}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// 첫프로젝트 설문 별점(1~5) 히스토그램 + NPS 요약.
+function SurveyStars({ nps }: { nps: NpsResult }) {
+  if (nps.total === 0) {
+    return (
+      <EmptyState label="첫프로젝트 설문 응답이 없습니다 (3.0.19 이후)." />
+    );
+  }
+  const stars = ["5", "4", "3", "2", "1"];
+  const max = Math.max(1, ...stars.map((s) => nps.byStar[s] ?? 0));
+  return (
+    <div className="space-y-3">
+      <div className="flex items-baseline gap-3">
+        <div>
+          <p className="text-2xl font-bold tabular-nums text-zinc-100">
+            {nps.avgRating == null ? "—" : nps.avgRating.toFixed(2)}
+          </p>
+          <p className="text-[11px] text-zinc-500">평균 별점 (1~5)</p>
+        </div>
+        <div>
+          <p
+            className="text-2xl font-bold tabular-nums"
+            style={{
+              color:
+                nps.nps == null
+                  ? INK_MUTED
+                  : nps.nps >= 40
+                  ? STATUS_GOOD
+                  : STATUS_WARN,
+            }}
+          >
+            {nps.nps == null ? "—" : nps.nps}
+          </p>
+          <p className="text-[11px] text-zinc-500">
+            NPS · 응답 {fmtInt(nps.total)}
+          </p>
+        </div>
+      </div>
+      <ul className="space-y-1.5">
+        {stars.map((s) => {
+          const count = nps.byStar[s] ?? 0;
+          const pct = Math.max((count / max) * 100, count > 0 ? 2 : 0);
+          return (
+            <li key={s} className="flex items-center gap-2">
+              <span className="flex w-8 shrink-0 items-center gap-0.5 text-[11px] tabular-nums text-zinc-400">
+                {s}
+                <Star className="h-3 w-3 fill-current text-amber-400" />
+              </span>
+              <div className="h-2 flex-1 overflow-hidden rounded bg-zinc-900">
+                <div
+                  className="h-full rounded"
+                  style={{ width: `${pct}%`, backgroundColor: SERIES }}
+                />
+              </div>
+              <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-zinc-500">
+                {fmtInt(count)}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// ── KPI 코크핏 뷰 (베타종료 게이지 + 온보딩 이벤트 + 재사용 + 스폰 헬스) ──────
+function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
+  const { onboardingEvents: onb, reuse, spawnHealth: spawn } = kpi;
+  const demo = onb.demo;
+  const consent = onb.consent;
+  return (
+    <div className="space-y-4">
+      {/* ★베타종료 게이지 6종 */}
+      <Panel
+        title="베타종료 게이지 (현재값 vs 목표)"
+        note="활성화 전략 메모의 지표기반 종료 기준. 분모 0 게이지는 '데이터 대기'."
+      >
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {kpi.betaExitGauges.map((g) => (
+            <GaugeCard key={g.key} gauge={g} />
+          ))}
+        </div>
+      </Panel>
+
+      {/* 재사용·리텐션 + 스폰 헬스 카드 */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="주간 활성 프로젝트"
+          value={fmtInt(reuse.weeklyActiveProjects)}
+          sub="최근 7일 distinct projectId"
+        />
+        <StatCard
+          label="주간 완료 티켓"
+          value={fmtInt(reuse.weeklyCompletedTasks)}
+          sub="최근 7일 task:completed"
+        />
+        <StatCard
+          label="2번째 세션 도달률"
+          value={
+            reuse.secondSessionRate == null
+              ? "—"
+              : fmtPct(reuse.secondSessionRate)
+          }
+          sub={`${fmtInt(reuse.secondSessionClients)} / ${fmtInt(
+            reuse.signupBase
+          )}명`}
+        />
+        <StatCard
+          label="DAU/WAU 끈적임"
+          value={reuse.stickiness == null ? "—" : fmtPct(reuse.stickiness)}
+          sub={`평균 DAU ${fmtInt(reuse.avgDau)} · WAU ${fmtInt(reuse.wau)}`}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="스폰 성공률"
+          value={spawn.successRate == null ? "—" : fmtPct(spawn.successRate)}
+          sub={`완료 ${fmtInt(spawn.completed)} vs 크래시 ${fmtInt(
+            spawn.crashed
+          )}`}
+          accent={
+            spawn.successRate == null
+              ? undefined
+              : spawn.successRate >= 0.7
+              ? STATUS_GOOD
+              : STATUS_WARN
+          }
+        />
+        <StatCard
+          label="크래시율"
+          value={spawn.crashRate == null ? "—" : fmtPct(spawn.crashRate)}
+          sub={`크래시 ${fmtInt(spawn.crashed)} / 스폰 ${fmtInt(
+            spawn.spawned
+          )}`}
+          accent={
+            spawn.crashRate != null && spawn.crashRate > 0
+              ? STATUS_CRIT
+              : undefined
+          }
+        />
+        <StatCard
+          label="평균 재시작/스폰"
+          value={
+            spawn.avgRestartPerSpawn == null
+              ? "—"
+              : spawn.avgRestartPerSpawn.toFixed(2)
+          }
+          sub={`재시작 ${fmtInt(spawn.restarted)}회`}
+        />
+        <StatCard
+          label="총 스폰"
+          value={fmtInt(spawn.spawned)}
+          sub={`agent:spawned / ${kpi.rangeDays}일`}
+        />
+      </div>
+
+      {/* 신규 온보딩 이벤트: CLI셋업 · 설문 · 데모 · 동의 */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel
+          title="CLI 셋업 위저드 단계"
+          note="notice → connect(인증) → project(폴더연결·오케실행) · 초록=성공·빨강=실패"
+        >
+          <CliSetupList steps={onb.cliSetup} />
+        </Panel>
+        <Panel
+          title="첫프로젝트 만족도 (별점·NPS)"
+          note="survey_first_project · 5=추천·4=중립·1~3=비추"
+        >
+          <SurveyStars nps={onb.survey.nps} />
+        </Panel>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Panel
+          title="샘플 데모 퍼널"
+          note="시작 → 완주 → 연결 CTA (인증 전 Demo Mode)"
+        >
+          <ul className="space-y-2.5">
+            {(
+              [
+                ["데모 시작", demo.startedClients, SERIES],
+                ["데모 완주", demo.completedClients, SERIES_2],
+                ["연결 CTA 클릭", demo.ctaClients, STATUS_GOOD],
+              ] as const
+            ).map(([label, value, color]) => {
+              const base = Math.max(1, demo.startedClients);
+              const pct = Math.max((value / base) * 100, value > 0 ? 2 : 0);
+              return (
+                <li key={label}>
+                  <div className="mb-0.5 flex items-baseline justify-between gap-2">
+                    <span className="text-xs text-zinc-300">{label}</span>
+                    <span className="text-xs tabular-nums text-zinc-400">
+                      {fmtInt(value)}명
+                    </span>
+                  </div>
+                  <div className="h-2.5 w-full overflow-hidden rounded bg-zinc-900">
+                    <div
+                      className="h-full rounded"
+                      style={{ width: `${pct}%`, backgroundColor: color }}
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-2 text-[11px] tabular-nums text-zinc-500">
+            완주율{" "}
+            {demo.completionRate == null ? "—" : fmtPct(demo.completionRate)} ·
+            CTA전환 {demo.ctaRate == null ? "—" : fmtPct(demo.ctaRate)}
+          </p>
+        </Panel>
+        <Panel
+          title="마케팅 수신 동의"
+          note="marketing_consent_shown → granted"
+        >
+          <div className="space-y-3">
+            <div className="flex items-baseline gap-3">
+              <div>
+                <p className="text-2xl font-bold tabular-nums text-zinc-100">
+                  {consent.grantRate == null ? "—" : fmtPct(consent.grantRate)}
+                </p>
+                <p className="text-[11px] text-zinc-500">동의율</p>
+              </div>
+              <p className="text-xs tabular-nums text-zinc-500">
+                {fmtInt(consent.grantedClients)} /{" "}
+                {fmtInt(consent.shownClients)}명
+              </p>
+            </div>
+          </div>
+        </Panel>
+        <Panel
+          title="CLI 실패 사유 (마이크로설문)"
+          note="survey_cli_fail · 5초 사유"
+        >
+          <BarList
+            data={onb.survey.cliFailReasons.map((r) => ({
+              key: r.key,
+              value: r.count,
+            }))}
+            color={STATUS_WARN}
+            showShare
+            emptyLabel="CLI 실패 설문 응답이 없습니다."
+          />
+        </Panel>
+      </div>
+
+      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>{kpi.note}</span>
+      </p>
+    </div>
+  );
+}
+
 export default function AnalyticsPanel() {
   const [days, setDays] = useState(30);
   // 운영자(존킴) 포함 토글. 기본 false = 제외(고객 지표). ON = 전체 포함.
@@ -1298,6 +1746,11 @@ export default function AnalyticsPanel() {
     error: null,
   });
   const [onbFunnel, setOnbFunnel] = useState<Loaded<OnboardingFunnel>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
+  const [kpi, setKpi] = useState<Loaded<KpiCockpit>>({
     data: null,
     loading: true,
     error: null,
@@ -1371,11 +1824,16 @@ export default function AnalyticsPanel() {
         { days: number; includeAdmin: boolean },
         OnboardingFunnel
       >(fns, "getAdminOnboardingFunnel");
+      const callKpi = httpsCallable<
+        { days: number; includeAdmin: boolean },
+        KpiCockpit
+      >(fns, "getAdminKpiCockpit");
 
       setBiz((s) => ({ ...s, loading: true, error: null }));
       setUsage((s) => ({ ...s, loading: true, error: null }));
       setModel((s) => ({ ...s, loading: true, error: null }));
       setOnbFunnel((s) => ({ ...s, loading: true, error: null }));
+      setKpi((s) => ({ ...s, loading: true, error: null }));
 
       // 각 콜러블 독립 처리 — 하나 실패해도 나머지는 렌더.
       callBiz({ days: d })
@@ -1418,6 +1876,15 @@ export default function AnalyticsPanel() {
             error: mapErr(e as CallableError),
           })
         );
+      callKpi({ days: d, includeAdmin: inc })
+        .then((r) => setKpi({ data: r.data, loading: false, error: null }))
+        .catch((e) =>
+          setKpi({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          })
+        );
     },
     []
   );
@@ -1430,7 +1897,11 @@ export default function AnalyticsPanel() {
   }, [days, includeAdmin, metricMode, load]);
 
   const anyLoading =
-    biz.loading || usage.loading || model.loading || onbFunnel.loading;
+    biz.loading ||
+    usage.loading ||
+    model.loading ||
+    onbFunnel.loading ||
+    kpi.loading;
 
   const b = biz.data;
   const u = usage.data;
@@ -1593,6 +2064,22 @@ export default function AnalyticsPanel() {
       </p>
 
       <AdminExclusionNote biz={b} usage={u} model={m} />
+
+      {/* ── ★KPI 코크핏: 베타종료 게이지·재사용·스폰·신규 온보딩 이벤트 (🟡) ── */}
+      <div className="space-y-4">
+        <SectionHeader
+          icon={Gauge}
+          title="지표기반 베타종료 · 활성화 코크핏"
+          trust="yellow"
+        />
+        {kpi.loading ? (
+          <LoadingBox />
+        ) : kpi.error ? (
+          <ErrorBox msg={kpi.error} />
+        ) : kpi.data ? (
+          <KpiCockpitView kpi={kpi.data} />
+        ) : null}
+      </div>
 
       {/* ── 사업 (🟢) ─────────────────────────────────────────────── */}
       <div className="space-y-4">
