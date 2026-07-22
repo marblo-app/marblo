@@ -39,7 +39,13 @@ export type TelemetryEvent =
   | "onboarding:folder_connected"
   | "onboarding:folder_connect_failed"
   | "onboarding:orchestrator_opened"
-  | "onboarding:orchestrator_blocked";
+  | "onboarding:orchestrator_blocked"
+  // 연결 마법사(CliSetupGate) 단계별 진입/성공/실패 (ticket CecrriY8). 위
+  // 퍼널이 "앱실행→로그인→폴더연결→오케오픈"의 큰 골격을 잡는다면, 이 이벤트는
+  // 그 사이의 최대 사각인 "CLI 연결(설치·터미널 로그인·인증확인)" 구간을
+  // 단계 해상도로 채운다. errorCategory 는 orchestrator_blocked 와 동일한
+  // 어휘(cli_auth/launch_error)를 재사용해 두 신호가 조인 가능하게 유지한다.
+  | "onboarding:cli_setup_step";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -551,6 +557,25 @@ export const telemetry = {
       event: "onboarding:orchestrator_blocked",
       success: false,
       errorCategory: reason,
+    });
+  },
+
+  /** 연결 마법사(CliSetupGate)의 한 단계 이벤트.
+   *  step = notice(고지) | connect(CLI 감지·설치·로그인·인증) | project(폴더연결·PRD·오케실행).
+   *  phase = enter(진입) | success(단계 완료) | fail(단계 실패).
+   *  reason = 실패 사유. connect 단계 실패는 orchestrator_blocked 와 같은
+   *  cli_auth 어휘를, project 단계 실패는 launch_error 를 재사용해 두 퍼널을
+   *  같은 축으로 조인할 수 있게 한다. 경로/자유텍스트는 절대 싣지 않는다. */
+  cliSetupStep(
+    step: "notice" | "connect" | "project",
+    phase: "enter" | "success" | "fail",
+    reason?: string,
+  ) {
+    logTelemetry({
+      event: "onboarding:cli_setup_step",
+      success: phase !== "fail",
+      metadata: { step, phase },
+      ...(reason ? { errorCategory: reason } : {}),
     });
   },
 

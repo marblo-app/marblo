@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useEditorStore } from "../../stores/editorStore";
+import telemetry from "../../services/telemetryService";
 import {
   autoInstallComplete,
   requiredInstalled as computeRequiredInstalled,
@@ -35,10 +38,32 @@ import {
  * manual re-check.
  *
  * An already-set-up user (claude installed & authed) never sees it.
+ *
+ * ── Ordered connection wizard (ticket CecrriY8) ──────────────────────────
+ * The single-panel gate is now presented as an ORDERED 3-step wizard while
+ * keeping every behavior above intact (probe, auto-install, dismissal,
+ * one-click sign-in, auto-recheck, `marblo:cli-auth-ready`, re-open listener):
+ *   1. notice  — cost/account-connect notice ("AI 사용료 미포함, 기존 Claude
+ *                Code·Codex 계정 연결"; the BYOK term is deliberately avoided).
+ *   2. connect — the CLI rows: detect → one-click install / copy command →
+ *                built-in terminal sign-in → auth confirmation.
+ *   3. project — connect a folder (→ orchestrator auto-launches) with an
+ *                optional sample PRD.md seeded + opened in the editor.
+ * Each step's enter/success/fail is instrumented via telemetry.cliSetupStep,
+ * reusing the same cli_auth / launch_error vocabulary as orchestratorBlocked
+ * so the two funnels join on one axis. Already-authed users still never see
+ * the wizard; a blocked-launch re-open (project already exists) starts at the
+ * connect step and skips the project step (auto-launch resumes on auth).
  */
 
 const DISMISSED_KEY = "marblo.cliSetupGateDismissed";
 const AUTO_INSTALL_KEY = "marblo.cliAutoInstallDone";
+// Sticky "the intro/cost notice has been shown once" flag. First run starts at
+// the notice step; later re-opens (e.g. a blocked orchestrator launch mid-
+// session) skip straight to the connect step so we don't re-lecture the user.
+const NOTICE_SEEN_KEY = "marblo.cliWizardNoticeSeen";
+
+type WizardStep = "notice" | "connect" | "project";
 
 type Model = "claude" | "codex" | "antigravity";
 
@@ -108,6 +133,13 @@ export function CliSetupGate() {
   );
   const autoRunRef = useRef(false); // one auto-install pass per mount
 
+  // ── Wizard step state (ticket CecrriY8) ─────────────────────────────────
+  const [step, setStep] = useState<WizardStep>("notice");
+  const [seeding, setSeeding] = useState(false); // sample-PRD write in flight
+  const [seedMsg, setSeedMsg] = useState<{ ok: boolean; text: string } | null>(
+    null,
+  );
+
   // Orchestrator-first onboarding: before a project/folder is connected the gate
   // must not block the empty board. We keep a live ref (the auto-install pass is
   // async and a folder may be connected mid-flight) so the blocking overlay is
@@ -126,6 +158,28 @@ export function CliSetupGate() {
         /* advisory only — ignore failures */
       });
   }, []);
+
+  // First run opens at the cost/notice step; a later re-open (blocked launch
+  // mid-session) skips to connect so we don't re-show the intro every time.
+  const initialStep = useCallback((): WizardStep => {
+    try {
+      return localStorage.getItem(NOTICE_SEEN_KEY) === "1"
+        ? "connect"
+        : "notice";
+    } catch {
+      return "notice";
+    }
+  }, []);
+
+  // Show the wizard at the right starting step and log that step's entry.
+  // Centralizes the "become visible" transition so every entry point (auto-run
+  // decision, re-open listener) lands on a consistent, instrumented step.
+  const openWizard = useCallback(() => {
+    const s = initialStep();
+    setStep(s);
+    setVisible(true);
+    telemetry.cliSetupStep(s, "enter");
+  }, [initialStep]);
 
   const probe = useCallback(async (model: Model, id: string) => {
     setStates((prev) => ({
@@ -222,7 +276,7 @@ export function CliSetupGate() {
       if (!autoDone && missing.length > 0) {
         // Only surface install progress once a project is connected — before
         // that, install silently so the empty board isn't blocked.
-        if (hasProjectRef.current) setVisible(true);
+        if (hasProjectRef.current) openWizard();
         for (const row of missing) {
           if (cancelled) return;
           await runInstall(row);
@@ -277,12 +331,12 @@ export function CliSetupGate() {
       // Orchestrator-first: never auto-block the empty board. With a project
       // connected, the orchestrator auto-launch fires `marblo:open-cli-setup`
       // when Claude auth is actually needed — that path always shows the gate.
-      if (decision.visible && hasProjectRef.current) setVisible(true);
+      if (decision.visible && hasProjectRef.current) openWizard();
     })();
     return () => {
       cancelled = true;
     };
-  }, [probeAll, runInstall, refreshVersions]);
+  }, [probeAll, runInstall, refreshVersions, openWizard]);
 
   // Re-open on demand — the spawn guard dispatches this when a launch is
   // blocked (orchestrator/agent), and agent-manager's login-screen backstop
@@ -291,11 +345,11 @@ export function CliSetupGate() {
     const onOpen = () => {
       void probeAll();
       refreshVersions();
-      setVisible(true);
+      openWizard();
     };
     window.addEventListener("marblo:open-cli-setup", onOpen);
     return () => window.removeEventListener("marblo:open-cli-setup", onOpen);
-  }, [probeAll, refreshVersions]);
+  }, [probeAll, refreshVersions, openWizard]);
 
   const handleCopy = useCallback(async (cmd: string) => {
     try {
@@ -313,8 +367,68 @@ export function CliSetupGate() {
     } catch {
       /* private mode — best effort */
     }
+    // Drop-off signal: dismissing the connect step before Claude is authed is
+    // the same "couldn't connect the CLI" failure orchestratorBlocked reports —
+    // reuse its cli_auth label so both funnels line up.
+    if (step === "connect" && !ready) {
+      telemetry.cliSetupStep("connect", "fail", "cli_auth");
+    }
     setVisible(false);
+  }, [step, ready]);
+
+  // notice → connect. Persist that the intro was seen so re-opens skip it.
+  const advanceFromNotice = useCallback(() => {
+    try {
+      localStorage.setItem(NOTICE_SEEN_KEY, "1");
+    } catch {
+      /* private mode — best effort; re-shows the notice next time, harmless */
+    }
+    telemetry.cliSetupStep("notice", "success");
+    setStep("connect");
+    telemetry.cliSetupStep("connect", "enter");
   }, []);
+
+  // project step: open the native folder picker. useProjectSetup's global
+  // `marblo:select-folder` listener auto-registers the folder as a project;
+  // useOrchestratorAutoLaunch then boots the orchestrator — this is the wizard's
+  // "첫 오케 실행" with no extra wiring here. We stay visible until the project
+  // connects (watched below), then auto-close.
+  const connectFolder = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("marblo:select-folder"));
+  }, []);
+
+  // project step: seed a starter PRD.md into the connected folder and open it,
+  // so a first-time user has something concrete to hand the orchestrator. Never
+  // clobbers an existing PRD.md — if one is already there we just open it.
+  const seedSamplePrd = useCallback(async () => {
+    const root = useProjectStore.getState().currentProject?.folderPath;
+    if (!root) return;
+    setSeeding(true);
+    setSeedMsg(null);
+    try {
+      let exists = true;
+      try {
+        await window.electronAPI.fs.readFile(root, "PRD.md");
+      } catch {
+        exists = false; // no PRD.md yet — safe to create
+      }
+      if (!exists) {
+        await window.electronAPI.fs.writeFile(
+          root,
+          "PRD.md",
+          t("onboarding.cliGate.prdContent"),
+        );
+      }
+      const editor = useEditorStore.getState();
+      editor.setRootPath(root);
+      await editor.openFile("PRD.md");
+      setSeedMsg({ ok: true, text: t("onboarding.cliGate.project.seeded") });
+    } catch {
+      setSeedMsg({ ok: false, text: t("onboarding.cliGate.project.seedFail") });
+    } finally {
+      setSeeding(false);
+    }
+  }, [t]);
 
   // One-click sign-in: spawn a real terminal tab, type the CLI's login command,
   // and hide the gate so the user can complete the interactive OAuth flow. The
@@ -371,37 +485,183 @@ export function CliSetupGate() {
   }, [loginRunning, probeAll]);
 
   // When the required set (Claude) transitions to ready — via one-click sign-in,
-  // manual Re-check, or auto-install completing — auto-dismiss the gate and emit
-  // `marblo:cli-auth-ready` so useOrchestratorAutoLaunch resumes the launch. This
-  // is the "authenticate → orchestrator opens automatically, no manual re-check"
-  // step of the orchestrator-first flow. Guarded on the false→true edge so it
-  // fires once and never on an already-ready mount's steady state.
+  // manual Re-check, or auto-install completing — emit `marblo:cli-auth-ready`
+  // so useOrchestratorAutoLaunch resumes the launch (unchanged contract). Then,
+  // in the wizard, advance to the project step when there is no project yet
+  // ("인증확인 → 샘플 프로젝트 열기"); if a project already exists (a blocked-
+  // launch re-open), close as before and let auto-launch take over. Guarded on
+  // the false→true edge so it fires once, never on an already-ready mount.
   const prevReadyRef = useRef(false);
   useEffect(() => {
     if (ready && !prevReadyRef.current) {
-      setVisible(false);
+      telemetry.cliSetupStep("connect", "success");
       window.dispatchEvent(new CustomEvent("marblo:cli-auth-ready"));
+      if (hasProjectRef.current) {
+        setVisible(false);
+      } else {
+        // First-run: guide the freshly-authed user into connecting a project.
+        // launchLogin may have hidden the gate to reveal the terminal — re-show
+        // it so the project step is actually visible.
+        setStep("project");
+        setVisible(true);
+        telemetry.cliSetupStep("project", "enter");
+      }
     }
     prevReadyRef.current = ready;
   }, [ready]);
+
+  // project step: once a folder connects, the orchestrator auto-launches
+  // (useOrchestratorAutoLaunch). Log success on the false→true edge of
+  // hasProject. We intentionally do NOT auto-close here — the connected view
+  // offers the optional "sample PRD" action and a Done button, so the user
+  // controls when to dismiss while the orchestrator boots underneath.
+  const prevHasProjectRef = useRef(hasProject);
+  useEffect(() => {
+    if (step === "project" && hasProject && !prevHasProjectRef.current) {
+      telemetry.cliSetupStep("project", "success");
+    }
+    prevHasProjectRef.current = hasProject;
+  }, [step, hasProject]);
+
+  // The header's visible steps: always notice + connect; add project for a
+  // first-run flow (no project yet) or while the project step is showing.
+  const steps = useMemo<WizardStep[]>(() => {
+    const base: WizardStep[] = ["notice", "connect"];
+    if (!hasProject || step === "project") base.push("project");
+    return base;
+  }, [hasProject, step]);
 
   if (!visible) return null;
 
   const anyChecking = ROWS.some((r) => states[r.id]?.checking);
 
+  const currentIndex = steps.indexOf(step);
+  const headerTitle =
+    step === "notice"
+      ? t("onboarding.cliGate.notice.title")
+      : step === "project"
+        ? t("onboarding.cliGate.project.title")
+        : t("onboarding.cliGate.title");
+  const headerSubtitle =
+    step === "notice"
+      ? t("onboarding.cliGate.notice.body")
+      : step === "project"
+        ? t("onboarding.cliGate.project.body")
+        : t("onboarding.cliGate.subtitle");
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-lg rounded-xl border border-[#313244] bg-[#1e1e2e] shadow-2xl">
         <div className="border-b border-[#313244] px-6 py-4">
+          {/* Step indicator — dots + labels for the ordered wizard. */}
+          <div className="mb-3 flex items-center gap-2">
+            {steps.map((sId, i) => {
+              const active = i === currentIndex;
+              const done = i < currentIndex;
+              return (
+                <div key={sId} className="flex items-center gap-2">
+                  <span
+                    className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${
+                      active
+                        ? "bg-[#89b4fa] text-[#1e1e2e]"
+                        : done
+                          ? "bg-[#a6e3a1] text-[#1e1e2e]"
+                          : "bg-[#313244] text-[#7f849c]"
+                    }`}
+                  >
+                    {done ? "✓" : i + 1}
+                  </span>
+                  <span
+                    className={`text-[11px] font-medium ${
+                      active ? "text-[#cdd6f4]" : "text-[#7f849c]"
+                    }`}
+                  >
+                    {t(`onboarding.cliGate.step.${sId}` as MessageKey)}
+                  </span>
+                  {i < steps.length - 1 && (
+                    <span className="mx-1 text-[#45475a]">›</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
           <h2 className="text-lg font-semibold text-[#cdd6f4]">
-            {t("onboarding.cliGate.title")}
+            {headerTitle}
           </h2>
-          <p className="mt-1 text-sm text-[#a6adc8]">
-            {t("onboarding.cliGate.subtitle")}
-          </p>
+          <p className="mt-1 text-sm text-[#a6adc8]">{headerSubtitle}</p>
         </div>
 
-        <div className="max-h-[60vh] space-y-3 overflow-auto px-6 py-4">
+        {/* ── Step 1: cost / account-connect notice ─────────────────────── */}
+        {step === "notice" && (
+          <div className="max-h-[60vh] overflow-auto px-6 py-5">
+            <ul className="space-y-2.5">
+              {[
+                t("onboarding.cliGate.notice.b1"),
+                t("onboarding.cliGate.notice.b2"),
+                t("onboarding.cliGate.notice.b3"),
+              ].map((line, i) => (
+                <li key={i} className="flex gap-2.5 text-sm text-[#cdd6f4]">
+                  <span className="mt-0.5 shrink-0 text-[#89b4fa]">•</span>
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* ── Step 3: connect a project + first orchestrator run ────────── */}
+        {step === "project" && (
+          <div className="max-h-[60vh] space-y-3 overflow-auto px-6 py-5">
+            {!hasProject ? (
+              <>
+                <button
+                  onClick={connectFolder}
+                  className="w-full rounded-md bg-[#89b4fa] px-3 py-2 text-sm font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
+                >
+                  {t("onboarding.cliGate.project.connectFolder")}
+                </button>
+                <p className="text-xs text-[#7f849c]">
+                  {t("onboarding.cliGate.project.hint")}
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 rounded-md border border-[#a6e3a1]/30 bg-[#a6e3a1]/10 px-3 py-2.5 text-sm text-[#a6e3a1]">
+                  <span>✓ {t("onboarding.cliGate.project.connected")}</span>
+                  <span className="text-[#a6adc8]">·</span>
+                  <span className="text-[#a6adc8]">
+                    {t("onboarding.cliGate.project.launching")}
+                  </span>
+                </div>
+                <button
+                  onClick={() => void seedSamplePrd()}
+                  disabled={seeding}
+                  className="w-full rounded-md border border-[#45475a] px-3 py-2 text-sm font-medium text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-60"
+                >
+                  {seeding
+                    ? t("onboarding.cliGate.project.seeding")
+                    : t("onboarding.cliGate.project.seedPrd")}
+                </button>
+                {seedMsg && (
+                  <p
+                    className={`text-xs ${
+                      seedMsg.ok ? "text-[#a6e3a1]" : "text-[#f38ba8]"
+                    }`}
+                  >
+                    {seedMsg.text}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── Step 2: detect / install / sign-in / auth confirmation ────── */}
+        <div
+          className={`max-h-[60vh] space-y-3 overflow-auto px-6 py-4 ${
+            step === "connect" ? "" : "hidden"
+          }`}
+        >
           {ROWS.map((row) => {
             const s = states[row.id];
             const cmd = s?.action ?? "";
@@ -533,33 +793,63 @@ export function CliSetupGate() {
           })}
         </div>
 
+        {/* ── Contextual footer per step ────────────────────────────────── */}
         <div className="flex items-center justify-between gap-3 border-t border-[#313244] px-6 py-4">
-          <button
-            onClick={() => {
-              void probeAll();
-              refreshVersions();
-            }}
-            disabled={anyChecking}
-            className="rounded-md border border-[#45475a] px-3 py-1.5 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-60"
-          >
-            {anyChecking
-              ? t("onboarding.cliGate.checking")
-              : t("onboarding.cliGate.recheck")}
-          </button>
+          {/* Left cluster: Re-check (connect step only), else a spacer. */}
+          {step === "connect" ? (
+            <button
+              onClick={() => {
+                void probeAll();
+                refreshVersions();
+              }}
+              disabled={anyChecking}
+              className="rounded-md border border-[#45475a] px-3 py-1.5 text-xs text-[#cdd6f4] transition-colors hover:bg-[#313244] disabled:opacity-60"
+            >
+              {anyChecking
+                ? t("onboarding.cliGate.checking")
+                : t("onboarding.cliGate.recheck")}
+            </button>
+          ) : (
+            <span />
+          )}
+
           <div className="flex items-center gap-2">
+            {/* Later / Done — dismiss. Labeled "Done" on a connected project. */}
             <button
               onClick={dismiss}
               className="rounded-md px-3 py-1.5 text-xs text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
             >
-              {t("onboarding.cliGate.skip")}
+              {step === "project" && hasProject
+                ? t("onboarding.cliGate.done")
+                : t("onboarding.cliGate.skip")}
             </button>
-            <button
-              onClick={dismiss}
-              disabled={!ready}
-              className="rounded-md bg-[#a6e3a1] px-4 py-1.5 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#94e2d5] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {t("onboarding.cliGate.continue")}
-            </button>
+
+            {/* Primary advance button — contextual per step. */}
+            {step === "notice" && (
+              <button
+                onClick={advanceFromNotice}
+                className="rounded-md bg-[#89b4fa] px-4 py-1.5 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
+              >
+                {t("onboarding.cliGate.notice.continue")}
+              </button>
+            )}
+            {step === "connect" && (
+              <button
+                onClick={() => {
+                  if (hasProject) dismiss();
+                  else {
+                    setStep("project");
+                    telemetry.cliSetupStep("project", "enter");
+                  }
+                }}
+                disabled={!ready}
+                className="rounded-md bg-[#a6e3a1] px-4 py-1.5 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#94e2d5] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {hasProject
+                  ? t("onboarding.cliGate.continue")
+                  : t("onboarding.cliGate.next")}
+              </button>
+            )}
           </div>
         </div>
       </div>

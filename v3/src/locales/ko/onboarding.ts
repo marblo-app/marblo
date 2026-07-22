@@ -313,6 +313,44 @@ export const onboarding = {
   "onboarding.cliGate.runLoginHint":
     "터미널에서 자동 실행 · 완료되면 자동 인식됩니다",
 
+  // — CliSetupGate 연결 마법사 스텝 (ticket CecrriY8) —
+  "onboarding.cliGate.step.notice": "안내",
+  "onboarding.cliGate.step.connect": "연결",
+  "onboarding.cliGate.step.project": "시작",
+  "onboarding.cliGate.stepOf": "{total}단계 중 {current}단계",
+  // 비용 고지 블록 — BYOK 용어를 쓰지 않고 "기존 계정 연결"로 설명한다.
+  "onboarding.cliGate.notice.title":
+    "설치 전에 — AI 사용료는 포함되지 않습니다",
+  "onboarding.cliGate.notice.body":
+    "마블로는 Claude Code·Codex 같은 AI CLI를 오케스트레이션합니다. AI 사용료는 마블로 요금에 포함되지 않으며, 이미 쓰고 계신 Claude Code·Codex 계정을 그대로 연결해 사용합니다. 마블로가 별도의 API 키를 요구하지 않습니다.",
+  "onboarding.cliGate.notice.b1":
+    "이미 구독 중인 Claude Code / Codex 계정을 연결합니다.",
+  "onboarding.cliGate.notice.b2":
+    "AI 토큰 사용료는 각 CLI 계정으로 청구됩니다 — 마블로 요금과 별개입니다.",
+  "onboarding.cliGate.notice.b3":
+    "필요한 CLI는 아래에서 자동으로 감지·설치하고, 로그인은 내장 터미널에서 한 번에 진행합니다.",
+  "onboarding.cliGate.notice.continue": "설치·연결 시작",
+  "onboarding.cliGate.back": "이전",
+  "onboarding.cliGate.next": "다음",
+  // 프로젝트/실행 스텝
+  "onboarding.cliGate.project.title": "프로젝트 연결 · 첫 실행",
+  "onboarding.cliGate.project.body":
+    "작업할 폴더를 연결하면 오케스트레이터가 자동으로 열립니다. 처음이라면 샘플 PRD로 시작해 첫 티켓을 만들어 보세요.",
+  "onboarding.cliGate.project.connectFolder": "폴더 연결하고 시작",
+  "onboarding.cliGate.project.seedPrd": "샘플 PRD 만들기",
+  "onboarding.cliGate.project.seeding": "생성 중…",
+  "onboarding.cliGate.project.seeded":
+    "PRD.md 를 만들었습니다 — 편집기에서 열렸습니다.",
+  "onboarding.cliGate.project.seedFail": "PRD 생성에 실패했습니다.",
+  "onboarding.cliGate.project.connected": "연결됨",
+  "onboarding.cliGate.project.launching": "오케스트레이터를 실행하는 중…",
+  "onboarding.cliGate.project.hint":
+    "폴더를 연결하면 이 마법사는 자동으로 닫히고 오케스트레이터가 첫 인사를 건넵니다.",
+  "onboarding.cliGate.done": "완료",
+  // 샘플 PRD 파일 내용(첫 티켓 유도용, 편집기에서 열림)
+  "onboarding.cliGate.prdContent":
+    "# 제품 요구사항(PRD)\n\n> 마블로 샘플 PRD 입니다. 아래를 여러분의 목표로 바꾼 뒤, 오케스트레이터에게 '이 PRD로 첫 티켓을 만들어줘'라고 말해 보세요.\n\n## 무엇을 만들까요?\n한 문장으로 목표를 적어 주세요. 예) 방문자가 이메일을 남길 수 있는 간단한 랜딩 페이지.\n\n## 왜 필요한가요?\n이 기능이 해결하는 문제를 적어 주세요.\n\n## 핵심 요구사항\n- [ ] 요구사항 1\n- [ ] 요구사항 2\n- [ ] 요구사항 3\n\n## 완료 기준\n- 무엇이 되면 '완료'인가요?\n",
+
   // — LoginPage (auth) —
   "onboarding.login.signupSubtitle": "새 계정을 만드세요",
   "onboarding.login.loginSubtitle": "계정에 로그인하세요",

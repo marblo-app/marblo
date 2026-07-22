@@ -318,6 +318,43 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.runLoginHint":
     "Runs in a terminal · detected automatically when done",
 
+  // — CliSetupGate connection wizard steps (ticket CecrriY8) —
+  "onboarding.cliGate.step.notice": "Notice",
+  "onboarding.cliGate.step.connect": "Connect",
+  "onboarding.cliGate.step.project": "Start",
+  "onboarding.cliGate.stepOf": "Step {current} of {total}",
+  // Cost notice block — describes "connect your existing account" without the BYOK term.
+  "onboarding.cliGate.notice.title":
+    "Before installing — AI usage is not included",
+  "onboarding.cliGate.notice.body":
+    "Marblo orchestrates AI CLIs like Claude Code and Codex. AI usage is not part of your Marblo plan — you connect the Claude Code and Codex accounts you already use. Marblo never asks you for a separate API key.",
+  "onboarding.cliGate.notice.b1":
+    "Connect the Claude Code / Codex accounts you already subscribe to.",
+  "onboarding.cliGate.notice.b2":
+    "AI token usage is billed to each CLI account — separate from your Marblo plan.",
+  "onboarding.cliGate.notice.b3":
+    "We auto-detect and install the CLIs you need below, and sign-in runs in a built-in terminal.",
+  "onboarding.cliGate.notice.continue": "Start install & connect",
+  "onboarding.cliGate.back": "Back",
+  "onboarding.cliGate.next": "Next",
+  // Project / launch step
+  "onboarding.cliGate.project.title": "Connect a project · first run",
+  "onboarding.cliGate.project.body":
+    "Connect a folder to work in and the orchestrator opens automatically. New here? Start with a sample PRD to create your first ticket.",
+  "onboarding.cliGate.project.connectFolder": "Connect a folder & start",
+  "onboarding.cliGate.project.seedPrd": "Create a sample PRD",
+  "onboarding.cliGate.project.seeding": "Creating…",
+  "onboarding.cliGate.project.seeded": "Created PRD.md — opened in the editor.",
+  "onboarding.cliGate.project.seedFail": "Failed to create the PRD.",
+  "onboarding.cliGate.project.connected": "Connected",
+  "onboarding.cliGate.project.launching": "Launching the orchestrator…",
+  "onboarding.cliGate.project.hint":
+    "Once a folder is connected this wizard closes automatically and the orchestrator says hello.",
+  "onboarding.cliGate.done": "Done",
+  // Sample PRD file contents (nudges the first ticket, opened in the editor)
+  "onboarding.cliGate.prdContent":
+    "# Product Requirements (PRD)\n\n> This is a Marblo sample PRD. Replace the sections below with your own goal, then tell the orchestrator: 'Create my first ticket from this PRD.'\n\n## What are we building?\nDescribe the goal in one sentence. e.g. A simple landing page where visitors can leave their email.\n\n## Why does it matter?\nDescribe the problem this solves.\n\n## Key requirements\n- [ ] Requirement 1\n- [ ] Requirement 2\n- [ ] Requirement 3\n\n## Definition of done\n- What makes this 'done'?\n",
+
   "onboarding.login.or": "or",
   "onboarding.login.email": "Email",
   "onboarding.login.password": "Password",
