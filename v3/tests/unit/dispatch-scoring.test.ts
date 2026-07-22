@@ -15,6 +15,7 @@ import {
   isWorktreeIsolated,
   checkPlanConcurrency,
   isCapExempt,
+  budgetBiasScore,
   getPlanAgentLimit,
   countActivePlanAgents,
   isLaneContextId,
@@ -636,6 +637,94 @@ describe("scoreAgents cost-efficiency integration", () => {
     const agents = [makeAgent({ model: "gpt", role: "frontend" })];
     const result = scoreAgents(agents, "backend");
     expect(result).toHaveLength(0);
+  });
+});
+
+// ── Real-time budget bias (Usage tab quota/headroom) ────────
+
+describe("budgetBiasScore", () => {
+  it("returns neutral bias when no usage information exists", () => {
+    expect(budgetBiasScore("claude").bias).toBe(0);
+    expect(budgetBiasScore("gemini", { claude: { usedPercent: 10 } }).bias).toBe(
+      0,
+    );
+  });
+
+  it("adds only a weak positive bias when plenty of quota remains", () => {
+    const result = budgetBiasScore("gpt", { gpt: { usedPercent: 20 } });
+    expect(result.bias).toBeGreaterThan(0);
+    expect(result.bias).toBeLessThanOrEqual(20);
+    expect(result.reason).toContain("budget +");
+  });
+
+  it("applies a strong negative bias near quota exhaustion", () => {
+    const result = budgetBiasScore("claude", {
+      claude: { usedPercent: 95 },
+    });
+    expect(result.bias).toBeLessThan(0);
+    expect(result.bias).toBeGreaterThanOrEqual(-20);
+    expect(result.reason).toContain("left");
+  });
+
+  it("returns null bias for exhausted quota so callers hard-gate the model", () => {
+    const result = budgetBiasScore("claude", {
+      claude: { usedPercent: 100 },
+    });
+    expect(result.bias).toBeNull();
+    expect(result.reason).toContain("exhausted");
+  });
+});
+
+describe("scoreAgents budget-bias integration", () => {
+  it("excludes a role-matched agent when its model quota is exhausted", () => {
+    const agents = [makeAgent({ model: "claude" })];
+    const result = scoreAgents(agents, "backend", undefined, [], {
+      claude: { usedPercent: 100 },
+    });
+    expect(result).toHaveLength(0);
+  });
+
+  it("records budget contribution in the agent decision reason", () => {
+    const result = scoreAgents(
+      [makeAgent({ model: "gpt" })],
+      "backend",
+      undefined,
+      [],
+      { gpt: { usedPercent: 30 } },
+    );
+    expect(result[0].reason).toContain("budget +");
+  });
+});
+
+describe("scoreModels budget-bias integration", () => {
+  it("uses budget bias only as a tie-breaker sized signal", () => {
+    const selection = scoreModelsDetailed(
+      ["claude", "gpt"],
+      ["architecture"],
+      "standard",
+      { claude: { usedPercent: 10 }, gpt: { usedPercent: 10 } },
+    );
+    expect(selection.selected).toBe("claude");
+    expect(selection.scores.find((s) => s.model === "claude")?.budgetBias).toBe(
+      6,
+    );
+  });
+
+  it("hard-gates exhausted models out of fresh-spawn scoring", () => {
+    const selection = scoreModelsDetailed(["claude", "gpt"], [], undefined, {
+      claude: { usedPercent: 100 },
+      gpt: { usedPercent: 20 },
+    });
+    expect(selection.scores.map((s) => s.model)).toEqual(["gpt"]);
+    expect(selection.selected).toBe("gpt");
+  });
+
+  it("reports all-budget-exhausted instead of falling back to an exhausted model", () => {
+    const selection = scoreModelsDetailed(["claude"], [], undefined, {
+      claude: { usedPercent: 100 },
+    });
+    expect(selection.mode).toBe("all-budget-exhausted");
+    expect(selection.scores).toHaveLength(0);
   });
 });
 

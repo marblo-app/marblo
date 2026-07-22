@@ -31,6 +31,19 @@ export interface ScoredAgent {
   reason: string;
 }
 
+export interface ModelBudgetInfo {
+  /** Account-global utilization percentage, 0-100. null/undefined = no data. */
+  usedPercent?: number | null;
+}
+
+export type ModelBudgetSnapshot = Partial<Record<ModelType, ModelBudgetInfo>>;
+
+export interface BudgetBiasResult {
+  /** null means the model is budget-exhausted and must be excluded. */
+  bias: number | null;
+  reason: string;
+}
+
 export function isLaneContextId(contextId: string | undefined): boolean {
   return contextId === "lane" || (!!contextId && contextId.startsWith("lane:"));
 }
@@ -164,6 +177,42 @@ const COST_EFFICIENCY_WEIGHT: Record<ModelType, number> = {
 // Smaller than the role/load components so cost alone never overrides
 // role mismatch (role is the gate per claim 9).
 const COST_EFFICIENCY_MAX = 15;
+
+const BUDGET_BIAS_MAX = 20;
+
+/**
+ * Real-time budget signal for dispatch scoring. This is intentionally separate
+ * from costEfficiencyScore(): cost-eff is static/unit-price prior, while this
+ * reads the current account quota headroom. Missing data is neutral.
+ */
+export function budgetBiasScore(
+  model: ModelType,
+  budgets?: ModelBudgetSnapshot,
+): BudgetBiasResult {
+  const used = budgets?.[model]?.usedPercent;
+  if (typeof used !== "number" || !Number.isFinite(used)) {
+    return { bias: 0, reason: "budget +0(no-data)" };
+  }
+
+  const clampedUsed = Math.min(100, Math.max(0, used));
+  const remaining = 100 - clampedUsed;
+  if (remaining <= 0) {
+    return { bias: null, reason: "budget exhausted" };
+  }
+
+  let bias: number;
+  if (remaining >= 50) bias = 6;
+  else if (remaining >= 25) bias = 2;
+  else if (remaining >= 10) bias = -8;
+  else bias = -16;
+
+  const safeBias = Math.max(-BUDGET_BIAS_MAX, Math.min(BUDGET_BIAS_MAX, bias));
+  const sign = safeBias >= 0 ? "+" : "";
+  return {
+    bias: safeBias,
+    reason: `budget ${sign}${safeBias}(${Math.round(remaining)}% left)`,
+  };
+}
 
 /**
  * Cost-efficiency score for the patent claim 9 비용효율지표.
@@ -454,6 +503,7 @@ export function scoreAgents(
   role: string,
   preferredModel?: ModelType,
   tags: string[] = [],
+  budgets?: ModelBudgetSnapshot,
 ): ScoredAgent[] {
   const results: ScoredAgent[] = [];
 
@@ -469,12 +519,16 @@ export function scoreAgents(
     // default 로 이미 유한값을 보장하지만 방어적으로 한 번 더 감싼다.
     const lIdx = finiteOr(loadBalanceIndex(agent), 0);
     const cIdx = finiteOr(costEfficiencyScore(agent.model, tags), 0);
+    const budget = budgetBiasScore(agent.model, budgets);
+    if (budget.bias === null) continue;
+    const bIdx = finiteOr(budget.bias, 0);
 
     // Core: w1·역할 + w2·부하균등 + w3·비용효율 (특허 [식 1])
     let score =
       WEIGHTS.role * rIdx +
       WEIGHTS.loadBalance * lIdx +
-      WEIGHTS.costEfficiency * cIdx;
+      WEIGHTS.costEfficiency * cIdx +
+      bIdx;
 
     const reasons: string[] = [
       `role=${role} (w1·${WEIGHTS.role}=${WEIGHTS.role * rIdx})`,
@@ -483,6 +537,7 @@ export function scoreAgents(
     if (cIdx > 0) {
       reasons.push(`cost-eff +${WEIGHTS.costEfficiency * cIdx}`);
     }
+    reasons.push(budget.reason);
 
     // Reuse bonus — 기존 에이전트 재활용은 PTY 부팅/컨텍스트 재구축 비용을
     // 회피하므로 새 spawn (MODEL_BASE_SCORE 45-50) 보다 거의 항상 우위에
@@ -585,6 +640,8 @@ export interface PerModelScore {
   tagPenalty: number;
   /** costEfficiencyScore(model, tags) — patent claim 9 비용효율지표. */
   costEff: number;
+  /** Real-time quota/headroom bias, same ±20 scale as KG graphBias. */
+  budgetBias: number;
   /** §C simple→antigravity soft bias (0 unless it applies to this model). */
   agyBias: number;
   /** Final weighted total used for ranking. */
@@ -594,6 +651,7 @@ export interface PerModelScore {
 /** How scoreModels picked the winner among the scored models. */
 export type ModelSelectionMode =
   | "empty" // no enabled models → fallback
+  | "all-budget-exhausted" // every candidate with budget data is exhausted
   | "top-score" // single clear winner
   | "round-robin-no-tags" // no differentiating signal → rotate for diversity
   | "tie-band-round-robin"; // near-tied top → rotate among contenders
@@ -618,6 +676,7 @@ export function scoreModelsDetailed(
   enabledModels: ModelType[],
   tags: string[],
   complexity?: "simple" | "standard" | "complex",
+  budgets?: ModelBudgetSnapshot,
 ): ModelSelection {
   const scored: PerModelScore[] = [];
   let hasTags = tags.length > 0;
@@ -655,10 +714,13 @@ export function scoreModelsDetailed(
     // expensive-model strengths don't apply. Same function as scoreAgents
     // for consistency between reuse and fresh-spawn paths.
     const costEff = costEfficiencyScore(model, tags);
+    const budget = budgetBiasScore(model, budgets);
+    if (budget.bias === null) continue;
     // §C: simple → antigravity 소프트 가점(0 이면 no-op).
     const thisAgyBias = model === "antigravity" ? agyBias : 0;
 
-    const rawTotal = base + tagBonus + tagPenalty + costEff + thisAgyBias;
+    const rawTotal =
+      base + tagBonus + tagPenalty + costEff + budget.bias + thisAgyBias;
     // 방어: 비유한 점수는 아래 정렬/타이밴드 비교(topScore - s.total)를
     // 오염시키므로 0 으로 대체. 정상 입력에선 항상 유한값이라 no-op 이다.
     scored.push({
@@ -667,16 +729,24 @@ export function scoreModelsDetailed(
       tagBonus,
       tagPenalty,
       costEff,
+      budgetBias: budget.bias,
       agyBias: thisAgyBias,
       total: finiteOr(rawTotal, 0),
     });
   }
 
   if (scored.length === 0) {
+    const anyBudgetData = enabledModels.some((m) => {
+      const used = budgets?.[m]?.usedPercent;
+      return typeof used === "number" && Number.isFinite(used);
+    });
     return {
       selected: enabledModels[0] || "claude",
       scores: [],
-      mode: "empty",
+      mode:
+        enabledModels.length > 0 && anyBudgetData
+          ? "all-budget-exhausted"
+          : "empty",
       contenders: [],
     };
   }
@@ -688,11 +758,13 @@ export function scoreModelsDetailed(
     .map((s) => s.model);
 
   // No tags at all → pure round-robin across enabled models for diversity.
-  if (!hasTags && enabledModels.length > 1) {
-    const idx = modelRoundRobin % enabledModels.length;
+  if (!hasTags && scored.length > 1) {
+    const scoredModels = new Set(scored.map((s) => s.model));
+    const roundRobinModels = enabledModels.filter((m) => scoredModels.has(m));
+    const idx = modelRoundRobin % roundRobinModels.length;
     modelRoundRobin++;
     return {
-      selected: enabledModels[idx],
+      selected: roundRobinModels[idx],
       scores: scored,
       mode: "round-robin-no-tags",
       contenders,
@@ -726,8 +798,9 @@ export function scoreModels(
   enabledModels: ModelType[],
   tags: string[],
   complexity?: "simple" | "standard" | "complex",
+  budgets?: ModelBudgetSnapshot,
 ): ModelType {
-  return scoreModelsDetailed(enabledModels, tags, complexity).selected;
+  return scoreModelsDetailed(enabledModels, tags, complexity, budgets).selected;
 }
 
 // ── Worktree isolation gate (dispatch reuse / restart) ──────

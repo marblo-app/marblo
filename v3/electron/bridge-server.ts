@@ -20,15 +20,40 @@ import {
   isWorktreeIsolated,
   checkPlanConcurrency,
   isAgentContextReusable,
+  budgetBiasScore,
   type AgentInfo,
   type ModelSelection,
+  type ModelBudgetSnapshot,
 } from "./dispatch-scoring";
 import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import { resolveTopClaudeModelDetailed } from "./agent-config";
 import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
+import type { RateLimitInfo } from "./session-parsers";
 import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
 import { issueFreshAgentCustomToken } from "./firebase-auth-sync";
 import type { WorktreeCoordinator } from "./worktree-coordinator";
+
+function rateLimitToBudgetInfo(
+  info: RateLimitInfo | null,
+): { usedPercent: number } | undefined {
+  if (!info) return undefined;
+  const readings = [info.primaryPercent, info.secondaryPercent].filter(
+    (p): p is number => typeof p === "number" && Number.isFinite(p),
+  );
+  if (readings.length === 0) return undefined;
+  return { usedPercent: Math.max(...readings) };
+}
+
+function accountRateLimitsToBudgetSnapshot(
+  rateLimits: AccountRateLimits,
+): ModelBudgetSnapshot {
+  const budgets: ModelBudgetSnapshot = {};
+  const claude = rateLimitToBudgetInfo(rateLimits.claude);
+  const gpt = rateLimitToBudgetInfo(rateLimits.gpt);
+  if (claude) budgets.claude = claude;
+  if (gpt) budgets.gpt = gpt;
+  return budgets;
+}
 
 /**
  * Append a completion-protocol footer to a dispatched instruction so the
@@ -1848,8 +1873,46 @@ export class BridgeServer {
       );
     }
 
+    // Select best model. Order:
+    //   1. enabledModels in the request body
+    //   2. per-project lookup (set by main when orchestrator launches)
+    //   3. global MARBLO_MODEL_PRESET as last-resort default
+    // The previous code read process.env.MARBLO_ENABLED_MODELS, which races
+    // across concurrent windows in multi-window mode.
+    const enabledModels =
+      params.enabledModels ||
+      (this.enabledModelsLookup(params.projectId ?? "") as
+        | ModelType[]
+        | undefined) ||
+      resolvePreset(process.env.MARBLO_MODEL_PRESET);
+    const budgetModels = new Set<ModelType>([
+      ...allAgents.map((agent) => agent.model),
+      ...(enabledModels as ModelType[]),
+      ...(model ? [model] : []),
+    ]);
+    let budgetSnapshot: ModelBudgetSnapshot = {};
+    if (budgetModels.has("claude") || budgetModels.has("gpt")) {
+      try {
+        budgetSnapshot = accountRateLimitsToBudgetSnapshot(
+          await getAccountRateLimits(),
+        );
+      } catch (err) {
+        console.warn(
+          `[BridgeServer] dispatch budget usage probe failed — neutral budgetBias fallback: ${String(
+            err,
+          )}`,
+        );
+      }
+    }
+
     // Step 1 & 2: Score existing agents
-    const scored = this.scoreAgents(allAgents, role, model, tags);
+    const scored = this.scoreAgents(
+      allAgents,
+      role,
+      model,
+      tags,
+      budgetSnapshot,
+    );
     // Explicit model request wins over reuse. When the user/orchestrator
     // names a model (normalized: "코덱스"/"codex" → "gpt"), only an agent of
     // that SAME model may be reused/restarted; otherwise we fall through to
@@ -2025,29 +2088,65 @@ export class BridgeServer {
     // orchestrator/internal/system whitelist. Per-agent FAST_FAIL/MAX_RESTARTS
     // (agent-manager) still backstop crash loops.
 
-    // Select best model. Order:
-    //   1. enabledModels in the request body
-    //   2. per-project lookup (set by main when orchestrator launches)
-    //   3. global MARBLO_MODEL_PRESET as last-resort default
-    // The previous code read process.env.MARBLO_ENABLED_MODELS, which races
-    // across concurrent windows in multi-window mode.
-    const enabledModels =
-      params.enabledModels ||
-      (this.enabledModelsLookup(params.projectId ?? "") as
-        | ModelType[]
-        | undefined) ||
-      resolvePreset(process.env.MARBLO_MODEL_PRESET);
     const eligibleModels = requiresTrackedModel
       ? trackedModelCandidates(enabledModels as ModelType[])
       : (enabledModels as ModelType[]);
+    if (model) {
+      const explicitBudget = budgetBiasScore(model, budgetSnapshot);
+      if (explicitBudget.bias === null) {
+        const reason = `Explicit model '${model}' is budget exhausted — dispatch blocked.`;
+        this.emitDispatchDecision({
+          taskId: params.taskId ?? null,
+          role,
+          complexity,
+          tags,
+          eligibleModels: eligibleModels as string[],
+          selectedModel: model,
+          perModelScores: [],
+          modelSelectionMode: "all-budget-exhausted",
+          decisionReason: reason,
+          reuseVsSpawn: "spawn",
+          explicitModel: true,
+        });
+        return { success: false, error: reason };
+      }
+    }
     // Score the eligible models ONCE (when no explicit model was named) so the
     // dispatch-decision telemetry can carry the per-model breakdown + how the
     // winner was picked. scoreModelsDetailed advances the round-robin counter
     // exactly once, identical to the old scoreModels() call — no double-rotate.
     const modelSelection: ModelSelection | null = model
       ? null
-      : scoreModelsDetailedFn(eligibleModels, tags, complexity);
+      : scoreModelsDetailedFn(
+          eligibleModels,
+          tags,
+          complexity,
+          budgetSnapshot,
+        );
+    if (modelSelection?.mode === "all-budget-exhausted") {
+      const reason = `All eligible models are budget exhausted — dispatch blocked.`;
+      this.emitDispatchDecision({
+        taskId: params.taskId ?? null,
+        role,
+        complexity,
+        tags,
+        eligibleModels: eligibleModels as string[],
+        selectedModel: modelSelection.selected,
+        perModelScores: [],
+        modelSelectionMode: modelSelection.mode,
+        decisionReason: reason,
+        reuseVsSpawn: "spawn",
+        explicitModel: false,
+      });
+      return { success: false, error: reason };
+    }
     const selectedModel = model || modelSelection!.selected;
+    const selectedBudgetReason = model
+      ? budgetBiasScore(selectedModel, budgetSnapshot).reason
+      : `budgetBias=${
+          modelSelection?.scores.find((s) => s.model === selectedModel)
+            ?.budgetBias ?? 0
+        }`;
     const agentName =
       params.nameHint ||
       `${role}-${selectedModel}-${Date.now().toString(36).slice(-4)}`;
@@ -2060,8 +2159,8 @@ export class BridgeServer {
     // coordinator's resolved taskId (the caller's, or a freshly created ad-hoc
     // task). Passing the already-footered effectiveInstruction would double it.
     const spawnDecisionReason = model
-      ? `Explicit model '${model}' requested — scoring bypassed. Spawned new ${selectedModel} agent.`
-      : `Scored ${eligibleModels.length} model(s) → ${selectedModel} (${modelSelection?.mode}). Spawned new agent.`;
+      ? `Explicit model '${model}' requested — scoring bypassed (${selectedBudgetReason}). Spawned new ${selectedModel} agent.`
+      : `Scored ${eligibleModels.length} model(s) → ${selectedModel} (${modelSelection?.mode}; ${selectedBudgetReason}). Spawned new agent.`;
     const spawnResult = await this.spawnNewAgent({
       name: agentName,
       model: selectedModel,
@@ -2333,6 +2432,7 @@ export class BridgeServer {
     role: string,
     preferredModel?: ModelType,
     tags: string[] = [],
+    budgets?: ModelBudgetSnapshot,
   ) {
     const infos: AgentInfo[] = agents.map((a) => ({
       id: a.id,
@@ -2342,7 +2442,7 @@ export class BridgeServer {
       status: a.status,
       restartCount: a.restartCount,
     }));
-    return scoreAgentsFn(infos, role, preferredModel, tags);
+    return scoreAgentsFn(infos, role, preferredModel, tags, budgets);
   }
 
   /**
