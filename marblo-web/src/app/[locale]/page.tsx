@@ -33,7 +33,7 @@ const HOME_FAQS: Record<
     {
       question: "마블로 가격은 얼마인가요?",
       answer:
-        "마블로 Free 플랜은 월 ₩0이고 Pro 플랜은 월 ₩19,000(약 $15)입니다. AI 사용료는 별도이며, 각 에이전트는 사용자 본인의 API 키 또는 구독으로 운영합니다.",
+        "마블로 Free 플랜은 월 ₩0이고 Pro 플랜은 월 ₩19,000(약 $15)입니다. AI 사용료는 별도이며, 각 에이전트는 사용자의 기존 Claude Code·Codex 등 AI 계정(또는 API 키)을 연결해 운영합니다.",
     },
     {
       question: "마블로는 맥과 윈도우에서 모두 작동하나요?",
@@ -41,9 +41,10 @@ const HOME_FAQS: Record<
         "네. 마블로는 macOS와 Windows용 데스크톱 앱으로 제공되며 다운로드 페이지에서 설치 파일을 받을 수 있습니다. 모든 실행이 로컬 머신에서 이루어져 코드가 외부 서버로 전송되지 않습니다.",
     },
     {
-      question: "마블로를 쓰려면 내 API 키나 구독이 필요한가요?",
+      question:
+        "마블로를 쓰려면 내 AI 계정(Claude Code·Codex 등)이 필요한가요?",
       answer:
-        "네. 마블로는 이종 AI 에이전트 오케스트레이터이므로 각 모델(Claude, GPT/Codex 등)은 사용자 본인의 API 키 또는 구독으로 실행됩니다. 마블로 구독료는 에이전트를 통합 지휘하는 오케스트레이션 비용이며 AI 사용료를 포함하지 않습니다.",
+        "네. 마블로는 이종 AI 에이전트 오케스트레이터이므로 각 모델(Claude, GPT/Codex 등)은 사용자의 기존 AI 계정(Claude Code·Codex 등 CLI 로그인, 또는 API 키)으로 실행됩니다. 설치 후 해당 CLI 설치·로그인·계정 연결이 필요합니다. 마블로 구독료는 에이전트를 통합 지휘하는 오케스트레이션 비용이며 AI 사용료를 포함하지 않습니다.",
     },
   ],
   en: [
@@ -60,7 +61,7 @@ const HOME_FAQS: Record<
     {
       question: "How much does Marblo cost?",
       answer:
-        "Marblo's Free plan is ₩0/month and the Pro plan is ₩19,000/month (about $15). AI usage is billed separately — each agent runs on your own API key or subscription.",
+        "Marblo's Free plan is ₩0/month and the Pro plan is ₩19,000/month (about $15). AI usage is billed separately — each agent runs on your own existing AI accounts (Claude Code, Codex, etc.) that you connect, or an API key.",
     },
     {
       question: "Does Marblo work on both Mac and Windows?",
@@ -68,9 +69,10 @@ const HOME_FAQS: Record<
         "Yes. Marblo ships as a desktop app for macOS and Windows, and you can get the installer from the download page. Everything runs locally on your machine, so your code is not sent to external servers.",
     },
     {
-      question: "Do I need my own API keys or subscriptions to use Marblo?",
+      question:
+        "Do I need my own AI accounts (Claude Code, Codex, etc.) to use Marblo?",
       answer:
-        "Yes. Because Marblo is a heterogeneous AI-agent orchestrator, each model (Claude, GPT/Codex, and others) runs on your own API key or subscription. The Marblo subscription is the cost of orchestrating those agents and does not include AI usage fees.",
+        "Yes. Because Marblo is a heterogeneous AI-agent orchestrator, each model (Claude, GPT/Codex, and others) runs on your own existing AI account (Claude Code / Codex CLI sign-in, or an API key). After installing Marblo you'll install those CLIs, sign in, and connect your accounts. The Marblo subscription is the cost of orchestrating those agents and does not include AI usage fees.",
     },
   ],
   ja: [
@@ -87,7 +89,7 @@ const HOME_FAQS: Record<
     {
       question: "Marbloの料金はいくらですか?",
       answer:
-        "MarbloのFreeプランは月額₩0、Proプランは月額₩19,000(約$15)です。AIの利用料金は別途で、各エージェントはユーザー自身のAPIキーまたはサブスクリプションで動作します。",
+        "MarbloのFreeプランは月額₩0、Proプランは月額₩19,000(約$15)です。AIの利用料金は別途で、各エージェントはユーザーが連携する既存のAIアカウント（Claude Code・Codexなど）またはAPIキーで動作します。",
     },
     {
       question: "MarbloはMacとWindowsの両方で動作しますか?",
@@ -96,9 +98,9 @@ const HOME_FAQS: Record<
     },
     {
       question:
-        "Marbloを使うには自分のAPIキーやサブスクリプションが必要ですか?",
+        "Marbloを使うには自分のAIアカウント（Claude Code・Codexなど）が必要ですか?",
       answer:
-        "はい。Marbloは異種AIエージェントのオーケストレーターであるため、各モデル(Claude、GPT/Codexなど)はユーザー自身のAPIキーまたはサブスクリプションで実行されます。Marbloのサブスクリプション料金はエージェントを統合指揮するオーケストレーション費用であり、AI利用料は含みません。",
+        "はい。Marbloは異種AIエージェントのオーケストレーターであるため、各モデル(Claude、GPT/Codexなど)はユーザー自身の既存AIアカウント（Claude Code・Codex CLIログイン、またはAPIキー）で実行されます。インストール後、これらのCLIのインストール・ログイン・アカウント連携が必要です。Marbloのサブスクリプション料金はエージェントを統合指揮するオーケストレーション費用であり、AI利用料は含みません。",
     },
   ],
 };
@@ -204,6 +206,13 @@ export default function HomePage() {
               {t("hero.cta_pricing")}
             </Link>
           </div>
+
+          {/* Honest prerequisite — AI usage not included, CLI login/account
+              connection required after install. Shown up front so users
+              aren't surprised post-install. */}
+          <p className="mt-5 text-sm text-zinc-500 max-w-2xl mx-auto leading-relaxed">
+            {t("hero.prereqNote")}
+          </p>
 
           {/* App Screenshot Mockup */}
           <HeroScreenshot />

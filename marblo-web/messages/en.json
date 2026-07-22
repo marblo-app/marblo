@@ -16,11 +16,12 @@
   },
   "hero": {
     "title": "One developer.\nAn entire team's output.",
-    "subtitle": "Claude, GPT/Codex, and Antigravity agents code simultaneously.\nYou direct. They execute.",
+    "subtitle": "Orchestrate multiple AI agents — Claude, GPT/Codex, Antigravity — across your project.\nYou direct. They execute.",
     "cta_download": "Download",
     "cta_pricing": "View Pricing",
     "badge": "Marblo · AI Agent Orchestration Platform",
-    "clickToEnlarge": "Click to enlarge"
+    "clickToEnlarge": "Click to enlarge",
+    "prereqNote": "AI usage is billed separately · After install, you'll install and sign in to your existing AI CLIs (Claude Code, Codex, etc.) and connect your accounts."
   },
   "featureVideo": {
     "badge": "Feature video",
@@ -50,7 +51,7 @@
     },
     "kanban": {
       "title": "Kanban Board + Agent Integration",
-      "description": "Create tasks and agents automatically pick them up, coding in their own terminals. Todo → In Progress → Done — agents handle the flow.",
+      "description": "Create tasks and agents automatically pick them up, coding in their own terminals. Todo → In Progress → Done — track every stage on the board.",
       "highlight": "Project management meets AI",
       "detail": "Marblo's kanban board manages agent work through a 5-stage state machine: TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE.\n\nWhen you create a task, it's automatically assigned to the right agent based on role (backend/frontend/test/DevOps). Each agent codes independently in its own terminal, with progress reflected on the kanban board in real-time.\n\nSet up task dependencies (depends_on) to automatically queue tasks until prerequisites are completed."
     },
@@ -74,9 +75,9 @@
     },
     "privacy": {
       "title": "Local Execution — Your Data Stays on Your Machine",
-      "description": "Your code never leaves your machine. The Electron app runs locally — you only configure your own API keys. Meets enterprise security requirements.",
+      "description": "Your code never leaves your machine. The Electron app runs locally — you connect your own existing AI accounts (Claude Code, Codex, etc.). Meets enterprise security requirements.",
       "highlight": "Zero code leakage risk",
-      "detail": "Marblo is an Electron-based desktop app where all code and data is processed exclusively on your local machine.\n\nYour code is never sent to Marblo servers. AI API calls go directly to each model provider (Anthropic, OpenAI, Google) using API keys you configure.\n\nSafe for enterprise environments, with on-premise deployment options for enhanced security. Audit logs and SSO authentication are available on the Enterprise plan."
+      "detail": "Marblo is an Electron-based desktop app where all code and data is processed exclusively on your local machine.\n\nYour code is never sent to Marblo servers. AI calls go directly to each model provider (Anthropic, OpenAI, Google) using the existing AI accounts you connect (Claude Code / Codex CLI sign-in, or an API key).\n\nSafe for enterprise environments, with on-premise deployment options for enhanced security. Audit logs and SSO authentication are available on the Enterprise plan."
     },
     "deep": {
       "kanban": {
@@ -199,7 +200,7 @@
       "features": [
         "Unlimited Projects",
         "Orchestrator · Flow Editor",
-        "Unlimited Agents (BYOK — you pay API costs)",
+        "Unlimited Agents (connect your own Claude Code / Codex accounts — you pay AI usage)",
         "Mission pipelines (coming soon)",
         "All Free features included"
       ]
@@ -249,6 +250,7 @@
       ]
     },
     "annual_discount": "2 months free with annual billing",
+    "byokNotice": "AI usage not included — each agent runs on your own existing AI accounts (Claude Code, Codex, etc.) that you connect. The Marblo fee covers orchestration only.",
     "autoRenew": {
       "monthly": "Monthly subscription · renews by automatic monthly payment",
       "annual": "Annual subscription · renews automatically every year"
@@ -276,11 +278,11 @@
         },
         {
           "q": "How much is Pro and what is different?",
-          "a": "The Pro plan is ₩19,000/month (about $15). It includes unlimited projects, unlimited agents (fair use · BYOK), and the orchestrator, plus everything in Free. Priority support is available from Team Plus and up."
+          "a": "The Pro plan is ₩19,000/month (about $15). It includes unlimited projects, unlimited agents (fair use · connect your own AI accounts), and the orchestrator, plus everything in Free. Priority support is available from Team Plus and up."
         },
         {
           "q": "Are there separate AI usage fees?",
-          "a": "Yes. Each agent runs on your own API key or subscription (Claude→Anthropic, GPT/Codex→OpenAI, etc.). The Marblo fee is the orchestration cost of directing those agents and does not include AI usage fees."
+          "a": "Yes. Each agent runs on your own existing AI account (Claude Code / Codex, etc.) or API key (Claude→Anthropic, GPT/Codex→OpenAI, etc.). After installing, you sign in to those CLIs and connect your accounts. The Marblo fee is the orchestration cost of directing those agents and does not include AI usage fees."
         },
         {
           "q": "Is there an annual discount?",
@@ -296,6 +298,8 @@
   "download": {
     "title": "Marblo Desktop (Beta)",
     "subtitle": "The macOS Universal build (Intel + Apple Silicon) is available to download now.\nWindows is coming soon.",
+    "prereq_title": "What you'll need after installing",
+    "prereq_body": "Marblo orchestrates AI agents. After installing, you'll install the AI CLIs (Claude Code, Codex, etc.), sign in, and connect your existing accounts so the agents can run. AI usage is billed to each account separately and is not included in the Marblo fee.",
     "badge": "Beta",
     "notify_title": "Get notified when Windows ships",
     "notify_subtitle": "Sign up and we'll notify you the moment the Windows build is ready.",

@@ -50,8 +50,13 @@ export default function PricingPage() {
       <div className="max-w-7xl mx-auto">
         <h1 className="text-4xl font-bold text-center">{t("title")}</h1>
         <p className="text-zinc-400 text-center mt-3 mb-4">{t("subtitle")}</p>
-        <p className="text-center text-sm text-indigo-400 mb-8">
+        <p className="text-center text-sm text-indigo-400 mb-4">
           {t("annual_discount")}
+        </p>
+        {/* Honest BYOK reframe — AI usage not included; agents run on the
+            user's own existing Claude Code/Codex accounts they connect. */}
+        <p className="mx-auto mb-8 max-w-2xl text-center text-sm text-zinc-400 leading-relaxed">
+          {t("byokNotice")}
         </p>
         <PricingSection />
 

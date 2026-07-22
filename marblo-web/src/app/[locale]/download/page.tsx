@@ -17,6 +17,7 @@ import {
   Loader2,
   Lock,
   Bug,
+  Info,
 } from "lucide-react";
 
 // 버전 고정 다운로드 링크 — 새 빌드 릴리스 시 이 값만 갱신.
@@ -137,6 +138,25 @@ export default function DownloadPage() {
         <h1 className="text-4xl md:text-5xl font-bold mt-6 whitespace-pre-line">
           {t("title")}
         </h1>
+
+        {/* Honest prerequisite — shown before download so users know they must
+            install/sign in to AI CLIs and connect existing accounts, and that
+            AI usage is billed separately. Visible in every non-loading state. */}
+        {state !== "loading" && (
+          <div className="mt-8 mx-auto max-w-xl text-left p-5 rounded-2xl border border-zinc-800 bg-zinc-900/40">
+            <div className="flex items-start gap-3">
+              <Info className="w-5 h-5 text-indigo-300 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-zinc-100">
+                  {t("prereq_title")}
+                </p>
+                <p className="mt-1.5 text-sm text-zinc-400 leading-relaxed">
+                  {t("prereq_body")}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {state === "loading" && (
           <div className="mt-12 flex justify-center">
