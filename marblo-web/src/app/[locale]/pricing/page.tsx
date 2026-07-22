@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import { useTranslations, useLocale } from "next-intl";
 import { getTranslations } from "next-intl/server";
 import PricingSection from "@/components/PricingSection";
-import { buildFAQPageSchema, buildProductOffersSchema } from "@/lib/schema";
+import {
+  buildFAQPageSchema,
+  buildSoftwareApplicationSchema,
+} from "@/lib/schema";
 
 // Locale-aware metadata. The title segment reuses the existing nav label
 // (가격 / Pricing / 料金) so Korean/Japanese search sees a localized <title>
@@ -35,7 +38,12 @@ export default function PricingPage() {
   const faqSchema = buildFAQPageSchema(
     faqItems.map((it) => ({ question: it.q, answer: it.a }))
   );
-  const productSchema = buildProductOffersSchema(locale);
+  // Emit the SoftwareApplication node (not a Product) so the pricing page's
+  // plan Offers attach to the correct entity type for a SaaS desktop app. A
+  // Product node here tripped Google's Merchant listing checks (shipping /
+  // return policy / brand type / review) — SoftwareApplication carries the same
+  // Free/Pro Offers without inviting those e-commerce requirements.
+  const productSchema = buildSoftwareApplicationSchema(locale);
 
   return (
     <div className="py-24 px-4">

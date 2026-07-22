@@ -228,38 +228,12 @@ export function buildBlogListSchema(opts: {
 }
 
 /**
- * Product node with the live pricing tiers as Offers, for the /pricing page.
- * Kept distinct from the SoftwareApplication node (APP_ID) so the pricing page
- * can expose plan Offers without redefining the app entity. Brand references
- * the Organization by `@id`. Prices are the real KRW values (Free ₩0, Pro
- * ₩19,000).
+ * The /pricing page intentionally has no dedicated Product node. Marblo is a
+ * SaaS desktop app, so its plan Offers attach to the {@link
+ * buildSoftwareApplicationSchema} node (`SoftwareApplication`, APP_ID) — the
+ * type Google expects for software. A prior `Product` node here tripped
+ * Merchant listing warnings (shipping details, return policy, brand type,
+ * aggregateRating/review) that only make sense for physical/retail goods; those
+ * fields cannot be filled with real data for a downloadable app, so the node
+ * was removed rather than padded with fabricated e-commerce metadata.
  */
-export function buildProductOffersSchema(locale: string) {
-  return {
-    "@context": "https://schema.org",
-    "@type": "Product",
-    "@id": `${SITE_URL}/#product`,
-    name: "Marblo",
-    description: pick(locale, APP_DESCRIPTION),
-    brand: { "@id": ORG_ID },
-    url: `${SITE_URL}/${locale}/pricing`,
-    offers: [
-      {
-        "@type": "Offer",
-        name: "Free",
-        price: "0",
-        priceCurrency: "KRW",
-        url: `${SITE_URL}/${locale}/pricing`,
-        availability: "https://schema.org/InStock",
-      },
-      {
-        "@type": "Offer",
-        name: "Pro",
-        price: "19000",
-        priceCurrency: "KRW",
-        url: `${SITE_URL}/${locale}/pricing`,
-        availability: "https://schema.org/InStock",
-      },
-    ],
-  };
-}
