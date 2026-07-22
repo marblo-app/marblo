@@ -1,0 +1,76 @@
+name: Merge History Capture
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  record:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect merged PR stats
+        id: collect
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const branch = pr.head.ref;
+            const match = branch.match(/^marblo\/[^/\s]+-([A-Za-z0-9]{8})$/);
+
+            if (!match) {
+              core.notice(`Skipping merge history capture: branch '${branch}' does not include a Marblo task prefix.`);
+              core.setOutput('skip', 'true');
+              return;
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const payload = {
+              prNumber: pr.number,
+              taskId: match[1],
+              taskId8: match[1],
+              mergedAt: pr.merged_at,
+              branch,
+              baseRef: pr.base.ref,
+              headSha: pr.merge_commit_sha || pr.head.sha,
+              owner: context.repo.owner,
+              repository: context.repo.repo,
+              filesChanged: files.length,
+              linesAdded: files.reduce((sum, file) => sum + (file.additions || 0), 0),
+              linesDeleted: files.reduce((sum, file) => sum + (file.deletions || 0), 0),
+              paths: files.map((file) => file.filename),
+            };
+
+            core.setOutput('skip', 'false');
+            core.setOutput('payload', JSON.stringify(payload));
+
+      - name: Send merge history
+        if: steps.collect.outputs.skip == 'false'
+        env:
+          WEBHOOK_URL: ${{ secrets.MERGE_HISTORY_WEBHOOK_URL }}
+          WEBHOOK_TOKEN: ${{ secrets.MERGE_HISTORY_WEBHOOK_TOKEN }}
+          PAYLOAD: ${{ steps.collect.outputs.payload }}
+        shell: bash
+        run: |
+          if [[ -z "$WEBHOOK_URL" || -z "$WEBHOOK_TOKEN" ]]; then
+            echo "::notice::Skipping merge history capture: webhook URL/token secrets are not configured."
+            exit 0
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $WEBHOOK_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data "$PAYLOAD" \
+            "$WEBHOOK_URL"

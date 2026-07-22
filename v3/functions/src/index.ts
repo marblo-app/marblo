@@ -101,6 +101,122 @@ const bigquery = new BigQuery({ location: BQ_LOCATION });
 const BQ_DATASET = "marblo_telemetry";
 const BQ_EVENTS_TABLE = "events";
 const BQ_COST_TABLE = "cost_logs";
+const GITHUB_MERGE_HISTORY_WEBHOOK_TOKEN =
+  process.env.GITHUB_MERGE_HISTORY_WEBHOOK_TOKEN || "";
+
+type MergeChangeType =
+  | "docs"
+  | "test"
+  | "config"
+  | "code"
+  | "mixed"
+  | "unknown";
+
+interface GitHubMergeHistoryPayload {
+  prNumber?: unknown;
+  taskId?: unknown;
+  taskId8?: unknown;
+  mergedAt?: unknown;
+  branch?: unknown;
+  baseRef?: unknown;
+  headSha?: unknown;
+  repository?: unknown;
+  owner?: unknown;
+  filesChanged?: unknown;
+  linesAdded?: unknown;
+  linesDeleted?: unknown;
+  paths?: unknown;
+}
+
+function parseMarbloTaskPrefix(branch: string): string | null {
+  const normalized = branch.replace(/^refs\/heads\//, "");
+  const match = normalized.match(/^marblo\/[^/\s]+-([A-Za-z0-9]{8})$/);
+  return match?.[1] ?? null;
+}
+
+function sanitizeDocIdPart(value: string): string {
+  return value.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 160);
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function asNonNegativeInt(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const n = Math.trunc(value);
+  return n >= 0 ? n : null;
+}
+
+function categorizeMergePath(p: string): "docs" | "test" | "config" | "code" {
+  const lower = p.toLowerCase();
+  const base = lower.split("/").pop() ?? lower;
+
+  if (
+    /\.(test|spec)\.[cm]?[jt]sx?$/.test(base) ||
+    /(^|\/)(tests?|__tests__|e2e|__mocks__)(\/|$)/.test(lower)
+  ) {
+    return "test";
+  }
+  if (
+    /\.(md|mdx|markdown|rst|txt|adoc)$/.test(base) ||
+    /(^|\/)docs?(\/|$)/.test(lower) ||
+    /^(readme|changelog|license|contributing|authors)\b/.test(base)
+  ) {
+    return "docs";
+  }
+  if (
+    /\.(json|ya?ml|toml|ini|cfg|conf|lock|env|properties)$/.test(base) ||
+    /\.(config|rc)\.[cm]?[jt]s$/.test(base) ||
+    /^\.[a-z]/.test(base) ||
+    /(^|\/)(dockerfile|makefile)$/.test(lower)
+  ) {
+    return "config";
+  }
+  return "code";
+}
+
+function classifyMergeChangeType(paths: string[]): MergeChangeType {
+  const categories = new Set<string>();
+  for (const p of paths) {
+    if (p.trim()) categories.add(categorizeMergePath(p));
+  }
+  if (categories.size === 0) return "unknown";
+  if (categories.has("code")) return "code";
+  if (categories.size === 1) return [...categories][0] as MergeChangeType;
+  return "mixed";
+}
+
+async function resolveFullTaskIdFromPrefix(taskId8: string): Promise<{
+  taskId: string;
+  projectId: string;
+} | null> {
+  const end = `${taskId8}\uf8ff`;
+  const snap = await db
+    .collection("tasks")
+    .where(admin.firestore.FieldPath.documentId(), ">=", taskId8)
+    .where(admin.firestore.FieldPath.documentId(), "<=", end)
+    .limit(2)
+    .get();
+
+  if (snap.empty) return null;
+  if (snap.size > 1) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      `Ambiguous task prefix: ${taskId8}`,
+    );
+  }
+
+  const doc = snap.docs[0];
+  const projectId = asNonEmptyString(doc.get("projectId"));
+  if (!projectId) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      `Task ${doc.id} has no projectId`,
+    );
+  }
+  return { taskId: doc.id, projectId };
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Agent Firebase Auth
@@ -141,6 +257,180 @@ export const issueAgentCustomToken = functions.https.onCall(
       customToken,
       uid: context.auth.uid,
     };
+  },
+);
+
+/**
+ * GitHub PR merge capture for the gh/Actions path that bypasses Electron's
+ * in-app Merge button. Converges on the same sinks and de-identified fields as
+ * electron/main.ts recordMergeHistory: Firestore `merge_history` +
+ * BigQuery `events` event=`task:merged`.
+ */
+export const recordGitHubMergeHistory = functions.https.onRequest(
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.set("Allow", "POST").status(405).send("Method Not Allowed");
+      return;
+    }
+
+    if (!GITHUB_MERGE_HISTORY_WEBHOOK_TOKEN) {
+      functions.logger.warn(
+        "[recordGitHubMergeHistory] webhook token is not configured",
+      );
+      res.status(503).json({ ok: false, error: "webhook_not_configured" });
+      return;
+    }
+
+    const auth = req.header("authorization") || "";
+    const expected = `Bearer ${GITHUB_MERGE_HISTORY_WEBHOOK_TOKEN}`;
+    if (auth !== expected) {
+      res.status(401).json({ ok: false, error: "unauthorized" });
+      return;
+    }
+
+    const body = (req.body || {}) as GitHubMergeHistoryPayload;
+    const branch = asNonEmptyString(body.branch);
+    const parsedPrefix = branch ? parseMarbloTaskPrefix(branch) : null;
+    const providedPrefix =
+      asNonEmptyString(body.taskId8) || asNonEmptyString(body.taskId);
+    const taskId8 = parsedPrefix || providedPrefix;
+
+    // External or manually named PRs do not carry the Marblo task id prefix.
+    if (!branch || !taskId8 || taskId8.length !== 8) {
+      res.status(200).json({ ok: true, skipped: "unparseable_branch" });
+      return;
+    }
+
+    const prNumber = asNonNegativeInt(body.prNumber);
+    const mergedAtRaw = asNonEmptyString(body.mergedAt);
+    const mergedAt = mergedAtRaw ? new Date(mergedAtRaw) : null;
+    const owner = asNonEmptyString(body.owner) || "unknown-owner";
+    const repository = asNonEmptyString(body.repository) || "unknown-repo";
+    const baseRef = asNonEmptyString(body.baseRef) || "main";
+    const headSha = asNonEmptyString(body.headSha) || "";
+    const filesChanged = asNonNegativeInt(body.filesChanged);
+    const linesAdded = asNonNegativeInt(body.linesAdded);
+    const linesDeleted = asNonNegativeInt(body.linesDeleted);
+    const paths = Array.isArray(body.paths)
+      ? body.paths.filter((p): p is string => typeof p === "string")
+      : [];
+    const changeType = classifyMergeChangeType(paths);
+
+    if (prNumber === null || !mergedAt || Number.isNaN(mergedAt.getTime())) {
+      res.status(400).json({ ok: false, error: "invalid_merge_payload" });
+      return;
+    }
+
+    let task;
+    try {
+      task = await resolveFullTaskIdFromPrefix(taskId8);
+    } catch (err) {
+      if (err instanceof functions.https.HttpsError) {
+        res.status(409).json({ ok: false, error: err.message });
+        return;
+      }
+      throw err;
+    }
+
+    if (!task) {
+      res.status(200).json({ ok: true, skipped: "task_not_found", taskId8 });
+      return;
+    }
+
+    const mergeDocId = [
+      "github",
+      sanitizeDocIdPart(owner),
+      sanitizeDocIdPart(repository),
+      String(prNumber),
+    ].join("_");
+    const mergeRef = db.collection("merge_history").doc(mergeDocId);
+    const mergeDoc = {
+      projectId: task.projectId,
+      taskId: task.taskId,
+      repoRoot: `${owner}/${repository}`,
+      branch,
+      baseRef,
+      headSha,
+      mode: "auto",
+      mergedAt: admin.firestore.Timestamp.fromDate(mergedAt),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      filesChanged: filesChanged ?? null,
+      linesAdded: linesAdded ?? null,
+      linesDeleted: linesDeleted ?? null,
+      changeType,
+      source: "github-actions",
+      prNumber,
+    };
+
+    const created = await db.runTransaction(async (tx) => {
+      const existing = await tx.get(mergeRef);
+      if (existing.exists) return false;
+      tx.create(mergeRef, mergeDoc);
+      return true;
+    });
+
+    if (!created) {
+      res.status(200).json({
+        ok: true,
+        skipped: "already_recorded",
+        taskId: task.taskId,
+        prNumber,
+      });
+      return;
+    }
+
+    const linesChanged = (linesAdded ?? 0) + (linesDeleted ?? 0);
+    await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert([
+      {
+        event: "task:merged",
+        userId: "github-actions",
+        appVersion: "github-actions",
+        projectId: task.projectId,
+        agentId: null,
+        taskId: task.taskId,
+        flowId: null,
+        model: null,
+        role: null,
+        status: null,
+        fromStatus: null,
+        toStatus: null,
+        durationMs: null,
+        tokensInput: null,
+        tokensOutput: null,
+        cost: null,
+        success: true,
+        exitCode: null,
+        nodeType: null,
+        nodeCount: null,
+        metadata: JSON.stringify({
+          mergeMode: "auto",
+          source: "github-actions",
+          prNumber,
+          branch,
+          linesAdded: linesAdded ?? 0,
+          linesDeleted: linesDeleted ?? 0,
+          changeType,
+        }),
+        taskType: changeType,
+        taskComplexity: null,
+        filesChanged: filesChanged ?? null,
+        linesChanged,
+        errorCategory: null,
+        errorMessage: null,
+        promptHash: null,
+        promptLength: null,
+        parentAgentId: null,
+        retryOf: null,
+        timestamp: mergedAt.toISOString(),
+      },
+    ]);
+
+    res.status(200).json({
+      ok: true,
+      recorded: true,
+      taskId: task.taskId,
+      prNumber,
+    });
   },
 );
 
