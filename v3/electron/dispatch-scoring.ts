@@ -6,6 +6,11 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import {
+  graphBiasForModel,
+  type RoutingGraph,
+  type GraphContext,
+} from "./routing-graph";
 
 export type ModelType =
   | "claude"
@@ -644,6 +649,13 @@ export interface PerModelScore {
   budgetBias: number;
   /** §C simple→antigravity soft bias (0 unless it applies to this model). */
   agyBias: number;
+  /**
+   * Live knowledge-graph bias (spec 2026-07-22): learned, decaying prior from
+   * observed (context × model) outcomes. Same ±20 scale as budgetBias —
+   * coexists as one more additive component, never overrides the role gate /
+   * reuse bonus. 0 when no graph passed OR cold start (no regression).
+   */
+  graphBias: number;
   /** Final weighted total used for ranking. */
   total: number;
 }
@@ -677,6 +689,8 @@ export function scoreModelsDetailed(
   tags: string[],
   complexity?: "simple" | "standard" | "complex",
   budgets?: ModelBudgetSnapshot,
+  ctx?: GraphContext,
+  graph?: RoutingGraph | null,
 ): ModelSelection {
   const scored: PerModelScore[] = [];
   let hasTags = tags.length > 0;
@@ -718,9 +732,25 @@ export function scoreModelsDetailed(
     if (budget.bias === null) continue;
     // §C: simple → antigravity 소프트 가점(0 이면 no-op).
     const thisAgyBias = model === "antigravity" ? agyBias : 0;
+    // Live knowledge-graph learned prior (spec 2026-07-22). Same additive
+    // pattern as budgetBias — one more ±20 component. 0 when no graph/ctx or
+    // cold start, so this is a strict no-op until real outcomes accumulate.
+    const graphBias =
+      ctx && graph ? finiteOr(graphBiasForModel(model, ctx, graph), 0) : 0;
+    // A learned graph signal (even with no task tags) should route through the
+    // score-based competition / tie-band instead of the tag-blind round-robin,
+    // so the graph's lean is actually honored. Cold start (all 0) leaves
+    // hasTags untouched → exactly current behavior (no regression).
+    if (graphBias !== 0) hasTags = true;
 
     const rawTotal =
-      base + tagBonus + tagPenalty + costEff + budget.bias + thisAgyBias;
+      base +
+      tagBonus +
+      tagPenalty +
+      costEff +
+      budget.bias +
+      thisAgyBias +
+      graphBias;
     // 방어: 비유한 점수는 아래 정렬/타이밴드 비교(topScore - s.total)를
     // 오염시키므로 0 으로 대체. 정상 입력에선 항상 유한값이라 no-op 이다.
     scored.push({
@@ -731,6 +761,7 @@ export function scoreModelsDetailed(
       costEff,
       budgetBias: budget.bias,
       agyBias: thisAgyBias,
+      graphBias,
       total: finiteOr(rawTotal, 0),
     });
   }

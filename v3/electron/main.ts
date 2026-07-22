@@ -37,6 +37,7 @@ import { describeRootPathFailure, diagnoseRootPath } from "./rootPathHealth";
 import { TaskDecomposer } from "./orchestrator/task-decomposer";
 import type { DecomposedTask } from "./orchestrator/dag-generator";
 import { BridgeServer, withCompletionFooter } from "./bridge-server";
+import { GraphUpdater } from "./graph-updater";
 import {
   AgentWatchdog,
   resolveWatchdogConfig,
@@ -999,6 +1000,28 @@ const agentManager = new AgentManager(
     const pid = projectIdForAgent(agentId);
     if (pid) sendToProject(pid, "agent:restartFailed", { agentId, exitCode });
     else broadcast("agent:restartFailed", { agentId, exitCode });
+    // KG feedback (spec §7): a terminal crash (restart budget exhausted). The
+    // agent doc is still in the manager here — read its task/model/role/restart
+    // count so the graph-updater can classify crash_loop vs a bad-host spawn
+    // fail and attribute it to the right cells. Best-effort, fire-and-forget.
+    try {
+      const a = agentManager.getAgent(agentId);
+      if (a?.currentTaskId) {
+        void graphUpdater.recordOutcome({
+          taskId: a.currentTaskId,
+          agentId,
+          model: a.model,
+          rawOutcome: "crashed",
+          hints: {
+            restartCount: a.restartCount,
+            errorCategory: "runtime_crash",
+          },
+          ctx: { role: a.role },
+        });
+      }
+    } catch {
+      // never let graph bookkeeping affect crash handling
+    }
   },
   () => mainWindow,
 );
@@ -1680,6 +1703,17 @@ const agentWatchdog = new AgentWatchdog(
             projectId: ticket.projectId,
           },
         });
+        // KG feedback (spec §9): the motivating negative label — an agent that
+        // went stale on this (context × model). Fold it in so repeated stales
+        // demote the model for this shape. ctx (tags/complexity) is backfilled
+        // from dispatchMeta; role/model come straight off the ticket.
+        void graphUpdater.recordOutcome({
+          taskId: ticket.taskId,
+          agentId: ticket.agentId ?? undefined,
+          model: ticket.model ?? undefined,
+          rawOutcome: "stale",
+          ctx: { role: ticket.role, complexity: ticket.complexity },
+        });
       }
       // Board-visible audit WITHOUT bumping projection.lastActivityAt (which
       // would mask the watchdog's own silence detection). Best-effort, fire
@@ -2188,6 +2222,12 @@ bridgeServer.setDispatchMetaHook((taskId, meta) => {
             model: meta.model,
             complexity: meta.complexity ?? null,
             dispatchReason: meta.dispatchReason ?? null,
+            // KG routing attribution keys (spec 2026-07-22 §7) — the
+            // graph-updater reads these back to fold a later outcome into the
+            // right (context × model) cells.
+            role: meta.role ?? null,
+            tags: meta.tags ?? null,
+            taskType: meta.taskType ?? null,
             updatedAt: fbTimestamp.now(),
           },
         },
@@ -2217,9 +2257,7 @@ bridgeServer.setTaskAgentActivityHook(async (taskId, agentId) => {
   };
   const projection = data.projection;
   const lastAgentId =
-    typeof projection?.lastAgentId === "string"
-      ? projection.lastAgentId
-      : "";
+    typeof projection?.lastAgentId === "string" ? projection.lastAgentId : "";
   const summary =
     typeof projection?.lastActivitySummary === "string"
       ? projection.lastActivitySummary.trim()
@@ -2502,6 +2540,46 @@ function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
   return roots;
 }
 
+// ── Live routing knowledge-graph updater (spec 2026-07-22 §7) ──────────────
+// Folds agent-lifecycle outcomes (stale / crash / merged) into the machine-
+// local routing-graph.json so the next dispatch's model scoring reads a learned,
+// decaying prior. fetchMeta recovers the dispatch's context (role/tags/complexity/
+// model) from the task's dispatchMeta. Every call is best-effort + fire-and-
+// forget — a graph write can never break recovery, telemetry, or a merge.
+const graphUpdater = new GraphUpdater({
+  fetchMeta: async (taskId) => {
+    try {
+      const { app, authReady } = getMissionFirebaseApp();
+      await authReady;
+      const db = getFirestore(app);
+      const snap = await fbGetDoc(fbDoc(db, "tasks", taskId));
+      const data = snap.data() as Record<string, unknown> | undefined;
+      const meta = data?.dispatchMeta as
+        | {
+            role?: unknown;
+            tags?: unknown;
+            taskType?: unknown;
+            complexity?: unknown;
+            model?: unknown;
+          }
+        | undefined;
+      if (!meta) return null;
+      return {
+        role: typeof meta.role === "string" ? meta.role : null,
+        tags: Array.isArray(meta.tags)
+          ? (meta.tags.filter((t) => typeof t === "string") as string[])
+          : null,
+        taskType: typeof meta.taskType === "string" ? meta.taskType : null,
+        complexity:
+          typeof meta.complexity === "string" ? meta.complexity : null,
+        model: typeof meta.model === "string" ? meta.model : null,
+      };
+    } catch {
+      return null;
+    }
+  },
+});
+
 // Append-only merge audit trail (WORKTREE-SPEC §6 / autonomy-dial audit log).
 // Writes one immutable doc per completed merge to the `merge_history`
 // collection, reusing the mission firebase app (anonymous auth) like the
@@ -2526,6 +2604,17 @@ const recordMergeHistory = async (
     linesDeleted: record.linesDeleted,
     changeType: record.changeType,
   });
+
+  // KG feedback (spec §7): merge is the top accepted (positive) label. Fold it
+  // into the routing graph — ctx (role/tags/complexity/model) is recovered from
+  // the task's dispatchMeta; changeType is a de-identified taskType fallback.
+  if (record.taskId) {
+    void graphUpdater.recordOutcome({
+      taskId: record.taskId,
+      rawOutcome: "merged",
+      ctx: record.changeType ? { taskType: record.changeType } : undefined,
+    });
+  }
 
   const { app, authReady } = getMissionFirebaseApp();
   await authReady;
