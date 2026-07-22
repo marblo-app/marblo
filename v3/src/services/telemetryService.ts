@@ -49,7 +49,17 @@ export type TelemetryEvent =
   | "onboarding:survey_cli_fail"
   | "onboarding:survey_first_project"
   | "onboarding:marketing_consent_shown"
-  | "onboarding:marketing_consent_granted";
+  | "onboarding:marketing_consent_granted"
+  // 인증 전 샘플 데모(Demo Mode P3, ticket qQLGS3NW). 미인증 상태에서 '오케가
+  // 티켓을 분해→에이전트를 배정하는 장면'을 스크립티드 재생으로 보여주고(실제
+  // CLI 스폰·LLM·과금 0), 종료 시 연결 마법사(CliSetupGate)로 유도한다. 아래
+  // 3 이벤트가 데모 퍼널(진입→완주→CTA클릭)을 채운다. ★전송 한계: 이 이벤트는
+  // 로그인 이전에 큐잉되고 flushTelemetry 는 auth.currentUser 가 있을 때만
+  // 전송하므로(anti-abuse), app:first_run 과 동일하게 "다음 성공 로그인" 시점에
+  // 함께 flush 된다 — 끝내 로그인 안 한 방문자의 데모 이탈은 전송되지 않는다.
+  | "onboarding:demo_started"
+  | "onboarding:demo_completed"
+  | "onboarding:demo_cta_click";
 
 interface TelemetryPayload {
   event: TelemetryEvent;
@@ -143,7 +153,7 @@ const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
 export function setTelemetryEnabled(
   enabled: boolean,
-  options: { persist?: boolean } = {}
+  options: { persist?: boolean } = {},
 ) {
   const next = firstPartyTelemetryDefaultEnabled() && enabled;
   telemetryEnabled = next;
@@ -316,7 +326,7 @@ export const telemetry = {
     name: string,
     model: string,
     role: string,
-    projectId?: string
+    projectId?: string,
   ) {
     logTelemetry({
       event: "agent:spawned",
@@ -342,7 +352,7 @@ export const telemetry = {
     exitCode: number,
     taskId?: string,
     errorCategory?: string,
-    errorMessage?: string
+    errorMessage?: string,
   ) {
     logTelemetry({
       event: "agent:crashed",
@@ -372,7 +382,7 @@ export const telemetry = {
     taskId: string,
     projectId: string,
     role: string,
-    priority?: number
+    priority?: number,
   ) {
     logTelemetry({
       event: "task:created",
@@ -387,7 +397,7 @@ export const telemetry = {
     taskId: string,
     fromStatus: string,
     toStatus: string,
-    agentId?: string
+    agentId?: string,
   ) {
     logTelemetry({
       event: "task:status_changed",
@@ -416,7 +426,7 @@ export const telemetry = {
     flowId: string,
     nodeType: string,
     durationMs: number,
-    success: boolean
+    success: boolean,
   ) {
     logTelemetry({
       event: "flow:node_executed",
@@ -431,7 +441,7 @@ export const telemetry = {
     flowId: string,
     status: string,
     durationMs: number,
-    nodeCount: number
+    nodeCount: number,
   ) {
     logTelemetry({
       event: "flow:completed",
@@ -449,7 +459,7 @@ export const telemetry = {
     tokensInput: number,
     tokensOutput: number,
     cost: number,
-    projectId?: string
+    projectId?: string,
   ) {
     logTelemetry({
       event: "token:usage",
@@ -573,7 +583,7 @@ export const telemetry = {
   cliSetupStep(
     step: "notice" | "connect" | "project",
     phase: "enter" | "success" | "fail",
-    reason?: string
+    reason?: string,
   ) {
     logTelemetry({
       event: "onboarding:cli_setup_step",
@@ -610,6 +620,30 @@ export const telemetry = {
       success: true,
       metadata: { surface, method },
     });
+  },
+
+  // ── 인증 전 샘플 데모 퍼널 (Demo Mode P3, ticket qQLGS3NW) ──────────────
+  /** 데모 진입(재생 시작). surface = 데모를 연 화면(auth_screen 등). */
+  demoStarted(surface: string) {
+    logTelemetry({
+      event: "onboarding:demo_started",
+      metadata: { surface },
+    });
+  },
+
+  /** 데모 완주. reason = played(끝까지 재생) | skipped(건너뛰기로 종료 도달). */
+  demoCompleted(reason: string) {
+    logTelemetry({
+      event: "onboarding:demo_completed",
+      success: true,
+      metadata: { reason },
+    });
+  },
+
+  /** 데모 종료 CTA('이제 내 계정을 연결해 실제로 실행하기') 클릭 = 연결 마법사로
+   *  유도된 시점. 이후 로그인 성공 시 CliSetupGate 위저드가 열린다. */
+  demoCtaClick() {
+    logTelemetry({ event: "onboarding:demo_cta_click", success: true });
   },
 
   flush: flushTelemetry,

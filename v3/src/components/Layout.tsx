@@ -45,6 +45,7 @@ import { useEditorStore } from "../stores/editorStore";
 import { useActivityStreamStore } from "../stores/activityStreamStore";
 import { useNavigationStore } from "../stores/navigationStore";
 import { useUiStore } from "../stores/uiStore";
+import { DEMO_CONNECT_PENDING_KEY } from "./onboarding/DemoMode";
 
 function GatedFlowsTab() {
   return (
@@ -105,6 +106,27 @@ export function Layout() {
         /* main may not have the handler in older builds — best-effort */
       });
   }, [currentProject?.id]);
+
+  // Pre-auth 데모(Demo Mode P3, ticket qQLGS3NW)의 CTA 이어받기: 미인증 데모에서
+  // "이제 내 계정을 연결해 실제로 실행하기" 를 누른 사용자는 이 플래그를 남긴다.
+  // 로그인 성공 후 처음 Layout 이 뜨는 지금, 플래그를 소비하고 연결 마법사의
+  // 기존 진입점(`marblo:open-cli-setup`)을 그대로 디스패치해 CliSetupGate 위저드를
+  // 연다 — 위저드는 재구현하지 않고 이벤트만 재사용. 자식(CliSetupGate)의 리스너
+  // 등록 이후 실행되도록 setTimeout(0) 으로 커밋 다음 틱에 발화한다.
+  useEffect(() => {
+    let pending = false;
+    try {
+      pending = localStorage.getItem(DEMO_CONNECT_PENDING_KEY) === "1";
+      if (pending) localStorage.removeItem(DEMO_CONNECT_PENDING_KEY);
+    } catch {
+      /* 프라이빗 모드 — 플래그 없으면 첫-실행 위저드가 자연히 뜬다 */
+    }
+    if (!pending) return;
+    const h = setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+    }, 0);
+    return () => clearTimeout(h);
+  }, []);
 
   // When the user switches projects in this window, clean up window-local UI
   // state that was tied to the previous project. Backend agents and PTYs are

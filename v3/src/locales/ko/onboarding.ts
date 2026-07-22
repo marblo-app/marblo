@@ -367,4 +367,52 @@ export const onboarding = {
   "onboarding.login.loginButton": "로그인",
   "onboarding.login.haveAccount": "이미 계정이 있나요?",
   "onboarding.login.noAccount": "아직 계정이 없나요?",
+
+  // — LoginPage: 인증 전 데모 진입점 (Demo Mode P3, ticket qQLGS3NW) —
+  "onboarding.login.demoLead": "마블로가 어떻게 동작하는지 먼저 볼까요?",
+  "onboarding.login.watchDemo": "60초 데모 보기",
+
+  // — DemoMode (인증 전 샘플 데모 재생) —
+  "onboarding.demo.badge": "샘플 데모",
+  "onboarding.demo.title":
+    "오케스트레이터가 티켓을 분해하고 에이전트를 배정합니다",
+  "onboarding.demo.disclaimer":
+    "실제 CLI 실행·AI 호출·과금 없이 재생되는 미리보기입니다.",
+  "onboarding.demo.close": "닫기",
+  "onboarding.demo.orchestrator": "오케스트레이터",
+  "onboarding.demo.thinking": "생각하는 중…",
+  "onboarding.demo.board": "작업 보드",
+  "onboarding.demo.request": "랜딩 페이지 만들기",
+  "onboarding.demo.status.queued": "대기",
+  "onboarding.demo.status.analyzing": "분석 중",
+  "onboarding.demo.status.running": "진행 중",
+  "onboarding.demo.status.done": "완료",
+  "onboarding.demo.col.todo": "대기",
+  "onboarding.demo.col.doing": "진행 중",
+  "onboarding.demo.col.done": "완료",
+  "onboarding.demo.agentWorking": "작업 중",
+  "onboarding.demo.playing": "샘플 시나리오를 재생하는 중…",
+  "onboarding.demo.skip": "건너뛰기",
+  "onboarding.demo.replay": "다시 보기",
+  "onboarding.demo.cta": "이제 내 계정을 연결해 실제로 실행하기",
+  // 하위 작업(분해 결과) — 카드 제목/역할
+  "onboarding.demo.sub.frontend": "랜딩 페이지 UI 와 이메일 폼 구현",
+  "onboarding.demo.sub.backend": "이메일 수집 API 엔드포인트 작성",
+  "onboarding.demo.sub.test": "폼 제출 플로우 E2E 테스트",
+  "onboarding.demo.role.frontend": "프론트엔드",
+  "onboarding.demo.role.backend": "백엔드",
+  "onboarding.demo.role.test": "테스트",
+  // 오케 대화 로그(스크립트)
+  "onboarding.demo.msg.user": "이 PRD로 첫 티켓을 만들어 주세요.",
+  "onboarding.demo.msg.analyze": "요구사항을 분석하고 있어요…",
+  "onboarding.demo.msg.decompose":
+    "요청을 3개의 하위 작업으로 분해했어요 — 프론트엔드 · 백엔드 · 테스트.",
+  "onboarding.demo.msg.assign": "각 작업에 알맞은 에이전트를 배정합니다.",
+  "onboarding.demo.msg.claudeStart":
+    "프론트엔드 · 테스트 작업을 맡았어요. 시작합니다.",
+  "onboarding.demo.msg.codexStart": "백엔드 API 작업을 맡았어요. 시작합니다.",
+  "onboarding.demo.msg.working":
+    "에이전트들이 병렬로 작업 중이에요. 진행 상황이 보드에 실시간 반영됩니다.",
+  "onboarding.demo.msg.done":
+    "첫 티켓이 완료됐어요 🎉 — 실제로는 여러분의 코드에 커밋까지 이어집니다.",
 };

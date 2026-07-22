@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useTranslation } from "../lib/i18n";
 import telemetry from "../services/telemetryService";
+import { DemoMode } from "../components/onboarding/DemoMode";
 
 export function LoginPage() {
   const { t, locale } = useTranslation();
@@ -17,6 +18,8 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [isSignup, setIsSignup] = useState(false);
   const [marketingEmailConsent, setMarketingEmailConsent] = useState(false);
+  // 인증 전 샘플 데모 오버레이 (Demo Mode P3, ticket qQLGS3NW).
+  const [showDemo, setShowDemo] = useState(false);
 
   useEffect(() => {
     telemetry.marketingConsentShown("auth_screen");
@@ -181,7 +184,32 @@ export function LoginPage() {
               : t("onboarding.login.signupButton")}
           </button>
         </p>
+
+        {/* 인증 전 샘플 데모 진입점 — 로그인/가입 없이 제품 동작을 먼저 보여준다. */}
+        <div className="mt-6 border-t border-gray-200 pt-5 text-center">
+          <p className="text-xs text-gray-500">
+            {t("onboarding.login.demoLead")}
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowDemo(true)}
+            className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-500"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+            {t("onboarding.login.watchDemo")}
+          </button>
+        </div>
       </div>
+
+      {showDemo && (
+        <DemoMode
+          surface="auth_screen"
+          onClose={() => setShowDemo(false)}
+          onConnect={() => setShowDemo(false)}
+        />
+      )}
     </div>
   );
 }

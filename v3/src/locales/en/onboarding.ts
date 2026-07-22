@@ -366,4 +366,53 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.login.loginButton": "Log in",
   "onboarding.login.haveAccount": "Already have an account?",
   "onboarding.login.noAccount": "Don't have an account yet?",
+
+  // — LoginPage: pre-auth demo entry (Demo Mode P3, ticket qQLGS3NW) —
+  "onboarding.login.demoLead": "Want to see how Marblo works first?",
+  "onboarding.login.watchDemo": "Watch the 60-second demo",
+
+  // — DemoMode (pre-auth sample demo playback) —
+  "onboarding.demo.badge": "Sample demo",
+  "onboarding.demo.title":
+    "The orchestrator breaks a ticket down and assigns agents",
+  "onboarding.demo.disclaimer":
+    "A preview that plays with no real CLI runs, AI calls, or billing.",
+  "onboarding.demo.close": "Close",
+  "onboarding.demo.orchestrator": "Orchestrator",
+  "onboarding.demo.thinking": "Thinking…",
+  "onboarding.demo.board": "Task board",
+  "onboarding.demo.request": "Build a landing page",
+  "onboarding.demo.status.queued": "Queued",
+  "onboarding.demo.status.analyzing": "Analyzing",
+  "onboarding.demo.status.running": "In progress",
+  "onboarding.demo.status.done": "Done",
+  "onboarding.demo.col.todo": "To do",
+  "onboarding.demo.col.doing": "In progress",
+  "onboarding.demo.col.done": "Done",
+  "onboarding.demo.agentWorking": "working",
+  "onboarding.demo.playing": "Playing the sample scenario…",
+  "onboarding.demo.skip": "Skip",
+  "onboarding.demo.replay": "Replay",
+  "onboarding.demo.cta": "Connect my account and run it for real",
+  // Subtasks (decomposition result) — card titles / roles
+  "onboarding.demo.sub.frontend": "Build the landing page UI and email form",
+  "onboarding.demo.sub.backend": "Write the email-capture API endpoint",
+  "onboarding.demo.sub.test": "End-to-end test the form submission flow",
+  "onboarding.demo.role.frontend": "Frontend",
+  "onboarding.demo.role.backend": "Backend",
+  "onboarding.demo.role.test": "Test",
+  // Orchestrator chat log (scripted)
+  "onboarding.demo.msg.user": "Create my first ticket from this PRD.",
+  "onboarding.demo.msg.analyze": "Analyzing the requirements…",
+  "onboarding.demo.msg.decompose":
+    "Broke the request into 3 subtasks — frontend, backend, and test.",
+  "onboarding.demo.msg.assign": "Assigning the right agent to each task.",
+  "onboarding.demo.msg.claudeStart":
+    "I've got the frontend and test tasks. Starting now.",
+  "onboarding.demo.msg.codexStart":
+    "I've got the backend API task. Starting now.",
+  "onboarding.demo.msg.working":
+    "The agents are working in parallel. Progress lands on the board in real time.",
+  "onboarding.demo.msg.done":
+    "First ticket done 🎉 — for real, this continues all the way to a commit in your code.",
 };
