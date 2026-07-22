@@ -21,11 +21,15 @@ import {
 import {
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   deleteDoc,
   collection,
   addDoc,
+  query,
+  where,
+  orderBy,
 } from "firebase/firestore";
 import { readFileSync } from "fs";
 import { describe, it, beforeAll, afterAll, beforeEach } from "vitest";
@@ -42,9 +46,22 @@ const MEMBER_EMAIL = "member@test.com";
 const OUTSIDER_ID = "outsider-user";
 const OUTSIDER_EMAIL = "outsider@test.com";
 const PROJECT_ID = "test-project";
+// 두 번째 테넌트 — MEMBER 는 여기에 속하지 않는다(크로스테넌트 격리 검증용).
+const OTHER_PROJECT_ID = "other-project";
+// 플랫폼 admin — projectId="" 유실 마커를 읽을 수 있는 유일한 주체.
+const PLATFORM_ADMIN_ID = "platform-admin-user";
+const PLATFORM_ADMIN_EMAIL = "padmin@test.com";
 
 function getContext(uid: string, email: string): RulesTestContext {
   return testEnv.authenticatedContext(uid, { email });
+}
+
+// 커스텀 토큰 클레임(admin: true)을 실은 컨텍스트 — isPlatformAdmin() 이 true.
+function adminContext(): RulesTestContext {
+  return testEnv.authenticatedContext(PLATFORM_ADMIN_ID, {
+    email: PLATFORM_ADMIN_EMAIL,
+    admin: true,
+  });
 }
 
 function unauthContext(): RulesTestContext {
@@ -200,6 +217,75 @@ beforeEach(async () => {
       plan: "pro",
       status: "active",
       currentPeriodEnd: new Date(),
+    });
+
+    // ── 원장 계열 시드 (L2 read 스코프 검증) ──────────────────────────
+
+    // 두 번째 테넌트 — MEMBER 는 비멤버. 크로스테넌트 격리를 실제로 검증하려면
+    // "내가 못 읽어야 할 다른 테넌트 문서"가 실재해야 한다.
+    await setDoc(doc(db, "projects", OTHER_PROJECT_ID), {
+      name: "Other Tenant",
+      ownerId: OUTSIDER_ID,
+      members: [OUTSIDER_ID],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // audit_logs: 우리 프로젝트 정상 레코드 / 타 테넌트 레코드 / projectId="" 유실 마커
+    await setDoc(doc(db, "audit_logs", "audit-ours"), {
+      projectId: PROJECT_ID,
+      agentId: "agent-1",
+      toolName: "add_activity",
+      result: "ok",
+      success: true,
+      kind: "tool",
+      actorUid: MEMBER_ID,
+      createdAt: new Date(),
+    });
+    await setDoc(doc(db, "audit_logs", "audit-other-tenant"), {
+      projectId: OTHER_PROJECT_ID,
+      agentId: "agent-x",
+      toolName: "add_activity",
+      result: "secret",
+      success: true,
+      kind: "tool",
+      actorUid: OUTSIDER_ID,
+      createdAt: new Date(),
+    });
+    // 오버플로/미해결 tombstone — ledger-spool.ts 가 귀속 prior 없을 때 projectId=""
+    await setDoc(doc(db, "audit_logs", "audit-tombstone-empty-project"), {
+      projectId: "",
+      agentId: "agent-1",
+      toolName: "__ledger_spool_overflow__",
+      result: "감사 이벤트 N건이 유실되었습니다",
+      success: false,
+      kind: "lifecycle",
+      actorUid: null,
+      createdAt: new Date(),
+    });
+
+    // merge_history: 우리 프로젝트 / 타 테넌트
+    await setDoc(doc(db, "merge_history", "merge-ours"), {
+      projectId: PROJECT_ID,
+      taskId: "task-1",
+      mergedAt: new Date(),
+    });
+    await setDoc(doc(db, "merge_history", "merge-other-tenant"), {
+      projectId: OTHER_PROJECT_ID,
+      taskId: "task-x",
+      mergedAt: new Date(),
+    });
+
+    // telemetry_events: 우리 프로젝트 / 타 테넌트
+    await setDoc(doc(db, "telemetry_events", "telemetry-ours"), {
+      projectId: PROJECT_ID,
+      event: "task:merged",
+      createdAt: new Date(),
+    });
+    await setDoc(doc(db, "telemetry_events", "telemetry-other-tenant"), {
+      projectId: OTHER_PROJECT_ID,
+      event: "task:merged",
+      createdAt: new Date(),
     });
   });
 });
@@ -1130,6 +1216,138 @@ describe("audit_logs collection", () => {
     const db = unauthContext().firestore();
     await assertFails(getDoc(doc(db, "audit_logs", LOG_ID)));
     await assertFails(setDoc(doc(db, "audit_logs", LOG_ID), auditDoc()));
+  });
+});
+
+// ===== 원장 계열 L2 read 스코프 (크로스테넌트 격리) =====
+//
+// audit_logs / merge_history / telemetry_events 는 이전에 `allow read: if
+// isAuthenticated()` 라 로그인만 하면 전 테넌트가 읽혔다. L2 는 이 셋을
+// isProjectMember 로 조이되, projectId="" 유실 마커만 플랫폼 admin 에게 연다.
+//
+// ★가드 실효성: 아래 "타 테넌트/외부인 읽기 거부" 테스트들은 옛 룰
+//   (isAuthenticated())에서는 읽기가 허용돼 assertFails 가 **실패**하고, 새 룰에서만
+//   통과한다. 즉 이 테스트들이 구멍을 실제로 막는지 증명한다.
+
+describe("audit_logs — L2 read 스코프", () => {
+  it("프로젝트 멤버는 자기 프로젝트 감사로그를 읽을 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "audit_logs", "audit-ours")));
+  });
+
+  it("★멤버라도 타 테넌트 감사로그는 읽을 수 없다 (옛 룰에선 뚫렸음)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "audit_logs", "audit-other-tenant")));
+  });
+
+  it("★외부인은 감사로그를 읽을 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "audit_logs", "audit-ours")));
+  });
+
+  it('★projectId="" 유실 tombstone 은 일반 멤버가 읽을 수 없다', async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      getDoc(doc(db, "audit_logs", "audit-tombstone-empty-project")),
+    );
+  });
+
+  it('★projectId="" 유실 tombstone 은 플랫폼 admin 이 읽을 수 있다 (유실 가시성 보존)', async () => {
+    const db = adminContext().firestore();
+    await assertSucceeds(
+      getDoc(doc(db, "audit_logs", "audit-tombstone-empty-project")),
+    );
+  });
+
+  it("플랫폼 admin 이라도 projectId 있는 타 테넌트 레코드는 멤버십으로만 읽힌다(=admin은 못 읽음)", async () => {
+    // admin 특권은 projectId="" 마커에만 열려 있다. 실 projectId 레코드는
+    // 여전히 isProjectMember 로만 결정된다 — admin 이 OTHER_PROJECT_ID 멤버가
+    // 아니므로 읽기 거부. (admin 을 만능 백도어로 만들지 않는다.)
+    const db = adminContext().firestore();
+    await assertFails(getDoc(doc(db, "audit_logs", "audit-other-tenant")));
+  });
+
+  it("미인증 사용자는 감사로그를 읽을 수 없다", async () => {
+    const db = unauthContext().firestore();
+    await assertFails(getDoc(doc(db, "audit_logs", "audit-ours")));
+  });
+});
+
+describe("merge_history — L2 read 스코프", () => {
+  it("프로젝트 멤버는 자기 프로젝트 머지이력을 읽을 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "merge_history", "merge-ours")));
+  });
+
+  it("★멤버라도 타 테넌트 머지이력은 읽을 수 없다 (옛 룰에선 뚫렸음)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "merge_history", "merge-other-tenant")));
+  });
+
+  it("★외부인은 머지이력을 읽을 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "merge_history", "merge-ours")));
+  });
+
+  // ── ★라이브 지뢰 인코딩: unscoped 쿼리는 거부, 멤버 스코프 쿼리만 허용 ──
+  // 코크핏(WorktreeTab/WorkHistoryTab)이 지금 projectId 없이 구독한다.
+  // 멤버 스코프 룰 하에서 unscoped orderBy 쿼리는 비멤버 문서를 포함할 수
+  // 있으므로 Firestore 가 통째 거부한다 → 배포 전 프론트 스코프가 필수임을
+  // 이 테스트가 못 박는다.
+  it("★unscoped 크로스프로젝트 list 쿼리는 거부된다 (코크핏 라이브 다운 방지 계약)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      getDocs(
+        query(collection(db, "merge_history"), orderBy("mergedAt", "desc")),
+      ),
+    );
+  });
+
+  it("멤버 프로젝트로 스코프한 list 쿼리(where projectId ==)는 허용된다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(db, "merge_history"),
+          where("projectId", "==", PROJECT_ID),
+          orderBy("mergedAt", "desc"),
+        ),
+      ),
+    );
+  });
+
+  it("멤버 프로젝트 목록으로 스코프한 list 쿼리(where projectId in [...])는 허용된다", async () => {
+    // mergeHistoryService 의 projectIds 옵션이 만드는 쿼리 형태 — 프론트가
+    // 배포 전 채택할 경로.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(db, "merge_history"),
+          where("projectId", "in", [PROJECT_ID]),
+          orderBy("mergedAt", "desc"),
+        ),
+      ),
+    );
+  });
+});
+
+describe("telemetry_events — L2 read 스코프", () => {
+  it("프로젝트 멤버는 자기 프로젝트 텔레메트리를 읽을 수 있다", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, "telemetry_events", "telemetry-ours")));
+  });
+
+  it("★멤버라도 타 테넌트 텔레메트리는 읽을 수 없다 (옛 룰에선 뚫렸음)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      getDoc(doc(db, "telemetry_events", "telemetry-other-tenant")),
+    );
+  });
+
+  it("★외부인은 텔레메트리를 읽을 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(getDoc(doc(db, "telemetry_events", "telemetry-ours")));
   });
 });
 

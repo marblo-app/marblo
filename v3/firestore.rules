@@ -63,6 +63,37 @@ service cloud.firestore {
             || request.auth.token.marbloRole == 'admin');
     }
 
+    // 원장 계열(audit_logs / merge_history / telemetry_events) 공통 read 게이트.
+    //
+    // 이전엔 세 컬렉션 모두 `allow read: if isAuthenticated()` 라 로그인한 누구나
+    // projectId 만 알면 타 테넌트의 감사 기록·머지 이력·텔레메트리를 통째로
+    // 읽었다(다른 컬렉션은 전부 isProjectMember 로 스코프돼 있었는데 이 셋만
+    // 빠져 있었다). L2 는 이 구멍을 닫는다.
+    //
+    // ★projectId == "" 예외 — 유실 가시성 보존:
+    //   ledger-spool.ts 의 오버플로 tombstone / 미해결 lifecycle 마커는 귀속할
+    //   prior 이벤트가 없을 때 projectId="" 로 생성된다(ledger-spool.ts:577,837).
+    //   이건 "감사 이벤트가 유실됐다"를 기록하는 레코드 자체다. isProjectMember("")
+    //   는 영원히 false 이므로 멤버 스코프로만 조이면 **유실의 기록이 다시 유실된다**
+    //   — 원장의 핵심(유실 가시성)이 깨진다.
+    //   → projectId="" 레코드는 특정 프로젝트에 귀속되지 않으므로 프로젝트 멤버가
+    //     아니라 **플랫폼 admin** 만 읽게 한다. 크로스테넌트는 여전히 닫혀 있고
+    //     (일반 사용자는 못 읽음), 유실은 admin 헬스뷰에서 조회 가능하다.
+    //   MCP 서버(에이전트)는 admin 이 아니라 이 tombstone 을 못 읽지만, 그건
+    //   의도된 동작이다: tools.ts verifyLedgerRecord 가 permission-denied 를
+    //   null(미상)로 받아 park 처리하므로 스풀이 고착하지 않는다.
+    //
+    // .get('projectId', '') 로 필드 부재(구 레코드)도 ""(admin-only)로 안전 처리한다.
+    function canReadLedgerDoc() {
+      return isAuthenticated()
+        && (
+          (resource.data.get('projectId', '') != ''
+            && isProjectMember(resource.data.projectId))
+          || (resource.data.get('projectId', '') == ''
+            && isPlatformAdmin())
+        );
+    }
+
     // ===== Users =====
     match /users/{userId} {
       allow read: if isAuthenticated();
@@ -248,8 +279,14 @@ service cloud.firestore {
     // serverTimestamp 가 아니라 Timestamp.fromMillis(occurredAtMs) 로 쓰기 때문에
     // 성립한다. ★이후 이 컬렉션에 서버 생성 값(serverTimestamp/request.time 등)을
     // 추가하면 이 등식이 깨져 고착이 되살아난다.
+    //
+    // ★L2 read 스코프 (크로스테넌트 격리): 이전엔 isAuthenticated() 만 검사해
+    // 로그인한 누구나 타 테넌트 감사 기록을 읽었다. canReadLedgerDoc() 으로
+    // 프로젝트 멤버(정상 레코드) / 플랫폼 admin(projectId="" 유실 마커)만 읽게
+    // 조인다. create/update(L1.6 멱등 재시도)/delete 는 건드리지 않는다 —
+    // update 규칙을 되돌리면 스풀 고착(L1.6 회귀)이 되살아난다.
     match /audit_logs/{logId} {
-      allow read: if isAuthenticated();
+      allow read: if canReadLedgerDoc();
       allow create: if isAuthenticated();
       allow update: if isAuthenticated()
         && request.resource.data == resource.data;
@@ -260,16 +297,31 @@ service cloud.firestore {
     // Append-only record of completed (squash-merged) worktrees. Written by the
     // Electron main process at the merge chokepoint; read by the cockpit's
     // "완료 이력" view. Immutable, same posture as audit_logs.
+    //
+    // ★L2 read 스코프: canReadLedgerDoc() 으로 프로젝트 멤버만 읽게 조인다.
+    //   main 이 실 projectId 로만 write 하므로 projectId="" 마커는 없지만 게이트는
+    //   공통으로 둔다(방어).
+    // ★★배포 전 필수 선행(프론트): 코크핏의 크로스프로젝트 뷰
+    //   (WorktreeTab / WorkHistoryTab)가 subscribeToMergeHistory 를 projectId
+    //   없이(unscoped orderBy) 구독한다. 멤버 스코프 룰 하에서는 Firestore 가
+    //   비멤버 문서를 포함할 수 있는 unscoped 쿼리를 permission-denied 로 통째
+    //   거부한다 → 룰만 먼저 배포하면 코크핏 완료이력/워크트리 탭이 라이브에서
+    //   죽는다(#406/#428 재현). 반드시 프론트 쿼리를 멤버 프로젝트로 스코프한 뒤
+    //   (mergeHistoryService 의 projectIds 옵션) 함께 배포한다.
     match /merge_history/{mergeId} {
-      allow read: if isAuthenticated();
+      allow read: if canReadLedgerDoc();
       allow create: if isAuthenticated();
       allow update: if false;
       allow delete: if false;
     }
 
     // ===== Telemetry Events =====
+    // ★L2 read 스코프: canReadLedgerDoc(). 현재 이 Firestore 컬렉션을 쓰거나 읽는
+    //   코드 경로는 없다(런타임 텔레메트리는 렌더러 choke → functions → BigQuery
+    //   로 감). 그래도 다른 원장 계열과 동일하게 멤버 스코프로 닫아 로그인만으로
+    //   과거/잔존 문서를 크로스테넌트로 읽는 구멍을 없앤다.
     match /telemetry_events/{eventId} {
-      allow read: if isAuthenticated();
+      allow read: if canReadLedgerDoc();
       allow create: if isAuthenticated();
       allow update: if false;
       allow delete: if false;
