@@ -1202,8 +1202,10 @@ function mapErr(err: CallableError): string {
   if (err?.code === "functions/invalid-argument")
     return "잘못된 기간 파라미터입니다.";
   // 신규 콜러블이 아직 배포 전(web 선배포)일 때의 안내 — 나머지 섹션은 정상.
-  if (err?.code === "functions/not-found" || err?.code === "functions/internal")
+  if (err?.code === "functions/not-found")
     return "이 지표는 Cloud Functions 배포 후 표시됩니다(신규 함수 미배포).";
+  if (err?.code === "functions/internal")
+    return "지표 데이터를 불러오지 못했습니다. 서버 로그에서 BigQuery/Cloud Functions 오류를 확인해야 합니다.";
   return err?.message || "데이터를 불러오지 못했습니다.";
 }
 
