@@ -30,10 +30,13 @@ if (import.meta.env.VITE_DISABLE_TELEMETRY === "1") {
   );
 }
 
+const PERFORMANCE_DEBUG_ENABLED =
+  import.meta.env.DEV && import.meta.env.VITE_PERFORMANCE_DEBUG === "1";
+
 // Performance monitor: log long tasks that block the main thread.
 // `attribution` reveals what was running (script src, container element).
 // `event` entryType (interactionId) helps identify INP spikes specifically.
-if (typeof PerformanceObserver !== "undefined") {
+if (PERFORMANCE_DEBUG_ENABLED && typeof PerformanceObserver !== "undefined") {
   type AttributedEntry = PerformanceEntry & {
     attribution?: Array<{
       name?: string;
