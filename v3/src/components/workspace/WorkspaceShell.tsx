@@ -14,6 +14,7 @@ import { useUiStore } from "../../stores/uiStore";
 import { useWorkspaceModeStore } from "../../stores/workspaceModeStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
+import { useActivityStreamStore } from "../../stores/activityStreamStore";
 import {
   isTerminalCollapsed,
   ratioFromPointer,
@@ -21,6 +22,8 @@ import {
 } from "../../lib/splitWorkspaceLayout";
 import { TerminalColumn } from "./TerminalColumn";
 import { WorkTabs } from "./WorkTabs";
+import { FileTree } from "../sidebar/FileTree";
+import { ActivityStreamPanel } from "../activity/ActivityStreamPanel";
 
 /**
  * Unified Workspace shell — the flag-ON experience (CEO-confirmed IDE split).
@@ -54,6 +57,13 @@ export function WorkspaceShell() {
     (s) => s.toggleTerminalCollapsed,
   );
   const setActiveTab = useSplitWorkspaceStore((s) => s.setActiveTab);
+  const fileTreeOpen = useSplitWorkspaceStore((s) => s.fileTreeOpen);
+  const toggleFileTree = useSplitWorkspaceStore((s) => s.toggleFileTree);
+
+  // Far-right Activity Stream panel — reuses the shared store (its own header
+  // ✕ / ⌘⇧A also toggle it). `open` persists across restarts (see store).
+  const activityOpen = useActivityStreamStore((s) => s.open);
+  const toggleActivity = useActivityStreamStore((s) => s.toggle);
 
   // Track the split container width for the narrow-window auto-collapse. A
   // callback ref (dis)connects the observer as the body mounts/unmounts, so it
@@ -193,53 +203,133 @@ export function WorkspaceShell() {
         </button>
       </div>
 
-      {/* Body: terminal column | divider | work tabs. */}
-      <div
-        ref={bodyRefCb}
-        className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
-      >
-        {collapsed ? (
-          <>
-            <TerminalColumn
-              collapsed
-              onToggle={toggleTerminalCollapsed}
-              onOpenAgents={() => {
-                if (terminalCollapsed) toggleTerminalCollapsed();
-              }}
-            />
-            <div className="min-w-0 flex-1 overflow-hidden">
-              <WorkTabs />
-            </div>
-          </>
-        ) : (
-          <>
-            <div
-              className="min-w-0 overflow-hidden"
-              style={{
-                flexBasis: `${ratio * 100}%`,
-                flexGrow: 0,
-                flexShrink: 0,
-              }}
+      {/* Body: file-tree rail | split area (terminals | divider | tabs) |
+          activity rail. The two side panels sit OUTSIDE the measured split area
+          so opening/closing them never skews the terminal↔tabs ratio math or
+          the narrow-collapse breakpoint. */}
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        {/* Far-left file-tree toggle rail (always present) + panel (opt-in). */}
+        <div className="flex h-full w-8 flex-shrink-0 flex-col items-center border-r border-gray-700 bg-gray-800 py-2">
+          <button
+            type="button"
+            onClick={toggleFileTree}
+            title={t(
+              fileTreeOpen ? "workspace.hideFiles" : "workspace.showFiles",
+            )}
+            aria-label={t(
+              fileTreeOpen ? "workspace.hideFiles" : "workspace.showFiles",
+            )}
+            aria-pressed={fileTreeOpen}
+            className={`rounded p-1.5 hover:bg-gray-700 hover:text-gray-200 ${
+              fileTreeOpen ? "text-blue-400" : "text-gray-400"
+            }`}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
-              <TerminalColumn
-                collapsed={false}
-                onToggle={toggleTerminalCollapsed}
-                onOpenAgents={() => {}}
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
               />
-            </div>
+            </svg>
+          </button>
+        </div>
+        {fileTreeOpen && (
+          <div className="flex w-60 min-w-0 flex-shrink-0 flex-col overflow-hidden border-r border-gray-700 bg-gray-900">
+            <FileTree />
+          </div>
+        )}
 
+        {/* Middle split area — measured (bodyRefCb) for the horizontal divider
+            drag + narrow-window auto-collapse. */}
+        <div
+          ref={bodyRefCb}
+          className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
+        >
+          {collapsed ? (
+            <>
+              <TerminalColumn
+                collapsed
+                onToggle={toggleTerminalCollapsed}
+                onOpenAgents={() => {
+                  if (terminalCollapsed) toggleTerminalCollapsed();
+                }}
+              />
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <WorkTabs />
+              </div>
+            </>
+          ) : (
+            <>
+              <div
+                className="min-w-0 overflow-hidden"
+                style={{
+                  flexBasis: `${ratio * 100}%`,
+                  flexGrow: 0,
+                  flexShrink: 0,
+                }}
+              >
+                <TerminalColumn
+                  collapsed={false}
+                  onToggle={toggleTerminalCollapsed}
+                  onOpenAgents={() => {}}
+                />
+              </div>
+
+              <div
+                onMouseDown={onDividerDown}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t("workspace.terminals")}
+                className="w-1 flex-shrink-0 cursor-col-resize bg-gray-700 transition-colors hover:bg-blue-600"
+              />
+
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <WorkTabs />
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Far-right Activity Stream: the full panel when open (its header ✕
+            closes it), else a slim rail whose button re-opens it. */}
+        {activityOpen ? (
+          <ActivityStreamPanel />
+        ) : (
+          <div className="flex h-full w-8 flex-shrink-0 flex-col items-center border-l border-[#313244] bg-gray-800 py-2">
+            <button
+              type="button"
+              onClick={toggleActivity}
+              title={t("workspace.showActivity")}
+              aria-label={t("workspace.showActivity")}
+              className="rounded p-1.5 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+            </button>
             <div
-              onMouseDown={onDividerDown}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t("workspace.terminals")}
-              className="w-1 flex-shrink-0 cursor-col-resize bg-gray-700 transition-colors hover:bg-blue-600"
-            />
-
-            <div className="min-w-0 flex-1 overflow-hidden">
-              <WorkTabs />
+              className="mt-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+              style={{ writingMode: "vertical-rl" }}
+            >
+              {t("workspace.activity")}
             </div>
-          </>
+          </div>
         )}
       </div>
 

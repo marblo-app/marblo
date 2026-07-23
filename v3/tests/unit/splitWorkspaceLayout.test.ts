@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
   RIGHT_TABS,
+  DEV_ONLY_RIGHT_TABS,
   MIN_RATIO,
   MAX_RATIO,
   DEFAULT_RATIO,
+  MIN_V_RATIO,
+  MAX_V_RATIO,
+  DEFAULT_V_RATIO,
   NARROW_BREAKPOINT,
   clampRatio,
   parseStoredRatio,
@@ -12,6 +16,10 @@ import {
   isRightTab,
   isTerminalCollapsed,
   ratioFromPointer,
+  clampVerticalRatio,
+  parseStoredVerticalRatio,
+  verticalRatioFromPointer,
+  visibleRightTabs,
 } from "../../src/lib/splitWorkspaceLayout";
 
 describe("clampRatio", () => {
@@ -97,5 +105,82 @@ describe("ratioFromPointer", () => {
 
   it("returns DEFAULT when width is degenerate", () => {
     expect(ratioFromPointer(600, 100, 0)).toBe(DEFAULT_RATIO);
+  });
+});
+
+describe("clampVerticalRatio", () => {
+  it("clamps below MIN_V and above MAX_V", () => {
+    expect(clampVerticalRatio(0)).toBe(MIN_V_RATIO);
+    expect(clampVerticalRatio(-3)).toBe(MIN_V_RATIO);
+    expect(clampVerticalRatio(1)).toBe(MAX_V_RATIO);
+    expect(clampVerticalRatio(42)).toBe(MAX_V_RATIO);
+  });
+
+  it("passes an in-band value through and defaults to an even split", () => {
+    expect(clampVerticalRatio(0.5)).toBe(0.5);
+    expect(DEFAULT_V_RATIO).toBe(0.5);
+  });
+
+  it("falls back to DEFAULT_V_RATIO for non-finite input", () => {
+    expect(clampVerticalRatio(Number.NaN)).toBe(DEFAULT_V_RATIO);
+    expect(clampVerticalRatio(Number.POSITIVE_INFINITY)).toBe(DEFAULT_V_RATIO);
+  });
+});
+
+describe("parseStoredVerticalRatio", () => {
+  it("returns DEFAULT_V for null/undefined/garbage", () => {
+    expect(parseStoredVerticalRatio(null)).toBe(DEFAULT_V_RATIO);
+    expect(parseStoredVerticalRatio(undefined)).toBe(DEFAULT_V_RATIO);
+    expect(parseStoredVerticalRatio("nope")).toBe(DEFAULT_V_RATIO);
+  });
+
+  it("parses and clamps a persisted string", () => {
+    expect(parseStoredVerticalRatio("0.6")).toBe(0.6);
+    expect(parseStoredVerticalRatio("0.01")).toBe(MIN_V_RATIO);
+    expect(parseStoredVerticalRatio("0.99")).toBe(MAX_V_RATIO);
+  });
+});
+
+describe("verticalRatioFromPointer", () => {
+  it("maps pointer Y within the column to a clamped fraction", () => {
+    // column: top=200, height=800 → pointer at 600 → (600-200)/800 = 0.5
+    expect(verticalRatioFromPointer(600, 200, 800)).toBe(0.5);
+  });
+
+  it("clamps a drag past the edges into the legal band", () => {
+    expect(verticalRatioFromPointer(200, 200, 800)).toBe(MIN_V_RATIO); // frac 0
+    expect(verticalRatioFromPointer(1000, 200, 800)).toBe(MAX_V_RATIO); // frac 1
+  });
+
+  it("returns DEFAULT_V when height is degenerate", () => {
+    expect(verticalRatioFromPointer(600, 200, 0)).toBe(DEFAULT_V_RATIO);
+  });
+});
+
+describe("visibleRightTabs", () => {
+  it("hides dev-only tabs when no dev features are enabled", () => {
+    const visible = visibleRightTabs([]);
+    for (const t of DEV_ONLY_RIGHT_TABS) expect(visible).not.toContain(t);
+    // Non-dev tabs always show.
+    expect(visible).toContain("board");
+    expect(visible).toContain("usage");
+    expect(visible).toContain("harness");
+  });
+
+  it("surfaces a dev-only tab only when its id is enabled", () => {
+    const visible = visibleRightTabs(["flows"]);
+    expect(visible).toContain("flows");
+    expect(visible).not.toContain("missions");
+    expect(visible).not.toContain("deploy");
+  });
+
+  it("preserves RIGHT_TABS order and never invents ids", () => {
+    const visible = visibleRightTabs(["missions", "flows", "deploy"]);
+    expect(visible).toEqual([...RIGHT_TABS]);
+  });
+
+  it("excludes agents (terminals live in the left column)", () => {
+    expect(RIGHT_TABS as readonly string[]).not.toContain("agents");
+    expect(isRightTab("agents")).toBe(false);
   });
 });

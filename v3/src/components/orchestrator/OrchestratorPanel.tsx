@@ -75,7 +75,19 @@ interface SessionInfo {
   agentId?: string;
 }
 
-export default memo(function OrchestratorPanel() {
+interface OrchestratorPanelProps {
+  /**
+   * Fill mode (Workspace shell vertical split): the panel stretches to fill its
+   * parent flex cell instead of owning a fixed pixel height, and its own top
+   * resize handle is suppressed (the shell's divider owns resizing). Default
+   * false → legacy fixed-height behavior (pixel-identical to before).
+   */
+  fill?: boolean;
+}
+
+export default memo(function OrchestratorPanel({
+  fill = false,
+}: OrchestratorPanelProps) {
   const { t } = useTranslation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const rootPath = useEditorStore((s) => s.rootPath);
@@ -396,11 +408,15 @@ export default memo(function OrchestratorPanel() {
 
   return (
     <div
-      className="flex flex-col flex-shrink-0 border-t border-[#313244] bg-[#181825]"
-      style={{ height }}
+      className={
+        fill
+          ? "flex h-full min-h-0 flex-col border-t border-[#313244] bg-[#181825]"
+          : "flex flex-col flex-shrink-0 border-t border-[#313244] bg-[#181825]"
+      }
+      style={fill ? undefined : { height }}
     >
-      {/* Resize handle */}
-      {!isCollapsed && isRunning && (
+      {/* Resize handle — suppressed in fill mode (shell divider owns sizing). */}
+      {!isCollapsed && isRunning && !fill && (
         <div
           onMouseDown={handleDragStart}
           className="h-1 flex-shrink-0 cursor-row-resize bg-[#313244] hover:bg-[#89b4fa] transition-colors"

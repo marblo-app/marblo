@@ -11,14 +11,59 @@
  * clamping and parse rules are unit-testable in the node test environment.
  */
 
-/** Right-pane tabs, in bar order. Terminals live in the LEFT column, not here. */
-export const RIGHT_TABS = ["board", "code", "worktrees", "history"] as const;
+/**
+ * Right-pane tabs, in bar order. Terminals + agents live in the LEFT column,
+ * not here — so `agents` is intentionally absent. Every id maps 1:1 to a reused
+ * legacy tab component (WorkTabs.TAB_COMPONENTS); we never reimplement a view.
+ */
+export const RIGHT_TABS = [
+  "board",
+  "code",
+  "worktrees",
+  "history",
+  "lanes",
+  "guide",
+  "usage",
+  "harness",
+  "missions",
+  "flows",
+  "deploy",
+] as const;
 export type RightTabId = (typeof RIGHT_TABS)[number];
+
+/**
+ * Tabs hidden in production — surfaced only when VITE_DEV_FEATURES lists the id.
+ * Mirrors TabBar.DEV_ONLY_TABS so the shell and the legacy tab bar gate the same
+ * feature-flagged views identically.
+ */
+export const DEV_ONLY_RIGHT_TABS: ReadonlySet<RightTabId> = new Set<RightTabId>(
+  ["missions", "flows", "deploy"],
+);
+
+/**
+ * The tabs to actually render, given the parsed VITE_DEV_FEATURES list. Pure so
+ * the dev-gating rule is unit-testable without an import.meta.env stub.
+ */
+export function visibleRightTabs(devFeatures: string[]): RightTabId[] {
+  return RIGHT_TABS.filter(
+    (t) => !DEV_ONLY_RIGHT_TABS.has(t) || devFeatures.includes(t),
+  );
+}
 
 /** Left (terminal) pane width as a fraction of the split container. */
 export const MIN_RATIO = 0.2;
 export const MAX_RATIO = 0.7;
 export const DEFAULT_RATIO = 0.4;
+
+/**
+ * Vertical split inside the LEFT column: the orchestrator pane's height as a
+ * fraction of the column, with the agent pane taking the rest. Wider legal band
+ * than the horizontal split (either terminal can be the focus) and defaults to
+ * an even 50/50.
+ */
+export const MIN_V_RATIO = 0.2;
+export const MAX_V_RATIO = 0.8;
+export const DEFAULT_V_RATIO = 0.5;
 
 /**
  * Below this container width (px) the terminal column auto-collapses to a slim
@@ -76,4 +121,32 @@ export function ratioFromPointer(
 ): number {
   if (!(width > 0)) return DEFAULT_RATIO;
   return clampRatio((clientX - left) / width);
+}
+
+/** Clamp a raw vertical fraction into [MIN_V, MAX_V]; non-finite → default. */
+export function clampVerticalRatio(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_V_RATIO;
+  return Math.min(MAX_V_RATIO, Math.max(MIN_V_RATIO, n));
+}
+
+/** Parse a persisted vertical-ratio string; anything invalid → DEFAULT_V_RATIO. */
+export function parseStoredVerticalRatio(
+  raw: string | null | undefined,
+): number {
+  if (raw == null) return DEFAULT_V_RATIO;
+  const n = Number.parseFloat(raw);
+  return Number.isFinite(n) ? clampVerticalRatio(n) : DEFAULT_V_RATIO;
+}
+
+/**
+ * Vertical fraction from a drag: pointer Y relative to the column, clamped to
+ * the legal band. `top`/`height` come from getBoundingClientRect.
+ */
+export function verticalRatioFromPointer(
+  clientY: number,
+  top: number,
+  height: number,
+): number {
+  if (!(height > 0)) return DEFAULT_V_RATIO;
+  return clampVerticalRatio((clientY - top) / height);
 }

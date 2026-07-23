@@ -39,6 +39,13 @@ function formatAge(date?: Date): string {
 interface Props {
   onJumpToAgent: (agentId: string) => void;
   onSpawnClick: () => void;
+  /**
+   * Fill mode (Workspace shell vertical split): the panel stretches to fill its
+   * parent flex cell instead of owning a fixed pixel height, and its own top
+   * resize handle is suppressed (the shell's divider owns resizing). Default
+   * false → legacy fixed-height behavior (pixel-identical to before).
+   */
+  fill?: boolean;
 }
 
 // Module-level so re-renders don't reset the count and "Terminal 1" doesn't
@@ -46,7 +53,11 @@ interface Props {
 // Layout.tsx's terminal:new event listener which has its own counter.
 let terminalSpawnCounter = 0;
 
-export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
+export function AgentListPanel({
+  onJumpToAgent,
+  onSpawnClick,
+  fill = false,
+}: Props) {
   const { t } = useTranslation();
   const agents = useAgentStore((s) => s.agents);
   const subscribeToAgents = useAgentStore((s) => s.subscribeToAgents);
@@ -452,17 +463,24 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
 
   return (
     <div
-      className="flex flex-col flex-shrink-0 bg-[#181825] border-t border-[#313244]"
-      style={{ height: panelHeight }}
+      className={
+        fill
+          ? "flex h-full min-h-0 flex-col bg-[#181825] border-t border-[#313244]"
+          : "flex flex-col flex-shrink-0 bg-[#181825] border-t border-[#313244]"
+      }
+      style={fill ? undefined : { height: panelHeight }}
     >
-      {/* Resize handle — drag up to grow, down to shrink. */}
-      <div
-        onMouseDown={handleDragStart}
-        className="h-1 flex-shrink-0 cursor-row-resize bg-[#313244] hover:bg-[#89b4fa] transition-colors"
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize agent list panel"
-      />
+      {/* Resize handle — drag up to grow, down to shrink. Suppressed in fill
+          mode (the shell's vertical divider owns resizing). */}
+      {!fill && (
+        <div
+          onMouseDown={handleDragStart}
+          className="h-1 flex-shrink-0 cursor-row-resize bg-[#313244] hover:bg-[#89b4fa] transition-colors"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize agent list panel"
+        />
+      )}
       <div className="flex items-center justify-between px-3 py-1.5 text-[11px] text-[#6c7086] border-b border-[#313244]">
         <span>
           {focusedRow ? (
