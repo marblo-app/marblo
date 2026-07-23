@@ -137,6 +137,23 @@ export async function initMainSentry(
       dsn: opts.dsn,
       release: opts.release,
       environment: opts.environment,
+      // ★ MUST be Classic. @sentry/electron's default ipcMode is `Both`
+      // (Classic | Protocol), and the Protocol half calls
+      // `protocol.registerSchemesAsPrivileged`, which Electron only permits
+      // BEFORE the app 'ready' event — @sentry/electron throws
+      // "Sentry SDK should be initialized before the Electron app 'ready'
+      // event is fired" otherwise. Our init is consent-driven and therefore
+      // ALWAYS post-ready (the renderer has to boot, authenticate and read
+      // consent before it can call us), so the default mode made this
+      // function throw on every single call: Sentry never initialized in any
+      // build, dev or production, no matter the DSN or consent state.
+      //
+      // Classic mode uses plain ipcMain/ipcRenderer channels, which are set
+      // up by `require("@sentry/electron/preload")` in electron/preload.ts —
+      // already present — so we lose nothing by dropping the protocol
+      // transport. Do not remove this option, and do not remove the preload
+      // require, without re-testing a post-ready init end to end.
+      ipcMode: Sentry.IPCMode.Classic,
       // Baseline sampling; bump after launch when we have real volume.
       tracesSampleRate: 0.1,
       // Never attach automatic PII (IP, cookies, etc.).
@@ -144,6 +161,11 @@ export async function initMainSentry(
       beforeSend: (event: unknown): unknown => scrubMainEvent(event),
     });
     initialized = true;
+    console.info(
+      `[Sentry:main] initialized (env=${opts.environment ?? "unset"}, release=${
+        opts.release ?? "unset"
+      }, ipcMode=Classic)`,
+    );
     return true;
   } catch (err) {
     console.warn("[Sentry:main] init failed:", err);

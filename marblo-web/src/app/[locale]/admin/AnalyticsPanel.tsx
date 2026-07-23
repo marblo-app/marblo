@@ -2622,11 +2622,13 @@ export default function AnalyticsPanel() {
         <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 py-10 text-center">
           <ShieldOff className="h-6 w-6 text-zinc-600" />
           <p className="text-sm font-medium text-zinc-400">
-            Sentry 연동 대기 (v2)
+            어드민 대시보드 연동 대기
           </p>
           <p className="max-w-md text-xs text-zinc-600">
-            크래시/에러율·릴리스별 안정성 KPI 는 Sentry DSN 설정 후
-            활성화됩니다. 현재 DSN 미설정 상태로 데이터 소스가 없습니다.
+            앱의 Sentry 크래시 리포팅은 DSN 이 설정되어 있고 사용자 동의 시
+            동작합니다. 다만 이 패널이 Sentry API 에서 지표를 읽어오는 연동은
+            아직 구현되지 않아 표시할 수치가 없습니다. 크래시/에러율·릴리스별
+            안정성 KPI 는 sentry.io 프로젝트에서 확인하세요.
           </p>
         </div>
       </div>

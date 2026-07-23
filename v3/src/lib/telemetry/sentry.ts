@@ -125,6 +125,12 @@ export async function maybeInitSentry(consented: boolean): Promise<void> {
   });
   initialized = true;
   enabled = true;
+  // Single positive signal so "is Sentry actually on?" is answerable from the
+  // devtools console in any build (dev included) without guessing. Never logs
+  // the DSN itself.
+  console.info(
+    `[Sentry] initialized (env=${ENVIRONMENT}, release=${RELEASE ?? "unset"})`,
+  );
 }
 
 /** Push a runtime error. No-ops if SDK absent or user opted out. */
