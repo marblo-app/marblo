@@ -365,6 +365,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
         estimatedHours: number;
       }>,
     ) => ipcRenderer.invoke("orchestrator:createTasks", tasks),
+    // In-process, project-resolved delivery of a free-form instruction to the
+    // project's orchestrator PTY. Returns a REAL ack ({ delivered, reason }) so
+    // the renderer router can fall through to the durable queue on a miss —
+    // unlike the fire-and-forget pty.writeAndSubmit it replaces.
+    injectMessage: (
+      projectId: string,
+      message: string,
+    ): Promise<{ delivered: boolean; reason?: string }> =>
+      ipcRenderer.invoke("orchestrator:injectMessage", { projectId, message }),
   },
   orchestratorSession: {
     // model: 이번 launch 의 명시 모델(패널 Start). 생략하면 main 이 프로젝트별

@@ -5462,6 +5462,49 @@ ipcMain.handle(
   }
 );
 
+// orchestrator:injectMessage — the in-process, project-resolved, guard-free
+// delivery path for renderer-originated orchestrator instructions (Worktrees-tab
+// "Review request" button, diff inline comments). Unlike the old
+// pty.list()+writeAndSubmit fast path — which grabbed the first PTY named
+// "orchestrator" across ALL windows and fired-and-forgot, so a detached pop-out
+// or second window (a non-owner of that PTY) was silently dropped by
+// isPtyCallerOwner while the UI still flashed a success toast — this resolves the
+// orchestrator by projectId in main and injects through OrchestratorManager.
+// injectMessage (boot-gate + board-routing-gate serialised), returning a REAL
+// ack. When there is no local orchestrator for the project, it isn't running, or
+// the injection couldn't be committed, we return delivered:false with a reason so
+// the renderer router can fall through to the durable Firestore queue and the UI
+// can honestly show queued/failed instead of a phantom "sent".
+ipcMain.handle(
+  "orchestrator:injectMessage",
+  async (
+    _event,
+    { projectId, message }: { projectId: string; message: string },
+  ): Promise<{ delivered: boolean; reason?: string }> => {
+    if (!projectId || typeof message !== "string" || message.length === 0) {
+      return { delivered: false, reason: "invalid-args" };
+    }
+    const orch = orchestrators.get(projectId);
+    if (!orch) {
+      return { delivered: false, reason: "no-local-orchestrator" };
+    }
+    if (!orch.isRunning()) {
+      return { delivered: false, reason: "orchestrator-not-running" };
+    }
+    try {
+      const delivered = await orch.injectMessage(message);
+      return delivered
+        ? { delivered: true }
+        : { delivered: false, reason: "inject-not-committed" };
+    } catch (err) {
+      return {
+        delivered: false,
+        reason: err instanceof Error ? err.message : "inject-error",
+      };
+    }
+  },
+);
+
 // --- Orchestrator Session IPC Handlers ---
 
 const ORCHESTRATOR_SWITCH_STEP_TIMEOUT_MS = 25_000;

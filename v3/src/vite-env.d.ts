@@ -235,6 +235,16 @@ interface OrchestratorAPI {
   createTasks: (
     tasks: DecomposedTaskDTO[],
   ) => Promise<{ tasks: DecomposedTaskDTO[]; layers: string[][] }>;
+  /**
+   * Inject a free-form instruction into the project's orchestrator PTY in-process
+   * (guard-free, project-resolved). Returns a real ack: `delivered` is true only
+   * when the message was actually committed to a running orchestrator; otherwise
+   * `reason` explains the miss so the caller can fall through to the durable queue.
+   */
+  injectMessage: (
+    projectId: string,
+    message: string,
+  ) => Promise<{ delivered: boolean; reason?: string }>;
 }
 
 interface MissionOrchestratorAPI {
