@@ -101,8 +101,53 @@ const bigquery = new BigQuery({ location: BQ_LOCATION });
 const BQ_DATASET = "marblo_telemetry";
 const BQ_EVENTS_TABLE = "events";
 const BQ_COST_TABLE = "cost_logs";
+const ADMIN_ANALYTICS_RUNTIME_OPTIONS: functions.RuntimeOptions = {
+  timeoutSeconds: 60,
+  memory: "512MB",
+};
 const GITHUB_MERGE_HISTORY_WEBHOOK_TOKEN =
   process.env.GITHUB_MERGE_HISTORY_WEBHOOK_TOKEN || "";
+
+type BigQueryRow = Record<string, unknown>;
+type BigQueryRows = BigQueryRow[];
+
+interface AdminAnalyticsQuerySpec {
+  name: string;
+  query: string;
+  params: Record<string, unknown>;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function runAdminAnalyticsQueries(
+  specs: readonly AdminAnalyticsQuerySpec[],
+): Promise<BigQueryRows[]> {
+  const settled = await Promise.allSettled(
+    specs.map((spec) =>
+      bigquery.query({
+        query: spec.query,
+        params: spec.params,
+        location: BQ_LOCATION,
+      }),
+    ),
+  );
+
+  return settled.map((result, index) => {
+    const spec = specs[index];
+    if (result.status === "fulfilled") {
+      const [rows] = result.value;
+      return rows as BigQueryRows;
+    }
+
+    functions.logger.error("Admin analytics BigQuery query failed", {
+      queryName: spec?.name ?? `query_${index}`,
+      error: errorMessage(result.reason),
+    });
+    return [];
+  });
+}
 
 type MergeChangeType =
   | "docs"
@@ -6336,8 +6381,10 @@ export const getAdminUsageSummary = functions.https.onCall(
  *
  * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
  */
-export const getAdminOnboardingFunnel = functions.https.onCall(
-  async (data, context) => {
+export const getAdminOnboardingFunnel = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(
+    async (data, context) => {
     requireAdmin(context);
     const rangeDays = parseAnalyticsDays(data);
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
@@ -6347,8 +6394,9 @@ export const getAdminOnboardingFunnel = functions.https.onCall(
     const ex = includeAdmin
       ? EMPTY_EXCLUSION
       : adminClientExclusion(adminClientIds);
-    // events.timestamp 는 STRING 적재 → 비교 전 SAFE_CAST(위 콜러블과 동일 사유).
-    const eventTs = "SAFE_CAST(timestamp AS TIMESTAMP)";
+    // events.timestamp 는 BigQuery TIMESTAMP 컬럼이다. 컬럼을 함수로 감싸면
+    // 파티션/클러스터 프루닝이 약해질 수 있어 직접 비교한다.
+    const eventTs = "timestamp";
 
     // 단일 스캔으로 정확히 뽑히는 단계 = reach 본선 + task_completed(단순 event
     // distinct). core_experience(스폰≥2)·retained_7d(7일내 2세션/2프로젝트)는
@@ -6430,12 +6478,16 @@ export const getAdminOnboardingFunnel = functions.https.onCall(
         HAVING COUNT(*) >= 2
       )
     `;
-    // (b) retained_7d: 첫 활동 후 7일 내 2번째 세션(sessionId≥2) 또는 2번째
-    //     프로젝트(projectId≥2)에 도달한 고유 clientId 수(초기 잔존). win 을 한 번
-    //     걸러(제외절 포함) firstSeen 과 조인 — bare userId 는 win 스캔에서 해석된다.
+    // (b) retained_7d: events에는 sessionId 컬럼이 없고 metadata.sessionId도
+    //     미적재라, 세션은 projectId+활동일 기반 파생 키로 정의한다. 기존
+    //     2번째 프로젝트(projectId≥2) 폴백은 유지한다.
     const retainedQuery = `
       WITH win AS (
-        SELECT userId, ${eventTs} AS ts, sessionId, projectId
+        SELECT
+          userId,
+          ${eventTs} AS ts,
+          DATE(${eventTs}) AS activity_date,
+          projectId
         FROM ${eventsTable}
         WHERE ${eventTs} >= ${since}
           AND userId IS NOT NULL${ex.clause}
@@ -6450,7 +6502,11 @@ export const getAdminOnboardingFunnel = functions.https.onCall(
         JOIN firstSeen f ON f.userId = w.userId
         WHERE w.ts <= TIMESTAMP_ADD(f.first_seen, INTERVAL 7 DAY)
         GROUP BY w.userId
-        HAVING COUNT(DISTINCT w.sessionId) >= 2
+        HAVING COUNT(DISTINCT CONCAT(
+                  COALESCE(w.projectId, '(none)'),
+                  ':',
+                  FORMAT_DATE('%F', w.activity_date)
+                )) >= 2
             OR COUNT(DISTINCT w.projectId) >= 2
       )
     `;
@@ -6484,42 +6540,41 @@ export const getAdminOnboardingFunnel = functions.https.onCall(
       LEFT JOIN firstTask t ON t.userId = s.userId
     `;
 
-    const [[funnelRows], [reasonRows], [coreRows], [retainedRows], [headRows]] =
-      await Promise.all([
-        bigquery.query({
+    const [funnelRows, reasonRows, coreRows, retainedRows, headRows] =
+      await runAdminAnalyticsQueries([
+        {
+          name: "onboarding.funnel",
           query: funnelQuery,
           params: { days: rangeDays, ...eventParams, ...ex.params },
-          location: BQ_LOCATION,
-        }),
-        bigquery.query({
+        },
+        {
+          name: "onboarding.failureReasons",
           query: reasonQuery,
           params: { days: rangeDays, ...failureParams, ...ex.params },
-          location: BQ_LOCATION,
-        }),
-        bigquery.query({
+        },
+        {
+          name: "onboarding.coreExperience",
           query: coreExpQuery,
           params: { days: rangeDays, ...ex.params },
-          location: BQ_LOCATION,
-        }),
-        bigquery.query({
+        },
+        {
+          name: "onboarding.retained7d",
           query: retainedQuery,
           params: { days: rangeDays, ...ex.params },
-          location: BQ_LOCATION,
-        }),
-        bigquery.query({
+        },
+        {
+          name: "onboarding.headline",
           query: headlineQuery,
           params: { days: rangeDays, ...ex.params },
-          location: BQ_LOCATION,
-        }),
+        },
       ]);
 
     // 단일 스캔 row 에 per-client 활성화 스칼라를 병합(순수 빌더가 d_<key> 로 읽는다).
-    const coreRow = (coreRows as Array<Record<string, unknown>>)[0] ?? {};
-    const retainedRow =
-      (retainedRows as Array<Record<string, unknown>>)[0] ?? {};
-    const headRow = (headRows as Array<Record<string, unknown>>)[0] ?? {};
+    const coreRow = coreRows[0] ?? {};
+    const retainedRow = retainedRows[0] ?? {};
+    const headRow = headRows[0] ?? {};
     const funnelRow: Record<string, unknown> = {
-      ...((funnelRows as Array<Record<string, unknown>>)[0] ?? {}),
+      ...(funnelRows[0] ?? {}),
       d_core_experience: coreRow.d_core_experience,
       d_retained_7d: retainedRow.d_retained_7d,
       d_activated_30m: headRow.d_activated_30m,
@@ -6558,8 +6613,10 @@ export const getAdminOnboardingFunnel = functions.https.onCall(
  *
  * params: { days?: number, includeAdmin?: boolean } (기본 30, 제외)
  */
-export const getAdminKpiCockpit = functions.https.onCall(
-  async (data, context) => {
+export const getAdminKpiCockpit = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(
+    async (data, context) => {
     requireAdmin(context);
     const rangeDays = parseAnalyticsDays(data);
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
@@ -6570,8 +6627,9 @@ export const getAdminKpiCockpit = functions.https.onCall(
     const ex = includeAdmin
       ? EMPTY_EXCLUSION
       : adminClientExclusion(adminClientIds);
-    // events.timestamp 는 STRING 적재 → 비교 전 SAFE_CAST(위 콜러블과 동일 사유).
-    const eventTs = "SAFE_CAST(timestamp AS TIMESTAMP)";
+    // events.timestamp 는 BigQuery TIMESTAMP 컬럼이다. 컬럼을 함수로 감싸면
+    // 파티션/클러스터 프루닝이 약해질 수 있어 직접 비교한다.
+    const eventTs = "timestamp";
 
     // ── (1) 헤드라인: 가입(login_success) 후 30분내 첫 티켓 완료 활성화율 ──
     // 게이지 분모(d_signup_base) + 분자(d_activated_30m). getAdminOnboardingFunnel
@@ -6604,10 +6662,14 @@ export const getAdminKpiCockpit = functions.https.onCall(
       LEFT JOIN firstTask t ON t.userId = s.userId
     `;
 
-    // ── (2) 7일 잔존: 첫 활동 후 7일내 2세션/2프로젝트 도달 고유 clientId ──
+    // ── (2) 7일 잔존: 첫 활동 후 7일내 2파생세션/2프로젝트 도달 고유 clientId ──
     const retainedQuery = `
       WITH win AS (
-        SELECT userId, ${eventTs} AS ts, sessionId, projectId
+        SELECT
+          userId,
+          ${eventTs} AS ts,
+          DATE(${eventTs}) AS activity_date,
+          projectId
         FROM ${eventsTable}
         WHERE ${eventTs} >= ${since}
           AND userId IS NOT NULL${ex.clause}
@@ -6622,7 +6684,11 @@ export const getAdminKpiCockpit = functions.https.onCall(
         JOIN firstSeen f ON f.userId = w.userId
         WHERE w.ts <= TIMESTAMP_ADD(f.first_seen, INTERVAL 7 DAY)
         GROUP BY w.userId
-        HAVING COUNT(DISTINCT w.sessionId) >= 2
+        HAVING COUNT(DISTINCT CONCAT(
+                  COALESCE(w.projectId, '(none)'),
+                  ':',
+                  FORMAT_DATE('%F', w.activity_date)
+                )) >= 2
             OR COUNT(DISTINCT w.projectId) >= 2
       )
     `;
@@ -6720,7 +6786,7 @@ export const getAdminKpiCockpit = functions.https.onCall(
       WHERE ${eventTs} >= ${week}${ex.clause}
     `;
 
-    // ── (9) 2번째 세션/프로젝트 도달(윈도우 전체) + 평균 DAU ──
+    // ── (9) 2번째 파생세션/프로젝트 도달(윈도우 전체) + 평균 DAU ──
     const secondSessionQuery = `
       SELECT COUNT(*) AS d_second_session
       FROM (
@@ -6729,7 +6795,11 @@ export const getAdminKpiCockpit = functions.https.onCall(
         WHERE ${eventTs} >= ${since}
           AND userId IS NOT NULL${ex.clause}
         GROUP BY userId
-        HAVING COUNT(DISTINCT sessionId) >= 2
+        HAVING COUNT(DISTINCT CONCAT(
+                  COALESCE(projectId, '(none)'),
+                  ':',
+                  FORMAT_DATE('%F', DATE(${eventTs}))
+                )) >= 2
             OR COUNT(DISTINCT projectId) >= 2
       )
     `;
@@ -6749,37 +6819,40 @@ export const getAdminKpiCockpit = functions.https.onCall(
     // (위 getAdminModelSummary 의 uid/client 분리와 동일 사유) 제외절 파라미터만
     // 넘긴다.
     const daysParams = { days: rangeDays, ...ex.params };
-    const q = (query: string) =>
-      bigquery.query({ query, params: daysParams, location: BQ_LOCATION });
-    const qNoDays = (query: string) =>
-      bigquery.query({ query, params: ex.params, location: BQ_LOCATION });
-
     const [
-      [headRows],
-      [retainedRows],
-      [activityRows],
-      [cliSetupRows],
-      [starRows],
-      [cliFailRows],
-      [demoConsentRows],
-      [weeklyRows],
-      [secondSessionRows],
-      [avgDauRows],
-    ] = await Promise.all([
-      q(headlineQuery),
-      q(retainedQuery),
-      q(activityQuery),
-      q(cliSetupQuery),
-      q(starRatingQuery),
-      q(cliFailQuery),
-      q(demoConsentQuery),
-      qNoDays(weeklyQuery),
-      q(secondSessionQuery),
-      q(avgDauQuery),
+      headRows,
+      retainedRows,
+      activityRows,
+      cliSetupRows,
+      starRows,
+      cliFailRows,
+      demoConsentRows,
+      weeklyRows,
+      secondSessionRows,
+      avgDauRows,
+    ] = await runAdminAnalyticsQueries([
+      { name: "kpi.headline", query: headlineQuery, params: daysParams },
+      { name: "kpi.retained7d", query: retainedQuery, params: daysParams },
+      { name: "kpi.activity", query: activityQuery, params: daysParams },
+      { name: "kpi.cliSetup", query: cliSetupQuery, params: daysParams },
+      { name: "kpi.starRating", query: starRatingQuery, params: daysParams },
+      { name: "kpi.cliFail", query: cliFailQuery, params: daysParams },
+      {
+        name: "kpi.demoConsent",
+        query: demoConsentQuery,
+        params: daysParams,
+      },
+      { name: "kpi.weekly", query: weeklyQuery, params: ex.params },
+      {
+        name: "kpi.secondSession",
+        query: secondSessionQuery,
+        params: daysParams,
+      },
+      { name: "kpi.avgDau", query: avgDauQuery, params: daysParams },
     ]);
 
-    const first = (rows: unknown): Record<string, unknown> =>
-      (rows as Array<Record<string, unknown>>)[0] ?? {};
+    const first = (rows: BigQueryRows): Record<string, unknown> =>
+      rows[0] ?? {};
     const headRow = first(headRows);
     const retainedRow = first(retainedRows);
     const activityRow = first(activityRows);
