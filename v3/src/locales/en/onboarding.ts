@@ -351,6 +351,48 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.project.hint":
     "Once a folder is connected this wizard closes automatically and the orchestrator says hello.",
   "onboarding.cliGate.done": "Done",
+
+  // — CliSetupGate linear 4-step activation wizard (ticket ir94m9C6) —
+  // Progress-indicator step labels
+  "onboarding.cliGate.step.install": "Install",
+  "onboarding.cliGate.step.auth": "Sign in",
+  "onboarding.cliGate.step.prd": "PRD",
+  "onboarding.cliGate.step.firstTicket": "First ticket",
+  // ① Install
+  "onboarding.cliGate.install.title": "① Install the CLI",
+  "onboarding.cliGate.install.body":
+    "Install the AI CLI that runs the orchestrator. We try to install it automatically, and show the official install method if that fails.",
+  "onboarding.cliGate.install.costNote":
+    "AI usage is not part of your Marblo plan — it's billed to the Claude Code / Codex accounts you already use.",
+  "onboarding.cliGate.install.officialHint":
+    "If auto-install is blocked (e.g. EACCES / npm prefix permission issues), run the command below in a terminal yourself, or follow the official install docs.",
+  "onboarding.cliGate.install.official": "Open official install docs",
+  // ② Auth
+  "onboarding.cliGate.auth.title": "② Sign in",
+  "onboarding.cliGate.auth.body":
+    "Sign in to just one of Claude Code or Codex. ‘Run sign-in’ runs in a built-in terminal and is detected automatically when done.",
+  "onboarding.cliGate.auth.needInstall":
+    "Install a CLI first before signing in. Go back to the install step.",
+  // ③ Sample PRD
+  "onboarding.cliGate.prd.title": "③ Sample PRD",
+  "onboarding.cliGate.prd.body":
+    "Connect a folder to work in and start from a sample PRD. Connecting a folder opens the orchestrator automatically.",
+  // ④ First ticket (the aha moment)
+  "onboarding.cliGate.firstTicket.title": "④ Create your first ticket",
+  "onboarding.cliGate.firstTicket.body":
+    "Ask the orchestrator to create your first ticket from this PRD and propose spawning an agent. The button hands it your first prompt — then watch the orchestrator get to work.",
+  "onboarding.cliGate.firstTicket.create":
+    "Create my first ticket from this PRD",
+  "onboarding.cliGate.firstTicket.creating": "Sending to the orchestrator…",
+  "onboarding.cliGate.firstTicket.sent":
+    "First prompt sent — the orchestrator is preparing your first ticket. Hang tight.",
+  "onboarding.cliGate.firstTicket.failed":
+    "Couldn't send it. Make sure the orchestrator is running, then try again.",
+  "onboarding.cliGate.firstTicket.needProject":
+    "Connect a folder first (step ③).",
+  // First prompt sent to the orchestrator — wires into the tf-start greeting hook.
+  "onboarding.cliGate.firstTicket.prompt":
+    "Read this project's PRD.md and create the first ticket from it. Then propose spawning the right agent(s) for that ticket.",
   // Sample PRD file contents (nudges the first ticket, opened in the editor)
   "onboarding.cliGate.prdContent":
     "# Product Requirements (PRD)\n\n> This is a Marblo sample PRD. Replace the sections below with your own goal, then tell the orchestrator: 'Create my first ticket from this PRD.'\n\n## What are we building?\nDescribe the goal in one sentence. e.g. A simple landing page where visitors can leave their email.\n\n## Why does it matter?\nDescribe the problem this solves.\n\n## Key requirements\n- [ ] Requirement 1\n- [ ] Requirement 2\n- [ ] Requirement 3\n\n## Definition of done\n- What makes this 'done'?\n",

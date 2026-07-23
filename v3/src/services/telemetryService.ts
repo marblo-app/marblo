@@ -157,7 +157,7 @@ const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
 export function setTelemetryEnabled(
   enabled: boolean,
-  options: { persist?: boolean } = {},
+  options: { persist?: boolean } = {}
 ) {
   const next = firstPartyTelemetryDefaultEnabled() && enabled;
   telemetryEnabled = next;
@@ -339,7 +339,7 @@ export const telemetry = {
     name: string,
     model: string,
     role: string,
-    projectId?: string,
+    projectId?: string
   ) {
     logTelemetry({
       event: "agent:spawned",
@@ -367,7 +367,7 @@ export const telemetry = {
     model?: string,
     dispatchReason?: string,
     errorCategory?: string,
-    errorMessage?: string,
+    errorMessage?: string
   ) {
     logTelemetry({
       event: "agent:crashed",
@@ -392,7 +392,7 @@ export const telemetry = {
     attempt: number,
     taskId?: string,
     model?: string,
-    dispatchReason?: string,
+    dispatchReason?: string
   ) {
     logTelemetry({
       event: "agent:restarted",
@@ -409,7 +409,7 @@ export const telemetry = {
     taskId: string,
     projectId: string,
     role: string,
-    priority?: number,
+    priority?: number
   ) {
     logTelemetry({
       event: "task:created",
@@ -424,7 +424,7 @@ export const telemetry = {
     taskId: string,
     fromStatus: string,
     toStatus: string,
-    agentId?: string,
+    agentId?: string
   ) {
     logTelemetry({
       event: "task:status_changed",
@@ -455,7 +455,7 @@ export const telemetry = {
     flowId: string,
     nodeType: string,
     durationMs: number,
-    success: boolean,
+    success: boolean
   ) {
     logTelemetry({
       event: "flow:node_executed",
@@ -470,7 +470,7 @@ export const telemetry = {
     flowId: string,
     status: string,
     durationMs: number,
-    nodeCount: number,
+    nodeCount: number
   ) {
     logTelemetry({
       event: "flow:completed",
@@ -488,7 +488,7 @@ export const telemetry = {
     tokensInput: number,
     tokensOutput: number,
     cost: number,
-    projectId?: string,
+    projectId?: string
   ) {
     logTelemetry({
       event: "token:usage",
@@ -604,15 +604,28 @@ export const telemetry = {
   },
 
   /** 연결 마법사(CliSetupGate)의 한 단계 이벤트.
-   *  step = notice(고지) | connect(CLI 감지·설치·로그인·인증) | project(폴더연결·PRD·오케실행).
+   *  ★활성화 퍼널(ticket ir94m9C6): 선형 4스텝으로 확장 —
+   *  step = install(CLI 설치) | auth(인증, claude/codex 하나) | prd(폴더연결·샘플 PRD) |
+   *         firstTicket(첫 티켓 프롬프트 전송, 아하 모먼트).
+   *  하위호환: 구 3스텝(notice/connect/project) 값도 그대로 받는다 —
+   *  BQ 퍼널 스키마(event/metadata.step)를 깨지 않고 install/auth/prd/firstTicket 로
+   *  세분화만 한 것이라 과거 이벤트와 한 축에서 조인된다.
    *  phase = enter(진입) | success(단계 완료) | fail(단계 실패).
-   *  reason = 실패 사유. connect 단계 실패는 orchestrator_blocked 와 같은
-   *  cli_auth 어휘를, project 단계 실패는 launch_error 를 재사용해 두 퍼널을
+   *  reason = 실패 사유. install/auth 단계 실패는 orchestrator_blocked 와 같은
+   *  cli_auth 어휘를, firstTicket 단계 실패는 launch_error 를 재사용해 두 퍼널을
    *  같은 축으로 조인할 수 있게 한다. 경로/자유텍스트는 절대 싣지 않는다. */
   cliSetupStep(
-    step: "notice" | "connect" | "project",
+    step:
+      | "install"
+      | "auth"
+      | "prd"
+      | "firstTicket"
+      // 하위호환용 구 3스텝 값 (재배치 전 이벤트와 스키마 호환)
+      | "notice"
+      | "connect"
+      | "project",
     phase: "enter" | "success" | "fail",
-    reason?: string,
+    reason?: string
   ) {
     logTelemetry({
       event: "onboarding:cli_setup_step",

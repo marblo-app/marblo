@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
   autoInstallComplete,
+  canAdvanceWizard,
+  initialWizardStep,
+  nextWizardStep,
   resolveGateVisibility,
   requiredInstalled,
   requiredReady,
+  WIZARD_STEPS,
   type CliProbe,
 } from "../../src/lib/cliSetupGate";
 
@@ -17,7 +21,7 @@ describe("autoInstallComplete (FT-8)", () => {
       autoInstallComplete(["cli-claude-code", "cli-codex"], {
         "cli-claude-code": installedOnly,
         "cli-codex": ready,
-      }),
+      })
     ).toBe(true);
   });
 
@@ -26,7 +30,7 @@ describe("autoInstallComplete (FT-8)", () => {
       autoInstallComplete(["cli-claude-code", "cli-codex"], {
         "cli-claude-code": missing, // install failed
         "cli-codex": ready,
-      }),
+      })
     ).toBe(false);
   });
 
@@ -34,7 +38,7 @@ describe("autoInstallComplete (FT-8)", () => {
     expect(
       autoInstallComplete(["cli-claude-code"], {
         /* nothing probed back */
-      }),
+      })
     ).toBe(false);
   });
 });
@@ -46,7 +50,7 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
         requiredReady: false,
         requiredInstalled: false,
         dismissed: false,
-      }),
+      })
     ).toEqual({ visible: true, clearDismissed: false });
   });
 
@@ -56,7 +60,7 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
         requiredReady: false,
         requiredInstalled: false,
         dismissed: true,
-      }),
+      })
     ).toEqual({ visible: true, clearDismissed: true });
   });
 
@@ -66,7 +70,7 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
         requiredReady: false,
         requiredInstalled: true,
         dismissed: true,
-      }),
+      })
     ).toEqual({ visible: false, clearDismissed: false });
   });
 
@@ -76,14 +80,14 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
         requiredReady: true,
         requiredInstalled: true,
         dismissed: false,
-      }),
+      })
     ).toEqual({ visible: false, clearDismissed: false });
     expect(
       resolveGateVisibility({
         requiredReady: true,
         requiredInstalled: true,
         dismissed: true,
-      }).visible,
+      }).visible
     ).toBe(false);
   });
 
@@ -93,7 +97,7 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
         requiredReady: false,
         requiredInstalled: true,
         dismissed: false,
-      }),
+      })
     ).toEqual({ visible: true, clearDismissed: false });
   });
 });
@@ -106,7 +110,7 @@ describe("requiredInstalled / requiredReady", () => {
       requiredInstalled(ids, {
         "cli-claude-code": missing,
         "cli-codex": ready,
-      }),
+      })
     ).toBe(true);
   });
 
@@ -115,7 +119,7 @@ describe("requiredInstalled / requiredReady", () => {
       requiredInstalled(ids, {
         "cli-claude-code": missing,
         "cli-codex": missing,
-      }),
+      })
     ).toBe(false);
   });
 
@@ -124,13 +128,13 @@ describe("requiredInstalled / requiredReady", () => {
       requiredReady(ids, {
         "cli-claude-code": installedOnly, // not authed
         "cli-codex": ready,
-      }),
+      })
     ).toBe(true);
     expect(
       requiredReady(ids, {
         "cli-claude-code": ready,
         "cli-codex": installedOnly,
-      }),
+      })
     ).toBe(true);
   });
 
@@ -139,7 +143,115 @@ describe("requiredInstalled / requiredReady", () => {
       requiredReady(ids, {
         "cli-claude-code": installedOnly,
         "cli-codex": installedOnly,
-      }),
+      })
     ).toBe(false);
+  });
+});
+
+describe("linear wizard step transitions (ticket ir94m9C6)", () => {
+  it("WIZARD_STEPS is the ordered activation funnel", () => {
+    expect(WIZARD_STEPS).toEqual(["install", "auth", "prd", "firstTicket"]);
+  });
+
+  describe("initialWizardStep — opens at the earliest incomplete step", () => {
+    it("nothing installed → install", () => {
+      expect(
+        initialWizardStep({
+          requiredInstalled: false,
+          requiredReady: false,
+          hasProject: false,
+        })
+      ).toBe("install");
+    });
+
+    it("installed but not authed → auth", () => {
+      expect(
+        initialWizardStep({
+          requiredInstalled: true,
+          requiredReady: false,
+          hasProject: false,
+        })
+      ).toBe("auth");
+    });
+
+    it("authed, no project → prd", () => {
+      expect(
+        initialWizardStep({
+          requiredInstalled: true,
+          requiredReady: true,
+          hasProject: false,
+        })
+      ).toBe("prd");
+    });
+
+    it("authed with a project (re-open) → prd, never firstTicket as an entry", () => {
+      expect(
+        initialWizardStep({
+          requiredInstalled: true,
+          requiredReady: true,
+          hasProject: true,
+        })
+      ).toBe("prd");
+    });
+  });
+
+  describe("canAdvanceWizard — per-step completion gate", () => {
+    const base = {
+      requiredInstalled: false,
+      requiredReady: false,
+      hasProject: false,
+    };
+
+    it("install advances only once a candidate is installed", () => {
+      expect(canAdvanceWizard("install", base)).toBe(false);
+      expect(
+        canAdvanceWizard("install", { ...base, requiredInstalled: true })
+      ).toBe(true);
+    });
+
+    it("auth advances only once a candidate is authenticated", () => {
+      expect(
+        canAdvanceWizard("auth", { ...base, requiredInstalled: true })
+      ).toBe(false);
+      expect(
+        canAdvanceWizard("auth", {
+          ...base,
+          requiredInstalled: true,
+          requiredReady: true,
+        })
+      ).toBe(true);
+    });
+
+    it("prd advances only once a folder is connected (PRD itself optional)", () => {
+      expect(canAdvanceWizard("prd", { ...base, requiredReady: true })).toBe(
+        false
+      );
+      expect(
+        canAdvanceWizard("prd", {
+          ...base,
+          requiredReady: true,
+          hasProject: true,
+        })
+      ).toBe(true);
+    });
+
+    it("firstTicket is terminal — never advances", () => {
+      expect(
+        canAdvanceWizard("firstTicket", {
+          requiredInstalled: true,
+          requiredReady: true,
+          hasProject: true,
+        })
+      ).toBe(false);
+    });
+  });
+
+  describe("nextWizardStep — linear order, terminal at firstTicket", () => {
+    it("walks install → auth → prd → firstTicket → null", () => {
+      expect(nextWizardStep("install")).toBe("auth");
+      expect(nextWizardStep("auth")).toBe("prd");
+      expect(nextWizardStep("prd")).toBe("firstTicket");
+      expect(nextWizardStep("firstTicket")).toBeNull();
+    });
   });
 });

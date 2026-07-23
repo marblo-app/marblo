@@ -347,6 +347,47 @@ export const onboarding = {
   "onboarding.cliGate.project.hint":
     "폴더를 연결하면 이 마법사는 자동으로 닫히고 오케스트레이터가 첫 인사를 건넵니다.",
   "onboarding.cliGate.done": "완료",
+
+  // — CliSetupGate 선형 4스텝 활성화 위저드 (ticket ir94m9C6) —
+  // 진행도 표시용 스텝 라벨
+  "onboarding.cliGate.step.install": "설치",
+  "onboarding.cliGate.step.auth": "인증",
+  "onboarding.cliGate.step.prd": "PRD",
+  "onboarding.cliGate.step.firstTicket": "첫 티켓",
+  // ① 설치
+  "onboarding.cliGate.install.title": "① CLI 설치",
+  "onboarding.cliGate.install.body":
+    "오케스트레이터를 실행할 AI CLI를 설치합니다. 자동으로 설치를 시도하고, 실패하면 공식 설치 방법을 안내합니다.",
+  "onboarding.cliGate.install.costNote":
+    "AI 사용료는 마블로 요금에 포함되지 않습니다 — 이미 쓰고 계신 Claude Code·Codex 계정으로 청구됩니다.",
+  "onboarding.cliGate.install.officialHint":
+    "자동 설치가 막히면(예: EACCES·npm prefix 권한 문제) 아래 명령을 터미널에서 직접 실행하거나 공식 설치 문서를 참고하세요.",
+  "onboarding.cliGate.install.official": "공식 설치 문서 열기",
+  // ② 인증
+  "onboarding.cliGate.auth.title": "② 로그인(인증)",
+  "onboarding.cliGate.auth.body":
+    "Claude Code 또는 Codex 중 하나만 로그인하면 됩니다. ‘인증 실행’을 누르면 내장 터미널에서 진행되고, 완료되면 자동으로 인식합니다.",
+  "onboarding.cliGate.auth.needInstall":
+    "먼저 CLI를 설치해야 로그인할 수 있습니다. 설치 단계로 돌아가 주세요.",
+  // ③ 샘플 PRD
+  "onboarding.cliGate.prd.title": "③ 샘플 PRD",
+  "onboarding.cliGate.prd.body":
+    "작업할 폴더를 연결하고 샘플 PRD로 시작하세요. 폴더를 연결하면 오케스트레이터가 자동으로 열립니다.",
+  // ④ 첫 티켓 (아하 모먼트)
+  "onboarding.cliGate.firstTicket.title": "④ 첫 티켓 만들기",
+  "onboarding.cliGate.firstTicket.body":
+    "오케스트레이터에게 이 PRD로 첫 티켓을 만들고 에이전트 스폰을 제안하도록 요청합니다. 버튼을 누르면 첫 프롬프트가 전달되고, 오케스트레이터가 작업을 시작하는 것을 지켜보세요.",
+  "onboarding.cliGate.firstTicket.create": "이 PRD로 첫 티켓 만들기",
+  "onboarding.cliGate.firstTicket.creating": "오케스트레이터에게 전달하는 중…",
+  "onboarding.cliGate.firstTicket.sent":
+    "첫 프롬프트를 전달했어요 — 오케스트레이터가 첫 티켓을 준비합니다. 잠시 지켜봐 주세요.",
+  "onboarding.cliGate.firstTicket.failed":
+    "전달에 실패했어요. 오케스트레이터가 실행 중인지 확인한 뒤 다시 시도해 주세요.",
+  "onboarding.cliGate.firstTicket.needProject":
+    "먼저 폴더를 연결해 주세요(③ 단계).",
+  // 오케스트레이터에게 보낼 첫 프롬프트 — tf-start 첫인사 훅과 연결된다.
+  "onboarding.cliGate.firstTicket.prompt":
+    "이 프로젝트의 PRD.md를 읽고 그걸로 첫 티켓을 만들어줘. 그리고 이 티켓에 알맞은 에이전트 스폰을 제안해줘.",
   // 샘플 PRD 파일 내용(첫 티켓 유도용, 편집기에서 열림)
   "onboarding.cliGate.prdContent":
     "# 제품 요구사항(PRD)\n\n> 마블로 샘플 PRD 입니다. 아래를 여러분의 목표로 바꾼 뒤, 오케스트레이터에게 '이 PRD로 첫 티켓을 만들어줘'라고 말해 보세요.\n\n## 무엇을 만들까요?\n한 문장으로 목표를 적어 주세요. 예) 방문자가 이메일을 남길 수 있는 간단한 랜딩 페이지.\n\n## 왜 필요한가요?\n이 기능이 해결하는 문제를 적어 주세요.\n\n## 핵심 요구사항\n- [ ] 요구사항 1\n- [ ] 요구사항 2\n- [ ] 요구사항 3\n\n## 완료 기준\n- 무엇이 되면 '완료'인가요?\n",

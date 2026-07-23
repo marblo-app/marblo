@@ -7,14 +7,20 @@ import { useEditorStore } from "../../stores/editorStore";
 import telemetry from "../../services/telemetryService";
 import {
   autoInstallComplete,
+  canAdvanceWizard,
+  initialWizardStep,
+  nextWizardStep,
   requiredInstalled as computeRequiredInstalled,
   requiredReady as computeRequiredReady,
   resolveGateVisibility,
+  WIZARD_STEPS,
+  type WizardStep,
 } from "../../lib/cliSetupGate";
+import { routeInstructionToOrchestrator } from "../../services/orchestratorInstructionService";
 import { CliFailSurvey } from "./CliFailSurvey";
 
 /**
- * First-run CLI setup gate.
+ * First-run CLI setup gate — the linear activation wizard.
  *
  * The designed onboarding wizard (WelcomeScreen/SetupWizard/OnboardingSteps)
  * was dead code — it only rendered from the Next.js-style `src/app/onboarding`
@@ -26,9 +32,10 @@ import { CliFailSurvey } from "./CliFailSurvey";
  * install + login state via harness.cliAuthCheck — the SAME probe the spawn
  * guard uses — for the orchestrator candidates (Claude or Codex) and the
  * optional Antigravity (agy). On mount it AUTO-INSTALLS any missing
- * auto-installable CLI in the background (no click); on failure it falls back to the manual
- * `npm install -g …` command. Login is one-click ("Run sign-in" spawns a
- * terminal and runs the login command) with copy/re-check as fallbacks.
+ * auto-installable CLI in the background (no click); on failure it falls back to
+ * the manual `npm install -g …` command + official docs link. Login is one-click
+ * ("Run sign-in" spawns a terminal and runs the login command) with copy/re-check
+ * as fallbacks.
  *
  * Orchestrator-first onboarding: the gate does NOT block the empty board before
  * a project/folder is connected — it stays quiet and only auto-installs in the
@@ -41,31 +48,34 @@ import { CliFailSurvey } from "./CliFailSurvey";
  *
  * An already-set-up user (Claude or Codex installed & authed) never sees it.
  *
- * ── Ordered connection wizard (ticket CecrriY8) ──────────────────────────
- * The single-panel gate is now presented as an ORDERED 3-step wizard while
- * keeping every behavior above intact (probe, auto-install, dismissal,
- * one-click sign-in, auto-recheck, `marblo:cli-auth-ready`, re-open listener):
- *   1. notice  — cost/account-connect notice ("AI 사용료 미포함, 기존 Claude
- *                Code·Codex 계정 연결"; the BYOK term is deliberately avoided).
- *   2. connect — the CLI rows: detect → one-click install / copy command →
- *                built-in terminal sign-in → auth confirmation.
- *   3. project — connect a folder (→ orchestrator auto-launches) with an
- *                optional sample PRD.md seeded + opened in the editor.
- * Each step's enter/success/fail is instrumented via telemetry.cliSetupStep,
- * reusing the same cli_auth / launch_error vocabulary as orchestratorBlocked
- * so the two funnels join on one axis. Already-authed users still never see
- * the wizard; a blocked-launch re-open (project already exists) starts at the
- * connect step and skips the project step (auto-launch resumes on auth).
+ * ── Linear 4-step activation wizard (ticket ir94m9C6) ────────────────────────
+ * Onboarding no longer ends at "folder connected" — it drives all the way to the
+ * activation KPI (first ticket completed within 30 min of signup). The single
+ * gate is presented as an ORDERED, progress-tracked 4-step flow while keeping
+ * every behavior above intact (probe, auto-install, dismissal, one-click sign-in,
+ * auto-recheck, `marblo:cli-auth-ready`, re-open listener):
+ *   ① install     — install the orchestrator CLI. Auto `npm i -g`; on failure
+ *                    (EACCES / npm prefix perms) the manual command + official
+ *                    docs link are surfaced instead of dying silently.
+ *   ② auth        — sign in to Claude OR Codex (at least one; ticket A's
+ *                    ORCHESTRATOR_CLI_IDS `.some` logic via computeRequiredReady).
+ *   ③ prd         — connect a folder (→ orchestrator auto-launches) + seed a
+ *                    starter PRD.md, opened in the editor.
+ *   ④ firstTicket — hand the PRD to the orchestrator as the first prompt
+ *                    (routeInstructionToOrchestrator, live-verified in #573) so it
+ *                    creates the first ticket + proposes spawning an agent, then
+ *                    close the gate and let the user watch the orchestrator work.
+ * Each step's enter/success/fail is instrumented via telemetry.cliSetupStep with
+ * the new install/auth/prd/firstTicket vocabulary (the funnel now sees where a
+ * user drops — a missing CLI vs a failed sign-in vs never reaching the first
+ * ticket), reusing cli_auth / launch_error reasons so it joins the
+ * orchestratorBlocked funnel on one axis. The cost/BYOK-avoidance notice folds
+ * into the install step's banner. Already-authed users still never see the
+ * wizard; a blocked-launch re-open opens at the earliest incomplete step.
  */
 
 const DISMISSED_KEY = "marblo.cliSetupGateDismissed";
 const AUTO_INSTALL_KEY = "marblo.cliAutoInstallDone";
-// Sticky "the intro/cost notice has been shown once" flag. First run starts at
-// the notice step; later re-opens (e.g. a blocked orchestrator launch mid-
-// session) skip straight to the connect step so we don't re-lecture the user.
-const NOTICE_SEEN_KEY = "marblo.cliWizardNoticeSeen";
-
-type WizardStep = "notice" | "connect" | "project";
 
 type Model = "claude" | "codex" | "antigravity";
 
@@ -98,11 +108,20 @@ const ROWS: CliRow[] = [
 ];
 
 /** Command that installs/updates each CLI to the latest published version.
- * Reused by the version-check advisory when an installed CLI is behind. */
+ * Reused by the version-check advisory when an installed CLI is behind, and as
+ * the manual install fallback when auto-install fails. */
 const UPDATE_CMD: Record<Model, string> = {
   claude: "npm install -g @anthropic-ai/claude-code",
   codex: "npm install -g @openai/codex",
   antigravity: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+};
+
+/** Official install/docs page per CLI — the "official method" fallback link
+ * shown next to the manual command when auto-install fails. */
+const DOCS_URL: Record<Model, string> = {
+  claude: "https://www.npmjs.com/package/@anthropic-ai/claude-code",
+  codex: "https://www.npmjs.com/package/@openai/codex",
+  antigravity: "https://antigravity.google",
 };
 
 type CliState = CliAuthResult & { checking: boolean };
@@ -143,12 +162,17 @@ export function CliSetupGate() {
   );
   const autoRunRef = useRef(false); // one auto-install pass per mount
 
-  // ── Wizard step state (ticket CecrriY8) ─────────────────────────────────
-  const [step, setStep] = useState<WizardStep>("notice");
+  // ── Wizard step state (ticket ir94m9C6 — linear install→auth→prd→firstTicket)
+  const [step, setStep] = useState<WizardStep>("install");
   const [seeding, setSeeding] = useState(false); // sample-PRD write in flight
   const [seedMsg, setSeedMsg] = useState<{ ok: boolean; text: string } | null>(
     null
   );
+  const [sendingTicket, setSendingTicket] = useState(false); // firstTicket route in flight
+  const [ticketMsg, setTicketMsg] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
 
   // Orchestrator-first onboarding: before a project/folder is connected the gate
   // must not block the empty board. We keep a live ref (the auto-install pass is
@@ -157,6 +181,10 @@ export function CliSetupGate() {
   const hasProject = useProjectStore((s) => !!s.currentProject?.folderPath);
   const hasProjectRef = useRef(hasProject);
   hasProjectRef.current = hasProject;
+
+  // Latest raw probe results, kept in a ref so openWizard can compute the right
+  // entry step synchronously (React state lags the async probe).
+  const resultsRef = useRef<Record<string, CliAuthResult>>({});
 
   // Non-blocking version probe (npm view under the hood). Fire-and-forget so a
   // slow/offline lookup never stalls the gate or the readiness spinner.
@@ -169,27 +197,32 @@ export function CliSetupGate() {
       });
   }, []);
 
-  // First run opens at the cost/notice step; a later re-open (blocked launch
-  // mid-session) skips to connect so we don't re-show the intro every time.
-  const initialStep = useCallback((): WizardStep => {
-    try {
-      return localStorage.getItem(NOTICE_SEEN_KEY) === "1"
-        ? "connect"
-        : "notice";
-    } catch {
-      return "notice";
-    }
+  // Advance to `next`, logging its entry. Centralizes the step transition so
+  // every path lands on a consistent, instrumented step.
+  const goToStep = useCallback((next: WizardStep) => {
+    setStep(next);
+    telemetry.cliSetupStep(next, "enter");
   }, []);
 
-  // Show the wizard at the right starting step and log that step's entry.
-  // Centralizes the "become visible" transition so every entry point (auto-run
-  // decision, re-open listener) lands on a consistent, instrumented step.
+  // Open the wizard at the earliest incomplete step and log its entry. Reads the
+  // live probe/project refs so a re-open (already installed/authed) skips
+  // finished steps rather than re-walking install/auth.
   const openWizard = useCallback(() => {
-    const s = initialStep();
+    const s = initialWizardStep({
+      requiredInstalled: computeRequiredInstalled(
+        ORCHESTRATOR_CLI_IDS,
+        resultsRef.current
+      ),
+      requiredReady: computeRequiredReady(
+        ORCHESTRATOR_CLI_IDS,
+        resultsRef.current
+      ),
+      hasProject: hasProjectRef.current,
+    });
     setStep(s);
     setVisible(true);
     telemetry.cliSetupStep(s, "enter");
-  }, [initialStep]);
+  }, []);
 
   const probe = useCallback(async (model: Model, id: string) => {
     setStates((prev) => ({
@@ -201,10 +234,12 @@ export function CliSetupGate() {
     }));
     try {
       const res = await window.electronAPI.harness.cliAuthCheck(model);
+      resultsRef.current[id] = res;
       setStates((prev) => ({ ...prev, [id]: { ...res, checking: false } }));
       return res;
     } catch {
       const miss = { installed: false, authenticated: false };
+      resultsRef.current[id] = miss;
       setStates((prev) => ({ ...prev, [id]: { ...miss, checking: false } }));
       return miss as CliAuthResult;
     }
@@ -372,13 +407,13 @@ export function CliSetupGate() {
   }, []);
 
   const dismiss = useCallback(() => {
-    // CLI-fail drop-off: dismissing the connect step before Claude is authed is
-    // the same "couldn't connect the CLI" failure orchestratorBlocked reports —
-    // log it with the same cli_auth vocabulary so both funnels line up, then
-    // surface the 5-second "무엇이 어려우셨나요?" survey once before closing.
-    // Any other dismiss (notice, or a connected/ready project step) just closes.
-    if (step === "connect" && !ready) {
-      telemetry.cliSetupStep("connect", "fail", "cli_auth");
+    // CLI-fail drop-off: dismissing the install/auth step before Claude/Codex is
+    // authed is the same "couldn't connect the CLI" failure orchestratorBlocked
+    // reports — log it with the same cli_auth vocabulary so both funnels line up,
+    // then surface the 5-second "무엇이 어려우셨나요?" survey once before closing.
+    // Any other dismiss (prd/firstTicket, or a ready gate) just closes.
+    if ((step === "install" || step === "auth") && !ready) {
+      telemetry.cliSetupStep(step, "fail", "cli_auth");
       let surveyDone = false;
       try {
         surveyDone = localStorage.getItem("marblo.survey.cli_fail") === "1";
@@ -399,29 +434,16 @@ export function CliSetupGate() {
     setVisible(false);
   }, [step, ready]);
 
-  // notice → connect. Persist that the intro was seen so re-opens skip it.
-  const advanceFromNotice = useCallback(() => {
-    try {
-      localStorage.setItem(NOTICE_SEEN_KEY, "1");
-    } catch {
-      /* private mode — best effort; re-shows the notice next time, harmless */
-    }
-    telemetry.cliSetupStep("notice", "success");
-    setStep("connect");
-    telemetry.cliSetupStep("connect", "enter");
-  }, []);
-
-  // project step: open the native folder picker. useProjectSetup's global
+  // project (prd) step: open the native folder picker. useProjectSetup's global
   // `marblo:select-folder` listener auto-registers the folder as a project;
   // useOrchestratorAutoLaunch then boots the orchestrator — this is the wizard's
-  // "첫 오케 실행" with no extra wiring here. We stay visible until the project
-  // connects (watched below), then auto-close.
+  // "첫 오케 실행" with no extra wiring here.
   const connectFolder = useCallback(() => {
     window.dispatchEvent(new CustomEvent("marblo:select-folder"));
   }, []);
 
-  // project step: seed a starter PRD.md into the connected folder and open it,
-  // so a first-time user has something concrete to hand the orchestrator. Never
+  // prd step: seed a starter PRD.md into the connected folder and open it, so a
+  // first-time user has something concrete to hand the orchestrator. Never
   // clobbers an existing PRD.md — if one is already there we just open it.
   const seedSamplePrd = useCallback(async () => {
     const root = useProjectStore.getState().currentProject?.folderPath;
@@ -451,6 +473,59 @@ export function CliSetupGate() {
       setSeedMsg({ ok: false, text: t("onboarding.cliGate.project.seedFail") });
     } finally {
       setSeeding(false);
+    }
+  }, [t]);
+
+  // firstTicket step (the aha-moment): hand the PRD to the orchestrator as the
+  // very first prompt. routeInstructionToOrchestrator is the local-PTY-first,
+  // durable-queue-fallback path live-verified in #573 — the orchestrator creates
+  // the first ticket and proposes spawning an agent. On success we close the gate
+  // so the user watches the orchestrator work (the tf-start greeting takes over).
+  const createFirstTicket = useCallback(async () => {
+    const proj = useProjectStore.getState().currentProject;
+    if (!proj?.id) {
+      setTicketMsg({
+        ok: false,
+        text: t("onboarding.cliGate.firstTicket.needProject"),
+      });
+      return;
+    }
+    setSendingTicket(true);
+    setTicketMsg(null);
+    try {
+      const result = await routeInstructionToOrchestrator({
+        projectId: proj.id,
+        message: t("onboarding.cliGate.firstTicket.prompt"),
+      });
+      if (result === "failed") {
+        telemetry.cliSetupStep("firstTicket", "fail", "launch_error");
+        setTicketMsg({
+          ok: false,
+          text: t("onboarding.cliGate.firstTicket.failed"),
+        });
+        return;
+      }
+      // "local" (in-process ack) or "queued" (durable fallback) — either way the
+      // orchestrator will pick it up. Mark the funnel's finish line and close.
+      telemetry.cliSetupStep("firstTicket", "success");
+      try {
+        localStorage.setItem(DISMISSED_KEY, "1");
+      } catch {
+        /* best effort */
+      }
+      setTicketMsg({
+        ok: true,
+        text: t("onboarding.cliGate.firstTicket.sent"),
+      });
+      setVisible(false);
+    } catch {
+      telemetry.cliSetupStep("firstTicket", "fail", "launch_error");
+      setTicketMsg({
+        ok: false,
+        text: t("onboarding.cliGate.firstTicket.failed"),
+      });
+    } finally {
+      setSendingTicket(false);
     }
   }, [t]);
 
@@ -518,52 +593,53 @@ export function CliSetupGate() {
     };
   }, [loginRunning, probeAll]);
 
-  // When the required set (Claude) transitions to ready — via one-click sign-in,
-  // manual Re-check, or auto-install completing — emit `marblo:cli-auth-ready`
-  // so useOrchestratorAutoLaunch resumes the launch (unchanged contract). Then,
-  // in the wizard, advance to the project step when there is no project yet
-  // ("인증확인 → 샘플 프로젝트 열기"); if a project already exists (a blocked-
+  // When the required set (Claude/Codex) transitions to ready — via one-click
+  // sign-in, manual Re-check, or auto-install completing — emit
+  // `marblo:cli-auth-ready` so useOrchestratorAutoLaunch resumes the launch
+  // (unchanged contract). Then advance the wizard to the PRD step so onboarding
+  // keeps moving toward the first ticket. If a project already exists (a blocked-
   // launch re-open), close as before and let auto-launch take over. Guarded on
   // the false→true edge so it fires once, never on an already-ready mount.
   const prevReadyRef = useRef(false);
   useEffect(() => {
     if (ready && !prevReadyRef.current) {
-      telemetry.cliSetupStep("connect", "success");
+      telemetry.cliSetupStep("auth", "success");
       window.dispatchEvent(new CustomEvent("marblo:cli-auth-ready"));
       if (hasProjectRef.current) {
+        // Mid-session blocked re-open: the orchestrator resumes on its own.
         setVisible(false);
       } else {
         // First-run: guide the freshly-authed user into connecting a project.
         // launchLogin may have hidden the gate to reveal the terminal — re-show
-        // it so the project step is actually visible.
-        setStep("project");
+        // it so the PRD step is actually visible.
+        setStep("prd");
         setVisible(true);
-        telemetry.cliSetupStep("project", "enter");
+        telemetry.cliSetupStep("prd", "enter");
       }
     }
     prevReadyRef.current = ready;
   }, [ready]);
 
-  // project step: once a folder connects, the orchestrator auto-launches
+  // prd step: once a folder connects, the orchestrator auto-launches
   // (useOrchestratorAutoLaunch). Log success on the false→true edge of
-  // hasProject. We intentionally do NOT auto-close here — the connected view
-  // offers the optional "sample PRD" action and a Done button, so the user
-  // controls when to dismiss while the orchestrator boots underneath.
+  // hasProject. We intentionally do NOT auto-advance — the connected view offers
+  // the optional "sample PRD" action and the user clicks Next when ready.
   const prevHasProjectRef = useRef(hasProject);
   useEffect(() => {
-    if (step === "project" && hasProject && !prevHasProjectRef.current) {
-      telemetry.cliSetupStep("project", "success");
+    if (step === "prd" && hasProject && !prevHasProjectRef.current) {
+      telemetry.cliSetupStep("prd", "success");
     }
     prevHasProjectRef.current = hasProject;
   }, [step, hasProject]);
 
-  // The header's visible steps: always notice + connect; add project for a
-  // first-run flow (no project yet) or while the project step is showing.
-  const steps = useMemo<WizardStep[]>(() => {
-    const base: WizardStep[] = ["notice", "connect"];
-    if (!hasProject || step === "project") base.push("project");
-    return base;
-  }, [hasProject, step]);
+  const gateState = useMemo(
+    () => ({
+      requiredInstalled: computeRequiredInstalled(ORCHESTRATOR_CLI_IDS, states),
+      requiredReady: ready,
+      hasProject,
+    }),
+    [states, ready, hasProject]
+  );
 
   if (!visible) return null;
 
@@ -578,32 +654,24 @@ export function CliSetupGate() {
   }
 
   const anyChecking = ROWS.some((r) => states[r.id]?.checking);
+  const currentIndex = WIZARD_STEPS.indexOf(step);
+  const canAdvance = canAdvanceWizard(step, gateState);
+  const next = nextWizardStep(step);
 
-  const currentIndex = steps.indexOf(step);
-  const headerTitle =
-    step === "notice"
-      ? t("onboarding.cliGate.notice.title")
-      : step === "project"
-      ? t("onboarding.cliGate.project.title")
-      : t("onboarding.cliGate.title");
-  const headerSubtitle =
-    step === "notice"
-      ? t("onboarding.cliGate.notice.body")
-      : step === "project"
-      ? t("onboarding.cliGate.project.body")
-      : t("onboarding.cliGate.subtitle");
+  const headerTitle = t(`onboarding.cliGate.${step}.title` as MessageKey);
+  const headerSubtitle = t(`onboarding.cliGate.${step}.body` as MessageKey);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-lg rounded-xl border border-[#313244] bg-[#1e1e2e] shadow-2xl">
         <div className="border-b border-[#313244] px-6 py-4">
-          {/* Step indicator — dots + labels for the ordered wizard. */}
-          <div className="mb-3 flex items-center gap-2">
-            {steps.map((sId, i) => {
+          {/* Progress indicator — the four ordered steps with connectors. */}
+          <div className="mb-3 flex items-center gap-1.5">
+            {WIZARD_STEPS.map((sId, i) => {
               const active = i === currentIndex;
               const done = i < currentIndex;
               return (
-                <div key={sId} className="flex items-center gap-2">
+                <div key={sId} className="flex items-center gap-1.5">
                   <span
                     className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${
                       active
@@ -622,8 +690,8 @@ export function CliSetupGate() {
                   >
                     {t(`onboarding.cliGate.step.${sId}` as MessageKey)}
                   </span>
-                  {i < steps.length - 1 && (
-                    <span className="mx-1 text-[#45475a]">›</span>
+                  {i < WIZARD_STEPS.length - 1 && (
+                    <span className="mx-0.5 text-[#45475a]">›</span>
                   )}
                 </div>
               );
@@ -635,26 +703,169 @@ export function CliSetupGate() {
           <p className="mt-1 text-sm text-[#a6adc8]">{headerSubtitle}</p>
         </div>
 
-        {/* ── Step 1: cost / account-connect notice ─────────────────────── */}
-        {step === "notice" && (
-          <div className="max-h-[60vh] overflow-auto px-6 py-5">
-            <ul className="space-y-2.5">
-              {[
-                t("onboarding.cliGate.notice.b1"),
-                t("onboarding.cliGate.notice.b2"),
-                t("onboarding.cliGate.notice.b3"),
-              ].map((line, i) => (
-                <li key={i} className="flex gap-2.5 text-sm text-[#cdd6f4]">
-                  <span className="mt-0.5 shrink-0 text-[#89b4fa]">•</span>
-                  <span>{line}</span>
-                </li>
-              ))}
-            </ul>
+        {/* ── Step ① + ②: detect / install / sign-in / auth confirmation ──── */}
+        {(step === "install" || step === "auth") && (
+          <div className="max-h-[60vh] space-y-3 overflow-auto px-6 py-4">
+            {/* Cost / account-connect notice folds into the install step. */}
+            {step === "install" && (
+              <div className="rounded-md border border-[#89b4fa]/25 bg-[#89b4fa]/5 px-3 py-2.5 text-xs text-[#a6adc8]">
+                {t("onboarding.cliGate.install.costNote")}
+              </div>
+            )}
+            {ROWS.map((row) => {
+              const s = states[row.id];
+              const cmd = s?.action ?? "";
+              const manualCmd = cmd || UPDATE_CMD[row.model];
+              const installError = installErrors[row.id];
+              const isInstalling = installing === row.id;
+              return (
+                <div
+                  key={row.id}
+                  className="rounded-lg border border-[#313244] bg-[#181825] p-4"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-[#cdd6f4]">
+                          {labelFor(row.model)}
+                        </span>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            row.required
+                              ? "bg-[#f38ba8]/15 text-[#f38ba8]"
+                              : "bg-[#585b70]/30 text-[#a6adc8]"
+                          }`}
+                        >
+                          {row.required
+                            ? t("onboarding.cliGate.required")
+                            : t("onboarding.cliGate.optional")}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-[#7f849c]">
+                        {row.model === "claude"
+                          ? t("onboarding.cliGate.claudeDesc")
+                          : row.model === "codex"
+                          ? t("onboarding.cliGate.codexDesc")
+                          : t("onboarding.cliGate.agyDesc")}
+                      </p>
+                    </div>
+                    <StatusBadge state={s} installing={isInstalling} t={t} />
+                  </div>
+
+                  {/* ① install: not installed → install button (auto for required,
+                      click for optional). On failure the manual command +
+                      official docs link are surfaced (no silent death). */}
+                  {step === "install" && s && !s.checking && !s.installed && (
+                    <div className="mt-3">
+                      <button
+                        onClick={() => void runInstall(row)}
+                        disabled={isInstalling}
+                        className="rounded-md bg-[#89b4fa] px-3 py-1.5 text-xs font-medium text-[#1e1e2e] transition-colors hover:bg-[#74c7ec] disabled:opacity-60"
+                      >
+                        {isInstalling
+                          ? t("onboarding.cliGate.installing")
+                          : t("onboarding.cliGate.install")}
+                      </button>
+                      {installError && (
+                        <div className="mt-2 rounded-md border border-[#f38ba8]/25 bg-[#f38ba8]/5 p-2.5">
+                          <p className="text-xs text-[#f38ba8]">
+                            {t("onboarding.cliGate.installFail")}:{" "}
+                            {installError}
+                          </p>
+                          <p className="mt-1.5 text-xs text-[#a6adc8]">
+                            {t("onboarding.cliGate.install.officialHint")}
+                          </p>
+                          <CommandBox
+                            cmd={manualCmd}
+                            copied={copied}
+                            onCopy={handleCopy}
+                            t={t}
+                          />
+                          <a
+                            href={DOCS_URL[row.model]}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-1.5 inline-block text-xs text-[#89b4fa] underline decoration-dotted hover:text-[#74c7ec]"
+                          >
+                            {t("onboarding.cliGate.install.official")} ↗
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ② auth: installed but not authed → one-click "Run sign-in"
+                      (spawns a terminal and runs the login command). */}
+                  {step === "auth" &&
+                    s &&
+                    !s.checking &&
+                    s.installed &&
+                    !s.authenticated &&
+                    cmd && (
+                      <div className="mt-3">
+                        <p className="text-xs text-[#a6adc8]">
+                          {t("onboarding.cliGate.loginHint")}
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <button
+                            onClick={() => void launchLogin(row, cmd)}
+                            className="rounded-md bg-[#89b4fa] px-3 py-1.5 text-xs font-medium text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
+                          >
+                            {t("onboarding.cliGate.runLogin")}
+                          </button>
+                          <span className="text-[10px] text-[#7f849c]">
+                            {t("onboarding.cliGate.runLoginHint")}
+                          </span>
+                        </div>
+                        <CommandBox
+                          cmd={cmd}
+                          copied={copied}
+                          onCopy={handleCopy}
+                          t={t}
+                        />
+                      </div>
+                    )}
+
+                  {/* ② auth: installed but not yet installed elsewhere — hint to
+                      finish install first. Only shown on the auth step. */}
+                  {step === "auth" && s && !s.checking && !s.installed && (
+                    <p className="mt-3 text-xs text-[#f9e2af]">
+                      {t("onboarding.cliGate.auth.needInstall")}
+                    </p>
+                  )}
+
+                  {/* Installed but outdated → advisory + update command (FT-5).
+                      Advisory only: never blocks the ready gate. */}
+                  {s &&
+                    !s.checking &&
+                    s.installed &&
+                    versions[row.id]?.updateState === "outdated" && (
+                      <div className="mt-3 rounded-md border border-[#f9e2af]/30 bg-[#f9e2af]/10 p-2.5">
+                        <p className="text-xs font-medium text-[#f9e2af]">
+                          {t("onboarding.cliGate.outdated", {
+                            from: versions[row.id]?.localVersion ?? "?",
+                            to: versions[row.id]?.latestVersion ?? "?",
+                          })}
+                        </p>
+                        <p className="mt-1 text-xs text-[#a6adc8]">
+                          {t("onboarding.cliGate.updateHint")}
+                        </p>
+                        <CommandBox
+                          cmd={UPDATE_CMD[row.model]}
+                          copied={copied}
+                          onCopy={handleCopy}
+                          t={t}
+                        />
+                      </div>
+                    )}
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {/* ── Step 3: connect a project + first orchestrator run ────────── */}
-        {step === "project" && (
+        {/* ── Step ③: connect a project + seed a sample PRD ─────────────── */}
+        {step === "prd" && (
           <div className="max-h-[60vh] space-y-3 overflow-auto px-6 py-5">
             {!hasProject ? (
               <>
@@ -700,147 +911,39 @@ export function CliSetupGate() {
           </div>
         )}
 
-        {/* ── Step 2: detect / install / sign-in / auth confirmation ────── */}
-        <div
-          className={`max-h-[60vh] space-y-3 overflow-auto px-6 py-4 ${
-            step === "connect" ? "" : "hidden"
-          }`}
-        >
-          {ROWS.map((row) => {
-            const s = states[row.id];
-            const cmd = s?.action ?? "";
-            const installError = installErrors[row.id];
-            const isInstalling = installing === row.id;
-            return (
-              <div
-                key={row.id}
-                className="rounded-lg border border-[#313244] bg-[#181825] p-4"
+        {/* ── Step ④: hand the PRD to the orchestrator — the first ticket ── */}
+        {step === "firstTicket" && (
+          <div className="max-h-[60vh] space-y-3 overflow-auto px-6 py-5">
+            <button
+              onClick={() => void createFirstTicket()}
+              disabled={sendingTicket || !hasProject}
+              className="w-full rounded-md bg-[#a6e3a1] px-3 py-2.5 text-sm font-semibold text-[#1e1e2e] transition-colors hover:bg-[#94e2d5] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {sendingTicket
+                ? t("onboarding.cliGate.firstTicket.creating")
+                : t("onboarding.cliGate.firstTicket.create")}
+            </button>
+            {!hasProject && (
+              <p className="text-xs text-[#f9e2af]">
+                {t("onboarding.cliGate.firstTicket.needProject")}
+              </p>
+            )}
+            {ticketMsg && (
+              <p
+                className={`text-xs ${
+                  ticketMsg.ok ? "text-[#a6e3a1]" : "text-[#f38ba8]"
+                }`}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-[#cdd6f4]">
-                        {labelFor(row.model)}
-                      </span>
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                          row.required
-                            ? "bg-[#f38ba8]/15 text-[#f38ba8]"
-                            : "bg-[#585b70]/30 text-[#a6adc8]"
-                        }`}
-                      >
-                        {row.required
-                          ? t("onboarding.cliGate.required")
-                          : t("onboarding.cliGate.optional")}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-xs text-[#7f849c]">
-                      {row.model === "claude"
-                        ? t("onboarding.cliGate.claudeDesc")
-                        : row.model === "codex"
-                        ? t("onboarding.cliGate.codexDesc")
-                        : t("onboarding.cliGate.agyDesc")}
-                    </p>
-                  </div>
-                  <StatusBadge state={s} installing={isInstalling} t={t} />
-                </div>
-
-                {/* Not installed → install button (auto for required, click for
-                    optional). Manual npm/curl command shown only on failure. */}
-                {s && !s.checking && !s.installed && (
-                  <div className="mt-3">
-                    <button
-                      onClick={() => void runInstall(row)}
-                      disabled={isInstalling}
-                      className="rounded-md bg-[#89b4fa] px-3 py-1.5 text-xs font-medium text-[#1e1e2e] transition-colors hover:bg-[#74c7ec] disabled:opacity-60"
-                    >
-                      {isInstalling
-                        ? t("onboarding.cliGate.installing")
-                        : t("onboarding.cliGate.install")}
-                    </button>
-                    {installError && (
-                      <div className="mt-2">
-                        <p className="text-xs text-[#f38ba8]">
-                          {t("onboarding.cliGate.installFail")}: {installError}
-                        </p>
-                        {cmd && (
-                          <p className="mt-1 text-xs text-[#a6adc8]">
-                            {t("onboarding.cliGate.manualHint")}
-                          </p>
-                        )}
-                        {cmd && (
-                          <CommandBox
-                            cmd={cmd}
-                            copied={copied}
-                            onCopy={handleCopy}
-                            t={t}
-                          />
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Installed but not authed → one-click "Run sign-in" (spawns a
-                    terminal and runs the login command), with copy as fallback. */}
-                {s && !s.checking && s.installed && !s.authenticated && cmd && (
-                  <div className="mt-3">
-                    <p className="text-xs text-[#a6adc8]">
-                      {t("onboarding.cliGate.loginHint")}
-                    </p>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <button
-                        onClick={() => void launchLogin(row, cmd)}
-                        className="rounded-md bg-[#89b4fa] px-3 py-1.5 text-xs font-medium text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
-                      >
-                        {t("onboarding.cliGate.runLogin")}
-                      </button>
-                      <span className="text-[10px] text-[#7f849c]">
-                        {t("onboarding.cliGate.runLoginHint")}
-                      </span>
-                    </div>
-                    <CommandBox
-                      cmd={cmd}
-                      copied={copied}
-                      onCopy={handleCopy}
-                      t={t}
-                    />
-                  </div>
-                )}
-
-                {/* Installed but outdated → advisory + update command (FT-5).
-                    Advisory only: never blocks the ready gate. */}
-                {s &&
-                  !s.checking &&
-                  s.installed &&
-                  versions[row.id]?.updateState === "outdated" && (
-                    <div className="mt-3 rounded-md border border-[#f9e2af]/30 bg-[#f9e2af]/10 p-2.5">
-                      <p className="text-xs font-medium text-[#f9e2af]">
-                        {t("onboarding.cliGate.outdated", {
-                          from: versions[row.id]?.localVersion ?? "?",
-                          to: versions[row.id]?.latestVersion ?? "?",
-                        })}
-                      </p>
-                      <p className="mt-1 text-xs text-[#a6adc8]">
-                        {t("onboarding.cliGate.updateHint")}
-                      </p>
-                      <CommandBox
-                        cmd={UPDATE_CMD[row.model]}
-                        copied={copied}
-                        onCopy={handleCopy}
-                        t={t}
-                      />
-                    </div>
-                  )}
-              </div>
-            );
-          })}
-        </div>
+                {ticketMsg.text}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* ── Contextual footer per step ────────────────────────────────── */}
         <div className="flex items-center justify-between gap-3 border-t border-[#313244] px-6 py-4">
-          {/* Left cluster: Re-check (connect step only), else a spacer. */}
-          {step === "connect" ? (
+          {/* Left cluster: Re-check (install/auth steps only), else a spacer. */}
+          {step === "install" || step === "auth" ? (
             <button
               onClick={() => {
                 void probeAll();
@@ -858,40 +961,26 @@ export function CliSetupGate() {
           )}
 
           <div className="flex items-center gap-2">
-            {/* Later / Done — dismiss. Labeled "Done" on a connected project. */}
+            {/* Later / Done — dismiss. Labeled "Done" on the final step. */}
             <button
               onClick={dismiss}
               className="rounded-md px-3 py-1.5 text-xs text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
             >
-              {step === "project" && hasProject
+              {step === "firstTicket"
                 ? t("onboarding.cliGate.done")
                 : t("onboarding.cliGate.skip")}
             </button>
 
-            {/* Primary advance button — contextual per step. */}
-            {step === "notice" && (
+            {/* Primary advance button — linear, contextual per step. The final
+                step's primary action lives in the body (the big "create first
+                ticket" button), so no Next here. */}
+            {next && (
               <button
-                onClick={advanceFromNotice}
-                className="rounded-md bg-[#89b4fa] px-4 py-1.5 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#74c7ec]"
-              >
-                {t("onboarding.cliGate.notice.continue")}
-              </button>
-            )}
-            {step === "connect" && (
-              <button
-                onClick={() => {
-                  if (hasProject) dismiss();
-                  else {
-                    setStep("project");
-                    telemetry.cliSetupStep("project", "enter");
-                  }
-                }}
-                disabled={!ready}
+                onClick={() => goToStep(next)}
+                disabled={!canAdvance}
                 className="rounded-md bg-[#a6e3a1] px-4 py-1.5 text-xs font-semibold text-[#1e1e2e] transition-colors hover:bg-[#94e2d5] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {hasProject
-                  ? t("onboarding.cliGate.continue")
-                  : t("onboarding.cliGate.next")}
+                {t("onboarding.cliGate.next")}
               </button>
             )}
           </div>
