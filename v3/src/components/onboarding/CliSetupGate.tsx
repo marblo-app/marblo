@@ -14,6 +14,7 @@ import {
   requiredReady as computeRequiredReady,
   resolveGateVisibility,
   shouldOpenGateOnReopen,
+  shouldShowPostAuthStep,
   WIZARD_STEPS,
   type WizardStep,
 } from "../../lib/cliSetupGate";
@@ -135,8 +136,8 @@ function labelFor(model: Model): string {
   return model === "claude"
     ? "Claude Code"
     : model === "codex"
-    ? "Codex (GPT)"
-    : "Antigravity (agy)";
+      ? "Codex (GPT)"
+      : "Antigravity (agy)";
 }
 
 function joinPath(dir: string, name: string): string {
@@ -150,7 +151,7 @@ export function CliSetupGate() {
   const [states, setStates] = useState<Record<string, CliState>>({});
   const [installing, setInstalling] = useState<string | null>(null);
   const [installErrors, setInstallErrors] = useState<Record<string, string>>(
-    {}
+    {},
   );
   const [copied, setCopied] = useState<string | null>(null);
   const [ready, setReady] = useState(false); // Claude or Codex ready
@@ -159,7 +160,7 @@ export function CliSetupGate() {
   // when an installed CLI is behind so an outdated build isn't silently passed
   // through the auth-only gate. Never blocks readiness.
   const [versions, setVersions] = useState<Record<string, HarnessVersionInfo>>(
-    {}
+    {},
   );
   const autoRunRef = useRef(false); // one auto-install pass per mount
 
@@ -167,7 +168,7 @@ export function CliSetupGate() {
   const [step, setStep] = useState<WizardStep>("install");
   const [seeding, setSeeding] = useState(false); // sample-PRD write in flight
   const [seedMsg, setSeedMsg] = useState<{ ok: boolean; text: string } | null>(
-    null
+    null,
   );
   const [sendingTicket, setSendingTicket] = useState(false); // firstTicket route in flight
   const [ticketMsg, setTicketMsg] = useState<{
@@ -212,11 +213,11 @@ export function CliSetupGate() {
     const s = initialWizardStep({
       requiredInstalled: computeRequiredInstalled(
         ORCHESTRATOR_CLI_IDS,
-        resultsRef.current
+        resultsRef.current,
       ),
       requiredReady: computeRequiredReady(
         ORCHESTRATOR_CLI_IDS,
-        resultsRef.current
+        resultsRef.current,
       ),
       hasProject: hasProjectRef.current,
     });
@@ -253,7 +254,7 @@ export function CliSetupGate() {
     await Promise.all(
       ROWS.map(async (r) => {
         results[r.id] = await probe(r.model, r.id);
-      })
+      }),
     );
     const requiredReady = computeRequiredReady(ORCHESTRATOR_CLI_IDS, results);
     setReady(requiredReady);
@@ -285,7 +286,7 @@ export function CliSetupGate() {
         await probe(row.model, row.id);
       }
     },
-    [probe, t]
+    [probe, t],
   );
 
   // First-run: probe, then auto-install any missing REQUIRED CLI (once), then
@@ -315,7 +316,7 @@ export function CliSetupGate() {
       // ready without a click. Optional rows install silently; only the
       // Claude/Codex candidate set can gate visibility.
       const missing = ROWS.filter(
-        (r) => r.autoInstall && first.results[r.id]?.installed === false
+        (r) => r.autoInstall && first.results[r.id]?.installed === false,
       );
       if (!autoDone && missing.length > 0) {
         // Only surface install progress once a project is connected — before
@@ -335,7 +336,7 @@ export function CliSetupGate() {
         if (
           autoInstallComplete(
             missing.map((r) => r.id),
-            latest
+            latest,
           )
         ) {
           try {
@@ -363,7 +364,7 @@ export function CliSetupGate() {
         requiredReady,
         requiredInstalled: computeRequiredInstalled(
           ORCHESTRATOR_CLI_IDS,
-          latest
+          latest,
         ),
         dismissed,
       });
@@ -472,7 +473,7 @@ export function CliSetupGate() {
         await window.electronAPI.fs.writeFile(
           root,
           prdPath,
-          t("onboarding.cliGate.prdContent")
+          t("onboarding.cliGate.prdContent"),
         );
       }
       const editor = useEditorStore.getState();
@@ -621,10 +622,23 @@ export function CliSetupGate() {
       } else {
         // First-run: guide the freshly-authed user into connecting a project.
         // launchLogin may have hidden the gate to reveal the terminal — re-show
-        // it so the PRD step is actually visible.
-        setStep("prd");
-        setVisible(true);
-        telemetry.cliSetupStep("prd", "enter");
+        // it so the PRD step is actually visible. But honor a prior dismissal:
+        // this false→true edge also fires on every restart (the auth probe flips
+        // once an already-authed user's CLIs are re-probed), so without the
+        // DISMISSED gate a user who clicked "Later"/"Skip" saw the PRD popup on
+        // every restart (ticket bRABKQX7). The cli-auth-ready event above still
+        // fires either way — only the wizard visibility is gated.
+        let dismissed = false;
+        try {
+          dismissed = localStorage.getItem(DISMISSED_KEY) === "1";
+        } catch {
+          /* private mode — treat as not dismissed */
+        }
+        if (shouldShowPostAuthStep(dismissed)) {
+          setStep("prd");
+          setVisible(true);
+          telemetry.cliSetupStep("prd", "enter");
+        }
       }
     }
     prevReadyRef.current = ready;
@@ -648,7 +662,7 @@ export function CliSetupGate() {
       requiredReady: ready,
       hasProject,
     }),
-    [states, ready, hasProject]
+    [states, ready, hasProject],
   );
 
   if (!visible) return null;
@@ -687,8 +701,8 @@ export function CliSetupGate() {
                       active
                         ? "bg-[#89b4fa] text-[#1e1e2e]"
                         : done
-                        ? "bg-[#a6e3a1] text-[#1e1e2e]"
-                        : "bg-[#313244] text-[#7f849c]"
+                          ? "bg-[#a6e3a1] text-[#1e1e2e]"
+                          : "bg-[#313244] text-[#7f849c]"
                     }`}
                   >
                     {done ? "✓" : i + 1}
@@ -755,8 +769,8 @@ export function CliSetupGate() {
                         {row.model === "claude"
                           ? t("onboarding.cliGate.claudeDesc")
                           : row.model === "codex"
-                          ? t("onboarding.cliGate.codexDesc")
-                          : t("onboarding.cliGate.agyDesc")}
+                            ? t("onboarding.cliGate.codexDesc")
+                            : t("onboarding.cliGate.agyDesc")}
                       </p>
                     </div>
                     <StatusBadge state={s} installing={isInstalling} t={t} />

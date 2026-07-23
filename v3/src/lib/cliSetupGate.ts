@@ -74,7 +74,7 @@ export function initialWizardStep(state: WizardGateState): WizardStep {
  */
 export function canAdvanceWizard(
   step: WizardStep,
-  state: WizardGateState
+  state: WizardGateState,
 ): boolean {
   switch (step) {
     case "install":
@@ -106,7 +106,7 @@ export function nextWizardStep(step: WizardStep): WizardStep | null {
  */
 export function autoInstallComplete(
   missingIds: string[],
-  results: Record<string, CliProbe | undefined>
+  results: Record<string, CliProbe | undefined>,
 ): boolean {
   // Vacuously true when nothing was missing — but callers only persist the
   // flag when they actually ran an install pass, so this stays meaningful.
@@ -156,10 +156,29 @@ export function shouldOpenGateOnReopen(requiredReady: boolean): boolean {
   return !requiredReady;
 }
 
+/**
+ * Post-auth (first-run, no-project) wizard advance — dismissal guard.
+ *
+ * When the orchestrator set transitions to ready on a first run with no project
+ * yet, the gate advances to the PRD step to keep onboarding moving toward the
+ * first ticket. But that transition also fires on every app restart: the auth
+ * probe starts false and flips false→true once the (already-authed) user's CLIs
+ * are re-probed. Without honoring a prior dismissal, a user who clicked
+ * "Later"/"Skip" saw the PRD popup re-open on every restart (ticket bRABKQX7).
+ *
+ * So the no-project post-auth branch only auto-opens the PRD step when the user
+ * has NOT dismissed the wizard. The `marblo:cli-auth-ready` event still fires
+ * either way (the orchestrator auto-launch must always resume) — only the wizard
+ * visibility is gated on dismissal.
+ */
+export function shouldShowPostAuthStep(dismissed: boolean): boolean {
+  return !dismissed;
+}
+
 /** Whether at least one orchestrator candidate CLI is at least installed. */
 export function requiredInstalled(
   candidateIds: string[],
-  results: Record<string, CliProbe | undefined>
+  results: Record<string, CliProbe | undefined>,
 ): boolean {
   return candidateIds.some((id) => results[id]?.installed === true);
 }
@@ -167,10 +186,10 @@ export function requiredInstalled(
 /** Whether at least one orchestrator candidate CLI is ready to spawn. */
 export function requiredReady(
   candidateIds: string[],
-  results: Record<string, CliProbe | undefined>
+  results: Record<string, CliProbe | undefined>,
 ): boolean {
   return candidateIds.some(
     (id) =>
-      results[id]?.installed === true && results[id]?.authenticated === true
+      results[id]?.installed === true && results[id]?.authenticated === true,
   );
 }
