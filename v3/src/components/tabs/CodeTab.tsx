@@ -5,9 +5,11 @@ import { useWorktreeStore } from "../../stores/worktreeStore";
 import { EditorTabs } from "../code/EditorTabs";
 import { CodeEditor } from "../code/CodeEditor";
 import { ImagePreview } from "../code/ImagePreview";
+import { MarkdownPreview } from "../code/MarkdownPreview";
 import { DiffSurface } from "../workspace/DiffSurface";
 import { WorktreeDiffBanner } from "../code/WorktreeDiffBanner";
 import { isImageFile } from "../../lib/imageFiles";
+import { isMarkdownFile } from "../../lib/markdownFiles";
 import {
   countUnknownVerdicts,
   isActiveOngoingWorktree,
@@ -200,6 +202,12 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
             )
           ) : isImageFile(activeFile.path) ? (
             <ImagePreview
+              filePath={activeFile.path}
+              content={activeFile.content}
+              language={activeFile.language}
+            />
+          ) : isMarkdownFile(activeFile.path) ? (
+            <MarkdownPreview
               filePath={activeFile.path}
               content={activeFile.content}
               language={activeFile.language}
