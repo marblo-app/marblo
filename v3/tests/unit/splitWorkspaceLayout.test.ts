@@ -12,6 +12,7 @@ import {
   clampRatio,
   parseStoredRatio,
   parseStoredTab,
+  initialActiveTab,
   parseStoredCollapsed,
   isRightTab,
   isTerminalCollapsed,
@@ -57,7 +58,7 @@ describe("parseStoredRatio", () => {
 describe("isRightTab / parseStoredTab", () => {
   it("accepts only known tab ids", () => {
     for (const t of RIGHT_TABS) expect(isRightTab(t)).toBe(true);
-    expect(isRightTab("agents")).toBe(false);
+    expect(isRightTab("nope")).toBe(false);
     expect(isRightTab("")).toBe(false);
     expect(isRightTab(42)).toBe(false);
     expect(isRightTab(null)).toBe(false);
@@ -179,8 +180,53 @@ describe("visibleRightTabs", () => {
     expect(visible).toEqual([...RIGHT_TABS]);
   });
 
-  it("excludes agents (terminals live in the left column)", () => {
-    expect(RIGHT_TABS as readonly string[]).not.toContain("agents");
-    expect(isRightTab("agents")).toBe(false);
+  // Parity guard: `agents` and `settings` were once excluded on the theory
+  // that the left column / the Header overlay already covered them. Both were
+  // wrong and shipped as user-visible regressions (ZdgQMxW7, 0JVQcUxd), so the
+  // whole legacy TabBar set must stay reachable from the shell.
+  it("covers every legacy TabBar tab", () => {
+    const LEGACY_TABS = [
+      "guide",
+      "board",
+      "lanes",
+      "missions",
+      "code",
+      "agents",
+      "usage",
+      "flows",
+      "deploy",
+      "worktrees",
+      "history",
+      "harness",
+      "settings",
+    ];
+    for (const tab of LEGACY_TABS) {
+      expect(RIGHT_TABS as readonly string[]).toContain(tab);
+      expect(isRightTab(tab)).toBe(true);
+    }
+  });
+
+  it("leads with the onboarding tab", () => {
+    expect(RIGHT_TABS[0]).toBe("startHere");
+    expect(visibleRightTabs([])[0]).toBe("startHere");
+  });
+});
+
+describe("initialActiveTab", () => {
+  it("always honors a persisted choice — no forced redirect to onboarding", () => {
+    expect(initialActiveTab("code", true)).toBe("code");
+    expect(initialActiveTab("board", true)).toBe("board");
+    expect(initialActiveTab("startHere", false)).toBe("startHere");
+  });
+
+  it("lands a fresh, unfinished onboarding on the Start Here tab", () => {
+    expect(initialActiveTab(null, true)).toBe("startHere");
+    expect(initialActiveTab(undefined, true)).toBe("startHere");
+    expect(initialActiveTab("bogus", true)).toBe("startHere");
+  });
+
+  it("falls back to the board once onboarding no longer wants the landing", () => {
+    expect(initialActiveTab(null, false)).toBe("board");
+    expect(initialActiveTab("bogus", false)).toBe("board");
   });
 });

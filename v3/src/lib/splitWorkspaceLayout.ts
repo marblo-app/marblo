@@ -12,14 +12,35 @@
  */
 
 /**
- * Right-pane tabs, in bar order. Terminals + agents live in the LEFT column,
- * not here — so `agents` is intentionally absent. Every id maps 1:1 to a reused
- * legacy tab component (WorkTabs.TAB_COMPONENTS); we never reimplement a view.
+ * Right-pane tabs, in bar order. Every id maps 1:1 to a reused legacy tab
+ * component (WorkTabs.TAB_COMPONENTS); we never reimplement a view.
+ *
+ * `startHere` leads the bar: onboarding is a first-class destination, not a
+ * modal you can lose (see lib/onboardingProgress).
+ *
+ * ★ PARITY RULE: this list must stay a superset of TabBar.TabId (the legacy
+ * Layout tab set). When the shell was built, `agents` and `settings` were
+ * excluded on the reasoning that "agents live in the left column" and
+ * "settings is an overlay" — both were wrong in practice and each cost a
+ * user-visible regression the CEO had to find by hand (tickets ZdgQMxW7,
+ * 0JVQcUxd):
+ *   - the left column holds agent TERMINALS (AgentListPanel); the legacy
+ *     `agents` tab is the AgentDashboard *management* view, which had no other
+ *     home at all;
+ *   - `settings` did open as a full-screen overlay from the Header gear, but
+ *     with no tab-bar entry users simply never found it.
+ * So the rule is now: every legacy TabId is a tab here. If a future change
+ * wants to drop one, leave the reason in this comment — do not just delete it.
+ *
+ * Nothing is currently excluded. `startHere` is the only addition: onboarding
+ * is a first-class destination, not a modal you can lose (lib/onboardingProgress).
  */
 export const RIGHT_TABS = [
+  "startHere",
   "guide",
   "board",
   "code",
+  "agents",
   "worktrees",
   "history",
   "lanes",
@@ -28,6 +49,7 @@ export const RIGHT_TABS = [
   "missions",
   "flows",
   "deploy",
+  "settings",
 ] as const;
 export type RightTabId = (typeof RIGHT_TABS)[number];
 
@@ -92,6 +114,24 @@ export function isRightTab(v: unknown): v is RightTabId {
 /** Parse a persisted active-tab string; unknown / missing → "board". */
 export function parseStoredTab(raw: string | null | undefined): RightTabId {
   return isRightTab(raw) ? raw : "board";
+}
+
+/**
+ * Which tab a cold start opens.
+ *
+ * A persisted choice ALWAYS wins — once the user picks a tab it sticks, and we
+ * never yank them back to onboarding mid-flow (no forced redirect). Only when
+ * there is no stored choice does the onboarding state decide: an unfinished,
+ * non-dismissed onboarding lands on Start Here, everything else on the board.
+ *
+ * `landOnStartHere` comes from onboardingProgress.shouldLandOnStartHere.
+ */
+export function initialActiveTab(
+  rawTab: string | null | undefined,
+  landOnStartHere: boolean,
+): RightTabId {
+  if (isRightTab(rawTab)) return rawTab;
+  return landOnStartHere ? "startHere" : "board";
 }
 
 /** Parse the persisted terminal-collapsed flag. Explicit "1" only → true. */

@@ -6,10 +6,12 @@ import {
   clampVerticalRatio,
   parseStoredRatio,
   parseStoredVerticalRatio,
-  parseStoredTab,
+  initialActiveTab,
   parseStoredCollapsed,
   type RightTabId,
 } from "../lib/splitWorkspaceLayout";
+import { shouldLandOnStartHere } from "../lib/onboardingProgress";
+import { readInitialProgress } from "./onboardingProgressStore";
 
 /**
  * Persisted layout state for the IDE split Workspace shell (flag ON only):
@@ -68,7 +70,13 @@ export const useSplitWorkspaceStore = create<SplitWorkspaceState>(
   (set, get) => ({
     ratio: parseStoredRatio(readString(RATIO_KEY)),
     verticalRatio: parseStoredVerticalRatio(readString(V_RATIO_KEY)),
-    activeTab: parseStoredTab(readString(TAB_KEY)),
+    // Landing rule: a persisted tab always wins (the user's choice is never
+    // overridden); with no stored choice, an unfinished + non-dismissed
+    // onboarding opens on "시작하기" so a first run cannot miss it.
+    activeTab: initialActiveTab(
+      readString(TAB_KEY),
+      shouldLandOnStartHere(readInitialProgress()),
+    ),
     terminalCollapsed: parseStoredCollapsed(readString(COLLAPSE_KEY)),
     // File tree defaults CLOSED — the split's terminals + work tabs are the
     // primary surface; the tree is an opt-in navigator. Explicit "1" → open.

@@ -278,6 +278,48 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.wizard.saving": "Saving...",
   "onboarding.wizard.save": "Save Configuration",
 
+  // — StartHereTab (onboarding promoted from a modal to a tab, ZdgQMxW7) —
+  "onboarding.startHere.title": "Start here",
+  "onboarding.startHere.subtitle":
+    "Four steps to your first ticket. Your progress is saved — pick it up whenever.",
+  "onboarding.startHere.progress": "{done} of {total} done",
+  "onboarding.startHere.demoLead": "Want to see how it works first?",
+  "onboarding.startHere.watchDemo": "Watch the 60-second demo",
+  "onboarding.startHere.stuckLabel": "Stuck?",
+  "onboarding.startHere.skipStep": "Skip for now (it stays on the list)",
+  "onboarding.startHere.badge.done": "Done",
+  "onboarding.startHere.badge.current": "You're here",
+  "onboarding.startHere.badge.remaining": "Remaining",
+  "onboarding.startHere.badge.skipped": "Skipped · remaining",
+  "onboarding.startHere.allDone.title": "You're all set!",
+  "onboarding.startHere.allDone.body":
+    "Your first ticket is with the orchestrator. Watch it work from the Board tab.",
+  "onboarding.startHere.dontLand": "Don't open this tab on launch",
+  "onboarding.startHere.reenableLanding": "Open this tab on launch",
+  "onboarding.startHere.dontLandHint":
+    "Either way, your remaining steps stay right here.",
+  // One line per step: why it's needed
+  "onboarding.startHere.why.install":
+    "The orchestrator and agents run on top of these CLIs — without one, nothing can launch.",
+  "onboarding.startHere.why.auth":
+    "This connects the AI account you already pay for. Without it, spawns fail silently.",
+  "onboarding.startHere.why.prd":
+    "The orchestrator needs a connected folder before it can read your code and file tickets.",
+  "onboarding.startHere.why.firstTicket":
+    "Creating one ticket is what makes it obvious what Marblo actually does for you.",
+  // One line per step: what to do when you're stuck
+  "onboarding.startHere.alt.install":
+    "If auto-install fails (EACCES / npm prefix permissions), run the command shown above in a terminal yourself, or follow the official install docs.",
+  "onboarding.startHere.alt.auth":
+    "You only need ONE of Claude Code or Codex. If the browser flow is blocked, copy the command and run it in a terminal.",
+  "onboarding.startHere.alt.prd":
+    "Any folder works — an empty one is fine, and you can write the PRD yourself later.",
+  "onboarding.startHere.alt.firstTicket":
+    "If sending fails, check that the orchestrator terminal is running and try again.",
+  // Inline banner (the modal's replacement) — a spawn blocked on auth
+  "onboarding.startHere.banner.title": "CLI sign-in required",
+  "onboarding.startHere.banner.cta": "Open Start here",
+
   // — LoginPage (auth) —
   "onboarding.login.signupSubtitle": "Create a new account",
   "onboarding.login.loginSubtitle": "Sign in to your account",

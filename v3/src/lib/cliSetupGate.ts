@@ -14,6 +14,15 @@ export interface CliProbe {
 }
 
 /**
+ * "User clicked 나중에/Skip." Predates the Start Here tab, so it is also the
+ * legacy seed for OnboardingProgress.dismissed — keep the key stable or every
+ * existing user gets re-prompted (regression bRABKQX7).
+ */
+export const DISMISSED_KEY = "marblo.cliSetupGateDismissed";
+/** One-shot guard for the background auto-install pass (FT-8). */
+export const AUTO_INSTALL_KEY = "marblo.cliAutoInstallDone";
+
+/**
  * Linear onboarding wizard steps (ticket ir94m9C6) — the activation funnel that
  * carries a fresh signup straight to the "first ticket" finish line:
  *

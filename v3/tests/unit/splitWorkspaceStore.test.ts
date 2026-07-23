@@ -49,9 +49,39 @@ describe("splitWorkspaceStore", () => {
     const s = store.getState();
     expect(s.ratio).toBe(DEFAULT_RATIO);
     expect(s.verticalRatio).toBe(DEFAULT_V_RATIO);
-    expect(s.activeTab).toBe("board");
+    // Empty storage == a brand-new user with onboarding untouched, so the
+    // shell opens on the 시작하기 tab (ticket ZdgQMxW7).
+    expect(s.activeTab).toBe("startHere");
     expect(s.terminalCollapsed).toBe(false);
     expect(s.fileTreeOpen).toBe(false);
+  });
+
+  describe("onboarding landing", () => {
+    it("opens the board once onboarding is finished", async () => {
+      const { store } = await loadStore({
+        "marblo.onboarding.progress": JSON.stringify({
+          done: ["install", "auth", "prd", "firstTicket"],
+        }),
+      });
+      expect(store.getState().activeTab).toBe("board");
+    });
+
+    // Regression bRABKQX7 — a user who clicked "나중에" on the legacy modal
+    // must not be dragged back into onboarding after the upgrade.
+    it("honors the legacy dismissal flag", async () => {
+      const { store } = await loadStore({
+        "marblo.cliSetupGateDismissed": "1",
+      });
+      expect(store.getState().activeTab).toBe("board");
+    });
+
+    it("never overrides an explicit tab choice", async () => {
+      const { store } = await loadStore({
+        "marblo.workspaceSplit.activeTab": "code",
+      });
+      // Onboarding is untouched here, yet the persisted choice still wins.
+      expect(store.getState().activeTab).toBe("code");
+    });
   });
 
   it("hydrates persisted values on load", async () => {
@@ -74,6 +104,11 @@ describe("splitWorkspaceStore", () => {
     const { store } = await loadStore({
       "marblo.workspaceSplit.ratio": "9",
       "marblo.workspaceSplit.activeTab": "bogus",
+      // Onboarding already finished, so the garbage tab falls back to board
+      // rather than the first-run landing.
+      "marblo.onboarding.progress": JSON.stringify({
+        done: ["install", "auth", "prd", "firstTicket"],
+      }),
     });
     const s = store.getState();
     expect(s.ratio).toBe(MAX_RATIO);

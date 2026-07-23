@@ -1,0 +1,275 @@
+import { useEffect, useRef } from "react";
+import {
+  AUTO_INSTALL_KEY,
+  DISMISSED_KEY,
+  autoInstallComplete,
+  initialWizardStep,
+  requiredInstalled as computeRequiredInstalled,
+  resolveGateVisibility,
+  shouldOpenGateOnReopen,
+  shouldShowPostAuthStep,
+  type WizardStep,
+} from "../lib/cliSetupGate";
+import {
+  ORCHESTRATOR_CLI_IDS,
+  ROWS,
+  useCliSetupStore,
+} from "../stores/cliSetupStore";
+import { useProjectStore } from "../stores/projectStore";
+import telemetry from "../services/telemetryService";
+
+/**
+ * The CLI setup engine's EFFECTS — first-run probe + background auto-install,
+ * the `marblo:open-cli-setup` re-open request, the sign-in auto-recheck poll,
+ * and the `marblo:cli-auth-ready` hand-off to useOrchestratorAutoLaunch.
+ *
+ * Lifted verbatim out of CliSetupGate.tsx (only the surface-specific bits are
+ * now callbacks) so the legacy modal and the split shell's Start Here tab run
+ * the SAME logic — including the three guards that each cost a live bug:
+ *   - #579  readiness is Claude OR Codex (`.some`, via lib/cliSetupGate)
+ *   - nB4eenxP  a re-open request re-probes first and only surfaces when the
+ *     orchestrator set is genuinely not ready (a restart-restored PTY can make
+ *     agent-manager emit a spurious agent:needsAuth)
+ *   - bRABKQX7  the post-auth advance honors a prior dismissal, because the
+ *     false→true ready edge also fires on every restart
+ *
+ * ★ Mount this EXACTLY ONCE per window. Two mounts would run two auto-install
+ * passes. The split shell mounts it in the always-present inline banner host;
+ * the legacy Layout mounts it in CliSetupGate. Only one of those trees exists
+ * at a time (workspace-mode flag).
+ */
+export interface CliSetupEngineHandlers {
+  /**
+   * Surface the setup UI at `step` — a blocked launch, or a first run that
+   * still needs attention. The modal opens itself; the tab shows a banner.
+   */
+  openAt: (step: WizardStep) => void;
+  /** Setup is no longer needed mid-session (auth completed with a project). */
+  close?: () => void;
+  /**
+   * First run, freshly authenticated, no project yet: keep onboarding moving
+   * toward the first ticket. Only called when the user has NOT dismissed.
+   */
+  showPostAuth?: (step: WizardStep) => void;
+}
+
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false; // private mode — treat as unset
+  }
+}
+
+/**
+ * prd-step success telemetry: fires once on the false→true edge of
+ * `hasProject` while the user is actually on the PRD step (connecting a folder
+ * auto-launches the orchestrator via useOrchestratorAutoLaunch). Shared so the
+ * modal and the tab report the same funnel event on the same condition.
+ */
+export function useStepPrdSuccess(
+  onPrdStep: boolean,
+  hasProject: boolean,
+): void {
+  const prev = useRef(hasProject);
+  useEffect(() => {
+    if (onPrdStep && hasProject && !prev.current) {
+      telemetry.cliSetupStep("prd", "success");
+    }
+    prev.current = hasProject;
+  }, [onPrdStep, hasProject]);
+}
+
+export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
+  const probeAll = useCliSetupStore((s) => s.probeAll);
+  const runInstall = useCliSetupStore((s) => s.runInstall);
+  const refreshVersions = useCliSetupStore((s) => s.refreshVersions);
+  const ready = useCliSetupStore((s) => s.ready);
+  const loginRunning = useCliSetupStore((s) => s.loginRunning);
+  const setLoginRunning = useCliSetupStore((s) => s.setLoginRunning);
+
+  // Keep handlers in a ref so a caller re-creating them each render never
+  // re-runs the one-shot auto-install effect.
+  const hRef = useRef(handlers);
+  hRef.current = handlers;
+
+  // Orchestrator-first onboarding: before a project/folder is connected the
+  // engine must not surface anything blocking. Live ref because the
+  // auto-install pass is async and a folder may connect mid-flight.
+  const hasProject = useProjectStore((s) => !!s.currentProject?.folderPath);
+  const hasProjectRef = useRef(hasProject);
+  hasProjectRef.current = hasProject;
+
+  const autoRunRef = useRef(false); // one auto-install pass per mount
+
+  // Open at the earliest incomplete step, computed from the LIVE probe results
+  // (store state lags the async probe, so read them synchronously).
+  const openAtEarliest = () => {
+    const results = useCliSetupStore.getState().results;
+    hRef.current.openAt(
+      initialWizardStep({
+        requiredInstalled: computeRequiredInstalled(
+          ORCHESTRATOR_CLI_IDS,
+          results,
+        ),
+        requiredReady: useCliSetupStore.getState().ready,
+        hasProject: hasProjectRef.current,
+      }),
+    );
+  };
+
+  // First-run: probe, then auto-install any missing auto-installable CLI
+  // (once), then decide visibility. Existing fully-set-up users are never
+  // surfaced, and auto-install skips anything already installed.
+  useEffect(() => {
+    if (autoRunRef.current) return;
+    autoRunRef.current = true;
+    let cancelled = false;
+    refreshVersions(); // fire-and-forget; result renders when it arrives
+    void (async () => {
+      const first = await probeAll();
+      if (cancelled) return;
+
+      const autoDone = readFlag(AUTO_INSTALL_KEY);
+
+      let requiredReady = first.requiredReady;
+      // Latest per-row probe results (refreshed after an auto-install pass) —
+      // the source for the install-complete (FT-8) and re-prompt (FT-6) checks.
+      let latest = first.results;
+      // Auto-install every auto-installable CLI that's missing so the fleet is
+      // ready without a click. Optional rows install silently; only the
+      // Claude/Codex candidate set can gate visibility.
+      const missing = ROWS.filter(
+        (r) => r.autoInstall && first.results[r.id]?.installed === false,
+      );
+      if (!autoDone && missing.length > 0) {
+        // Only surface install progress once a project is connected — before
+        // that, install silently so the empty board isn't blocked.
+        if (hasProjectRef.current) openAtEarliest();
+        for (const row of missing) {
+          if (cancelled) return;
+          await runInstall(row);
+        }
+        if (cancelled) return;
+        const reprobe = await probeAll();
+        requiredReady = reprobe.requiredReady;
+        latest = reprobe.results;
+        // Only mark auto-install "done" once every previously-missing CLI is
+        // actually installed. On failure we leave the flag unset so the next
+        // launch retries rather than silently giving up (FT-8).
+        if (
+          autoInstallComplete(
+            missing.map((r) => r.id),
+            latest,
+          )
+        ) {
+          try {
+            localStorage.setItem(AUTO_INSTALL_KEY, "1");
+          } catch {
+            /* best effort */
+          }
+        }
+      }
+
+      if (cancelled) return;
+
+      // A prior "Later" is honored only while at least one orchestrator
+      // candidate is installed. If none is installed the user can't launch
+      // anything, so re-surface and clear the stale dismissal — the next run
+      // keeps behaving like a first run until install succeeds (FT-6).
+      const decision = resolveGateVisibility({
+        requiredReady,
+        requiredInstalled: computeRequiredInstalled(
+          ORCHESTRATOR_CLI_IDS,
+          latest,
+        ),
+        dismissed: readFlag(DISMISSED_KEY),
+      });
+      if (decision.clearDismissed) {
+        try {
+          localStorage.removeItem(DISMISSED_KEY);
+        } catch {
+          /* best effort */
+        }
+      }
+      // Orchestrator-first: never auto-surface on the empty board. With a
+      // project connected, the orchestrator auto-launch fires
+      // `marblo:open-cli-setup` when auth is actually needed.
+      if (decision.visible && hasProjectRef.current) openAtEarliest();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [probeAll, runInstall, refreshVersions]);
+
+  // Re-open on demand — the spawn guard dispatches this when a launch is
+  // blocked (orchestrator/agent), and agent-manager's login-screen backstop
+  // surfaces it via the agent:needsAuth → shell bridge.
+  useEffect(() => {
+    const onOpen = () => {
+      // Treat the event as "re-check auth, surface only if actually needed",
+      // not "force open" — agent-manager's backstop can emit a spurious
+      // agent:needsAuth for a restart-restored PTY, which made an already
+      // authenticated user see the popup on every restart (nB4eenxP).
+      refreshVersions(); // advisory, fire-and-forget
+      void (async () => {
+        const { requiredReady } = await probeAll();
+        if (shouldOpenGateOnReopen(requiredReady)) openAtEarliest();
+      })();
+    };
+    window.addEventListener("marblo:open-cli-setup", onOpen);
+    return () => window.removeEventListener("marblo:open-cli-setup", onOpen);
+  }, [probeAll, refreshVersions]);
+
+  // Auto re-check while a sign-in is running in a terminal: poll the auth probe
+  // and re-check when the window regains focus (user returns from the browser
+  // OAuth flow). As soon as the required set is authenticated we stop.
+  useEffect(() => {
+    if (!loginRunning) return;
+    let stopped = false;
+    let ticks = 0;
+    const MAX_TICKS = 150; // ~6min backstop — then fall back to manual Re-check
+    const tick = async () => {
+      const { requiredReady } = await probeAll();
+      if (!stopped && requiredReady) setLoginRunning(false);
+    };
+    const interval = window.setInterval(() => {
+      if (++ticks > MAX_TICKS) {
+        setLoginRunning(false); // cleanup below clears the interval
+        return;
+      }
+      void tick();
+    }, 2500);
+    const onFocus = () => void tick();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [loginRunning, probeAll, setLoginRunning]);
+
+  // When the required set (Claude/Codex) transitions to ready — via one-click
+  // sign-in, manual Re-check, or auto-install completing — emit
+  // `marblo:cli-auth-ready` so useOrchestratorAutoLaunch resumes the launch
+  // (unchanged contract). Guarded on the false→true edge so it fires once.
+  const prevReadyRef = useRef(false);
+  useEffect(() => {
+    if (ready && !prevReadyRef.current) {
+      telemetry.cliSetupStep("auth", "success");
+      window.dispatchEvent(new CustomEvent("marblo:cli-auth-ready"));
+      if (hasProjectRef.current) {
+        // Mid-session blocked re-open: the orchestrator resumes on its own.
+        hRef.current.close?.();
+      } else if (shouldShowPostAuthStep(readFlag(DISMISSED_KEY))) {
+        // First run: guide the freshly-authed user into connecting a project.
+        // The dismissal check matters because this edge ALSO fires on every
+        // restart (the probe starts false and flips once re-probed) — without
+        // it, a user who clicked "Later" saw the PRD popup every restart
+        // (bRABKQX7). `marblo:cli-auth-ready` above fires either way.
+        hRef.current.showPostAuth?.("prd");
+      }
+    }
+    prevReadyRef.current = ready;
+  }, [ready]);
+}

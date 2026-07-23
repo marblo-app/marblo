@@ -392,6 +392,49 @@ export const onboarding = {
   "onboarding.cliGate.prdContent":
     "# 제품 요구사항(PRD)\n\n> 마블로 샘플 PRD 입니다. 아래를 여러분의 목표로 바꾼 뒤, 오케스트레이터에게 '이 PRD로 첫 티켓을 만들어줘'라고 말해 보세요.\n\n## 무엇을 만들까요?\n한 문장으로 목표를 적어 주세요. 예) 방문자가 이메일을 남길 수 있는 간단한 랜딩 페이지.\n\n## 왜 필요한가요?\n이 기능이 해결하는 문제를 적어 주세요.\n\n## 핵심 요구사항\n- [ ] 요구사항 1\n- [ ] 요구사항 2\n- [ ] 요구사항 3\n\n## 완료 기준\n- 무엇이 되면 '완료'인가요?\n",
 
+  // — StartHereTab ('시작하기' 탭 — 팝업에서 승격된 온보딩, ticket ZdgQMxW7) —
+  "onboarding.startHere.title": "시작하기",
+  "onboarding.startHere.subtitle":
+    "네 단계면 첫 티켓까지 갑니다. 진행 상황은 저장되니 언제든 이어서 하세요.",
+  "onboarding.startHere.progress": "{total}단계 중 {done}단계 완료",
+  "onboarding.startHere.demoLead": "먼저 어떻게 동작하는지 볼까요?",
+  "onboarding.startHere.watchDemo": "60초 데모 보기",
+  "onboarding.startHere.stuckLabel": "막혔을 때:",
+  "onboarding.startHere.skipStep":
+    "이 단계는 나중에 하기(목록에 계속 남습니다)",
+  "onboarding.startHere.badge.done": "완료",
+  "onboarding.startHere.badge.current": "지금 할 차례",
+  "onboarding.startHere.badge.remaining": "남음",
+  "onboarding.startHere.badge.skipped": "건너뜀 · 남음",
+  "onboarding.startHere.allDone.title": "준비 끝났습니다!",
+  "onboarding.startHere.allDone.body":
+    "첫 티켓을 오케스트레이터에게 넘겼습니다. 보드 탭에서 진행 상황을 지켜보세요.",
+  "onboarding.startHere.dontLand": "앱을 켤 때 이 탭으로 시작하지 않기",
+  "onboarding.startHere.reenableLanding": "앱을 켤 때 이 탭으로 시작하기",
+  "onboarding.startHere.dontLandHint":
+    "어느 쪽이든 남은 단계는 이 탭에 그대로 남아 있습니다.",
+  // 왜 필요한지 — 단계마다 한 줄
+  "onboarding.startHere.why.install":
+    "오케스트레이터와 에이전트는 이 CLI 위에서 돌아갑니다. 없으면 아무것도 실행되지 않습니다.",
+  "onboarding.startHere.why.auth":
+    "이미 쓰고 계신 AI 계정을 연결하는 단계입니다. 인증이 없으면 스폰이 조용히 실패합니다.",
+  "onboarding.startHere.why.prd":
+    "작업할 폴더를 연결해야 오케스트레이터가 코드를 읽고 티켓을 만들 수 있습니다.",
+  "onboarding.startHere.why.firstTicket":
+    "첫 티켓을 만들어 봐야 마블로가 실제로 무엇을 해주는지 보입니다.",
+  // 막혔을 때의 대안 — 단계마다 한 줄
+  "onboarding.startHere.alt.install":
+    "자동 설치가 실패하면(EACCES·npm prefix 권한 등) 위에 뜨는 명령을 터미널에서 직접 실행하거나 공식 설치 문서를 따라가세요.",
+  "onboarding.startHere.alt.auth":
+    "Claude Code 와 Codex 중 하나만 로그인하면 됩니다. 브라우저 인증이 막히면 명령을 복사해 터미널에서 직접 실행하세요.",
+  "onboarding.startHere.alt.prd":
+    "아무 폴더나 괜찮습니다. 빈 폴더로 시작해도 되고, PRD 는 나중에 직접 써도 됩니다.",
+  "onboarding.startHere.alt.firstTicket":
+    "전달이 실패하면 오케스트레이터 터미널이 떠 있는지 확인한 뒤 다시 눌러 주세요.",
+  // 인라인 배너(모달 대체) — 스폰이 인증으로 막힌 순간
+  "onboarding.startHere.banner.title": "CLI 인증이 필요합니다",
+  "onboarding.startHere.banner.cta": "시작하기 열기",
+
   // — LoginPage (auth) —
   "onboarding.login.signupSubtitle": "새 계정을 만드세요",
   "onboarding.login.loginSubtitle": "계정에 로그인하세요",

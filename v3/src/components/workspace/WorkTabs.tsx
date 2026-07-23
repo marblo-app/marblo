@@ -16,6 +16,9 @@ import { HarnessStore } from "../harness/HarnessStore";
 import { MissionsTab } from "../tabs/MissionsTab";
 import { DeployTab } from "../tabs/DeployTab";
 import { FlowsTab } from "../tabs/FlowsTab";
+import { AgentsTab } from "../tabs/AgentsTab";
+import { SettingsPage } from "../settings/SettingsPage";
+import { StartHereTab } from "../onboarding/StartHereTab";
 import { PlanGate } from "../settings/PlanGate";
 
 /**
@@ -47,7 +50,13 @@ function GatedFlowsTab() {
 }
 
 const TAB_COMPONENTS: Record<RightTabId, () => JSX.Element> = {
+  startHere: StartHereTab,
   board: BoardTab,
+  agents: AgentsTab,
+  // Settings is ALSO reachable from the Header gear (which opens the shell's
+  // full-screen overlay). It gets a tab too because with the overlay as the
+  // only entry point users never found it (ticket 0JVQcUxd).
+  settings: SettingsPage,
   code: CodeTab,
   worktrees: WorktreeTab,
   history: WorkHistoryTab,
@@ -61,7 +70,10 @@ const TAB_COMPONENTS: Record<RightTabId, () => JSX.Element> = {
 };
 
 const TAB_LABEL_KEY = {
+  startHere: "workspace.tab.startHere",
   board: "workspace.tab.board",
+  agents: "workspace.tab.agents",
+  settings: "workspace.tab.settings",
   code: "workspace.tab.code",
   worktrees: "workspace.tab.worktrees",
   history: "workspace.tab.history",
