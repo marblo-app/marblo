@@ -18,8 +18,13 @@ import {
   pickMergeOutcomesToForward,
   pickMergedTaskCompletionCandidates,
   shouldMarkMergedTaskDone,
+  enrichMergePayload,
 } from "./services/mergeHistoryKgForwarder";
-import { getTask, updateTaskStatus } from "./services/taskService";
+import {
+  getTask,
+  getTaskDispatchMeta,
+  updateTaskStatus,
+} from "./services/taskService";
 import { buildBusyTaskIds } from "./lib/archiveSignals";
 import {
   logTelemetry,
@@ -306,12 +311,26 @@ function AppContent() {
     const unsub = subscribeToMergeHistory(
       (entries) => {
         if (kg) {
-          for (const payload of pickMergeOutcomesToForward(entries, forwarded)) {
-            try {
-              kg.recordMergeOutcome(payload);
-            } catch {
-              // best-effort: a bridge/IPC failure must never break the app
-            }
+          for (const base of pickMergeOutcomesToForward(entries, forwarded)) {
+            // Enrich with the task's dispatchMeta (role/taskType/complexity/
+            // model) BEFORE forwarding: the anonymous main process can't read
+            // member-scoped `tasks` (#406/L2), so without this the merge folds
+            // seen-only and the cell never learns. Async + best-effort — on any
+            // failure we still forward the base payload (taskType←changeType).
+            void (async () => {
+              let payload = base;
+              try {
+                const meta = await getTaskDispatchMeta(base.taskId);
+                payload = enrichMergePayload(base, meta);
+              } catch {
+                // fall through with base — main still learns taskType/changeType
+              }
+              try {
+                kg.recordMergeOutcome(payload);
+              } catch {
+                // best-effort: a bridge/IPC failure must never break the app
+              }
+            })();
           }
         }
         for (const candidate of pickMergedTaskCompletionCandidates(
@@ -324,7 +343,9 @@ function AppContent() {
               if (
                 !shouldMarkMergedTaskDone(task, {
                   worktrees: useWorktreeStore.getState().worktrees,
-                  busyTaskIds: buildBusyTaskIds(useAgentStore.getState().agents),
+                  busyTaskIds: buildBusyTaskIds(
+                    useAgentStore.getState().agents,
+                  ),
                 })
               ) {
                 return;

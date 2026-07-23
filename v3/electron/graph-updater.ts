@@ -125,6 +125,14 @@ export interface RecordOutcomeInput {
   atMs?: number;
 }
 
+/** Why an outcome couldn't be folded into the graph (attribution failed). */
+export interface OutcomeDropInfo {
+  taskId?: string | null;
+  agentId?: string | null;
+  mode: OutcomeMode;
+  reason: string;
+}
+
 export interface GraphUpdaterOptions {
   /** Graph file to write (defaults to the global machine-local file). */
   graphFile?: string;
@@ -133,6 +141,11 @@ export interface GraphUpdaterOptions {
   /** Read the task's dispatchMeta to recover role/tags/complexity/model when the
    * caller didn't pass an explicit ctx. Best-effort; may return null. */
   fetchMeta?: (taskId: string) => Promise<DispatchMetaLike | null>;
+  /** Called (best-effort) just before an unattributable outcome is dropped —
+   * defaults to a console.warn. Negative signals were silently vanishing (the
+   * graph learned ONLY positives); this makes every drop observable, and lets
+   * tests assert the reason. */
+  onDrop?: (info: OutcomeDropInfo) => void;
 }
 
 export class GraphUpdater {
@@ -141,6 +154,7 @@ export class GraphUpdater {
   private readonly fetchMeta?: (
     taskId: string,
   ) => Promise<DispatchMetaLike | null>;
+  private readonly onDrop: (info: OutcomeDropInfo) => void;
   /** Serializes read→mutate→write so concurrent outcomes never clobber. */
   private writeChain: Promise<void> = Promise.resolve();
 
@@ -148,6 +162,13 @@ export class GraphUpdater {
     this.graphFile = opts.graphFile ?? GLOBAL_GRAPH_FILE;
     this.now = opts.now ?? (() => Date.now());
     this.fetchMeta = opts.fetchMeta;
+    this.onDrop =
+      opts.onDrop ??
+      ((info) =>
+        console.warn(
+          `[GraphUpdater] dropped ${info.mode} outcome — ${info.reason}`,
+          { taskId: info.taskId ?? null, agentId: info.agentId ?? null },
+        ));
   }
 
   /**
@@ -186,9 +207,28 @@ export class GraphUpdater {
     }
 
     const model = normalizeModel(modelStr ?? undefined);
-    // Can't attribute an outcome to a model → drop it (don't guess).
-    if (!model || !ctx) return null;
-    if (!hasAnyFactor(ctx)) return null;
+    // Can't attribute an outcome to a model → drop it (don't guess). Log the
+    // reason first: a silent drop here is exactly why negative signals never
+    // reached the graph (dead agents dying with no resolvable model/ctx).
+    if (!model) {
+      this.onDrop({
+        taskId: input.taskId,
+        agentId: input.agentId,
+        mode,
+        reason: `unresolved model (raw=${JSON.stringify(modelStr)})`,
+      });
+      return null;
+    }
+    if (!ctx || !hasAnyFactor(ctx)) {
+      this.onDrop({
+        taskId: input.taskId,
+        agentId: input.agentId,
+        mode,
+        reason:
+          "no attributable context factor (role/taskType/complexity/tags all empty)",
+      });
+      return null;
+    }
 
     const atMs = input.atMs ?? this.now();
     await this.enqueueWrite(model, mode, ctx, input, atMs);

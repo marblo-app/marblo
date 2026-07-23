@@ -41,6 +41,36 @@ export async function getTask(taskId: string): Promise<Task | null> {
   return raw ? toTask(raw) : null;
 }
 
+/**
+ * Routing-graph attribution subset of a task's `dispatchMeta`. Not part of the
+ * public `Task` shape (it's an internal dispatch artifact), so it's read raw.
+ * Used by the KG merge forwarder: the renderer (an authenticated project member)
+ * resolves this and passes it to the anonymous main process, which can't read
+ * member-scoped `tasks` itself (#406/L2).
+ */
+export interface TaskDispatchMeta {
+  role: string | null;
+  taskType: string | null;
+  complexity: string | null;
+  model: string | null;
+}
+
+export async function getTaskDispatchMeta(
+  taskId: string,
+): Promise<TaskDispatchMeta | null> {
+  const raw = await getDocument<Record<string, unknown>>(COLLECTION, taskId);
+  const meta = raw?.dispatchMeta as Record<string, unknown> | undefined;
+  if (!meta || typeof meta !== "object") return null;
+  const str = (v: unknown): string | null =>
+    typeof v === "string" && v.trim() ? v : null;
+  return {
+    role: str(meta.role),
+    taskType: str(meta.taskType),
+    complexity: str(meta.complexity),
+    model: str(meta.model),
+  };
+}
+
 export async function createTask(
   data: Omit<Task, "id" | "createdAt" | "updatedAt">,
 ): Promise<string> {

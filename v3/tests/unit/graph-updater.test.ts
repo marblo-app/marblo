@@ -173,6 +173,76 @@ describe("GraphUpdater.recordOutcome (write path)", () => {
     expect(fs.existsSync(file)).toBe(false);
   });
 
+  it("logs the drop reason before dropping an unattributable outcome", async () => {
+    const drops: string[] = [];
+    const u = new GraphUpdater({
+      graphFile: file,
+      now: () => clock,
+      onDrop: (info) => drops.push(`${info.mode}:${info.reason}`),
+    });
+    // No model → the graph can't attribute the crash → dropped WITH a reason.
+    await u.recordOutcome({ taskId: "T1", rawOutcome: "crashed", ctx: CTX });
+    expect(drops.length).toBe(1);
+    expect(drops[0]).toContain("crash"); // mode is crash_loop/crashed
+    expect(drops[0]).toContain("unresolved model");
+
+    // Has a model but no context factor → dropped for the OTHER reason.
+    await u.recordOutcome({
+      taskId: "T2",
+      model: "antigravity",
+      rawOutcome: "crashed",
+      ctx: {},
+    });
+    expect(drops.length).toBe(2);
+    expect(drops[1]).toContain("no attributable context factor");
+  });
+
+  it("folds a negative outcome that has NO taskId (role+model only)", async () => {
+    // Gap 1: a crash between tasks arrives with a null taskId. Before the fix
+    // the call site skipped it entirely; now role+model is enough to record a
+    // negative into the role cell, and agentId still seeds idempotency.
+    const u = updater();
+    for (let i = 0; i < 5; i++) {
+      clock += 24 * 60 * 60 * 1000;
+      await u.recordOutcome({
+        taskId: null,
+        agentId: `agy-crash-${i}`,
+        model: "antigravity",
+        rawOutcome: "crashed",
+        ctx: { role: "backend" },
+      });
+    }
+    const graph = loadRoutingGraphFile(file);
+    expect(graph.cells["role:backend|antigravity"]).toBeDefined();
+    expect(
+      graphBiasForModel("antigravity", { role: "backend" }, graph),
+    ).toBeLessThan(0);
+  });
+
+  it("is idempotent on (null-taskId, agentId, mode) via the agentId key", async () => {
+    const u = updater();
+    const ev = {
+      taskId: null,
+      agentId: "agy-1",
+      model: "antigravity" as const,
+      rawOutcome: "crashed" as const,
+      ctx: { role: "backend" },
+    };
+    await u.recordOutcome({ ...ev });
+    const once = graphBiasForModel(
+      "antigravity",
+      { role: "backend" },
+      loadRoutingGraphFile(file),
+    );
+    await u.recordOutcome({ ...ev }); // re-delivered
+    const twice = graphBiasForModel(
+      "antigravity",
+      { role: "backend" },
+      loadRoutingGraphFile(file),
+    );
+    expect(twice).toBe(once);
+  });
+
   // gh + app merges both feed the graph via merge_history; the renderer
   // re-forwards every historical merge on each launch. The `seen` guard makes
   // those re-deliveries no-ops — this asserts they also skip the disk write, so
