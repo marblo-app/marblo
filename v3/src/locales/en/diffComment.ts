@@ -10,4 +10,6 @@ export const diffComment = {
   "diff.comment.sentLocal": "Sent to the orchestrator",
   "diff.comment.sentQueued": "Queued — the orchestrator host will pick it up",
   "diff.comment.sentFailed": "Send failed — please try again later",
+  "diff.comment.editAction": "Request edit from orchestrator",
+  "diff.comment.editPlaceholder": "Describe the change you want to this code…",
 };

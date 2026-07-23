@@ -13,4 +13,9 @@ export const diffComment = {
   "diff.comment.sentLocal": "오케스트레이터에 전송됨",
   "diff.comment.sentQueued": "대기열에 등록됨 (오케 호스트가 수신)",
   "diff.comment.sentFailed": "전송 실패 — 나중에 다시 시도하세요",
+  // Code 에디터(diff 아님)에서 코드 선택 → 오케에게 수정 요청. 같은 전송
+  // 경로(useOrchestratorDiffComment)를 쓰지만 문구는 '리뷰 코멘트'가 아니라
+  // '수정 지시'다.
+  "diff.comment.editAction": "오케에게 수정 요청",
+  "diff.comment.editPlaceholder": "이 코드를 어떻게 고칠지 지시…",
 };
