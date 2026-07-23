@@ -479,6 +479,44 @@ export function decideMarketingConsentSync(
   };
 }
 
+/**
+ * 백필 전용: users/{uid} 문서 한 장을 보고 "이 사람에게 명시적 마케팅 동의가
+ * 실제로 기록돼 있는가"만 판정해 grant 요청을 만든다(없으면 null).
+ *
+ * ★훅(syncMarketingConsentOnUserWrite)과 같은 판정기 decideMarketingConsentSync
+ *   를 재사용한다 — 백필과 훅의 동의 기준이 갈라지는 것을 구조적으로 막는다.
+ * ★null 이 아닌 값을 돌려주는 경우는 webPrivacyConsent.marketing === true
+ *   하나뿐이다. 동의 기록이 없거나(false·필드 없음·문서 없음) 앱의
+ *   privacyConsent(텔레메트리 스키마)뿐인 사용자를 granted 로 만드는 경로는
+ *   없다 — 동의 없는 발송은 PIPA 위반이다.
+ * ★revoke 는 돌려주지 않는다: 백필에는 before 스냅샷이 없어 true→false 전이를
+ *   관측할 수 없고, 철회 판정은 훅의 책임이다. 이미 revoked 인 컨택트는
+ *   mergeEmailConsent 가 되살리지 않는다(우선순위 2).
+ */
+export function backfillConsentGrantFromUserDoc(
+  userDoc: UserDocRaw | null | undefined,
+): {
+  locale: string;
+  grant: {
+    source: string;
+    version: string;
+    legalBasis: EmailMarketingConsent["legalBasis"];
+    consentedAt: unknown | null;
+  };
+} | null {
+  const action = decideMarketingConsentSync(null, userDoc);
+  if (action.kind !== "grant") return null;
+  return {
+    locale: action.locale,
+    grant: {
+      source: "web_privacy_consent",
+      version: action.version,
+      legalBasis: "explicit_opt_in",
+      consentedAt: action.consentedAt,
+    },
+  };
+}
+
 // ─── lifecycle·세그먼트 파생 ────────────────────────────────────────
 export interface ContactFlags {
   hasWaitlist: boolean;

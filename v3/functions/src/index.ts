@@ -47,6 +47,7 @@ import {
   contactToBqRow,
   mergeEmailConsent,
   decideMarketingConsentSync,
+  backfillConsentGrantFromUserDoc,
   type UserDocRaw,
   type ContactFlags,
   type ContactSource,
@@ -1763,6 +1764,8 @@ const FOUNDERS_COLLECTION = "founders";
 // 신청 목록 조회/반려 매칭이 스캔하는 최대 신청 수. 이메일 정규화 기준으로
 // 매칭·중복제거하려면 doc 을 읽어봐야 해서 쿼리 필터 대신 스캔 상한을 둔다.
 const WAITLIST_SCAN_LIMIT = 1000;
+/** 백필의 users/{uid} 동의 조회 배치 크기(getAll 1회당 문서 수). */
+const USER_CONSENT_READ_CHUNK = 200;
 
 interface FounderSurveyAnswers {
   q1: string;
@@ -8440,8 +8443,12 @@ export const syncMarketingContactOnSubscriptionWrite = functions.firestore
 
 // ─── 백필: Auth(실가입만)·waitlist·founders·subscriptions → 컨택트 ────
 // 어드민 전용. dryRun 기본 true — 실적재 전 대상 규모를 확인한다.
-// ★Auth 4,954 중 custom-token(에이전트) 계정을 반드시 걸러낸다(감사 실측:
-//   실가입 google 22 + password 12 ≈ 34).
+// ★Auth 5,025 중 custom-token(에이전트) 계정을 반드시 걸러낸다(실측 2026-07-24:
+//   실가입 56, 나머지 4,969 는 에이전트 계정).
+// ★consent: users/{uid}.webPrivacyConsent.marketing === true 인 실가입자만
+//   granted(explicit_opt_in)로 올린다(1b 단계). waitlist agreed 는 pending
+//   까지만 — 마케팅 수신동의가 아니다(COMPLIANCE-AUDIT D2). 그 외 소스는
+//   consent 를 건드리지 않는다.
 export const backfillMarketingContacts = functions.https.onCall(
   async (data, context) => {
     requireAdmin(context);
@@ -8483,6 +8490,37 @@ export const backfillMarketingContacts = functions.https.onCall(
       }
       pageToken = page.pageToken;
     } while (pageToken);
+
+    // 1b) users/{uid}.webPrivacyConsent → 명시 동의 조회
+    //
+    // ★왜 필요한가: 동의를 SoT 로 잇는 훅(syncMarketingConsentOnUserWrite)은
+    //   users 문서가 "다시 써질 때"만 발화한다. 훅 배포(2026-07-22) 이전에
+    //   동의한 사용자는 문서가 재기록되지 않는 한 영영 미동기로 남는다.
+    //   백필이 이 갭을 메우지 않으면 granted 증가분이 0 이라 무의미하다.
+    // ★판정은 훅과 같은 함수(backfillConsentGrantFromUserDoc →
+    //   decideMarketingConsentSync)로만 한다. marketing === true 인 사람만
+    //   granted 가 되고, 동의 기록이 없는 사람은 unknown 그대로다.
+    // ★쿼리가 아니라 uid 지정 getAll 이다 — 중첩 필드 단일 인덱스 유무나
+    //   인덱스 예외 설정에 결과가 좌우되면 안 되는 판정이다(누락 = 미동기 잔존,
+    //   과잉 = 규제 위반).
+    const explicitConsentByUid = new Map<
+      string,
+      NonNullable<ReturnType<typeof backfillConsentGrantFromUserDoc>>
+    >();
+    for (let i = 0; i < realUsers.length; i += USER_CONSENT_READ_CHUNK) {
+      const chunk = realUsers.slice(i, i + USER_CONSENT_READ_CHUNK);
+      if (chunk.length === 0) continue;
+      const snaps = await db.getAll(
+        ...chunk.map((u) => db.collection("users").doc(u.uid)),
+      );
+      snaps.forEach((snap, idx) => {
+        if (!snap.exists) return;
+        const consent = backfillConsentGrantFromUserDoc(
+          snap.data() as UserDocRaw,
+        );
+        if (consent) explicitConsentByUid.set(chunk[idx].uid, consent);
+      });
+    }
 
     // 2) waitlist
     const waitlistSnap = await db
@@ -8530,6 +8568,11 @@ export const backfillMarketingContacts = functions.https.onCall(
       authScanned,
       authRealUsers: realUsers.length,
       authSkippedNonReal: authScanned - realUsers.length,
+      // ★granted 로 승격될 예정 인원 = users/{uid}.webPrivacyConsent.marketing
+      // 이 true 인 실가입자. dry-run 에서 이 값을 먼저 확인하고 실적재한다
+      // (실적재 후 consentGranted 는 이미 granted 인 사람을 뺀 값이라 이보다
+      // 작거나 같다).
+      authExplicitConsent: explicitConsentByUid.size,
       waitlistRows: waitlistRows.length,
       // ★pending(재동의 대상) 편입 예정 수 — granted 아님. 발송 가능 모수가
       // 아니다(emailable 은 explicit_opt_in 재동의 후에만 늘어난다).
@@ -8561,11 +8604,16 @@ export const backfillMarketingContacts = functions.https.onCall(
       return r;
     };
     for (const u of realUsers) {
+      // ★동의 기록이 있는 사람만 grantConsent 가 실린다. 없으면 null 이라
+      // unknown 그대로 — 백필이 동의를 만들어내는 일은 없다.
+      const consent = explicitConsentByUid.get(u.uid) ?? null;
       await apply({
         email: u.email,
         uid: u.uid,
         source: "auth_signup",
+        locale: consent?.locale ?? null,
         signupAt: u.creationTime ? new Date(u.creationTime) : null,
+        grantConsent: consent?.grant ?? null,
         actor: "backfill",
       });
     }

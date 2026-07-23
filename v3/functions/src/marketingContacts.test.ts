@@ -21,6 +21,7 @@ import {
   toIsoOrNull,
   mergeEmailConsent,
   decideMarketingConsentSync,
+  backfillConsentGrantFromUserDoc,
   UNKNOWN_CONSENT,
   type ContactFlags,
   type EmailMarketingConsent,
@@ -450,6 +451,75 @@ test("★순서 무관: saveConsent 가 auth onCreate 보다 나중이어도 gra
       true,
     );
   }
+});
+
+// ─── backfillConsentGrantFromUserDoc (백필의 동의 매핑) ───────────────
+// 회귀 방지: 백필이 users/{uid}.webPrivacyConsent 를 안 읽어서 granted 승격이
+// 0 이던 버그(티켓 N8sAY4Tjelm5EhZmvjvv). 반대 방향(동의 없는 사람을 granted 로
+// 만드는 것)은 규제 위반이라 양쪽을 다 못박는다.
+test("backfillConsentGrantFromUserDoc: marketing=true → explicit_opt_in grant", () => {
+  const g = backfillConsentGrantFromUserDoc(userDoc(true));
+  assert.ok(g);
+  assert.equal(g.grant.legalBasis, "explicit_opt_in");
+  assert.equal(g.grant.source, "web_privacy_consent");
+  assert.equal(g.grant.version, "2026-07-14");
+  assert.equal(g.grant.consentedAt, NOW); // 백필 시각이 아니라 실제 동의 시각
+  assert.equal(g.locale, "ko");
+
+  // 훅과 같은 판정기를 쓴다 — 백필/훅의 동의 기준이 갈라지지 않는다
+  const viaHook = decideMarketingConsentSync(null, userDoc(true));
+  assert.equal(viaHook.kind, "grant");
+  if (viaHook.kind === "grant") assert.equal(g.grant.version, viaHook.version);
+});
+
+test("★backfillConsentGrantFromUserDoc: 동의 없는 사람은 절대 grant 하지 않는다", () => {
+  assert.equal(backfillConsentGrantFromUserDoc(userDoc(false)), null); // 미체크
+  assert.equal(backfillConsentGrantFromUserDoc({}), null); // 동의 레코드 없음
+  assert.equal(backfillConsentGrantFromUserDoc(null), null); // users 문서 없음
+  assert.equal(backfillConsentGrantFromUserDoc(undefined), null);
+  // 앱의 privacyConsent(텔레메트리 스키마)는 마케팅 동의 소스가 아니다
+  assert.equal(
+    backfillConsentGrantFromUserDoc({
+      privacyConsent: { firstPartyTelemetry: true, marketing: true },
+    }),
+    null,
+  );
+  // marketing 이 truthy 지만 true 가 아닌 값도 동의가 아니다
+  assert.equal(
+    backfillConsentGrantFromUserDoc({ webPrivacyConsent: { marketing: "1" } }),
+    null,
+  );
+});
+
+test("★백필 grant 는 revoked 를 되살리지 않는다(수신거부 이력 보존)", () => {
+  const g = backfillConsentGrantFromUserDoc(userDoc(true));
+  assert.ok(g);
+  const merged = mergeEmailConsent(
+    withStatus("revoked"),
+    { grant: g.grant },
+    NOW,
+  );
+  assert.equal(merged.consent.status, "revoked");
+  assert.equal(merged.event, null);
+});
+
+test("백필 grant 는 unknown·pending 만 올리고, 이미 granted 면 멱등", () => {
+  const g = backfillConsentGrantFromUserDoc(userDoc(true));
+  assert.ok(g);
+  assert.equal(
+    mergeEmailConsent(null, { grant: g.grant }, NOW).consent.status,
+    "granted",
+  );
+  assert.equal(
+    mergeEmailConsent(withStatus("pending"), { grant: g.grant }, NOW).consent
+      .status,
+    "granted",
+  );
+  // 재실행해도 이벤트가 다시 쌓이지 않는다
+  assert.equal(
+    mergeEmailConsent(withStatus("granted"), { grant: g.grant }, NOW).event,
+    null,
+  );
 });
 
 test("★철회 우선 불변식: 수신거부한 사람은 재동의해도 발송 불가", () => {
