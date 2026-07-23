@@ -785,6 +785,22 @@ interface ElectronAPI {
   connection: ConnectionAPI;
   updater: UpdaterAPI;
   sentry: SentryBridgeAPI;
+  kg: KgBridgeAPI;
+}
+
+/**
+ * Routing knowledge-graph feedback bridge. The renderer forwards each merge it
+ * observes in merge_history (its own app merge OR a gh/GitHub merge captured
+ * server-side, #566) to the main process, which folds it into the machine-local
+ * routing graph. Renderer is the authenticated project member allowed to read
+ * member-scoped merge_history (cf #406/L2); main runs anonymous and can't.
+ */
+interface KgBridgeAPI {
+  recordMergeOutcome: (payload: {
+    taskId: string;
+    changeType: string | null;
+    mergedAtMs: number | null;
+  }) => void;
 }
 
 interface Window {

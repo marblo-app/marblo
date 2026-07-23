@@ -2580,6 +2580,55 @@ const graphUpdater = new GraphUpdater({
   },
 });
 
+// Fold one ACCEPTED merge (the top positive KG label, spec §7) into the
+// machine-local routing graph. Shared by BOTH merge sources so gh/GitHub merges
+// learn identically to the app's own Merge button:
+//   (1) the app Merge path (recordMergeHistory, below) calls this directly;
+//   (2) gh/GitHub merges are captured server-side into merge_history (#566),
+//       which the renderer (an authenticated project member — the anonymous-auth
+//       main process may NOT read member-scoped merge_history, cf #406/L2 rules)
+//       forwards over the `kg:recordMergeOutcome` channel.
+// ctx (role/tags/complexity/model) is recovered from the task's dispatchMeta;
+// changeType is a de-identified taskType fallback. Idempotent via the graph's
+// `seen` guard keyed on (taskId,agentId=-,merged), so double-folding an app
+// merge (direct call + its own forwarded merge_history doc) is a no-op. A merge
+// with no taskId can't be attributed to a dispatch's model+ctx, so recordOutcome
+// would drop it anyway — skip it here.
+const foldMergeOutcome = (input: {
+  taskId?: string | null;
+  changeType?: string | null;
+  mergedAtMs?: number | null;
+}): void => {
+  if (!input.taskId) return;
+  void graphUpdater.recordOutcome({
+    taskId: input.taskId,
+    rawOutcome: "merged",
+    ctx: input.changeType ? { taskType: input.changeType } : undefined,
+    atMs:
+      typeof input.mergedAtMs === "number" && Number.isFinite(input.mergedAtMs)
+        ? input.mergedAtMs
+        : undefined,
+  });
+};
+
+// Renderer → main bridge for source (2) above: the renderer's merge_history
+// subscription (member-scoped read it IS allowed to do) forwards each new merge.
+// Renderer-provided payload → validate every field before use.
+ipcMain.on("kg:recordMergeOutcome", (_event, payload: unknown) => {
+  if (!payload || typeof payload !== "object") return;
+  const p = payload as {
+    taskId?: unknown;
+    changeType?: unknown;
+    mergedAtMs?: unknown;
+  };
+  if (typeof p.taskId !== "string" || !p.taskId) return;
+  foldMergeOutcome({
+    taskId: p.taskId,
+    changeType: typeof p.changeType === "string" ? p.changeType : null,
+    mergedAtMs: typeof p.mergedAtMs === "number" ? p.mergedAtMs : null,
+  });
+});
+
 // Append-only merge audit trail (WORKTREE-SPEC §6 / autonomy-dial audit log).
 // Writes one immutable doc per completed merge to the `merge_history`
 // collection, reusing the mission firebase app (anonymous auth) like the
@@ -2606,15 +2655,10 @@ const recordMergeHistory = async (
   });
 
   // KG feedback (spec §7): merge is the top accepted (positive) label. Fold it
-  // into the routing graph — ctx (role/tags/complexity/model) is recovered from
-  // the task's dispatchMeta; changeType is a de-identified taskType fallback.
-  if (record.taskId) {
-    void graphUpdater.recordOutcome({
-      taskId: record.taskId,
-      rawOutcome: "merged",
-      ctx: record.changeType ? { taskType: record.changeType } : undefined,
-    });
-  }
+  // into the routing graph via the shared entry point (same path gh merges take
+  // through the kg:recordMergeOutcome bridge). Idempotent with the renderer-
+  // forwarded copy of this same merge_history doc.
+  foldMergeOutcome({ taskId: record.taskId, changeType: record.changeType });
 
   const { app, authReady } = getMissionFirebaseApp();
   await authReady;

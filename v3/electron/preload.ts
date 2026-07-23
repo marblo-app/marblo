@@ -445,6 +445,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeAllListeners("telemetry:event");
     },
   },
+  // Routing knowledge-graph feedback: the renderer (an authenticated project
+  // member — the only party allowed to read member-scoped merge_history, cf
+  // #406/L2 rules) forwards each new merge — the app's OR gh/GitHub's (#566) —
+  // to main, which folds it into the machine-local routing graph. Fire-and-
+  // forget send; main validates the payload and best-efforts the fold.
+  kg: {
+    recordMergeOutcome: (payload: {
+      taskId: string;
+      changeType: string | null;
+      mergedAtMs: number | null;
+    }) => ipcRenderer.send("kg:recordMergeOutcome", payload),
+  },
   // Sentry: consent-gated crash/error capture. The renderer calls initMain
   // ONLY after the user opts in AND VITE_SENTRY_DSN is set; main inits the
   // @sentry/electron/main SDK (idempotent, no-op without a DSN).

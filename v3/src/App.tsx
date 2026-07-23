@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AuthProvider } from "./auth";
 import { LanguageFirstRun } from "./components/onboarding/LanguageFirstRun";
 import { useAuth } from "./hooks/useAuth";
@@ -11,6 +11,8 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BrandLoader } from "./components/BrandLoader";
 import { useProjectStore } from "./stores/projectStore";
 import { useSubscriptionStore } from "./stores/subscriptionStore";
+import { subscribeToMergeHistory } from "./services/mergeHistoryService";
+import { pickMergeOutcomesToForward } from "./services/mergeHistoryKgForwarder";
 import {
   logTelemetry,
   setTelemetryEnabled,
@@ -220,7 +222,21 @@ function AppContent() {
   const subscribeToSubscription = useSubscriptionStore(
     (s) => s.subscribeToSubscription,
   );
+  const projects = useProjectStore((s) => s.projects);
   const workspaceMode = useWorkspaceModeStore((s) => s.enabled);
+
+  // Stable membership key: the projects array is a fresh reference on every
+  // snapshot, so we key the KG-forwarding effect on the sorted project ids to
+  // re-subscribe only when membership actually changes (not on every re-render).
+  const memberProjectIdsKey = useMemo(
+    () =>
+      projects
+        .map((p) => p.id)
+        .filter(Boolean)
+        .sort()
+        .join(","),
+    [projects],
+  );
 
   // DIAGNOSTIC TEST: Firebase realtime listeners suspected of causing typing
   // input delay (React reconciliation triggered by snapshot updates competing
@@ -261,6 +277,38 @@ function AppContent() {
     setAutoSelectFirstProject,
     FIREBASE_LISTENERS_ENABLED,
   ]);
+
+  // KG v1 feedback loop (spec #559 §7): keep the machine-local routing graph
+  // fed by EVERY merge. gh/GitHub merges land in merge_history server-side
+  // (#566) but never touch the main-process app-merge path — so the renderer
+  // (the authenticated project member allowed to read member-scoped
+  // merge_history, cf #406/L2; main runs anonymous and can't) subscribes and
+  // forwards each new merge to main, which folds it into routing-graph.json.
+  useEffect(() => {
+    if (!user) return;
+    if (!FIREBASE_LISTENERS_ENABLED) return;
+    const projectIds = memberProjectIdsKey
+      ? memberProjectIdsKey.split(",")
+      : [];
+    if (projectIds.length === 0) return;
+    const kg = window.electronAPI?.kg;
+    if (!kg) return; // preload bridge absent (e.g. non-Electron) → degrade
+    // Per-session dedup; the graph's persistent `seen` guard handles the rest.
+    const forwarded = new Set<string>();
+    const unsub = subscribeToMergeHistory(
+      (entries) => {
+        for (const payload of pickMergeOutcomesToForward(entries, forwarded)) {
+          try {
+            kg.recordMergeOutcome(payload);
+          } catch {
+            // best-effort: a bridge/IPC failure must never break the app
+          }
+        }
+      },
+      { projectIds, maxResults: 200 },
+    );
+    return () => unsub();
+  }, [user?.uid, memberProjectIdsKey, FIREBASE_LISTENERS_ENABLED]);
 
   // Track session start/end
   useEffect(() => {

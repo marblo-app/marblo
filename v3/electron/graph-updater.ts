@@ -205,6 +205,22 @@ export class GraphUpdater {
     const run = () => {
       try {
         const graph = loadRoutingGraphFile(this.graphFile);
+        // Idempotency-aware write-skip: applyOutcome is a no-op when this
+        // (taskId,agentId,mode) was already folded (its `seen` guard). Detect
+        // that up front so a re-delivered outcome never rewrites an unchanged
+        // file — notably the merge_history subscription re-emitting historical
+        // merges on every launch (a fresh in-memory Set re-forwards them, but
+        // the graph already absorbed each). Safe-degrading: if this key format
+        // ever drifts from routing-graph's, `alreadyFolded` just reads false
+        // and we always save — it can never skip a genuine first-time fold nor
+        // lose data. Mirrors applyOutcome's `${taskId}:${agentId}:${mode}` key.
+        const seenKey = `${input.taskId ?? "-"}:${
+          input.agentId ?? "-"
+        }:${mode}`;
+        const alreadyFolded = Object.prototype.hasOwnProperty.call(
+          graph.seen,
+          seenKey,
+        );
         applyOutcome(graph, {
           model,
           mode,
@@ -213,7 +229,7 @@ export class GraphUpdater {
           agentId: input.agentId ?? null,
           atMs,
         });
-        saveRoutingGraph(graph, this.graphFile);
+        if (!alreadyFolded) saveRoutingGraph(graph, this.graphFile);
       } catch (err) {
         console.warn("[GraphUpdater] recordOutcome write failed:", err);
       }

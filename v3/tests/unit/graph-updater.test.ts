@@ -172,4 +172,55 @@ describe("GraphUpdater.recordOutcome (write path)", () => {
     expect(applied).toBeNull();
     expect(fs.existsSync(file)).toBe(false);
   });
+
+  // gh + app merges both feed the graph via merge_history; the renderer
+  // re-forwards every historical merge on each launch. The `seen` guard makes
+  // those re-deliveries no-ops — this asserts they also skip the disk write, so
+  // backfill re-delivery can't spam N rewrites of an unchanged file every boot.
+  // Detect writes via mtime: stamp the file to a distinct past time, then any
+  // real save (writeFileSync+rename → mtime≈now) is unambiguously detectable,
+  // independent of timer resolution. Spying on the ESM `fs` export isn't
+  // possible (namespace is frozen), so we observe the side effect instead.
+  const PAST = new Date("2000-01-01T00:00:00Z");
+  const stampPast = () => {
+    fs.utimesSync(file, PAST, PAST);
+    return fs.statSync(file).mtimeMs;
+  };
+
+  it("skips the disk write when re-delivering an already-folded merge", async () => {
+    const u = updater();
+    const merge = {
+      taskId: "M1",
+      model: "antigravity",
+      rawOutcome: "merged" as const,
+      ctx: CTX,
+    };
+    await u.recordOutcome({ ...merge }); // first fold → writes
+    const before = fs.readFileSync(file, "utf-8");
+    const pastMs = stampPast();
+
+    await u.recordOutcome({ ...merge }); // re-delivered (relaunch backfill)
+    await u.recordOutcome({ ...merge }); // and again
+    // mtime unchanged → no rewrite; content byte-identical → counted once.
+    expect(fs.statSync(file).mtimeMs).toBe(pastMs);
+    expect(fs.readFileSync(file, "utf-8")).toBe(before);
+  });
+
+  it("still writes a genuinely new merge (skip is idempotency-gated, not blanket)", async () => {
+    const u = updater();
+    await u.recordOutcome({
+      taskId: "M1",
+      model: "antigravity",
+      rawOutcome: "merged",
+      ctx: CTX,
+    });
+    const pastMs = stampPast();
+    await u.recordOutcome({
+      taskId: "M2", // different task → not yet seen → must persist
+      model: "antigravity",
+      rawOutcome: "merged",
+      ctx: CTX,
+    });
+    expect(fs.statSync(file).mtimeMs).toBeGreaterThan(pastMs);
+  });
 });
