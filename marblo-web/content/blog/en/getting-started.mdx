@@ -1,21 +1,21 @@
 ---
 title: "Marblo Getting Started — From Download to Your First Finished Agent"
-description: "A hands-on guide for developers opening Marblo for the first time. ★Before you start: you need your own paid Claude subscription (or API key) and Node.js. Download → Install → Node.js → CLI auth → Connect a folder → First spawn → First completed task — clearing the three walls that stop most people."
+description: "A hands-on guide for developers opening Marblo for the first time. ★Before you start: you need your own paid Claude subscription (or API key) and Node.js. Download → Install → Node.js → CLI auth → Connect a folder → First spawn → First completed task — following the flow the first-run popup (connection wizard) guides you through."
 date: "2026-07-21"
 category: "product"
 locales: ["ko", "en", "ja"]
 author: "Marblo"
 ---
 
-When most people open Marblo for the first time, they close it **without ever spawning a single agent**. Not because the product is bad, but because they hit three walls **before** they ever see the value. This guide names those three walls up front and walks you past each one, all the way to **the moment your first agent finishes a ticket end to end**.
+Marblo is a platform that runs agents **by connecting your own Claude·Codex subscription**. So if you **haven't used Claude Code before**, that very first step — making the **initial connection** with the orchestrator — can feel a little unfamiliar the first time you open Marblo. Once that first connection is done, everything after it flows smoothly, so please follow the **first-run popup (the connection wizard)** all the way through when you first launch the app. This guide walks through the flow that connection wizard guides you along, from download all the way to **the moment your first agent finishes a ticket end to end**.
 
 It's written developer-first, but it includes the Node.js install step so that **someone new to AI tooling can also get through it alone**.
 
-## ★Before you start — let's be honest (BYOK)
+## ★Before you start — two things you'll need (connect your own account)
 
-Marblo runs agents **on your own AI account**. This is called BYOK (Bring Your Own Key). So to start you need **two things**, and without both you'll get stuck at the first spawn.
+Marblo runs agents **by connecting your own AI account**. So to start you need **two things**, and with both in place your initial connection and first spawn go smoothly.
 
-<Diagram caption="The three unannounced walls on the way to your first spawn. Following only the in-app prompts, it's easy to get silently stuck at wall ①, ②, or ③. This guide covers how to clear each one.">
+<Diagram caption="The three steps the first-run popup (connection wizard) guides you through. After download and install, clear ①, ②, and ③ in order to reach your first completed task. This guide walks through each step one by one.">
   <svg
     viewBox="0 0 640 300"
     role="img"
@@ -363,7 +363,7 @@ codex login
 > ⚠️ **This is wall ②·③.** The gate only says "sign in," which makes it look like a free login is enough. But:
 >
 > - **Signing in alone isn't enough** — the account you signed in with needs a **paid entitlement (Claude Pro/Max or API credit)**.
-> - Sign in with a free account and the gate passes you as "ready," but **the first spawn dies within 2 seconds** (wall ③, pass-through crash). When that happens, don't ask "why did it die?" — check **Requirement 1 (a paid subscription/API key) in "Before you start — BYOK"** at the top.
+> - Sign in with a free account and the gate passes you as "ready," but **the first spawn dies within 2 seconds** (wall ③, pass-through crash). When that happens, don't ask "why did it die?" — check **Requirement 1 (a paid subscription/API key) in "Before you start — two things you'll need"** at the top.
 
 Once authentication finishes, each CLI flips to an "authenticated" state. If the state doesn't update, restart the app.
 
@@ -399,11 +399,11 @@ When the agent finishes, it moves the ticket to **REVIEW**. You check the result
 
 ![Creating a mission (task) in the orchestrator.](/images/guide/mission-create.svg)
 
-If you got here, congratulations. You've cleared all three walls that stop most people, and **watched an agent finish a ticket end to end** with your own eyes.
+If you got here, congratulations. You've completed all three steps of the initial connection, and **watched an agent finish a ticket end to end** with your own eyes.
 
 > 🎥 **Video slot F** — The agent moving work to REVIEW → the user checking the diff → approving → DONE. (Completion = the value moment, the climax of the video.)
 
-## Stuck? — Three-wall troubleshooting
+## Stuck? — Initial-connection troubleshooting
 
 | Symptom                                                     | Which wall                         | Fix                                                                                                     |
 | ----------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -421,4 +421,4 @@ Once you've reached your first completion, the next move is running **multiple a
 - [One developer, many agents](/en/blog/one-dev-many-agents) — how to work at team scale, solo
 - [Parallel agents that don't collide](/en/blog/parallel-agents-that-dont-collide) — running many agents at once with worktree isolation
 
-Get the two requirements (a paid Claude account + Node.js) in place and Marblo handles most of the rest automatically. You just have to clear the three walls.
+Get the two requirements (a paid Claude account + Node.js) in place and Marblo handles most of the rest automatically. You just have to complete that one-time connection.
