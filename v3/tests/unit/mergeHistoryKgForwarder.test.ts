@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { pickMergeOutcomesToForward } from "../../src/services/mergeHistoryKgForwarder";
+import {
+  pickMergeOutcomesToForward,
+  pickMergedTaskCompletionCandidates,
+  shouldMarkMergedTaskDone,
+} from "../../src/services/mergeHistoryKgForwarder";
 import type { MergeHistoryEntry } from "../../src/types/mergeHistory";
+import type { Task, TaskStatus } from "../../src/types/task";
+import type { Worktree, WorktreeStatus } from "../../src/types/worktree";
 
 function entry(
   over: Partial<MergeHistoryEntry> & { id: string },
@@ -14,6 +20,62 @@ function entry(
     headSha: "sha",
     mode: "manual",
     mergedAt: new Date("2026-07-01T00:00:00Z"),
+    ...over,
+  };
+}
+
+function task(status: TaskStatus, over: Partial<Task> = {}): Task {
+  return {
+    id: "T1",
+    projectId: "p1",
+    contextId: "board",
+    title: "Task",
+    description: "",
+    status,
+    role: "frontend",
+    priority: 1,
+    dependsOn: [],
+    dependsOnCompleted: true,
+    claimedBy: null,
+    claimedAt: null,
+    scope: [],
+    comment: "",
+    prUrl: "",
+    hasPmFeedback: false,
+    createdAt: new Date("2026-07-01T00:00:00Z"),
+    updatedAt: new Date("2026-07-01T00:00:00Z"),
+    ...over,
+  };
+}
+
+function status(over: Partial<WorktreeStatus> = {}): WorktreeStatus {
+  return {
+    branch: "feat",
+    baseRef: "main",
+    ahead: 1,
+    behind: 0,
+    dirty: false,
+    mergeable: true,
+    conflicts: [],
+    filesChanged: 0,
+    insertions: 0,
+    deletions: 0,
+    ...over,
+  };
+}
+
+function worktree(over: Partial<Worktree> = {}): Worktree {
+  return {
+    id: "p1:/wt",
+    taskId: "T1",
+    projectId: "p1",
+    agentId: null,
+    branch: "feat",
+    baseRef: "main",
+    path: "/wt",
+    repoRoot: "/repo",
+    createdAt: null,
+    status: status(),
     ...over,
   };
 }
@@ -78,5 +140,70 @@ describe("pickMergeOutcomesToForward", () => {
     );
     expect(p.mergedAtMs).toBeNull();
     expect(p.changeType).toBeNull();
+  });
+});
+
+describe("pickMergedTaskCompletionCandidates", () => {
+  it("selects task-attributable merge docs once per session", () => {
+    const seen = new Set<string>();
+    const first = pickMergedTaskCompletionCandidates(
+      [
+        entry({ id: "m1", taskId: "TA" }),
+        entry({ id: "m2", taskId: null }),
+        entry({ id: "m3", taskId: "TB" }),
+      ],
+      seen,
+    );
+    expect(first.map((p) => p.taskId)).toEqual(["TA", "TB"]);
+
+    const second = pickMergedTaskCompletionCandidates(
+      [entry({ id: "m1", taskId: "TA" }), entry({ id: "m4", taskId: "TC" })],
+      seen,
+    );
+    expect(second.map((p) => p.taskId)).toEqual(["TC"]);
+  });
+});
+
+describe("shouldMarkMergedTaskDone", () => {
+  it("allows only REVIEW tasks to be reconciled to DONE", () => {
+    expect(shouldMarkMergedTaskDone(task("REVIEW"))).toBe(true);
+    expect(shouldMarkMergedTaskDone(task("DONE"))).toBe(false);
+    expect(shouldMarkMergedTaskDone(task("IN_PROGRESS"))).toBe(false);
+    expect(shouldMarkMergedTaskDone(task("TODO"))).toBe(false);
+    expect(shouldMarkMergedTaskDone(null)).toBe(false);
+  });
+
+  it("blocks dirty, conflicting, unmergeable, and agent-held worktrees", () => {
+    const reviewTask = task("REVIEW");
+    expect(
+      shouldMarkMergedTaskDone(reviewTask, {
+        worktrees: [worktree({ status: status({ dirty: true }) })],
+      }),
+    ).toBe(false);
+    expect(
+      shouldMarkMergedTaskDone(reviewTask, {
+        worktrees: [
+          worktree({ status: status({ conflicts: ["src/App.ts"] }) }),
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      shouldMarkMergedTaskDone(reviewTask, {
+        worktrees: [worktree({ status: status({ mergeable: false }) })],
+      }),
+    ).toBe(false);
+    expect(
+      shouldMarkMergedTaskDone(reviewTask, {
+        worktrees: [worktree({ agentId: "agent-1" })],
+      }),
+    ).toBe(false);
+  });
+
+  it("blocks tasks currently held by a live agent", () => {
+    expect(
+      shouldMarkMergedTaskDone(task("REVIEW"), {
+        busyTaskIds: new Set(["T1"]),
+      }),
+    ).toBe(false);
   });
 });

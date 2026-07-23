@@ -11,8 +11,16 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BrandLoader } from "./components/BrandLoader";
 import { useProjectStore } from "./stores/projectStore";
 import { useSubscriptionStore } from "./stores/subscriptionStore";
+import { useAgentStore } from "./stores/agentStore";
+import { useWorktreeStore } from "./stores/worktreeStore";
 import { subscribeToMergeHistory } from "./services/mergeHistoryService";
-import { pickMergeOutcomesToForward } from "./services/mergeHistoryKgForwarder";
+import {
+  pickMergeOutcomesToForward,
+  pickMergedTaskCompletionCandidates,
+  shouldMarkMergedTaskDone,
+} from "./services/mergeHistoryKgForwarder";
+import { getTask, updateTaskStatus } from "./services/taskService";
+import { buildBusyTaskIds } from "./lib/archiveSignals";
 import {
   logTelemetry,
   setTelemetryEnabled,
@@ -292,17 +300,40 @@ function AppContent() {
       : [];
     if (projectIds.length === 0) return;
     const kg = window.electronAPI?.kg;
-    if (!kg) return; // preload bridge absent (e.g. non-Electron) → degrade
     // Per-session dedup; the graph's persistent `seen` guard handles the rest.
     const forwarded = new Set<string>();
+    const completed = new Set<string>();
     const unsub = subscribeToMergeHistory(
       (entries) => {
-        for (const payload of pickMergeOutcomesToForward(entries, forwarded)) {
-          try {
-            kg.recordMergeOutcome(payload);
-          } catch {
-            // best-effort: a bridge/IPC failure must never break the app
+        if (kg) {
+          for (const payload of pickMergeOutcomesToForward(entries, forwarded)) {
+            try {
+              kg.recordMergeOutcome(payload);
+            } catch {
+              // best-effort: a bridge/IPC failure must never break the app
+            }
           }
+        }
+        for (const candidate of pickMergedTaskCompletionCandidates(
+          entries,
+          completed,
+        )) {
+          void (async () => {
+            try {
+              const task = await getTask(candidate.taskId);
+              if (
+                !shouldMarkMergedTaskDone(task, {
+                  worktrees: useWorktreeStore.getState().worktrees,
+                  busyTaskIds: buildBusyTaskIds(useAgentStore.getState().agents),
+                })
+              ) {
+                return;
+              }
+              await updateTaskStatus(candidate.taskId, "DONE");
+            } catch {
+              // best-effort: merge_history reconciliation must not break the app
+            }
+          })();
         }
       },
       { projectIds, maxResults: 200 },

@@ -16,6 +16,8 @@
  * App level (src/App.tsx), reusing #541's subscribeToMergeHistory.
  */
 import type { MergeHistoryEntry } from "../types/mergeHistory";
+import type { Task } from "../types/task";
+import type { Worktree } from "../types/worktree";
 
 export interface MergeOutcomePayload {
   taskId: string;
@@ -55,4 +57,62 @@ export function pickMergeOutcomesToForward(
     });
   }
   return out;
+}
+
+export interface MergedTaskCompletionCandidate {
+  mergeHistoryId: string;
+  taskId: string;
+}
+
+export interface MergedTaskCompletionGuard {
+  worktrees?: readonly Worktree[];
+  busyTaskIds?: ReadonlySet<string>;
+}
+
+/**
+ * Select merge_history docs whose task ticket should be reconciled to DONE.
+ * This deliberately uses its own session guard instead of sharing the KG guard:
+ * KG delivery and task status reconciliation are separate side effects, so a
+ * bridge failure on one path must not suppress the other.
+ */
+export function pickMergedTaskCompletionCandidates(
+  entries: MergeHistoryEntry[],
+  seen: Set<string>,
+): MergedTaskCompletionCandidate[] {
+  const out: MergedTaskCompletionCandidate[] = [];
+  for (const e of entries) {
+    if (!e.taskId) continue;
+    if (seen.has(e.id)) continue;
+    seen.add(e.id);
+    out.push({ mergeHistoryId: e.id, taskId: e.taskId });
+  }
+  return out;
+}
+
+/**
+ * A merge_history row is hard evidence that the PR landed. The only renderer
+ * status transition we allow from that evidence is REVIEW -> DONE: REVIEW means
+ * the task already passed review and was waiting on merge, while all open
+ * statuses still represent owned work. Local protection signals rank above the
+ * merge signal so dirty, conflicting, or agent-held worktrees are never moved.
+ */
+export function shouldMarkMergedTaskDone(
+  task: Task | null,
+  guard: MergedTaskCompletionGuard = {},
+): boolean {
+  if (!task) return false;
+  if (task.status === "DONE") return false;
+  if (task.status !== "REVIEW") return false;
+  if (guard.busyTaskIds?.has(task.id) === true) return false;
+
+  const worktrees = guard.worktrees ?? [];
+  for (const wt of worktrees) {
+    if (wt.taskId !== task.id) continue;
+    if (wt.agentId != null) return false;
+    if (wt.status?.dirty === true) return false;
+    if (wt.status?.mergeable === false) return false;
+    if ((wt.status?.conflicts.length ?? 0) > 0) return false;
+  }
+
+  return true;
 }
