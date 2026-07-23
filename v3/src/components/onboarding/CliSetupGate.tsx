@@ -115,6 +115,10 @@ function labelFor(model: Model): string {
     : "Antigravity (agy)";
 }
 
+function joinPath(dir: string, name: string): string {
+  return dir.endsWith("/") ? `${dir}${name}` : `${dir}/${name}`;
+}
+
 export function CliSetupGate() {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
@@ -419,22 +423,23 @@ export function CliSetupGate() {
     setSeeding(true);
     setSeedMsg(null);
     try {
+      const prdPath = joinPath(root, "PRD.md");
       let exists = true;
       try {
-        await window.electronAPI.fs.readFile(root, "PRD.md");
+        await window.electronAPI.fs.readFile(root, prdPath);
       } catch {
         exists = false; // no PRD.md yet — safe to create
       }
       if (!exists) {
         await window.electronAPI.fs.writeFile(
           root,
-          "PRD.md",
+          prdPath,
           t("onboarding.cliGate.prdContent")
         );
       }
       const editor = useEditorStore.getState();
       editor.setRootPath(root);
-      await editor.openFile("PRD.md");
+      await editor.openFile(prdPath);
       setSeedMsg({ ok: true, text: t("onboarding.cliGate.project.seeded") });
     } catch {
       setSeedMsg({ ok: false, text: t("onboarding.cliGate.project.seedFail") });
