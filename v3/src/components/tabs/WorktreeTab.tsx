@@ -513,10 +513,12 @@ function MergeHistoryRow({
   entry,
   projectLabel,
   titleMeta,
+  commitRepoRoot,
 }: {
   entry: MergeHistoryEntry;
   projectLabel: string;
   titleMeta: WorktreeTitleMeta;
+  commitRepoRoot: string;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -533,8 +535,9 @@ function MergeHistoryRow({
       setError(null);
       try {
         const res = await window.electronAPI.worktree.showCommit(
-          entry.repoRoot,
+          commitRepoRoot,
           entry.headSha,
+          entry.projectId,
         );
         setDiff(res.diff);
       } catch (err) {
@@ -840,6 +843,12 @@ export function WorktreeTab() {
   const projectName = useMemo(() => {
     const map = new Map(projects.map((p) => [p.id, p.name]));
     return (projectId: string) => map.get(projectId) ?? projectId;
+  }, [projects]);
+
+  const projectRepoRoot = useMemo(() => {
+    const map = new Map(projects.map((p) => [p.id, p.folderPath]));
+    return (entry: MergeHistoryEntry) =>
+      map.get(entry.projectId) ?? entry.repoRoot;
   }, [projects]);
 
   // 필터 적용 후 프로젝트별 그룹.
@@ -1329,6 +1338,7 @@ export function WorktreeTab() {
                   key={entry.id}
                   entry={entry}
                   projectLabel={projectName(entry.projectId)}
+                  commitRepoRoot={projectRepoRoot(entry)}
                   titleMeta={resolveWorktreeTitle(taskById, {
                     taskId: entry.taskId,
                     branch: entry.branch,

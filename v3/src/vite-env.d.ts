@@ -563,6 +563,7 @@ interface WorktreeAPI {
   showCommit: (
     repoRoot: string,
     sha: string,
+    projectId?: string,
   ) => Promise<{ ok: boolean; diff: string }>;
 }
 

@@ -2537,6 +2537,9 @@ function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
 
   const state = readAppState();
   addRoot(state.lastProjectId, state.lastRootPath);
+  for (const connection of listProjectConnections()) {
+    addRoot(connection.projectId, connection.localPath);
+  }
 
   return roots;
 }

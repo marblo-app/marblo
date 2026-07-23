@@ -50,10 +50,12 @@ function WorkHistoryRow({
   task,
   report,
   mergeEntry,
+  commitRepoRoot,
 }: {
   task: Task;
   report: ParsedCompletionReport | null;
   mergeEntry: MergeHistoryEntry | null;
+  commitRepoRoot?: string;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -70,8 +72,9 @@ function WorkHistoryRow({
     setDiffError(null);
     try {
       const res = await window.electronAPI.worktree.showCommit(
-        mergeEntry.repoRoot,
+        commitRepoRoot ?? mergeEntry.repoRoot,
         mergeEntry.headSha,
+        mergeEntry.projectId,
       );
       setDiff(res.diff);
     } catch (err) {
@@ -343,6 +346,7 @@ export function WorkHistoryTab() {
               task={task}
               report={reports[task.id] ?? null}
               mergeEntry={mergeByTask[task.id] ?? null}
+              commitRepoRoot={currentProject.folderPath}
             />
           ))}
         </div>

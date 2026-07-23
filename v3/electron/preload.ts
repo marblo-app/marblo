@@ -271,8 +271,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // Render a completed merge's diff for the "완료 이력" view (git show <sha>
     // on base, where the squashed commit lives after the worktree is gone).
     // Returns { ok, diff }.
-    showCommit: (repoRoot: string, sha: string) =>
-      ipcRenderer.invoke("worktree:showCommit", { repoRoot, sha }),
+    showCommit: (repoRoot: string, sha: string, projectId?: string) =>
+      ipcRenderer.invoke("worktree:showCommit", { repoRoot, sha, projectId }),
     // Conflict path: spawn a Resolve(agent) in the worktree (WORKTREE-SPEC §6).
     // Returns { success, agentId?, stub?, reason? }.
     resolve: (args: {

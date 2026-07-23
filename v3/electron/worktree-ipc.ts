@@ -86,6 +86,7 @@ interface WorktreeMergeArgs {
 interface WorktreeShowCommitArgs {
   repoRoot: string;
   sha: string;
+  projectId?: string;
 }
 
 export type MergeMode = "manual" | "auto";
@@ -240,6 +241,10 @@ function parseShowCommitArgs(args: unknown): WorktreeShowCommitArgs {
   return {
     repoRoot: requireString(args.repoRoot, "repoRoot"),
     sha: requireString(args.sha, "sha"),
+    projectId:
+      typeof args.projectId === "string" && args.projectId.length > 0
+        ? args.projectId
+        : undefined,
   };
 }
 
@@ -335,6 +340,18 @@ export function registerWorktreeIpc(
   // is a notification, not a gate.
   onWorktreesRemoved?: (paths: string[]) => void,
 ): void {
+  const resolveShowCommitRepoRoot = (parsed: WorktreeShowCommitArgs): string => {
+    if (fs.existsSync(parsed.repoRoot)) return parsed.repoRoot;
+
+    const roots = uniqueProjectRoots(getProjectRoots()).filter((root) =>
+      fs.existsSync(root.repoRoot)
+    );
+    const projectRoot = parsed.projectId
+      ? roots.find((root) => root.projectId === parsed.projectId)?.repoRoot
+      : undefined;
+    return projectRoot ?? roots[0]?.repoRoot ?? parsed.repoRoot;
+  };
+
   const listWorktrees = async (): Promise<WorktreeProjectGroup[]> => {
     const roots = uniqueProjectRoots(getProjectRoots());
     return Promise.all(
@@ -520,7 +537,10 @@ export function registerWorktreeIpc(
   // is long gone, but its squashed commit lives on base — `git show <sha>`.
   ipcMain.handle("worktree:showCommit", async (_event, args: unknown) => {
     const parsed = parseShowCommitArgs(args);
-    const diff = await worktreeManager.showCommit(parsed.repoRoot, parsed.sha);
+    const diff = await worktreeManager.showCommit(
+      resolveShowCommitRepoRoot(parsed),
+      parsed.sha
+    );
     return { ok: true, diff };
   });
 
