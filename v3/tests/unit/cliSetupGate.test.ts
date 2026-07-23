@@ -8,6 +8,7 @@ import {
   requiredInstalled,
   requiredReady,
   shouldOpenGateOnReopen,
+  shouldShowPostAuthStep,
   WIZARD_STEPS,
   type CliProbe,
 } from "../../src/lib/cliSetupGate";
@@ -22,7 +23,7 @@ describe("autoInstallComplete (FT-8)", () => {
       autoInstallComplete(["cli-claude-code", "cli-codex"], {
         "cli-claude-code": installedOnly,
         "cli-codex": ready,
-      })
+      }),
     ).toBe(true);
   });
 
@@ -31,7 +32,7 @@ describe("autoInstallComplete (FT-8)", () => {
       autoInstallComplete(["cli-claude-code", "cli-codex"], {
         "cli-claude-code": missing, // install failed
         "cli-codex": ready,
-      })
+      }),
     ).toBe(false);
   });
 
@@ -39,7 +40,7 @@ describe("autoInstallComplete (FT-8)", () => {
     expect(
       autoInstallComplete(["cli-claude-code"], {
         /* nothing probed back */
-      })
+      }),
     ).toBe(false);
   });
 });
@@ -51,7 +52,7 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
         requiredReady: false,
         requiredInstalled: false,
         dismissed: false,
-      })
+      }),
     ).toEqual({ visible: true, clearDismissed: false });
   });
 
@@ -61,7 +62,7 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
         requiredReady: false,
         requiredInstalled: false,
         dismissed: true,
-      })
+      }),
     ).toEqual({ visible: true, clearDismissed: true });
   });
 
@@ -71,7 +72,7 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
         requiredReady: false,
         requiredInstalled: true,
         dismissed: true,
-      })
+      }),
     ).toEqual({ visible: false, clearDismissed: false });
   });
 
@@ -81,14 +82,14 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
         requiredReady: true,
         requiredInstalled: true,
         dismissed: false,
-      })
+      }),
     ).toEqual({ visible: false, clearDismissed: false });
     expect(
       resolveGateVisibility({
         requiredReady: true,
         requiredInstalled: true,
         dismissed: true,
-      }).visible
+      }).visible,
     ).toBe(false);
   });
 
@@ -98,7 +99,7 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
         requiredReady: false,
         requiredInstalled: true,
         dismissed: false,
-      })
+      }),
     ).toEqual({ visible: true, clearDismissed: false });
   });
 });
@@ -111,7 +112,7 @@ describe("requiredInstalled / requiredReady", () => {
       requiredInstalled(ids, {
         "cli-claude-code": missing,
         "cli-codex": ready,
-      })
+      }),
     ).toBe(true);
   });
 
@@ -120,7 +121,7 @@ describe("requiredInstalled / requiredReady", () => {
       requiredInstalled(ids, {
         "cli-claude-code": missing,
         "cli-codex": missing,
-      })
+      }),
     ).toBe(false);
   });
 
@@ -129,13 +130,13 @@ describe("requiredInstalled / requiredReady", () => {
       requiredReady(ids, {
         "cli-claude-code": installedOnly, // not authed
         "cli-codex": ready,
-      })
+      }),
     ).toBe(true);
     expect(
       requiredReady(ids, {
         "cli-claude-code": ready,
         "cli-codex": installedOnly,
-      })
+      }),
     ).toBe(true);
   });
 
@@ -144,7 +145,7 @@ describe("requiredInstalled / requiredReady", () => {
       requiredReady(ids, {
         "cli-claude-code": installedOnly,
         "cli-codex": installedOnly,
-      })
+      }),
     ).toBe(false);
   });
 });
@@ -156,6 +157,16 @@ describe("shouldOpenGateOnReopen (ticket nB4eenxPkNWNtCuHf65o)", () => {
 
   it("opens when nothing is ready — a genuinely signed-out user still gets the gate", () => {
     expect(shouldOpenGateOnReopen(false)).toBe(true);
+  });
+});
+
+describe("shouldShowPostAuthStep (ticket bRABKQX7)", () => {
+  it("opens the PRD step for a fresh (not-dismissed) first-run user", () => {
+    expect(shouldShowPostAuthStep(false)).toBe(true);
+  });
+
+  it("does NOT re-open PRD when the user previously dismissed — no popup on every restart", () => {
+    expect(shouldShowPostAuthStep(true)).toBe(false);
   });
 });
 
@@ -171,7 +182,7 @@ describe("linear wizard step transitions (ticket ir94m9C6)", () => {
           requiredInstalled: false,
           requiredReady: false,
           hasProject: false,
-        })
+        }),
       ).toBe("install");
     });
 
@@ -181,7 +192,7 @@ describe("linear wizard step transitions (ticket ir94m9C6)", () => {
           requiredInstalled: true,
           requiredReady: false,
           hasProject: false,
-        })
+        }),
       ).toBe("auth");
     });
 
@@ -191,7 +202,7 @@ describe("linear wizard step transitions (ticket ir94m9C6)", () => {
           requiredInstalled: true,
           requiredReady: true,
           hasProject: false,
-        })
+        }),
       ).toBe("prd");
     });
 
@@ -201,7 +212,7 @@ describe("linear wizard step transitions (ticket ir94m9C6)", () => {
           requiredInstalled: true,
           requiredReady: true,
           hasProject: true,
-        })
+        }),
       ).toBe("prd");
     });
   });
@@ -216,33 +227,33 @@ describe("linear wizard step transitions (ticket ir94m9C6)", () => {
     it("install advances only once a candidate is installed", () => {
       expect(canAdvanceWizard("install", base)).toBe(false);
       expect(
-        canAdvanceWizard("install", { ...base, requiredInstalled: true })
+        canAdvanceWizard("install", { ...base, requiredInstalled: true }),
       ).toBe(true);
     });
 
     it("auth advances only once a candidate is authenticated", () => {
       expect(
-        canAdvanceWizard("auth", { ...base, requiredInstalled: true })
+        canAdvanceWizard("auth", { ...base, requiredInstalled: true }),
       ).toBe(false);
       expect(
         canAdvanceWizard("auth", {
           ...base,
           requiredInstalled: true,
           requiredReady: true,
-        })
+        }),
       ).toBe(true);
     });
 
     it("prd advances only once a folder is connected (PRD itself optional)", () => {
       expect(canAdvanceWizard("prd", { ...base, requiredReady: true })).toBe(
-        false
+        false,
       );
       expect(
         canAdvanceWizard("prd", {
           ...base,
           requiredReady: true,
           hasProject: true,
-        })
+        }),
       ).toBe(true);
     });
 
@@ -252,7 +263,7 @@ describe("linear wizard step transitions (ticket ir94m9C6)", () => {
           requiredInstalled: true,
           requiredReady: true,
           hasProject: true,
-        })
+        }),
       ).toBe(false);
     });
   });
