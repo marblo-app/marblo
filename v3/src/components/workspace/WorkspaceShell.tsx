@@ -3,11 +3,10 @@ import { t } from "../../lib/i18n";
 import { Header } from "../Header";
 import { UpdateBanner } from "../UpdateBanner";
 import { ProjectSetupBanners } from "../onboarding/ProjectSetupBanners";
-import { CliSetupGate } from "../onboarding/CliSetupGate";
+import { CliSetupHost } from "../onboarding/CliSetupHost";
 import { PrivacyConsentGate } from "../legal/PrivacyConsentGate";
 import { ChatToastHost } from "../chat/ChatToastHost";
 import { BugReportNoticeToast } from "../chat/BugReportNoticeToast";
-import { SettingsPage } from "../settings/SettingsPage";
 import { UpgradeModal } from "../settings/UpgradeModal";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
 import { useUiStore } from "../../stores/uiStore";
@@ -41,8 +40,6 @@ export function WorkspaceShell() {
   const { projectSetup, isNewWindow, restoreSettled, rootPath } =
     useAppLifecycle();
   const { handleSelectDirectory } = projectSetup;
-
-  const [showSettings, setShowSettings] = useState(false);
 
   const upgradeModal = useUiStore((s) => s.upgradeModal);
   const hideUpgrade = useUiStore((s) => s.hideUpgrade);
@@ -108,10 +105,13 @@ export function WorkspaceShell() {
     [setRatio],
   );
 
-  // Deep-link to Settings (e.g. Upgrade modal CTA) → open the overlay.
+  // Deep-link to Settings (e.g. Upgrade modal CTA) → surface the Settings tab.
+  // Settings is a real tab now (ticket 0JVQcUxd — as an overlay-only surface
+  // nobody found it), so every in-shell entry point routes there. That also
+  // keeps SettingsPage to a single mount (the old overlay is gone).
   useEffect(() => {
-    if (pendingSettingsSection) setShowSettings(true);
-  }, [pendingSettingsSection]);
+    if (pendingSettingsSection) setActiveTab("settings");
+  }, [pendingSettingsSection, setActiveTab]);
 
   // Activity Stream jump → surface the matching right tab, or expand the
   // terminal column for an agent jump (agents live in the left column).
@@ -145,7 +145,7 @@ export function WorkspaceShell() {
   if (isNewWindow && !rootPath && !restoreSettled) {
     return (
       <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
-        <Header onNavigateToSettings={() => setShowSettings(true)} />
+        <Header onNavigateToSettings={() => setActiveTab("settings")} />
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
             <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
@@ -161,7 +161,7 @@ export function WorkspaceShell() {
   if (isNewWindow && !rootPath) {
     return (
       <div className="flex h-screen flex-col bg-gray-900 text-gray-100">
-        <Header onNavigateToSettings={() => setShowSettings(true)} />
+        <Header onNavigateToSettings={() => setActiveTab("settings")} />
         <div className="flex flex-1 items-center justify-center">
           <div className="space-y-6 text-center">
             <div className="text-6xl">M</div>
@@ -181,9 +181,12 @@ export function WorkspaceShell() {
 
   return (
     <div className="relative flex h-screen flex-col bg-gray-900 text-gray-100">
-      <Header onNavigateToSettings={() => setShowSettings(true)} />
+      <Header onNavigateToSettings={() => setActiveTab("settings")} />
       <UpdateBanner />
       <ProjectSetupBanners {...projectSetup} />
+      {/* Onboarding: no modal here. This host runs the CLI setup engine and
+          surfaces a non-blocking banner that deep-links to the 시작하기 tab. */}
+      <CliSetupHost />
 
       {/* Body: file-tree rail | split area (terminals | divider | tabs) |
           activity rail. The two side panels sit OUTSIDE the measured split area
@@ -316,7 +319,6 @@ export function WorkspaceShell() {
       </div>
 
       {/* Global gates / hosts (parity with Layout). */}
-      <CliSetupGate />
       <PrivacyConsentGate />
       <ChatToastHost />
       <BugReportNoticeToast />
@@ -329,26 +331,10 @@ export function WorkspaceShell() {
         />
       )}
 
-      {/* Settings as an overlay (no dedicated tab bar in the shell). */}
-      {showSettings && (
-        <div className="absolute inset-0 z-40 flex flex-col bg-gray-900">
-          <div className="flex items-center justify-between border-b border-gray-700 bg-gray-800 px-3 py-2">
-            <span className="text-sm font-semibold text-gray-200">
-              {t("settings.title")}
-            </span>
-            <button
-              type="button"
-              onClick={() => setShowSettings(false)}
-              className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-700 hover:text-gray-200"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto">
-            <SettingsPage />
-          </div>
-        </div>
-      )}
+      {/* Settings used to be an overlay here because the shell had no tab for
+          it. It has one now (WorkTabs), which is both discoverable and a single
+          mount — so the overlay is gone and every entry point routes to the
+          tab. */}
     </div>
   );
 }
