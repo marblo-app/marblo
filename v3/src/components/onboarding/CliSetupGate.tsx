@@ -8,6 +8,7 @@ import telemetry from "../../services/telemetryService";
 import {
   autoInstallComplete,
   requiredInstalled as computeRequiredInstalled,
+  requiredReady as computeRequiredReady,
   resolveGateVisibility,
 } from "../../lib/cliSetupGate";
 import { CliFailSurvey } from "./CliFailSurvey";
@@ -23,9 +24,9 @@ import { CliFailSurvey } from "./CliFailSurvey";
  *
  * This is a real, mounted gate (Layout renders it as an overlay). It live-probes
  * install + login state via harness.cliAuthCheck — the SAME probe the spawn
- * guard uses — for the REQUIRED set (claude only) and the OPTIONAL Codex (GPT)
- * and Antigravity (agy). On mount it AUTO-INSTALLS any missing auto-installable
- * CLI in the background (no click); on failure it falls back to the manual
+ * guard uses — for the orchestrator candidates (Claude or Codex) and the
+ * optional Antigravity (agy). On mount it AUTO-INSTALLS any missing
+ * auto-installable CLI in the background (no click); on failure it falls back to the manual
  * `npm install -g …` command. Login is one-click ("Run sign-in" spawns a
  * terminal and runs the login command) with copy/re-check as fallbacks.
  *
@@ -34,11 +35,11 @@ import { CliFailSurvey } from "./CliFailSurvey";
  * background. The blocking overlay surfaces at orchestrator-launch time (via the
  * `marblo:open-cli-setup` event from useOrchestratorAutoLaunch's needsAuth
  * branch, the spawn guard, and the agent:needsAuth backstop), i.e. exactly when
- * Claude auth is actually needed. When Claude becomes authenticated the gate
- * emits `marblo:cli-auth-ready` so the orchestrator auto-launch resumes with no
- * manual re-check.
+ * one orchestrator CLI auth is actually needed. When Claude or Codex becomes
+ * authenticated the gate emits `marblo:cli-auth-ready` so the orchestrator
+ * auto-launch resumes with no manual re-check.
  *
- * An already-set-up user (claude installed & authed) never sees it.
+ * An already-set-up user (Claude or Codex installed & authed) never sees it.
  *
  * ── Ordered connection wizard (ticket CecrriY8) ──────────────────────────
  * The single-panel gate is now presented as an ORDERED 3-step wizard while
@@ -77,11 +78,14 @@ interface CliRow {
   autoInstall: boolean;
 }
 
-// Claude is the ONLY required CLI: it powers the orchestrator, which is the
-// hub of the orchestrator-first onboarding flow (folder → project → orchestrator).
-// Codex is secondary here (it runs spawned Codex/GPT agents) — a codex-only
-// orchestrator is a separate follow-up — so it's optional and never blocks the
-// gate. It still auto-installs in the background (autoInstall) for convenience.
+// Claude and Codex are orchestrator candidates: either one being installed and
+// authenticated is enough to pass the gate. Both are still recommended and
+// auto-installed in the background; Antigravity remains optional.
+const ORCHESTRATOR_CLI_IDS: Array<CliRow["id"]> = [
+  "cli-claude-code",
+  "cli-codex",
+];
+
 const ROWS: CliRow[] = [
   { id: "cli-claude-code", model: "claude", required: true, autoInstall: true },
   { id: "cli-codex", model: "codex", required: false, autoInstall: true },
@@ -129,7 +133,7 @@ export function CliSetupGate() {
     {}
   );
   const [copied, setCopied] = useState<string | null>(null);
-  const [ready, setReady] = useState(false); // required set (claude+codex) satisfied
+  const [ready, setReady] = useState(false); // Claude or Codex ready
   const [loginRunning, setLoginRunning] = useState(false); // sign-in launched in a terminal
   // Local↔latest CLI versions (keyed by row id). Advisory only — used to warn
   // when an installed CLI is behind so an outdated build isn't silently passed
@@ -206,8 +210,8 @@ export function CliSetupGate() {
     }
   }, []);
 
-  // Probe every row; return the raw results + whether the REQUIRED set is ready
-  // (used synchronously by the auto-install pass, since React state lags).
+  // Probe every row; return the raw results + whether an orchestrator candidate
+  // is ready (used synchronously by the auto-install pass, since React state lags).
   const probeAll = useCallback(async () => {
     const results: Record<string, CliAuthResult> = {};
     await Promise.all(
@@ -215,9 +219,7 @@ export function CliSetupGate() {
         results[r.id] = await probe(r.model, r.id);
       })
     );
-    const requiredReady = ROWS.filter((r) => r.required).every(
-      (r) => results[r.id]?.installed && results[r.id]?.authenticated
-    );
+    const requiredReady = computeRequiredReady(ORCHESTRATOR_CLI_IDS, results);
     setReady(requiredReady);
     return { results, requiredReady };
   }, [probe]);
@@ -273,9 +275,9 @@ export function CliSetupGate() {
       // Latest per-row probe results (refreshed after an auto-install pass) —
       // the source for the install-complete (FT-8) and re-prompt (FT-6) checks.
       let latest = first.results;
-      // Auto-install every auto-installable CLI that's missing — including the
-      // now-optional Codex — so the fleet is ready without a click. Optional
-      // rows install silently; only Claude (required) can gate visibility.
+      // Auto-install every auto-installable CLI that's missing so the fleet is
+      // ready without a click. Optional rows install silently; only the
+      // Claude/Codex candidate set can gate visibility.
       const missing = ROWS.filter(
         (r) => r.autoInstall && first.results[r.id]?.installed === false
       );
@@ -316,15 +318,17 @@ export function CliSetupGate() {
         /* private mode — treat as not dismissed */
       }
 
-      // A prior "Later" is honored only while the required CLIs are at least
-      // installed. If one is still missing the user can't launch anything, so
-      // re-surface the gate and clear the stale dismissal — the next run keeps
-      // behaving like a first run until install succeeds (FT-6). Login-only
-      // gaps (installed but not authed) still respect the dismissal.
-      const requiredIds = ROWS.filter((r) => r.required).map((r) => r.id);
+      // A prior "Later" is honored only while at least one orchestrator
+      // candidate is installed. If none is installed the user can't launch
+      // anything, so re-surface the gate and clear the stale dismissal — the
+      // next run keeps behaving like a first run until install succeeds (FT-6).
+      // Login-only gaps (installed but not authed) still respect the dismissal.
       const decision = resolveGateVisibility({
         requiredReady,
-        requiredInstalled: computeRequiredInstalled(requiredIds, latest),
+        requiredInstalled: computeRequiredInstalled(
+          ORCHESTRATOR_CLI_IDS,
+          latest
+        ),
         dismissed,
       });
       if (decision.clearDismissed) {
@@ -378,7 +382,9 @@ export function CliSetupGate() {
       let surveyDone = false;
       try {
         surveyDone = localStorage.getItem("marblo.survey.cli_fail") === "1";
-      } catch {}
+      } catch {
+        /* private mode — treat as not done */
+      }
       if (!surveyDone) {
         setShowSurvey(true);
         return;

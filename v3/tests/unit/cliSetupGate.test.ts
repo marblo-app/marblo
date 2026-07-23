@@ -101,36 +101,45 @@ describe("resolveGateVisibility (FT-6 + first-run)", () => {
 describe("requiredInstalled / requiredReady", () => {
   const ids = ["cli-claude-code", "cli-codex"];
 
-  it("requiredInstalled true when both installed (auth irrelevant)", () => {
-    expect(
-      requiredInstalled(ids, {
-        "cli-claude-code": installedOnly,
-        "cli-codex": ready,
-      }),
-    ).toBe(true);
-  });
-
-  it("requiredInstalled false when one missing", () => {
+  it("requiredInstalled true when at least one orchestrator candidate is installed", () => {
     expect(
       requiredInstalled(ids, {
         "cli-claude-code": missing,
         "cli-codex": ready,
       }),
+    ).toBe(true);
+  });
+
+  it("requiredInstalled false when no orchestrator candidate is installed", () => {
+    expect(
+      requiredInstalled(ids, {
+        "cli-claude-code": missing,
+        "cli-codex": missing,
+      }),
     ).toBe(false);
   });
 
-  it("requiredReady demands both installed AND authenticated", () => {
+  it("requiredReady passes when at least one orchestrator candidate is installed AND authenticated", () => {
     expect(
       requiredReady(ids, {
         "cli-claude-code": installedOnly, // not authed
         "cli-codex": ready,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       requiredReady(ids, {
         "cli-claude-code": ready,
-        "cli-codex": ready,
+        "cli-codex": installedOnly,
       }),
     ).toBe(true);
+  });
+
+  it("requiredReady false when candidates are only installed, not authenticated", () => {
+    expect(
+      requiredReady(ids, {
+        "cli-claude-code": installedOnly,
+        "cli-codex": installedOnly,
+      }),
+    ).toBe(false);
   });
 });

@@ -34,14 +34,15 @@ export function autoInstallComplete(
 /**
  * FT-6 + first-run — gate visibility.
  *
- * A prior "Later" (dismissed) is honored ONLY while the required CLIs are at
- * least installed. If one is still missing the user can't launch anything, so
- * we re-surface the gate and signal that the stale dismissal should be cleared
- * — the next run behaves like a first run until install succeeds. Login-only
- * gaps (installed but not authenticated) keep respecting the dismissal.
+ * A prior "Later" (dismissed) is honored ONLY while at least one orchestrator
+ * candidate CLI is installed. If none is installed the user can't launch
+ * anything, so we re-surface the gate and signal that the stale dismissal
+ * should be cleared — the next run behaves like a first run until install
+ * succeeds. Login-only gaps (installed but not authenticated) keep respecting
+ * the dismissal.
  *
- * @param requiredReady    required set installed AND authenticated
- * @param requiredInstalled required set at least installed
+ * @param requiredReady    any orchestrator candidate installed AND authenticated
+ * @param requiredInstalled any orchestrator candidate at least installed
  * @param dismissed        user previously clicked "Later"
  */
 export function resolveGateVisibility(input: {
@@ -57,20 +58,20 @@ export function resolveGateVisibility(input: {
   };
 }
 
-/** Whether every required CLI is at least installed. */
+/** Whether at least one orchestrator candidate CLI is at least installed. */
 export function requiredInstalled(
-  requiredIds: string[],
+  candidateIds: string[],
   results: Record<string, CliProbe | undefined>,
 ): boolean {
-  return requiredIds.every((id) => results[id]?.installed === true);
+  return candidateIds.some((id) => results[id]?.installed === true);
 }
 
-/** Whether every required CLI is installed AND authenticated (ready to spawn). */
+/** Whether at least one orchestrator candidate CLI is ready to spawn. */
 export function requiredReady(
-  requiredIds: string[],
+  candidateIds: string[],
   results: Record<string, CliProbe | undefined>,
 ): boolean {
-  return requiredIds.every(
+  return candidateIds.some(
     (id) =>
       results[id]?.installed === true && results[id]?.authenticated === true,
   );
