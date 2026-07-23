@@ -13,6 +13,7 @@ import {
   requiredInstalled as computeRequiredInstalled,
   requiredReady as computeRequiredReady,
   resolveGateVisibility,
+  shouldOpenGateOnReopen,
   WIZARD_STEPS,
   type WizardStep,
 } from "../../lib/cliSetupGate";
@@ -388,9 +389,18 @@ export function CliSetupGate() {
   // surfaces it via the agent:needsAuth → Layout bridge.
   useEffect(() => {
     const onOpen = () => {
-      void probeAll();
+      // Treat the event as "re-check auth, open only if actually needed", not
+      // "force open". agent-manager's login-screen backstop can emit a spurious
+      // agent:needsAuth for a restart-restored PTY; without this guard an
+      // already-authenticated user saw the popup on every restart (ticket
+      // nB4eenxPkNWNtCuHf65o). refreshVersions stays fire-and-forget (advisory);
+      // openWizard runs only after probeAll fills resultsRef so the entry step
+      // is computed from fresh probe results.
       refreshVersions();
-      openWizard();
+      void (async () => {
+        const { requiredReady } = await probeAll();
+        if (shouldOpenGateOnReopen(requiredReady)) openWizard();
+      })();
     };
     window.addEventListener("marblo:open-cli-setup", onOpen);
     return () => window.removeEventListener("marblo:open-cli-setup", onOpen);

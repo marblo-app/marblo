@@ -7,6 +7,7 @@ import {
   resolveGateVisibility,
   requiredInstalled,
   requiredReady,
+  shouldOpenGateOnReopen,
   WIZARD_STEPS,
   type CliProbe,
 } from "../../src/lib/cliSetupGate";
@@ -145,6 +146,16 @@ describe("requiredInstalled / requiredReady", () => {
         "cli-codex": installedOnly,
       })
     ).toBe(false);
+  });
+});
+
+describe("shouldOpenGateOnReopen (ticket nB4eenxPkNWNtCuHf65o)", () => {
+  it("does NOT open when a required candidate is already ready — spurious agent:needsAuth on restart must not popup an authed user", () => {
+    expect(shouldOpenGateOnReopen(true)).toBe(false);
+  });
+
+  it("opens when nothing is ready — a genuinely signed-out user still gets the gate", () => {
+    expect(shouldOpenGateOnReopen(false)).toBe(true);
   });
 });
 

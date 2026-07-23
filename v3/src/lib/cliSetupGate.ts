@@ -140,6 +140,22 @@ export function resolveGateVisibility(input: {
   };
 }
 
+/**
+ * Re-open guard for the `marblo:open-cli-setup` event.
+ *
+ * The event is a *request* to consider showing the gate, not a command to force
+ * it open — it fires from the spawn guard AND from agent-manager's login-screen
+ * backstop, which can mis-read a restart-restored PTY as a fresh needsAuth and
+ * emit a spurious `agent:needsAuth`. If the orchestrator set is already ready
+ * (Claude OR Codex installed & authed), an authenticated user would otherwise
+ * see the popup on every restart. So: re-probe first, and only open when a
+ * required candidate is NOT ready. A genuinely signed-out user (nothing ready)
+ * still gets the gate.
+ */
+export function shouldOpenGateOnReopen(requiredReady: boolean): boolean {
+  return !requiredReady;
+}
+
 /** Whether at least one orchestrator candidate CLI is at least installed. */
 export function requiredInstalled(
   candidateIds: string[],
