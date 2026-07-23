@@ -629,10 +629,10 @@ export const telemetry = {
     });
   },
 
-  surveyFirstProject(rating: number) {
+  surveyFirstProject(rating: number, feedback?: string) {
     logTelemetry({
       event: "onboarding:survey_first_project",
-      metadata: { rating },
+      metadata: { rating, ...(feedback ? { feedback } : {}) },
     });
   },
 
