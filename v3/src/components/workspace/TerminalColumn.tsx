@@ -1,13 +1,19 @@
+import { useCallback, useRef } from "react";
 import OrchestratorPanel from "../orchestrator/OrchestratorPanel";
 import { AgentListPanel } from "../agents/list-panel/AgentListPanel";
 import { t } from "../../lib/i18n";
+import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
+import { verticalRatioFromPointer } from "../../lib/splitWorkspaceLayout";
 
 /**
  * The fixed LEFT column of the IDE split shell: the orchestrator (Claude) PTY
- * on top and the agent terminals below it. Both are reused verbatim
- * (OrchestratorPanel + AgentListPanel) — no PTY re-wiring. They each own their
- * height via their internal resize handles, so the column simply scrolls if the
- * two stacked panels exceed its height.
+ * on top and the agent terminals below it, as a vertical 50/50 split (default)
+ * with a draggable horizontal divider between them. Both panels are reused
+ * verbatim (OrchestratorPanel + AgentListPanel) in their `fill` mode — no PTY
+ * re-wiring — so each stretches to fill its half instead of owning a fixed
+ * height. The column packs to the very bottom (no scroll gap), and the agent
+ * xterm fits to the bottom on first mount via TerminalView's own ResizeObserver
+ * (the panes have a definite flex height from frame one).
  *
  * ★ This column lives in its own DOM subtree, sibling to the right work-view.
  * Switching a right tab re-renders only the right subtree, so the terminals
@@ -25,6 +31,36 @@ export function TerminalColumn({
   onToggle: () => void;
   onOpenAgents: () => void;
 }) {
+  const verticalRatio = useSplitWorkspaceStore((s) => s.verticalRatio);
+  const setVerticalRatio = useSplitWorkspaceStore((s) => s.setVerticalRatio);
+  const splitRef = useRef<HTMLDivElement | null>(null);
+
+  // Divider drag → set the orchestrator (top) height fraction, clamped to the
+  // legal band. Measured against the split container, not the whole column, so
+  // the header above the split doesn't skew the fraction.
+  const onDividerDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const el = splitRef.current;
+      if (!el) return;
+      const move = (ev: MouseEvent) => {
+        const rect = el.getBoundingClientRect();
+        setVerticalRatio(
+          verticalRatioFromPointer(ev.clientY, rect.top, rect.height),
+        );
+      };
+      const up = () => {
+        window.removeEventListener("mousemove", move);
+        window.removeEventListener("mouseup", up);
+        document.body.style.userSelect = "";
+      };
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", move);
+      window.addEventListener("mouseup", up);
+    },
+    [setVerticalRatio],
+  );
+
   if (collapsed) {
     return (
       <div className="flex h-full w-9 flex-shrink-0 flex-col items-center border-r border-gray-700 bg-gray-800 py-2">
@@ -88,14 +124,37 @@ export function TerminalColumn({
         </button>
       </div>
 
-      {/* Stacked terminals. Each panel self-manages its height; the column
-          scrolls if their combined height exceeds the viewport. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <OrchestratorPanel />
-        <AgentListPanel
-          onJumpToAgent={onOpenAgents}
-          onSpawnClick={onOpenAgents}
+      {/* Vertical split: orchestrator (top) · draggable divider · agents
+          (bottom). Each panel runs in `fill` mode so it stretches to fill its
+          half — the two flex-basis fractions sum to 100%, packing the column to
+          the bottom with no scroll gap. */}
+      <div ref={splitRef} className="flex min-h-0 flex-1 flex-col">
+        <div
+          className="min-h-0 overflow-hidden"
+          style={{
+            flexBasis: `${verticalRatio * 100}%`,
+            flexGrow: 0,
+            flexShrink: 0,
+          }}
+        >
+          <OrchestratorPanel fill />
+        </div>
+
+        <div
+          onMouseDown={onDividerDown}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={t("workspace.resizeTerminals")}
+          className="h-1 flex-shrink-0 cursor-row-resize bg-gray-700 transition-colors hover:bg-blue-600"
         />
+
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <AgentListPanel
+            fill
+            onJumpToAgent={onOpenAgents}
+            onSpawnClick={onOpenAgents}
+          />
+        </div>
       </div>
     </div>
   );
