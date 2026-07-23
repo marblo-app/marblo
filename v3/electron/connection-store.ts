@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
+import { gitSpawnEnv } from "./git-path";
 import * as path from "node:path";
 
 /**
@@ -202,7 +203,7 @@ export class ConnectionStore {
    */
   setAccessMode(
     projectId: string,
-    accessMode: AccessMode,
+    accessMode: AccessMode
   ): ProjectConnection | null {
     const existing = this.get(projectId);
     if (!existing) return null;
@@ -221,7 +222,7 @@ export class ConnectionStore {
 function runGit(
   args: string[],
   cwd: string,
-  timeoutMs = GIT_TIMEOUT_MS,
+  timeoutMs = GIT_TIMEOUT_MS
 ): Promise<{ code: number; stdout: string }> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -234,7 +235,7 @@ function runGit(
       resolve({ code, stdout });
     };
     try {
-      const proc = spawn("git", args, { cwd });
+      const proc = spawn("git", args, { cwd, env: gitSpawnEnv() });
       timer = setTimeout(() => {
         try {
           proc.kill("SIGKILL");
@@ -262,7 +263,7 @@ function runGit(
  * 어느 쪽도 못 구하면 해당 필드 null. 절대 throw 안 함.
  */
 export async function deriveGitRepoMeta(
-  localPath: string,
+  localPath: string
 ): Promise<GitRepoMeta> {
   const meta: GitRepoMeta = { repoUrl: null, defaultBranch: null };
 
@@ -274,7 +275,7 @@ export async function deriveGitRepoMeta(
 
   const sym = await runGit(
     ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-    localPath,
+    localPath
   );
   if (sym.code === 0 && sym.stdout.trim()) {
     // "origin/main" → "main".
@@ -301,7 +302,7 @@ export async function deriveGitRepoMeta(
  * (표시/명령용) 슬러그의 대소문자는 보존한다 — 비교는 호출부에서 무시한다.
  */
 export function parseGitHubRepoSlug(
-  repoUrl: string | null | undefined,
+  repoUrl: string | null | undefined
 ): string | null {
   if (!repoUrl) return null;
   const trimmed = repoUrl
@@ -362,7 +363,7 @@ export function normalizeGitUrl(url: string | null | undefined): string | null {
  */
 export function repoUrlsMatch(
   a: string | null | undefined,
-  b: string | null | undefined,
+  b: string | null | undefined
 ): boolean {
   const slugA = parseGitHubRepoSlug(a);
   const slugB = parseGitHubRepoSlug(b);
@@ -388,14 +389,14 @@ export function getConnectionStore(): ConnectionStore {
 
 /** 테스트 훅 — 기본 store 를 주입/리셋(미지정 시 다음 호출에서 재생성). */
 export function _setDefaultConnectionStore(
-  store: ConnectionStore | null,
+  store: ConnectionStore | null
 ): void {
   _defaultStore = store;
 }
 
 /** ★단일 진실원 읽기 — projectId 의 연결, 없으면 null. (T2/T3 소비 진입점) */
 export function getProjectConnection(
-  projectId: string,
+  projectId: string
 ): ProjectConnection | null {
   return getConnectionStore().get(projectId);
 }
@@ -405,7 +406,7 @@ export function getProjectConnection(
  * ProjectConnection 을 그대로 넣어도 동작한다(없는 필드만 자동 채움).
  */
 export function upsertProjectConnection(
-  conn: ProjectConnectionInput,
+  conn: ProjectConnectionInput
 ): Promise<ProjectConnection> {
   return getConnectionStore().connect(conn);
 }
@@ -418,7 +419,7 @@ export function listProjectConnections(): ProjectConnection[] {
 /** 마지막 실행 시각 갱신(기본 now=Date.now()). 레코드 없으면 null. */
 export function touchProjectLastRun(
   projectId: string,
-  at: number = Date.now(),
+  at: number = Date.now()
 ): ProjectConnection | null {
   return getConnectionStore().touchLastRun(projectId, at);
 }
@@ -429,7 +430,7 @@ export function touchProjectLastRun(
  */
 export function setAccessMode(
   projectId: string,
-  accessMode: AccessMode,
+  accessMode: AccessMode
 ): ProjectConnection | null {
   return getConnectionStore().setAccessMode(projectId, accessMode);
 }
@@ -480,7 +481,7 @@ export function computeAvailableMcps(): string[] {
  * 보존해 명시적으로 넣어둔 MCP 가 사라지지 않게 한다. conn 이 null 이면 null.
  */
 export function withAvailableMcps(
-  conn: ProjectConnection | null,
+  conn: ProjectConnection | null
 ): ProjectConnection | null {
   if (!conn) return conn;
   const merged = new Set<string>([

@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
+import { gitSpawnEnv } from "./git-path";
 
 export interface FileNode {
   name: string;
@@ -145,6 +146,7 @@ export class FsManager {
       try {
         const proc = spawn("git", ["status", "--porcelain", "-uall"], {
           cwd: rootPath,
+          env: gitSpawnEnv(),
         });
         let output = "";
 
@@ -183,7 +185,7 @@ export class FsManager {
     return new Promise((resolve, reject) => {
       let proc;
       try {
-        proc = spawn("git", args, { cwd });
+        proc = spawn("git", args, { cwd, env: gitSpawnEnv() });
       } catch (err) {
         reject(err);
         return;
@@ -202,8 +204,10 @@ export class FsManager {
         else
           reject(
             new Error(
-              `git ${args[0]} exited ${code}${errOut.trim() ? `: ${errOut.trim()}` : ""}`,
-            ),
+              `git ${args[0]} exited ${code}${
+                errOut.trim() ? `: ${errOut.trim()}` : ""
+              }`
+            )
           );
       });
     });
@@ -230,7 +234,7 @@ export class FsManager {
    */
   async getWorktreeChanges(
     rootPath: string,
-    baseRef: string,
+    baseRef: string
   ): Promise<{
     baseSha: string;
     files: Array<{ relPath: string; status: string }>;
@@ -249,11 +253,11 @@ export class FsManager {
 
     const nameStatus = await this.git(
       ["diff", "--name-status", "--no-renames", baseSha],
-      rootPath,
+      rootPath
     );
     const untracked = await this.git(
       ["ls-files", "--others", "--exclude-standard"],
-      rootPath,
+      rootPath
     );
 
     const files = new Map<string, string>();
@@ -288,7 +292,7 @@ export class FsManager {
    */
   async getGitDiff(
     filePath: string,
-    baseSha?: string,
+    baseSha?: string
   ): Promise<{ original: string; modified: string }> {
     const dir = path.dirname(filePath);
     return new Promise((resolve) => {
@@ -298,9 +302,12 @@ export class FsManager {
           "git",
           [
             "show",
-            `${baseSha ?? "HEAD"}:${path.relative(this.findGitRoot(dir), filePath)}`,
+            `${baseSha ?? "HEAD"}:${path.relative(
+              this.findGitRoot(dir),
+              filePath
+            )}`,
           ],
-          { cwd: dir },
+          { cwd: dir }
         );
         let original = "";
 
@@ -328,6 +335,7 @@ export class FsManager {
       try {
         const proc = spawn("git", ["remote", "get-url", "origin"], {
           cwd: rootPath,
+          env: gitSpawnEnv(),
         });
         let output = "";
         proc.stdout.on("data", (data) => {
@@ -454,7 +462,7 @@ export class FsManager {
   watchDirectory(
     token: string,
     rootPath: string,
-    callback: (event: string, filePath: string) => void,
+    callback: (event: string, filePath: string) => void
   ): void {
     const existing = this.watchers.get(token);
     if (existing) existing.close();
@@ -471,7 +479,7 @@ export class FsManager {
             if (parts.some((p) => DEFAULT_IGNORES.has(p))) return;
             callback(eventType, fullPath);
           }
-        },
+        }
       );
       this.watchers.set(token, watcher);
     } catch {
