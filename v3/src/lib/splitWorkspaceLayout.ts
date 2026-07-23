@@ -17,12 +17,12 @@
  * legacy tab component (WorkTabs.TAB_COMPONENTS); we never reimplement a view.
  */
 export const RIGHT_TABS = [
+  "guide",
   "board",
   "code",
   "worktrees",
   "history",
   "lanes",
-  "guide",
   "usage",
   "harness",
   "missions",

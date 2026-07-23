@@ -11,7 +11,6 @@ import { SettingsPage } from "../settings/SettingsPage";
 import { UpgradeModal } from "../settings/UpgradeModal";
 import { useAppLifecycle } from "../../hooks/useAppLifecycle";
 import { useUiStore } from "../../stores/uiStore";
-import { useWorkspaceModeStore } from "../../stores/workspaceModeStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useActivityStreamStore } from "../../stores/activityStreamStore";
@@ -45,7 +44,6 @@ export function WorkspaceShell() {
 
   const [showSettings, setShowSettings] = useState(false);
 
-  const disableWorkspaceMode = useWorkspaceModeStore((s) => s.setEnabled);
   const upgradeModal = useUiStore((s) => s.upgradeModal);
   const hideUpgrade = useUiStore((s) => s.hideUpgrade);
   const pendingSettingsSection = useUiStore((s) => s.pendingSettingsSection);
@@ -186,22 +184,6 @@ export function WorkspaceShell() {
       <Header onNavigateToSettings={() => setShowSettings(true)} />
       <UpdateBanner />
       <ProjectSetupBanners {...projectSetup} />
-
-      {/* Workspace-mode chrome: label + exit hatch. Keeps the opt-in reversible
-          from inside the shell without needing to open Settings. */}
-      <div className="flex items-center gap-2 border-b border-gray-700 bg-gray-800 px-3 py-1 text-[11px] text-gray-400">
-        <span className="rounded bg-blue-600/20 px-1.5 py-0.5 font-semibold uppercase tracking-wider text-blue-300">
-          {t("workspace.badge")}
-        </span>
-        <span className="flex-1 truncate">{t("workspace.tagline")}</span>
-        <button
-          type="button"
-          onClick={() => disableWorkspaceMode(false)}
-          className="rounded px-2 py-0.5 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
-        >
-          {t("workspace.exit")}
-        </button>
-      </div>
 
       {/* Body: file-tree rail | split area (terminals | divider | tabs) |
           activity rail. The two side panels sit OUTSIDE the measured split area

@@ -133,7 +133,7 @@ function resolveWorktreeTitle(
 function StatusPill({ pill }: { pill: WorktreeStatusPill }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${
         TONE_CLASSES[pill.tone]
       }`}
     >
@@ -148,7 +148,7 @@ function CategoryBadge({ category }: { category: WorktreeCategory }) {
   const style = CATEGORY_STYLE[category];
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${style.badge}`}
+      className={`inline-flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${style.badge}`}
       title={t(style.tipKey)}
     >
       <span aria-hidden>{style.icon}</span>
@@ -372,7 +372,7 @@ function ArchiveReasonBadge({
   const style = ARCHIVE_REASON_STYLE[reason];
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${style.className}`}
+      className={`inline-flex flex-shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-medium ${style.className}`}
       title={t(style.tipKey)}
     >
       {t(style.labelKey)}
@@ -495,7 +495,7 @@ function MergeModeBadge({ mode }: { mode: MergeHistoryEntry["mode"] }) {
   const isAuto = mode === "auto";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${
         isAuto
           ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
           : "bg-sky-500/15 text-sky-300 border border-sky-500/30"
@@ -627,7 +627,7 @@ function LegendChip({ category }: { category: WorktreeCategory }) {
   const style = CATEGORY_STYLE[category];
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${style.badge}`}
+      className={`inline-flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${style.badge}`}
     >
       <span aria-hidden>{style.icon}</span>
       {t(style.labelKey)}
