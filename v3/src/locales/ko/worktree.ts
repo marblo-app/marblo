@@ -102,4 +102,66 @@ export const worktree = {
   "worktree.archivedReason.mergedTip": "이미 base에 머지되어 자동 아카이브됨",
   "worktree.archivedReason.staleTip": "장기 무활동으로 자동 아카이브됨",
   "worktree.archivedReason.doneTip": "티켓이 DONE 이라 자동 아카이브됨",
+
+  // 감사 라이프사이클 카테고리 (taskStore 상태 기반, git squash 무관)
+  "worktree.category.developing": "개발 중",
+  "worktree.category.developingTip":
+    "에이전트가 활성이거나 미커밋 변경이 있음 / 티켓이 아직 열려 있음 — 일괄 정리 대상 아님(보호)",
+  "worktree.category.mergeNeeded": "머지 필요",
+  "worktree.category.mergeNeededTip":
+    "티켓이 REVIEW — 작업 완료, 사람이 머지·충돌해소를 판단해야 함",
+  "worktree.category.cleanupMerged": "정리 필요 · 머지됨",
+  "worktree.category.cleanupMergedTip":
+    "티켓이 DONE — base에 안착한 작업. 워크트리를 정리할 수 있음",
+  "worktree.category.cleanupStale": "정리 필요 · stale",
+  "worktree.category.cleanupStaleTip":
+    "연결된 티켓이 없는 고아/임시 브랜치 — 정리 후보",
+
+  // GitHub / 티켓 / 리뷰요청 버튼
+  "worktree.action.github": "GitHub",
+  "worktree.action.githubTip": "PR(있으면) 또는 브랜치 비교를 브라우저로 열기",
+  "worktree.action.githubUnavailable": "GitHub 리모트/브랜치가 없어 열 수 없음",
+  "worktree.action.ticket": "티켓",
+  "worktree.action.ticketTip": "보드에서 이 워크트리의 티켓 열기",
+  "worktree.action.ticketUnavailable": "연결된 보드 티켓이 없음",
+  "worktree.action.review": "리뷰요청",
+  "worktree.action.reviewSending": "보내는 중…",
+  "worktree.action.reviewTip":
+    "오케스트레이터에게 이 워크트리의 머지·충돌해소·정리 판단을 요청",
+
+  // 오케에게 리뷰 요청 메시지 / 결과
+  "worktree.review.message":
+    "워크트리 리뷰 요청 — {label} (브랜치 {branch}, 상태 {status}). 머지·충돌해소·정리 여부를 판단해줘.",
+  "worktree.review.statusConflict": "충돌",
+  "worktree.review.statusDeveloping": "개발중",
+  "worktree.review.sentLocal":
+    "{branch} 리뷰 요청을 오케스트레이터에 전달했습니다.",
+  "worktree.review.sentQueued":
+    "{branch} 리뷰 요청을 큐에 넣었습니다(오케 머신에서 수신).",
+  "worktree.review.failed": "리뷰 요청 전송 실패",
+
+  // 일괄 정리(머지됨) — 개발중·충돌·미커밋은 절대 대상 아님
+  "worktree.cleanupMergedTip":
+    "'정리 필요(머지됨)' 워크트리만 일괄 제거 (개발중·충돌·미커밋은 제외)",
+  "worktree.cleanupMergedLabel": "🧹 머지됨 일괄 정리 ({count})",
+  "worktree.confirm.cleanupMerged":
+    "머지된(DONE) 워크트리 {count}개를 제거하고 브랜치도 정리할까요? (개발중·충돌·미커밋은 제외됩니다)",
+
+  // 범례
+  "worktree.legend.toggleLabel": "ⓘ 범례",
+  "worktree.legend.toggleTip": "상태 카테고리와 버튼 설명 펼치기/접기",
+  "worktree.legend.statesTitle": "상태",
+  "worktree.legend.buttonsTitle": "버튼",
+  "worktree.legend.developing":
+    "에이전트 활성 또는 미커밋 — 자동 정리 안 함(보호)",
+  "worktree.legend.mergeNeeded": "REVIEW 완료 대기 — 머지/충돌해소 판단",
+  "worktree.legend.cleanup":
+    "머지됨(DONE) 또는 고아(stale) — 일괄 정리는 '머지됨'만 대상",
+  "worktree.legend.btnRebase": "Rebase = 최신 base(main) 위에 재정렬",
+  "worktree.legend.btnMerge": "Merge = base 로 스쿼시 병합",
+  "worktree.legend.btnGithub": "GitHub = PR/브랜치 비교를 브라우저로 열기",
+  "worktree.legend.btnTicket": "티켓 = 보드의 해당 티켓 열기",
+  "worktree.legend.btnReview": "리뷰요청 = 오케에게 판단 요청",
+  "worktree.legend.btnArchive": "보관 = 기본 목록에서 숨김(복원 가능)",
+  "worktree.legend.btnDelete": "Delete = 워크트리+브랜치 물리 삭제",
 };

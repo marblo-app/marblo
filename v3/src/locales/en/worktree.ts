@@ -107,4 +107,70 @@ export const worktree: Record<keyof typeof koWorktree, string> = {
     "Auto-archived — already merged into base",
   "worktree.archivedReason.staleTip": "Auto-archived — long idle",
   "worktree.archivedReason.doneTip": "Auto-archived — its ticket is DONE",
+
+  // Audit lifecycle category (task-status based, squash-proof)
+  "worktree.category.developing": "In development",
+  "worktree.category.developingTip":
+    "An agent is active, there are uncommitted changes, or the ticket is still open — never a bulk-cleanup target (protected)",
+  "worktree.category.mergeNeeded": "Merge needed",
+  "worktree.category.mergeNeededTip":
+    "Ticket is in REVIEW — work is done, a human must decide merge/conflict-resolution",
+  "worktree.category.cleanupMerged": "Cleanup · merged",
+  "worktree.category.cleanupMergedTip":
+    "Ticket is DONE — landed work. The worktree can be cleaned up",
+  "worktree.category.cleanupStale": "Cleanup · stale",
+  "worktree.category.cleanupStaleTip":
+    "Orphan / ad-hoc branch with no linked ticket — a prune candidate",
+
+  // GitHub / ticket / request-review buttons
+  "worktree.action.github": "GitHub",
+  "worktree.action.githubTip":
+    "Open the PR (if any) or the branch comparison in the browser",
+  "worktree.action.githubUnavailable": "No GitHub remote/branch to open",
+  "worktree.action.ticket": "Ticket",
+  "worktree.action.ticketTip": "Open this worktree's ticket on the board",
+  "worktree.action.ticketUnavailable": "No linked board ticket",
+  "worktree.action.review": "Review",
+  "worktree.action.reviewSending": "Sending…",
+  "worktree.action.reviewTip":
+    "Ask the orchestrator to judge merge/conflict-resolution/cleanup for this worktree",
+
+  // Request-review message / result
+  "worktree.review.message":
+    "Worktree review request — {label} (branch {branch}, status {status}). Please judge whether to merge, resolve conflicts, or clean up.",
+  "worktree.review.statusConflict": "conflict",
+  "worktree.review.statusDeveloping": "in development",
+  "worktree.review.sentLocal":
+    "Sent the review request for {branch} to the orchestrator.",
+  "worktree.review.sentQueued":
+    "Queued the review request for {branch} (the orchestrator's machine will pick it up).",
+  "worktree.review.failed": "Failed to send review request",
+
+  // Bulk cleanup (merged) — never touches developing/conflict/uncommitted
+  "worktree.cleanupMergedTip":
+    "Bulk-remove only 'Cleanup · merged' worktrees (developing/conflict/uncommitted excluded)",
+  "worktree.cleanupMergedLabel": "🧹 Bulk-clean merged ({count})",
+  "worktree.confirm.cleanupMerged":
+    "Remove {count} merged (DONE) worktree(s) and clean up their branches? (developing/conflict/uncommitted are excluded)",
+
+  // Legend
+  "worktree.legend.toggleLabel": "ⓘ Legend",
+  "worktree.legend.toggleTip":
+    "Show/hide the status categories and button descriptions",
+  "worktree.legend.statesTitle": "Status",
+  "worktree.legend.buttonsTitle": "Buttons",
+  "worktree.legend.developing":
+    "agent active or uncommitted — never auto-cleaned (protected)",
+  "worktree.legend.mergeNeeded":
+    "REVIEW done — decide merge/conflict-resolution",
+  "worktree.legend.cleanup":
+    "merged (DONE) or orphan (stale) — bulk cleanup targets 'merged' only",
+  "worktree.legend.btnRebase": "Rebase = replay onto latest base (main)",
+  "worktree.legend.btnMerge": "Merge = squash-merge into base",
+  "worktree.legend.btnGithub": "GitHub = open PR/branch comparison in browser",
+  "worktree.legend.btnTicket": "Ticket = open the board ticket",
+  "worktree.legend.btnReview": "Review = ask the orchestrator to judge",
+  "worktree.legend.btnArchive":
+    "Archive = hide from the default list (restorable)",
+  "worktree.legend.btnDelete": "Delete = physically remove worktree + branch",
 };

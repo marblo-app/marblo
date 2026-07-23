@@ -110,6 +110,17 @@ interface WorktreeState {
     removed: string[];
     failed: { path: string; error: string }[];
   }>;
+  /**
+   * Remove an EXPLICIT list of worktrees, one `worktree:remove` per entry, then
+   * refresh once. Unlike {@link WorktreeState.cleanupStale} (which recomputes
+   * "stale" repo-wide in the main process and force-removes dirty trees), this
+   * deletes only the paths handed to it — so the caller can exclude developing /
+   * uncommitted / unpushed worktrees up front and never lose live work.
+   */
+  cleanupWorktrees: (targets: { repoRoot: string; path: string }[]) => Promise<{
+    removed: string[];
+    failed: { path: string; error: string }[];
+  }>;
   getWorktreesByProject: (projectId: string) => Worktree[];
   getGroupedByProject: () => Record<string, Worktree[]>;
   statusPill: (worktree: Worktree) => WorktreeStatusPill;
@@ -411,6 +422,36 @@ export const useWorktreeStore = create<WorktreeState>((set, get) => ({
       );
       await get().refresh();
       return result;
+    } catch (err) {
+      set({ loading: false, lastError: errorMessage(err) });
+      throw err;
+    }
+  },
+
+  cleanupWorktrees: async (targets) => {
+    set({ loading: true, lastError: null });
+    const removed: string[] = [];
+    const failed: { path: string; error: string }[] = [];
+    try {
+      for (const target of targets) {
+        try {
+          await window.electronAPI.worktree.remove(
+            target.repoRoot,
+            target.path,
+            true,
+          );
+          removed.push(target.path);
+        } catch (e) {
+          failed.push({
+            path: target.path,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+      // Single refresh after the whole batch — a per-remove refresh() would run
+      // the full worktree:list sweep N times.
+      await get().refresh();
+      return { removed, failed };
     } catch (err) {
       set({ loading: false, lastError: errorMessage(err) });
       throw err;

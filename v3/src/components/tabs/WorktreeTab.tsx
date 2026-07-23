@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTaskStore } from "../../stores/taskStore";
+import { useNavigationStore } from "../../stores/navigationStore";
 import { viewWorktree } from "../../lib/viewWorktree";
 import { subscribeToMergeHistory } from "../../services/mergeHistoryService";
 import type { Task } from "../../types/task";
@@ -18,6 +19,14 @@ import {
   type ArchiveReason,
   type ArchiveSignals,
 } from "../../lib/worktreeHygiene";
+import {
+  isCleanupCandidate,
+  worktreeCategory,
+  type WorktreeCategory,
+} from "../../lib/worktreeCategory";
+import { githubRepoWebBase, worktreeGithubUrl } from "../../lib/githubWebUrl";
+import { routeInstructionToOrchestrator } from "../../services/orchestratorInstructionService";
+import { useAuth } from "../../hooks/useAuth";
 import { useArchiveSignals } from "../../hooks/useArchiveSignals";
 import { t, useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
@@ -34,6 +43,51 @@ const TONE_CLASSES: Record<WorktreeStatusTone, string> = {
   behind: "bg-yellow-500/15 text-yellow-300 border border-yellow-500/30",
   ready: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
   idle: "bg-gray-500/15 text-gray-300 border border-gray-500/30",
+};
+
+/**
+ * Per-category presentation: row accent border, badge chip, label + tooltip.
+ * Colours follow the ticket — 개발중 파랑 / 머지필요 노랑 / 정리필요 회색 (both
+ * cleanup variants share grey, distinguished by their sub-label).
+ */
+const CATEGORY_STYLE: Record<
+  WorktreeCategory,
+  {
+    accent: string;
+    badge: string;
+    icon: string;
+    labelKey: MessageKey;
+    tipKey: MessageKey;
+  }
+> = {
+  developing: {
+    accent: "border-l-blue-500/70",
+    badge: "border-blue-500/30 bg-blue-500/15 text-blue-300",
+    icon: "🔵",
+    labelKey: "worktree.category.developing",
+    tipKey: "worktree.category.developingTip",
+  },
+  mergeNeeded: {
+    accent: "border-l-amber-500/70",
+    badge: "border-amber-500/30 bg-amber-500/15 text-amber-300",
+    icon: "🟡",
+    labelKey: "worktree.category.mergeNeeded",
+    tipKey: "worktree.category.mergeNeededTip",
+  },
+  cleanupMerged: {
+    accent: "border-l-gray-500/60",
+    badge: "border-gray-500/30 bg-gray-500/15 text-gray-300",
+    icon: "⚪",
+    labelKey: "worktree.category.cleanupMerged",
+    tipKey: "worktree.category.cleanupMergedTip",
+  },
+  cleanupStale: {
+    accent: "border-l-gray-500/60",
+    badge: "border-gray-500/30 bg-gray-500/15 text-gray-300",
+    icon: "⚪",
+    labelKey: "worktree.category.cleanupStale",
+    tipKey: "worktree.category.cleanupStaleTip",
+  },
 };
 
 // 상태 필터 드롭다운 옵션. tone 값과 1:1.
@@ -89,6 +143,20 @@ function StatusPill({ pill }: { pill: WorktreeStatusPill }) {
   );
 }
 
+function CategoryBadge({ category }: { category: WorktreeCategory }) {
+  const { t } = useTranslation();
+  const style = CATEGORY_STYLE[category];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${style.badge}`}
+      title={t(style.tipKey)}
+    >
+      <span aria-hidden>{style.icon}</span>
+      {t(style.labelKey)}
+    </span>
+  );
+}
+
 function ConflictSummary({ worktree }: { worktree: Worktree }) {
   const { t } = useTranslation();
   const conflicts = worktree.status?.conflicts.length ?? 0;
@@ -105,7 +173,16 @@ function ConflictSummary({ worktree }: { worktree: Worktree }) {
   return <span className="text-gray-500">{t("worktree.conflict.none")}</span>;
 }
 
-type RowAction = "rebase" | "merge" | "resolve" | "open" | "archive" | "delete";
+type RowAction =
+  | "rebase"
+  | "merge"
+  | "resolve"
+  | "open"
+  | "archive"
+  | "delete"
+  | "github"
+  | "ticket"
+  | "review";
 
 function ActionButton({
   children,
@@ -143,18 +220,30 @@ function ActionButton({
 function RowActions({
   worktree,
   archived,
+  category,
+  githubUrl,
+  ticketAvailable,
   busyAction,
   onAction,
 }: {
   worktree: Worktree;
   archived: boolean;
+  category: WorktreeCategory;
+  githubUrl: string | null;
+  ticketAvailable: boolean;
   busyAction: RowAction | null;
   onAction: (worktree: Worktree, action: RowAction) => void;
 }) {
   const { t } = useTranslation();
   const mergeable = worktree.status?.mergeable === true;
-  const canResolve = Boolean(worktree.status && !worktree.status.mergeable);
+  const hasConflict = Boolean(worktree.status && !worktree.status.mergeable);
+  const canResolve = hasConflict;
   const disabled = busyAction !== null;
+  // "오케에게 리뷰 요청" is for worktrees a human must judge: still in
+  // development or in conflict, or waiting for a merge decision. A landed
+  // (cleanupMerged) worktree needs no review, so it is hidden there.
+  const showReview =
+    category === "developing" || category === "mergeNeeded" || hasConflict;
 
   return (
     <div className="flex flex-shrink-0 items-center gap-1">
@@ -185,6 +274,39 @@ function RowActions({
           onClick={() => onAction(worktree, "resolve")}
         >
           {busyAction === "resolve" ? "Resolving" : "Resolve"}
+        </ActionButton>
+      )}
+      <ActionButton
+        disabled={disabled || !githubUrl}
+        title={
+          githubUrl
+            ? t("worktree.action.githubTip")
+            : t("worktree.action.githubUnavailable")
+        }
+        onClick={() => onAction(worktree, "github")}
+      >
+        {t("worktree.action.github")}
+      </ActionButton>
+      <ActionButton
+        disabled={disabled || !ticketAvailable}
+        title={
+          ticketAvailable
+            ? t("worktree.action.ticketTip")
+            : t("worktree.action.ticketUnavailable")
+        }
+        onClick={() => onAction(worktree, "ticket")}
+      >
+        {t("worktree.action.ticket")}
+      </ActionButton>
+      {showReview && (
+        <ActionButton
+          disabled={disabled}
+          title={t("worktree.action.reviewTip")}
+          onClick={() => onAction(worktree, "review")}
+        >
+          {busyAction === "review"
+            ? t("worktree.action.reviewSending")
+            : t("worktree.action.review")}
         </ActionButton>
       )}
       <ActionButton
@@ -262,6 +384,9 @@ function WorktreeRow({
   worktree,
   titleMeta,
   pill,
+  category,
+  githubUrl,
+  ticketAvailable,
   archived,
   signals,
   busyAction,
@@ -270,6 +395,9 @@ function WorktreeRow({
   worktree: Worktree;
   titleMeta: WorktreeTitleMeta;
   pill: WorktreeStatusPill;
+  category: WorktreeCategory;
+  githubUrl: string | null;
+  ticketAvailable: boolean;
   archived: boolean;
   signals: ArchiveSignals;
   busyAction: RowAction | null;
@@ -283,12 +411,17 @@ function WorktreeRow({
   const deletions = status?.deletions ?? 0;
 
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-800/40 px-3 py-2">
-      {/* 메인 행: 제목 / 에이전트 / 브랜치 / +ins/-del / 상태 pill */}
+    <div
+      className={`rounded-lg border border-l-4 border-gray-800 bg-gray-800/40 px-3 py-2 ${CATEGORY_STYLE[category].accent}`}
+    >
+      {/* 메인 행: 제목 / 카테고리 배지 / 에이전트 / 브랜치 / +ins/-del / 상태 pill */}
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1" title={titleMeta.titleTip}>
-          <div className="truncate text-sm font-semibold text-gray-100">
-            {titleMeta.title}
+          <div className="flex items-center gap-2">
+            <span className="truncate text-sm font-semibold text-gray-100">
+              {titleMeta.title}
+            </span>
+            <CategoryBadge category={category} />
           </div>
           {titleMeta.subtitle && (
             <div className="truncate font-mono text-[10px] text-gray-500">
@@ -331,6 +464,9 @@ function WorktreeRow({
           <RowActions
             worktree={worktree}
             archived={archived}
+            category={category}
+            githubUrl={githubUrl}
+            ticketAvailable={ticketAvailable}
             busyAction={busyAction}
             onAction={onAction}
           />
@@ -480,6 +616,66 @@ function MergeHistoryRow({
   );
 }
 
+// ── 범례 (상태 카테고리 + 버튼 설명) ──────────────────────────────────
+
+/** Small colour chip mirroring a category's badge, for the legend. */
+function LegendChip({ category }: { category: WorktreeCategory }) {
+  const { t } = useTranslation();
+  const style = CATEGORY_STYLE[category];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${style.badge}`}
+    >
+      <span aria-hidden>{style.icon}</span>
+      {t(style.labelKey)}
+    </span>
+  );
+}
+
+function WorktreeLegend() {
+  const { t } = useTranslation();
+  const buttonKeys: MessageKey[] = [
+    "worktree.legend.btnRebase",
+    "worktree.legend.btnMerge",
+    "worktree.legend.btnGithub",
+    "worktree.legend.btnTicket",
+    "worktree.legend.btnReview",
+    "worktree.legend.btnArchive",
+    "worktree.legend.btnDelete",
+  ];
+  return (
+    <div className="space-y-2 rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2 text-xs text-gray-400">
+      {/* 상태 카테고리 */}
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-1">
+        <span className="font-semibold text-gray-300">
+          {t("worktree.legend.statesTitle")}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <LegendChip category="developing" />
+          <span>{t("worktree.legend.developing")}</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <LegendChip category="mergeNeeded" />
+          <span>{t("worktree.legend.mergeNeeded")}</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <LegendChip category="cleanupMerged" />
+          <span>{t("worktree.legend.cleanup")}</span>
+        </span>
+      </div>
+      {/* 버튼 */}
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-1 border-t border-gray-800 pt-2">
+        <span className="font-semibold text-gray-300">
+          {t("worktree.legend.buttonsTitle")}
+        </span>
+        {buttonKeys.map((key) => (
+          <span key={key}>{t(key)}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function WorktreeTab() {
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const loading = useWorktreeStore((s) => s.loading);
@@ -489,7 +685,7 @@ export function WorktreeTab() {
   const merge = useWorktreeStore((s) => s.merge);
   const resolve = useWorktreeStore((s) => s.resolve);
   const remove = useWorktreeStore((s) => s.remove);
-  const cleanupStale = useWorktreeStore((s) => s.cleanupStale);
+  const cleanupWorktrees = useWorktreeStore((s) => s.cleanupWorktrees);
   const statusPill = useWorktreeStore((s) => s.statusPill);
   const archiveOverrides = useWorktreeStore((s) => s.archiveOverrides);
   const archiveSignals = useArchiveSignals();
@@ -498,6 +694,7 @@ export function WorktreeTab() {
   const currentProjectId = useProjectStore((s) => s.currentProject?.id ?? null);
   const tasks = useTaskStore((s) => s.tasks);
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
+  const { user } = useAuth();
   const { t } = useTranslation();
 
   const [projectFilter, setProjectFilter] = useState<string>(() =>
@@ -519,15 +716,48 @@ export function WorktreeTab() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [cleaningStale, setCleaningStale] = useState(false);
+  // 범례 — 카테고리/버튼 한 줄 설명. 기본 펼침(감사 온보딩 도움), 접기 가능.
+  const [showLegend, setShowLegend] = useState(true);
   // 완료 이력 뷰 — 머지되어 사라진 워크트리의 감사 트레일 (merge_history).
   const [historyView, setHistoryView] = useState(false);
   const [history, setHistory] = useState<MergeHistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // repoRoot → GitHub 웹 base URL(github.com 리모트만, 아니면 null). 행의 GitHub
+  // 버튼이 동기적으로 쓰도록 미리 채운다. fs.gitRemoteUrl 은 repoRoot 당 1회만.
+  const [remoteBases, setRemoteBases] = useState<Record<string, string | null>>(
+    {},
+  );
+  const fetchedRootsRef = useRef<Set<string>>(new Set());
 
   // mount 시 1회 로드. 실패는 store.lastError 로 표면화되므로 swallow.
   useEffect(() => {
     refresh().catch(() => {});
   }, [refresh]);
+
+  // repoRoot 별 GitHub 리모트 base 를 lazily 채운다(중복 방지=fetchedRootsRef).
+  useEffect(() => {
+    const roots = Array.from(new Set(worktrees.map((wt) => wt.repoRoot)));
+    const missing = roots.filter((r) => !fetchedRootsRef.current.has(r));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const root of missing) {
+        fetchedRootsRef.current.add(root);
+        let base: string | null = null;
+        try {
+          const url = await window.electronAPI.fs.gitRemoteUrl(root);
+          base = githubRepoWebBase(url);
+        } catch {
+          base = null;
+        }
+        if (cancelled) return;
+        setRemoteBases((prev) => ({ ...prev, [root]: base }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [worktrees]);
 
   useEffect(() => {
     if (!currentProjectId) return;
@@ -574,6 +804,36 @@ export function WorktreeTab() {
   const taskById = useMemo(
     () => new Map(tasks.map((task) => [task.id, task])),
     [tasks],
+  );
+
+  // 워크트리 → 감사 라이프사이클 카테고리 (taskStore 상태 기반, git squash 무관).
+  const categoryOf = useMemo(
+    () =>
+      (worktree: Worktree): WorktreeCategory =>
+        worktreeCategory(
+          worktree,
+          worktree.taskId ? (taskById.get(worktree.taskId) ?? null) : null,
+          archiveSignals,
+        ),
+    [taskById, archiveSignals],
+  );
+
+  // 워크트리 → GitHub 링크(있으면). task.prUrl 우선, 없으면 리모트에서 파생.
+  const resolveGithubUrl = useMemo(
+    () =>
+      (worktree: Worktree): string | null => {
+        const task = worktree.taskId
+          ? (taskById.get(worktree.taskId) ?? null)
+          : null;
+        const pr = task?.prUrl?.trim();
+        if (pr) return pr;
+        return worktreeGithubUrl({
+          remoteUrl: remoteBases[worktree.repoRoot] ?? null,
+          branch: worktree.branch,
+          baseRef: worktree.baseRef,
+        });
+      },
+    [taskById, remoteBases],
   );
 
   // projectId → 사람이 읽는 이름. 미등록 프로젝트는 id 그대로.
@@ -648,10 +908,21 @@ export function WorktreeTab() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [worktrees, projectName]);
 
-  // 정리 가능(stale) 워크트리 — 이미 base에 머지됨 / 장기 무활동.
-  const staleWorktrees = useMemo(
-    () => worktrees.filter((wt) => wt.stale),
-    [worktrees],
+  // 일괄 cleanup 대상 — ★'정리 필요(머지됨)' 카테고리(DONE 티켓, base에 안착)만.
+  // 개발 중·충돌·미커밋 워크트리는 절대 포함하지 않는다(오늘 미커밋 워크트리가
+  // cleanup 에 지워져 유실된 사고 재발 방지). isCleanupCandidate 가 dirty/busy 에
+  // 더해 unpushed(로컬 전용 커밋)까지 배제하므로, 렌더러가 직접 remove 해도
+  // 메인프로세스 repo-wide cleanupStale 보다 안전하다(그건 dirty 를 --force 로 지움).
+  const cleanupCandidates = useMemo(
+    () =>
+      worktrees.filter((wt) => {
+        const task = wt.taskId ? (taskById.get(wt.taskId) ?? null) : null;
+        return (
+          worktreeCategory(wt, task, archiveSignals) === "cleanupMerged" &&
+          isCleanupCandidate(wt, task, archiveSignals)
+        );
+      }),
+    [worktrees, taskById, archiveSignals],
   );
 
   // 아카이브된 워크트리 수 — 토글 배지에 표시.
@@ -681,6 +952,50 @@ export function WorktreeTab() {
     viewWorktree(worktree, { switchToCodeTab: true });
   };
 
+  // 오케스트레이터에게 이 워크트리 리뷰를 요청한다. worktree.projectId 의 오케에게
+  // 보낸다(워크트리는 크로스프로젝트일 수 있으므로 현재 프로젝트가 아님).
+  const handleReviewRequest = async (worktree: Worktree) => {
+    const task = worktree.taskId
+      ? (taskById.get(worktree.taskId) ?? null)
+      : null;
+    const label = task?.title ?? worktree.branch;
+    const hasConflict = Boolean(worktree.status && !worktree.status.mergeable);
+    const statusText = hasConflict
+      ? t("worktree.review.statusConflict")
+      : t("worktree.review.statusDeveloping");
+    const message = t("worktree.review.message", {
+      label: worktree.taskId ? `${label} (${worktree.taskId})` : label,
+      branch: worktree.branch,
+      status: statusText,
+    });
+
+    setBusy({ id: worktree.id, action: "review" });
+    try {
+      const result = await routeInstructionToOrchestrator({
+        projectId: worktree.projectId,
+        message,
+        fromUserId: user?.uid,
+        fromUserName: user?.displayName ?? "User",
+        taskId: worktree.taskId ?? null,
+      });
+      if (result === "failed") {
+        setActionError(t("worktree.review.failed"));
+      } else {
+        setActionMessage(
+          result === "local"
+            ? t("worktree.review.sentLocal", { branch: worktree.branch })
+            : t("worktree.review.sentQueued", { branch: worktree.branch }),
+        );
+      }
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : t("worktree.review.failed"),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const handleAction = async (worktree: Worktree, action: RowAction) => {
     setActionError(null);
     setActionMessage(null);
@@ -705,6 +1020,34 @@ export function WorktreeTab() {
           ? t("worktree.msg.restored", { branch: worktree.branch })
           : t("worktree.msg.archived", { branch: worktree.branch }),
       );
+      return;
+    }
+
+    // GitHub: open the PR (task.prUrl) or the branch's compare/tree view in the
+    // OS browser. window.open("_blank") → main's setWindowOpenHandler routes
+    // external https to shell.openExternal (no new IPC).
+    if (action === "github") {
+      const url = resolveGithubUrl(worktree);
+      if (!url) return;
+      window.open(url, "_blank", "noopener");
+      return;
+    }
+
+    // 티켓 보기: jump to this worktree's board ticket (reuses the same
+    // navigationStore hand-off the Activity Stream "태스크 열기" uses — Layout
+    // switches to the board tab, KanbanBoard opens the detail modal).
+    if (action === "ticket") {
+      if (!worktree.taskId) return;
+      useNavigationStore
+        .getState()
+        .requestJump({ type: "task", id: worktree.taskId });
+      return;
+    }
+
+    // 오케에게 리뷰 요청: hand a free-form review request to the project
+    // orchestrator via the proven local-PTY-first / Firestore-queue routing.
+    if (action === "review") {
+      await handleReviewRequest(worktree);
       return;
     }
 
@@ -762,41 +1105,42 @@ export function WorktreeTab() {
     }
   };
 
-  // 정리 가능 워크트리를 repoRoot별로 묶어 일괄 cleanup (deleteBranch).
-  const handleCleanupStale = async () => {
+  // '정리 필요(머지됨)' 워크트리만 명시적으로 일괄 제거한다. 후보는 이미
+  // cleanupCandidates 로 좁혀져 있어(개발중·충돌·미커밋·unpushed 전부 제외) 안전.
+  // repo-wide cleanupStale 대신 정확히 이 목록만 remove 하므로 라이브 작업이
+  // 쓸려나갈 수 없다.
+  const handleCleanupMerged = async () => {
     setActionError(null);
     setActionMessage(null);
-    if (staleWorktrees.length === 0) return;
+    if (cleanupCandidates.length === 0) return;
 
-    const repoRoots = Array.from(
-      new Set(staleWorktrees.map((wt) => wt.repoRoot)),
-    );
     const ok = window.confirm(
-      t("worktree.confirm.cleanupStale", { count: staleWorktrees.length }),
+      t("worktree.confirm.cleanupMerged", { count: cleanupCandidates.length }),
     );
     if (!ok) return;
 
     setCleaningStale(true);
     try {
-      let removed = 0;
-      const failures: string[] = [];
-      for (const repoRoot of repoRoots) {
-        const result = await cleanupStale(repoRoot);
-        removed += result.removed.length;
-        for (const fail of result.failed) {
-          failures.push(`${fail.path}: ${fail.error}`);
-        }
-      }
-      if (failures.length > 0) {
+      const result = await cleanupWorktrees(
+        cleanupCandidates.map((wt) => ({
+          repoRoot: wt.repoRoot,
+          path: wt.path,
+        })),
+      );
+      if (result.failed.length > 0) {
         setActionError(
           t("worktree.msg.cleanupPartial", {
-            removed,
-            failed: failures.length,
-            detail: failures.join("; "),
+            removed: result.removed.length,
+            failed: result.failed.length,
+            detail: result.failed
+              .map((f) => `${f.path}: ${f.error}`)
+              .join("; "),
           }),
         );
       } else {
-        setActionMessage(t("worktree.msg.cleanupDone", { removed }));
+        setActionMessage(
+          t("worktree.msg.cleanupDone", { removed: result.removed.length }),
+        );
       }
     } catch (err) {
       setActionError(
@@ -894,19 +1238,33 @@ export function WorktreeTab() {
           {t("worktree.historyToggleLabel")}
         </button>
 
+        <button
+          type="button"
+          onClick={() => setShowLegend((v) => !v)}
+          title={t("worktree.legend.toggleTip")}
+          aria-expanded={showLegend}
+          className={`rounded border px-2 py-1 text-xs transition ${
+            showLegend
+              ? "border-gray-400/50 bg-gray-500/15 text-gray-200"
+              : "border-gray-700 text-gray-300 hover:bg-gray-800"
+          }`}
+        >
+          {t("worktree.legend.toggleLabel")}
+        </button>
+
         <div className="ml-auto flex items-center gap-2">
-          {staleWorktrees.length > 0 && (
+          {cleanupCandidates.length > 0 && (
             <button
               type="button"
-              onClick={handleCleanupStale}
+              onClick={handleCleanupMerged}
               disabled={cleaningStale || loading}
-              title={t("worktree.cleanupStaleTip")}
-              className="rounded border border-amber-500/40 px-2 py-1 text-xs text-amber-300 transition hover:bg-amber-500/10 disabled:opacity-50"
+              title={t("worktree.cleanupMergedTip")}
+              className="rounded border border-gray-500/40 px-2 py-1 text-xs text-gray-300 transition hover:bg-gray-500/10 disabled:opacity-50"
             >
               {cleaningStale
                 ? t("worktree.cleaningStale")
-                : t("worktree.cleanupStaleLabel", {
-                    count: staleWorktrees.length,
+                : t("worktree.cleanupMergedLabel", {
+                    count: cleanupCandidates.length,
                   })}
             </button>
           )}
@@ -938,6 +1296,9 @@ export function WorktreeTab() {
           {actionMessage}
         </div>
       )}
+
+      {/* 범례 — 상태(카테고리) + 버튼 한 줄 설명 */}
+      {showLegend && <WorktreeLegend />}
 
       {/* 본문 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -1022,6 +1383,11 @@ export function WorktreeTab() {
                       worktree={wt}
                       titleMeta={resolveWorktreeTitle(taskById, wt)}
                       pill={statusPill(wt)}
+                      category={categoryOf(wt)}
+                      githubUrl={resolveGithubUrl(wt)}
+                      ticketAvailable={
+                        wt.taskId != null && taskById.has(wt.taskId)
+                      }
                       archived={isWorktreeArchived(
                         wt,
                         archiveOverrides,
