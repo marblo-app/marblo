@@ -7,13 +7,22 @@ import type { workspace as koWorkspace } from "../ko/workspace";
 export const workspace: Record<keyof typeof koWorkspace, string> = {
   // Shell chrome
   "workspace.badge": "Workspace Beta",
-  "workspace.tagline": "Unified shell — panes · browser · diff review",
+  "workspace.tagline": "IDE split — fixed terminals left · work tabs right",
   "workspace.exit": "Exit",
+
+  // IDE split shell
+  "workspace.terminals": "Terminals",
+  "workspace.collapseTerminals": "Collapse terminals",
+  "workspace.expandTerminals": "Expand terminals",
+  "workspace.tab.board": "Board",
+  "workspace.tab.code": "Code",
+  "workspace.tab.worktrees": "Worktrees",
+  "workspace.tab.history": "History",
 
   // Settings toggle
   "workspace.settings.heading": "New Workspace (Beta)",
   "workspace.settings.help":
-    "An experimental shell that unifies chrome-tab panes (move / split / close), a collapsible orchestrator spine, an agent dock, a built-in browser, and inline diff review in one window. Off by default; turning it on leaves all existing features intact.",
+    "An IDE-style split shell: the orchestrator and agent terminals stay pinned on the left while you switch between board, code, worktree, and history tabs on the right. Switching a right tab never disturbs the left terminals. Off by default; turning it on leaves all existing features intact.",
   "workspace.settings.toggleLabel": "Use the new Workspace shell",
   "workspace.settings.on": "On",
   "workspace.settings.off": "Off",

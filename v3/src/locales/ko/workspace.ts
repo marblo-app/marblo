@@ -5,13 +5,22 @@
 export const workspace = {
   // Shell chrome
   "workspace.badge": "워크스페이스 베타",
-  "workspace.tagline": "통합 셸 — 팬(pane)·브라우저·diff 리뷰",
+  "workspace.tagline": "IDE 스플릿 — 좌측 터미널 고정 · 우측 작업 탭",
   "workspace.exit": "종료",
+
+  // IDE split shell
+  "workspace.terminals": "터미널",
+  "workspace.collapseTerminals": "터미널 접기",
+  "workspace.expandTerminals": "터미널 펼치기",
+  "workspace.tab.board": "보드",
+  "workspace.tab.code": "코드",
+  "workspace.tab.worktrees": "워크트리",
+  "workspace.tab.history": "완료 이력",
 
   // Settings toggle
   "workspace.settings.heading": "새 워크스페이스 (베타)",
   "workspace.settings.help":
-    "한 창에 크롬 탭식 pane(이동·분할·닫기), 접이식 오케스트레이터 척추, 에이전트 도킹, 자체 브라우저, 인라인 diff 리뷰를 통합한 실험적 셸입니다. 기본은 꺼짐이며, 켜도 기존 기능은 그대로 유지됩니다.",
+    "좌측에 오케스트레이터·에이전트 터미널을 고정하고, 우측에서 보드·코드·워크트리·이력 탭을 전환하는 IDE형 스플릿 셸입니다. 우측 탭을 바꿔도 좌측 터미널은 그대로 유지됩니다. 기본은 꺼짐이며, 켜도 기존 기능은 그대로 유지됩니다.",
   "workspace.settings.toggleLabel": "새 워크스페이스 셸 사용",
   "workspace.settings.on": "켜짐",
   "workspace.settings.off": "꺼짐",
