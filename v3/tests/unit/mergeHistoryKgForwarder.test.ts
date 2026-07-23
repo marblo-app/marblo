@@ -3,6 +3,8 @@ import {
   pickMergeOutcomesToForward,
   pickMergedTaskCompletionCandidates,
   shouldMarkMergedTaskDone,
+  enrichMergePayload,
+  type MergeOutcomePayload,
 } from "../../src/services/mergeHistoryKgForwarder";
 import type { MergeHistoryEntry } from "../../src/types/mergeHistory";
 import type { Task, TaskStatus } from "../../src/types/task";
@@ -140,6 +142,51 @@ describe("pickMergeOutcomesToForward", () => {
     );
     expect(p.mergedAtMs).toBeNull();
     expect(p.changeType).toBeNull();
+  });
+});
+
+describe("enrichMergePayload (recover dispatchMeta ctx for a forwarded merge)", () => {
+  const base: MergeOutcomePayload = {
+    taskId: "TA",
+    changeType: "feature",
+    mergedAtMs: 123,
+  };
+
+  it("folds dispatchMeta role/taskType/complexity/model onto the payload", () => {
+    const out = enrichMergePayload(base, {
+      role: "backend",
+      taskType: "refactor",
+      complexity: "complex",
+      model: "antigravity",
+    });
+    expect(out.role).toBe("backend");
+    expect(out.taskType).toBe("refactor"); // meta.taskType wins over changeType
+    expect(out.complexity).toBe("complex");
+    expect(out.model).toBe("antigravity");
+    // Base fields are preserved.
+    expect(out.taskId).toBe("TA");
+    expect(out.mergedAtMs).toBe(123);
+  });
+
+  it("falls back taskType←changeType when dispatchMeta is absent", () => {
+    // The exact seen-only regression: no dispatchMeta → previously null ctx →
+    // empty cell keys. Now taskType is derived from the de-identified changeType
+    // so the cell still learns a positive signal.
+    const out = enrichMergePayload(base, null);
+    expect(out.taskType).toBe("feature");
+    expect(out.role).toBeNull();
+    expect(out.complexity).toBeNull();
+    expect(out.model).toBeNull();
+  });
+
+  it("leaves taskType null only when BOTH dispatchMeta and changeType are empty", () => {
+    const out = enrichMergePayload(
+      { taskId: "TA", changeType: null, mergedAtMs: null },
+      { role: "  ", taskType: "", complexity: null, model: undefined },
+    );
+    expect(out.taskType).toBeNull();
+    expect(out.role).toBeNull(); // whitespace-only is treated as empty
+    expect(out.model).toBeNull();
   });
 });
 

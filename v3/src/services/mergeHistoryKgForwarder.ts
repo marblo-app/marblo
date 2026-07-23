@@ -25,6 +25,54 @@ export interface MergeOutcomePayload {
   changeType: string | null;
   /** Merge server-time (ms) so the graph decays historical merges correctly. */
   mergedAtMs: number | null;
+  // ── Enriched routing ctx (recovered from the task's dispatchMeta) ──
+  // The anonymous-auth MAIN process may NOT read member-scoped `tasks`
+  // (#406/L2 — tasks read requires isProjectMember), so its own fetchMeta
+  // backfill silently fails and a forwarded merge lands with NO model/role/
+  // complexity → the cell never learns (seen-only). The renderer IS the
+  // authenticated project member, so it resolves these here and passes them
+  // through the IPC payload. All optional/null-safe: an un-enriched payload
+  // still degrades to `{ taskType: changeType }` on the main side.
+  role?: string | null;
+  taskType?: string | null;
+  complexity?: string | null;
+  model?: string | null;
+}
+
+/** The subset of a task's dispatchMeta the routing graph attributes an outcome
+ * to. Mirrors what the dispatch-meta persister writes (electron/main.ts). */
+export interface MergeDispatchMeta {
+  role?: string | null;
+  taskType?: string | null;
+  complexity?: string | null;
+  model?: string | null;
+}
+
+/**
+ * Fold a task's dispatchMeta into a base merge payload so the main-process
+ * `recordOutcome` receives full routing ctx (role/taskType/complexity/model)
+ * instead of a bare taskId. Pure — the async task read happens at the call site
+ * (App.tsx), keeping this unit-testable without the firestore import chain.
+ *
+ * taskType falls back to the de-identified `changeType` so the cell still learns
+ * a taskType signal even when dispatchMeta is absent (older / externally-created
+ * tasks). A completely un-resolvable meta leaves the base payload's `taskType`
+ * as `changeType` and everything else null — identical to prior behavior, never
+ * worse.
+ */
+export function enrichMergePayload(
+  base: MergeOutcomePayload,
+  meta: MergeDispatchMeta | null | undefined,
+): MergeOutcomePayload {
+  const clean = (v: string | null | undefined): string | null =>
+    typeof v === "string" && v.trim() ? v : null;
+  return {
+    ...base,
+    role: clean(meta?.role) ?? clean(base.role),
+    taskType: clean(meta?.taskType) ?? clean(base.taskType) ?? base.changeType,
+    complexity: clean(meta?.complexity) ?? clean(base.complexity),
+    model: clean(meta?.model) ?? clean(base.model),
+  };
 }
 
 /**

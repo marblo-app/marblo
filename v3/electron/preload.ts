@@ -464,6 +464,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       taskId: string;
       changeType: string | null;
       mergedAtMs: number | null;
+      // Renderer-resolved routing ctx (dispatchMeta) — main can't read
+      // member-scoped `tasks` itself (#406/L2). Optional/null-safe.
+      role?: string | null;
+      taskType?: string | null;
+      complexity?: string | null;
+      model?: string | null;
     }) => ipcRenderer.send("kg:recordMergeOutcome", payload),
   },
   // Sentry: consent-gated crash/error capture. The renderer calls initMain

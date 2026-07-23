@@ -7,7 +7,7 @@ locales: ["ko", "en", "ja"]
 author: "Marblo"
 ---
 
-Marblo is a platform that runs agents **by connecting your own Claude·Codex subscription**. So if you **haven't used Claude Code before**, that very first step — making the **initial connection** with the orchestrator — can feel a little unfamiliar the first time you open Marblo. Once that first connection is done, everything after it flows smoothly, so please follow the **first-run popup (the connection wizard)** all the way through when you first launch the app. This guide walks through the flow that connection wizard guides you along, from download all the way to **the moment your first agent finishes a ticket end to end**.
+Marblo is a platform that runs agents by connecting your own Claude·Codex subscription. So if you **haven't used Claude Code before**, that very first step — making the initial connection with the orchestrator — can feel a little unfamiliar the first time you open Marblo. Once that first connection is done, everything after it flows smoothly, so please follow the first-run popup (the connection wizard) all the way through when you first launch the app. This guide walks through the flow that connection wizard guides you along, from download all the way to the moment your first agent finishes a ticket end to end.
 
 It's written developer-first, but it includes the Node.js install step so that **someone new to AI tooling can also get through it alone**.
 
@@ -15,11 +15,11 @@ It's written developer-first, but it includes the Node.js install step so that *
 
 Marblo runs agents **by connecting your own AI account**. So to start you need **two things**, and with both in place your initial connection and first spawn go smoothly.
 
-<Diagram caption="The three steps the first-run popup (connection wizard) guides you through. After download and install, clear ①, ②, and ③ in order to reach your first completed task. This guide walks through each step one by one.">
+<Diagram caption="The setup flow the first-run popup (connection wizard) guides you through. After download and install, finish preparations 1 and 2 (Node.js · CLI auth) and connect a folder to reach your first completed task. This guide walks through each step one by one.">
   <svg
     viewBox="0 0 640 300"
     role="img"
-    aria-label="A setup path from Download and Install, through Node.js install (wall 1), CLI auth and paid subscription (wall 2), and past a free-account pass-through crash (wall 3), to Connect a folder and First completion. Walls 1, 2, and 3 are highlighted."
+    aria-label="A setup path from Download and Install, through Node.js install and CLI auth with a subscription, to Connect a folder and First completion. The two preparation steps are highlighted."
     style={{ width: "100%", height: "auto" }}
   >
     <defs>
@@ -85,7 +85,7 @@ Marblo runs agents **by connecting your own AI account**. So to start you need *
       fontWeight="700"
       fill="#fbbf24"
     >
-      Wall ①
+      Prep 1
     </text>
     <text
       x="228"
@@ -105,7 +105,7 @@ Marblo runs agents **by connecting your own AI account**. So to start you need *
       fontSize="10"
       fill="#a1a1aa"
     >
-      / npm missing
+      Install
     </text>
     <rect
       x="316"
@@ -126,7 +126,7 @@ Marblo runs agents **by connecting your own AI account**. So to start you need *
       fontWeight="700"
       fill="#fbbf24"
     >
-      Wall ②·③
+      Prep 2
     </text>
     <text
       x="376"
@@ -146,7 +146,7 @@ Marblo runs agents **by connecting your own AI account**. So to start you need *
       fontSize="10"
       fill="#a1a1aa"
     >
-      + paid plan
+      + subscription
     </text>
     <rect
       x="464"
@@ -256,23 +256,23 @@ Marblo runs agents **by connecting your own AI account**. So to start you need *
       fontSize="12"
       fill="#a1a1aa"
     >
-      Wall ① no Node.js · Wall ② no paid Claude auth · Wall ③ free account
-      passes, then first spawn crashes
+      Prep 1 install Node.js · Prep 2 CLI auth with a subscription · then
+      connect a folder to reach your first finish
     </text>
   </svg>
 </Diagram>
 
 ### Requirement 1 — your own paid Claude subscription (or API key)
 
-The agents Marblo spawns run on the Claude Code CLI, and **Claude Code only actually works with a paid plan (Claude Pro or higher) or an Anthropic API key**. If you run `claude login` with a free account, the login itself succeeds, but **the first task silently fails** (that's wall ③).
+The agents Marblo spawns run on the Claude Code CLI, and **Claude Code only actually works with a paid plan (Claude Pro or higher) or an Anthropic API key**. If you run `claude login` with a free account, the login itself succeeds, but **the first task silently fails**.
 
-![Claude pricing table. Claude Code is not on the Free plan — it's only on the paid Pro/Max plans.](/images/guide/first-run/wall2b-claude-pricing.png)
+![Claude plan comparison table. In the "Claude Code" row, it's absent on the Free plan and available only on paid plans like Pro/Max.](/images/guide/first-run/claude-pricing.png)
 
 - **Smoothest path**: if you already use Claude Pro (or Max), just run `claude login`.
 - **API key also works**: get an `ANTHROPIC_API_KEY` and it runs without a subscription. You pay per usage.
 - If you'll use Codex, OpenAI is the same — a paid ChatGPT subscription or an `OPENAI_API_KEY`.
 
-> The point: signing in to Marblo is free, but **the cost of actually running agents comes out of your AI account.** Start without knowing this and you'll get stuck at the first spawn.
+> The point: the Marblo app itself is free to use, but agents run on **your own subscription or API key (the model) that you connect.** So the actual model usage is billed to the account you connect. Get this connection ready before you start and the first spawn flows smoothly.
 
 ### Requirement 2 — Node.js / npm
 
@@ -298,8 +298,6 @@ Here's the order:
 2. If selected, access instructions arrive by email.
 3. While signed in, open the [download page](/en/download) — only then can you grab the macOS (Apple Silicon · Intel) or Windows build.
 
-> 🎥 **Video slot A** — Getting the founder email → signing in → the download button unlocking. (A web screen outside the app, so it can be captured live.)
-
 ## Step 1 — Install and first launch
 
 Run the file you downloaded.
@@ -314,9 +312,7 @@ On first launch you may see a macOS **Gatekeeper** or Windows **SmartScreen** wa
 - **macOS**: `System Settings > Privacy & Security` → **"Open Anyway"**.
 - **Windows**: `More info > Run anyway`.
 
-> 🎥 **Video slot B** — Clearing the Gatekeeper/SmartScreen warning on first launch and the app opening.
-
-## Step 2 — Install Node.js / npm (Wall ①)
+## Step 2 — Install Node.js / npm
 
 If `node -v` gave you `command not found`, fix it here. **If you already have it, skip this step.**
 
@@ -326,17 +322,25 @@ If `node -v` gave you `command not found`, fix it here. **If you already have it
 
 ![nodejs.org home page. The green "Get Node.js®" download button and the latest LTS version indicator at the bottom.](/images/guide/first-run/en/wall1-nodejs.png)
 
+**On a Mac and comfortable with the terminal? One-line install with Homebrew.** If you already have [Homebrew](https://brew.sh), you can install Node.js and npm together with a single line instead of downloading the installer:
+
+```bash
+brew install node
+```
+
+If you don't have Homebrew, the nodejs.org installer above is simpler. Either one works — just pick whichever is easier.
+
 When it's done, **open a new terminal** and check again:
 
 ```bash
 node -v && npm -v
 ```
 
-If both version numbers appear, you've cleared wall ①.
+If both version numbers appear, your Node.js setup is done.
 
 > **Why is this needed?** Marblo auto-installs the agent CLIs with `npm install -g`. Without npm, that auto-install fails and the app tells you "npm not found. Install Node.js / npm and try again." Installing Node.js first skips that detour entirely.
 
-## Step 3 — Confirm CLI auto-install & authenticate (Walls ②·③)
+## Step 3 — Confirm CLI auto-install & authenticate
 
 This is **where new users get stuck most often**. Stay calm; there are only two things to do: (a) confirm the CLIs are installed, and (b) **authenticate with your own paid account**.
 
@@ -360,14 +364,12 @@ When the browser opens, sign in with **your own Anthropic account**. If you'll a
 codex login
 ```
 
-> ⚠️ **This is wall ②·③.** The gate only says "sign in," which makes it look like a free login is enough. But:
+> ⚠️ **Just remember one thing here.** The gate only says "sign in," which makes it look like a free login is enough. But:
 >
-> - **Signing in alone isn't enough** — the account you signed in with needs a **paid entitlement (Claude Pro/Max or API credit)**.
-> - Sign in with a free account and the gate passes you as "ready," but **the first spawn dies within 2 seconds** (wall ③, pass-through crash). When that happens, don't ask "why did it die?" — check **Requirement 1 (a paid subscription/API key) in "Before you start — two things you'll need"** at the top.
+> - **Signing in alone isn't enough** — the account you signed in with needs a **subscription or API credit (Claude Pro/Max, etc.)** connected to actually work.
+> - Sign in with a free account and the gate passes you as "ready," but **the first spawn stops right away.** When that happens, don't panic — check **Requirement 1 (a subscription / API key) in "Before you start — two things you'll need"** at the top.
 
 Once authentication finishes, each CLI flips to an "authenticated" state. If the state doesn't update, restart the app.
-
-> 🎥 **Video slot C** — The CLI auth gate → clicking "Run authentication" → `claude login` in the terminal → browser sign-in → flipping to "authenticated." (The key moment of getting started.)
 
 ## Step 4 — Connect a folder → orchestrator opens automatically
 
@@ -379,8 +381,6 @@ The orchestrator is your command center. When the folder connects, it greets you
 
 ![The orchestrator opening automatically after you connect a folder.](/images/guide/project-orchestrator.svg)
 
-> 🎥 **Video slot D** — Picking a folder once → the orchestrator opening automatically and greeting you.
-
 ## Step 5 — Your first agent spawn
 
 Just tell the orchestrator what you want in natural language. For example:
@@ -389,9 +389,7 @@ Just tell the orchestrator what you want in natural language. For example:
 
 The orchestrator creates the ticket and **spawns a physical agent (a standalone CLI process)**. The spawned agent reads and writes actual code in its own terminal tab.
 
-At this moment **walls ②·③ are tested again**. With auth and a paid entitlement in place, the agent stays alive and starts working. If it dies within 2 seconds into an "error" card → re-check the paid entitlement from Step 3.
-
-> 🎥 **Video slot E** — A one-line instruction to the orchestrator → ticket created → an agent tab spawning and actually starting to move.
+At this moment your earlier auth and subscription connection are tested again. With auth and a subscription (or API credit) in place, the agent stays alive and starts working. If it dies right away into an "error" card → re-check the subscription connection from Step 3.
 
 ## Step 6 — First completed task (the value moment)
 
@@ -401,17 +399,13 @@ When the agent finishes, it moves the ticket to **REVIEW**. You check the result
 
 If you got here, congratulations. You've completed all three steps of the initial connection, and **watched an agent finish a ticket end to end** with your own eyes.
 
-> 🎥 **Video slot F** — The agent moving work to REVIEW → the user checking the diff → approving → DONE. (Completion = the value moment, the climax of the video.)
-
 ## Stuck? — Initial-connection troubleshooting
 
-| Symptom                                                     | Which wall                         | Fix                                                                                                     |
-| ----------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| App says "npm not found"                                    | Wall ① (no Node.js)                | Install Node.js via Step 2, open a new terminal, retry                                                  |
-| Auth gate won't go away / keeps asking to "sign in"         | Wall ② (not authenticated)         | Complete `claude login` fully. Sign in via the browser, then restart the app                            |
-| Signed in, but the agent dies within 2 seconds (error card) | Wall ③ (free-account pass-through) | Check that the account you signed in with has **Claude Pro/Max or API credit**. Free accounts stop here |
-| App won't open on first launch (warning dialog)             | Install                            | Get past Gatekeeper/SmartScreen per Step 1                                                              |
-| Still stuck                                                 | —                                  | Tell us via [Report a bug](/en/bugs). Where you got stuck shapes the next version                       |
+- **When the app says "npm not found"** — Install Node.js via Step 2, open a new terminal, and retry.
+- **When the auth gate won't go away or keeps asking you to "sign in"** — Complete `claude login` fully, sign in via the browser, then restart the app.
+- **When you're signed in but the agent dies right away (error card)** — Check that the account you signed in with has Claude Pro/Max or API credit connected. Free accounts stop here.
+- **When the app won't open on first launch (warning dialog)** — Get past Gatekeeper/SmartScreen per Step 1.
+- **When you're still stuck** — Tell us via [Report a bug](/en/bugs). Where you got stuck shapes the next version.
 
 ## Next steps
 
