@@ -464,7 +464,23 @@ export function AgentListPanel({ onJumpToAgent, onSpawnClick }: Props) {
         aria-label="Resize agent list panel"
       />
       <div className="flex items-center justify-between px-3 py-1.5 text-[11px] text-[#6c7086] border-b border-[#313244]">
-        <span>
+        <span className="inline-flex items-center gap-1.5">
+          {/* Neutral agent glyph (inherits the muted gray) — deliberately plain
+              so the accented Orchestrator badge above reads as the special one. */}
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="4" y="8" width="16" height="12" rx="2" />
+            <path d="M12 8V4M9 13.5h.01M15 13.5h.01" />
+          </svg>
           {focusedRow ? (
             <>Focused Agent</>
           ) : (

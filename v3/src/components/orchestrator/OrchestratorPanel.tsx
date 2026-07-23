@@ -428,7 +428,33 @@ export default memo(function OrchestratorPanel() {
                   : "bg-[#6c7086]"
           }`}
         />
-        <span className="text-[#cdd6f4] font-medium">Orchestrator</span>
+        <span className="inline-flex items-center gap-1.5 text-[#cdd6f4] font-medium">
+          {/* Orchestrator badge — conductor/hub glyph in accent mauve marks this
+              panel as the special "conductor" above the neutral agent list. */}
+          <span
+            className="inline-flex h-[18px] w-[18px] items-center justify-center rounded bg-[#cba6f7]/15 text-[#cba6f7]"
+            title="Orchestrator — conducts your agents"
+            aria-hidden="true"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="2.5" />
+              <circle cx="5" cy="5" r="2" />
+              <circle cx="19" cy="5" r="2" />
+              <circle cx="12" cy="20" r="2" />
+              <path d="M10.3 10.3 6.5 6.5M13.7 10.3l3.8-3.8M12 14.5V18" />
+            </svg>
+          </span>
+          Orchestrator
+        </span>
 
         {isRunning ? (
           <>
