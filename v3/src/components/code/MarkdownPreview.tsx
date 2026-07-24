@@ -21,7 +21,10 @@ interface MarkdownPreviewProps {
 // visible element is themed here (Tailwind, dark tones matching the app shell)
 // rather than relying on a global stylesheet. Kept module-level so the object
 // identity is stable across renders.
-const components: Components = {
+//
+// Exported so NotebookView renders .ipynb markdown cells and code-cell sources
+// with the exact same typography as a standalone .md file.
+export const markdownComponents: Components = {
   h1: (props) => (
     <h1
       className="mt-6 mb-4 border-b border-gray-700 pb-2 text-2xl font-bold text-gray-100 first:mt-0"
@@ -218,7 +221,7 @@ export function MarkdownPreview({
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeHighlight]}
-            components={components}
+            components={markdownComponents}
           >
             {content}
           </ReactMarkdown>

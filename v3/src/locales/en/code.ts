@@ -16,6 +16,18 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.rootArchivedHint": "{count} archived · manage in the Worktrees tab",
   "code.rootUnknownHint": "{count} unjudged · hygiene status unavailable",
 
+  "code.notebook.cellCount": "{total} cells · {code} code",
+  "code.notebook.empty": "This notebook has no cells.",
+  "code.notebook.parseError":
+    "Could not read the notebook: {message} — showing the raw JSON.",
+  "code.notebook.run": "Run",
+  "code.notebook.restart": "Restart kernel",
+  "code.notebook.kernel.loadingRuntime": "Loading Python runtime…",
+  "code.notebook.kernel.loadingPackages": "Loading packages…",
+  "code.notebook.kernel.running": "Running…",
+  "code.notebook.kernel.ready": "Kernel ready",
+  "code.notebook.kernel.failed": "Kernel error",
+
   "code.worktreeDiff.loading": "Checking worktree changes...",
   "code.worktreeDiff.changedCount": "{count} changed",
   "code.worktreeDiff.deletedFile": "{path} — deleted, cannot be opened",

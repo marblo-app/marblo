@@ -25,6 +25,23 @@
 
 macOS는 `build.yml`의 배선만으로 서명+공증이 자동 수행된다. Windows는 CI에서 **무서명** `.exe`만 산출하고, 실제 서명은 KoreaSSL USB 토큰으로 **수동**(§4)으로 한다.
 
+### 0-1. ★ 빌드 전제 — Pyodide 자산(코드탭 노트북 실행)
+
+`build:electron`은 `vite build` **직전에** `npm run assets:pyodide`를 돌린다(`scripts/fetch-pyodide-assets.mjs`). 코드탭의 `.ipynb` 셀 실행 런타임(Pyodide + numpy/pandas/matplotlib 휠, 약 31MB)을 `v3/src/public/pyodide/`에 받아두는 단계다. 이 자산은 `dist/`로 복사돼 asar에 들어가고, 앱은 **런타임에 외부 CDN을 절대 호출하지 않는다**(오프라인·CDN 장애 무관).
+
+**mac/Windows/Linux 어느 머신에서 빌드하든 동일하게 적용된다** — `build:mac` / `build:win` / `build:linux`가 전부 `build:electron`을 거치기 때문에 별도 조치가 필요 없다. Windows 서명 머신(§4, §6-6)도 마찬가지다.
+
+| 상황                   | 동작                                                      |
+| ---------------------- | --------------------------------------------------------- |
+| 첫 빌드 (자산 없음)    | jsdelivr에서 13개 휠 다운로드. **네트워크 필요**, 약 31MB |
+| 이후 빌드 (자산 있음)  | sha256 재검증 후 **스킵 — 네트워크 호출 0회**, 0.2초 내외 |
+| 파일이 깨졌거나 변조됨 | 해당 파일만 자동 재다운로드 (sha256 불일치 감지)          |
+
+- 무결성: 모든 바이트를 `pyodide-lock.json`의 sha256과 대조하고, 불일치하면 **쓰지 않고 빌드를 실패시킨다**. 손상된 런타임이 릴리스에 들어갈 경로가 없다.
+- `src/public/pyodide/`는 gitignore다(재생성 가능한 바이너리). 그래서 **새로 클론한 머신의 첫 빌드에는 네트워크가 필요**하다 — 오프라인 빌드 머신이라면 이 디렉터리를 미리 복사해두면 그대로 스킵된다.
+- 수동 실행/강제 재다운로드: `npm run assets:pyodide` / `node scripts/fetch-pyodide-assets.mjs --force`.
+- 자산이 빠진 앱은 크래시하지 않는다. 노트북 **렌더는 정상**이고 Run만 "자산 없음" 안내로 degrade한다 — 즉 **릴리스에서 이 단계가 조용히 빠져도 티가 잘 안 난다.** 릴리스 후 `.ipynb`에서 셀 실행을 한 번 눌러보는 것이 유일한 확실한 확인법이다.
+
 ---
 
 ## 1. macOS 서명·공증 따라하기

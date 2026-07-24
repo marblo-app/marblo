@@ -1098,6 +1098,15 @@ function buildStaticServer(): http.Server {
       ".woff": "font/woff",
       ".woff2": "font/woff2",
       ".ttf": "font/ttf",
+      // Chromium refuses to evaluate a module script served as
+      // application/octet-stream, so the Code tab's notebook kernel (Pyodide,
+      // dist/pyodide/*.mjs) would fail to load in packaged builds without this.
+      ".mjs": "application/javascript",
+      // instantiateStreaming needs the real wasm type; .whl/.zip are the
+      // vendored Python wheels + stdlib the same runtime fetches.
+      ".wasm": "application/wasm",
+      ".whl": "application/zip",
+      ".zip": "application/zip",
     };
     res.writeHead(200, {
       "Content-Type": mimeTypes[ext] || "application/octet-stream",

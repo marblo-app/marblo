@@ -17,6 +17,19 @@ export const code = {
   "code.rootArchivedHint": "{count}개 아카이브됨 · Worktrees 탭에서 관리",
   "code.rootUnknownHint": "{count}개 판정 불가 · 정리 상태를 확인할 수 없음",
 
+  // .ipynb 노트북 뷰. 셀/커널 이름·언어는 기계 식별자라 번역하지 않는다.
+  "code.notebook.cellCount": "{total}셀 · 코드 {code}",
+  "code.notebook.empty": "셀이 없는 노트북입니다.",
+  "code.notebook.parseError":
+    "노트북을 읽지 못했습니다: {message} — 원본 JSON 을 표시합니다.",
+  "code.notebook.run": "실행",
+  "code.notebook.restart": "커널 재시작",
+  "code.notebook.kernel.loadingRuntime": "Python 런타임 로드 중…",
+  "code.notebook.kernel.loadingPackages": "패키지 로드 중…",
+  "code.notebook.kernel.running": "실행 중…",
+  "code.notebook.kernel.ready": "커널 준비됨",
+  "code.notebook.kernel.failed": "커널 오류",
+
   // "이 워크트리 보기" diff 자동 표시 결과. diff 가 안 뜨는 경우마다 이유를
   // 밝힌다 — 조용히 아무것도 안 하면 버그와 구분되지 않는다.
   "code.worktreeDiff.loading": "워크트리 변경사항 확인 중...",

@@ -36,3 +36,7 @@ playwright/.cache/
 
 # OAuth client secret JSON (never commit)
 keys/
+
+# Pyodide 노트북 런타임(코드탭 .ipynb 실행). 31MB 바이너리 자산이라 커밋하지
+# 않는다 — scripts/fetch-pyodide-assets.mjs 로 재생성(sha256 검증 포함).
+src/public/pyodide/

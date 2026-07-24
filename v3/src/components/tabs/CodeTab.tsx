@@ -6,10 +6,12 @@ import { EditorTabs } from "../code/EditorTabs";
 import { CodeEditor } from "../code/CodeEditor";
 import { ImagePreview } from "../code/ImagePreview";
 import { MarkdownPreview } from "../code/MarkdownPreview";
+import { NotebookView } from "../code/NotebookView";
 import { DiffSurface } from "../workspace/DiffSurface";
 import { WorktreeDiffBanner } from "../code/WorktreeDiffBanner";
 import { isImageFile } from "../../lib/imageFiles";
 import { isMarkdownFile } from "../../lib/markdownFiles";
+import { isNotebookFile } from "../../lib/notebookFiles";
 import {
   countUnknownVerdicts,
   isActiveOngoingWorktree,
@@ -202,6 +204,12 @@ export function CodeTab({ renderDiff }: CodeTabProps = {}) {
             )
           ) : isImageFile(activeFile.path) ? (
             <ImagePreview
+              filePath={activeFile.path}
+              content={activeFile.content}
+              language={activeFile.language}
+            />
+          ) : isNotebookFile(activeFile.path) ? (
+            <NotebookView
               filePath={activeFile.path}
               content={activeFile.content}
               language={activeFile.language}
