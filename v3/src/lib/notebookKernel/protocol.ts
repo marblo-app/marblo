@@ -56,6 +56,39 @@ export const PYODIDE_BASE = "/pyodide/";
 export const PYODIDE_INSTALL_COMMAND = "cd v3 && npm run assets:pyodide";
 
 /**
+ * The bundled Hangul font, served from src/public/notebook-fonts/. Pyodide's
+ * matplotlib carries DejaVu Sans only, which has no Hangul glyphs, so without
+ * this every Korean chart label renders as a tofu box. See that directory's
+ * README for the licence and why this font.
+ */
+export const NOTEBOOK_FONT_URL = "/notebook-fonts/Pretendard-Regular.otf";
+
+/** Where the worker drops that font inside the kernel's own filesystem. */
+export const KERNEL_FONT_PATH = "/marblo-fonts/Pretendard-Regular.otf";
+
+/**
+ * True when `bytes` opens with an sfnt signature (TrueType, CFF/OTF, or a
+ * collection).
+ *
+ * The app's static server answers unknown paths with index.html and a 200, so
+ * a successful fetch is not evidence the font is actually there — the same
+ * trap assertAssetsPresent() works around for pyodide-lock.json. Handing that
+ * HTML to matplotlib would surface as a puzzling font error instead of a clean
+ * fallback to DejaVu.
+ */
+export function looksLikeFont(bytes: Uint8Array): boolean {
+  if (bytes.length < 4) return false;
+  const tag =
+    ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0;
+  return (
+    tag === 0x00010000 || // TrueType outlines
+    tag === 0x4f54544f || // 'OTTO' — CFF outlines (what Pretendard ships)
+    tag === 0x74727565 || // 'true'
+    tag === 0x74746366 // 'ttcf' — TrueType collection
+  );
+}
+
+/**
  * Validates what runner.py sent back. The worker hands us a JSON string built
  * in Python, so treat it as untrusted shape-wise: a malformed payload should
  * surface as a kernel error, never as a half-rendered cell.

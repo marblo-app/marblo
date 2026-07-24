@@ -10,7 +10,13 @@
 // No CDN is contacted at runtime.
 
 import runnerSource from "./runner.py?raw";
-import { PYODIDE_BASE, parseRunnerPayload } from "./protocol";
+import {
+  KERNEL_FONT_PATH,
+  NOTEBOOK_FONT_URL,
+  PYODIDE_BASE,
+  looksLikeFont,
+  parseRunnerPayload,
+} from "./protocol";
 import type {
   KernelErrorCode,
   KernelRequest,
@@ -28,6 +34,11 @@ interface PyodideApi {
     options?: { messageCallback?: (msg: string) => void },
   ): Promise<void>;
   globals: { get(name: string): ((arg: string) => string) | undefined };
+  /** Emscripten's in-memory filesystem — how host bytes reach the interpreter. */
+  FS: {
+    mkdirTree(path: string): void;
+    writeFile(path: string, data: Uint8Array): void;
+  };
 }
 
 const post = (message: KernelResponse) => self.postMessage(message);
@@ -87,6 +98,27 @@ async function assertAssetsPresent(): Promise<void> {
   }
 }
 
+/**
+ * Stages the bundled Hangul font inside the kernel filesystem and tells
+ * runner.py where it landed. Throws on any problem — the caller downgrades
+ * that to a warning, because Korean labels rendering as boxes is a far smaller
+ * bug than the notebook refusing to run at all.
+ */
+async function installKoreanFont(pyodide: PyodideApi): Promise<void> {
+  const response = await fetch(NOTEBOOK_FONT_URL);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!looksLikeFont(bytes)) {
+    throw new Error(`${NOTEBOOK_FONT_URL} 응답이 폰트 파일이 아닙니다.`);
+  }
+  pyodide.FS.mkdirTree(
+    KERNEL_FONT_PATH.slice(0, KERNEL_FONT_PATH.lastIndexOf("/")),
+  );
+  pyodide.FS.writeFile(KERNEL_FONT_PATH, bytes);
+  // JSON.stringify of an ASCII path is also a valid Python string literal.
+  pyodide.runPython(`__marblo_set_font(${JSON.stringify(KERNEL_FONT_PATH)})`);
+}
+
 async function getPyodide(): Promise<PyodideApi> {
   if (pyodidePromise) return pyodidePromise;
   pyodidePromise = (async () => {
@@ -111,6 +143,13 @@ async function getPyodide(): Promise<PyodideApi> {
     // are rendered off-screen and captured as PNGs by runner.py.
     pyodide.runPython("import os\nos.environ['MPLBACKEND'] = 'AGG'");
     pyodide.runPython(runnerSource);
+    try {
+      await installKoreanFont(pyodide);
+    } catch (e) {
+      // Charts fall back to DejaVu (tofu for Hangul), everything else is
+      // unaffected. Never fail kernel startup over a font.
+      console.warn("[notebook] 한글 폰트 등록 실패:", e);
+    }
     return pyodide;
   })();
   pyodidePromise.catch(() => {

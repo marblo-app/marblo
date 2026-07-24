@@ -28,6 +28,71 @@ def __marblo_reset():
     __marblo_ns = {"__name__": "__main__"}
 
 
+# --- Hangul font -----------------------------------------------------------
+# Pyodide's matplotlib ships DejaVu Sans and nothing else, so every Korean
+# label in a chart comes out as a tofu box. The worker writes a bundled OFL
+# font into this filesystem at boot and hands us the path; we register it with
+# matplotlib the first time matplotlib is actually loaded.
+#
+# All of this is best-effort by design: a missing or unreadable font must fall
+# back to DejaVu, never stop a cell from running. A chart feature that refuses
+# to boot is a worse bug than a chart with tofu in it.
+__marblo_font_path = None
+__marblo_font_state = "unset"  # unset | pending | applied | unavailable
+
+
+def __marblo_set_font(path):
+    """Called once by the worker after it stages the font file."""
+    global __marblo_font_path, __marblo_font_state
+    __marblo_font_path = path
+    __marblo_font_state = "pending"
+
+
+def __marblo_apply_font():
+    """Make the bundled font matplotlib's default. Idempotent, cheap when done.
+
+    Must run BEFORE the cell body: a Text object snapshots
+    rcParams["font.family"] when it is constructed, so applying this after
+    plt.title() has already run would be too late to matter.
+
+    Stays a no-op until the matplotlib wheel is on sys.path — importing it
+    eagerly would cost seconds on every cell that never plots.
+    """
+    global __marblo_font_state
+    if __marblo_font_state != "pending":
+        return
+    try:
+        import importlib.util
+
+        if importlib.util.find_spec("matplotlib") is None:
+            return  # wheel not loaded yet; a later cell will pick it up
+
+        import matplotlib
+        from matplotlib import font_manager
+
+        font_manager.fontManager.addfont(__marblo_font_path)
+        family = font_manager.FontProperties(fname=__marblo_font_path).get_name()
+        # Keep the old list behind it rather than replacing it: the Hangul font
+        # covers Latin too, but anything it lacks should still fall back to
+        # DejaVu instead of turning into a box.
+        matplotlib.rcParams["font.family"] = "sans-serif"
+        matplotlib.rcParams["font.sans-serif"] = [family] + [
+            name
+            for name in matplotlib.rcParams["font.sans-serif"]
+            if name != family
+        ]
+        # Negative ticks: matplotlib draws U+2212 MINUS SIGN by default, which
+        # most Korean fonts omit — so fixing Hangul classically re-breaks "-0.05"
+        # into a box. The ASCII hyphen is in every font, including whatever the
+        # user switches to later.
+        matplotlib.rcParams["axes.unicode_minus"] = False
+        __marblo_font_state = "applied"
+    except Exception:
+        # Try once, then stay out of the way. Retrying per cell would spend the
+        # same seconds again on a font that is not going to start working.
+        __marblo_font_state = "unavailable"
+
+
 def __marblo_capture_figures(outputs):
     """Drain every open matplotlib figure into a PNG output, then close it.
 
@@ -75,6 +140,11 @@ def __marblo_result_output(value):
 
 
 def __marblo_run(code):
+    # Before the redirect below, so nothing this does can leak into the cell's
+    # own stdout, and before the cell body, so rcParams are in place by the
+    # time the cell constructs its first Text.
+    __marblo_apply_font()
+
     outputs = []
     stdout, stderr = io.StringIO(), io.StringIO()
     error = None
