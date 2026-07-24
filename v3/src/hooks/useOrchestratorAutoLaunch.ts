@@ -6,6 +6,10 @@ import {
   upsertOrchestratorAgentDoc,
 } from "../services/orchestratorAgentDoc";
 import telemetry from "../services/telemetryService";
+import {
+  orchestratorKey,
+  orchestratorTeardownAction,
+} from "../lib/orchestratorTeardown";
 
 /**
  * - Stops the orchestrator when project/folder changes or unmounts.
@@ -30,21 +34,35 @@ export function useOrchestratorAutoLaunch() {
   const prevKeyRef = useRef<string | null>(null);
   const autoConnectRef = useRef(false);
 
-  // Teardown on project/folder change
+  // Teardown on project/folder change.
+  //
+  // ★UNMOUNT IS NOT A PROJECT SWITCH. See orchestratorTeardownAction for why
+  // the cleanup below must never stop the orchestrator: this effect's cleanup
+  // fires on every unmount, and in dev the dominant cause is a Vite FULL PAGE
+  // RELOAD, which used to kill the boss's live session on any file edit.
   useEffect(() => {
-    const projectId = currentProject?.id;
-    const key = projectId && fixedRoot ? `${projectId}:${fixedRoot}` : null;
+    const key = orchestratorKey(currentProject?.id, fixedRoot);
 
-    if (prevKeyRef.current && prevKeyRef.current !== key) {
+    const onKeyChange = orchestratorTeardownAction(
+      "key-change",
+      prevKeyRef.current,
+      key,
+    );
+    if (onKeyChange.stopOrchestrator) {
       window.electronAPI.orchestratorSession.stop().catch(() => {});
+    }
+    if (onKeyChange.clearStore) {
       clear();
       autoConnectRef.current = false;
     }
     prevKeyRef.current = key;
 
     return () => {
-      window.electronAPI.orchestratorSession.stop().catch(() => {});
-      clear();
+      const onUnmount = orchestratorTeardownAction("unmount", key, key);
+      if (onUnmount.stopOrchestrator) {
+        window.electronAPI.orchestratorSession.stop().catch(() => {});
+      }
+      if (onUnmount.clearStore) clear();
     };
   }, [currentProject?.id, fixedRoot, clear]);
 

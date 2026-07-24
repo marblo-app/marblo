@@ -49,6 +49,7 @@ import {
   type PendingInstruction,
 } from "./agent-watchdog";
 import { OrchestratorManager } from "./orchestrator-manager";
+import { OwnerRegistry } from "./owner-registry";
 import {
   buildOrchestratorHandoffSnapshot,
   formatHandoffPrompt,
@@ -1499,8 +1500,41 @@ function sendToProject(
 
 // --- Bridge Server + Orchestrator Managers (per project) ---
 const ptyBuffers = new Map<string, string[]>();
-// Track which window owns each PTY session so output goes only there.
-const ptyOwners = new Map<string, number>(); // ptySessionId → webContents.id
+// Track which windows own each PTY session so output goes only to them.
+// Multi-owner (see OwnerRegistry): one PTY can legitimately be displayed by
+// more than one window, and a second window must not steal the first's stream.
+const ptyOwners = new OwnerRegistry<string>(); // ptySessionId → webContents.ids
+
+/** Register `senderId` as an owner of `sid` (additive — never evicts others). */
+function addPtyOwner(sid: string, senderId: number): void {
+  ptyOwners.add(sid, senderId);
+}
+
+/**
+ * Send to every window that owns `sid`. Falls back to mainWindow when the PTY
+ * has no live owner — same permissive posture as sendToOwner, so legacy paths
+ * that never registered an owner keep working.
+ */
+function sendToPtyOwners(
+  sid: string,
+  channel: string,
+  ...args: unknown[]
+): void {
+  const owners = ptyOwners.ownersOf(sid);
+  let delivered = false;
+  if (owners) {
+    for (const win of allWindows) {
+      if (win.isDestroyed()) continue;
+      if (owners.has(win.webContents.id)) {
+        win.webContents.send(channel, ...args);
+        delivered = true;
+      }
+    }
+  }
+  if (!delivered && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, ...args);
+  }
+}
 // Renderers that have already drained the early-output buffer via pty:replay.
 // On restart we reuse the same sid (agent-${id}) and the existing TerminalView
 // does NOT re-call pty:replay (its useEffect only runs when sessionId changes).
@@ -2120,9 +2154,19 @@ const agentWatchdog = new AgentWatchdog(
 // usage; if the same project is opened in two windows they share an instance
 // (same view, same PTY) — distinct projects stay fully isolated.
 const orchestrators = new Map<string, OrchestratorManager>();
-// Track which window launched each project's orchestrator (for default
+// Track which windows have this project's orchestrator open (for default
 // stop/status routing when the renderer call doesn't carry projectId).
-const orchestratorOwners = new Map<string, number>(); // projectId → webContents.id
+//
+// A SET for the same reason as ptyOwners: the orchestrator instance is shared
+// per project across windows, so a second window opening the same project used
+// to overwrite the first window's ownership. The dispossessed window's
+// stop()/status calls then resolved to null and became silent no-ops.
+const orchestratorOwners = new OwnerRegistry<string>(); // projectId → webContents.ids
+
+/** Register `senderId` as an owner of `projectId`'s orchestrator. */
+function addOrchestratorOwner(projectId: string, senderId: number): void {
+  orchestratorOwners.add(projectId, senderId);
+}
 // Per-project enabledModels for dispatch scoring — replaces the previous
 // global process.env.MARBLO_ENABLED_MODELS that races across windows.
 const projectEnabledModels = new Map<string, string[]>();
@@ -2133,12 +2177,15 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
     agentManager.getConfigGenerator(),
     (status) => {
       refreshWorkPowerSaveBlocker();
-      // Route status to the owner window only (multi-window: each window
-      // tracks its own orchestrator). Broadcast as fallback when owner is
-      // unknown (e.g., scratch instance from getAnyOrchestrator).
-      const ownerId = orchestratorOwners.get(projectId);
-      if (ownerId !== undefined) {
-        sendToOwner(ownerId, "orchestrator:statusChanged", { status });
+      // Route status to every window showing this project's orchestrator
+      // (they share one instance, so they must all see the same status).
+      // Broadcast as fallback when no owner is known (e.g., scratch instance
+      // from getAnyOrchestrator).
+      const owners = orchestratorOwners.ownersOf(projectId);
+      if (owners && owners.size > 0) {
+        for (const ownerId of owners) {
+          sendToOwner(ownerId, "orchestrator:statusChanged", { status });
+        }
       } else {
         broadcast("orchestrator:statusChanged", { status });
       }
@@ -2190,8 +2237,8 @@ function getAnyOrchestrator(): OrchestratorManager {
 function getOrchestratorForSender(
   senderId: number,
 ): OrchestratorManager | null {
-  for (const [projectId, ownerId] of orchestratorOwners) {
-    if (ownerId === senderId) return orchestrators.get(projectId) ?? null;
+  for (const [projectId, owners] of orchestratorOwners.entries()) {
+    if (owners.has(senderId)) return orchestrators.get(projectId) ?? null;
   }
   return null;
 }
@@ -2308,11 +2355,13 @@ function resolveSpawnOwner(
     }
     // 3. orchestrator parent — find which window owns its project
     if (parentAgentId.startsWith("orchestrator-")) {
-      // orchestratorOwners is projectId → webContentsId. Any single-project
-      // window that has an orchestrator running matches; if multiple, pick
-      // the first (deterministic enough for fallback).
-      for (const [pid, ownerWin] of orchestratorOwners) {
-        return { ownerId: ownerWin, resolvedProjectId: pid };
+      // orchestratorOwners is projectId → webContentsIds. Any window that has
+      // an orchestrator running matches; if multiple, pick the first
+      // (deterministic enough for fallback).
+      for (const [pid, ownerWins] of orchestratorOwners.entries()) {
+        for (const ownerWin of ownerWins) {
+          return { ownerId: ownerWin, resolvedProjectId: pid };
+        }
       }
     }
   }
@@ -2332,7 +2381,7 @@ bridgeServer.setAgentSpawnedHook(
       parentAgentId,
     );
     if (ownerId !== undefined) {
-      ptyOwners.set(sid, ownerId);
+      addPtyOwner(sid, ownerId);
     }
     setupPtyForwarding(sid);
 
@@ -2845,11 +2894,15 @@ function ensureMissionOrchestratorLaunched(
     projectId,
     rootPath,
     bridgeServer.getPort(),
-    (sid) => {
+    (sid, { reused }) => {
       // 소유 윈도우를 알면 그 창으로 라우팅, 모르면 setupPtyForwarding 의
       // mainWindow 폴백 + 버퍼링으로 패널이 나중에 붙어도 backlog 수신.
       const ownerId = missionOrchestratorOwners.get(projectId);
-      if (ownerId !== undefined) ptyOwners.set(sid, ownerId);
+      if (ownerId !== undefined) addPtyOwner(sid, ownerId);
+      // 이 경로는 위에서 isRunning() 이면 early-return 하거나 stop() 하므로
+      // 실질적으로 항상 fresh spawn 이다. 그래도 방어적으로 막는다 — 살아있는
+      // PTY 에 forwarding 을 다시 걸면 출력이 두 배가 된다.
+      if (reused) return;
       setupPtyForwarding(sid);
       hookOrchestratorActivity(sid, projectId);
       logTelegramRouteHealth(projectId, "mission-launch-pty-ready");
@@ -3309,7 +3362,7 @@ function handleAgentDelegation(
           // only — same pattern as the bridge agentSpawnedHook above.
           if (owningProjectId) {
             const ownerId = getOwnerForProject(owningProjectId);
-            if (ownerId !== undefined) ptyOwners.set(sid, ownerId);
+            if (ownerId !== undefined) addPtyOwner(sid, ownerId);
           }
           setupPtyForwarding(sid);
         },
@@ -3553,16 +3606,30 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
     // Best-effort cleanup of per-window state. Keyed by the id captured above —
     // never re-read it off the destroyed window.
     const closedSenderId = senderId;
-    for (const [sid, ownerId] of ptyOwners) {
-      if (ownerId === closedSenderId) ptyOwners.delete(sid);
+    // Drop this window from every PTY's owner set. A PTY still owned by
+    // ANOTHER window keeps its entry and keeps streaming there — only the
+    // ones that just lost their LAST owner are untracked (which merely
+    // reverts them to the permissive mainWindow fallback; the process lives).
+    for (const sid of ptyOwners.removeWindow(closedSenderId)) {
+      ptyOwners.delete(sid);
     }
-    for (const [pid, ownerId] of orchestratorOwners) {
-      if (ownerId === closedSenderId) {
-        orchestratorOwners.delete(pid);
-        // Stop the orchestrator owned by the closing window so its PTY isn't
-        // left running with no place to send output.
-        orchestrators.get(pid)?.stop();
-      }
+    for (const pid of orchestratorOwners.removeWindow(closedSenderId)) {
+      // Last window showing this orchestrator is gone. We deliberately do NOT
+      // stop() it: the orchestrator is long-lived main-process state driving
+      // real work (spawned agents, telegram relay, pending instructions), and
+      // closing a window — or a renderer teardown that merely looks like one —
+      // must not destroy the user's live session. It stays running and
+      // reattaches when a window reopens the project (launch() is idempotent).
+      //
+      // The cost is a genuinely orphaned orchestrator surviving until quit
+      // (killAll on app exit still reaps it). That is the deliberate trade:
+      // an over-eager reclaim is unrecoverable, an orphan is merely idle. If
+      // this ever needs reclaiming, do it on a grace timer that re-checks for
+      // owners — never synchronously here.
+      orchestratorOwners.delete(pid);
+      console.warn(
+        `[Orchestrator] Window ${closedSenderId} closed and was the last owner of project ${pid}'s orchestrator. Leaving it RUNNING for reattach (no auto-kill).`,
+      );
     }
     // Mission orchestrators are owned per-window too (missionOrchestratorOwners
     // is populated on mission:start). Without this the map keeps accumulating
@@ -3774,8 +3841,9 @@ function restoreWindowSession(): void {
 // fallback posture as sendToOwner. Same-trust app, so this is defence-in-depth,
 // not a hard security boundary.
 function isPtyCallerOwner(senderId: number, id: string): boolean {
-  const owner = ptyOwners.get(id);
-  return owner === undefined || owner === senderId;
+  // Untracked (or fully orphaned) sids stay permissive — see comment above.
+  if (!ptyOwners.isOwned(id)) return true;
+  return ptyOwners.has(id, senderId);
 }
 
 // pty:create spawns a PTY with a renderer-supplied command/args. This is a
@@ -3801,7 +3869,7 @@ ipcMain.handle("pty:create", (event, { id, name, command, args, cwd }) => {
     }
     throw err;
   }
-  ptyOwners.set(id, event.sender.id);
+  addPtyOwner(id, event.sender.id);
 
   // Use same buffer-then-live pattern as agents (survives React StrictMode)
   setupPtyForwarding(id);
@@ -4778,9 +4846,9 @@ function setupPtyForwarding(sid: string): void {
       return;
     }
 
-    // Live mode — route to the owner window only. Falls back to mainWindow
-    // if owner isn't tracked (legacy paths) or has been closed.
-    sendToOwner(ptyOwners.get(sid), `pty:data:${sid}`, data);
+    // Live mode — route to every owner window. Falls back to mainWindow
+    // if no owner is tracked (legacy paths) or all owners have closed.
+    sendToPtyOwners(sid, `pty:data:${sid}`, data);
   });
 
   ptyManager.onExit(sid, (exitCode) => {
@@ -4789,9 +4857,11 @@ function setupPtyForwarding(sid: string): void {
     // pty's ptyOwners/ptyBuffers entries and forward a phantom exit to
     // the renderer mid-restart.
     if (sidGen.get(sid) !== gen) return;
-    const ownerId = ptyOwners.get(sid);
     ptyBuffers.delete(sid);
-    sendToOwner(ownerId, `pty:exit:${sid}`, exitCode);
+    // Notify every owner BEFORE dropping the ownership record — the process is
+    // gone, so all windows showing it need the exit, not just the last one to
+    // register.
+    sendToPtyOwners(sid, `pty:exit:${sid}`, exitCode);
     ptyOwners.delete(sid);
   });
 }
@@ -4930,7 +5000,7 @@ ipcMain.handle(
       onPtyReady: (sid) => {
         // Tag agent PTY with owner window so output flows back to the
         // launching window only.
-        ptyOwners.set(sid, senderId);
+        addPtyOwner(sid, senderId);
         setupPtyForwarding(sid);
       },
     });
@@ -4982,7 +5052,7 @@ ipcMain.handle("agent:restart", (event, agentId: string) => {
     // fresh PTY. Every chunk fired both listeners → renderer received each
     // pty:data event twice → terminal.write twice → the whole chat + input
     // box appeared duplicated. Fixed in <this commit>.
-    ptyOwners.set(instance.ptySessionId, event.sender.id);
+    addPtyOwner(instance.ptySessionId, event.sender.id);
   }
   return instance
     ? {
@@ -5183,7 +5253,7 @@ ipcMain.handle(
         // 걸려 있으므로 setupPtyForwarding 을 다시 부르지 않는다 (node-pty
         // 의 onData 는 호출마다 listener 가 누적돼 데이터가 중복 forward
         // 되는 부작용).
-        ptyOwners.set(existing.ptySessionId, senderId);
+        addPtyOwner(existing.ptySessionId, senderId);
         continue;
       }
 
@@ -5312,7 +5382,7 @@ ipcMain.handle(
           currentTaskId: agentData.currentTaskId ?? null,
           contextId: laneContextId,
           onPtyReady: (sid) => {
-            ptyOwners.set(sid, senderId);
+            addPtyOwner(sid, senderId);
             setupPtyForwarding(sid);
           },
         });
@@ -5403,7 +5473,7 @@ ipcMain.handle(
     // 엔진이 먼저 띄운 경우 forwarding 의 소유 윈도우가 이 패널이 아닐 수 있으니
     // 라이브 출력을 현재 패널 창으로 재라우팅. (초기 backlog 는 pty:replay 가
     // 호출 renderer 에게 직접 반환하므로 순서 무관.)
-    ptyOwners.set(session.ptySessionId, event.sender.id);
+    addPtyOwner(session.ptySessionId, event.sender.id);
     return {
       sessionId: session.sessionId,
       ptySessionId: session.ptySessionId,
@@ -5706,14 +5776,18 @@ ipcMain.handle(
       },
       launchNew: async (switchArgs, snapshot) => {
         const orch = getOrchestrator(projectId);
-        orchestratorOwners.set(projectId, senderId);
+        addOrchestratorOwner(projectId, senderId);
         const handoffPrompt = formatHandoffPrompt(snapshot, switchArgs.mode);
         const session = orch.launch(
           projectId,
           resolvedRootPath,
           port,
-          (sid) => {
-            ptyOwners.set(sid, senderId);
+          (sid, { reused }) => {
+            addPtyOwner(sid, senderId);
+            // A switch always stop()s the current orchestrator first, so this
+            // is a fresh spawn in practice. Guard anyway — re-wiring a live
+            // PTY duplicates its output.
+            if (reused) return;
             setupPtyForwarding(sid);
             hookOrchestratorActivity(sid, projectId);
             logTelegramRouteHealth(projectId, "switch-new-pty-ready");
@@ -5837,15 +5911,26 @@ ipcMain.handle(
 
     const senderId = event.sender.id;
     const orch = getOrchestrator(projectId);
-    orchestratorOwners.set(projectId, senderId);
+    addOrchestratorOwner(projectId, senderId);
     const session = orch.launch(
       projectId,
       resolvedPath,
       port,
-      (sid) => {
-        // Tag the PTY session with its owner window so output is routed
-        // back only to that window (not broadcast / mainWindow-only).
-        ptyOwners.set(sid, senderId);
+      (sid, { reused }) => {
+        // Tag the PTY session with this owner window so its output is routed
+        // here too. Additive: a second window attaching does NOT displace the
+        // first — both terminals stay live.
+        addPtyOwner(sid, senderId);
+        if (reused) {
+          // Attached to an ALREADY-RUNNING orchestrator. Everything below is
+          // per-PTY wiring that is still in place from the original launch.
+          // Re-running it would add a second node-pty data listener
+          // (duplicated terminal output) and a duplicate pending-instruction
+          // listener (double-injected instructions). Ownership above is the
+          // only thing this new window needs.
+          logTelegramRouteHealth(projectId, "launch-pty-attached");
+          return;
+        }
         setupPtyForwarding(sid);
         hookOrchestratorActivity(sid, projectId);
         // Cross-machine routing: any teammate who @mentions the orchestrator

@@ -271,6 +271,18 @@ export interface OrchestratorLaunchOptions {
   handoffMode?: "wait" | "takeover";
 }
 
+/** Second argument handed to launch()'s `onPtyReady` callback. */
+export interface OrchestratorPtyReadyInfo {
+  /**
+   * True when launch() ATTACHED to an already-running PTY rather than spawning
+   * a new one. Callers must register ownership (so output reaches their window)
+   * but must NOT re-run PTY output forwarding: `PtyManager.onData` ADDS a
+   * node-pty listener, so wiring it twice duplicates every byte in the
+   * terminal.
+   */
+  reused: boolean;
+}
+
 /**
  * Detects summary-only stub JSONLs. Claude Code occasionally writes a
  * single `{"type":"summary",...,"leafUuid":...}` line when a session
@@ -405,7 +417,10 @@ export class OrchestratorManager {
     bridgePort: number;
   } | null = null;
   private lastLaunchOptions?: OrchestratorLaunchOptions;
-  private lastOnPtyReady?: (ptySessionId: string) => void;
+  private lastOnPtyReady?: (
+    ptySessionId: string,
+    info: OrchestratorPtyReadyInfo,
+  ) => void;
   // crash auto-restart 가 동일 미션 세션을 이어가도록 마지막 ownerMissionId 보관.
   private lastOwnerMissionId: string | null = null;
 
@@ -559,16 +574,98 @@ export class OrchestratorManager {
     return false;
   }
 
+  /**
+   * Decide whether an incoming launch() can ATTACH to the session already
+   * running here instead of killing it and respawning.
+   *
+   * The orchestrator PTY is main-process state that must outlive any single
+   * renderer. Before this existed, launch() unconditionally did
+   * `if (this.session) this.stop()`, so a second launch for the SAME project —
+   * a renderer remount after a Vite full-reload, a second window opening the
+   * same project, a reconnect — silently killed the boss's live conversation
+   * and respawned it. That is the "오케가 혼자 끊긴다" P0.
+   *
+   * Attach only when the request is genuinely for the SAME orchestrator:
+   * same project, same rootPath, same model, same owning mission. A change in
+   * any of those is a different orchestrator and must respawn (the model switch
+   * path in particular — orchestratorSession:switch — calls stop() explicitly
+   * before launching, so it never reaches here with a live session).
+   *
+   * `resumeSessionId` is deliberately NOT part of the match: when a session is
+   * already live, that live conversation IS the session, and resuming a
+   * different one would mean discarding it. The only callers that pass a
+   * concrete id are the reconnect paths (which want exactly this attach) and
+   * the panel's Start button (which is gated behind `if (isRunning) return`).
+   */
+  private findAttachableSession(
+    projectId: string,
+    rootPath: string,
+    model: ModelType,
+    ownerMissionId: string | null,
+  ): OrchestratorSession | null {
+    const current = this.session;
+    if (!current) return null;
+    if (current.status !== "running" && current.status !== "starting") {
+      return null;
+    }
+    if (current.projectId !== projectId) return null;
+    if (current.rootPath !== rootPath) return null;
+    // launchConfig is optional on the type; without it we cannot prove the
+    // running model matches, so fail safe and respawn rather than attach.
+    if (!current.launchConfig || current.launchConfig.model !== model) {
+      return null;
+    }
+    if ((this.currentMissionId ?? null) !== ownerMissionId) return null;
+    // Status can lag reality — onExit removes the PTY from PtyManager before
+    // our status listener necessarily ran. Attaching to a dead ptySessionId
+    // would hand the renderer a terminal that never emits another byte, which
+    // is a WORSE failure than respawning. Verify the process is really there.
+    if (!this.ptyManager.hasSession(current.ptySessionId)) return null;
+    return current;
+  }
+
   launch(
     projectId: string,
     rootPath: string,
     bridgePort: number,
-    onPtyReady?: (ptySessionId: string) => void,
+    onPtyReady?: (ptySessionId: string, info: OrchestratorPtyReadyInfo) => void,
     resumeSessionId?: string, // specific session ID or 'latest' for --continue
     ownerMissionId?: string, // kind="mission" 운전 대상 미션 id (세션 store 키잉용)
     launchOptions?: OrchestratorLaunchOptions,
   ): OrchestratorSession {
-    // Stop existing session if any
+    // Model must be resolved BEFORE the attach check — a model change is one of
+    // the few things that legitimately forces a respawn.
+    const orchestratorModel: ModelType =
+      launchOptions?.modelOverride ?? resolveOrchestratorModel();
+
+    // ── Idempotent re-launch ────────────────────────────────────────────────
+    // Same orchestrator, already running → attach. We hand the caller the
+    // EXISTING ptySessionId and let it (re)register ownership, but we do NOT
+    // respawn, do NOT re-send the boot prompt, and do NOT touch the resume
+    // lock. `reused: true` tells the caller its PTY output forwarding is
+    // already wired: re-running it would ADD a second node-pty data listener
+    // and duplicate every byte in the terminal.
+    const attachable = this.findAttachableSession(
+      projectId,
+      rootPath,
+      orchestratorModel,
+      ownerMissionId ?? null,
+    );
+    if (attachable) {
+      // Keep the newest caller's wiring for crash auto-restart, so a respawn
+      // reattaches to the window that most recently asked for this session.
+      this.lastOnPtyReady = onPtyReady;
+      console.log(
+        `[Orchestrator:${this.kind}] launch(project=${projectId}) matched the RUNNING session — attaching to ${attachable.ptySessionId} instead of respawning` +
+          (resumeSessionId && resumeSessionId !== "new"
+            ? ` (requested resume "${resumeSessionId}" ignored: the live session takes precedence)`
+            : ""),
+      );
+      onPtyReady?.(attachable.ptySessionId, { reused: true });
+      return attachable;
+    }
+
+    // Not attachable — a stale/mismatched session must go before we respawn.
     if (this.session) {
       this.stop();
     }
@@ -606,9 +703,6 @@ export class OrchestratorManager {
     const ptySessionId = `orch-${sessionId}-${Date.now()}`;
 
     this.setStatus("starting");
-
-    const orchestratorModel: ModelType =
-      launchOptions?.modelOverride ?? resolveOrchestratorModel();
 
     // Determine resume mode.
     // board (default kind) 는 기존대로 rootPath 에 세션 있으면 auto-resume.
@@ -921,8 +1015,9 @@ export class OrchestratorManager {
     // stop()/relaunch. onDanger (wired in the constructor) still records + logs.
     this.ptyManager.setBlockDangerousForSession(ptySessionId, true);
 
-    // Notify caller IMMEDIATELY so they can register data listeners
-    onPtyReady?.(ptySessionId);
+    // Notify caller IMMEDIATELY so they can register data listeners. Fresh
+    // spawn → the caller MUST wire forwarding (contrast the attach path above).
+    onPtyReady?.(ptySessionId, { reused: false });
 
     this.session = {
       sessionId,

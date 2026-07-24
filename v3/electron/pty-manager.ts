@@ -764,6 +764,19 @@ export class PtyManager {
     }));
   }
 
+  /**
+   * True when a live PTY session still occupies this id.
+   *
+   * Callers that decide "can I reuse the running process instead of respawning
+   * it?" cannot trust a cached status alone: onExit evicts the session here
+   * before the owner's status listener necessarily runs, so a session can read
+   * "running" while its PTY is already gone. Check this before handing a
+   * ptySessionId back as reusable.
+   */
+  hasSession(id: string): boolean {
+    return this.sessions.has(id);
+  }
+
   onData(id: string, callback: (data: string) => void): void {
     const session = this.sessions.get(id);
     if (session) {
