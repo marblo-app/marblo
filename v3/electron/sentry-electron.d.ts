@@ -30,3 +30,11 @@ declare module "@sentry/electron/main" {
 }
 
 declare module "@sentry/electron/preload" {}
+
+/**
+ * Build-time switch injected by `scripts/bundle-preload.mjs` (esbuild `define`)
+ * — `true` when VITE_SENTRY_DSN resolves, `false` when it does not. It does
+ * NOT exist in the plain tsc output, so every read must be `typeof`-guarded;
+ * see the three-state comment in electron/preload.ts.
+ */
+declare const __SENTRY_PRELOAD_ENABLED__: boolean;

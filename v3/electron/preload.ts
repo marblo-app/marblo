@@ -11,14 +11,34 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 // would abort this module BEFORE exposeInMainWorld runs, leaving
 // window.electronAPI undefined and white-screening the whole app on launch.
 // Sentry is dead weight without a DSN anyway, so a failure here is non-fatal.
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require("@sentry/electron/preload");
-} catch (err) {
+//
+// `__SENTRY_PRELOAD_ENABLED__` is baked in by scripts/bundle-preload.mjs, which
+// esbuild-bundles this file so the require above resolves at BUILD time (a
+// sandboxed preload cannot resolve node_modules at runtime — measured:
+// "module not found: @sentry/electron/preload", which is why the bridge had
+// never once installed). Three states, and the `typeof` test must come first:
+//
+//   undefined → not bundled (bare tsc output). Warn loudly; a silent miss here
+//               is precisely the failure mode this ticket exists to kill.
+//               `typeof` on an undeclared identifier is safe — it cannot throw.
+//   false     → bundled with no DSN. Complete no-op; esbuild has already
+//               dead-code-eliminated the SDK out of the artifact entirely.
+//   true      → bundled with a DSN. The bridge is inlined; wire it up.
+if (typeof __SENTRY_PRELOAD_ENABLED__ === "undefined") {
   console.warn(
-    "[preload] @sentry/electron/preload unavailable — skipping Sentry renderer bridge",
-    err,
+    "[preload] not esbuild-bundled — Sentry renderer bridge inactive. " +
+      "Run `node scripts/bundle-preload.mjs` (build scripts do this after tsc).",
   );
+} else if (__SENTRY_PRELOAD_ENABLED__) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require("@sentry/electron/preload");
+  } catch (err) {
+    console.warn(
+      "[preload] @sentry/electron/preload unavailable — skipping Sentry renderer bridge",
+      err,
+    );
+  }
 }
 
 const isNewWindow = process.argv.includes("--marblo-new-window=1");
