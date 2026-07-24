@@ -3,6 +3,7 @@ import {
   EMPTY_PROGRESS,
   effectiveDone,
   isOnboardingComplete,
+  isPersistedComplete,
   markStepDone,
   markStepSkipped,
   parseProgress,
@@ -237,5 +238,27 @@ describe("shouldLandOnStartHere", () => {
   // Regression bRABKQX7 — "나중에" must survive restarts.
   it("respects a dismissal even with work outstanding", () => {
     expect(shouldLandOnStartHere(progress({ dismissed: true }))).toBe(false);
+  });
+});
+
+describe("isPersistedComplete", () => {
+  it("is true only once every step is persisted done", () => {
+    expect(isPersistedComplete(EMPTY_PROGRESS)).toBe(false);
+    expect(
+      isPersistedComplete(
+        progress({ done: ["install", "auth", "prd", "firstTicket"] }),
+      ),
+    ).toBe(true);
+  });
+
+  it("a skipped step does not count as done", () => {
+    expect(
+      isPersistedComplete(
+        progress({
+          done: ["install", "auth", "prd"],
+          skipped: ["firstTicket"],
+        }),
+      ),
+    ).toBe(false);
   });
 });

@@ -119,18 +119,27 @@ export function parseStoredTab(raw: string | null | undefined): RightTabId {
 /**
  * Which tab a cold start opens.
  *
- * A persisted choice ALWAYS wins — once the user picks a tab it sticks, and we
- * never yank them back to onboarding mid-flow (no forced redirect). Only when
- * there is no stored choice does the onboarding state decide: an unfinished,
- * non-dismissed onboarding lands on Start Here, everything else on the board.
+ * A persisted choice wins — with one graduation exception: `startHere` itself.
+ * Onboarding is meant to be lived in until it's finished, not permanently
+ * revisited — once a user completes every step there is no reason to show
+ * them the finish line again on every restart, and the tab stays one click
+ * away in the bar regardless. Every OTHER persisted tab is untouchable; this
+ * never yanks a user out of `code`/`board`/etc. mid-flow. With no stored
+ * choice at all, the onboarding state decides: an unfinished, non-dismissed
+ * onboarding lands on Start Here, everything else on the board.
  *
  * `landOnStartHere` comes from onboardingProgress.shouldLandOnStartHere.
+ * `onboardingComplete` comes from onboardingProgress.isPersistedComplete —
+ * defaults to false so existing callers are unaffected.
  */
 export function initialActiveTab(
   rawTab: string | null | undefined,
   landOnStartHere: boolean,
+  onboardingComplete = false,
 ): RightTabId {
-  if (isRightTab(rawTab)) return rawTab;
+  if (isRightTab(rawTab)) {
+    return rawTab === "startHere" && onboardingComplete ? "board" : rawTab;
+  }
   return landOnStartHere ? "startHere" : "board";
 }
 

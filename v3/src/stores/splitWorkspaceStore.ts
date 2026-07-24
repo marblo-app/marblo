@@ -10,7 +10,10 @@ import {
   parseStoredCollapsed,
   type RightTabId,
 } from "../lib/splitWorkspaceLayout";
-import { shouldLandOnStartHere } from "../lib/onboardingProgress";
+import {
+  isPersistedComplete,
+  shouldLandOnStartHere,
+} from "../lib/onboardingProgress";
 import { readInitialProgress } from "./onboardingProgressStore";
 
 /**
@@ -66,16 +69,22 @@ interface SplitWorkspaceState {
   toggleFileTree: () => void;
 }
 
+// Read once at module-evaluation time — used by both the landing decision and
+// the graduation check, so parsing the persisted record twice is avoided.
+const initialProgress = readInitialProgress();
+
 export const useSplitWorkspaceStore = create<SplitWorkspaceState>(
   (set, get) => ({
     ratio: parseStoredRatio(readString(RATIO_KEY)),
     verticalRatio: parseStoredVerticalRatio(readString(V_RATIO_KEY)),
-    // Landing rule: a persisted tab always wins (the user's choice is never
-    // overridden); with no stored choice, an unfinished + non-dismissed
-    // onboarding opens on "시작하기" so a first run cannot miss it.
+    // Landing rule: a persisted tab wins, except a persisted "시작하기" once
+    // onboarding has graduated (initialActiveTab bounces that one to board);
+    // with no stored choice, an unfinished + non-dismissed onboarding opens on
+    // "시작하기" so a first run cannot miss it.
     activeTab: initialActiveTab(
       readString(TAB_KEY),
-      shouldLandOnStartHere(readInitialProgress()),
+      shouldLandOnStartHere(initialProgress),
+      isPersistedComplete(initialProgress),
     ),
     terminalCollapsed: parseStoredCollapsed(readString(COLLAPSE_KEY)),
     // File tree defaults CLOSED — the split's terminals + work tabs are the

@@ -82,6 +82,23 @@ describe("splitWorkspaceStore", () => {
       // Onboarding is untouched here, yet the persisted choice still wins.
       expect(store.getState().activeTab).toBe("code");
     });
+
+    it("graduates a persisted startHere to board once onboarding is finished", async () => {
+      const { store } = await loadStore({
+        "marblo.workspaceSplit.activeTab": "startHere",
+        "marblo.onboarding.progress": JSON.stringify({
+          done: ["install", "auth", "prd", "firstTicket"],
+        }),
+      });
+      expect(store.getState().activeTab).toBe("board");
+    });
+
+    it("keeps a persisted startHere while onboarding is still unfinished", async () => {
+      const { store } = await loadStore({
+        "marblo.workspaceSplit.activeTab": "startHere",
+      });
+      expect(store.getState().activeTab).toBe("startHere");
+    });
   });
 
   it("hydrates persisted values on load", async () => {

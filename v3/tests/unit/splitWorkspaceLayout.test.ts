@@ -229,4 +229,17 @@ describe("initialActiveTab", () => {
     expect(initialActiveTab(null, false)).toBe("board");
     expect(initialActiveTab("bogus", false)).toBe("board");
   });
+
+  it("graduates a persisted startHere to board once onboarding is complete", () => {
+    expect(initialActiveTab("startHere", false, true)).toBe("board");
+  });
+
+  it("keeps a persisted startHere while onboarding is still unfinished", () => {
+    expect(initialActiveTab("startHere", true, false)).toBe("startHere");
+  });
+
+  it("never touches a persisted non-startHere tab, complete or not", () => {
+    expect(initialActiveTab("code", true, true)).toBe("code");
+    expect(initialActiveTab("board", true, true)).toBe("board");
+  });
 });

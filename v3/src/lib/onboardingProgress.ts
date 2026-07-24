@@ -241,5 +241,18 @@ export function isOnboardingComplete(
  */
 export function shouldLandOnStartHere(p: OnboardingProgress): boolean {
   if (p.dismissed) return false;
-  return !WIZARD_STEPS.every((s) => p.done.includes(s));
+  return !isPersistedComplete(p);
+}
+
+/**
+ * Persisted-only completion check (no live probe) — the counterpart to
+ * {@link isOnboardingComplete} for the cold-start tab decision, which runs
+ * before the live probe exists. `firstTicket` is the last step and has no live
+ * signal anyway (it's a one-shot hand-off), so the persisted record alone is
+ * enough to decide graduation: once every step is truly `done` (skipped does
+ * not count — see the `skipped` field), a returning user no longer needs to
+ * be auto-landed on Start Here.
+ */
+export function isPersistedComplete(p: OnboardingProgress): boolean {
+  return WIZARD_STEPS.every((s) => p.done.includes(s));
 }
