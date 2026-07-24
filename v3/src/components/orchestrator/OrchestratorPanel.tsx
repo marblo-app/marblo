@@ -5,8 +5,11 @@ import {
   useEffect,
   memo,
   type ChangeEvent,
+  type CSSProperties,
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "../../lib/i18n";
+import { placeAnchoredPopup } from "../../lib/anchoredPopup";
 import {
   ORCHESTRATOR_MODEL_OPTIONS,
   isOrchestratorModel,
@@ -75,6 +78,41 @@ interface SessionInfo {
   agentId?: string;
 }
 
+const SESSION_POPUP_WIDTH = 288; // was w-72
+const SWITCH_POPUP_WIDTH = 320; // was w-80
+const SESSION_POPUP_EST_HEIGHT = 300;
+const SWITCH_POPUP_EST_HEIGHT = 160;
+
+/**
+ * Inline style for a popup rendered through a portal.
+ *
+ * These popups used to be `absolute bottom-full` children of the header, which
+ * only worked while the orchestrator was pinned to the BOTTOM of the window
+ * (legacy Layout). In the Workspace split shell the panel sits at the TOP of
+ * the left terminal column under three `overflow-hidden` ancestors, so an
+ * upward popup rendered entirely outside the clip rect — the session picker
+ * looked like it had disappeared. Anchoring to the trigger's viewport rect and
+ * portaling to <body> makes the popup immune to any ancestor clipping.
+ */
+function anchoredPopupStyle(
+  rect: DOMRect | null,
+  width: number,
+  estHeight: number,
+  align: "left" | "right",
+): CSSProperties {
+  if (!rect) return { display: "none" };
+  return {
+    position: "fixed",
+    ...placeAnchoredPopup(
+      rect,
+      { width: window.innerWidth, height: window.innerHeight },
+      width,
+      estHeight,
+      align,
+    ),
+  };
+}
+
 interface OrchestratorPanelProps {
   /**
    * Fill mode (Workspace shell vertical split): the panel stretches to fill its
@@ -132,6 +170,14 @@ export default memo(function OrchestratorPanel({
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const draggingRef = useRef(false);
 
+  // Trigger rects captured at open time — the portaled popups position against
+  // these instead of against a clipped `position: relative` ancestor.
+  const sessionBtnRef = useRef<HTMLButtonElement | null>(null);
+  const sessionPopupRef = useRef<HTMLDivElement | null>(null);
+  const switchAnchorRef = useRef<HTMLDivElement | null>(null);
+  const [sessionAnchor, setSessionAnchor] = useState<DOMRect | null>(null);
+  const [switchAnchor, setSwitchAnchor] = useState<DOMRect | null>(null);
+
   useEffect(() => {
     let alive = true;
     // 프로젝트별 모델 우선(재시작 연속성) — 전역값은 다른 프로젝트가 마지막으로
@@ -181,17 +227,29 @@ export default memo(function OrchestratorPanel({
     [panelHeight],
   );
 
-  // Close session picker when clicking outside
+  // Close session picker when clicking outside. The popup is portaled to
+  // <body>, so it is no longer a DOM descendant of this panel — containment is
+  // checked against the popup node itself rather than relying on the click
+  // bubbling through the React subtree.
   useEffect(() => {
     if (!showSessionPicker) return;
-    const handleClick = () => setShowSessionPicker(false);
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (target && sessionPopupRef.current?.contains(target)) return;
+      setShowSessionPicker(false);
+    };
+    const close = () => setShowSessionPicker(false);
     const timer = setTimeout(
       () => document.addEventListener("click", handleClick),
       0,
     );
+    // A fixed-position popup cannot follow its anchor, so any layout shift
+    // (window resize, split-divider drag) dismisses it instead of stranding it.
+    window.addEventListener("resize", close);
     return () => {
       clearTimeout(timer);
       document.removeEventListener("click", handleClick);
+      window.removeEventListener("resize", close);
     };
   }, [showSessionPicker]);
 
@@ -270,6 +328,7 @@ export default memo(function OrchestratorPanel({
     }
     if (next === runningModel) return;
     setPendingSwitchModel(next);
+    setSwitchAnchor(switchAnchorRef.current?.getBoundingClientRect() ?? null);
     setShowSwitchConfirm(true);
   };
 
@@ -377,6 +436,14 @@ export default memo(function OrchestratorPanel({
   const handleShowSessionPicker = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isRunning) return;
+    if (showSessionPicker) {
+      setShowSessionPicker(false);
+      return;
+    }
+    // Anchor first so the popup is positioned from the click, not from wherever
+    // the header sits once the (async) session list resolves.
+    setSessionAnchor(sessionBtnRef.current?.getBoundingClientRect() ?? null);
+    setShowSessionPicker(true);
     const cwd = rootPath || "~";
     try {
       const list =
@@ -385,7 +452,6 @@ export default memo(function OrchestratorPanel({
     } catch {
       setSessions([]);
     }
-    setShowSessionPicker(true);
   };
 
   const handleStop = async (e: React.MouseEvent) => {
@@ -428,7 +494,7 @@ export default memo(function OrchestratorPanel({
       {/* Header bar */}
       <div
         onClick={isRunning ? toggleCollapsed : undefined}
-        className={`flex items-center gap-2 px-3 py-1.5 text-xs select-none ${
+        className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 text-xs select-none ${
           isRunning ? "cursor-pointer hover:bg-[#313244]/50" : ""
         } transition-colors`}
       >
@@ -478,7 +544,11 @@ export default memo(function OrchestratorPanel({
               {isSwitching
                 ? "Switching..."
                 : status === "running"
-                  ? `${ORCHESTRATOR_MODEL_OPTIONS.find((m) => m.value === (runningModel ?? selectedModel))?.label ?? "Claude"} Code`
+                  ? `${
+                      ORCHESTRATOR_MODEL_OPTIONS.find(
+                        (m) => m.value === (runningModel ?? selectedModel),
+                      )?.label ?? "Claude"
+                    } Code`
                   : "Starting..."}
             </span>
             {claudeVersion && (
@@ -489,7 +559,11 @@ export default memo(function OrchestratorPanel({
                 v{claudeVersion}
               </span>
             )}
-            <div className="relative ml-1" onClick={(e) => e.stopPropagation()}>
+            <div
+              ref={switchAnchorRef}
+              className="relative ml-1"
+              onClick={(e) => e.stopPropagation()}
+            >
               <select
                 value={selectedModel}
                 onChange={handleModelChange}
@@ -503,47 +577,58 @@ export default memo(function OrchestratorPanel({
                   </option>
                 ))}
               </select>
-              {showSwitchConfirm && (
-                <div className="absolute bottom-full right-0 z-50 mb-1 w-80 rounded-md border border-[#313244] bg-[#1e1e2e] p-3 text-xs shadow-lg">
-                  <div className="mb-1 font-medium text-[#cdd6f4]">
-                    Switch orchestrator to{" "}
-                    {ORCHESTRATOR_MODEL_OPTIONS.find(
-                      (m) => m.value === targetSwitchModel,
-                    )?.label ?? "Claude"}
-                  </div>
-                  <div className="mb-3 text-[11px] leading-4 text-[#a6adc8]">
-                    Snapshot will include active missions and board work.
-                    {activeTaskCount > 0
-                      ? ` ${activeTaskCount} active board item(s) detected.`
-                      : " No active board item is loaded in this window."}
-                    {lastHandoffSummary
-                      ? ` Last handoff: ${lastHandoffSummary.activeMissionCount} mission(s), ${lastHandoffSummary.inFlightTaskCount} task(s).`
-                      : ""}
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={(e) => handleCancelSwitch(e)}
-                      className="rounded px-2 py-1 text-[#a6adc8] hover:bg-[#313244]"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={(e) => handleSwitch("takeover", e)}
-                      disabled={isSwitching}
-                      className="rounded border border-[#45475a] px-2 py-1 text-[#f9e2af] hover:bg-[#45475a]"
-                    >
-                      Take over now
-                    </button>
-                    <button
-                      onClick={(e) => handleSwitch("wait", e)}
-                      disabled={isSwitching}
-                      className="rounded bg-[#89b4fa]/20 px-2 py-1 text-[#89b4fa] hover:bg-[#89b4fa]/30"
-                    >
-                      Switch and wait
-                    </button>
-                  </div>
-                </div>
-              )}
+              {showSwitchConfirm &&
+                createPortal(
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={anchoredPopupStyle(
+                      switchAnchor,
+                      SWITCH_POPUP_WIDTH,
+                      SWITCH_POPUP_EST_HEIGHT,
+                      "right",
+                    )}
+                    className="z-[60] overflow-auto rounded-md border border-[#313244] bg-[#1e1e2e] p-3 text-xs shadow-lg"
+                  >
+                    <div className="mb-1 font-medium text-[#cdd6f4]">
+                      Switch orchestrator to{" "}
+                      {ORCHESTRATOR_MODEL_OPTIONS.find(
+                        (m) => m.value === targetSwitchModel,
+                      )?.label ?? "Claude"}
+                    </div>
+                    <div className="mb-3 text-[11px] leading-4 text-[#a6adc8]">
+                      Snapshot will include active missions and board work.
+                      {activeTaskCount > 0
+                        ? ` ${activeTaskCount} active board item(s) detected.`
+                        : " No active board item is loaded in this window."}
+                      {lastHandoffSummary
+                        ? ` Last handoff: ${lastHandoffSummary.activeMissionCount} mission(s), ${lastHandoffSummary.inFlightTaskCount} task(s).`
+                        : ""}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={(e) => handleCancelSwitch(e)}
+                        className="rounded px-2 py-1 text-[#a6adc8] hover:bg-[#313244]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={(e) => handleSwitch("takeover", e)}
+                        disabled={isSwitching}
+                        className="rounded border border-[#45475a] px-2 py-1 text-[#f9e2af] hover:bg-[#45475a]"
+                      >
+                        Take over now
+                      </button>
+                      <button
+                        onClick={(e) => handleSwitch("wait", e)}
+                        disabled={isSwitching}
+                        className="rounded bg-[#89b4fa]/20 px-2 py-1 text-[#89b4fa] hover:bg-[#89b4fa]/30"
+                      >
+                        Switch and wait
+                      </button>
+                    </div>
+                  </div>,
+                  document.body,
+                )}
             </div>
             {/* Stop button */}
             <button
@@ -598,10 +683,20 @@ export default memo(function OrchestratorPanel({
                 Start
               </button>
               <button
+                ref={sessionBtnRef}
                 onClick={handleShowSessionPicker}
-                className="rounded bg-[#313244]/50 px-1 py-0.5 text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244] transition-colors"
+                aria-haspopup="menu"
+                aria-expanded={showSessionPicker}
+                className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 transition-colors ${
+                  showSessionPicker
+                    ? "bg-[#313244] text-[#cdd6f4]"
+                    : "bg-[#313244]/50 text-[#a6adc8] hover:bg-[#313244] hover:text-[#cdd6f4]"
+                }`}
                 title={t("orchestrator.sessionPicker")}
               >
+                <span className="text-[10px]">
+                  {t("orchestrator.sessionPicker")}
+                </span>
                 <svg
                   className="h-3.5 w-3.5"
                   fill="none"
@@ -616,59 +711,71 @@ export default memo(function OrchestratorPanel({
                   />
                 </svg>
               </button>
-              {showSessionPicker && (
-                <div
-                  onClick={(e) => e.stopPropagation()}
-                  className="absolute bottom-full left-0 mb-1 w-72 rounded-md border border-[#313244] bg-[#1e1e2e] shadow-lg z-50 overflow-hidden"
-                >
-                  <div className="px-3 py-1.5 text-[10px] text-[#6c7086] border-b border-[#313244] uppercase tracking-wider">
-                    Select Session
-                  </div>
-                  <button
-                    onClick={() => handleStartWithSession("new")}
-                    className="w-full text-left px-3 py-2 text-xs text-[#a6e3a1] hover:bg-[#313244]/60 transition-colors flex items-center gap-2"
+              {showSessionPicker &&
+                createPortal(
+                  <div
+                    ref={sessionPopupRef}
+                    role="menu"
+                    onClick={(e) => e.stopPropagation()}
+                    style={anchoredPopupStyle(
+                      sessionAnchor,
+                      SESSION_POPUP_WIDTH,
+                      SESSION_POPUP_EST_HEIGHT,
+                      "left",
+                    )}
+                    className="z-[60] overflow-auto rounded-md border border-[#313244] bg-[#1e1e2e] shadow-lg"
                   >
-                    <span className="text-sm">+</span>
-                    New Session
-                  </button>
-                  {sessions.length > 0 && (
-                    <div className="border-t border-[#313244]">
-                      {sessions.slice(0, 8).map((s, i) => {
-                        const date = new Date(s.updatedAt);
-                        const timeStr = date.toLocaleString("ko-KR", {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        });
-                        return (
-                          <button
-                            key={s.id}
-                            onClick={() =>
-                              handleStartWithSession(i === 0 ? "latest" : s.id)
-                            }
-                            className="w-full text-left px-3 py-2 text-xs hover:bg-[#313244]/60 transition-colors flex items-center justify-between gap-2"
-                          >
-                            <span className="text-[#cdd6f4] truncate flex items-center gap-1.5">
-                              {i === 0 && (
-                                <span className="text-[#89b4fa] text-[10px]">
-                                  latest
-                                </span>
-                              )}
-                              <span className="text-[#6c7086] font-mono text-[10px]">
-                                {s.label || s.id.slice(0, 8) + "\u2026"}
-                              </span>
-                            </span>
-                            <span className="text-[#6c7086] text-[10px] flex-shrink-0">
-                              {timeStr} · {s.sizeKB}KB
-                            </span>
-                          </button>
-                        );
-                      })}
+                    <div className="px-3 py-1.5 text-[10px] text-[#6c7086] border-b border-[#313244] uppercase tracking-wider">
+                      Select Session
                     </div>
-                  )}
-                </div>
-              )}
+                    <button
+                      onClick={() => handleStartWithSession("new")}
+                      className="w-full text-left px-3 py-2 text-xs text-[#a6e3a1] hover:bg-[#313244]/60 transition-colors flex items-center gap-2"
+                    >
+                      <span className="text-sm">+</span>
+                      New Session
+                    </button>
+                    {sessions.length > 0 && (
+                      <div className="border-t border-[#313244]">
+                        {sessions.slice(0, 8).map((s, i) => {
+                          const date = new Date(s.updatedAt);
+                          const timeStr = date.toLocaleString("ko-KR", {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          });
+                          return (
+                            <button
+                              key={s.id}
+                              onClick={() =>
+                                handleStartWithSession(
+                                  i === 0 ? "latest" : s.id,
+                                )
+                              }
+                              className="w-full text-left px-3 py-2 text-xs hover:bg-[#313244]/60 transition-colors flex items-center justify-between gap-2"
+                            >
+                              <span className="text-[#cdd6f4] truncate flex items-center gap-1.5">
+                                {i === 0 && (
+                                  <span className="text-[#89b4fa] text-[10px]">
+                                    latest
+                                  </span>
+                                )}
+                                <span className="text-[#6c7086] font-mono text-[10px]">
+                                  {s.label || s.id.slice(0, 8) + "\u2026"}
+                                </span>
+                              </span>
+                              <span className="text-[#6c7086] text-[10px] flex-shrink-0">
+                                {timeStr} · {s.sizeKB}KB
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>,
+                  document.body,
+                )}
             </div>
             {!rootPath && (
               <span className="ml-1 text-[10px] text-[#f9e2af]">
