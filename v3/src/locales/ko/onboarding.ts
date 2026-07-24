@@ -527,8 +527,11 @@ export const onboarding = {
   // — 2막 대사: 그다음부터는 /tf-add 뒤에 프롬프트를 이어 쓴다 —
   "onboarding.demo.a2.user":
     "요구가 하나 늘었어요. 관리자용 구독자 목록 화면이 필요합니다.",
-  "onboarding.demo.a2.cmd":
-    "/tf-add 구독자 목록 화면. 이메일 검색과 CSV 내보내기.",
+  // ★커맨드와 프롬프트는 두 비트로 나뉘어 순서대로 등장한다(demoScript.ts 의
+  //   act2 log). 붙여 쓰면 "/tf-add 구독자 목록 화면. 이메일 검색과 CSV 내보내기."
+  //   한 줄 — 사람이 치는 순서를 보이려고 나눠 둔 것이니 다시 합치지 말 것.
+  "onboarding.demo.a2.cmd": "/tf-add",
+  "onboarding.demo.a2.prompt": "구독자 목록 화면. 이메일 검색과 CSV 내보내기.",
   "onboarding.demo.a2.cmdHint":
     "그다음부터는 /tf-add 뒤에 원하는 것을 그대로 쓰면 됩니다.",
   "onboarding.demo.a2.ingest":

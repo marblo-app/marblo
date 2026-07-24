@@ -524,8 +524,10 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   // — Act 2 script: from then on, write your prompt right after /tf-add —
   "onboarding.demo.a2.user":
     "One more requirement came in — an admin screen listing subscribers.",
-  "onboarding.demo.a2.cmd":
-    "/tf-add Subscriber list screen. Email search and CSV export.",
+  // The command and the prompt land as two separate beats, in typing order.
+  "onboarding.demo.a2.cmd": "/tf-add",
+  "onboarding.demo.a2.prompt":
+    "Subscriber list screen. Email search and CSV export.",
   "onboarding.demo.a2.cmdHint":
     "From then on, just write what you want right after /tf-add.",
   "onboarding.demo.a2.ingest":

@@ -511,6 +511,18 @@ function LogBubble({ line, t }: { line: DemoLogLine; t: TFn }) {
       </div>
     );
   }
+  // 커맨드 뒤에 이어 쓰는 요청 본문 — 같은 입력 줄의 두 번째 비트라 모노·우측
+  // 정렬은 그대로 두고, 색만 나눈다(에메랄드는 슬래시커맨드 토큰 몫으로 남긴다).
+  // 그래야 "초록색 그 부분이 커맨드고 나머지는 그냥 내가 쓰는 말" 이 읽힌다.
+  if (line.kind === "prompt") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[90%] rounded-lg rounded-tr-sm bg-slate-800 px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-200 ring-1 ring-white/10">
+          {text}
+        </div>
+      </div>
+    );
+  }
   if (line.kind === "hint") {
     return (
       <div className="flex justify-end">

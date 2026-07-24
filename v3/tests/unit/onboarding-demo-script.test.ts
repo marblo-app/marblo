@@ -40,12 +40,23 @@ const srcPath = (rel: string) =>
   fileURLToPath(new URL(`../../src/${rel}`, import.meta.url));
 
 describe("demo script — 재생시간이 라벨과 일치한다", () => {
-  it("글자당 노출 시간은 한글 분당 400자에서 나온다", () => {
-    expect(KO_CHARS_PER_MINUTE).toBe(400);
-    expect(MS_PER_CHAR).toBe(150);
+  it("글자당 노출 시간은 한글 분당 450자에서 나온다", () => {
+    // 400 → 450 (사장님: "메시지간 속도 조금만 빨라지면"). 값 자체가 아니라
+    // "분당 자수에서 파생된다" 가 계약이므로 파생식도 같이 못 박는다.
+    expect(KO_CHARS_PER_MINUTE).toBe(450);
+    expect(MS_PER_CHAR).toBe(133);
+    expect(MS_PER_CHAR).toBe(Math.round(60_000 / KO_CHARS_PER_MINUTE));
   });
 
-  it("각 step 지연 = 고정비 + ko 글자수 × 150ms + 새 카드 × 400ms (clamp 적용)", () => {
+  it("고정비는 글자수와 무관한 몫이라 읽기 속도보다 먼저 깎였다", () => {
+    // 600 → 420. 고정비는 모든 step 에 똑같이 붙어서, 여길 깎으면 짧은 step 이
+    // 많이 줄고 대사가 긴 step 은 덜 다친다.
+    expect(STEP_BASE_MS).toBe(420);
+    // 그래도 시선 이동을 눈이 따라갈 만큼은 남아 있어야 한다.
+    expect(STEP_BASE_MS).toBeGreaterThanOrEqual(300);
+  });
+
+  it("각 step 지연 = 고정비 + ko 글자수 × MS_PER_CHAR + 새 카드 × 400ms (clamp 적용)", () => {
     for (const act of DEMO_ACTS) {
       const delays = delaysForAct(act);
       expect(delays).toHaveLength(act.finalStep);
@@ -147,8 +158,9 @@ describe("demo script — 재생시간이 라벨과 일치한다", () => {
   it("실제 재생시간은 사람이 읽을 수 있는 범위 안이다", () => {
     // 원래 10.1초는 "읽히기 전에 넘어간다" 는 사장님 피드백의 원인이었다.
     expect(DEMO_TOTAL_MS).toBeGreaterThan(40_000);
-    // 2분을 넘기면 온보딩 데모가 아니라 영상이다.
-    expect(DEMO_TOTAL_MS).toBeLessThan(120_000);
+    // 그 뒤 75.5초까지 늘렸더니 이번엔 "조금만 빨라지면" 이 왔다. 다시 그 언저리로
+    // 돌아가면(대사를 늘리든 상수를 되돌리든) 여기서 걸린다.
+    expect(DEMO_TOTAL_MS).toBeLessThan(72_000);
     for (const act of DEMO_ACTS) {
       expect(actDurationMs(act)).toBeGreaterThan(10_000);
     }
@@ -171,6 +183,36 @@ describe("demo script — 2막 구성", () => {
     expect(koOnboarding["onboarding.demo.a2.cmd"]).toContain("/tf-add");
     expect(enOnboarding["onboarding.demo.a1.cmd"]).toContain("/tf-start");
     expect(enOnboarding["onboarding.demo.a2.cmd"]).toContain("/tf-add");
+  });
+
+  it("★2막: /tf-add 가 먼저 뜨고, 프롬프트 본문이 그 다음 step 에 따라 붙는다", () => {
+    // 사장님: "tf-add 다음에 프롬프트가 오는 형태로". 한 버블에 다시 뭉치면
+    // 여기서 죽는다.
+    const act2 = DEMO_ACTS[1];
+    const cmd = act2.log.find((l) => l.kind === "command")!;
+    const prompt = act2.log.find((l) => l.kind === "prompt")!;
+    expect(cmd.key).toBe("onboarding.demo.a2.cmd");
+    expect(prompt.key).toBe("onboarding.demo.a2.prompt");
+    // 순서: 커맨드가 먼저, 프롬프트가 뒤. 같은 step 에 겹치면 한 버블과 다를 바 없다.
+    expect(prompt.atStep).toBe(cmd.atStep + 1);
+
+    for (const locale of [koOnboarding, enOnboarding]) {
+      // 커맨드 비트는 슬래시커맨드 **하나만** — 인자가 다시 붙으면 실패.
+      expect(locale["onboarding.demo.a2.cmd"].trim()).toBe("/tf-add");
+      // 프롬프트 비트는 커맨드를 다시 반복하지 않는다.
+      expect(locale["onboarding.demo.a2.prompt"]).not.toContain("/tf-add");
+      expect(locale["onboarding.demo.a2.prompt"].trim().length).toBeGreaterThan(
+        0,
+      );
+    }
+  });
+
+  it("1막의 /tf-start 는 쪼개지 않는다 — 뒤따르는 건 프롬프트가 아니라 파일 경로다", () => {
+    // 일관성만 보고 여기까지 쪼개면 가르치는 것 없이 step 만 하나 는다(= 재생시간
+    // 이 다시 길어진다). 판단 근거를 테스트로 남긴다.
+    const act1 = DEMO_ACTS[0];
+    expect(act1.log.some((l) => l.kind === "prompt")).toBe(false);
+    expect(koOnboarding["onboarding.demo.a1.cmd"]).toBe("/tf-start PRD.md");
   });
 
   it("1막: PRD → 분해 → 배정 → 병렬 → 3티켓 완료", () => {
@@ -209,9 +251,10 @@ describe("demo script — 2막 구성", () => {
     expect(fresh).toHaveLength(2);
     // 이월 카드는 step 0 부터 계속 완료.
     expect(carried.every((t) => columnFor(t, 0) === "done")).toBe(true);
-    // 새 티켓은 /tf-add 를 친 뒤에야 등장한다.
-    expect(fresh.every((t) => columnFor(t, 2) === null)).toBe(true);
-    expect(fresh.every((t) => columnFor(t, 3) === "todo")).toBe(true);
+    // 새 티켓은 /tf-add + 프롬프트를 다 친 뒤에야 등장한다(커맨드 1 · 프롬프트 2 ·
+    // 힌트 3 → 오케가 받아 티켓을 얹는 게 4).
+    expect(fresh.every((t) => columnFor(t, 3) === null)).toBe(true);
+    expect(fresh.every((t) => columnFor(t, 4) === "todo")).toBe(true);
     // 이월 카드는 끝까지 완료로 남는다 — 보드가 리셋되지 않는다.
     expect(carried.every((t) => columnFor(t, act2.finalStep) === "done")).toBe(
       true,
@@ -225,14 +268,14 @@ describe("demo script — 2막 구성", () => {
     expect(ui.blockedBy).toBe(api.id);
 
     // 선행이 도는 동안 후행은 예약 상태로 대기.
-    expect(columnFor(api, 5)).toBe("doing");
-    expect(columnFor(ui, 5)).toBe("todo");
-    expect(isScheduled(ui, 5)).toBe(true);
+    expect(columnFor(api, 6)).toBe("doing");
+    expect(columnFor(ui, 6)).toBe("todo");
+    expect(isScheduled(ui, 6)).toBe(true);
 
-    // 선행이 끝난 뒤(step 6) 예약이 풀리고, step 7 에 후행이 시작된다.
-    expect(columnFor(api, 6)).toBe("done");
-    expect(columnFor(ui, 7)).toBe("doing");
-    expect(isScheduled(ui, 7)).toBe(false);
+    // 선행이 끝난 뒤(step 7) 예약이 풀리고, step 8 에 후행이 시작된다.
+    expect(columnFor(api, 7)).toBe("done");
+    expect(columnFor(ui, 8)).toBe("doing");
+    expect(isScheduled(ui, 8)).toBe(false);
     expect(columnFor(ui, act2.finalStep)).toBe("done");
 
     // 의존성 없는 티켓은 예약 배지가 붙지 않는다.

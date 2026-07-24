@@ -9,8 +9,8 @@
  *
  * ★타이밍을 감으로 정하지 않는다.
  * 각 step 의 지연 = 고정비(STEP_BASE_MS) + 그 step 에서 **새로 노출되는 한국어
- * 텍스트 글자 수** × MS_PER_CHAR. MS_PER_CHAR 는 한글 읽기 속도 분당 400자
- * (= 150ms/자) 에서 나온다. 대사를 고치면 재생시간이 따라 움직이고,
+ * 텍스트 글자 수** × MS_PER_CHAR. MS_PER_CHAR 는 한글 읽기 속도 분당 450자
+ * (= 133ms/자) 에서 나온다. 대사를 고치면 재생시간이 따라 움직이고,
  * watchDemo 라벨의 {seconds} 도 같은 계산에서 나오므로 라벨이 실측과
  * 어긋날 수 없다(그 불변식은 tests/unit/onboarding-demo-script.test.ts 가 강제).
  *
@@ -24,8 +24,21 @@ export type DemoMessageKey = keyof typeof koOnboarding;
 
 export type AgentKind = "claude" | "codex";
 export type Column = "todo" | "doing" | "done";
-/** 로그 한 줄의 화자. "command" 는 사용자가 실제로 친 슬래시커맨드(모노 칩). */
-export type LogKind = "user" | "command" | "hint" | "orch" | AgentKind;
+/**
+ * 로그 한 줄의 화자.
+ * - "command" — 사용자가 실제로 친 슬래시커맨드 자체(모노 칩).
+ * - "prompt"  — 그 커맨드 **뒤에 이어 쓰는 요청 본문**. 같은 입력 한 줄이지만
+ *   사람이 치는 순서대로 커맨드 다음 비트로 따로 등장시킨다("/tf-add 뒤에
+ *   원하는 것을 그대로 쓰면 된다" 가 2막의 교육 목적이라, 한 버블에 뭉치면
+ *   그 순서가 안 보인다).
+ */
+export type LogKind =
+  | "user"
+  | "command"
+  | "prompt"
+  | "hint"
+  | "orch"
+  | AgentKind;
 
 export interface DemoLogLine {
   /** 이 줄이 처음 보이는 step. */
@@ -63,12 +76,27 @@ export interface DemoAct {
 }
 
 // ── 읽기 속도 상수 ────────────────────────────────────────────────────────
-/** 한글 읽기 속도 기준(분당 자). */
-export const KO_CHARS_PER_MINUTE = 400;
-/** 글자당 노출 시간 = 60_000 / 400 = 150ms. */
+/**
+ * 한글 읽기 속도 기준(분당 자).
+ *
+ * 처음엔 400 이었다 — "읽히기 전에 넘어간다" 는 피드백을 고치느라 잡은 **보수적
+ * 하한**이었다. 그 속도로 완주해 본 사장님 피드백이 "메시지간 속도 조금만
+ * 빨라지면 좋겠다" 여서 450 으로 올린다. 한글 묵독 속도로 흔히 인용되는
+ * 400~600자/분 구간의 여전히 아래쪽이고, 여기 대사는 짧은 대화체라 되읽기가
+ * 없다. 그 이상(500+)은 "조금만" 이 아니라 원래 문제로 되돌아가는 쪽이다.
+ */
+export const KO_CHARS_PER_MINUTE = 450;
+/** 글자당 노출 시간 = 60_000 / 450 ≈ 133ms. */
 export const MS_PER_CHAR = Math.round(60_000 / KO_CHARS_PER_MINUTE);
-/** 텍스트와 무관한 고정비 — 카드 이동·시선 전환을 눈이 따라가는 시간. */
-export const STEP_BASE_MS = 600;
+/**
+ * 텍스트와 무관한 고정비 — 카드 이동·시선 전환을 눈이 따라가는 시간.
+ *
+ * 600 → 420. 읽기 속도보다 이쪽을 먼저 깎는 이유: 고정비는 대사 길이와 무관하게
+ * **모든 step 에 똑같이** 붙으므로, 깎으면 짧은 step 이 많이 줄고 대사가 긴 step 은
+ * 덜 다친다(= 긴 대사의 가독성을 지키면서 리듬만 조인다). 420ms 는 새 요소로
+ * 시선이 옮겨가 고정되는 데 드는 시간(대략 200~300ms)보다 아직 넉넉하다.
+ */
+export const STEP_BASE_MS = 420;
 /**
  * 새로 뜨는 티켓 카드 1장당 가산 시간. 카드 제목은 산문이 아니라 **훑는** 라벨이고
  * 여러 장이 컬럼에 나란히 뜨므로 순차 읽기 속도를 적용하지 않는다.
@@ -153,17 +181,23 @@ const ACT2: DemoAct = {
   id: "act2",
   nameKey: "onboarding.demo.act2.name",
   requestKey: "onboarding.demo.act2.request",
-  finalStep: 8,
+  finalStep: 9,
   log: [
     { atStep: 0, kind: "user", key: "onboarding.demo.a2.user" },
+    // ★커맨드와 프롬프트는 한 입력 줄이지만 **두 비트로 나눠** 등장시킨다.
+    // 사람이 실제로 치는 순서이고, "그다음부터는 /tf-add 뒤에 원하는 것을 그대로
+    // 쓰면 된다" 는 이 막의 교육 목적이 한 버블에 뭉치면 보이지 않는다.
+    // (1막의 `/tf-start PRD.md` 는 쪼개지 않는다 — 뒤에 오는 게 자유서술 프롬프트가
+    //  아니라 고정된 파일 경로라, 나눠 봐야 가르치는 것 없이 step 만 하나 는다.)
     { atStep: 1, kind: "command", key: "onboarding.demo.a2.cmd" },
-    { atStep: 2, kind: "hint", key: "onboarding.demo.a2.cmdHint" },
-    { atStep: 3, kind: "orch", key: "onboarding.demo.a2.ingest" },
-    { atStep: 4, kind: "orch", key: "onboarding.demo.a2.dependency" },
-    { atStep: 5, kind: "codex", key: "onboarding.demo.a2.codexStart" },
-    { atStep: 6, kind: "orch", key: "onboarding.demo.a2.unblocked" },
-    { atStep: 7, kind: "claude", key: "onboarding.demo.a2.claudeStart" },
-    { atStep: 8, kind: "orch", key: "onboarding.demo.a2.done" },
+    { atStep: 2, kind: "prompt", key: "onboarding.demo.a2.prompt" },
+    { atStep: 3, kind: "hint", key: "onboarding.demo.a2.cmdHint" },
+    { atStep: 4, kind: "orch", key: "onboarding.demo.a2.ingest" },
+    { atStep: 5, kind: "orch", key: "onboarding.demo.a2.dependency" },
+    { atStep: 6, kind: "codex", key: "onboarding.demo.a2.codexStart" },
+    { atStep: 7, kind: "orch", key: "onboarding.demo.a2.unblocked" },
+    { atStep: 8, kind: "claude", key: "onboarding.demo.a2.claudeStart" },
+    { atStep: 9, kind: "orch", key: "onboarding.demo.a2.done" },
   ],
   tasks: [
     ...ACT1.tasks.map(carried),
@@ -172,18 +206,18 @@ const ACT2: DemoAct = {
       titleKey: "onboarding.demo.sub.subApi",
       roleKey: "onboarding.demo.role.backend",
       agent: "codex",
-      appearsAtStep: 3,
-      startsAtStep: 5,
-      doneAtStep: 6,
+      appearsAtStep: 4,
+      startsAtStep: 6,
+      doneAtStep: 7,
     },
     {
       id: "a2-ui",
       titleKey: "onboarding.demo.sub.subUi",
       roleKey: "onboarding.demo.role.frontend",
       agent: "claude",
-      appearsAtStep: 3,
-      startsAtStep: 7,
-      doneAtStep: 8,
+      appearsAtStep: 4,
+      startsAtStep: 8,
+      doneAtStep: 9,
       blockedBy: "a2-api",
     },
   ],
