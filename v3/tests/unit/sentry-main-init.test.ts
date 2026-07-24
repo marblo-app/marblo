@@ -95,6 +95,30 @@ describe("initMainSentry", () => {
     expect(out.server_name).toBeUndefined();
   });
 
+  it("★ an omitted environment defaults to `development`, never production", async () => {
+    // Sentry's SERVER files an event with no environment under `production`.
+    // The only callers that omit it are ad-hoc ones — headless probes, E2E
+    // harnesses, one-off `require("dist-electron/sentry-main.js")` scripts —
+    // so leaving it undefined turns every probe crash into a page for the
+    // CEO. That is exactly how the zTwKGyav preload probe leaked.
+    const { initMainSentry } = await import("../../electron/sentry-main");
+
+    await initMainSentry({ dsn: OPTS.dsn });
+
+    const args = h.init.mock.calls[0][0] as { environment?: string };
+    expect(args.environment).toBe("development");
+    expect(args.environment).not.toBe("production");
+  });
+
+  it("normalizes environment casing/whitespace for exact-match alert rules", async () => {
+    const { initMainSentry } = await import("../../electron/sentry-main");
+
+    await initMainSentry({ dsn: OPTS.dsn, environment: "  Production  " });
+
+    const args = h.init.mock.calls[0][0] as { environment?: string };
+    expect(args.environment).toBe("production");
+  });
+
   it("no DSN → complete no-op (SDK never touched)", async () => {
     const { initMainSentry, isMainSentryInitialized } =
       await import("../../electron/sentry-main");

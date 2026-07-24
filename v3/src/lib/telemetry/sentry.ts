@@ -35,9 +35,47 @@ const RELEASE =
   typeof __APP_VERSION__ !== "undefined"
     ? `marblo@${__APP_VERSION__}`
     : undefined;
-const ENVIRONMENT =
-  (import.meta.env.VITE_SENTRY_ENVIRONMENT as string | undefined) ||
-  (import.meta.env.PROD ? "production" : "development");
+/**
+ * The one literal that production alert rules match on. Sentry alerting is
+ * configured as an **allowlist** (`environment:production` → notify), so this
+ * string is load-bearing operational config, not a display label: drift it and
+ * real user crashes stop paging anyone. Pinned by
+ * tests/unit/sentry-environment.test.ts.
+ */
+export const PRODUCTION_ENVIRONMENT = "production";
+export const DEVELOPMENT_ENVIRONMENT = "development";
+
+/**
+ * Resolve the environment tag every event is filed under.
+ *
+ * Two invariants, both learned the hard way:
+ *   1. **A dev server is never `production`.** `VITE_SENTRY_ENVIRONMENT` is
+ *      read from `v3/.env`, and the runbook used to print
+ *      `VITE_SENTRY_ENVIRONMENT=production` in the snippet for that very file
+ *      — so a dev build mislabelling itself as production is a mistake that
+ *      has actually been invited. A `vite dev` run is always non-production
+ *      regardless of what .env claims.
+ *   2. **Normalized.** Trimmed + lower-cased so an alert rule matching the
+ *      exact literal can't be defeated by ` Production`.
+ *
+ * Exported (rather than inlined) purely so it is unit-testable — reading
+ * `import.meta.env` at module scope is not.
+ */
+export function resolveSentryEnvironment(
+  configured: string | undefined,
+  isProdBuild: boolean,
+): string {
+  const raw = (configured ?? "").trim().toLowerCase();
+  if (isProdBuild) return raw || PRODUCTION_ENVIRONMENT;
+  // Non-production build: honour a custom tag (e.g. "probe", "staging") but
+  // never let it be "production".
+  return raw && raw !== PRODUCTION_ENVIRONMENT ? raw : DEVELOPMENT_ENVIRONMENT;
+}
+
+const ENVIRONMENT = resolveSentryEnvironment(
+  import.meta.env.VITE_SENTRY_ENVIRONMENT as string | undefined,
+  Boolean(import.meta.env.PROD),
+);
 
 let initialized = false;
 let enabled = false;

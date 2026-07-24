@@ -28,6 +28,30 @@ export interface SentryMainInitOptions {
   environment?: string;
 }
 
+/**
+ * Fail-safe environment for callers that omit one.
+ *
+ * ★ Why this matters: if `environment` is left undefined, Sentry's *server*
+ * files the event under `production`. That is exactly backwards for us — the
+ * only callers that omit it are ad-hoc ones (headless probes, E2E harnesses,
+ * one-off `require("dist-electron/sentry-main.js")` scripts), and an
+ * unlabelled probe crash would then masquerade as a real user crash and page
+ * the CEO. The renderer always passes an explicit value, so defaulting to
+ * `development` here can never downgrade a genuine production event.
+ *
+ * See v3/docs/SENTRY-RUNBOOK.md §5 for the environment taxonomy.
+ */
+export const DEFAULT_ENVIRONMENT = "development";
+
+/**
+ * Normalize an environment tag. Lower-cased and trimmed so alert rules can
+ * match exact literals (`environment:production`) without whitespace/casing
+ * drift silently falling out of the filter.
+ */
+export function resolveEnvironment(raw?: string): string {
+  return (raw ?? "").trim().toLowerCase() || DEFAULT_ENVIRONMENT;
+}
+
 // ── PII scrub (mirror of src/lib/telemetry/scrub.ts) ─────────────────────
 const ANTHROPIC_KEY = /sk-ant-[A-Za-z0-9_-]{20,}/g;
 const OPENAI_KEY = /sk-[A-Za-z0-9_-]{20,}/g;
@@ -131,12 +155,16 @@ export async function initMainSentry(
   if (initialized) return true;
   if (!opts?.dsn) return false; // no DSN → complete no-op (regression guard)
 
+  // Never forward a bare `undefined` — Sentry's server would file it as
+  // `production`. See DEFAULT_ENVIRONMENT above.
+  const environment = resolveEnvironment(opts.environment);
+
   try {
     const Sentry = await import("@sentry/electron/main");
     Sentry.init({
       dsn: opts.dsn,
       release: opts.release,
-      environment: opts.environment,
+      environment,
       // ★ MUST be Classic. @sentry/electron's default ipcMode is `Both`
       // (Classic | Protocol), and the Protocol half calls
       // `protocol.registerSchemesAsPrivileged`, which Electron only permits
@@ -162,7 +190,7 @@ export async function initMainSentry(
     });
     initialized = true;
     console.info(
-      `[Sentry:main] initialized (env=${opts.environment ?? "unset"}, release=${
+      `[Sentry:main] initialized (env=${environment}, release=${
         opts.release ?? "unset"
       }, ipcMode=Classic)`,
     );
