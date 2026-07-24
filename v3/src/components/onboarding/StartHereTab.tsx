@@ -21,6 +21,7 @@ import {
 } from "../../services/cliSetupActions";
 import { CliRowCard } from "./CliSetupRows";
 import { DemoMode, DEMO_CONNECT_PENDING_KEY } from "./DemoMode";
+import { DEMO_TOTAL_SECONDS } from "./demoScript";
 
 /**
  * "시작하기" — onboarding as a first-class TAB (ticket ZdgQMxW7).
@@ -213,7 +214,10 @@ export function StartHereTab() {
               onClick={openDemo}
               className="rounded-md border border-[#45475a] px-2.5 py-1 text-xs font-medium text-[#cdd6f4] transition-colors hover:bg-[#313244]"
             >
-              ▶ {t("onboarding.startHere.watchDemo")}
+              ▶{" "}
+              {t("onboarding.startHere.watchDemo", {
+                seconds: DEMO_TOTAL_SECONDS,
+              })}
             </button>
             <button
               type="button"

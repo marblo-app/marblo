@@ -3,6 +3,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useTranslation } from "../lib/i18n";
 import telemetry from "../services/telemetryService";
 import { DemoMode } from "../components/onboarding/DemoMode";
+import { DEMO_TOTAL_SECONDS } from "../components/onboarding/demoScript";
 
 export function LoginPage() {
   const { t, locale } = useTranslation();
@@ -198,7 +199,7 @@ export function LoginPage() {
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7z" />
             </svg>
-            {t("onboarding.login.watchDemo")}
+            {t("onboarding.login.watchDemo", { seconds: DEMO_TOTAL_SECONDS })}
           </button>
         </div>
       </div>

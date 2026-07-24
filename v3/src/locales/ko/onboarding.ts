@@ -398,7 +398,9 @@ export const onboarding = {
     "네 단계면 첫 티켓까지 갑니다. 진행 상황은 저장되니 언제든 이어서 하세요.",
   "onboarding.startHere.progress": "{total}단계 중 {done}단계 완료",
   "onboarding.startHere.demoLead": "먼저 어떻게 동작하는지 볼까요?",
-  "onboarding.startHere.watchDemo": "60초 데모 보기",
+  // {seconds} = DemoMode 스크립트에서 실측 계산된 총 재생시간. 하드코딩 금지 —
+  // 대본이 바뀌면 숫자도 따라 바뀌어야 하고, 그 불변식은 유닛테스트가 강제한다.
+  "onboarding.startHere.watchDemo": "{seconds}초 데모 보기",
   "onboarding.startHere.stuckLabel": "막혔을 때:",
   "onboarding.startHere.skipStep":
     "이 단계는 나중에 하기(목록에 계속 남습니다)",
@@ -454,9 +456,13 @@ export const onboarding = {
 
   // — LoginPage: 인증 전 데모 진입점 (Demo Mode P3, ticket qQLGS3NW) —
   "onboarding.login.demoLead": "마블로가 어떻게 동작하는지 먼저 볼까요?",
-  "onboarding.login.watchDemo": "60초 데모 보기",
+  // {seconds} — 위 startHere.watchDemo 와 같은 실측값이 들어간다.
+  "onboarding.login.watchDemo": "{seconds}초 데모 보기",
 
-  // — DemoMode (인증 전 샘플 데모 재생) —
+  // — DemoMode (인증 전 샘플 데모 재생, 2막 구성) —
+  // ★대사 길이가 곧 재생 지연이다: demoScript.ts 가 아래 ko 문자열의 글자 수를
+  //   세어(한글 분당 400자) step 지연을 계산한다. 대사를 고치면 총 재생시간과
+  //   watchDemo 라벨의 {seconds} 가 함께 움직인다.
   "onboarding.demo.badge": "샘플 데모",
   "onboarding.demo.title":
     "오케스트레이터가 티켓을 분해하고 에이전트를 배정합니다",
@@ -466,7 +472,6 @@ export const onboarding = {
   "onboarding.demo.orchestrator": "오케스트레이터",
   "onboarding.demo.thinking": "생각하는 중…",
   "onboarding.demo.board": "작업 보드",
-  "onboarding.demo.request": "랜딩 페이지 만들기",
   "onboarding.demo.status.queued": "대기",
   "onboarding.demo.status.analyzing": "분석 중",
   "onboarding.demo.status.running": "진행 중",
@@ -476,27 +481,63 @@ export const onboarding = {
   "onboarding.demo.col.done": "완료",
   "onboarding.demo.agentWorking": "작업 중",
   "onboarding.demo.playing": "샘플 시나리오를 재생하는 중…",
-  "onboarding.demo.skip": "건너뛰기",
-  "onboarding.demo.replay": "다시 보기",
+  "onboarding.demo.paused": "일시정지됨 — 이어서 보려면 재개를 누르세요.",
+  "onboarding.demo.skip": "이 막 건너뛰기",
+  "onboarding.demo.replay": "처음부터 다시 보기",
+  "onboarding.demo.pause": "일시정지",
+  "onboarding.demo.resume": "재개",
+  "onboarding.demo.nextStep": "다음 단계",
   "onboarding.demo.cta": "이제 내 계정을 연결해 실제로 실행하기",
-  // 하위 작업(분해 결과) — 카드 제목/역할
+  // 막(챕터) 구조
+  "onboarding.demo.act.indicator": "{current}/{total}막",
+  "onboarding.demo.act1.name": "1막 · PRD 로 프로젝트 열기",
+  "onboarding.demo.act2.name": "2막 · 추가 임무 붙이기",
+  "onboarding.demo.act1.request": "랜딩 페이지 만들기",
+  "onboarding.demo.act2.request": "구독자 관리 화면 추가",
+  "onboarding.demo.nextAct": "이어서 2막 · 추가 임무 붙이기 보기",
+  "onboarding.demo.actDone": "1막이 끝났습니다. 실전에서는 여기서 멈추지 않죠.",
+  // 티켓 카드 — 1막(PRD 분해 결과)
   "onboarding.demo.sub.frontend": "랜딩 페이지 UI 와 이메일 폼 구현",
   "onboarding.demo.sub.backend": "이메일 수집 API 엔드포인트 작성",
   "onboarding.demo.sub.test": "폼 제출 플로우 E2E 테스트",
+  // 티켓 카드 — 2막(/tf-add 로 얹은 것)
+  "onboarding.demo.sub.subApi": "구독자 조회 API + 검색 파라미터",
+  "onboarding.demo.sub.subUi": "구독자 목록 화면 · CSV 내보내기",
   "onboarding.demo.role.frontend": "프론트엔드",
   "onboarding.demo.role.backend": "백엔드",
   "onboarding.demo.role.test": "테스트",
-  // 오케 대화 로그(스크립트)
-  "onboarding.demo.msg.user": "이 PRD로 첫 티켓을 만들어 주세요.",
-  "onboarding.demo.msg.analyze": "요구사항을 분석하고 있어요…",
-  "onboarding.demo.msg.decompose":
-    "요청을 3개의 하위 작업으로 분해했어요 — 프론트엔드 · 백엔드 · 테스트.",
-  "onboarding.demo.msg.assign": "각 작업에 알맞은 에이전트를 배정합니다.",
-  "onboarding.demo.msg.claudeStart":
-    "프론트엔드 · 테스트 작업을 맡았어요. 시작합니다.",
-  "onboarding.demo.msg.codexStart": "백엔드 API 작업을 맡았어요. 시작합니다.",
-  "onboarding.demo.msg.working":
-    "에이전트들이 병렬로 작업 중이에요. 진행 상황이 보드에 실시간 반영됩니다.",
-  "onboarding.demo.msg.done":
-    "첫 티켓이 완료됐어요 🎉 — 실제로는 여러분의 코드에 커밋까지 이어집니다.",
+  "onboarding.demo.carriedOver": "1막에서 완료",
+  "onboarding.demo.scheduled": "예약됨",
+  "onboarding.demo.blockedBy": "선행 티켓 대기",
+  // — 1막 대사: 사용자가 PRD 를 쓰고 /tf-start 로 프로젝트를 연다 —
+  // ★한 줄이 길어지면 그 step 이 통째로 길어진다. 대사는 한 호흡(≈35자) 안에서
+  //   끊고, 할 말이 남으면 step 을 하나 더 쓴다 — 그래야 clamp 가 아니라 실측이
+  //   재생시간을 정한다(demoScript.ts 의 STEP_MAX_MS 불변식).
+  "onboarding.demo.a1.user": "PRD.md 에 만들 것을 적어 뒀어요.",
+  "onboarding.demo.a1.cmd": "/tf-start PRD.md",
+  "onboarding.demo.a1.cmdHint": "처음 한 번은 PRD 와 함께 /tf-start 로 엽니다.",
+  "onboarding.demo.a1.readPrd": "PRD 를 읽었어요. 요구사항 3개를 찾았습니다.",
+  "onboarding.demo.a1.decompose": "티켓 3개로 분해해 보드에 올렸어요.",
+  "onboarding.demo.a1.assign": "각 티켓에 알맞은 에이전트를 배정합니다.",
+  "onboarding.demo.a1.claudeStart": "프론트엔드 · 테스트를 맡았습니다.",
+  "onboarding.demo.a1.codexStart": "백엔드 API 를 맡았습니다.",
+  "onboarding.demo.a1.working": "격리된 워크트리에서 병렬로 작업 중이에요.",
+  "onboarding.demo.a1.done":
+    "티켓 3개가 모두 끝났습니다. 실제로는 각 티켓이 PR 까지 이어집니다.",
+  // — 2막 대사: 그다음부터는 /tf-add 뒤에 프롬프트를 이어 쓴다 —
+  "onboarding.demo.a2.user":
+    "요구가 하나 늘었어요. 관리자용 구독자 목록 화면이 필요합니다.",
+  "onboarding.demo.a2.cmd":
+    "/tf-add 구독자 목록 화면. 이메일 검색과 CSV 내보내기.",
+  "onboarding.demo.a2.cmdHint":
+    "그다음부터는 /tf-add 뒤에 원하는 것을 그대로 쓰면 됩니다.",
+  "onboarding.demo.a2.ingest":
+    "돌아가던 보드는 그대로 두고 새 티켓 2개를 얹었어요.",
+  "onboarding.demo.a2.dependency":
+    "목록 화면은 조회 API 가 먼저라 예약해 뒀어요.",
+  "onboarding.demo.a2.codexStart": "구독자 조회 API 를 맡았습니다.",
+  "onboarding.demo.a2.unblocked": "선행이 끝나 예약이 풀렸어요.",
+  "onboarding.demo.a2.claudeStart": "목록 화면을 바로 시작합니다.",
+  "onboarding.demo.a2.done":
+    "추가 임무까지 끝났습니다 🎉 — 프로젝트가 도는 동안 /tf-add 로 계속 얹으면 됩니다.",
 };

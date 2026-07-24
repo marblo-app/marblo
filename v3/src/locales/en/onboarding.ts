@@ -284,7 +284,8 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
     "Four steps to your first ticket. Your progress is saved — pick it up whenever.",
   "onboarding.startHere.progress": "{done} of {total} done",
   "onboarding.startHere.demoLead": "Want to see how it works first?",
-  "onboarding.startHere.watchDemo": "Watch the 60-second demo",
+  // {seconds} = runtime, measured from the demo script. Never hard-code it.
+  "onboarding.startHere.watchDemo": "Watch the {seconds}-second demo",
   "onboarding.startHere.stuckLabel": "Stuck?",
   "onboarding.startHere.skipStep": "Skip for now (it stays on the list)",
   "onboarding.startHere.badge.done": "Done",
@@ -453,9 +454,11 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
 
   // — LoginPage: pre-auth demo entry (Demo Mode P3, ticket qQLGS3NW) —
   "onboarding.login.demoLead": "Want to see how Marblo works first?",
-  "onboarding.login.watchDemo": "Watch the 60-second demo",
+  "onboarding.login.watchDemo": "Watch the {seconds}-second demo",
 
-  // — DemoMode (pre-auth sample demo playback) —
+  // — DemoMode (pre-auth sample demo playback, two acts) —
+  // NOTE: step delays are computed from the *Korean* copy (see demoScript.ts),
+  // so editing these English strings does not change the runtime.
   "onboarding.demo.badge": "Sample demo",
   "onboarding.demo.title":
     "The orchestrator breaks a ticket down and assigns agents",
@@ -465,7 +468,6 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.demo.orchestrator": "Orchestrator",
   "onboarding.demo.thinking": "Thinking…",
   "onboarding.demo.board": "Task board",
-  "onboarding.demo.request": "Build a landing page",
   "onboarding.demo.status.queued": "Queued",
   "onboarding.demo.status.analyzing": "Analyzing",
   "onboarding.demo.status.running": "In progress",
@@ -475,28 +477,65 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.demo.col.done": "Done",
   "onboarding.demo.agentWorking": "working",
   "onboarding.demo.playing": "Playing the sample scenario…",
-  "onboarding.demo.skip": "Skip",
-  "onboarding.demo.replay": "Replay",
+  "onboarding.demo.paused":
+    "Paused — hit resume to pick up where you left off.",
+  "onboarding.demo.skip": "Skip this act",
+  "onboarding.demo.replay": "Replay from the start",
+  "onboarding.demo.pause": "Pause",
+  "onboarding.demo.resume": "Resume",
+  "onboarding.demo.nextStep": "Next step",
   "onboarding.demo.cta": "Connect my account and run it for real",
-  // Subtasks (decomposition result) — card titles / roles
+  // Act (chapter) structure
+  "onboarding.demo.act.indicator": "Act {current}/{total}",
+  "onboarding.demo.act1.name": "Act 1 · Open the project from a PRD",
+  "onboarding.demo.act2.name": "Act 2 · Add follow-up work",
+  "onboarding.demo.act1.request": "Build a landing page",
+  "onboarding.demo.act2.request": "Add a subscriber admin screen",
+  "onboarding.demo.nextAct": "Continue to Act 2 · Add follow-up work",
+  "onboarding.demo.actDone": "That's Act 1. In real life you don't stop there.",
+  // Ticket cards — Act 1 (PRD decomposition)
   "onboarding.demo.sub.frontend": "Build the landing page UI and email form",
   "onboarding.demo.sub.backend": "Write the email-capture API endpoint",
   "onboarding.demo.sub.test": "End-to-end test the form submission flow",
+  // Ticket cards — Act 2 (added via /tf-add)
+  "onboarding.demo.sub.subApi": "Subscriber list API with search params",
+  "onboarding.demo.sub.subUi": "Subscriber list screen with CSV export",
   "onboarding.demo.role.frontend": "Frontend",
   "onboarding.demo.role.backend": "Backend",
   "onboarding.demo.role.test": "Test",
-  // Orchestrator chat log (scripted)
-  "onboarding.demo.msg.user": "Create my first ticket from this PRD.",
-  "onboarding.demo.msg.analyze": "Analyzing the requirements…",
-  "onboarding.demo.msg.decompose":
-    "Broke the request into 3 subtasks — frontend, backend, and test.",
-  "onboarding.demo.msg.assign": "Assigning the right agent to each task.",
-  "onboarding.demo.msg.claudeStart":
-    "I've got the frontend and test tasks. Starting now.",
-  "onboarding.demo.msg.codexStart":
-    "I've got the backend API task. Starting now.",
-  "onboarding.demo.msg.working":
-    "The agents are working in parallel. Progress lands on the board in real time.",
-  "onboarding.demo.msg.done":
-    "First ticket done 🎉 — for real, this continues all the way to a commit in your code.",
+  "onboarding.demo.carriedOver": "Done in Act 1",
+  "onboarding.demo.scheduled": "Scheduled",
+  "onboarding.demo.blockedBy": "Waiting on a prerequisite",
+  // — Act 1 script: you write a PRD and open the project with /tf-start —
+  "onboarding.demo.a1.user": "I wrote what I want to build in PRD.md.",
+  "onboarding.demo.a1.cmd": "/tf-start PRD.md",
+  "onboarding.demo.a1.cmdHint":
+    "The first time in, open it with your PRD and /tf-start.",
+  "onboarding.demo.a1.readPrd": "Read the PRD. Found 3 requirements.",
+  "onboarding.demo.a1.decompose":
+    "Broke it into 3 tickets and put them on the board.",
+  "onboarding.demo.a1.assign": "Assigning the right agent to each ticket.",
+  "onboarding.demo.a1.claudeStart": "I've got frontend and test.",
+  "onboarding.demo.a1.codexStart": "I've got the backend API.",
+  "onboarding.demo.a1.working":
+    "Working in parallel, each in its own isolated worktree.",
+  "onboarding.demo.a1.done":
+    "All 3 tickets are done. For real, each one carries on to a PR.",
+  // — Act 2 script: from then on, write your prompt right after /tf-add —
+  "onboarding.demo.a2.user":
+    "One more requirement came in — an admin screen listing subscribers.",
+  "onboarding.demo.a2.cmd":
+    "/tf-add Subscriber list screen. Email search and CSV export.",
+  "onboarding.demo.a2.cmdHint":
+    "From then on, just write what you want right after /tf-add.",
+  "onboarding.demo.a2.ingest":
+    "Left the running board alone and stacked 2 new tickets on top.",
+  "onboarding.demo.a2.dependency":
+    "The list screen needs the query API first, so I scheduled it.",
+  "onboarding.demo.a2.codexStart": "I've got the subscriber query API.",
+  "onboarding.demo.a2.unblocked":
+    "The prerequisite landed, so the hold is released.",
+  "onboarding.demo.a2.claudeStart": "Starting the list screen right away.",
+  "onboarding.demo.a2.done":
+    "The follow-up work is done too 🎉 — keep stacking with /tf-add while the project runs.",
 };
