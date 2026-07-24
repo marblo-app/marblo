@@ -11,7 +11,12 @@
 
 import runnerSource from "./runner.py?raw";
 import { PYODIDE_BASE, parseRunnerPayload } from "./protocol";
-import type { KernelRequest, KernelResponse, KernelStatus } from "./protocol";
+import type {
+  KernelErrorCode,
+  KernelRequest,
+  KernelResponse,
+  KernelStatus,
+} from "./protocol";
 
 // Minimal surface of the Pyodide API we use — the real types live in the
 // pyodide package, but this worker loads the runtime at runtime (not via a
@@ -30,14 +35,36 @@ const status = (s: KernelStatus) => post({ type: "status", status: s });
 
 let pyodidePromise: Promise<PyodideApi> | null = null;
 
-/** Fails fast with a clear message when the vendored runtime is absent. */
+/**
+ * Carries a machine-readable cause across the worker boundary. `message` stays
+ * English-only and diagnostic — the renderer replaces it with a localized,
+ * actionable one keyed off `code` (see NotebookKernel.describe).
+ */
+class KernelError extends Error {
+  constructor(
+    message: string,
+    readonly code: KernelErrorCode,
+  ) {
+    super(message);
+  }
+}
+
+/** Fails fast, with a cause the UI can act on, when the runtime is absent. */
 async function assertAssetsPresent(): Promise<void> {
   let response: Response;
   try {
-    response = await fetch(`${PYODIDE_BASE}pyodide-lock.json`);
+    // no-store: the answer changes the moment the developer runs the vendoring
+    // script, and Retry has to see that — a cached "missing" would make the
+    // button look broken right after the fix landed.
+    response = await fetch(`${PYODIDE_BASE}pyodide-lock.json`, {
+      cache: "no-store",
+    });
   } catch (e) {
-    throw new Error(
-      `Pyodide 자산을 읽을 수 없습니다 (${e instanceof Error ? e.message : String(e)}).`,
+    // The dev server not serving /pyodide/ at all is the same user-visible
+    // situation as the directory being empty: nothing was ever vendored.
+    throw new KernelError(
+      `pyodide-lock.json unreachable: ${e instanceof Error ? e.message : String(e)}`,
+      "missing-assets",
     );
   }
   // The app's static server answers unknown paths with index.html + 200, so a
@@ -53,8 +80,9 @@ async function assertAssetsPresent(): Promise<void> {
       throw new Error("shape");
     }
   } catch {
-    throw new Error(
-      "Pyodide 자산이 설치되어 있지 않습니다. `node scripts/fetch-pyodide-assets.mjs` 를 실행하세요.",
+    throw new KernelError(
+      "pyodide-lock.json missing or not a lock file",
+      "missing-assets",
     );
   }
 }
@@ -98,11 +126,14 @@ async function run(id: number, code: string): Promise<void> {
     pyodide = await getPyodide();
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    const code = e instanceof KernelError ? e.code : undefined;
     status({
-      phase: message.includes("자산") ? "missing-assets" : "failed",
-      detail: message,
+      phase: code === "missing-assets" ? "missing-assets" : "failed",
+      // Missing assets get their whole explanation from the renderer, which can
+      // translate it; a generic failure has nothing better than its own message.
+      detail: code === "missing-assets" ? undefined : message,
     });
-    post({ type: "error", id, message });
+    post({ type: "error", id, message, code });
     return;
   }
 

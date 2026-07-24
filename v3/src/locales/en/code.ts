@@ -18,8 +18,12 @@ export const code: Record<keyof typeof koCode, string> = {
 
   "code.notebook.cellCount": "{total} cells · {code} code",
   "code.notebook.empty": "This notebook has no cells.",
-  "code.notebook.parseError":
-    "Could not read the notebook: {message} — showing the raw JSON.",
+
+  "code.notebook.rawFallback.title":
+    "Couldn't read this notebook — showing the raw JSON instead",
+  "code.notebook.rawFallback.reason": "Reason: {message}",
+  "code.notebook.rawFallback.unknownReason":
+    "The cause couldn't be determined — this may not be a .ipynb file.",
   "code.notebook.run": "Run",
   "code.notebook.restart": "Restart kernel",
   "code.notebook.kernel.loadingRuntime": "Loading Python runtime…",
@@ -27,6 +31,16 @@ export const code: Record<keyof typeof koCode, string> = {
   "code.notebook.kernel.running": "Running…",
   "code.notebook.kernel.ready": "Kernel ready",
   "code.notebook.kernel.failed": "Kernel error",
+
+  "code.notebook.kernel.missingAssets": "Python runtime not installed",
+  "code.notebook.kernel.missingAssetsError":
+    "The Python runtime is not installed. Run `{command}` from the repo root, then try again.",
+  "code.notebook.assets.title": "The Python runtime isn't ready",
+  "code.notebook.assets.body":
+    "Running notebook cells needs the Pyodide runtime (~31MB). `npm run dev` normally fetches it for you — you're seeing this because you were offline or the download failed. Run the command below from the repo root, then hit Retry.",
+  "code.notebook.assets.copy": "Copy command",
+  "code.notebook.assets.copied": "Copied",
+  "code.notebook.assets.retry": "Retry",
 
   "code.worktreeDiff.loading": "Checking worktree changes...",
   "code.worktreeDiff.changedCount": "{count} changed",

@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Play, RotateCcw } from "lucide-react";
+import { Check, Copy, Play, RotateCcw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -15,6 +15,7 @@ import {
 import type { NotebookCell, NotebookOutput } from "../../lib/notebook";
 import { useNotebookKernel } from "../../hooks/useNotebookKernel";
 import type { KernelStatus } from "../../lib/notebookKernel/protocol";
+import { PYODIDE_INSTALL_COMMAND } from "../../lib/notebookKernel/protocol";
 import { useTranslation } from "../../lib/i18n";
 import "highlight.js/styles/github-dark.css";
 
@@ -323,7 +324,9 @@ function KernelBadge({ status }: { status: KernelStatus }) {
           ? t("code.notebook.kernel.running")
           : status.phase === "ready"
             ? t("code.notebook.kernel.ready")
-            : (status.detail ?? t("code.notebook.kernel.failed"));
+            : status.phase === "missing-assets"
+              ? t("code.notebook.kernel.missingAssets")
+              : (status.detail ?? t("code.notebook.kernel.failed"));
 
   return (
     <span
@@ -347,6 +350,70 @@ function KernelBadge({ status }: { status: KernelStatus }) {
 }
 
 /**
+ * Shown when the kernel reports that the vendored Pyodide runtime is absent.
+ *
+ * The fix has to be reachable from here — telling someone to go read a script
+ * name out of an error string is how this became a bug in the first place. So:
+ * the exact command, one click to copy, one click to re-check.
+ *
+ * What this deliberately does NOT do is download anything itself. 31MB pulled
+ * because someone opened a file would be a surprise, and the renderer has no
+ * business writing into the repo. Retry re-checks; the download stays an
+ * explicit action the developer takes in their own shell.
+ */
+function MissingAssetsBanner({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+
+  const onCopy = useCallback(() => {
+    navigator.clipboard.writeText(PYODIDE_INSTALL_COMMAND).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => {
+        // Clipboard denied — the command is rendered as selectable text
+        // right next to this button, so there is still a way through.
+      },
+    );
+  }, []);
+
+  return (
+    <div className="border-b border-amber-900/50 bg-amber-950/30 px-5 py-3 text-xs text-amber-200">
+      <div className="mx-auto max-w-5xl">
+        <div className="font-medium">{t("code.notebook.assets.title")}</div>
+        <p className="mt-1 leading-5 text-amber-200/80">
+          {t("code.notebook.assets.body")}
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <code className="min-w-0 flex-1 overflow-x-auto rounded border border-amber-900/60 bg-gray-900/70 px-2 py-1 font-mono text-[12px] whitespace-pre text-amber-100 select-all">
+            {PYODIDE_INSTALL_COMMAND}
+          </code>
+          <button
+            type="button"
+            onClick={onCopy}
+            className="flex shrink-0 items-center gap-1 rounded border border-amber-900/60 px-2 py-1 text-amber-200 hover:bg-amber-900/40"
+          >
+            {copied ? <Check size={11} /> : <Copy size={11} />}
+            {copied
+              ? t("code.notebook.assets.copied")
+              : t("code.notebook.assets.copy")}
+          </button>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="flex shrink-0 items-center gap-1 rounded border border-amber-700 bg-amber-900/40 px-2 py-1 font-medium text-amber-100 hover:bg-amber-900/70"
+          >
+            <RotateCcw size={11} />
+            {t("code.notebook.assets.retry")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Renders a Jupyter notebook (.ipynb) as cells + their saved outputs — text,
  * matplotlib PNGs, DataFrame tables and tracebacks — instead of the raw JSON
  * blob Monaco would show. A Preview ↔ Raw toggle mirrors MarkdownPreview, so
@@ -358,7 +425,6 @@ export function NotebookView({
   language,
 }: NotebookViewProps) {
   const { t } = useTranslation();
-  const [view, setView] = useState<"preview" | "raw">("preview");
   const { status, runningCellId, runCell, restart } = useNotebookKernel();
   // Outputs produced this session, keyed by cell id. The file on disk is never
   // touched — a notebook opened here is a read-only document that you can
@@ -367,8 +433,13 @@ export function NotebookView({
     Record<string, NotebookOutput[]>
   >({});
 
+  // The cell whose Run hit the missing-runtime wall, so Retry can pick up
+  // exactly where the user was instead of making them hunt for it again.
+  const lastRunCell = useRef<NotebookCell | null>(null);
+
   const onRun = useCallback(
     async (cell: NotebookCell) => {
+      lastRunCell.current = cell;
       const result = await runCell(cell.id, cell.source);
       setLiveOutputs((prev) => ({ ...prev, [cell.id]: result.outputs }));
     },
@@ -379,6 +450,14 @@ export function NotebookView({
     restart();
     setLiveOutputs({});
   }, [restart]);
+
+  // Drop the worker before re-running: it is the thing that concluded the
+  // assets were missing, and a fresh one re-checks from scratch.
+  const onRetryAssets = useCallback(() => {
+    restart();
+    const cell = lastRunCell.current;
+    if (cell) void onRun(cell);
+  }, [restart, onRun]);
 
   const parsed = useMemo(() => {
     try {
@@ -426,42 +505,27 @@ export function NotebookView({
           {t("code.notebook.restart")}
         </button>
       )}
-      <div className="ml-auto flex overflow-hidden rounded border border-gray-700">
-        <button
-          type="button"
-          onClick={() => setView("preview")}
-          className={`px-2 py-0.5 ${
-            view === "preview"
-              ? "bg-blue-600 text-white"
-              : "text-gray-300 hover:bg-gray-700"
-          }`}
-        >
-          Preview
-        </button>
-        <button
-          type="button"
-          onClick={() => setView("raw")}
-          className={`px-2 py-0.5 ${
-            view === "raw"
-              ? "bg-blue-600 text-white"
-              : "text-gray-300 hover:bg-gray-700"
-          }`}
-        >
-          Raw
-        </button>
-      </div>
     </div>
   );
 
-  if (view === "raw" || !notebook) {
+  // The raw JSON is no longer a view the user picks — it is the fallback for a
+  // notebook we could not parse. Keeping that path is not optional: a corrupt
+  // or hand-edited .ipynb has to still show its bytes, or there is no way to
+  // see what went wrong. What it now always carries is the reason.
+  if (!notebook) {
     return (
       <div className="flex h-full flex-col">
         {toolbar}
-        {parsed.error && (
-          <div className="border-b border-red-900/50 bg-red-950/30 px-3 py-1.5 text-xs text-red-300">
-            {t("code.notebook.parseError", { message: parsed.error })}
+        <div className="border-b border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+          <div className="font-medium">
+            {t("code.notebook.rawFallback.title")}
           </div>
-        )}
+          <div className="mt-0.5 text-red-300/80">
+            {parsed.error
+              ? t("code.notebook.rawFallback.reason", { message: parsed.error })
+              : t("code.notebook.rawFallback.unknownReason")}
+          </div>
+        </div>
         <div className="min-h-0 flex-1">
           <CodeEditor
             filePath={filePath}
@@ -477,6 +541,9 @@ export function NotebookView({
   return (
     <div className="flex h-full flex-col">
       {toolbar}
+      {status.phase === "missing-assets" && (
+        <MissingAssetsBanner onRetry={onRetryAssets} />
+      )}
       <div className="min-h-0 flex-1 overflow-auto bg-gray-900">
         <div className="mx-auto max-w-5xl space-y-4 px-5 py-5">
           {notebook.cells.length === 0 && (

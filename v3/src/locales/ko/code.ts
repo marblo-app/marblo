@@ -20,8 +20,14 @@ export const code = {
   // .ipynb 노트북 뷰. 셀/커널 이름·언어는 기계 식별자라 번역하지 않는다.
   "code.notebook.cellCount": "{total}셀 · 코드 {code}",
   "code.notebook.empty": "셀이 없는 노트북입니다.",
-  "code.notebook.parseError":
-    "노트북을 읽지 못했습니다: {message} — 원본 JSON 을 표시합니다.",
+
+  // 파싱 불가 .ipynb 폴백. Preview/Raw 토글은 없앴지만 이 경로는 남는다 —
+  // 깨진 파일에서 원문마저 못 보면 무엇이 잘못됐는지 확인할 방법이 없다.
+  "code.notebook.rawFallback.title":
+    "이 노트북을 읽을 수 없어 원문(JSON)을 표시합니다",
+  "code.notebook.rawFallback.reason": "원인: {message}",
+  "code.notebook.rawFallback.unknownReason":
+    "원인을 특정하지 못했습니다 — .ipynb 형식이 아닐 수 있습니다.",
   "code.notebook.run": "실행",
   "code.notebook.restart": "커널 재시작",
   "code.notebook.kernel.loadingRuntime": "Python 런타임 로드 중…",
@@ -29,6 +35,19 @@ export const code = {
   "code.notebook.kernel.running": "실행 중…",
   "code.notebook.kernel.ready": "커널 준비됨",
   "code.notebook.kernel.failed": "커널 오류",
+
+  // Pyodide 자산 미설치. 안내에 나가는 명령은 PYODIDE_INSTALL_COMMAND 하나에서
+  // 내려오므로 여기에 직접 적지 말고 {command} 를 쓸 것 — 문구와 실제 스크립트가
+  // 어긋나면 "복사해서 붙여넣었는데 안 되는" 원래의 그 버그로 돌아간다.
+  "code.notebook.kernel.missingAssets": "Python 런타임 미설치",
+  "code.notebook.kernel.missingAssetsError":
+    "Python 런타임이 설치되어 있지 않습니다. 레포 루트에서 `{command}` 를 실행한 뒤 다시 시도하세요.",
+  "code.notebook.assets.title": "Python 런타임이 준비되지 않았습니다",
+  "code.notebook.assets.body":
+    "노트북 셀을 실행하려면 Pyodide 런타임(약 31MB)이 필요합니다. 보통 `npm run dev` 가 자동으로 받아두지만, 오프라인이었거나 다운로드가 실패하면 이 화면이 보입니다. 레포 루트에서 아래 명령을 실행한 뒤 [다시 시도]를 누르세요.",
+  "code.notebook.assets.copy": "명령 복사",
+  "code.notebook.assets.copied": "복사됨",
+  "code.notebook.assets.retry": "다시 시도",
 
   // "이 워크트리 보기" diff 자동 표시 결과. diff 가 안 뜨는 경우마다 이유를
   // 밝힌다 — 조용히 아무것도 안 하면 버그와 구분되지 않는다.

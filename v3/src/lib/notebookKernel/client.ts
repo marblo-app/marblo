@@ -6,12 +6,44 @@
 // no other exit, since a real SIGINT needs cross-origin isolation.
 
 import type { NotebookOutput } from "../notebook";
-import type { KernelRequest, KernelResponse, KernelStatus } from "./protocol";
-import { toErrorOutput } from "./protocol";
+import type {
+  KernelErrorCode,
+  KernelRequest,
+  KernelResponse,
+  KernelStatus,
+} from "./protocol";
+import { PYODIDE_INSTALL_COMMAND, toErrorOutput } from "./protocol";
+import { t } from "../i18n";
 
 export interface RunResult {
   outputs: NotebookOutput[];
   failed: boolean;
+}
+
+/** A worker failure that kept its machine-readable cause. */
+class KernelRunError extends Error {
+  constructor(
+    message: string,
+    readonly code?: KernelErrorCode,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Turns a kernel failure into the sentence a user should read.
+ *
+ * Translation happens here, not in the worker: this side has the locale store,
+ * so the same failure reads correctly in ko and en. Anything without a known
+ * code falls back to the worker's own (diagnostic) message.
+ */
+function describe(error: unknown): string {
+  if (error instanceof KernelRunError && error.code === "missing-assets") {
+    return t("code.notebook.kernel.missingAssetsError", {
+      command: PYODIDE_INSTALL_COMMAND,
+    });
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 type StatusListener = (status: KernelStatus) => void;
@@ -66,7 +98,7 @@ export class NotebookKernel {
       if (message.type === "result") {
         entry.resolve({ outputs: message.outputs, failed: message.failed });
       } else {
-        entry.reject(new Error(message.message));
+        entry.reject(new KernelRunError(message.message, message.code));
       }
     };
     worker.onerror = (event) => {
@@ -102,7 +134,10 @@ export class NotebookKernel {
     try {
       return await this.request({ type: "run", code });
     } catch (e) {
-      return { outputs: [toErrorOutput("KernelError", e)], failed: true };
+      return {
+        outputs: [toErrorOutput("KernelError", describe(e))],
+        failed: true,
+      };
     }
   }
 

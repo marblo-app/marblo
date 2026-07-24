@@ -9,10 +9,19 @@
 // them ONCE here, at build time, and verify every byte against the sha256 in
 // pyodide-lock.json before it is written.
 //
-//   node scripts/fetch-pyodide-assets.mjs [--force]
+//   npm run assets:pyodide              # strict — build path, any failure aborts
+//   npm run assets:pyodide -- --force   # re-download even when the sha256 matches
+//   npm run assets:pyodide:soft         # best-effort — used by the dev pre-hooks
 //
 // Output is gitignored and re-created on demand. Without it the notebook
 // renders fine and Run reports that the runtime is missing (see NotebookView).
+//
+// --soft exists because this now runs before `npm run dev` (predev). Vendoring
+// is a nice-to-have for a dev session, but being unable to start the app on a
+// plane is not — so in soft mode every failure (offline, CDN down, checksum
+// mismatch) degrades to a warning and exit 0. Only the notebook feature is
+// affected, and it says exactly how to fix itself. The build path stays strict:
+// an installer must never ship without the runtime it promises.
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -32,6 +41,8 @@ const V3 = path.resolve(HERE, "..");
 const SRC = path.join(V3, "node_modules", "pyodide");
 const OUT = path.join(V3, "src", "public", "pyodide");
 const FORCE = process.argv.includes("--force");
+// Best-effort mode for the dev pre-hooks: warn and succeed instead of aborting.
+const SOFT = process.argv.includes("--soft");
 
 // Everything the Pyodide loader itself fetches from indexURL, plus the loader.
 const CORE_FILES = [
@@ -46,9 +57,13 @@ const CORE_FILES = [
 // from the lock, so adding one name here pulls in whatever it needs.
 const ROOT_PACKAGES = ["numpy", "pandas", "matplotlib"];
 
+/** A failure we recognise and can explain — as opposed to a crash. */
+class AssetError extends Error {}
+
+// Throws rather than exits so soft mode can decide the exit code in one place.
+// Every caller treats this as terminating, which a throw still is.
 function fail(msg) {
-  console.error(`[pyodide-assets] ${msg}`);
-  process.exit(1);
+  throw new AssetError(msg);
 }
 
 // PEP 503 name normalization — the lock spells it "Pillow" while matplotlib's
@@ -87,7 +102,16 @@ async function alreadyGood(dest, expectedSha) {
 }
 
 async function download(url, dest, expectedSha) {
-  const res = await fetch(url);
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    // Offline / DNS / TLS. Surface it as a diagnosis, not a node stack trace —
+    // soft mode prints this straight to a developer's `npm run dev` output.
+    fail(
+      `${url} → 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
   if (!res.ok) fail(`${url} → HTTP ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
   const got = sha256(buf);
@@ -120,11 +144,9 @@ async function main() {
   console.log(`[pyodide-assets] pyodide ${version} → src/public/pyodide/`);
 
   for (const file of CORE_FILES) {
-    const from = path.join(SRC, file);
-    if (!existsSync(from)) fail(`node_modules/pyodide/${file} 이 없습니다.`);
-    await copyFile(from, path.join(OUT, file));
+    if (!existsSync(path.join(SRC, file)))
+      fail(`node_modules/pyodide/${file} 이 없습니다.`);
   }
-  console.log(`[pyodide-assets] core ${CORE_FILES.length}개 복사 완료`);
 
   const packages = closure(lock, ROOT_PACKAGES);
   console.log(
@@ -148,6 +170,16 @@ async function main() {
     );
   }
 
+  // Core files land LAST, on purpose. The kernel treats pyodide-lock.json as
+  // proof the directory is complete (see kernel.worker.ts), so writing it
+  // before the wheels would let a half-finished soft run — the one that just
+  // lost the network — look fully vendored and fail later with a far more
+  // confusing error than "assets missing".
+  for (const file of CORE_FILES) {
+    await copyFile(path.join(SRC, file), path.join(OUT, file));
+  }
+  console.log(`[pyodide-assets] core ${CORE_FILES.length}개 복사 완료`);
+
   const files = await readdir(OUT);
   const total = (
     await Promise.all(files.map((f) => stat(path.join(OUT, f))))
@@ -159,6 +191,24 @@ async function main() {
   );
 }
 
-main().catch((e) =>
-  fail(e instanceof Error ? (e.stack ?? e.message) : String(e)),
-);
+main().catch((e) => {
+  // An AssetError is a diagnosis; anything else is a bug and keeps its stack.
+  const detail =
+    e instanceof AssetError
+      ? e.message
+      : e instanceof Error
+        ? (e.stack ?? e.message)
+        : String(e);
+
+  if (SOFT) {
+    console.warn(`[pyodide-assets] 자산 준비를 건너뜁니다 — ${detail}`);
+    console.warn(
+      "[pyodide-assets] 앱은 정상 기동합니다. 노트북(.ipynb) 셀 실행만 비활성화되며,\n" +
+        "[pyodide-assets] 네트워크 복구 후 `npm run assets:pyodide` 로 언제든 받을 수 있습니다.",
+    );
+    process.exit(0);
+  }
+
+  console.error(`[pyodide-assets] ${detail}`);
+  process.exit(1);
+});

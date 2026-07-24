@@ -24,13 +24,36 @@ export type KernelRequest =
   | { type: "run"; id: number; code: string }
   | { type: "reset"; id: number };
 
+/**
+ * Machine-readable cause, so the renderer can localize the explanation and
+ * offer the matching recovery UI.
+ *
+ * The worker deliberately does NOT translate: it is a separate module instance
+ * with no access to the locale store (workers have no localStorage), so any
+ * string it invents would be stuck in one language. It reports a code; the
+ * renderer turns that into words.
+ */
+export type KernelErrorCode = "missing-assets";
+
 export type KernelResponse =
   | { type: "status"; status: KernelStatus }
   | { type: "result"; id: number; outputs: NotebookOutput[]; failed: boolean }
-  | { type: "error"; id: number; message: string };
+  | {
+      type: "error";
+      id: number;
+      message: string;
+      code?: KernelErrorCode;
+    };
 
 /** The directory the vendored Pyodide runtime is served from. */
 export const PYODIDE_BASE = "/pyodide/";
+
+/**
+ * The exact command that vendors the runtime, ready to paste into a shell at
+ * the repo root. Single source of truth: the UI shows this string, the clipboard
+ * button copies it, and `npm run dev` runs the same script via its pre-hook.
+ */
+export const PYODIDE_INSTALL_COMMAND = "cd v3 && npm run assets:pyodide";
 
 /**
  * Validates what runner.py sent back. The worker hands us a JSON string built

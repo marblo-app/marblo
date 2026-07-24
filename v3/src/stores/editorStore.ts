@@ -62,8 +62,8 @@ function getLanguage(filename: string): string {
     scala: "scala",
     md: "markdown",
     json: "json",
-    // Notebooks render as cells via <NotebookView>; "json" is what its Raw
-    // view (and the diff view) should highlight the underlying file as.
+    // Notebooks render as cells via <NotebookView>; "json" is what its
+    // unparseable-file fallback (and the diff view) highlights the file as.
     ipynb: "json",
     yaml: "yaml",
     yml: "yaml",
