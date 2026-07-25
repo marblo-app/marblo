@@ -17,7 +17,20 @@
  * 쉽고 이 모듈을 순수하게 유지한다.
  */
 
+import type { QuestionAudience } from "./escalation-policy.js";
+
 export type QuestionStatus = "open" | "answered";
+
+/** 사장님 승격 기록 — 언제·누가 올렸고 실제로 전달됐는지(P5-3). */
+export interface OwnerEscalation {
+  at: number;
+  /** 승격을 실행한 주체(오케 id). */
+  by: string;
+  /** 텔레그램 전달 결과. failed 는 숨기지 않는다(조용한 유실 금지). */
+  delivery: "sent" | "failed";
+  /** 실패 사유 또는 오케 메모. */
+  note?: string;
+}
 
 export interface QuestionEntry {
   /** `<taskId>#q<base36>` — 티켓을 자기기술하는 상관키(§아래 parseQuestionId). */
@@ -36,6 +49,18 @@ export interface QuestionEntry {
   answeredAt?: number;
   /** 답변을 질문자 PTY 로 보낸 결과 — queued(전달 큐 등록) / failed(전달 불가). */
   answerDelivery?: "queued" | "failed";
+  /**
+   * P5-3 판정: 이 질문을 누가 답해야 하나(`escalation-policy` 의 규칙기반 힌트).
+   * ★권위가 아니라 힌트다 — 최종 판단은 오케가 한다.
+   */
+  audience?: QuestionAudience;
+  /** 사장님께 승격된 기록. 없으면 아직 오케 선에서 다루는 질문이다. */
+  ownerEscalation?: OwnerEscalation;
+  /**
+   * 고비용 칸 승인 요청 질문이면 그 칸 라벨(`model@effort`).
+   * 승인 레코드(`tasks/{id}.modelEscalations`)와 이 질문을 잇는 열쇠.
+   */
+  approvalFor?: string;
 }
 
 /** 티켓 1건이 보관하는 질문 수 상한(문서 비대 방지). 넘치면 오래된 answered 부터 정리. */
@@ -112,6 +137,22 @@ export function readQuestions(value: unknown): QuestionEntry[] {
     if (typeof r.answeredAt === "number") entry.answeredAt = r.answeredAt;
     if (r.answerDelivery === "queued" || r.answerDelivery === "failed") {
       entry.answerDelivery = r.answerDelivery;
+    }
+    if (r.audience === "owner" || r.audience === "orchestrator") {
+      entry.audience = r.audience;
+    }
+    if (typeof r.approvalFor === "string") entry.approvalFor = r.approvalFor;
+    const esc = r.ownerEscalation;
+    if (esc && typeof esc === "object") {
+      const e = esc as Record<string, unknown>;
+      if (e.delivery === "sent" || e.delivery === "failed") {
+        entry.ownerEscalation = {
+          at: typeof e.at === "number" ? e.at : 0,
+          by: typeof e.by === "string" ? e.by : "",
+          delivery: e.delivery,
+          ...(typeof e.note === "string" ? { note: e.note } : {}),
+        };
+      }
     }
     out.push(entry);
   }
@@ -209,6 +250,8 @@ export function formatQuestionNotification(input: {
   roleLabel: string;
   question: string;
   blocking: boolean;
+  /** P5-3 판정 힌트(escalation-policy.formatAudienceHint). 없으면 생략. */
+  audienceHint?: string;
 }): string {
   const flag = input.blocking ? " ★차단(blocking)" : "";
   return [
@@ -217,9 +260,21 @@ export function formatQuestionNotification(input: {
     "",
     input.question,
     "",
+    ...(input.audienceHint ? [input.audienceHint, ""] : []),
     `→ 답변: answer_question(question_id="${input.questionId}", answer="...")`,
     "  답은 질문한 에이전트 PTY 로 자동 전달된다(전달 실패 시 명시 보고).",
   ].join("\n");
+}
+
+/** 사장님 승격 결과를 해당 질문에 기록한다(전달 실패도 남긴다). */
+export function markOwnerEscalation(
+  entries: QuestionEntry[],
+  questionId: string,
+  escalation: OwnerEscalation,
+): QuestionEntry[] {
+  return entries.map((q) =>
+    q.id === questionId ? { ...q, ownerEscalation: escalation } : q,
+  );
 }
 
 /** 질문자 PTY 로 주입할 답변 본문. 질문 요약을 함께 실어 문맥이 끊기지 않게. */
@@ -251,9 +306,20 @@ export function formatQuestionLine(
 ): string {
   const where = taskTitle ? ` [${taskTitle}]` : "";
   const flag = entry.blocking ? " ★blocking" : "";
+  // 판정·승격 상태를 목록에서 바로 보여준다 — "사장님께 올렸는데 답이 없는
+  // 질문" 이 open 더미에 섞여 안 보이면 승격 자체가 유실과 다를 바 없다.
+  const marks = [
+    entry.approvalFor ? `★승인요청 ${entry.approvalFor}` : "",
+    entry.audience === "owner" ? "판정=사장님" : "",
+    entry.ownerEscalation
+      ? `승격 ${entry.ownerEscalation.delivery === "sent" ? "전달됨" : "전달실패"}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
   const head = `- ${entry.id}${where}${flag} (${entry.status}, agent=${
     entry.askedBy || "unknown"
-  })`;
+  }${marks ? `, ${marks}` : ""})`;
   if (entry.status === "answered") {
     return `${head}\n  Q: ${entry.question}\n  A: ${entry.answer ?? ""}`;
   }

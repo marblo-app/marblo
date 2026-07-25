@@ -115,6 +115,7 @@ TODO → CLAIMED → IN_PROGRESS → REVIEW → DONE
 
 - 질문·확인 요청(★권장): `ask_orchestrator(task_id, question="필요한 것: ... / 이유: ... / 못 받으면 막히는 범위: ...", blocking=false)` — `question_id` 를 돌려준다. 질문 **전문**이 오케 PTY 로 전달되고(길이 제한으로 안 잘림), 티켓에 `open` 으로 남으며, 오케가 `answer_question(question_id, answer)` 로 답하면 그 답이 네 PTY 로 자동 주입된다. 주입에 실패하면 재시도 후 명시적으로 보고된다 — 조용한 유실 없음.
 - 대안(구 경로): `add_activity(task_id, message="[질문] ...")`. 이때 `[질문]` 표기는 **관례가 아니라 실제 전달 스위치**다 — 표기(또는 "확인 필요/판단 필요" 같은 막힘 표현)가 없는 평범한 activity 는 오케 PTY 로 가지 않고 타임라인에만 남는다(`bridge-server.shouldInjectOrchestratorNotification`). 게다가 오케로 나가는 본문은 300자에서 잘리므로 긴 질의엔 `ask_orchestrator` 를 써라.
+- ★**고비용 모델 칸은 네가 못 켠다**: `max`/`ultra` effort(현재 `gpt-5.6-sol@max`·`gpt-5.6-sol@ultra`)는 사용자 승인 없이는 안 쓰인다. 정말 필요하면 `request_model_escalation(task_id, model, effort, reason="싼 칸으로 무엇을 시도했고 왜 부족했나")` 로 요청하고, **승인을 기다리며 멈추지 말고** 승인 없이 갈 수 있는 칸으로 계속 진행하라(승인 없으면 자동 강등된다). 승인은 1회용·티켓당 1건이다.
 - 그 미지 때문에 진행이 실제로 멈추면: `update_task_status(task_id, "BLOCKED", comment="무엇을 기다리는지")`
 - **★질문했다고 작업 전체를 멈추지 마라.** 그 미지와 무관하게 진행 가능한 잔여 작업은 계속하고, 답이 오면 막혔던 부분을 이어서 한다. 한 가지 미지로 티켓 전체를 idle 로 세우지 말 것.
 - 사용자만 답할 수 있는 것(스크린샷, 라이브 관측값, 제품 판단)이라도 오케에 보고하면 오케가 판단해 답하거나 사장님께 모아 전달한다.

@@ -9,8 +9,14 @@ import {
   getModel,
   meetsMinCli,
   modelsByProvider,
+  type EffortLevel,
   type ModelProvider,
 } from "./model-registry";
+import {
+  entryRung,
+  isApprovalGatedEffort,
+  type LadderTier,
+} from "./model-ladder";
 import { maskEnvForLogging } from "./config-redaction";
 import { CODEX_ORCH_REQUIRED_MCP_TOOLS } from "./mcp-server/tool-surface";
 
@@ -806,13 +812,71 @@ export function resolveStandardClaudeModel(installedVersion?: string): string {
   return resolveStandardClaudeModelDetailed(installedVersion).model;
 }
 
+/**
+ * ★티어별 Codex effort 의 **기본값은 사다리에서 읽는다**(P3-1).
+ *
+ * 종전엔 여기 `"high"`/`"low"`/`"medium"` 리터럴 세 개가 박혀 있어서, 사다리를
+ * 데이터로 만들어도 라이브 스폰은 그 데이터를 안 보는 죽은 표가 될 수 있었다.
+ * 지금은 `MODEL_LADDERS.gpt` 의 티어 진입 칸이 곧 기본 effort 다 —
+ * 사다리 데이터와 라이브 동작이 갈라질 수 없다.
+ *
+ * 현행 진입 칸 effort 는 low/medium/high(설계상 의도) 이므로 이 변경으로
+ * 스폰 인자는 한 바이트도 바뀌지 않는다(무회귀). `model-ladder-live.test.ts`
+ * 가 그 동일성을 못박는다.
+ */
+function ladderEffortForTier(tier: LadderTier): EffortLevel {
+  const rung = entryRung("gpt", tier);
+  // gpt 사다리는 buildLadder 검증을 통과했으므로 진입 칸에 effort 가 반드시 있다.
+  // 그래도 undefined 를 그냥 넘기지 않는 이유: 사다리가 나중에 바뀌어도 여기서
+  // 조용히 "effort 없음"이 되면 codex 가 CLI 기본 effort 로 떨어져 티어 정책이
+  // 사라진다(조용한 성능/비용 변동).
+  if (!rung?.effort) {
+    throw new Error(
+      `[model-policy] gpt 사다리의 ${tier} 진입 칸에 effort 가 없습니다 — model-ladder.ts 를 확인하세요.`,
+    );
+  }
+  return rung.effort;
+}
+
+/**
+ * env 로 들어온 effort 를 검증한다.
+ *
+ * ★승인 게이트 집행 지점(사장님 결정 2026-07-25): `max`/`ultra` 는 사용자
+ * 승인 없이는 쓸 수 없다. env 는 티켓별 승인 레코드를 볼 수 없는 전역 스위치라
+ * **여기서는 무조건 거부**하고 티어 기본값으로 떨어뜨린다(조용히 열리지 않게
+ * 경고 로그를 남긴다). 고비용 칸을 실제로 쓰려면 티켓 단위 승인 왕복
+ * (`request_model_escalation` → `resolve_model_escalation`)을 거쳐야 한다.
+ *
+ * `xhigh` 는 통과시킨다 — 5.5 계열에도 있던 기존 칸이고 게이트 대상이 아니다.
+ */
+function validateCodexEffortEnv(
+  raw: string | undefined,
+  envKey: string,
+  fallback: EffortLevel,
+): string {
+  const value = (raw || "").trim().toLowerCase();
+  if (!value) return fallback;
+  if (isApprovalGatedEffort(value)) {
+    console.warn("[model-policy] refusing gated codex effort from env", {
+      envKey,
+      requested: value,
+      fallbackTo: fallback,
+      why: "max/ultra 는 티켓 단위 사용자 승인(request_model_escalation)이 필요하다",
+    });
+    return fallback;
+  }
+  return ["low", "medium", "high", "xhigh"].includes(value) ? value : fallback;
+}
+
 /** complex 에서 쓸 Codex 최상위 reasoning effort. env MARBLO_TOP_CODEX_REASONING,
- * 기본 "high". 유효값(low/medium/high) 아니면 high 로 폴백. */
+ * 기본 = 사다리의 complex 진입 칸 effort(현행 "high"). 유효하지 않거나 승인
+ * 게이트 대상(max/ultra)이면 그 기본값으로 폴백. */
 export function resolveTopCodexReasoning(): string {
-  const r = (process.env.MARBLO_TOP_CODEX_REASONING || "high")
-    .trim()
-    .toLowerCase();
-  return ["low", "medium", "high"].includes(r) ? r : "high";
+  return validateCodexEffortEnv(
+    process.env.MARBLO_TOP_CODEX_REASONING,
+    "MARBLO_TOP_CODEX_REASONING",
+    ladderEffortForTier("complex"),
+  );
 }
 
 /** 기본 cheap Claude 모델 — simple 기본 물리 스폰에서 사용. */
@@ -841,12 +905,14 @@ export function resolveSimpleClaudeModel(installedVersion?: string): string {
 }
 
 /** simple 에서 쓸 cheap Codex reasoning effort. env MARBLO_SIMPLE_CODEX_REASONING,
- * 기본 "low". 유효값(low/medium/high) 아니면 low 로 폴백. */
+ * 기본 = 사다리의 simple 진입 칸 effort(현행 "low"). 유효하지 않거나 승인
+ * 게이트 대상(max/ultra)이면 그 기본값으로 폴백. */
 export function resolveSimpleCodexReasoning(): string {
-  const r = (process.env.MARBLO_SIMPLE_CODEX_REASONING || "low")
-    .trim()
-    .toLowerCase();
-  return ["low", "medium", "high"].includes(r) ? r : "low";
+  return validateCodexEffortEnv(
+    process.env.MARBLO_SIMPLE_CODEX_REASONING,
+    "MARBLO_SIMPLE_CODEX_REASONING",
+    ladderEffortForTier("simple"),
+  );
 }
 
 // 작업 complexity → 프로바이더별 모델/레벨. 품질 우선 정책: 기본(standard)은
@@ -865,6 +931,16 @@ export function resolveSimpleCodexReasoning(): string {
 // simple 모델은 dispatch_task 기본 물리 스폰에서 비용 폭발을 막는 cheap tier 로
 // 쓰인다(§B v2).
 export type TaskComplexity = "simple" | "standard" | "complex";
+
+// ★컴파일타임 가드: 난도 축(TaskComplexity)과 사다리의 티어 축(LadderTier)이 같은
+// 집합인지 양방향으로 못박는다. model-ladder.ts 가 순환 의존을 피하려고 유니온을
+// 따로 선언했으므로, 한쪽에만 티어를 추가하면 여기서 타입에러가 난다
+// (레지스트리 ModelProvider↔ModelType 가드와 같은 방식).
+const _tierCoversComplexity: LadderTier = null as unknown as TaskComplexity;
+const _complexityCoversTier: TaskComplexity = null as unknown as LadderTier;
+void _tierCoversComplexity;
+void _complexityCoversTier;
+
 export function modelTierForComplexity(
   model: ModelType,
   complexity: TaskComplexity | undefined,
@@ -885,10 +961,12 @@ export function modelTierForComplexity(
   }
   if (model === "gpt") {
     if (complexity === "simple")
-      return { codexReasoning: resolveSimpleCodexReasoning() }; // env, 기본 low
+      return { codexReasoning: resolveSimpleCodexReasoning() }; // env, 기본=사다리 simple 진입(low)
     if (complexity === "complex")
-      return { codexReasoning: resolveTopCodexReasoning() }; // env, 기본 high
-    return { codexReasoning: "medium" };
+      return { codexReasoning: resolveTopCodexReasoning() }; // env, 기본=사다리 complex 진입(high)
+    // standard 는 전용 env 가 없다(종전과 동일) — 사다리 standard 진입 칸의
+    // effort 를 그대로 쓴다. 종전 리터럴 "medium" 과 같은 값이다.
+    return { codexReasoning: ladderEffortForTier("standard") };
   }
   return {}; // gemini/antigravity/local/custom — 레벨 플래그 없음(기본 유지)
 }

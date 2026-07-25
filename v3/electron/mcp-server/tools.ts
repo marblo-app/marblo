@@ -64,6 +64,7 @@ import {
   formatQuestionLine,
   formatQuestionNotification,
   markAnswerDelivery,
+  markOwnerEscalation,
   newQuestionId,
   MAX_QUESTION_CHARS,
   openQuestions,
@@ -71,6 +72,30 @@ import {
   readQuestions,
   type QuestionEntry,
 } from "./question-channel.js";
+import {
+  classifyQuestionAudience,
+  clampForTelegram,
+  formatAudienceHint,
+  formatOwnerEscalation,
+} from "./escalation-policy.js";
+import {
+  approvalBudgetSpent,
+  consumeApproval,
+  decideApproval,
+  effortFromDispatchArgs,
+  formatApprovalDecision,
+  formatApprovalRequest,
+  isApprovalGatedEffort,
+  parseGatedRungSpec,
+  pendingRequestFor,
+  readEscalationApprovals,
+  stripEffortSuffix,
+  usableApproval,
+  usableApprovalLoose,
+  GATED_LADDER_RUNGS,
+  MAX_GATED_APPROVALS_PER_TASK,
+  type EscalationApprovalRecord,
+} from "./escalation-approval.js";
 import {
   chunkBulkTasks,
   normalizeBulkTasksPayload,
@@ -1160,6 +1185,10 @@ const ORCHESTRATOR_LIVE_GUARDED_TOOLS = new Set([
   "add_pending_instruction",
   "mark_instruction_delivered",
   "answer_question",
+  // 사장님 승격(외부 발송)과 승인 결정 기록은 오케만 하는 행위다 — 죽은 오케
+  // 세션이 사장님께 텔레그램을 쏘거나 승인을 적어 넣지 못하게 같이 게이트한다.
+  "escalate_to_owner",
+  "resolve_model_escalation",
   "run_skill",
   "mission_step_done",
   "send_telegram_message",
@@ -3732,6 +3761,37 @@ export function registerTools(server: McpServer): void {
         if (!preflight.ok) return text(preflight.error);
       }
 
+      // ★P3-1 승인 게이트 — 고비용 칸(max/ultra)은 여기서 걸러진다.
+      //
+      // 왜 이 층인가: 승인 레코드는 티켓 문서(`tasks/{id}.modelEscalations`)에
+      // 있고 그걸 읽을 수 있는 것은 Firestore 를 쥔 이 MCP 층이다. bridge 는
+      // Firestore 클라이언트가 없어 승인 여부를 확인할 방법이 없다 — 그래서
+      // 게이트를 bridge 에 두면 "확인 못 하니 통과" 나 "확인 못 하니 전면 차단"
+      // 둘 중 하나가 되고, 둘 다 사장님 지시("승인받고 쓸 것")를 못 지킨다.
+      //
+      // 결과는 차단이 아니라 **effort 강등**이다: 모델 지정은 살리고 effort 만
+      // 떨어뜨려 티켓이 계속 굴러가게 하되, 무시했다는 사실을 호출자에게 문장으로
+      // 돌려준다(조용한 무시 금지). 승인이 있으면 통과시키고 스폰 성공 후 소진한다.
+      const requestedEffort = effortFromDispatchArgs(model, effort);
+      let effortForDispatch = effort;
+      let gateNote = "";
+      let approvalToConsume: string | null = null;
+      if (isApprovalGatedEffort(requestedEffort)) {
+        // 승인은 티켓 단위이므로 호출자가 준 task_id 로 조회한다(미션 경로에서
+        // 뒤늦게 만들어지는 ad-hoc 티켓에는 승인 레코드가 있을 수 없다).
+        const gate = await gateDispatchEffort(task_id, requestedEffort!, model);
+        if (gate.approvedQuestionId) {
+          approvalToConsume = gate.approvedQuestionId;
+          gateNote = `★고비용 칸 ${requestedEffort} 사용(승인 question_id=${gate.approvedQuestionId}) — 이 승인은 이번 스폰으로 소진됩니다.\n`;
+        } else {
+          // model 문자열에 '@max' 형태로 들어온 경우까지 확실히 떼어낸다 —
+          // 여기서 놓치면 bridge 의 parseModelSpec 이 그대로 살려 스폰한다.
+          model = stripEffortSuffix(model);
+          effortForDispatch = undefined;
+          gateNote = `⚠️ ${gate.reason}\neffort 지정을 무시하고 승인 없이 쓸 수 있는 기본 effort 로 스폰합니다. 정말 필요하면 request_model_escalation(task_id, model, effort, reason) 으로 사용자 승인을 받으세요.\n`;
+        }
+      }
+
       const missionContextId = resolveMissionContextForWrite();
       let dispatchTaskId = task_id;
 
@@ -3891,7 +3951,8 @@ export function registerTools(server: McpServer): void {
               taskId: dispatchTaskId,
               complexity: complexity || "standard",
               model,
-              effort,
+              // ★승인 게이트를 통과한 effort 만 나간다(강등 시 undefined).
+              effort: effortForDispatch,
               nameHint: name,
               cwd,
               skills,
@@ -3930,7 +3991,21 @@ export function registerTools(server: McpServer): void {
         };
 
         if (!result.success) {
-          return text(`Dispatch failed: ${result.error || "Unknown error"}`);
+          return text(
+            `${gateNote}Dispatch failed: ${result.error || "Unknown error"}`,
+          );
+        }
+
+        // ★스폰이 성공한 뒤에야 승인을 소진한다(1회용 계약). 실패한 스폰이 승인을
+        // 태우면 사장님을 다시 깨워야 하므로 순서가 중요하다.
+        if (approvalToConsume) {
+          const consumedAt = Date.now();
+          const ok = await mutateEscalations(task_id!, (cur) =>
+            consumeApproval(cur, approvalToConsume!, consumedAt),
+          );
+          gateNote += ok
+            ? `승인 ${approvalToConsume} 소진 처리됨.\n`
+            : `⚠️ 승인 ${approvalToConsume} 소진 기록에 실패했습니다 — 같은 승인이 재사용될 수 있으니 오케가 확인하세요.\n`;
         }
 
         // Persist newly-spawned / restarted agents to Firestore so they
@@ -4002,6 +4077,9 @@ export function registerTools(server: McpServer): void {
         }
 
         const lines = [
+          // ★게이트 결과를 맨 앞에 붙인다 — effort 를 무시했다는 사실을 호출자가
+          // 못 보고 지나가면 그게 곧 "조용한 무시" 다.
+          ...(gateNote ? [gateNote.trimEnd()] : []),
           `Dispatch: ${result.action}`,
           `  Reason: ${result.reason}`,
         ];
@@ -4639,6 +4717,157 @@ export function registerTools(server: McpServer): void {
     });
   }
 
+  /**
+   * 답변을 질문자 PTY 로 보내는 하드닝된 전달 경로(P5-2). answer_question 과
+   * 승인 결과 회신(resolve_model_escalation)이 **같은 함수**를 쓴다 — 두 벌로
+   * 두면 한쪽만 하드닝되는 일이 반드시 생긴다.
+   */
+  async function queueAnswerDelivery(input: {
+    task: TaskDoc;
+    taskId: string;
+    questionId: string;
+    question: string;
+    answer: string;
+    answeredBy: string;
+    target: string;
+  }): Promise<{ delivery: "queued" | "failed"; note: string }> {
+    const callerUid = getCurrentAuthUid();
+    if (!callerUid) {
+      return {
+        delivery: "failed",
+        note: "Firebase auth 미준비로 전달 큐에 넣지 못했습니다.",
+      };
+    }
+    try {
+      const ref = await addDoc(collection(db, "pendingInstructions"), {
+        projectId: input.task.projectId,
+        taskId: input.taskId,
+        targetAgentId: input.target,
+        message: formatAnswerDelivery({
+          questionId: input.questionId,
+          taskId: input.taskId,
+          question: input.question,
+          answer: input.answer,
+          answeredBy: input.answeredBy,
+        }),
+        fromUserId: callerUid,
+        fromUserName: "",
+        sourceType: "orchestrator",
+        isDelivered: false,
+        createdAt: Timestamp.now(),
+        deliveredAt: null,
+      });
+      return {
+        delivery: "queued",
+        note: `전달 큐 등록됨(instruction=${ref.id}, target=${input.target}).`,
+      };
+    } catch (err) {
+      return {
+        delivery: "failed",
+        note: `전달 큐 등록 실패: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+  }
+
+  /**
+   * 텔레그램 아웃바운드(브리지 경유). `send_telegram_message` 와 사장님 승격
+   * (`escalate_to_owner`)이 같은 경로를 쓴다 — 봇 토큰은 이 경계를 넘지 않고,
+   * 에러 문자열은 poller 가 이미 토큰 스크럽한 것이다.
+   */
+  async function sendTelegramViaBridge(
+    projectId: string,
+    messageText: string,
+    chatId?: string,
+  ): Promise<{ ok: boolean; chatId?: string; error?: string }> {
+    const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+    if (!bridgePort) {
+      return {
+        ok: false,
+        error: "MARBLO_BRIDGE_PORT not set. Bridge server not available.",
+      };
+    }
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${bridgePort}/send-telegram-message`,
+        {
+          method: "POST",
+          headers: bridgeHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ projectId, text: messageText, chatId }),
+        },
+      );
+      return (await response.json()) as {
+        ok: boolean;
+        chatId?: string;
+        error?: string;
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : "network error",
+      };
+    }
+  }
+
+  /**
+   * ★고비용 칸(max/ultra) 게이트 — `dispatch_task` 가 스폰 전에 부른다.
+   *
+   * "승인이 있으면 통과, 없으면 강등" 을 판정만 하고 소진은 하지 않는다(스폰이
+   * 실패했는데 1회용 승인이 타버리면 사장님을 또 깨워야 한다). 소진은 bridge 가
+   * 성공을 돌려준 뒤에 한다.
+   */
+  async function gateDispatchEffort(
+    taskId: string | undefined,
+    effort: string,
+    requestedModel: string | undefined,
+  ): Promise<{ approvedQuestionId?: string; reason: string }> {
+    if (!taskId) {
+      return {
+        reason: `effort "${effort}" 는 사용자 승인이 필요한 고비용 칸인데, 이 dispatch 엔 task_id 가 없어 승인 레코드를 확인할 수 없습니다(승인은 티켓 단위).`,
+      };
+    }
+    const task = await fetchTask(taskId);
+    if (!task) {
+      return {
+        reason: `effort "${effort}" 승인을 확인하려 했지만 티켓 ${taskId} 를 찾지 못했습니다.`,
+      };
+    }
+    const records = readEscalationApprovals(
+      (task as unknown as Record<string, unknown>).modelEscalations,
+    );
+    const approval = usableApprovalLoose(records, requestedModel, effort);
+    if (approval) {
+      return { approvedQuestionId: approval.questionId, reason: "" };
+    }
+    return {
+      reason: `effort "${effort}" 는 사용자 승인이 필요한 고비용 칸이고, 티켓 ${taskId} 에 ${
+        requestedModel ? `${stripEffortSuffix(requestedModel)} 용 ` : ""
+      }미소진 승인이 없습니다(승인 예산 사용 ${approvalBudgetSpent(records)}/${MAX_GATED_APPROVALS_PER_TASK}).`,
+    };
+  }
+
+  /** 승인 레코드 배열을 트랜잭션으로 갱신한다(동시 요청/결정이 서로를 덮지 않게). */
+  async function mutateEscalations(
+    taskId: string,
+    mutate: (
+      current: EscalationApprovalRecord[],
+    ) => EscalationApprovalRecord[] | null,
+  ): Promise<boolean> {
+    return runTransaction(db, async (tx) => {
+      const ref = doc(db, "tasks", taskId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return false;
+      const current = readEscalationApprovals(
+        (snap.data() as Record<string, unknown>).modelEscalations,
+      );
+      const next = mutate(current);
+      if (!next) return false;
+      tx.update(ref, { modelEscalations: next });
+      return true;
+    });
+  }
+
   // 23. ask_orchestrator — 에이전트가 오케에 타입드 질문을 던진다.
   auditedTool(
     "ask_orchestrator",
@@ -4672,6 +4901,9 @@ export function registerTools(server: McpServer): void {
       const seed = `${Date.now().toString(36)}${Math.random()
         .toString(36)
         .slice(2, 6)}`;
+      // P5-3 판정 — 이 질문을 오케가 답할 수 있나, 사장님께 올려야 하나.
+      // ★힌트일 뿐이고 최종 판단은 오케가 한다(escalation-policy.ts 참조).
+      const verdict = classifyQuestionAudience(clamped.value);
       const entry: QuestionEntry = {
         id: newQuestionId(task_id, seed),
         question: clamped.value,
@@ -4679,6 +4911,7 @@ export function registerTools(server: McpServer): void {
         askedBy: askedBy === "unknown" ? "" : askedBy,
         askedAt: Date.now(),
         blocking: blocking === true,
+        audience: verdict.audience,
       };
 
       const stored = await mutateQuestions(task_id, (cur) =>
@@ -4721,6 +4954,7 @@ export function registerTools(server: McpServer): void {
           roleLabel,
           question: entry.question,
           blocking: entry.blocking,
+          audienceHint: formatAudienceHint(verdict, entry.id),
         }),
         task.contextId,
       );
@@ -4734,7 +4968,7 @@ export function registerTools(server: McpServer): void {
       return text(
         `질문 등록: question_id=${entry.id} (status=open${
           entry.blocking ? ", blocking" : ""
-        })\n${deliveryNote}${truncNote}\n답이 오면 이 에이전트 PTY 로 자동 주입됩니다. 그 사이 무관한 잔여 작업은 계속하세요.`,
+        }, 판정=${verdict.audience}/${verdict.rule})\n${deliveryNote}${truncNote}\n답이 오면 이 에이전트 PTY 로 자동 주입됩니다. 그 사이 무관한 잔여 작업은 계속하세요.`,
       );
     },
   );
@@ -4824,39 +5058,15 @@ export function registerTools(server: McpServer): void {
 
       // 전달은 하드닝된 pendingInstructions 경로를 탄다: 호스트 앱의 리스너가
       // 현재 PTY 로 재시도하고, 끝내 실패하면 오케에 명시 보고한다(P5-2).
-      let delivery: "queued" | "failed" = "failed";
-      let deliveryNote = "";
-      const callerUid = getCurrentAuthUid();
-      if (!callerUid) {
-        deliveryNote = "Firebase auth 미준비로 전달 큐에 넣지 못했습니다.";
-      } else {
-        try {
-          const ref = await addDoc(collection(db, "pendingInstructions"), {
-            projectId: task.projectId,
-            taskId,
-            targetAgentId: target,
-            message: formatAnswerDelivery({
-              questionId: question_id,
-              taskId,
-              question: entry?.question ?? "",
-              answer: clamped.value,
-              answeredBy,
-            }),
-            fromUserId: callerUid,
-            fromUserName: "",
-            sourceType: "orchestrator",
-            isDelivered: false,
-            createdAt: Timestamp.now(),
-            deliveredAt: null,
-          });
-          delivery = "queued";
-          deliveryNote = `전달 큐 등록됨(instruction=${ref.id}, target=${target}).`;
-        } catch (err) {
-          deliveryNote = `전달 큐 등록 실패: ${
-            err instanceof Error ? err.message : String(err)
-          }`;
-        }
-      }
+      const { delivery, note: deliveryNote } = await queueAnswerDelivery({
+        task,
+        taskId,
+        questionId: question_id,
+        question: entry?.question ?? "",
+        answer: clamped.value,
+        answeredBy,
+        target,
+      });
 
       await mutateQuestions(taskId, (cur) =>
         markAnswerDelivery(cur, question_id, delivery),
@@ -4949,6 +5159,424 @@ export function registerTools(server: McpServer): void {
       return text(lines.length ? lines.join("\n") : "미답 질문이 없습니다.");
     },
     { userFacing: false },
+  );
+
+  // ── 22.6 사장님 왕복 + 고비용 모델 승인 게이트 (P5-3 / P3-1) ──────────
+  //
+  // 설계문서 §6 갭 ④: 질문 채널은 있는데 "누가 답할 질문인가" 를 정하는 규칙이
+  // 없었다. 판정 자체는 `escalation-policy.ts`(순수) 가 하고, 여기서는 그 판정에
+  // 따른 두 경로를 배관한다 — 사장님께 올리기(escalate_to_owner)와, 고비용 칸을
+  // 쓰기 위한 승인 왕복(request_model_escalation / resolve_model_escalation).
+  //
+  // ★새 배관은 만들지 않았다: 질문 저장은 P5-1 질문채널, 회신은 P5-2 하드닝된
+  //   pendingInstructions 큐, 사장님 전달은 기존 텔레그램 아웃바운드다.
+
+  // 26. escalate_to_owner — 오케가 답할 수 없는 질문을 사장님께 올린다.
+  auditedTool(
+    "escalate_to_owner",
+    "Escalate an open question to the owner (사장님) over Telegram, for the cases the orchestrator cannot answer: product judgment, cost/billing decisions, approval of irreversible or outward-facing actions, anything the orchestrator cannot observe (screenshots/live screens), and arbitration of contradictory instructions. The full question text is sent (no 300-char truncation). The owner's reply comes back to the orchestrator, which then calls answer_question so the asking agent receives it. Use ask_orchestrator's routing hint as a guide, not an authority — if you can answer from the codebase or ticket, answer instead.",
+    {
+      question_id: z
+        .string()
+        .describe(
+          "question_id from ask_orchestrator / request_model_escalation",
+        ),
+      note: z
+        .string()
+        .optional()
+        .describe(
+          "Orchestrator's note for the owner — what you already checked and what exactly you need decided.",
+        ),
+      chat_id: z
+        .string()
+        .optional()
+        .describe(
+          "Telegram chat id (defaults to the project's last inbound chat)",
+        ),
+    },
+    async ({ question_id, note, chat_id }) => {
+      const parsed = parseQuestionId(question_id);
+      if (!parsed.taskId) {
+        return text(
+          `Error: question_id "${question_id}" 에서 task 를 알 수 없습니다.`,
+        );
+      }
+      const taskId = parsed.taskId;
+      const task = await fetchTask(taskId);
+      if (!task) return text(`Error: Task ${taskId} not found.`);
+      const entries = readQuestions(
+        (task as unknown as Record<string, unknown>).questions,
+      );
+      const entry = entries.find((q) => q.id === question_id);
+      if (!entry) {
+        return text(
+          `Error: question_id ${question_id} 를 티켓 ${taskId} 에서 찾지 못했습니다. get_open_questions 로 확인하세요.`,
+        );
+      }
+      if (entry.status === "answered") {
+        return text(
+          `Question ${question_id} 은 이미 답변됐습니다(${entry.answeredBy ?? "unknown"}). 사장님을 깨우지 않았습니다.`,
+        );
+      }
+
+      const body = clampForTelegram(
+        formatOwnerEscalation({
+          questionId: question_id,
+          taskId,
+          taskTitle: task.title,
+          askedBy: entry.askedBy,
+          question: entry.question,
+          verdict: classifyQuestionAudience(entry.question),
+          note,
+        }),
+      );
+      const sent = await sendTelegramViaBridge(
+        task.projectId,
+        body.value,
+        chat_id,
+      );
+
+      // 전달 성공/실패를 **둘 다** 티켓에 남긴다. 실패를 숨기면 "사장님께
+      // 올렸다" 는 기록만 남고 답은 영원히 오지 않는다(§6 갭 ③ 과 같은 부류).
+      await mutateQuestions(taskId, (cur) =>
+        markOwnerEscalation(cur, question_id, {
+          at: Date.now(),
+          by: MARBLO_AGENT_ID || "orchestrator",
+          delivery: sent.ok ? "sent" : "failed",
+          ...(sent.ok ? (note ? { note } : {}) : { note: sent.error ?? "" }),
+        }),
+      );
+
+      try {
+        await applyProjection(db, taskId, {
+          lastAgentId: "",
+          lastActivitySummary: `[사장님 승격] ${question_id} ${sent.ok ? "전달됨" : "전달실패"}`,
+          activityPayload: {
+            agentId: MARBLO_AGENT_ID || "orchestrator",
+            message:
+              `[사장님 승격 ${question_id}] ${sent.ok ? "텔레그램 전달됨" : `전달 실패: ${sent.error ?? "unknown"}`}` +
+              (note ? `\n메모: ${note}` : ""),
+          },
+        });
+      } catch (err) {
+        console.error("[escalate_to_owner] activity write failed:", err);
+      }
+
+      if (!sent.ok) {
+        return text(
+          `사장님 전달 실패: ${sent.error ?? "unknown error"}\n` +
+            `질문은 티켓에 open 으로 남아 있습니다. 텔레그램 채널이 없으면 사장님께 직접 여쭙고, 받은 답을 answer_question 으로 넣어 주세요(그래야 에이전트 PTY 로 전달됩니다).`,
+        );
+      }
+      return text(
+        `사장님께 전달됨(chat ${sent.chatId ?? "default"}, question_id=${question_id})${
+          body.truncated ? " ⚠️ 텔레그램 4096자 한도로 뒷부분이 잘렸습니다" : ""
+        }.\n` +
+          `사장님 답장은 '[Telegram inbound ...]' 로 도착합니다. 그 답을 answer_question(question_id="${question_id}", answer="...") 로 넣으면 질문한 에이전트 PTY 로 자동 전달됩니다.`,
+      );
+    },
+  );
+
+  // 27. request_model_escalation — 고비용 칸(max/ultra)을 쓰기 위한 승인 요청.
+  auditedTool(
+    "request_model_escalation",
+    `Request user approval to use a high-cost model rung. Only the gated rungs need this (currently ${GATED_LADDER_RUNGS.join(
+      ", ",
+    )}) — every other rung on the ladder is usable without asking. Returns a question_id; the orchestrator must get the USER's decision (escalate_to_owner, or ask in-app) and record it with resolve_model_escalation. Approval is single-use and the per-ticket budget is ${MAX_GATED_APPROVALS_PER_TASK}. Without an approval record the spawn path silently downgrades to the highest ungated rung, so these rungs never fire automatically.`,
+    {
+      task_id: z.string().describe("Task ID this escalation belongs to"),
+      model: z
+        .string()
+        .describe(`Model id, e.g. ${GATED_LADDER_RUNGS[0].split("@")[0]}`),
+      effort: z.string().describe("Gated reasoning effort: max or ultra"),
+      reason: z
+        .string()
+        .describe(
+          "Why the cheaper rungs are not enough — what was already tried and what failed. The user decides on this text.",
+        ),
+      agent_id: z
+        .string()
+        .optional()
+        .describe("Requesting agent id (defaults to this MCP session's agent)"),
+    },
+    async ({ task_id, model, effort, reason, agent_id }) => {
+      const task = await fetchTask(task_id);
+      if (!task) return text(`Error: Task ${task_id} not found.`);
+      const why = reason.trim();
+      if (!why) {
+        return text(
+          "Error: reason 이 비어 있습니다 — 사용자가 판단할 근거 없이 고비용 칸을 승인할 수는 없습니다.",
+        );
+      }
+      const spec = parseGatedRungSpec(model, effort);
+      if (!spec.ok) {
+        return text(
+          spec.needsNoApproval
+            ? `승인 불필요: ${spec.error}`
+            : `Error: ${spec.error}`,
+        );
+      }
+
+      const existing = readEscalationApprovals(
+        (task as unknown as Record<string, unknown>).modelEscalations,
+      );
+      const already = usableApproval(existing, spec.model, spec.effort);
+      if (already) {
+        return text(
+          `이미 승인된 미소진 건이 있습니다(question_id=${already.questionId}, ${spec.label}). 새 요청을 만들지 않았습니다 — 그 승인을 쓰세요.`,
+        );
+      }
+      const pending = pendingRequestFor(existing, spec.model, spec.effort);
+      if (pending) {
+        return text(
+          `이미 답을 기다리는 승인 요청이 있습니다(question_id=${pending.questionId}, ${spec.label}). 중복 요청으로 사장님을 두 번 깨우지 않습니다.`,
+        );
+      }
+      const spent = approvalBudgetSpent(existing);
+      if (spent >= MAX_GATED_APPROVALS_PER_TASK) {
+        return text(
+          `Error: 이 티켓의 고비용 승인 예산(${MAX_GATED_APPROVALS_PER_TASK}건)을 이미 소진했습니다(사용 ${spent}건). ` +
+            `설계문서 §4 의 "상향은 티켓당 1회" 규칙과 같은 계정입니다 — 더 필요하면 티켓을 쪼개거나 사장님께 별도로 요청하세요.`,
+        );
+      }
+
+      const requestedBy = agent_id || MARBLO_AGENT_ID;
+      const seed = `${Date.now().toString(36)}${Math.random()
+        .toString(36)
+        .slice(2, 6)}`;
+      const questionId = newQuestionId(task_id, seed);
+      const questionBody = [
+        `[고비용 모델 승인 요청] ${spec.label}`,
+        "",
+        `사유: ${why}`,
+        "",
+        `이 칸은 사용자 승인 없이는 쓰이지 않습니다(승인 없으면 사다리 하위 칸으로 강등). 승인은 1회용이며 티켓당 ${MAX_GATED_APPROVALS_PER_TASK}건입니다.`,
+      ].join("\n");
+      const clamped = clampQuestionText(questionBody);
+      const entry: QuestionEntry = {
+        id: questionId,
+        question: clamped.value,
+        status: "open",
+        askedBy: requestedBy === "unknown" ? "" : requestedBy,
+        askedAt: Date.now(),
+        blocking: false,
+        // 비용 결정은 §6-2 에 따라 언제나 사용자 몫이다 — 분류기를 돌리지 않고
+        // owner 로 못박는다(오케가 자기 판단으로 승인해 버리는 길을 막는다).
+        audience: "owner",
+        approvalFor: spec.label,
+      };
+      const stored = await mutateQuestions(task_id, (cur) =>
+        appendQuestion(cur, entry),
+      );
+      if (!stored) {
+        return text(
+          `Error: 승인 요청을 티켓 ${task_id} 에 기록하지 못했습니다(태스크 없음).`,
+        );
+      }
+      const record: EscalationApprovalRecord = {
+        questionId,
+        model: spec.model,
+        effort: spec.effort,
+        decision: "pending",
+        requestedBy: entry.askedBy,
+        requestedAt: entry.askedAt,
+        note: why,
+      };
+      const recorded = await mutateEscalations(task_id, (cur) => [
+        ...cur,
+        record,
+      ]);
+      if (!recorded) {
+        return text(
+          `Error: 승인 레코드를 티켓 ${task_id} 에 기록하지 못했습니다. 질문(${questionId})은 남아 있으니 다시 시도하세요.`,
+        );
+      }
+
+      const notify = await notifyOrchestratorAwaited(
+        formatApprovalRequest({
+          questionId,
+          taskId: task_id,
+          taskTitle: task.title,
+          requestedBy: entry.askedBy || "unknown",
+          label: spec.label,
+          reason: why,
+          budgetSpent: spent,
+        }),
+        task.contextId,
+      );
+
+      try {
+        await applyProjection(db, task_id, {
+          lastAgentId: attributionAgentId(agent_id),
+          lastActivitySummary: `[승인요청] ${spec.label}`,
+          activityPayload: {
+            agentId: entry.askedBy || "unknown",
+            message: `[승인요청 ${questionId}] ${spec.label}\n${why}`,
+          },
+        });
+      } catch (err) {
+        console.error("[request_model_escalation] activity write failed:", err);
+      }
+
+      return text(
+        `승인 요청 등록: question_id=${questionId} (${spec.label}, status=pending)\n` +
+          (notify.injected
+            ? "오케스트레이터 PTY 로 전달됨."
+            : `⚠️ 오케 PTY 주입 실패(${notify.error}). 요청은 티켓에 open 으로 남아 있어 get_open_questions 로 회수됩니다.`) +
+          `\n★승인이 오기 전까지 이 칸은 쓰이지 않습니다 — 승인 없이 갈 수 있는 칸으로 계속 진행하세요.`,
+      );
+    },
+  );
+
+  // 28. resolve_model_escalation — 오케가 **사용자의** 결정을 기록한다.
+  auditedTool(
+    "resolve_model_escalation",
+    "Record the USER's decision on a request_model_escalation and send it back to the requesting agent. This tool does not make the decision — it writes down the one the user made, so ask first (escalate_to_owner or in-app) and pass decided_for so the audit trail says who decided. Approving writes a single-use approval record; denying leaves the per-ticket budget intact.",
+    {
+      question_id: z
+        .string()
+        .describe("question_id returned by request_model_escalation"),
+      decision: z
+        .enum(["approve", "deny"])
+        .describe("The user's decision — not yours"),
+      decided_for: z
+        .string()
+        .optional()
+        .describe(
+          "Who actually decided (e.g. '사장님'). Recorded separately from the orchestrator that writes it down.",
+        ),
+      note: z
+        .string()
+        .optional()
+        .describe("The user's reasoning / conditions, verbatim if possible."),
+    },
+    async ({ question_id, decision, decided_for, note }) => {
+      const parsed = parseQuestionId(question_id);
+      if (!parsed.taskId) {
+        return text(
+          `Error: question_id "${question_id}" 에서 task 를 알 수 없습니다.`,
+        );
+      }
+      const taskId = parsed.taskId;
+      const task = await fetchTask(taskId);
+      if (!task) return text(`Error: Task ${taskId} not found.`);
+
+      const decidedBy = MARBLO_AGENT_ID || "orchestrator";
+      const outcome: {
+        record: EscalationApprovalRecord | null;
+        failure: "not-found" | "already-decided" | "budget-exhausted" | null;
+      } = { record: null, failure: null };
+      const applied = await mutateEscalations(taskId, (cur) => {
+        const res = decideApproval(
+          cur,
+          question_id,
+          decision === "approve" ? "approved" : "denied",
+          decidedBy,
+          decided_for?.trim() || "",
+          Date.now(),
+          note?.trim() || undefined,
+        );
+        if (!res.ok) {
+          outcome.failure = res.reason;
+          outcome.record = res.record ?? null;
+          return null;
+        }
+        outcome.record = res.record;
+        return res.records;
+      });
+
+      if (!applied) {
+        if (outcome.failure === "already-decided") {
+          const prev = outcome.record;
+          return text(
+            `이 요청은 이미 ${prev?.decision === "approved" ? "승인" : "거부"}됐습니다(${prev?.decidedBy ?? "unknown"}${
+              prev?.decidedFor ? `, 판단=${prev.decidedFor}` : ""
+            }). 덮어쓰지 않았습니다 — 새 결정이 필요하면 새 요청을 받으세요.`,
+          );
+        }
+        if (outcome.failure === "budget-exhausted") {
+          return text(
+            `Error: 승인 예산(티켓당 ${MAX_GATED_APPROVALS_PER_TASK}건)이 이미 소진돼 승인할 수 없습니다. 거부(deny)만 가능합니다.`,
+          );
+        }
+        return text(
+          `Error: question_id ${question_id} 에 해당하는 승인 요청이 티켓 ${taskId} 에 없습니다.`,
+        );
+      }
+
+      const record = outcome.record!;
+      const label = `${record.model}@${record.effort}`;
+      const answerBody = formatApprovalDecision({
+        label,
+        decision: record.decision === "approved" ? "approved" : "denied",
+        decidedFor: record.decidedFor,
+        note: record.note,
+      });
+
+      // 질문도 함께 닫는다 — 승인 요청은 질문 채널의 질문이므로, 결정만 적고
+      // 질문을 open 으로 남기면 오케가 같은 건을 또 사장님께 올린다.
+      const entries = readQuestions(
+        (task as unknown as Record<string, unknown>).questions,
+      );
+      const question = entries.find((q) => q.id === question_id);
+      let answerNote = "";
+      const closed = await mutateQuestions(taskId, (cur) => {
+        const res = answerQuestion(
+          cur,
+          question_id,
+          answerBody,
+          decidedBy,
+          Date.now(),
+        );
+        return res.ok ? res.entries : null;
+      });
+      if (!closed) {
+        answerNote = " (질문은 이미 닫혀 있었습니다)";
+      }
+
+      const target = question?.askedBy ?? "";
+      let deliveryNote =
+        "요청자 agent id 가 비어 있어 PTY 전달은 생략했습니다.";
+      if (target) {
+        const res = await queueAnswerDelivery({
+          task,
+          taskId,
+          questionId: question_id,
+          question: question?.question ?? label,
+          answer: answerBody,
+          answeredBy: decidedBy,
+          target,
+        });
+        deliveryNote = res.note;
+        await mutateQuestions(taskId, (cur) =>
+          markAnswerDelivery(cur, question_id, res.delivery),
+        );
+      }
+
+      try {
+        await applyProjection(db, taskId, {
+          lastAgentId: "",
+          lastActivitySummary: `[승인결정] ${label} ${record.decision}`,
+          activityPayload: {
+            agentId: decidedBy,
+            message:
+              `[승인결정 ${question_id}] ${label} → ${record.decision}` +
+              (record.decidedFor ? ` (판단=${record.decidedFor})` : "") +
+              (record.note ? `\n메모: ${record.note}` : ""),
+          },
+        });
+      } catch (err) {
+        console.error("[resolve_model_escalation] activity write failed:", err);
+      }
+
+      const budgetLine =
+        record.decision === "approved"
+          ? `승인 예산: 1/${MAX_GATED_APPROVALS_PER_TASK} 사용(1회용 — 스폰에 쓰이면 소진).`
+          : "거부는 예산을 쓰지 않습니다.";
+      return text(
+        `${label} → ${record.decision}${record.decidedFor ? ` (판단=${record.decidedFor})` : ""}.${answerNote}\n${budgetLine}\n${deliveryNote}`,
+      );
+    },
   );
 
   // 23. run_skill — Mission engine 용 (명세 §8).
@@ -5205,47 +5833,20 @@ export function registerTools(server: McpServer): void {
           "Error: no projectId (set MARBLO_PROJECT or pass projectId).",
         );
       }
-      const bridgePort = process.env.MARBLO_BRIDGE_PORT;
-      if (!bridgePort) {
+      // 전송 자체는 escalate_to_owner 와 같은 헬퍼를 쓴다(경로 이중화 금지).
+      const result = await sendTelegramViaBridge(
+        targetProject,
+        messageText,
+        chatId,
+      );
+      if (!result.ok) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
+          `Failed to send Telegram message: ${result.error || "unknown error"}`,
         );
       }
-      try {
-        const response = await fetch(
-          `http://127.0.0.1:${bridgePort}/send-telegram-message`,
-          {
-            method: "POST",
-            headers: bridgeHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({
-              projectId: targetProject,
-              text: messageText,
-              chatId,
-            }),
-          },
-        );
-        const result = (await response.json()) as {
-          ok: boolean;
-          chatId?: string;
-          error?: string;
-        };
-        if (!result.ok) {
-          return text(
-            `Failed to send Telegram message: ${
-              result.error || "unknown error"
-            }`,
-          );
-        }
-        return text(
-          `Sent Telegram message to chat ${result.chatId ?? "(default)"}.`,
-        );
-      } catch (err) {
-        return text(
-          `Error sending Telegram message: ${
-            err instanceof Error ? err.message : "network error"
-          }`,
-        );
-      }
+      return text(
+        `Sent Telegram message to chat ${result.chatId ?? "(default)"}.`,
+      );
     },
   );
 
