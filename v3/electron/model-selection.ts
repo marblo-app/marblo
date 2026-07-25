@@ -39,6 +39,7 @@ import {
   type ModelRegistryEntry,
 } from "./model-registry";
 import { normalizeModel, type ModelType } from "./dispatch-scoring";
+import { isApprovalGatedEffort } from "./mcp-server/escalation-approval";
 
 /** 파싱된 모델 지정 — "무엇을 원했는가"(정책 적용 전). */
 export interface ModelSpec {
@@ -275,20 +276,57 @@ export function resolveModelPin(
 // 셀렉터용 목록
 // ─────────────────────────────────────────────────────────────────────────
 
-/** 오케 모델 셀렉터 한 칸. `value` 는 `provider[:modelId]` compound. */
+/** 오케 모델 셀렉터 한 칸. `value` 는 `provider[:modelId][@effort]` compound. */
 export interface OrchestratorModelChoice {
   value: string;
   provider: ModelType;
   modelId?: string;
   label: string;
+  /**
+   * 이 칸에서 **셀렉터로 고를 수 있는** effort 들(낮음 → 높음). 비었으면 effort
+   * 축이 없다는 뜻이고(claude 전부, 프로바이더 기본칸), 그때 UI 는 effort 드롭다운
+   * 자체를 그리지 않는다 — 즉 Claude 만 쓰는 사용자에겐 종전과 픽셀 동일하다.
+   *
+   * ★레지스트리 `efforts` 전부가 아니다. 승인게이트 칸(max/ultra, #602)은 빠진다
+   * — 사유는 `selectableEfforts` 주석.
+   */
+  efforts: EffortLevel[];
 }
 
-/** compound 셀렉터 값을 만든다. 프로바이더만이면 접미 없음(기존 값과 동일). */
+/**
+ * compound 셀렉터 값을 만든다. `provider[:modelId][@effort]`.
+ *
+ * 접미가 하나도 없으면 종전 값("claude"/"codex")과 바이트 동일하다 — 앱상태에
+ * 저장된 기존 값이 그대로 유효하다(재시작 연속성 하위호환).
+ *
+ * effort 는 **모델 핀 위에만** 얹는다. 모델 없이 effort 만 지정하는 값은 만들지
+ * 않는다 — 어느 모델의 effort 인지 검증할 수 없고, 사용자 `config.toml` 이 물고
+ * 있는 모델이 그 effort 를 지원하는지도 알 수 없기 때문이다.
+ */
 export function orchestratorModelValue(
   provider: string,
   modelId?: string,
+  effort?: string,
 ): string {
-  return modelId ? `${provider}:${modelId}` : provider;
+  if (!modelId) return provider;
+  return effort ? `${provider}:${modelId}@${effort}` : `${provider}:${modelId}`;
+}
+
+/**
+ * 이 모델을 **오케 셀렉터에서** 고를 수 있는 effort 목록(레지스트리 파생).
+ *
+ * ★max/ultra 를 빼는 이유는 "비싸서" 가 아니라 **오케 모델 선택이 프로젝트별로
+ * 영구 저장되기 때문**이다. 한 번 ultra 로 고르면 앱 재시작·크래시 자동재시작·
+ * 모델 핸드오프가 전부 말없이 ultra 로 뜬다 — #602 승인게이트가 막으려던 바로 그
+ * "자동 남발" 이 셀렉터 경로로 새는 것이다. 게다가 그 승인은 **티켓당 1회용**이라
+ * (`escalation-approval`) 수명이 무한한 오케 기본값과 애초에 맞지 않는다.
+ *
+ * 그래서 셀렉터의 천장은 무게이트 최고칸(xhigh)이다. 에이전트 스폰의 max/ultra 는
+ * 종전대로 `request_model_escalation` 승인 왕복으로만 열린다 — 그 경로는 손대지
+ * 않았다.
+ */
+export function selectableEfforts(entry: ModelRegistryEntry): EffortLevel[] {
+  return entry.efforts.filter((e) => !isApprovalGatedEffort(e));
 }
 
 /**
@@ -300,17 +338,28 @@ export function orchestratorModelValue(
  * 프로바이더만 넣고 모델 핀은 launch 옵션으로 따로 전달한다.
  *
  * 레지스트리가 모르는 모델 접미는 **버린다**(프로바이더는 살린다) — 예전 빌드가
- * 저장해 둔 값이나 오타가 spawn 을 깨뜨리지 않게.
+ * 저장해 둔 값이나 오타가 spawn 을 깨뜨리지 않게. 같은 이유로 이 모델이 지원하지
+ * 않는 effort, 그리고 승인게이트 칸(max/ultra)도 버린다: 저장값·env 로 들어온
+ * `@ultra` 가 승인 없이 매 재시작마다 되살아나는 경로를 여기서 끊는다(#602).
+ * ★버리는 것은 effort 뿐이고 모델 핀과 프로바이더는 살아남는다 — 선택이 통째로
+ * 무효가 되어 오케가 엉뚱한 CLI 로 뜨는 편이 훨씬 나쁘다.
  */
 export function splitOrchestratorModelValue(value: string): {
   provider: string;
   modelId?: string;
+  effort?: EffortLevel;
 } {
   const raw = (value ?? "").trim().toLowerCase();
-  const sep = raw.indexOf(":");
-  if (sep < 0) return { provider: raw };
-  const provider = raw.slice(0, sep);
-  const modelPart = raw.slice(sep + 1);
+  // effort 를 먼저 떼어낸다. 모델 id 에는 "@" 가 없으므로(레지스트리) 마지막
+  // "@" 뒤는 항상 effort 자리다.
+  const at = raw.lastIndexOf("@");
+  const body = at > 0 ? raw.slice(0, at) : raw;
+  const effortPart = at > 0 ? raw.slice(at + 1).trim() : "";
+
+  const sep = body.indexOf(":");
+  if (sep < 0) return { provider: body };
+  const provider = body.slice(0, sep);
+  const modelPart = body.slice(sep + 1);
   const entry = findModelLoose(modelPart);
   if (!entry) {
     console.warn("[model-selection] 미지 오케 모델 접미 무시", {
@@ -320,7 +369,68 @@ export function splitOrchestratorModelValue(value: string): {
     });
     return { provider };
   }
-  return { provider, modelId: entry.id };
+  if (!effortPart) return { provider, modelId: entry.id };
+
+  const allowed = selectableEfforts(entry);
+  if (!allowed.includes(effortPart as EffortLevel)) {
+    console.warn("[model-selection] 오케 effort 무시", {
+      value,
+      model: entry.id,
+      requested: effortPart,
+      reason: isApprovalGatedEffort(effortPart)
+        ? "승인게이트 칸(max/ultra)은 오케 기본값으로 고정할 수 없다"
+        : "이 모델이 지원하지 않는 effort",
+      allowed: allowed.length ? allowed.join("/") : "(effort 축 없음)",
+    });
+    return { provider, modelId: entry.id };
+  }
+  return { provider, modelId: entry.id, effort: effortPart as EffortLevel };
+}
+
+/**
+ * 오케 셀렉터/저장값 하나(`provider[:modelId][@effort]`)를 launch 옵션의 **모델 핀
+ * 두 축**으로 해석한다. 프로바이더만 고른 값이면 전부 undefined 를 돌려주고, 그때
+ * 오케는 종전대로 각 CLI 의 기본 모델·기본 effort 를 상속한다(바이트 동일).
+ *
+ * ★main.ts 가 이 함수를 쓰고 테스트도 이 함수를 쓴다. 해석 규칙을 main 안에 두면
+ * (a) 테스트가 그 규칙을 복사하게 되고 — 복사본을 검증해봐야 라이브 경로를 증명하지
+ * 못한다 — (b) claude 축과 codex 축이 서로 다른 자리에서 갈라진다.
+ *
+ * claude 축은 버전가드(`resolveClaudeModelPinned`)를 그대로 통과한다. codex 축엔
+ * 게이트가 없다 — 레지스트리 codex 행에 `minCli` 가 없기 때문이고(§ 모델 목록을
+ * 서버 권위 캐시에서 받으므로 CLI 버전으로 대신 판정할 근거가 없다), effort 는
+ * `splitOrchestratorModelValue` 가 모델별 지원목록 + 승인게이트로 이미 걸러서 준다.
+ */
+export function orchestratorLaunchPin(
+  value: string,
+  installedClaudeVersion?: string,
+): { claudeModel?: string; codexModel?: string; codexEffort?: EffortLevel } {
+  const { provider, modelId, effort } = splitOrchestratorModelValue(value);
+  if (!modelId) return {};
+
+  const pin = resolveModelPin(
+    effort ? `${modelId}@${effort}` : modelId,
+    installedClaudeVersion,
+  );
+  if (!pin) return {};
+
+  // 프로바이더가 어긋난 값(env·손편집)은 축을 넘기지 않는다 — claude CLI 에
+  // `--model gpt-5.5` 가 붙으면 spawn 이 깨진다.
+  if (provider === "claude" && pin.provider === "claude") {
+    return pin.claudeModel ? { claudeModel: pin.claudeModel } : {};
+  }
+  if (provider === "codex" && pin.provider === "gpt") {
+    return {
+      ...(pin.codexModel ? { codexModel: pin.codexModel } : {}),
+      ...(pin.codexEffort ? { codexEffort: pin.codexEffort } : {}),
+    };
+  }
+  console.warn("[model-selection] 오케 모델 핀이 프로바이더와 어긋나 무시", {
+    value,
+    provider,
+    pinProvider: pin.provider,
+  });
+  return {};
 }
 
 /**
@@ -335,20 +445,64 @@ export function splitOrchestratorModelValue(value: string): {
  * 위에 오게 된다. 등급만 뒤집고 동률 순서는 보존해야 "신형이 위" 가 성립한다.
  */
 export function claudeOrchestratorChoices(): OrchestratorModelChoice[] {
+  return orchestratorChoicesFor("claude", "claude", (entry) =>
+    humanizeClaudeModelId(entry.id),
+  );
+}
+
+/**
+ * 셀렉터에 넣을 Codex(GPT) 변형 목록 — Claude 와 **같은 경로**로 레지스트리에서
+ * 파생한다(능력등급 높음 → 낮음).
+ *
+ * ★라벨에 모델 id 를 **그대로** 쓴다: `Codex (gpt-5.6-sol)`. Claude 쪽처럼 예쁘게
+ * 접지 않는 이유는 codex 변종 이름이 사람 사이에서 자주 오전달되기 때문이다
+ * (사장님 표기 "gpt-5.6-solar" ↔ 실제 `gpt-5.6-sol`). 화면에 레지스트리 실명이
+ * 그대로 보이면 그 어긋남이 즉시 드러난다 — 이 티켓의 "모델명 날조 금지" 는
+ * 데이터뿐 아니라 UI 표기까지의 요구다.
+ *
+ * effort 축은 별도 드롭다운이 된다(칸을 곱집합으로 펼치면 6모델 × 4effort = 24칸
+ * 짜리 드롭다운이 되어 아무도 못 고른다). 두 축의 선택은 하나의 compound 값
+ * `codex:gpt-5.6-terra@high` 로 합쳐져 저장·전달된다 — 저장 필드가 하나라 재시작
+ * 연속성 경로가 갈라지지 않는다.
+ */
+export function codexOrchestratorChoices(): OrchestratorModelChoice[] {
+  return orchestratorChoicesFor("gpt", "codex", (entry) => entry.id);
+}
+
+/**
+ * 프로바이더 하나의 셀렉터 칸들. 두 프로바이더가 같은 정렬·같은 값 포맷을 쓰도록
+ * 한 곳에 둔다(#601 이 claude 에만 깔아둔 규칙을 codex 가 복제하지 않게).
+ *
+ * ★정렬은 `.reverse()` 가 아니라 내림차순 비교자다. `modelsByProvider` 의 정렬은
+ * 안정정렬이라 같은 등급 안에서는 레지스트리 등재 순서(신형이 먼저)가 유지되는데,
+ * 통째로 뒤집으면 그 동률 순서까지 뒤집혀 `top` 등급의 Opus 5 밑에 Opus 4.8 이 아니라
+ * 위에 오게 된다. 등급만 뒤집고 동률 순서는 보존해야 "신형이 위" 가 성립한다.
+ *
+ * @param provider   레지스트리 프로바이더 축("claude" | "gpt")
+ * @param valuePrefix compound 값·라벨에 쓸 UI 프로바이더 이름. gpt 는 UI 에서
+ *                    "codex" 다(메모리: Codex==gpt, 내부 model id 는 "gpt").
+ */
+function orchestratorChoicesFor(
+  provider: "claude" | "gpt",
+  valuePrefix: string,
+  humanize: (entry: ModelRegistryEntry) => string,
+): OrchestratorModelChoice[] {
   const rank: Record<string, number> = {
     cheap: 0,
     mid: 1,
     top: 2,
     frontier: 3,
   };
-  return modelsByProvider("claude")
+  const uiName = valuePrefix.charAt(0).toUpperCase() + valuePrefix.slice(1);
+  return modelsByProvider(provider)
     .slice()
     .sort((a, b) => rank[b.capability] - rank[a.capability])
     .map((entry) => ({
-      value: orchestratorModelValue("claude", entry.id),
-      provider: "claude" as ModelType,
+      value: orchestratorModelValue(valuePrefix, entry.id),
+      provider: provider as ModelType,
       modelId: entry.id,
-      label: `Claude (${humanizeClaudeModelId(entry.id)})`,
+      label: `${uiName} (${humanize(entry)})`,
+      efforts: selectableEfforts(entry),
     }));
 }
 

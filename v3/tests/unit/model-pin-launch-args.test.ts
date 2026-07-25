@@ -18,7 +18,10 @@ import {
   spawnedModelFromArgs,
   formatModelAtEffort,
 } from "../../electron/agent-manager";
-import { resolveModelPin } from "../../electron/model-selection";
+import {
+  resolveModelPin,
+  orchestratorLaunchPin,
+} from "../../electron/model-selection";
 
 const CLI_OK = "2.1.220";
 const CLI_OLD = "2.1.100";
@@ -143,6 +146,84 @@ describe("codex — 지정 모델·effort 가 -c 로 나간다", () => {
     const args = launchArgs("gpt", { codexModel: "gpt-5.6-luna" });
     expect(codexConf(args, "approval_policy")).toBe("never");
     expect(codexConf(args, "sandbox_mode")).toBe("danger-full-access");
+  });
+});
+
+/**
+ * 오케 셀렉터 값이 실제 오케 launch 인자까지 도달하는지 — 이 티켓(aduYHKhp)의
+ * 완료기준 본체.
+ *
+ * 배선은 셀렉터 값 → `orchestratorLaunchPin`(main.ts 가 그대로 호출) →
+ * `OrchestratorLaunchOptions.codexModelOverride/codexEffortOverride` →
+ * `getLaunchConfig(..., modelPin)` → argv 다. 아래는 그 사슬에서 **main.ts 가 쓰는
+ * 것과 같은 함수**로 핀을 만들어 진짜 argv 까지 밀어본다(핀 해석을 테스트가 다시
+ * 구현하면 라이브 경로를 증명하지 못한다).
+ */
+describe("오케 셀렉터 값 → codex launch 인자", () => {
+  /** main.ts 의 launch/switch 핸들러가 하는 일과 동일한 순서. */
+  const argsForSelector = (value: string): string[] => {
+    const pin = orchestratorLaunchPin(value, CLI_OK);
+    return launchArgs("gpt", {
+      codexModel: pin.codexModel,
+      codexEffort: pin.codexEffort,
+    });
+  };
+
+  it("★완료기준: 'codex:gpt-5.6-sol' → -c model=\"gpt-5.6-sol\"", () => {
+    const args = argsForSelector("codex:gpt-5.6-sol");
+    expect(codexConf(args, "model")).toBe("gpt-5.6-sol");
+  });
+
+  it("★완료기준: effort 선택이 model_reasoning_effort 로 전달된다", () => {
+    const args = argsForSelector("codex:gpt-5.6-terra@xhigh");
+    expect(codexConf(args, "model")).toBe("gpt-5.6-terra");
+    expect(codexConf(args, "model_reasoning_effort")).toBe("xhigh");
+  });
+
+  it("sol/terra/luna·5.5 전부 자기 id 그대로 나간다(날조 0)", () => {
+    for (const id of [
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+    ]) {
+      expect(codexConf(argsForSelector(`codex:${id}`), "model"), id).toBe(id);
+    }
+  });
+
+  it("★무회귀: 프로바이더만 고른 'codex' 는 종전과 동일(모델 핀 없음)", () => {
+    const args = argsForSelector("codex");
+    expect(codexConf(args, "model")).toBeUndefined();
+    // 오케는 complexity 를 안 태우므로 effort 도 CLI 기본값 그대로다.
+    expect(codexConf(args, "model_reasoning_effort")).toBeUndefined();
+    expect(codexConf(args, "approval_policy")).toBe("never");
+  });
+
+  it("★승인게이트: '@ultra' 를 골라도 CLI 로 나가지 않는다(#602)", () => {
+    const args = argsForSelector("codex:gpt-5.6-sol@ultra");
+    // 모델 선택은 살아남고 effort 만 떨어진다 — 오케가 아예 안 뜨면 더 나쁘다.
+    expect(codexConf(args, "model")).toBe("gpt-5.6-sol");
+    expect(codexConf(args, "model_reasoning_effort")).toBeUndefined();
+  });
+
+  it("claude 축은 종전 그대로 — 셀렉터 Claude 변형이 --model 로", () => {
+    const pin = orchestratorLaunchPin("claude:claude-fable-5", CLI_OK);
+    expect(pin.claudeModel).toBe("claude-fable-5");
+    expect(pin.codexModel).toBeUndefined();
+    expect(claudeModelArg(launchArgs("claude", pin))).toBe("claude-fable-5");
+  });
+
+  it("claude 변형도 버전가드를 계속 탄다(미검증 CLI → 폴백)", () => {
+    const pin = orchestratorLaunchPin("claude:claude-fable-5", CLI_OLD);
+    expect(pin.claudeModel).not.toBe("claude-fable-5");
+    expect(claudeModelArg(launchArgs("claude", pin))).toBe(pin.claudeModel);
+  });
+
+  it("★프로바이더와 어긋난 핀은 축을 넘기지 않는다(spawn 안 깨짐)", () => {
+    // env/손편집으로만 생길 수 있는 값. claude CLI 에 --model gpt-5.5 가 붙으면
+    // 즉사한다.
+    expect(orchestratorLaunchPin("claude:gpt-5.5", CLI_OK)).toEqual({});
+    expect(orchestratorLaunchPin("codex:claude-opus-5", CLI_OK)).toEqual({});
   });
 });
 

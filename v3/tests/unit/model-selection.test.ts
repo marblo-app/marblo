@@ -15,6 +15,8 @@ import {
   splitOrchestratorModelValue,
   orchestratorModelValue,
   claudeOrchestratorChoices,
+  codexOrchestratorChoices,
+  selectableEfforts,
   humanizeClaudeModelId,
 } from "../../electron/model-selection";
 import { normalizeModel } from "../../electron/dispatch-scoring";
@@ -238,6 +240,108 @@ describe("오케 셀렉터 compound 값", () => {
         (m) => m.provider === "claude" && m.status === "active",
       ).length,
     );
+  });
+
+  // ── Codex 변형(이 티켓) ──────────────────────────────────────────────
+  it("★Codex 변형 목록도 레지스트리 파생이고 최상위가 먼저 온다", () => {
+    const choices = codexOrchestratorChoices();
+    const ids = choices.map((c) => c.modelId);
+    // ★완료기준: sol/terra/luna + 5.5. 이름은 레지스트리 실명 그대로다
+    // ("gpt-5.6-solar" 같은 표기는 존재하지 않는다).
+    expect(ids).toContain("gpt-5.6-sol");
+    expect(ids).toContain("gpt-5.6-terra");
+    expect(ids).toContain("gpt-5.6-luna");
+    expect(ids).toContain("gpt-5.5");
+    expect(ids[0]).toBe("gpt-5.6-sol"); // frontier 가 맨 앞
+    expect(choices).toHaveLength(
+      MODEL_REGISTRY.filter(
+        (m) => m.provider === "gpt" && m.status === "active",
+      ).length,
+    );
+    // 값·라벨 포맷은 Claude 와 같은 규칙(프로바이더 프리픽스 + 레지스트리 id).
+    expect(choices[0].value).toBe("codex:gpt-5.6-sol");
+    expect(choices[0].label).toBe("Codex (gpt-5.6-sol)");
+  });
+
+  it("★셀렉터 effort 는 승인게이트 칸(max/ultra)을 뺀 것이다 — #602", () => {
+    for (const choice of codexOrchestratorChoices()) {
+      expect(choice.efforts, choice.value).not.toContain("max");
+      expect(choice.efforts, choice.value).not.toContain("ultra");
+      // 무게이트 칸은 그대로 남는다(축이 통째로 사라지면 안 된다).
+      expect(choice.efforts, choice.value).toContain("high");
+      expect(choice.efforts, choice.value).toContain("xhigh");
+    }
+    // sol 은 레지스트리상 max/ultra 를 지원한다 — 즉 위 단언은 "원래 없어서"가
+    // 아니라 "게이트로 뺐기 때문"이다.
+    expect(getModel("gpt-5.6-sol")!.efforts).toContain("ultra");
+    expect(selectableEfforts(getModel("gpt-5.6-sol")!)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+  });
+
+  it("claude 칸엔 effort 축이 없다(둘째 드롭다운을 그리지 않는 근거)", () => {
+    for (const choice of claudeOrchestratorChoices()) {
+      expect(choice.efforts, choice.value).toEqual([]);
+    }
+  });
+
+  it("effort 는 모델 핀 위에만 얹힌다", () => {
+    expect(orchestratorModelValue("codex", "gpt-5.6-terra", "high")).toBe(
+      "codex:gpt-5.6-terra@high",
+    );
+    expect(orchestratorModelValue("codex", "gpt-5.6-terra")).toBe(
+      "codex:gpt-5.6-terra",
+    );
+    // 모델 없이 effort 만 → 프로바이더만(어느 모델의 effort 인지 검증 불가).
+    expect(orchestratorModelValue("codex", undefined, "high")).toBe("codex");
+  });
+
+  it("model@effort compound 가 세 조각으로 쪼개진다", () => {
+    expect(splitOrchestratorModelValue("codex:gpt-5.6-terra@high")).toEqual({
+      provider: "codex",
+      modelId: "gpt-5.6-terra",
+      effort: "high",
+    });
+  });
+
+  it("★승인게이트 effort(max/ultra)는 저장값·env 로 들어와도 떨궈진다 — #602", () => {
+    // 이 경로가 열려 있으면 한 번 고른 ultra 가 재시작마다 승인 없이 되살아난다.
+    expect(splitOrchestratorModelValue("codex:gpt-5.6-sol@ultra")).toEqual({
+      provider: "codex",
+      modelId: "gpt-5.6-sol",
+    });
+    expect(splitOrchestratorModelValue("codex:gpt-5.6-sol@max")).toEqual({
+      provider: "codex",
+      modelId: "gpt-5.6-sol",
+    });
+  });
+
+  it("이 모델이 지원하지 않는 effort 도 떨구되 모델 핀은 살린다", () => {
+    // luna 는 ultra 자체가 없다(레지스트리 §1.2). 모델 선택은 살아남아야 한다.
+    expect(splitOrchestratorModelValue("codex:gpt-5.6-luna@ultra")).toEqual({
+      provider: "codex",
+      modelId: "gpt-5.6-luna",
+    });
+    expect(splitOrchestratorModelValue("codex:gpt-5.5@쓰레기")).toEqual({
+      provider: "codex",
+      modelId: "gpt-5.5",
+    });
+  });
+
+  it("★codex 변형 선택이 그대로 CLI 두 축의 핀으로 해석된다(launch 전달값)", () => {
+    const { modelId, effort } = splitOrchestratorModelValue(
+      "codex:gpt-5.6-terra@xhigh",
+    );
+    const pin = resolveModelPin(`${modelId}@${effort}`, CLI_OK);
+    expect(pin!.provider).toBe("gpt");
+    expect(pin!.codexModel).toBe("gpt-5.6-terra");
+    expect(pin!.codexEffort).toBe("xhigh");
+    expect(pin!.label).toBe("gpt-5.6-terra@xhigh");
+    // claude 축은 건드리지 않는다.
+    expect(pin!.claudeModel).toBeUndefined();
   });
 
   it("라벨은 id 에서 기계적으로 만든다", () => {

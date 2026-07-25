@@ -100,8 +100,9 @@ import {
 import {
   splitOrchestratorModelValue,
   orchestratorModelValue,
-  resolveModelPin,
+  orchestratorLaunchPin,
 } from "./model-selection";
+import { getModel } from "./model-registry";
 import { CostTracker } from "./cost-tracker";
 import { getAccountRateLimits } from "./account-usage";
 import { mainTelemetry } from "./telemetry";
@@ -3228,17 +3229,28 @@ const INITIAL_ORCHESTRATOR_MODEL_ENV =
   process.env.MARBLO_ORCHESTRATOR_MODEL?.trim() || "";
 
 /**
- * 오케 모델 설정값을 정규화한다. 값은 `provider[:modelId]` compound 다
- * ("claude", "codex", "claude:claude-fable-5").
+ * 오케 모델 설정값을 정규화한다. 값은 `provider[:modelId][@effort]` compound 다
+ * ("claude", "codex", "claude:claude-fable-5", "codex:gpt-5.6-terra@high").
  *
  * ★모델 접미는 레지스트리에 있는 것만 살아남는다 — 오타나 옛 빌드가 저장한 미지
- * 모델은 접미만 버리고 프로바이더로 강등된다(spawn 이 깨지지 않게).
+ * 모델은 접미만 버리고 프로바이더로 강등된다(spawn 이 깨지지 않게). effort 도
+ * 같다: 이 모델이 지원하지 않는 값과 승인게이트 칸(max/ultra)은
+ * `splitOrchestratorModelValue` 가 이미 떨궈서 온다(#602 — 저장값·env 로 들어온
+ * `@ultra` 가 매 재시작 되살아나는 경로를 여기서 끊는다).
  * 접미 없는 값의 결과는 종전과 완전히 동일하므로 기존 저장값이 그대로 유효하다.
+ *
+ * ★모델 핀이 프로바이더와 어긋나면(예: "claude:gpt-5.5") 접미를 버린다. 셀렉터는
+ * 그런 값을 만들지 않지만 env·손편집은 만들 수 있고, 그대로 통과시키면 claude CLI
+ * 에 `--model gpt-5.5` 가 붙어 spawn 이 깨진다.
  */
 function normalizeOrchestratorModelSetting(value: unknown): string {
   const input = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!input) return "claude";
-  const { provider: rawProvider, modelId } = splitOrchestratorModelValue(input);
+  const {
+    provider: rawProvider,
+    modelId,
+    effort,
+  } = splitOrchestratorModelValue(input);
   const provider = rawProvider === "gpt" ? "codex" : rawProvider;
   if (
     provider !== "claude" &&
@@ -3247,10 +3259,21 @@ function normalizeOrchestratorModelSetting(value: unknown): string {
   ) {
     return "claude";
   }
-  // 모델 핀은 claude 축에만 있다(codex 모델 변형은 별건).
-  if (provider === "claude" && modelId) {
-    return orchestratorModelValue(provider, modelId);
+  if (!modelId) return provider;
+  // 모델 핀 축은 claude·codex 둘 다 있다. antigravity 는 아직 레지스트리에 행이
+  // 없으므로 여기 도달할 수 없다(도달하면 접미를 버린다).
+  const pinProvider = getModel(modelId)?.provider;
+  if (
+    (provider === "claude" && pinProvider === "claude") ||
+    (provider === "codex" && pinProvider === "gpt")
+  ) {
+    return orchestratorModelValue(provider, modelId, effort);
   }
+  console.warn(
+    `[Main] 오케 모델 접미 "${modelId}"(${
+      pinProvider ?? "미지"
+    })가 프로바이더 "${provider}" 와 어긋나 무시합니다`,
+  );
   return provider;
 }
 
@@ -3264,18 +3287,23 @@ function normalizeOrchestratorModelType(value: unknown): ModelType {
 }
 
 /**
- * 이 설정값이 요구하는 claude `--model` 핀. 없으면 undefined(=CLI 기본 모델).
+ * 이 설정값이 요구하는 CLI 모델 핀 전부 — claude `--model`, codex `-c model=` +
+ * `-c model_reasoning_effort=`. 비어 있는 축은 종전대로 CLI 기본값을 상속한다
+ * (프로바이더만 고른 "claude"/"codex" 는 전 축이 비어 종전 동작과 바이트 동일).
  *
- * ★버전가드를 여기서 태운다 — 셀렉터에서 고른 모델이 설치된 CLI 의 검증 범위 밖
- * 이면 `resolveClaudeModelPinned` 이 opus 로 떨어뜨리고 구조화 로그를 남긴다.
+ * ★claude 축은 버전가드를 탄다 — 셀렉터에서 고른 모델이 설치된 CLI 의 검증 범위
+ * 밖이면 `resolveClaudeModelPinned` 이 opus 로 떨어뜨리고 구조화 로그를 남긴다.
  * 오케가 안 뜨는 것보다 한 단계 낮은 모델로 뜨는 편이 낫다(§8.3 불변식).
+ *
+ * 해석 자체는 `model-selection.orchestratorLaunchPin` 이 한다(라이브 경로와 유닛
+ * 테스트가 같은 함수를 쓰게 하려고 그쪽에 뒀다). 여기서는 설정값 정규화만 얹는다.
  */
-function orchestratorClaudeModelPin(value: unknown): string | undefined {
-  const { provider, modelId } = splitOrchestratorModelValue(
-    normalizeOrchestratorModelSetting(value),
-  );
-  if (provider !== "claude" || !modelId) return undefined;
-  return resolveModelPin(modelId)?.claudeModel;
+function orchestratorModelPins(value: unknown): {
+  claudeModel?: string;
+  codexModel?: string;
+  codexEffort?: string;
+} {
+  return orchestratorLaunchPin(normalizeOrchestratorModelSetting(value));
 }
 
 /** 프로젝트별 저장 모델 (없으면 null). 반환값은 정규화된 설정 문자열. */
@@ -5815,7 +5843,8 @@ ipcMain.handle(
     const targetModelSetting = normalizeOrchestratorModelSetting(
       rawArgs.targetModel,
     );
-    const targetClaudeModel = orchestratorClaudeModelPin(targetModelSetting);
+    // Codex 변형(모델 + reasoning effort)도 같은 함수로 함께 해석된다.
+    const targetPins = orchestratorModelPins(targetModelSetting);
     const args: OrchestratorSwitchArgs = {
       projectId,
       rootPath: resolvedRootPath,
@@ -5892,7 +5921,9 @@ ipcMain.handle(
           undefined,
           {
             modelOverride: targetModel,
-            claudeModelOverride: targetClaudeModel,
+            claudeModelOverride: targetPins.claudeModel,
+            codexModelOverride: targetPins.codexModel,
+            codexEffortOverride: targetPins.codexEffort,
             handoffPrompt,
             handoffMode: switchArgs.mode,
           },
@@ -5975,11 +6006,10 @@ ipcMain.handle(
       typeof model === "string" ? model : undefined,
     );
     const orchestratorModel = resolveOrchestratorModel();
-    // 셀렉터가 Claude 변형을 골랐으면 그 구체 모델을 `--model` 로 핀한다. 미지정
-    // (프로바이더만 고름)이면 undefined → 종전대로 CLI 기본 모델을 상속한다.
-    const orchestratorClaudeModel = orchestratorClaudeModelPin(
-      effectiveModelSetting,
-    );
+    // 셀렉터가 구체 변형을 골랐으면 그 모델을 CLI 인자로 핀한다 — claude 는
+    // `--model`, codex 는 `-c model=` + `-c model_reasoning_effort=`. 프로바이더만
+    // 고른 경우엔 전 축이 undefined → 종전대로 각 CLI 의 기본값을 상속한다.
+    const orchestratorPins = orchestratorModelPins(effectiveModelSetting);
 
     // Pre-spawn auth gate. If the selected CLI is not installed / logged in,
     // DON'T spawn it into an interactive login
@@ -6050,7 +6080,9 @@ ipcMain.handle(
       // 이 launch 가 결정한 모델을 명시적으로 고정한다.
       {
         modelOverride: orchestratorModel,
-        claudeModelOverride: orchestratorClaudeModel,
+        claudeModelOverride: orchestratorPins.claudeModel,
+        codexModelOverride: orchestratorPins.codexModel,
+        codexEffortOverride: orchestratorPins.codexEffort,
       },
     );
 

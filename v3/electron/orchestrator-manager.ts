@@ -277,6 +277,22 @@ export interface OrchestratorLaunchOptions {
    * 위해서다.
    */
   claudeModelOverride?: string;
+  /**
+   * codex 오케를 띄울 **구체 모델 id**(`-c model="…"` 값). 모델 셀렉터가 Codex
+   * 변형(gpt-5.6-sol / terra / luna …)을 고르면 채워진다. undefined 면 종전대로
+   * 플래그 없이 떠서 사용자 `~/.codex/config.toml` 의 모델을 그대로 쓴다 — 즉
+   * 기존 "Codex" 선택 경로는 바이트 동일하다.
+   */
+  codexModelOverride?: string;
+  /**
+   * codex reasoning effort(`-c model_reasoning_effort="…"` 값). 오케는 난도 티어를
+   * 타지 않으므로(complexity 미지정) 이 값이 없으면 CLI 기본 effort 가 그대로다.
+   *
+   * ★승인게이트(max/ultra, #602)는 여기 오기 전에 이미 걸러진다 —
+   * `model-selection.splitOrchestratorModelValue` 가 셀렉터·저장값·env 세 입구를
+   * 모두 통과시키는 유일한 문이다.
+   */
+  codexEffortOverride?: string;
   handoffPrompt?: string;
   handoffMode?: "wait" | "takeover";
 }
@@ -794,8 +810,13 @@ export class OrchestratorManager {
       false,
       // complexity: 오케는 난도 티어를 타지 않는다(종전대로 미지정).
       undefined,
-      // 모델 셀렉터가 고른 Claude 변형. 미지정이면 --model 자체가 안 붙는다.
-      { claudeModel: launchOptions?.claudeModelOverride },
+      // 모델 셀렉터가 고른 변형. 미지정 축은 플래그 자체가 안 붙는다
+      // (claude=--model, codex=-c model=/-c model_reasoning_effort=).
+      {
+        claudeModel: launchOptions?.claudeModelOverride,
+        codexModel: launchOptions?.codexModelOverride,
+        codexEffort: launchOptions?.codexEffortOverride,
+      },
     );
 
     // ── YOLO(권한 스킵) 보장 ────────────────────────────────────────────
@@ -976,7 +997,9 @@ export class OrchestratorManager {
       // no obvious cause (P3-6). Surface the failure so a broken dispatch is
       // traceable to the token/port injection instead of looking like an auth bug.
       console.warn(
-        `[Orchestrator:${this.kind}] MCP config patch failed (bridge token/port not injected → spawn_agent/dispatch_task may 401): ${
+        `[Orchestrator:${
+          this.kind
+        }] MCP config patch failed (bridge token/port not injected → spawn_agent/dispatch_task may 401): ${
           e instanceof Error ? e.message : String(e)
         }`,
       );
@@ -1075,14 +1098,14 @@ export class OrchestratorManager {
       // accepting input.
       if (launchConfig.model === "gpt") {
         console.info(
-          `[Orchestrator:${this.kind}] Codex boot health: ${buildCodexBootHealthSummary(
-            {
-              projectId,
-              contextId: context,
-              bridgeConnected: Boolean(bridgePort),
-              surface: codexSurface,
-            },
-          )}`,
+          `[Orchestrator:${
+            this.kind
+          }] Codex boot health: ${buildCodexBootHealthSummary({
+            projectId,
+            contextId: context,
+            bridgeConnected: Boolean(bridgePort),
+            surface: codexSurface,
+          })}`,
         );
       }
       const codexOrchestratorInstructions =

@@ -13,7 +13,11 @@ import { placeAnchoredPopup } from "../../lib/anchoredPopup";
 import {
   ORCHESTRATOR_MODEL_OPTIONS,
   isOrchestratorModel,
+  orchestratorEffortsFor,
+  orchestratorModelBase,
+  orchestratorModelEffort,
   useOrchestratorStore,
+  withOrchestratorEffort,
   type OrchestratorModel,
 } from "../../stores/orchestratorStore";
 import { useProjectStore } from "../../stores/projectStore";
@@ -43,6 +47,19 @@ function computeDefaultHeight(): number {
       Math.round(window.innerHeight * DEFAULT_HEIGHT_RATIO),
     ),
   );
+}
+
+/**
+ * 저장값(`provider[:modelId][@effort]`)을 사람이 읽는 한 줄로. 모델 라벨은 셀렉터
+ * 목록에서 가져오고 effort 는 그 뒤에 붙인다 — 지금 오케가 어느 effort 로 도는지
+ * 헤더만 보고 알 수 있어야 "왜 이렇게 비싸지" 를 추적할 수 있다.
+ */
+function describeOrchestratorModel(value: string): string {
+  const base = orchestratorModelBase(value);
+  const label =
+    ORCHESTRATOR_MODEL_OPTIONS.find((m) => m.value === base)?.label ?? "Claude";
+  const effort = orchestratorModelEffort(value);
+  return effort ? `${label} @${effort}` : label;
 }
 
 async function withSwitchClientTimeout<T>(
@@ -271,6 +288,11 @@ export default memo(function OrchestratorPanel({
     ["CLAIMED", "IN_PROGRESS", "BLOCKED", "REVIEW"].includes(task.status),
   ).length;
   const targetSwitchModel = pendingSwitchModel ?? selectedModel;
+  // 셀렉터는 두 축이다: 모델(첫째 드롭다운) + reasoning effort(둘째, codex 변형
+  // 에서만 뜬다). 저장·IPC 로 오가는 값은 둘을 합친 compound 하나뿐이다.
+  const selectedBase = orchestratorModelBase(selectedModel);
+  const selectedEffort = orchestratorModelEffort(selectedModel);
+  const effortChoices = orchestratorEffortsFor(selectedModel);
 
   const handleStartWithSession = async (resumeSessionId?: string) => {
     setShowSessionPicker(false);
@@ -316,9 +338,12 @@ export default memo(function OrchestratorPanel({
     }
   };
 
-  const handleModelChange = (e: ChangeEvent<HTMLSelectElement>) => {
-    e.stopPropagation();
-    const next = e.target.value as OrchestratorModel;
+  /**
+   * 모델 축·effort 축 어느 쪽이 바뀌든 최종 compound 값 하나로 수렴시킨다.
+   * 두 드롭다운이 각자 저장·스위치 로직을 복제하지 않게 하려는 것 — effort 만
+   * 바꾼 것도 실제로는 오케 재기동이라 모델 변경과 완전히 같은 경로를 타야 한다.
+   */
+  const applyModelSelection = (next: OrchestratorModel) => {
     setSelectedModel(next);
     if (!isRunning) {
       window.electronAPI.orchestratorModel
@@ -330,6 +355,18 @@ export default memo(function OrchestratorPanel({
     setPendingSwitchModel(next);
     setSwitchAnchor(switchAnchorRef.current?.getBoundingClientRect() ?? null);
     setShowSwitchConfirm(true);
+  };
+
+  const handleModelChange = (e: ChangeEvent<HTMLSelectElement>) => {
+    e.stopPropagation();
+    // 현재 effort 를 새 모델로 이월한다. 새 모델이 그 effort 를 지원하지 않으면
+    // withOrchestratorEffort 가 모델 축만 남긴다(무효 compound 를 안 만든다).
+    applyModelSelection(withOrchestratorEffort(e.target.value, selectedEffort));
+  };
+
+  const handleEffortChange = (e: ChangeEvent<HTMLSelectElement>) => {
+    e.stopPropagation();
+    applyModelSelection(withOrchestratorEffort(selectedBase, e.target.value));
   };
 
   const handleCancelSwitch = (e?: React.MouseEvent) => {
@@ -544,11 +581,9 @@ export default memo(function OrchestratorPanel({
               {isSwitching
                 ? "Switching..."
                 : status === "running"
-                  ? `${
-                      ORCHESTRATOR_MODEL_OPTIONS.find(
-                        (m) => m.value === (runningModel ?? selectedModel),
-                      )?.label ?? "Claude"
-                    } Code`
+                  ? `${describeOrchestratorModel(
+                      runningModel ?? selectedModel,
+                    )} Code`
                   : "Starting..."}
             </span>
             {claudeVersion && (
@@ -565,7 +600,7 @@ export default memo(function OrchestratorPanel({
               onClick={(e) => e.stopPropagation()}
             >
               <select
-                value={selectedModel}
+                value={selectedBase}
                 onChange={handleModelChange}
                 disabled={isSwitching}
                 className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa] disabled:opacity-60"
@@ -577,6 +612,22 @@ export default memo(function OrchestratorPanel({
                   </option>
                 ))}
               </select>
+              {effortChoices.length > 0 && (
+                <select
+                  value={selectedEffort}
+                  onChange={handleEffortChange}
+                  disabled={isSwitching}
+                  className="ml-1 h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa] disabled:opacity-60"
+                  title="Codex reasoning effort"
+                >
+                  <option value="">effort: default</option>
+                  {effortChoices.map((effort) => (
+                    <option key={effort} value={effort}>
+                      effort: {effort}
+                    </option>
+                  ))}
+                </select>
+              )}
               {showSwitchConfirm &&
                 createPortal(
                   <div
@@ -591,9 +642,7 @@ export default memo(function OrchestratorPanel({
                   >
                     <div className="mb-1 font-medium text-[#cdd6f4]">
                       Switch orchestrator to{" "}
-                      {ORCHESTRATOR_MODEL_OPTIONS.find(
-                        (m) => m.value === targetSwitchModel,
-                      )?.label ?? "Claude"}
+                      {describeOrchestratorModel(targetSwitchModel)}
                     </div>
                     <div className="mb-3 text-[11px] leading-4 text-[#a6adc8]">
                       Snapshot will include active missions and board work.
@@ -664,7 +713,7 @@ export default memo(function OrchestratorPanel({
             {/* Start button + session picker toggle */}
             <div className="relative ml-2 flex items-center gap-1">
               <select
-                value={selectedModel}
+                value={selectedBase}
                 onClick={(e) => e.stopPropagation()}
                 onChange={handleModelChange}
                 className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa]"
@@ -676,6 +725,22 @@ export default memo(function OrchestratorPanel({
                   </option>
                 ))}
               </select>
+              {effortChoices.length > 0 && (
+                <select
+                  value={selectedEffort}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={handleEffortChange}
+                  className="h-6 rounded border border-[#313244] bg-[#1e1e2e] px-1.5 text-[11px] text-[#cdd6f4] outline-none hover:border-[#89b4fa]"
+                  title="Codex reasoning effort"
+                >
+                  <option value="">effort: default</option>
+                  {effortChoices.map((effort) => (
+                    <option key={effort} value={effort}>
+                      effort: {effort}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
                 onClick={handleManualStart}
                 className="rounded bg-[#89b4fa]/20 px-2.5 py-0.5 text-[#89b4fa] hover:bg-[#89b4fa]/30 transition-colors"
