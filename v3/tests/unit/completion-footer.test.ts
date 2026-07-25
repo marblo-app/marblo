@@ -48,6 +48,15 @@ describe("withCompletionFooter", () => {
       );
     });
 
+    // P5-1: 타입드 질문 채널이 기본 경로가 됐다. 구 경로(add_activity + [질문])는
+    // 안내가 남아 있어야 하지만, 우선 안내는 ask_orchestrator 여야 한다.
+    it("타입드 질문 채널(ask_orchestrator)을 우선 안내한다", () => {
+      const out = withCompletionFooter("x", "task-xyz");
+      expect(out).toContain('ask_orchestrator(task_id="task-xyz"');
+      expect(out).toContain("question_id");
+      expect(out).toContain("answer_question");
+    });
+
     it("질문 자체는 유지하고 추측 수정을 금지한다 (과잉교정 방지)", () => {
       const out = withCompletionFooter("x", "task-xyz");
       expect(out).toContain("추측으로 고치지 마라");

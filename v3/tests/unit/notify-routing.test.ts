@@ -164,6 +164,38 @@ describe("shouldInjectOrchestratorNotification — quiet progress gate", () => {
     }
   });
 
+  // P5-4: 설계문서(#595 §6)는 "add_activity 는 lane 이 아니면 무조건 오케 PTY 로
+  // 전달되므로 [질문] 표기는 관례일 뿐" 이라고 적었지만 사실이 아니다. MCP 쪽은
+  // 무조건 POST 하지만 여기 브리지 게이트가 평범한 [Task Activity] 를 떨어뜨린다.
+  // 즉 표기(또는 자연어 안전망)가 실제로 전달 여부를 가른다. 이 두 줄이 그 계약이다.
+  it("★[질문] 표기는 관례가 아니라 실제 전달 스위치다", () => {
+    const plain =
+      '[Task Activity] "T" progress update (backend, id=t1, agent=a1): 리팩터링 절반 끝냈습니다';
+    const marked =
+      '[Task Activity] "T" progress update (backend, id=t1, agent=a1): [질문] 어느 모델로 갈까요';
+    expect(shouldInjectOrchestratorNotification(plain)).toBe(false);
+    expect(shouldInjectOrchestratorNotification(marked)).toBe(true);
+  });
+
+  // 타입드 질문 채널(P5-1)은 게이트를 통과하는 것이 계약이다 — 질문이 억제되면
+  // 에이전트가 오지 않을 답을 기다리며 논다.
+  it("[Question] 타입드 질문은 항상 주입된다", () => {
+    expect(
+      shouldInjectOrchestratorNotification(
+        '[Question] "T" (backend, task=t1, agent=a1)\nquestion_id=t1#qabc\n\n본문',
+      ),
+    ).toBe(true);
+  });
+
+  // 전달 실패 보고(P5-2) 역시 오케가 반드시 봐야 한다.
+  it("[전달 실패] 보고는 항상 주입된다", () => {
+    expect(
+      shouldInjectOrchestratorNotification(
+        "[전달 실패] 에이전트 a1 의 PTY 주입이 9회 시도 후 실패했습니다",
+      ),
+    ).toBe(true);
+  });
+
   it("still suppresses ordinary progress that merely contains a question mark", () => {
     expect(
       shouldInjectOrchestratorNotification(

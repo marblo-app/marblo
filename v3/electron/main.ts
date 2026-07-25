@@ -923,7 +923,27 @@ startMcpOrphanReaper();
 const fsManager = new FsManager();
 // Bridges the cross-machine `pendingInstructions` Firestore queue to local
 // PTYs. attach/detach is driven by agent spawn / stop lifecycle below.
-const pendingListener = new PendingInstructionListener(ptyManager);
+const pendingListener = new PendingInstructionListener(ptyManager, {
+  // ★전달 실패는 조용히 넘어가지 않는다(P5-2). 원장에 delivered 로 찍힌 지시가
+  // 끝내 PTY 에 못 들어가면 — 오케가 보낸 "답변"이 여기 해당한다 — 그 사실을
+  // 오케 PTY 로 되돌려 준다. 오케가 다시 보내거나 사장님께 올릴 수 있게.
+  onDeliveryFailure: (failure) => {
+    if (!failure.permanent) return; // 재시도 여지가 남은 실패는 시끄럽게 알리지 않는다.
+    const projectId = failure.agentId.startsWith("orch-")
+      ? failure.agentId.slice("orch-".length)
+      : (projectIdForAgent(failure.agentId) ?? "");
+    if (!projectId) return;
+    const orch = orchestrators.get(projectId);
+    // 오케 자신에게 못 넣은 경우는 알릴 통로가 그 PTY 뿐이라 재주입해봐야
+    // 같은 이유로 실패한다 — 콘솔 기록(큐가 이미 남김)으로만 끝낸다.
+    if (!orch || failure.agentId === `orch-${projectId}`) return;
+    void orch.injectMessage(
+      `[전달 실패] 에이전트 ${failure.agentId} 의 PTY 주입이 ${failure.attempts}회 시도 후 실패했습니다 ` +
+        `(사유: ${failure.reason}). 아래 내용은 전달되지 않았습니다 — 필요하면 다시 보내세요.\n` +
+        `--- 미전달 원문 (doc=${failure.docId}) ---\n${failure.message}`,
+    );
+  },
+});
 // Helper used by AgentManager callbacks to route project-scoped events.
 // Looks up the agent's project from its launchConfig env (set at spawn).
 function projectIdForAgent(agentId: string): string | undefined {

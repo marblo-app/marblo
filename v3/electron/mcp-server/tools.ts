@@ -17,6 +17,7 @@ import {
   where,
   orderBy,
   limit as fsLimit,
+  runTransaction,
   waitForPendingWrites,
   Timestamp,
   type QueryConstraint,
@@ -55,6 +56,21 @@ import {
   composeTaskBody,
 } from "./task-body.js";
 import { evaluateDeleteGuards, type DeleteMode } from "./task-delete.js";
+import {
+  appendQuestion,
+  answerQuestion,
+  clampQuestionText,
+  formatAnswerDelivery,
+  formatQuestionLine,
+  formatQuestionNotification,
+  markAnswerDelivery,
+  newQuestionId,
+  MAX_QUESTION_CHARS,
+  openQuestions,
+  parseQuestionId,
+  readQuestions,
+  type QuestionEntry,
+} from "./question-channel.js";
 import {
   chunkBulkTasks,
   normalizeBulkTasksPayload,
@@ -257,6 +273,52 @@ function notifyOrchestrator(message: string, contextId?: string): void {
   }).catch(() => {
     /* best-effort */
   });
+}
+
+/**
+ * `notifyOrchestrator` 의 결과 확인형 변종 — 주입 성공 여부를 실제로 기다린다.
+ *
+ * 대부분의 알림은 fire-and-forget 이어도 된다(놓쳐도 티켓 타임라인에 남는다).
+ * 질문은 다르다: 오케 PTY 에 안 들어갔다면 "물어봤다"가 거짓이 되고, 에이전트는
+ * 오지 않을 답을 기다린다. 그래서 이 경로만 응답을 읽어 호출자에게 사실대로
+ * 돌려준다(주입 실패 시 질문은 티켓에 open 으로 남아 get_open_questions 로 복구).
+ */
+async function notifyOrchestratorAwaited(
+  message: string,
+  contextId?: string,
+): Promise<{ injected: boolean; error?: string }> {
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) return { injected: false, error: "no bridge port" };
+  const projectId = process.env.MARBLO_PROJECT || "";
+  try {
+    const res = await fetch(
+      `http://127.0.0.1:${bridgePort}/notify-orchestrator`,
+      {
+        method: "POST",
+        headers: bridgeHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          message,
+          projectId,
+          contextId: contextId ?? "",
+        }),
+      },
+    );
+    const body = (await res.json()) as {
+      success?: boolean;
+      injected?: boolean;
+      error?: string;
+    };
+    if (body.injected) return { injected: true };
+    return {
+      injected: false,
+      error: body.error || "orchestrator PTY did not accept the message",
+    };
+  } catch (err) {
+    return {
+      injected: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 /**
@@ -1097,6 +1159,7 @@ const ORCHESTRATOR_LIVE_GUARDED_TOOLS = new Set([
   "update_flow",
   "add_pending_instruction",
   "mark_instruction_delivered",
+  "answer_question",
   "run_skill",
   "mission_step_done",
   "send_telegram_message",
@@ -4518,6 +4581,350 @@ export function registerTools(server: McpServer): void {
       });
       return text(`Instruction ${instruction_id} marked as delivered.`);
     },
+  );
+
+  // ── 22.5 타입드 질문 채널 (P5-1) ─────────────────────────────────
+  //
+  // 왜 add_activity 로 충분하지 않은가: 질문·진행보고·완료보고가 한 평문
+  // 스트림에 섞이고, 질문 id 도 "답변 대기" 상태도 없어 답을 질문에 이을 수
+  // 없으며, 오케 PTY 로 나갈 때 300자에서 잘려 긴 질의는 몸통이 사라졌다.
+  // 여기서는 질문에 id 를 주고(ask_orchestrator), 답을 그 id 로 잇고
+  // (answer_question), 상태를 티켓(tasks/{id}.questions)에 남긴다.
+  // 순수 로직(상관키/용량/포맷)은 ./question-channel.ts.
+
+  /** 질문 배열을 트랜잭션으로 갱신한다(동시 질문/답변이 서로를 덮지 않게). */
+  async function mutateQuestions(
+    taskId: string,
+    mutate: (current: QuestionEntry[]) => QuestionEntry[] | null,
+  ): Promise<boolean> {
+    return runTransaction(db, async (tx) => {
+      const ref = doc(db, "tasks", taskId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return false;
+      const current = readQuestions(
+        (snap.data() as Record<string, unknown>).questions,
+      );
+      const next = mutate(current);
+      if (!next) return false;
+      tx.update(ref, {
+        questions: next,
+        // 스칼라 미러 — 보드/오케가 배열을 열지 않고도 "미답 질문 있음"을 본다.
+        openQuestionCount: openQuestions(next).length,
+      });
+      return true;
+    });
+  }
+
+  // 23. ask_orchestrator — 에이전트가 오케에 타입드 질문을 던진다.
+  auditedTool(
+    "ask_orchestrator",
+    "Ask the orchestrator a question through the typed Q&A channel. Returns a question_id; the orchestrator replies with answer_question(question_id, answer) and the answer is delivered back to this agent's PTY. The full question text is forwarded (no 300-char truncation) and the open/answered state is kept on the ticket.",
+    {
+      task_id: z.string().describe("Task ID this question belongs to"),
+      question: z
+        .string()
+        .describe(
+          "Question body — full text. Say what you need, why, and what is blocked without it.",
+        ),
+      blocking: z
+        .boolean()
+        .optional()
+        .describe(
+          "true only when work genuinely cannot proceed without the answer (default false — keep working on the rest).",
+        ),
+      agent_id: z
+        .string()
+        .optional()
+        .describe("Asking agent id (defaults to this MCP session's agent)"),
+    },
+    async ({ task_id, question, blocking, agent_id }) => {
+      const task = await fetchTask(task_id);
+      if (!task) return text(`Error: Task ${task_id} not found.`);
+      const body = question.trim();
+      if (!body) return text("Error: question 이 비어 있습니다.");
+
+      const clamped = clampQuestionText(body);
+      const askedBy = agent_id || MARBLO_AGENT_ID;
+      const seed = `${Date.now().toString(36)}${Math.random()
+        .toString(36)
+        .slice(2, 6)}`;
+      const entry: QuestionEntry = {
+        id: newQuestionId(task_id, seed),
+        question: clamped.value,
+        status: "open",
+        askedBy: askedBy === "unknown" ? "" : askedBy,
+        askedAt: Date.now(),
+        blocking: blocking === true,
+      };
+
+      const stored = await mutateQuestions(task_id, (cur) =>
+        appendQuestion(cur, entry),
+      );
+      if (!stored) {
+        return text(
+          `Error: 질문을 티켓 ${task_id} 에 기록하지 못했습니다(태스크 없음).`,
+        );
+      }
+
+      // 타임라인에도 남긴다 — 보드에서 "이 티켓은 답을 기다리는 중"이 보이도록.
+      try {
+        await applyProjection(db, task_id, {
+          lastAgentId: attributionAgentId(agent_id),
+          lastActivitySummary: `[질문] ${entry.question.slice(0, 200)}`,
+          activityPayload: {
+            agentId: entry.askedBy || "unknown",
+            message: `[질문 ${entry.id}] ${entry.question}`,
+          },
+        });
+      } catch (err) {
+        // 타임라인 기록 실패가 질문 자체를 무효화하지는 않는다(질문은 이미 저장됨).
+        console.error("[ask_orchestrator] activity write failed:", err);
+      }
+
+      // 오케 PTY 로 전문 전달. lane 도 게이트하지 않는다 — 질문은 진행 잡음이
+      // 아니라 응답이 필요한 이벤트고, 막힌 에이전트가 조용히 노는 것이 정확히
+      // 이 채널이 막으려는 실패다.
+      const roleLabel = formatAgentTaskRoleLabel(
+        task.role,
+        await fetchAgentRole(entry.askedBy),
+      );
+      const notify = await notifyOrchestratorAwaited(
+        formatQuestionNotification({
+          questionId: entry.id,
+          taskId: task_id,
+          taskTitle: task.title,
+          askedBy: entry.askedBy || "unknown",
+          roleLabel,
+          question: entry.question,
+          blocking: entry.blocking,
+        }),
+        task.contextId,
+      );
+
+      const truncNote = clamped.truncated
+        ? `\n⚠️ 질문이 ${clamped.originalLength}자라 ${MAX_QUESTION_CHARS}자에서 잘렸습니다 — 나머지는 나눠서 다시 물어보세요.`
+        : "";
+      const deliveryNote = notify.injected
+        ? "오케스트레이터 PTY 로 전달됨."
+        : `⚠️ 오케 PTY 주입 실패(${notify.error}). 질문은 티켓에 open 으로 남아 있으니 오케가 get_open_questions 로 회수할 수 있습니다.`;
+      return text(
+        `질문 등록: question_id=${entry.id} (status=open${
+          entry.blocking ? ", blocking" : ""
+        })\n${deliveryNote}${truncNote}\n답이 오면 이 에이전트 PTY 로 자동 주입됩니다. 그 사이 무관한 잔여 작업은 계속하세요.`,
+      );
+    },
+  );
+
+  // 24. answer_question — 오케가 질문에 답하고, 그 답을 질문자에게 되돌린다.
+  auditedTool(
+    "answer_question",
+    "Answer a question raised via ask_orchestrator. Correlates by question_id, flips the ticket entry to answered, and queues the full answer for delivery into the asking agent's PTY (hardened delivery: retried, and explicitly reported if it cannot be delivered).",
+    {
+      question_id: z
+        .string()
+        .describe("question_id returned by ask_orchestrator"),
+      answer: z.string().describe("Answer body — full text."),
+      task_id: z
+        .string()
+        .optional()
+        .describe(
+          "Task ID (optional — inferred from question_id, which embeds it)",
+        ),
+    },
+    async ({ question_id, answer, task_id }) => {
+      const body = answer.trim();
+      if (!body) return text("Error: answer 가 비어 있습니다.");
+      const parsed = parseQuestionId(question_id);
+      const taskId = task_id || parsed.taskId;
+      if (!taskId) {
+        return text(
+          `Error: question_id "${question_id}" 에서 task 를 알 수 없습니다. task_id 를 함께 주세요.`,
+        );
+      }
+      const task = await fetchTask(taskId);
+      if (!task) return text(`Error: Task ${taskId} not found.`);
+
+      const clamped = clampQuestionText(body);
+      const answeredBy = MARBLO_AGENT_ID || "orchestrator";
+      // 콜백에서 채우는 결과 홀더 — 트랜잭션의 성공/실패와 별개로 "왜 실패했나"를
+      // 밖으로 들고 나와야 호출자에게 사실대로 답할 수 있다.
+      const outcome: {
+        entry: QuestionEntry | null;
+        failure: "not-found" | "already-answered" | null;
+      } = { entry: null, failure: null };
+
+      const applied = await mutateQuestions(taskId, (cur) => {
+        const res = answerQuestion(
+          cur,
+          question_id,
+          clamped.value,
+          answeredBy,
+          Date.now(),
+        );
+        if (!res.ok) {
+          outcome.failure = res.reason;
+          outcome.entry = res.entry ?? null;
+          return null;
+        }
+        outcome.entry = res.entry;
+        return res.entries;
+      });
+
+      if (!applied) {
+        if (outcome.failure === "already-answered") {
+          const prev = outcome.entry;
+          return text(
+            `Question ${question_id} 은 이미 답변됨(${
+              prev?.answeredBy ?? "unknown"
+            }). ` +
+              `덮어쓰지 않았습니다 — 정정이 필요하면 새 지시를 add_pending_instruction 으로 보내세요.\n` +
+              `기존 답: ${prev?.answer ?? ""}`,
+          );
+        }
+        return text(
+          `Error: question_id ${question_id} 를 티켓 ${taskId} 에서 찾지 못했습니다. get_open_questions(task_id="${taskId}") 로 확인하세요.`,
+        );
+      }
+
+      const entry = outcome.entry;
+      const target = entry?.askedBy ?? "";
+      if (!target) {
+        await mutateQuestions(taskId, (cur) =>
+          markAnswerDelivery(cur, question_id, "failed"),
+        );
+        return text(
+          `답변 기록 완료(question_id=${question_id}) — 다만 질문자 agent id 가 비어 있어 PTY 로 전달하지 못했습니다. ` +
+            `대상 에이전트를 확인해 add_pending_instruction 으로 직접 보내세요.`,
+        );
+      }
+
+      // 전달은 하드닝된 pendingInstructions 경로를 탄다: 호스트 앱의 리스너가
+      // 현재 PTY 로 재시도하고, 끝내 실패하면 오케에 명시 보고한다(P5-2).
+      let delivery: "queued" | "failed" = "failed";
+      let deliveryNote = "";
+      const callerUid = getCurrentAuthUid();
+      if (!callerUid) {
+        deliveryNote = "Firebase auth 미준비로 전달 큐에 넣지 못했습니다.";
+      } else {
+        try {
+          const ref = await addDoc(collection(db, "pendingInstructions"), {
+            projectId: task.projectId,
+            taskId,
+            targetAgentId: target,
+            message: formatAnswerDelivery({
+              questionId: question_id,
+              taskId,
+              question: entry?.question ?? "",
+              answer: clamped.value,
+              answeredBy,
+            }),
+            fromUserId: callerUid,
+            fromUserName: "",
+            sourceType: "orchestrator",
+            isDelivered: false,
+            createdAt: Timestamp.now(),
+            deliveredAt: null,
+          });
+          delivery = "queued";
+          deliveryNote = `전달 큐 등록됨(instruction=${ref.id}, target=${target}).`;
+        } catch (err) {
+          deliveryNote = `전달 큐 등록 실패: ${
+            err instanceof Error ? err.message : String(err)
+          }`;
+        }
+      }
+
+      await mutateQuestions(taskId, (cur) =>
+        markAnswerDelivery(cur, question_id, delivery),
+      );
+
+      try {
+        await applyProjection(db, taskId, {
+          // 답변자는 오케다 — attributionAgentId 규칙대로 담당자 귀속은 건드리지
+          // 않고(""), 직전 실제 작업자를 보존한다.
+          lastAgentId: "",
+          lastActivitySummary: `[답변] ${clamped.value.slice(0, 200)}`,
+          activityPayload: {
+            agentId: answeredBy,
+            message: `[답변 ${question_id}] ${clamped.value}`,
+          },
+        });
+      } catch (err) {
+        console.error("[answer_question] activity write failed:", err);
+      }
+
+      const truncNote = clamped.truncated
+        ? `\n⚠️ 답변이 ${clamped.originalLength}자라 ${MAX_QUESTION_CHARS}자에서 잘렸습니다.`
+        : "";
+      return text(
+        `Question ${question_id} answered. ${deliveryNote}${truncNote}`,
+      );
+    },
+  );
+
+  // 25. get_open_questions — 오케가 놓친 질문을 되찾는 복구 경로.
+  //     PTY 알림은 유실될 수 있지만 티켓의 질문 상태는 남는다.
+  auditedTool(
+    "get_open_questions",
+    "List questions raised via ask_orchestrator. Without task_id it scans the project's open tasks — use it to recover questions whose PTY notification was missed.",
+    {
+      task_id: z
+        .string()
+        .optional()
+        .describe("Limit to one task (otherwise scans the project)"),
+      include_answered: z
+        .boolean()
+        .optional()
+        .describe("Include answered questions (default: false)"),
+      project_id: z.string().optional().describe("Project ID"),
+    },
+    async ({ task_id, include_answered, project_id }) => {
+      const wantAll = include_answered === true;
+      const render = (t: TaskDoc, entries: QuestionEntry[]): string[] =>
+        entries
+          .filter((q) => wantAll || q.status === "open")
+          .map((q) => formatQuestionLine(q, t.title));
+
+      if (task_id) {
+        const task = await fetchTask(task_id);
+        if (!task) return text(`Error: Task ${task_id} not found.`);
+        const entries = readQuestions(
+          (task as unknown as Record<string, unknown>).questions,
+        );
+        const lines = render(task, entries);
+        return text(
+          lines.length ? lines.join("\n") : "질문이 없습니다(open 기준).",
+        );
+      }
+
+      const projectId = await enforceProjectLock(
+        "get_open_questions",
+        project_id,
+      );
+      const constraints: QueryConstraint[] = [];
+      if (projectId) constraints.push(where("projectId", "==", projectId));
+      // openQuestionCount 는 질문이 처음 달릴 때 생기는 필드라, 이 조건은
+      // 질문이 하나라도 있었던 티켓만 읽는다(질문 없는 보드는 0 doc read).
+      const snap = await boundedGetDocs(
+        "tasks",
+        constraints,
+        [where("openQuestionCount", ">", 0)],
+        "get_open_questions",
+      );
+      const lines: string[] = [];
+      for (const d of snap.docs) {
+        const t = { id: d.id, ...d.data() } as TaskDoc;
+        if (t.deleted) continue;
+        lines.push(
+          ...render(
+            t,
+            readQuestions((d.data() as Record<string, unknown>).questions),
+          ),
+        );
+      }
+      return text(lines.length ? lines.join("\n") : "미답 질문이 없습니다.");
+    },
+    { userFacing: false },
   );
 
   // 23. run_skill — Mission engine 용 (명세 §8).

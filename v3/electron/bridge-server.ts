@@ -109,7 +109,13 @@ export function withCompletionFooter(
     "",
     "[막혔을 때 — 사용자에게 직접 묻지 말 것]",
     "- 근거가 없으면 추측으로 고치지 마라. 모르면 묻는 게 맞다. 단 물어볼 대상은 사용자가 아니라 오케스트레이터다.",
-    `- 질문·확인 요청: add_activity(task_id="${taskId}", message="[질문] 필요한 것: ... / 이유: ... / 못 받으면 막히는 범위: ...") — "[질문]" 표기가 있어야 오케 PTY 로 즉시 전달된다.`,
+    // ★질문은 타입드 채널이 우선이다(P5-1). ask_orchestrator 는 전문을 자르지
+    // 않고 오케 PTY 로 넣고, question_id 로 답을 이 에이전트 PTY 까지 되돌린다.
+    // 구 경로(add_activity)도 살아 있지만 "[질문]" 표기가 없으면 브리지 게이트
+    // (shouldInjectOrchestratorNotification)가 타임라인 전용으로 떨어뜨리고,
+    // 나가는 본문도 300자에서 잘린다 — 긴 질의엔 부적합.
+    `- 질문·확인 요청(★권장): ask_orchestrator(task_id="${taskId}", question="필요한 것: ... / 이유: ... / 못 받으면 막히는 범위: ...") — question_id 를 돌려주고, 오케의 answer_question 답변이 네 PTY 로 자동 주입된다(주입 실패 시 재시도+명시 보고).`,
+    `- 구 경로: add_activity(task_id="${taskId}", message="[질문] ...") — 이때 "[질문]" 표기는 관례가 아니라 실제 전달 스위치다(표기 없는 진행보고는 오케 PTY 로 가지 않는다).`,
     `- 그 미지 때문에 진행이 실제로 멈추면: update_task_status(task_id="${taskId}", status="BLOCKED", comment="무엇을 기다리는지") — BLOCKED 도 즉시 전달된다.`,
     "- ★질문했다고 작업 전체를 멈추지 마라. 그 미지와 무관하게 진행 가능한 잔여 작업은 계속하고, 답이 오면 막혔던 부분을 이어서 한다.",
     "- 사용자만 답할 수 있는 것(스크린샷, 라이브 관측값, 제품 판단)이라도 오케에 보고하면 오케가 판단해 답하거나 사장님께 모아 전달한다.",
@@ -331,6 +337,12 @@ export function shouldInjectOrchestratorNotification(message: string): boolean {
 
   if (trimmed.startsWith("[Review Submitted]")) return true;
   if (trimmed.startsWith("[Dependency Resolved]")) return true;
+  // 타입드 질문 채널(P5-1). 질문은 정의상 응답이 필요한 이벤트라 절대 억제하지
+  // 않는다 — 여기서 막히면 에이전트는 오지 않을 답을 기다리며 논다.
+  if (trimmed.startsWith("[Question]")) return true;
+  // 전달 실패 보고(P5-2) — 답변이 에이전트 PTY 에 못 들어갔다는 사실은
+  // 오케가 반드시 알아야 재발송/승격을 결정할 수 있다.
+  if (trimmed.startsWith("[전달 실패]")) return true;
 
   return true;
 }
@@ -1471,15 +1483,44 @@ export class BridgeServer {
         // Write the notification message to the orchestrator's PTY stdin.
         // writeAndSubmit splits text and \r so Claude Code registers Enter
         // as a discrete keystroke (single-chunk gets paste-buffered).
-        this.ptyManager.writeAndSubmit(session.ptySessionId, params.message);
-        console.log(
-          `[BridgeServer] Notified ${target} orchestrator (project=${projectId}, context=${
-            contextId || "board"
-          }): ${params.message.slice(0, 80)}...`,
-        );
-
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ success: true, injected: true }));
+        //
+        // ★결과를 기다렸다가 사실대로 답한다(P5-2). writeAndSubmit 은 실패를
+        // throw 가 아니라 `false` 로 알리므로, 예전처럼 fire-and-forget 하고
+        // injected:true 를 돌려주면 "오케에 전달됨"이 거짓이 될 수 있다. 질문
+        // 채널(ask_orchestrator)은 이 값을 읽어 질문자에게 전달 여부를 알린다.
+        this.ptyManager
+          .writeAndSubmit(session.ptySessionId, params.message)
+          .then((injected) => {
+            console.log(
+              `[BridgeServer] Notified ${target} orchestrator (project=${projectId}, context=${
+                contextId || "board"
+              }) injected=${injected}: ${params.message.slice(0, 80)}...`,
+            );
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                success: true,
+                injected,
+                ...(injected
+                  ? {}
+                  : { error: "orchestrator PTY did not accept the message" }),
+              }),
+            );
+          })
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error(
+              `[BridgeServer] orchestrator notification write failed (project=${projectId}): ${message}`,
+            );
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                success: false,
+                injected: false,
+                error: message,
+              }),
+            );
+          });
       } catch (err) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(

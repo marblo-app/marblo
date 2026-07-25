@@ -12,6 +12,11 @@ import {
   type DocumentSnapshot,
 } from "firebase/firestore";
 import { PtyManager } from "./pty-manager";
+import {
+  InstructionDeliveryQueue,
+  type InstructionDeliveryFailure,
+  type InstructionDeliverySuccess,
+} from "./instruction-delivery-queue";
 
 const NAMED_APP = "pending-instruction-listener";
 
@@ -91,6 +96,17 @@ function getDb(): Firestore {
  * the first transaction commits and only that listener injects into PTY.
  * Subsequent listeners observe `isDelivered == true` and skip.
  */
+export interface PendingInstructionListenerHooks {
+  /**
+   * ★전달 실패 싱크. 트랜잭션에서 이미 delivered 로 마킹된 지시가 끝내 PTY 에
+   * 못 들어갔을 때 호출된다. 배선하는 쪽(main.ts)이 오케에 알려 사람이 개입할
+   * 수 있게 한다 — 조용히 사라지는 경로를 남기지 않기 위한 마지막 관문.
+   */
+  onDeliveryFailure?: (failure: InstructionDeliveryFailure) => void;
+  /** 전달 성공 훅(관측용). */
+  onDelivered?: (result: InstructionDeliverySuccess) => void;
+}
+
 export class PendingInstructionListener {
   private db: Firestore;
   private unsubscribers: Map<string, Unsubscribe> = new Map();
@@ -98,10 +114,31 @@ export class PendingInstructionListener {
   // 프로세스 수명 멱등 가드 — 이미 PTY 로 주입한 지시 doc id 집합. re-attach
   // (에이전트 재시작) 초기 스냅샷이 같은 doc 을 다시 added 로 올려도 재주입 0.
   private deliveredDocIds: Set<string> = new Set();
+  // agentId → 현재 붙어 있는 PTY 세션. attach 때 갱신되며, 재시도는 캡처된
+  // sid 가 아니라 이 맵을 다시 읽는다(전달 대기 중 PTY 가 바뀌어도 따라가게).
+  private ptyByAgent: Map<string, string> = new Map();
+  private queue: InstructionDeliveryQueue;
 
-  constructor(ptyManager: PtyManager) {
+  constructor(
+    ptyManager: PtyManager,
+    hooks: PendingInstructionListenerHooks = {},
+  ) {
     this.db = getDb();
     this.ptyManager = ptyManager;
+    this.queue = new InstructionDeliveryQueue({
+      writer: {
+        writeAndSubmit: (sessionId, text) =>
+          this.ptyManager.writeAndSubmit(sessionId, text),
+      },
+      resolvePty: (agentId) => this.ptyByAgent.get(agentId),
+      onDelivered: hooks.onDelivered,
+      onFailure: hooks.onDeliveryFailure,
+    });
+  }
+
+  /** 미전달로 남아 있는 지시 수 — 진단/테스트용. */
+  undeliveredCount(agentId?: string): number {
+    return this.queue.pendingCount(agentId);
   }
 
   /**
@@ -110,6 +147,12 @@ export class PendingInstructionListener {
    * the same `agentId` is a no-op.
    */
   attach(agentId: string, ptySessionId: string): void {
+    // PTY 맵은 구독 여부와 무관하게 항상 최신으로 — 재시도가 이 값을 읽는다.
+    this.ptyByAgent.set(agentId, ptySessionId);
+    // 직전 라운드에서 주입에 실패해 메모리에 남은 지시를 새 PTY 로 재주입한다.
+    // (에이전트 재시작 창에 도착한 답변이 살아 돌아오는 경로.)
+    void this.queue.flush(agentId);
+
     if (this.unsubscribers.has(agentId)) return;
 
     const q = query(
@@ -137,7 +180,7 @@ export class PendingInstructionListener {
           return at - bt;
         });
         for (const change of added) {
-          await this.deliver(change.doc, ptySessionId);
+          await this.deliver(change.doc, agentId);
         }
       },
       (err) => {
@@ -156,11 +199,18 @@ export class PendingInstructionListener {
 
   /** Stop the listener for `agentId`. Safe to call when not attached. */
   detach(agentId: string): void {
+    // PTY 매핑은 항상 지운다 — 죽은 세션 id 로 재시도해 봐야 유실만 확정된다.
+    // 미전달 버퍼는 남긴다: 에이전트가 다시 뜨면(attach) 그때 재주입한다.
+    this.ptyByAgent.delete(agentId);
     const unsub = this.unsubscribers.get(agentId);
     if (!unsub) return;
     unsub();
     this.unsubscribers.delete(agentId);
-    console.log(`[PendingInstructionListener] detached agent=${agentId}`);
+    const undelivered = this.queue.pendingCount(agentId);
+    console.log(
+      `[PendingInstructionListener] detached agent=${agentId}` +
+        (undelivered > 0 ? ` (undelivered kept: ${undelivered})` : ""),
+    );
   }
 
   /** Detach all listeners. Called on app shutdown. */
@@ -170,11 +220,20 @@ export class PendingInstructionListener {
       console.log(`[PendingInstructionListener] detached agent=${agentId}`);
     }
     this.unsubscribers.clear();
+    this.ptyByAgent.clear();
+    // 앱 종료 시점에 남은 미전달분은 프로세스와 함께 사라진다 — 조용히 지나가지
+    // 않도록 마지막으로 원문째 남긴다(수동 복구 근거).
+    const stranded = this.queue.pendingSummary();
+    for (const s of stranded) {
+      console.error(
+        `[PendingInstructionListener] shutdown with UNDELIVERED instruction doc=${s.docId} agent=${s.agentId} attempts=${s.attempts}: ${s.message}`,
+      );
+    }
   }
 
   private async deliver(
     docSnap: DocumentSnapshot,
-    ptySessionId: string,
+    agentId: string,
   ): Promise<void> {
     const ref = docSnap.ref;
     let message = "";
@@ -220,22 +279,22 @@ export class PendingInstructionListener {
       return;
     }
 
-    try {
-      this.ptyManager.writeAndSubmit(ptySessionId, message);
+    // ★P5-2: 여기가 답변 유실의 진범이었다. writeAndSubmit 은 실패를 throw 가
+    // 아니라 `false` 로 알린다(세션 없음 / 위험명령 차단 / CR 미등록) — 예전
+    // 코드는 반환값을 안 보고 try/catch 만 둬서 catch 가 영원히 안 걸렸고,
+    // 원장엔 delivered, 로그엔 "injected", 실제 답변은 증발했다.
+    // 이제는 결과를 await 해 판정하고, 실패하면 큐가 (a) 현재 PTY 를 다시
+    // 해석해 재시도하고 (b) 그래도 안 되면 메모리에 보관해 다음 attach 때
+    // 재주입하며 (c) 예산을 소진하면 onDeliveryFailure 로 명시 보고한다.
+    // Firestore 로 되돌리는(isDelivered=false) 재큐잉은 보안룰이 막고 있어
+    // (false→true 단방향 1회) 재시도 상태는 프로세스 안에서 산다.
+    const delivered = await this.queue.deliver(agentId, ref.id, message);
+    if (delivered) {
       console.log(
-        `[PendingInstructionListener] injected to pty=${ptySessionId}: ${message.slice(
+        `[PendingInstructionListener] injected agent=${agentId}: ${message.slice(
           0,
           80,
         )}`,
-      );
-    } catch (err) {
-      // PTY injection failed AFTER we already marked delivered. Don't
-      // revert: reverting would let a subsequent snapshot tick re-attempt
-      // injection on a possibly-different PTY. Log loudly so an operator
-      // can re-issue the instruction manually.
-      console.error(
-        `[PendingInstructionListener] PTY inject failed for ${ref.id} (already marked delivered):`,
-        err,
       );
     }
   }

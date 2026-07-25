@@ -3,7 +3,7 @@
 const store = new Map<string, Map<string, Record<string, unknown>>>();
 
 function getCollection(
-  collectionPath: string
+  collectionPath: string,
 ): Map<string, Record<string, unknown>> {
   if (!store.has(collectionPath)) {
     store.set(collectionPath, new Map());
@@ -47,7 +47,7 @@ export async function getDocs(q: {
   const docs: Array<{ id: string; data: () => Record<string, unknown> }> = [];
   for (const [id, data] of col.entries()) {
     const ok = wheres.every((w) =>
-      w.op === "==" ? data[w.field as string] === w.value : true
+      w.op === "==" ? data[w.field as string] === w.value : true,
     );
     if (ok) docs.push({ id, data: () => data });
   }
@@ -56,14 +56,14 @@ export async function getDocs(q: {
     size: docs.length,
     docs,
     forEach: (
-      cb: (d: { id: string; data: () => Record<string, unknown> }) => void
+      cb: (d: { id: string; data: () => Record<string, unknown> }) => void,
     ) => docs.forEach(cb),
   };
 }
 
 export async function addDoc(
   ref: { path: string },
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
 ) {
   const col = getCollection(ref.path);
   const id = `mock-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -73,7 +73,7 @@ export async function addDoc(
 
 export async function setDoc(
   ref: { collectionPath: string; docId: string },
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
 ) {
   const col = getCollection(ref.collectionPath);
   col.set(ref.docId, data);
@@ -81,7 +81,7 @@ export async function setDoc(
 
 export async function updateDoc(
   ref: { collectionPath: string; docId: string },
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
 ) {
   const col = getCollection(ref.collectionPath);
   const existing = col.get(ref.docId) || {};
@@ -141,7 +141,7 @@ function resolveValue(existing: unknown, value: unknown): unknown {
 // (e.g. "projection.statusCounts"), everything else is a shallow top-level set.
 function applyUpdate(
   existing: Record<string, unknown>,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
 ): Record<string, unknown> {
   const next = { ...existing };
   for (const [key, value] of Object.entries(data)) {
@@ -162,13 +162,20 @@ function applyUpdate(
   return next;
 }
 
+// 백엔드 ack 대기 — 실물은 로컬 쓰기가 서버에 반영될 때까지 기다린다. 목에선
+// 즉시 resolve 로 충분하다. ★없으면 안 되는 이유: tools.ts 의 감사 원장 sink 가
+// 이걸 호출하므로, 미구현 시 모든 감사 write 가 TypeError 로 실패해 스풀에 쌓이고
+// 그 경고가 **모든 툴 출력 앞에 prepend** 된다 — 툴 출력 문자열을 검사하는 테스트가
+// 실제 결함 없이 깨진다(question-channel-tools 4번 케이스가 이걸로 깨졌다).
+export async function waitForPendingWrites(_db?: unknown): Promise<void> {}
+
 export function orderBy(_field: string, _direction?: string) {
   return { type: "orderBy" };
 }
 
 export function onSnapshot(
   _query: unknown,
-  _callback: (snap: unknown) => void
+  _callback: (snap: unknown) => void,
 ) {
   return () => {}; // unsubscribe
 }
@@ -210,9 +217,9 @@ export async function runTransaction<T>(
     set: (ref: Record<string, unknown>, data: Record<string, unknown>) => void;
     update: (
       ref: { collectionPath: string; docId: string },
-      data: Record<string, unknown>
+      data: Record<string, unknown>,
     ) => void;
-  }) => Promise<T>
+  }) => Promise<T>,
 ): Promise<T> {
   const txn = {
     get: (ref: { collectionPath: string; docId: string }) => getDoc(ref),
@@ -228,7 +235,7 @@ export async function runTransaction<T>(
     },
     update: (
       ref: { collectionPath: string; docId: string },
-      data: Record<string, unknown>
+      data: Record<string, unknown>,
     ) => {
       const col = getCollection(ref.collectionPath);
       col.set(ref.docId, applyUpdate(col.get(ref.docId) || {}, data));

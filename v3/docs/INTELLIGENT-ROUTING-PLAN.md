@@ -382,12 +382,19 @@ A/B/C 와 **독립**. 병행 가능하고, 사장님 체감이 가장 빠른 축
 
 ### 현재 실측 상태
 
-- **에이전트→오케 전달은 이미 무조건 작동한다.** `add_activity` 는 lane 컨텍스트가
-  아니면 **모든** activity 를 `notifyOrchestrator` 로 오케 PTY 에 넣는다
-  (`tools.ts:2576-2587`).
-  ★**문서·코드 불일치**: 역할스킬은 "`[질문]` 표기가 있어야 오케 PTY 로 전달된다"
-  고 안내하지만, 코드엔 `질문` 분기가 없다(grep 0건). 실제로는 전부 전달된다.
-  → 표기는 사람이 눈으로 고르라는 관례일 뿐, 기계적 채널이 아니다.
+- **에이전트→오케 전달은 무조건이 아니다.** `add_activity` 는 lane 컨텍스트가
+  아니면 모든 activity 를 `notifyOrchestrator` 로 POST 하지만
+  (`tools.ts:2576-2587`), 그 뒤 **브리지가 한 번 더 거른다**:
+  `shouldInjectOrchestratorNotification`(`bridge-server.ts:312`)이 평범한
+  `[Task Activity]` 를 타임라인 전용으로 떨어뜨리고, `mentionsBlockedOrNeedsInput`
+  (`:292`)이 `[질문]` 표기·막힘 표현·자연어 질문 패턴을 만났을 때만 통과시킨다.
+  ★**정정(P5-4, 2026-07-25)**: 이 문서의 첫 판은 "표기는 관례일 뿐, 전부 전달된다"
+  고 적었으나 **사실과 반대다** — MCP 쪽만 보고 브리지 게이트를 놓친 오독이었다.
+  역할스킬의 "`[질문]` 표기가 있어야 전달된다" 는 안내가 맞다. 회귀 가드:
+  `tests/unit/notify-routing.test.ts` "★[질문] 표기는 관례가 아니라 실제 전달 스위치다".
+  → 다만 표기 의존은 여전히 취약하다(300자 프리뷰 밖으로 밀리면 표기도 사라진다).
+  그래서 P5-1 타입드 채널이 필요하다: `[Question]` 접두는 게이트를 무조건 통과하고
+  전문이 잘리지 않는다.
 - **오케→에이전트 회신 경로도 있다**: `add_pending_instruction` → Firestore →
   `pending-instruction-listener` → `ptyManager.writeAndSubmit`.
 - `orchestrator-manager.injectMessage`(:522)는 **PTY 전환 시 재라우팅 가드**를
@@ -493,7 +500,7 @@ A~D 와 독립. 단 D 의 "스킬발 질의" 가 이 채널을 타므로 **D 와
 | P5-1 | **타입드 질문 채널** — `ask_orchestrator`/`answer_question`, questionId 상관관계, 300자 절단 우회 | backend | —    | P1     |
 | P5-2 | **★회신 전달 하드닝** — delivered 선마킹 후 PTY 주입 실패 시 답변 유실 경로 수리                  | backend | —    | **P1** |
 | P5-3 | **에스컬레이션 판정 + 사장님 왕복** — §6-2 기준 + 텔레그램 라우팅 재사용                          | backend | P5-1 | P2     |
-| P5-4 | 역할스킬 문서 정정 — "`[질문]` 표기가 있어야 전달" 은 사실과 다름(전부 전달)                      | backend | —    | P3     |
+| P5-4 | 문서 정정 — ★반대로 판명: 표기가 **실제** 전달 스위치였다(§6 정정 + 스킬에 타입드 채널 안내)      | backend | —    | P3     |
 
 **권장 착수 순서**: P1-3·P1-4·P2-1·P5-2 (전부 현존 결함) → P1-1·P1-2 → P4-1 →
 나머지. 결함 4건을 먼저 처리해야 그 위에 쌓는 측정이 신뢰할 수 있다.
