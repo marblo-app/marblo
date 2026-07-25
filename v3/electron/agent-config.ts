@@ -4,6 +4,13 @@ import os from "os";
 import crypto from "crypto";
 import { execFileSync } from "child_process";
 import { ModelType } from "./agent-manager";
+import {
+  cmpSemver,
+  getModel,
+  meetsMinCli,
+  modelsByProvider,
+  type ModelProvider,
+} from "./model-registry";
 import { maskEnvForLogging } from "./config-redaction";
 import { CODEX_ORCH_REQUIRED_MCP_TOOLS } from "./mcp-server/tool-surface";
 
@@ -567,16 +574,34 @@ export function orchestratorCommandForModel(model: ModelType): string {
 
 // ── 최상위 모델 견고화 (SPAWN-MODEL-ALLOCATION-V2 §3) ──────────────
 //
-// complex 티어가 쓰는 "현재 사용 가능한 최상위 Claude 모델 id"를 env 주입 +
-// CLI 버전가드 + 그레이스풀 폴백을 거쳐 결정한다(하드코딩 "opus" 제거).
-// ★사용자 결정1: resolver 는 complex 티어에만 적용한다 — standard 는 기존
-// "opus" 리터럴을 그대로 유지(표준작업 비용 무변동). 즉 MARBLO_TOP_CLAUDE_MODEL
-// 은 complex 작업에만 영향을 준다.
+// 티어별 Claude 모델 id 를 env 주입 + CLI 버전가드 + 그레이스풀 폴백을 거쳐
+// 결정한다. 모델 "사실"(id·alias·능력등급·단가·minCli)은 전부 model-registry.ts
+// 가 갖고, 여기 남는 건 **정책**(어느 난도에 무엇을 쓸까)뿐이다.
+//
+// ★2026-07-25 변경(라우팅 P1-4): 세 티어 모두 레지스트리를 경유해 **구체 id 로
+// 핀** 한다. 종전엔 standard 가 `"opus"` 리터럴이었는데, claude CLI 업데이트만으로
+// alias `opus` 의 의미가 opus-4.x → claude-opus-5 로 바뀌면서 "표준작업 비용
+// 무변동" 이라는 원 설계 의도가 아무도 모르게 깨져 있었다(설계문서 §1.3-①).
+// 사장님 결정 = **standard 는 Opus 5 유지**. 그래서 되돌리는 게 아니라 지금 상태를
+// `claude-opus-5` 로 명시 고정하고, 다시는 조용히 움직이지 못하게 막는다.
+
+// ★컴파일타임 가드: 레지스트리의 벤더 축(ModelProvider)과 런타임의 모델 축
+// (ModelType)이 같은 집합인지 양방향으로 못박는다. 새 벤더를 한쪽에만 추가하면
+// 여기서 타입에러가 난다 — 레지스트리에 있는데 라우팅이 모르는(또는 그 반대인)
+// 벤더가 조용히 생기는 것을 막는다.
+const _providerCoversModelType: ModelProvider = null as unknown as ModelType;
+const _modelTypeCoversProvider: ModelType = null as unknown as ModelProvider;
+void _providerCoversModelType;
+void _modelTypeCoversProvider;
 
 /** 불확실한 모든 상황의 안전 귀결(§8.3). "최상위를 못 쓰는 것"은 허용,
  * "spawn 자체가 깨지는 것"은 불허 — 그래서 늘 검증된 opus 로 떨어진다.
  * 이건 "버전가드 미달/미지모델일 때의 안전 바닥"이지 "기본 선택값"이 아니다
- * (기본 선택값은 DEFAULT_TOP_CLAUDE_MODEL). */
+ * (기본 선택값은 DEFAULT_TOP_CLAUDE_MODEL).
+ *
+ * ★여기만 alias 인 것은 의도다. 폴백은 "CLI 버전을 신뢰할 수 없는 구간에서
+ * CLI 가 아는 최선으로 떨어진다"가 목적이라 이동표적인 편이 옳다. 반대로 주
+ * 선택값(핀)은 절대 alias 를 쓰지 않는다 — model-registry.ts 상단 규율 참조. */
 export const FALLBACK_TOP_CLAUDE_MODEL = "opus";
 
 /**
@@ -588,23 +613,42 @@ export const FALLBACK_TOP_CLAUDE_MODEL = "opus";
  * CLAUDE_MODEL(opus)로 그레이스풀 폴백(구조화 로그)된다. 즉:
  *   - CLI 자격 O → complex claude = fable5 (최신 하이)
  *   - CLI 자격 X → complex claude = opus (안전 폴백, 로그 남김)
- * ★적용 범위는 complex 티어 한정 — standard 는 여전히 "opus" 리터럴,
- *   simple 은 resolveSimpleClaudeModel(기본 sonnet). simple/standard 무회귀.
- * opus 로 되돌리려면 MARBLO_TOP_CLAUDE_MODEL=opus 를 명시하면 된다. */
+ * ★이 env 의 적용 범위는 complex 티어 한정이다. standard 는 별도 핀
+ *   (DEFAULT_STANDARD_CLAUDE_MODEL / MARBLO_STANDARD_CLAUDE_MODEL), simple 은
+ *   resolveSimpleClaudeModel(기본 sonnet5). 세 티어가 서로 간섭하지 않는다.
+ * opus 로 되돌리려면 MARBLO_TOP_CLAUDE_MODEL=opus 를 명시하면 된다
+ * (레지스트리를 거쳐 claude-opus-5 로 핀된다). */
 export const DEFAULT_TOP_CLAUDE_MODEL = "fable";
 
-/** Fable5 최소 요구 claude CLI 버전(버전가드 기본 임계값). env 로 덮어쓸 수 있다. */
+/** Fable5 최소 요구 claude CLI 버전(버전가드 기본 임계값). env 로 덮어쓸 수 있다.
+ * 레지스트리의 `claude-fable-5.minCli` 와 같은 값이며, env 가 이를 덮어쓴다. */
 const DEFAULT_FABLE5_MIN_CLI = "2.1.170";
 
+/**
+ * standard 티어 claude 모델의 **명시 핀**(env MARBLO_STANDARD_CLAUDE_MODEL 미설정 시).
+ * ★사장님 결정(2026-07-25) = Opus 5 유지. alias `"opus"` 가 아니라 구체 id 를 쓰는
+ * 것이 요점이다 — alias 였기 때문에 조용한 세대 승격이 일어났다(설계문서 §1.3-①).
+ */
+export const DEFAULT_STANDARD_CLAUDE_MODEL = "claude-opus-5";
+
 /** claude 계열 모델 id alias. 프로바이더 정규화(normalizeModel, dispatch-scoring)
- * 와는 다른 층 — 이건 claude 내부의 _모델 id_ alias 다. "fable" → "claude-fable-5". */
-export const CLAUDE_MODEL_ALIASES: Record<string, string> = {
-  fable: "claude-fable-5",
-};
+ * 와는 다른 층 — 이건 claude 내부의 _모델 id_ alias 다. "fable" → "claude-fable-5".
+ *
+ * ★단일소스화: 이 표는 이제 model-registry.ts 에서 **파생**된다(직접 편집 금지).
+ * 신규 alias 는 레지스트리 항목의 `aliases` 에 추가하면 여기 자동 반영된다.
+ * 하위호환을 위해 형태(Record<alias, id>)는 그대로 유지한다. */
+export const CLAUDE_MODEL_ALIASES: Record<string, string> = Object.fromEntries(
+  modelsByProvider("claude").flatMap((m) =>
+    m.aliases.map((a) => [a, m.id] as const),
+  ),
+);
 
 export interface TopModelFallback {
-  /** 폴백 사유 코드(텔레메트리/로그 키). */
-  reason: "fable5_version_guard" | "unknown_top_model";
+  /** 폴백 사유 코드(텔레메트리/로그 키).
+   *  - fable5_version_guard : Fable5 전용 버전가드(하위호환 유지 코드)
+   *  - min_cli_unverified   : 그 외 모델의 minCli 미검증 구간
+   *  - unknown_top_model    : 레지스트리에 없는 모델 id */
+  reason: "fable5_version_guard" | "min_cli_unverified" | "unknown_top_model";
   /** 요청된 모델 id(alias 정규화 후). */
   requested: string;
   /** 설치된 claude CLI 버전(또는 "unknown"). */
@@ -624,16 +668,9 @@ export interface TopModelResolution {
   fallback: TopModelFallback | null;
 }
 
-/** semver "X.Y.Z" 비교. a<b → 음수, a==b → 0, a>b → 양수. 누락 파트는 0 취급. */
-export function cmpSemver(a: string, b: string): number {
-  const pa = a.split(".").map((n) => parseInt(n, 10) || 0);
-  const pb = b.split(".").map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < 3; i++) {
-    const d = (pa[i] || 0) - (pb[i] || 0);
-    if (d) return d;
-  }
-  return 0;
-}
+/** semver 비교. 구현은 model-registry 로 옮겼고(레지스트리의 minCli 게이트가
+ * 쓰므로) 여기선 기존 호출자를 위해 재수출한다. */
+export { cmpSemver };
 
 /** 폴백을 조용히 넘기지 않는다(§8.1) — 구조화 콘솔 로그. 윈도우가 있는 호출자
  * (agent-manager/bridge)는 이 위에 추가로 텔레메트리 이벤트를 쏜다. */
@@ -649,67 +686,107 @@ function logTopModelFallback(f: TopModelFallback): void {
 }
 
 /**
- * 최상위 Claude 모델을 env/버전가드/폴백을 거쳐 결정한다(§3). 폴백 메타까지
- * 반환하는 상세판 — 텔레메트리/사용자 표식용. 순수 함수(env + resolveClaudeBinary
- * 만 읽음)라 단위테스트가 쉽다.
+ * ★티어 공용 Claude 모델 resolver. 요청된 alias/id 를 레지스트리로 **구체 id 에
+ * 핀** 하되, 그 id 가 "검증된 CLI 범위" 밖이면 alias 로 안전 폴백한다.
  *
- *   - MARBLO_TOP_CLAUDE_MODEL(기본 DEFAULT_TOP_CLAUDE_MODEL="fable")를 읽어
- *     alias 정규화("fable" → "claude-fable-5").
- *   - claude-fable-5 면 설치된 claude CLI 버전을 MARBLO_FABLE5_MIN_CLI(기본
- *     2.1.170)와 비교 — 미달/파싱실패 시 opus 로 그레이스풀 폴백 + 구조화 로그.
- *   - opus/sonnet 은 통과. 검증 못 하는 미지 모델은 보수적으로 opus 폴백.
+ *   1. alias 정규화 — "fable" → "claude-fable-5", "opus" → "claude-opus-5".
+ *   2. 레지스트리에 없는 id → unknown_top_model 폴백(미지 모델로 spawn 이 깨지는
+ *      것보다 최상위를 못 쓰는 편이 낫다, §8.3).
+ *   3. `minCli` 미검증 구간 → 폴백. minCli 의 의미는 "이 아래면 미지원" 이 아니라
+ *      **"이 아래는 미검증"** 이다(model-registry.ts 참조). 폴백 대상이 alias 라
+ *      결과적으로 종전 동작 그대로여서, 이 게이트는 보수적이어도 손해가 없다.
  *
+ * 종전 대비 실질 차이는 반환값이 alias 가 아니라 구체 id 라는 점 하나다
+ * (`"opus"` → `"claude-opus-5"`). 서빙되는 모델은 §1.1 CLI 프로브 기준 동일하고,
+ * 이제는 CLI 가 alias 해석을 바꿔도 우리 선택이 따라 움직이지 않는다.
+ *
+ * 순수 함수(env + resolveClaudeBinary 만 읽음)라 단위테스트가 쉽다.
+ *
+ * @param requested alias 또는 구체 id(대소문자·공백 무관).
  * @param installedVersion 설치된 claude CLI 버전 주입(테스트용). 미지정이면
  *   resolveClaudeBinary().version(실제 설치본)을 쓴다.
  */
-export function resolveTopClaudeModelDetailed(
+export function resolveClaudeModelPinned(
+  requested: string,
   installedVersion?: string,
 ): TopModelResolution {
-  const raw = (process.env.MARBLO_TOP_CLAUDE_MODEL || DEFAULT_TOP_CLAUDE_MODEL)
-    .trim()
-    .toLowerCase();
-  const id = CLAUDE_MODEL_ALIASES[raw] || raw; // "fable" → "claude-fable-5"
+  const raw = requested.trim().toLowerCase();
+  const entry = getModel(raw);
   const resolvedCli =
     installedVersion === undefined ? resolveClaudeBinary() : null;
   const version = installedVersion ?? resolvedCli?.version ?? ""; // "X.Y.Z"
 
-  if (id === "claude-fable-5") {
-    const minCli = (
-      process.env.MARBLO_FABLE5_MIN_CLI || DEFAULT_FABLE5_MIN_CLI
-    ).trim();
-    if (!version || cmpSemver(version, minCli) < 0) {
-      const fallback: TopModelFallback = {
-        reason: "fable5_version_guard",
-        requested: id,
-        installed: version || "unknown",
-        ...(resolvedCli ? { command: resolvedCli.command } : {}),
-        required: minCli,
-        fallbackTo: FALLBACK_TOP_CLAUDE_MODEL,
-      };
-      logTopModelFallback(fallback);
-      return { model: FALLBACK_TOP_CLAUDE_MODEL, fallback };
-    }
-    return { model: "claude-fable-5", fallback: null };
-  }
-
-  // opus/sonnet 은 검증된 알려진 id — 통과.
-  if (id === "opus" || id === "sonnet") return { model: id, fallback: null };
-
-  // 검증 불가한 미지 모델 → 보수적으로 opus.
-  const fallback: TopModelFallback = {
-    reason: "unknown_top_model",
-    requested: id,
-    installed: version || "unknown",
-    ...(resolvedCli ? { command: resolvedCli.command } : {}),
-    fallbackTo: FALLBACK_TOP_CLAUDE_MODEL,
+  const bail = (
+    reason: TopModelFallback["reason"],
+    required?: string,
+  ): TopModelResolution => {
+    const fallback: TopModelFallback = {
+      reason,
+      requested: entry?.id ?? raw,
+      installed: version || "unknown",
+      ...(resolvedCli ? { command: resolvedCli.command } : {}),
+      ...(required ? { required } : {}),
+      fallbackTo: FALLBACK_TOP_CLAUDE_MODEL,
+    };
+    logTopModelFallback(fallback);
+    return { model: FALLBACK_TOP_CLAUDE_MODEL, fallback };
   };
-  logTopModelFallback(fallback);
-  return { model: FALLBACK_TOP_CLAUDE_MODEL, fallback };
+
+  if (!entry) return bail("unknown_top_model");
+
+  // Fable5 만 별도 env 로 임계값을 튜닝할 수 있고 폴백 사유 코드도 따로 쓴다
+  // (기존 텔레메트리 소비자 하위호환).
+  const isFable5 = entry.id === "claude-fable-5";
+  const minCliOverride = isFable5
+    ? (process.env.MARBLO_FABLE5_MIN_CLI || DEFAULT_FABLE5_MIN_CLI).trim()
+    : undefined;
+  const required = minCliOverride ?? entry.minCli;
+
+  if (!meetsMinCli(entry.id, version, minCliOverride)) {
+    return bail(
+      isFable5 ? "fable5_version_guard" : "min_cli_unverified",
+      required,
+    );
+  }
+  return { model: entry.id, fallback: null };
+}
+
+/**
+ * complex 티어의 최상위 Claude 모델(env MARBLO_TOP_CLAUDE_MODEL, 기본 "fable").
+ * 폴백 메타까지 반환하는 상세판 — 텔레메트리/사용자 표식용.
+ */
+export function resolveTopClaudeModelDetailed(
+  installedVersion?: string,
+): TopModelResolution {
+  return resolveClaudeModelPinned(
+    process.env.MARBLO_TOP_CLAUDE_MODEL || DEFAULT_TOP_CLAUDE_MODEL,
+    installedVersion,
+  );
 }
 
 /** §3 resolver 의 모델 id 만 필요한 호출자용 얇은 래퍼. */
 export function resolveTopClaudeModel(): string {
   return resolveTopClaudeModelDetailed().model;
+}
+
+/**
+ * ★standard 티어의 명시 핀(env MARBLO_STANDARD_CLAUDE_MODEL, 기본
+ * `claude-opus-5`). 이 함수의 존재 자체가 P1-4 의 수리다 — 종전엔 여기가
+ * `"opus"` 리터럴이라 CLI 가 alias 뜻을 바꾸면 표준작업 전체가 조용히 따라
+ * 움직였다.
+ */
+export function resolveStandardClaudeModelDetailed(
+  installedVersion?: string,
+): TopModelResolution {
+  return resolveClaudeModelPinned(
+    process.env.MARBLO_STANDARD_CLAUDE_MODEL || DEFAULT_STANDARD_CLAUDE_MODEL,
+    installedVersion,
+  );
+}
+
+/** standard 티어 모델 id 만 필요한 호출자용 얇은 래퍼. */
+export function resolveStandardClaudeModel(installedVersion?: string): string {
+  return resolveStandardClaudeModelDetailed(installedVersion).model;
 }
 
 /** complex 에서 쓸 Codex 최상위 reasoning effort. env MARBLO_TOP_CODEX_REASONING,
@@ -725,14 +802,25 @@ export function resolveTopCodexReasoning(): string {
 export const DEFAULT_SIMPLE_CLAUDE_MODEL = "sonnet";
 
 /** simple(저난도) 에서 쓸 cheap Claude 모델. env MARBLO_SIMPLE_CLAUDE_MODEL,
- * 기본 "sonnet". 빈 값이면 기본으로 폴백. (--model alias/id 를 그대로 전달) */
-export function resolveSimpleClaudeModel(): string {
-  const m = (
+ * 기본 "sonnet". 빈 값이면 기본으로 폴백.
+ *
+ * ★다른 티어와 마찬가지로 레지스트리를 경유해 구체 id 로 핀된다
+ * ("sonnet" → "claude-sonnet-5"). 서빙 모델은 §1.1 프로브 기준 동일하다. */
+export function resolveSimpleClaudeModelDetailed(
+  installedVersion?: string,
+): TopModelResolution {
+  const raw = (
     process.env.MARBLO_SIMPLE_CLAUDE_MODEL || DEFAULT_SIMPLE_CLAUDE_MODEL
-  )
-    .trim()
-    .toLowerCase();
-  return m || DEFAULT_SIMPLE_CLAUDE_MODEL;
+  ).trim();
+  return resolveClaudeModelPinned(
+    raw || DEFAULT_SIMPLE_CLAUDE_MODEL,
+    installedVersion,
+  );
+}
+
+/** simple 티어 모델 id 만 필요한 호출자용 얇은 래퍼. */
+export function resolveSimpleClaudeModel(installedVersion?: string): string {
+  return resolveSimpleClaudeModelDetailed(installedVersion).model;
 }
 
 /** simple 에서 쓸 cheap Codex reasoning effort. env MARBLO_SIMPLE_CODEX_REASONING,
@@ -745,27 +833,38 @@ export function resolveSimpleCodexReasoning(): string {
 }
 
 // 작업 complexity → 프로바이더별 모델/레벨. 품질 우선 정책: 기본(standard)은
-// 최상위(claude=opus, gpt-5.5=medium)를 유지하고, 작은 작업(simple)만 한 단계 낮추며,
+// 최상위(claude=Opus5, gpt-5.5=medium)를 유지하고, 작은 작업(simple)만 한 단계 낮추며,
 // 어려운 작업(complex)은 최상위를 쓴다. complexity 가 undefined 면 override 하지 않아
 // 기본 모델을 상속한다(오케스트레이터 등). claude=--model, gpt(codex)=model_reasoning_effort.
-//   claude:  simple → resolveSimpleClaudeModel(),  standard → opus(리터럴),  complex → resolveTopClaudeModel()
-//   gpt:     simple → resolveSimpleCodexReasoning(),  standard → medium,        complex → resolveTopCodexReasoning()
-// ★결정1: complex/simple 만 resolver 를 탄다. env 미설정 시 simple=sonnet/low,
-// standard=opus(리터럴, 무변동). complex 는 DEFAULT_TOP_CLAUDE_MODEL="fable"
-// 정책으로 CLI 자격 충족 시 fable5, 미달이면 opus 폴백(티켓 XL3NhdW). simple 모델은
-// dispatch_task 기본 물리 스폰에서 비용 폭발을 막는 cheap tier 로 쓰인다(§B v2).
+//   claude:  simple → claude-sonnet-5,  standard → claude-opus-5,  complex → claude-fable-5
+//   gpt:     simple → low,              standard → medium,          complex → high
+//
+// ★2026-07-25(라우팅 P1-4): claude 세 티어가 전부 레지스트리를 경유해 **구체 id**
+// 를 반환한다. 종전엔 standard 가 `"opus"` 리터럴이라, CLI 업데이트로 alias 뜻이
+// 바뀌자 표준작업 모델 세대가 아무도 모르게 올라갔다(설계문서 §1.3-①). 사장님
+// 결정은 "Opus5 유지" 이므로 되돌리지 않고 `claude-opus-5` 로 명시 핀한다.
+// 서빙 모델은 §1.1 CLI 프로브 기준 종전과 동일 — 바뀐 건 그 선택이 이제
+// 이동표적(alias)이 아니라 커밋에 남는 사실이라는 점이다.
+// simple 모델은 dispatch_task 기본 물리 스폰에서 비용 폭발을 막는 cheap tier 로
+// 쓰인다(§B v2).
 export type TaskComplexity = "simple" | "standard" | "complex";
 export function modelTierForComplexity(
   model: ModelType,
   complexity: TaskComplexity | undefined,
+  // 설치된 claude CLI 버전 주입(테스트용). 미지정이면 실제 설치본을 읽는다.
+  // ★테스트가 이걸 주입해야 결정적이다 — 주입 없이 짠 기존 유닛이 CLI 업그레이드
+  //   만으로 깨졌던 게 이 티켓이 고치는 문제의 테스트판이다.
+  installedVersion?: string,
 ): { claudeModel?: string; codexReasoning?: string } {
   if (!complexity) return {}; // override 없음 → 기본 상속
   if (model === "claude") {
     if (complexity === "simple")
-      return { claudeModel: resolveSimpleClaudeModel() }; // env, 기본 sonnet
+      return { claudeModel: resolveSimpleClaudeModel(installedVersion) }; // env, 기본 sonnet5
     if (complexity === "complex")
-      return { claudeModel: resolveTopClaudeModel() }; // env/버전가드/폴백(§3)
-    return { claudeModel: "opus" }; // standard — 현행 리터럴 유지(무변동)
+      return {
+        claudeModel: resolveTopClaudeModelDetailed(installedVersion).model,
+      }; // env/버전가드/폴백(§3)
+    return { claudeModel: resolveStandardClaudeModel(installedVersion) }; // ★standard = Opus5 명시 핀
   }
   if (model === "gpt") {
     if (complexity === "simple")

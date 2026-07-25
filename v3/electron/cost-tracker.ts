@@ -16,6 +16,7 @@ import {
   geminiTmpDir,
   resolveClaudeBinary,
 } from "./agent-config";
+import { registryPricing } from "./model-registry";
 import {
   probeClaudeUsage,
   type ClaudeUsageSnapshot,
@@ -99,7 +100,7 @@ type RawTokenRate = { inputPer1M: number; outputPer1M: number };
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json"
+  "subscription-plans.json",
 );
 
 interface SubscriptionPlanEntry {
@@ -131,30 +132,57 @@ function loadSubscriptionPlans(): SubscriptionPlanEntry[] {
   } catch (err) {
     console.error(
       "[CostTracker] Failed to load subscription plans:",
-      err instanceof Error ? err.message : err
+      err instanceof Error ? err.message : err,
     );
     subscriptionPlanCache = [];
     return [];
   }
 }
 
+// Per-token rates, keyed by model-id PREFIX (longest match wins — see
+// findPricing). Two layers:
+//
+//   1. `registryPricing()` — every CLI-verified current model, straight from
+//      the vendor-neutral single source (electron/model-registry.ts). Adding a
+//      new model there is enough; nothing here needs editing.
+//   2. The legacy rows below — retired models the registry deliberately does
+//      not carry (Claude 3.x/4.x, gpt-4o, o3, gemini) but that still appear in
+//      historical session logs, plus generic family fallbacks.
+//
+// Registry rows are spread LAST so the single source always wins a key clash.
+//
+// ★2026-07-25 pricing repair (routing P1-3). What was wrong before:
+//   - `claude-fable-5` / `claude-opus-5` / `claude-sonnet-5` had NO row and
+//     prefix-matched nothing, so they fell through to `default` $3/$15. The
+//     complex tier's default is Fable5 ($10/$50) → its OUTPUT cost was under-
+//     reported 3.3x. The most expensive workload was the most under-reported.
+//   - `gpt-5.5` said $5/$20; the real rate is $5/$30 (output under-reported 33%).
+// Both distortions pointed the same way — cheap-looking expensive work — which
+// is exactly the failure mode that would poison the routing epic's cost-vs-
+// effect learning. Sources: ticket 150oZRiD / PR#596 official-docs crawl.
 const MODEL_PRICING: Record<string, RawTokenRate> = {
+  // ── Legacy / retired (not in the registry, still in historical logs) ──
   // Claude 4.x family
   "claude-opus-4-7": { inputPer1M: 15, outputPer1M: 75 },
   "claude-opus-4-6": { inputPer1M: 15, outputPer1M: 75 },
   "claude-opus-4-0": { inputPer1M: 15, outputPer1M: 75 },
   "claude-sonnet-4-6": { inputPer1M: 3, outputPer1M: 15 },
   "claude-sonnet-4-0": { inputPer1M: 3, outputPer1M: 15 },
-  "claude-haiku-4-5": { inputPer1M: 0.8, outputPer1M: 4 },
+  // Haiku 4.5 is $1/$5 (the old $0.8/$4 row here was Haiku 3.5's rate). The
+  // registry carries the dated id `claude-haiku-4-5-20251001` that alias
+  // `haiku` actually resolves to; this undated prefix catches any other spelling.
+  "claude-haiku-4-5": { inputPer1M: 1, outputPer1M: 5 },
   // Claude 3.x family (legacy)
   "claude-3-5-sonnet": { inputPer1M: 3, outputPer1M: 15 },
   "claude-3-5-haiku": { inputPer1M: 0.8, outputPer1M: 4 },
   "claude-3-opus": { inputPer1M: 15, outputPer1M: 75 },
-  // OpenAI
-  "gpt-5.5": { inputPer1M: 5, outputPer1M: 20 },
-  // Generic gpt-5.x fallback (codex reports ids like gpt-5.4, gpt-5.5-codex);
-  // longest-prefix match means a specific row above still wins when present.
-  "gpt-5": { inputPer1M: 5, outputPer1M: 20 },
+  // OpenAI — Codex-CLI-only model (api ✗, so not a routing candidate and not
+  // in the registry), but it does show up in session logs.
+  "gpt-5.3-codex": { inputPer1M: 1.75, outputPer1M: 14 },
+  // Generic gpt-5.x fallback for variants we haven't catalogued. Set to the
+  // gpt-5.5 rate rather than the old $5/$20 so an unknown 5.x errs toward
+  // OVER-reporting; specific rows (registry included) still win by length.
+  "gpt-5": { inputPer1M: 5, outputPer1M: 30 },
   "gpt-4o": { inputPer1M: 2.5, outputPer1M: 10 },
   "gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.6 },
   "gpt-4.1": { inputPer1M: 2, outputPer1M: 8 },
@@ -169,9 +197,36 @@ const MODEL_PRICING: Record<string, RawTokenRate> = {
   "gemini-2.5-pro": { inputPer1M: 1.25, outputPer1M: 10 },
   "gemini-2.5-flash": { inputPer1M: 0.15, outputPer1M: 0.6 },
   "gemini-2.0-flash": { inputPer1M: 0.1, outputPer1M: 0.4 },
-  // Fallback
+
+  // ── Single source: every CLI-verified current model ───────────────────
+  ...registryPricing(),
+
+  // Fallback for a model id that matches nothing above. Kept at Sonnet's rate
+  // for continuity, but note it is now a genuine last resort — every model we
+  // actually route to has a real row.
   default: { inputPer1M: 3, outputPer1M: 15 },
 };
+
+/**
+ * Per-token rate for a model id, by longest-prefix match over MODEL_PRICING
+ * (the sentinel `default` row is the last resort, never a prefix candidate).
+ *
+ * Exported as a pure function so the rate table is unit-testable without
+ * standing up a CostTracker — `findPricing` is a private method behind
+ * subscription-plan resolution and filesystem state. The under-reporting bugs
+ * this repairs (Fable5 charged at Sonnet's rate, gpt-5.5 output at $20) were
+ * invisible precisely because nothing could assert on this table.
+ */
+export function perTokenRateFor(model: string): RawTokenRate {
+  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
+  const keys = Object.keys(MODEL_PRICING)
+    .filter((k) => k !== "default")
+    .sort((a, b) => b.length - a.length);
+  for (const key of keys) {
+    if (model.startsWith(key)) return MODEL_PRICING[key];
+  }
+  return MODEL_PRICING["default"];
+}
 
 // Regex patterns for PTY output parsing (non-Claude CLIs)
 const COST_PATTERN =
@@ -304,19 +359,12 @@ export class CostTracker {
       };
     }
     // 2. Per-token rate (default).
-    const wrap = (r: RawTokenRate): PerTokenPricing => ({
+    const r = perTokenRateFor(model);
+    return {
       scheme: "per-token",
       inputPer1M: r.inputPer1M,
       outputPer1M: r.outputPer1M,
-    });
-    if (MODEL_PRICING[model]) return wrap(MODEL_PRICING[model]);
-    const keys = Object.keys(MODEL_PRICING)
-      .filter((k) => k !== "default")
-      .sort((a, b) => b.length - a.length);
-    for (const key of keys) {
-      if (model.startsWith(key)) return wrap(MODEL_PRICING[key]);
-    }
-    return wrap(MODEL_PRICING["default"]);
+    };
   }
 
   /**
@@ -340,7 +388,7 @@ export class CostTracker {
     accumulatedInputTokens = 0,
     accumulatedOutputTokens = 0,
     deltaCacheReadTokens = 0,
-    deltaCacheWriteTokens = 0
+    deltaCacheWriteTokens = 0,
   ): number {
     if (pricing.scheme === "per-token") {
       // API-equivalent value INCLUDING cache. Cache rates aren't in the table;
@@ -377,7 +425,7 @@ export class CostTracker {
     // portion above allowance, split proportionally across input/output.
     const overageDelta = Math.min(
       deltaInputTokens + deltaOutputTokens,
-      totalAfter - Math.max(totalBefore, allowance)
+      totalAfter - Math.max(totalBefore, allowance),
     );
     if (overageDelta <= 0) return 0;
     const totalDelta = deltaInputTokens + deltaOutputTokens || 1;
@@ -400,7 +448,7 @@ export class CostTracker {
   }
 
   private getMonthlySubscriptionTotals(
-    pricing: SubscriptionPricing
+    pricing: SubscriptionPricing,
   ): TokenTotals {
     const key = this.monthlyUsageKey(pricing);
     const existing = this.monthlySubscriptionTokens.get(key);
@@ -420,7 +468,7 @@ export class CostTracker {
         monthly.input,
         monthly.output,
         delta.cacheRead,
-        delta.cacheWrite
+        delta.cacheWrite,
       );
     }
 
@@ -431,13 +479,13 @@ export class CostTracker {
       0,
       0,
       delta.cacheRead,
-      delta.cacheWrite
+      delta.cacheWrite,
     );
   }
 
   private recordMonthlySubscriptionUsage(
     pricing: ModelPricing,
-    delta: TokenTotals
+    delta: TokenTotals,
   ): void {
     if (pricing.scheme !== "subscription") return;
     const monthly = this.getMonthlySubscriptionTotals(pricing);
@@ -461,7 +509,7 @@ export class CostTracker {
     agentId: string,
     rootPath: string,
     sessionId: string | null | undefined,
-    model: string
+    model: string,
   ): void {
     // Don't double-track
     if (this.sessions.has(agentId)) {
@@ -488,7 +536,7 @@ export class CostTracker {
       os.homedir(),
       ".claude",
       "projects",
-      encodedPath
+      encodedPath,
     );
 
     let filePath: string;
@@ -511,7 +559,7 @@ export class CostTracker {
         }
         filePath = path.join(projectDir, files[0].name);
         console.log(
-          `[CostTracker] No sessionId — using most recent: ${files[0].name}`
+          `[CostTracker] No sessionId — using most recent: ${files[0].name}`,
         );
       } catch {
         console.warn(`[CostTracker] Cannot read project dir: ${projectDir}`);
@@ -526,7 +574,7 @@ export class CostTracker {
     // Bailing here is exactly what left newly-spawned agents reading 0 tokens.
     if (!fs.existsSync(filePath)) {
       console.log(
-        `[CostTracker] Session file not present yet, will poll until it appears: ${filePath}`
+        `[CostTracker] Session file not present yet, will poll until it appears: ${filePath}`,
       );
     }
 
@@ -541,13 +589,13 @@ export class CostTracker {
       totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS
+        SESSION_POLL_INTERVAL_MS,
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`
+      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`,
     );
 
     // Account-global rate-limit probe runs while any claude tracker lives.
@@ -563,7 +611,7 @@ export class CostTracker {
     if (this.claudeProbeTimer) return;
     this.claudeProbeTimer = setInterval(
       () => void this.pollClaudeUsage(),
-      CLAUDE_PROBE_INTERVAL_MS
+      CLAUDE_PROBE_INTERVAL_MS,
     );
     void this.pollClaudeUsage();
   }
@@ -589,7 +637,7 @@ export class CostTracker {
         this.claudeProbeFailures = 0;
         console.log(
           `[CostTracker] Claude rate-limit probe: 5h=${snap.primaryPercent}% ` +
-            `7d=${snap.secondaryPercent}% plan=${snap.planType ?? "?"}`
+            `7d=${snap.secondaryPercent}% plan=${snap.planType ?? "?"}`,
         );
       } else {
         this.claudeProbeFailures++;
@@ -598,7 +646,7 @@ export class CostTracker {
           this.claudeProbeFailures = 0;
           console.warn(
             `[CostTracker] Claude rate-limit probe failed ${CLAUDE_PROBE_MAX_FAILURES}x — ` +
-              `backing off ${CLAUDE_PROBE_BACKOFF_MS / 60_000}min`
+              `backing off ${CLAUDE_PROBE_BACKOFF_MS / 60_000}min`,
           );
         }
       }
@@ -656,13 +704,13 @@ export class CostTracker {
       totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS
+        SESSION_POLL_INTERVAL_MS,
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`
+      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`,
     );
 
     // Initial scan (file may not exist yet — poller tolerates that).
@@ -709,7 +757,7 @@ export class CostTracker {
       const { delta, newState } = parseSessionDelta(
         tracker.format,
         lines,
-        tracker.state
+        tracker.state,
       );
       tracker.state = newState;
       if (newState.model) tracker.model = newState.model;
@@ -725,7 +773,7 @@ export class CostTracker {
     } catch (err) {
       console.error(
         `[CostTracker] Error polling session for agent=${agentId}:`,
-        err
+        err,
       );
     }
   }
@@ -737,7 +785,7 @@ export class CostTracker {
   private emit(
     tracker: SessionTracker,
     delta: TokenTotals,
-    rateLimit?: RateLimitInfo | null
+    rateLimit?: RateLimitInfo | null,
   ): void {
     const hasTokens =
       delta.input > 0 ||
@@ -792,7 +840,7 @@ export class CostTracker {
     console.log(
       `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} ` +
         `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()} ` +
-        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`
+        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`,
     );
   }
 
@@ -856,12 +904,12 @@ export class CostTracker {
       loggedLimited: false,
       timer: setInterval(
         () => this.pollAgySession(agentId),
-        SESSION_POLL_INTERVAL_MS
+        SESSION_POLL_INTERVAL_MS,
       ),
     };
     this.agySessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking antigravity store for agent=${agentId}`
+      `[CostTracker] Tracking antigravity store for agent=${agentId}`,
     );
     this.pollAgySession(agentId);
   }
@@ -888,7 +936,7 @@ export class CostTracker {
           tracker.loggedLimited = true;
           console.warn(
             `[CostTracker] agy agent=${agentId} uses legacy .pb store — ` +
-              `token capture limited (no decode); relying on PTY signals.`
+              `token capture limited (no decode); relying on PTY signals.`,
           );
         }
         return;
@@ -900,7 +948,7 @@ export class CostTracker {
     } catch (err) {
       console.error(
         `[CostTracker] Error polling agy store for agent=${agentId}:`,
-        err
+        err,
       );
     }
   }
@@ -943,7 +991,7 @@ export class CostTracker {
 
     console.log(
       `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} (agy) ` +
-        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`
+        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`,
     );
   }
 
@@ -1013,7 +1061,7 @@ export class CostTracker {
         const cost = this.computeIncrementalCost(
           pricing,
           inputTokens,
-          outputTokens
+          outputTokens,
         );
 
         this.onCostDetected?.(agentId, {
