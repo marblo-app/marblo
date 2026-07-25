@@ -1,34 +1,36 @@
 /**
- * Task-type classification for ML labels (`task_outcomes.taskType`).
+ * Task-type classification — **main/MCP 쪽 미러** of
+ * `src/lib/telemetry/taskType.ts`.
  *
- * Background: the outcome writer hardcoded `taskType: null` with a
- * "TODO: derive from task metadata" comment, so 29/29 BigQuery rows carried a
- * NULL type and the column was unusable as a training feature. This module is
- * that missing derivation.
+ * ── 왜 미러인가 (P2-1) ──────────────────────────────────────────────────
+ * PR#596 이 "지식그래프 콜드시드·학습 축이 complexity 뿐" 의 진범으로 지목한 것이
+ * 이 경계다: 라우팅의 taskType 축은 자료구조·시드·집계에 다 있는데 **읽기 경로에서
+ * 값이 만들어지지 않아** 항상 비어 있었다. 근거는 종전 코드 주석 세 곳이 그대로
+ * 남겨 놓았다 —
+ *   - `bridge-server.persistDispatchMeta`: "taskType intentionally omitted here:
+ *     electron can't import the src classifyTaskType() (module-boundary)"
+ *   - `graph-updater.ts` 헤더의 Boundary note
+ *   - `scripts/seed-routing-graph.ts`: "Seeding `taskType:*` would be inert"
  *
- * Design constraints:
- *  - **Pure + deterministic.** No IO, no clock, no LLM call. Same task text
- *    always yields the same label, so a row logged today stays comparable to
- *    one logged in six months. An LLM classifier here would cost money per
- *    task and drift silently between model versions.
- *  - **Derived, never raw.** The return value is one of a small fixed enum —
- *    the ticket text itself never leaves the machine. This keeps the outcome
- *    row inside the same privacy contract as promptHash/promptLength (see
- *    docs/research/routing-slm-data-collection.md §4).
- *  - **Bilingual.** Marblo tickets are written in Korean and English, often
- *    mixed in one title ("fix(v3): 오케 재시작 크래시"). Korean-only or
- *    English-only keyword lists would mislabel most of the real corpus.
+ * 이 repo 는 `src/`(vite 렌더러)와 `electron/`(main) 사이에 cross-import 를 두지
+ * 않는 규율이 있고(`src/lib/rootPathScope.ts`·`src/stores/orchestratorStore.ts`
+ * 주석), MCP 서버는 그보다 더 좁다 — `electron/mcp-server/tsconfig.json` 의
+ * `rootDir: "."` 때문에 상위 디렉터리 모듈을 아예 import 할 수 없다. 그래서
+ * 선택지는 (a) 미러 + 패리티 테스트, (b) 축을 계속 죽여 두기 뿐이었고, 이미
+ * 같은 문제를 같은 방식으로 푼 선례가 있다(`mcp-server/escalation-approval.ts` 의
+ * 상수 미러 ↔ `model-ladder.assertMirrorsMatch`).
  *
- * Ordering matters: the first matching category wins, so the list runs from
- * most-specific to most-generic. "테스트 실패 수정" is a bug-fix, not a test
- * task — bug-fix is checked first for exactly that reason.
+ * ★위치가 `mcp-server/` 인 이유: 여기 두면 **한 벌**로 끝난다. mcp-server 는 상위를
+ * import 할 수 없지만 `electron/` 은 `electron/mcp-server/*` 를 import 할 수 있어
+ * (`model-ladder.ts` 가 이미 그렇게 한다) MCP·bridge 양쪽이 같은 구현을 쓴다.
  *
- * ★MIRROR (P2-1, 2026-07-25): `electron/mcp-server/task-type.ts` holds a
- * character-identical copy of RULES / CONVENTIONAL_MAP / classifyTaskType,
- * because main+MCP need the same label to key the routing graph's taskType axis
- * and this repo keeps `src/` and `electron/` free of cross-imports (MCP's
- * `rootDir` makes it impossible, not merely discouraged). **Change one, change
- * both** — `tests/unit/task-type-parity.test.ts` fails on drift.
+ * ★고치는 규칙: 규칙(RULES/CONVENTIONAL_MAP)을 한쪽만 바꾸면 라벨이 갈라지고,
+ * 갈라진 라벨은 그래프 셀을 조용히 쪼갠다. `tests/unit/task-type-parity.test.ts`
+ * 가 두 구현을 같은 코퍼스로 대조해 그 드리프트를 깨뜨린다.
+ *
+ * 아래 규칙 본문은 `src/lib/telemetry/taskType.ts` 와 문자 단위로 같아야 한다.
+ * (설계 의도·순서 근거는 그 파일의 모듈 주석에 있다: 순수·결정적, 파생값만,
+ * 한/영 이중언어, 그리고 "가장 구체적인 것부터" 순서.)
  */
 
 export type TaskType =
@@ -123,7 +125,7 @@ export interface ClassifiableTask {
  *
  * `null` is a deliberate outcome, not a failure: a task titled "TASK-1234"
  * carries no signal, and guessing "feature" for it would inject noise into the
- * training set. Downstream treats NULL as "unlabeled" and can drop the row.
+ * training set (and, here, into the routing graph's taskType cells).
  */
 export function classifyTaskType(task: ClassifiableTask): TaskType | null {
   const title = (task.title ?? "").trim();
@@ -148,4 +150,19 @@ export function classifyTaskType(task: ClassifiableTask): TaskType | null {
     if (rule.patterns.test(haystack)) return rule.type;
   }
   return null;
+}
+
+/**
+ * 외부에서 받은 taskType 문자열을 그래프 축으로 쓸 수 있게 정돈한다.
+ *
+ * 왜 자유문자열을 그냥 받지 않는가: cell key 의 factorValue 가 되므로 공백·대소문자
+ * 차이만으로 셀이 쪼개진다("Bug-Fix" ≠ "bug-fix"). 그리고 **미지 라벨은 통과시킨다**
+ * — merge 경로가 넘기는 de-identified `changeType`(main.ts foldMergeOutcome)처럼
+ * 이 enum 밖의 정당한 라벨이 이미 있어서, 여기서 걸러내면 그 학습이 사라진다.
+ */
+export function normalizeTaskTypeLabel(
+  raw: string | null | undefined,
+): string | undefined {
+  const value = (raw ?? "").trim().toLowerCase();
+  return value ? value : undefined;
 }

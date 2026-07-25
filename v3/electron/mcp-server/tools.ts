@@ -100,6 +100,12 @@ import {
   chunkBulkTasks,
   normalizeBulkTasksPayload,
 } from "./bulk-task-payload.js";
+import { classifyTaskType } from "./task-type.js";
+import {
+  aggregateEffectiveness,
+  formatEffectivenessReport,
+  type EffectivenessInputRow,
+} from "./routing-effectiveness.js";
 import {
   formatAgentTaskRoleLabel,
   normalizeFirestoreFallbackAgentStatus,
@@ -3841,6 +3847,10 @@ export function registerTools(server: McpServer): void {
       // 명시적으로 dependency gate 를 둔다 — get_available_tasks 의 필터와
       // 별개로, task_id 가 직접 지정된 dispatch 경로(오케스트레이터가 특정
       // 태스크를 콕 집어 배정하는 케이스)에서도 같은 가드가 적용되도록 함.
+      // ★P2-1 — 지식그래프의 taskType 축. 티켓 문서를 여기서 이미 읽으므로
+      // (아래 dependency precheck) 그 자리에서 분류해 bridge 로 넘긴다. 종전엔
+      // electron 쪽에 분류기가 없어서 그래프가 complexity 단일축으로만 학습했다.
+      let dispatchTaskType: string | undefined;
       if (dispatchTaskId) {
         try {
           const task = await fetchTask(dispatchTaskId);
@@ -3849,6 +3859,7 @@ export function registerTools(server: McpServer): void {
               `Error: Task ${dispatchTaskId} not found — refusing to dispatch.`,
             );
           }
+          dispatchTaskType = classifyTaskType(task) ?? undefined;
           const missionContextError = await ensureTaskMissionContext(
             dispatchTaskId,
             task,
@@ -3957,6 +3968,8 @@ export function registerTools(server: McpServer): void {
               cwd,
               skills,
               tags,
+              // ★P2-1 — 그래프 taskType 축(없으면 종전대로 우아한 저하).
+              taskType: dispatchTaskType,
               mix: effectiveMix,
               stages: effectiveStages,
               isolate: effectiveIsolate,
@@ -5881,6 +5894,79 @@ export function registerTools(server: McpServer): void {
           `다른 에이전트 프로세스의 스풀은 여기서 보이지 않습니다.`,
       );
       return text(lines.join("\n"));
+    },
+    { userFacing: false },
+  );
+
+  // 33-b. get_routing_effectiveness (P2-4)
+  //
+  // 라우팅 에픽이 측정하려던 지표를 실제로 계산해 돌려준다:
+  // (model@effort × 난도 × taskType) → 성공률 · 평균비용 · 비용당성공.
+  //
+  // 조인은 `tasks/{id}` 안에서 이미 끝나 있다 — costTotal 롤업(cost_logs 와 같은
+  // taskId 스탬프)과 dispatchMeta(실스폰 model@effort·난도·taskType)와 상태가 한
+  // 문서에 있다. 정의·규율은 ./routing-effectiveness.ts 헤더.
+  auditedTool(
+    "get_routing_effectiveness",
+    "라우팅 효과집계: (model@effort × 난도 × taskType) 별 성공률·평균비용·비용당성공. 터미널 티켓(DONE/FAILED/BLOCKED)만 세고, 비용 롤업이 없는 티켓은 비용 분모에서 빼고 커버리지로 보고한다(누락을 0 으로 만들지 않는다). 어느 모델 칸을 쓸지 판단하기 전에 근거를 확인할 때 쓴다 — 임계값·판정은 주지 않는다.",
+    {
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+        ),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(2000)
+        .optional()
+        .describe(
+          "스캔할 티켓 수 상한(기본 500). 상한에 걸리면 리포트가 그 사실을 명시한다.",
+        ),
+    },
+    async ({ project_id, limit }) => {
+      const projectId = await enforceProjectLock(
+        "get_routing_effectiveness",
+        project_id,
+      );
+      const cap = limit ?? 500;
+      const constraints: QueryConstraint[] = [];
+      if (projectId) constraints.push(where("projectId", "==", projectId));
+      // status 로 쿼리 필터하지 않는다: (projectId, status) 복합 인덱스를 새로
+      // 요구하지 않으려는 것도 있지만, 더 중요한 이유는 "진행중 몇 건이 제외됐나"
+      // 를 리포트가 말해야 하기 때문이다 — 쿼리에서 지워 버리면 그 수를 셀 수 없다.
+      const snap = await boundedGetDocs(
+        "tasks",
+        constraints,
+        [fsLimit(cap)],
+        "get_routing_effectiveness",
+      );
+      const rows: EffectivenessInputRow[] = [];
+      for (const d of snap.docs) {
+        const data = d.data() as Record<string, unknown>;
+        if (data.deleted === true) continue;
+        const meta = (data.dispatchMeta ?? {}) as Record<string, unknown>;
+        const str = (v: unknown): string | null =>
+          typeof v === "string" && v.trim() ? v : null;
+        rows.push({
+          taskId: d.id,
+          status: str(data.status),
+          spawnedModelKey: str(meta.spawnedModelKey),
+          provider: str(meta.model),
+          complexity: str(meta.complexity),
+          taskType: str(meta.taskType),
+          role: str(meta.role) ?? str(data.role),
+          costTotal: typeof data.costTotal === "number" ? data.costTotal : null,
+        });
+      }
+      return text(
+        formatEffectivenessReport(aggregateEffectiveness(rows), {
+          scanned: rows.length,
+          cap,
+        }),
+      );
     },
     { userFacing: false },
   );

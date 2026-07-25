@@ -37,6 +37,9 @@ export interface MergeOutcomePayload {
   taskType?: string | null;
   complexity?: string | null;
   model?: string | null;
+  /** ★P2-2 — 실스폰 관측 model@effort 키. 그래프 셀의 모델 축이 이 값이다.
+   * 구 dispatchMeta 엔 없으므로 null 이 정상이고, 그때는 프로바이더 키로 학습한다. */
+  spawnedModelKey?: string | null;
 }
 
 /** The subset of a task's dispatchMeta the routing graph attributes an outcome
@@ -46,6 +49,7 @@ export interface MergeDispatchMeta {
   taskType?: string | null;
   complexity?: string | null;
   model?: string | null;
+  spawnedModelKey?: string | null;
 }
 
 /**
@@ -72,6 +76,8 @@ export function enrichMergePayload(
     taskType: clean(meta?.taskType) ?? clean(base.taskType) ?? base.changeType,
     complexity: clean(meta?.complexity) ?? clean(base.complexity),
     model: clean(meta?.model) ?? clean(base.model),
+    spawnedModelKey:
+      clean(meta?.spawnedModelKey) ?? clean(base.spawnedModelKey),
   };
 }
 

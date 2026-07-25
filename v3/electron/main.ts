@@ -2317,6 +2317,9 @@ bridgeServer.setDispatchMetaHook((taskId, meta) => {
             role: meta.role ?? null,
             tags: meta.tags ?? null,
             taskType: meta.taskType ?? null,
+            // ★P2-2 — 그래프 모델축 키(실스폰 argv 관측). 없으면 null 로 남겨
+            // 두고, 읽는 쪽이 프로바이더 키로 떨어진다(추측 키를 만들지 않는다).
+            spawnedModelKey: meta.spawnedModelKey ?? null,
             updatedAt: fbTimestamp.now(),
           },
         },
@@ -2655,6 +2658,7 @@ const graphUpdater = new GraphUpdater({
             taskType?: unknown;
             complexity?: unknown;
             model?: unknown;
+            spawnedModelKey?: unknown;
           }
         | undefined;
       if (!meta) return null;
@@ -2667,6 +2671,12 @@ const graphUpdater = new GraphUpdater({
         complexity:
           typeof meta.complexity === "string" ? meta.complexity : null,
         model: typeof meta.model === "string" ? meta.model : null,
+        // ★P2-2 — model@effort 해상도의 셀 키. 구 문서엔 없으므로 null 이 정상이고,
+        // 그때는 프로바이더 키로 학습한다(구키 폴백이 읽기에서 이어 준다).
+        spawnedModelKey:
+          typeof meta.spawnedModelKey === "string"
+            ? meta.spawnedModelKey
+            : null,
       };
     } catch {
       return null;
@@ -2699,6 +2709,9 @@ const foldMergeOutcome = (input: {
   taskType?: string | null;
   complexity?: string | null;
   model?: string | null;
+  /** ★P2-2 — 실스폰 관측 model@effort 키. 없으면 updater 가 dispatchMeta 를
+   * 되읽어 채우고, 그것도 없으면 프로바이더 키로 학습한다. */
+  spawnedModelKey?: string | null;
 }): void => {
   if (!input.taskId) return;
   // Build ctx from the renderer-resolved dispatchMeta; taskType falls back to
@@ -2720,6 +2733,7 @@ const foldMergeOutcome = (input: {
   void graphUpdater.recordOutcome({
     taskId: input.taskId,
     model: input.model ?? undefined,
+    modelKey: input.spawnedModelKey ?? undefined,
     rawOutcome: "merged",
     ctx: hasCtx ? ctx : undefined,
     atMs:
@@ -2742,6 +2756,7 @@ ipcMain.on("kg:recordMergeOutcome", (_event, payload: unknown) => {
     taskType?: unknown;
     complexity?: unknown;
     model?: unknown;
+    spawnedModelKey?: unknown;
   };
   if (typeof p.taskId !== "string" || !p.taskId) return;
   const str = (v: unknown): string | null =>
@@ -2754,6 +2769,7 @@ ipcMain.on("kg:recordMergeOutcome", (_event, payload: unknown) => {
     taskType: str(p.taskType),
     complexity: str(p.complexity),
     model: str(p.model),
+    spawnedModelKey: str(p.spawnedModelKey),
   });
 });
 

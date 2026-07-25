@@ -43,10 +43,18 @@ import type { ModelType } from "../dispatch-scoring";
  * Scope discipline — three rules decided which cells are in here, and they
  * matter more than the numbers:
  *
- *  1. ONLY factors the READ path consults. bridge-server builds its
- *     GraphContext as `{role, tags, complexity}` — taskType is absent (the
- *     electron↔src boundary means the renderer's classifyTaskType() isn't
- *     reachable). Seeding `taskType:*` would be inert, so it isn't seeded.
+ *  1. ONLY factors the READ path consults. When this seed was written
+ *     bridge-server built its GraphContext as `{role, tags, complexity}` —
+ *     taskType was absent, so seeding `taskType:*` would have been inert.
+ *     ★2026-07-25 (P2-1) that gap is closed: dispatch now carries a classified
+ *     taskType (`mcp-server/task-type.ts`) and the read path consults it. This
+ *     seed is deliberately left as-is anyway — adding a taskType prior is a new
+ *     data claim, and the rule below (#3: only where the static scorer is silent
+ *     or provably wrong) has to be argued per cell, not inherited. What DID
+ *     change for free: these `complexity:*|claude` cells are now read as the
+ *     **legacy/provider tier** of the model-key fallback (routing-graph.ts
+ *     header), so they keep working at full weight for every claude variant
+ *     until variant-level observations displace them.
  *  2. ONLY a closed value set. `complexity` is the enum simple|standard|complex,
  *     so every seeded cell is guaranteed reachable. `tags` are free-form strings
  *     supplied per dispatch, so a seeded tag is a coin-flip on ever being hit —

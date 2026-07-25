@@ -23,7 +23,16 @@
 > | P3-1 사다리 데이터화    | ✅ 구현됨 | `electron/model-ladder.ts` — 3변종 변주 + **max/ultra 사용자 승인 게이트**(§4 넷-뉴 1·1-b)            |
 > | P5-3 판정 + 사장님 왕복 | ✅ 구현됨 | `electron/mcp-server/escalation-policy.ts` + `escalate_to_owner` / `request·resolve_model_escalation` |
 >
-> 티켓 `cwud8fqPA2LZRjToqe0U`. 나머지 Phase 는 미착수.
+> 티켓 `cwud8fqPA2LZRjToqe0U`.
+>
+> | 항목                   | 상태      | 산출물                                                                                                      |
+> | ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------- |
+> | P2-1 taskType 읽기경로 | ✅ 구현됨 | `electron/mcp-server/task-type.ts`(미러) + dispatch_task→bridge→dispatchMeta 배선                           |
+> | P2-2 cell key 해상도   | ✅ 구현됨 | `electron/routing-model-key.ts` + `routing-graph.ts` 다단(구키 폴백) 조회                                   |
+> | P2-3 dispatch 구체모델 | ✅ 구현됨 | PR#601 이 `dispatch:decision.spawnedModel` 기록 → 이 티켓이 `dispatchMeta.spawnedModelKey` 로 그래프에 연결 |
+> | P2-4 모델별 효과집계   | ✅ 구현됨 | `electron/mcp-server/routing-effectiveness.ts` + MCP `get_routing_effectiveness`                            |
+>
+> 티켓 `8wBiVzwIepKrjR9JRZJR`(Phase-2 최종). 나머지 Phase 는 미착수.
 
 ---
 
@@ -137,6 +146,13 @@ cells 12개, n = claude 72 / gpt 20 / antigravity 2, **raw outcome 은 `merged` 
 이후에도 온디스크 그래프는 여전히 merged-only 이므로, 수리가 실제로 부정신호를
 적재하는지 재확인이 필요하다 — Phase 2 검증항목.)
 
+> **② 수리됨**(P2-2, 티켓 `8wBiVzwIepKrjR9JRZJR`). cell key 의 모델 축이
+> `ModelType`(프로바이더) → `modelKey`(`claude-opus-5`/`gpt-5.5@medium`) 문자열이 됐고,
+> 위 12개 cell·94건은 **구키 폴백 계층으로 무손실 보존**된다(§3 완료 노트).
+> ★단 "부정신호가 실제로 적재되는가" 는 여전히 **라이브 관측 항목**이다 — 유닛은
+> 부정 outcome 이 새 키 셀로 접히는 것까지 증명하지만, 온디스크 그래프가 merged-only
+> 를 벗어났는지는 앱 재시작 후 실제 dispatch 를 돌려 봐야 판정된다.
+
 **③ 신규 Claude 모델이 전부 오단가로 계상되고 있다**
 `cost-tracker.ts:141 MODEL_PRICING` 에 `claude-fable-5`·`claude-opus-5`·
 `claude-sonnet-5` 항목이 **하나도 없다**(grep 실측 0건). `findPricing` 은
@@ -248,6 +264,46 @@ Phase 1(선행 조건)이다.
 4. **부정신호 적재 재확인** — §1.3-② 대로 현재 그래프는 merged-only 다. PR#581
    수리가 실제로 crash/stale/reject 를 적재하는지 **라이브 관측으로** 확인하고,
    안 되면 그게 B 의 최우선 작업이다. **부정신호 없이는 학습이 성립하지 않는다.**
+
+**★완료(P2, 2026-07-25, 티켓 `8wBiVzwIepKrjR9JRZJR`)** — 구현이 위 초안과 달라진
+점과 그 이유:
+
+- **cell key 의 모델 축이 `string`(modelKey)이 됐다.** `routing-graph.ts` 는 그 문자열이
+  어떻게 만들어지는지 모른다 — 해상도 정책은 `routing-model-key.ts`, 사실은
+  레지스트리·사다리다(그래프 모듈은 계속 "카운터 + 감쇠" 만 안다).
+- **구키 폴백은 "있으면 새 키, 없으면 구키" 가 아니라 계층 축소(hierarchical
+  shrinkage)다.** 전자로 짜면 새 키에 관측 1건이 들어온 순간 축적된 94건이 시야에서
+  사라진다. 지금은 구(프로바이더) 셀이 새 셀의 **prior** 이고, `n/(n+K)` — 이 파일이
+  이미 쓰던 SHRINKAGE_K — 로 비중이 옮겨간다. 새 상수를 만들지 않았다. 키를 하나만
+  넘기면 종전과 바이트 동일이라 기존 유닛(#567/#596) 전부가 그대로 통과한다.
+- **쓰기는 키 하나만 쓴다**(관측 = argv 되읽기, 없으면 프로바이더 키). 난도에서 모델을
+  역추론해 구체 키로 적지 않는다 — 그게 이중계상 방지의 근거이기도 하다.
+- **읽기 예측은 사다리 데이터가 아니라 `modelTierForComplexity`(스폰이 쓰는 그 함수)로
+  한다.** 사다리만 보면 complex claude 를 항상 `claude-fable-5` 로 예측하는데, 이
+  Mac 처럼 `MARBLO_TOP_CLAUDE_MODEL=opus` 가 걸린 환경의 실제 스폰은 `claude-opus-5`
+  다. 읽는 셀과 쓰는 셀이 갈리면 학습이 조용히 죽으므로 예측/관측이 같은 정책을
+  쓰게 했다(`routing-model-key.test.ts` 가 이 일치를 못박는다).
+- **★codex 키의 모델은 `inheritedModel` 이다.** 오늘 스폰은 effort 만 넘기고 모델은
+  사용자 `config.toml` 값이라(`ProviderLadder.pinsModel=false`) argv 에 모델이 없다.
+  사다리가 그 목적으로 들고 있던 `inheritedModel`(=`gpt-5.5`)로 채워 초안 예시와
+  같은 `gpt-5.5@medium` 키가 된다. 모델 핀 배선이 켜지면 그 분기가 자동으로 바뀐다.
+- **P2-1 은 미러 + 패리티 테스트로 풀었다.** 이 repo 는 `src/`↔`electron/` cross-import
+  가 없고 MCP 는 `rootDir` 때문에 아예 불가능하다. 그래서 분류기를
+  `electron/mcp-server/task-type.ts` 에 한 벌 두고(mcp·bridge 양쪽이 같은 구현을 쓴다)
+  `tests/unit/task-type-parity.test.ts` 가 규칙 원문 + 코퍼스 동작을 대조한다
+  (`escalation-approval` 미러 ↔ `assertMirrorsMatch` 와 같은 선례).
+- **P2-4 의 조인은 이미 `tasks/{id}` 에 물질화돼 있었다.** `costTotal` 롤업(=cost_logs
+  와 같은 taskId 스탬프) + `dispatchMeta`(실스폰 model@effort·난도·taskType) + `status`
+  가 한 문서에 있으므로 BQ 왕복 없이 같은 정의를 계산한다. 리포트는 진행중/모델미상
+  제외 건수와 **비용 커버리지**를 함께 보고하고, 비용 미측정을 0원으로 세지 않으며
+  (`successPerDollar` 의 분자도 비용측정 부분집합으로 맞춘다) 임계값·판정은 주지 않는다.
+- **아직 하지 않은 것**: 넷-뉴 4(부정신호 실적재 재확인)는 **라이브 관측 항목**이라
+  코드로 닫지 않았다. 유닛은 부정 outcome 이 새 키 셀에 접히는 것까지 증명하지만,
+  온디스크 그래프가 여전히 merged-only 인지는 앱 재시작 후 실제 dispatch 몇 건을
+  돌려 봐야 안다(§3 검증법 "라이브"). 그리고 그래프가 `usableRungs()` 안에서만
+  흔들도록 강제하는 것은 자동 상향(P3-2)의 몫이다 — 읽기 예측 키는 티어 **진입 칸**
+  에서 나오고 진입 칸은 승인 게이트 대상이 될 수 없으므로(`buildLadder` 가 금지),
+  오늘의 예측 키는 게이트 칸을 가리킬 수 없다(그 방어를 유닛으로 못박았다).
 
 ### 의존성
 

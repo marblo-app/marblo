@@ -691,6 +691,14 @@ export function scoreModelsDetailed(
   budgets?: ModelBudgetSnapshot,
   ctx?: GraphContext,
   graph?: RoutingGraph | null,
+  /**
+   * P2-2 — 프로바이더 → 그래프 model key 들(구체적인 것부터). 주면 그래프를
+   * model@effort 해상도로 읽고, 안 주면 프로바이더 키 단일 조회 = 종전 동작.
+   * 이 모듈이 직접 해상도를 계산하지 않는 이유: 티어 정책 해석은 `agent-config`
+   * (CLI 버전가드·env)의 몫이고, 순수 스코어러가 그걸 import 하면 테스트가
+   * 설치된 CLI 에 의존하게 된다. 주입 지점은 bridge-server 다.
+   */
+  modelKeys?: (model: ModelType) => readonly string[],
 ): ModelSelection {
   const scored: PerModelScore[] = [];
   let hasTags = tags.length > 0;
@@ -736,7 +744,12 @@ export function scoreModelsDetailed(
     // pattern as budgetBias — one more ±20 component. 0 when no graph/ctx or
     // cold start, so this is a strict no-op until real outcomes accumulate.
     const graphBias =
-      ctx && graph ? finiteOr(graphBiasForModel(model, ctx, graph), 0) : 0;
+      ctx && graph
+        ? finiteOr(
+            graphBiasForModel(modelKeys?.(model) ?? model, ctx, graph),
+            0,
+          )
+        : 0;
     // A learned graph signal (even with no task tags) should route through the
     // score-based competition / tie-band instead of the tag-blind round-robin,
     // so the graph's lean is actually honored. Cold start (all 0) leaves

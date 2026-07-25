@@ -13,13 +13,21 @@
  * and every step is best-effort: a failed graph update NEVER breaks recovery,
  * telemetry, or dispatch (dispatch just reads a slightly older graph).
  *
- * Boundary note: electron can't import the renderer's `classifyTaskType()`
- * (src/), so taskType is only used when a caller already resolved it (e.g. from
- * dispatchMeta / merge changeType). Absent taskType → graceful degradation: the
- * role / tag / complexity cells still learn (spec §13).
+ * Boundary note (★2026-07-25 P2-1 로 해소): taskType 은 이제 dispatch 시점에
+ * `mcp-server/task-type.ts` 가 분류해 `dispatchMeta.taskType` 으로 남기므로
+ * `fetchMeta` 가 그걸 읽어 온다. 종전엔 electron 이 렌더러의 `classifyTaskType()`
+ * 을 import 할 수 없다는 이유로 이 축이 사실상 항상 비어 있었고(그게 PR#596 이
+ * 지목한 "학습 축이 complexity 뿐" 의 진범이다), 그때도 코드는 우아하게 저하했다.
+ * 저하 경로는 그대로 유지한다 — taskType 이 없으면 role/tag/complexity 셀만 배운다.
+ *
+ * ★모델 축 해상도(P2-2): 셀 키의 모델 축은 `dispatchMeta.spawnedModelKey`(실제
+ * 스폰 argv 관측 = `gpt-5.5@medium`)를 우선 쓰고, 없으면 종전처럼 프로바이더 키
+ * (`normalizeModel` 결과)로 쓴다. **난도에서 모델을 역추론하지 않는다** — 관측이
+ * 없으면 덜 구체적인 키로 적는 것이 맞고, 읽기 경로가 그 구키를 폴백으로 함께
+ * 조회하므로 학습이 끊기지 않는다(routing-graph 파일 상단).
  */
 
-import { normalizeModel, type ModelType } from "./dispatch-scoring";
+import { normalizeModel } from "./dispatch-scoring";
 import {
   applyOutcome,
   loadRoutingGraphFile,
@@ -110,6 +118,8 @@ export interface DispatchMetaLike {
   taskType?: string | null;
   complexity?: string | null;
   model?: string | null;
+  /** ★P2-2 — 실제 스폰 관측 키(`claude-opus-5`/`gpt-5.5@medium`). 있으면 이게 셀 키다. */
+  spawnedModelKey?: string | null;
 }
 
 export interface RecordOutcomeInput {
@@ -119,6 +129,11 @@ export interface RecordOutcomeInput {
   model?: string | null;
   rawOutcome: RawOutcome | string;
   hints?: NormalizeHints;
+  /**
+   * ★P2-2 — 그래프 모델축 키를 호출자가 직접 줄 때(실스폰 관측값). 없으면
+   * dispatchMeta.spawnedModelKey → 그것도 없으면 프로바이더 키로 떨어진다.
+   */
+  modelKey?: string | null;
   /** Explicit context; when omitted, resolved from dispatchMeta (fetchMeta). */
   ctx?: GraphContext;
   /** Event server timestamp (ms). Defaults to now(). */
@@ -187,9 +202,14 @@ export class GraphUpdater {
       ? { ...input.ctx }
       : undefined;
     let modelStr = input.model ?? null;
+    let modelKey = trimmedOrNull(input.modelKey);
     const ctxIncomplete =
       !ctx || !ctx.role || !ctx.tags || !ctx.complexity || !ctx.taskType;
-    if ((ctxIncomplete || !modelStr) && input.taskId && this.fetchMeta) {
+    if (
+      (ctxIncomplete || !modelStr || !modelKey) &&
+      input.taskId &&
+      this.fetchMeta
+    ) {
       try {
         const meta = await this.fetchMeta(input.taskId);
         if (meta) {
@@ -200,6 +220,7 @@ export class GraphUpdater {
             complexity: ctx?.complexity ?? normalizeComplexity(meta.complexity),
           };
           modelStr = modelStr ?? meta.model ?? null;
+          modelKey = modelKey ?? trimmedOrNull(meta.spawnedModelKey);
         }
       } catch {
         // ignore — fall through with whatever we have
@@ -231,12 +252,14 @@ export class GraphUpdater {
     }
 
     const atMs = input.atMs ?? this.now();
-    await this.enqueueWrite(model, mode, ctx, input, atMs);
+    // ★P2-2 — 셀 키의 모델 축. 실스폰 관측 키가 있으면 model@effort 해상도로,
+    // 없으면 종전 프로바이더 키로 적는다(관측 없는 구체 키를 지어내지 않는다).
+    await this.enqueueWrite(modelKey ?? model, mode, ctx, input, atMs);
     return mode;
   }
 
   private enqueueWrite(
-    model: ModelType,
+    modelKey: string,
     mode: OutcomeMode,
     ctx: GraphContext,
     input: RecordOutcomeInput,
@@ -262,7 +285,7 @@ export class GraphUpdater {
           seenKey,
         );
         applyOutcome(graph, {
-          model,
+          model: modelKey,
           mode,
           ctx,
           taskId: input.taskId ?? null,
@@ -279,6 +302,12 @@ export class GraphUpdater {
     this.writeChain = this.writeChain.then(run, run);
     return this.writeChain;
   }
+}
+
+/** 공백만 있는 문자열은 값이 아니다 — 키를 만들 때 빈 축이 생기지 않게. */
+function trimmedOrNull(value: string | null | undefined): string | null {
+  const v = (value ?? "").trim();
+  return v ? v : null;
 }
 
 function normalizeComplexity(

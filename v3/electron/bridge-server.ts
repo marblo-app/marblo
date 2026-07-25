@@ -33,9 +33,12 @@ import {
 } from "./routing-graph";
 import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import {
+  modelTierForComplexity,
   resolveTopClaudeModelDetailed,
   type LaunchModelPin,
 } from "./agent-config";
+import { graphModelKeys, modelKeyFromSpawn } from "./routing-model-key";
+import { normalizeTaskTypeLabel } from "./mcp-server/task-type";
 import { resolveModelPin, type ResolvedModelPin } from "./model-selection";
 import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
 import type { RateLimitInfo } from "./session-parsers";
@@ -547,6 +550,19 @@ export interface DispatchTaskRequest {
   nameHint?: string;
   cwd?: string;
   tags?: string[];
+  /**
+   * ★P2-1 — 티켓의 작업종류 라벨(`bug-fix`|`feature`|`refactor`|…).
+   *
+   * 지식그래프의 **복수축 학습**(taskType × complexity × model@effort)을 살리는
+   * 축이다. 종전엔 electron 이 렌더러의 `classifyTaskType()` 을 import 할 수 없다는
+   * 이유로 이 값이 dispatch 경로에 아예 없었고(`persistDispatchMeta` 주석), 그래서
+   * 콜드시드·학습이 complexity 단일축으로 우아하게 저하돼 있었다(PR#596 이
+   * 밝힌 진범). 이제 MCP `dispatch_task` 가 티켓 문서(title/goal/description)를
+   * 이미 읽고 있으므로 그 자리에서 분류해 넘긴다 — 분류기는 양쪽이 같이 쓰는
+   * `mcp-server/task-type.ts` 다. 미지정이면 종전대로 우아한 저하(role/tag/
+   * complexity 셀만 학습).
+   */
+  taskType?: string;
   /** Project ID — required in multi-window mode. Filters reusable agents
    * to only those owned by this project. MCP forwards MARBLO_PROJECT. */
   projectId?: string;
@@ -760,6 +776,9 @@ export class BridgeServer {
           role?: string;
           tags?: string[];
           taskType?: string;
+          /** ★P2-2 그래프 모델축 키(`claude-opus-5`/`gpt-5.5@medium`). argv 관측
+           * 기반이라, 지정 모델이 버전가드로 폴백했어도 **실제로 서빙된** 쪽이 적힌다. */
+          spawnedModelKey?: string;
         },
       ) => void)
     | null = null;
@@ -874,6 +893,7 @@ export class BridgeServer {
         role?: string;
         tags?: string[];
         taskType?: string;
+        spawnedModelKey?: string;
       },
     ) => void,
   ): void {
@@ -1822,9 +1842,19 @@ export class BridgeServer {
         // dispatch routed to an already-bound agent), fall back to the request.
         role: agent.role || params.role,
         tags: params.tags,
-        // taskType intentionally omitted here: electron can't import the src
-        // classifyTaskType() (module-boundary), and the request carries no
-        // taskType. The graph degrades gracefully to role/tag/complexity cells.
+        // ★P2-1 — taskType 은 더 이상 비어 있지 않다. 분류는 MCP dispatch_task 가
+        // 티켓 문서로 이미 했고(mcp-server/task-type.ts), 여기는 그 라벨을 그래프
+        // 귀속키로 함께 굳히는 자리다. 없으면 종전대로 우아한 저하.
+        taskType: normalizeTaskTypeLabel(params.taskType),
+        // ★P2-2/P2-3 — 지식그래프의 모델 축 키. `getSpawnedModel` 이 되읽은 실제
+        // argv 가 1차 근거이고, codex 처럼 모델을 핀하지 않는 경로에서는 사다리의
+        // `inheritedModel`(=오늘 실측되는 상속 기본모델) + argv effort 로 채운다.
+        // 결과 outcome 이 이 키의 셀로 접혀야 (모델,난도,taskType)별 학습이 성립한다.
+        spawnedModelKey:
+          modelKeyFromSpawn(
+            agent.model,
+            this.agentManager.getSpawnedModel(agentId),
+          ) ?? undefined,
       });
     } catch (err) {
       console.warn("[BridgeServer] persistDispatchMeta failed:", err);
@@ -2389,7 +2419,21 @@ export class BridgeServer {
     // graphBias 0 everywhere, so scoring is byte-identical to before. Read here
     // (not on every candidate) so one load serves the whole model competition.
     const routingGraph = model ? null : loadRoutingGraph(params.projectId);
-    const graphCtx: GraphContext = { role, tags, complexity };
+    // ★P2-1 — taskType 을 ctx 에 살려 복수축(taskType × complexity × model@effort)
+    // 으로 학습·조회한다. 값이 없으면 종전과 동일(role/tag/complexity 만).
+    const graphCtx: GraphContext = {
+      role,
+      tags,
+      complexity,
+      taskType: normalizeTaskTypeLabel(params.taskType),
+    };
+    // ★P2-2 — 그래프 조회 키를 model@effort 해상도로. 예측은 스폰이 쓰는 그
+    // 티어 정책(`modelTierForComplexity`)으로 하고, 구키(프로바이더)를 폴백 칸에
+    // 함께 넘겨 기존 학습(94건 + #596 시드)이 계속 쓰이게 한다.
+    const graphKeysFor = (candidate: ModelType): readonly string[] =>
+      graphModelKeys(candidate, complexity, (provider, tier) =>
+        modelTierForComplexity(provider as ModelType, tier),
+      );
     // Score the eligible models ONCE (when no explicit model was named) so the
     // dispatch-decision telemetry can carry the per-model breakdown + how the
     // winner was picked. scoreModelsDetailed advances the round-robin counter
@@ -2403,6 +2447,7 @@ export class BridgeServer {
           budgetSnapshot,
           graphCtx,
           routingGraph,
+          graphKeysFor,
         );
     if (modelSelection?.mode === "all-budget-exhausted") {
       const reason = `All eligible models are budget exhausted — dispatch blocked.`;
@@ -2449,7 +2494,11 @@ export class BridgeServer {
           const parts: string[] = [];
           for (const s of modelSelection?.scores ?? []) {
             if (s.graphBias === 0) continue;
-            const d = graphBiasDetailForModel(s.model, graphCtx, routingGraph);
+            const d = graphBiasDetailForModel(
+              graphKeysFor(s.model),
+              graphCtx,
+              routingGraph,
+            );
             const sign = s.graphBias > 0 ? "+" : "";
             parts.push(
               `${s.model} ${sign}${Math.round(s.graphBias)}${

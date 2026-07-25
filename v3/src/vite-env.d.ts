@@ -811,6 +811,12 @@ interface KgBridgeAPI {
     taskId: string;
     changeType: string | null;
     mergedAtMs: number | null;
+    role?: string | null;
+    taskType?: string | null;
+    complexity?: string | null;
+    model?: string | null;
+    /** ★P2-2 실스폰 관측 model@effort 키 — 그래프 셀의 모델 축. */
+    spawnedModelKey?: string | null;
   }) => void;
 }
 

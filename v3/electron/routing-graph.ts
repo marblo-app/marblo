@@ -32,12 +32,29 @@
  * fits the synchronous `scoreModelsDetailed` hot path (same mtime-cache pattern
  * as `loadSubscriptionPlans`). The write path (`applyOutcome`) runs off the hot
  * path, on agent-lifecycle outcome events (graph-updater.ts).
+ *
+ * ── ★P2-2 model@effort 해상도 (2026-07-25) ──────────────────────────────
+ * cell key 의 모델 축은 이제 **프로바이더가 아니라 `modelKey` 문자열**이다
+ * (`claude-opus-5`, `gpt-5.5@medium`, …). 이 파일은 그 문자열이 어떻게 만들어
+ * 지는지 모른다 — 해상도 정책은 `routing-model-key.ts` 가, 사실은 레지스트리·
+ * 사다리가 갖는다(이 모듈은 여전히 "카운터 + 감쇠" 만 안다).
+ *
+ * 마이그레이션은 **구키 폴백 다단 조회**로 한다: 읽기 호출자는 키를 구체적인
+ * 것부터 덜 구체적인 순서로 넘기고(`["gpt-5.5@medium", "gpt"]`), 각 factor 마다
+ * 존재하는 셀들을 **계층 축소(hierarchical shrinkage)** 로 섞는다 — 덜 구체적인
+ * 셀(=종전 프로바이더 셀에 쌓인 94건)이 구체적인 셀의 prior 가 되고, 구체적인
+ * 셀에 관측이 쌓이면 그 비중이 자동으로 옮겨간다. 그래서
+ *   - 키 하나만 넘기면 종전과 **바이트 동일**(기존 유닛 전부 보존),
+ *   - 새 키가 비어 있는 첫날엔 구키가 **원래 무게 그대로** 쓰이고,
+ *   - 새 키가 차면 구키 영향이 사라진다.
+ * 새 상수를 만들지 않았다 — 축소 계수는 이 파일이 이미 쓰던 SHRINKAGE_K 다.
+ * ★같은 관측이 두 셀에 동시에 들어가지 않는다(쓰기 경로는 키 하나만 쓴다)는
+ * 것이 이중계상 방지의 근거다.
  */
 
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ModelType } from "./dispatch-scoring";
 
 // ── Failure / success taxonomy (spec §3) ───────────────────────
 //
@@ -188,7 +205,13 @@ export interface RoutingGraph {
   scope: string; // "global" | "project:<id>"
   updatedAt: string;
   halfLifeDays: Record<DecayBucket, number>;
-  /** key = `${factorType}:${factorValue}|${model}` */
+  /**
+   * key = `${factorType}:${factorValue}|${modelKey}`
+   *
+   * `modelKey` 는 P2-2 이후 `claude-opus-5`·`gpt-5.5@medium` 같은 model@effort
+   * 문자열이고, 그 이전에 쌓인 셀은 프로바이더 문자열(`claude`)이다. 두 세대가
+   * 한 파일에 공존하는 것이 정상이며, 읽기 경로가 다단 조회로 섞는다(파일 상단).
+   */
   cells: Record<string, RoutingGraphCell>;
   /** idempotency guard: `${taskId}:${agentId}:${mode}` → ISO ts */
   seen: Record<string, string>;
@@ -217,15 +240,17 @@ export function emptyRoutingGraph(scope = "global"): RoutingGraph {
 
 // ── Cell keys from context ──────────────────────────────────────
 
-/** All cell keys a dispatch context touches for a given model (spec §4.1). */
-export function cellKeysForContext(
-  model: ModelType,
-  ctx: GraphContext,
-): string[] {
+/**
+ * The context-factor half of a cell key (`role:backend`, `taskType:feature`, …)
+ * — everything left of the `|`. Split out from `cellKeysForContext` because the
+ * multi-tier read (P2-2) needs to compose the SAME factor list against several
+ * model keys, and re-deriving it per tier would let the two lists drift.
+ */
+export function factorKeysForContext(ctx: GraphContext): string[] {
   const keys: string[] = [];
   const push = (factorType: string, factorValue?: string) => {
     if (factorValue && factorValue.trim()) {
-      keys.push(`${factorType}:${factorValue}|${model}`);
+      keys.push(`${factorType}:${factorValue}`);
     }
   };
   push("role", ctx.role);
@@ -233,6 +258,38 @@ export function cellKeysForContext(
   push("complexity", ctx.complexity);
   for (const tag of ctx.tags ?? []) push("tag", tag);
   return keys;
+}
+
+/**
+ * All cell keys a dispatch context touches for one model key (spec §4.1).
+ *
+ * `modelKey` is a plain string on purpose (P2-2): `claude-opus-5`,
+ * `gpt-5.5@medium`, or — for a vendor whose model facts we don't have — the bare
+ * provider (`antigravity`). Resolution lives in `routing-model-key.ts`.
+ */
+export function cellKeysForContext(
+  modelKey: string,
+  ctx: GraphContext,
+): string[] {
+  return factorKeysForContext(ctx).map((factor) => `${factor}|${modelKey}`);
+}
+
+/**
+ * One or more model keys, ordered **most specific first**
+ * (`["gpt-5.5@medium", "gpt"]`). A bare string = single tier = pre-P2-2
+ * behaviour.
+ */
+export type ModelKeyQuery = string | readonly string[];
+
+/** Trim + de-dup a key query, preserving the caller's specificity order. */
+function modelKeyTiers(query: ModelKeyQuery): string[] {
+  const raw = typeof query === "string" ? [query] : query;
+  const out: string[] = [];
+  for (const key of raw) {
+    const trimmed = (key ?? "").trim();
+    if (trimmed && !out.includes(trimmed)) out.push(trimmed);
+  }
+  return out;
 }
 
 // ── Decay ───────────────────────────────────────────────────────
@@ -272,7 +329,14 @@ function decayCellTo(
 // ── Apply an outcome (write path, spec §7) ──────────────────────
 
 export interface OutcomeInput {
-  model: ModelType;
+  /**
+   * ★쓰기는 **키 하나만** 쓴다(P2-2). 아는 만큼만 구체적으로 — 실제 스폰 argv
+   * 에서 model@effort 를 읽어낸 경우엔 그 키, 못 읽은 경우엔 프로바이더 키다.
+   * 난도에서 "아마 이 모델이었을 것" 을 역추론해 구체 키로 적지 않는다(그건
+   * 관측이 아니라 추측이고, 그래프는 관측만 담는다). 키를 하나로 제한하는 것이
+   * 다단 읽기의 이중계상 방지 근거이기도 하다.
+   */
+  model: string;
   mode: OutcomeMode;
   ctx: GraphContext;
   /** Idempotency key parts. */
@@ -361,7 +425,8 @@ export interface ColdStartPrior {
   /** Factor family — must be one the READ path actually consults. */
   factorType: "role" | "taskType" | "complexity" | "tag";
   factorValue: string;
-  model: ModelType;
+  /** 프로바이더 키(`claude`) 또는 model@effort 키(`gpt-5.5@medium`). */
+  model: string;
   /** Signed nudge, |prior| ≤ SEED_PRIOR_MAX. */
   prior: number;
   /** Why — persisted into the cell so the live file explains itself. */
@@ -509,22 +574,57 @@ function cellBias(cell: RoutingGraphCell): number {
 }
 
 /**
- * Observed routing prior for `model` in this dispatch context (spec §4.3).
+ * Blend one factor's cells across model-key tiers (P2-2 구키 폴백).
+ *
+ * `cells` arrives most-specific first. The fold walks from the LEAST specific
+ * cell upward, each step treating the accumulated coarser signal as the prior
+ * for the finer cell under the same n/(n+K) confidence weight `cellBias`
+ * already uses for seeded priors:
+ *
+ *   bias = coarse                            (fine cell absent)
+ *   bias = fine                              (coarse cell absent)
+ *   bias = fine·n/(n+K) + coarse·K/(n+K)     (both present)
+ *
+ * The single-tier case is byte-identical to the pre-P2-2 function, which is why
+ * every existing routing-graph unit keeps its expected numbers. Applying the
+ * shrink ONLY when a coarser cell exists matters: shrinking unconditionally
+ * would double-shrink a brand-new precise cell (1/7 → 1/49) and silently
+ * flatten exactly the learning this ticket is trying to enable.
+ */
+function blendKeyTiers(cells: (RoutingGraphCell | undefined)[]): number {
+  const present = cells.filter((c): c is RoutingGraphCell => !!c);
+  if (present.length === 0) return 0;
+  let acc = cellBias(present[present.length - 1]);
+  for (let i = present.length - 2; i >= 0; i--) {
+    const cell = present[i];
+    const n = Number.isFinite(cell.n) ? Math.max(0, cell.n) : 0;
+    const shrink = n / (n + SHRINKAGE_K);
+    acc = cellBias(cell) * shrink + acc * (1 - shrink);
+  }
+  return acc;
+}
+
+/**
+ * Observed routing prior for a model key in this dispatch context (spec §4.3).
  * Pure: reads the graph as materialized (decay is applied at write time). Sums
- * the per-cell biases the context points at, clamped to ±GRAPH_BIAS_MAX.
+ * the per-factor biases the context points at, clamped to ±GRAPH_BIAS_MAX.
+ *
+ * `modelKey` may be a single key (pre-P2-2 behaviour) or a specificity-ordered
+ * list (`["gpt-5.5@medium", "gpt"]`) — see `blendKeyTiers`.
  *
  * Cold start (no matching cells / tiny n) → 0, i.e. the scorer is unchanged.
  */
 export function graphBiasForModel(
-  model: ModelType,
+  modelKey: ModelKeyQuery,
   ctx: GraphContext,
   graph: RoutingGraph | null | undefined,
 ): number {
   if (!graph) return 0;
+  const tiers = modelKeyTiers(modelKey);
+  if (tiers.length === 0) return 0;
   let sum = 0;
-  for (const key of cellKeysForContext(model, ctx)) {
-    const cell = graph.cells[key];
-    if (cell) sum += cellBias(cell);
+  for (const factor of factorKeysForContext(ctx)) {
+    sum += blendKeyTiers(tiers.map((key) => graph.cells[`${factor}|${key}`]));
   }
   if (!Number.isFinite(sum)) return 0;
   return Math.max(-GRAPH_BIAS_MAX, Math.min(GRAPH_BIAS_MAX, sum));
@@ -542,11 +642,11 @@ export interface GraphBiasDetail {
  * influence is re-logged to telemetry (observable feedback loop, spec §6.3).
  */
 export function graphBiasDetailForModel(
-  model: ModelType,
+  modelKey: ModelKeyQuery,
   ctx: GraphContext,
   graph: RoutingGraph | null | undefined,
 ): GraphBiasDetail {
-  const bias = graphBiasForModel(model, ctx, graph);
+  const bias = graphBiasForModel(modelKey, ctx, graph);
   if (!graph || bias === 0) return { bias: 0, note: "" };
 
   // Dominant modes across the touched cells (by |decayed net| per mode).
@@ -556,11 +656,24 @@ export function graphBiasDetailForModel(
   // (n = 0) — include both, else a seed-driven bias would be reported with an
   // empty note and the decision log would say nothing about why it moved.
   let seeded = false;
-  for (const key of cellKeysForContext(model, ctx)) {
+  const tiers = modelKeyTiers(modelKey);
+  // Per factor, name the MOST SPECIFIC tier that actually carries signal — the
+  // note should say "gpt-5.5@medium" once that cell is learning, and honestly
+  // fall back to the legacy provider cell while it isn't.
+  const contributing: string[] = [];
+  for (const factor of factorKeysForContext(ctx)) {
+    for (const key of tiers) {
+      const cell = graph.cells[`${factor}|${key}`];
+      if (!cell) continue;
+      if (cell.n <= 0 && clampSeedPrior(cell.prior) === 0) continue;
+      contributing.push(`${factor}|${key}`);
+      break;
+    }
+  }
+  for (const key of contributing) {
     const cell = graph.cells[key];
     if (!cell) continue;
     const hasPrior = clampSeedPrior(cell.prior) !== 0;
-    if (cell.n <= 0 && !hasPrior) continue;
     if (hasPrior) seeded = true;
     const factorValue = key.split("|")[0].split(":").slice(1).join(":");
     if (factorValue) factors.push(factorValue);

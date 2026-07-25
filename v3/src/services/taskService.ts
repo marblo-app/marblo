@@ -53,6 +53,8 @@ export interface TaskDispatchMeta {
   taskType: string | null;
   complexity: string | null;
   model: string | null;
+  /** ★P2-2 — 실스폰 관측 model@effort 키(그래프 셀의 모델 축). 구 문서엔 없음. */
+  spawnedModelKey: string | null;
 }
 
 export async function getTaskDispatchMeta(
@@ -68,6 +70,7 @@ export async function getTaskDispatchMeta(
     taskType: str(meta.taskType),
     complexity: str(meta.complexity),
     model: str(meta.model),
+    spawnedModelKey: str(meta.spawnedModelKey),
   };
 }
 
