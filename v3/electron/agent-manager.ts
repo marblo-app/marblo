@@ -28,6 +28,53 @@ export type ModelType =
   | "custom";
 export type AgentStatus = "idle" | "working" | "error" | "stopped";
 
+/** 실제 spawn 된 argv 에서 되읽은 모델 축(§P2-3). 값이 없으면 핀하지 않은 것. */
+export interface SpawnedModelInfo {
+  /** claude `--model` / codex `-c model=` 값. */
+  modelId?: string;
+  /** codex `-c model_reasoning_effort=` 값. claude 는 effort 축이 없다. */
+  effort?: string;
+}
+
+/**
+ * 우리가 만든 CLI argv 에서 모델·effort 를 되읽는다.
+ *
+ * ★"무엇을 요청했나"가 아니라 **"무엇으로 떴나"** 를 얻는 것이 요점이다. 요청과
+ * 실제는 갈릴 수 있다(버전가드 폴백, 런타임 강등). 라우팅 지식그래프가 비용대비
+ * 효과를 학습할 때 요청값을 사실로 착각하면 잘못 수렴하므로, 관측 지점을 argv 로
+ * 잡는다 — 여기가 CLI 에 실제로 넘어간 문자열이다.
+ */
+export function spawnedModelFromArgs(
+  model: ModelType,
+  args: string[],
+): SpawnedModelInfo {
+  if (model === "claude") {
+    const i = args.indexOf("--model");
+    return i >= 0 && i + 1 < args.length ? { modelId: args[i + 1] } : {};
+  }
+  if (model === "gpt") {
+    // codex 는 `-c key="value"` 쌍으로 온다.
+    const out: SpawnedModelInfo = {};
+    for (let i = 0; i < args.length - 1; i++) {
+      if (args[i] !== "-c") continue;
+      const m = /^model="(.*)"$/.exec(args[i + 1]);
+      if (m) out.modelId = m[1];
+      const e = /^model_reasoning_effort="(.*)"$/.exec(args[i + 1]);
+      if (e) out.effort = e[1];
+    }
+    return out;
+  }
+  return {};
+}
+
+/** `model@effort` 표기. 모델을 모르면 undefined — 빈 문자열을 만들지 않는다. */
+export function formatModelAtEffort(
+  info: SpawnedModelInfo | null | undefined,
+): string | undefined {
+  if (!info?.modelId) return undefined;
+  return info.effort ? `${info.modelId}@${info.effort}` : info.modelId;
+}
+
 // --- Auto-restart constants ---
 const MAX_RESTARTS = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -68,9 +115,17 @@ export interface AgentLaunchParams {
   dispatchReason?: string | null;
   /** MARBLO_CONTEXT injected into this agent's MCP process, e.g. lane:<id>. */
   contextId?: string;
-  /** claude 런타임 강등 재시작(§3.4-3)용 모델 override. 설정되면 complexity
-   * resolver 대신 이 모델 id 로 --model 핀(예: fable5 실패 → "opus"). */
+  /** claude 모델 핀. 설정되면 complexity resolver 대신 이 모델 id 로 --model.
+   * 두 출처가 공유한다 — 런타임 강등 재시작(§3.4-3, fable5 실패 → "opus")과
+   * 사용자/오케의 명시 지정(dispatch model='opus5'). 양쪽 다 이미
+   * resolveClaudeModelPinned 의 버전가드를 통과한 값이 들어온다. */
   claudeModelOverride?: string;
+  /** codex 모델 핀(`-c model=…`). 사용자 지정 시에만. 미지정이면 사용자
+   * config.toml 의 모델을 그대로 쓴다(현행 동작). */
+  codexModelOverride?: string;
+  /** codex reasoning effort 핀(`-c model_reasoning_effort=…`). complexity
+   * 파생값을 덮는다. */
+  codexEffortOverride?: string;
   /** Called immediately after PTY is created, before any output can be missed */
   onPtyReady?: (ptySessionId: string) => void;
 }
@@ -139,10 +194,23 @@ export interface AgentInstance {
    * launch and downgrade it to opus on restart (§3.4-3). undefined for
    * non-claude / non-complex launches. */
   topClaudeModel?: string;
-  /** Set once when a Fable5 launch is downgraded to opus after a runtime
-   * fast-fail. Carried into the auto-restart so the relaunch pins opus, and
-   * acts as the once-only guard so the downgrade can't loop. */
+  /** claude 모델 핀 — 두 출처가 공유한다. (a) Fable5 launch 가 런타임
+   * fast-fail 후 opus 로 강등될 때 세팅되며, 자동 재시작에 실려 relaunch 가
+   * opus 를 핀하게 하고 동시에 강등이 루프하지 않게 하는 once-only 가드다.
+   * (b) 사용자/오케가 dispatch·셀렉터로 명시 지정한 모델. 재시작이 지정 모델을
+   * 잃지 않으려면 여기 보존돼야 한다. */
   claudeModelOverride?: string;
+  /** codex 모델·effort 핀. 재시작이 사용자 지정을 잃지 않도록 보존한다. */
+  codexModelOverride?: string;
+  codexEffortOverride?: string;
+  /** §3.4-3 런타임 강등이 이미 한 번 일어났음. 강등 루프 방지 래치.
+   *
+   * ★종전엔 이 래치가 `claudeModelOverride` 가 비어있는지로 대체돼 있었다.
+   * 그때는 그 필드에 값이 있다는 것이 곧 "이미 강등됨"과 동의어였기 때문이다.
+   * 이제는 사용자가 `dispatch(model='fable')` 로 처음부터 값을 넣을 수 있어
+   * 그 등식이 깨졌다 — 래치를 분리하지 않으면 명시 지정된 fable5 는 런타임
+   * fast-fail 해도 영영 강등되지 못한다(안전 폴백 불변식 구멍). */
+  claudeRuntimeDowngraded?: boolean;
   /** P3-4: epoch-ms the agent entered a TERMINAL state (stopped/error) with no
    * pending auto-restart. null while live or mid-restart. The periodic pruner
    * uses it as a backstop to evict long-dead map entries that cleanup_agents
@@ -448,8 +516,13 @@ export class AgentManager {
       true,
       // 작업 난이도 → claude(--model sonnet/opus)·codex(reasoning) 모델/레벨 선택.
       params.complexity,
-      // 런타임 강등 재시작 시 forced --model(예: fable5 실패 → "opus", §3.4-3).
-      params.claudeModelOverride,
+      // 명시 모델 핀 — 런타임 강등 재시작(§3.4-3)과 사용자 지정 모델이 공유하는
+      // 레일. 비어 있으면 complexity 티어 정책이 그대로 돈다.
+      {
+        claudeModel: params.claudeModelOverride,
+        codexModel: params.codexModelOverride,
+        codexEffort: params.codexEffortOverride,
+      },
       params.contextId,
     );
 
@@ -866,6 +939,8 @@ export class AgentManager {
       terminalSince: null,
       topClaudeModel,
       claudeModelOverride: params.claudeModelOverride,
+      codexModelOverride: params.codexModelOverride,
+      codexEffortOverride: params.codexEffortOverride,
     };
 
     this.agents.set(params.id, instance);
@@ -1053,15 +1128,19 @@ export class AgentManager {
         );
 
         // §3.4-3 2차 안전망: Fable5 가 런타임에서 빠르게 실패(미지원 모델 오류
-        // 등)하면 opus 로 강등해 재시작한다. claudeModelOverride 가 한 번만
+        // 등)하면 opus 로 강등해 재시작한다. claudeRuntimeDowngraded 가 한 번만
         // 세팅되는 전이 가드 — 강등 후 opus 가 또 fast-fail 하면 일반 예산을
         // 따른다. fastFail 예산은 강등 시점에 리셋해 opus 에 공정한 재시도를 준다.
+        // ★래치는 claudeModelOverride 의 유무가 아니라 전용 플래그다. 사용자가
+        // 처음부터 fable5 를 명시 지정하면 override 가 이미 차 있어서, 옛 조건은
+        // 그 에이전트를 강등 대상에서 통째로 빼버렸다(불변식 구멍).
         if (
           agent.model === "claude" &&
           agent.topClaudeModel === "claude-fable-5" &&
-          !agent.claudeModelOverride
+          !agent.claudeRuntimeDowngraded
         ) {
           agent.claudeModelOverride = FALLBACK_TOP_CLAUDE_MODEL;
+          agent.claudeRuntimeDowngraded = true;
           agent.fastFailCount = 0;
           mainTelemetry.topModelFallback(
             this.getMainWindow?.() ?? null,
@@ -1155,9 +1234,13 @@ export class AgentManager {
     const restartCount = agent.restartCount;
     const fastFailCount = agent.fastFailCount;
     const onPtyReady = agent.onPtyReady;
-    // Carry any Fable5→opus runtime downgrade into the relaunch so the restart
-    // pins the safe model instead of resolving Fable5 again (§3.4-3).
+    // 모델 핀을 relaunch 로 옮긴다. 두 가지가 여기 실린다 — Fable5→opus 런타임
+    // 강등(§3.4-3, 재시작이 다시 Fable5 를 고르지 않게)과 사용자가 지정한 모델
+    // (재시작이 지정을 잃고 기본 티어로 흘러내리지 않게).
     const claudeModelOverride = agent.claudeModelOverride;
+    const codexModelOverride = agent.codexModelOverride;
+    const codexEffortOverride = agent.codexEffortOverride;
+    const claudeRuntimeDowngraded = agent.claudeRuntimeDowngraded;
 
     // Cleanup old PTY, config, and timers (heartbeat + the backoff timer that
     // just fired). onExit already released the heartbeat, but stay consistent.
@@ -1198,11 +1281,15 @@ export class AgentManager {
       resumeSessionId: resolvedSessionId,
       onPtyReady,
       claudeModelOverride,
+      codexModelOverride,
+      codexEffortOverride,
     });
 
     // Carry over restart counters; spawnedAt is freshly set by launch().
     newInstance.restartCount = restartCount;
     newInstance.fastFailCount = fastFailCount;
+    // 강등 래치도 함께 옮긴다 — 안 옮기면 재시작마다 래치가 리셋돼 강등이 루프한다.
+    newInstance.claudeRuntimeDowngraded = claudeRuntimeDowngraded;
   }
 
   /**
@@ -1278,6 +1365,20 @@ export class AgentManager {
   getMCPConfig(agentId: string): LaunchConfig | null {
     const agent = this.agents.get(agentId);
     return agent?.launchConfig ?? null;
+  }
+
+  /**
+   * 이 에이전트가 **실제로 어떤 모델·effort 로 떴는지**. 요청이 아니라 사실이다
+   * — 우리가 만든 argv 를 되읽는다(§P2-3). 라우팅 지식그래프가 이 값을 소비하므로
+   * "지정했으나 폴백됐다" 같은 경우에도 실제로 서빙된 쪽이 기록돼야 한다.
+   *
+   * 모델을 핀하지 않은 launch(오케 기본 경로 등)는 argv 에 모델 인자가 없으므로
+   * undefined 를 돌려준다 — "CLI 기본값" 을 우리가 지어내지 않는다.
+   */
+  getSpawnedModel(agentId: string): SpawnedModelInfo | null {
+    const agent = this.agents.get(agentId);
+    if (!agent?.launchConfig) return null;
+    return spawnedModelFromArgs(agent.model, agent.launchConfig.args);
   }
 
   getConfigGenerator(): AgentConfigGenerator {

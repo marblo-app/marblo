@@ -643,6 +643,23 @@ export const CLAUDE_MODEL_ALIASES: Record<string, string> = Object.fromEntries(
   ),
 );
 
+/**
+ * 한 번의 launch 가 강제할 **구체 모델 핀**. 티어 정책(complexity)보다 우선한다.
+ *
+ * 종전엔 이 자리가 `claudeModelOverride?: string` 하나뿐이었다 — fable5 런타임
+ * 강등 재시작(§3.4-3)이 유일한 사용처였기 때문이다. 이제 사용자가 dispatch/셀렉터
+ * 로 모델을 직접 지정할 수 있게 되면서 codex 축(모델 + reasoning effort)이 필요해져
+ * 객체로 일반화했다. 필드가 비어 있으면 종전대로 complexity 티어 정책이 돈다.
+ */
+export interface LaunchModelPin {
+  /** claude CLI 의 `--model` 값(구체 id 또는 폴백 alias). */
+  claudeModel?: string;
+  /** codex CLI 의 `-c model=…` 값. 미지정이면 사용자 config 의 모델을 그대로 쓴다. */
+  codexModel?: string;
+  /** codex CLI 의 `-c model_reasoning_effort=…` 값. complexity 파생값을 덮는다. */
+  codexEffort?: string;
+}
+
 export interface TopModelFallback {
   /** 폴백 사유 코드(텔레메트리/로그 키).
    *  - fable5_version_guard : Fable5 전용 버전가드(하위호환 유지 코드)
@@ -1517,9 +1534,11 @@ export class AgentConfigGenerator {
     // 작업 난이도 — claude(--model)·codex(reasoning) 모델/레벨 선택에 쓰인다.
     // 미지정(오케스트레이터 경로)이면 기본 모델 유지(opus).
     complexity?: TaskComplexity,
-    // claude 런타임 강등 재시작(§3.4-3)용 모델 override. 설정되면 complexity
-    // 기반 resolver 대신 이 모델 id 로 --model 을 핀한다(예: fable5 실패 → "opus").
-    claudeModelOverride?: string,
+    // 명시 모델 핀. 설정된 축은 complexity 기반 resolver 를 덮는다.
+    //   claudeModel — 런타임 강등 재시작(§3.4-3) 또는 사용자 지정 모델
+    //   codexModel/codexEffort — 사용자 지정 codex 모델·reasoning effort
+    // 전부 미설정이면 종전대로 complexity 티어 정책이 돈다.
+    modelPin?: LaunchModelPin,
     // Optional MCP context. Quick Lane agents use lane:<id> for board isolation.
     marbloContextId?: string,
   ): LaunchConfig {
@@ -1548,7 +1567,7 @@ export class AgentConfigGenerator {
         resumeSessionId,
         pinClaudeSession,
         complexity,
-        claudeModelOverride,
+        modelPin,
         marbloContextId,
       );
 
@@ -2370,7 +2389,7 @@ export class AgentConfigGenerator {
     resumeSessionId?: string,
     pinFreshClaudeSession = false,
     complexity?: TaskComplexity,
-    claudeModelOverride?: string,
+    modelPin?: LaunchModelPin,
     marbloContextId?: string,
   ): {
     command: string;
@@ -2409,13 +2428,16 @@ export class AgentConfigGenerator {
         );
         // complexity 기반 모델 핀(--model). 미지정(오케 경로)이면 기본 모델 상속.
         // 결정 우선순위:
-        //   1) claudeModelOverride — 런타임 강등 재시작(fable5 실패 → opus, §3.4-3)
+        //   1) modelPin.claudeModel — 명시 지정. 두 출처가 이 레일을 공유한다:
+        //      런타임 강등 재시작(fable5 실패 → opus, §3.4-3)과 사용자/오케의
+        //      모델 지정(dispatch model='opus5', 오케 셀렉터). 둘 다 이미
+        //      resolveClaudeModelPinned 의 버전가드를 통과한 값이다.
         //   2) complex → resolveTopClaudeModelDetailed() (env/버전가드/폴백 + 메타)
         //   3) 그 외(simple/standard/미지정) → modelTierForComplexity 리터럴
         let claudeModel: string | undefined;
         let modelResolution: TopModelResolution | undefined;
-        if (claudeModelOverride) {
-          claudeModel = claudeModelOverride;
+        if (modelPin?.claudeModel) {
+          claudeModel = modelPin.claudeModel;
         } else if (complexity === "complex") {
           modelResolution = resolveTopClaudeModelDetailed();
           claudeModel = modelResolution.model;
@@ -2521,9 +2543,17 @@ export class AgentConfigGenerator {
           "-c",
           'sandbox_mode="danger-full-access"',
         );
-        // complexity 기반 reasoning effort(모델은 사용자 config 유지). 미지정이면
-        // override 안 함. complex→high, standard→medium, simple→low.
-        const { codexReasoning } = modelTierForComplexity(model, complexity);
+        // 모델 핀(-c model=…). 명시 지정이 있을 때만 붙는다 — 없으면 종전대로
+        // 사용자 CODEX_HOME config.toml 의 모델을 그대로 쓴다(현행 동작 0 변화).
+        // Codex 는 모델 × effort 곱집합이라 두 축이 따로 붙는다(레지스트리 §2).
+        if (modelPin?.codexModel) {
+          codexArgs.push("-c", `model="${modelPin.codexModel}"`);
+        }
+        // reasoning effort 우선순위: 명시 지정 > complexity 파생(complex→high,
+        // standard→medium, simple→low) > 미지정(CLI 기본값 유지).
+        const codexReasoning =
+          modelPin?.codexEffort ??
+          modelTierForComplexity(model, complexity).codexReasoning;
         if (codexReasoning) {
           codexArgs.push("-c", `model_reasoning_effort="${codexReasoning}"`);
         }

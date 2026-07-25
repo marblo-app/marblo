@@ -2,7 +2,10 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useWorkspaceModeStore } from "../../stores/workspaceModeStore";
 import { useProjectStore } from "../../stores/projectStore";
-import { useOrchestratorStore } from "../../stores/orchestratorStore";
+import {
+  useOrchestratorStore,
+  orchestratorModelProvider,
+} from "../../stores/orchestratorStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useUiStore } from "../../stores/uiStore";
 import { useTranslation } from "../../lib/i18n";
@@ -98,8 +101,8 @@ export function SettingsPage() {
               plan === "team"
                 ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
                 : plan === "pro"
-                ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
+                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                  : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
             }`}
           >
             {plan.toUpperCase()} {t("header.planBadge.suffix")}
@@ -413,7 +416,12 @@ function ModelPresetSection() {
       .get()
       .then((model) => {
         if (model) {
-          setOrchestratorModel(model);
+          // 저장값은 `provider[:modelId]` compound 일 수 있다(오케 패널에서 Claude
+          // 변형을 고른 경우). 이 설정은 **어느 CLI 로 띄울지**를 정하는 전역
+          // 기본값이므로 프로바이더 축만 본다 — 그러지 않으면 "claude:claude-fable-5"
+          // 가 목록에 없는 값이 되어 멀쩡한 선택이 "기타(env)"로 보인다.
+          // 구체 모델 선택은 오케 패널 셀렉터가 담당한다(프로젝트별).
+          setOrchestratorModel(orchestratorModelProvider(model));
         }
       })
       .catch(() => {});
@@ -567,7 +575,7 @@ function SubscriptionPlansSection() {
 
   const update = (i: number, patch: Partial<SubscriptionPlanEntry>) => {
     setPlans((prev) =>
-      prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p))
+      prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)),
     );
   };
 

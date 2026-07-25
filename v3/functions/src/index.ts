@@ -4550,6 +4550,11 @@ interface TelemetryRow {
   modelSelectionMode?: string;
   perModelScores?: unknown;
   agentScore?: number;
+  /** ★P2-3 — 실제 스폰된 구체 모델·effort("claude-opus-5", "gpt-5.6-terra@max").
+   * selectedModel 은 프로바이더까지만 말하므로 그것과 별개 축이다. */
+  spawnedModel?: string;
+  /** 지정 모델이 CLI 버전가드에 걸려 폴백했을 때의 사유 코드. */
+  modelFallbackReason?: string;
 }
 
 // dispatch:decision fields that get folded into the `metadata` JSON column.
@@ -4566,6 +4571,10 @@ const DISPATCH_DECISION_META_KEYS = [
   "modelSelectionMode",
   "perModelScores",
   "agentScore",
+  // ★이 목록은 화이트리스트다 — 여기 없는 필드는 metadata 에 접히지 않고 조용히
+  // 사라진다. P2-3 의 model@effort 기록이 BigQuery 까지 살아 가려면 반드시 등재.
+  "spawnedModel",
+  "modelFallbackReason",
 ] as const;
 
 /**

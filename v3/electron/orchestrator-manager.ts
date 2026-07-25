@@ -267,6 +267,16 @@ export interface OrchestratorSession {
 
 export interface OrchestratorLaunchOptions {
   modelOverride?: ModelType;
+  /**
+   * claude 오케를 띄울 **구체 모델 id**(`--model` 값). 모델 셀렉터가 Claude 변형
+   * (Fable 5 / Opus 4.8 …)을 고르면 채워진다. undefined 면 종전대로 플래그 없이
+   * 떠서 CLI 기본 모델을 상속한다 — 즉 기존 경로는 바이트 동일하다.
+   *
+   * 호출자(main.ts)가 이미 버전가드(`resolveClaudeModelPinned`)를 통과시킨 값을
+   * 넘긴다. 여기서 다시 검증하지 않는 이유는 폴백 로그가 두 번 찍히지 않게 하기
+   * 위해서다.
+   */
+  claudeModelOverride?: string;
   handoffPrompt?: string;
   handoffMode?: "wait" | "takeover";
 }
@@ -780,6 +790,12 @@ export class OrchestratorManager {
       undefined,
       projectId,
       nonClaudeResumeSessionId,
+      // pinClaudeSession: 오케는 자기 세션 수명을 직접 관리한다(종전 기본값 유지).
+      false,
+      // complexity: 오케는 난도 티어를 타지 않는다(종전대로 미지정).
+      undefined,
+      // 모델 셀렉터가 고른 Claude 변형. 미지정이면 --model 자체가 안 붙는다.
+      { claudeModel: launchOptions?.claudeModelOverride },
     );
 
     // ── YOLO(권한 스킵) 보장 ────────────────────────────────────────────

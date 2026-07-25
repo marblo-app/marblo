@@ -97,6 +97,11 @@ import {
   resolveAllHarnessVersions,
   preflightNodeSpawn,
 } from "./agent-config";
+import {
+  splitOrchestratorModelValue,
+  orchestratorModelValue,
+  resolveModelPin,
+} from "./model-selection";
 import { CostTracker } from "./cost-tracker";
 import { getAccountRateLimits } from "./account-usage";
 import { mainTelemetry } from "./telemetry";
@@ -3206,21 +3211,55 @@ if (savedPreset) process.env.MARBLO_MODEL_PRESET = savedPreset;
 const INITIAL_ORCHESTRATOR_MODEL_ENV =
   process.env.MARBLO_ORCHESTRATOR_MODEL?.trim() || "";
 
+/**
+ * 오케 모델 설정값을 정규화한다. 값은 `provider[:modelId]` compound 다
+ * ("claude", "codex", "claude:claude-fable-5").
+ *
+ * ★모델 접미는 레지스트리에 있는 것만 살아남는다 — 오타나 옛 빌드가 저장한 미지
+ * 모델은 접미만 버리고 프로바이더로 강등된다(spawn 이 깨지지 않게).
+ * 접미 없는 값의 결과는 종전과 완전히 동일하므로 기존 저장값이 그대로 유효하다.
+ */
 function normalizeOrchestratorModelSetting(value: unknown): string {
-  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (!raw) return "claude";
-  if (raw === "gpt") return "codex";
-  if (raw === "claude" || raw === "codex" || raw === "antigravity") {
-    return raw;
+  const input = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!input) return "claude";
+  const { provider: rawProvider, modelId } = splitOrchestratorModelValue(input);
+  const provider = rawProvider === "gpt" ? "codex" : rawProvider;
+  if (
+    provider !== "claude" &&
+    provider !== "codex" &&
+    provider !== "antigravity"
+  ) {
+    return "claude";
   }
-  return "claude";
+  // 모델 핀은 claude 축에만 있다(codex 모델 변형은 별건).
+  if (provider === "claude" && modelId) {
+    return orchestratorModelValue(provider, modelId);
+  }
+  return provider;
 }
 
 function normalizeOrchestratorModelType(value: unknown): ModelType {
-  const normalized = normalizeOrchestratorModelSetting(value);
-  if (normalized === "codex") return "gpt";
-  if (normalized === "antigravity") return "antigravity";
+  const { provider } = splitOrchestratorModelValue(
+    normalizeOrchestratorModelSetting(value),
+  );
+  if (provider === "codex") return "gpt";
+  if (provider === "antigravity") return "antigravity";
   return "claude";
+}
+
+/**
+ * 이 설정값이 요구하는 claude `--model` 핀. 없으면 undefined(=CLI 기본 모델).
+ *
+ * ★버전가드를 여기서 태운다 — 셀렉터에서 고른 모델이 설치된 CLI 의 검증 범위 밖
+ * 이면 `resolveClaudeModelPinned` 이 opus 로 떨어뜨리고 구조화 로그를 남긴다.
+ * 오케가 안 뜨는 것보다 한 단계 낮은 모델로 뜨는 편이 낫다(§8.3 불변식).
+ */
+function orchestratorClaudeModelPin(value: unknown): string | undefined {
+  const { provider, modelId } = splitOrchestratorModelValue(
+    normalizeOrchestratorModelSetting(value),
+  );
+  if (provider !== "claude" || !modelId) return undefined;
+  return resolveModelPin(modelId)?.claudeModel;
 }
 
 /** 프로젝트별 저장 모델 (없으면 null). 반환값은 정규화된 설정 문자열. */
@@ -3264,7 +3303,13 @@ function applyOrchestratorModelEnvForProject(
       readAppState().orchestratorModel,
     ),
   });
-  process.env.MARBLO_ORCHESTRATOR_MODEL = effective;
+  // ★env 에는 **프로바이더만** 넣는다. `resolveOrchestratorModel()`(agent-config)이
+  // 이 env 를 ModelType 으로만 읽기 때문에, compound("claude:claude-fable-5")를
+  // 그대로 쓰면 미지값 → claude 폴백이 되면서 모델 핀이 조용히 사라진다. 모델 핀은
+  // env 가 아니라 launch 옵션(claudeModelOverride)으로 따로 전달된다. 이 분리 덕에
+  // resolveOrchestratorModel 은 한 글자도 바뀌지 않는다(재시작 연속성·핸드오프 회귀 0).
+  process.env.MARBLO_ORCHESTRATOR_MODEL =
+    splitOrchestratorModelValue(effective).provider;
   return effective;
 }
 
@@ -5749,6 +5794,12 @@ ipcMain.handle(
     const resolvedRootPath =
       rawArgs.rootPath === "~" ? os.homedir() : rawArgs.rootPath;
     const targetModel = normalizeOrchestratorModelType(rawArgs.targetModel);
+    // 셀렉터가 Claude 변형으로 스위치했으면 그 구체 모델을 새 오케에 핀한다.
+    // compound 를 통째로 보존해야 재시작 연속성이 변형까지 기억한다.
+    const targetModelSetting = normalizeOrchestratorModelSetting(
+      rawArgs.targetModel,
+    );
+    const targetClaudeModel = orchestratorClaudeModelPin(targetModelSetting);
     const args: OrchestratorSwitchArgs = {
       projectId,
       rootPath: resolvedRootPath,
@@ -5825,12 +5876,15 @@ ipcMain.handle(
           undefined,
           {
             modelOverride: targetModel,
+            claudeModelOverride: targetClaudeModel,
             handoffPrompt,
             handoffMode: switchArgs.mode,
           },
         );
         // 스위치로 모델이 바뀌면 이 프로젝트의 재시작 연속성도 새 모델을 따른다.
-        saveProjectOrchestratorModel(projectId, targetModel);
+        // ★compound 를 저장한다 — 프로바이더만 저장하면 Claude 변형 선택이 다음
+        // 재시작에서 사라진다.
+        saveProjectOrchestratorModel(projectId, targetModelSetting);
         return {
           sessionId: session.sessionId,
           ptySessionId: session.ptySessionId,
@@ -5900,11 +5954,16 @@ ipcMain.handle(
     // 모델 결정: 명시 요청(패널 Start) > 프로젝트별 저장(재시작 연속성) > 전역.
     // 전역값만 쓰면 마지막으로 만진 프로젝트의 모델이 다른 프로젝트의 재시작에
     // 적용돼 claude 대화를 가진 프로젝트가 codex fresh 로 부팅된다(라이브 사고).
-    applyOrchestratorModelEnvForProject(
+    const effectiveModelSetting = applyOrchestratorModelEnvForProject(
       projectId,
       typeof model === "string" ? model : undefined,
     );
     const orchestratorModel = resolveOrchestratorModel();
+    // 셀렉터가 Claude 변형을 골랐으면 그 구체 모델을 `--model` 로 핀한다. 미지정
+    // (프로바이더만 고름)이면 undefined → 종전대로 CLI 기본 모델을 상속한다.
+    const orchestratorClaudeModel = orchestratorClaudeModelPin(
+      effectiveModelSetting,
+    );
 
     // Pre-spawn auth gate. If the selected CLI is not installed / logged in,
     // DON'T spawn it into an interactive login
@@ -5973,12 +6032,17 @@ ipcMain.handle(
       undefined,
       // env 는 전역이라 동시 다중 창 launch 가 서로의 모델을 덮을 수 있다 —
       // 이 launch 가 결정한 모델을 명시적으로 고정한다.
-      { modelOverride: orchestratorModel },
+      {
+        modelOverride: orchestratorModel,
+        claudeModelOverride: orchestratorClaudeModel,
+      },
     );
 
     // 재시작 연속성: 이 프로젝트 오케가 실제로 뜬 모델을 기록. 다음 앱 재시작의
     // auto-reconnect(모델 미명시)는 전역 대신 이 값을 따른다.
-    saveProjectOrchestratorModel(projectId, orchestratorModel);
+    // ★compound 를 통째로 저장한다 — 프로바이더만 저장하면 재시작 때 Claude 변형
+    // 선택이 사라져 CLI 기본 모델로 조용히 되돌아간다.
+    saveProjectOrchestratorModel(projectId, effectiveModelSetting);
 
     return {
       sessionId: session.sessionId,

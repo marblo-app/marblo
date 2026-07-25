@@ -3619,9 +3619,26 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Preferred model hint (claude/codex/antigravity). 'codex' and 'gpt' " +
-            "both map to the OpenAI Codex CLI. When set, this model is forced " +
-            "over tag scoring.",
+          "모델 지정. 두 층위를 다 받는다. (1) 프로바이더만: 'claude' | 'codex' " +
+            "| 'gpt' | 'antigravity' — 'codex'와 'gpt'는 같은 Codex CLI. 이때는 " +
+            "구체 모델을 그 벤더의 난도별 티어 정책이 고른다. (2) 구체 모델: " +
+            "'opus'/'opus5'/'fable'/'sonnet'/'haiku' 같은 별칭이나 " +
+            "'claude-opus-4-8'/'gpt-5.6-terra' 같은 구체 id. 표기는 느슨해도 " +
+            "된다('opus 4.8'='opus4.8'='claude-opus-4-8'). 'gpt-5.6-terra@xhigh' " +
+            "처럼 @로 effort를 함께 줄 수도 있다. 어느 쪽이든 지정하면 태그 " +
+            "스코어링을 우회한다. ★유효한 모델은 서버의 모델 레지스트리가 단일 " +
+            "소스이며 CLI 실측으로 검증된 것만 등록돼 있다 — 목록에 없는 id는 " +
+            "무시되고 기존 스코어링으로 폴백한다(추측 스폰 없음). 설치된 CLI가 " +
+            "그 모델을 검증한 범위 밖이면 안전 모델로 폴백하고 스폰은 성공한다.",
+        ),
+      effort: z
+        .string()
+        .optional()
+        .describe(
+          "reasoning effort (low/medium/high/xhigh/max/ultra). Codex 계열만 " +
+            "effort 축이 있고 Claude에는 없다(지정해도 무시). 모델별 지원 " +
+            "목록에 없는 값도 무시된다 — 모델 지정 자체는 그대로 살아 있다. " +
+            "model에 '@effort'가 이미 있으면 그쪽이 우선한다.",
         ),
       name: z.string().optional().describe("Agent name hint"),
       cwd: z.string().optional().describe("Working directory"),
@@ -3686,6 +3703,7 @@ export function registerTools(server: McpServer): void {
       task_id,
       complexity,
       model,
+      effort,
       name,
       cwd,
       skills,
@@ -3873,6 +3891,7 @@ export function registerTools(server: McpServer): void {
               taskId: dispatchTaskId,
               complexity: complexity || "standard",
               model,
+              effort,
               nameHint: name,
               cwd,
               skills,
@@ -3897,6 +3916,8 @@ export function registerTools(server: McpServer): void {
           agentName?: string;
           agentRole?: string;
           model?: string;
+          /** 실제로 스폰된 구체 모델·effort. `model`(프로바이더)과 별개 축. */
+          spawnedModel?: string;
           score?: number;
           reason?: string;
           error?: string;
@@ -3988,6 +4009,9 @@ export function registerTools(server: McpServer): void {
         if (result.agentName) lines.push(`  Agent Name: ${result.agentName}`);
         if (result.agentRole) lines.push(`  Agent Role: ${result.agentRole}`);
         if (result.model) lines.push(`  Model: ${result.model}`);
+        // 실제 스폰된 구체 모델. 지정과 다르면(버전가드 폴백, reuse) 여기서 드러난다.
+        if (result.spawnedModel)
+          lines.push(`  Spawned model: ${result.spawnedModel}`);
         if (result.score !== undefined) lines.push(`  Score: ${result.score}`);
         if (dispatchTaskId) lines.push(`  Task ID: ${dispatchTaskId}`);
         if (result.companionAgentId)

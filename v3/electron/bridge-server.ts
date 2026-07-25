@@ -5,6 +5,7 @@ import os from "os";
 import path from "path";
 import {
   AgentManager,
+  formatModelAtEffort,
   type AgentInstance,
   type AgentStatus,
   type ModelType,
@@ -31,7 +32,11 @@ import {
   type GraphContext,
 } from "./routing-graph";
 import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
-import { resolveTopClaudeModelDetailed } from "./agent-config";
+import {
+  resolveTopClaudeModelDetailed,
+  type LaunchModelPin,
+} from "./agent-config";
+import { resolveModelPin, type ResolvedModelPin } from "./model-selection";
 import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
 import type { RateLimitInfo } from "./session-parsers";
 import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
@@ -182,6 +187,9 @@ export interface SpawnAgentRequest {
   complexity?: "simple" | "standard" | "complex";
   /** Short routing decision reason retained for lifecycle outcome telemetry. */
   dispatchReason?: string;
+  /** 명시 모델 핀(`model@effort` 해석 결과). 설정된 축은 complexity 티어 정책을
+   * 덮는다. claude 축은 이미 버전가드를 통과한 값이 들어온다. */
+  modelPin?: LaunchModelPin;
 }
 
 interface SpawnAgentResponse {
@@ -500,6 +508,22 @@ function taskAgentFirstActivityGraceMs(): number {
   );
 }
 
+/**
+ * `model` 과 별도로 온 `effort` 를 하나의 `model@effort` 스펙 문자열로 합친다.
+ * `model` 이 이미 `@` 를 달고 있으면 그쪽이 이긴다 — 한 요청 안에서 두 표기가
+ * 충돌할 때 더 구체적인(모델에 직접 붙은) 쪽을 신뢰한다.
+ */
+function joinModelAndEffort(
+  model?: string,
+  effort?: string,
+): string | undefined {
+  const m = (model ?? "").trim();
+  const e = (effort ?? "").trim();
+  if (!m) return undefined;
+  if (!e || m.includes("@")) return m;
+  return `${m}@${e}`;
+}
+
 export interface DispatchTaskRequest {
   role: string;
   instruction: string;
@@ -507,7 +531,18 @@ export interface DispatchTaskRequest {
   /** Caller MCP context. Used to keep board dispatches from reusing lane agents. */
   contextId?: string;
   complexity?: "simple" | "standard" | "complex";
-  model?: ModelType;
+  /**
+   * 모델 힌트. 두 층위를 다 받는다 —
+   *   프로바이더: "claude" | "codex" | "gpt" | "agy" …  (기존 동작)
+   *   구체 모델:  "opus5" | "fable" | "gpt-5.6-terra" | "gpt-5.6-terra@max"
+   * ★타입이 ModelType 이 아니라 string 인 것은 의도다. 종전 시그니처는 프로바이더만
+   * 표현할 수 있어서 구체 모델 지정이 타입 레벨에서부터 불가능했다. 해석은
+   * `resolveModelPin`(model-selection) 이 레지스트리를 경유해 한다.
+   */
+  model?: string;
+  /** `model` 과 분리해 준 reasoning effort(예: "xhigh"). `model` 에 `@effort` 가
+   * 이미 있으면 그쪽이 이긴다. effort 축이 없는 모델(claude)에선 무시된다. */
+  effort?: string;
   enabledModels?: ModelType[];
   nameHint?: string;
   cwd?: string;
@@ -573,7 +608,12 @@ export interface DispatchTaskResponse {
   /** Actual registered role of the selected agent. May differ from task role
    * when routing to an already-bound or manually reused agent. */
   agentRole?: string;
+  /** 프로바이더(claude/gpt/…). "어느 CLI 로 떴나". */
   model?: string;
+  /** ★실제로 스폰된 구체 모델·effort("claude-opus-5", "gpt-5.6-terra@max").
+   * `model` 이 프로바이더까지만 말하므로 별개 축이다. 모델을 핀하지 않은 스폰
+   * (CLI 기본 모델)에서는 undefined — 지어내지 않는다. */
+  spawnedModel?: string;
   score?: number;
   reason?: string;
   error?: string;
@@ -1930,11 +1970,44 @@ export class BridgeServer {
     // request matches the right agents during reuse scoring AND spawns the
     // right CLI. undefined (no/unknown hint) falls through to tag scoring.
     const requiresTrackedModel = dispatchRequiresTrackedModel(params);
-    const requestedModel = normalizeModel(params.model);
+    // 두 축을 함께 해석한다. `model` 은 프로바이더(어느 CLI 냐), `modelPin` 은
+    // 그 안에서의 구체 모델·effort 다.
+    //
+    // ★여기가 이 티켓의 결함 지점이었다. 종전엔 normalizeModel() 만 불렀는데 그
+    // 함수는 프로바이더까지만 접으므로 `model:"fable"` 이 undefined 가 되어 지정이
+    // **조용히 사라지고** 태그 스코어링으로 폴백했다. resolveModelPin 은 레지스트리를
+    // 경유해 'fable'·'opus5'·'gpt-5.6-terra@max' 를 구체 id 로 해석하고, 프로바이더는
+    // 그 항목에서 파생한다. 프로바이더만 말한 기존 호출("codex")은 modelId 없이
+    // 그대로 통과하므로 동작이 바뀌지 않는다.
+    const modelSpecInput = joinModelAndEffort(params.model, params.effort);
+    const resolvedPin = resolveModelPin(modelSpecInput);
+    const requestedModel =
+      resolvedPin?.provider ?? normalizeModel(params.model);
     const model =
       requiresTrackedModel && requestedModel === "antigravity"
         ? undefined
         : requestedModel;
+    // 프로바이더가 무시된 경우(antigravity 트래킹 요구)엔 모델 핀도 함께 버린다 —
+    // 다른 프로바이더로 라우팅되는데 그쪽 CLI 에 없는 모델 id 를 넘기면 안 된다.
+    const modelPin: LaunchModelPin | undefined =
+      model && resolvedPin && resolvedPin.provider === model
+        ? {
+            claudeModel: resolvedPin.claudeModel,
+            codexModel: resolvedPin.codexModel,
+            codexEffort: resolvedPin.codexEffort,
+          }
+        : undefined;
+    if (resolvedPin?.fallback) {
+      // 폴백 자체의 구조화 로그는 agent-config 이 이미 남겼다. 여기선 dispatch
+      // 맥락(어느 태스크였는지)을 붙여 한 줄 더 남긴다.
+      console.warn("[BridgeServer] 지정 모델 폴백", {
+        taskId: params.taskId ?? null,
+        requested: resolvedPin.fallback.requested,
+        installed: resolvedPin.fallback.installed,
+        fallbackTo: resolvedPin.fallback.fallbackTo,
+        reason: resolvedPin.fallback.reason,
+      });
+    }
 
     // P4-1 — 스킬 게이트. 지정 스킬이 대상 벤더에 실제로 설치돼 있는지 디스크로
     // 확인하고, 없으면 스폰하지 않고 즉시 실패한다(오타 `/seo-geo-optimization`
@@ -2151,6 +2224,13 @@ export class BridgeServer {
         reuseVsSpawn: "reuse",
         explicitModel: !!model,
         agentScore: candidate.score,
+        // ★P2-3 — reuse 는 **이미 떠 있는** 프로세스를 쓴다. 그래서 이번 요청의
+        // 모델 핀이 아니라 그 에이전트가 실제로 떠 있는 모델을 기록해야 한다.
+        // 요청값을 적으면 그래프가 "opus5 로 돌았다"고 배우지만 실제로는 그
+        // 프로세스가 sonnet 일 수 있다.
+        spawnedModel: formatModelAtEffort(
+          this.agentManager.getSpawnedModel(fullAgent.id),
+        ),
       });
       return {
         success: true,
@@ -2159,6 +2239,11 @@ export class BridgeServer {
         agentName: candidate.agent.name,
         agentRole: fullAgent.role,
         model: candidate.agent.model,
+        // reuse 는 이미 떠 있는 프로세스 — 이번 요청의 모델 핀이 아니라 그 프로세스의
+        // 실제 모델을 돌려준다. 지정과 다를 수 있고, 그 사실이 보여야 한다.
+        spawnedModel: formatModelAtEffort(
+          this.agentManager.getSpawnedModel(fullAgent.id),
+        ),
         score: candidate.score,
         reason: candidate.reason,
         taskId: params.taskId ?? null,
@@ -2226,6 +2311,12 @@ export class BridgeServer {
           reuseVsSpawn: "restart",
           explicitModel: !!model,
           agentScore: best.score,
+          // ★P2-3 — restart 는 그 에이전트의 기존 launch 설정을 그대로 재사용한다
+          // (agentManager.restart 는 새 모델 핀을 받지 않는다). 그래서 재시작된
+          // 프로세스의 실제 argv 를 읽는다.
+          spawnedModel: formatModelAtEffort(
+            this.agentManager.getSpawnedModel(restarted.id),
+          ),
         });
         return {
           success: true,
@@ -2234,6 +2325,9 @@ export class BridgeServer {
           agentName: best.agent.name,
           agentRole: restarted.role,
           model: best.agent.model,
+          spawnedModel: formatModelAtEffort(
+            this.agentManager.getSpawnedModel(restarted.id),
+          ),
           score: best.score,
           reason: best.reason,
           taskId: params.taskId ?? null,
@@ -2382,6 +2476,8 @@ export class BridgeServer {
       system: params.system,
       // complexity → claude(--model)·codex(reasoning) 모델/레벨 선택.
       complexity,
+      // 명시 모델 핀이 있으면 그것이 complexity 티어를 덮는다(버전가드 통과 후 값).
+      modelPin,
       dispatchReason: spawnDecisionReason,
     });
 
@@ -2435,6 +2531,11 @@ export class BridgeServer {
       decisionReason: spawnDecisionReason,
       reuseVsSpawn: "spawn",
       explicitModel: !!model,
+      // ★P2-3 — 방금 만든 argv 를 되읽어 "실제로 뭘로 떴는지" 를 박는다.
+      spawnedModel: formatModelAtEffort(
+        this.agentManager.getSpawnedModel(spawnResult.agentId!),
+      ),
+      modelFallbackReason: resolvedPin?.fallback?.reason,
     });
     // §8.1 폴백 사용자 표식 — complex claude 가 최상위 모델 resolver 를 탔는데
     // 버전가드/미지모델로 폴백됐으면 dispatch 응답에 표시(사용자가 왜 최상위가
@@ -2450,6 +2551,14 @@ export class BridgeServer {
           ` → ${f.fallbackTo}`;
       }
     }
+    // 지정 모델이 버전가드로 폴백했으면 응답에도 남긴다 — 오케가 "왜 요청한
+    // 모델이 아닌지" 를 즉시 볼 수 있어야 조용한 강등이 되지 않는다.
+    const pinFallbackNote = resolvedPin?.fallback
+      ? ` | ⚠️ 지정모델 폴백: ${resolvedPin.fallback.requested}` +
+        ` (installed=${resolvedPin.fallback.installed}` +
+        `${resolvedPin.fallback.required ? ` < ${resolvedPin.fallback.required}` : ""})` +
+        ` → ${resolvedPin.fallback.fallbackTo}`
+      : "";
     return {
       success: true,
       action: "spawned",
@@ -2457,8 +2566,11 @@ export class BridgeServer {
       agentName,
       agentRole: role,
       model: selectedModel,
+      spawnedModel: formatModelAtEffort(
+        this.agentManager.getSpawnedModel(spawnResult.agentId!),
+      ),
       score: 0,
-      reason: `No reusable agent found. Spawned new ${selectedModel} agent '${agentName}'${topModelNote}`,
+      reason: `No reusable agent found. Spawned new ${selectedModel} agent '${agentName}'${topModelNote}${pinFallbackNote}`,
       taskId: resolvedTaskId,
     };
   }
@@ -2868,6 +2980,10 @@ export class BridgeServer {
       projectId: params.projectId,
       complexity: params.complexity,
       contextId: params.contextId,
+      // 명시 모델 핀(§P2-3). 미설정 축은 complexity 티어 정책이 그대로 채운다.
+      claudeModelOverride: params.modelPin?.claudeModel,
+      codexModelOverride: params.modelPin?.codexModel,
+      codexEffortOverride: params.modelPin?.codexEffort,
       onPtyReady: (sid) => {
         if (this.agentSpawnedHook) {
           this.agentSpawnedHook({

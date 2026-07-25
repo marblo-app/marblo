@@ -20,7 +20,11 @@ import {
   type DispatchTaskRequest,
   type SpawnAgentRequest,
 } from "../../electron/bridge-server";
-import type { AgentInstance, AgentStatus } from "../../electron/agent-manager";
+import {
+  spawnedModelFromArgs,
+  type AgentInstance,
+  type AgentStatus,
+} from "../../electron/agent-manager";
 
 // ── Fakes ───────────────────────────────────────────────────
 
@@ -79,6 +83,15 @@ class FakeAgentManager {
 
   getAgent(id: string): AgentInstance | null {
     return this.agents.get(id) ?? null;
+  }
+
+  /** 실제 매니저처럼 launchConfig.args 에서 스폰된 모델을 되읽는다(§P2-3).
+   *  이 fake 는 launchConfig 를 세우지 않는 시드가 대부분이라 대개 {} 다 —
+   *  dispatch:decision 의 spawnedModel 이 그때 undefined 로 남는 것이 정상이다. */
+  getSpawnedModel(id: string): { modelId?: string; effort?: string } | null {
+    const agent = this.agents.get(id);
+    if (!agent?.launchConfig) return null;
+    return spawnedModelFromArgs(agent.model, agent.launchConfig.args);
   }
 
   getAgentByName(name: string): AgentInstance | null {

@@ -27,7 +27,11 @@ import {
   BridgeServer,
   type DispatchTaskRequest,
 } from "../../electron/bridge-server";
-import type { AgentInstance, AgentStatus } from "../../electron/agent-manager";
+import {
+  spawnedModelFromArgs,
+  type AgentInstance,
+  type AgentStatus,
+} from "../../electron/agent-manager";
 import { clearSkillRegistryCache } from "../../electron/mcp-server/skill-registry";
 
 // 실 usage 프로브(claude/codex CLI 서브프로세스)는 이 테스트의 관심사가 아니고
@@ -128,6 +132,12 @@ class FakeAgentManager {
   }
   getAgent(id: string): AgentInstance | null {
     return this.agents.get(id) ?? null;
+  }
+  /** §P2-3 — 실제 매니저처럼 launchConfig.args 에서 스폰 모델을 되읽는다. */
+  getSpawnedModel(id: string): { modelId?: string; effort?: string } | null {
+    const agent = this.agents.get(id);
+    if (!agent?.launchConfig) return null;
+    return spawnedModelFromArgs(agent.model, agent.launchConfig.args);
   }
   getAgentByName(name: string): AgentInstance | null {
     return this.listAgents().find((a) => a.name === name) ?? null;

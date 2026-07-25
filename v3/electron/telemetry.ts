@@ -296,6 +296,9 @@ export const mainTelemetry = {
       modelSelectionMode: payload.modelSelectionMode,
       perModelScores: payload.perModelScores,
       agentScore: payload.agentScore,
+      // ★P2-3 — 실제 스폰된 model@effort. 후속 지식그래프가 이 축으로 학습한다.
+      spawnedModel: payload.spawnedModel,
+      modelFallbackReason: payload.modelFallbackReason,
     });
   },
 };
@@ -333,6 +336,22 @@ export interface DispatchDecisionPayload {
   reuseVsSpawn: "reuse" | "restart" | "spawn";
   /** 사용자/오케가 모델을 명시했는지(명시 시 점수경쟁 우회). */
   explicitModel: boolean;
+  /**
+   * ★P2-3 — **실제로 스폰된** 구체 모델·effort(`claude-opus-5`,
+   * `gpt-5.6-terra@max`). `selectedModel` 이 프로바이더(claude/gpt)까지만 말하는
+   * 반면 이 필드는 CLI 에 실제로 넘어간 argv 를 되읽은 값이다.
+   *
+   * 왜 따로 있나: 요청과 실제는 갈릴 수 있다(버전가드 폴백, 런타임 강등, 티어
+   * 정책). 비용대비효과를 학습하는 라우팅 지식그래프(티켓 8wBiVzwI)가 이 값을
+   * 소비하므로, 요청값을 사실로 착각하면 잘못된 (모델 × 결과) 사전확률로 수렴한다.
+   *
+   * undefined = 모델을 핀하지 않은 launch(CLI 기본 모델). 그 경우 "무엇이 떴는지"
+   * 를 우리가 알 수 없으므로 지어내지 않고 비운다.
+   */
+  spawnedModel?: string;
+  /** 지정 모델이 버전가드에 걸려 폴백했을 때의 사유 코드(폴백 없으면 undefined).
+   * 이게 채워져 있으면 spawnedModel 은 요청한 모델이 아니라 폴백된 모델이다. */
+  modelFallbackReason?: string;
   /** reuse/restart 경로에서 선택된 기존 에이전트의 매칭 점수. */
   agentScore?: number;
 }

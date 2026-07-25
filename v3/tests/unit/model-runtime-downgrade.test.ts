@@ -82,10 +82,14 @@ vi.mock("../../electron/agent-config", () => ({
   FALLBACK_TOP_CLAUDE_MODEL: "opus",
   AgentConfigGenerator: class {
     // launch() calls: getLaunchConfig(agent, cwd, prompt, projectId, resume,
-    // pin, complexity, claudeModelOverride). args[6]=complexity, [7]=override.
+    // pinSession, complexity, modelPin, contextId).
+    // args[6]=complexity, [7]=modelPin{claudeModel,codexModel,codexEffort}.
+    // ★[7] 은 예전엔 claudeModelOverride 문자열이었다 — codex 축(모델+effort)이
+    // 생기면서 객체로 일반화됐다. claude 모델 핀은 이제 그 안의 한 필드다.
     getLaunchConfig(...args: unknown[]) {
       const complexity = args[6] as string | undefined;
-      const override = args[7] as string | undefined;
+      const override = (args[7] as { claudeModel?: string } | undefined)
+        ?.claudeModel;
       launchConfigCalls.push({ complexity, override });
       // complex claude with no override → resolver picked Fable5 (no fallback).
       // override path (downgrade) → no resolution meta (mirrors real code).
