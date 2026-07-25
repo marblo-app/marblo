@@ -94,6 +94,13 @@ import {
   type SpoolNotice,
   type SpoolRecord,
 } from "./ledger-spool.js";
+import {
+  evaluateMergeCloseout,
+  parsePrNumber,
+  branchMatchesTask,
+  type MergeState,
+  type MergeVerdict,
+} from "./merge-closeout.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -618,6 +625,340 @@ function formatAgentIdAsTaskIdError(id: string, agent: AgentIdHint): string {
 
 function text(t: string) {
   return { content: [{ type: "text" as const, text: t }] };
+}
+
+/**
+ * Resolve every task that depends on a just-completed task (atomic, idempotent
+ * — N4). Extracted from update_task_status so `merge_and_close` reaches DONE
+ * through the exact same dependency-gate path: a DONE that skips this leaves
+ * dependents pinned at dependsOnCompleted=false forever (the edge-trigger
+ * sticking bug, PR#507), which is precisely the "ticket looks handled but the
+ * board is wrong" failure this tool exists to stop.
+ *
+ * The per-dependent flip runs inside a transaction (resolveDependentIfReady)
+ * that re-checks the flag and all upstream statuses atomically, so two
+ * dependencies completing concurrently cannot both observe a stale false and
+ * double-notify the orchestrator (-> duplicate dispatch of the same task). Each
+ * dependent is isolated in its own try/catch so one transient failure does not
+ * strand the rest. notify fires only for the transaction that actually
+ * performed the flip -> exactly once per unblocked task.
+ *
+ * @returns how many dependents this call unblocked.
+ */
+async function resolveDependentsAfterDone(
+  taskId: string,
+  contextId: string,
+): Promise<number> {
+  let depDocs: Array<{ id: string }> = [];
+  try {
+    const depQ = query(
+      collection(db, "tasks"),
+      where("dependsOn", "array-contains", taskId),
+    );
+    depDocs = (await getDocs(depQ)).docs;
+  } catch (err) {
+    console.error("[MCP] Dependency query error:", err);
+  }
+
+  let unblocked = 0;
+  for (const depDoc of depDocs) {
+    try {
+      const res = await resolveDependentIfReady(db, depDoc.id, taskId);
+      if (res.unblocked) {
+        unblocked++;
+        // Notify orchestrator about newly unblocked task. Scope to the
+        // completed task's context — a mission's dependents share its
+        // contextId, so this routes to the same (mission/board) orch.
+        // Lane dependents stay silent (P4): a Quick Lane's readiness is
+        // not an orch wake event — board orch picks lane work up via the
+        // board card, not a PTY inject.
+        if (!isLaneContextId(contextId)) {
+          notifyOrchestrator(
+            `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`,
+            contextId,
+          );
+        }
+      }
+    } catch (err) {
+      console.error(`[MCP] Dependency resolution error for ${depDoc.id}:`, err);
+    }
+  }
+  return unblocked;
+}
+
+// ── merge_and_close: gh merge-state resolution ───────────────
+//
+// The merge fact is read from `gh`, NOT from git ancestry. Both merge paths in
+// this product squash (GitHub's squash-merge and the app's own
+// squashMergeToBase), and a squash creates a NEW commit on base — the branch's
+// commits never become ancestors of base. So `git rev-list base..HEAD == 0`
+// (WorktreeManager.isMergedIntoBase / reap's `requireMerged`) reports "not
+// merged" for every squash-merged PR, forever. gh is the only source that
+// actually knows.
+
+interface GhRun {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Run `gh` with a hard timeout. Never throws — a missing/failing gh resolves
+ *  to a non-zero code so the caller degrades to an explicit UNKNOWN. */
+function runGh(
+  args: string[],
+  cwd: string,
+  timeoutMs = 20_000,
+): Promise<GhRun> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("gh", args, {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: process.env,
+      });
+    } catch (e) {
+      resolve({
+        code: -1,
+        stdout: "",
+        stderr: e instanceof Error ? e.message : String(e),
+      });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const done = (r: GhRun) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+      done({ code: -1, stdout, stderr: `gh timed out after ${timeoutMs}ms` });
+    }, timeoutMs);
+    child.stdout?.on("data", (d) => {
+      stdout += String(d);
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += String(d);
+    });
+    child.on("error", (e) =>
+      done({ code: -1, stdout, stderr: e.message || String(e) }),
+    );
+    child.on("close", (code) => done({ code: code ?? -1, stdout, stderr }));
+  });
+}
+
+/** A directory inside the repo for gh to resolve the remote from. The MCP
+ *  process's own cwd is the agent's worktree, which may already be gone (the
+ *  app tears it down on merge) — fall back through the known candidates. */
+function ghWorkingDir(): string {
+  const candidates = [
+    process.env.MARBLO_PROJECT_ROOT,
+    process.cwd(),
+    os.homedir(),
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return os.homedir();
+}
+
+interface GhPrRow {
+  number?: number;
+  state?: string;
+  url?: string;
+  mergedAt?: string | null;
+  mergeStateStatus?: string;
+  headRefName?: string;
+}
+
+const PR_JSON_FIELDS = "number,state,url,mergedAt,mergeStateStatus,headRefName";
+
+function toMergeVerdict(row: GhPrRow): MergeVerdict {
+  const raw = (row.state ?? "").toUpperCase();
+  // gh reports MERGED/OPEN/CLOSED. `mergedAt` is the belt-and-braces check: a
+  // PR is only MERGED if GitHub stamped a merge time.
+  const state: MergeState =
+    raw === "MERGED" && row.mergedAt
+      ? "MERGED"
+      : raw === "OPEN"
+        ? "OPEN"
+        : raw === "CLOSED"
+          ? "CLOSED"
+          : "UNKNOWN";
+  const verdict: MergeVerdict = { state };
+  if (typeof row.number === "number") verdict.prNumber = row.number;
+  if (row.url) verdict.url = row.url;
+  if (row.mergeStateStatus) verdict.mergeStateStatus = row.mergeStateStatus;
+  if (raw === "MERGED" && !row.mergedAt) {
+    verdict.detail = "gh 가 MERGED 라고 했지만 mergedAt 이 비어 있다";
+  }
+  return verdict;
+}
+
+/**
+ * Find the PR backing a task and read its merge state. Resolution order:
+ *   1. an explicit pr_number argument
+ *   2. the PR number recorded on the ticket (`prUrl`, set by submit_for_review)
+ *   3. an explicit branch argument
+ *   4. the task's worktree branch, matched by the `-<taskId8>` suffix convention
+ *
+ * Any failure (no gh, not authenticated, no PR found) returns UNKNOWN with a
+ * reason — never a guess. UNKNOWN changes nothing downstream.
+ */
+async function resolveMergeVerdict(args: {
+  taskId: string;
+  prNumber?: number;
+  branch?: string;
+  prUrl?: string;
+}): Promise<MergeVerdict> {
+  const cwd = ghWorkingDir();
+  const parse = <T>(raw: string): T | null => {
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  };
+
+  const number = args.prNumber ?? parsePrNumber(args.prUrl) ?? undefined;
+  if (number) {
+    const res = await runGh(
+      ["pr", "view", String(number), "--json", PR_JSON_FIELDS],
+      cwd,
+    );
+    if (res.code !== 0) {
+      return {
+        state: "UNKNOWN",
+        prNumber: number,
+        detail: `gh pr view 실패: ${res.stderr.trim().split("\n")[0] || `exit ${res.code}`}`,
+      };
+    }
+    const row = parse<GhPrRow>(res.stdout);
+    if (!row)
+      return {
+        state: "UNKNOWN",
+        prNumber: number,
+        detail: "gh 응답 파싱 실패",
+      };
+    return toMergeVerdict(row);
+  }
+
+  if (args.branch) {
+    const res = await runGh(
+      // --state all so an already-merged PR is still found.
+      [
+        "pr",
+        "list",
+        "--head",
+        args.branch,
+        "--state",
+        "all",
+        "--limit",
+        "5",
+        "--json",
+        PR_JSON_FIELDS,
+      ],
+      cwd,
+    );
+    const rows = res.code === 0 ? parse<GhPrRow[]>(res.stdout) : null;
+    if (!rows || rows.length === 0) {
+      return {
+        state: "UNKNOWN",
+        detail: `브랜치 ${args.branch} 에 연결된 PR 을 찾지 못했다`,
+      };
+    }
+    // Prefer a merged PR if the branch was reused across several.
+    const merged = rows.find((r) => (r.state ?? "").toUpperCase() === "MERGED");
+    return toMergeVerdict(merged ?? rows[0]);
+  }
+
+  // Last resort: scan recent PRs for the task's branch-name suffix.
+  const res = await runGh(
+    [
+      "pr",
+      "list",
+      "--state",
+      "all",
+      "--limit",
+      "150",
+      "--json",
+      PR_JSON_FIELDS,
+    ],
+    cwd,
+  );
+  if (res.code !== 0) {
+    return {
+      state: "UNKNOWN",
+      detail: `gh pr list 실패: ${res.stderr.trim().split("\n")[0] || `exit ${res.code}`}`,
+    };
+  }
+  const rows = parse<GhPrRow[]>(res.stdout) ?? [];
+  const hits = rows.filter((r) =>
+    branchMatchesTask(r.headRefName ?? "", args.taskId),
+  );
+  if (hits.length === 0) {
+    return {
+      state: "UNKNOWN",
+      detail:
+        "이 태스크에 연결된 PR 을 찾지 못했다 (prUrl 미기록 + 최근 150건에 브랜치 없음). " +
+        "pr_number 나 branch 를 직접 넘겨라.",
+    };
+  }
+  const merged = hits.find((r) => (r.state ?? "").toUpperCase() === "MERGED");
+  return toMergeVerdict(merged ?? hits[0]);
+}
+
+/** Ask the app (bridge) to reap this task's worktree. The bridge owns repoRoot
+ *  resolution, the live-agent guard, and WorktreeManager's work-loss guard —
+ *  a dirty or unpushed tree is preserved there, never here. */
+async function reapTaskWorktree(
+  taskId: string,
+): Promise<{ removed: boolean; reason: string; path?: string }> {
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  const projectId = process.env.MARBLO_PROJECT;
+  if (!bridgePort || !projectId) {
+    return {
+      removed: false,
+      reason:
+        "브리지 미연결 (MARBLO_BRIDGE_PORT/MARBLO_PROJECT 부재) — 워크트리 정리 생략",
+    };
+  }
+  try {
+    const res = await fetch(`http://127.0.0.1:${bridgePort}/reap-worktree`, {
+      method: "POST",
+      headers: bridgeHeaders({ "Content-Type": "application/json" }),
+      // NOTE: deliberately no `requireMerged`. That flag is a git-ancestry check
+      // which is always false for a squash merge; we have already proven the
+      // merge via gh. The reap's own work-loss guard (dirty / unpushed) still
+      // applies, so nothing can be destroyed by skipping it.
+      body: JSON.stringify({ projectId, taskId }),
+    });
+    const body = (await res.json()) as {
+      removed?: boolean;
+      reason?: string;
+      path?: string;
+      error?: string;
+    };
+    if (body.error) return { removed: false, reason: body.error };
+    return {
+      removed: !!body.removed,
+      reason: body.reason ?? (body.removed ? "removed" : "no reason given"),
+      ...(body.path ? { path: body.path } : {}),
+    };
+  } catch (e) {
+    return {
+      removed: false,
+      reason: `브리지 호출 실패: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
 }
 
 async function fetchAgentRole(agentId: string): Promise<string | null> {
@@ -2151,55 +2492,10 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      // ── Inline dependency resolution (atomic, idempotent — N4) ──
-      // When a task completes, resolve every task that depends on it. The
-      // per-dependent flip (dependsOnCompleted -> true) runs inside a
-      // transaction (resolveDependentIfReady) that re-checks the flag and all
-      // upstream statuses atomically, so two dependencies completing
-      // concurrently cannot both observe a stale false and double-notify the
-      // orchestrator (-> duplicate dispatch of the same task). Each dependent
-      // is isolated in its own try/catch so one transient failure does not
-      // strand the rest. notify fires only for the transaction that actually
-      // performed the flip -> exactly once per unblocked task.
-      let unblocked = 0;
-      if (newStatus === "DONE") {
-        let depDocs: Array<{ id: string }> = [];
-        try {
-          const depQ = query(
-            collection(db, "tasks"),
-            where("dependsOn", "array-contains", task_id),
-          );
-          depDocs = (await getDocs(depQ)).docs;
-        } catch (err) {
-          console.error("[MCP] Dependency query error:", err);
-        }
-
-        for (const depDoc of depDocs) {
-          try {
-            const res = await resolveDependentIfReady(db, depDoc.id, task_id);
-            if (res.unblocked) {
-              unblocked++;
-              // Notify orchestrator about newly unblocked task. Scope to the
-              // completed task's context — a mission's dependents share its
-              // contextId, so this routes to the same (mission/board) orch.
-              // Lane dependents stay silent (P4): a Quick Lane's readiness is
-              // not an orch wake event — board orch picks lane work up via the
-              // board card, not a PTY inject.
-              if (!isLaneContextId(task.contextId)) {
-                notifyOrchestrator(
-                  `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`,
-                  task.contextId,
-                );
-              }
-            }
-          } catch (err) {
-            console.error(
-              `[MCP] Dependency resolution error for ${depDoc.id}:`,
-              err,
-            );
-          }
-        }
-      }
+      const unblocked =
+        newStatus === "DONE"
+          ? await resolveDependentsAfterDone(task_id, task.contextId)
+          : 0;
 
       const unblockedNote =
         unblocked > 0 ? ` Unblocked ${unblocked} dependent task(s).` : "";
@@ -4522,5 +4818,164 @@ export function registerTools(server: McpServer): void {
       return text(lines.join("\n"));
     },
     { userFacing: false },
+  );
+
+  // 34. merge_and_close
+  //
+  // Closes the loop that submit_for_review deliberately leaves open. Today the
+  // ticket flip and the actual merge are two unrelated paths — `gh pr merge`
+  // (orchestrator, via shell) and the app's Merge button both land code without
+  // touching the ticket, so tickets stick at REVIEW and their worktrees stay
+  // registered. Measured on 2026-07-25: 9 merges, 13 REVIEW tickets left behind,
+  // all of them re-read later as "needs merging".
+  //
+  // Covers BOTH merge paths, because it is triggered explicitly rather than
+  // hooked into either one:
+  //   • gh merge  — worktree still on disk → status flip + reap.
+  //   • app merge — worktree:merge already tore the worktree down and wrote
+  //     merge_history, so the reap reports "no worktree for task" and only the
+  //     status flip is left. Idempotent either way.
+  auditedTool(
+    "merge_and_close",
+    "Close out a merged ticket atomically: verify the PR really is merged, flip the ticket to DONE through the normal state machine, and reap its now-stale worktree. Refuses to change anything if the PR is still open or conflicting, and holds the ticket at REVIEW (with a reason) when the ticket says follow-up work is still outstanding — code merged is not the same as work done. Call it right after merging a PR. Pass dry_run=true to see the verdict without writing.",
+    {
+      task_id: z.string().describe("Task ID to close out"),
+      pr_number: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "PR number. Defaults to the PR recorded on the ticket, then to the task's worktree branch.",
+        ),
+      branch: z
+        .string()
+        .optional()
+        .describe("Branch name, if the ticket has no PR URL recorded"),
+      dry_run: z
+        .boolean()
+        .optional()
+        .describe(
+          "Report the verdict without changing anything (default: false)",
+        ),
+    },
+    async ({ task_id, pr_number, branch, dry_run }) => {
+      const task = await fetchTask(task_id);
+      if (!task) return text(`Error: Task ${task_id} not found.`);
+
+      const merge = await resolveMergeVerdict({
+        taskId: task_id,
+        ...(pr_number !== undefined ? { prNumber: pr_number } : {}),
+        ...(branch !== undefined ? { branch } : {}),
+        prUrl: task.prUrl,
+      });
+
+      const verdict = evaluateMergeCloseout({
+        status: task.status,
+        merge,
+        comment: task.comment,
+        description: task.description,
+        notes: task.notes ?? null,
+      });
+
+      const prLabel = merge.prNumber ? `#${merge.prNumber}` : "(미확인)";
+      const lines: string[] = [
+        `태스크: "${task.title}" (${task.status}, id=${task_id})`,
+        `PR ${prLabel}: ${merge.state}${merge.detail ? ` — ${merge.detail}` : ""}`,
+        `판정: ${verdict.action} — ${verdict.reason}`,
+      ];
+
+      if (dry_run) {
+        lines.push(
+          `\n(dry_run — 아무것도 바꾸지 않았다. 실제 마감은 dry_run 없이 다시 호출.)`,
+        );
+        return text(lines.join("\n"));
+      }
+
+      // ── Status transitions ──────────────────────────────────
+      // Every hop is a legal edge and is re-validated inside the transaction.
+      // force=true is NEVER used here: the whole point is that an automated
+      // closeout must not be able to do something a human couldn't.
+      let current: TaskStatus = task.status;
+      const applied: TaskStatus[] = [];
+      for (const next of verdict.path) {
+        const from = current;
+        const mut: ApplyProjectionInput = {
+          newStatus: next,
+          lastAgentId: WORKER_AGENT_ID,
+          lastActivitySummary:
+            next === "DONE"
+              ? `merge_and_close: PR ${prLabel} 머지 확인 → DONE`
+              : `merge_and_close: ${verdict.reason}`,
+          validateFrom: (s) => canTransition(s, next),
+        };
+        try {
+          await applyProjection(db, task_id, mut);
+          applied.push(next);
+          current = next;
+        } catch (err) {
+          lines.push(
+            `\n⚠️ ${from} → ${next} 전이 실패 (동시에 다른 곳에서 상태가 바뀌었을 수 있다): ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+          );
+          break;
+        }
+      }
+
+      // The hold reason is the whole value of a HOLD_REVIEW — without it the
+      // ticket just looks ignored. Written even when there was no status hop
+      // (the common case: the ticket is already at REVIEW).
+      if (verdict.action === "HOLD_REVIEW") {
+        try {
+          await applyProjection(db, task_id, {
+            lastAgentId: WORKER_AGENT_ID,
+            lastActivitySummary: `merge_and_close: DONE 보류 — ${verdict.followupSignals.join(", ")}`,
+            extraTaskFields: { comment: verdict.reason },
+            activityPayload: {
+              agentId: MARBLO_AGENT_ID,
+              message: `[merge_and_close] PR ${prLabel} 머지 확인. ${verdict.reason}`,
+            },
+          });
+        } catch (err) {
+          lines.push(
+            `\n⚠️ 보류 사유 기록 실패: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      if (applied.length > 0) {
+        lines.push(`상태: ${task.status} → ${applied.join(" → ")}`);
+      }
+
+      // Dependents must be resolved on DONE or the gate sticks (PR#507).
+      if (applied.includes("DONE")) {
+        const unblocked = await resolveDependentsAfterDone(
+          task_id,
+          task.contextId,
+        );
+        if (unblocked > 0) {
+          lines.push(`의존 태스크 ${unblocked}건 해제됨.`);
+        }
+      }
+
+      // ── Worktree hygiene ────────────────────────────────────
+      if (verdict.reapWorktree) {
+        const reap = await reapTaskWorktree(task_id);
+        lines.push(
+          reap.removed
+            ? `워크트리 정리: 제거됨 (${reap.reason})${reap.path ? ` — ${reap.path}` : ""}`
+            : `워크트리 정리: 건너뜀 — ${reap.reason}`,
+        );
+        if (!reap.removed && /uncommitted|preserved/i.test(reap.reason)) {
+          // Never destroy uncommitted work to tidy a listing. A stray worktree
+          // is cheap; a clobbered untracked doc is not.
+          lines.push(
+            `  ⚠️ 커밋되지 않은 변경이 남아 있어 보존했다. 내용을 확인하고 직접 정리해라.`,
+          );
+        }
+      }
+
+      return text(lines.join("\n"));
+    },
   );
 }

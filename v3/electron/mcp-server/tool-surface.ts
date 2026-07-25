@@ -7,6 +7,10 @@ export const CODEX_ORCH_REQUIRED_MCP_TOOLS = [
   "add_activity",
   "update_task_status",
   "get_agents",
+  // Merge-time closeout. Listed here so the Codex orchestrator is told the tool
+  // exists at boot: without it the orch falls back to `gh pr merge` alone and
+  // the ticket + worktree are never closed out (ticket pn2m5cVx).
+  "merge_and_close",
 ] as const;
 
 export const CODEX_ORCH_REQUIRED_MCP_TOOL_COUNT =

@@ -207,6 +207,102 @@ describe("WorktreeCoordinator.prepare", () => {
   });
 });
 
+describe("WorktreeCoordinator.reapForTask — merge_and_close hygiene (pn2m5cVx)", () => {
+  const coordFor = (mgr: WorktreeManager) =>
+    new WorktreeCoordinator({
+      worktreeManager: mgr,
+      createTask: vi.fn(async () => "SHOULD_NOT_BE_CALLED"),
+    });
+
+  it("PRESERVES a worktree with uncommitted changes instead of removing it", async () => {
+    // The work-loss guard that matters most: reaping a dirty tree to tidy a
+    // listing destroys untracked files (docs written but not yet committed).
+    const { repoRoot, mgr } = makeRepo();
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "proj1",
+      taskId: "task1234abcd",
+      slug: "dirty",
+    });
+    fs.writeFileSync(path.join(info.path, "NOTES.md"), "uncommitted work\n");
+
+    const res = await coordFor(mgr).reapForTask({
+      projectId: "proj1",
+      taskId: "task1234abcd",
+      repoRoot,
+    });
+
+    expect(res.removed).toBe(false);
+    expect(res.reason).toMatch(/uncommitted/i);
+    // The tree — and the uncommitted file — are still there.
+    expect(fs.existsSync(path.join(info.path, "NOTES.md"))).toBe(true);
+    expect((await mgr.list(repoRoot)).some((w) => w.path === info.path)).toBe(
+      true,
+    );
+  });
+
+  it("prunes a stale registration whose directory is already gone", async () => {
+    // Before the prune step, this entry was unreachable: every git probe against
+    // the missing dir errors, hasUncommittedChanges conservatively reports
+    // "dirty", and the reap preserved a worktree that no longer existed — so it
+    // stayed registered forever and kept reading as "still needs cleanup".
+    const { repoRoot, mgr } = makeRepo();
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "proj1",
+      taskId: "task5678efgh",
+      slug: "stale",
+    });
+    fs.rmSync(info.path, { recursive: true, force: true });
+    expect((await mgr.list(repoRoot)).some((w) => w.path === info.path)).toBe(
+      true,
+    );
+
+    const res = await coordFor(mgr).reapForTask({
+      projectId: "proj1",
+      taskId: "task5678efgh",
+      repoRoot,
+    });
+
+    // Pruned before the lookup, so there is no worktree left to act on.
+    expect(res.removed).toBe(false);
+    expect(res.reason).toBe("no worktree for task");
+    expect((await mgr.list(repoRoot)).some((w) => w.path === info.path)).toBe(
+      false,
+    );
+  });
+
+  it("removes a clean worktree whose branch is merged into base", async () => {
+    const { repoRoot, mgr } = makeRepo();
+    const info = await mgr.create({
+      repoRoot,
+      projectId: "proj1",
+      taskId: "task9012ijkl",
+      slug: "clean",
+    });
+
+    const res = await coordFor(mgr).reapForTask({
+      projectId: "proj1",
+      taskId: "task9012ijkl",
+      repoRoot,
+    });
+
+    expect(res.removed).toBe(true);
+    expect(fs.existsSync(info.path)).toBe(false);
+  });
+
+  it("is a no-op for a task that never had a worktree", async () => {
+    const { repoRoot, mgr } = makeRepo();
+    const res = await coordFor(mgr).reapForTask({
+      projectId: "proj1",
+      taskId: "neverExisted00",
+      repoRoot,
+    });
+    expect(res.removed).toBe(false);
+    expect(res.reason).toBe("no worktree for task");
+  });
+});
+
 describe("WorktreeManager.gitSupportsMergeTree", () => {
   it("reports ok:true and a version string for the current (modern) git", async () => {
     const mgr = new WorktreeManager();
