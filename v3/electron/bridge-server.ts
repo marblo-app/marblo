@@ -35,6 +35,12 @@ import { resolveTopClaudeModelDetailed } from "./agent-config";
 import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
 import type { RateLimitInfo } from "./session-parsers";
 import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
+import {
+  resolveSkillRouting,
+  vendorForModel,
+  withSkillDirective,
+  type SkillVendor,
+} from "./mcp-server/skill-registry";
 import { issueFreshAgentCustomToken } from "./firebase-auth-sync";
 import type { WorktreeCoordinator } from "./worktree-coordinator";
 
@@ -519,6 +525,12 @@ export interface DispatchTaskRequest {
    * 최상위 + Codex high 2-spawn. "cross-check"=교차검증(기본), "split-role"=역할분담.
    * complexity!=="complex" 면 무시(+경고). 미지정이면 단일 디스패치(무변동). */
   mix?: "cross-check" | "split-role";
+  /** P4-1 — 이 작업에 쓸 **CLI 네이티브 스킬** 이름들(예: ["seo-geo-full"]).
+   * 스폰 전에 대상 벤더(claude=~/.claude/skills, codex=$CODEX_HOME/skills)에
+   * 실제로 설치돼 있는지 디스크로 검증하고, 없으면 스폰하지 않고 즉시 실패한다
+   * (오타가 조용히 무시되던 경로 차단). 통과하면 지시문 맨 앞에 지정 블록 +
+   * 사용 관측 규약이 주입된다. 미지정이면 기존 동작과 완전 동일. */
+  skills?: string[];
   /** 단계분할(§5) — complex 전용 opt-in. 스텝 배열을 각각 작은 dispatch 로 풀어
    * 난도별 모델을 매칭한다. dependsOnPrevious 인 스텝은 직전 스텝 후 디스패치(순차),
    * 아니면 병렬. complexity!=="complex" 면 무시(+경고). */
@@ -1883,6 +1895,36 @@ export class BridgeServer {
         ? undefined
         : requestedModel;
 
+    // P4-1 — 스킬 게이트. 지정 스킬이 대상 벤더에 실제로 설치돼 있는지 디스크로
+    // 확인하고, 없으면 스폰하지 않고 즉시 실패한다(오타 `/seo-geo-optimization`
+    // 이 조용히 무시되던 경로 차단). 전달 자체는 env 상속으로 이미 되므로
+    // 여기서 하는 일은 "지정 + 검증 + 관측 규약 주입" 이다 — §D 실측 결론.
+    const skillRouting = resolveSkillRouting({
+      skills: params.skills ?? [],
+      explicitModel: model ?? null,
+      cwd: params.cwd,
+    });
+    if (!skillRouting.ok) {
+      console.warn(`[BridgeServer] ${skillRouting.error}`);
+      return { success: false, error: skillRouting.error };
+    }
+    const requestedSkills = skillRouting.skills;
+    const skillVendorOk = (candidate: string): boolean =>
+      requestedSkills.length === 0 ||
+      skillRouting.allowedVendors.includes(
+        vendorForModel(candidate) as SkillVendor,
+      );
+    if (requestedSkills.length > 0) {
+      console.log(`[BridgeServer] dispatch skills — ${skillRouting.note}`);
+    }
+    // 스킬 블록은 완료 규약 footer 보다 먼저 붙는다(지시문 맨 앞). 스킬이 없으면
+    // 원문 그대로라 기존 동작과 byte-identical.
+    const skillFramedInstruction = withSkillDirective(
+      instruction,
+      requestedSkills,
+      { taskId: params.taskId },
+    );
+
     // Append a completion-protocol footer so the worker knows which MCP
     // calls close the loop back to the orchestrator. Without this, agents
     // finish the work in their PTY but never call submit_for_review /
@@ -1891,7 +1933,7 @@ export class BridgeServer {
     // append when taskId is provided (one-off dispatches without a task
     // can't be reported via these tools).
     const effectiveInstruction = withCompletionFooter(
-      instruction,
+      skillFramedInstruction,
       params.taskId,
     );
 
@@ -1902,7 +1944,15 @@ export class BridgeServer {
       return {
         success: true,
         action: "logical",
-        reason: `Simple task — logical sub-agent explicitly requested (useLogical=true)`,
+        // 논리 서브에이전트는 PTY 가 없어 지시문이 오케 자신에게 돌아간다.
+        // 지정 스킬을 조용히 흘리지 않도록 오케가 직접 쓰라고 명시한다.
+        reason:
+          `Simple task — logical sub-agent explicitly requested (useLogical=true)` +
+          (requestedSkills.length
+            ? ` | 지정 스킬 [${requestedSkills.join(
+                ", ",
+              )}] 은 오케가 직접 호출할 것 (물리 에이전트가 없어 위임 대상이 없다).`
+            : ""),
         taskId: params.taskId ?? null,
       };
     }
@@ -1919,7 +1969,11 @@ export class BridgeServer {
       )
       .filter(
         (agent) => !requiresTrackedModel || isTrackedDispatchModel(agent.model),
-      );
+      )
+      // 스킬 지정 dispatch 는 그 스킬이 설치된 벤더의 에이전트로만 간다. 이게
+      // 없으면 재사용 스코어링이 스킬 0개인 벤더의 유휴 에이전트를 집어가
+      // 지정이 무효화된다(조용한 무효의 두 번째 경로).
+      .filter((agent) => skillVendorOk(agent.model));
 
     // L3/RG — per-task single-agent guarantee. A task-bound live agent wins
     // before normal idle reuse scoring. The binding can come from the isolated
@@ -2155,9 +2209,26 @@ export class BridgeServer {
     // orchestrator/internal/system whitelist. Per-agent FAST_FAIL/MAX_RESTARTS
     // (agent-manager) still backstop crash loops.
 
-    const eligibleModels = requiresTrackedModel
-      ? trackedModelCandidates(enabledModels as ModelType[])
-      : (enabledModels as ModelType[]);
+    const eligibleModels = (
+      requiresTrackedModel
+        ? trackedModelCandidates(enabledModels as ModelType[])
+        : (enabledModels as ModelType[])
+    ).filter((candidate) => skillVendorOk(candidate));
+    // 스킬 요구가 프로바이더 선택의 하드 제약이 되는 지점(§D 넷-뉴 2). 후보가
+    // 0이 되면 스코어러가 빈 배열로 임의 선택하지 않도록 여기서 끊는다.
+    if (requestedSkills.length > 0 && eligibleModels.length === 0) {
+      const reason =
+        `Dispatch aborted (skills): 지정 스킬 [${requestedSkills.join(
+          ", ",
+        )}] 은 ` +
+        `[${skillRouting.allowedVendors.join(", ")}] 에만 설치돼 있는데, 이 ` +
+        `프로젝트의 활성 모델(${(enabledModels as ModelType[]).join(
+          ", ",
+        )}) 중 ` +
+        "해당 벤더가 없다. 모델 프리셋을 바꾸거나 스킬을 그 벤더에 설치하라.";
+      console.warn(`[BridgeServer] ${reason}`);
+      return { success: false, error: reason };
+    }
     if (model) {
       const explicitBudget = budgetBiasScore(model, budgetSnapshot);
       if (explicitBudget.bias === null) {
@@ -2261,7 +2332,7 @@ export class BridgeServer {
       model: selectedModel,
       role,
       cwd: params.cwd,
-      initialPrompt: instruction,
+      initialPrompt: skillFramedInstruction,
       taskId: params.taskId,
       projectId: params.projectId,
       parentAgentId: params.parentAgentId,
@@ -2366,10 +2437,30 @@ export class BridgeServer {
     // 1차가 실패/논리에이전트면 믹스 없이 그대로 반환.
     if (!primary.success || primary.action === "logical") return primary;
 
-    const framed =
+    // P4-1 — 동반은 항상 Codex 다. 지정 스킬이 codex 에 설치돼 있지 않으면
+    // 동반에게는 그 스킬이 조용히 무효가 되므로, 동반만 빼고 1차로 강등한다
+    // (캡에 막혔을 때와 같은 그레이스풀 강등). 스킬 없는 믹스는 무변동.
+    const mixSkills = resolveSkillRouting({
+      skills: params.skills ?? [],
+      explicitModel: "gpt",
+      cwd: params.cwd,
+    });
+    if (!mixSkills.ok) {
+      console.warn(
+        `[BridgeServer] Mix(${mode}) 동반 생략 — ${mixSkills.error}`,
+      );
+      return {
+        ...primary,
+        reason: `${primary.reason} | 모델 믹스(${mode}) 동반 생략: 지정 스킬이 codex 에 미설치 — 단일로 강등.`,
+      };
+    }
+    const framedBase =
       mode === "cross-check"
         ? `[모델 믹스 · 교차검증] 아래 작업을 독립적으로 수행하고, 1차 에이전트의 산출물을 적대적으로 검증(refute)하라. 불일치 시 오케스트레이터에 에스컬레이션.\n\n${params.instruction}`
         : `[모델 믹스 · 역할분담] 너는 테스트/기계적 변경/검증 담당이다. 설계·리팩터는 1차(Claude) 에이전트가 맡는다.\n\n${params.instruction}`;
+    const framed = withSkillDirective(framedBase, mixSkills.skills, {
+      vendor: "codex",
+    });
     const companionName = `${params.role}-codex-mix-${Date.now()
       .toString(36)
       .slice(-4)}`;
@@ -2435,6 +2526,9 @@ export class BridgeServer {
         parentAgentId: parent.parentAgentId,
         system: parent.system,
         requireTrackedModel: parentRequiresTrackedModel,
+        // 지정 스킬은 모든 스텝에 그대로 적용된다 — 스텝마다 자기 모델을 고르므로
+        // 게이트도 스텝별로 다시 걸려야 조용한 무효가 생기지 않는다.
+        skills: parent.skills,
         // taskId 의도적으로 비움 — 스텝마다 독립 에이전트(worktree 충돌 방지).
       });
 

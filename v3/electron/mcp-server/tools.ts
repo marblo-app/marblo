@@ -75,6 +75,10 @@ import {
 } from "./task-listing.js";
 import { staleBuildNotice } from "./build-info.js";
 import {
+  MAX_SKILLS_PER_DISPATCH,
+  resolveSkillRouting,
+} from "./skill-registry.js";
+import {
   formatCompletionReport,
   resolveCompletionReport,
   type CompletionSummary,
@@ -838,7 +842,9 @@ async function resolveMergeVerdict(args: {
       return {
         state: "UNKNOWN",
         prNumber: number,
-        detail: `gh pr view 실패: ${res.stderr.trim().split("\n")[0] || `exit ${res.code}`}`,
+        detail: `gh pr view 실패: ${
+          res.stderr.trim().split("\n")[0] || `exit ${res.code}`
+        }`,
       };
     }
     const row = parse<GhPrRow>(res.stdout);
@@ -897,7 +903,9 @@ async function resolveMergeVerdict(args: {
   if (res.code !== 0) {
     return {
       state: "UNKNOWN",
-      detail: `gh pr list 실패: ${res.stderr.trim().split("\n")[0] || `exit ${res.code}`}`,
+      detail: `gh pr list 실패: ${
+        res.stderr.trim().split("\n")[0] || `exit ${res.code}`
+      }`,
     };
   }
   const rows = parse<GhPrRow[]>(res.stdout) ?? [];
@@ -3554,6 +3562,17 @@ export function registerTools(server: McpServer): void {
         ),
       name: z.string().optional().describe("Agent name hint"),
       cwd: z.string().optional().describe("Working directory"),
+      skills: z
+        .array(z.string())
+        .max(MAX_SKILLS_PER_DISPATCH)
+        .optional()
+        .describe(
+          "이 작업에 쓸 CLI 네이티브 스킬 이름들(예: ['seo-geo-full']). " +
+            "스폰 전에 실제 설치 여부를 디스크로 검증한다 — 미설치/오타명은 " +
+            "조용히 무시되지 않고 즉시 에러(제안명 포함). 지정하면 그 스킬이 " +
+            "설치된 벤더(claude/codex)로만 라우팅되고, 지시문에 사용 규약이 " +
+            "주입된다. 스킬을 쓸 필요가 없으면 비워 둔다.",
+        ),
       tags: z
         .array(z.string())
         .optional()
@@ -3606,6 +3625,7 @@ export function registerTools(server: McpServer): void {
       model,
       name,
       cwd,
+      skills,
       tags,
       mix,
       stages,
@@ -3617,6 +3637,18 @@ export function registerTools(server: McpServer): void {
         return text(
           "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
         );
+      }
+
+      // P4-1 — 스킬명 선검증. 벤더별 하드 게이트는 bridge 가 실제 선택 모델에
+      // 대해 다시 걸지만(단일 진실), 오타는 여기서 먼저 끊는다: 미션 태스크
+      // 생성·의존성 게이트 같은 부수효과가 일어나기 전에 실패해야 `/seo-geo-
+      // optimization` 한 글자 때문에 보드에 쓰레기 티켓이 남지 않는다.
+      if (skills && skills.length > 0) {
+        const preflight = resolveSkillRouting({
+          skills,
+          cwd: cwd || process.env.MARBLO_PROJECT_ROOT,
+        });
+        if (!preflight.ok) return text(preflight.error);
       }
 
       const missionContextId = resolveMissionContextForWrite();
@@ -3780,6 +3812,7 @@ export function registerTools(server: McpServer): void {
               model,
               nameHint: name,
               cwd,
+              skills,
               tags,
               mix: effectiveMix,
               stages: effectiveStages,
@@ -4881,7 +4914,9 @@ export function registerTools(server: McpServer): void {
       const prLabel = merge.prNumber ? `#${merge.prNumber}` : "(미확인)";
       const lines: string[] = [
         `태스크: "${task.title}" (${task.status}, id=${task_id})`,
-        `PR ${prLabel}: ${merge.state}${merge.detail ? ` — ${merge.detail}` : ""}`,
+        `PR ${prLabel}: ${merge.state}${
+          merge.detail ? ` — ${merge.detail}` : ""
+        }`,
         `판정: ${verdict.action} — ${verdict.reason}`,
       ];
 
@@ -4929,7 +4964,9 @@ export function registerTools(server: McpServer): void {
         try {
           await applyProjection(db, task_id, {
             lastAgentId: WORKER_AGENT_ID,
-            lastActivitySummary: `merge_and_close: DONE 보류 — ${verdict.followupSignals.join(", ")}`,
+            lastActivitySummary: `merge_and_close: DONE 보류 — ${verdict.followupSignals.join(
+              ", ",
+            )}`,
             extraTaskFields: { comment: verdict.reason },
             activityPayload: {
               agentId: MARBLO_AGENT_ID,
@@ -4938,7 +4975,9 @@ export function registerTools(server: McpServer): void {
           });
         } catch (err) {
           lines.push(
-            `\n⚠️ 보류 사유 기록 실패: ${err instanceof Error ? err.message : String(err)}`,
+            `\n⚠️ 보류 사유 기록 실패: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
           );
         }
       }
@@ -4963,7 +5002,9 @@ export function registerTools(server: McpServer): void {
         const reap = await reapTaskWorktree(task_id);
         lines.push(
           reap.removed
-            ? `워크트리 정리: 제거됨 (${reap.reason})${reap.path ? ` — ${reap.path}` : ""}`
+            ? `워크트리 정리: 제거됨 (${reap.reason})${
+                reap.path ? ` — ${reap.path}` : ""
+              }`
             : `워크트리 정리: 건너뜀 — ${reap.reason}`,
         );
         if (!reap.removed && /uncommitted|preserved/i.test(reap.reason)) {
