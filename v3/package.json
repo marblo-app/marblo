@@ -46,6 +46,7 @@
     "smoke:packaged:mac": "node scripts/smoke-packaged-app.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run --config vitest.rules.config.mjs\"",
     "worktree:reap": "tsc -p electron/tsconfig.json && node dist-electron/scripts/reap-worktrees.js",
+    "graph:seed": "tsc -p electron/tsconfig.json && node dist-electron/scripts/seed-routing-graph.js",
     "test:e2e:pw": "playwright test",
     "test:e2e:pw:ui": "playwright test --ui",
     "test:e2e:pw:headed": "playwright test --headed",

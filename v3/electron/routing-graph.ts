@@ -12,7 +12,10 @@
  *
  * Design invariants (why this is safe to add to a hot path):
  *   - COLD START = 0. No cell / tiny n → `graphBiasForModel` returns 0, so the
- *     scorer behaves EXACTLY as before until real evidence accumulates.
+ *     scorer behaves EXACTLY as before until real evidence accumulates. The ONE
+ *     exception is an explicitly seeded cold-start `prior` (§ Cold-start priors
+ *     below): a cell a human/agent deliberately seeded contributes its prior
+ *     while n is small. Un-seeded cells are still exactly 0.
  *   - BOUNDED. graphBias is clamped to ±GRAPH_BIAS_MAX (20) — the same scale as
  *     budgetBias — so it can NEVER outweigh the role hard-gate (100) or the reuse
  *     bonus (30). It's a tie-breaker / mild lean, not a router override.
@@ -144,6 +147,17 @@ export const SEEN_TTL_DAYS = 30;
  * overrides the global cell once it has this many observations. */
 export const PROJECT_OVERLAY_N_MIN = 8;
 
+/**
+ * Max absolute cold-start `prior` a single cell may carry (§ Cold-start priors).
+ *
+ * Deliberately far below GRAPH_BIAS_MAX (20) so a seeded belief is a nudge, not
+ * a router override: the scorer's own static spread (MODEL_BASE_SCORE 50/45/45,
+ * TIED_SCORE_BAND 5) means ±3 can break a tie but can never beat a tag bonus
+ * (25) or the role hard-gate (100). Seeding above this is refused, not clamped
+ * silently at the call site — see `applyColdStartPriors`.
+ */
+export const SEED_PRIOR_MAX = 3;
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const GRAPH_VERSION = 1;
 
@@ -158,6 +172,15 @@ export interface RoutingGraphCell {
   n: number;
   firstSeen: string;
   lastSeen: string;
+  /**
+   * Cold-start prior (§ Cold-start priors) — a seeded belief, NOT an
+   * observation. Bounded by SEED_PRIOR_MAX, never decays, and is deliberately
+   * excluded from `n` and `raw` so it can never masquerade as evidence in an
+   * audit. Its weight in `cellBias` fades as real observations arrive.
+   */
+  prior?: number;
+  /** Short human note for why `prior` was seeded (audit trail in the file). */
+  priorNote?: string;
 }
 
 export interface RoutingGraph {
@@ -320,21 +343,169 @@ function pruneSeen(graph: RoutingGraph, atMs: number): void {
   }
 }
 
+// ── Cold-start priors (seeding path) ────────────────────────────
+//
+// `applyOutcome` is the only way OBSERVATIONS enter the graph. This section is
+// the only way BELIEFS do. The split is the point: a prior is a hypothesis
+// someone argued for from prices/docs/known failure modes, and the graph must
+// never let it be mistaken for something that happened. Hence a separate field
+// (never `n`, never `raw`), a hard magnitude bound, an idempotent set-not-
+// accumulate write, and a single-call revert.
+//
+// Do NOT hand-edit `prior` into routing-graph.json. Go through
+// `applyColdStartPriors` + `saveRoutingGraph` (the `graph:seed` script) so the
+// bound, the audit note, and the revert path all hold.
+
+/** One seeded (context-factor × model) belief. */
+export interface ColdStartPrior {
+  /** Factor family — must be one the READ path actually consults. */
+  factorType: "role" | "taskType" | "complexity" | "tag";
+  factorValue: string;
+  model: ModelType;
+  /** Signed nudge, |prior| ≤ SEED_PRIOR_MAX. */
+  prior: number;
+  /** Why — persisted into the cell so the live file explains itself. */
+  note?: string;
+}
+
+export interface SeedResult {
+  /** Cell keys written, with the value actually stored. */
+  applied: { key: string; prior: number; created: boolean }[];
+  /** Entries refused, with the reason (never silently dropped). */
+  rejected: { key: string; reason: string }[];
+}
+
+/** Bound a prior to ±SEED_PRIOR_MAX; non-finite/absent → 0. */
+export function clampSeedPrior(value: number | undefined | null): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(-SEED_PRIOR_MAX, Math.min(SEED_PRIOR_MAX, value));
+}
+
+/**
+ * Fold cold-start priors into `graph`. Mutates and returns a report.
+ *
+ * SET, not accumulate — re-running the same seed twice yields the same graph, so
+ * a seed script is safe to re-run and a diff is meaningful. Observations already
+ * on the cell (`n`, `raw`, `decayed`) are left completely untouched, so seeding a
+ * cell that has been learning does not destroy what it learned; it only changes
+ * the belief the cell falls back on while `n` is small.
+ *
+ * Refuses (rather than clamps) an over-magnitude prior: silently shrinking a
+ * caller's ±20 request to ±3 would make the seed look applied when it wasn't.
+ */
+export function applyColdStartPriors(
+  graph: RoutingGraph,
+  priors: readonly ColdStartPrior[],
+  atMs: number,
+): SeedResult {
+  const nowIso = new Date(atMs).toISOString();
+  const result: SeedResult = { applied: [], rejected: [] };
+
+  for (const p of priors) {
+    const key = `${p.factorType}:${p.factorValue}|${p.model}`;
+    if (!p.factorValue || !p.factorValue.trim()) {
+      result.rejected.push({ key, reason: "empty factorValue" });
+      continue;
+    }
+    if (typeof p.prior !== "number" || !Number.isFinite(p.prior)) {
+      result.rejected.push({ key, reason: `non-finite prior ${p.prior}` });
+      continue;
+    }
+    if (Math.abs(p.prior) > SEED_PRIOR_MAX) {
+      result.rejected.push({
+        key,
+        reason: `|prior| ${Math.abs(p.prior)} exceeds SEED_PRIOR_MAX ${SEED_PRIOR_MAX}`,
+      });
+      continue;
+    }
+
+    let cell = graph.cells[key];
+    const created = !cell;
+    if (!cell) {
+      cell = {
+        raw: {},
+        decayed: {},
+        n: 0,
+        firstSeen: nowIso,
+        lastSeen: nowIso,
+      };
+      graph.cells[key] = cell;
+    }
+    if (p.prior === 0) {
+      delete cell.prior;
+      delete cell.priorNote;
+    } else {
+      cell.prior = p.prior;
+      if (p.note) cell.priorNote = p.note;
+    }
+    result.applied.push({ key, prior: p.prior, created });
+  }
+
+  graph.updatedAt = nowIso;
+  return result;
+}
+
+/**
+ * Strip every seeded prior — the documented one-call revert. Cells that exist
+ * ONLY because they were seeded (no observations) are removed entirely, so a
+ * revert restores the pre-seed graph rather than leaving inert husks behind.
+ * Returns the keys touched.
+ */
+export function removeColdStartPriors(
+  graph: RoutingGraph,
+  atMs: number,
+): { cleared: string[]; removed: string[] } {
+  const cleared: string[] = [];
+  const removed: string[] = [];
+  for (const [key, cell] of Object.entries(graph.cells)) {
+    if (cell.prior === undefined && cell.priorNote === undefined) continue;
+    delete cell.prior;
+    delete cell.priorNote;
+    const barren =
+      (cell.n ?? 0) <= 0 &&
+      Object.keys(cell.raw ?? {}).length === 0 &&
+      Object.keys(cell.decayed ?? {}).length === 0;
+    if (barren) {
+      delete graph.cells[key];
+      removed.push(key);
+    } else {
+      cleared.push(key);
+    }
+  }
+  if (cleared.length || removed.length) {
+    graph.updatedAt = new Date(atMs).toISOString();
+  }
+  return { cleared, removed };
+}
+
 // ── Graph → scoring bias (read path, spec §4.3) ─────────────────
 
 /**
- * Net decayed routing signal of a single cell (sum of signed, decayed
- * per-mode weights), scaled by confidence shrinkage n/(n+K). A cold cell
- * (n = 0) contributes 0; a single observation is shrunk to ~1/7 of its weight.
+ * Net routing signal of a single cell: the standard Bayesian blend of a seeded
+ * prior and observed evidence, split by the SAME confidence weight that already
+ * governed this function.
+ *
+ *   bias = prior · K/(n+K)  +  netDecayed · n/(n+K)
+ *
+ * At n = 0 the cell contributes its prior alone; at n = SHRINKAGE_K (6) the two
+ * carry equal weight; by n = 30 the prior is down to 1/6 influence. So evidence
+ * doesn't merely outvote the seed, it *displaces* it — which is the property the
+ * seeding path needs to be safe (a wrong prior self-heals).
+ *
+ * Un-seeded cells (`prior` absent) keep the exact previous behaviour: cold → 0,
+ * one observation shrunk to ~1/7 of its weight.
  */
 function cellBias(cell: RoutingGraphCell): number {
-  if (!cell || cell.n <= 0) return 0;
+  if (!cell) return 0;
+  const prior = clampSeedPrior(cell.prior);
+  const n = Number.isFinite(cell.n) ? cell.n : 0;
+  if (n <= 0) return prior;
   let net = 0;
   for (const mode of Object.keys(cell.decayed) as OutcomeMode[]) {
     net += cell.decayed[mode] ?? 0;
   }
-  const shrink = cell.n / (cell.n + SHRINKAGE_K);
-  return net * shrink;
+  const shrink = n / (n + SHRINKAGE_K);
+  return prior * (1 - shrink) + net * shrink;
 }
 
 /**
@@ -381,9 +552,16 @@ export function graphBiasDetailForModel(
   // Dominant modes across the touched cells (by |decayed net| per mode).
   const modeNet = new Map<OutcomeMode, number>();
   const factors: string[] = [];
+  // A cell can contribute via observations (n > 0) OR via a seeded prior alone
+  // (n = 0) — include both, else a seed-driven bias would be reported with an
+  // empty note and the decision log would say nothing about why it moved.
+  let seeded = false;
   for (const key of cellKeysForContext(model, ctx)) {
     const cell = graph.cells[key];
-    if (!cell || cell.n <= 0) continue;
+    if (!cell) continue;
+    const hasPrior = clampSeedPrior(cell.prior) !== 0;
+    if (cell.n <= 0 && !hasPrior) continue;
+    if (hasPrior) seeded = true;
     const factorValue = key.split("|")[0].split(":").slice(1).join(":");
     if (factorValue) factors.push(factorValue);
     for (const mode of Object.keys(cell.decayed) as OutcomeMode[]) {
@@ -393,7 +571,7 @@ export function graphBiasDetailForModel(
   const topMode = [...modeNet.entries()].sort(
     (a, b) => Math.abs(b[1]) - Math.abs(a[1]),
   )[0];
-  const modeLabel = topMode ? topMode[0] : "";
+  const modeLabel = topMode ? topMode[0] : seeded ? "seed" : "";
   const factorLabel = factors.slice(0, 3).join(",");
   const note = [factorLabel, modeLabel].filter(Boolean).join(" ");
   return { bias, note };
