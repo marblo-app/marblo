@@ -34,6 +34,7 @@ import {
 import {
   getModel,
   modelsByHarness,
+  HARNESS_NATIVE_VENDOR,
   MODEL_REGISTRY,
   type EffortLevel,
   type ModelRegistryEntry,
@@ -540,7 +541,7 @@ function orchestratorChoicesFor(
   };
   const uiName = valuePrefix.charAt(0).toUpperCase() + valuePrefix.slice(1);
   return modelsByHarness(harness)
-    .slice()
+    .filter(selectorEligible)
     .sort((a, b) => rank[b.capability] - rank[a.capability])
     .map((entry) => ({
       value: orchestratorModelValue(valuePrefix, entry.id),
@@ -550,6 +551,24 @@ function orchestratorChoicesFor(
       label: `${uiName} (${humanize(entry)})`,
       efforts: selectableEfforts(entry),
     }));
+}
+
+/**
+ * 오케 셀렉터에 세울 수 있는 행인가 — **하네스 네이티브 벤더만** 통과한다.
+ *
+ * ★사유는 max/ultra 를 셀렉터에서 빼는 것(`selectableEfforts`)과 정확히 같다:
+ * 오케 모델 선택은 **프로젝트별로 영구 저장**된다. env-swap 벤더(GLM 등)는 별도
+ * 구독키가 있어야 도는데, 키가 없는 상태로 한 번 저장되면 앱 재시작·크래시
+ * 자동재시작·모델 핸드오프가 **전부 말없이** 그 값으로 뜨고, 매번 벤더 프로파일
+ * 미주입 → 하네스 기본 백엔드로 새는 스폰이 반복된다. 수명이 무한한 기본값에
+ * 조건부 크레덴셜을 얹지 않는다.
+ *
+ * env-swap 벤더는 **명시 지정**(`dispatch_task(model="glm-4.7")`)으로 닿는다 —
+ * 그 경로는 티켓 1건짜리 수명이라 실패해도 그 티켓에서 끝난다. 구독 확보 + 라이브
+ * 검증(서베이 V1-2)이 끝나면 이 필터를 걷고 벤더별 표기 라벨을 붙인다.
+ */
+function selectorEligible(entry: ModelRegistryEntry): boolean {
+  return entry.provider === HARNESS_NATIVE_VENDOR[entry.harness];
 }
 
 /**

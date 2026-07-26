@@ -14,6 +14,8 @@
  *   [effort]    codex 모델의 지원 effort·기본 effort 가 캐시와 일치하는가
  *   [mincli]    설치된 CLI 가 각 항목의 minCli 를 만족하는가(미달이면 폴백 중이라는 뜻)
  *   [pricing]   단가가 아직 추정치(estimated)로 남아 있는 항목
+ *   [vendor]    env-swap 벤더(GLM 등) 크레덴셜이 설정됐는가 + 설정됐다면 라이브 대조
+ *               (키 없으면 필요한 **env 키 이름**만 알려주고 skip — 값은 안 찍는다)
  *
  * 사용법:
  *   npm run verify:models              # 전체(claude 실프로브 포함 — 소액 토큰 과금)
@@ -30,19 +32,32 @@ import os from "os";
 import path from "path";
 import { execFileSync } from "child_process";
 import {
+  HARNESS_NATIVE_VENDOR,
   MODEL_REGISTRY,
   type EffortLevel,
   type ModelRegistryEntry,
   cmpSemver,
   getModel,
 } from "../model-registry";
-import { resolveClaudeBinary, resolveHarnessCli } from "../agent-config";
+import {
+  applyVendorEnv,
+  resolveClaudeBinary,
+  resolveHarnessCli,
+  vendorEnvReadiness,
+} from "../agent-config";
 
 type Severity = "mismatch" | "warn" | "ok";
 
 interface Finding {
   severity: Severity;
-  check: "alias" | "id" | "unlisted" | "effort" | "mincli" | "pricing";
+  check:
+    | "alias"
+    | "id"
+    | "unlisted"
+    | "effort"
+    | "mincli"
+    | "pricing"
+    | "vendor";
   subject: string;
   detail: string;
 }
@@ -73,6 +88,8 @@ const add = (
 function probeClaudeServedModel(
   command: string,
   requested: string,
+  /** 벤더 프로파일 env(env-swap 벤더 행 검증용). 미지정이면 현재 env 그대로. */
+  extraEnv?: Record<string, string>,
 ): string | null {
   try {
     const out = execFileSync(
@@ -83,6 +100,7 @@ function probeClaudeServedModel(
         cwd: os.tmpdir(),
         timeout: 120_000,
         maxBuffer: 8 * 1024 * 1024,
+        ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}),
       },
     );
     const parsed = JSON.parse(out) as {
@@ -269,6 +287,77 @@ function verifyCodex(): void {
 
 // ─────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────
+// env-swap 벤더(provider ≠ 하네스 네이티브 벤더 — GLM 등)
+//
+// 이 행들은 **이 머신의 claude 로그인으로는 검증할 수 없다**. 검증하려면 그 벤더의
+// 구독키가 필요하고, 키는 레지스트리가 아니라 env(`v3/.env`)에 있다. 그래서:
+//   키 없음 → 무엇을 넣어야 켜지는지 **키 이름만** 알려주고 프로브 skip(무과금)
+//   키 있음 → 그 프로파일 env 를 얹어 실제 프로브(그 벤더 쿼터를 1프롬프트 소모)
+// ★어느 쪽이든 시크릿 **값**은 출력하지 않는다.
+// ─────────────────────────────────────────────────────────────────────────
+
+function verifyVendorProfiles(offline: boolean): void {
+  const entries = MODEL_REGISTRY.filter(
+    (m) => m.envProfile && m.provider !== HARNESS_NATIVE_VENDOR[m.harness],
+  );
+  if (entries.length === 0) return;
+
+  console.log(`\n▸ env-swap 벤더 프로파일 ${entries.length}행`);
+  const cli = resolveClaudeBinary();
+
+  for (const entry of entries) {
+    const readiness = vendorEnvReadiness(entry.id);
+    const need = readiness.requiredEnvKeys.join(", ") || "(시크릿 없음)";
+    if (!readiness.ready) {
+      add(
+        "warn",
+        "vendor",
+        entry.id,
+        `${entry.provider} 크레덴셜 미설정 — 라이브 검증 skip. ` +
+          `필요한 env(값 아님): ${readiness.missingEnvKeys.join(", ")} → v3/.env 에 설정 후 재실행`,
+      );
+      continue;
+    }
+    console.log(`  ✓ env    ${entry.id} — ${need} 설정됨`);
+
+    if (offline) continue;
+    if (entry.harness !== "claude" || !cli.version) {
+      add(
+        "warn",
+        "vendor",
+        entry.id,
+        `harness=${entry.harness} 프로브 경로가 아직 없다(또는 CLI 미검출) — 라이브 대조 생략`,
+      );
+      continue;
+    }
+    // 프로파일을 얹은 env 로 프로브. `--model` 은 우리 스폰 경로와 같은 값이다.
+    const profileEnv = applyVendorEnv({}, entry.id);
+    const served = probeClaudeServedModel(cli.command, entry.id, profileEnv);
+    if (served === null) {
+      add(
+        "warn",
+        "vendor",
+        entry.id,
+        `${entry.provider} 엔드포인트가 이 id 를 서빙하지 못했다(키 만료·플랜 미포함·id 변경 중 하나). ` +
+          "구독 상태를 먼저 확인할 것",
+      );
+    } else if (served !== entry.id) {
+      // ★mismatch 가 아니라 warn 이다: 벤더가 응답에 어떤 모델명을 담는지 우리가
+      // 아직 라이브로 본 적이 없다(구독키 미보유). 첫 라이브 실행에서 사람이
+      // 판정하고, 그때 이 severity 를 확정한다.
+      add(
+        "warn",
+        "vendor",
+        entry.id,
+        `요청 id 와 응답 모델명이 다르다 → ${served}. 벤더 응답 규약 확인 후 레지스트리/이 검사 확정`,
+      );
+    } else {
+      console.log(`  ✓ live   ${entry.id} (${entry.provider})`);
+    }
+  }
+}
+
 /** 설치된 CLI 가 각 항목의 minCli 를 만족하는가. 미달 = 지금 폴백 중이라는 뜻. */
 function checkMinCli(
   entries: readonly ModelRegistryEntry[],
@@ -321,6 +410,7 @@ async function main(): Promise<void> {
 
   verifyClaude(offline);
   verifyCodex();
+  verifyVendorProfiles(offline);
   checkEstimatedPricing();
 
   const mismatches = findings.filter((f) => f.severity === "mismatch");

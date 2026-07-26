@@ -11,8 +11,10 @@ import {
   harnessForModel,
   meetsMinCli,
   modelsByHarness,
+  vendorEnvSecretRef,
   type EffortLevel,
   type HarnessId,
+  type VendorId,
 } from "./model-registry";
 import {
   entryRung,
@@ -1122,9 +1124,98 @@ export function mergeVendorEnv(
 }
 
 /**
- * 핀된 모델의 벤더 프로파일을 스폰 env 에 얹는다(레지스트리 조회 + `mergeVendorEnv`).
+ * 벤더 프로파일의 시크릿 자리표시자(`${ZAI_API_KEY}`)를 실제 값으로 채운다.
  *
- * 오늘 레지스트리엔 프로파일을 가진 행이 없으므로 **항상 `base` 를 그대로** 돌려준다.
+ * 시크릿은 레지스트리에 **키 이름**으로만 있고 값은 `process.env` 에서 온다 —
+ * 그 env 는 main.ts 가 부팅 때 `v3/.env` 로 dotenv 로드한 단일소스다. 값은 이
+ * 함수 밖으로 나가지 않는다(반환 env 는 스폰 프로세스로만 가고, 로그에는 키
+ * 이름과 마스킹된 형태만 남는다).
+ */
+export function resolveVendorEnvProfile(profile: Record<string, string>): {
+  resolved: Record<string, string>;
+  /** 자리표시자는 있는데 `process.env` 가 비어 있는 **키 이름**들(값 아님). */
+  missing: string[];
+} {
+  const resolved: Record<string, string> = {};
+  const missing: string[] = [];
+  for (const [key, value] of Object.entries(profile)) {
+    const ref = vendorEnvSecretRef(value);
+    if (!ref) {
+      resolved[key] = value;
+      continue;
+    }
+    const secret = process.env[ref]?.trim();
+    if (!secret) {
+      missing.push(ref);
+      continue;
+    }
+    resolved[key] = secret;
+  }
+  return { resolved, missing: [...new Set(missing)].sort() };
+}
+
+/** 이 모델을 벤더 백엔드로 붙일 준비가 됐는지(값은 절대 담지 않는다). */
+export interface VendorEnvReadiness {
+  /** 이 모델의 벤더. 레지스트리에 없으면 undefined. */
+  vendor?: VendorId;
+  /** 벤더 프로파일이 있는 행인가(= env-swap 벤더인가). */
+  hasProfile: boolean;
+  /** 필요한 시크릿 env **키 이름**들. */
+  requiredEnvKeys: string[];
+  /** 그중 아직 설정되지 않은 키 이름들. */
+  missingEnvKeys: string[];
+  /** 스폰 시 프로파일이 실제로 얹히는가. */
+  ready: boolean;
+}
+
+/**
+ * 벤더 크레덴셜 준비 상태. `verify:models` 런북과 테스트가 "무슨 env 를 넣어야
+ * 켜지나" 를 **값 없이** 물어보는 창구다.
+ */
+export function vendorEnvReadiness(pinnedModelId?: string): VendorEnvReadiness {
+  const entry = getModel(pinnedModelId ?? "");
+  const profile = envProfileForModel(pinnedModelId);
+  const hasProfile = Object.keys(profile).length > 0;
+  if (!hasProfile) {
+    return {
+      ...(entry ? { vendor: entry.provider } : {}),
+      hasProfile: false,
+      requiredEnvKeys: [],
+      missingEnvKeys: [],
+      ready: true, // 프로파일이 없는 행은 CLI 자기 로그인으로 이미 붙는다
+    };
+  }
+  const { missing } = resolveVendorEnvProfile(profile);
+  const required = [
+    ...new Set(
+      Object.values(profile)
+        .map((v) => vendorEnvSecretRef(v))
+        .filter((k): k is string => Boolean(k)),
+    ),
+  ].sort();
+  return {
+    ...(entry ? { vendor: entry.provider } : {}),
+    hasProfile: true,
+    requiredEnvKeys: required,
+    missingEnvKeys: missing,
+    ready: missing.length === 0,
+  };
+}
+
+/**
+ * 핀된 모델의 벤더 프로파일을 스폰 env 에 얹는다(레지스트리 조회 + 시크릿 해석 +
+ * `mergeVendorEnv`). 프로파일이 없는 행(anthropic/openai)은 `base` 를 **그 객체
+ * 그대로** 돌려준다 — 기존 벤더 스폰 env 는 한 바이트도 안 바뀐다.
+ *
+ * ★시크릿이 하나라도 없으면 **프로파일 전체를 얹지 않는다**(부분 주입 금지).
+ * `ANTHROPIC_BASE_URL` 만 얹히고 토큰이 빠지면 claude CLI 가 **우리 Anthropic
+ * 크레덴셜을 그대로 들고** 남의 엔드포인트로 붙는다 — 유출이고, 실패 원인도
+ * "왜 인증이 안 되지" 로 오독된다. 전부-아니면-전무가 유일하게 안전하다.
+ *
+ * 그래도 **스폰은 계속된다**(throw 하지 않는다). 키가 없는 상태에서 GLM 을 지정하면
+ * claude 가 Anthropic 에 `--model glm-4.7` 을 물어보고 그 CLI 의 정상 에러로
+ * 끝나는데, 그 편이 "티켓이 스폰 실패로 멈추는 것" 보다 낫고 원인도 아래 경고
+ * 한 줄로 즉시 드러난다(§8.3 "spawn 이 깨지는 것은 불허" 불변식).
  *
  * @param pinnedModelId 이 launch 가 실제로 쓰는 구체 모델 id(없으면 no-op)
  */
@@ -1134,9 +1225,23 @@ export function applyVendorEnv(
 ): Record<string, string> {
   const profile = envProfileForModel(pinnedModelId);
   if (Object.keys(profile).length === 0) return base;
-  return mergeVendorEnv(base, profile, {
+
+  const vendor = getModel(pinnedModelId ?? "")?.provider;
+  const { resolved, missing } = resolveVendorEnvProfile(profile);
+  if (missing.length > 0) {
+    // ★키 **이름**만 남긴다. 값은 로그에 절대 나가지 않는다.
+    console.warn("[agent-config] 벤더 크레덴셜 미설정 — 프로파일 미주입", {
+      model: pinnedModelId ?? "unknown",
+      vendor: vendor ?? "unknown",
+      missingEnvKeys: missing,
+      effect: `${vendor ?? "벤더"} 대신 하네스 기본 백엔드로 스폰된다(부분 주입 금지)`,
+      fix: `v3/.env 에 ${missing.join(", ")} 를 설정하고 앱을 재시작하세요`,
+    });
+    return base;
+  }
+  return mergeVendorEnv(base, resolved, {
     model: pinnedModelId,
-    vendor: getModel(pinnedModelId ?? "")?.provider,
+    vendor,
   });
 }
 

@@ -510,9 +510,15 @@ const REGISTRY_ROWS: BenchRecord[] = [
 
 const REFERENCE_ROWS: BenchRecord[] = [
   // ── Z.ai GLM ──────────────────────────────────────────────────────────
+  // ★glm-4.7 은 MTtCVCP4 로 레지스트리에 편입됐다(provider=zai, harness=claude).
+  // 그래서 이 행은 `kind: "registry"` 이고 id 도 레지스트리 표기(소문자 구체 id)를
+  // 쓴다 — 위 validateBenchRecords 의 역방향 검증이 이 전환을 강제했다.
+  // ★점수는 **벤더 자체 하네스** 기준이다. 바로 아래 GLM-4.6 두 행이 같은 모델에서
+  // 스캐폴드만 바꿔 12.8pt 차이를 내는 것이 그 경고의 실물이다 — 우리 하네스(claude
+  // CLI + Marblo 배선)에서의 값은 아직 아무도 모른다.
   {
-    model: "GLM-4.7",
-    kind: "reference",
+    model: "glm-4.7",
+    kind: "registry",
     benchmark: "swe-bench-verified",
     version: "unspecified",
     harness: {

@@ -269,8 +269,15 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
   });
 
   it("추정 단가는 estimated 로 표시돼 사실로 위장하지 않는다", () => {
-    // 현재 확정 못 한 항목은 gpt-5.4 하나(PR#596 크롤이 본체 행 미확정).
-    expect(estimatedPricingModelIds()).toEqual(["gpt-5.4"]);
+    // gpt-5.4  — PR#596 크롤이 본체 행 단가를 미확정.
+    // glm-*    — 공식 API 리스트 단가는 확인했지만(docs.z.ai/guides/overview/pricing)
+    //            우리 접근 경로가 정액 Coding Plan 이라 per-token 이 실비용이 아니다.
+    //            상한으로 잡아두고 쿼터 기반 비용축(서베이 V1-5)에서 확정한다.
+    expect(estimatedPricingModelIds()).toEqual([
+      "gpt-5.4",
+      "glm-5.2",
+      "glm-4.7",
+    ]);
     // 추정치는 과소보고를 피하려고 보수적으로(=5.5 와 동일하게) 잡는다.
     expect(perTokenRateFor("gpt-5.4").outputPer1M).toBeGreaterThanOrEqual(
       perTokenRateFor("gpt-5.5").outputPer1M,

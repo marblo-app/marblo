@@ -22,6 +22,7 @@ import path from "path";
 import {
   ENV_PROFILE_SUPPORTED_HARNESSES,
   HARNESS_IDS,
+  HARNESS_NATIVE_VENDOR,
   MODEL_REGISTRY,
   VENDOR_IDS,
   envProfileForModel,
@@ -48,6 +49,15 @@ import { ladderFor } from "../../electron/model-ladder";
 import type { ModelType } from "../../electron/agent-manager";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-axis-"));
+
+/**
+ * 하네스 네이티브 벤더 행(= CLI 자기 로그인으로 붙는 행). 회귀 0 단언의 대상이다.
+ * env-swap 벤더 행(GLM 등)은 정의상 env 를 바꾸므로 여기서 제외되고, 그쪽은
+ * `vendor-glm-zai.test.ts` 가 따로 본다.
+ */
+const NATIVE_ROWS = MODEL_REGISTRY.filter(
+  (m) => m.provider === HARNESS_NATIVE_VENDOR[m.harness],
+);
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -110,8 +120,11 @@ describe("★회귀 0 — 기존 벤더(claude/codex) 스폰이 그대로다", (
     }
   });
 
-  it("★오늘 레지스트리엔 envProfile 을 가진 행이 하나도 없다 — env 주입은 완전한 no-op", () => {
-    for (const entry of MODEL_REGISTRY) {
+  it("★벤더-네이티브 행(anthropic/openai)엔 envProfile 이 없다 — 그 행들의 env 주입은 완전한 no-op", () => {
+    // ★MTtCVCP4 이후 레지스트리엔 프로파일을 가진 행이 존재한다(GLM). 회귀 0 의
+    // 주장은 "프로파일이 하나도 없다" 가 아니라 **"기존 벤더 행은 그대로다"** 로
+    // 좁혀진다 — 그 경계를 여기서 명시적으로 고정한다.
+    for (const entry of NATIVE_ROWS) {
       expect(entry.envProfile, entry.id).toBeUndefined();
       expect(envProfileForModel(entry.id), entry.id).toEqual({});
     }
@@ -119,7 +132,7 @@ describe("★회귀 0 — 기존 벤더(claude/codex) 스폰이 그대로다", (
 
   it("★applyVendorEnv 가 기존 모델에 대해 base 를 **같은 객체 그대로** 돌려준다", () => {
     const base = { MARBLO_AGENT_ID: "a1", PATH: "/usr/bin" };
-    for (const entry of MODEL_REGISTRY) {
+    for (const entry of NATIVE_ROWS) {
       // 참조 동일성 = "env 를 한 바이트도 안 건드렸다" 의 가장 강한 형태.
       expect(applyVendorEnv(base, entry.id), entry.id).toBe(base);
       for (const alias of entry.aliases) {
@@ -212,13 +225,24 @@ describe("★회귀 0 — 기존 벤더(claude/codex) 스폰이 그대로다", (
     });
     expect(ladderFor("claude")!.harness).toBe("claude");
     expect(ladderFor("gpt")!.harness).toBe("gpt");
-    // 하네스 필터와 벤더 필터가 오늘은 같은 집합을 준다(1:1 이므로).
+    // ★두 축이 실제로 갈라졌다: claude 하네스에는 anthropic 아닌 벤더가 함께 선다.
+    // (축이 하나였다면 이 두 집합은 영원히 같았을 것이다.)
     expect(modelsByHarness("claude").map((m) => m.id)).toEqual(
-      modelsByVendor("anthropic").map((m) => m.id),
+      expect.arrayContaining(modelsByVendor("anthropic").map((m) => m.id)),
     );
+    expect(modelsByHarness("claude").length).toBeGreaterThan(
+      modelsByVendor("anthropic").length,
+    );
+    // 벤더 필터는 그 벤더 행만 준다 — 하네스가 같아도 섞이지 않는다.
+    for (const m of modelsByVendor("anthropic"))
+      expect(m.provider).toBe("anthropic");
     expect(modelsByHarness("gpt").map((m) => m.id)).toEqual(
       modelsByVendor("openai").map((m) => m.id),
     );
+    // 사다리는 여전히 anthropic 행만 태운다(GLM 은 LADDER_EXCLUSIONS).
+    for (const rung of ladderFor("claude")!.rungs) {
+      expect(getModel(rung.model)!.provider, rung.model).toBe("anthropic");
+    }
   });
 
   it("파서·핀이 두 축을 함께 돌려주되 하네스 값은 종전 그대로다", () => {
@@ -243,10 +267,12 @@ describe("★회귀 0 — 기존 벤더(claude/codex) 스폰이 그대로다", (
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
- * Z.ai GLM 형태의 행. **레지스트리에 넣지 않는다** — 이 티켓은 표현·배선만이고,
- * 실제 편입(구독 결제·라이브 검증)은 후속 티켓 MTtCVCP4 다.
+ * Z.ai GLM 형태의 **합성** 행. 축분리 자체(두 축이 독립이라는 것)를 레지스트리
+ * 데이터와 무관하게 증명하는 것이 목적이라, 실제 편입(MTtCVCP4 로 레지스트리에
+ * 들어간 `glm-5.2`/`glm-4.7`) 이후에도 그대로 둔다 — 이 파일은 "표현 가능한가",
+ * `vendor-glm-zai.test.ts` 는 "실제로 등록·주입되는가" 를 본다.
  *
- * 배선값 출처: v3/docs/VENDOR-EXPANSION-SURVEY.md §2.4 (docs.z.ai/devpack/tool/claude).
+ * 배선값 출처: docs.z.ai/devpack/tool/claude.
  * ★토큰은 값이 아니라 자리표시자다 — 시크릿을 코드에 박지 않는다.
  */
 const GLM_ROW: ModelRegistryEntry = {

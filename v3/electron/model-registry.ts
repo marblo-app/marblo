@@ -166,14 +166,26 @@ export interface ModelVerification {
  * 자리다. 예: GLM 은 `claude` 하네스에 `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`
  * 만 갈아끼우면 돈다(서베이 §2.4).
  *
- * ★이 티켓(USbdRV4k)은 **표현·배선 자리만** 만든다. 실제 GLM 값 등록은 후속
- * 티켓(MTtCVCP4)이고, 지금 레지스트리에는 `envProfile` 을 가진 행이 하나도 없다
- * — 그래서 스폰 env 가 종전과 바이트 동일하다(회귀 0).
+ * ★시크릿을 여기 박지 않는다. 토큰류는 값이 아니라 **읽어올 env 키 이름**을
+ * `${ZAI_API_KEY}` 형태의 자리표시자로 적는다(MTtCVCP4 에서 확정). 해석은
+ * `agent-config.applyVendorEnv` 가 스폰 시점에 `process.env`(= `v3/.env` dotenv
+ * 단일소스)에서 하고, 키가 없으면 **프로파일 전체를 얹지 않는다** — 자세한 사유는
+ * 그 함수 주석 참조("반쪽 프로파일" 이 우리 Anthropic 크레덴셜을 남의 엔드포인트로
+ * 보내는 사고를 막는다).
  *
- * ★시크릿을 여기 박지 않는다. 토큰류는 값이 아니라 **읽어올 env 키 이름**으로
- * 표현하거나(후속 티켓 결정) 사용자 설정에서 주입한다.
+ * 자리표시자는 **값 전체**여야 한다(`"Bearer ${K}"` 같은 부분보간 금지). 부분보간을
+ * 허용하면 시크릿이 다른 문자열에 섞여 들어가 마스킹·감사가 어려워진다 — 아래
+ * 부팅 가드가 강제한다.
  */
 export type VendorEnvProfile = Readonly<Record<string, string>>;
+
+/** `${ENV_VAR}` 자리표시자(값 전체일 때만 유효). */
+const VENDOR_ENV_SECRET_REF = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
+
+/** 이 프로파일 값이 시크릿 참조면 그 env 키 이름, 아니면 undefined. */
+export function vendorEnvSecretRef(value: string): string | undefined {
+  return VENDOR_ENV_SECRET_REF.exec(value)?.[1];
+}
 
 export interface ModelRegistryEntry {
   /** CLI/API 에 그대로 넘기는 구체 모델 id. */
@@ -239,6 +251,20 @@ const CODEX_PROBE: ModelVerification = {
   cli: "0.145.0",
   method:
     "~/.codex/models_cache.json (fetched_at 2026-07-25T09:59:42Z, client_version 0.145.0) 원문",
+};
+
+/**
+ * Z.ai GLM — **CLI 프로브가 아니라 벤더 공식문서 크롤**이다. 구독키(Coding Plan)가
+ * 없으면 `claude -p --model glm-4.7` 프로브 자체가 불가능하므로, 이 행들의 `verified`
+ * 는 "문서에서 이 id·이 엔드포인트를 읽었다" 까지만 주장한다. 라이브 대조는 키를
+ * 받은 뒤 `npm run verify:models`(벤더 프로파일 섹션)가 자동으로 돌린다.
+ */
+const ZAI_DOCS_PROBE: ModelVerification = {
+  at: "2026-07-26",
+  cli: "n/a (구독키 미보유 — 라이브 프로브 대기)",
+  method:
+    "gstack /browse 크롤: docs.z.ai/devpack/tool/claude · /devpack/latest-model · " +
+    "/guides/overview/pricing (1차 출처). 모델 id·엔드포인트·단가 전부 원문 대조",
 };
 
 /** 5.6 계열 effort 축(max/ultra 까지). */
@@ -412,6 +438,76 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
     status: "active",
   },
 
+  // ── Z.ai GLM (첫 env-swap 벤더 — 서베이 §2.4) ──────────────────────────
+  // ★이 두 행이 **레퍼런스 패턴**이다. 신규 (B)형 벤더(MiniMax 등)는 코드를 한 줄도
+  // 안 늘리고 여기 같은 모양의 행만 추가하면 된다: harness=claude(우리가 이미
+  // 스폰하는 바이너리) + provider=<벤더> + envProfile(엔드포인트 + 시크릿 참조).
+  //
+  // 실측 출처(2026-07-26 gstack /browse 크롤, 1차 출처만):
+  //   docs.z.ai/devpack/tool/claude   — ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN 배선
+  //   docs.z.ai/devpack/latest-model  — "Claude Code / Goose (Anthropic-compatible):
+  //                                      https://api.z.ai/api/anthropic", 모델 전환표
+  //   docs.z.ai/guides/overview/pricing — 텍스트 모델 per-1M 단가표
+  //
+  // ★`ANTHROPIC_DEFAULT_*_MODEL` 을 함께 얹는 이유: 우리는 `--model <id>` 로 핀하지만,
+  // claude CLI 는 그 밖의 자리(요약·제목 생성 등 내부 alias 경로)에서 `opus`/`sonnet`/
+  // `haiku` 를 자체적으로 해석한다. 매핑을 안 주면 그 호출들이 **Anthropic 모델명 그대로**
+  // Z.ai 엔드포인트에 나가 실패한다. 세 키 전부 GLM id 로 접어 벤더 경계를 닫는다
+  // (docs.z.ai 의 "default configuration" 도 세 키를 모두 지정한다).
+  //
+  // ★1M 컨텍스트 변종(`glm-5.2[1m]`)은 등록하지 않았다 — 별도 env
+  // (`CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000`)와 최신 CLI 를 요구하고, 우리가 아직
+  // 라이브로 확인하지 못했다. 구독키 확보 후 별 행으로 편입한다.
+  {
+    id: "glm-5.2",
+    harness: "claude", // 우리 claude 바이너리를 그대로 스폰한다(신규 하네스 0)
+    provider: "zai", // 붙는 백엔드는 Anthropic 이 아니라 Z.ai 다
+    envProfile: {
+      ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "${ZAI_API_KEY}", // ★값이 아니라 env 키 이름
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5.2",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.2",
+      // haiku 자리는 벤더 문서가 더 싼 모델을 권한다. 우리는 **레지스트리에 등록된**
+      // id 만 쓴다 — 미등록 id 가 스폰 env 로 새면 cost-tracker 가 단가를 모르는
+      // "유령 비용" 이 된다(vzHgU4Tx 설계문서의 동일 실패모드).
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-4.7",
+    },
+    aliases: [],
+    // ★벤치 미확보(model-bench-reference 에 GLM 행 없음). 등급은 **벤더 자기
+    // 포지셔닝**(5.2=현행 플래그십, 4.7=직전 세대)에 따른 잠정값이고, 라우팅
+    // 사다리엔 아직 안 들어가므로(LADDER_EXCLUSIONS) 이 값이 자동 선택을 바꾸지
+    // 않는다. 실측 후 조정 대상.
+    capability: "top",
+    // claude 하네스엔 CLI 인자로 줄 effort 축이 없다. (Z.ai 문서는 세션 내
+    // `/effort` 명령이 GLM effort 로 매핑된다고 적지만, 그건 우리 스폰 argv 가
+    // 건드릴 수 있는 축이 아니다 — 그래서 여기선 빈 배열이 정직하다.)
+    efforts: [],
+    // 공식 API 리스트 단가($/1M). ★우리 접근 경로는 정액 Coding Plan 이라 실
+    // 한계비용은 이보다 낮다(≈0) — 그래서 estimated 로 표시한다. 이 값은
+    // "과소보고하지 않는" 상한이고, 쿼터 기반 비용축은 후속(서베이 V1-5).
+    pricing: { inputPer1M: 1.4, outputPer1M: 4.4, estimated: true },
+    verified: ZAI_DOCS_PROBE,
+    status: "active",
+  },
+  {
+    id: "glm-4.7",
+    harness: "claude",
+    provider: "zai",
+    envProfile: {
+      ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "${ZAI_API_KEY}",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-4.7",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-4.7",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-4.7",
+    },
+    aliases: [],
+    capability: "mid",
+    efforts: [],
+    pricing: { inputPer1M: 0.6, outputPer1M: 2.2, estimated: true },
+    verified: ZAI_DOCS_PROBE,
+    status: "active",
+  },
+
   // 의도적 미등록(§1.2 표에는 있으나 라우팅 후보가 아님):
   //   - gpt-5.3-codex-spark : api ❌ (Codex CLI 전용). 단가만 cost-tracker 의
   //     legacy 프리픽스 행("gpt-5.3-codex" $1.75/$14)이 커버한다.
@@ -444,7 +540,31 @@ export const ENV_PROFILE_SUPPORTED_HARNESSES: readonly HarnessId[] = [
   "gpt",
 ] as const;
 
+/**
+ * 각 하네스가 **아무 프로파일 없이** 붙는 백엔드(= 그 CLI 자기 로그인의 주인).
+ *
+ * 이 표가 있는 이유는 아래 부팅 가드 하나 때문이다: `provider` 만 바꾸고
+ * `envProfile` 을 잊은 행은 **조용히 네이티브 벤더로 스폰된다**. GLM 이라고 적힌
+ * 행이 실제로는 Anthropic 쿼터를 태우는 것이 이 티켓이 막아야 할 실패모드다.
+ */
+export const HARNESS_NATIVE_VENDOR: Readonly<Record<HarnessId, VendorId>> = {
+  claude: "anthropic",
+  gemini: "google",
+  gpt: "openai",
+  antigravity: "google",
+  local: "local",
+  custom: "custom",
+};
+
 for (const entry of MODEL_REGISTRY) {
+  const native = HARNESS_NATIVE_VENDOR[entry.harness];
+  if (entry.provider !== native && !entry.envProfile) {
+    throw new Error(
+      `[model-registry] "${entry.id}" 는 provider=${entry.provider} 인데 envProfile 이 없습니다. ` +
+        `harness="${entry.harness}" 는 프로파일이 없으면 ${native} 로 붙습니다 — ` +
+        "벤더 이름만 바꾼 행은 조용히 네이티브 벤더 쿼터를 태웁니다.",
+    );
+  }
   if (!entry.envProfile) continue;
   if (!ENV_PROFILE_SUPPORTED_HARNESSES.includes(entry.harness)) {
     throw new Error(
@@ -454,6 +574,34 @@ for (const entry of MODEL_REGISTRY) {
         )}). 그 하네스의 스폰 분기에 벤더 env 머지를 먼저 배선하세요.`,
     );
   }
+  for (const [key, value] of Object.entries(entry.envProfile)) {
+    // 부분보간 금지(`"Bearer ${K}"`). 값 전체가 자리표시자이거나, 자리표시자가
+    // 아예 없거나 둘 중 하나여야 마스킹·감사 경계가 단순하게 유지된다.
+    if (value.includes("${") && !vendorEnvSecretRef(value)) {
+      throw new Error(
+        `[model-registry] "${entry.id}" envProfile.${key} 의 \${...} 자리표시자는 ` +
+          '값 전체여야 합니다(부분보간 금지). 예: "${ZAI_API_KEY}"',
+      );
+    }
+  }
+}
+
+/**
+ * 이 모델을 벤더 백엔드로 붙이는 데 **반드시 있어야 하는 env 키 이름들**(값 아님).
+ *
+ * 런북·`verify:models`·설정 UI 가 "무엇을 넣어야 켜지나" 를 값 없이 물어볼 수 있게
+ * 하는 자리다. 시크릿 값은 이 모듈이 아예 읽지 않는다(`process.env` 접근은
+ * `agent-config` 쪽 한 군데뿐).
+ */
+export function vendorEnvSecretKeys(idOrAlias?: string): string[] {
+  const profile = getModel(idOrAlias ?? "")?.envProfile;
+  if (!profile) return [];
+  const keys = new Set<string>();
+  for (const value of Object.values(profile)) {
+    const ref = vendorEnvSecretRef(value);
+    if (ref) keys.add(ref);
+  }
+  return [...keys].sort();
 }
 
 /** 입력 정규화 — CLI 는 대소문자를 가리지 않고 env 값엔 공백이 섞인다. */

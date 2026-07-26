@@ -236,12 +236,19 @@ describe("오케 셀렉터 compound 값", () => {
     expect(ids).toContain("claude-sonnet-5");
     // frontier(fable5)가 맨 앞.
     expect(ids[0]).toBe("claude-fable-5");
-    // 레지스트리의 active claude 모델 수와 일치 — 목록을 따로 만들지 않았다는 증거.
+    // 레지스트리의 active claude **네이티브 벤더** 행 수와 일치 — 목록을 따로
+    // 만들지 않았다는 증거. ★env-swap 벤더 행(GLM 등)은 셀렉터에서 제외된다
+    // (사유는 model-selection 의 `selectorEligible` 주석: 영구 저장되는 기본값에
+    // 조건부 크레덴셜을 얹지 않는다). 그 행들은 dispatch 명시 지정으로 닿는다.
     expect(choices).toHaveLength(
       MODEL_REGISTRY.filter(
-        (m) => m.harness === "claude" && m.status === "active",
+        (m) =>
+          m.harness === "claude" &&
+          m.status === "active" &&
+          m.provider === "anthropic",
       ).length,
     );
+    expect(choices.every((c) => c.vendor === "anthropic")).toBe(true);
   });
 
   // ── Codex 변형(이 티켓) ──────────────────────────────────────────────
@@ -256,9 +263,8 @@ describe("오케 셀렉터 compound 값", () => {
     expect(ids).toContain("gpt-5.5");
     expect(ids[0]).toBe("gpt-5.6-sol"); // frontier 가 맨 앞
     expect(choices).toHaveLength(
-      MODEL_REGISTRY.filter(
-        (m) => m.harness === "gpt" && m.status === "active",
-      ).length,
+      MODEL_REGISTRY.filter((m) => m.harness === "gpt" && m.status === "active")
+        .length,
     );
     // 값·라벨 포맷은 Claude 와 같은 규칙(프로바이더 프리픽스 + 레지스트리 id).
     expect(choices[0].value).toBe("codex:gpt-5.6-sol");

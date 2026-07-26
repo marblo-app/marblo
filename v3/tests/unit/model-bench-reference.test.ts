@@ -393,11 +393,20 @@ describe("model-bench-reference / 수치 스팟체크(출처 대조)", () => {
   });
 
   it("벤더 후보 참조행", () => {
+    // ★glm-4.7 은 MTtCVCP4 로 레지스트리에 편입되면서 참조행 → registry 행이 됐다
+    // (표기도 벤더 블로그의 "GLM-4.7" 이 아니라 레지스트리 구체 id). 이 전환은
+    // validateBenchRecords 의 역방향 검증이 부팅 시 강제한다.
     const glm47 = BENCH_REFERENCE.find(
-      (r) => r.model === "GLM-4.7" && r.benchmark === "swe-bench-verified",
+      (r) => r.model === "glm-4.7" && r.benchmark === "swe-bench-verified",
     );
     expect(glm47?.score).toBe(73.8);
-    expect(glm47?.kind).toBe("reference");
+    expect(glm47?.kind).toBe("registry");
+    // 아직 편입 전인 GLM-4.6 행들은 참조행 그대로다.
+    expect(
+      BENCH_REFERENCE.filter((r) => r.model === "GLM-4.6").every(
+        (r) => r.kind === "reference",
+      ),
+    ).toBe(true);
 
     // Grok 4.5 는 Verified 가 없고 Pro 만 있다.
     const grokRows = benchRowsForModel("Grok 4.5");

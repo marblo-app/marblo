@@ -165,7 +165,13 @@ describe("★실단가 기반 순서 (PR 근거)", () => {
   });
 
   it("claude 칸도 같은 규칙으로 설명된다(mid=sonnet5, top=opus5, frontier=fable5)", () => {
-    expect(cheapestByCapability("claude", "mid")[0].id).toBe("claude-sonnet-5");
+    // ★"실단가 최저" 는 **사다리 후보 안에서** 따진다. env-swap 벤더 행(GLM)은
+    // 단가가 더 싸도 별도 구독이 필요해 LADDER_EXCLUSIONS 에 있고, 그 배제 사유가
+    // 곧 여기서 제외하는 근거다 — 배제 목록을 지우면 이 단언이 먼저 깨진다.
+    const eligible = cheapestByCapability("claude", "mid").filter(
+      (m) => !(m.id in LADDER_EXCLUSIONS),
+    );
+    expect(eligible[0].id).toBe("claude-sonnet-5");
     expect(entryRung("claude", "simple")!.model).toBe("claude-sonnet-5");
     expect(entryRung("claude", "standard")!.model).toBe("claude-opus-5");
     expect(entryRung("claude", "complex")!.model).toBe("claude-fable-5");
