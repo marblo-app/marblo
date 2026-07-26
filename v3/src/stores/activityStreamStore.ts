@@ -26,13 +26,15 @@ interface ActivityStreamState {
 const OPEN_KEY = "marblo.activityStream.open";
 
 function readOpen(): boolean {
-  if (typeof window === "undefined") return true;
+  if (typeof window === "undefined") return false;
   try {
-    // Default OPEN when unset — the panel is the canonical "what's happening
-    // now" surface. Only an explicit "0" keeps it closed.
-    return localStorage.getItem(OPEN_KEY) !== "0";
+    // Default CLOSED when unset. The shell's cold-open shape is the three-way
+    // split (files · terminals · work view) and Activity is its opt-in fourth
+    // region — one click away on the far-right rail, or ⌘⇧A. Only an explicit
+    // "1" (the user opened it) restores it on the next start.
+    return localStorage.getItem(OPEN_KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 

@@ -21,6 +21,17 @@ import {
   parseStoredVerticalRatio,
   verticalRatioFromPointer,
   visibleRightTabs,
+  BOARD_MIN_WIDTH,
+  BOARD_COLUMN_COUNT,
+  BOARD_COLUMN_MIN_WIDTH,
+  BOARD_COLUMN_GAP,
+  BOARD_PADDING,
+  DIVIDER_WIDTH,
+  ACTIVITY_PANEL_WIDTH,
+  ACTIVITY_MIN_PANEL_WIDTH,
+  ACTIVITY_COLLAPSE_BREAKPOINT,
+  activityPanelWidth,
+  ratioWithActivityOpen,
 } from "../../src/lib/splitWorkspaceLayout";
 
 describe("clampRatio", () => {
@@ -241,5 +252,112 @@ describe("initialActiveTab", () => {
   it("never touches a persisted non-startHere tab, complete or not", () => {
     expect(initialActiveTab("code", true, true)).toBe("code");
     expect(initialActiveTab("board", true, true)).toBe("board");
+  });
+});
+
+describe("BOARD_MIN_WIDTH", () => {
+  // Pins the constant to the board's own Tailwind classes. If KanbanColumn's
+  // min-w or KanbanBoard's gap/padding changes without this constant following,
+  // the shell would keep reserving the wrong width and the REVIEW column would
+  // quietly slide back behind the horizontal scroll.
+  it("equals the four-column minimum it claims to be", () => {
+    expect(BOARD_COLUMN_COUNT).toBe(4);
+    expect(
+      BOARD_COLUMN_COUNT * BOARD_COLUMN_MIN_WIDTH +
+        (BOARD_COLUMN_COUNT - 1) * BOARD_COLUMN_GAP +
+        2 * BOARD_PADDING,
+    ).toBe(BOARD_MIN_WIDTH);
+  });
+});
+
+describe("activityPanelWidth", () => {
+  it("returns the preferred width on a wide work area", () => {
+    expect(activityPanelWidth(2400)).toBe(ACTIVITY_PANEL_WIDTH);
+    expect(activityPanelWidth(1600)).toBe(ACTIVITY_PANEL_WIDTH);
+  });
+
+  it("never exceeds 30% of the work area in the mid band", () => {
+    // 900 * 0.3 = 270 — narrower than the preferred 280.
+    expect(activityPanelWidth(900)).toBe(270);
+    expect(activityPanelWidth(900)).toBeLessThan(ACTIVITY_PANEL_WIDTH);
+  });
+
+  it("floors at the minimum panel width", () => {
+    const w = activityPanelWidth(ACTIVITY_COLLAPSE_BREAKPOINT);
+    expect(w).not.toBeNull();
+    expect(w!).toBeGreaterThanOrEqual(ACTIVITY_MIN_PANEL_WIDTH);
+  });
+
+  it("collapses to the rail below the breakpoint", () => {
+    expect(activityPanelWidth(ACTIVITY_COLLAPSE_BREAKPOINT - 1)).toBeNull();
+    expect(activityPanelWidth(320)).toBeNull();
+  });
+
+  it("answers the preferred width while unmeasured", () => {
+    // First frame before the ResizeObserver reports — must not flash collapsed.
+    expect(activityPanelWidth(0)).toBe(ACTIVITY_PANEL_WIDTH);
+    expect(activityPanelWidth(-1)).toBe(ACTIVITY_PANEL_WIDTH);
+    expect(activityPanelWidth(Number.NaN)).toBe(ACTIVITY_PANEL_WIDTH);
+  });
+
+  it("is monotonic in the available width", () => {
+    const widths = [700, 800, 900, 1000, 1200, 1600, 2400];
+    const seen = widths.map((w) => activityPanelWidth(w) ?? 0);
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
+    }
+  });
+});
+
+describe("ratioWithActivityOpen", () => {
+  // The whole point: the work view keeps BOARD_MIN_WIDTH so the board's four
+  // columns (TODO / CLAIMED / IN PROGRESS / REVIEW) all stay on screen.
+  function workViewWidth(splitWidth: number, ratio: number): number {
+    return splitWidth * (1 - ratio) - DIVIDER_WIDTH;
+  }
+
+  it("leaves a ratio that already fits untouched", () => {
+    // 3000 * 0.6 - 4 = 1796 ≫ 880 — no cap needed.
+    expect(ratioWithActivityOpen(0.4, 3000)).toBe(0.4);
+  });
+
+  it("caps the terminal ratio so the board keeps its four columns", () => {
+    // 1200 * 0.6 - 4 = 716 — 36px short of the four-column minimum, so the
+    // terminal column has to give those 36px back.
+    const splitWidth = 1200;
+    const capped = ratioWithActivityOpen(DEFAULT_RATIO, splitWidth);
+    expect(capped).toBeLessThan(DEFAULT_RATIO);
+    expect(workViewWidth(splitWidth, capped)).toBeGreaterThanOrEqual(
+      BOARD_MIN_WIDTH,
+    );
+  });
+
+  it("preserves the board minimum across the realistic width band", () => {
+    for (let splitWidth = 1000; splitWidth <= 3000; splitWidth += 100) {
+      const r = ratioWithActivityOpen(MAX_RATIO, splitWidth);
+      expect(workViewWidth(splitWidth, r)).toBeGreaterThanOrEqual(
+        BOARD_MIN_WIDTH,
+      );
+    }
+  });
+
+  it("never drops below MIN_RATIO even when the board cannot fit", () => {
+    // 600px of split cannot host a 752px board at any ratio — the terminal
+    // column stops shrinking at MIN_RATIO and the board scrolls, exactly as it
+    // already does at that width with the panel closed.
+    expect(ratioWithActivityOpen(0.4, 600)).toBe(MIN_RATIO);
+    expect(ratioWithActivityOpen(0.4, 100)).toBe(MIN_RATIO);
+  });
+
+  it("never widens the terminal column beyond what was stored", () => {
+    for (const stored of [0.2, 0.3, 0.4, 0.55, 0.7]) {
+      expect(ratioWithActivityOpen(stored, 4000)).toBeLessThanOrEqual(stored);
+    }
+  });
+
+  it("falls back to the clamped stored ratio when unmeasured", () => {
+    expect(ratioWithActivityOpen(0.4, 0)).toBe(0.4);
+    expect(ratioWithActivityOpen(0.4, Number.NaN)).toBe(0.4);
+    expect(ratioWithActivityOpen(9, 0)).toBe(MAX_RATIO);
   });
 });

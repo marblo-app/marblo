@@ -33,9 +33,9 @@ export const workspace = {
   "workspace.tab.deploy": "배포",
 
   // Settings toggle
-  "workspace.settings.heading": "새 워크스페이스 (베타)",
+  "workspace.settings.heading": "새 워크스페이스",
   "workspace.settings.help":
-    "좌측에 오케스트레이터·에이전트 터미널을 고정하고, 우측에서 보드·코드·워크트리·이력 탭을 전환하는 IDE형 스플릿 셸입니다. 우측 탭을 바꿔도 좌측 터미널은 그대로 유지됩니다. 기본은 꺼짐이며, 켜도 기존 기능은 그대로 유지됩니다.",
+    "좌측에 파일 트리, 가운데에 오케스트레이터·에이전트 터미널, 우측에 보드·코드·워크트리·이력 탭을 두는 IDE형 스플릿 셸입니다. 우측 탭을 바꿔도 터미널은 그대로 유지됩니다. 기본으로 켜져 있으며, 끄면 이전 레이아웃으로 그대로 돌아갑니다.",
   "workspace.settings.toggleLabel": "새 워크스페이스 셸 사용",
   "workspace.settings.on": "켜짐",
   "workspace.settings.off": "꺼짐",

@@ -87,9 +87,11 @@ export const useSplitWorkspaceStore = create<SplitWorkspaceState>(
       isPersistedComplete(initialProgress),
     ),
     terminalCollapsed: parseStoredCollapsed(readString(COLLAPSE_KEY)),
-    // File tree defaults CLOSED — the split's terminals + work tabs are the
-    // primary surface; the tree is an opt-in navigator. Explicit "1" → open.
-    fileTreeOpen: readString(FILETREE_KEY) === "1",
+    // File tree defaults OPEN: the shell's cold-open shape is the three-way
+    // split (files · terminals · work view), so the tree is part of the default
+    // experience rather than something to be discovered. Explicit "0" (the user
+    // closed it) still wins and survives restarts.
+    fileTreeOpen: readString(FILETREE_KEY) !== "0",
 
     setRatio: (n) => {
       const ratio = clampRatio(n);

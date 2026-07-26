@@ -1,25 +1,30 @@
 import { create } from "zustand";
 
 /**
- * Single opt-in flag for the new unified Workspace shell (chrome-tab panes +
- * collapsible orchestrator spine + agent dock + browser pane + diff-A).
+ * Single flag for the unified Workspace shell (IDE split: file tree ·
+ * orchestrator + agent terminals · tabbed work view · activity).
  *
- * ★ DEFAULT OFF, and OFF must be a total no-op: App renders the existing
- * <Layout /> verbatim when this is false. The only reachable effect of this
- * store when disabled is that the Settings toggle reads `enabled === false`.
+ * ★ DEFAULT ON since the shell became the product's cold-open experience. The
+ * flag did not disappear — it inverted: it is now an opt-OUT back to the legacy
+ * <Layout />, and OFF must still be a total no-op (App renders <Layout />
+ * verbatim, pixel-identical to before the shell existed).
  *
- * Persisted to localStorage so the choice survives restarts. A read failure
- * (private mode, storage disabled) falls back to OFF — never accidentally ON.
+ * The polarity change is deliberately expressed as "explicit "0" wins", not as
+ * a flipped default with the same read: users who turned the shell OFF wrote
+ * "0" and keep the legacy layout across this change, while everyone who never
+ * touched the Settings toggle (no key at all) graduates to the shell. A read
+ * failure (private mode, storage disabled) lands on the shell too, since that
+ * is now the default experience rather than an experiment.
  */
 const STORAGE_KEY = "marblo.workspaceMode.enabled";
 
 function readInitial(): boolean {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") return true;
   try {
-    // Explicit "1" only. Anything else (missing, "0", garbage) → OFF.
-    return localStorage.getItem(STORAGE_KEY) === "1";
+    // Explicit "0" only (a deliberate opt-out). Missing / "1" / garbage → ON.
+    return localStorage.getItem(STORAGE_KEY) !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 

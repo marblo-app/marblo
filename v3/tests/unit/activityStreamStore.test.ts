@@ -38,34 +38,39 @@ describe("activityStreamStore open persistence", () => {
     vi.unstubAllGlobals();
   });
 
-  it("defaults open when nothing is persisted", async () => {
+  // Cold open is the THREE-way split (files / terminals / work view); Activity
+  // is the opt-in fourth region, one click away on the far-right rail.
+  it("defaults closed when nothing is persisted", async () => {
     const { store } = await loadStore();
-    expect(store.getState().open).toBe(true);
+    expect(store.getState().open).toBe(false);
   });
 
-  it("stays open unless an explicit '0' is stored", async () => {
+  it("stays closed unless an explicit '1' is stored", async () => {
     const open = await loadStore({ [OPEN_KEY]: "1" });
     expect(open.store.getState().open).toBe(true);
 
     const closed = await loadStore({ [OPEN_KEY]: "0" });
     expect(closed.store.getState().open).toBe(false);
+
+    const garbage = await loadStore({ [OPEN_KEY]: "yes" });
+    expect(garbage.store.getState().open).toBe(false);
   });
 
   it("toggle flips and persists", async () => {
     const { store, map } = await loadStore();
     store.getState().toggle();
-    expect(store.getState().open).toBe(false);
-    expect(map.get(OPEN_KEY)).toBe("0");
-    store.getState().toggle();
     expect(store.getState().open).toBe(true);
     expect(map.get(OPEN_KEY)).toBe("1");
+    store.getState().toggle();
+    expect(store.getState().open).toBe(false);
+    expect(map.get(OPEN_KEY)).toBe("0");
   });
 
   it("setOpen persists the explicit value", async () => {
     const { store, map } = await loadStore();
-    store.getState().setOpen(false);
-    expect(store.getState().open).toBe(false);
-    expect(map.get(OPEN_KEY)).toBe("0");
+    store.getState().setOpen(true);
+    expect(store.getState().open).toBe(true);
+    expect(map.get(OPEN_KEY)).toBe("1");
   });
 
   it("filter / viewMode stay in-memory (not persisted)", async () => {

@@ -47,7 +47,13 @@ export function KanbanColumn({
   return (
     <div
       ref={setNodeRef}
-      className={`flex flex-col flex-1 min-w-[200px] rounded-lg border transition-colors ${
+      // The floor is 168px, not 200: a column only ever reaches it when the
+      // board pane is tight, and at that point four narrow-but-readable
+      // columns beat three wide ones plus a REVIEW column hidden behind the
+      // horizontal scroll. Cards truncate/reflow, so nothing clips.
+      // ★ splitWorkspaceLayout.BOARD_MIN_WIDTH is derived from this number —
+      // change one and change the other (a test pins the arithmetic).
+      className={`flex flex-col flex-1 min-w-[168px] rounded-lg border transition-colors ${
         highlight
           ? "bg-blue-500/10 border-blue-500/50"
           : invalid

@@ -14,14 +14,42 @@ import { useNavigationStore } from "../../stores/navigationStore";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useActivityStreamStore } from "../../stores/activityStreamStore";
 import {
+  activityPanelWidth,
   isTerminalCollapsed,
   ratioFromPointer,
+  ratioWithActivityOpen,
   NARROW_BREAKPOINT,
 } from "../../lib/splitWorkspaceLayout";
 import { TerminalColumn } from "./TerminalColumn";
 import { WorkTabs } from "./WorkTabs";
 import { FileTree } from "../sidebar/FileTree";
 import { ActivityStreamPanel } from "../activity/ActivityStreamPanel";
+
+/**
+ * Observe an element's width via a callback ref. Returns the ref callback to
+ * attach, the live element ref (for pointer-geometry reads), and the measured
+ * width — seeded wide so nothing renders in its narrow/collapsed form for one
+ * frame before the first ResizeObserver callback.
+ */
+function useMeasuredWidth() {
+  const elRef = useRef<HTMLDivElement | null>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const [width, setWidth] = useState<number>(NARROW_BREAKPOINT * 2);
+  const refCb = useCallback((node: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    elRef.current = node;
+    if (!node) return;
+    setWidth(node.getBoundingClientRect().width);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (typeof w === "number") setWidth(w);
+    });
+    ro.observe(node);
+    observerRef.current = ro;
+  }, []);
+  useEffect(() => () => observerRef.current?.disconnect(), []);
+  return { refCb, elRef, width };
+}
 
 /**
  * Unified Workspace shell — the flag-ON experience (CEO-confirmed IDE split).
@@ -60,30 +88,37 @@ export function WorkspaceShell() {
   const activityOpen = useActivityStreamStore((s) => s.open);
   const toggleActivity = useActivityStreamStore((s) => s.toggle);
 
-  // Track the split container width for the narrow-window auto-collapse. A
-  // callback ref (dis)connects the observer as the body mounts/unmounts, so it
-  // survives the folder-pick gate's early returns. Seed wide to avoid a
-  // first-frame collapse flash before the observer reports the real width.
-  const bodyElRef = useRef<HTMLDivElement | null>(null);
-  const observerRef = useRef<ResizeObserver | null>(null);
-  const [bodyWidth, setBodyWidth] = useState<number>(NARROW_BREAKPOINT * 2);
-  const bodyRefCb = useCallback((node: HTMLDivElement | null) => {
-    observerRef.current?.disconnect();
-    bodyElRef.current = node;
-    if (!node) return;
-    setBodyWidth(node.getBoundingClientRect().width);
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width;
-      if (typeof w === "number") setBodyWidth(w);
-    });
-    ro.observe(node);
-    observerRef.current = ro;
-  }, []);
-  useEffect(() => () => observerRef.current?.disconnect(), []);
+  // Track the split container width for the narrow-window auto-collapse, and
+  // the enclosing work area (split + activity) for the Activity panel's width
+  // budget. Callback refs (dis)connect each observer as the node mounts /
+  // unmounts, so they survive the folder-pick gate's early returns. Seeded wide
+  // to avoid a first-frame collapse flash before the observers report.
+  const {
+    refCb: bodyRefCb,
+    elRef: bodyElRef,
+    width: bodyWidth,
+  } = useMeasuredWidth();
+  const { refCb: workAreaRefCb, width: workAreaWidth } = useMeasuredWidth();
 
   const collapsed = isTerminalCollapsed(terminalCollapsed, bodyWidth);
 
-  // Divider drag → set the left pane fraction, clamped to the legal band.
+  // Activity panel width, or null when the window is too narrow to host it
+  // beside the work view (→ slim rail). `open` stays true through an
+  // auto-collapse, so widening the window brings the panel straight back.
+  const activityWidth = activityOpen ? activityPanelWidth(workAreaWidth) : null;
+  const activityDocked = activityWidth != null;
+
+  // While the panel is docked, cap the terminal fraction so the board keeps its
+  // four columns — the panel's width comes out of the terminal column, never
+  // out of the board. The STORED ratio is untouched: closing the panel restores
+  // the user's drag verbatim.
+  const effectiveRatio = activityDocked
+    ? ratioWithActivityOpen(ratio, bodyWidth)
+    : ratio;
+
+  // Divider drag → set the left pane fraction, clamped to the legal band (and,
+  // while Activity is docked, to the board-preserving cap so the pane lands
+  // where the pointer left it instead of snapping back on release).
   const onDividerDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -91,7 +126,8 @@ export function WorkspaceShell() {
       if (!el) return;
       const move = (ev: MouseEvent) => {
         const rect = el.getBoundingClientRect();
-        setRatio(ratioFromPointer(ev.clientX, rect.left, rect.width));
+        const raw = ratioFromPointer(ev.clientX, rect.left, rect.width);
+        setRatio(activityDocked ? ratioWithActivityOpen(raw, rect.width) : raw);
       };
       const up = () => {
         window.removeEventListener("mousemove", move);
@@ -102,7 +138,7 @@ export function WorkspaceShell() {
       window.addEventListener("mousemove", move);
       window.addEventListener("mouseup", up);
     },
-    [setRatio],
+    [setRatio, activityDocked, bodyElRef],
   );
 
   // Deep-link to Settings (e.g. Upgrade modal CTA) → surface the Settings tab.
@@ -188,12 +224,14 @@ export function WorkspaceShell() {
           surfaces a non-blocking banner that deep-links to the 시작하기 tab. */}
       <CliSetupHost />
 
-      {/* Body: file-tree rail | split area (terminals | divider | tabs) |
-          activity rail. The two side panels sit OUTSIDE the measured split area
-          so opening/closing them never skews the terminal↔tabs ratio math or
-          the narrow-collapse breakpoint. */}
+      {/* Body: file-tree rail | file tree | work area, where the work area is
+          (split area | activity panel-or-rail). The file tree sits OUTSIDE the
+          measured split area so opening/closing it never skews the
+          terminal↔tabs ratio math or the narrow-collapse breakpoint; Activity
+          sits outside it too, but inside the measured WORK AREA, because its
+          width is budgeted against what the board needs. */}
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        {/* Far-left file-tree toggle rail (always present) + panel (opt-in). */}
+        {/* Far-left file-tree toggle rail (always present) + panel. */}
         <div className="flex h-full w-8 flex-shrink-0 flex-col items-center border-r border-gray-700 bg-gray-800 py-2">
           <button
             type="button"
@@ -230,92 +268,104 @@ export function WorkspaceShell() {
           </div>
         )}
 
-        {/* Middle split area — measured (bodyRefCb) for the horizontal divider
-            drag + narrow-window auto-collapse. */}
+        {/* Work area — measured (workAreaRefCb) so the Activity panel can be
+            sized against what is actually left for it. */}
         <div
-          ref={bodyRefCb}
+          ref={workAreaRefCb}
           className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
         >
-          {collapsed ? (
-            <>
-              <TerminalColumn
-                collapsed
-                onToggle={toggleTerminalCollapsed}
-                onOpenAgents={() => {
-                  if (terminalCollapsed) toggleTerminalCollapsed();
-                }}
-              />
-              <div className="min-w-0 flex-1 overflow-hidden">
-                <WorkTabs />
-              </div>
-            </>
-          ) : (
-            <>
-              <div
-                className="min-w-0 overflow-hidden"
-                style={{
-                  flexBasis: `${ratio * 100}%`,
-                  flexGrow: 0,
-                  flexShrink: 0,
-                }}
-              >
+          {/* Split area — measured (bodyRefCb) for the horizontal divider drag
+              + narrow-window auto-collapse. */}
+          <div
+            ref={bodyRefCb}
+            className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
+          >
+            {collapsed ? (
+              <>
                 <TerminalColumn
-                  collapsed={false}
+                  collapsed
                   onToggle={toggleTerminalCollapsed}
-                  onOpenAgents={() => {}}
+                  onOpenAgents={() => {
+                    if (terminalCollapsed) toggleTerminalCollapsed();
+                  }}
                 />
-              </div>
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <WorkTabs />
+                </div>
+              </>
+            ) : (
+              <>
+                <div
+                  className="min-w-0 overflow-hidden"
+                  style={{
+                    flexBasis: `${effectiveRatio * 100}%`,
+                    flexGrow: 0,
+                    flexShrink: 0,
+                  }}
+                >
+                  <TerminalColumn
+                    collapsed={false}
+                    onToggle={toggleTerminalCollapsed}
+                    onOpenAgents={() => {}}
+                  />
+                </div>
 
+                <div
+                  onMouseDown={onDividerDown}
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={t("workspace.terminals")}
+                  className="w-1 flex-shrink-0 cursor-col-resize bg-gray-700 transition-colors hover:bg-blue-600"
+                />
+
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <WorkTabs />
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Activity Stream — the shell's fourth region, docked beside the
+              work view at a budgeted width (never overlapping it, never wide
+              enough to push a board column off-screen). Too narrow a window,
+              or panel closed → the slim rail whose button re-opens it. */}
+          {activityWidth != null ? (
+            <ActivityStreamPanel width={activityWidth} />
+          ) : (
+            <div className="flex h-full w-8 flex-shrink-0 flex-col items-center border-l border-[#313244] bg-gray-800 py-2">
+              <button
+                type="button"
+                onClick={toggleActivity}
+                title={t("workspace.showActivity")}
+                aria-label={t("workspace.showActivity")}
+                aria-pressed={activityOpen}
+                className={`rounded p-1.5 hover:bg-gray-700 hover:text-gray-200 ${
+                  activityOpen ? "text-blue-400" : "text-gray-400"
+                }`}
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                  />
+                </svg>
+              </button>
               <div
-                onMouseDown={onDividerDown}
-                role="separator"
-                aria-orientation="vertical"
-                aria-label={t("workspace.terminals")}
-                className="w-1 flex-shrink-0 cursor-col-resize bg-gray-700 transition-colors hover:bg-blue-600"
-              />
-
-              <div className="min-w-0 flex-1 overflow-hidden">
-                <WorkTabs />
+                className="mt-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                style={{ writingMode: "vertical-rl" }}
+              >
+                {t("workspace.activity")}
               </div>
-            </>
+            </div>
           )}
         </div>
-
-        {/* Far-right Activity Stream: the full panel when open (its header ✕
-            closes it), else a slim rail whose button re-opens it. */}
-        {activityOpen ? (
-          <ActivityStreamPanel />
-        ) : (
-          <div className="flex h-full w-8 flex-shrink-0 flex-col items-center border-l border-[#313244] bg-gray-800 py-2">
-            <button
-              type="button"
-              onClick={toggleActivity}
-              title={t("workspace.showActivity")}
-              aria-label={t("workspace.showActivity")}
-              className="rounded p-1.5 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                />
-              </svg>
-            </button>
-            <div
-              className="mt-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
-              style={{ writingMode: "vertical-rl" }}
-            >
-              {t("workspace.activity")}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Global gates / hosts (parity with Layout). */}

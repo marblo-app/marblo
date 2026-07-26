@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { useWorkspaceModeStore } from "../../src/stores/workspaceModeStore";
 
 describe("workspaceModeStore", () => {
-  it("defaults to OFF (opt-in, no localStorage value present)", () => {
-    // In the node test env there is no persisted "1", so the flag must be OFF.
-    expect(useWorkspaceModeStore.getState().enabled).toBe(false);
+  it("defaults to ON (the shell is the default experience)", () => {
+    // In the node test env there is no persisted "0", so the flag must be ON.
+    expect(useWorkspaceModeStore.getState().enabled).toBe(true);
   });
 
   it("setEnabled flips the in-memory flag even when persistence is unavailable", () => {

@@ -35,9 +35,9 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.tab.deploy": "Deploy",
 
   // Settings toggle
-  "workspace.settings.heading": "New Workspace (Beta)",
+  "workspace.settings.heading": "New Workspace",
   "workspace.settings.help":
-    "An IDE-style split shell: the orchestrator and agent terminals stay pinned on the left while you switch between board, code, worktree, and history tabs on the right. Switching a right tab never disturbs the left terminals. Off by default; turning it on leaves all existing features intact.",
+    "An IDE-style split shell: the file tree on the left, the orchestrator and agent terminals in the middle, and board, code, worktree, and history tabs on the right. Switching a right tab never disturbs the terminals. On by default; turning it off returns you to the previous layout unchanged.",
   "workspace.settings.toggleLabel": "Use the new Workspace shell",
   "workspace.settings.on": "On",
   "workspace.settings.off": "Off",

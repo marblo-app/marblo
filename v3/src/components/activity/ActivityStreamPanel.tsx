@@ -11,6 +11,7 @@ import {
   type ActivityFilter,
   type ActivityViewMode,
 } from "../../stores/activityStreamStore";
+import { ACTIVITY_PANEL_WIDTH } from "../../lib/splitWorkspaceLayout";
 import { useProjectStore } from "../../stores/projectStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { useAgentFocusStore } from "../../stores/agentFocusStore";
@@ -275,7 +276,17 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
   );
 }
 
-export function ActivityStreamPanel() {
+interface ActivityStreamPanelProps {
+  /**
+   * Rendered width in px. The Workspace shell sizes the panel to whatever is
+   * left after the board's four columns are guaranteed
+   * (splitWorkspaceLayout.activityPanelWidth); the legacy Layout doesn't
+   * measure anything and takes the default.
+   */
+  width?: number;
+}
+
+export function ActivityStreamPanel({ width }: ActivityStreamPanelProps = {}) {
   const { t } = useTranslation();
   const { open, filter, setFilter, toggle, viewMode, setViewMode } =
     useActivityStreamStore();
@@ -307,7 +318,8 @@ export function ActivityStreamPanel() {
 
   return (
     <aside
-      className="flex h-full w-[320px] flex-col border-l border-[#313244] bg-[#181825] flex-shrink-0"
+      className="flex h-full flex-col border-l border-[#313244] bg-[#181825] flex-shrink-0"
+      style={{ width: width ?? ACTIVITY_PANEL_WIDTH }}
       aria-label="Activity stream"
     >
       {/* Header */}

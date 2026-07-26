@@ -94,6 +94,111 @@ export const DEFAULT_V_RATIO = 0.5;
  */
 export const NARROW_BREAKPOINT = 880;
 
+/** Width (px) of the draggable divider between the terminal and work panes. */
+export const DIVIDER_WIDTH = 4;
+
+/**
+ * Board geometry the shell has to respect, mirrored from the board's own
+ * Tailwind classes: KanbanBoard lays the four status columns out as
+ * `flex gap-4` (16px) inside a `p-4` (16px per side) `overflow-x-auto` box, and
+ * KanbanColumn floors each column at `min-w-[168px]`.
+ *
+ * ★ These are the SAME numbers as the board's classes, not an estimate. If a
+ * board class changes, change these — BOARD_MIN_WIDTH_PARTS is asserted against
+ * BOARD_MIN_WIDTH in the unit tests so the drift is a failing test, not a
+ * silently reappearing hidden REVIEW column.
+ */
+export const BOARD_COLUMN_COUNT = 4;
+export const BOARD_COLUMN_MIN_WIDTH = 168;
+export const BOARD_COLUMN_GAP = 16;
+export const BOARD_PADDING = 16;
+
+/**
+ * The narrowest the work-view pane can get before the Board tab starts clipping
+ * columns:
+ *
+ *   4 × 168 + 3 × 16 + 2 × 16 = 752
+ *
+ * Below this the columns stop shrinking and the last one (REVIEW) slides behind
+ * the horizontal scroll — the exact symptom this constant exists to prevent.
+ */
+export const BOARD_MIN_WIDTH = 752;
+
+/**
+ * Activity Stream panel width band. The panel is the FOURTH region of the shell
+ * (files · terminals · work view · activity), not an overlay and not a shove:
+ * it is deliberately narrower than the 320px it used to claim, because the
+ * width it takes comes straight out of the work view.
+ */
+export const ACTIVITY_PANEL_WIDTH = 280;
+export const ACTIVITY_MIN_PANEL_WIDTH = 220;
+
+/**
+ * Fraction of the work area the Activity panel may never exceed. Guards the
+ * mid-width band where a fixed 280px would be most of the window.
+ */
+const ACTIVITY_MAX_FRACTION = 0.3;
+
+/**
+ * Below this work-area width (px) the panel cannot usefully coexist with
+ * anything and renders as its slim rail instead. Well under the point where the
+ * terminal column has already auto-collapsed (NARROW_BREAKPOINT), so this only
+ * fires on genuinely tiny windows; the rail's button brings it straight back
+ * once the window grows.
+ */
+export const ACTIVITY_COLLAPSE_BREAKPOINT = 700;
+
+/**
+ * How wide to render the Activity panel inside a work area of `availableWidth`
+ * (the region holding the split area + the panel/rail), or `null` when the
+ * window is too narrow to host it at all.
+ *
+ * A non-positive / non-finite width means "not measured yet" (first frame
+ * before the ResizeObserver reports) — answer with the preferred width so the
+ * panel doesn't flash collapsed.
+ */
+export function activityPanelWidth(availableWidth: number): number | null {
+  if (!Number.isFinite(availableWidth) || availableWidth <= 0) {
+    return ACTIVITY_PANEL_WIDTH;
+  }
+  if (availableWidth < ACTIVITY_COLLAPSE_BREAKPOINT) return null;
+  const cap = Math.floor(availableWidth * ACTIVITY_MAX_FRACTION);
+  return Math.max(
+    ACTIVITY_MIN_PANEL_WIDTH,
+    Math.min(ACTIVITY_PANEL_WIDTH, cap),
+  );
+}
+
+/**
+ * The terminal-pane fraction to actually render while the Activity panel is
+ * open: the stored ratio, capped so the work view keeps at least
+ * BOARD_MIN_WIDTH. Opening Activity must never be what pushes a board column
+ * out of view — the space comes from the terminal column instead, which the
+ * user can always drag back or collapse.
+ *
+ * The stored ratio is NOT mutated: close the panel and the drag the user chose
+ * returns verbatim. When the split is so narrow that even a zero-width terminal
+ * column couldn't reach BOARD_MIN_WIDTH, clampRatio's floor (MIN_RATIO) wins —
+ * the board scrolls, exactly as it already does at that width with the panel
+ * closed. Only called when the panel is open, so the panel-closed geometry is
+ * untouched.
+ */
+export function ratioWithActivityOpen(
+  storedRatio: number,
+  splitWidth: number,
+): number {
+  if (!Number.isFinite(splitWidth) || splitWidth <= 0) {
+    return clampRatio(storedRatio);
+  }
+  // Reserve one extra pixel. The exact quotient round-trips through binary
+  // floating point (ratio → flex-basis → remaining width) and can land a hair
+  // UNDER the reservation — 879.9999999999999px — which is all it takes for the
+  // browser to start the horizontal scroll this function exists to avoid.
+  const maxTerminalRatio =
+    (splitWidth - DIVIDER_WIDTH - BOARD_MIN_WIDTH - 1) / splitWidth;
+  return clampRatio(Math.min(storedRatio, maxTerminalRatio));
+}
+
 /** Clamp a raw fraction into [MIN, MAX]; non-finite falls back to the default. */
 export function clampRatio(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_RATIO;

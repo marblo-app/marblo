@@ -53,7 +53,8 @@ describe("splitWorkspaceStore", () => {
     // shell opens on the 시작하기 tab (ticket ZdgQMxW7).
     expect(s.activeTab).toBe("startHere");
     expect(s.terminalCollapsed).toBe(false);
-    expect(s.fileTreeOpen).toBe(false);
+    // The cold-open shape is the three-way split, so the tree starts OPEN.
+    expect(s.fileTreeOpen).toBe(true);
   });
 
   describe("onboarding landing", () => {
@@ -179,14 +180,22 @@ describe("splitWorkspaceStore", () => {
     expect(store.getState().verticalRatio).toBe(MAX_V_RATIO);
   });
 
-  it("toggleFileTree flips and persists (default closed)", async () => {
+  it("toggleFileTree flips and persists (default open)", async () => {
     const { store, map } = await loadStore();
-    expect(store.getState().fileTreeOpen).toBe(false);
-    store.getState().toggleFileTree();
     expect(store.getState().fileTreeOpen).toBe(true);
-    expect(map.get("marblo.workspaceSplit.fileTreeOpen")).toBe("1");
     store.getState().toggleFileTree();
     expect(store.getState().fileTreeOpen).toBe(false);
     expect(map.get("marblo.workspaceSplit.fileTreeOpen")).toBe("0");
+    store.getState().toggleFileTree();
+    expect(store.getState().fileTreeOpen).toBe(true);
+    expect(map.get("marblo.workspaceSplit.fileTreeOpen")).toBe("1");
+  });
+
+  // A user who closed the tree keeps it closed across the default flip.
+  it("honours a persisted '0' as a deliberate opt-out", async () => {
+    const { store } = await loadStore({
+      "marblo.workspaceSplit.fileTreeOpen": "0",
+    });
+    expect(store.getState().fileTreeOpen).toBe(false);
   });
 });
