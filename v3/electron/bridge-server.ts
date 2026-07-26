@@ -161,7 +161,7 @@ export function buildResolverPrompt(req: {
 
 export interface SpawnAgentRequest {
   name: string;
-  model: "claude" | "gemini" | "gpt" | "antigravity" | "local" | "custom";
+  model: ModelType;
   role: string;
   command?: string;
   cwd?: string;
@@ -2036,6 +2036,7 @@ export class BridgeServer {
             claudeModel: resolvedPin.claudeModel,
             codexModel: resolvedPin.codexModel,
             codexEffort: resolvedPin.codexEffort,
+            nativeModel: resolvedPin.nativeModel,
           }
         : undefined;
     if (resolvedPin?.fallback) {
@@ -3044,6 +3045,7 @@ export class BridgeServer {
       claudeModelOverride: params.modelPin?.claudeModel,
       codexModelOverride: params.modelPin?.codexModel,
       codexEffortOverride: params.modelPin?.codexEffort,
+      nativeModelOverride: params.modelPin?.nativeModel,
       onPtyReady: (sid, spawnedModel) => {
         // spawnedModel 은 agent-manager 가 방금 만든 argv 에서 되읽어 넘겨준다
         // — 이 콜백은 agents.set 보다 먼저 불려서 getSpawnedModel 로는 못 얻는다.

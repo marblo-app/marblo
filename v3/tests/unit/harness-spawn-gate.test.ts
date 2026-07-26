@@ -9,10 +9,11 @@ import {
 
 // modelToCliAuth + looksLikeLoginScreen are pure — import once, no mocking.
 describe("modelToCliAuth", () => {
-  it("maps claude → claude, gpt/codex → codex", () => {
+  it("maps claude → claude, gpt/codex → codex, grok → grok", () => {
     expect(modelToCliAuth("claude")).toBe("claude");
     expect(modelToCliAuth("gpt")).toBe("codex");
     expect(modelToCliAuth("codex")).toBe("codex");
+    expect(modelToCliAuth("grok")).toBe("grok");
   });
 
   it("returns null for ungated models (no probe → pass-through)", () => {
@@ -54,6 +55,12 @@ describe("looksLikeLoginScreen", () => {
     ).toBe(true);
   });
 
+  it("matches the Grok browser auth flow", () => {
+    expect(looksLikeLoginScreen("Grok Build login required")).toBe(true);
+    expect(looksLikeLoginScreen("Sign in with xAI to continue")).toBe(true);
+    expect(looksLikeLoginScreen("Browser OIDC")).toBe(true);
+  });
+
   it("does NOT match a normal ready CLI prompt (no false blocking)", () => {
     // These are the readiness signatures agent/orchestrator boot into once
     // authenticated — none may look like a login screen.
@@ -75,7 +82,7 @@ function makeHome(): string {
 
 function touchFakeBinary(
   home: string,
-  binary: "claude" | "codex" | "agy",
+  binary: "claude" | "codex" | "grok" | "agy",
 ): void {
   const binDir = path.join(home, ".npm", "bin");
   actualFs.mkdirSync(binDir, { recursive: true });
@@ -124,6 +131,7 @@ describe("checkSpawnAuthGate", () => {
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "OPENAI_API_KEY",
+    "XAI_API_KEY",
   ];
   let saved: Record<string, string | undefined>;
   let home: string;
@@ -172,6 +180,28 @@ describe("checkSpawnAuthGate", () => {
     expect(gate.model).toBe("codex");
     expect(gate.reason).toBe("not-authenticated");
     expect(gate.action).toBe("codex login");
+  });
+
+  it("blocks grok when installed but not logged in", async () => {
+    touchFakeBinary(home, "grok");
+    const { checkSpawnAuthGate } = await loadGateWithFakeHome(home);
+    const gate = await checkSpawnAuthGate("grok");
+    expect(gate.ok).toBe(false);
+    expect(gate.model).toBe("grok");
+    expect(gate.reason).toBe("not-authenticated");
+    expect(gate.action).toBe("grok login");
+  });
+
+  it("passes grok when installed + XAI_API_KEY is present", async () => {
+    touchFakeBinary(home, "grok");
+    process.env.XAI_API_KEY = "test-key";
+    const { checkSpawnAuthGate } = await loadGateWithFakeHome(home);
+    await expect(checkSpawnAuthGate("grok")).resolves.toEqual({
+      ok: true,
+      model: "grok",
+      installed: true,
+      authenticated: true,
+    });
   });
 
   it("passes claude when installed + authenticated (existing users unaffected)", async () => {

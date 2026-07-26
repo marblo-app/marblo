@@ -43,6 +43,13 @@ const MODEL_OPTIONS: {
     color: "#10a37f",
   },
   {
+    value: "grok",
+    label: "Grok Build (xAI)",
+    icon: "🔷",
+    command: "grok",
+    color: "#06b6d4",
+  },
+  {
     value: "antigravity",
     label: "Antigravity (agy)",
     icon: "🟠",

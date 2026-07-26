@@ -31,9 +31,10 @@ function statusLabel(status: HarnessPackage["status"]): string {
 
 // Catalog packages whose login state we live-probe (binary on PATH ≠ logged
 // in — spawning an unauthenticated CLI hangs on its login prompt).
-const CLI_AUTH_MODELS: Record<string, "claude" | "codex"> = {
+const CLI_AUTH_MODELS: Record<string, "claude" | "codex" | "grok"> = {
   "cli-claude-code": "claude",
   "cli-codex": "codex",
+  "cli-grok": "grok",
 };
 
 export function HarnessStore({ onClose }: HarnessStoreProps) {

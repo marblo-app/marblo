@@ -16,6 +16,7 @@ export type ModelType =
   | "claude"
   | "gemini"
   | "gpt"
+  | "grok"
   | "antigravity"
   | "local"
   | "custom";
@@ -166,6 +167,7 @@ const COST_EFFICIENCY_WEIGHT: Record<ModelType, number> = {
   gemini: 8,
   // Codex/GPT: cheapest mainstream (gpt-4.1-nano ~$0.10, mini ~$0.40)
   gpt: 10,
+  grok: 8,
   // Antigravity (agy): Gemini 3.5 Flash backed (similar tier to gemini),
   // free at launch (2026-05-19). Slightly higher cost-efficiency than
   // gemini due to agentic optimizations + free-tier window.
@@ -361,6 +363,14 @@ export const MODEL_TAG_BONUSES: Record<string, Record<string, number>> = {
     test: 15,
     boilerplate: 15,
   },
+  grok: {
+    coding: 20,
+    agentic: 20,
+    "multi-file": 15,
+    "complex-edit": 15,
+    refactor: 15,
+    autonomous: 15,
+  },
   antigravity: {
     // Antigravity (agy) is purpose-built for multi-step autonomous flows
     // with sub-agents. Strong on agentic / autonomous tags, secondary on
@@ -392,6 +402,7 @@ export const MODEL_BASE_SCORE: Record<string, number> = {
   // Antigravity: same base as Gemini/GPT — proves itself via tag bonuses
   // for agentic workloads rather than being shoo-in for everything.
   antigravity: 45,
+  grok: 45,
   // Local: capability varies with the loaded weights, so we anchor below
   // the hosted-model tier. User can override via custom command + tags.
   local: 35,
@@ -411,6 +422,7 @@ export type ModelPreset =
   | "recommended"
   | "balanced"
   | "codex-only"
+  | "grok-only"
   | "antigravity-only";
 
 export const MODEL_PRESETS: Record<
@@ -436,6 +448,11 @@ export const MODEL_PRESETS: Record<
     label: "Codex 100%",
     models: ["gpt"],
     description: "All agents use OpenAI Codex (model id 'gpt')",
+  },
+  "grok-only": {
+    label: "Grok 100%",
+    models: ["grok"],
+    description: "All agents use xAI Grok Build",
   },
   "antigravity-only": {
     label: "Antigravity 100%",
@@ -464,6 +481,7 @@ const MODEL_ALIASES: Record<string, ModelType> = {
   claude: "claude",
   codex: "gpt", // ← the important one: Codex CLI == ModelType "gpt"
   gpt: "gpt",
+  grok: "grok",
   gemini: "gemini", // retained for back-compat with existing gemini agents
   antigravity: "antigravity",
   agy: "antigravity",

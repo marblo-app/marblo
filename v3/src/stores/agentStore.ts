@@ -215,6 +215,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         claude: "🟣",
         gemini: "🔵",
         gpt: "🟢",
+        grok: "🔷",
         antigravity: "🟠",
         local: "⚫",
         custom: "⚪",

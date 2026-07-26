@@ -651,7 +651,7 @@ interface HarnessAPI {
   install: (id: string) => Promise<{ success: boolean; error?: string }>;
   uninstall: (id: string) => Promise<{ success: boolean; error?: string }>;
   cliAuthCheck: (
-    model: "claude" | "codex" | "antigravity",
+    model: "claude" | "codex" | "grok" | "antigravity",
   ) => Promise<CliAuthResult>;
 }
 

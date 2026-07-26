@@ -23,8 +23,12 @@ import {
  * advisory version check are lifted verbatim from the gate.
  */
 
-export type CliModel = "claude" | "codex" | "antigravity";
-export type CliRowId = "cli-claude-code" | "cli-codex" | "cli-antigravity";
+export type CliModel = "claude" | "codex" | "grok" | "antigravity";
+export type CliRowId =
+  | "cli-claude-code"
+  | "cli-codex"
+  | "cli-grok"
+  | "cli-antigravity";
 
 export interface CliRow {
   id: CliRowId;
@@ -48,6 +52,7 @@ export const ORCHESTRATOR_CLI_IDS: CliRowId[] = [
 export const ROWS: CliRow[] = [
   { id: "cli-claude-code", model: "claude", required: true, autoInstall: true },
   { id: "cli-codex", model: "codex", required: false, autoInstall: true },
+  { id: "cli-grok", model: "grok", required: false, autoInstall: false },
   {
     id: "cli-antigravity",
     model: "antigravity",
@@ -62,6 +67,7 @@ export const ROWS: CliRow[] = [
 export const UPDATE_CMD: Record<CliModel, string> = {
   claude: "npm install -g @anthropic-ai/claude-code",
   codex: "npm install -g @openai/codex",
+  grok: "curl -fsSL https://x.ai/cli/install.sh | bash",
   antigravity: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
 };
 
@@ -70,6 +76,7 @@ export const UPDATE_CMD: Record<CliModel, string> = {
 export const DOCS_URL: Record<CliModel, string> = {
   claude: "https://www.npmjs.com/package/@anthropic-ai/claude-code",
   codex: "https://www.npmjs.com/package/@openai/codex",
+  grok: "https://x.ai/cli",
   antigravity: "https://antigravity.google",
 };
 
@@ -84,7 +91,9 @@ export function cliLabel(model: CliModel): string {
     ? "Claude Code"
     : model === "codex"
       ? "Codex (GPT)"
-      : "Antigravity (agy)";
+      : model === "grok"
+        ? "Grok Build"
+        : "Antigravity (agy)";
 }
 
 interface CliSetupState {

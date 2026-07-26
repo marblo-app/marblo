@@ -149,6 +149,16 @@ describe("model-registry", () => {
     it("아직 CLI-verified 모델이 없는 하네스는 빈 배열(에러 아님)", () => {
       expect(modelsByHarness("antigravity")).toEqual([]);
     });
+
+    it("Grok Build 모델은 native grok 하네스로 등록된다", () => {
+      expect(getModel("grok-4.5")).toMatchObject({
+        id: "grok-4.5",
+        harness: "grok",
+        provider: "xai",
+        status: "active",
+      });
+      expect(modelsByHarness("grok").map((m) => m.id)).toEqual(["grok-4.5"]);
+    });
   });
 });
 
@@ -276,8 +286,10 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
     // MiniMax-* — 같은 사유(정액 Token Plan). 게다가 M3 는 문서 단가 자체가
     //            "Permanent 50% off" 가 붙은 값이라, 우리는 **할인 전 리스트**를
     //            상한으로 적는다(할인은 벤더가 언제든 거둔다).
+    // grok-4.5 — Grok Build 무료 프로모/구독 경로와 API 리스트 단가 축이 다르다.
     expect(estimatedPricingModelIds()).toEqual([
       "gpt-5.4",
+      "grok-4.5",
       "glm-5.2",
       "glm-4.7",
       "MiniMax-M3",

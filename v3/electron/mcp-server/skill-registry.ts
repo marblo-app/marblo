@@ -28,9 +28,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 /** 네이티브 스킬을 지원하는 CLI 벤더. */
-export type SkillVendor = "claude" | "codex";
+export type SkillVendor = "claude" | "codex" | "grok";
 
-export const SKILL_VENDORS: readonly SkillVendor[] = ["claude", "codex"];
+export const SKILL_VENDORS: readonly SkillVendor[] = [
+  "claude",
+  "codex",
+  "grok",
+];
 
 /** 스킬이 발견된 위치의 종류. */
 export type SkillSource = "user" | "project" | "plugin" | "system";
@@ -104,6 +108,7 @@ export function vendorForModel(
   const m = model.trim().toLowerCase();
   if (m === "claude") return "claude";
   if (m === "gpt" || m === "codex") return "codex";
+  if (m === "grok") return "grok";
   return null;
 }
 
@@ -121,6 +126,13 @@ function codexHomeDir(opts: SkillLookupOptions): string {
   const home = opts.homeDir ?? os.homedir();
   const configured = env.CODEX_HOME?.trim();
   return configured ? configured : path.join(home, ".codex");
+}
+
+function grokHomeDir(opts: SkillLookupOptions): string {
+  const env = opts.env ?? process.env;
+  const home = opts.homeDir ?? os.homedir();
+  const configured = env.GROK_HOME?.trim();
+  return configured ? configured : path.join(home, ".grok");
 }
 
 /**
@@ -143,6 +155,18 @@ export function skillRootsFor(
     }
     return roots;
   }
+  if (vendor === "grok") {
+    const roots: SkillRoot[] = [
+      { dir: path.join(grokHomeDir(opts), "skills"), source: "user" },
+    ];
+    if (opts.cwd) {
+      roots.push({
+        dir: path.join(opts.cwd, ".grok", "skills"),
+        source: "project",
+      });
+    }
+    return roots;
+  }
   // codex: 사용자 스킬 + 프리인스톨된 .system 스킬
   const codexSkills = path.join(codexHomeDir(opts), "skills");
   return [
@@ -159,6 +183,9 @@ export function skillRootPathsFor(
   const roots = skillRootsFor(vendor, opts).map((r) => r.dir);
   if (vendor === "claude") {
     roots.push(path.join(claudeConfigDir(opts), "plugins", "cache", "*"));
+  }
+  if (vendor === "grok") {
+    roots.push(path.join(grokHomeDir(opts), "plugins", "cache", "*"));
   }
   return roots;
 }
@@ -193,8 +220,10 @@ function readSkillDirs(root: SkillRoot, vendor: SkillVendor): InstalledSkill[] {
  * (예: `superpowers:brainstorming`). 같은 플러그인의 여러 버전이 캐시에 남아
  * 있을 수 있으므로 이름 기준으로 중복 제거한다.
  */
-function readClaudePluginSkills(opts: SkillLookupOptions): InstalledSkill[] {
-  const cacheRoot = path.join(claudeConfigDir(opts), "plugins", "cache");
+function readPluginSkills(
+  cacheRoot: string,
+  vendor: SkillVendor,
+): InstalledSkill[] {
   const out: InstalledSkill[] = [];
   const listDirs = (dir: string): string[] => {
     try {
@@ -218,13 +247,27 @@ function readClaudePluginSkills(opts: SkillLookupOptions): InstalledSkill[] {
               source: "plugin",
               namePrefix: plugin,
             },
-            "claude",
+            vendor,
           ),
         );
       }
     }
   }
   return out;
+}
+
+function readClaudePluginSkills(opts: SkillLookupOptions): InstalledSkill[] {
+  return readPluginSkills(
+    path.join(claudeConfigDir(opts), "plugins", "cache"),
+    "claude",
+  );
+}
+
+function readGrokPluginSkills(opts: SkillLookupOptions): InstalledSkill[] {
+  return readPluginSkills(
+    path.join(grokHomeDir(opts), "plugins", "cache"),
+    "grok",
+  );
 }
 
 /**
@@ -251,6 +294,9 @@ export function listInstalledSkills(
   }
   if (vendor === "claude") {
     collected.push(...readClaudePluginSkills(opts));
+  }
+  if (vendor === "grok") {
+    collected.push(...readGrokPluginSkills(opts));
   }
 
   const byName = new Map<string, InstalledSkill>();

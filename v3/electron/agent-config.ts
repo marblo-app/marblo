@@ -447,6 +447,7 @@ const _harnessCliResolved = new Map<ModelType, ResolvedCli>();
 const MODEL_BINARY: Partial<Record<ModelType, string>> = {
   gemini: "gemini",
   gpt: "codex",
+  grok: "grok",
   antigravity: "agy",
 };
 
@@ -549,6 +550,7 @@ export function resolveOrchestratorModel(): ModelType {
   const allowed: ModelType[] = [
     "claude",
     "gpt",
+    "grok",
     "antigravity",
     "local",
     "custom",
@@ -672,6 +674,8 @@ export interface LaunchModelPin {
   codexModel?: string;
   /** codex CLI 의 `-c model_reasoning_effort=…` 값. complexity 파생값을 덮는다. */
   codexEffort?: string;
+  /** Grok/Kimi 등 native CLI 의 모델 선택 플래그에 그대로 넘길 구체 id. */
+  nativeModel?: string;
 }
 
 export interface TopModelFallback {
@@ -1800,6 +1804,8 @@ export class AgentConfigGenerator {
         return this.generateGeminiConfig(agentId, mcpEntry);
       case "gpt":
         return this.generateGPTConfig(agentId, mcpEntry, projectDir);
+      case "grok":
+        return this.generateGrokConfig(agentId, mcpEntry);
       case "antigravity":
         return this.generateAntigravityConfig(agentId, mcpEntry);
       case "custom":
@@ -2476,6 +2482,59 @@ export class AgentConfigGenerator {
     return configPath;
   }
 
+  // projectDir 를 받지 않는다 — grok config.toml 은 프로젝트 경로에 의존하지
+  // 않고 GROK_HOME 아래에 통째로 격리된다(codex 분기와 다른 점).
+  private generateGrokConfig(
+    agentId: string,
+    mcpEntry: MCPServerEntry,
+  ): string {
+    // Grok Build reads TOML config from $GROK_HOME/config.toml or
+    // ~/.grok/config.toml. Each worker gets an isolated config so Marblo MCP
+    // env is per-agent, while non-MCP user settings are preserved.
+    const grokHome = path.join(CONFIG_DIR, `grok-home-${agentId}`);
+    fs.mkdirSync(grokHome, { recursive: true });
+
+    const userGrokDir = path.join(os.homedir(), ".grok");
+    const userConfigPath = path.join(userGrokDir, "config.toml");
+    let preserved = "";
+    if (fs.existsSync(userConfigPath)) {
+      try {
+        preserved = fs
+          .readFileSync(userConfigPath, "utf-8")
+          .replace(/\[mcp_servers\.[\s\S]*?(?=\n\[(?!mcp_servers)|$)/g, "")
+          .trimEnd();
+      } catch {
+        // Best-effort — ignore unreadable user config.
+      }
+    }
+
+    const envEntries = Object.entries(mcpEntry.env || {})
+      .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
+      .join("\n");
+
+    const tomlSections = [
+      preserved,
+      "",
+      "[models]",
+      'default = "grok-4.5"',
+      "",
+      "[mcp_servers.marblo]",
+      `command = ${JSON.stringify(mcpEntry.command)}`,
+      `args = ${JSON.stringify(mcpEntry.args)}`,
+      "enabled = true",
+      "startup_timeout_sec = 30",
+      "tool_timeout_sec = 6000",
+    ];
+    if (envEntries) {
+      tomlSections.push("", "[mcp_servers.marblo.env]", envEntries);
+    }
+
+    const configPath = path.join(grokHome, "config.toml");
+    fs.writeFileSync(configPath, tomlSections.join("\n") + "\n", "utf-8");
+    this.trackFile(agentId, configPath);
+    return configPath;
+  }
+
   private generateCodexTfPrompts(
     agentId: string,
     codexHome: string,
@@ -2737,7 +2796,8 @@ export class AgentConfigGenerator {
     // switch 를 늘리지 않고 각 분기의 env 로만 갈린다(applyVendorEnv) — 그래야
     // GLM 같은 env-swap 벤더가 `case "zai"` 를 요구하지 않는다(서베이 §4.5.1).
     // 오늘 모든 레지스트리 행이 harness === ModelType 이라 값은 종전과 동일하다.
-    const pinnedModelId = modelPin?.claudeModel ?? modelPin?.codexModel;
+    const pinnedModelId =
+      modelPin?.claudeModel ?? modelPin?.codexModel ?? modelPin?.nativeModel;
     const harness = harnessForLaunch(model, pinnedModelId);
     switch (harness) {
       case "claude": {
@@ -2907,6 +2967,30 @@ export class AgentConfigGenerator {
             { ...env, CODEX_HOME: path.dirname(mcpConfigPath) },
             modelPin?.codexModel,
           ),
+        };
+      }
+
+      case "grok": {
+        // Grok Build TUI. First launch opens the user's browser for auth
+        // (SuperGrok/X account); Marblo only supplies per-agent MCP config via
+        // GROK_HOME and pins the native default model explicitly.
+        const grokArgs: string[] = ["--dangerously-skip-permissions"];
+        const grokModel = modelPin?.nativeModel;
+        grokArgs.push("-m", grokModel || "grok-4.5");
+        const grokCommand =
+          os.platform() === "win32" && (!baseCommand || baseCommand === "grok")
+            ? resolveHarnessCli("grok").command
+            : !baseCommand
+              ? "grok"
+              : baseCommand;
+        const grokLaunch = ptyCommandForCli(grokCommand, grokArgs);
+        return {
+          command: grokLaunch.command,
+          args: grokLaunch.args,
+          env: {
+            ...env,
+            GROK_HOME: path.dirname(mcpConfigPath),
+          },
         };
       }
 

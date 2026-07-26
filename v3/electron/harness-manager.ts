@@ -268,16 +268,14 @@ async function runPostInstallExec(
 // Hosts whose curl-pipe-bash installer scripts are trusted to run. Each
 // entry must be the EXACT hostname (no path/scheme). Keep this list small
 // and curated — the user implicitly trusts whatever runs through here.
-const TRUSTED_SHELL_INSTALLER_HOSTS = new Set<string>(["antigravity.google"]);
+const TRUSTED_SHELL_INSTALLER_HOSTS = new Set<string>([
+  "antigravity.google",
+  "x.ai",
+]);
 
 async function installShell(strategy: InstallStrategy): Promise<void> {
   if (!strategy.source) {
     throw new Error("shell install requires installer URL in source");
-  }
-  if (process.platform === "win32") {
-    throw new Error(
-      "Windows에서는 bash 기반 shell 인스톨러를 자동 실행하지 않습니다. Antigravity(agy)는 현재 macOS/Linux 자동 설치만 지원하므로 Windows용 공식 설치 안내에 따라 수동 설치 후 다시 시도하세요.",
-    );
   }
   let url: URL;
   try {
@@ -294,6 +292,15 @@ async function installShell(strategy: InstallStrategy): Promise<void> {
     throw new Error(
       `Shell installer host not whitelisted: ${url.host}. ` +
         `Allowed: ${[...TRUSTED_SHELL_INSTALLER_HOSTS].join(", ")}`,
+    );
+  }
+  // Windows 는 bash 기반 curl-pipe 인스톨러를 자동 실행하지 않는다. 호스트별로
+  // 예외를 두지 않는다 — x.ai/antigravity 둘 다 bash 스크립트라 win32 에서는
+  // 어차피 못 돈다. 호스트를 붙여 어떤 CLI 를 수동 설치해야 하는지만 알려준다.
+  if (process.platform === "win32") {
+    throw new Error(
+      `Windows에서는 bash 기반 shell 인스톨러를 자동 실행하지 않습니다(${url.host}). ` +
+        "해당 CLI의 Windows용 공식 설치 안내에 따라 수동 설치 후 다시 시도하세요.",
     );
   }
 
@@ -806,7 +813,7 @@ export function scheduleHarnessUpdates(
 // surface a "login required" badge with the exact command to run instead of
 // silently hanging.
 
-export type CliAuthModel = "claude" | "codex" | "antigravity";
+export type CliAuthModel = "claude" | "codex" | "grok" | "antigravity";
 
 export interface CliAuthResult {
   /** Binary present on PATH. */
@@ -894,6 +901,22 @@ function codexAuthenticated(): boolean {
   }
 }
 
+/** Non-interactive signals that Grok Build is logged in. */
+function grokAuthenticated(): boolean {
+  if (envHasValue("XAI_API_KEY")) return true;
+  const grokDir = path.join(HOME, ".grok");
+  for (const rel of [
+    "auth.json",
+    "credentials.json",
+    "session.json",
+    path.join("auth", "tokens.json"),
+    path.join("auth", "session.json"),
+  ]) {
+    if (fileExists(path.join(grokDir, rel))) return true;
+  }
+  return false;
+}
+
 /**
  * Non-interactive signals that Antigravity (agy) is logged in. agy shares the
  * user's ~/.gemini (Google account), so a completed OAuth leaves an
@@ -942,6 +965,18 @@ export async function probeCliAuth(
       ? { installed: true, authenticated: true }
       : { installed: true, authenticated: false, action: "codex login" };
   }
+  if (model === "grok") {
+    if (!isBinaryOnPath("grok")) {
+      return {
+        installed: false,
+        authenticated: false,
+        action: "curl -fsSL https://x.ai/cli/install.sh | bash",
+      };
+    }
+    return grokAuthenticated()
+      ? { installed: true, authenticated: true }
+      : { installed: true, authenticated: false, action: "grok login" };
+  }
   if (model === "antigravity") {
     if (!isBinaryOnPath("agy")) {
       return {
@@ -977,6 +1012,7 @@ export async function probeCliAuth(
 export function modelToCliAuth(model: string): CliAuthModel | null {
   if (model === "claude") return "claude";
   if (model === "gpt" || model === "codex") return "codex";
+  if (model === "grok") return "grok";
   return null;
 }
 
@@ -1051,6 +1087,10 @@ export const LOGIN_SCREEN_PATTERNS: RegExp[] = [
   /Log ?in (with|to) (your )?(Claude|Anthropic)/i, // claude login
   /Claude account with subscription/i, // claude login option
   /Anthropic Console account/i, // claude login option
+  /Grok Build.*(login|auth)/i, // grok first-run auth
+  /Log ?in (with|to) (your )?(Grok|xAI|X account)/i, // grok login
+  /Sign in with (Grok|xAI|X)/i, // grok browser auth
+  /Browser OIDC/i, // grok login method docs/flow wording
   // Antigravity (agy) / gemini OAuth flow — the CLI blocks on a browser
   // sign-in spinner. Distinctive to the auth handshake, so it won't trip on
   // ordinary boot output. Lets the readiness backstop suppress blind typing

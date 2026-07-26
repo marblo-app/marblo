@@ -17,6 +17,7 @@ import { AgentConfigGenerator } from "../../electron/agent-config";
 import {
   spawnedModelFromArgs,
   formatModelAtEffort,
+  type ModelType,
 } from "../../electron/agent-manager";
 import {
   resolveModelPin,
@@ -33,11 +34,12 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-pin-"));
  * 공개 진입점으로 부른다 — 우리가 검증하려는 것이 바로 그 공개 경로다.
  */
 function launchArgs(
-  model: "claude" | "gpt",
+  model: ModelType,
   modelPin?: {
     claudeModel?: string;
     codexModel?: string;
     codexEffort?: string;
+    nativeModel?: string;
   },
   complexity?: "simple" | "standard" | "complex",
 ): string[] {
@@ -149,6 +151,21 @@ describe("codex — 지정 모델·effort 가 -c 로 나간다", () => {
   });
 });
 
+describe("grok — 지정 모델이 -m 으로 나간다", () => {
+  it("model='grok-4.5' → -m grok-4.5", () => {
+    const pin = resolveModelPin("grok-4.5", CLI_OK);
+    const args = launchArgs("grok", pin);
+    expect(args).toContain("--dangerously-skip-permissions");
+    expect(args).toContain("-m");
+    expect(args[args.indexOf("-m") + 1]).toBe("grok-4.5");
+  });
+
+  it("핀 없음 → 기본 grok-4.5", () => {
+    const args = launchArgs("grok");
+    expect(args[args.indexOf("-m") + 1]).toBe("grok-4.5");
+  });
+});
+
 /**
  * 오케 셀렉터 값이 실제 오케 launch 인자까지 도달하는지 — 이 티켓(aduYHKhp)의
  * 완료기준 본체.
@@ -242,6 +259,13 @@ describe("역방향 — argv 에서 '실제로 뭘로 떴나' 를 되읽는다(P
     );
     expect(formatModelAtEffort(spawnedModelFromArgs("gpt", args))).toBe(
       "gpt-5.6-terra@max",
+    );
+  });
+
+  it("grok argv → 모델 id", () => {
+    const args = launchArgs("grok", resolveModelPin("grok-4.5", CLI_OK));
+    expect(formatModelAtEffort(spawnedModelFromArgs("grok", args))).toBe(
+      "grok-4.5",
     );
   });
 

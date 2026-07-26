@@ -142,6 +142,28 @@ export const CATALOG: HarnessPackage[] = [
     detect: { binary: "codex" },
     url: "https://github.com/openai/codex",
   },
+  // ★`recommended` 이지 `required` 가 아니다. 필수 하네스는 오케스트레이터가
+  // 실제로 후보로 삼는 claude/codex 뿐이고, Grok 은 **선택 확장**이다. `required`
+  // 로 두면 (a) Harness 스토어가 "필수" 배지로 표시해 미설치 사용자에게 설정이
+  // 덜 끝난 것처럼 보이고, (b) `uninstallPackage` 가 제거를 막아 선택 확장을
+  // 되돌릴 수 없게 된다(harness-manager 의 `category === "required"` 가드).
+  // 온보딩 게이트 쪽은 `cliSetupStore.ROWS` 가 이미 required:false·autoInstall:false 다.
+  {
+    id: "cli-grok",
+    name: "xAI Grok Build CLI",
+    description:
+      "Grok Build 에이전트 실행에 필요한 CLI. 공식 shell 인스톨러로 설치합니다. 첫 실행 또는 `grok login` 시 브라우저 인증(SuperGrok/X 계정)이 열립니다.",
+    type: "cli",
+    category: "recommended",
+    install: {
+      kind: "shell",
+      source: "https://x.ai/cli/install.sh",
+      postInstall:
+        "설치 후 터미널에서 `grok login` 또는 `grok`를 실행해 브라우저 인증을 완료하세요. 인증 후 Marblo 재시작.",
+    },
+    detect: { binary: "grok" },
+    url: "https://x.ai/cli",
+  },
   // Gemini CLI 는 단종 예정 (2026-06-18 개인 티어 EOL → Antigravity 로 통합).
   // 주력 CLI 는 Claude Code / Codex / Antigravity 3종. 카탈로그에는 남겨두되
   // `deprecated` 플래그로 "단종 예정" 배지·설치 비권장을 표시하고, 자동 업데이트

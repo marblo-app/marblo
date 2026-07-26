@@ -64,6 +64,7 @@ export type HarnessId =
   | "claude"
   | "gemini"
   | "gpt"
+  | "grok"
   | "antigravity"
   | "local"
   | "custom";
@@ -94,6 +95,7 @@ export const HARNESS_IDS: readonly HarnessId[] = [
   "claude",
   "gemini",
   "gpt",
+  "grok",
   "antigravity",
   "local",
   "custom",
@@ -280,6 +282,15 @@ const MINIMAX_DOCS_PROBE: ModelVerification = {
     "(1차 출처). 엔드포인트·모델 id·단가 전부 원문 대조",
 };
 
+/** Grok Build — xAI 공식 문서/오픈소스 README 확인. 브라우저 인증형 TUI. */
+const GROK_BUILD_PROBE: ModelVerification = {
+  at: "2026-07-26",
+  cli: "n/a (grok Build 공식 문서/README 확인 — 라이브 브라우저 인증 대기)",
+  method:
+    "docs.x.ai/build/overview + github.com/xai-org/grok-build README: " +
+    "`grok` CLI, first launch browser auth, `grok -p`, `grok -p ... -m grok-4.5`",
+};
+
 /** 5.6 계열 effort 축(max/ultra 까지). */
 const EFFORTS_56_FULL: EffortLevel[] = [
   "low",
@@ -448,6 +459,21 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
     defaultEffort: "medium",
     pricing: { inputPer1M: 0.75, outputPer1M: 4.5 },
     verified: CODEX_PROBE,
+    status: "active",
+  },
+
+  // ── Grok Build (xAI native harness) ───────────────────────────────────
+  {
+    id: "grok-4.5",
+    harness: "grok",
+    provider: "xai",
+    aliases: ["grok"],
+    capability: "top",
+    efforts: [],
+    // API list 단가. Grok Build 의 현재 무료 프로모/구독 경로와는 과금축이
+    // 다르므로 상한 추정치로 표시한다.
+    pricing: { inputPer1M: 2, outputPer1M: 6, estimated: true },
+    verified: GROK_BUILD_PROBE,
     status: "active",
   },
 
@@ -656,6 +682,7 @@ export const HARNESS_NATIVE_VENDOR: Readonly<Record<HarnessId, VendorId>> = {
   claude: "anthropic",
   gemini: "google",
   gpt: "openai",
+  grok: "xai",
   antigravity: "google",
   local: "local",
   custom: "custom",
@@ -674,7 +701,9 @@ for (const entry of MODEL_REGISTRY) {
   if (!ENV_PROFILE_SUPPORTED_HARNESSES.includes(entry.harness)) {
     throw new Error(
       `[model-registry] "${entry.id}"(provider=${entry.provider}) 의 envProfile 은 ` +
-        `harness="${entry.harness}" 에서 주입되지 않습니다(주입 가능: ${ENV_PROFILE_SUPPORTED_HARNESSES.join(
+        `harness="${
+          entry.harness
+        }" 에서 주입되지 않습니다(주입 가능: ${ENV_PROFILE_SUPPORTED_HARNESSES.join(
           ", ",
         )}). 그 하네스의 스폰 분기에 벤더 env 머지를 먼저 배선하세요.`,
     );

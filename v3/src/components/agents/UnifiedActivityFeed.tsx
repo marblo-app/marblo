@@ -37,6 +37,7 @@ const modelEmoji: Record<ModelType, string> = {
   claude: "🟣",
   gemini: "🔵",
   gpt: "🟢",
+  grok: "🔷",
   antigravity: "🟠",
   local: "⚫",
   custom: "⚪",

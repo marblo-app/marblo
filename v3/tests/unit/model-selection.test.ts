@@ -78,6 +78,7 @@ describe("parseModelSpec — 느슨한 표기", () => {
     ["gpt5.6terra", "gpt-5.6-terra"],
     ["5.6-luna", "gpt-5.6-luna"],
     ["gpt-5.4-mini", "gpt-5.4-mini"],
+    ["grok-4.5", "grok-4.5"],
   ];
   it.each(cases)("%s → %s", (input, expected) => {
     expect(parseModelSpec(input)?.modelId).toBe(expected);
@@ -86,6 +87,7 @@ describe("parseModelSpec — 느슨한 표기", () => {
   it("구체 모델의 프로바이더는 레지스트리에서 파생된다", () => {
     expect(parseModelSpec("opus5")!.harness).toBe("claude");
     expect(parseModelSpec("gpt-5.6-terra")!.harness).toBe("gpt");
+    expect(parseModelSpec("grok-4.5")!.harness).toBe("grok");
   });
 
   it("느슨한 인덱스에 충돌이 없다(모델 추가 시 이 테스트가 먼저 깨진다)", () => {
@@ -186,6 +188,17 @@ describe("resolveModelPin — 정책 적용", () => {
     expect(pin).toMatchObject({ harness: "gpt", label: "gpt" });
     expect(pin!.codexModel).toBeUndefined();
     expect(pin!.claudeModel).toBeUndefined();
+  });
+
+  it("grok 구체 지정 → native model pin", () => {
+    const pin = resolveModelPin("grok-4.5", CLI_OK);
+    expect(pin).toMatchObject({
+      harness: "grok",
+      nativeModel: "grok-4.5",
+      label: "grok-4.5",
+    });
+    expect(pin!.claudeModel).toBeUndefined();
+    expect(pin!.codexModel).toBeUndefined();
   });
 
   it("미지 입력은 undefined — 호출자가 기존 스코어링으로 폴백한다", () => {

@@ -2,6 +2,7 @@ export type ModelType =
   | "claude"
   | "gemini"
   | "gpt"
+  | "grok"
   | "antigravity"
   | "local"
   | "custom";

@@ -2978,11 +2978,19 @@ export function registerTools(server: McpServer): void {
     {
       name: z.string().describe('Agent display name (e.g., "backend-auth")'),
       model: z
-        .enum(["claude", "codex", "gpt", "antigravity", "local", "custom"])
+        .enum([
+          "claude",
+          "codex",
+          "gpt",
+          "grok",
+          "antigravity",
+          "local",
+          "custom",
+        ])
         .describe(
           "AI model to use. 'codex' and 'gpt' are the same OpenAI Codex CLI " +
             "(there is no separate 'gpt' CLI) — both spawn the `codex` binary. " +
-            "Fleet: claude (Claude Code) / codex (OpenAI Codex) / antigravity (agy).",
+            "Fleet: claude (Claude Code) / codex (OpenAI Codex) / grok (xAI Grok Build) / antigravity (agy).",
         ),
       role: z.string().describe("Agent role (backend/frontend/test/devops)"),
       command: z
@@ -3664,10 +3672,10 @@ export function registerTools(server: McpServer): void {
         .optional()
         .describe(
           "모델 지정. 두 층위를 다 받는다. (1) 프로바이더만: 'claude' | 'codex' " +
-            "| 'gpt' | 'antigravity' — 'codex'와 'gpt'는 같은 Codex CLI. 이때는 " +
+            "| 'gpt' | 'grok' | 'antigravity' — 'codex'와 'gpt'는 같은 Codex CLI. 이때는 " +
             "구체 모델을 그 벤더의 난도별 티어 정책이 고른다. (2) 구체 모델: " +
             "'opus'/'opus5'/'fable'/'sonnet'/'haiku' 같은 별칭이나 " +
-            "'claude-opus-4-8'/'gpt-5.6-terra' 같은 구체 id. 표기는 느슨해도 " +
+            "'claude-opus-4-8'/'gpt-5.6-terra'/'grok-4.5' 같은 구체 id. 표기는 느슨해도 " +
             "된다('opus 4.8'='opus4.8'='claude-opus-4-8'). 'gpt-5.6-terra@xhigh' " +
             "처럼 @로 effort를 함께 줄 수도 있다. 어느 쪽이든 지정하면 태그 " +
             "스코어링을 우회한다. ★유효한 모델은 서버의 모델 레지스트리가 단일 " +

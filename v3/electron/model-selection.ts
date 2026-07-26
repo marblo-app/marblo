@@ -80,6 +80,8 @@ export interface ResolvedModelPin {
   codexModel?: string;
   /** codex CLI 의 `-c model_reasoning_effort=…` 값. */
   codexEffort?: EffortLevel;
+  /** Grok 등 native CLI 의 모델 선택값. */
+  nativeModel?: string;
   /** 버전가드에 걸려 폴백했으면 그 상세(구조화 로그는 agent-config 이 이미 남김). */
   fallback?: TopModelFallback;
   /** 텔레메트리·로그용 `model@effort` 표기(effort 없으면 모델 id 만). P2-3. */
@@ -296,8 +298,17 @@ export function resolveModelPin(
     };
   }
 
-  // 그 외 하네스(antigravity/local/custom)는 아직 모델 핀 축이 없다 —
-  // 레지스트리에 행이 생기면 여기 분기를 추가한다.
+  if (spec.harness === "grok") {
+    return {
+      harness: "grok",
+      ...(spec.vendor ? { vendor: spec.vendor } : {}),
+      nativeModel: spec.modelId,
+      label: spec.modelId,
+      spec,
+    };
+  }
+
+  // 그 외 하네스(antigravity/local/custom)는 아직 모델 핀 축이 없다.
   return {
     harness: spec.harness,
     ...(spec.vendor ? { vendor: spec.vendor } : {}),

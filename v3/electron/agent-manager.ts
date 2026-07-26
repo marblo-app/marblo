@@ -23,6 +23,7 @@ export type ModelType =
   | "claude"
   | "gemini"
   | "gpt"
+  | "grok"
   | "antigravity"
   | "local"
   | "custom";
@@ -63,6 +64,10 @@ export function spawnedModelFromArgs(
       if (e) out.effort = e[1];
     }
     return out;
+  }
+  if (model === "grok") {
+    const i = args.indexOf("-m");
+    return i >= 0 && i + 1 < args.length ? { modelId: args[i + 1] } : {};
   }
   return {};
 }
@@ -126,6 +131,8 @@ export interface AgentLaunchParams {
   /** codex reasoning effort 핀(`-c model_reasoning_effort=…`). complexity
    * 파생값을 덮는다. */
   codexEffortOverride?: string;
+  /** Grok 등 native CLI 모델 핀. */
+  nativeModelOverride?: string;
   /**
    * Called immediately after PTY is created, before any output can be missed.
    *
@@ -213,6 +220,8 @@ export interface AgentInstance {
   /** codex 모델·effort 핀. 재시작이 사용자 지정을 잃지 않도록 보존한다. */
   codexModelOverride?: string;
   codexEffortOverride?: string;
+  /** native CLI 모델 핀. 재시작이 사용자 지정을 잃지 않도록 보존한다. */
+  nativeModelOverride?: string;
   /** §3.4-3 런타임 강등이 이미 한 번 일어났음. 강등 루프 방지 래치.
    *
    * ★종전엔 이 래치가 `claudeModelOverride` 가 비어있는지로 대체돼 있었다.
@@ -532,6 +541,7 @@ export class AgentManager {
         claudeModel: params.claudeModelOverride,
         codexModel: params.codexModelOverride,
         codexEffort: params.codexEffortOverride,
+        nativeModel: params.nativeModelOverride,
       },
       params.contextId,
     );
@@ -960,6 +970,7 @@ export class AgentManager {
       claudeModelOverride: params.claudeModelOverride,
       codexModelOverride: params.codexModelOverride,
       codexEffortOverride: params.codexEffortOverride,
+      nativeModelOverride: params.nativeModelOverride,
     };
 
     this.agents.set(params.id, instance);
@@ -1259,6 +1270,7 @@ export class AgentManager {
     const claudeModelOverride = agent.claudeModelOverride;
     const codexModelOverride = agent.codexModelOverride;
     const codexEffortOverride = agent.codexEffortOverride;
+    const nativeModelOverride = agent.nativeModelOverride;
     const claudeRuntimeDowngraded = agent.claudeRuntimeDowngraded;
 
     // Cleanup old PTY, config, and timers (heartbeat + the backoff timer that
@@ -1302,6 +1314,7 @@ export class AgentManager {
       claudeModelOverride,
       codexModelOverride,
       codexEffortOverride,
+      nativeModelOverride,
     });
 
     // Carry over restart counters; spawnedAt is freshly set by launch().
