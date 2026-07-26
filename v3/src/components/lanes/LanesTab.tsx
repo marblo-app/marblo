@@ -250,6 +250,8 @@ export function LanesTab() {
     // launch 가 돌려준 진짜 ptySessionId 를 매핑에 박아 둔다 — lane row 의
     // "터미널" 버튼이 이걸 reactive 로 읽어 활성화된다.
     useAgentSessionMap.getState().set(agentId, result.ptySessionId);
+    // 실제로 뜬 구체 모델 스탬프(핀 없는 launch 면 no-op).
+    agentService.stampSpawnedModel(agentId, result?.spawnedModel);
     useTerminalStore
       .getState()
       .attachSession(

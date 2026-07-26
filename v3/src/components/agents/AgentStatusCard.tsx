@@ -5,6 +5,7 @@ import type { Task } from "../../types/task";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useCostStore } from "../../stores/costStore";
+import * as agentService from "../../services/agentService";
 import { t, useTranslation } from "../../lib/i18n";
 
 interface SessionInfo {
@@ -177,6 +178,8 @@ export default function AgentStatusCard({
         agent.currentTaskId ?? undefined,
       );
       if (result) {
+        // resume 도 모델 핀을 다시 계산하므로 이전 스탬프가 낡을 수 있다.
+        agentService.stampSpawnedModel(agent.id, result.spawnedModel);
         useTerminalStore
           .getState()
           .attachSession(

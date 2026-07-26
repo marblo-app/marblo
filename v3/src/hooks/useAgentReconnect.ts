@@ -58,6 +58,26 @@ export function useAgentReconnect() {
             const icon = agent ? MODEL_ICONS[agent.model] || "⚪" : "⚪";
             const label = agent ? `${icon} ${agent.name}` : result.agentId;
             attachSession(result.ptySessionId, label);
+            // 콜드부트 relaunch 는 원래 dispatch 의 모델 핀을 갖고 있지 않아
+            // 실제 모델이 달라질 수 있다. 지금 돌고 있는 값으로 재스탬프해서
+            // 배지가 죽은 과거를 계속 주장하지 않게 한다. 값이 없으면(핀 없는
+            // launch) 기존 스탬프를 그대로 둔다 — 지우면 배지만 사라진다.
+            if (
+              result.spawnedModel &&
+              result.spawnedModel !== agent?.spawnedModel
+            ) {
+              agentService
+                .updateAgent(result.agentId, {
+                  spawnedModel: result.spawnedModel,
+                })
+                .catch((err) => {
+                  console.warn(
+                    "[Reconnect] Failed to re-stamp spawnedModel:",
+                    result.agentId,
+                    err,
+                  );
+                });
+            }
             continue;
           }
 

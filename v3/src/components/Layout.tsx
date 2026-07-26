@@ -310,6 +310,10 @@ export function Layout() {
               ownerId: "orchestrator",
               name: data.name,
               model: data.model,
+              // 구체 모델(model@effort)은 값이 있을 때만 실는다 — undefined 를
+              // 쓰면 merge 로 기존 스탬프를 지우게 된다. 없으면 UI 가 벤더로
+              // graceful fallback.
+              ...(data.spawnedModel ? { spawnedModel: data.spawnedModel } : {}),
               role: data.role || "agent",
               status: "working",
               currentTaskId: null,

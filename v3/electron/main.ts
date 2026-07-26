@@ -26,7 +26,12 @@ import {
 import { PendingInstructionListener } from "./pending-instruction-listener";
 import { FsManager } from "./fs-manager";
 import { gitSpawnEnv } from "./git-path";
-import { AgentManager, serializeAgent, type ModelType } from "./agent-manager";
+import {
+  AgentManager,
+  serializeAgent,
+  formatModelAtEffort,
+  type ModelType,
+} from "./agent-manager";
 import { Updater } from "./updater";
 import {
   isPathUnder,
@@ -2407,7 +2412,16 @@ function resolveSpawnOwner(
 }
 
 bridgeServer.setAgentSpawnedHook(
-  ({ sid, projectId, agentId, parentAgentId, name, model, role }) => {
+  ({
+    sid,
+    projectId,
+    agentId,
+    parentAgentId,
+    name,
+    model,
+    role,
+    spawnedModel,
+  }) => {
     // (Re-)attach the pending-instruction listener with the current PTY
     // session. On auto-restart `sid` changes, so detach first to discard
     // the stale closure, then attach with the fresh sid.
@@ -2434,6 +2448,9 @@ bridgeServer.setAgentSpawnedHook(
       ptySessionId: sid,
       model,
       role,
+      // 벤더(model)와 별개인 구체 모델 축. 재시작도 같은 onPtyReady 를 재사용해
+      // 이 훅을 다시 태우므로, 강등/폴백으로 모델이 바뀌면 렌더러가 재스탬프한다.
+      spawnedModel,
     };
     if (resolvedProjectId) {
       sendToProject(resolvedProjectId, "agent:spawned", payload);
@@ -3465,6 +3482,9 @@ function handleAgentDelegation(
 
     const agentId = crypto.randomUUID();
     const model = spawnConfig.model as "claude" | "gemini" | "gpt" | "custom";
+    // onPtyReady 가 실어 주는 구체 모델. 이 콜백은 launch() 반환 전에 불리므로
+    // 아래 payload 를 만들 때는 이미 채워져 있다.
+    let spawnedModel: string | undefined;
 
     try {
       const instance = agentManager.launch({
@@ -3475,9 +3495,10 @@ function handleAgentDelegation(
         command: getDefaultCommand(model),
         cwd,
         initialPrompt: resolvedTask,
-        onPtyReady: (sid) => {
+        onPtyReady: (sid, launchedModel) => {
           // Tag the PTY's owner so output is routed to the project's window
           // only — same pattern as the bridge agentSpawnedHook above.
+          spawnedModel = launchedModel;
           if (owningProjectId) {
             const ownerId = getOwnerForProject(owningProjectId);
             if (ownerId !== undefined) addPtyOwner(sid, ownerId);
@@ -3494,6 +3515,7 @@ function handleAgentDelegation(
         name: spawnConfig.name,
         ptySessionId: instance.ptySessionId,
         model,
+        spawnedModel,
         role: spawnConfig.role,
         flowNodeId: nodeId,
       };
@@ -5129,6 +5151,12 @@ ipcMain.handle(
       status: instance.status,
       command: instance.command,
       args: instance.launchConfig?.args || [],
+      // UI 에서 띄운 에이전트(Agents 탭 / 카드 ▶ Start / Lanes)는 agent:spawned
+      // 훅을 타지 않으므로 여기서 구체 모델을 돌려줘 호출자가 doc 에 스탬프한다.
+      // launch() 반환 뒤라 조회 경로가 유효하다.
+      spawnedModel: formatModelAtEffort(
+        agentManager.getSpawnedModel(instance.id),
+      ),
     };
   },
 );
@@ -5508,6 +5536,12 @@ ipcMain.handle(
           agentId: agentData.id,
           reconnected: true,
           ptySessionId: instance.ptySessionId,
+          // 콜드부트 재접속은 dispatch 때의 모델 핀(override)을 갖고 있지 않다 —
+          // 이 relaunch 의 argv 가 곧 지금 돌고 있는 모델이다. 렌더러가 이 값으로
+          // doc 을 재스탬프해야 배지가 "예전에 뭐였는지" 를 계속 주장하지 않는다.
+          spawnedModel: formatModelAtEffort(
+            agentManager.getSpawnedModel(agentData.id),
+          ),
         });
         console.log(
           `[Reconnect] Agent ${agentData.name} (${

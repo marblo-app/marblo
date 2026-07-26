@@ -118,6 +118,10 @@ interface AgentAPI {
     id: string;
     ptySessionId: string;
     status: string;
+    /** 이 launch 가 CLI 에 실제로 넘긴 구체 모델(`model@effort`). UI 스폰 경로는
+     * agent:spawned 훅을 타지 않으므로, 호출자가 이 값을 agent doc 의
+     * spawnedModel 로 스탬프해야 목록/보드가 벤더 대신 구체 모델을 보여준다. */
+    spawnedModel?: string;
     /** Present (with empty id/ptySessionId) when the spawn was blocked
      * because the CLI is not installed / not logged in. */
     needsAuth?: { model: string; action: string; installed: boolean };
@@ -192,6 +196,10 @@ interface AgentAPI {
       agentId: string;
       reconnected: boolean;
       ptySessionId: string | null;
+      /** reconnected=true 일 때 이 relaunch 가 실제로 쓴 구체 모델
+       * (`model@effort`). 콜드부트 재접속은 원래 dispatch 의 모델 핀을 갖고
+       * 있지 않으므로 값이 달라질 수 있다 — 프론트가 doc 을 재스탬프한다. */
+      spawnedModel?: string;
       /** reconnected=false 일 때 왜 skip 됐는지. 프론트가 Firestore status
        * 를 "stopped" 로 동기화할지 결정하는 데 사용. "no-session" 만
        * stopped 로 마킹 (다른 사유는 그대로 둠). "foreign-machine" 은 타
@@ -342,6 +350,10 @@ interface OrchestratorSessionAPI {
       ptySessionId: string;
       model: string;
       role: string;
+      /** 실제로 뜬 구체 모델(`model@effort`, 예: "claude-fable-5",
+       * "gpt-5.6-sol@high"). 벤더(model)와 별개 축이며, 모델을 핀하지 않은
+       * 스폰이면 없다 — 표시는 벤더로 graceful fallback. */
+      spawnedModel?: string;
     }) => void,
   ) => void;
 }

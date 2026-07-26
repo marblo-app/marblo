@@ -21,6 +21,10 @@ export const VENDOR_VISUALS: Record<VendorKind, VendorVisual> = {
 export interface AgentRowData {
   id: string;
   vendor: VendorKind;
+  /** 실제로 뜬 구체 모델(`model@effort`, 예: "claude-fable-5"). 벤더 모노그램
+   * 만으로는 fable5 인지 5.6-sol 인지 구분이 안 돼서 이름 옆 배지로 노출한다.
+   * 없으면(모델 핀 없는 스폰·구 doc) 배지를 그리지 않고 벤더 표시만 남긴다. */
+  spawnedModel?: string;
   displayName: string;
   taskId: string | null;
   status: AgentStatus | "running";

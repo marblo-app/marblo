@@ -15,6 +15,10 @@ import {
 import { viewWorktree } from "../../lib/viewWorktree";
 import { usePresence } from "../../hooks/usePresence";
 import { isLaneTask, isMissionTask } from "../../lib/laneContext";
+import {
+  spawnedModelLabel,
+  spawnedModelTitle,
+} from "../../lib/spawnedModelLabel";
 import { useTranslation } from "../../lib/i18n";
 import FlowKanbanLink from "../flows/FlowKanbanLink";
 
@@ -230,6 +234,8 @@ function TaskCardContent({
   const claimingAgent = task.claimedBy
     ? agents.find((a) => a.name === task.claimedBy || a.id === task.claimedBy)
     : undefined;
+  // 구체 모델 스탬프(model@effort). 없으면 null → 배지는 벤더로 fallback.
+  const agentModelLabel = spawnedModelLabel(claimingAgent?.spawnedModel);
   const ownerId = claimingAgent?.ownerId;
   const lastHeartbeatAt = usePresence(ownerId);
   // Presence 1차 판정은 에이전트 프로세스의 직접 시그널(agent.status)을 본다.
@@ -285,6 +291,24 @@ function TaskCardContent({
         >
           {priority.label}
         </span>
+        {/* 이 티켓을 물고 있는 에이전트가 실제로 어떤 모델로 떴는지. 벤더만
+            보이면 같은 claude 안에서 fable5 인지 5.6-sol 인지 구분이 안 돼
+            "지정한 모델로 떴는지" 를 보드에서 확인할 수 없었다. 스탬프가 없는
+            에이전트(핀 없는 스폰·구 doc)는 벤더 이름으로 fallback. */}
+        {claimingAgent && (
+          <span
+            className="inline-flex max-w-[160px] items-center gap-1 truncate rounded bg-gray-500/20 px-1.5 py-0.5 text-xs font-medium text-gray-300"
+            title={spawnedModelTitle(
+              agentModelLabel ?? claimingAgent.model,
+              claimingAgent.model,
+            )}
+          >
+            <span aria-hidden>{MODEL_ICONS[claimingAgent.model] ?? "⚪"}</span>
+            <span className="truncate font-mono">
+              {agentModelLabel ?? claimingAgent.model}
+            </span>
+          </span>
+        )}
         {isLaneTask(task.contextId) && (
           <span
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-500/20 text-amber-300"

@@ -1,6 +1,10 @@
 import { memo } from "react";
 import { VENDOR_VISUALS, STATUS_PILL, type AgentRowData } from "./types";
 import { useTranslation } from "../../../lib/i18n";
+import {
+  spawnedModelLabel,
+  spawnedModelTitle,
+} from "../../../lib/spawnedModelLabel";
 
 interface Props {
   row: AgentRowData;
@@ -29,6 +33,9 @@ function AgentRowImpl({
   // crash 가 아니라 회색 fallback 으로만 표시되도록 진입점에서 가드.
   const vendor = VENDOR_VISUALS[row.vendor] ?? VENDOR_VISUALS.custom;
   const pill = STATUS_PILL[row.status] ?? STATUS_PILL.idle;
+  // 구체 모델 스탬프가 있을 때만 배지를 낸다 — 없으면 벤더 모노그램만 남는
+  // 기존 표시로 자연스럽게 되돌아간다(구 doc/핀 없는 스폰).
+  const modelLabel = spawnedModelLabel(row.spawnedModel);
 
   return (
     <div
@@ -75,6 +82,15 @@ function AgentRowImpl({
       <span className="flex-1 truncate text-sm text-[#cdd6f4]">
         {row.displayName}
       </span>
+
+      {modelLabel && (
+        <span
+          className="max-w-[140px] shrink-0 truncate rounded border border-[#45475a] bg-[#181825] px-1.5 py-0.5 text-[10px] font-mono text-[#a6adc8]"
+          title={spawnedModelTitle(modelLabel, vendor.label)}
+        >
+          {modelLabel}
+        </span>
+      )}
 
       <span
         className="flex items-center gap-1 text-[11px] font-medium"

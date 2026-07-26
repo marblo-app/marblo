@@ -122,9 +122,8 @@ export function useAppLifecycle() {
 
       if (currentProject) {
         try {
-          const { doc, setDoc, serverTimestamp } = await import(
-            "firebase/firestore"
-          );
+          const { doc, setDoc, serverTimestamp } =
+            await import("firebase/firestore");
           const { db } = await import("../lib/firebase");
           await setDoc(
             doc(db, "agents", data.agentId),
@@ -133,6 +132,10 @@ export function useAppLifecycle() {
               ownerId: "orchestrator",
               name: data.name,
               model: data.model,
+              // 구체 모델은 있을 때만 쓴다. undefined 를 실으면 merge 가 기존
+              // 스탬프(예: MCP 층이 먼저 쓴 값)를 지울 수 있고, 모델을 핀하지
+              // 않은 스폰에 빈 배지를 만들게 된다.
+              ...(data.spawnedModel ? { spawnedModel: data.spawnedModel } : {}),
               role: data.role || "agent",
               status: "working",
               currentTaskId: null,
@@ -140,17 +143,17 @@ export function useAppLifecycle() {
                 data.model === "gpt"
                   ? "codex"
                   : data.model === "antigravity"
-                  ? "agy"
-                  : data.model,
+                    ? "agy"
+                    : data.model,
               skillFile: "",
               createdAt: serverTimestamp(),
             },
-            { merge: true }
+            { merge: true },
           );
         } catch (err) {
           console.warn(
             "[useAppLifecycle] Firestore agent upsert failed (non-fatal):",
-            err
+            err,
           );
         }
       }

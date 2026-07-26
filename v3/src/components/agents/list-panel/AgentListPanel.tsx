@@ -190,6 +190,7 @@ export function AgentListPanel({
       return {
         id: a.id,
         vendor,
+        spawnedModel: a.spawnedModel,
         displayName: a.name,
         taskId: a.currentTaskId,
         status: a.status === "working" ? "running" : a.status,

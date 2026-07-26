@@ -444,6 +444,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ptySessionId: string;
         model: string;
         role: string;
+        /** 실제로 뜬 구체 모델(`model@effort`). 모델을 핀하지 않은 스폰이면
+         * 없다 — 수신 측은 벤더(model) 표시로 fallback 해야 한다. */
+        spawnedModel?: string;
       }) => void,
     ) => {
       ipcRenderer.on("agent:spawned", (_event, data) => callback(data));

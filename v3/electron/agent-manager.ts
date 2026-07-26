@@ -126,8 +126,16 @@ export interface AgentLaunchParams {
   /** codex reasoning effort 핀(`-c model_reasoning_effort=…`). complexity
    * 파생값을 덮는다. */
   codexEffortOverride?: string;
-  /** Called immediately after PTY is created, before any output can be missed */
-  onPtyReady?: (ptySessionId: string) => void;
+  /**
+   * Called immediately after PTY is created, before any output can be missed.
+   *
+   * `spawnedModel` 은 이 launch 가 CLI 에 실제로 넘긴 `model@effort` 표기다
+   * (formatModelAtEffort). ★이 콜백은 `agents.set` 보다 **먼저** 불리므로
+   * 수신 측에서 `getSpawnedModel(agentId)` 를 조회하면 null 이 나온다 —
+   * 스폰 알림 페이로드에 구체 모델을 실으려면 반드시 이 인자를 써야 한다.
+   * 모델을 핀하지 않은 launch 면 undefined.
+   */
+  onPtyReady?: (ptySessionId: string, spawnedModel?: string) => void;
 }
 
 export interface AgentInstance {
@@ -169,8 +177,10 @@ export interface AgentInstance {
   stopRequested: boolean;
   restartTimer: ReturnType<typeof setTimeout> | null;
   heartbeatTimer: ReturnType<typeof setInterval> | null;
-  /** Stored so auto-restart can re-register PTY forwarding */
-  onPtyReady?: (ptySessionId: string) => void;
+  /** Stored so auto-restart can re-register PTY forwarding. 재시작도 같은
+   * 콜백을 재사용하므로 relaunch 의 새 `spawnedModel` 이 그대로 다시 통보된다
+   * (강등 재시작으로 모델이 바뀌면 수신 측이 재스탬프할 수 있다). */
+  onPtyReady?: (ptySessionId: string, spawnedModel?: string) => void;
   /** epoch-ms of the most recent PTY output activity. Bumped on every onData
    * chunk. A HINT ONLY — silence does not mean idle (a reasoning agent emits
    * nothing), so this now feeds only the wedged-turn backstop
@@ -578,7 +588,16 @@ export class AgentManager {
 
     // Notify caller IMMEDIATELY so they can register data listeners
     // before the PTY produces any output.
-    params.onPtyReady?.(ptySessionId);
+    //
+    // 방금 만든 argv 를 되읽어 구체 모델을 함께 넘긴다. 여기서 계산해야 하는
+    // 이유: 이 콜백은 `this.agents.set` 보다 앞서 불리므로 수신 측이
+    // getSpawnedModel(id) 로 조회하면 아직 null 이다.
+    params.onPtyReady?.(
+      ptySessionId,
+      formatModelAtEffort(
+        spawnedModelFromArgs(params.model, launchConfig.args),
+      ),
+    );
 
     // Send initial prompt via stdin after CLI finishes booting (only for NEW sessions).
     // Uses PTY output detection instead of fixed timer to reliably detect readiness.

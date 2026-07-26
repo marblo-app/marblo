@@ -108,7 +108,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // Launch via IPC — pass current project ID for MCP context
       const agent = { ...data, id, createdAt: new Date() } as Agent;
       const projectId = useProjectStore.getState().currentProject?.id;
-      await window.electronAPI.agent.launch(
+      const launched = await window.electronAPI.agent.launch(
         agent,
         "",
         undefined,
@@ -116,6 +116,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         projectId,
         agent.currentTaskId ?? undefined,
       );
+      // 벤더 말고 실제로 뜬 구체 모델을 doc 에 남긴다 — UI 스폰은 브릿지의
+      // agent:spawned 훅을 안 타므로 여기가 유일한 스탬프 지점이다.
+      agentService.stampSpawnedModel(id, launched?.spawnedModel);
       return id;
     } catch (err) {
       set({
@@ -168,7 +171,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         throw new Error(msg);
       }
       const projectId = useProjectStore.getState().currentProject?.id;
-      await window.electronAPI.agent.launch(
+      const launched = await window.electronAPI.agent.launch(
         agent,
         cwd,
         undefined,
@@ -176,6 +179,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         projectId,
         agent.currentTaskId ?? undefined,
       );
+      // 재기동은 모델 핀을 다시 계산하므로 이전 스탬프가 낡을 수 있다 — 지금
+      // 값으로 갱신.
+      agentService.stampSpawnedModel(agent.id, launched?.spawnedModel);
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to launch agent",
@@ -263,6 +269,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         agent.currentTaskId ?? undefined,
       );
       await agentService.updateAgent(id, { status: "idle" as AgentStatus });
+      // 앱 재시작 후 재기동 — 이 relaunch 의 argv 가 지금 돌고 있는 모델이다.
+      agentService.stampSpawnedModel(id, launchResult?.spawnedModel);
 
       // Attach terminal session (MODEL_ICONS hoisted to top of restartAgent)
       const { useTerminalStore } = await import("./terminalStore");

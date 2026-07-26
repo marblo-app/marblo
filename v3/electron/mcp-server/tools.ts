@@ -3058,6 +3058,8 @@ export function registerTools(server: McpServer): void {
           success: boolean;
           agentId?: string;
           ptySessionId?: string;
+          /** 실제로 스폰된 구체 모델·effort. `model`(벤더)과 별개 축. */
+          spawnedModel?: string;
           error?: string;
           // Board task the bridge bound the agent to — the supplied task_id, or
           // an ad-hoc task the WorktreeCoordinator created when none was given.
@@ -3084,6 +3086,13 @@ export function registerTools(server: McpServer): void {
               ownerId: "orchestrator",
               name,
               model,
+              // 벤더(model)만으로는 fable5 인지 5.6-sol 인지 보드에서 구분이 안
+              // 된다. 브릿지가 argv 에서 되읽은 구체 모델을 그대로 스탬프.
+              // 값이 없으면(모델 핀 없는 스폰) 키 자체를 빼서 merge 가 기존
+              // 스탬프를 지우지 않게 한다.
+              ...(result.spawnedModel
+                ? { spawnedModel: result.spawnedModel }
+                : {}),
               role,
               status: "idle",
               // Link the agent to its board task — the supplied task_id, or the
@@ -4043,6 +4052,13 @@ export function registerTools(server: McpServer): void {
                   ownerId: "orchestrator",
                   name: result.agentName || `${role}-agent`,
                   model: result.model || model || "claude",
+                  // 구체 모델 축. spawned/restarted 모두 브릿지가 그 프로세스의
+                  // 실제 argv 를 되읽은 값이라, 버전가드 폴백이 걸렸으면 요청값이
+                  // 아니라 서빙된 값이 보드에 남는다. 없으면 키를 빼서 merge 가
+                  // 기존 스탬프를 지우지 않게 한다.
+                  ...(result.spawnedModel
+                    ? { spawnedModel: result.spawnedModel }
+                    : {}),
                   role: result.agentRole || role,
                   status: "working",
                   // Link to the board task — the supplied task_id, or the ad-hoc

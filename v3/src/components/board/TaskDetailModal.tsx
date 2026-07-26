@@ -24,6 +24,10 @@ import { useEditorStore } from "../../stores/editorStore";
 import { useAuth } from "../../hooks/useAuth";
 import { useTranslation } from "../../lib/i18n";
 import {
+  spawnedModelLabel,
+  spawnedModelTitle,
+} from "../../lib/spawnedModelLabel";
+import {
   findTaskWorktree,
   resolveTaskAgentId,
   sameWorktreePath,
@@ -183,11 +187,18 @@ function AgentAssign({
       <div className="flex flex-wrap gap-2">
         {agents.map((agent) => {
           const isAssigned = claimedBy === agent.name || claimedBy === agent.id;
+          // 구체 모델 스탬프. 없으면 배지를 빼고 기존 아이콘+이름만 남긴다.
+          const modelLabel = spawnedModelLabel(agent.spawnedModel);
           return (
             <button
               key={agent.id}
               onClick={() =>
                 isAssigned ? handleUnassign() : handleAssign(agent.name)
+              }
+              title={
+                modelLabel
+                  ? spawnedModelTitle(modelLabel, agent.model)
+                  : agent.model
               }
               className={`flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs transition-colors ${
                 isAssigned
@@ -197,6 +208,11 @@ function AgentAssign({
             >
               <span>{MODEL_ICONS[agent.model] || "⚪"}</span>
               <span>{agent.name}</span>
+              {modelLabel && (
+                <span className="max-w-[140px] truncate rounded bg-black/30 px-1 py-px font-mono text-[10px] text-gray-400">
+                  {modelLabel}
+                </span>
+              )}
               {isAssigned && <span className="text-[10px]">✓</span>}
             </button>
           );
@@ -243,10 +259,17 @@ function AgentTerminalButton({
     onClose(); // Close modal to show terminal
   };
 
+  // 이 티켓을 물고 있는 워커가 실제로 어떤 모델로 떴는지. 없으면(핀 없는
+  // 스폰·구 doc) 배지 없이 기존 표시 그대로.
+  const modelLabel = spawnedModelLabel(agent.spawnedModel);
+
   return (
     <div>
       <button
         onClick={handleOpenTerminal}
+        title={
+          modelLabel ? spawnedModelTitle(modelLabel, agent.model) : agent.model
+        }
         className="flex items-center gap-2 rounded border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-400 hover:bg-blue-500/20 transition-colors"
       >
         <svg
@@ -264,6 +287,11 @@ function AgentTerminalButton({
         </svg>
         {MODEL_ICONS[agent.model] || "⚪"}{" "}
         {t("board.taskDetail.viewTerminal", { name: agent.name })}
+        {modelLabel && (
+          <span className="max-w-[160px] truncate rounded bg-black/30 px-1 py-px font-mono text-[10px] text-gray-400">
+            {modelLabel}
+          </span>
+        )}
         {!hasSession && (
           <span className="text-[10px] text-gray-500">
             {t("board.taskDetail.connect")}

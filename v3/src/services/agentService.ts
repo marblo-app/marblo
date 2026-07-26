@@ -1,5 +1,5 @@
-import { where } from 'firebase/firestore';
-import type { Agent } from '../types/agent';
+import { where } from "firebase/firestore";
+import type { Agent } from "../types/agent";
 import {
   getDocument,
   queryDocuments,
@@ -8,10 +8,10 @@ import {
   deleteDocument,
   toTimestamp,
   convertTimestamps,
-} from './firestore';
+} from "./firestore";
 
-const COLLECTION = 'agents';
-const DATE_FIELDS = ['createdAt'];
+const COLLECTION = "agents";
+const DATE_FIELDS = ["createdAt"];
 
 function toAgent(raw: Record<string, unknown>): Agent {
   return convertTimestamps<Agent>(raw, DATE_FIELDS);
@@ -20,7 +20,7 @@ function toAgent(raw: Record<string, unknown>): Agent {
 export async function getAgents(projectId: string): Promise<Agent[]> {
   const docs = await queryDocuments<Record<string, unknown>>(
     COLLECTION,
-    where('projectId', '==', projectId),
+    where("projectId", "==", projectId),
   );
   return docs.map(toAgent);
 }
@@ -31,7 +31,7 @@ export async function getAgent(agentId: string): Promise<Agent | null> {
 }
 
 export async function createAgent(
-  data: Omit<Agent, 'id' | 'createdAt'>,
+  data: Omit<Agent, "id" | "createdAt">,
 ): Promise<string> {
   return createDocument(COLLECTION, {
     ...data,
@@ -39,9 +39,29 @@ export async function createAgent(
   });
 }
 
+/**
+ * 이 launch 가 실제로 쓴 구체 모델(`model@effort`)을 agent doc 에 스탬프한다.
+ *
+ * UI 에서 띄운 에이전트(Agents 탭 / 카드 ▶ Start / Lanes / 재시작)는 브릿지의
+ * agent:spawned 훅을 타지 않아서, main 이 돌려준 launch 결과가 구체 모델을 얻는
+ * 유일한 지점이다. 값이 없으면(모델을 핀하지 않은 launch) 아무것도 쓰지 않는다 —
+ * 빈 값을 써서 기존 스탬프를 지우면 배지만 사라지고 얻는 게 없다.
+ *
+ * best-effort: 실패해도 에이전트는 이미 돌고 있으므로 배지만 벤더로 남는다.
+ */
+export function stampSpawnedModel(
+  agentId: string,
+  spawnedModel?: string,
+): void {
+  if (!spawnedModel) return;
+  updateAgent(agentId, { spawnedModel }).catch((err) => {
+    console.warn("[agentService] spawnedModel stamp failed:", agentId, err);
+  });
+}
+
 export async function updateAgent(
   agentId: string,
-  data: Partial<Omit<Agent, 'id' | 'createdAt'>>,
+  data: Partial<Omit<Agent, "id" | "createdAt">>,
 ): Promise<void> {
   await updateDocument(COLLECTION, agentId, data);
 }

@@ -112,6 +112,9 @@ export function AgentsTab() {
         window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
         return;
       }
+      // 실제로 뜬 구체 모델(model@effort)을 doc 에 남긴다 — 목록/보드가 벤더
+      // 대신 이 값을 배지로 보여준다. 핀 없는 launch 면 no-op.
+      agentService.stampSpawnedModel(id, result?.spawnedModel);
       // 에이전트 실행 즉시 터미널 탭 자동 연결 (출력 유실 방지)
       const MODEL_ICONS: Record<string, string> = {
         claude: "🟣",

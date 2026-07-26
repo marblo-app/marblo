@@ -13,6 +13,18 @@ export interface Agent {
   ownerId: string;
   name: string;
   model: ModelType;
+  // 이 에이전트가 **실제로 어떤 구체 모델로 떴는지** — `model`(벤더/프로바이더)
+  // 과는 다른 축이다. 예: model="claude" + spawnedModel="claude-fable-5",
+  // model="gpt" + spawnedModel="gpt-5.6-sol@high".
+  //
+  // 값의 출처는 요청이 아니라 사실이다: main 이 CLI 에 실제로 넘긴 argv 를
+  // 되읽어(agent-manager.spawnedModelFromArgs) 스탬프한다. 지정 모델이
+  // 버전가드로 폴백했거나 런타임 강등 재시작이 걸린 경우, 여기엔 요청값이
+  // 아니라 서빙된 값이 남는다.
+  //
+  // 모델을 핀하지 않은 launch(오케 기본 경로 등)와 이 필드가 생기기 전에
+  // 만들어진 구 doc 에는 없다 — UI 는 반드시 벤더 표시로 graceful fallback.
+  spawnedModel?: string;
   role: string;
   status: AgentStatus;
   currentTaskId: string | null;

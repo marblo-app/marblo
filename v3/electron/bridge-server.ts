@@ -199,6 +199,10 @@ interface SpawnAgentResponse {
   success: boolean;
   agentId?: string;
   ptySessionId?: string;
+  /** 실제로 스폰된 구체 모델·effort(`model@effort`). `model`(벤더)과 별개 축으로,
+   * MCP 층이 agent doc 에 스탬프해 보드/목록이 "claude" 대신 "claude-fable-5" 를
+   * 보여줄 수 있게 한다. 모델을 핀하지 않은 스폰이면 undefined. */
+  spawnedModel?: string;
   error?: string;
   /** Board task the agent was bound to — the caller's taskId, or an ad-hoc
    * task auto-created by WorktreeCoordinator when none was supplied (null when
@@ -728,6 +732,10 @@ export class BridgeServer {
         name: string;
         model: string;
         role: string;
+        /** 이 프로세스가 실제로 뜬 구체 모델(`model@effort`). 같은 이유로
+         * 여기 실어 나른다 — hook 시점엔 getSpawnedModel(agentId) 가 아직
+         * null 이다. 모델을 핀하지 않은 launch 면 undefined. */
+        spawnedModel?: string;
       }) => void)
     | null = null;
 
@@ -861,6 +869,7 @@ export class BridgeServer {
       name: string;
       model: string;
       role: string;
+      spawnedModel?: string;
     }) => void,
   ): void {
     this.agentSpawnedHook = hook;
@@ -3033,7 +3042,9 @@ export class BridgeServer {
       claudeModelOverride: params.modelPin?.claudeModel,
       codexModelOverride: params.modelPin?.codexModel,
       codexEffortOverride: params.modelPin?.codexEffort,
-      onPtyReady: (sid) => {
+      onPtyReady: (sid, spawnedModel) => {
+        // spawnedModel 은 agent-manager 가 방금 만든 argv 에서 되읽어 넘겨준다
+        // — 이 콜백은 agents.set 보다 먼저 불려서 getSpawnedModel 로는 못 얻는다.
         if (this.agentSpawnedHook) {
           this.agentSpawnedHook({
             sid,
@@ -3043,6 +3054,7 @@ export class BridgeServer {
             name: params.name,
             model: params.model,
             role: params.role,
+            spawnedModel,
           });
           return;
         }
@@ -3086,6 +3098,10 @@ export class BridgeServer {
         ptySessionId: sid,
         model: params.model,
         role: params.role,
+        // launch() 가 반환된 뒤라 agents.set 이 끝났다 — 여기선 조회로 얻어도 안전.
+        spawnedModel: formatModelAtEffort(
+          this.agentManager.getSpawnedModel(agentId),
+        ),
       });
     }
 
@@ -3093,6 +3109,11 @@ export class BridgeServer {
       success: true,
       agentId,
       ptySessionId: sid,
+      // 이 에이전트가 실제로 뜬 구체 모델. MCP spawn_agent 가 Firestore doc 에
+      // 스탬프해 보드/에이전트 목록이 벤더 대신 구체 모델을 보여줄 수 있게 한다.
+      spawnedModel: formatModelAtEffort(
+        this.agentManager.getSpawnedModel(agentId),
+      ),
       taskId: prep.taskId ?? params.taskId ?? null,
     };
   }
