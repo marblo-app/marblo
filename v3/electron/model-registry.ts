@@ -267,6 +267,19 @@ const ZAI_DOCS_PROBE: ModelVerification = {
     "/guides/overview/pricing (1차 출처). 모델 id·엔드포인트·단가 전부 원문 대조",
 };
 
+/**
+ * MiniMax — GLM 과 같은 이유로 **문서 크롤**이다(Token Plan 구독키 미보유).
+ * 라이브 대조는 키 확보 후 `npm run verify:models` 의 [vendor] 섹션이 돌린다.
+ */
+const MINIMAX_DOCS_PROBE: ModelVerification = {
+  at: "2026-07-26",
+  cli: "n/a (Token Plan 구독키 미보유 — 라이브 프로브 대기)",
+  method:
+    "gstack /browse 크롤: platform.minimax.io/docs/token-plan/claude-code.md · " +
+    "/token-plan/other-tools.md · /guides/models-intro.md · /guides/pricing-paygo.md " +
+    "(1차 출처). 엔드포인트·모델 id·단가 전부 원문 대조",
+};
+
 /** 5.6 계열 effort 축(max/ultra 까지). */
 const EFFORTS_56_FULL: EffortLevel[] = [
   "low",
@@ -508,6 +521,92 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
     status: "active",
   },
 
+  // ── MiniMax Token Plan (두 번째 env-swap 벤더 — 서베이 §2.5) ─────────────
+  // GLM 행의 **정확한 복제**다. 새로 배선한 코드는 없다 — 위 두 행과 같은 모양의
+  // 행 2개가 전부다((B)형 벤더의 편입 비용이 실제로 데이터라는 두 번째 증거).
+  //
+  // 실측 출처(2026-07-26 gstack /browse 크롤, 1차 출처만):
+  //   /docs/token-plan/claude-code.md  — Claude Code 배선(ANTHROPIC_BASE_URL/
+  //                                      ANTHROPIC_AUTH_TOKEN + DEFAULT_* 매핑),
+  //                                      "for international users, use
+  //                                       https://api.minimax.io/anthropic"
+  //   /docs/token-plan/other-tools.md  — Anthropic-Compatible 표: Base URL
+  //                                      https://api.minimax.io/anthropic,
+  //                                      Model ID `MiniMax-M3`
+  //   /docs/guides/models-intro.md     — 현행 언어모델 3종(M3 / M2.7 /
+  //                                      M2.7-highspeed), 그 아래는 Legacy
+  //   /docs/guides/pricing-paygo.md    — per-1M 단가표
+  //
+  // ★모델 id 대소문자는 **벤더 문서 원문 그대로**다(`MiniMax-M3`). 소문자로 접어
+  // 적으면 우리가 만든 문자열을 남의 API 에 보내는 것이고, 그게 유효한지 확인할
+  // 방법이 (구독키 없이는) 없다. 레지스트리 **조회**는 대소문자를 안 가린다
+  // (BY_ID 가 norm 키를 쓴다) — 그래서 dispatch 는 `minimax-m3` 로도 닿는다.
+  //
+  // ★국내(중국) 엔드포인트 `https://api.minimaxi.com/anthropic` 는 등록하지
+  // 않았다. 같은 키가 양쪽에서 통하지 않고(플랫폼 계정 자체가 다르다), 우리가
+  // 쓰는 건 international 이다. 필요해지면 별 행이 아니라 env 로 갈릴 축이다.
+  //
+  // ★1M 컨텍스트 표기(`MiniMax-M3[1m]`)는 등록하지 않았다 — GLM 의 `[1m]` 변종과
+  // 같은 이유다. 벤더 Claude Code 문서가 그 표기와 함께
+  // `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000` 을 요구하는데, 그 env 를 우리 스폰에
+  // 얹었을 때의 동작을 라이브로 확인하지 못했다. 안 얹으면 claude 가 자기 기본
+  // 임계에서 더 일찍 compact 할 뿐이라 **안전한 쪽으로 틀린다**.
+  {
+    id: "MiniMax-M3",
+    harness: "claude", // 우리 claude 바이너리를 그대로 스폰한다(신규 하네스 0)
+    provider: "minimax",
+    envProfile: {
+      ANTHROPIC_BASE_URL: "https://api.minimax.io/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "${MINIMAX_API_KEY}", // ★값이 아니라 env 키 이름
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "MiniMax-M3",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "MiniMax-M3",
+      // GLM 과 같은 규율: **레지스트리에 등록된 id 만** env 로 내보낸다(미등록 id =
+      // cost-tracker 가 단가를 모르는 유령 비용). 그래서 haiku 자리는 더 싼 현행
+      // 모델인 M2.7 로 접었다.
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "MiniMax-M2.7",
+    },
+    aliases: [],
+    // 벤더 자기 표기는 "Frontier multimodal coding model" 이지만, 우리 `frontier`
+    // 등급은 벤치·실측이 붙은 칸이다(오늘은 fable5 하나). 벤더 마케팅 문구로 그
+    // 등급을 주지 않는다 — GLM 과 같이 top 으로 잠정 두고, 사다리에 안 들어가므로
+    // (LADDER_EXCLUSIONS) 이 값이 자동 선택을 바꾸지 않는다.
+    capability: "top",
+    efforts: [], // claude 하네스엔 CLI 인자로 줄 effort 축이 없다
+    // 공식 pay-as-you-go 리스트 단가(≤512k input). 문서는 "Permanent 50% off" 로
+    // $0.30/$1.20 을 병기하지만 **할인 전 리스트**를 적는다 — 할인은 벤더가 언제든
+    // 거두고, 과소보고는 라우팅 학습을 오염시키는 방향이다(cost-tracker 규율).
+    // 512k 초과 입력 구간은 2배($1.20/$4.80)이고 우리 축엔 그 조건이 없다. 우리
+    // 접근 경로는 정액 Token Plan 이라 실 한계비용은 ≈0 — 그래서 estimated 다.
+    pricing: { inputPer1M: 0.6, outputPer1M: 2.4, estimated: true },
+    verified: MINIMAX_DOCS_PROBE,
+    status: "active",
+  },
+  {
+    id: "MiniMax-M2.7",
+    harness: "claude",
+    provider: "minimax",
+    envProfile: {
+      ANTHROPIC_BASE_URL: "https://api.minimax.io/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "${MINIMAX_API_KEY}",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "MiniMax-M2.7",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "MiniMax-M2.7",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "MiniMax-M2.7",
+    },
+    aliases: [],
+    capability: "mid",
+    efforts: [],
+    // $0.3/$1.2 (pricing-paygo.md, 할인 표기 없음). estimated 인 이유는 GLM 과
+    // 같다 — 우리가 실제로 태우는 것은 구독 쿼터지 이 단가가 아니다.
+    pricing: { inputPer1M: 0.3, outputPer1M: 1.2, estimated: true },
+    verified: MINIMAX_DOCS_PROBE,
+    status: "active",
+  },
+  // MiniMax 에서 **등록하지 않은 것**:
+  //   - `MiniMax-M2.7-highspeed` : M2.7 과 성능 동일 + 저지연이고 단가가 2배다
+  //     ($0.6/$2.4). 지연을 라우팅 축으로 쓰지 않는 지금은 "같은 성능에 2배 비싼
+  //     칸" 일 뿐이라 고를 근거가 없다.
+  //   - M2.5 / M2.1 / M2 : 벤더 문서가 Legacy 로 접었다.
+
   // 의도적 미등록(§1.2 표에는 있으나 라우팅 후보가 아님):
   //   - gpt-5.3-codex-spark : api ❌ (Codex CLI 전용). 단가만 cost-tracker 의
   //     legacy 프리픽스 행("gpt-5.3-codex" $1.75/$14)이 커버한다.
@@ -520,11 +619,17 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
 // 조회 API
 // ─────────────────────────────────────────────────────────────────────────
 
+// ★인덱스 키는 `norm`(trim+소문자)으로 접는다 — `getModel` 이 같은 함수로 조회하기
+// 때문이다. 종전엔 **원문 그대로** 넣었고, 우리 id 가 전부 소문자라 그 차이가
+// 드러나지 않았다. MiniMax 는 벤더 공식 id 가 `MiniMax-M3`(대소문자 혼합)라
+// 그대로 두면 `getModel("MiniMax-M3")` 가 **영구 miss** 한다 — 즉 envProfile 이
+// 조용히 안 얹히고 스폰이 Anthropic 으로 새는, 이 축이 막으려던 바로 그 실패모드다.
+// 접는 쪽은 **조회 키**뿐이고 `entry.id` 원문(=CLI·API 로 나가는 값)은 그대로다.
 const BY_ID = new Map<string, ModelRegistryEntry>();
 const BY_ALIAS = new Map<string, ModelRegistryEntry>();
 for (const entry of MODEL_REGISTRY) {
-  BY_ID.set(entry.id, entry);
-  for (const alias of entry.aliases) BY_ALIAS.set(alias, entry);
+  BY_ID.set(norm(entry.id), entry);
+  for (const alias of entry.aliases) BY_ALIAS.set(norm(alias), entry);
 }
 
 /**

@@ -92,6 +92,11 @@ dispatch_task(model="glm-4.7")   # claude 바이너리 + Z.ai env 로 스폰
 
 ## 5. MiniMax 편입 시 (레퍼런스 패턴)
 
+> ✅ 착지했다 — [`VENDOR-MINIMAX.md`](./VENDOR-MINIMAX.md) (tg6U7MKt). 아래 5단계는
+> 그대로 밟혔고, **한 가지만 예외**였다: 벤더 공식 id 가 대소문자 혼합
+> (`MiniMax-M3`)이라 레지스트리 조회를 케이스 무관으로 고쳐야 했다(코드 2줄).
+> 그 문서 §3 ② 참조.
+
 1. `VendorId` 에 이미 `minimax` 가 있다 → 유니온 수정 불필요.
 2. `MODEL_REGISTRY` 에 행 추가: `harness: "claude"`, `provider: "minimax"`,
    `envProfile: { ANTHROPIC_BASE_URL: <실측>, ANTHROPIC_AUTH_TOKEN: "${MINIMAX_API_KEY}", ... }`.
