@@ -6,11 +6,13 @@ import { execFileSync } from "child_process";
 import { ModelType } from "./agent-manager";
 import {
   cmpSemver,
+  envProfileForModel,
   getModel,
+  harnessForModel,
   meetsMinCli,
-  modelsByProvider,
+  modelsByHarness,
   type EffortLevel,
-  type ModelProvider,
+  type HarnessId,
 } from "./model-registry";
 import {
   entryRung,
@@ -591,14 +593,18 @@ export function orchestratorCommandForModel(model: ModelType): string {
 // 사장님 결정 = **standard 는 Opus 5 유지**. 그래서 되돌리는 게 아니라 지금 상태를
 // `claude-opus-5` 로 명시 고정하고, 다시는 조용히 움직이지 못하게 막는다.
 
-// ★컴파일타임 가드: 레지스트리의 벤더 축(ModelProvider)과 런타임의 모델 축
-// (ModelType)이 같은 집합인지 양방향으로 못박는다. 새 벤더를 한쪽에만 추가하면
-// 여기서 타입에러가 난다 — 레지스트리에 있는데 라우팅이 모르는(또는 그 반대인)
-// 벤더가 조용히 생기는 것을 막는다.
-const _providerCoversModelType: ModelProvider = null as unknown as ModelType;
-const _modelTypeCoversProvider: ModelType = null as unknown as ModelProvider;
-void _providerCoversModelType;
-void _modelTypeCoversProvider;
+// ★컴파일타임 가드: 레지스트리의 **하네스** 축(HarnessId)과 런타임의 모델 축
+// (ModelType)이 같은 집합인지 양방향으로 못박는다. 새 하네스를 한쪽에만 추가하면
+// 여기서 타입에러가 난다 — 레지스트리에 있는데 스폰이 모르는(또는 그 반대인)
+// 바이너리가 조용히 생기는 것을 막는다.
+//
+// ★축분리(USbdRV4k) 후에도 이 단언은 그대로다. 쪼개진 쪽은 **벤더**(VendorId)이고
+// 그건 ModelType 과 무관하게 늘어난다 — 벤더가 늘어도 스폰 switch 는 안 늘어나는
+// 것이 축분리의 목적이므로, 벤더 축에는 이런 단언을 걸지 않는다.
+const _harnessCoversModelType: HarnessId = null as unknown as ModelType;
+const _modelTypeCoversHarness: ModelType = null as unknown as HarnessId;
+void _harnessCoversModelType;
+void _modelTypeCoversHarness;
 
 /** 불확실한 모든 상황의 안전 귀결(§8.3). "최상위를 못 쓰는 것"은 허용,
  * "spawn 자체가 깨지는 것"은 불허 — 그래서 늘 검증된 opus 로 떨어진다.
@@ -644,7 +650,7 @@ export const DEFAULT_STANDARD_CLAUDE_MODEL = "claude-opus-5";
  * 신규 alias 는 레지스트리 항목의 `aliases` 에 추가하면 여기 자동 반영된다.
  * 하위호환을 위해 형태(Record<alias, id>)는 그대로 유지한다. */
 export const CLAUDE_MODEL_ALIASES: Record<string, string> = Object.fromEntries(
-  modelsByProvider("claude").flatMap((m) =>
+  modelsByHarness("claude").flatMap((m) =>
     m.aliases.map((a) => [a, m.id] as const),
   ),
 );
@@ -1028,6 +1034,136 @@ export function resolveAllHarnessVersions(): Record<string, string> {
     out[model] = resolveHarnessCli(model).version;
   }
   return out;
+}
+
+// ── ★provider ≠ harness 분기 지점 (USbdRV4k, 서베이 §4.5.1) ──────────────
+//
+// 스폰 경로가 두 축을 나눠 쓰는 자리는 정확히 둘이다:
+//
+//   1. **바이너리**는 `harness` 가 고른다   → harnessForLaunch()
+//   2. **백엔드**는 `provider`(벤더)가 고른다 → applyVendorEnv()
+//
+// 오늘 레지스트리의 모든 행이 `harness === 옛 provider` 이고 `envProfile` 이 없어서
+// 두 함수 다 **항등**이다(claude/codex 스폰 회귀 0 —
+// tests/unit/provider-harness-axis.test.ts 가 이 항등성을 강제한다). env-swap
+// 벤더(GLM/MiniMax)가 행으로 들어오면 그때 여기서만 갈린다 — switch 는 안 늘어난다.
+
+/**
+ * 벤더 프로파일이 **덮어쓸 수 없는** env 키 프리픽스. 우리 배선(MCP 브리지 토큰·
+ * Firebase config)이 벤더 데이터로 갈아치워지면 에이전트가 보드에서 통째로
+ * 사라진다 — 레지스트리 행 하나로 그런 일이 나지 않게 막는다.
+ */
+const VENDOR_ENV_PROTECTED_PREFIXES = ["MARBLO_", "VITE_FIREBASE_"] as const;
+
+/** 벤더 프로파일이 덮어쓸 수 없는 개별 키(프로세스·하네스 배선). */
+const VENDOR_ENV_PROTECTED_KEYS = new Set([
+  "PATH",
+  "HOME",
+  "CODEX_HOME",
+  "GEMINI_CLI_HOME",
+  "MCP_CONFIG_PATH",
+  "ELECTRON_RUN_AS_NODE",
+  "NODE_OPTIONS",
+]);
+
+function isProtectedVendorEnvKey(key: string): boolean {
+  return (
+    VENDOR_ENV_PROTECTED_KEYS.has(key) ||
+    VENDOR_ENV_PROTECTED_PREFIXES.some((p) => key.startsWith(p))
+  );
+}
+
+/**
+ * 스폰 env 에 벤더 프로파일을 얹는 **순수** 함수.
+ *
+ * 프로파일이 비면 `base` 를 **그 객체 그대로** 돌려준다 — 새 객체조차 만들지
+ * 않으므로 "기존 벤더 스폰 env 무변경" 이 참조 동일성으로 증명된다.
+ *
+ * 레지스트리를 읽지 않으므로 아직 등록되지 않은 벤더 행(GLM 등)의 프로파일로도
+ * 검증할 수 있다 — 축분리가 "표현 가능" 한지는 이 함수로 증명된다.
+ *
+ * @param base    하네스 분기가 이미 조립한 env(MCP 브리지·CODEX_HOME 등)
+ * @param profile 벤더 프로파일(`ModelRegistryEntry.envProfile`)
+ * @param label   로그용 식별자(모델 id / 벤더)
+ */
+export function mergeVendorEnv(
+  base: Record<string, string>,
+  profile: Readonly<Record<string, string>> | undefined,
+  label?: { model?: string; vendor?: string },
+): Record<string, string> {
+  const keys = Object.keys(profile ?? {});
+  if (keys.length === 0) return base;
+
+  const merged = { ...base };
+  const injected: string[] = [];
+  const rejected: string[] = [];
+  for (const key of keys) {
+    if (isProtectedVendorEnvKey(key)) {
+      rejected.push(key);
+      continue;
+    }
+    merged[key] = profile![key];
+    injected.push(key);
+  }
+  if (rejected.length) {
+    console.warn("[agent-config] 벤더 프로파일의 보호 키 무시", {
+      model: label?.model ?? "unknown",
+      vendor: label?.vendor ?? "unknown",
+      rejected: rejected.sort(),
+    });
+  }
+  console.log("[agent-config] 벤더 env 주입", {
+    model: label?.model ?? "unknown",
+    vendor: label?.vendor ?? "unknown",
+    injectedKeys: injected.sort(),
+    env: maskEnvForLogging(merged),
+  });
+  return merged;
+}
+
+/**
+ * 핀된 모델의 벤더 프로파일을 스폰 env 에 얹는다(레지스트리 조회 + `mergeVendorEnv`).
+ *
+ * 오늘 레지스트리엔 프로파일을 가진 행이 없으므로 **항상 `base` 를 그대로** 돌려준다.
+ *
+ * @param pinnedModelId 이 launch 가 실제로 쓰는 구체 모델 id(없으면 no-op)
+ */
+export function applyVendorEnv(
+  base: Record<string, string>,
+  pinnedModelId?: string,
+): Record<string, string> {
+  const profile = envProfileForModel(pinnedModelId);
+  if (Object.keys(profile).length === 0) return base;
+  return mergeVendorEnv(base, profile, {
+    model: pinnedModelId,
+    vendor: getModel(pinnedModelId ?? "")?.provider,
+  });
+}
+
+/**
+ * 이 launch 가 스폰할 **바이너리**(하네스)를 정한다.
+ *
+ * 에이전트 문서의 `model` 은 종전부터 하네스 축이었다(claude/gpt/antigravity…).
+ * 핀된 모델이 레지스트리에 있으면 그 행의 `harness` 가 최종 권위다 — env-swap
+ * 벤더는 `{provider:"zai", harness:"claude"}` 라서, 벤더 이름이 무엇이든 claude
+ * 바이너리로 접힌다. 모르는 모델·핀 없음이면 입력을 그대로 돌려준다.
+ *
+ * 오늘 레지스트리의 모든 행이 harness === 기존 ModelType 이라 **항상 항등**이다.
+ */
+export function harnessForLaunch(
+  model: ModelType,
+  pinnedModelId?: string,
+): ModelType {
+  if (!pinnedModelId) return model;
+  const harness = harnessForModel(pinnedModelId);
+  if (!harness || harness === model) return model;
+  console.warn("[agent-config] 핀 모델의 하네스가 에이전트 모델과 다르다", {
+    agentModel: model,
+    pinnedModel: pinnedModelId,
+    harness,
+    note: "바이너리는 하네스를 따른다(축분리 USbdRV4k)",
+  });
+  return harness;
 }
 
 export interface LaunchConfig {
@@ -2491,7 +2627,14 @@ export class AgentConfigGenerator {
     // NOTE: Initial prompts are NOT passed via CLI flags (e.g. -p) because
     // that runs non-interactively and exits. Instead, prompts are sent via
     // stdin after the CLI starts, keeping the session interactive.
-    switch (model) {
+    //
+    // ★스폰할 **바이너리**는 하네스 축이 고른다(축분리 USbdRV4k). 벤더는 이
+    // switch 를 늘리지 않고 각 분기의 env 로만 갈린다(applyVendorEnv) — 그래야
+    // GLM 같은 env-swap 벤더가 `case "zai"` 를 요구하지 않는다(서베이 §4.5.1).
+    // 오늘 모든 레지스트리 행이 harness === ModelType 이라 값은 종전과 동일하다.
+    const pinnedModelId = modelPin?.claudeModel ?? modelPin?.codexModel;
+    const harness = harnessForLaunch(model, pinnedModelId);
+    switch (harness) {
       case "claude": {
         // Pin the session id up front so cost tracking can attribute tokens
         // deterministically (see claudeSessionArgs). A fresh launch gets
@@ -2520,7 +2663,7 @@ export class AgentConfigGenerator {
           modelResolution = resolveTopClaudeModelDetailed();
           claudeModel = modelResolution.model;
         } else {
-          claudeModel = modelTierForComplexity(model, complexity).claudeModel;
+          claudeModel = modelTierForComplexity(harness, complexity).claudeModel;
         }
         return {
           // On Windows node-pty does NOT resolve a bare command via PATH/PATHEXT
@@ -2544,7 +2687,9 @@ export class AgentConfigGenerator {
             mcpConfigPath,
             ...sessionArgs,
           ],
-          env,
+          // 벤더 프로파일 주입 자리. 오늘은 프로파일을 가진 행이 없어 `env` 가
+          // 그대로(참조까지 동일) 나간다 — 기존 Anthropic 스폰 무오염.
+          env: applyVendorEnv(env, claudeModel),
           claudeSessionId: sessionId,
           modelResolution,
         };
@@ -2631,7 +2776,7 @@ export class AgentConfigGenerator {
         // standard→medium, simple→low) > 미지정(CLI 기본값 유지).
         const codexReasoning =
           modelPin?.codexEffort ??
-          modelTierForComplexity(model, complexity).codexReasoning;
+          modelTierForComplexity(harness, complexity).codexReasoning;
         if (codexReasoning) {
           codexArgs.push("-c", `model_reasoning_effort="${codexReasoning}"`);
         }
@@ -2651,7 +2796,12 @@ export class AgentConfigGenerator {
         return {
           command: codexLaunch.command,
           args: codexLaunch.args,
-          env: { ...env, CODEX_HOME: path.dirname(mcpConfigPath) },
+          // 벤더 프로파일 주입 자리(claude 분기와 동일 규율). CODEX_HOME 은 보호
+          // 키라 프로파일이 덮어쓸 수 없다 — 덮이면 MCP 배선이 통째로 날아간다.
+          env: applyVendorEnv(
+            { ...env, CODEX_HOME: path.dirname(mcpConfigPath) },
+            modelPin?.codexModel,
+          ),
         };
       }
 

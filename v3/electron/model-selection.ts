@@ -33,18 +33,30 @@ import {
 } from "./agent-config";
 import {
   getModel,
-  modelsByProvider,
+  modelsByHarness,
   MODEL_REGISTRY,
   type EffortLevel,
   type ModelRegistryEntry,
+  type VendorId,
 } from "./model-registry";
 import { normalizeModel, type ModelType } from "./dispatch-scoring";
 import { isApprovalGatedEffort } from "./mcp-server/escalation-approval";
 
 /** 파싱된 모델 지정 — "무엇을 원했는가"(정책 적용 전). */
 export interface ModelSpec {
-  /** 프로바이더 축. 구체 모델을 골랐으면 그 모델의 provider 에서 파생된다. */
-  provider: ModelType;
+  /**
+   * ★하네스 축(= 스폰할 CLI). 구체 모델을 골랐으면 그 모델의 `harness` 에서
+   * 파생된다. `ModelType` 과 같은 집합이라 기존 호출자(dispatch/bridge)가 그대로
+   * 프로바이더 자리에 쓰던 값과 **바이트 동일**하다 — 축이 쪼개져도(USbdRV4k)
+   * 여기 흐르는 값은 종전 그대로다.
+   */
+  harness: ModelType;
+  /**
+   * 벤더 축(백엔드 주인). 구체 모델을 골랐을 때만 채워진다. 오늘 값은
+   * anthropic/openai 뿐이고, env-swap 벤더(zai 등)가 등록되면 같은 harness 에
+   * 다른 vendor 가 실려 온다 — 라우팅·텔레메트리가 두 벤더를 구분할 근거다.
+   */
+  vendor?: VendorId;
   /** 레지스트리의 구체 모델 id. 프로바이더만 말했으면(예: "codex") undefined. */
   modelId?: string;
   /** 지정 effort. 이 모델이 지원하는 값일 때만 채워진다. */
@@ -57,7 +69,10 @@ export interface ModelSpec {
 
 /** 정책(버전가드·폴백)까지 적용된 최종 스폰 핀. */
 export interface ResolvedModelPin {
-  provider: ModelType;
+  /** 스폰할 CLI(하네스). 종전 `provider` 필드와 값이 같다. */
+  harness: ModelType;
+  /** 벤더(백엔드 주인). 구체 모델 핀일 때만. */
+  vendor?: VendorId;
   /** claude CLI 의 `--model` 값. claude 를 구체 지정했을 때만. */
   claudeModel?: string;
   /** codex CLI 의 `-c model=…` 값. gpt 를 구체 지정했을 때만. */
@@ -102,7 +117,9 @@ function looseKeysFor(entry: ModelRegistryEntry): string[] {
   };
   add(entry.id);
   for (const alias of entry.aliases) add(alias);
-  const prefix = `${entry.provider}-`;
+  // ★프리픽스는 **하네스**로 뗀다("claude-opus-5" → "opus5"). 벤더로 떼면
+  // env-swap 행(provider=zai, id="glm-5.2")에서 엉뚱한 문자열이 잘린다.
+  const prefix = `${entry.harness}-`;
   const bare = entry.id.startsWith(prefix)
     ? entry.id.slice(prefix.length)
     : entry.id;
@@ -177,19 +194,25 @@ export function parseModelSpec(input?: string): ModelSpec | undefined {
           .toLowerCase()
       : "";
 
-  // 1) 프로바이더만 말한 경우 — 구체 모델 없음(기존 경로 그대로).
+  // 1) 하네스 토큰만 말한 경우 — 구체 모델 없음(기존 경로 그대로).
   //    normalizeModel 은 "gpt-5.6-terra" 같은 구체 슬러그도 "gpt" 로 접으므로,
   //    레지스트리에 그 id 가 있는지를 먼저 확인해 구체 지정과 구분한다.
+  //    ★벤더는 모른다 — "codex" 라고만 말한 사람은 벤더를 특정하지 않았다.
   const entry = findModelLoose(modelPart);
   if (!entry) {
-    const provider = normalizeModel(modelPart);
-    if (!provider) return undefined;
-    return withEffort({ provider, raw }, effortPart, undefined);
+    const harness = normalizeModel(modelPart);
+    if (!harness) return undefined;
+    return withEffort({ harness, raw }, effortPart, undefined);
   }
 
-  // 2) 구체 모델 지정. 프로바이더는 레지스트리 항목에서 파생한다(별도 표 없음).
+  // 2) 구체 모델 지정. 두 축 모두 레지스트리 항목에서 파생한다(별도 표 없음).
   return withEffort(
-    { provider: entry.provider as ModelType, modelId: entry.id, raw },
+    {
+      harness: entry.harness as ModelType,
+      vendor: entry.provider,
+      modelId: entry.id,
+      raw,
+    },
     effortPart,
     entry,
   );
@@ -210,7 +233,7 @@ function withEffort(
   console.warn("[model-selection] effort 무시", {
     raw: base.raw,
     requested: effortPart,
-    model: entry?.id ?? base.provider,
+    model: entry?.id ?? base.harness,
     supported: supported.length
       ? supported.join("/")
       : "(이 모델엔 effort 축 없음)",
@@ -236,18 +259,22 @@ export function resolveModelPin(
   const spec = parseModelSpec(input);
   if (!spec) return undefined;
 
-  // 프로바이더만 말했으면 모델 핀 없음 — 기존 complexity 티어 정책이 그대로 돈다.
+  // 하네스만 말했으면 모델 핀 없음 — 기존 complexity 티어 정책이 그대로 돈다.
   if (!spec.modelId) {
-    return { provider: spec.provider, label: spec.provider, spec };
+    return { harness: spec.harness, label: spec.harness, spec };
   }
 
-  if (spec.provider === "claude") {
+  // ★바이너리 선택은 **harness** 축이 한다(USbdRV4k). 벤더는 env 로 갈리고
+  // (`agent-config.applyVendorEnv`) 바이너리를 바꾸지 않는다 — 그래서 GLM 같은
+  // env-swap 벤더가 이 분기를 하나도 늘리지 않는다.
+  if (spec.harness === "claude") {
     const resolution = resolveClaudeModelPinned(
       spec.modelId,
       installedClaudeVersion,
     );
     return {
-      provider: "claude",
+      harness: "claude",
+      ...(spec.vendor ? { vendor: spec.vendor } : {}),
       claudeModel: resolution.model,
       ...(resolution.fallback ? { fallback: resolution.fallback } : {}),
       label: resolution.model,
@@ -255,11 +282,12 @@ export function resolveModelPin(
     };
   }
 
-  if (spec.provider === "gpt") {
+  if (spec.harness === "gpt") {
     // codex 는 레지스트리에 minCli 가 없다(= 게이트 없음). effort 는 모델별
     // 지원목록으로 이미 검증됐고, 미지정이면 CLI 기본 effort 를 그대로 둔다.
     return {
-      provider: "gpt",
+      harness: "gpt",
+      ...(spec.vendor ? { vendor: spec.vendor } : {}),
       codexModel: spec.modelId,
       ...(spec.effort ? { codexEffort: spec.effort } : {}),
       label: spec.effort ? `${spec.modelId}@${spec.effort}` : spec.modelId,
@@ -267,19 +295,27 @@ export function resolveModelPin(
     };
   }
 
-  // 그 외 프로바이더(antigravity/local/custom)는 아직 모델 핀 축이 없다 —
+  // 그 외 하네스(antigravity/local/custom)는 아직 모델 핀 축이 없다 —
   // 레지스트리에 행이 생기면 여기 분기를 추가한다.
-  return { provider: spec.provider, label: spec.modelId, spec };
+  return {
+    harness: spec.harness,
+    ...(spec.vendor ? { vendor: spec.vendor } : {}),
+    label: spec.modelId,
+    spec,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 // 셀렉터용 목록
 // ─────────────────────────────────────────────────────────────────────────
 
-/** 오케 모델 셀렉터 한 칸. `value` 는 `provider[:modelId][@effort]` compound. */
+/** 오케 모델 셀렉터 한 칸. `value` 는 `harness[:modelId][@effort]` compound. */
 export interface OrchestratorModelChoice {
   value: string;
-  provider: ModelType;
+  /** 스폰할 CLI(하네스). 값·의미 모두 종전 `provider` 필드와 동일하다. */
+  harness: ModelType;
+  /** 벤더(백엔드 주인). 모델 핀이 있는 칸에만. */
+  vendor?: VendorId;
   modelId?: string;
   label: string;
   /**
@@ -345,7 +381,12 @@ export function selectableEfforts(entry: ModelRegistryEntry): EffortLevel[] {
  * 무효가 되어 오케가 엉뚱한 CLI 로 뜨는 편이 훨씬 나쁘다.
  */
 export function splitOrchestratorModelValue(value: string): {
-  provider: string;
+  /**
+   * UI 표기 하네스 이름(`claude` | `codex`). 내부 `HarnessId` 로는 codex → gpt 다
+   * (`resolveOrchestratorModel` 이 그 정규화를 한다). 값·의미 모두 종전 `provider`
+   * 필드와 동일하고, 이름만 축분리(USbdRV4k) 어휘로 맞췄다.
+   */
+  harness: string;
   modelId?: string;
   effort?: EffortLevel;
 } {
@@ -357,19 +398,19 @@ export function splitOrchestratorModelValue(value: string): {
   const effortPart = at > 0 ? raw.slice(at + 1).trim() : "";
 
   const sep = body.indexOf(":");
-  if (sep < 0) return { provider: body };
-  const provider = body.slice(0, sep);
+  if (sep < 0) return { harness: body };
+  const harness = body.slice(0, sep);
   const modelPart = body.slice(sep + 1);
   const entry = findModelLoose(modelPart);
   if (!entry) {
     console.warn("[model-selection] 미지 오케 모델 접미 무시", {
       value,
-      provider,
+      harness,
       modelPart,
     });
-    return { provider };
+    return { harness };
   }
-  if (!effortPart) return { provider, modelId: entry.id };
+  if (!effortPart) return { harness, modelId: entry.id };
 
   const allowed = selectableEfforts(entry);
   if (!allowed.includes(effortPart as EffortLevel)) {
@@ -382,9 +423,9 @@ export function splitOrchestratorModelValue(value: string): {
         : "이 모델이 지원하지 않는 effort",
       allowed: allowed.length ? allowed.join("/") : "(effort 축 없음)",
     });
-    return { provider, modelId: entry.id };
+    return { harness, modelId: entry.id };
   }
-  return { provider, modelId: entry.id, effort: effortPart as EffortLevel };
+  return { harness, modelId: entry.id, effort: effortPart as EffortLevel };
 }
 
 /**
@@ -405,7 +446,7 @@ export function orchestratorLaunchPin(
   value: string,
   installedClaudeVersion?: string,
 ): { claudeModel?: string; codexModel?: string; codexEffort?: EffortLevel } {
-  const { provider, modelId, effort } = splitOrchestratorModelValue(value);
+  const { harness, modelId, effort } = splitOrchestratorModelValue(value);
   if (!modelId) return {};
 
   const pin = resolveModelPin(
@@ -414,21 +455,21 @@ export function orchestratorLaunchPin(
   );
   if (!pin) return {};
 
-  // 프로바이더가 어긋난 값(env·손편집)은 축을 넘기지 않는다 — claude CLI 에
+  // 하네스가 어긋난 값(env·손편집)은 축을 넘기지 않는다 — claude CLI 에
   // `--model gpt-5.5` 가 붙으면 spawn 이 깨진다.
-  if (provider === "claude" && pin.provider === "claude") {
+  if (harness === "claude" && pin.harness === "claude") {
     return pin.claudeModel ? { claudeModel: pin.claudeModel } : {};
   }
-  if (provider === "codex" && pin.provider === "gpt") {
+  if (harness === "codex" && pin.harness === "gpt") {
     return {
       ...(pin.codexModel ? { codexModel: pin.codexModel } : {}),
       ...(pin.codexEffort ? { codexEffort: pin.codexEffort } : {}),
     };
   }
-  console.warn("[model-selection] 오케 모델 핀이 프로바이더와 어긋나 무시", {
+  console.warn("[model-selection] 오케 모델 핀이 하네스와 어긋나 무시", {
     value,
-    provider,
-    pinProvider: pin.provider,
+    harness,
+    pinHarness: pin.harness,
   });
   return {};
 }
@@ -470,20 +511,24 @@ export function codexOrchestratorChoices(): OrchestratorModelChoice[] {
 }
 
 /**
- * 프로바이더 하나의 셀렉터 칸들. 두 프로바이더가 같은 정렬·같은 값 포맷을 쓰도록
+ * 하네스 하나의 셀렉터 칸들. 두 하네스가 같은 정렬·같은 값 포맷을 쓰도록
  * 한 곳에 둔다(#601 이 claude 에만 깔아둔 규칙을 codex 가 복제하지 않게).
  *
- * ★정렬은 `.reverse()` 가 아니라 내림차순 비교자다. `modelsByProvider` 의 정렬은
+ * ★목록의 축은 **하네스**다(USbdRV4k). "Claude 드롭다운" 은 "claude 바이너리로
+ * 뜨는 칸들" 이라는 뜻이고, env-swap 벤더가 등록되면 같은 드롭다운에 다른 벤더
+ * 칸이 함께 선다 — 그때 벤더 구분은 `vendor` 필드가 한다.
+ *
+ * ★정렬은 `.reverse()` 가 아니라 내림차순 비교자다. `modelsByHarness` 의 정렬은
  * 안정정렬이라 같은 등급 안에서는 레지스트리 등재 순서(신형이 먼저)가 유지되는데,
  * 통째로 뒤집으면 그 동률 순서까지 뒤집혀 `top` 등급의 Opus 5 밑에 Opus 4.8 이 아니라
  * 위에 오게 된다. 등급만 뒤집고 동률 순서는 보존해야 "신형이 위" 가 성립한다.
  *
- * @param provider   레지스트리 프로바이더 축("claude" | "gpt")
- * @param valuePrefix compound 값·라벨에 쓸 UI 프로바이더 이름. gpt 는 UI 에서
+ * @param harness    레지스트리 하네스 축("claude" | "gpt")
+ * @param valuePrefix compound 값·라벨에 쓸 UI 이름. gpt 는 UI 에서
  *                    "codex" 다(메모리: Codex==gpt, 내부 model id 는 "gpt").
  */
 function orchestratorChoicesFor(
-  provider: "claude" | "gpt",
+  harness: "claude" | "gpt",
   valuePrefix: string,
   humanize: (entry: ModelRegistryEntry) => string,
 ): OrchestratorModelChoice[] {
@@ -494,12 +539,13 @@ function orchestratorChoicesFor(
     frontier: 3,
   };
   const uiName = valuePrefix.charAt(0).toUpperCase() + valuePrefix.slice(1);
-  return modelsByProvider(provider)
+  return modelsByHarness(harness)
     .slice()
     .sort((a, b) => rank[b.capability] - rank[a.capability])
     .map((entry) => ({
       value: orchestratorModelValue(valuePrefix, entry.id),
-      provider: provider as ModelType,
+      harness: harness as ModelType,
+      vendor: entry.provider,
       modelId: entry.id,
       label: `${uiName} (${humanize(entry)})`,
       efforts: selectableEfforts(entry),

@@ -53,7 +53,7 @@ import {
   getModel,
   type CapabilityTier,
   type EffortLevel,
-  type ModelProvider,
+  type HarnessId,
   type ModelRate,
   type ModelRegistryEntry,
 } from "./model-registry";
@@ -88,15 +88,20 @@ export const LADDER_TIERS: readonly LadderTier[] = [
 export interface LadderRung {
   /** 레지스트리 구체 id(alias 금지 — 이동표적은 핀이 될 수 없다). */
   model: string;
-  provider: ModelProvider;
+  /**
+   * ★스폰할 바이너리(벤더가 아니다 — USbdRV4k 축분리). 사다리는 "어느 CLI 안에서
+   * 어느 칸을 오르나" 의 자료구조라 하네스로 묶인다. 벤더는 칸마다 고정이 아니라
+   * 모델의 사실이므로 `rungVendor()` 로 레지스트리에서 읽는다(사실 중복 금지).
+   */
+  harness: HarnessId;
   /** effort 축이 있는 프로바이더만. claude 계열은 undefined. */
   effort?: EffortLevel;
   /** 이 칸이 왜 여기 있는지(리뷰어가 순서를 검증할 수 있게 근거를 남긴다). */
   why: string;
 }
 
-export interface ProviderLadder {
-  provider: ModelProvider;
+export interface HarnessLadder {
+  harness: HarnessId;
   /** 낮은 칸 → 높은 칸. 상향 재시도는 이 배열의 인덱스를 +1 한다. */
   rungs: readonly LadderRung[];
   /** 티어별 **진입 칸**(rung index). 상향은 여기서 시작해 위로 간다. */
@@ -157,12 +162,12 @@ const CAPABILITY_ORDER: Readonly<Record<CapabilityTier, number>> = {
  * 사다리 데이터를 검증한다 — 근거와 데이터가 따로 놀지 않게).
  */
 export function cheapestByCapability(
-  provider: ModelProvider,
+  harness: HarnessId,
   capability: CapabilityTier,
 ): ModelRegistryEntry[] {
   return MODEL_REGISTRY.filter(
     (m) =>
-      m.provider === provider &&
+      m.harness === harness &&
       m.status === "active" &&
       m.capability === capability,
   ).sort((a, b) => blendedCostIndex(a.pricing) - blendedCostIndex(b.pricing));
@@ -277,17 +282,17 @@ export function gateRung(
 const CLAUDE_RUNGS: LadderRung[] = [
   {
     model: "claude-sonnet-5",
-    provider: "claude",
+    harness: "claude",
     why: "mid 칸 최저단가($3/$15). haiku($1/$5)가 더 싸지만 현행 simple 바닥이 sonnet5 이고 하향은 이 티켓 범위가 아니다(비용 회귀 가드는 상향만 본다).",
   },
   {
     model: "claude-opus-5",
-    provider: "claude",
+    harness: "claude",
     why: "top 칸($5/$25). opus-4-8 과 동일단가·동일등급이라 중복 칸을 만들지 않았다. standard 진입점(사장님 결정 2026-07-25).",
   },
   {
     model: "claude-fable-5",
-    provider: "claude",
+    harness: "claude",
     why: "frontier 칸($10/$50) — 우리가 가진 가장 비싼 칸. complex 진입점(현행 유지).",
   },
 ];
@@ -310,61 +315,61 @@ const CLAUDE_RUNGS: LadderRung[] = [
 const GPT_RUNGS: LadderRung[] = [
   {
     model: "gpt-5.6-luna",
-    provider: "gpt",
+    harness: "gpt",
     effort: "low",
     why: "mid 칸 최저단가($1/$6, 지표 3.5). 5.4-mini 가 더 싸지만 코딩 에이전트 적합성이 미검증이라 진입점으로 쓰지 않는다.",
   },
   {
     model: "gpt-5.6-luna",
-    provider: "gpt",
+    harness: "gpt",
     effort: "medium",
     why: "같은 모델 effort 상향 — 단가 동일, 토큰만 늘어난다(가장 값싼 상향).",
   },
   {
     model: "gpt-5.6-luna",
-    provider: "gpt",
+    harness: "gpt",
     effort: "high",
     why: "mid 칸의 천장. 여기서 부족하면 능력등급을 올린다.",
   },
   {
     model: "gpt-5.6-terra",
-    provider: "gpt",
+    harness: "gpt",
     effort: "medium",
     why: "top 칸($2.5/$15, 지표 8.75) — 같은 등급 gpt-5.5(17.5)보다 3.5배 싸서 이 칸을 차지한다. standard 진입점(effort medium = 현행 라이브와 동일).",
   },
   {
     model: "gpt-5.6-terra",
-    provider: "gpt",
+    harness: "gpt",
     effort: "high",
     why: "top 칸 effort 상향.",
   },
   {
     model: "gpt-5.6-terra",
-    provider: "gpt",
+    harness: "gpt",
     effort: "xhigh",
     why: "top 칸 천장. xhigh 는 5.5 계열에도 있던 기존 칸이라 승인 게이트 대상이 아니다(§1.2).",
   },
   {
     model: "gpt-5.6-sol",
-    provider: "gpt",
+    harness: "gpt",
     effort: "high",
     why: "frontier 칸($5/$30, 지표 17.5). complex 진입점(effort high = 현행 라이브와 동일).",
   },
   {
     model: "gpt-5.6-sol",
-    provider: "gpt",
+    harness: "gpt",
     effort: "xhigh",
     why: "frontier effort 상향 — 승인 없이 갈 수 있는 마지막 칸.",
   },
   {
     model: "gpt-5.6-sol",
-    provider: "gpt",
+    harness: "gpt",
     effort: "max",
     why: "★고비용 상단 — 사용자 승인 필요(사장님 결정 2026-07-25).",
   },
   {
     model: "gpt-5.6-sol",
-    provider: "gpt",
+    harness: "gpt",
     effort: "ultra",
     why: "★최상단 — 사용자 승인 필요. luna 는 ultra 를 지원하지 않으므로(레지스트리) 이 칸은 sol/terra 계열에만 존재한다.",
   },
@@ -384,7 +389,7 @@ export const LADDER_EXCLUSIONS: Readonly<Record<string, string>> = {
   "claude-opus-4-8":
     "claude-opus-5 와 동일 능력등급·동일 단가($5/$25). 같은 칸을 둘로 만들면 사다리 순서가 무의미해진다. env(MARBLO_STANDARD_CLAUDE_MODEL)로는 여전히 선택 가능.",
   "gpt-5.5":
-    "오늘 codex 가 실제로 서빙하는 기본 모델(ProviderLadder.inheritedModel)이지만, top 등급이 같은 terra 가 3.5배 싸므로 **권장 칸**으로 올릴 근거가 없다. 사용자 config.toml 을 우리가 갈아치우지도 않는다.",
+    "오늘 codex 가 실제로 서빙하는 기본 모델(HarnessLadder.inheritedModel)이지만, top 등급이 같은 terra 가 3.5배 싸므로 **권장 칸**으로 올릴 근거가 없다. 사용자 config.toml 을 우리가 갈아치우지도 않는다.",
   "gpt-5.4":
     "단가가 추정치(pricing.estimated) 다. 추정 단가로 순서를 정하면 '실단가 기반 사다리' 라는 이 파일의 전제가 깨진다 — db3qs0o6 서베이가 실단가를 확정하면 편입 검토.",
   "gpt-5.4-mini":
@@ -393,44 +398,44 @@ export const LADDER_EXCLUSIONS: Readonly<Record<string, string>> = {
 
 /** rung 을 레지스트리와 대조해 검증한다(불일치 = 모듈 로드 실패). */
 function buildLadder(
-  provider: ModelProvider,
+  harness: HarnessId,
   rungs: LadderRung[],
   entry: Record<LadderTier, number>,
   extra: { pinsModel: boolean; inheritedModel?: string },
-): ProviderLadder {
+): HarnessLadder {
   rungs.forEach((rung, i) => {
     const model = getModel(rung.model);
     if (!model) {
       throw new Error(
-        `[model-ladder] ${provider} rung#${i}: 레지스트리에 없는 모델 id "${rung.model}". ` +
+        `[model-ladder] ${harness} rung#${i}: 레지스트리에 없는 모델 id "${rung.model}". ` +
           "model-registry.ts 에 CLI-verified 행을 먼저 추가하세요(추론으로 id 를 쓰지 않는다).",
       );
     }
     if (model.id !== rung.model) {
       throw new Error(
-        `[model-ladder] ${provider} rung#${i}: "${rung.model}" 은 alias 입니다(→ ${model.id}). ` +
+        `[model-ladder] ${harness} rung#${i}: "${rung.model}" 은 alias 입니다(→ ${model.id}). ` +
           "사다리 칸은 구체 id 만 쓴다 — alias 는 CLI 가 뜻을 바꾸는 이동표적이다.",
       );
     }
-    if (model.provider !== provider) {
+    if (model.harness !== harness) {
       throw new Error(
-        `[model-ladder] ${provider} rung#${i}: "${rung.model}" 의 provider 는 ${model.provider} 입니다.`,
+        `[model-ladder] ${harness} rung#${i}: "${rung.model}" 의 harness 는 ${model.harness} 입니다(벤더는 ${model.provider}).`,
       );
     }
     if (model.status !== "active") {
       throw new Error(
-        `[model-ladder] ${provider} rung#${i}: "${rung.model}" 은 ${model.status} 입니다.`,
+        `[model-ladder] ${harness} rung#${i}: "${rung.model}" 은 ${model.status} 입니다.`,
       );
     }
     if (rung.effort === undefined) {
       if (model.efforts.length > 0) {
         throw new Error(
-          `[model-ladder] ${provider} rung#${i}: "${rung.model}" 은 effort 축이 있는 모델인데 칸에 effort 가 없습니다.`,
+          `[model-ladder] ${harness} rung#${i}: "${rung.model}" 은 effort 축이 있는 모델인데 칸에 effort 가 없습니다.`,
         );
       }
     } else if (!model.efforts.includes(rung.effort)) {
       throw new Error(
-        `[model-ladder] ${provider} rung#${i}: "${rung.model}" 은 effort "${rung.effort}" 를 지원하지 않습니다(지원: ${
+        `[model-ladder] ${harness} rung#${i}: "${rung.model}" 은 effort "${rung.effort}" 를 지원하지 않습니다(지원: ${
           model.efforts.join(", ") || "없음"
         }).`,
       );
@@ -441,12 +446,12 @@ function buildLadder(
     const idx = entry[tier];
     if (!Number.isInteger(idx) || idx < 0 || idx >= rungs.length) {
       throw new Error(
-        `[model-ladder] ${provider} entry.${tier}=${idx} 가 rung 범위(0..${rungs.length - 1}) 밖입니다.`,
+        `[model-ladder] ${harness} entry.${tier}=${idx} 가 rung 범위(0..${rungs.length - 1}) 밖입니다.`,
       );
     }
     if (rungNeedsApproval(rungs[idx])) {
       throw new Error(
-        `[model-ladder] ${provider} entry.${tier} 이 승인 게이트 칸(${rungLabel(
+        `[model-ladder] ${harness} entry.${tier} 이 승인 게이트 칸(${rungLabel(
           rungs[idx],
         )})을 가리킵니다 — 진입점은 승인 없이 써야 하므로 금지.`,
       );
@@ -454,7 +459,7 @@ function buildLadder(
   }
 
   return {
-    provider,
+    harness,
     rungs,
     entry,
     pinsModel: extra.pinsModel,
@@ -463,7 +468,7 @@ function buildLadder(
 }
 
 export const MODEL_LADDERS: Readonly<
-  Partial<Record<ModelProvider, ProviderLadder>>
+  Partial<Record<HarnessId, HarnessLadder>>
 > = {
   claude: buildLadder(
     "claude",
@@ -532,22 +537,22 @@ export function rungLabel(rung: LadderRung): string {
   return rungSpecLabel(rung.model, rung.effort);
 }
 
-export function ladderFor(provider: ModelProvider): ProviderLadder | undefined {
-  return MODEL_LADDERS[provider];
+export function ladderFor(harness: HarnessId): HarnessLadder | undefined {
+  return MODEL_LADDERS[harness];
 }
 
-/** 티어 진입 칸. 사다리가 없는 프로바이더는 undefined(정책 override 없음 = 현행 상속). */
+/** 티어 진입 칸. 사다리가 없는 하네스는 undefined(정책 override 없음 = 현행 상속). */
 export function entryRung(
-  provider: ModelProvider,
+  harness: HarnessId,
   tier: LadderTier,
 ): LadderRung | undefined {
-  const ladder = ladderFor(provider);
+  const ladder = ladderFor(harness);
   return ladder?.rungs[ladder.entry[tier]];
 }
 
 /** 사다리에서 이 칸의 인덱스(모양이 같은 칸을 찾는다). 없으면 -1. */
-export function rungIndex(provider: ModelProvider, rung: LadderRung): number {
-  const ladder = ladderFor(provider);
+export function rungIndex(harness: HarnessId, rung: LadderRung): number {
+  const ladder = ladderFor(harness);
   if (!ladder) return -1;
   return ladder.rungs.findIndex(
     (r) => r.model === rung.model && r.effort === rung.effort,
@@ -563,21 +568,21 @@ export function rungIndex(provider: ModelProvider, rung: LadderRung): number {
  * 숨겨 갖고 있으면 그 예산을 감사할 수 없다.
  */
 export function nextRung(
-  provider: ModelProvider,
+  harness: HarnessId,
   current: LadderRung,
 ): LadderRung | undefined {
-  const idx = rungIndex(provider, current);
+  const idx = rungIndex(harness, current);
   if (idx < 0) return undefined;
-  return ladderFor(provider)?.rungs[idx + 1];
+  return ladderFor(harness)?.rungs[idx + 1];
 }
 
 /** 이 칸(포함) 아래에서 승인 없이 쓸 수 있는 가장 높은 칸. */
 export function highestUngatedRungAtOrBelow(
   rung: LadderRung,
 ): LadderRung | undefined {
-  const ladder = ladderFor(rung.provider);
+  const ladder = ladderFor(rung.harness);
   if (!ladder) return undefined;
-  const idx = rungIndex(rung.provider, rung);
+  const idx = rungIndex(rung.harness, rung);
   const from = idx < 0 ? ladder.rungs.length - 1 : idx;
   for (let i = from; i >= 0; i--) {
     if (!rungNeedsApproval(ladder.rungs[i])) return ladder.rungs[i];
@@ -591,10 +596,10 @@ export function highestUngatedRungAtOrBelow(
  * 상한을 우회한다.
  */
 export function usableRungs(
-  provider: ModelProvider,
+  harness: HarnessId,
   records: readonly EscalationApprovalRecord[] = [],
 ): LadderRung[] {
-  const ladder = ladderFor(provider);
+  const ladder = ladderFor(harness);
   if (!ladder) return [];
   return ladder.rungs.filter(
     (r) => !rungNeedsApproval(r) || !!usableApproval(records, r),
@@ -632,7 +637,7 @@ export function parseRung(
     }
     return {
       ok: true,
-      rung: { model: entry.id, provider: entry.provider, why: "동적 지정" },
+      rung: { model: entry.id, harness: entry.harness, why: "동적 지정" },
     };
   }
   if (!EFFORT_LADDER.includes(effortPart as EffortLevel)) {
@@ -653,7 +658,7 @@ export function parseRung(
     ok: true,
     rung: {
       model: entry.id,
-      provider: entry.provider,
+      harness: entry.harness,
       effort: effortPart as EffortLevel,
       why: "동적 지정",
     },
@@ -661,9 +666,9 @@ export function parseRung(
 }
 
 /** 사다리를 사람이 읽는 표로. 오케/런북이 "무엇이 어디 있나" 를 물을 때. */
-export function formatLadder(provider: ModelProvider): string {
-  const ladder = ladderFor(provider);
-  if (!ladder) return `${provider}: 사다리 없음(CLI-verified 모델 미등록).`;
+export function formatLadder(harness: HarnessId): string {
+  const ladder = ladderFor(harness);
+  if (!ladder) return `${harness}: 사다리 없음(CLI-verified 모델 미등록).`;
   const tierAt = new Map<number, LadderTier[]>();
   for (const tier of LADDER_TIERS) {
     const idx = ladder.entry[tier];
@@ -683,7 +688,7 @@ export function formatLadder(provider: ModelProvider): string {
   const pinNote = ladder.pinsModel
     ? "모델 핀: 예(--model)"
     : `모델 핀: 아니오 — 오늘 실제 서빙 모델은 ${ladder.inheritedModel ?? "CLI 기본값"} (P1-1 이 -c model 배선 예정)`;
-  return [`${provider} 사다리 (${pinNote})`, ...lines].join("\n");
+  return [`${harness} 사다리 (${pinNote})`, ...lines].join("\n");
 }
 
 // 미러 대조는 사다리와 조회 API 가 모두 정의된 뒤 딱 한 번 돈다.

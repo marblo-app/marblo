@@ -8,7 +8,7 @@ import {
   isKnownModelId,
   isModelAlias,
   meetsMinCli,
-  modelsByProvider,
+  modelsByHarness,
   registryPricing,
   resolveModelAlias,
   supportsEffort,
@@ -47,7 +47,7 @@ describe("model-registry", () => {
         for (const e of m.efforts) expect(EFFORT_LADDER).toContain(e);
         if (m.defaultEffort) expect(m.efforts).toContain(m.defaultEffort);
         // claude 는 effort 축이 없다 → 기본 effort 도 없어야 한다.
-        if (m.provider === "claude") {
+        if (m.harness === "claude") {
           expect(m.efforts).toEqual([]);
           expect(m.defaultEffort).toBeUndefined();
         }
@@ -137,17 +137,17 @@ describe("model-registry", () => {
     });
   });
 
-  describe("modelsByProvider", () => {
+  describe("modelsByHarness", () => {
     it("능력등급 오름차순(cheap → frontier)으로 준다", () => {
       // 사전순이 아니라 등급 랭크순이어야 한다(에스컬레이션 사다리의 재료).
       const RANK = { cheap: 0, mid: 1, top: 2, frontier: 3 } as const;
-      const ranks = modelsByProvider("claude").map((m) => RANK[m.capability]);
+      const ranks = modelsByHarness("claude").map((m) => RANK[m.capability]);
       expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
-      expect(modelsByProvider("claude")[0].capability).toBe("cheap");
-      expect(modelsByProvider("claude").at(-1)?.capability).toBe("frontier");
+      expect(modelsByHarness("claude")[0].capability).toBe("cheap");
+      expect(modelsByHarness("claude").at(-1)?.capability).toBe("frontier");
     });
-    it("아직 CLI-verified 모델이 없는 벤더는 빈 배열(에러 아님)", () => {
-      expect(modelsByProvider("antigravity")).toEqual([]);
+    it("아직 CLI-verified 모델이 없는 하네스는 빈 배열(에러 아님)", () => {
+      expect(modelsByHarness("antigravity")).toEqual([]);
     });
   });
 });

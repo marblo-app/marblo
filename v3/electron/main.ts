@@ -3264,11 +3264,11 @@ function normalizeOrchestratorModelSetting(value: unknown): string {
   const input = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!input) return "claude";
   const {
-    provider: rawProvider,
+    harness: rawHarness,
     modelId,
     effort,
   } = splitOrchestratorModelValue(input);
-  const provider = rawProvider === "gpt" ? "codex" : rawProvider;
+  const provider = rawHarness === "gpt" ? "codex" : rawHarness;
   if (
     provider !== "claude" &&
     provider !== "codex" &&
@@ -3279,27 +3279,29 @@ function normalizeOrchestratorModelSetting(value: unknown): string {
   if (!modelId) return provider;
   // 모델 핀 축은 claude·codex 둘 다 있다. antigravity 는 아직 레지스트리에 행이
   // 없으므로 여기 도달할 수 없다(도달하면 접미를 버린다).
-  const pinProvider = getModel(modelId)?.provider;
+  // ★핀이 어느 CLI 로 뜨는지는 **하네스** 축이 정한다(USbdRV4k). 벤더는 env 로
+  // 갈릴 뿐 바이너리를 바꾸지 않으므로, 여기서 봐야 하는 값은 harness 다.
+  const pinHarness = getModel(modelId)?.harness;
   if (
-    (provider === "claude" && pinProvider === "claude") ||
-    (provider === "codex" && pinProvider === "gpt")
+    (provider === "claude" && pinHarness === "claude") ||
+    (provider === "codex" && pinHarness === "gpt")
   ) {
     return orchestratorModelValue(provider, modelId, effort);
   }
   console.warn(
-    `[Main] 오케 모델 접미 "${modelId}"(${
-      pinProvider ?? "미지"
+    `[Main] 오케 모델 접미 "${modelId}"(harness=${
+      pinHarness ?? "미지"
     })가 프로바이더 "${provider}" 와 어긋나 무시합니다`,
   );
   return provider;
 }
 
 function normalizeOrchestratorModelType(value: unknown): ModelType {
-  const { provider } = splitOrchestratorModelValue(
+  const { harness } = splitOrchestratorModelValue(
     normalizeOrchestratorModelSetting(value),
   );
-  if (provider === "codex") return "gpt";
-  if (provider === "antigravity") return "antigravity";
+  if (harness === "codex") return "gpt";
+  if (harness === "antigravity") return "antigravity";
   return "claude";
 }
 
@@ -3370,7 +3372,7 @@ function applyOrchestratorModelEnvForProject(
   // env 가 아니라 launch 옵션(claudeModelOverride)으로 따로 전달된다. 이 분리 덕에
   // resolveOrchestratorModel 은 한 글자도 바뀌지 않는다(재시작 연속성·핸드오프 회귀 0).
   process.env.MARBLO_ORCHESTRATOR_MODEL =
-    splitOrchestratorModelValue(effective).provider;
+    splitOrchestratorModelValue(effective).harness;
   return effective;
 }
 

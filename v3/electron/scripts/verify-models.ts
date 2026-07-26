@@ -103,7 +103,13 @@ function verifyClaude(offline: boolean): void {
   const installed = cli.version || "unknown";
   console.log(`\n▸ claude CLI ${installed} (${cli.command})`);
 
-  const entries = MODEL_REGISTRY.filter((m) => m.provider === "claude");
+  // ★하네스로 고르고 벤더로 한 번 더 좁힌다(USbdRV4k 축분리). 이 프로브는 **이
+  // 머신의 claude 로그인**으로 도는 것이라, 같은 harness 라도 env-swap 벤더
+  // (provider=zai 등)는 여기서 검증할 수 없다 — 그 행의 검증은 자기 프로파일 env
+  // 를 얹은 별도 경로가 필요하다(벤더 편입 티켓).
+  const entries = MODEL_REGISTRY.filter(
+    (m) => m.harness === "claude" && m.provider === "anthropic",
+  );
   checkMinCli(entries, cli.version);
 
   if (offline) {
@@ -186,7 +192,10 @@ function verifyCodex(): void {
   const cli = resolveHarnessCli("gpt");
   console.log(`\n▸ codex CLI ${cli.version || "unknown"} (${cli.command})`);
 
-  const entries = MODEL_REGISTRY.filter((m) => m.provider === "gpt");
+  // 하네스 gpt + 벤더 openai 만. (사유는 verifyClaude 주석과 동일.)
+  const entries = MODEL_REGISTRY.filter(
+    (m) => m.harness === "gpt" && m.provider === "openai",
+  );
   checkMinCli(entries, cli.version);
 
   const cache = readCodexCache();

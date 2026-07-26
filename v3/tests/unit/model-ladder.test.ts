@@ -49,23 +49,24 @@ import {
   usableApprovalLoose,
 } from "../../electron/mcp-server/escalation-approval";
 
-const LADDER_PROVIDERS = ["claude", "gpt"] as const;
+/** 사다리는 **하네스** 축으로 묶인다(축분리 USbdRV4k). */
+const LADDER_HARNESSES = ["claude", "gpt"] as const;
 
 describe("사다리 데이터 규율", () => {
   it("모든 칸이 레지스트리의 구체 id 다(alias·미등록 id 금지)", () => {
-    for (const provider of LADDER_PROVIDERS) {
-      for (const rung of ladderFor(provider)!.rungs) {
+    for (const harness of LADDER_HARNESSES) {
+      for (const rung of ladderFor(harness)!.rungs) {
         expect(isKnownModelId(rung.model)).toBe(true);
         expect(isModelAlias(rung.model)).toBe(false);
-        expect(getModel(rung.model)!.provider).toBe(provider);
+        expect(getModel(rung.model)!.harness).toBe(harness);
         expect(getModel(rung.model)!.status).toBe("active");
       }
     }
   });
 
   it("모든 칸의 effort 가 그 모델이 실제 지원하는 값이다", () => {
-    for (const provider of LADDER_PROVIDERS) {
-      for (const rung of ladderFor(provider)!.rungs) {
+    for (const harness of LADDER_HARNESSES) {
+      for (const rung of ladderFor(harness)!.rungs) {
         const supported = getModel(rung.model)!.efforts;
         if (supported.length === 0) {
           // claude 계열 — effort 축이 없다.
@@ -78,16 +79,16 @@ describe("사다리 데이터 규율", () => {
   });
 
   it("모든 칸에 존재 근거(why)가 적혀 있다", () => {
-    for (const provider of LADDER_PROVIDERS) {
-      for (const rung of ladderFor(provider)!.rungs) {
+    for (const harness of LADDER_HARNESSES) {
+      for (const rung of ladderFor(harness)!.rungs) {
         expect(rung.why.length).toBeGreaterThan(10);
       }
     }
   });
 
   it("칸 순서가 능력등급 비내림차순이다(상향 축 = 능력)", () => {
-    for (const provider of LADDER_PROVIDERS) {
-      const ranks = ladderFor(provider)!.rungs.map(
+    for (const harness of LADDER_HARNESSES) {
+      const ranks = ladderFor(harness)!.rungs.map(
         (r) => capabilityRank(r.model)!,
       );
       for (let i = 1; i < ranks.length; i++) {
@@ -97,8 +98,8 @@ describe("사다리 데이터 규율", () => {
   });
 
   it("같은 모델 안에서는 effort 가 낮은 칸부터 온다", () => {
-    for (const provider of LADDER_PROVIDERS) {
-      const rungs = ladderFor(provider)!.rungs;
+    for (const harness of LADDER_HARNESSES) {
+      const rungs = ladderFor(harness)!.rungs;
       for (let i = 1; i < rungs.length; i++) {
         if (rungs[i].model !== rungs[i - 1].model) continue;
         const efforts = getModel(rungs[i].model)!.efforts;
@@ -110,16 +111,16 @@ describe("사다리 데이터 규율", () => {
   });
 
   it("티어 진입 칸은 승인 게이트가 아니다(기본 동작이 승인 대기일 수 없다)", () => {
-    for (const provider of LADDER_PROVIDERS) {
+    for (const harness of LADDER_HARNESSES) {
       for (const tier of LADDER_TIERS) {
-        expect(rungNeedsApproval(entryRung(provider, tier)!)).toBe(false);
+        expect(rungNeedsApproval(entryRung(harness, tier)!)).toBe(false);
       }
     }
   });
 
   it("진입 칸이 simple ≤ standard ≤ complex 순이다", () => {
-    for (const provider of LADDER_PROVIDERS) {
-      const { entry } = ladderFor(provider)!;
+    for (const harness of LADDER_HARNESSES) {
+      const { entry } = ladderFor(harness)!;
       expect(entry.simple).toBeLessThan(entry.standard);
       expect(entry.standard).toBeLessThan(entry.complex);
     }
@@ -207,11 +208,11 @@ describe("★gpt-5.6 3변종 변주", () => {
 describe("완결성 — 레지스트리 행이 사다리에서 유령이 되지 않는다", () => {
   it("모든 활성 claude/gpt 모델은 사다리에 있거나 제외 이유가 적혀 있다", () => {
     const inLadder = new Set(
-      LADDER_PROVIDERS.flatMap((p) => ladderFor(p)!.rungs.map((r) => r.model)),
+      LADDER_HARNESSES.flatMap((p) => ladderFor(p)!.rungs.map((r) => r.model)),
     );
     for (const entry of MODEL_REGISTRY) {
       if (entry.status !== "active") continue;
-      if (!LADDER_PROVIDERS.includes(entry.provider as "claude" | "gpt"))
+      if (!LADDER_HARNESSES.includes(entry.harness as "claude" | "gpt"))
         continue;
       const covered = inLadder.has(entry.id) || entry.id in LADDER_EXCLUSIONS;
       expect(
@@ -250,7 +251,7 @@ describe("상향 이동 (nextRung)", () => {
   it("사다리 밖 칸은 -1 / undefined 로 정직하게 답한다", () => {
     const alien: LadderRung = {
       model: "claude-opus-4-8",
-      provider: "claude",
+      harness: "claude",
       why: "x",
     };
     expect(rungIndex("claude", alien)).toBe(-1);

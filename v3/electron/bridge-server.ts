@@ -39,7 +39,7 @@ import {
 } from "./agent-config";
 import { graphModelKeys, modelKeyFromSpawn } from "./routing-model-key";
 import { normalizeTaskTypeLabel } from "./mcp-server/task-type";
-import { resolveModelPin, type ResolvedModelPin } from "./model-selection";
+import { resolveModelPin } from "./model-selection";
 import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
 import type { RateLimitInfo } from "./session-parsers";
 import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
@@ -2020,8 +2020,10 @@ export class BridgeServer {
     // 그대로 통과하므로 동작이 바뀌지 않는다.
     const modelSpecInput = joinModelAndEffort(params.model, params.effort);
     const resolvedPin = resolveModelPin(modelSpecInput);
+    // ★스폰할 CLI 는 **하네스** 축이다(USbdRV4k 축분리). 벤더(anthropic/zai…)는
+    // env 로 갈릴 뿐 바이너리를 바꾸지 않으므로 이 자리 값은 종전과 동일하다.
     const requestedModel =
-      resolvedPin?.provider ?? normalizeModel(params.model);
+      resolvedPin?.harness ?? normalizeModel(params.model);
     const model =
       requiresTrackedModel && requestedModel === "antigravity"
         ? undefined
@@ -2029,7 +2031,7 @@ export class BridgeServer {
     // 프로바이더가 무시된 경우(antigravity 트래킹 요구)엔 모델 핀도 함께 버린다 —
     // 다른 프로바이더로 라우팅되는데 그쪽 CLI 에 없는 모델 id 를 넘기면 안 된다.
     const modelPin: LaunchModelPin | undefined =
-      model && resolvedPin && resolvedPin.provider === model
+      model && resolvedPin && resolvedPin.harness === model
         ? {
             claudeModel: resolvedPin.claudeModel,
             codexModel: resolvedPin.codexModel,

@@ -31,19 +31,86 @@
  */
 
 /**
- * 프로바이더(벤더) 축. `agent-manager.ts` / `dispatch-scoring.ts` 의 `ModelType`
- * 과 같은 집합이며, `agent-config.ts` 가 컴파일타임 양방향 호환 단언으로 고정한다.
+ * ── ★provider ≠ harness (축 분리, USbdRV4k / 서베이 §4.5.1) ──────────────
  *
- * ★신규 벤더 추가 절차 = 이 유니온에 한 줄 + 아래 `MODEL_REGISTRY` 에 행 추가.
- * (db3qs0o6 벤더 서베이 결과가 그렇게 편입되도록 만든 구조다.)
+ * 종전엔 축이 하나였다 — `ModelProvider` 가 `ModelType`(스폰할 바이너리)과 같은
+ * 집합이었고, 그래서 "벤더" 와 "실행 CLI" 가 한 값에 겹쳐 있었다. 그 상태에서는
+ * Z.ai GLM 처럼 **우리 `claude` 바이너리를 그대로 쓰면서 env 만 바꾸는 벤더**를
+ * 표현할 수 없다(유니온에 `"zai"` 를 넣는 순간 `buildLaunchConfig` 의 switch 가
+ * `case "zai"` 를 요구하고, 서베이 §3.2 가 실측한 18파일 확산이 되살아난다).
+ *
+ * 그래서 축을 둘로 쪼갠다:
+ *
+ *   harness  — **어떤 바이너리를 스폰하는가** (claude / codex(=gpt) / agy …)
+ *   provider — **어느 벤더 백엔드로 붙는가** (anthropic / openai / zai / minimax …)
+ *
+ * 기존 행은 전부 `harness === 옛 provider` 라 매핑이 항등이고 스폰 회귀가 0 이다
+ * (`tests/unit/provider-harness-axis.test.ts` 가 강제한다).
  */
-export type ModelProvider =
+
+/**
+ * 하네스 축 — 스폰할 CLI 바이너리. `agent-manager.ts` / `dispatch-scoring.ts` 의
+ * `ModelType` 과 같은 집합이며, `agent-config.ts` 가 컴파일타임 양방향 호환
+ * 단언으로 고정한다. 값이 `gpt`(=codex 바이너리)·`antigravity`(=agy)인 것은
+ * 기존 `ModelType` 리터럴을 그대로 승계했기 때문이다 — 이 동일성이 깨지면
+ * Firestore 에 쌓인 에이전트 문서·그래프 셀키·텔레메트리가 전부 갈라진다.
+ *
+ * ★신규 **하네스**(자기 CLI 를 갖는 벤더: Grok Build, Kimi Code) 추가는 이 유니온에
+ * 한 줄 + `ModelType` 에 한 줄 + 스폰 switch 에 case 1개다(서베이 Phase V2).
+ * 신규 **벤더**(자기 CLI 가 없는 env-swap 형: GLM, MiniMax)는 이 유니온을 건드리지
+ * 않는다 — `VendorId` 에 한 줄 + 레지스트리 행 하나로 끝난다.
+ */
+export type HarnessId =
   | "claude"
   | "gemini"
   | "gpt"
   | "antigravity"
   | "local"
   | "custom";
+
+/**
+ * 벤더 축 — 토큰·쿼터·장애특성·단가의 주인. **하네스와 독립**이다.
+ *
+ * 같은 `claude` 하네스라도 `anthropic` 과 `zai` 는 완전히 다른 백엔드다(다른
+ * 구독·다른 쿼터창·다른 모델 id). 라우팅이 두 벤더의 성과를 한 셀에 섞지 않으려면
+ * 이 축이 1급이어야 한다(서베이 §5.2).
+ *
+ * ★`local`/`custom` 은 "벤더 미상" 을 뜻하는 자리표시자다 — 사용자가 붙인 임의
+ * 엔드포인트라 우리가 벤더를 알 수 없다.
+ */
+export type VendorId =
+  | "anthropic"
+  | "openai"
+  | "google"
+  | "zai"
+  | "minimax"
+  | "xai"
+  | "moonshot"
+  | "local"
+  | "custom";
+
+/** 하네스 전체 목록(런타임 검증·테스트용). `HarnessId` 와 같아야 한다. */
+export const HARNESS_IDS: readonly HarnessId[] = [
+  "claude",
+  "gemini",
+  "gpt",
+  "antigravity",
+  "local",
+  "custom",
+] as const;
+
+/** 벤더 전체 목록(런타임 검증·테스트용). `VendorId` 와 같아야 한다. */
+export const VENDOR_IDS: readonly VendorId[] = [
+  "anthropic",
+  "openai",
+  "google",
+  "zai",
+  "minimax",
+  "xai",
+  "moonshot",
+  "local",
+  "custom",
+] as const;
 
 /**
  * reasoning effort 축. Codex 는 모델 × effort 곱집합이고 Claude 는 effort 축이
@@ -92,10 +159,37 @@ export interface ModelVerification {
   method: string;
 }
 
+/**
+ * 벤더 프로파일 — 이 모델을 그 벤더 백엔드로 붙이기 위해 스폰 env 에 얹는 값들.
+ *
+ * (B)형 벤더(자기 CLI 가 없는 env-swap 형)를 **코드 없이 데이터로** 흡수하는
+ * 자리다. 예: GLM 은 `claude` 하네스에 `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`
+ * 만 갈아끼우면 돈다(서베이 §2.4).
+ *
+ * ★이 티켓(USbdRV4k)은 **표현·배선 자리만** 만든다. 실제 GLM 값 등록은 후속
+ * 티켓(MTtCVCP4)이고, 지금 레지스트리에는 `envProfile` 을 가진 행이 하나도 없다
+ * — 그래서 스폰 env 가 종전과 바이트 동일하다(회귀 0).
+ *
+ * ★시크릿을 여기 박지 않는다. 토큰류는 값이 아니라 **읽어올 env 키 이름**으로
+ * 표현하거나(후속 티켓 결정) 사용자 설정에서 주입한다.
+ */
+export type VendorEnvProfile = Readonly<Record<string, string>>;
+
 export interface ModelRegistryEntry {
   /** CLI/API 에 그대로 넘기는 구체 모델 id. */
   id: string;
-  provider: ModelProvider;
+  /**
+   * ★스폰할 **바이너리**. 벤더가 아니다 — `{ harness: "claude", provider: "zai" }`
+   * 는 "우리 claude CLI 로 띄우되 Z.ai 백엔드에 붙는다" 는 뜻이다.
+   */
+  harness: HarnessId;
+  /** ★**벤더**(백엔드 주인). 하네스와 독립이다. */
+  provider: VendorId;
+  /**
+   * 이 모델을 벤더 백엔드로 붙이기 위한 스폰 env. 벤더-네이티브 행(anthropic/
+   * openai — CLI 가 자기 로그인으로 이미 붙는다)에는 없다.
+   */
+  envProfile?: VendorEnvProfile;
   /**
    * 이 모델로 해석되는 CLI alias 들. ★alias 는 이동표적이므로 핀에 쓰지 말 것
    * (파일 상단 규율 참조). 여기 등록하는 이유는 (a) 사용자가 env 에 alias 를
@@ -171,7 +265,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   // ── Claude (§1.1) ─────────────────────────────────────────────────────
   {
     id: "claude-fable-5",
-    provider: "claude",
+    harness: "claude",
+    provider: "anthropic",
     aliases: ["fable"],
     capability: "frontier",
     efforts: [], // claude 는 effort 축 없음
@@ -183,7 +278,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   },
   {
     id: "claude-opus-5",
-    provider: "claude",
+    harness: "claude",
+    provider: "anthropic",
     // ★alias `opus` 는 2026-07-25 기준 이 모델로 해석된다(§1.1). 그 사실이
     // 바로 §1.3-① "조용한 승격" 의 원인이므로, 핀에는 alias 가 아니라 이 id 를 쓴다.
     aliases: ["opus"],
@@ -196,7 +292,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   },
   {
     id: "claude-opus-4-8",
-    provider: "claude",
+    harness: "claude",
+    provider: "anthropic",
     aliases: [],
     capability: "top",
     efforts: [],
@@ -208,7 +305,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   },
   {
     id: "claude-sonnet-5",
-    provider: "claude",
+    harness: "claude",
+    provider: "anthropic",
     aliases: ["sonnet"],
     capability: "mid",
     efforts: [],
@@ -219,7 +317,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   },
   {
     id: "claude-haiku-4-5-20251001",
-    provider: "claude",
+    harness: "claude",
+    provider: "anthropic",
     // alias `haiku` 는 날짜형 id 로 해석된다(§1.1) — 우리 코드가 프리픽스
     // 매칭에 의존하므로 id 를 날짜까지 그대로 둔다.
     aliases: ["haiku"],
@@ -237,7 +336,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   // (우리 기본 모델 gpt-5.5 $5/$30 > sonnet5 $3/$15).
   {
     id: "gpt-5.6-sol",
-    provider: "gpt",
+    harness: "gpt",
+    provider: "openai",
     aliases: [],
     capability: "frontier",
     efforts: EFFORTS_56_FULL,
@@ -248,7 +348,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   },
   {
     id: "gpt-5.6-terra",
-    provider: "gpt",
+    harness: "gpt",
+    provider: "openai",
     aliases: [],
     capability: "top",
     efforts: EFFORTS_56_FULL,
@@ -259,7 +360,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   },
   {
     id: "gpt-5.6-luna",
-    provider: "gpt",
+    harness: "gpt",
+    provider: "openai",
     aliases: [],
     capability: "mid",
     efforts: EFFORTS_56_NO_ULTRA,
@@ -270,7 +372,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   },
   {
     id: "gpt-5.5",
-    provider: "gpt",
+    harness: "gpt",
+    provider: "openai",
     aliases: [],
     capability: "top",
     efforts: EFFORTS_CLASSIC,
@@ -283,7 +386,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   },
   {
     id: "gpt-5.4",
-    provider: "gpt",
+    harness: "gpt",
+    provider: "openai",
     aliases: [],
     capability: "mid",
     efforts: EFFORTS_CLASSIC,
@@ -297,7 +401,8 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   },
   {
     id: "gpt-5.4-mini",
-    provider: "gpt",
+    harness: "gpt",
+    provider: "openai",
     aliases: [],
     capability: "cheap",
     efforts: EFFORTS_CLASSIC,
@@ -324,6 +429,31 @@ const BY_ALIAS = new Map<string, ModelRegistryEntry>();
 for (const entry of MODEL_REGISTRY) {
   BY_ID.set(entry.id, entry);
   for (const alias of entry.aliases) BY_ALIAS.set(alias, entry);
+}
+
+/**
+ * `envProfile` 을 **실제로 주입할 수 있는** 하네스.
+ *
+ * 스폰 env 머지는 `agent-config.buildCLICommand` 의 claude·gpt 분기에만 배선돼
+ * 있다(USbdRV4k). 다른 하네스에 프로파일을 단 행을 등록하면 그 env 는 **조용히
+ * 버려진다** — 벤더 편입 티켓이 "붙였는데 왜 Anthropic 으로 가지?" 로 하루를
+ * 태우는 실패모드라, 여기서 부팅을 멈춘다.
+ */
+export const ENV_PROFILE_SUPPORTED_HARNESSES: readonly HarnessId[] = [
+  "claude",
+  "gpt",
+] as const;
+
+for (const entry of MODEL_REGISTRY) {
+  if (!entry.envProfile) continue;
+  if (!ENV_PROFILE_SUPPORTED_HARNESSES.includes(entry.harness)) {
+    throw new Error(
+      `[model-registry] "${entry.id}"(provider=${entry.provider}) 의 envProfile 은 ` +
+        `harness="${entry.harness}" 에서 주입되지 않습니다(주입 가능: ${ENV_PROFILE_SUPPORTED_HARNESSES.join(
+          ", ",
+        )}). 그 하네스의 스폰 분기에 벤더 env 머지를 먼저 배선하세요.`,
+    );
+  }
 }
 
 /** 입력 정규화 — CLI 는 대소문자를 가리지 않고 env 값엔 공백이 섞인다. */
@@ -356,19 +486,63 @@ export function resolveModelAlias(idOrAlias: string): string {
   return getModel(idOrAlias)?.id ?? norm(idOrAlias);
 }
 
-/** 프로바이더별 활성 모델(능력등급 낮음 → 높음). 라우팅 사다리의 재료. */
-export function modelsByProvider(
-  provider: ModelProvider,
-): ModelRegistryEntry[] {
-  const order: Record<CapabilityTier, number> = {
-    cheap: 0,
-    mid: 1,
-    top: 2,
-    frontier: 3,
-  };
-  return MODEL_REGISTRY.filter(
-    (m) => m.provider === provider && m.status === "active",
-  ).sort((a, b) => order[a.capability] - order[b.capability]);
+const CAPABILITY_ORDER: Readonly<Record<CapabilityTier, number>> = {
+  cheap: 0,
+  mid: 1,
+  top: 2,
+  frontier: 3,
+};
+
+function byCapability(entries: ModelRegistryEntry[]): ModelRegistryEntry[] {
+  return entries.sort(
+    (a, b) => CAPABILITY_ORDER[a.capability] - CAPABILITY_ORDER[b.capability],
+  );
+}
+
+/**
+ * **하네스**별 활성 모델(능력등급 낮음 → 높음). 라우팅 사다리의 재료.
+ *
+ * ★종전 이름은 `modelsByProvider` 였다. 축이 쪼개진 지금 그 이름을 남겨두면
+ * "provider 로 필터하는데 실제로는 바이너리 기준" 이라는 조용한 거짓말이 되므로
+ * 이름을 바꿨다(호출자는 컴파일 에러로 전부 드러난다).
+ */
+export function modelsByHarness(harness: HarnessId): ModelRegistryEntry[] {
+  return byCapability(
+    MODEL_REGISTRY.filter(
+      (m) => m.harness === harness && m.status === "active",
+    ),
+  );
+}
+
+/** **벤더**별 활성 모델(능력등급 낮음 → 높음). 쿼터·단가 집계의 재료. */
+export function modelsByVendor(provider: VendorId): ModelRegistryEntry[] {
+  return byCapability(
+    MODEL_REGISTRY.filter(
+      (m) => m.provider === provider && m.status === "active",
+    ),
+  );
+}
+
+/** 이 모델을 띄울 바이너리(하네스). 모르는 모델은 undefined. */
+export function harnessForModel(idOrAlias: string): HarnessId | undefined {
+  return getModel(idOrAlias)?.harness;
+}
+
+/** 이 모델의 벤더. 모르는 모델은 undefined. */
+export function vendorForModel(idOrAlias: string): VendorId | undefined {
+  return getModel(idOrAlias)?.provider;
+}
+
+/**
+ * 이 모델을 벤더 백엔드로 붙이는 데 필요한 스폰 env. 프로파일이 없으면 **빈
+ * 객체**를 돌려준다 — 오늘 모든 행이 그렇고, 그래서 스폰 env 가 종전과 동일하다.
+ *
+ * 사본을 돌려주므로 호출자가 변형해도 레지스트리 사실이 오염되지 않는다.
+ */
+export function envProfileForModel(idOrAlias?: string): Record<string, string> {
+  if (!idOrAlias) return {};
+  const profile = getModel(idOrAlias)?.envProfile;
+  return profile ? { ...profile } : {};
 }
 
 /** 이 모델이 해당 effort 를 지원하는가. effort 축이 없는 모델은 항상 false. */

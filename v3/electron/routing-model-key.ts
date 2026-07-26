@@ -22,6 +22,16 @@
  * 4. **`agent-config` 를 import 하지 않는다.** 티어 정책은 `TierModelResolver` 로
  *    주입받는다. 그래야 (a) 이 모듈이 CLI 프로브 없이 결정적으로 유닛테스트되고,
  *    (b) 그래프 읽기 경로가 무거운 스폰 모듈을 끌고 오지 않는다.
+ *
+ * ── ★축 인지: 여기 흐르는 첫 인자는 **하네스**다 (USbdRV4k) ───────────────
+ * `claude`/`gpt` 는 벤더가 아니라 **스폰할 바이너리**다. 축분리 후 그 사실이
+ * 이름에 드러나도록 인자명을 `harness` 로 바꿨다(값·동작은 무변경).
+ *
+ * ★**벤더는 아직 키에 넣지 않는다.** 서베이 §5.2 는 최종형을
+ * `role:backend|claude/zai/glm-5.2` 로 제안하지만, 지금 벤더를 키에 끼우면
+ * 축분리만으로 기존 셀(`claude-opus-5` 등)이 전부 다른 키가 되어 축적된 관측이
+ * 고아가 된다 — 그 마이그레이션(2단 폴백 포함)은 별도 티켓(서베이 V1-3)의 몫이다.
+ * 오늘은 harness 1:1 vendor 라 키가 잃는 정보도 없다.
  */
 
 import {
@@ -43,7 +53,7 @@ export interface TierModelResolution {
  * 를 그대로 넘긴다 — 스폰이 쓰는 그 함수여야 예측 키와 실제 키가 일치한다.
  */
 export type TierModelResolver = (
-  provider: string,
+  harness: string,
   complexity: LadderTier | undefined,
 ) => TierModelResolution;
 
@@ -65,24 +75,22 @@ export function formatModelKey(
 }
 
 /**
- * 이 프로바이더가 오늘 실제로 서빙하는 모델 id.
+ * 이 하네스가 오늘 실제로 서빙하는 모델 id.
  *
  * codex 는 `pinsModel=false` — 우리 스폰은 effort 만 넘기고 모델은 사용자
  * `~/.codex/config.toml` 값을 쓴다. 그래서 "권장 칸의 모델"(rung.model)이 아니라
  * 사다리가 그 목적으로 들고 있는 `inheritedModel` 이 그래프 키의 모델이 된다
- * (`ProviderLadder.inheritedModel` 주석: "비용추정·그래프 키 용도").
+ * (`HarnessLadder.inheritedModel` 주석: "비용추정·그래프 키 용도").
  * 모델 핀 배선이 켜지면 이 함수만 pinsModel 분기를 타 자동으로 바뀐다.
  */
 function servedModelId(
-  provider: string,
+  harness: string,
   complexity: LadderTier | undefined,
 ): string | undefined {
-  const ladder = ladderFor(provider as never);
+  const ladder = ladderFor(harness as never);
   if (!ladder) return undefined;
   if (!ladder.pinsModel) return ladder.inheritedModel;
-  const rung = complexity
-    ? entryRung(provider as never, complexity)
-    : undefined;
+  const rung = complexity ? entryRung(harness as never, complexity) : undefined;
   return rung?.model;
 }
 
@@ -95,7 +103,7 @@ function servedModelId(
  * ★난도에서 모델을 역추론하지 않는다(추측을 관측으로 적지 않는다).
  */
 export function modelKeyFromSpawn(
-  provider: string,
+  harness: string,
   info: SpawnedModelLike | null | undefined,
 ): string | null {
   const modelId = info?.modelId?.trim();
@@ -103,7 +111,7 @@ export function modelKeyFromSpawn(
   if (modelId)
     return formatModelKey(resolveModelAlias(modelId), effort) || null;
   if (!effort) return null;
-  const inherited = ladderFor(provider as never)?.inheritedModel;
+  const inherited = ladderFor(harness as never)?.inheritedModel;
   return inherited ? formatModelKey(inherited, effort) : null;
 }
 
@@ -120,27 +128,27 @@ export function modelKeyFromSpawn(
  * 예측을 포기한다 — 데이터 편향이 비용 상한을 우회할 입구를 만들지 않는다.
  */
 export function predictedModelKey(
-  provider: string,
+  harness: string,
   complexity: LadderTier | undefined,
   resolveTier: TierModelResolver,
 ): string | null {
   if (!complexity) return null;
   let tier: TierModelResolution;
   try {
-    tier = resolveTier(provider, complexity) ?? {};
+    tier = resolveTier(harness, complexity) ?? {};
   } catch {
     // 티어 정책이 던지면(사다리 설정 오류 등) 그래프 해상도를 포기하고 구키로
     // 떨어진다 — dispatch 자체를 깨뜨리지 않는다.
     return null;
   }
-  if (provider === "claude") {
+  if (harness === "claude") {
     const id = tier.claudeModel?.trim();
     return id ? formatModelKey(resolveModelAlias(id)) || null : null;
   }
-  if (provider === "gpt") {
+  if (harness === "gpt") {
     const effort = tier.codexReasoning?.trim();
     if (effort && isApprovalGatedEffort(effort)) return null;
-    const modelId = servedModelId(provider, complexity);
+    const modelId = servedModelId(harness, complexity);
     if (!modelId) return null;
     return formatModelKey(modelId, effort) || null;
   }
@@ -156,10 +164,10 @@ export function predictedModelKey(
  * 칸이 하나뿐이므로 종전과 바이트 동일하다.
  */
 export function graphModelKeys(
-  provider: string,
+  harness: string,
   complexity: LadderTier | undefined,
   resolveTier: TierModelResolver,
 ): string[] {
-  const precise = predictedModelKey(provider, complexity, resolveTier);
-  return precise && precise !== provider ? [precise, provider] : [provider];
+  const precise = predictedModelKey(harness, complexity, resolveTier);
+  return precise && precise !== harness ? [precise, harness] : [harness];
 }

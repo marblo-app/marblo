@@ -38,7 +38,7 @@ describe("parseModelSpec — 프로바이더 토큰(기존 동작 보존)", () =
     ] as const) {
       const spec = parseModelSpec(input);
       expect(spec, input).toBeDefined();
-      expect(spec!.provider, input).toBe(provider);
+      expect(spec!.harness, input).toBe(provider);
       expect(spec!.modelId, input).toBeUndefined();
     }
   });
@@ -84,8 +84,8 @@ describe("parseModelSpec — 느슨한 표기", () => {
   });
 
   it("구체 모델의 프로바이더는 레지스트리에서 파생된다", () => {
-    expect(parseModelSpec("opus5")!.provider).toBe("claude");
-    expect(parseModelSpec("gpt-5.6-terra")!.provider).toBe("gpt");
+    expect(parseModelSpec("opus5")!.harness).toBe("claude");
+    expect(parseModelSpec("gpt-5.6-terra")!.harness).toBe("gpt");
   });
 
   it("느슨한 인덱스에 충돌이 없다(모델 추가 시 이 테스트가 먼저 깨진다)", () => {
@@ -106,7 +106,7 @@ describe("parseModelSpec — @effort", () => {
   it("지원하는 effort 는 그대로 붙는다", () => {
     const spec = parseModelSpec("gpt-5.6-terra@xhigh");
     expect(spec).toMatchObject({
-      provider: "gpt",
+      harness: "gpt",
       modelId: "gpt-5.6-terra",
       effort: "xhigh",
     });
@@ -137,7 +137,7 @@ describe("resolveModelPin — 정책 적용", () => {
   it("claude 구체 지정 → --model 에 넣을 구체 id", () => {
     const pin = resolveModelPin("opus5", CLI_OK);
     expect(pin).toMatchObject({
-      provider: "claude",
+      harness: "claude",
       claudeModel: "claude-opus-5",
       label: "claude-opus-5",
     });
@@ -166,7 +166,7 @@ describe("resolveModelPin — 정책 적용", () => {
   it("codex 구체 지정 → model + effort, label 은 model@effort", () => {
     const pin = resolveModelPin("gpt-5.6-terra@max", CLI_OK);
     expect(pin).toMatchObject({
-      provider: "gpt",
+      harness: "gpt",
       codexModel: "gpt-5.6-terra",
       codexEffort: "max",
       label: "gpt-5.6-terra@max",
@@ -183,7 +183,7 @@ describe("resolveModelPin — 정책 적용", () => {
 
   it("프로바이더만 지정하면 모델 핀이 생기지 않는다(티어 정책 그대로)", () => {
     const pin = resolveModelPin("codex", CLI_OK);
-    expect(pin).toMatchObject({ provider: "gpt", label: "gpt" });
+    expect(pin).toMatchObject({ harness: "gpt", label: "gpt" });
     expect(pin!.codexModel).toBeUndefined();
     expect(pin!.claudeModel).toBeUndefined();
   });
@@ -205,23 +205,25 @@ describe("오케 셀렉터 compound 값", () => {
     );
   });
 
-  it("기존 저장값(접미 없음)은 그대로 프로바이더로 읽힌다", () => {
+  it("기존 저장값(접미 없음)은 그대로 하네스로 읽힌다", () => {
     expect(splitOrchestratorModelValue("claude")).toEqual({
-      provider: "claude",
+      harness: "claude",
     });
-    expect(splitOrchestratorModelValue("codex")).toEqual({ provider: "codex" });
+    expect(splitOrchestratorModelValue("codex")).toEqual({
+      harness: "codex",
+    });
   });
 
-  it("compound 는 프로바이더와 모델로 쪼개진다", () => {
+  it("compound 는 하네스와 모델로 쪼개진다", () => {
     expect(splitOrchestratorModelValue("claude:claude-opus-4-8")).toEqual({
-      provider: "claude",
+      harness: "claude",
       modelId: "claude-opus-4-8",
     });
   });
 
-  it("★미지 모델 접미는 버리되 프로바이더는 살린다(spawn 안 깨짐)", () => {
+  it("★미지 모델 접미는 버리되 하네스는 살린다(spawn 안 깨짐)", () => {
     expect(splitOrchestratorModelValue("claude:claude-nonexistent-9")).toEqual({
-      provider: "claude",
+      harness: "claude",
     });
   });
 
@@ -237,7 +239,7 @@ describe("오케 셀렉터 compound 값", () => {
     // 레지스트리의 active claude 모델 수와 일치 — 목록을 따로 만들지 않았다는 증거.
     expect(choices).toHaveLength(
       MODEL_REGISTRY.filter(
-        (m) => m.provider === "claude" && m.status === "active",
+        (m) => m.harness === "claude" && m.status === "active",
       ).length,
     );
   });
@@ -255,7 +257,7 @@ describe("오케 셀렉터 compound 값", () => {
     expect(ids[0]).toBe("gpt-5.6-sol"); // frontier 가 맨 앞
     expect(choices).toHaveLength(
       MODEL_REGISTRY.filter(
-        (m) => m.provider === "gpt" && m.status === "active",
+        (m) => m.harness === "gpt" && m.status === "active",
       ).length,
     );
     // 값·라벨 포맷은 Claude 와 같은 규칙(프로바이더 프리픽스 + 레지스트리 id).
@@ -301,7 +303,7 @@ describe("오케 셀렉터 compound 값", () => {
 
   it("model@effort compound 가 세 조각으로 쪼개진다", () => {
     expect(splitOrchestratorModelValue("codex:gpt-5.6-terra@high")).toEqual({
-      provider: "codex",
+      harness: "codex",
       modelId: "gpt-5.6-terra",
       effort: "high",
     });
@@ -310,11 +312,11 @@ describe("오케 셀렉터 compound 값", () => {
   it("★승인게이트 effort(max/ultra)는 저장값·env 로 들어와도 떨궈진다 — #602", () => {
     // 이 경로가 열려 있으면 한 번 고른 ultra 가 재시작마다 승인 없이 되살아난다.
     expect(splitOrchestratorModelValue("codex:gpt-5.6-sol@ultra")).toEqual({
-      provider: "codex",
+      harness: "codex",
       modelId: "gpt-5.6-sol",
     });
     expect(splitOrchestratorModelValue("codex:gpt-5.6-sol@max")).toEqual({
-      provider: "codex",
+      harness: "codex",
       modelId: "gpt-5.6-sol",
     });
   });
@@ -322,11 +324,11 @@ describe("오케 셀렉터 compound 값", () => {
   it("이 모델이 지원하지 않는 effort 도 떨구되 모델 핀은 살린다", () => {
     // luna 는 ultra 자체가 없다(레지스트리 §1.2). 모델 선택은 살아남아야 한다.
     expect(splitOrchestratorModelValue("codex:gpt-5.6-luna@ultra")).toEqual({
-      provider: "codex",
+      harness: "codex",
       modelId: "gpt-5.6-luna",
     });
     expect(splitOrchestratorModelValue("codex:gpt-5.5@쓰레기")).toEqual({
-      provider: "codex",
+      harness: "codex",
       modelId: "gpt-5.5",
     });
   });
@@ -336,7 +338,7 @@ describe("오케 셀렉터 compound 값", () => {
       "codex:gpt-5.6-terra@xhigh",
     );
     const pin = resolveModelPin(`${modelId}@${effort}`, CLI_OK);
-    expect(pin!.provider).toBe("gpt");
+    expect(pin!.harness).toBe("gpt");
     expect(pin!.codexModel).toBe("gpt-5.6-terra");
     expect(pin!.codexEffort).toBe("xhigh");
     expect(pin!.label).toBe("gpt-5.6-terra@xhigh");
