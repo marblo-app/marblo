@@ -15,7 +15,17 @@ import * as agentService from "../../services/agentService";
 import { checkAgentSpawn } from "../../lib/planLimits";
 import { buildLaneContextId, isLaneContext } from "../../lib/laneContext";
 import { laneStatusPill } from "../../lib/laneStatus";
+import {
+  buildModelPin,
+  describeSelection,
+  type QuickLaneSelection,
+} from "../../lib/quickLaneModel";
+import {
+  spawnedModelLabel,
+  spawnedModelTitle,
+} from "../../lib/spawnedModelLabel";
 import type { Agent } from "../../types/agent";
+import type { ModelType } from "../../types/agent";
 import { LaneCreateModal, type LaneLaunchInput } from "./LaneCreateModal";
 import { LaneDeleteConfirmModal } from "./LaneDeleteConfirmModal";
 import type { Task } from "../../types/task";
@@ -42,6 +52,7 @@ const TONE_COLOR: Record<string, string> = {
 const HARNESS_ICON: Record<string, string> = {
   claude: "🟣",
   gpt: "🟢",
+  grok: "⚡",
   antigravity: "🟠",
   gemini: "🔵",
   local: "⚫",
@@ -54,6 +65,30 @@ interface LaneRow {
   task: Task;
   agent: Agent | null;
   worktree: Worktree | null;
+}
+
+/**
+ * 아직 보드/에이전트 스토어에 나타나기 전의 레인 — **낙관적 카드**.
+ *
+ * 왜 필요한가: "시작" 을 누르고 나서 티켓 doc 생성 → 에이전트 doc 생성 → 워크트리
+ * 준비 → PTY 스폰 이 끝나고 Firestore 구독이 그 문서를 되돌려줄 때까지 화면에는
+ * **아무 일도 일어나지 않는다**. 병렬로 세 개를 띄우려는 사용자에게 그 공백은
+ * "안 눌렸나?" 로 읽히고, 실제로 중복 클릭을 유발한다. 그래서 누른 즉시 카드가
+ * 서고, 그 카드가 자기 단계(티켓 생성 → 스폰 → 워크트리)를 스스로 보고한다.
+ *
+ * 실패해도 카드는 남는다 — 사유를 그 자리에 적어야 어떤 레인이 왜 실패했는지
+ * 알 수 있다(배너 하나에 몰아넣으면 병렬 상황에서 누구 얘긴지 알 수 없다).
+ */
+type PendingPhase = "creating" | "spawning" | "failed";
+
+interface PendingLane {
+  id: string;
+  title: string;
+  selection: QuickLaneSelection;
+  phase: PendingPhase;
+  /** 티켓이 만들어진 뒤 채워진다 — 진짜 레인 행이 나타나면 이 카드를 걷는다. */
+  taskId?: string;
+  error?: string;
 }
 
 function hasWorktreeConflict(worktree: Worktree | null): boolean {
@@ -152,10 +187,16 @@ export function LanesTab() {
   const [deleteTarget, setDeleteTarget] = useState<LaneRow | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingLane[]>([]);
   const [busy, setBusy] = useState<{
     taskId: string;
     action: LaneRowAction;
   } | null>(null);
+
+  const patchPending = (id: string, patch: Partial<PendingLane>) =>
+    setPending((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+    );
 
   useEffect(() => {
     if (!projectId) return;
@@ -177,88 +218,194 @@ export function LanesTab() {
     });
   }, [tasks, agents, worktrees]);
 
-  const launchLane = async ({ title, model, command }: LaneLaunchInput) => {
-    if (!user || !projectId) {
-      setError(t("lanes.error.noProject"));
-      throw new Error("no project");
-    }
-    setError(null);
+  /** 실제 레인 행이 아직 안 나타난 진행중 카드만 그린다(중복 방지). */
+  const activePending = useMemo(
+    () =>
+      pending.filter(
+        (p) =>
+          p.phase !== "failed" &&
+          !(p.taskId && laneRows.some((r) => r.task.id === p.taskId)),
+      ),
+    [pending, laneRows],
+  );
+  const failedPending = useMemo(
+    () => pending.filter((p) => p.phase === "failed"),
+    [pending],
+  );
+
+  // 행이 나타난 진행중 카드는 상태에서도 걷어낸다 — 안 걷으면 배열이 세션 내내
+  // 자라고, activePending 이 매번 그 전부를 다시 훑는다.
+  useEffect(() => {
+    setPending((prev) => {
+      const next = prev.filter(
+        (p) =>
+          p.phase === "failed" ||
+          !(p.taskId && laneRows.some((r) => r.task.id === p.taskId)),
+      );
+      return next.length === prev.length ? prev : next;
+    });
+  }, [laneRows]);
+
+  const dismissPending = (id: string) =>
+    setPending((prev) => prev.filter((p) => p.id !== id));
+
+  /**
+   * "지금 동시에 굴러가는" 레인 수 — 아직 터미널 상태가 아닌 레인 행 + 비행 중인
+   * 낙관적 카드. 완료/실패/차단된 레인은 목록에 남아도 병렬도에 포함되지 않는다.
+   */
+  const runningCount = useMemo(
+    () =>
+      laneRows.filter(
+        (r) => !["DONE", "FAILED", "BLOCKED"].includes(r.task.status),
+      ).length + activePending.length,
+    [laneRows, activePending],
+  );
+
+  /**
+   * 레인 하나를 띄운다 — **fire-and-forget**.
+   *
+   * 종전엔 `await` 하는 async 핸들러였고 모달이 그 프라미스를 기다렸다. 그래서
+   * 레인 생성이 직렬화됐다: 첫 레인의 워크트리 준비 + PTY 스폰이 끝나야 두 번째
+   * 레인을 시작할 수 있었다. 병렬이 이 탭의 존재 이유인데 정작 **입구가** 병렬이
+   * 아니었던 셈이다. 이제 모달은 즉시 닫히고, 진행 상황은 각 레인의 낙관적
+   * 카드가 자기 몫만 보고한다 — 서로를 기다리지 않는다.
+   *
+   * 실패는 던지지 않고 그 레인의 카드에 남긴다. 병렬 상황에서 배너 하나에
+   * 몰아넣으면 "어느 레인이 실패했는지" 를 알 수 없다.
+   */
+  const launchLane = ({ title, selection }: LaneLaunchInput) => {
+    const pendingId = crypto.randomUUID();
+    setPending((prev) => [
+      ...prev,
+      { id: pendingId, title, selection, phase: "creating" },
+    ]);
+    void runLaneLaunch(pendingId, title, selection);
+  };
+
+  const runLaneLaunch = async (
+    pendingId: string,
+    title: string,
+    selection: QuickLaneSelection,
+  ) => {
+    const fail = (reason: string) =>
+      patchPending(pendingId, { phase: "failed", error: reason });
+
+    if (!user || !projectId) return fail(t("lanes.error.noProject"));
     // 격리의 핵심 전제: 워크트리는 repo 루트(cwd)에서만 만들어진다. rootPath 가
     // 비면 worktreeCoordinator.prepare 가 조용히 plain cwd 로 폴백해 격리가 깨지므로,
     // 레인을 만들기 전에 막고 사용자에게 알린다 (orphan 태스크도 방지).
-    if (!rootPath) {
-      setError(t("lanes.error.noRepoRoot"));
-      throw new Error("no repo root");
-    }
+    if (!rootPath) return fail(t("lanes.error.noRepoRoot"));
+
     // 플랜 동시 실행 한도 게이트: 이 핸들러는 agentStore.spawnAgent 를 우회해
     // agentService.createAgent + electronAPI.agent.launch 를 직접 호출하므로
     // (AgentsTab.handleLaunch 와 동일 사정) 여기서 checkAgentSpawn 을 재검사한다.
     // 진실의 원천은 lib/planLimits.ts. task/agent doc 생성 전에 막아 orphan 방지.
+    //
+    // ★비행 중인 레인도 슬롯을 센다. 이제 여러 레인이 동시에 뜰 수 있는데
+    // `agents` 는 Firestore 왕복 뒤에야 갱신되므로, 한도가 1 남았을 때 세 개를
+    // 연속으로 누르면 세 개가 전부 게이트를 통과해 버린다(모두 같은 stale 카운트를
+    // 읽는다). 아직 doc 이 없는 pending 을 활성 에이전트로 세어 그 창을 닫는다.
+    const inFlight = pending.filter((p) => p.phase !== "failed").length;
     const plan = useSubscriptionStore.getState().getPlan();
-    const spawnCheck = checkAgentSpawn(plan, agents);
+    const spawnCheck = checkAgentSpawn(plan, [
+      ...agents,
+      ...Array.from({ length: inFlight }, () => ({ status: "idle" }) as Agent),
+    ]);
     if (!spawnCheck.allowed) {
-      setError(spawnCheck.reason ?? t("lanes.error.agentLimit"));
       // Free hit the fair-use agent cap → also open the upgrade modal
       // (routes to Settings → Billing).
       useUiStore.getState().showUpgrade("agents", "pro");
-      throw new Error("agent limit reached");
+      return fail(spawnCheck.reason ?? t("lanes.error.agentLimit"));
     }
-    // 레인마다 구별되는 contextId 를 규약("lane:<laneId>")대로 부여한다. task 생성
-    // 전에 laneId 가 필요하므로(contextId 는 생성 payload 에 들어간다) 여기서 미리
-    // 고유 id 를 만든다. 과거의 "lane" 단일 리터럴(B1)은 미션으로 오분류돼 보드
-    // 마킹이 깨졌었다 — 이제 buildLaneContextId 로 통일.
-    const laneId = crypto.randomUUID();
-    const taskId = await taskService.createTask({
-      projectId,
-      contextId: buildLaneContextId(laneId),
-      title,
-      description: "",
-      status: "TODO",
-      role: "backend",
-      priority: 3,
-      dependsOn: [],
-      dependsOnCompleted: true,
-      claimedBy: null,
-      claimedAt: null,
-      scope: [],
-      comment: "quick-lane",
-      prUrl: "",
-      hasPmFeedback: false,
-    });
-    const agentData = {
-      projectId,
-      ownerId: user.uid,
-      name: title.length > 36 ? `${title.slice(0, 33)}…` : title,
-      model,
-      role: "backend",
-      status: "idle" as const,
-      currentTaskId: taskId,
-      command,
-      skillFile: "",
-    };
-    const agentId = await agentService.createAgent(agentData);
-    const agent = { ...agentData, id: agentId, createdAt: new Date() } as Agent;
-    const prompt = `빠른 개선 작업입니다: ${title}\n\n이 워크트리(독립 브랜치) 안에서 변경하고 완료되면 커밋하세요. 다른 작업과 격리돼 있습니다.`;
-    const result = await window.electronAPI.agent.launch(
-      agent,
-      rootPath,
-      prompt,
-      undefined,
-      projectId,
-      taskId,
-    );
-    // launch 가 돌려준 진짜 ptySessionId 를 매핑에 박아 둔다 — lane row 의
-    // "터미널" 버튼이 이걸 reactive 로 읽어 활성화된다.
-    useAgentSessionMap.getState().set(agentId, result.ptySessionId);
-    // 실제로 뜬 구체 모델 스탬프(핀 없는 launch 면 no-op).
-    agentService.stampSpawnedModel(agentId, result?.spawnedModel);
-    useTerminalStore
-      .getState()
-      .attachSession(
-        result.ptySessionId,
-        `${HARNESS_ICON[model] ?? "⚪"} ${agentData.name}`,
+
+    try {
+      // 레인마다 구별되는 contextId 를 규약("lane:<laneId>")대로 부여한다. task 생성
+      // 전에 laneId 가 필요하므로(contextId 는 생성 payload 에 들어간다) 여기서 미리
+      // 고유 id 를 만든다. 과거의 "lane" 단일 리터럴(B1)은 미션으로 오분류돼 보드
+      // 마킹이 깨졌었다 — 이제 buildLaneContextId 로 통일.
+      const laneId = crypto.randomUUID();
+      const taskId = await taskService.createTask({
+        projectId,
+        contextId: buildLaneContextId(laneId),
+        title,
+        description: "",
+        status: "TODO",
+        role: "backend",
+        priority: 3,
+        dependsOn: [],
+        dependsOnCompleted: true,
+        claimedBy: null,
+        claimedAt: null,
+        scope: [],
+        comment: "quick-lane",
+        prUrl: "",
+        hasPmFeedback: false,
+      });
+      patchPending(pendingId, { taskId, phase: "spawning" });
+
+      const agentData = {
+        projectId,
+        ownerId: user.uid,
+        name: title.length > 36 ? `${title.slice(0, 33)}…` : title,
+        // 에이전트 doc 의 `model` 은 **하네스**(스폰할 바이너리)다. 구체 모델은
+        // 별도 축(spawnedModel)이고, 아래 launch 가 실제로 뜬 값을 돌려준다.
+        model: selection.harness as ModelType,
+        role: "backend",
+        status: "idle" as const,
+        currentTaskId: taskId,
+        command: selection.command,
+        skillFile: "",
+      };
+      const agentId = await agentService.createAgent(agentData);
+      const agent = {
+        ...agentData,
+        id: agentId,
+        createdAt: new Date(),
+      } as Agent;
+      const prompt = `빠른 개선 작업입니다: ${title}\n\n이 워크트리(독립 브랜치) 안에서 변경하고 완료되면 커밋하세요. 다른 작업과 격리돼 있습니다.`;
+      const result = await window.electronAPI.agent.launch(
+        agent,
+        rootPath,
+        prompt,
+        undefined,
+        projectId,
+        taskId,
+        // ★구체 모델 핀. main 이 dispatch_task 와 같은 resolveModelPin 으로 풀어
+        // claude/codex/native 축에 맞는 CLI 인자로 바꾼다.
+        buildModelPin(selection),
       );
-    refreshWorktrees().catch(() => {});
+
+      // CLI 미설치/미로그인이면 main 이 PTY 를 만들기 전에 막고 needsAuth 를
+      // 돌려준다. 그 경우 ptySessionId 는 빈 문자열이라 매핑에 박으면 안 된다.
+      if (result?.needsAuth) {
+        return fail(
+          t("lanes.error.needsAuth", {
+            model: result.needsAuth.model,
+            action: result.needsAuth.action,
+          }),
+        );
+      }
+
+      // launch 가 돌려준 진짜 ptySessionId 를 매핑에 박아 둔다 — lane row 의
+      // "터미널" 버튼이 이걸 reactive 로 읽어 활성화된다.
+      useAgentSessionMap.getState().set(agentId, result.ptySessionId);
+      // 실제로 뜬 구체 모델 스탬프(핀 없는 launch 면 no-op). 이 값이 레인 카드의
+      // 모델 배지(#605)가 되고, 요청값이 아니라 **서빙된 값**이라 버전가드 폴백도
+      // 그대로 드러난다.
+      agentService.stampSpawnedModel(agentId, result?.spawnedModel);
+      // ★attachSession 이 아니라 openTerminalForSession — 탭을 붙이는 데 그치지
+      // 않고 활성 탭으로 세우고 터미널 영역에 포커스를 보낸다. "티켓을 만들면
+      // 곧바로 터미널이 열려 작업이 시작되는" 흐름이 이 한 줄에 달려 있다.
+      useTerminalStore
+        .getState()
+        .openTerminalForSession(
+          result.ptySessionId,
+          `${HARNESS_ICON[selection.harness] ?? "⚪"} ${agentData.name}`,
+        );
+      refreshWorktrees().catch(() => {});
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
   };
 
   // cleanup 은 agent.stop → removeWorktree → agent.remove/deleteAgent →
@@ -392,15 +539,27 @@ export function LanesTab() {
     <div className="flex h-full flex-col gap-3 p-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-gray-200">Lanes</h2>
+          <h2 className="text-sm font-semibold text-gray-200">
+            {t("lanes.header.title")}
+          </h2>
           <p className="text-xs text-gray-500">{t("lanes.header.subtitle")}</p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
-        >
-          {t("lanes.newButton")}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 병렬 실행 카운터 — 여러 레인이 동시에 돈다는 사실을 숫자로 못박는다.
+              (카드가 여러 장 보이는 것과 별개로, 그중 몇 개가 "지금 굴러가는
+              중"인지는 카드만 봐서는 세어야 알 수 있다.) */}
+          {runningCount > 0 && (
+            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
+              {t("lanes.header.runningCount", { count: String(runningCount) })}
+            </span>
+          )}
+          <button
+            onClick={() => setShowCreate(true)}
+            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
+          >
+            {t("lanes.newButton")}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -414,7 +573,35 @@ export function LanesTab() {
         </div>
       )}
 
-      {laneRows.length === 0 ? (
+      {/* 실패한 레인 시도 — 티켓이 생기기 전에 죽은 것도 있으므로 목록 카드로는
+          표현할 수 없다. 각자 자기 사유를 달고 서고, 사용자가 개별로 닫는다. */}
+      {failedPending.length > 0 && (
+        <div className="space-y-1.5">
+          {failedPending.map((p) => (
+            <div
+              key={p.id}
+              className="flex items-start justify-between gap-2 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-medium">{p.title}</div>
+                <div className="mt-0.5 whitespace-pre-line text-red-300/80">
+                  {p.error}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => dismissPending(p.id)}
+                className="flex-shrink-0 rounded px-1.5 text-red-300/70 hover:text-red-200"
+                aria-label={t("lanes.pending.dismiss")}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {laneRows.length === 0 && activePending.length === 0 ? (
         <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
           <div>
             <p className="text-sm text-gray-300">{t("lanes.empty.title")}</p>
@@ -424,7 +611,36 @@ export function LanesTab() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 space-y-1.5 overflow-y-auto">
+        // ★한 줄 리스트가 아니라 카드 그리드다. 병렬로 도는 레인들이 세로로
+        // 한 줄씩 쌓이면 "큐" 처럼 읽히고, 나란히 서면 "동시에 도는 것들" 로
+        // 읽힌다. 좁은 폭(터미널 컬럼이 넓을 때)에서는 자연히 1열로 접힌다.
+        <div className="grid flex-1 auto-rows-min grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2 2xl:grid-cols-3">
+          {/* 낙관적 카드: 누른 즉시 여기 선다(티켓 doc 이 돌아오기 전). */}
+          {activePending.map((p) => (
+            <div
+              key={p.id}
+              className="animate-pulse rounded-lg border border-blue-500/40 bg-gray-800 p-3"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm">
+                  {HARNESS_ICON[p.selection.harness] ?? "⚪"}
+                </span>
+                <span className="truncate text-sm font-medium text-gray-200">
+                  {p.title}
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-gray-400">
+                <span className="font-mono text-gray-500">
+                  {describeSelection(p.selection)}
+                </span>
+                <span className="text-blue-300">
+                  {p.phase === "creating"
+                    ? t("lanes.pending.creating")
+                    : t("lanes.pending.spawning")}
+                </span>
+              </div>
+            </div>
+          ))}
           {laneRows.map(({ task, agent, worktree }) => {
             const row = { task, agent, worktree };
             // 레인 상태 pill 의 단일 진실의 원천. worktree git 상태만 보던
@@ -450,6 +666,23 @@ export function LanesTab() {
                         {task.title}
                       </span>
                     </div>
+                    {/* #605 구체 모델 배지 — 스탬프가 있을 때만. 없으면(핀 없는
+                        스폰·구 doc) 왼쪽 하네스 아이콘만 남는 종전 표시로
+                        자연스럽게 되돌아간다. 값은 요청이 아니라 argv 를 되읽은
+                        **서빙된 모델**이라, 버전가드 폴백도 여기서 드러난다. */}
+                    {agent && spawnedModelLabel(agent.spawnedModel) && (
+                      <div className="mt-1">
+                        <span
+                          className="inline-block max-w-full truncate rounded border border-[#45475a] bg-[#181825] px-1.5 py-0.5 font-mono text-[10px] text-[#a6adc8]"
+                          title={spawnedModelTitle(
+                            spawnedModelLabel(agent.spawnedModel) as string,
+                            agent.model,
+                          )}
+                        >
+                          {spawnedModelLabel(agent.spawnedModel)}
+                        </span>
+                      </div>
+                    )}
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-gray-400">
                       {worktree ? (
                         <span className="font-mono text-gray-500">

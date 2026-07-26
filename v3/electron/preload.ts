@@ -179,6 +179,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       resumeSessionId?: string,
       projectId?: string,
       taskId?: string,
+      /** 명시 모델 핀 `<modelId>[@<effort>]` (퀵레인 모델 셀렉터). */
+      modelPin?: string,
     ) =>
       ipcRenderer.invoke("agent:launch", {
         agent,
@@ -187,6 +189,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         resumeSessionId,
         projectId,
         taskId,
+        modelPin,
       }),
     stop: (id: string) => ipcRenderer.invoke("agent:stop", id),
     restart: (id: string) => ipcRenderer.invoke("agent:restart", id),
@@ -546,6 +549,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("modelPreset:set", preset) as Promise<{
         success: boolean;
       }>,
+  },
+  models: {
+    /**
+     * 퀵레인 모델 셀렉터가 그릴 벤더→모델 카탈로그. 목록은 `model-registry`
+     * 파생이고 available/missingEnvKeys 는 main 이 `process.env` 로 판정한다.
+     * ★키 **이름**과 boolean 만 건너온다(시크릿 값은 절대 안 넘어온다).
+     */
+    quickLaneCatalog: () => ipcRenderer.invoke("models:quickLaneCatalog"),
   },
   orchestratorModel: {
     // projectId 를 주면 그 프로젝트의 오케가 마지막으로 돈 모델을 우선 반환/기록

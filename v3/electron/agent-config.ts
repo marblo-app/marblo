@@ -451,6 +451,19 @@ const MODEL_BINARY: Partial<Record<ModelType, string>> = {
   antigravity: "agy",
 };
 
+/**
+ * 이 하네스가 스폰하는 CLI 이름 — 에이전트 doc 의 `command` 필드에 넣을 값.
+ *
+ * ★`MODEL_BINARY` 를 단일소스로 재사용한다. 이 표가 없던 동안 UI 쪽(퀵레인 생성
+ * 모달)이 자기 리터럴 표("claude"/"codex"/"agy")를 따로 들고 있었고, 그래서 신규
+ * 하네스(grok)가 레지스트리에 들어와도 UI 에는 나타날 방법이 없었다. `claude` 가
+ * `MODEL_BINARY` 에 없는 것은 누락이 아니라 사실이다 — claude 는 `resolveClaudeCli`
+ * 가 별도로 해석하는 경로라 여기 이름만 돌려준다.
+ */
+export function harnessCommandName(harness: ModelType): string {
+  return MODEL_BINARY[harness] ?? harness;
+}
+
 function candidateBinaryNames(binary: string): string[] {
   if (os.platform() !== "win32" || path.extname(binary)) return [binary];
   const pathext = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")

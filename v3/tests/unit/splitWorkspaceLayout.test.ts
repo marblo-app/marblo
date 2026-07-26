@@ -221,6 +221,26 @@ describe("visibleRightTabs", () => {
     expect(RIGHT_TABS[0]).toBe("startHere");
     expect(visibleRightTabs([])[0]).toBe("startHere");
   });
+
+  // Quick Lanes was promoted out of the tail of the bar (it used to sit after
+  // `history`, six tabs deep, where it read as an archive view). The whole
+  // point of the tab is to be the FAST path — spawn a parallel worker on the
+  // improvement you just noticed, without leaving the file you're in — so it
+  // has to sit next to `code`. Pinned here so a future tab insertion doesn't
+  // quietly bury it again; if the product decision changes, change this test
+  // deliberately.
+  it("★places Quick Lanes immediately after Code", () => {
+    const codeIndex = RIGHT_TABS.indexOf("code");
+    expect(codeIndex).toBeGreaterThanOrEqual(0);
+    expect(RIGHT_TABS[codeIndex + 1]).toBe("lanes");
+  });
+
+  it("★Quick Lanes stays adjacent to Code once dev-only tabs are hidden", () => {
+    // Neither `code` nor `lanes` is dev-gated, so the adjacency has to survive
+    // the production filter too — the bar users actually see.
+    const visible = visibleRightTabs([]);
+    expect(visible[visible.indexOf("code") + 1]).toBe("lanes");
+  });
 });
 
 describe("initialActiveTab", () => {

@@ -34,16 +34,24 @@
  *
  * Nothing is currently excluded. `startHere` is the only addition: onboarding
  * is a first-class destination, not a modal you can lose (lib/onboardingProgress).
+ *
+ * ★ ORDER IS PRODUCT, NOT ALPHABET. `lanes` (Quick Lanes) sits immediately
+ * after `code` because it is the second thing a user reaches for while working
+ * — spawn a parallel worker on the improvement you just noticed, without
+ * leaving the file you are in. It used to sit after `history`, six tabs deep,
+ * where it read as an archive view; a feature that is supposed to be the fast
+ * path cannot be behind the slow ones. `tests/unit/splitWorkspaceLayout.test.ts`
+ * pins the adjacency so a future insertion doesn't quietly bury it again.
  */
 export const RIGHT_TABS = [
   "startHere",
   "guide",
   "board",
   "code",
+  "lanes",
   "agents",
   "worktrees",
   "history",
-  "lanes",
   "usage",
   "harness",
   "missions",

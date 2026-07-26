@@ -28,14 +28,18 @@
  *    (agent-config §8.3 의 기존 계약).
  */
 import {
+  harnessCommandName,
   resolveClaudeModelPinned,
   type TopModelFallback,
 } from "./agent-config";
 import {
   getModel,
   modelsByHarness,
+  vendorEnvSecretKeys,
   HARNESS_NATIVE_VENDOR,
   MODEL_REGISTRY,
+  VENDOR_IDS,
+  type CapabilityTier,
   type EffortLevel,
   type ModelRegistryEntry,
   type VendorId,
@@ -594,3 +598,145 @@ export function humanizeClaudeModelId(id: string): string {
   const titled = family.charAt(0).toUpperCase() + family.slice(1);
   return version ? `${titled} ${version}` : titled;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// 퀵레인 모델 카탈로그 (벤더 → 구체 모델 → effort)
+//
+// 오케 셀렉터(`*OrchestratorChoices`)와 **의도적으로 다른 함수**다. 두 셀렉터의
+// 선택은 수명이 다르기 때문이다:
+//
+//   오케 선택   — 프로젝트별로 **영구 저장**된다. 그래서 env-swap 벤더를
+//                 `selectorEligible` 로 잘라낸다(키가 없는 값이 매 재시작마다
+//                 되살아나 조용히 네이티브 벤더로 새는 것을 막으려고).
+//   퀵레인 선택 — **레인 1개짜리 수명**이다. 티켓 하나를 띄우는 그 순간의
+//                 선택이고, 실패해도 그 레인에서 끝난다 — `dispatch_task(model=…)`
+//                 명시 지정과 같은 수명이라 같은 대우를 받는다.
+//
+// 그래서 여기는 **레지스트리 전 행**을 벤더별로 세운다. 키가 없는 벤더는 목록에서
+// 지우는 대신 `requiredEnvKeys` 를 실어 보내고, 켤 수 있는지 판정(=process.env
+// 조회)은 main 이 한다 — 이 모듈은 시크릿을 읽지 않는다(model-registry 상단 규율).
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * 벤더 표시명. **모델 목록이 아니라 브랜드 표기**라서 표로 둔다 —
+ * `Record<VendorId, string>` 이 exhaustive 라, 레지스트리에 새 벤더가 들어오면
+ * 컴파일이 여기서 멈춘다(라벨을 잊은 채 조용히 벤더 id 가 UI 에 노출되지 않는다).
+ */
+const VENDOR_LABEL: Readonly<Record<VendorId, string>> = {
+  anthropic: "Claude",
+  openai: "Codex",
+  google: "Gemini",
+  zai: "Z.ai GLM",
+  minimax: "MiniMax",
+  xai: "Grok",
+  moonshot: "Kimi",
+  local: "로컬",
+  custom: "사용자 지정",
+};
+
+/** 퀵레인 셀렉터의 모델 한 칸. */
+export interface QuickLaneModelOption {
+  /** 레지스트리 구체 id. 그대로 `agent:launch` 의 modelPin 으로 나간다. */
+  modelId: string;
+  /** 사람이 읽는 이름(claude 계열만 예쁘게 접고 나머지는 실명 그대로). */
+  label: string;
+  capability: CapabilityTier;
+  /** 셀렉터에서 고를 수 있는 effort(낮음 → 높음). 빈 배열 = effort 축 없음. */
+  efforts: EffortLevel[];
+  /** CLI 기본 effort — 드롭다운의 "기본" 칸이 무엇을 뜻하는지 보여주는 힌트. */
+  defaultEffort?: EffortLevel;
+  /** 단가가 추정치인가(=화면에 "추정" 표기). */
+  estimatedPricing: boolean;
+}
+
+/** 퀵레인 셀렉터의 벤더 그룹(= 1단계 선택지). */
+export interface QuickLaneVendorGroup {
+  vendor: VendorId;
+  label: string;
+  /** 이 그룹의 모델들이 스폰하는 바이너리. 에이전트 doc 의 `model` 이 된다. */
+  harness: ModelType;
+  /** 에이전트 doc 의 `command`. `agent-config.MODEL_BINARY` 단일소스 파생. */
+  command: string;
+  /**
+   * 이 벤더에 붙으려면 있어야 하는 env 키 **이름들**(값 아님). 네이티브 벤더는
+   * 빈 배열 — CLI 자기 로그인으로 붙는다.
+   */
+  requiredEnvKeys: string[];
+  models: QuickLaneModelOption[];
+}
+
+/**
+ * 퀵레인 모델 카탈로그 — **레지스트리 파생**. 이 함수 안에 모델 id 리터럴은
+ * 하나도 없다(모델을 추가하려면 레지스트리에 행 하나면 된다).
+ *
+ * 정렬: 벤더는 네이티브(하네스 기본 벤더) 먼저 → 그 안에서 `VENDOR_IDS` 순서.
+ * 모델은 능력등급 높음 → 낮음(오케 셀렉터와 같은 규칙, 같은 이유로 `.reverse()`
+ * 가 아니라 내림차순 비교자다 — 동률 순서를 보존해야 "신형이 위" 가 성립한다).
+ */
+export function quickLaneVendorCatalog(): QuickLaneVendorGroup[] {
+  const rank: Record<CapabilityTier, number> = {
+    cheap: 0,
+    mid: 1,
+    top: 2,
+    frontier: 3,
+  };
+  const groups: QuickLaneVendorGroup[] = [];
+
+  for (const vendor of VENDOR_IDS) {
+    const entries = MODEL_REGISTRY.filter(
+      (m) => m.provider === vendor && m.status === "active",
+    );
+    if (entries.length === 0) continue;
+
+    // 한 벤더의 행들이 서로 다른 하네스로 갈리는 경우는 오늘 없지만, 생긴다면
+    // 그룹을 하네스별로 쪼개야 한다(그룹 하나가 두 바이너리를 뜻할 수 없다).
+    // 그때 조용히 첫 하네스로 뭉뚱그리지 않도록 여기서 갈라 준다.
+    const harnesses = [...new Set(entries.map((e) => e.harness))];
+    for (const harness of harnesses) {
+      const models = entries
+        .filter((e) => e.harness === harness)
+        .sort((a, b) => rank[b.capability] - rank[a.capability])
+        .map<QuickLaneModelOption>((entry) => ({
+          modelId: entry.id,
+          label:
+            entry.harness === "claude" && entry.provider === "anthropic"
+              ? humanizeClaudeModelId(entry.id)
+              : entry.id,
+          capability: entry.capability,
+          efforts: selectableEfforts(entry),
+          ...(entry.defaultEffort
+            ? { defaultEffort: entry.defaultEffort }
+            : {}),
+          estimatedPricing: Boolean(entry.pricing.estimated),
+        }));
+
+      // 그룹의 필수 env 키 = 소속 모델들이 요구하는 키의 합집합. 오늘 한 벤더의
+      // 행들은 같은 프로파일을 쓰므로 합집합이 곧 각 행의 키다.
+      const envKeys = new Set<string>();
+      for (const entry of entries) {
+        for (const key of vendorEnvSecretKeys(entry.id)) envKeys.add(key);
+      }
+
+      groups.push({
+        vendor,
+        label: VENDOR_LABEL[vendor],
+        harness: harness as ModelType,
+        command: harnessCommandName(harness as ModelType),
+        requiredEnvKeys: [...envKeys].sort(),
+        models,
+      });
+    }
+  }
+
+  // 네이티브 벤더(=그 하네스가 프로파일 없이 붙는 곳)를 앞으로. env-swap 벤더는
+  // 조건부 크레덴셜이 필요한 칸이라 목록 아래쪽이 정직하다.
+  return groups.sort((a, b) => {
+    const an = HARNESS_NATIVE_VENDOR[a.harness as HarnessKey] === a.vendor;
+    const bn = HARNESS_NATIVE_VENDOR[b.harness as HarnessKey] === b.vendor;
+    if (an !== bn) return an ? -1 : 1;
+    return 0;
+  });
+}
+
+/** `HARNESS_NATIVE_VENDOR` 의 키 타입(레지스트리 `HarnessId`)에 맞추기 위한 별칭. */
+type HarnessKey = keyof typeof HARNESS_NATIVE_VENDOR;

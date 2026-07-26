@@ -13,9 +13,32 @@ export const lanes = {
   "lanes.terminal.connectBadge": "(연결)",
 
   // Header
+  "lanes.header.title": "퀵레인",
   "lanes.header.subtitle":
     "메인 작업과 병렬로 — 떠오른 개선점을 독립 워크트리에서 빠르게",
+  "lanes.header.runningCount": "{count}개 병렬 실행 중",
   "lanes.newButton": "＋ 빠른 작업",
+
+  // 낙관적(pending) 카드 — 티켓/에이전트 doc 이 돌아오기 전 단계 표시
+  "lanes.pending.creating": "티켓 생성 중…",
+  "lanes.pending.spawning": "에이전트 스폰 · 워크트리 준비 중…",
+  "lanes.pending.dismiss": "닫기",
+
+  // 모델 셀렉터(벤더 → 구체 모델 → effort). 목록은 model-registry 파생이라
+  // 여기엔 모델 이름이 없다 — 라벨만 있다.
+  "lanes.model.vendorLabel": "프로바이더",
+  "lanes.model.modelLabel": "모델",
+  "lanes.model.effortLabel": "reasoning effort",
+  "lanes.model.effortDefault": "기본({value})",
+  "lanes.model.loading": "모델 목록 불러오는 중…",
+  "lanes.model.unavailable": "모델 목록을 불러오지 못했습니다.",
+  "lanes.model.retry": "다시 시도",
+  "lanes.model.keyRequiredBadge": "키 필요",
+  "lanes.model.missingKeys": "다음 환경변수가 필요합니다: {keys}",
+  "lanes.model.envHint": "키 미등록: {vendors} — v3/.env 에 추가하면 켜집니다.",
+  "lanes.model.estimated": "추정단가",
+  "lanes.model.estimatedTip":
+    "공식 단가를 확인하지 못해 보수적으로(높게) 잡은 값입니다.",
 
   // Empty state
   "lanes.empty.title": "진행 중인 빠른 작업이 없습니다.",
@@ -44,6 +67,7 @@ export const lanes = {
   "lanes.error.noRepoRoot":
     "프로젝트 폴더 경로가 없어 격리 워크트리를 만들 수 없습니다. 사이드바에서 프로젝트 폴더를 먼저 여세요.",
   "lanes.error.agentLimit": "에이전트 동시 실행 한도에 도달했습니다.",
+  "lanes.error.needsAuth": "{model} CLI 인증이 필요합니다: {action}",
 
   // Delete flow (multi-step, banners)
   "lanes.delete.fatalStep":

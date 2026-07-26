@@ -114,6 +114,12 @@ interface AgentAPI {
     resumeSessionId?: string,
     projectId?: string,
     taskId?: string,
+    /**
+     * 명시 모델 핀 `<modelId>[@<effort>]` — 퀵레인 모델 셀렉터가 고른 구체 모델.
+     * 생략하면 종전 동작(complexity 티어 정책 / CLI 기본 모델)이 그대로 돈다.
+     * 핀의 하네스가 `agent.model` 과 다르면 main 이 버린다(spawn 보호).
+     */
+    modelPin?: string,
   ) => Promise<{
     id: string;
     ptySessionId: string;
@@ -406,6 +412,42 @@ interface CodeAPI {
 interface ModelPresetAPI {
   get: () => Promise<string>;
   set: (preset: string) => Promise<{ success: boolean }>;
+}
+
+/**
+ * 퀵레인 모델 셀렉터가 그릴 한 칸(구체 모델). 형태는
+ * `electron/model-selection.QuickLaneModelOption` 과 같고, 값은 전부
+ * `electron/model-registry` 파생이다 — 렌더러엔 모델 id 리터럴이 없다.
+ */
+interface QuickLaneModelOption {
+  modelId: string;
+  label: string;
+  capability: "cheap" | "mid" | "top" | "frontier";
+  /** 고를 수 있는 effort(낮음→높음). 빈 배열이면 effort 드롭다운을 그리지 않는다. */
+  efforts: Array<"low" | "medium" | "high" | "xhigh">;
+  /** CLI 기본 effort(있을 때). "기본" 칸이 무엇을 뜻하는지 보여주는 힌트. */
+  defaultEffort?: string;
+  estimatedPricing: boolean;
+}
+
+/** 벤더 그룹(= 셀렉터 1단계). env-swap 벤더는 키가 없으면 available=false. */
+interface QuickLaneVendorGroup {
+  vendor: string;
+  label: string;
+  /** 스폰할 바이너리 — 에이전트 doc 의 `model` 필드가 된다. */
+  harness: string;
+  /** 에이전트 doc 의 `command` 필드. */
+  command: string;
+  /** 이 벤더에 붙는 데 필요한 env 키 **이름**(값 아님). */
+  requiredEnvKeys: string[];
+  /** 그중 이 머신에 없는 것들. 비어 있으면 available. */
+  missingEnvKeys: string[];
+  available: boolean;
+  models: QuickLaneModelOption[];
+}
+
+interface ModelsAPI {
+  quickLaneCatalog: () => Promise<QuickLaneVendorGroup[]>;
 }
 
 interface OrchestratorModelAPI {
@@ -799,6 +841,7 @@ interface ElectronAPI {
   settings: SettingsAPI;
   code: CodeAPI;
   modelPreset: ModelPresetAPI;
+  models: ModelsAPI;
   orchestratorModel: OrchestratorModelAPI;
   subscriptionPlans: SubscriptionPlansAPI;
   clipboard: ClipboardAPI;

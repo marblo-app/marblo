@@ -62,7 +62,7 @@ const tabs: Tab[] = [
   },
   {
     id: "lanes",
-    label: "Lanes",
+    label: "Quick Lanes",
     icon: (
       <svg
         className="h-4 w-4"

@@ -106,6 +106,8 @@ import {
   splitOrchestratorModelValue,
   orchestratorModelValue,
   orchestratorLaunchPin,
+  quickLaneVendorCatalog,
+  resolveModelPin,
 } from "./model-selection";
 import { getModel } from "./model-registry";
 import { CostTracker } from "./cost-tracker";
@@ -5035,11 +5037,40 @@ async function resolveLaneLaunchContext(
   }
 }
 
+/**
+ * 퀵레인 모델 셀렉터가 그릴 카탈로그 — **레지스트리 파생 + 이 프로세스의 env 판정**.
+ *
+ * 렌더러가 직접 만들 수 없는 값이 둘이라 IPC 로 내린다:
+ *   (1) 모델 사실 — `electron/model-registry.ts` 는 `src/` 에서 import 할 수 없다
+ *       (경계 규약, `src/lib/rootPathScope.ts`). 종전 오케 셀렉터는 그래서 미러
+ *       배열 + 대조 테스트로 버텼는데, 여기는 어차피 (2) 때문에 IPC 가 필요하므로
+ *       목록까지 같은 채널로 내려 **미러 자체를 없앤다**.
+ *   (2) 벤더 크레덴셜 존재 여부 — `process.env`(= v3/.env dotenv 단일소스)는 메인
+ *       프로세스에만 있다.
+ *
+ * ★값은 절대 내려보내지 않는다. 내려가는 것은 키 **이름**과 boolean 뿐이다
+ *   (model-registry 상단 규율 + 스킬의 시크릿 출력 금지).
+ */
+ipcMain.handle("models:quickLaneCatalog", () => {
+  return quickLaneVendorCatalog().map((group) => {
+    const missingEnvKeys = group.requiredEnvKeys.filter(
+      (key) => !(process.env[key] ?? "").trim(),
+    );
+    return {
+      ...group,
+      missingEnvKeys,
+      // 네이티브 벤더는 requiredEnvKeys 가 비어 있어 항상 available=true 다
+      // (CLI 로그인 여부는 별개 축이고 스폰 직전 checkSpawnAuthGate 가 본다).
+      available: missingEnvKeys.length === 0,
+    };
+  });
+});
+
 ipcMain.handle(
   "agent:launch",
   async (
     event,
-    { agent, cwd, initialPrompt, resumeSessionId, projectId, taskId },
+    { agent, cwd, initialPrompt, resumeSessionId, projectId, taskId, modelPin },
   ) => {
     // Pre-spawn auth gate (claude/codex). Block an unauthenticated spawn before
     // any worktree/PTY side effects so the CLI never boots into its login
@@ -5127,12 +5158,38 @@ ipcMain.handle(
       laneContextId && taskId
         ? withCompletionFooter(initialPrompt || "", taskId)
         : initialPrompt;
+
+    // 명시 모델 핀(`<modelId>[@<effort>]`). 퀵레인 모델 셀렉터가 보내는 축이다.
+    //
+    // ★해석은 `resolveModelPin` 이 한다 — dispatch_task(model=…) 와 **같은 함수**라
+    // claude 버전가드(미검증 CLI → 안전 폴백)와 effort 검증이 자동으로 따라온다.
+    // 하네스가 어긋난 핀(예: agent.model="claude" 인데 modelPin="gpt-5.5")은
+    // 버린다 — claude CLI 에 `--model gpt-5.5` 가 붙으면 spawn 이 깨진다.
+    const pin = modelPin ? resolveModelPin(String(modelPin)) : undefined;
+    const pinApplies = pin?.harness === agent.model;
+    if (pin && !pinApplies) {
+      console.warn("[agent:launch] 모델 핀이 하네스와 어긋나 무시", {
+        agent: agent.name,
+        agentModel: agent.model,
+        modelPin,
+        pinHarness: pin.harness,
+      });
+    }
+
     const instance = agentManager.launch({
       id: agent.id,
       name: agent.name,
       model: agent.model,
       role: agent.role,
       command: agent.command,
+      ...(pinApplies
+        ? {
+            claudeModelOverride: pin?.claudeModel,
+            codexModelOverride: pin?.codexModel,
+            codexEffortOverride: pin?.codexEffort,
+            nativeModelOverride: pin?.nativeModel,
+          }
+        : {}),
       cwd: launchCwd,
       initialPrompt: effectiveInitialPrompt,
       resumeSessionId: resolvedSessionId,

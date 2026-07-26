@@ -14,9 +14,33 @@ export const lanes: Record<keyof typeof koLanes, string> = {
   "lanes.terminal.connectBadge": "(connect)",
 
   // Header
+  "lanes.header.title": "Quick Lanes",
   "lanes.header.subtitle":
     "Parallel to your main work — knock out improvements fast in an isolated worktree",
+  "lanes.header.runningCount": "{count} running in parallel",
   "lanes.newButton": "＋ Quick task",
+
+  // Optimistic (pending) cards — stages before the task/agent docs come back
+  "lanes.pending.creating": "Creating ticket…",
+  "lanes.pending.spawning": "Spawning agent · preparing worktree…",
+  "lanes.pending.dismiss": "Dismiss",
+
+  // Model selector (vendor → concrete model → effort). The list is derived from
+  // model-registry, so no model names live here — only labels.
+  "lanes.model.vendorLabel": "Provider",
+  "lanes.model.modelLabel": "Model",
+  "lanes.model.effortLabel": "Reasoning effort",
+  "lanes.model.effortDefault": "Default ({value})",
+  "lanes.model.loading": "Loading models…",
+  "lanes.model.unavailable": "Could not load the model list.",
+  "lanes.model.retry": "Retry",
+  "lanes.model.keyRequiredBadge": "key needed",
+  "lanes.model.missingKeys": "Requires these env vars: {keys}",
+  "lanes.model.envHint":
+    "No key yet: {vendors} — add them to v3/.env to enable.",
+  "lanes.model.estimated": "est. price",
+  "lanes.model.estimatedTip":
+    "Official pricing unconfirmed — held conservatively high.",
 
   // Empty state
   "lanes.empty.title": "No quick tasks in progress.",
@@ -44,6 +68,7 @@ export const lanes: Record<keyof typeof koLanes, string> = {
   "lanes.error.noRepoRoot":
     "No project folder path, so an isolated worktree can't be created. Open the project folder from the sidebar first.",
   "lanes.error.agentLimit": "Reached the concurrent agent limit.",
+  "lanes.error.needsAuth": "{model} CLI needs authentication: {action}",
 
   // Delete flow (multi-step, banners)
   "lanes.delete.fatalStep":
