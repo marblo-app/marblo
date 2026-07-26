@@ -15,7 +15,7 @@
  *      (이 파일이 컴파일된다는 사실 자체가 축이 둘이라는 증거다: 축이 하나였다면
  *      `provider: "zai"` 가 타입에러였다.)
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import os from "os";
 import fs from "fs";
 import path from "path";
@@ -59,7 +59,46 @@ const NATIVE_ROWS = MODEL_REGISTRY.filter(
   (m) => m.provider === HARNESS_NATIVE_VENDOR[m.harness],
 );
 
+/**
+ * ★스폰 env 의 **키 집합**은 ambient `process.env` 파생이다 — getMCPServerEnv 는
+ * MARBLO_BRIDGE_PORT / MARBLO_BRIDGE_TOKEN / MARBLO_FIREBASE_CUSTOM_TOKEN /
+ * MARBLO_PROJECT / (VITE_)FIREBASE_* 를 "있으면 전달" 하기 때문이다. 즉 골든
+ * 키집합 단언을 ambient 에 맡기면 실행 머신(로컬 Electron 세션 vs CI 컨테이너)에
+ * 따라 통과/실패가 갈린다 — 회귀가 아닌데 빨개지는 전형적 플랩.
+ *
+ * 그래서 키집합에 영향을 주는 env 를 전부 못박는다: 골든 목록에 있는 키는 값을
+ * 주입하고, 없는 키(비-VITE FIREBASE_*)는 명시적으로 제거한다. 값 자체는 의미가
+ * 없고(단언 대상이 아님) 시크릿도 아닌 자리표시자다.
+ */
+const STUBBED_ENV: Record<string, string | undefined> = {
+  // 골든 키집합에 포함 — 반드시 존재해야 한다.
+  MARBLO_BRIDGE_PORT: "34567",
+  MARBLO_BRIDGE_TOKEN: "test-bridge-token",
+  MARBLO_FIREBASE_CUSTOM_TOKEN: "test-custom-token",
+  MARBLO_PROJECT: "test-project",
+  VITE_FIREBASE_API_KEY: "test-api-key",
+  VITE_FIREBASE_AUTH_DOMAIN: "test.firebaseapp.com",
+  VITE_FIREBASE_PROJECT_ID: "test-project",
+  VITE_FIREBASE_STORAGE_BUCKET: "test.appspot.com",
+  VITE_FIREBASE_MESSAGING_SENDER_ID: "0",
+  VITE_FIREBASE_APP_ID: "1:0:web:0",
+  // 골든 키집합에 없음 — 머신에 깔려 있어도 새 키로 새어 들어오지 못하게 제거.
+  FIREBASE_API_KEY: undefined,
+  FIREBASE_AUTH_DOMAIN: undefined,
+  FIREBASE_PROJECT_ID: undefined,
+  FIREBASE_STORAGE_BUCKET: undefined,
+  FIREBASE_MESSAGING_SENDER_ID: undefined,
+  FIREBASE_APP_ID: undefined,
+};
+
+beforeEach(() => {
+  for (const [key, value] of Object.entries(STUBBED_ENV)) {
+    vi.stubEnv(key, value as string);
+  }
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 

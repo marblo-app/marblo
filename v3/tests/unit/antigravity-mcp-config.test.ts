@@ -1,8 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as nodeOs from "node:os";
 import * as path from "node:path";
-import { AgentConfigGenerator } from "../../electron/agent-config";
+import {
+  AgentConfigGenerator,
+  resolveNodeBinary,
+} from "../../electron/agent-config";
 
 interface McpConfig {
   mcpServers?: Record<
@@ -22,30 +25,18 @@ function readConfig(filePath: string): McpConfig {
 
 describe("AgentConfigGenerator — Antigravity MCP config", () => {
   let tmpHome: string;
-  let savedBridgePort: string | undefined;
-  let savedAgyConfigHome: string | undefined;
 
+  // 생성되는 MCP env 는 ambient process.env 파생이다(getMCPServerEnv). 손으로
+  // 저장/복구하면 실패한 테스트가 프로세스 env 를 오염시킨 채 끝나 뒤 테스트가
+  // 머신마다 다르게 깨진다 — vi.stubEnv/unstubAllEnvs 로 결정론화한다.
   beforeEach(() => {
-    tmpHome = fs.mkdtempSync(
-      path.join(nodeOs.tmpdir(), "marblo-agy-home-"),
-    );
-    savedBridgePort = process.env.MARBLO_BRIDGE_PORT;
-    savedAgyConfigHome = process.env.MARBLO_AGY_CONFIG_HOME;
-    process.env.MARBLO_BRIDGE_PORT = "34567";
-    process.env.MARBLO_AGY_CONFIG_HOME = tmpHome;
+    tmpHome = fs.mkdtempSync(path.join(nodeOs.tmpdir(), "marblo-agy-home-"));
+    vi.stubEnv("MARBLO_BRIDGE_PORT", "34567");
+    vi.stubEnv("MARBLO_AGY_CONFIG_HOME", tmpHome);
   });
 
   afterEach(() => {
-    if (savedBridgePort === undefined) {
-      delete process.env.MARBLO_BRIDGE_PORT;
-    } else {
-      process.env.MARBLO_BRIDGE_PORT = savedBridgePort;
-    }
-    if (savedAgyConfigHome === undefined) {
-      delete process.env.MARBLO_AGY_CONFIG_HOME;
-    } else {
-      process.env.MARBLO_AGY_CONFIG_HOME = savedAgyConfigHome;
-    }
+    vi.unstubAllEnvs();
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
@@ -95,20 +86,28 @@ describe("AgentConfigGenerator — Antigravity MCP config", () => {
     expect(shared.mcpServers?.existing?.command).toBe("existing-shared");
     expect(legacy.mcpServers?.legacy?.command).toBe("existing-legacy");
 
+    // command 는 더이상 PATH 의존 "node" 가 아니라 resolveNodeBinary() 가 고른
+    // **검증된 절대경로**다(PATH 첫 node 가 깨진 바이너리인 사고 이후). 경로 값
+    // 자체는 머신마다 다르므로 리터럴로 박지 않고 같은 리졸버로 기대값을 만든다.
+    const resolvedNode = resolveNodeBinary();
+
     for (const cfg of [shared, legacy]) {
       const marblo = cfg.mcpServers?.marblo;
-      expect(marblo?.command).toBe("node");
+      expect(marblo?.command).toBe(resolvedNode.command);
+      expect(path.isAbsolute(marblo?.command ?? "")).toBe(true);
+      expect(marblo?.command).not.toBe("node"); // bare PATH 조회로 회귀 금지
       expect(marblo?.args?.[0]).toContain("dist-mcp");
       expect(marblo?.env?.MARBLO_AGENT_ID).toBe("agent-agy-1");
       expect(marblo?.env?.MARBLO_PROJECT).toBe("project-1");
       expect(marblo?.env?.MARBLO_CONTEXT).toBe("board");
       expect(marblo?.env?.MARBLO_BRIDGE_PORT).toBe("34567");
-      expect(marblo?.env?.PATH).toContain(".local/bin");
+      // 홈 경로·구분자는 플랫폼/머신마다 다르므로 리터럴 대신 조립해서 비교.
+      expect(marblo?.env?.PATH).toContain(
+        path.join(nodeOs.homedir(), ".local", "bin"),
+      );
     }
 
-    const sentinel = JSON.parse(
-      fs.readFileSync(sentinelPath, "utf-8"),
-    ) as {
+    const sentinel = JSON.parse(fs.readFileSync(sentinelPath, "utf-8")) as {
       globalConfigPath: string;
       globalConfigPaths: string[];
       mergeFailed: boolean;

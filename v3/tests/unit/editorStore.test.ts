@@ -21,6 +21,14 @@ const { useEditorStore } = await import("../../src/stores/editorStore");
  * 수정(ref-to-latest)은 CodeEditor.tsx 에서 이뤄진다.
  */
 
+/**
+ * preload 의 fs 브리지는 rootPath 를 첫 인자로 받는다(electron/preload.ts):
+ *   readFile(rootPath, filePath) / writeFile(rootPath, filePath, content)
+ * store 는 `get().rootPath ?? ""` 를 그대로 앞에 붙여 넘긴다 — 목도 같은 arity 로
+ * 둬서 "인자 순서가 밀렸는데 테스트는 통과" 를 막는다.
+ */
+const ROOT = "/repo";
+
 type FsMock = {
   readFile: ReturnType<typeof vi.fn>;
   writeFile: ReturnType<typeof vi.fn>;
@@ -28,7 +36,10 @@ type FsMock = {
 
 function installFs(): FsMock {
   const fs: FsMock = {
-    readFile: vi.fn(async (p: string) => `content-of:${p}`),
+    readFile: vi.fn(
+      async (rootPath: string, filePath: string) =>
+        `content-of:${rootPath}:${filePath}`,
+    ),
     writeFile: vi.fn(async () => undefined),
   };
   (window as unknown as { electronAPI: { fs: FsMock } }).electronAPI = { fs };
@@ -37,7 +48,7 @@ function installFs(): FsMock {
 
 beforeEach(() => {
   useEditorStore.setState({
-    rootPath: null,
+    rootPath: ROOT,
     openFiles: [],
     activeFilePath: null,
     showDiff: false,
@@ -58,6 +69,7 @@ describe("editorStore.saveFile — 데이터 유실 재현", () => {
     // 파일 A 열고, 이어서 .env 열기
     await store().openFile("/repo/a.ts");
     await store().openFile("/repo/.env");
+    expect(fs.readFile).toHaveBeenCalledWith(ROOT, "/repo/a.ts");
 
     // 화면(.env)을 편집 → .env 만 isModified=true
     store().updateContent("/repo/.env", "SECRET=edited");
@@ -84,7 +96,11 @@ describe("editorStore.saveFile — 데이터 유실 재현", () => {
     // 수정본은 올바른 경로로 저장 (fix 후 Cmd+S 가 하는 일)
     await store().saveFile("/repo/.env");
 
-    expect(fs.writeFile).toHaveBeenCalledWith("/repo/.env", "SECRET=edited");
+    expect(fs.writeFile).toHaveBeenCalledWith(
+      ROOT,
+      "/repo/.env",
+      "SECRET=edited",
+    );
     const env = store().openFiles.find((f) => f.path === "/repo/.env");
     expect(env?.isModified).toBe(false);
     expect(env?.originalContent).toBe("SECRET=edited");
@@ -125,7 +141,7 @@ describe("editorStore.saveFile — 저장 실패 표시", () => {
     store().updateContent("/repo/.env", "v2");
     await store().saveFile("/repo/.env");
     expect(store().saveError).toBeNull();
-    expect(fs.writeFile).toHaveBeenLastCalledWith("/repo/.env", "v2");
+    expect(fs.writeFile).toHaveBeenLastCalledWith(ROOT, "/repo/.env", "v2");
   });
 
   it("clearSaveError 로 수동 해제할 수 있다", async () => {

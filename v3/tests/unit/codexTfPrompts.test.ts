@@ -19,27 +19,32 @@ describe("Codex /tf prompt installation", () => {
 
       const codexHome = cfg.env.CODEX_HOME;
       expect(codexHome).toBeTruthy();
-      expect(fs.existsSync(path.join(codexHome, "prompts", "tf-start.md"))).toBe(
-        true,
-      );
-      expect(fs.existsSync(path.join(codexHome, "prompts", "tf-status.md"))).toBe(
-        true,
-      );
+      expect(
+        fs.existsSync(path.join(codexHome, "prompts", "tf-start.md")),
+      ).toBe(true);
+      expect(
+        fs.existsSync(path.join(codexHome, "prompts", "tf-status.md")),
+      ).toBe(true);
 
       const startPrompt = fs.readFileSync(
         path.join(codexHome, "prompts", "tf-start.md"),
         "utf-8",
       );
+      // frontmatter + Codex 전용 헤더. 헤더 문구는 codexTfPromptOverride 의
+      // `# Marblo /${name} for Codex` 에서 온다.
       expect(startPrompt).toContain("description:");
-      expect(startPrompt).toContain("Marblo /tf-start workflow");
+      expect(startPrompt).toContain("# Marblo /tf-start for Codex");
       expect(startPrompt).toContain("create_tasks_bulk");
       expect(startPrompt).toContain("$ARGUMENTS");
     } finally {
       generator.cleanup(agentId);
-      fs.rmSync(path.join(os.tmpdir(), "marblo-agent-configs", `codex-home-${agentId}`), {
-        recursive: true,
-        force: true,
-      });
+      fs.rmSync(
+        path.join(os.tmpdir(), "marblo-agent-configs", `codex-home-${agentId}`),
+        {
+          recursive: true,
+          force: true,
+        },
+      );
     }
   });
 });
