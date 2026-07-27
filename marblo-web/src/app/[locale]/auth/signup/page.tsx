@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { sendVerification } from "@/lib/emailVerification";
 import PrivacyConsentFields from "@/components/PrivacyConsentFields";
 import {
   saveConsent,
@@ -52,7 +53,18 @@ export default function SignupPage() {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       // 계정 생성 직후 동의를 저장 — Gate 모달이 다시 뜨지 않도록.
       await saveConsent(cred.user.uid, consent, locale as ConsentLocale);
-      router.push(`/${locale}`);
+      // 인증 메일 발송 — email/password 계정은 이 경로가 없으면 email_verified 를
+      // 영원히 못 얻고, 파운더 설문(submitFounderFeedback)이 계속 거절된다.
+      // 발송 실패는 가입 자체를 되돌릴 이유가 아니다(계정은 이미 생성됨).
+      // /auth/verify 에 재발송 버튼이 있으니 그쪽으로 보내고 거기서 복구시킨다.
+      let sent = false;
+      try {
+        await sendVerification(cred.user, { locale });
+        sent = true;
+      } catch {
+        // 무시 — verify 페이지가 '보내기' 상태로 열린다.
+      }
+      router.push(`/${locale}/auth/verify${sent ? "?sent=1" : ""}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);

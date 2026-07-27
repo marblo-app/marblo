@@ -490,7 +490,10 @@
     "error_already_submitted": "You've already submitted the survey.",
     "error_deadline": "The survey submission window has passed. If you need help, contact team@marblo.app.",
     "error_invalid": "Please check your input and make sure every question is filled in.",
-    "error_network": "Please try again in a moment."
+    "error_network": "Please try again in a moment.",
+    "verify_title": "Email verification required",
+    "verify_body": "Only verified email addresses can submit — that is what keeps the free Pro grant from being farmed on addresses nobody owns. Verify yours and this form unlocks right here; anything you have typed is kept.",
+    "submit_locked": "Verify your email to submit"
   },
   "auth": {
     "login": "Login",
@@ -508,6 +511,30 @@
     "passwordMismatch": "Passwords do not match.",
     "ageConfirm": "[Required] I am 14 years of age or older.",
     "ageRequired": "You must be at least 14 years old to sign up."
+  },
+  "emailVerify": {
+    "title": "Verify your email",
+    "sent_to": "We sent a verification link to {email}.",
+    "not_sent_yet": "Send a verification link to {email} to activate your account.",
+    "body": "Open that email and click the link. It comes from Marblo — if it is not in your inbox within a minute, check your spam or promotions folder.",
+    "send": "Send verification email",
+    "resend": "Resend email",
+    "sending": "Sending…",
+    "sent_ok": "Verification email sent. Check your inbox.",
+    "resend_wait": "You can send another in {seconds}s",
+    "refresh": "I clicked the link — check again",
+    "refreshing": "Checking…",
+    "still_unverified": "Not verified yet. Click the link in the email first, then check again.",
+    "verified_title": "Email verified",
+    "verified_body": "Your email is verified. You can submit the founder survey and claim your free Pro now.",
+    "continue": "Continue",
+    "signed_out_title": "Sign in to verify",
+    "signed_out_body": "Log in with the account you signed up with and we will send the verification link.",
+    "login": "Log in",
+    "error_too_many": "Too many requests. Wait a few minutes before asking for another email.",
+    "error_network": "Network error. Check your connection and try again.",
+    "error_session": "Your session expired. Log in again and retry.",
+    "error_generic": "We could not send the verification email. Please try again in a moment."
   },
   "checkout": {
     "title": "Checkout",
