@@ -32,6 +32,8 @@ import {
   type UnmatchedPricingEvent,
 } from "../../electron/cost-tracker";
 import { MODEL_REGISTRY, getModel } from "../../electron/model-registry";
+import { grokSessionsDir } from "../../electron/agent-config";
+import path from "path";
 
 const SONNET_RATE = { inputPer1M: 3, outputPer1M: 15 };
 const ZERO_RATE = { inputPer1M: 0, outputPer1M: 0 };
@@ -297,27 +299,63 @@ describe("★(b) 미매칭 가시화 — warn 로그 + 텔레메트리 카운터
   });
 
   // ── 인접 고스트 비용: 남의 토큰을 내 것으로 청구하는 경로 ─────────────
-  it("★grok/custom 은 ~/.claude JSONL 리더로 새지 않는다(교차귀속 방지)", () => {
-    // grok 은 자기 GROK_HOME 아래 자기 바이너리로 돈다 — ~/.claude/projects 에
-    // JSONL 을 쓰지 않는다. 종전엔 claude 분기로 흘러들었고, sessionId 가 null 인
+  it("★custom 은 ~/.claude JSONL 리더로 새지 않는다(교차귀속 방지)", () => {
+    // custom 은 세션 포맷을 모르는 하네스다 — ~/.claude/projects 에 JSONL 을
+    // 쓰지 않는다. 종전엔 claude 분기로 흘러들었고, sessionId 가 null 인
     // 재접속 경로(main.ts --continue)에서는 "프로젝트 디렉토리의 최신 JSONL" 을
     // 집었다 = **다른 에이전트의 실제 Anthropic 세션**. 틀린 요율보다 나쁘다:
     // 진짜 돈이 두 번 청구된다.
     const emitted: string[] = [];
     const tracker = new CostTracker((agentId) => emitted.push(agentId));
 
-    for (const model of ["grok", "custom"]) {
-      tracker.trackSession(`agent-${model}`, process.cwd(), null, model);
-      // 트래커가 아예 안 생겨야 한다 — 생겼다면 15s 폴러가 남의 파일을 읽는다.
-      expect(
-        (tracker as unknown as { sessions: Map<string, unknown> }).sessions.has(
-          `agent-${model}`,
-        ),
-        model,
-      ).toBe(false);
-    }
+    tracker.trackSession("agent-custom", process.cwd(), null, "custom");
+    // 트래커가 아예 안 생겨야 한다 — 생겼다면 15s 폴러가 남의 파일을 읽는다.
+    expect(
+      (tracker as unknown as { sessions: Map<string, unknown> }).sessions.has(
+        "agent-custom",
+      ),
+    ).toBe(false);
     expect(emitted).toEqual([]);
     tracker.clearAll();
+  });
+
+  it("★grok 은 추적하되 읽는 곳은 자기 GROK_HOME 이다(claude 트리 미접촉)", () => {
+    // grok 은 이제 **추적된다** — 자기 GROK_HOME 아래 updates.jsonl 에 실제
+    // per-prompt usage 를 쓰기 때문이다(session-parsers.grokLineUsage). 다만
+    // 위 교차귀속 사고를 되풀이하지 않는 게 조건이다: searchRoot 가 grok 자기
+    // 홈이어야 하고, ~/.claude 근처면 안 된다. 포맷도 grok 이어야 한다 —
+    // claude 포맷이면 account-global rate-limit 프로브까지 딸려 켜진다.
+    const tracker = new CostTracker(() => {});
+    tracker.trackSession("agent-grok", process.cwd(), null, "grok");
+
+    const sessions = (
+      tracker as unknown as {
+        sessions: Map<string, { format: string; searchRoot: string }>;
+      }
+    ).sessions;
+    const t = sessions.get("agent-grok");
+    expect(t).toBeDefined();
+    expect(t!.format).toBe("grok");
+    expect(t!.searchRoot).toBe(grokSessionsDir("agent-grok"));
+    expect(t!.searchRoot).toContain("grok-home-agent-grok");
+    expect(t!.searchRoot).not.toContain(path.join(".claude", "projects"));
+    tracker.clearAll();
+  });
+
+  it("★grok 서버측 변종 id(grok-4.5-build)는 grok-4.5 행으로 청구된다", () => {
+    // grok 의 turn_completed.modelUsage 키는 우리가 핀한 id 가 아니라 **서버가
+    // 실제로 서빙한 이름**이다(라이브 관측: `grok-4.5-build`). 이 id 가 단가표에
+    // 안 걸리면 새로 붙인 grok 토큰이 전부 $0 로 적재되고 15s 폴러가 warn 을
+    // 쏟는다. 최장-프리픽스가 grok-4.5 행으로 접어주는 게 그 방지선이다.
+    const r = resolvePerTokenRate("grok-4.5-build");
+    expect(r.matched).toBe(true);
+    expect(r.matchedKey).toBe("grok-4.5");
+    const row = getModel("grok-4.5")!.pricing;
+    expect(r.rate).toEqual({
+      inputPer1M: row.inputPer1M,
+      outputPer1M: row.outputPer1M,
+    });
+    expect(unmatchedPricingCounters()).toEqual({});
   });
 
   it("알려진 모델은 카운터를 오염시키지 않는다", () => {

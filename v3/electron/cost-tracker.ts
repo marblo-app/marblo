@@ -14,6 +14,7 @@ import { encodeClaudeProjectDir } from "./claude-paths";
 import {
   codexSessionsDir,
   geminiTmpDir,
+  grokSessionsDir,
   resolveClaudeBinary,
 } from "./agent-config";
 import { getModel, registryPricing } from "./model-registry";
@@ -684,9 +685,19 @@ export class CostTracker {
       this.stopSession(agentId);
     }
 
-    // Codex / Gemini: file-based tracking from the per-agent CLI home dir.
-    // These never resolve to a ~/.claude path, so route them out early.
-    if (model === "gpt" || model === "gemini") {
+    // Codex / Gemini / Grok: file-based tracking from the per-agent CLI home
+    // dir. These never resolve to a ~/.claude path, so route them out early.
+    //
+    // ★`grok` used to be dropped by the skip branch below instead, on the
+    // (correct) ground that it writes no ~/.claude JSONL. The cost of that was
+    // total invisibility: 0 cost_logs rows, so grok work showed up in
+    // task_outcomes as done but in the Usage tab / KG / BigQuery as if it had
+    // spent nothing. The xAI CLI does report per-prompt usage after all — in
+    // its ACP `updates.jsonl` under the isolated GROK_HOME, see `grokLineUsage`
+    // in session-parsers.ts — so it belongs on this path, reading only its own
+    // home. (Being tracked also stops the PTY scraper from inventing
+    // model:"unknown" rows off grok's terminal output.)
+    if (model === "gpt" || model === "gemini" || model === "grok") {
       this.trackCliSession(agentId, model);
       return;
     }
@@ -702,9 +713,6 @@ export class CostTracker {
     // ★Harnesses that do NOT write a ~/.claude JSONL must not fall through to
     // the claude reader below (ghost cost, adjacent to the P1 pricing fix).
     //
-    //   - `grok` spawns the xAI `grok` binary under its own GROK_HOME
-    //     (agent-config buildCLICommand case "grok"); it never touches
-    //     ~/.claude/projects.
     //   - `custom` has no known session format at all — session-parsers'
     //     `formatForModel` already documents that these fall back to PTY
     //     parsing.
@@ -720,7 +728,7 @@ export class CostTracker {
     // Not tracking is the honest outcome: PTY parsing still runs for these
     // (processOutput skips only agents with a live tracker), so a CLI that
     // prints its own cost is still captured.
-    if (model === "grok" || model === "custom") {
+    if (model === "custom") {
       console.log(
         `[CostTracker] agent=${agentId} model=${model} writes no ~/.claude ` +
           `JSONL — skipping file tracking (PTY fallback still applies). ` +
@@ -872,23 +880,31 @@ export class CostTracker {
   }
 
   /**
-   * Start file-based tracking for a Codex (gpt) or Gemini agent. Unlike the
-   * Claude path, the session file may not exist yet at launch — the poller
+   * Start file-based tracking for a Codex (gpt), Gemini or Grok agent. Unlike
+   * the Claude path, the session file may not exist yet at launch — the poller
    * re-resolves the newest session file under the per-agent CLI home on every
    * tick, so it picks the file up as soon as the CLI writes it. No data is
    * lost: the file persists, and a reconnect re-scans it from scratch.
    *
    *   Codex:  <CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl
    *   Gemini: <GEMINI_CLI_HOME>/.gemini/tmp/<hash>/chats/session-*.jsonl
+   *   Grok:   <GROK_HOME>/sessions/<url-encoded-cwd>/<session-uuid>/updates.jsonl
    */
-  private trackCliSession(agentId: string, model: "gpt" | "gemini"): void {
+  private trackCliSession(
+    agentId: string,
+    model: "gpt" | "gemini" | "grok",
+  ): void {
     // SSOT: model→session-format mapping lives in session-parsers.formatForModel.
-    // `model` is narrowed to "gpt" | "gemini" here, so it always maps to a
-    // concrete format ("codex" | "gemini") — never the null (antigravity/custom)
-    // branch — hence the non-null assertion.
+    // `model` is narrowed to "gpt" | "gemini" | "grok" here, so it always maps
+    // to a concrete format ("codex" | "gemini" | "grok") — never the null
+    // (antigravity/custom) branch — hence the non-null assertion.
     const format: SessionFormat = formatForModel(model)!;
     const searchRoot =
-      format === "codex" ? codexSessionsDir(agentId) : geminiTmpDir(agentId);
+      format === "codex"
+        ? codexSessionsDir(agentId)
+        : format === "grok"
+          ? grokSessionsDir(agentId)
+          : geminiTmpDir(agentId);
 
     const tracker: SessionTracker = {
       agentId,
@@ -897,8 +913,16 @@ export class CostTracker {
       searchRoot,
       state: newParseState(),
       accumulated: { ...ZERO_TOTALS },
-      // Best-guess default until the session records its real model id.
-      model: format === "codex" ? "gpt-5.5" : "gemini-2.5-pro",
+      // Best-guess default until the session records its real model id. For
+      // grok this is also the id we pin at spawn (agent-config
+      // GROK_DEFAULT_MODEL), so a turn without a `modelUsage` breakdown still
+      // prices against a registry row instead of counting as unmatched.
+      model:
+        format === "codex"
+          ? "gpt-5.5"
+          : format === "grok"
+            ? "grok-4.5"
+            : "gemini-2.5-pro",
       totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
@@ -1059,6 +1083,14 @@ export class CostTracker {
       for (const entry of entries) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
+          // ★grok nests a full child session dir per subagent under
+          // `<session>/subagents/`, each with its own updates.jsonl. The
+          // PARENT's turn_completed usage already includes every subagent that
+          // finished inside the turn (vendor doc, headless-mode §Usage notes),
+          // so descending here would double-count that spend — and the newest
+          // file in the tree is often the subagent's, which would also make
+          // the tracker hop off the real session mid-run.
+          if (tracker.format === "grok" && entry.name === "subagents") continue;
           stack.push(full);
           continue;
         }
@@ -1066,8 +1098,10 @@ export class CostTracker {
         const matches =
           tracker.format === "codex"
             ? entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")
-            : entry.name.startsWith("session-") &&
-              entry.name.endsWith(".jsonl");
+            : tracker.format === "grok"
+              ? entry.name === "updates.jsonl"
+              : entry.name.startsWith("session-") &&
+                entry.name.endsWith(".jsonl");
         if (!matches) continue;
         let mtime: number;
         try {

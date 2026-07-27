@@ -16,6 +16,10 @@
  *              cumulative and emit the difference. `total = input + output`,
  *              so `reasoning_output_tokens` is already inside `output_tokens`;
  *              `cached_input_tokens` is a subset of `input_tokens`.
+ *   - grok   : ACP `session/update` stream (`updates.jsonl`); the
+ *              `turn_completed` update carries `usage` for THAT PROMPT — SUM
+ *              across turns, same as claude. See `grokLineUsage` for the
+ *              vendor-documented field policy.
  *
  * In every format we normalise to the same shape as the Claude path:
  *   input     = billable prompt tokens, cache EXCLUDED
@@ -24,7 +28,7 @@
  *   cacheWrite= cache-creation tokens (only Claude reports these)
  */
 
-export type SessionFormat = "claude" | "codex" | "gemini";
+export type SessionFormat = "claude" | "codex" | "gemini" | "grok";
 
 export interface TokenTotals {
   input: number;
@@ -95,6 +99,8 @@ export function formatForModel(
       return "codex";
     case "gemini":
       return "gemini";
+    case "grok":
+      return "grok";
     default:
       return null;
   }
@@ -110,6 +116,8 @@ export function parseSessionDelta(
       return parseLineSummed(lines, state, claudeLineUsage);
     case "gemini":
       return parseLineSummed(lines, state, geminiLineUsage);
+    case "grok":
+      return parseLineSummed(lines, state, grokLineUsage);
     case "codex":
       return parseCodexCumulative(lines, state);
   }
@@ -272,6 +280,117 @@ function geminiLineUsage(entry: unknown): ReturnType<LineUsage> {
     },
     model: e.model ?? null,
   };
+}
+
+/**
+ * Grok Build (xAI native harness) — `<GROK_HOME>/sessions/<encoded-cwd>/
+ * <session-id>/updates.jsonl`, the ACP session-update stream.
+ *
+ * The only billable-token record in the whole session tree is the
+ * `turn_completed` update:
+ *
+ *   {"timestamp":…, "method":"session/update", "params":{"sessionId":…,
+ *     "update":{"sessionUpdate":"turn_completed", "prompt_id":…,
+ *       "stop_reason":"end_turn",
+ *       "usage":{"inputTokens":1325602,"outputTokens":13590,
+ *                "totalTokens":1339192,"cachedReadTokens":1194752,
+ *                "reasoningTokens":3167,"modelCalls":16,
+ *                "costUsdTicks":7016656000,
+ *                "modelUsage":{"grok-4.5-build":{…}},"numTurns":16}}}}
+ *
+ * ★Field policy is the vendor's, not our inference — grok ships its own docs
+ * at `<GROK_HOME>/docs/user-guide/14-headless-mode.md`, and the live sessions
+ * on this machine arithmetically agree with them:
+ *
+ *   - `usage` sums ONE PROMPT (subagents that finished inside it included),
+ *     not the session. So turn_completed records are deltas → SUM them.
+ *     That is why this rides `parseLineSummed` and not the codex
+ *     cumulative-watermark path; summing a cumulative stream, or diffing a
+ *     per-prompt one, would both be wrong by orders of magnitude.
+ *   - the ACP `usage.inputTokens` is the FULL prompt input, cache INCLUDED
+ *     ("only the headless projector subtracts cache"). Verified:
+ *     inputTokens + outputTokens === totalTokens, and cachedReadTokens is a
+ *     subset of inputTokens. We bill the uncached remainder, matching every
+ *     other format in this file.
+ *   - `reasoningTokens` ⊆ `outputTokens` (the doc's own example arithmetic:
+ *     total = input + cache_read + output, with reasoning left out). Adding
+ *     it — as the gemini path must for `thoughts` — would double-count.
+ *   - grok reports no cache-CREATION tokens, so `cacheWrite` stays 0.
+ *
+ * Two shapes we must survive, both observed live:
+ *   - a turn that never reached the model (`stop_reason:"error"`, e.g. the 401
+ *     from the auth-propagation bug) carries NO `usage` key at all → null.
+ *   - `_meta.totalTokens` on `agent_thought_chunk` lines is CONTEXT-window
+ *     occupancy, not billable spend. Matching only `turn_completed` keeps it
+ *     out; never widen this to any line with a token-ish field.
+ *
+ * ★`costUsdTicks` (1 USD = 10^10 ticks) is deliberately NOT read here. It is
+ * the vendor's exact stamped cost and would beat our estimated `grok-4.5`
+ * rate — but it only appears when the server reported a COMPLETE cost, which
+ * on the subscription/OAuth path it usually does not (`costIsPartial`, or the
+ * field simply absent). Mixing a sometimes-present vendor bill with a
+ * sometimes-computed one would make cost_logs mean two different things per
+ * row, and plumbing it end-to-end needs a cost_logs schema column. Cost stays
+ * on the existing pricing path; tokens — which is what was missing — land now.
+ *
+ * Model attribution: `modelUsage` is keyed by the model the server actually
+ * served (`grok-4.5`, `grok-4.5-build`, …) and a single prompt may span more
+ * than one. `CostEntry` carries one model id, so we report the key with the
+ * most tokens; the pricing table resolves `grok-4.5-build` onto the
+ * `grok-4.5` registry row by longest-prefix, so a build-variant turn is
+ * priced, not billed at 0.
+ */
+function grokLineUsage(entry: unknown): ReturnType<LineUsage> {
+  const e = entry as {
+    params?: {
+      update?: {
+        sessionUpdate?: string;
+        usage?: Record<string, unknown> | null;
+      } | null;
+    } | null;
+  };
+  const update = e?.params?.update;
+  if (update?.sessionUpdate !== "turn_completed") return null;
+  const u = update.usage;
+  if (!u || typeof u !== "object") return null; // errored turn — no spend
+
+  const inputTokens = num(u.inputTokens);
+  const cached = num(u.cachedReadTokens);
+  return {
+    usage: {
+      // `inputTokens` includes cache reads; bill the remainder.
+      input: Math.max(0, inputTokens - cached),
+      // reasoning is already inside output — do NOT add reasoningTokens.
+      output: num(u.outputTokens),
+      cacheRead: cached,
+      cacheWrite: 0,
+    },
+    model: dominantGrokModel(u.modelUsage),
+  };
+}
+
+/**
+ * Pick the `modelUsage` key that accounts for the most tokens in this turn.
+ * Ties keep the first key seen, so attribution is deterministic across polls.
+ * Returns null when the turn carries no per-model breakdown — the caller then
+ * keeps whatever model it already knew rather than inventing one.
+ */
+function dominantGrokModel(modelUsage: unknown): string | null {
+  if (!modelUsage || typeof modelUsage !== "object") return null;
+  let best: string | null = null;
+  let bestTokens = -1;
+  for (const [id, raw] of Object.entries(
+    modelUsage as Record<string, unknown>,
+  )) {
+    const row = (raw ?? {}) as Record<string, unknown>;
+    const tokens =
+      num(row.totalTokens) || num(row.inputTokens) + num(row.outputTokens);
+    if (tokens > bestTokens) {
+      best = id;
+      bestTokens = tokens;
+    }
+  }
+  return best;
 }
 
 // ── Cumulative format (codex) ───────────────────────────────────────────

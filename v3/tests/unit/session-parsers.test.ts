@@ -10,6 +10,7 @@ describe("formatForModel", () => {
     expect(formatForModel("claude")).toBe("claude");
     expect(formatForModel("gpt")).toBe("codex");
     expect(formatForModel("gemini")).toBe("gemini");
+    expect(formatForModel("grok")).toBe("grok");
   });
 
   it("returns null for formats without a JSONL parser", () => {
@@ -323,5 +324,180 @@ describe("parseSessionDelta — gemini", () => {
       cacheRead: 14177,
       cacheWrite: 0,
     });
+  });
+});
+
+describe("parseSessionDelta — grok (ACP updates.jsonl)", () => {
+  // Every fixture below is a verbatim shape captured from a real
+  // <GROK_HOME>/sessions/**/updates.jsonl written by grok Build 0.2.112 on
+  // this machine — not an invented schema.
+  const turnCompleted = (
+    usage: Record<string, unknown> | null,
+    stopReason = "end_turn",
+  ) =>
+    JSON.stringify({
+      timestamp: 1785126570,
+      method: "session/update",
+      params: {
+        sessionId: "019fa278-6105-77a0-ba4e-a094dbab06e8",
+        update: {
+          sessionUpdate: "turn_completed",
+          prompt_id: "7501779a-e28c-4080-a35c-89f6097b33a3",
+          stop_reason: stopReason,
+          ...(usage ? { usage } : {}),
+        },
+      },
+    });
+
+  // ★_meta.totalTokens here is CONTEXT-window occupancy, not billable spend.
+  const thoughtChunk = JSON.stringify({
+    timestamp: 1785126570,
+    method: "session/update",
+    params: {
+      sessionId: "s",
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "thinking..." },
+      },
+    },
+    _meta: { totalTokens: 17579, updateType: "AgentThoughtChunk" },
+  });
+
+  const toolCall = JSON.stringify({
+    method: "session/update",
+    params: { sessionId: "s", update: { sessionUpdate: "tool_call" } },
+  });
+
+  it("sums per-prompt usage, splitting cache out of the ACP full input", () => {
+    const lines = [
+      thoughtChunk,
+      toolCall,
+      turnCompleted({
+        inputTokens: 1325602,
+        outputTokens: 13590,
+        totalTokens: 1339192,
+        cachedReadTokens: 1194752,
+        reasoningTokens: 3167,
+        modelCalls: 16,
+        apiDurationMs: 207984,
+        costUsdTicks: 7016656000,
+        modelUsage: {
+          "grok-4.5-build": {
+            inputTokens: 1325602,
+            outputTokens: 13590,
+            totalTokens: 1339192,
+            cachedReadTokens: 1194752,
+          },
+        },
+        numTurns: 16,
+      }),
+    ];
+    const { delta, newState } = parseSessionDelta(
+      "grok",
+      lines,
+      newParseState(),
+    );
+    expect(delta).toEqual({
+      // 1325602 - 1194752 = 130850 uncached input
+      input: 130850,
+      // reasoningTokens (3167) is INSIDE outputTokens — never added on top.
+      output: 13590,
+      cacheRead: 1194752,
+      cacheWrite: 0,
+    });
+    expect(newState.model).toBe("grok-4.5-build");
+    expect(newState.lastLineCount).toBe(3);
+  });
+
+  it("treats each turn_completed as a delta and stays incremental across polls", () => {
+    const usage = (input: number, output: number, cached: number) => ({
+      inputTokens: input,
+      outputTokens: output,
+      totalTokens: input + output,
+      cachedReadTokens: cached,
+      reasoningTokens: 40,
+      modelUsage: { "grok-4.5": { inputTokens: input, outputTokens: output } },
+    });
+    const base = [turnCompleted(usage(27371, 41, 128))];
+    const first = parseSessionDelta("grok", base, newParseState());
+    expect(first.delta).toEqual({
+      input: 27243,
+      output: 41,
+      cacheRead: 128,
+      cacheWrite: 0,
+    });
+
+    // A second prompt in the SAME session. Vendor doc: `usage` sums one
+    // prompt, not the session — so this is added, not diffed. Diffing it (the
+    // codex rule) would report ~0 for a turn that really spent 28k tokens.
+    const grown = [...base, thoughtChunk, turnCompleted(usage(28084, 46, 128))];
+    const second = parseSessionDelta("grok", grown, first.newState);
+    expect(second.delta).toEqual({
+      input: 27956,
+      output: 46,
+      cacheRead: 128,
+      cacheWrite: 0,
+    });
+    expect(second.newState.cumulative.input).toBe(27243 + 27956);
+  });
+
+  it("survives an errored turn that carries no usage (observed: 401 auth failure)", () => {
+    const lines = [
+      turnCompleted(null, "error"),
+      turnCompleted({
+        inputTokens: 100,
+        outputTokens: 10,
+        totalTokens: 110,
+        cachedReadTokens: 30,
+        modelUsage: { "grok-4.5": { totalTokens: 110 } },
+      }),
+    ];
+    const { delta } = parseSessionDelta("grok", lines, newParseState());
+    expect(delta).toEqual({
+      input: 70,
+      output: 10,
+      cacheRead: 30,
+      cacheWrite: 0,
+    });
+  });
+
+  it("ignores context-window _meta.totalTokens and non-turn updates", () => {
+    const { delta, newState } = parseSessionDelta(
+      "grok",
+      [thoughtChunk, toolCall],
+      newParseState(),
+    );
+    expect(delta).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    expect(newState.model).toBeNull();
+  });
+
+  it("attributes a multi-model turn to the model with the most tokens", () => {
+    // Observed live: one prompt served partly by grok-4.5 and partly by the
+    // build variant. CostEntry carries a single model id.
+    const lines = [
+      turnCompleted({
+        inputTokens: 475618,
+        outputTokens: 2719,
+        totalTokens: 478337,
+        cachedReadTokens: 286464,
+        costIsPartial: true,
+        modelUsage: {
+          "grok-4.5": { totalTokens: 263191 },
+          "grok-4.5-build": { totalTokens: 215146 },
+        },
+      }),
+    ];
+    const { newState } = parseSessionDelta("grok", lines, newParseState());
+    expect(newState.model).toBe("grok-4.5");
+  });
+
+  it("keeps the known model when a turn has no modelUsage breakdown", () => {
+    const seeded = { ...newParseState(), model: "grok-4.5" };
+    const { newState } = parseSessionDelta(
+      "grok",
+      [turnCompleted({ inputTokens: 10, outputTokens: 2, totalTokens: 12 })],
+      seeded,
+    );
+    expect(newState.model).toBe("grok-4.5");
   });
 });

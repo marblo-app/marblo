@@ -1434,6 +1434,17 @@ export function geminiTmpDir(agentId: string): string {
   return path.join(CONFIG_DIR, `gemini-home-${agentId}`, ".gemini", "tmp");
 }
 
+/**
+ * Root of the per-agent Grok Build session tree
+ * (`<GROK_HOME>/sessions/<url-encoded-cwd>/<session-uuid>/updates.jsonl`).
+ * Mirrors the isolated GROK_HOME that `writeGrokConfig` creates above, so the
+ * tree belongs to exactly one agent. Used by the cost tracker to locate the
+ * agent's ACP update stream — the only file grok writes billable tokens into.
+ */
+export function grokSessionsDir(agentId: string): string {
+  return path.join(CONFIG_DIR, `grok-home-${agentId}`, "sessions");
+}
+
 // MCP server entry point (compiled JS in dist-mcp/).
 //
 // 패키지 앱에서 dist-mcp 는 asar 밖 extraResource(Contents/Resources/dist-mcp)
