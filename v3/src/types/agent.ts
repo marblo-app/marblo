@@ -46,6 +46,16 @@ export interface Agent {
   totalCacheReadTokens?: number;
   totalCacheWriteTokens?: number;
   costUpdatedAt?: Date;
+  // cost-tracker 가 **과금된 세션 메타데이터**에서 읽어낸 구체 모델 id
+  // (`useCostWriter` 가 매 cost:update 마다 SET 한다 — increment 아님).
+  //
+  // `spawnedModel`(스폰 argv 되읽기)과 다른 축이다: 저쪽은 "무엇으로 띄웠나",
+  // 이쪽은 "무엇이 실제로 과금됐나". 사용량 탭의 에이전트↔실모델 매핑은 이
+  // 값을 1순위 근거로 쓴다(관측이 요청보다 강한 증거라서).
+  //
+  // ★`model`(벤더/하네스 계열)을 덮어쓰면 안 되는 이유는 useCostWriter 주석 참조.
+  // 이 필드가 생기기 전 doc 에는 없다 — UI 는 반드시 graceful fallback.
+  detectedModelId?: string;
   // Subscription / rate-limit signals. Codex exposes these in its session
   // rollout (plan_type + rate_limits.used_percent); claude/agy don't, so they
   // stay undefined and the UI falls back to the declared plan + token activity.

@@ -12,24 +12,76 @@ export const usage: Record<keyof typeof koUsage, string> = {
     "Token usage by model, agent, and day. Live (agent docs) + history (BigQuery) combined.",
   "usage.selectProjectPrompt": "Select a project to see usage.",
 
+  // ── Period selector ─────────────────────────────────────
+  "usage.period.label": "Period",
+  "usage.period.7d": "7 days",
+  "usage.period.30d": "30 days",
+  "usage.period.all": "All",
+
   // ── Summary cards ───────────────────────────────────────
   "usage.card.totalTokens": "Total tokens",
   "usage.card.inputOutput": "Input / Output",
   "usage.card.cache": "Cache (R/W)",
+  "usage.card.cost": "Cost",
   "usage.section.byModelAgent": "By model / agent",
+  "usage.totals.rangeNote":
+    "Selected period ({period}) · aggregated from BigQuery cost_logs",
+  "usage.totals.liveNote":
+    "No BigQuery rows for the selected period, so this shows live lifetime totals summed across agent docs — the period filter is not applied to these numbers.",
 
   // ── Model family label (only the catch-all is translated) ──
   "usage.modelFamily.other": "Other",
 
-  // ── Weekly token card ───────────────────────────────────
-  "usage.weekly.title": "Last 7 days total tokens",
-  "usage.weekly.tokensSuffix": "tokens · last 7 days",
-  "usage.weekly.empty":
-    "No token data for the last 7 days yet. Aggregated by getCostSummary (BigQuery) — run an agent on a new build to populate.",
+  // ── Vendor → submodel breakdown ─────────────────────────
+  "usage.breakdown.title": "By vendor · submodel",
+  "usage.breakdown.loading": "Loading aggregation…",
+  "usage.breakdown.empty":
+    "No usage recorded for the selected period. The breakdown is aggregated from the actual executed model id in BigQuery cost_logs.",
+  "usage.breakdown.modelCount": "{n} model(s)",
+  "usage.breakdown.modelUnknown": "model not recorded",
+  "usage.breakdown.vendorUnknown": "Unknown vendor",
+  "usage.breakdown.unregistered": "unregistered",
+  "usage.breakdown.unregisteredTip":
+    "This id is not in the model registry. The vendor is inferred from the id prefix, and pricing is not pinned for this id either.",
+  "usage.breakdown.estimated": "est. pricing",
+  "usage.breakdown.estimatedTip":
+    "This model's rate is a conservative estimate, not the vendor's confirmed list price (erring toward over-reporting). On a flat subscription the real marginal cost is lower.",
+  "usage.breakdown.footer":
+    "Vendors are resolved from the model registry (single source) — GLM and MiniMax stay separate vendors even though they spawn the same claude binary. Cost uses the recorded rate and is notional on flat subscriptions.",
+
+  // ── Agent ↔ actual model ────────────────────────────────
+  "usage.agentModel.title": "Agent ↔ actual model",
+  "usage.agentModel.empty": "No agents in this project.",
+  "usage.agentModel.colAgent": "Agent",
+  "usage.agentModel.colHarness": "Harness",
+  "usage.agentModel.colModel": "Actual model",
+  "usage.agentModel.colSource": "Evidence",
+  "usage.agentModel.noModel": "not recorded",
+  "usage.agentModel.source.detected": "billed session",
+  "usage.agentModel.source.spawned": "spawn argv",
+  "usage.agentModel.source.none": "—",
+  "usage.agentModel.footer":
+    "Model ids come from observation only — billed session metadata (detectedModelId) first, else the argv the main process read back (spawnedModel). With neither, the cell is left empty rather than guessed.",
+
+  // ── Vendor credits / quota ──────────────────────────────
+  "usage.credits.title": "Vendor credits · quota",
+  "usage.credits.axis.subscription": "Subscription",
+  "usage.credits.axis.subscriptionQuota": "Subscription quota (5h + weekly)",
+  "usage.credits.axis.unknown": "Billing axis unknown",
+  "usage.credits.unavailable": "Not queryable",
+  "usage.credits.noApi":
+    "This vendor publishes no remaining-quota API (verified across their full docs index). Check actual consumption in the vendor console.",
+  "usage.credits.subscriptionNote":
+    "Subscription-based, so there is no prepaid balance. Remaining headroom is measured below under 'Rate limit status'.",
+  "usage.credits.console": "Open vendor console",
+  "usage.credits.keySet": "Credentials set ({keys})",
+  "usage.credits.keyMissing": "Credentials missing ({keys})",
+  "usage.credits.footer":
+    "This panel never estimates a number. Credential status is measured by the main process; only key names are shown and values never reach the renderer.",
 
   // ── Daily trend ─────────────────────────────────────────
-  "usage.trend.titleEmpty": "Daily trend (by model)",
-  "usage.trend.title": "Daily trend (by model, last {span} days)",
+  "usage.trend.titleEmpty": "Daily trend (by vendor)",
+  "usage.trend.title": "Daily trend (by vendor, last {span} days)",
   "usage.trend.empty":
     "No daily data yet. The per-model trend is aggregated from BigQuery cost logs — run an agent on a new build to populate.",
   "usage.trend.noUsage": "No usage",
