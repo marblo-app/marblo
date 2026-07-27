@@ -73,6 +73,34 @@ export const board = {
     "이 태스크에 연결된 worktree를 찾을 수 없습니다.",
   "board.taskDetail.diffLoadFailed": "diff 로드 실패",
 
+  // StuckLane — DONE 우측 가상 레인. status 가 아니라 화면 그룹이다.
+  "board.stuck.title": "정체",
+  "board.stuck.tooltip":
+    "멈춘 티켓 모음 — BLOCKED/FAILED 와 파생 판정 STALE. 티켓 상태(status)는 바뀌지 않습니다.",
+  "board.stuck.empty": "정체된 티켓이 없습니다.",
+  "board.stuck.group.BLOCKED": "BLOCKED",
+  "board.stuck.group.FAILED": "FAILED",
+  "board.stuck.group.STALE": "STALE",
+  "board.stuck.reason.agent-missing": "담당 에이전트가 목록에 없음",
+  "board.stuck.reason.agent-dead": "담당 에이전트가 정지·오류 상태",
+  "board.stuck.reason.no-progress": "30분 넘게 진척 없음",
+  "board.stuck.reason.worktree-idle": "워크트리가 하루 넘게 무변경",
+  "board.stuck.idleFor": "{minutes}분째",
+  "board.stuck.action.retry": "재시도",
+  "board.stuck.action.archive": "보관",
+  "board.stuck.action.delete": "삭제",
+  "board.stuck.action.restore": "복구",
+  "board.stuck.hiddenToggle": "🗄 보관·삭제됨 ({count})",
+  "board.stuck.retryInjection":
+    "정체 레인에서 재시도 요청이 들어왔습니다. 남은 작업을 이어서 진행하세요.",
+  "board.stuck.msg.reused": "{agent} 재기동 — 하던 작업을 이어서 진행합니다.",
+  "board.stuck.msg.redispatched":
+    "담당을 회수하고 TODO 로 되돌렸습니다. 오케스트레이터가 다시 배정합니다.",
+  "board.stuck.msg.archived": '"{title}" 보관됨 — 보드에서 숨겨집니다.',
+  "board.stuck.msg.deleted": '"{title}" 삭제됨 (복구 가능).',
+  "board.stuck.msg.restored": '"{title}" 복구됨 — 보드에 다시 표시됩니다.',
+  "board.stuck.error.generic": "작업에 실패했습니다.",
+
   // DiffViewer
   "board.diff.loading": "변경 diff 불러오는 중...",
   "board.diff.retry": "다시 시도",

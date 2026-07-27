@@ -75,6 +75,34 @@ export const board: Record<keyof typeof koBoard, string> = {
     "No worktree linked to this task was found.",
   "board.taskDetail.diffLoadFailed": "Failed to load diff",
 
+  // StuckLane — virtual lane right of DONE. A view grouping, not a status.
+  "board.stuck.title": "Stuck",
+  "board.stuck.tooltip":
+    "Tickets that stopped moving — BLOCKED/FAILED plus the derived STALE verdict. A ticket's status is never changed by this lane.",
+  "board.stuck.empty": "Nothing is stuck.",
+  "board.stuck.group.BLOCKED": "BLOCKED",
+  "board.stuck.group.FAILED": "FAILED",
+  "board.stuck.group.STALE": "STALE",
+  "board.stuck.reason.agent-missing": "Bound agent is gone from the list",
+  "board.stuck.reason.agent-dead": "Bound agent is stopped or errored",
+  "board.stuck.reason.no-progress": "No progress for over 30 minutes",
+  "board.stuck.reason.worktree-idle": "Worktree untouched for over a day",
+  "board.stuck.idleFor": "{minutes}m and counting",
+  "board.stuck.action.retry": "Retry",
+  "board.stuck.action.archive": "Archive",
+  "board.stuck.action.delete": "Delete",
+  "board.stuck.action.restore": "Restore",
+  "board.stuck.hiddenToggle": "🗄 Archived / deleted ({count})",
+  "board.stuck.retryInjection":
+    "A retry was requested from the Stuck lane. Please pick the work back up where it left off.",
+  "board.stuck.msg.reused": "{agent} restarted — resuming where it left off.",
+  "board.stuck.msg.redispatched":
+    "Claim released and the ticket is back in TODO. The orchestrator will re-assign it.",
+  "board.stuck.msg.archived": '"{title}" archived — hidden from the board.',
+  "board.stuck.msg.deleted": '"{title}" deleted (recoverable).',
+  "board.stuck.msg.restored": '"{title}" restored — back on the board.',
+  "board.stuck.error.generic": "The action failed.",
+
   // DiffViewer
   "board.diff.loading": "Loading diff...",
   "board.diff.retry": "Retry",

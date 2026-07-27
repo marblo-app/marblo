@@ -38,6 +38,17 @@ interface AgentState {
   // limit. Cost/spend aggregation stays project-scoped via `agents`.
   ownedAgents: Agent[];
   loading: boolean;
+  /**
+   * `agents` 가 실제 스냅샷을 한 번이라도 받았는가. 구독 시작 시 false 로
+   * 되돌아간다.
+   *
+   * ★ 빈 배열은 두 가지를 뜻한다 — "이 프로젝트에 에이전트가 없다" 와 "아직
+   * 안 왔다". 정체 레인의 STALE 판정은 "티켓이 문 에이전트가 목록에 없다" 를
+   * 근거로 쓰기 때문에 이 둘을 구분하지 못하면 콜드 부팅 한 프레임 동안
+   * 진행 중인 티켓이 전부 정체로 튄다. `loading` 은 구독 전 idle 상태와
+   * 로드 완료를 모두 false 로 뭉개서 이 구분을 못 한다.
+   */
+  hydrated: boolean;
   error: string | null;
 
   subscribeToAgents: (projectId: string) => () => void;
@@ -56,19 +67,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   agents: [],
   ownedAgents: [],
   loading: false,
+  hydrated: false,
   error: null,
 
   subscribeToAgents: (projectId: string) => {
     if (!projectId) {
-      set({ agents: [], loading: false });
+      set({ agents: [], loading: false, hydrated: false });
       return () => {};
     }
-    set({ loading: true });
+    set({ loading: true, hydrated: false });
     return subscribeToCollection<Record<string, unknown>>(
       COLLECTION,
       [where("projectId", "==", projectId)],
       (docs) => {
-        set({ agents: dedupeAgentsById(docs.map(toAgent)), loading: false });
+        set({
+          agents: dedupeAgentsById(docs.map(toAgent)),
+          loading: false,
+          hydrated: true,
+        });
       },
     );
   },

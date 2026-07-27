@@ -15,12 +15,14 @@ import { useTaskStore } from "../../stores/taskStore";
 import { useSubscriptionStore } from "../../stores/subscriptionStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { KanbanColumn } from "./KanbanColumn";
+import { StuckLane } from "./StuckLane";
 import { TaskCard } from "./TaskCard";
 import { TaskCreateModal } from "./TaskCreateModal";
 import { TaskDetailModal } from "./TaskDetailModal";
 import { OrchestratorChat } from "../orchestrator/OrchestratorChat";
 import { getNextStatuses, canTransition } from "../../services/stateMachine";
 import { updateTaskStatus } from "../../services/taskService";
+import { useStuckLane } from "../../hooks/useStuckLane";
 import { useTranslation } from "../../lib/i18n";
 
 const COLUMN_STATUSES: TaskStatus[] = [
@@ -30,12 +32,6 @@ const COLUMN_STATUSES: TaskStatus[] = [
   "REVIEW",
   "DONE",
 ];
-
-// BLOCKED/FAILED 태스크가 표시될 폴백 컬럼 (직전 상태 기준)
-const FALLBACK_COLUMN: Record<string, TaskStatus> = {
-  BLOCKED: "IN_PROGRESS",
-  FAILED: "IN_PROGRESS",
-};
 const ROLES: AgentRole[] = ["backend", "frontend", "test", "devops"];
 
 export function KanbanBoard() {
@@ -166,13 +162,18 @@ export function KanbanBoard() {
     return true;
   });
 
+  // 활성 컬럼 / 정체 레인 / 감춤(보관·삭제) 한 번에 가른다. 컬럼별로 다시
+  // 판정하지 않으므로 같은 티켓이 두 곳에 뜨거나 어디에도 안 뜨는 일이 없다.
+  //
+  // BLOCKED/FAILED 는 예전엔 IN_PROGRESS 컬럼에 폴백으로 얹혀 있었다 — 진행
+  // 중인 일과 멈춘 일이 한 칸에 섞여 "지금 굴러가는 게 몇 개인가" 를 셀 수
+  // 없었다. 이제 둘 다 정체 레인으로 빠지고 활성 4컬럼은 정말 활성만 센다.
+  const { active: activeTasks, stuck, hidden } = useStuckLane(filteredTasks);
+
+  const visibleCount = activeTasks.length + stuck.total;
+
   const tasksByColumn = (columnStatus: TaskStatus) =>
-    filteredTasks.filter((t) => {
-      if (t.status === columnStatus) return true;
-      // BLOCKED/FAILED → 폴백 컬럼에 표시
-      const fallback = FALLBACK_COLUMN[t.status];
-      return fallback === columnStatus;
-    });
+    activeTasks.filter((t) => t.status === columnStatus);
 
   if (!currentProject) {
     // Distinguish "still loading on cold start" from "genuinely no project".
@@ -271,9 +272,10 @@ export function KanbanBoard() {
 
         <div className="flex-1" />
 
-        {/* Task count */}
+        {/* Task count — 보관/삭제로 감춘 티켓은 빠진다(화면에 없는 걸 세지
+            않는다). 정체분은 여전히 보드 위에 있으므로 포함. */}
         <span className="text-xs text-gray-500">
-          {filteredTasks.length} task{filteredTasks.length !== 1 ? "s" : ""}
+          {visibleCount} task{visibleCount !== 1 ? "s" : ""}
         </span>
 
         <button
@@ -336,6 +338,14 @@ export function KanbanBoard() {
                 isDropTarget={validDropStatuses.has(status)}
               />
             ))}
+            {/* DONE 우측 — 드롭 타깃이 아니다. 정체는 사용자가 끌어다 놓는
+                컬럼이 아니라 판정 결과라, 끌어다 놓아도 판정이 그대로면 즉시
+                되돌아온다. */}
+            <StuckLane
+              groups={stuck}
+              hidden={hidden}
+              onTaskClick={setSelectedTask}
+            />
           </div>
         </div>
         <DragOverlay>

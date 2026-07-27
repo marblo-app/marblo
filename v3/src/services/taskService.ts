@@ -18,7 +18,13 @@ import {
 } from "./taskOutcomeReporter";
 
 const COLLECTION = "tasks";
-const DATE_FIELDS = ["claimedAt", "createdAt", "updatedAt"];
+const DATE_FIELDS = [
+  "claimedAt",
+  "createdAt",
+  "updatedAt",
+  "archivedAt",
+  "deletedAt",
+];
 
 function toTask(raw: Record<string, unknown>): Task {
   const task = convertTimestamps<Task>(raw, DATE_FIELDS);
@@ -111,6 +117,58 @@ export async function updateTask(
 
 export async function deleteTask(taskId: string): Promise<void> {
   await deleteDocument(COLLECTION, taskId);
+}
+
+/**
+ * 보관(archive) 토글 — 티켓을 전 레인에서 숨기거나 되돌린다.
+ *
+ * ★ status 는 손대지 않는다. BLOCKED 였던 티켓을 보관해도 원장에는 BLOCKED
+ * 로 남아 있어야 나중에 "왜 멈췄었나" 를 되짚을 수 있다. 보관은 가시성
+ * 축이고 status 는 진행 축이다 — 두 축을 한 필드에 겹치는 순간 되돌릴 수
+ * 없는 손실이 난다.
+ */
+export async function setTaskArchived(
+  taskId: string,
+  archived: boolean,
+): Promise<void> {
+  await updateTask(taskId, {
+    archived,
+    ...(archived ? { archivedAt: new Date() } : {}),
+  });
+}
+
+/**
+ * soft-delete — 되돌릴 수 있는 삭제. 문서는 그대로 두고 플래그만 세운다.
+ *
+ * MCP `delete_task(mode="soft")` 와 **같은 필드**(deleted / deletedAt /
+ * deletedBy / deleteReason)를 쓴다. 규약을 갈라놓으면 UI 로 지운 티켓이 MCP
+ * 쪽 목록에 계속 살아 있고 그 반대도 마찬가지가 된다.
+ *
+ * 물리 삭제는 별도의 의도적 조치({@link deleteTask})로 남겨 둔다.
+ */
+export async function softDeleteTask(
+  taskId: string,
+  options: { deletedBy?: string; reason?: string } = {},
+): Promise<void> {
+  await updateTask(taskId, {
+    deleted: true,
+    deletedAt: new Date(),
+    deletedBy: options.deletedBy ?? "user",
+    deleteReason: options.reason ?? "",
+  });
+}
+
+/**
+ * 보관·soft-delete 를 한 번에 되돌린다 — 티켓이 원래 status 그대로 보드에
+ * 다시 뜬다.
+ *
+ * 두 플래그를 같이 내리는 이유: 사용자에게 "이 티켓 다시 보이게 해줘" 는 한
+ * 가지 의도다. 어느 플래그로 숨겨졌는지 기억해서 짝을 맞추라고 요구하면,
+ * 보관 후 삭제한 티켓이 복구 버튼을 눌러도 안 돌아오는 함정이 된다.
+ * status 는 여기서도 손대지 않는다.
+ */
+export async function restoreTask(taskId: string): Promise<void> {
+  await updateTask(taskId, { archived: false, deleted: false });
 }
 
 export function subscribeToTasks(

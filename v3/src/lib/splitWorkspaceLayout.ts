@@ -115,6 +115,13 @@ export const DIVIDER_WIDTH = 4;
  * board class changes, change these — BOARD_MIN_WIDTH_PARTS is asserted against
  * BOARD_MIN_WIDTH in the unit tests so the drift is a failing test, not a
  * silently reappearing hidden REVIEW column.
+ *
+ * The Stuck lane (board/StuckLane, right of DONE) is deliberately NOT counted
+ * here. It ships collapsed at a 52px rail and holds work that is by definition
+ * not moving, so reserving pane width for it would take space from the active
+ * columns — the opposite of what this reservation is for. Expanded, it takes
+ * its share of the same flex row and the board scrolls, exactly as it already
+ * does past the fourth column.
  */
 export const BOARD_COLUMN_COUNT = 4;
 export const BOARD_COLUMN_MIN_WIDTH = 168;
