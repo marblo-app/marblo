@@ -20,6 +20,8 @@
 
 import {
   WIZARD_STEPS,
+  authSatisfied,
+  installSatisfied,
   type WizardGateState,
   type WizardStep,
 } from "./cliSetupGate";
@@ -162,8 +164,11 @@ export function effectiveDone(
 ): Set<WizardStep> {
   const done = new Set<WizardStep>(p.done);
   // Authenticated implies installed — an authed CLI can't be missing.
-  if (live.requiredInstalled || live.requiredReady) done.add("install");
-  if (live.requiredReady) done.add("auth");
+  // ★두 판정 모두 BYOM 축을 OR 로 포함한다(F4): Claude/Codex 계정이 없어도 오케를
+  // 태울 수 있는 벤더 경로가 서 있으면 그 단계는 실제로 끝난 것이다. BYOM 축이
+  // 비어 있으면(기본) 종전 식과 완전히 같다.
+  if (installSatisfied(live) || authSatisfied(live)) done.add("install");
+  if (authSatisfied(live)) done.add("auth");
   if (live.hasProject) done.add("prd");
   return done;
 }

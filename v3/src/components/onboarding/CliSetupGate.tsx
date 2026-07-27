@@ -22,7 +22,9 @@ import {
   type ActionResult,
   type FirstTicketResult,
 } from "../../services/cliSetupActions";
+import { useByomOptions } from "../../hooks/useByomOptions";
 import { CliRowCard } from "./CliSetupRows";
+import { ByomStartSection } from "./ByomStartSection";
 import { CliFailSurvey } from "./CliFailSurvey";
 import { FirstTicketResultNote } from "./FirstTicketResultNote";
 
@@ -161,9 +163,19 @@ export function CliSetupGate() {
     }
   }, []);
 
+  // BYOM 축(F4) — 시작하기 탭과 **같은 훅**에서 온다. 두 표면이 ②단계 통과 조건을
+  // 두고 다른 말을 하면, 플래그 하나로 앱이 다른 제품이 된다.
+  const { gate: byom } = useByomOptions();
+
   const gateState = useMemo(
-    () => ({ requiredInstalled, requiredReady: ready, hasProject }),
-    [requiredInstalled, ready, hasProject],
+    () => ({
+      requiredInstalled,
+      requiredReady: ready,
+      hasProject,
+      byomInstalled: byom.installed,
+      byomReady: byom.ready,
+    }),
+    [requiredInstalled, ready, hasProject, byom.installed, byom.ready],
   );
 
   if (!visible) return null;
@@ -245,6 +257,8 @@ export function CliSetupGate() {
                 onLoginLaunched={() => setVisible(false)}
               />
             ))}
+            {/* ②단계의 대안 — 시작하기 탭과 같은 컴포넌트(F4). */}
+            {step === "auth" && <ByomStartSection />}
           </div>
         )}
 

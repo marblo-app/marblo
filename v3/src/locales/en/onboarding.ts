@@ -358,6 +358,26 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.vendors.guideLead":
     "Endpoints, context nuances and the verification runbook live here:",
 
+  // — Step ②'s BYOM alternative (activation F4) —
+  // ★No vendor names here either. The list is registry-derived; this table only
+  //   carries the fact that you can start without an account, and on what terms.
+  "onboarding.byom.title": "No account? Start with a vendor key",
+  "onboarding.byom.headline.ready":
+    "A registered vendor key is ready — continue without a Claude or Codex account.",
+  "onboarding.byom.headline.workerOnly":
+    "You have a usable vendor. The orchestrator still runs on Claude/Codex only, so assign these vendors to worker agents instead.",
+  "onboarding.byom.headline.setup":
+    "Instead of a Claude or Codex account you can start with a key from an AI subscription you already pay for. Each vendor is a one-time setup.",
+  "onboarding.byom.headline.none":
+    "This build has no additional vendors to connect.",
+  "onboarding.byom.canHostOrchestrator":
+    "✓ This vendor can run the orchestrator too — it satisfies this step on its own.",
+  // ★This line is what keeps the screen honest. Do not drop or soften it —
+  //   without it a user clears step ② and then stalls at step ④ for no visible
+  //   reason.
+  "onboarding.byom.workerOnlyNote":
+    "This vendor is worker-agent only for now. The orchestrator — the side that files tickets and dispatches agents — still needs a Claude or Codex account, so this vendor alone cannot clear this step.",
+
   // — LoginPage (auth) —
   "onboarding.login.signupSubtitle": "Create a new account",
   "onboarding.login.loginSubtitle": "Sign in to your account",

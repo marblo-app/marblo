@@ -58,6 +58,31 @@ export interface WizardGateState {
   requiredReady: boolean;
   /** A project folder is connected (orchestrator can be launched/messaged). */
   hasProject: boolean;
+  /**
+   * ★BYOM 축(F4) — 벤더 키/CLI 만으로 ①②단계를 만족했는가.
+   *
+   * Claude/Codex 계정이 하나도 없는 사용자(해외·BYOM 유입의 기본형)는 종전 두 축
+   * 만으로는 ②단계를 영구히 통과하지 못했다. 이 두 필드는 기존 축을 **대체하지
+   * 않고 OR 로 합쳐진다** — 미지정(undefined)이면 값이 없는 것과 같아 종전 동작과
+   * 바이트 동일하다(기존 호출자·테스트 무회귀).
+   *
+   * 무엇이 이 값을 참으로 만드는지는 `lib/byomOnboarding` 이 정한다. 요점은
+   * **오케스트레이터를 태울 수 있는 BYOM 경로만** 여기 기여한다는 것이다 —
+   * ③④단계가 전부 오케를 거치므로, 워커 전용 벤더로 ②단계를 넘기면 화면만
+   * 넘어가고 ④단계에서 다시 막힌다.
+   */
+  byomInstalled?: boolean;
+  byomReady?: boolean;
+}
+
+/** ①단계가 만족됐나 — 종전 축 OR BYOM 축. */
+export function installSatisfied(state: WizardGateState): boolean {
+  return state.requiredInstalled || state.byomInstalled === true;
+}
+
+/** ②단계가 만족됐나 — 종전 축 OR BYOM 축. */
+export function authSatisfied(state: WizardGateState): boolean {
+  return state.requiredReady || state.byomReady === true;
 }
 
 /**
@@ -68,16 +93,16 @@ export interface WizardGateState {
  * explicit advance once a project + PRD exist.
  */
 export function initialWizardStep(state: WizardGateState): WizardStep {
-  if (!state.requiredInstalled) return "install";
-  if (!state.requiredReady) return "auth";
+  if (!installSatisfied(state)) return "install";
+  if (!authSatisfied(state)) return "auth";
   return "prd";
 }
 
 /**
  * Whether the user may advance from `step` to the next one, given gate state.
  * The primary "Next" button is gated on this; the completion criteria per step:
- *   install → requires an installed orchestrator candidate
- *   auth    → requires an authenticated one (Claude OR Codex)
+ *   install → requires an installed orchestrator candidate (OR a BYOM path)
+ *   auth    → requires an authenticated one (Claude OR Codex OR a BYOM path)
  *   prd     → requires a connected folder (the PRD itself is optional)
  *   firstTicket → terminal; nothing to advance to
  */
@@ -87,9 +112,9 @@ export function canAdvanceWizard(
 ): boolean {
   switch (step) {
     case "install":
-      return state.requiredInstalled;
+      return installSatisfied(state);
     case "auth":
-      return state.requiredReady;
+      return authSatisfied(state);
     case "prd":
       return state.hasProject;
     case "firstTicket":

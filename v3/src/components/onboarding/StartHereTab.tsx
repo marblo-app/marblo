@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
-import { WIZARD_STEPS, type WizardStep } from "../../lib/cliSetupGate";
+import {
+  WIZARD_STEPS,
+  authSatisfied,
+  installSatisfied,
+  type WizardStep,
+} from "../../lib/cliSetupGate";
 import {
   isOnboardingComplete,
   resumeStep,
@@ -12,6 +17,7 @@ import { ROWS, useCliSetupStore } from "../../stores/cliSetupStore";
 import { useOnboardingProgressStore } from "../../stores/onboardingProgressStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useStepPrdSuccess } from "../../hooks/useCliSetupEngine";
+import { useByomOptions } from "../../hooks/useByomOptions";
 import telemetry from "../../services/telemetryService";
 import {
   connectFolder,
@@ -21,6 +27,7 @@ import {
   type FirstTicketResult,
 } from "../../services/cliSetupActions";
 import { CliRowCard } from "./CliSetupRows";
+import { ByomStartSection } from "./ByomStartSection";
 import { FirstTicketResultNote } from "./FirstTicketResultNote";
 import { VendorModelsSection } from "./VendorModelsSection";
 import { DemoMode, DEMO_CONNECT_PENDING_KEY } from "./DemoMode";
@@ -82,16 +89,26 @@ export function StartHereTab() {
   const [ticketMsg, setTicketMsg] = useState<FirstTicketResult | null>(null);
   const [showDemo, setShowDemo] = useState(false);
 
+  // BYOM 축(F4) — 벤더 키/CLI 만으로 ①②단계를 만족했는가. Claude/Codex 계정이
+  // 하나도 없는 사용자는 이 축이 없으면 ②단계에서 영구히 멈춘다.
+  const { gate: byom } = useByomOptions();
+
   const live = useMemo(
-    () => ({ requiredInstalled, requiredReady: ready, hasProject }),
-    [requiredInstalled, ready, hasProject],
+    () => ({
+      requiredInstalled,
+      requiredReady: ready,
+      hasProject,
+      byomInstalled: byom.installed,
+      byomReady: byom.ready,
+    }),
+    [requiredInstalled, ready, hasProject, byom.installed, byom.ready]
   );
 
   const views = useMemo(() => stepViews(progress, live), [progress, live]);
   const resume = useMemo(() => resumeStep(progress, live), [progress, live]);
   const complete = useMemo(
     () => isOnboardingComplete(progress, live),
-    [progress, live],
+    [progress, live]
   );
 
   // Which step's body is expanded. Starts at the resume point; the user can
@@ -107,10 +124,12 @@ export function StartHereTab() {
   // Persist live-derived completions so the cold-start landing rule (which can
   // only read storage, before any probe has run) knows onboarding is finished.
   useEffect(() => {
-    if (requiredInstalled || ready) markDone("install");
-    if (ready) markDone("auth");
-    if (hasProject) markDone("prd");
-  }, [requiredInstalled, ready, hasProject, markDone]);
+    // ★BYOM 축을 포함한 판정으로 기록한다(effectiveDone 과 같은 식). 벤더 경로로
+    // 넘긴 단계가 저장되지 않으면 콜드 시작 착지 규칙이 매번 "미완료" 로 읽는다.
+    if (installSatisfied(live)) markDone("install");
+    if (authSatisfied(live)) markDone("auth");
+    if (live.hasProject) markDone("prd");
+  }, [live, markDone]);
 
   useStepPrdSuccess(openStep === "prd", hasProject);
 
@@ -121,7 +140,7 @@ export function StartHereTab() {
       setCurrent(step);
       telemetry.cliSetupStep(step, "enter");
     },
-    [setCurrent],
+    [setCurrent]
   );
 
   const skipStep = useCallback(
@@ -137,7 +156,7 @@ export function StartHereTab() {
       const next = WIZARD_STEPS[idx + 1];
       if (next) selectStep(next);
     },
-    [markSkipped, selectStep],
+    [markSkipped, selectStep]
   );
 
   const handleSeed = useCallback(async () => {
@@ -371,8 +390,8 @@ function StepBadge({ status, index }: { status: StepStatus; index: number }) {
     status === "done"
       ? "bg-[#a6e3a1] text-[#1e1e2e]"
       : status === "current"
-        ? "bg-[#89b4fa] text-[#1e1e2e]"
-        : "bg-[#313244] text-[#7f849c]";
+      ? "bg-[#89b4fa] text-[#1e1e2e]"
+      : "bg-[#313244] text-[#7f849c]";
   return (
     <span
       className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${cls}`}
@@ -451,6 +470,10 @@ function StepBody({
         {ROWS.map((row) => (
           <CliRowCard key={row.id} row={row} phase={step} />
         ))}
+        {/* ②단계의 대안 — Claude·Codex 계정이 둘 다 없어도 시작하는 길(F4).
+            ①단계에는 두지 않는다: 저 CLI 들은 어차피 자동 설치되고, 벤더 선택은
+            "무슨 계정으로 붙을까" 라는 ②단계의 질문이다. */}
+        {step === "auth" && <ByomStartSection />}
       </>
     );
   }

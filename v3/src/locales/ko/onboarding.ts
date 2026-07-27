@@ -492,6 +492,25 @@ export const onboarding = {
   "onboarding.startHere.vendors.guideLead":
     "엔드포인트·컨텍스트·검증 런북 등 상세는 이 문서에 있습니다:",
 
+  // — ②단계의 BYOM 대안 (활성화 F4) —
+  // ★여기에도 벤더 이름이 없다. 목록은 레지스트리 파생이고, 이 표에 있는 것은
+  //   "계정이 없어도 시작할 수 있다" 는 사실과 그 조건뿐이다.
+  "onboarding.byom.title": "계정이 없나요? 벤더 키로 시작하기",
+  "onboarding.byom.headline.ready":
+    "등록된 벤더 키로 바로 시작할 수 있습니다 — Claude·Codex 계정 없이 다음 단계로 가세요.",
+  "onboarding.byom.headline.workerOnly":
+    "쓸 수 있는 벤더가 있습니다. 다만 오케스트레이터는 아직 Claude·Codex 로만 뜨므로, 이 벤더들은 작업 에이전트로 지정해 쓰세요.",
+  "onboarding.byom.headline.setup":
+    "Claude·Codex 계정 대신 이미 쓰는 다른 AI 구독의 키로 시작할 수 있습니다. 벤더마다 처음 한 번만 등록하면 됩니다.",
+  "onboarding.byom.headline.none":
+    "지금 이 빌드에 붙일 수 있는 다른 벤더가 없습니다.",
+  "onboarding.byom.canHostOrchestrator":
+    "✓ 이 벤더로 오케스트레이터까지 띄울 수 있습니다 — 이 단계를 이걸로 통과할 수 있어요.",
+  // ★이 줄이 화면의 정직성이다. 지우거나 흐리게 만들지 말 것 — 이 문구가 없으면
+  //   사용자는 ②단계를 넘긴 뒤 ④단계(첫 티켓)에서 이유 없이 막힌다.
+  "onboarding.byom.workerOnlyNote":
+    "이 벤더는 아직 작업 에이전트 전용입니다. 오케스트레이터(티켓을 만들고 에이전트를 배치하는 쪽)는 Claude·Codex 계정이 필요해서, 이 벤더만으로는 이 단계를 넘길 수 없습니다.",
+
   // — LoginPage (auth) —
   "onboarding.login.signupSubtitle": "새 계정을 만드세요",
   "onboarding.login.loginSubtitle": "계정에 로그인하세요",
