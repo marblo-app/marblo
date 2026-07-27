@@ -53,6 +53,13 @@ tests/playwright/
 ├── live/        ← Tier 3: 진짜 LLM + 진짜 Firestore
 │                  RUN_LLM_E2E=1 게이트, 비용 발생. 야간 1회 등으로 한정.
 │
+├── cleanroom/   ← 최초실행(신규 유저) 퍼널. 격리된 userData/HOME/PATH 로
+│                  "처음 켠 앱"을 재현 — 온보딩 팝업 재노출(#579), 첫 티켓
+│                  라우팅(#580), 설치 실패 대안, BYOM 경로를 검증한다.
+│                  실행/발견사항: ../../docs/QA-CLEANROOM-FIRST-RUN.md
+│                  ※ 기존 사용자 프로필(~/Library/Application Support/Marblo,
+│                    ~/.claude)은 절대 건드리지 않는다.
+│
 ├── helpers/
 │   ├── launch.ts      ← Electron _electron.launch wrapper
 │   └── fixtures.ts    ← test.extend(marblo, ...) Playwright fixture
