@@ -4,12 +4,15 @@ import type { MessageKey } from "../../locales/ko";
 import { useProjectStore } from "../../stores/projectStore";
 import telemetry from "../../services/telemetryService";
 import {
-  DISMISSED_KEY,
   canAdvanceWizard,
   nextWizardStep,
   WIZARD_STEPS,
   type WizardStep,
 } from "../../lib/cliSetupGate";
+import {
+  setOnboardingDismissed,
+  useOnboardingProgressStore,
+} from "../../stores/onboardingProgressStore";
 import { ROWS, useCliSetupStore } from "../../stores/cliSetupStore";
 import {
   useCliSetupEngine,
@@ -113,20 +116,15 @@ export function CliSetupGate() {
         return;
       }
     }
-    try {
-      localStorage.setItem(DISMISSED_KEY, "1");
-    } catch {
-      /* private mode — best effort */
-    }
+    // One writer for the dismissal: the store persists the onboarding record
+    // AND mirrors the legacy flag, so the modal and the shell banner can never
+    // disagree about "the user said not now" (barrier F2).
+    setOnboardingDismissed(true);
     setVisible(false);
   }, [step, ready]);
 
   const finishDismiss = useCallback(() => {
-    try {
-      localStorage.setItem(DISMISSED_KEY, "1");
-    } catch {
-      /* private mode — best effort */
-    }
+    setOnboardingDismissed(true);
     setShowSurvey(false);
     setVisible(false);
   }, []);
@@ -151,11 +149,10 @@ export function CliSetupGate() {
       // 버리면 유저는 아무 일도 안 일어난 화면에 남고 돌아올 길도 사라진다 —
       // 그대로 열어 두고 FirstTicketResultNote 가 오케 띄우는 법을 안내한다.
       if (res.ok) {
-        try {
-          localStorage.setItem(DISMISSED_KEY, "1");
-        } catch {
-          /* best effort */
-        }
+        // Onboarding actually finished here — record the step (what the shell
+        // tab does) as well as the dismissal that closes this modal for good.
+        useOnboardingProgressStore.getState().markDone("firstTicket");
+        setOnboardingDismissed(true);
         setVisible(false);
       }
     } finally {

@@ -317,9 +317,17 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
     "Any folder works — an empty one is fine, and you can write the PRD yourself later.",
   "onboarding.startHere.alt.firstTicket":
     "If sending fails, check that the orchestrator terminal is running and try again.",
-  // Inline banner (the modal's replacement) — a spawn blocked on auth
-  "onboarding.startHere.banner.title": "CLI sign-in required",
+  // Inline banner (the modal's replacement) — onboarding still has work left.
+  // The title MUST vary per step: it used to be the single sentence "CLI
+  // sign-in required", so a user who had signed in and only lacked a folder saw
+  // a title saying "sign in" above a body saying "connect a folder" (barrier F2).
+  "onboarding.startHere.banner.title.install": "Install the orchestrator CLI",
+  "onboarding.startHere.banner.title.auth": "CLI sign-in required",
+  "onboarding.startHere.banner.title.prd": "Connect a folder to work in",
+  "onboarding.startHere.banner.title.firstTicket":
+    "One first ticket and you're done",
   "onboarding.startHere.banner.cta": "Open Start here",
+  "onboarding.startHere.banner.dismiss": "Dismiss (don't show this again)",
 
   // — Start Here tab: connecting other vendors (XHXSIdPN) —
   // No vendor name or model id lives here: the list is derived from the model

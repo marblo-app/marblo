@@ -41,6 +41,26 @@ function writeProgress(p: OnboardingProgress): void {
   }
 }
 
+/**
+ * Mirror the dismissal onto the legacy `marblo.cliSetupGateDismissed` flag.
+ *
+ * `progress.dismissed` is the single source of truth (see
+ * {@link isOnboardingDismissed}), but the legacy key is what
+ * {@link parseProgress} seeds from on a cold start, so the two must never
+ * disagree — otherwise a stale `"1"` would resurrect a dismissal the user has
+ * since turned back off. Cleared (not set to "0") on re-enable so a fresh
+ * install and a re-enabled user look identical.
+ */
+function writeLegacyDismissed(dismissed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (dismissed) localStorage.setItem(DISMISSED_KEY, "1");
+    else localStorage.removeItem(DISMISSED_KEY);
+  } catch {
+    // Private mode — best effort; the JSON record still carries the truth.
+  }
+}
+
 /** Initial record: stored JSON if present, else seeded from the legacy flag. */
 export function readInitialProgress(): OnboardingProgress {
   return parseProgress(
@@ -73,7 +93,33 @@ export const useOnboardingProgressStore = create<OnboardingProgressState>(
       markDone: (step) => apply((p) => markStepDone(p, step)),
       markSkipped: (step) => apply((p) => markStepSkipped(p, step)),
       setCurrent: (step) => apply((p) => setCurrentStep(p, step)),
-      setDismissed: (dismissed) => apply((p) => setDismissed(p, dismissed)),
+      setDismissed: (dismissed) => {
+        // Mirror unconditionally, not inside `apply`: a no-op transition still
+        // has to converge the legacy key (e.g. an in-memory `true` seeded from
+        // a legacy flag that a later write dropped).
+        writeLegacyDismissed(dismissed);
+        apply((p) => setDismissed(p, dismissed));
+      },
     };
   },
 );
+
+/**
+ * The dismissal, read imperatively — for effects that must not subscribe.
+ *
+ * ★ This is the ONE place non-React code asks "did the user say 'not now'?".
+ * The engine used to read the legacy `marblo.cliSetupGateDismissed` flag
+ * directly, which only the legacy modal ever wrote: in the split shell nothing
+ * set it, so the post-auth branch re-surfaced the onboarding banner on EVERY
+ * restart and the ✕ could not stick (activation barrier F2). Every writer now
+ * funnels through {@link useOnboardingProgressStore.setDismissed}, and every
+ * reader through here.
+ */
+export function isOnboardingDismissed(): boolean {
+  return useOnboardingProgressStore.getState().progress.dismissed;
+}
+
+/** Imperative counterpart of the store mutator, for the same non-React callers. */
+export function setOnboardingDismissed(dismissed: boolean): void {
+  useOnboardingProgressStore.getState().setDismissed(dismissed);
+}

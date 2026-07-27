@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import {
   AUTO_INSTALL_KEY,
-  DISMISSED_KEY,
   autoInstallComplete,
   initialWizardStep,
   requiredInstalled as computeRequiredInstalled,
@@ -15,6 +14,10 @@ import {
   ROWS,
   useCliSetupStore,
 } from "../stores/cliSetupStore";
+import {
+  isOnboardingDismissed,
+  setOnboardingDismissed,
+} from "../stores/onboardingProgressStore";
 import { useProjectStore } from "../stores/projectStore";
 import telemetry from "../services/telemetryService";
 
@@ -183,15 +186,9 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
           ORCHESTRATOR_CLI_IDS,
           latest,
         ),
-        dismissed: readFlag(DISMISSED_KEY),
+        dismissed: isOnboardingDismissed(),
       });
-      if (decision.clearDismissed) {
-        try {
-          localStorage.removeItem(DISMISSED_KEY);
-        } catch {
-          /* best effort */
-        }
-      }
+      if (decision.clearDismissed) setOnboardingDismissed(false);
       // Orchestrator-first: never auto-surface on the empty board. With a
       // project connected, the orchestrator auto-launch fires
       // `marblo:open-cli-setup` when auth is actually needed.
@@ -261,12 +258,15 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
       if (hasProjectRef.current) {
         // Mid-session blocked re-open: the orchestrator resumes on its own.
         hRef.current.close?.();
-      } else if (shouldShowPostAuthStep(readFlag(DISMISSED_KEY))) {
+      } else if (shouldShowPostAuthStep(isOnboardingDismissed())) {
         // First run: guide the freshly-authed user into connecting a project.
         // The dismissal check matters because this edge ALSO fires on every
         // restart (the probe starts false and flips once re-probed) — without
         // it, a user who clicked "Later" saw the PRD popup every restart
         // (bRABKQX7). `marblo:cli-auth-ready` above fires either way.
+        // ★ Read via the onboarding record, NOT the legacy flag: only the
+        // legacy modal ever wrote that flag, so shell users had no way to make
+        // a dismissal stick and got this banner on every restart (barrier F2).
         hRef.current.showPostAuth?.("prd");
       }
     }

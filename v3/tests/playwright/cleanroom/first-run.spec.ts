@@ -1,7 +1,9 @@
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import {
+  bannerTitle,
   bannerVisible,
+  dismissBanner,
   injectProject,
   launchCleanRoom,
   openWorkTab,
@@ -48,14 +50,8 @@ async function settle(page: Page, ms = 2500): Promise<void> {
   await page.waitForTimeout(ms);
 }
 
-/** 셸 배너의 ✕(닫기). 배너가 없으면 조용히 통과. */
-async function closeBanner(page: Page): Promise<void> {
-  const x = page.getByRole("button", { name: "닫기", exact: true }).first();
-  if (await x.isVisible().catch(() => false)) {
-    await x.click().catch(() => {});
-    await page.waitForTimeout(400);
-  }
-}
+/** 셸 배너의 ✕(닫기 = 다시 띄우지 않기). 배너가 없으면 조용히 통과. */
+const closeBanner = dismissBanner;
 
 test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
   test("A(#579) codex 만 인증돼 있으면 재요청에도 온보딩이 다시 뜨지 않는다 — 셸 + 레거시", async () => {
@@ -104,7 +100,7 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
     }
   });
 
-  test("A2(특성화·F2) 인증은 됐지만 폴더가 없는 유저는 재시작마다 'CLI 인증 필요' 배너를 다시 본다", async () => {
+  test("A2(F2 회귀가드) 인증은 됐고 폴더만 없는 유저 — 배너 제목이 사실과 맞고, ✕ 는 재시작 뒤에도 유지된다", async () => {
     let cr: CleanRoom = await launchCleanRoom({
       claude: "missing",
       codex: "ready", // 인증 완료 — 즉 '인증 필요'는 사실이 아니다
@@ -115,7 +111,14 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
       await openWorkTab(cr.page, "보드");
       await settle(cr.page, 3000);
       const first = await bannerVisible(cr.page);
+      const firstTitle = await bannerTitle(cr.page);
       await cr.shot("A2-banner-first-boot");
+
+      // 배너가 떴다면 제목은 실제 상황(=폴더 미연결)을 말해야 한다. codex 는
+      // 이미 로그인돼 있으므로 "CLI 인증이 필요합니다"는 거짓말이다.
+      if (first) {
+        expect(firstTitle).toBe("작업할 폴더를 연결해 주세요");
+      }
 
       // 사용자는 배너를 닫는다.
       await closeBanner(cr.page);
@@ -134,22 +137,26 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
       const afterRestart = await bannerVisible(cr.page);
       const keys = await cr.page.evaluate(() => ({
         legacyDismissed: localStorage.getItem("marblo.cliSetupGateDismissed"),
-        progress: localStorage.getItem("marblo.onboardingProgress"),
+        progress: localStorage.getItem("marblo.onboarding.progress"),
       }));
       await cr.shot("A2-banner-after-restart");
       console.log(
-        `[cleanroom][A2] 첫부팅=${first} 닫은직후=${afterClose} 재시작후=${afterRestart}`,
+        `[cleanroom][A2] 첫부팅=${first} 제목="${firstTitle}" 닫은직후=${afterClose} 재시작후=${afterRestart}`,
         keys,
       );
 
-      // ── 현재 동작(=활성화 장벽 F2)을 고정한다 ─────────────────────────
-      // 원인: 배너를 띄우는 post-auth 분기는 레거시 키
-      // `marblo.cliSetupGateDismissed` 만 읽는데(useCliSetupEngine), 그 키를
-      // 쓰는 코드는 레거시 모달(CliSetupGate)뿐이다. 셸에는 그 키를 세우는
-      // 경로가 없어서 "다시 보지 않기"가 성립하지 않는다.
-      // ★ 이 expect 가 깨지면 = 고쳐진 것. 기대값을 false 로 뒤집고 F2 를 닫아라.
-      expect(afterRestart).toBe(true);
-      expect(keys.legacyDismissed).toBeNull();
+      // ── F2 수정 후의 계약 ───────────────────────────────────────────────
+      // 배너 ✕ 는 그 자리에서 사라지고(afterClose), 재시작해도 돌아오지 않는다.
+      // 원래 결함: post-auth 분기가 레거시 키 `marblo.cliSetupGateDismissed`
+      // 만 읽는데 셸에는 그 키를 세우는 경로가 없어서 "다시 보지 않기"가
+      // 성립하지 않았다. 이제 dismissed 는 `onboardingProgress.dismissed`
+      // 한 곳이고(레거시 키는 콜드스타트 seed 로 미러링), 배너 ✕ 가 그걸 쓴다.
+      expect(afterClose).toBe(false);
+      expect(afterRestart).toBe(false);
+      // 두 표면이 같은 사실을 말하는지 — 미러링이 살아 있어야 콜드스타트
+      // seed(parseProgress)가 같은 답을 낸다.
+      expect(keys.legacyDismissed).toBe("1");
+      expect(JSON.parse(keys.progress ?? "{}").dismissed).toBe(true);
     } finally {
       await cr.close();
     }
@@ -321,16 +328,26 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
       // 인증 스텝을 연 채로: CLI 계정연결 외의 경로(벤더 API 키)가 안내되는가.
       await cr.page.locator('button:has-text("인증")').first().click();
       await settle(cr.page, 700);
-      const authBody = await cr.page.locator("body").innerText();
+      // ★ 페이지 전체(body)가 아니라 **열린 스텝의 본문**만 본다. 탭 하단의
+      //   VendorModelsSection("다른 벤더 모델도 붙일 수 있어요", #632)이 항상
+      //   렌더되므로 body 전체를 훑으면 "인증 스텝이 BYOM 을 안내한다"가 항상
+      //   참으로 나온다 — F4 가 묻는 것과 다른 것을 재는 오탐이다.
+      //   "막혔을 때:" 문단은 열린 스텝에만 렌더되므로 그 스텝 섹션이 곧
+      //   인증 스텝의 본문이다.
+      const authStep = cr.page
+        .locator('section:has(p:has-text("막혔을 때:"))')
+        .first();
+      const authBody = await authStep.innerText();
       const mentionsVendorKey = /벤더|API 키|env-swap|GLM|Kimi|MiniMax/.test(
         authBody,
       );
       console.log(
         `[cleanroom][E] 인증 스텝에 벤더키(BYOM) 안내 있음=${mentionsVendorKey}`,
       );
-      // ★ 현재 동작(F4): 온보딩에는 Claude/Codex/Grok/agy CLI 로그인만 있고,
-      //   벤더 API 키(설정 › 벤더 API 키)로 시작하는 경로는 언급되지 않는다.
-      //   고쳐지면 이 기대값을 true 로 뒤집고 F4 를 닫아라.
+      // ★ 현재 동작(F4): 인증 스텝은 Claude/Codex/Grok/agy CLI 로그인만 제시하고,
+      //   벤더 API 키(설정 › 벤더 API 키)로 시작하는 경로는 언급하지 않는다.
+      //   탭 맨 아래 벤더 섹션은 온보딩이 끝나야 펴지므로 ②에서 막힌 유저를
+      //   구해주지 못한다. 고쳐지면 이 기대값을 true 로 뒤집고 F4 를 닫아라.
       expect(mentionsVendorKey).toBe(false);
     } finally {
       await cr.close();

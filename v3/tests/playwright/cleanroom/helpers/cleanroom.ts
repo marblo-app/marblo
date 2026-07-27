@@ -477,13 +477,31 @@ export async function wizardVisible(page: Page): Promise<boolean> {
  * 셸에서의 "온보딩 팝업 영구노출"에 해당한다.
  * ※ 시작하기 탭에 서 있으면 배너는 의도적으로 숨는다(CliSetupHost) — 배너를
  *   관측하려면 다른 탭으로 옮긴 뒤 봐야 한다.
+ * ※ 제목 문자열이 아니라 testid 로 잡는다: 제목은 이제 단계별로 달라진다(F2
+ *   수정). 문구로 잡으면 "제목이 바뀌었다"를 "배너가 사라졌다"로 오독한다.
  */
 export async function bannerVisible(page: Page): Promise<boolean> {
   return page
-    .locator('text="CLI 인증이 필요합니다"')
+    .getByTestId("cli-setup-banner")
     .first()
     .isVisible()
     .catch(() => false);
+}
+
+/** 배너 제목의 실제 문구 — 제목이 상황과 맞는지(F2) 확인용. 없으면 null. */
+export async function bannerTitle(page: Page): Promise<string | null> {
+  const el = page.getByTestId("cli-setup-banner-title").first();
+  if (!(await el.isVisible().catch(() => false))) return null;
+  return (await el.textContent())?.trim() ?? null;
+}
+
+/** 배너의 ✕(닫기 = 다시 띄우지 않기). 배너가 없으면 조용히 통과. */
+export async function dismissBanner(page: Page): Promise<void> {
+  const x = page.getByTestId("cli-setup-banner-dismiss").first();
+  if (await x.isVisible().catch(() => false)) {
+    await x.click().catch(() => {});
+    await page.waitForTimeout(400);
+  }
 }
 
 /** 워크스페이스 셸의 우측 탭 전환 (라벨 = WorkTabs 의 i18n 라벨). */

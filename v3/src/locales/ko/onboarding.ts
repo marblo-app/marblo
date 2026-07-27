@@ -451,9 +451,17 @@ export const onboarding = {
     "아무 폴더나 괜찮습니다. 빈 폴더로 시작해도 되고, PRD 는 나중에 직접 써도 됩니다.",
   "onboarding.startHere.alt.firstTicket":
     "전달이 실패하면 오케스트레이터 터미널이 떠 있는지 확인한 뒤 다시 눌러 주세요.",
-  // 인라인 배너(모달 대체) — 스폰이 인증으로 막힌 순간
-  "onboarding.startHere.banner.title": "CLI 인증이 필요합니다",
+  // 인라인 배너(모달 대체) — 온보딩이 아직 남아 있는 순간.
+  // ★제목은 단계별로 갈라야 한다. 예전엔 "CLI 인증이 필요합니다" 한 문장이
+  //   고정이라, 인증을 마치고 폴더만 없는 유저에게 제목은 "인증 필요"인데
+  //   본문(why.prd)은 "폴더를 연결해야…" 라고 서로 다른 말을 했다 (장벽 F2).
+  "onboarding.startHere.banner.title.install":
+    "오케스트레이터 CLI 설치가 필요합니다",
+  "onboarding.startHere.banner.title.auth": "CLI 인증이 필요합니다",
+  "onboarding.startHere.banner.title.prd": "작업할 폴더를 연결해 주세요",
+  "onboarding.startHere.banner.title.firstTicket": "첫 티켓만 만들면 끝납니다",
   "onboarding.startHere.banner.cta": "시작하기 열기",
+  "onboarding.startHere.banner.dismiss": "이 안내 닫기(다시 띄우지 않기)",
 
   // — 시작하기 탭: 다른 벤더 모델 붙이기 (XHXSIdPN) —
   // ★벤더 이름·모델 id 가 이 표에 하나도 없다. 목록은 model-registry 파생이고

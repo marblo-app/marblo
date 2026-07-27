@@ -17,6 +17,12 @@ export interface CliProbe {
  * "User clicked 나중에/Skip." Predates the Start Here tab, so it is also the
  * legacy seed for OnboardingProgress.dismissed — keep the key stable or every
  * existing user gets re-prompted (regression bRABKQX7).
+ *
+ * ★ NOT the source of truth, and nothing outside `onboardingProgressStore` may
+ * read or write it. `OnboardingProgress.dismissed` is the record; the store
+ * mirrors it onto this key purely so the next cold start seeds from the same
+ * answer. Reading this flag directly is what made the shell's onboarding banner
+ * un-dismissable — only the legacy modal ever wrote it (activation barrier F2).
  */
 export const DISMISSED_KEY = "marblo.cliSetupGateDismissed";
 /** One-shot guard for the background auto-install pass (FT-8). */
