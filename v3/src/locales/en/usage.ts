@@ -111,6 +111,35 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.rateLimit.footer":
     "Rows are per vendor — GLM, MiniMax and Kimi have their own quotas even though they spawn the same claude binary. Numbers are shown only for vendors with a real account probe (Claude/Anthropic, Codex/OpenAI); the rest publish no query API and stay empty. Claude weekly limit display is wired up later (Phase 1b, statusline capture).",
 
+  // ── Model fact sheet (collapsible, collapsed by default) ─
+  // Benchmark names (SWE-bench Verified/Pro …) and harness names stay literal —
+  // they must match the source page verbatim so numbers can be cross-checked.
+  "usage.factSheet.title": "Model pricing · performance · context",
+  "usage.factSheet.hint": "expand to view",
+  "usage.factSheet.loading": "Loading model facts…",
+  "usage.factSheet.error":
+    "Could not load model facts (no response from the Electron bridge).",
+  "usage.factSheet.retry": "Retry",
+  "usage.factSheet.empty":
+    "No models to show. This table reads straight from the model registry.",
+  "usage.factSheet.colModel": "Model",
+  "usage.factSheet.colInput": "Input $/1M",
+  "usage.factSheet.colOutput": "Output $/1M",
+  "usage.factSheet.colBench": "SWE-bench (rough)",
+  "usage.factSheet.colContext": "Context",
+  "usage.factSheet.maxOutput": "max output {n}",
+  "usage.factSheet.estimated": "est.",
+  "usage.factSheet.estimatedTip":
+    "The vendor's list price can't be taken at face value here (flat-rate subscription, so the real marginal cost differs — or the billing axis is different altogether). This is a conservative upper bound that avoids under-reporting.",
+  "usage.factSheet.unknown": "needs checking",
+  "usage.factSheet.benchNoRow":
+    "No benchmark reference row for this model yet.",
+  "usage.factSheet.altMeasure": "other run {harness} · {date}: {score}%",
+  "usage.factSheet.altMeasureTip":
+    "Another measurement of the same model on the same benchmark — a different scaffold (vendor-internal vs the official leaderboard), or the same vendor publishing again on a different date. This is how much it moves, so read the column as an order of magnitude, not a ranking.",
+  "usage.factSheet.footer":
+    "Prices are read verbatim from the model registry (electron/model-registry.ts) as the single source — add a model there and it shows up here automatically. SWE-bench is four different problem sets, and each model reports under different benchmark and scaffold conditions, so these are rough figures. Every number links to its primary source and the date it was read; cells with no official number say 'needs checking' rather than guessing.",
+
   // ── Relative reset time (fmtReset) ──────────────────────
   "usage.reset.soon": "soon",
   "usage.reset.days": "in {n} days",

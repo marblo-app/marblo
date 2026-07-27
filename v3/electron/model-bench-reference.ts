@@ -158,6 +158,12 @@ const SRC = {
   xaiGrok45: "https://x.ai/news/grok-4-5",
   kimiK26Card: "https://huggingface.co/moonshotai/Kimi-K2.6",
   kimiK27CodeCard: "https://huggingface.co/moonshotai/Kimi-K2.7-Code",
+  kimiK3Card: "https://huggingface.co/moonshotai/Kimi-K3",
+  zaiGlm52: "https://z.ai/blog/glm-5.2",
+  minimaxM3Card: "https://huggingface.co/MiniMaxAI/MiniMax-M3",
+  minimaxM27Card: "https://huggingface.co/MiniMaxAI/MiniMax-M2.7",
+  openaiGpt54: "https://platform.openai.com/docs/models/gpt-5.4",
+  openaiGpt54Mini: "https://platform.openai.com/docs/models/gpt-5.4-mini",
 } as const;
 
 /**
@@ -499,6 +505,191 @@ const REGISTRY_ROWS: BenchRecord[] = [
     asOf: "2026-04-23",
     note: 'GPT-5.5 런치 발표. 표기가 "SWE-Bench Pro (Public)" 이고 각주로 "Labs have noted evidence of memorization on this eval" 를 달았다.',
   },
+
+  // ── ★gpt-5.4 계열: 공식 모델 페이지에 벤치 수치 자체가 없다 ────────────
+  // 규율 3(빈 칸을 침묵시키지 않는다). 아래 두 행이 "여기까지 찾아봤다" 는
+  // 음성 증거다 — 다음 사람이 같은 페이지를 다시 뒤지지 않는다.
+  {
+    model: "gpt-5.4",
+    kind: "registry",
+    benchmark: "swe-bench-pro",
+    version: "unspecified",
+    harness: { name: "vendor-internal (OpenAI)" },
+    score: null,
+    source: SRC.openaiGpt54,
+    sourceKind: "model-vendor",
+    asOf: "2026-07-27",
+    note: "no official number: OpenAI 공식 모델 페이지(2026-07-27 확인)는 컨텍스트·단가·knowledge cutoff 만 싣고 벤치 수치를 싣지 않는다. GPT-5.6 GA 발표문의 Coding 비교표에도 5.4 열은 없다(5.6 sol/terra/luna + 5.5 만).",
+  },
+  {
+    model: "gpt-5.4-mini",
+    kind: "registry",
+    benchmark: "swe-bench-pro",
+    version: "unspecified",
+    harness: { name: "vendor-internal (OpenAI)" },
+    score: null,
+    source: SRC.openaiGpt54Mini,
+    sourceKind: "model-vendor",
+    asOf: "2026-07-27",
+    note: "no official number: gpt-5.4 와 같은 사유(공식 모델 페이지에 벤치 없음).",
+  },
+
+  // ── Z.ai GLM-5.2 (MTtCVCP4 로 레지스트리 편입된 현행 플래그십) ──────────
+  // ★Verified 가 아니라 **Pro** 다. 아래 null 행이 그 사실을 남긴다 —
+  // glm-4.7(73.8)은 Verified 라서, 두 값을 같은 열에 놓으면 세대가 내려가며
+  // 점수가 떨어진 것처럼 보이는 착시가 생긴다.
+  {
+    model: "glm-5.2",
+    kind: "registry",
+    benchmark: "swe-bench-pro",
+    version: "unspecified",
+    harness: {
+      name: "vendor-internal (Z.ai)",
+      config:
+        "OpenHands + 자체 instruction prompt, temperature 1, top_p 1, max_new_tokens 32k, 400K 컨텍스트(블로그 Evaluation Details)",
+    },
+    score: 62.1,
+    source: SRC.zaiGlm52,
+    sourceKind: "model-vendor",
+    asOf: "2026-06-16",
+    note: "GLM-5.2 발표 블로그 Full Benchmark Table 의 Coding 절. ★같은 표의 Claude Opus 4.8(69.2)·GPT-5.5(58.6) 열이 각 벤더 1차 출처와 정확히 일치해 표 자체가 교차확인된다.",
+  },
+  {
+    model: "glm-5.2",
+    kind: "registry",
+    benchmark: "swe-bench-verified",
+    version: "unspecified",
+    harness: { name: "vendor-internal (Z.ai)" },
+    score: null,
+    source: SRC.zaiGlm52,
+    sourceKind: "model-vendor",
+    asOf: "2026-06-16",
+    note: "no official number: GLM-5.2 발표 블로그의 Coding 절은 SWE-bench Pro / NL2Repo / DeepSWE / ProgramBench 만 싣고 Verified 는 없다(직전 세대 glm-4.7 은 Verified 73.8 로 공개했다 — 벤더가 보고 벤치를 바꿨다).",
+  },
+
+  // ── MiniMax (두 번째 env-swap 벤더의 두 행) ────────────────────────────
+  // 출처는 **오픈웨이트 모델카드의 Eval Results 메타데이터**다(HF 가 `*` 로
+  // self-reported 표기). 벤더 자기보고이므로 sourceKind=model-vendor 이고,
+  // 하네스는 카드가 밝히지 않아 "vendor-internal" 까지만 적는다.
+  {
+    model: "MiniMax-M3",
+    kind: "registry",
+    benchmark: "swe-bench-verified",
+    version: "unspecified",
+    harness: { name: "vendor-internal (MiniMax)" },
+    score: 80.5,
+    source: SRC.minimaxM3Card,
+    sourceKind: "model-vendor",
+    asOf: "2026-07-01",
+    note: '공식 HF 모델카드(MiniMaxAI 조직)의 Eval Results 메타데이터, self-reported(`*`). asOf 는 2026-07-27 관측 시점의 카드 갱신 표기("Updated 26 days ago")에서 환산했다 — 카드가 정확한 발간일을 밝히지 않는다.',
+  },
+  {
+    model: "MiniMax-M3",
+    kind: "registry",
+    benchmark: "swe-bench-pro",
+    version: "unspecified",
+    harness: { name: "vendor-internal (MiniMax)" },
+    score: 59.0,
+    source: SRC.minimaxM3Card,
+    sourceKind: "model-vendor",
+    asOf: "2026-07-01",
+    note: "같은 카드의 ScaleAI/SWE-bench_Pro 행(59). ★Z.ai GLM-5.2 블로그 비교표도 MiniMax M3 를 59.0 으로 적어 교차확인된다(경쟁사 인용이지만 값이 같다).",
+  },
+  {
+    model: "MiniMax-M2.7",
+    kind: "registry",
+    benchmark: "swe-bench-pro",
+    version: "unspecified",
+    harness: { name: "vendor-internal (MiniMax)" },
+    score: 56.2,
+    source: SRC.minimaxM27Card,
+    sourceKind: "model-vendor",
+    asOf: "2026-05-27",
+    note: '카드 본문 "On SWE-Pro, M2.7 achieved 56.22%, matching GPT-5.3-Codex" + Eval Results 메타데이터(56.2). asOf 는 카드 표기 갱신일(Updated May 27).',
+  },
+  {
+    model: "MiniMax-M2.7",
+    kind: "registry",
+    benchmark: "swe-bench-multilingual",
+    version: "unspecified",
+    harness: { name: "vendor-internal (MiniMax)" },
+    score: 76.5,
+    source: SRC.minimaxM27Card,
+    sourceKind: "model-vendor",
+    asOf: "2026-05-27",
+    note: '카드 본문 "SWE Multilingual (76.5)". 같은 문장의 "Multi SWE Bench (52.7)" 은 우리 4종 중 어디에도 대응하지 않아 담지 않는다.',
+  },
+  {
+    model: "MiniMax-M2.7",
+    kind: "registry",
+    benchmark: "swe-bench-verified",
+    version: "unspecified",
+    harness: { name: "vendor-internal (MiniMax)" },
+    score: null,
+    source: SRC.minimaxM27Card,
+    sourceKind: "model-vendor",
+    asOf: "2026-05-27",
+    note: "no official number: M2.7 카드는 SWE-Pro / SWE Multilingual / Multi SWE Bench 만 싣고 Verified 는 싣지 않는다(같은 벤더의 M3 카드에는 Verified 80.5 가 있다).",
+  },
+
+  // ── Moonshot Kimi Code (세 번째 env-swap 벤더의 세 행) ──────────────────
+  // 셋 다 빈 칸이고, 그것이 이 벤더에 대해 우리가 아는 전부다.
+  ...(["k3", "k3-256k"] as const).map(
+    (model): BenchRecord => ({
+      model,
+      kind: "registry",
+      benchmark: "swe-bench-verified",
+      version: "unspecified",
+      harness: { name: "vendor-internal (Moonshot)" },
+      score: null,
+      source: SRC.kimiK3Card,
+      sourceKind: "model-vendor",
+      asOf: "2026-07-27",
+      note: "no official number: 2026-07-27 기준 공식 HF 카드가 아직 'Upcoming release'(카운트다운만 있고 벤치표 없음). 오픈웨이트 공개 후 재수집 대상.",
+    }),
+  ),
+  {
+    model: "kimi-for-coding",
+    kind: "registry",
+    benchmark: "swe-bench-verified",
+    version: "unspecified",
+    harness: { name: "vendor-internal (Moonshot, Kimi Code CLI)" },
+    score: null,
+    source: SRC.kimiK27CodeCard,
+    sourceKind: "model-vendor",
+    asOf: "2026-06-15",
+    note: "no official number: 이 id 의 실체인 Kimi K2.7 Code 의 공식 모델카드가 SWE-bench 를 아예 보고하지 않는다(자체 Kimi Code Bench v2 / Program Bench / MLS-Bench Lite / Kimi Claw 24/7 Bench 로 대체). 아래 참조행의 베이스 모델 K2.6(Verified 80.2)이 그나마 가까운 대용이다.",
+  },
+
+  // ── xAI Grok 4.5 ──────────────────────────────────────────────────────
+  // ★종전엔 `kind: "reference"`("Grok 4.5")였다. 이 모델이 레지스트리에
+  // 편입되면서(harness=grok, provider=xai) 규율 4 상 registry 행이 맞다 —
+  // 벤더 표기명과 우리 id 가 공백/하이픈만 달라 역방향 가드를 우연히 피해
+  // 갔을 뿐이다. id 를 구체 id 로 바꾸면 사용량 탭 조회가 실제로 닿는다.
+  {
+    model: "grok-4.5",
+    kind: "registry",
+    benchmark: "swe-bench-verified",
+    version: "unspecified",
+    harness: { name: "vendor-internal (xAI)" },
+    score: null,
+    source: SRC.xaiGrok45,
+    sourceKind: "model-vendor",
+    asOf: "2026-07-16",
+    note: "no official number: Grok 4.5 발표는 SWE Bench Pro / DeepSWE / SWE Marathon / Terminal-Bench 만 싣고 Verified 는 없다. swebench.com 리더보드에도 Grok 항목 자체가 없다.",
+  },
+  {
+    model: "grok-4.5",
+    kind: "registry",
+    benchmark: "swe-bench-pro",
+    version: "unspecified",
+    harness: { name: "vendor-internal (xAI)" },
+    score: 64.7,
+    source: SRC.xaiGrok45,
+    sourceKind: "model-vendor",
+    asOf: "2026-07-16",
+    note: "발표문 SWE Bench Pro resolve rate.",
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -573,44 +764,11 @@ const REFERENCE_ROWS: BenchRecord[] = [
   },
 
   // ── xAI Grok ──────────────────────────────────────────────────────────
-  {
-    model: "Grok 4.5",
-    kind: "reference",
-    benchmark: "swe-bench-verified",
-    version: "unspecified",
-    harness: { name: "vendor-internal (xAI)" },
-    score: null,
-    source: SRC.xaiGrok45,
-    sourceKind: "model-vendor",
-    asOf: "2026-07-16",
-    note: "no official number: Grok 4.5 발표는 SWE Bench Pro / DeepSWE / SWE Marathon / Terminal-Bench 만 싣고 Verified 는 없다. swebench.com 리더보드에도 Grok 항목 자체가 없다.",
-  },
-  {
-    model: "Grok 4.5",
-    kind: "reference",
-    benchmark: "swe-bench-pro",
-    version: "unspecified",
-    harness: { name: "vendor-internal (xAI)" },
-    score: 64.7,
-    source: SRC.xaiGrok45,
-    sourceKind: "model-vendor",
-    asOf: "2026-07-16",
-    note: "발표문 SWE Bench Pro resolve rate.",
-  },
+  // ★Grok 4.5 참조행은 위 REGISTRY_ROWS 로 옮겼다(레지스트리 편입 완료).
+  //   Kimi K2.7 Code 도 같은 이유로 `kimi-for-coding` registry 행이 됐다.
+  //   아래 남은 참조행들은 아직 우리 하네스에 없는 모델뿐이다.
 
-  // ── Moonshot Kimi ─────────────────────────────────────────────────────
-  {
-    model: "Kimi K2.7 Code",
-    kind: "reference",
-    benchmark: "swe-bench-verified",
-    version: "unspecified",
-    harness: { name: "vendor-internal (Moonshot, Kimi Code CLI)" },
-    score: null,
-    source: SRC.kimiK27CodeCard,
-    sourceKind: "model-vendor",
-    asOf: "2026-06-15",
-    note: "no official number: 공식 모델카드가 SWE-bench 를 아예 보고하지 않는다(자체 Kimi Code Bench v2 / Program Bench / MLS-Bench Lite / Kimi Claw 24/7 Bench 로 대체). 아래 베이스 모델 K2.6 행이 그나마 가까운 대용.",
-  },
+  // ── Moonshot Kimi (베이스 모델 — 라우팅 대상 아님) ────────────────────
   {
     model: "Kimi K2.6",
     kind: "reference",

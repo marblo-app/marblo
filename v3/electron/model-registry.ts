@@ -463,10 +463,14 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
     capability: "mid",
     efforts: EFFORTS_CLASSIC,
     defaultEffort: "medium",
-    // TODO(단가확정): PR#596 크롤이 5.4 본체 행을 확정하지 못했다(5.4-mini 는 확정).
-    // 과소보고를 피하려고 5.5 와 동일하게 보수적으로 잡아둔다. 서베이(db3qs0o6)
-    // 결과가 나오면 estimated 를 지우고 실단가로 교체할 것.
-    pricing: { inputPer1M: 5, outputPer1M: 30, estimated: true },
+    // ★확정(2026-07-27, gstack /browse): platform.openai.com/docs/models/gpt-5.4
+    // 의 Pricing 절이 Input $2.50 / Cached $0.25 / Output $15.00 을 싣는다.
+    // 종전 값은 "확정 못 해서 5.5 와 같게 잡아둔" 보수적 추정치($5/$30)였고,
+    // 실단가의 **2배**였다 — 즉 5.4 를 쓴 티켓의 비용이 과대보고돼 왔다
+    // (cost-tracker 규율은 과소보고를 금할 뿐, 과대보고도 라우팅 학습을
+    //  오염시키는 방향은 같다). 같은 화면의 Quick comparison 표도 GPT-5.4 를
+    // $2.50 로 적어 교차확인된다.
+    pricing: { inputPer1M: 2.5, outputPer1M: 15 },
     verified: CODEX_PROBE,
     status: "active",
   },

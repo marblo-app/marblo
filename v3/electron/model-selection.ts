@@ -622,7 +622,7 @@ export function humanizeClaudeModelId(id: string): string {
  * `Record<VendorId, string>` 이 exhaustive 라, 레지스트리에 새 벤더가 들어오면
  * 컴파일이 여기서 멈춘다(라벨을 잊은 채 조용히 벤더 id 가 UI 에 노출되지 않는다).
  */
-const VENDOR_LABEL: Readonly<Record<VendorId, string>> = {
+export const VENDOR_LABEL: Readonly<Record<VendorId, string>> = {
   anthropic: "Claude",
   openai: "Codex",
   google: "Gemini",

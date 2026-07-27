@@ -111,6 +111,34 @@ export const usage = {
   "usage.rateLimit.footer":
     "행은 벤더 단위입니다 — 같은 claude 바이너리로 떠도 GLM·MiniMax·Kimi 는 별도 쿼터입니다. 수치는 계정 프로브가 실재하는 Claude(Anthropic)·Codex(OpenAI) 만 표시하고, 나머지 벤더는 조회 API 가 없어 비웁니다. Claude 주간 한도 표기는 후속(Phase 1b, statusline 캡처)에서 연결됩니다.",
 
+  // ── Model fact sheet (접이식 · 기본 접힘) ────────────────
+  // 벤치 이름(SWE-bench Verified/Pro …)과 하네스 이름은 고유명사라 번역하지
+  // 않는다 — 출처 화면에 적힌 표기가 그대로 보여야 대조가 된다.
+  "usage.factSheet.title": "모델 단가 · 성능 · 컨텍스트",
+  "usage.factSheet.hint": "펼쳐서 보기",
+  "usage.factSheet.loading": "모델 정보를 불러오는 중…",
+  "usage.factSheet.error":
+    "모델 정보를 불러오지 못했습니다(Electron 브리지 응답 없음).",
+  "usage.factSheet.retry": "다시 시도",
+  "usage.factSheet.empty":
+    "표시할 모델이 없습니다. 이 표는 모델 레지스트리에서 직접 읽습니다.",
+  "usage.factSheet.colModel": "모델",
+  "usage.factSheet.colInput": "Input $/1M",
+  "usage.factSheet.colOutput": "Output $/1M",
+  "usage.factSheet.colBench": "SWE-bench (개략)",
+  "usage.factSheet.colContext": "컨텍스트",
+  "usage.factSheet.maxOutput": "최대 출력 {n}",
+  "usage.factSheet.estimated": "추정",
+  "usage.factSheet.estimatedTip":
+    "벤더 공식 리스트 단가를 그대로 쓸 수 없는 칸입니다(정액 구독 경로라 실 한계비용이 다르거나, 과금축 자체가 다름). 과소보고를 피하는 방향의 보수적 상한입니다.",
+  "usage.factSheet.unknown": "확인 필요",
+  "usage.factSheet.benchNoRow": "이 모델의 벤치 참조 행이 아직 없습니다.",
+  "usage.factSheet.altMeasure": "타 측정 {harness} · {date}: {score}%",
+  "usage.factSheet.altMeasureTip":
+    "같은 모델·같은 벤치의 다른 측정입니다. 스캐폴드가 다르거나(벤더 자체 vs 공식 리더보드), 같은 벤더가 다른 날 다시 발표한 값입니다. 이만큼 움직이므로 이 열은 순위표가 아니라 자릿수 감각입니다.",
+  "usage.factSheet.footer":
+    "단가는 모델 레지스트리(electron/model-registry.ts) 단일소스에서 그대로 읽습니다 — 레지스트리에 모델이 추가되면 이 표에 자동 반영됩니다. SWE-bench 는 문제집합이 다른 4종이고 모델마다 벤치·스캐폴드 조건이 달라 **개략** 값입니다. 각 수치의 1차 출처와 관측일은 셀 아래 링크에 있고, 공식 수치를 못 찾은 칸은 지어내지 않고 '확인 필요' 로 둡니다.",
+
   // ── Relative reset time (fmtReset) ──────────────────────
   "usage.reset.soon": "곧",
   "usage.reset.days": "{n}일 후",

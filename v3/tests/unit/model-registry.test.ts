@@ -291,7 +291,9 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
   });
 
   it("추정 단가는 estimated 로 표시돼 사실로 위장하지 않는다", () => {
-    // gpt-5.4  — PR#596 크롤이 본체 행 단가를 미확정.
+    // ★gpt-5.4 는 목록에서 빠졌다(2026-07-27 BOwRIdND): platform.openai.com 의
+    //            공식 모델 페이지가 $2.50/$15.00 을 실어 추정이 사실로 교체됐다.
+    //            종전 추정치 $5/$30 은 실단가의 2배였다.
     // glm-*    — 공식 API 리스트 단가는 확인했지만(docs.z.ai/guides/overview/pricing)
     //            우리 접근 경로가 정액 Coding Plan 이라 per-token 이 실비용이 아니다.
     //            상한으로 잡아두고 쿼터 기반 비용축(서베이 V1-5)에서 확정한다.
@@ -304,7 +306,6 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
     //            것이고, 우리가 실제로 태우는 것은 구독 쿼터다. k3-256k 는 가격표에
     //            별 행이 없어 k3 값을 그대로 상한으로 쓴다(과소보고 회피).
     expect(estimatedPricingModelIds()).toEqual([
-      "gpt-5.4",
       "grok-4.5",
       "glm-5.2",
       "glm-4.7",
@@ -314,9 +315,12 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
       "k3-256k",
       "kimi-for-coding",
     ]);
-    // 추정치는 과소보고를 피하려고 보수적으로(=5.5 와 동일하게) 잡는다.
-    expect(perTokenRateFor("gpt-5.4").outputPer1M).toBeGreaterThanOrEqual(
-      perTokenRateFor("gpt-5.5").outputPer1M,
-    );
+    // ★gpt-5.4 확정 단가($2.50/$15.00, platform.openai.com/docs/models/gpt-5.4).
+    // 이 두 줄이 "추정치를 지웠다" 가 아니라 "실단가로 교체했다" 를 못박는다.
+    expect(perTokenRateFor("gpt-5.4")).toEqual({
+      inputPer1M: 2.5,
+      outputPer1M: 15,
+    });
+    expect(estimatedPricingModelIds()).not.toContain("gpt-5.4");
   });
 });

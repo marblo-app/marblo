@@ -33,6 +33,7 @@ import type {
   VendorUsageRow,
 } from "../../lib/usageBreakdown";
 import { VendorCreditsPanel } from "./VendorCreditsPanel";
+import { ModelFactSheet } from "./ModelFactSheet";
 
 /**
  * Top-level Usage tab. Surfaces what used to be buried two levels deep
@@ -198,6 +199,11 @@ export function UsagePage() {
         </div>
         <PeriodSelector value={periodId} onChange={setPeriodId} />
       </div>
+
+      {/* 모델 단가·성능·컨텍스트 참고표 — 기본 접힘. 아래 섹션들이 전부 "우리가
+          쓴 실적" 인 반면 이 표만 "모델 자체의 사실" 이라, 이 탭의 1차 질문
+          ("얼마 썼나")을 밀어내지 않도록 접어 둔다. */}
+      <ModelFactSheet />
 
       {/* Totals — 선택 기간(BQ) 기준. BQ 행이 없으면 라이브 누적으로 폴백하고
           그 사실을 라벨로 드러낸다(두 수치는 답하는 질문이 다르다). */}

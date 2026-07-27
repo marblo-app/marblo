@@ -328,14 +328,22 @@ describe("model-bench-reference / routing 그래프 미주입", () => {
     }
   });
 
-  it("electron 전체에서 이 모듈을 import 하는 프로덕션 코드가 아직 없다", () => {
-    const importers = walkTs(ELECTRON_DIR).filter(
-      (f) =>
-        !f.endsWith("model-bench-reference.ts") &&
-        IMPORT_RE.test(readFileSync(f, "utf8")),
-    );
-    // 나중에 UI/런북이 읽어가는 건 괜찮지만, 그때도 **라우팅 코드**여선 안 된다.
-    // 목록이 늘면 이 테스트가 그 사실을 리뷰 앞으로 끌고 온다.
+  it("이 모듈을 읽는 프로덕션 코드는 허용목록 안에만 있다(라우팅 코드 아님)", () => {
+    // 종전엔 "importer 가 하나도 없다" 였다. 지금은 사용량 탭 정보표
+    // (`model-fact-sheet.ts`)가 읽는다 — 표시 전용이고 라우팅 결정에 관여하지
+    // 않는다. 허용목록으로 바꾼 이유는 위 주석 그대로다: **목록이 늘면 이
+    // 테스트가 그 사실을 리뷰 앞으로 끌고 온다.** 라우팅 모듈이 여기 들어오려
+    // 하면 위 테스트(routing-graph/graph-updater/routing-effectiveness)가 먼저
+    // 막는다.
+    const ALLOWED = ["model-fact-sheet.ts"];
+    const importers = walkTs(ELECTRON_DIR)
+      .filter(
+        (f) =>
+          !f.endsWith("model-bench-reference.ts") &&
+          IMPORT_RE.test(readFileSync(f, "utf8")),
+      )
+      .map((f) => f.split("/").pop() ?? f)
+      .filter((name) => !ALLOWED.includes(name));
     expect(importers).toEqual([]);
   });
 
@@ -408,8 +416,14 @@ describe("model-bench-reference / 수치 스팟체크(출처 대조)", () => {
       ),
     ).toBe(true);
 
-    // Grok 4.5 는 Verified 가 없고 Pro 만 있다.
-    const grokRows = benchRowsForModel("Grok 4.5");
+    // ★Grok 4.5 도 같은 전환을 거쳤다: 레지스트리에 `grok-4.5` 행이 생기면서
+    // 참조행 → registry 행이 됐고, 표기도 벤더 발표문의 "Grok 4.5"(공백)가
+    // 아니라 레지스트리 구체 id 다. 종전 표기는 공백/하이픈 차이 때문에
+    // 역방향 가드를 우연히 피해 갔고, 그 상태에서는 사용량 탭이 모델 id 로
+    // 조회해도 이 행에 닿지 못했다.
+    expect(benchRowsForModel("Grok 4.5")).toEqual([]);
+    const grokRows = benchRowsForModel("grok-4.5");
+    expect(grokRows.every((r) => r.kind === "registry")).toBe(true);
     expect(
       grokRows.find((r) => r.benchmark === "swe-bench-verified")?.score,
     ).toBeNull();

@@ -491,8 +491,54 @@ interface QuickLaneVendorGroup {
   models: QuickLaneModelOption[];
 }
 
+/**
+ * 사용량 탭 정보표의 벤치 칸. 형태는 `electron/model-fact-sheet.ModelFactBench`
+ * 와 같다. ★`score: null` 은 "0점" 이 아니라 **공식 수치가 없다** 는 뜻이고,
+ * `note` 가 왜 비었는지를 들고 있다.
+ */
+interface ModelFactBench {
+  benchmark: string;
+  score: number | null;
+  /** 점수를 낸 스캐폴드(`name@version`). 이게 다르면 다른 실험이다. */
+  harness: string;
+  source: string;
+  sourceKind: "model-vendor" | "benchmark-owner" | "rival-vendor";
+  asOf: string;
+  note?: string;
+}
+
+/** 정보표의 컨텍스트 칸. `tokens: null` = 공식 수치 미확인. */
+interface ModelFactContext {
+  tokens: number | null;
+  maxOutputTokens?: number;
+  source: string;
+  asOf: string;
+  note?: string;
+}
+
+/**
+ * 정보표 한 줄 = 레지스트리 한 행. 단가는 `model-registry.pricing` 단일소스
+ * 파생이라 레지스트리에 모델이 늘면 이 표도 자동으로 는다.
+ */
+interface ModelFactRow {
+  modelId: string;
+  label: string;
+  vendor: string;
+  vendorLabel: string;
+  harness: string;
+  capability: "cheap" | "mid" | "top" | "frontier";
+  inputPer1M: number;
+  outputPer1M: number;
+  estimatedPricing: boolean;
+  context: ModelFactContext | null;
+  bench: ModelFactBench | null;
+  /** 같은 벤치의 다른 하네스 점수(있으면 "스캐폴드가 점수를 바꾼다"는 증거). */
+  benchAlternates: ModelFactBench[];
+}
+
 interface ModelsAPI {
   quickLaneCatalog: () => Promise<QuickLaneVendorGroup[]>;
+  factSheet: () => Promise<ModelFactRow[]>;
 }
 
 interface OrchestratorModelAPI {

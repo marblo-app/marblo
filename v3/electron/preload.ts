@@ -595,6 +595,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
      * ★키 **이름**과 boolean 만 건너온다(시크릿 값은 절대 안 넘어온다).
      */
     quickLaneCatalog: () => ipcRenderer.invoke("models:quickLaneCatalog"),
+    /**
+     * 사용량 탭 상단 정보표(단가·개략 SWE-bench·컨텍스트). `model-registry` +
+     * 컨텍스트/벤치 참조표의 조인이고, env·시크릿은 지나가지 않는다.
+     */
+    factSheet: () => ipcRenderer.invoke("models:factSheet"),
   },
   orchestratorModel: {
     // projectId 를 주면 그 프로젝트의 오케가 마지막으로 돈 모델을 우선 반환/기록
