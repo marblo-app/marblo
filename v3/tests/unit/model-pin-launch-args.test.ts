@@ -17,6 +17,7 @@ import {
   AgentConfigGenerator,
   resetClaudeResolution,
   resolveAllHarnessVersions,
+  type LaunchConfig,
 } from "../../electron/agent-config";
 import {
   spawnedModelFromArgs,
@@ -73,6 +74,17 @@ function launchCommand(model: ModelType, baseCommand = ""): string {
     TMP,
   );
   return cfg.command;
+}
+
+function launchConfig(
+  model: ModelType,
+  agentId = `ag-cfg-${model}-${Math.random()}`,
+): LaunchConfig {
+  const gen = new AgentConfigGenerator();
+  return gen.getLaunchConfig(
+    { id: agentId, model, role: "backend", command: "" },
+    TMP,
+  );
 }
 
 /** `--model` 뒤 값. 없으면 undefined(= 모델을 핀하지 않은 launch). */
@@ -227,6 +239,63 @@ describe("grok — 검증된 CLI 경로와 버전 배지", () => {
 
   it("resolveAllHarnessVersions 가 grok 배지 키를 포함한다", () => {
     expect(resolveAllHarnessVersions()).toHaveProperty("grok");
+  });
+});
+
+describe("grok — 격리 GROK_HOME 인증 전파", () => {
+  let home: string;
+  let savedXaiApiKey: string | undefined;
+  let homedirSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-grok-home-"));
+    fs.mkdirSync(path.join(home, ".grok"), { recursive: true });
+    savedXaiApiKey = process.env.XAI_API_KEY;
+    delete process.env.XAI_API_KEY;
+    homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(home);
+  });
+
+  afterEach(() => {
+    homedirSpy.mockRestore();
+    if (savedXaiApiKey === undefined) delete process.env.XAI_API_KEY;
+    else process.env.XAI_API_KEY = savedXaiApiKey;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it("auth.json 이 있으면 격리 GROK_HOME 으로 심볼릭 링크한다", () => {
+    const sourceAuth = path.join(home, ".grok", "auth.json");
+    fs.writeFileSync(sourceAuth, JSON.stringify({ token: "fixture" }), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+
+    const cfg = launchConfig("grok", "grok-auth-linked");
+    const targetAuth = path.join(String(cfg.env.GROK_HOME), "auth.json");
+
+    expect(fs.existsSync(targetAuth)).toBe(true);
+    expect(fs.lstatSync(targetAuth).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(targetAuth)).toBe(sourceAuth);
+  });
+
+  it("auth.json 이 없으면 전파를 조용히 스킵한다", () => {
+    const cfg = launchConfig("grok", "grok-auth-missing");
+    const targetAuth = path.join(String(cfg.env.GROK_HOME), "auth.json");
+
+    expect(fs.existsSync(targetAuth)).toBe(false);
+  });
+
+  it("XAI_API_KEY 가 있으면 브라우저 인증 파일 전파를 스킵한다", () => {
+    fs.writeFileSync(
+      path.join(home, ".grok", "auth.json"),
+      JSON.stringify({ token: "fixture" }),
+      { encoding: "utf-8", mode: 0o600 },
+    );
+    process.env.XAI_API_KEY = "fixture-key";
+
+    const cfg = launchConfig("grok", "grok-auth-env");
+    const targetAuth = path.join(String(cfg.env.GROK_HOME), "auth.json");
+
+    expect(fs.existsSync(targetAuth)).toBe(false);
   });
 });
 

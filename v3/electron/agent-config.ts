@@ -2511,6 +2511,7 @@ export class AgentConfigGenerator {
     fs.mkdirSync(grokHome, { recursive: true });
 
     const userGrokDir = path.join(os.homedir(), ".grok");
+    this.propagateGrokAuthAssets(agentId, userGrokDir, grokHome);
     const userConfigPath = path.join(userGrokDir, "config.toml");
     let preserved = "";
     if (fs.existsSync(userConfigPath)) {
@@ -2546,6 +2547,49 @@ export class AgentConfigGenerator {
     fs.writeFileSync(configPath, tomlSections.join("\n") + "\n", "utf-8");
     this.trackFile(agentId, configPath);
     return configPath;
+  }
+
+  private propagateGrokAuthAssets(
+    agentId: string,
+    userGrokDir: string,
+    grokHome: string,
+  ): void {
+    // If xAI API-key auth is already present, let the CLI use that path. When
+    // both mechanisms exist, env auth is explicit for this process and avoids
+    // coupling the isolated home to browser-login state.
+    if (process.env.XAI_API_KEY?.trim()) return;
+
+    const sourceAuth = path.join(userGrokDir, "auth.json");
+    if (!fs.existsSync(sourceAuth)) return;
+
+    const targetAuth = path.join(grokHome, "auth.json");
+    try {
+      let targetExists = fs.existsSync(targetAuth);
+      if (!targetExists) {
+        try {
+          targetExists = fs.lstatSync(targetAuth).isSymbolicLink();
+        } catch {
+          targetExists = false;
+        }
+      }
+      if (targetExists) {
+        fs.unlinkSync(targetAuth);
+      }
+
+      // Prefer a symlink so browser-login token refreshes in ~/.grok remain
+      // visible to already-created isolated GROK_HOME directories. If symlink
+      // creation is unavailable, copy as a best-effort fallback; copied tokens
+      // can become stale after a refresh, but should not block spawning.
+      try {
+        fs.symlinkSync(sourceAuth, targetAuth);
+      } catch {
+        fs.copyFileSync(sourceAuth, targetAuth);
+        fs.chmodSync(targetAuth, 0o600);
+      }
+      this.trackFile(agentId, targetAuth);
+    } catch {
+      // Fail-safe: auth propagation must never prevent Grok from launching.
+    }
   }
 
   private generateCodexTfPrompts(
