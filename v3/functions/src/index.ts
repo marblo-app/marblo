@@ -69,6 +69,7 @@ import {
   type SubscriptionSnapshot,
 } from "./billing";
 import { resolveEntitledPlan } from "./entitlement";
+import { MAX_COST_LOGS_LIMIT, normalizeCostLogsLimit } from "./costLogsLimit";
 
 function getFirebaseProjectId(): string | undefined {
   if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
@@ -4801,7 +4802,13 @@ export const getCostLogs = functions.https.onCall(async (data, context) => {
   }
 
   const userId = context.auth.uid;
-  const limit: number = data.limit || 200;
+  const { limit, capped } = normalizeCostLogsLimit(data.limit);
+  if (capped) {
+    functions.logger.warn("[getCostLogs] limit capped to protect BigQuery", {
+      requestedLimit: Number(data.limit),
+      maxLimit: MAX_COST_LOGS_LIMIT,
+    });
+  }
 
   const query = `
     SELECT agentId, model, inputTokens, outputTokens,
