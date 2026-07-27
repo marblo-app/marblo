@@ -638,6 +638,16 @@ const VENDOR_LABEL: Readonly<Record<VendorId, string>> = {
 export interface QuickLaneModelOption {
   /** 레지스트리 구체 id. 그대로 `agent:launch` 의 modelPin 으로 나간다. */
   modelId: string;
+  /**
+   * 이 모델로 해석되는 CLI alias 들(`registry.aliases` 그대로).
+   *
+   * 셀렉터는 이 값을 **그리지 않는다** — 핀에는 구체 id 만 쓴다(레지스트리 상단
+   * 규율). 그럼에도 카탈로그에 실어 보내는 이유는 사용량 탭 때문이다: 과거 로그·
+   * 스폰 argv 에는 `grok`·`opus` 같은 alias 가 그대로 남아 있고, 렌더러는
+   * 레지스트리를 import 할 수 없어(경계 규약) 이 채널 말고는 alias→벤더를 알
+   * 방법이 없다. 안 실어 보내면 alias 로 기록된 사용량이 "미등록" 으로 떨어진다.
+   */
+  aliases: string[];
   /** 사람이 읽는 이름(claude 계열만 예쁘게 접고 나머지는 실명 그대로). */
   label: string;
   capability: CapabilityTier;
@@ -698,6 +708,7 @@ export function quickLaneVendorCatalog(): QuickLaneVendorGroup[] {
         .sort((a, b) => rank[b.capability] - rank[a.capability])
         .map<QuickLaneModelOption>((entry) => ({
           modelId: entry.id,
+          aliases: [...entry.aliases],
           label:
             entry.harness === "claude" && entry.provider === "anthropic"
               ? humanizeClaudeModelId(entry.id)

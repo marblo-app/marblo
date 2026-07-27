@@ -16,6 +16,7 @@ import {
   aggregateUsageByVendor,
   buildVendorModelIndex,
   guessVendorFromModelId,
+  isUnattributedModelId,
   mapAgentsToModels,
   periodById,
   resolveModel,
@@ -84,6 +85,73 @@ describe("벤더↔모델 인덱스 = 레지스트리 단일소스", () => {
     const lower = resolveModel(mm.id.toLowerCase(), INDEX);
     expect(lower.registered).toBe(true);
     expect(lower.vendor).toBe("minimax");
+  });
+
+  it("★네이티브 하네스 모델이 제 벤더로 잡힌다(grok→xai, kimi→moonshot)", () => {
+    // 이 티켓의 요구 그 자체. 카탈로그는 VENDOR_IDS 전체를 돌므로 하네스가
+    // claude 가 아니어도(harness=grok) 인덱스에 있어야 한다.
+    const native = MODEL_REGISTRY.filter(
+      (m) =>
+        m.status === "active" &&
+        (m.provider === "xai" || m.provider === "moonshot"),
+    );
+    expect(native.length).toBeGreaterThan(0);
+    for (const m of native) {
+      const r = resolveModel(m.id, INDEX);
+      expect(r.registered, `${m.id} 가 인덱스에 없다`).toBe(true);
+      expect(r.vendor).toBe(m.provider);
+      expect(r.vendor).not.toBe("unknown");
+      // 벤더 라벨은 카탈로그 브랜드명이어야 한다(raw id 노출 금지).
+      expect(r.vendorLabel).not.toBe(m.provider);
+    }
+    const grok = MODEL_REGISTRY.find((m) => m.provider === "xai")!;
+    expect(grok.harness).toBe("grok"); // 네이티브 하네스임을 고정
+    expect(resolveModel(grok.id, INDEX).harness).toBe("grok");
+  });
+
+  it("★CLI alias 도 해석된다(`grok`/`opus` 는 id 가 아니라 이동표적)", () => {
+    const aliased = MODEL_REGISTRY.filter(
+      (m) => m.status === "active" && m.aliases.length > 0,
+    );
+    expect(aliased.length).toBeGreaterThan(0);
+    for (const m of aliased) {
+      for (const alias of m.aliases) {
+        const r = resolveModel(alias, INDEX);
+        expect(r.registered, `alias ${alias} 가 인덱스에 없다`).toBe(true);
+        expect(r.vendor).toBe(m.provider);
+      }
+    }
+    // 대소문자·공백도 같이 접힌다.
+    expect(resolveModel("  GROK ", INDEX).vendor).toBe("xai");
+  });
+
+  it("★등록 id 의 변종 표기는 최장 프리픽스로 제 벤더에 붙는다", () => {
+    // 벤더 문서의 1M 컨텍스트 표기 — 레지스트리엔 일부러 등록하지 않았다.
+    for (const [variant, vendor] of [
+      ["k3[1m]", "moonshot"],
+      ["glm-5.2[1m]", "zai"],
+      ["MiniMax-M3[1m]", "minimax"],
+    ] as const) {
+      const r = resolveModel(variant, INDEX);
+      expect(r.vendor, variant).toBe(vendor);
+      // 등록된 id 가 아니므로 추정임을 계속 들고 다닌다.
+      expect(r.registered, variant).toBe(false);
+      expect(r.modelLabel).toBe(variant);
+    }
+  });
+
+  it('★PTY 폴백 센티넬 "unknown" 은 모델 이름이 아니다', () => {
+    // cost-tracker.tryParse 가 모델 귀속 없이 emit 하는 리터럴. 모델명으로 그리면
+    // "unknown 이라는 모델을 썼다" 는 없는 사실이 생긴다.
+    expect(isUnattributedModelId("unknown")).toBe(true);
+    expect(isUnattributedModelId(" UNKNOWN ")).toBe(true);
+    expect(isUnattributedModelId("")).toBe(true);
+    expect(isUnattributedModelId("claude-opus-5")).toBe(false);
+
+    const r = resolveModel("unknown", INDEX);
+    expect(r.vendor).toBe("unknown");
+    expect(r.modelLabel).toBe(""); // 이름 칸은 비운다
+    expect(r.registered).toBe(false);
   });
 
   it("모르는 id 는 registered=false 로 표시되고 추정 벤더를 단다", () => {
@@ -196,6 +264,23 @@ describe("aggregateUsageByVendor", () => {
     expect(totals.tokens).toBe(10);
   });
 
+  it("★센티넬 행은 '미상' 벤더의 이름 없는 한 칸으로 접힌다", () => {
+    // PTY 폴백이 쓴 "unknown" 과 model 이 비어 있던 구 행은 같은 사실이다.
+    const { vendors } = aggregateUsageByVendor(
+      [
+        entry("unknown", { totalTokens: 30 }),
+        entry("", { totalTokens: 20 }),
+        entry(opus, { totalTokens: 50 }),
+      ],
+      INDEX,
+    );
+    const unknownRow = vendors.find((v) => v.vendor === "unknown")!;
+    expect(unknownRow.tokens).toBe(50);
+    expect(unknownRow.models).toHaveLength(1);
+    expect(unknownRow.models[0].modelId).toBe("");
+    expect(unknownRow.color).toBe(NEUTRAL_VENDOR_COLOR);
+  });
+
   it("빈 입력은 빈 결과 — 0 을 지어내 채우지 않는다", () => {
     const { vendors, totals } = aggregateUsageByVendor([], INDEX);
     expect(vendors).toEqual([]);
@@ -251,6 +336,60 @@ describe("에이전트 ↔ 실제 실행 모델", () => {
     // 표시는 원문 유지, 조회만 effort 를 벗긴다 → 벤더가 제대로 잡혀야 한다.
     expect(row.vendor).toBe("openai");
     expect(row.registered).toBe(true);
+  });
+
+  it("★grok(네이티브 하네스): 센티넬 detected 를 무시하고 spawn argv 로 떨어진다", () => {
+    // grok 은 ~/.claude JSONL 을 안 써서 cost-tracker 가 PTY 폴백을 타고, 그
+    // 폴백이 agent doc 에 `detectedModelId: "unknown"` 을 남긴다. 그것을 근거로
+    // 치면 이 행이 영구히 "unknown / 벤더 미상" 이 된다 — 이 티켓의 증상.
+    const grok = MODEL_REGISTRY.find((m) => m.provider === "xai")!;
+    const [row] = mapAgentsToModels(
+      [
+        {
+          id: "a1",
+          name: "grok-worker",
+          model: "grok",
+          spawnedModel: grok.id,
+          detectedModelId: "unknown",
+        },
+      ],
+      INDEX,
+    );
+    expect(row.modelId).toBe(grok.id);
+    expect(row.source).toBe("spawned");
+    expect(row.vendor).toBe("xai");
+    expect(row.registered).toBe(true);
+    expect(row.harness).toBe("grok");
+    expect(row.color).not.toBe(NEUTRAL_VENDOR_COLOR);
+  });
+
+  it("센티넬만 있고 다른 근거가 없으면 근거 없음이다(벤더를 지어내지 않는다)", () => {
+    const [row] = mapAgentsToModels(
+      [{ id: "a1", name: "n", model: "grok", detectedModelId: "unknown" }],
+      INDEX,
+    );
+    expect(row.source).toBe("none");
+    expect(row.modelId).toBeNull();
+    expect(row.vendor).toBe("unknown");
+  });
+
+  it("kimi(env-swap): 스폰 핀만 있어도 moonshot 으로 잡힌다", () => {
+    const kimi = MODEL_REGISTRY.find((m) => m.provider === "moonshot")!;
+    const [row] = mapAgentsToModels(
+      [
+        {
+          id: "a1",
+          name: "kimi-worker",
+          model: "claude",
+          spawnedModel: kimi.id,
+        },
+      ],
+      INDEX,
+    );
+    expect(row.vendor).toBe("moonshot");
+    expect(row.registered).toBe(true);
+    // 하네스는 claude 인데 벤더는 anthropic 이 아니다 — 축 분리의 요점.
+    expect(row.harness).toBe("claude");
   });
 
   it("★근거가 하나도 없으면 모델을 추측하지 않는다", () => {

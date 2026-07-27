@@ -105,8 +105,11 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.rateLimit.note.antigravity":
     "Shares your personal Gemini account quota — tightest quota, exceeded often",
   "usage.rateLimit.note.none": "No limit info",
+  "usage.rateLimit.unavailable": "Not queryable",
+  "usage.rateLimit.unavailableTip":
+    "This vendor publishes no remaining-limit API — the number is left empty rather than invented. Check actual consumption via the vendor console link under 'Vendor credits · quota' above.",
   "usage.rateLimit.footer":
-    "Codex shows 5-hour and weekly (7-day) limits live from rollout. Claude weekly limit display is wired up later (Phase 1b, statusline capture).",
+    "Rows are per vendor — GLM, MiniMax and Kimi have their own quotas even though they spawn the same claude binary. Numbers are shown only for vendors with a real account probe (Claude/Anthropic, Codex/OpenAI); the rest publish no query API and stay empty. Claude weekly limit display is wired up later (Phase 1b, statusline capture).",
 
   // ── Relative reset time (fmtReset) ──────────────────────
   "usage.reset.soon": "soon",

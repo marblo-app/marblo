@@ -105,8 +105,11 @@ export const usage = {
   "usage.rateLimit.note.antigravity":
     "개인 Gemini 계정 쿼터 공유 — 쿼터가 가장 빡빡, 초과 잦음",
   "usage.rateLimit.note.none": "한도 정보 없음",
+  "usage.rateLimit.unavailable": "조회불가",
+  "usage.rateLimit.unavailableTip":
+    "이 벤더는 잔여 한도 조회 API 를 제공하지 않습니다 — 수치를 지어내지 않고 비웁니다. 실제 소진 현황은 위 '벤더 크레딧 · 쿼터' 의 벤더 콘솔 링크에서 확인하세요.",
   "usage.rateLimit.footer":
-    "Codex 는 5시간·주간(7일) 한도를 rollout 에서 실시간 표기합니다. Claude 주간 한도 표기는 후속(Phase 1b, statusline 캡처)에서 연결됩니다.",
+    "행은 벤더 단위입니다 — 같은 claude 바이너리로 떠도 GLM·MiniMax·Kimi 는 별도 쿼터입니다. 수치는 계정 프로브가 실재하는 Claude(Anthropic)·Codex(OpenAI) 만 표시하고, 나머지 벤더는 조회 API 가 없어 비웁니다. Claude 주간 한도 표기는 후속(Phase 1b, statusline 캡처)에서 연결됩니다.",
 
   // ── Relative reset time (fmtReset) ──────────────────────
   "usage.reset.soon": "곧",

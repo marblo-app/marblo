@@ -461,6 +461,11 @@ interface ModelPresetAPI {
  */
 interface QuickLaneModelOption {
   modelId: string;
+  /**
+   * 이 모델로 해석되는 CLI alias 들. 셀렉터는 안 그리고, 사용량 탭이 과거 로그·
+   * 스폰 argv 에 남은 alias(`grok`·`opus`…)를 벤더로 해석하는 데 쓴다.
+   */
+  aliases: string[];
   label: string;
   capability: "cheap" | "mid" | "top" | "frontier";
   /** 고를 수 있는 effort(낮음→높음). 빈 배열이면 effort 드롭다운을 그리지 않는다. */

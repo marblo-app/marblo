@@ -11,8 +11,9 @@ import { useQuickLaneModelStore } from "../../stores/quickLaneModelStore";
 import { UsageDashboard } from "../agents/AgentDashboard";
 import {
   CONNECTED_RATE_LIMIT_PACKAGES,
-  getRateLimitProviderModels,
+  buildRateLimitRows,
 } from "./rateLimitProviders";
+import type { RateLimitRow } from "./rateLimitProviders";
 import { resolveRateLimitWindows } from "./rateLimitWindows";
 import {
   aggregateUsageByVendor,
@@ -260,8 +261,9 @@ export function UsagePage() {
         />
       </Section>
 
-      {/* Rate-limit status — account-global (all owned agents), not per-project */}
-      <RateLimitPanel agents={ownedAgents} />
+      {/* Rate-limit status — account-global (all owned agents), not per-project.
+          축은 하네스가 아니라 **벤더**다(같은 claude 바이너리가 네 벤더를 띄운다). */}
+      <RateLimitPanel agents={ownedAgents} index={modelIndex} />
     </div>
   );
 }
@@ -369,11 +371,14 @@ export function PeriodSelector({
 
 // ── 벤더 → 하위모델 분해 ─────────────────────────────────────
 
-/** 벤더 표시명. 카탈로그 라벨이 있으면 그것, 없으면(추정 분류) "미상". */
+/**
+ * 벤더 표시명. 카탈로그 라벨이 있으면 그것(추정 분류여도 브랜드명이 정직하다 —
+ * "추정" 이라는 사실은 모델 행의 "미등록" 배지가 이미 말한다), 벤더 자체를
+ * 모르면 "미상".
+ */
 function vendorDisplayLabel(row: VendorUsageRow, t: Translate): string {
-  if (row.registered) return row.label;
   if (row.vendor === "unknown") return t("usage.breakdown.vendorUnknown");
-  return row.vendor;
+  return row.label || row.vendor;
 }
 
 /**
@@ -685,7 +690,15 @@ export function DailyTrend({
       if (!row.date) continue;
       const resolved = resolveModel(row.model, index);
       vendorSet.add(resolved.vendor);
+      // 레지스트리 매칭이 있으면 그 라벨이 이긴다. 없더라도 카탈로그가 아는
+      // 브랜드명이면 쓴다 — 안 그러면 legend 에 raw 벤더 id("xai")가 뜬다.
       if (resolved.registered) labelOf[resolved.vendor] = resolved.vendorLabel;
+      else if (
+        !labelOf[resolved.vendor] &&
+        resolved.vendorLabel &&
+        resolved.vendorLabel !== resolved.vendor
+      )
+        labelOf[resolved.vendor] = resolved.vendorLabel;
       const tokens =
         row.totalTokens ||
         (row.inputTokens || 0) +
@@ -894,6 +907,35 @@ function rateLimitNote(model: string, t: Translate): string {
   return t(RATE_LIMIT_NOTE_KEYS[model] ?? "usage.rateLimit.note.none");
 }
 
+/**
+ * 한도 행의 브랜드 표기.
+ *
+ * 라벨 우선순위: 카탈로그 벤더명(= 레지스트리 파생, "Z.ai GLM"·"Kimi"·"Grok") →
+ * 하네스 브랜드 표기(카탈로그에 행이 없는 gemini/agy) → 벤더 id. 아이콘은
+ * 하네스 표에만 있으므로 첫 하네스 것을 쓰고, 없으면 중립 ⚪.
+ *
+ * 한 벤더가 여러 하네스로 떴으면(예: google ← gemini + agy) 하네스 목록을 작은
+ * 힌트로 함께 보여준다 — 라벨 하나로 접으면 어떤 CLI 가 그 쿼터를 태웠는지가
+ * 사라진다.
+ */
+function rateLimitBrand(
+  row: RateLimitRow,
+  index: VendorModelIndex,
+): { label: string; icon: string; harnessHint: string } {
+  const primary = row.harnesses[0] ?? "";
+  const guidance = RATE_LIMIT_GUIDANCE[primary];
+  const label =
+    (row.vendor ? index.vendorLabels.get(row.vendor) : undefined) ??
+    guidance?.label ??
+    row.vendor ??
+    primary;
+  return {
+    label: label || primary,
+    icon: guidance?.icon ?? "⚪",
+    harnessHint: row.harnesses.length > 1 ? row.harnesses.join(" · ") : "",
+  };
+}
+
 /** epoch seconds → 짧은 상대 리셋 표기 ("3일 후" / "5시간 후" / "곧"). */
 function fmtReset(epochSeconds: number, t: Translate): string {
   const ms = epochSeconds * 1000 - Date.now();
@@ -946,11 +988,27 @@ function WindowGauge({
 }
 
 /**
- * Rate-limit status per connected provider. Claude Code and Codex should stay
- * visible once their CLI harnesses are installed, even before the current
- * project has spawned an agent for that provider.
+ * Rate-limit status per **vendor**. Claude Code and Codex should stay visible
+ * once their CLI harnesses are installed, even before the current project has
+ * spawned an agent for that provider.
+ *
+ * ── ★벤더축 + 조회 가능한 것만 수치 ──────────────────────────────────────
+ * 행은 벤더 단위다 — 같은 `claude` 바이너리가 Anthropic·Z.ai·MiniMax·Kimi 를
+ * 띄우므로 하네스로 접으면 서로 다른 쿼터가 한 칸에 겹친다. 벤더는
+ * `mapAgentsToModels`(모델 근거 → 레지스트리)로 해석하고, 근거가 없으면 벤더를
+ * **추정하지 않고** 하네스 전용 행으로 남긴다.
+ *
+ * 수치는 계정 프로브가 실재하는 벤더(anthropic/openai)에만 그린다. 나머지는
+ * "조회불가(벤더 미제공)" 다 — 근거는 `rateLimitProviders`/`vendorBilling` 주석의
+ * 1차 문서 전수조사이고, 없는 쿼터를 0%/100% 로 채우지 않는다.
  */
-function RateLimitPanel({ agents }: { agents: Agent[] }) {
+function RateLimitPanel({
+  agents,
+  index,
+}: {
+  agents: Agent[];
+  index: VendorModelIndex;
+}) {
   const { t } = useTranslation();
   const [connectedModels, setConnectedModels] = useState<Agent["model"][]>([]);
   // Account-global rate limits, independent of any running agent. This is the
@@ -1004,25 +1062,50 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
     };
   }, []);
 
-  const providerModels = useMemo(
-    () => getRateLimitProviderModels(agents, connectedModels),
-    [agents, connectedModels],
+  // 에이전트 → (하네스, 해석된 벤더). 벤더 해석은 사용량 분해와 **같은 함수**를
+  // 쓴다 — 두 패널이 같은 모델 id 를 다른 벤더로 부르면 화면이 자기모순이 된다.
+  const agentRows = useMemo(
+    () => mapAgentsToModels(agents, index),
+    [agents, index],
+  );
+  const vendorByAgentId = useMemo(
+    () => new Map(agentRows.map((r) => [r.agentId, r.vendor])),
+    [agentRows],
   );
 
-  if (providerModels.length === 0) return null;
+  const rows = useMemo(
+    () =>
+      buildRateLimitRows({
+        connectedModels,
+        agents: agentRows.map((r) => ({
+          harness: r.harness,
+          vendor: r.vendor,
+        })),
+      }),
+    [agentRows, connectedModels],
+  );
+
+  if (rows.length === 0) return null;
 
   return (
     <Section title={t("usage.rateLimit.title")}>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {providerModels.map((model) => {
-          const g = RATE_LIMIT_GUIDANCE[model] || {
-            label: model,
-            icon: "⚪",
-          };
+        {rows.map((row) => {
+          const g = rateLimitBrand(row, index);
           // 5h(primary) + 주간(7일/secondary) 윈도우를 agent doc 에서 읽는다.
           // codex 가 둘 다 emit, claude 주간은 Phase 1b 캡처로 같은 필드 채움.
-          // 빈 model 은 위 modelsInUse 에서 이미 걸러졌으므로 정확 일치만 본다.
-          const forModel = agents.filter((a) => a.model === model);
+          //
+          // ★행이 벤더축이므로 후보 doc 도 벤더로 거른다 — GLM(harness=claude)
+          // 에이전트 doc 에 남은 percent 를 Anthropic 칸의 현재값으로 읽으면 남의
+          // 쿼터를 우리 쿼터로 보고하는 셈이 된다. 벤더를 모르는 doc(모델 근거
+          // 없음)은 하네스 전용 행에서만 후보가 된다.
+          const forModel = agents.filter((a) => {
+            if (!a.model || !row.harnesses.includes(a.model)) return false;
+            const vendor = vendorByAgentId.get(a.id) ?? "unknown";
+            return row.vendor
+              ? vendor === row.vendor
+              : vendor === "unknown" || !vendor;
+          });
           // 죽은/스테일 agent doc 에 잔존한 percent 를 현재값으로 오인하지
           // 않도록, 한 대표 에이전트의 값만 읽는다. 선택 우선순위:
           //  (1) 한도 percent 를 실제로 보유한 doc 만 후보
@@ -1044,24 +1127,36 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
             })[0];
           // Account-global snapshot is the canonical source (works with zero
           // agents); the per-agent doc is only a fallback when the probe has
-          // no data for that provider. claude/gpt have an account source;
-          // gemini/antigravity fall through to the agent doc as before.
+          // no data for that provider. Only anthropic/openai have an account
+          // source — every other vendor renders "조회불가" below instead.
           const acct =
-            model === "claude"
+            row.probe === "claude"
               ? account?.claude
-              : model === "gpt"
+              : row.probe === "gpt"
                 ? account?.gpt
                 : null;
           // Account snapshot is canonical. When it is duration-aware, the set
           // of windows it carries is authoritative — a stale per-agent doc must
           // not resurrect a window (e.g. a bogus 5h gauge on a weekly-only
           // Codex `prolite` plan). resolveRateLimitWindows encodes that gate.
+          // 조회 경로가 없는 벤더는 창 해석 자체를 하지 않는다 — 스테일 doc 값이
+          // "이 벤더의 현재 한도" 로 승격되는 경로를 애초에 만들지 않는다.
+          const probed = row.source === "account-probe";
           const { live, liveReset, weekly, weeklyReset, weeklyOnly, hasData } =
-            resolveRateLimitWindows(acct, rep);
+            probed
+              ? resolveRateLimitWindows(acct, rep)
+              : {
+                  live: undefined,
+                  liveReset: undefined,
+                  weekly: undefined,
+                  weeklyReset: undefined,
+                  weeklyOnly: false,
+                  hasData: false,
+                };
           const headline = typeof weekly === "number" ? weekly : live;
           return (
             <div
-              key={model}
+              key={row.key}
               className="rounded-lg border border-gray-700 bg-gray-800/50 p-3"
             >
               <div className="flex items-center gap-2">
@@ -1069,7 +1164,20 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
                 <span className="text-sm font-medium text-gray-200">
                   {g.label}
                 </span>
-                {typeof headline === "number" && (
+                {g.harnessHint && (
+                  <span className="font-mono text-[10px] text-gray-600">
+                    {g.harnessHint}
+                  </span>
+                )}
+                {!probed && (
+                  <span
+                    title={t("usage.rateLimit.unavailableTip")}
+                    className="ml-auto text-xs text-gray-500"
+                  >
+                    {t("usage.rateLimit.unavailable")}
+                  </span>
+                )}
+                {probed && typeof headline === "number" && (
                   <span className="ml-auto font-mono text-xs text-gray-300">
                     {typeof weekly === "number"
                       ? `${t("usage.rateLimit.weeklyLabel")} `
@@ -1079,7 +1187,7 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
                     })}
                   </span>
                 )}
-                {typeof headline !== "number" && (
+                {probed && typeof headline !== "number" && (
                   <span className="ml-auto text-xs text-gray-500">
                     {t("usage.rateLimit.noUsage")}
                   </span>
@@ -1106,15 +1214,29 @@ function RateLimitPanel({ agents }: { agents: Agent[] }) {
                   {t("usage.rateLimit.weeklyOnly")}
                 </p>
               )}
-              {!hasData && (
+              {probed && !hasData && (
                 // 유효한 percent 가 없으면 스테일 빨강 게이지 대신 우아하게 표기.
                 <p className="mt-2 text-xs text-gray-500">
                   {t("usage.rateLimit.noUsage")}
                 </p>
               )}
-              <p className="mt-2 text-[11px] leading-snug text-gray-500">
-                {rateLimitNote(model, t)}
-              </p>
+              {!probed && (
+                // ★조회 API 가 없는 벤더 — 게이지를 그리지 않고 이유를 적는다.
+                // 실물 소진 현황은 위 "벤더 크레딧·쿼터" 패널의 콘솔 링크로 간다.
+                <p className="mt-2 text-[11px] leading-snug text-gray-500">
+                  {t("usage.rateLimit.unavailableTip")}
+                </p>
+              )}
+              {row.harnesses.map((harness) =>
+                RATE_LIMIT_NOTE_KEYS[harness] ? (
+                  <p
+                    key={harness}
+                    className="mt-2 text-[11px] leading-snug text-gray-500"
+                  >
+                    {rateLimitNote(harness, t)}
+                  </p>
+                ) : null,
+              )}
             </div>
           );
         })}
