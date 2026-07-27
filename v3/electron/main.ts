@@ -104,12 +104,12 @@ import {
 } from "./agent-config";
 import {
   splitOrchestratorModelValue,
-  orchestratorModelValue,
+  normalizeOrchestratorModelSetting as normalizeOrchestratorModelSettingImpl,
+  orchestratorModelTypeForSetting,
   orchestratorLaunchPin,
   quickLaneVendorCatalog,
   resolveModelPin,
 } from "./model-selection";
-import { getModel } from "./model-registry";
 import { modelFactSheet } from "./model-fact-sheet";
 import {
   vendorSecretsSnapshot,
@@ -3276,64 +3276,19 @@ if (savedPreset) process.env.MARBLO_MODEL_PRESET = savedPreset;
 const INITIAL_ORCHESTRATOR_MODEL_ENV =
   process.env.MARBLO_ORCHESTRATOR_MODEL?.trim() || "";
 
-/**
- * 오케 모델 설정값을 정규화한다. 값은 `provider[:modelId][@effort]` compound 다
- * ("claude", "codex", "claude:claude-fable-5", "codex:gpt-5.6-terra@high").
- *
- * ★모델 접미는 레지스트리에 있는 것만 살아남는다 — 오타나 옛 빌드가 저장한 미지
- * 모델은 접미만 버리고 프로바이더로 강등된다(spawn 이 깨지지 않게). effort 도
- * 같다: 이 모델이 지원하지 않는 값과 승인게이트 칸(max/ultra)은
- * `splitOrchestratorModelValue` 가 이미 떨궈서 온다(#602 — 저장값·env 로 들어온
- * `@ultra` 가 매 재시작 되살아나는 경로를 여기서 끊는다).
- * 접미 없는 값의 결과는 종전과 완전히 동일하므로 기존 저장값이 그대로 유효하다.
- *
- * ★모델 핀이 프로바이더와 어긋나면(예: "claude:gpt-5.5") 접미를 버린다. 셀렉터는
- * 그런 값을 만들지 않지만 env·손편집은 만들 수 있고, 그대로 통과시키면 claude CLI
- * 에 `--model gpt-5.5` 가 붙어 spawn 이 깨진다.
- */
+// 오케 모델 설정값(`provider[:modelId][@effort]`)의 정규화는
+// `model-selection.normalizeOrchestratorModelSetting` 이 한다 — 저장값·env·IPC 세
+// 입구가 전부 그 함수를 지나고, 유닛테스트도 **그 함수**를 검증한다(규칙을 main
+// 안에 두면 테스트가 복사본을 검증하게 된다 — `orchestratorLaunchPin` 과 같은 이유).
+// 그 함수가 이 티켓에서 늘린 축이 둘이다: 오케 후보에 grok(네이티브 CLI, 자체 auth)
+// 편입, 그리고 env-swap 벤더 핀("claude:glm-4.7")의 명시적 강등.
+// 여기서는 이름만 로컬로 유지해 기존 호출부를 그대로 둔다(선언 호이스팅도 유지).
 function normalizeOrchestratorModelSetting(value: unknown): string {
-  const input = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (!input) return "claude";
-  const {
-    harness: rawHarness,
-    modelId,
-    effort,
-  } = splitOrchestratorModelValue(input);
-  const provider = rawHarness === "gpt" ? "codex" : rawHarness;
-  if (
-    provider !== "claude" &&
-    provider !== "codex" &&
-    provider !== "antigravity"
-  ) {
-    return "claude";
-  }
-  if (!modelId) return provider;
-  // 모델 핀 축은 claude·codex 둘 다 있다. antigravity 는 아직 레지스트리에 행이
-  // 없으므로 여기 도달할 수 없다(도달하면 접미를 버린다).
-  // ★핀이 어느 CLI 로 뜨는지는 **하네스** 축이 정한다(USbdRV4k). 벤더는 env 로
-  // 갈릴 뿐 바이너리를 바꾸지 않으므로, 여기서 봐야 하는 값은 harness 다.
-  const pinHarness = getModel(modelId)?.harness;
-  if (
-    (provider === "claude" && pinHarness === "claude") ||
-    (provider === "codex" && pinHarness === "gpt")
-  ) {
-    return orchestratorModelValue(provider, modelId, effort);
-  }
-  console.warn(
-    `[Main] 오케 모델 접미 "${modelId}"(harness=${
-      pinHarness ?? "미지"
-    })가 프로바이더 "${provider}" 와 어긋나 무시합니다`
-  );
-  return provider;
+  return normalizeOrchestratorModelSettingImpl(value);
 }
 
 function normalizeOrchestratorModelType(value: unknown): ModelType {
-  const { harness } = splitOrchestratorModelValue(
-    normalizeOrchestratorModelSetting(value)
-  );
-  if (harness === "codex") return "gpt";
-  if (harness === "antigravity") return "antigravity";
-  return "claude";
+  return orchestratorModelTypeForSetting(value);
 }
 
 /**
@@ -5112,21 +5067,52 @@ ipcMain.handle(
     event,
     { agent, cwd, initialPrompt, resumeSessionId, projectId, taskId, modelPin }
   ) => {
-    // Pre-spawn auth gate (claude/codex). Block an unauthenticated spawn before
-    // any worktree/PTY side effects so the CLI never boots into its login
+    // 명시 모델 핀(`<modelId>[@<effort>]`). 퀵레인 모델 셀렉터가 보내는 축이다.
+    //
+    // ★해석은 `resolveModelPin` 이 한다 — dispatch_task(model=…) 와 **같은 함수**라
+    // claude 버전가드(미검증 CLI → 안전 폴백)와 effort 검증이 자동으로 따라온다.
+    // 하네스가 어긋난 핀(예: agent.model="claude" 인데 modelPin="gpt-5.5")은
+    // 버린다 — claude CLI 에 `--model gpt-5.5` 가 붙으면 spawn 이 깨진다.
+    //
+    // ★게이트보다 **먼저** 해석한다: env-swap 벤더(GLM/MiniMax/Kimi)로 뜨는 스폰의
+    // 인증 축은 Anthropic 계정이 아니라 벤더 크레덴셜이고, 그 판정에 이 핀이 필요하다.
+    const pin = modelPin ? resolveModelPin(String(modelPin)) : undefined;
+    const pinApplies = pin?.harness === agent.model;
+    if (pin && !pinApplies) {
+      console.warn("[agent:launch] 모델 핀이 하네스와 어긋나 무시", {
+        agent: agent.name,
+        agentModel: agent.model,
+        modelPin,
+        pinHarness: pin.harness,
+      });
+    }
+    // 게이트에 넘기는 구체 모델 id — `getLaunchConfig` 가 `applyVendorEnv` 에 넘기는
+    // 값과 **같은 식**이다(claudeModel ?? codexModel ?? nativeModel). 두 곳이 갈리면
+    // "게이트는 통과했는데 스폰은 다른 벤더" 라는 어긋남이 생긴다(버전가드가 핀을
+    // 폴백시킨 경우까지 포함해 같은 값을 본다).
+    const gatePinnedModelId = pinApplies
+      ? pin?.claudeModel ?? pin?.codexModel ?? pin?.nativeModel
+      : undefined;
+
+    // Pre-spawn auth gate (claude/codex/grok). Block an unauthenticated spawn
+    // before any worktree/PTY side effects so the CLI never boots into its login
     // prompt. Ungated models (gemini/agy/custom) pass through. Resume launches
     // are gated too — a lapsed login should still surface, not hang.
-    const agentGate = await checkSpawnAuthGate(agent.model);
+    const agentGate = await checkSpawnAuthGate(agent.model, gatePinnedModelId);
     if (!agentGate.ok) {
       console.warn(
-        `[agent:launch] Blocked "${agent.name}" — ${agentGate.model} ${agentGate.reason} (action: ${agentGate.action})`
+        `[agent:launch] Blocked "${agent.name}" — ${
+          agentGate.vendor ?? agentGate.model
+        } ${agentGate.reason} (action: ${agentGate.action})`
       );
       return {
         id: "",
         ptySessionId: "",
         status: "blocked",
         needsAuth: {
-          model: agentGate.model ?? agent.model,
+          // env-swap 벤더 차단이면 사용자가 손봐야 하는 축은 CLI 로그인이 아니라
+          // 그 벤더의 키다 — 그 사실이 그대로 보이게 벤더 id 를 앞세운다.
+          model: agentGate.vendor ?? agentGate.model ?? agent.model,
           action: agentGate.action ?? "",
           installed: agentGate.installed,
         },
@@ -5199,23 +5185,7 @@ ipcMain.handle(
         ? withCompletionFooter(initialPrompt || "", taskId)
         : initialPrompt;
 
-    // 명시 모델 핀(`<modelId>[@<effort>]`). 퀵레인 모델 셀렉터가 보내는 축이다.
-    //
-    // ★해석은 `resolveModelPin` 이 한다 — dispatch_task(model=…) 와 **같은 함수**라
-    // claude 버전가드(미검증 CLI → 안전 폴백)와 effort 검증이 자동으로 따라온다.
-    // 하네스가 어긋난 핀(예: agent.model="claude" 인데 modelPin="gpt-5.5")은
-    // 버린다 — claude CLI 에 `--model gpt-5.5` 가 붙으면 spawn 이 깨진다.
-    const pin = modelPin ? resolveModelPin(String(modelPin)) : undefined;
-    const pinApplies = pin?.harness === agent.model;
-    if (pin && !pinApplies) {
-      console.warn("[agent:launch] 모델 핀이 하네스와 어긋나 무시", {
-        agent: agent.name,
-        agentModel: agent.model,
-        modelPin,
-        pinHarness: pin.harness,
-      });
-    }
-
+    // 모델 핀은 게이트보다 먼저 해석했다(위 `pin` / `pinApplies`).
     const instance = agentManager.launch({
       id: agent.id,
       name: agent.name,
@@ -6030,7 +6000,10 @@ ipcMain.handle(
       buildSnapshot: (switchArgs) =>
         buildSwitchHandoffSnapshot(switchArgs, resolvedRootPath, targetModel),
       checkAuth: async (model) => {
-        const gate = await checkSpawnAuthGate(model);
+        const gate = await checkSpawnAuthGate(
+          model,
+          splitOrchestratorModelValue(targetModelSetting).modelId
+        );
         return {
           ok: gate.ok,
           model: gate.model,
@@ -6162,7 +6135,13 @@ ipcMain.handle(
     // prompt (which would hang the readiness loop and dump the boot prompt
     // into the login menu). Return a needsAuth marker so the renderer can open
     // the CLI setup gate instead of silently failing. (QA vj7ZvHphYOIhsNd340ad)
-    const orchGate = await checkSpawnAuthGate(orchestratorModel);
+    // 핀된 구체 모델도 넘긴다 — 게이트가 벤더 축을 볼 근거다. 오케 후보는
+    // `normalizeOrchestratorModelSetting` 이 네이티브 벤더로만 좁혀 두므로 이 값은
+    // env-swap 행일 수 없고, 따라서 오케의 인증 축은 종전(계정 프로브) 그대로다.
+    const orchGate = await checkSpawnAuthGate(
+      orchestratorModel,
+      splitOrchestratorModelValue(effectiveModelSetting).modelId
+    );
     if (!orchGate.ok) {
       console.warn(
         `[orchestratorSession:launch] Blocked — ${orchestratorModel} ${orchGate.reason} (action: ${orchGate.action})`

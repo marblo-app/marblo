@@ -445,6 +445,109 @@ export function splitOrchestratorModelValue(value: string): {
 }
 
 /**
+ * 오케로 띄울 수 있는 **하네스**(설정값의 프로바이더 자리에 올 수 있는 이름).
+ *
+ * 기준은 하나다: **자기 계정으로 자기 CLI 가 뜨는가**. claude/codex/grok/antigravity
+ * 는 각자 로그인(구독·OAuth·브라우저 인증)을 자기 홈에 들고 있어 오케 수명(무한)에
+ * 얹어도 조건부 상태가 없다. grok 은 네이티브 CLI(하네스 A형)라 여기 속한다 —
+ * 종전엔 목록에 없어 "grok" 설정이 조용히 claude 로 강등됐다(BYOM 게이트 티켓).
+ *
+ * ★env-swap 벤더(GLM/MiniMax/Kimi)는 여기 없다. 그들은 **하네스가 아니라 모델 핀**
+ * 으로만 지정되는데, 오케 선택은 프로젝트별 영구 저장이라 키가 빠진 순간부터 매
+ * 재시작이 말없이 네이티브 백엔드로 샌다(`selectorEligible` 주석의 확정 결정).
+ * 그 차단은 목록이 아니라 아래 모델 핀 검사가 한다.
+ */
+export const ORCHESTRATOR_HARNESS_SETTINGS = [
+  "claude",
+  "codex",
+  "grok",
+  "antigravity",
+] as const;
+
+/**
+ * 오케 모델 설정값(`provider[:modelId][@effort]`)을 정규화한다. main.ts 의 저장값·
+ * env·IPC 세 입구가 전부 이 함수를 지난다.
+ *
+ * ★모델 접미는 레지스트리에 있는 것만 살아남는다 — 오타나 옛 빌드가 저장한 미지
+ * 모델은 접미만 버리고 프로바이더로 강등된다(spawn 이 깨지지 않게). effort 도
+ * 같다: 이 모델이 지원하지 않는 값과 승인게이트 칸(max/ultra)은
+ * `splitOrchestratorModelValue` 가 이미 떨궈서 온다(#602 — 저장값·env 로 들어온
+ * `@ultra` 가 매 재시작 되살아나는 경로를 여기서 끊는다).
+ * 접미 없는 값의 결과는 종전과 완전히 동일하므로 기존 저장값이 그대로 유효하다.
+ *
+ * ★모델 핀이 하네스와 어긋나면(예: "claude:gpt-5.5") 접미를 버린다. 셀렉터는 그런
+ * 값을 만들지 않지만 env·손편집은 만들 수 있고, 그대로 통과시키면 claude CLI 에
+ * `--model gpt-5.5` 가 붙어 spawn 이 깨진다.
+ *
+ * ★env-swap 벤더 핀("claude:glm-4.7")도 버린다 — UI 셀렉터는 `selectorEligible` 로
+ * 이미 그 칸을 세우지 않지만, env·손편집·옛 저장값은 여기로 들어올 수 있다. 목록
+ * 필터만으로는 "오케에 env-swap 미편입" 이 지켜지지 않는다.
+ */
+export function normalizeOrchestratorModelSetting(value: unknown): string {
+  const input = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!input) return "claude";
+  const {
+    harness: rawHarness,
+    modelId,
+    effort,
+  } = splitOrchestratorModelValue(input);
+  const provider = rawHarness === "gpt" ? "codex" : rawHarness;
+  if (
+    !(ORCHESTRATOR_HARNESS_SETTINGS as readonly string[]).includes(provider)
+  ) {
+    return "claude";
+  }
+  if (!modelId) return provider;
+
+  const entry = getModel(modelId);
+  // ★핀이 어느 CLI 로 뜨는지는 **하네스** 축이 정한다(USbdRV4k). 벤더는 env 로
+  // 갈릴 뿐 바이너리를 바꾸지 않으므로, 여기서 봐야 하는 값은 harness 다.
+  const pinHarness = entry?.harness;
+
+  if (entry && entry.provider !== HARNESS_NATIVE_VENDOR[entry.harness]) {
+    console.warn(
+      `[model-selection] env-swap 벤더 모델 "${modelId}"(vendor=${entry.provider})은 오케 후보가 아니라 접미를 버립니다 — 오케 선택은 영구 저장이라 조건부 크레덴셜을 얹지 않는다`,
+    );
+    return provider;
+  }
+
+  if (
+    (provider === "claude" && pinHarness === "claude") ||
+    (provider === "codex" && pinHarness === "gpt")
+  ) {
+    return orchestratorModelValue(provider, modelId, effort);
+  }
+
+  // grok/antigravity 는 하네스로는 뜨지만 **모델 핀 축이 launch 옵션에 아직 없다**
+  // (`orchestratorLaunchPin` 은 claude/codex 두 축만 만든다). 접미를 살려두면
+  // 저장값엔 남는데 CLI 엔 안 붙어 "골랐는데 안 먹는" 상태가 되므로 여기서 버린다.
+  if (pinHarness && pinHarness === provider) {
+    console.warn(
+      `[model-selection] "${provider}" 오케는 모델 핀 축이 없어 접미 "${modelId}" 를 버립니다(프로바이더 기본 모델로 뜬다)`,
+    );
+    return provider;
+  }
+
+  console.warn(
+    `[model-selection] 오케 모델 접미 "${modelId}"(harness=${
+      pinHarness ?? "미지"
+    })가 프로바이더 "${provider}" 와 어긋나 무시합니다`,
+  );
+  return provider;
+}
+
+/** 정규화된 오케 설정값 → 스폰 하네스(`ModelType`). */
+export function orchestratorModelTypeForSetting(value: unknown): ModelType {
+  const { harness } = splitOrchestratorModelValue(
+    normalizeOrchestratorModelSetting(value),
+  );
+  if (harness === "codex") return "gpt";
+  if (harness === "grok") return "grok";
+  if (harness === "antigravity") return "antigravity";
+  return "claude";
+}
+
+/**
  * 오케 셀렉터/저장값 하나(`provider[:modelId][@effort]`)를 launch 옵션의 **모델 핀
  * 두 축**으로 해석한다. 프로바이더만 고른 값이면 전부 undefined 를 돌려주고, 그때
  * 오케는 종전대로 각 CLI 의 기본 모델·기본 effort 를 상속한다(바이트 동일).

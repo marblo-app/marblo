@@ -18,6 +18,8 @@ import {
   type HarnessPackage,
   type InstallStrategy,
 } from "./harness-catalog";
+import { harnessForModel } from "./model-registry";
+import { vendorEnvReadiness } from "./agent-config";
 
 const HOME = os.homedir();
 const CLAUDE_DIR = path.join(HOME, ".claude");
@@ -1004,9 +1006,13 @@ export async function probeCliAuth(
 // unauthenticated `claude` / `codex` never gets spawned into its interactive
 // login prompt (which no readiness pattern matches → the 10s blind fallback
 // then types the instruction into the login menu and the CLI exits cleanly,
-// leaving a dead PTY with no explanation). Only claude/codex are gated —
+// leaving a dead PTY with no explanation). Only claude/codex/grok are gated —
 // gemini/antigravity/custom/local have no probe, so they pass through
 // unchanged (backstopped by looksLikeLoginScreen at the readiness loop).
+//
+// ★인증 축은 하네스가 아니라 **핀된 모델**이 정한다. env-swap 벤더(GLM/MiniMax/
+// Kimi)는 우리 claude 바이너리로 뜨지만 붙는 곳은 Anthropic 이 아니므로, 그 스폰의
+// 준비 여부는 Anthropic 계정이 아니라 벤더 크레덴셜이 답한다(`envSwapSpawn`).
 
 /** Map an AgentManager ModelType to the CLI auth model, or null if ungated. */
 export function modelToCliAuth(model: string): CliAuthModel | null {
@@ -1025,20 +1031,92 @@ export interface SpawnAuthGate {
   authenticated: boolean;
   /** Concrete next command (install or login) when blocked. */
   action?: string;
-  reason?: "not-installed" | "not-authenticated";
+  reason?: "not-installed" | "not-authenticated" | "vendor-not-configured";
+  /**
+   * env-swap 벤더로 판정했을 때 그 벤더 id(zai/minimax/moonshot). 이 필드가 있으면
+   * 인증 축은 **Anthropic 계정이 아니라 벤더 크레덴셜**이었다는 뜻이다.
+   */
+  vendor?: string;
+  /** 아직 설정되지 않은 벤더 시크릿 env **키 이름**들(값은 절대 담지 않는다). */
+  missingEnvKeys?: string[];
+}
+
+/** 이 스폰이 env-swap 벤더로 붙는가 — 붙는다면 그 크레덴셜 준비 상태. */
+interface EnvSwapSpawn {
+  vendor: string;
+  ready: boolean;
+  /** 값이 아니라 키 **이름**들. */
+  missingEnvKeys: string[];
+  requiredEnvKeys: string[];
+}
+
+/**
+ * 이 launch 의 **핀된 모델**이 env-swap 벤더 행인지 판정한다(GLM/MiniMax/Kimi).
+ *
+ * env-swap 벤더는 우리 `claude` 바이너리를 그대로 스폰하고 백엔드만 env 로 바꾼다
+ * (`agent-config.applyVendorEnv`). 그래서 하네스만 보면 전부 "claude" 로 보이고,
+ * 종전 게이트는 그 스폰을 **Anthropic 계정 프로브**로 판정했다 — Claude 계정이
+ * 없는 BYOM 유저는 벤더 키를 다 넣고도 스폰조차 못 했다. 인증 축이 틀렸던 것이다.
+ *
+ * 핀이 없거나(=하네스 기본 모델) 네이티브 벤더 행이면 null 을 돌려 **종전 경로**로
+ * 보낸다(기존 Anthropic/OpenAI 유저 회귀 0).
+ */
+function envSwapSpawn(
+  harness: string,
+  pinnedModelId?: string,
+): EnvSwapSpawn | null {
+  if (!pinnedModelId) return null;
+  const readiness = vendorEnvReadiness(pinnedModelId);
+  // hasProfile=false → 네이티브 CLI 로그인으로 붙는 행. 종전 프로브 그대로.
+  if (!readiness.hasProfile) return null;
+  // 하네스가 어긋난 핀은 스폰 쪽(`agent:launch` 의 pinApplies, getLaunchConfig)이
+  // 이미 버린다. 게이트만 그 핀을 믿으면 "인증은 통과했는데 스폰은 다른 벤더로"
+  // 라는 어긋남이 생기므로 여기서도 똑같이 버린다.
+  const pinHarness = harnessForModel(pinnedModelId);
+  const spawnHarness = harness === "codex" ? "gpt" : harness;
+  if (pinHarness !== spawnHarness) {
+    console.warn(
+      `[spawn-gate] 모델 핀 "${pinnedModelId}"(harness=${
+        pinHarness ?? "미지"
+      })이 스폰 하네스 "${spawnHarness}" 와 어긋나 벤더 판정에서 제외합니다`,
+    );
+    return null;
+  }
+  return {
+    vendor: readiness.vendor ?? "unknown",
+    ready: readiness.ready,
+    missingEnvKeys: readiness.missingEnvKeys,
+    requiredEnvKeys: readiness.requiredEnvKeys,
+  };
 }
 
 /**
  * Live-probe whether it's safe to spawn `model`. Non-interactive and fast
  * (delegates to probeCliAuth). Ungated models short-circuit to ok:true.
+ *
+ * @param pinnedModelId 이 launch 가 실제로 쓰는 구체 모델 id(`agent-config` 의
+ *   `applyVendorEnv` 에 가는 값과 **같은 값**이어야 한다). 이 값이 env-swap 벤더
+ *   행이면 인증 축이 벤더 크레덴셜로 바뀐다:
+ *
+ *     - 준비됨(전 키 존재)  → **Anthropic 계정 프로브를 건너뛰고 통과**. BYOM 유저가
+ *       Claude 계정 없이 첫 티켓을 스폰할 수 있게 하는 관문이다.
+ *     - 미준비(키 하나라도 없음) → 차단. 부분 주입 금지(전부-아니면-전무) 때문에
+ *       그대로 두면 우리 Anthropic 크레덴셜을 든 claude 가 `--model glm-4.7` 로
+ *       Anthropic 에 붙는다 — 조용한 쿼터 소모 + "왜 인증이 안 되지" 오독이다.
+ *       여기서 막고 **어떤 키가 비었는지**(이름만) 돌려주는 편이 정직하다.
+ *
+ *   ★바이너리 설치 검사는 어느 경우에도 건너뛰지 않는다 — env-swap 벤더도 결국
+ *   우리 `claude` 바이너리로 뜨기 때문이다.
  */
 export async function checkSpawnAuthGate(
   model: string,
+  pinnedModelId?: string,
 ): Promise<SpawnAuthGate> {
   const cliModel = modelToCliAuth(model);
   if (!cliModel) {
     return { ok: true, model: null, installed: true, authenticated: true };
   }
+  const vendorSpawn = envSwapSpawn(model, pinnedModelId);
   const r = await probeCliAuth(cliModel);
   if (!r.installed) {
     return {
@@ -1048,6 +1126,29 @@ export async function checkSpawnAuthGate(
       authenticated: false,
       action: r.action,
       reason: "not-installed",
+      ...(vendorSpawn ? { vendor: vendorSpawn.vendor } : {}),
+    };
+  }
+  if (vendorSpawn) {
+    if (vendorSpawn.ready) {
+      return {
+        ok: true,
+        model: cliModel,
+        installed: true,
+        authenticated: true,
+        vendor: vendorSpawn.vendor,
+      };
+    }
+    return {
+      ok: false,
+      model: cliModel,
+      installed: true,
+      authenticated: false,
+      // 키 **이름**만 노출한다(값 금지 — 스킬 §시크릿 출력 금지).
+      action: `설정 → 벤더 키에 ${vendorSpawn.missingEnvKeys.join(", ")} 등록`,
+      reason: "vendor-not-configured",
+      vendor: vendorSpawn.vendor,
+      missingEnvKeys: vendorSpawn.missingEnvKeys,
     };
   }
   if (!r.authenticated) {
