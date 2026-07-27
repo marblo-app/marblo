@@ -110,7 +110,7 @@ import {
   resolveModelPin,
 } from "./model-selection";
 import { getModel } from "./model-registry";
-import { CostTracker } from "./cost-tracker";
+import { CostTracker, onUnmatchedPricing } from "./cost-tracker";
 import { getAccountRateLimits } from "./account-usage";
 import { mainTelemetry } from "./telemetry";
 import { initMainSentry } from "./sentry-main";
@@ -3226,6 +3226,13 @@ const costTracker = new CostTracker((agentId, cost) => {
     cost.deltaCost,
     projectId,
   );
+});
+
+// Surface models we cannot price. Those tokens are billed at $0 (never at a
+// borrowed rate), so without this event the under-reporting would be silent —
+// exactly the ghost-cost failure the zero-rate rule replaced.
+onUnmatchedPricing(({ model, count, firstSeen }) => {
+  mainTelemetry.pricingUnmatched(mainWindow, model, count, firstSeen);
 });
 
 // Load stored API keys and create LLM provider

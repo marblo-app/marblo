@@ -167,7 +167,12 @@ describe("model-registry", () => {
 // 잘못된 결론으로 수렴한다"(설계문서 §1.3-③)를 막는 회귀 가드다.
 // ─────────────────────────────────────────────────────────────────────────
 describe("MODEL_PRICING 실단가 (P1-3)", () => {
-  const DEFAULT_RATE = { inputPer1M: 3, outputPer1M: 15 }; // 폴백 sentinel
+  // ★2026-07-27: 종전엔 이 값이 "폴백 sentinel"(= 미매칭 모델에 자동 청구되던
+  // 요율)이었다. 지금은 **Sonnet5 의 실단가일 뿐**이고 폴백은 존재하지 않는다
+  // (미매칭 = 0 + 미매칭 보고). 아래 테스트들이 "Sonnet 요율로 안 잡힌다" 를
+  // 주장할 때의 대조군으로만 남는다. 상세는 cost-tracker-unmatched-pricing.test.ts.
+  const SONNET_RATE = { inputPer1M: 3, outputPer1M: 15 };
+  const DEFAULT_RATE = SONNET_RATE;
 
   it("★Fable5 가 더 이상 default($3/$15)로 안 잡힌다 — 출력 3.3배 과소보고 수리", () => {
     const r = perTokenRateFor("claude-fable-5");
@@ -256,8 +261,15 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
     });
   });
 
-  it("미지 모델은 여전히 default 로 떨어진다(비용 계산이 멈추진 않게)", () => {
-    expect(perTokenRateFor("totally-unknown-model")).toEqual(DEFAULT_RATE);
+  // ★뒤집힌 계약. 종전 이 테스트는 "미지 모델 → default($3/$15)" 를 통과시켰고,
+  // 그게 곧 고스트 비용이었다(신규 벤더 id 가 Sonnet 요율로 청구됨). 이제
+  // 미매칭은 0 이고, 이 파일의 대조는 "Sonnet 이 아니다" 까지만 한다.
+  it("미지 모델은 Sonnet 요율로 청구되지 않는다(0 + 미매칭)", () => {
+    expect(perTokenRateFor("totally-unknown-model")).not.toEqual(SONNET_RATE);
+    expect(perTokenRateFor("totally-unknown-model")).toEqual({
+      inputPer1M: 0,
+      outputPer1M: 0,
+    });
   });
 
   it("최장 프리픽스 매칭이 유지된다 — gpt-5.4-mini 가 gpt-5.4/gpt-5 를 이긴다", () => {

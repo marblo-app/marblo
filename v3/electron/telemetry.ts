@@ -150,6 +150,37 @@ export const mainTelemetry = {
     });
   },
 
+  /**
+   * The cost tracker met a model id it cannot price — neither the pricing
+   * table nor the model registry (alias- and case-folded lookups included)
+   * had a row. Those tokens are billed at $0, so this event is the only
+   * signal that spend is going UNDER-reported for that model.
+   *
+   * Emitted on the first sighting per model id and then at each order of
+   * magnitude (1, 10, 100 …) so a long-running miss shows its scale without
+   * flooding — the 15s poller would otherwise emit one per tick per agent.
+   *
+   * The fix is always a verified row in electron/model-registry.ts. Never a
+   * guessed rate: a fabricated number is what this whole path exists to stop.
+   *
+   * ★`count`/`firstSeen` ride in `metadata`, not as top-level fields. The
+   * BigQuery writer (functions/src/index.ts buildMetadata) maps a fixed set of
+   * first-class columns and passes `metadata` through as JSON — any other
+   * top-level key is dropped silently. `model` IS a first-class column, so it
+   * stays up top and stays GROUP BY-able.
+   */
+  pricingUnmatched(
+    win: BrowserWindow | null,
+    model: string,
+    count: number,
+    firstSeen: boolean,
+  ) {
+    sendTelemetry(win, "cost:pricing_unmatched", {
+      model,
+      metadata: { count, firstSeen },
+    });
+  },
+
   heartbeat(
     win: BrowserWindow | null,
     agentId: string,

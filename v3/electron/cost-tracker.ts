@@ -16,7 +16,7 @@ import {
   geminiTmpDir,
   resolveClaudeBinary,
 } from "./agent-config";
-import { registryPricing } from "./model-registry";
+import { getModel, registryPricing } from "./model-registry";
 import {
   probeClaudeUsage,
   type ClaudeUsageSnapshot,
@@ -201,31 +201,197 @@ const MODEL_PRICING: Record<string, RawTokenRate> = {
   // ── Single source: every CLI-verified current model ───────────────────
   ...registryPricing(),
 
-  // Fallback for a model id that matches nothing above. Kept at Sonnet's rate
-  // for continuity, but note it is now a genuine last resort — every model we
-  // actually route to has a real row.
-  default: { inputPer1M: 3, outputPer1M: 15 },
+  // ★NO `default` ROW. See `resolvePerTokenRate` below — an unmatched model id
+  // now costs 0 and is reported, never silently billed at some other model's rate.
 };
 
+/** Rate charged when nothing matched. Zero — never a guess. */
+export const UNMATCHED_RATE: Readonly<RawTokenRate> = {
+  inputPer1M: 0,
+  outputPer1M: 0,
+};
+
+/** How a rate was resolved (`unmatched` = nothing matched, rate is zero). */
+export type RateMatchKind =
+  | "exact"
+  | "registry"
+  | "prefix"
+  | "prefix-ci"
+  | "unmatched";
+
+export interface RateResolution {
+  rate: RawTokenRate;
+  /** false ⇒ rate is {0,0} and this lookup must be surfaced, not billed. */
+  matched: boolean;
+  kind: RateMatchKind;
+  /** Pricing-table key / registry id that supplied the rate (undefined when unmatched). */
+  matchedKey?: string;
+}
+
 /**
- * Per-token rate for a model id, by longest-prefix match over MODEL_PRICING
- * (the sentinel `default` row is the last resort, never a prefix candidate).
+ * Resolve the per-token rate for a model id. **Pure** — the unmatched counter
+ * is bumped by the charging path (`recordUnmatchedPricing`), not by a lookup,
+ * so tests and dashboards can probe the table without polluting telemetry.
  *
- * Exported as a pure function so the rate table is unit-testable without
- * standing up a CostTracker — `findPricing` is a private method behind
- * subscription-plan resolution and filesystem state. The under-reporting bugs
- * this repairs (Fable5 charged at Sonnet's rate, gpt-5.5 output at $20) were
- * invisible precisely because nothing could assert on this table.
+ * ── ★Why there is no longer a Sonnet-shaped fallback (ghost cost, P1) ──────
+ * The table used to end in `default: {3, 15}` — Sonnet's rate. Anything that
+ * matched no row was billed as if it were Sonnet, silently. That was tolerable
+ * when every model we ran was Anthropic's; it stopped being tolerable the
+ * moment the registry grew grok(xai) / GLM(zai) / MiniMax rows, because:
+ *
+ *   - `MiniMax-M3` is registered under the vendor's own mixed-case id, but the
+ *     table lookup and the prefix scan are BOTH case-sensitive. A session that
+ *     reported `minimax-m3` matched nothing → billed $3/$15 instead of its real
+ *     $0.6/$2.4. Overcharged 5x on input, 6.25x on output — invented money.
+ *   - `grok`, `opus`, `fable`… are CLI *aliases*, not ids. They matched no row
+ *     either, so a Fable5 agent seen by its alias was billed at Sonnet's rate.
+ *
+ * Both directions are corrupting: cost-vs-effect routing learns from these
+ * numbers, so a fabricated rate teaches the router a fabricated preference.
+ * The rule now is that we bill only what we can source, and make the gap loud.
+ *
+ * Resolution order (first hit wins):
+ *   1. `exact`     — verbatim row in MODEL_PRICING (covers `MiniMax-M3`).
+ *   2. `registry`  — model-registry lookup: alias-aware AND case-insensitive.
+ *                    This is the ★single source (PR#598); we re-ask it rather
+ *                    than duplicating rates here.
+ *   3. `prefix`    — longest-prefix over the table (legacy/family rows:
+ *                    `claude-3-*`, `gpt-4o`, `gemini-*`, generic `gpt-5`).
+ *   4. `prefix-ci` — same scan, case-folded, for vendor ids that arrive in a
+ *                    different casing than the row was written in.
+ *   5. `unmatched` — rate 0. Caller warns + counts. NEVER a borrowed rate.
+ */
+export function resolvePerTokenRate(model: string): RateResolution {
+  const raw = (model ?? "").trim();
+  if (!raw)
+    return { rate: { ...UNMATCHED_RATE }, matched: false, kind: "unmatched" };
+
+  // 1. exact row
+  const exact = MODEL_PRICING[raw];
+  if (exact)
+    return { rate: exact, matched: true, kind: "exact", matchedKey: raw };
+
+  // 2. registry re-lookup (alias → concrete id, case-insensitive)
+  const entry = getModel(raw);
+  if (entry) {
+    return {
+      rate: {
+        inputPer1M: entry.pricing.inputPer1M,
+        outputPer1M: entry.pricing.outputPer1M,
+      },
+      matched: true,
+      kind: "registry",
+      matchedKey: entry.id,
+    };
+  }
+
+  // 3/4. longest-prefix over the table — case-sensitive first, then folded.
+  const keys = Object.keys(MODEL_PRICING).sort((a, b) => b.length - a.length);
+  for (const key of keys) {
+    if (raw.startsWith(key))
+      return {
+        rate: MODEL_PRICING[key],
+        matched: true,
+        kind: "prefix",
+        matchedKey: key,
+      };
+  }
+  const lowered = raw.toLowerCase();
+  for (const key of keys) {
+    if (lowered.startsWith(key.toLowerCase()))
+      return {
+        rate: MODEL_PRICING[key],
+        matched: true,
+        kind: "prefix-ci",
+        matchedKey: key,
+      };
+  }
+
+  // 5. nothing. Zero, and let the caller make the miss visible.
+  return { rate: { ...UNMATCHED_RATE }, matched: false, kind: "unmatched" };
+}
+
+/**
+ * Per-token rate for a model id. Thin, pure wrapper over
+ * `resolvePerTokenRate` — an unmatched id yields {0, 0}, not a stand-in rate.
+ *
+ * Exported so the rate table is unit-testable without standing up a
+ * CostTracker (`findPricing` sits behind subscription-plan resolution and
+ * filesystem state). The under-reporting bugs this file already repaired
+ * (Fable5 at Sonnet's rate, gpt-5.5 output at $20) were invisible precisely
+ * because nothing could assert on this table.
  */
 export function perTokenRateFor(model: string): RawTokenRate {
-  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
-  const keys = Object.keys(MODEL_PRICING)
-    .filter((k) => k !== "default")
-    .sort((a, b) => b.length - a.length);
-  for (const key of keys) {
-    if (model.startsWith(key)) return MODEL_PRICING[key];
-  }
-  return MODEL_PRICING["default"];
+  return resolvePerTokenRate(model).rate;
+}
+
+// ── Unmatched-model visibility (ghost-cost detector) ─────────────────────
+// A model we cannot price is a real operational fact — a vendor row we never
+// added, an env-swap profile leaking an unregistered id (the failure mode
+// model-registry.ts guards against in its `ANTHROPIC_DEFAULT_*_MODEL` notes),
+// or a CLI that renamed a model under us. Billing it at 0 keeps the ledger
+// honest; this counter keeps the gap from being *quiet*, which is the other
+// half of the bug.
+
+export interface UnmatchedPricingEvent {
+  /** Model id exactly as the session/PTY reported it. */
+  model: string;
+  /** Times this id has been seen unmatched in this process (cumulative). */
+  count: number;
+  /** True on the first sighting of this id. */
+  firstSeen: boolean;
+}
+
+const unmatchedPricingCounts = new Map<string, number>();
+let unmatchedPricingSink: ((ev: UnmatchedPricingEvent) => void) | null = null;
+
+/**
+ * Register the telemetry sink for unmatched-model pricing lookups (main.ts
+ * wires this to `mainTelemetry.pricingUnmatched`). One sink; re-registering
+ * replaces it. Pass null to detach.
+ */
+export function onUnmatchedPricing(
+  sink: ((ev: UnmatchedPricingEvent) => void) | null,
+): void {
+  unmatchedPricingSink = sink;
+}
+
+/** Cumulative unmatched counts by model id — for rollups/tests. */
+export function unmatchedPricingCounters(): Record<string, number> {
+  return Object.fromEntries(unmatchedPricingCounts);
+}
+
+/** Test hook: forget every unmatched sighting (and the once-per-id warn latch). */
+export function resetUnmatchedPricing(): void {
+  unmatchedPricingCounts.clear();
+}
+
+/**
+ * Count one unmatched pricing lookup and make it visible.
+ *
+ * Log volume is bounded on purpose: the poller ticks every 15s per agent, so
+ * warning on every sighting would bury the signal it exists to raise. We warn
+ * (and emit telemetry) on the first sighting and then at each order of
+ * magnitude — enough to show both "this happened" and "this is happening a
+ * lot", without a log flood. The exact count is always available via
+ * `unmatchedPricingCounters()`.
+ */
+function recordUnmatchedPricing(model: string): void {
+  const id = (model ?? "").trim() || "(empty)";
+  const count = (unmatchedPricingCounts.get(id) ?? 0) + 1;
+  unmatchedPricingCounts.set(id, count);
+
+  const isMilestone = count === 1 || Math.log10(count) % 1 === 0;
+  if (!isMilestone) return;
+
+  console.warn(
+    `[CostTracker] ★UNMATCHED MODEL PRICING: "${id}" is in neither the ` +
+      `pricing table nor the model registry (alias/case-folded lookups also ` +
+      `missed). Billing it at $0 — cost for this model is UNDER-REPORTED, not ` +
+      `estimated. Seen ${count}x. Fix: add a verified row to ` +
+      `electron/model-registry.ts (never invent a rate).`,
+  );
+  unmatchedPricingSink?.({ model: id, count, firstSeen: count === 1 });
 }
 
 // Regex patterns for PTY output parsing (non-Claude CLIs)
@@ -340,8 +506,8 @@ export class CostTracker {
    * win over per-token defaults — patent claim 8 explicitly contemplates
    * mixing 구독제 and 토큰단위 across agents in one orchestration. If the
    * model has no subscription declared, fall back to the per-token rate
-   * table (longest-prefix match). Sentinel "default" row is the last
-   * resort so unknown models still produce a sensible cost figure.
+   * table. ★An id that resolves to nothing is billed at 0 and counted as
+   * unmatched — see `resolvePerTokenRate` for why no fallback rate is safe.
    */
   private findPricing(model: string): ModelPricing {
     // 1. Subscription plans win when the user has declared one for this model.
@@ -358,12 +524,14 @@ export class CostTracker {
         overagePerToken: matchedPlan.overagePerToken,
       };
     }
-    // 2. Per-token rate (default).
-    const r = perTokenRateFor(model);
+    // 2. Per-token rate. This is the money path, so an unmatched id is
+    //    recorded here (the resolver itself stays pure).
+    const resolved = resolvePerTokenRate(model);
+    if (!resolved.matched) recordUnmatchedPricing(model);
     return {
       scheme: "per-token",
-      inputPer1M: r.inputPer1M,
-      outputPer1M: r.outputPer1M,
+      inputPer1M: resolved.rate.inputPer1M,
+      outputPer1M: resolved.rate.outputPer1M,
     };
   }
 
@@ -528,6 +696,36 @@ export class CostTracker {
     // subsystem (not JSONL) — see trackAgySession.
     if (model === "antigravity") {
       this.trackAgySession(agentId);
+      return;
+    }
+
+    // ★Harnesses that do NOT write a ~/.claude JSONL must not fall through to
+    // the claude reader below (ghost cost, adjacent to the P1 pricing fix).
+    //
+    //   - `grok` spawns the xAI `grok` binary under its own GROK_HOME
+    //     (agent-config buildCLICommand case "grok"); it never touches
+    //     ~/.claude/projects.
+    //   - `custom` has no known session format at all — session-parsers'
+    //     `formatForModel` already documents that these fall back to PTY
+    //     parsing.
+    //
+    // Falling through was not merely useless, it MISATTRIBUTED: the
+    // no-sessionId branch below picks the most recently modified JSONL in the
+    // project dir, which on the reconnect path (main.ts `--continue`, where
+    // candidate.sessionId is null) is some *other* agent's live Claude
+    // session. That charged one agent's real Anthropic tokens to a different
+    // agent — the same "bill something we cannot source" failure as the Sonnet
+    // default rate, except the dollars are real and double-counted.
+    //
+    // Not tracking is the honest outcome: PTY parsing still runs for these
+    // (processOutput skips only agents with a live tracker), so a CLI that
+    // prints its own cost is still captured.
+    if (model === "grok" || model === "custom") {
+      console.log(
+        `[CostTracker] agent=${agentId} model=${model} writes no ~/.claude ` +
+          `JSONL — skipping file tracking (PTY fallback still applies). ` +
+          `Wiring a real ${model} usage source is a separate task.`,
+      );
       return;
     }
 
@@ -1049,14 +1247,16 @@ export class CostTracker {
         : 0;
 
       if (inputTokens > 0 || outputTokens > 0) {
-        // Unknown-model fallback: use the per-token "default" rate. We
-        // don't try subscription matching here since we don't know which
-        // model produced the tokens.
-        const fallback = MODEL_PRICING["default"];
+        // ★PTY scraping gives us token counts with NO model attribution — we
+        // literally do not know what produced them. This used to bill them at
+        // the "default" (= Sonnet) rate, which invented a dollar figure out of
+        // a number we could not attribute. Now it costs 0 and registers as
+        // unmatched, same rule as an unknown model id.
+        recordUnmatchedPricing("unknown");
         const pricing: ModelPricing = {
           scheme: "per-token",
-          inputPer1M: fallback.inputPer1M,
-          outputPer1M: fallback.outputPer1M,
+          inputPer1M: UNMATCHED_RATE.inputPer1M,
+          outputPer1M: UNMATCHED_RATE.outputPer1M,
         };
         const cost = this.computeIncrementalCost(
           pricing,

@@ -19,6 +19,12 @@ export type TelemetryEvent =
   | "flow:node_executed"
   | "flow:completed"
   | "token:usage"
+  // ★고스트 비용 감지기. cost-tracker 가 단가를 모르는 model id 를 만났다 =
+  // 그 토큰은 $0 으로 적재된다(= 지출 과소보고). 종전엔 미매칭 id 를 조용히
+  // Sonnet 요율($3/$15)로 청구했고, 그건 없는 돈을 발명하는 쪽의 오류였다.
+  // 이제 0 으로 청구하되 이 이벤트가 그 공백을 드러낸다. model 은 1급 컬럼,
+  // 누적횟수/최초목격은 metadata JSON 으로 간다(electron/telemetry.ts 참조).
+  | "cost:pricing_unmatched"
   | "session:started"
   | "session:ended"
   | "chat:message_sent"
@@ -157,7 +163,7 @@ const logHeartbeatFn = httpsCallable(functions, "logHeartbeat");
 
 export function setTelemetryEnabled(
   enabled: boolean,
-  options: { persist?: boolean } = {}
+  options: { persist?: boolean } = {},
 ) {
   const next = firstPartyTelemetryDefaultEnabled() && enabled;
   telemetryEnabled = next;
@@ -339,7 +345,7 @@ export const telemetry = {
     name: string,
     model: string,
     role: string,
-    projectId?: string
+    projectId?: string,
   ) {
     logTelemetry({
       event: "agent:spawned",
@@ -367,7 +373,7 @@ export const telemetry = {
     model?: string,
     dispatchReason?: string,
     errorCategory?: string,
-    errorMessage?: string
+    errorMessage?: string,
   ) {
     logTelemetry({
       event: "agent:crashed",
@@ -392,7 +398,7 @@ export const telemetry = {
     attempt: number,
     taskId?: string,
     model?: string,
-    dispatchReason?: string
+    dispatchReason?: string,
   ) {
     logTelemetry({
       event: "agent:restarted",
@@ -409,7 +415,7 @@ export const telemetry = {
     taskId: string,
     projectId: string,
     role: string,
-    priority?: number
+    priority?: number,
   ) {
     logTelemetry({
       event: "task:created",
@@ -424,7 +430,7 @@ export const telemetry = {
     taskId: string,
     fromStatus: string,
     toStatus: string,
-    agentId?: string
+    agentId?: string,
   ) {
     logTelemetry({
       event: "task:status_changed",
@@ -455,7 +461,7 @@ export const telemetry = {
     flowId: string,
     nodeType: string,
     durationMs: number,
-    success: boolean
+    success: boolean,
   ) {
     logTelemetry({
       event: "flow:node_executed",
@@ -470,7 +476,7 @@ export const telemetry = {
     flowId: string,
     status: string,
     durationMs: number,
-    nodeCount: number
+    nodeCount: number,
   ) {
     logTelemetry({
       event: "flow:completed",
@@ -488,7 +494,7 @@ export const telemetry = {
     tokensInput: number,
     tokensOutput: number,
     cost: number,
-    projectId?: string
+    projectId?: string,
   ) {
     logTelemetry({
       event: "token:usage",
@@ -625,7 +631,7 @@ export const telemetry = {
       | "connect"
       | "project",
     phase: "enter" | "success" | "fail",
-    reason?: string
+    reason?: string,
   ) {
     logTelemetry({
       event: "onboarding:cli_setup_step",
