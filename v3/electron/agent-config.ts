@@ -22,6 +22,7 @@ import {
   type LadderTier,
 } from "./model-ladder";
 import { maskEnvForLogging } from "./config-redaction";
+import { getVendorSecret } from "./vendor-secrets";
 import { CODEX_ORCH_REQUIRED_MCP_TOOLS } from "./mcp-server/tool-surface";
 
 export interface ResolvedCli {
@@ -1155,14 +1156,25 @@ export function mergeVendorEnv(
 /**
  * 벤더 프로파일의 시크릿 자리표시자(`${ZAI_API_KEY}`)를 실제 값으로 채운다.
  *
- * 시크릿은 레지스트리에 **키 이름**으로만 있고 값은 `process.env` 에서 온다 —
- * 그 env 는 main.ts 가 부팅 때 `v3/.env` 로 dotenv 로드한 단일소스다. 값은 이
- * 함수 밖으로 나가지 않는다(반환 env 는 스폰 프로세스로만 가고, 로그에는 키
- * 이름과 마스킹된 형태만 남는다).
+ * 시크릿은 레지스트리에 **키 이름**으로만 있고, 값은 두 소스에서 온다:
+ *
+ *   1. `process.env` — main.ts 가 부팅 때 `v3/.env` 로 dotenv 로드한 개발 경로.
+ *   2. 앱 안전저장소(`vendor-secrets`, OS 키체인 암호화) — 설정 UI 가 등록한 값.
+ *
+ * ★우선순위는 1 > 2 다. 셸/`.env` 로 **명시한** 값을 GUI 저장소가 조용히 덮으면
+ * 개발자가 어떤 크레덴셜로 붙었는지 알 수 없어진다(BYOK 의 `syncApiKeysToEnv` 도
+ * 같은 방향이다). 대신 그 승부는 숨기지 않는다 — 설정 UI 가 키마다 출처를 표시한다.
+ *
+ * 2번 소스가 생기기 전엔 Finder 로 띄운 **패키지앱에 키를 넣을 방법이 아예 없어서**
+ * GLM/MiniMax 가 빌드앱에서 못 켜졌다(R3UBmo5q). 저장소를 못 여는 프로세스
+ * (앱 ready 전, 순수 node 스크립트)에서는 1번만 보므로 종전 동작 그대로다.
+ *
+ * 값은 이 함수 밖으로 나가지 않는다(반환 env 는 스폰 프로세스로만 가고, 로그에는
+ * 키 이름과 마스킹된 형태만 남는다).
  */
 export function resolveVendorEnvProfile(profile: Record<string, string>): {
   resolved: Record<string, string>;
-  /** 자리표시자는 있는데 `process.env` 가 비어 있는 **키 이름**들(값 아님). */
+  /** 자리표시자는 있는데 **양쪽 소스 모두** 비어 있는 키 이름들(값 아님). */
   missing: string[];
 } {
   const resolved: Record<string, string> = {};
@@ -1173,7 +1185,7 @@ export function resolveVendorEnvProfile(profile: Record<string, string>): {
       resolved[key] = value;
       continue;
     }
-    const secret = process.env[ref]?.trim();
+    const secret = process.env[ref]?.trim() || getVendorSecret(ref);
     if (!secret) {
       missing.push(ref);
       continue;
@@ -1264,7 +1276,9 @@ export function applyVendorEnv(
       vendor: vendor ?? "unknown",
       missingEnvKeys: missing,
       effect: `${vendor ?? "벤더"} 대신 하네스 기본 백엔드로 스폰된다(부분 주입 금지)`,
-      fix: `v3/.env 에 ${missing.join(", ")} 를 설정하고 앱을 재시작하세요`,
+      fix:
+        `설정 → API 키 → "벤더 API 키" 에서 ${missing.join(", ")} 를 등록하세요` +
+        `(개발 환경이라면 v3/.env 에 넣고 앱 재시작해도 됩니다)`,
     });
     return base;
   }
@@ -3049,10 +3063,7 @@ export class AgentConfigGenerator {
         // Keep the model pin in argv, not config.toml: it gives the PTY/badge
         // path an observable launched model while still letting nativeModel
         // override the default.
-        const grokArgs: string[] = [
-          "--permission-mode",
-          "bypassPermissions",
-        ];
+        const grokArgs: string[] = ["--permission-mode", "bypassPermissions"];
         const grokModel = modelPin?.nativeModel;
         grokArgs.push("-m", grokModel || GROK_DEFAULT_MODEL);
         const resolvedGrokCommand = resolveHarnessCli("grok").command;

@@ -118,4 +118,41 @@ export const settings: Record<keyof typeof koSettings, string> = {
   "settings.subscription.addPlan": "+ Add plan",
   "settings.subscription.saving": "Saving...",
   "settings.subscription.saved": "Saved",
+
+  // ── env-swap vendor keys (SettingsPage › VendorKeysSettings) ─────
+  "settings.vendorKeys.heading": "Vendor API keys (env-swap)",
+  "settings.vendorKeys.help":
+    "These vendors ship no CLI of their own — we spawn the same claude harness and swap only the backend. Keys registered here are encrypted with the OS keychain, stored in {path}, and injected as environment variables only into spawned agent processes. No plaintext is ever shown on screen, written to logs, or sent to the cloud.",
+  "settings.vendorKeys.loading": "Loading vendor key status...",
+  "settings.vendorKeys.noEncryption":
+    "OS keychain encryption is unavailable on this system, so keys cannot be saved. On Linux, install libsecret-1-0 / gnome-keyring and restart. (We never fall back to plaintext storage.)",
+  "settings.vendorKeys.defaultHint":
+    "Points the claude harness at this vendor's endpoint.",
+  "settings.vendorKeys.models": "Models: {models}",
+  "settings.vendorKeys.ready": "Active",
+  "settings.vendorKeys.notReady": "Not configured",
+  "settings.vendorKeys.partialWarning":
+    "Every required key must be present before this vendor activates. With only some of them filled in, the profile is not injected at all — a half-injected profile would send your Anthropic credentials to someone else's endpoint.",
+  "settings.vendorKeys.unset": "Not set",
+  "settings.vendorKeys.sourceEnv":
+    "· using shell/.env value (takes precedence over the stored key)",
+  "settings.vendorKeys.sourceStore": "· app store",
+  "settings.vendorKeys.replacePlaceholder":
+    "Entering a new key replaces the stored one",
+  "settings.vendorKeys.newPlaceholder": "Key issued from {console}",
+  "settings.vendorKeys.save": "Save",
+  "settings.vendorKeys.delete": "Delete",
+  "settings.vendorKeys.envWinsNotice":
+    "A shell/.env variable of the same name exists and takes precedence. To use the stored key, unset the shell variable and restart.",
+  "settings.vendorKeys.saved": "Key saved securely (OS keychain encryption).",
+  "settings.vendorKeys.saveFailed": "Failed to save the key.",
+  "settings.vendorKeys.deleted": "Stored key deleted.",
+  "settings.vendorKeys.deleteFailed": "Failed to delete the key.",
+  "settings.vendorKeys.respawnNotice":
+    "Agents already running hold their own copy of the environment — a new key takes effect from the next spawn.",
+  "settings.vendorKeys.consoleFallback": "the vendor console",
+  "settings.vendorKeys.hint.zai":
+    "GLM Coding Plan subscription key. Points the claude harness at the Z.ai endpoint.",
+  "settings.vendorKeys.hint.minimax":
+    "MiniMax Token Plan subscription key. Points the claude harness at the MiniMax endpoint.",
 };

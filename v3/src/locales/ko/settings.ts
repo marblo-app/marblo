@@ -29,7 +29,8 @@ export const settings = {
     "현재 오케스트레이터가 실행 중입니다. 변경사항은 오케스트레이터를 중지한 뒤 다시 시작하면 적용됩니다.",
   "settings.orchestratorModel.restartStopped":
     "변경사항은 다음 오케스트레이터 시작부터 적용됩니다. Electron main 변경은 HMR이 안 되므로 런타임 검증은 앱 재빌드/재시작 후 확인하세요.",
-  "settings.orchestratorModel.saved": "저장됨. 다음 오케스트레이터 재시작 후 적용됩니다.",
+  "settings.orchestratorModel.saved":
+    "저장됨. 다음 오케스트레이터 재시작 후 적용됩니다.",
   "settings.language.heading": "Language / 언어",
   "settings.language.help": "UI 언어를 변경합니다. 변경 즉시 적용됩니다.",
   "settings.language.korean": "한국어",
@@ -114,4 +115,41 @@ export const settings = {
   "settings.subscription.addPlan": "+ 플랜 추가",
   "settings.subscription.saving": "저장 중...",
   "settings.subscription.saved": "저장됨",
+
+  // ── env-swap 벤더 키 (SettingsPage › VendorKeysSettings) ─────────
+  // ★벤더 이름·모델 id·env 키 이름은 번역 대상이 아니다(식별자). 여기 있는 것은
+  //   UI 틀 문구뿐이다.
+  "settings.vendorKeys.heading": "벤더 API 키 (env-swap)",
+  "settings.vendorKeys.help":
+    "자체 CLI 가 없고 claude 하네스를 그대로 쓰되 백엔드만 갈아끼우는 벤더입니다. 여기 등록한 키는 OS 키체인으로 암호화해 {path} 에 저장되고, 에이전트 스폰 시에만 그 프로세스 환경변수로 주입됩니다. 평문은 화면·로그·클라우드 어디에도 남지 않습니다.",
+  "settings.vendorKeys.loading": "벤더 키 상태를 불러오는 중...",
+  "settings.vendorKeys.noEncryption":
+    "이 시스템에서 OS 키체인 암호화를 쓸 수 없어 키를 저장할 수 없습니다. Linux 라면 libsecret-1-0 / gnome-keyring 설치 후 재시작하세요. (평문 저장은 하지 않습니다.)",
+  "settings.vendorKeys.defaultHint":
+    "claude 하네스를 이 벤더 엔드포인트로 붙입니다.",
+  "settings.vendorKeys.models": "모델: {models}",
+  "settings.vendorKeys.ready": "활성",
+  "settings.vendorKeys.notReady": "미설정",
+  "settings.vendorKeys.partialWarning":
+    "필요한 키가 전부 차야 활성화됩니다. 일부만 채운 상태에서는 프로파일을 아예 주입하지 않습니다 — 반쪽 주입은 Anthropic 크레덴셜을 다른 엔드포인트로 보내는 유출이 됩니다.",
+  "settings.vendorKeys.unset": "미설정",
+  "settings.vendorKeys.sourceEnv": "· 셸/.env 값 사용 중(앱 저장값보다 우선)",
+  "settings.vendorKeys.sourceStore": "· 앱 저장소",
+  "settings.vendorKeys.replacePlaceholder": "새 키를 입력하면 교체됩니다",
+  "settings.vendorKeys.newPlaceholder": "{console} 에서 발급한 키",
+  "settings.vendorKeys.save": "저장",
+  "settings.vendorKeys.delete": "삭제",
+  "settings.vendorKeys.envWinsNotice":
+    "셸/.env 에 같은 이름의 값이 있어 그쪽이 사용됩니다. 앱 저장값을 쓰려면 셸 env 를 지우고 재시작하세요.",
+  "settings.vendorKeys.saved": "키를 안전 저장했습니다(OS 키체인 암호화).",
+  "settings.vendorKeys.saveFailed": "저장에 실패했습니다.",
+  "settings.vendorKeys.deleted": "저장된 키를 삭제했습니다.",
+  "settings.vendorKeys.deleteFailed": "삭제에 실패했습니다.",
+  "settings.vendorKeys.respawnNotice":
+    "이미 떠 있는 에이전트는 자기 환경변수 사본을 들고 있습니다 — 새 키는 다음 스폰부터 적용됩니다.",
+  "settings.vendorKeys.consoleFallback": "벤더 콘솔",
+  "settings.vendorKeys.hint.zai":
+    "GLM Coding Plan 구독키. claude 하네스를 Z.ai 엔드포인트로 붙입니다.",
+  "settings.vendorKeys.hint.minimax":
+    "MiniMax Token Plan 구독키. claude 하네스를 MiniMax 엔드포인트로 붙입니다.",
 };

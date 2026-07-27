@@ -110,6 +110,11 @@ import {
   resolveModelPin,
 } from "./model-selection";
 import { getModel } from "./model-registry";
+import {
+  vendorSecretsSnapshot,
+  setVendorSecret,
+  deleteVendorSecret,
+} from "./vendor-secrets";
 import { CostTracker, onUnmatchedPricing } from "./cost-tracker";
 import { getAccountRateLimits } from "./account-usage";
 import { mainTelemetry } from "./telemetry";
@@ -186,14 +191,14 @@ const firebaseConfigEnvResult = loadPackagedMainFirebaseConfigEnv({
 });
 if (firebaseConfigEnvResult.status === "loaded") {
   console.log(
-    `[Main] packaged Firebase config loaded for main process (path=${firebaseConfigEnvResult.configPath}; keys=${firebaseConfigEnvResult.injectedKeys.length}; apiKeyPresent=${firebaseConfigEnvResult.apiKeyPresent})`,
+    `[Main] packaged Firebase config loaded for main process (path=${firebaseConfigEnvResult.configPath}; keys=${firebaseConfigEnvResult.injectedKeys.length}; apiKeyPresent=${firebaseConfigEnvResult.apiKeyPresent})`
   );
 } else if (
   firebaseConfigEnvResult.status === "missing" ||
   firebaseConfigEnvResult.status === "invalid"
 ) {
   console.warn(
-    `[Main] packaged Firebase config unavailable for main process (status=${firebaseConfigEnvResult.status}; path=${firebaseConfigEnvResult.configPath})`,
+    `[Main] packaged Firebase config unavailable for main process (status=${firebaseConfigEnvResult.status}; path=${firebaseConfigEnvResult.configPath})`
   );
 }
 
@@ -344,7 +349,7 @@ function writeApiKeys(keys: StoredApiKeys): void {
     throw new Error(
       "OS keychain encryption unavailable. " +
         "On Linux install libsecret-1-0 / gnome-keyring and restart Marblo. " +
-        "On macOS or Windows this should not happen — please report to support@marblo.app.",
+        "On macOS or Windows this should not happen — please report to support@marblo.app."
     );
   }
   const enc: EncryptedKeyStore = {
@@ -451,7 +456,7 @@ function normalizeDemoCellScope(value: unknown): string {
   if (!scope) return DEFAULT_DEMO_CELL_SCOPE;
   if (scope.length > MAX_DEMO_CELL_SCOPE_LENGTH) {
     throw new Error(
-      `demo cell scope must be ${MAX_DEMO_CELL_SCOPE_LENGTH} characters or fewer`,
+      `demo cell scope must be ${MAX_DEMO_CELL_SCOPE_LENGTH} characters or fewer`
     );
   }
   return scope;
@@ -465,7 +470,7 @@ function normalizeDemoCellValues(value: unknown): Record<string, string> {
   const entries = Object.entries(value);
   if (entries.length > MAX_DEMO_CELL_COUNT) {
     throw new Error(
-      `demo cell values cannot exceed ${MAX_DEMO_CELL_COUNT} cells`,
+      `demo cell values cannot exceed ${MAX_DEMO_CELL_COUNT} cells`
     );
   }
 
@@ -475,7 +480,7 @@ function normalizeDemoCellValues(value: unknown): Record<string, string> {
     if (!key) throw new Error("demo cell key cannot be empty");
     if (key.length > MAX_DEMO_CELL_KEY_LENGTH) {
       throw new Error(
-        `demo cell key must be ${MAX_DEMO_CELL_KEY_LENGTH} characters or fewer`,
+        `demo cell key must be ${MAX_DEMO_CELL_KEY_LENGTH} characters or fewer`
       );
     }
     if (typeof cellValue !== "string") {
@@ -483,7 +488,7 @@ function normalizeDemoCellValues(value: unknown): Record<string, string> {
     }
     if (cellValue.length > MAX_DEMO_CELL_VALUE_LENGTH) {
       throw new Error(
-        `demo cell value must be ${MAX_DEMO_CELL_VALUE_LENGTH} characters or fewer`,
+        `demo cell value must be ${MAX_DEMO_CELL_VALUE_LENGTH} characters or fewer`
       );
     }
     normalized[key] = cellValue;
@@ -498,7 +503,7 @@ function readDemoCellValues(scope: string): Record<string, string> {
 
 function writeDemoCellValues(
   scope: string,
-  values: Record<string, string>,
+  values: Record<string, string>
 ): void {
   const state = readAppState();
   writeAppState({
@@ -569,7 +574,7 @@ function stampAgentMachineOwnership(agentId: string): void {
           instancePid: process.pid,
           instanceStartedAt: instanceStartedAtMs,
         },
-        { merge: true },
+        { merge: true }
       );
     } catch (err) {
       // Allow a retry on the next status change rather than giving up forever.
@@ -577,7 +582,7 @@ function stampAgentMachineOwnership(agentId: string): void {
       console.warn(
         "[MachineId] Failed to stamp agent ownership:",
         agentId,
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
     }
   })();
@@ -597,7 +602,7 @@ function stampAgentMachineOwnership(agentId: string): void {
 // in-flight writes may still be cut off — the boot ghost sweep is the backstop.
 function finalizeAgentStatusInFirestore(
   agentId: string,
-  status: "stopped" | "error",
+  status: "stopped" | "error"
 ): void {
   void (async () => {
     try {
@@ -607,14 +612,14 @@ function finalizeAgentStatusInFirestore(
       await fbSetDoc(
         fbDoc(db, "agents", agentId),
         { status, updatedAt: fbTimestamp.now() },
-        { merge: true },
+        { merge: true }
       );
     } catch (err) {
       console.warn(
         "[LifecycleReclaim] terminal status finalize failed:",
         agentId,
         status,
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
     }
   })();
@@ -656,8 +661,8 @@ async function runGhostReclaimSweep(): Promise<GhostReclaimSweepResult> {
   const snap = await fbGetDocs(
     fbQuery(
       fbCollection(db, "agents"),
-      fbWhere("machineId", "==", getMachineId()),
-    ),
+      fbWhere("machineId", "==", getMachineId())
+    )
   );
   const now = Date.now();
   const reclaimed: GhostReclaimSweepResult["reclaimed"] = [];
@@ -683,18 +688,18 @@ async function runGhostReclaimSweep(): Promise<GhostReclaimSweepResult> {
       await fbSetDoc(
         fbDoc(db, "agents", id),
         { status: "stopped", updatedAt: fbTimestamp.now() },
-        { merge: true },
+        { merge: true }
       );
       const name = typeof data.name === "string" ? data.name : id;
       reclaimed.push({ id, name, reason: decision.reason });
       console.log(
-        `[LifecycleReclaim] ghost reclaimed: ${name} — ${decision.reason}`,
+        `[LifecycleReclaim] ghost reclaimed: ${name} — ${decision.reason}`
       );
     } catch (err) {
       console.warn(
         "[LifecycleReclaim] ghost mark-stopped failed:",
         id,
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
     }
   }
@@ -768,7 +773,7 @@ async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
           a.status !== "stopped" &&
           a.status !== "error" &&
           !!a.cwd &&
-          (a.cwd === c.path || a.cwd.startsWith(c.path + path.sep)),
+          (a.cwd === c.path || a.cwd.startsWith(c.path + path.sep))
       );
     if (busy) continue;
 
@@ -777,7 +782,7 @@ async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
     try {
       const td = await fbGetDoc(fbDoc(db, "tasks", c.taskId));
       taskStatus = td.exists()
-        ? ((td.data() as { status?: string }).status ?? null)
+        ? (td.data() as { status?: string }).status ?? null
         : null;
     } catch {
       continue; // lookup failure → preserve
@@ -789,7 +794,7 @@ async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
     let repoRoot: string | null = null;
     try {
       repoRoot = deriveRepoRootFromGitFile(
-        fs.readFileSync(path.join(c.path, ".git"), "utf-8"),
+        fs.readFileSync(path.join(c.path, ".git"), "utf-8")
       );
     } catch {
       repoRoot = null;
@@ -801,7 +806,7 @@ async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
       if (res.removed) {
         result.removed.push(c.path);
         console.log(
-          `[LifecycleReclaim] worktree reaped: ${c.path} — ${res.reason}`,
+          `[LifecycleReclaim] worktree reaped: ${c.path} — ${res.reason}`
         );
       } else {
         result.preserved++;
@@ -810,7 +815,7 @@ async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
       console.warn(
         "[LifecycleReclaim] worktree reap failed:",
         c.path,
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
     }
   }
@@ -842,7 +847,7 @@ async function reportAccumulation(worktreeCount: number | null): Promise<void> {
   console.log(
     `[LifecycleReclaim] accumulation: agents=${agentDocs ?? "?"} worktrees=${
       worktreeCount ?? "?"
-    }`,
+    }`
   );
   const decision = evaluateAccumulationAlert({
     counts: { agentDocs, worktrees: worktreeCount },
@@ -874,14 +879,14 @@ async function runLifecycleReclaimSweep(trigger: string): Promise<void> {
     const ghosts = await runGhostReclaimSweep().catch((err) => {
       console.warn(
         "[LifecycleReclaim] ghost sweep failed:",
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
       return null;
     });
     const wt = await runWorktreeTerminalSweep().catch((err) => {
       console.warn(
         "[LifecycleReclaim] worktree sweep failed:",
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
       return null;
     });
@@ -893,7 +898,7 @@ async function runLifecycleReclaimSweep(trigger: string): Promise<void> {
           wt
             ? `${wt.removed.length} reaped / ${wt.preserved} preserved / ${wt.total} on disk`
             : "skipped"
-        }`,
+        }`
     );
     await reportAccumulation(wt ? wt.total - wt.removed.length : null);
   } finally {
@@ -944,7 +949,7 @@ const pendingListener = new PendingInstructionListener(ptyManager, {
     if (!failure.permanent) return; // 재시도 여지가 남은 실패는 시끄럽게 알리지 않는다.
     const projectId = failure.agentId.startsWith("orch-")
       ? failure.agentId.slice("orch-".length)
-      : (projectIdForAgent(failure.agentId) ?? "");
+      : projectIdForAgent(failure.agentId) ?? "";
     if (!projectId) return;
     const orch = orchestrators.get(projectId);
     // 오케 자신에게 못 넣은 경우는 알릴 통로가 그 PTY 뿐이라 재주입해봐야
@@ -953,7 +958,7 @@ const pendingListener = new PendingInstructionListener(ptyManager, {
     void orch.injectMessage(
       `[전달 실패] 에이전트 ${failure.agentId} 의 PTY 주입이 ${failure.attempts}회 시도 후 실패했습니다 ` +
         `(사유: ${failure.reason}). 아래 내용은 전달되지 않았습니다 — 필요하면 다시 보내세요.\n` +
-        `--- 미전달 원문 (doc=${failure.docId}) ---\n${failure.message}`,
+        `--- 미전달 원문 (doc=${failure.docId}) ---\n${failure.message}`
     );
   },
 });
@@ -1065,7 +1070,7 @@ const agentManager = new AgentManager(
       // never let graph bookkeeping affect crash handling
     }
   },
-  () => mainWindow,
+  () => mainWindow
 );
 
 let mainWindow: BrowserWindow | null = null; // First window — fallback for things lacking owner
@@ -1098,7 +1103,7 @@ function buildStaticServer(): http.Server {
       urlPath = rawPath;
     }
     let filePath = path.normalize(
-      path.join(distPath, urlPath === "/" ? "index.html" : urlPath),
+      path.join(distPath, urlPath === "/" ? "index.html" : urlPath)
     );
     // Path-traversal guard: reject anything that escapes distPath (e.g.
     // `GET /../../../.marblo/bridge-token`) with 403 rather than serving it.
@@ -1177,7 +1182,7 @@ function startStaticServer(): Promise<number> {
         if (allowFallback) {
           console.warn(
             `[Marblo] static port ${port} unavailable (${err.code}); ` +
-              "retrying on a random free port (auth persistence resets this launch)",
+              "retrying on a random free port (auth persistence resets this launch)"
           );
           bind(0, false);
         } else {
@@ -1189,7 +1194,7 @@ function startStaticServer(): Promise<number> {
         server.removeListener("error", onError);
         // Keep a benign handler so a later runtime error can't crash the app.
         server.on("error", (e) =>
-          console.error("[Marblo] Static server runtime error:", e),
+          console.error("[Marblo] Static server runtime error:", e)
         );
         const addr = server.address();
         const boundPort = typeof addr === "object" && addr ? addr.port : 0;
@@ -1197,7 +1202,7 @@ function startStaticServer(): Promise<number> {
         // Persist so the next launch reuses the same origin.
         if (boundPort) writeAppState({ staticServerPort: boundPort });
         console.log(
-          `[Marblo] Shared static server on http://127.0.0.1:${boundPort}`,
+          `[Marblo] Shared static server on http://127.0.0.1:${boundPort}`
         );
         resolve(boundPort);
       };
@@ -1233,7 +1238,7 @@ function emitTelegramHealth(report: ChannelHealthReport): void {
   const reliability = telegramPoller.getReliabilityStats(report.projectId);
   if (reliability.unanswered > 0 || reliability.sendFailures > 0) {
     console.warn(
-      `[TelegramHealth] project=${report.projectId} reliability — unanswered inbounds=${reliability.unanswered}, failed sends=${reliability.sendFailures}`,
+      `[TelegramHealth] project=${report.projectId} reliability — unanswered inbounds=${reliability.unanswered}, failed sends=${reliability.sendFailures}`
     );
   }
   broadcast("telegram:health", { ...report, reliability });
@@ -1312,7 +1317,7 @@ const notifiedWorktreeFallbacks = new Set<string>();
  */
 function pickFallbackRoot(
   deadRootPath: string,
-  windowKey?: number,
+  windowKey?: number
 ): string | undefined {
   const usable = (p: string | undefined): p is string =>
     !!p && p !== deadRootPath && fs.existsSync(p);
@@ -1343,7 +1348,7 @@ function repointWindowRoot(
   windowKey: number | undefined,
   rootPath: string,
   removedRootPath: string,
-  opts?: { notice?: string },
+  opts?: { notice?: string }
 ): void {
   if (windowKey === undefined) return;
   const entry = windowRestore.get(windowKey);
@@ -1398,10 +1403,10 @@ function notifyRootPathMissing(rootPath: string, ownerKey?: number): void {
         ? {
             notice: "작업 워크트리가 정리되어 프로젝트 루트로 돌아왔습니다.",
           }
-        : undefined,
+        : undefined
     );
     console.warn(
-      `[Window] Removed worktree root "${rootPath}" recovered without modal via "${diagnosis.fallbackRootPath}"`,
+      `[Window] Removed worktree root "${rootPath}" recovered without modal via "${diagnosis.fallbackRootPath}"`
     );
     return;
   }
@@ -1466,7 +1471,7 @@ function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
     writeAppState({ lastRootPath: replacement });
     console.warn(
       `[Window] Worktree removed — global lastRootPath "${lastRootPath}" cleared` +
-        (replacement ? ` in favour of "${replacement}"` : " (no fallback)"),
+        (replacement ? ` in favour of "${replacement}"` : " (no fallback)")
     );
   }
 
@@ -1484,7 +1489,7 @@ function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
     if (rootPath) {
       windowRestore.set(key, { ...entry, rootPath });
       console.warn(
-        `[Window] Worktree removed — repointing window ${key} from "${removedRootPath}" to "${rootPath}"`,
+        `[Window] Worktree removed — repointing window ${key} from "${removedRootPath}" to "${rootPath}"`
       );
     } else {
       // No live fallback. Drop the root so the window reconnects to the folder
@@ -1492,7 +1497,7 @@ function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
       const { rootPath: _dead, ...rest } = entry;
       windowRestore.set(key, rest);
       console.warn(
-        `[Window] Worktree removed — window ${key} has no surviving root (was "${removedRootPath}")`,
+        `[Window] Worktree removed — window ${key} has no surviving root (was "${removedRootPath}")`
       );
     }
     sendToOwner(key, "window:rootPathInvalidated", {
@@ -1635,7 +1640,7 @@ const bridgeServer = new BridgeServer(
   agentManager,
   ptyManager,
   ptyBuffers,
-  worktreeCoordinator,
+  worktreeCoordinator
 );
 // cleanup_agents' Firestore pass — reaches ghost docs of dead previous
 // instances that the bridge's in-memory agent list cannot see.
@@ -1664,8 +1669,8 @@ const agentWatchdog = new AgentWatchdog(
       const snap = await fbGetDocs(
         fbQuery(
           fbCollection(db, "tasks"),
-          fbWhere("status", "in", ["CLAIMED", "IN_PROGRESS"]),
-        ),
+          fbWhere("status", "in", ["CLAIMED", "IN_PROGRESS"])
+        )
       );
       const out: WatchdogTicket[] = [];
       snap.forEach((d) => {
@@ -1762,8 +1767,8 @@ const agentWatchdog = new AgentWatchdog(
         const res = await bridgeServer.dispatchTask(
           buildRespawnDispatch(
             ticket,
-            live ? { cwd: live.cwd, model: live.model } : null,
-          ),
+            live ? { cwd: live.cwd, model: live.model } : null
+          )
         );
         return res?.success !== false;
       } catch (err) {
@@ -1899,7 +1904,7 @@ const agentWatchdog = new AgentWatchdog(
         };
         const scope = Array.isArray(data.scope) ? (data.scope as string[]) : [];
         const constraintText = `${String(data.description ?? "")}\n${String(
-          data.comment ?? "",
+          data.comment ?? ""
         )}`;
         // Host constraint: a Windows-only task (C:\… cwd or explicit Windows
         // note) must not respawn on this darwin host.
@@ -1970,7 +1975,7 @@ const agentWatchdog = new AgentWatchdog(
         const alt =
           cur.includes("gpt") || cur.includes("codex") ? "claude" : "gpt";
         const res = await bridgeServer.dispatchTask(
-          buildRespawnDispatch({ ...ticket, model: alt }, null),
+          buildRespawnDispatch({ ...ticket, model: alt }, null)
         );
         return res?.success !== false;
       } catch (err) {
@@ -2048,7 +2053,7 @@ const agentWatchdog = new AgentWatchdog(
       } catch (err) {
         console.error(
           "[AgentWatchdog] escalateStalledInProgress orch failed:",
-          err,
+          err
         );
       }
       try {
@@ -2056,7 +2061,7 @@ const agentWatchdog = new AgentWatchdog(
       } catch (err) {
         console.error(
           "[AgentWatchdog] escalateStalledInProgress tg failed:",
-          err,
+          err
         );
       }
     },
@@ -2068,7 +2073,7 @@ const agentWatchdog = new AgentWatchdog(
       const db = getFirestore(app);
       // Cross-project: every REVIEW ticket, dead-assignee filtered downstream.
       const snap = await fbGetDocs(
-        fbQuery(fbCollection(db, "tasks"), fbWhere("status", "==", "REVIEW")),
+        fbQuery(fbCollection(db, "tasks"), fbWhere("status", "==", "REVIEW"))
       );
       const out: StaleReviewTicket[] = [];
       snap.forEach((d) => {
@@ -2143,8 +2148,8 @@ const agentWatchdog = new AgentWatchdog(
       const snap = await fbGetDocs(
         fbQuery(
           fbCollection(db, "pendingInstructions"),
-          fbWhere("isDelivered", "==", false),
-        ),
+          fbWhere("isDelivered", "==", false)
+        )
       );
       const out: PendingInstruction[] = [];
       snap.forEach((d) => {
@@ -2189,7 +2194,7 @@ const agentWatchdog = new AgentWatchdog(
       }
     },
   },
-  resolveWatchdogConfig(),
+  resolveWatchdogConfig()
 );
 
 // Per-project orchestrator instances. One window per project is the typical
@@ -2242,7 +2247,7 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
         // electron main 이 소유하므로 오케가 멈춰도 인계할 것이 없다
         // (ticket vw38IB2VcmOIOlFV51Wa).
       }
-    },
+    }
   );
   // "error" alone doesn't say WHY, and a dead rootPath produces no output at
   // all — the shell never starts. Name the cause instead of leaving the user
@@ -2277,7 +2282,7 @@ function getAnyOrchestrator(): OrchestratorManager {
 
 /** Resolve the orchestrator for a webContents (sender) window. */
 function getOrchestratorForSender(
-  senderId: number,
+  senderId: number
 ): OrchestratorManager | null {
   for (const [projectId, owners] of orchestratorOwners.entries()) {
     if (owners.has(senderId)) return orchestrators.get(projectId) ?? null;
@@ -2289,14 +2294,14 @@ function getOrchestratorForSender(
 // orchestrator. Bridge selects by projectId from the request body / agent's
 // MARBLO_PROJECT env.
 bridgeServer.setOrchestratorLookup(
-  (projectId: string) => orchestrators.get(projectId) ?? null,
+  (projectId: string) => orchestrators.get(projectId) ?? null
 );
 
 // Per-project enabledModels lookup — replaces the global env var fallback
 // in BridgeServer.dispatchTask so concurrent windows can dispatch with
 // different model presets simultaneously.
 bridgeServer.setEnabledModelsLookup((projectId: string) =>
-  projectEnabledModels.get(projectId),
+  projectEnabledModels.get(projectId)
 );
 
 // Persist each dispatch's resolved cwd/model/complexity onto the task doc as
@@ -2331,13 +2336,13 @@ bridgeServer.setDispatchMetaHook((taskId, meta) => {
             updatedAt: fbTimestamp.now(),
           },
         },
-        { merge: true },
+        { merge: true }
       );
     } catch (err) {
       console.warn(
         "[DispatchMeta] Failed to persist dispatchMeta for task",
         taskId,
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
     }
   })();
@@ -2381,7 +2386,7 @@ bridgeServer.setTaskAgentActivityHook(async (taskId, agentId) => {
 //   4. mainWindow fallback (legacy / single-window mode)
 function resolveSpawnOwner(
   projectId: string | undefined,
-  parentAgentId: string | undefined,
+  parentAgentId: string | undefined
 ): { ownerId: number | undefined; resolvedProjectId: string | undefined } {
   // 1. explicit projectId
   if (projectId) {
@@ -2432,7 +2437,7 @@ bridgeServer.setAgentSpawnedHook(
 
     const { ownerId, resolvedProjectId } = resolveSpawnOwner(
       projectId,
-      parentAgentId,
+      parentAgentId
     );
     if (ownerId !== undefined) {
       addPtyOwner(sid, ownerId);
@@ -2459,7 +2464,7 @@ bridgeServer.setAgentSpawnedHook(
     } else {
       broadcast("agent:spawned", payload);
     }
-  },
+  }
 );
 
 // Inject session resolver so agent auto-restart resolves 'latest' per-agent.
@@ -2470,8 +2475,8 @@ agentManager.setSessionResolver(
       rootPath,
       requested,
       filterLabel,
-      filterAgentId,
-    ),
+      filterAgentId
+    )
 );
 
 // --- Mission Engine Wire (Phase 3, Step 5) ---
@@ -2499,7 +2504,7 @@ const missionOrchestratorOwners = new Map<string, number>(); // projectId → we
 // orchestrator exists this returns null and the bridge drops the mission
 // notification (never falls back to the board orch).
 bridgeServer.setMissionOrchestratorLookup(
-  (projectId: string) => missionOrchestrators.get(projectId) ?? null,
+  (projectId: string) => missionOrchestrators.get(projectId) ?? null
 );
 
 // ── Telegram poller (electron-main-owned, ticket vw38IB2VcmOIOlFV51Wa) ──
@@ -2524,12 +2529,12 @@ const telegramPoller = new TelegramPoller({
   onLoopActivityChange: () => refreshWorkPowerSaveBlocker(),
 });
 bridgeServer.setSendTelegramMessage((projectId, text, chatId) =>
-  telegramPoller.sendMessage(projectId, text, chatId),
+  telegramPoller.sendMessage(projectId, text, chatId)
 );
 
 function telegramInboundTarget(
   manager: OrchestratorManager,
-  kind: "board" | "mission",
+  kind: "board" | "mission"
 ): InboundTarget {
   return {
     injectMessage: (text) => manager.injectMessage(text),
@@ -2561,7 +2566,7 @@ function logTelegramRouteHealth(projectId: string, reason: string): void {
             }`
           : "none"
       } ` +
-      `unanswered=${health.reliability.unanswered} sendFailures=${health.reliability.sendFailures}`,
+      `unanswered=${health.reliability.unanswered} sendFailures=${health.reliability.sendFailures}`
   );
 }
 
@@ -2595,8 +2600,8 @@ function refreshWorkPowerSaveBlocker(): void {
       workPowerSaveBlockerId = powerSaveBlocker.start("prevent-app-suspension");
       console.log(
         `[PowerSave] Started prevent-app-suspension blocker id=${workPowerSaveBlockerId} sources=${sources.join(
-          ",",
-        )}`,
+          ","
+        )}`
       );
     }
     return;
@@ -2615,7 +2620,7 @@ function stopWorkPowerSaveBlocker(reason: string): void {
       powerSaveBlocker.stop(id);
     }
     console.log(
-      `[PowerSave] Stopped prevent-app-suspension blocker (${reason})`,
+      `[PowerSave] Stopped prevent-app-suspension blocker (${reason})`
     );
   } catch (err) {
     console.warn("[PowerSave] Failed to stop blocker:", err);
@@ -2632,7 +2637,7 @@ function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
   const roots: WorktreeProjectRoot[] = [];
   const addRoot = (
     projectId: string | undefined,
-    repoRoot: string | undefined,
+    repoRoot: string | undefined
   ) => {
     if (!projectId || !repoRoot) return;
     roots.push({
@@ -2799,7 +2804,7 @@ ipcMain.on("kg:recordMergeOutcome", (_event, payload: unknown) => {
 // worktree coordinator's task writer above. Best-effort: the merge handler
 // fires this without awaiting, so a Firestore failure never affects the merge.
 const recordMergeHistory = async (
-  record: MergeHistoryRecord,
+  record: MergeHistoryRecord
 ): Promise<void> => {
   // Single capture, fed to both sinks (ticket cZBlOnkg). (1) ML sink first: a
   // synchronous IPC send to the renderer's gated telemetry choke point — routed
@@ -2851,11 +2856,11 @@ registerWorktreeIpc(
   collectWorktreeProjectRoots,
   undefined,
   recordMergeHistory,
-  invalidateRemovedWorktreeRoots,
+  invalidateRemovedWorktreeRoots
 );
 
 function createMissionOrchestratorInstance(
-  projectId: string,
+  projectId: string
 ): OrchestratorManager {
   const orchestrator = new OrchestratorManager(
     ptyManager,
@@ -2869,7 +2874,7 @@ function createMissionOrchestratorInstance(
         broadcast("missionOrchestrator:statusChanged", { status });
       }
     },
-    "mission", // kind — board orchestrator 와 sessionId / MCP config 분리
+    "mission" // kind — board orchestrator 와 sessionId / MCP config 분리
   );
   orchestrator.setRootPathMissingHandler(notifyRootPathMissing);
   return orchestrator;
@@ -2905,7 +2910,7 @@ function resolveMissionRootPath(projectId: string, hint?: string): string {
 function ensureMissionOrchestratorLaunched(
   projectId: string,
   rootPathHint?: string,
-  missionId?: string,
+  missionId?: string
 ): OrchestratorManager {
   let manager = missionOrchestrators.get(projectId);
   if (!manager) {
@@ -2932,7 +2937,7 @@ function ensureMissionOrchestratorLaunched(
   // claude uuid 가 `codex resume <uuid>` 로 넘어가 exit 1 즉사하거나(혼재
   // 프로젝트), 항상 null → 매 재시작 fresh(순수 codex)가 된다. (56C9L5DP 흡수)
   const missionModel = normalizeOrchestratorModelType(
-    applyOrchestratorModelEnvForProject(projectId),
+    applyOrchestratorModelEnvForProject(projectId)
   );
   // resume 결정:
   //  - missionId 알면: 그 미션의 세션이 있으면 resume(스텝→스텝 / 앱 재시작 이어가기),
@@ -2952,13 +2957,13 @@ function ensureMissionOrchestratorLaunched(
     resumeId = hasSavedCodexSession && missionOwnsLast ? "latest" : "new";
     if (resumeId === "new" && hasSavedCodexSession && missionId) {
       console.log(
-        `[MissionOrchestrator] Saved codex session belongs to another mission — starting fresh for mission ${missionId}`,
+        `[MissionOrchestrator] Saved codex session belongs to another mission — starting fresh for mission ${missionId}`
       );
     }
   } else {
     resumeId = missionId
-      ? (manager.resolveMissionResumeId(rootPath, missionId) ?? "new")
-      : (manager.resolveOrchestratorResumeId(rootPath) ?? "new");
+      ? manager.resolveMissionResumeId(rootPath, missionId) ?? "new"
+      : manager.resolveOrchestratorResumeId(rootPath) ?? "new";
   }
   manager.launch(
     projectId,
@@ -2979,7 +2984,7 @@ function ensureMissionOrchestratorLaunched(
     },
     resumeId,
     missionId,
-    { modelOverride: missionModel },
+    { modelOverride: missionModel }
   );
   return manager;
 }
@@ -3071,7 +3076,7 @@ const missionsEnabled = (process.env.VITE_DEV_FEATURES || "")
   .includes("missions");
 if (!missionsEnabled) {
   console.log(
-    "[Mission] disabled for MVP — set VITE_DEV_FEATURES=missions to enable the tab + engine",
+    "[Mission] disabled for MVP — set VITE_DEV_FEATURES=missions to enable the tab + engine"
   );
 }
 if (missionsEnabled)
@@ -3166,7 +3171,7 @@ const costTracker = new CostTracker((agentId, cost) => {
   const projectId = agent?.launchConfig?.env?.MARBLO_PROJECT || "";
   if (!projectId) {
     console.warn(
-      `[CostTracker:CB] No projectId for agent ${agentId} — recording with empty projectId`,
+      `[CostTracker:CB] No projectId for agent ${agentId} — recording with empty projectId`
     );
   }
 
@@ -3213,7 +3218,7 @@ const costTracker = new CostTracker((agentId, cost) => {
       projectId || "(none)"
     } in=${cost.deltaInputTokens} out=${
       cost.deltaOutputTokens
-    } cost=$${cost.deltaCost.toFixed(4)}`,
+    } cost=$${cost.deltaCost.toFixed(4)}`
   );
 
   // Also send token:usage telemetry event with projectId
@@ -3224,7 +3229,7 @@ const costTracker = new CostTracker((agentId, cost) => {
     cost.deltaInputTokens,
     cost.deltaOutputTokens,
     cost.deltaCost,
-    projectId,
+    projectId
   );
 });
 
@@ -3300,14 +3305,14 @@ function normalizeOrchestratorModelSetting(value: unknown): string {
   console.warn(
     `[Main] 오케 모델 접미 "${modelId}"(harness=${
       pinHarness ?? "미지"
-    })가 프로바이더 "${provider}" 와 어긋나 무시합니다`,
+    })가 프로바이더 "${provider}" 와 어긋나 무시합니다`
   );
   return provider;
 }
 
 function normalizeOrchestratorModelType(value: unknown): ModelType {
   const { harness } = splitOrchestratorModelValue(
-    normalizeOrchestratorModelSetting(value),
+    normalizeOrchestratorModelSetting(value)
   );
   if (harness === "codex") return "gpt";
   if (harness === "antigravity") return "antigravity";
@@ -3350,7 +3355,7 @@ function saveProjectOrchestratorModel(projectId: string, model: string): void {
   map[projectId] = normalized;
   writeAppState({ orchestratorModelByProject: map });
   console.log(
-    `[Main] Orchestrator model for project ${projectId} recorded: ${normalized}`,
+    `[Main] Orchestrator model for project ${projectId} recorded: ${normalized}`
   );
 }
 
@@ -3363,7 +3368,7 @@ function saveProjectOrchestratorModel(projectId: string, model: string): void {
  */
 function applyOrchestratorModelEnvForProject(
   projectId?: string,
-  explicitModel?: string,
+  explicitModel?: string
 ): string {
   const effective = resolveEffectiveOrchestratorModelSetting({
     envOverride: INITIAL_ORCHESTRATOR_MODEL_ENV,
@@ -3372,7 +3377,7 @@ function applyOrchestratorModelEnvForProject(
       : null,
     perProject: readProjectOrchestratorModel(projectId),
     globalSetting: normalizeOrchestratorModelSetting(
-      readAppState().orchestratorModel,
+      readAppState().orchestratorModel
     ),
   });
   // ★env 에는 **프로바이더만** 넣는다. `resolveOrchestratorModel()`(agent-config)이
@@ -3466,7 +3471,7 @@ function getDefaultCommand(model: string): string {
  */
 function handleAgentDelegation(
   nodeId: string,
-  output: Record<string, unknown>,
+  output: Record<string, unknown>
 ): void {
   const connectionMode = output.connectionMode as string;
   const resolvedTask = (output.task as string) || "";
@@ -3537,12 +3542,12 @@ function handleAgentDelegation(
       }
 
       console.log(
-        `[Flow:AgentDelegation] Spawned agent "${spawnConfig.name}" (${agentId}) for node ${nodeId}`,
+        `[Flow:AgentDelegation] Spawned agent "${spawnConfig.name}" (${agentId}) for node ${nodeId}`
       );
     } catch (err) {
       console.error(
         `[Flow:AgentDelegation] Failed to spawn agent for node ${nodeId}:`,
-        err,
+        err
       );
     }
   } else if (connectionMode === "existing" && output.existingAgentId) {
@@ -3556,11 +3561,11 @@ function handleAgentDelegation(
       // as a discrete keystroke (single-chunk gets paste-buffered).
       ptyManager.writeAndSubmit(agent.ptySessionId, taskMessage);
       console.log(
-        `[Flow:AgentDelegation] Sent task to existing agent "${agent.name}" (${existingAgentId}) for node ${nodeId}`,
+        `[Flow:AgentDelegation] Sent task to existing agent "${agent.name}" (${existingAgentId}) for node ${nodeId}`
       );
     } else {
       console.warn(
-        `[Flow:AgentDelegation] Agent ${existingAgentId} not found or stopped. Cannot route task for node ${nodeId}.`,
+        `[Flow:AgentDelegation] Agent ${existingAgentId} not found or stopped. Cannot route task for node ${nodeId}.`
       );
     }
   }
@@ -3690,8 +3695,8 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
           detachedView === "board"
             ? "Board"
             : detachedView === "code"
-              ? "Code"
-              : "History"
+            ? "Code"
+            : "History"
         }`
       : "Marblo",
     webPreferences: {
@@ -3727,7 +3732,7 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
           "Marblo — 시작 실패",
           "내부 웹 서버를 시작하지 못했습니다. 이미 실행 중인 다른 Marblo 인스턴스가 " +
             "포트를 점유하고 있거나 로컬 방화벽/보안 소프트웨어가 127.0.0.1 바인딩을 " +
-            "차단하고 있을 수 있습니다.\n\n앱을 완전히 종료한 뒤 다시 실행해 주세요.",
+            "차단하고 있을 수 있습니다.\n\n앱을 완전히 종료한 뒤 다시 실행해 주세요."
         );
         return;
       }
@@ -3779,7 +3784,7 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
       // owners — never synchronously here.
       orchestratorOwners.delete(pid);
       console.warn(
-        `[Orchestrator] Window ${closedSenderId} closed and was the last owner of project ${pid}'s orchestrator. Leaving it RUNNING for reattach (no auto-kill).`,
+        `[Orchestrator] Window ${closedSenderId} closed and was the last owner of project ${pid}'s orchestrator. Leaving it RUNNING for reattach (no auto-kill).`
       );
     }
     // Mission orchestrators are owned per-window too (missionOrchestratorOwners
@@ -3801,7 +3806,7 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
     if (mainWindow === win) {
       // Promote another window as primary, or null
       mainWindow =
-        allWindows.size > 0 ? (allWindows.values().next().value ?? null) : null;
+        allWindows.size > 0 ? allWindows.values().next().value ?? null : null;
       if (mainWindow) bridgeServer.setMainWindow(mainWindow);
     }
   });
@@ -3909,7 +3914,7 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
 // folder picker (per-window restore record wins even for new windows).
 function createDetachedWindow(
   view: DetachedView,
-  seed?: { rootPath?: string; projectId?: string },
+  seed?: { rootPath?: string; projectId?: string }
 ): BrowserWindow {
   const win = createWindow(true, view);
   // External-link handling is already applied via createWindow; re-asserting it
@@ -3946,11 +3951,11 @@ function restoreWindowSession(): void {
   const { windows: resolved, dropped } = resolveRestoreRoots(
     persistable,
     (p) => fs.existsSync(p),
-    state.lastRootPath ? { defaultRootPath: state.lastRootPath } : undefined,
+    state.lastRootPath ? { defaultRootPath: state.lastRootPath } : undefined
   );
   for (const w of dropped) {
     console.warn(
-      `[Window] Saved window root no longer exists and has no fallback — not reopening: "${w.rootPath}"`,
+      `[Window] Saved window root no longer exists and has no fallback — not reopening: "${w.rootPath}"`
     );
   }
   const saved = resolved.slice(0, 10); // sanity cap — never spawn a runaway number of windows
@@ -3972,7 +3977,7 @@ function restoreWindowSession(): void {
     });
     if (w.fellBackFrom) {
       console.warn(
-        `[Window] Saved root "${w.fellBackFrom}" no longer exists — reopening on "${w.rootPath}" instead`,
+        `[Window] Saved root "${w.fellBackFrom}" no longer exists — reopening on "${w.rootPath}" instead`
       );
     }
   });
@@ -4046,11 +4051,11 @@ ipcMain.on(
       id,
       data,
       bracketedPaste,
-    }: { id: string; data: string; bracketedPaste?: boolean },
+    }: { id: string; data: string; bracketedPaste?: boolean }
   ) => {
     if (!isPtyCallerOwner(event.sender.id, id)) return;
     ptyManager.writeAndSubmit(id, data, undefined, bracketedPaste);
-  },
+  }
 );
 
 ipcMain.handle("pty:resize", (event, { id, cols, rows }) => {
@@ -4071,7 +4076,7 @@ ipcMain.handle("pty:resize", (event, { id, cols, rows }) => {
   if (buf && buf.length > 0) {
     buf.length = 0;
     console.log(
-      `[PTY:RESIZE] Cleared pre-resize buffer for ${id} (now ${cols}x${rows})`,
+      `[PTY:RESIZE] Cleared pre-resize buffer for ${id} (now ${cols}x${rows})`
     );
   }
   ptyManager.resize(id, cols, rows);
@@ -4128,7 +4133,7 @@ ipcMain.handle(
       void syncTelegramChannelMeta(getMachineId()).catch(() => undefined);
     }
     return result;
-  },
+  }
 );
 
 ipcMain.handle("auth:clearAgentCustomToken", () => clearAgentCustomToken());
@@ -4173,13 +4178,13 @@ function truncateBoardDiff(diff: string): string {
   if (diff.length <= BOARD_DIFF_MAX_BYTES) return diff;
   return `${diff.slice(
     0,
-    BOARD_DIFF_MAX_BYTES,
+    BOARD_DIFF_MAX_BYTES
   )}\n\n...(truncated - run git diff locally for full output)`;
 }
 
 async function buildBoardWorktreeDiff(
   worktreePath: string,
-  baseRef: string,
+  baseRef: string
 ): Promise<string> {
   if (
     !fs.existsSync(worktreePath) ||
@@ -4191,7 +4196,7 @@ async function buildBoardWorktreeDiff(
   let comparisonRef = baseRef;
   const mergeBase = await runBoardGit(
     ["merge-base", baseRef, "HEAD"],
-    worktreePath,
+    worktreePath
   );
   if (mergeBase.code === 0 && mergeBase.stdout.trim()) {
     comparisonRef = mergeBase.stdout.trim();
@@ -4207,7 +4212,7 @@ async function buildBoardWorktreeDiff(
       comparisonRef,
       "--",
     ],
-    worktreePath,
+    worktreePath
   );
   if (tracked.code !== 0) {
     throw new Error(`git diff failed: ${tracked.stderr.trim()}`);
@@ -4216,13 +4221,13 @@ async function buildBoardWorktreeDiff(
   const parts = [tracked.stdout.trimEnd()].filter(Boolean);
   const untracked = await runBoardGit(
     ["ls-files", "--others", "--exclude-standard"],
-    worktreePath,
+    worktreePath
   );
   if (untracked.code === 0) {
     for (const filePath of untracked.stdout.split("\n").filter(Boolean)) {
       const fileDiff = await runBoardGit(
         ["diff", "--no-index", "--no-color", "--", "/dev/null", filePath],
-        worktreePath,
+        worktreePath
       );
       if ((fileDiff.code === 0 || fileDiff.code === 1) && fileDiff.stdout) {
         parts.push(fileDiff.stdout.trimEnd());
@@ -4242,7 +4247,7 @@ ipcMain.handle(
       throw new Error("board:worktreeDiff requires worktreePath");
     }
     return buildBoardWorktreeDiff(worktreePath, args.baseRef?.trim() || "HEAD");
-  },
+  }
 );
 
 // --- File System IPC Handlers ---
@@ -4257,7 +4262,7 @@ ipcMain.handle(
     // reads of arbitrary absolute paths (e.g. ~/.ssh/config) via this IPC.
     fsGuard(rootPath, filePath);
     return fsManager.readFile(filePath);
-  },
+  }
 );
 
 ipcMain.handle(
@@ -4268,12 +4273,12 @@ ipcMain.handle(
       rootPath,
       filePath,
       content,
-    }: { rootPath: string; filePath: string; content: string },
+    }: { rootPath: string; filePath: string; content: string }
   ) => {
     // Containment guard — blocks writes of arbitrary absolute paths.
     fsGuard(rootPath, filePath);
     fsManager.writeFile(filePath, content);
-  },
+  }
 );
 
 ipcMain.handle("fs:gitStatus", async (_event, rootPath: string) => {
@@ -4287,17 +4292,17 @@ ipcMain.handle(
   "fs:gitWorktreeChanges",
   async (
     _event,
-    { rootPath, baseRef }: { rootPath: string; baseRef: string },
+    { rootPath, baseRef }: { rootPath: string; baseRef: string }
   ) => {
     return fsManager.getWorktreeChanges(rootPath, baseRef);
-  },
+  }
 );
 
 ipcMain.handle(
   "fs:gitDiff",
   async (_event, filePath: string, baseSha?: string) => {
     return fsManager.getGitDiff(filePath, baseSha);
-  },
+  }
 );
 
 ipcMain.handle("fs:gitRemoteUrl", async (_event, rootPath: string) => {
@@ -4365,7 +4370,7 @@ ipcMain.handle(
     fsGuard(rootPath, filePath);
     fsManager.createFile(filePath);
     return { success: true, path: filePath };
-  },
+  }
 );
 
 ipcMain.handle(
@@ -4374,7 +4379,7 @@ ipcMain.handle(
     fsGuard(rootPath, dirPath);
     fsManager.createDirectory(dirPath);
     return { success: true, path: dirPath };
-  },
+  }
 );
 
 ipcMain.handle(
@@ -4385,24 +4390,24 @@ ipcMain.handle(
       rootPath,
       fromPath,
       toPath,
-    }: { rootPath: string; fromPath: string; toPath: string },
+    }: { rootPath: string; fromPath: string; toPath: string }
   ) => {
     fsGuard(rootPath, fromPath, toPath);
     fsManager.rename(fromPath, toPath);
     return { success: true, fromPath, toPath };
-  },
+  }
 );
 
 ipcMain.handle(
   "fs:remove",
   (
     _event,
-    { rootPath, targetPath }: { rootPath: string; targetPath: string },
+    { rootPath, targetPath }: { rootPath: string; targetPath: string }
   ) => {
     fsGuard(rootPath, targetPath);
     fsManager.remove(targetPath);
     return { success: true, path: targetPath };
-  },
+  }
 );
 
 ipcMain.handle(
@@ -4413,12 +4418,12 @@ ipcMain.handle(
       rootPath,
       fromPath,
       toPath,
-    }: { rootPath: string; fromPath: string; toPath: string },
+    }: { rootPath: string; fromPath: string; toPath: string }
   ) => {
     fsGuard(rootPath, fromPath, toPath);
     const finalPath = fsManager.copy(fromPath, toPath);
     return { success: true, fromPath, toPath: finalPath };
-  },
+  }
 );
 
 // Read a file as base64 — used by the Code tab's ImagePreview to render raster
@@ -4427,13 +4432,13 @@ ipcMain.handle(
   "fs:readFileBase64",
   async (
     _event,
-    { rootPath, filePath }: { rootPath: string; filePath: string },
+    { rootPath, filePath }: { rootPath: string; filePath: string }
   ) => {
     // Containment guard, symmetric with the mutation handlers.
     fsGuard(rootPath, filePath);
     const buf = await fs.promises.readFile(filePath);
     return buf.toString("base64");
-  },
+  }
 );
 
 // Import external OS files (e.g. dragged from Finder) into a project directory.
@@ -4448,7 +4453,7 @@ ipcMain.handle(
       rootPath,
       destDir,
       srcPaths,
-    }: { rootPath: string; destDir: string; srcPaths: string[] },
+    }: { rootPath: string; destDir: string; srcPaths: string[] }
   ) => {
     fsGuard(rootPath, destDir);
     const imported: string[] = [];
@@ -4462,7 +4467,7 @@ ipcMain.handle(
         do {
           dest = path.join(
             destDir,
-            `${base} copy${i > 1 ? ` ${i}` : ""}${ext}`,
+            `${base} copy${i > 1 ? ` ${i}` : ""}${ext}`
           );
           i += 1;
         } while (fs.existsSync(dest));
@@ -4471,7 +4476,7 @@ ipcMain.handle(
       imported.push(dest);
     }
     return { success: true, imported };
-  },
+  }
 );
 
 ipcMain.handle("fs:revealInFinder", (_event, targetPath: string) => {
@@ -4483,7 +4488,7 @@ function makeConnectionCheckItem(
   id: ConnectionCheckItem["id"],
   label: string,
   status: ConnectionCheckStatus,
-  detail: string,
+  detail: string
 ): ConnectionCheckItem {
   return { id, label, status, detail };
 }
@@ -4495,7 +4500,7 @@ function runConnectionCheckCommand(
   command: string,
   args: string[],
   cwd: string | undefined,
-  timeoutMs = 10_000,
+  timeoutMs = 10_000
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -4568,7 +4573,7 @@ function parseRepoView(stdout: string): {
 }
 
 async function checkProjectConnectionHealth(
-  projectId: string,
+  projectId: string
 ): Promise<ConnectionCheckResult> {
   const checkedAt = Date.now();
   const connection = getProjectConnection(projectId);
@@ -4581,31 +4586,31 @@ async function checkProjectConnectionHealth(
           "repo",
           "Repo access",
           "fail",
-          "프로젝트 연결 정보가 없습니다.",
+          "프로젝트 연결 정보가 없습니다."
         ),
         makeConnectionCheckItem(
           "branch",
           "Branch",
           "fail",
-          "기본 브랜치를 확인할 연결 정보가 없습니다.",
+          "기본 브랜치를 확인할 연결 정보가 없습니다."
         ),
         makeConnectionCheckItem(
           "issues",
           "Issue read",
           "fail",
-          "Issue 조회를 위한 repo 연결 정보가 없습니다.",
+          "Issue 조회를 위한 repo 연결 정보가 없습니다."
         ),
         makeConnectionCheckItem(
           "pullRequest",
           "PR create",
           "fail",
-          "PR 권한을 확인할 repo 연결 정보가 없습니다.",
+          "PR 권한을 확인할 repo 연결 정보가 없습니다."
         ),
         makeConnectionCheckItem(
           "auth",
           "Token/auth",
           "fail",
-          "GitHub 인증 상태를 확인할 연결 정보가 없습니다.",
+          "GitHub 인증 상태를 확인할 연결 정보가 없습니다."
         ),
       ],
     };
@@ -4616,7 +4621,7 @@ async function checkProjectConnectionHealth(
     : undefined;
   const repoSlug = parseGitHubRepoSlug(connection.repoUrl);
   const hasGitHubMcp = connection.availableMcps.some((mcp) =>
-    /github/i.test(mcp),
+    /github/i.test(mcp)
   );
   const items: ConnectionCheckItem[] = [];
 
@@ -4628,14 +4633,14 @@ async function checkProjectConnectionHealth(
         "mismatch",
         "Repo match",
         "warn",
-        "로컬 경로가 없어 origin 일치 여부를 확인할 수 없습니다.",
-      ),
+        "로컬 경로가 없어 origin 일치 여부를 확인할 수 없습니다."
+      )
     );
   } else {
     const origin = await runConnectionCheckCommand(
       "git",
       ["remote", "get-url", "origin"],
-      cwd,
+      cwd
     );
     const localOrigin = origin.code === 0 ? origin.stdout.trim() : "";
     if (!connection.repoUrl) {
@@ -4644,8 +4649,8 @@ async function checkProjectConnectionHealth(
           "mismatch",
           "Repo match",
           "warn",
-          "저장된 repo URL이 없어 로컬 origin과 비교할 수 없습니다.",
-        ),
+          "저장된 repo URL이 없어 로컬 origin과 비교할 수 없습니다."
+        )
       );
     } else if (!localOrigin) {
       items.push(
@@ -4653,8 +4658,8 @@ async function checkProjectConnectionHealth(
           "mismatch",
           "Repo match",
           "warn",
-          "로컬 git origin을 확인하지 못해 일치 여부를 비교할 수 없습니다.",
-        ),
+          "로컬 git origin을 확인하지 못해 일치 여부를 비교할 수 없습니다."
+        )
       );
     } else if (repoUrlsMatch(localOrigin, connection.repoUrl)) {
       items.push(
@@ -4664,8 +4669,8 @@ async function checkProjectConnectionHealth(
           "pass",
           `로컬 origin이 저장된 repo와 일치합니다 (${
             parseGitHubRepoSlug(connection.repoUrl) ?? connection.repoUrl
-          }).`,
-        ),
+          }).`
+        )
       );
     } else {
       items.push(
@@ -4673,8 +4678,8 @@ async function checkProjectConnectionHealth(
           "mismatch",
           "Repo match",
           "fail",
-          `로컬 origin(${localOrigin})이 저장된 repo URL(${connection.repoUrl})과 다릅니다. 잘못된 repo에 작업할 위험이 있습니다.`,
-        ),
+          `로컬 origin(${localOrigin})이 저장된 repo URL(${connection.repoUrl})과 다릅니다. 잘못된 repo에 작업할 위험이 있습니다.`
+        )
       );
     }
   }
@@ -4682,7 +4687,7 @@ async function checkProjectConnectionHealth(
   const auth = await runConnectionCheckCommand(
     "gh",
     ["auth", "status", "-h", "github.com"],
-    cwd,
+    cwd
   );
   const ghAvailable = auth.code !== -1;
   const ghAuthed = auth.code === 0;
@@ -4696,9 +4701,9 @@ async function checkProjectConnectionHealth(
           ? "GitHub 인증과 GitHub MCP 연결 신호를 확인했습니다."
           : "GitHub 인증을 확인했습니다."
         : ghAvailable
-          ? "GitHub CLI 인증이 필요합니다. OAuth 화면은 열지 않았습니다."
-          : "GitHub CLI를 찾을 수 없습니다. GitHub MCP 또는 gh 인증 경로가 필요합니다.",
-    ),
+        ? "GitHub CLI 인증이 필요합니다. OAuth 화면은 열지 않았습니다."
+        : "GitHub CLI를 찾을 수 없습니다. GitHub MCP 또는 gh 인증 경로가 필요합니다."
+    )
   );
 
   let repoView:
@@ -4714,7 +4719,7 @@ async function checkProjectConnectionHealth(
         "--json",
         "nameWithOwner,defaultBranchRef,viewerPermission",
       ],
-      cwd,
+      cwd
     );
     if (repo.code === 0) repoView = parseRepoView(repo.stdout);
     items.push(
@@ -4724,14 +4729,14 @@ async function checkProjectConnectionHealth(
         repo.code === 0 ? "pass" : "fail",
         repo.code === 0
           ? `${repoSlug} 접근 가능`
-          : repo.stderr || `${repoSlug} 접근 확인 실패`,
-      ),
+          : repo.stderr || `${repoSlug} 접근 확인 실패`
+      )
     );
   } else if (connection.repoUrl) {
     const repo = await runConnectionCheckCommand(
       "git",
       ["ls-remote", "--exit-code", connection.repoUrl, "HEAD"],
-      cwd,
+      cwd
     );
     items.push(
       makeConnectionCheckItem(
@@ -4740,8 +4745,8 @@ async function checkProjectConnectionHealth(
         repo.code === 0 ? "warn" : "fail",
         repo.code === 0
           ? "git remote 접근은 가능하지만 GitHub 인증 점검은 통과하지 못했습니다."
-          : repo.stderr || "repo 접근 확인 실패",
-      ),
+          : repo.stderr || "repo 접근 확인 실패"
+      )
     );
   } else {
     items.push(
@@ -4749,8 +4754,8 @@ async function checkProjectConnectionHealth(
         "repo",
         "Repo access",
         "fail",
-        "repo URL이 연결 정보에 없습니다.",
-      ),
+        "repo URL이 연결 정보에 없습니다."
+      )
     );
   }
 
@@ -4760,7 +4765,7 @@ async function checkProjectConnectionHealth(
     const branch = await runConnectionCheckCommand(
       "gh",
       ["api", `repos/${repoSlug}/branches/${defaultBranch}`],
-      cwd,
+      cwd
     );
     items.push(
       makeConnectionCheckItem(
@@ -4769,8 +4774,8 @@ async function checkProjectConnectionHealth(
         branch.code === 0 ? "pass" : "fail",
         branch.code === 0
           ? `${defaultBranch} 브랜치 확인`
-          : branch.stderr || `${defaultBranch} 브랜치 확인 실패`,
-      ),
+          : branch.stderr || `${defaultBranch} 브랜치 확인 실패`
+      )
     );
   } else if (connection.repoUrl && defaultBranch) {
     const branch = await runConnectionCheckCommand(
@@ -4781,7 +4786,7 @@ async function checkProjectConnectionHealth(
         connection.repoUrl,
         `refs/heads/${defaultBranch}`,
       ],
-      cwd,
+      cwd
     );
     items.push(
       makeConnectionCheckItem(
@@ -4790,8 +4795,8 @@ async function checkProjectConnectionHealth(
         branch.code === 0 ? "warn" : "fail",
         branch.code === 0
           ? `${defaultBranch} 브랜치는 확인했지만 GitHub API 인증은 통과하지 못했습니다.`
-          : branch.stderr || `${defaultBranch} 브랜치 확인 실패`,
-      ),
+          : branch.stderr || `${defaultBranch} 브랜치 확인 실패`
+      )
     );
   } else {
     items.push(
@@ -4799,8 +4804,8 @@ async function checkProjectConnectionHealth(
         "branch",
         "Branch",
         "fail",
-        "기본 브랜치 정보가 없습니다.",
-      ),
+        "기본 브랜치 정보가 없습니다."
+      )
     );
   }
 
@@ -4808,7 +4813,7 @@ async function checkProjectConnectionHealth(
     const issues = await runConnectionCheckCommand(
       "gh",
       ["issue", "list", "--repo", repoSlug, "--limit", "1", "--json", "number"],
-      cwd,
+      cwd
     );
     items.push(
       makeConnectionCheckItem(
@@ -4817,8 +4822,8 @@ async function checkProjectConnectionHealth(
         issues.code === 0 ? "pass" : "fail",
         issues.code === 0
           ? "Issue 조회 가능"
-          : issues.stderr || "Issue 조회 권한 확인 실패",
-      ),
+          : issues.stderr || "Issue 조회 권한 확인 실패"
+      )
     );
   } else {
     items.push(
@@ -4826,14 +4831,14 @@ async function checkProjectConnectionHealth(
         "issues",
         "Issue read",
         "fail",
-        "GitHub 인증이 없어 Issue 조회를 확인하지 못했습니다.",
-      ),
+        "GitHub 인증이 없어 Issue 조회를 확인하지 못했습니다."
+      )
     );
   }
 
   const viewerPermission = repoView?.viewerPermission;
   const canWriteToRepo = ["ADMIN", "MAINTAIN", "WRITE"].includes(
-    viewerPermission ?? "",
+    viewerPermission ?? ""
   );
   const connectionAllowsPr =
     connection.accessMode === "pr" || connection.accessMode === "commit";
@@ -4844,16 +4849,16 @@ async function checkProjectConnectionHealth(
       canWriteToRepo && connectionAllowsPr
         ? "pass"
         : canWriteToRepo
-          ? "warn"
-          : "fail",
+        ? "warn"
+        : "fail",
       canWriteToRepo && connectionAllowsPr
         ? `PR 생성 가능 (${viewerPermission})`
         : canWriteToRepo
-          ? `GitHub 권한은 ${viewerPermission}이지만 connection accessMode가 ${connection.accessMode}입니다.`
-          : viewerPermission
-            ? `현재 GitHub 권한 ${viewerPermission}으로 PR 생성을 보장할 수 없습니다.`
-            : "GitHub repo 권한 정보를 확인하지 못했습니다.",
-    ),
+        ? `GitHub 권한은 ${viewerPermission}이지만 connection accessMode가 ${connection.accessMode}입니다.`
+        : viewerPermission
+        ? `현재 GitHub 권한 ${viewerPermission}으로 PR 생성을 보장할 수 없습니다.`
+        : "GitHub repo 권한 정보를 확인하지 못했습니다."
+    )
   );
 
   return {
@@ -4885,14 +4890,14 @@ ipcMain.handle(
   async (_event, input: ProjectConnectionInput) => {
     const conn = await upsertProjectConnection(input);
     return withAvailableMcps(conn);
-  },
+  }
 );
 
 ipcMain.handle(
   "connection:touchLastRun",
   (_event, { projectId, at }: { projectId: string; at?: number }) => {
     return touchProjectLastRun(projectId, at);
-  },
+  }
 );
 
 ipcMain.handle("connection:check", (_event, projectId: string) => {
@@ -4906,10 +4911,10 @@ ipcMain.handle(
   "connection:setAccess",
   (
     _event,
-    { projectId, accessMode }: { projectId: string; accessMode: AccessMode },
+    { projectId, accessMode }: { projectId: string; accessMode: AccessMode }
   ) => {
     return withAvailableMcps(setAccessMode(projectId, accessMode));
-  },
+  }
 );
 
 // 연결 해제 — 레코드 삭제. 있었으면 true, 없었으면 false.
@@ -5018,7 +5023,7 @@ function setupPtyForwarding(sid: string): void {
 }
 
 async function resolveLaneLaunchContext(
-  taskId: string | undefined,
+  taskId: string | undefined
 ): Promise<string | undefined> {
   if (!taskId) return undefined;
   try {
@@ -5038,7 +5043,7 @@ async function resolveLaneLaunchContext(
   } catch (err) {
     console.warn(
       `[agent:launch] Failed to resolve task context for task=${taskId}:`,
-      err,
+      err
     );
     return undefined;
   }
@@ -5061,7 +5066,7 @@ async function resolveLaneLaunchContext(
 ipcMain.handle("models:quickLaneCatalog", () => {
   return quickLaneVendorCatalog().map((group) => {
     const missingEnvKeys = group.requiredEnvKeys.filter(
-      (key) => !(process.env[key] ?? "").trim(),
+      (key) => !(process.env[key] ?? "").trim()
     );
     return {
       ...group,
@@ -5077,7 +5082,7 @@ ipcMain.handle(
   "agent:launch",
   async (
     event,
-    { agent, cwd, initialPrompt, resumeSessionId, projectId, taskId, modelPin },
+    { agent, cwd, initialPrompt, resumeSessionId, projectId, taskId, modelPin }
   ) => {
     // Pre-spawn auth gate (claude/codex). Block an unauthenticated spawn before
     // any worktree/PTY side effects so the CLI never boots into its login
@@ -5086,7 +5091,7 @@ ipcMain.handle(
     const agentGate = await checkSpawnAuthGate(agent.model);
     if (!agentGate.ok) {
       console.warn(
-        `[agent:launch] Blocked "${agent.name}" — ${agentGate.model} ${agentGate.reason} (action: ${agentGate.action})`,
+        `[agent:launch] Blocked "${agent.name}" — ${agentGate.model} ${agentGate.reason} (action: ${agentGate.action})`
       );
       return {
         id: "",
@@ -5125,7 +5130,7 @@ ipcMain.handle(
         const uuid = getAgyConversationId(agent.id);
         resolvedSessionId = uuid ?? "latest";
         console.log(
-          `[agent:launch] agy resolve 'latest' for "${agent.name}" → ${resolvedSessionId}`,
+          `[agent:launch] agy resolve 'latest' for "${agent.name}" → ${resolvedSessionId}`
         );
       } else if (agent.model === "gpt" || agent.model === "gemini") {
         // Codex/Gemini sessions live in this agent's isolated home, NOT in
@@ -5141,7 +5146,7 @@ ipcMain.handle(
           ? "latest"
           : "new";
         console.log(
-          `[agent:launch] Resolved 'latest' for "${agent.name}" (${agent.model}) → ${resolvedSessionId}`,
+          `[agent:launch] Resolved 'latest' for "${agent.name}" (${agent.model}) → ${resolvedSessionId}`
         );
       } else {
         // Stateless file-IO — any orchestrator instance reads the same on-disk
@@ -5150,11 +5155,11 @@ ipcMain.handle(
           launchCwd,
           "latest",
           agent.name,
-          agent.id,
+          agent.id
         );
         resolvedSessionId = resolved ?? "new";
         console.log(
-          `[agent:launch] Resolved 'latest' for "${agent.name}" → ${resolvedSessionId}`,
+          `[agent:launch] Resolved 'latest' for "${agent.name}" → ${resolvedSessionId}`
         );
       }
     }
@@ -5221,10 +5226,10 @@ ipcMain.handle(
       // 훅을 타지 않으므로 여기서 구체 모델을 돌려줘 호출자가 doc 에 스탬프한다.
       // launch() 반환 뒤라 조회 경로가 유효하다.
       spawnedModel: formatModelAtEffort(
-        agentManager.getSpawnedModel(instance.id),
+        agentManager.getSpawnedModel(instance.id)
       ),
     };
-  },
+  }
 );
 
 // Renderer calls this after TerminalView mounts to drain any buffered early output.
@@ -5233,7 +5238,7 @@ ipcMain.handle(
 ipcMain.handle("pty:replay", (_event, { id }: { id: string }) => {
   const buffer = ptyBuffers.get(id);
   console.log(
-    `[PTY:REPLAY] id=${id}, drained ${buffer?.length ?? 0} chunks → live mode`,
+    `[PTY:REPLAY] id=${id}, drained ${buffer?.length ?? 0} chunks → live mode`
   );
   // Mark live regardless of buffer presence — second replay call for the
   // same sid (StrictMode dev double-mount, or a stale call) shouldn't undo
@@ -5272,7 +5277,7 @@ ipcMain.handle("agent:restart", (event, agentId: string) => {
         ptySessionId: instance.ptySessionId,
         status: instance.status,
         spawnedModel: formatModelAtEffort(
-          agentManager.getSpawnedModel(instance.id),
+          agentManager.getSpawnedModel(instance.id)
         ),
       }
     : null;
@@ -5325,7 +5330,7 @@ ipcMain.handle(
     // Keep the on-disk multi-window session current so a full restart reopens
     // every project window (not just the last-touched one).
     persistWindowSession();
-  },
+  }
 );
 
 ipcMain.handle("window:getRestoreState", (event) => {
@@ -5391,13 +5396,13 @@ ipcMain.handle(
       }>;
       rootPath: string;
       projectId: string;
-    },
+    }
   ) => {
     const senderId = event.sender.id;
     // Find session candidates for each agent
     const candidates = findReconnectCandidates(
       agents.map((a) => ({ id: a.id, name: a.name, role: a.role })),
-      rootPath,
+      rootPath
     );
 
     // Machine-scoping (shared-account safety): read each agent doc's machineId
@@ -5416,19 +5421,19 @@ ipcMain.handle(
       const snap = await fbGetDocs(
         fbQuery(
           fbCollection(db, "agents"),
-          fbWhere("projectId", "==", projectId),
-        ),
+          fbWhere("projectId", "==", projectId)
+        )
       );
       snap.forEach((d) => {
         machineIdByAgent.set(
           d.id,
-          (d.data() as { machineId?: string }).machineId,
+          (d.data() as { machineId?: string }).machineId
         );
       });
     } catch (err) {
       console.warn(
         "[Reconnect] machineId map fetch failed — treating all docs as legacy (no auto-launch):",
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
     }
 
@@ -5483,7 +5488,7 @@ ipcMain.handle(
       // for it, it is genuinely ours regardless of a stale doc machineId.
       const ownership = classifyMachineOwnership(
         machineIdByAgent.get(agentData.id),
-        thisMachineId,
+        thisMachineId
       );
       if (ownership !== "own") {
         console.log(
@@ -5491,7 +5496,7 @@ ipcMain.handle(
             ownership === "foreign"
               ? "owned by another machine"
               : "unstamped/legacy"
-          } → read-only skip (no launch, no Firestore mutation)`,
+          } → read-only skip (no launch, no Firestore mutation)`
         );
         results.push({
           agentId: agentData.id,
@@ -5529,11 +5534,11 @@ ipcMain.handle(
               rootPath,
               "latest",
               agentData.name,
-              agentData.id,
+              agentData.id
             );
         resumeId = resolveClaudeColdBootResumeId(
           candidate.sessionId,
-          nameScoped,
+          nameScoped
         );
       } else {
         const model = agentData.model as
@@ -5565,7 +5570,7 @@ ipcMain.handle(
       // status 를 "stopped" 로 동기화해 UI 에 ▶ Start 가 노출되도록 처리.
       if (!resumeId) {
         console.log(
-          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session → skip (사용자가 ▶ Start 로 수동 기동)`,
+          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session → skip (사용자가 ▶ Start 로 수동 기동)`
         );
         results.push({
           agentId: agentData.id,
@@ -5578,7 +5583,7 @@ ipcMain.handle(
 
       try {
         const laneContextId = await resolveLaneLaunchContext(
-          agentData.currentTaskId ?? undefined,
+          agentData.currentTaskId ?? undefined
         );
         const instance = agentManager.launch({
           id: agentData.id,
@@ -5609,7 +5614,7 @@ ipcMain.handle(
           // 이 relaunch 의 argv 가 곧 지금 돌고 있는 모델이다. 렌더러가 이 값으로
           // doc 을 재스탬프해야 배지가 "예전에 뭐였는지" 를 계속 주장하지 않는다.
           spawnedModel: formatModelAtEffort(
-            agentManager.getSpawnedModel(agentData.id),
+            agentManager.getSpawnedModel(agentData.id)
           ),
         });
         console.log(
@@ -5619,7 +5624,7 @@ ipcMain.handle(
             candidate.sessionId
               ? "--resume " + candidate.sessionId
               : "--continue"
-          }`,
+          }`
         );
 
         // Start cost tracking — uses sessionId if known, or finds most recent JSONL
@@ -5627,7 +5632,7 @@ ipcMain.handle(
           agentData.id,
           rootPath,
           candidate.sessionId,
-          agentData.model || "claude",
+          agentData.model || "claude"
         );
       } catch (err) {
         console.error(`[Reconnect] Failed for agent ${agentData.id}:`, err);
@@ -5640,7 +5645,7 @@ ipcMain.handle(
       }
     }
     return results;
-  },
+  }
 );
 
 ipcMain.handle("agent:getSkill", (_event, role: string) => {
@@ -5671,7 +5676,7 @@ ipcMain.handle(
       rootPath: string;
       modelType?: string;
       missionId?: string;
-    },
+    }
   ) => {
     const { projectId, rootPath, missionId } = args;
     if (!projectId || !rootPath) {
@@ -5687,7 +5692,7 @@ ipcMain.handle(
     const manager = ensureMissionOrchestratorLaunched(
       projectId,
       rootPath,
-      missionId,
+      missionId
     );
     const session = manager.getSession();
     if (!session) return null;
@@ -5700,7 +5705,7 @@ ipcMain.handle(
       ptySessionId: session.ptySessionId,
       status: session.status,
     };
-  },
+  }
 );
 
 ipcMain.handle(
@@ -5715,7 +5720,7 @@ ipcMain.handle(
       ptySessionId: session.ptySessionId,
       status: session.status,
     };
-  },
+  }
 );
 
 ipcMain.handle(
@@ -5725,7 +5730,7 @@ ipcMain.handle(
     if (manager) {
       manager.stop();
     }
-  },
+  }
 );
 
 // 미션 스코프 중지 — 어밴던/삭제된 미션에 바인딩된 오케만 stop 한다. 다른
@@ -5738,7 +5743,7 @@ ipcMain.handle(
     if (manager && manager.getOwnerMissionId() === missionId) {
       manager.stop();
     }
-  },
+  }
 );
 
 // 직전 mission 오케스트레이터 세션 id (kind=mission, rootPath 스코프) 조회.
@@ -5750,14 +5755,14 @@ ipcMain.handle(
   async (
     _event,
     rootPath: string,
-    projectId?: string,
+    projectId?: string
   ): Promise<string | null> => {
     const resolved = rootPath === "~" ? os.homedir() : rootPath;
     // 모델 인지 필수: claude 전용 resolver 가 codex 프로젝트에서 claude uuid 를
     // 돌려주면 `codex resume <uuid>` 즉사로 이어진다. gpt 는 격리 CODEX_HOME 의
     // 세션 실재 여부만으로 "latest"/null 을 판정한다.
     const targetModel = normalizeOrchestratorModelType(
-      applyOrchestratorModelEnvForProject(projectId),
+      applyOrchestratorModelEnvForProject(projectId)
     );
     if (targetModel === "gpt") {
       if (!projectId) return null;
@@ -5774,7 +5779,7 @@ ipcMain.handle(
     } catch {
       return null;
     }
-  },
+  }
 );
 
 // --- Orchestrator IPC Handlers ---
@@ -5794,7 +5799,7 @@ ipcMain.handle(
     const decomposer = getDecomposer();
     const layers = decomposer.getExecutionPlan(tasks);
     return { tasks, layers };
-  },
+  }
 );
 
 // orchestrator:injectMessage — the in-process, project-resolved, guard-free
@@ -5814,7 +5819,7 @@ ipcMain.handle(
   "orchestrator:injectMessage",
   async (
     _event,
-    { projectId, message }: { projectId: string; message: string },
+    { projectId, message }: { projectId: string; message: string }
   ): Promise<{ delivered: boolean; reason?: string }> => {
     if (!projectId || typeof message !== "string" || message.length === 0) {
       return { delivered: false, reason: "invalid-args" };
@@ -5837,7 +5842,7 @@ ipcMain.handle(
         reason: err instanceof Error ? err.message : "inject-error",
       };
     }
-  },
+  }
 );
 
 // --- Orchestrator Session IPC Handlers ---
@@ -5864,7 +5869,7 @@ function describeSwitchLock(lock: OrchestratorSwitchLock): string {
 }
 
 function firestoreDocsToRaw(
-  snap: Awaited<ReturnType<typeof fbGetDocs>>,
+  snap: Awaited<ReturnType<typeof fbGetDocs>>
 ): RawHandoffDoc[] {
   return snap.docs.map((d) => ({
     id: d.id,
@@ -5875,7 +5880,7 @@ function firestoreDocsToRaw(
 async function buildSwitchHandoffSnapshot(
   args: OrchestratorSwitchArgs,
   resolvedRootPath: string,
-  targetModel: ModelType,
+  targetModel: ModelType
 ) {
   const { app: missionApp, authReady } = getMissionFirebaseApp();
   await authReady;
@@ -5895,14 +5900,14 @@ async function buildSwitchHandoffSnapshot(
     fbGetDocs(
       fbQuery(
         fbCollection(db, "missions"),
-        fbWhere("projectId", "==", args.projectId),
-      ),
+        fbWhere("projectId", "==", args.projectId)
+      )
     ),
     fbGetDocs(
       fbQuery(
         fbCollection(db, "tasks"),
-        fbWhere("projectId", "==", args.projectId),
-      ),
+        fbWhere("projectId", "==", args.projectId)
+      )
     ),
   ]);
 
@@ -5931,7 +5936,7 @@ ipcMain.handle(
       targetModel: string;
       mode?: OrchestratorSwitchMode;
       resume?: OrchestratorSwitchResumeMode;
-    },
+    }
   ): Promise<OrchestratorSwitchResult> => {
     const projectId = rawArgs.projectId;
     if (!projectId || !rawArgs.rootPath) {
@@ -5944,7 +5949,7 @@ ipcMain.handle(
     // 셀렉터가 Claude 변형으로 스위치했으면 그 구체 모델을 새 오케에 핀한다.
     // compound 를 통째로 보존해야 재시작 연속성이 변형까지 기억한다.
     const targetModelSetting = normalizeOrchestratorModelSetting(
-      rawArgs.targetModel,
+      rawArgs.targetModel
     );
     // Codex 변형(모델 + reasoning effort)도 같은 함수로 함께 해석된다.
     const targetPins = orchestratorModelPins(targetModelSetting);
@@ -5961,15 +5966,15 @@ ipcMain.handle(
       if (ageMs < ORCHESTRATOR_SWITCH_STALE_LOCK_MS) {
         console.warn(
           `[orchestratorSession:switch] Existing switch in flight for project ${projectId}; reusing (${describeSwitchLock(
-            existing,
-          )})`,
+            existing
+          )})`
         );
         return existing.promise;
       }
       console.error(
         `[orchestratorSession:switch] Dropping stale switch lock for project ${projectId}; previous ${describeSwitchLock(
-          existing,
-        )}`,
+          existing
+        )}`
       );
       orchestratorSwitchLocks.delete(projectId);
     }
@@ -6029,7 +6034,7 @@ ipcMain.handle(
             codexEffortOverride: targetPins.codexEffort,
             handoffPrompt,
             handoffMode: switchArgs.mode,
-          },
+          }
         );
         // 스위치로 모델이 바뀌면 이 프로젝트의 재시작 연속성도 새 모델을 따른다.
         // ★compound 를 저장한다 — 프로바이더만 저장하면 Claude 변형 선택이 다음
@@ -6056,7 +6061,7 @@ ipcMain.handle(
       onStage: (stage) => {
         lock.stage = stage;
         console.info(
-          `[orchestratorSession:switch] project=${projectId} stage=${stage} target=${targetModel} mode=${args.mode}`,
+          `[orchestratorSession:switch] project=${projectId} stage=${stage} target=${targetModel} mode=${args.mode}`
         );
       },
       onWarning: (message, error) => {
@@ -6066,12 +6071,12 @@ ipcMain.handle(
       .catch((error: unknown) => {
         if (error instanceof OrchestratorSwitchStepTimeoutError) {
           console.error(
-            `[orchestratorSession:switch] Timeout at ${error.step} for project ${projectId}; lock will be released`,
+            `[orchestratorSession:switch] Timeout at ${error.step} for project ${projectId}; lock will be released`
           );
         } else {
           console.error(
             `[orchestratorSession:switch] Failed for project ${projectId}; lock will be released`,
-            error,
+            error
           );
         }
         throw error;
@@ -6085,18 +6090,18 @@ ipcMain.handle(
     lock.promise = op;
 
     console.info(
-      `[orchestratorSession:switch] Starting switch project=${projectId} target=${targetModel} mode=${args.mode} resume=${args.resume}`,
+      `[orchestratorSession:switch] Starting switch project=${projectId} target=${targetModel} mode=${args.mode} resume=${args.resume}`
     );
     orchestratorSwitchLocks.set(projectId, lock);
     return op;
-  },
+  }
 );
 
 ipcMain.handle(
   "orchestratorSession:launch",
   async (
     event,
-    { projectId, rootPath, resumeSessionId, enabledModels, model },
+    { projectId, rootPath, resumeSessionId, enabledModels, model }
   ) => {
     const port = bridgeServer.getPort();
     // Resolve '~' to actual home directory
@@ -6106,7 +6111,7 @@ ipcMain.handle(
     // 적용돼 claude 대화를 가진 프로젝트가 codex fresh 로 부팅된다(라이브 사고).
     const effectiveModelSetting = applyOrchestratorModelEnvForProject(
       projectId,
-      typeof model === "string" ? model : undefined,
+      typeof model === "string" ? model : undefined
     );
     const orchestratorModel = resolveOrchestratorModel();
     // 셀렉터가 구체 변형을 골랐으면 그 모델을 CLI 인자로 핀한다 — claude 는
@@ -6122,7 +6127,7 @@ ipcMain.handle(
     const orchGate = await checkSpawnAuthGate(orchestratorModel);
     if (!orchGate.ok) {
       console.warn(
-        `[orchestratorSession:launch] Blocked — ${orchestratorModel} ${orchGate.reason} (action: ${orchGate.action})`,
+        `[orchestratorSession:launch] Blocked — ${orchestratorModel} ${orchGate.reason} (action: ${orchGate.action})`
       );
       return {
         sessionId: "",
@@ -6186,7 +6191,7 @@ ipcMain.handle(
         claudeModelOverride: orchestratorPins.claudeModel,
         codexModelOverride: orchestratorPins.codexModel,
         codexEffortOverride: orchestratorPins.codexEffort,
-      },
+      }
     );
 
     // 재시작 연속성: 이 프로젝트 오케가 실제로 뜬 모델을 기록. 다음 앱 재시작의
@@ -6200,7 +6205,7 @@ ipcMain.handle(
       ptySessionId: session.ptySessionId,
       status: session.status,
     };
-  },
+  }
 );
 
 ipcMain.handle(
@@ -6212,7 +6217,7 @@ ipcMain.handle(
     //   3. otherwise no-op (legacy renderer paths still work after this lands)
     const explicit = payload?.projectId;
     const orch = explicit
-      ? (orchestrators.get(explicit) ?? null)
+      ? orchestrators.get(explicit) ?? null
       : getOrchestratorForSender(event.sender.id);
     if (orch) {
       orch.stop();
@@ -6227,7 +6232,7 @@ ipcMain.handle(
         }
       }
     }
-  },
+  }
 );
 
 ipcMain.handle(
@@ -6235,10 +6240,10 @@ ipcMain.handle(
   (event, payload?: { projectId?: string }) => {
     const explicit = payload?.projectId;
     const orch = explicit
-      ? (orchestrators.get(explicit) ?? null)
+      ? orchestrators.get(explicit) ?? null
       : getOrchestratorForSender(event.sender.id);
     return orch?.getStatus() ?? "stopped";
-  },
+  }
 );
 
 ipcMain.handle(
@@ -6247,7 +6252,7 @@ ipcMain.handle(
     const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
     // Stateless file-IO — any instance works.
     return getAnyOrchestrator().listSessions(resolvedPath);
-  },
+  }
 );
 
 // Resolve the best previous orchestrator session to resume: label match,
@@ -6278,7 +6283,7 @@ ipcMain.handle(
       resolvePreviousNonGptSession: () =>
         getAnyOrchestrator().resolveOrchestratorResumeId(resolvedPath),
     });
-  },
+  }
 );
 
 // --- Flow IPC Handlers ---
@@ -6287,7 +6292,7 @@ ipcMain.handle(
   "flow:run",
   async (
     _event,
-    { flow, inputs }: { flow: Flow; inputs?: Record<string, unknown> },
+    { flow, inputs }: { flow: Flow; inputs?: Record<string, unknown> }
   ) => {
     kanbanBridge.registerFlow(flow);
     flowNodeCache.set(flow.id, flow);
@@ -6295,7 +6300,7 @@ ipcMain.handle(
     // Clean up cache after flow completes
     flowNodeCache.delete(flow.id);
     return state;
-  },
+  }
 );
 
 ipcMain.handle("flow:pause", async (_event, { runId }: { runId: string }) => {
@@ -6306,11 +6311,11 @@ ipcMain.handle(
   "flow:resume",
   async (
     _event,
-    { runId, humanInput }: { runId: string; humanInput?: HumanInput },
+    { runId, humanInput }: { runId: string; humanInput?: HumanInput }
   ) => {
     const state = await flowRunner.resume(runId, humanInput);
     return state;
-  },
+  }
 );
 
 ipcMain.handle("flow:cancel", async (_event, { runId }: { runId: string }) => {
@@ -6343,7 +6348,7 @@ ipcMain.handle(
   "code:format",
   async (
     _event,
-    { content, filePath }: { content: string; filePath: string },
+    { content, filePath }: { content: string; filePath: string }
   ) => {
     try {
       const prettier = await import("prettier");
@@ -6384,7 +6389,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : "Format failed",
       };
     }
-  },
+  }
 );
 
 ipcMain.handle(
@@ -6399,7 +6404,7 @@ ipcMain.handle(
     writeApiKeys(keys);
     refreshLLMProvider();
     return { success: true };
-  },
+  }
 );
 
 ipcMain.handle(
@@ -6414,7 +6419,41 @@ ipcMain.handle(
     writeApiKeys(keys);
     refreshLLMProvider();
     return { success: true };
-  },
+  }
+);
+
+// --- env-swap 벤더 크레덴셜 IPC (GLM/MiniMax…) ---------------------------
+//
+// BYOK(위 settings:*ApiKey)와 **다른 축**이다. 저쪽은 Flow 엔진이 쓰는 프로바이더
+// SDK 키고, 이쪽은 우리가 스폰하는 `claude` 바이너리를 남의 Anthropic-호환
+// 엔드포인트로 붙이기 위한 벤더 구독키다(레지스트리 `envProfile` 의 `${...}` 참조).
+//
+// ★평문은 renderer 로 절대 나가지 않는다. 아래 세 핸들러 중 값을 **받는** 것은
+//   set 하나뿐이고, 돌려주는 것은 전부 마스킹된 스냅샷이다.
+ipcMain.handle("vendorSecrets:list", () => {
+  return vendorSecretsSnapshot();
+});
+
+ipcMain.handle(
+  "vendorSecrets:set",
+  (_event, { envKey, value }: { envKey: string; value: string }) => {
+    // allowlist 검증은 setVendorSecret 안에서 레지스트리 파생 목록으로 한다 —
+    // 여기서 목록을 복제하면 벤더 행이 늘 때 둘이 어긋난다.
+    setVendorSecret(envKey, value);
+    // 같은 프로세스에서 이미 스폰된 에이전트는 자기 env 사본을 들고 있으므로
+    // 영향받지 않는다. 다음 스폰부터 새 값이 적용된다.
+    console.log("[vendor-secrets] 저장됨", { envKey }); // ★값 없음
+    return { success: true, snapshot: vendorSecretsSnapshot() };
+  }
+);
+
+ipcMain.handle(
+  "vendorSecrets:delete",
+  (_event, { envKey }: { envKey: string }) => {
+    deleteVendorSecret(envKey);
+    console.log("[vendor-secrets] 삭제됨", { envKey });
+    return { success: true, snapshot: vendorSecretsSnapshot() };
+  }
 );
 
 ipcMain.handle("settings:getPowerSave", () => {
@@ -6445,7 +6484,7 @@ ipcMain.handle(
       refCount: workPowerSaveRefCount,
       sources: collectWorkPowerSaveSources(),
     };
-  },
+  }
 );
 
 // --- App State IPC ---
@@ -6460,7 +6499,7 @@ ipcMain.handle(
       message: string;
       taskId?: string;
       taskTitle?: string;
-    },
+    }
   ) => {
     const port = bridgeServer.getPort();
     if (!port) return { success: false, error: "Bridge server not running" };
@@ -6475,7 +6514,7 @@ ipcMain.handle(
       body: JSON.stringify(params),
     });
     return res.json();
-  },
+  }
 );
 
 // --- Clipboard support ---
@@ -6509,7 +6548,7 @@ ipcMain.handle("clipboard:getFilePaths", () => {
       // Use osascript (AppleScript) — no compilation needed, fast
       const result = execSync(
         `osascript -e 'set filePaths to {}' -e 'try' -e 'set theClip to the clipboard as «class furl»' -e 'set end of filePaths to POSIX path of theClip' -e 'end try' -e 'try' -e 'set fileList to the clipboard as list' -e 'repeat with f in fileList' -e 'try' -e 'set end of filePaths to POSIX path of (f as «class furl»)' -e 'end try' -e 'end repeat' -e 'end try' -e 'set text item delimiters to linefeed' -e 'filePaths as text'`,
-        { encoding: "utf-8", timeout: 2000 },
+        { encoding: "utf-8", timeout: 2000 }
       ).trim();
       if (result) {
         return result
@@ -6549,7 +6588,7 @@ ipcMain.handle(
     if (projectId) saveProjectOrchestratorModel(projectId, normalized);
     console.log(`[Main] Orchestrator model set to: ${normalized}`);
     return { success: true };
-  },
+  }
 );
 
 ipcMain.handle("orchestratorModel:get", (_event, projectId?: string) => {
@@ -6577,11 +6616,11 @@ ipcMain.handle(
   "sentry:init-main",
   async (
     _e,
-    opts: { dsn?: string; release?: string; environment?: string },
+    opts: { dsn?: string; release?: string; environment?: string }
   ) => {
     const ok = await initMainSentry(opts || {});
     return { ok };
-  },
+  }
 );
 
 // --- Subscription plans (patent claim 8 — 구독제 vs 토큰단위 구분) ---
@@ -6596,7 +6635,7 @@ ipcMain.handle(
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json",
+  "subscription-plans.json"
 );
 
 interface SubscriptionPlanEntry {
@@ -6631,7 +6670,7 @@ ipcMain.handle(
       fs.writeFileSync(tmp, JSON.stringify(plans, null, 2), "utf-8");
       fs.renameSync(tmp, SUBSCRIPTION_PLANS_FILE);
       console.log(
-        `[Main] subscriptionPlans:save wrote ${plans.length} plan(s)`,
+        `[Main] subscriptionPlans:save wrote ${plans.length} plan(s)`
       );
       return { success: true };
     } catch (err) {
@@ -6641,7 +6680,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : String(err),
       };
     }
-  },
+  }
 );
 
 ipcMain.handle("appState:load", () => readAppState());
@@ -6688,7 +6727,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : String(err),
       };
     }
-  },
+  }
 );
 
 ipcMain.handle("demoCells:clear", (_event, scope?: unknown) => {
@@ -6752,7 +6791,7 @@ ipcMain.handle(
         action: err instanceof Error ? err.message : "probe failed",
       };
     }
-  },
+  }
 );
 
 // Account-global rate-limit snapshots for the Usage tab. Independent of any
@@ -6786,7 +6825,7 @@ app.whenReady().then(async () => {
     console.warn(
       "[ApiKeys] OS keychain encryption unavailable on this system. " +
         "BYOK keys will not persist across restarts. " +
-        "On Linux, install libsecret-1-0 / gnome-keyring.",
+        "On Linux, install libsecret-1-0 / gnome-keyring."
     );
   }
 
@@ -6796,7 +6835,7 @@ app.whenReady().then(async () => {
   try {
     const result = await installBundledHarness();
     console.log(
-      `[Main] Bundle install: ${result.installed} files, ${result.errors.length} errors`,
+      `[Main] Bundle install: ${result.installed} files, ${result.errors.length} errors`
     );
   } catch (err) {
     console.warn("[Main] Bundle install failed (non-fatal):", err);
@@ -6853,7 +6892,7 @@ app.whenReady().then(async () => {
       onReport: emitTelegramHealth,
     })
       .catch((err) =>
-        console.warn("[Main] Telegram wake health check failed:", err),
+        console.warn("[Main] Telegram wake health check failed:", err)
       )
       .finally(() => telegramPoller.syncActiveChannels());
   });
@@ -6863,18 +6902,15 @@ app.whenReady().then(async () => {
   // deaf poller). Only probes active channels; no-op when none are configured.
   // unref'd so it never keeps the process alive on quit. Also reconciles poller
   // loops so a crashed loop is revived and a newly-active channel gets one.
-  telegramHealthTimer = setInterval(
-    () => {
-      void runTelegramChannelHealthCheck("interval", {
-        onReport: emitTelegramHealth,
-      })
-        .catch((err) =>
-          console.warn("[Main] Telegram interval health check failed:", err),
-        )
-        .finally(() => telegramPoller.syncActiveChannels());
-    },
-    4 * 60 * 1000,
-  );
+  telegramHealthTimer = setInterval(() => {
+    void runTelegramChannelHealthCheck("interval", {
+      onReport: emitTelegramHealth,
+    })
+      .catch((err) =>
+        console.warn("[Main] Telegram interval health check failed:", err)
+      )
+      .finally(() => telegramPoller.syncActiveChannels());
+  }, 4 * 60 * 1000);
   telegramHealthTimer.unref?.();
 
   // Share windows with bridge server
@@ -6914,8 +6950,8 @@ app.whenReady().then(async () => {
     void runGhostReclaimSweep().catch((err) =>
       console.warn(
         "[LifecycleReclaim] periodic ghost sweep failed:",
-        err instanceof Error ? err.message : err,
-      ),
+        err instanceof Error ? err.message : err
+      )
     );
   }, GHOST_RECLAIM_INTERVAL_MS);
   ghostSweepTimer.unref?.();

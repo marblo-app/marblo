@@ -13,6 +13,7 @@ import { BillingPage } from "./BillingPage";
 import { TeamManagement } from "./TeamManagement";
 import { PlanGate } from "./PlanGate";
 import { APIKeysSettings } from "./APIKeysSettings";
+import { VendorKeysSettings } from "./VendorKeysSettings";
 import { PrivacySettings } from "./PrivacySettings";
 import { BugReportModal } from "./BugReportModal";
 
@@ -141,7 +142,14 @@ export function SettingsPage() {
               {t("settings.team.selectProjectFirst")}
             </div>
           ))}
-        {activeTab === "apikeys" && <APIKeysSettings />}
+        {activeTab === "apikeys" && (
+          // 벤더(env-swap) 키를 먼저 둔다 — 에이전트 스폰이 실제로 막히는 쪽이라
+          // Flow 엔진용 BYOK 키보다 사용자가 찾을 일이 잦다.
+          <div className="space-y-6">
+            <VendorKeysSettings />
+            <APIKeysSettings />
+          </div>
+        )}
         {activeTab === "privacy" && <PrivacySettings />}
         {activeTab === "language" && <LanguageSection />}
         {activeTab === "bugreport" && <BugReportSection />}

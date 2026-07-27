@@ -43,6 +43,28 @@ if (typeof __SENTRY_PRELOAD_ENABLED__ === "undefined") {
 
 const isNewWindow = process.argv.includes("--marblo-new-window=1");
 
+/**
+ * env-swap 벤더 크레덴셜의 **값 없는** 스냅샷(main 의 `vendorSecretsSnapshot` 과
+ * 같은 모양). preview 는 `abcd***wxyz` 로 마스킹된 문자열이고, 평문 시크릿은 이
+ * 브리지를 **한 방향으로도** 통과하지 않는다(set 의 입력만 예외).
+ */
+interface VendorSecretsSnapshot {
+  encryptionAvailable: boolean;
+  vendors: Array<{
+    vendor: string;
+    envKeys: string[];
+    modelIds: string[];
+    ready: boolean;
+    keys: Array<{
+      envKey: string;
+      source: "env" | "store" | "none";
+      storedInApp: boolean;
+      presentInProcessEnv: boolean;
+      preview: string;
+    }>;
+  }>;
+}
+
 contextBridge.exposeInMainWorld("electronAPI", {
   platform: process.platform,
   // 이 기기의 안정적 식별자. 프로젝트 폴더 경로를 기기별 칸에 저장하려면
@@ -517,6 +539,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("settings:setApiKey", { provider, key }),
     deleteApiKey: (provider: string) =>
       ipcRenderer.invoke("settings:deleteApiKey", { provider }),
+    // env-swap 벤더(GLM/MiniMax…) 크레덴셜. ★list/set/delete 모두 **평문을 돌려주지
+    // 않는다** — 반환값은 마스킹된 스냅샷뿐이고, 평문은 set 의 입력으로만 흐른다.
+    getVendorSecrets: () =>
+      ipcRenderer.invoke(
+        "vendorSecrets:list",
+      ) as Promise<VendorSecretsSnapshot>,
+    setVendorSecret: (envKey: string, value: string) =>
+      ipcRenderer.invoke("vendorSecrets:set", { envKey, value }) as Promise<{
+        success: boolean;
+        snapshot: VendorSecretsSnapshot;
+      }>,
+    deleteVendorSecret: (envKey: string) =>
+      ipcRenderer.invoke("vendorSecrets:delete", { envKey }) as Promise<{
+        success: boolean;
+        snapshot: VendorSecretsSnapshot;
+      }>,
     getPowerSave: () =>
       ipcRenderer.invoke("settings:getPowerSave") as Promise<{
         preventSleepWhileWorking: boolean;

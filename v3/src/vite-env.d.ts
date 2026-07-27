@@ -400,6 +400,46 @@ interface SettingsAPI {
   }>;
   setApiKey: (provider: string, key: string) => Promise<{ success: boolean }>;
   deleteApiKey: (provider: string) => Promise<{ success: boolean }>;
+  // env-swap 벤더(GLM/MiniMax…) 크레덴셜. BYOK(위 3종)와 다른 축이다 — 이쪽은
+  // 우리가 스폰하는 claude 바이너리를 벤더 엔드포인트로 붙이는 구독키다.
+  // ★반환값에 평문은 없다. preview 는 마스킹 문자열.
+  getVendorSecrets: () => Promise<VendorSecretsSnapshot>;
+  setVendorSecret: (
+    envKey: string,
+    value: string,
+  ) => Promise<{ success: boolean; snapshot: VendorSecretsSnapshot }>;
+  deleteVendorSecret: (
+    envKey: string,
+  ) => Promise<{ success: boolean; snapshot: VendorSecretsSnapshot }>;
+}
+
+/** 값 없는 벤더 크레덴셜 스냅샷(electron/vendor-secrets.ts 와 같은 모양). */
+interface VendorSecretsSnapshot {
+  /** OS 키체인 암호화를 쓸 수 있는가. false 면 저장 시도가 에러로 끝난다. */
+  encryptionAvailable: boolean;
+  vendors: VendorSecretVendorStatus[];
+}
+
+interface VendorSecretVendorStatus {
+  /** VendorId ("zai" | "minimax" | …). */
+  vendor: string;
+  /** 이 벤더를 켜는 데 필요한 env 키 이름들 — 전부 있어야 켜진다. */
+  envKeys: string[];
+  /** 이 프로파일을 쓰는 활성 모델 id 들. */
+  modelIds: string[];
+  /** all-or-nothing 판정: 하나라도 비면 스폰 시 프로파일을 얹지 않는다. */
+  ready: boolean;
+  keys: VendorSecretKeyStatus[];
+}
+
+interface VendorSecretKeyStatus {
+  envKey: string;
+  /** 실제로 이기는 소스. "none" 이면 미설정. */
+  source: "env" | "store" | "none";
+  storedInApp: boolean;
+  presentInProcessEnv: boolean;
+  /** `abcd***wxyz`. 값이 없으면 빈 문자열. */
+  preview: string;
 }
 
 interface CodeAPI {

@@ -295,6 +295,12 @@ function verifyCodex(): void {
 //   키 없음 → 무엇을 넣어야 켜지는지 **키 이름만** 알려주고 프로브 skip(무과금)
 //   키 있음 → 그 프로파일 env 를 얹어 실제 프로브(그 벤더 쿼터를 1프롬프트 소모)
 // ★어느 쪽이든 시크릿 **값**은 출력하지 않는다.
+//
+// ★이 스크립트는 순수 node 로 돈다 — 앱 설정 UI 가 등록한 키(OS 키체인 암호화,
+// `vendor-secrets`)는 Electron 밖에서 복호화할 수 없으므로 여기서는 **보이지 않는다**.
+// 그래서 "앱에선 켜져 있는데 여기선 미설정" 이 정상 조합이고, 아래 안내가 두 경로를
+// 모두 말해준다(앱에서 켠 것을 이 스크립트로 라이브 프로브하려면 같은 키를 `v3/.env`
+// 에도 넣어야 한다).
 // ─────────────────────────────────────────────────────────────────────────
 
 function verifyVendorProfiles(offline: boolean): void {
@@ -314,8 +320,10 @@ function verifyVendorProfiles(offline: boolean): void {
         "warn",
         "vendor",
         entry.id,
-        `${entry.provider} 크레덴셜 미설정 — 라이브 검증 skip. ` +
-          `필요한 env(값 아님): ${readiness.missingEnvKeys.join(", ")} → v3/.env 에 설정 후 재실행`,
+        `${entry.provider} 크레덴셜 미설정(이 프로세스 기준) — 라이브 검증 skip. ` +
+          `필요한 env(값 아님): ${readiness.missingEnvKeys.join(", ")}. ` +
+          `앱에서 쓰려면 설정 → API 키 → "벤더 API 키" 에 등록하고, ` +
+          `이 스크립트로 라이브 프로브까지 하려면 v3/.env 에도 넣고 재실행하세요`,
       );
       continue;
     }
