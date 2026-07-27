@@ -20,9 +20,11 @@ import {
   createFirstTicket,
   seedSamplePrd,
   type ActionResult,
+  type FirstTicketResult,
 } from "../../services/cliSetupActions";
 import { CliRowCard } from "./CliSetupRows";
 import { CliFailSurvey } from "./CliFailSurvey";
+import { FirstTicketResultNote } from "./FirstTicketResultNote";
 
 /**
  * First-run CLI setup gate — the LEGACY (workspace-mode OFF) activation
@@ -57,7 +59,7 @@ export function CliSetupGate() {
   const [seeding, setSeeding] = useState(false); // sample-PRD write in flight
   const [seedMsg, setSeedMsg] = useState<ActionResult | null>(null);
   const [sendingTicket, setSendingTicket] = useState(false);
-  const [ticketMsg, setTicketMsg] = useState<ActionResult | null>(null);
+  const [ticketMsg, setTicketMsg] = useState<FirstTicketResult | null>(null);
 
   const ready = useCliSetupStore((s) => s.ready);
   const states = useCliSetupStore((s) => s.states);
@@ -143,6 +145,9 @@ export function CliSetupGate() {
     try {
       const res = await createFirstTicket();
       setTicketMsg(res);
+      // ★오케가 실제로 받았을 때만 마법사를 닫는다. queued(오케 미기동)에 닫아
+      // 버리면 유저는 아무 일도 안 일어난 화면에 남고 돌아올 길도 사라진다 —
+      // 그대로 열어 두고 FirstTicketResultNote 가 오케 띄우는 법을 안내한다.
       if (res.ok) {
         try {
           localStorage.setItem(DISMISSED_KEY, "1");
@@ -307,15 +312,7 @@ export function CliSetupGate() {
                 {t("onboarding.cliGate.firstTicket.needProject")}
               </p>
             )}
-            {ticketMsg && (
-              <p
-                className={`text-xs ${
-                  ticketMsg.ok ? "text-[#a6e3a1]" : "text-[#f38ba8]"
-                }`}
-              >
-                {ticketMsg.text}
-              </p>
-            )}
+            {ticketMsg && <FirstTicketResultNote result={ticketMsg} />}
           </div>
         )}
 

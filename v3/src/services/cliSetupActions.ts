@@ -9,6 +9,11 @@ import {
 } from "../stores/cliSetupStore";
 import telemetry from "../services/telemetryService";
 import { routeInstructionToOrchestrator } from "./orchestratorInstructionService";
+import {
+  deliveryFromRoute,
+  firstTicketView,
+  type FirstTicketDelivery,
+} from "../lib/firstTicketDelivery";
 
 /**
  * The onboarding wizard's side-effecting step actions, lifted out of
@@ -24,6 +29,15 @@ import { routeInstructionToOrchestrator } from "./orchestratorInstructionService
 export interface ActionResult {
   ok: boolean;
   text: string;
+}
+
+/**
+ * 첫 티켓만 결과가 3값이다 — 전달됨 / 큐에만 쌓임(오케 없음) / 실패. `ok` 만으로
+ * 접으면 "큐에만 쌓임" 이 성공으로 보인다(활성화 F3). 색조·안내·퍼널 계상 규칙은
+ * `lib/firstTicketDelivery` 의 순수 함수가 단일소스다.
+ */
+export interface FirstTicketResult extends ActionResult {
+  delivery: FirstTicketDelivery;
 }
 
 function joinPath(dir: string, name: string): string {
@@ -110,27 +124,40 @@ export async function seedSamplePrd(): Promise<ActionResult | null> {
  * very first prompt. routeInstructionToOrchestrator is the local-PTY-first,
  * durable-queue-fallback path live-verified in #573 — the orchestrator creates
  * the first ticket and proposes spawning an agent.
+ *
+ * ★"queued" 는 성공이 아니다(활성화 F3). 예전에는 local 과 queued 를 한데 접어
+ * `firstTicket.sent`("전달했어요") + success 계측으로 끝냈는데, queued 는 로컬 오케에
+ * 못 넣어 Firestore 큐에 쌓아만 둔 상태다. 큐를 소비할 오케가 없으면 아무 일도
+ * 일어나지 않는데 화면은 초록색 성공이라, 신규 유저는 죽은 화면을 성공으로 읽고
+ * 이탈했다. 이제 세 결과를 그대로 넘겨 호출부가 색조·안내·완료여부를 가른다.
  */
-export async function createFirstTicket(): Promise<ActionResult> {
+export async function createFirstTicket(): Promise<FirstTicketResult> {
   const proj = useProjectStore.getState().currentProject;
   if (!proj?.id) {
-    return { ok: false, text: t("onboarding.cliGate.firstTicket.needProject") };
+    // 폴더 미연결 — 전송 자체를 시도하지 않았다. 전달 실패와 같은 색조(빨강)지만
+    // 오케 안내는 붙지 않는다(③단계로 돌아가는 게 다음 액션이라서).
+    return {
+      ok: false,
+      delivery: "failed",
+      text: t("onboarding.cliGate.firstTicket.needProject"),
+    };
   }
+  let delivery: FirstTicketDelivery = "failed";
   try {
-    const result = await routeInstructionToOrchestrator({
-      projectId: proj.id,
-      message: t("onboarding.cliGate.firstTicket.prompt"),
-    });
-    if (result === "failed") {
-      telemetry.cliSetupStep("firstTicket", "fail", "launch_error");
-      return { ok: false, text: t("onboarding.cliGate.firstTicket.failed") };
-    }
-    // "local" (in-process ack) or "queued" (durable fallback) — either way the
-    // orchestrator will pick it up. Mark the funnel's finish line.
-    telemetry.cliSetupStep("firstTicket", "success");
-    return { ok: true, text: t("onboarding.cliGate.firstTicket.sent") };
+    delivery = deliveryFromRoute(
+      await routeInstructionToOrchestrator({
+        projectId: proj.id,
+        message: t("onboarding.cliGate.firstTicket.prompt"),
+      }),
+    );
   } catch {
-    telemetry.cliSetupStep("firstTicket", "fail", "launch_error");
-    return { ok: false, text: t("onboarding.cliGate.firstTicket.failed") };
+    delivery = "failed";
   }
+  const view = firstTicketView(delivery);
+  telemetry.cliSetupStep(
+    "firstTicket",
+    view.telemetry.phase,
+    view.telemetry.reason,
+  );
+  return { ok: view.completesStep, delivery, text: t(view.messageKey) };
 }

@@ -18,8 +18,10 @@ import {
   createFirstTicket,
   seedSamplePrd,
   type ActionResult,
+  type FirstTicketResult,
 } from "../../services/cliSetupActions";
 import { CliRowCard } from "./CliSetupRows";
+import { FirstTicketResultNote } from "./FirstTicketResultNote";
 import { VendorModelsSection } from "./VendorModelsSection";
 import { DemoMode, DEMO_CONNECT_PENDING_KEY } from "./DemoMode";
 import { DEMO_TOTAL_SECONDS } from "./demoScript";
@@ -77,7 +79,7 @@ export function StartHereTab() {
   const [seeding, setSeeding] = useState(false);
   const [seedMsg, setSeedMsg] = useState<ActionResult | null>(null);
   const [sendingTicket, setSendingTicket] = useState(false);
-  const [ticketMsg, setTicketMsg] = useState<ActionResult | null>(null);
+  const [ticketMsg, setTicketMsg] = useState<FirstTicketResult | null>(null);
   const [showDemo, setShowDemo] = useState(false);
 
   const live = useMemo(
@@ -154,6 +156,9 @@ export function StartHereTab() {
     try {
       const res = await createFirstTicket();
       setTicketMsg(res);
+      // ★res.ok 는 "오케가 실제로 받았다"(delivery === "delivered") 일 때만 참이다.
+      // queued(오케 미기동, 큐에만 적재)를 완료로 찍으면 온보딩이 끝난 것처럼 보여
+      // 유저가 아무 일도 안 일어난 화면에 갇힌다 — 단계를 남겨 두고 안내한다.
       if (res.ok) markDone("firstTicket");
     } finally {
       setSendingTicket(false);
@@ -415,7 +420,7 @@ interface StepBodyProps {
   seedMsg: ActionResult | null;
   onSeed: () => void;
   sendingTicket: boolean;
-  ticketMsg: ActionResult | null;
+  ticketMsg: FirstTicketResult | null;
   onFirstTicket: () => void;
 }
 
@@ -521,15 +526,7 @@ function StepBody({
           {t("onboarding.cliGate.firstTicket.needProject")}
         </p>
       )}
-      {ticketMsg && (
-        <p
-          className={`text-xs ${
-            ticketMsg.ok ? "text-[#a6e3a1]" : "text-[#f38ba8]"
-          }`}
-        >
-          {ticketMsg.text}
-        </p>
-      )}
+      {ticketMsg && <FirstTicketResultNote result={ticketMsg} />}
     </>
   );
 }

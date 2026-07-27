@@ -468,6 +468,21 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.cliGate.firstTicket.creating": "Sending to the orchestrator…",
   "onboarding.cliGate.firstTicket.sent":
     "First prompt sent — the orchestrator is preparing your first ticket. Hang tight.",
+  // ★queued ≠ delivered: it only landed in the durable queue because no local
+  //   orchestrator accepted it. Showing this as a green "sent" is what made a
+  //   dead screen read as success (activation F3). needOrch.* is the next step.
+  "onboarding.cliGate.firstTicket.queued":
+    "Not delivered yet — it's only sitting in the queue. This project's orchestrator isn't running, so there's nobody to create the first ticket right now.",
+  "onboarding.cliGate.firstTicket.needOrch.title":
+    "Start the orchestrator to actually get your first ticket",
+  "onboarding.cliGate.firstTicket.needOrch.step1":
+    "Open the orchestrator panel (the left spine, or the “Orchestrator” bar at the bottom). If it says “Stopped”, pick a model and hit [Start].",
+  "onboarding.cliGate.firstTicket.needOrch.step2":
+    "If [Start] is blocked on CLI sign-in, finish steps ① install and ② sign-in. The orchestrator relaunches by itself once you're authenticated.",
+  "onboarding.cliGate.firstTicket.needOrch.step3":
+    "Once the orchestrator is running, press the button above once more to create the first ticket.",
+  "onboarding.cliGate.firstTicket.needOrch.crossMachine":
+    "If this project's orchestrator is running on another machine, the queued prompt will be delivered there shortly.",
   "onboarding.cliGate.firstTicket.failed":
     "Couldn't send it. Make sure the orchestrator is running, then try again.",
   "onboarding.cliGate.firstTicket.needProject":

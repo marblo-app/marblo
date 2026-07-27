@@ -384,6 +384,21 @@ export const onboarding = {
   "onboarding.cliGate.firstTicket.creating": "오케스트레이터에게 전달하는 중…",
   "onboarding.cliGate.firstTicket.sent":
     "첫 프롬프트를 전달했어요 — 오케스트레이터가 첫 티켓을 준비합니다. 잠시 지켜봐 주세요.",
+  // ★queued ≠ 전달됨. 로컬 오케에 못 넣어서 대기열에만 쌓아 둔 상태다 — 이걸
+  //   'sent' 와 같은 초록 문구로 쓰면 신규 유저는 아무 일도 안 일어나는 화면을
+  //   성공으로 읽고 이탈한다(활성화 F3). 다음 액션은 아래 needOrch.* 가 안내한다.
+  "onboarding.cliGate.firstTicket.queued":
+    "아직 전달되지 않았어요 — 대기열에 넣어만 뒀습니다. 이 프로젝트의 오케스트레이터가 실행 중이 아니라서, 지금은 첫 티켓을 만들 상대가 없습니다.",
+  "onboarding.cliGate.firstTicket.needOrch.title":
+    "오케스트레이터를 띄워야 첫 티켓이 실제로 만들어집니다",
+  "onboarding.cliGate.firstTicket.needOrch.step1":
+    "오케스트레이터 패널(왼쪽 오케 영역 또는 화면 아래 ‘오케스트레이터’ 바)을 펼치고, 상태가 ‘Stopped’ 면 모델을 고른 뒤 [Start] 를 누르세요.",
+  "onboarding.cliGate.firstTicket.needOrch.step2":
+    "[Start] 가 CLI 인증에서 막히면 ①설치·②로그인 단계로 돌아가 마저 끝내 주세요. 인증이 되면 오케스트레이터는 자동으로 다시 뜹니다.",
+  "onboarding.cliGate.firstTicket.needOrch.step3":
+    "오케스트레이터가 실행 중이 되면 위 버튼을 한 번 더 눌러 첫 티켓을 만드세요.",
+  "onboarding.cliGate.firstTicket.needOrch.crossMachine":
+    "다른 컴퓨터에서 이 프로젝트의 오케스트레이터가 켜져 있다면, 대기열에 넣어 둔 이 프롬프트는 그쪽에서 곧 전달됩니다.",
   "onboarding.cliGate.firstTicket.failed":
     "전달에 실패했어요. 오케스트레이터가 실행 중인지 확인한 뒤 다시 시도해 주세요.",
   "onboarding.cliGate.firstTicket.needProject":
