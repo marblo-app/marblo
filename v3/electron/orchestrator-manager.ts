@@ -88,11 +88,11 @@ const BOARD_ORCHESTRATOR_ONBOARDING =
 const BOARD_ORCHESTRATOR_ROUTING_GATE =
   "Routing gate for every user turn: A) work, artifacts, code changes, execution, or multi-step requests => create_task or create_tasks_bulk, then dispatch_task to a physical Marblo agent and leave a board ticket. Do not solve these inline. B) questions, status checks, approvals, or clarifications => answer directly with no ticket. If ambiguous, prefer A. Never use Claude Code's native Task tool or logical subagents for A; route through physical dispatch_task. Codex orchestrators must also avoid inline execution for A. Only trivial read-only checks may stay in the orchestrator session.";
 
-function codexTomlEnvLine(key: string, value: string): string {
+function tomlEnvLine(key: string, value: string): string {
   return `${key} = ${JSON.stringify(value)}`;
 }
 
-function parseCodexTomlEnvBlock(block: string): OrchestratorMcpEnv {
+function parseTomlEnvBlock(block: string): OrchestratorMcpEnv {
   const env: OrchestratorMcpEnv = {};
   for (const line of block.split("\n")) {
     const trimmed = line.trim();
@@ -112,7 +112,13 @@ function parseCodexTomlEnvBlock(block: string): OrchestratorMcpEnv {
   return env;
 }
 
-function patchCodexMarbloMcpEnv(
+/**
+ * `[mcp_servers.marblo.env]` 를 머지 패치한다. codex(CODEX_HOME/config.toml)와
+ * grok(GROK_HOME/config.toml)이 **같은 TOML 섹션 이름**을 쓰므로 한 함수로 둘 다
+ * 처리한다 — grok 을 JSON 분기로 보내면 `JSON.parse` 가 TOML 을 만나 던지고,
+ * 브리지 포트/토큰이 통째로 유실돼 오케의 spawn_agent·dispatch_task 가 401 난다.
+ */
+function patchTomlMarbloMcpEnv(
   configPath: string,
   env: OrchestratorMcpEnv,
 ): void {
@@ -120,11 +126,11 @@ function patchCodexMarbloMcpEnv(
   const existingEnvMatch =
     /\n?\[mcp_servers\.marblo\.env\]\n([\s\S]*?)(?=\n\[|$)/.exec(configContent);
   const existingEnv = existingEnvMatch
-    ? parseCodexTomlEnvBlock(existingEnvMatch[1])
+    ? parseTomlEnvBlock(existingEnvMatch[1])
     : {};
   const mergedEnv = { ...existingEnv, ...env };
   const envEntries = Object.entries(mergedEnv)
-    .map(([key, value]) => codexTomlEnvLine(key, value))
+    .map(([key, value]) => tomlEnvLine(key, value))
     .join("\n");
   if (!envEntries) return;
 
@@ -956,8 +962,8 @@ export class OrchestratorManager {
     // Also patch the MCP config file so the MCP server (node process)
     // gets MARBLO_BRIDGE_PORT — needed for spawn_agent tool
     try {
-      if (launchConfig.model === "gpt") {
-        patchCodexMarbloMcpEnv(launchConfig.mcpConfigPath, mcpEnvPatch);
+      if (launchConfig.model === "gpt" || launchConfig.model === "grok") {
+        patchTomlMarbloMcpEnv(launchConfig.mcpConfigPath, mcpEnvPatch);
       } else {
         const configContent = fs.readFileSync(
           launchConfig.mcpConfigPath,

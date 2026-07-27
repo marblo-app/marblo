@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import crypto from "crypto";
-import { execFileSync } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import { ModelType } from "./agent-manager";
 import {
   cmpSemver,
@@ -1686,6 +1686,339 @@ function buildMCPServerEntry(
   };
 }
 
+// ── 격리 GROK_HOME 한 벌 (config.toml + trusted_folders.toml) ─────────────
+//
+// ★왜 trusted_folders.toml 까지 써야 하는가 (라이브 실측, grok 0.2.112):
+//   격리 GROK_HOME 은 사용자 홈이 아니라 **새 홈**이라 아무 폴더도 신뢰돼 있지
+//   않다. grok 은 신뢰되지 않은 폴더에서 로컬 stdio MCP 서버를 **아예 기동하지
+//   않는다** — `grok mcp doctor marblo` 가
+//     ✗ folder untrusted (repo-local (project-scoped) server not started)
+//   로 떨어지고 툴은 0개다. config.toml 에 `[mcp_servers.marblo]` 가 멀쩡히
+//   들어있고 `grok inspect` 가 그 서버를 "로드됨"으로 보여줘도 그렇다. 즉 오케는
+//   뜨지만 dispatch/보드 툴이 하나도 없는 **무력 오케**가 된다. 신뢰를 주면 같은
+//   config 로 `✓ handshake OK / 41 tools discovered` 가 된다.
+//
+// ★신뢰 키잉 주의: grok 은 git **worktree 를 main 체크아웃으로 정규화**한다.
+//   워크트리 자기 경로만 신뢰 등록하면 여전히 `Project trusted: no` 이고,
+//   main 체크아웃을 등록해야 신뢰된다(실측). 그래서 후보에 projectDir 뿐 아니라
+//   그 realpath 와 **git main 체크아웃**(+realpath)까지 함께 넣는다.
+//
+// 사용자가 이미 내린 신뢰 결정(~/.grok/trusted_folders.toml)은 그대로 보존한다.
+// 같은 폴더가 사용자 파일에 이미 있으면(신뢰 여부 무관) 우리 엔트리를 덧붙이지
+// 않는다 — TOML 중복 테이블은 파싱 자체를 깨뜨리고, 사용자가 명시적으로 거부한
+// 폴더를 우리가 몰래 뒤집어서도 안 되기 때문이다.
+function writeGrokHomeFiles(
+  grokHome: string,
+  mcpEntry: MCPServerEntry,
+  projectDir?: string,
+): { configPath: string; written: string[] } {
+  const written: string[] = [];
+  const userGrokDir = path.join(os.homedir(), ".grok");
+
+  // ── config.toml ────────────────────────────────────────────────────────
+  const userConfigPath = path.join(userGrokDir, "config.toml");
+  let preserved = "";
+  if (fs.existsSync(userConfigPath)) {
+    try {
+      preserved = fs
+        .readFileSync(userConfigPath, "utf-8")
+        .replace(/\[mcp_servers\.[\s\S]*?(?=\n\[(?!mcp_servers)|$)/g, "")
+        .trimEnd();
+    } catch {
+      // Best-effort — ignore unreadable user config.
+    }
+  }
+
+  const envEntries = Object.entries(mcpEntry.env || {})
+    .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
+    .join("\n");
+
+  const tomlSections = [
+    preserved,
+    "",
+    "[mcp_servers.marblo]",
+    `command = ${JSON.stringify(mcpEntry.command)}`,
+    `args = ${JSON.stringify(mcpEntry.args)}`,
+    "enabled = true",
+    "startup_timeout_sec = 30",
+    "tool_timeout_sec = 6000",
+  ];
+  if (envEntries) {
+    tomlSections.push("", "[mcp_servers.marblo.env]", envEntries);
+  }
+
+  const configPath = path.join(grokHome, "config.toml");
+  fs.writeFileSync(configPath, tomlSections.join("\n") + "\n", "utf-8");
+  written.push(configPath);
+
+  // ── trusted_folders.toml ───────────────────────────────────────────────
+  const trustPath = path.join(grokHome, "trusted_folders.toml");
+  let preservedTrust = "";
+  try {
+    const userTrustPath = path.join(userGrokDir, "trusted_folders.toml");
+    if (fs.existsSync(userTrustPath)) {
+      preservedTrust = fs.readFileSync(userTrustPath, "utf-8").trimEnd();
+    }
+  } catch {
+    // Best-effort — a missing/unreadable user trust file just means we write
+    // only our own entries.
+  }
+
+  const alreadyDecided = new Set(grokTrustedFolderKeys(preservedTrust));
+  const candidates: string[] = [];
+  const addCandidate = (candidate: string | null | undefined): void => {
+    if (!candidate) return;
+    const abs = path.resolve(candidate);
+    if (alreadyDecided.has(abs) || candidates.includes(abs)) return;
+    candidates.push(abs);
+  };
+  if (projectDir) {
+    addCandidate(projectDir);
+    addCandidate(safeRealpath(projectDir));
+    const mainCheckout = resolveGitMainCheckout(projectDir);
+    addCandidate(mainCheckout);
+    addCandidate(mainCheckout ? safeRealpath(mainCheckout) : null);
+  }
+
+  const decidedAt = Math.floor(Date.now() / 1000);
+  const trustSections = candidates.map(
+    (folder) =>
+      `[folders.${JSON.stringify(folder)}]\ntrusted = true\ndecided_at = ${decidedAt}`,
+  );
+  const trustBody = [preservedTrust, ...trustSections]
+    .filter(Boolean)
+    .join("\n\n");
+  fs.writeFileSync(trustPath, trustBody ? `${trustBody}\n` : "", "utf-8");
+  written.push(trustPath);
+
+  return { configPath, written };
+}
+
+/** trusted_folders.toml 본문에서 이미 결정된 폴더 경로들을 뽑는다. */
+function grokTrustedFolderKeys(toml: string): string[] {
+  const keys: string[] = [];
+  const re = /^\s*\[folders\.(?:"([^"]*)"|'([^']*)')\]/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(toml)) !== null) {
+    const raw = m[1] ?? m[2];
+    if (raw) keys.push(path.resolve(raw));
+  }
+  return keys;
+}
+
+/**
+ * `dir` 이 속한 git **main 체크아웃**(worktree 가 아닌 원본) 경로.
+ *
+ * linked worktree 는 `.git` 이 파일이고 그 안의 `gitdir:` 가
+ * `<main>/.git/worktrees/<name>` 을 가리킨다 — 거기서 `<main>` 을 되짚는다.
+ * git 을 스폰하지 않는다(설정 생성 경로라 동기 subprocess 를 피한다).
+ */
+function resolveGitMainCheckout(dir: string): string | null {
+  let cur = path.resolve(dir);
+  for (let depth = 0; depth < 64; depth++) {
+    const dotGit = path.join(cur, ".git");
+    try {
+      const stat = fs.lstatSync(dotGit);
+      if (stat.isDirectory()) return cur;
+      if (stat.isFile()) {
+        const match = /^gitdir:\s*(.+)$/m.exec(
+          fs.readFileSync(dotGit, "utf-8"),
+        );
+        if (!match) return cur;
+        const gitDir = path.resolve(cur, match[1].trim());
+        const marker = `${path.sep}.git${path.sep}worktrees${path.sep}`;
+        const idx = gitDir.indexOf(marker);
+        return idx >= 0 ? gitDir.slice(0, idx) : cur;
+      }
+    } catch {
+      // No .git here — keep walking up.
+    }
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return null;
+}
+
+function safeRealpath(target: string): string | null {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return null;
+  }
+}
+
+// ── grok 오케 무력화 방지 게이트 ─────────────────────────────────────────
+//
+// grok 오케는 marblo MCP 없이는 dispatch·보드 조작이 하나도 안 되는 껍데기다.
+// 그런데 그 실패는 **조용하다** — CLI 는 멀쩡히 뜨고, config.toml 엔 서버가
+// 들어있고, `grok inspect` 도 "로드됨" 으로 보여준다. 폴더 신뢰가 없으면 grok 이
+// 서버를 기동만 안 할 뿐이다(writeGrokHomeFiles 주석 참조). 그래서 "설정 파일에
+// 썼는가" 를 자기 자신에게 되묻는 동어반복 검사로는 못 잡는다.
+//
+// 유일하게 정직한 검사는 **grok 에게 직접 물어보는 것**이다. `grok mcp doctor
+// marblo --json` 은 실제로 서버를 기동해 핸드셰이크하고 툴 개수를 돌려준다
+// (실측 ~0.45s). 프로덕션과 동일한 `writeGrokHomeFiles` 로 일회용 GROK_HOME 을
+// 만들어 검사하므로, 통과하면 진짜 스폰도 같은 결과를 낸다.
+export interface GrokMcpProbeResult {
+  ok: boolean;
+  toolCount: number;
+  /** ok 일 때 "" — 아니면 기계 판독용 사유. */
+  reason: string;
+  /** 사람이 읽는 한 줄(로그/UI 용). 시크릿을 담지 않는다. */
+  detail: string;
+}
+
+interface GrokDoctorCheck {
+  label?: string;
+  passed?: boolean;
+  detail?: string;
+}
+
+interface GrokDoctorServer {
+  name?: string;
+  healthy?: boolean;
+  checks?: GrokDoctorCheck[];
+}
+
+const GROK_MCP_PROBE_TIMEOUT_MS = 20_000;
+
+/**
+ * 이 프로젝트에서 grok 이 marblo MCP 를 실제로 기동하고 툴을 붙일 수 있는지
+ * 라이브로 확인한다. 일회용 GROK_HOME 을 만들고 검사 후 지운다.
+ *
+ * 필요 툴 개수는 오케가 실제로 쓰는 최소 표면(CODEX_ORCH_REQUIRED_MCP_TOOLS)을
+ * 하한으로 쓴다 — doctor 가 이름이 아니라 개수만 주기 때문이다. 서버가 그 이름들을
+ * 실제로 노출하는지는 MCP 표면 테스트가 따로 못박는다.
+ */
+export async function probeGrokMarbloMcp(
+  projectDir: string,
+): Promise<GrokMcpProbeResult> {
+  const probeHome = path.join(
+    CONFIG_DIR,
+    `grok-mcp-probe-${crypto.randomUUID()}`,
+  );
+  try {
+    fs.mkdirSync(probeHome, { recursive: true });
+    writeGrokHomeFiles(
+      probeHome,
+      buildMCPServerEntry(projectDir, undefined, "grok-mcp-probe"),
+      projectDir,
+    );
+
+    const grokCli = resolveHarnessCli("grok").command;
+    const stdout = await execFileCapture(
+      grokCli,
+      ["mcp", "doctor", "marblo", "--json"],
+      {
+        cwd: projectDir,
+        env: { ...process.env, GROK_HOME: probeHome },
+        timeout: GROK_MCP_PROBE_TIMEOUT_MS,
+      },
+    );
+
+    let servers: GrokDoctorServer[] = [];
+    try {
+      servers =
+        (JSON.parse(stdout) as { servers?: GrokDoctorServer[] }).servers ?? [];
+    } catch {
+      return {
+        ok: false,
+        toolCount: 0,
+        reason: "doctor-unparsable",
+        detail: `grok mcp doctor 출력을 해석하지 못했습니다 (grok CLI ${grokCli})`,
+      };
+    }
+
+    const marblo = servers.find((s) => s.name === "marblo");
+    if (!marblo) {
+      return {
+        ok: false,
+        toolCount: 0,
+        reason: "server-not-configured",
+        detail: "grok 이 marblo MCP 서버를 인식하지 못했습니다",
+      };
+    }
+
+    const toolCount = grokDoctorToolCount(marblo);
+    if (!marblo.healthy) {
+      const failed = (marblo.checks ?? []).find((c) => c.passed === false);
+      return {
+        ok: false,
+        toolCount,
+        reason: "server-unhealthy",
+        detail: failed?.label
+          ? `marblo MCP 기동 실패: ${failed.label}${
+              failed.detail ? ` (${failed.detail})` : ""
+            }`
+          : "marblo MCP 기동 실패",
+      };
+    }
+    if (toolCount < CODEX_ORCH_REQUIRED_MCP_TOOLS.length) {
+      return {
+        ok: false,
+        toolCount,
+        reason: "insufficient-tools",
+        detail: `marblo MCP 툴 ${toolCount}개 — 오케에 필요한 최소 ${CODEX_ORCH_REQUIRED_MCP_TOOLS.length}개 미만`,
+      };
+    }
+    return {
+      ok: true,
+      toolCount,
+      reason: "",
+      detail: `marblo MCP 툴 ${toolCount}개 확인`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      toolCount: 0,
+      reason: "probe-failed",
+      detail: `grok MCP 프로브 실패: ${errorMessage(error)}`,
+    };
+  } finally {
+    try {
+      fs.rmSync(probeHome, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup — a leftover probe dir must never fail a launch.
+    }
+  }
+}
+
+/** doctor 의 "<N> tools discovered" 체크에서 개수를 뽑는다. */
+function grokDoctorToolCount(server: GrokDoctorServer): number {
+  for (const check of server.checks ?? []) {
+    const match = /^(\d+)\s+tools?\s+discovered$/i.exec(check.label ?? "");
+    if (match) return Number(match[1]);
+  }
+  return 0;
+}
+
+/**
+ * execFile 의 stdout 을 돌려준다. **비정상 종료도 던지지 않는다** — `grok mcp
+ * doctor` 는 unhealthy 일 때 exit 1 이면서도 진단 JSON 을 정상 출력하기 때문이다
+ * (실측). 그 JSON 이야말로 우리가 읽고 싶은 것이다. 진짜 실행 실패(ENOENT,
+ * 타임아웃)는 stdout 이 비어 호출부의 파싱 분기가 잡는다.
+ */
+function execFileCapture(
+  command: string,
+  args: string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv; timeout: number },
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, options, (error, stdout) => {
+      if (stdout && stdout.trim()) {
+        resolve(stdout);
+        return;
+      }
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(stdout ?? "");
+    });
+  });
+}
+
 // ── Per-agent MCP 화이트리스트 (RAM 절감 §성능) ──────────────────────────
 // 배경: claude 스폰이 `--mcp-config`만 주고 `--strict-mcp-config`를 안 주면
 // Claude 가 per-agent config(marblo 1개)에 사용자 글로벌 ~/.claude.json 의
@@ -1855,7 +2188,7 @@ export class AgentConfigGenerator {
       case "gpt":
         return this.generateGPTConfig(agentId, mcpEntry, projectDir);
       case "grok":
-        return this.generateGrokConfig(agentId, mcpEntry);
+        return this.generateGrokConfig(agentId, mcpEntry, projectDir);
       case "antigravity":
         return this.generateAntigravityConfig(agentId, mcpEntry);
       case "custom":
@@ -2488,7 +2821,7 @@ export class AgentConfigGenerator {
     const trustEntries: string[] = [];
     if (projectDir) {
       const seen = new Set<string>();
-      for (const candidate of [projectDir, this.safeRealpath(projectDir)]) {
+      for (const candidate of [projectDir, safeRealpath(projectDir)]) {
         if (!candidate || seen.has(candidate)) continue;
         seen.add(candidate);
         trustEntries.push(
@@ -2532,11 +2865,13 @@ export class AgentConfigGenerator {
     return configPath;
   }
 
-  // projectDir 를 받지 않는다 — grok config.toml 은 프로젝트 경로에 의존하지
-  // 않고 GROK_HOME 아래에 통째로 격리된다(codex 분기와 다른 점).
+  // ★projectDir 를 받는다. grok 의 **폴더 신뢰**가 프로젝트 경로에 의존하기
+  // 때문이다 — writeGrokHomeFiles 주석 참조. (config.toml 의 MCP 엔트리 자체는
+  // 여전히 경로 무관하다.)
   private generateGrokConfig(
     agentId: string,
     mcpEntry: MCPServerEntry,
+    projectDir?: string,
   ): string {
     // Grok Build reads TOML config from $GROK_HOME/config.toml or
     // ~/.grok/config.toml. Each worker gets an isolated config so Marblo MCP
@@ -2546,40 +2881,15 @@ export class AgentConfigGenerator {
 
     const userGrokDir = path.join(os.homedir(), ".grok");
     this.propagateGrokAuthAssets(agentId, userGrokDir, grokHome);
-    const userConfigPath = path.join(userGrokDir, "config.toml");
-    let preserved = "";
-    if (fs.existsSync(userConfigPath)) {
-      try {
-        preserved = fs
-          .readFileSync(userConfigPath, "utf-8")
-          .replace(/\[mcp_servers\.[\s\S]*?(?=\n\[(?!mcp_servers)|$)/g, "")
-          .trimEnd();
-      } catch {
-        // Best-effort — ignore unreadable user config.
-      }
+
+    const { configPath, written } = writeGrokHomeFiles(
+      grokHome,
+      mcpEntry,
+      projectDir,
+    );
+    for (const file of written) {
+      this.trackFile(agentId, file);
     }
-
-    const envEntries = Object.entries(mcpEntry.env || {})
-      .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
-      .join("\n");
-
-    const tomlSections = [
-      preserved,
-      "",
-      "[mcp_servers.marblo]",
-      `command = ${JSON.stringify(mcpEntry.command)}`,
-      `args = ${JSON.stringify(mcpEntry.args)}`,
-      "enabled = true",
-      "startup_timeout_sec = 30",
-      "tool_timeout_sec = 6000",
-    ];
-    if (envEntries) {
-      tomlSections.push("", "[mcp_servers.marblo.env]", envEntries);
-    }
-
-    const configPath = path.join(grokHome, "config.toml");
-    fs.writeFileSync(configPath, tomlSections.join("\n") + "\n", "utf-8");
-    this.trackFile(agentId, configPath);
     return configPath;
   }
 
@@ -2815,14 +3125,6 @@ export class AgentConfigGenerator {
     }
 
     return null;
-  }
-
-  private safeRealpath(p: string): string | null {
-    try {
-      return fs.realpathSync(p);
-    } catch {
-      return null;
-    }
   }
 
   private generateCustomConfig(

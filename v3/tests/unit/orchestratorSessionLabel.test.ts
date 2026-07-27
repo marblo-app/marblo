@@ -364,6 +364,25 @@ describe("OrchestratorManager session reconnect", () => {
       });
     });
 
+    // Regression (H7Es8X1l): grok 의 격리 GROK_HOME/config.toml 도 TOML 이라
+    // JSON 분기로 보내면 `JSON.parse` 가 던지고 catch 가 삼킨다 → 브리지 포트/
+    // 토큰이 통째로 유실돼 오케의 spawn_agent·dispatch_task 가 401 난다.
+    it("patches grok TOML env (not the JSON branch) so the bridge token reaches its MCP", () => {
+      const mcpConfigPath = path.join(tmpHome, "grok-config.toml");
+      writeCodexMcpConfig(mcpConfigPath); // 같은 [mcp_servers.marblo] TOML 모양
+      const mgr = makeLaunchManager("board", mcpConfigPath, "grok");
+
+      mgr.launch("project-1", rootPath, 12345, undefined, "new");
+
+      expect(readCodexMcpEnv(mcpConfigPath)).toMatchObject({
+        ELECTRON_RUN_AS_NODE: "1",
+        MARBLO_AGENT_ID: "existing-agent",
+        MARBLO_BRIDGE_PORT: "12345",
+        MARBLO_PROJECT: "project-1",
+        MARBLO_CONTEXT: "board",
+      });
+    });
+
     it("resumes Codex with the native resume subcommand and skips the boot prompt", async () => {
       const mcpConfigPath = path.join(tmpHome, "codex-resume-config.toml");
       writeCodexMcpConfig(mcpConfigPath);

@@ -101,6 +101,7 @@ import {
   resolveOrchestratorModel,
   resolveAllHarnessVersions,
   preflightNodeSpawn,
+  probeGrokMarbloMcp,
 } from "./agent-config";
 import {
   splitOrchestratorModelValue,
@@ -3311,6 +3312,38 @@ function orchestratorModelPins(value: unknown): {
   return orchestratorLaunchPin(normalizeOrchestratorModelSetting(value));
 }
 
+/**
+ * 오케 스폰 **2번째 관문** — 인증(checkSpawnAuthGate) 다음으로, 이 오케가 실제로
+ * 일을 할 수 있는지 본다.
+ *
+ * grok 오케는 marblo MCP 가 없으면 dispatch·보드 조작이 전부 불가능한 껍데기이고,
+ * 그 실패가 **조용하다**(CLI 는 멀쩡히 뜨고 설정 파일에도 서버가 들어있다).
+ * 그래서 스폰 전에 grok 에게 직접 물어 툴이 실제로 붙는지 확인하고, 안 붙으면
+ * 무력 오케를 띄우는 대신 막는다.
+ *
+ * grok 이 아닌 모델은 즉시 통과 — 기존 경로는 바이트 동일하다.
+ */
+async function checkOrchestratorMcpGate(
+  model: string,
+  projectDir: string
+): Promise<{ ok: boolean; action?: string }> {
+  if (model !== "grok") return { ok: true };
+  const probe = await probeGrokMarbloMcp(projectDir);
+  if (probe.ok) {
+    console.info(
+      `[orchestratorSession] grok MCP gate passed — ${probe.detail}`
+    );
+    return { ok: true };
+  }
+  console.error(
+    `[orchestratorSession] Blocked — grok orchestrator has no Marblo MCP tools (${probe.reason}): ${probe.detail}`
+  );
+  return {
+    ok: false,
+    action: `grok 오케 차단 — ${probe.detail}. 프로젝트 폴더 신뢰/설정을 확인하세요.`,
+  };
+}
+
 /** 프로젝트별 저장 모델 (없으면 null). 반환값은 정규화된 설정 문자열. */
 function readProjectOrchestratorModel(projectId?: string): string | null {
   if (!projectId) return null;
@@ -6004,8 +6037,28 @@ ipcMain.handle(
           model,
           splitOrchestratorModelValue(targetModelSetting).modelId
         );
+        if (!gate.ok) {
+          return {
+            ok: false,
+            model: gate.model,
+            action: gate.action,
+            installed: gate.installed,
+          };
+        }
+        // launch 와 같은 2번째 관문 — MCP 툴이 안 붙는 오케로는 스위치하지 않는다.
+        // 여기서 막지 않으면 사용자는 멀쩡히 돌던 오케를 잃고 무력한 grok 오케를
+        // 받는다(스위치는 항상 현재 오케를 stop 한 뒤 새로 띄우기 때문이다).
+        const mcpGate = await checkOrchestratorMcpGate(model, resolvedRootPath);
+        if (!mcpGate.ok) {
+          return {
+            ok: false,
+            model,
+            action: mcpGate.action,
+            installed: true,
+          };
+        }
         return {
-          ok: gate.ok,
+          ok: true,
           model: gate.model,
           action: gate.action,
           installed: gate.installed,
@@ -6154,6 +6207,24 @@ ipcMain.handle(
           model: orchGate.model ?? orchestratorModel,
           action: orchGate.action ?? "claude login",
           installed: orchGate.installed,
+        },
+      };
+    }
+
+    // 2번째 관문 — 인증은 됐지만 MCP 툴이 안 붙는 "무력 오케" 차단(grok 한정).
+    const orchMcpGate = await checkOrchestratorMcpGate(
+      orchestratorModel,
+      resolvedPath
+    );
+    if (!orchMcpGate.ok) {
+      return {
+        sessionId: "",
+        ptySessionId: "",
+        status: "blocked",
+        needsAuth: {
+          model: orchestratorModel,
+          action: orchMcpGate.action ?? "grok MCP 설정 확인",
+          installed: true,
         },
       };
     }
