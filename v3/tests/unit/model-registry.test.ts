@@ -299,6 +299,10 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
     //            "Permanent 50% off" 가 붙은 값이라, 우리는 **할인 전 리스트**를
     //            상한으로 적는다(할인은 벤더가 언제든 거둔다).
     // grok-4.5 — Grok Build 무료 프로모/구독 경로와 API 리스트 단가 축이 다르다.
+    // k3 / k3-256k / kimi-for-coding — 같은 사유(정액 Kimi 멤버십). 단가는 Kimi
+    //            **Platform**(pay-go) 가격표의 cache-miss 값을 상한으로 옮겨 적은
+    //            것이고, 우리가 실제로 태우는 것은 구독 쿼터다. k3-256k 는 가격표에
+    //            별 행이 없어 k3 값을 그대로 상한으로 쓴다(과소보고 회피).
     expect(estimatedPricingModelIds()).toEqual([
       "gpt-5.4",
       "grok-4.5",
@@ -306,6 +310,9 @@ describe("MODEL_PRICING 실단가 (P1-3)", () => {
       "glm-4.7",
       "MiniMax-M3",
       "MiniMax-M2.7",
+      "k3",
+      "k3-256k",
+      "kimi-for-coding",
     ]);
     // 추정치는 과소보고를 피하려고 보수적으로(=5.5 와 동일하게) 잡는다.
     expect(perTokenRateFor("gpt-5.4").outputPer1M).toBeGreaterThanOrEqual(

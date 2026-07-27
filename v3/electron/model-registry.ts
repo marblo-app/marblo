@@ -282,6 +282,27 @@ const MINIMAX_DOCS_PROBE: ModelVerification = {
     "(1차 출처). 엔드포인트·모델 id·단가 전부 원문 대조",
 };
 
+/**
+ * Kimi Code — 문서 크롤 + **라이브 엔드포인트 프로브**다(구독키 미보유).
+ *
+ * GLM/MiniMax 행보다 한 단계 더 주장할 수 있다: 구독키 없이도 엔드포인트가
+ * Anthropic 에러 봉투로 401 을 돌려주는 것까지 실측했으므로, "이 URL 이 실재하고
+ * Anthropic 프로토콜을 말한다" 는 **추론이 아니라 관측**이다. 다만 모델 id 가
+ * 실제로 서빙되는지는 구독키가 있어야 확인된다 — 그 대조는 키 확보 후
+ * `npm run verify:models` 의 [vendor] 섹션이 돌린다.
+ */
+const KIMI_CODE_PROBE: ModelVerification = {
+  at: "2026-07-27",
+  cli: "2.1.220 (claude) — Kimi Code 구독키 미보유, 모델 id 라이브 대조 대기",
+  method:
+    "gstack /browse 크롤: www.kimi.com/code/docs/en/ (Service Endpoint 표) · " +
+    "/third-party-tools/claude-code.html (Claude Code 배선) · /kimi-code/models.html " +
+    "(모델 id 4종) · platform.kimi.ai/docs/pricing/chat-k3|chat-k27-code (단가). " +
+    "+ 라이브: POST https://api.kimi.com/coding/v1/messages → 401 Anthropic 에러 봉투 " +
+    "(무인증 vs 더미 크레덴셜이 다른 메시지 = 크레덴셜 파싱 확인, x-api-key/Bearer 동치), " +
+    "claude 2.1.220 격리홈 실스폰 → duration_api_ms=0 + modelUsage={} 인증거부",
+};
+
 /** Grok Build — xAI 공식 문서/오픈소스 README 확인. 브라우저 인증형 TUI. */
 const GROK_BUILD_PROBE: ModelVerification = {
   at: "2026-07-26",
@@ -632,6 +653,151 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   //     ($0.6/$2.4). 지연을 라우팅 축으로 쓰지 않는 지금은 "같은 성능에 2배 비싼
   //     칸" 일 뿐이라 고를 근거가 없다.
   //   - M2.5 / M2.1 / M2 : 벤더 문서가 Legacy 로 접었다.
+
+  // ── Kimi Code (세 번째 env-swap 벤더 — tUobgoQF) ───────────────────────
+  // ★1단계 판별 결과: **(B)형이다.** 티켓은 "자체 kimi CLI" 때문에 (A)형 신규
+  // 하네스일 가능성을 열어뒀지만, 실측해 보니 **같은 구독이 Anthropic 호환
+  // 엔드포인트로도 열린다** — 그래서 GLM/MiniMax 와 똑같이 행 3개로 끝난다
+  // (`HarnessId` 무변경, 스폰 switch 무변경, grok 3겹 수술 0).
+  //
+  // 실측 출처 A — 2026-07-27 gstack /browse 크롤(1차 출처만):
+  //   www.kimi.com/code/docs/en/  "Service Endpoint" 표
+  //     · Anthropic Compatible  Base URL `https://api.kimi.com/coding/`
+  //                             → 실 엔드포인트 `…/v1/messages`
+  //     · OpenAI Compatible     `https://api.kimi.com/coding/v1`
+  //     · "Subscribers can also obtain an API Key to integrate Kimi Code's model
+  //        capabilities into third-party development tools" ← 구독 혜택이 자체
+  //        CLI 전용이 **아니라는** 근거. 이 한 줄이 (A)형/(B)형을 갈랐다.
+  //   /third-party-tools/claude-code.html — **Claude Code 전용 공식 가이드**.
+  //     배선이 GLM/MiniMax 와 동형(ANTHROPIC_BASE_URL + 크레덴셜 + DEFAULT_* 매핑).
+  //   /kimi-code/models.html — 모델 id 4종·컨텍스트·플랜별 가용성 표.
+  //
+  // 실측 출처 B — 2026-07-27 라이브 프로브(구독키 없이 확인 가능한 범위):
+  //   ① `POST https://api.kimi.com/coding/v1/messages` 무인증 → 401
+  //      `{"error":{"type":"authentication_error",…},"type":"error"}`
+  //      = **Anthropic 에러 봉투 그대로**. 엔드포인트가 실재하고 프로토콜이 맞다.
+  //   ② 같은 요청 + 더미 크레덴셜 → 401 "The API Key appears to be invalid" 로
+  //      메시지가 **바뀐다**(무인증과 다름) = 크레덴셜이 실제로 파싱된다.
+  //   ③ ★`x-api-key`(=ANTHROPIC_API_KEY)와 `Authorization: Bearer`
+  //      (=ANTHROPIC_AUTH_TOKEN) **둘 다** ②와 동일 응답 → 게이트웨이가 두 헤더
+  //      형태를 모두 받는다. 아래 AUTH_TOKEN 선택의 근거다.
+  //   ④ claude CLI 2.1.220 로 이 프로파일을 실제 스폰(`-p --model kimi-for-coding`,
+  //      격리 HOME): 두 형태 모두 `is_error:true` + `duration_api_ms:0` +
+  //      `modelUsage:{}` 로 동일하게 인증거부 — 즉 우리 env 가 Kimi 까지 닿았다
+  //      (CLAUDE_PROBE 가 쓰는 "무효 설정" 시그니처와 같은 모양).
+  //
+  // ★크레덴셜 키는 `ANTHROPIC_AUTH_TOKEN` 이다 — 벤더 문서는 `ANTHROPIC_API_KEY`
+  // 를 쓰지만 위 프로브 ③이 두 형태 동치를 보였고, `ANTHROPIC_API_KEY` 는 claude
+  // CLI 의 "이 API 키를 쓸까요?" 승인 경로를 건드릴 수 있는 축이다(대화형 스폰에서
+  // 프롬프트로 멈추면 grok #617 과 같은 부류의 사고가 된다). 세 env-swap 벤더를
+  // 한 모양으로 유지하는 이득도 같이 얻는다.
+  //
+  // ★env 이름은 `KIMI_API_KEY` 다(`MOONSHOT_API_KEY` 가 아니다). 후자는 Kimi
+  // **Platform**(pay-go, api.moonshot.ai) 키의 공식 이름이고, 우리가 쓰는 것은
+  // Kimi **Code Console** 의 구독 키다 — 엔드포인트도 모델 id 도 다른 별개 키라,
+  // 같은 이름을 쓰면 두 계정 크레덴셜이 서로의 백엔드로 새는 축이 생긴다.
+  //
+  // ★모델 id 는 Kimi **Code** 표기(k3 / k3-256k / kimi-for-coding)다. Platform
+  // 쪽 id(kimi-k3 / kimi-k2.7-code)와 **다르다** — 베이스 URL 이 다르면 id 도 다르다.
+  {
+    id: "k3",
+    harness: "claude", // 우리 claude 바이너리를 그대로 스폰한다(신규 하네스 0)
+    provider: "moonshot",
+    envProfile: {
+      ANTHROPIC_BASE_URL: "https://api.kimi.com/coding/",
+      ANTHROPIC_AUTH_TOKEN: "${KIMI_API_KEY}", // ★값이 아니라 env 키 이름
+      // ★벤더 Claude Code 가이드는 GLM/MiniMax 문서에 없던 두 키를 더 지정한다
+      // (FABLE·SUBAGENT). 우리 fleet 엔 `claude-fable-5` 행이 실재하고 Task 서브
+      // 에이전트도 뜨므로, 이 둘을 안 접으면 그 경로가 **Anthropic 모델명 그대로**
+      // Kimi 엔드포인트에 나가 실패한다. 벤더 경계를 전부 닫는다.
+      ANTHROPIC_DEFAULT_FABLE_MODEL: "k3",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "k3",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "k3",
+      // GLM/MiniMax 와 같은 규율: **레지스트리에 등록된 id 만** env 로 내보낸다
+      // (미등록 id = cost-tracker 가 단가를 모르는 유령 비용). haiku 자리는 전
+      // 멤버가 쓸 수 있고 제일 싼 kimi-for-coding 으로 접는다.
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-for-coding",
+      CLAUDE_CODE_SUBAGENT_MODEL: "k3",
+    },
+    aliases: [],
+    // 벤더 자기 표기는 "2.8T 파라미터 플래그십". MiniMax 행과 같은 규율로
+    // `frontier` 는 주지 않는다 — 그 칸은 벤치·실측이 붙은 자리다(오늘 fable5 뿐).
+    capability: "top",
+    // ★K3 는 reasoning_effort(low/high/max) 가 **있다**. 그런데 그 축은 세션 내
+    // `/effort` 나 요청 본문 필드로 가는 것이지 우리 스폰 argv 가 건드리는 축이
+    // 아니다(claude 하네스엔 effort 인자가 없다). 그래서 빈 배열이 정직하다.
+    // 벤더 문서상 미지정 기본값이 `high` 라 우리 스폰은 high 로 돈다.
+    efforts: [],
+    // Kimi Platform(pay-go) 리스트 단가 중 **cache-miss 입력**($3.00)과 출력
+    // ($15.00) — platform.kimi.ai/docs/pricing/chat-k3. 우리 접근 경로는 정액
+    // Kimi Code 구독이라 실 한계비용은 ≈0 이고, 이 값은 "과소보고하지 않는" 상한이다.
+    pricing: { inputPer1M: 3.0, outputPer1M: 15.0, estimated: true },
+    verified: KIMI_CODE_PROBE,
+    status: "active",
+  },
+  {
+    id: "k3-256k",
+    harness: "claude",
+    provider: "moonshot",
+    envProfile: {
+      ANTHROPIC_BASE_URL: "https://api.kimi.com/coding/",
+      ANTHROPIC_AUTH_TOKEN: "${KIMI_API_KEY}",
+      ANTHROPIC_DEFAULT_FABLE_MODEL: "k3-256k",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "k3-256k",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "k3-256k",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-for-coding",
+      CLAUDE_CODE_SUBAGENT_MODEL: "k3-256k",
+    },
+    aliases: [],
+    capability: "top",
+    efforts: [],
+    // 별도 단가 행이 없다(플랫폼 가격표엔 kimi-k3 한 행뿐). 문서는 "256K 판이라
+    // 소모가 줄어든다" 고만 적으므로, 과소보고를 피해 k3 와 같은 값을 상한으로 둔다.
+    pricing: { inputPer1M: 3.0, outputPer1M: 15.0, estimated: true },
+    verified: KIMI_CODE_PROBE,
+    status: "active",
+  },
+  {
+    id: "kimi-for-coding",
+    harness: "claude",
+    provider: "moonshot",
+    envProfile: {
+      ANTHROPIC_BASE_URL: "https://api.kimi.com/coding/",
+      ANTHROPIC_AUTH_TOKEN: "${KIMI_API_KEY}",
+      ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-for-coding",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-for-coding",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-for-coding",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-for-coding",
+      CLAUDE_CODE_SUBAGENT_MODEL: "kimi-for-coding",
+    },
+    aliases: [],
+    // K2.7 Code = K3 직전 세대의 코딩 전용 모델. glm-4.7 / MiniMax-M2.7 과 같은 칸.
+    capability: "mid",
+    efforts: [],
+    // platform.kimi.ai/docs/pricing/chat-k27-code 의 `kimi-k2.7-code` 행
+    // (cache-miss 입력 $0.95 / 출력 $4.00). estimated 사유는 위와 같다.
+    pricing: { inputPer1M: 0.95, outputPer1M: 4.0, estimated: true },
+    verified: KIMI_CODE_PROBE,
+    status: "active",
+  },
+  // Kimi 에서 **등록하지 않은 것**:
+  //   - `kimi-for-coding-highspeed` : kimi-for-coding 과 **같은 모델**이고 출력만
+  //     5~6배 빠른 대신 쿼터를 3배 태운다(+ Allegretto 이상 전용). MiniMax 의
+  //     `-highspeed` 를 뺀 것과 같은 판단이다 — 지연을 라우팅 축으로 쓰지 않는
+  //     지금은 "같은 성능에 3배 비싼 칸" 이라 고를 근거가 없다.
+  //   - `k3[1m]` (1M 컨텍스트 표기) : GLM `glm-5.2[1m]`·MiniMax `MiniMax-M3[1m]`
+  //     을 뺀 것과 **같은 이유**다. 벤더 문서가 그 표기와 함께
+  //     `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1048576`·`CLAUDE_CODE_MAX_CONTEXT_TOKENS`
+  //     를 요구하는데, 그 env 를 우리 스폰에 얹었을 때의 동작을 라이브로 확인하지
+  //     못했다. 안 얹으면 claude 가 자기 기본 임계에서 더 일찍 compact 할 뿐이라
+  //     **안전한 쪽으로 틀린다**. 위 `k3` 행은 대괄호 없는 평문 id 라 플랜이 주는
+  //     만큼의 컨텍스트로 그냥 돈다.
+  //   - `CLAUDE_CODE_EFFORT_LEVEL=high` : 벤더 예시엔 있지만 문서의 매핑표가
+  //     "미지정 기본 = high" 라고 못박는다. 값이 같은 env 를 굳이 얹어 미검증
+  //     노브를 늘리지 않는다.
+  //   - 네이티브 `kimi` CLI (`code.kimi.com/kimi-code/install.sh`) : 실재하지만
+  //     같은 구독이 위 (B)형으로 이미 열리므로 (A)형 하네스 수술(argv·격리홈
+  //     auth 전파·command 정규화 3겹)을 지불할 이유가 없다.
 
   // 의도적 미등록(§1.2 표에는 있으나 라우팅 후보가 아님):
   //   - gpt-5.3-codex-spark : api ❌ (Codex CLI 전용). 단가만 cost-tracker 의
