@@ -40,8 +40,22 @@ const APP_DESCRIPTION: Record<Locale, string> = {
 /**
  * Organization node. `sameAs` is optional — pass only genuine official
  * profiles (omit rather than link a weak/unofficial page).
+ *
+ * `locale` selects the description language. Previously this always emitted
+ * the English text, so the /ko and /ja pages described the brand entity in a
+ * language their own content is not written in — the opposite of what an
+ * answer engine needs to cite the right sentence back to a Korean or Japanese
+ * asker.
+ *
+ * `contactPoint` and `address` carry the same values already published to
+ * humans on /legal/business (the 전자상거래법 disclosure page). Nothing here is
+ * new information — it is the existing, verifiable business record restated in
+ * a machine-readable form so the entity resolves.
  */
-export function buildOrganizationSchema(opts?: { sameAs?: string[] }) {
+export function buildOrganizationSchema(opts?: {
+  locale?: string;
+  sameAs?: string[];
+}) {
   const sameAs = (opts?.sameAs ?? []).filter(Boolean);
   return {
     "@context": "https://schema.org",
@@ -57,14 +71,34 @@ export function buildOrganizationSchema(opts?: { sameAs?: string[] }) {
       "@type": "ImageObject",
       url: `${SITE_URL}/marblo-mark.svg`,
     },
-    description: ORG_DESCRIPTION.en,
+    description: pick(opts?.locale ?? "en", ORG_DESCRIPTION),
     email: "team@marblo.app",
+    // `telephone` is deliberately absent. The number on /legal/business is a
+    // personal mobile, published there because 전자상거래법 requires it on that
+    // one disclosure page. Putting it in site-wide JSON-LD is a different act:
+    // it invites search engines to surface it in knowledge panels and AI
+    // answers on every page. That is the owner's call to make, not a side
+    // effect of an SEO change — see docs/SEO-GSC-INDEXING-AUDIT.md.
+    contactPoint: {
+      "@type": "ContactPoint",
+      contactType: "customer support",
+      email: "team@marblo.app",
+      areaServed: ["KR", "JP", "US"],
+      availableLanguage: ["ko", "en", "ja"],
+    },
+    address: {
+      "@type": "PostalAddress",
+      streetAddress: "2F, 16 Baekjegobun-ro 50-gil",
+      addressLocality: "Songpa-gu",
+      addressRegion: "Seoul",
+      addressCountry: "KR",
+    },
     ...(sameAs.length ? { sameAs } : {}),
   };
 }
 
 /** WebSite node. Publisher references the Organization by `@id`. */
-export function buildWebSiteSchema() {
+export function buildWebSiteSchema(locale?: string) {
   return {
     "@context": "https://schema.org",
     "@type": "WebSite",
@@ -72,7 +106,7 @@ export function buildWebSiteSchema() {
     url: SITE_URL,
     name: "Marblo",
     alternateName: ["마블로", "マブロ"],
-    description: ORG_DESCRIPTION.en,
+    description: pick(locale ?? "en", ORG_DESCRIPTION),
     inLanguage: ["ko", "en", "ja"],
     publisher: { "@id": ORG_ID },
   };

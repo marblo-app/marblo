@@ -183,11 +183,23 @@ export default function HomePage() {
         <div className="absolute inset-0 bg-gradient-to-b from-indigo-600/5 to-transparent" />
         <HeroConstellation />
         <div className="max-w-4xl mx-auto relative z-10">
-          <span className="inline-block bg-indigo-500/10 text-indigo-400 text-sm font-medium px-4 py-1.5 rounded-full mb-6 border border-indigo-500/30">
-            {t("hero.badge")}
-          </span>
-          <h1 className="text-5xl md:text-7xl font-bold leading-tight whitespace-pre-line tracking-tight bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
-            {t("hero.title")}
+          {/* The eyebrow pill lives INSIDE the h1. hero.title is pure benefit
+              copy ("혼자서 팀 전체의 성과를 만드세요") and contains neither the
+              brand nor the category, so the single strongest on-page heading
+              signal was carrying zero of the terms we want to rank for, while
+              hero.badge — which carries all of them ("마블로 · AI 에이전트
+              오케스트레이션 플랫폼") — sat in a sibling span that counts for
+              almost nothing. Grouping them makes the h1 read "brand · category
+              → promise" without hiding text or changing a word of the copy.
+              Styling moved onto the inner spans so the pill and the headline
+              render exactly as before. */}
+          <h1>
+            <span className="inline-block bg-indigo-500/10 text-indigo-400 text-sm font-medium px-4 py-1.5 rounded-full mb-6 border border-indigo-500/30">
+              {t("hero.badge")}
+            </span>
+            <span className="block text-5xl md:text-7xl font-bold leading-tight whitespace-pre-line tracking-tight bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
+              {t("hero.title")}
+            </span>
           </h1>
           <p className="mt-6 text-xl text-zinc-400 max-w-2xl mx-auto whitespace-pre-line leading-relaxed">
             {t("hero.subtitle")}

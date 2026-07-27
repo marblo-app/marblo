@@ -219,9 +219,10 @@ export default async function LocaleLayout({
   // sameAs points at the official public release repository (only genuine
   // external presence — omit weak links rather than pad this).
   const organizationSchema = buildOrganizationSchema({
+    locale,
     sameAs: ["https://github.com/melocream/marblo-releases"],
   });
-  const websiteSchema = buildWebSiteSchema();
+  const websiteSchema = buildWebSiteSchema(locale);
 
   return (
     <html

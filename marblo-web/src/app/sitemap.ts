@@ -14,12 +14,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/founders",
     "/blog",
     "/faq",
-    // Policy pages — real, indexable, trust-building routes that were missing
-    // from the sitemap. Low priority (support content, not conversion pages).
-    // /legal/business (사업자정보) is intentionally omitted here.
+    // Founder-programme FAQ — public content with its own copy, previously
+    // reachable and indexable but absent from the sitemap.
+    "/founders/faq",
+    // Policy pages — real, indexable, trust-building routes. Low priority
+    // (support content, not conversion pages). /legal/business (사업자정보) is
+    // a legally mandated public disclosure page and renders `index: true`, so
+    // it belongs here too: leaving an indexable page out of the sitemap is
+    // what produces "Discovered - currently not indexed" in Search Console.
     "/legal/privacy",
     "/legal/terms",
     "/legal/refund",
+    "/legal/business",
   ];
 
   // Per-page hreflang cluster shared across every locale entry for that page.
@@ -41,6 +47,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     if (page === "") return 1.0;
     if (page.startsWith("/legal")) return 0.3;
     if (page.includes("/lectures")) return 0.5;
+    // Sub-pages of a campaign landing page (/founders/faq) support it rather
+    // than compete with it.
+    if (page.split("/").length > 2) return 0.5;
     return 0.8;
   };
 
@@ -52,13 +61,29 @@ export default function sitemap(): MetadataRoute.Sitemap {
     return "monthly";
   };
 
+  // `lastModified` is emitted ONLY where a truthful date exists (blog posts,
+  // and the blog index which tracks its newest post). Static pages previously
+  // used `new Date()`, which stamps every deploy time onto every URL and tells
+  // Google the whole site changed whenever anything did. Google discards
+  // lastmod values it judges unreliable, so a wrong date is strictly worse
+  // than no date — the field is simply omitted for those pages.
+  const newestPostDate = (): Date | undefined => {
+    const times = locales
+      .flatMap((l) => getAllPosts(l))
+      .map((p) => new Date(p.updated ?? p.date).getTime())
+      .filter((t) => Number.isFinite(t));
+    return times.length ? new Date(Math.max(...times)) : undefined;
+  };
+  const blogIndexModified = newestPostDate();
+
   const entries: MetadataRoute.Sitemap = [];
 
   for (const locale of locales) {
     for (const page of pages) {
+      const lastModified = page === "/blog" ? blogIndexModified : undefined;
       entries.push({
         url: `${baseUrl}/${locale}${page}`,
-        lastModified: new Date(),
+        ...(lastModified ? { lastModified } : {}),
         changeFrequency: changeFrequencyFor(page),
         priority: priorityFor(page),
         alternates: {
