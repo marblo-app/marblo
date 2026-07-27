@@ -20,6 +20,7 @@ import {
   type ActionResult,
 } from "../../services/cliSetupActions";
 import { CliRowCard } from "./CliSetupRows";
+import { VendorModelsSection } from "./VendorModelsSection";
 import { DemoMode, DEMO_CONNECT_PENDING_KEY } from "./DemoMode";
 import { DEMO_TOTAL_SECONDS } from "./demoScript";
 
@@ -317,6 +318,11 @@ export function StartHereTab() {
             );
           })}
         </div>
+
+        {/* 벤더 확장 — 체크리스트 **뒤**에 둔다. ①~④는 첫 티켓까지 가는 최단
+            경로고, 다른 벤더는 그 뒤에 오는 선택이다. 온보딩이 끝나면 펴진 상태로
+            보여 "다음에 해볼 것" 이 된다. */}
+        <VendorModelsSection onboardingComplete={complete} />
 
         {/* Landing opt-out. The steps stay right here either way — this only
             stops the shell from opening on this tab. */}

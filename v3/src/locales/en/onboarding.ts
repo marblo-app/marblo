@@ -321,6 +321,43 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
   "onboarding.startHere.banner.title": "CLI sign-in required",
   "onboarding.startHere.banner.cta": "Open Start here",
 
+  // — Start Here tab: connecting other vendors (XHXSIdPN) —
+  // No vendor name or model id lives here: the list is derived from the model
+  // registry. These strings only say what the first-run action is; endpoints,
+  // context nuances and the verification runbook stay in
+  // docs/VENDOR-MODEL-USAGE-GUIDE.md.
+  "onboarding.startHere.vendors.title": "Other vendors work here too",
+  "onboarding.startHere.vendors.subtitle":
+    "Steps ① and ② cover Claude and Codex. These are optional, and each vendor takes one setup step — once.",
+  "onboarding.startHere.vendors.summary": "{ready} of {total} ready",
+  "onboarding.startHere.vendors.loading": "Loading the model list…",
+  "onboarding.startHere.vendors.loadFailed": "Could not load the model list.",
+  "onboarding.startHere.vendors.retry": "Try again",
+  // {command} = the binary this vendor actually spawns (registry-derived).
+  // Vendors with their own CLI (Grok) have no such line — they reuse the very
+  // same row card as steps ① and ②, described by `onboarding.cliGate.*Desc`.
+  "onboarding.startHere.vendors.kind.envSwap":
+    "Runs on the {command} you already have — no new CLI, just a subscription key.",
+  "onboarding.startHere.vendors.status.ready": "Ready",
+  "onboarding.startHere.vendors.status.needsKey": "Key needed",
+  "onboarding.startHere.vendors.status.needsInstall": "Install needed",
+  "onboarding.startHere.vendors.status.needsLogin": "Sign-in needed",
+  "onboarding.startHere.vendors.status.unknown": "Checking",
+  // {keys} = env key NAMES only — values never reach the renderer.
+  "onboarding.startHere.vendors.key.hint":
+    "Keys needed: {keys} — stored encrypted in the OS keychain and never shown back on screen.",
+  "onboarding.startHere.vendors.key.cta": "Add the key in Settings",
+  "onboarding.startHere.vendors.key.recheck": "Re-check",
+  "onboarding.startHere.vendors.key.ready":
+    "The key is registered. Pin a model as shown below (agents spawned after the key was saved pick it up).",
+  "onboarding.startHere.vendors.dispatchLabel":
+    "How to launch it — say this to the orchestrator",
+  // {model} = the concrete model id picked from the chips above (registry-derived).
+  "onboarding.startHere.vendors.dispatchSnippet":
+    'dispatch_task(role="backend", instruction="…", model="{model}")',
+  "onboarding.startHere.vendors.guideLead":
+    "Endpoints, context nuances and the verification runbook live here:",
+
   // — LoginPage (auth) —
   "onboarding.login.signupSubtitle": "Create a new account",
   "onboarding.login.loginSubtitle": "Sign in to your account",
@@ -338,6 +375,8 @@ export const onboarding: Record<keyof typeof koOnboarding, string> = {
     "Optional: install to run Codex (GPT) agents.",
   "onboarding.cliGate.agyDesc":
     "Optional: install to use Antigravity (agy) agents.",
+  "onboarding.cliGate.grokDesc":
+    "Optional: install, then sign in through the browser to use Grok (xAI) agents.",
   "onboarding.cliGate.installFail": "Install failed",
   "onboarding.cliGate.manualHint":
     "Auto-install failed. Run this in a terminal instead:",

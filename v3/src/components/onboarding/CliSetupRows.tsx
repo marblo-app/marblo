@@ -143,7 +143,11 @@ export function CliRowCard({ row, phase, onLoginLaunched }: CliRowCardProps) {
               ? t("onboarding.cliGate.claudeDesc")
               : row.model === "codex"
                 ? t("onboarding.cliGate.codexDesc")
-                : t("onboarding.cliGate.agyDesc")}
+                : row.model === "grok"
+                  ? // grok 행이 ROWS 에 들어온 뒤로도 이 분기가 없어서 Antigravity
+                    // 설명을 달고 있었다 — 브라우저 인증이라는 결정적 차이가 가려졌다.
+                    t("onboarding.cliGate.grokDesc")
+                  : t("onboarding.cliGate.agyDesc")}
           </p>
         </div>
         <StatusBadge state={state} installing={installing} t={t} />

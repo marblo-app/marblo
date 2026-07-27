@@ -290,6 +290,9 @@ export const onboarding = {
     "선택: Codex(GPT) 에이전트를 쓰려면 설치·로그인하세요.",
   "onboarding.cliGate.agyDesc":
     "선택: Antigravity(agy) 에이전트를 쓰려면 설치하세요.",
+  // Grok 은 ROWS 에 있는데 설명 문구가 없어 Antigravity 문구를 쓰고 있었다.
+  "onboarding.cliGate.grokDesc":
+    "선택: Grok(xAI) 에이전트를 쓰려면 설치 후 브라우저로 로그인하세요.",
   "onboarding.cliGate.installFail": "설치 실패",
   "onboarding.cliGate.manualHint":
     "자동 설치가 실패했습니다. 터미널에서 아래 명령을 직접 실행하세요:",
@@ -436,6 +439,43 @@ export const onboarding = {
   // 인라인 배너(모달 대체) — 스폰이 인증으로 막힌 순간
   "onboarding.startHere.banner.title": "CLI 인증이 필요합니다",
   "onboarding.startHere.banner.cta": "시작하기 열기",
+
+  // — 시작하기 탭: 다른 벤더 모델 붙이기 (XHXSIdPN) —
+  // ★벤더 이름·모델 id 가 이 표에 하나도 없다. 목록은 model-registry 파생이고
+  //   여기 있는 것은 "첫 켰을 때 무엇을 해야 켜지나" 라는 행동 문구뿐이다.
+  //   엔드포인트·1M 컨텍스트·검증 런북 같은 상세는 중복하지 않는다 —
+  //   docs/VENDOR-MODEL-USAGE-GUIDE.md 가 그쪽 단일소스다.
+  "onboarding.startHere.vendors.title": "다른 벤더 모델도 붙일 수 있어요",
+  "onboarding.startHere.vendors.subtitle":
+    "①②단계가 Claude·Codex 입니다. 아래는 선택이고, 벤더마다 처음 한 번만 하면 됩니다.",
+  "onboarding.startHere.vendors.summary": "{total}개 중 {ready}개 사용 가능",
+  "onboarding.startHere.vendors.loading": "모델 목록을 불러오는 중…",
+  "onboarding.startHere.vendors.loadFailed": "모델 목록을 불러오지 못했습니다.",
+  "onboarding.startHere.vendors.retry": "다시 시도",
+  // {command} = 이 벤더가 실제로 스폰하는 바이너리 이름(레지스트리 파생).
+  // ★자체 CLI 벤더(Grok)엔 이런 줄이 없다 — 그쪽은 ①②단계와 같은 행 카드를
+  //   그대로 재사용하므로 설명도 `onboarding.cliGate.*Desc` 를 쓴다.
+  "onboarding.startHere.vendors.kind.envSwap":
+    "이미 쓰는 {command} 를 그대로 씁니다 — 새 CLI 없이 구독키만 등록하면 켜집니다.",
+  "onboarding.startHere.vendors.status.ready": "사용 가능",
+  "onboarding.startHere.vendors.status.needsKey": "키 필요",
+  "onboarding.startHere.vendors.status.needsInstall": "설치 필요",
+  "onboarding.startHere.vendors.status.needsLogin": "로그인 필요",
+  "onboarding.startHere.vendors.status.unknown": "확인 중",
+  // {keys} = 필요한 env 키 **이름**만. 값은 렌더러에 오지 않는다.
+  "onboarding.startHere.vendors.key.hint":
+    "필요한 키: {keys} — 값은 OS 키체인에 암호화 저장되고 화면으로 다시 나오지 않습니다.",
+  "onboarding.startHere.vendors.key.cta": "설정에서 키 등록하기",
+  "onboarding.startHere.vendors.key.recheck": "등록 상태 다시 확인",
+  "onboarding.startHere.vendors.key.ready":
+    "키가 등록돼 있습니다. 아래처럼 모델을 지정해 바로 띄우세요(키 등록 뒤 새로 스폰하는 에이전트부터 적용됩니다).",
+  "onboarding.startHere.vendors.dispatchLabel":
+    "띄우는 법 — 오케스트레이터에게 이렇게 말하세요",
+  // {model} = 사용자가 위 칩에서 고른 구체 모델 id(레지스트리 파생).
+  "onboarding.startHere.vendors.dispatchSnippet":
+    'dispatch_task(role="backend", instruction="…", model="{model}")',
+  "onboarding.startHere.vendors.guideLead":
+    "엔드포인트·컨텍스트·검증 런북 등 상세는 이 문서에 있습니다:",
 
   // — LoginPage (auth) —
   "onboarding.login.signupSubtitle": "새 계정을 만드세요",
