@@ -13,7 +13,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "os";
 import fs from "fs";
 import path from "path";
-import { AgentConfigGenerator } from "../../electron/agent-config";
+import {
+  AgentConfigGenerator,
+  resetClaudeResolution,
+  resolveAllHarnessVersions,
+} from "../../electron/agent-config";
 import {
   spawnedModelFromArgs,
   formatModelAtEffort,
@@ -55,6 +59,20 @@ function launchArgs(
     modelPin,
   );
   return cfg.args;
+}
+
+function launchCommand(model: ModelType, baseCommand = ""): string {
+  const gen = new AgentConfigGenerator();
+  const cfg = gen.getLaunchConfig(
+    {
+      id: `ag-cmd-${model}-${Math.random()}`,
+      model,
+      role: "backend",
+      command: baseCommand,
+    },
+    TMP,
+  );
+  return cfg.command;
 }
 
 /** `--model` 뒤 값. 없으면 undefined(= 모델을 핀하지 않은 launch). */
@@ -155,7 +173,11 @@ describe("grok — 지정 모델이 -m 으로 나간다", () => {
   it("model='grok-4.5' → -m grok-4.5", () => {
     const pin = resolveModelPin("grok-4.5", CLI_OK);
     const args = launchArgs("grok", pin);
-    expect(args).toContain("--dangerously-skip-permissions");
+    expect(args).toContain("--permission-mode");
+    expect(args[args.indexOf("--permission-mode") + 1]).toBe(
+      "bypassPermissions",
+    );
+    expect(args).not.toContain("--dangerously-skip-permissions");
     expect(args).toContain("-m");
     expect(args[args.indexOf("-m") + 1]).toBe("grok-4.5");
   });
@@ -163,6 +185,48 @@ describe("grok — 지정 모델이 -m 으로 나간다", () => {
   it("핀 없음 → 기본 grok-4.5", () => {
     const args = launchArgs("grok");
     expect(args[args.indexOf("-m") + 1]).toBe("grok-4.5");
+  });
+
+  it("nativeModel 핀이 기본 grok-4.5 를 덮는다", () => {
+    const args = launchArgs("grok", { nativeModel: "grok-code-fast-1" });
+    expect(args[args.indexOf("-m") + 1]).toBe("grok-code-fast-1");
+  });
+});
+
+describe("grok — 검증된 CLI 경로와 버전 배지", () => {
+  let savedPath: string | undefined;
+  let binDir: string;
+
+  beforeEach(() => {
+    savedPath = process.env.PATH;
+    binDir = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-grok-bin-"));
+    const grok = path.join(binDir, "grok");
+    fs.writeFileSync(
+      grok,
+      "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'grok 0.2.112'; exit 0; fi\nexit 0\n",
+      "utf-8",
+    );
+    fs.chmodSync(grok, 0o755);
+    process.env.PATH = `${binDir}${path.delimiter}${savedPath ?? ""}`;
+    resetClaudeResolution();
+  });
+
+  afterEach(() => {
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+    fs.rmSync(binDir, { recursive: true, force: true });
+    resetClaudeResolution();
+  });
+
+  it("bare grok 스폰은 문자열 grok 대신 버전검증된 경로를 쓴다", () => {
+    const command = launchCommand("grok");
+    expect(command).not.toBe("grok");
+    expect(path.isAbsolute(command)).toBe(true);
+    expect(path.basename(command)).toBe("grok");
+  });
+
+  it("resolveAllHarnessVersions 가 grok 배지 키를 포함한다", () => {
+    expect(resolveAllHarnessVersions()).toHaveProperty("grok");
   });
 });
 

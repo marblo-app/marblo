@@ -451,6 +451,8 @@ const MODEL_BINARY: Partial<Record<ModelType, string>> = {
   antigravity: "agy",
 };
 
+const GROK_DEFAULT_MODEL = "grok-4.5";
+
 /**
  * 이 하네스가 스폰하는 CLI 이름 — 에이전트 doc 의 `command` 필드에 넣을 값.
  *
@@ -1047,6 +1049,7 @@ export function resolveAllHarnessVersions(): Record<string, string> {
   for (const model of [
     "claude",
     "gpt",
+    "grok",
     "antigravity",
     "gemini",
   ] as ModelType[]) {
@@ -2528,9 +2531,6 @@ export class AgentConfigGenerator {
     const tomlSections = [
       preserved,
       "",
-      "[models]",
-      'default = "grok-4.5"',
-      "",
       "[mcp_servers.marblo]",
       `command = ${JSON.stringify(mcpEntry.command)}`,
       `args = ${JSON.stringify(mcpEntry.args)}`,
@@ -2986,16 +2986,26 @@ export class AgentConfigGenerator {
       case "grok": {
         // Grok Build TUI. First launch opens the user's browser for auth
         // (SuperGrok/X account); Marblo only supplies per-agent MCP config via
-        // GROK_HOME and pins the native default model explicitly.
-        const grokArgs: string[] = ["--dangerously-skip-permissions"];
+        // GROK_HOME.
+        //
+        // `grok --help` (0.2.112) exposes `--permission-mode` values including
+        // `bypassPermissions`; that is the native unattended equivalent for
+        // tool approvals. `--dangerously-skip-permissions` is Claude-specific,
+        // and `--always-approve` is narrower than the permission-mode contract.
+        //
+        // Keep the model pin in argv, not config.toml: it gives the PTY/badge
+        // path an observable launched model while still letting nativeModel
+        // override the default.
+        const grokArgs: string[] = [
+          "--permission-mode",
+          "bypassPermissions",
+        ];
         const grokModel = modelPin?.nativeModel;
-        grokArgs.push("-m", grokModel || "grok-4.5");
+        grokArgs.push("-m", grokModel || GROK_DEFAULT_MODEL);
         const grokCommand =
-          os.platform() === "win32" && (!baseCommand || baseCommand === "grok")
+          !baseCommand || baseCommand === "grok"
             ? resolveHarnessCli("grok").command
-            : !baseCommand
-              ? "grok"
-              : baseCommand;
+            : baseCommand;
         const grokLaunch = ptyCommandForCli(grokCommand, grokArgs);
         return {
           command: grokLaunch.command,
