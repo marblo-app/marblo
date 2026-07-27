@@ -1856,14 +1856,20 @@ export class BridgeServer {
         // 티켓 문서로 이미 했고(mcp-server/task-type.ts), 여기는 그 라벨을 그래프
         // 귀속키로 함께 굳히는 자리다. 없으면 종전대로 우아한 저하.
         taskType: normalizeTaskTypeLabel(params.taskType),
-        // ★P2-2/P2-3 — 지식그래프의 모델 축 키. `getSpawnedModel` 이 되읽은 실제
-        // argv 가 1차 근거이고, codex 처럼 모델을 핀하지 않는 경로에서는 사다리의
+        // ★P2-2/P2-3 — 지식그래프의 모델 축 키. `resolveConcreteModel` 이 관측
+        // 사다리를 그대로 준다: argv 되읽기(1차) → 과금 세션이 기록한 실제 모델
+        // id(2차). codex 처럼 모델을 핀하지 않는 경로에서는 사다리의
         // `inheritedModel`(=오늘 실측되는 상속 기본모델) + argv effort 로 채운다.
         // 결과 outcome 이 이 키의 셀로 접혀야 (모델,난도,taskType)별 학습이 성립한다.
+        //
+        // ★2차(과금 관측)를 넣은 이유: 모델을 핀하지 않고 뜬 에이전트(오케 기본
+        // 경로·Agents 탭 ▶Start·콜드부트 reconnect)로 **reuse 디스패치**가 가면
+        // argv 근거가 영영 없어 이 키가 항상 null 이었다 — KG "모델미상" 의 주된
+        // 출처다. 그 에이전트는 이미 돌아본 적이 있으므로 과금 관측은 존재한다.
         spawnedModelKey:
           modelKeyFromSpawn(
             agent.model,
-            this.agentManager.getSpawnedModel(agentId),
+            this.agentManager.resolveConcreteModel(agentId),
           ) ?? undefined,
       });
     } catch (err) {
@@ -2023,8 +2029,7 @@ export class BridgeServer {
     const resolvedPin = resolveModelPin(modelSpecInput);
     // ★스폰할 CLI 는 **하네스** 축이다(USbdRV4k 축분리). 벤더(anthropic/zai…)는
     // env 로 갈릴 뿐 바이너리를 바꾸지 않으므로 이 자리 값은 종전과 동일하다.
-    const requestedModel =
-      resolvedPin?.harness ?? normalizeModel(params.model);
+    const requestedModel = resolvedPin?.harness ?? normalizeModel(params.model);
     const model =
       requiresTrackedModel && requestedModel === "antigravity"
         ? undefined
@@ -2271,8 +2276,12 @@ export class BridgeServer {
         // 모델 핀이 아니라 그 에이전트가 실제로 떠 있는 모델을 기록해야 한다.
         // 요청값을 적으면 그래프가 "opus5 로 돌았다"고 배우지만 실제로는 그
         // 프로세스가 sonnet 일 수 있다.
+        //
+        // 관측 사다리(argv → 과금 세션 모델)를 쓴다: 모델을 핀하지 않고 뜬
+        // 에이전트는 argv 근거가 없지만 **이미 돌아본 적이 있으므로** 과금 관측은
+        // 있다. 그걸 안 보면 이 경로가 영구히 "모델미상" 이었다.
         spawnedModel: formatModelAtEffort(
-          this.agentManager.getSpawnedModel(fullAgent.id),
+          this.agentManager.resolveConcreteModel(fullAgent.id),
         ),
       });
       return {
@@ -2285,7 +2294,7 @@ export class BridgeServer {
         // reuse 는 이미 떠 있는 프로세스 — 이번 요청의 모델 핀이 아니라 그 프로세스의
         // 실제 모델을 돌려준다. 지정과 다를 수 있고, 그 사실이 보여야 한다.
         spawnedModel: formatModelAtEffort(
-          this.agentManager.getSpawnedModel(fullAgent.id),
+          this.agentManager.resolveConcreteModel(fullAgent.id),
         ),
         score: candidate.score,
         reason: candidate.reason,
@@ -2357,10 +2366,11 @@ export class BridgeServer {
           reuseVsSpawn: "restart",
           explicitModel: !!model,
           agentScore: best.score,
-          // ★P2-3 — restart 도 요청 핀 또는 기존 launch 핀을 실어 재기동한다.
-          // 배지는 요청값이 아니라 재시작된 프로세스의 실제 argv 를 읽는다.
+          // ★P2-3 — restart 도 요청 핀 또는 기존 launch 핀(+난도)을 실어 재기동한다.
+          // 배지는 요청값이 아니라 재시작된 프로세스의 실제 argv 를 읽고, argv 에
+          // 핀이 없으면 직전 세션의 과금 관측으로 떨어진다(재시작 간 보존됨).
           spawnedModel: formatModelAtEffort(
-            this.agentManager.getSpawnedModel(restarted.id),
+            this.agentManager.resolveConcreteModel(restarted.id),
           ),
         });
         return {
@@ -2371,7 +2381,7 @@ export class BridgeServer {
           agentRole: restarted.role,
           model: best.agent.model,
           spawnedModel: formatModelAtEffort(
-            this.agentManager.getSpawnedModel(restarted.id),
+            this.agentManager.resolveConcreteModel(restarted.id),
           ),
           score: best.score,
           reason: best.reason,
@@ -2853,8 +2863,9 @@ export class BridgeServer {
       agentName: agent.name,
       agentRole: agent.role,
       model: agent.model,
+      // 이미 이 태스크에 묶여 돌고 있는 프로세스 — reuse 와 같은 관측 사다리.
       spawnedModel: formatModelAtEffort(
-        this.agentManager.getSpawnedModel(agent.id),
+        this.agentManager.resolveConcreteModel(agent.id),
       ),
       score: 0,
       reason:

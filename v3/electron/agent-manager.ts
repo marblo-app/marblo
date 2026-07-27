@@ -18,6 +18,7 @@ import {
   shouldDemoteAbandonedTurn,
 } from "./agent-status-reconcile";
 import { looksLikeLoginScreen } from "./harness-manager";
+import { isHarnessFamilyId } from "./model-registry";
 
 export type ModelType =
   | "claude"
@@ -49,7 +50,9 @@ export function spawnedModelFromArgs(
   model: ModelType,
   args: string[],
 ): SpawnedModelInfo {
-  if (model === "claude") {
+  // `local` 은 Ollama 의 Anthropic 호환 엔드포인트를 claude 하네스로 태우는
+  // env-swap 축이라 argv 모양이 claude 와 같다(`--model <id>`). 같은 리더를 쓴다.
+  if (model === "claude" || model === "local") {
     const i = args.indexOf("--model");
     return i >= 0 && i + 1 < args.length ? { modelId: args[i + 1] } : {};
   }
@@ -151,6 +154,8 @@ export interface AgentRestartOptions {
   codexModelOverride?: string;
   codexEffortOverride?: string;
   nativeModelOverride?: string;
+  /** 재시작 시 난도를 바꿔야 할 때만. 미지정이면 최초 launch 의 난도를 그대로 잇는다. */
+  complexity?: TaskComplexity;
 }
 
 export interface AgentInstance {
@@ -230,6 +235,23 @@ export interface AgentInstance {
   codexEffortOverride?: string;
   /** native CLI 모델 핀. 재시작이 사용자 지정을 잃지 않도록 보존한다. */
   nativeModelOverride?: string;
+  /**
+   * 이 launch 가 쓴 난도. ★재시작이 이 값을 잃으면 모델 핀이 통째로 사라진다:
+   * dispatch 스폰은 명시 핀 없이 `complexity="standard"` → `--model claude-opus-5`
+   * 로 뜨는데, 종전 restart 는 `claudeModelOverride`(명시 핀)만 옮겼으므로
+   * relaunch argv 에서 `--model` 이 사라져 (a) 실제 서빙 모델이 CLI 기본값으로
+   * 조용히 강등되고 (b) getSpawnedModel 이 빈 값이 돼 배지·KG·cost_logs 가 전부
+   * "모델미상" 으로 떨어졌다. 난도를 보존해 relaunch 가 같은 티어 결정을 다시
+   * 내리게 한다(결정 자체는 재실행 — CLI 버전가드/폴백이 그대로 다시 걸린다).
+   */
+  complexity?: TaskComplexity;
+  /**
+   * cost-tracker 가 **과금된 세션 메타데이터**에서 읽은 실제 모델 id
+   * (`claude-opus-5`). argv 관측보다 늦게 오지만 더 강한 근거다 — argv 에 모델을
+   * 핀하지 않은 launch(오케 기본 경로·Agents 탭 ▶Start·콜드부트 reconnect)에서
+   * 유일한 관측이기도 하다. main 의 cost 콜백이 되먹인다(setDetectedModel).
+   */
+  detectedModelId?: string;
   /** §3.4-3 런타임 강등이 이미 한 번 일어났음. 강등 루프 방지 래치.
    *
    * ★종전엔 이 래치가 `claudeModelOverride` 가 비어있는지로 대체돼 있었다.
@@ -399,11 +421,19 @@ export class AgentManager {
   private ptyManager: PtyManager;
   private configGenerator: AgentConfigGenerator;
   private onStatusChange?: (agentId: string, status: AgentStatus) => void;
+  /**
+   * `spawnedModel` = 이 launch 의 argv 에서 되읽은 구체 모델 id(effort 접미사 없이).
+   * ★claude 분기는 `agents.set` **이전**에 동기 발화하므로 수신 측이
+   * `getSpawnedModel(agentId)` 로 조회하면 null 이다 — 비용 트래커를 구체 모델로
+   * 씨딩하려면 반드시 이 인자를 써야 한다(안 그러면 트래커가 하네스족 'claude' 로
+   * 씨딩돼 cost_logs.model 이 족으로 나가고, 단가표도 미매칭이라 $0 로 청구된다).
+   */
   private onSessionDetected?: (
     rootPath: string,
     sessionId: string,
     label: string,
     agentId: string,
+    spawnedModel?: string,
   ) => void;
   private onRestartAttempt?: (
     agentId: string,
@@ -427,6 +457,7 @@ export class AgentManager {
       sessionId: string,
       label: string,
       agentId: string,
+      spawnedModel?: string,
     ) => void,
     onRestartAttempt?: (
       agentId: string,
@@ -610,12 +641,11 @@ export class AgentManager {
     // 방금 만든 argv 를 되읽어 구체 모델을 함께 넘긴다. 여기서 계산해야 하는
     // 이유: 이 콜백은 `this.agents.set` 보다 앞서 불리므로 수신 측이
     // getSpawnedModel(id) 로 조회하면 아직 null 이다.
-    params.onPtyReady?.(
-      ptySessionId,
-      formatModelAtEffort(
-        spawnedModelFromArgs(params.model, launchConfig.args),
-      ),
+    const spawnedModelInfo = spawnedModelFromArgs(
+      params.model,
+      launchConfig.args,
     );
+    params.onPtyReady?.(ptySessionId, formatModelAtEffort(spawnedModelInfo));
 
     // Send initial prompt via stdin after CLI finishes booting (only for NEW sessions).
     // Uses PTY output detection instead of fixed timer to reliably detect readiness.
@@ -775,6 +805,9 @@ export class AgentManager {
       const rootPath = params.cwd;
       const agentName = params.name;
       const agentId = params.id;
+      // 이 launch 가 실제로 넘긴 모델 id. 비용 트래커 씨딩용이라 effort 없이
+      // 모델 id 만 넘긴다(단가표는 모델 id 로 조회한다).
+      const launchedModelId = spawnedModelInfo.modelId;
 
       if (launchConfig.claudeSessionId && !isResume) {
         this.onSessionDetected(
@@ -782,6 +815,7 @@ export class AgentManager {
           launchConfig.claudeSessionId,
           agentName,
           agentId,
+          launchedModelId,
         );
       } else {
         // Fallback for the rare unresolved `--resume latest` (no concrete id to
@@ -829,7 +863,13 @@ export class AgentManager {
               (id: string) => !existingIds.has(id),
             );
             if (newId) {
-              this.onSessionDetected!(rootPath, newId, agentName, agentId);
+              this.onSessionDetected!(
+                rootPath,
+                newId,
+                agentName,
+                agentId,
+                launchedModelId,
+              );
             }
           } catch (err) {
             console.error(
@@ -858,8 +898,17 @@ export class AgentManager {
       const rootPath = params.cwd;
       const agentName = params.name;
       const agentId = params.id;
+      // codex 는 모델을 핀하지 않는 경로가 기본이라 modelId 가 비어 있을 수 있다.
+      // 그때는 넘기지 않고 트래커의 사다리 기본값(inheritedModel)이 그대로 산다.
+      const launchedModelId = spawnedModelInfo.modelId;
       setTimeout(() => {
-        this.onSessionDetected!(rootPath, "", agentName, agentId);
+        this.onSessionDetected!(
+          rootPath,
+          "",
+          agentName,
+          agentId,
+          launchedModelId,
+        );
       }, 8000);
     }
 
@@ -979,6 +1028,12 @@ export class AgentManager {
       codexModelOverride: params.codexModelOverride,
       codexEffortOverride: params.codexEffortOverride,
       nativeModelOverride: params.nativeModelOverride,
+      complexity: params.complexity,
+      // 같은 id 로 다시 뜨는 경우(Agents 탭 ▶Start·콜드부트 reconnect)는 같은
+      // 에이전트·같은 CLI 세션의 재개다 — 직전 과금 관측은 여전히 그 에이전트의
+      // 사실이므로 이어받는다. 없으면 undefined(첫 스폰). argv 관측이 생기면
+      // 어차피 그쪽이 이긴다(resolveConcreteModel).
+      detectedModelId: this.agents.get(params.id)?.detectedModelId,
     };
 
     this.agents.set(params.id, instance);
@@ -1279,7 +1334,15 @@ export class AgentManager {
     const codexModelOverride = agent.codexModelOverride;
     const codexEffortOverride = agent.codexEffortOverride;
     const nativeModelOverride = agent.nativeModelOverride;
+    // ★난도도 함께 옮긴다. 명시 핀이 없는 대부분의 dispatch 스폰은 모델이 난도에서
+    // 파생되므로, 이걸 빠뜨리면 relaunch argv 에 `--model` 이 사라져 모델이 CLI
+    // 기본값으로 조용히 강등되고 관측(배지/KG/cost_logs)이 미상으로 떨어진다.
+    const complexity = agent.complexity;
     const claudeRuntimeDowngraded = agent.claudeRuntimeDowngraded;
+    // 과금 관측도 함께 옮긴다 — auto-restart 는 같은 세션을 resume 하므로 직전에
+    // 관측된 모델은 여전히 이 에이전트의 사실이다. 안 옮기면 재시작마다 관측이
+    // 리셋돼 dispatchMeta 가 다시 "모델미상" 으로 떨어진다(argv 핀이 없는 경로).
+    const detectedModelId = agent.detectedModelId;
 
     // Cleanup old PTY, config, and timers (heartbeat + the backoff timer that
     // just fired). onExit already released the heartbeat, but stay consistent.
@@ -1323,6 +1386,7 @@ export class AgentManager {
       codexModelOverride,
       codexEffortOverride,
       nativeModelOverride,
+      complexity,
     });
 
     // Carry over restart counters; spawnedAt is freshly set by launch().
@@ -1330,6 +1394,7 @@ export class AgentManager {
     newInstance.fastFailCount = fastFailCount;
     // 강등 래치도 함께 옮긴다 — 안 옮기면 재시작마다 래치가 리셋돼 강등이 루프한다.
     newInstance.claudeRuntimeDowngraded = claudeRuntimeDowngraded;
+    newInstance.detectedModelId = detectedModelId;
   }
 
   /**
@@ -1378,6 +1443,8 @@ export class AgentManager {
         ? { initialPrompt: initialPromptOrOptions }
         : (initialPromptOrOptions ?? {});
     const claudeRuntimeDowngraded = agent.claudeRuntimeDowngraded;
+    // 과금 관측 보존(performAutoRestart 와 같은 이유).
+    const detectedModelId = agent.detectedModelId;
 
     // Kill existing PTY + cleanup configs + heartbeat
     agent.stopRequested = true;
@@ -1407,8 +1474,12 @@ export class AgentManager {
         options.codexEffortOverride ?? agent.codexEffortOverride,
       nativeModelOverride:
         options.nativeModelOverride ?? agent.nativeModelOverride,
+      // 난도 보존(performAutoRestart 와 같은 이유) — 명시 핀 없는 스폰의 모델은
+      // 난도 파생이라, 이게 빠지면 재시작이 모델을 잃는다.
+      complexity: options.complexity ?? agent.complexity,
     });
     restarted.claudeRuntimeDowngraded = claudeRuntimeDowngraded;
+    restarted.detectedModelId = detectedModelId;
     return restarted;
   }
 
@@ -1438,6 +1509,42 @@ export class AgentManager {
     const agent = this.agents.get(agentId);
     if (!agent?.launchConfig) return null;
     return spawnedModelFromArgs(agent.model, agent.launchConfig.args);
+  }
+
+  /**
+   * cost-tracker 가 과금 세션 메타데이터에서 읽어낸 **실제 모델 id** 를 되먹인다.
+   * 관측만 받는다 — 하네스족 문자열(`claude`/`gpt`)은 모델 id 가 아니므로 버린다.
+   * 그걸 통과시키면 "모델미상" 을 다른 이름으로 저장하는 셈이 된다.
+   */
+  setDetectedModel(agentId: string, modelId: string | null | undefined): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    const id = (modelId ?? "").trim();
+    if (!id || isHarnessFamilyId(id)) return;
+    agent.detectedModelId = id;
+  }
+
+  /**
+   * 이 에이전트의 **구체 실행 모델**, 근거가 강한 순서로.
+   *
+   *   1. argv 되읽기(`getSpawnedModel`) — 우리가 CLI 에 실제로 넘긴 값.
+   *   2. `detectedModelId` — 과금된 세션이 기록한 모델. argv 에 모델을 핀하지
+   *      않은 launch(오케 기본 경로·Agents 탭 ▶Start·콜드부트 reconnect)에서는
+   *      이쪽만 존재하고, 그 경로들이 곧 dispatchMeta/KG 의 "모델미상" 출처였다.
+   *
+   * 둘 다 없으면 null — CLI 기본값을 지어내지 않는다(관측만 기록한다는 규율).
+   * effort 축은 argv 에만 있다: 과금 메타데이터는 effort 를 남기지 않으므로
+   * detected 로 떨어질 때는 model 만 채운다(없는 축을 만들지 않는다).
+   */
+  resolveConcreteModel(agentId: string): SpawnedModelInfo | null {
+    const fromArgs = this.getSpawnedModel(agentId);
+    if (fromArgs?.modelId) return fromArgs;
+    const detected = this.agents.get(agentId)?.detectedModelId?.trim();
+    if (!detected) return fromArgs;
+    // argv 가 effort 만 준 경우(codex 기본 경로)는 그 effort 를 유지한 채 모델만 채운다.
+    return fromArgs?.effort
+      ? { modelId: detected, effort: fromArgs.effort }
+      : { modelId: detected };
   }
 
   getConfigGenerator(): AgentConfigGenerator {

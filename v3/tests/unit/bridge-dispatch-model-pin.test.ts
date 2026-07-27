@@ -83,6 +83,12 @@ class RealishAgentManager {
     if (!a?.launchConfig) return null;
     return spawnedModelFromArgs(a.model, a.launchConfig.args);
   }
+  /** 관측 사다리(argv → 과금 세션 모델). 이 fake 는 과금 관측이 없어 argv 와 같다. */
+  resolveConcreteModel(
+    id: string,
+  ): { modelId?: string; effort?: string } | null {
+    return this.getSpawnedModel(id);
+  }
   setStatus(id: string, status: AgentStatus): void {
     const a = this.agents.get(id);
     if (a) a.status = status;
@@ -107,7 +113,9 @@ class RealishAgentManager {
     const current = this.agents.get(id);
     if (!current) return null;
     const restartOptions =
-      typeof options === "string" ? { initialPrompt: options } : (options ?? {});
+      typeof options === "string"
+        ? { initialPrompt: options }
+        : (options ?? {});
     this.agents.delete(id);
     return this.launch({
       id: current.id,

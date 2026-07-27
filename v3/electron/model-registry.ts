@@ -101,6 +101,21 @@ export const HARNESS_IDS: readonly HarnessId[] = [
   "custom",
 ] as const;
 
+const HARNESS_ID_SET: ReadonlySet<string> = new Set<string>(HARNESS_IDS);
+
+/**
+ * 주어진 문자열이 **구체 모델 id 가 아니라 하네스 이름**인가.
+ *
+ * 이 구분이 관측 싱크의 불변식이다: 하네스 문자열이 모델 자리에 새어 들어가면
+ * `cost_logs.model='claude'` / `task_outcomes.model='claude'` / KG 프로바이더
+ * 해상도 셀처럼 "모델미상" 이 모델인 척 적재된다. 게다가 단가표·레지스트리 어디에도
+ * `claude` 라는 id 는 없으므로 그 구간은 $0 로 청구된다(고스트 비용).
+ * 씨앗/폴백을 고르는 자리는 전부 이 술어로 걸러라.
+ */
+export function isHarnessFamilyId(value: string | null | undefined): boolean {
+  return HARNESS_ID_SET.has((value ?? "").trim().toLowerCase());
+}
+
 /** 벤더 전체 목록(런타임 검증·테스트용). `VendorId` 와 같아야 한다. */
 export const VENDOR_IDS: readonly VendorId[] = [
   "anthropic",

@@ -58,6 +58,11 @@ class FakeAgentManager {
   getSpawnedModel(): { modelId?: string; effort?: string } {
     return this.spawnModel;
   }
+  /** 관측 사다리(argv → 과금 세션 모델). 이 fake 는 과금 관측을 갖지 않으므로
+   * argv 관측을 그대로 돌려준다 — 이 파일이 보는 축은 argv→키 접힘이다. */
+  resolveConcreteModel(): { modelId?: string; effort?: string } {
+    return this.spawnModel;
+  }
   setStatus(id: string, status: AgentStatus): void {
     const a = this.agents.get(id);
     if (a) a.status = status;

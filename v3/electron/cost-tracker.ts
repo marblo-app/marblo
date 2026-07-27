@@ -17,7 +17,7 @@ import {
   grokSessionsDir,
   resolveClaudeBinary,
 } from "./agent-config";
-import { getModel, registryPricing } from "./model-registry";
+import { getModel, isHarnessFamilyId, registryPricing } from "./model-registry";
 import {
   probeClaudeUsage,
   type ClaudeUsageSnapshot,
@@ -101,7 +101,7 @@ type RawTokenRate = { inputPer1M: number; outputPer1M: number };
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json",
+  "subscription-plans.json"
 );
 
 interface SubscriptionPlanEntry {
@@ -133,7 +133,7 @@ function loadSubscriptionPlans(): SubscriptionPlanEntry[] {
   } catch (err) {
     console.error(
       "[CostTracker] Failed to load subscription plans:",
-      err instanceof Error ? err.message : err,
+      err instanceof Error ? err.message : err
     );
     subscriptionPlanCache = [];
     return [];
@@ -326,6 +326,23 @@ export function perTokenRateFor(model: string): RawTokenRate {
   return resolvePerTokenRate(model).rate;
 }
 
+/**
+ * 트래커 씨앗으로 쓸 **구체 모델 id** 만 통과시킨다. 하네스족 이름(`claude`,
+ * `gpt`…)이나 빈 값은 null — 모델 자리에 족을 넣는 것이 이 파일이 고치는 결함
+ * 자체다(`cost_logs.model='claude'` + 단가 미매칭 $0 청구).
+ *
+ * `model@effort` 로 들어와도 effort 는 벗긴다: 단가·집계 축은 모델 id 다.
+ */
+export function normalizeSeedModel(
+  candidate: string | null | undefined
+): string | null {
+  const raw = (candidate ?? "").trim();
+  if (!raw) return null;
+  const id = raw.split("@")[0].trim();
+  if (!id || isHarnessFamilyId(id)) return null;
+  return id;
+}
+
 // ── Unmatched-model visibility (ghost-cost detector) ─────────────────────
 // A model we cannot price is a real operational fact — a vendor row we never
 // added, an env-swap profile leaking an unregistered id (the failure mode
@@ -352,7 +369,7 @@ let unmatchedPricingSink: ((ev: UnmatchedPricingEvent) => void) | null = null;
  * replaces it. Pass null to detach.
  */
 export function onUnmatchedPricing(
-  sink: ((ev: UnmatchedPricingEvent) => void) | null,
+  sink: ((ev: UnmatchedPricingEvent) => void) | null
 ): void {
   unmatchedPricingSink = sink;
 }
@@ -390,7 +407,7 @@ function recordUnmatchedPricing(model: string): void {
       `pricing table nor the model registry (alias/case-folded lookups also ` +
       `missed). Billing it at $0 — cost for this model is UNDER-REPORTED, not ` +
       `estimated. Seen ${count}x. Fix: add a verified row to ` +
-      `electron/model-registry.ts (never invent a rate).`,
+      `electron/model-registry.ts (never invent a rate).`
   );
   unmatchedPricingSink?.({ model: id, count, firstSeen: count === 1 });
 }
@@ -557,7 +574,7 @@ export class CostTracker {
     accumulatedInputTokens = 0,
     accumulatedOutputTokens = 0,
     deltaCacheReadTokens = 0,
-    deltaCacheWriteTokens = 0,
+    deltaCacheWriteTokens = 0
   ): number {
     if (pricing.scheme === "per-token") {
       // API-equivalent value INCLUDING cache. Cache rates aren't in the table;
@@ -594,7 +611,7 @@ export class CostTracker {
     // portion above allowance, split proportionally across input/output.
     const overageDelta = Math.min(
       deltaInputTokens + deltaOutputTokens,
-      totalAfter - Math.max(totalBefore, allowance),
+      totalAfter - Math.max(totalBefore, allowance)
     );
     if (overageDelta <= 0) return 0;
     const totalDelta = deltaInputTokens + deltaOutputTokens || 1;
@@ -617,7 +634,7 @@ export class CostTracker {
   }
 
   private getMonthlySubscriptionTotals(
-    pricing: SubscriptionPricing,
+    pricing: SubscriptionPricing
   ): TokenTotals {
     const key = this.monthlyUsageKey(pricing);
     const existing = this.monthlySubscriptionTokens.get(key);
@@ -637,7 +654,7 @@ export class CostTracker {
         monthly.input,
         monthly.output,
         delta.cacheRead,
-        delta.cacheWrite,
+        delta.cacheWrite
       );
     }
 
@@ -648,13 +665,13 @@ export class CostTracker {
       0,
       0,
       delta.cacheRead,
-      delta.cacheWrite,
+      delta.cacheWrite
     );
   }
 
   private recordMonthlySubscriptionUsage(
     pricing: ModelPricing,
-    delta: TokenTotals,
+    delta: TokenTotals
   ): void {
     if (pricing.scheme !== "subscription") return;
     const monthly = this.getMonthlySubscriptionTotals(pricing);
@@ -679,6 +696,19 @@ export class CostTracker {
     rootPath: string,
     sessionId: string | null | undefined,
     model: string,
+    /**
+     * ★이 launch 의 argv 에서 되읽은 **구체 모델 id**(`claude-opus-5`). 없으면
+     * undefined — 지어내지 않는다.
+     *
+     * 왜 필요한가: `model` 은 하네스족(`claude`)이지 모델 id 가 아니다. 종전엔 그
+     * 족 문자열이 트래커의 초기 모델이 되어 (a) 세션 JSONL 이 첫 assistant 턴을
+     * 쓰기 전에 나가는 emit — 특히 토큰 0 인 rate-limit 전용 emit — 이 전부
+     * `cost_logs.model='claude'` 로 적재됐고, (b) `findPricing("claude")` 가
+     * 단가표·레지스트리 양쪽에서 미매칭이라 그 구간이 $0 로 청구됐다(고스트 비용).
+     * 씨앗을 구체 모델로 주면 첫 emit 부터 모델 id 와 정상 단가가 붙는다. 파일에서
+     * 실제 과금 모델이 읽히면 그 관측이 여전히 씨앗을 덮는다(pollSessionFile).
+     */
+    spawnedModelId?: string
   ): void {
     // Don't double-track
     if (this.sessions.has(agentId)) {
@@ -698,7 +728,7 @@ export class CostTracker {
     // home. (Being tracked also stops the PTY scraper from inventing
     // model:"unknown" rows off grok's terminal output.)
     if (model === "gpt" || model === "gemini" || model === "grok") {
-      this.trackCliSession(agentId, model);
+      this.trackCliSession(agentId, model, spawnedModelId);
       return;
     }
 
@@ -732,7 +762,7 @@ export class CostTracker {
       console.log(
         `[CostTracker] agent=${agentId} model=${model} writes no ~/.claude ` +
           `JSONL — skipping file tracking (PTY fallback still applies). ` +
-          `Wiring a real ${model} usage source is a separate task.`,
+          `Wiring a real ${model} usage source is a separate task.`
       );
       return;
     }
@@ -742,7 +772,7 @@ export class CostTracker {
       os.homedir(),
       ".claude",
       "projects",
-      encodedPath,
+      encodedPath
     );
 
     let filePath: string;
@@ -765,7 +795,7 @@ export class CostTracker {
         }
         filePath = path.join(projectDir, files[0].name);
         console.log(
-          `[CostTracker] No sessionId — using most recent: ${files[0].name}`,
+          `[CostTracker] No sessionId — using most recent: ${files[0].name}`
         );
       } catch {
         console.warn(`[CostTracker] Cannot read project dir: ${projectDir}`);
@@ -780,7 +810,7 @@ export class CostTracker {
     // Bailing here is exactly what left newly-spawned agents reading 0 tokens.
     if (!fs.existsSync(filePath)) {
       console.log(
-        `[CostTracker] Session file not present yet, will poll until it appears: ${filePath}`,
+        `[CostTracker] Session file not present yet, will poll until it appears: ${filePath}`
       );
     }
 
@@ -791,17 +821,20 @@ export class CostTracker {
       searchRoot: "",
       state: newParseState(),
       accumulated: { ...ZERO_TOTALS },
-      model,
+      // 구체 모델이 관측됐으면 그것으로, 아니면 종전대로 하네스족. 족으로 남는
+      // 경우는 argv 에 모델을 핀하지 않은 launch 뿐이고, 그때도 첫 assistant 턴이
+      // 파싱되는 순간 pollSessionFile 이 실제 모델로 덮는다.
+      model: normalizeSeedModel(spawnedModelId) ?? model,
       totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS,
+        SESSION_POLL_INTERVAL_MS
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`,
+      `[CostTracker] Tracking session file for agent=${agentId}: ${filePath}`
     );
 
     // Account-global rate-limit probe runs while any claude tracker lives.
@@ -817,7 +850,7 @@ export class CostTracker {
     if (this.claudeProbeTimer) return;
     this.claudeProbeTimer = setInterval(
       () => void this.pollClaudeUsage(),
-      CLAUDE_PROBE_INTERVAL_MS,
+      CLAUDE_PROBE_INTERVAL_MS
     );
     void this.pollClaudeUsage();
   }
@@ -843,7 +876,7 @@ export class CostTracker {
         this.claudeProbeFailures = 0;
         console.log(
           `[CostTracker] Claude rate-limit probe: 5h=${snap.primaryPercent}% ` +
-            `7d=${snap.secondaryPercent}% plan=${snap.planType ?? "?"}`,
+            `7d=${snap.secondaryPercent}% plan=${snap.planType ?? "?"}`
         );
       } else {
         this.claudeProbeFailures++;
@@ -852,7 +885,7 @@ export class CostTracker {
           this.claudeProbeFailures = 0;
           console.warn(
             `[CostTracker] Claude rate-limit probe failed ${CLAUDE_PROBE_MAX_FAILURES}x — ` +
-              `backing off ${CLAUDE_PROBE_BACKOFF_MS / 60_000}min`,
+              `backing off ${CLAUDE_PROBE_BACKOFF_MS / 60_000}min`
           );
         }
       }
@@ -893,6 +926,7 @@ export class CostTracker {
   private trackCliSession(
     agentId: string,
     model: "gpt" | "gemini" | "grok",
+    spawnedModelId?: string
   ): void {
     // SSOT: model→session-format mapping lives in session-parsers.formatForModel.
     // `model` is narrowed to "gpt" | "gemini" | "grok" here, so it always maps
@@ -903,8 +937,8 @@ export class CostTracker {
       format === "codex"
         ? codexSessionsDir(agentId)
         : format === "grok"
-          ? grokSessionsDir(agentId)
-          : geminiTmpDir(agentId);
+        ? grokSessionsDir(agentId)
+        : geminiTmpDir(agentId);
 
     const tracker: SessionTracker = {
       agentId,
@@ -913,26 +947,28 @@ export class CostTracker {
       searchRoot,
       state: newParseState(),
       accumulated: { ...ZERO_TOTALS },
-      // Best-guess default until the session records its real model id. For
-      // grok this is also the id we pin at spawn (agent-config
-      // GROK_DEFAULT_MODEL), so a turn without a `modelUsage` breakdown still
-      // prices against a registry row instead of counting as unmatched.
+      // 관측된 스폰 모델이 있으면 그것이 최선의 씨앗이다(codex `-c model="…"` 핀).
+      // 없으면 하네스별 기본 추정값 — 세션이 실제 모델 id 를 기록하는 순간 덮인다.
+      // grok 은 이 기본값이 스폰 시 핀하는 id(agent-config GROK_DEFAULT_MODEL)라,
+      // modelUsage breakdown 없는 턴도 unmatched 대신 레지스트리 행에 가격 매겨진다.
+      // 어느 경우든 하네스족 문자열은 절대 모델 자리에 들어가지 않는다.
       model:
-        format === "codex"
+        normalizeSeedModel(spawnedModelId) ??
+        (format === "codex"
           ? "gpt-5.5"
           : format === "grok"
-            ? "grok-4.5"
-            : "gemini-2.5-pro",
+          ? "grok-4.5"
+          : "gemini-2.5-pro"),
       totalCostUsd: 0,
       timer: setInterval(
         () => this.pollSessionFile(agentId),
-        SESSION_POLL_INTERVAL_MS,
+        SESSION_POLL_INTERVAL_MS
       ),
     };
 
     this.sessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`,
+      `[CostTracker] Tracking ${format} session for agent=${agentId} under ${searchRoot}`
     );
 
     // Initial scan (file may not exist yet — poller tolerates that).
@@ -979,7 +1015,7 @@ export class CostTracker {
       const { delta, newState } = parseSessionDelta(
         tracker.format,
         lines,
-        tracker.state,
+        tracker.state
       );
       tracker.state = newState;
       if (newState.model) tracker.model = newState.model;
@@ -995,7 +1031,7 @@ export class CostTracker {
     } catch (err) {
       console.error(
         `[CostTracker] Error polling session for agent=${agentId}:`,
-        err,
+        err
       );
     }
   }
@@ -1007,7 +1043,7 @@ export class CostTracker {
   private emit(
     tracker: SessionTracker,
     delta: TokenTotals,
-    rateLimit?: RateLimitInfo | null,
+    rateLimit?: RateLimitInfo | null
   ): void {
     const hasTokens =
       delta.input > 0 ||
@@ -1062,7 +1098,7 @@ export class CostTracker {
     console.log(
       `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} ` +
         `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()} ` +
-        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`,
+        `cache_read=${acc.cacheRead.toLocaleString()} cache_write=${acc.cacheWrite.toLocaleString()}`
     );
   }
 
@@ -1099,9 +1135,9 @@ export class CostTracker {
           tracker.format === "codex"
             ? entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")
             : tracker.format === "grok"
-              ? entry.name === "updates.jsonl"
-              : entry.name.startsWith("session-") &&
-                entry.name.endsWith(".jsonl");
+            ? entry.name === "updates.jsonl"
+            : entry.name.startsWith("session-") &&
+              entry.name.endsWith(".jsonl");
         if (!matches) continue;
         let mtime: number;
         try {
@@ -1136,12 +1172,12 @@ export class CostTracker {
       loggedLimited: false,
       timer: setInterval(
         () => this.pollAgySession(agentId),
-        SESSION_POLL_INTERVAL_MS,
+        SESSION_POLL_INTERVAL_MS
       ),
     };
     this.agySessions.set(agentId, tracker);
     console.log(
-      `[CostTracker] Tracking antigravity store for agent=${agentId}`,
+      `[CostTracker] Tracking antigravity store for agent=${agentId}`
     );
     this.pollAgySession(agentId);
   }
@@ -1168,7 +1204,7 @@ export class CostTracker {
           tracker.loggedLimited = true;
           console.warn(
             `[CostTracker] agy agent=${agentId} uses legacy .pb store — ` +
-              `token capture limited (no decode); relying on PTY signals.`,
+              `token capture limited (no decode); relying on PTY signals.`
           );
         }
         return;
@@ -1180,7 +1216,7 @@ export class CostTracker {
     } catch (err) {
       console.error(
         `[CostTracker] Error polling agy store for agent=${agentId}:`,
-        err,
+        err
       );
     }
   }
@@ -1223,7 +1259,7 @@ export class CostTracker {
 
     console.log(
       `[CostTracker] Agent=${tracker.agentId} model=${tracker.model} (agy) ` +
-        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`,
+        `in=${acc.input.toLocaleString()} out=${acc.output.toLocaleString()}`
     );
   }
 
@@ -1295,7 +1331,7 @@ export class CostTracker {
         const cost = this.computeIncrementalCost(
           pricing,
           inputTokens,
-          outputTokens,
+          outputTokens
         );
 
         this.onCostDetected?.(agentId, {

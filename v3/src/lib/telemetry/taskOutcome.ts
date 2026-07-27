@@ -53,8 +53,12 @@ export interface TaskRollups {
 
 /** Subset of `agents/<id>` used as a fallback model source. */
 export interface AgentModelSnapshot {
+  /** 하네스(스폰한 바이너리) — `claude`/`gpt`. **모델 id 가 아니다.** */
   model?: string | null;
+  /** cost-tracker 가 과금 세션 메타데이터에서 읽은 실제 모델 id. */
   detectedModelId?: string | null;
+  /** main 이 스폰 argv 를 되읽어 스탬프한 값. effort 접미사(`@high`)가 붙는다. */
+  spawnedModel?: string | null;
 }
 
 export interface BuildTaskOutcomeInput {
@@ -104,6 +108,17 @@ export interface TaskOutcomeRow {
  * corrupt or partially-written counter must not poison the training set with
  * NaN / Infinity / negative values, and BigQuery would reject NaN outright.
  */
+/** 첫 번째 non-empty 문자열. 공백만 있는 값은 없는 것으로 친다. */
+function firstNonEmpty(
+  ...candidates: (string | null | undefined)[]
+): string | undefined {
+  for (const c of candidates) {
+    const v = (c ?? "").trim();
+    if (v) return v;
+  }
+  return undefined;
+}
+
 function sanitizeCount(value: number | null | undefined): number | null {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return null;
@@ -149,9 +164,19 @@ export function buildTaskOutcome(input: BuildTaskOutcomeInput): TaskOutcomeRow {
   // ── Defect ④ — derived task type ──────────────────────────────────────
   const taskType = classifyTaskType(task);
 
-  // Model: prefer the cost-tracker-detected versioned id ("claude-opus-4-8")
-  // over the family enum ("claude") for training fidelity.
-  const model = agent?.detectedModelId ?? agent?.model ?? null;
+  // ── Defect ⑤ — 구체 실행 모델 ───────────────────────────────────────────
+  // 근거 사다리는 usageBreakdown.mapAgentsToModels / UsagePage 와 **같아야 한다**:
+  //   1. detectedModelId — 과금된 세션이 기록한 모델 id(가장 강한 근거)
+  //   2. spawnedModel    — main 이 스폰 argv 를 되읽어 스탬프한 값
+  //   3. model           — 하네스족. 모델 id 가 아니지만 "어느 바이너리로 돌았나"
+  //                        는 관측된 사실이라 최후 폴백으로만 남긴다.
+  //
+  // ★종전엔 2번이 통째로 빠져 있었다. argv 로 관측된 구체 모델이 agents doc 에
+  // 멀쩡히 있는데도 이 행만 족(claude)이나 null 로 적재돼 `task_outcomes.model` 이
+  // "-" 로 보였다 — 같은 사실을 읽는 세 화면 중 여기만 사다리가 짧았던 것이다.
+  const model =
+    firstNonEmpty(agent?.detectedModelId, agent?.spawnedModel, agent?.model) ??
+    null;
 
   // promptLength: the column exists server-side but the client never sent it
   // (doc §3.2 — "서버는 받는데 클라가 안 보냄"). Description length is a

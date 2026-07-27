@@ -94,6 +94,15 @@ class FakeAgentManager {
     return spawnedModelFromArgs(agent.model, agent.launchConfig.args);
   }
 
+  /** 관측 사다리(argv → 과금 세션이 기록한 모델). 이 fake 의 시드는 과금 관측을
+   *  갖지 않으므로 argv 관측과 같은 값이다 — 사다리 자체는
+   *  `model-identity-rootfix.test.ts` 가 실물 매니저로 덮는다. */
+  resolveConcreteModel(
+    id: string,
+  ): { modelId?: string; effort?: string } | null {
+    return this.getSpawnedModel(id);
+  }
+
   getAgentByName(name: string): AgentInstance | null {
     return this.listAgents().find((a) => a.name === name) ?? null;
   }

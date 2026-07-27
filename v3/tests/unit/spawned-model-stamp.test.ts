@@ -249,13 +249,15 @@ describe("onPtyReady 가 구체 모델을 실어 나른다", () => {
       claudeModelOverride: "claude-fable-5",
       onPtyReady,
     });
-    // restart() 는 저장된 onPtyReady 를 그대로 재사용한다. 모델 핀은 재시작
-    // 파라미터에 실리지 않으므로(현행 계약) relaunch 는 핀 없이 뜨고, 배지는
-    // 그 사실대로 갱신돼야 한다 — 죽은 과거를 계속 주장하면 안 된다.
+    // restart() 는 저장된 onPtyReady 를 그대로 재사용하므로 relaunch 의 모델이
+    // 다시 통보된다. ★그 모델은 재시작 후에도 **같아야** 한다 — restart 는
+    // 인스턴스에 보존된 모델 핀(claudeModelOverride)과 난도(complexity)를 그대로
+    // 실어 재기동하기 때문이다. 여기가 갈리면 재시작이 모델을 조용히 CLI
+    // 기본값으로 강등시키고 배지·KG·cost_logs 가 한꺼번에 "모델미상" 이 된다.
     am.restart("ag-restart");
 
     expect(seen).toHaveLength(2);
     expect(seen[0]).toBe("claude-fable-5");
-    expect(seen[1]).toBeUndefined();
+    expect(seen[1]).toBe("claude-fable-5");
   });
 });
