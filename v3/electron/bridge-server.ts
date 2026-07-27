@@ -2329,10 +2329,13 @@ export class BridgeServer {
     if (restartable.length > 0) {
       const best = restartable[0];
       // Pass instruction as initialPrompt so readiness detection handles delivery timing
-      const restarted = this.agentManager.restart(
-        best.agent.id,
-        effectiveInstruction,
-      );
+      const restarted = this.agentManager.restart(best.agent.id, {
+        initialPrompt: effectiveInstruction,
+        claudeModelOverride: modelPin?.claudeModel,
+        codexModelOverride: modelPin?.codexModel,
+        codexEffortOverride: modelPin?.codexEffort,
+        nativeModelOverride: modelPin?.nativeModel,
+      });
       if (restarted) {
         this.agentManager.setStatus(restarted.id, "working");
         this.agentManager.setDispatchReason(restarted.id, best.reason);
@@ -2354,9 +2357,8 @@ export class BridgeServer {
           reuseVsSpawn: "restart",
           explicitModel: !!model,
           agentScore: best.score,
-          // ★P2-3 — restart 는 그 에이전트의 기존 launch 설정을 그대로 재사용한다
-          // (agentManager.restart 는 새 모델 핀을 받지 않는다). 그래서 재시작된
-          // 프로세스의 실제 argv 를 읽는다.
+          // ★P2-3 — restart 도 요청 핀 또는 기존 launch 핀을 실어 재기동한다.
+          // 배지는 요청값이 아니라 재시작된 프로세스의 실제 argv 를 읽는다.
           spawnedModel: formatModelAtEffort(
             this.agentManager.getSpawnedModel(restarted.id),
           ),
@@ -2851,6 +2853,9 @@ export class BridgeServer {
       agentName: agent.name,
       agentRole: agent.role,
       model: agent.model,
+      spawnedModel: formatModelAtEffort(
+        this.agentManager.getSpawnedModel(agent.id),
+      ),
       score: 0,
       reason:
         `Agent already bound to task ${taskId} with live activity evidence ` +

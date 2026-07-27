@@ -53,7 +53,8 @@ interface LaunchParams {
   claudeModelOverride?: string;
   codexModelOverride?: string;
   codexEffortOverride?: string;
-  onPtyReady?: (sid: string) => void;
+  nativeModelOverride?: string;
+  onPtyReady?: (sid: string, spawnedModel?: string) => void;
 }
 
 /**
@@ -87,9 +88,44 @@ class RealishAgentManager {
     if (a) a.status = status;
   }
   setCurrentTask(): void {}
-  setDispatchReason(): void {}
-  restart(): AgentInstance | null {
-    return null;
+  setDispatchReason(id: string, reason: string | null): void {
+    const a = this.agents.get(id);
+    if (a) a.dispatchReason = reason;
+  }
+  restart(
+    id: string,
+    options?:
+      | string
+      | {
+          initialPrompt?: string;
+          claudeModelOverride?: string;
+          codexModelOverride?: string;
+          codexEffortOverride?: string;
+          nativeModelOverride?: string;
+        },
+  ): AgentInstance | null {
+    const current = this.agents.get(id);
+    if (!current) return null;
+    const restartOptions =
+      typeof options === "string" ? { initialPrompt: options } : (options ?? {});
+    this.agents.delete(id);
+    return this.launch({
+      id: current.id,
+      name: current.name,
+      model: current.model,
+      role: current.role,
+      cwd: current.cwd,
+      currentTaskId: current.currentTaskId,
+      projectId: current.launchConfig?.env.MARBLO_PROJECT,
+      claudeModelOverride:
+        restartOptions.claudeModelOverride ?? current.claudeModelOverride,
+      codexModelOverride:
+        restartOptions.codexModelOverride ?? current.codexModelOverride,
+      codexEffortOverride:
+        restartOptions.codexEffortOverride ?? current.codexEffortOverride,
+      nativeModelOverride:
+        restartOptions.nativeModelOverride ?? current.nativeModelOverride,
+    });
   }
   remove(id: string): void {
     this.agents.delete(id);
@@ -114,6 +150,7 @@ class RealishAgentManager {
         claudeModel: params.claudeModelOverride,
         codexModel: params.codexModelOverride,
         codexEffort: params.codexEffortOverride,
+        nativeModel: params.nativeModelOverride,
       },
     );
     const inst = {
@@ -125,14 +162,31 @@ class RealishAgentManager {
       ptySessionId: `pty-${params.id}`,
       cwd: params.cwd,
       currentTaskId: params.currentTaskId ?? null,
+      dispatchReason: null,
       restartCount: 0,
       spawnedAt: Date.now(),
       launchConfig,
+      claudeModelOverride: params.claudeModelOverride,
+      codexModelOverride: params.codexModelOverride,
+      codexEffortOverride: params.codexEffortOverride,
+      nativeModelOverride: params.nativeModelOverride,
     } as unknown as AgentInstance;
     this.agents.set(params.id, inst);
-    params.onPtyReady?.(inst.ptySessionId);
+    params.onPtyReady?.(
+      inst.ptySessionId,
+      amSpawnedModelFromArgs(inst.model, inst.launchConfig!.args),
+    );
     return inst;
   }
+}
+
+function amSpawnedModelFromArgs(
+  model: AgentInstance["model"],
+  args: string[],
+): string | undefined {
+  const info = spawnedModelFromArgs(model, args);
+  if (!info.modelId) return undefined;
+  return info.effort ? `${info.modelId}@${info.effort}` : info.modelId;
 }
 
 class FakePty {
@@ -267,6 +321,35 @@ describe("dispatch_task 지정모델 → 실제 스폰 argv", () => {
     expect(res.success).toBe(true);
     // 명시 모델로 인정되지 않았으므로 점수 경쟁이 돌았다.
     expect(lastDecision().explicitModel).toBe(false);
+  });
+
+  it("★재시작 회귀: stopped agent 재시작도 요청 model pin 을 보존한다", async () => {
+    const { bridge, am } = makeBridge();
+    const existing = am.launch({
+      id: "codex-stopped",
+      name: "codex-stopped",
+      model: "gpt",
+      role: "backend",
+      cwd: TMP,
+    });
+    am.setStatus(existing.id, "stopped");
+
+    const res = await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      model: "gpt-5.6-terra@max",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.action).toBe("restarted");
+    expect(res.agentId).toBe(existing.id);
+    expect(res.spawnedModel).toBe("gpt-5.6-terra@max");
+    const args = argsOf(am, existing.id);
+    expect(args).toContain('model="gpt-5.6-terra"');
+    expect(args).toContain('model_reasoning_effort="max"');
+    expect(lastDecision().spawnedModel).toBe("gpt-5.6-terra@max");
+    expect(lastDecision().reuseVsSpawn).toBe("restart");
   });
 });
 

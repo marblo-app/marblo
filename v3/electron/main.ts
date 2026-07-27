@@ -5264,6 +5264,9 @@ ipcMain.handle("agent:restart", (event, agentId: string) => {
         id: instance.id,
         ptySessionId: instance.ptySessionId,
         status: instance.status,
+        spawnedModel: formatModelAtEffort(
+          agentManager.getSpawnedModel(instance.id),
+        ),
       }
     : null;
 });

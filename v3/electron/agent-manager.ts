@@ -145,6 +145,14 @@ export interface AgentLaunchParams {
   onPtyReady?: (ptySessionId: string, spawnedModel?: string) => void;
 }
 
+export interface AgentRestartOptions {
+  initialPrompt?: string;
+  claudeModelOverride?: string;
+  codexModelOverride?: string;
+  codexEffortOverride?: string;
+  nativeModelOverride?: string;
+}
+
 export interface AgentInstance {
   id: string;
   name: string;
@@ -1359,9 +1367,17 @@ export class AgentManager {
     mainTelemetry.agentStopped(this.getMainWindow?.() ?? null, agentId, 0);
   }
 
-  restart(agentId: string, initialPrompt?: string): AgentInstance | null {
+  restart(
+    agentId: string,
+    initialPromptOrOptions?: string | AgentRestartOptions,
+  ): AgentInstance | null {
     const agent = this.agents.get(agentId);
     if (!agent) return null;
+    const options =
+      typeof initialPromptOrOptions === "string"
+        ? { initialPrompt: initialPromptOrOptions }
+        : (initialPromptOrOptions ?? {});
+    const claudeRuntimeDowngraded = agent.claudeRuntimeDowngraded;
 
     // Kill existing PTY + cleanup configs + heartbeat
     agent.stopRequested = true;
@@ -1371,7 +1387,7 @@ export class AgentManager {
     this.agents.delete(agentId);
 
     // Re-launch with same params (+ optional initial prompt for dispatch restart)
-    return this.launch({
+    const restarted = this.launch({
       id: agent.id,
       name: agent.name,
       model: agent.model,
@@ -1379,10 +1395,21 @@ export class AgentManager {
       command: agent.command,
       cwd: agent.cwd,
       currentTaskId: agent.currentTaskId,
+      dispatchReason: agent.dispatchReason,
       contextId: agent.launchConfig?.env?.MARBLO_CONTEXT,
-      initialPrompt,
+      initialPrompt: options.initialPrompt,
       onPtyReady: agent.onPtyReady,
+      claudeModelOverride:
+        options.claudeModelOverride ?? agent.claudeModelOverride,
+      codexModelOverride:
+        options.codexModelOverride ?? agent.codexModelOverride,
+      codexEffortOverride:
+        options.codexEffortOverride ?? agent.codexEffortOverride,
+      nativeModelOverride:
+        options.nativeModelOverride ?? agent.nativeModelOverride,
     });
+    restarted.claudeRuntimeDowngraded = claudeRuntimeDowngraded;
+    return restarted;
   }
 
   getStatus(agentId: string): AgentStatus {
