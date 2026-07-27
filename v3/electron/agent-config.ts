@@ -529,6 +529,15 @@ function ptyCommandForCli(
   return { command, args };
 }
 
+function isHarnessCommandName(command: string, harness: ModelType): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  const base = path.basename(trimmed).toLowerCase();
+  const expected = harnessCommandName(harness).toLowerCase();
+  if (base === expected) return true;
+  return os.platform() === "win32" && base === `${expected}.exe`;
+}
+
 // ── 오케스트레이터 부팅 모델 추상화 ─────────────────────────────────
 //
 // 워커는 이미 멀티모델(getLaunchConfig 모델분기 + MODEL_BINARY + resolveHarnessCli)
@@ -3046,10 +3055,19 @@ export class AgentConfigGenerator {
         ];
         const grokModel = modelPin?.nativeModel;
         grokArgs.push("-m", grokModel || GROK_DEFAULT_MODEL);
+        const resolvedGrokCommand = resolveHarnessCli("grok").command;
+        // Stale Firestore docs have carried command:"claude" or
+        // command:"grok-4.5" while model/harness is grok. Grok argv includes
+        // `-m`, so honoring those stale commands routes Grok flags into the
+        // wrong binary (Claude) or an ENOENT model slug. Only a real grok
+        // binary name/path is accepted; everything else falls back to the
+        // resolved Grok CLI.
         const grokCommand =
-          !baseCommand || baseCommand === "grok"
-            ? resolveHarnessCli("grok").command
-            : baseCommand;
+          baseCommand && isHarnessCommandName(baseCommand, "grok")
+            ? path.isAbsolute(baseCommand)
+              ? baseCommand
+              : resolvedGrokCommand
+            : resolvedGrokCommand;
         const grokLaunch = ptyCommandForCli(grokCommand, grokArgs);
         return {
           command: grokLaunch.command,

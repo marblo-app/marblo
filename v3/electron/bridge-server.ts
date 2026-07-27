@@ -416,6 +416,7 @@ export const ALLOWED_SPAWN_COMMANDS = new Set([
   "claude",
   "gemini",
   "codex",
+  "grok",
   "agy",
 ]);
 
@@ -3150,6 +3151,8 @@ export class BridgeServer {
         return "gemini";
       case "gpt":
         return "codex";
+      case "grok":
+        return "grok";
       case "antigravity":
         return "agy";
       default:

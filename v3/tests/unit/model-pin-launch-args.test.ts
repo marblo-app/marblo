@@ -237,6 +237,20 @@ describe("grok — 검증된 CLI 경로와 버전 배지", () => {
     expect(path.basename(command)).toBe("grok");
   });
 
+  it("stale command='claude' 여도 grok 바이너리로 스폰한다", () => {
+    const command = launchCommand("grok", "claude");
+    expect(command).not.toBe("claude");
+    expect(path.isAbsolute(command)).toBe(true);
+    expect(path.basename(command)).toBe("grok");
+  });
+
+  it("stale command='grok-4.5' 여도 모델 slug 를 스폰하지 않는다", () => {
+    const command = launchCommand("grok", "grok-4.5");
+    expect(command).not.toBe("grok-4.5");
+    expect(path.isAbsolute(command)).toBe(true);
+    expect(path.basename(command)).toBe("grok");
+  });
+
   it("resolveAllHarnessVersions 가 grok 배지 키를 포함한다", () => {
     expect(resolveAllHarnessVersions()).toHaveProperty("grok");
   });

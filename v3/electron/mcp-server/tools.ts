@@ -168,6 +168,40 @@ type TaskStatus =
   | "FAILED"
   | "DONE";
 
+type ManagedAgentModel =
+  | "claude"
+  | "gemini"
+  | "gpt"
+  | "grok"
+  | "antigravity";
+
+const MANAGED_AGENT_COMMAND: Readonly<Record<ManagedAgentModel, string>> = {
+  claude: "claude",
+  gemini: "gemini",
+  gpt: "codex",
+  grok: "grok",
+  antigravity: "agy",
+};
+
+function normalizeAgentModel(model: string | undefined): string | undefined {
+  return model === "codex" ? "gpt" : model;
+}
+
+function isManagedAgentModel(model: string): model is ManagedAgentModel {
+  return Object.prototype.hasOwnProperty.call(MANAGED_AGENT_COMMAND, model);
+}
+
+function agentDocumentCommand(
+  model: string | undefined,
+  explicitCommand?: string,
+): string {
+  const normalized = normalizeAgentModel(model);
+  if (normalized && isManagedAgentModel(normalized)) {
+    return MANAGED_AGENT_COMMAND[normalized];
+  }
+  return explicitCommand || normalized || "claude";
+}
+
 // The 7-member TaskStatus value domain. Used to validate untrusted `status`
 // strings before any transition/force logic (see update_task_status, P2-2).
 const TASK_STATUS_VALUES: readonly TaskStatus[] = [
@@ -3106,7 +3140,7 @@ export function registerTools(server: McpServer): void {
               // Link the agent to its board task — the supplied task_id, or the
               // ad-hoc worktree task the bridge auto-created (result.taskId).
               currentTaskId: result.taskId ?? task_id ?? null,
-              command: command || model,
+              command: agentDocumentCommand(model, command),
               skillFile: "",
               createdAt: Timestamp.now(),
             },
@@ -4072,7 +4106,7 @@ export function registerTools(server: McpServer): void {
                   // Link to the board task — the supplied task_id, or the ad-hoc
                   // worktree task the bridge auto-created (result.taskId).
                   currentTaskId: result.taskId ?? dispatchTaskId ?? null,
-                  command: result.model || model || "claude",
+                  command: agentDocumentCommand(result.model || model),
                   skillFile: "",
                   createdAt: Timestamp.now(),
                 },
