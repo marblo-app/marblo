@@ -7,8 +7,9 @@ import "@xterm/xterm/css/xterm.css";
 import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 import { resolveClipboardForTerminal } from "../../utils/clipboardImage";
 import {
-  MONO_FONT_FAMILY,
+  TERMINAL_FONT_FAMILY,
   XTERM_CJK_RENDER_OPTIONS,
+  bindTerminalCjkFont,
 } from "../../lib/monoFont";
 import { t } from "../../lib/i18n";
 
@@ -62,7 +63,7 @@ export default memo(function TerminalView({
       // RAM 을 낮춘다(스크롤 히스토리 길이만 단축, 기능 무해).
       scrollback: 500,
       fontSize: 13,
-      fontFamily: MONO_FONT_FAMILY,
+      fontFamily: TERMINAL_FONT_FAMILY,
       theme: {
         background: "#1e1e2e",
         foreground: "#cdd6f4",
@@ -170,6 +171,26 @@ export default memo(function TerminalView({
             );
           }
         }
+
+        // Agent terminals run the DOM renderer by default, whose row
+        // letter-spacing is derived from a WidthCache filled at open() — with
+        // the bundled Korean webfont still unloaded, that is exactly the
+        // broken 한글 자간 in scrollback. Rebuild once the face lands.
+        // See lib/monoFont.ts.
+        bindTerminalCjkFont(terminal, {
+          label: "TerminalView",
+          isStale: () => disposed || !termOpened,
+          // Cell metrics can change with the face, so cols/rows must be
+          // recomputed (and the PTY told) rather than left at the old grid.
+          onRebuilt: () => {
+            try {
+              fitAddon.fit();
+            } catch {
+              /* ignore */
+            }
+          },
+        });
+
         requestAnimationFrame(() => {
           if (disposed) return;
           try {

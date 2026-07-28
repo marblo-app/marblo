@@ -8,8 +8,9 @@ import "@xterm/xterm/css/xterm.css";
 import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 import { resolveClipboardForTerminal } from "../../utils/clipboardImage";
 import {
-  MONO_FONT_FAMILY,
+  TERMINAL_FONT_FAMILY,
   XTERM_CJK_RENDER_OPTIONS,
+  bindTerminalCjkFont,
 } from "../../lib/monoFont";
 
 interface OrchestratorTerminalProps {
@@ -39,7 +40,7 @@ export default memo(function OrchestratorTerminal({
       ...XTERM_CJK_RENDER_OPTIONS,
       cursorBlink: false, // periodic redraw was contributing to RAF queue saturation
       fontSize: 13,
-      fontFamily: MONO_FONT_FAMILY,
+      fontFamily: TERMINAL_FONT_FAMILY,
       theme: {
         background: "#181825",
         foreground: "#cdd6f4",
@@ -137,7 +138,7 @@ export default memo(function OrchestratorTerminal({
             } catch (err) {
               console.warn(
                 "[OrchestratorTerminal] WebGL init failed, falling back to canvas:",
-                err
+                err,
               );
               try {
                 terminal.loadAddon(new CanvasAddon());
@@ -152,11 +153,30 @@ export default memo(function OrchestratorTerminal({
             } catch (err) {
               console.warn(
                 "[OrchestratorTerminal] Canvas init failed, using DOM renderer:",
-                err
+                err,
               );
             }
           }
         }
+
+        // The renderer just baked its glyph atlas / width caches from whatever
+        // faces were resolvable at open(). The bundled Korean face is a
+        // webfont, so it usually is not one of them — rebuild once it lands.
+        // See lib/monoFont.ts for why this is the whole fix for CJK 자간.
+        bindTerminalCjkFont(terminal, {
+          label: "OrchestratorTerminal",
+          isStale: () => disposed || !termOpened,
+          // Cell metrics can change with the face, so cols/rows must be
+          // recomputed (and the PTY told) rather than left at the old grid.
+          onRebuilt: () => {
+            try {
+              fitAddon.fit();
+            } catch {
+              /* ignore */
+            }
+          },
+        });
+
         requestAnimationFrame(() => {
           if (disposed) return;
           try {
@@ -479,7 +499,7 @@ export default memo(function OrchestratorTerminal({
     window.electronAPI.pty.onExit(sessionId, (code) => {
       if (disposed) return;
       terminal.write(
-        `\r\n\x1b[90m[Orchestrator exited with code ${code}]\x1b[0m\r\n`
+        `\r\n\x1b[90m[Orchestrator exited with code ${code}]\x1b[0m\r\n`,
       );
     });
 
