@@ -577,6 +577,13 @@ interface ModelFactRow {
   estimatedPricing: boolean;
   context: ModelFactContext | null;
   /**
+   * ★**티어 판정용 대표 벤치**(변형 선택과 무관, 벤치 간 fallback 있음). 표에
+   * 그리는 숫자가 아니라 묶음 라벨의 재료다 — 티어는 모델 고유 속성이라 벤치 탭을
+   * 토글해도 흔들리면 안 되고, 오케(`get_model_guidance`)가 듣는 판정과도 같아야
+   * 한다. 화면 셀은 아래 `benchByVariant` 만 쓴다.
+   */
+  representativeBench: ModelFactBench | null;
+  /**
    * ★**변형별** 벤치 칸. 표는 한 번에 한 변형만 그린다 — 다른 변형으로 넘어가는
    * fallback 은 없다(그 fallback 이 Verified 96 과 Pro 64.6 을 한 열에 세웠다).
    */

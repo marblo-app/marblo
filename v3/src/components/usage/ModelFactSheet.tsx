@@ -96,20 +96,26 @@ export function ModelFactSheet() {
   // 필터링한 뒤에 묶으면 기준(단가 중앙값)이 같이 좁아져 같은 모델이 필터를 바꿀
   // 때마다 다른 티어로 보인다.
   //
-  // ★티어에 먹이는 벤치도 **선택된 한 변형**이다. 예전엔 행마다 다른 변형이 섞여
-  // 들어갔고, 그러면 가성비 판정의 분모(같은 벤치 최고점)가 행마다 다른 시험의
-  // 최고점이 된다. 변형을 고정하면 그 정규화가 비로소 뜻을 갖는다.
+  // ★티어에 먹이는 벤치는 **선택된 변형이 아니라 행의 대표 벤치**
+  // (`representativeBench`, 메인이 `pickBenchRecords` 로 뽑아 내려준다)다.
+  //
+  // 티어는 모델 고유 속성이다 — 사용자가 위의 벤치 탭을 Verified ↔ Pro 로 토글했다고
+  // 같은 모델이 가성비였다가 아니었다가 하면 그건 모델이 아니라 화면 상태에 대한
+  // 말이 된다. 선택된 변형을 먹이면 그 변형에 점수가 없는 행은 근거가 통째로 사라져
+  // (valueRatio=null) 오케가 `get_model_guidance` 로 듣는 판정과도 갈라진다.
+  // 대표는 그 두 경로가 공유하는 한 벌이라 화면과 오케가 같은 티어를 말한다.
+  //
+  // 표/차트의 **셀**은 여전히 선택된 변형만 그린다(benchByVariant) — 그 규율은
+  // 그대로다. 여기서만 자를 하나로 고정할 뿐이다.
   const tierFacts = useMemo(
     () =>
       rows.map((row) => ({
         row,
         capability: row.capability,
         outputPer1M: row.outputPer1M,
-        bench: benchmark
-          ? (row.benchByVariant?.[benchmark]?.primary ?? null)
-          : null,
+        bench: row.representativeBench ?? null,
       })),
-    [rows, benchmark],
+    [rows],
   );
   const groups = useMemo(() => groupModelsByTier(tierFacts), [tierFacts]);
   const visibleGroups =

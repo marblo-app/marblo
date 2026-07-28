@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   modelFactSheet,
   modelFactSheetPayload,
+  pickBenchRecords,
 } from "../../electron/model-fact-sheet";
 import { MODEL_REGISTRY, getModel } from "../../electron/model-registry";
 import { BENCHMARK_IDS } from "../../electron/model-bench-reference";
@@ -224,6 +225,61 @@ describe("model-fact-sheet / 정렬", () => {
       expect(order[rows[i].capability]).toBeGreaterThanOrEqual(
         order[rows[i - 1].capability],
       );
+    }
+  });
+});
+
+/**
+ * ★티어용 **대표 벤치** — 표 셀과 갈라 둔 필드.
+ *
+ * 티어(프리미어/일반/가성비)는 모델 고유 속성이라 사용자가 벤치 탭을 토글해도
+ * 안 바뀌어야 하고, 오케(`get_model_guidance`)가 듣는 판정과도 같아야 한다.
+ * 그래서 대표는 **변형 선택과 무관**하게 `pickBenchRecords` 한 곳에서만 나온다.
+ */
+describe("model-fact-sheet / 대표 벤치(티어용)", () => {
+  it("모든 행이 대표 칸을 들고 있다(pickBenchRecords 와 같은 행)", () => {
+    for (const row of rows) {
+      const { representative } = pickBenchRecords(row.modelId);
+      if (!representative) {
+        expect(row.representativeBench, row.modelId).toBeNull();
+        continue;
+      }
+      expect(row.representativeBench?.benchmark, row.modelId).toBe(
+        representative.benchmark,
+      );
+      expect(row.representativeBench?.score, row.modelId).toBe(
+        representative.score,
+      );
+      expect(row.representativeBench?.source, row.modelId).toBe(
+        representative.source,
+      );
+    }
+  });
+
+  it("★대표는 변형 선택과 무관하다(벤치 탭을 바꿔도 티어 입력이 안 흔들린다)", () => {
+    // 표 셀은 변형마다 다르지만(그게 규율), 대표는 같은 행에 하나뿐이다.
+    // fable-5 가 이 티켓의 실증 사례다: Verified 칸은 비어 있고 Pro 에만 점수가
+    // 있어서, 선택된 변형을 티어에 먹이면 Verified 탭에서 근거가 사라졌다.
+    const fable = byId.get("claude-fable-5");
+    expect(fable, "claude-fable-5 행이 표에 있어야 한다").toBeTruthy();
+    expect(fable!.representativeBench?.score).not.toBeNull();
+    // 두 번 호출해도 같은 값(순수) — 변형 상태가 끼어들 자리가 없다.
+    const again = new Map(
+      modelFactSheet().map((r) => [r.modelId, r.representativeBench]),
+    );
+    for (const row of rows) {
+      expect(again.get(row.modelId), row.modelId).toEqual(
+        row.representativeBench,
+      );
+    }
+  });
+
+  it("점수가 없으면 지어내지 않는다(대표도 null 이거나 score:null 이다)", () => {
+    for (const row of rows) {
+      const b = row.representativeBench;
+      if (!b || b.score === null) continue;
+      expect(b.source, row.modelId).toMatch(/^https:\/\//);
+      expect(b.asOf, row.modelId).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }
   });
 });

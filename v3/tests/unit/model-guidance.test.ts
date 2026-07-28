@@ -174,7 +174,15 @@ describe("model-guidance / 티어는 화면과 같은 판정이다", () => {
       payload as unknown as GuidanceStaticPayload,
       [],
     );
-    const screen = withModelTiers(modelFactSheet());
+    // 화면이 티어에 먹이는 것과 **같은 재료**: 행의 대표 벤치(변형 선택과 무관).
+    // 여기서 표 셀(benchByVariant)을 먹이면 두 경로가 다시 갈라진다 — 그게 이
+    // 테스트가 잡는 사고다(#653 이후 화면=선택변형 vs 오케=대표로 벌어졌던 것).
+    const screen = withModelTiers(
+      modelFactSheet().map((row) => ({
+        ...row,
+        bench: row.representativeBench,
+      })),
+    );
     expect(merged.length).toBe(screen.length);
     merged.forEach((row, i) => {
       const want = screen[i];

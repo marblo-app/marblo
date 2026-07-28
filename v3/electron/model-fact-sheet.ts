@@ -118,6 +118,23 @@ export interface ModelFactRow {
   /** 참조표에 짝이 없으면 null(화면은 "확인 필요"). */
   context: ModelFactContext | null;
   /**
+   * ★**티어 판정용 대표 벤치** 한 칸(`pickBenchRecords` 단일소스, 변형 간
+   * fallback 있음). 표 셀(`benchByVariant`)과 **이름으로** 갈라 둔다.
+   *
+   * 왜 표 셀을 그대로 쓰면 안 되나: 티어(프리미어/일반/가성비)는 **모델 고유
+   * 속성**이다. 사용자가 벤치 탭을 Verified ↔ Pro 로 토글했다고 같은 모델이
+   * 가성비였다가 아니었다가 하면, 그건 모델에 대한 사실이 아니라 화면 상태에
+   * 대한 사실이다. 게다가 선택된 변형에 점수가 없는 행은 근거가 통째로 사라져
+   * (`valueRatio: null`) 오케가 `get_model_guidance` 로 듣는 판정과 갈라진다 —
+   * 두 경로가 같은 모델을 다른 티어로 부르는 그 사고가 이 필드가 막는 것이다.
+   *
+   * 그래서 대표는 **변형 선택과 무관**하고, 오케 경로(`model-guidance.ts` 의
+   * `representativeIndex`)와 같은 함수에서 나온다. 표 셀은 변형 안에서만 고르는
+   * 규율(`benchCellFor`)을 그대로 유지한다 — 화면에 그리는 숫자는 여전히 그 열의
+   * 자로 잰 값뿐이다.
+   */
+  representativeBench: ModelFactBench | null;
+  /**
    * ★**변형별** 벤치 칸. 네 변형이 모두 키로 있고, 행이 없는 변형은
    * `primary: null` 이다.
    *
@@ -183,7 +200,7 @@ export function pickBenchRecords(modelId: string): {
 
   for (const benchmark of BENCHMARK_PREFERENCE) {
     const scored = rows.filter(
-      (r) => r.benchmark === benchmark && r.score !== null
+      (r) => r.benchmark === benchmark && r.score !== null,
     );
     if (scored.length === 0) continue;
     const vendorFirst =
@@ -201,7 +218,10 @@ export function pickBenchRecords(modelId: string): {
   return { representative: null, alternates: [] };
 }
 
-/** 화면용 좁힌 모양. 선정 정책은 `pickBenchRecords` 한 곳뿐이다. */
+/**
+ * 화면용 좁힌 모양(행의 `representativeBench` 가 이걸 쓴다). 선정 정책은
+ * `pickBenchRecords` 한 곳뿐이라 화면 티어와 오케 티어가 같은 행을 대표로 부른다.
+ */
 function pickBench(modelId: string): {
   bench: ModelFactBench | null;
   alternates: ModelFactBench[];
@@ -231,7 +251,7 @@ function pickBench(modelId: string): {
  */
 export function benchCellFor(
   modelId: string,
-  benchmark: BenchmarkId
+  benchmark: BenchmarkId,
 ): ModelFactBenchCell {
   const empty: ModelFactBenchCell = {
     benchmark,
@@ -241,7 +261,7 @@ export function benchCellFor(
   };
 
   const rows = benchRowsForModel(modelId).filter(
-    (r) => r.benchmark === benchmark
+    (r) => r.benchmark === benchmark,
   );
   if (rows.length === 0) return empty;
 
@@ -264,10 +284,10 @@ export function benchCellFor(
 
 /** 네 변형 전부에 대해 칸을 만든다(없는 변형은 빈 칸). */
 function benchCellsFor(
-  modelId: string
+  modelId: string,
 ): Record<BenchmarkId, ModelFactBenchCell> {
   return Object.fromEntries(
-    BENCHMARK_IDS.map((id) => [id, benchCellFor(modelId, id)])
+    BENCHMARK_IDS.map((id) => [id, benchCellFor(modelId, id)]),
   ) as Record<BenchmarkId, ModelFactBenchCell>;
 }
 
@@ -314,6 +334,9 @@ export function modelFactSheet(): ModelFactRow[] {
             ...(context.note ? { note: context.note } : {}),
           }
         : null,
+      // 티어용 대표(변형 무관) — 오케 경로와 같은 함수. 표 셀은 그 아래 줄에서
+      // 변형 안에서만 고른다. 두 값을 한 필드로 합치면 그 구분이 사라진다.
+      representativeBench: pickBench(entry.id).bench,
       benchByVariant: benchCellsFor(entry.id),
     });
   }

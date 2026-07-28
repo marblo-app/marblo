@@ -130,14 +130,14 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.factSheet.basisNote":
     "Every SWE-bench number in this table and chart is on one basis: {variant} ({n}/{total} models have an official figure). The other variants (Verified, Pro, …) are separate exams over different problem sets, so they cannot be subtracted or ranked against each other — only one is shown at a time. Switching the basis re-renders both the table and the chart.",
   "usage.factSheet.basisTip":
-    "SWE-bench is not one exam but four with different problem sets (Verified, Pro, Multilingual, Multimodal). Vendors publish different ones — OpenAI publishes only Pro, Anthropic publishes all four — so this table used to pick whichever variant each model happened to have and put them in one column. That put Verified 96 next to Pro 64.6 and the gap read as a capability difference. Now the column has a single fixed basis, and a model with no figure on that basis is left as \"unverified\" rather than scored low. The default basis is not hand-picked: it is whichever variant currently measures the most models with the same ruler.",
+    'SWE-bench is not one exam but four with different problem sets (Verified, Pro, Multilingual, Multimodal). Vendors publish different ones — OpenAI publishes only Pro, Anthropic publishes all four — so this table used to pick whichever variant each model happened to have and put them in one column. That put Verified 96 next to Pro 64.6 and the gap read as a capability difference. Now the column has a single fixed basis, and a model with no figure on that basis is left as "unverified" rather than scored low. The default basis is not hand-picked: it is whichever variant currently measures the most models with the same ruler.',
   "usage.factSheet.benchNoVariantRow":
     "No official {variant} figure for this model (we do not fill it in with a different variant's score).",
 
   // ── Price + SWE-bench bar chart ──────────────────────────
   "usage.factSheet.chart.title": "Price vs performance at a glance",
   "usage.factSheet.chart.subtitle":
-    "Sorted by {variant} score. Only the {n}/{total} models with an official figure get a bar; the rest read \"unverified\" instead of a zero-length bar. Price and score use different units, so they do not share an axis (two panels).",
+    'Sorted by {variant} score. Only the {n}/{total} models with an official figure get a bar; the rest read "unverified" instead of a zero-length bar. Price and score use different units, so they do not share an axis (two panels).',
   "usage.factSheet.chart.priceAxis": "Price $/1M tokens",
   "usage.factSheet.chart.priceTip":
     "Straight from the model registry. The lighter top bar is input, the darker bottom bar is output. Coding-agent cost is usually dominated by output.",
@@ -177,7 +177,7 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.factSheet.tier.ruleTip":
     "Tiers are derived from the facts in this table, not from a hand-written list of model names. The base is the registry capability grade (frontier/top → Premier, mid → Standard, cheap → Value), plus one more move in a single direction: a Standard model is promoted to Value only if its output price is at or below the table's median AND its performance-per-dollar is at or above the median. Performance is normalized against the best score on the same benchmark so different benchmarks never get compared directly. A cheap price never demotes a Premier model — a cheap Premier is still Premier.",
   "usage.factSheet.tierFooter":
-    "Tiers are derived automatically from the numbers above (registry capability grade + performance-per-dollar). Add a model to the registry and it lands in the right group here on its own. A model with no official benchmark number is never promoted to Value: we know it is cheap, but not that it is good enough. Benchmark conditions differ per model, so treat this grouping as rough guidance rather than a precise ranking.",
+    "Tiers are derived automatically from the numbers above (registry capability grade + performance-per-dollar). Add a model to the registry and it lands in the right group here on its own. A model with no official benchmark number is never promoted to Value: we know it is cheap, but not that it is good enough. Benchmark conditions differ per model, so treat this grouping as rough guidance rather than a precise ranking. A tier is a property of the model, so switching the benchmark variant above never moves it: the table cells follow the variant you picked, but tiers are judged from each model's one representative benchmark.",
   "usage.factSheet.footer":
     "Prices are read verbatim from the model registry (electron/model-registry.ts) as the single source — add a model there and it shows up here automatically. SWE-bench is four different problem sets, and each model reports under different benchmark and scaffold conditions, so these are rough figures. Every number links to its primary source and the date it was read; cells with no official number say 'needs checking' rather than guessing.",
 

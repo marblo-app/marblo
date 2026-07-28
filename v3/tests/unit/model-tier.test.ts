@@ -21,16 +21,17 @@ import {
 import { modelFactSheetPayload } from "../../electron/model-fact-sheet";
 
 /**
- * 실제 정보표 행 + **선택된 한 변형**의 벤치 칸(= 화면이 티어에 먹이는 것 그대로).
+ * 실제 정보표 행 + **행의 대표 벤치**(= 화면이 티어에 먹이는 것 그대로).
  *
- * ★변형을 고정해서 넣는 것이 이 하네스의 핵심이다. 예전엔 행마다 다른 변형이
- * 섞여 들어갔고, 그러면 가성비 판정의 분모(같은 벤치 최고점)가 행마다 다른
- * 시험의 최고점이 된다. 화면과 같은 방식(payload 의 기본 축)으로 고정한다.
+ * ★대표를 먹이는 것이 이 하네스의 핵심이다. 표 셀(`benchByVariant`)을 먹이면
+ * 사용자가 벤치 탭을 토글할 때마다 같은 모델의 티어가 바뀌고, 선택된 변형에
+ * 점수가 없는 행은 근거가 통째로 사라져 오케(`get_model_guidance`)가 듣는 판정과
+ * 갈라진다. 대표는 변형 선택과 무관하고 두 경로가 같은 함수에서 뽑는다.
  */
 const payload = modelFactSheetPayload();
 const factRows = payload.rows.map((row) => ({
   ...row,
-  bench: row.benchByVariant[payload.defaultBenchmark].primary,
+  bench: row.representativeBench,
 }));
 const tierById = new Map(
   withModelTiers(factRows).map((a) => [a.row.modelId, a]),
@@ -241,17 +242,25 @@ describe("modelTier / 실제 레지스트리 위에서", () => {
     }
   });
 
-  it("★선택된 기준에 점수가 없으면 다른 변형의 점수를 빌려 승격하지 않는다", () => {
+  it("★티어는 화면이 고른 기준이 아니라 그 모델의 대표 벤치로 판정한다", () => {
     // glm-4.7 은 $2.2 로 표에서 가장 싼 축이고 Verified 73.8 을 갖고 있다.
-    // 하지만 기본 기준인 Pro 로는 Z.ai 가 이 모델의 수치를 낸 적이 없다
-    // (5.2 세대부터 Pro 로 갈아탔다). 예전 구현은 여기서 Verified 로 fallback 해
-    // 승격시켰는데, 그건 **다른 시험 점수로 이 기준의 성능을 주장**하는 것이다.
-    // 지금은 근거 없음으로 취급해 capability 자리에 그대로 둔다(모듈 규율 3).
+    // 표의 기본 기준인 Pro 로는 Z.ai 가 이 모델 수치를 낸 적이 없다(5.2 세대부터
+    // Pro 로 갈아탔다). 그래서 **선택된 기준**을 티어에 먹이면 이 모델은 Pro 탭에선
+    // 일반작업, Verified 탭에선 가성비가 된다 — 모델이 아니라 탭 상태에 대한 말이다.
+    // 게다가 오케(`get_model_guidance`)는 늘 대표로 판정하므로 두 경로가 갈라진다.
+    //
+    // 대표를 먹여도 **벤치끼리 섞이지는 않는다**: 정규화 분모가 벤치별 최고점이라
+    // 73.8 은 Verified 최고점(opus-5 96)과만 비교된다. 즉 "다른 시험 점수로 이
+    // 기준의 성능을 주장" 하는 게 아니라, 이 모델의 성능을 **자기 시험 안에서** 잰다.
     const glm = tierById.get("glm-4.7");
-    expect(glm?.row.bench).toBeNull();
-    expect(glm?.valueRatio).toBeNull();
-    expect(glm?.tier).toBe("standard");
-    expect(glm?.reason).toBe("capability");
+    expect(glm?.row.bench?.benchmark).toBe("swe-bench-verified");
+    expect(glm?.row.bench?.score).toBe(73.8);
+    expect(glm?.valueRatio).not.toBeNull();
+    expect(glm?.tier).toBe("value");
+    expect(glm?.reason).toBe("value-heuristic");
+    // 분모가 벤치별이라는 증거: ratio = (73.8 / Verified 최고점) / 단가.
+    const best = modelFleetStats(factRows).benchBest["swe-bench-verified"];
+    expect(glm?.valueRatio).toBeCloseTo(73.8 / best / glm!.row.outputPer1M, 10);
   });
 
   it("벤치 참조 행이 없는 mid 는 승격되지 않는다(단가만으로 판단하지 않는다)", () => {
