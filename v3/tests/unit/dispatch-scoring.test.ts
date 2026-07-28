@@ -309,6 +309,25 @@ describe("scoreModels", () => {
   });
 
   describe("tag-based model selection", () => {
+    it("rotates general coding tasks inside the claude/gpt tie-band", () => {
+      const first = scoreModelsDetailed(["claude", "gpt"], ["coding"]);
+      const second = scoreModelsDetailed(["claude", "gpt"], ["coding"]);
+
+      expect(first.mode).toBe("tie-band-round-robin");
+      expect(second.mode).toBe("tie-band-round-robin");
+      expect(first.contenders).toEqual(["claude", "gpt"]);
+      expect(second.contenders).toEqual(["claude", "gpt"]);
+      expect(new Set([first.selected, second.selected])).toEqual(
+        new Set(["claude", "gpt"]),
+      );
+
+      const claude = first.scores.find((s) => s.model === "claude")!;
+      const gpt = first.scores.find((s) => s.model === "gpt")!;
+      expect(claude.tagBonus).toBe(22);
+      expect(gpt.tagBonus).toBe(20);
+      expect(Math.abs(claude.total - gpt.total)).toBeLessThanOrEqual(5);
+    });
+
     it("selects claude for architecture tags", () => {
       const result = scoreModels(
         ["claude", "gemini", "gpt"],
@@ -330,8 +349,25 @@ describe("scoreModels", () => {
         ["claude", "gemini", "gpt"],
         ["github", "simple-fix"],
       );
-      // gpt: 35 + 20 + 15 = 70, claude: 50, gemini: 40
+      // gpt keeps the GitHub/simple-fix specialty lead.
       expect(result).toBe("gpt");
+    });
+
+    it("keeps vendor-specialty tags as differentiators", () => {
+      expect(
+        scoreModelsDetailed(["claude", "gpt", "gemini"], ["github"]).scores[0]
+          .model,
+      ).toBe("gpt");
+      expect(
+        scoreModelsDetailed(["claude", "gpt", "gemini"], ["research"])
+          .scores[0].model,
+      ).toBe("gemini");
+      expect(
+        scoreModelsDetailed(
+          ["claude", "gpt", "antigravity"],
+          ["agentic"],
+        ).scores[0].model,
+      ).toBe("antigravity");
     });
 
     it("applies penalties to gemini for multi-file", () => {
@@ -708,6 +744,29 @@ describe("scoreModels budget-bias integration", () => {
     expect(selection.scores.find((s) => s.model === "claude")?.budgetBias).toBe(
       6,
     );
+  });
+
+  it("lets budget pressure route coding work away from a depleted claude quota", () => {
+    const gptSelection = scoreModelsDetailed(
+      ["claude", "gpt", "gemini"],
+      ["coding"],
+      "standard",
+      { claude: { usedPercent: 95 }, gpt: { usedPercent: 20 } },
+    );
+    expect(gptSelection.selected).toBe("gpt");
+
+    const geminiSelection = scoreModelsDetailed(
+      ["claude", "gpt", "gemini"],
+      ["coding"],
+      "standard",
+      {
+        claude: { usedPercent: 100 },
+        gpt: { usedPercent: 100 },
+        gemini: { usedPercent: 20 },
+      },
+    );
+    expect(geminiSelection.scores.map((s) => s.model)).toEqual(["gemini"]);
+    expect(geminiSelection.selected).toBe("gemini");
   });
 
   it("hard-gates exhausted models out of fresh-spawn scoring", () => {

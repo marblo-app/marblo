@@ -338,12 +338,11 @@ function hasSubscriptionPlan(model: ModelType): boolean {
 
 export const MODEL_TAG_BONUSES: Record<string, Record<string, number>> = {
   claude: {
-    // Strong but not crushing — leave room for Codex/Gemini to win on
-    // their own tags. Previously these were 30 across the board which
-    // made Claude essentially always-on for any coding-like task.
+    // Strong but not crushing — leave room for Codex/Grok/Gemini to win on
+    // evidence-backed peers or their own specialty tags.
     architecture: 25,
     "multi-file": 25,
-    coding: 25,
+    coding: 22,
     design: 20,
     mcp: 20,
     refactor: 20,
@@ -356,6 +355,10 @@ export const MODEL_TAG_BONUSES: Record<string, Record<string, number>> = {
     "fast-response": 15,
   },
   gpt: {
+    // General coding should be a Claude/Codex tie-band, not a Claude lock:
+    // SWE-bench Pro has gpt-5.6-sol close enough to Opus 4.8 that the live
+    // budget/diversity signals should decide borderline coding tasks.
+    coding: 20,
     github: 25,
     "simple-fix": 25,
     "quick-edit": 20,
