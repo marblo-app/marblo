@@ -275,25 +275,81 @@ export function gateRung(
 
 /**
  * claude 사다리. effort 축이 없으므로(레지스트리) 칸 = 모델 하나.
- * 세 칸이 현행 라이브 티어 매핑과 **정확히 같다** — 이 티켓은 사다리를
- * 데이터로 만드는 것이 목적이고, 티어 기본값을 움직이는 것은 비용 회귀
- * (설계문서 §4 검증법)이므로 하지 않는다.
+ * **진입칸**(entry.simple/standard/complex) 세 개는 현행 라이브 티어 매핑과
+ * **정확히 같다** — sonnet5/opus5/fable5. 이 티켓(hyKsSYYM, 사장님 A안)이
+ * 하는 일은 그 옆에 **env-swap 벤더(키 있으면) 칸**을 끼워 넣는 것이지,
+ * 진입칸 자체를 옮기는 것이 아니다: "강제 배치 말고 점수가 결정" — env-swap
+ * 칸은 각자의 능력등급 그룹 안에서 sonnet5/opus5 **옆**(같은 능력등급, 다른
+ * 인덱스)에 앉고, 단가 압도(`model-autoselect.COST_WEIGHT`)가 simple/standard
+ * 승부를 실제로 가른다.
+ *
+ * ★sonnet5→opus5 는 **여전히 인접 칸**(인덱스 차 1)이다 — mid 그룹의 새 칸은
+ * 전부 sonnet5 **앞**에, top 그룹의 새 칸은 전부 opus5 **뒤**에 둔다. 그래야
+ * (a) 능력등급 비내림차순 불변식(mid…mid,top…top,frontier)이 유지되고
+ * (b) 크레덴셜이 없어 env-swap 이 전부 걸러진 기기에서는 `steps = candidate.index
+ * - entryIndex` 가 이 티켓 이전과 **비트 단위로 같다** — `candidate.index` 는
+ * `autoCandidates()` 가 **필터 이전** 절대 위치로 굳히므로, sonnet5/opus5 사이에
+ * 무언가를 끼우면 credential 필터로 그 칸이 나중에 빠지더라도 둘 사이의 거리
+ * 자체가 이미 벌어져 있다(무회귀가 아니게 된다) — 그래서 끼우지 않는다.
+ * complex 진입칸(fable5) 은 사다리 맨 끝이라 다른 모든 칸이 그 아래라
+ * 무거운 `down`(12) 감점을 받는다(complex 하향 비대칭 감점, FIT_PENALTY 주석).
+ *
+ * ★키 가드는 여기 없다 — **구조적으로 후보다**(승인게이트처럼 사다리에서
+ * 자체를 빼지 않는다). 크레덴셜 필터는 호출자 축(`AutoSelectInput.modelAvailable`,
+ * `bridge-server.ts` 가 `vendorEnvReadiness(id).ready` 로 이미 배선)에서
+ * 런타임에 거른다 — #660 유출 게이트와 이중 안전. 키가 없는 기기에서는 이 칸들이
+ * `usable` 목록에서 빠지고 sonnet5/opus5/fable5 만 경쟁한다(무회귀).
  */
 const CLAUDE_RUNGS: LadderRung[] = [
   {
+    model: "MiniMax-M2.7",
+    harness: "claude",
+    why: "mid 등급 최저단가($0.3/$1.2, 지표 0.75). sonnet5 **앞**(인덱스가 낮음, down 감점만 받음)이라 simple 단가경쟁에서 압도적으로 유리하다 — 키 있으면(사장님 A안).",
+  },
+  {
+    model: "glm-4.7",
+    harness: "claude",
+    why: "mid 등급 2번째 최저단가($0.6/$2.2, 지표 1.4). GLM 5.2 의 하위 모델. 키 있으면(사장님 A안).",
+  },
+  {
+    model: "kimi-for-coding",
+    harness: "claude",
+    why: "mid 등급($0.95/$4.0, 지표 2.475). Kimi K2.7 Code — 플랜 게이트 없이 전 멤버가 쓸 수 있는 칸(k3 시리즈와 달리 Moderato 이상 불필요). 키(KIMI_API_KEY) 있으면(사장님 A안).",
+  },
+  {
     model: "claude-sonnet-5",
     harness: "claude",
-    why: "mid 칸 최저단가($3/$15). haiku($1/$5)가 더 싸지만 현행 simple 바닥이 sonnet5 이고 하향은 이 티켓 범위가 아니다(비용 회귀 가드는 상향만 본다).",
+    why: "mid 칸 최저단가($3/$15). haiku($1/$5)가 더 싸지만 현행 simple 바닥이 sonnet5 이고 하향은 이 티켓 범위가 아니다(비용 회귀 가드는 상향만 본다). ★sonnet5 자신은 **진입칸**(entry.simple)이자 opus5 의 바로 앞 칸(인덱스 차 1, 무회귀 보존) — 위 3개 env-swap 칸은 이 칸보다 인덱스가 낮아 시장가 우위만으로 이 칸을 이겨야 한다(강제 배치가 아니다).",
   },
   {
     model: "claude-opus-5",
     harness: "claude",
-    why: "top 칸($5/$25). opus-4-8 과 동일단가·동일등급이라 중복 칸을 만들지 않았다. standard 진입점(사장님 결정 2026-07-25).",
+    why: "top 칸($5/$25). opus-4-8 과 동일단가·동일등급이라 중복 칸을 만들지 않았다. standard 진입점(사장님 결정 2026-07-25). ★sonnet5 의 바로 다음 칸(인덱스 차 1) — 아래 4개 top 등급 env-swap 칸은 전부 이 칸 **뒤**에 둬서 sonnet5↔opus5 거리를 건드리지 않는다.",
+  },
+  {
+    model: "MiniMax-M3",
+    harness: "claude",
+    why: "top 등급 최저단가($0.6/$2.4, 지표 1.5). SWE-bench Verified 80.5(자체보고) — top 칸(opus5 96.0) 대비 낮아도 standard 경쟁에서 단가 우위가 크다. opus5 **뒤**(up 감점을 받지만 단가차가 압도적이라 이겨도 됨) — 키 있으면(사장님 A안).",
+  },
+  {
+    model: "glm-5.2",
+    harness: "claude",
+    why: "top 등급($1.4/$4.4, 지표 2.9). Verified 미보고(SWE-bench Pro 62.1 만 발표) — 벤치 비교불가라 능력등급 폴백으로만 opus5 와 겨룬다. 키 있으면(사장님 A안).",
+  },
+  {
+    model: "k3",
+    harness: "claude",
+    why: "top 등급($3.0/$15.0, 지표 9.0) — opus5(15) 보다는 싸다. SWE-bench 4종 전부 미보고(벤더가 자체 벤치로 전환)라 능력등급 폴백. 키(KIMI_API_KEY, Moderato 이상 플랜) 있으면(사장님 A안).",
+  },
+  {
+    model: "k3-256k",
+    harness: "claude",
+    why: "k3 와 동일 단가·동일 게이트 — 컨텍스트만 256k. 키 있으면(사장님 A안).",
   },
   {
     model: "claude-fable-5",
     harness: "claude",
-    why: "frontier 칸($10/$50) — 우리가 가진 가장 비싼 칸. complex 진입점(현행 유지).",
+    why: "frontier 칸($10/$50) — 우리가 가진 가장 비싼 칸. complex 진입점(현행 유지). 사다리의 다른 모든 칸(env-swap 포함)이 이 칸보다 인덱스가 낮아 complex 에서는 무거운 down(12) 감점을 받는다 — SWE 우위와 무관하게도 하향이 억제된다.",
   },
 ];
 
@@ -423,38 +479,13 @@ export const LADDER_EXCLUSIONS: Readonly<Record<string, string>> = {
     "단가가 추정치(pricing.estimated) 다. 추정 단가로 순서를 정하면 '실단가 기반 사다리' 라는 이 파일의 전제가 깨진다 — db3qs0o6 서베이가 실단가를 확정하면 편입 검토.",
   "gpt-5.4-mini":
     "cheap 등급 최저단가($0.75/$4.5)지만 코딩 에이전트로서의 적합성이 한 번도 측정되지 않았다. 진입점으로 쓰면 simple 티켓 실패율이 오를 수 있고, 그 판정은 P2-4 효과집계의 몫이다.",
-  // ── Z.ai GLM (MTtCVCP4) ────────────────────────────────────────────────
-  // 사다리 = **라우팅이 자동으로 고르는 칸**이다. GLM 은 별도 구독(Z.ai Coding
-  // Plan)이 있어야 도는데, 키가 없는 기기에서 사다리가 GLM 을 고르면 그 티켓은
-  // 하네스 기본 백엔드로 새거나(=Anthropic 쿼터) 인증 에러로 끝난다. 게다가
-  // 코딩 적합성 실측이 0 이라 사다리 순서를 정할 근거도 없다.
-  // → 지금은 **명시 지정**(dispatch model='glm-4.7', 오케 셀렉터)으로만 닿는다.
-  //   라이브 1건 완주 + 효과집계가 쌓이면 편입 검토(서베이 V1-2/V1-5).
-  "glm-5.2":
-    "별도 구독(Z.ai Coding Plan) 필요 + 코딩 적합성 실측 0. 자동 선택 대상이 아니라 명시 지정 전용이다. 라이브 검증 후 재검토(서베이 V1-2).",
-  "glm-4.7":
-    "위 glm-5.2 와 동일. 단가는 제일 싸지만(=사다리 바닥 후보) 구독·실측이 선행되지 않으면 simple 티켓을 조용히 실패시키는 칸이 된다.",
-  // ── MiniMax Token Plan (tg6U7MKt) ──────────────────────────────────────
-  // GLM 과 같은 사유다. 별도 구독(Token Plan $20~/월)이 있어야 돌고, 키가 없는
-  // 기기에서 사다리가 이 칸을 고르면 프로파일이 통째로 미주입돼(전부-아니면-전무)
-  // 하네스 기본 백엔드로 새거나 인증 에러로 끝난다. 코딩 적합성 실측도 0 이다.
-  // → 명시 지정(dispatch model='MiniMax-M3')으로만 닿는다.
-  "MiniMax-M3":
-    "별도 구독(MiniMax Token Plan) 필요 + 우리 하네스에서의 코딩 적합성 실측 0. 자동 선택 대상이 아니라 명시 지정 전용이다. 라이브 검증 후 재검토(서베이 V1-4).",
-  "MiniMax-M2.7":
-    "위 MiniMax-M3 와 동일. 단가가 더 싸도(=사다리 바닥 후보) 구독·실측이 선행되지 않으면 simple 티켓을 조용히 실패시키는 칸이 된다.",
-  // ── Kimi Code (tUobgoQF) ───────────────────────────────────────────────
-  // GLM/MiniMax 와 같은 사유다. 별도 구독(Kimi 멤버십)이 있어야 돌고, 키가 없는
-  // 기기에서 사다리가 이 칸을 고르면 프로파일이 통째로 미주입돼(전부-아니면-전무)
-  // 하네스 기본 백엔드로 새거나 인증 에러로 끝난다. 코딩 적합성 실측도 0 이다.
-  // + Kimi 는 **플랜 티어까지** 축이 하나 더 있다(k3 계열은 Moderato 이상 전용 —
-  //   그 아래 플랜은 모델 id 가 맞아도 401). 사다리는 그 축을 모른다.
-  // → 명시 지정(dispatch model='kimi-for-coding', 퀵레인 셀렉터)으로만 닿는다.
-  k3: "별도 구독(Kimi 멤버십 Moderato 이상) 필요 + 우리 하네스에서의 코딩 적합성 실측 0. 자동 선택 대상이 아니라 명시 지정 전용이다. 라이브 검증 후 재검토(tUobgoQF).",
-  "k3-256k":
-    "위 k3 와 동일(같은 Moderato 이상 게이트). 컨텍스트만 256k 로 고정된 판이라 사다리 순서를 가를 근거가 되지 못한다.",
-  "kimi-for-coding":
-    "위 k3 와 동일하되 플랜 게이트는 없다(전 멤버). 그래도 구독 자체가 선행조건이고 실측이 0 이라, 사다리 바닥에 놓으면 키 없는 기기의 simple 티켓을 조용히 실패시킨다.",
+  // ── ★env-swap 벤더(GLM/MiniMax/Kimi) — 이 티켓(hyKsSYYM, 사장님 A안)으로
+  // 위 CLAUDE_RUNGS 에 편입됐다. "명시 지정 전용" 배제는 여기서 끝났다:
+  // glm-5.2·glm-4.7·MiniMax-M3·MiniMax-M2.7·k3·k3-256k·kimi-for-coding 은
+  // 더 이상 이 표에 없다 — 사다리 완결성 테스트가 "사다리에 있거나 여기 있거나"
+  // 를 요구하므로, 편입된 모델을 여기 남겨 두면 중복(사다리+제외 동시)이 된다.
+  // 키 없는 기기에서의 안전은 이 표가 아니라 `AutoSelectInput.modelAvailable`
+  // (= `vendorEnvReadiness(id).ready`, bridge-server.ts 배선)이 런타임에 맡는다.
 };
 
 /** rung 을 레지스트리와 대조해 검증한다(불일치 = 모듈 로드 실패). */
@@ -534,7 +565,7 @@ export const MODEL_LADDERS: Readonly<
   claude: buildLadder(
     "claude",
     CLAUDE_RUNGS,
-    { simple: 0, standard: 1, complex: 2 },
+    { simple: 3, standard: 4, complex: 9 },
     { pinsModel: true },
   ),
   // gemini/antigravity/local/custom: CLI-verified 모델 사실이 아직 없어

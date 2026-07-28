@@ -280,9 +280,19 @@ describe("★회귀 0 — 기존 벤더(claude/codex) 스폰이 그대로다", (
     expect(modelsByHarness("gpt").map((m) => m.id)).toEqual(
       modelsByVendor("openai").map((m) => m.id),
     );
-    // 사다리는 여전히 anthropic 행만 태운다(GLM 은 LADDER_EXCLUSIONS).
+    // ★hyKsSYYM(사장님 A안) 이후 claude 사다리는 anthropic 행만이 아니다 —
+    // env-swap 벤더(zai/minimax/moonshot)도 harness=claude 로 같은 사다리에
+    // 탄다(벤더는 하네스가 아니다, USbdRV4k 축분리). 여기서 확인할 불변식은
+    // "provider=anthropic 만" 이 아니라 "harness 는 여전히 claude 하나" 다.
     for (const rung of ladderFor("claude")!.rungs) {
-      expect(getModel(rung.model)!.provider, rung.model).toBe("anthropic");
+      expect(getModel(rung.model)!.harness, rung.model).toBe("claude");
+    }
+    // anthropic 세 칸(sonnet5/opus5/fable5)은 여전히 사다리 안에 있다(회귀 0).
+    for (const id of ["claude-sonnet-5", "claude-opus-5", "claude-fable-5"]) {
+      expect(
+        ladderFor("claude")!.rungs.some((r) => r.model === id),
+        id,
+      ).toBe(true);
     }
   });
 

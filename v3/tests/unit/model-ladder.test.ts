@@ -171,14 +171,21 @@ describe("★실단가 기반 순서 (PR 근거)", () => {
     expect(entryRung("gpt", "standard")!.model).toBe("gpt-5.6-terra");
   });
 
-  it("claude 칸도 같은 규칙으로 설명된다(mid=sonnet5, top=opus5, frontier=fable5)", () => {
-    // ★"실단가 최저" 는 **사다리 후보 안에서** 따진다. env-swap 벤더 행(GLM)은
-    // 단가가 더 싸도 별도 구독이 필요해 LADDER_EXCLUSIONS 에 있고, 그 배제 사유가
-    // 곧 여기서 제외하는 근거다 — 배제 목록을 지우면 이 단언이 먼저 깨진다.
-    const eligible = cheapestByCapability("claude", "mid").filter(
-      (m) => !(m.id in LADDER_EXCLUSIONS),
-    );
-    expect(eligible[0].id).toBe("claude-sonnet-5");
+  it("claude 진입칸은 sonnet5/opus5/fable5 그대로다 — env-swap 은 더 싸도 진입칸을 대체하지 않는다(점수가 결정, hyKsSYYM)", () => {
+    // ★hyKsSYYM(사장님 A안) 이전엔 "실단가 최저" 가 진입칸과 같았다 — GLM/MiniMax/
+    // Kimi 가 LADDER_EXCLUSIONS 에 있어 후보 자체가 아니었기 때문이다. 이제는
+    // 편입돼 있고(제외 목록에 없음) 실단가도 더 싸다 — 그런데도 진입칸은 그대로
+    // sonnet5/opus5/fable5 다. "강제 배치 말고 점수가 결정" 이라 진입칸 자체를
+    // 옮기지 않고, env-swap 칸은 사다리에서 더 **낮은 인덱스**(가벼운 down 감점)에
+    // 앉아 있다가 단가 우위로 런타임 점수 경쟁에서 이겨야 한다
+    // (model-autoselect.test.ts 의 "★env-swap 자동선택 편입" 참고).
+    const cheapestMid = cheapestByCapability("claude", "mid")[0];
+    expect(cheapestMid.id).not.toBe("claude-sonnet-5");
+    expect(cheapestMid.id in LADDER_EXCLUSIONS).toBe(false);
+    const cheapestTop = cheapestByCapability("claude", "top")[0];
+    expect(cheapestTop.id).not.toBe("claude-opus-5");
+    expect(cheapestTop.id in LADDER_EXCLUSIONS).toBe(false);
+
     expect(entryRung("claude", "simple")!.model).toBe("claude-sonnet-5");
     expect(entryRung("claude", "standard")!.model).toBe("claude-opus-5");
     expect(entryRung("claude", "complex")!.model).toBe("claude-fable-5");
@@ -274,16 +281,24 @@ describe("상향 이동 (nextRung)", () => {
     expect(nextRung("claude", alien)).toBeUndefined();
   });
 
-  it("claude 상향: sonnet5 → opus5 → fable5 → 천장", () => {
-    const a = entryRung("claude", "simple")!;
-    const b = nextRung("claude", a)!;
-    const c = nextRung("claude", b)!;
-    expect([a.model, b.model, c.model]).toEqual([
-      "claude-sonnet-5",
-      "claude-opus-5",
-      "claude-fable-5",
-    ]);
-    expect(nextRung("claude", c)).toBeUndefined();
+  it("claude 상향: 진입칸에서 한 칸씩 올라가면 사다리 끝(fable5)에서 천장을 만난다", () => {
+    // ★hyKsSYYM 이전엔 사다리에 3칸뿐이라 sonnet5→opus5→fable5 가 곧 "한 칸씩"
+    // 이었다. 지금은 env-swap 칸이 sonnet5/opus5 뒤(더 높은 인덱스)에도 끼어
+    // 있어(top 등급 4칸이 opus5 앞에 있다) `nextRung` 한 번은 다음 **인덱스**로
+    // 갈 뿐 다음 **진입칸**으로 가지 않는다 — 그 계약은 안 바뀌었다(model-ladder.ts
+    // nextRung 주석). 여기서는 "끝까지 오르면 fable5 에서 멈춘다" 만 확인한다.
+    let rung = entryRung("claude", "simple")!;
+    const path = [rung.model];
+    for (let i = 0; i < 20; i++) {
+      const next = nextRung("claude", rung);
+      if (!next) break;
+      rung = next;
+      path.push(rung.model);
+    }
+    expect(rung.model).toBe("claude-fable-5");
+    expect(nextRung("claude", rung)).toBeUndefined();
+    expect(path[0]).toBe("claude-sonnet-5");
+    expect(path).toContain("claude-opus-5");
   });
 });
 

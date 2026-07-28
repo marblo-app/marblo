@@ -173,12 +173,14 @@ describe("★MiniMax 행 등록 — provider=minimax / harness=claude", () => {
     expect(JSON.stringify(MODEL_REGISTRY)).not.toMatch(/sk-[a-z]{2}-/i);
   });
 
-  it("★사다리엔 안 들어간다 — 자동 선택이 아니라 명시 지정 전용이다", () => {
+  it("★사다리에 들어간다(hyKsSYYM, 사장님 A안) — 키 있으면 워커 자동선택 후보", () => {
+    // ★tg6U7MKt 당시엔 "명시 지정 전용"(LADDER_EXCLUSIONS)이었다. hyKsSYYM
+    // (사장님 A안)이 그 배제를 풀었다 — MiniMax 도 키만 있으면 워커 자동선택
+    // 사다리 칸이다. LADDER_EXCLUSIONS 에 남아 있으면 완결성 테스트(사다리 XOR
+    // 제외)가 깨지므로, 여기 없다는 것 자체가 편입의 증거다.
     for (const id of MINIMAX_IDS) {
-      expect(LADDER_EXCLUSIONS[id], id).toBeTruthy();
-      expect(ladderFor("claude")!.rungs.some((r) => r.model === id)).toBe(
-        false,
-      );
+      expect(LADDER_EXCLUSIONS[id], id).toBeUndefined();
+      expect(ladderFor("claude")!.rungs.some((r) => r.model === id)).toBe(true);
     }
   });
 
