@@ -56,6 +56,34 @@
  *   · claude-haiku-4-5-20251001: 우리 레지스트리 모델 중 **유일하게** 공식
  *     리더보드에 등재.
  *   · Kimi K2.7 Code: 벤더가 SWE-bench 를 아예 보고하지 않는다(자체 벤치로 이동).
+ *
+ * ── ★2026-07-28 재조사(PbGJpaP9) — "어느 변형이 공통 축인가" ─────────────
+ * 정보표가 Claude=Verified 96 과 GPT-5.6=Pro 64.6 을 한 열에 나란히 놓아 능력차로
+ * 읽히던 사고를 고치며, **전 모델을 Verified 로 통일할 수 있는가**를 먼저 확인했다.
+ *
+ *   Q1. GPT-5.6 의 Verified 가 어디엔가 있는가?  → **없다.** 두 곳에서 확인:
+ *       · openai.com/index/gpt-5-6 (Wayback 20260725095156) 의 Coding 표는
+ *         "AA Coding Agent Index v1.1 / SWE-Bench Pro / DeepSWE v1.1 /
+ *         Terminal-Bench 2.1" 네 행뿐. Verified 행 자체가 없다.
+ *       · swebench.com 공식 Verified 리더보드의 GPT 최신 항목은
+ *         gpt-5.2-2025-12-11. 5.5/5.6 제출이 없다.
+ *       → "전 모델 Verified 통일" 은 데이터가 허락하지 않는다.
+ *
+ *   Q2. 그럼 공통 축이 아예 없나?  → **있다. Pro 다.** 그리고 그 축은
+ *       **경쟁 벤더끼리 교차검증**돼 있다: OpenAI 가 자기 GPT-5.6 표에 남의 모델인
+ *       Claude Fable 5 = 80%, Claude Opus 4.8 = 69.2% 를 Pro 로 실었는데, 이 값이
+ *       Anthropic 자기 시스템카드의 80.0 / 69.2 와 **정확히 일치**한다(아래 행들).
+ *       한 벤더가 자기에게 유리하게 고른 숫자였다면 이렇게 맞아떨어지지 않는다.
+ *
+ *   결론: 표/차트의 기본 축은 **Pro**. 같은 Pro 위에서 opus-5 79.2 vs
+ *   gpt-5.6-sol 64.6 이므로, 96 vs 64.6 오독이 수치를 하나도 건드리지 않고 사라진다.
+ *   Verified 는 여전히 고를 수 있고, 그때 gpt 계열은 정직하게 "확인 필요" 로 빈다.
+ *   ★이 판정은 코드에 상수로 박지 않는다 — `benchVariantCoverage()` 가 지금 데이터의
+ *   커버리지를 세어 돌려주고, 화면이 그 1위를 기본값으로 쓴다. 벤더가 보고 벤치를
+ *   또 갈아타면 기본 축도 따라 움직인다.
+ *
+ *   · Kimi K3: 07-27 엔 카드가 "Upcoming release" 였고 07-28 에 실제 공개됐는데,
+ *     SWE-bench 4종이 한 줄도 없다(DeepSWE/FrontierSWE/SWE-Marathon 등으로 이동).
  */
 
 import { getModel, isKnownModelId } from "./model-registry";
@@ -77,6 +105,63 @@ export const BENCHMARK_IDS: readonly BenchmarkId[] = [
   "swe-bench-multilingual",
   "swe-bench-multimodal",
 ] as const;
+
+/**
+ * ★**변형 서술자** — `BenchmarkId` 를 화면이 쓸 수 있는 사실로 승격시킨 것.
+ *
+ * 왜 id 만으로 부족했나(PbGJpaP9 이 고치는 실물 사고): 정보표는 모델마다
+ * "점수가 있는 첫 벤치"를 골라 **한 열에** 넣었다. 그래서 Claude 는 Verified 96,
+ * GPT-5.6 은 Pro 64.6 이 같은 열에 나란히 섰고, 사용자는 그 32pt 를 능력차로
+ * 읽었다. 실제로는 문제집합이 다른 두 시험의 점수라 뺄셈 자체가 성립하지 않는다
+ * (같은 Pro 축에서 보면 opus-5 79.2 vs gpt-5.6-sol 64.6 이다).
+ *
+ * 데이터에 변형이 **id 로만** 있으면 화면은 그걸 그냥 라벨로 쓰고 만다. 여기에
+ * 라벨·설명·주의문을 같이 담아 두면, 열을 한 변형으로 고정하고 "왜 고정했는지"를
+ * 사용자에게 말하는 것이 UI 의 재량이 아니라 **데이터가 시키는 일**이 된다.
+ */
+export interface BenchVariant {
+  id: BenchmarkId;
+  /** 표준 표기. 고유명사라 번역하지 않는다(출처 화면과 대조 가능해야 한다). */
+  label: string;
+  /** 짧은 이름 — 칩·축 라벨처럼 폭이 좁은 자리용. */
+  short: string;
+  /** 이 변형이 **무엇으로 다른가**. 화면이 "왜 섞으면 안 되나" 를 말할 때 쓴다. */
+  blurb: string;
+}
+
+/**
+ * ★서술은 벤치 **소유자**가 정의한 성격만 적는다. 문제 수·난이도 배수 같은
+ * 수치는 여기 적지 않는다 — 이 파일의 규율 1(날조 금지)은 점수 칸에만 걸리는 게
+ * 아니라 설명문에도 걸린다. 확인한 것만: 넷은 서로 **문제집합이 다르다**.
+ */
+export const BENCH_VARIANTS: Readonly<Record<BenchmarkId, BenchVariant>> = {
+  "swe-bench-verified": {
+    id: "swe-bench-verified",
+    label: "SWE-bench Verified",
+    short: "Verified",
+    blurb:
+      "사람이 풀 수 있음을 검수한 문제집합. 가장 널리 인용되지만, 우리 fleet 중 gpt 계열은 이 수치를 공개하지 않는다.",
+  },
+  "swe-bench-pro": {
+    id: "swe-bench-pro",
+    label: "SWE-bench Pro",
+    short: "Pro",
+    blurb:
+      "Verified 와 문제집합이 다른 별개 시험(더 어렵다고 알려져 점수대가 낮게 나온다). ★우리 fleet 에서 claude·gpt·grok·glm·MiniMax 가 모두 값을 가진 유일한 축이다.",
+  },
+  "swe-bench-multilingual": {
+    id: "swe-bench-multilingual",
+    label: "SWE-bench Multilingual",
+    short: "Multilingual",
+    blurb: "여러 프로그래밍 언어로 확장한 문제집합.",
+  },
+  "swe-bench-multimodal": {
+    id: "swe-bench-multimodal",
+    label: "SWE-bench Multimodal",
+    short: "Multimodal",
+    blurb: "이미지가 붙은 이슈를 다루는 문제집합.",
+  },
+};
 
 /**
  * 점수를 낸 **하네스(스캐폴드)**. 같은 모델이라도 이게 다르면 다른 실험이다.
@@ -112,11 +197,23 @@ export interface BenchRecord {
   model: string;
   /** 라우팅 대상(registry)인가, 편입 검토용 후보(reference)인가. */
   kind: "registry" | "reference";
+  /** ★변형(=문제집합) 축. 이게 다른 두 점수는 **직접 비교 대상이 아니다**. */
   benchmark: BenchmarkId;
   /**
-   * 출처가 표기한 벤치 **버전/변형**. 표기가 없으면 `"unspecified"`.
+   * ★출처가 **화면에 그대로 적은** 변형 이름. 표준 표기(`BENCH_VARIANTS[].label`)와
+   * 다를 때만 적는다 — 같으면 생략하고 `variantLabelOf()` 가 표준 표기를 돌려준다.
+   *
+   * 왜 남기나: OpenAI 는 같은 벤치를 "SWE-Bench Pro" 로, MiniMax 는 카드
+   * 메타데이터에서 "ScaleAI/SWE-bench_Pro" 로 적는다. 리뷰어가 출처 화면을 열어
+   * 우리 행과 대조할 때 찾아야 할 문자열이 이것이라, 표준화해 버리면 대조가
+   * 한 단계 어려워진다.
+   */
+  variantLabel?: string;
+  /**
+   * 출처가 표기한 벤치 **버전**(변형 안에서의 판올림). 표기가 없으면 `"unspecified"`.
    * (예: OpenAI 는 GPT-5.5 발표에선 "Public" 이라 적고 GPT-5.6 발표에선 안 적었다.
    *  그 차이가 두 발표의 58.6 vs 59.4 를 설명할 수도 있어 버리지 않는다.)
+   * ★`benchmark`(문제집합)와는 다른 축이다 — 이건 섞어도 되고, 저건 안 된다.
    */
   version: string;
   harness: BenchHarness;
@@ -451,6 +548,7 @@ const REGISTRY_ROWS: BenchRecord[] = [
     model: "gpt-5.6-sol",
     kind: "registry",
     benchmark: "swe-bench-pro",
+    variantLabel: "SWE-Bench Pro",
     version: "unspecified",
     harness: { name: "vendor-internal (OpenAI)" },
     score: 64.6,
@@ -463,6 +561,7 @@ const REGISTRY_ROWS: BenchRecord[] = [
     model: "gpt-5.6-terra",
     kind: "registry",
     benchmark: "swe-bench-pro",
+    variantLabel: "SWE-Bench Pro",
     version: "unspecified",
     harness: { name: "vendor-internal (OpenAI)" },
     score: 63.4,
@@ -474,6 +573,7 @@ const REGISTRY_ROWS: BenchRecord[] = [
     model: "gpt-5.6-luna",
     kind: "registry",
     benchmark: "swe-bench-pro",
+    variantLabel: "SWE-Bench Pro",
     version: "unspecified",
     harness: { name: "vendor-internal (OpenAI)" },
     score: 62.7,
@@ -485,6 +585,7 @@ const REGISTRY_ROWS: BenchRecord[] = [
     model: "gpt-5.5",
     kind: "registry",
     benchmark: "swe-bench-pro",
+    variantLabel: "SWE-Bench Pro",
     version: "unspecified",
     harness: { name: "vendor-internal (OpenAI)" },
     score: 59.4,
@@ -497,6 +598,7 @@ const REGISTRY_ROWS: BenchRecord[] = [
     model: "gpt-5.5",
     kind: "registry",
     benchmark: "swe-bench-pro",
+    variantLabel: "SWE-Bench Pro (Public)",
     version: "Public",
     harness: { name: "vendor-internal (OpenAI)" },
     score: 58.6,
@@ -587,6 +689,7 @@ const REGISTRY_ROWS: BenchRecord[] = [
     model: "MiniMax-M3",
     kind: "registry",
     benchmark: "swe-bench-pro",
+    variantLabel: "ScaleAI/SWE-bench_Pro",
     version: "unspecified",
     harness: { name: "vendor-internal (MiniMax)" },
     score: 59.0,
@@ -599,6 +702,7 @@ const REGISTRY_ROWS: BenchRecord[] = [
     model: "MiniMax-M2.7",
     kind: "registry",
     benchmark: "swe-bench-pro",
+    variantLabel: "SWE-Pro",
     version: "unspecified",
     harness: { name: "vendor-internal (MiniMax)" },
     score: 56.2,
@@ -611,6 +715,7 @@ const REGISTRY_ROWS: BenchRecord[] = [
     model: "MiniMax-M2.7",
     kind: "registry",
     benchmark: "swe-bench-multilingual",
+    variantLabel: "SWE Multilingual",
     version: "unspecified",
     harness: { name: "vendor-internal (MiniMax)" },
     score: 76.5,
@@ -634,18 +739,24 @@ const REGISTRY_ROWS: BenchRecord[] = [
 
   // ── Moonshot Kimi Code (세 번째 env-swap 벤더의 세 행) ──────────────────
   // 셋 다 빈 칸이고, 그것이 이 벤더에 대해 우리가 아는 전부다.
+  //
+  // ★2026-07-28 재수집(PbGJpaP9): 직전 조사(07-27)에선 K3 카드가 아직
+  // "Upcoming release" 였다. 오늘 실제로 공개돼 벤치표를 받아봤고 — **SWE-bench
+  // 계열이 한 줄도 없다**. 그래서 빈 칸은 그대로지만 note 의 성격이 바뀌었다:
+  // "아직 안 나왔다"(시간이 해결) → "나왔는데 벤더가 이 벤치를 안 쓴다"(재수집해도
+  // 안 나온다). 이 구분이 다음 사람의 행동을 바꾸므로 note 를 갈아끼운다.
   ...(["k3", "k3-256k"] as const).map(
     (model): BenchRecord => ({
       model,
       kind: "registry",
       benchmark: "swe-bench-verified",
       version: "unspecified",
-      harness: { name: "vendor-internal (Moonshot)" },
+      harness: { name: "vendor-internal (Moonshot, Kimi Code harness)" },
       score: null,
       source: SRC.kimiK3Card,
       sourceKind: "model-vendor",
-      asOf: "2026-07-27",
-      note: "no official number: 2026-07-27 기준 공식 HF 카드가 아직 'Upcoming release'(카운트다운만 있고 벤치표 없음). 오픈웨이트 공개 후 재수집 대상.",
+      asOf: "2026-07-28",
+      note: "no official number: 2026-07-28 공개된 공식 HF 카드 §3 Evaluation Results 의 Coding 절이 DeepSWE 67.5 / ProgramBench 77.8 / Terminal-Bench 2.1 88.3 / FrontierSWE 81.2 / SWE-Marathon 42.0 / Kimi Code Bench 2.0 72.9 로만 채워져 있고 SWE-bench 4종은 한 줄도 없다. 공식 기술블로그(kimi.com/blog/kimi-k3)도 동일 — 각주가 DeepSWE·Terminal-Bench·ProgramBench 방법론만 밝힌다. ★베이스인 K2.6 은 Verified 80.2 를 냈으므로(아래 참조행) 벤더가 세대를 넘기며 보고 벤치를 갈아탄 것이지, 측정을 못 한 게 아니다.",
     }),
   ),
   {
@@ -840,6 +951,37 @@ const REFERENCE_ROWS: BenchRecord[] = [
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * 자유표기 변형 이름 → `BenchmarkId`. 어느 것도 아니거나 **둘 이상**에 걸리면 null.
+ *
+ * 둘 이상을 null 로 떨구는 게 핵심이다: "SWE-bench Verified (Pro subset)" 같은
+ * 문자열은 사람이 봐도 어느 쪽인지 확정되지 않는다. 그런 행은 통과시키는 것보다
+ * 부팅을 죽이는 편이 싸다(규율 1).
+ */
+export function variantFamilyOf(variantLabel: string): BenchmarkId | null {
+  const s = variantLabel.toLowerCase();
+  const hits = BENCHMARK_IDS.filter((id) => VARIANT_PATTERN[id].test(s));
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
+ * 변형을 알아보는 패턴. `pro` 만 경계를 손으로 적는데, 이유는 실측 표기가
+ * "SWE-Bench Pro"(공백) · "SWE-Pro"(하이픈) · "ScaleAI/SWE-bench_Pro"(언더바)로
+ * 갈리기 때문이다. 언더바는 정규식에서 **단어 문자**라 `\bpro` 가 안 걸린다.
+ * 반대로 경계 없이 `pro` 만 찾으면 "ProgramBench" 같은 남의 벤치 이름에 걸린다.
+ */
+const VARIANT_PATTERN: Readonly<Record<BenchmarkId, RegExp>> = {
+  "swe-bench-verified": /verified/,
+  "swe-bench-pro": /(?:\bpro\b|[_-]pro\b)/,
+  "swe-bench-multilingual": /multilingual/,
+  "swe-bench-multimodal": /multimodal/,
+};
+
+/** 화면에 적을 변형 이름 — 출처 표기가 있으면 그것, 없으면 표준 표기. */
+export function variantLabelOf(rec: BenchRecord): string {
+  return rec.variantLabel ?? BENCH_VARIANTS[rec.benchmark].label;
+}
+
 function label(rec: BenchRecord, i: number): string {
   return `#${i} ${rec.model}/${rec.benchmark}/${harnessKey(rec.harness)}`;
 }
@@ -913,6 +1055,37 @@ export function validateBenchRecords(
         `[model-bench-reference] ${at}: 알 수 없는 benchmark "${rec.benchmark}".`,
       );
     }
+
+    // ── ★변형 라벨 교차검증 ─────────────────────────────────────────────
+    // `variantLabel` 은 출처가 화면에 적은 이름이므로 표기 흔들림(대소문자,
+    // 하이픈/언더바, 네임스페이스 접두)은 허용해야 한다. 하지만 **어느 변형을
+    // 말하는가**는 흔들리면 안 된다 — "SWE-Bench Pro" 라 적힌 출처의 값이
+    // `benchmark: "swe-bench-verified"` 행에 들어가는 붙여넣기 사고가 이 표에서
+    // 가장 비싼 실수이고(그게 바로 이 티켓이 고치는 오독의 데이터판이다),
+    // 사람 눈으로는 두 필드가 열 몇 개 떨어져 있어 안 잡힌다.
+    if (rec.variantLabel !== undefined) {
+      if (!rec.variantLabel.trim()) {
+        throw new Error(
+          `[model-bench-reference] ${at}: variantLabel 이 빈 문자열입니다. ` +
+            "출처 표기가 표준과 같으면 필드를 아예 빼세요(표준 표기가 기본값).",
+        );
+      }
+      const claimed = variantFamilyOf(rec.variantLabel);
+      if (claimed === null) {
+        throw new Error(
+          `[model-bench-reference] ${at}: variantLabel "${rec.variantLabel}" 에서 ` +
+            "변형(Verified/Pro/Multilingual/Multimodal)을 읽을 수 없습니다. " +
+            "출처가 정말 그렇게만 적었다면 그 행은 어느 변형인지 확정되지 않은 것이라 담으면 안 됩니다.",
+        );
+      }
+      if (claimed !== rec.benchmark) {
+        throw new Error(
+          `[model-bench-reference] ${at}: variantLabel 이 "${rec.variantLabel}"(= ${claimed}) ` +
+            `인데 benchmark 는 "${rec.benchmark}" 입니다. 출처가 적은 변형과 이 행이 주장하는 ` +
+            "변형이 다릅니다 — 둘 중 하나가 오타이거나 다른 변형의 값을 붙여넣은 것입니다.",
+        );
+      }
+    }
     if (!rec.version.trim()) {
       throw new Error(
         `[model-bench-reference] ${at}: version 이 비었습니다(표기가 없으면 "unspecified").`,
@@ -985,6 +1158,56 @@ export function benchRowsFor(
       (opts.kind ? r.kind === opts.kind : true) &&
       (opts.scoredOnly ? r.score !== null : true),
   );
+}
+
+/**
+ * ★변형별 **커버리지** — "이 변형으로 보면 우리 모델 중 몇 개에 값이 있나".
+ *
+ * 화면이 어느 변형을 기본 축으로 삼을지 고르는 근거다. 상수로 박지 않는 이유는
+ * 이 파일이 지난 이틀 동안 실제로 겪은 일 때문이다: Kimi 는 세대를 넘기며 SWE-bench
+ * 를 통째로 버렸고, Z.ai 는 4.7(Verified) → 5.2(Pro) 로 보고 벤치를 바꿨다. 벤더가
+ * 무엇을 보고할지는 우리가 통제하지 못하므로, "지금 데이터에서 가장 많은 모델을
+ * 같은 자로 잴 수 있는 변형" 을 그때그때 세는 편이 옳다.
+ *
+ * 세는 단위는 **행이 아니라 모델**이다. haiku 4.5 는 같은 Verified 에 하네스가 다른
+ * 두 행을 갖는데, 그걸 2 로 세면 한 모델이 커버리지를 두 배로 부풀린다.
+ *
+ * `opts.models` 를 주면 그 id 들로만 센다. 정보표는 `status: "deprecated"` 행을
+ * 빼고 그리므로, 화면이 고를 기본 축은 **화면에 실제로 있는 모델** 기준이어야
+ * 한다 — 전체 표 기준으로 세면 표에 없는 모델이 기본값을 흔든다.
+ */
+export interface BenchVariantCoverage {
+  variant: BenchVariant;
+  /** 이 변형에 **점수가 있는** 레지스트리 모델 수(중복 id 제거). */
+  scoredModels: number;
+  /** 점수 유무와 무관하게 이 변형 행을 가진 레지스트리 모델 수. */
+  models: number;
+}
+
+/**
+ * `scoredModels` 내림차순. 동률이면 `BENCHMARK_IDS` 순서(= 인용 빈도 순)로
+ * 안정 정렬한다 — 같은 데이터로 두 번 부르면 같은 순서가 나와야 화면 기본값이
+ * 새로고침마다 흔들리지 않는다.
+ */
+export function benchVariantCoverage(
+  opts: { models?: readonly string[] } = {},
+): BenchVariantCoverage[] {
+  const only = opts.models ? new Set(opts.models) : null;
+  return BENCHMARK_IDS.map((id) => {
+    const rows = BENCH_REFERENCE.filter(
+      (r) =>
+        r.benchmark === id &&
+        r.kind === "registry" &&
+        (only ? only.has(r.model) : true),
+    );
+    return {
+      variant: BENCH_VARIANTS[id],
+      scoredModels: new Set(
+        rows.filter((r) => r.score !== null).map((r) => r.model),
+      ).size,
+      models: new Set(rows.map((r) => r.model)).size,
+    };
+  }).sort((a, b) => b.scoredModels - a.scoredModels);
 }
 
 /**

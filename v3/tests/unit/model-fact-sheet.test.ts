@@ -9,8 +9,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { modelFactSheet } from "../../electron/model-fact-sheet";
+import {
+  modelFactSheet,
+  modelFactSheetPayload,
+} from "../../electron/model-fact-sheet";
 import { MODEL_REGISTRY, getModel } from "../../electron/model-registry";
+import { BENCHMARK_IDS } from "../../electron/model-bench-reference";
 
 const rows = modelFactSheet();
 const byId = new Map(rows.map((r) => [r.modelId, r]));
@@ -64,66 +68,135 @@ describe("model-fact-sheet / 컨텍스트 칸", () => {
   });
 });
 
-describe("model-fact-sheet / 벤치 칸", () => {
-  it("Verified 가 있으면 Verified 를 대표로 잡는다", () => {
-    const opus5 = byId.get("claude-opus-5")?.bench;
-    expect(opus5?.benchmark).toBe("swe-bench-verified");
-    expect(opus5?.score).toBe(96.0);
-    expect(opus5?.source).toMatch(/^https:\/\//);
-  });
-
-  it("Verified 가 비어 있으면 Pro 로 내려간다(빈 칸을 0 으로 만들지 않는다)", () => {
-    // OpenAI 는 Verified 를 공개하지 않는다 — 그래서 gpt 행의 대표는 Pro 다.
-    const sol = byId.get("gpt-5.6-sol")?.bench;
-    expect(sol?.benchmark).toBe("swe-bench-pro");
-    expect(sol?.score).toBe(64.6);
-
-    // GLM-5.2 도 같은 모양(벤더가 Verified 를 안 싣는다).
-    expect(byId.get("glm-5.2")?.bench?.benchmark).toBe("swe-bench-pro");
-    expect(byId.get("glm-5.2")?.bench?.score).toBe(62.1);
-  });
-
-  it("점수가 하나도 없으면 **왜 비었는지**를 나르는 빈 행을 대표로 둔다", () => {
-    const k3 = byId.get("k3")?.bench;
-    expect(k3?.score).toBeNull();
-    expect(k3?.note).toContain("no official number");
-    expect(k3?.source).toMatch(/^https:\/\//);
-
-    const kfc = byId.get("kimi-for-coding")?.bench;
-    expect(kfc?.score).toBeNull();
-    expect(kfc?.note).toContain("no official number");
-  });
-
-  it("★같은 벤치의 다른 하네스 점수를 함께 내린다(순위 착시 방지)", () => {
-    // haiku 4.5 는 벤더 스캐폴드 73.3 과 공식 리더보드 66.6 을 둘 다 갖는다.
-    // 대표는 벤더 수치(열의 성격을 통일), 리더보드는 alternates 로 같이 보인다.
-    const haiku = byId.get("claude-haiku-4-5-20251001");
-    expect(haiku?.bench?.score).toBe(73.3);
-    expect(haiku?.benchAlternates.map((a) => a.score)).toEqual([66.6]);
-    expect(haiku?.benchAlternates[0]?.harness).toBe("mini-SWE-agent@2.0.0");
-  });
-
-  it("alternates 는 **같은 벤치**끼리만 묶인다(Verified 와 Pro 를 섞지 않는다)", () => {
+describe("model-fact-sheet / 벤치 칸(변형 고정)", () => {
+  it("★칸의 변형은 **요청한 변형**이다 — 다른 변형으로 새지 않는다", () => {
+    // 이게 이 티켓이 고친 버그의 회귀 가드다. 예전엔 모델마다 "점수가 있는 첫
+    // 변형" 을 골라서 Claude 칸엔 Verified, GPT 칸엔 Pro 가 들어갔다.
     for (const row of rows) {
-      for (const alt of row.benchAlternates) {
-        expect(alt.benchmark, row.modelId).toBe(row.bench?.benchmark);
+      for (const id of BENCHMARK_IDS) {
+        const cell = row.benchByVariant[id];
+        expect(cell.benchmark, `${row.modelId}/${id}`).toBe(id);
+        for (const alt of cell.alternates) {
+          expect(alt.benchmark, `${row.modelId}/${id} alt`).toBe(id);
+        }
+        if (cell.primary) {
+          expect(cell.primary.benchmark, `${row.modelId}/${id}`).toBe(id);
+        }
       }
     }
   });
 
+  it("★Verified 를 고르면 gpt 계열은 낮은 점수가 아니라 빈칸이다", () => {
+    // OpenAI 는 Verified 를 공개하지 않는다(2026-07-28 실측: 공식 발표문에도,
+    // swebench.com 리더보드에도 없다). 그 사실이 "64.6" 으로 둔갑하면 안 된다.
+    const sol = byId.get("gpt-5.6-sol")!;
+    expect(sol.benchByVariant["swe-bench-verified"].primary?.score).toBeNull();
+    expect(sol.benchByVariant["swe-bench-verified"].primary?.note).toContain(
+      "no official number",
+    );
+    // 같은 모델의 Pro 칸엔 값이 있다 — 빈 것은 모델이 아니라 그 **기준**이다.
+    expect(sol.benchByVariant["swe-bench-pro"].primary?.score).toBe(64.6);
+  });
+
+  it("★Pro 기준에선 claude 와 gpt 가 같은 자로 재진다(96 vs 64.6 오독의 수리)", () => {
+    const pro = (id: string) =>
+      byId.get(id)?.benchByVariant["swe-bench-pro"].primary?.score ?? null;
+    // 예전 표는 opus-5 96(Verified) 옆에 gpt-5.6-sol 64.6(Pro) 을 세웠다.
+    // 같은 Pro 축에선 79.2 vs 64.6 — 차이가 32pt 가 아니라 14.6pt 다.
+    expect(pro("claude-opus-5")).toBe(79.2);
+    expect(pro("gpt-5.6-sol")).toBe(64.6);
+    expect(
+      byId.get("claude-opus-5")?.benchByVariant["swe-bench-verified"].primary
+        ?.score,
+    ).toBe(96.0);
+  });
+
+  it("빈 칸이 두 종류로 구분된다(행이 없다 vs 찾았는데 수치가 없다)", () => {
+    // k3: Moonshot 이 SWE-bench 를 아예 안 쓴다 → 행은 있고 score 만 null.
+    const k3 = byId.get("k3")!.benchByVariant["swe-bench-verified"];
+    expect(k3.primary).not.toBeNull();
+    expect(k3.primary?.score).toBeNull();
+    expect(k3.primary?.note).toContain("no official number");
+    expect(k3.primary?.source).toMatch(/^https:\/\//);
+
+    // 같은 모델의 Multilingual: 참조 행 자체가 없다 → primary 가 null.
+    expect(
+      byId.get("k3")!.benchByVariant["swe-bench-multilingual"].primary,
+    ).toBeNull();
+  });
+
+  it("★같은 변형의 다른 하네스 점수를 함께 내린다(순위 착시 방지)", () => {
+    // haiku 4.5 는 벤더 스캐폴드 73.3 과 공식 리더보드 66.6 을 둘 다 갖는다.
+    // 대표는 벤더 수치(열의 성격을 통일), 리더보드는 alternates 로 같이 보인다.
+    const cell = byId.get("claude-haiku-4-5-20251001")!.benchByVariant[
+      "swe-bench-verified"
+    ];
+    expect(cell.primary?.score).toBe(73.3);
+    expect(cell.alternates.map((a) => a.score)).toEqual([66.6]);
+    expect(cell.alternates[0]?.harness).toBe("mini-SWE-agent@2.0.0");
+  });
+
+  it("변형 라벨은 **출처가 적은 표기** 그대로다(대조 가능해야 한다)", () => {
+    // OpenAI 는 "SWE-Bench Pro"(대문자 B), MiniMax 카드는 "ScaleAI/SWE-bench_Pro".
+    expect(
+      byId.get("gpt-5.6-sol")!.benchByVariant["swe-bench-pro"].variantLabel,
+    ).toBe("SWE-Bench Pro");
+    expect(
+      byId.get("MiniMax-M3")!.benchByVariant["swe-bench-pro"].variantLabel,
+    ).toBe("ScaleAI/SWE-bench_Pro");
+    // 표준 표기와 같은 출처는 표준 표기가 그대로 나온다.
+    expect(
+      byId.get("claude-opus-5")!.benchByVariant["swe-bench-pro"].variantLabel,
+    ).toBe("SWE-bench Pro");
+  });
+
   it("Grok 4.5 는 레지스트리 id 로 조회된다(참조행 → registry 행 전환)", () => {
-    const grok = byId.get("grok-4.5")?.bench;
-    expect(grok?.benchmark).toBe("swe-bench-pro");
-    expect(grok?.score).toBe(64.7);
+    expect(
+      byId.get("grok-4.5")?.benchByVariant["swe-bench-pro"].primary?.score,
+    ).toBe(64.7);
   });
 
   it("점수가 있는 칸은 전부 출처·하네스·일자를 달고 있다", () => {
     for (const row of rows) {
-      const b = row.bench;
-      if (!b || b.score === null) continue;
-      expect(b.harness, row.modelId).toBeTruthy();
-      expect(b.source, row.modelId).toMatch(/^https:\/\//);
-      expect(b.asOf, row.modelId).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      for (const id of BENCHMARK_IDS) {
+        const b = row.benchByVariant[id].primary;
+        if (!b || b.score === null) continue;
+        expect(b.harness, row.modelId).toBeTruthy();
+        expect(b.source, row.modelId).toMatch(/^https:\/\//);
+        expect(b.asOf, row.modelId).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      }
+    }
+  });
+});
+
+describe("model-fact-sheet / 기본 기준(변형) 파생", () => {
+  const payload = modelFactSheetPayload();
+
+  it("★기본 기준은 하드코딩이 아니라 커버리지 1위다", () => {
+    const best = [...payload.variants].sort(
+      (a, b) => b.scoredModels - a.scoredModels,
+    )[0];
+    expect(payload.defaultBenchmark).toBe(best.benchmark);
+    expect(payload.variants[0].benchmark).toBe(payload.defaultBenchmark);
+  });
+
+  it("지금 데이터에선 Pro 가 1위다(claude·gpt·grok·glm·MiniMax 가 모두 있는 유일한 축)", () => {
+    // 이 단언이 깨지면 벤더가 보고 벤치를 갈아탄 것이다 — 코드가 아니라 세상이
+    // 바뀐 것이므로, 그때는 파생이 새 1위를 자동으로 집는지 확인하고 여기를 고친다.
+    expect(payload.defaultBenchmark).toBe("swe-bench-pro");
+    const pro = payload.variants.find((v) => v.benchmark === "swe-bench-pro")!;
+    const verified = payload.variants.find(
+      (v) => v.benchmark === "swe-bench-verified",
+    )!;
+    expect(pro.scoredModels).toBeGreaterThan(verified.scoredModels);
+  });
+
+  it("고를 수 있는 변형은 전부 최소 한 모델의 점수를 갖는다(빈 축을 못 고르게)", () => {
+    for (const v of payload.variants) {
+      expect(v.scoredModels, v.benchmark).toBeGreaterThan(0);
+      expect(v.totalModels).toBe(payload.rows.length);
+      expect(v.label, v.benchmark).toBeTruthy();
+      expect(v.short, v.benchmark).toBeTruthy();
     }
   });
 });

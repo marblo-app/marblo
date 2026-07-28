@@ -125,6 +125,44 @@ export const usage = {
   "usage.factSheet.colOutput": "Output $/1M",
   "usage.factSheet.colBench": "SWE-bench (개략)",
   "usage.factSheet.colContext": "컨텍스트",
+  // ★{variant} 가 이미 "SWE-bench Pro" 처럼 벤치 이름을 통째로 들고 온다
+  // (출처 표기 그대로라서). 앞에 "SWE-bench" 를 또 붙이면 헤더가
+  // "SWE-bench SWE-bench Pro" 가 된다.
+  "usage.factSheet.colBenchVariant": "{variant} (개략)",
+
+  // ── ★기준(변형) 고정 ────────────────────────────────────
+  // SWE-bench 는 문제집합이 다른 4종이라, 열 하나에 두 변형을 섞으면 뺄셈이
+  // 성립하지 않는 두 수가 나란히 선다(Verified 96 vs Pro 64.6 = 이 화면이 실제로
+  // 낸 오독). 그래서 한 번에 한 변형만 고를 수 있다.
+  "usage.factSheet.basisLabel": "기준",
+  "usage.factSheet.basisNote":
+    "이 표와 차트의 SWE-bench 는 전부 {variant} 한 가지 기준으로 맞췄습니다({n}/{total} 모델에 공식 수치 존재). 다른 변형(Verified·Pro 등)은 문제집합이 다른 별개 시험이라 서로 빼거나 순위를 매길 수 없어 한 번에 하나만 보여 줍니다 — 기준을 바꾸면 표·차트가 함께 바뀝니다.",
+  "usage.factSheet.basisTip":
+    "SWE-bench 는 하나의 시험이 아니라 문제집합이 다른 4종(Verified·Pro·Multilingual·Multimodal)입니다. 벤더마다 공개하는 변형이 달라서(예: OpenAI 는 Pro 만, Anthropic 은 넷 다) 예전엔 모델마다 있는 변형을 골라 한 열에 넣었고, 그 결과 Verified 96 과 Pro 64.6 이 나란히 서서 능력차로 읽혔습니다. 지금은 열의 기준을 하나로 고정하고, 그 기준에 값이 없는 모델은 낮은 점수가 아니라 '확인 필요' 로 비웁니다. 기본 기준은 손으로 정한 것이 아니라 지금 데이터에서 가장 많은 모델을 같은 자로 잴 수 있는 변형이 자동으로 뽑힙니다.",
+  "usage.factSheet.benchNoVariantRow":
+    "이 모델은 {variant} 기준 공식 수치가 없습니다(다른 변형의 점수로 대신 채우지 않습니다).",
+
+  // ── ★단가 + SWE-bench 막대차트 ──────────────────────────
+  "usage.factSheet.chart.title": "단가 · 성능 한눈 비교",
+  "usage.factSheet.chart.subtitle":
+    "{variant} 점수 높은 순. 공식 수치가 있는 {n}/{total} 모델만 막대가 그려지고, 나머지는 길이 0 이 아니라 '확인 필요' 입니다. 단가와 점수는 단위가 달라 축을 공유하지 않습니다(두 패널).",
+  "usage.factSheet.chart.priceAxis": "단가 $/1M 토큰",
+  "usage.factSheet.chart.priceTip":
+    "모델 레지스트리 단가 그대로입니다. 위쪽 연한 막대가 input, 아래쪽 진한 막대가 output 입니다. 코딩 에이전트 비용은 대개 output 이 지배합니다.",
+  "usage.factSheet.chart.benchAxis": "{variant} % resolved",
+  "usage.factSheet.chart.benchTip":
+    "축은 항상 0~100 고정입니다. 최고점에 맞춰 축을 좁히면 1위가 만점처럼 보이고 모델 간 차이도 실제보다 커 보입니다.",
+  "usage.factSheet.chart.input": "input",
+  "usage.factSheet.chart.inputTip": "입력 토큰 100만 개당 단가.",
+  "usage.factSheet.chart.output": "output",
+  "usage.factSheet.chart.outputTip": "출력 토큰 100만 개당 단가.",
+  "usage.factSheet.chart.noScoreLegend": "막대 없음 = 확인 필요",
+  "usage.factSheet.chart.noScoreTip":
+    "이 기준의 공식 수치를 못 찾은 모델입니다. 0 점이 아니라 미확인이라, 막대를 그리지 않습니다.",
+  "usage.factSheet.chart.rowPriceTip":
+    "{model} — input {input} / output {output} (100만 토큰당)",
+  "usage.factSheet.chart.rowBenchTip":
+    "{model} — {variant} {score}% · 스캐폴드 {harness}",
   "usage.factSheet.maxOutput": "최대 출력 {n}",
   "usage.factSheet.estimated": "추정",
   "usage.factSheet.estimatedTip":

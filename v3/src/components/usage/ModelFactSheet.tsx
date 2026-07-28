@@ -3,12 +3,12 @@ import { useTranslation } from "../../lib/i18n";
 import { useModelFactSheetStore } from "../../stores/modelFactSheetStore";
 import { vendorColor } from "../../lib/usageBreakdown";
 import {
-  benchmarkLabel,
   formatContextTokens,
   formatRate,
   shortHarness,
 } from "../../lib/modelFactFormat";
 import { groupModelsByTier, type ModelTier } from "../../lib/modelTier";
+import { ModelFactChart } from "./ModelFactChart";
 
 /**
  * 사용량 탭 상단 **모델 정보표** — 기본 접힘.
@@ -35,6 +35,30 @@ import { groupModelsByTier, type ModelTier } from "../../lib/modelTier";
  * 함께 보인다(haiku 4.5: 벤더 73.3 vs 공식 리더보드 66.6). 열을 세로로 훑어 순위를
  * 매기지 말라는 경고를 표 안에 박아 두는 셈이다.
  *
+ * ── ★★기준(변형) 고정 — 이 화면이 실제로 낸 사고와 그 수리 ─────────────
+ * 위 경고문만으로는 부족했다. 예전 이 표의 벤치 열은 **행마다 자가 달랐다**:
+ * 모델별로 "점수가 있는 첫 변형" 을 골랐기 때문에 Claude 칸엔 Verified 96 이,
+ * GPT-5.6 칸엔 Pro 64.6 이 들어갔다. 두 숫자는 문제집합이 다른 별개 시험의 결과라
+ * 뺄셈이 성립하지 않는데, 세로로 붙어 있으면 사람은 32pt 차를 능력차로 읽는다.
+ * 실제로 사장님이 그렇게 읽었고, 그게 이 수리의 출발점이다.
+ *
+ * 수리는 경고를 더 크게 쓰는 쪽이 아니라 **구조를 바꾸는 쪽**이다:
+ *   · 변형이 이제 **열의 속성**이다. 한 번에 한 변형만 그리고, 그 변형에 값이 없는
+ *     모델은 낮은 점수가 아니라 빈칸("확인 필요")이 된다.
+ *   · 기본 변형은 하드코딩이 아니라 **커버리지에서 파생**된다(메인 프로세스의
+ *     `benchVariantCoverage`). 지금 데이터에선 Pro 가 12/19 로 1위라 기본이 되고,
+ *     같은 Pro 축에서 opus-5 79.2 vs gpt-5.6-sol 64.6 이 되어 오독이 사라진다.
+ *     ★수치는 하나도 안 건드렸다 — 자를 통일했을 뿐이다.
+ *   · 왜 Verified 로 통일하지 않았나: OpenAI 가 Verified 를 공개하지 않고
+ *     swebench.com 공식 리더보드에도 gpt-5.5/5.6 제출이 없다(2026-07-28 실측).
+ *     Verified 를 고르면 gpt 열 전체가 "확인 필요" 로 빈다 — 고를 수는 있지만
+ *     기본값으로 두면 표가 절반 비어 보인다.
+ *
+ * ── 필터 한 줄 ──────────────────────────────────────────────────────────
+ * 기준(변형)과 티어는 **차트와 표를 같이** 좁힌다. 그래서 둘 다 카드 하나 안이
+ * 아니라 둘 위의 한 줄에 있다 — 차트에만 걸린 필터와 표에만 걸린 필터가 따로 있으면
+ * 두 그림이 서로 다른 슬라이스를 보여 주고, 그 어긋남은 눈에 띄지 않는다.
+ *
  * ── ★티어 묶음(프리미어 · 일반작업 · 가성비) ────────────────────────────
  * 위의 세 칸은 정확하지만, 19줄을 훑어 "그래서 뭘 고르나" 를 사용자가 직접 계산해야
  * 했다. 그 한 단계를 `lib/modelTier.ts` 가 대신 밟는다 — **여기에 모델 목록이 없다**.
@@ -47,17 +71,55 @@ export function ModelFactSheet() {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [tierFilter, setTierFilter] = useState<ModelTier | "all">("all");
+  // null = "아직 안 골랐다" → 메인이 커버리지로 파생한 기본 축을 따른다. 사용자가
+  // 한 번 고르면 그 선택이 이긴다(응답이 다시 와도 덮어쓰지 않는다).
+  const [pickedVariant, setPickedVariant] = useState<BenchmarkVariantId | null>(
+    null,
+  );
   const rows = useModelFactSheetStore((s) => s.rows);
+  const variants = useModelFactSheetStore((s) => s.variants);
+  const defaultBenchmark = useModelFactSheetStore((s) => s.defaultBenchmark);
   const status = useModelFactSheetStore((s) => s.status);
   const load = useModelFactSheetStore((s) => s.load);
   const reload = useModelFactSheetStore((s) => s.reload);
 
+  // 고른 변형이 응답에 없으면(레지스트리 변화로 사라진 축) 기본으로 되돌린다 —
+  // 없는 축을 들고 있으면 표 전체가 조용히 "확인 필요" 로 빈다.
+  const activeVariant =
+    variants.find((v) => v.benchmark === pickedVariant) ??
+    variants.find((v) => v.benchmark === defaultBenchmark) ??
+    variants[0] ??
+    null;
+  const benchmark = activeVariant?.benchmark ?? null;
+
   // ★묶기는 **항상 전체 행**으로 한다. 필터는 그 결과에서 보여줄 묶음만 고른다 —
   // 필터링한 뒤에 묶으면 기준(단가 중앙값)이 같이 좁아져 같은 모델이 필터를 바꿀
   // 때마다 다른 티어로 보인다.
-  const groups = useMemo(() => groupModelsByTier(rows), [rows]);
+  //
+  // ★티어에 먹이는 벤치도 **선택된 한 변형**이다. 예전엔 행마다 다른 변형이 섞여
+  // 들어갔고, 그러면 가성비 판정의 분모(같은 벤치 최고점)가 행마다 다른 시험의
+  // 최고점이 된다. 변형을 고정하면 그 정규화가 비로소 뜻을 갖는다.
+  const tierFacts = useMemo(
+    () =>
+      rows.map((row) => ({
+        row,
+        capability: row.capability,
+        outputPer1M: row.outputPer1M,
+        bench: benchmark
+          ? (row.benchByVariant?.[benchmark]?.primary ?? null)
+          : null,
+      })),
+    [rows, benchmark],
+  );
+  const groups = useMemo(() => groupModelsByTier(tierFacts), [tierFacts]);
   const visibleGroups =
     tierFilter === "all" ? groups : groups.filter((g) => g.tier === tierFilter);
+
+  // 차트는 표와 **같은 슬라이스**를 그린다(필터 한 줄 규율).
+  const visibleRows = useMemo(
+    () => visibleGroups.flatMap((g) => g.rows.map((a) => a.row.row)),
+    [visibleGroups],
+  );
 
   // 펼칠 때 처음 한 번만 읽는다. 접혀 있는 동안은 IPC 왕복이 없다.
   useEffect(() => {
@@ -109,14 +171,39 @@ export function ModelFactSheet() {
             </p>
           )}
 
-          {rows.length > 0 && (
+          {rows.length > 0 && benchmark && activeVariant && (
             <>
-              <TierFilter
-                groups={groups}
-                selected={tierFilter}
-                total={rows.length}
-                onSelect={setTierFilter}
+              {/* ★필터 한 줄 — 기준(변형)과 티어가 차트·표를 함께 좁힌다. */}
+              <div className="space-y-1.5">
+                <VariantFilter
+                  variants={variants}
+                  selected={benchmark}
+                  onSelect={setPickedVariant}
+                />
+                <TierFilter
+                  groups={groups}
+                  selected={tierFilter}
+                  total={rows.length}
+                  onSelect={setTierFilter}
+                />
+              </div>
+
+              {/* ★'기준' 안내 한 줄 — 이 열의 자가 무엇인지, 왜 하나로 고정했는지. */}
+              <p className="text-[11px] leading-snug text-amber-300/70">
+                ⓘ{" "}
+                {t("usage.factSheet.basisNote", {
+                  variant: activeVariant.label,
+                  n: activeVariant.scoredModels,
+                  total: activeVariant.totalModels,
+                })}
+              </p>
+
+              <ModelFactChart
+                rows={visibleRows}
+                benchmark={benchmark}
+                variantLabel={activeVariant.label}
               />
+
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-xs">
                   <thead className="text-[11px] text-gray-500">
@@ -130,8 +217,15 @@ export function ModelFactSheet() {
                       <th className="py-1.5 pr-3 text-right font-normal">
                         {t("usage.factSheet.colOutput")}
                       </th>
-                      <th className="py-1.5 pr-3 font-normal">
-                        {t("usage.factSheet.colBench")}
+                      {/* ★열 제목이 변형을 이름으로 말한다 — 이 열이 무슨 자인지
+                          헤더만 봐도 알아야 한다. */}
+                      <th
+                        className="py-1.5 pr-3 font-normal"
+                        title={activeVariant.blurb}
+                      >
+                        {t("usage.factSheet.colBenchVariant", {
+                          variant: activeVariant.label,
+                        })}
                       </th>
                       <th className="py-1.5 font-normal">
                         {t("usage.factSheet.colContext")}
@@ -146,8 +240,13 @@ export function ModelFactSheet() {
                         tier={group.tier}
                         count={group.rows.length}
                       />
-                      {group.rows.map(({ row }) => (
-                        <FactRow key={row.modelId} row={row} />
+                      {group.rows.map((assignment) => (
+                        <FactRow
+                          key={assignment.row.row.modelId}
+                          row={assignment.row.row}
+                          benchmark={benchmark}
+                          variant={activeVariant}
+                        />
                       ))}
                     </tbody>
                   ))}
@@ -192,6 +291,65 @@ const TIER_DESC_KEY = {
   standard: "usage.factSheet.tier.standardDesc",
   value: "usage.factSheet.tier.valueDesc",
 } as const;
+
+/**
+ * ★**기준(변형) 선택기.** 이 화면에서 가장 중요한 컨트롤이다 — 벤치 열과 차트
+ * 축이 무엇을 재는 자인지가 여기서 정해진다.
+ *
+ * 라디오 그룹인 이유(체크박스가 아니라): 여러 변형을 **동시에** 켜는 순간 이
+ * 티켓이 고친 버그가 그대로 돌아온다. 한 번에 하나만 고를 수 있다는 사실 자체가
+ * "서로 다른 변형을 나란히 두지 않는다" 는 규칙의 구현이다.
+ *
+ * 칩마다 `n/total` 커버리지를 적는 이유: Verified 를 고르면 표의 절반이 비는데,
+ * 고르기 **전에** 그걸 알 수 있어야 사용자가 "이 앱이 고장났나" 대신 "OpenAI 가
+ * 이 수치를 안 낸다" 로 읽는다.
+ */
+function VariantFilter({
+  variants,
+  selected,
+  onSelect,
+}: {
+  variants: ModelFactVariant[];
+  selected: BenchmarkVariantId;
+  onSelect: (v: BenchmarkVariantId) => void;
+}) {
+  const { t } = useTranslation();
+  if (variants.length <= 1) return null;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1.5"
+      role="radiogroup"
+      aria-label={t("usage.factSheet.basisLabel")}
+    >
+      <span className="text-[11px] text-gray-500">
+        {t("usage.factSheet.basisLabel")}
+      </span>
+      {variants.map((v) => {
+        const active = v.benchmark === selected;
+        return (
+          <button
+            key={v.benchmark}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onSelect(v.benchmark)}
+            title={`${v.blurb}\n\n${t("usage.factSheet.basisTip")}`}
+            className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] ${
+              active
+                ? "border-amber-500/60 bg-amber-500/10 text-amber-200"
+                : "border-gray-700 text-gray-400 hover:text-gray-200"
+            }`}
+          >
+            <span>{v.short}</span>
+            <span className="tabular-nums text-gray-500">
+              {v.scoredModels}/{v.totalModels}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 /**
  * 티어 필터 칩. 표를 좁혀 보는 용도지, 티어 판정을 바꾸지는 않는다(판정은 늘
@@ -278,7 +436,15 @@ function TierHeaderRow({ tier, count }: { tier: ModelTier; count: number }) {
   );
 }
 
-function FactRow({ row }: { row: ModelFactRow }) {
+function FactRow({
+  row,
+  benchmark,
+  variant,
+}: {
+  row: ModelFactRow;
+  benchmark: BenchmarkVariantId;
+  variant: ModelFactVariant;
+}) {
   const { t } = useTranslation();
   const showId = row.label !== row.modelId;
   return (
@@ -309,7 +475,10 @@ function FactRow({ row }: { row: ModelFactRow }) {
       </td>
 
       <td className="py-2 pr-3">
-        <BenchCell row={row} />
+        <BenchCell
+          cell={row.benchByVariant?.[benchmark] ?? null}
+          variant={variant}
+        />
       </td>
 
       <td className="py-2">
@@ -351,20 +520,47 @@ function EstimatedBadge() {
   );
 }
 
-function BenchCell({ row }: { row: ModelFactRow }) {
+/**
+ * 벤치 칸 — **선택된 변형 하나**에 대한 이 모델의 답.
+ *
+ * 빈 칸이 두 종류라는 점이 중요하다. 둘 다 "확인 필요" 로 그리되 툴팁이 다르다:
+ *   · `cell == null` / `primary == null` → 이 변형에 이 모델의 참조 행이 아예 없다
+ *     (= 아직 안 찾아봤다).
+ *   · `primary.score == null` → 찾아봤는데 벤더가 공식 수치를 안 냈다. 그 note 가
+ *     어디까지 찾았는지를 들고 있어, 다음 사람이 같은 곳을 다시 뒤지지 않는다.
+ *
+ * ★어느 경우에도 **다른 변형의 점수로 메우지 않는다**. 그 메움이 이 티켓의 버그였다.
+ */
+function BenchCell({
+  cell,
+  variant,
+}: {
+  cell: ModelFactBenchCell | null;
+  variant: ModelFactVariant;
+}) {
   const { t } = useTranslation();
-  const bench = row.bench;
-  if (!bench) return <Unknown note={t("usage.factSheet.benchNoRow")} />;
+  const bench = cell?.primary ?? null;
+  if (!bench)
+    return (
+      <Unknown
+        note={t("usage.factSheet.benchNoVariantRow", {
+          variant: variant.label,
+        })}
+      />
+    );
   if (bench.score === null) return <Unknown note={bench.note} />;
 
-  const name = benchmarkLabel(bench.benchmark);
   return (
     <div>
       <div className="flex items-baseline gap-1.5">
         <span className="font-mono text-gray-200">
           {bench.score.toFixed(1)}%
         </span>
-        <span className="text-[10px] text-gray-400">{name}</span>
+        {/* 출처가 화면에 적은 변형 이름 그대로 — 표준 표기와 다르면 그 차이가
+            보여야 리뷰어가 출처를 열어 한 번에 대조한다. */}
+        <span className="text-[10px] text-gray-400" title={variant.blurb}>
+          {cell?.variantLabel ?? variant.label}
+        </span>
       </div>
       <div
         className="text-[10px] text-gray-500"
@@ -372,11 +568,11 @@ function BenchCell({ row }: { row: ModelFactRow }) {
       >
         {shortHarness(bench.harness)}
       </div>
-      {/* ★같은 벤치의 다른 측정. 하네스가 다를 수도(haiku: 벤더 vs 리더보드),
+      {/* ★같은 변형의 다른 측정. 하네스가 다를 수도(haiku: 벤더 vs 리더보드),
           하네스는 같은데 발표가 다를 수도 있다(gpt-5.5 를 OpenAI 가 두 번
           발표했고 값이 다르다). 그래서 라벨에 하네스와 **일자**를 같이 적는다 —
           "다른 하네스" 라고만 쓰면 후자를 거짓으로 설명하게 된다. */}
-      {row.benchAlternates.map((alt) => (
+      {(cell?.alternates ?? []).map((alt) => (
         <div
           key={`${alt.harness}-${alt.source}-${alt.asOf}`}
           className="text-[10px] text-amber-400/80"

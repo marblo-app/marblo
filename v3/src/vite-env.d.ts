@@ -530,6 +530,37 @@ interface ModelFactContext {
   note?: string;
 }
 
+/** SWE-bench 의 **변형**(=문제집합). 이게 다른 두 점수는 직접 비교 대상이 아니다. */
+type BenchmarkVariantId =
+  | "swe-bench-verified"
+  | "swe-bench-pro"
+  | "swe-bench-multilingual"
+  | "swe-bench-multimodal";
+
+/**
+ * 한 **변형**에 대한 이 모델의 벤치 칸. `primary: null` = 이 변형에 이 모델의
+ * 행이 아예 없다(= 안 찾아봤다). `primary.score: null` = 찾아봤는데 공식 수치가
+ * 없다. 화면은 둘 다 "확인 필요" 로 그리되 툴팁이 다르다.
+ */
+interface ModelFactBenchCell {
+  benchmark: BenchmarkVariantId;
+  /** 출처가 화면에 적은 변형 이름(표준 표기와 다를 수 있다). */
+  variantLabel: string;
+  primary: ModelFactBench | null;
+  /** **같은 변형**의 다른 측정(하네스가 다르거나 발표가 다르다). */
+  alternates: ModelFactBench[];
+}
+
+/** 표/차트가 고를 수 있는 변형 하나. 커버리지가 붙어 있어 기본값을 파생할 수 있다. */
+interface ModelFactVariant {
+  benchmark: BenchmarkVariantId;
+  label: string;
+  short: string;
+  blurb: string;
+  scoredModels: number;
+  totalModels: number;
+}
+
 /**
  * 정보표 한 줄 = 레지스트리 한 행. 단가는 `model-registry.pricing` 단일소스
  * 파생이라 레지스트리에 모델이 늘면 이 표도 자동으로 는다.
@@ -545,14 +576,24 @@ interface ModelFactRow {
   outputPer1M: number;
   estimatedPricing: boolean;
   context: ModelFactContext | null;
-  bench: ModelFactBench | null;
-  /** 같은 벤치의 다른 하네스 점수(있으면 "스캐폴드가 점수를 바꾼다"는 증거). */
-  benchAlternates: ModelFactBench[];
+  /**
+   * ★**변형별** 벤치 칸. 표는 한 번에 한 변형만 그린다 — 다른 변형으로 넘어가는
+   * fallback 은 없다(그 fallback 이 Verified 96 과 Pro 64.6 을 한 열에 세웠다).
+   */
+  benchByVariant: Record<BenchmarkVariantId, ModelFactBenchCell>;
+}
+
+/** `models:factSheet` 응답. 행 + 고를 수 있는 변형 목록. */
+interface ModelFactSheetPayload {
+  rows: ModelFactRow[];
+  /** 커버리지 내림차순. [0] 이 기본 축이고, 그 판정은 데이터에서 파생된다. */
+  variants: ModelFactVariant[];
+  defaultBenchmark: BenchmarkVariantId;
 }
 
 interface ModelsAPI {
   quickLaneCatalog: () => Promise<QuickLaneVendorGroup[]>;
-  factSheet: () => Promise<ModelFactRow[]>;
+  factSheet: () => Promise<ModelFactSheetPayload>;
 }
 
 interface OrchestratorModelAPI {

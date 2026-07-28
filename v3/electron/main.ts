@@ -112,7 +112,7 @@ import {
   quickLaneVendorCatalog,
   resolveModelPin,
 } from "./model-selection";
-import { modelFactSheet } from "./model-fact-sheet";
+import { modelFactSheetPayload } from "./model-fact-sheet";
 import {
   vendorSecretsSnapshot,
   setVendorSecret,
@@ -5097,7 +5097,7 @@ ipcMain.handle("models:quickLaneCatalog", () => {
  * `model-fact-sheet.ts` 에 있어 여기는 그대로 흘리기만 한다(시크릿·env 값은 한
  * 바이트도 지나가지 않는다).
  */
-ipcMain.handle("models:factSheet", () => modelFactSheet());
+ipcMain.handle("models:factSheet", () => modelFactSheetPayload());
 
 ipcMain.handle(
   "agent:launch",

@@ -12,8 +12,11 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
-  BENCH_REFERENCE,
   BENCHMARK_IDS,
+  BENCH_REFERENCE,
+  BENCH_VARIANTS,
+  benchVariantCoverage,
+  variantFamilyOf,
   benchRowsFor,
   benchRowsForModel,
   comparableRows,
@@ -226,6 +229,124 @@ describe("model-bench-reference / 검증기는 잘못된 행을 거부한다", (
     const aliases = new Set(MODEL_REGISTRY.flatMap((m) => m.aliases));
     for (const r of BENCH_REFERENCE) {
       expect(aliases.has(r.model), `${r.model} 은 alias`).toBe(false);
+    }
+  });
+
+  // ── ★변형 라벨 교차검증 ─────────────────────────────────────────────
+  // 이 표에서 가장 비싼 실수는 "출처가 Pro 라 적은 값을 Verified 행에 붙여넣는
+  // 것" 이다. 두 필드가 몇 줄 떨어져 있어 사람 눈으로는 안 잡히고, 잡히지
+  // 않은 채로 화면에 나가면 정확히 이 티켓이 고친 오독이 데이터에서 다시 난다.
+
+  it("출처 표기와 benchmark 가 어긋나면 거부한다", () => {
+    expect(() =>
+      validateBenchRecords([
+        {
+          ...ok,
+          benchmark: "swe-bench-verified",
+          variantLabel: "SWE-Bench Pro",
+        },
+      ]),
+    ).toThrow(/출처가 적은 변형과 이 행이 주장하는 변형이 다릅니다/);
+  });
+
+  it("변형을 읽을 수 없는 라벨은 거부한다(어느 시험인지 확정 안 됨)", () => {
+    expect(() =>
+      validateBenchRecords([{ ...ok, variantLabel: "SWE-bench" }]),
+    ).toThrow(
+      /변형\(Verified\/Pro\/Multilingual\/Multimodal\)을 읽을 수 없습니다/,
+    );
+    // 둘 이상에 걸려도 확정이 아니다.
+    expect(() =>
+      validateBenchRecords([
+        { ...ok, variantLabel: "SWE-bench Verified (Pro subset)" },
+      ]),
+    ).toThrow(/읽을 수 없습니다/);
+  });
+
+  it("빈 variantLabel 은 거부한다(생략이 기본값이지 빈 문자열이 아니다)", () => {
+    expect(() => validateBenchRecords([{ ...ok, variantLabel: "  " }])).toThrow(
+      /빈 문자열/,
+    );
+  });
+
+  it("실측 표기 흔들림은 통과한다(대문자·하이픈·언더바·네임스페이스)", () => {
+    for (const label of [
+      "SWE-Bench Pro",
+      "SWE-bench Pro",
+      "SWE-Bench Pro (Public)",
+      "SWE-Pro",
+      "ScaleAI/SWE-bench_Pro",
+    ]) {
+      expect(
+        () =>
+          validateBenchRecords([
+            { ...ok, benchmark: "swe-bench-pro", variantLabel: label },
+          ]),
+        label,
+      ).not.toThrow();
+    }
+  });
+
+  it("남의 벤치 이름의 'pro' 에 걸리지 않는다(ProgramBench)", () => {
+    // 경계 없이 "pro" 를 찾으면 ProgramBench 가 Pro 로 잡힌다. 그러면 Kimi 카드의
+    // ProgramBench 값을 SWE-bench Pro 행에 넣는 사고를 가드가 오히려 통과시킨다.
+    expect(() =>
+      validateBenchRecords([{ ...ok, variantLabel: "ProgramBench" }]),
+    ).toThrow(/읽을 수 없습니다/);
+  });
+
+  it("모든 실제 행의 변형 라벨이 자기 benchmark 와 일치한다", () => {
+    for (const r of BENCH_REFERENCE) {
+      if (r.variantLabel === undefined) continue;
+      expect(
+        variantFamilyOf(r.variantLabel),
+        `${r.model}/${r.benchmark} → "${r.variantLabel}"`,
+      ).toBe(r.benchmark);
+    }
+  });
+});
+
+describe("model-bench-reference / 변형 커버리지 파생", () => {
+  it("커버리지는 **행이 아니라 모델** 수로 센다(중복 하네스가 부풀리지 않게)", () => {
+    // haiku 4.5 는 Verified 에 하네스가 다른 두 행을 갖는다. 2 로 세면 한 모델이
+    // 커버리지를 두 배로 부풀린다.
+    const verified = benchVariantCoverage().find(
+      (c) => c.variant.id === "swe-bench-verified",
+    )!;
+    const distinct = new Set(
+      benchRowsFor("swe-bench-verified", {
+        kind: "registry",
+        scoredOnly: true,
+      }).map((r) => r.model),
+    );
+    expect(verified.scoredModels).toBe(distinct.size);
+  });
+
+  it("점수 내림차순으로 나온다(1위가 기본 축이 된다)", () => {
+    const cov = benchVariantCoverage();
+    expect(cov).toHaveLength(BENCHMARK_IDS.length);
+    for (let i = 1; i < cov.length; i++) {
+      expect(cov[i - 1].scoredModels).toBeGreaterThanOrEqual(
+        cov[i].scoredModels,
+      );
+    }
+  });
+
+  it("models 필터를 주면 그 모델들로만 센다", () => {
+    const only = benchVariantCoverage({ models: ["claude-opus-5"] });
+    for (const c of only) expect(c.scoredModels).toBeLessThanOrEqual(1);
+    const pro = only.find((c) => c.variant.id === "swe-bench-pro")!;
+    expect(pro.scoredModels).toBe(1);
+  });
+
+  it("BENCH_VARIANTS 는 네 변형 전부에 라벨을 갖는다", () => {
+    for (const id of BENCHMARK_IDS) {
+      expect(BENCH_VARIANTS[id].id).toBe(id);
+      expect(BENCH_VARIANTS[id].label).toBeTruthy();
+      expect(BENCH_VARIANTS[id].short).toBeTruthy();
+      expect(BENCH_VARIANTS[id].blurb).toBeTruthy();
+      // 표준 라벨은 자기 변형으로 되읽혀야 한다(라벨과 id 의 자기일관성).
+      expect(variantFamilyOf(BENCH_VARIANTS[id].label)).toBe(id);
     }
   });
 });

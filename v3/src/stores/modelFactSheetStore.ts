@@ -17,6 +17,14 @@ export type ModelFactSheetStatus = "idle" | "loading" | "ready" | "error";
 
 interface ModelFactSheetState {
   rows: ModelFactRow[];
+  /**
+   * 고를 수 있는 벤치 변형. **커버리지 내림차순**이라 `[0]` 이 기본 축이다.
+   * 화면이 목록을 만들지 않는 이유는 티어와 같다 — 목록을 렌더러에 적는 순간
+   * 벤더가 보고 벤치를 갈아탈 때 화면만 옛 축에 남는다.
+   */
+  variants: ModelFactVariant[];
+  /** 메인이 커버리지로 파생한 기본 축. */
+  defaultBenchmark: BenchmarkVariantId | null;
   status: ModelFactSheetStatus;
   error: string | null;
   /** 한 번 읽는다. 이미 ready/loading 이면 no-op(중복 왕복 방지). */
@@ -25,18 +33,28 @@ interface ModelFactSheetState {
   reload: () => Promise<void>;
 }
 
-async function fetchFactSheet(): Promise<ModelFactRow[]> {
+const EMPTY: Pick<
+  ModelFactSheetState,
+  "rows" | "variants" | "defaultBenchmark"
+> = { rows: [], variants: [], defaultBenchmark: null };
+
+async function fetchFactSheet(): Promise<typeof EMPTY> {
   // Electron 밖(웹 프리뷰·컴포넌트 테스트)에서는 브리지가 없다. 던지지 않고 빈
-  // 배열로 떨어뜨려, 표가 "표시할 모델 없음" 안내를 그리게 한다.
+  // 응답으로 떨어뜨려, 표가 "표시할 모델 없음" 안내를 그리게 한다.
   const api = window.electronAPI?.models;
-  if (!api?.factSheet) return [];
-  const rows = await api.factSheet();
-  return Array.isArray(rows) ? rows : [];
+  if (!api?.factSheet) return EMPTY;
+  const payload = await api.factSheet();
+  if (!payload || !Array.isArray(payload.rows)) return EMPTY;
+  return {
+    rows: payload.rows,
+    variants: Array.isArray(payload.variants) ? payload.variants : [],
+    defaultBenchmark: payload.defaultBenchmark ?? null,
+  };
 }
 
 export const useModelFactSheetStore = create<ModelFactSheetState>(
   (set, get) => ({
-    rows: [],
+    ...EMPTY,
     status: "idle",
     error: null,
 
@@ -49,11 +67,10 @@ export const useModelFactSheetStore = create<ModelFactSheetState>(
     reload: async () => {
       set({ status: "loading", error: null });
       try {
-        const rows = await fetchFactSheet();
-        set({ rows, status: "ready", error: null });
+        set({ ...(await fetchFactSheet()), status: "ready", error: null });
       } catch (err) {
         set({
-          rows: [],
+          ...EMPTY,
           status: "error",
           error: err instanceof Error ? err.message : String(err),
         });

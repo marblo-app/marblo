@@ -123,6 +123,38 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.factSheet.colOutput": "Output $/1M",
   "usage.factSheet.colBench": "SWE-bench (rough)",
   "usage.factSheet.colContext": "Context",
+  "usage.factSheet.colBenchVariant": "{variant} (rough)",
+
+  // ── Basis (variant) lock ─────────────────────────────────
+  "usage.factSheet.basisLabel": "Basis",
+  "usage.factSheet.basisNote":
+    "Every SWE-bench number in this table and chart is on one basis: {variant} ({n}/{total} models have an official figure). The other variants (Verified, Pro, …) are separate exams over different problem sets, so they cannot be subtracted or ranked against each other — only one is shown at a time. Switching the basis re-renders both the table and the chart.",
+  "usage.factSheet.basisTip":
+    "SWE-bench is not one exam but four with different problem sets (Verified, Pro, Multilingual, Multimodal). Vendors publish different ones — OpenAI publishes only Pro, Anthropic publishes all four — so this table used to pick whichever variant each model happened to have and put them in one column. That put Verified 96 next to Pro 64.6 and the gap read as a capability difference. Now the column has a single fixed basis, and a model with no figure on that basis is left as \"unverified\" rather than scored low. The default basis is not hand-picked: it is whichever variant currently measures the most models with the same ruler.",
+  "usage.factSheet.benchNoVariantRow":
+    "No official {variant} figure for this model (we do not fill it in with a different variant's score).",
+
+  // ── Price + SWE-bench bar chart ──────────────────────────
+  "usage.factSheet.chart.title": "Price vs performance at a glance",
+  "usage.factSheet.chart.subtitle":
+    "Sorted by {variant} score. Only the {n}/{total} models with an official figure get a bar; the rest read \"unverified\" instead of a zero-length bar. Price and score use different units, so they do not share an axis (two panels).",
+  "usage.factSheet.chart.priceAxis": "Price $/1M tokens",
+  "usage.factSheet.chart.priceTip":
+    "Straight from the model registry. The lighter top bar is input, the darker bottom bar is output. Coding-agent cost is usually dominated by output.",
+  "usage.factSheet.chart.benchAxis": "{variant} % resolved",
+  "usage.factSheet.chart.benchTip":
+    "The axis is always fixed at 0-100. Shrinking it to the top score would make the leader look perfect and exaggerate the gaps.",
+  "usage.factSheet.chart.input": "input",
+  "usage.factSheet.chart.inputTip": "Price per 1M input tokens.",
+  "usage.factSheet.chart.output": "output",
+  "usage.factSheet.chart.outputTip": "Price per 1M output tokens.",
+  "usage.factSheet.chart.noScoreLegend": "no bar = unverified",
+  "usage.factSheet.chart.noScoreTip":
+    "No official figure found on this basis. That is unverified, not zero, so no bar is drawn.",
+  "usage.factSheet.chart.rowPriceTip":
+    "{model} — input {input} / output {output} (per 1M tokens)",
+  "usage.factSheet.chart.rowBenchTip":
+    "{model} — {variant} {score}% · scaffold {harness}",
   "usage.factSheet.maxOutput": "max output {n}",
   "usage.factSheet.estimated": "est.",
   "usage.factSheet.estimatedTip":
