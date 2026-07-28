@@ -9,12 +9,14 @@ import { useUiStore } from "../../stores/uiStore";
 import { useWorktreeStore } from "../../stores/worktreeStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useAgentSessionMap } from "../../stores/agentSessionMap";
-import { useAgentFocusStore } from "../../stores/agentFocusStore";
 import * as taskService from "../../services/taskService";
 import * as agentService from "../../services/agentService";
 import { checkAgentSpawn } from "../../lib/planLimits";
 import { buildLaneContextId, isLaneContext } from "../../lib/laneContext";
 import { laneStatusPill } from "../../lib/laneStatus";
+import { groupLaneRows, laneGroupDef } from "../../lib/laneGroups";
+import { harnessIcon, laneToneColor } from "../../lib/laneVisuals";
+import { findTaskWorktree } from "../../lib/taskWorktree";
 import {
   buildModelPin,
   describeSelection,
@@ -28,7 +30,9 @@ import type { Agent } from "../../types/agent";
 import type { ModelType } from "../../types/agent";
 import { LaneCreateModal, type LaneLaunchInput } from "./LaneCreateModal";
 import { LaneDeleteConfirmModal } from "./LaneDeleteConfirmModal";
-import type { Task } from "../../types/task";
+import { LaneDetailDrawer } from "./LaneDetailDrawer";
+import { LaneTerminalButton } from "./LaneTerminalButton";
+import type { LaneRow } from "../../types/lane";
 import type { Worktree } from "../../types/worktree";
 import { useTranslation } from "../../lib/i18n";
 
@@ -39,33 +43,7 @@ import { useTranslation } from "../../lib/i18n";
 const isLaneRow = (contextId: string | undefined | null): boolean =>
   isLaneContext(contextId);
 
-const TONE_COLOR: Record<string, string> = {
-  danger: "#f38ba8",
-  warning: "#f9e2af",
-  behind: "#fab387",
-  ready: "#a6e3a1",
-  idle: "#6c7086",
-  done: "#a6e3a1",
-  review: "#89b4fa",
-  failed: "#f38ba8",
-};
-const HARNESS_ICON: Record<string, string> = {
-  claude: "🟣",
-  gpt: "🟢",
-  grok: "⚡",
-  antigravity: "🟠",
-  gemini: "🔵",
-  local: "⚫",
-  custom: "⚪",
-};
-
 type LaneRowAction = "delete" | "restart";
-
-interface LaneRow {
-  task: Task;
-  agent: Agent | null;
-  worktree: Worktree | null;
-}
 
 /**
  * 아직 보드/에이전트 스토어에 나타나기 전의 레인 — **낙관적 카드**.
@@ -116,57 +94,6 @@ function canRestartLane(row: LaneRow): boolean {
   );
 }
 
-/**
- * "터미널" 버튼 — 이미 실행 중인 lane 에이전트의 PTY 를 연다.
- *
- * attachSession 의 id 는 반드시 진짜 ptySessionId 여야 한다(표시명 X). lane
- * 에이전트의 ptySessionId 는 launch 시점에 agentSessionMap 에 등록되며, 본
- * 컴포넌트가 reactive 셀렉터로 그 매핑을 읽는다. 아직 매핑이 없으면(=세션
- * 미생성/미등록) 잘못된 id 를 넘기는 대신 버튼을 비활성화한다. AgentStatusCard /
- * TaskDetailModal 이 쓰는 패턴과 동일.
- */
-function LaneTerminalButton({ agent }: { agent: Agent }) {
-  const { t } = useTranslation();
-  // agentSessionMap 에 launch 시 등록된 진짜 ptySessionId. 미등록이면 undefined
-  // (store 의 deterministic "agent-${id}" fallback 은 의도적으로 우회 — 죽은
-  // 채널을 attach 하지 않기 위함).
-  const ptySessionId = useAgentSessionMap((s) => s.map[agent.id]);
-  // 실제로 attach 가능한 세션이 이 윈도우에 존재하는지(=라이브 PTY) 교차 확인.
-  const hasLiveSession = useTerminalStore((s) =>
-    ptySessionId ? s.sessions.some((sess) => sess.id === ptySessionId) : false,
-  );
-  const canOpen = Boolean(ptySessionId);
-
-  const label = `${HARNESS_ICON[agent.model] ?? "⚪"} ${agent.name}`;
-
-  return (
-    <button
-      type="button"
-      disabled={!canOpen}
-      title={
-        canOpen
-          ? hasLiveSession
-            ? t("lanes.terminal.view")
-            : t("lanes.terminal.connect")
-          : t("lanes.terminal.noSession")
-      }
-      onClick={() => {
-        if (!ptySessionId) return;
-        useTerminalStore.getState().openTerminalForSession(ptySessionId, label);
-        useAgentFocusStore.getState().setFocusedAgent(agent.id);
-      }}
-      className="rounded bg-gray-700 px-2 py-0.5 text-[11px] text-gray-200 hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      {t("lanes.terminal.label")}
-      {canOpen && !hasLiveSession && (
-        <span className="ml-1 text-[10px] text-gray-400">
-          {t("lanes.terminal.connectBadge")}
-        </span>
-      )}
-    </button>
-  );
-}
-
 export function LanesTab() {
   const { user } = useAuth();
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -185,6 +112,13 @@ export function LanesTab() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<LaneRow | null>(null);
+  /**
+   * 상세 드로우가 열려 있는 레인 — **행 객체가 아니라 taskId 를 들고 있는다.**
+   * 행을 스냅샷으로 붙들면 그 순간의 에이전트/워크트리 상태가 드로우 안에서
+   * 얼어붙는다(작업이 진행돼도 ahead/behind·상태가 안 움직인다). id 로 들고
+   * 매 렌더 laneRows 에서 되찾으면 드로우가 카드와 같은 라이브 데이터를 본다.
+   */
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingLane[]>([]);
@@ -209,14 +143,36 @@ export function LanesTab() {
     };
   }, [projectId, subscribeTasks, subscribeAgents, refreshWorktrees]);
 
-  const laneRows = useMemo(() => {
+  const laneRows: LaneRow[] = useMemo(() => {
     const lanes = tasks.filter((task) => isLaneRow(task.contextId));
     return lanes.map((task) => {
       const agent = agents.find((a) => a.currentTaskId === task.id) ?? null;
-      const worktree = worktrees.find((w) => w.taskId === task.id) ?? null;
+      // 보드/티켓 상세와 **같은** 해석기. 종전의 `w.taskId === task.id` 는
+      // 워크트리 doc 에 taskId 가 안 찍힌 생성 경로에서 조용히 빗나갔고, 그러면
+      // 카드가 영원히 "워크트리 준비 중…" 으로 남는다. findTaskWorktree 는
+      // taskId → 경로 → 브랜치 순으로 느슨하게 되짚는다.
+      const worktree = findTaskWorktree(worktrees, task);
       return { task, agent, worktree };
     });
   }, [tasks, agents, worktrees]);
+
+  /**
+   * 라인(상태 레인)별 묶음. 그룹핑 규칙 자체는 lib/laneGroups 의 순수 함수라
+   * 유닛 테스트가 전수로 검증한다.
+   */
+  const laneGroups = useMemo(() => groupLaneRows(laneRows), [laneRows]);
+
+  /** 드로우가 보는 행 — 매 렌더 되찾아 라이브 상태를 따라간다. */
+  const detailRow = useMemo(
+    () => laneRows.find((r) => r.task.id === detailTaskId) ?? null,
+    [laneRows, detailTaskId],
+  );
+
+  // 열어 둔 레인이 사라지면(삭제/필터 이탈) 선택도 놓는다 — 안 놓으면 다음에
+  // 같은 id 가 살아날 때 드로우가 유령처럼 되살아난다.
+  useEffect(() => {
+    if (detailTaskId && !detailRow) setDetailTaskId(null);
+  }, [detailTaskId, detailRow]);
 
   /** 실제 레인 행이 아직 안 나타난 진행중 카드만 그린다(중복 방지). */
   const activePending = useMemo(
@@ -232,6 +188,17 @@ export function LanesTab() {
     () => pending.filter((p) => p.phase === "failed"),
     [pending],
   );
+
+  /**
+   * 실제로 그릴 라인들. 비행 중인 낙관적 카드는 "진행 중" 라인에 들어가는데,
+   * 그 라인이 아직 비어 있을 수 있다(첫 레인을 방금 눌렀을 때 — 티켓 doc 이
+   * 아직 없다). 그때도 헤더가 서야 카드가 라인 밖에 떠 있지 않는다.
+   */
+  const renderGroups = useMemo(() => {
+    if (activePending.length === 0) return laneGroups;
+    if (laneGroups.some((g) => g.def.id === "active")) return laneGroups;
+    return [{ def: laneGroupDef("active"), rows: [] }, ...laneGroups];
+  }, [laneGroups, activePending]);
 
   // 행이 나타난 진행중 카드는 상태에서도 걷어낸다 — 안 걷으면 배열이 세션 내내
   // 자라고, activePending 이 매번 그 전부를 다시 훑는다.
@@ -400,7 +367,7 @@ export function LanesTab() {
         .getState()
         .openTerminalForSession(
           result.ptySessionId,
-          `${HARNESS_ICON[selection.harness] ?? "⚪"} ${agentData.name}`,
+          `${harnessIcon(selection.harness)} ${agentData.name}`,
         );
       refreshWorktrees().catch(() => {});
     } catch (err) {
@@ -536,7 +503,9 @@ export function LanesTab() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
+    // relative: 상세 드로우가 이 탭 안쪽 오른쪽에 붙는다(화면 전체를 덮는
+    // 모달이 아니라). overflow-hidden 은 드로우가 탭 경계를 넘지 않게 한다.
+    <div className="relative flex h-full flex-col gap-3 overflow-hidden p-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-gray-200">
@@ -611,142 +580,210 @@ export function LanesTab() {
           </div>
         </div>
       ) : (
-        // ★한 줄 리스트가 아니라 카드 그리드다. 병렬로 도는 레인들이 세로로
-        // 한 줄씩 쌓이면 "큐" 처럼 읽히고, 나란히 서면 "동시에 도는 것들" 로
-        // 읽힌다. 좁은 폭(터미널 컬럼이 넓을 때)에서는 자연히 1열로 접힌다.
-        <div className="grid flex-1 auto-rows-min grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2 2xl:grid-cols-3">
-          {/* 낙관적 카드: 누른 즉시 여기 선다(티켓 doc 이 돌아오기 전). */}
-          {activePending.map((p) => (
-            <div
-              key={p.id}
-              className="animate-pulse rounded-lg border border-blue-500/40 bg-gray-800 p-3"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-sm">
-                  {HARNESS_ICON[p.selection.harness] ?? "⚪"}
-                </span>
-                <span className="truncate text-sm font-medium text-gray-200">
-                  {p.title}
-                </span>
-              </div>
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-gray-400">
-                <span className="font-mono text-gray-500">
-                  {describeSelection(p.selection)}
-                </span>
-                <span className="text-blue-300">
-                  {p.phase === "creating"
-                    ? t("lanes.pending.creating")
-                    : t("lanes.pending.spawning")}
-                </span>
-              </div>
-            </div>
-          ))}
-          {laneRows.map(({ task, agent, worktree }) => {
-            const row = { task, agent, worktree };
-            // 레인 상태 pill 의 단일 진실의 원천. worktree git 상태만 보던
-            // 과거 statusPill 과 달리, 연결된 task 의 터미널 상태를 반영해
-            // 완료된 레인이 "작업중"으로 남아 멈춘 것처럼 보이는 오탐을 없앤다.
-            const pill = laneStatusPill(task, worktree);
-            const st = worktree?.status;
-            const busyAction = busy?.taskId === task.id ? busy.action : null;
-            const showRestart = canRestartLane(row);
-            const showDelete = canDeleteLane(row);
+        // ★라인(상태 레인)별로 접어 둔다. 라인 안에서는 여전히 **카드 그리드**다:
+        // 병렬로 도는 레인들이 세로로 한 줄씩 쌓이면 "큐" 처럼 읽히고, 나란히
+        // 서면 "동시에 도는 것들" 로 읽힌다(그 판단은 그대로 유지). 라인이 바꾸는
+        // 것은 카드의 배치가 아니라 묶음 — "지금 굴러가는 것"과 "치우면 되는 것"을
+        // 카드마다 pill 을 읽어 가려내지 않아도 되게 한다.
+        <div className="flex-1 space-y-4 overflow-y-auto">
+          {renderGroups.map(({ def, rows }) => {
+            const pendingHere = def.id === "active" ? activePending : [];
+            const count = rows.length + pendingHere.length;
             return (
-              <div
-                key={task.id}
-                className="rounded-lg border border-gray-700/50 bg-gray-800 p-3"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm">
-                        {HARNESS_ICON[agent?.model ?? ""] ?? "⚪"}
-                      </span>
-                      <span className="truncate text-sm font-medium text-gray-200">
-                        {task.title}
-                      </span>
-                    </div>
-                    {/* #605 구체 모델 배지 — 스탬프가 있을 때만. 없으면(핀 없는
-                        스폰·구 doc) 왼쪽 하네스 아이콘만 남는 종전 표시로
-                        자연스럽게 되돌아간다. 값은 요청이 아니라 argv 를 되읽은
-                        **서빙된 모델**이라, 버전가드 폴백도 여기서 드러난다. */}
-                    {agent && spawnedModelLabel(agent.spawnedModel) && (
-                      <div className="mt-1">
-                        <span
-                          className="inline-block max-w-full truncate rounded border border-[#45475a] bg-[#181825] px-1.5 py-0.5 font-mono text-[10px] text-[#a6adc8]"
-                          title={spawnedModelTitle(
-                            spawnedModelLabel(agent.spawnedModel) as string,
-                            agent.model,
-                          )}
-                        >
-                          {spawnedModelLabel(agent.spawnedModel)}
+              <section key={def.id}>
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span
+                    aria-hidden
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: def.dotColor }}
+                  />
+                  <h3 className="text-xs font-semibold text-gray-300">
+                    {t(def.labelKey)}
+                  </h3>
+                  <span className="text-[11px] text-gray-500">{count}</span>
+                  <span className="h-px flex-1 bg-gray-800" />
+                </div>
+                <div className="grid auto-rows-min grid-cols-1 gap-2 md:grid-cols-2 2xl:grid-cols-3">
+                  {/* 낙관적 카드: 누른 즉시 여기 선다(티켓 doc 이 돌아오기 전).
+                      아직 티켓이 없어 열어 볼 상세도 없으므로 클릭 대상이 아니다. */}
+                  {pendingHere.map((p) => (
+                    <div
+                      key={p.id}
+                      className="animate-pulse rounded-lg border border-blue-500/40 bg-gray-800 p-3"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">
+                          {harnessIcon(p.selection.harness)}
+                        </span>
+                        <span className="truncate text-sm font-medium text-gray-200">
+                          {p.title}
                         </span>
                       </div>
-                    )}
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-gray-400">
-                      {worktree ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-gray-400">
                         <span className="font-mono text-gray-500">
-                          {worktree.branch}
+                          {describeSelection(p.selection)}
                         </span>
-                      ) : (
-                        <span className="text-gray-600">
-                          {t("lanes.row.worktreePreparing")}
+                        <span className="text-blue-300">
+                          {p.phase === "creating"
+                            ? t("lanes.pending.creating")
+                            : t("lanes.pending.spawning")}
                         </span>
-                      )}
-                      {st && (
-                        <span>
-                          ▲{st.ahead} ▼{st.behind} · +{st.insertions}/−
-                          {st.deletions}
-                        </span>
-                      )}
-                      <span className="text-gray-500">{task.status}</span>
+                      </div>
                     </div>
-                  </div>
-                  {pill && (
-                    <span
-                      className="flex flex-shrink-0 items-center gap-1 text-xs font-medium"
-                      style={{ color: TONE_COLOR[pill.tone] ?? "#cdd6f4" }}
-                    >
-                      <span aria-hidden>{pill.icon}</span>
-                      {pill.label}
-                    </span>
-                  )}
+                  ))}
+                  {rows.map((row) => {
+                    const { task, agent, worktree } = row;
+                    // 레인 상태 pill 의 단일 진실의 원천. worktree git 상태만 보던
+                    // 과거 statusPill 과 달리, 연결된 task 의 터미널 상태를 반영해
+                    // 완료된 레인이 "작업중"으로 남아 멈춘 것처럼 보이는 오탐을 없앤다.
+                    const pill = laneStatusPill(task, worktree);
+                    const st = worktree?.status;
+                    const busyAction =
+                      busy?.taskId === task.id ? busy.action : null;
+                    const showRestart = canRestartLane(row);
+                    const showDelete = canDeleteLane(row);
+                    const selected = detailTaskId === task.id;
+                    return (
+                      // ★카드 전체가 클릭 타깃이다. 종전엔 카드 컨테이너에 아예
+                      // onClick 이 없어서(pointer-events 문제가 아니라 핸들러 부재)
+                      // 안쪽 버튼 말고는 어디를 눌러도 아무 일이 없었다.
+                      // <button> 이 아니라 role="button" 인 이유: 카드 안에 이미
+                      // 버튼(터미널/재시작/삭제)이 들어 있어 버튼 중첩은 무효
+                      // 마크업이 된다. 키보드 접근은 tabIndex + Enter/Space 로 연다.
+                      <div
+                        key={task.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={t("lanes.row.openDetail", {
+                          title: task.title,
+                        })}
+                        title={t("lanes.row.openDetailTip")}
+                        onClick={() => setDetailTaskId(task.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setDetailTaskId(task.id);
+                          }
+                        }}
+                        className={`cursor-pointer rounded-lg border bg-gray-800 p-3 text-left transition hover:border-gray-500 hover:bg-gray-800/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
+                          selected
+                            ? "border-blue-500/60 ring-1 ring-blue-500/30"
+                            : "border-gray-700/50"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">
+                                {harnessIcon(agent?.model)}
+                              </span>
+                              <span className="truncate text-sm font-medium text-gray-200">
+                                {task.title}
+                              </span>
+                            </div>
+                            {/* #605 구체 모델 배지 — 스탬프가 있을 때만. 없으면(핀 없는
+                                스폰·구 doc) 왼쪽 하네스 아이콘만 남는 종전 표시로
+                                자연스럽게 되돌아간다. 값은 요청이 아니라 argv 를 되읽은
+                                **서빙된 모델**이라, 버전가드 폴백도 여기서 드러난다. */}
+                            {agent && spawnedModelLabel(agent.spawnedModel) && (
+                              <div className="mt-1">
+                                <span
+                                  className="inline-block max-w-full truncate rounded border border-[#45475a] bg-[#181825] px-1.5 py-0.5 font-mono text-[10px] text-[#a6adc8]"
+                                  title={spawnedModelTitle(
+                                    spawnedModelLabel(
+                                      agent.spawnedModel,
+                                    ) as string,
+                                    agent.model,
+                                  )}
+                                >
+                                  {spawnedModelLabel(agent.spawnedModel)}
+                                </span>
+                              </div>
+                            )}
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-gray-400">
+                              {worktree ? (
+                                <span className="font-mono text-gray-500">
+                                  {worktree.branch}
+                                </span>
+                              ) : (
+                                <span className="text-gray-600">
+                                  {t("lanes.row.worktreePreparing")}
+                                </span>
+                              )}
+                              {st && (
+                                <span>
+                                  ▲{st.ahead} ▼{st.behind} · +{st.insertions}/−
+                                  {st.deletions}
+                                </span>
+                              )}
+                              <span className="text-gray-500">
+                                {task.status}
+                              </span>
+                            </div>
+                          </div>
+                          {pill && (
+                            <span
+                              className="flex flex-shrink-0 items-center gap-1 text-xs font-medium"
+                              style={{ color: laneToneColor(pill.tone) }}
+                            >
+                              <span aria-hidden>{pill.icon}</span>
+                              {pill.label}
+                            </span>
+                          )}
+                        </div>
+                        {(agent || showRestart || showDelete) && (
+                          // ★액션 줄은 카드 클릭에서 떼어 낸다. 안 떼면 "터미널"을
+                          // 누를 때 상세 드로우까지 같이 열린다(버블링).
+                          <div
+                            className="mt-2 flex flex-wrap items-center gap-1.5"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            role="presentation"
+                          >
+                            {agent && <LaneTerminalButton agent={agent} />}
+                            {showRestart && (
+                              <button
+                                type="button"
+                                disabled={busyAction !== null}
+                                title={t("lanes.row.restartTip")}
+                                onClick={() => restartLane(row)}
+                                className="rounded border border-amber-500/40 px-2 py-0.5 text-[11px] text-amber-300 transition hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {busyAction === "restart"
+                                  ? t("lanes.row.restarting")
+                                  : t("lanes.row.restart")}
+                              </button>
+                            )}
+                            {showDelete && (
+                              <button
+                                type="button"
+                                disabled={busyAction !== null}
+                                title={t("lanes.row.deleteTip")}
+                                onClick={() => setDeleteTarget(row)}
+                                className="rounded border border-red-500/40 px-2 py-0.5 text-[11px] text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {busyAction === "delete"
+                                  ? t("lanes.row.deleting")
+                                  : t("lanes.row.delete")}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                {(agent || showRestart || showDelete) && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {agent && <LaneTerminalButton agent={agent} />}
-                    {showRestart && (
-                      <button
-                        type="button"
-                        disabled={busyAction !== null}
-                        title={t("lanes.row.restartTip")}
-                        onClick={() => restartLane(row)}
-                        className="rounded border border-amber-500/40 px-2 py-0.5 text-[11px] text-amber-300 transition hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {busyAction === "restart"
-                          ? t("lanes.row.restarting")
-                          : t("lanes.row.restart")}
-                      </button>
-                    )}
-                    {showDelete && (
-                      <button
-                        type="button"
-                        disabled={busyAction !== null}
-                        title={t("lanes.row.deleteTip")}
-                        onClick={() => setDeleteTarget(row)}
-                        className="rounded border border-red-500/40 px-2 py-0.5 text-[11px] text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {busyAction === "delete"
-                          ? t("lanes.row.deleting")
-                          : t("lanes.row.delete")}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+              </section>
             );
           })}
         </div>
+      )}
+
+      {detailRow && (
+        <LaneDetailDrawer
+          row={detailRow}
+          onClose={() => setDetailTaskId(null)}
+        />
       )}
 
       {showCreate && (
