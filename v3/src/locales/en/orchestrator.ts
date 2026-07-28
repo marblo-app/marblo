@@ -20,6 +20,13 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
     "Could not start the {model} orchestrator — Marblo MCP tools did not attach",
   "orchestrator.blocked.mcpHint":
     "This is not a login problem. The CLI refuses to start local MCP servers in an untrusted folder, so trust this project folder in that CLI once and start again. An orchestrator without MCP cannot touch the board or dispatch anything.",
+  // Spawn blocked by login/install. Shown even when the setup wizard suppresses
+  // itself (a user whose Claude is ready but who picked grok as orchestrator).
+  "orchestrator.blocked.authTitle":
+    "Could not start the {model} orchestrator — this CLI needs to be signed in",
+  "orchestrator.blocked.authHint":
+    "Another CLI being signed in is not enough: the CLI you picked as orchestrator has its own sign-in. Run the action below, then start again.",
+  "orchestrator.blocked.login": "Sign in to {model}",
   "orchestrator.blocked.dismiss": "Dismiss",
   // Category labels
   "orchestrator.cat.project": "Start project",

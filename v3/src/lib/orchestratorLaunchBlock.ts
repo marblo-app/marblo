@@ -41,8 +41,10 @@ export interface OrchestratorLaunchBlock {
   model: string;
   /** main 이 준 조치 문구. 사용자가 실제로 할 일이 여기 적혀 있다. */
   action: string;
-  /** true 면 CLI 설정 위저드를 연다. false 면 패널이 직접 설명한다. */
+  /** true 면 CLI 설정 위저드를 **함께** 연다(패널 배너를 대신하지 않는다). */
   opensCliSetup: boolean;
+  /** 설치는 돼 있나 — 로그인 CTA 를 걸어도 되는지의 전제. */
+  installed: boolean;
 }
 
 export function classifyOrchestratorBlock(
@@ -55,5 +57,87 @@ export function classifyOrchestratorBlock(
     model: needsAuth.model,
     action: needsAuth.action,
     opensCliSetup: kind === "auth",
+    installed: needsAuth.installed,
   };
+}
+
+/**
+ * 차단 봉투 → **화면 지시**. 호출부(패널 launch/switch, 자동기동 훅)는 전부 이
+ * 함수를 거친다.
+ *
+ * ── 무엇이 틀려 있었나 (라이브 버그 d44PLFhR) ──────────────────────────
+ * 종전 호출부는 `if (opensCliSetup) 위저드 else 패널배너` 라는 **배타 분기**였다.
+ * 그래서 인증 차단은 전적으로 위저드에 맡겨졌는데, 위저드의 재오픈 가드
+ * (`cliSetupGate.shouldOpenGateOnReopen`)는 "claude/codex 중 하나라도 준비됐나"
+ * (`ORCHESTRATOR_CLI_IDS`) 하나만 본다. claude 가 멀쩡한 사용자가 **grok** 오케로
+ * 전환하려다 grok 미로그인으로 막히면 requiredReady=true 라 위저드가 스스로를
+ * 억제하고 — 배타 분기 탓에 패널도 침묵한다. 화면에 아무 일도 안 일어난다.
+ *
+ * 위저드의 그 가드는 그 자체로는 옳다(재시작마다 뜨던 유령 팝업을 막는 장치다).
+ * 틀린 건 "위저드가 열릴 것" 이라고 넘겨짚고 패널이 입을 닫은 쪽이다.
+ *
+ * ── 규칙 ────────────────────────────────────────────────────────────────
+ * **패널 배너는 모든 차단에서 뜬다.** 위저드는 그 위에 얹히는 보조 표면이다.
+ * 이 불변식이 "고를 수는 있는데 왜 안 되는지 모른다" 를 구조적으로 없앤다.
+ */
+export interface OrchestratorBlockUiPlan {
+  block: OrchestratorLaunchBlock;
+  /** 항상 true — 무음 차단을 코드로 금지한다. */
+  showPanelNotice: boolean;
+  /** 인증 축일 때만. 열려도 패널 배너를 대체하지 않는다. */
+  openCliSetup: boolean;
+}
+
+export function planOrchestratorBlockUi(
+  needsAuth: OrchestratorNeedsAuth,
+): OrchestratorBlockUiPlan {
+  const block = classifyOrchestratorBlock(needsAuth);
+  return {
+    block,
+    showPanelNotice: true,
+    openCliSetup: block.opensCliSetup,
+  };
+}
+
+/**
+ * 배너가 쓸 i18n 키. kind 별로 갈린다 — MCP 문구("폴더 신뢰를 확인하세요")가
+ * 로그인 차단에 새면 사용자를 정확히 반대 방향으로 보낸다. 이 repo 는 같은 종류의
+ * 사고를 이미 한 번 겪었다(grok 행이 Antigravity 설명을 달고 있던 #642).
+ */
+export function orchestratorBlockCopyKeys(kind: OrchestratorBlockKind): {
+  title: string;
+  hint: string;
+} {
+  return kind === "mcp"
+    ? {
+        title: "orchestrator.blocked.mcpTitle",
+        hint: "orchestrator.blocked.mcpHint",
+      }
+    : {
+        title: "orchestrator.blocked.authTitle",
+        hint: "orchestrator.blocked.authHint",
+      };
+}
+
+/**
+ * 배너에 원클릭 로그인 CTA 를 걸 CLI — 걸 수 없으면 null.
+ *
+ * `cliSetupStore.CliModel` 과 같은 값 집합이지만 그 모듈을 import 하지 않는다(이
+ * 파일은 순수 규칙만 담는다). 값이 벌어지면 아래 배열이 단일소스다.
+ *
+ * CTA 를 **거는** 조건은 셋 다 참일 때뿐이다:
+ *   ① 인증 축이다      — MCP 차단은 로그인으로 안 풀린다.
+ *   ② 설치돼 있다      — 미설치면 로그인이 아니라 설치가 먼저다(문구가 그렇게 온다).
+ *   ③ 아는 CLI 다      — 모르는 이름으로 로그인 터미널을 띄우지 않는다.
+ */
+const LOGIN_CTA_MODELS = ["claude", "codex", "grok", "antigravity"] as const;
+
+export type OrchestratorBlockLoginModel = (typeof LOGIN_CTA_MODELS)[number];
+
+export function orchestratorBlockLoginModel(
+  block: OrchestratorLaunchBlock,
+): OrchestratorBlockLoginModel | null {
+  if (block.kind !== "auth" || !block.installed) return null;
+  const match = LOGIN_CTA_MODELS.find((m) => m === block.model);
+  return match ?? null;
 }

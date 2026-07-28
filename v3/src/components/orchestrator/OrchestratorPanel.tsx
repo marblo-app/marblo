@@ -9,8 +9,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "../../lib/i18n";
+import type { MessageKey } from "../../locales/ko";
 import { placeAnchoredPopup } from "../../lib/anchoredPopup";
-import { classifyOrchestratorBlock } from "../../lib/orchestratorLaunchBlock";
+import { launchLogin } from "../../services/cliSetupActions";
+import {
+  planOrchestratorBlockUi,
+  orchestratorBlockCopyKeys,
+  orchestratorBlockLoginModel,
+} from "../../lib/orchestratorLaunchBlock";
 import {
   ORCHESTRATOR_MODEL_OPTIONS,
   isOrchestratorModel,
@@ -169,6 +175,11 @@ export default memo(function OrchestratorPanel({
   const setHandoffSummary = useOrchestratorStore((s) => s.setHandoffSummary);
   const launchBlock = useOrchestratorStore((s) => s.launchBlock);
   const setLaunchBlock = useOrchestratorStore((s) => s.setLaunchBlock);
+  // 차단 배너의 문구·CTA 는 순수 규칙이 정한다(kind 별 i18n 키, 로그인 가능 CLI).
+  const blockCopy = orchestratorBlockCopyKeys(launchBlock?.kind ?? "auth");
+  const blockLoginModel = launchBlock
+    ? orchestratorBlockLoginModel(launchBlock)
+    : null;
   const tasks = useTaskStore((s) => s.tasks);
 
   // Resolved Claude Code build that agents actually launch with. Shown in the
@@ -318,17 +329,15 @@ export default memo(function OrchestratorPanel({
         resumeSessionId,
         selectedModel,
       );
-      // Spawn blocked. 두 갈래다(classifyOrchestratorBlock):
-      //   auth — CLI 미설치/미로그인. 종전대로 설정 위저드가 받는다.
-      //   mcp  — 로그인은 됐는데 marblo MCP 가 안 붙는다(#639 grok 게이트).
-      //          위저드는 "연결됨" 만 보여주므로 여기서 직접 설명해야 한다.
+      // Spawn blocked. 배너는 **항상** 세우고, 인증 축이면 위저드를 함께 연다
+      // (planOrchestratorBlockUi 주석 — 배타 분기였을 때 위저드가 스스로를 억제한
+      // grok 전환이 아무 표시 없이 죽었다).
       if (result?.needsAuth) {
         setStatus("stopped");
-        const block = classifyOrchestratorBlock(result.needsAuth);
-        if (block.opensCliSetup) {
+        const ui = planOrchestratorBlockUi(result.needsAuth);
+        if (ui.showPanelNotice) setLaunchBlock(ui.block);
+        if (ui.openCliSetup) {
           window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
-        } else {
-          setLaunchBlock(block);
         }
         return;
       }
@@ -434,14 +443,13 @@ export default memo(function OrchestratorPanel({
       );
       if (result?.needsAuth) {
         setSwitchStatus("error");
-        const block = classifyOrchestratorBlock(result.needsAuth);
+        const ui = planOrchestratorBlockUi(result.needsAuth);
         // setSelectedModel 이 launchBlock 을 비우므로 되돌리기가 먼저다 —
         // 순서가 뒤집히면 방금 세운 안내가 즉시 지워진다.
         if (runningModel) setSelectedModel(runningModel);
-        if (block.opensCliSetup) {
+        if (ui.showPanelNotice) setLaunchBlock(ui.block);
+        if (ui.openCliSetup) {
           window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
-        } else {
-          setLaunchBlock(block);
         }
         return;
       }
@@ -879,30 +887,49 @@ export default memo(function OrchestratorPanel({
         )}
       </div>
 
-      {/* 스폰 차단 안내 — 위저드로 못 푸는 사유(오늘은 grok MCP 게이트)만 온다.
-          접힘 상태여도 보여준다: 이 배너가 안 보이면 사용자는 "Start 를 눌렀는데
-          아무 일도 안 일어난다" 만 겪는다(#639 게이트가 조용히 막던 그 화면). */}
+      {/* 스폰 차단 안내 — **모든** 차단 사유가 여기로 온다(인증·MCP 둘 다).
+          접힘 상태여도 보여준다: 이 배너가 안 보이면 사용자는 "Start/전환을
+          눌렀는데 아무 일도 안 일어난다" 만 겪는다. 인증 축을 위저드에만 맡겼을
+          때 grok 전환이 정확히 그렇게 죽었다(planOrchestratorBlockUi 주석). */}
       {launchBlock && (
         <div
           role="alert"
+          data-testid="orchestrator-launch-block"
+          data-block-kind={launchBlock.kind}
           className="mx-3 mb-2 rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-3 py-2 text-[11px] leading-4 text-[#f9e2af]"
         >
           <div className="font-medium">
-            {t("orchestrator.blocked.mcpTitle", { model: launchBlock.model })}
+            {t(blockCopy.title as MessageKey, { model: launchBlock.model })}
           </div>
           <div className="mt-1 text-[#f5e0dc]">{launchBlock.action}</div>
           <div className="mt-1 text-[10px] text-[#a6adc8]">
-            {t("orchestrator.blocked.mcpHint")}
+            {t(blockCopy.hint as MessageKey)}
           </div>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setLaunchBlock(null);
-            }}
-            className="mt-2 rounded border border-[#45475a] px-2 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
-          >
-            {t("orchestrator.blocked.dismiss")}
-          </button>
+          <div className="mt-2 flex items-center gap-2">
+            {/* 로그인으로 풀리는 차단이면 한 번에 풀어준다 — 온보딩 위저드와
+                같은 `launchLogin` 을 그대로 쓴다(터미널 탭에서 실제 로그인). */}
+            {blockLoginModel && (
+              <button
+                data-testid="orchestrator-block-login"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void launchLogin(blockLoginModel, launchBlock.action);
+                }}
+                className="rounded border border-[#f9e2af]/60 px-2 py-0.5 text-[10px] font-medium text-[#f9e2af] hover:bg-[#f9e2af]/20"
+              >
+                {t("orchestrator.blocked.login", { model: launchBlock.model })}
+              </button>
+            )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setLaunchBlock(null);
+              }}
+              className="rounded border border-[#45475a] px-2 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+            >
+              {t("orchestrator.blocked.dismiss")}
+            </button>
+          </div>
         </div>
       )}
 

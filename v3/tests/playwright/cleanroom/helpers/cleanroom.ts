@@ -71,6 +71,21 @@ export interface CleanRoomScenario {
    * 격리는 그대로 유지하고 바이너리 해석 경로만 연다.)
    */
   extraPathDirs?: string[];
+  /**
+   * `orchestratorSession:launch` 가 이 차단 봉투를 돌려주게 한다(null 이면 스텁
+   * 없음 = 진짜 핸들러).
+   *
+   * 오케 스폰 차단은 메인 프로세스의 **환경 판정**(CLI 인증·MCP 프로브)이라
+   * 클린룸에서 임의의 사유를 재현할 수 없다. 여기서 보고 싶은 것은 그 판정이
+   * 아니라 **차단이 화면에 뜨는가** 이므로, 봉투만 주입하고 렌더러가 그것을
+   * 어떻게 다루는지를 본다.
+   */
+  orchestratorLaunchBlock?: {
+    model: string;
+    action: string;
+    installed: boolean;
+    reason?: string;
+  } | null;
 }
 
 export interface InjectedMessage {
@@ -274,6 +289,12 @@ export async function launchCleanRoom(
           installResultsIn: { installed: boolean; authenticated: boolean };
           orchestratorRunning: boolean;
           projectDir: string;
+          orchestratorLaunchBlock: {
+            model: string;
+            action: string;
+            installed: boolean;
+            reason?: string;
+          } | null;
         };
       };
       g.__cleanroom = {
@@ -285,6 +306,7 @@ export async function launchCleanRoom(
         installResultsIn: s.installResultsIn,
         orchestratorRunning: s.orchestratorRunning,
         projectDir: s.projectDir,
+        orchestratorLaunchBlock: s.orchestratorLaunchBlock,
       };
       const cr = g.__cleanroom!;
 
@@ -354,6 +376,17 @@ export async function launchCleanRoom(
       // 폴더 선택 다이얼로그(네이티브)는 자동화 불가 → 임시 프로젝트 폴더 반환.
       rehandle("fs:selectDirectory", () => cr.projectDir);
 
+      // 오케 스폰이 막혔을 때의 봉투 — 렌더러가 이걸 화면에 어떻게 옮기는지가
+      // 검증 대상이다(무음 차단 회귀 d44PLFhR).
+      if (cr.orchestratorLaunchBlock) {
+        rehandle("orchestratorSession:launch", () => ({
+          sessionId: "",
+          ptySessionId: "",
+          status: "blocked",
+          needsAuth: cr.orchestratorLaunchBlock,
+        }));
+      }
+
       // ★ #580 의 증거 지점: 위저드 마지막 버튼이 여기까지 오는지.
       rehandle("orchestrator:injectMessage", (payload) => {
         const p = payload as { projectId: string; message: string };
@@ -389,6 +422,7 @@ export async function launchCleanRoom(
       ),
       orchestratorRunning: scenario.orchestratorRunning ?? false,
       projectDir,
+      orchestratorLaunchBlock: scenario.orchestratorLaunchBlock ?? null,
     },
   );
 

@@ -6,6 +6,7 @@ import {
   launchCleanRoom,
   openWorkTab,
   passFirstRunModals,
+  injectProject,
 } from "./helpers/cleanroom";
 import {
   MODEL_REGISTRY,
@@ -304,6 +305,102 @@ test.describe("@cleanroom grok 오케 marblo MCP 게이트(#639)", () => {
       expect(probe.toolCount).toBeGreaterThanOrEqual(
         CODEX_ORCH_REQUIRED_MCP_TOOLS.length,
       );
+    } finally {
+      await cr.close();
+    }
+  });
+});
+
+test.describe("@cleanroom 오케 차단이 화면에 뜨는가(d44PLFhR)", () => {
+  /**
+   * ★무음 차단 회귀.
+   *
+   * 라이브 증상: 사장님이 오케를 grok 으로 바꾸면 "그냥 안 됐다". 원인은 두 겹인데
+   * 두 번째가 코드 결함이다 —
+   *   ① grok 리프레시 토큰이 만료돼(RefreshTokenRejected) 인증 게이트가 **옳게**
+   *      막았다.
+   *   ② 그런데 렌더러 호출부가 `if (opensCliSetup) 위저드 else 패널배너` 라는
+   *      배타 분기였고, 위저드의 재오픈 가드는 claude/codex 중 하나라도 준비되면
+   *      스스로를 억제한다(`shouldOpenGateOnReopen`). claude 가 멀쩡한 사용자가
+   *      grok 을 고르면 **위저드도 패널도 아무 말을 안 한다**.
+   *
+   * 그래서 이 테스트의 시나리오가 정확히 그 조합이다: claude=ready(위저드 억제
+   * 조건) + grok 인증 차단 봉투. 유닛테스트는 순수 규칙만 보므로, "실제 앱 화면에
+   * 배너 DOM 이 뜨는가" 는 여기서만 증명된다.
+   */
+  const GROK_AUTH_BLOCK = {
+    model: "grok",
+    action: "grok login",
+    installed: true,
+    reason: "not-authenticated",
+  };
+
+  test("C-a claude 가 준비된 사용자여도 grok 인증 차단이 패널 배너로 뜬다", async () => {
+    const cr = await launchCleanRoom({
+      claude: "ready", // ← 위저드가 스스로를 억제하는 조건
+      grok: "installed", // 설치는 됐고 로그인만 없음
+      orchestratorLaunchBlock: GROK_AUTH_BLOCK,
+    });
+    try {
+      await passFirstRunModals(cr.page);
+      await injectProject(cr.page, cr.projectDir);
+
+      const banner = cr.page.locator(
+        '[data-testid="orchestrator-launch-block"]',
+      );
+      await expect(banner).toBeVisible({ timeout: 20_000 });
+
+      const kind = await banner.getAttribute("data-block-kind");
+      const text = (await banner.innerText()).replace(/\s+/g, " ");
+      console.log(`[cleanroom][C-a] 차단 배너 kind=${kind} · 문구="${text}"`);
+
+      expect(kind).toBe("auth");
+      // main 이 준 조치 문구가 그대로 보여야 한다 — 사용자가 할 일이 그것이다.
+      expect(text).toContain(GROK_AUTH_BLOCK.action);
+      // 어느 CLI 가 막혔는지 이름이 화면에 있어야 한다.
+      expect(text).toContain("grok");
+      // ★MCP 문구가 새면 정반대 방향("폴더 신뢰")으로 안내한다.
+      expect(text).not.toContain("신뢰");
+      // 로그인으로 풀리는 차단이므로 원클릭 로그인 CTA 가 걸린다.
+      await expect(
+        cr.page.locator('[data-testid="orchestrator-block-login"]'),
+      ).toBeVisible();
+    } finally {
+      await cr.close();
+    }
+  });
+
+  test("C-b MCP 차단은 같은 배너를 쓰되 사유가 갈린다(#639 회귀 방지)", async () => {
+    const cr = await launchCleanRoom({
+      claude: "ready",
+      grok: "installed",
+      orchestratorLaunchBlock: {
+        model: "grok",
+        action:
+          "grok 오케 차단 — marblo MCP 툴 0개. 프로젝트 폴더 신뢰를 확인하세요.",
+        installed: true,
+        reason: "mcp-unavailable",
+      },
+    });
+    try {
+      await passFirstRunModals(cr.page);
+      await injectProject(cr.page, cr.projectDir);
+
+      const banner = cr.page.locator(
+        '[data-testid="orchestrator-launch-block"]',
+      );
+      await expect(banner).toBeVisible({ timeout: 20_000 });
+      const kind = await banner.getAttribute("data-block-kind");
+      const text = (await banner.innerText()).replace(/\s+/g, " ");
+      console.log(`[cleanroom][C-b] 차단 배너 kind=${kind} · 문구="${text}"`);
+
+      expect(kind).toBe("mcp");
+      expect(text).toContain("신뢰");
+      // 로그인으로 안 풀리는 차단이므로 로그인 CTA 를 걸지 않는다.
+      // (문구엔 "로그인 문제가 아닙니다" 가 있으므로 버튼 자체로 판정한다.)
+      await expect(
+        cr.page.locator('[data-testid="orchestrator-block-login"]'),
+      ).toHaveCount(0);
     } finally {
       await cr.close();
     }

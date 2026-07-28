@@ -10,7 +10,7 @@ import {
   orchestratorKey,
   orchestratorTeardownAction,
 } from "../lib/orchestratorTeardown";
-import { classifyOrchestratorBlock } from "../lib/orchestratorLaunchBlock";
+import { planOrchestratorBlockUi } from "../lib/orchestratorLaunchBlock";
 
 /**
  * - Stops the orchestrator when project/folder changes or unmounts.
@@ -110,13 +110,13 @@ export function useOrchestratorAutoLaunch() {
         telemetry.orchestratorBlocked("cli_auth");
         setStatus("stopped");
         autoConnectRef.current = false;
-        // 인증이 아닌 차단(=MCP 게이트)은 위저드가 풀어줄 수 없다. 자동기동
-        // 경로에서도 패널 배너로 보내야 사용자가 "왜 안 뜨지" 를 알 수 있다.
-        const block = classifyOrchestratorBlock(result.needsAuth);
-        if (block.opensCliSetup) {
+        // 자동기동 경로에서도 패널 배너는 항상 세운다 — 위저드는 자기 판단으로
+        // 억제될 수 있고(claude 는 준비됐는데 저장된 오케가 grok 인 경우),
+        // 그러면 사용자는 "오케가 그냥 안 뜬다" 만 겪는다.
+        const ui = planOrchestratorBlockUi(result.needsAuth);
+        if (ui.showPanelNotice) setLaunchBlock(ui.block);
+        if (ui.openCliSetup) {
           window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
-        } else {
-          setLaunchBlock(block);
         }
         return;
       }

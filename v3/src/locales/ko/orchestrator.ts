@@ -20,6 +20,13 @@ export const orchestrator = {
     "{model} 오케를 띄우지 못했습니다 — Marblo MCP 툴이 붙지 않습니다",
   "orchestrator.blocked.mcpHint":
     "로그인 문제가 아닙니다. 이 CLI 는 신뢰되지 않은 폴더에서 로컬 MCP 서버를 기동하지 않으므로, 해당 CLI 로 프로젝트 폴더를 한 번 신뢰(trust)해 준 뒤 다시 시작하세요. MCP 없이 뜬 오케는 보드·디스패치를 하나도 못 합니다.",
+  // 스폰 차단 안내 — 로그인/설치로 막힌 경우. 위저드가 스스로를 억제해도(이미
+  // claude 가 준비된 사용자가 grok 을 고른 경우) 이 배너는 항상 뜬다.
+  "orchestrator.blocked.authTitle":
+    "{model} 오케를 띄우지 못했습니다 — 이 CLI 의 로그인이 필요합니다",
+  "orchestrator.blocked.authHint":
+    "다른 CLI 가 로그인돼 있어도 오케로 고른 이 CLI 는 따로 로그인해야 합니다. 아래 조치를 실행한 뒤 다시 시작하세요.",
+  "orchestrator.blocked.login": "{model} 로그인",
   "orchestrator.blocked.dismiss": "닫기",
   // Category labels
   "orchestrator.cat.project": "프로젝트 시작",
