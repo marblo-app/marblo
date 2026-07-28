@@ -31,9 +31,15 @@ import { MODEL_REGISTRY, isKnownModelId } from "../../electron/model-registry";
 const ELECTRON_DIR = join(__dirname, "..", "..", "electron");
 
 describe("model-bench-reference / 스키마 규율", () => {
-  it("모든 행에 출처 URL 이 있다 (score=null 인 행도 예외 없음)", () => {
+  it("모든 행에 출처가 있다 (leaderboard 외에는 URL)", () => {
     expect(BENCH_REFERENCE.length).toBeGreaterThan(0);
     for (const r of BENCH_REFERENCE) {
+      if (r.sourceKind === "leaderboard") {
+        expect(r.source, `${r.model}/${r.benchmark}`).toBe(
+          "BenchLM (benchlm.ai/benchmarks/swePro)",
+        );
+        continue;
+      }
       expect(r.source, `${r.model}/${r.benchmark}`).toMatch(/^https?:\/\/\S+$/);
     }
   });
@@ -525,6 +531,45 @@ describe("model-bench-reference / 수치 스팟체크(출처 대조)", () => {
     expect(find("gpt-5.6-sol", "swe-bench-pro", h)?.score).toBe(64.6);
     expect(find("gpt-5.6-terra", "swe-bench-pro", h)?.score).toBe(63.4);
     expect(find("gpt-5.6-luna", "swe-bench-pro", h)?.score).toBe(62.7);
+  });
+
+  it("BenchLM SWE-bench Pro 리더보드 수치와 출처 규율", () => {
+    const expected: Array<[string, BenchRecord["kind"], number]> = [
+      ["claude-fable-5", "registry", 80.0],
+      ["claude-opus-5", "registry", 79.2],
+      ["claude-opus-4-8", "registry", 69.2],
+      ["claude-sonnet-5", "registry", 63.2],
+      ["grok-4.5", "registry", 64.7],
+      ["gpt-5.6-sol", "registry", 64.6],
+      ["gpt-5.6-terra", "registry", 63.4],
+      ["gpt-5.6-luna", "registry", 62.7],
+      ["gpt-5.5", "registry", 58.6],
+      ["glm-5.2", "registry", 62.1],
+      ["MiniMax-M3", "registry", 59.0],
+      ["MiniMax-M2.7", "registry", 56.2],
+      ["Gemini 3.5 Flash", "reference", 55.1],
+      ["Gemini 3.5 Flash-Lite", "reference", 54.2],
+      ["GLM-5.1", "reference", 58.4],
+      ["GLM-5", "reference", 55.1],
+      ["Kimi K2.6", "reference", 58.6],
+      ["Kimi K2.5", "reference", 50.7],
+    ];
+    for (const [model, kind, score] of expected) {
+      const row = BENCH_REFERENCE.find(
+        (r) =>
+          r.model === model &&
+          r.kind === kind &&
+          r.benchmark === "swe-bench-pro" &&
+          r.sourceKind === "leaderboard",
+      );
+      expect(row, model).toBeDefined();
+      expect(row?.score, model).toBe(score);
+      expect(row?.source, model).toBe("BenchLM (benchlm.ai/benchmarks/swePro)");
+      expect(row?.asOf, model).toBe("2026-07-28");
+      expect(row?.note, model).toContain(
+        "OpenAI 2026-07 audit flagged ~30% public tasks broken",
+      );
+    }
   });
 
   it("벤더 후보 참조행", () => {

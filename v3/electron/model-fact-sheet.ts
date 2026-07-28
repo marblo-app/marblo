@@ -204,7 +204,9 @@ export function pickBenchRecords(modelId: string): {
     );
     if (scored.length === 0) continue;
     const vendorFirst =
-      scored.find((r) => r.sourceKind === "model-vendor") ?? scored[0];
+      scored.find((r) => r.sourceKind === "leaderboard") ??
+      scored.find((r) => r.sourceKind === "model-vendor") ??
+      scored[0];
     return {
       representative: vendorFirst,
       alternates: scored.filter((r) => r !== vendorFirst),
@@ -241,10 +243,8 @@ function pickBench(modelId: string): {
  * Pro 로 내려갔고, 그 한 줄이 열의 자를 행마다 바꿔 96 vs 64.6 오독을 만들었다.
  *
  * 고르는 규칙(변형 안에서만):
- *   1. 점수가 있는 행 중 **벤더 자기보고**를 대표로. 리더보드(제3자 채점)가 더
- *      강한 증거이긴 하나, 표의 다른 모델은 대부분 벤더 수치라 한 칸만 리더보드로
- *      바꾸면 열이 서로 다른 성격의 숫자로 섞인다. 그 리더보드 행은 `alternates`
- *      로 같이 내려가 "같은 변형인데 스캐폴드가 다르면 이만큼" 을 보인다.
+ *   1. 점수가 있는 행 중 **제3자 리더보드**를 먼저 대표로. 같은 Pro 축은 BenchLM
+ *      행이 출처 규율을 들고 다녀야 하므로, 벤더 자기보고는 대안으로 내린다.
  *   2. 점수 있는 행이 없으면 **빈 칸 행**을 대표로 — note("no official number: …")
  *      가 왜 비었는지를 화면에 나른다.
  *   3. 행 자체가 없으면 null(= 아직 안 찾아봤다. 2 와 다르다).
@@ -271,7 +271,9 @@ export function benchCellFor(
   }
 
   const vendorFirst =
-    scored.find((r) => r.sourceKind === "model-vendor") ?? scored[0];
+    scored.find((r) => r.sourceKind === "leaderboard") ??
+    scored.find((r) => r.sourceKind === "model-vendor") ??
+    scored[0];
   return {
     benchmark,
     // 라벨은 **대표 행의 출처 표기**를 따른다 — 그 칸의 숫자를 리뷰어가 대조할

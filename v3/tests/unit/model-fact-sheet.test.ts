@@ -20,6 +20,11 @@ import { BENCHMARK_IDS } from "../../electron/model-bench-reference";
 const rows = modelFactSheet();
 const byId = new Map(rows.map((r) => [r.modelId, r]));
 
+function expectBenchSource(source: string, modelId: string): void {
+  if (source === "BenchLM (benchlm.ai/benchmarks/swePro)") return;
+  expect(source, modelId).toMatch(/^https:\/\//);
+}
+
 describe("model-fact-sheet / 단일소스", () => {
   it("활성 레지스트리 모델과 1:1 이다(deprecated 는 뺀다)", () => {
     const active = MODEL_REGISTRY.filter((m) => m.status === "active").map(
@@ -137,14 +142,14 @@ describe("model-fact-sheet / 벤치 칸(변형 고정)", () => {
     expect(cell.alternates[0]?.harness).toBe("mini-SWE-agent@2.0.0");
   });
 
-  it("변형 라벨은 **출처가 적은 표기** 그대로다(대조 가능해야 한다)", () => {
-    // OpenAI 는 "SWE-Bench Pro"(대문자 B), MiniMax 카드는 "ScaleAI/SWE-bench_Pro".
+  it("변형 라벨은 **대표 출처가 적은 표기** 그대로다(대조 가능해야 한다)", () => {
+    // BenchLM 리더보드 행이 Pro 대표가 되므로 리더보드 표기를 따른다.
     expect(
       byId.get("gpt-5.6-sol")!.benchByVariant["swe-bench-pro"].variantLabel,
-    ).toBe("SWE-Bench Pro");
+    ).toBe("SWE-bench Pro");
     expect(
       byId.get("MiniMax-M3")!.benchByVariant["swe-bench-pro"].variantLabel,
-    ).toBe("ScaleAI/SWE-bench_Pro");
+    ).toBe("SWE-bench Pro");
     // 표준 표기와 같은 출처는 표준 표기가 그대로 나온다.
     expect(
       byId.get("claude-opus-5")!.benchByVariant["swe-bench-pro"].variantLabel,
@@ -163,7 +168,7 @@ describe("model-fact-sheet / 벤치 칸(변형 고정)", () => {
         const b = row.benchByVariant[id].primary;
         if (!b || b.score === null) continue;
         expect(b.harness, row.modelId).toBeTruthy();
-        expect(b.source, row.modelId).toMatch(/^https:\/\//);
+        expectBenchSource(b.source, row.modelId);
         expect(b.asOf, row.modelId).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       }
     }
@@ -278,7 +283,7 @@ describe("model-fact-sheet / 대표 벤치(티어용)", () => {
     for (const row of rows) {
       const b = row.representativeBench;
       if (!b || b.score === null) continue;
-      expect(b.source, row.modelId).toMatch(/^https:\/\//);
+      expectBenchSource(b.source, row.modelId);
       expect(b.asOf, row.modelId).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }
   });

@@ -183,11 +183,16 @@ export interface BenchHarness {
  * 출처를 **누가** 냈는가. 같은 URL 이어도 신뢰 성격이 다르다:
  *   · model-vendor    : 모델 제조사가 자기 모델 점수를 발표(자기보고)
  *   · benchmark-owner : 벤치 소유자의 공식 리더보드(제3자 채점)
+ *   · leaderboard     : 제3자 리더보드(벤치 소유자/모델 벤더가 아님)
  *   · rival-vendor    : ★경쟁사가 비교표에 올린 남의 모델 점수. 공식 발간물이긴
  *                       하나 1차 출처가 아니므로 별도 표기한다. 1차 출처가
  *                       나타나면 그 행으로 교체하는 것이 원칙.
  */
-export type SourceKind = "model-vendor" | "benchmark-owner" | "rival-vendor";
+export type SourceKind =
+  | "model-vendor"
+  | "benchmark-owner"
+  | "leaderboard"
+  | "rival-vendor";
 
 export interface BenchRecord {
   /**
@@ -261,7 +266,11 @@ const SRC = {
   minimaxM27Card: "https://huggingface.co/MiniMaxAI/MiniMax-M2.7",
   openaiGpt54: "https://platform.openai.com/docs/models/gpt-5.4",
   openaiGpt54Mini: "https://platform.openai.com/docs/models/gpt-5.4-mini",
+  benchlmSwePro: "BenchLM (benchlm.ai/benchmarks/swePro)",
 } as const;
+
+const BENCHLM_SWE_PRO_NOTE =
+  "3rd-party leaderboard; OpenAI 2026-07 audit flagged ~30% public tasks broken";
 
 /**
  * Anthropic 시스템카드의 표준 실행설정(각 카드 Table 8.1.A 캡션 + §8.2).
@@ -275,6 +284,30 @@ const ANTHROPIC_INTERNAL: BenchHarness = {
 /** swebench.com 공식 Verified 리더보드가 쓰는 공통 하네스. */
 function miniSweAgent(version: string, config?: string): BenchHarness {
   return { name: "mini-SWE-agent", version, ...(config ? { config } : {}) };
+}
+
+const BENCHLM_LEADERBOARD: BenchHarness = {
+  name: "BenchLM SWE-bench Pro leaderboard",
+};
+
+function benchlmPro(
+  model: string,
+  kind: BenchRecord["kind"],
+  score: number,
+): BenchRecord {
+  return {
+    model,
+    kind,
+    benchmark: "swe-bench-pro",
+    variantLabel: "SWE-bench Pro",
+    version: "unspecified",
+    harness: BENCHLM_LEADERBOARD,
+    score,
+    source: SRC.benchlmSwePro,
+    sourceKind: "leaderboard",
+    asOf: "2026-07-28",
+    note: BENCHLM_SWE_PRO_NOTE,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -801,6 +834,22 @@ const REGISTRY_ROWS: BenchRecord[] = [
     asOf: "2026-07-16",
     note: "발표문 SWE Bench Pro resolve rate.",
   },
+
+  // ── SWE-bench Pro (BenchLM 3rd-party leaderboard, 2026-07-28) ──────────
+  // Verified(system-card) 행은 그대로 둔다. Pro 는 별도 변형 축이고, 이 묶음은
+  // 티켓 JEQZNzshTGWJL8RFcXh7 이 지정한 BenchLM 리더보드 출처 규율을 따른다.
+  benchlmPro("claude-fable-5", "registry", 80.0),
+  benchlmPro("claude-opus-5", "registry", 79.2),
+  benchlmPro("claude-opus-4-8", "registry", 69.2),
+  benchlmPro("claude-sonnet-5", "registry", 63.2),
+  benchlmPro("grok-4.5", "registry", 64.7),
+  benchlmPro("gpt-5.6-sol", "registry", 64.6),
+  benchlmPro("gpt-5.6-terra", "registry", 63.4),
+  benchlmPro("gpt-5.6-luna", "registry", 62.7),
+  benchlmPro("gpt-5.5", "registry", 58.6),
+  benchlmPro("glm-5.2", "registry", 62.1),
+  benchlmPro("MiniMax-M3", "registry", 59.0),
+  benchlmPro("MiniMax-M2.7", "registry", 56.2),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -811,6 +860,19 @@ const REGISTRY_ROWS: BenchRecord[] = [
 // ─────────────────────────────────────────────────────────────────────────
 
 const REFERENCE_ROWS: BenchRecord[] = [
+  // ── SWE-bench Pro (BenchLM reference-only rows) ───────────────────────
+  // 레지스트리에 없는 모델은 라우팅 후보가 아니므로 reference 로만 둔다.
+  benchlmPro("Gemini 3.5 Flash", "reference", 55.1),
+  benchlmPro("Gemini 3.5 Flash-Lite", "reference", 54.2),
+  // leaderboard-reference only — no verified vendor API model id yet; not
+  // spawnable until confirmed.
+  benchlmPro("GLM-5.1", "reference", 58.4),
+  benchlmPro("GLM-5", "reference", 55.1),
+  // leaderboard-reference only — no verified vendor API model id yet; not
+  // spawnable until confirmed.
+  benchlmPro("Kimi K2.6", "reference", 58.6),
+  benchlmPro("Kimi K2.5", "reference", 50.7),
+
   // ── Z.ai GLM ──────────────────────────────────────────────────────────
   // ★glm-4.7 은 MTtCVCP4 로 레지스트리에 편입됐다(provider=zai, harness=claude).
   // 그래서 이 행은 `kind: "registry"` 이고 id 도 레지스트리 표기(소문자 구체 id)를
@@ -999,8 +1061,12 @@ export function validateBenchRecords(
   rows.forEach((rec, i) => {
     const at = label(rec, i);
 
-    // ── 출처 URL 필수 ───────────────────────────────────────────────────
-    if (!/^https?:\/\/\S+$/.test(rec.source)) {
+    // ── 출처 필수 ──────────────────────────────────────────────────────
+    // 원칙은 URL 이지만, BenchLM 리더보드는 티켓 규율상 표시 문자열 자체를 source 로
+    // 들고 다닌다. 이 예외는 sourceKind=leaderboard 일 때만 허용한다.
+    const isBenchLmLeaderboard =
+      rec.sourceKind === "leaderboard" && rec.source === SRC.benchlmSwePro;
+    if (!isBenchLmLeaderboard && !/^https?:\/\/\S+$/.test(rec.source)) {
       throw new Error(
         `[model-bench-reference] ${at}: source 가 URL 이 아닙니다("${rec.source}"). ` +
           "출처 없는 수치는 담지 않는다 — score=null 인 행도 '여기까지 찾아봤다'는 URL 이 필요하다.",
