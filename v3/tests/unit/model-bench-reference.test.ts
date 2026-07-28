@@ -335,7 +335,13 @@ describe("model-bench-reference / routing 그래프 미주입", () => {
     // 테스트가 그 사실을 리뷰 앞으로 끌고 온다.** 라우팅 모듈이 여기 들어오려
     // 하면 위 테스트(routing-graph/graph-updater/routing-effectiveness)가 먼저
     // 막는다.
-    const ALLOWED = ["model-fact-sheet.ts"];
+    //
+    // `model-guidance.ts` 가 두 번째로 들어왔다(오케 `get_model_guidance` 의 정적
+    // 절반). 같은 근거로 허용된다: **읽어서 보여줄 뿐 라우팅 결정에 관여하지
+    // 않는다.** 그 툴은 점수도 추천도 만들지 않고 참조표 레코드를 그대로 실어
+    // 오케에게 보여주며, 스코어러(dispatch-scoring)는 위 테스트가 계속 막는다 —
+    // 즉 "사람(오케)이 읽는 경로" 와 "자동 라우팅 경로" 의 분리는 유지된다.
+    const ALLOWED = ["model-fact-sheet.ts", "model-guidance.ts"];
     const importers = walkTs(ELECTRON_DIR)
       .filter(
         (f) =>

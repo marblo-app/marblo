@@ -18,6 +18,20 @@
  *
  * Safety: dry-run is the default, --apply always writes a timestamped backup
  * next to the graph first, and --revert is a complete one-call undo.
+ *
+ * ── ★정적 모델 사실을 이 그래프에 복제하지 마라 ─────────────────────────
+ * 단가·컨텍스트·공개 벤치 점수는 `model-registry.ts` / `model-context-reference.ts`
+ * / `model-bench-reference.ts` 가 단일소스로 갖고, 오케는 `get_model_guidance`
+ * (MCP)로 그것을 **직접 읽는다**. 그 수치를 prior 로 번역해 여기 눌러 담고 싶은
+ * 유혹이 생기는데, 그러면 (a) 참조표가 갱신돼도 그래프의 복사본은 낡은 채로 남고,
+ * (b) 카운터(관측)와 정적 사실(공개 수치)이 한 숫자로 섞여 "우리가 본 것" 과
+ * "벤더가 주장한 것" 을 다시 분리할 수 없게 된다. 실제로 그 분리는 테스트로도
+ * 강제돼 있다 — `tests/unit/model-bench-reference.test.ts` 의 "routing 그래프
+ * 미주입" 이 라우팅 모듈의 참조표 import 자체를 막는다.
+ *
+ * 여기 들어가도 되는 것은 **사람이 근거를 적어 넣은 소수의 cold-start prior**
+ * (아래 SEED_PRIORS, 근거는 v3/docs/MODEL-COMPARISON-SEED.md)뿐이고, 그것도 관측이
+ * 쌓이면 K/(n+K) 로 밀려나도록 설계돼 있다.
  */
 import * as fs from "fs";
 import * as path from "path";

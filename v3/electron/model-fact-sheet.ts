@@ -113,7 +113,12 @@ function toFactBench(rec: BenchRecord): ModelFactBench {
 }
 
 /**
- * 이 모델의 대표 벤치 + 같은 벤치의 대안들.
+ * 이 모델의 대표 벤치 + 같은 벤치의 대안들 — **BenchRecord 원형 그대로**.
+ *
+ * `pickBench` 와 갈라 둔 이유: 화면은 좁힌 `ModelFactBench` 를 원하지만, 오케에게
+ * 내려가는 통합 지식(`model-guidance.ts`)은 참조표 레코드를 **필드 손실 없이**
+ * 그대로 날라야 한다. 두 소비자가 각자 대표 선정 규칙을 다시 구현하면 화면과
+ * 오케가 서로 다른 행을 "대표" 라 부르게 되므로, 정책은 이 함수 하나뿐이다.
  *
  * 고르는 규칙:
  *   1. 선호 순서대로 훑어 **점수가 있는** 벤치를 먼저 잡는다.
@@ -125,12 +130,12 @@ function toFactBench(rec: BenchRecord): ModelFactBench {
  *   3. 점수 있는 벤치가 하나도 없으면, 선호 순서 첫 **빈 칸** 행을 대표로 둔다 —
  *      그 행의 note("no official number: …")가 왜 비었는지를 화면에 나른다.
  */
-function pickBench(modelId: string): {
-  bench: ModelFactBench | null;
-  alternates: ModelFactBench[];
+export function pickBenchRecords(modelId: string): {
+  representative: BenchRecord | null;
+  alternates: BenchRecord[];
 } {
   const rows = benchRowsForModel(modelId);
-  if (rows.length === 0) return { bench: null, alternates: [] };
+  if (rows.length === 0) return { representative: null, alternates: [] };
 
   for (const benchmark of BENCHMARK_PREFERENCE) {
     const scored = rows.filter(
@@ -140,16 +145,28 @@ function pickBench(modelId: string): {
     const vendorFirst =
       scored.find((r) => r.sourceKind === "model-vendor") ?? scored[0];
     return {
-      bench: toFactBench(vendorFirst),
-      alternates: scored.filter((r) => r !== vendorFirst).map(toFactBench),
+      representative: vendorFirst,
+      alternates: scored.filter((r) => r !== vendorFirst),
     };
   }
 
   for (const benchmark of BENCHMARK_PREFERENCE) {
     const empty = rows.find((r) => r.benchmark === benchmark);
-    if (empty) return { bench: toFactBench(empty), alternates: [] };
+    if (empty) return { representative: empty, alternates: [] };
   }
-  return { bench: null, alternates: [] };
+  return { representative: null, alternates: [] };
+}
+
+/** 화면용 좁힌 모양. 선정 정책은 `pickBenchRecords` 한 곳뿐이다. */
+function pickBench(modelId: string): {
+  bench: ModelFactBench | null;
+  alternates: ModelFactBench[];
+} {
+  const { representative, alternates } = pickBenchRecords(modelId);
+  return {
+    bench: representative ? toFactBench(representative) : null,
+    alternates: alternates.map(toFactBench),
+  };
 }
 
 const CAPABILITY_ORDER: Readonly<Record<CapabilityTier, number>> = {

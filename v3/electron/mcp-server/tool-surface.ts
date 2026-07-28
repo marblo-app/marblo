@@ -50,6 +50,7 @@ export const PROJECT_ID_TOOL_CONTRACTS: Readonly<
   add_pending_instruction: "locked",
   get_open_questions: "locked",
   get_routing_effectiveness: "locked",
+  get_model_guidance: "locked",
   create_task: "cross-project-create",
   create_tasks_bulk: "cross-project-create",
 };

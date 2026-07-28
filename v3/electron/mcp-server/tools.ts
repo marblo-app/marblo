@@ -104,8 +104,14 @@ import { classifyTaskType } from "./task-type.js";
 import {
   aggregateEffectiveness,
   formatEffectivenessReport,
+  rollupEffectivenessByModel,
   type EffectivenessInputRow,
 } from "./routing-effectiveness.js";
+import {
+  formatModelGuidance,
+  mergeModelGuidance,
+  type GuidanceStaticPayload,
+} from "./model-guidance-report.js";
 import {
   formatAgentTaskRoleLabel,
   normalizeFirestoreFallbackAgentStatus,
@@ -168,12 +174,7 @@ type TaskStatus =
   | "FAILED"
   | "DONE";
 
-type ManagedAgentModel =
-  | "claude"
-  | "gemini"
-  | "gpt"
-  | "grok"
-  | "antigravity";
+type ManagedAgentModel = "claude" | "gemini" | "gpt" | "grok" | "antigravity";
 
 const MANAGED_AGENT_COMMAND: Readonly<Record<ManagedAgentModel, string>> = {
   claude: "claude",
@@ -308,6 +309,55 @@ function bridgeHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = process.env.MARBLO_BRIDGE_TOKEN;
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
+}
+
+/**
+ * 정적 모델 지식을 메인 프로세스에서 가져온다(GET /model-guidance).
+ *
+ * 이 프로세스는 `model-registry.ts` 를 볼 수 없다(mcp tsconfig rootDir 경계) —
+ * 그래서 브리지가 유일한 경로다. ★실패를 성공처럼 만들지 않는다: 못 받으면
+ * `payload: null` + 사람이 읽는 사유를 돌려주고, 호출부가 "정적 절반 없음" 을
+ * 리포트 첫 줄에 적는다. 빈 목록을 돌려주면 "모델이 없다" 로 오독된다.
+ */
+async function fetchModelGuidanceStatic(): Promise<{
+  payload: GuidanceStaticPayload | null;
+  error: string | null;
+}> {
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) {
+    return {
+      payload: null,
+      error:
+        "브리지 포트를 모른다(MARBLO_BRIDGE_PORT 없음 — 앱 밖에서 뜬 MCP 프로세스)",
+    };
+  }
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${bridgePort}/model-guidance`,
+      { headers: bridgeHeaders() },
+    );
+    if (!response.ok) {
+      return { payload: null, error: `브리지 응답 ${response.status}` };
+    }
+    const data = (await response.json()) as Partial<GuidanceStaticPayload>;
+    if (!Array.isArray(data.models)) {
+      return { payload: null, error: "브리지 응답에 models 배열이 없다" };
+    }
+    return {
+      payload: {
+        payloadVersion:
+          typeof data.payloadVersion === "number" ? data.payloadVersion : 0,
+        sources: data.sources ?? {},
+        models: data.models,
+      },
+      error: null,
+    };
+  } catch (err) {
+    return {
+      payload: null,
+      error: `브리지 호출 실패: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 /**
@@ -5956,6 +6006,48 @@ export function registerTools(server: McpServer): void {
     { userFacing: false },
   );
 
+  // ── 효과집계 입력 로딩 (get_routing_effectiveness · get_model_guidance 공용) ──
+  //
+  // 두 툴이 같은 모집단을 봐야 한다. 로딩을 각자 쓰면 한쪽만 `deleted` 를 거르거나
+  // 한쪽만 dispatchMeta 필드를 새로 읽는 식으로 조용히 갈라지고, 그러면 같은 질문에
+  // 두 답이 나온다. 쿼리 규율은 원래 get_routing_effectiveness 의 것 그대로:
+  // status 로 필터하지 않는다 — (projectId, status) 복합 인덱스를 새로 요구하지
+  // 않으려는 것도 있지만, 더 중요하게는 "진행중 몇 건이 제외됐나" 를 리포트가
+  // 말해야 하기 때문이다(쿼리에서 지우면 그 수를 셀 수 없다).
+  async function loadEffectivenessRows(
+    projectId: string | undefined,
+    cap: number,
+    caller: string,
+  ): Promise<EffectivenessInputRow[]> {
+    const constraints: QueryConstraint[] = [];
+    if (projectId) constraints.push(where("projectId", "==", projectId));
+    const snap = await boundedGetDocs(
+      "tasks",
+      constraints,
+      [fsLimit(cap)],
+      caller,
+    );
+    const rows: EffectivenessInputRow[] = [];
+    for (const d of snap.docs) {
+      const data = d.data() as Record<string, unknown>;
+      if (data.deleted === true) continue;
+      const meta = (data.dispatchMeta ?? {}) as Record<string, unknown>;
+      const str = (v: unknown): string | null =>
+        typeof v === "string" && v.trim() ? v : null;
+      rows.push({
+        taskId: d.id,
+        status: str(data.status),
+        spawnedModelKey: str(meta.spawnedModelKey),
+        provider: str(meta.model),
+        complexity: str(meta.complexity),
+        taskType: str(meta.taskType),
+        role: str(meta.role) ?? str(data.role),
+        costTotal: typeof data.costTotal === "number" ? data.costTotal : null,
+      });
+    }
+    return rows;
+  }
+
   // 33-b. get_routing_effectiveness (P2-4)
   //
   // 라우팅 에픽이 측정하려던 지표를 실제로 계산해 돌려준다:
@@ -5990,39 +6082,110 @@ export function registerTools(server: McpServer): void {
         project_id,
       );
       const cap = limit ?? 500;
-      const constraints: QueryConstraint[] = [];
-      if (projectId) constraints.push(where("projectId", "==", projectId));
-      // status 로 쿼리 필터하지 않는다: (projectId, status) 복합 인덱스를 새로
-      // 요구하지 않으려는 것도 있지만, 더 중요한 이유는 "진행중 몇 건이 제외됐나"
-      // 를 리포트가 말해야 하기 때문이다 — 쿼리에서 지워 버리면 그 수를 셀 수 없다.
-      const snap = await boundedGetDocs(
-        "tasks",
-        constraints,
-        [fsLimit(cap)],
+      const rows = await loadEffectivenessRows(
+        projectId,
+        cap,
         "get_routing_effectiveness",
       );
-      const rows: EffectivenessInputRow[] = [];
-      for (const d of snap.docs) {
-        const data = d.data() as Record<string, unknown>;
-        if (data.deleted === true) continue;
-        const meta = (data.dispatchMeta ?? {}) as Record<string, unknown>;
-        const str = (v: unknown): string | null =>
-          typeof v === "string" && v.trim() ? v : null;
-        rows.push({
-          taskId: d.id,
-          status: str(data.status),
-          spawnedModelKey: str(meta.spawnedModelKey),
-          provider: str(meta.model),
-          complexity: str(meta.complexity),
-          taskType: str(meta.taskType),
-          role: str(meta.role) ?? str(data.role),
-          costTotal: typeof data.costTotal === "number" ? data.costTotal : null,
-        });
-      }
       return text(
         formatEffectivenessReport(aggregateEffectiveness(rows), {
           scanned: rows.length,
           cap,
+        }),
+      );
+    },
+    { userFacing: false },
+  );
+
+  // 33-c. get_model_guidance
+  //
+  // get_routing_effectiveness 와 겹치지 않는다. 그쪽은 **동적만** 답한다("우리
+  // 보드에서 무엇이 성공했나"). 이 툴은 그 동적 절반에 **정적 절반**(레지스트리
+  // 단가·능력등급·컨텍스트 · 공개 SWE-bench 원문 · 파생 티어)을 합쳐 "이 티켓을
+  // 어느 칸에 줄까" 라는 질문 하나에 답하도록 만든 선택지원 뷰다. 콜드일 때
+  // get_routing_effectiveness 는 할 말이 없지만 이 툴은 정적 근거를 준다.
+  //
+  // ★새 수치를 만들지 않는다. 정적은 브리지가 넘긴 참조표 원문 그대로, 동적은
+  // 위 loadEffectivenessRows + aggregateEffectiveness 그대로다. 합류·서술만
+  // model-guidance-report.ts 가 한다. 종합점수/추천 한 줄도 만들지 않는다 —
+  // 서로 다른 벤치와 얇은 표본을 한 숫자로 뭉개면 그게 근거처럼 읽힌다.
+  auditedTool(
+    "get_model_guidance",
+    "모델 선택 지식 통합: 모델별 정적 사실(레지스트리 단가·능력등급·지원 effort·컨텍스트 창 + 공개 SWE-bench 점수 원문(벤치·스캐폴드·출처·일자 동반) + 파생 티어(프리미어/일반작업/가성비))과 동적 실적(우리 보드의 성공률·평균비용·비용당성공)을 한 번에 돌려준다. dispatch_task/spawn_agent 로 모델을 고르기 전에 근거를 확인할 때 쓴다. 임계값·추천·종합점수는 주지 않는다 — 판정은 호출자가 한다. 칸별 (난도 × taskType) 세부는 get_routing_effectiveness 쪽이다.",
+    {
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+        ),
+      model: z
+        .string()
+        .optional()
+        .describe(
+          "모델 id 또는 alias 로 한 행만 보기(부분일치). 생략하면 활성 레지스트리 전체.",
+        ),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(2000)
+        .optional()
+        .describe(
+          "동적 절반이 스캔할 티켓 수 상한(기본 500). 상한에 걸리면 리포트가 그 사실을 명시한다.",
+        ),
+    },
+    async ({ project_id, model, limit }) => {
+      const projectId = await enforceProjectLock(
+        "get_model_guidance",
+        project_id,
+      );
+      const cap = limit ?? 500;
+
+      // 동적 절반은 이 프로세스가 직접 만든다(Firestore 접근이 여기 있다).
+      const rows = await loadEffectivenessRows(
+        projectId,
+        cap,
+        "get_model_guidance",
+      );
+      const report = aggregateEffectiveness(rows);
+      const rollups = rollupEffectivenessByModel(report);
+
+      // 정적 절반은 메인 프로세스만 가진다(rootDir 경계). 못 받으면 **조용히
+      // 반쪽을 정상인 척하지 않는다** — 사유를 먼저 말하고, 그래도 손에 있는
+      // 동적 절반은 get_routing_effectiveness 와 같은 표로 붙여 준다(빈손으로
+      // 돌려보내면 오케가 그냥 기억으로 고른다).
+      const staticPayload = await fetchModelGuidanceStatic();
+      if (!staticPayload.payload) {
+        return text(
+          formatModelGuidance([], {
+            scanned: rows.length,
+            cap,
+            staticError: staticPayload.error,
+            filter: model ?? null,
+          }) +
+            "\n\n" +
+            formatEffectivenessReport(report, { scanned: rows.length, cap }),
+        );
+      }
+
+      // 티어는 **전체 행**으로 파생한 뒤 필터한다(중앙값 기준이라 부분집합으로
+      // 계산하면 model= 을 줄 때마다 티어가 달라진다).
+      const merged = mergeModelGuidance(staticPayload.payload, rollups);
+      const needle = (model ?? "").trim().toLowerCase();
+      const shown = needle
+        ? merged.filter(
+            (r) =>
+              r.static.modelId.toLowerCase().includes(needle) ||
+              r.static.aliases.some((a) => a.toLowerCase().includes(needle)),
+          )
+        : merged;
+
+      return text(
+        formatModelGuidance(shown, {
+          scanned: rows.length,
+          cap,
+          filter: model ?? null,
         }),
       );
     },

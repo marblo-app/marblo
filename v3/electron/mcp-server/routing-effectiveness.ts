@@ -270,3 +270,84 @@ export function formatEffectivenessReport(
   );
   return lines.join("\n");
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// 모델 축 롤업 — `get_model_guidance` 가 정적 지식과 합류시킬 동적 절반.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * 한 modelKey 의 (난도 × taskType) 칸들을 하나로 접은 것.
+ *
+ * ★재집계가 아니라 **칸의 합**이다. 원시 행에서 다시 세면 성공/실패 판정 규칙이
+ * 두 벌이 되고, 언젠가 한쪽만 고쳐진다. n·successes·costTotal·costedN·
+ * costedSuccesses 는 칸 단위로 서로소라 합이 정확하고, 파생 비율은 그 합에서
+ * `aggregateEffectiveness` 와 **같은 식**으로 다시 계산한다(미측정 ≠ 0 규율 포함).
+ */
+export interface EffectivenessModelRollup {
+  modelKey: string;
+  resolution: ModelKeyResolution;
+  /** 이 키가 몇 개의 (난도 × taskType) 칸에서 왔나 — 얇음을 숨기지 않는다. */
+  cellCount: number;
+  n: number;
+  successes: number;
+  failures: number;
+  successRate: number;
+  costedN: number;
+  costTotal: number;
+  avgCost: number | null;
+  costCoverage: number;
+  successPerDollar: number | null;
+  costedSuccesses: number;
+}
+
+/**
+ * modelKey 별 롤업. 정렬은 (n desc, modelKey) 로 결정적.
+ *
+ * modelKey 는 `aggregateEffectiveness` 안에서 이미 정규화(소문자)돼 있고, 한 키는
+ * 항상 한 해상도다(`model@effort` 를 만든 행과 `provider` 로 떨어진 행은 애초에
+ * 다른 문자열). 그래서 해상도를 섞어 담을 일이 없다.
+ */
+export function rollupEffectivenessByModel(
+  report: EffectivenessReport,
+): EffectivenessModelRollup[] {
+  const byKey = new Map<string, EffectivenessModelRollup>();
+  for (const cell of report.cells) {
+    let roll = byKey.get(cell.modelKey);
+    if (!roll) {
+      roll = {
+        modelKey: cell.modelKey,
+        resolution: cell.resolution,
+        cellCount: 0,
+        n: 0,
+        successes: 0,
+        failures: 0,
+        successRate: 0,
+        costedN: 0,
+        costTotal: 0,
+        avgCost: null,
+        costCoverage: 0,
+        successPerDollar: null,
+        costedSuccesses: 0,
+      };
+      byKey.set(cell.modelKey, roll);
+    }
+    roll.cellCount++;
+    roll.n += cell.n;
+    roll.successes += cell.successes;
+    roll.failures += cell.failures;
+    roll.costedN += cell.costedN;
+    roll.costTotal += cell.costTotal;
+    roll.costedSuccesses += cell.costedSuccesses;
+  }
+
+  const out = [...byKey.values()];
+  for (const roll of out) {
+    roll.successRate = roll.n > 0 ? roll.successes / roll.n : 0;
+    roll.costCoverage = roll.n > 0 ? roll.costedN / roll.n : 0;
+    roll.avgCost = roll.costedN > 0 ? roll.costTotal / roll.costedN : null;
+    roll.successPerDollar =
+      roll.costTotal > 0 ? roll.costedSuccesses / roll.costTotal : null;
+  }
+  out.sort((a, b) => b.n - a.n || a.modelKey.localeCompare(b.modelKey));
+  return out;
+}

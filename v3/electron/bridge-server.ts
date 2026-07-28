@@ -40,6 +40,7 @@ import {
 import { graphModelKeys, modelKeyFromSpawn } from "./routing-model-key";
 import { normalizeTaskTypeLabel } from "./mcp-server/task-type";
 import { resolveModelPin } from "./model-selection";
+import { modelGuidanceStatic } from "./model-guidance";
 import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
 import type { RateLimitInfo } from "./session-parsers";
 import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
@@ -1054,6 +1055,14 @@ export class BridgeServer {
           return;
         }
 
+        // 정적 모델 지식(레지스트리·공개벤치·컨텍스트). MCP 서버 프로세스는
+        // tsconfig rootDir 때문에 그 참조표들을 직접 import 할 수 없어서, /agents
+        // 와 같은 방식으로 메인 프로세스가 넘겨준다. 읽기 전용·인자 없음.
+        if (req.method === "GET" && req.url === "/model-guidance") {
+          this.handleGetModelGuidance(res);
+          return;
+        }
+
         if (req.method === "POST" && req.url === "/spawn-agent") {
           this.handleSpawnAgent(req, res);
           return;
@@ -1209,6 +1218,27 @@ export class BridgeServer {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ agents }));
+  }
+
+  // ── GET /model-guidance — 정적 모델 지식(오케 모델선택 근거) ──────────
+  //
+  // 조인·선정 정책은 전부 model-guidance.ts 가 갖는다. 여기선 직렬화만 한다 —
+  // 핸들러가 페이로드를 손보기 시작하면 화면(IPC)과 오케(브리지)가 서로 다른
+  // 사실을 보게 된다.
+  private handleGetModelGuidance(res: http.ServerResponse): void {
+    try {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(modelGuidanceStatic()));
+    } catch (error) {
+      console.error("[Bridge] model-guidance failed:", error);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
   }
 
   // ── POST /agent-custom-token — MCP 자가 재인증용 신선한 토큰 발급 ──────────
