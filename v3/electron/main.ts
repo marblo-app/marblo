@@ -66,6 +66,7 @@ import {
   type RawHandoffDoc,
 } from "./orchestrator-handoff";
 import {
+  ORCHESTRATOR_BLOCK_REASON_MCP,
   OrchestratorSwitchStepTimeoutError,
   runOrchestratorSwitch,
   type OrchestratorSwitchStage,
@@ -6055,6 +6056,9 @@ ipcMain.handle(
             model,
             action: mcpGate.action,
             installed: true,
+            // 인증이 아니라 MCP 가용성 — 렌더러가 CLI 로그인 위저드 대신
+            // 폴더신뢰/MCP 안내를 띄우게 하는 표식.
+            reason: ORCHESTRATOR_BLOCK_REASON_MCP,
           };
         }
         return {
@@ -6225,6 +6229,9 @@ ipcMain.handle(
           model: orchestratorModel,
           action: orchMcpGate.action ?? "grok MCP 설정 확인",
           installed: true,
+          // ★인증 실패가 아니다 — 렌더러가 CLI 로그인 위저드를 열면 "이미
+          // 로그인됨" 만 보여주고 사용자는 이유 없이 막힌 채로 끝난다.
+          reason: ORCHESTRATOR_BLOCK_REASON_MCP,
         },
       };
     }

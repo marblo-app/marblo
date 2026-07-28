@@ -3,6 +3,8 @@ import { useAuth } from "../../hooks/useAuth";
 import { useWorkspaceModeStore } from "../../stores/workspaceModeStore";
 import { useProjectStore } from "../../stores/projectStore";
 import {
+  ORCHESTRATOR_HARNESS_DESC,
+  ORCHESTRATOR_HARNESS_OPTIONS,
   useOrchestratorStore,
   orchestratorModelProvider,
 } from "../../stores/orchestratorStore";
@@ -380,24 +382,18 @@ const PRESETS = [
   },
 ];
 
-type OrchestratorModel = "claude" | "codex";
-
-const ORCHESTRATOR_MODELS: Array<{
-  id: OrchestratorModel;
-  label: string;
-  desc: string;
-}> = [
-  {
-    id: "claude",
-    label: "Claude",
-    desc: "Highest quality; uses Claude weekly limits. Default.",
-  },
-  {
-    id: "codex",
-    label: "Codex (GPT)",
-    desc: "Good for saving Claude quota; uses OpenAI/Codex limits.",
-  },
-];
+/**
+ * 이 설정이 다루는 축은 **하네스**(어느 CLI 로 오케를 띄울까) 하나다. 구체 모델
+ * 핀은 프로젝트별인 오케 패널 셀렉터의 몫이라 여기 값은 접미 없는 문자열이다.
+ *
+ * ★종전엔 여기에 claude/codex 두 칸이 **따로 하드코딩**돼 있었다. 그 결과 백엔드
+ * (`model-selection.ORCHESTRATOR_HARNESS_SETTINGS`)와 오케 패널 셀렉터가 grok 을
+ * 편입한 뒤에도 이 화면만 옛 두 칸에 머물러, 유저는 env 없이는 grok 오케를 고를
+ * 길이 없었다(#638/#639 는 백엔드에서 완전 동작 중이었다). 그래서 목록을 여기서
+ * 만들지 않고 셀렉터 목록의 하네스 축을 그대로 쓴다 — 두 화면이 벌어질 자리 자체가
+ * 없어진다.
+ */
+type OrchestratorModel = string;
 
 const ORCHESTRATOR_ENV_MODEL = {
   label: "기타(env)",
@@ -481,20 +477,26 @@ function ModelPresetSection() {
           }
           className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
         >
-          {ORCHESTRATOR_MODELS.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.label}
+          {ORCHESTRATOR_HARNESS_OPTIONS.map((harness) => (
+            <option key={harness.value} value={harness.value}>
+              {harness.label}
             </option>
           ))}
-          {!ORCHESTRATOR_MODELS.some((m) => m.id === orchestratorModel) && (
+          {!ORCHESTRATOR_HARNESS_OPTIONS.some(
+            (h) => h.value === orchestratorModel,
+          ) && (
             <option value={orchestratorModel} disabled>
               {ORCHESTRATOR_ENV_MODEL.label}
             </option>
           )}
         </select>
         <p className="mt-2 text-xs text-gray-500">
-          {ORCHESTRATOR_MODELS.find((m) => m.id === orchestratorModel)?.desc ??
-            ORCHESTRATOR_ENV_MODEL.desc}
+          {ORCHESTRATOR_HARNESS_OPTIONS.some(
+            (h) => h.value === orchestratorModel,
+          )
+            ? // 설명이 없는 하네스는 설명만 비운다 — 칸은 이미 서 있다.
+              (ORCHESTRATOR_HARNESS_DESC[orchestratorModel] ?? "")
+            : ORCHESTRATOR_ENV_MODEL.desc}
         </p>
         <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
           {isOrchestratorRunning

@@ -175,8 +175,9 @@ describe("byomOptions — 목록", () => {
   });
 
   it("★자체 CLI 벤더는 셀렉터가 그 CLI 칸을 세우는 순간 오케 후보가 된다", () => {
-    // electron 후속 티켓이 grok 을 오케 후보로 열면 셀렉터 미러에 모델 접미 없는
-    // 칸("grok")이 생긴다. 그때 이 화면이 **코드 수정 없이** 따라가는지를 못박는다.
+    // ★이 테스트가 예고했던 "electron 후속 티켓" 이 착지했다(F6): 셀렉터 미러에
+    // 모델 접미 없는 칸 "grok" 이 생겼고, 이 화면은 **코드 수정 없이** 따라왔다.
+    // 이제 단언 방향이 뒤집힌다 — 열린 것이 현재 사실이고, 닫힌 쪽이 가정이다.
     const grok = card({
       vendor: "xai",
       harness: "grok",
@@ -188,15 +189,21 @@ describe("byomOptions — 목록", () => {
       exampleModelId: "grok-4.5",
       cliRowId: "cli-grok",
     });
-    expect(byomOptions([grok], OPTION_VALUES)[0].canHostOrchestrator).toBe(
-      false,
-    );
-    const opened = byomOptions([grok], [...OPTION_VALUES, "grok"])[0];
+    // 라이브 목록(=셀렉터가 실제로 세우는 칸)엔 grok 이 있다.
+    expect(OPTION_VALUES).toContain("grok");
+    const opened = byomOptions([grok], OPTION_VALUES)[0];
     expect(opened.canHostOrchestrator).toBe(true);
     expect(byomGateContribution([opened])).toEqual({
       installed: true, // 설치는 됐고
       ready: false, // 로그인이 남았다
     });
+    // 반대 방향도 그대로 산다: 셀렉터가 그 칸을 안 세우면 후보가 아니다
+    // (파생이지 리터럴이 아님을 증명하는 축).
+    const closed = byomOptions(
+      [grok],
+      OPTION_VALUES.filter((v) => v !== "grok"),
+    )[0];
+    expect(closed.canHostOrchestrator).toBe(false);
   });
 
   it("env-swap 벤더는 하네스 이름이 같다는 이유로 오케 후보가 되지 않는다", () => {
@@ -208,7 +215,14 @@ describe("byomOptions — 목록", () => {
     ).toBe(false);
   });
 
-  it("★오늘의 라이브 사실(트립와이어): 크레덴셜을 다 채워도 BYOM 만으론 ②단계를 못 넘는다", () => {
+  it("★오늘의 라이브 사실: BYOM 만으로 ②단계를 넘을 수 있다 — 네이티브 CLI 벤더(grok) 경로", () => {
+    // ★이 테스트는 종전엔 반대 사실("못 넘는다")의 트립와이어였다. 그때의 원인은
+    //   오케 셀렉터가 claude/codex 두 칸만 세운다는 것이었고, 그 자리에서 스스로
+    //   "이 단언이 깨지는 날 = BYOM 오케를 연 날" 이라고 적어 뒀다. F6 이 그날이다:
+    //   셀렉터가 ORCHESTRATOR_HARNESS_SETTINGS 파생으로 grok/antigravity 칸을
+    //   세우면서, 자체 CLI + 자기 로그인을 가진 벤더는 실제로 오케를 태운다.
+    //   화면(ByomStartSection)의 workerOnly 문구는 리터럴이 아니라 이 파생을 따르는
+    //   분기라 함께 자동으로 옳아진다 — 걷어낼 문구가 없다.
     // 모든 벤더 키가 등록되고 모든 CLI 가 로그인된 최상의 조건을 만든다.
     const cliStates = Object.fromEntries(
       CLI_ROWS.map((r) => [r.id, { installed: true, authenticated: true }]),
@@ -226,15 +240,24 @@ describe("byomOptions — 목록", () => {
     const options = byomOptions(cards, OPTION_VALUES);
     expect(options.every((o) => o.status === "ready")).toBe(true);
 
-    // 그래도 게이트 기여는 0 이다 — 오케 셀렉터가 이 벤더들을 아직 안 세우기
-    // 때문이고(`model-selection.selectorEligible`), 오케 없이는 ③④단계를 못 간다.
-    // ★이 단언이 깨지는 날 = 메인 프로세스가 BYOM 오케를 연 날이다. 그때 이
-    //   테스트를 "이제 넘어간다" 로 뒤집고, 화면의 workerOnly 문구도 함께 걷어라.
     expect(byomGateContribution(options)).toEqual({
+      installed: true,
+      ready: true,
+    });
+    expect(byomHeadline(options)).toBe("ready");
+
+    // ★단, 그 통과는 **오케를 태울 수 있는 벤더** 때문이지 "준비된 벤더가 있어서"
+    // 가 아니다. env-swap 벤더(GLM/MiniMax/Kimi)만 준비된 상태는 여전히 ②단계를
+    // 못 넘는다 — 그 규율(오케 선택은 영구저장이라 env-swap 미편입)이 이 티켓으로
+    // 느슨해지지 않았음을 같은 데이터로 확인한다.
+    const envSwapOnly = options.filter((o) => o.kind === "envSwap");
+    expect(envSwapOnly.length).toBeGreaterThan(0);
+    expect(envSwapOnly.every((o) => o.status === "ready")).toBe(true);
+    expect(byomGateContribution(envSwapOnly)).toEqual({
       installed: false,
       ready: false,
     });
-    expect(byomHeadline(options)).toBe("workerOnly");
+    expect(byomHeadline(envSwapOnly)).toBe("workerOnly");
   });
 
   it("★라이브 사실: 오케 후보로 서는 것은 하네스 네이티브 벤더뿐이다", () => {

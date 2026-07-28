@@ -313,8 +313,16 @@ interface OrchestratorSessionAPI {
     ptySessionId: string;
     status: string;
     /** Present (with empty sessionId/ptySessionId) when the orchestrator
-     * spawn was blocked because claude is not installed / not logged in. */
-    needsAuth?: { model: string; action: string; installed: boolean };
+     * spawn was blocked. `reason` tells the two gates apart: absent/anything
+     * else = auth (open the CLI setup wizard), "mcp-unavailable" = the CLI is
+     * signed in but Marblo MCP does not attach (#639 grok folder trust).
+     * Classify with `lib/orchestratorLaunchBlock.classifyOrchestratorBlock`. */
+    needsAuth?: {
+      model: string;
+      action: string;
+      installed: boolean;
+      reason?: string;
+    };
   }>;
   switch: (args: {
     projectId: string;
@@ -331,7 +339,13 @@ interface OrchestratorSessionAPI {
       inFlightTaskCount: number;
       unresolvedDecisionCount: number;
     };
-    needsAuth?: { model: string; action: string; installed: boolean };
+    /** launch 와 같은 봉투·같은 분류 규칙(위 주석 참조). */
+    needsAuth?: {
+      model: string;
+      action: string;
+      installed: boolean;
+      reason?: string;
+    };
   }>;
   stop: () => Promise<void>;
   status: () => Promise<string>;

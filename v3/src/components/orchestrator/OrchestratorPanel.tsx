@@ -10,6 +10,7 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "../../lib/i18n";
 import { placeAnchoredPopup } from "../../lib/anchoredPopup";
+import { classifyOrchestratorBlock } from "../../lib/orchestratorLaunchBlock";
 import {
   ORCHESTRATOR_MODEL_OPTIONS,
   isOrchestratorModel,
@@ -56,8 +57,12 @@ function computeDefaultHeight(): number {
  */
 function describeOrchestratorModel(value: string): string {
   const base = orchestratorModelBase(value);
+  // 목록에 없는 값(env·손편집)은 **그 값 그대로** 보여준다. 종전엔 "Claude" 로
+  // 접었는데, 그러면 grok 으로 도는 오케가 헤더에선 Claude 라고 말한다.
   const label =
-    ORCHESTRATOR_MODEL_OPTIONS.find((m) => m.value === base)?.label ?? "Claude";
+    ORCHESTRATOR_MODEL_OPTIONS.find((m) => m.value === base)?.label ||
+    base ||
+    "Claude";
   const effort = orchestratorModelEffort(value);
   return effort ? `${label} @${effort}` : label;
 }
@@ -162,6 +167,8 @@ export default memo(function OrchestratorPanel({
   const setSelectedModel = useOrchestratorStore((s) => s.setSelectedModel);
   const setSwitchStatus = useOrchestratorStore((s) => s.setSwitchStatus);
   const setHandoffSummary = useOrchestratorStore((s) => s.setHandoffSummary);
+  const launchBlock = useOrchestratorStore((s) => s.launchBlock);
+  const setLaunchBlock = useOrchestratorStore((s) => s.setLaunchBlock);
   const tasks = useTaskStore((s) => s.tasks);
 
   // Resolved Claude Code build that agents actually launch with. Shown in the
@@ -301,6 +308,7 @@ export default memo(function OrchestratorPanel({
     const cwd = rootPath || "~";
     try {
       setStatus("starting");
+      setLaunchBlock(null);
       await window.electronAPI.orchestratorModel.set(selectedModel, projectId);
       // 명시 모델을 launch 에 함께 전달 — main 의 프로젝트별 저장 모델보다
       // 이번 사용자 선택이 우선하게 한다.
@@ -310,11 +318,18 @@ export default memo(function OrchestratorPanel({
         resumeSessionId,
         selectedModel,
       );
-      // Spawn blocked: claude not installed / not logged in. Open the CLI
-      // setup gate instead of leaving the orchestrator dead with no reason.
+      // Spawn blocked. 두 갈래다(classifyOrchestratorBlock):
+      //   auth — CLI 미설치/미로그인. 종전대로 설정 위저드가 받는다.
+      //   mcp  — 로그인은 됐는데 marblo MCP 가 안 붙는다(#639 grok 게이트).
+      //          위저드는 "연결됨" 만 보여주므로 여기서 직접 설명해야 한다.
       if (result?.needsAuth) {
         setStatus("stopped");
-        window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        const block = classifyOrchestratorBlock(result.needsAuth);
+        if (block.opensCliSetup) {
+          window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        } else {
+          setLaunchBlock(block);
+        }
         return;
       }
       if (result) {
@@ -419,8 +434,15 @@ export default memo(function OrchestratorPanel({
       );
       if (result?.needsAuth) {
         setSwitchStatus("error");
+        const block = classifyOrchestratorBlock(result.needsAuth);
+        // setSelectedModel 이 launchBlock 을 비우므로 되돌리기가 먼저다 —
+        // 순서가 뒤집히면 방금 세운 안내가 즉시 지워진다.
         if (runningModel) setSelectedModel(runningModel);
-        window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        if (block.opensCliSetup) {
+          window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        } else {
+          setLaunchBlock(block);
+        }
         return;
       }
       setSwitchStatus("starting");
@@ -516,7 +538,11 @@ export default memo(function OrchestratorPanel({
           ? "flex h-full min-h-0 flex-col border-t border-[#313244] bg-[#181825]"
           : "flex flex-col flex-shrink-0 border-t border-[#313244] bg-[#181825]"
       }
-      style={fill ? undefined : { height }}
+      style={
+        // 차단 배너가 서 있는 동안은 고정 높이를 놓는다. 접힘 높이(36px)는 헤더
+        // 한 줄분이라, 고정한 채로 배너를 그리면 안내가 패널 밖으로 삐져나온다.
+        fill || launchBlock ? undefined : { height }
+      }
     >
       {/* Resize handle — suppressed in fill mode (shell divider owns sizing). */}
       {!isCollapsed && isRunning && !fill && (
@@ -578,12 +604,14 @@ export default memo(function OrchestratorPanel({
         {isRunning ? (
           <>
             <span className="text-[#6c7086]">
+              {/* 종전엔 라벨 뒤에 " Code" 를 붙였다("Claude Code"). 제품명이
+                  맞는 건 claude 뿐이고 codex 도 이미 "Codex Code" 로 어긋나 있었다
+                  — 하네스가 넷이 된 지금은 "Grok Code"/"Antigravity Code" 라는
+                  없는 제품명을 셋 만든다. 라벨만 그대로 보여준다. */}
               {isSwitching
                 ? "Switching..."
                 : status === "running"
-                  ? `${describeOrchestratorModel(
-                      runningModel ?? selectedModel,
-                    )} Code`
+                  ? describeOrchestratorModel(runningModel ?? selectedModel)
                   : "Starting..."}
             </span>
             {claudeVersion && (
@@ -850,6 +878,33 @@ export default memo(function OrchestratorPanel({
           </>
         )}
       </div>
+
+      {/* 스폰 차단 안내 — 위저드로 못 푸는 사유(오늘은 grok MCP 게이트)만 온다.
+          접힘 상태여도 보여준다: 이 배너가 안 보이면 사용자는 "Start 를 눌렀는데
+          아무 일도 안 일어난다" 만 겪는다(#639 게이트가 조용히 막던 그 화면). */}
+      {launchBlock && (
+        <div
+          role="alert"
+          className="mx-3 mb-2 rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-3 py-2 text-[11px] leading-4 text-[#f9e2af]"
+        >
+          <div className="font-medium">
+            {t("orchestrator.blocked.mcpTitle", { model: launchBlock.model })}
+          </div>
+          <div className="mt-1 text-[#f5e0dc]">{launchBlock.action}</div>
+          <div className="mt-1 text-[10px] text-[#a6adc8]">
+            {t("orchestrator.blocked.mcpHint")}
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setLaunchBlock(null);
+            }}
+            className="mt-2 rounded border border-[#45475a] px-2 py-0.5 text-[10px] text-[#a6adc8] hover:bg-[#313244]"
+          >
+            {t("orchestrator.blocked.dismiss")}
+          </button>
+        </div>
+      )}
 
       {/* Terminal content */}
       {!isCollapsed && ptySessionId && isRunning && (

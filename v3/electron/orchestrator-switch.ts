@@ -14,11 +14,28 @@ export interface OrchestratorSwitchArgs {
   resume: OrchestratorSwitchResumeMode;
 }
 
+/**
+ * 스폰 차단 사유가 **인증이 아닌** 경우의 표식.
+ *
+ * `needsAuth` 라는 필드명이 말하는 것과 달리, 오케 스폰에는 관문이 둘이다:
+ * 인증(`checkSpawnAuthGate`)과 MCP 가용성(`checkOrchestratorMcpGate`, grok 한정).
+ * 둘 다 같은 봉투로 렌더러에 돌아오는데, 렌더러는 종전에 그것을 전부 "로그인이
+ * 필요하다" 로 읽어 CLI 설정 위저드를 열었다 — 로그인은 멀쩡한데 폴더 신뢰가
+ * 없어서 막힌 grok 사용자는 "이미 로그인됨" 만 보이는 위저드 앞에서 끝난다.
+ * 이 한 글자가 그 두 실패를 가른다(없으면 종전대로 인증으로 읽힌다 = 하위호환).
+ */
+export const ORCHESTRATOR_BLOCK_REASON_MCP = "mcp-unavailable";
+
 export interface OrchestratorSwitchSession {
   sessionId: string;
   ptySessionId: string;
   status: string;
-  needsAuth?: { model: string; action: string; installed: boolean };
+  needsAuth?: {
+    model: string;
+    action: string;
+    installed: boolean;
+    reason?: string;
+  };
 }
 
 export interface OrchestratorSwitchResult extends OrchestratorSwitchSession {
@@ -55,6 +72,8 @@ export interface OrchestratorSwitchDeps {
     model: string | null;
     action?: string;
     installed: boolean;
+    /** 인증이 아닌 사유로 막혔을 때의 표식(ORCHESTRATOR_BLOCK_REASON_MCP). */
+    reason?: string;
   }>;
   detachPending: (projectId: string) => void;
   stopCurrent: (projectId: string) => void;
@@ -138,6 +157,7 @@ export async function runOrchestratorSwitch(
         model: gate.model ?? args.targetModel,
         action: gate.action ?? `${args.targetModel} login`,
         installed: gate.installed,
+        ...(gate.reason ? { reason: gate.reason } : {}),
       },
       handoffSummary,
     };

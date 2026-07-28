@@ -15,6 +15,12 @@ export const orchestrator = {
   "orchestrator.addTask": "새 태스크 추가",
   "orchestrator.sessionPicker": "세션 선택",
   "orchestrator.autoStartHint": "(폴더를 열면 자동 시작)",
+  // 스폰 차단 안내 — 로그인이 아니라 MCP 가용성으로 막힌 경우(#639 grok 게이트).
+  "orchestrator.blocked.mcpTitle":
+    "{model} 오케를 띄우지 못했습니다 — Marblo MCP 툴이 붙지 않습니다",
+  "orchestrator.blocked.mcpHint":
+    "로그인 문제가 아닙니다. 이 CLI 는 신뢰되지 않은 폴더에서 로컬 MCP 서버를 기동하지 않으므로, 해당 CLI 로 프로젝트 폴더를 한 번 신뢰(trust)해 준 뒤 다시 시작하세요. MCP 없이 뜬 오케는 보드·디스패치를 하나도 못 합니다.",
+  "orchestrator.blocked.dismiss": "닫기",
   // Category labels
   "orchestrator.cat.project": "프로젝트 시작",
   "orchestrator.cat.project-step": "단계별 시작",

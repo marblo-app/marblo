@@ -10,6 +10,7 @@ import {
   orchestratorKey,
   orchestratorTeardownAction,
 } from "../lib/orchestratorTeardown";
+import { classifyOrchestratorBlock } from "../lib/orchestratorLaunchBlock";
 
 /**
  * - Stops the orchestrator when project/folder changes or unmounts.
@@ -69,6 +70,7 @@ export function useOrchestratorAutoLaunch() {
   // Auto-reconnect: separate effect so status changes don't trigger cleanup
   const setSession = useOrchestratorStore((s) => s.setSession);
   const setStatus = useOrchestratorStore((s) => s.setStatus);
+  const setLaunchBlock = useOrchestratorStore((s) => s.setLaunchBlock);
 
   const tryAutoConnect = useCallback(async () => {
     const projectId = currentProject?.id;
@@ -108,7 +110,14 @@ export function useOrchestratorAutoLaunch() {
         telemetry.orchestratorBlocked("cli_auth");
         setStatus("stopped");
         autoConnectRef.current = false;
-        window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        // 인증이 아닌 차단(=MCP 게이트)은 위저드가 풀어줄 수 없다. 자동기동
+        // 경로에서도 패널 배너로 보내야 사용자가 "왜 안 뜨지" 를 알 수 있다.
+        const block = classifyOrchestratorBlock(result.needsAuth);
+        if (block.opensCliSetup) {
+          window.dispatchEvent(new CustomEvent("marblo:open-cli-setup"));
+        } else {
+          setLaunchBlock(block);
+        }
         return;
       }
       if (result) {
@@ -133,7 +142,7 @@ export function useOrchestratorAutoLaunch() {
       telemetry.orchestratorBlocked("launch_error");
       setStatus("stopped");
     }
-  }, [currentProject?.id, fixedRoot, setSession, setStatus]);
+  }, [currentProject?.id, fixedRoot, setSession, setStatus, setLaunchBlock]);
 
   useEffect(() => {
     if (autoConnectRef.current || !currentProject?.id || !fixedRoot) return;

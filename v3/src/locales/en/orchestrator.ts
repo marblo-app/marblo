@@ -15,6 +15,12 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.addTask": "Add task",
   "orchestrator.sessionPicker": "Select session",
   "orchestrator.autoStartHint": "(starts automatically when you open a folder)",
+  // Spawn blocked by MCP availability, not by login (#639 grok gate).
+  "orchestrator.blocked.mcpTitle":
+    "Could not start the {model} orchestrator — Marblo MCP tools did not attach",
+  "orchestrator.blocked.mcpHint":
+    "This is not a login problem. The CLI refuses to start local MCP servers in an untrusted folder, so trust this project folder in that CLI once and start again. An orchestrator without MCP cannot touch the board or dispatch anything.",
+  "orchestrator.blocked.dismiss": "Dismiss",
   // Category labels
   "orchestrator.cat.project": "Start project",
   "orchestrator.cat.project-step": "Step-by-step start",

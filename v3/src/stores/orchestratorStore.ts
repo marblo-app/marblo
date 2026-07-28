@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { OrchestratorLaunchBlock } from "../lib/orchestratorLaunchBlock";
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 /**
@@ -10,8 +11,24 @@ export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
  *   "codex"                      — Codex CLI 기본 모델(종전 값. 바이트 동일)
  *   "codex:gpt-5.6-terra"        — Codex CLI 를 이 구체 모델로 핀(effort=CLI 기본)
  *   "codex:gpt-5.6-terra@high"   — 모델 + reasoning effort 까지 지정
+ *   "grok" / "antigravity"       — 그 CLI 기본 모델(모델 핀 축 없음. 아래 참조)
  * 접미가 없는 값은 종전과 완전히 같은 의미라 앱상태에 저장된 기존 값
  * ("claude"/"codex")이 그대로 유효하다(재시작 연속성 하위호환).
+ *
+ * ★모델 접미 없는 칸(=하네스 칸)의 목록은 우리 취향이 아니라 메인 프로세스의
+ * `model-selection.ORCHESTRATOR_HARNESS_SETTINGS` 가 정하는 사실이다. 그 목록에
+ * 없는 값을 셀렉터가 세우면 `normalizeOrchestratorModelSetting` 이 저장 직전에
+ * claude 로 강등해서 "골랐는데 안 먹는" 칸이 되고, 반대로 목록에 있는데 셀렉터가
+ * 안 세우면 **env 로만 닿는 기능**이 된다 — grok 오케(#638/#639)가 백엔드에선
+ * 완전 동작하는데 UI 엔 claude/codex 뿐이라 아무도 못 고르던 상태가 그것이다.
+ * 그래서 하네스 칸은 그 배열과 **원소·순서까지** 같아야 하고,
+ * `tests/unit/orchestrator-model-options.test.ts` 가 그것을 못박는다.
+ *
+ * ★grok/antigravity 는 모델 접미 칸을 세우지 않는다. 두 하네스는 launch 옵션에
+ * 모델 핀 축이 없어서(`orchestratorLaunchPin` 은 claude/codex 두 축만 만든다)
+ * 접미를 세워봐야 저장값에만 남고 CLI 엔 안 붙는다 — `normalizeOrchestratorModel
+ * Setting` 이 그 접미를 버린다. 핀 축이 생기는 날 그 함수가 먼저 열리고, 이 목록은
+ * 위 테스트가 시키는 대로 따라간다.
  *
  * ★이 배열은 **모델 축만** 담는다. effort 는 모델마다 지원 목록이 달라서 곱집합으로
  * 펼치면(6모델 × 4effort) 아무도 못 고르는 드롭다운이 되므로, 각 칸이 자기가 허용
@@ -76,7 +93,37 @@ export const ORCHESTRATOR_MODEL_OPTIONS = [
     label: "Codex (gpt-5.4-mini)",
     efforts: ["low", "medium", "high", "xhigh"],
   },
+  // Grok Build(xAI 네이티브 하네스) · Antigravity(agy). 둘 다 자기 계정으로 자기
+  // CLI 가 뜨므로 오케 후보다(ORCHESTRATOR_HARNESS_SETTINGS). 모델 핀 축은 없다.
+  { value: "grok", label: "Grok", efforts: [] },
+  { value: "antigravity", label: "Antigravity", efforts: [] },
 ] as const;
+
+/**
+ * 모델 접미가 없는 칸들 = **하네스 축**(claude/codex/grok/antigravity).
+ *
+ * 설정 화면의 "실행 모델"(전역 기본 오케 CLI)은 이 축만 다룬다 — 구체 모델 핀은
+ * 프로젝트별인 오케 패널 셀렉터의 몫이다. 파생으로 두는 이유는 하나: 종전엔
+ * `SettingsPage.ORCHESTRATOR_MODELS` 에 claude/codex 두 칸이 **따로 하드코딩**돼
+ * 있어서, 여기 목록이 늘어도 설정 화면은 조용히 옛 두 칸에 머물렀다.
+ */
+export const ORCHESTRATOR_HARNESS_OPTIONS = ORCHESTRATOR_MODEL_OPTIONS.filter(
+  (option) => !option.value.includes(":"),
+);
+
+/**
+ * 하네스 한 줄 설명(설정 화면 전용).
+ *
+ * ★목록이 아니라 **덧붙임**이다 — 여기 없는 하네스도 셀렉터엔 그대로 서고 설명만
+ * 비어 보인다. 반대로 두면(설명 표가 목록을 정하면) 새 하네스가 문구를 기다리다
+ * 조용히 사라진다. 이번 티켓이 고치는 실패모드가 정확히 그 모양이다.
+ */
+export const ORCHESTRATOR_HARNESS_DESC: Readonly<Record<string, string>> = {
+  claude: "Highest quality; uses Claude weekly limits. Default.",
+  codex: "Good for saving Claude quota; uses OpenAI/Codex limits.",
+  grok: "xAI Grok Build CLI. Needs the project folder trusted so Marblo MCP attaches.",
+  antigravity: "Google Antigravity (agy) CLI; uses your Google account.",
+};
 
 /** 모델 축의 값(effort 접미 없음). 셀렉터 첫째 드롭다운이 다루는 값. */
 export type OrchestratorModelBase =
@@ -182,6 +229,11 @@ interface OrchestratorState {
   runningModel: OrchestratorModel | null;
   switchStatus: OrchestratorSwitchStatus;
   lastHandoffSummary: HandoffSummary | null;
+  /**
+   * 스폰이 막힌 이유 중 **위저드로 못 푸는 것**(오늘은 grok MCP 게이트).
+   * 인증 차단은 종전대로 CLI 설정 위저드가 받아가므로 여기 안 온다.
+   */
+  launchBlock: OrchestratorLaunchBlock | null;
 
   setSession: (
     sessionId: string,
@@ -193,6 +245,7 @@ interface OrchestratorState {
   setSelectedModel: (model: OrchestratorModel) => void;
   setSwitchStatus: (status: OrchestratorSwitchStatus) => void;
   setHandoffSummary: (summary: HandoffSummary | null) => void;
+  setLaunchBlock: (block: OrchestratorLaunchBlock | null) => void;
   toggleCollapsed: () => void;
   clear: () => void;
 }
@@ -206,6 +259,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   runningModel: null,
   switchStatus: "idle",
   lastHandoffSummary: null,
+  launchBlock: null,
 
   setSession: (sessionId, ptySessionId, model) =>
     set((state) => ({
@@ -213,17 +267,24 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       ptySessionId,
       status: "starting",
       runningModel: model ?? state.selectedModel,
+      // 실제로 떴다 = 앞선 차단 안내는 이제 거짓이다.
+      launchBlock: null,
     })),
 
   setStatus: (status) => set({ status }),
 
   setCollapsed: (collapsed) => set({ isCollapsed: collapsed }),
 
-  setSelectedModel: (selectedModel) => set({ selectedModel }),
+  // 모델을 갈아타면 앞 모델의 차단 안내는 유효하지 않다(grok 안내를 든 채로
+  // claude 를 고르면 화면이 거짓말을 한다).
+  setSelectedModel: (selectedModel) =>
+    set({ selectedModel, launchBlock: null }),
 
   setSwitchStatus: (switchStatus) => set({ switchStatus }),
 
   setHandoffSummary: (lastHandoffSummary) => set({ lastHandoffSummary }),
+
+  setLaunchBlock: (launchBlock) => set({ launchBlock }),
 
   toggleCollapsed: () => set({ isCollapsed: !get().isCollapsed }),
 
