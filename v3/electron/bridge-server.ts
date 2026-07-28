@@ -35,12 +35,22 @@ import { mainTelemetry, type DispatchDecisionPayload } from "./telemetry";
 import {
   modelTierForComplexity,
   resolveTopClaudeModelDetailed,
+  vendorEnvReadiness,
   type LaunchModelPin,
 } from "./agent-config";
 import { graphModelKeys, modelKeyFromSpawn } from "./routing-model-key";
 import { normalizeTaskTypeLabel } from "./mcp-server/task-type";
 import { resolveModelPin } from "./model-selection";
 import { modelGuidanceStatic } from "./model-guidance";
+import {
+  selectAutoModel,
+  resolveEpsilon,
+  type AutoModelPlan,
+} from "./model-autoselect";
+import {
+  filterAvailableHarnesses,
+  type AvailabilityFilter,
+} from "./model-availability";
 import { getAccountRateLimits, type AccountRateLimits } from "./account-usage";
 import type { RateLimitInfo } from "./session-parsers";
 import { decideAutoMix, isAutoMixEnabled, autoMixThresholds } from "./auto-mix";
@@ -2469,6 +2479,29 @@ export class BridgeServer {
         return { success: false, error: reason };
       }
     }
+    // ── ★사용가능성 축(다요소 자동선택 1/2) ──────────────────────────
+    //
+    // 인증이 깨진 하네스를 **선택 단계에서** 뺀다.
+    //
+    // ★이 경로에는 사전 인증 게이트가 없다. `checkSpawnAuthGate` 는 `agent:launch`
+    // IPC(main.ts)가 부르는데, 보드 dispatch 스폰은 `agentManager.launch` 로 바로
+    // 내려가 **PTY 가 로그인 화면을 뱉은 뒤에야**(`looksLikeLoginScreen` 백스톱)
+    // 인증 문제가 드러난다. 그래서 라우팅이 인증 깨진 하네스를 고르면 티켓이 죽은
+    // PTY 하나를 안고 멈춘다(grok auth 가 깨졌을 때 라이브에서 나온 모양). 같은
+    // 프로브(`probeCliAuth` — 게이트가 쓰는 그 함수)를 선택 앞으로 당긴다.
+    //
+    // 전부 미인증이면 필터를 적용하지 않는다 — 라우팅이 스폰을 대신 막아 버리면
+    // 사용자는 "왜 아무것도 안 뜨지" 만 보고, 로그인 안내는 어디에도 안 뜬다.
+    //
+    // ★명시 모델 지정에는 적용하지 않는다. 지정은 존중하고, 인증 판정은 게이트가
+    // 정확한 안내와 함께 한다.
+    const availability: AvailabilityFilter<ModelType> | null = model
+      ? null
+      : await filterAvailableHarnesses(eligibleModels);
+    if (availability?.note) {
+      console.log(`[BridgeServer] dispatch ${availability.note}`);
+    }
+    const scoredModels = availability?.available ?? eligibleModels;
     // Live knowledge-graph (spec 2026-07-22): sync mtime-cache load — an
     // observed, decaying prior over (context × model) outcomes. Cold/absent →
     // graphBias 0 everywhere, so scoring is byte-identical to before. Read here
@@ -2482,13 +2515,55 @@ export class BridgeServer {
       complexity,
       taskType: normalizeTaskTypeLabel(params.taskType),
     };
+    // ── ★다요소 칸 자동선택(2/2) ─────────────────────────────────────
+    //
+    // 종전엔 1층(프로바이더)만 다요소였고 2층(그 안의 구체 칸)은 난도 상수였다
+    // (`modelTierForComplexity`: standard → 항상 opus5). 여기서 후보 하네스마다
+    // "그 하네스를 고르면 어느 칸으로 뜰지" 를 난이도·단가·SWE/티어·KG효과·잔여
+    // 예산·가용성으로 계산한다. 근거가 없으면(콜드) 진입칸 = 종전 동작이다.
+    //
+    // ★exploration 롤은 **dispatch 당 한 번**이다. 하네스마다 굴리면 후보가 많을
+    // 수록 탐색 확률이 올라가 ε 의 뜻이 흐려진다.
+    //
+    // ★명시 모델(`params.model`)이 있으면 계산 자체를 하지 않는다 — 자동선택은
+    // 미지정일 때만이라는 계약(그 경로는 위 resolvedPin 이 이미 처리했다).
+    const autoExplore = model
+      ? false
+      : Math.random() < resolveEpsilon(process.env.MARBLO_ROUTING_EXPLORE);
+    const autoPlans = new Map<ModelType, AutoModelPlan>();
+    if (!model) {
+      for (const candidate of scoredModels) {
+        const plan = selectAutoModel({
+          harness: candidate,
+          tier: complexity,
+          ctx: graphCtx,
+          graph: routingGraph,
+          budgetUsedPercent: budgetSnapshot[candidate]?.usedPercent,
+          // 벤더 크레덴셜이 없는 구체 모델은 후보에서 뺀다(env-swap 벤더). 오늘
+          // 사다리엔 그런 행이 없어 no-op 이지만, 편입되는 순간 자동선택이 키
+          // 없는 칸을 고르는 사고를 자료구조가 막는다.
+          modelAvailable: (modelId) => vendorEnvReadiness(modelId).ready,
+          forceExplore: autoExplore,
+        });
+        if (plan) autoPlans.set(candidate, plan);
+      }
+    }
     // ★P2-2 — 그래프 조회 키를 model@effort 해상도로. 예측은 스폰이 쓰는 그
     // 티어 정책(`modelTierForComplexity`)으로 하고, 구키(프로바이더)를 폴백 칸에
     // 함께 넘겨 기존 학습(94건 + #596 시드)이 계속 쓰이게 한다.
-    const graphKeysFor = (candidate: ModelType): readonly string[] =>
-      graphModelKeys(candidate, complexity, (provider, tier) =>
+    //
+    // ★자동선택이 진입칸을 벗어났으면 **그 칸의 키가 가장 구체적인 칸**이다.
+    // 예측(읽기)과 실제 스폰(쓰기)이 다른 셀을 가리키면 자기강화 루프가 끊긴다 —
+    // 고른 칸의 성과가 다른 칸의 근거로 쌓이기 때문이다.
+    const graphKeysFor = (candidate: ModelType): readonly string[] => {
+      const tierKeys = graphModelKeys(candidate, complexity, (provider, tier) =>
         modelTierForComplexity(provider as ModelType, tier),
       );
+      const planKey = autoPlans.get(candidate)?.modelKey;
+      return planKey && !tierKeys.includes(planKey)
+        ? [planKey, ...tierKeys]
+        : tierKeys;
+    };
     // Score the eligible models ONCE (when no explicit model was named) so the
     // dispatch-decision telemetry can carry the per-model breakdown + how the
     // winner was picked. scoreModelsDetailed advances the round-robin counter
@@ -2496,7 +2571,7 @@ export class BridgeServer {
     const modelSelection: ModelSelection | null = model
       ? null
       : scoreModelsDetailedFn(
-          eligibleModels,
+          scoredModels,
           tags,
           complexity,
           budgetSnapshot,
@@ -2563,9 +2638,48 @@ export class BridgeServer {
           }
           return parts.length ? ` graph: ${parts.join(", ")}.` : "";
         })();
+    // ★자동선택 결과를 **실제 스폰 핀**으로 바꾼다. 명시 핀(modelPin)이 있으면
+    // 그것이 이긴다 — 자동선택은 미지정일 때만이라는 계약.
+    //
+    // 두 모양으로 갈리는 이유는 사다리의 `pinsModel` 계약이다:
+    //   · claude — 모델 축을 실제로 핀한다(`--model`). 버전가드를 통과시키려고
+    //     기존 `resolveModelPin` 을 그대로 태운다(미검증 CLI 면 그 함수가 우아하게
+    //     폴백하고 스폰은 살아남는다 — §8.3 불변식).
+    //   · codex  — 사용자 `~/.codex/config.toml` 의 모델을 갈아치우지 않는다.
+    //     effort 축만 넘긴다(자동선택도 그 축에서만 골랐다).
+    const autoPlan = model ? undefined : autoPlans.get(selectedModel);
+    const autoPin: LaunchModelPin | undefined = !autoPlan
+      ? undefined
+      : autoPlan.pinsModel
+        ? (() => {
+            const pin = resolveModelPin(autoPlan.modelKey);
+            if (!pin) return undefined;
+            if (pin.fallback) {
+              // 자동선택한 칸이 이 CLI 에서 미검증이라 폴백했다 — 조용히 넘기지
+              // 않는다(명시 지정 폴백과 같은 취급).
+              console.warn("[BridgeServer] 자동선택 모델 폴백", {
+                taskId: params.taskId ?? null,
+                requested: pin.fallback.requested,
+                installed: pin.fallback.installed,
+                fallbackTo: pin.fallback.fallbackTo,
+              });
+            }
+            return {
+              claudeModel: pin.claudeModel,
+              codexModel: pin.codexModel,
+              codexEffort: pin.codexEffort,
+              nativeModel: pin.nativeModel,
+            };
+          })()
+        : autoPlan.effort
+          ? { codexEffort: autoPlan.effort }
+          : undefined;
+    const effectivePin = modelPin ?? autoPin;
+    const autoFragment = autoPlan ? ` ${autoPlan.reason}.` : "";
+    const availFragment = availability?.note ? ` ${availability.note}.` : "";
     const spawnDecisionReason = model
       ? `Explicit model '${model}' requested — scoring bypassed (${selectedBudgetReason}). Spawned new ${selectedModel} agent.`
-      : `Scored ${eligibleModels.length} model(s) → ${selectedModel} (${modelSelection?.mode}; ${selectedBudgetReason}).${graphFragment} Spawned new agent.`;
+      : `Scored ${scoredModels.length} model(s) → ${selectedModel} (${modelSelection?.mode}; ${selectedBudgetReason}).${graphFragment}${availFragment}${autoFragment} Spawned new agent.`;
     const spawnResult = await this.spawnNewAgent({
       name: agentName,
       model: selectedModel,
@@ -2580,8 +2694,9 @@ export class BridgeServer {
       system: params.system,
       // complexity → claude(--model)·codex(reasoning) 모델/레벨 선택.
       complexity,
-      // 명시 모델 핀이 있으면 그것이 complexity 티어를 덮는다(버전가드 통과 후 값).
-      modelPin,
+      // 명시 모델 핀 > 자동선택 핀 > (핀 없음 = complexity 티어 상수).
+      // 세 번째 칸이 이 티켓 전의 유일한 경로였다.
+      modelPin: effectivePin,
       dispatchReason: spawnDecisionReason,
     });
 
@@ -2628,7 +2743,9 @@ export class BridgeServer {
       role,
       complexity,
       tags,
-      eligibleModels: eligibleModels as string[],
+      // 실제로 **경쟁한** 후보를 적는다(가용성 필터 적용 후). 뺀 후보와 사유는
+      // decisionReason 의 `avail:` 조각에 남는다.
+      eligibleModels: scoredModels as string[],
       selectedModel,
       perModelScores: modelSelection?.scores ?? [],
       modelSelectionMode: modelSelection?.mode,
@@ -2644,8 +2761,12 @@ export class BridgeServer {
     // §8.1 폴백 사용자 표식 — complex claude 가 최상위 모델 resolver 를 탔는데
     // 버전가드/미지모델로 폴백됐으면 dispatch 응답에 표시(사용자가 왜 최상위가
     // 아닌지 알 수 있게). read-only 재해석(같은 env → spawn 이 쓴 값과 일치).
+    //
+    // ★자동선택 핀이 걸린 경우엔 이 재해석을 하지 않는다 — 그 스폰은 최상위
+    // resolver 가 아니라 `resolveModelPin(autoPlan)` 을 탔고, 그쪽 폴백은 위에서
+    // 이미 로그로 남는다. 안 쓴 resolver 의 폴백을 응답에 적으면 거짓 표식이다.
     let topModelNote = "";
-    if (selectedModel === "claude" && complexity === "complex") {
+    if (!autoPin && selectedModel === "claude" && complexity === "complex") {
       const res = resolveTopClaudeModelDetailed();
       if (res.fallback) {
         const f = res.fallback;

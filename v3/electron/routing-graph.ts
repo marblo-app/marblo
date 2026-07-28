@@ -630,6 +630,40 @@ export function graphBiasForModel(
   return Math.max(-GRAPH_BIAS_MAX, Math.min(GRAPH_BIAS_MAX, sum));
 }
 
+/**
+ * 이 맥락에서 한 모델 키가 **몇 번 관측됐나**(bias 가 아니라 증거의 양).
+ *
+ * `graphBiasForModel` 은 "어느 쪽이 좋은가" 를 답하고, 이 함수는 "그 답을 얼마나
+ * 믿을 근거가 쌓였나" 를 답한다. 둘은 다른 질문이다 — bias 0 은 "중립" 일 수도
+ * "무근거" 일 수도 있고, ε-greedy 탐색(`model-autoselect`)이 고를 칸은 후자,
+ * 즉 **셀이 비어 있는 칸**이어야 비교데이터가 실제로 늘어난다.
+ *
+ * 다단 키는 **가장 구체적인 존재 셀 하나만** 센다. 구키(프로바이더) 관측까지 더하면
+ * 새 칸이 이미 관측된 것처럼 보여 탐색이 그 칸을 영원히 건너뛴다.
+ */
+export function observationCountForModel(
+  modelKey: ModelKeyQuery,
+  ctx: GraphContext,
+  graph: RoutingGraph | null | undefined,
+): number {
+  if (!graph) return 0;
+  const tiers = modelKeyTiers(modelKey);
+  if (tiers.length === 0) return 0;
+  let total = 0;
+  for (const factor of factorKeysForContext(ctx)) {
+    for (const key of tiers) {
+      const cell = graph.cells[`${factor}|${key}`];
+      if (!cell) continue;
+      const n = Number.isFinite(cell.n) ? Math.max(0, cell.n) : 0;
+      if (n > 0) {
+        total += n;
+        break;
+      }
+    }
+  }
+  return total;
+}
+
 export interface GraphBiasDetail {
   bias: number;
   /** Short human note for decisionReason, e.g. "complex,agentic stale". */
