@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { TelegramChannelPanel } from "./TelegramChannelPanel";
+import { EnvSwapVendorSection } from "./EnvSwapVendorSection";
 import { useTranslation, t as translate } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 
@@ -9,7 +10,19 @@ interface HarnessStoreProps {
   onClose?: () => void;
 }
 
-type CategoryFilter = "all" | "required" | "recommended" | "mcp" | "cli";
+/**
+ * `envswap` 은 패키지 `category` 가 아니라 **다른 갈래를 여는 칸**이다. 설치형
+ * 카탈로그(`harness-manager`)엔 env-swap 벤더 행이 없고 있어서도 안 된다 — 설치할
+ * 바이너리가 없는 벤더에 설치 버튼을 다는 오분류가 되기 때문. 그래서 이 값일 때는
+ * 패키지 격자를 접고 `EnvSwapVendorSection`(레지스트리 파생)만 보여준다.
+ */
+type CategoryFilter =
+  | "all"
+  | "required"
+  | "recommended"
+  | "mcp"
+  | "cli"
+  | "envswap";
 
 const CATEGORY_FILTERS: CategoryFilter[] = [
   "all",
@@ -17,6 +30,7 @@ const CATEGORY_FILTERS: CategoryFilter[] = [
   "recommended",
   "mcp",
   "cli",
+  "envswap",
 ];
 
 // Display labels read locale at call time via the pure t() (the enum value
@@ -99,6 +113,10 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
     }
   }, [packages, refreshAuth]);
 
+  // `envswap` 은 설치형 패키지 카테고리가 아니므로 격자 자체를 접는다(빈 목록
+  // 안내를 띄우면 "패키지가 없다" 는 엉뚱한 말이 된다).
+  const showPackages = filter !== "envswap";
+  const showEnvSwap = filter === "all" || filter === "envswap";
   const filtered = packages.filter(
     (p) => filter === "all" || p.category === filter,
   );
@@ -245,176 +263,183 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
           <ConnectionStatusPanel />
           <TelegramChannelPanel />
 
+          {/* env-swap 벤더 — 설치형 카탈로그에 없는 "키만 얹는" 벤더들.
+              카탈로그보다 위에 두는 이유: 이 탭에서 안 보인다는 것이 문제였다. */}
+          {showEnvSwap && <EnvSwapVendorSection />}
+
           {/* List */}
-          <div className="p-4">
-            {filtered.length === 0 && (
-              <p className="text-center text-sm text-[#6c7086]">
-                {t("harness.store.emptyList")}
-              </p>
-            )}
-            <div className="grid gap-3 md:grid-cols-2">
-              {filtered.map((pkg) => {
-                const isBusy = busy === pkg.id;
-                const isInstalled = pkg.status === "installed";
-                const isDeprecated = !!pkg.deprecated;
-                const isRequired = pkg.category === "required" && !isDeprecated;
-                const isBundled = pkg.install.kind === "bundled";
-                const isManual = pkg.install.kind === "manual";
-                const ver = versions[pkg.id];
-                const auth = CLI_AUTH_MODELS[pkg.id]
-                  ? authStates[pkg.id]
-                  : undefined;
-                const authBusy = !!authChecking[pkg.id];
-                return (
-                  <div
-                    key={pkg.id}
-                    className="rounded-md border border-[#313244] bg-[#181825] p-3 transition-colors hover:border-[#45475a]"
-                  >
-                    <div className="mb-1 flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-semibold text-[#cdd6f4]">
-                          {pkg.name}
-                        </span>
-                        <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] uppercase text-[#6c7086]">
-                          {pkg.type}
-                        </span>
-                      </div>
-                      <div className="flex flex-shrink-0 items-center gap-1">
-                        {isDeprecated && (
-                          <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
-                            {t("harness.store.deprecated")}
+          {showPackages && (
+            <div className="p-4">
+              {filtered.length === 0 && (
+                <p className="text-center text-sm text-[#6c7086]">
+                  {t("harness.store.emptyList")}
+                </p>
+              )}
+              <div className="grid gap-3 md:grid-cols-2">
+                {filtered.map((pkg) => {
+                  const isBusy = busy === pkg.id;
+                  const isInstalled = pkg.status === "installed";
+                  const isDeprecated = !!pkg.deprecated;
+                  const isRequired =
+                    pkg.category === "required" && !isDeprecated;
+                  const isBundled = pkg.install.kind === "bundled";
+                  const isManual = pkg.install.kind === "manual";
+                  const ver = versions[pkg.id];
+                  const auth = CLI_AUTH_MODELS[pkg.id]
+                    ? authStates[pkg.id]
+                    : undefined;
+                  const authBusy = !!authChecking[pkg.id];
+                  return (
+                    <div
+                      key={pkg.id}
+                      className="rounded-md border border-[#313244] bg-[#181825] p-3 transition-colors hover:border-[#45475a]"
+                    >
+                      <div className="mb-1 flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-semibold text-[#cdd6f4]">
+                            {pkg.name}
                           </span>
-                        )}
-                        <span
-                          className={`rounded px-1.5 py-0.5 text-[10px] ${
-                            isInstalled
-                              ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
-                              : isManual
-                                ? "bg-[#f9e2af]/20 text-[#f9e2af]"
-                                : "bg-[#313244] text-[#6c7086]"
-                          }`}
-                        >
-                          {isInstalled
-                            ? t("harness.store.badge.installed")
-                            : isManual
-                              ? t("harness.store.badge.manual")
-                              : t("harness.store.badge.notInstalled")}
-                        </span>
-                        {auth && isInstalled && (
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[10px] ${
-                              auth.authenticated
-                                ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
-                                : "bg-[#f9e2af]/20 text-[#f9e2af]"
-                            }`}
-                          >
-                            {authBusy
-                              ? t("harness.store.auth.checking")
-                              : auth.authenticated
-                                ? "Ready"
-                                : t("harness.store.auth.needed")}
+                          <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] uppercase text-[#6c7086]">
+                            {pkg.type}
                           </span>
-                        )}
-                      </div>
-                    </div>
-                    <p className="mb-2 text-xs text-[#bac2de]">
-                      {pkg.description}
-                    </p>
-                    {ver && isInstalled && ver.localVersion && (
-                      <div className="mb-3 flex items-center gap-1.5 text-[10px]">
-                        <span className="text-[#6c7086]">
-                          v{ver.localVersion}
-                        </span>
-                        {ver.updateState === "outdated" &&
-                          ver.latestVersion && (
-                            <span className="rounded bg-[#f9e2af]/20 px-1.5 py-0.5 text-[#f9e2af]">
-                              {t("harness.store.updatePending", {
-                                version: ver.latestVersion,
-                              })}
+                        </div>
+                        <div className="flex flex-shrink-0 items-center gap-1">
+                          {isDeprecated && (
+                            <span className="rounded bg-[#f38ba8]/20 px-1.5 py-0.5 text-[10px] text-[#f38ba8]">
+                              {t("harness.store.deprecated")}
                             </span>
                           )}
-                        {ver.updateState === "up-to-date" && (
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] ${
+                              isInstalled
+                                ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
+                                : isManual
+                                  ? "bg-[#f9e2af]/20 text-[#f9e2af]"
+                                  : "bg-[#313244] text-[#6c7086]"
+                            }`}
+                          >
+                            {isInstalled
+                              ? t("harness.store.badge.installed")
+                              : isManual
+                                ? t("harness.store.badge.manual")
+                                : t("harness.store.badge.notInstalled")}
+                          </span>
+                          {auth && isInstalled && (
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[10px] ${
+                                auth.authenticated
+                                  ? "bg-[#a6e3a1]/20 text-[#a6e3a1]"
+                                  : "bg-[#f9e2af]/20 text-[#f9e2af]"
+                              }`}
+                            >
+                              {authBusy
+                                ? t("harness.store.auth.checking")
+                                : auth.authenticated
+                                  ? "Ready"
+                                  : t("harness.store.auth.needed")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="mb-2 text-xs text-[#bac2de]">
+                        {pkg.description}
+                      </p>
+                      {ver && isInstalled && ver.localVersion && (
+                        <div className="mb-3 flex items-center gap-1.5 text-[10px]">
                           <span className="text-[#6c7086]">
-                            {t("harness.store.upToDate")}
+                            v{ver.localVersion}
+                          </span>
+                          {ver.updateState === "outdated" &&
+                            ver.latestVersion && (
+                              <span className="rounded bg-[#f9e2af]/20 px-1.5 py-0.5 text-[#f9e2af]">
+                                {t("harness.store.updatePending", {
+                                  version: ver.latestVersion,
+                                })}
+                              </span>
+                            )}
+                          {ver.updateState === "up-to-date" && (
+                            <span className="text-[#6c7086]">
+                              {t("harness.store.upToDate")}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {auth && isInstalled && !auth.authenticated && (
+                        <div className="mb-3 rounded border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-2 py-1.5 text-[10px] text-[#f9e2af]">
+                          <div className="mb-1.5">
+                            {t("harness.store.auth.loginHintBefore")}{" "}
+                            <code className="rounded bg-[#313244] px-1 py-0.5 text-[#f9e2af]">
+                              {auth.action ?? "login"}
+                            </code>{" "}
+                            {t("harness.store.auth.loginHintAfter")}
+                          </div>
+                          <button
+                            onClick={() => refreshAuth(pkg.id)}
+                            disabled={authBusy}
+                            className="rounded bg-[#f9e2af]/20 px-2 py-0.5 text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/30 disabled:opacity-50"
+                          >
+                            {authBusy
+                              ? t("harness.store.auth.checkingShort")
+                              : "Re-check"}
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        {isDeprecated && (
+                          <span className="text-xs text-[#f38ba8]">
+                            {t("harness.store.deprecatedNoInstall")}
                           </span>
                         )}
+                        {!isInstalled && !isDeprecated && (
+                          <button
+                            onClick={() => handleInstall(pkg)}
+                            disabled={isBusy || isBundled}
+                            className="rounded bg-[#89b4fa]/20 px-2.5 py-1 text-xs text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/30 disabled:opacity-50"
+                          >
+                            {isBusy
+                              ? t("harness.store.installing")
+                              : isManual
+                                ? t("harness.store.viewGuide")
+                                : isBundled
+                                  ? t("harness.store.bundled")
+                                  : isRequired
+                                    ? t("harness.store.requiredInstall")
+                                    : statusLabel(pkg.status)}
+                          </button>
+                        )}
+                        {isInstalled && !isRequired && (
+                          <button
+                            onClick={() => handleUninstall(pkg)}
+                            disabled={isBusy}
+                            className="rounded bg-[#f38ba8]/20 px-2.5 py-1 text-xs text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30 disabled:opacity-50"
+                          >
+                            {isBusy
+                              ? t("harness.store.processing")
+                              : t("harness.store.uninstall")}
+                          </button>
+                        )}
+                        {isInstalled && isRequired && (
+                          <span className="text-xs text-[#6c7086]">
+                            {t("harness.store.requiredNoRemove")}
+                          </span>
+                        )}
+                        {pkg.url && (
+                          <a
+                            href={pkg.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-auto text-xs text-[#6c7086] hover:text-[#89b4fa]"
+                          >
+                            {t("harness.store.docs")}
+                          </a>
+                        )}
                       </div>
-                    )}
-                    {auth && isInstalled && !auth.authenticated && (
-                      <div className="mb-3 rounded border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-2 py-1.5 text-[10px] text-[#f9e2af]">
-                        <div className="mb-1.5">
-                          {t("harness.store.auth.loginHintBefore")}{" "}
-                          <code className="rounded bg-[#313244] px-1 py-0.5 text-[#f9e2af]">
-                            {auth.action ?? "login"}
-                          </code>{" "}
-                          {t("harness.store.auth.loginHintAfter")}
-                        </div>
-                        <button
-                          onClick={() => refreshAuth(pkg.id)}
-                          disabled={authBusy}
-                          className="rounded bg-[#f9e2af]/20 px-2 py-0.5 text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/30 disabled:opacity-50"
-                        >
-                          {authBusy
-                            ? t("harness.store.auth.checkingShort")
-                            : "Re-check"}
-                        </button>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      {isDeprecated && (
-                        <span className="text-xs text-[#f38ba8]">
-                          {t("harness.store.deprecatedNoInstall")}
-                        </span>
-                      )}
-                      {!isInstalled && !isDeprecated && (
-                        <button
-                          onClick={() => handleInstall(pkg)}
-                          disabled={isBusy || isBundled}
-                          className="rounded bg-[#89b4fa]/20 px-2.5 py-1 text-xs text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/30 disabled:opacity-50"
-                        >
-                          {isBusy
-                            ? t("harness.store.installing")
-                            : isManual
-                              ? t("harness.store.viewGuide")
-                              : isBundled
-                                ? t("harness.store.bundled")
-                                : isRequired
-                                  ? t("harness.store.requiredInstall")
-                                  : statusLabel(pkg.status)}
-                        </button>
-                      )}
-                      {isInstalled && !isRequired && (
-                        <button
-                          onClick={() => handleUninstall(pkg)}
-                          disabled={isBusy}
-                          className="rounded bg-[#f38ba8]/20 px-2.5 py-1 text-xs text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/30 disabled:opacity-50"
-                        >
-                          {isBusy
-                            ? t("harness.store.processing")
-                            : t("harness.store.uninstall")}
-                        </button>
-                      )}
-                      {isInstalled && isRequired && (
-                        <span className="text-xs text-[#6c7086]">
-                          {t("harness.store.requiredNoRemove")}
-                        </span>
-                      )}
-                      {pkg.url && (
-                        <a
-                          href={pkg.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="ml-auto text-xs text-[#6c7086] hover:text-[#89b4fa]"
-                        >
-                          {t("harness.store.docs")}
-                        </a>
-                      )}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Footer note */}

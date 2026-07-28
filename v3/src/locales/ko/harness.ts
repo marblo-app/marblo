@@ -75,6 +75,18 @@ export const harness = {
   "harness.store.cat.recommended": "추천 스킬",
   "harness.store.cat.mcp": "유용한 MCP",
   "harness.store.cat.cli": "CLI",
+  "harness.store.cat.envswap": "env-swap 벤더",
+  // --- env-swap 벤더 섹션 (설치가 아니라 키 등록) ---
+  // ★벤더 이름·모델 id 가 이 표에 하나도 없다. 목록은 model-registry 파생이고,
+  //   여기 있는 것은 "설치할 CLI 가 아니라 키를 얹는 것" 이라는 분류 문구뿐이다.
+  "harness.store.envSwap.title": "env-swap 벤더",
+  "harness.store.envSwap.subtitle":
+    "claude 하네스에 API 키만 얹어 쓰는 벤더입니다 — 설치할 CLI 가 없고, 키를 등록하면 바로 켜집니다.",
+  "harness.store.envSwap.summary": "{total}개 중 {ready}개 준비됨",
+  "harness.store.envSwap.loading": "벤더 목록을 불러오는 중…",
+  "harness.store.envSwap.loadFailed": "벤더 목록을 불러오지 못했습니다.",
+  "harness.store.envSwap.retry": "다시 시도",
+  "harness.store.envSwap.empty": "등록된 env-swap 벤더가 없습니다.",
   "harness.store.status.installed": "설치됨",
   "harness.store.status.not-installed": "설치",
   "harness.store.status.manual-required": "수동 설치",

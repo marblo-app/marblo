@@ -78,6 +78,18 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.cat.recommended": "Recommended skills",
   "harness.store.cat.mcp": "Useful MCPs",
   "harness.store.cat.cli": "CLI",
+  "harness.store.cat.envswap": "Env-swap vendors",
+  // --- env-swap vendor section (a key to register, not a CLI to install) ---
+  // No vendor or model id literals live here — the list is registry-derived and
+  // these strings only carry the classification ("key, not install").
+  "harness.store.envSwap.title": "Env-swap vendors",
+  "harness.store.envSwap.subtitle":
+    "These vendors run on the claude harness with just an API key — nothing to install; register the key and they turn on.",
+  "harness.store.envSwap.summary": "{ready} of {total} ready",
+  "harness.store.envSwap.loading": "Loading the vendor list…",
+  "harness.store.envSwap.loadFailed": "Could not load the vendor list.",
+  "harness.store.envSwap.retry": "Try again",
+  "harness.store.envSwap.empty": "No env-swap vendors are registered.",
   "harness.store.status.installed": "Installed",
   "harness.store.status.not-installed": "Install",
   "harness.store.status.manual-required": "Manual install",

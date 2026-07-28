@@ -193,6 +193,32 @@ export function additionalVendorCards(
 }
 
 /** 헤더에 접어 보여줄 요약(= 지금 바로 쓸 수 있는 벤더 수). */
-export function vendorReadyCount(cards: VendorSetupCard[]): number {
+export function vendorReadyCount(cards: readonly VendorSetupCard[]): number {
   return cards.filter((c) => c.status === "ready").length;
+}
+
+/**
+ * **env-swap 벤더만** 골라낸다 — 하네스 탭의 "env-swap 벤더" 섹션(#649 후속)이
+ * 그리는 목록.
+ *
+ * ── 왜 하네스 탭에 따로 필요한가 ─────────────────────────────────────────
+ * 하네스 탭의 카탈로그는 `harness-manager` 의 **설치형 패키지**(claude/codex/grok/
+ * antigravity CLI·스킬·MCP)만 다룬다. GLM·MiniMax·Kimi 는 설치할 CLI 가 아니라
+ * "우리 claude 바이너리 + 키" 라서 그 카탈로그에 행 자체가 없고, 결과적으로 하네스
+ * 탭에서는 **존재하지 않는 벤더**로 보였다(설정 화면에만 있었다).
+ *
+ * ★그렇다고 이들을 패키지 카탈로그에 끼워 넣으면 안 된다 — 그 순간 "설치" 버튼이
+ * 달리고, 설치할 것이 없는 벤더에 설치를 시키는 오분류가 된다. 분류의 근거는 이름이
+ * 아니라 데이터 하나다: **`requiredEnvKeys.length > 0`**(= 레지스트리 행의
+ * `envProfile` 이 시크릿을 이름으로 참조한다). 그래서 레지스트리에 env-swap 벤더가
+ * 늘면 이 함수도 화면도 한 줄 안 바꾸고 카드가 늘어난다.
+ *
+ * 모델이 0개인 벤더는 뺀다(`additionalVendorCards` 와 같은 이유 — 고를 것이 없는
+ * 카드는 안내가 아니라 소음이다). env-swap 카드는 구조상 `orchestratorCli` 가 될 수
+ * 없어서 그쪽 필터는 여기서 항등이다.
+ */
+export function envSwapVendorCards<T extends VendorSetupCard>(
+  cards: readonly T[],
+): T[] {
+  return cards.filter((c) => c.kind === "envSwap" && c.modelIds.length > 0);
 }

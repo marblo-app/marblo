@@ -17,6 +17,7 @@ import {
 } from "../../electron/model-registry";
 import {
   additionalVendorCards,
+  envSwapVendorCards,
   vendorReadyCount,
   vendorSetupCards,
   type CliRowLike,
@@ -224,6 +225,89 @@ describe("상태 판정", () => {
     );
     expect(vendorReadyCount(cards)).toBe(
       cards.filter((c) => c.status === "ready").length,
+    );
+  });
+});
+
+/**
+ * 하네스 탭의 **"env-swap 벤더" 섹션**(설치형 카탈로그와 다른 갈래).
+ *
+ * 여기서 지키는 것도 문구가 아니라 불변식 둘이다:
+ *   ① 목록이 레지스트리에서 파생된다 — `envProfile` 을 가진 벤더가 전부, 그것만.
+ *   ② ★그 카드에는 "설치" 라는 개념이 없다 — 액션은 키 등록뿐이다. 설치형 CLI 가
+ *      이 목록에 새어 들어오면(=오분류) 여기서 깨진다.
+ */
+describe("envSwapVendorCards — 하네스 탭 env-swap 섹션", () => {
+  it("레지스트리의 env-swap 벤더 전부, 그것만 담는다", () => {
+    const cards = envSwapVendorCards(
+      vendorSetupCards(catalogGroups(), input()),
+    );
+    expect(new Set(cards.map((c) => c.vendor))).toEqual(ENV_SWAP_VENDORS);
+    expect(cards.length).toBeGreaterThan(0);
+  });
+
+  it("★설치형 CLI 벤더는 하나도 안 들어온다(설치 버튼 오분류 방지)", () => {
+    const all = vendorSetupCards(catalogGroups(), input());
+    const envSwap = envSwapVendorCards(all);
+    for (const card of envSwap) {
+      // 설치/로그인 UI 를 붙일 행이 없다 = 설치할 바이너리가 없다.
+      expect(card.cliRowId, card.vendor).toBeNull();
+      expect(card.requiredEnvKeys.length, card.vendor).toBeGreaterThan(0);
+      // 상태도 설치 축(needsInstall/needsLogin)으로는 갈 수 없다.
+      expect(["ready", "needsKey"]).toContain(card.status);
+    }
+    // 자체 CLI 로 붙는 벤더(Grok 등)는 기존 패키지 카탈로그 쪽에 남는다.
+    const nativeVendors = all
+      .filter((c) => c.kind !== "envSwap")
+      .map((c) => c.vendor);
+    for (const v of nativeVendors) {
+      expect(envSwap.map((c) => c.vendor)).not.toContain(v);
+    }
+  });
+
+  it("각 카드가 그 벤더의 활성 모델 id 를 그대로 물고 온다(지원 모델 표기)", () => {
+    for (const card of envSwapVendorCards(
+      vendorSetupCards(catalogGroups(), input()),
+    )) {
+      const expected = MODEL_REGISTRY.filter(
+        (m) =>
+          m.status === "active" &&
+          m.provider === card.vendor &&
+          m.harness === card.harness,
+      ).map((m) => m.id);
+      expect(card.modelIds.length).toBeGreaterThan(0);
+      expect([...card.modelIds].sort()).toEqual([...expected].sort());
+    }
+  });
+
+  it("키가 채워지면 준비상태가 ready 로 바뀐다(설정 #624 등록 반영)", () => {
+    const before = envSwapVendorCards(
+      vendorSetupCards(catalogGroups(), input()),
+    );
+    for (const card of before) expect(card.status).toBe("needsKey");
+
+    const present: Record<string, string> = {};
+    for (const entry of MODEL_REGISTRY) {
+      for (const key of vendorEnvSecretKeys(entry.id)) present[key] = "x";
+    }
+    const after = envSwapVendorCards(
+      vendorSetupCards(catalogGroups(present), input()),
+    );
+    expect(after.length).toBe(before.length);
+    for (const card of after) {
+      expect(card.status).toBe("ready");
+      expect(card.missingEnvKeys).toEqual([]);
+    }
+  });
+
+  it("모델 행이 없는 벤더는 그리지 않는다(고를 것이 없는 카드는 소음)", () => {
+    const cards = vendorSetupCards(catalogGroups(), input());
+    const target = envSwapVendorCards(cards)[0];
+    const stripped = cards.map((c) =>
+      c.vendor === target.vendor ? { ...c, modelIds: [] } : c,
+    );
+    expect(envSwapVendorCards(stripped).map((c) => c.vendor)).not.toContain(
+      target.vendor,
     );
   });
 });
