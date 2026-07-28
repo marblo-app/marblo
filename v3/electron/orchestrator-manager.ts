@@ -10,6 +10,7 @@ import {
   resolveOrchestratorModel,
   orchestratorCommandForModel,
 } from "./agent-config";
+import { usesIsolatedHomeSentinelResume } from "./orchestrator-handoff";
 import { contextForKind } from "./mcp-server/context";
 import {
   CODEX_ORCH_REQUIRED_MCP_TOOL_COUNT,
@@ -741,36 +742,44 @@ export class OrchestratorManager {
     // 다른 kind (mission 등) 는 board 와 같은 세션을 동시에 resume 하면 충돌
     // (PTY 가 비어 보이는 증상) → 명시적 resumeSessionId 가 주어진 경우에만 resume.
     let effectiveResumeSessionId = resumeSessionId;
-    if (orchestratorModel === "gpt") {
-      const hasSavedCodexSession = this.configGenerator.hasSavedSession(
+    // 격리 홈 하네스(codex/grok)는 같은 계약을 공유한다: 세션이 자기 홈에만 있고,
+    // resume 은 네이티브 sentinel(`codex resume --last` / `grok --continue`)이며,
+    // 남의 CLI uuid 를 넘기면 **즉사**한다. grok 은 로컬에서 못 찾으면 원격 세션
+    // 레지스트리로 폴백해 404 로 죽는다(0.2.112 라이브 실측) — codex 의
+    // "No saved session found" 전례와 같은 모양. 그래서 한 분기로 묶는다.
+    if (usesIsolatedHomeSentinelResume(orchestratorModel)) {
+      const isolatedHomeModel = orchestratorModel === "grok" ? "grok" : "gpt";
+      const hasSavedIsolatedSession = this.configGenerator.hasSavedSession(
         sessionId,
-        "gpt",
+        isolatedHomeModel,
+        rootPath,
       );
       if (!effectiveResumeSessionId || effectiveResumeSessionId === "latest") {
-        if (hasSavedCodexSession) {
+        if (hasSavedIsolatedSession) {
           effectiveResumeSessionId = "latest";
         } else if (effectiveResumeSessionId === "latest") {
           console.log(
-            `[Orchestrator:${this.kind}] Codex resume requested but no saved session exists for ${sessionId}; starting new`,
+            `[Orchestrator:${this.kind}] ${isolatedHomeModel} resume requested but no saved session exists for ${sessionId}; starting new`,
           );
           effectiveResumeSessionId = undefined;
         }
       } else if (effectiveResumeSessionId !== "new") {
-        // Concrete id under codex. Marblo never persists codex rollout ids
-        // (codex is resumed via `resume --last` against its isolated home),
-        // so any concrete id reaching here was minted by ANOTHER CLI — a
-        // claude uuid from a model-unaware resolver. `codex resume
-        // <unknown-id>` exits 1 ("No saved session found") → 오케 즉사.
+        // Concrete id under an isolated-home harness. Marblo never persists
+        // their session ids (they are resumed via the native sentinel against
+        // their own home), so any concrete id reaching here was minted by
+        // ANOTHER CLI — a claude uuid from a model-unaware resolver. `codex
+        // resume <unknown-id>` exits 1 ("No saved session found") and `grok
+        // --resume <unknown-id>` 404s off the remote registry → 오케 즉사.
         // Never pass it through: resume this home's own last session when
         // one exists, else start fresh. (0zV1apB3CvIiabHlYHxQ / 56C9L5DP)
-        if (hasSavedCodexSession) {
+        if (hasSavedIsolatedSession) {
           console.warn(
-            `[Orchestrator:${this.kind}] Discarding non-codex resume id "${effectiveResumeSessionId}" for ${sessionId} → resuming latest saved codex session instead`,
+            `[Orchestrator:${this.kind}] Discarding foreign resume id "${effectiveResumeSessionId}" for ${sessionId} → resuming latest saved ${isolatedHomeModel} session instead`,
           );
           effectiveResumeSessionId = "latest";
         } else {
           console.warn(
-            `[Orchestrator:${this.kind}] Discarding non-codex resume id "${effectiveResumeSessionId}" for ${sessionId}; no saved codex session — starting new`,
+            `[Orchestrator:${this.kind}] Discarding foreign resume id "${effectiveResumeSessionId}" for ${sessionId}; no saved ${isolatedHomeModel} session — starting new`,
           );
           effectiveResumeSessionId = undefined;
         }
@@ -795,6 +804,9 @@ export class OrchestratorManager {
     // only constructs the launchConfig for that binary; the orchestrator's
     // actual readiness/prompt/session wiring for non-claude models is a
     // separate follow-up (backlog IUj7YTFqJVZvi9AbtTPf).
+    // 이 값이 agent-config 로 흘러 각 하네스의 resume 플래그가 된다
+    // (codex `resume --last|<id>`, gemini `--resume latest`,
+    //  grok `--continue|--resume <uuid>`, agy `--continue|--conversation`).
     const nonClaudeResumeSessionId =
       orchestratorModel === "claude" ||
       !effectiveResumeSessionId ||
@@ -1074,11 +1086,16 @@ export class OrchestratorManager {
       claudeSessionId: resumedSessionId ?? undefined,
     };
 
-    // Codex 세션은 rollout id 를 우리가 저장하지 않으므로(resume 은 항상
-    // `--last`), 대신 "이 미션이 이 codex home 의 마지막 세션 소유자" 라는
+    // 격리 홈 하네스(codex/grok)의 세션 id 는 우리가 저장하지 않으므로(resume 은
+    // 항상 네이티브 sentinel), 대신 "이 미션이 이 홈의 마지막 세션 소유자" 라는
     // 마커를 orch store 에 남긴다. 재시작 시 같은 미션이면 `latest` 로
     // 이어가고, 다른(새) 미션이면 fresh 로 뜨는 미션 단위 연속성의 근거.
-    if (launchConfig.model === "gpt" && this.kind === "mission") {
+    // grok 도 GROK_HOME 을 프로젝트 단위로 공유하므로 같은 마커가 필요하다 —
+    // 없으면 새 미션이 직전 미션의 대화를 `--continue` 로 물어버린다.
+    if (
+      usesIsolatedHomeSentinelResume(launchConfig.model) &&
+      this.kind === "mission"
+    ) {
       this.saveOrchSessionId(rootPath, GPT_SESSION_MARKER);
     }
 
@@ -1333,12 +1350,14 @@ export class OrchestratorManager {
           const ownerMission = this.lastOwnerMissionId ?? undefined;
           const restartModel =
             this.lastLaunchOptions?.modelOverride ?? resolveOrchestratorModel();
-          const resumeTarget =
-            restartModel === "gpt"
-              ? "latest"
-              : this.kind === "mission" && ownerMission
-                ? (this.resolveMissionResumeId(rp, ownerMission) ?? "new")
-                : (this.resolveOrchestratorResumeId(rp) ?? "new");
+          // 격리 홈 하네스(codex/grok)는 claude resolver 를 태우면 안 된다 —
+          // "latest" 를 넘기면 launch() 앞단의 가드가 세션 실재 여부를 확인해
+          // sentinel 이나 fresh 로 정리한다.
+          const resumeTarget = usesIsolatedHomeSentinelResume(restartModel)
+            ? "latest"
+            : this.kind === "mission" && ownerMission
+              ? (this.resolveMissionResumeId(rp, ownerMission) ?? "new")
+              : (this.resolveOrchestratorResumeId(rp) ?? "new");
           this.launch(
             pId,
             rp,
@@ -1940,10 +1959,13 @@ export class OrchestratorManager {
   }
 
   /**
-   * gpt(codex) 미션 연속성 판정: 이 미션이 codex home 의 마지막 세션 소유자로
-   * 마킹돼 있으면 true → 호출부가 "latest"(`codex resume --last`) 로 이어간다.
-   * 다른 미션 소유거나 마커가 없으면 false → fresh. codex 는 rollout id 를
-   * 우리가 저장하지 않으므로 이 마커가 미션 단위 resume 근거의 전부다.
+   * 격리 홈 하네스(codex/grok) 미션 연속성 판정: 이 미션이 그 홈의 마지막 세션
+   * 소유자로 마킹돼 있으면 true → 호출부가 "latest"(`codex resume --last` /
+   * `grok --continue`) 로 이어간다. 다른 미션 소유거나 마커가 없으면 false →
+   * fresh. 두 CLI 모두 세션 id 를 우리가 저장하지 않으므로 이 마커가 미션 단위
+   * resume 근거의 전부다. (저장값은 레거시 스토어 호환을 위해 그대로
+   * GPT_SESSION_MARKER 문자열을 쓴다 — 하네스 구분자가 아니라 "sentinel 로
+   * 이어가는 세션" 표식이다.)
    */
   hasGptMissionMarker(rootPath: string, missionId: string): boolean {
     if (this.kind !== "mission" || !missionId) return false;

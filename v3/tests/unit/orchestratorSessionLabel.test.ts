@@ -104,16 +104,34 @@ describe("OrchestratorManager session reconnect", () => {
     );
   }
 
+  // OrchestratorManager resolves its model from MARBLO_ORCHESTRATOR_MODEL,
+  // while these tests mock the config generator to report a model of their own
+  // choosing. If the ambient env disagrees with the mock, the manager takes a
+  // foreign-harness resume branch the test never intended and the assertions
+  // fail for reasons unrelated to the behavior under test — reproducible with
+  // `MARBLO_ORCHESTRATOR_MODEL=gpt npx vitest run <this file>`. Pin the env per
+  // test (makeRestartManager overrides it with its own `model`) so the suite is
+  // hermetic on any developer machine, including one running a non-claude
+  // orchestrator.
+  let prevOrchestratorModelEnv: string | undefined;
+
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "orch-label-"));
     rootPath = fs.mkdtempSync(path.join(os.tmpdir(), "orch-root-"));
     fs.mkdirSync(sessionsDir(), { recursive: true });
     homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
+    prevOrchestratorModelEnv = process.env.MARBLO_ORCHESTRATOR_MODEL;
+    process.env.MARBLO_ORCHESTRATOR_MODEL = "claude";
     vi.useFakeTimers();
   });
   afterEach(() => {
     vi.useRealTimers();
     homedirSpy.mockRestore();
+    if (prevOrchestratorModelEnv === undefined) {
+      delete process.env.MARBLO_ORCHESTRATOR_MODEL;
+    } else {
+      process.env.MARBLO_ORCHESTRATOR_MODEL = prevOrchestratorModelEnv;
+    }
     fs.rmSync(tmpHome, { recursive: true, force: true });
     fs.rmSync(rootPath, { recursive: true, force: true });
   });
@@ -757,6 +775,10 @@ describe("OrchestratorManager session reconnect", () => {
       exitCbs: Map<string, (code: number) => void>;
       mcpConfigPath: string;
     } {
+      // Keep the REAL manager's model resolution in step with the mocked
+      // launch config — otherwise the manager runs a different harness's
+      // resume logic than the one this test is describing.
+      process.env.MARBLO_ORCHESTRATOR_MODEL = model;
       const createCalls: CreateCall[] = [];
       const exitCbs = new Map<string, (code: number) => void>();
       const mcpConfigPath = path.join(

@@ -1275,9 +1275,13 @@ export function applyVendorEnv(
       model: pinnedModelId ?? "unknown",
       vendor: vendor ?? "unknown",
       missingEnvKeys: missing,
-      effect: `${vendor ?? "벤더"} 대신 하네스 기본 백엔드로 스폰된다(부분 주입 금지)`,
+      effect: `${
+        vendor ?? "벤더"
+      } 대신 하네스 기본 백엔드로 스폰된다(부분 주입 금지)`,
       fix:
-        `설정 → API 키 → "벤더 API 키" 에서 ${missing.join(", ")} 를 등록하세요` +
+        `설정 → API 키 → "벤더 API 키" 에서 ${missing.join(
+          ", ",
+        )} 를 등록하세요` +
         `(개발 환경이라면 v3/.env 에 넣고 앱 재시작해도 됩니다)`,
     });
     return base;
@@ -1332,6 +1336,17 @@ export interface LaunchConfig {
    */
   claudeSessionId?: string;
   /**
+   * Grok only: the session id this launch is addressable by — the freshly
+   * minted uuid we pinned with `--session-id`, or the concrete uuid we handed
+   * `--resume`. Undefined for a `--continue` ('latest') resume, where grok
+   * picks the session itself. Grok's cost tracking does NOT need this (it
+   * re-resolves the newest file under the per-agent GROK_HOME each tick); it
+   * exists so the launch path can name the exact session directory
+   * (`<GROK_HOME>/sessions/<encodeURIComponent(cwd)>/<id>/`) in logs when a
+   * live resume has to be debugged. See grokSessionArgs.
+   */
+  grokSessionId?: string;
+  /**
    * Claude only: how the `--model` value was resolved when complexity ===
    * "complex" (the only tier that runs the §3 resolver). Carries any
    * graceful fallback (Fable5 version-guard miss, unknown model) so the
@@ -1385,6 +1400,64 @@ export function claudeSessionArgs(
     return { args: ["--session-id", newSessionId], sessionId: newSessionId };
   }
   return { args: [], sessionId: undefined };
+}
+
+/**
+ * Decide Grok Build's session-related CLI args and the resulting session id.
+ *
+ * Contract verified LIVE against grok 0.2.112 on this machine (isolated
+ * GROK_HOME, headless `-p` turns):
+ *
+ *   `--session-id <uuid>`   pins a NEW conversation to that uuid and names the
+ *                           session directory after it
+ *                           (`<GROK_HOME>/sessions/<encodeURIComponent(cwd)>/<uuid>/`).
+ *                           Reusing an existing id is FATAL
+ *                           ("Session ID … is already in use") — so this is
+ *                           only ever emitted on a freshly minted uuid.
+ *   `--resume <uuid>`       resumes that exact session. ★cwd-INDEPENDENT: grok
+ *                           searches the whole GROK_HOME and reports
+ *                           "found locally (originally in <dir>)". Unknown id
+ *                           is FATAL (falls through to a remote registry
+ *                           lookup → 404 → exit), exactly like the codex
+ *                           `resume <unknown-id>` 즉사 전례 — so grok must never
+ *                           be handed another CLI's uuid.
+ *   `--continue`            resumes the most recent session FOR THE CURRENT
+ *                           WORKING DIRECTORY. Fatal on an empty cwd
+ *                           ("No session found for current directory"), hence
+ *                           the hasSavedSession() gate before we emit it.
+ *
+ * So, mirroring the Claude path:
+ *
+ *   fresh / "new"        → `--session-id <newSessionId>`, id = newSessionId
+ *   resume concrete UUID → `--resume <uuid>`,             id = uuid
+ *   resume "latest"      → `--continue`,                  id = undefined
+ *
+ * Unlike Claude the fresh pin is unconditional (no `pinFreshSession` opt-in).
+ * Claude needs the opt-in because the orchestrator pushes its own `--resume`
+ * onto argv afterwards and the two flags would collide; the orchestrator does
+ * no such thing for grok (orchestrator-manager only appends `--resume` when
+ * `launchConfig.model === "claude"`), so pinning is always safe here and buys
+ * a deterministic, addressable session directory from turn one.
+ *
+ * ★Session keying uses the REAL cwd, not grok's normalized main checkout —
+ * verified live in a git worktree, whose session landed under the worktree's
+ * own encoded path. (The main-checkout normalization that
+ * `writeGrokHomeFiles` compensates for is a FOLDER-TRUST rule, not a session
+ * one.) `--continue` therefore stays scoped to the worktree the agent runs in.
+ */
+export function grokSessionArgs(
+  resumeSessionId: string | undefined,
+  newSessionId: string,
+): { args: string[]; sessionId?: string } {
+  const wantResume = !!resumeSessionId && resumeSessionId !== "new";
+  const resumeIsLatest = resumeSessionId === "latest";
+  if (wantResume && !resumeIsLatest) {
+    return { args: ["--resume", resumeSessionId!], sessionId: resumeSessionId };
+  }
+  if (wantResume && resumeIsLatest) {
+    return { args: ["--continue"], sessionId: undefined };
+  }
+  return { args: ["--session-id", newSessionId], sessionId: newSessionId };
 }
 
 interface MCPServerEntry {
@@ -1783,7 +1856,9 @@ function writeGrokHomeFiles(
   const decidedAt = Math.floor(Date.now() / 1000);
   const trustSections = candidates.map(
     (folder) =>
-      `[folders.${JSON.stringify(folder)}]\ntrusted = true\ndecided_at = ${decidedAt}`,
+      `[folders.${JSON.stringify(
+        folder,
+      )}]\ntrusted = true\ndecided_at = ${decidedAt}`,
   );
   const trustBody = [preservedTrust, ...trustSections]
     .filter(Boolean)
@@ -2264,20 +2339,26 @@ export class AgentConfigGenerator {
         ? fs.readFileSync(skillPath, "utf-8")
         : "";
 
-    const { command, args, env, claudeSessionId, modelResolution } =
-      this.buildCLICommand(
-        agent.model,
-        agent.command,
-        mcpConfigPath,
-        projectDir,
-        marbloProjectId,
-        agent.id,
-        resumeSessionId,
-        pinClaudeSession,
-        complexity,
-        modelPin,
-        marbloContextId,
-      );
+    const {
+      command,
+      args,
+      env,
+      claudeSessionId,
+      grokSessionId,
+      modelResolution,
+    } = this.buildCLICommand(
+      agent.model,
+      agent.command,
+      mcpConfigPath,
+      projectDir,
+      marbloProjectId,
+      agent.id,
+      resumeSessionId,
+      pinClaudeSession,
+      complexity,
+      modelPin,
+      marbloContextId,
+    );
 
     // ── Telegram 폴러 경합 차단 (에이전트 claude 세션) ─────────────────────
     // telegram 플러그인이 유저 전역(~/.claude/settings.json enabledPlugins)으로
@@ -2318,6 +2399,7 @@ export class AgentConfigGenerator {
       skillContent,
       initialPrompt,
       claudeSessionId,
+      grokSessionId,
       modelResolution,
     };
   }
@@ -2332,8 +2414,52 @@ export class AgentConfigGenerator {
    * Gemini stores at `<HOME>/.gemini/tmp/<projectHash>/checkpoint-*.json`
    * (but the existence of `.gemini/tmp/` with any subdir is enough signal
    * for `--resume latest` to find something).
+   * Grok stores at
+   * `<GROK_HOME>/sessions/<encodeURIComponent(cwd)>/<session-uuid>/*.jsonl`.
+   *
+   * `cwd` narrows the grok answer to the directory `grok --continue` actually
+   * looks in — it is cwd-scoped and dies outright on a directory with no
+   * session ("No session found for current directory", live-verified). Omit it
+   * and grok degrades to the codex/gemini fidelity: "this agent's home has SOME
+   * session". Ignored by every other harness.
    */
-  hasSavedSession(agentId: string, model: ModelType): boolean {
+  hasSavedSession(agentId: string, model: ModelType, cwd?: string): boolean {
+    if (model === "grok") {
+      const sessionsRoot = grokSessionsDir(agentId);
+      // Match by DECODING each directory key rather than re-encoding `cwd`:
+      // that survives any escaping difference and lets us also accept the
+      // realpath (symlinked worktree roots resolve differently per caller).
+      const wanted = cwd ? new Set([cwd]) : null;
+      if (wanted && cwd) {
+        try {
+          wanted.add(fs.realpathSync(cwd));
+        } catch {
+          // cwd may not exist yet — the raw form is still a valid candidate.
+        }
+      }
+      try {
+        for (const entry of fs.readdirSync(sessionsRoot, {
+          withFileTypes: true,
+        })) {
+          if (!entry.isDirectory()) continue;
+          if (wanted) {
+            let decoded: string;
+            try {
+              decoded = decodeURIComponent(entry.name);
+            } catch {
+              continue;
+            }
+            if (!wanted.has(decoded)) continue;
+          }
+          if (this.hasGrokSessionDir(path.join(sessionsRoot, entry.name))) {
+            return true;
+          }
+        }
+      } catch {
+        // Missing/unreadable sessions root → no resumable session.
+      }
+      return false;
+    }
     if (model === "gpt") {
       const sessionsRoot = path.join(
         CONFIG_DIR,
@@ -2358,6 +2484,28 @@ export class AgentConfigGenerator {
       // 해당 agentId 엔트리가 있고 + 그 UUID 의 .pb 가 실제 존재해야 resume
       // 가능 → getAgyConversationId 가 그 둘을 한번에 검증한다.
       return getAgyConversationId(agentId) !== null;
+    }
+    return false;
+  }
+
+  /**
+   * True when `cwdDir` (a `<GROK_HOME>/sessions/<encoded-cwd>` directory) holds
+   * at least one real session. A session is a UUID-named SUBdirectory with
+   * transcript `.jsonl` files in it; the loose `prompt_history.jsonl` grok
+   * writes directly under the cwd key is NOT one, so a bare
+   * "any .jsonl below" test would greenlight `--continue` on a directory that
+   * has no resumable session and make grok exit.
+   */
+  private hasGrokSessionDir(cwdDir: string): boolean {
+    try {
+      for (const entry of fs.readdirSync(cwdDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        if (this.hasAnyFileBelow(path.join(cwdDir, entry.name), ".jsonl")) {
+          return true;
+        }
+      }
+    } catch {
+      // Unreadable → treat as no session.
     }
     return false;
   }
@@ -3167,6 +3315,7 @@ export class AgentConfigGenerator {
     args: string[];
     env: Record<string, string>;
     claudeSessionId?: string;
+    grokSessionId?: string;
     modelResolution?: TopModelResolution;
   } {
     const env = getMCPServerEnv(
@@ -3382,11 +3531,22 @@ export class AgentConfigGenerator {
         // the terminal's native scrollback while the prompt stays pinned. This
         // avoids the alt-screen fullscreen TUI swallowing completed
         // orchestrator/agent dialogue from Marblo's xterm scrollback.
+        //
+        // Resume (see grokSessionArgs for the live-verified flag contract):
+        //   fresh                → --session-id <새 UUID>  (id 를 우리가 못박고
+        //                          grokSessionId 로 돌려준다)
+        //   resume concrete UUID → --resume <uuid>
+        //   resume 'latest'      → --continue (cwd 최근 세션)
+        // grok 은 이 배선이 붙기 전까지 resumeSessionId 를 통째로 무시했다 —
+        // 다섯 하네스 중 유일하게 매 스폰이 fresh 였다.
         const grokArgs: string[] = [
           "--minimal",
           "--permission-mode",
           "bypassPermissions",
         ];
+        const { args: grokSessionFlags, sessionId: grokSessionId } =
+          grokSessionArgs(resumeSessionId, crypto.randomUUID());
+        grokArgs.push(...grokSessionFlags);
         const grokModel = modelPin?.nativeModel;
         grokArgs.push("-m", grokModel || GROK_DEFAULT_MODEL);
         const resolvedGrokCommand = resolveHarnessCli("grok").command;
@@ -3406,10 +3566,16 @@ export class AgentConfigGenerator {
         return {
           command: grokLaunch.command,
           args: grokLaunch.args,
+          // ★불변식: fresh 와 resume 이 같은 GROK_HOME(= grokSessionsDir 과 같은
+          //   에이전트별 홈)을 봐야 세션 파일이 보인다. mcpConfigPath 는
+          //   generateGrokConfig 가 `<CONFIG_DIR>/grok-home-<agentId>/config.toml`
+          //   로 쓰므로 그 dirname 이 정확히 그 홈이다 — resume 경로도 같은
+          //   config 생성기를 타므로 두 경로가 갈릴 수 없다.
           env: {
             ...env,
             GROK_HOME: path.dirname(mcpConfigPath),
           },
+          grokSessionId,
         };
       }
 

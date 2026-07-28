@@ -151,7 +151,7 @@ describe("orchestrator handoff snapshot", () => {
     const resumeSessionId = resolveSwitchHandoffResumeSessionId({
       resume: "previous",
       targetModel: "gpt",
-      hasSavedGptSession: () => false,
+      hasSavedIsolatedHomeSession: () => false,
       resolvePreviousNonGptSession: () => {
         throw new Error("non-gpt resolver should not run for Codex");
       },
@@ -164,7 +164,7 @@ describe("orchestrator handoff snapshot", () => {
     const resumeSessionId = resolveSwitchHandoffResumeSessionId({
       resume: "previous",
       targetModel: "gpt",
-      hasSavedGptSession: () => true,
+      hasSavedIsolatedHomeSession: () => true,
       resolvePreviousNonGptSession: () => null,
     });
 
@@ -175,7 +175,7 @@ describe("orchestrator handoff snapshot", () => {
     const resumeSessionId = resolveSwitchHandoffResumeSessionId({
       resume: "previous",
       targetModel: "claude",
-      hasSavedGptSession: () => {
+      hasSavedIsolatedHomeSession: () => {
         throw new Error("Codex saved-session check should not run for Claude");
       },
       resolvePreviousNonGptSession: () => "claude-session-1",
@@ -199,7 +199,7 @@ describe("resolveRestartResumeSessionId", () => {
   it("never hands a Claude session id to a Codex restart", () => {
     const resumeSessionId = resolveRestartResumeSessionId({
       targetModel: "gpt",
-      hasSavedGptSession: () => true,
+      hasSavedIsolatedHomeSession: () => true,
       resolvePreviousNonGptSession: () =>
         "62676abb-3e4e-4089-9f94-9429a683175a",
     });
@@ -213,7 +213,7 @@ describe("resolveRestartResumeSessionId", () => {
     // null lets the caller distinguish "nothing to resume" and skip resuming.
     const resumeSessionId = resolveRestartResumeSessionId({
       targetModel: "gpt",
-      hasSavedGptSession: () => false,
+      hasSavedIsolatedHomeSession: () => false,
       resolvePreviousNonGptSession: () => {
         throw new Error("non-gpt resolver should not run for Codex");
       },
@@ -225,7 +225,7 @@ describe("resolveRestartResumeSessionId", () => {
   it("keeps Claude restart resolution on the orchestrator session store", () => {
     const resumeSessionId = resolveRestartResumeSessionId({
       targetModel: "claude",
-      hasSavedGptSession: () => {
+      hasSavedIsolatedHomeSession: () => {
         throw new Error("Codex saved-session check should not run for Claude");
       },
       resolvePreviousNonGptSession: () => "claude-session-1",
@@ -237,7 +237,7 @@ describe("resolveRestartResumeSessionId", () => {
   it("returns null for Claude when no prior session exists", () => {
     const resumeSessionId = resolveRestartResumeSessionId({
       targetModel: "claude",
-      hasSavedGptSession: () => false,
+      hasSavedIsolatedHomeSession: () => false,
       resolvePreviousNonGptSession: () => null,
     });
 

@@ -85,29 +85,50 @@ export interface BuildHandoffInput {
   now?: number;
 }
 
+/**
+ * Harnesses whose sessions live in a per-orchestrator ISOLATED HOME rather
+ * than in `~/.claude/projects`, and which are resumed by a native
+ * "most recent" sentinel instead of a concrete uuid:
+ *
+ *   gpt  → `codex resume --last`
+ *   grok → `grok --continue`
+ *
+ * For these the Claude resolver must never run: it scans ~/.claude and would
+ * return a CLAUDE uuid, which the foreign CLI cannot find. Both die on it —
+ * `codex resume <unknown-id>` exits 1, and `grok --resume <unknown-id>` misses
+ * locally, falls through to the remote session registry and 404s (verified
+ * live against grok 0.2.112). Because each home is scoped to one orchestrator,
+ * the "latest" sentinel is unambiguously *this* orchestrator's own session.
+ */
+export function usesIsolatedHomeSentinelResume(targetModel: string): boolean {
+  return targetModel === "gpt" || targetModel === "grok";
+}
+
 export interface ResolveSwitchHandoffResumeInput {
   resume: OrchestratorSwitchResumeMode;
   targetModel: string;
-  hasSavedGptSession: () => boolean;
+  /** Does this orchestrator's isolated CLI home hold a resumable session? */
+  hasSavedIsolatedHomeSession: () => boolean;
   resolvePreviousNonGptSession: () => string | null | undefined;
 }
 
 export function resolveSwitchHandoffResumeSessionId({
   resume,
   targetModel,
-  hasSavedGptSession,
+  hasSavedIsolatedHomeSession,
   resolvePreviousNonGptSession,
 }: ResolveSwitchHandoffResumeInput): "new" | string {
   if (resume !== "previous") return "new";
-  if (targetModel === "gpt") {
-    return hasSavedGptSession() ? "latest" : "new";
+  if (usesIsolatedHomeSentinelResume(targetModel)) {
+    return hasSavedIsolatedHomeSession() ? "latest" : "new";
   }
   return resolvePreviousNonGptSession() ?? "new";
 }
 
 export interface ResolveRestartResumeInput {
   targetModel: string;
-  hasSavedGptSession: () => boolean;
+  /** Does this orchestrator's isolated CLI home hold a resumable session? */
+  hasSavedIsolatedHomeSession: () => boolean;
   resolvePreviousNonGptSession: () => string | null | undefined;
 }
 
@@ -119,15 +140,16 @@ export interface ResolveRestartResumeInput {
  *
  *  - Claude keys sessions by uuid under `~/.claude/projects/<encoded>` and is
  *    resumed by `--resume <uuid>`, so it needs a concrete id.
- *  - Codex keeps its sessions in the per-orchestrator isolated CODEX_HOME
- *    (`codex-home-orchestrator-<projectId>`) and is resumed by the native
- *    `codex resume --last`, for which "latest" is the sentinel. Because that
- *    home is scoped to this one orchestrator, "--last" is unambiguously
- *    *this* orchestrator's own last session.
+ *  - Codex / Grok keep their sessions in the per-orchestrator isolated home
+ *    (`codex-home-orchestrator-<projectId>` / `grok-home-orchestrator-<projectId>`)
+ *    and are resumed by a native "most recent" sentinel — `codex resume --last`
+ *    / `grok --continue` — for which "latest" is our sentinel. Because that
+ *    home is scoped to this one orchestrator, it unambiguously names *this*
+ *    orchestrator's own last session. See usesIsolatedHomeSentinelResume.
  *
  * Passing a Claude uuid to Codex is not a no-op — `codex resume <unknown-id>`
  * exits 1 with "No saved session found with ID ...", so the orchestrator died
- * on every restart. Keep the Claude resolver strictly off the Codex path.
+ * on every restart. Keep the Claude resolver strictly off those paths.
  *
  * Mirrors resolveSwitchHandoffResumeSessionId (the switch path, which was
  * already model-aware — which is why switching worked while restarting did
@@ -136,11 +158,11 @@ export interface ResolveRestartResumeInput {
  */
 export function resolveRestartResumeSessionId({
   targetModel,
-  hasSavedGptSession,
+  hasSavedIsolatedHomeSession,
   resolvePreviousNonGptSession,
 }: ResolveRestartResumeInput): string | null {
-  if (targetModel === "gpt") {
-    return hasSavedGptSession() ? "latest" : null;
+  if (usesIsolatedHomeSentinelResume(targetModel)) {
+    return hasSavedIsolatedHomeSession() ? "latest" : null;
   }
   return resolvePreviousNonGptSession() ?? null;
 }

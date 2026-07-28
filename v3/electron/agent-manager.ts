@@ -8,6 +8,7 @@ import {
   AgentConfigGenerator,
   LaunchConfig,
   FALLBACK_TOP_CLAUDE_MODEL,
+  grokSessionsDir,
   type TaskComplexity,
 } from "./agent-config";
 import { mainTelemetry } from "./telemetry";
@@ -504,7 +505,9 @@ export class AgentManager {
       this.clearAgentTimers(agent);
       this.agents.delete(id);
       console.log(
-        `[AgentManager] Pruned dead entry ${agent.name} (${id}, ${agent.status} for ${Math.round(
+        `[AgentManager] Pruned dead entry ${agent.name} (${id}, ${
+          agent.status
+        } for ${Math.round(
           (now - agent.terminalSince) / 60000,
         )}min) — backstop reaper (P3-4).`,
       );
@@ -528,9 +531,11 @@ export class AgentManager {
 
     // Resume resolution. Claude Code needs a concrete session UUID
     // (resolveSessionId converts "latest" by scanning ~/.claude/projects/).
-    // Codex / Gemini take "latest" natively (codex resume --last,
-    // gemini --resume latest), so we keep the sentinel and let agent-config
-    // emit the right CLI flags.
+    // Codex / Gemini / Grok take "latest" natively (codex resume --last,
+    // gemini --resume latest, grok --continue), so we keep the sentinel and
+    // let agent-config emit the right CLI flags. Resolving it to a concrete id
+    // for them would be actively harmful: the only resolver we have scans
+    // ~/.claude, so it hands back a CLAUDE uuid that their own CLI cannot find.
     let resolvedResumeId = params.resumeSessionId;
     if (
       params.model === "claude" &&
@@ -547,6 +552,30 @@ export class AgentManager {
         }`,
       );
     }
+    // Grok's 'latest' maps to `grok --continue`, which is FATAL on a directory
+    // with no session ("No session found for current directory" → exit) — the
+    // same shape as `codex resume <unknown-id>`. The per-agent GROK_HOME starts
+    // empty, so a never-run agent asked to resume 'latest' would die on launch.
+    // Downgrade to a fresh session instead (agent-config then pins a new
+    // --session-id, so the NEXT resume has a concrete id to use).
+    if (params.model === "grok" && resolvedResumeId === "latest") {
+      const grokHasSession = this.configGenerator.hasSavedSession(
+        params.id,
+        "grok",
+        params.cwd,
+      );
+      if (!grokHasSession) {
+        console.log(
+          `[Agent:${
+            params.id
+          }] grok 'latest' requested but no saved session under this agent's GROK_HOME for cwd=${
+            params.cwd ?? "(none)"
+          } → starting fresh (--continue would exit).`,
+        );
+        resolvedResumeId = undefined;
+      }
+    }
+
     const isResume =
       !!resolvedResumeId &&
       resolvedResumeId !== "new" &&
@@ -585,6 +614,19 @@ export class AgentManager {
       },
       params.contextId,
     );
+
+    // Grok resume 는 라이브 관측이 유일한 검증 수단이라(세션 디렉터리가 cwd 로
+    // 키잉된다) 이 스폰이 어느 세션을 물었는지 남긴다. --continue 로 붙은
+    // 경우엔 grok 이 스스로 고르므로 id 가 없다.
+    if (params.model === "grok") {
+      console.log(
+        `[Agent:${params.id}] grok session ${
+          isResume ? "resume" : "pinned"
+        } → ${launchConfig.grokSessionId ?? "(--continue: CLI picks latest for cwd)"} under ${grokSessionsDir(
+          params.id,
+        )}`,
+      );
+    }
 
     // 모델 할당 v2 텔레메트리 + 폴백 표식(§8.1/§8.4). modelResolution 은 complex
     // claude 가 §3 resolver 를 탔을 때만 채워진다(override 경로는 비움).
@@ -1153,7 +1195,9 @@ export class AgentManager {
         })
       ) {
         console.warn(
-          `[Agent:${params.id}] no completion report and PTY mute for ${Math.round(
+          `[Agent:${
+            params.id
+          }] no completion report and PTY mute for ${Math.round(
             (Date.now() - agent.lastPtyActivity) / 60000,
           )}min — presuming wedged turn, demoting to idle.`,
         );
@@ -1561,12 +1605,15 @@ export class AgentManager {
   /**
    * Whether the given agent has any saved CLI session in its isolated
    * home dir. Used by the reconnect path to decide if `resume --last`
-   * (codex) / `--resume latest` (gemini) is safe to pass — running
-   * those against an empty sessions dir errors out on some CLIs and
-   * would just leave a dead PTY.
+   * (codex) / `--resume latest` (gemini) / `--continue` (grok) is safe to
+   * pass — running those against an empty sessions dir errors out on some
+   * CLIs and would just leave a dead PTY.
+   *
+   * `cwd` only narrows the grok answer (its sessions are keyed by working
+   * directory); other harnesses ignore it.
    */
-  hasSavedSession(agentId: string, model: ModelType): boolean {
-    return this.configGenerator.hasSavedSession(agentId, model);
+  hasSavedSession(agentId: string, model: ModelType, cwd?: string): boolean {
+    return this.configGenerator.hasSavedSession(agentId, model, cwd);
   }
 
   setStatus(agentId: string, status: AgentStatus): void {
