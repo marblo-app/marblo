@@ -189,6 +189,7 @@ describe("grok — 지정 모델이 -m 으로 나간다", () => {
     expect(args[args.indexOf("--permission-mode") + 1]).toBe(
       "bypassPermissions",
     );
+    expect(args).toContain("--minimal");
     expect(args).not.toContain("--dangerously-skip-permissions");
     expect(args).toContain("-m");
     expect(args[args.indexOf("-m") + 1]).toBe("grok-4.5");

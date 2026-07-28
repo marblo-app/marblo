@@ -3376,7 +3376,17 @@ export class AgentConfigGenerator {
         // Keep the model pin in argv, not config.toml: it gives the PTY/badge
         // path an observable launched model while still letting nativeModel
         // override the default.
-        const grokArgs: string[] = ["--permission-mode", "bypassPermissions"];
+        //
+        // `grok --help` / ~/.grok/docs (0.2.112 live check) define --minimal
+        // as scrollback-native rendering: completed blocks are printed into
+        // the terminal's native scrollback while the prompt stays pinned. This
+        // avoids the alt-screen fullscreen TUI swallowing completed
+        // orchestrator/agent dialogue from Marblo's xterm scrollback.
+        const grokArgs: string[] = [
+          "--minimal",
+          "--permission-mode",
+          "bypassPermissions",
+        ];
         const grokModel = modelPin?.nativeModel;
         grokArgs.push("-m", grokModel || GROK_DEFAULT_MODEL);
         const resolvedGrokCommand = resolveHarnessCli("grok").command;
