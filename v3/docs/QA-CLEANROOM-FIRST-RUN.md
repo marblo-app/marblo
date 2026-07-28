@@ -148,6 +148,12 @@ DISMISSED_KEY))` 로 **레거시 키** `marblo.cliSetupGateDismissed` 만 읽는
 
 ## 5. 수동 클린룸 체크리스트 (다른 맥 / 새 macOS 사용자 계정)
 
+> ★여분 맥으로 실기 테스트할 때는 이 절 대신
+> **[QA-CLEANROOM-MACBOOKAIR-RUNBOOK.md](./QA-CLEANROOM-MACBOOKAIR-RUNBOOK.md)** 를 쓴다 —
+> 실측 기반 제거 명령(claude/codex/grok 설치 경로·키체인), 릴리스 버전 게이트,
+> 경로 A(CLI)/경로 B(BYOM) 분기, F2·F3·F4·#638·#639 판정표까지 복붙 가능한 형태로
+> 확장한 판이다. 아래는 그 요약본으로 남긴다.
+
 자동화가 대체할 수 없는 것: **실제 npm 설치 시간, 브라우저 OAuth, 오케 실기동,
 가입~첫티켓 실측 시간.**
 
