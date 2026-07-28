@@ -32,6 +32,10 @@
  *   · KG효과    `routing-graph.graphBiasForModel` 을 **model@effort 키**로 조회한
  *               ±20 성분(성공/실패 관측의 감쇠 가중합). P2-2 가 이미 그 해상도로
  *               학습·조회하도록 키를 올려놨다 — 여기서는 그 키를 그대로 쓴다.
+ *   · 다양성    `MARBLO_ROUTING_DIVERSITY` 계수의 UCB1 형 저표본 보너스.
+ *               exploitation 점수 자체에 상시로 들어가므로 85% top-score 경로도
+ *               아직 덜 본 `model@effort` 셀을 조금 끌어올린다. 읽는 셀은 실제
+ *               스폰할 그 키라 P2-2 해상도와 쓰기 경로가 맞는다.
  *   · 잔여예산  계정 쿼터 잔량이 적을수록 **단가 가중치를 키운다**. budgetBias 는
  *               프로바이더 축(1층)이라 한 하네스 안의 칸들을 가르지 못한다. 잔량이
  *               라우팅을 실제로 바꾸는 자리는 여기다.
@@ -167,6 +171,13 @@ export const TIE_BAND = 5;
 /** ε 기본값 — 스폰 6~7건 중 1건꼴로 비교데이터를 만든다. */
 export const DEFAULT_EPSILON = 0.15;
 
+/**
+ * UCB1 형 저표본 보너스 기본 계수. n=0, total≈10 에서 약 +6점이라 콜드 셀이
+ * 동률 밴드 바깥으로 밀려난 경우도 한 번 끌어올릴 수 있고, n≈8~10 이후에는
+ * +2점대로 내려가 KG·단가·성능 성분에 자리를 내준다.
+ */
+export const DEFAULT_DIVERSITY_C = 4;
+
 /** exploration 이 넘볼 수 있는 최대 칸 거리(진입칸 기준). */
 const EXPLORE_WINDOW = 1;
 
@@ -183,6 +194,29 @@ export function resolveEpsilon(raw?: string): number {
   const value = Number(trimmed);
   if (!Number.isFinite(value) || value < 0 || value > 1) return DEFAULT_EPSILON;
   return value;
+}
+
+/**
+ * `MARBLO_ROUTING_DIVERSITY` 로 UCB1 저표본 보너스 계수를 조정한다(`0` = 끄기).
+ * 음수·비수는 기본값으로 되돌린다.
+ */
+export function resolveDiversityC(raw?: string): number {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return DEFAULT_DIVERSITY_C;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_DIVERSITY_C;
+  return value;
+}
+
+export function diversityBonus(
+  nCell: number,
+  totalObs: number,
+  coefficient: number,
+): number {
+  if (!(coefficient > 0)) return 0;
+  const n = Number.isFinite(nCell) ? Math.max(0, nCell) : 0;
+  const total = Number.isFinite(totalObs) ? Math.max(0, totalObs) : 0;
+  return coefficient * Math.sqrt(Math.log(total + 1) / (n + 1));
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -353,6 +387,10 @@ export interface AutoScoreBreakdown {
   capability: number;
   /** 라우팅 그래프 관측(±20). 콜드면 0. */
   kg: number;
+  /** UCB1 형 저표본 다양성 보너스(≥0). */
+  diversity: number;
+  /** 현 ctx 후보 관측 합(UCB1 totalObs). */
+  totalObservations: number;
   /** 이 칸의 그래프 관측 수(exploration 이 "빈 셀" 을 찾는 근거). */
   observations: number;
   total: number;
@@ -379,8 +417,15 @@ export interface AutoModelPlan {
   movedFromEntry: boolean;
   /** 그래프에 이 맥락의 관측이 하나도 없나(콜드 = 정적신호로만 판단했다). */
   coldStart: boolean;
-  /** 무엇이 결정했나 — 난이도/단가/능력/효과/탐색/동률. */
-  decidedBy: "fit" | "cost" | "bench" | "capability" | "kg" | AutoSelectMode;
+  /** 무엇이 결정했나 — 난이도/단가/능력/효과/다양성/탐색/동률. */
+  decidedBy:
+    | "fit"
+    | "cost"
+    | "bench"
+    | "capability"
+    | "kg"
+    | "diversity"
+    | AutoSelectMode;
   scores: AutoScoreBreakdown[];
   /** dispatchReason 에 그대로 붙는 한 줄. */
   reason: string;
@@ -397,6 +442,8 @@ export interface AutoSelectInput {
   modelAvailable?: (modelId: string) => boolean;
   /** ε. 미지정이면 env(`MARBLO_ROUTING_EXPLORE`) → DEFAULT_EPSILON. */
   epsilon?: number;
+  /** UCB1 저표본 보너스 계수. 미지정이면 env(`MARBLO_ROUTING_DIVERSITY`) → 기본값. */
+  diversityCoefficient?: number;
   /** 결정적 테스트용 난수(0 이상 1 미만). 미지정이면 Math.random. */
   random?: () => number;
   /** 이 dispatch 가 이미 탐색으로 결정됐는가(하네스별 롤을 나누지 않기 위한 주입). */
@@ -466,6 +513,21 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
   const costWeight = COST_WEIGHT[tier] * pressure;
   const benchWeight = BENCH_WEIGHT[tier];
   const capWeight = CAPABILITY_WEIGHT[tier];
+  const diversityCoefficient =
+    input.diversityCoefficient ??
+    resolveDiversityC(process.env.MARBLO_ROUTING_DIVERSITY);
+
+  const observed = new Map<string, number>();
+  for (const candidate of usable) {
+    observed.set(
+      candidate.modelKey,
+      graph ? observationCountForModel(candidate.modelKey, ctx, graph) : 0,
+    );
+  }
+  const totalObservations = [...observed.values()].reduce(
+    (sum, n) => sum + n,
+    0,
+  );
 
   const scores: AutoScoreBreakdown[] = usable.map((candidate) => {
     const steps = candidate.index - entryIndex;
@@ -501,11 +563,14 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
     const kg = graph
       ? graphBiasForModel([candidate.modelKey, harness], ctx, graph)
       : 0;
-    const observations = graph
-      ? observationCountForModel(candidate.modelKey, ctx, graph)
-      : 0;
+    const observations = observed.get(candidate.modelKey) ?? 0;
+    const diversity = diversityBonus(
+      observations,
+      totalObservations,
+      diversityCoefficient,
+    );
 
-    const total = fit + cost + bench + capability + kg;
+    const total = fit + cost + bench + capability + kg + diversity;
     return {
       candidate,
       fit: round1(fit),
@@ -513,6 +578,8 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
       bench: round1(bench),
       capability: round1(capability),
       kg: round1(kg),
+      diversity: round1(diversity),
+      totalObservations,
       observations,
       total: round1(Number.isFinite(total) ? total : 0),
     };
@@ -611,6 +678,7 @@ function decideFactor(
     ["bench", Math.abs(winner.bench)],
     ["capability", Math.abs(winner.capability)],
     ["kg", Math.abs(winner.kg)],
+    ["diversity", Math.abs(winner.diversity)],
   ];
   parts.sort((a, b) => b[1] - a[1]);
   return parts[0][1] > 0 ? parts[0][0] : "top-score";
@@ -646,6 +714,7 @@ export function formatAutoReason(
     winner.capability !== 0 ? `cap ${signed(winner.capability)}` : "",
     tierLabel ? `tier=${tierLabel}` : "",
     `kg ${signed(winner.kg)}${plan.coldStart ? "(cold)" : `(n=${winner.observations})`}`,
+    `diversity ${signed(winner.diversity)} (n=${winner.observations}, tot=${winner.totalObservations})`,
     `budget ${headroom}`,
   ]
     .filter(Boolean)
