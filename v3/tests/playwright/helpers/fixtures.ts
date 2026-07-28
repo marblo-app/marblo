@@ -208,7 +208,7 @@ async function openMockOrchestrator(page: Page): Promise<string> {
     });
   });
 
-  // 1) PTY spawn — sh seq 1 5000 → 약 5천 줄 출력 (xterm scroll 가능 분량)
+  // 1) PTY spawn — 한글이 포함된 5천 줄 출력 (xterm scrollback + CJK metrics 검증)
   //    + sleep 60 으로 프로세스 살아있게 (자식 종료 시 PTY 정리되어 회귀 검증 못함).
   const ptySessionId = `test-mock-orch-${Date.now()}`;
   await page.evaluate(async (sessionId) => {
@@ -216,7 +216,10 @@ async function openMockOrchestrator(page: Page): Promise<string> {
       id: sessionId,
       name: "MockOrchestrator",
       command: "sh",
-      args: ["-c", "for i in $(seq 1 5000); do echo line $i; done; sleep 60"],
+      args: [
+        "-c",
+        'for i in $(seq 1 5000); do echo "한글 line $i"; done; sleep 60',
+      ],
       cwd: undefined,
     });
   }, ptySessionId);

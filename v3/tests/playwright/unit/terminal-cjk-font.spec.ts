@@ -169,4 +169,47 @@ test.describe("터미널 한글 폰트 (회귀 #659 후속)", () => {
       expect(geom!.letterSpacing).toMatch(/^-?\d+(\.\d+)?px$|^normal$/);
     }
   });
+
+  test("@mocked scrollback 한글도 재측정돼 자간 없이 2칸을 차지한다", async ({
+    marblo,
+  }, testInfo) => {
+    await marblo.openMockOrchestrator();
+    const term = await marblo.terminal("orchestrator");
+    await term.waitReady();
+    await term.waitMs(1500);
+
+    await marblo.page.screenshot({
+      path: testInfo.outputPath("grok-scrollback-before.png"),
+    });
+    await term.wheelUp(800);
+    await term.waitMs(200);
+    await marblo.page.screenshot({
+      path: testInfo.outputPath("grok-scrollback-after.png"),
+    });
+
+    const geom = await marblo.page.evaluate(
+      ({ stack, spec }) => {
+        const root = document.querySelector(".xterm");
+        const rows = root?.querySelector(".xterm-rows") as HTMLElement | null;
+        const ctx = document.createElement("canvas").getContext("2d")!;
+        ctx.font = `13px ${stack}`;
+        const cellW = ctx.measureText("0").width;
+        ctx.font = spec;
+        const hanW = ctx.measureText("한").width;
+        return {
+          letterSpacing: rows ? getComputedStyle(rows).letterSpacing : null,
+          ratio: hanW / cellW,
+        };
+      },
+      { stack: TERMINAL_FONT_FAMILY, spec: CJK_SPEC },
+    );
+
+    expect(
+      geom.ratio,
+      `스크롤백 한글 advance/셀폭 = ${geom.ratio.toFixed(4)} (2.0이어야 함)`,
+    ).toBeCloseTo(2, 3);
+    if (geom.letterSpacing !== null) {
+      expect(geom.letterSpacing).toMatch(/^-?\d+(\.\d+)?px$|^normal$/);
+    }
+  });
 });

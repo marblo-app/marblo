@@ -179,7 +179,9 @@ export function resetCjkFontLoadForTests(): void {
  */
 export interface FontCacheInvalidatable {
   options: { fontFamily?: string; fontSize?: number };
+  cols: number;
   rows: number;
+  resize(cols: number, rows: number): void;
   clearTextureAtlas(): void;
   refresh(start: number, end: number): void;
 }
@@ -193,6 +195,11 @@ export interface FontCacheInvalidatable {
  * glyph atlas — and because the family ends up back at its original value, the
  * renderer re-acquires the very same process-wide cached atlas. So
  * `clearTextureAtlas()` has to come after, never before.
+ *
+ * `refresh()` only dirties rows currently owned by the viewport. The DOM renderer can keep
+ * already-scrolled rows alive with their old inline spacing until a buffer reflow occurs. A
+ * one-column resize round trip reflows the complete normal buffer, so those scrollback rows
+ * are laid out with the freshly measured WidthCache.
  */
 export function invalidateTerminalFontCaches(
   terminal: FontCacheInvalidatable,
@@ -202,6 +209,14 @@ export function invalidateTerminalFontCaches(
   terminal.options.fontFamily = family;
   // No-op on the DOM renderer (it has no atlas); clears canvas/WebGL pages.
   terminal.clearTextureAtlas();
+  const cols = terminal.cols;
+  const rows = terminal.rows;
+  if (cols > 0 && rows > 0) {
+    // xterm's buffer resize is the public path that reflows every scrollback line. Restore the
+    // original grid immediately so the PTY and the visible terminal keep their actual size.
+    terminal.resize(cols + 1, rows);
+    terminal.resize(cols, rows);
+  }
   terminal.refresh(0, Math.max(0, terminal.rows - 1));
 }
 

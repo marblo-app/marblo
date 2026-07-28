@@ -23,6 +23,7 @@ const V3 = path.resolve(__dirname, "../..");
 function fakeTerminal(fontSize = 13) {
   const calls: string[] = [];
   const term = {
+    cols: 80,
     rows: 24,
     options: {
       fontSize,
@@ -38,6 +39,8 @@ function fakeTerminal(fontSize = 13) {
         calls.push(`fontFamily=${v}`);
       },
     },
+    resize: (cols: number, rows: number) =>
+      calls.push(`resize(${cols},${rows})`),
     clearTextureAtlas: () => calls.push("clearTextureAtlas"),
     refresh: (a: number, b: number) => calls.push(`refresh(${a},${b})`),
   };
@@ -184,7 +187,7 @@ describe("invalidateTerminalFontCaches", () => {
     expect(TERMINAL_FONT_FAMILY.endsWith("monospace")).toBe(true);
   });
 
-  it("clears the glyph atlas AFTER the family change, then refreshes", () => {
+  it("clears the atlas, reflows the full buffer, then refreshes the viewport", () => {
     const { term, calls } = fakeTerminal();
     invalidateTerminalFontCaches(term);
     // Ending back on the original family makes xterm re-acquire the same
@@ -193,6 +196,8 @@ describe("invalidateTerminalFontCaches", () => {
       expect.stringMatching(/^fontFamily=/),
       `fontFamily=${TERMINAL_FONT_FAMILY}`,
       "clearTextureAtlas",
+      "resize(81,24)",
+      "resize(80,24)",
       "refresh(0,23)",
     ]);
   });
@@ -201,6 +206,15 @@ describe("invalidateTerminalFontCaches", () => {
     const { term, calls } = fakeTerminal();
     (term as unknown as { rows: number }).rows = 0;
     invalidateTerminalFontCaches(term);
+    expect(calls).toContain("refresh(0,0)");
+  });
+
+  it("skips the reflow when the terminal has no live grid", () => {
+    const { term, calls } = fakeTerminal();
+    (term as unknown as { cols: number; rows: number }).cols = 0;
+    (term as unknown as { rows: number }).rows = 0;
+    invalidateTerminalFontCaches(term);
+    expect(calls).not.toContain("resize(81,0)");
     expect(calls).toContain("refresh(0,0)");
   });
 });
