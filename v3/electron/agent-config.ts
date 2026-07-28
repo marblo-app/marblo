@@ -3372,6 +3372,25 @@ export class AgentConfigGenerator {
         } else {
           claudeModel = modelTierForComplexity(harness, complexity).claudeModel;
         }
+        // ★foreign command 불신(grok 분기와 같은 규율). `baseCommand` 는 Firestore
+        // 에이전트 doc 의 값이라 **다른 하네스의 바이너리**가 실려 올 수 있다:
+        // 모델을 바꾼 에이전트의 stale doc(command:"grok"/"codex"), 그리고
+        // env-swap 벤더 핀이 `harnessForLaunch` 로 이 분기에 접혀 들어온 경우가
+        // 그렇다(하네스는 핀을 따르지만 command 는 doc 값 그대로다). claude argv 는
+        // `--dangerously-skip-permissions`/`--model` 을 싣고 있어 남의 바이너리에
+        // 넘어가면 즉사한다("unknown option ..." — grok 이 실제로 겪은 3번째 버그).
+        // 진짜 claude 커맨드 이름(또는 그 절대경로)만 존중하고, 나머지는 해석된
+        // claude 바이너리로 떨어뜨린다. 오케/워커가 넘기는 "claude" 는 종전 그대로다.
+        const claudeCommand = isHarnessCommandName(baseCommand, "claude")
+          ? baseCommand
+          : resolveClaudeBinary().command;
+        if (baseCommand && !isHarnessCommandName(baseCommand, "claude")) {
+          console.warn("[agent-config] claude 분기의 낯선 command 무시", {
+            baseCommand,
+            pinnedModel: pinnedModelId ?? null,
+            using: claudeCommand,
+          });
+        }
         return {
           // On Windows node-pty does NOT resolve a bare command via PATH/PATHEXT
           // (it throws "File not found"), so the orchestrator's literal "claude"
@@ -3380,7 +3399,7 @@ export class AgentConfigGenerator {
           command:
             os.platform() === "win32"
               ? resolveClaudeBinary().command
-              : baseCommand || resolveClaudeBinary().command,
+              : claudeCommand,
           args: [
             "--dangerously-skip-permissions",
             ...(claudeModel ? ["--model", claudeModel] : []),

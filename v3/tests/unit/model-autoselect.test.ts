@@ -124,7 +124,20 @@ describe("후보 구성", () => {
 
   it("사다리가 없는 하네스는 계획 자체가 없다(종전 경로 유지 = 무회귀)", () => {
     expect(plan("antigravity", "standard")).toBeNull();
-    expect(plan("grok", "complex")).toBeNull();
+    expect(plan("gemini", "standard")).toBeNull();
+  });
+
+  it("★grok 은 칸이 하나라도 계획이 나온다 — 그래프 읽는 셀 = 쓰는 셀", () => {
+    // 사다리가 없던 동안 grok dispatch 는 계획이 null 이라 그래프 조회 키가
+    // 하네스 이름 "grok"(=모델미상 유령 셀)으로 떨어졌다. 결과를 쓰는 쪽은 argv
+    // 에서 되읽은 "grok-4.5" 라 읽기·쓰기가 갈렸다.
+    const p = plan("grok", "complex")!;
+    expect(p).not.toBeNull();
+    expect(p.modelKey).toBe("grok-4.5");
+    expect(p.pinsModel).toBe(true);
+    expect(p.mode).toBe("single");
+    // 진입칸을 벗어나지 않는다 = 스폰 argv 가 종전(`-m grok-4.5` 기본값)과 같다.
+    expect(p.movedFromEntry).toBe(false);
   });
 });
 

@@ -14,7 +14,7 @@
  * fake 는 PTY/워크트리/Firestore 만 대체하고, **모델 결정과 argv 생성은 진짜
  * 코드**를 탄다 — 그러지 않으면 fake 를 테스트하게 된다.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import os from "os";
 import fs from "fs";
 import path from "path";
@@ -412,5 +412,92 @@ describe("P2-3 — dispatch:decision 에 실제 model@effort 가 기록된다", 
     });
     // codex 는 complexity 파생 effort 만 붙고 모델 핀이 없다 → 라벨 없음.
     expect(lastDecision().spawnedModel).toBeUndefined();
+  });
+});
+
+/**
+ * ★env-swap 벤더 크레덴셜 게이트 — 보드 dispatch·HTTP 스폰 경로(sAw2jP3G).
+ *
+ * `checkSpawnAuthGate`(#638)는 `agent:launch` IPC 에만 걸려 있어서, 이 경로는
+ * 키 없는 env-swap 모델을 그대로 스폰했다. 그 스폰은 **조용히 실패한다**:
+ * `applyVendorEnv` 가 전부-아니면-전무로 프로파일을 버리므로 우리 Anthropic
+ * 크레덴셜을 든 claude 가 `--model k3` 로 Anthropic 에 붙는다.
+ */
+describe("env-swap 벤더 크레덴셜 게이트(dispatch 경로)", () => {
+  const KEY = "KIMI_API_KEY";
+  let saved: string | undefined;
+
+  beforeEach(() => {
+    saved = process.env[KEY];
+    delete process.env[KEY];
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env[KEY];
+    else process.env[KEY] = saved;
+  });
+
+  it("★키가 없으면 스폰하지 않고 키 이름을 돌려준다", async () => {
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      model: "kimi-for-coding",
+    });
+    expect(res.success).toBe(false);
+    expect(res.error).toContain(KEY);
+    // 죽은 PTY 를 안고 멈추지 않는다 — 스폰 자체가 없었다.
+    expect(am.listAgents()).toHaveLength(0);
+  });
+
+  it("에러 메시지엔 키 **이름**만 담긴다(값 금지)", async () => {
+    process.env[KEY] = "super-secret-value";
+    const { bridge } = makeBridge();
+    const res = await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      model: "k3",
+    });
+    // 키가 있으니 통과한다(게이트가 항상 막는 것이 아니라 크레덴셜을 본다).
+    expect(res.success).toBe(true);
+    expect(JSON.stringify(res)).not.toContain("super-secret-value");
+  });
+
+  it("키가 있으면 벤더 프로파일이 실제 스폰 env 에 얹힌다", async () => {
+    process.env[KEY] = "fixture-kimi";
+    const { bridge, am } = makeBridge();
+    const res = await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      model: "k3",
+    });
+    expect(res.success).toBe(true);
+    // 하네스는 claude(축분리) — 바이너리는 우리 claude 그대로다.
+    expect(res.model).toBe("claude");
+    const env = am.getAgent(res.agentId!)!.launchConfig!.env;
+    expect(env.ANTHROPIC_BASE_URL).toBe("https://api.kimi.com/coding/");
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("fixture-kimi");
+    const args = argsOf(am, res.agentId!);
+    expect(args[args.indexOf("--model") + 1]).toBe("k3");
+  });
+
+  it("★무회귀: 네이티브 벤더(claude/codex)는 게이트를 그냥 지난다", async () => {
+    const { bridge } = makeBridge();
+    const claude = await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      model: "opus5",
+    });
+    expect(claude.success).toBe(true);
+    const codex = await bridge.dispatchTask({
+      role: "backend",
+      instruction: "do it",
+      cwd: TMP,
+      model: "gpt-5.6-terra",
+    });
+    expect(codex.success).toBe(true);
   });
 });

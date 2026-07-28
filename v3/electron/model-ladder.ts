@@ -376,6 +376,37 @@ const GPT_RUNGS: LadderRung[] = [
 ];
 
 /**
+ * grok(Grok Build) 사다리 — 오늘 레지스트리에 grok 하네스 행이 **하나**뿐이라 칸도
+ * 하나다. 칸이 하나면 고를 것이 없는데 왜 사다리를 만드는가:
+ *
+ * 사다리가 없으면 `selectAutoModel` 이 `null` 을 돌려주고(=계획 없음),
+ * `bridge-server.graphKeysFor` 는 그때 `predictedModelKey` 로 떨어진다. 그런데 그
+ * 함수는 claude/gpt 축만 알아서 grok 에는 `null` 을 주고, 결국 라우팅 그래프가
+ * **읽는 셀이 `"grok"`**(하네스 이름)이 된다. 반면 결과를 **쓰는** 쪽은
+ * `spawnedModelKey`(= argv 에서 되읽은 `grok-4.5`)라, 같은 스폰의 읽기·쓰기가 서로
+ * 다른 셀을 가리켰다 — 관측이 아무리 쌓여도 그 근거가 다음 선택에 도달하지 못하는
+ * 자기강화 루프의 단선이다(`model-autoselect` 상단의 "읽는 셀 = 쓰는 셀" 불변식).
+ * 게다가 `"grok"` 은 `isHarnessFamilyId` 가 잡아내는 "모델미상" 문자열이라
+ * 레지스트리·단가표 어디에도 없는 유령 셀이다.
+ *
+ * 칸이 하나이므로 **스폰 argv 는 한 바이트도 바뀌지 않는다**: 자동선택이
+ * `grok-4.5` 를 고르면 `nativeModel` 핀이 되어 `-m grok-4.5` 가 붙는데, 그것은
+ * `buildCLICommand` 의 grok 분기가 핀 없이도 넣던 기본값(`GROK_DEFAULT_MODEL`)과
+ * 같은 값이다. 바뀌는 것은 그래프 셀 키뿐이다.
+ *
+ * ★난도 3티어가 같은 칸을 가리키는 것도 사실 그대로다 — Grok Build 는 우리가 argv 로
+ * 고를 수 있는 다른 모델을 아직 레지스트리에 갖고 있지 않다. 변종(grok-code-fast 등)이
+ * CLI-verified 로 등록되면 그때 칸이 늘고 티어 진입점이 갈린다.
+ */
+const GROK_RUNGS: LadderRung[] = [
+  {
+    model: "grok-4.5",
+    harness: "grok",
+    why: "오늘 grok 하네스의 유일한 CLI-verified 행(top 등급). 핀 값이 buildCLICommand 의 기본 -m 값과 같아 argv 무변경이고, 사다리가 있어야 라우팅 그래프의 읽는 셀이 실제 스폰 키(grok-4.5)와 일치한다.",
+  },
+];
+
+/**
  * 사다리에 **의도적으로 넣지 않은** 활성 모델과 그 이유.
  *
  * 이 표가 있는 이유: 레지스트리에 행을 추가한 사람이 사다리 갱신을 잊으면
@@ -516,6 +547,14 @@ export const MODEL_LADDERS: Readonly<
     GPT_RUNGS,
     { simple: 0, standard: 3, complex: 6 },
     { pinsModel: false, inheritedModel: "gpt-5.5" },
+  ),
+  // grok 은 argv 로 모델을 실제로 핀한다(`-m <id>`) — codex 처럼 사용자 config 를
+  // 상속하는 축이 아니라 claude 와 같은 pinsModel=true 다.
+  grok: buildLadder(
+    "grok",
+    GROK_RUNGS,
+    { simple: 0, standard: 0, complex: 0 },
+    { pinsModel: true },
   ),
 };
 

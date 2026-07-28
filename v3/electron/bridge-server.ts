@@ -3163,6 +3163,36 @@ export class BridgeServer {
     // mission engine) routes to the right CLI even when the orchestrator
     // says the natural word "codex" instead of the internal id "gpt".
     params.model = normalizeModel(params.model) ?? params.model;
+
+    // ── ★env-swap 벤더 크레덴셜 게이트 (#638 을 이 경로에도) ─────────────
+    //
+    // `checkSpawnAuthGate` 는 `agent:launch` IPC(퀵레인·UI)와 오케 경로에만 걸려
+    // 있다. 보드 dispatch·HTTP `/spawn-agent`·미션 엔진은 전부 이 함수로 바로
+    // 내려오므로, 키 없는 env-swap 모델을 명시 지정하면 아무 것도 막지 않았다.
+    // 그 결과가 조용하지 않은 실패라면 두어도 되지만 실제로는 조용하다:
+    // `applyVendorEnv` 가 부분 주입 금지(전부-아니면-전무)로 프로파일을 통째로
+    // 버리므로 **우리 Anthropic 크레덴셜을 든 claude** 가 `--model k3` 로 Anthropic
+    // 에 붙는다 — 남의 모델 이름으로 우리 쿼터를 태우고, 원인은 "왜 인증이 안 되지"
+    // 로 오독된다(BYOM 게이트 티켓이 quick-lane 경로에서 막던 바로 그 실패모드).
+    //
+    // 스폰 자체를 여기서 끊는 것이 정직하다: 이 스폰은 성공할 수 없고, 사용자가
+    // 할 일은 재시도가 아니라 키 등록이다. 값이 아니라 **키 이름**만 노출한다.
+    const spawnPinnedModelId =
+      params.modelPin?.claudeModel ??
+      params.modelPin?.codexModel ??
+      params.modelPin?.nativeModel;
+    const vendorReadiness = vendorEnvReadiness(spawnPinnedModelId);
+    if (vendorReadiness.hasProfile && !vendorReadiness.ready) {
+      const reason =
+        `Spawn blocked (vendor credentials): '${spawnPinnedModelId}' 는 ` +
+        `${vendorReadiness.vendor ?? "외부 벤더"} 백엔드로 붙는 모델인데 ` +
+        `${vendorReadiness.missingEnvKeys.join(", ")} 가 없습니다. ` +
+        "설정 → 벤더 API 키에 등록한 뒤 다시 시도하세요(키가 없으면 벤더 " +
+        "프로파일이 통째로 미주입돼 Anthropic 쿼터로 새기 때문에 스폰하지 않습니다).";
+      console.warn(`[BridgeServer] ${reason}`);
+      return { success: false, error: reason };
+    }
+
     const agentId = crypto.randomUUID();
     // cwd resolution chain: explicit → parent agent's cwd → orchestrator
     // for the same project → process.cwd(). This fixes the "agent opens

@@ -50,7 +50,7 @@ import {
 } from "../../electron/mcp-server/escalation-approval";
 
 /** 사다리는 **하네스** 축으로 묶인다(축분리 USbdRV4k). */
-const LADDER_HARNESSES = ["claude", "gpt"] as const;
+const LADDER_HARNESSES = ["claude", "gpt", "grok"] as const;
 
 describe("사다리 데이터 규율", () => {
   it("모든 칸이 레지스트리의 구체 id 다(alias·미등록 id 금지)", () => {
@@ -120,9 +120,16 @@ describe("사다리 데이터 규율", () => {
 
   it("진입 칸이 simple ≤ standard ≤ complex 순이다", () => {
     for (const harness of LADDER_HARNESSES) {
-      const { entry } = ladderFor(harness)!;
-      expect(entry.simple).toBeLessThan(entry.standard);
-      expect(entry.standard).toBeLessThan(entry.complex);
+      const ladder = ladderFor(harness)!;
+      const { entry } = ladder;
+      expect(entry.simple).toBeLessThanOrEqual(entry.standard);
+      expect(entry.standard).toBeLessThanOrEqual(entry.complex);
+      // ★칸이 여럿인 사다리에서만 **엄격** 증가를 요구한다. grok 처럼 CLI-verified
+      // 행이 하나뿐인 하네스는 세 티어가 같은 칸을 가리키는 것이 사실이다 — 거기서
+      // 엄격 증가를 강요하면 없는 모델을 지어내야 한다(레지스트리 상단 규율).
+      if (ladder.rungs.length > 1) {
+        expect(entry.simple).toBeLessThan(entry.complex);
+      }
     }
   });
 });
@@ -212,18 +219,21 @@ describe("★gpt-5.6 3변종 변주", () => {
 });
 
 describe("완결성 — 레지스트리 행이 사다리에서 유령이 되지 않는다", () => {
-  it("모든 활성 claude/gpt 모델은 사다리에 있거나 제외 이유가 적혀 있다", () => {
+  // ★하네스로 거르지 않는다. 종전엔 `entry.harness` 가 claude/gpt 가 아니면
+  // `continue` 해서, **사다리가 없는 하네스의 행은 이 가드 자체를 통과할 수 없었다**
+  // — grok-4.5 가 사다리에도 LADDER_EXCLUSIONS 에도 없이 살아 있었는데(=자동선택이
+  // 절대 못 고르는 행) 완결성 테스트는 초록이었다. 필터를 걷으면 그런 행이 침묵할
+  // 자리가 없어진다: 사다리를 만들거나, 이유를 적거나 둘 중 하나다.
+  it("모든 활성 모델은 사다리에 있거나 제외 이유가 적혀 있다(하네스 불문)", () => {
     const inLadder = new Set(
       LADDER_HARNESSES.flatMap((p) => ladderFor(p)!.rungs.map((r) => r.model)),
     );
     for (const entry of MODEL_REGISTRY) {
       if (entry.status !== "active") continue;
-      if (!LADDER_HARNESSES.includes(entry.harness as "claude" | "gpt"))
-        continue;
       const covered = inLadder.has(entry.id) || entry.id in LADDER_EXCLUSIONS;
       expect(
         covered,
-        `${entry.id} 가 사다리에도 LADDER_EXCLUSIONS 에도 없다 — 라우팅이 절대 고를 수 없는 유령 모델이 된다.`,
+        `${entry.id}(harness=${entry.harness}) 가 사다리에도 LADDER_EXCLUSIONS 에도 없다 — 라우팅이 절대 고를 수 없는 유령 모델이 된다.`,
       ).toBe(true);
     }
   });
