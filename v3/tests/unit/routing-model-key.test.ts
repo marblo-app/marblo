@@ -106,9 +106,11 @@ describe("predictedModelKey / graphModelKeys (읽기 경로 = 예측)", () => {
       "claude-opus-5",
     );
     expect(predictedModelKey("gpt", "standard", FAKE_TIER)).toBe(
-      "gpt-5.5@medium",
+      "gpt-5.6-terra@medium",
     );
-    expect(predictedModelKey("gpt", "simple", FAKE_TIER)).toBe("gpt-5.5@low");
+    expect(predictedModelKey("gpt", "simple", FAKE_TIER)).toBe(
+      "gpt-5.6-luna@low",
+    );
   });
 
   it("난도가 없으면 예측하지 않는다(스폰이 모델 인자를 안 붙여 CLI 기본이 뜬다)", () => {
@@ -124,8 +126,9 @@ describe("predictedModelKey / graphModelKeys (읽기 경로 = 예측)", () => {
     expect(graphModelKeys("gemini", "simple", FAKE_TIER)).toEqual(["gemini"]);
   });
 
-  it("★구키(프로바이더)를 항상 폴백 칸으로 함께 넘긴다 — 순서는 구체적인 것부터", () => {
+  it("★기존 gpt-5.5 학습과 구키를 폴백 칸으로 함께 넘긴다 — 순서는 구체적인 것부터", () => {
     expect(graphModelKeys("gpt", "standard", FAKE_TIER)).toEqual([
+      "gpt-5.6-terra@medium",
       "gpt-5.5@medium",
       "gpt",
     ]);
@@ -174,7 +177,12 @@ describe("★읽기 예측과 라이브 티어 정책의 일치(agent-config 실
       "simple",
       "2.1.220",
     ).codexReasoning;
-    expect(modelKeyFromSpawn("gpt", { effort: spawnEffort })).toBe(predicted);
+    expect(
+      modelKeyFromSpawn("gpt", {
+        modelId: "gpt-5.6-luna",
+        effort: spawnEffort,
+      }),
+    ).toBe(predicted);
   });
 });
 

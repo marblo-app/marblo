@@ -295,10 +295,14 @@ describe("P2 배선 — outcome 이 model@effort × taskType 셀로 접히고 �
     const keys = graphModelKeys("gpt", "standard", () => ({
       codexReasoning: "medium",
     }));
-    expect(keys).toEqual(["gpt-5.5@medium", "gpt"]);
+    expect(keys).toEqual([
+      "gpt-5.6-terra@medium",
+      "gpt-5.5@medium",
+      "gpt",
+    ]);
     expect(graphBiasForModel(keys, ctx, graph)).toBeGreaterThan(0);
-    // 다른 변종은 이 학습을 상속하지 않는다(변별력).
-    expect(graphBiasForModel(["gpt-5.6-sol@high", "gpt"], ctx, graph)).toBe(0);
+    // gpt-5.5 학습은 폴백으로만 상속된다. 폴백을 빼면 새 변종 셀은 아직 비어 있다.
+    expect(graphBiasForModel(["gpt-5.6-terra@medium"], ctx, graph)).toBe(0);
   });
 
   it("spawnedModelKey 가 없는 구 dispatchMeta 는 종전 프로바이더 키로 학습한다", async () => {

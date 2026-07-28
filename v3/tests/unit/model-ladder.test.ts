@@ -496,8 +496,8 @@ describe("formatLadder — 사람이 읽는 표", () => {
     expect(out).toContain("gpt-5.6-luna@low");
     expect(out).toContain("← simple 진입");
     expect(out).toContain("★승인필요");
-    // 모델 핀이 아직 없다는 사실을 숨기지 않는다.
-    expect(out).toContain("모델 핀: 아니오");
+    expect(out).toContain("모델 핀: 예(--model/-c model)");
+    // 기존 학습 폴백 모델도 표기한다.
     expect(out).toContain("gpt-5.5");
   });
 

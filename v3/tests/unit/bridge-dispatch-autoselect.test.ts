@@ -186,17 +186,28 @@ function claudeModelOf(am: RealishAgentManager, agentId: string): string {
   return args[args.indexOf("--model") + 1];
 }
 
+function codexConf(args: string[], key: string): string | undefined {
+  for (let i = 0; i < args.length - 1; i++) {
+    if (args[i] !== "-c") continue;
+    const m = new RegExp(`^${key}="(.*)"$`).exec(args[i + 1]);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
 /** 매번 새 브리지로 한 건 dispatch(재사용 경로를 타지 않게). */
 async function dispatchOnce(opts: {
   complexity?: "simple" | "standard" | "complex";
   model?: string;
+  enabledModels?: string[];
 }): Promise<{ am: RealishAgentManager; agentId: string; model: string }> {
   const { bridge, am } = makeBridge();
+  const enabledModels = opts.enabledModels ?? ["claude"];
   const res = await bridge.dispatchTask({
     role: "backend",
     instruction: "do it",
     cwd: TMP,
-    enabledModels: ["claude"],
+    enabledModels,
     ...opts,
   });
   expect(res.success).toBe(true);
@@ -222,6 +233,17 @@ describe("★단순 → 저단가 / 복잡 → 고성능 (실제 argv)", () => {
   it("complex 는 최상위 칸을 유지한다(하향 사고 없음)", async () => {
     const { model } = await dispatchOnce({ complexity: "complex" });
     expect(model).toBe(entryRung("claude", "complex")!.model);
+  });
+
+  it("gpt 자동선택은 고른 변종을 -c model= 로 핀한다", async () => {
+    const { am, agentId } = await dispatchOnce({
+      complexity: "standard",
+      enabledModels: ["gpt"],
+    });
+    const args = am.getAgent(agentId)!.launchConfig!.args;
+    expect(codexConf(args, "model")).toMatch(/^gpt-5\.6-/);
+    expect(codexConf(args, "model_reasoning_effort")).toBeDefined();
+    expect(String(lastDecision().decisionReason)).toContain("auto-model[");
   });
 });
 

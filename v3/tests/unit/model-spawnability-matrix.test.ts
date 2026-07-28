@@ -191,11 +191,8 @@ describe("사다리 — 죽은 행(영원히 미선택)이 없다", () => {
     }
   });
 
-  // ★사다리에 있다고 자동선택 후보인 것은 아니다 — codex 축은 모델을 핀하지
-  // 않으므로(`pinsModel=false`) 후보가 **상속 모델의 effort 칸**이다. 그 괴리를
-  // 침묵시키지 않고 여기서 사실로 못박는다(정책이 바뀌면 이 단언이 먼저 깨진다).
-  it("pinsModel 사다리(claude·grok)의 칸은 전부 자동선택 후보다", () => {
-    for (const harness of ["claude", "grok"] as const) {
+  it("pinsModel 사다리(claude·gpt·grok)의 칸은 전부 자동선택 후보다", () => {
+    for (const harness of ["claude", "gpt", "grok"] as const) {
       const ladder = ladderFor(harness)!;
       expect(ladder.pinsModel).toBe(true);
       const candidates = new Set(
@@ -209,18 +206,19 @@ describe("사다리 — 죽은 행(영원히 미선택)이 없다", () => {
     }
   });
 
-  it("★알려진 괴리: gpt 사다리의 3변종은 자동선택 후보가 아니다(pinsModel=false)", () => {
+  it("★gpt 5.6 3변종은 난도별 자동선택 후보에 오른다", () => {
     const ladder = ladderFor("gpt")!;
-    expect(ladder.pinsModel).toBe(false);
+    expect(ladder.pinsModel).toBe(true);
     expect(ladder.inheritedModel).toBe("gpt-5.5");
-    const candidates = new Set(
-      autoCandidates("gpt", "standard").candidates.map((c) => c.model),
-    );
-    // 후보는 사용자 config.toml 이 물고 있는 상속 모델의 effort 칸들뿐이다.
-    expect(candidates).toEqual(new Set(["gpt-5.5"]));
-    for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
-      expect(candidates.has(id), `${id} 가 자동선택 후보가 됐다`).toBe(false);
-    }
+    expect(
+      new Set(autoCandidates("gpt", "simple").candidates.map((c) => c.model)),
+    ).toContain("gpt-5.6-luna");
+    expect(
+      new Set(autoCandidates("gpt", "standard").candidates.map((c) => c.model)),
+    ).toContain("gpt-5.6-terra");
+    expect(
+      new Set(autoCandidates("gpt", "complex").candidates.map((c) => c.model)),
+    ).toContain("gpt-5.6-sol");
   });
 });
 

@@ -61,11 +61,9 @@
  * 3. **`agent-config` 를 import 하지 않는다.**(routing-model-key 와 같은 규율)
  *    가용성 판정·핀 해석은 주입/호출자 몫이라 이 모듈은 CLI·키체인·env 없이
  *    결정적으로 유닛테스트된다.
- * 4. **핀하지 않는 축은 고르지 않는다.** codex 사다리는 `pinsModel=false` —
- *    우리는 사용자 `~/.codex/config.toml` 의 모델을 갈아치우지 않는다(사다리
- *    LADDER_EXCLUSIONS 의 명시 정책). 그래서 gpt 후보는 **상속 모델의 effort 칸들**
- *    이고 단가는 전부 같다. 여기서 luna/terra 를 고른 척하면 실제로는 gpt-5.5 가
- *    떠서 **점수의 근거가 날조**된다 — 그 함정을 자료구조로 막는다.
+ * 4. **자동선택만 모델을 핀한다.** codex 사다리는 `pinsModel=true` 이므로
+ *    자동선택이 고른 gpt-5.6 변종이 `-c model=...` 로 실제 스폰된다. 명시 모델
+ *    또는 사용자 직접 launch 는 이 모듈을 타지 않아 사용자 config.toml 을 존중한다.
  */
 
 import {
@@ -315,11 +313,11 @@ export interface AutoCandidate {
 /**
  * 이 하네스에서 자동선택이 고를 수 있는 칸들 + 티어 진입칸의 위치.
  *
- * ★두 모양이 있다(파일 상단 규율 4):
- *   · `pinsModel=true`(claude)  — 사다리 칸 그대로(모델 축이 실제로 핀된다).
- *   · `pinsModel=false`(codex)  — **상속 모델의 effort 칸들**. 모델은 사용자
- *     config.toml 이 정하므로 우리가 고를 수 있는 것은 effort 뿐이고, 그래서
- *     단가·벤치가 후보 전체에서 동일하다(그 사실이 점수에 정직하게 반영된다).
+ * ★두 모양이 있다:
+ *   · `pinsModel=true`(claude/gpt/grok) — 사다리 칸 그대로(모델 축이 실제로 핀된다).
+ *   · `pinsModel=false` — **상속 모델의 effort 칸들**. 모델은 사용자 config 가
+ *     정하므로 우리가 고를 수 있는 것은 effort 뿐이고, 그래서 단가·벤치가 후보
+ *     전체에서 동일하다(그 사실이 점수에 정직하게 반영된다).
  */
 export function autoCandidates(
   harness: string,
@@ -597,7 +595,25 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
   // 최선(=대개 더 싼 칸)만 그대로 쓴다.
   const conserving = pressure > 1;
 
-  if (scores.length === 1 || conserving) {
+  const entryScore = scores.find(
+    (s) => s.candidate.modelKey === entryCandidate?.modelKey,
+  );
+
+  const gptShouldHoldEntry =
+    harness === "gpt" &&
+    entryScore &&
+    !input.forceExplore &&
+    scores.every((s) => s.kg === 0) &&
+    (coldStart || diversityCoefficient === 0);
+
+  if (gptShouldHoldEntry) {
+    // gpt-5.6 변종 편입 직후에는 변종별 KG가 없다. 이때 비용 동률 회전이
+    // standard→terra, complex→sol 진입 정책을 흔들면 사다리 자체가 말한
+    // 난도별 기본 변종이 사라진다. KG·diversity·명시 탐색 근거가 있으면
+    // 아래 경로로 간다.
+    winner = entryScore;
+    mode = "top-score";
+  } else if (scores.length === 1 || conserving) {
     mode = scores.length === 1 ? "single" : "top-score";
   } else {
     const epsilon =

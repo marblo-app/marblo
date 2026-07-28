@@ -81,11 +81,11 @@ export function formatModelKey(
 /**
  * 이 하네스가 오늘 실제로 서빙하는 모델 id.
  *
- * codex 는 `pinsModel=false` — 우리 스폰은 effort 만 넘기고 모델은 사용자
- * `~/.codex/config.toml` 값을 쓴다. 그래서 "권장 칸의 모델"(rung.model)이 아니라
- * 사다리가 그 목적으로 들고 있는 `inheritedModel` 이 그래프 키의 모델이 된다
- * (`HarnessLadder.inheritedModel` 주석: "비용추정·그래프 키 용도").
- * 모델 핀 배선이 켜지면 이 함수만 pinsModel 분기를 타 자동으로 바뀐다.
+ * pinsModel=false 사다리는 effort 만 넘기고 모델은 사용자 config 값을 쓴다. 그래서
+ * "권장 칸의 모델"(rung.model)이 아니라 사다리가 그 목적으로 들고 있는
+ * `inheritedModel` 이 그래프 키의 모델이 된다. gpt 처럼 pinsModel=true 이면서
+ * inheritedModel 도 가진 사다리는 `graphModelKeys()` 에서 기존 학습 폴백 키로 함께
+ * 넘긴다.
  */
 function servedModelId(
   harness: string,
@@ -96,6 +96,24 @@ function servedModelId(
   if (!ladder.pinsModel) return ladder.inheritedModel;
   const rung = complexity ? entryRung(harness as never, complexity) : undefined;
   return rung?.model;
+}
+
+function inheritedModelKey(
+  harness: string,
+  complexity: LadderTier | undefined,
+  resolveTier: TierModelResolver,
+): string | null {
+  const inherited = ladderFor(harness as never)?.inheritedModel;
+  if (!inherited) return null;
+  let tier: TierModelResolution;
+  try {
+    tier = resolveTier(harness, complexity) ?? {};
+  } catch {
+    return null;
+  }
+  const effort = harness === "gpt" ? tier.codexReasoning?.trim() : undefined;
+  if (effort && isApprovalGatedEffort(effort)) return null;
+  return formatModelKey(inherited, effort) || null;
 }
 
 /**
@@ -160,7 +178,8 @@ export function predictedModelKey(
 }
 
 /**
- * 그래프 조회에 넘길 키들 — **구체적인 것부터**(`["gpt-5.5@medium", "gpt"]`).
+ * 그래프 조회에 넘길 키들 — **구체적인 것부터**
+ * (`["gpt-5.6-terra@medium", "gpt-5.5@medium", "gpt"]`).
  *
  * 두 번째 칸이 P2-2 마이그레이션의 핵심인 **구키 폴백**이다: 종전 프로바이더
  * 셀에 쌓인 94건이 새 셀의 prior 로 계속 일하고, 새 셀에 관측이 차면 자동으로
@@ -173,5 +192,9 @@ export function graphModelKeys(
   resolveTier: TierModelResolver,
 ): string[] {
   const precise = predictedModelKey(harness, complexity, resolveTier);
-  return precise && precise !== harness ? [precise, harness] : [harness];
+  if (!precise || precise === harness) return [harness];
+  const inherited = inheritedModelKey(harness, complexity, resolveTier);
+  return inherited && inherited !== precise && inherited !== harness
+    ? [precise, inherited, harness]
+    : [precise, harness];
 }

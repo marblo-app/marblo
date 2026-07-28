@@ -302,15 +302,13 @@ const CLAUDE_RUNGS: LadderRung[] = [
  * 변주한다 — luna(빠름·저렴)=simple, terra(밸런스)=standard, sol(프론티어)=complex.
  *
  * 각 변종 안에서는 effort 로 세 칸을 올리고, 변종을 넘어갈 때 능력등급이 오른다.
- * 진입 effort(low/medium/high)가 현행 라이브 매핑과 같아서, 오늘의 스폰 동작은
- * 한 바이트도 바뀌지 않는다(모델 핀은 pinsModel=false 라 아직 넘기지 않는다).
+ * 진입 effort(low/medium/high)가 현행 라이브 매핑과 같고, 모델 축도 핀한다.
  *
  * ★"gpt=저가" 가정을 명시적으로 깬 자리: top 칸이 `gpt-5.5`($5/$30)가 아니라
  * `gpt-5.6-terra`($2.5/$15)다. 능력등급이 같고 단가는 3.5배 싸다(지표 8.75 vs
  * 17.5). 그리고 simple 칸의 luna(지표 3.5)조차 `claude-sonnet-5`(9)보다 싸지만,
- * **오늘 라이브에서 codex 에 실제로 서빙되는 모델은 gpt-5.5(17.5)** 라
- * sonnet5 의 2배다 — 이 비대칭이 사다리 데이터로 드러나는 것 자체가 이 칸들의
- * 값어치다(모델 핀 배선이 붙는 순간 simple gpt 비용이 5배 떨어진다).
+ * 기존 gpt-5.5 학습은 `inheritedModel` 폴백 키로 남겨 두어, 변종별 새 셀이
+ * 차기 관측을 쌓는 동안에도 종전 관측을 잃지 않는다.
  */
 const GPT_RUNGS: LadderRung[] = [
   {
@@ -546,7 +544,7 @@ export const MODEL_LADDERS: Readonly<
     "gpt",
     GPT_RUNGS,
     { simple: 0, standard: 3, complex: 6 },
-    { pinsModel: false, inheritedModel: "gpt-5.5" },
+    { pinsModel: true, inheritedModel: "gpt-5.5" },
   ),
   // grok 은 argv 로 모델을 실제로 핀한다(`-m <id>`) — codex 처럼 사용자 config 를
   // 상속하는 축이 아니라 claude 와 같은 pinsModel=true 다.
@@ -756,8 +754,11 @@ export function formatLadder(harness: HarnessId): string {
     const idx = costIndexForModel(r.model);
     return `  ${i}. ${rungLabel(r)} (단가지표 ${idx ?? "?"}) ${marks}`.trimEnd();
   });
+  const inheritedNote = ladder.inheritedModel
+    ? `; 폴백 학습 키: ${ladder.inheritedModel}`
+    : "";
   const pinNote = ladder.pinsModel
-    ? "모델 핀: 예(--model)"
+    ? `모델 핀: 예(--model/-c model)${inheritedNote}`
     : `모델 핀: 아니오 — 오늘 실제 서빙 모델은 ${ladder.inheritedModel ?? "CLI 기본값"} (P1-1 이 -c model 배선 예정)`;
   return [`${harness} 사다리 (${pinNote})`, ...lines].join("\n");
 }

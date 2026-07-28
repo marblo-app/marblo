@@ -103,12 +103,17 @@ describe("후보 구성", () => {
     );
   });
 
-  it("★codex 는 상속 모델의 effort 칸들 — 사용자 config.toml 모델을 갈아치우지 않는다", () => {
-    const { candidates, pinsModel } = autoCandidates("gpt", "standard");
-    expect(pinsModel).toBe(false);
-    // 모든 후보가 같은 모델(= 사다리의 inheritedModel)이라 단가 축이 평평하다.
-    expect(new Set(candidates.map((c) => c.model)).size).toBe(1);
-    expect(candidates.every((c) => !!c.effort)).toBe(true);
+  it("★codex 는 gpt-5.6 변종 칸을 실제 모델 핀 후보로 올린다", () => {
+    const { candidates, pinsModel, entryIndex } = autoCandidates(
+      "gpt",
+      "standard",
+    );
+    expect(pinsModel).toBe(true);
+    expect(candidates[entryIndex].model).toBe("gpt-5.6-terra");
+    expect(candidates[entryIndex].effort).toBe("medium");
+    expect(new Set(candidates.map((c) => c.model))).toEqual(
+      new Set(["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]),
+    );
   });
 
   it("★승인게이트 칸(max/ultra)은 자동선택 후보가 아니다", () => {
@@ -151,8 +156,9 @@ describe("★단순 → 저단가", () => {
 
   it("simple gpt 는 가장 낮은 effort 칸을 고른다(토큰 소모가 최소)", () => {
     const p = plan("gpt", "simple")!;
+    expect(p.model).toBe("gpt-5.6-luna");
     expect(p.effort).toBe("low");
-    expect(p.pinsModel).toBe(false);
+    expect(p.pinsModel).toBe(true);
   });
 
   it("simple 에서 최상위 칸은 큰 격차로 진다(비용 폭발 방지)", () => {
@@ -172,7 +178,15 @@ describe("★복잡 → 고성능", () => {
 
   it("complex gpt 는 진입 effort 아래로 내려가지 않는다", () => {
     const p = plan("gpt", "complex")!;
+    expect(p.model).toBe("gpt-5.6-sol");
     expect(p.effort).toBe(entryRung("gpt", "complex")!.effort);
+  });
+
+  it("standard gpt 콜드스타트는 terra 진입칸을 유지한다", () => {
+    const p = plan("gpt", "standard")!;
+    expect(p.model).toBe("gpt-5.6-terra");
+    expect(p.effort).toBe("medium");
+    expect(p.movedFromEntry).toBe(false);
   });
 
   it("complex 에서는 회전만으로 상향되지 않는다(근거 없는 비용증가 금지)", () => {
@@ -252,7 +266,9 @@ describe("★exploration — 비교데이터를 만든다", () => {
     const p = plan("gpt", "complex", { forceExplore: true })!;
     const efforts = autoCandidates("gpt", "complex").candidates;
     const entryIdx = efforts.findIndex(
-      (c) => c.effort === entryRung("gpt", "complex")!.effort,
+      (c) =>
+        c.model === entryRung("gpt", "complex")!.model &&
+        c.effort === entryRung("gpt", "complex")!.effort,
     );
     const pickedIdx = efforts.findIndex((c) => c.modelKey === p.modelKey);
     expect(Math.abs(pickedIdx - entryIdx)).toBeLessThanOrEqual(1);
