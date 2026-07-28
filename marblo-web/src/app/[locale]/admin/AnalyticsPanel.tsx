@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { httpsCallable, getFunctions } from "firebase/functions";
 import app from "@/lib/firebase";
 import {
@@ -18,6 +25,7 @@ import {
   Hash,
   Gauge,
   Star,
+  Tag,
 } from "lucide-react";
 
 // ── 콜러블 응답 타입 (docs/analytics-admin-callables-api.md 미러) ───────────────
@@ -240,6 +248,39 @@ type ModelSummary = {
     count: number;
   }[];
   costByDay: { date: string; cost: number }[];
+  // 일별 × 모델 비용(기간별 분해). 구버전 functions 는 안 내려주므로 optional.
+  costByDayModel?: {
+    dates: string[];
+    models: { model: string; total: number; share: number }[];
+    /** models 순서와 1:1 대응하는 일자별 비용 행렬. */
+    matrix: number[][];
+    grandTotal: number;
+    truncatedModels: number;
+  };
+  // ★하위모델 분해(하네스 → 구체 모델). 구버전 functions 는 안 내려준다.
+  modelBreakdown?: {
+    harnesses: {
+      harness: string;
+      agents: number;
+      cost: number;
+      tokens: number;
+      costRows: number;
+      share: number;
+      subModels: {
+        model: string;
+        agents: number;
+        cost: number;
+        tokens: number;
+        costRows: number;
+        share: number;
+        unattributed: boolean;
+      }[];
+      hasDecomposition: boolean;
+    }[];
+    totalCost: number;
+    totalAgents: number;
+    note: string;
+  };
   modelRoleStats: {
     model: string;
     role: string;
@@ -272,6 +313,39 @@ type ModelSummary = {
       count: number;
     }[];
   };
+};
+
+// ── 릴리스·버전 헬스 (getAdminReleaseHealth) ─────────────────────────────────
+// ★앱 버전은 전용 이벤트가 아니라 events.appVersion **컬럼**에서 파생한다
+// (`lifecycle:app-version` 같은 이벤트는 존재하지 않는다 — 서버 주석 참조).
+type ReleaseHealth = {
+  rangeDays: number;
+  generatedAt: string;
+  adminExcluded?: AdminExcludedTelemetry;
+  versions: {
+    version: string;
+    isSemver: boolean;
+    isCi: boolean; // github-actions = CI 스모크 발신(사용자 설치본 아님)
+    clients: number;
+    events: number;
+    sessions: number;
+    spawned: number;
+    crashed: number;
+    crashRate: number | null; // 스폰 0 이면 null("데이터 없음")
+    firstSeen: string;
+    lastSeen: string;
+  }[];
+  adoption: {
+    dates: string[];
+    series: { version: string; values: number[] }[];
+  };
+  totals: {
+    versions: number;
+    spawned: number;
+    crashed: number;
+    crashRate: number | null;
+  };
+  note: string;
 };
 
 // ── 드릴다운 (getAdminDrilldown) ────────────────────────────────────────────
@@ -330,6 +404,25 @@ const STATUS_GOOD = "#0ca30c";
 const STATUS_WARN = "#fab219";
 const STATUS_CRIT = "#d03b3b";
 const INK_MUTED = "#898781";
+
+// 다계열(누적막대) 카테고리 슬롯 — palette.md dark 열의 고정 순서.
+// ★순환 금지: 슬롯이 모자라면 색을 만들어내지 않고 '그 외'로 접는다(서버의
+// buildCostByDayModel 이 topN 으로 이미 접어 보낸다). 인접쌍 기준 CVD/명도 게이트를
+// validate_palette.js 로 통과 확인함(dark, 7슬롯 ALL PASS).
+const CATEGORICAL = [
+  "#3987e5", // blue
+  "#d95926", // orange
+  "#199e70", // aqua
+  "#c98500", // yellow
+  "#d55181", // magenta
+  "#008300", // green
+  "#9085e9", // violet
+] as const;
+// 계열 인덱스 → 색. 엔티티 순서 고정 배정이라 필터로 계열 수가 바뀌어도
+// 남은 계열의 색이 다시 칠해지지 않는다(색은 순위가 아니라 엔티티를 따른다).
+function seriesColor(i: number): string {
+  return CATEGORICAL[i] ?? INK_MUTED;
+}
 
 // 구독 티어 — key 로 고정 배정(순위 아님).
 const TIER_COLOR: Record<string, string> = {
@@ -706,7 +799,7 @@ function TwoLineChart({
   onDrill?: (date: string) => void;
 }) {
   const clean = data.filter(
-    (d) => d && isFinite(d.first) && isFinite(d.second)
+    (d) => d && isFinite(d.first) && isFinite(d.second),
   );
   const allZero = clean.every((d) => d.first === 0 && d.second === 0);
   if (clean.length === 0 || allZero) return <EmptyState label={emptyLabel} />;
@@ -808,7 +901,7 @@ function TwoLineChart({
             style={onDrill ? { cursor: "pointer" } : undefined}
           >
             <title>{`${fmtDay(d.date)} · ${first.label} ${fmtFirst(
-              d.first
+              d.first,
             )} · ${second.label} ${fmtSecond(d.second)}${
               onDrill ? " (클릭: 상세 분해)" : ""
             }`}</title>
@@ -892,11 +985,11 @@ function SectionHeader({
           t: "🟢 항상 켜짐·식별",
         }
       : trust === "yellow"
-      ? {
-          c: "text-amber-300 bg-amber-950/30 border-amber-900/40",
-          t: "🟡 옵트인 표본",
-        }
-      : { c: "text-zinc-400 bg-zinc-900 border-zinc-800", t: "🔴 소스 없음" };
+        ? {
+            c: "text-amber-300 bg-amber-950/30 border-amber-900/40",
+            t: "🟡 옵트인 표본",
+          }
+        : { c: "text-zinc-400 bg-zinc-900 border-zinc-800", t: "🔴 소스 없음" };
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="flex items-center gap-2">
@@ -1146,11 +1239,11 @@ function AdminExclusionNote({
     parts.push(
       fsTotal > 0
         ? `사업 데이터에서 관리자 소유 ${fmtInt(fsTotal)}건 제외(구독 ${fmtInt(
-            fs.subscriptions
+            fs.subscriptions,
           )} · 청구 ${fmtInt(fs.billingCharges)} · 파운더 ${fmtInt(
-            fs.founders
+            fs.founders,
           )} · 에이전트 ${fmtInt(fs.agents)})`
-        : "사업 데이터에 관리자 소유 문서 없음"
+        : "사업 데이터에 관리자 소유 문서 없음",
     );
   }
   if (tel) {
@@ -1163,25 +1256,25 @@ function AdminExclusionNote({
       parts.push(
         tel.clientIdCount > 0
           ? `🟠 텔레메트리 전체 포함 중(운영자 미제외) — 제외 시 관리자 클라이언트 ${fmtInt(
-              tel.clientIdCount
+              tel.clientIdCount,
             )}개가 빠집니다`
-          : "🟠 텔레메트리 전체 포함 중(운영자 미제외)"
+          : "🟠 텔레메트리 전체 포함 중(운영자 미제외)",
       );
     } else if (tel.clientIdCount > 0) {
       parts.push(
         `텔레메트리에서 관리자 클라이언트 ${fmtInt(
-          tel.clientIdCount
-        )}개 제외(cost_logs 역참조 추정)`
+          tel.clientIdCount,
+        )}개 제외(cost_logs 역참조 추정)`,
       );
     } else {
       parts.push(
         "텔레메트리는 익명 clientId 라 운영자 식별분이 없어 제외분 0 " +
-          "(비용 지출은 uid 기준 정확 제외)"
+          "(비용 지출은 uid 기준 정확 제외)",
       );
     }
     // ★blind spot 상시 고지 — cost_logs 무흔적 세션은 존킴이라도 못 잡음.
     parts.push(
-      "제외기 한계: cost_logs 흔적 있는 세션만 잡아 무토큰·dev·크래시 세션은 외부로 샐 수 있음"
+      "제외기 한계: cost_logs 흔적 있는 세션만 잡아 무토큰·dev·크래시 세션은 외부로 샐 수 있음",
     );
   }
 
@@ -1220,7 +1313,7 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
   const maxClients = Math.max(1, ...steps.map((s) => s.clients));
   const hasAny = steps.some((s) => s.clients > 0 || s.events > 0);
   const failuresWithData = funnel.failureBranches.filter(
-    (f) => f.clients > 0 || f.events > 0
+    (f) => f.clients > 0 || f.events > 0,
   );
 
   if (!hasAny) {
@@ -1297,8 +1390,8 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
                         backgroundColor: s.isMaxDrop
                           ? STATUS_CRIT
                           : s.kind === "activation"
-                          ? SERIES_2
-                          : SERIES,
+                            ? SERIES_2
+                            : SERIES,
                       }}
                     />
                     <div className="absolute inset-0 flex items-center gap-2 px-2">
@@ -1329,7 +1422,7 @@ function OnboardingFunnelView({ funnel }: { funnel: OnboardingFunnel }) {
               key={f.key}
               title={`실패 분기 · ${f.label}`}
               note={`${fmtInt(f.clients)} clientId · ${fmtInt(
-                f.events
+                f.events,
               )}건 · 사유(errorCategory)별`}
             >
               {f.byCategory.length > 0 ? (
@@ -1373,8 +1466,8 @@ function GaugeCard({ gauge }: { gauge: BetaExitGauge }) {
   const valueText = !hasData
     ? "—"
     : isNps
-    ? String(Math.round(gauge.current as number))
-    : fmtPct(gauge.current);
+      ? String(Math.round(gauge.current as number))
+      : fmtPct(gauge.current);
   const targetText = isNps ? String(gauge.target) : fmtPct(gauge.target);
   const color = !hasData ? INK_MUTED : gauge.met ? STATUS_GOOD : STATUS_WARN;
   const statusText = !hasData ? "데이터 대기" : gauge.met ? "달성" : "미달";
@@ -1425,7 +1518,7 @@ function GaugeCard({ gauge }: { gauge: BetaExitGauge }) {
 // CLI 셋업 위저드 단계별 성공/실패 미니 리스트.
 function CliSetupList({ steps }: { steps: CliSetupStepSummary[] }) {
   const hasAny = steps.some(
-    (s) => s.clients.enter > 0 || s.clients.success > 0 || s.clients.fail > 0
+    (s) => s.clients.enter > 0 || s.clients.success > 0 || s.clients.fail > 0,
   );
   if (!hasAny) {
     return (
@@ -1495,8 +1588,8 @@ function SurveyStars({ nps }: { nps: NpsResult }) {
                 nps.nps == null
                   ? INK_MUTED
                   : nps.nps >= 40
-                  ? STATUS_GOOD
-                  : STATUS_WARN,
+                    ? STATUS_GOOD
+                    : STATUS_WARN,
             }}
           >
             {nps.nps == null ? "—" : nps.nps}
@@ -1572,7 +1665,7 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
               : fmtPct(reuse.secondSessionRate)
           }
           sub={`${fmtInt(reuse.secondSessionClients)} / ${fmtInt(
-            reuse.signupBase
+            reuse.signupBase,
           )}명`}
         />
         <StatCard
@@ -1587,21 +1680,21 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
           label="스폰 성공률"
           value={spawn.successRate == null ? "—" : fmtPct(spawn.successRate)}
           sub={`완료 ${fmtInt(spawn.completed)} vs 크래시 ${fmtInt(
-            spawn.crashed
+            spawn.crashed,
           )}`}
           accent={
             spawn.successRate == null
               ? undefined
               : spawn.successRate >= 0.7
-              ? STATUS_GOOD
-              : STATUS_WARN
+                ? STATUS_GOOD
+                : STATUS_WARN
           }
         />
         <StatCard
           label="크래시율"
           value={spawn.crashRate == null ? "—" : fmtPct(spawn.crashRate)}
           sub={`크래시 ${fmtInt(spawn.crashed)} / 스폰 ${fmtInt(
-            spawn.spawned
+            spawn.spawned,
           )}`}
           accent={
             spawn.crashRate != null && spawn.crashRate > 0
@@ -1757,8 +1850,13 @@ export default function AnalyticsPanel() {
     loading: true,
     error: null,
   });
+  const [release, setRelease] = useState<Loaded<ReleaseHealth>>({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const [modelView, setModelView] = useState<"overview" | "routing">(
-    "overview"
+    "overview",
   );
   // 드릴다운 — 열려 있는 요청과 그 응답.
   const [drill, setDrill] = useState<DrilldownRequest | null>(null);
@@ -1780,7 +1878,7 @@ export default function AnalyticsPanel() {
       const fns = getFunctions(app, "us-central1");
       const call = httpsCallable<DrilldownRequest, DrilldownResult>(
         fns,
-        "getAdminDrilldown"
+        "getAdminDrilldown",
       );
       call(fullReq)
         .then((r) => {
@@ -1796,7 +1894,7 @@ export default function AnalyticsPanel() {
           });
         });
     },
-    [includeAdmin]
+    [includeAdmin],
   );
 
   const closeDrill = useCallback(() => {
@@ -1811,7 +1909,7 @@ export default function AnalyticsPanel() {
       // 사업(Firestore)은 항상 운영자 제외(별도 doc-id 기반) — includeAdmin 무관.
       const callBiz = httpsCallable<{ days: number }, BusinessSummary>(
         fns,
-        "getAdminBusinessSummary"
+        "getAdminBusinessSummary",
       );
       // 텔레메트리 계열은 includeAdmin 토글을 그대로 전달. usage 는 metricMode 도.
       const callUsage = httpsCallable<
@@ -1830,12 +1928,17 @@ export default function AnalyticsPanel() {
         { days: number; includeAdmin: boolean },
         KpiCockpit
       >(fns, "getAdminKpiCockpit");
+      const callRelease = httpsCallable<
+        { days: number; includeAdmin: boolean },
+        ReleaseHealth
+      >(fns, "getAdminReleaseHealth");
 
       setBiz((s) => ({ ...s, loading: true, error: null }));
       setUsage((s) => ({ ...s, loading: true, error: null }));
       setModel((s) => ({ ...s, loading: true, error: null }));
       setOnbFunnel((s) => ({ ...s, loading: true, error: null }));
       setKpi((s) => ({ ...s, loading: true, error: null }));
+      setRelease((s) => ({ ...s, loading: true, error: null }));
 
       // 각 콜러블 독립 처리 — 하나 실패해도 나머지는 렌더.
       callBiz({ days: d })
@@ -1845,7 +1948,7 @@ export default function AnalyticsPanel() {
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          })
+          }),
         );
       callUsage({ days: d, includeAdmin: inc, metricMode: mode })
         .then((r) => setUsage({ data: r.data, loading: false, error: null }))
@@ -1854,7 +1957,7 @@ export default function AnalyticsPanel() {
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          })
+          }),
         );
       callModel({ days: d, includeAdmin: inc })
         .then((r) => setModel({ data: r.data, loading: false, error: null }))
@@ -1863,20 +1966,20 @@ export default function AnalyticsPanel() {
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          })
+          }),
         );
       // 신규 콜러블 — functions 미배포(web 선배포) 시 not-found 로 실패할 수 있으나
       // 독립 catch 라 나머지 섹션은 정상 렌더된다(배포순서 soft-fail).
       callFunnel({ days: d, includeAdmin: inc })
         .then((r) =>
-          setOnbFunnel({ data: r.data, loading: false, error: null })
+          setOnbFunnel({ data: r.data, loading: false, error: null }),
         )
         .catch((e) =>
           setOnbFunnel({
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          })
+          }),
         );
       callKpi({ days: d, includeAdmin: inc })
         .then((r) => setKpi({ data: r.data, loading: false, error: null }))
@@ -1885,10 +1988,19 @@ export default function AnalyticsPanel() {
             data: null,
             loading: false,
             error: mapErr(e as CallableError),
-          })
+          }),
+        );
+      callRelease({ days: d, includeAdmin: inc })
+        .then((r) => setRelease({ data: r.data, loading: false, error: null }))
+        .catch((e) =>
+          setRelease({
+            data: null,
+            loading: false,
+            error: mapErr(e as CallableError),
+          }),
         );
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -1921,41 +2033,41 @@ export default function AnalyticsPanel() {
     () =>
       b
         ? Object.entries(b.subscriptions.byPlanActive || {}).map(
-            ([key, value]) => ({ key, value })
+            ([key, value]) => ({ key, value }),
           )
         : [],
-    [b]
+    [b],
   );
   const statusRows = useMemo(
     () =>
       b
         ? Object.entries(b.subscriptions.byStatus || {}).map(
-            ([key, value]) => ({ key, value })
+            ([key, value]) => ({ key, value }),
           )
         : [],
-    [b]
+    [b],
   );
   const providerRows = useMemo(
     () =>
       b
         ? Object.entries(b.subscriptions.byProviderActive || {}).map(
-            ([key, value]) => ({ key, value })
+            ([key, value]) => ({ key, value }),
           )
         : [],
-    [b]
+    [b],
   );
   const consecutiveRows = useMemo(
     () =>
       b
         ? Object.entries(
-            b.subscriptions.consecutiveBilling?.byCycleCount || {}
+            b.subscriptions.consecutiveBilling?.byCycleCount || {},
           ).map(([key, value]) => ({ key, value }))
         : [],
-    [b]
+    [b],
   );
   const subscriptionTrend = useMemo(
     () => b?.subscriptions.trendByDay || [],
-    [b]
+    [b],
   );
 
   // 퍼널: 신청 → 선정 → 활성(옵트인) → Pro. 활성은 익명 표본이라 라벨 구분.
@@ -2102,7 +2214,7 @@ export default function AnalyticsPanel() {
                 label="활성 파운더"
                 value={fmtInt(b.founders.accessGranted)}
                 sub={`설문 ${fmtInt(
-                  b.founders.feedbackSubmitted
+                  b.founders.feedbackSubmitted,
                 )} · 인터뷰 ${fmtInt(b.founders.interviewCompleted)}`}
               />
               <StatCard
@@ -2115,7 +2227,7 @@ export default function AnalyticsPanel() {
                 label="유료 Pro(active)"
                 value={fmtInt(b.subscriptions.paidProActive)}
                 sub={`현재 ${fmtInt(
-                  b.subscriptions.paidCurrent
+                  b.subscriptions.paidCurrent,
                 )} · 무료부여 ${fmtInt(b.subscriptions.founderGrantActive)}`}
                 accent={SERIES}
               />
@@ -2123,7 +2235,7 @@ export default function AnalyticsPanel() {
                 label="연속 구독자"
                 value={fmtInt(consecutiveBilling.subscribers)}
                 sub={`Toss 평균 ${consecutiveBilling.averageCycleCount.toFixed(
-                  1
+                  1,
                 )}회`}
                 accent={SERIES_2}
               />
@@ -2143,8 +2255,8 @@ export default function AnalyticsPanel() {
                 note={`활성 구독 ${fmtInt(
                   Object.values(b.subscriptions.byPlanActive || {}).reduce(
                     (a, c) => a + c,
-                    0
-                  )
+                    0,
+                  ),
                 )}건`}
               >
                 <BarList
@@ -2223,7 +2335,7 @@ export default function AnalyticsPanel() {
               <Panel
                 title="연속 청구 사이클"
                 note={`Toss billingCharges 기준 · Paddle ${fmtInt(
-                  b.subscriptions.paddleActiveCurrent
+                  b.subscriptions.paddleActiveCurrent,
                 )}건은 원장 공백`}
               >
                 <BarList
@@ -2254,7 +2366,7 @@ export default function AnalyticsPanel() {
                     return funnel.map((f) => {
                       const pct = Math.max(
                         (f.value / fmax) * 100,
-                        f.value > 0 ? 3 : 0
+                        f.value > 0 ? 3 : 0,
                       );
                       const color = f.trust === "yellow" ? STATUS_WARN : SERIES;
                       return (
@@ -2497,6 +2609,56 @@ export default function AnalyticsPanel() {
                   </Panel>
                 </div>
 
+                {/* 기간별 모델 분해 — 위 '일별 비용 추이'는 총합이라 어느 모델이
+                    그날 비용을 만들었는지 못 본다. 구버전 functions 응답에는
+                    없는 필드라 optional 가드(배포순서 soft-fail). */}
+                {m.costByDayModel && (
+                  <Panel
+                    title="일별 모델별 비용"
+                    note={
+                      m.costByDayModel.truncatedModels > 0
+                        ? `상위 ${
+                            m.costByDayModel.models.length - 1
+                          }종 + 그 외 ${
+                            m.costByDayModel.truncatedModels
+                          }종 (총합 보존)`
+                        : `모델 ${m.costByDayModel.models.length}종 (cost_logs)`
+                    }
+                  >
+                    <StackedBarChart
+                      dates={m.costByDayModel.dates}
+                      series={m.costByDayModel.models.map((mm, i) => ({
+                        key: mm.model,
+                        values: m.costByDayModel!.matrix[i] ?? [],
+                      }))}
+                      format={fmtCost}
+                      emptyLabel="비용 데이터가 없습니다."
+                      onDrill={(date) =>
+                        openDrill({ scope: "cost:day", date, days })
+                      }
+                    />
+                  </Panel>
+                )}
+
+                {/* ★하위모델 분해 — 스폰축(하네스)과 비용축(구체 모델)의 해상도
+                    차이를 agentId 조인으로 메운다. */}
+                {m.modelBreakdown && (
+                  <Panel
+                    title="하네스 → 하위모델 분해"
+                    note="스폰(events.model=하네스) × 비용(cost_logs.model=구체 모델) agentId 조인"
+                  >
+                    <SubModelBreakdownTable
+                      harnesses={m.modelBreakdown.harnesses}
+                      onDrill={(key) =>
+                        openDrill({ scope: "segment:model", key, days })
+                      }
+                    />
+                    <p className="mt-3 text-xs leading-relaxed text-zinc-600">
+                      {m.modelBreakdown.note}
+                    </p>
+                  </Panel>
+                )}
+
                 <Panel
                   title="모델 × 역할 성공률·효율"
                   note="성공률·평균비용·비용대비효율 (task_outcomes)"
@@ -2519,8 +2681,8 @@ export default function AnalyticsPanel() {
                     value={fmtInt(
                       m.routing.byReuseVsSpawn.reduce(
                         (sum, r) => sum + r.count,
-                        0
-                      )
+                        0,
+                      ),
                     )}
                     sub="dispatch:decision"
                   />
@@ -2539,8 +2701,8 @@ export default function AnalyticsPanel() {
                     value={fmtInt(
                       m.outcomeByModel.reduce(
                         (sum, r) => sum + r.reworkCount,
-                        0
-                      )
+                        0,
+                      ),
                     )}
                     sub="retriesCount 합계"
                   />
@@ -2616,9 +2778,28 @@ export default function AnalyticsPanel() {
         ) : null}
       </div>
 
-      {/* ── 안정성 (🔴 Sentry 선행) ──────────────────────────────── */}
+      {/* ── 릴리스·버전 헬스 (🟡 BQ events.appVersion) ─────────────── */}
       <div className="space-y-4">
-        <SectionHeader icon={ShieldOff} title="안정성·에러율" trust="red" />
+        <SectionHeader icon={Tag} title="릴리스·버전 헬스" trust="yellow" />
+        {release.loading ? (
+          <LoadingBox />
+        ) : release.error ? (
+          <ErrorBox msg={release.error} />
+        ) : release.data ? (
+          <ReleaseHealthView data={release.data} />
+        ) : null}
+      </div>
+
+      {/* ── 안정성 상세 (🔴 Sentry 선행) ──────────────────────────── */}
+      {/* 위 릴리스 섹션이 채우는 것은 **에이전트 크래시 이벤트**(agent:crashed)
+          기반 버전별 안정성이다. 앱 자체의 예외/스택트레이스 집계는 Sentry
+          연동이 선행이라 여전히 비어 있다 — 두 개를 한 칸으로 합치지 않는다. */}
+      <div className="space-y-4">
+        <SectionHeader
+          icon={ShieldOff}
+          title="앱 예외·스택트레이스"
+          trust="red"
+        />
         <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 py-10 text-center">
           <ShieldOff className="h-6 w-6 text-zinc-600" />
           <p className="text-sm font-medium text-zinc-400">
@@ -2627,8 +2808,10 @@ export default function AnalyticsPanel() {
           <p className="max-w-md text-xs text-zinc-600">
             앱의 Sentry 크래시 리포팅은 DSN 이 설정되어 있고 사용자 동의 시
             동작합니다. 다만 이 패널이 Sentry API 에서 지표를 읽어오는 연동은
-            아직 구현되지 않아 표시할 수치가 없습니다. 크래시/에러율·릴리스별
-            안정성 KPI 는 sentry.io 프로젝트에서 확인하세요.
+            아직 구현되지 않아 표시할 수치가 없습니다. 예외/스택트레이스 단위
+            지표는 sentry.io 프로젝트에서 확인하세요. (버전별 에이전트
+            크래시율은 위 &ldquo;릴리스·버전 헬스&rdquo; 섹션이 텔레메트리로
+            이미 보여줍니다.)
           </p>
         </div>
       </div>
@@ -2641,6 +2824,419 @@ export default function AnalyticsPanel() {
         />
       )}
     </section>
+  );
+}
+
+// 누적 막대 — 하나의 총량을 카테고리(모델/버전)로 쪼개 일자별로 본다.
+// 단일 y축(이중축 금지). 계열 색은 CATEGORICAL 고정 배정이고, 범례가 항상 있어
+// 식별이 색에만 의존하지 않는다. 세그먼트 사이에는 2px 서피스 간격을 둔다.
+function StackedBarChart({
+  dates,
+  series,
+  format = fmtInt,
+  emptyLabel,
+  onDrill,
+}: {
+  dates: string[];
+  series: { key: string; values: number[] }[];
+  format?: (n: number) => string;
+  emptyLabel?: string;
+  onDrill?: (date: string) => void;
+}) {
+  const n = dates.length;
+  // 일자별 총합 — y 스케일과 빈 상태 판정의 기준.
+  const totals = dates.map((_, i) =>
+    series.reduce((s, ser) => s + (ser.values[i] ?? 0), 0),
+  );
+  const max = Math.max(...totals, 0);
+  if (n === 0 || series.length === 0 || max <= 0) {
+    return <EmptyState label={emptyLabel} />;
+  }
+
+  const W = 720;
+  const H = 220;
+  const padL = 56;
+  const padR = 12;
+  const padT = 12;
+  const padB = 30;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const slot = innerW / n;
+  const barW = Math.max(2, Math.min(28, slot * 0.7));
+  const x = (i: number) => padL + slot * i + slot / 2;
+  const yOf = (v: number) => padT + innerH - (v / max) * innerH;
+  // x축 라벨은 처음/중간/끝만(라벨 충돌 방지).
+  const labelIdx = n === 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
+
+  return (
+    <div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="h-auto w-full"
+        role="img"
+        aria-label="일자별 누적 분해 차트"
+      >
+        {/* 눈금선 — 배경으로 물러나게(recessive) */}
+        {[0, 0.5, 1].map((t) => (
+          <line
+            key={t}
+            x1={padL}
+            x2={W - padR}
+            y1={padT + innerH * t}
+            y2={padT + innerH * t}
+            stroke="#27272a"
+            strokeWidth={1}
+          />
+        ))}
+        {[1, 0.5, 0].map((t) => (
+          <text
+            key={t}
+            x={padL - 8}
+            y={padT + innerH * (1 - t) + 4}
+            textAnchor="end"
+            className="fill-zinc-600"
+            fontSize={10}
+          >
+            {format(max * t)}
+          </text>
+        ))}
+
+        {dates.map((d, i) => {
+          // 아래에서 위로 쌓는다. 세그먼트 사이 2px 간격은 높이에서 빼서 만든다.
+          let acc = 0;
+          return (
+            <g key={d}>
+              {series.map((ser, si) => {
+                const v = ser.values[i] ?? 0;
+                if (v <= 0) return null;
+                const y0 = yOf(acc);
+                const y1 = yOf(acc + v);
+                acc += v;
+                const h = Math.max(1, y0 - y1 - 2); // 2px 서피스 간격
+                return (
+                  <rect
+                    key={ser.key}
+                    x={x(i) - barW / 2}
+                    y={y1}
+                    width={barW}
+                    height={h}
+                    rx={2}
+                    fill={seriesColor(si)}
+                  >
+                    <title>{`${fmtDay(d)} · ${ser.key} ${format(v)}`}</title>
+                  </rect>
+                );
+              })}
+              {/* 컬럼 전체 히트 타깃 — 막대보다 크게 잡아 총합 툴팁/드릴다운 제공 */}
+              <rect
+                x={padL + slot * i}
+                y={padT}
+                width={slot}
+                height={innerH}
+                fill="transparent"
+                className={onDrill ? "cursor-pointer" : undefined}
+                onClick={onDrill ? () => onDrill(d) : undefined}
+              >
+                <title>{`${fmtDay(d)} · 합계 ${format(totals[i])}`}</title>
+              </rect>
+            </g>
+          );
+        })}
+
+        {labelIdx.map((i) => (
+          <text
+            key={i}
+            x={x(i)}
+            y={H - 10}
+            textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
+            className="fill-zinc-600"
+            fontSize={10}
+          >
+            {fmtDay(dates[i])}
+          </text>
+        ))}
+      </svg>
+
+      {/* 범례 — 2계열 이상이면 항상 표시(색 단독 식별 금지) */}
+      <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+        {series.map((ser, si) => (
+          <li key={ser.key} className="flex items-center gap-1.5 text-xs">
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-sm"
+              style={{ backgroundColor: seriesColor(si) }}
+              aria-hidden
+            />
+            <span className="text-zinc-400">{ser.key}</span>
+            <span className="tabular-nums text-zinc-500">
+              {format(ser.values.reduce((a, b) => a + b, 0))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// 하위모델 분해표 — 하네스(스폰축) 행 아래에 구체 모델(비용축) 행을 들여쓴다.
+// ★두 축의 해상도가 달라서 필요한 표다(서버 buildModelBreakdown 주석 참조):
+// env-swap 벤더는 우리 claude 바이너리를 그대로 쓰므로 하네스 축만 보면
+// Anthropic 과 한 칸에 섞인다.
+function SubModelBreakdownTable({
+  harnesses,
+  onDrill,
+}: {
+  harnesses: NonNullable<ModelSummary["modelBreakdown"]>["harnesses"];
+  onDrill?: (model: string) => void;
+}) {
+  if (harnesses.length === 0) {
+    return <EmptyState label="스폰-비용 조인 결과가 없습니다." />;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-zinc-800 text-left text-zinc-500">
+            <th className="py-2 pr-4 font-medium">하네스 / 구체 모델</th>
+            <th className="py-2 pr-4 text-right font-medium">에이전트</th>
+            <th className="py-2 pr-4 text-right font-medium">토큰</th>
+            <th className="py-2 pr-4 text-right font-medium">비용</th>
+            <th className="py-2 font-medium">비중</th>
+          </tr>
+        </thead>
+        <tbody>
+          {harnesses.map((h) => (
+            <Fragment key={h.harness}>
+              <tr className="border-b border-zinc-800/60 bg-zinc-900/30">
+                <td className="py-2 pr-4 font-medium text-zinc-100">
+                  {h.harness}
+                  {!h.hasDecomposition && (
+                    <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-normal text-zinc-400">
+                      구체 모델 미기록
+                    </span>
+                  )}
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums text-zinc-300">
+                  {fmtInt(h.agents)}
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                  {fmtInt(h.tokens)}
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums text-zinc-200">
+                  {fmtCost(h.cost)}
+                </td>
+                <td className="py-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 w-16 overflow-hidden rounded bg-zinc-900">
+                      <div
+                        className="h-full rounded"
+                        style={{
+                          width: `${Math.round(h.share * 100)}%`,
+                          backgroundColor: SERIES,
+                        }}
+                      />
+                    </div>
+                    <span className="tabular-nums text-zinc-400">
+                      {fmtPct(h.share)}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+              {h.subModels.map((s) => (
+                <tr
+                  key={`${h.harness}-${s.model}`}
+                  className="border-b border-zinc-800/40 last:border-0"
+                >
+                  <td className="py-1.5 pr-4 pl-6 text-zinc-300">
+                    <span className="mr-1.5 text-zinc-600">└</span>
+                    {s.unattributed ? (
+                      <span className="text-zinc-500">
+                        {s.model}
+                        <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                          모델 미기록
+                        </span>
+                      </span>
+                    ) : onDrill ? (
+                      <button
+                        type="button"
+                        onClick={() => onDrill(s.model)}
+                        className="rounded underline decoration-dotted underline-offset-2 transition hover:text-indigo-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                      >
+                        {s.model}
+                      </button>
+                    ) : (
+                      s.model
+                    )}
+                  </td>
+                  <td className="py-1.5 pr-4 text-right tabular-nums text-zinc-500">
+                    {fmtInt(s.agents)}
+                  </td>
+                  <td className="py-1.5 pr-4 text-right tabular-nums text-zinc-500">
+                    {fmtInt(s.tokens)}
+                  </td>
+                  <td className="py-1.5 pr-4 text-right tabular-nums text-zinc-400">
+                    {fmtCost(s.cost)}
+                  </td>
+                  <td className="py-1.5 text-xs tabular-nums text-zinc-500">
+                    {s.costRows === 0 ? "비용 미적재" : fmtPct(s.share)}
+                  </td>
+                </tr>
+              ))}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// 릴리스·버전 헬스 — 버전별 채택/크래시율 표 + 일자별 버전 채택 추이.
+function ReleaseHealthView({ data }: { data: ReleaseHealth }) {
+  const { versions, adoption, totals } = data;
+  // 실사용 릴리스만(=CI 스모크·미기록 제외)으로 헤드라인을 낸다.
+  const realReleases = versions.filter((v) => v.isSemver);
+  const latest = realReleases[0];
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="관측 버전"
+          value={fmtInt(totals.versions)}
+          sub={`실사용 릴리스 ${realReleases.length}종`}
+        />
+        <StatCard
+          label="최신 릴리스"
+          value={latest ? latest.version : "—"}
+          sub={latest ? `클라이언트 ${fmtInt(latest.clients)}` : "semver 없음"}
+        />
+        <StatCard
+          label="전체 크래시율"
+          value={totals.crashRate == null ? "—" : fmtPct(totals.crashRate)}
+          sub={`크래시 ${fmtInt(totals.crashed)} / 스폰 ${fmtInt(
+            totals.spawned,
+          )}`}
+          accent={
+            totals.crashRate == null
+              ? undefined
+              : totals.crashRate >= 0.2
+                ? STATUS_CRIT
+                : totals.crashRate >= 0.05
+                  ? STATUS_WARN
+                  : STATUS_GOOD
+          }
+        />
+        <StatCard
+          label="최신 릴리스 크래시율"
+          value={latest?.crashRate == null ? "—" : fmtPct(latest.crashRate)}
+          sub={latest ? `스폰 ${fmtInt(latest.spawned)}` : "데이터 없음"}
+        />
+      </div>
+
+      <Panel
+        title="버전별 채택 추이"
+        note="일자별 고유 클라이언트 수 (events.appVersion 컬럼 파생)"
+      >
+        <StackedBarChart
+          dates={adoption.dates}
+          series={adoption.series.map((s) => ({
+            key: s.version,
+            values: s.values,
+          }))}
+          format={fmtInt}
+          emptyLabel="이 구간에 버전 관측이 없습니다."
+        />
+      </Panel>
+
+      <Panel
+        title="버전별 안정성"
+        note="크래시율 = agent:crashed / agent:spawned"
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-zinc-800 text-left text-zinc-500">
+                <th className="py-2 pr-4 font-medium">버전</th>
+                <th className="py-2 pr-4 text-right font-medium">클라이언트</th>
+                <th className="py-2 pr-4 text-right font-medium">세션</th>
+                <th className="py-2 pr-4 text-right font-medium">스폰</th>
+                <th className="py-2 pr-4 text-right font-medium">크래시</th>
+                <th className="py-2 pr-4 font-medium">크래시율</th>
+                <th className="py-2 font-medium">관측 기간</th>
+              </tr>
+            </thead>
+            <tbody>
+              {versions.map((v) => (
+                <tr
+                  key={v.version}
+                  className="border-b border-zinc-800/60 last:border-0"
+                >
+                  <td className="py-2 pr-4 text-zinc-200">
+                    {v.version}
+                    {v.isCi && (
+                      <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                        CI 발신
+                      </span>
+                    )}
+                    {!v.isSemver && !v.isCi && (
+                      <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                        버전 미주입
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                    {fmtInt(v.clients)}
+                  </td>
+                  <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                    {fmtInt(v.sessions)}
+                  </td>
+                  <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                    {fmtInt(v.spawned)}
+                  </td>
+                  <td className="py-2 pr-4 text-right tabular-nums text-zinc-400">
+                    {fmtInt(v.crashed)}
+                  </td>
+                  <td className="py-2 pr-4">
+                    {v.crashRate == null ? (
+                      // 스폰 0 → 0% 가 아니라 "데이터 없음"(0% 로 오도 금지)
+                      <span className="text-xs text-zinc-600">데이터 없음</span>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 w-16 overflow-hidden rounded bg-zinc-900">
+                          <div
+                            className="h-full rounded"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                Math.round(v.crashRate * 100),
+                              )}%`,
+                              backgroundColor:
+                                v.crashRate >= 0.2
+                                  ? STATUS_CRIT
+                                  : v.crashRate >= 0.05
+                                    ? STATUS_WARN
+                                    : STATUS_GOOD,
+                            }}
+                          />
+                        </div>
+                        <span className="tabular-nums text-zinc-300">
+                          {fmtPct(v.crashRate)}
+                        </span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-2 text-xs tabular-nums text-zinc-500">
+                    {v.firstSeen && v.lastSeen
+                      ? `${fmtDay(v.firstSeen)} – ${fmtDay(v.lastSeen)}`
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      <p className="text-xs leading-relaxed text-zinc-600">{data.note}</p>
+    </div>
   );
 }
 
@@ -2711,8 +3307,8 @@ function ModelRoleTable({
                           r.successRate >= 0.7
                             ? STATUS_GOOD
                             : r.successRate >= 0.4
-                            ? STATUS_WARN
-                            : STATUS_CRIT,
+                              ? STATUS_WARN
+                              : STATUS_CRIT,
                       }}
                     />
                   </div>

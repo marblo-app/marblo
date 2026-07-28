@@ -19,8 +19,16 @@ import {
   ONBOARDING_FAILURE_EVENTS,
   buildKpiCockpit,
   buildCliSetupSummary,
+  buildReleaseHealth,
+  buildModelBreakdown,
+  buildCostByDayModel,
   type ReasonRow,
   type CliSetupStepRow,
+  type ReleaseVersionSourceRow,
+  type ReleaseAdoptionSourceRow,
+  type ModelBridgeSourceRow,
+  type HarnessAgentRow,
+  type CostByDayModelSourceRow,
 } from "./adminAnalytics";
 import {
   verifyPaddleSignature,
@@ -427,50 +435,53 @@ export const recordGitHubMergeHistory = functions.https.onRequest(
     }
 
     const linesChanged = (linesAdded ?? 0) + (linesDeleted ?? 0);
-    await bigquery.dataset(BQ_DATASET).table(BQ_EVENTS_TABLE).insert([
-      {
-        event: "task:merged",
-        userId: "github-actions",
-        appVersion: "github-actions",
-        projectId: task.projectId,
-        agentId: null,
-        taskId: task.taskId,
-        flowId: null,
-        model: null,
-        role: null,
-        status: null,
-        fromStatus: null,
-        toStatus: null,
-        durationMs: null,
-        tokensInput: null,
-        tokensOutput: null,
-        cost: null,
-        success: true,
-        exitCode: null,
-        nodeType: null,
-        nodeCount: null,
-        metadata: JSON.stringify({
-          mergeMode: "auto",
-          source: "github-actions",
-          prNumber,
-          branch,
-          linesAdded: linesAdded ?? 0,
-          linesDeleted: linesDeleted ?? 0,
-          changeType,
-        }),
-        taskType: changeType,
-        taskComplexity: null,
-        filesChanged: filesChanged ?? null,
-        linesChanged,
-        errorCategory: null,
-        errorMessage: null,
-        promptHash: null,
-        promptLength: null,
-        parentAgentId: null,
-        retryOf: null,
-        timestamp: mergedAt.toISOString(),
-      },
-    ]);
+    await bigquery
+      .dataset(BQ_DATASET)
+      .table(BQ_EVENTS_TABLE)
+      .insert([
+        {
+          event: "task:merged",
+          userId: "github-actions",
+          appVersion: "github-actions",
+          projectId: task.projectId,
+          agentId: null,
+          taskId: task.taskId,
+          flowId: null,
+          model: null,
+          role: null,
+          status: null,
+          fromStatus: null,
+          toStatus: null,
+          durationMs: null,
+          tokensInput: null,
+          tokensOutput: null,
+          cost: null,
+          success: true,
+          exitCode: null,
+          nodeType: null,
+          nodeCount: null,
+          metadata: JSON.stringify({
+            mergeMode: "auto",
+            source: "github-actions",
+            prNumber,
+            branch,
+            linesAdded: linesAdded ?? 0,
+            linesDeleted: linesDeleted ?? 0,
+            changeType,
+          }),
+          taskType: changeType,
+          taskComplexity: null,
+          filesChanged: filesChanged ?? null,
+          linesChanged,
+          errorCategory: null,
+          errorMessage: null,
+          promptHash: null,
+          promptLength: null,
+          parentAgentId: null,
+          retryOf: null,
+          timestamp: mergedAt.toISOString(),
+        },
+      ]);
 
     res.status(200).json({
       ok: true,
@@ -6402,8 +6413,7 @@ export const getAdminUsageSummary = functions.https.onCall(
  */
 export const getAdminOnboardingFunnel = functions
   .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
-  .https.onCall(
-    async (data, context) => {
+  .https.onCall(async (data, context) => {
     requireAdmin(context);
     const rangeDays = parseAnalyticsDays(data);
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
@@ -6612,8 +6622,7 @@ export const getAdminOnboardingFunnel = functions
       },
       ...funnel,
     };
-  },
-);
+  });
 
 /**
  * getAdminKpiCockpit — 지표기반 베타종료 게이지 + 신규 온보딩 이벤트(설문·데모·
@@ -6634,8 +6643,7 @@ export const getAdminOnboardingFunnel = functions
  */
 export const getAdminKpiCockpit = functions
   .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
-  .https.onCall(
-    async (data, context) => {
+  .https.onCall(async (data, context) => {
     requireAdmin(context);
     const rangeDays = parseAnalyticsDays(data);
     const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
@@ -6954,8 +6962,7 @@ export const getAdminKpiCockpit = functions
       },
       ...cockpit,
     };
-  },
-);
+  });
 
 /**
  * getAdminModelSummary — 모델 선정/라우팅 지표(🟡 BQ).
@@ -7041,6 +7048,75 @@ export const getAdminModelSummary = functions.https.onCall(
       GROUP BY model
       ORDER BY total DESC
     `;
+    // (3-b) 일별 × 모델 비용 — 위 costByDayQuery 는 총합만이라 "그날 어느 모델이
+    // 비용을 만들었나"를 못 본다. 같은 필터·같은 제외절로 모델 축만 추가한다.
+    const costByDayModelQuery = `
+      SELECT
+        FORMAT_DATE('%F', DATE(${tsCast})) AS date,
+        COALESCE(model, '(none)') AS model,
+        SUM(COALESCE(totalCost, 0)) AS cost
+      FROM ${costTable}
+      WHERE ${tsCast} >= ${sinceTs}${uidEx.clause}
+      GROUP BY date, model
+      ORDER BY date ASC
+    `;
+
+    // (3-c) ★하위모델 분해 — 스폰축(events.model = 하네스 claude/gpt/grok…)과
+    // 비용축(cost_logs.model = 구체 id claude-opus-4-8/MiniMax-M3…)은 해상도가
+    // 다르다. agentId 로 조인해야 "하네스 claude 밑에서 실제로 무엇이 돌았나"가
+    // 보인다(env-swap 벤더는 우리 claude 바이너리를 그대로 쓰므로 하네스 축만
+    // 보면 Anthropic 과 한 칸에 섞인다).
+    //
+    // ★제외절이 두 축으로 갈린다: events 는 익명 clientId(clientEx), cost_logs 는
+    // 실 uid(uidEx). 각 절은 bare `userId` 를 참조하므로 JOIN 바깥이 아니라 각
+    // 서브쿼리 **안**에서 적용해 컬럼 모호성을 피한다. 두 파라미터 집합이 모두
+    // 참조되므로 이 쿼리에는 합쳐서 넘긴다(미참조 파라미터 없음).
+    const harnessBridgeQuery = `
+      WITH spawns AS (
+        SELECT DISTINCT agentId, COALESCE(model, '(none)') AS harness
+        FROM ${eventsTable}
+        WHERE event = 'agent:spawned'
+          AND agentId IS NOT NULL
+          AND ${tsCast} >= ${sinceTs}${clientEx.clause}
+      ),
+      costs AS (
+        SELECT
+          agentId,
+          COALESCE(model, '(none)') AS model,
+          SUM(COALESCE(totalCost, 0)) AS cost,
+          SUM(COALESCE(inputTokens, 0) + COALESCE(outputTokens, 0) +
+              COALESCE(cacheReadTokens, 0) + COALESCE(cacheWriteTokens, 0))
+            AS tokens,
+          COUNT(*) AS costRows
+        FROM ${costTable}
+        WHERE agentId IS NOT NULL
+          AND ${tsCast} >= ${sinceTs}${uidEx.clause}
+        GROUP BY agentId, model
+      )
+      SELECT
+        s.harness AS harness,
+        COALESCE(c.model, '(비용 미적재)') AS model,
+        COUNT(DISTINCT s.agentId) AS agents,
+        SUM(COALESCE(c.cost, 0)) AS cost,
+        SUM(COALESCE(c.tokens, 0)) AS tokens,
+        SUM(COALESCE(c.costRows, 0)) AS costRows
+      FROM spawns AS s
+      LEFT JOIN costs AS c ON c.agentId = s.agentId
+      GROUP BY harness, model
+      ORDER BY cost DESC
+    `;
+    // 하네스 그레인 고유 에이전트 수 — 위 (harness,model) 행의 agents 를 합치면
+    // 한 에이전트가 모델 2종을 태운 경우 중복 계상된다. 정확한 분모를 따로 센다.
+    const harnessAgentsQuery = `
+      SELECT COALESCE(model, '(none)') AS harness,
+             COUNT(DISTINCT agentId) AS agents
+      FROM ${eventsTable}
+      WHERE event = 'agent:spawned'
+        AND agentId IS NOT NULL
+        AND ${tsCast} >= ${sinceTs}${clientEx.clause}
+      GROUP BY harness
+    `;
+
     // (4) dispatch:decision 라우팅 결정 분포(metadata JSON STRING 파싱)
     const routingQuery = (jsonPath: string) => `
       SELECT JSON_VALUE(metadata, '${jsonPath}') AS key, COUNT(*) AS n
@@ -7098,10 +7174,16 @@ export const getAdminModelSummary = functions.https.onCall(
       });
     const qCost = (query: string) => q(query, uidEx.params);
     const qClient = (query: string) => q(query, clientEx.params);
+    // 브릿지 쿼리만 두 축의 제외절을 모두 참조한다(각 서브쿼리 안에서 적용).
+    const qBoth = (query: string) =>
+      q(query, { ...uidEx.params, ...clientEx.params });
 
     const [
       [costByModelRows],
       [costByDayRows],
+      [costByDayModelRows],
+      [harnessBridgeRows],
+      [harnessAgentRows],
       [modelRoleRows],
       [outcomeByModelRows],
       [routingSelectedRows],
@@ -7112,6 +7194,9 @@ export const getAdminModelSummary = functions.https.onCall(
     ] = await Promise.all([
       qCost(costByModelQuery),
       qCost(costByDayQuery),
+      qCost(costByDayModelQuery),
+      qBoth(harnessBridgeQuery),
+      qClient(harnessAgentsQuery),
       qClient(modelRoleQuery),
       qClient(outcomeByModelQuery),
       qClient(routingQuery("$.selectedModel")),
@@ -7180,6 +7265,16 @@ export const getAdminModelSummary = functions.https.onCall(
         date: String(r.date ?? ""),
         cost: toNumber(r.cost as number | string | undefined),
       })),
+      // 일별 × 모델(기간별 분해) — 상위 6종 + '그 외'로 접되 총합은 보존한다.
+      costByDayModel: buildCostByDayModel(
+        costByDayModelRows as CostByDayModelSourceRow[],
+        6,
+      ),
+      // ★하위모델 분해(하네스 → 구체 모델).
+      modelBreakdown: buildModelBreakdown(
+        harnessBridgeRows as ModelBridgeSourceRow[],
+        harnessAgentRows as HarnessAgentRow[],
+      ),
       modelRoleStats,
       outcomeByModel,
       routing: {
@@ -7211,6 +7306,91 @@ export const getAdminModelSummary = functions.https.onCall(
     };
   },
 );
+
+/**
+ * getAdminReleaseHealth — 앱 빌드/릴리스·버전 축(🟡 BQ events).
+ *
+ * ★전용 이벤트가 없다: 앱 버전은 `lifecycle:app-version` 같은 이벤트가 아니라
+ * events 테이블의 **appVersion 컬럼**(telemetryService 가 flush 시 모든 이벤트에
+ * 주입)에서 파생한다. 그래서 이벤트 필터가 아니라 컬럼 GROUP BY 다.
+ *
+ * (1) 버전별 채택/헬스 — 고유 clientId·세션·스폰·크래시·크래시율·관측기간
+ * (2) 버전별 일자 채택 추이(고유 clientId)
+ *
+ * 크래시율은 agent:crashed / agent:spawned 이며, 스폰 0 인 버전은 null 로 둔다
+ * (0% 로 오도 금지). 순수 조립은 adminAnalytics.buildReleaseHealth 가 담당한다.
+ *
+ * params: { days?: number, includeAdmin?: boolean } (기본 30 / 제외)
+ */
+export const getAdminReleaseHealth = functions
+  .runWith(ADMIN_ANALYTICS_RUNTIME_OPTIONS)
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const rangeDays = parseAnalyticsDays(data);
+    const eventsTable = `\`marblo-2253d.${BQ_DATASET}.${BQ_EVENTS_TABLE}\``;
+    const since = "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)";
+    const includeAdmin = parseIncludeAdmin(data);
+    const adminClientIds = await resolveAdminClientIds(rangeDays);
+    const ex = includeAdmin
+      ? EMPTY_EXCLUSION
+      : adminClientExclusion(adminClientIds);
+    // events.timestamp 는 STRING 적재라 비교 전 SAFE_CAST(다른 어드민 콜러블과 동일).
+    const eventTs = "SAFE_CAST(timestamp AS TIMESTAMP)";
+    // NULL appVersion 은 컬럼 도입 이전 텔레메트리 — 버리지 않고 빈 문자열로 모아
+    // 순수 빌더가 '(미기록)' 으로 라벨한다(있는 데이터를 화면에서 지우지 않는다).
+    const versionExpr = "COALESCE(appVersion, '')";
+
+    const versionQuery = `
+      SELECT
+        ${versionExpr} AS version,
+        COUNT(DISTINCT userId) AS clients,
+        COUNT(*) AS events,
+        COUNTIF(event = 'session:started') AS sessions,
+        COUNTIF(event = 'agent:spawned') AS spawned,
+        COUNTIF(event = 'agent:crashed') AS crashed,
+        FORMAT_DATE('%F', MIN(DATE(${eventTs}))) AS firstSeen,
+        FORMAT_DATE('%F', MAX(DATE(${eventTs}))) AS lastSeen
+      FROM ${eventsTable}
+      WHERE ${eventTs} >= ${since}${ex.clause}
+      GROUP BY version
+    `;
+    const adoptionQuery = `
+      SELECT
+        FORMAT_DATE('%F', DATE(${eventTs})) AS date,
+        ${versionExpr} AS version,
+        COUNT(DISTINCT userId) AS clients
+      FROM ${eventsTable}
+      WHERE ${eventTs} >= ${since}${ex.clause}
+      GROUP BY date, version
+      ORDER BY date ASC
+    `;
+
+    const run = (query: string) =>
+      bigquery.query({
+        query,
+        params: { days: rangeDays, ...ex.params },
+        location: BQ_LOCATION,
+      });
+
+    const [[versionRows], [adoptionRows]] = await Promise.all([
+      run(versionQuery),
+      run(adoptionQuery),
+    ]);
+
+    return {
+      rangeDays,
+      generatedAt: new Date().toISOString(),
+      adminExcluded: {
+        applied: !includeAdmin,
+        uidFiltered: getAdminExclusionUid() != null,
+        clientIdCount: adminClientIds.length,
+      },
+      ...buildReleaseHealth(
+        versionRows as ReleaseVersionSourceRow[],
+        adoptionRows as ReleaseAdoptionSourceRow[],
+      ),
+    };
+  });
 
 // ============================================
 // Admin Analytics Drilldown — 차트 클릭 → 상세 분해

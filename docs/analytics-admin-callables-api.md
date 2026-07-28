@@ -12,7 +12,7 @@
 - **권한:** 모든 콜러블 `requireAdmin(context)` — `ADMIN_UID` env 와 `context.auth.uid` 일치만 허용. 불일치/미설정 시 `HttpsError('permission-denied', 'Admin only')`. 클라는 이 에러로 어드민 여부 판정(기존 /admin 패턴 재사용).
   - ⚠️ **배포 전 `ADMIN_UID` env 확인 필수** — 미설정이면 전 콜러블 차단(파운더 봇 런북과 동일).
 - **파라미터:** `{ days?: number }` — 조회 기간(일). 기본 30, 양의 정수만, 상한 365(BQ 스캔 가드). 위반 시 `HttpsError('invalid-argument')`.
-  - **`includeAdmin?: boolean`** — 운영자(존킴) 자기활동 포함 토글. **기본 `false`(제외)**, `true` 면 전체 포함. `getAdminUsageSummary`·`getAdminModelSummary`·`getAdminDrilldown`·`getAdminOnboardingFunnel` 에 적용(텔레메트리/비용 계열). `getAdminBusinessSummary`(Firestore)는 항상 제외라 무관.
+  - **`includeAdmin?: boolean`** — 운영자(존킴) 자기활동 포함 토글. **기본 `false`(제외)**, `true` 면 전체 포함. `getAdminUsageSummary`·`getAdminModelSummary`·`getAdminDrilldown`·`getAdminOnboardingFunnel`·`getAdminReleaseHealth` 에 적용(텔레메트리/비용 계열). `getAdminBusinessSummary`(Firestore)는 항상 제외라 무관.
     - ★**하위호환:** 구버전 functions 는 이 param 을 무시(기존=항상 제외), 신규 functions 는 param 이 없으면 `false`(제외)로 기존 동작 유지. 어느 방향 배포순서든 안전.
     - ★**포함/제외 비교:** 토글을 켜고/끄며 두 수치를 대조한다. 제외 모드에서도 `adminExcluded.clientIdCount` 로 "제외 시 몇 개가 빠지는지"를 노출한다.
 - **BQ location:** `US` 고정(`BQ_LOCATION`). 과거 us-central1 조회 500 버그 회피.
@@ -171,6 +171,40 @@
     cost: number;
   }
   []; // 일별 총비용(히스토리)
+  // 일별 × 모델 비용(기간별 분해). 상위 6종 + '그 외'로 접되 총합은 보존한다.
+  costByDayModel: {
+    dates: string[];
+    models: { model: string; total: number; share: number }[];
+    matrix: number[][]; // models 순서와 1:1 대응, 각 행 길이 = dates.length
+    grandTotal: number;
+    truncatedModels: number; // '그 외'로 접힌 모델 종수
+  };
+  // ★하위모델 분해 — 스폰축(events.model=하네스)과 비용축(cost_logs.model=구체
+  // 모델 id)을 agentId 로 조인한 2단 트리. env-swap 벤더(MiniMax·GLM·Kimi)가
+  // 하네스 claude 밑에 숨는 문제를 이 표가 드러낸다.
+  modelBreakdown: {
+    harnesses: {
+      harness: string; // claude · gpt · gemini · antigravity · grok …
+      agents: number; // 하네스 그레인 COUNT(DISTINCT agentId)
+      cost: number;
+      tokens: number;
+      costRows: number;
+      share: number;
+      subModels: {
+        model: string;
+        agents: number;
+        cost: number;
+        tokens: number;
+        costRows: number;
+        share: number;
+        unattributed: boolean; // unknown/<synthetic>/하네스명 그대로 = 모델 미기록
+      }[];
+      hasDecomposition: boolean;
+    }[];
+    totalCost: number;
+    totalAgents: number;
+    note: string;
+  };
   modelRoleStats: {
     model: string;
     role: string;
@@ -347,6 +381,49 @@
 
 > 페이로드 매핑(실 스키마): `orchestrator_blocked` 의 reason·`agent:crashed` 의 errorCategory·`login_failed` 의 code 는 전부 events 테이블 **top-level `errorCategory` 컬럼**(metadata 아님). `folder_connected.mode`·`orchestrator_opened.resumed`·`login.method` 는 `metadata` JSON.
 > 순수 집계·이탈 계산은 `v3/functions/src/adminAnalytics.ts`(`buildOnboardingFunnel`)로 분리 — `npm run test:admin-analytics`(node:test, devDep 무추가)로 단위검증.
+
+---
+
+## 6. `getAdminReleaseHealth` — 앱 빌드/릴리스·버전 헬스 (🟡 BQ, 옵트인 표본)
+
+소스: BQ `events` — **`appVersion` 컬럼**.
+
+> ★**전용 이벤트가 없다.** `lifecycle:app-version` 같은 버전 이벤트는 존재하지 않는다. 앱 버전은 `telemetryService` 가 flush 시 **모든 이벤트에 부착하는 `appVersion` 컬럼**이라, 이 콜러블은 이벤트 필터가 아니라 컬럼 `GROUP BY` 파생이다.
+
+**Request:** `{ days?: number, includeAdmin?: boolean }`
+
+**Response:**
+
+```ts
+{
+  rangeDays: number;
+  generatedAt: string;
+  adminExcluded: { applied: boolean; uidFiltered: boolean; clientIdCount: number };
+  versions: {
+    version: string;      // 미기록(NULL)은 '(미기록)' 라벨
+    isSemver: boolean;    // semver 로 해석됐나(정렬·최신 판정 가능 여부)
+    isCi: boolean;        // 'github-actions' = CI 스모크 발신(사용자 설치본 아님)
+    clients: number;      // 고유 clientId(익명)
+    events: number;
+    sessions: number;     // session:started
+    spawned: number;      // agent:spawned
+    crashed: number;      // agent:crashed
+    crashRate: number | null; // crashed / spawned. 스폰 0 이면 null('데이터 없음')
+    firstSeen: string;    // YYYY-MM-DD
+    lastSeen: string;
+  }[];                    // semver 최신순 → 라벨 → '(미기록)' 순
+  adoption: {
+    dates: string[];                                    // 공통 x축(오름차순)
+    series: { version: string; values: number[] }[];    // dates 와 길이 동일(결측=0)
+  };
+  totals: { versions: number; spawned: number; crashed: number; crashRate: number | null };
+  note: string;
+}
+```
+
+> **해석 주의:** `(미기록)` 은 `appVersion` 주입 이전 텔레메트리, `github-actions` 는 CI 스모크 발신이라 **둘 다 실사용 릴리스가 아니다**. `crashRate` 는 스폰 0 인 버전에서 `0` 이 아니라 `null` 이다(0% 로 오도 금지). 이 섹션이 다루는 것은 **에이전트 크래시 이벤트** 기반 안정성이고, 앱 자체의 예외/스택트레이스는 Sentry 연동(별도·미구현) 영역이다.
+
+순수 조립은 `adminAnalytics.buildReleaseHealth` (BQ 무의존, `npm run test:admin-analytics`).
 
 ---
 

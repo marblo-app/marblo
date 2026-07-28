@@ -864,3 +864,414 @@ export function buildKpiCockpit(input: KpiCockpitInput): KpiCockpitResult {
       "재시작은 회복 신호라 분모에서 제외한다. 동시작업 수는 세션 상관이 필요해 v1 미포함.",
   };
 }
+// ════════════════════════════════════════════════════════════════════════════
+// 릴리스·버전 헬스 + 모델 하위분해 (ticket F7OUUkNSD6FqoWxktWcp)
+// ════════════════════════════════════════════════════════════════════════════
+// 어드민 텔레메트리 대시보드에서 "지금 실제로 데이터가 쌓여 있는 축"만 채운다.
+// 베타 세그먼트/리텐션은 외부 실사용≈0 이라 빈 화면이 되므로 여기 넣지 않는다.
+//
+// ★티켓 전제 정정(실측): `lifecycle:app-version` 같은 **이벤트는 없다**. 앱 버전은
+// events 테이블의 `appVersion` **컬럼**으로 모든 행에 부착된다(telemetryService 가
+// flush 시 주입). 그래서 릴리스 축은 이벤트 필터가 아니라 컬럼 GROUP BY 파생이다.
+//
+// ★두 model 컬럼의 해상도가 다르다(하위모델 분해가 필요한 이유):
+//   - events.model      = 스폰 시점의 **하네스/CLI 계열**(claude · gpt · gemini · grok …)
+//   - cost_logs.model   = 실제 과금된 **구체 모델 id**(claude-opus-4-8 · gpt-5.5 · MiniMax-M3 …)
+// 두 축을 agentId 로 조인해야 "하네스 claude 밑에서 실제로 무엇이 돌았나"가 보인다
+// (env-swap 벤더는 우리 claude 바이너리를 그대로 쓰기 때문에 하네스 축만 보면
+// MiniMax/GLM 토큰이 Anthropic 과 한 칸에 섞인다 — usageBreakdown.ts 와 같은 문제의식).
+
+// ── 버전 정렬(semver) ────────────────────────────────────────────────────────
+// appVersion 은 실측상 semver("3.0.17")와 비-semver 라벨("github-actions" = CI 스모크
+// 발신, index.ts 의 recordEvent 참조)과 NULL(구버전 텔레메트리 = 컬럼 도입 전)이
+// 섞여 있다. 정렬은 semver 를 최신순으로 먼저 놓고, 라벨/미기록은 뒤로 보낸다.
+// 지어낸 순서를 만들지 않기 위해 비교 불가한 값은 원문을 그대로 유지한다.
+
+/** semver 파싱 — "3.0.17" 은 [3,0,17]. 파싱 불가면 null(비-semver). */
+export function parseSemver(v: string): [number, number, number] | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v.trim());
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+/** 미기록(NULL/빈 문자열) 버전의 표시 라벨. 0 이나 "unknown" 으로 위장하지 않는다. */
+export const VERSION_UNRECORDED = "(미기록)";
+/** CI 스모크 발신 라벨 — 사용자 설치본이 아니므로 UI 가 구분해 표시한다. */
+export const VERSION_CI_LABEL = "github-actions";
+
+export type ReleaseVersionRow = {
+  version: string; // 표시용 버전(미기록은 VERSION_UNRECORDED)
+  isSemver: boolean; // semver 로 해석됐나(정렬/최신판정 가능 여부)
+  isCi: boolean; // CI 스모크 발신(github-actions) — 사용자 설치본 아님
+  clients: number; // 고유 clientId(익명)
+  events: number; // 총 이벤트
+  sessions: number; // session:started
+  spawned: number; // agent:spawned
+  crashed: number; // agent:crashed
+  // 크래시율 = crashed / spawned. 스폰 0 이면 null("데이터 없음" — 0% 로 오도 금지).
+  crashRate: number | null;
+  firstSeen: string; // 최초 관측일(YYYY-MM-DD)
+  lastSeen: string; // 최종 관측일
+};
+
+// BQ 집계행(컬럼명 규약은 index.ts 쿼리와 1:1).
+export type ReleaseVersionSourceRow = {
+  version?: unknown;
+  clients?: unknown;
+  events?: unknown;
+  sessions?: unknown;
+  spawned?: unknown;
+  crashed?: unknown;
+  firstSeen?: unknown;
+  lastSeen?: unknown;
+};
+
+/** 문자열 안전 변환 — null/빈값은 fallback. */
+function coerceStr(v: unknown, fallback = ""): string {
+  if (typeof v === "string" && v.trim() !== "") return v.trim();
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return fallback;
+}
+
+/**
+ * 버전행 정렬 비교자 — semver 최신순, 그다음 CI/기타 라벨, 마지막이 미기록.
+ * 같은 그룹 안에서는 이벤트 많은 순(실사용 비중).
+ */
+export function compareReleaseRows(
+  a: ReleaseVersionRow,
+  b: ReleaseVersionRow,
+): number {
+  const rank = (r: ReleaseVersionRow): number =>
+    r.isSemver ? 0 : r.version === VERSION_UNRECORDED ? 2 : 1;
+  const ra = rank(a);
+  const rb = rank(b);
+  if (ra !== rb) return ra - rb;
+  if (a.isSemver && b.isSemver) {
+    const pa = parseSemver(a.version);
+    const pb = parseSemver(b.version);
+    if (pa && pb) {
+      for (let i = 0; i < 3; i++) {
+        if (pa[i] !== pb[i]) return pb[i] - pa[i]; // 최신 먼저
+      }
+    }
+  }
+  return b.events - a.events;
+}
+
+export type ReleaseAdoptionSeries = {
+  dates: string[]; // 공통 x축(오름차순 날짜)
+  series: Array<{ version: string; values: number[] }>; // 버전별 일자 클라이언트 수
+};
+
+export type ReleaseHealthResult = {
+  versions: ReleaseVersionRow[];
+  adoption: ReleaseAdoptionSeries;
+  totals: {
+    versions: number; // 관측된 버전 수(미기록·CI 포함)
+    spawned: number;
+    crashed: number;
+    crashRate: number | null; // 전체 크래시율
+  };
+  note: string;
+};
+
+/** 버전행 조립(순수). BQ 행에서 크래시율을 계산하고 정렬한다. */
+export function buildReleaseVersions(
+  rows: ReadonlyArray<ReleaseVersionSourceRow>,
+): ReleaseVersionRow[] {
+  return rows
+    .map((r) => {
+      const raw = coerceStr(r.version);
+      const version = raw === "" ? VERSION_UNRECORDED : raw;
+      const spawned = coerceNumber(r.spawned);
+      const crashed = coerceNumber(r.crashed);
+      return {
+        version,
+        isSemver: parseSemver(version) != null,
+        isCi: version === VERSION_CI_LABEL,
+        clients: coerceNumber(r.clients),
+        events: coerceNumber(r.events),
+        sessions: coerceNumber(r.sessions),
+        spawned,
+        crashed,
+        crashRate: spawned > 0 ? crashed / spawned : null,
+        firstSeen: coerceStr(r.firstSeen),
+        lastSeen: coerceStr(r.lastSeen),
+      };
+    })
+    .sort(compareReleaseRows);
+}
+
+// 채택 추이 원시행 — { date, version, clients }.
+export type ReleaseAdoptionSourceRow = {
+  date?: unknown;
+  version?: unknown;
+  clients?: unknown;
+};
+
+/**
+ * 채택 추이 조립 — (date, version, clients) 롱포맷을 공통 x축과 버전별 시리즈로 편다.
+ * 관측 없는 (버전,날짜) 칸은 0 으로 채운다(실제 0 = 그날 그 버전 활동 없음).
+ * 시리즈 순서는 versionOrder(버전표 정렬)를 그대로 따라 UI 범례와 일치시킨다.
+ */
+export function buildReleaseAdoption(
+  rows: ReadonlyArray<ReleaseAdoptionSourceRow>,
+  versionOrder: ReadonlyArray<string>,
+): ReleaseAdoptionSeries {
+  const dateSet = new Set<string>();
+  const byVersion = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const date = coerceStr(r.date);
+    if (!date) continue;
+    const rawV = coerceStr(r.version);
+    const version = rawV === "" ? VERSION_UNRECORDED : rawV;
+    dateSet.add(date);
+    const m = byVersion.get(version) ?? new Map<string, number>();
+    m.set(date, (m.get(date) ?? 0) + coerceNumber(r.clients));
+    byVersion.set(version, m);
+  }
+  const dates = Array.from(dateSet).sort();
+  // versionOrder 에 있는 것 먼저, 그 외(추이에만 등장)는 뒤에 붙인다.
+  const ordered = [
+    ...versionOrder.filter((v) => byVersion.has(v)),
+    ...Array.from(byVersion.keys()).filter((v) => !versionOrder.includes(v)),
+  ];
+  return {
+    dates,
+    series: ordered.map((version) => {
+      const m = byVersion.get(version) ?? new Map<string, number>();
+      return { version, values: dates.map((d) => m.get(d) ?? 0) };
+    }),
+  };
+}
+
+export function buildReleaseHealth(
+  versionRows: ReadonlyArray<ReleaseVersionSourceRow>,
+  adoptionRows: ReadonlyArray<ReleaseAdoptionSourceRow>,
+): ReleaseHealthResult {
+  const versions = buildReleaseVersions(versionRows);
+  const spawned = versions.reduce((s, v) => s + v.spawned, 0);
+  const crashed = versions.reduce((s, v) => s + v.crashed, 0);
+  return {
+    versions,
+    adoption: buildReleaseAdoption(
+      adoptionRows,
+      versions.map((v) => v.version),
+    ),
+    totals: {
+      versions: versions.length,
+      spawned,
+      crashed,
+      crashRate: spawned > 0 ? crashed / spawned : null,
+    },
+    note:
+      "앱 버전은 전용 이벤트가 아니라 events.appVersion 컬럼(모든 이벤트에 부착)에서 " +
+      "파생한다. '(미기록)'은 appVersion 주입 이전 텔레메트리이고, 'github-actions'는 " +
+      "CI 스모크 발신이라 사용자 설치본이 아니다 — 둘 다 실사용 릴리스로 읽지 말 것. " +
+      "크래시율은 agent:crashed / agent:spawned 이며 스폰 0 인 버전은 null('데이터 없음')로 " +
+      "둔다(0% 로 오도 금지). 표본은 옵트인 텔레메트리이고 현재 도그푸드 편향이 크다.",
+  };
+}
+
+// ── 하위모델 분해(하네스에서 구체 모델로) ───────────────────────────────────
+// events(agent:spawned).model = 하네스, cost_logs.model = 구체 id 를 agentId 로 조인한
+// 행을 받아 2단 트리로 접는다. ★조인 신뢰도: 실측상 한 agentId 가 2개 하네스로 스폰된
+// 경우는 2093개 중 2개(0.1%)라 하네스 귀속은 사실상 1:1 이다. 그래도 추정이 아니라
+// "관측된 조인 결과"이므로 없는 값을 만들지 않는다 — 비용행이 없는 하네스는 cost 0 과
+// costRows 0 으로 그대로 남겨 UI 가 "비용 미적재"로 표시한다.
+
+/** 구체 모델 칸이 실제 모델 id 가 아니라 미귀속 센티넬인지. usageBreakdown 과 같은 규율. */
+export const UNATTRIBUTED_MODEL_KEYS: ReadonlySet<string> = new Set([
+  "unknown", // cost-tracker 가 모델 귀속 없이 emit 한 값(자기 세션파일 미사용 하네스)
+  "(none)", // BQ COALESCE fallback
+  "<synthetic>", // 합성/테스트 적재
+]);
+
+export type ModelBridgeSourceRow = {
+  harness?: unknown;
+  model?: unknown;
+  agents?: unknown;
+  cost?: unknown;
+  tokens?: unknown;
+  costRows?: unknown;
+};
+
+export type SubModelRow = {
+  model: string;
+  agents: number;
+  cost: number;
+  tokens: number;
+  costRows: number;
+  share: number; // 상위 하네스 비용 내 점유율(0~1). 하네스 비용 0 이면 0
+  /** 구체 모델로 못 읽는 칸(미귀속 센티넬이거나 하네스명이 그대로 온 경우). */
+  unattributed: boolean;
+};
+
+export type HarnessRow = {
+  harness: string;
+  agents: number;
+  cost: number;
+  tokens: number;
+  costRows: number;
+  share: number; // 전체 비용 내 점유율
+  /** 이 하네스 밑에서 실제로 돈 구체 모델(비용 내림차순). */
+  subModels: SubModelRow[];
+  /** 하네스명과 다른 구체 모델이 1종이라도 잡혔나(=분해가 의미를 가졌나). */
+  hasDecomposition: boolean;
+};
+
+export type ModelBreakdownResult = {
+  harnesses: HarnessRow[];
+  totalCost: number;
+  totalAgents: number;
+  note: string;
+};
+
+// 하네스별 고유 에이전트 수 — (harness, model) 그레인의 agents 를 합치면 한 에이전트가
+// 여러 모델을 태운 경우 중복 계상되므로, 하네스 그레인의 COUNT(DISTINCT agentId) 를
+// 별도로 받아 덮어쓴다. 안 주면 하위합(중복 가능)으로 폴백한다.
+export type HarnessAgentRow = { harness?: unknown; agents?: unknown };
+
+/**
+ * 하네스에서 구체모델로 내려가는 2단 분해(순수).
+ * @param rows agentId 조인 결과 (harness, model, agents, cost, tokens, costRows)
+ * @param harnessAgentRows 하네스 그레인 고유 에이전트 수(중복 계상 방지)
+ */
+export function buildModelBreakdown(
+  rows: ReadonlyArray<ModelBridgeSourceRow>,
+  harnessAgentRows: ReadonlyArray<HarnessAgentRow> = [],
+): ModelBreakdownResult {
+  const harnessAgents = new Map<string, number>();
+  for (const r of harnessAgentRows) {
+    harnessAgents.set(coerceStr(r.harness, "(none)"), coerceNumber(r.agents));
+  }
+  const acc = new Map<string, Map<string, SubModelRow>>();
+  for (const r of rows) {
+    const harness = coerceStr(r.harness, "(none)");
+    const model = coerceStr(r.model, "(none)");
+    const sub = acc.get(harness) ?? new Map<string, SubModelRow>();
+    const prev = sub.get(model);
+    const merged: SubModelRow = {
+      model,
+      agents: (prev?.agents ?? 0) + coerceNumber(r.agents),
+      cost: (prev?.cost ?? 0) + coerceNumber(r.cost),
+      tokens: (prev?.tokens ?? 0) + coerceNumber(r.tokens),
+      costRows: (prev?.costRows ?? 0) + coerceNumber(r.costRows),
+      share: 0, // 아래에서 채움
+      // 하네스명이 그대로 구체 칸에 온 경우도 "분해 안 됨"으로 본다
+      // (예: harness=claude 인데 model 도 claude 이면 구체 모델 미기록).
+      unattributed:
+        UNATTRIBUTED_MODEL_KEYS.has(model.toLowerCase()) ||
+        model.toLowerCase() === harness.toLowerCase(),
+    };
+    sub.set(model, merged);
+    acc.set(harness, sub);
+  }
+
+  const harnesses: HarnessRow[] = Array.from(acc.entries()).map(
+    ([harness, sub]) => {
+      const subModels = Array.from(sub.values()).sort(
+        (a, b) => b.cost - a.cost || b.agents - a.agents,
+      );
+      const cost = subModels.reduce((s, m) => s + m.cost, 0);
+      for (const m of subModels) m.share = cost > 0 ? m.cost / cost : 0;
+      return {
+        harness,
+        agents:
+          harnessAgents.get(harness) ??
+          subModels.reduce((s, m) => s + m.agents, 0),
+        cost,
+        tokens: subModels.reduce((s, m) => s + m.tokens, 0),
+        costRows: subModels.reduce((s, m) => s + m.costRows, 0),
+        share: 0,
+        subModels,
+        hasDecomposition: subModels.some((m) => !m.unattributed),
+      };
+    },
+  );
+
+  const totalCost = harnesses.reduce((s, h) => s + h.cost, 0);
+  for (const h of harnesses) h.share = totalCost > 0 ? h.cost / totalCost : 0;
+  harnesses.sort((a, b) => b.cost - a.cost || b.agents - a.agents);
+
+  return {
+    harnesses,
+    totalCost,
+    totalAgents: harnesses.reduce((s, h) => s + h.agents, 0),
+    note:
+      "스폰 이벤트의 model 은 하네스(claude·gpt·grok…)이고 실제 과금 모델 id 는 " +
+      "cost_logs.model 이라, 두 축을 agentId 로 조인해 하위모델을 분해한다. env-swap " +
+      "벤더(Z.ai·MiniMax·Kimi)는 우리 claude 바이너리를 그대로 쓰기 때문에 하네스 축만 " +
+      "보면 Anthropic 과 한 칸에 섞인다 — 이 표가 그 구분을 드러낸다. 구체 모델 칸이 " +
+      "하네스명과 같거나 unknown/synthetic 이면 '모델 미기록'으로 표시하며 지어내지 " +
+      "않는다. 비용행이 0 인 하네스는 스폰만 있고 토큰 적재가 없는 경우다.",
+  };
+}
+
+// ── 일별 × 모델 비용(기간별 분해) ───────────────────────────────────────────
+// 기존 대시보드의 costByDay 는 **총합**만이라 "어느 모델이 그날 비용을 만들었나"를
+// 볼 수 없다. (date, model, cost) 롱포맷을 상위 N 모델과 '그 외'로 접어 누적막대용
+// 매트릭스로 만든다. topN 을 넘긴 모델은 버리지 않고 '그 외'로 합산한다(총합 보존).
+
+export const COST_BY_DAY_OTHER_KEY = "그 외";
+
+export type CostByDayModelSourceRow = {
+  date?: unknown;
+  model?: unknown;
+  cost?: unknown;
+};
+
+export type CostByDayModelResult = {
+  dates: string[];
+  models: Array<{ model: string; total: number; share: number }>;
+  /** models 순서와 1:1 대응하는 일자별 비용 행렬(models.length × dates.length). */
+  matrix: number[][];
+  grandTotal: number;
+  truncatedModels: number; // '그 외'로 접힌 모델 종수(0 이면 접힘 없음)
+};
+
+export function buildCostByDayModel(
+  rows: ReadonlyArray<CostByDayModelSourceRow>,
+  topN = 6,
+): CostByDayModelResult {
+  const dateSet = new Set<string>();
+  const totals = new Map<string, number>();
+  const cell = new Map<string, number>(); // `model date` 키로 합산
+  const cellKey = (m: string, d: string): string => `${m} ${d}`;
+  for (const r of rows) {
+    const date = coerceStr(r.date);
+    if (!date) continue;
+    const model = coerceStr(r.model, "(none)");
+    const cost = coerceNumber(r.cost);
+    dateSet.add(date);
+    totals.set(model, (totals.get(model) ?? 0) + cost);
+    const k = cellKey(model, date);
+    cell.set(k, (cell.get(k) ?? 0) + cost);
+  }
+  const dates = Array.from(dateSet).sort();
+  const ranked = Array.from(totals.entries()).sort((a, b) => b[1] - a[1]);
+  const limit = Math.max(1, topN);
+  const keep = ranked.slice(0, limit);
+  const rest = ranked.slice(limit);
+
+  const models = keep.map(([model, total]) => ({ model, total, share: 0 }));
+  const matrix = keep.map(([model]) =>
+    dates.map((d) => cell.get(cellKey(model, d)) ?? 0),
+  );
+  if (rest.length > 0) {
+    models.push({
+      model: COST_BY_DAY_OTHER_KEY,
+      total: rest.reduce((s, [, t]) => s + t, 0),
+      share: 0,
+    });
+    matrix.push(
+      dates.map((d) =>
+        rest.reduce((s, [m]) => s + (cell.get(cellKey(m, d)) ?? 0), 0),
+      ),
+    );
+  }
+  const grandTotal = models.reduce((s, m) => s + m.total, 0);
+  for (const m of models) m.share = grandTotal > 0 ? m.total / grandTotal : 0;
+
+  return { dates, models, matrix, grandTotal, truncatedModels: rest.length };
+}

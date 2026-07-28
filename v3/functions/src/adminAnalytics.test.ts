@@ -644,3 +644,301 @@ test("cockpit: assembles gauges, onboarding events, reuse, spawn health", () => 
   assert.equal(result.spawnHealth.successRate, 25 / 30);
   assert.match(result.note, /3\.0\.19/);
 });
+// ════════════════════════════════════════════════════════════════════════════
+// 릴리스·버전 헬스 + 모델 하위분해 (ticket F7OUUkNSD6FqoWxktWcp)
+// ════════════════════════════════════════════════════════════════════════════
+// 고정값은 전부 2026-07-28 BQ 실측 형태를 본뜬 것이다(수치 자체는 테스트용 축약).
+import {
+  parseSemver,
+  compareReleaseRows,
+  buildReleaseVersions,
+  buildReleaseAdoption,
+  buildReleaseHealth,
+  buildModelBreakdown,
+  buildCostByDayModel,
+  VERSION_UNRECORDED,
+  VERSION_CI_LABEL,
+  COST_BY_DAY_OTHER_KEY,
+} from "./adminAnalytics";
+
+test("parseSemver: semver 만 파싱하고 라벨은 null", () => {
+  assert.deepEqual(parseSemver("3.0.17"), [3, 0, 17]);
+  assert.deepEqual(parseSemver(" 3.0.0 "), [3, 0, 0]);
+  assert.equal(parseSemver("github-actions"), null);
+  assert.equal(parseSemver(""), null);
+});
+
+test("buildReleaseVersions: 크래시율 계산 + 스폰0 이면 null", () => {
+  const rows = buildReleaseVersions([
+    {
+      version: "3.0.16",
+      clients: 1,
+      events: 3251,
+      sessions: 4,
+      spawned: 373,
+      crashed: 171,
+      firstSeen: "2026-07-17",
+      lastSeen: "2026-07-18",
+    },
+    {
+      version: VERSION_CI_LABEL,
+      clients: 1,
+      events: 49,
+      sessions: 0,
+      spawned: 0,
+      crashed: 0,
+      firstSeen: "2026-07-20",
+      lastSeen: "2026-07-23",
+    },
+  ]);
+  const v316 = rows.find((r) => r.version === "3.0.16");
+  assert.ok(v316);
+  assert.equal(v316.crashRate, 171 / 373);
+  assert.equal(v316.isSemver, true);
+  assert.equal(v316.isCi, false);
+
+  // 스폰 0 → 0% 가 아니라 null("데이터 없음"). 0% 로 오도하면 안 된다.
+  const ci = rows.find((r) => r.version === VERSION_CI_LABEL);
+  assert.ok(ci);
+  assert.equal(ci.crashRate, null);
+  assert.equal(ci.isCi, true);
+  assert.equal(ci.isSemver, false);
+});
+
+test("buildReleaseVersions: NULL/빈 버전은 (미기록) 라벨", () => {
+  const rows = buildReleaseVersions([
+    { version: null, events: 5321, spawned: 1090, crashed: 471 },
+    { version: "   ", events: 1 },
+  ]);
+  assert.ok(rows.every((r) => r.version === VERSION_UNRECORDED));
+  assert.ok(rows.every((r) => r.isSemver === false));
+});
+
+test("compareReleaseRows: semver 최신순 → 라벨 → 미기록 순", () => {
+  const rows = buildReleaseVersions([
+    { version: null, events: 99999 }, // 이벤트가 제일 많아도 맨 뒤
+    { version: "3.0.0", events: 55640 },
+    { version: VERSION_CI_LABEL, events: 49 },
+    { version: "3.0.18", events: 119 },
+    { version: "3.0.17", events: 28866 },
+  ]);
+  assert.deepEqual(
+    rows.map((r) => r.version),
+    ["3.0.18", "3.0.17", "3.0.0", VERSION_CI_LABEL, VERSION_UNRECORDED],
+  );
+  // 비교자 자체도 직접 검증(정렬 안정성 회귀 방지).
+  assert.ok(compareReleaseRows(rows[0], rows[1]) < 0);
+});
+
+test("buildReleaseAdoption: 결측 칸은 0 으로 채우고 versionOrder 를 따른다", () => {
+  const adoption = buildReleaseAdoption(
+    [
+      { date: "2026-07-18", version: "3.0.17", clients: 2 },
+      { date: "2026-07-17", version: "3.0.16", clients: 1 },
+      { date: "2026-07-18", version: "3.0.16", clients: 1 },
+    ],
+    ["3.0.17", "3.0.16"],
+  );
+  assert.deepEqual(adoption.dates, ["2026-07-17", "2026-07-18"]);
+  assert.deepEqual(
+    adoption.series.map((s) => s.version),
+    ["3.0.17", "3.0.16"],
+  );
+  // 3.0.17 은 07-17 에 관측이 없으므로 0(실제 0 = 그날 활동 없음)
+  assert.deepEqual(adoption.series[0].values, [0, 2]);
+  assert.deepEqual(adoption.series[1].values, [1, 1]);
+});
+
+test("buildReleaseAdoption: versionOrder 에 없는 버전도 버리지 않고 뒤에 붙인다", () => {
+  const adoption = buildReleaseAdoption(
+    [{ date: "2026-07-21", version: "3.0.18", clients: 4 }],
+    ["3.0.17"],
+  );
+  assert.deepEqual(
+    adoption.series.map((s) => s.version),
+    ["3.0.18"],
+  );
+});
+
+test("buildReleaseHealth: 전체 합계와 크래시율", () => {
+  const res = buildReleaseHealth(
+    [
+      { version: "3.0.17", spawned: 615, crashed: 15, events: 28866 },
+      { version: "3.0.16", spawned: 373, crashed: 171, events: 3251 },
+    ],
+    [{ date: "2026-07-18", version: "3.0.17", clients: 2 }],
+  );
+  assert.equal(res.totals.versions, 2);
+  assert.equal(res.totals.spawned, 615 + 373);
+  assert.equal(res.totals.crashed, 15 + 171);
+  assert.equal(res.totals.crashRate, 186 / 988);
+  assert.ok(res.note.includes("appVersion"));
+});
+
+test("buildReleaseHealth: 빈 입력도 안전(0/null, 예외 없음)", () => {
+  const res = buildReleaseHealth([], []);
+  assert.deepEqual(res.versions, []);
+  assert.deepEqual(res.adoption.dates, []);
+  assert.equal(res.totals.crashRate, null);
+});
+
+test("buildModelBreakdown: 하네스 밑의 구체 모델을 분해하고 점유율을 낸다", () => {
+  const res = buildModelBreakdown([
+    // 하네스 claude 밑에 Anthropic 과 env-swap 벤더가 섞여 있는 실제 형태
+    {
+      harness: "claude",
+      model: "claude-opus-4-8",
+      agents: 30,
+      cost: 75,
+      tokens: 1000,
+      costRows: 52144,
+    },
+    {
+      harness: "claude",
+      model: "MiniMax-M3",
+      agents: 2,
+      cost: 25,
+      tokens: 200,
+      costRows: 63,
+    },
+    {
+      harness: "gpt",
+      model: "gpt-5.5",
+      agents: 10,
+      cost: 100,
+      tokens: 500,
+      costRows: 9268,
+    },
+  ]);
+  assert.equal(res.totalCost, 200);
+  assert.equal(res.totalAgents, 42);
+  // 비용 내림차순: gpt(100) 과 claude(100) 동률 → 에이전트 많은 claude 가 앞
+  const claude = res.harnesses.find((h) => h.harness === "claude");
+  assert.ok(claude);
+  assert.equal(claude.cost, 100);
+  assert.equal(claude.share, 0.5);
+  assert.equal(claude.subModels.length, 2);
+  assert.equal(claude.subModels[0].model, "claude-opus-4-8");
+  assert.equal(claude.subModels[0].share, 0.75);
+  // env-swap 벤더가 claude 하네스 밑에서 드러나야 한다(이 표의 존재 이유)
+  assert.equal(claude.subModels[1].model, "MiniMax-M3");
+  assert.equal(claude.subModels[1].unattributed, false);
+  assert.equal(claude.hasDecomposition, true);
+});
+
+test("buildModelBreakdown: 미귀속 센티넬과 하네스명 그대로인 칸을 표시", () => {
+  const res = buildModelBreakdown([
+    { harness: "claude", model: "claude", agents: 1, cost: 0, costRows: 1231 },
+    { harness: "grok", model: "unknown", agents: 1, cost: 0, costRows: 0 },
+    { harness: "codex", model: "<synthetic>", agents: 1, cost: 3, costRows: 2 },
+  ]);
+  const byHarness = Object.fromEntries(
+    res.harnesses.map((h) => [h.harness, h]),
+  );
+  // model 이 하네스명과 같으면 구체 모델 미기록
+  assert.equal(byHarness["claude"].subModels[0].unattributed, true);
+  assert.equal(byHarness["claude"].hasDecomposition, false);
+  // cost-tracker 의 미귀속 센티넬
+  assert.equal(byHarness["grok"].subModels[0].unattributed, true);
+  assert.equal(byHarness["codex"].subModels[0].unattributed, true);
+});
+
+test("buildModelBreakdown: 같은 (하네스,모델) 행은 합산된다", () => {
+  const res = buildModelBreakdown([
+    { harness: "gpt", model: "gpt-5.5", agents: 1, cost: 10, tokens: 5 },
+    { harness: "gpt", model: "gpt-5.5", agents: 2, cost: 20, tokens: 7 },
+  ]);
+  assert.equal(res.harnesses.length, 1);
+  assert.equal(res.harnesses[0].subModels.length, 1);
+  assert.equal(res.harnesses[0].subModels[0].agents, 3);
+  assert.equal(res.harnesses[0].subModels[0].cost, 30);
+  assert.equal(res.harnesses[0].subModels[0].tokens, 12);
+});
+
+test("buildModelBreakdown: 비용 0 하네스도 유지(스폰만 있고 토큰 미적재)", () => {
+  const res = buildModelBreakdown([
+    { harness: "grok", model: "unknown", agents: 8, cost: 0, costRows: 0 },
+  ]);
+  assert.equal(res.harnesses.length, 1);
+  assert.equal(res.harnesses[0].cost, 0);
+  assert.equal(res.harnesses[0].share, 0); // 0/0 을 NaN 으로 흘리지 않는다
+  assert.equal(res.harnesses[0].subModels[0].share, 0);
+});
+
+test("buildModelBreakdown: 빈 입력 안전", () => {
+  const res = buildModelBreakdown([]);
+  assert.deepEqual(res.harnesses, []);
+  assert.equal(res.totalCost, 0);
+});
+
+test("buildCostByDayModel: 상위N 밖 모델은 버리지 않고 '그 외'로 합산", () => {
+  const rows = [
+    { date: "2026-07-27", model: "a", cost: 100 },
+    { date: "2026-07-27", model: "b", cost: 50 },
+    { date: "2026-07-28", model: "c", cost: 10 },
+    { date: "2026-07-28", model: "d", cost: 5 },
+  ];
+  const res = buildCostByDayModel(rows, 2);
+  assert.deepEqual(res.dates, ["2026-07-27", "2026-07-28"]);
+  assert.deepEqual(
+    res.models.map((m) => m.model),
+    ["a", "b", COST_BY_DAY_OTHER_KEY],
+  );
+  assert.equal(res.truncatedModels, 2);
+  // ★총합 보존 — 접혀도 합계는 원본과 같아야 한다(수치 왜곡 금지)
+  assert.equal(res.grandTotal, 165);
+  // 행렬은 models 순서와 1:1
+  assert.deepEqual(res.matrix[0], [100, 0]);
+  assert.deepEqual(res.matrix[1], [50, 0]);
+  assert.deepEqual(res.matrix[2], [0, 15]);
+  assert.equal(res.models[0].share, 100 / 165);
+});
+
+test("buildCostByDayModel: 접힘 없으면 truncatedModels=0 이고 '그 외' 없음", () => {
+  const res = buildCostByDayModel(
+    [{ date: "2026-07-28", model: "gpt-5.5", cost: 3 }],
+    6,
+  );
+  assert.equal(res.truncatedModels, 0);
+  assert.deepEqual(
+    res.models.map((m) => m.model),
+    ["gpt-5.5"],
+  );
+  assert.deepEqual(res.matrix, [[3]]);
+});
+
+test("buildCostByDayModel: 같은 (날짜,모델) 중복행 합산 + 날짜 없는 행 무시", () => {
+  const res = buildCostByDayModel(
+    [
+      { date: "2026-07-28", model: "x", cost: 1 },
+      { date: "2026-07-28", model: "x", cost: 2 },
+      { date: null, model: "x", cost: 999 },
+    ],
+    6,
+  );
+  assert.deepEqual(res.matrix, [[3]]);
+  assert.equal(res.grandTotal, 3);
+});
+
+test("buildCostByDayModel: 빈 입력 안전(NaN 없음)", () => {
+  const res = buildCostByDayModel([], 6);
+  assert.deepEqual(res.dates, []);
+  assert.deepEqual(res.models, []);
+  assert.equal(res.grandTotal, 0);
+});
+test("buildModelBreakdown: 하네스 고유 에이전트 수는 별도 입력이 하위합을 덮어쓴다", () => {
+  // 에이전트 1개가 모델 2종을 태운 경우 — 하위합(1+1=2)은 중복 계상이다.
+  const rows = [
+    { harness: "claude", model: "claude-opus-5", agents: 1, cost: 5 },
+    { harness: "claude", model: "MiniMax-M3", agents: 1, cost: 1 },
+  ];
+  const naive = buildModelBreakdown(rows);
+  assert.equal(naive.harnesses[0].agents, 2); // 폴백(하위합)
+
+  const exact = buildModelBreakdown(rows, [{ harness: "claude", agents: 1 }]);
+  assert.equal(exact.harnesses[0].agents, 1); // 하네스 그레인 DISTINCT 가 이긴다
+  assert.equal(exact.totalAgents, 1);
+  // 하위 모델별 수치는 그대로 유지된다(덮어쓰기는 하네스 레벨만)
+  assert.equal(exact.harnesses[0].subModels.length, 2);
+  assert.equal(exact.harnesses[0].cost, 6);
+});
