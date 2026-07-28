@@ -12,11 +12,7 @@ export const usage: Record<keyof typeof koUsage, string> = {
     "Token usage by model, agent, and day. Live (agent docs) + history (BigQuery) combined.",
   "usage.selectProjectPrompt": "Select a project to see usage.",
 
-  // ── Period selector ─────────────────────────────────────
-  "usage.period.label": "Period",
-  "usage.period.7d": "7 days",
-  "usage.period.30d": "30 days",
-  "usage.period.all": "All",
+  // ── Period selector: labels moved to `common.period.*` (shared control) ──
 
   // ── Summary cards ───────────────────────────────────────
   "usage.card.totalTokens": "Total tokens",

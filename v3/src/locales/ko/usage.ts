@@ -13,10 +13,8 @@ export const usage = {
   "usage.selectProjectPrompt": "프로젝트를 선택하면 사용량이 표시됩니다.",
 
   // ── Period selector ─────────────────────────────────────
-  "usage.period.label": "기간",
-  "usage.period.7d": "7일",
-  "usage.period.30d": "30일",
-  "usage.period.all": "전체",
+  // 라벨은 `common.period.*` 로 옮겼다 — 작업내역 탭과 공용 컨트롤이라
+  // 한쪽에서만 고치면 두 화면 문구가 갈라진다.
 
   // ── Summary cards ───────────────────────────────────────
   "usage.card.totalTokens": "총 토큰",

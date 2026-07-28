@@ -24,6 +24,12 @@ export const common = {
   "common.unknown": "알 수 없음",
   "common.loginRequired": "로그인이 필요합니다.",
 
+  // — 기간 선택기 (components/common/PeriodSelector: 사용량 탭 + 작업내역 탭 공용) —
+  "common.period.label": "기간",
+  "common.period.7d": "7일",
+  "common.period.30d": "30일",
+  "common.period.all": "전체",
+
   // — agent runtime guard (stores/agentStore) —
   "common.agentLimitReached": "현재 플랜의 동시 에이전트 한도에 도달했습니다.",
 

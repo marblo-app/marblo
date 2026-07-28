@@ -11,10 +11,18 @@ import {
   type ParsedCompletionReport,
 } from "../../lib/completionReport";
 import { computeShareStats, resolvePrUrl } from "../../lib/shareCard";
+import {
+  DEFAULT_WORK_HISTORY_FILTER,
+  filterDoneTasks,
+  isFilterActive,
+  type WorkHistoryFilter,
+} from "../../lib/workHistoryFilter";
 import { useTaskActivities } from "../../hooks/useTaskActivities";
 import { DiffViewer } from "../board/DiffViewer";
 import { TaskDetailModal } from "../board/TaskDetailModal";
+import { periodLabel } from "../common/PeriodSelector";
 import { ShareCard } from "./ShareCard";
+import { WorkHistoryFilterBar } from "./WorkHistoryFilterBar";
 
 // 완료 보고를 추적할 최근 완료 태스크 상한. task 당 Firestore activities 리스너가
 // 하나씩 생기므로, 무한정 구독하지 않도록 최신순으로 잘라 둔다.
@@ -225,17 +233,26 @@ export function WorkHistoryTab() {
     return () => unsub();
   }, [currentProject?.id, subscribeToTasks]);
 
-  // 완료 태스크, 최신순.
-  const doneTasks = useMemo(
-    () =>
-      tasks
-        .filter((t) => t.status === "DONE")
-        .sort((a, b) => {
-          const at = a.updatedAt ? +a.updatedAt : 0;
-          const bt = b.updatedAt ? +b.updatedAt : 0;
-          return bt - at;
-        }),
+  const [filter, setFilter] = useState<WorkHistoryFilter>(
+    DEFAULT_WORK_HISTORY_FILTER,
+  );
+  const patchFilter = (patch: Partial<WorkHistoryFilter>) =>
+    setFilter((prev) => ({ ...prev, ...patch }));
+
+  // 프로젝트 전체 완료 건수 — 필터와 무관한 분모(헤더의 "완료 N건").
+  const doneTotal = useMemo(
+    () => tasks.filter((task) => task.status === "DONE").length,
     [tasks],
+  );
+
+  // ★필터를 슬라이스보다 먼저 건다. 반대로 하면 역할·검색이 "최근 50건 안에서만"
+  //   동작한다(lib/workHistoryFilter 헤더 참조).
+  //   `Date.now()` 를 memo 의존성에 넣을 수 없으니 기간 컷오프는 filter 가 바뀔 때
+  //   또는 태스크 스냅샷이 들어올 때 다시 계산된다 — 구독이 살아 있는 화면이라
+  //   실사용에서 경계가 밀릴 일은 없다.
+  const doneTasks = useMemo(
+    () => filterDoneTasks(tasks, filter),
+    [tasks, filter],
   );
 
   const trackedTasks = useMemo(
@@ -296,10 +313,14 @@ export function WorkHistoryTab() {
     return () => unsub();
   }, [currentProject?.id]);
 
+  // 공유카드는 **현재 보이는 집합**(필터+슬라이스)을 집계한다 — 화면의 리스트와
+  // 카드 수치가 어긋나지 않게.
   const shareStats = useMemo(
     () => computeShareStats(trackedTasks, reports),
     [trackedTasks, reports],
   );
+
+  const filterOn = isFilterActive(filter);
 
   if (!currentProject) {
     return (
@@ -314,28 +335,57 @@ export function WorkHistoryTab() {
     // 흐름으로 배치한다. 스크롤하면 ShareCard 도 함께 위로 밀려 올라가 리스트가 전체
     // 높이를 활용한다(ShareCard sticky 미적용 — 요청=전체 스크롤).
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-sm font-semibold text-gray-200">
           {t("workHistory.title")}
         </h1>
         <span className="text-xs text-gray-500">
-          {t("workHistory.doneCount", { count: doneTasks.length })}
+          {/* 필터가 걸려 있으면 "필터 N / 전체 M" 로 분모를 같이 보여준다 —
+              숫자 하나만 바뀌면 완료 이력이 사라진 것처럼 읽힌다. */}
+          {filterOn
+            ? t("workHistory.filteredCount", {
+                count: doneTasks.length,
+                total: doneTotal,
+                period: periodLabel(filter.periodId, t),
+              })
+            : t("workHistory.doneCount", { count: doneTotal })}
           {doneTasks.length > MAX_TRACKED &&
             ` ${t("workHistory.recentAggregate", { count: MAX_TRACKED })}`}
         </span>
       </div>
+
+      <WorkHistoryFilterBar
+        filter={filter}
+        onChange={patchFilter}
+        onReset={() => setFilter(DEFAULT_WORK_HISTORY_FILTER)}
+      />
 
       <ShareCard stats={shareStats} />
 
       {doneTasks.length === 0 ? (
         <div className="flex flex-1 items-center justify-center py-12">
           <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-6 text-center">
+            {/* 완료가 아예 없는 것과 필터에 안 걸린 것은 다른 상태다 —
+                후자에서 "완료된 작업이 없습니다" 는 거짓말이 된다. */}
             <p className="text-sm text-gray-300">
-              {t("workHistory.empty.title")}
+              {filterOn && doneTotal > 0
+                ? t("workHistory.empty.filtered.title")
+                : t("workHistory.empty.title")}
             </p>
             <p className="mt-1 text-xs text-gray-500">
-              {t("workHistory.empty.hint")}
+              {filterOn && doneTotal > 0
+                ? t("workHistory.empty.filtered.hint")
+                : t("workHistory.empty.hint")}
             </p>
+            {filterOn && doneTotal > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilter(DEFAULT_WORK_HISTORY_FILTER)}
+                className="mt-3 rounded border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition hover:bg-gray-800"
+              >
+                {t("workHistory.filter.reset")}
+              </button>
+            )}
           </div>
         </div>
       ) : (

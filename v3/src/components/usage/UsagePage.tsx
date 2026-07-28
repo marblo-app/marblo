@@ -22,8 +22,8 @@ import {
   periodById,
   resolveModel,
   vendorColor,
-  USAGE_PERIODS,
 } from "../../lib/usageBreakdown";
+import { PeriodSelector, periodLabel } from "../common/PeriodSelector";
 import type {
   AgentModelRow,
   ModelIdSource,
@@ -56,7 +56,7 @@ import { ModelFactSheet } from "./ModelFactSheet";
  * Sections: 기간 선택기 → 총계 → 벤더·하위모델 분해 → 일자별 추이 →
  * 에이전트↔실모델 → 벤더 크레딧/쿼터 → 모델·에이전트(기존) → 한도 상태.
  *
- * ★하위 섹션 컴포넌트(`PeriodSelector`/`VendorBreakdown`/`DailyTrend`/
+ * ★하위 섹션 컴포넌트(`VendorBreakdown`/`DailyTrend`/
  * `AgentModelMap`)를 export 해 두는 이유: 이 페이지 전체는 Firestore·IPC·인증에
  * 묶여 있어 Electron 을 띄우지 않으면 렌더 자체가 안 된다. 섹션 단위로 꺼낼 수
  * 있으면 vite 프리뷰나 컴포넌트 테스트로 **레이아웃만** 검증할 수 있다.
@@ -318,62 +318,9 @@ type Translate = (
   vars?: Record<string, string | number>,
 ) => string;
 
-const PERIOD_LABEL_KEYS: Record<UsagePeriodId, MessageKey> = {
-  "7d": "usage.period.7d",
-  "30d": "usage.period.30d",
-  all: "usage.period.all",
-};
-
-function periodLabel(id: UsagePeriodId, t: Translate): string {
-  return t(PERIOD_LABEL_KEYS[id]);
-}
-
 // ── 기간 선택기 ──────────────────────────────────────────────
-
-/**
- * 7 / 30 / 전체. 세그먼트 컨트롤 한 줄 — 필터는 차트 위 한 행에 둔다.
- * 값은 `loadSummary(projectId, days)` 로 그대로 나가는 **서버 WHERE** 다.
- */
-export function PeriodSelector({
-  value,
-  onChange,
-}: {
-  value: UsagePeriodId;
-  onChange: (id: UsagePeriodId) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-[11px] text-gray-500">
-        {t("usage.period.label")}
-      </span>
-      <div
-        role="group"
-        aria-label={t("usage.period.label")}
-        className="flex overflow-hidden rounded-md border border-gray-700"
-      >
-        {USAGE_PERIODS.map((p) => {
-          const active = p.id === value;
-          return (
-            <button
-              key={p.id}
-              type="button"
-              aria-pressed={active}
-              onClick={() => onChange(p.id)}
-              className={`px-3 py-1 text-xs transition-colors ${
-                active
-                  ? "bg-gray-700 font-medium text-gray-100"
-                  : "bg-gray-800/50 text-gray-400 hover:text-gray-200"
-              }`}
-            >
-              {periodLabel(p.id, t)}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+// `PeriodSelector`/`periodLabel` 은 `components/common/PeriodSelector.tsx` 로
+// 옮겼다 — 작업내역 탭이 같은 컨트롤을 쓰기 때문(복사본 금지).
 
 // ── 벤더 → 하위모델 분해 ─────────────────────────────────────
 

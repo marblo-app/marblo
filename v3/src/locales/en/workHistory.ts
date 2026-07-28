@@ -31,13 +31,23 @@ export const workHistory: Record<keyof typeof koWorkHistory, string> = {
   // — header —
   "workHistory.title": "Work History",
   "workHistory.doneCount": "{count} completed",
+  "workHistory.filteredCount": "{period} · {count} of {total} completed",
   "workHistory.recentAggregate": "· latest {count} aggregated",
+
+  // — filter bar —
+  "workHistory.filter.role": "Role",
+  "workHistory.filter.roleAll": "All",
+  "workHistory.filter.searchPlaceholder": "Search title / description",
+  "workHistory.filter.reset": "Reset filters",
 
   // — empty / select states —
   "workHistory.selectProject": "Select a project to see its work history.",
   "workHistory.empty.title": "No completed work yet.",
   "workHistory.empty.hint":
     "Once a task moves to DONE, it lands here with its provenance.",
+  "workHistory.empty.filtered.title": "No completed work matches this filter.",
+  "workHistory.empty.filtered.hint":
+    "Widen the period, or clear the role and search filters.",
 
   // — share card —
   "workHistory.share.subtitle":

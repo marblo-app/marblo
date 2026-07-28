@@ -18,6 +18,12 @@ export const common: Record<keyof typeof koCommon, string> = {
   "common.unknown": "Unknown",
   "common.loginRequired": "You must be logged in.",
 
+  // — period selector (components/common/PeriodSelector: Usage + Work history) —
+  "common.period.label": "Period",
+  "common.period.7d": "7 days",
+  "common.period.30d": "30 days",
+  "common.period.all": "All",
+
   // — agent runtime guard —
   "common.agentLimitReached":
     "You've reached your plan's concurrent agent limit.",
