@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AuthProvider } from "./auth";
-import { LanguageFirstRun } from "./components/onboarding/LanguageFirstRun";
+import { FirstRunFlow } from "./components/onboarding/FirstRunFlow";
+import { isFirstRunFlowPending } from "./lib/firstRunFlow";
 import { useAuth } from "./hooks/useAuth";
 import { LoginPage } from "./auth";
 import { Layout } from "./components/Layout";
@@ -32,7 +33,7 @@ import {
   type TelemetryEvent,
 } from "./services/telemetryService";
 import telemetry from "./services/telemetryService";
-import { t, hasChosenLocale } from "./lib/i18n";
+import { t } from "./lib/i18n";
 
 // First-party telemetry is ON by default for de-identified operational metrics.
 // VITE_DISABLE_TELEMETRY=1 is the hard kill-switch: it force-disables here too,
@@ -453,11 +454,14 @@ function markFirstRunIfNeeded() {
 }
 
 function App() {
-  // First-run language picker: shown once, before anything else (even login),
-  // when the user has never made an explicit choice. Detached pop-out windows
-  // skip it — they inherit the main window's already-persisted locale.
-  const [needsLocaleChoice, setNeedsLocaleChoice] = useState(
-    () => resolveDetachedView() === null && !hasChosenLocale(),
+  // First-run flow (language → privacy consent): shown once, before anything
+  // else (even login), as one continuous sequence. Both steps are mandatory
+  // gates; running them back-to-back here is what closes F5 — consent used to
+  // be derived from a post-login Firestore read and landed ~5s later, on top
+  // of a screen the user was already using. Detached pop-out windows skip it —
+  // they inherit the main window's already-persisted locale and consent.
+  const [firstRunPending, setFirstRunPending] = useState(
+    () => resolveDetachedView() === null && isFirstRunFlowPending(),
   );
 
   // Fire the install's first-launch marker once, at the very first app mount
@@ -469,8 +473,15 @@ function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        {needsLocaleChoice && (
-          <LanguageFirstRun onComplete={() => setNeedsLocaleChoice(false)} />
+        {firstRunPending && (
+          // `relative z-[100]` creates a stacking context above the app shell.
+          // The consent step carries z-50 internally (it used to be rendered
+          // from inside Layout); without this wrapper it would tie with
+          // AppContent's own z-50 elements and lose on DOM order, since the
+          // flow is painted before AppContent.
+          <div className="relative z-[100]">
+            <FirstRunFlow onComplete={() => setFirstRunPending(false)} />
+          </div>
         )}
         <AppContent />
       </AuthProvider>

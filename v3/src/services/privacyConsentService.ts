@@ -211,6 +211,86 @@ export function hasAcceptedConsentCached(
   }
 }
 
+/**
+ * Pending (pre-sign-in) consent.
+ *
+ * The first-run flow asks for consent in one continuous sequence right after
+ * the language picker — which is *before* the user has signed in, so there is
+ * no uid to write against yet. The answer is parked here and flushed to
+ * Firestore by PrivacyConsentGate the moment a uid appears.
+ *
+ * Why not just ask after sign-in (the old behavior)? Because the consent read
+ * is auth + network bound, so the modal landed ~5s after the language modal —
+ * a second full-screen overlay dropping onto a screen the user had already
+ * started clicking (F5, cleanroom #633/#641).
+ *
+ * Version-scoped like the proof-of-consent cache: a policy bump invalidates a
+ * stale pending answer rather than flushing consent to text the user never saw.
+ */
+const PENDING_CONSENT_KEY = "marblo:pendingConsent";
+
+export interface PendingConsent {
+  flags: ConsentFlags;
+  locale: string;
+  version: string;
+}
+
+/** Park a pre-sign-in consent answer. Best-effort — never throws. */
+export function rememberPendingConsent(
+  flags: ConsentFlags,
+  locale: string,
+): void {
+  try {
+    safeLocalStorage()?.setItem(
+      PENDING_CONSENT_KEY,
+      JSON.stringify({ flags, locale, version: CURRENT_POLICY_VERSION }),
+    );
+  } catch {
+    // private mode / quota / disabled storage. The user still gets asked again
+    // after sign-in via the Gate — we lose the head start, not the consent.
+  }
+}
+
+/**
+ * Read a parked answer for the CURRENT policy version, or null. A record for a
+ * superseded version is dropped (and cleared) rather than returned.
+ */
+export function readPendingConsent(): PendingConsent | null {
+  try {
+    const raw = safeLocalStorage()?.getItem(PENDING_CONSENT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PendingConsent>;
+    if (parsed?.version !== CURRENT_POLICY_VERSION || !parsed.flags) {
+      clearPendingConsent();
+      return null;
+    }
+    return {
+      flags: {
+        firstPartyTelemetry: parsed.flags.firstPartyTelemetry !== false,
+        sentry: !!parsed.flags.sentry,
+        ga4: !!parsed.flags.ga4,
+        mixpanel: !!parsed.flags.mixpanel,
+        overseasTransfer: !!parsed.flags.overseasTransfer,
+      },
+      locale: parsed.locale ?? "ko",
+      version: parsed.version,
+    };
+  } catch {
+    // Unparseable/unavailable — treat as absent. Don't clear blindly here;
+    // a storage throw would just throw again.
+    return null;
+  }
+}
+
+/** Drop the parked answer (after a successful flush). Never throws. */
+export function clearPendingConsent(): void {
+  try {
+    safeLocalStorage()?.removeItem(PENDING_CONSENT_KEY);
+  } catch {
+    // best-effort
+  }
+}
+
 /** Save flags + bump version + acceptedAt. `merge: true` so we don't
  *  clobber other fields on the user doc. */
 export async function saveConsent(

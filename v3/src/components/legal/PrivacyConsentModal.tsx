@@ -24,6 +24,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { usePrivacyConsentStore } from "../../stores/privacyConsentStore";
 import { useTranslation } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
+import type { ConsentFlags } from "../../services/privacyConsentService";
 import { PrivacyPolicyPage } from "./PrivacyPolicyPage";
 
 type CheckboxId = "sentry" | "ga4" | "mixpanel" | "overseasTransfer";
@@ -59,10 +60,20 @@ function renderRich(text: string): ReactNode[] {
 interface PrivacyConsentModalProps {
   /** Called after the user clicks 허용/나중에 — host can hide the modal. */
   onComplete?: () => void;
+  /**
+   * Where the answer is persisted. Defaults to the signed-in path (Firestore,
+   * keyed by uid). The first-run flow runs this modal *before* sign-in — there
+   * is no uid yet — so it injects a handler that parks the answer locally and
+   * lets PrivacyConsentGate flush it once a uid exists.
+   */
+  onSubmit?: (flags: ConsentFlags, locale: string) => Promise<void> | void;
 }
 
-export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
-  const { t } = useTranslation();
+export function PrivacyConsentModal({
+  onComplete,
+  onSubmit,
+}: PrivacyConsentModalProps) {
+  const { t, locale } = useTranslation();
   const { user } = useAuth();
   const save = usePrivacyConsentStore((s) => s.save);
 
@@ -85,23 +96,18 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
     }
   }, [flags.sentry, flags.overseasTransfer]);
 
-  const allow = async () => {
-    if (!user) return;
-    // Hard guard: if Sentry is on, overseasTransfer must also be on.
-    if (flags.sentry && !flags.overseasTransfer) {
-      setError(t("legal.consent.overseasRequired"));
-      return;
-    }
+  /**
+   * Persist one answer and close. `onSubmit` wins when the host injected one
+   * (pre-sign-in first-run flow); otherwise this is the signed-in Firestore
+   * write. The record carries the locale the user actually read the policy in
+   * — this modal now runs right after the language picker, so that is known.
+   */
+  const submit = async (answer: ConsentFlags) => {
+    if (!onSubmit && !user) return;
     setSubmitting(true);
     try {
-      await save(
-        user.uid,
-        {
-          firstPartyTelemetry: true,
-          ...flags,
-        },
-        "ko",
-      );
+      if (onSubmit) await onSubmit(answer, locale);
+      else if (user) await save(user.uid, answer, locale);
     } catch (err) {
       // Fail-open: Firestore write 실패해도 모달은 닫는다. store.save 가
       // local state 까지 안 채웠다면 다음 부팅 때 다시 묻힐 뿐 — 사용자
@@ -117,31 +123,25 @@ export function PrivacyConsentModal({ onComplete }: PrivacyConsentModalProps) {
     }
   };
 
-  const later = async () => {
-    if (!user) return;
-    setSubmitting(true);
-    try {
-      // "나중에" = explicit decline. Save zero flags so we don't re-prompt
-      // on every launch (only when policy version bumps).
-      await save(
-        user.uid,
-        {
-          firstPartyTelemetry: true,
-          sentry: false,
-          ga4: false,
-          mixpanel: false,
-          overseasTransfer: false,
-        },
-        "ko",
-      );
-    } catch (err) {
-      // Same fail-open rationale as accept().
-      console.warn("[PrivacyConsent] later save failed, closing anyway:", err);
-    } finally {
-      setSubmitting(false);
-      onComplete?.();
+  const allow = async () => {
+    // Hard guard: if Sentry is on, overseasTransfer must also be on.
+    if (flags.sentry && !flags.overseasTransfer) {
+      setError(t("legal.consent.overseasRequired"));
+      return;
     }
+    await submit({ firstPartyTelemetry: true, ...flags });
   };
+
+  // "나중에" = explicit decline. Save zero flags so we don't re-prompt
+  // on every launch (only when policy version bumps).
+  const later = async () =>
+    submit({
+      firstPartyTelemetry: true,
+      sentry: false,
+      ga4: false,
+      mixpanel: false,
+      overseasTransfer: false,
+    });
 
   if (showPolicy) {
     return (

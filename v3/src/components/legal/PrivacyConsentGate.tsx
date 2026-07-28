@@ -15,6 +15,10 @@ import { useAuth } from "../../hooks/useAuth";
 import { usePrivacyConsentStore } from "../../stores/privacyConsentStore";
 import { maybeInitSentry } from "../../lib/telemetry/sentry";
 import { setTelemetryEnabled } from "../../services/telemetryService";
+import {
+  readPendingConsent,
+  clearPendingConsent,
+} from "../../services/privacyConsentService";
 import { PrivacyConsentModal } from "./PrivacyConsentModal";
 
 export function PrivacyConsentGate() {
@@ -26,10 +30,34 @@ export function PrivacyConsentGate() {
     (s) => s.consent.firstPartyTelemetry,
   );
   const load = usePrivacyConsentStore((s) => s.load);
+  const save = usePrivacyConsentStore((s) => s.save);
 
   // Load consent the first time we have a uid.
   useEffect(() => {
     if (!user?.uid) return;
+
+    // The first-run flow (FirstRunFlow) asks for consent before sign-in, so the
+    // answer is waiting in localStorage with no uid attached. Flush it instead
+    // of reading — this user answered seconds ago, that answer is authoritative,
+    // and `save` flips needsPrompt=false synchronously so the modal never
+    // flashes on top of the flow that just closed.
+    const pending = readPendingConsent();
+    if (pending) {
+      save(user.uid, pending.flags, pending.locale)
+        // Only drop the parked answer once it is durably stored. On a failed
+        // write we keep it and retry next launch — the alternative is losing
+        // the consent record server-side and re-prompting a user who already
+        // answered.
+        .then(() => clearPendingConsent())
+        .catch((err) => {
+          console.warn(
+            "[PrivacyConsentGate] pending consent flush failed:",
+            err,
+          );
+        });
+      return;
+    }
+
     load(user.uid).catch((err) => {
       // Fail open with default OFF — user will see the prompt next launch.
       // 정확한 진단을 위해 err 는 콘솔에 남긴다 (service 내부 logFirestoreError
@@ -37,7 +65,7 @@ export function PrivacyConsentGate() {
       // 한 줄 더).
       console.warn("[PrivacyConsentGate] load failed:", err);
     });
-  }, [user?.uid, load]);
+  }, [user?.uid, load, save]);
 
   // Drive SDK init based on current consent. maybeInitSentry is idempotent.
   useEffect(() => {

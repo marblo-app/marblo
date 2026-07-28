@@ -9,7 +9,9 @@ import {
   launchCleanRoom,
   openWorkTab,
   passFirstRunModals,
+  passFirstRunModalsTimed,
   switchToLegacyLayout,
+  waitForAppShell,
   wizardVisible,
   type CleanRoom,
 } from "./helpers/cleanroom";
@@ -380,14 +382,19 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
     const cr = await launchCleanRoom({ claude: "missing", codex: "missing" });
     try {
       const t0 = Date.now();
-      const modals = await passFirstRunModals(cr.page);
-      const readyMs = Date.now() - t0;
+      const pass = await passFirstRunModalsTimed(cr.page);
+      // 모달이 부팅보다 먼저 끝나므로 셸이 뜰 때까지 기다려야 한다(F5 수정 후).
+      const shellUp = await waitForAppShell(cr.page);
+      const msUntilAppUsable = Date.now() - t0;
       await settle(cr.page, 2000);
 
       const body = await cr.page.locator("body").innerText();
       const observed = {
-        firstRunModals: modals,
-        msUntilModalsCleared: readyMs,
+        firstRunModals: pass.passed,
+        msUntilModalsCleared: pass.totalMs,
+        msBetweenModals: pass.gapMs,
+        msUntilAppUsable,
+        shellUp,
         landsOnStartHere: /시작하기/.test(body) && /남음/.test(body),
         hasConnectFolderCta: /폴더 선택|폴더 연결|프로젝트 열기/.test(body),
         mentionsCli: /CLI|Claude Code|Codex/.test(body),
@@ -400,6 +407,68 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
       expect(observed.landsOnStartHere || observed.hasConnectFolderCta).toBe(
         true,
       );
+
+      // ★F5 닫힘 — 이 기대값은 원래 "그냥 관측"이었다(실측 5012ms, 언어 →
+      //   ~5초 뒤 동의). 두 모달이 서로 다른 축(localStorage vs auth+Firestore)
+      //   에 걸려 있어서, 그 사이 유저는 조작 가능한 화면을 만졌다가 두 번째
+      //   전면 오버레이에 클릭을 뺏겼다. 이제 FirstRunFlow 한 흐름에서
+      //   연속으로 뜬다 — 되돌아가면(동의를 다시 로그인 뒤로 미루면) 여기서
+      //   깨진다.
+      expect(observed.firstRunModals).toEqual(["language", "privacy-consent"]);
+      expect(observed.msBetweenModals).not.toBeNull();
+      // 연속 렌더면 폴링 오차(100ms) 수준. 1.5s 는 CI 지터까지 감안한 상한이지
+      // 목표치가 아니다 — 실측은 수백 ms 다.
+      expect(observed.msBetweenModals ?? Infinity).toBeLessThan(1500);
+    } finally {
+      await cr.close();
+    }
+  });
+
+  test("D2(F5 계약) 최초실행에서 언어·동의를 둘 다 받고, 재시작 때 다시 묻지 않는다", async () => {
+    // F5 수정의 다른 절반: 두 게이트를 앞당겼다고 해서 수집을 건너뛰거나,
+    // 반대로 매 부팅 다시 묻게 되면 안 된다.
+    let cr = await launchCleanRoom({ claude: "missing", codex: "missing" });
+    const root = cr.root;
+    try {
+      const first = await passFirstRunModalsTimed(cr.page);
+      expect(first.passed).toEqual(["language", "privacy-consent"]);
+      await waitForAppShell(cr.page);
+      await settle(cr.page, 2000);
+
+      // 답이 실제로 어딘가에 적혔는가. 클린룸은 bypassAuth mock 유저라
+      // Firestore 쓰기가 뜨지 않으므로 답은 pending 에 남는다(= 다음 부팅에
+      // 재시도). 진짜 유저라면 flush 성공 후 accepted 캐시로 옮겨간다. 둘 중
+      // 어느 쪽이든 "답이 유실되지 않았다"가 이 단언의 내용이다.
+      const stored = await cr.page.evaluate(() => ({
+        locale: localStorage.getItem("marblo:locale"),
+        pending: localStorage.getItem("marblo:pendingConsent"),
+        accepted: Object.keys(localStorage).filter((k) =>
+          k.startsWith("marblo:consentAccepted:"),
+        ),
+        flowInProgress: localStorage.getItem("marblo.firstRun.inProgress"),
+      }));
+      console.log("[cleanroom][D2] 최초실행 후 저장 상태:", stored);
+      expect(stored.locale).toMatch(/^(ko|en)$/); // 언어 수집됨
+      expect(stored.pending !== null || stored.accepted.length > 0).toBe(true);
+      // 흐름이 끝났으므로 진행중 표시는 지워져 있어야 한다 — 남아 있으면
+      // 재시작 때 동의를 또 묻는다.
+      expect(stored.flowInProgress).toBeNull();
+
+      // ── 같은 userData 로 재시작 ────────────────────────────────────────
+      await cr.close();
+      cr = await launchCleanRoom({
+        claude: "missing",
+        codex: "missing",
+        reuseRoot: root,
+      });
+      const second = await passFirstRunModalsTimed(cr.page);
+      await waitForAppShell(cr.page);
+      await settle(cr.page, 2000);
+      await cr.shot("D2-restart-no-modals");
+      console.log("[cleanroom][D2] 재시작 시 뜬 모달:", second.passed);
+
+      // 이미 답한 유저에게 아무것도 다시 묻지 않는다.
+      expect(second.passed).toEqual([]);
     } finally {
       await cr.close();
     }

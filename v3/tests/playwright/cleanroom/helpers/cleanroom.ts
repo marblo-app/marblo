@@ -570,49 +570,121 @@ export async function launchCleanRoom(
   };
 }
 
+/** 최초실행 모달 통과 결과 — 단계 목록 + F5(모달 간 시차) 실측. */
+export interface FirstRunModalPass {
+  /** 통과한 단계 이름들 (퍼널 기록용). */
+  passed: string[];
+  /**
+   * ★F5 지표 — 언어 선택을 확정한 시점부터 동의 모달이 뜨기까지의 ms.
+   * 둘 중 하나라도 안 떴으면 null.
+   *
+   * 고침 전에는 이 값이 4~5초였다(동의가 auth uid → Firestore 읽기 뒤에 붙어
+   * 있었다). 그 사이 화면은 조작 가능한 상태였고, 유저가 클릭을 시작한 뒤에
+   * 두 번째 전면 오버레이가 떨어졌다. 지금은 같은 흐름 안에서 연속으로 뜬다.
+   */
+  gapMs: number | null;
+  /** 첫 모달이 사라질 때까지 걸린 총 시간(ms) — 호출 시작 기준. */
+  totalMs: number;
+}
+
 /**
- * 최초실행 모달들을 신규 유저가 하듯 통과시킨다. 이 함수가 하는 클릭 하나하나가
- * 신규 유저에게 요구되는 실제 단계다 — 늘어나면 그만큼 활성화 마찰이다.
- * @returns 통과한 단계 이름들 (퍼널 기록용)
+ * 최초실행 모달들을 신규 유저가 하듯 통과시키고 시차를 실측한다. 이 함수가 하는
+ * 클릭 하나하나가 신규 유저에게 요구되는 실제 단계다 — 늘어나면 그만큼 활성화
+ * 마찰이다.
+ *
+ * 최초실행 모달은 한 흐름(FirstRunFlow) 안에서 순차로 뜬다:
+ *   ① 언어 선택 (LanguageFirstRun)
+ *   ② 개인정보/텔레메트리 동의 (PrivacyConsentModal) — ①을 닫는 같은 커밋에서
+ *      렌더된다. 로그인·Firestore 를 기다리지 않는다(F5 수정).
+ * 둘 다 전면 오버레이(fixed inset-0)라 안 닫으면 이후 모든 클릭이 막힌다.
  */
-export async function passFirstRunModals(page: Page): Promise<string[]> {
+export async function passFirstRunModalsTimed(
+  page: Page,
+): Promise<FirstRunModalPass> {
+  const startedAt = Date.now();
   const passed: string[] = [];
   // 아무 모달도 안 뜨는 상태(=재시작 런)에서 오래 붙잡히지 않도록, 마지막
-  // 동작 이후 12초간 조용하면 끝낸다. 동의 모달은 부팅 후 ~8-12초에 뜬다.
-  const QUIET_MS = 12_000;
+  // 동작 이후 조용하면 끝낸다. 동의가 네트워크 뒤에 붙어 있던 시절엔 12초가
+  // 필요했지만(부팅 후 ~8-12초), 이제 ①과 같은 틱에 뜨므로 5초면 충분하다.
+  const QUIET_MS = 5_000;
   let deadline = Date.now() + QUIET_MS;
+  let langAt: number | null = null;
+  let consentAt: number | null = null;
 
-  // 최초실행 모달은 순차·비동기로 뜬다:
-  //   ① 언어 선택 (LanguageFirstRun) — 클린 userData 면 즉시
-  //   ② 개인정보/텔레메트리 동의 (PrivacyConsentModal) — auth user uid 를
-  //      받은 뒤에야 판정하므로 부팅 후 수 초 뒤. 한 번의 짧은 대기로는 놓친다.
-  // 둘 다 전면 오버레이(fixed inset-0)라 안 닫으면 이후 모든 클릭이 막힌다.
   while (Date.now() < deadline) {
-    const lang = page
-      .getByRole("button", { name: "계속", exact: true })
-      .first();
-    if (await lang.isVisible().catch(() => false)) {
-      await lang.click().catch(() => {});
-      passed.push("language");
-      deadline = Date.now() + QUIET_MS;
-      await page.waitForTimeout(500);
-      continue;
+    // 각 단계는 한 번씩만 처리한다 — click 직후 재렌더 전에 루프가 한 바퀴 더
+    // 돌면 같은 버튼을 두 번 눌러 단계가 중복 기록될 수 있다.
+    if (!passed.includes("language")) {
+      const lang = page
+        .getByRole("button", { name: "계속", exact: true })
+        .first();
+      if (await lang.isVisible().catch(() => false)) {
+        await lang.click().catch(() => {});
+        langAt = Date.now();
+        passed.push("language");
+        deadline = Date.now() + QUIET_MS;
+        continue;
+      }
     }
     // 정확 일치 — "나중에 설정하기" 같은 다른 버튼과 헷갈리면 모달이 안 닫힌다.
     const consent = page
       .getByRole("button", { name: "나중에", exact: true })
       .first();
     if (await consent.isVisible().catch(() => false)) {
+      consentAt = Date.now();
       await consent.click().catch(() => {});
       passed.push("privacy-consent");
       // 동의까지 닫았으면 더 기다릴 이유가 없다.
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(500);
       break;
     }
-    await page.waitForTimeout(500);
+    // 100ms 폴링 — 측정 대상이 "두 모달 사이의 시차" 자체라 폴링 간격이
+    // 그대로 측정 오차가 된다.
+    await page.waitForTimeout(100);
   }
 
-  return passed;
+  return {
+    passed,
+    gapMs: langAt !== null && consentAt !== null ? consentAt - langAt : null,
+    totalMs: Date.now() - startedAt,
+  };
+}
+
+/**
+ * `passFirstRunModalsTimed` 의 단계 목록만 필요한 호출부용 얇은 래퍼.
+ * @returns 통과한 단계 이름들
+ */
+export async function passFirstRunModals(page: Page): Promise<string[]> {
+  return (await passFirstRunModalsTimed(page)).passed;
+}
+
+/**
+ * 앱 셸이 실제로 뜰 때까지(BrandLoader 가 사라질 때까지) 기다린다.
+ *
+ * ★F5 수정 이후 필요해진 대기다. 예전엔 동의 모달이 부팅 뒤에 붙어 있어서
+ * "모달을 다 닫았다 = 셸이 이미 떴다" 였다. 지금은 모달이 부팅보다 먼저
+ * 끝나므로(실측 ~0.7s vs 부팅 ~5s), 고정 대기로 관측하면 아직 로더인 화면을
+ * 보게 된다. 부팅 시간 자체가 줄어든 건 아니다 — 유저가 그 시간을 **모달에
+ * 가로막힌 채**가 아니라 로더를 보며 기다린다는 것이 달라진 점이다.
+ *
+ * @returns 제한시간 안에 셸이 떴는가
+ */
+export async function waitForAppShell(
+  page: Page,
+  timeoutMs = 30_000,
+): Promise<boolean> {
+  const LOADER = /불러오는 중|로딩 중|Loading projects|Loading\.\.\./;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const text = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
+    // 빈 문자열 = 아직 렌더 전. 로더 문구가 사라진 시점이 셸 등장이다.
+    if (text.trim() && !LOADER.test(text)) return true;
+    await page.waitForTimeout(200);
+  }
+  return false;
 }
 
 /**
@@ -684,6 +756,9 @@ export async function dismissBanner(page: Page): Promise<void> {
 
 /** 워크스페이스 셸의 우측 탭 전환 (라벨 = WorkTabs 의 i18n 라벨). */
 export async function openWorkTab(page: Page, label: string): Promise<void> {
+  // 탭은 셸에만 있다. 예전엔 동의 모달이 부팅 뒤에 떠서 "모달을 닫았다"가
+  // 곧 "셸이 떴다"였지만(F5), 이제 모달이 먼저 끝나므로 명시적으로 기다린다.
+  await waitForAppShell(page);
   await page.locator(`button:has-text("${label}")`).first().click();
   await page.waitForTimeout(400);
 }
@@ -710,6 +785,9 @@ export async function injectProject(
   page: Page,
   folderPath: string,
 ): Promise<void> {
+  // 셸이 뜨기 전에 넣으면 부팅 중 projects 하이드레이션이 currentProject 를
+  // 도로 비운다 — 폴더 미연결로 보여 ④단계 버튼이 disabled 로 남는다.
+  await waitForAppShell(page);
   await page.waitForFunction(
     () => {
       const tw = (
