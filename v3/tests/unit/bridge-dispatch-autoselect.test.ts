@@ -333,13 +333,13 @@ describe("★무회귀 — 명시 지정이 우선", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// ★hyKsSYYM — env-swap 자동선택 실물 스폰 증명(사장님 A안, "읽는 셀 = 쓰는 셀").
+// ★구독 우선 — env-swap 키가 있어도 쿼터가 넉넉하면 native 구독 칸 우선.
 //
-// 위 테스트들과 달리 여기서는 MINIMAX_API_KEY 를 **채운다** — vendorEnvReadiness
-// 가 실제로 ready=true 를 내는 상태에서 dispatch 가 진짜 argv/env 를 무엇으로
-// 만드는지 본다(dist-electron 스폰 경로 그대로, PTY/워크트리만 fake).
+// 여기서는 MINIMAX_API_KEY 를 **채운다** — vendorEnvReadiness 가 ready=true 를 내도
+// 구독형 native 칸의 effective 단가가 낮으면 dispatch 가 env-swap 을 쓰지 않는지
+// 본다(dist-electron 스폰 경로 그대로, PTY/워크트리만 fake).
 // ─────────────────────────────────────────────────────────────────────────
-describe("★env-swap 자동선택 실물 스폰(hyKsSYYM, 사장님 A안)", () => {
+describe("★구독 우선 실물 스폰", () => {
   const savedKey = { value: undefined as string | undefined };
 
   beforeEach(() => {
@@ -352,25 +352,24 @@ describe("★env-swap 자동선택 실물 스폰(hyKsSYYM, 사장님 A안)", () 
     else process.env.MINIMAX_API_KEY = savedKey.value;
   });
 
-  it("키가 있으면 simple 자동선택이 env-swap(MiniMax-M2.7)을 실제로 고른다", async () => {
+  it("키가 있어도 구독 쿼터가 넉넉하면 simple 자동선택이 구독 칸을 실제로 고른다", async () => {
     const { am, agentId, model } = await dispatchOnce({ complexity: "simple" });
-    expect(model).toBe("MiniMax-M2.7");
+    expect(model).toBe("claude-sonnet-5");
 
     // 읽는 셀 = 쓰는 셀: argv 에 실제로 그 모델 id 가 그대로 핀된다.
     const args = am.getAgent(agentId)!.launchConfig!.args;
     expect(args).toContain("--model");
-    expect(args[args.indexOf("--model") + 1]).toBe("MiniMax-M2.7");
+    expect(args[args.indexOf("--model") + 1]).toBe("claude-sonnet-5");
 
-    // 벤더 env 프로파일이 실제로 얹힌다(전부-아니면-전무의 "전부" 쪽).
+    // 구독형 native provider 이므로 env-swap 프로파일은 얹히지 않는다.
     const env = am.getAgent(agentId)!.launchConfig!.env;
-    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("fixture-minimax-key");
-    expect(env.ANTHROPIC_BASE_URL).toBeTruthy();
+    expect(env.ANTHROPIC_AUTH_TOKEN).not.toBe("fixture-minimax-key");
 
     // 그래프 키(dispatchReason)도 같은 모델을 가리킨다(대소문자는
     // formatModelKey 가 소문자로 정규화 — routing-model-key.ts).
     const reason = String(lastDecision().decisionReason);
     expect(reason).toContain("auto-model[simple]");
-    expect(reason).toContain("minimax-m2.7");
+    expect(reason).toContain("claude-sonnet-5");
   });
 
   it("키가 있어도 complex 자동선택은 여전히 claude-fable-5 를 고른다(SWE·비대칭감점 우세)", async () => {

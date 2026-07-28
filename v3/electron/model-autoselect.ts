@@ -68,9 +68,11 @@
 
 import {
   EFFORT_LADDER,
+  HARNESS_NATIVE_VENDOR,
   getModel,
   type CapabilityTier,
   type EffortLevel,
+  type HarnessId,
 } from "./model-registry";
 import {
   costIndexForModel,
@@ -148,9 +150,45 @@ const CAPABILITY_ORDER: Readonly<Record<CapabilityTier, number>> = {
   frontier: 3,
 };
 
+const SUBSCRIPTION_HARNESSES: ReadonlySet<HarnessId> = new Set([
+  "claude",
+  "gpt",
+  "grok",
+]);
+
 /**
- * 잔여 쿼터 → 단가 가중치 배수. 잔량이 적을수록 싼 칸이 유리해진다.
- * 데이터가 없으면 1.0(중립) — 프로브 실패가 라우팅을 바꾸지 않는다.
+ * 잔여 쿼터 → 구독형 effective 단가 배수.
+ *
+ * 경제 논리:
+ *   · claude/codex/grok 같은 CLI 계정 구독은 이미 낸 정액권이다. 쿼터가 남아 있으면
+ *     지금 한 번 더 쓰는 한계비용은 사실상 0 이므로 list price 로 env-swap 과
+ *     비교하면 안 된다.
+ *   · env-swap(zai/minimax/moonshot)은 API 키 종량제라 매번 실제 증분지출이 난다.
+ *     그래서 단가를 낮춰 보정하지 않는다.
+ *   · 구독 쿼터가 마르면 아껴야 할 자원이 되므로 effective 단가를 급격히 올린다.
+ *
+ * 이 값은 별도 budgetBias 성분이 아니라 `costIndex` 자체에 곱한다. 그래야 단가 성분
+ * 안에서 "구독(쿼터有) > env-swap > 구독(소진)" 서열이 결정되고, 단가 외 성분이
+ * 같은 사실을 두 번 세지 않는다.
+ */
+export function subscriptionCostScaleForHeadroom(
+  usedPercent?: number | null,
+): number {
+  if (typeof usedPercent !== "number" || !Number.isFinite(usedPercent)) {
+    return 0.02;
+  }
+  const remaining = 100 - Math.min(100, Math.max(0, usedPercent));
+  if (remaining >= 50) return 0.02;
+  if (remaining >= 25) return 0.08;
+  if (remaining >= 10) return 0.35;
+  if (remaining > 0) return 4;
+  return 12;
+}
+
+/**
+ * 잔여 쿼터 → 단가 민감도 배수. 이 값도 cost 항 안에서만 쓰며, 별도 budget 점수로
+ * 더하지 않는다. 구독 쿼터가 마를수록 같은 구독형 내부의 고단가 칸도 더 강하게
+ * 벌해야 해서 effective 단가 스케일과 함께 cost log-ratio 를 증폭한다.
  */
 export function costPressureForHeadroom(usedPercent?: number | null): number {
   if (typeof usedPercent !== "number" || !Number.isFinite(usedPercent)) {
@@ -161,6 +199,28 @@ export function costPressureForHeadroom(usedPercent?: number | null): number {
   if (remaining >= 25) return 1.4;
   if (remaining >= 10) return 2;
   return 2.6;
+}
+
+export function isSubscriptionMeteredModel(modelId: string): boolean {
+  const entry = getModel(modelId);
+  if (!entry) return false;
+  return (
+    SUBSCRIPTION_HARNESSES.has(entry.harness) &&
+    entry.provider === HARNESS_NATIVE_VENDOR[entry.harness]
+  );
+}
+
+export function effectiveCostIndexForModel(
+  modelId: string,
+  budgetUsedPercent?: number | null,
+): number | undefined {
+  const entry = getModel(modelId);
+  if (!entry) return undefined;
+  const base = costIndexForModel(entry.id);
+  if (typeof base !== "number") return undefined;
+  return isSubscriptionMeteredModel(entry.id)
+    ? base * subscriptionCostScaleForHeadroom(budgetUsedPercent)
+    : base;
 }
 
 /** 동률로 볼 점수차. 1층 스코어러의 TIED_SCORE_BAND(5)와 같은 감각. */
@@ -500,15 +560,14 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
   const entryGuidance = entryCandidate
     ? modelGuidance(entryCandidate.model)
     : undefined;
-  const entryCost = entryGuidance?.costIndex;
   const entryBench = entryGuidance?.benchScore;
   const entryCapability = entryGuidance
     ? CAPABILITY_ORDER[entryGuidance.capability]
     : undefined;
 
-  const pressure = costPressureForHeadroom(budgetUsedPercent);
   const fitWeights = FIT_PENALTY[tier];
-  const costWeight = COST_WEIGHT[tier] * pressure;
+  const costWeight =
+    COST_WEIGHT[tier] * costPressureForHeadroom(budgetUsedPercent);
   const benchWeight = BENCH_WEIGHT[tier];
   const capWeight = CAPABILITY_WEIGHT[tier];
   const diversityCoefficient =
@@ -537,9 +596,17 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
           : fitWeights.down * steps; // steps<0 → 음수 유지
 
     const guidance = modelGuidance(candidate.model);
+    const effectiveEntryCost = entryCandidate
+      ? effectiveCostIndexForModel(entryCandidate.model, budgetUsedPercent)
+      : undefined;
+    const effectiveCandidateCost = effectiveCostIndexForModel(
+      candidate.model,
+      budgetUsedPercent,
+    );
     const cost =
-      typeof entryCost === "number" && typeof guidance?.costIndex === "number"
-        ? costWeight * log2Ratio(entryCost, guidance.costIndex)
+      typeof effectiveEntryCost === "number" &&
+      typeof effectiveCandidateCost === "number"
+        ? costWeight * log2Ratio(effectiveEntryCost, effectiveCandidateCost)
         : 0;
     // ★**같은 벤치끼리만** 뺀다. SWE-bench 는 문제집합이 다른 4종이고, 벤더마다
     // 보고하는 변형이 다르다(예: OpenAI 는 Verified 를 아예 안 낸다 — Pro 만).
@@ -593,7 +660,7 @@ export function selectAutoModel(input: AutoSelectInput): AutoModelPlan | null {
   // 탐색은 "미래의 판단을 좋게 하려고 지금 조금 더 쓰는 것" 인데, 잔량이 부족한
   // 순간엔 그 지출이 다음 티켓의 스폰 자체를 못 하게 만들 수 있다. 그때는 근거상
   // 최선(=대개 더 싼 칸)만 그대로 쓴다.
-  const conserving = pressure > 1;
+  const conserving = costPressureForHeadroom(budgetUsedPercent) > 1;
 
   const entryScore = scores.find(
     (s) => s.candidate.modelKey === entryCandidate?.modelKey,

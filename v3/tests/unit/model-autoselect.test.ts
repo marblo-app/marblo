@@ -21,6 +21,7 @@ import {
   resolveEpsilon,
   modelGuidance,
   DEFAULT_EPSILON,
+  effectiveCostIndexForModel,
 } from "../../electron/model-autoselect";
 import { costIndexForModel, entryRung } from "../../electron/model-ladder";
 import { formatModelKey } from "../../electron/routing-model-key";
@@ -175,10 +176,13 @@ describe("후보 구성", () => {
 });
 
 describe("★단순 → 저단가", () => {
-  it("simple claude 는 후보 중 실단가가 가장 싼 칸을 고른다", () => {
+  it("simple claude 는 후보 중 effective 단가가 가장 싼 구독 칸을 고른다", () => {
     const p = plan("claude", "simple")!;
-    const costs = p.scores.map((s) => costIndexForModel(s.candidate.model)!);
-    expect(costIndexForModel(p.model)).toBe(Math.min(...costs));
+    const costs = p.scores.map(
+      (s) => effectiveCostIndexForModel(s.candidate.model)!,
+    );
+    expect(effectiveCostIndexForModel(p.model)).toBe(Math.min(...costs));
+    expect(p.model).toBe("claude-sonnet-5");
     expect(p.mode).toBe("top-score");
   });
 
@@ -338,11 +342,11 @@ describe("★env-swap 자동선택 편입(hyKsSYYM, 사장님 A안)", () => {
     );
   });
 
-  it("simple 은 env-swap 최저단가 칸(MiniMax-M2.7)이 이긴다 — 점수가 결정, 강제 배치가 아니다", () => {
+  it("구독 쿼터가 넉넉하면 simple 은 env-swap 실단가보다 구독 칸을 우선한다", () => {
     const p = plan("claude", "simple")!;
-    expect(p.model).toBe("MiniMax-M2.7");
-    expect(costIndexForModel(p.model)).toBe(
-      Math.min(...p.scores.map((s) => costIndexForModel(s.candidate.model)!)),
+    expect(p.model).toBe("claude-sonnet-5");
+    expect(effectiveCostIndexForModel(p.model)).toBeLessThan(
+      costIndexForModel("MiniMax-M2.7")!,
     );
   });
 
@@ -363,8 +367,8 @@ describe("★env-swap 자동선택 편입(hyKsSYYM, 사장님 A안)", () => {
     }
   });
 
-  it("읽는 셀 = 쓰는 셀 — env-swap 이 이기면 modelKey 가 그 모델 id 로부터 결정적으로 파생된다(effort 없음)", () => {
-    const p = plan("claude", "simple")!;
+  it("구독 쿼터가 마르면 env-swap 이 overflow 로 이기고 modelKey 가 그 모델 id 에서 파생된다", () => {
+    const p = plan("claude", "simple", { budgetUsedPercent: 95 })!;
     expect(p.model).toBe("MiniMax-M2.7");
     expect(p.pinsModel).toBe(true);
     expect(p.effort).toBeUndefined();
