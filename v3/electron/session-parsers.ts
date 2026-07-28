@@ -106,6 +106,31 @@ export function formatForModel(
   }
 }
 
+/**
+ * Harnesses whose usage lives in a **per-agent CLI home** that the cost
+ * tracker self-resolves (`CostTracker.trackCliSession`), as opposed to claude
+ * (a concrete `~/.claude` path known at launch) or antigravity (SQLite store).
+ *
+ * ★SSOT on purpose. This list used to be spelled out inline in three places —
+ * the tracker's routing branch, the spawn-time kickoff in agent-manager, and
+ * the session callback in main — and `grok` landed in only two of them
+ * (#630). The tracker knew how to read grok's `updates.jsonl`, but nothing
+ * ever *started* it on a fresh spawn, so grok wrote 0 cost_logs rows and fell
+ * out of the Usage tab's vendor→sub-model breakdown entirely while still
+ * showing up on the events-sourced axes. Adding a harness must not require
+ * remembering three call sites.
+ */
+export const CLI_HOME_TRACKED_MODELS = ["gpt", "gemini", "grok"] as const;
+
+export type CliHomeTrackedModel = (typeof CLI_HOME_TRACKED_MODELS)[number];
+
+/** True when this harness is cost-tracked from its per-agent CLI home. */
+export function isCliHomeTracked(
+  model: string | null | undefined,
+): model is CliHomeTrackedModel {
+  return CLI_HOME_TRACKED_MODELS.includes(model as CliHomeTrackedModel);
+}
+
 export function parseSessionDelta(
   format: SessionFormat,
   lines: string[],

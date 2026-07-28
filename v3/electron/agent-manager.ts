@@ -18,6 +18,7 @@ import {
   shouldDemoteAbandonedTurn,
 } from "./agent-status-reconcile";
 import { looksLikeLoginScreen } from "./harness-manager";
+import { isCliHomeTracked } from "./session-parsers";
 import { isHarnessFamilyId } from "./model-registry";
 
 export type ModelType =
@@ -881,19 +882,25 @@ export class AgentManager {
       }
     }
 
-    // Codex / Gemini cost-tracking kickoff.
+    // Codex / Gemini / Grok cost-tracking kickoff.
     //
     // The Claude session detector above only scans ~/.claude/projects, so it
-    // never fires onSessionDetected for codex/gemini. Their cost tracking is
+    // never fires onSessionDetected for these. Their cost tracking is
     // file-based and self-resolving (CostTracker polls the per-agent CLI home
     // and re-resolves the newest session file each tick), so we just nudge it
     // to start a few seconds after launch — the CLI needs a moment to write
     // its first session file. sessionId is passed empty; the tracker ignores
     // it for these models.
+    //
+    // ★The membership test is `isCliHomeTracked`, not an inline list. grok was
+    // missing from the inline version, and since no other branch claims it,
+    // a freshly spawned grok agent got no tracker at all → 0 cost_logs rows
+    // (the cold-boot reconnect path passed `agentData.model` straight through,
+    // so the loss was new-spawn-only). See session-parsers.
     if (
       this.onSessionDetected &&
       params.cwd &&
-      (params.model === "gpt" || params.model === "gemini")
+      isCliHomeTracked(params.model)
     ) {
       const rootPath = params.cwd;
       const agentName = params.name;

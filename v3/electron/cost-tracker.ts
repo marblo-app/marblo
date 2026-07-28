@@ -24,6 +24,7 @@ import {
 } from "./claude-usage-probe";
 import {
   formatForModel,
+  isCliHomeTracked,
   newParseState,
   parseSessionDelta,
   type ParseState,
@@ -727,7 +728,7 @@ export class CostTracker {
     // in session-parsers.ts — so it belongs on this path, reading only its own
     // home. (Being tracked also stops the PTY scraper from inventing
     // model:"unknown" rows off grok's terminal output.)
-    if (model === "gpt" || model === "gemini" || model === "grok") {
+    if (isCliHomeTracked(model)) {
       this.trackCliSession(agentId, model, spawnedModelId);
       return;
     }

@@ -119,6 +119,7 @@ import {
   deleteVendorSecret,
 } from "./vendor-secrets";
 import { CostTracker, onUnmatchedPricing } from "./cost-tracker";
+import { isCliHomeTracked } from "./session-parsers";
 import { getAccountRateLimits } from "./account-usage";
 import { mainTelemetry } from "./telemetry";
 import { initMainSentry } from "./sentry-main";
@@ -1026,11 +1027,14 @@ const agentManager = new AgentManager(
       costTracker.trackSession(agentId, rootPath, sessionId, model);
       return;
     }
-    if (model === "gpt" || model === "gemini") {
-      // Codex/Gemini resume 는 네이티브(--last / --resume latest)라 UUID 라벨을
-      // 저장할 필요가 없다. 파일 기반 비용 추적만 시작 — 트래커가 per-agent
-      // CLI home 아래 최신 세션 파일을 스스로 찾고, 아직 없으면 다음 폴에서
-      // 잡는다 (유실 없음).
+    if (isCliHomeTracked(model)) {
+      // Codex/Gemini/Grok resume 는 네이티브(--last / --resume latest)라 UUID
+      // 라벨을 저장할 필요가 없다. 파일 기반 비용 추적만 시작 — 트래커가
+      // per-agent CLI home 아래 최신 세션 파일을 스스로 찾고, 아직 없으면 다음
+      // 폴에서 잡는다 (유실 없음).
+      //
+      // ★grok 이 이 분기에 없던 동안엔 아래 claude 분기로 흘러 클로드용
+      // saveSessionLabel(빈 sessionId)까지 탔다 — 지금은 자기 경로로 온다.
       costTracker.trackSession(agentId, rootPath, null, model, seedModel);
       return;
     }
