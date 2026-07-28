@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { useModelFactSheetStore } from "../../stores/modelFactSheetStore";
 import { vendorColor } from "../../lib/usageBreakdown";
@@ -8,6 +8,7 @@ import {
   formatRate,
   shortHarness,
 } from "../../lib/modelFactFormat";
+import { groupModelsByTier, type ModelTier } from "../../lib/modelTier";
 
 /**
  * 사용량 탭 상단 **모델 정보표** — 기본 접힘.
@@ -33,15 +34,30 @@ import {
  * **벤치 이름과 하네스**를 같이 적고, 같은 벤치의 다른 하네스 점수가 있으면 그것도
  * 함께 보인다(haiku 4.5: 벤더 73.3 vs 공식 리더보드 66.6). 열을 세로로 훑어 순위를
  * 매기지 말라는 경고를 표 안에 박아 두는 셈이다.
+ *
+ * ── ★티어 묶음(프리미어 · 일반작업 · 가성비) ────────────────────────────
+ * 위의 세 칸은 정확하지만, 19줄을 훑어 "그래서 뭘 고르나" 를 사용자가 직접 계산해야
+ * 했다. 그 한 단계를 `lib/modelTier.ts` 가 대신 밟는다 — **여기에 모델 목록이 없다**.
+ * 티어는 행이 들고 온 사실(capability + 벤치/단가 비)에서 파생되므로 레지스트리에
+ * 모델이 늘면 새 줄이 알아서 제 묶음에 들어간다. 파생 규칙과 그 한계는 그 파일에
+ * 적혀 있고, 화면은 묶음 헤더의 툴팁으로 같은 말을 사용자에게도 한다.
  */
 
 export function ModelFactSheet() {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [tierFilter, setTierFilter] = useState<ModelTier | "all">("all");
   const rows = useModelFactSheetStore((s) => s.rows);
   const status = useModelFactSheetStore((s) => s.status);
   const load = useModelFactSheetStore((s) => s.load);
   const reload = useModelFactSheetStore((s) => s.reload);
+
+  // ★묶기는 **항상 전체 행**으로 한다. 필터는 그 결과에서 보여줄 묶음만 고른다 —
+  // 필터링한 뒤에 묶으면 기준(단가 중앙값)이 같이 좁아져 같은 모델이 필터를 바꿀
+  // 때마다 다른 티어로 보인다.
+  const groups = useMemo(() => groupModelsByTier(rows), [rows]);
+  const visibleGroups =
+    tierFilter === "all" ? groups : groups.filter((g) => g.tier === tierFilter);
 
   // 펼칠 때 처음 한 번만 읽는다. 접혀 있는 동안은 IPC 왕복이 없다.
   useEffect(() => {
@@ -95,6 +111,12 @@ export function ModelFactSheet() {
 
           {rows.length > 0 && (
             <>
+              <TierFilter
+                groups={groups}
+                selected={tierFilter}
+                total={rows.length}
+                onSelect={setTierFilter}
+              />
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-xs">
                   <thead className="text-[11px] text-gray-500">
@@ -116,21 +138,143 @@ export function ModelFactSheet() {
                       </th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {rows.map((row) => (
-                      <FactRow key={row.modelId} row={row} />
-                    ))}
-                  </tbody>
+                  {/* 묶음마다 tbody 를 따로 둔다 — 헤더 줄이 그 묶음에 속한다는
+                      것이 마크업으로도 참이어야 스크린리더가 같이 읽는다. */}
+                  {visibleGroups.map((group) => (
+                    <tbody key={group.tier}>
+                      <TierHeaderRow
+                        tier={group.tier}
+                        count={group.rows.length}
+                      />
+                      {group.rows.map(({ row }) => (
+                        <FactRow key={row.modelId} row={row} />
+                      ))}
+                    </tbody>
+                  ))}
                 </table>
               </div>
               <p className="text-[11px] leading-snug text-gray-600">
                 ⓘ {t("usage.factSheet.footer")}
+              </p>
+              <p className="text-[11px] leading-snug text-gray-600">
+                ⓘ {t("usage.factSheet.tierFooter")}
               </p>
             </>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * 티어 배색. 묶음 헤더·필터 칩이 같은 색을 쓰므로 한 군데서만 정의한다.
+ * ★색만으로 뜻을 나르지 않는다 — 라벨 글자가 항상 함께 있다(색각 이상 대응).
+ */
+const TIER_STYLE: Readonly<Record<ModelTier, { dot: string; text: string }>> = {
+  premier: { dot: "bg-violet-400", text: "text-violet-300" },
+  standard: { dot: "bg-sky-400", text: "text-sky-300" },
+  value: { dot: "bg-emerald-400", text: "text-emerald-300" },
+};
+
+/**
+ * 티어 라벨/설명 i18n 키. 템플릿 문자열로 조립하지 않고 리터럴로 적는다 —
+ * `t()` 의 키 타입이 유니온이라, 조립하면 오탈자를 타입체커가 못 잡는다.
+ */
+const TIER_LABEL_KEY = {
+  premier: "usage.factSheet.tier.premier",
+  standard: "usage.factSheet.tier.standard",
+  value: "usage.factSheet.tier.value",
+} as const;
+
+const TIER_DESC_KEY = {
+  premier: "usage.factSheet.tier.premierDesc",
+  standard: "usage.factSheet.tier.standardDesc",
+  value: "usage.factSheet.tier.valueDesc",
+} as const;
+
+/**
+ * 티어 필터 칩. 표를 좁혀 보는 용도지, 티어 판정을 바꾸지는 않는다(판정은 늘
+ * 전체 묶음 기준). 선택 상태는 `aria-pressed` 로도 나른다.
+ */
+function TierFilter({
+  groups,
+  selected,
+  total,
+  onSelect,
+}: {
+  groups: { tier: ModelTier; rows: unknown[] }[];
+  selected: ModelTier | "all";
+  total: number;
+  onSelect: (tier: ModelTier | "all") => void;
+}) {
+  const { t } = useTranslation();
+  const chip = (key: ModelTier | "all", label: string, count: number) => {
+    const active = selected === key;
+    const style = key === "all" ? null : TIER_STYLE[key];
+    return (
+      <button
+        key={key}
+        type="button"
+        aria-pressed={active}
+        onClick={() => onSelect(key)}
+        title={key === "all" ? undefined : t(TIER_DESC_KEY[key])}
+        className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] ${
+          active
+            ? "border-gray-500 bg-gray-700/60 text-gray-100"
+            : "border-gray-700 text-gray-400 hover:text-gray-200"
+        }`}
+      >
+        {style && (
+          <span
+            className={`inline-block h-1.5 w-1.5 rounded-full ${style.dot}`}
+            aria-hidden
+          />
+        )}
+        <span>{label}</span>
+        <span className="text-gray-500">{count}</span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+      {chip("all", t("usage.factSheet.tier.all"), total)}
+      {groups.map((g) =>
+        chip(g.tier, t(TIER_LABEL_KEY[g.tier]), g.rows.length),
+      )}
+    </div>
+  );
+}
+
+/** 묶음 헤더 줄. 라벨 + 개수 + 한 줄 설명(툴팁엔 파생 규칙 전문). */
+function TierHeaderRow({ tier, count }: { tier: ModelTier; count: number }) {
+  const { t } = useTranslation();
+  const style = TIER_STYLE[tier];
+  return (
+    <tr className="border-b border-gray-700 bg-gray-800/40">
+      {/* 이 줄은 **뒤따르는 행들**의 머리다 → scope=rowgroup(= 이 tbody). */}
+      <th colSpan={5} scope="rowgroup" className="px-0 py-1.5 text-left">
+        <span className="flex items-center gap-1.5">
+          <span
+            className={`inline-block h-2 w-2 rounded-full ${style.dot}`}
+            aria-hidden
+          />
+          <span className={`text-[11px] font-medium ${style.text}`}>
+            {t(TIER_LABEL_KEY[tier])}
+          </span>
+          <span className="text-[10px] text-gray-500">
+            {t("usage.factSheet.tier.count", { n: count })}
+          </span>
+          <span
+            className="truncate text-[10px] font-normal text-gray-500"
+            title={t("usage.factSheet.tier.ruleTip")}
+          >
+            {t(TIER_DESC_KEY[tier])}
+          </span>
+        </span>
+      </th>
+    </tr>
   );
 }
 

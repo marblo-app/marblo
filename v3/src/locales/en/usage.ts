@@ -133,6 +133,19 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.factSheet.altMeasure": "other run {harness} · {date}: {score}%",
   "usage.factSheet.altMeasureTip":
     "Another measurement of the same model on the same benchmark — a different scaffold (vendor-internal vs the official leaderboard), or the same vendor publishing again on a different date. This is how much it moves, so read the column as an order of magnitude, not a ranking.",
+  // ── Tier grouping (premier · standard · value) ──────────
+  "usage.factSheet.tier.all": "All",
+  "usage.factSheet.tier.count": "{n}",
+  "usage.factSheet.tier.premier": "Premier",
+  "usage.factSheet.tier.premierDesc": "when you need top capability",
+  "usage.factSheet.tier.standard": "Standard",
+  "usage.factSheet.tier.standardDesc": "mid grade",
+  "usage.factSheet.tier.value": "Value",
+  "usage.factSheet.tier.valueDesc": "cheap, and good enough",
+  "usage.factSheet.tier.ruleTip":
+    "Tiers are derived from the facts in this table, not from a hand-written list of model names. The base is the registry capability grade (frontier/top → Premier, mid → Standard, cheap → Value), plus one more move in a single direction: a Standard model is promoted to Value only if its output price is at or below the table's median AND its performance-per-dollar is at or above the median. Performance is normalized against the best score on the same benchmark so different benchmarks never get compared directly. A cheap price never demotes a Premier model — a cheap Premier is still Premier.",
+  "usage.factSheet.tierFooter":
+    "Tiers are derived automatically from the numbers above (registry capability grade + performance-per-dollar). Add a model to the registry and it lands in the right group here on its own. A model with no official benchmark number is never promoted to Value: we know it is cheap, but not that it is good enough. Benchmark conditions differ per model, so treat this grouping as rough guidance rather than a precise ranking.",
   "usage.factSheet.footer":
     "Prices are read verbatim from the model registry (electron/model-registry.ts) as the single source — add a model there and it shows up here automatically. SWE-bench is four different problem sets, and each model reports under different benchmark and scaffold conditions, so these are rough figures. Every number links to its primary source and the date it was read; cells with no official number say 'needs checking' rather than guessing.",
 

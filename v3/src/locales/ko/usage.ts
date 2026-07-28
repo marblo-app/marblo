@@ -134,6 +134,19 @@ export const usage = {
   "usage.factSheet.altMeasure": "타 측정 {harness} · {date}: {score}%",
   "usage.factSheet.altMeasureTip":
     "같은 모델·같은 벤치의 다른 측정입니다. 스캐폴드가 다르거나(벤더 자체 vs 공식 리더보드), 같은 벤더가 다른 날 다시 발표한 값입니다. 이만큼 움직이므로 이 열은 순위표가 아니라 자릿수 감각입니다.",
+  // ── 티어 묶음(프리미어 · 일반작업 · 가성비) ──────────────
+  "usage.factSheet.tier.all": "전체",
+  "usage.factSheet.tier.count": "{n}개",
+  "usage.factSheet.tier.premier": "프리미어",
+  "usage.factSheet.tier.premierDesc": "최고 성능이 필요할 때",
+  "usage.factSheet.tier.standard": "일반작업",
+  "usage.factSheet.tier.standardDesc": "중간 등급",
+  "usage.factSheet.tier.value": "가성비",
+  "usage.factSheet.tier.valueDesc": "저단가 · 성능 준수",
+  "usage.factSheet.tier.ruleTip":
+    "티어는 모델 목록을 손으로 적어 둔 것이 아니라 이 표의 사실에서 파생됩니다. 기본은 레지스트리 능력등급(frontier·top → 프리미어, mid → 일반작업, cheap → 가성비)이고, 여기에 가성비 판정이 한 방향으로만 더해집니다: 일반작업 중 output 단가가 표 중앙값 이하이면서 성능/단가 비가 중앙값 이상인 모델만 가성비로 올립니다. 성능은 서로 다른 벤치를 섞지 않도록 같은 벤치 최고점 대비 비율로 환산해 씁니다. 값이 싸다는 이유로 프리미어를 내리지는 않습니다 — 싼 프리미어는 여전히 프리미어입니다.",
+  "usage.factSheet.tierFooter":
+    "티어는 위 숫자에서 자동으로 파생됩니다(레지스트리 능력등급 + 성능/단가 비). 새 모델이 레지스트리에 추가되면 이 표에서 알아서 제 묶음에 들어갑니다. 공식 벤치 수치가 없는 모델은 '싸다'만 알고 '성능이 준수하다'는 모르므로 가성비로 올리지 않습니다. 벤치 조건이 모델마다 달라 이 구분도 정밀한 순위가 아니라 **개략**입니다.",
   "usage.factSheet.footer":
     "단가는 모델 레지스트리(electron/model-registry.ts) 단일소스에서 그대로 읽습니다 — 레지스트리에 모델이 추가되면 이 표에 자동 반영됩니다. SWE-bench 는 문제집합이 다른 4종이고 모델마다 벤치·스캐폴드 조건이 달라 **개략** 값입니다. 각 수치의 1차 출처와 관측일은 셀 아래 링크에 있고, 공식 수치를 못 찾은 칸은 지어내지 않고 '확인 필요' 로 둡니다.",
 
