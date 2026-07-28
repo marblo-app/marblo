@@ -3,6 +3,10 @@ import type { ElectronApplication, Page } from "@playwright/test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import {
+  MODEL_REGISTRY,
+  vendorEnvSecretKeys,
+} from "../../../../electron/model-registry";
 
 /**
  * 클린룸(최초실행) 하네스 — 신규 유저가 앱을 "처음" 켠 상태를 이 맥에서
@@ -54,6 +58,19 @@ export interface CleanRoomScenario {
   orchestratorRunning?: boolean;
   /** 재시작 시나리오용 — 앞선 런의 root 를 그대로 재사용(=같은 userData/HOME). */
   reuseRoot?: string;
+  /**
+   * 추가 env — BYOM(env-swap 벤더) 크레덴셜 주입용. **가짜 값만** 넣는다:
+   * `checkSpawnAuthGate` 는 키의 **존재**만 보고(값은 스폰 env 조립 때나 쓰인다)
+   * 이 하네스는 실제 스폰을 하지 않는다.
+   * ※ `cleanEnv` 의 삭제 목록보다 나중에 적용되므로 여기 넣은 키는 살아남는다.
+   */
+  extraEnv?: Record<string, string>;
+  /**
+   * PATH 앞에 덧붙일 실제 디렉터리 — **라이브 CLI 가 필요한 시나리오 전용**.
+   * (grok MCP 실기동 프로브는 진짜 `grok` 바이너리가 있어야 한다. userData/HOME
+   * 격리는 그대로 유지하고 바이너리 해석 경로만 연다.)
+   */
+  extraPathDirs?: string[];
 }
 
 export interface InjectedMessage {
@@ -84,6 +101,26 @@ export interface CleanRoom {
   injected(): Promise<InjectedMessage[]>;
   /** 스텁 없이 진짜 probeCliAuth — 클린룸 격리의 실효성 관측용(F1). */
   realProbe(model: "claude" | "codex"): Promise<CliProbeResult>;
+  /**
+   * 메인 프로세스에서 `dist-electron/<module>` 의 export 를 **그대로** 부른다.
+   *
+   * 왜 필요한가: #638 스폰 게이트 / #639 grok MCP 게이트는 렌더러에서 보이지 않는
+   * 메인 프로세스 판정이고, 그 판정의 입력(process.env 벤더 키·PATH·키체인)은
+   * 이 클린룸이 만든 격리 환경이다. 유닛테스트는 같은 함수를 **다른 환경**에서
+   * 부르므로 "이 환경에서 실제로 어떤 답이 나오나" 는 못 답한다. dist-electron 은
+   * 번들이 아니라 모듈별 파일로 나오므로 require 캐시를 통해 앱이 로드한 것과
+   * **같은 인스턴스**를 잡는다.
+   */
+  mainCall<T>(
+    moduleFile: string,
+    exportName: string,
+    args: unknown[],
+  ): Promise<T>;
+  /**
+   * 스텁되지 않은 **진짜** IPC 핸들러를 부른다(렌더러가 보는 것과 같은 payload).
+   * 스텁된 채널이면 스텁이 아니라 원본을 부른다.
+   */
+  callRealIpc<T>(channel: string, payload: unknown): Promise<T>;
   /** 시나리오 중간에 CLI 상태를 바꾼다(로그인 완료 흉내). */
   setCli(model: string, state: CliStateName): Promise<void>;
   /** 실패 지점 증거 — test-results/cleanroom/<name>.png */
@@ -134,12 +171,25 @@ function seedFakeBinaries(bin: string, scenario: CleanRoomScenario): void {
   if (scenario.antigravity && scenario.antigravity !== "missing") write("agy");
 }
 
-/** 인증 상태를 새게 만드는 env 를 전부 제거한 launch env. */
+/**
+ * 인증 상태를 새게 만드는 env 를 전부 제거한 launch env.
+ *
+ * ★벤더(env-swap) 크레덴셜도 지운다 — **레지스트리에서 파생**해서. 개발자 셸엔
+ * `ZAI_API_KEY`·`MINIMAX_API_KEY` 같은 키가 실제로 살아 있고(이 맥 실측), 그게
+ * 새면 "키가 없는 신규 유저" 시나리오가 성립하지 않는다(BYOM 게이트가 항상
+ * 통과해 테스트가 vacuous 해진다). 목록을 손으로 적지 않으므로 레지스트리에
+ * 벤더가 늘어도 이 격리는 저절로 따라간다.
+ *
+ * 삭제는 **extra 보다 먼저** 한다 — 시나리오가 명시적으로 넣은 키(BYOM 준비됨
+ * 시나리오)는 살아남아야 하기 때문이다.
+ */
 function cleanEnv(extra: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
-    ...extra,
   };
+  const vendorKeys = new Set(
+    MODEL_REGISTRY.flatMap((m) => vendorEnvSecretKeys(m.id)),
+  );
   for (const key of [
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -151,10 +201,11 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
     "GEMINI_API_KEY",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
+    ...vendorKeys,
   ]) {
     delete env[key];
   }
-  return env;
+  return { ...env, ...extra };
 }
 
 export async function launchCleanRoom(
@@ -189,9 +240,18 @@ export async function launchCleanRoom(
     cwd: REPO_ROOT,
     env: cleanEnv({
       HOME: home,
-      PATH: [bin, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(
-        path.delimiter,
-      ),
+      PATH: [
+        bin,
+        ...(scenario.extraPathDirs ?? []),
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+      ].join(path.delimiter),
+      // 벤더 키(ZAI_API_KEY 등)는 cleanEnv 의 삭제 목록에 없으므로 그대로 산다.
+      // 삭제 목록에 있는 키(ANTHROPIC_*/OPENAI_* …)는 여기 넣어도 지워진다 —
+      // 그 축은 이 하네스가 일부러 닫아 둔 인증 누수 경로다.
+      ...(scenario.extraEnv ?? {}),
       MARBLO_TEST_MODE: "cleanroom",
       // 빌드 산출물 직접 launch → isDev 오판 방지 (helpers/launch.ts 와 동일).
       MARBLO_FORCE_PROD: "1",
@@ -378,6 +438,71 @@ export async function launchCleanRoom(
         if (!orig) throw new Error("원본 cliAuthCheck 핸들러를 못 잡았습니다");
         return orig(null, { model: m });
       }, model) as Promise<CliProbeResult>,
+    mainCall: <T>(moduleFile: string, exportName: string, args: unknown[]) =>
+      app.evaluate(
+        async (_electron, a) => {
+          // evaluate 는 모듈 스코프가 아니라 `require` 도 `import()` 도 렉시컬로
+          // 없다(각각 ReferenceError / "dynamic import callback was not
+          // specified"). 남는 정직한 입구가 `process.getBuiltinModule`(Node 22+)
+          // 이다 — 거기서 얻은 createRequire 는 **표준 CJS 캐시**를 타므로 앱이
+          // 이미 로드한 모듈 인스턴스가 그대로 잡힌다(새 사본이 아니다).
+          const nodeModule = (
+            process as unknown as {
+              getBuiltinModule?: (id: string) => {
+                createRequire: (from: string) => (id: string) => unknown;
+              };
+            }
+          ).getBuiltinModule?.("module");
+          if (!nodeModule?.createRequire) {
+            throw new Error(
+              "process.getBuiltinModule('module') 을 못 얻었습니다 — 메인 프로세스 모듈 접근 불가",
+            );
+          }
+          const mod = nodeModule.createRequire(a.file)(a.file) as Record<
+            string,
+            unknown
+          >;
+          const fn = mod[a.exportName];
+          if (typeof fn !== "function") {
+            throw new Error(`${a.file} 에 ${a.exportName} export 가 없습니다`);
+          }
+          return await (fn as (...x: unknown[]) => unknown)(...a.args);
+        },
+        {
+          file: path.join(REPO_ROOT, "dist-electron", moduleFile),
+          exportName,
+          args,
+        },
+      ) as Promise<T>,
+    callRealIpc: <T>(channel: string, payload: unknown) =>
+      app.evaluate(
+        async ({ ipcMain }, a) => {
+          // 스텁으로 갈아끼운 채널이면 보관해 둔 원본을, 아니면 등록된 핸들러를.
+          const originals = (
+            globalThis as unknown as {
+              __cleanroomOriginals?: Map<
+                string,
+                (e: unknown, p: unknown) => unknown
+              >;
+            }
+          ).__cleanroomOriginals;
+          const handler =
+            originals?.get(a.channel) ??
+            (
+              ipcMain as unknown as {
+                _invokeHandlers: Map<
+                  string,
+                  (e: unknown, p: unknown) => unknown
+                >;
+              }
+            )._invokeHandlers?.get(a.channel);
+          if (!handler) throw new Error(`IPC 핸들러 없음: ${a.channel}`);
+          // 렌더러 event 대신 최소 stub — 이 하네스가 부르는 경로는 게이트에서
+          // 되돌아오므로 event 를 만지지 않는다(만지면 여기서 바로 터진다).
+          return await handler({ sender: { id: 1 } }, a.payload);
+        },
+        { channel, payload },
+      ) as Promise<T>,
     setCli: async (model, state) => {
       await app.evaluate(
         (_electron, arg) => {
@@ -454,6 +579,25 @@ export async function passFirstRunModals(page: Page): Promise<string[]> {
   }
 
   return passed;
+}
+
+/**
+ * 온보딩 진행상태에서 "완료로 찍힌 단계" 목록(`marblo.onboarding.progress.done`).
+ *
+ * 활성화 검증의 핵심 축이다 — 화면 문구보다 이쪽이 정직하다. F3(#635)의 계약이
+ * 여기 걸린다: 전달되지 않은 첫 티켓을 완료로 찍으면 유저는 아무 일도 안 일어난
+ * 화면을 온보딩 종료로 읽는다.
+ */
+export async function doneSteps(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    try {
+      const raw = localStorage.getItem("marblo.onboarding.progress");
+      const parsed = raw ? (JSON.parse(raw) as { done?: string[] }) : {};
+      return parsed.done ?? [];
+    } catch {
+      return [];
+    }
+  });
 }
 
 /** 레거시 모달 위저드가 현재 떠 있는지 (제목 = 스텝별 h2). */

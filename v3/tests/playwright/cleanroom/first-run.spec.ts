@@ -4,6 +4,7 @@ import {
   bannerTitle,
   bannerVisible,
   dismissBanner,
+  doneSteps,
   injectProject,
   launchCleanRoom,
   openWorkTab,
@@ -256,6 +257,10 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
       expect(injected[0].message.length).toBeGreaterThan(20);
 
       await expect(cr.page.locator("body")).toContainText("전달했어요");
+      // ★F3(#635) 성공 축 — 진짜 전달(delivered)일 때만 단계가 완료로 찍힌다.
+      const done = await doneSteps(cr.page);
+      console.log("[cleanroom][C] 완료로 찍힌 단계:", done);
+      expect(done).toContain("firstTicket");
       console.log(
         `[cleanroom][C] 최초실행→첫티켓 소요: ${(
           (Date.now() - started) /
@@ -297,11 +302,26 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
 
       // 로컬 전달이 거절(delivered:false)됐는데 UI 가 "전달했어요"로 끝나면
       // 유저는 아무 일도 안 일어난 화면을 성공으로 읽는다.
-      // ※ 한계: 이 하네스는 Firestore 폴백(pendingInstructions)이 인증 부재로
-      //   실패한다. 실제 로그인 유저는 큐 적재가 성공해 "전달했어요"가 뜨는데,
-      //   그 큐를 소비할 오케가 없으면 여전히 아무 일도 안 일어난다(F3).
       expect(claimsSent).toBe(false);
       expect(injected.length).toBeGreaterThan(0); // 라우팅 시도는 실제로 했다
+
+      // ★F3(#635) 실패 축 — 전달되지 않았으면 단계도 완료로 찍히지 않는다.
+      //   (예전엔 local 과 queued 를 한데 접어 성공으로 끝냈다.)
+      const done = await doneSteps(cr.page);
+      console.log("[cleanroom][C'] 완료로 찍힌 단계:", done);
+      expect(done).not.toContain("firstTicket");
+
+      // ── ★이 하네스가 못 만드는 상태: queued ────────────────────────────
+      // 세 결과(delivered / queued / failed) 중 여기서 재현되는 것은 delivered(C)
+      // 와 failed(여기)뿐이다. queued 는 "로컬 오케엔 못 넣었지만 Firestore
+      // `pendingInstructions` 적재는 성공" 이라는 상태인데, 이 클린룸은
+      // MARBLO_TEST_BYPASS_AUTH 라 그 쓰기가 거절돼 failed 로 떨어진다(위 로그의
+      // UI 실패표시=true 가 그 증거). 실계정 로그인 없이는 만들 수 없는 상태라
+      // 분기 규칙 자체는 유닛테스트(first-ticket-queued-vs-delivered)가 못박고,
+      // 라이브 확인은 별 티켓(맥북에어 런북)에서 한다.
+      expect(bodyText).not.toContain(
+        "오케스트레이터를 띄워야 첫 티켓이 실제로 만들어집니다",
+      );
     } finally {
       await cr.close();
     }
@@ -344,11 +364,13 @@ test.describe("@cleanroom 최초실행 활성화 퍼널", () => {
       console.log(
         `[cleanroom][E] 인증 스텝에 벤더키(BYOM) 안내 있음=${mentionsVendorKey}`,
       );
-      // ★ 현재 동작(F4): 인증 스텝은 Claude/Codex/Grok/agy CLI 로그인만 제시하고,
-      //   벤더 API 키(설정 › 벤더 API 키)로 시작하는 경로는 언급하지 않는다.
-      //   탭 맨 아래 벤더 섹션은 온보딩이 끝나야 펴지므로 ②에서 막힌 유저를
-      //   구해주지 못한다. 고쳐지면 이 기대값을 true 로 뒤집고 F4 를 닫아라.
-      expect(mentionsVendorKey).toBe(false);
+      // ★F4 닫힘(#636) — 이 기대값은 원래 false 였다(인증 스텝이 Claude/Codex CLI
+      //   로그인만 제시하던 시절의 특성화). 이제 ②단계 본문에 BYOM 시작 경로가
+      //   있으므로 true 로 뒤집는다. 되돌아가면 여기서 깨진다.
+      expect(mentionsVendorKey).toBe(true);
+      // 정규식만으로는 "벤더" 라는 낱말이 어딘가 스쳤다"도 참이 된다 — ②단계가
+      // 실제로 **시작 경로**를 제시하는지 제목으로 못박는다(ByomStartSection).
+      expect(authBody).toContain("벤더 키로 시작하기");
     } finally {
       await cr.close();
     }
