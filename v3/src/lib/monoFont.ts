@@ -19,6 +19,13 @@
  *   - Consolas                       → guaranteed on every Windows install,
  *     the real floor so we never hit Courier New again
  *   - DejaVu / Liberation Mono       → common Linux faces
+ *   - Marblo D2Coding                → bundled OFL Korean coding font used
+ *     when the OS stack lacks a CJK monospace face
  */
 export const MONO_FONT_FAMILY =
-  '"Cascadia Code", "Cascadia Mono", Menlo, Monaco, "SF Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace';
+  '"Cascadia Code", "Cascadia Mono", Menlo, Monaco, "SF Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", "Marblo D2Coding", monospace';
+
+export const XTERM_CJK_RENDER_OPTIONS = {
+  allowProposedApi: true,
+  rescaleOverlappingGlyphs: true,
+} as const;

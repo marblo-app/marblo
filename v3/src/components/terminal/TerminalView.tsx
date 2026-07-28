@@ -6,7 +6,10 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { patchTerminalForFastIME } from "../../lib/xtermIMEPatch";
 import { resolveClipboardForTerminal } from "../../utils/clipboardImage";
-import { MONO_FONT_FAMILY } from "../../lib/monoFont";
+import {
+  MONO_FONT_FAMILY,
+  XTERM_CJK_RENDER_OPTIONS,
+} from "../../lib/monoFont";
 import { t } from "../../lib/i18n";
 
 interface TerminalViewProps {
@@ -52,6 +55,7 @@ export default memo(function TerminalView({
     let disposed = false;
 
     const terminal = new Terminal({
+      ...XTERM_CJK_RENDER_OPTIONS,
       cursorBlink: false, // periodic redraw was contributing to RAF queue saturation
       // 숨긴 탭도 버퍼를 메모리에 유지하므로(visibility 토글, 언마운트 아님)
       // 에이전트가 많을수록 누적된다. 기본 1000줄 → 500줄로 캡해 renderer

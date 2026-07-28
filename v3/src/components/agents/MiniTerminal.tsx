@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import { usePtyMirrorStore } from "../../stores/ptyMirrorStore";
 import { stripAnsi } from "../../lib/ansi";
+import { MONO_FONT_FAMILY } from "../../lib/monoFont";
 
 interface MiniTerminalProps {
   sessionId: string;
@@ -51,6 +52,7 @@ function MiniTerminalImpl({
   return (
     <pre
       ref={ref}
+      style={{ fontFamily: MONO_FONT_FAMILY }}
       className={
         className ??
         "font-mono text-[10px] leading-tight text-[#a6adc8] bg-[#11111b] " +
