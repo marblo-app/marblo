@@ -1,0 +1,48 @@
+schema_version: 1
+
+id: k-skill
+name: k-skill (Korean everyday & public services)
+type: skill
+version: 0.1.0
+status: active
+description: 122 skills that drive Korean everyday and public services from an agent — SRT/KTX booking, delivery tracking, KakaoTalk archive search, weather and fine dust, law and patent search, business-registration and tax-delinquency lookups, e-tax invoices.
+
+i18n:
+  ko:
+    name: k-skill (한국 생활·행정 서비스 스킬 모음)
+    description: 한국의 생활·행정 서비스를 에이전트로 처리하는 스킬 122종 — SRT·KTX 예매, 택배 조회, 카카오톡 아카이브 검색, 날씨·미세먼지, 법령·특허 검색, 사업자등록·국세 체납 조회, 전자세금계산서.
+
+publisher:
+  name: NomaDamas
+  tier: community
+  url: https://github.com/NomaDamas
+
+# Manifest-only. The one upstream tag (`manus-bundle-latest`) is a moving
+# bundle pointer, not a release, so the pin is the main-branch commit SHA.
+source:
+  repository: https://github.com/NomaDamas/k-skill
+  ref: 42473dad91ca919fd21d6d8b7fc6dbae3fa48b2c
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - network:outbound
+  - shell:exec
+  - secrets:read
+
+keywords:
+  - korea
+  - korean
+  - public-services
+  - government
+  - collection
+  - external
+
+license: MIT
+homepage: https://github.com/NomaDamas/k-skill

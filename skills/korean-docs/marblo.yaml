@@ -1,0 +1,43 @@
+schema_version: 1
+
+id: korean-docs
+name: korean-docs (Korean technical writing)
+type: skill
+version: 0.1.0
+status: active
+description: A prompt-only skill that writes Korean technical documentation to a fixed convention — which terms stay in English, 경어체 register, active voice, and section conventions for READMEs, API docs, and guides.
+
+i18n:
+  ko:
+    name: korean-docs (한국어 기술문서 작성)
+    description: 정해진 규약대로 한국어 기술문서를 쓰는 프롬프트 전용 스킬 — 어떤 용어를 영문으로 남길지, 경어체 문체, 능동태 우선, README·API 문서·가이드의 구성 규칙을 정의한다.
+
+publisher:
+  name: roboco-io
+  tier: community
+  url: https://github.com/roboco-io
+
+# Manifest-only: pinned to the upstream release tag v0.3.0
+# (annotated tag 6d75408d00ba3f63db687500f15ab3aa9cb82d67 -> commit 0938adeefa13d462c236e89876ce7849615ed8f6).
+source:
+  repository: https://github.com/roboco-io/plugins
+  ref: v0.3.0
+  path: plugins/documentation/skills/korean-docs
+
+compatibility:
+  harnesses:
+    - claude-code
+    - any
+
+permissions:
+  - filesystem:read
+
+keywords:
+  - korea
+  - korean
+  - documentation
+  - technical-writing
+  - external
+
+license: MIT
+homepage: https://github.com/roboco-io/plugins

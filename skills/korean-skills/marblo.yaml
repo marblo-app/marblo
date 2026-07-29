@@ -1,0 +1,44 @@
+schema_version: 1
+
+id: korean-skills
+name: Korean Writing Skills (한국어 글쓰기 3종)
+type: skill
+version: 0.1.0
+status: active
+description: Three prompt-only skills for Korean prose — rewrite machine-sounding AI text into natural Korean, proofread against 국립국어원 orthography rules, and apply a consistent Korean style guide.
+
+i18n:
+  ko:
+    name: 한국어 글쓰기 스킬 3종
+    description: 한국어 글을 다듬는 프롬프트 전용 스킬 3종 — AI 티 나는 문장을 자연스러운 한국어로 고쳐 쓰고, 국립국어원 어문규범 기준으로 맞춤법을 교정하며, 일관된 한국어 문체 가이드를 적용한다.
+
+publisher:
+  name: DaleSeo
+  tier: community
+  url: https://github.com/DaleSeo
+
+# Manifest-only: pinned to the upstream release tag v1.0.0
+# (resolves to commit fe6432e95f6675f7e411eacb2e1c36f1de54f962).
+source:
+  repository: https://github.com/DaleSeo/korean-skills
+  ref: v1.0.0
+  path: skills
+
+compatibility:
+  harnesses:
+    - claude-code
+    - any
+
+permissions:
+  - filesystem:read
+
+keywords:
+  - korea
+  - korean
+  - writing
+  - proofreading
+  - style-guide
+  - external
+
+license: MIT
+homepage: https://github.com/DaleSeo/korean-skills
