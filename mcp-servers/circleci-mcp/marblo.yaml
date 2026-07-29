@@ -1,0 +1,43 @@
+schema_version: 1
+
+id: circleci-mcp
+name: CircleCI MCP Server
+type: mcp-server
+version: 0.19.0
+status: active
+description: CircleCI's own MCP server — pull the failure logs of the latest failed pipeline, inspect flaky tests, and validate config without leaving the agent. Referenced by manifest; not vendored.
+
+publisher:
+  name: CircleCI
+  tier: community
+  url: https://github.com/CircleCI-Public
+
+# Manifest-only: the real code stays upstream. The repo publishes no git tags
+# and no GitHub releases, so the pin is the 40-hex default-branch head SHA.
+# package.json at that commit reads @circleci/mcp-server-circleci@0.19.0.
+source:
+  repository: https://github.com/CircleCI-Public/mcp-server-circleci
+  ref: 8787136b6c8bf72752ebcffad1520c2a847b5276
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Read-oriented against the CircleCI API, authenticated with a personal token
+# that the app never holds — only the variable NAME appears anywhere here.
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - circleci
+  - ci
+  - devops
+  - build-failures
+  - flaky-tests
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/CircleCI-Public/mcp-server-circleci

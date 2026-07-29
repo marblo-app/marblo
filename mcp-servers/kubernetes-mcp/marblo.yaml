@@ -1,0 +1,44 @@
+schema_version: 1
+
+id: kubernetes-mcp
+name: Kubernetes MCP Server
+type: mcp-server
+version: 0.0.65
+status: active
+description: Talks to a Kubernetes or OpenShift cluster through your existing kubeconfig — list, inspect, apply, and delete resources, read pod logs, and run events triage. Referenced by manifest; not vendored.
+
+publisher:
+  name: Containers (Open Repository for Container Tools)
+  tier: community
+  url: https://github.com/containers
+
+# Manifest-only: the real code stays upstream, pinned to an immutable release tag.
+# v0.0.65 is the newest GitHub release (2026-07-14) and matches npm
+# kubernetes-mcp-server@0.0.65, the npm wrapper that ships the Go binary.
+source:
+  repository: https://github.com/containers/kubernetes-mcp-server
+  ref: v0.0.65
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Reads the kubeconfig off disk — which carries cluster credentials — and acts
+# on the cluster with whatever those credentials allow, including deletes.
+permissions:
+  - network:outbound
+  - filesystem:read
+  - secrets:read
+
+keywords:
+  - kubernetes
+  - openshift
+  - devops
+  - cluster
+  - sre
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/containers/kubernetes-mcp-server

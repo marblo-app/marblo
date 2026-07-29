@@ -1,0 +1,42 @@
+schema_version: 1
+
+id: sequential-thinking-mcp
+name: Sequential Thinking MCP
+type: mcp-server
+version: 2026.7.4
+status: active
+description: A structured scratchpad for multi-step reasoning — the agent records numbered thoughts, revises earlier ones, and branches alternatives instead of holding a plan in prose. Referenced by manifest; not vendored.
+
+publisher:
+  name: Model Context Protocol (Linux Foundation)
+  tier: community
+  url: https://github.com/modelcontextprotocol
+
+# Manifest-only: the real code stays upstream, pinned to the immutable release
+# tag whose tree published npm @modelcontextprotocol/server-sequential-thinking@2026.7.4.
+# A newer tag (2026.7.10) exists but was not published to npm, so pinning it
+# would name a tree nobody installs.
+source:
+  repository: https://github.com/modelcontextprotocol/servers
+  ref: 2026.7.4
+  path: src/sequentialthinking
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Genuinely nothing: the server keeps thought state in memory for the life of
+# the process and writes only to stderr. An empty list is the declaration.
+permissions: []
+
+keywords:
+  - reasoning
+  - planning
+  - chain-of-thought
+  - problem-solving
+  - external
+
+license: MIT AND Apache-2.0
+homepage: https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking

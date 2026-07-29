@@ -1,0 +1,46 @@
+schema_version: 1
+
+id: stripe-mcp
+name: Stripe MCP
+type: mcp-server
+version: 0.3.3
+status: active
+description: Stripe's own MCP server — read and act on customers, subscriptions, invoices, payments, and refunds through the Stripe API, scoped by the restricted key you hand it. Referenced by manifest; not vendored.
+
+publisher:
+  name: Stripe
+  tier: community
+  url: https://github.com/stripe
+
+# Manifest-only: the real code stays upstream. The repository (formerly
+# stripe/agent-toolkit, now stripe/ai — GitHub redirects the old path) is a
+# monorepo that publishes no git release tags, so the pin is a 40-hex SHA of
+# the default-branch head at survey time. package.json under the pinned path
+# reads @stripe/mcp@0.3.3.
+source:
+  repository: https://github.com/stripe/ai
+  ref: 150d4d4ac00b28220b1a31044d21e5970d701dee
+  path: tools/modelcontextprotocol
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# The API key is passed as --api-key or read from STRIPE_SECRET_KEY; every tool
+# call is a live Stripe API call, and write scope depends on the key's grants.
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - stripe
+  - payments
+  - billing
+  - subscriptions
+  - finance
+  - external
+
+license: MIT
+homepage: https://github.com/stripe/ai/tree/main/tools/modelcontextprotocol

@@ -1,0 +1,45 @@
+schema_version: 1
+
+id: gitlab-mcp
+name: GitLab MCP
+type: mcp-server
+version: 2.1.43
+status: active
+description: Reads and writes GitLab from the agent — merge requests, issues, pipelines, files, and wiki — against gitlab.com or a self-managed instance. Referenced by manifest; not vendored.
+
+publisher:
+  name: zereight
+  tier: community
+  url: https://github.com/zereight
+
+# Manifest-only: the real code stays upstream, pinned to an immutable release tag.
+# v2.1.43 is the newest release (2026-07-26) and its package.json reads 2.1.43,
+# matching npm @zereight/mcp-gitlab@2.1.43 — pin and published package agree.
+source:
+  repository: https://github.com/zereight/gitlab-mcp
+  ref: v2.1.43
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Write scope is real: this server can create and merge merge requests, edit
+# issues, and push file changes unless GITLAB_PERMISSION_MODE narrows it.
+permissions:
+  - network:outbound
+  - repository:read
+  - repository:write
+  - secrets:read
+
+keywords:
+  - gitlab
+  - devops
+  - merge-request
+  - ci
+  - issues
+  - external
+
+license: MIT
+homepage: https://github.com/zereight/gitlab-mcp
