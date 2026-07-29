@@ -1,0 +1,40 @@
+name: Validate registry
+
+on:
+  pull_request:
+    paths:
+      - "agents/**"
+      - "knowledge/**"
+      - "mcp-servers/**"
+      - "skills/**"
+      - "workflows/**"
+      - "registry/**"
+      - "packages/registry-validator/**"
+      - ".github/workflows/validate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  registry:
+    name: Registry manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/registry-validator/package-lock.json
+      - name: Install validator dependencies
+        working-directory: packages/registry-validator
+        run: npm ci
+      - name: Test validator
+        working-directory: packages/registry-validator
+        run: npm test
+      - name: Validate registry manifests
+        working-directory: packages/registry-validator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npm run validate

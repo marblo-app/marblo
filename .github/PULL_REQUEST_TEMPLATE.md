@@ -18,8 +18,9 @@
 <!--
 Review process, so there are no surprises:
 
-• CI does not exist in this repo yet — checks are Phase 1a (see ROADMAP.md §5).
-  A maintainer reviews the manifest AND the payload by hand, which takes a few days.
+• CI validates the schema, IDs, required permissions and licenses, immutable
+  source pins, and GitHub repository reachability (best effort). A maintainer
+  still reviews the manifest AND the payload by hand, which takes a few days.
 
 • External items merge as `community` tier = LISTED, NOT INSTALLABLE. They are
   discoverable and linked to their source; the app will not one-click-install them

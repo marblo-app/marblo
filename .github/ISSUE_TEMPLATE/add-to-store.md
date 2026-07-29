@@ -39,8 +39,9 @@ Upstream (if referenced): <!-- repo URL + tag/SHA -->
 <!--
 Before you invest time, two things worth knowing (see CONTRIBUTING.md):
 
-• There is no CI in this repo yet — a maintainer reviews the manifest and the
-  payload by hand, so expect a few days.
+• CI validates the manifest schema, required metadata, immutable source pins,
+  and GitHub repository reachability (best effort). A maintainer also reviews
+  the manifest and payload by hand, so expect a few days.
 
 • External items merge as `community` tier = LISTED, NOT INSTALLABLE. They're
   discoverable and linked to their source, but the app won't one-click-install

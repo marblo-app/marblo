@@ -20,7 +20,7 @@ The Marblo Store installs content that runs on a user's machine, so the registry
 
 **What is not true yet, and we would rather say so:**
 
-- **There is no CI validation in this repo.** Schema checks, pin resolution, license verification, and secret scanning are **planned for Phase 1a** ([ROADMAP.md](ROADMAP.md) §5) and today happen only as manual review. Earlier revisions of these docs described CI as if it already existed. It does not.
+- **CI validation is intentionally narrow.** Every pull request runs schema, ID, required permission, license, immutable external source-pin, and best-effort GitHub repository-reachability checks. CI does not verify an upstream's license text or scan an external payload for secrets; those remain maintainer-review responsibilities.
 - **App-side enforcement of `status: revoked` is not shipped.** The field and the advisory file exist so the vocabulary is in place; the app-side check lands in Phase 1a.
 - **Permissions are disclosure, not enforcement.** Marblo spawns CLI subprocesses with your own credentials. It can show you what an item says it needs. It cannot restrict what that item does once installed, and it does not claim to.
 
@@ -53,4 +53,4 @@ Advisories are public and permanent — an entry is never deleted, because users
 
 ## What must never be committed
 
-API keys or secrets, model weights, large datasets, or credentials of any kind. Manifests missing a license, or pointing at an unreachable or unpinned source, are rejected in review (and, from Phase 1a, by CI).
+API keys or secrets, model weights, large datasets, or credentials of any kind. Manifests missing a license or an immutable source pin are rejected by CI; a GitHub repository reachability check is also run on a best-effort basis. Payload review remains mandatory.
