@@ -15,7 +15,16 @@ export async function generateMetadata({
   return {
     title: t("title"),
     description: t("subtitle"),
-    alternates: buildAlternates(locale, "/blog"),
+    // `types` adds <link rel="alternate" type="application/rss+xml">. The feed
+    // at /[locale]/blog/rss.xml was already built and served with the right
+    // content-type, but nothing on the page pointed at it, so feed readers and
+    // the crawlers that use autodiscovery could not find it from the blog index.
+    alternates: {
+      ...buildAlternates(locale, "/blog"),
+      types: {
+        "application/rss+xml": `${SITE_URL}/${locale}/blog/rss.xml`,
+      },
+    },
     openGraph: {
       title: `${t("title")} | Marblo`,
       description: t("subtitle"),
