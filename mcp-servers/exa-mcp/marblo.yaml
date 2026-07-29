@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: exa-mcp
+name: Exa MCP
+type: mcp-server
+version: 3.2.1
+status: active
+description: Neural web search and crawling built for agents rather than humans, returning page contents instead of a list of blue links. Referenced by manifest; not vendored.
+
+publisher:
+  name: Exa Labs
+  tier: community
+  url: https://github.com/exa-labs
+
+# Manifest-only: the real code stays upstream. Upstream cuts no GitHub releases,
+# so the default branch's head commit is pinned (a moving branch name would be
+# rejected by the schema, and rightly so).
+source:
+  repository: https://github.com/exa-labs/exa-mcp-server
+  ref: b4076055af28698d944b50deade80e541b7788ea
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - search
+  - web
+  - research
+  - crawling
+  - external
+
+license: MIT
+homepage: https://github.com/exa-labs/exa-mcp-server

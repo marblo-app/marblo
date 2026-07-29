@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: mcp-toolbox-databases
+name: MCP Toolbox for Databases
+type: mcp-server
+version: 1.8.0
+status: active
+description: One MCP server that fronts many databases, with the queries an agent may run declared up front in a tools file instead of handed to the model as raw SQL. Referenced by manifest; not vendored.
+
+publisher:
+  name: Google APIs
+  tier: community
+  url: https://github.com/googleapis
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/googleapis/mcp-toolbox
+  ref: v1.8.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - filesystem:read
+  - secrets:read
+
+keywords:
+  - database
+  - sql
+  - postgres
+  - bigquery
+  - data
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/googleapis/mcp-toolbox

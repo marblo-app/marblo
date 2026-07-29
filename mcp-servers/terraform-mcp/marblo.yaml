@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: terraform-mcp
+name: Terraform MCP Server
+type: mcp-server
+version: 1.1.0
+status: active
+description: Official HashiCorp server — looks up provider schemas, resource arguments, and modules from the Terraform Registry so generated HCL matches the real provider version. Referenced by manifest; not vendored.
+
+publisher:
+  name: HashiCorp
+  tier: community
+  url: https://github.com/hashicorp
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/hashicorp/terraform-mcp-server
+  ref: v1.1.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - terraform
+  - iac
+  - infrastructure
+  - registry
+  - devops
+  - external
+
+license: MPL-2.0
+homepage: https://github.com/hashicorp/terraform-mcp-server

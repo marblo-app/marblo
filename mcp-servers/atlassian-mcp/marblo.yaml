@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: atlassian-mcp
+name: MCP Atlassian
+type: mcp-server
+version: 0.23.0
+status: active
+description: Reads and writes Jira issues and Confluence pages from the agent, against both Atlassian Cloud and Server/Data Center deployments. Referenced by manifest; not vendored.
+
+publisher:
+  name: sooperset
+  tier: community
+  url: https://github.com/sooperset
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/sooperset/mcp-atlassian
+  ref: v0.23.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - jira
+  - confluence
+  - atlassian
+  - issue-tracking
+  - external
+
+license: MIT
+homepage: https://github.com/sooperset/mcp-atlassian
