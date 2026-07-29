@@ -475,3 +475,68 @@ describe("getRegistryIndex degradation", () => {
     expect(index.commit).toBe(COMMIT);
   });
 });
+
+/**
+ * i18n 오버레이 파싱. install 블록과 **다른 실패 정책**이라는 게 요점이다:
+ * install 은 선언이 깨지면 설치 버튼을 떼지만, i18n 은 표시 문자열 덧씌우기라
+ * 깨져도 항목을 숨기지 않는다 — 영어 base 로 그리면 그만이고, 숨기면 번역 오타
+ * 하나가 멀쩡한 자산을 스토어에서 지운다.
+ */
+describe("parseI18nBlock", () => {
+  function manifestWithI18n(block: string): RegistryItem | null {
+    return parseManifest(
+      `${V1_SKILL}\n${block}`,
+      "skills/code-review",
+      "skill",
+      COMMIT,
+    );
+  }
+
+  it("ko 오버레이를 name·description 으로 싣는다", () => {
+    const item = manifestWithI18n(
+      "i18n:\n  ko:\n    name: 코드 리뷰\n    description: 리뷰한다.",
+    );
+    expect(item?.i18n?.ko).toEqual({
+      name: "코드 리뷰",
+      description: "리뷰한다.",
+    });
+  });
+
+  it("한쪽 필드만 있는 오버레이도 그대로 싣는다(폴백은 UI 가 필드 단위로)", () => {
+    const item = manifestWithI18n("i18n:\n  ko:\n    name: 코드 리뷰");
+    expect(item?.i18n?.ko).toEqual({ name: "코드 리뷰" });
+    expect(item?.name).toBe("Code Review");
+  });
+
+  it("i18n 이 없으면 undefined — 없는 게 정상 상태다", () => {
+    const item = parseManifest(V1_SKILL, "skills/code-review", "skill", COMMIT);
+    expect(item?.i18n).toBeUndefined();
+  });
+
+  it("★깨진 오버레이가 항목을 숨기지 않는다 — 그 필드만 버리고 base 로 산다", () => {
+    const item = manifestWithI18n(
+      "i18n:\n  ko:\n    name: 코드 리뷰\n    description: 42",
+    );
+    expect(item).not.toBeNull();
+    expect(item?.name).toBe("Code Review");
+    expect(item?.i18n?.ko).toEqual({ name: "코드 리뷰" });
+  });
+
+  it("모르는 로케일·공백뿐인 값은 버린다", () => {
+    expect(manifestWithI18n("i18n:\n  fr:\n    name: Revue")?.i18n).toBeUndefined();
+    expect(manifestWithI18n('i18n:\n  ko:\n    name: "   "')?.i18n).toBeUndefined();
+  });
+
+  it("한도를 넘는 문자열은 잘라내지 않고 그 필드를 버린다", () => {
+    const item = manifestWithI18n(
+      `i18n:\n  ko:\n    name: ${"가".repeat(81)}\n    description: 리뷰한다.`,
+    );
+    expect(item?.i18n?.ko).toEqual({ description: "리뷰한다." });
+  });
+
+  it("i18n 이 객체가 아니면 통째로 무시하고 항목은 산다", () => {
+    const item = manifestWithI18n("i18n: 코드 리뷰");
+    expect(item).not.toBeNull();
+    expect(item?.i18n).toBeUndefined();
+  });
+});

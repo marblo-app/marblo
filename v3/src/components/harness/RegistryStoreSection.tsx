@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslation, t as translate } from "../../lib/i18n";
+import { useTranslation, t as translate, type Locale } from "../../lib/i18n";
 
 /**
  * 하네스 탭의 **공개 레지스트리 스토어** 섹션 (marblo-app/marblo).
@@ -38,12 +38,34 @@ const REGISTRY_CATALOG_URL = "https://github.com/marblo-app/marblo";
  */
 export function splitRegistryByTier(
   items: RegistryStoreItem[],
-  typeFilter?: RegistryStoreSectionProps["typeFilter"],
+  typeFilter?: RegistryStoreSectionProps["typeFilter"]
 ): { visible: RegistryStoreItem[]; communityCount: number } {
   const scoped = items.filter((i) => !typeFilter || i.type === typeFilter);
   return {
     visible: scoped.filter((i) => i.tier !== "community"),
     communityCount: scoped.filter((i) => i.tier === "community").length,
+  };
+}
+
+/**
+ * 표시용 이름·설명 — 앱 로케일에 맞는 오버레이가 **그 필드에** 있으면 그것을,
+ * 없으면 영어 base 를 쓴다.
+ *
+ * 폴백이 필드 단위인 게 요점이다: 이름만 번역된 항목은 이름만 한국어로 나오고
+ * 설명은 영어로 남는다. "둘 다 있어야 번역을 쓴다" 로 만들면 부분 번역이 통째로
+ * 사라져서, 기여자가 정확히 옮길 수 있는 것만 옮기는 선택지가 없어진다.
+ *
+ * 영어는 오버레이가 아니라 base 자체다(공개 스키마의 i18n 키에 `en` 이 없다) —
+ * 그래서 en 은 조회 없이 곧장 base 로 간다.
+ */
+export function localizedItemText(
+  item: Pick<RegistryStoreItem, "name" | "description" | "i18n">,
+  locale: Locale
+): { name: string; description: string } {
+  const overlay = locale === "en" ? undefined : item.i18n?.[locale];
+  return {
+    name: overlay?.name ?? item.name,
+    description: overlay?.description ?? item.description,
   };
 }
 
@@ -60,14 +82,14 @@ function tierBadgeClass(tier: RegistryStoreItem["tier"]): string {
 
 function tierLabel(tier: RegistryStoreItem["tier"]): string {
   return translate(
-    `harness.store.registry.tier.${tier}` as Parameters<typeof translate>[0],
+    `harness.store.registry.tier.${tier}` as Parameters<typeof translate>[0]
   );
 }
 
 export function RegistryStoreSection({
   typeFilter,
 }: RegistryStoreSectionProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [items, setItems] = useState<RegistryStoreItem[]>([]);
   const [stale, setStale] = useState(false);
   const [available, setAvailable] = useState(true);
@@ -78,14 +100,14 @@ export function RegistryStoreSection({
     text: string;
   } | null>(null);
   const [disclosureFor, setDisclosureFor] = useState<RegistryStoreItem | null>(
-    null,
+    null
   );
 
   const load = useCallback(async (refresh?: boolean) => {
     setLoading(true);
     try {
       const res = await window.electronAPI.registry.index(
-        refresh ? { refresh: true } : undefined,
+        refresh ? { refresh: true } : undefined
       );
       setItems(res.items ?? []);
       setStale(!!res.stale);
@@ -104,7 +126,7 @@ export function RegistryStoreSection({
 
   const { visible, communityCount } = useMemo(
     () => splitRegistryByTier(items, typeFilter),
-    [items, typeFilter],
+    [items, typeFilter]
   );
   const groups = useMemo(() => {
     const skills = visible.filter((i) => i.type === "skill");
@@ -133,7 +155,9 @@ export function RegistryStoreSection({
           setNotice({
             kind: "info",
             text: translate("harness.store.registry.installDone", {
-              name: item.name,
+              // 알림도 카드와 같은 이름을 써야 한다 — 카드엔 한국어 이름이,
+              // 알림엔 영어 이름이 뜨면 사용자는 다른 걸 설치했다고 읽는다.
+              name: localizedItemText(item, locale).name,
             }),
           });
         } else {
@@ -147,7 +171,7 @@ export function RegistryStoreSection({
         void load();
       }
     },
-    [load],
+    [load, locale]
   );
 
   const runUninstall = useCallback(
@@ -155,8 +179,8 @@ export function RegistryStoreSection({
       if (
         !confirm(
           translate("harness.store.registry.uninstallConfirm", {
-            name: item.name,
-          }),
+            name: localizedItemText(item, locale).name,
+          })
         )
       ) {
         return;
@@ -171,7 +195,7 @@ export function RegistryStoreSection({
           setNotice({
             kind: "info",
             text: translate("harness.store.registry.uninstallDone", {
-              name: item.name,
+              name: localizedItemText(item, locale).name,
             }),
           });
         } else {
@@ -186,7 +210,7 @@ export function RegistryStoreSection({
         void load();
       }
     },
-    [load],
+    [load, locale]
   );
 
   return (
@@ -250,6 +274,7 @@ export function RegistryStoreSection({
           <div className="grid gap-3 md:grid-cols-2">
             {group.rows.map((item) => {
               const isBusy = busy === item.id;
+              const display = localizedItemText(item, locale);
               const installed =
                 item.installState === "installed" ||
                 item.installState === "outdated";
@@ -266,7 +291,7 @@ export function RegistryStoreSection({
                   <div className="mb-1 flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-1.5">
                       <span className="truncate text-sm font-semibold text-[#cdd6f4]">
-                        {item.name}
+                        {display.name}
                       </span>
                       <span className="flex-shrink-0 text-[10px] text-[#6c7086]">
                         v{item.version}
@@ -275,7 +300,7 @@ export function RegistryStoreSection({
                     <div className="flex flex-shrink-0 items-center gap-1">
                       <span
                         className={`rounded px-1.5 py-0.5 text-[10px] ${tierBadgeClass(
-                          item.tier,
+                          item.tier
                         )}`}
                       >
                         {tierLabel(item.tier)}
@@ -300,7 +325,7 @@ export function RegistryStoreSection({
                     </div>
                   </div>
                   <p className="mb-2 text-xs text-[#bac2de]">
-                    {item.description}
+                    {display.description}
                   </p>
 
                   {/* 권한 공시 — 스코프 문자열 verbatim, 고위험은 강조(§4.6) */}
@@ -421,7 +446,7 @@ export function RegistryStoreSection({
           <div className="w-full max-w-md rounded-lg border border-[#313244] bg-[#1e1e2e] p-4 shadow-2xl">
             <h4 className="mb-1 text-sm font-semibold text-[#cdd6f4]">
               {t("harness.store.registry.disclosureTitle")} —{" "}
-              {disclosureFor.name}
+              {localizedItemText(disclosureFor, locale).name}
             </h4>
             <p className="mb-3 text-xs text-[#7f849c]">
               {t("harness.store.registry.disclosureNote")}

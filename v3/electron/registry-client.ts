@@ -47,6 +47,19 @@ export type RegistryTier = "official" | "verified" | "community";
 export type RegistryItemType = "skill" | "mcp-server";
 export type RegistryItemStatus = "active" | "deprecated" | "revoked";
 
+/**
+ * 표시 문자열 오버레이가 실릴 수 있는 로케일(공개 스키마 `i18n` 의 키와 동일).
+ * **영어는 여기 없다** — 영어가 base 그 자체이기 때문이다. `en` 은 오버레이를
+ * 조회하지 않고 곧장 base 를 쓴다.
+ */
+export type RegistryLocale = "ko" | "ja";
+
+/** 한 로케일의 표시 문자열. 필드별로 독립 폴백하므로 둘 다 옵셔널이다. */
+export interface RegistryLocalizedStrings {
+  name?: string;
+  description?: string;
+}
+
 /** files 설치: root 는 앱이 절대경로로 매핑하는 enum 키. 경로는 절대 안 받는다. */
 export interface RegistryFilesInstall {
   kind: "files";
@@ -85,6 +98,14 @@ export interface RegistryItem {
   type: RegistryItemType;
   version: string;
   description: string;
+  /**
+   * 표시 문자열의 로케일 오버레이(공개 스키마 `i18n`, 옵셔널). name·description
+   * 은 위의 영어 base 가 정본이고 이건 덧씌우기다 — 없는 항목이 다수이며 그게
+   * 정상 상태다. UI 는 **필드 단위로** 폴백해야 한다(§i18n): 이름만 번역된
+   * 항목은 이름만 번역돼 나와야지, 둘 다 있어야 보이는 규칙이면 부분 번역이
+   * 통째로 사라진다.
+   */
+  i18n?: Partial<Record<RegistryLocale, RegistryLocalizedStrings>>;
   /**
    * v1 manifest 의 tier 는 기여자가 자기 파일에 스스로 적는 값이다(설계 S2 —
    * CI 파생은 Lane A). UI 는 이것을 "공시"로만 표시해야 하고, installer 의
@@ -160,7 +181,7 @@ function asString(v: unknown, maxLen: number): string | null {
 function asStringArray(
   v: unknown,
   maxItems: number,
-  maxLen: number,
+  maxLen: number
 ): string[] | null {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v) || v.length > maxItems) return null;
@@ -173,6 +194,43 @@ function asStringArray(
   return out;
 }
 
+const I18N_LOCALES: RegistryLocale[] = ["ko", "ja"];
+
+/**
+ * i18n 오버레이 파싱. install 블록과 달리 **여기서 실패해도 항목을 숨기지
+ * 않는다** — 이건 표시 문자열 덧씌우기일 뿐이라, 오버레이가 깨졌으면 영어
+ * base 로 그리면 그만이다. 항목을 통째로 감추면 번역 오타 하나가 멀쩡한 자산을
+ * 스토어에서 지워버린다. 그래서 모르는 로케일·모양이 틀린 값은 **그 필드만**
+ * 조용히 버리고 나머지는 살린다.
+ *
+ * 공백뿐인 문자열은 base 보다 나쁘다(카드가 빈칸으로 렌더된다) — 길이만 보는
+ * asString 을 그대로 쓰지 않고 trim 결과로 판정하는 이유다.
+ */
+export function parseI18nBlock(
+  v: unknown
+): Partial<Record<RegistryLocale, RegistryLocalizedStrings>> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const src = v as Record<string, unknown>;
+  const out: Partial<Record<RegistryLocale, RegistryLocalizedStrings>> = {};
+  for (const locale of I18N_LOCALES) {
+    const entry = src[locale];
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const e = entry as Record<string, unknown>;
+    const strings: RegistryLocalizedStrings = {};
+    const name = asDisplayString(e.name, 80);
+    const description = asDisplayString(e.description, MAX_DESCRIPTION_LEN);
+    if (name) strings.name = name;
+    if (description) strings.description = description;
+    if (name || description) out[locale] = strings;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function asDisplayString(v: unknown, maxLen: number): string | undefined {
+  const s = asString(v, maxLen);
+  return s && s.trim() !== "" ? s : undefined;
+}
+
 /**
  * Parse + validate one marblo.yaml. Returns null when the manifest must be
  * hidden (unknown schema_version, malformed, over limits) — never throws.
@@ -182,7 +240,7 @@ export function parseManifest(
   raw: string,
   itemPath: string,
   expectedType: RegistryItemType,
-  commit: string,
+  commit: string
 ): RegistryItem | null {
   if (Buffer.byteLength(raw, "utf-8") > MAX_MANIFEST_BYTES) return null;
   let doc: unknown;
@@ -225,8 +283,8 @@ export function parseManifest(
     m.status === undefined
       ? "active"
       : STATUSES.includes(m.status as RegistryItemStatus)
-        ? (m.status as RegistryItemStatus)
-        : null;
+      ? (m.status as RegistryItemStatus)
+      : null;
   if (!status) return null;
 
   const permissionsDeclared = m.permissions !== undefined;
@@ -248,6 +306,7 @@ export function parseManifest(
     type: expectedType,
     version,
     description,
+    i18n: parseI18nBlock(m.i18n),
     tier: tier as RegistryTier,
     publisherName,
     publisherUrl: asString(pubObj.url, 200) ?? undefined,
@@ -292,7 +351,7 @@ export function parseManifest(
  */
 function parseInstallBlock(
   v: unknown,
-  expectedType: RegistryItemType,
+  expectedType: RegistryItemType
 ): RegistryInstall | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const b = v as Record<string, unknown>;
@@ -332,7 +391,7 @@ function parseInstallBlock(
     }
     const integrity: Record<string, string> = {};
     for (const [k, val] of Object.entries(
-      digestMap as Record<string, unknown>,
+      digestMap as Record<string, unknown>
     )) {
       const hex = asString(val, 64);
       if (!hex || !/^[0-9a-f]{64}$/.test(hex)) return null;
@@ -376,7 +435,7 @@ function parseInstallBlock(
  */
 export function deriveFilesInstallFromTree(
   item: RegistryItem,
-  tree: TreeEntry[],
+  tree: TreeEntry[]
 ): void {
   if (item.type !== "skill" || item.install) return;
   // manifest 가 계약을 선언했는데 거부된 경우(reason 이 이미 붙어 있다) 파생하지
@@ -460,7 +519,7 @@ function writeCacheAtomic(cacheDir: string, cache: CacheShape): void {
 async function fetchWithTimeout(
   fetchImpl: typeof fetch,
   url: string,
-  accept: string,
+  accept: string
 ): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
@@ -476,12 +535,12 @@ async function fetchWithTimeout(
 
 async function fetchJson(
   fetchImpl: typeof fetch,
-  url: string,
+  url: string
 ): Promise<unknown> {
   const res = await fetchWithTimeout(
     fetchImpl,
     url,
-    "application/vnd.github+json",
+    "application/vnd.github+json"
   );
   if (!res.ok) throw new Error(`GET ${url} → ${res.status}`);
   return res.json();
@@ -491,18 +550,18 @@ export async function fetchRawRegistryFile(
   fetchImpl: typeof fetch,
   commit: string,
   repoPath: string,
-  maxBytes: number,
+  maxBytes: number
 ): Promise<Buffer> {
   const res = await fetchWithTimeout(
     fetchImpl,
     `${RAW_BASE}/${commit}/${repoPath}`,
-    "*/*",
+    "*/*"
   );
   if (!res.ok) throw new Error(`raw fetch ${repoPath} → ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.byteLength > maxBytes) {
     throw new Error(
-      `raw fetch ${repoPath} → ${buf.byteLength}B > 한도 ${maxBytes}B`,
+      `raw fetch ${repoPath} → ${buf.byteLength}B > 한도 ${maxBytes}B`
     );
   }
   return buf;
@@ -511,7 +570,7 @@ export async function fetchRawRegistryFile(
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
-  fn: (item: T) => Promise<R>,
+  fn: (item: T) => Promise<R>
 ): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
@@ -523,7 +582,7 @@ async function mapLimit<T, R>(
         if (i >= items.length) return;
         out[i] = await fn(items[i]);
       }
-    },
+    }
   );
   await Promise.all(workers);
   return out;
@@ -531,13 +590,13 @@ async function mapLimit<T, R>(
 
 /** 트리에서 Phase 1a manifest 후보를 고른다: <dir>/<name>/marblo.yaml 정확히 2단. */
 export function selectManifestEntries(
-  tree: TreeEntry[],
+  tree: TreeEntry[]
 ): Array<{ path: string; dir: string; type: RegistryItemType }> {
   const out: Array<{ path: string; dir: string; type: RegistryItemType }> = [];
   for (const e of tree) {
     if (e.type !== "blob") continue;
     const m = e.path.match(
-      /^([a-z-]+)\/([a-z0-9]+(?:-[a-z0-9]+)*)\/marblo\.yaml$/,
+      /^([a-z-]+)\/([a-z0-9]+(?:-[a-z0-9]+)*)\/marblo\.yaml$/
     );
     if (!m) continue;
     const itemType = PHASE_1A_DIRS[m[1]];
@@ -551,11 +610,11 @@ export function selectManifestEntries(
 
 async function fetchFreshIndex(
   fetchImpl: typeof fetch,
-  cached: CacheShape | null,
+  cached: CacheShape | null
 ): Promise<CacheShape> {
   const head = (await fetchJson(
     fetchImpl,
-    `${API_BASE}/commits/${REGISTRY_BRANCH}`,
+    `${API_BASE}/commits/${REGISTRY_BRANCH}`
   )) as { sha?: string };
   const commit = head?.sha;
   if (!commit || !COMMIT_RE.test(commit)) {
@@ -568,7 +627,7 @@ async function fetchFreshIndex(
 
   const treeRes = (await fetchJson(
     fetchImpl,
-    `${API_BASE}/git/trees/${commit}?recursive=1`,
+    `${API_BASE}/git/trees/${commit}?recursive=1`
   )) as { tree?: TreeEntry[]; truncated?: boolean };
   if (!treeRes?.tree || treeRes.truncated) {
     throw new Error("레지스트리 트리 조회 실패(또는 truncated)");
@@ -583,13 +642,13 @@ async function fetchFreshIndex(
           fetchImpl,
           commit,
           entry.path,
-          MAX_MANIFEST_BYTES,
+          MAX_MANIFEST_BYTES
         );
         const item = parseManifest(
           buf.toString("utf-8"),
           entry.dir,
           entry.type,
-          commit,
+          commit
         );
         if (item && item.type === "skill" && item.schemaVersion === 1) {
           deriveFilesInstallFromTree(item, tree);
@@ -632,7 +691,7 @@ export function resetRegistryClientMemo(): void {
  * available:false 빈 인덱스. 스토어가 이것 때문에 못 열리는 일은 없다.
  */
 export async function getRegistryIndex(
-  deps: RegistryFetchDeps & { forceRefresh?: boolean } = {},
+  deps: RegistryFetchDeps & { forceRefresh?: boolean } = {}
 ): Promise<RegistryIndex> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const cacheDir = deps.cacheDir;
