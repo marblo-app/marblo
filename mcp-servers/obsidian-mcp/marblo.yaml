@@ -1,0 +1,43 @@
+schema_version: 1
+
+id: obsidian-mcp
+name: Obsidian MCP
+type: mcp-server
+version: 0.2.2
+status: active
+description: Searches and edits an Obsidian vault through the Local REST API plugin, so notes reach the agent without handing it raw filesystem access. Referenced by manifest; not vendored.
+
+publisher:
+  name: Markus Pfundstein
+  tier: community
+  url: https://github.com/MarkusPfundstein
+
+# Manifest-only: the real code stays upstream, pinned to an immutable commit.
+# Upstream cuts no git tags and no GitHub releases, so the default branch's head
+# commit is pinned (a moving branch name would be rejected by the schema).
+# `version` above is the pyproject.toml version at that commit, not a release tag.
+source:
+  repository: https://github.com/MarkusPfundstein/mcp-obsidian
+  ref: 32285e9ac07049a8a23ea7d7903603a3e48a1bf7
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# No filesystem permission, and that is the point: every vault read and write goes
+# over HTTP to the Local REST API plugin, not through the vault directory.
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - obsidian
+  - notes
+  - knowledge-base
+  - markdown
+  - external
+
+license: MIT
+homepage: https://github.com/MarkusPfundstein/mcp-obsidian

@@ -1,0 +1,44 @@
+schema_version: 1
+
+id: google-workspace-mcp
+name: Google Workspace MCP
+type: mcp-server
+version: 1.22.2
+status: active
+description: One server across Gmail, Calendar, Drive, Docs, Sheets, Slides, Forms, Tasks, and Chat, authenticating with your own Google OAuth client. Referenced by manifest; not vendored.
+
+publisher:
+  name: taylorwilsdon
+  tier: community
+  url: https://github.com/taylorwilsdon
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/taylorwilsdon/google_workspace_mcp
+  ref: v1.22.2
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# filesystem:* is not boilerplate here: the server reads local files to attach
+# them to mail and Drive uploads, and writes downloaded attachments plus the
+# OAuth token store to disk.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - google-workspace
+  - gmail
+  - calendar
+  - drive
+  - docs
+  - external
+
+license: MIT
+homepage: https://github.com/taylorwilsdon/google_workspace_mcp

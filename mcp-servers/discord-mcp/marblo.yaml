@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: discord-mcp
+name: Discord MCP
+type: mcp-server
+version: 1.0.0
+status: active
+description: Drives a Discord bot from the agent — send and read channel messages, manage channels and roles, and add reactions on a server you administer. Referenced by manifest; not vendored.
+
+publisher:
+  name: SaseQ
+  tier: community
+  url: https://github.com/SaseQ
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+# Head has moved past v1.0.0 (last push 2026-04-25, tag cut 2026-03-16); the tag
+# is pinned anyway. Java/Maven, so this one is not an `npx` install.
+source:
+  repository: https://github.com/SaseQ/discord-mcp
+  ref: v1.0.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - discord
+  - chat
+  - community
+  - bot
+  - external
+
+license: MIT
+homepage: https://github.com/SaseQ/discord-mcp

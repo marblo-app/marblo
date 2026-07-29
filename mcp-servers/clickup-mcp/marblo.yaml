@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: clickup-mcp
+name: ClickUp MCP
+type: mcp-server
+version: 1.6.2
+status: active
+description: Searches, creates, and updates ClickUp tasks from the agent, plus comments and time tracking, with a read-only mode for workspaces that should not be written to. Referenced by manifest; not vendored.
+
+publisher:
+  name: hauptsache.net
+  tier: community
+  url: https://github.com/hauptsacheNet
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+# Note: package.json at v1.6.2 still reads 1.6.1 — upstream tagged without
+# bumping. `version` above tracks the pinned ref, which is what installs.
+source:
+  repository: https://github.com/hauptsacheNet/clickup-mcp
+  ref: v1.6.2
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - clickup
+  - project-management
+  - tasks
+  - time-tracking
+  - external
+
+license: MIT
+homepage: https://github.com/hauptsacheNet/clickup-mcp
