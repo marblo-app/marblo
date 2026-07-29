@@ -1,0 +1,9 @@
+# Default owners for the ecosystem repo.
+* @melocream
+
+# The registry is a supply-chain surface — every manifest change is reviewed.
+/registry/ @melocream
+/skills/ @melocream
+/mcp-servers/ @melocream
+/agents/ @melocream
+/workflows/ @melocream

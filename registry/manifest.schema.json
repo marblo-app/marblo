@@ -1,0 +1,153 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://marblo.app/registry/manifest.schema.json",
+  "title": "Marblo Store item manifest (marblo.yaml)",
+  "description": "Every installable item in the Marblo ecosystem — skill, MCP server, agent, workflow, knowledge pack, harness, or bundle — is described by a marblo.yaml that validates against this schema. The Marblo app reads these manifests to build the Store index and to install items by tag or commit SHA.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "type",
+    "version",
+    "description",
+    "publisher",
+    "license"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "Manifest schema version. Bump only on breaking changes to this schema.",
+      "const": 1
+    },
+    "id": {
+      "description": "Globally unique, stable, kebab-case identifier. Never reused for a different item.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "name": {
+      "description": "Human-readable display name shown in the Store.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "type": {
+      "description": "Store category.",
+      "enum": [
+        "harness",
+        "skill",
+        "mcp-server",
+        "agent",
+        "workflow",
+        "knowledge-pack",
+        "bundle"
+      ]
+    },
+    "version": {
+      "description": "SemVer of THIS manifest/item. For manifest-only external items, tracks the pinned upstream ref.",
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+    },
+    "description": {
+      "description": "One or two sentences: what it does and when to install it.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 280
+    },
+    "publisher": {
+      "type": "object",
+      "required": ["name", "tier"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "tier": {
+          "description": "official = maintained by Marblo; verified = external, reviewed & source-pinned; community = external, unreviewed.",
+          "enum": ["official", "verified", "community"]
+        },
+        "url": { "type": "string", "format": "uri" }
+      }
+    },
+    "source": {
+      "description": "For external / manifest-only items: where the real code lives. Marblo installs from this pinned ref — it is NOT vendored into this repo.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string", "format": "uri" },
+        "ref": {
+          "description": "Tag or commit SHA to pin. Never a moving branch.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Subpath within the source repo, if not the root.",
+          "type": "string"
+        }
+      },
+      "required": ["repository", "ref"]
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "harnesses": {
+          "description": "Which agent harnesses this item works with.",
+          "type": "array",
+          "items": {
+            "enum": [
+              "claude-code",
+              "codex",
+              "gemini-cli",
+              "grok",
+              "custom-cli",
+              "any"
+            ]
+          },
+          "minItems": 1
+        },
+        "marblo_min_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        }
+      }
+    },
+    "permissions": {
+      "description": "Capabilities the item requests, surfaced to the user before install.",
+      "type": "array",
+      "items": {
+        "enum": [
+          "repository:read",
+          "repository:write",
+          "network:outbound",
+          "filesystem:read",
+          "filesystem:write",
+          "shell:exec",
+          "secrets:read"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "includes": {
+      "description": "For type=bundle only: ids of other registry items installed together.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+      "minItems": 2
+    },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 12
+    },
+    "homepage": { "type": "string", "format": "uri" },
+    "license": {
+      "description": "SPDX license identifier for first-party items, or the upstream license for referenced ones.",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "bundle" } } },
+      "then": { "required": ["includes"] }
+    }
+  ]
+}

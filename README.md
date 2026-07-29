@@ -155,7 +155,7 @@ Describe the goal in natural language. Marblo turns it into a ticket graph, then
 
 ### ⚡ Lanes
 
-Need parallel *right now*? Fire off several agents at once from the Lanes tab — you pick the model for each. Runs alongside the orchestrator, not through it.
+Need parallel _right now_? Fire off several agents at once from the Lanes tab — you pick the model for each. Runs alongside the orchestrator, not through it.
 
 [Guide →](https://marblo.app/en/guide)
 
@@ -225,26 +225,48 @@ Marblo is where you **manage** agents — board, isolation, cost, and safe merge
 
 ## Why Marblo
 
-| Pain today | What Marblo does |
-| --- | --- |
-| One chat, one agent, you wait | One orchestrator, many agents in parallel |
-| “What’s it doing?” for 30 minutes | Live board + per-agent terminals |
-| Parallel agents overwrite each other | Worktree-per-ticket isolation |
-| API cost is a black hole | Usage by agent / model / day |
-| Merge is trust-me | Review, verify, then you confirm |
+| Pain today                           | What Marblo does                          |
+| ------------------------------------ | ----------------------------------------- |
+| One chat, one agent, you wait        | One orchestrator, many agents in parallel |
+| “What’s it doing?” for 30 minutes    | Live board + per-agent terminals          |
+| Parallel agents overwrite each other | Worktree-per-ticket isolation             |
+| API cost is a black hole             | Usage by agent / model / day              |
+| Merge is trust-me                    | Review, verify, then you confirm          |
 
 > Agents are cheap to start. **Knowing what the fleet is doing** is the hard part. That’s the product.
 
 ---
 
+## 🧩 Ecosystem & Store (open source)
+
+This repository is the public home of Marblo's ecosystem — a community-driven **Store** of skills, MCP servers, agents, workflows, and knowledge packs you can install into the app. It's an install-and-run monorepo, not a copy-everything warehouse: first-party items keep their real files here, external items are referenced by a pinned manifest.
+
+```text
+registry/     # manifests the app reads to build the Store (+ manifest.schema.json)
+skills/       # first-party skills (e.g. code-review)
+mcp-servers/  # official + referenced MCP servers (e.g. marblo-control, github)
+agents/       # agent roles (e.g. reviewer)
+workflows/    # multi-step flows (e.g. review-and-merge)
+knowledge/    # Knowledge Packs (curated conventions + vetted links)
+docs/         # getting-started, concepts, harness-store, orchestration, troubleshooting
+```
+
+- **Plan & roadmap:** [ROADMAP.md](ROADMAP.md) · **Registry:** [registry/](registry/) · **Docs:** [docs/](docs/)
+- **Contribute an item** (anyone can): [CONTRIBUTING.md](CONTRIBUTING.md) — add a `marblo.yaml`, open a PR; it lands as `community` tier and can be promoted to `verified`.
+- **Categories:** Harnesses · Skills · MCP Servers · Agents · Workflows · Knowledge Packs · Bundles.
+
+> ⭐ Star the repo to follow the ecosystem as it grows.
+
+---
+
 ## Download
 
-| Platform | Get it |
-| --- | --- |
+| Platform                        | Get it                                                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | 🖥 **Desktop (macOS · Windows)** | [Download latest release](https://github.com/melocream/marblo-releases/releases/latest) — **v3.0.19** |
-| 🌐 **Web** | [marblo.app](https://marblo.app) |
-| 📖 **Guide** | [marblo.app/en/guide](https://marblo.app/en/guide) |
-| 💰 **Pricing** | [marblo.app/en/pricing](https://marblo.app/en/pricing) |
+| 🌐 **Web**                      | [marblo.app](https://marblo.app)                                                                      |
+| 📖 **Guide**                    | [marblo.app/en/guide](https://marblo.app/en/guide)                                                    |
+| 💰 **Pricing**                  | [marblo.app/en/pricing](https://marblo.app/en/pricing)                                                |
 
 > After install you’ll connect your existing AI CLIs (Claude Code, Codex, …). AI usage is billed to those accounts — not included in the Marblo fee.
 

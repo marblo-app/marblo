@@ -1,0 +1,26 @@
+schema_version: 1
+
+id: curated-llm-resources
+name: LLM Study — Curated Resources
+type: knowledge-pack
+version: 1.0.0
+description: A source-verified learning path for LLMs — foundations, agents & MCP, RAG, evals, and observability — as an English study guide with vetted links.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - any
+
+keywords:
+  - learning
+  - curriculum
+  - rag
+  - agents
+  - evals
+
+license: CC-BY-4.0
+homepage: https://github.com/melocream/awesome-llm-study

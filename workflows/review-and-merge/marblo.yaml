@@ -1,0 +1,29 @@
+schema_version: 1
+
+id: review-and-merge
+name: Review & Merge
+type: workflow
+version: 1.0.0
+description: Take a completed ticket through review to a safe merge — run the review skill, require findings resolved, then merge and close on confirmation.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - repository:write
+
+keywords:
+  - workflow
+  - review
+  - safe-merge
+
+license: MIT
+homepage: https://marblo.app
