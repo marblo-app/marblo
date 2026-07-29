@@ -1,0 +1,47 @@
+schema_version: 1
+
+id: docker-mcp-gateway
+name: Docker MCP Gateway
+type: mcp-server
+version: 0.43.3
+status: active
+description: One MCP endpoint in front of many servers — Docker's CLI plugin runs catalog servers in isolated containers, holds their secrets, and exposes the merged tool set to the client. Referenced by manifest; not vendored.
+
+publisher:
+  name: Docker
+  tier: community
+  url: https://github.com/docker
+
+# Manifest-only: the real code stays upstream, pinned to an immutable tag.
+# v0.43.3 is the highest version tag on the repo; upstream cuts tags but
+# publishes no GitHub releases (releases/latest returns 404).
+source:
+  repository: https://github.com/docker/mcp-gateway
+  ref: v0.43.3
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Broadest declaration in this collection, and accurately so: the gateway
+# launches containers, mounts paths into them, reads catalog and Docker
+# Desktop secret stores, and proxies the traffic of every server it fronts.
+permissions:
+  - network:outbound
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - secrets:read
+
+keywords:
+  - docker
+  - gateway
+  - containers
+  - devops
+  - security
+  - external
+
+license: MIT
+homepage: https://github.com/docker/mcp-gateway

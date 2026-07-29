@@ -1,0 +1,44 @@
+schema_version: 1
+
+id: sentry-mcp
+name: Sentry MCP
+type: mcp-server
+version: 0.37.0
+status: active
+description: Sentry's own MCP server — pull issues, events, and stack traces for a project, search across releases, and hand the agent a real crash instead of a pasted excerpt. Referenced by manifest; not vendored.
+
+publisher:
+  name: Sentry (Functional Software, Inc.)
+  tier: community
+  url: https://github.com/getsentry
+
+# Manifest-only: the real code stays upstream, pinned to an immutable release
+# tag. 0.37.0 matches npm @sentry/mcp-server@0.37.0.
+source:
+  repository: https://github.com/getsentry/sentry-mcp
+  ref: 0.37.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Reads Sentry over the API with a user token. NOTE the licence caveat and the
+# LLM-provider-key caveat in README.md before installing this one.
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - sentry
+  - errors
+  - observability
+  - stack-traces
+  - devops
+  - external
+
+# NOT an OSI-approved licence: Functional Source License 1.1 with an Apache-2.0
+# future grant (source-available, non-compete for two years). See README.md.
+license: FSL-1.1-ALv2
+homepage: https://github.com/getsentry/sentry-mcp

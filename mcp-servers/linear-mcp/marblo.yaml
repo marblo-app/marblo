@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: linear-mcp
+name: Linear MCP (tacticlaunch)
+type: mcp-server
+version: 1.4.1
+status: active
+description: Reads and writes Linear from the agent — issues, comments, projects, cycles, and status transitions — over Linear's GraphQL API with a personal token. Referenced by manifest; not vendored.
+
+publisher:
+  name: tacticlaunch
+  tier: community
+  url: https://github.com/tacticlaunch
+
+# Manifest-only: the real code stays upstream, pinned to an immutable release
+# tag. v1.4.1 (2026-07-28) matches npm @tacticlaunch/mcp-linear@1.4.1.
+source:
+  repository: https://github.com/tacticlaunch/mcp-linear
+  ref: v1.4.1
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Writes are in scope: the server creates and updates issues and comments with
+# whatever the personal token allows.
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - linear
+  - issue-tracker
+  - project-management
+  - planning
+  - external
+
+license: MIT
+homepage: https://github.com/tacticlaunch/mcp-linear
