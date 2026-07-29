@@ -1,0 +1,42 @@
+schema_version: 1
+
+id: supabase-mcp
+name: Supabase MCP
+type: mcp-server
+version: 0.9.0
+status: active
+description: Official Supabase server — inspect schemas, run queries, manage migrations and branches, and fetch logs, with a read-only flag and per-project scoping. Referenced by manifest; not vendored.
+
+publisher:
+  name: Supabase
+  tier: community
+  url: https://github.com/supabase
+
+# Manifest-only: the real code stays upstream, pinned to an immutable commit.
+# Upstream's release tags are monorepo-scoped (mcp-server-supabase-v0.9.0) and do
+# not match the schema's ref pattern, so the tag's commit SHA is pinned instead.
+source:
+  repository: https://github.com/supabase/mcp
+  ref: 4690aa917f14553d8c4d5f7039ac894c3abf176a
+  path: packages/mcp-server-supabase
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - supabase
+  - postgres
+  - database
+  - migrations
+  - backend
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/supabase/mcp

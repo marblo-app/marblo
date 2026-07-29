@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: playwright-mcp
+name: Playwright MCP
+type: mcp-server
+version: 0.0.78
+status: active
+description: Drives a real browser from the agent using Playwright's accessibility tree rather than screenshots, so page interaction is structured text instead of vision guesswork. Referenced by manifest; not vendored.
+
+publisher:
+  name: Microsoft
+  tier: community
+  url: https://github.com/microsoft
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/microsoft/playwright-mcp
+  ref: v0.0.78
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - browser
+  - playwright
+  - e2e
+  - automation
+  - qa
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/microsoft/playwright-mcp

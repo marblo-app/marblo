@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: context7-mcp
+name: Context7
+type: mcp-server
+version: 3.2.5
+status: active
+description: Pulls version-correct library documentation and code examples into the agent's context on demand, so it stops citing APIs that were removed two releases ago. Referenced by manifest; not vendored.
+
+publisher:
+  name: Upstash
+  tier: community
+  url: https://github.com/upstash
+
+# Manifest-only: the real code stays upstream, pinned to an immutable commit.
+# Upstream's release tags are monorepo-scoped (@upstash/context7-mcp@3.2.5) and do
+# not match the schema's ref pattern, so the tag's commit SHA is pinned instead.
+source:
+  repository: https://github.com/upstash/context7
+  ref: b250c2515694eee4b6df4db82fa056df9ed3e306
+  path: packages/mcp
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - documentation
+  - context
+  - libraries
+  - api-reference
+  - external
+
+license: MIT
+homepage: https://github.com/upstash/context7

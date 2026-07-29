@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: serena-mcp
+name: Serena
+type: mcp-server
+version: 1.6.1
+status: active
+description: Symbol-level code retrieval and editing over Language Server Protocol, so an agent can find and change a definition without reading whole files. Referenced by manifest; not vendored.
+
+publisher:
+  name: Oraios AI
+  tier: community
+  url: https://github.com/oraios
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/oraios/serena
+  ref: v1.6.1
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - repository:read
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - code-intelligence
+  - lsp
+  - refactoring
+  - semantic-search
+  - external
+
+license: MIT
+homepage: https://github.com/oraios/serena

@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: figma-context-mcp
+name: Framelink Figma MCP
+type: mcp-server
+version: 0.13.2
+status: active
+description: Turns a Figma frame into the layout data a coding agent can actually use, instead of asking it to reimplement a design from a screenshot. Referenced by manifest; not vendored.
+
+publisher:
+  name: Framelink (GLips)
+  tier: community
+  url: https://github.com/GLips
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/GLips/Figma-Context-MCP
+  ref: v0.13.2
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - figma
+  - design
+  - ui
+  - frontend
+  - external
+
+license: MIT
+homepage: https://github.com/GLips/Figma-Context-MCP

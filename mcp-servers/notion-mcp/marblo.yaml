@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: notion-mcp
+name: Notion MCP Server
+type: mcp-server
+version: 2.5.0
+status: active
+description: Official Notion server — lets an agent search, read, and update pages and databases in a workspace you explicitly share with it. Referenced by manifest; not vendored.
+
+publisher:
+  name: Notion
+  tier: community
+  url: https://github.com/makenotion
+
+# Manifest-only: the real code stays upstream, pinned to the newest release tag.
+# Note: upstream's *published GitHub release* is still v2.1.0 (2026-01-31) while
+# tags run ahead to v2.5.0 — `releases/latest` is the wrong signal for this repo.
+source:
+  repository: https://github.com/makenotion/notion-mcp-server
+  ref: v2.5.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - notion
+  - docs
+  - knowledge-base
+  - notes
+  - external
+
+license: MIT
+homepage: https://github.com/makenotion/notion-mcp-server

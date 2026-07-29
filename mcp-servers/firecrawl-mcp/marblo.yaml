@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: firecrawl-mcp
+name: Firecrawl MCP
+type: mcp-server
+version: 3.22.4
+status: active
+description: Scrapes and crawls web pages into clean markdown for the agent, handling JavaScript rendering and pagination that a plain fetch tool cannot. Referenced by manifest; not vendored.
+
+publisher:
+  name: Firecrawl
+  tier: community
+  url: https://github.com/firecrawl
+
+# Manifest-only: the real code stays upstream, pinned to an immutable commit.
+# Upstream's newest git tag is v3.2.1 (2025-09-26) but they have shipped to 3.22.4
+# on npm since, without tagging — so a tag pin here would freeze this ~10 months
+# behind the code users actually run. The default branch head commit is pinned instead.
+source:
+  repository: https://github.com/firecrawl/firecrawl-mcp-server
+  ref: 2175de2dfd7e5073e9e743ec31a5e2515fa82df8
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - web-scraping
+  - crawler
+  - markdown
+  - research
+  - external
+
+license: MIT
+homepage: https://github.com/firecrawl/firecrawl-mcp-server

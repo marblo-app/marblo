@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: grafana-mcp
+name: Grafana MCP
+type: mcp-server
+version: 1.0.0
+status: active
+description: Official Grafana server — query dashboards, Prometheus and Loki data sources, incidents, and alert rules from the agent while debugging. Referenced by manifest; not vendored.
+
+publisher:
+  name: Grafana Labs
+  tier: community
+  url: https://github.com/grafana
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/grafana/mcp-grafana
+  ref: v1.0.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - observability
+  - grafana
+  - prometheus
+  - loki
+  - incidents
+  - devops
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/grafana/mcp-grafana
