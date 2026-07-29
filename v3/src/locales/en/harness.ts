@@ -130,6 +130,13 @@ export const harness: Record<keyof typeof koHarness, string> = {
     "Marblo MCP auto-connects only to agents spawned inside the dashboard (per-agent isolated config). Manage external terminal CLI sessions with your own setup, e.g. the taskforce MCP.",
   "harness.store.footerGithub":
     "Direct install from external GitHub URLs is coming later (after trust verification).",
+  // --- The two sections of the store screen (Connections / Store) ---
+  "harness.store.section.connections": "Connections",
+  "harness.store.section.connectionsDesc":
+    "Connect CLIs, vendors and channels to this app.",
+  "harness.store.section.store": "Store",
+  "harness.store.section.storeDesc":
+    "Install reviewed skills and MCP assets. The full catalog lives on GitHub.",
   // --- Telegram channel panel ---
   "harness.telegram.status.idle": "Idle",
   "harness.telegram.status.connected": "Connected",
@@ -166,16 +173,15 @@ export const harness: Record<keyof typeof koHarness, string> = {
   // --- Public registry store (marblo-app/marblo) ---
   "harness.store.cat.regskill": "Store skills",
   "harness.store.cat.regmcp": "Store MCP",
-  "harness.store.registry.title": "Community Store",
+  "harness.store.registry.title": "Public registry",
   "harness.store.registry.subtitle":
-    "Skills and MCP servers from the public registry (marblo-app/marblo). Tier and permissions are disclosures — they do not restrict what an item does once installed.",
+    "Only official and verified tiers from the public registry (marblo-app/marblo) are installable in-app. Tier and permissions are disclosures — they do not restrict what an item does once installed.",
   "harness.store.registry.skills": "Skills",
   "harness.store.registry.mcp": "MCP servers",
   "harness.store.registry.stale":
     "Could not reach the registry — showing the last fetched list.",
   "harness.store.registry.unavailable":
     "Registry unreachable. The built-in catalog still works.",
-  "harness.store.registry.empty": "No registry items to show.",
   "harness.store.registry.refresh": "Refresh",
   "harness.store.registry.tier.official": "Official",
   "harness.store.registry.tier.verified": "Verified",
@@ -206,4 +212,9 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.registry.uninstallFail": "Uninstall failed.",
   "harness.store.registry.source": "Source",
   "harness.store.registry.loadFail": "Failed to load the registry list.",
+  // Community tier is kept out of the in-app list — link to the GitHub catalog.
+  "harness.store.registry.communityHidden": "{count} community items",
+  "harness.store.registry.githubCatalog": "Full catalog on GitHub →",
+  "harness.store.registry.emptyVerified":
+    "Reviewed assets will show up here soon. The full catalog is on GitHub.",
 };

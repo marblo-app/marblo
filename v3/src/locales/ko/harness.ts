@@ -126,6 +126,13 @@ export const harness = {
     "Marblo MCP는 대시보드 내부에서 spawn 된 에이전트에만 자동 연결됩니다 (per-agent isolated config). 외부 터미널 CLI 세션은 사용자의 taskforce MCP 등 별도 설정으로 관리하세요.",
   "harness.store.footerGithub":
     "외부 GitHub URL 직접 설치는 차후 추가될 예정입니다 (신뢰 검증 후).",
+  // --- Store 화면의 두 섹션 (연결 / 스토어) ---
+  "harness.store.section.connections": "연결",
+  "harness.store.section.connectionsDesc":
+    "CLI·벤더·채널을 이 앱에 연결합니다.",
+  "harness.store.section.store": "스토어",
+  "harness.store.section.storeDesc":
+    "검증된 스킬·MCP 자산을 설치합니다. 전체 카탈로그는 GitHub 에 있습니다.",
   // --- Telegram channel panel ---
   // Status badge (fixed-set labels)
   "harness.telegram.status.idle": "대기",
@@ -165,16 +172,15 @@ export const harness = {
   // --- Public registry store (marblo-app/marblo) ---
   "harness.store.cat.regskill": "스토어 스킬",
   "harness.store.cat.regmcp": "스토어 MCP",
-  "harness.store.registry.title": "커뮤니티 스토어",
+  "harness.store.registry.title": "공개 레지스트리",
   "harness.store.registry.subtitle":
-    "공개 레지스트리(marblo-app/marblo)에서 가져온 스킬·MCP 서버입니다. tier 와 권한은 공시이며, 설치 후 동작을 제한하지 않습니다.",
+    "공개 레지스트리(marblo-app/marblo)의 공식·검증됨 tier 만 앱에서 설치할 수 있습니다. tier 와 권한은 공시이며, 설치 후 동작을 제한하지 않습니다.",
   "harness.store.registry.skills": "스킬",
   "harness.store.registry.mcp": "MCP 서버",
   "harness.store.registry.stale":
     "레지스트리에 연결하지 못해 마지막으로 확인한 목록을 표시 중입니다.",
   "harness.store.registry.unavailable":
     "레지스트리에 연결할 수 없습니다. 내장 카탈로그는 정상 동작합니다.",
-  "harness.store.registry.empty": "표시할 레지스트리 항목이 없습니다.",
   "harness.store.registry.refresh": "새로고침",
   "harness.store.registry.tier.official": "공식",
   "harness.store.registry.tier.verified": "검증됨",
@@ -205,4 +211,9 @@ export const harness = {
   "harness.store.registry.uninstallFail": "제거에 실패했습니다.",
   "harness.store.registry.source": "소스",
   "harness.store.registry.loadFail": "레지스트리 목록을 불러오지 못했습니다.",
+  // 커뮤니티 tier 는 인앱 목록에서 제외하고 GitHub 전체 카탈로그로 보낸다.
+  "harness.store.registry.communityHidden": "커뮤니티 {count}개",
+  "harness.store.registry.githubCatalog": "GitHub 전체 카탈로그 →",
+  "harness.store.registry.emptyVerified":
+    "검증된 자산이 곧 여기 뜹니다. 전체는 GitHub에서 볼 수 있습니다.",
 };

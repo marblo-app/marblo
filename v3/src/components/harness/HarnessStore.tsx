@@ -52,6 +52,35 @@ function statusLabel(status: HarnessPackage["status"]): string {
   return translate(`harness.store.status.${status}` as MessageKey);
 }
 
+/**
+ * 스토어 화면의 두 갈래를 가르는 머리줄. 이 화면은 성격이 다른 두 가지를 한
+ * 스크롤에 담고 있었다 — (1) 이 앱에 CLI·벤더·채널을 **연결**하는 셋업,
+ * (2) 외부 레지스트리에서 자산을 **설치**하는 스토어. 둘이 시각적으로 안
+ * 갈려서 클러터로 읽혔다. `separated` 는 앞 섹션과의 경계선(두 번째부터).
+ */
+function StoreSectionHeader({
+  label,
+  desc,
+  separated,
+}: {
+  label: string;
+  desc: string;
+  separated?: boolean;
+}) {
+  return (
+    <div
+      className={`bg-[#11111b] px-4 py-2.5 ${
+        separated ? "border-y-2 border-[#313244]" : "border-b border-[#313244]"
+      }`}
+    >
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#89b4fa]">
+        {label}
+      </h3>
+      <p className="mt-0.5 text-[11px] text-[#6c7086]">{desc}</p>
+    </div>
+  );
+}
+
 // Catalog packages whose login state we live-probe (binary on PATH ≠ logged
 // in — spawning an unauthenticated CLI hangs on its login prompt).
 const CLI_AUTH_MODELS: Record<string, "claude" | "codex" | "grok"> = {
@@ -278,17 +307,17 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
         {/* Body scrolls as one unit so the connection state and catalog stay in
             normal document flow without separate nested scrollbars. */}
         <div className="min-h-0 flex-1 overflow-y-auto">
+          {/* ── 섹션 1: 연결 — CLI·벤더·채널을 이 앱에 붙이는 셋업 ── */}
+          <StoreSectionHeader
+            label={t("harness.store.section.connections")}
+            desc={t("harness.store.section.connectionsDesc")}
+          />
           <ConnectionStatusPanel />
           <TelegramChannelPanel />
 
           {/* env-swap 벤더 — 설치형 카탈로그에 없는 "키만 얹는" 벤더들.
               카탈로그보다 위에 두는 이유: 이 탭에서 안 보인다는 것이 문제였다. */}
           {showEnvSwap && <EnvSwapVendorSection />}
-
-          {/* 공개 레지스트리 스토어 — 내장 카탈로그와 분리된 채널(registry:*). */}
-          {showRegistry && (
-            <RegistryStoreSection typeFilter={registryTypeFilter} />
-          )}
 
           {/* List */}
           {showPackages && (
@@ -462,6 +491,19 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
                 })}
               </div>
             </div>
+          )}
+
+          {/* ── 섹션 2: 스토어 — 공개 레지스트리(registry:*)에서 설치하는 자산.
+              내장 카탈로그와 데이터 소스·IPC 채널이 완전히 분리돼 있다. ── */}
+          {showRegistry && (
+            <>
+              <StoreSectionHeader
+                separated
+                label={t("harness.store.section.store")}
+                desc={t("harness.store.section.storeDesc")}
+              />
+              <RegistryStoreSection typeFilter={registryTypeFilter} />
+            </>
           )}
         </div>
 

@@ -11,7 +11,10 @@ import { useTranslation, t as translate } from "../../lib/i18n";
  *
  * 표시 원칙:
  *  - tier·permissions 는 **공시**다. UI 카피가 "강제 아님"을 명시한다(§4.6).
- *  - community tier 는 목록·공시만 — 설치 버튼 자체가 없다(§6.3 기본 차단).
+ *  - community tier 는 설치 불가(§6.3 기본 차단)이며, **인앱 목록에서도 제외**한다
+ *    — 설치할 수 없는 항목 수십 개가 스토어를 덮어 official/verified 를 묻어버렸다.
+ *    대신 개수만 집계해 GitHub 전체 카탈로그로 보낸다. 설치 게이트(`installable`)
+ *    는 목록 필터와 별개로 그대로 둔다 — 표시 정책이 바뀌어도 차단은 유지된다.
  *  - install 계약이 없는 항목(v1 mcp-server 등)은 "자동 설치 불가"로 정직하게
  *    표시하고 홈페이지 링크만 준다 — 가짜 설치 버튼 금지.
  *  - 설치 전에는 항상 권한 공시 모달을 지난다. 고위험 스코프는 강조.
@@ -24,6 +27,25 @@ interface RegistryStoreSectionProps {
 }
 
 const HIGH_RISK_RE = /^(shell:exec|secrets:read|repository:write)/;
+
+/** 공개 레지스트리 저장소 — 인앱에서 감춘 community 항목의 목적지. */
+const REGISTRY_CATALOG_URL = "https://github.com/marblo-app/marblo";
+
+/**
+ * 타입 필터를 지난 항목을 "인앱에 보여줄 목록" 과 "GitHub 으로 보낼 community
+ * 개수" 로 가른다. 둘을 **같은 모집단**에서 뽑는 게 요점 — 카운트가 화면의
+ * 필터와 어긋나면 "커뮤니티 N개" 가 거짓말이 된다.
+ */
+export function splitRegistryByTier(
+  items: RegistryStoreItem[],
+  typeFilter?: RegistryStoreSectionProps["typeFilter"],
+): { visible: RegistryStoreItem[]; communityCount: number } {
+  const scoped = items.filter((i) => !typeFilter || i.type === typeFilter);
+  return {
+    visible: scoped.filter((i) => i.tier !== "community"),
+    communityCount: scoped.filter((i) => i.tier === "community").length,
+  };
+}
 
 function tierBadgeClass(tier: RegistryStoreItem["tier"]): string {
   switch (tier) {
@@ -80,8 +102,8 @@ export function RegistryStoreSection({
     void load();
   }, [load]);
 
-  const visible = useMemo(
-    () => items.filter((i) => !typeFilter || i.type === typeFilter),
+  const { visible, communityCount } = useMemo(
+    () => splitRegistryByTier(items, typeFilter),
     [items, typeFilter],
   );
   const groups = useMemo(() => {
@@ -209,9 +231,11 @@ export function RegistryStoreSection({
           {t("harness.store.registry.unavailable")}
         </p>
       )}
+      {/* 빈 상태 = "아직 검증된 자산이 없다" — 레지스트리가 비었다는 뜻이 아니다
+          (community 는 여기서 세지 않고 아래 카탈로그 줄이 대신 안내한다). */}
       {available && !loading && visible.length === 0 && (
         <p className="text-xs text-[#6c7086]">
-          {t("harness.store.registry.empty")}
+          {t("harness.store.registry.emptyVerified")}
         </p>
       )}
 
@@ -367,6 +391,29 @@ export function RegistryStoreSection({
           </div>
         </div>
       ))}
+
+      {/* 감춘 community 항목의 출구 — 개수는 공시하되 목록은 GitHub 이 갖는다.
+          레지스트리에 닿지 못한 상태(!available)에선 개수가 0 이라 링크만 남는다. */}
+      {available && !loading && (
+        <p className="mt-3 text-[11px] text-[#6c7086]">
+          {communityCount > 0 && (
+            <>
+              {t("harness.store.registry.communityHidden", {
+                count: communityCount,
+              })}
+              {" · "}
+            </>
+          )}
+          <a
+            href={REGISTRY_CATALOG_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#89b4fa] hover:underline"
+          >
+            {t("harness.store.registry.githubCatalog")}
+          </a>
+        </p>
+      )}
 
       {/* 설치 전 권한 공시 모달 (§4.6) */}
       {disclosureFor && (
