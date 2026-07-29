@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: naver-search-mcp
+name: Naver Search MCP
+type: mcp-server
+version: 1.0.50
+status: active
+description: Search Naver — news, blogs, cafés, local, encyclopedia — plus DataLab search-trend and shopping-insight analysis. Naver is the search engine most Korean-language content is actually indexed in.
+
+publisher:
+  name: isnow890
+  tier: community
+  url: https://github.com/isnow890
+
+# Manifest-only: upstream publishes no git tags, so the pin is a full commit SHA.
+source:
+  repository: https://github.com/isnow890/naver-search-mcp
+  ref: d7c7c58cab0de2692336b710727f1ee123270e6c
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - korea
+  - korean
+  - naver
+  - search
+  - datalab
+  - trends
+  - external
+
+license: MIT
+homepage: https://github.com/isnow890/naver-search-mcp

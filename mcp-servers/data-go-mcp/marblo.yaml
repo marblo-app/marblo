@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: data-go-mcp
+name: Korea Public Data (data.go.kr) MCP Servers
+type: mcp-server
+version: 0.2.0
+status: active
+description: Six MCP servers over Korea's public data portal — national pension enrollment, business-registration verification, public procurement bids, corporate financials, presidential speeches, and chemical safety data.
+
+publisher:
+  name: Koomook
+  tier: community
+  url: https://github.com/Koomook
+
+# Manifest-only: upstream publishes no git tags, so the pin is a full commit SHA.
+source:
+  repository: https://github.com/Koomook/data-go-mcp-servers
+  ref: dd27f99490400b31fa14f96045a138fa217580a4
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - korea
+  - korean
+  - public-data
+  - government
+  - procurement
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/Koomook/data-go-mcp-servers
