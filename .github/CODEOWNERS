@@ -1,0 +1,23 @@
+# Default owners for the ecosystem repo.
+* @melocream
+
+# The registry is a supply-chain surface — every manifest change is reviewed.
+/registry/ @melocream
+/skills/ @melocream
+/mcp-servers/ @melocream
+/agents/ @melocream
+/workflows/ @melocream
+
+# Knowledge packs are pure prose loaded into an agent's context — the most
+# prompt-injectable item type in the catalog, and previously the only category
+# missing from this list.
+/knowledge/ @melocream
+
+# Security posture and the revocation record.
+/SECURITY.md @melocream
+/SECURITY-ADVISORIES.md @melocream
+
+# NOTE: CODEOWNERS only gates anything if branch protection has "Require review
+# from Code Owners" enabled. That is a repo setting, invisible in this file.
+# Every path here currently resolves to one person — a review bottleneck that
+# has to be widened before community submissions can scale.

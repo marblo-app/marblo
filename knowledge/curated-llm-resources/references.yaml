@@ -1,0 +1,54 @@
+# Vetted references for the LLM Study knowledge pack.
+# Every URL was opened and checked. Full list: github.com/melocream/awesome-llm-study
+schema_version: 1
+
+source_of_truth:
+  name: awesome-llm-study
+  repository: https://github.com/melocream/awesome-llm-study
+  license: CC-BY-4.0
+
+references:
+  - stage: foundations
+    title: 3Blue1Brown — Transformers (Ch.5)
+    url: https://www.youtube.com/watch?v=wjZofJX0v4M
+    level: intro
+  - stage: foundations
+    title: The Illustrated Transformer
+    url: https://jalammar.github.io/illustrated-transformer/
+    level: intro
+  - stage: foundations
+    title: Karpathy — Let's build the GPT Tokenizer
+    url: https://www.youtube.com/watch?v=zduSFxRajkE
+    level: mid
+  - stage: build
+    title: Karpathy — Neural Networks Zero to Hero
+    url: https://karpathy.ai/zero-to-hero.html
+    level: mid
+  - stage: build
+    title: Stanford CS336 — Language Modeling from Scratch
+    url: https://stanford-cs336.github.io/spring2025/
+    level: deep
+  - stage: agents
+    title: Anthropic — Building Effective Agents
+    url: https://www.anthropic.com/engineering/building-effective-agents
+    level: intro
+  - stage: agents
+    title: Model Context Protocol — intro
+    url: https://modelcontextprotocol.io/docs/getting-started/intro
+    level: intro
+  - stage: rag
+    title: MTEB Leaderboard
+    url: https://huggingface.co/spaces/mteb/leaderboard
+    level: ref
+  - stage: rag
+    title: Anthropic — Contextual Retrieval
+    url: https://www.anthropic.com/engineering/contextual-retrieval
+    level: mid
+  - stage: operate
+    title: Langfuse
+    url: https://langfuse.com/docs
+    level: ref
+  - stage: operate
+    title: OpenTelemetry for Generative AI
+    url: https://opentelemetry.io/blog/2024/otel-generative-ai/
+    level: mid

@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: github-mcp
+name: GitHub MCP Server
+type: mcp-server
+version: 1.7.0
+status: active
+description: Official GitHub MCP server — give agents scoped access to repositories, issues, and pull requests. Referenced by manifest; not vendored.
+
+publisher:
+  name: GitHub
+  tier: verified
+  url: https://github.com/github
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/github/github-mcp-server
+  ref: v1.7.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - repository:read
+  - repository:write
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - github
+  - issues
+  - pull-requests
+  - external
+
+license: MIT
+homepage: https://github.com/github/github-mcp-server

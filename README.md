@@ -155,7 +155,7 @@ Describe the goal in natural language. Marblo turns it into a ticket graph, then
 
 ### ⚡ Lanes
 
-Need parallel *right now*? Fire off several agents at once from the Lanes tab — you pick the model for each. Runs alongside the orchestrator, not through it.
+Need parallel _right now_? Fire off several agents at once from the Lanes tab — you pick the model for each. Runs alongside the orchestrator, not through it.
 
 [Guide →](https://marblo.app/en/guide)
 
@@ -225,26 +225,97 @@ Marblo is where you **manage** agents — board, isolation, cost, and safe merge
 
 ## Why Marblo
 
-| Pain today | What Marblo does |
-| --- | --- |
-| One chat, one agent, you wait | One orchestrator, many agents in parallel |
-| “What’s it doing?” for 30 minutes | Live board + per-agent terminals |
-| Parallel agents overwrite each other | Worktree-per-ticket isolation |
-| API cost is a black hole | Usage by agent / model / day |
-| Merge is trust-me | Review, verify, then you confirm |
+| Pain today                           | What Marblo does                          |
+| ------------------------------------ | ----------------------------------------- |
+| One chat, one agent, you wait        | One orchestrator, many agents in parallel |
+| “What’s it doing?” for 30 minutes    | Live board + per-agent terminals          |
+| Parallel agents overwrite each other | Worktree-per-ticket isolation             |
+| API cost is a black hole             | Usage by agent / model / day              |
+| Merge is trust-me                    | Review, verify, then you confirm          |
 
 > Agents are cheap to start. **Knowing what the fleet is doing** is the hard part. That’s the product.
 
 ---
 
+## 🧩 Ecosystem — these assets run in the CLI you already have
+
+**You do not need Marblo to use anything in this repository.**
+
+Every first-party asset here is a plain, standards-native file: a `SKILL.md` that drops into `~/.claude/skills/`, an agent definition in the format Claude Code and Codex already read, a knowledge pack that is just markdown. Copy one in and it works in your next session. Installing Marblo is a one-click upgrade on top — never the gate.
+
+### 30-second install, no app required
+
+**🚩 [Fleet Operations](knowledge/fleet-operations/) — the flagship.** What running a heterogeneous fleet of agent CLIs in production actually teaches: which vendor subscriptions open an Anthropic-compatible endpoint (and why "ships its own CLI" is the wrong test), per-harness resume contracts that kill the process on the wrong flag, why PTY output is the wrong agent-liveness signal in _both_ directions, where cost attribution silently breaks, and worktree-per-ticket hygiene. Measured, not inferred. **[Just read it →](knowledge/fleet-operations/KNOWLEDGE.md)**
+
+```bash
+# Keep it where your agents can find it
+mkdir -p ~/.claude/skills/fleet-operations && curl -sL \
+  https://raw.githubusercontent.com/marblo-app/marblo/main/knowledge/fleet-operations/KNOWLEDGE.md \
+  -o ~/.claude/skills/fleet-operations/SKILL.md
+```
+
+**[Code Review skill](skills/code-review/)** — review a diff for correctness, security, and simplicity; findings ranked by severity, each with a concrete failure scenario.
+
+```bash
+# Claude Code
+mkdir -p ~/.claude/skills/code-review && curl -sL \
+  https://raw.githubusercontent.com/marblo-app/marblo/main/skills/code-review/SKILL.md \
+  -o ~/.claude/skills/code-review/SKILL.md
+
+# Codex — same file, different directory
+mkdir -p ~/.codex/skills/code-review && cp ~/.claude/skills/code-review/SKILL.md ~/.codex/skills/code-review/
+```
+
+**[Reviewer agent](agents/reviewer/)** — a read-only subagent that reviews the diff against its merge base and returns BLOCK or APPROVE.
+
+```bash
+mkdir -p ~/.claude/agents && curl -sL \
+  https://raw.githubusercontent.com/marblo-app/marblo/main/agents/reviewer/AGENT.md \
+  -o ~/.claude/agents/reviewer.md
+```
+
+**[LLM study pack](knowledge/curated-llm-resources/)** — a source-verified learning path (foundations → agents & MCP → RAG → evals → observability). Read it on GitHub; nothing to install.
+
+Two items here are **not** standalone, and we would rather say so than pretend: [`marblo-control`](mcp-servers/marblo-control/) ships inside the app, and [`review-and-merge`](workflows/review-and-merge/) describes Marblo's orchestration flow. The [`github`](mcp-servers/github/) MCP server is a manifest-only reference — install it from upstream's own instructions at the pinned tag.
+
+### What's open and what isn't
+
+Being explicit about this, because a closed core that presents itself as an open ecosystem is worse than either one honestly labeled:
+
+> **The orchestration engine is our product, and it is closed.** The board, the live orchestrator, worktree isolation, cost attribution, and safe merge are the paid app. **Everything the agents _consume_ is open, portable, and MIT/CC-licensed** — skills, agents, workflows, MCP manifests, and knowledge packs, all of which work whether or not you ever install Marblo.
+
+Assets are portable by design. If you stop using Marblo, everything in this repo keeps working.
+
+### Repository layout
+
+```text
+knowledge/    # Knowledge Packs — fleet-operations (flagship), curated-llm-resources
+skills/       # first-party skills (e.g. code-review)
+agents/       # agent definitions (e.g. reviewer)
+workflows/    # multi-step flows (e.g. review-and-merge) — Marblo-specific
+mcp-servers/  # official + referenced MCP servers (e.g. marblo-control, github)
+registry/     # manifests + manifest.schema.json (additive Store metadata)
+docs/         # getting-started, concepts, harness-store, orchestration, troubleshooting
+```
+
+A `marblo.yaml` sits next to each item. It is **additive Store metadata, not a container** — the asset works without it.
+
+- **Plan & roadmap:** [ROADMAP.md](ROADMAP.md) · **Registry:** [registry/](registry/) · **Docs:** [docs/](docs/)
+- **Contribute an item:** [CONTRIBUTING.md](CONTRIBUTING.md). Community submissions are accepted as **listings** — discoverable and linkable, not one-click installable — until the app ships a permission gate and review workflow. [Why →](SECURITY.md)
+- **Security:** [SECURITY.md](SECURITY.md) · [SECURITY-ADVISORIES.md](SECURITY-ADVISORIES.md)
+
+> ⭐ Star the repo to follow the ecosystem as it grows.
+
+---
+
 ## Download
 
-| Platform | Get it |
-| --- | --- |
+| Platform                        | Get it                                                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | 🖥 **Desktop (macOS · Windows)** | [Download latest release](https://github.com/melocream/marblo-releases/releases/latest) — **v3.0.19** |
-| 🌐 **Web** | [marblo.app](https://marblo.app) |
-| 📖 **Guide** | [marblo.app/en/guide](https://marblo.app/en/guide) |
-| 💰 **Pricing** | [marblo.app/en/pricing](https://marblo.app/en/pricing) |
+| 🌐 **Web**                      | [marblo.app](https://marblo.app)                                                                      |
+| 📖 **Guide**                    | [marblo.app/en/guide](https://marblo.app/en/guide)                                                    |
+| 💰 **Pricing**                  | [marblo.app/en/pricing](https://marblo.app/en/pricing)                                                |
 
 > After install you’ll connect your existing AI CLIs (Claude Code, Codex, …). AI usage is billed to those accounts — not included in the Marblo fee.
 

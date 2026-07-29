@@ -1,0 +1,30 @@
+schema_version: 1
+
+id: code-review
+name: Code Review
+type: skill
+version: 1.0.0
+status: active
+description: Review agent-generated code for correctness, security, and simplicity before it merges.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+
+keywords:
+  - review
+  - quality
+  - merge-gate
+  - security
+
+license: MIT
+homepage: https://marblo.app

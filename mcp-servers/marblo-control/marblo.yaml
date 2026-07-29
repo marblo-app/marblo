@@ -1,0 +1,32 @@
+schema_version: 1
+
+id: marblo-control
+name: Marblo Control MCP
+type: mcp-server
+version: 1.0.0
+status: active
+description: The MCP server an orchestrator uses to run the board — create and dispatch tickets, spawn and track agents, and record decisions. Ships with the Marblo app.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - repository:read
+  - network:outbound
+
+keywords:
+  - orchestration
+  - board
+  - agents
+  - official
+
+license: MIT
+homepage: https://marblo.app

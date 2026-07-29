@@ -1,0 +1,30 @@
+schema_version: 1
+
+id: fleet-operations
+name: Fleet Operations
+type: knowledge-pack
+version: 1.0.0
+status: active
+description: Production knowledge for running a heterogeneous fleet of agent CLIs — vendor compatibility, per-harness resume contracts, agent liveness, cost attribution, and worktree hygiene.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - any
+
+permissions: []
+
+keywords:
+  - fleet
+  - operations
+  - multi-agent
+  - harness
+  - cost-attribution
+  - worktrees
+
+license: CC-BY-4.0
+homepage: https://github.com/marblo-app/marblo/tree/main/knowledge/fleet-operations
