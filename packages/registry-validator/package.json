@@ -1,0 +1,19 @@
+{
+  "name": "@marblo/registry-validator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Validates Marblo ecosystem registry manifests before merge.",
+  "type": "module",
+  "scripts": {
+    "validate": "node bin/validate-registry.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "yaml": "^2.5.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -22,7 +22,7 @@ Thanks for helping build the Marblo ecosystem. This repo is the public home of h
 
 ### What happens to your PR
 
-**There is no CI in this repo yet.** Validation runs as manual review; automated checks (schema, pin resolution, license, secret scan) are Phase 1a — see [ROADMAP.md](ROADMAP.md) §5. So a maintainer will read your manifest and your payload by hand, and the review may take a few days.
+Every pull request runs the registry validator. It checks the manifest schema, unique kebab-case IDs, required permissions and licenses, immutable external source pins, and GitHub source reachability on a best-effort basis. A maintainer still reviews each manifest and its payload by hand; automated validation is a gate, not a trust decision.
 
 **External items merge as `community` tier, which means listed, not installable.** They are discoverable and linked to their source, but the app will not one-click-install them until it ships a permission gate. This is deliberate — [SECURITY.md](SECURITY.md) explains why a pinned commit does not make an unreviewed text payload safe. Promotion to `verified` follows a maintainer review of the payload itself.
 
