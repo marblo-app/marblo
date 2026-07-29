@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: wshobson-git-workflow
+name: Git Workflow (wshobson)
+type: workflow
+version: 0.1.0
+status: active
+description: A ten-step pipeline from review to opened PR — quality gate, breaking-change scan, tests, conventional commit, branch push, PR description. Every step persists to disk and the push and PR steps stop for confirmation. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/git-pr-workflows
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - repository:write
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - git
+  - pull-request
+  - workflow
+  - slash-command
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

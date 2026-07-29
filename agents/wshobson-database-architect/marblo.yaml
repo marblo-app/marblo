@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: wshobson-database-architect
+name: Database Architect (wshobson)
+type: agent
+version: 0.1.0
+status: active
+description: Data-layer design subagent — engine selection across SQL/NoSQL/time-series, schema and normalization decisions, migration planning, and performance-first modeling for greenfield or re-architecture. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/database-design/agents/database-architect.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - database
+  - schema
+  - migrations
+  - data-modeling
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: voltagent-electron-pro
+name: Electron Pro (VoltAgent)
+type: agent
+version: 0.1.0
+status: active
+description: Desktop-app subagent for Electron — main/renderer process boundaries, context isolation and IPC hardening, native OS integration, memory budgets, and signed cross-platform installers. Referenced by manifest; not vendored.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-claude-code-subagents
+  ref: 947b44ca0c58d606b084e9cb1a2389335b49278b
+  path: categories/01-core-development/electron-pro.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - electron
+  - desktop
+  - ipc
+  - code-signing
+  - external
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-claude-code-subagents

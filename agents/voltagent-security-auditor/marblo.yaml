@@ -1,0 +1,36 @@
+schema_version: 1
+
+id: voltagent-security-auditor
+name: Security Auditor (VoltAgent)
+type: agent
+version: 0.1.0
+status: active
+description: Read-only audit subagent — systematic vulnerability analysis, security-control and configuration review, compliance gap identification, and evidence-backed findings with remediation steps. Referenced by manifest; not vendored.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-claude-code-subagents
+  ref: 947b44ca0c58d606b084e9cb1a2389335b49278b
+  path: categories/04-quality-security/security-auditor.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+
+keywords:
+  - security
+  - audit
+  - compliance
+  - read-only
+  - external
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-claude-code-subagents

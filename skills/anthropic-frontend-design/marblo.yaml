@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: anthropic-frontend-design
+name: Frontend Design (Anthropic)
+type: skill
+version: 0.1.0
+status: active
+description: Anthropic's guidance for giving new UI a deliberate visual identity — aesthetic direction, typography, and palette choices that do not read as templated defaults. Referenced by manifest; not vendored.
+
+publisher:
+  name: Anthropic
+  tier: community
+  url: https://github.com/anthropics
+
+# Manifest-only: the real files stay upstream, pinned to a commit SHA.
+# anthropics/skills publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/anthropics/skills
+  ref: b29e7cf65e5cb78a5ac33d582270551bc74a14eb
+  path: skills/frontend-design
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - frontend
+  - design
+  - typography
+  - ui
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/anthropics/skills/tree/main/skills/frontend-design

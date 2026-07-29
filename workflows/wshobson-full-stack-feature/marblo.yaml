@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: wshobson-full-stack-feature
+name: Full-Stack Feature (wshobson)
+type: workflow
+version: 0.1.0
+status: active
+description: End-to-end feature orchestration across database, backend, frontend, and infrastructure, with testing, security, and performance agents fanned out in parallel before a deployment pass. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/full-stack-orchestration
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - full-stack
+  - orchestration
+  - parallel-agents
+  - slash-command
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

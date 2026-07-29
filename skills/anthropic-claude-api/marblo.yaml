@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: anthropic-claude-api
+name: Claude API Reference (Anthropic)
+type: skill
+version: 0.1.0
+status: active
+description: Anthropic's own reference for building on the Claude API — current model ids and pricing, streaming, tool use, MCP, prompt caching, token counting, and migration notes, with SDK snippets in nine languages. Referenced by manifest; not vendored.
+
+publisher:
+  name: Anthropic
+  tier: community
+  url: https://github.com/anthropics
+
+# Manifest-only: the real files stay upstream, pinned to a commit SHA.
+# anthropics/skills publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/anthropics/skills
+  ref: b29e7cf65e5cb78a5ac33d582270551bc74a14eb
+  path: skills/claude-api
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - claude-api
+  - sdk
+  - tool-use
+  - prompt-caching
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/anthropics/skills/tree/main/skills/claude-api
