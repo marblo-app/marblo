@@ -1,17 +1,148 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" width="1200" height="760" role="img" aria-label="Lanes — Start parallel lanes directly" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0b0f"/><stop offset="1" stop-color="#090909"/></linearGradient>
-    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.32" r="0.85"><stop offset="0" stop-color="#6366f1" stop-opacity="0.16"/><stop offset="1" stop-color="#6366f1" stop-opacity="0"/></radialGradient>
+    <linearGradient id="ls-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
   </defs>
-  <rect x="8" y="8" width="1184" height="744" rx="16" fill="url(#bg)" stroke="#27272a" stroke-width="1.5"/>
-  <path d="M8 24 a16 16 0 0 1 16 -16 h1152 a16 16 0 0 1 16 16 v40 h-1184 z" fill="#111113"/>
-  <line x1="8" y1="64" x2="1192" y2="64" stroke="#27272a" stroke-width="1.5"/>
-  <circle cx="36" cy="36" r="6" fill="#ff5f57"/><circle cx="58" cy="36" r="6" fill="#febc2e"/><circle cx="80" cy="36" r="6" fill="#28c840"/>
-  <rect x="8" y="64" width="1184" height="688" fill="url(#glow)"/>
-  <rect x="8" y="8" width="6" height="744" fill="url(#brand)"/>
-  <text x="600" y="378" text-anchor="middle" fill="#fafafa" font-size="76" font-weight="800" letter-spacing="-1.5">Lanes</text>
-  <text x="600" y="434" text-anchor="middle" fill="#a1a1aa" font-size="27" font-weight="500">Start parallel lanes directly</text>
-  <rect x="512" y="484" width="176" height="36" rx="18" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
-  <text x="600" y="508" text-anchor="middle" fill="#818cf8" font-size="15" font-weight="600" letter-spacing="1.5">PREVIEW</text>
+  <style> .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; } </style>
+
+  <rect x="8" y="8" width="1184" height="744" rx="14" fill="#111827" stroke="#374151" stroke-width="1.5"/>
+  <clipPath id="ls-clip"><rect x="8" y="8" width="1184" height="744" rx="14"/></clipPath>
+  <g clip-path="url(#ls-clip)">
+
+    <!-- header -->
+    <rect x="8" y="8" width="1184" height="48" fill="#0d1420"/>
+    <line x1="8" y1="56" x2="1192" y2="56" stroke="#374151"/>
+    <circle cx="34" cy="32" r="6" fill="#ff5f57"/><circle cx="56" cy="32" r="6" fill="#febc2e"/><circle cx="78" cy="32" r="6" fill="#28c840"/>
+    <rect x="104" y="21" width="22" height="22" rx="6" fill="url(#ls-mark)"/><circle cx="115" cy="32" r="4.5" fill="#0d1420"/>
+    <text x="136" y="38" fill="#ffffff" font-size="16" font-weight="700">Marblo</text>
+    <text x="202" y="38" fill="#6b7280" font-size="11">v3</text>
+    <rect x="500" y="18" width="200" height="28" rx="8" fill="#1f2937" stroke="#374151"/>
+    <text x="540" y="37" fill="#e5e7eb" font-size="13" font-weight="600">my-app</text>
+    <path d="M676 29 l4 4 l4 -4" fill="none" stroke="#9ca3af" stroke-width="1.5"/>
+    <rect x="710" y="22" width="46" height="20" rx="10" fill="#3b82f6" fill-opacity="0.2" stroke="#3b82f6" stroke-opacity="0.3"/>
+    <text x="733" y="36" fill="#60a5fa" font-size="10" font-weight="700" text-anchor="middle" letter-spacing="0.5">FREE</text>
+    <circle cx="1168" cy="32" r="12" fill="#3b82f6"/><text x="1168" y="36" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">D</text>
+
+    <!-- tab bar (Lanes active) -->
+    <rect x="8" y="56" width="1184" height="36" fill="#0d1420"/>
+    <line x1="8" y1="92" x2="1192" y2="92" stroke="#374151"/>
+    <g font-size="12.5" font-weight="600" fill="#9ca3af">
+      <text x="40" y="78">Guide</text>
+      <text x="97" y="78">Board</text>
+      <text x="154" y="78" fill="#60a5fa">Lanes</text>
+      <text x="211" y="78">Missions</text>
+      <text x="289" y="78">Code</text>
+      <text x="339" y="78">Agents</text>
+      <text x="403" y="78">Usage</text>
+      <text x="460" y="78">Worktrees</text>
+      <text x="545" y="78">History</text>
+    </g>
+    <rect x="148" y="90" width="47" height="2" fill="#3b82f6"/>
+
+    <!-- ===== lanes list behind the modal ===== -->
+    <g opacity="0.55">
+      <text x="72" y="122" fill="#e5e7eb" font-size="14" font-weight="600">퀵레인</text>
+      <text x="72" y="140" fill="#6b7280" font-size="11">메인 작업과 병렬로 — 떠오른 개선점을 독립 워크트리에서 빠르게</text>
+      <rect x="920" y="112" width="130" height="22" rx="11" fill="#10b981" fill-opacity="0.1" stroke="#10b981" stroke-opacity="0.4"/>
+      <text x="985" y="127" fill="#6ee7b7" font-size="11" font-weight="600" text-anchor="middle">2개 병렬 실행 중</text>
+      <rect x="1062" y="110" width="100" height="26" rx="6" fill="#2563eb"/>
+      <text x="1112" y="127" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">＋ 빠른 작업</text>
+
+      <circle cx="78" cy="167" r="3" fill="#89b4fa"/>
+      <text x="90" y="171" fill="#d1d5db" font-size="12" font-weight="600">진행 중</text>
+      <text x="142" y="171" fill="#6b7280" font-size="11">2</text>
+      <line x1="158" y1="167" x2="1160" y2="167" stroke="#1f2937"/>
+
+      <rect x="72" y="182" width="344" height="116" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <circle cx="90" cy="204" r="5" fill="#a855f7"/>
+      <text x="104" y="208" fill="#e5e7eb" font-size="12.5" font-weight="500">토스트 알림 자동 닫힘 시간 통일</text>
+      <rect x="90" y="218" width="104" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="98" y="230" class="mono" fill="#a6adc8" font-size="10">claude-opus-5</text>
+      <text x="90" y="254" class="mono" fill="#6b7280" font-size="11">wt/toast-timing</text>
+      <text x="216" y="254" class="mono" fill="#9ca3af" font-size="11">▲2 ▼0 · +34/−12</text>
+
+      <rect x="444" y="182" width="344" height="116" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <circle cx="462" cy="204" r="5" fill="#22c55e"/>
+      <text x="476" y="208" fill="#e5e7eb" font-size="12.5" font-weight="500">느린 검색 쿼리 인덱스 추가</text>
+      <rect x="462" y="218" width="98" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="470" y="230" class="mono" fill="#a6adc8" font-size="10">gpt-5.6-sol</text>
+      <text x="462" y="254" class="mono" fill="#6b7280" font-size="11">wt/search-index</text>
+      <text x="588" y="254" class="mono" fill="#9ca3af" font-size="11">▲5 ▼3 · +212/−96</text>
+
+      <rect x="816" y="182" width="344" height="116" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.35" stroke-dasharray="5 4"/>
+      <text x="988" y="246" fill="#4b5563" font-size="12" text-anchor="middle">세 번째 레인이 여기에 섭니다</text>
+
+      <rect x="72" y="330" width="1088" height="80" rx="10" fill="#1f2937" fill-opacity="0.25" stroke="#374151" stroke-opacity="0.4" stroke-dasharray="6 5"/>
+      <text x="616" y="366" fill="#9ca3af" font-size="12.5" text-anchor="middle">독립적인 작업마다 반복하면 각 레인이 서로 나란히 실행됩니다</text>
+      <text x="616" y="388" fill="#6b7280" font-size="11" text-anchor="middle">＋ 빠른 작업 → 무엇을 할지 적고 → 모델을 고르고 → 시작</text>
+    </g>
+
+    <!-- modal backdrop -->
+    <rect x="8" y="92" width="1184" height="660" fill="#000000" fill-opacity="0.5"/>
+
+    <!-- ===== LaneCreateModal ===== -->
+    <rect x="370" y="160" width="460" height="472" rx="10" fill="#1f2937" stroke="#374151" stroke-width="1.5"/>
+
+    <text x="390" y="192" fill="#f3f4f6" font-size="13.5" font-weight="600">＋ 빠른 작업</text>
+
+    <text x="390" y="220" fill="#9ca3af" font-size="11" font-weight="500">무엇을 할까요?</text>
+    <rect x="390" y="228" width="420" height="34" rx="5" fill="#374151" stroke="#3b82f6"/>
+    <text x="404" y="250" fill="#f3f4f6" font-size="12.5">로그인 에러 메시지 개선</text>
+    <rect x="580" y="236" width="1.5" height="18" fill="#93c5fd"/>
+
+    <!-- vendor row -->
+    <text x="390" y="288" fill="#9ca3af" font-size="11" font-weight="500">프로바이더</text>
+    <g font-size="11">
+      <rect x="390" y="296" width="72" height="24" rx="4" fill="#374151" stroke="#4b5563"/><text x="426" y="312" fill="#9ca3af" text-anchor="middle">anthropic</text>
+      <rect x="470" y="296" width="60" height="24" rx="4" fill="#3b82f6" fill-opacity="0.15" stroke="#3b82f6"/><text x="500" y="312" fill="#f3f4f6" text-anchor="middle">openai</text>
+      <rect x="538" y="296" width="42" height="24" rx="4" fill="#374151" stroke="#4b5563"/><text x="559" y="312" fill="#9ca3af" text-anchor="middle">xai</text>
+      <rect x="588" y="296" width="42" height="24" rx="4" fill="#374151" stroke="#4b5563"/><text x="609" y="312" fill="#9ca3af" text-anchor="middle">zai</text>
+      <rect x="638" y="296" width="76" height="24" rx="4" fill="#374151" stroke="#4b5563"/><text x="676" y="312" fill="#9ca3af" text-anchor="middle">moonshot</text>
+      <rect x="722" y="296" width="102" height="24" rx="4" fill="#374151" stroke="#4b5563" stroke-opacity="0.6" opacity="0.6"/>
+      <text x="756" y="312" fill="#9ca3af" text-anchor="middle" opacity="0.6">minimax</text>
+      <text x="800" y="311" fill="#fbbf24" font-size="9.5" text-anchor="middle" opacity="0.85">키 필요</text>
+    </g>
+    <text x="390" y="338" fill="#6b7280" font-size="10.5">키 미등록: minimax — v3/.env 에 추가하면 켜집니다.</text>
+
+    <!-- model list -->
+    <text x="390" y="368" fill="#9ca3af" font-size="11" font-weight="500">모델</text>
+    <g font-size="11.5">
+      <rect x="390" y="376" width="420" height="28" rx="4" fill="#3b82f6" fill-opacity="0.15" stroke="#3b82f6"/>
+      <text x="404" y="395" class="mono" fill="#f3f4f6">gpt-5.6-sol</text>
+      <rect x="726" y="383" width="70" height="15" rx="3" fill="#374151"/>
+      <text x="761" y="395" fill="#d1d5db" font-size="9.5" letter-spacing="0.6" text-anchor="middle">FRONTIER</text>
+
+      <rect x="390" y="408" width="420" height="28" rx="4" fill="#374151" fill-opacity="0.55" stroke="#4b5563"/>
+      <text x="404" y="427" class="mono" fill="#9ca3af">gpt-5.5</text>
+      <rect x="754" y="415" width="42" height="15" rx="3" fill="#374151"/>
+      <text x="775" y="427" fill="#d1d5db" font-size="9.5" letter-spacing="0.6" text-anchor="middle">TOP</text>
+
+      <rect x="390" y="440" width="420" height="28" rx="4" fill="#374151" fill-opacity="0.55" stroke="#4b5563"/>
+      <text x="404" y="459" class="mono" fill="#9ca3af">gpt-5.4-mini</text>
+      <rect x="742" y="447" width="54" height="15" rx="3" fill="#374151"/>
+      <text x="769" y="459" fill="#d1d5db" font-size="9.5" letter-spacing="0.6" text-anchor="middle">CHEAP</text>
+    </g>
+
+    <!-- effort row -->
+    <text x="390" y="500" fill="#9ca3af" font-size="11" font-weight="500">reasoning effort</text>
+    <g font-size="11">
+      <rect x="390" y="508" width="70" height="24" rx="4" fill="#374151" stroke="#4b5563"/><text x="425" y="524" fill="#9ca3af" text-anchor="middle">기본(low)</text>
+      <rect x="468" y="508" width="62" height="24" rx="4" fill="#374151" stroke="#4b5563"/><text x="499" y="524" fill="#9ca3af" text-anchor="middle">medium</text>
+      <rect x="538" y="508" width="46" height="24" rx="4" fill="#3b82f6" fill-opacity="0.15" stroke="#3b82f6"/><text x="561" y="524" fill="#f3f4f6" text-anchor="middle">high</text>
+      <rect x="592" y="508" width="50" height="24" rx="4" fill="#374151" stroke="#4b5563"/><text x="617" y="524" fill="#9ca3af" text-anchor="middle">xhigh</text>
+      <rect x="650" y="508" width="42" height="24" rx="4" fill="#374151" stroke="#4b5563"/><text x="671" y="524" fill="#9ca3af" text-anchor="middle">max</text>
+    </g>
+
+    <!-- worktree note -->
+    <rect x="390" y="546" width="420" height="30" rx="6" fill="#3b82f6" fill-opacity="0.08" stroke="#3b82f6" stroke-opacity="0.25"/>
+    <circle cx="408" cy="561" r="6" fill="none" stroke="#93c5fd" stroke-width="1.3"/><path d="M408 558 v3 l2 2" stroke="#93c5fd" stroke-width="1.2" fill="none"/>
+    <text x="424" y="565" fill="#bfdbfe" font-size="10.5">시작하면 이 레인만의 격리 워크트리와 브랜치가 만들어집니다</text>
+
+    <!-- footer -->
+    <text x="390" y="606" class="mono" fill="#6b7280" font-size="11">gpt-5.6-sol@high</text>
+    <text x="704" y="606" fill="#9ca3af" font-size="12.5">취소</text>
+    <rect x="740" y="590" width="70" height="26" rx="5" fill="#2563eb"/>
+    <text x="775" y="607" fill="#ffffff" font-size="12.5" font-weight="500" text-anchor="middle">시작</text>
+  </g>
 </svg>
