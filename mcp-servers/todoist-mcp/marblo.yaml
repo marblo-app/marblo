@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: todoist-mcp
+name: Todoist MCP
+type: mcp-server
+version: 12.1.2
+status: active
+description: Manages Todoist tasks, projects, sections, and labels from the agent, published by Doist themselves rather than a third party. Referenced by manifest; not vendored.
+
+publisher:
+  name: Doist
+  tier: community
+  url: https://github.com/Doist
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/Doist/todoist-mcp
+  ref: v12.1.2
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - todoist
+  - tasks
+  - productivity
+  - gtd
+  - external
+
+license: MIT
+homepage: https://github.com/Doist/todoist-mcp

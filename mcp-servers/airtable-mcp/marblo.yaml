@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: airtable-mcp
+name: Airtable MCP
+type: mcp-server
+version: 1.14.0
+status: active
+description: Reads and writes Airtable bases from the agent — list bases and tables, inspect schema, then query, create, update, and delete records. Referenced by manifest; not vendored.
+
+publisher:
+  name: domdomegg
+  tier: community
+  url: https://github.com/domdomegg
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/domdomegg/airtable-mcp-server
+  ref: v1.14.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - airtable
+  - database
+  - records
+  - no-code
+  - external
+
+license: MIT
+homepage: https://github.com/domdomegg/airtable-mcp-server

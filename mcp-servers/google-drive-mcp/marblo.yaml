@@ -1,0 +1,44 @@
+schema_version: 1
+
+id: google-drive-mcp
+name: Google Drive MCP
+type: mcp-server
+version: 2.5.0
+status: active
+description: Drive-scoped file operations — search, read, create, and edit files in Drive, Docs, Sheets, and Slides — for teams that do not want a full Workspace grant. Referenced by manifest; not vendored.
+
+publisher:
+  name: piotr-agier
+  tier: community
+  url: https://github.com/piotr-agier
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/piotr-agier/google-drive-mcp
+  ref: v2.5.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Reads the OAuth client JSON off disk and writes the refreshed token cache
+# (default ~/.config/google-drive-mcp/tokens.json), so filesystem access is real
+# rather than incidental.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - google-drive
+  - docs
+  - sheets
+  - slides
+  - files
+  - external
+
+license: MIT
+homepage: https://github.com/piotr-agier/google-drive-mcp

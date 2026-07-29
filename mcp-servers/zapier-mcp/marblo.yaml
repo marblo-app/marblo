@@ -1,0 +1,46 @@
+schema_version: 1
+
+id: zapier-mcp
+name: Zapier MCP
+type: mcp-server
+version: 1.0.0
+status: active
+description: Reaches thousands of SaaS apps through Zapier's hosted MCP endpoint over OAuth. The server is remote; the pinned repo is Zapier's official client-side plugin. Referenced by manifest; not vendored.
+
+publisher:
+  name: Zapier
+  tier: community
+  url: https://github.com/zapier
+
+# Manifest-only, and read the README before this pin is taken at face value: the
+# MCP server itself is HOSTED at https://mcp.zapier.com/api/v1/connect and has no
+# public source. What is pinned here is Zapier's official plugin distribution —
+# the client-side skills, agents, and `gemini-extension.json` that point at that
+# endpoint. Upstream cuts no tags, so the head commit is pinned; `version` is the
+# plugin version from gemini-extension.json at that commit.
+source:
+  repository: https://github.com/zapier/zapier-mcp
+  ref: e672a7bd0d4ef125f4b81fde1c4369a95348ba46
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - gemini-cli
+    - any
+
+# OAuth against the hosted endpoint rather than a static token: no API-key env var
+# is required, but the negotiated credential is still read from the client's store.
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - zapier
+  - automation
+  - integrations
+  - workflows
+  - external
+
+license: MIT
+homepage: https://github.com/zapier/zapier-mcp

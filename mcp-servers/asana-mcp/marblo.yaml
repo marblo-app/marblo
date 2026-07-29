@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: asana-mcp
+name: Asana MCP
+type: mcp-server
+version: 1.6.0
+status: active
+description: Works Asana from the agent — search and read tasks, projects, and portfolios, then create tasks, post comments, and update status. Referenced by manifest; not vendored.
+
+publisher:
+  name: roychri
+  tier: community
+  url: https://github.com/roychri
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+# Upstream tags releases but publishes no GitHub Releases, so there is no release
+# feed to watch — this pin needs a deliberate re-check.
+source:
+  repository: https://github.com/roychri/mcp-server-asana
+  ref: v1.6.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - asana
+  - project-management
+  - tasks
+  - collaboration
+  - external
+
+license: MIT
+homepage: https://github.com/roychri/mcp-server-asana

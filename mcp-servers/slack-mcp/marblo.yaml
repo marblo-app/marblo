@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: slack-mcp
+name: Slack MCP Server
+type: mcp-server
+version: 1.3.0
+status: active
+description: Reads and posts Slack messages from the agent — channels, DMs, group DMs, and threads — without asking a workspace admin to approve a bot app first. Referenced by manifest; not vendored.
+
+publisher:
+  name: korotovsky
+  tier: community
+  url: https://github.com/korotovsky
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+# Head has moved past v1.3.0 (last push 2026-07-16, tag cut 2026-05-14) — the tag
+# is pinned anyway, because a pin is only worth what it freezes.
+source:
+  repository: https://github.com/korotovsky/slack-mcp-server
+  ref: v1.3.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - slack
+  - chat
+  - messaging
+  - collaboration
+  - external
+
+license: MIT
+homepage: https://github.com/korotovsky/slack-mcp-server
