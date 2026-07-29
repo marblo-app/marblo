@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: korean-law-mcp
+name: Korean Law MCP (법제처 국가법령정보)
+type: mcp-server
+version: 4.9.1
+status: active
+description: Korean statutes, case law, administrative rules, and treaties from the 법제처 open APIs, plus citation verification that checks a cited article exists and says what the model claims it says.
+
+publisher:
+  name: chrisryugj
+  tier: community
+  url: https://github.com/chrisryugj
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/chrisryugj/korean-law-mcp
+  ref: v4.9.1
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - korea
+  - korean
+  - law
+  - legal
+  - citation-verification
+  - public-data
+  - external
+
+license: MIT
+homepage: https://github.com/chrisryugj/korean-law-mcp

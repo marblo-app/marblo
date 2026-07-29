@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: korea-stock-mcp
+name: Korea Stock MCP (DART · KRX)
+type: mcp-server
+version: 1.4.1
+status: active
+description: Korean equity research from official sources — DART regulatory filings with XBRL financial statements, and KRX daily prices and listings for KOSPI/KOSDAQ.
+
+publisher:
+  name: jjlabsio
+  tier: community
+  url: https://github.com/jjlabsio
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/jjlabsio/korea-stock-mcp
+  ref: v1.4.1
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - korea
+  - korean
+  - stocks
+  - dart
+  - krx
+  - finance
+  - external
+
+license: ISC
+homepage: https://github.com/jjlabsio/korea-stock-mcp
