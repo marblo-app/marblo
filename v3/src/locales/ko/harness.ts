@@ -161,4 +161,48 @@ export const harness = {
 
   // HarnessVersionBadge — tooltip for an agent's installed CLI version
   "harness.installedCliVersion": "설치된 CLI 버전 v{version}",
+
+  // --- Public registry store (marblo-app/marblo) ---
+  "harness.store.cat.regskill": "스토어 스킬",
+  "harness.store.cat.regmcp": "스토어 MCP",
+  "harness.store.registry.title": "커뮤니티 스토어",
+  "harness.store.registry.subtitle":
+    "공개 레지스트리(marblo-app/marblo)에서 가져온 스킬·MCP 서버입니다. tier 와 권한은 공시이며, 설치 후 동작을 제한하지 않습니다.",
+  "harness.store.registry.skills": "스킬",
+  "harness.store.registry.mcp": "MCP 서버",
+  "harness.store.registry.stale":
+    "레지스트리에 연결하지 못해 마지막으로 확인한 목록을 표시 중입니다.",
+  "harness.store.registry.unavailable":
+    "레지스트리에 연결할 수 없습니다. 내장 카탈로그는 정상 동작합니다.",
+  "harness.store.registry.empty": "표시할 레지스트리 항목이 없습니다.",
+  "harness.store.registry.refresh": "새로고침",
+  "harness.store.registry.tier.official": "공식",
+  "harness.store.registry.tier.verified": "검증됨",
+  "harness.store.registry.tier.community": "커뮤니티",
+  "harness.store.registry.communityListOnly":
+    "커뮤니티 tier 는 미검수 — 목록·공시만 제공하며 설치할 수 없습니다.",
+  "harness.store.registry.permissions": "요구 권한(공시)",
+  "harness.store.registry.permissionsNone": "권한 필요 없음(명시)",
+  "harness.store.registry.permissionsUndeclared": "권한 미신고",
+  "harness.store.registry.highRisk": "고위험",
+  "harness.store.registry.disclosureTitle": "설치 전 권한 공시",
+  "harness.store.registry.disclosureNote":
+    "Marblo 는 항목이 필요하다고 공시한 권한을 보여줄 뿐, 설치 후 실제 동작을 제한하지 않습니다. 신뢰할 수 있는 항목만 설치하세요.",
+  "harness.store.registry.disclosureConfirm": "확인하고 설치",
+  "harness.store.registry.disclosureCancel": "취소",
+  "harness.store.registry.install": "설치",
+  "harness.store.registry.installing": "설치 중…",
+  "harness.store.registry.uninstall": "제거",
+  "harness.store.registry.uninstallConfirm":
+    "{name} 을(를) 제거할까요? 설치 시 원장에 기록된 파일만 삭제됩니다.",
+  "harness.store.registry.installed": "설치됨",
+  "harness.store.registry.outdated": "업데이트 있음",
+  "harness.store.registry.notInstallable": "자동 설치 불가",
+  "harness.store.registry.revoked": "회수됨",
+  "harness.store.registry.installDone": "{name} 설치 완료.",
+  "harness.store.registry.installFail": "설치에 실패했습니다.",
+  "harness.store.registry.uninstallDone": "{name} 제거 완료.",
+  "harness.store.registry.uninstallFail": "제거에 실패했습니다.",
+  "harness.store.registry.source": "소스",
+  "harness.store.registry.loadFail": "레지스트리 목록을 불러오지 못했습니다.",
 };

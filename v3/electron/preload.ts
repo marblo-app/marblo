@@ -713,6 +713,33 @@ contextBridge.exposeInMainWorld("electronAPI", {
         action?: string;
       }>,
   },
+  // 공개 레지스트리 스토어(marblo-app/marblo). 내장 카탈로그(harness.*)와
+  // 분리된 채널 — 설치 검증은 전부 메인 프로세스(registry-installer)에서 한다.
+  registry: {
+    index: (opts?: { refresh?: boolean }) =>
+      ipcRenderer.invoke("registry:index", opts) as Promise<{
+        success: boolean;
+        commit?: string | null;
+        stale?: boolean;
+        available?: boolean;
+        error?: string;
+        items: unknown[];
+      }>,
+    install: (payload: {
+      id: string;
+      type: string;
+      overwriteLocalChanges?: boolean;
+    }) =>
+      ipcRenderer.invoke("registry:install", payload) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    uninstall: (payload: { id: string }) =>
+      ipcRenderer.invoke("registry:uninstall", payload) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+  },
   usage: {
     // Account-global rate-limit snapshots, independent of any running agent.
     // null per provider = no information (logged out / probe failed), never 0%.

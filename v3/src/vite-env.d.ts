@@ -850,6 +850,55 @@ interface HarnessAPI {
   ) => Promise<CliAuthResult>;
 }
 
+/** 공개 레지스트리(marblo-app/marblo) 스토어 항목 — electron registry-installer
+ *  의 RegistryStoreItem 직렬화 형태. */
+interface RegistryStoreItem {
+  schemaVersion: number;
+  id: string;
+  name: string;
+  type: "skill" | "mcp-server";
+  version: string;
+  description: string;
+  tier: "official" | "verified" | "community";
+  publisherName: string;
+  publisherUrl?: string;
+  status: "active" | "deprecated" | "revoked";
+  permissions: string[];
+  permissionsDeclared: boolean;
+  sourceRepository?: string;
+  sourceRef?: string;
+  license?: string;
+  homepage?: string;
+  path: string;
+  commit: string;
+  install: { kind: "files" | "mcp-server" } | null;
+  installDerived: boolean;
+  notInstallableReason?: string;
+  installState: "installed" | "outdated" | "not-installed" | "not-installable";
+  installedVersion?: string;
+}
+
+interface RegistryIndexResponse {
+  success: boolean;
+  commit?: string | null;
+  stale?: boolean;
+  available?: boolean;
+  error?: string;
+  items: RegistryStoreItem[];
+}
+
+interface RegistryAPI {
+  index: (opts?: { refresh?: boolean }) => Promise<RegistryIndexResponse>;
+  install: (payload: {
+    id: string;
+    type: string;
+    overwriteLocalChanges?: boolean;
+  }) => Promise<{ success: boolean; error?: string }>;
+  uninstall: (payload: {
+    id: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+}
+
 type ConnectionAccessMode = "read" | "write" | "pr" | "commit";
 type ConnectionPermissionsState = "unknown" | "pending" | "granted" | "denied";
 
@@ -978,6 +1027,7 @@ interface ElectronAPI {
   auth: AuthAPI;
   claude: ClaudeAPI;
   harness: HarnessAPI;
+  registry: RegistryAPI;
   usage: UsageAPI;
   send: (channel: string, data: unknown) => void;
   on: (channel: string, callback: (...args: unknown[]) => void) => void;

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { TelegramChannelPanel } from "./TelegramChannelPanel";
 import { EnvSwapVendorSection } from "./EnvSwapVendorSection";
+import { RegistryStoreSection } from "./RegistryStoreSection";
 import { useTranslation, t as translate } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 
@@ -16,13 +17,19 @@ interface HarnessStoreProps {
  * 바이너리가 없는 벤더에 설치 버튼을 다는 오분류가 되기 때문. 그래서 이 값일 때는
  * 패키지 격자를 접고 `EnvSwapVendorSection`(레지스트리 파생)만 보여준다.
  */
+/**
+ * `regskill`/`regmcp` 도 `envswap` 과 같은 "다른 갈래를 여는 칸"이다 — 공개
+ * 레지스트리(marblo-app/marblo) 파생 섹션만 보여주고 내장 패키지 격자는 접는다.
+ */
 type CategoryFilter =
   | "all"
   | "required"
   | "recommended"
   | "mcp"
   | "cli"
-  | "envswap";
+  | "envswap"
+  | "regskill"
+  | "regmcp";
 
 const CATEGORY_FILTERS: CategoryFilter[] = [
   "all",
@@ -31,6 +38,8 @@ const CATEGORY_FILTERS: CategoryFilter[] = [
   "mcp",
   "cli",
   "envswap",
+  "regskill",
+  "regmcp",
 ];
 
 // Display labels read locale at call time via the pure t() (the enum value
@@ -113,10 +122,19 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
     }
   }, [packages, refreshAuth]);
 
-  // `envswap` 은 설치형 패키지 카테고리가 아니므로 격자 자체를 접는다(빈 목록
-  // 안내를 띄우면 "패키지가 없다" 는 엉뚱한 말이 된다).
-  const showPackages = filter !== "envswap";
+  // `envswap`/`regskill`/`regmcp` 는 설치형 패키지 카테고리가 아니므로 격자
+  // 자체를 접는다(빈 목록 안내를 띄우면 "패키지가 없다" 는 엉뚱한 말이 된다).
+  const showPackages =
+    filter !== "envswap" && filter !== "regskill" && filter !== "regmcp";
   const showEnvSwap = filter === "all" || filter === "envswap";
+  const showRegistry =
+    filter === "all" || filter === "regskill" || filter === "regmcp";
+  const registryTypeFilter =
+    filter === "regskill"
+      ? ("skill" as const)
+      : filter === "regmcp"
+        ? ("mcp-server" as const)
+        : undefined;
   const filtered = packages.filter(
     (p) => filter === "all" || p.category === filter,
   );
@@ -266,6 +284,11 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
           {/* env-swap 벤더 — 설치형 카탈로그에 없는 "키만 얹는" 벤더들.
               카탈로그보다 위에 두는 이유: 이 탭에서 안 보인다는 것이 문제였다. */}
           {showEnvSwap && <EnvSwapVendorSection />}
+
+          {/* 공개 레지스트리 스토어 — 내장 카탈로그와 분리된 채널(registry:*). */}
+          {showRegistry && (
+            <RegistryStoreSection typeFilter={registryTypeFilter} />
+          )}
 
           {/* List */}
           {showPackages && (

@@ -49,7 +49,9 @@ function fileExists(p: string): boolean {
   }
 }
 
-function readClaudeJson(): { mcpServers?: Record<string, unknown> } {
+// registry-installer 가 같은 파일을 같은 원자적 패턴으로 다루도록 export —
+// 단 설치 정책·검증은 공유하지 않는다(§4.4: untrusted 입력은 별도 경로).
+export function readClaudeJson(): { mcpServers?: Record<string, unknown> } {
   try {
     if (!fileExists(CLAUDE_JSON)) return {};
     return JSON.parse(fs.readFileSync(CLAUDE_JSON, "utf-8"));
@@ -58,7 +60,7 @@ function readClaudeJson(): { mcpServers?: Record<string, unknown> } {
   }
 }
 
-function writeClaudeJsonAtomic(data: object): void {
+export function writeClaudeJsonAtomic(data: object): void {
   const tmp = `${CLAUDE_JSON}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
   fs.renameSync(tmp, CLAUDE_JSON);

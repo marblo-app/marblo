@@ -162,4 +162,48 @@ export const harness: Record<keyof typeof koHarness, string> = {
 
   // HarnessVersionBadge — tooltip for an agent's installed CLI version
   "harness.installedCliVersion": "Installed CLI version v{version}",
+
+  // --- Public registry store (marblo-app/marblo) ---
+  "harness.store.cat.regskill": "Store skills",
+  "harness.store.cat.regmcp": "Store MCP",
+  "harness.store.registry.title": "Community Store",
+  "harness.store.registry.subtitle":
+    "Skills and MCP servers from the public registry (marblo-app/marblo). Tier and permissions are disclosures — they do not restrict what an item does once installed.",
+  "harness.store.registry.skills": "Skills",
+  "harness.store.registry.mcp": "MCP servers",
+  "harness.store.registry.stale":
+    "Could not reach the registry — showing the last fetched list.",
+  "harness.store.registry.unavailable":
+    "Registry unreachable. The built-in catalog still works.",
+  "harness.store.registry.empty": "No registry items to show.",
+  "harness.store.registry.refresh": "Refresh",
+  "harness.store.registry.tier.official": "Official",
+  "harness.store.registry.tier.verified": "Verified",
+  "harness.store.registry.tier.community": "Community",
+  "harness.store.registry.communityListOnly":
+    "Community tier is unreviewed — listed for disclosure only, not installable.",
+  "harness.store.registry.permissions": "Declared permissions",
+  "harness.store.registry.permissionsNone": "Needs nothing (declared)",
+  "harness.store.registry.permissionsUndeclared": "Permissions undeclared",
+  "harness.store.registry.highRisk": "high-risk",
+  "harness.store.registry.disclosureTitle": "Permission disclosure",
+  "harness.store.registry.disclosureNote":
+    "Marblo shows what an item says it needs. It does not restrict what it can do once installed. Only install items you trust.",
+  "harness.store.registry.disclosureConfirm": "Confirm & install",
+  "harness.store.registry.disclosureCancel": "Cancel",
+  "harness.store.registry.install": "Install",
+  "harness.store.registry.installing": "Installing…",
+  "harness.store.registry.uninstall": "Uninstall",
+  "harness.store.registry.uninstallConfirm":
+    "Uninstall {name}? Only the files recorded in the install ledger will be removed.",
+  "harness.store.registry.installed": "Installed",
+  "harness.store.registry.outdated": "Update available",
+  "harness.store.registry.notInstallable": "Not auto-installable",
+  "harness.store.registry.revoked": "Revoked",
+  "harness.store.registry.installDone": "{name} installed.",
+  "harness.store.registry.installFail": "Install failed.",
+  "harness.store.registry.uninstallDone": "{name} uninstalled.",
+  "harness.store.registry.uninstallFail": "Uninstall failed.",
+  "harness.store.registry.source": "Source",
+  "harness.store.registry.loadFail": "Failed to load the registry list.",
 };

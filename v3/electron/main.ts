@@ -86,6 +86,14 @@ import {
   checkSpawnAuthGate,
   type CliAuthModel,
 } from "./harness-manager";
+import { getRegistryIndex } from "./registry-client";
+import {
+  installRegistryItem,
+  uninstallRegistryItem,
+  overlayInstallState,
+  type InstallerDeps,
+} from "./registry-installer";
+import { readLedger, registryLedgerPath } from "./registry-ledger";
 import { FlowRunner } from "./flow-engine/flow-runner";
 import { KanbanBridge } from "./flow-engine/kanban-bridge";
 import { createLLMProvider } from "./flow-engine/llm-provider";
@@ -6934,6 +6942,97 @@ ipcMain.handle(
         installed: false,
         authenticated: false,
         action: err instanceof Error ? err.message : "probe failed",
+      };
+    }
+  },
+);
+
+// --- Registry IPC Handlers (public marblo-app/marblo Store) ---
+//
+// 내장 카탈로그(harness:*)와 완전히 분리된 경로다 — untrusted 레지스트리
+// 입력은 registry-client(검증) → registry-installer(§4.4 하드룰) → ledger 만
+// 지난다. 설치·제거의 대상 항목은 항상 "우리가 마지막으로 검증한 인덱스"에서
+// id 로 찾는다(렌더러가 항목 본문을 실어 보내는 구조 금지 — IPC 로 위조된
+// install 블록이 게이트를 우회하지 못하게).
+
+function registryInstallerDeps(): InstallerDeps {
+  return {
+    ledgerPath: registryLedgerPath(app.getPath("userData")),
+    marbloVersion: app.getVersion(),
+  };
+}
+
+ipcMain.handle(
+  "registry:index",
+  async (_event, opts?: { refresh?: boolean }) => {
+    try {
+      const index = await getRegistryIndex({
+        cacheDir: app.getPath("userData"),
+        forceRefresh: !!opts?.refresh,
+      });
+      const ledger = readLedger(registryInstallerDeps().ledgerPath);
+      return {
+        success: true,
+        commit: index.commit,
+        stale: index.stale,
+        available: index.available,
+        error: index.error,
+        items: overlayInstallState(index, ledger),
+      };
+    } catch (err) {
+      return {
+        success: false,
+        available: false,
+        items: [],
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
+  },
+);
+
+ipcMain.handle(
+  "registry:install",
+  async (
+    _event,
+    payload: { id: string; type: string; overwriteLocalChanges?: boolean },
+  ) => {
+    try {
+      if (!payload || typeof payload.id !== "string") {
+        throw new Error("잘못된 요청");
+      }
+      const index = await getRegistryIndex({
+        cacheDir: app.getPath("userData"),
+      });
+      const item = index.items.find(
+        (i) => i.id === payload.id && i.type === payload.type,
+      );
+      if (!item) throw new Error(`레지스트리에 없는 항목: ${payload.id}`);
+      await installRegistryItem(item, registryInstallerDeps(), {
+        overwriteLocalChanges: !!payload.overwriteLocalChanges,
+      });
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
+  },
+);
+
+ipcMain.handle(
+  "registry:uninstall",
+  async (_event, payload: { id: string }) => {
+    try {
+      if (!payload || typeof payload.id !== "string") {
+        throw new Error("잘못된 요청");
+      }
+      uninstallRegistryItem(payload.id, registryInstallerDeps());
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : "Unknown error",
       };
     }
   },
