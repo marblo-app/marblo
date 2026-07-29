@@ -136,6 +136,130 @@
       },
       "uniqueItems": true
     },
+    "install": {
+      "description": "How the Marblo app installs this item, if it can. OPTIONAL: an item with no `install` block is listed and disclosed in the Store but has no install button — the app never guesses an install procedure from the other fields. The block is a kind-discriminated union and is deliberately narrow: it names WHICH package to run or WHICH files to copy, and it can never supply a shell command, an absolute path, a secret value, or a moving ref. Every rule below is re-enforced inside the app immediately before anything touches disk, so a manifest edited after review cannot widen what gets installed.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "description": "`files` copies an allowlist of files out of this repo at the reviewed commit. `mcp-server` writes one entry into the harness MCP config. `shell` does not exist and never will — curl-pipe-bash is unreachable from the registry at any tier.",
+          "enum": ["files", "mcp-server"]
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "kind: files — copy an explicit allowlist into an app-controlled root.",
+          "if": {
+            "required": ["kind"],
+            "properties": { "kind": { "const": "files" } }
+          },
+          "then": {
+            "required": ["kind", "root", "dest", "files", "integrity"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": { "const": "files" },
+              "root": {
+                "description": "Destination root, as an ENUM KEY the app maps to an absolute path. A manifest can never carry a path.",
+                "enum": ["claude-skills"]
+              },
+              "dest": {
+                "description": "Directory name under `root`. Exactly one path segment: no `/`, no `\\`, no `.`, no `..`. The app re-resolves and realpath-checks containment on top of this.",
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+                "maxLength": 64
+              },
+              "files": {
+                "description": "Explicit allowlist of files to copy, relative to this manifest's directory. Nothing outside this list is ever written.",
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 200,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "maxLength": 300,
+                  "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*$"
+                }
+              },
+              "integrity": {
+                "description": "Per-file digests, verified at install time. Required: without it, 'what the Store installs is what was reviewed' is an unbacked claim.",
+                "type": "object",
+                "required": ["algorithm", "files"],
+                "additionalProperties": false,
+                "properties": {
+                  "algorithm": { "const": "sha256" },
+                  "files": {
+                    "description": "Map of the same relative paths listed in `files` to their lowercase hex sha256.",
+                    "type": "object",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "maxLength": 300,
+                      "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*$"
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "kind: mcp-server — register one server in the harness MCP config.",
+          "if": {
+            "required": ["kind"],
+            "properties": { "kind": { "const": "mcp-server" } }
+          },
+          "then": {
+            "required": [
+              "kind",
+              "runner",
+              "package",
+              "mcp_key",
+              "env_required"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": { "const": "mcp-server" },
+              "runner": {
+                "description": "Launcher enum, NOT a free-form command. `docker` and `binary` are reserved for a later phase and are rejected today rather than half-supported.",
+                "enum": ["npx", "uvx"]
+              },
+              "package": {
+                "description": "Exact, version-locked package: `name@x.y.z`. Dist-tags such as `@latest` are not a pin and are rejected.",
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^(@[a-z0-9~][a-z0-9._~-]{0,63}/)?[a-z0-9~][a-z0-9._~-]{0,127}@\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]{1,32})?$"
+              },
+              "args": {
+                "description": "Fixed extra arguments. Must be the same for every user — anything user-specific (a project ref, a workspace id) belongs in the user's own config, not here. `${...}` is rejected everywhere in this block: harness CLIs expand it at runtime, which would turn an argument into a secret-exfiltration channel.",
+                "type": "array",
+                "maxItems": 20,
+                "items": { "type": "string", "maxLength": 256 },
+                "default": []
+              },
+              "mcp_key": {
+                "description": "Key written into the harness MCP config. May not shadow a key the app already ships built-in.",
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+                "maxLength": 48
+              },
+              "env_required": {
+                "description": "Environment variable NAMES the server needs. Values never appear in a manifest — the app writes only `${NAME}` and the user supplies the value. An empty array is a meaningful declaration ('needs no secrets'); harness/cloud credential names (ANTHROPIC_API_KEY, OPENAI_API_KEY, AWS_*, …) are refused outright.",
+                "type": "array",
+                "maxItems": 10,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
     "includes": {
       "description": "For type=bundle only: ids of other registry items installed together.",
       "type": "array",
@@ -187,6 +311,62 @@
         }
       },
       "then": { "required": ["source"] }
+    },
+    {
+      "$comment": "The install kind has to match the item type — a skill installs files, an MCP server registers a server. Only these two types are installable in Phase 1a; the rest are list-and-disclose only.",
+      "if": { "required": ["install"] },
+      "then": {
+        "allOf": [
+          {
+            "if": {
+              "required": ["type"],
+              "properties": { "type": { "const": "skill" } }
+            },
+            "then": {
+              "properties": {
+                "install": { "properties": { "kind": { "const": "files" } } }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": ["type"],
+              "properties": { "type": { "const": "mcp-server" } }
+            },
+            "then": {
+              "properties": {
+                "install": {
+                  "properties": { "kind": { "const": "mcp-server" } }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "type": { "enum": ["skill", "mcp-server"] }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "$comment": "Registering an MCP server means a process launches on the user's machine on the next CLI start. Unreviewed (community) items do not get that. The app enforces the same gate independently.",
+      "if": {
+        "required": ["install"],
+        "properties": {
+          "install": {
+            "required": ["kind"],
+            "properties": { "kind": { "const": "mcp-server" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "publisher": {
+            "properties": { "tier": { "enum": ["official", "verified"] } }
+          }
+        }
+      }
     }
   ]
 }

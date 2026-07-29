@@ -30,6 +30,26 @@ Any MCP client works — this is a plain stdio MCP server, nothing Marblo-specif
 
 Package name and version read from `package.json` at the pinned commit. Self-hosting, retry tuning (`FIRECRAWL_RETRY_*`), and credit-warning thresholds are documented in **upstream's own README at the pinned ref**.
 
+## Installing it from the Marblo Store
+
+This is the first referenced MCP server in the registry to carry an [`install` contract](../../registry/README.md#the-install-contract), so the Store installs it in one click instead of showing you the JSON above to copy:
+
+```yaml
+install:
+  kind: mcp-server
+  runner: npx
+  package: firecrawl-mcp@3.22.4
+  args: []
+  mcp_key: firecrawl
+  env_required:
+    - FIRECRAWL_API_KEY
+```
+
+Two things that block are worth knowing before you click:
+
+- **The app writes `${FIRECRAWL_API_KEY}`, never your key.** `env_required` carries a variable _name_; the value has to be in the environment the CLI starts in. Install it without setting the variable and the server registers fine and then fails to authenticate at first use — that is the contract working, not a bug.
+- **The version is pinned exactly**, matching the source pin above. It does not follow npm's `latest`, so a new upstream release reaches you when this manifest moves, and the permission disclosure runs again when it does.
+
 ## Permissions
 
 `network:outbound`, `secrets:read` — calls the Firecrawl API (or your self-hosted instance), which in turn fetches whatever URLs the agent asks for; reads `FIRECRAWL_API_KEY` from the environment.
@@ -40,7 +60,7 @@ The manifest uses the flat permission vocabulary `schema_version: 1` defines; sc
 
 ## Details
 
-- **Manifest:** [`marblo.yaml`](marblo.yaml) · **Tier:** `community` — listed, not one-click-installable. The payload has not been reviewed by Marblo maintainers; see [SECURITY.md](../../SECURITY.md#why-community-items-cannot-be-installed-with-one-click).
+- **Manifest:** [`marblo.yaml`](marblo.yaml) · **Tier:** `verified` — external, reviewed by maintainers, source pinned. What was reviewed: the pinned commit's `package.json` reads `firecrawl-mcp@3.22.4`, which is the exact package the install contract pins, so the source read here and the code npm ships are the same tree. That is what `verified` asserts. It does not assert that Marblo audited Firecrawl's source line by line, and the permissions below are still disclosure rather than a sandbox.
 - **License:** MIT (upstream)
 
 Pinning freezes this at one commit: upstream fixes, including security fixes, do not reach you until the pin here moves. Because upstream is not tagging, there is no release feed to watch — this pin needs a deliberate re-check.

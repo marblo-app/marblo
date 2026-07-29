@@ -44,6 +44,50 @@ flowchart TD
 - **`source` is required whenever tier is not `official`.** Without it there is no pinned upstream to resolve, and the promise that "the pinned source resolves" would have nothing to check.
 - **`source.ref` must be a version-shaped tag or a 40-hex SHA.** `main`, `master`, `develop`, and `HEAD` fail the pattern.
 - **`status`** is `active` (default), `deprecated`, or `revoked`. Revocations are recorded in [SECURITY-ADVISORIES.md](../SECURITY-ADVISORIES.md); app-side enforcement lands in Phase 1a.
+- **`install` is optional.** An item without it is listed and disclosed, but the Store shows no install button — the app never infers an install procedure from the other fields.
+
+## The `install` contract
+
+`install` is what turns a listing into a one-click install. It is a kind-discriminated union, and it is deliberately narrow: a manifest says **which** package to run or **which** files to copy, and it can never supply a shell command, an absolute path, a secret value, or a moving ref.
+
+```yaml
+# type: skill — copy an allowlist out of this repo at the reviewed commit
+install:
+  kind: files
+  root: claude-skills # ENUM KEY. The app maps it to a path; a manifest never carries one.
+  dest: code-review # exactly one path segment — no /, no \, no ., no ..
+  files: # explicit allowlist; nothing else is ever written
+    - SKILL.md
+    - README.md
+  integrity:
+    algorithm: sha256
+    files: # every entry in `files` needs a digest, and it must match the committed bytes
+      SKILL.md: c8b984fb…
+      README.md: 2b6ae4b1…
+```
+
+```yaml
+# type: mcp-server — register one server in the harness MCP config
+install:
+  kind: mcp-server
+  runner: npx # enum (npx | uvx), NOT a free-form command
+  package: firecrawl-mcp@3.22.4 # exact name@x.y.z — @latest is not a pin
+  args: [] # fixed for every user; anything user-specific belongs in the user's own config
+  mcp_key: firecrawl # may not shadow a key the app ships built-in
+  env_required: # NAMES only. The app writes ${NAME}; the user supplies the value.
+    - FIRECRAWL_API_KEY
+```
+
+Rules the validator enforces, beyond the schema:
+
+- **`kind` must match `type`** — `skill` → `files`, `mcp-server` → `mcp-server`. Other types are not installable in Phase 1a.
+- **Digests must match the committed bytes**, and cover exactly the `files` list — no stale digest, no digest for a file that is not installed.
+- **`kind: mcp-server` requires tier `official` or `verified`.** Registering a server means a process launches on the user's machine at the next CLI start; unreviewed items do not get that.
+- **An installable item cannot be pinned to a moving branch**, whatever its tier.
+- **`${…}` is refused everywhere in the block.** Harness CLIs expand it at launch, so an argument containing `${ANTHROPIC_API_KEY}` would become a secret-exfiltration channel even though nothing here calls an expander. For the same reason, `env_required` cannot name a harness or cloud credential.
+- **`kind: shell` does not exist and never will.** curl-pipe-bash is unreachable from the registry at any tier.
+
+Every one of these is re-checked inside the app immediately before anything touches disk, so a manifest edited after review cannot widen what gets installed.
 
 ## Categories
 
@@ -57,4 +101,4 @@ flowchart TD
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full checklist.
 
-> Status: **v0 preview.** The manifest schema is stabilizing; `schema_version: 1` will remain readable, and breaking changes will bump it. The `install` contract (destination, runner, integrity digests) that Phase 1a needs is not in `schema_version: 1` and will arrive with `2`.
+> Status: **v0 preview.** The manifest schema is stabilizing; `schema_version: 1` will remain readable, and breaking changes will bump it. The `install` contract (destination, runner, integrity digests) landed as an **optional** field in `schema_version: 1` rather than forcing a `2`: adding it optionally is not a breaking change, and every manifest written before it stays valid and keeps working as a listing.

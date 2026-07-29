@@ -9,7 +9,7 @@ description: Scrapes and crawls web pages into clean markdown for the agent, han
 
 publisher:
   name: Firecrawl
-  tier: community
+  tier: verified
   url: https://github.com/firecrawl
 
 # Manifest-only: the real code stays upstream, pinned to an immutable commit.
@@ -19,6 +19,21 @@ publisher:
 source:
   repository: https://github.com/firecrawl/firecrawl-mcp-server
   ref: 2175de2dfd7e5073e9e743ec31a5e2515fa82df8
+
+# Verified: the pinned commit above is the tree that published npm firecrawl-mcp@3.22.4
+# (package.json at 2175de2 reads 3.22.4), so the reviewed source and the installed
+# package are the same code. `npx -y firecrawl-mcp@3.22.4` is the vendor-documented
+# stdio invocation; the version is pinned exactly, never a dist-tag.
+install:
+  kind: mcp-server
+  runner: npx
+  package: firecrawl-mcp@3.22.4
+  args: []
+  mcp_key: firecrawl
+  # NAME only. The app writes `${FIRECRAWL_API_KEY}` into the harness config and
+  # the user supplies the value in their own environment — no key ever lives here.
+  env_required:
+    - FIRECRAWL_API_KEY
 
 compatibility:
   harnesses:
