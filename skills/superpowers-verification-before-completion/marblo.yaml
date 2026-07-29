@@ -1,0 +1,37 @@
+schema_version: 1
+
+id: superpowers-verification-before-completion
+name: Verification Before Completion (Superpowers)
+type: skill
+version: 6.2.0
+status: active
+description: No completion claim without fresh evidence — run the command, read the output, then say it passes. A single-file guard against agents reporting success they never checked.
+
+publisher:
+  name: Jesse Vincent (obra)
+  tier: community
+  url: https://github.com/obra
+
+source:
+  repository: https://github.com/obra/superpowers
+  ref: v6.2.0
+  path: skills/verification-before-completion
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - shell:exec
+
+keywords:
+  - verification
+  - evidence
+  - completion
+  - discipline
+  - external
+
+license: MIT
+homepage: https://github.com/obra/superpowers/tree/main/skills/verification-before-completion

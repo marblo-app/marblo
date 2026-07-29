@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: wshobson-devops-troubleshooter
+name: DevOps Troubleshooter (wshobson)
+type: agent
+version: 0.1.0
+status: active
+description: Incident-response subagent for production debugging — log analysis, distributed tracing, Kubernetes and container failures, and root-cause write-ups. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/cicd-automation/agents/devops-troubleshooter.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:read
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - devops
+  - incident
+  - observability
+  - kubernetes
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

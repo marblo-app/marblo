@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: wshobson-incident-response
+name: Incident Response (wshobson)
+type: workflow
+version: 0.1.0
+status: active
+description: Multi-agent incident orchestration by severity — triage, parallel investigation, mitigation, then a postmortem, with checkpoints between phases. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/incident-response
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - incident
+  - sre
+  - postmortem
+  - workflow
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

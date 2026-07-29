@@ -278,11 +278,34 @@ mkdir -p ~/.claude/agents && curl -sL \
 
 Two items here are **not** standalone, and we would rather say so than pretend: [`marblo-control`](mcp-servers/marblo-control/) ships inside the app, and [`review-and-merge`](workflows/review-and-merge/) describes Marblo's orchestration flow. The [`github`](mcp-servers/github/) MCP server is a manifest-only reference — install it from upstream's own instructions at the pinned tag.
 
+### Community catalog — good work by other people, pinned and linked
+
+These are **not ours and not copied here.** Each is a `marblo.yaml` pointing at an upstream repository at a pinned tag or commit SHA, so the license, the ownership, and the maintenance all stay with the author. Every one was picked on a single test: **it works in the CLI you already run, with or without Marblo.** Each item's README carries an install snippet that was executed before it was written down.
+
+They merge as `community` tier — **listed, not one-click-installable** — until the app ships a permission gate. [Why](SECURITY.md#why-community-items-cannot-be-installed-with-one-click).
+
+| Item                                                                                 | Type     | Upstream                                | Pin       |
+| ------------------------------------------------------------------------------------ | -------- | --------------------------------------- | --------- |
+| [MCP Builder](skills/anthropic-mcp-builder/)                                         | skill    | anthropics/skills                       | `b29e7cf` |
+| [Webapp Testing](skills/anthropic-webapp-testing/)                                   | skill    | anthropics/skills                       | `b29e7cf` |
+| [Skill Creator](skills/anthropic-skill-creator/)                                     | skill    | anthropics/skills                       | `b29e7cf` |
+| [Systematic Debugging](skills/superpowers-systematic-debugging/)                     | skill    | obra/superpowers                        | `v6.2.0`  |
+| [Test-Driven Development](skills/superpowers-test-driven-development/)               | skill    | obra/superpowers                        | `v6.2.0`  |
+| [Verification Before Completion](skills/superpowers-verification-before-completion/) | skill    | obra/superpowers                        | `v6.2.0`  |
+| [DevOps Troubleshooter](agents/wshobson-devops-troubleshooter/)                      | agent    | wshobson/agents                         | `c4b82b0` |
+| [Observability Engineer](agents/wshobson-observability-engineer/)                    | agent    | wshobson/agents                         | `c4b82b0` |
+| [Multi-Agent Coordinator](agents/voltagent-multi-agent-coordinator/)                 | agent    | VoltAgent/awesome-claude-code-subagents | `947b44c` |
+| [TDD Cycle](workflows/wshobson-tdd-cycle/)                                           | workflow | wshobson/agents                         | `c4b82b0` |
+| [Incident Response](workflows/wshobson-incident-response/)                           | workflow | wshobson/agents                         | `c4b82b0` |
+| [Security Hardening](workflows/wshobson-security-hardening/)                         | workflow | wshobson/agents                         | `c4b82b0` |
+
+Worth knowing about the three Anthropic skills: the `anthropics/skills` repository root ships **no** `LICENSE` file, so the GitHub API reports it as unlicensed. The license is per-skill — each of the three folders above carries its own Apache-2.0 `LICENSE.txt`, and it travels with the install. We checked rather than assumed, and each item's README says so.
+
 ### What's open and what isn't
 
 Being explicit about this, because a closed core that presents itself as an open ecosystem is worse than either one honestly labeled:
 
-> **The orchestration engine is our product, and it is closed.** The board, the live orchestrator, worktree isolation, cost attribution, and safe merge are the paid app. **Everything the agents _consume_ is open, portable, and MIT/CC-licensed** — skills, agents, workflows, MCP manifests, and knowledge packs, all of which work whether or not you ever install Marblo.
+> **The orchestration engine is our product, and it is closed.** The board, the live orchestrator, worktree isolation, cost attribution, and safe merge are the paid app. **Everything the agents _consume_ is open and portable** — skills, agents, workflows, MCP manifests, and knowledge packs, all of which work whether or not you ever install Marblo. First-party assets are MIT or CC-licensed; referenced community items keep their upstream license (MIT and Apache-2.0 today), declared in each manifest.
 
 Assets are portable by design. If you stop using Marblo, everything in this repo keeps working.
 
@@ -290,9 +313,9 @@ Assets are portable by design. If you stop using Marblo, everything in this repo
 
 ```text
 knowledge/    # Knowledge Packs — fleet-operations (flagship), curated-llm-resources
-skills/       # first-party skills (e.g. code-review)
-agents/       # agent definitions (e.g. reviewer)
-workflows/    # multi-step flows (e.g. review-and-merge) — Marblo-specific
+skills/       # first-party skills (e.g. code-review) + pinned community references
+agents/       # agent definitions (e.g. reviewer) + pinned community references
+workflows/    # multi-step flows — review-and-merge is Marblo-specific; community ones are portable
 mcp-servers/  # official + referenced MCP servers (e.g. marblo-control, github)
 registry/     # manifests + manifest.schema.json (additive Store metadata)
 docs/         # getting-started, concepts, harness-store, orchestration, troubleshooting

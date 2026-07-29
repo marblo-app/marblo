@@ -6,6 +6,11 @@ All notable changes to the Marblo ecosystem repo are documented here. The format
 
 ### Added
 
+- **First community catalog — 12 referenced items, manifest-only.** External skills, agents, and workflows that run in Claude Code / Codex without Marblo, each pinned to an upstream release tag or 40-hex commit SHA. Nothing is vendored: license, ownership, and maintenance stay with the upstream author.
+  - Skills — `anthropic-mcp-builder`, `anthropic-webapp-testing`, `anthropic-skill-creator` (anthropics/skills @ `b29e7cf`); `superpowers-systematic-debugging`, `superpowers-test-driven-development`, `superpowers-verification-before-completion` (obra/superpowers @ `v6.2.0`).
+  - Agents — `wshobson-devops-troubleshooter`, `wshobson-observability-engineer` (wshobson/agents @ `c4b82b0`); `voltagent-multi-agent-coordinator` (VoltAgent/awesome-claude-code-subagents @ `947b44c`).
+  - Workflows — `wshobson-tdd-cycle`, `wshobson-incident-response`, `wshobson-security-hardening` (wshobson/agents @ `c4b82b0`). Unlike `review-and-merge`, these are portable: a slash command plus the subagents it dispatches, all installable outside the app.
+  - Every install snippet in these READMEs was executed against the pinned ref before it was documented; every pin was resolved via the GitHub API; every manifest validates against `registry/manifest.schema.json`.
 - **Ecosystem monorepo foundation (Phase 0).** Repository structure for a public ecosystem of harness-neutral assets.
 - **`knowledge/fleet-operations` — the flagship Knowledge Pack.** Production knowledge from running a heterogeneous fleet of agent CLIs: vendor integration shapes and the discriminator that actually decides them, env-swap wiring hazards, per-harness session/resume contracts (version-stamped), why PTY output is the wrong agent-liveness signal in both directions, where cost attribution silently breaks, worktree-per-ticket hygiene, and watchdog false-positive checks. Measured, not inferred.
 - **Standalone install snippets on every portable first-party item.** Each asset now documents how to use it with the CLI you already run — Claude Code, Codex — with no Marblo install.
@@ -23,6 +28,7 @@ All notable changes to the Marblo ecosystem repo are documented here. The format
 
 ### Changed
 
+- **Licensing claim in `README.md` narrowed to what is true.** It previously said everything agents consume is "MIT/CC-licensed"; with referenced community items in the catalog, that now reads: first-party assets are MIT or CC, referenced items keep their upstream license (MIT and Apache-2.0 today), declared per manifest. Note that `anthropics/skills` carries **no repository-root `LICENSE`** — the GitHub API reports it as unlicensed — but each skill folder ships its own Apache-2.0 `LICENSE.txt`, which is what the three manifests declare.
 - **Reframed the repo around standalone use.** Assets are plain, standards-native files that run in the reader's existing CLI; `marblo.yaml` is additive Store metadata, not a container. Installing Marblo is a one-click upgrade, not a gate.
 - **Stated the open/closed boundary explicitly** in `README.md` and `ROADMAP.md` §6: the orchestration engine is the closed, paid product; everything the agents consume is open and portable.
 - **`ROADMAP.md` §2** — replaced the "open-source agent IDE" star benchmark, which is not available to a closed-core product by construction, with the harness-neutral content repos that are the actual peer set.
