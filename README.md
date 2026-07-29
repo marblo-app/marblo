@@ -276,6 +276,23 @@ mkdir -p ~/.claude/agents && curl -sL \
 
 **[LLM study pack](knowledge/curated-llm-resources/)** — a source-verified learning path (foundations → agents & MCP → RAG → evals → observability). Read it on GitHub; nothing to install.
 
+### 🇰🇷 Korea coverage — the part a global registry doesn't have
+
+Eight referenced items covering work that Korean-language and Korean-market agents actually hit: an `.hwp` an agent cannot open, a 조문 citation a model invented, a DART filing that has no US equivalent. All are `community` tier — **listed and pinned, not one-click-installable** — and each README states what was measured on 2026-07-29, including the ones with problems.
+
+| Item                                                                      | What it does                                                          | License    |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------- |
+| **[kordoc](mcp-servers/kordoc/)**                                         | HWP/HWPX/PDF/Office → Markdown, compare and generate. CLI + MCP.      | MIT        |
+| **[korean-law-mcp](mcp-servers/korean-law-mcp/)**                         | 법제처 statutes and case law, with citation verification.             | MIT        |
+| **[korea-stock-mcp](mcp-servers/korea-stock-mcp/)**                       | DART filings + XBRL financials, KRX prices.                           | ISC        |
+| **[naver-search-mcp](mcp-servers/naver-search-mcp/)**                     | Naver search + DataLab trends. ⚠️ upstream API migration in progress. | MIT        |
+| **[data-go-mcp](mcp-servers/data-go-mcp/)**                               | Six servers over data.go.kr. ⚠️ upstream quiet since 2025-09.         | Apache-2.0 |
+| **[korean-legal-doc-drafter](skills/korean-legal-doc-drafter/)**          | Drafts Korean legal documents from 150 reference guides.              | Apache-2.0 |
+| **[hwpx-editing](skills/hwpx-editing/)**                                  | Edit `.hwpx` without corrupting it — rules + Python tools.            | MIT        |
+| **[awesome-korean-agent-skills](knowledge/awesome-korean-agent-skills/)** | Index of Korean agent skills. ⚠️ AI-operated list, per upstream.      | CC0-1.0    |
+
+Two Korean projects we found and did **not** list, because the reason matters more than the count: one 221-star curated list ships no LICENSE file at all, and one 261-star plugin marketplace is licensed non-commercial, no-derivatives. Neither belongs in a store people install from at work.
+
 Two items here are **not** standalone, and we would rather say so than pretend: [`marblo-control`](mcp-servers/marblo-control/) ships inside the app, and [`review-and-merge`](workflows/review-and-merge/) describes Marblo's orchestration flow. The [`github`](mcp-servers/github/) MCP server is a manifest-only reference — install it from upstream's own instructions at the pinned tag.
 
 ### Community catalog — good work by other people, pinned and linked
@@ -317,6 +334,10 @@ skills/       # first-party skills (e.g. code-review) + pinned community referen
 agents/       # agent definitions (e.g. reviewer) + pinned community references
 workflows/    # multi-step flows — review-and-merge is Marblo-specific; community ones are portable
 mcp-servers/  # official + referenced MCP servers (e.g. marblo-control, github)
+skills/       # first-party skills (e.g. code-review) + referenced ones (e.g. hwpx-editing)
+agents/       # agent definitions (e.g. reviewer)
+workflows/    # multi-step flows (e.g. review-and-merge) — Marblo-specific
+mcp-servers/  # official + referenced MCP servers (e.g. marblo-control, github, kordoc)
 registry/     # manifests + manifest.schema.json (additive Store metadata)
 docs/         # getting-started, concepts, harness-store, orchestration, troubleshooting
 ```
