@@ -5,7 +5,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/macOS%20%7C%20Windows-6366f1?style=flat-square" alt="Supported platforms: macOS and Windows" />
-  <a href="https://github.com/melocream/marblo-releases"><img src="https://img.shields.io/badge/download-desktop-0ea5e9?style=flat-square" alt="Download desktop app" /></a>
+  <a href="https://github.com/melocream/marblo-releases/releases/latest"><img src="https://img.shields.io/badge/download-desktop-0ea5e9?style=flat-square" alt="Download desktop app" /></a>
   <a href="https://marblo.app"><img src="https://img.shields.io/badge/web-marblo.app-8b5cf6?style=flat-square" alt="marblo.app" /></a>
   <a href="mailto:team@marblo.app"><img src="https://img.shields.io/badge/contact-team%40marblo.app-22c55e?style=flat-square" alt="Contact" /></a>
 </p>
@@ -18,7 +18,7 @@
 </p>
 
 <h3 align="center">
-  <a href="https://github.com/melocream/marblo-releases"><ins>⬇️ Download Marblo</ins></a>
+  <a href="https://github.com/melocream/marblo-releases/releases/latest"><ins>⬇️ Download Marblo</ins></a>
   &nbsp;·&nbsp;
   <a href="https://marblo.app"><ins>🌐 marblo.app</ins></a>
   &nbsp;·&nbsp;
@@ -220,7 +220,7 @@ Marblo is where you **manage** agents — board, isolation, cost, and safe merge
 
 | Platform | Get it |
 | --- | --- |
-| 🖥 **Desktop (macOS · Windows)** | [melocream/marblo-releases](https://github.com/melocream/marblo-releases) — latest: **v3.0.18** |
+| 🖥 **Desktop (macOS · Windows)** | [Download latest release](https://github.com/melocream/marblo-releases/releases/latest) — **v3.0.19** |
 | 🌐 **Web** | [marblo.app](https://marblo.app) |
 | 📖 **Guide** | [marblo.app/en/guide](https://marblo.app/en/guide) |
 | 💰 **Pricing** | [marblo.app/en/pricing](https://marblo.app/en/pricing) |
@@ -232,7 +232,7 @@ Marblo is where you **manage** agents — board, isolation, cost, and safe merge
 ## Links
 
 - 🏠 Product site — [marblo.app](https://marblo.app)
-- ⬇️ Releases — [github.com/melocream/marblo-releases](https://github.com/melocream/marblo-releases)
+- ⬇️ Releases — [github.com/melocream/marblo-releases](https://github.com/melocream/marblo-releases/releases/latest)
 - ✉️ Contact — [team@marblo.app](mailto:team@marblo.app)
 - 🧑‍💻 Founder — [@melocream](https://github.com/melocream)
 
