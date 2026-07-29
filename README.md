@@ -140,13 +140,34 @@ Fan out, compare, merge the winner.
 
 ### 🎯 Missions
 
-Describe the goal in natural language. Marblo turns it into a ticket graph, assigns models, and runs the fleet.
+Describe the goal in natural language. Marblo turns it into a ticket graph, then spawns the model that fits each task — diversifying across your fleet instead of locking to one vendor — and runs it all.
 
 [Guide →](https://marblo.app/en/guide)
 
 </td>
 <td width="52%">
   <img src="assets/live-complete.png" alt="Mission complete — tickets done, ready to connect accounts" width="100%" />
+</td>
+</tr>
+
+<tr>
+<td width="48%" valign="middle">
+
+### ⚡ Lanes
+
+Need parallel *right now*? Fire off several agents at once from the Lanes tab — you pick the model for each. Runs alongside the orchestrator, not through it.
+
+[Guide →](https://marblo.app/en/guide)
+
+</td>
+<td width="52%" valign="middle">
+
+### 🔀 Bring your own model
+
+Drop in a vendor key and an agent boots on that model — GLM, Kimi, MiniMax, and local models via Ollama — right next to Claude, Codex, and Grok.
+
+[Guide →](https://marblo.app/en/guide)
+
 </td>
 </tr>
 
@@ -195,7 +216,7 @@ Marblo is where you **manage** agents — board, isolation, cost, and safe merge
 
 **Also in the box**
 
-- **Multi-model fleet** — Claude Code, Codex, Grok, GLM, MiniMax, and more CLI agents side by side
+- **Multi-model fleet** — Claude Code, Codex, Grok, GLM, Kimi, MiniMax, and local models (Ollama) side by side — bring your own key (BYOM)
 - **Safe merge** — review and verification before anything hits your main branch
 - **Desktop-first** — local execution, your keys, your repos
 - **Activity stream** — live structured log of who claimed what and when
