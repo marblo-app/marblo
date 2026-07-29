@@ -1,0 +1,35 @@
+schema_version: 1
+
+id: awesome-korean-agent-skills
+name: Awesome Korean Agent Skills (한국어 에이전트 스킬 큐레이션)
+type: knowledge-pack
+version: 0.1.0
+status: active
+description: A curated index of Korean-language agent skills, subagents, rules, and hooks for Claude Code, Codex, Gemini CLI, and Cursor, grouped by what they do so comparable tools sit side by side.
+
+publisher:
+  name: J-nowcow
+  tier: community
+  url: https://github.com/J-nowcow
+
+# Manifest-only: upstream publishes no git tags, so the pin is a full commit SHA.
+source:
+  repository: https://github.com/J-nowcow/awesome-korean-agent-skills
+  ref: 61a36830c58a5765be248536bbc5a0a4ddc8da9a
+
+compatibility:
+  harnesses:
+    - any
+
+permissions: []
+
+keywords:
+  - korea
+  - korean
+  - skills
+  - curation
+  - index
+  - external
+
+license: CC0-1.0
+homepage: https://github.com/J-nowcow/awesome-korean-agent-skills

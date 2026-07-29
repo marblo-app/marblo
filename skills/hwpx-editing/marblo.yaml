@@ -1,0 +1,43 @@
+schema_version: 1
+
+id: hwpx-editing
+name: HWPX Editing Skill (한글 문서 안전 편집)
+type: skill
+version: 0.1.0
+status: active
+description: Teaches an agent to edit Hangul .hwpx files without corrupting them — verified HWPML editing rules plus Python tools for inspection, table generation, layout/typography audit, and conversion.
+
+publisher:
+  name: kangdacool
+  tier: community
+  url: https://github.com/kangdacool
+
+# Manifest-only: upstream publishes no git tags, so the pin is a full commit SHA.
+source:
+  repository: https://github.com/kangdacool/hwpx-editing-skill
+  ref: d0f565c322ff45b3a5c7bf3e4aa21d3a15db9e99
+  path: skills/hwpx-editing
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - gemini-cli
+    - any
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - korea
+  - korean
+  - hwpx
+  - hwp
+  - documents
+  - editing
+  - external
+
+license: MIT
+homepage: https://github.com/kangdacool/hwpx-editing-skill

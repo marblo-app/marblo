@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: kordoc
+name: kordoc — HWP/HWPX & Korean office document parser
+type: mcp-server
+version: 4.2.9
+status: active
+description: Parse, compare, and generate the document formats Korean public-sector work runs on — HWP 3.x/5.x, HWPX, HWPML, PDF, XLS(X), DOCX — from an agent. Ships as both a CLI and an MCP server.
+
+publisher:
+  name: chrisryugj
+  tier: community
+  url: https://github.com/chrisryugj
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/chrisryugj/kordoc
+  ref: v4.2.9
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - network:outbound
+
+keywords:
+  - korea
+  - korean
+  - hwp
+  - hwpx
+  - documents
+  - parsing
+  - external
+
+license: MIT
+homepage: https://github.com/chrisryugj/kordoc

@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: korean-legal-doc-drafter
+name: Korean Legal Document Drafter (한국 법률문서 작성)
+type: skill
+version: 0.1.0
+status: active
+description: Drafts Korean legal documents through guided Q&A — 내용증명, contracts, employment agreements, payment orders, settlements, complaints, leases, powers of attorney — from 150 per-document reference guides.
+
+publisher:
+  name: openmagi
+  tier: community
+  url: https://github.com/openmagi
+
+# Manifest-only: upstream publishes no git tags, so the pin is a full commit SHA.
+source:
+  repository: https://github.com/openmagi/korean-legal-doc-drafter
+  ref: 09addc57285ef53e3f5b78d5a307ec56c64a3708
+  path: skills/korean-legal-doc-drafter
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - filesystem:read
+
+keywords:
+  - korea
+  - korean
+  - legal
+  - contracts
+  - drafting
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/openmagi/korean-legal-doc-drafter
