@@ -250,6 +250,77 @@ function checkInstallBlock(manifest, manifestPath, label, errors, dests) {
   }
 }
 
+// ── i18n overlay (registry/manifest.schema.json `i18n`) ─────────────────────
+// The schema already rejects unknown locales and the wrong types. These checks
+// cover what a JSON Schema structurally cannot: a string that is non-empty only
+// because it is whitespace (minLength counts spaces), and a "translation" that
+// is byte-identical to the English base — which renders exactly like no overlay
+// at all, so shipping it as one is a claim the display does not back.
+const supportedLocales = new Set(["ko", "ja"]);
+const localizedFields = { name: 80, description: 280 };
+
+function checkI18nBlock(manifest, label, errors, warnings) {
+  const i18n = manifest?.i18n;
+  if (i18n === undefined || i18n === null) return;
+  if (typeof i18n !== "object" || Array.isArray(i18n)) {
+    errors.push(`${label}: i18n must be an object keyed by locale`);
+    return;
+  }
+  for (const [locale, strings] of Object.entries(i18n)) {
+    if (!supportedLocales.has(locale)) {
+      errors.push(
+        `${label}: i18n locale '${locale}' is not supported (${[
+          ...supportedLocales,
+        ].join(" | ")})`
+      );
+      continue;
+    }
+    if (
+      typeof strings !== "object" ||
+      strings === null ||
+      Array.isArray(strings)
+    ) {
+      errors.push(`${label}: i18n.${locale} must be an object`);
+      continue;
+    }
+    const provided = Object.keys(strings);
+    if (provided.length === 0) {
+      errors.push(
+        `${label}: i18n.${locale} is empty — omit the locale instead of declaring an empty translation`
+      );
+      continue;
+    }
+    for (const field of provided) {
+      const maxLength = localizedFields[field];
+      if (maxLength === undefined) {
+        errors.push(
+          `${label}: i18n.${locale}.${field} is not a translatable field (${Object.keys(
+            localizedFields
+          ).join(" | ")})`
+        );
+        continue;
+      }
+      const value = strings[field];
+      if (typeof value !== "string" || value.trim() === "") {
+        errors.push(
+          `${label}: i18n.${locale}.${field} must be a non-empty string`
+        );
+        continue;
+      }
+      if (value.length > maxLength) {
+        errors.push(
+          `${label}: i18n.${locale}.${field} is ${value.length} characters, over the ${maxLength} limit that the base field has`
+        );
+      }
+      if (value === manifest[field]) {
+        warnings.push(
+          `${label}: i18n.${locale}.${field} is identical to the English base — it renders the same as no translation`
+        );
+      }
+    }
+  }
+}
+
 function repositoryApiPath(repository) {
   try {
     const url = new URL(repository);
@@ -363,6 +434,7 @@ export function validateRegistry({ repoRoot, checkSources = true } = {}) {
       );
     }
     checkInstallBlock(manifest, manifestPath, label, errors, installTargets);
+    checkI18nBlock(manifest, label, errors, warnings);
     if (checkSources && manifest?.source?.repository) {
       const warning = checkRepository(manifest.source.repository);
       if (warning) warnings.push(`${label}: ${warning}`);

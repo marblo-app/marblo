@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Teaches an agent to edit Hangul .hwpx files without corrupting them — verified HWPML editing rules plus Python tools for inspection, table generation, layout/typography audit, and conversion.
 
+i18n:
+  ko:
+    name: HWPX 편집 스킬 (한글 문서 안전 편집)
+    description: 한글 .hwpx 파일을 깨뜨리지 않고 편집하는 법을 에이전트에게 가르친다 — 검증된 HWPML 편집 규칙과 문서 검사·표 생성·레이아웃/타이포그래피 점검·변환용 Python 도구.
+
 publisher:
   name: kangdacool
   tier: community

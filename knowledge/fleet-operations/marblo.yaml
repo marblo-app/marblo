@@ -7,6 +7,11 @@ version: 1.0.0
 status: active
 description: Production knowledge for running a heterogeneous fleet of agent CLIs — vendor compatibility, per-harness resume contracts, agent liveness, cost attribution, and worktree hygiene.
 
+i18n:
+  ko:
+    name: Fleet Operations — 에이전트 함대 운영
+    description: 이기종 에이전트 CLI 함대를 굴리기 위한 실전 지식 — 벤더 호환성, 하네스별 resume 계약, 에이전트 생존 판정, 비용 귀속, 워크트리 위생. 본문은 영어다.
+
 publisher:
   name: Marblo
   tier: official

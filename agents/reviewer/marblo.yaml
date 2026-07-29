@@ -7,6 +7,11 @@ version: 1.0.0
 status: active
 description: A dedicated review agent — claims review tickets, runs the code-review skill on each diff, and reports blocking findings before merge.
 
+i18n:
+  ko:
+    name: 리뷰어 에이전트
+    description: 리뷰 전담 에이전트 — 리뷰 티켓을 선점해 각 diff 에 code-review 스킬을 돌리고, 머지를 막아야 할 지적사항을 보고한다.
+
 publisher:
   name: Marblo
   tier: official

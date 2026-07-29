@@ -7,6 +7,11 @@ version: 1.0.0
 status: active
 description: Take a completed ticket through review to a safe merge — run the review skill, require findings resolved, then merge and close on confirmation.
 
+i18n:
+  ko:
+    name: 리뷰 & 머지
+    description: 완료된 티켓을 리뷰를 거쳐 안전하게 머지한다 — 리뷰 스킬 실행, 지적사항 해소 확인, 승인 뒤 머지·종료.
+
 publisher:
   name: Marblo
   tier: official

@@ -7,6 +7,11 @@ version: 1.0.50
 status: active
 description: Search Naver — news, blogs, cafés, local, encyclopedia — plus DataLab search-trend and shopping-insight analysis. Naver is the search engine most Korean-language content is actually indexed in.
 
+i18n:
+  ko:
+    name: 네이버 검색 MCP
+    description: 네이버 검색 — 뉴스·블로그·카페·지역·백과사전 — 과 데이터랩 검색어 트렌드·쇼핑인사이트 분석. 한국어 콘텐츠가 실제로 색인돼 있는 검색엔진이다.
+
 publisher:
   name: isnow890
   tier: community

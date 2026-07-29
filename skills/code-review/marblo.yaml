@@ -7,6 +7,13 @@ version: 1.0.0
 status: active
 description: Review agent-generated code for correctness, security, and simplicity before it merges.
 
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: 코드 리뷰
+    description: 에이전트가 만든 코드를 머지 전에 정확성·보안·단순성 관점으로 리뷰한다.
+
 publisher:
   name: Marblo
   tier: official

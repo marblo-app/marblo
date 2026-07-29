@@ -7,6 +7,12 @@ version: 1.0.0
 status: active
 description: The MCP server an orchestrator uses to run the board — create and dispatch tickets, spawn and track agents, and record decisions. Ships with the Marblo app.
 
+# `name` is a product name — it is the same in both languages, so it is left out
+# and falls back to the base rather than shipping as a no-op translation.
+i18n:
+  ko:
+    description: 오케스트레이터가 보드를 운영하는 데 쓰는 MCP 서버 — 티켓 생성·배정, 에이전트 스폰·추적, 의사결정 기록. Marblo 앱에 기본 탑재된다.
+
 publisher:
   name: Marblo
   tier: official
