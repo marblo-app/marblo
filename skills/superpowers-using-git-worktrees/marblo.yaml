@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: superpowers-using-git-worktrees
+name: Using Git Worktrees (Superpowers)
+type: skill
+version: 6.2.0
+status: active
+description: Ensures work happens in an isolated workspace — detect existing isolation first (with a submodule guard), prefer the harness's native worktree tooling, fall back to plain git worktrees only when there is none. Referenced by manifest; not vendored.
+
+publisher:
+  name: Jesse Vincent (obra)
+  tier: community
+  url: https://github.com/obra
+
+source:
+  repository: https://github.com/obra/superpowers
+  ref: v6.2.0
+  path: skills/using-git-worktrees
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - repository:read
+  - repository:write
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - worktree
+  - isolation
+  - git
+  - parallel-agents
+  - external
+
+license: MIT
+homepage: https://github.com/obra/superpowers/tree/main/skills/using-git-worktrees

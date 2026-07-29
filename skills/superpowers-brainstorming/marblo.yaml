@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: superpowers-brainstorming
+name: Brainstorming (Superpowers)
+type: skill
+version: 6.2.0
+status: active
+description: A hard gate before any implementation — one question at a time, two or three approaches with trade-offs, then a written design doc the user approves. No code until the design lands. Referenced by manifest; not vendored.
+
+publisher:
+  name: Jesse Vincent (obra)
+  tier: community
+  url: https://github.com/obra
+
+source:
+  repository: https://github.com/obra/superpowers
+  ref: v6.2.0
+  path: skills/brainstorming
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - repository:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - design
+  - requirements
+  - spec
+  - discipline
+  - external
+
+license: MIT
+homepage: https://github.com/obra/superpowers/tree/main/skills/brainstorming

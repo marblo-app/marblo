@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: anthropic-web-artifacts-builder
+name: Web Artifacts Builder (Anthropic)
+type: skill
+version: 0.1.0
+status: active
+description: Scaffolds a Vite + React + Tailwind + shadcn/ui project and bundles it back down to one self-contained HTML file. For multi-component artifacts that need state and routing. Referenced by manifest; not vendored.
+
+publisher:
+  name: Anthropic
+  tier: community
+  url: https://github.com/anthropics
+
+# Manifest-only: the real files stay upstream, pinned to a commit SHA.
+# anthropics/skills publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/anthropics/skills
+  ref: b29e7cf65e5cb78a5ac33d582270551bc74a14eb
+  path: skills/web-artifacts-builder
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - artifacts
+  - react
+  - tailwind
+  - shadcn
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/anthropics/skills/tree/main/skills/web-artifacts-builder

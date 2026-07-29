@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: superpowers-writing-plans
+name: Writing Plans (Superpowers)
+type: skill
+version: 6.2.0
+status: active
+description: Turns an approved spec into a bite-sized implementation plan written for an engineer with zero context — file-by-file decomposition, per-task tests, and frequent commits. Referenced by manifest; not vendored.
+
+publisher:
+  name: Jesse Vincent (obra)
+  tier: community
+  url: https://github.com/obra
+
+source:
+  repository: https://github.com/obra/superpowers
+  ref: v6.2.0
+  path: skills/writing-plans
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - repository:read
+  - filesystem:write
+
+keywords:
+  - planning
+  - decomposition
+  - tdd
+  - handoff
+  - external
+
+license: MIT
+homepage: https://github.com/obra/superpowers/tree/main/skills/writing-plans
