@@ -18,10 +18,11 @@
  * auto-registers the project (zero clicks) and auto-starts the orchestrator.
  *
  * Order: install & first run → CLI auth → pick folder (auto register +
- * orchestrator auto-start) → first mission → billing → FAQ.
+ * orchestrator auto-start) → first mission → Quick Lanes → workspace tour →
+ * billing → FAQ.
  *
  * Anchors: each top-level section id is a deep-link target
- * (#install, #auth, #project, #mission, #billing, #faq). Each sub-step also
+ * (#install, #auth, #project, #mission, #lanes, #workspace, #billing, #faq). Each sub-step also
  * gets its own anchor (`${section}-${sub}`) so the left tree can jump to and
  * scroll-spy individual sub-steps.
  */
@@ -32,6 +33,8 @@ export const GUIDE_SECTION_IDS = [
   "auth",
   "project",
   "mission",
+  "lanes",
+  "workspace",
   "billing",
   "faq",
 ] as const;
@@ -163,6 +166,14 @@ export const GUIDE_STEPS: GuideStep[] = [
         ],
       },
       {
+        id: "auth-byom",
+        titleKey: "auth.byom.title",
+        blocks: [
+          { kind: "text", key: "auth.byom.body" },
+          { kind: "callout", variant: "note", key: "auth.byom.note" },
+        ],
+      },
+      {
         id: "auth-verify",
         titleKey: "auth.verify.title",
         blocks: [
@@ -241,11 +252,123 @@ export const GUIDE_STEPS: GuideStep[] = [
           { kind: "callout", variant: "warn", key: "mission.review.warn" },
         ],
       },
+      {
+        id: "mission-model-routing",
+        titleKey: "mission.modelRouting.title",
+        blocks: [
+          { kind: "text", key: "mission.modelRouting.body" },
+          { kind: "callout", variant: "tip", key: "mission.modelRouting.tip" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "lanes",
+    num: 5,
+    titleKey: "lanes.title",
+    introKey: "lanes.intro",
+    substeps: [
+      {
+        id: "lanes-start",
+        titleKey: "lanes.start.title",
+        blocks: [
+          { kind: "text", key: "lanes.start.body" },
+          {
+            kind: "shot",
+            src: "/images/guide/lanes-start.svg",
+            altKey: "lanes.start.alt",
+          },
+        ],
+      },
+      {
+        id: "lanes-model",
+        titleKey: "lanes.model.title",
+        blocks: [
+          { kind: "text", key: "lanes.model.body" },
+          { kind: "callout", variant: "note", key: "lanes.model.note" },
+        ],
+      },
+      {
+        id: "lanes-isolation",
+        titleKey: "lanes.isolation.title",
+        blocks: [
+          { kind: "text", key: "lanes.isolation.body" },
+          {
+            kind: "shot",
+            src: "/images/guide/lanes-isolation.svg",
+            altKey: "lanes.isolation.alt",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "workspace",
+    num: 6,
+    titleKey: "workspace.title",
+    introKey: "workspace.intro",
+    substeps: [
+      {
+        id: "workspace-board",
+        titleKey: "workspace.board.title",
+        blocks: [
+          { kind: "text", key: "workspace.board.body" },
+          { kind: "shot", src: "/images/guide/workspace-board.svg", altKey: "workspace.board.alt" },
+        ],
+      },
+      {
+        id: "workspace-agents",
+        titleKey: "workspace.agents.title",
+        blocks: [
+          { kind: "text", key: "workspace.agents.body" },
+          { kind: "shot", src: "/images/guide/workspace-agents.svg", altKey: "workspace.agents.alt" },
+        ],
+      },
+      {
+        id: "workspace-code",
+        titleKey: "workspace.code.title",
+        blocks: [
+          { kind: "text", key: "workspace.code.body" },
+          { kind: "shot", src: "/images/guide/workspace-code.svg", altKey: "workspace.code.alt" },
+        ],
+      },
+      {
+        id: "workspace-worktrees",
+        titleKey: "workspace.worktrees.title",
+        blocks: [
+          { kind: "text", key: "workspace.worktrees.body" },
+          { kind: "shot", src: "/images/guide/workspace-worktrees.svg", altKey: "workspace.worktrees.alt" },
+        ],
+      },
+      {
+        id: "workspace-lanes",
+        titleKey: "workspace.lanes.title",
+        blocks: [
+          { kind: "text", key: "workspace.lanes.body" },
+          { kind: "shot", src: "/images/guide/workspace-lanes.svg", altKey: "workspace.lanes.alt" },
+        ],
+      },
+      {
+        id: "workspace-usage",
+        titleKey: "workspace.usage.title",
+        blocks: [
+          { kind: "text", key: "workspace.usage.body" },
+          { kind: "shot", src: "/images/guide/workspace-usage.svg", altKey: "workspace.usage.alt" },
+        ],
+      },
+      {
+        id: "workspace-history",
+        titleKey: "workspace.history.title",
+        blocks: [
+          { kind: "text", key: "workspace.history.body" },
+          { kind: "shot", src: "/images/guide/workspace-history.svg", altKey: "workspace.history.alt" },
+        ],
+      },
     ],
   },
   {
     id: "billing",
-    num: 5,
+    num: 7,
     titleKey: "billing.title",
     introKey: "billing.intro",
     substeps: [
@@ -276,7 +399,7 @@ export const GUIDE_STEPS: GuideStep[] = [
   },
   {
     id: "faq",
-    num: 6,
+    num: 8,
     titleKey: "faq.title",
     introKey: "faq.intro",
     substeps: [

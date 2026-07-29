@@ -848,6 +848,11 @@
         "body": "Authenticate Antigravity as well. Follow the sign-in prompt that appears the first time you use it to log in with your account.",
         "note": "You only need to authenticate the CLIs you'll actually use. To run multiple agents at once, authenticate all of them."
       },
+      "byom": {
+        "title": "Connect a model with BYOM",
+        "body": "There are two ways to connect models: sign in to a native CLI account, or add a vendor key through Bring Your Own Model (BYOM). With a vendor key, agents boot against that model instead of a native CLI account. Supported choices include GLM, Kimi, MiniMax, and local models through Ollama.",
+        "note": "Native CLI authentication and BYOM are separate paths. Use the native CLI login for Claude Code, Codex, or Antigravity; use BYOM when you want to bring a vendor key or a local Ollama model."
+      },
       "verify": {
         "title": "Verify authentication",
         "body": "Once you're signed in, each CLI switches to an authenticated state. If the status doesn't update, try restarting the app.",
@@ -886,6 +891,69 @@
         "title": "The review gate",
         "body": "Finished tickets move to the REVIEW state. A human confirms the changes and approves them before they're merged.",
         "warn": "Always review the diff before merging an agent's changes. Marblo places a human REVIEW gate before merge so unintended changes don't land automatically."
+      },
+      "modelRouting": {
+        "title": "The orchestrator routes models across the fleet",
+        "body": "The orchestrator turns your goal into a ticket graph, then spawns a model suited to each task. It considers task shape, cost, and available quota when selecting models, and diversifies the fleet so the whole mission is not locked to one vendor.",
+        "tip": "You can follow each ticket's assigned model in the Board and Agents views. The model used for a task can differ from the model running the orchestrator."
+      }
+    },
+    "lanes": {
+      "title": "Run Quick Lanes in parallel",
+      "intro": "Quick Lanes are the direct, hands-on mode: choose a model yourself and start several agents side by side without going through the orchestrator.",
+      "start": {
+        "title": "Start a lane directly",
+        "body": "Open the Lanes tab, create a lane, describe the work, and start it. Repeat for as many independent tasks as you want; each lane runs alongside the others.",
+        "alt": "The Quick Lanes tab showing several parallel lane cards"
+      },
+      "model": {
+        "title": "Choose the model for each lane",
+        "body": "Each lane has its own model selector. Pick the model that fits that task, including a BYOM or local option when it is available in your model registry.",
+        "note": "Quick Lanes do not ask the orchestrator to decompose or route the work. You choose the model and the parallel work yourself."
+      },
+      "isolation": {
+        "title": "Track lane progress independently",
+        "body": "Lane work is tagged with its own lane context and runs in an isolated worktree. Open a lane's terminal or details to follow status, model, worktree state, and restart actions without mixing it with mission tickets.",
+        "alt": "A Quick Lane detail view with its model, terminal, and isolated worktree status"
+      }
+    },
+    "workspace": {
+      "title": "Explore the workspace tabs",
+      "intro": "After your first mission, use the workspace tabs to move from planning to live execution, review, and the audit trail. Each tab has one focused job.",
+      "board": {
+        "title": "Board — see the kanban flow",
+        "body": "Board is the kanban view of project tickets. Use it to see what is queued, in progress, in review, or done, and open a ticket to inspect its agent and changes.",
+        "alt": "The Board tab showing project tickets across kanban columns"
+      },
+      "agents": {
+        "title": "Agents — watch live terminals",
+        "body": "Agents gives you a live terminal for each agent and its current status. The agent watchdog can reconnect or self-heal interrupted work, while the panel keeps the latest model and activity visible.",
+        "alt": "The Agents tab showing live agent terminals and status cards"
+      },
+      "code": {
+        "title": "Code — review worktree diffs",
+        "body": "Code opens the files and diff for the selected worktree. Use it to inspect the exact changes and leave review feedback before anything is merged.",
+        "alt": "The Code tab showing a worktree diff before merge"
+      },
+      "worktrees": {
+        "title": "Worktrees — keep tickets isolated",
+        "body": "Worktrees shows the isolated branch and filesystem workspace created for each ticket. Parallel agents work in separate worktrees, so unrelated changes do not collide while they are being developed.",
+        "alt": "The Worktrees tab showing isolated ticket workspaces"
+      },
+      "lanes": {
+        "title": "Lanes — run direct parallel work",
+        "body": "Lanes is the direct parallel mode described above: select a model per lane and run independent agents next to orchestrated mission work.",
+        "alt": "The Lanes tab showing user-selected models for parallel work"
+      },
+      "usage": {
+        "title": "Usage — understand model and daily cost",
+        "body": "Usage summarizes agent and model activity over time, including daily cost totals where recorded. Use it to understand which vendors and models are consuming your available budget or quota.",
+        "alt": "The Usage tab showing agent, model, and daily cost summaries"
+      },
+      "history": {
+        "title": "History — keep the append-only record",
+        "body": "History is the append-only work ledger: progress, costs, provenance, and merge events stay available after a task completes. Use it to reconstruct what happened and open the related ticket or diff.",
+        "alt": "The History tab showing an append-only work and merge ledger"
       }
     },
     "billing": {
