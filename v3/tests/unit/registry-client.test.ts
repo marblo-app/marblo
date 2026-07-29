@@ -146,6 +146,185 @@ describe("parseManifest", () => {
   });
 });
 
+// 공개 레지스트리가 실제로 싣고 있는 모양: schema_version 은 1 이고 install 은
+// 그 위의 **옵셔널** 필드다(옵셔널 추가는 breaking change 가 아니므로 기존
+// manifest 가 전부 유효하게 남는다). 앱이 install 을 sv===2 로 게이트하면 이
+// 계약을 통째로 못 읽는다 — 아래 두 스펙이 그 회귀를 잡는다.
+const V1_MCP_WITH_INSTALL = `
+schema_version: 1
+id: firecrawl-mcp
+name: Firecrawl MCP
+type: mcp-server
+version: 3.22.4
+description: Scrapes and crawls web pages into clean markdown for the agent.
+publisher:
+  name: Firecrawl
+  tier: verified
+source:
+  repository: https://github.com/firecrawl/firecrawl-mcp-server
+  ref: 2175de2dfd7e5073e9e743ec31a5e2515fa82df8
+install:
+  kind: mcp-server
+  runner: npx
+  package: firecrawl-mcp@3.22.4
+  args: []
+  mcp_key: firecrawl
+  env_required:
+    - FIRECRAWL_API_KEY
+permissions:
+  - network:outbound
+  - secrets:read
+license: MIT
+`;
+
+const V1_SKILL_WITH_INSTALL = `
+schema_version: 1
+id: code-review
+name: Code Review
+type: skill
+version: 1.0.0
+description: Review agent code.
+publisher:
+  name: Marblo
+  tier: official
+install:
+  kind: files
+  root: claude-skills
+  dest: code-review
+  files:
+    - SKILL.md
+    - README.md
+  integrity:
+    algorithm: sha256
+    files:
+      SKILL.md: "${"c".repeat(64)}"
+      README.md: "${"d".repeat(64)}"
+permissions:
+  - repository:read
+license: MIT
+`;
+
+describe("install contract on schema_version 1 (public registry shape)", () => {
+  it("reads an mcp-server install block declared on a v1 manifest", () => {
+    const item = parseManifest(
+      V1_MCP_WITH_INSTALL,
+      "mcp-servers/firecrawl-mcp",
+      "mcp-server",
+      COMMIT,
+    );
+    expect(item).not.toBeNull();
+    expect(item!.schemaVersion).toBe(1);
+    expect(item!.install).toEqual({
+      kind: "mcp-server",
+      runner: "npx",
+      package: "firecrawl-mcp@3.22.4",
+      args: [],
+      envRequired: ["FIRECRAWL_API_KEY"],
+      mcpKey: "firecrawl",
+    });
+    expect(item!.notInstallableReason).toBeUndefined();
+  });
+
+  it("reads a files install block declared on a v1 skill, without deriving", () => {
+    const item = parseManifest(
+      V1_SKILL_WITH_INSTALL,
+      "skills/code-review",
+      "skill",
+      COMMIT,
+    )!;
+    expect(item.install).toEqual({
+      kind: "files",
+      root: "claude-skills",
+      dest: "code-review",
+      files: ["SKILL.md", "README.md"],
+      integrity: { "SKILL.md": "c".repeat(64), "README.md": "d".repeat(64) },
+    });
+    expect(item.installDerived).toBe(false);
+
+    // 선언이 이겼으므로 트리 파생은 그것을 덮지 않는다.
+    deriveFilesInstallFromTree(item, [
+      {
+        path: "skills/code-review/EXTRA.md",
+        mode: "100644",
+        type: "blob",
+        size: 10,
+      },
+    ]);
+    expect(item.install).toEqual({
+      kind: "files",
+      root: "claude-skills",
+      dest: "code-review",
+      files: ["SKILL.md", "README.md"],
+      integrity: { "SKILL.md": "c".repeat(64), "README.md": "d".repeat(64) },
+    });
+  });
+
+  it("a declared-but-invalid block is not installable, and does not fall back to the repo tree", () => {
+    // dest 가 경로 탈출을 시도한다 — installer 도 거부하지만, 여기서 떨어지면
+    // 파생이 대신 끼어들어 "선언한 것과 다른 것"이 설치되면 안 된다.
+    const raw = V1_SKILL_WITH_INSTALL.replace(
+      "dest: code-review",
+      'dest: "../../evil"',
+    );
+    const item = parseManifest(raw, "skills/code-review", "skill", COMMIT)!;
+    expect(item.install).toBeNull();
+    expect(item.notInstallableReason).toMatch(/유효하지 않음/);
+
+    deriveFilesInstallFromTree(item, [
+      {
+        path: "skills/code-review/SKILL.md",
+        mode: "100644",
+        type: "blob",
+        size: 10,
+      },
+    ]);
+    expect(item.install).toBeNull();
+  });
+
+  it("rejects a files block whose integrity does not cover every file", () => {
+    const raw = V1_SKILL_WITH_INSTALL.replace(
+      `      README.md: "${"d".repeat(64)}"\n`,
+      "",
+    );
+    const item = parseManifest(raw, "skills/code-review", "skill", COMMIT)!;
+    expect(item.install).toBeNull();
+  });
+
+  it("rejects a files block with no integrity at all", () => {
+    const raw =
+      V1_SKILL_WITH_INSTALL.split("  integrity:")[0] +
+      "permissions:\n  - repository:read\nlicense: MIT\n";
+    const item = parseManifest(raw, "skills/code-review", "skill", COMMIT)!;
+    expect(item.install).toBeNull();
+    expect(item.notInstallableReason).toMatch(/유효하지 않음/);
+  });
+
+  it("rejects runners the Phase 1a installer cannot honour (no dead install button)", () => {
+    for (const runner of ["docker", "binary", "sh"]) {
+      const raw = V1_MCP_WITH_INSTALL.replace(
+        "runner: npx",
+        `runner: ${runner}`,
+      );
+      const item = parseManifest(
+        raw,
+        "mcp-servers/firecrawl-mcp",
+        "mcp-server",
+        COMMIT,
+      )!;
+      expect(item.install).toBeNull();
+    }
+  });
+
+  it("rejects an install block whose kind does not match the item type", () => {
+    const raw = V1_SKILL_WITH_INSTALL.replace(
+      "kind: files",
+      "kind: mcp-server",
+    );
+    const item = parseManifest(raw, "skills/code-review", "skill", COMMIT)!;
+    expect(item.install).toBeNull();
+  });
+});
+
 describe("deriveFilesInstallFromTree", () => {
   function baseItem(): RegistryItem {
     return parseManifest(V1_SKILL, "skills/code-review", "skill", COMMIT)!;

@@ -62,6 +62,11 @@ export interface RegistryFilesInstall {
 /** mcp-server 설치: free-form command 금지 — runner 는 enum, package 는 exact pin. */
 export interface RegistryMcpInstall {
   kind: "mcp-server";
+  /**
+   * 계약상의 enum 전체. Phase 1a 에서 실제로 파싱을 통과하는 것은 npx·uvx 뿐이다
+   * (docker/binary 는 installer 가 거부하므로, 파서가 미리 떨궈 죽은 설치 버튼을
+   * 만들지 않는다). 타입은 계약 공간을, 파서·installer 는 지원 범위를 나타낸다.
+   */
   runner: "npx" | "uvx" | "docker" | "binary";
   /** `name@x.y.z` 정확 핀. */
   package: string;
@@ -102,8 +107,9 @@ export interface RegistryItem {
   /** 이 항목을 읽은 레지스트리 커밋 — 설치는 항상 이 커밋에서 받는다. */
   commit: string;
   /**
-   * null = 이 manifest 로는 안전한 자동 설치가 불가(v1 mcp-server 등) —
-   * UI 는 목록·공시만 하고 설치 버튼을 달지 않는다.
+   * null = 이 manifest 로는 안전한 자동 설치가 불가(계약 미선언, 또는 선언했으나
+   * 형태 검증 실패) — UI 는 목록·공시만 하고 설치 버튼을 달지 않는다. 이유는
+   * notInstallableReason 에 담겨 그대로 표시된다.
    */
   install: RegistryInstall | null;
   /** true = v1 in-repo skill 페이로드에서 파생한 files 설치(레포 트리 기반). */
@@ -140,6 +146,9 @@ export interface RegistryFetchDeps {
 const ID_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]{1,32})?$/;
 const COMMIT_RE = /^[0-9a-f]{40}$/;
+/** 공개 스키마의 install.files 항목 패턴과 동일 — `..`/절대경로/역슬래시 불가. */
+const INSTALL_FILE_RE =
+  /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
 const TIERS: RegistryTier[] = ["official", "verified", "community"];
 const STATUSES: RegistryItemStatus[] = ["active", "deprecated", "revoked"];
 
@@ -255,18 +264,33 @@ export function parseManifest(
     installDerived: false,
   };
 
-  // v2 manifest 는 install 블록을 직접 나른다(설계 §3.2). 형태만 검증해 싣고,
-  // 강제 규칙(§4.4) 은 installer 가 설치 직전에 다시 전부 돈다.
-  if (sv === 2) {
-    item.install = parseV2InstallBlock(m.install, expectedType);
+  // install 블록은 **schema_version 과 무관하게** 읽는다. 공개 스키마는 이것을
+  // v1 의 옵셔널 필드로 실었다(옵셔널 추가는 breaking change 가 아니라 기존
+  // manifest 가 전부 유효하게 남는다) — 여기서 sv===2 로 게이트하면 실제 레지스트리가
+  // 싣고 있는 계약을 앱이 통째로 못 읽는다. 형태만 검증해 싣고, 강제 규칙(§4.4)은
+  // installer 가 설치 직전에 다시 전부 돈다.
+  if (m.install !== undefined) {
+    item.install = parseInstallBlock(m.install, expectedType);
     if (!item.install) {
-      item.notInstallableReason = "install 블록이 없거나 유효하지 않음";
+      // 계약을 **선언했는데 유효하지 않은** 경우다. 이 항목은 목록·공시만 한다 —
+      // 아래 트리 파생으로 조용히 대체하면 게시자가 쓴 계약을 무시하고 레포
+      // 페이로드를 대신 설치하게 된다(선언과 다른 것을 설치 = 조용한 오동작).
+      item.notInstallableReason = "install 블록이 유효하지 않음";
     }
+  } else if (sv === 2) {
+    // v2 는 install 이 필수다(§3.2). 없으면 설치 계약 없음.
+    item.notInstallableReason = "install 블록이 없음(schema v2 필수)";
   }
   return item;
 }
 
-function parseV2InstallBlock(
+/**
+ * 선언된 install 블록의 **형태**만 검증한다. 공개 스키마
+ * (registry/manifest.schema.json `install`) 와 1:1 로 맞춰져 있어야 한다 —
+ * 여기가 더 느슨하면 스키마가 거부한 모양이 앱에서만 통과하고, 더 빡빡하면
+ * CI 를 통과한 정상 항목이 앱에서 조용히 설치불가로 떨어진다.
+ */
+function parseInstallBlock(
   v: unknown,
   expectedType: RegistryItemType,
 ): RegistryInstall | null {
@@ -278,24 +302,45 @@ function parseV2InstallBlock(
     if (b.root !== "claude-skills" || !dest || !files || files.length === 0) {
       return null;
     }
-    let integrity: Record<string, string> | undefined;
+    // dest·files 의 모양도 여기서 본다. installer 가 어차피 다시 보지만, 통과
+    // 시켜두면 스토어가 "누르면 경로탈출로 거부되는" 설치 버튼을 그린다.
+    // 이 검사는 방어가 아니라 정직한 UI 를 위한 것이다 — 방어는 installer 다.
+    if (!ID_RE.test(dest)) return null;
     if (
-      b.integrity &&
-      typeof b.integrity === "object" &&
-      !Array.isArray(b.integrity)
+      files.some((f) => !INSTALL_FILE_RE.test(f) || f.split("/").length > 8)
     ) {
-      const files2 = (b.integrity as Record<string, unknown>).files;
-      if (files2 && typeof files2 === "object" && !Array.isArray(files2)) {
-        integrity = {};
-        for (const [k, val] of Object.entries(
-          files2 as Record<string, unknown>,
-        )) {
-          const hex = asString(val, 64);
-          if (!hex || !/^[0-9a-f]{64}$/.test(hex)) return null;
-          integrity[k] = hex;
-        }
-      }
+      return null;
     }
+    // 선언된 files 설치는 integrity 가 **필수**다(공개 스키마와 동일). installer 는
+    // 다이제스트가 있을 때만 대조하므로, 여기서 요구하지 않으면 "계약을 선언했는데
+    // 아무것도 대조되지 않는" 설치가 생긴다. 트리 파생 설치(v1, 아래 함수)는 핀
+    // 커밋 자체가 앵커라 별개 경로다.
+    if (
+      !b.integrity ||
+      typeof b.integrity !== "object" ||
+      Array.isArray(b.integrity)
+    ) {
+      return null;
+    }
+    const digestMap = (b.integrity as Record<string, unknown>).files;
+    if (
+      !digestMap ||
+      typeof digestMap !== "object" ||
+      Array.isArray(digestMap)
+    ) {
+      return null;
+    }
+    const integrity: Record<string, string> = {};
+    for (const [k, val] of Object.entries(
+      digestMap as Record<string, unknown>,
+    )) {
+      const hex = asString(val, 64);
+      if (!hex || !/^[0-9a-f]{64}$/.test(hex)) return null;
+      integrity[k] = hex;
+    }
+    // 목록의 모든 파일이 다이제스트로 덮여야 한다 — 일부만 덮이면 나머지는
+    // 대조 없이 디스크에 쓰인다.
+    if (files.some((f) => !integrity[f])) return null;
     return { kind: "files", root: "claude-skills", dest, files, integrity };
   }
   if (expectedType === "mcp-server" && b.kind === "mcp-server") {
@@ -307,7 +352,10 @@ function parseV2InstallBlock(
     if (!runner || !pkg || !mcpKey || args === null || envRequired === null) {
       return null;
     }
-    if (!["npx", "uvx", "docker", "binary"].includes(runner)) return null;
+    // docker/binary 는 계약상 유효하지만 installer 가 Phase 1a 에서 거부한다.
+    // 여기서 통과시키면 스토어가 **누르면 반드시 실패하는** 설치 버튼을 그린다 —
+    // 이 모듈의 원칙(가짜 설치 버튼 금지)에 어긋나므로 파싱 단계에서 떨군다.
+    if (!["npx", "uvx"].includes(runner)) return null;
     return {
       kind: "mcp-server",
       runner: runner as RegistryMcpInstall["runner"],
@@ -331,6 +379,9 @@ export function deriveFilesInstallFromTree(
   tree: TreeEntry[],
 ): void {
   if (item.type !== "skill" || item.install) return;
+  // manifest 가 계약을 선언했는데 거부된 경우(reason 이 이미 붙어 있다) 파생하지
+  // 않는다 — 선언된 것과 다른 페이로드를 대신 설치하게 되기 때문.
+  if (item.notInstallableReason) return;
   const prefix = `${item.path}/`;
   const files: string[] = [];
   let total = 0;
@@ -545,7 +596,7 @@ async function fetchFreshIndex(
         }
         if (item && item.type === "mcp-server" && !item.install) {
           item.notInstallableReason ??=
-            "manifest 에 설치 계약 없음(schema v1) — 수동 설치만 가능";
+            "manifest 에 설치 계약 없음 — 수동 설치만 가능";
         }
         return item;
       } catch (err) {
