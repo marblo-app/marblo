@@ -1,0 +1,45 @@
+schema_version: 1
+
+id: korea-realestate-mcp
+name: Korea Real Estate MCP — MOLIT transaction prices
+type: mcp-server
+version: 0.1.0
+status: active
+description: Real transaction prices from Korea's MOLIT open API — apartments, officetels, villas, single/multi-household homes, and commercial buildings, sale and jeonse/monthly rent — plus apartment subscription notices and results. 14+ tools.
+
+i18n:
+  ko:
+    name: 국토교통부 부동산 실거래가 MCP
+    description: 아파트·오피스텔·연립다세대·단독다가구·상업업무용 부동산의 매매와 전월세 실거래가를 국토교통부 공공 API 로 조회하고, 청약홈 분양·당첨 정보까지 함께 본다. 도구 14개 이상.
+
+publisher:
+  name: tae0y
+  tier: community
+  url: https://github.com/tae0y
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/tae0y/real-estate-mcp
+  ref: v0.1.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - korea
+  - korean
+  - real-estate
+  - molit
+  - public-data
+  - finance
+  - external
+
+license: MIT
+homepage: https://github.com/tae0y/real-estate-mcp

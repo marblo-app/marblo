@@ -1,0 +1,44 @@
+schema_version: 1
+
+id: daiso-mcp
+name: Daiso MCP — Korean retail, convenience stores, and cinemas
+type: mcp-server
+version: 1.0.10
+status: active
+description: Product, store, and stock lookups across Korean retail — Daiso, Olive Young, Lotte Mart, GS25, CU, 7-Eleven, Emart24 — plus Opinet fuel prices, Naver local place search, and Megabox/Lotte Cinema/CGV showtimes. No API key of your own.
+
+i18n:
+  ko:
+    name: 다이소 MCP — 한국 리테일·편의점·영화관 조회
+    description: 다이소·올리브영·롯데마트·GS25·CU·세븐일레븐·이마트24 의 상품·매장·재고, 오피넷 유가와 주유소, 네이버 지역검색, 메가박스·롯데시네마·CGV 상영정보를 조회한다. 본인 API 키 없이 바로 쓴다.
+
+publisher:
+  name: hmmhmmhm
+  tier: community
+  url: https://github.com/hmmhmmhm
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/hmmhmmhm/daiso-mcp
+  ref: v1.0.10
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+
+keywords:
+  - korea
+  - korean
+  - retail
+  - convenience-store
+  - cinema
+  - local
+  - external
+
+license: MIT
+homepage: https://github.com/hmmhmmhm/daiso-mcp
