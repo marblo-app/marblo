@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: wshobson-tdd-cycle
+name: TDD Cycle (wshobson)
+type: workflow
+version: 0.1.0
+status: active
+description: A phase-gated red-green-refactor orchestration — each step writes its output to disk, checkpoints wait for your approval, and any failure halts the run. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/tdd-workflows
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - tdd
+  - workflow
+  - slash-command
+  - checkpoints
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

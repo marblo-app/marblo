@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: superpowers-test-driven-development
+name: Test-Driven Development (Superpowers)
+type: skill
+version: 6.2.0
+status: active
+description: RED-GREEN-REFACTOR held to the letter — if you did not watch the test fail, you do not know it tests anything. Includes a guide to writing tests worth keeping. Referenced by manifest; not vendored.
+
+publisher:
+  name: Jesse Vincent (obra)
+  tier: community
+  url: https://github.com/obra
+
+source:
+  repository: https://github.com/obra/superpowers
+  ref: v6.2.0
+  path: skills/test-driven-development
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - repository:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - tdd
+  - testing
+  - red-green-refactor
+  - discipline
+  - external
+
+license: MIT
+homepage: https://github.com/obra/superpowers/tree/main/skills/test-driven-development
