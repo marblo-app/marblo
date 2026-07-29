@@ -41,7 +41,11 @@ function withFixture(run) {
 }
 
 /** A skill item whose payload is a single SKILL.md with a known digest. */
-function writeSkillItem(fixture, dir, { install, body = "payload\n" }) {
+function writeSkillItem(
+  fixture,
+  dir,
+  { install = "", body = "payload\n", extra = "" }
+) {
   const itemDir = join(fixture, "skills", dir);
   mkdirSync(itemDir, { recursive: true });
   writeFileSync(join(itemDir, "SKILL.md"), body);
@@ -60,6 +64,7 @@ function writeSkillItem(fixture, dir, { install, body = "payload\n" }) {
       "license: MIT",
       "permissions: []",
       install,
+      extra,
     ].join("\n") + "\n"
   );
   return createHash("sha256").update(body).digest("hex");
@@ -421,4 +426,101 @@ test("invalid manifest requirements are reported", () => {
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }
+});
+
+// ── i18n overlay ────────────────────────────────────────────────────────────
+// The base name/description stay English and are always valid on their own; the
+// overlay is additive. These assert both directions: a well-formed overlay does
+// not disturb anything, and a malformed one is rejected at the same gate as the
+// install contract rather than reaching an app that would render it.
+
+function warningsFor(fixture) {
+  return validateRegistry({ repoRoot: fixture, checkSources: false }).warnings;
+}
+
+test("an item with no i18n block is valid — English is a complete state", () => {
+  withFixture((fixture) => {
+    writeSkillItem(fixture, "untranslated-skill", {});
+    assert.deepEqual(errorsFor(fixture), []);
+  });
+});
+
+test("a full and a name-only i18n overlay both validate", () => {
+  withFixture((fixture) => {
+    writeSkillItem(fixture, "translated-skill", {
+      extra: [
+        "i18n:",
+        "  ko:",
+        "    name: 픽스처 스킬",
+        "    description: 픽스처 설명",
+      ].join("\n"),
+    });
+    // Partial by design: description falls back to the English base per field.
+    writeSkillItem(fixture, "half-translated-skill", {
+      extra: ["i18n:", "  ko:", "    name: 절반만 번역된 스킬"].join("\n"),
+    });
+    assert.deepEqual(errorsFor(fixture), []);
+  });
+});
+
+test("an unsupported i18n locale is rejected", () => {
+  withFixture((fixture) => {
+    writeSkillItem(fixture, "wrong-locale-skill", {
+      extra: ["i18n:", "  fr:", "    name: Compétence"].join("\n"),
+    });
+    assert.ok(
+      errorsFor(fixture).some((error) =>
+        error.includes("i18n locale 'fr' is not supported")
+      )
+    );
+  });
+});
+
+test("an i18n field that is only whitespace is rejected", () => {
+  withFixture((fixture) => {
+    writeSkillItem(fixture, "blank-translation-skill", {
+      extra: ["i18n:", "  ko:", '    name: "   "'].join("\n"),
+    });
+    assert.ok(
+      errorsFor(fixture).some((error) =>
+        error.includes("i18n.ko.name must be a non-empty string")
+      )
+    );
+  });
+});
+
+test("an empty i18n locale object is rejected rather than read as translated", () => {
+  withFixture((fixture) => {
+    writeSkillItem(fixture, "empty-locale-skill", {
+      extra: ["i18n:", "  ko: {}"].join("\n"),
+    });
+    assert.ok(errorsFor(fixture).some((error) => error.includes("i18n.ko")));
+  });
+});
+
+test("i18n cannot smuggle a non-display field past the display overlay", () => {
+  withFixture((fixture) => {
+    writeSkillItem(fixture, "overreaching-i18n-skill", {
+      extra: ["i18n:", "  ko:", "    id: 다른-아이디"].join("\n"),
+    });
+    assert.ok(
+      errorsFor(fixture).some((error) =>
+        error.includes("is not a translatable field")
+      )
+    );
+  });
+});
+
+test("a translation identical to the English base warns but does not fail", () => {
+  withFixture((fixture) => {
+    writeSkillItem(fixture, "noop-translation-skill", {
+      extra: ["i18n:", "  ko:", "    name: Fixture Skill"].join("\n"),
+    });
+    assert.deepEqual(errorsFor(fixture), []);
+    assert.ok(
+      warningsFor(fixture).some((warning) =>
+        warning.includes("identical to the English base")
+      )
+    );
+  });
 });

@@ -7,6 +7,11 @@ version: 0.2.0
 status: active
 description: Six MCP servers over Korea's public data portal — national pension enrollment, business-registration verification, public procurement bids, corporate financials, presidential speeches, and chemical safety data.
 
+i18n:
+  ko:
+    name: 공공데이터포털(data.go.kr) MCP 서버 모음
+    description: 공공데이터포털 위에 올린 MCP 서버 6종 — 국민연금 가입정보, 사업자등록 진위확인, 나라장터 입찰공고, 기업 재무정보, 대통령 연설기록, 화학물질 안전정보.
+
 publisher:
   name: Koomook
   tier: community

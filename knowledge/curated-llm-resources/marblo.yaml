@@ -7,6 +7,11 @@ version: 1.0.0
 status: active
 description: A source-verified learning path for LLMs — foundations, agents & MCP, RAG, evals, and observability — as an English study guide with vetted links.
 
+i18n:
+  ko:
+    name: LLM 학습 — 엄선 자료 모음
+    description: 출처를 검증한 LLM 학습 경로 — 기초, 에이전트와 MCP, RAG, 평가(evals), 관측성. 검증된 링크로 엮은 영어 학습 가이드다.
+
 publisher:
   name: Marblo
   tier: official

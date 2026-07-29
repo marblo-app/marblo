@@ -7,6 +7,11 @@ version: 4.9.1
 status: active
 description: Korean statutes, case law, administrative rules, and treaties from the 법제처 open APIs, plus citation verification that checks a cited article exists and says what the model claims it says.
 
+i18n:
+  ko:
+    name: 국가법령정보 MCP (법제처)
+    description: 법제처 오픈 API 의 법령·판례·행정규칙·조약 조회. 인용 검증 기능이 모델이 든 조문이 실제로 존재하는지, 그 조문이 모델 주장대로인지까지 확인한다.
+
 publisher:
   name: chrisryugj
   tier: community

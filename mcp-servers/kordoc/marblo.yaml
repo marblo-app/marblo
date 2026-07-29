@@ -7,6 +7,11 @@ version: 4.2.9
 status: active
 description: Parse, compare, and generate the document formats Korean public-sector work runs on — HWP 3.x/5.x, HWPX, HWPML, PDF, XLS(X), DOCX — from an agent. Ships as both a CLI and an MCP server.
 
+i18n:
+  ko:
+    name: kordoc — HWP/HWPX·한국 오피스 문서 파서
+    description: 한국 공공 업무가 돌아가는 문서 포맷을 에이전트에서 파싱·비교·생성한다 — HWP 3.x/5.x, HWPX, HWPML, PDF, XLS(X), DOCX. CLI 와 MCP 서버 두 형태로 제공된다.
+
 publisher:
   name: chrisryugj
   tier: community

@@ -4,6 +4,18 @@
   "title": "Marblo Store item manifest (marblo.yaml)",
   "description": "Every item in the Marblo ecosystem — skill, MCP server, agent, workflow, knowledge pack, harness, or bundle — is described by a marblo.yaml that validates against this schema. First-party items are plain, standards-native files that work standalone in Claude Code / Codex; this manifest is additive Store metadata, not a container. The Marblo app reads these manifests to build the Store index and to install items by tag or commit SHA.",
   "type": "object",
+  "definitions": {
+    "localizedStrings": {
+      "description": "Translated display strings for one locale. Every field is optional and falls back independently: translate the name, the description, both, or neither. At least one field must be present — an empty locale object says nothing and is rejected so it cannot be mistaken for a translation that exists.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 280 }
+      }
+    }
+  },
   "required": [
     "schema_version",
     "id",
@@ -54,6 +66,16 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 280
+    },
+    "i18n": {
+      "description": "OPTIONAL per-locale overlay for the two display strings. `name` and `description` above stay English — they are the base, and the base is what every item is reviewed and searched by. A client shows the entry matching the user's locale when one exists FOR THAT FIELD and the English base otherwise, field by field, so a partial translation is a real option rather than a broken one. Nothing here is ever required: most items carry no `i18n` block at all and display in English, which is a complete and supported state — the registry does not ask contributors to translate an item they cannot translate accurately. This block carries display strings only; `id`, `keywords`, and every install field stay locale-independent.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "ko": { "$ref": "#/definitions/localizedStrings" },
+        "ja": { "$ref": "#/definitions/localizedStrings" }
+      }
     },
     "status": {
       "description": "Lifecycle state; absent means `active`. `deprecated` = still installable but superseded. `revoked` = withdrawn for a security, licensing, or provenance reason — the app must refuse to install it and warn about it if already installed. Revocations are recorded in SECURITY-ADVISORIES.md; app-side enforcement lands in Phase 1a (see ROADMAP.md).",

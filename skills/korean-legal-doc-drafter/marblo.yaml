@@ -7,6 +7,11 @@ version: 0.1.0
 status: active
 description: Drafts Korean legal documents through guided Q&A — 내용증명, contracts, employment agreements, payment orders, settlements, complaints, leases, powers of attorney — from 150 per-document reference guides.
 
+i18n:
+  ko:
+    name: 한국 법률문서 작성 스킬
+    description: 문답으로 한국 법률문서를 작성한다 — 내용증명, 계약서, 근로계약서, 지급명령, 합의서, 고소장, 임대차계약서, 위임장 — 문서별 참고 가이드 150종에 기반한다.
+
 publisher:
   name: openmagi
   tier: community

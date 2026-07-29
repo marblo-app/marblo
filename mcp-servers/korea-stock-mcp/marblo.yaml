@@ -7,6 +7,11 @@ version: 1.4.1
 status: active
 description: Korean equity research from official sources — DART regulatory filings with XBRL financial statements, and KRX daily prices and listings for KOSPI/KOSDAQ.
 
+i18n:
+  ko:
+    name: 한국 주식 MCP (DART · KRX)
+    description: 공식 출처 기반 한국 주식 리서치 — DART 공시와 XBRL 재무제표, KRX 의 코스피·코스닥 일별 시세와 상장 정보.
+
 publisher:
   name: jjlabsio
   tier: community
