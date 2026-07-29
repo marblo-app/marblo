@@ -5,6 +5,7 @@ import {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -15,12 +16,45 @@ import { validateRegistry } from "../bin/validate-registry.js";
 
 const repositoryRoot = new URL("../../..", import.meta.url).pathname;
 
-test("the committed registry contains exactly 45 valid manifests", () => {
+/**
+ * Independently walks the repo for every `<category>/<item>/marblo.yaml`,
+ * without going through the validator being tested, so the manifest count
+ * below is a real cross-check rather than a hardcoded number that a new
+ * registry item PR would have to remember to bump.
+ */
+function countManifestsOnDisk(repoRoot) {
+  return readdirSync(repoRoot, { withFileTypes: true })
+    .filter(
+      (category) => category.isDirectory() && !category.name.startsWith(".")
+    )
+    .flatMap((category) =>
+      readdirSync(join(repoRoot, category.name), {
+        withFileTypes: true,
+      }).filter(
+        (item) =>
+          item.isDirectory() &&
+          existsSyncQuiet(
+            join(repoRoot, category.name, item.name, "marblo.yaml")
+          )
+      )
+    ).length;
+}
+
+function existsSyncQuiet(path) {
+  try {
+    readFileSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("the committed registry is fully valid and matches the manifests on disk", () => {
   const result = validateRegistry({
     repoRoot: repositoryRoot,
     checkSources: false,
   });
-  assert.equal(result.manifests.length, 45);
+  assert.equal(result.manifests.length, countManifestsOnDisk(repositoryRoot));
   assert.deepEqual(result.errors, []);
 });
 
