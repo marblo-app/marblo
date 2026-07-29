@@ -1,0 +1,42 @@
+schema_version: 1
+
+id: neon-mcp
+name: Neon MCP
+type: mcp-server
+version: 1.0.0
+status: active
+description: Neon's official remote server for serverless Postgres — create projects and branches, run SQL, and drive branch-per-change migrations from the agent. Referenced by manifest; not vendored.
+
+publisher:
+  name: Neon
+  tier: community
+  url: https://github.com/neondatabase
+
+# Manifest-only: the real code stays upstream, pinned to a 40-hex commit SHA.
+# The only tag upstream carries is `v0.2.0`, long superseded — package.json at the
+# pinned commit reads 1.0.0 — so pinning that tag would freeze this listing far
+# behind. `version` tracks the package version at the pinned commit.
+source:
+  repository: https://github.com/neondatabase/mcp-server-neon
+  ref: 5de25551d31ddb481a53f48834d0df8059c8de0e
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - neon
+  - postgres
+  - serverless
+  - database
+  - branching
+  - external
+
+license: MIT
+homepage: https://github.com/neondatabase/mcp-server-neon

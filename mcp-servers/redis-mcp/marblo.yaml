@@ -1,0 +1,42 @@
+schema_version: 1
+
+id: redis-mcp
+name: Redis MCP
+type: mcp-server
+version: 0.5.0
+status: active
+description: Redis' official server — read and write strings, hashes, lists, sets, streams, JSON, and vector indexes, so the agent can use Redis as working memory or inspect a live cache. Referenced by manifest; not vendored.
+
+publisher:
+  name: Redis
+  tier: community
+  url: https://github.com/redis
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/redis/mcp-redis
+  ref: 0.5.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# filesystem:read covers TLS material: REDIS_SSL_CA_PATH and the client
+# cert/key paths are read off disk when connecting over rediss://.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+
+keywords:
+  - redis
+  - cache
+  - key-value
+  - vector-search
+  - database
+  - external
+
+license: MIT
+homepage: https://github.com/redis/mcp-redis

@@ -1,0 +1,42 @@
+schema_version: 1
+
+id: gcp-cloud-run-mcp
+name: Google Cloud Run MCP
+type: mcp-server
+version: 1.10.0
+status: active
+description: Google Cloud's official server for deploying and inspecting Cloud Run services — deploy a local folder or container, list services, read logs, from the agent. Referenced by manifest; not vendored.
+
+publisher:
+  name: Google Cloud Platform
+  tier: community
+  url: https://github.com/GoogleCloudPlatform
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/GoogleCloudPlatform/cloud-run-mcp
+  ref: v1.10.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Deploying "the current folder" means reading it off disk; credentials come from
+# Application Default Credentials or GOOGLE_APPLICATION_CREDENTIALS.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+
+keywords:
+  - gcp
+  - google-cloud
+  - cloud-run
+  - deployment
+  - devops
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/GoogleCloudPlatform/cloud-run-mcp

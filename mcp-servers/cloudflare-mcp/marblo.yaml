@@ -1,0 +1,44 @@
+schema_version: 1
+
+id: cloudflare-mcp
+name: Cloudflare MCP Servers
+type: mcp-server
+version: 0.1.0
+status: active
+description: Cloudflare's official remote MCP servers — docs, Workers bindings and builds, observability, Radar, AI Gateway, AutoRAG, audit logs, and more, each at its own hosted endpoint. Referenced by manifest; not vendored.
+
+publisher:
+  name: Cloudflare
+  tier: community
+  url: https://github.com/cloudflare
+
+# Manifest-only: the real code stays upstream, pinned to a 40-hex commit SHA.
+# Upstream tags per app (workers-observability@0.5.2, dex-analysis@0.5.2, …), not
+# repo-wide, and those literals do not match the pin pattern, so the commit is
+# pinned instead. `version` is this listing's own, not an upstream release.
+source:
+  repository: https://github.com/cloudflare/mcp-server-cloudflare
+  ref: 26c1989472469e79ed31d8e732efd0f2f4841e25
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# The servers run on Cloudflare, not on your machine: the local half is an OAuth
+# browser flow and an HTTP bridge. Nothing here reads or writes local files.
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - cloudflare
+  - workers
+  - cdn
+  - observability
+  - cloud
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/cloudflare/mcp-server-cloudflare

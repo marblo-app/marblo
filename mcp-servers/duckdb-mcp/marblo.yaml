@@ -1,0 +1,43 @@
+schema_version: 1
+
+id: duckdb-mcp
+name: DuckDB / MotherDuck MCP
+type: mcp-server
+version: 1.0.7
+status: active
+description: MotherDuck's official server — run DuckDB SQL against an in-memory database, a local .duckdb file, or a MotherDuck cloud database, so the agent can analyse CSV and Parquet without a warehouse. Referenced by manifest; not vendored.
+
+publisher:
+  name: MotherDuck
+  tier: community
+  url: https://github.com/motherduckdb
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/motherduckdb/mcp-server-motherduck
+  ref: v1.0.7
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# --db-path points at a local .duckdb file and --read-write lets DuckDB write it;
+# DuckDB also reads local CSV/Parquet directly and can reach S3/HTTP endpoints.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - duckdb
+  - motherduck
+  - sql
+  - analytics
+  - parquet
+  - external
+
+license: MIT
+homepage: https://github.com/motherduckdb/mcp-server-motherduck
