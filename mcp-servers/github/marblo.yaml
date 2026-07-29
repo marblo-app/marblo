@@ -4,6 +4,7 @@ id: github-mcp
 name: GitHub MCP Server
 type: mcp-server
 version: 1.7.0
+status: active
 description: Official GitHub MCP server — give agents scoped access to repositories, issues, and pull requests. Referenced by manifest; not vendored.
 
 publisher:

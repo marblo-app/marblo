@@ -4,6 +4,7 @@ id: marblo-control
 name: Marblo Control MCP
 type: mcp-server
 version: 1.0.0
+status: active
 description: The MCP server an orchestrator uses to run the board — create and dispatch tickets, spawn and track agents, and record decisions. Ships with the Marblo app.
 
 publisher:

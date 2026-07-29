@@ -1,30 +1,47 @@
 # Contributing to Marblo
 
-Thanks for helping build the Marblo ecosystem. This repo is the **public home** of Marblo's Store: skills, MCP servers, agents, workflows, and knowledge packs you can install into the app.
+Thanks for helping build the Marblo ecosystem. This repo is the public home of harness-neutral assets — skills, agents, workflows, MCP manifests, and knowledge packs — that work in the agent CLI you already run, and that the Marblo app can also install for you.
+
+**The bar for a first-party asset:** it has to be useful to someone who never installs Marblo. If an item only makes sense inside the app, say so in its README rather than implying portability it does not have.
 
 ## What lives here (and what doesn't)
 
-**Here:** first-party skills/agents/workflows/knowledge packs (real files), registry manifests, docs, examples, and the public tooling (`packages/`).
+**Here:** first-party skills/agents/workflows/knowledge packs (real files), registry manifests, docs, examples, and public tooling (`packages/`).
 
-**Not here:** the Marblo product and its core technology (private). Also **not** vendored: third-party code — reference it by manifest (`source.repository` + a pinned `ref`) instead of copying it in. Copying external code drags in its license, its security patches, its ownership, and its maintenance onto us; a pinned manifest keeps all four with the upstream author.
+**Not here:** the Marblo product and its orchestration engine (private — see [ROADMAP.md](ROADMAP.md) §6). Also **not** vendored: third-party code — reference it by manifest (`source.repository` + a pinned `ref`) instead of copying it in. Copying external code drags its license, its ownership, and its maintenance onto us; a pinned manifest keeps all three with the upstream author.
 
 ## Adding a Store item
 
-1. Pick a category under `registry/` and author a `marblo.yaml` that validates against [`registry/manifest.schema.json`](registry/manifest.schema.json).
-2. **First-party** item → put its real files beside the manifest (e.g. `skills/<id>/SKILL.md`).
-   **Referenced** item → set `source.repository` and a `source.ref` that is a **tag or commit SHA**, never a moving branch.
-3. Declare `permissions`, `compatibility.harnesses`, and a `license`.
-4. Open a PR. CI checks: schema validity, the pinned source resolves, a license is present, and the `id` is unique.
+1. **Create a folder under the category directory at the repo root** — `skills/`, `agents/`, `workflows/`, `mcp-servers/`, or `knowledge/` — named after your item's `id`. The `registry/` directory holds the schema and docs, **not** manifests; a `marblo.yaml` placed there will not be found.
+2. Author a `marblo.yaml` in that folder that validates against [`registry/manifest.schema.json`](registry/manifest.schema.json).
+3. **First-party** item → put its real files beside the manifest (e.g. `skills/<id>/SKILL.md`), in the format the target CLI already reads.
+   **Referenced** item → set `source.repository` and a `source.ref` that is a **release tag or a 40-character commit SHA**, never a moving branch. The schema rejects `main`, `master`, `develop`, and `HEAD` by pattern; if your tag does not fit the version-tag shape, pin the SHA.
+4. Declare `permissions` (**required** for `skill`, `agent`, `workflow`, `mcp-server`, `harness` — an empty list is a valid answer meaning "asks for nothing"), `compatibility.harnesses`, and a `license`.
+5. Add a short `README.md` next to the manifest, including a **standalone install snippet** if the item works without Marblo.
+6. Open a PR.
+
+### What happens to your PR
+
+**There is no CI in this repo yet.** Validation runs as manual review; automated checks (schema, pin resolution, license, secret scan) are Phase 1a — see [ROADMAP.md](ROADMAP.md) §5. So a maintainer will read your manifest and your payload by hand, and the review may take a few days.
+
+**External items merge as `community` tier, which means listed, not installable.** They are discoverable and linked to their source, but the app will not one-click-install them until it ships a permission gate. This is deliberate — [SECURITY.md](SECURITY.md) explains why a pinned commit does not make an unreviewed text payload safe. Promotion to `verified` follows a maintainer review of the payload itself.
+
+We would rather tell you this up front than have you discover it after the merge.
 
 ## Knowledge packs, not a warehouse
 
-`knowledge/` is for **Knowledge Packs** — curated conventions, prompt patterns, review rules, and _links_ to vetted resources — not a dump of documents. Do **not** commit model weights, large datasets, copied third-party docs, secrets/API keys, or prompt collections of unclear provenance.
+`knowledge/` is for **Knowledge Packs** — operational knowledge, curated conventions, review rules, and _links_ to vetted resources — not a dump of documents.
+
+The best pack is one that could only be written by someone who did the thing. [`fleet-operations`](knowledge/fleet-operations/) is the model: measured findings from running the system in production, including the hypotheses that turned out to be wrong. **Measured, not inferred**, and version-stamped when it describes a CLI contract that will drift.
+
+Do **not** commit model weights, large datasets, copied third-party docs, secrets/API keys, or prompt collections of unclear provenance.
 
 ## Style
 
 - One item = one clear job. Write descriptions from the user's side ("Review agent-generated code before merge"), not the system's.
-- Keep manifests minimal and honest about `tier` and `permissions`.
+- Keep manifests minimal and honest about `tier` and `permissions`. Over-declaring permissions is not "safe" — it trains people to ignore the disclosure.
+- If your item does something the docs here claim it does not, fix the docs in the same PR.
 
 ## Reporting problems
 
-Security issues → [SECURITY.md](SECURITY.md). Everything else → open an Issue. Broken links, wrong pins, and license gaps are all fair game.
+Security issues → [SECURITY.md](SECURITY.md). Something already merged that turned out to be unsafe → the revocation path in [SECURITY-ADVISORIES.md](SECURITY-ADVISORIES.md). Everything else → open an Issue. Broken links, wrong pins, license gaps, and docs that overstate what exists are all fair game — the last one especially.

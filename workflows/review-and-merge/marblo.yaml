@@ -4,6 +4,7 @@ id: review-and-merge
 name: Review & Merge
 type: workflow
 version: 1.0.0
+status: active
 description: Take a completed ticket through review to a safe merge — run the review skill, require findings resolved, then merge and close on confirmation.
 
 publisher:

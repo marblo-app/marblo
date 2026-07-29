@@ -4,6 +4,7 @@ id: reviewer
 name: Reviewer Agent
 type: agent
 version: 1.0.0
+status: active
 description: A dedicated review agent — claims review tickets, runs the code-review skill on each diff, and reports blocking findings before merge.
 
 publisher:

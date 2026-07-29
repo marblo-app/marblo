@@ -4,6 +4,7 @@ id: code-review
 name: Code Review
 type: skill
 version: 1.0.0
+status: active
 description: Review agent-generated code for correctness, security, and simplicity before it merges.
 
 publisher:

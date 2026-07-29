@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://marblo.app/registry/manifest.schema.json",
   "title": "Marblo Store item manifest (marblo.yaml)",
-  "description": "Every installable item in the Marblo ecosystem — skill, MCP server, agent, workflow, knowledge pack, harness, or bundle — is described by a marblo.yaml that validates against this schema. The Marblo app reads these manifests to build the Store index and to install items by tag or commit SHA.",
+  "description": "Every item in the Marblo ecosystem — skill, MCP server, agent, workflow, knowledge pack, harness, or bundle — is described by a marblo.yaml that validates against this schema. First-party items are plain, standards-native files that work standalone in Claude Code / Codex; this manifest is additive Store metadata, not a container. The Marblo app reads these manifests to build the Store index and to install items by tag or commit SHA.",
   "type": "object",
   "required": [
     "schema_version",
@@ -33,7 +33,7 @@
       "maxLength": 80
     },
     "type": {
-      "description": "Store category.",
+      "description": "Store category. The executable types — skill, agent, workflow, mcp-server, harness — must declare `permissions` (see below).",
       "enum": [
         "harness",
         "skill",
@@ -55,6 +55,11 @@
       "minLength": 1,
       "maxLength": 280
     },
+    "status": {
+      "description": "Lifecycle state; absent means `active`. `deprecated` = still installable but superseded. `revoked` = withdrawn for a security, licensing, or provenance reason — the app must refuse to install it and warn about it if already installed. Revocations are recorded in SECURITY-ADVISORIES.md; app-side enforcement lands in Phase 1a (see ROADMAP.md).",
+      "enum": ["active", "deprecated", "revoked"],
+      "default": "active"
+    },
     "publisher": {
       "type": "object",
       "required": ["name", "tier"],
@@ -62,21 +67,26 @@
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "tier": {
-          "description": "official = maintained by Marblo; verified = external, reviewed & source-pinned; community = external, unreviewed.",
+          "description": "official = maintained by Marblo; verified = external, reviewed & source-pinned; community = external, listed but not reviewed. NOTE: today this field is self-asserted by whoever writes the manifest, so it is a claim, not a guarantee — a `tier` in a file the contributor controls cannot certify itself. Phase 1a moves tier derivation into CI (from repo ownership and a maintainer-controlled trusted-publisher list) and the app will read the derived value, not this one. Until then, treat tier as an editorial label enforced by human review at merge time.",
           "enum": ["official", "verified", "community"]
         },
         "url": { "type": "string", "format": "uri" }
       }
     },
     "source": {
-      "description": "For external / manifest-only items: where the real code lives. Marblo installs from this pinned ref — it is NOT vendored into this repo.",
+      "description": "For external / manifest-only items: where the real code lives. Marblo installs from this pinned ref — it is NOT vendored into this repo. Required for every item whose publisher tier is not `official` (see allOf below).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "repository": { "type": "string", "format": "uri" },
         "ref": {
-          "description": "Tag or commit SHA to pin. Never a moving branch.",
-          "type": "string"
+          "description": "Immutable pin: a release tag (e.g. v1.7.0, 2026.07.29-1) or a full 40-character commit SHA. Moving branches (main, master, develop, HEAD) do not match this pattern and are rejected — what the Store installs has to be what was reviewed. If your tag does not fit the version-tag shape, pin the 40-hex commit SHA instead.",
+          "type": "string",
+          "maxLength": 120,
+          "anyOf": [
+            { "pattern": "^[0-9a-f]{40}$" },
+            { "pattern": "^v?\\d+(\\.\\d+)*([.-][0-9A-Za-z.-]+)?$" }
+          ]
         },
         "path": {
           "description": "Subpath within the source repo, if not the root.",
@@ -90,7 +100,7 @@
       "additionalProperties": false,
       "properties": {
         "harnesses": {
-          "description": "Which agent harnesses this item works with.",
+          "description": "Which agent harnesses this item works with. `any` means it is harness-neutral — it needs nothing Marblo-specific.",
           "type": "array",
           "items": {
             "enum": [
@@ -111,7 +121,7 @@
       }
     },
     "permissions": {
-      "description": "Capabilities the item requests, surfaced to the user before install.",
+      "description": "Capabilities the item requests, surfaced to the user before install. REQUIRED for every executable type (skill, agent, workflow, mcp-server, harness): an empty array is a valid and meaningful declaration — 'this item asks for nothing' — whereas omission says nothing at all, and an omitted list must not be able to render as harmless. This is disclosure, not enforcement: Marblo shows what an item says it needs; it does not restrict what the item can do once installed. Scoped forms (e.g. network:outbound:<host>) land with the Phase 1a permission gate.",
       "type": "array",
       "items": {
         "enum": [
@@ -146,8 +156,37 @@
   },
   "allOf": [
     {
-      "if": { "properties": { "type": { "const": "bundle" } } },
+      "$comment": "A bundle must say what it bundles.",
+      "if": {
+        "required": ["type"],
+        "properties": { "type": { "const": "bundle" } }
+      },
       "then": { "required": ["includes"] }
+    },
+    {
+      "$comment": "Executable types must declare permissions. An empty array is the way to say 'nothing'.",
+      "if": {
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "enum": ["skill", "agent", "workflow", "mcp-server", "harness"]
+          }
+        }
+      },
+      "then": { "required": ["permissions"] }
+    },
+    {
+      "$comment": "Anything not published by Marblo itself must be pinned to an immutable upstream ref. Without this, CONTRIBUTING's promise that 'the pinned source resolves' has nothing to resolve.",
+      "if": {
+        "required": ["publisher"],
+        "properties": {
+          "publisher": {
+            "required": ["tier"],
+            "properties": { "tier": { "enum": ["verified", "community"] } }
+          }
+        }
+      },
+      "then": { "required": ["source"] }
     }
   ]
 }
