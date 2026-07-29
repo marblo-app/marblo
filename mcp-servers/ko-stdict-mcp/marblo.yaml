@@ -1,0 +1,46 @@
+schema_version: 1
+
+id: ko-stdict-mcp
+name: 표준국어대사전 (Standard Korean Dictionary) MCP
+type: mcp-server
+version: 0.2.0
+status: active
+description: Look up headwords in the National Institute of Korean Language's Standard Korean Dictionary. Downloads the official JSON dump once, normalizes it into local SQLite, and serves lookups from there — no Open API key, no per-query network call.
+
+i18n:
+  ko:
+    name: 《표준국어대사전》 MCP 서버
+    description: 국립국어원 표준국어대사전의 공식 내려받기 덤프를 SQLite 로 정규화해 표제어를 조회하는 Deno stdio MCP 서버. 최초 1회 내려받은 뒤에는 로컬 DB 를 재사용하며 Open API 키가 필요 없다.
+
+publisher:
+  name: dahlia
+  tier: community
+  url: https://github.com/dahlia
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/dahlia/ko-stdict-mcp
+  ref: 0.2.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - korea
+  - korean
+  - dictionary
+  - language
+  - reference
+  - offline
+  - external
+
+license: AGPL-3.0
+homepage: https://github.com/dahlia/ko-stdict-mcp

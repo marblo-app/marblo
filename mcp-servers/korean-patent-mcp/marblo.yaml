@@ -1,0 +1,45 @@
+schema_version: 1
+
+id: korean-patent-mcp
+name: Korean Patent MCP (KIPRIS)
+type: mcp-server
+version: 0.2.1
+status: active
+description: Search Korean patents, utility models, trademarks, and designs through KIPRIS Plus — free-text search, fielded search over IPC/title/abstract/claims, applicant and right-holder lookup, and full bibliographic detail by application number. 7 tools.
+
+i18n:
+  ko:
+    name: KIPRIS 특허·상표·디자인 검색 MCP
+    description: 특허청 KIPRIS Plus 오픈API 를 도구 7개로 노출한다. 특허·실용신안 자유검색과 IPC·발명명칭·초록·청구범위 항목검색, 출원인·권리자 검색, 출원번호 서지상세 조회, 상표·디자인 검색을 제공한다.
+
+publisher:
+  name: chrisryugj
+  tier: community
+  url: https://github.com/chrisryugj
+
+# Manifest-only: upstream publishes no git tags, so the pin is a full commit SHA.
+source:
+  repository: https://github.com/chrisryugj/korean-patent-mcp
+  ref: 9686dd8ff102324aed642fefeda3102caccce93c
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - korea
+  - korean
+  - patent
+  - trademark
+  - kipris
+  - intellectual-property
+  - external
+
+license: MIT
+homepage: https://github.com/chrisryugj/korean-patent-mcp

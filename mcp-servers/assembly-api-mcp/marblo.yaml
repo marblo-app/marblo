@@ -1,0 +1,45 @@
+schema_version: 1
+
+id: assembly-api-mcp
+name: National Assembly of Korea (열린국회정보) MCP
+type: mcp-server
+version: 0.7.0
+status: active
+description: 287 Korean legislature open APIs behind 6 (Lite) or 11 (Full) MCP tools — members, bills and their committee-to-plenary path, sessions, votes, petitions, minutes, public legislative notices, and NABO budget research.
+
+i18n:
+  ko:
+    name: 대한민국 국회 열린국회정보 MCP
+    description: 국회의원·의안·회의·표결·청원·회의록에 더해 국민참여입법센터 입법예고와 국회예산정책처(NABO) 보고서까지, 국회 관련 Open API 287개를 Lite 6개·Full 11개 도구로 묶은 MCP 서버.
+
+publisher:
+  name: hollobit
+  tier: community
+  url: https://github.com/hollobit
+
+# Manifest-only: upstream publishes no git tags, so the pin is a full commit SHA.
+source:
+  repository: https://github.com/hollobit/assembly-api-mcp
+  ref: f74c6b452c59d87e2fa7265fd985b90e4057a8ef
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - korea
+  - korean
+  - government
+  - legislation
+  - parliament
+  - public-data
+  - external
+
+license: MIT
+homepage: https://github.com/hollobit/assembly-api-mcp

@@ -1,0 +1,47 @@
+schema_version: 1
+
+id: kis-mcp-server
+name: Korea Investment & Securities (KIS) REST API MCP
+type: mcp-server
+version: 0.1.0
+status: active
+description: 166 Korea Investment & Securities REST endpoints across 8 groups, exposed as catalog-driven MCP tools — domestic and overseas quotes, balances, buying power, and order APIs. Order, amend, and cancel calls are blocked by default. Unofficial.
+
+i18n:
+  ko:
+    name: 한국투자증권(KIS) REST API MCP
+    description: 한국투자증권 REST API 166개를 카탈로그 기반 MCP 도구로 호출한다. 국내·해외 주식 시세와 잔고·매수가능금액 조회, 주문 API 를 지원하되 주문·정정·취소는 기본 차단이다. 비공식 커뮤니티 프로젝트다.
+
+publisher:
+  name: migusdn
+  tier: community
+  url: https://github.com/migusdn
+
+# Manifest-only: upstream publishes no git tags, so the pin is a full commit SHA.
+source:
+  repository: https://github.com/migusdn/KIS_MCP_Server
+  ref: 595d5d1cdbbe6ae706f030cd196cfa1c12f15ca7
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - korea
+  - korean
+  - finance
+  - stocks
+  - brokerage
+  - trading
+  - external
+
+license: MIT
+homepage: https://github.com/migusdn/KIS_MCP_Server

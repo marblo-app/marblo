@@ -1,0 +1,45 @@
+schema_version: 1
+
+id: kmsg-kakaotalk
+name: kmsg — unofficial KakaoTalk CLI & MCP server (macOS)
+type: mcp-server
+version: 1.260726.0
+status: active
+description: Read, watch, and send KakaoTalk messages from an agent on macOS. Drives the on-screen KakaoTalk UI through the Accessibility API rather than a private protocol, and emits structured JSON. Unofficial — not a Kakao Corp. product.
+
+i18n:
+  ko:
+    name: kmsg — 비공식 카카오톡 CLI·MCP 서버 (macOS)
+    description: macOS 손쉬운 사용(Accessibility) API 로 카카오톡 대화 목록과 메시지를 읽고, 새 메시지를 감시하고, 텍스트·이미지를 전송하는 네이티브 stdio MCP 서버 겸 CLI. 카카오 공식 도구가 아니다.
+
+publisher:
+  name: channprj
+  tier: community
+  url: https://github.com/channprj
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/channprj/kmsg
+  ref: v1.260726.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - korea
+  - korean
+  - kakaotalk
+  - messaging
+  - macos
+  - automation
+  - external
+
+license: MIT
+homepage: https://github.com/channprj/kmsg

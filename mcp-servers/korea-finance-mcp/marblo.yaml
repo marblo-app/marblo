@@ -1,0 +1,45 @@
+schema_version: 1
+
+id: korea-finance-mcp
+name: Korea Finance MCP — ECOS, RTMS, R-ONE, DART, KRX
+type: mcp-server
+version: 1.4.0
+status: active
+description: 19 tools over Bank of Korea ECOS macro series, MOLIT RTMS transaction prices, R-ONE housing indices, DART filings, and KRX quotes — including cross-source correlation such as policy rate against apartment prices. Lookup only, no order path.
+
+i18n:
+  ko:
+    name: 한국 금융·거시경제 MCP — ECOS·RTMS·R-ONE·DART·KRX
+    description: 한국은행 ECOS 거시지표, 국토부 RTMS 실거래가, 한국부동산원 R-ONE 주택가격지수, DART 공시, KRX 시세를 한 서버에서 조회하고 금리와 집값 같은 교차 상관을 계산한다. 조회 전용이며 주문 기능은 없다.
+
+publisher:
+  name: emceeKim
+  tier: community
+  url: https://github.com/emceeKim
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/emceeKim/korea-finance-mcp
+  ref: v1.4.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - korea
+  - korean
+  - finance
+  - macroeconomics
+  - real-estate
+  - dart
+  - external
+
+license: MIT
+homepage: https://github.com/emceeKim/korea-finance-mcp
