@@ -1,0 +1,43 @@
+schema_version: 1
+
+id: fluent-korean
+name: fluent-korean (Korean output style)
+type: skill
+version: 0.1.0
+status: active
+description: A Claude Code output-style that stops the agent writing broken machine-Korean — dropped particles and endings, telegraphic noun strings, metaphor-swapped vocabulary. Install it when your agents report, hand off, or produce deliverables in Korean.
+
+i18n:
+  ko:
+    name: fluent-korean (한국어 출력 스타일)
+    description: 에이전트가 조사·어미가 빠진 번역투 한국어, 명사 나열, 뜻이 어긋난 비유 표현을 쓰지 않도록 잡아주는 Claude Code 출력 스타일. 보고·인계·산출물이 한국어로 오갈 때 설치한다.
+
+publisher:
+  name: snflkd
+  tier: community
+  url: https://github.com/snflkd
+
+# Manifest-only: pinned to the upstream release tag v1.0.0
+# (resolves to commit 3c1073a629eead3bd3ffc1ec7e47824b21be6d6d).
+source:
+  repository: https://github.com/snflkd/fluent-korean
+  ref: v1.0.0
+  path: plugins/fluent-korean
+
+compatibility:
+  harnesses:
+    - claude-code
+
+# Output-style markdown only: no scripts, no file access, no network.
+permissions: []
+
+keywords:
+  - korea
+  - korean
+  - output-style
+  - writing
+  - localization
+  - external
+
+license: MIT
+homepage: https://github.com/snflkd/fluent-korean

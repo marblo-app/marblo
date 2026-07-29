@@ -1,0 +1,47 @@
+schema_version: 1
+
+id: hwpx-plugins
+name: hwpx-plugins (HWPX document automation)
+type: skill
+version: 0.1.0
+status: active
+description: Plugin bundle that hands an agent the python-hwpx engine for Hangul .hwpx work — form filling, mail-merge, old/new comparison tables, spacing and margin edits — through a stateful MCP workflow with approval steps.
+
+i18n:
+  ko:
+    name: hwpx-plugins (HWPX 문서 자동화 플러그인)
+    description: python-hwpx 엔진을 에이전트에 연결해 한글 .hwpx 문서를 다루는 플러그인 번들 — 양식 채움, 메일머지, 신구대조표, 줄간격·여백 편집을 승인 단계가 있는 MCP 워크플로로 수행한다.
+
+publisher:
+  name: airmang
+  tier: community
+  url: https://github.com/airmang
+
+# Manifest-only: pinned to the upstream release tag v1.0.0
+# (resolves to commit 26f7fb8c926803fa5631e7a0d118d47dd226334e).
+source:
+  repository: https://github.com/airmang/hwpx-plugins
+  ref: v1.0.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - korea
+  - korean
+  - hwpx
+  - hwp
+  - documents
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/airmang/hwpx-plugins

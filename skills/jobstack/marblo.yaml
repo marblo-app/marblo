@@ -1,0 +1,44 @@
+schema_version: 1
+
+id: jobstack
+name: jobstack (Korean job application toolkit)
+type: skill
+version: 0.1.0
+status: active
+description: 16 skills covering a Korean job search end to end — company research, 이력서 and 자기소개서 drafting and review, NCS competency mapping for public-sector applications, portfolio review, salary analysis, and mock interviews.
+
+i18n:
+  ko:
+    name: jobstack (한국 취업 서류·면접 스킬 시스템)
+    description: 한국 취업 준비 전 과정을 다루는 스킬 16종 — 기업분석, 이력서·자기소개서 작성과 첨삭, 공기업 지원용 NCS 역량 매핑, 포트폴리오 리뷰, 연봉 분석, 모의면접.
+
+publisher:
+  name: thesun4sky
+  tier: community
+  url: https://github.com/thesun4sky
+
+# Manifest-only: upstream publishes no git tags, so the pin is a full commit SHA.
+source:
+  repository: https://github.com/thesun4sky/jobstack
+  ref: a5ef5ed8df2840e08bb7f2d2ab7fbab679bb3eff
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - korea
+  - korean
+  - resume
+  - cover-letter
+  - interview
+  - external
+
+license: MIT
+homepage: https://github.com/thesun4sky/jobstack
