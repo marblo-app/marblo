@@ -17,6 +17,23 @@ compatibility:
     - claude-code
     - codex
 
+# The payload lives in this repo, so the Store copies it directly at the reviewed
+# commit — no upstream fetch, no archive extraction. `root` is an enum key the app
+# maps to ~/.claude/skills; the manifest never sees a path. The digests below are
+# what the app checks the bytes against before anything lands on disk.
+install:
+  kind: files
+  root: claude-skills
+  dest: code-review
+  files:
+    - SKILL.md
+    - README.md
+  integrity:
+    algorithm: sha256
+    files:
+      SKILL.md: c8b984fb630bdfb1510729d16fb6ebb7aabab44f04da0f7d69f4c49dc2c1bec7
+      README.md: d1a2f7575dc81251ef2e81ac244b808ad7234246c9faf4b5a6a2c5604b228587
+
 permissions:
   - repository:read
 

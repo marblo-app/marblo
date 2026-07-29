@@ -29,6 +29,21 @@ To scope it to one project instead of your whole machine, put it under `./.claud
 
 **In Marblo:** find **Code Review** in the Store (category: Skills) — one click, with version tracking. Same file.
 
+The manifest carries the [`install` contract](../../registry/README.md#the-install-contract) that makes that click possible, and it is worth reading once because it is the shape every future skill copies:
+
+```yaml
+install:
+  kind: files
+  root: claude-skills # enum key — the app owns the path, the manifest never sees one
+  dest: code-review
+  files: [SKILL.md, README.md] # allowlist; nothing outside it is written
+  integrity: # sha256 of the committed bytes, checked before anything lands
+    algorithm: sha256
+    files: { SKILL.md: c8b984fb…, README.md: 2b6ae4b1… }
+```
+
+So the one-click path is strictly _narrower_ than the `curl` above: it writes two named files into one directory it computed itself, and it refuses to write any of them if the bytes do not hash to what was reviewed here. Uninstall is driven by a ledger the app wrote at install time, not by this manifest — editing this file later cannot redirect a delete.
+
 ## Details
 
 - **Skill:** [`SKILL.md`](SKILL.md) · **Manifest:** [`marblo.yaml`](marblo.yaml)
