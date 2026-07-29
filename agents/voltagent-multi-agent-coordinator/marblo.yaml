@@ -1,0 +1,37 @@
+schema_version: 1
+
+id: voltagent-multi-agent-coordinator
+name: Multi-Agent Coordinator (VoltAgent)
+type: agent
+version: 0.1.0
+status: active
+description: Designs coordination for concurrent agents — inter-agent messaging, task dependency graphs, parallel execution control, deadlock and partial-failure handling. Referenced by manifest; not vendored.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-claude-code-subagents
+  ref: 947b44ca0c58d606b084e9cb1a2389335b49278b
+  path: categories/09-meta-orchestration/multi-agent-coordinator.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - orchestration
+  - multi-agent
+  - dependencies
+  - fault-tolerance
+  - external
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-claude-code-subagents

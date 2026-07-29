@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: anthropic-webapp-testing
+name: Webapp Testing (Anthropic)
+type: skill
+version: 0.1.0
+status: active
+description: Drive a local web app with native Playwright scripts — verify frontend behaviour, capture screenshots, and read browser logs instead of guessing why the UI is wrong. Referenced by manifest; not vendored.
+
+publisher:
+  name: Anthropic
+  tier: community
+  url: https://github.com/anthropics
+
+source:
+  repository: https://github.com/anthropics/skills
+  ref: b29e7cf65e5cb78a5ac33d582270551bc74a14eb
+  path: skills/webapp-testing
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - testing
+  - playwright
+  - frontend
+  - screenshots
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/anthropics/skills/tree/main/skills/webapp-testing

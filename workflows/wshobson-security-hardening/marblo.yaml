@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: wshobson-security-hardening
+name: Security Hardening (wshobson)
+type: workflow
+version: 0.1.0
+status: active
+description: Defense-in-depth hardening pass across application layers, with selectable depth and OWASP/SOC2/GDPR/PCI-DSS compliance framings, plus STRIDE and attack-tree skills. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/security-scanning
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - security
+  - owasp
+  - stride
+  - threat-modeling
+  - compliance
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: anthropic-skill-creator
+name: Skill Creator (Anthropic)
+type: skill
+version: 0.1.0
+status: active
+description: Author, edit, and measure skills — drafts a SKILL.md, builds an eval set, runs it, and reports where the description fails to trigger. Referenced by manifest; not vendored.
+
+publisher:
+  name: Anthropic
+  tier: community
+  url: https://github.com/anthropics
+
+source:
+  repository: https://github.com/anthropics/skills
+  ref: b29e7cf65e5cb78a5ac33d582270551bc74a14eb
+  path: skills/skill-creator
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - authoring
+  - skills
+  - evals
+  - meta
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/anthropics/skills/tree/main/skills/skill-creator
