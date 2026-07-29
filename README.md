@@ -368,6 +368,7 @@ A `marblo.yaml` sits next to each item. It is **additive Store metadata, not a c
 ## Links
 
 - 🏠 Product site — [marblo.app](https://marblo.app)
+- 📝 What's new — [release notes](releases/) (every version, mirrored automatically)
 - ⬇️ Releases — [github.com/melocream/marblo-releases](https://github.com/melocream/marblo-releases/releases/latest)
 - ✉️ Contact — [team@marblo.app](mailto:team@marblo.app)
 - 🧑‍💻 Founder — [@melocream](https://github.com/melocream)

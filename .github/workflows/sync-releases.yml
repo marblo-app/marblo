@@ -1,0 +1,25 @@
+name: Sync release notes
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Mirror releases from marblo-releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/sync-releases.mjs
+      - name: Commit if changed
+        run: |
+          git config user.name "marblo-bot"
+          git config user.email "team@marblo.app"
+          git add releases/
+          if git diff --staged --quiet; then echo "no changes"; else git commit -m "docs(releases): sync from marblo-releases" && git push; fi
