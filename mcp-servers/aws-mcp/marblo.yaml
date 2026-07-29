@@ -1,0 +1,49 @@
+schema_version: 1
+
+id: aws-mcp
+name: AWS MCP Servers
+type: mcp-server
+version: 2026.07.20260728181317
+status: active
+description: AWS Labs' collection of MCP servers — one per service area (API, docs, pricing, CloudWatch, EKS, DynamoDB, and ~55 more), installed individually from the same repo. Referenced by manifest; not vendored.
+
+publisher:
+  name: AWS Labs
+  tier: community
+  url: https://github.com/awslabs
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+# The repo is a monorepo — each server lives under src/<name>-mcp-server and is
+# published to PyPI separately, but the release tag is repo-wide, so the whole
+# tree at this tag is what this listing points at. `version` is that tag verbatim;
+# upstream versions by release date, not SemVer.
+source:
+  repository: https://github.com/awslabs/mcp
+  ref: 2026.07.20260728181317
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Superset across the collection's documented modes — the API server shells out
+# to the AWS CLI, several servers read and write local project files, and all of
+# them read AWS credentials from the environment or ~/.aws.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - aws
+  - cloud
+  - infrastructure
+  - devops
+  - database
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/awslabs/mcp

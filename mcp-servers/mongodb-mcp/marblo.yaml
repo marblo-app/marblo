@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: mongodb-mcp
+name: MongoDB MCP
+type: mcp-server
+version: 1.14.0
+status: active
+description: MongoDB's official server — explore collections, run queries and aggregations, inspect indexes, and drive Atlas cluster administration, with a --readOnly flag that disables every mutating tool. Referenced by manifest; not vendored.
+
+publisher:
+  name: MongoDB
+  tier: community
+  url: https://github.com/mongodb-js
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+# Newer `v1.15.0-alpha.*` tags exist; the pin tracks the latest stable release.
+source:
+  repository: https://github.com/mongodb-js/mongodb-mcp-server
+  ref: v1.14.0
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - network:outbound
+  - secrets:read
+
+keywords:
+  - mongodb
+  - atlas
+  - database
+  - nosql
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/mongodb-js/mongodb-mcp-server

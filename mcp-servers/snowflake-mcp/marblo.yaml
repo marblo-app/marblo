@@ -1,0 +1,45 @@
+schema_version: 1
+
+id: snowflake-mcp
+name: Snowflake MCP
+type: mcp-server
+version: 1.4.2
+status: active
+description: Snowflake Labs' server for querying warehouses and driving Cortex Search, Analyst, and Agent services from the agent, with a config file that allowlists which SQL statement types are permitted. Referenced by manifest; not vendored.
+
+publisher:
+  name: Snowflake Labs
+  tier: community
+  url: https://github.com/Snowflake-Labs
+
+# Manifest-only: the real code stays upstream, pinned to a 40-hex commit SHA.
+# Upstream's newest tag is `v.1.4.2` — the dot after `v` means the literal is not
+# a shape the pin pattern accepts, so that tag's commit is pinned instead and
+# `version` carries the release number it stands for.
+source:
+  repository: https://github.com/Snowflake-Labs/mcp
+  ref: 662cb486395d79ab1ad0b3538f933fe6a686ce7c
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Reads a local service-config YAML (and optionally a private key file); connects
+# to your Snowflake account; credentials come from the environment or ~/.snowflake.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+
+keywords:
+  - snowflake
+  - data-warehouse
+  - sql
+  - analytics
+  - cortex
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/Snowflake-Labs/mcp

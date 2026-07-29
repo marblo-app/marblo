@@ -15,12 +15,12 @@ import { validateRegistry } from "../bin/validate-registry.js";
 
 const repositoryRoot = new URL("../../..", import.meta.url).pathname;
 
-test("the committed registry contains exactly 39 valid manifests", () => {
+test("the committed registry contains exactly 51 valid manifests", () => {
   const result = validateRegistry({
     repoRoot: repositoryRoot,
     checkSources: false,
   });
-  assert.equal(result.manifests.length, 39);
+  assert.equal(result.manifests.length, 51);
   assert.deepEqual(result.errors, []);
 });
 

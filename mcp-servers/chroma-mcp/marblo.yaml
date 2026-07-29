@@ -1,0 +1,45 @@
+schema_version: 1
+
+id: chroma-mcp
+name: Chroma MCP
+type: mcp-server
+version: 0.2.6
+status: active
+description: Chroma's official server for its embedding database — create collections, add documents, and run semantic, keyword, or metadata queries, against an in-memory, on-disk, or hosted Chroma. Referenced by manifest; not vendored.
+
+publisher:
+  name: Chroma
+  tier: community
+  url: https://github.com/chroma-core
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+# NOTE: upstream has not pushed since 2025-09-17 — see README.md for the
+# staleness disclosure that belongs with this listing.
+source:
+  repository: https://github.com/chroma-core/chroma-mcp
+  ref: v0.2.6
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# filesystem read/write cover the documented persistent client (CHROMA_DATA_DIR),
+# which keeps collections in a local directory; the dotenv path is also read.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - chroma
+  - vector-database
+  - embeddings
+  - semantic-search
+  - rag
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/chroma-core/chroma-mcp

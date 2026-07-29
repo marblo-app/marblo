@@ -1,0 +1,48 @@
+schema_version: 1
+
+id: azure-mcp
+name: Azure MCP Server
+type: mcp-server
+version: 3.0.0-beta.30
+status: active
+description: Microsoft's official Azure server — query and manage storage, Cosmos DB, Key Vault, AKS, Monitor, and the rest of the resource surface from the agent using your existing Azure sign-in. Referenced by manifest; not vendored.
+
+publisher:
+  name: Microsoft
+  tier: community
+  url: https://github.com/microsoft
+
+# Manifest-only: the real code stays upstream, pinned to a 40-hex commit SHA.
+# The standalone Azure/azure-mcp repo was archived 2026-02-06; development moved
+# into the microsoft/mcp catalog under servers/Azure.Mcp.Server. Upstream tags
+# there read `Azure.Mcp.Server-3.0.0-beta.30`, which is not a shape the pin
+# pattern accepts, so that tag's commit is pinned and `version` carries the
+# SemVer part of the tag.
+source:
+  repository: https://github.com/microsoft/mcp
+  ref: bd96686782eb9b62c47662b941de4c4b9eb0aaf7
+  path: servers/Azure.Mcp.Server
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# Talks to Azure Resource Manager; resolves credentials through the Azure
+# Identity chain, which reads the local az CLI / developer credential cache.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+
+keywords:
+  - azure
+  - microsoft
+  - cloud
+  - infrastructure
+  - devops
+  - external
+
+license: MIT
+homepage: https://github.com/microsoft/mcp/tree/main/servers/Azure.Mcp.Server

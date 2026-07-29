@@ -1,0 +1,42 @@
+schema_version: 1
+
+id: clickhouse-mcp
+name: ClickHouse MCP
+type: mcp-server
+version: 0.4.1
+status: active
+description: ClickHouse's official server — run SELECT queries against a ClickHouse cluster (read-only by default), list databases and tables, and optionally query local files through embedded chDB. Referenced by manifest; not vendored.
+
+publisher:
+  name: ClickHouse
+  tier: community
+  url: https://github.com/ClickHouse
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/ClickHouse/mcp-clickhouse
+  ref: v0.4.1
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# filesystem:read covers the optional chDB mode, which queries local data files
+# in-process; the default ClickHouse-only mode does not touch disk.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+
+keywords:
+  - clickhouse
+  - olap
+  - sql
+  - analytics
+  - database
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/ClickHouse/mcp-clickhouse

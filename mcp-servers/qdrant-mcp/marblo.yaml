@@ -1,0 +1,44 @@
+schema_version: 1
+
+id: qdrant-mcp
+name: Qdrant MCP
+type: mcp-server
+version: 0.8.1
+status: active
+description: Qdrant's official server — store and semantically retrieve text with its metadata, embedding on the fly, so the agent gets a memory layer it can query in natural language. Referenced by manifest; not vendored.
+
+publisher:
+  name: Qdrant
+  tier: community
+  url: https://github.com/qdrant
+
+# Manifest-only: the real code stays upstream, pinned to a released tag.
+source:
+  repository: https://github.com/qdrant/mcp-server-qdrant
+  ref: v0.8.1
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+# filesystem read/write cover the documented local mode (QDRANT_LOCAL_PATH), which
+# keeps the collection in an on-disk store instead of a remote instance; the
+# embedding model is also downloaded to a local cache on first run.
+permissions:
+  - network:outbound
+  - secrets:read
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - qdrant
+  - vector-database
+  - embeddings
+  - semantic-search
+  - memory
+  - external
+
+license: Apache-2.0
+homepage: https://github.com/qdrant/mcp-server-qdrant
