@@ -1,0 +1,56 @@
+schema_version: 1
+
+id: marketing-strategist
+name: Marketing Strategist
+type: agent
+version: 1.0.0
+status: active
+description: Sharpens positioning and picks a channel — names who it is for, what it replaces, and the one message that survives repetition. Rejects feature-list marketing.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: 마케팅 전략가
+    description: 포지셔닝을 벼리고 채널을 고른다 — 누구를 위한 것인지, 무엇을 대체하는지, 반복해도 살아남는 한 문장을 정한다. 기능 나열식 마케팅은 거부한다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: marketing-strategist
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 926d6b6387aa80e8eb27dc11e99403c8f6e9033cfdb8050116ebb2abf7896e0a
+
+permissions:
+  - repository:read
+  - network:outbound
+
+keywords:
+  - agent
+  - marketing
+  - positioning
+  - gtm
+  - messaging
+
+license: MIT
+homepage: https://marblo.app

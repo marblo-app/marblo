@@ -1,0 +1,56 @@
+schema_version: 1
+
+id: ceo-advisor
+name: CEO Advisor
+type: agent
+version: 1.0.0
+status: active
+description: Pressure-tests a strategic decision — where to concentrate, what to kill, and what the plan is betting on. Argues for focus and names the option nobody in the room is arguing for.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: CEO 자문
+    description: 전략 결정을 압박 검증한다 — 어디에 집중하고 무엇을 끊을지, 이 계획이 무엇에 베팅하는지 짚고, 아무도 꺼내지 않는 선택지를 말한다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: ceo-advisor
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 68c0bc912e29d7910c871e5ae2905ef68dcb1927de1782c04ee8da9a05fb5ce4
+
+permissions:
+  - repository:read
+  - network:outbound
+
+keywords:
+  - agent
+  - strategy
+  - focus
+  - prioritization
+  - advisor
+
+license: MIT
+homepage: https://marblo.app

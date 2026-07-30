@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: voltagent-postgres-pro
+name: Postgres Pro (VoltAgent)
+type: agent
+version: 0.1.0
+status: active
+description: PostgreSQL operations subagent — query and index tuning, configuration work, replication and high-availability design, backup strategy, and diagnosing databases already under load. Referenced by manifest; not vendored.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-claude-code-subagents
+  ref: 947b44ca0c58d606b084e9cb1a2389335b49278b
+  path: categories/05-data-ai/postgres-pro.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - postgres
+  - database
+  - tuning
+  - replication
+  - external
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-claude-code-subagents

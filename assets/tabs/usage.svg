@@ -1,0 +1,218 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" width="1200" height="760" role="img" aria-label="Usage — Cost by agent, model, and day" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <linearGradient id="us-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <style> .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; } </style>
+
+  <rect x="8" y="8" width="1184" height="744" rx="14" fill="#111827" stroke="#374151" stroke-width="1.5"/>
+  <clipPath id="us-clip"><rect x="8" y="8" width="1184" height="744" rx="14"/></clipPath>
+  <g clip-path="url(#us-clip)">
+
+    <!-- header -->
+    <rect x="8" y="8" width="1184" height="48" fill="#0d1420"/>
+    <line x1="8" y1="56" x2="1192" y2="56" stroke="#374151"/>
+    <circle cx="34" cy="32" r="6" fill="#ff5f57"/><circle cx="56" cy="32" r="6" fill="#febc2e"/><circle cx="78" cy="32" r="6" fill="#28c840"/>
+    <rect x="104" y="21" width="22" height="22" rx="6" fill="url(#us-mark)"/><circle cx="115" cy="32" r="4.5" fill="#0d1420"/>
+    <text x="136" y="38" fill="#ffffff" font-size="16" font-weight="700">Marblo</text>
+    <text x="202" y="38" fill="#6b7280" font-size="11">v3</text>
+    <rect x="500" y="18" width="200" height="28" rx="8" fill="#1f2937" stroke="#374151"/>
+    <text x="540" y="37" fill="#e5e7eb" font-size="13" font-weight="600">my-app</text>
+    <path d="M676 29 l4 4 l4 -4" fill="none" stroke="#9ca3af" stroke-width="1.5"/>
+    <rect x="710" y="22" width="46" height="20" rx="10" fill="#3b82f6" fill-opacity="0.2" stroke="#3b82f6" stroke-opacity="0.3"/>
+    <text x="733" y="36" fill="#60a5fa" font-size="10" font-weight="700" text-anchor="middle" letter-spacing="0.5">FREE</text>
+    <circle cx="1168" cy="32" r="12" fill="#3b82f6"/><text x="1168" y="36" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">D</text>
+
+    <!-- tab bar (Usage active) -->
+    <rect x="8" y="56" width="1184" height="36" fill="#0d1420"/>
+    <line x1="8" y1="92" x2="1192" y2="92" stroke="#374151"/>
+    <g font-size="12.5" font-weight="600" fill="#9ca3af">
+      <text x="40" y="78">Guide</text>
+      <text x="97" y="78">Board</text>
+      <text x="154" y="78">Lanes</text>
+      <text x="211" y="78">Missions</text>
+      <text x="289" y="78">Code</text>
+      <text x="339" y="78">Agents</text>
+      <text x="403" y="78" fill="#60a5fa">Usage</text>
+      <text x="460" y="78">Worktrees</text>
+      <text x="545" y="78">History</text>
+    </g>
+    <rect x="397" y="90" width="47" height="2" fill="#3b82f6"/>
+
+    <!-- page header + period selector -->
+    <text x="72" y="122" fill="#f3f4f6" font-size="16" font-weight="600">Usage</text>
+    <text x="72" y="142" fill="#6b7280" font-size="11">Token usage by model, agent, and day. Live (agent docs) + history (BigQuery), combined.</text>
+    <g font-size="11">
+      <rect x="972" y="108" width="52" height="24" rx="6" fill="#1f2937" stroke="#374151"/><text x="998" y="124" fill="#9ca3af" text-anchor="middle">7d</text>
+      <rect x="1028" y="108" width="56" height="24" rx="6" fill="#2563eb"/><text x="1056" y="124" fill="#ffffff" font-weight="600" text-anchor="middle">14d</text>
+      <rect x="1088" y="108" width="56" height="24" rx="6" fill="#1f2937" stroke="#374151"/><text x="1116" y="124" fill="#9ca3af" text-anchor="middle">30d</text>
+    </g>
+
+    <!-- model fact sheet (collapsed) -->
+    <rect x="72" y="156" width="1088" height="30" rx="8" fill="#1f2937" fill-opacity="0.5" stroke="#374151"/>
+    <text x="90" y="176" fill="#6b7280" font-size="11">▸</text>
+    <text x="108" y="176" fill="#d1d5db" font-size="12" font-weight="500">Model rate · performance · context</text>
+    <text x="1144" y="176" fill="#6b7280" font-size="11" text-anchor="end">Expand</text>
+
+    <!-- totals -->
+    <text x="72" y="208" fill="#6b7280" font-size="11">For the selected range (last 14 days) · aggregated from BigQuery cost_logs</text>
+    <g>
+      <rect x="72" y="218" width="248" height="62" rx="8" fill="#1f2937" fill-opacity="0.5" stroke="#374151"/>
+      <text x="90" y="240" fill="#6b7280" font-size="11">Total tokens</text>
+      <text x="90" y="264" class="mono" fill="#f3f4f6" font-size="16" font-weight="500">2.4M</text>
+
+      <rect x="352" y="218" width="248" height="62" rx="8" fill="#1f2937" fill-opacity="0.5" stroke="#374151"/>
+      <text x="370" y="240" fill="#6b7280" font-size="11">Input / Output</text>
+      <text x="370" y="264" class="mono" fill="#f3f4f6" font-size="16" font-weight="500">1.9M / 512K</text>
+
+      <rect x="632" y="218" width="248" height="62" rx="8" fill="#1f2937" fill-opacity="0.5" stroke="#374151"/>
+      <text x="650" y="240" fill="#6b7280" font-size="11">Cache (R/W)</text>
+      <text x="650" y="264" class="mono" fill="#f3f4f6" font-size="16" font-weight="500">8.1M / 640K</text>
+
+      <rect x="912" y="218" width="248" height="62" rx="8" fill="#1f2937" fill-opacity="0.5" stroke="#374151"/>
+      <text x="930" y="240" fill="#6b7280" font-size="11">Cost</text>
+      <text x="930" y="264" class="mono" fill="#f3f4f6" font-size="16" font-weight="500">$33.89</text>
+    </g>
+
+    <!-- ══ vendor / submodel breakdown ══ -->
+    <text x="72" y="308" fill="#d1d5db" font-size="12.5" font-weight="600">Broken down by vendor · sub-model</text>
+    <rect x="72" y="318" width="530" height="216" rx="8" fill="#1f2937" fill-opacity="0.5" stroke="#374151"/>
+
+    <!-- vendor 1 : anthropic (expanded) -->
+    <rect x="90" y="336" width="10" height="10" rx="2" fill="#a855f7"/>
+    <text x="108" y="345" fill="#e5e7eb" font-size="12" font-weight="500">anthropic</text>
+    <text x="174" y="345" fill="#6b7280" font-size="10.5">2 models</text>
+    <text x="470" y="345" class="mono" fill="#f3f4f6" font-size="12" text-anchor="end">$18.42</text>
+    <text x="530" y="345" class="mono" fill="#6b7280" font-size="10.5" text-anchor="end">1.2M</text>
+    <text x="576" y="345" fill="#6b7280" font-size="10.5" text-anchor="end">54%</text>
+    <rect x="90" y="352" width="484" height="6" rx="3" fill="#374151"/>
+    <rect x="90" y="352" width="261" height="6" rx="3" fill="#a855f7"/>
+
+    <line x1="90" y1="368" x2="574" y2="368" stroke="#374151" stroke-opacity="0.6"/>
+    <text x="110" y="386" class="mono" fill="#d1d5db" font-size="11">claude-opus-5</text>
+    <text x="470" y="386" class="mono" fill="#d1d5db" font-size="11" text-anchor="end">$12.80</text>
+    <text x="530" y="386" class="mono" fill="#6b7280" font-size="10.5" text-anchor="end">760K</text>
+    <rect x="110" y="392" width="440" height="4" rx="2" fill="#374151" fill-opacity="0.7"/>
+    <rect x="110" y="392" width="304" height="4" rx="2" fill="#c084fc"/>
+    <text x="110" y="414" class="mono" fill="#d1d5db" font-size="11">claude-sonnet-5</text>
+    <text x="470" y="414" class="mono" fill="#d1d5db" font-size="11" text-anchor="end">$5.62</text>
+    <text x="530" y="414" class="mono" fill="#6b7280" font-size="10.5" text-anchor="end">440K</text>
+    <rect x="110" y="420" width="440" height="4" rx="2" fill="#374151" fill-opacity="0.7"/>
+    <rect x="110" y="420" width="136" height="4" rx="2" fill="#c084fc"/>
+
+    <!-- vendor 2 : openai -->
+    <rect x="90" y="440" width="10" height="10" rx="2" fill="#22c55e"/>
+    <text x="108" y="449" fill="#e5e7eb" font-size="12" font-weight="500">openai</text>
+    <text x="162" y="449" fill="#6b7280" font-size="10.5">2 models</text>
+    <text x="470" y="449" class="mono" fill="#f3f4f6" font-size="12" text-anchor="end">$9.15</text>
+    <text x="530" y="449" class="mono" fill="#6b7280" font-size="10.5" text-anchor="end">840K</text>
+    <text x="576" y="449" fill="#6b7280" font-size="10.5" text-anchor="end">27%</text>
+    <rect x="90" y="456" width="484" height="6" rx="3" fill="#374151"/>
+    <rect x="90" y="456" width="131" height="6" rx="3" fill="#22c55e"/>
+
+    <!-- vendor 3 : xai -->
+    <rect x="90" y="474" width="10" height="10" rx="2" fill="#06b6d4"/>
+    <text x="108" y="483" fill="#e5e7eb" font-size="12" font-weight="500">xai</text>
+    <text x="140" y="483" fill="#6b7280" font-size="10.5">1 model</text>
+    <rect x="196" y="472" width="52" height="14" rx="3" fill="#111827" stroke="#a16207"/>
+    <text x="222" y="483" fill="#d97706" font-size="9.5" text-anchor="middle">est. rate</text>
+    <text x="470" y="483" class="mono" fill="#f3f4f6" font-size="12" text-anchor="end">$4.02</text>
+    <text x="530" y="483" class="mono" fill="#6b7280" font-size="10.5" text-anchor="end">280K</text>
+    <text x="576" y="483" fill="#6b7280" font-size="10.5" text-anchor="end">12%</text>
+    <rect x="90" y="490" width="484" height="6" rx="3" fill="#374151"/>
+    <rect x="90" y="490" width="58" height="6" rx="3" fill="#06b6d4"/>
+
+    <!-- vendor 4 : zai -->
+    <rect x="90" y="508" width="10" height="10" rx="2" fill="#f59e0b"/>
+    <text x="108" y="517" fill="#e5e7eb" font-size="12" font-weight="500">zai</text>
+    <text x="140" y="517" fill="#6b7280" font-size="10.5">1 model</text>
+    <text x="470" y="517" class="mono" fill="#f3f4f6" font-size="12" text-anchor="end">$2.30</text>
+    <text x="530" y="517" class="mono" fill="#6b7280" font-size="10.5" text-anchor="end">120K</text>
+    <text x="576" y="517" fill="#6b7280" font-size="10.5" text-anchor="end">7%</text>
+    <rect x="90" y="524" width="484" height="6" rx="3" fill="#374151"/>
+    <rect x="90" y="524" width="34" height="6" rx="3" fill="#f59e0b"/>
+
+    <!-- ══ daily trend ══ -->
+    <text x="630" y="308" fill="#d1d5db" font-size="12.5" font-weight="600">Daily trend (by vendor, last 14 days)</text>
+    <rect x="630" y="318" width="530" height="216" rx="8" fill="#1f2937" fill-opacity="0.5" stroke="#374151"/>
+    <g font-size="10.5" fill="#9ca3af">
+      <rect x="650" y="334" width="10" height="10" rx="2" fill="#a855f7"/><text x="666" y="343">anthropic</text>
+      <rect x="726" y="334" width="10" height="10" rx="2" fill="#22c55e"/><text x="742" y="343">openai</text>
+      <rect x="796" y="334" width="10" height="10" rx="2" fill="#06b6d4"/><text x="812" y="343">xai</text>
+      <rect x="848" y="334" width="10" height="10" rx="2" fill="#f59e0b"/><text x="864" y="343">zai</text>
+    </g>
+
+    <line x1="650" y1="496" x2="1140" y2="496" stroke="#374151"/>
+    <g>
+      <!-- 14 stacked daily bars (anthropic · openai · xai · zai) -->
+      <g><rect x="650" y="485" width="28" height="11" fill="#a855f7"/><rect x="650" y="479" width="28" height="6" fill="#22c55e"/><rect x="650" y="476" width="28" height="3" fill="#06b6d4"/><rect x="650" y="474" width="28" height="2" fill="#f59e0b"/></g>
+      <g><rect x="685" y="476" width="28" height="20" fill="#a855f7"/><rect x="685" y="465" width="28" height="11" fill="#22c55e"/><rect x="685" y="459" width="28" height="6" fill="#06b6d4"/><rect x="685" y="456" width="28" height="3" fill="#f59e0b"/></g>
+      <g><rect x="720" y="478" width="28" height="18" fill="#a855f7"/><rect x="720" y="469" width="28" height="9" fill="#22c55e"/><rect x="720" y="464" width="28" height="5" fill="#06b6d4"/><rect x="720" y="461" width="28" height="3" fill="#f59e0b"/></g>
+      <g><rect x="755" y="467" width="28" height="29" fill="#a855f7"/><rect x="755" y="451" width="28" height="16" fill="#22c55e"/><rect x="755" y="443" width="28" height="8" fill="#06b6d4"/><rect x="755" y="438" width="28" height="5" fill="#f59e0b"/></g>
+      <g><rect x="790" y="460" width="28" height="36" fill="#a855f7"/><rect x="790" y="441" width="28" height="19" fill="#22c55e"/><rect x="790" y="431" width="28" height="10" fill="#06b6d4"/><rect x="790" y="424" width="28" height="7" fill="#f59e0b"/></g>
+      <g><rect x="825" y="464" width="28" height="32" fill="#a855f7"/><rect x="825" y="447" width="28" height="17" fill="#22c55e"/><rect x="825" y="438" width="28" height="9" fill="#06b6d4"/><rect x="825" y="432" width="28" height="6" fill="#f59e0b"/></g>
+      <g><rect x="860" y="451" width="28" height="45" fill="#a855f7"/><rect x="860" y="427" width="28" height="24" fill="#22c55e"/><rect x="860" y="414" width="28" height="13" fill="#06b6d4"/><rect x="860" y="406" width="28" height="8" fill="#f59e0b"/></g>
+      <g><rect x="895" y="472" width="28" height="24" fill="#a855f7"/><rect x="895" y="459" width="28" height="13" fill="#22c55e"/><rect x="895" y="452" width="28" height="7" fill="#06b6d4"/><rect x="895" y="448" width="28" height="4" fill="#f59e0b"/></g>
+      <g><rect x="930" y="453" width="28" height="43" fill="#a855f7"/><rect x="930" y="430" width="28" height="23" fill="#22c55e"/><rect x="930" y="418" width="28" height="12" fill="#06b6d4"/><rect x="930" y="410" width="28" height="8" fill="#f59e0b"/></g>
+      <g><rect x="965" y="441" width="28" height="55" fill="#a855f7"/><rect x="965" y="411" width="28" height="30" fill="#22c55e"/><rect x="965" y="396" width="28" height="15" fill="#06b6d4"/><rect x="965" y="386" width="28" height="10" fill="#f59e0b"/></g>
+      <g><rect x="1000" y="448" width="28" height="48" fill="#a855f7"/><rect x="1000" y="422" width="28" height="26" fill="#22c55e"/><rect x="1000" y="409" width="28" height="13" fill="#06b6d4"/><rect x="1000" y="400" width="28" height="9" fill="#f59e0b"/></g>
+      <g><rect x="1035" y="459" width="28" height="37" fill="#a855f7"/><rect x="1035" y="439" width="28" height="20" fill="#22c55e"/><rect x="1035" y="429" width="28" height="10" fill="#06b6d4"/><rect x="1035" y="422" width="28" height="7" fill="#f59e0b"/></g>
+      <g><rect x="1070" y="437" width="28" height="59" fill="#a855f7"/><rect x="1070" y="405" width="28" height="32" fill="#22c55e"/><rect x="1070" y="388" width="28" height="17" fill="#06b6d4"/><rect x="1070" y="378" width="28" height="10" fill="#f59e0b"/></g>
+      <g><rect x="1105" y="445" width="28" height="51" fill="#a855f7"/><rect x="1105" y="417" width="28" height="28" fill="#22c55e"/><rect x="1105" y="403" width="28" height="14" fill="#06b6d4"/><rect x="1105" y="394" width="28" height="9" fill="#f59e0b"/></g>
+    </g>
+    <!-- hover tooltip on the busiest day -->
+    <rect x="1000" y="330" width="140" height="44" rx="6" fill="#0d1420" stroke="#374151"/>
+    <text x="1012" y="346" fill="#e5e7eb" font-size="10.5" font-weight="500">07-26</text>
+    <text x="1012" y="362" class="mono" fill="#f3f4f6" font-size="11">$4.61 · 268K tok</text>
+    <text x="650" y="516" fill="#6b7280" font-size="10">07-16</text>
+    <text x="1140" y="516" fill="#6b7280" font-size="10" text-anchor="end">07-29</text>
+
+    <!-- ══ agent ↔ actual model ══ -->
+    <text x="72" y="562" fill="#d1d5db" font-size="12.5" font-weight="600">Agent ↔ the model actually run</text>
+    <rect x="72" y="572" width="1088" height="152" rx="8" fill="#1f2937" fill-opacity="0.5" stroke="#374151"/>
+    <line x1="72" y1="600" x2="1160" y2="600" stroke="#374151"/>
+    <g font-size="11" fill="#6b7280">
+      <text x="94" y="592">Agents</text>
+      <text x="330" y="592">Harness</text>
+      <text x="470" y="592">Model actually run</text>
+      <text x="880" y="592">Evidence</text>
+    </g>
+    <g font-size="11">
+      <text x="94" y="622" fill="#e5e7eb">auth-api</text>
+      <text x="330" y="622" class="mono" fill="#6b7280">claude</text>
+      <rect x="470" y="613" width="9" height="9" rx="2" fill="#a855f7"/>
+      <text x="486" y="622" class="mono" fill="#e5e7eb">claude-opus-5</text>
+      <text x="600" y="622" fill="#6b7280">anthropic</text>
+      <text x="880" y="622" fill="#6b7280">billing session observed</text>
+      <line x1="72" y1="632" x2="1160" y2="632" stroke="#374151" stroke-opacity="0.4"/>
+
+      <text x="94" y="652" fill="#e5e7eb">payments-webhook</text>
+      <text x="330" y="652" class="mono" fill="#6b7280">gpt</text>
+      <rect x="470" y="643" width="9" height="9" rx="2" fill="#22c55e"/>
+      <text x="486" y="652" class="mono" fill="#e5e7eb">gpt-5.6-sol</text>
+      <text x="600" y="652" fill="#6b7280">openai</text>
+      <text x="880" y="652" fill="#6b7280">spawn argv</text>
+      <line x1="72" y1="662" x2="1160" y2="662" stroke="#374151" stroke-opacity="0.4"/>
+
+      <text x="94" y="682" fill="#e5e7eb">ci-cache-keys</text>
+      <text x="330" y="682" class="mono" fill="#6b7280">grok</text>
+      <rect x="470" y="673" width="9" height="9" rx="2" fill="#06b6d4"/>
+      <text x="486" y="682" class="mono" fill="#e5e7eb">grok-4.5</text>
+      <text x="600" y="682" fill="#6b7280">xai</text>
+      <rect x="656" y="671" width="52" height="14" rx="3" fill="#111827" stroke="#a16207"/>
+      <text x="682" y="682" fill="#d97706" font-size="9.5" text-anchor="middle">est. rate</text>
+      <text x="880" y="682" fill="#6b7280">spawn argv</text>
+      <line x1="72" y1="692" x2="1160" y2="692" stroke="#374151" stroke-opacity="0.4"/>
+
+      <text x="94" y="712" fill="#e5e7eb">pricing-page</text>
+      <text x="330" y="712" class="mono" fill="#6b7280">claude</text>
+      <rect x="470" y="703" width="9" height="9" rx="2" fill="#f59e0b"/>
+      <text x="486" y="712" class="mono" fill="#e5e7eb">glm-5.2</text>
+      <text x="600" y="712" fill="#6b7280">zai</text>
+      <text x="880" y="712" fill="#6b7280">billing session observed</text>
+    </g>
+
+    <text x="72" y="742" fill="#6b7280" font-size="10.5">Vendors resolve through the model registry — GLM stays a separate vendor even when it boots on the same claude binary. Model ids come from observation only; with no evidence the field stays empty.</text>
+  </g>
+</svg>

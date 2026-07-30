@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: voltagent-mcp-developer
+name: MCP Developer (VoltAgent)
+type: agent
+version: 0.1.0
+status: active
+description: Model Context Protocol subagent — server and client implementation against the JSON-RPC 2.0 contract, SDK usage, transport and auth choices, and debugging a server that a harness refuses to load. Referenced by manifest; not vendored.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-claude-code-subagents
+  ref: 947b44ca0c58d606b084e9cb1a2389335b49278b
+  path: categories/06-developer-experience/mcp-developer.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - mcp
+  - protocol
+  - json-rpc
+  - tooling
+  - external
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-claude-code-subagents

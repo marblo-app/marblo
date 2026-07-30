@@ -1,0 +1,230 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" width="1200" height="760" role="img" aria-label="Agents — A live terminal per agent" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <linearGradient id="ag-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <style> .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; } </style>
+
+  <rect x="8" y="8" width="1184" height="744" rx="14" fill="#111827" stroke="#374151" stroke-width="1.5"/>
+  <clipPath id="ag-clip"><rect x="8" y="8" width="1184" height="744" rx="14"/></clipPath>
+  <g clip-path="url(#ag-clip)">
+
+    <!-- header -->
+    <rect x="8" y="8" width="1184" height="48" fill="#0d1420"/>
+    <line x1="8" y1="56" x2="1192" y2="56" stroke="#374151"/>
+    <circle cx="34" cy="32" r="6" fill="#ff5f57"/><circle cx="56" cy="32" r="6" fill="#febc2e"/><circle cx="78" cy="32" r="6" fill="#28c840"/>
+    <rect x="104" y="21" width="22" height="22" rx="6" fill="url(#ag-mark)"/><circle cx="115" cy="32" r="4.5" fill="#0d1420"/>
+    <text x="136" y="38" fill="#ffffff" font-size="16" font-weight="700">Marblo</text>
+    <text x="202" y="38" fill="#6b7280" font-size="11">v3</text>
+    <rect x="500" y="18" width="200" height="28" rx="8" fill="#1f2937" stroke="#374151"/>
+    <text x="540" y="37" fill="#e5e7eb" font-size="13" font-weight="600">my-app</text>
+    <path d="M676 29 l4 4 l4 -4" fill="none" stroke="#9ca3af" stroke-width="1.5"/>
+    <rect x="710" y="22" width="46" height="20" rx="10" fill="#3b82f6" fill-opacity="0.2" stroke="#3b82f6" stroke-opacity="0.3"/>
+    <text x="733" y="36" fill="#60a5fa" font-size="10" font-weight="700" text-anchor="middle" letter-spacing="0.5">FREE</text>
+    <rect x="960" y="21" width="150" height="22" rx="11" fill="#22c55e" fill-opacity="0.12" stroke="#22c55e" stroke-opacity="0.28"/>
+    <circle cx="978" cy="32" r="3.5" fill="#4ade80"/>
+    <text x="990" y="36" fill="#86efac" font-size="11" font-weight="600">4 agents running</text>
+    <circle cx="1168" cy="32" r="12" fill="#3b82f6"/><text x="1168" y="36" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">D</text>
+
+    <!-- tab bar (Agents active) -->
+    <rect x="8" y="56" width="1184" height="36" fill="#0d1420"/>
+    <line x1="8" y1="92" x2="1192" y2="92" stroke="#374151"/>
+    <g font-size="12.5" font-weight="600" fill="#9ca3af">
+      <text x="40" y="78">Guide</text>
+      <text x="97" y="78">Board</text>
+      <text x="154" y="78">Lanes</text>
+      <text x="211" y="78">Missions</text>
+      <text x="289" y="78">Code</text>
+      <text x="339" y="78" fill="#60a5fa">Agents</text>
+      <text x="403" y="78">Usage</text>
+      <text x="460" y="78">Worktrees</text>
+      <text x="545" y="78">History</text>
+    </g>
+    <rect x="333" y="90" width="54" height="2" fill="#3b82f6"/>
+
+    <!-- collapsed sidebar strip -->
+    <rect x="8" y="92" width="40" height="660" fill="#1f2937"/>
+    <line x1="48" y1="92" x2="48" y2="752" stroke="#374151"/>
+    <path d="M20 120 h14 v10 h-14 z M20 120 l3.5 -4 h5 l0 4" fill="#eab308"/>
+    <path d="M22 150 l5 5 l-5 5" fill="none" stroke="#6b7280" stroke-width="1.4"/>
+
+    <!-- tab toolbar -->
+    <text x="72" y="120" fill="#e5e7eb" font-size="14" font-weight="600">Agents</text>
+    <text x="142" y="120" fill="#6b7280" font-size="11">5 · 4 working · 1 idle</text>
+    <rect x="962" y="104" width="94" height="26" rx="7" fill="#1f2937" stroke="#374151"/>
+    <path d="M980 113 h8 M980 117 h8 M980 121 h8" stroke="#9ca3af" stroke-width="1.4"/>
+    <text x="996" y="121" fill="#d1d5db" font-size="12" font-weight="600">Terminal</text>
+    <rect x="1066" y="104" width="112" height="26" rx="7" fill="#2563eb"/>
+    <path d="M1084 117 h10 M1089 112 v10" stroke="#fff" stroke-width="1.6"/>
+    <text x="1102" y="121" fill="#ffffff" font-size="12" font-weight="600">Add agent</text>
+
+    <!-- ===== fleet grid — one live terminal per agent ===== -->
+
+    <!-- cell 1 : claude (working) -->
+    <g>
+      <rect x="72" y="148" width="352" height="278" rx="8" fill="#181825" stroke="#313244"/>
+      <rect x="72" y="148" width="3" height="278" fill="#a855f7"/>
+      <circle cx="92" cy="170" r="5" fill="#a855f7"/>
+      <text x="106" y="174" fill="#cdd6f4" font-size="12" font-weight="600">auth-api</text>
+      <circle cx="172" cy="170" r="3.5" fill="#4ade80"/>
+      <rect x="330" y="161" width="84" height="18" rx="9" fill="#a6e3a1" fill-opacity="0.14"/>
+      <text x="372" y="174" fill="#a6e3a1" font-size="10.5" font-weight="600" text-anchor="middle">working</text>
+      <rect x="84" y="188" width="328" height="184" rx="6" fill="#11111b"/>
+      <g class="mono" font-size="10.5" xml:space="preserve">
+        <text x="96" y="206"><tspan fill="#89b4fa">●</tspan><tspan fill="#cdd6f4"> Read src/api/auth.ts (218 lines)</tspan></text>
+        <text x="96" y="224"><tspan fill="#89b4fa">●</tspan><tspan fill="#cdd6f4"> Edit src/api/auth.ts</tspan></text>
+        <text x="96" y="242"><tspan fill="#6c7086">   rotate refresh token on renew</tspan></text>
+        <text x="96" y="260"><tspan fill="#a6e3a1">✓</tspan><tspan fill="#cdd6f4"> 12 passing (2.4s)</tspan></text>
+        <text x="96" y="278"><tspan fill="#89b4fa">●</tspan><tspan fill="#cdd6f4"> Bash(npm run typecheck)</tspan></text>
+        <text x="96" y="296"><tspan fill="#a6e3a1">✓</tspan><tspan fill="#cdd6f4"> tsc — no errors</tspan></text>
+        <text x="96" y="314"><tspan fill="#cba6f7">▸</tspan><tspan fill="#cdd6f4"> marblo:submit_for_review</tspan></text>
+        <text x="96" y="332"><tspan fill="#6c7086">   writing tests/auth.e2e.ts …</tspan></text>
+        <text x="96" y="350"><tspan fill="#f5e0dc">▌</tspan></text>
+      </g>
+      <text x="84" y="392" fill="#6c7086" font-size="9.5" letter-spacing="0.6">BACKEND</text>
+      <rect x="146" y="380" width="86" height="16" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="154" y="392" class="mono" fill="#a6adc8" font-size="9.5">claude 2.1.16</text>
+      <text x="242" y="392" fill="#a6e3a1" font-size="10">Edit src/api/auth.ts</text>
+      <rect x="84" y="404" width="98" height="16" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="92" y="416" class="mono" fill="#a6adc8" font-size="9.5">claude-opus-5</text>
+    </g>
+
+    <!-- cell 2 : codex (working) -->
+    <g>
+      <rect x="449" y="148" width="352" height="278" rx="8" fill="#181825" stroke="#313244"/>
+      <rect x="449" y="148" width="3" height="278" fill="#22c55e"/>
+      <circle cx="469" cy="170" r="5" fill="#22c55e"/>
+      <text x="483" y="174" fill="#cdd6f4" font-size="12" font-weight="600">payments-webhook</text>
+      <circle cx="614" cy="170" r="3.5" fill="#4ade80"/>
+      <rect x="707" y="161" width="84" height="18" rx="9" fill="#a6e3a1" fill-opacity="0.14"/>
+      <text x="749" y="174" fill="#a6e3a1" font-size="10.5" font-weight="600" text-anchor="middle">working</text>
+      <rect x="461" y="188" width="328" height="184" rx="6" fill="#11111b"/>
+      <g class="mono" font-size="10.5" xml:space="preserve">
+        <text x="473" y="206"><tspan fill="#6c7086">codex</tspan><tspan fill="#cdd6f4"> exec — payments-webhook</tspan></text>
+        <text x="473" y="224"><tspan fill="#89b4fa">▸</tspan><tspan fill="#cdd6f4"> apply_patch server/toss.ts</tspan></text>
+        <text x="473" y="242"><tspan fill="#a6e3a1">+ verifyTossSignature(raw, sig)</tspan></text>
+        <text x="473" y="260"><tspan fill="#f38ba8">- JSON.parse(req.body)</tspan></text>
+        <text x="473" y="278"><tspan fill="#89b4fa">▸</tspan><tspan fill="#cdd6f4"> shell: pytest tests/webhook</tspan></text>
+        <text x="473" y="296"><tspan fill="#a6e3a1">✓</tspan><tspan fill="#cdd6f4"> 8 passed in 1.9s</tspan></text>
+        <text x="473" y="314"><tspan fill="#f9e2af">!</tspan><tspan fill="#cdd6f4"> replay window 5m — TODO</tspan></text>
+        <text x="473" y="332"><tspan fill="#6c7086">   thinking (medium) …</tspan></text>
+        <text x="473" y="350"><tspan fill="#f5e0dc">▌</tspan></text>
+      </g>
+      <text x="461" y="392" fill="#6c7086" font-size="9.5" letter-spacing="0.6">BACKEND</text>
+      <rect x="523" y="380" width="80" height="16" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="531" y="392" class="mono" fill="#a6adc8" font-size="9.5">codex 0.144</text>
+      <text x="613" y="392" fill="#a6e3a1" font-size="10">apply_patch server/toss.ts</text>
+      <rect x="461" y="404" width="88" height="16" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="469" y="416" class="mono" fill="#a6adc8" font-size="9.5">gpt-5.6-sol</text>
+    </g>
+
+    <!-- cell 3 : grok (working) -->
+    <g>
+      <rect x="826" y="148" width="352" height="278" rx="8" fill="#181825" stroke="#313244"/>
+      <rect x="826" y="148" width="3" height="278" fill="#06b6d4"/>
+      <circle cx="846" cy="170" r="5" fill="#06b6d4"/>
+      <text x="860" y="174" fill="#cdd6f4" font-size="12" font-weight="600">ci-cache-keys</text>
+      <circle cx="960" cy="170" r="3.5" fill="#4ade80"/>
+      <rect x="1084" y="161" width="84" height="18" rx="9" fill="#a6e3a1" fill-opacity="0.14"/>
+      <text x="1126" y="174" fill="#a6e3a1" font-size="10.5" font-weight="600" text-anchor="middle">working</text>
+      <rect x="838" y="188" width="328" height="184" rx="6" fill="#11111b"/>
+      <g class="mono" font-size="10.5" xml:space="preserve">
+        <text x="850" y="206"><tspan fill="#6c7086">grok</tspan><tspan fill="#cdd6f4"> — 41 MCP tools connected</tspan></text>
+        <text x="850" y="224"><tspan fill="#89b4fa">▸</tspan><tspan fill="#cdd6f4"> read .github/workflows/ci.yml</tspan></text>
+        <text x="850" y="242"><tspan fill="#89b4fa">▸</tspan><tspan fill="#cdd6f4"> edit cache key → lockfile hash</tspan></text>
+        <text x="850" y="260"><tspan fill="#a6e3a1">✓</tspan><tspan fill="#cdd6f4"> actions/cache@v4 pinned</tspan></text>
+        <text x="850" y="278"><tspan fill="#89b4fa">▸</tspan><tspan fill="#cdd6f4"> git commit -m "ci: cache keys"</tspan></text>
+        <text x="850" y="296"><tspan fill="#a6e3a1">✓</tspan><tspan fill="#cdd6f4"> 1 file changed, +14 −9</tspan></text>
+        <text x="850" y="314"><tspan fill="#cba6f7">▸</tspan><tspan fill="#cdd6f4"> marblo:add_activity</tspan></text>
+        <text x="850" y="332"><tspan fill="#6c7086">   worktree wt/ci-cache-keys</tspan></text>
+        <text x="850" y="350"><tspan fill="#f5e0dc">▌</tspan></text>
+      </g>
+      <text x="838" y="392" fill="#6c7086" font-size="9.5" letter-spacing="0.6">DEVOPS</text>
+      <rect x="892" y="380" width="84" height="16" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="900" y="392" class="mono" fill="#a6adc8" font-size="9.5">grok 0.2.112</text>
+      <text x="986" y="392" fill="#a6e3a1" font-size="10">commit ci: cache keys</text>
+      <rect x="838" y="404" width="72" height="16" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="846" y="416" class="mono" fill="#a6adc8" font-size="9.5">grok-4.5</text>
+    </g>
+
+    <!-- cell 4 : glm on the claude harness (waiting on an answer) -->
+    <g>
+      <rect x="72" y="448" width="352" height="278" rx="8" fill="#181825" stroke="#313244"/>
+      <rect x="72" y="448" width="3" height="278" fill="#a855f7"/>
+      <circle cx="92" cy="470" r="5" fill="#a855f7"/>
+      <text x="106" y="474" fill="#cdd6f4" font-size="12" font-weight="600">pricing-page</text>
+      <circle cx="200" cy="470" r="3.5" fill="#facc15"/>
+      <rect x="318" y="461" width="96" height="18" rx="9" fill="#f9e2af" fill-opacity="0.14"/>
+      <text x="366" y="474" fill="#f9e2af" font-size="10.5" font-weight="600" text-anchor="middle">needs input</text>
+      <rect x="84" y="488" width="328" height="184" rx="6" fill="#11111b"/>
+      <g class="mono" font-size="10.5" xml:space="preserve">
+        <text x="96" y="506"><tspan fill="#a6e3a1">✓</tspan><tspan fill="#cdd6f4"> pricing table rows aligned</tspan></text>
+        <text x="96" y="524"><tspan fill="#a6e3a1">✓</tspan><tspan fill="#cdd6f4"> ko / en / ja copy synced</tspan></text>
+        <text x="96" y="542"><tspan fill="#cba6f7">▸</tspan><tspan fill="#cdd6f4"> marblo:ask_orchestrator</tspan></text>
+        <text x="96" y="560"><tspan fill="#6c7086">   annual discount 15% or 20%?</tspan></text>
+        <text x="96" y="578"><tspan fill="#f9e2af">…</tspan><tspan fill="#cdd6f4"> waiting for answer</tspan></text>
+        <text x="96" y="596"><tspan fill="#6c7086">   (non-blocking — rest continues)</tspan></text>
+        <text x="96" y="614"><tspan fill="#89b4fa">●</tspan><tspan fill="#cdd6f4"> Edit web/pricing/page.tsx</tspan></text>
+        <text x="96" y="632"><tspan fill="#6c7086">   idle 40s</tspan></text>
+      </g>
+      <text x="84" y="692" fill="#6c7086" font-size="9.5" letter-spacing="0.6">FRONTEND</text>
+      <rect x="152" y="680" width="86" height="16" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="160" y="692" class="mono" fill="#a6adc8" font-size="9.5">claude 2.1.16</text>
+      <text x="248" y="692" fill="#f9e2af" font-size="10">waiting on the orchestrator</text>
+      <rect x="84" y="704" width="66" height="16" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="92" y="716" class="mono" fill="#a6adc8" font-size="9.5">glm-5.2</text>
+    </g>
+
+    <!-- cell 5 : watchdog restarted -->
+    <g>
+      <rect x="449" y="448" width="352" height="278" rx="8" fill="#181825" stroke="#313244"/>
+      <rect x="449" y="448" width="3" height="278" fill="#22c55e"/>
+      <circle cx="469" cy="470" r="5" fill="#22c55e"/>
+      <text x="483" y="474" fill="#cdd6f4" font-size="12" font-weight="600">search-indexing</text>
+      <circle cx="598" cy="470" r="3.5" fill="#4ade80"/>
+      <rect x="695" y="461" width="96" height="18" rx="9" fill="#89b4fa" fill-opacity="0.14"/>
+      <text x="743" y="474" fill="#89b4fa" font-size="10.5" font-weight="600" text-anchor="middle">restarted 1x</text>
+      <rect x="461" y="488" width="328" height="184" rx="6" fill="#11111b"/>
+      <g class="mono" font-size="10.5" xml:space="preserve">
+        <text x="473" y="506"><tspan fill="#f38ba8">✗</tspan><tspan fill="#cdd6f4"> session ended (exit 143)</tspan></text>
+        <text x="473" y="524"><tspan fill="#f9e2af">↻</tspan><tspan fill="#cdd6f4"> watchdog: respawn + resume</tspan></text>
+        <text x="473" y="542"><tspan fill="#a6e3a1">✓</tspan><tspan fill="#cdd6f4"> session restored — 0 work lost</tspan></text>
+        <text x="473" y="560"><tspan fill="#89b4fa">▸</tspan><tspan fill="#cdd6f4"> resume worktree wt/search-idx</tspan></text>
+        <text x="473" y="578"><tspan fill="#89b4fa">▸</tspan><tspan fill="#cdd6f4"> Bash(npm run bench:search)</tspan></text>
+        <text x="473" y="596"><tspan fill="#a6e3a1">✓</tspan><tspan fill="#cdd6f4"> p95 412ms → 118ms</tspan></text>
+        <text x="473" y="614"><tspan fill="#6c7086">   writing migration notes …</tspan></text>
+        <text x="473" y="632"><tspan fill="#f5e0dc">▌</tspan></text>
+      </g>
+      <text x="461" y="692" fill="#6c7086" font-size="9.5" letter-spacing="0.6">BACKEND</text>
+      <rect x="523" y="680" width="80" height="16" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="531" y="692" class="mono" fill="#a6adc8" font-size="9.5">codex 0.144</text>
+      <text x="613" y="692" fill="#a6e3a1" font-size="10">bench:search p95 118ms</text>
+      <rect x="461" y="704" width="72" height="16" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="469" y="716" class="mono" fill="#a6adc8" font-size="9.5">gpt-5.5</text>
+    </g>
+
+    <!-- cell 6 : plain shell tab (not an agent) -->
+    <g>
+      <rect x="826" y="448" width="352" height="278" rx="8" fill="#181825" stroke="#313244"/>
+      <rect x="826" y="448" width="3" height="278" fill="#6b7280"/>
+      <circle cx="846" cy="470" r="5" fill="#6b7280"/>
+      <text x="860" y="474" fill="#cdd6f4" font-size="12" font-weight="600">terminal · my-app</text>
+      <circle cx="982" cy="470" r="3.5" fill="#6b7280"/>
+      <rect x="1096" y="461" width="72" height="18" rx="9" fill="#6c7086" fill-opacity="0.18"/>
+      <text x="1132" y="474" fill="#a6adc8" font-size="10.5" font-weight="600" text-anchor="middle">idle</text>
+      <rect x="838" y="488" width="328" height="184" rx="6" fill="#11111b"/>
+      <g class="mono" font-size="10.5" xml:space="preserve">
+        <text x="850" y="506"><tspan fill="#a6e3a1">➜</tspan><tspan fill="#89b4fa"> my-app</tspan><tspan fill="#cdd6f4"> git status -sb</tspan></text>
+        <text x="850" y="524"><tspan fill="#cdd6f4">## main…origin/main</tspan></text>
+        <text x="850" y="542"><tspan fill="#a6e3a1">➜</tspan><tspan fill="#89b4fa"> my-app</tspan><tspan fill="#cdd6f4"> git worktree list</tspan></text>
+        <text x="850" y="560"><tspan fill="#6c7086">../wt/auth-api          </tspan><tspan fill="#94e2d5">wt/auth-api</tspan></text>
+        <text x="850" y="578"><tspan fill="#6c7086">../wt/payments-webhook  </tspan><tspan fill="#94e2d5">wt/payments…</tspan></text>
+        <text x="850" y="596"><tspan fill="#6c7086">../wt/ci-cache-keys     </tspan><tspan fill="#94e2d5">wt/ci-cache…</tspan></text>
+        <text x="850" y="614"><tspan fill="#a6e3a1">➜</tspan><tspan fill="#89b4fa"> my-app</tspan><tspan fill="#f5e0dc"> ▌</tspan></text>
+      </g>
+      <text x="838" y="692" fill="#6c7086" font-size="9.5" letter-spacing="0.6">TERMINAL</text>
+      <text x="906" y="692" fill="#6c7086" font-size="10">Plain shell tabs sit in the same grid, next to the agents</text>
+    </g>
+  </g>
+</svg>

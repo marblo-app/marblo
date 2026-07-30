@@ -4,30 +4,55 @@
 </h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/macOS%20%7C%20Windows-6366f1?style=flat-square" alt="Supported platforms: macOS and Windows" />
-  <a href="https://github.com/melocream/marblo-releases/releases/latest"><img src="https://img.shields.io/badge/download-desktop-0ea5e9?style=flat-square" alt="Download desktop app" /></a>
-  <a href="https://marblo.app"><img src="https://img.shields.io/badge/web-marblo.app-8b5cf6?style=flat-square" alt="marblo.app" /></a>
-  <a href="mailto:team@marblo.app"><img src="https://img.shields.io/badge/contact-team%40marblo.app-22c55e?style=flat-square" alt="Contact" /></a>
+  <strong>The live orchestrator for AI-native teams.</strong><br/>
+  Describe a goal. One orchestrator breaks it into tickets, spawns a real coding agent for each —<br/>
+  Claude, Codex, Grok, and more — and runs them in parallel, each in its own worktree.<br/>
+  You watch it happen on one board, see what it costs, and decide what merges.
 </p>
 
 <p align="center">
-  <strong>The live orchestrator for AI-native teams.</strong><br/>
-  Describe a goal. Marblo’s orchestrator breaks it into tickets, spawns a real<br/>
-  AI coding agent for each — Claude, Codex, and more — then tracks, verifies,<br/>
-  and safely merges everything they ship. All from one board.
+  <a href="https://github.com/melocream/marblo-releases/releases/latest"><img src="https://img.shields.io/badge/⬇%20download-macOS%20%7C%20Windows-0ea5e9?style=flat-square" alt="Download for macOS or Windows" /></a>
+  <a href="#install-in-30-seconds--no-app-required"><img src="https://img.shields.io/badge/skills%20%26%20agents-install%20in%2030s-6366f1?style=flat-square" alt="Install a skill or agent in 30 seconds" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/first--party%20assets-MIT-22c55e?style=flat-square" alt="First-party assets are MIT licensed" /></a>
+  <a href="https://marblo.app"><img src="https://img.shields.io/badge/web-marblo.app-8b5cf6?style=flat-square" alt="marblo.app" /></a>
 </p>
 
 <h3 align="center">
   <a href="https://github.com/melocream/marblo-releases/releases/latest"><ins>⬇️ Download Marblo</ins></a>
   &nbsp;·&nbsp;
-  <a href="https://marblo.app"><ins>🌐 marblo.app</ins></a>
+  <a href="#install-in-30-seconds--no-app-required"><ins>⚡ 30-second install</ins></a>
+  &nbsp;·&nbsp;
+  <a href="#full-catalog--every-item-in-the-repo"><ins>🧩 Catalog</ins></a>
   &nbsp;·&nbsp;
   <a href="https://marblo.app/en/guide"><ins>📖 Guide</ins></a>
 </h3>
 
 <p align="center">
-  <img src="assets/hero.png" alt="Marblo — one developer, an entire team's output" width="960" />
+  <img src="assets/tabs/board.svg" alt="The Marblo board — tickets across TODO, CLAIMED, IN PROGRESS, REVIEW and DONE, each card showing the agent and the concrete model working it" width="960" />
 </p>
+
+<p align="center">
+  <sub>Every card names the agent <em>and</em> the model actually running it — <code>claude-opus-5</code>, <code>gpt-5.6-sol</code>, <code>grok-4.5</code>, <code>glm-5.2</code>, <code>MiniMax-M3</code>.</sub>
+</p>
+
+---
+
+## Install in 30 seconds — no app required
+
+**Everything in this repository is a plain file that works in the CLI you already run.** Start here — installing the app is an upgrade on top, never the gate.
+
+**🚩 [Fleet Operations](knowledge/fleet-operations/) — the flagship knowledge pack.** What running a heterogeneous fleet of agent CLIs in production actually teaches: which vendor subscriptions open an Anthropic-compatible endpoint (and why "ships its own CLI" is the wrong test), per-harness resume contracts that kill the process on the wrong flag, why PTY output is the wrong agent-liveness signal in _both_ directions, where cost attribution silently breaks, and worktree-per-ticket hygiene. Measured, not inferred.
+
+```bash
+# Keep it where your agents can find it
+mkdir -p ~/.claude/skills/fleet-operations && curl -sL \
+  https://raw.githubusercontent.com/marblo-app/marblo/main/knowledge/fleet-operations/KNOWLEDGE.md \
+  -o ~/.claude/skills/fleet-operations/SKILL.md
+```
+
+**[Just read it →](knowledge/fleet-operations/KNOWLEDGE.md)** &nbsp;·&nbsp; **[More skills, agents, and MCP servers ↓](#-ecosystem--these-assets-run-in-the-cli-you-already-have)** &nbsp;·&nbsp; **[Full catalog ↓](#full-catalog--every-item-in-the-repo)**
+
+**Want the fleet, not just the files?** [Download Marblo](https://github.com/melocream/marblo-releases/releases/latest) for macOS or Windows, then connect the CLIs you already pay for. Marblo spawns and tracks them; AI usage stays billed to those accounts.
 
 ---
 
@@ -43,183 +68,88 @@ One orchestrator decomposes your mission, spawns the right agent per task, heals
 
 > **Mission → auto ticket breakdown → per-model spawn → watchdog self-heal → merge judgment → your confirmation.**
 
-<table>
-<tr>
-<td width="50%" valign="top" align="center">
+**1 · Describe the goal.** Marblo splits it into tickets, picks a model per ticket, and puts them on the board.
 
-**1 · Decompose &amp; assign**<br/>
-Natural-language goal → tickets on the board, each with the model that fits.
+<p align="center">
+  <img src="assets/tabs/mission-create.svg" alt="A mission described in plain language, split into eight tickets and assigned across claude and codex" width="960" />
+</p>
 
-<img src="assets/live-decompose.png" alt="Mission decomposed into tickets and agents assigned" width="100%" />
-
-</td>
-<td width="50%" valign="top" align="center">
-
-**2 · Complete &amp; confirm**<br/>
-Agents finish in parallel. You review, then merge — nothing lands without you.
-
-<img src="assets/live-complete.png" alt="Work complete, ready for your confirmation" width="100%" />
-
-</td>
-</tr>
-</table>
+**2 · Watch it run, then confirm.** Agents work in parallel in separate worktrees. You review the diff and merge — nothing lands without you.
 
 ---
 
-## Features
-
-<table>
-<tr>
-<td width="48%" valign="middle">
+## The tour — one tab at a time
 
 ### 📋 Board
 
-Kanban for AI agents. Create a ticket — the right agent claims it, works in its own worktree, and the card moves with it.
+Kanban for AI agents. Create a ticket and the right agent claims it, works in its own worktree, and moves the card as it goes. Every card carries the concrete model, so "which one wrote this?" is never a guess.
 
-You see the concrete model on every card (`claude-opus`, `gpt-codex`, `antigravity`).
-
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-<td width="52%">
-  <img src="assets/board.png" alt="Marblo task board with multi-agent kanban" width="100%" />
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<p align="center">
+  <img src="assets/tabs/board.svg" alt="Board tab — kanban columns of tickets with the claiming agent and model on each card" width="960" />
+</p>
 
 ### 🤖 Agents
 
-A live terminal per agent. Watch stdout stream, send follow-ups without killing the session, reuse or hand off mid-run.
+A live terminal per agent. Watch stdout stream, send a follow-up without killing the session, reuse or hand off mid-run. The watchdog respawns and resumes an agent that stalls, and an agent that needs a decision says so instead of going quiet.
 
-The orchestrator keeps the fleet healthy — watchdog self-heal when something stalls.
-
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-<td width="52%">
-  <img src="assets/live-decompose.png" alt="Orchestrator assigning agents to tickets" width="100%" />
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<p align="center">
+  <img src="assets/tabs/agents.svg" alt="Agents tab — six live agent terminals side by side, one waiting on the orchestrator and one respawned by the watchdog" width="960" />
+</p>
 
 ### 💻 Code
 
-Browse and diff each agent’s work across worktrees. Review before merge — no mystery patches on `main`.
+Browse and diff each agent’s work across worktrees before it merges. Click a line to send a review comment straight to the orchestrator — no mystery patches on `main`.
 
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-<td width="52%">
-  <img src="assets/board.png" alt="Board and activity view for reviewing agent work" width="100%" />
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<p align="center">
+  <img src="assets/tabs/code.svg" alt="Code tab — a worktree diff against base main with an inline review comment routed to the orchestrator" width="960" />
+</p>
 
 ### 🌿 Worktrees
 
-Every ticket gets an isolated branch. Parallel agents never collide on the same files.
+Every ticket gets an isolated branch and checkout, so parallel agents never collide on the same files. Merge state, conflicts, ahead/behind and cleanup all live in one list.
 
-Fan out, compare, merge the winner.
+<p align="center">
+  <img src="assets/tabs/worktrees.svg" alt="Worktrees tab — seven ticket worktrees with merge state, conflicts, and cleanup actions" width="960" />
+</p>
 
-[Guide →](https://marblo.app/en/guide)
+<details>
+<summary><strong>More tabs — Lanes, Usage, History</strong></summary>
 
-</td>
-<td width="52%">
-  <img src="assets/orchestration.png" alt="Parallel agents routed from one orchestrator" width="100%" />
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
-
-### 🎯 Missions
-
-Describe the goal in natural language. Marblo turns it into a ticket graph, then spawns the model that fits each task — diversifying across your fleet instead of locking to one vendor — and runs it all.
-
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-<td width="52%">
-  <img src="assets/live-complete.png" alt="Mission complete — tickets done, ready to connect accounts" width="100%" />
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<br/>
 
 ### ⚡ Lanes
 
-Need parallel _right now_? Fire off several agents at once from the Lanes tab — you pick the model for each. Runs alongside the orchestrator, not through it.
+Need parallel work _right now_, without a mission? Fire off several agents at once and pick the model for each. Runs alongside the orchestrator, not through it.
 
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-<td width="52%" valign="middle">
-
-### 🔀 Bring your own model
-
-Drop in a vendor key and an agent boots on that model — GLM, Kimi, MiniMax, and local models via Ollama — right next to Claude, Codex, and Grok.
-
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<p align="center">
+  <img src="assets/tabs/lanes.svg" alt="Lanes tab — six independent quick tasks running in parallel, each with a user-picked model" width="960" />
+</p>
 
 ### 📊 Usage
 
-Cost and model usage per agent, project, and day. No more “why was this month’s API bill a surprise?”
+Cost and token usage by model, agent, and day. It also shows which model each agent _actually_ ran and what the evidence for that was — an observed billing session or the spawn argv — and leaves the field empty when there is none.
 
-[Pricing →](https://marblo.app/en/pricing)
-
-</td>
-<td width="52%" valign="middle">
-
-### 🧩 Harness
-
-Per-agent skills and MCP tools. Bring your own from a GitHub repo — connect once, every agent can use it.
-
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<p align="center">
+  <img src="assets/tabs/usage.svg" alt="Usage tab — spend broken down by vendor and sub-model, with the agent-to-model mapping and its evidence" width="960" />
+</p>
 
 ### 🕘 History
 
-An append-only ledger of progress, cost, and every merge / deploy decision. Full audit trail for the fleet.
+An append-only ledger of what each ticket did: problem, approach, changes, verification, cost, and the merge decision. It survives the ticket being deleted.
 
-[Guide →](https://marblo.app/en/guide)
+<p align="center">
+  <img src="assets/tabs/history.svg" alt="History tab — an append-only ledger row expanded to show problem, approach, changes, verification, cost, and the merge decision" width="960" />
+</p>
 
-</td>
-<td width="52%" valign="middle">
-
-### 🚀 Control plane, not just chat
-
-Marblo is where you **manage** agents — board, isolation, cost, and safe merge — not where you wait on a single conversation.
-
-[What is Marblo →](https://marblo.app/en/blog/what-is-marblo)
-
-</td>
-</tr>
-</table>
+</details>
 
 **Also in the box**
 
 - **Multi-model fleet** — Claude Code, Codex, Grok, GLM, Kimi, MiniMax, and local models (Ollama) side by side — bring your own key (BYOM)
+- **Missions** — a natural-language goal becomes a ticket graph, spawned across your fleet instead of locked to one vendor
+- **Harness** — per-agent skills and MCP tools, including your own from a GitHub repo: connect once, every agent can use it
 - **Safe merge** — review and verification before anything hits your main branch
 - **Desktop-first** — local execution, your keys, your repos
-- **Activity stream** — live structured log of who claimed what and when
 
 ---
 
@@ -243,16 +173,9 @@ Marblo is where you **manage** agents — board, isolation, cost, and safe merge
 
 Every first-party asset here is a plain, standards-native file: a `SKILL.md` that drops into `~/.claude/skills/`, an agent definition in the format Claude Code and Codex already read, a knowledge pack that is just markdown. Copy one in and it works in your next session. Installing Marblo is a one-click upgrade on top — never the gate.
 
-### 30-second install, no app required
+### More one-liners
 
-**🚩 [Fleet Operations](knowledge/fleet-operations/) — the flagship.** What running a heterogeneous fleet of agent CLIs in production actually teaches: which vendor subscriptions open an Anthropic-compatible endpoint (and why "ships its own CLI" is the wrong test), per-harness resume contracts that kill the process on the wrong flag, why PTY output is the wrong agent-liveness signal in _both_ directions, where cost attribution silently breaks, and worktree-per-ticket hygiene. Measured, not inferred. **[Just read it →](knowledge/fleet-operations/KNOWLEDGE.md)**
-
-```bash
-# Keep it where your agents can find it
-mkdir -p ~/.claude/skills/fleet-operations && curl -sL \
-  https://raw.githubusercontent.com/marblo-app/marblo/main/knowledge/fleet-operations/KNOWLEDGE.md \
-  -o ~/.claude/skills/fleet-operations/SKILL.md
-```
+The flagship [Fleet Operations](knowledge/fleet-operations/) pack is [at the top of this README](#install-in-30-seconds--no-app-required). The rest install the same way:
 
 **[Code Review skill](skills/code-review/)** — review a diff for correctness, security, and simplicity; findings ranked by severity, each with a concrete failure scenario.
 
@@ -282,25 +205,24 @@ Referenced items covering work that Korean-language and Korean-market agents act
 
 Two Korean projects we found and did **not** list, because the reason matters more than the count: one 221-star curated list ships no LICENSE file at all, and one 261-star plugin marketplace is licensed non-commercial, no-derivatives. Neither belongs in a store people install from at work.
 
-Fourteen items here are **not** standalone, and we would rather say so than pretend: [`marblo-control`](mcp-servers/marblo-control/) ships inside the app, and [`review-and-merge`](workflows/review-and-merge/) plus the twelve `tf-*` workflows are Marblo's own orchestration flow written down — every step in them is a call into the Marblo MCP server, so they load in Claude Code and then have nothing to call. The [`github`](mcp-servers/github/) MCP server is a manifest-only reference — install it from upstream's own instructions at the pinned tag.
+Some items here are **not** standalone, and we would rather say so than pretend: [`marblo-control`](mcp-servers/marblo-control/) ships inside the app, and [`review-and-merge`](workflows/review-and-merge/) plus the `tf-*` workflows are Marblo's own orchestration flow written down — they load in your CLI, but every step calls into the Marblo MCP server, so outside Marblo they have nothing to call. The [`github`](mcp-servers/github/) MCP server is a manifest-only reference — install it from upstream's own instructions at the pinned tag.
 
 ### Full catalog — every item in the repo
 
 Most of this is **not ours and not copied here.** Each referenced item is a `marblo.yaml` pointing at an upstream repository at a pinned tag or commit SHA, so the license, the ownership, and the maintenance all stay with the author. Every one was picked on a single test: **it works in the CLI you already run, with or without Marblo.** Each item's README carries an install snippet that was executed before it was written down.
 
 The table below is **generated from the manifests** by [`scripts/gen-catalog.mjs`](scripts/gen-catalog.mjs) — every id, description, tier, license, and pin is the value committed in that item's `marblo.yaml`. Adding an item means adding a manifest; nobody edits this table, and CI fails any PR where the two have drifted apart.
-
 <!-- prettier-ignore-start -->
 <!-- CATALOG:START -->
 <!-- Generated by scripts/gen-catalog.mjs from every <category>/<id>/marblo.yaml.
      Do NOT edit between these markers — run `npm run gen:catalog`.
      CI regenerates this block and fails the PR if it differs from what is committed. -->
 
-**106 items** · 56 MCP servers · 21 skills · 7 agents · 19 workflows · 3 knowledge packs
+**150 items** · 56 MCP servers · 26 skills · 42 agents · 23 workflows · 3 knowledge packs
 
-**Tier** — 🟢 `official` 18 maintained by Marblo · 🔵 `verified` 2 external, reviewed and source-pinned · ⚪ `community` 86 external, listed and pinned but not reviewed.
+**Tier** — 🟢 `official` 30 maintained by Marblo · 🔵 `verified` 2 external, reviewed and source-pinned · ⚪ `community` 118 external, listed and pinned but not reviewed.
 
-**Install** — ⚡ **one-click in the app** for 2 items whose install contract is written and digest-verified. Everything else is **— reference**: listed, linked, and pinned, installed by following the item's own README. `community` items are reference-only by policy and stay that way until the app ships a permission gate ([why](SECURITY.md#why-community-items-cannot-be-installed-with-one-click)).
+**Install** — ⚡ **one-click in the app** for 14 items whose install contract is written and digest-verified. Everything else is **— reference**: listed, linked, and pinned, installed by following the item's own README. `community` items are reference-only by policy and stay that way until the app ships a permission gate ([why](SECURITY.md#why-community-items-cannot-be-installed-with-one-click)).
 
 **🇰🇷** marks the 22 items covering Korean-language and Korean-market work.
 
@@ -365,7 +287,7 @@ The table below is **generated from the manifests** by [`scripts/gen-catalog.mjs
 | [todoist-mcp](mcp-servers/todoist-mcp/) | Manages Todoist tasks, projects, sections, and labels from the agent, published by Doist themselves rather than a third party. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [Doist/todoist-mcp](https://github.com/Doist/todoist-mcp/tree/v12.1.2) `v12.1.2` |
 | [zapier-mcp](mcp-servers/zapier-mcp/) | Reaches thousands of SaaS apps through Zapier's hosted MCP endpoint over OAuth. The server is remote; the pinned repo is Zapier's official client-side plugin. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [zapier/zapier-mcp](https://github.com/zapier/zapier-mcp/tree/e672a7bd0d4ef125f4b81fde1c4369a95348ba46) `e672a7b` |
 
-#### Skills (21)
+#### Skills (26)
 
 | Item | What it does | Tier | Install | License | Upstream pin |
 | --- | --- | --- | --- | --- | --- |
@@ -385,25 +307,65 @@ The table below is **generated from the manifests** by [`scripts/gen-catalog.mjs
 | [korean-legal-doc-drafter](skills/korean-legal-doc-drafter/) 🇰🇷 | Drafts Korean legal documents through guided Q&A — 내용증명, contracts, employment agreements, payment orders, settlements, complaints, leases, powers of attorney — from 150 per-document reference guides. | ⚪ `community` | — reference | Apache-2.0 | [openmagi/korean-legal-doc-drafter](https://github.com/openmagi/korean-legal-doc-drafter/tree/09addc57285ef53e3f5b78d5a307ec56c64a3708/skills/korean-legal-doc-drafter) `09addc5` |
 | [korean-skills](skills/korean-skills/) 🇰🇷 | Three prompt-only skills for Korean prose — rewrite machine-sounding AI text into natural Korean, proofread against 국립국어원 orthography rules, and apply a consistent Korean style guide. | ⚪ `community` | — reference | MIT | [DaleSeo/korean-skills](https://github.com/DaleSeo/korean-skills/tree/v1.0.0/skills) `v1.0.0` |
 | [superpowers-brainstorming](skills/superpowers-brainstorming/) | A hard gate before any implementation — one question at a time, two or three approaches with trade-offs, then a written design doc the user approves. No code until the design lands. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/brainstorming) `v6.2.0` |
+| [superpowers-dispatching-parallel-agents](skills/superpowers-dispatching-parallel-agents/) | Decision rule and mechanics for fanning work out to concurrent subagents — when problems are independent enough to parallelise, how to scope each agent, and when to stay sequential. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/dispatching-parallel-agents) `v6.2.0` |
+| [superpowers-receiving-code-review](skills/superpowers-receiving-code-review/) | A protocol for acting on review feedback — read fully, restate the requirement, verify it against the codebase, push back with reasoning when it is wrong, and implement one item at a time. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/receiving-code-review) `v6.2.0` |
+| [superpowers-requesting-code-review](skills/superpowers-requesting-code-review/) | Dispatches a reviewer subagent with a purpose-built prompt and an explicit commit range instead of inherited session history, and sorts the returned findings into critical, important, and minor. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/requesting-code-review) `v6.2.0` |
+| [superpowers-subagent-driven-development](skills/superpowers-subagent-driven-development/) | Executes an implementation plan by dispatching a fresh subagent per task, reviewing each result for spec compliance and code quality, and closing with a whole-branch review. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/subagent-driven-development) `v6.2.0` |
 | [superpowers-systematic-debugging](skills/superpowers-systematic-debugging/) | One rule, enforced — no fix before root cause. Root-cause tracing, condition-based waiting instead of sleeps, and a test-polluter finder for flaky suites. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/systematic-debugging) `v6.2.0` |
 | [superpowers-test-driven-development](skills/superpowers-test-driven-development/) | RED-GREEN-REFACTOR held to the letter — if you did not watch the test fail, you do not know it tests anything. Includes a guide to writing tests worth keeping. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/test-driven-development) `v6.2.0` |
 | [superpowers-using-git-worktrees](skills/superpowers-using-git-worktrees/) | Ensures work happens in an isolated workspace — detect existing isolation first (with a submodule guard), prefer the harness's native worktree tooling, fall back to plain git worktrees only when there is none. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/using-git-worktrees) `v6.2.0` |
 | [superpowers-verification-before-completion](skills/superpowers-verification-before-completion/) | No completion claim without fresh evidence — run the command, read the output, then say it passes. A single-file guard against agents reporting success they never checked. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/verification-before-completion) `v6.2.0` |
 | [superpowers-writing-plans](skills/superpowers-writing-plans/) | Turns an approved spec into a bite-sized implementation plan written for an engineer with zero context — file-by-file decomposition, per-task tests, and frequent commits. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/writing-plans) `v6.2.0` |
+| [superpowers-writing-skills](skills/superpowers-writing-skills/) | Applies test-driven development to skill authoring — run the pressure scenario first to see the agent fail, write the skill against the exact rationalisations observed, then verify compliance and close loopholes. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/writing-skills) `v6.2.0` |
 
-#### Agents (7)
+#### Agents (42)
 
 | Item | What it does | Tier | Install | License | Upstream pin |
 | --- | --- | --- | --- | --- | --- |
+| [backend-engineer](agents/backend-engineer/) | Designs and implements server-side work — data model, API boundary, transactions, and failure behavior — handling the failure modes before the happy path. Writes code and the test that proves it. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [business-analyst](agents/business-analyst/) | Defines a metric so it cannot be gamed, or finds where a funnel leaks — traces each number back to the event that produces it and reports what the instrumentation can and cannot support. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [ceo-advisor](agents/ceo-advisor/) | Pressure-tests a strategic decision — where to concentrate, what to kill, and what the plan is betting on. Argues for focus and names the option nobody in the room is arguing for. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [cfo-advisor](agents/cfo-advisor/) | Checks whether a plan survives contact with cash — unit economics, runway, pricing, and the assumption the model depends on. Builds the arithmetic explicitly and stress-tests it. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [data-scientist](agents/data-scientist/) | Answers a question with data honestly — turns a vague ask into a measurable estimand, checks whether the data can support it, and reports the effect with its uncertainty and confounders. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [frontend-engineer](agents/frontend-engineer/) | Builds user-facing code — component structure, state ownership, data fetching, accessibility, and perceived performance — rendering every state, not only the one with data. Writes code and tests. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [marketing-strategist](agents/marketing-strategist/) | Sharpens positioning and picks a channel — names who it is for, what it replaces, and the one message that survives repetition. Rejects feature-list marketing. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [product-designer](agents/product-designer/) | Designs and critiques user-facing flows — reads the real UI code, judges it against state coverage, hierarchy, and accessibility, and returns an implementable design spec. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [product-manager](agents/product-manager/) | Decides what gets built and what does not — pressure-tests a request against the metric it moves, its true cost, and its cheapest test, then returns a build/defer/cut decision with reasoning. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [product-planner](agents/product-planner/) | Turns a product decision into a spec engineers can build without asking questions — enumerates flows, rules, edge cases, state transitions, and acceptance criteria until every branch has an answer. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [qa-engineer](agents/qa-engineer/) | Finds the defects a feature's own author would not look for — designs adversarial cases, reproduces each one, and reports severity with minimum repro steps. Verifies before reporting; does not fix. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
 | [reviewer](agents/reviewer/) | A dedicated review agent — claims review tickets, runs the code-review skill on each diff, and reports blocking findings before merge. | 🟢 `official` | — reference | MIT | first-party — lives in this repo |
+| [security-engineer](agents/security-engineer/) | Threat-models a design or audits a change for exploitable weakness — maps trust boundaries, then reports only findings with a concrete attack path. Refuses to pad a report with theoretical risk. | 🟢 `official` | ⚡ one-click (`files`) | MIT | first-party — lives in this repo |
+| [voltagent-accessibility-tester](agents/voltagent-accessibility-tester/) | WCAG 2.1/3.0 audit subagent — compliance checks across visual, auditory, motor, and cognitive dimensions, assistive-technology support review, and prioritised remediation guidance. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/04-quality-security/accessibility-tester.md) `947b44c` |
+| [voltagent-context-manager](agents/voltagent-context-manager/) | Shared-state subagent for multi-agent runs — storing and retrieving project context, keeping several agents reading the same facts, and governing what is written back. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/09-meta-orchestration/context-manager.md) `947b44c` |
 | [voltagent-electron-pro](agents/voltagent-electron-pro/) | Desktop-app subagent for Electron — main/renderer process boundaries, context isolation and IPC hardening, native OS integration, memory budgets, and signed cross-platform installers. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/01-core-development/electron-pro.md) `947b44c` |
+| [voltagent-mcp-developer](agents/voltagent-mcp-developer/) | Model Context Protocol subagent — server and client implementation against the JSON-RPC 2.0 contract, SDK usage, transport and auth choices, and debugging a server that a harness refuses to load. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/06-developer-experience/mcp-developer.md) `947b44c` |
 | [voltagent-multi-agent-coordinator](agents/voltagent-multi-agent-coordinator/) | Designs coordination for concurrent agents — inter-agent messaging, task dependency graphs, parallel execution control, deadlock and partial-failure handling. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/09-meta-orchestration/multi-agent-coordinator.md) `947b44c` |
+| [voltagent-nextjs-developer](agents/voltagent-nextjs-developer/) | Next.js 14+ App Router subagent — server components and server actions, rendering-strategy choices, Core Web Vitals work, and SEO-sensitive production deploys. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/02-language-specialists/nextjs-developer.md) `947b44c` |
+| [voltagent-postgres-pro](agents/voltagent-postgres-pro/) | PostgreSQL operations subagent — query and index tuning, configuration work, replication and high-availability design, backup strategy, and diagnosing databases already under load. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/05-data-ai/postgres-pro.md) `947b44c` |
+| [voltagent-python-pro](agents/voltagent-python-pro/) | Python 3.11+ subagent — typed, idiomatic code for web APIs, async workloads, and system utilities, with attention to project conventions, packaging, and test structure. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/02-language-specialists/python-pro.md) `947b44c` |
+| [voltagent-qa-expert](agents/voltagent-qa-expert/) | Quality-strategy subagent — test planning across the delivery cycle, coverage-gap and risk analysis, defect-pattern review, and quality metrics that survive contact with a real backlog. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/04-quality-security/qa-expert.md) `947b44c` |
+| [voltagent-react-specialist](agents/voltagent-react-specialist/) | React 18+ specialist subagent — render-performance work, advanced hook and concurrent patterns, state-management architecture, and untangling component trees that outgrew their original design. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/02-language-specialists/react-specialist.md) `947b44c` |
+| [voltagent-rust-engineer](agents/voltagent-rust-engineer/) | Rust 2021 subagent — ownership and lifetime design, trait and zero-cost abstraction work, auditing `unsafe`, and async or embedded performance tuning inside an existing Cargo workspace. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/02-language-specialists/rust-engineer.md) `947b44c` |
 | [voltagent-security-auditor](agents/voltagent-security-auditor/) | Read-only audit subagent — systematic vulnerability analysis, security-control and configuration review, compliance gap identification, and evidence-backed findings with remediation steps. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/04-quality-security/security-auditor.md) `947b44c` |
+| [voltagent-sre-engineer](agents/voltagent-sre-engineer/) | Site-reliability subagent — SLI/SLO definition, error-budget policy, toil reduction and automation, capacity planning, chaos experiments, and sustainable on-call design. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/03-infrastructure/sre-engineer.md) `947b44c` |
+| [voltagent-typescript-pro](agents/voltagent-typescript-pro/) | TypeScript 5+ subagent for the type system itself — complex generics, conditional and mapped types, type-level programming, and end-to-end type safety across a full-stack boundary. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents/tree/947b44ca0c58d606b084e9cb1a2389335b49278b/categories/02-language-specialists/typescript-pro.md) `947b44c` |
+| [wshobson-ai-engineer](agents/wshobson-ai-engineer/) | LLM application subagent — RAG pipelines, vector search, agent orchestration frameworks, multimodal integration, and the serving stack (vLLM, Ollama, BentoML) behind a production AI feature. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/llm-application-dev/agents/ai-engineer.md) `c4b82b0` |
+| [wshobson-backend-architect](agents/wshobson-backend-architect/) | Service-boundary and API design subagent — REST/GraphQL/gRPC contracts, microservice decomposition, event-driven and resilience patterns, and observability designed in before the first endpoint ships. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/backend-development/agents/backend-architect.md) `c4b82b0` |
+| [wshobson-cloud-architect](agents/wshobson-cloud-architect/) | Multi-cloud design subagent covering AWS/Azure/GCP/OCI — landing zones, IaC strategy, FinOps cost modelling, disaster recovery, and the serverless-vs-containers call. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/cloud-infrastructure/agents/cloud-architect.md) `c4b82b0` |
 | [wshobson-database-architect](agents/wshobson-database-architect/) | Data-layer design subagent — engine selection across SQL/NoSQL/time-series, schema and normalization decisions, migration planning, and performance-first modeling for greenfield or re-architecture. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/database-design/agents/database-architect.md) `c4b82b0` |
+| [wshobson-debugger](agents/wshobson-debugger/) | Compact root-cause subagent for errors, test failures, and unexpected behaviour — capture the trace, isolate the failure, form and test a hypothesis, apply the minimal fix, verify. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/debugging-toolkit/agents/debugger.md) `c4b82b0` |
 | [wshobson-devops-troubleshooter](agents/wshobson-devops-troubleshooter/) | Incident-response subagent for production debugging — log analysis, distributed tracing, Kubernetes and container failures, and root-cause write-ups. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/cicd-automation/agents/devops-troubleshooter.md) `c4b82b0` |
+| [wshobson-error-detective](agents/wshobson-error-detective/) | Log-forensics subagent — regex extraction over log streams, cross-language stack-trace reading, error correlation across distributed services, and anomaly hunting in Elasticsearch or Splunk queries. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/distributed-debugging/agents/error-detective.md) `c4b82b0` |
+| [wshobson-incident-responder](agents/wshobson-incident-responder/) | SRE incident-command subagent — first-five-minutes severity triage, blast-radius assessment, comms cadence, mitigation before root cause, and blameless post-mortem with error-budget accounting. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/incident-response/agents/incident-responder.md) `c4b82b0` |
+| [wshobson-kubernetes-architect](agents/wshobson-kubernetes-architect/) | Cloud-native platform subagent — EKS/AKS/GKE/OKE cluster design, GitOps with ArgoCD or Flux, service mesh, progressive delivery, multi-tenancy, and cluster-level cost and security posture. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/kubernetes-operations/agents/kubernetes-architect.md) `c4b82b0` |
 | [wshobson-observability-engineer](agents/wshobson-observability-engineer/) | Builds the monitoring you wish you had before the outage — metrics, structured logging, distributed tracing, and SLI/SLO definitions with alerting that is actionable. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/application-performance/agents/observability-engineer.md) `c4b82b0` |
+| [wshobson-payment-integration](agents/wshobson-payment-integration/) | Payments subagent for Stripe, PayPal, and Square — checkout and subscription flows, webhook handling, idempotency, PCI-conscious data handling, and the refund/dispute/failure edge cases. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/payment-processing/agents/payment-integration.md) `c4b82b0` |
+| [wshobson-prompt-engineer](agents/wshobson-prompt-engineer/) | Prompt-design subagent — chain-of-thought and few-shot construction, constitutional patterns, system-prompt authoring, and evaluation of prompt changes against production behaviour. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/llm-application-dev/agents/prompt-engineer.md) `c4b82b0` |
+| [wshobson-tdd-orchestrator](agents/wshobson-tdd-orchestrator/) | Enforcement subagent for red-green-refactor across a team — test-first compliance checking, cycle-time measurement, coverage governance, and coordination of multiple agents working the same TDD flow. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/tdd-workflows/agents/tdd-orchestrator.md) `c4b82b0` |
+| [wshobson-terraform-specialist](agents/wshobson-terraform-specialist/) | Terraform/OpenTofu subagent for module composition, remote state and locking, policy as code, multi-cloud provider work, and Terraform-to-OpenTofu migration. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/cicd-automation/agents/terraform-specialist.md) `c4b82b0` |
+| [wshobson-threat-modeling-expert](agents/wshobson-threat-modeling-expert/) | Design-time security subagent — STRIDE and PASTA analysis, attack-tree construction, data-flow diagram review, security-requirement extraction, and risk-ranked mitigation mapping. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/security-scanning/agents/threat-modeling-expert.md) `c4b82b0` |
 
-#### Workflows (19)
+#### Workflows (23)
 
 | Item | What it does | Tier | Install | License | Upstream pin |
 | --- | --- | --- | --- | --- | --- |
@@ -420,10 +382,14 @@ The table below is **generated from the manifests** by [`scripts/gen-catalog.mjs
 | [tf-start](workflows/tf-start/) | The step after /tf-plan: pre-flight the PRD and the MCP connection, bulk-create every ticket in a single call with role, priority, depends_on and scope, spawn the agents, and monitor the board while work lands. | 🟢 `official` | — reference | MIT | first-party — lives in this repo |
 | [tf-sync](workflows/tf-sync/) | Reconciles ticket state with what is actually on disk after an agent coded without updating the board: compares each ticket's file scope against the working tree, lists every mismatch with a recommended transition, and applies only the ones you pick. | 🟢 `official` | — reference | MIT | first-party — lives in this repo |
 | [tf-work](workflows/tf-work/) | The agent-side execution loop for one ticket: pick from the workable list, claim it, load the role's skill file and the ticket's file scope, code, and log every meaningful step as an activity before submitting for review. | 🟢 `official` | — reference | MIT | first-party — lives in this repo |
+| [wshobson-accessibility-audit](workflows/wshobson-accessibility-audit/) | A WCAG audit pipeline — axe-core automation driven through a headless browser, manual keyboard and screen-reader verification, and remediation guidance ranked by user impact. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/accessibility-compliance) `c4b82b0` |
+| [wshobson-agent-teams](workflows/wshobson-agent-teams/) | Seven slash commands for spawning and running a multi-agent team — preset compositions, parallel multi-dimension review, hypothesis-split debugging, and file-ownership-partitioned feature work. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/agent-teams) `c4b82b0` |
 | [wshobson-comprehensive-review](workflows/wshobson-comprehensive-review/) | Multi-dimensional review orchestration — quality, architecture, and security passes run by separate specialist subagents, each writing its findings to disk before the next begins. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/comprehensive-review) `c4b82b0` |
+| [wshobson-context-management](workflows/wshobson-context-management/) | Two commands that serialise a working session — capture architecture decisions, state, and open threads to disk, then rehydrate them in a later session or a different agent. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/context-management) `c4b82b0` |
 | [wshobson-full-stack-feature](workflows/wshobson-full-stack-feature/) | End-to-end feature orchestration across database, backend, frontend, and infrastructure, with testing, security, and performance agents fanned out in parallel before a deployment pass. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/full-stack-orchestration) `c4b82b0` |
 | [wshobson-git-workflow](workflows/wshobson-git-workflow/) | A ten-step pipeline from review to opened PR — quality gate, breaking-change scan, tests, conventional commit, branch push, PR description. Every step persists to disk and the push and PR steps stop for confirmation. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/git-pr-workflows) `c4b82b0` |
 | [wshobson-incident-response](workflows/wshobson-incident-response/) | Multi-agent incident orchestration by severity — triage, parallel investigation, mitigation, then a postmortem, with checkpoints between phases. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/incident-response) `c4b82b0` |
+| [wshobson-legacy-modernization](workflows/wshobson-legacy-modernization/) | A checkpointed strangler-fig migration pipeline — plan the replacement, migrate by feature or by layer, upgrade dependencies with breaking-change paths, and stop for approval between phases. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/framework-migration) `c4b82b0` |
 | [wshobson-security-hardening](workflows/wshobson-security-hardening/) | Defense-in-depth hardening pass across application layers, with selectable depth and OWASP/SOC2/GDPR/PCI-DSS compliance framings, plus STRIDE and attack-tree skills. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/security-scanning) `c4b82b0` |
 | [wshobson-tdd-cycle](workflows/wshobson-tdd-cycle/) | A phase-gated red-green-refactor orchestration — each step writes its output to disk, checkpoints wait for your approval, and any failure halts the run. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [wshobson/agents](https://github.com/wshobson/agents/tree/c4b82b0ad771190355eb8e204b1329732a18449a/plugins/tdd-workflows) `c4b82b0` |
 

@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: voltagent-nextjs-developer
+name: Next.js Developer (VoltAgent)
+type: agent
+version: 0.1.0
+status: active
+description: Next.js 14+ App Router subagent — server components and server actions, rendering-strategy choices, Core Web Vitals work, and SEO-sensitive production deploys. Referenced by manifest; not vendored.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-claude-code-subagents
+  ref: 947b44ca0c58d606b084e9cb1a2389335b49278b
+  path: categories/02-language-specialists/nextjs-developer.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - nextjs
+  - app-router
+  - ssr
+  - web-vitals
+  - external
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-claude-code-subagents

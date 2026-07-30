@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: wshobson-agent-teams
+name: Agent Teams (wshobson)
+type: workflow
+version: 0.1.0
+status: active
+description: Seven slash commands for spawning and running a multi-agent team — preset compositions, parallel multi-dimension review, hypothesis-split debugging, and file-ownership-partitioned feature work. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/agent-teams
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - agent-teams
+  - orchestration
+  - parallel-review
+  - slash-command
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

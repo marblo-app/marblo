@@ -1,0 +1,39 @@
+schema_version: 1
+
+id: superpowers-receiving-code-review
+name: Receiving Code Review (Superpowers)
+type: skill
+version: 6.2.0
+status: active
+description: A protocol for acting on review feedback — read fully, restate the requirement, verify it against the codebase, push back with reasoning when it is wrong, and implement one item at a time. Referenced by manifest; not vendored.
+
+publisher:
+  name: Jesse Vincent (obra)
+  tier: community
+  url: https://github.com/obra
+
+source:
+  repository: https://github.com/obra/superpowers
+  ref: v6.2.0
+  path: skills/receiving-code-review
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - repository:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - code-review
+  - verification
+  - feedback
+  - rigor
+  - external
+
+license: MIT
+homepage: https://github.com/obra/superpowers/tree/main/skills/receiving-code-review

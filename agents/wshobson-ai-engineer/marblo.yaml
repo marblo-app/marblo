@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: wshobson-ai-engineer
+name: AI Engineer (wshobson)
+type: agent
+version: 0.1.0
+status: active
+description: LLM application subagent — RAG pipelines, vector search, agent orchestration frameworks, multimodal integration, and the serving stack (vLLM, Ollama, BentoML) behind a production AI feature. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/llm-application-dev/agents/ai-engineer.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - llm
+  - rag
+  - agents
+  - vector-search
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents
