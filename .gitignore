@@ -1,0 +1,5 @@
+# Installed dependencies — the lockfiles are committed, the trees are not.
+node_modules/
+
+# OS / editor noise
+.DS_Store

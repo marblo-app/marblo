@@ -18,11 +18,14 @@ Thanks for helping build the Marblo ecosystem. This repo is the public home of h
    **Referenced** item → set `source.repository` and a `source.ref` that is a **release tag or a 40-character commit SHA**, never a moving branch. The schema rejects `main`, `master`, `develop`, and `HEAD` by pattern; if your tag does not fit the version-tag shape, pin the SHA.
 4. Declare `permissions` (**required** for `skill`, `agent`, `workflow`, `mcp-server`, `harness` — an empty list is a valid answer meaning "asks for nothing"), `compatibility.harnesses`, and a `license`.
 5. Add a short `README.md` next to the manifest, including a **standalone install snippet** if the item works without Marblo.
-6. Open a PR.
+6. Run `npm install && npm run gen:catalog` at the repo root, and commit the `README.md` change it makes. The catalog table in the root README is generated from every manifest — **do not hand-edit it**, and do not hand-write your row either. CI regenerates the table and fails the PR if what you committed differs.
+7. Open a PR.
 
 ### What happens to your PR
 
 Every pull request runs the registry validator. It checks the manifest schema, unique kebab-case IDs, required permissions and licenses, immutable external source pins, and GitHub source reachability on a best-effort basis. A maintainer still reviews each manifest and its payload by hand; automated validation is a gate, not a trust decision.
+
+A second job regenerates the root README's catalog block from the manifests and fails if it drifted — that is what step 6 above prevents. If it fails, run `npm run gen:catalog` and commit the result; there is nothing to fix by hand.
 
 **External items merge as `community` tier, which means listed, not installable.** They are discoverable and linked to their source, but the app will not one-click-install them until it ships a permission gate. This is deliberate — [SECURITY.md](SECURITY.md) explains why a pinned commit does not make an unreviewed text payload safe. Promotion to `verified` follows a maintainer review of the payload itself.
 
