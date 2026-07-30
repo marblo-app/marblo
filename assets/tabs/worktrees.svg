@@ -1,0 +1,228 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" width="1200" height="760" role="img" aria-label="Worktrees — An isolated branch per ticket" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <linearGradient id="wt-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <style> .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; } </style>
+
+  <rect x="8" y="8" width="1184" height="744" rx="14" fill="#111827" stroke="#374151" stroke-width="1.5"/>
+  <clipPath id="wt-clip"><rect x="8" y="8" width="1184" height="744" rx="14"/></clipPath>
+  <g clip-path="url(#wt-clip)">
+
+    <!-- header -->
+    <rect x="8" y="8" width="1184" height="48" fill="#0d1420"/>
+    <line x1="8" y1="56" x2="1192" y2="56" stroke="#374151"/>
+    <circle cx="34" cy="32" r="6" fill="#ff5f57"/><circle cx="56" cy="32" r="6" fill="#febc2e"/><circle cx="78" cy="32" r="6" fill="#28c840"/>
+    <rect x="104" y="21" width="22" height="22" rx="6" fill="url(#wt-mark)"/><circle cx="115" cy="32" r="4.5" fill="#0d1420"/>
+    <text x="136" y="38" fill="#ffffff" font-size="16" font-weight="700">Marblo</text>
+    <text x="202" y="38" fill="#6b7280" font-size="11">v3</text>
+    <rect x="500" y="18" width="200" height="28" rx="8" fill="#1f2937" stroke="#374151"/>
+    <text x="540" y="37" fill="#e5e7eb" font-size="13" font-weight="600">my-app</text>
+    <path d="M676 29 l4 4 l4 -4" fill="none" stroke="#9ca3af" stroke-width="1.5"/>
+    <rect x="710" y="22" width="46" height="20" rx="10" fill="#3b82f6" fill-opacity="0.2" stroke="#3b82f6" stroke-opacity="0.3"/>
+    <text x="733" y="36" fill="#60a5fa" font-size="10" font-weight="700" text-anchor="middle" letter-spacing="0.5">FREE</text>
+    <circle cx="1168" cy="32" r="12" fill="#3b82f6"/><text x="1168" y="36" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">D</text>
+
+    <!-- tab bar (Worktrees active) -->
+    <rect x="8" y="56" width="1184" height="36" fill="#0d1420"/>
+    <line x1="8" y1="92" x2="1192" y2="92" stroke="#374151"/>
+    <g font-size="12.5" font-weight="600" fill="#9ca3af">
+      <text x="40" y="78">Guide</text>
+      <text x="97" y="78">Board</text>
+      <text x="154" y="78">Lanes</text>
+      <text x="211" y="78">Missions</text>
+      <text x="289" y="78">Code</text>
+      <text x="339" y="78">Agents</text>
+      <text x="403" y="78">Usage</text>
+      <text x="460" y="78" fill="#60a5fa">Worktrees</text>
+      <text x="545" y="78">History</text>
+    </g>
+    <rect x="454" y="90" width="75" height="2" fill="#3b82f6"/>
+
+    <!-- toolbar -->
+    <text x="72" y="122" fill="#e5e7eb" font-size="14" font-weight="600">Worktrees</text>
+    <text x="154" y="122" fill="#6b7280" font-size="11">An isolated branch per ticket · 7</text>
+    <rect x="72" y="136" width="120" height="24" rx="6" fill="#1f2937" stroke="#374151"/>
+    <text x="84" y="152" fill="#d1d5db" font-size="11">All states</text>
+    <path d="M172 145 l4 4 l4 -4" fill="none" stroke="#9ca3af" stroke-width="1.4"/>
+    <rect x="202" y="136" width="82" height="24" rx="6" fill="#1f2937" stroke="#374151"/>
+    <text x="243" y="152" fill="#d1d5db" font-size="11" text-anchor="middle">⚠️ Exceptions</text>
+    <rect x="294" y="136" width="96" height="24" rx="6" fill="#1f2937" stroke="#374151"/>
+    <text x="342" y="152" fill="#d1d5db" font-size="11" text-anchor="middle">📜 Completed</text>
+    <rect x="852" y="136" width="200" height="24" rx="6" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b" stroke-opacity="0.4"/>
+    <text x="952" y="152" fill="#fbbf24" font-size="11" text-anchor="middle">⚠️ Clean up all cleanable (2)</text>
+    <rect x="1062" y="136" width="88" height="24" rx="6" fill="#1f2937" stroke="#374151"/>
+    <text x="1106" y="152" fill="#d1d5db" font-size="11" text-anchor="middle">Refresh</text>
+
+    <!-- ===== rows ===== -->
+
+    <!-- row 1 — developing -->
+    <g>
+      <rect x="72" y="176" width="1088" height="62" rx="8" fill="#1f2937" fill-opacity="0.45" stroke="#1f2937"/>
+      <rect x="72" y="176" width="4" height="62" fill="#3b82f6" fill-opacity="0.7"/>
+      <text x="92" y="200" fill="#f3f4f6" font-size="13" font-weight="600">Auth API — JWT refresh rotation</text>
+      <rect x="316" y="188" width="70" height="18" rx="9" fill="#3b82f6" fill-opacity="0.15" stroke="#3b82f6" stroke-opacity="0.3"/>
+      <text x="351" y="201" fill="#93c5fd" font-size="10.5" font-weight="600" text-anchor="middle">🔵 In dev</text>
+      <text x="92" y="216" class="mono" fill="#6b7280" font-size="10">~/dev/wt/auth-api · NUISs7fI</text>
+      <text x="700" y="204" fill="#9ca3af" font-size="11">claude</text>
+      <text x="800" y="204" class="mono" fill="#93c5fd" font-size="11">wt/auth-api</text>
+      <text x="1010" y="204" class="mono" fill="#34d399" font-size="11" text-anchor="end">+128</text>
+      <text x="1046" y="204" class="mono" fill="#f87171" font-size="11" text-anchor="end">-46</text>
+      <text x="1148" y="204" fill="#a6e3a1" font-size="11" font-weight="600" text-anchor="end">🟢 Mergeable</text>
+      <text x="94" y="230" class="mono" fill="#9ca3af" font-size="11">▲3  ▼0</text>
+      <text x="164" y="230" fill="#6b7280" font-size="11">no conflicts</text>
+      <g font-size="10.5">
+        <rect x="716" y="219" width="56" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="744" y="231" fill="#d1d5db" text-anchor="middle">Rebase</text>
+        <rect x="778" y="219" width="52" height="16" rx="4" fill="#2563eb"/><text x="804" y="231" fill="#ffffff" text-anchor="middle">Merge</text>
+        <rect x="836" y="219" width="46" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="859" y="231" fill="#d1d5db" text-anchor="middle">Code</text>
+        <rect x="888" y="219" width="44" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="910" y="231" fill="#d1d5db" text-anchor="middle">ticket</text>
+        <rect x="938" y="219" width="58" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="967" y="231" fill="#d1d5db" text-anchor="middle">GitHub</text>
+        <rect x="1002" y="219" width="114" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="1059" y="231" fill="#d1d5db" text-anchor="middle">review requested</text>
+        <rect x="1122" y="219" width="38" height="16" rx="4" fill="#111827" stroke="#7f1d1d"/><text x="1141" y="231" fill="#fca5a5" text-anchor="middle">Remove</text>
+      </g>
+    </g>
+
+    <!-- row 2 — developing (behind) -->
+    <g>
+      <rect x="72" y="248" width="1088" height="62" rx="8" fill="#1f2937" fill-opacity="0.45" stroke="#1f2937"/>
+      <rect x="72" y="248" width="4" height="62" fill="#3b82f6" fill-opacity="0.7"/>
+      <text x="92" y="272" fill="#f3f4f6" font-size="13" font-weight="600">Payments integration (Toss webhook)</text>
+      <rect x="352" y="260" width="70" height="18" rx="9" fill="#3b82f6" fill-opacity="0.15" stroke="#3b82f6" stroke-opacity="0.3"/>
+      <text x="387" y="273" fill="#93c5fd" font-size="10.5" font-weight="600" text-anchor="middle">🔵 In dev</text>
+      <text x="92" y="288" class="mono" fill="#6b7280" font-size="10">~/dev/wt/payments-webhook · Kp2mQxRa</text>
+      <text x="700" y="276" fill="#9ca3af" font-size="11">codex</text>
+      <text x="800" y="276" class="mono" fill="#93c5fd" font-size="11">wt/payments-webhook</text>
+      <text x="1010" y="276" class="mono" fill="#34d399" font-size="11" text-anchor="end">+64</text>
+      <text x="1046" y="276" class="mono" fill="#f87171" font-size="11" text-anchor="end">-8</text>
+      <text x="1148" y="276" fill="#fab387" font-size="11" font-weight="600" text-anchor="end">🟡 Behind</text>
+      <text x="94" y="302" class="mono" fill="#9ca3af" font-size="11">▲2  ▼5</text>
+      <text x="164" y="302" fill="#6b7280" font-size="11">no conflicts</text>
+      <g font-size="10.5">
+        <rect x="770" y="291" width="56" height="16" rx="4" fill="#2563eb"/><text x="798" y="303" fill="#ffffff" text-anchor="middle">Rebase</text>
+        <rect x="890" y="291" width="46" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="913" y="303" fill="#d1d5db" text-anchor="middle">Code</text>
+        <rect x="942" y="291" width="44" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="964" y="303" fill="#d1d5db" text-anchor="middle">ticket</text>
+        <rect x="992" y="291" width="58" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="1021" y="303" fill="#d1d5db" text-anchor="middle">GitHub</text>
+        <rect x="1122" y="291" width="38" height="16" rx="4" fill="#111827" stroke="#7f1d1d"/><text x="1141" y="303" fill="#fca5a5" text-anchor="middle">Remove</text>
+      </g>
+    </g>
+
+    <!-- row 3 — conflict -->
+    <g>
+      <rect x="72" y="320" width="1088" height="62" rx="8" fill="#1f2937" fill-opacity="0.45" stroke="#1f2937"/>
+      <rect x="72" y="320" width="4" height="62" fill="#f59e0b" fill-opacity="0.7"/>
+      <text x="92" y="344" fill="#f3f4f6" font-size="13" font-weight="600">Search indexing optimization</text>
+      <rect x="304" y="332" width="92" height="18" rx="9" fill="#f59e0b" fill-opacity="0.15" stroke="#f59e0b" stroke-opacity="0.3"/>
+      <text x="350" y="345" fill="#fcd34d" font-size="10.5" font-weight="600" text-anchor="middle">🟡 Needs merge</text>
+      <text x="92" y="360" class="mono" fill="#6b7280" font-size="10">~/dev/wt/search-idx · Vr8nLcTe</text>
+      <text x="700" y="348" fill="#9ca3af" font-size="11">codex</text>
+      <text x="800" y="348" class="mono" fill="#93c5fd" font-size="11">wt/search-idx</text>
+      <text x="1010" y="348" class="mono" fill="#34d399" font-size="11" text-anchor="end">+212</text>
+      <text x="1046" y="348" class="mono" fill="#f87171" font-size="11" text-anchor="end">-96</text>
+      <text x="1148" y="348" fill="#f38ba8" font-size="11" font-weight="600" text-anchor="end">🔴 Conflict</text>
+      <text x="94" y="374" class="mono" fill="#9ca3af" font-size="11">▲7  ▼4</text>
+      <text x="164" y="374" fill="#f87171" font-size="11">2 conflicts · rebase needed</text>
+      <g font-size="10.5">
+        <rect x="706" y="363" width="58" height="16" rx="4" fill="#7f1d1d" fill-opacity="0.5" stroke="#ef4444" stroke-opacity="0.5"/><text x="735" y="375" fill="#fca5a5" text-anchor="middle">Resolve</text>
+        <rect x="770" y="363" width="56" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="798" y="375" fill="#d1d5db" text-anchor="middle">Rebase</text>
+        <rect x="890" y="363" width="46" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="913" y="375" fill="#d1d5db" text-anchor="middle">Code</text>
+        <rect x="942" y="363" width="44" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="964" y="375" fill="#d1d5db" text-anchor="middle">ticket</text>
+        <rect x="1122" y="363" width="38" height="16" rx="4" fill="#111827" stroke="#7f1d1d"/><text x="1141" y="375" fill="#fca5a5" text-anchor="middle">Remove</text>
+      </g>
+    </g>
+
+    <!-- row 4 — lane worktree -->
+    <g>
+      <rect x="72" y="392" width="1088" height="62" rx="8" fill="#1f2937" fill-opacity="0.45" stroke="#1f2937"/>
+      <rect x="72" y="392" width="4" height="62" fill="#3b82f6" fill-opacity="0.7"/>
+      <text x="92" y="416" fill="#f3f4f6" font-size="13" font-weight="600">Tighten CI cache keys</text>
+      <rect x="264" y="404" width="70" height="18" rx="9" fill="#3b82f6" fill-opacity="0.15" stroke="#3b82f6" stroke-opacity="0.3"/>
+      <text x="299" y="417" fill="#93c5fd" font-size="10.5" font-weight="600" text-anchor="middle">🔵 In dev</text>
+      <rect x="342" y="404" width="46" height="18" rx="9" fill="#f59e0b" fill-opacity="0.15" stroke="#f59e0b" stroke-opacity="0.3"/>
+      <text x="365" y="417" fill="#fbbf24" font-size="10.5" font-weight="600" text-anchor="middle">Lane</text>
+      <text x="92" y="432" class="mono" fill="#6b7280" font-size="10">~/dev/wt/ci-cache-keys · Zq5wHbNd</text>
+      <text x="700" y="420" fill="#9ca3af" font-size="11">grok</text>
+      <text x="800" y="420" class="mono" fill="#93c5fd" font-size="11">wt/ci-cache-keys</text>
+      <text x="1010" y="420" class="mono" fill="#34d399" font-size="11" text-anchor="end">+14</text>
+      <text x="1046" y="420" class="mono" fill="#f87171" font-size="11" text-anchor="end">-9</text>
+      <text x="1148" y="420" fill="#a6e3a1" font-size="11" font-weight="600" text-anchor="end">🟢 Mergeable</text>
+      <text x="94" y="446" class="mono" fill="#9ca3af" font-size="11">▲1  ▼0</text>
+      <text x="164" y="446" fill="#6b7280" font-size="11">no conflicts</text>
+      <g font-size="10.5">
+        <rect x="770" y="435" width="56" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="798" y="447" fill="#d1d5db" text-anchor="middle">Rebase</text>
+        <rect x="832" y="435" width="52" height="16" rx="4" fill="#2563eb"/><text x="858" y="447" fill="#ffffff" text-anchor="middle">Merge</text>
+        <rect x="890" y="435" width="46" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="913" y="447" fill="#d1d5db" text-anchor="middle">Code</text>
+        <rect x="1122" y="435" width="38" height="16" rx="4" fill="#111827" stroke="#7f1d1d"/><text x="1141" y="447" fill="#fca5a5" text-anchor="middle">Remove</text>
+      </g>
+    </g>
+
+    <!-- row 5 — developing (idle) -->
+    <g>
+      <rect x="72" y="464" width="1088" height="62" rx="8" fill="#1f2937" fill-opacity="0.45" stroke="#1f2937"/>
+      <rect x="72" y="464" width="4" height="62" fill="#3b82f6" fill-opacity="0.7"/>
+      <text x="92" y="488" fill="#f3f4f6" font-size="13" font-weight="600">Pricing page consistency pass</text>
+      <rect x="320" y="476" width="70" height="18" rx="9" fill="#3b82f6" fill-opacity="0.15" stroke="#3b82f6" stroke-opacity="0.3"/>
+      <text x="355" y="489" fill="#93c5fd" font-size="10.5" font-weight="600" text-anchor="middle">🔵 In dev</text>
+      <text x="92" y="504" class="mono" fill="#6b7280" font-size="10">~/dev/wt/pricing-page · Hm4tYpQs</text>
+      <text x="700" y="492" fill="#9ca3af" font-size="11">claude</text>
+      <text x="800" y="492" class="mono" fill="#93c5fd" font-size="11">wt/pricing-page</text>
+      <text x="1010" y="492" class="mono" fill="#34d399" font-size="11" text-anchor="end">+38</text>
+      <text x="1046" y="492" class="mono" fill="#f87171" font-size="11" text-anchor="end">-12</text>
+      <text x="1148" y="492" fill="#6c7086" font-size="11" font-weight="600" text-anchor="end">⚪ Working</text>
+      <text x="94" y="518" class="mono" fill="#9ca3af" font-size="11">▲0  ▼0</text>
+      <text x="164" y="518" fill="#6b7280" font-size="11">no conflicts</text>
+      <g font-size="10.5">
+        <rect x="770" y="507" width="56" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="798" y="519" fill="#d1d5db" text-anchor="middle">Rebase</text>
+        <rect x="890" y="507" width="46" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="913" y="519" fill="#d1d5db" text-anchor="middle">Code</text>
+        <rect x="942" y="507" width="44" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="964" y="519" fill="#d1d5db" text-anchor="middle">ticket</text>
+        <rect x="1122" y="507" width="38" height="16" rx="4" fill="#111827" stroke="#7f1d1d"/><text x="1141" y="519" fill="#fca5a5" text-anchor="middle">Remove</text>
+      </g>
+    </g>
+
+    <!-- row 6 — cleanup · merged -->
+    <g opacity="0.72">
+      <rect x="72" y="536" width="1088" height="62" rx="8" fill="#1f2937" fill-opacity="0.45" stroke="#1f2937"/>
+      <rect x="72" y="536" width="4" height="62" fill="#6b7280" fill-opacity="0.6"/>
+      <text x="92" y="560" fill="#f3f4f6" font-size="13" font-weight="600">Billing store — state management</text>
+      <rect x="332" y="548" width="112" height="18" rx="9" fill="#6b7280" fill-opacity="0.15" stroke="#6b7280" stroke-opacity="0.3"/>
+      <text x="388" y="561" fill="#d1d5db" font-size="10.5" font-weight="600" text-anchor="middle">⚪ Cleanup · merged</text>
+      <text x="92" y="576" class="mono" fill="#6b7280" font-size="10">~/dev/wt/billing-store · Ct7rJfWm</text>
+      <text x="700" y="564" fill="#9ca3af" font-size="11">claude</text>
+      <text x="800" y="564" class="mono" fill="#93c5fd" font-size="11">wt/billing-store</text>
+      <text x="1010" y="564" class="mono" fill="#34d399" font-size="11" text-anchor="end">+0</text>
+      <text x="1046" y="564" class="mono" fill="#f87171" font-size="11" text-anchor="end">-0</text>
+      <text x="1148" y="564" fill="#6c7086" font-size="11" font-weight="600" text-anchor="end">⚪ Working</text>
+      <text x="94" y="590" class="mono" fill="#9ca3af" font-size="11">▲0  ▼12</text>
+      <text x="172" y="590" fill="#6b7280" font-size="11">Merged into base — only the branch is left</text>
+      <g font-size="10.5">
+        <rect x="1056" y="579" width="60" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="1086" y="591" fill="#d1d5db" text-anchor="middle">Archive</text>
+        <rect x="1122" y="579" width="38" height="16" rx="4" fill="#111827" stroke="#7f1d1d"/><text x="1141" y="591" fill="#fca5a5" text-anchor="middle">Remove</text>
+      </g>
+    </g>
+
+    <!-- row 7 — cleanup · stale -->
+    <g opacity="0.72">
+      <rect x="72" y="608" width="1088" height="62" rx="8" fill="#1f2937" fill-opacity="0.45" stroke="#1f2937"/>
+      <rect x="72" y="608" width="4" height="62" fill="#6b7280" fill-opacity="0.6"/>
+      <text x="92" y="632" fill="#f3f4f6" font-size="13" font-weight="600">Spike — websocket presence</text>
+      <rect x="308" y="620" width="116" height="18" rx="9" fill="#6b7280" fill-opacity="0.15" stroke="#6b7280" stroke-opacity="0.3"/>
+      <text x="366" y="633" fill="#d1d5db" font-size="10.5" font-weight="600" text-anchor="middle">⚪ Cleanup · stale</text>
+      <text x="92" y="648" class="mono" fill="#6b7280" font-size="10">~/dev/wt/ws-presence · Bd9kSxUv</text>
+      <text x="700" y="636" fill="#9ca3af" font-size="11">—</text>
+      <text x="800" y="636" class="mono" fill="#93c5fd" font-size="11">wt/ws-presence</text>
+      <text x="1010" y="636" class="mono" fill="#34d399" font-size="11" text-anchor="end">+9</text>
+      <text x="1046" y="636" class="mono" fill="#f87171" font-size="11" text-anchor="end">-2</text>
+      <text x="1148" y="636" fill="#f9e2af" font-size="11" font-weight="600" text-anchor="end">⚠️ stale</text>
+      <text x="94" y="662" class="mono" fill="#9ca3af" font-size="11">▲1  ▼31</text>
+      <text x="172" y="662" fill="#6b7280" font-size="11">No activity for 14 days</text>
+      <g font-size="10.5">
+        <rect x="1056" y="651" width="60" height="16" rx="4" fill="#111827" stroke="#374151"/><text x="1086" y="663" fill="#d1d5db" text-anchor="middle">Archive</text>
+        <rect x="1122" y="651" width="38" height="16" rx="4" fill="#111827" stroke="#7f1d1d"/><text x="1141" y="663" fill="#fca5a5" text-anchor="middle">Remove</text>
+      </g>
+    </g>
+
+    <!-- footer note -->
+    <text x="72" y="700" fill="#6b7280" font-size="11">Parallel agents each work in their own worktree, so touching the same file never overwrites another agent's change.</text>
+    <text x="1160" y="700" fill="#6b7280" font-size="11" text-anchor="end">main is not in the list — ticket worktrees only</text>
+  </g>
+</svg>
