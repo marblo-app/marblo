@@ -1,0 +1,17 @@
+{
+  "name": "@marblo/ecosystem",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Marblo ecosystem monorepo — repo-level tooling. The catalog table in README.md is generated from the marblo.yaml manifests, never hand-edited.",
+  "type": "module",
+  "scripts": {
+    "gen:catalog": "node scripts/gen-catalog.mjs",
+    "check:catalog": "node scripts/gen-catalog.mjs --check"
+  },
+  "devDependencies": {
+    "yaml": "^2.5.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -10,6 +10,10 @@ on:
       - "workflows/**"
       - "registry/**"
       - "packages/registry-validator/**"
+      - "scripts/gen-catalog.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "README.md"
       - ".github/workflows/validate.yml"
   workflow_dispatch:
 
@@ -38,3 +42,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: npm run validate
+
+  catalog:
+    name: README catalog is generated, not stale
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install catalog generator dependencies
+        run: npm ci
+      # Regenerate from the manifests and require the result to be byte-identical
+      # to what the PR committed. Adding an item without running `npm run
+      # gen:catalog` fails here, which is the point: the README table has no
+      # hand-maintained path back to being stale.
+      - name: Regenerate the catalog block
+        run: npm run gen:catalog
+      - name: Fail if README.md drifted from the manifests
+        run: |
+          if ! git diff --exit-code -- README.md; then
+            echo "::error file=README.md::README catalog block is out of date. Run 'npm run gen:catalog' and commit the result."
+            exit 1
+          fi
