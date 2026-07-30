@@ -1,0 +1,191 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" width="1200" height="760" role="img" aria-label="Lanes — Quick parallel — you pick the model" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <linearGradient id="ln-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <style> .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; } </style>
+
+  <rect x="8" y="8" width="1184" height="744" rx="14" fill="#111827" stroke="#374151" stroke-width="1.5"/>
+  <clipPath id="ln-clip"><rect x="8" y="8" width="1184" height="744" rx="14"/></clipPath>
+  <g clip-path="url(#ln-clip)">
+
+    <!-- header -->
+    <rect x="8" y="8" width="1184" height="48" fill="#0d1420"/>
+    <line x1="8" y1="56" x2="1192" y2="56" stroke="#374151"/>
+    <circle cx="34" cy="32" r="6" fill="#ff5f57"/><circle cx="56" cy="32" r="6" fill="#febc2e"/><circle cx="78" cy="32" r="6" fill="#28c840"/>
+    <rect x="104" y="21" width="22" height="22" rx="6" fill="url(#ln-mark)"/><circle cx="115" cy="32" r="4.5" fill="#0d1420"/>
+    <text x="136" y="38" fill="#ffffff" font-size="16" font-weight="700">Marblo</text>
+    <text x="202" y="38" fill="#6b7280" font-size="11">v3</text>
+    <rect x="500" y="18" width="200" height="28" rx="8" fill="#1f2937" stroke="#374151"/>
+    <text x="540" y="37" fill="#e5e7eb" font-size="13" font-weight="600">my-app</text>
+    <path d="M676 29 l4 4 l4 -4" fill="none" stroke="#9ca3af" stroke-width="1.5"/>
+    <rect x="710" y="22" width="46" height="20" rx="10" fill="#3b82f6" fill-opacity="0.2" stroke="#3b82f6" stroke-opacity="0.3"/>
+    <text x="733" y="36" fill="#60a5fa" font-size="10" font-weight="700" text-anchor="middle" letter-spacing="0.5">FREE</text>
+    <circle cx="1168" cy="32" r="12" fill="#3b82f6"/><text x="1168" y="36" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">D</text>
+
+    <!-- tab bar (Lanes active) -->
+    <rect x="8" y="56" width="1184" height="36" fill="#0d1420"/>
+    <line x1="8" y1="92" x2="1192" y2="92" stroke="#374151"/>
+    <g font-size="12.5" font-weight="600" fill="#9ca3af">
+      <text x="40" y="78">Guide</text>
+      <text x="97" y="78">Board</text>
+      <text x="154" y="78" fill="#60a5fa">Lanes</text>
+      <text x="211" y="78">Missions</text>
+      <text x="289" y="78">Code</text>
+      <text x="339" y="78">Agents</text>
+      <text x="403" y="78">Usage</text>
+      <text x="460" y="78">Worktrees</text>
+      <text x="545" y="78">History</text>
+    </g>
+    <rect x="148" y="90" width="47" height="2" fill="#3b82f6"/>
+
+    <!-- tab header -->
+    <text x="72" y="122" fill="#e5e7eb" font-size="14" font-weight="600">Lanes</text>
+    <text x="72" y="140" fill="#6b7280" font-size="11">Parallel to your main work — small ideas, each in its own worktree</text>
+    <rect x="920" y="112" width="130" height="22" rx="11" fill="#10b981" fill-opacity="0.1" stroke="#10b981" stroke-opacity="0.4"/>
+    <text x="985" y="127" fill="#6ee7b7" font-size="11" font-weight="600" text-anchor="middle">6 running in parallel</text>
+    <rect x="1062" y="110" width="100" height="26" rx="6" fill="#2563eb"/>
+    <text x="1112" y="127" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">＋ Quick task</text>
+
+    <!-- ══ group: In progress ══ -->
+    <circle cx="78" cy="167" r="3" fill="#89b4fa"/>
+    <text x="90" y="171" fill="#d1d5db" font-size="12" font-weight="600">In progress</text>
+    <text x="170" y="171" fill="#6b7280" font-size="11">5</text>
+    <line x1="184" y1="167" x2="1160" y2="167" stroke="#1f2937"/>
+
+    <!-- lane card 1 — claude -->
+    <g>
+      <rect x="72" y="182" width="344" height="116" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <circle cx="90" cy="204" r="5" fill="#a855f7"/>
+      <text x="104" y="208" fill="#e5e7eb" font-size="12.5" font-weight="500">Unify toast auto-dismiss timing</text>
+      <text x="402" y="208" fill="#a6e3a1" font-size="11.5" font-weight="600" text-anchor="end">🟢 Mergeable</text>
+      <rect x="90" y="218" width="104" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="98" y="230" class="mono" fill="#a6adc8" font-size="10">claude-opus-5</text>
+      <text x="90" y="254" class="mono" fill="#6b7280" font-size="11">wt/toast-timing</text>
+      <text x="200" y="254" class="mono" fill="#9ca3af" font-size="11">▲2 ▼0 · +34/−12</text>
+      <text x="402" y="254" fill="#6b7280" font-size="11" text-anchor="end">IN_PROGRESS</text>
+      <g font-size="10.5">
+        <rect x="90" y="264" width="62" height="18" rx="4" fill="#111827" stroke="#374151"/><text x="121" y="277" fill="#d1d5db" text-anchor="middle">Terminal</text>
+      </g>
+    </g>
+
+    <!-- lane card 2 — codex -->
+    <g>
+      <rect x="444" y="182" width="344" height="116" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <circle cx="462" cy="204" r="5" fill="#22c55e"/>
+      <text x="476" y="208" fill="#e5e7eb" font-size="12.5" font-weight="500">Add index for slow search</text>
+      <text x="774" y="208" fill="#fab387" font-size="11.5" font-weight="600" text-anchor="end">🟡 Behind</text>
+      <rect x="462" y="218" width="98" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="470" y="230" class="mono" fill="#a6adc8" font-size="10">gpt-5.6-sol</text>
+      <text x="462" y="254" class="mono" fill="#6b7280" font-size="11">wt/search-index</text>
+      <text x="580" y="254" class="mono" fill="#9ca3af" font-size="11">▲5 ▼3 · +212/−96</text>
+      <text x="774" y="254" fill="#6b7280" font-size="11" text-anchor="end">IN_PROGRESS</text>
+      <g font-size="10.5">
+        <rect x="462" y="264" width="62" height="18" rx="4" fill="#111827" stroke="#374151"/><text x="493" y="277" fill="#d1d5db" text-anchor="middle">Terminal</text>
+      </g>
+    </g>
+
+    <!-- lane card 3 — grok -->
+    <g>
+      <rect x="816" y="182" width="344" height="116" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <circle cx="834" cy="204" r="5" fill="#06b6d4"/>
+      <text x="848" y="208" fill="#e5e7eb" font-size="12.5" font-weight="500">Clean up CI cache keys</text>
+      <text x="1146" y="208" fill="#a6e3a1" font-size="11.5" font-weight="600" text-anchor="end">🟢 Mergeable</text>
+      <rect x="834" y="218" width="72" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="842" y="230" class="mono" fill="#a6adc8" font-size="10">grok-4.5</text>
+      <text x="834" y="254" class="mono" fill="#6b7280" font-size="11">wt/ci-cache-keys</text>
+      <text x="956" y="254" class="mono" fill="#9ca3af" font-size="11">▲1 ▼0 · +14/−9</text>
+      <text x="1146" y="254" fill="#6b7280" font-size="11" text-anchor="end">IN_PROGRESS</text>
+      <g font-size="10.5">
+        <rect x="834" y="264" width="62" height="18" rx="4" fill="#111827" stroke="#374151"/><text x="865" y="277" fill="#d1d5db" text-anchor="middle">Terminal</text>
+      </g>
+    </g>
+
+    <!-- lane card 4 — optimistic (pending) card, still spawning -->
+    <g>
+      <rect x="72" y="310" width="344" height="116" rx="8" fill="#1f2937" stroke="#3b82f6" stroke-opacity="0.45"/>
+      <circle cx="90" cy="332" r="5" fill="#6b7280"/>
+      <text x="104" y="336" fill="#e5e7eb" font-size="12.5" font-weight="500">Refresh the README install steps</text>
+      <text x="90" y="358" class="mono" fill="#6b7280" font-size="10.5">moonshot · k3</text>
+      <text x="90" y="382" fill="#93c5fd" font-size="11">Spawning agent · preparing worktree…</text>
+      <text x="90" y="402" fill="#6b7280" font-size="10.5">Hit go and the card appears; each lane reports its own stage</text>
+    </g>
+
+    <!-- lane card 5 — MiniMax -->
+    <g>
+      <rect x="444" y="310" width="344" height="116" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <circle cx="462" cy="332" r="5" fill="#a855f7"/>
+      <text x="476" y="336" fill="#e5e7eb" font-size="12.5" font-weight="500">Improve Settings empty state</text>
+      <text x="774" y="336" fill="#6c7086" font-size="11.5" font-weight="600" text-anchor="end">⚪ Working</text>
+      <rect x="462" y="346" width="100" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="470" y="358" class="mono" fill="#a6adc8" font-size="10">MiniMax-M3</text>
+      <text x="462" y="382" class="mono" fill="#6b7280" font-size="11">wt/settings-empty</text>
+      <text x="590" y="382" class="mono" fill="#9ca3af" font-size="11">▲0 ▼0 · +8/−1</text>
+      <text x="774" y="382" fill="#6b7280" font-size="11" text-anchor="end">CLAIMED</text>
+      <g font-size="10.5">
+        <rect x="462" y="392" width="62" height="18" rx="4" fill="#111827" stroke="#374151"/><text x="493" y="405" fill="#d1d5db" text-anchor="middle">Terminal</text>
+      </g>
+    </g>
+
+    <!-- ══ group: Review ══ -->
+    <circle cx="78" cy="463" r="3" fill="#cba6f7"/>
+    <text x="90" y="467" fill="#d1d5db" font-size="12" font-weight="600">Review</text>
+    <text x="124" y="467" fill="#6b7280" font-size="11">1</text>
+    <line x1="140" y1="463" x2="1160" y2="463" stroke="#1f2937"/>
+
+    <g>
+      <rect x="72" y="478" width="344" height="116" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <circle cx="90" cy="500" r="5" fill="#a855f7"/>
+      <text x="104" y="504" fill="#e5e7eb" font-size="12.5" font-weight="500">Align pricing across 3 locales</text>
+      <text x="402" y="504" fill="#89b4fa" font-size="11.5" font-weight="600" text-anchor="end">🔵 Review</text>
+      <rect x="90" y="514" width="66" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="98" y="526" class="mono" fill="#a6adc8" font-size="10">glm-5.2</text>
+      <text x="90" y="550" class="mono" fill="#6b7280" font-size="11">wt/pricing-i18n</text>
+      <text x="200" y="550" class="mono" fill="#9ca3af" font-size="11">▲4 ▼0 · +96/−31</text>
+      <text x="402" y="550" fill="#6b7280" font-size="11" text-anchor="end">REVIEW</text>
+      <g font-size="10.5">
+        <rect x="90" y="560" width="62" height="18" rx="4" fill="#111827" stroke="#374151"/><text x="121" y="573" fill="#d1d5db" text-anchor="middle">Terminal</text>
+        <rect x="158" y="560" width="52" height="18" rx="4" fill="#111827" stroke="#78350f"/><text x="184" y="573" fill="#fcd34d" text-anchor="middle">Restart</text>
+      </g>
+    </g>
+
+    <!-- ══ group: Done ══ -->
+    <circle cx="78" cy="623" r="3" fill="#a6e3a1"/>
+    <text x="90" y="627" fill="#d1d5db" font-size="12" font-weight="600">Done</text>
+    <text x="124" y="627" fill="#6b7280" font-size="11">2</text>
+    <line x1="140" y1="623" x2="1160" y2="623" stroke="#1f2937"/>
+
+    <g opacity="0.8">
+      <rect x="72" y="638" width="344" height="106" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <circle cx="90" cy="660" r="5" fill="#22c55e"/>
+      <text x="104" y="664" fill="#e5e7eb" font-size="12.5" font-weight="500">Fix the broken docs links</text>
+      <text x="402" y="664" fill="#a6e3a1" font-size="11.5" font-weight="600" text-anchor="end">✅ Done</text>
+      <rect x="90" y="674" width="86" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="98" y="686" class="mono" fill="#a6adc8" font-size="10">gpt-5.4-mini</text>
+      <text x="90" y="710" class="mono" fill="#6b7280" font-size="11">wt/doc-links</text>
+      <text x="216" y="710" class="mono" fill="#9ca3af" font-size="11">▲1 ▼0 · +22/−22</text>
+      <text x="402" y="710" fill="#6b7280" font-size="11" text-anchor="end">DONE</text>
+      <g font-size="10.5">
+        <rect x="90" y="720" width="46" height="18" rx="4" fill="#111827" stroke="#7f1d1d"/><text x="113" y="733" fill="#fca5a5" text-anchor="middle">Delete</text>
+      </g>
+    </g>
+    <g opacity="0.8">
+      <rect x="444" y="638" width="344" height="106" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <circle cx="462" cy="660" r="5" fill="#a855f7"/>
+      <text x="476" y="664" fill="#e5e7eb" font-size="12.5" font-weight="500">Unit tests for log masking</text>
+      <text x="774" y="664" fill="#a6e3a1" font-size="11.5" font-weight="600" text-anchor="end">✅ Done</text>
+      <rect x="462" y="674" width="106" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="470" y="686" class="mono" fill="#a6adc8" font-size="10">claude-sonnet-5</text>
+      <text x="462" y="710" class="mono" fill="#6b7280" font-size="11">wt/mask-logs-test</text>
+      <text x="606" y="710" class="mono" fill="#9ca3af" font-size="11">▲2 ▼0 · +58/−0</text>
+      <text x="774" y="710" fill="#6b7280" font-size="11" text-anchor="end">DONE</text>
+      <g font-size="10.5">
+        <rect x="462" y="720" width="46" height="18" rx="4" fill="#111827" stroke="#7f1d1d"/><text x="485" y="733" fill="#fca5a5" text-anchor="middle">Delete</text>
+      </g>
+    </g>
+
+    <!-- side note -->
+    <text x="1160" y="627" fill="#6b7280" font-size="11" text-anchor="end">You pick the model per lane — it does not go through the orchestrator</text>
+  </g>
+</svg>

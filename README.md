@@ -4,30 +4,55 @@
 </h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/macOS%20%7C%20Windows-6366f1?style=flat-square" alt="Supported platforms: macOS and Windows" />
-  <a href="https://github.com/melocream/marblo-releases/releases/latest"><img src="https://img.shields.io/badge/download-desktop-0ea5e9?style=flat-square" alt="Download desktop app" /></a>
-  <a href="https://marblo.app"><img src="https://img.shields.io/badge/web-marblo.app-8b5cf6?style=flat-square" alt="marblo.app" /></a>
-  <a href="mailto:team@marblo.app"><img src="https://img.shields.io/badge/contact-team%40marblo.app-22c55e?style=flat-square" alt="Contact" /></a>
+  <strong>The live orchestrator for AI-native teams.</strong><br/>
+  Describe a goal. One orchestrator breaks it into tickets, spawns a real coding agent for each —<br/>
+  Claude, Codex, Grok, and more — and runs them in parallel, each in its own worktree.<br/>
+  You watch it happen on one board, see what it costs, and decide what merges.
 </p>
 
 <p align="center">
-  <strong>The live orchestrator for AI-native teams.</strong><br/>
-  Describe a goal. Marblo’s orchestrator breaks it into tickets, spawns a real<br/>
-  AI coding agent for each — Claude, Codex, and more — then tracks, verifies,<br/>
-  and safely merges everything they ship. All from one board.
+  <a href="https://github.com/melocream/marblo-releases/releases/latest"><img src="https://img.shields.io/badge/⬇%20download-macOS%20%7C%20Windows-0ea5e9?style=flat-square" alt="Download for macOS or Windows" /></a>
+  <a href="#install-in-30-seconds--no-app-required"><img src="https://img.shields.io/badge/skills%20%26%20agents-install%20in%2030s-6366f1?style=flat-square" alt="Install a skill or agent in 30 seconds" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/first--party%20assets-MIT-22c55e?style=flat-square" alt="First-party assets are MIT licensed" /></a>
+  <a href="https://marblo.app"><img src="https://img.shields.io/badge/web-marblo.app-8b5cf6?style=flat-square" alt="marblo.app" /></a>
 </p>
 
 <h3 align="center">
   <a href="https://github.com/melocream/marblo-releases/releases/latest"><ins>⬇️ Download Marblo</ins></a>
   &nbsp;·&nbsp;
-  <a href="https://marblo.app"><ins>🌐 marblo.app</ins></a>
+  <a href="#install-in-30-seconds--no-app-required"><ins>⚡ 30-second install</ins></a>
+  &nbsp;·&nbsp;
+  <a href="#full-catalog--every-item-in-the-repo"><ins>🧩 Catalog</ins></a>
   &nbsp;·&nbsp;
   <a href="https://marblo.app/en/guide"><ins>📖 Guide</ins></a>
 </h3>
 
 <p align="center">
-  <img src="assets/hero.png" alt="Marblo — one developer, an entire team's output" width="960" />
+  <img src="assets/tabs/board.svg" alt="The Marblo board — tickets across TODO, CLAIMED, IN PROGRESS, REVIEW and DONE, each card showing the agent and the concrete model working it" width="960" />
 </p>
+
+<p align="center">
+  <sub>Every card names the agent <em>and</em> the model actually running it — <code>claude-opus-5</code>, <code>gpt-5.6-sol</code>, <code>grok-4.5</code>, <code>glm-5.2</code>, <code>MiniMax-M3</code>.</sub>
+</p>
+
+---
+
+## Install in 30 seconds — no app required
+
+**Everything in this repository is a plain file that works in the CLI you already run.** Start here — installing the app is an upgrade on top, never the gate.
+
+**🚩 [Fleet Operations](knowledge/fleet-operations/) — the flagship knowledge pack.** What running a heterogeneous fleet of agent CLIs in production actually teaches: which vendor subscriptions open an Anthropic-compatible endpoint (and why "ships its own CLI" is the wrong test), per-harness resume contracts that kill the process on the wrong flag, why PTY output is the wrong agent-liveness signal in _both_ directions, where cost attribution silently breaks, and worktree-per-ticket hygiene. Measured, not inferred.
+
+```bash
+# Keep it where your agents can find it
+mkdir -p ~/.claude/skills/fleet-operations && curl -sL \
+  https://raw.githubusercontent.com/marblo-app/marblo/main/knowledge/fleet-operations/KNOWLEDGE.md \
+  -o ~/.claude/skills/fleet-operations/SKILL.md
+```
+
+**[Just read it →](knowledge/fleet-operations/KNOWLEDGE.md)** &nbsp;·&nbsp; **[More skills, agents, and MCP servers ↓](#-ecosystem--these-assets-run-in-the-cli-you-already-have)** &nbsp;·&nbsp; **[Full catalog ↓](#full-catalog--every-item-in-the-repo)**
+
+**Want the fleet, not just the files?** [Download Marblo](https://github.com/melocream/marblo-releases/releases/latest) for macOS or Windows, then connect the CLIs you already pay for. Marblo spawns and tracks them; AI usage stays billed to those accounts.
 
 ---
 
@@ -43,183 +68,88 @@ One orchestrator decomposes your mission, spawns the right agent per task, heals
 
 > **Mission → auto ticket breakdown → per-model spawn → watchdog self-heal → merge judgment → your confirmation.**
 
-<table>
-<tr>
-<td width="50%" valign="top" align="center">
+**1 · Describe the goal.** Marblo splits it into tickets, picks a model per ticket, and puts them on the board.
 
-**1 · Decompose &amp; assign**<br/>
-Natural-language goal → tickets on the board, each with the model that fits.
+<p align="center">
+  <img src="assets/tabs/mission-create.svg" alt="A mission described in plain language, split into eight tickets and assigned across claude and codex" width="960" />
+</p>
 
-<img src="assets/live-decompose.png" alt="Mission decomposed into tickets and agents assigned" width="100%" />
-
-</td>
-<td width="50%" valign="top" align="center">
-
-**2 · Complete &amp; confirm**<br/>
-Agents finish in parallel. You review, then merge — nothing lands without you.
-
-<img src="assets/live-complete.png" alt="Work complete, ready for your confirmation" width="100%" />
-
-</td>
-</tr>
-</table>
+**2 · Watch it run, then confirm.** Agents work in parallel in separate worktrees. You review the diff and merge — nothing lands without you.
 
 ---
 
-## Features
-
-<table>
-<tr>
-<td width="48%" valign="middle">
+## The tour — one tab at a time
 
 ### 📋 Board
 
-Kanban for AI agents. Create a ticket — the right agent claims it, works in its own worktree, and the card moves with it.
+Kanban for AI agents. Create a ticket and the right agent claims it, works in its own worktree, and moves the card as it goes. Every card carries the concrete model, so "which one wrote this?" is never a guess.
 
-You see the concrete model on every card (`claude-opus`, `gpt-codex`, `antigravity`).
-
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-<td width="52%">
-  <img src="assets/board.png" alt="Marblo task board with multi-agent kanban" width="100%" />
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<p align="center">
+  <img src="assets/tabs/board.svg" alt="Board tab — kanban columns of tickets with the claiming agent and model on each card" width="960" />
+</p>
 
 ### 🤖 Agents
 
-A live terminal per agent. Watch stdout stream, send follow-ups without killing the session, reuse or hand off mid-run.
+A live terminal per agent. Watch stdout stream, send a follow-up without killing the session, reuse or hand off mid-run. The watchdog respawns and resumes an agent that stalls, and an agent that needs a decision says so instead of going quiet.
 
-The orchestrator keeps the fleet healthy — watchdog self-heal when something stalls.
-
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-<td width="52%">
-  <img src="assets/live-decompose.png" alt="Orchestrator assigning agents to tickets" width="100%" />
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<p align="center">
+  <img src="assets/tabs/agents.svg" alt="Agents tab — six live agent terminals side by side, one waiting on the orchestrator and one respawned by the watchdog" width="960" />
+</p>
 
 ### 💻 Code
 
-Browse and diff each agent’s work across worktrees. Review before merge — no mystery patches on `main`.
+Browse and diff each agent’s work across worktrees before it merges. Click a line to send a review comment straight to the orchestrator — no mystery patches on `main`.
 
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-<td width="52%">
-  <img src="assets/board.png" alt="Board and activity view for reviewing agent work" width="100%" />
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<p align="center">
+  <img src="assets/tabs/code.svg" alt="Code tab — a worktree diff against base main with an inline review comment routed to the orchestrator" width="960" />
+</p>
 
 ### 🌿 Worktrees
 
-Every ticket gets an isolated branch. Parallel agents never collide on the same files.
+Every ticket gets an isolated branch and checkout, so parallel agents never collide on the same files. Merge state, conflicts, ahead/behind and cleanup all live in one list.
 
-Fan out, compare, merge the winner.
+<p align="center">
+  <img src="assets/tabs/worktrees.svg" alt="Worktrees tab — seven ticket worktrees with merge state, conflicts, and cleanup actions" width="960" />
+</p>
 
-[Guide →](https://marblo.app/en/guide)
+<details>
+<summary><strong>More tabs — Lanes, Usage, History</strong></summary>
 
-</td>
-<td width="52%">
-  <img src="assets/orchestration.png" alt="Parallel agents routed from one orchestrator" width="100%" />
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
-
-### 🎯 Missions
-
-Describe the goal in natural language. Marblo turns it into a ticket graph, then spawns the model that fits each task — diversifying across your fleet instead of locking to one vendor — and runs it all.
-
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-<td width="52%">
-  <img src="assets/live-complete.png" alt="Mission complete — tickets done, ready to connect accounts" width="100%" />
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<br/>
 
 ### ⚡ Lanes
 
-Need parallel _right now_? Fire off several agents at once from the Lanes tab — you pick the model for each. Runs alongside the orchestrator, not through it.
+Need parallel work _right now_, without a mission? Fire off several agents at once and pick the model for each. Runs alongside the orchestrator, not through it.
 
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-<td width="52%" valign="middle">
-
-### 🔀 Bring your own model
-
-Drop in a vendor key and an agent boots on that model — GLM, Kimi, MiniMax, and local models via Ollama — right next to Claude, Codex, and Grok.
-
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<p align="center">
+  <img src="assets/tabs/lanes.svg" alt="Lanes tab — six independent quick tasks running in parallel, each with a user-picked model" width="960" />
+</p>
 
 ### 📊 Usage
 
-Cost and model usage per agent, project, and day. No more “why was this month’s API bill a surprise?”
+Cost and token usage by model, agent, and day. It also shows which model each agent _actually_ ran and what the evidence for that was — an observed billing session or the spawn argv — and leaves the field empty when there is none.
 
-[Pricing →](https://marblo.app/en/pricing)
-
-</td>
-<td width="52%" valign="middle">
-
-### 🧩 Harness
-
-Per-agent skills and MCP tools. Bring your own from a GitHub repo — connect once, every agent can use it.
-
-[Guide →](https://marblo.app/en/guide)
-
-</td>
-</tr>
-
-<tr>
-<td width="48%" valign="middle">
+<p align="center">
+  <img src="assets/tabs/usage.svg" alt="Usage tab — spend broken down by vendor and sub-model, with the agent-to-model mapping and its evidence" width="960" />
+</p>
 
 ### 🕘 History
 
-An append-only ledger of progress, cost, and every merge / deploy decision. Full audit trail for the fleet.
+An append-only ledger of what each ticket did: problem, approach, changes, verification, cost, and the merge decision. It survives the ticket being deleted.
 
-[Guide →](https://marblo.app/en/guide)
+<p align="center">
+  <img src="assets/tabs/history.svg" alt="History tab — an append-only ledger row expanded to show problem, approach, changes, verification, cost, and the merge decision" width="960" />
+</p>
 
-</td>
-<td width="52%" valign="middle">
-
-### 🚀 Control plane, not just chat
-
-Marblo is where you **manage** agents — board, isolation, cost, and safe merge — not where you wait on a single conversation.
-
-[What is Marblo →](https://marblo.app/en/blog/what-is-marblo)
-
-</td>
-</tr>
-</table>
+</details>
 
 **Also in the box**
 
 - **Multi-model fleet** — Claude Code, Codex, Grok, GLM, Kimi, MiniMax, and local models (Ollama) side by side — bring your own key (BYOM)
+- **Missions** — a natural-language goal becomes a ticket graph, spawned across your fleet instead of locked to one vendor
+- **Harness** — per-agent skills and MCP tools, including your own from a GitHub repo: connect once, every agent can use it
 - **Safe merge** — review and verification before anything hits your main branch
 - **Desktop-first** — local execution, your keys, your repos
-- **Activity stream** — live structured log of who claimed what and when
 
 ---
 
@@ -243,16 +173,9 @@ Marblo is where you **manage** agents — board, isolation, cost, and safe merge
 
 Every first-party asset here is a plain, standards-native file: a `SKILL.md` that drops into `~/.claude/skills/`, an agent definition in the format Claude Code and Codex already read, a knowledge pack that is just markdown. Copy one in and it works in your next session. Installing Marblo is a one-click upgrade on top — never the gate.
 
-### 30-second install, no app required
+### More one-liners
 
-**🚩 [Fleet Operations](knowledge/fleet-operations/) — the flagship.** What running a heterogeneous fleet of agent CLIs in production actually teaches: which vendor subscriptions open an Anthropic-compatible endpoint (and why "ships its own CLI" is the wrong test), per-harness resume contracts that kill the process on the wrong flag, why PTY output is the wrong agent-liveness signal in _both_ directions, where cost attribution silently breaks, and worktree-per-ticket hygiene. Measured, not inferred. **[Just read it →](knowledge/fleet-operations/KNOWLEDGE.md)**
-
-```bash
-# Keep it where your agents can find it
-mkdir -p ~/.claude/skills/fleet-operations && curl -sL \
-  https://raw.githubusercontent.com/marblo-app/marblo/main/knowledge/fleet-operations/KNOWLEDGE.md \
-  -o ~/.claude/skills/fleet-operations/SKILL.md
-```
+The flagship [Fleet Operations](knowledge/fleet-operations/) pack is [at the top of this README](#install-in-30-seconds--no-app-required). The rest install the same way:
 
 **[Code Review skill](skills/code-review/)** — review a diff for correctness, security, and simplicity; findings ranked by severity, each with a concrete failure scenario.
 
@@ -289,7 +212,6 @@ Two items here are **not** standalone, and we would rather say so than pretend: 
 Most of this is **not ours and not copied here.** Each referenced item is a `marblo.yaml` pointing at an upstream repository at a pinned tag or commit SHA, so the license, the ownership, and the maintenance all stay with the author. Every one was picked on a single test: **it works in the CLI you already run, with or without Marblo.** Each item's README carries an install snippet that was executed before it was written down.
 
 The table below is **generated from the manifests** by [`scripts/gen-catalog.mjs`](scripts/gen-catalog.mjs) — every id, description, tier, license, and pin is the value committed in that item's `marblo.yaml`. Adding an item means adding a manifest; nobody edits this table, and CI fails any PR where the two have drifted apart.
-
 <!-- prettier-ignore-start -->
 <!-- CATALOG:START -->
 <!-- Generated by scripts/gen-catalog.mjs from every <category>/<id>/marblo.yaml.
