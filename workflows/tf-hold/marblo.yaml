@@ -1,0 +1,37 @@
+schema_version: 1
+
+id: tf-hold
+name: "Pause and Take Stock (/tf-hold)"
+type: workflow
+version: 1.0.0
+status: active
+description: "The stop-and-look-around step for when work has got confusing or the direction needs to change: snapshot every ticket by status, surface what is stuck and what is unread, and decide the next action before resuming."
+
+i18n:
+  ko:
+    name: "작업 일시중지 (/tf-hold)"
+    description: "작업이 엉키거나 방향을 바꿔야 할 때 멈춰서 상황을 정리하는 단계 — 상태별 티켓 스냅샷을 찍고 막힌 것과 미확인 항목을 드러낸 뒤, 재개 전에 다음 행동을 정한다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - shell:exec
+
+keywords:
+  - workflow
+  - pause
+  - status
+  - triage
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app

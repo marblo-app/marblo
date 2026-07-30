@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: tf-plan
+name: "Plan a Project (/tf-plan)"
+type: workflow
+version: 1.0.0
+status: active
+description: "The heavyweight planning pass before any code is written: eight required Socratic questions, then a PRD with non-functional requirements, constraints, KPIs and risks, then an 18–22 task decomposition with a model recommendation per task. Creates no tickets."
+
+i18n:
+  ko:
+    name: "프로젝트 기획 (/tf-plan)"
+    description: "코드 한 줄 쓰기 전 무거운 기획 단계 — 필수 소크라틱 질문 8개 → PRD(비기능 요구·제약·KPI·리스크) → 18~22개 태스크 분해(태스크별 모델 추천). 티켓은 만들지 않고 계획만 세운다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - repository:write
+  - shell:exec
+
+keywords:
+  - workflow
+  - planning
+  - prd
+  - task-decomposition
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app

@@ -1,0 +1,36 @@
+schema_version: 1
+
+id: tf-create-tasks
+name: "Create Tasks in Bulk (/tf-create-tasks)"
+type: workflow
+version: 1.0.0
+status: active
+description: "Turns an analysis or a PRD into tickets in a single bulk call — structured bodies (goal / changes / acceptance / notes), role, priority, depends_on, and a non-overlapping file scope per ticket — created only after you confirm the list."
+
+i18n:
+  ko:
+    name: "태스크 일괄 생성 (/tf-create-tasks)"
+    description: "분석 결과나 PRD 를 티켓으로 바꾼다 — 단일 일괄 호출로 생성하며 티켓마다 구조화 본문(goal/changes/acceptance/notes)·role·priority·depends_on·겹치지 않는 파일 scope. 사용자 확인 뒤에만 생성한다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - shell:exec
+
+keywords:
+  - workflow
+  - tickets
+  - bulk-create
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app

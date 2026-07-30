@@ -1,0 +1,37 @@
+schema_version: 1
+
+id: tf-work
+name: "Work a Task (/tf-work)"
+type: workflow
+version: 1.0.0
+status: active
+description: "The agent-side execution loop for one ticket: pick from the workable list, claim it, load the role's skill file and the ticket's file scope, code, and log every meaningful step as an activity before submitting for review."
+
+i18n:
+  ko:
+    name: "태스크 작업 (/tf-work)"
+    description: "티켓 1건을 실행하는 에이전트 루프 — 작업 가능 목록에서 골라 선점하고, 역할 스킬 파일과 티켓 scope 를 불러와 코딩하며, 의미 있는 단계마다 activity 를 남긴 뒤 리뷰를 제출한다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - repository:write
+  - shell:exec
+
+keywords:
+  - workflow
+  - execution
+  - activity-log
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app

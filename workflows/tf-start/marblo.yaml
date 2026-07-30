@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: tf-start
+name: "Project Kickoff (/tf-start)"
+type: workflow
+version: 1.0.0
+status: active
+description: "The step after /tf-plan: pre-flight the PRD and the MCP connection, bulk-create every ticket in a single call with role, priority, depends_on and scope, spawn the agents, and monitor the board while work lands."
+
+i18n:
+  ko:
+    name: "프로젝트 킥오프 (/tf-start)"
+    description: "/tf-plan 다음 단계 — PRD 와 MCP 연결을 프리플라이트하고, 단일 호출로 전체 티켓을 일괄 생성(role·priority·depends_on·scope)한 뒤 에이전트를 스폰하고 보드를 모니터링한다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - repository:write
+  - shell:exec
+
+keywords:
+  - workflow
+  - kickoff
+  - tickets
+  - agents
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app
