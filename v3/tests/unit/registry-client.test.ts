@@ -204,6 +204,32 @@ permissions:
 license: MIT
 `;
 
+const V1_AGENT_WITH_INSTALL = `
+schema_version: 1
+id: qa-engineer
+name: QA Engineer
+type: agent
+version: 1.0.0
+description: Finds the defects a feature's own author would not look for.
+publisher:
+  name: Marblo
+  tier: official
+install:
+  kind: files
+  root: claude-agents
+  dest: qa-engineer
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: "${"e".repeat(64)}"
+permissions:
+  - repository:read
+  - shell:exec
+license: MIT
+`;
+
 describe("install contract on schema_version 1 (public registry shape)", () => {
   it("reads an mcp-server install block declared on a v1 manifest", () => {
     const item = parseManifest(
@@ -323,6 +349,72 @@ describe("install contract on schema_version 1 (public registry shape)", () => {
     const item = parseManifest(raw, "skills/code-review", "skill", COMMIT)!;
     expect(item.install).toBeNull();
   });
+
+  it("reads a files install block declared on an agent, into the agents root", () => {
+    const item = parseManifest(
+      V1_AGENT_WITH_INSTALL,
+      "agents/qa-engineer",
+      "agent",
+      COMMIT,
+    )!;
+    expect(item.type).toBe("agent");
+    expect(item.install).toEqual({
+      kind: "files",
+      root: "claude-agents",
+      dest: "qa-engineer",
+      files: ["AGENT.md"],
+      integrity: { "AGENT.md": "e".repeat(64) },
+    });
+    expect(item.notInstallableReason).toBeUndefined();
+  });
+
+  // root 는 타입에 묶여 있다. 스킬 트리에 떨어진 에이전트, 에이전트 트리에 떨어진
+  // 스킬 둘 다 "리뷰된 카테고리 ≠ 착지한 카테고리" 이므로 파서에서 이미 떨군다 —
+  // 여기서 통과시키면 스토어가 누르면 installer 가 거부하는 버튼을 그린다.
+  it("rejects an agent that declares the skills root", () => {
+    const raw = V1_AGENT_WITH_INSTALL.replace(
+      "root: claude-agents",
+      "root: claude-skills",
+    );
+    const item = parseManifest(raw, "agents/qa-engineer", "agent", COMMIT)!;
+    expect(item.install).toBeNull();
+    expect(item.notInstallableReason).toBe("install 블록이 유효하지 않음");
+  });
+
+  it("rejects a skill that declares the agents root", () => {
+    const raw = V1_SKILL_WITH_INSTALL.replace(
+      "root: claude-skills",
+      "root: claude-agents",
+    );
+    const item = parseManifest(raw, "skills/code-review", "skill", COMMIT)!;
+    expect(item.install).toBeNull();
+  });
+
+  // 에이전트는 트리 파생을 하지 않는다: frontmatter 없는 README 까지 에이전트
+  // 트리에 심으면 게시자가 선언하지 않은 파일이 하네스 스캔 대상이 된다.
+  it("never derives a files install for an agent from the repo tree", () => {
+    const raw = V1_AGENT_WITH_INSTALL.replace(
+      /install:[\s\S]*?permissions:/,
+      "permissions:",
+    );
+    const item = parseManifest(raw, "agents/qa-engineer", "agent", COMMIT)!;
+    expect(item.install).toBeNull();
+    deriveFilesInstallFromTree(item, [
+      {
+        path: "agents/qa-engineer/AGENT.md",
+        mode: "100644",
+        type: "blob",
+        size: 10,
+      },
+      {
+        path: "agents/qa-engineer/README.md",
+        mode: "100644",
+        type: "blob",
+        size: 10,
+      },
+    ]);
+    expect(item.install).toBeNull();
+  });
 });
 
 describe("deriveFilesInstallFromTree", () => {
@@ -431,9 +523,17 @@ describe("selectManifestEntries", () => {
         size: 10,
       },
     ]);
+    // agents/ 는 phase-1a 카테고리다(에이전트 팩 착지 이후). skills/nested/deep 은
+    // 2단이 아니라서, skills/code-review/SKILL.md 는 manifest 가 아니라서 빠진다.
     expect(entries.map((e) => e.path)).toEqual([
       "skills/code-review/marblo.yaml",
       "mcp-servers/github/marblo.yaml",
+      "agents/reviewer/marblo.yaml",
+    ]);
+    expect(entries.map((e) => e.type)).toEqual([
+      "skill",
+      "mcp-server",
+      "agent",
     ]);
   });
 });
@@ -523,8 +623,12 @@ describe("parseI18nBlock", () => {
   });
 
   it("모르는 로케일·공백뿐인 값은 버린다", () => {
-    expect(manifestWithI18n("i18n:\n  fr:\n    name: Revue")?.i18n).toBeUndefined();
-    expect(manifestWithI18n('i18n:\n  ko:\n    name: "   "')?.i18n).toBeUndefined();
+    expect(
+      manifestWithI18n("i18n:\n  fr:\n    name: Revue")?.i18n,
+    ).toBeUndefined();
+    expect(
+      manifestWithI18n('i18n:\n  ko:\n    name: "   "')?.i18n,
+    ).toBeUndefined();
   });
 
   it("한도를 넘는 문자열은 잘라내지 않고 그 필드를 버린다", () => {

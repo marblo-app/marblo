@@ -164,6 +164,85 @@ describe("dest containment", () => {
     );
   });
 
+  // root 는 타입에 묶여 있다(공개 스키마의 install allOf 와 1:1). 에이전트 트리에
+  // 떨어진 파일은 하네스가 매 세션 로드하는 페르소나가 되므로, "스킬로 리뷰됐는데
+  // 에이전트로 착지" 는 조용한 권한 상승이다 — 양방향 모두 installer 가 막는다.
+  it("rejects a skill that declares the agents root", async () => {
+    const { deps, root } = makeEnv();
+    deps.rootsOverride = {
+      "claude-skills": root,
+      "claude-agents": path.join(root, "..", "agents-root"),
+    };
+    const item = skillItem({
+      install: {
+        kind: "files",
+        root: "claude-agents",
+        dest: "test-skill",
+        files: ["SKILL.md"],
+      },
+    });
+    await expect(installRegistryItem(item, deps)).rejects.toThrow(
+      /type "skill" 은 root "claude-skills" 에만/,
+    );
+  });
+
+  it("rejects an agent that declares the skills root", async () => {
+    const { deps, root } = makeEnv();
+    deps.rootsOverride = {
+      "claude-skills": root,
+      "claude-agents": path.join(root, "..", "agents-root"),
+    };
+    const item = skillItem({
+      id: "qa-engineer",
+      type: "agent",
+      path: "agents/qa-engineer",
+      install: {
+        kind: "files",
+        root: "claude-skills",
+        dest: "qa-engineer",
+        files: ["AGENT.md"],
+      },
+    });
+    await expect(installRegistryItem(item, deps)).rejects.toThrow(
+      /type "agent" 은 root "claude-agents" 에만/,
+    );
+  });
+
+  it("installs an agent into the agents root and records it in the ledger", async () => {
+    const { deps, root } = makeEnv(stubFetch({ "AGENT.md": "# agent" }));
+    const agentsRoot = path.join(path.dirname(root), "agents-root");
+    deps.rootsOverride = {
+      "claude-skills": root,
+      "claude-agents": agentsRoot,
+    };
+    const item = skillItem({
+      id: "qa-engineer",
+      type: "agent",
+      path: "agents/qa-engineer",
+      install: {
+        kind: "files",
+        root: "claude-agents",
+        dest: "qa-engineer",
+        files: ["AGENT.md"],
+      },
+    });
+    await installRegistryItem(item, deps);
+    // 하네스가 재귀 탐색하는 위치에 실제로 파일이 있어야 한다 — 원장만 맞고 디스크가
+    // 비면 "설치됨" 배지가 거짓말을 한다.
+    expect(
+      fs.readFileSync(
+        path.join(agentsRoot, "qa-engineer", "AGENT.md"),
+        "utf-8",
+      ),
+    ).toBe("# agent");
+    const entry = readLedger(deps.ledgerPath).items["qa-engineer"];
+    expect(entry.install).toEqual({
+      kind: "files",
+      root: "claude-agents",
+      dest: "qa-engineer",
+    });
+  });
+
   it.each([
     "../x",
     "/abs",

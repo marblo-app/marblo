@@ -41,6 +41,18 @@ const HOME = os.homedir();
 // §4.4 rule 1 — root enum. manifest 가 절대경로를 실어 보낼 방법이 없다.
 const INSTALL_ROOTS: Record<string, string> = {
   "claude-skills": path.join(HOME, ".claude", "skills"),
+  "claude-agents": path.join(HOME, ".claude", "agents"),
+};
+
+/**
+ * root 는 item type 에 **묶여** 있다(공개 스키마의 같은 allOf 게이트와 1:1).
+ * 단순 allowlist 로 두면 skill 로 리뷰된 항목이 에이전트 트리에 떨어질 수 있고,
+ * 에이전트 트리의 파일은 하네스가 매 세션 로드하는 페르소나가 된다 — 즉 "리뷰된
+ * 카테고리 ≠ 착지한 카테고리" 가 조용히 성립한다. 양방향 모두 거부한다.
+ */
+const ROOT_FOR_TYPE: Record<string, string> = {
+  skill: "claude-skills",
+  agent: "claude-agents",
 };
 
 const DEST_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -342,8 +354,23 @@ async function installFiles(
   if (!rootDir) {
     throw new Error(`설치 거부: root "${install.root}" 는 허용 목록에 없음`);
   }
+  const expectedRoot = ROOT_FOR_TYPE[item.type];
+  if (!expectedRoot) {
+    throw new Error(`설치 거부: type "${item.type}" 은 files 설치를 갖지 않음`);
+  }
+  if (install.root !== expectedRoot) {
+    throw new Error(
+      `설치 거부: type "${item.type}" 은 root "${expectedRoot}" 에만 설치 가능(선언값 "${install.root}")`,
+    );
+  }
   validateFilesList(install.files);
-  if (BUILTIN_SKILL_DESTS.has(install.dest)) {
+  // 내장 카탈로그 스킬 가림 방어는 **스킬 트리에서만** 의미가 있다. 에이전트
+  // 트리의 dest 는 내장 스킬과 같은 이름공간이 아니므로, 여기서 무조건 막으면
+  // 정상 에이전트 항목이 이유 없이 거부된다.
+  if (
+    install.root === "claude-skills" &&
+    BUILTIN_SKILL_DESTS.has(install.dest)
+  ) {
     throw new Error(
       `설치 거부: dest "${install.dest}" 는 내장 카탈로그 스킬과 충돌(가림 금지)`,
     );

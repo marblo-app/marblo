@@ -27,6 +27,20 @@ const REGISTRY_BRANCH = "main";
 const PHASE_1A_DIRS: Record<string, RegistryItemType> = {
   skills: "skill",
   "mcp-servers": "mcp-server",
+  agents: "agent",
+};
+
+/**
+ * files 설치를 갖는 타입 → 그 타입에 **허용된 유일한** root(공개 스키마의
+ * install allOf 게이트와 1:1). 목록이 아니라 1:1 매핑인 게 핵심이다 — 에이전트
+ * 트리에 떨어진 파일은 하네스가 매 세션 로드하는 페르소나가 되므로, "스킬로
+ * 리뷰됐는데 에이전트로 착지" 는 조용한 권한 상승이다. 양방향 모두 막힌다.
+ */
+const FILES_INSTALL_ROOT_BY_TYPE: Partial<
+  Record<RegistryItemType, RegistryFilesInstall["root"]>
+> = {
+  skill: "claude-skills",
+  agent: "claude-agents",
 };
 
 const API_BASE = `https://api.github.com/repos/${REGISTRY_REPO}`;
@@ -44,7 +58,7 @@ const MANIFEST_FETCH_CONCURRENCY = 8;
 const INDEX_MEMO_TTL_MS = 10 * 60 * 1000;
 
 export type RegistryTier = "official" | "verified" | "community";
-export type RegistryItemType = "skill" | "mcp-server";
+export type RegistryItemType = "skill" | "mcp-server" | "agent";
 export type RegistryItemStatus = "active" | "deprecated" | "revoked";
 
 /**
@@ -60,10 +74,14 @@ export interface RegistryLocalizedStrings {
   description?: string;
 }
 
-/** files 설치: root 는 앱이 절대경로로 매핑하는 enum 키. 경로는 절대 안 받는다. */
+/**
+ * files 설치: root 는 앱이 절대경로로 매핑하는 enum 키. 경로는 절대 안 받는다.
+ * root 는 item type 에 묶인다(skill→claude-skills, agent→claude-agents) — 파서와
+ * installer 가 각각 독립적으로 재검사한다.
+ */
 export interface RegistryFilesInstall {
   kind: "files";
-  root: "claude-skills";
+  root: "claude-skills" | "claude-agents";
   /** 단일 세그먼트 `^[a-z0-9]+(-[a-z0-9]+)*$` — installer 가 재검증한다. */
   dest: string;
   /** 명시 allowlist — 이 목록 밖은 어떤 것도 쓰지 않는다. item path 기준 상대경로. */
@@ -181,7 +199,7 @@ function asString(v: unknown, maxLen: number): string | null {
 function asStringArray(
   v: unknown,
   maxItems: number,
-  maxLen: number
+  maxLen: number,
 ): string[] | null {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v) || v.length > maxItems) return null;
@@ -207,7 +225,7 @@ const I18N_LOCALES: RegistryLocale[] = ["ko", "ja"];
  * asString 을 그대로 쓰지 않고 trim 결과로 판정하는 이유다.
  */
 export function parseI18nBlock(
-  v: unknown
+  v: unknown,
 ): Partial<Record<RegistryLocale, RegistryLocalizedStrings>> | undefined {
   if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
   const src = v as Record<string, unknown>;
@@ -240,7 +258,7 @@ export function parseManifest(
   raw: string,
   itemPath: string,
   expectedType: RegistryItemType,
-  commit: string
+  commit: string,
 ): RegistryItem | null {
   if (Buffer.byteLength(raw, "utf-8") > MAX_MANIFEST_BYTES) return null;
   let doc: unknown;
@@ -283,8 +301,8 @@ export function parseManifest(
     m.status === undefined
       ? "active"
       : STATUSES.includes(m.status as RegistryItemStatus)
-      ? (m.status as RegistryItemStatus)
-      : null;
+        ? (m.status as RegistryItemStatus)
+        : null;
   if (!status) return null;
 
   const permissionsDeclared = m.permissions !== undefined;
@@ -351,14 +369,18 @@ export function parseManifest(
  */
 function parseInstallBlock(
   v: unknown,
-  expectedType: RegistryItemType
+  expectedType: RegistryItemType,
 ): RegistryInstall | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const b = v as Record<string, unknown>;
-  if (expectedType === "skill" && b.kind === "files") {
+  // files 설치를 갖는 타입과, 그 타입이 쓸 수 있는 **유일한** root.
+  // 공개 스키마의 같은 게이트와 1:1 — 여기가 더 느슨하면 스키마가 거부한 root 조합이
+  // 앱에서만 통과해 "skill 로 리뷰된 항목이 에이전트 트리에 착지"가 가능해진다.
+  const filesRoot = FILES_INSTALL_ROOT_BY_TYPE[expectedType];
+  if (filesRoot && b.kind === "files") {
     const dest = asString(b.dest, MAX_ID_LEN);
     const files = asStringArray(b.files, MAX_FILES_PER_ITEM, 300);
-    if (b.root !== "claude-skills" || !dest || !files || files.length === 0) {
+    if (b.root !== filesRoot || !dest || !files || files.length === 0) {
       return null;
     }
     // dest·files 의 모양도 여기서 본다. installer 가 어차피 다시 보지만, 통과
@@ -391,7 +413,7 @@ function parseInstallBlock(
     }
     const integrity: Record<string, string> = {};
     for (const [k, val] of Object.entries(
-      digestMap as Record<string, unknown>
+      digestMap as Record<string, unknown>,
     )) {
       const hex = asString(val, 64);
       if (!hex || !/^[0-9a-f]{64}$/.test(hex)) return null;
@@ -400,7 +422,7 @@ function parseInstallBlock(
     // 목록의 모든 파일이 다이제스트로 덮여야 한다 — 일부만 덮이면 나머지는
     // 대조 없이 디스크에 쓰인다.
     if (files.some((f) => !integrity[f])) return null;
-    return { kind: "files", root: "claude-skills", dest, files, integrity };
+    return { kind: "files", root: filesRoot, dest, files, integrity };
   }
   if (expectedType === "mcp-server" && b.kind === "mcp-server") {
     const runner = asString(b.runner, 16);
@@ -435,7 +457,7 @@ function parseInstallBlock(
  */
 export function deriveFilesInstallFromTree(
   item: RegistryItem,
-  tree: TreeEntry[]
+  tree: TreeEntry[],
 ): void {
   if (item.type !== "skill" || item.install) return;
   // manifest 가 계약을 선언했는데 거부된 경우(reason 이 이미 붙어 있다) 파생하지
@@ -519,7 +541,7 @@ function writeCacheAtomic(cacheDir: string, cache: CacheShape): void {
 async function fetchWithTimeout(
   fetchImpl: typeof fetch,
   url: string,
-  accept: string
+  accept: string,
 ): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
@@ -535,12 +557,12 @@ async function fetchWithTimeout(
 
 async function fetchJson(
   fetchImpl: typeof fetch,
-  url: string
+  url: string,
 ): Promise<unknown> {
   const res = await fetchWithTimeout(
     fetchImpl,
     url,
-    "application/vnd.github+json"
+    "application/vnd.github+json",
   );
   if (!res.ok) throw new Error(`GET ${url} → ${res.status}`);
   return res.json();
@@ -550,18 +572,18 @@ export async function fetchRawRegistryFile(
   fetchImpl: typeof fetch,
   commit: string,
   repoPath: string,
-  maxBytes: number
+  maxBytes: number,
 ): Promise<Buffer> {
   const res = await fetchWithTimeout(
     fetchImpl,
     `${RAW_BASE}/${commit}/${repoPath}`,
-    "*/*"
+    "*/*",
   );
   if (!res.ok) throw new Error(`raw fetch ${repoPath} → ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.byteLength > maxBytes) {
     throw new Error(
-      `raw fetch ${repoPath} → ${buf.byteLength}B > 한도 ${maxBytes}B`
+      `raw fetch ${repoPath} → ${buf.byteLength}B > 한도 ${maxBytes}B`,
     );
   }
   return buf;
@@ -570,7 +592,7 @@ export async function fetchRawRegistryFile(
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
-  fn: (item: T) => Promise<R>
+  fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
@@ -582,7 +604,7 @@ async function mapLimit<T, R>(
         if (i >= items.length) return;
         out[i] = await fn(items[i]);
       }
-    }
+    },
   );
   await Promise.all(workers);
   return out;
@@ -590,13 +612,13 @@ async function mapLimit<T, R>(
 
 /** 트리에서 Phase 1a manifest 후보를 고른다: <dir>/<name>/marblo.yaml 정확히 2단. */
 export function selectManifestEntries(
-  tree: TreeEntry[]
+  tree: TreeEntry[],
 ): Array<{ path: string; dir: string; type: RegistryItemType }> {
   const out: Array<{ path: string; dir: string; type: RegistryItemType }> = [];
   for (const e of tree) {
     if (e.type !== "blob") continue;
     const m = e.path.match(
-      /^([a-z-]+)\/([a-z0-9]+(?:-[a-z0-9]+)*)\/marblo\.yaml$/
+      /^([a-z-]+)\/([a-z0-9]+(?:-[a-z0-9]+)*)\/marblo\.yaml$/,
     );
     if (!m) continue;
     const itemType = PHASE_1A_DIRS[m[1]];
@@ -610,11 +632,11 @@ export function selectManifestEntries(
 
 async function fetchFreshIndex(
   fetchImpl: typeof fetch,
-  cached: CacheShape | null
+  cached: CacheShape | null,
 ): Promise<CacheShape> {
   const head = (await fetchJson(
     fetchImpl,
-    `${API_BASE}/commits/${REGISTRY_BRANCH}`
+    `${API_BASE}/commits/${REGISTRY_BRANCH}`,
   )) as { sha?: string };
   const commit = head?.sha;
   if (!commit || !COMMIT_RE.test(commit)) {
@@ -627,7 +649,7 @@ async function fetchFreshIndex(
 
   const treeRes = (await fetchJson(
     fetchImpl,
-    `${API_BASE}/git/trees/${commit}?recursive=1`
+    `${API_BASE}/git/trees/${commit}?recursive=1`,
   )) as { tree?: TreeEntry[]; truncated?: boolean };
   if (!treeRes?.tree || treeRes.truncated) {
     throw new Error("레지스트리 트리 조회 실패(또는 truncated)");
@@ -642,18 +664,26 @@ async function fetchFreshIndex(
           fetchImpl,
           commit,
           entry.path,
-          MAX_MANIFEST_BYTES
+          MAX_MANIFEST_BYTES,
         );
         const item = parseManifest(
           buf.toString("utf-8"),
           entry.dir,
           entry.type,
-          commit
+          commit,
         );
         if (item && item.type === "skill" && item.schemaVersion === 1) {
           deriveFilesInstallFromTree(item, tree);
         }
-        if (item && item.type === "mcp-server" && !item.install) {
+        // agent 는 skill 과 달리 트리 파생을 하지 않는다: 에이전트 디렉터리에는
+        // frontmatter 가 없는 README 가 함께 있고, 그것까지 에이전트 트리에 심으면
+        // 게시자가 선언하지 않은 파일을 하네스가 로드 대상으로 스캔하게 된다.
+        // 계약을 선언한 항목만 설치하고, 나머지는 이유를 붙여 목록·공시만 한다.
+        if (
+          item &&
+          (item.type === "mcp-server" || item.type === "agent") &&
+          !item.install
+        ) {
           item.notInstallableReason ??=
             "manifest 에 설치 계약 없음 — 수동 설치만 가능";
         }
@@ -691,7 +721,7 @@ export function resetRegistryClientMemo(): void {
  * available:false 빈 인덱스. 스토어가 이것 때문에 못 열리는 일은 없다.
  */
 export async function getRegistryIndex(
-  deps: RegistryFetchDeps & { forceRefresh?: boolean } = {}
+  deps: RegistryFetchDeps & { forceRefresh?: boolean } = {},
 ): Promise<RegistryIndex> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const cacheDir = deps.cacheDir;
