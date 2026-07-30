@@ -1,0 +1,37 @@
+schema_version: 1
+
+id: voltagent-context-manager
+name: Context Manager (VoltAgent)
+type: agent
+version: 0.1.0
+status: active
+description: Shared-state subagent for multi-agent runs — storing and retrieving project context, keeping several agents reading the same facts, and governing what is written back. Referenced by manifest; not vendored.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-claude-code-subagents
+  ref: 947b44ca0c58d606b084e9cb1a2389335b49278b
+  path: categories/09-meta-orchestration/context-manager.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+
+keywords:
+  - context
+  - multi-agent
+  - state
+  - orchestration
+  - external
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-claude-code-subagents

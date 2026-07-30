@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: superpowers-subagent-driven-development
+name: Subagent-Driven Development (Superpowers)
+type: skill
+version: 6.2.0
+status: active
+description: Executes an implementation plan by dispatching a fresh subagent per task, reviewing each result for spec compliance and code quality, and closing with a whole-branch review. Referenced by manifest; not vendored.
+
+publisher:
+  name: Jesse Vincent (obra)
+  tier: community
+  url: https://github.com/obra
+
+source:
+  repository: https://github.com/obra/superpowers
+  ref: v6.2.0
+  path: skills/subagent-driven-development
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - repository:read
+  - repository:write
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - subagents
+  - planning
+  - review
+  - orchestration
+  - external
+
+license: MIT
+homepage: https://github.com/obra/superpowers/tree/main/skills/subagent-driven-development

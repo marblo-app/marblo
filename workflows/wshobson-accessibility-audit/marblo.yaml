@@ -1,0 +1,40 @@
+schema_version: 1
+
+id: wshobson-accessibility-audit
+name: Accessibility Audit (wshobson)
+type: workflow
+version: 0.1.0
+status: active
+description: A WCAG audit pipeline — axe-core automation driven through a headless browser, manual keyboard and screen-reader verification, and remediation guidance ranked by user impact. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/accessibility-compliance
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - accessibility
+  - wcag
+  - axe-core
+  - audit
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

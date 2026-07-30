@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: voltagent-rust-engineer
+name: Rust Engineer (VoltAgent)
+type: agent
+version: 0.1.0
+status: active
+description: Rust 2021 subagent — ownership and lifetime design, trait and zero-cost abstraction work, auditing `unsafe`, and async or embedded performance tuning inside an existing Cargo workspace. Referenced by manifest; not vendored.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-claude-code-subagents
+  ref: 947b44ca0c58d606b084e9cb1a2389335b49278b
+  path: categories/02-language-specialists/rust-engineer.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - rust
+  - ownership
+  - systems
+  - performance
+  - external
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-claude-code-subagents

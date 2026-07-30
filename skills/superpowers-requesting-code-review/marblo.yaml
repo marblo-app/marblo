@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: superpowers-requesting-code-review
+name: Requesting Code Review (Superpowers)
+type: skill
+version: 6.2.0
+status: active
+description: Dispatches a reviewer subagent with a purpose-built prompt and an explicit commit range instead of inherited session history, and sorts the returned findings into critical, important, and minor. Referenced by manifest; not vendored.
+
+publisher:
+  name: Jesse Vincent (obra)
+  tier: community
+  url: https://github.com/obra
+
+source:
+  repository: https://github.com/obra/superpowers
+  ref: v6.2.0
+  path: skills/requesting-code-review
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+    - any
+
+permissions:
+  - repository:read
+  - shell:exec
+
+keywords:
+  - code-review
+  - subagents
+  - git
+  - quality
+  - external
+
+license: MIT
+homepage: https://github.com/obra/superpowers/tree/main/skills/requesting-code-review

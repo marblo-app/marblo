@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: wshobson-terraform-specialist
+name: Terraform Specialist (wshobson)
+type: agent
+version: 0.1.0
+status: active
+description: Terraform/OpenTofu subagent for module composition, remote state and locking, policy as code, multi-cloud provider work, and Terraform-to-OpenTofu migration. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/cicd-automation/agents/terraform-specialist.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - terraform
+  - opentofu
+  - iac
+  - state
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

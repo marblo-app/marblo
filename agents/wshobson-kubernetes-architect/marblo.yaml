@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: wshobson-kubernetes-architect
+name: Kubernetes Architect (wshobson)
+type: agent
+version: 0.1.0
+status: active
+description: Cloud-native platform subagent — EKS/AKS/GKE/OKE cluster design, GitOps with ArgoCD or Flux, service mesh, progressive delivery, multi-tenancy, and cluster-level cost and security posture. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/kubernetes-operations/agents/kubernetes-architect.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - kubernetes
+  - gitops
+  - platform
+  - service-mesh
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents
