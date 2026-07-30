@@ -42,6 +42,14 @@
  * where it read as an archive view; a feature that is supposed to be the fast
  * path cannot be behind the slow ones. `tests/unit/splitWorkspaceLayout.test.ts`
  * pins the adjacency so a future insertion doesn't quietly bury it again.
+ *
+ * `store` sits immediately BEFORE `harness` for the same reason. The public
+ * registry store used to be a section buried inside the Harness tab, below the
+ * CLI/vendor connection setup — a browsable catalog behind a settings screen,
+ * which nobody scrolls to. Splitting it out makes the two jobs legible:
+ * `harness` = the connections this app REQUIRES (CLI login, env-swap vendors),
+ * `store` = optional assets you may choose to add. Adjacency (and the order) is
+ * pinned in the unit test.
  */
 export const RIGHT_TABS = [
   "startHere",
@@ -53,13 +61,14 @@ export const RIGHT_TABS = [
   "worktrees",
   "history",
   "usage",
+  "store",
   "harness",
   "missions",
   "flows",
   "deploy",
   "settings",
 ] as const;
-export type RightTabId = (typeof RIGHT_TABS)[number];
+export type RightTabId = typeof RIGHT_TABS[number];
 
 /**
  * Tabs hidden in production — surfaced only when VITE_DEV_FEATURES lists the id.
@@ -67,7 +76,7 @@ export type RightTabId = (typeof RIGHT_TABS)[number];
  * feature-flagged views identically.
  */
 export const DEV_ONLY_RIGHT_TABS: ReadonlySet<RightTabId> = new Set<RightTabId>(
-  ["missions", "flows", "deploy"],
+  ["missions", "flows", "deploy"]
 );
 
 /**
@@ -76,7 +85,7 @@ export const DEV_ONLY_RIGHT_TABS: ReadonlySet<RightTabId> = new Set<RightTabId>(
  */
 export function visibleRightTabs(devFeatures: string[]): RightTabId[] {
   return RIGHT_TABS.filter(
-    (t) => !DEV_ONLY_RIGHT_TABS.has(t) || devFeatures.includes(t),
+    (t) => !DEV_ONLY_RIGHT_TABS.has(t) || devFeatures.includes(t)
   );
 }
 
@@ -180,7 +189,7 @@ export function activityPanelWidth(availableWidth: number): number | null {
   const cap = Math.floor(availableWidth * ACTIVITY_MAX_FRACTION);
   return Math.max(
     ACTIVITY_MIN_PANEL_WIDTH,
-    Math.min(ACTIVITY_PANEL_WIDTH, cap),
+    Math.min(ACTIVITY_PANEL_WIDTH, cap)
   );
 }
 
@@ -200,7 +209,7 @@ export function activityPanelWidth(availableWidth: number): number | null {
  */
 export function ratioWithActivityOpen(
   storedRatio: number,
-  splitWidth: number,
+  splitWidth: number
 ): number {
   if (!Number.isFinite(splitWidth) || splitWidth <= 0) {
     return clampRatio(storedRatio);
@@ -255,7 +264,7 @@ export function parseStoredTab(raw: string | null | undefined): RightTabId {
 export function initialActiveTab(
   rawTab: string | null | undefined,
   landOnStartHere: boolean,
-  onboardingComplete = false,
+  onboardingComplete = false
 ): RightTabId {
   if (isRightTab(rawTab)) {
     return rawTab === "startHere" && onboardingComplete ? "board" : rawTab;
@@ -274,7 +283,7 @@ export function parseStoredCollapsed(raw: string | null | undefined): boolean {
  */
 export function isTerminalCollapsed(
   manualCollapsed: boolean,
-  containerWidth: number,
+  containerWidth: number
 ): boolean {
   return manualCollapsed || containerWidth < NARROW_BREAKPOINT;
 }
@@ -286,7 +295,7 @@ export function isTerminalCollapsed(
 export function ratioFromPointer(
   clientX: number,
   left: number,
-  width: number,
+  width: number
 ): number {
   if (!(width > 0)) return DEFAULT_RATIO;
   return clampRatio((clientX - left) / width);
@@ -300,7 +309,7 @@ export function clampVerticalRatio(n: number): number {
 
 /** Parse a persisted vertical-ratio string; anything invalid → DEFAULT_V_RATIO. */
 export function parseStoredVerticalRatio(
-  raw: string | null | undefined,
+  raw: string | null | undefined
 ): number {
   if (raw == null) return DEFAULT_V_RATIO;
   const n = Number.parseFloat(raw);
@@ -314,7 +323,7 @@ export function parseStoredVerticalRatio(
 export function verticalRatioFromPointer(
   clientY: number,
   top: number,
-  height: number,
+  height: number
 ): number {
   if (!(height > 0)) return DEFAULT_V_RATIO;
   return clampVerticalRatio((clientY - top) / height);

@@ -12,6 +12,7 @@ export type TabId =
   | "deploy"
   | "worktrees"
   | "history"
+  | "store"
   | "harness"
   | "settings";
 
@@ -227,6 +228,25 @@ const tabs: Tab[] = [
           strokeLinejoin="round"
           strokeWidth={2}
           d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: "store",
+    label: "Store",
+    icon: (
+      <svg
+        className="h-4 w-4"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
         />
       </svg>
     ),

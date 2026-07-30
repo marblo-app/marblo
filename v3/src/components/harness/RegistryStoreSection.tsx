@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation, t as translate, type Locale } from "../../lib/i18n";
 
 /**
- * 하네스 탭의 **공개 레지스트리 스토어** 섹션 (marblo-app/marblo).
+ * **공개 레지스트리 스토어** 섹션 (marblo-app/marblo). 최상위 스토어 탭
+ * (`components/store/StoreTab`)이 이것을 통째로 렌더한다.
  *
  * `EnvSwapVendorSection` 과 같은 "레지스트리 파생 섹션" 패턴이다 — 내장
  * 카탈로그 격자(HarnessPackage)와 데이터 소스·IPC 채널·설치 경로를 전혀
@@ -11,10 +12,12 @@ import { useTranslation, t as translate, type Locale } from "../../lib/i18n";
  *
  * 표시 원칙:
  *  - tier·permissions 는 **공시**다. UI 카피가 "강제 아님"을 명시한다(§4.6).
- *  - community tier 는 설치 불가(§6.3 기본 차단)이며, **인앱 목록에서도 제외**한다
- *    — 설치할 수 없는 항목 수십 개가 스토어를 덮어 official/verified 를 묻어버렸다.
- *    대신 개수만 집계해 GitHub 전체 카탈로그로 보낸다. 설치 게이트(`installable`)
- *    는 목록 필터와 별개로 그대로 둔다 — 표시 정책이 바뀌어도 차단은 유지된다.
+ *  - ★community tier 는 **보이되 설치 불가**다(§6.3 기본 차단). 한때는 목록에서도
+ *    빼서 개수만 GitHub 으로 보냈는데, 스토어가 탭으로 격상되면서 카탈로그를
+ *    브라우징하는 화면이 됐다 — 카탈로그가 자기 카탈로그의 대부분을 감추면
+ *    브라우징이 안 된다. 그래서 **표시 정책만** 바뀌었고 **설치 게이트
+ *    (`installable`)는 그대로**다: 미검수 페이로드에 원클릭 설치를 달지 않는다.
+ *    이 둘이 분리돼 있는 게 요점 — 표시를 열어도 차단은 유지된다.
  *  - install 계약이 없는 항목(v1 mcp-server 등)은 "자동 설치 불가"로 정직하게
  *    표시하고 홈페이지 링크만 준다 — 가짜 설치 버튼 금지.
  *  - 설치 전에는 항상 권한 공시 모달을 지난다. 고위험 스코프는 강조.
@@ -22,29 +25,65 @@ import { useTranslation, t as translate, type Locale } from "../../lib/i18n";
  */
 
 interface RegistryStoreSectionProps {
-  /** "skill" | "mcp-server" | undefined(둘 다) — HarnessStore 필터 연동. */
+  /** "skill" | "mcp-server" | undefined(전 타입). 스토어 탭은 필터를 주지 않는다. */
   typeFilter?: "skill" | "mcp-server";
 }
 
 const HIGH_RISK_RE = /^(shell:exec|secrets:read|repository:write)/;
 
-/** 공개 레지스트리 저장소 — 인앱에서 감춘 community 항목의 목적지. */
+/** 공개 레지스트리 저장소 — 전체 카탈로그의 정본. */
 const REGISTRY_CATALOG_URL = "https://github.com/marblo-app/marblo";
 
 /**
- * 타입 필터를 지난 항목을 "인앱에 보여줄 목록" 과 "GitHub 으로 보낼 community
+ * 타입 필터를 지난 항목을 "화면에 그릴 목록" 과 "그 중 참조 전용(community)
  * 개수" 로 가른다. 둘을 **같은 모집단**에서 뽑는 게 요점 — 카운트가 화면의
  * 필터와 어긋나면 "커뮤니티 N개" 가 거짓말이 된다.
+ *
+ * ★ community 는 이제 `visible` 에 **들어간다**. 설치 차단은 여기가 아니라
+ * 카드의 `installable` 판정이 한다 — 목록 정책과 설치 게이트를 같은 곳에서
+ * 결정하면, 목록을 여는 변경이 조용히 설치까지 열어버린다.
  */
+const TIER_RANK: Record<RegistryStoreItem["tier"], number> = {
+  official: 0,
+  verified: 1,
+  community: 2,
+};
+
 export function splitRegistryByTier(
   items: RegistryStoreItem[],
-  typeFilter?: RegistryStoreSectionProps["typeFilter"]
+  typeFilter?: RegistryStoreSectionProps["typeFilter"],
 ): { visible: RegistryStoreItem[]; communityCount: number } {
   const scoped = items.filter((i) => !typeFilter || i.type === typeFilter);
+  // 설치 가능한 것부터 보여준다. 레지스트리 순서 그대로 두면 community 가
+  // 압도적으로 많아서(94개 중 대부분) official/verified 가 스크롤 아래로
+  // 밀린다 — 감추는 대신 순서로 푼다. Array.sort 는 안정 정렬이라 같은 tier
+  // 안에서는 레지스트리 순서가 그대로 유지된다.
+  const visible = [...scoped].sort(
+    (a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier],
+  );
   return {
-    visible: scoped.filter((i) => i.tier !== "community"),
+    visible,
     communityCount: scoped.filter((i) => i.tier === "community").length,
   };
+}
+
+/**
+ * ★설치 게이트(§6.3). 인앱 원클릭 설치는 세 조건을 **모두** 만족할 때만 열린다:
+ *  1. tier 가 official/verified — community 는 미검수 페이로드라 표시만 한다,
+ *  2. 설치 계약(`install`)이 실제로 있다 — 없으면 "자동 설치 불가"로 정직하게,
+ *  3. 회수(revoked)되지 않았다.
+ *
+ * 목록 필터(`splitRegistryByTier`)와 **일부러 분리**돼 있다. 예전엔 community 를
+ * 목록에서 빼는 것이 사실상의 2차 방어선처럼 보였지만, 그건 착시였다 — 표시
+ * 정책이 바뀌면 같이 사라지는 방어선은 방어선이 아니다. 실제 차단은 항상 이
+ * 함수 하나였고, 스토어가 community 를 보여주게 된 지금도 그대로다.
+ */
+export function isRegistryItemInstallable(
+  item: Pick<RegistryStoreItem, "tier" | "install" | "status">,
+): boolean {
+  return (
+    item.tier !== "community" && !!item.install && item.status !== "revoked"
+  );
 }
 
 /**
@@ -60,7 +99,7 @@ export function splitRegistryByTier(
  */
 export function localizedItemText(
   item: Pick<RegistryStoreItem, "name" | "description" | "i18n">,
-  locale: Locale
+  locale: Locale,
 ): { name: string; description: string } {
   const overlay = locale === "en" ? undefined : item.i18n?.[locale];
   return {
@@ -82,7 +121,7 @@ function tierBadgeClass(tier: RegistryStoreItem["tier"]): string {
 
 function tierLabel(tier: RegistryStoreItem["tier"]): string {
   return translate(
-    `harness.store.registry.tier.${tier}` as Parameters<typeof translate>[0]
+    `harness.store.registry.tier.${tier}` as Parameters<typeof translate>[0],
   );
 }
 
@@ -100,14 +139,14 @@ export function RegistryStoreSection({
     text: string;
   } | null>(null);
   const [disclosureFor, setDisclosureFor] = useState<RegistryStoreItem | null>(
-    null
+    null,
   );
 
   const load = useCallback(async (refresh?: boolean) => {
     setLoading(true);
     try {
       const res = await window.electronAPI.registry.index(
-        refresh ? { refresh: true } : undefined
+        refresh ? { refresh: true } : undefined,
       );
       setItems(res.items ?? []);
       setStale(!!res.stale);
@@ -126,11 +165,16 @@ export function RegistryStoreSection({
 
   const { visible, communityCount } = useMemo(
     () => splitRegistryByTier(items, typeFilter),
-    [items, typeFilter]
+    [items, typeFilter],
   );
   const groups = useMemo(() => {
     const skills = visible.filter((i) => i.type === "skill");
     const mcps = visible.filter((i) => i.type === "mcp-server");
+    // 레지스트리는 우리 빌드보다 먼저 새 타입(agent/workflow/…)을 낼 수 있다.
+    // 알려진 두 그룹만 그리면 그런 항목은 조용히 사라진다 — 카탈로그 화면에서
+    // "없는 것"과 "우리가 못 그리는 것"은 다르다. 남는 건 여기로 모은다.
+    const known = new Set(["skill", "mcp-server"]);
+    const others = visible.filter((i) => !known.has(i.type));
     return [
       {
         key: "skills",
@@ -138,6 +182,7 @@ export function RegistryStoreSection({
         rows: skills,
       },
       { key: "mcp", label: t("harness.store.registry.mcp"), rows: mcps },
+      { key: "other", label: t("harness.store.registry.other"), rows: others },
     ].filter((g) => g.rows.length > 0);
   }, [visible, t]);
 
@@ -171,7 +216,7 @@ export function RegistryStoreSection({
         void load();
       }
     },
-    [load, locale]
+    [load, locale],
   );
 
   const runUninstall = useCallback(
@@ -180,7 +225,7 @@ export function RegistryStoreSection({
         !confirm(
           translate("harness.store.registry.uninstallConfirm", {
             name: localizedItemText(item, locale).name,
-          })
+          }),
         )
       ) {
         return;
@@ -210,7 +255,7 @@ export function RegistryStoreSection({
         void load();
       }
     },
-    [load, locale]
+    [load, locale],
   );
 
   return (
@@ -255,11 +300,11 @@ export function RegistryStoreSection({
           {t("harness.store.registry.unavailable")}
         </p>
       )}
-      {/* 빈 상태 = "아직 검증된 자산이 없다" — 레지스트리가 비었다는 뜻이 아니다
-          (community 는 여기서 세지 않고 아래 카탈로그 줄이 대신 안내한다). */}
+      {/* 빈 상태 = 레지스트리에서 이 화면 조건에 맞는 항목이 하나도 안 왔다는
+          뜻이다(이제 tier 로 감추는 항목이 없으므로 정말로 비어 있는 것). */}
       {available && !loading && visible.length === 0 && (
         <p className="text-xs text-[#6c7086]">
-          {t("harness.store.registry.emptyVerified")}
+          {t("harness.store.registry.emptyCatalog")}
         </p>
       )}
 
@@ -279,10 +324,7 @@ export function RegistryStoreSection({
                 item.installState === "installed" ||
                 item.installState === "outdated";
               const communityListOnly = item.tier === "community";
-              const installable =
-                !!item.install &&
-                !communityListOnly &&
-                item.status !== "revoked";
+              const installable = isRegistryItemInstallable(item);
               return (
                 <div
                   key={`${item.type}:${item.id}`}
@@ -300,7 +342,7 @@ export function RegistryStoreSection({
                     <div className="flex flex-shrink-0 items-center gap-1">
                       <span
                         className={`rounded px-1.5 py-0.5 text-[10px] ${tierBadgeClass(
-                          item.tier
+                          item.tier,
                         )}`}
                       >
                         {tierLabel(item.tier)}
@@ -417,13 +459,15 @@ export function RegistryStoreSection({
         </div>
       ))}
 
-      {/* 감춘 community 항목의 출구 — 개수는 공시하되 목록은 GitHub 이 갖는다.
-          레지스트리에 닿지 못한 상태(!available)에선 개수가 0 이라 링크만 남는다. */}
+      {/* 전체 카탈로그의 정본은 GitHub 이다. 목록에 섞여 있는 community 항목이
+          몇 개인지도 여기서 한 번 더 공시한다 — 카드마다 붙는 '참조 전용' 배지를
+          훑지 않아도 "이 중 N개는 설치가 안 된다"가 한 줄로 읽히게. 레지스트리에
+          닿지 못한 상태(!available)에선 개수가 0 이라 링크만 남는다. */}
       {available && !loading && (
         <p className="mt-3 text-[11px] text-[#6c7086]">
           {communityCount > 0 && (
             <>
-              {t("harness.store.registry.communityHidden", {
+              {t("harness.store.registry.communityListedNote", {
                 count: communityCount,
               })}
               {" · "}

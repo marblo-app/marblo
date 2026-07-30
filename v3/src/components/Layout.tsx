@@ -23,6 +23,7 @@ import { ChatToastHost } from "./chat/ChatToastHost";
 import { BugReportNoticeToast } from "./chat/BugReportNoticeToast";
 import { TaskCreateModal } from "./board/TaskCreateModal";
 import { HarnessStore } from "./harness/HarnessStore";
+import { StoreTab } from "./store/StoreTab";
 import { GuideTab } from "./guide/GuideTab";
 import { ActivityStreamPanel } from "./activity/ActivityStreamPanel";
 import { PrivacyConsentGate } from "./legal/PrivacyConsentGate";
@@ -72,6 +73,7 @@ const tabComponents: Record<TabId, () => JSX.Element> = {
   deploy: DeployTab,
   worktrees: WorktreeTab,
   history: WorkHistoryTab,
+  store: StoreTab,
   harness: HarnessTabPanel,
   settings: SettingsPage,
 };

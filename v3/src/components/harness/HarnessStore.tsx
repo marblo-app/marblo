@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from "react";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { TelegramChannelPanel } from "./TelegramChannelPanel";
 import { EnvSwapVendorSection } from "./EnvSwapVendorSection";
-import { RegistryStoreSection } from "./RegistryStoreSection";
 import { useTranslation, t as translate } from "../../lib/i18n";
 import type { MessageKey } from "../../locales/ko";
 
@@ -18,8 +17,10 @@ interface HarnessStoreProps {
  * 패키지 격자를 접고 `EnvSwapVendorSection`(레지스트리 파생)만 보여준다.
  */
 /**
- * `regskill`/`regmcp` 도 `envswap` 과 같은 "다른 갈래를 여는 칸"이다 — 공개
- * 레지스트리(marblo-app/marblo) 파생 섹션만 보여주고 내장 패키지 격자는 접는다.
+ * 공개 레지스트리(marblo-app/marblo) 스토어는 더 이상 이 화면에 없다 — 워크스페이스
+ * 최상위 **스토어** 탭(`components/store/StoreTab`)으로 격상됐다. 이 탭은 이제
+ * "이 앱을 쓰려면 반드시 해야 하는 연결"만 담는다: CLI 설치·로그인, env-swap 벤더
+ * 키, 채널. 그래서 `regskill`/`regmcp` 필터 칸도 함께 사라졌다.
  */
 type CategoryFilter =
   | "all"
@@ -27,9 +28,7 @@ type CategoryFilter =
   | "recommended"
   | "mcp"
   | "cli"
-  | "envswap"
-  | "regskill"
-  | "regmcp";
+  | "envswap";
 
 const CATEGORY_FILTERS: CategoryFilter[] = [
   "all",
@@ -38,8 +37,6 @@ const CATEGORY_FILTERS: CategoryFilter[] = [
   "mcp",
   "cli",
   "envswap",
-  "regskill",
-  "regmcp",
 ];
 
 // Display labels read locale at call time via the pure t() (the enum value
@@ -53,26 +50,14 @@ function statusLabel(status: HarnessPackage["status"]): string {
 }
 
 /**
- * 스토어 화면의 두 갈래를 가르는 머리줄. 이 화면은 성격이 다른 두 가지를 한
- * 스크롤에 담고 있었다 — (1) 이 앱에 CLI·벤더·채널을 **연결**하는 셋업,
- * (2) 외부 레지스트리에서 자산을 **설치**하는 스토어. 둘이 시각적으로 안
- * 갈려서 클러터로 읽혔다. `separated` 는 앞 섹션과의 경계선(두 번째부터).
+ * 섹션 머리줄. 이 화면은 한때 성격이 다른 두 가지를 한 스크롤에 담고 있었다 —
+ * (1) 이 앱에 CLI·벤더·채널을 **연결**하는 셋업, (2) 외부 레지스트리에서 자산을
+ * **설치**하는 스토어. 둘이 안 갈려서 클러터로 읽혔고, 결국 (2)는 최상위 스토어
+ * 탭으로 나갔다. 남은 것은 (1) 하나뿐이라 구분선 옵션(`separated`)도 함께 없앴다.
  */
-function StoreSectionHeader({
-  label,
-  desc,
-  separated,
-}: {
-  label: string;
-  desc: string;
-  separated?: boolean;
-}) {
+function StoreSectionHeader({ label, desc }: { label: string; desc: string }) {
   return (
-    <div
-      className={`bg-[#11111b] px-4 py-2.5 ${
-        separated ? "border-y-2 border-[#313244]" : "border-b border-[#313244]"
-      }`}
-    >
+    <div className="border-b border-[#313244] bg-[#11111b] px-4 py-2.5">
       <h3 className="text-xs font-semibold uppercase tracking-wider text-[#89b4fa]">
         {label}
       </h3>
@@ -151,19 +136,10 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
     }
   }, [packages, refreshAuth]);
 
-  // `envswap`/`regskill`/`regmcp` 는 설치형 패키지 카테고리가 아니므로 격자
-  // 자체를 접는다(빈 목록 안내를 띄우면 "패키지가 없다" 는 엉뚱한 말이 된다).
-  const showPackages =
-    filter !== "envswap" && filter !== "regskill" && filter !== "regmcp";
+  // `envswap` 은 설치형 패키지 카테고리가 아니므로 격자 자체를 접는다(빈 목록
+  // 안내를 띄우면 "패키지가 없다" 는 엉뚱한 말이 된다).
+  const showPackages = filter !== "envswap";
   const showEnvSwap = filter === "all" || filter === "envswap";
-  const showRegistry =
-    filter === "all" || filter === "regskill" || filter === "regmcp";
-  const registryTypeFilter =
-    filter === "regskill"
-      ? ("skill" as const)
-      : filter === "regmcp"
-        ? ("mcp-server" as const)
-        : undefined;
   const filtered = packages.filter(
     (p) => filter === "all" || p.category === filter,
   );
@@ -493,18 +469,8 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
             </div>
           )}
 
-          {/* ── 섹션 2: 스토어 — 공개 레지스트리(registry:*)에서 설치하는 자산.
-              내장 카탈로그와 데이터 소스·IPC 채널이 완전히 분리돼 있다. ── */}
-          {showRegistry && (
-            <>
-              <StoreSectionHeader
-                separated
-                label={t("harness.store.section.store")}
-                desc={t("harness.store.section.storeDesc")}
-              />
-              <RegistryStoreSection typeFilter={registryTypeFilter} />
-            </>
-          )}
+          {/* 공개 레지스트리 스토어는 최상위 **스토어** 탭으로 나갔다
+              (components/store/StoreTab) — 이 탭은 필수 연결만 담는다. */}
         </div>
 
         {/* Footer note */}
@@ -513,7 +479,7 @@ export function HarnessStore({ onClose }: HarnessStoreProps) {
             <span className="text-[#89b4fa]">●</span>{" "}
             {t("harness.store.footerMcp")}
           </div>
-          <div>{t("harness.store.footerGithub")}</div>
+          <div>{t("harness.store.footerStoreMoved")}</div>
         </div>
       </div>
     </div>

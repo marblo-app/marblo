@@ -29,6 +29,7 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.tab.lanes": "Quick Lanes",
   "workspace.tab.guide": "Guide",
   "workspace.tab.usage": "Usage",
+  "workspace.tab.store": "Store",
   "workspace.tab.harness": "Harness",
   "workspace.tab.missions": "Missions",
   "workspace.tab.flows": "Flows (Beta)",

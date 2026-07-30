@@ -98,8 +98,10 @@ export const harness = {
   "harness.store.uninstallConfirm": "{name} 제거하시겠습니까?",
   "harness.store.uninstallFail": "제거 실패",
   "harness.store.uninstallDone": "{name} 제거됨.",
-  "harness.store.title": "Harness 스토어",
-  "harness.store.subtitle": "스킬 / MCP 한 번에 설치",
+  // Harness 탭은 "이 앱을 쓰려면 반드시 해야 하는 연결"만 담는다 — 골라 담는
+  // 자산 카탈로그는 최상위 스토어 탭으로 나갔다.
+  "harness.store.title": "하네스 연결",
+  "harness.store.subtitle": "CLI·벤더·채널 — 이 앱이 쓰려면 필요한 연결",
   "harness.store.emptyList": "표시할 패키지가 없습니다.",
   "harness.store.deprecated": "단종 예정",
   "harness.store.badge.installed": "설치됨",
@@ -124,15 +126,12 @@ export const harness = {
   "harness.store.docs": "문서 →",
   "harness.store.footerMcp":
     "Marblo MCP는 대시보드 내부에서 spawn 된 에이전트에만 자동 연결됩니다 (per-agent isolated config). 외부 터미널 CLI 세션은 사용자의 taskforce MCP 등 별도 설정으로 관리하세요.",
-  "harness.store.footerGithub":
-    "외부 GitHub URL 직접 설치는 차후 추가될 예정입니다 (신뢰 검증 후).",
-  // --- Store 화면의 두 섹션 (연결 / 스토어) ---
+  "harness.store.footerStoreMoved":
+    "스킬·MCP 자산 설치는 상단 '스토어' 탭으로 옮겨졌습니다.",
+  // --- 연결 섹션 머리줄 ---
   "harness.store.section.connections": "연결",
   "harness.store.section.connectionsDesc":
     "CLI·벤더·채널을 이 앱에 연결합니다.",
-  "harness.store.section.store": "스토어",
-  "harness.store.section.storeDesc":
-    "검증된 스킬·MCP 자산을 설치합니다. 전체 카탈로그는 GitHub 에 있습니다.",
   // --- Telegram channel panel ---
   // Status badge (fixed-set labels)
   "harness.telegram.status.idle": "대기",
@@ -170,13 +169,15 @@ export const harness = {
   "harness.installedCliVersion": "설치된 CLI 버전 v{version}",
 
   // --- Public registry store (marblo-app/marblo) ---
-  "harness.store.cat.regskill": "스토어 스킬",
-  "harness.store.cat.regmcp": "스토어 MCP",
+  // 최상위 스토어 탭 헤더
+  "store.tab.title": "스토어",
+  "store.tab.subtitle": "공개 레지스트리의 스킬·MCP 카탈로그",
   "harness.store.registry.title": "공개 레지스트리",
   "harness.store.registry.subtitle":
-    "공개 레지스트리(marblo-app/marblo)의 공식·검증됨 tier 만 앱에서 설치할 수 있습니다. tier 와 권한은 공시이며, 설치 후 동작을 제한하지 않습니다.",
+    "공개 레지스트리(marblo-app/marblo)의 전체 카탈로그입니다. 앱에서 설치할 수 있는 것은 공식·검증됨 tier 뿐이고, 커뮤니티 tier 는 목록·공시만 제공합니다. tier 와 권한은 공시이며, 설치 후 동작을 제한하지 않습니다.",
   "harness.store.registry.skills": "스킬",
   "harness.store.registry.mcp": "MCP 서버",
+  "harness.store.registry.other": "기타",
   "harness.store.registry.stale":
     "레지스트리에 연결하지 못해 마지막으로 확인한 목록을 표시 중입니다.",
   "harness.store.registry.unavailable":
@@ -211,9 +212,10 @@ export const harness = {
   "harness.store.registry.uninstallFail": "제거에 실패했습니다.",
   "harness.store.registry.source": "소스",
   "harness.store.registry.loadFail": "레지스트리 목록을 불러오지 못했습니다.",
-  // 커뮤니티 tier 는 인앱 목록에서 제외하고 GitHub 전체 카탈로그로 보낸다.
-  "harness.store.registry.communityHidden": "커뮤니티 {count}개",
+  // 커뮤니티 tier 는 목록에는 뜨지만 설치는 안 된다 — 그 사실을 한 줄로 공시한다.
+  "harness.store.registry.communityListedNote":
+    "이 중 커뮤니티 {count}개는 참조 전용(설치 불가)",
   "harness.store.registry.githubCatalog": "GitHub 전체 카탈로그 →",
-  "harness.store.registry.emptyVerified":
-    "검증된 자산이 곧 여기 뜹니다. 전체는 GitHub에서 볼 수 있습니다.",
+  "harness.store.registry.emptyCatalog":
+    "표시할 자산이 없습니다. 전체 카탈로그는 GitHub에서 볼 수 있습니다.",
 };

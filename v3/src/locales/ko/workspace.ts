@@ -27,6 +27,7 @@ export const workspace = {
   "workspace.tab.lanes": "퀵레인",
   "workspace.tab.guide": "가이드",
   "workspace.tab.usage": "사용량",
+  "workspace.tab.store": "스토어",
   "workspace.tab.harness": "하네스",
   "workspace.tab.missions": "미션",
   "workspace.tab.flows": "플로우 (베타)",

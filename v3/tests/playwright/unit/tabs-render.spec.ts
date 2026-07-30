@@ -28,6 +28,7 @@ const TABS = [
   "missions",
   "code",
   "agents",
+  "store",
   "harness",
   "settings",
 ] as const;

@@ -208,6 +208,7 @@ describe("visibleRightTabs", () => {
       "deploy",
       "worktrees",
       "history",
+      "store",
       "harness",
       "settings",
     ];
@@ -233,6 +234,22 @@ describe("visibleRightTabs", () => {
     const codeIndex = RIGHT_TABS.indexOf("code");
     expect(codeIndex).toBeGreaterThanOrEqual(0);
     expect(RIGHT_TABS[codeIndex + 1]).toBe("lanes");
+  });
+
+  // The Store was a section buried inside the Harness tab, under the required
+  // CLI/vendor connection setup — a browsable catalog behind a settings screen.
+  // It was promoted to its own tab placed immediately BEFORE Harness so the
+  // pair reads as "what you must connect" → "what you may add". Pinned so a
+  // future insertion doesn't split them or push Store back behind Harness.
+  it("★places Store immediately before Harness", () => {
+    const harnessIndex = RIGHT_TABS.indexOf("harness");
+    expect(harnessIndex).toBeGreaterThan(0);
+    expect(RIGHT_TABS[harnessIndex - 1]).toBe("store");
+  });
+
+  it("★Store is always visible — never dev-flag gated", () => {
+    expect(DEV_ONLY_RIGHT_TABS.has("store")).toBe(false);
+    expect(visibleRightTabs([])).toContain("store");
   });
 
   it("★Quick Lanes stays adjacent to Code once dev-only tabs are hidden", () => {

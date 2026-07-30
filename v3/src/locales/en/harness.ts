@@ -101,8 +101,10 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.uninstallConfirm": "Uninstall {name}?",
   "harness.store.uninstallFail": "Uninstall failed",
   "harness.store.uninstallDone": "{name} uninstalled.",
-  "harness.store.title": "Harness Store",
-  "harness.store.subtitle": "Install skills / MCPs in one place",
+  // The Harness tab now holds only the connections this app REQUIRES — the
+  // opt-in asset catalog moved out to the top-level Store tab.
+  "harness.store.title": "Harness connections",
+  "harness.store.subtitle": "CLIs, vendors, channels — what this app needs",
   "harness.store.emptyList": "No packages to show.",
   "harness.store.deprecated": "Deprecated soon",
   "harness.store.badge.installed": "Installed",
@@ -128,15 +130,12 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.docs": "Docs →",
   "harness.store.footerMcp":
     "Marblo MCP auto-connects only to agents spawned inside the dashboard (per-agent isolated config). Manage external terminal CLI sessions with your own setup, e.g. the taskforce MCP.",
-  "harness.store.footerGithub":
-    "Direct install from external GitHub URLs is coming later (after trust verification).",
-  // --- The two sections of the store screen (Connections / Store) ---
+  "harness.store.footerStoreMoved":
+    "Installing skill / MCP assets moved to the “Store” tab above.",
+  // --- Connections section header ---
   "harness.store.section.connections": "Connections",
   "harness.store.section.connectionsDesc":
     "Connect CLIs, vendors and channels to this app.",
-  "harness.store.section.store": "Store",
-  "harness.store.section.storeDesc":
-    "Install reviewed skills and MCP assets. The full catalog lives on GitHub.",
   // --- Telegram channel panel ---
   "harness.telegram.status.idle": "Idle",
   "harness.telegram.status.connected": "Connected",
@@ -171,13 +170,15 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.installedCliVersion": "Installed CLI version v{version}",
 
   // --- Public registry store (marblo-app/marblo) ---
-  "harness.store.cat.regskill": "Store skills",
-  "harness.store.cat.regmcp": "Store MCP",
+  // Top-level Store tab header
+  "store.tab.title": "Store",
+  "store.tab.subtitle": "Skill and MCP catalog from the public registry",
   "harness.store.registry.title": "Public registry",
   "harness.store.registry.subtitle":
-    "Only official and verified tiers from the public registry (marblo-app/marblo) are installable in-app. Tier and permissions are disclosures — they do not restrict what an item does once installed.",
+    "The full catalog of the public registry (marblo-app/marblo). Only official and verified tiers are installable in-app; community tier is listed for disclosure only. Tier and permissions are disclosures — they do not restrict what an item does once installed.",
   "harness.store.registry.skills": "Skills",
   "harness.store.registry.mcp": "MCP servers",
+  "harness.store.registry.other": "Other",
   "harness.store.registry.stale":
     "Could not reach the registry — showing the last fetched list.",
   "harness.store.registry.unavailable":
@@ -212,9 +213,10 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.store.registry.uninstallFail": "Uninstall failed.",
   "harness.store.registry.source": "Source",
   "harness.store.registry.loadFail": "Failed to load the registry list.",
-  // Community tier is kept out of the in-app list — link to the GitHub catalog.
-  "harness.store.registry.communityHidden": "{count} community items",
+  // Community tier is listed but never installable — say so in one line.
+  "harness.store.registry.communityListedNote":
+    "{count} of these are community, reference-only (not installable)",
   "harness.store.registry.githubCatalog": "Full catalog on GitHub →",
-  "harness.store.registry.emptyVerified":
-    "Reviewed assets will show up here soon. The full catalog is on GitHub.",
+  "harness.store.registry.emptyCatalog":
+    "No assets to show. The full catalog is on GitHub.",
 };

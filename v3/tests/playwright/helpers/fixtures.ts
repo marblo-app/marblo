@@ -54,6 +54,7 @@ export interface MarbloHandle {
       | "agents"
       | "flows"
       | "deploy"
+      | "store"
       | "harness"
       | "settings",
   ): Promise<void>;
@@ -134,6 +135,22 @@ export const test = base.extend<Fixtures>({
       async openTab(tabId) {
         // 모달이 뒤늦게 떴을 수 있으니 클릭 직전 한 번 더 확인.
         await dismissFirstRunDialogs(page);
+        // 셸 탭(role=tab, i18n 라벨)을 먼저 보고, 없으면 레거시 TabBar(영어
+        // 라벨)로 떨어진다. 셸의 탭 바는 가로 스크롤이라 화면 밖일 수 있어
+        // 클릭 전에 스크롤해 들여온다.
+        const shellTab = page.locator(
+          `[role="tab"]:has-text("${shellLabelOf(tabId)}")`,
+        );
+        if (
+          await shellTab
+            .first()
+            .isVisible()
+            .catch(() => false)
+        ) {
+          await shellTab.first().scrollIntoViewIfNeeded();
+          await shellTab.first().click();
+          return;
+        }
         const sel = `[data-testid="tab-${tabId}"], button:has-text("${labelOf(
           tabId,
         )}")`;
@@ -614,8 +631,35 @@ function labelOf(tabId: string): string {
     agents: "Agents",
     flows: "Flows (Beta)",
     deploy: "Deploy",
+    store: "Store",
     harness: "Harness",
     settings: "Settings",
+  };
+  return m[tabId] ?? tabId;
+}
+
+/**
+ * 워크스페이스 셸(기본 ON)의 탭 라벨 — `src/locales/ko/workspace.ts` 의
+ * `workspace.tab.*` 와 일치해야 한다.
+ *
+ * 왜 두 벌인가: 앱은 두 개의 탭 바를 갖고 있다. 레거시 `TabBar`(하드코딩 영어
+ * 라벨)와 워크스페이스 셸의 `WorkTabs`(i18n, 기본 로케일 ko). 헬퍼가 영어
+ * 라벨만 찾던 시절엔 셸이 기본이 된 뒤로 board·code·harness·settings 등
+ * 대부분의 탭 클릭이 30초 타임아웃으로 죽어 있었다 — 스펙이 빨간 게 아니라
+ * 헬퍼가 낡은 것이었다. 둘 다 시도하므로 어느 셸이 켜져 있어도 동작한다.
+ */
+function shellLabelOf(tabId: string): string {
+  const m: Record<string, string> = {
+    guide: "가이드",
+    board: "보드",
+    missions: "미션",
+    code: "코드",
+    agents: "에이전트",
+    flows: "플로우 (베타)",
+    deploy: "배포",
+    store: "스토어",
+    harness: "하네스",
+    settings: "설정",
   };
   return m[tabId] ?? tabId;
 }

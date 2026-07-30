@@ -13,6 +13,7 @@ import { LanesTab } from "../lanes/LanesTab";
 import { GuideTab } from "../guide/GuideTab";
 import { UsagePage } from "../usage/UsagePage";
 import { HarnessStore } from "../harness/HarnessStore";
+import { StoreTab } from "../store/StoreTab";
 import { MissionsTab } from "../tabs/MissionsTab";
 import { DeployTab } from "../tabs/DeployTab";
 import { FlowsTab } from "../tabs/FlowsTab";
@@ -63,6 +64,7 @@ const TAB_COMPONENTS: Record<RightTabId, () => JSX.Element> = {
   lanes: LanesTab,
   guide: GuideTab,
   usage: UsagePage,
+  store: StoreTab,
   harness: HarnessTabPanel,
   missions: MissionsTab,
   flows: GatedFlowsTab,
@@ -80,6 +82,7 @@ const TAB_LABEL_KEY = {
   lanes: "workspace.tab.lanes",
   guide: "workspace.tab.guide",
   usage: "workspace.tab.usage",
+  store: "workspace.tab.store",
   harness: "workspace.tab.harness",
   missions: "workspace.tab.missions",
   flows: "workspace.tab.flows",
