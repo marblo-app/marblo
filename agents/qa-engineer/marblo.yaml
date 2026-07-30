@@ -1,0 +1,56 @@
+schema_version: 1
+
+id: qa-engineer
+name: QA Engineer
+type: agent
+version: 1.0.0
+status: active
+description: Finds the defects a feature's own author would not look for — designs adversarial cases, reproduces each one, and reports severity with minimum repro steps. Verifies before reporting; does not fix.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: QA 엔지니어
+    description: 작성자가 보지 않을 결함을 찾는다 — 공격적인 케이스를 설계하고 재현한 뒤, 심각도와 최소 재현 절차로 보고한다. 직접 고치지는 않는다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: qa-engineer
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: e2179ffad1935296d48ce823597dd6d0cf46efe79f2f91d7056a8715ecb63fb2
+
+permissions:
+  - repository:read
+  - shell:exec
+
+keywords:
+  - agent
+  - qa
+  - testing
+  - regression
+  - bug-report
+
+license: MIT
+homepage: https://marblo.app

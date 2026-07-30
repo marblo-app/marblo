@@ -429,6 +429,165 @@ test("install.kind must match the item type", () => {
   });
 });
 
+/**
+ * An agent item whose payload is a single AGENT.md with a known digest. Agents
+ * install into a different root than skills, so they need their own fixture
+ * rather than a flag on the skill one.
+ */
+function writeAgentItem(fixture, dir, { install = "", body = "agent\n" }) {
+  const itemDir = join(fixture, "agents", dir);
+  mkdirSync(itemDir, { recursive: true });
+  writeFileSync(join(itemDir, "AGENT.md"), body);
+  writeFileSync(
+    join(itemDir, "marblo.yaml"),
+    [
+      "schema_version: 1",
+      `id: ${dir}`,
+      "name: Fixture Agent",
+      "type: agent",
+      "version: 1.0.0",
+      "description: fixture",
+      "publisher:",
+      "  name: Marblo",
+      "  tier: official",
+      "license: MIT",
+      "permissions: []",
+      install,
+    ].join("\n") + "\n"
+  );
+  return createHash("sha256").update(body).digest("hex");
+}
+
+test("an agent installs files into the subagents root", () => {
+  withFixture((fixture) => {
+    const digest = writeAgentItem(fixture, "good-agent", {
+      install: [
+        "install:",
+        "  kind: files",
+        "  root: claude-agents",
+        "  dest: good-agent",
+        "  files:",
+        "    - AGENT.md",
+        "  integrity:",
+        "    algorithm: sha256",
+        "    files:",
+        "      AGENT.md: PLACEHOLDER",
+      ].join("\n"),
+    });
+    const manifestPath = join(fixture, "agents", "good-agent", "marblo.yaml");
+    writeFileSync(
+      manifestPath,
+      readFileSync(manifestPath, "utf8").replace("PLACEHOLDER", digest)
+    );
+    assert.deepEqual(errorsFor(fixture), []);
+  });
+});
+
+test("an agent cannot install itself into the skills tree", () => {
+  withFixture((fixture) => {
+    const digest = writeAgentItem(fixture, "root-swapping-agent", {
+      install: [
+        "install:",
+        "  kind: files",
+        "  root: claude-skills",
+        "  dest: root-swapping-agent",
+        "  files:",
+        "    - AGENT.md",
+        "  integrity:",
+        "    algorithm: sha256",
+        "    files:",
+        "      AGENT.md: PLACEHOLDER",
+      ].join("\n"),
+    });
+    const manifestPath = join(
+      fixture,
+      "agents",
+      "root-swapping-agent",
+      "marblo.yaml"
+    );
+    writeFileSync(
+      manifestPath,
+      readFileSync(manifestPath, "utf8").replace("PLACEHOLDER", digest)
+    );
+    assert.ok(
+      errorsFor(fixture).some((error) =>
+        error.includes("does not match type 'agent'")
+      )
+    );
+  });
+});
+
+test("a skill cannot install itself into the subagents tree", () => {
+  withFixture((fixture) => {
+    const digest = writeSkillItem(fixture, "root-swapping-skill", {
+      install: [
+        "install:",
+        "  kind: files",
+        "  root: claude-agents",
+        "  dest: root-swapping-skill",
+        "  files:",
+        "    - SKILL.md",
+        "  integrity:",
+        "    algorithm: sha256",
+        "    files:",
+        "      SKILL.md: PLACEHOLDER",
+      ].join("\n"),
+    });
+    const manifestPath = join(
+      fixture,
+      "skills",
+      "root-swapping-skill",
+      "marblo.yaml"
+    );
+    writeFileSync(
+      manifestPath,
+      readFileSync(manifestPath, "utf8").replace("PLACEHOLDER", digest)
+    );
+    assert.ok(
+      errorsFor(fixture).some((error) =>
+        error.includes("does not match type 'skill'")
+      )
+    );
+  });
+});
+
+test("a type with no install semantics still cannot carry an install block", () => {
+  withFixture((fixture) => {
+    const itemDir = join(fixture, "workflows", "uninstallable-workflow");
+    mkdirSync(itemDir, { recursive: true });
+    writeFileSync(join(itemDir, "WORKFLOW.md"), "steps\n");
+    writeFileSync(
+      join(itemDir, "marblo.yaml"),
+      [
+        "schema_version: 1",
+        "id: uninstallable-workflow",
+        "name: Fixture Workflow",
+        "type: workflow",
+        "version: 1.0.0",
+        "description: fixture",
+        "publisher:",
+        "  name: Marblo",
+        "  tier: official",
+        "license: MIT",
+        "permissions: []",
+        "install:",
+        "  kind: files",
+        "  root: claude-agents",
+        "  dest: uninstallable-workflow",
+        "  files:",
+        "    - WORKFLOW.md",
+        "  integrity:",
+        "    algorithm: sha256",
+        "    files:",
+        `      WORKFLOW.md: ${"0".repeat(64)}`,
+      ].join("\n") + "\n"
+    );
+    assert.ok(
+      errorsFor(fixture).some((error) => error.includes("is not installable"))
+    );
+  });
+});
+
 test("invalid manifest requirements are reported", () => {
   const fixture = mkdtempSync(join(tmpdir(), "marblo-registry-"));
   try {

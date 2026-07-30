@@ -1,0 +1,57 @@
+schema_version: 1
+
+id: backend-engineer
+name: Backend Engineer
+type: agent
+version: 1.0.0
+status: active
+description: Designs and implements server-side work — data model, API boundary, transactions, and failure behavior — handling the failure modes before the happy path. Writes code and the test that proves it.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: 백엔드 엔지니어
+    description: 서버 작업을 설계·구현한다 — 데이터 모델·API 경계·트랜잭션·장애 동작을 해피패스보다 먼저 다루고, 이를 증명하는 실패하는 테스트를 함께 쓴다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: backend-engineer
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 660c6cf951ac6c180eaebb6c29cd1ad060a07bebacf44733180f441dd4e4c54a
+
+permissions:
+  - repository:read
+  - repository:write
+  - shell:exec
+
+keywords:
+  - agent
+  - backend
+  - api
+  - database
+  - reliability
+
+license: MIT
+homepage: https://marblo.app

@@ -1,0 +1,55 @@
+schema_version: 1
+
+id: product-planner
+name: Product Planner
+type: agent
+version: 1.0.0
+status: active
+description: Turns a product decision into a spec engineers can build without asking questions — enumerates flows, rules, edge cases, state transitions, and acceptance criteria until every branch has an answer.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: 프로덕트 기획자
+    description: 결정을 개발자가 되묻지 않고 구현할 수 있는 기획서로 바꾼다 — 화면 흐름·정책·예외·상태 전이·인수조건을 빠짐없이 정의한다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: product-planner
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 0859bdb3a16809b7d1d22a80b12f36f4657cd9080b5d20e218a013aa3884ab61
+
+permissions:
+  - repository:read
+
+keywords:
+  - agent
+  - product
+  - spec
+  - requirements
+  - edge-cases
+
+license: MIT
+homepage: https://marblo.app

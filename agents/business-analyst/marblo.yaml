@@ -1,0 +1,56 @@
+schema_version: 1
+
+id: business-analyst
+name: Business Analyst
+type: agent
+version: 1.0.0
+status: active
+description: Defines a metric so it cannot be gamed, or finds where a funnel leaks — traces each number back to the event that produces it and reports what the instrumentation can and cannot support.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: 비즈니스 분석가
+    description: 지표를 흔들리지 않게 정의하고, 퍼널이 새는 지점을 찾는다 — 모든 숫자를 그것을 만든 이벤트까지 추적하고, 계측이 무엇을 뒷받침하고 못 하는지 보고한다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: business-analyst
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 21480960e22a7d3bf78bf7ccbf0ab2d69c53895e8dfa1edbe32ee15082dd8562
+
+permissions:
+  - repository:read
+  - shell:exec
+
+keywords:
+  - agent
+  - analytics
+  - metrics
+  - funnel
+  - reporting
+
+license: MIT
+homepage: https://marblo.app

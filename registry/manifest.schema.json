@@ -181,8 +181,8 @@
             "properties": {
               "kind": { "const": "files" },
               "root": {
-                "description": "Destination root, as an ENUM KEY the app maps to an absolute path. A manifest can never carry a path.",
-                "enum": ["claude-skills"]
+                "description": "Destination root, as an ENUM KEY the app maps to an absolute path — `claude-skills` resolves to the harness skills directory, `claude-agents` to its subagents directory. A manifest can never carry a path. The root is also bound to the item `type` (see allOf below): a skill cannot install itself into the agents tree, and an agent cannot install itself into the skills tree, so the category an item is listed under is the category it lands in.",
+                "enum": ["claude-skills", "claude-agents"]
               },
               "dest": {
                 "description": "Directory name under `root`. Exactly one path segment: no `/`, no `\\`, no `.`, no `..`. The app re-resolves and realpath-checks containment on top of this.",
@@ -335,7 +335,7 @@
       "then": { "required": ["source"] }
     },
     {
-      "$comment": "The install kind has to match the item type — a skill installs files, an MCP server registers a server. Only these two types are installable in Phase 1a; the rest are list-and-disclose only.",
+      "$comment": "The install kind AND the destination root have to match the item type — a skill installs files into the skills tree, an agent installs files into the subagents tree, an MCP server registers a server. Only these three types are installable; the rest are list-and-disclose only. Binding root to type is what stops an item from being reviewed as one category and installed as another.",
       "if": { "required": ["install"] },
       "then": {
         "allOf": [
@@ -346,7 +346,28 @@
             },
             "then": {
               "properties": {
-                "install": { "properties": { "kind": { "const": "files" } } }
+                "install": {
+                  "properties": {
+                    "kind": { "const": "files" },
+                    "root": { "const": "claude-skills" }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": ["type"],
+              "properties": { "type": { "const": "agent" } }
+            },
+            "then": {
+              "properties": {
+                "install": {
+                  "properties": {
+                    "kind": { "const": "files" },
+                    "root": { "const": "claude-agents" }
+                  }
+                }
               }
             }
           },
@@ -365,7 +386,7 @@
           },
           {
             "properties": {
-              "type": { "enum": ["skill", "mcp-server"] }
+              "type": { "enum": ["skill", "agent", "mcp-server"] }
             }
           }
         ]

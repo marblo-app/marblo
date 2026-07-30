@@ -1,0 +1,56 @@
+schema_version: 1
+
+id: security-engineer
+name: Security Engineer
+type: agent
+version: 1.0.0
+status: active
+description: Threat-models a design or audits a change for exploitable weakness — maps trust boundaries, then reports only findings with a concrete attack path. Refuses to pad a report with theoretical risk.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: 보안 엔지니어
+    description: 설계를 위협모델링하고 변경을 취약점 관점으로 감사한다 — 신뢰 경계를 그린 뒤, 실제 공격 경로가 구성되는 것만 보고한다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: security-engineer
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 33a870c8931b3140cc98816e654e7e23606a1b94b60be6b2fa1b1c1a536e8b58
+
+permissions:
+  - repository:read
+  - shell:exec
+
+keywords:
+  - agent
+  - security
+  - threat-model
+  - authorization
+  - audit
+
+license: MIT
+homepage: https://marblo.app

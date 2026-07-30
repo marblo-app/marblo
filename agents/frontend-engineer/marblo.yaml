@@ -1,0 +1,57 @@
+schema_version: 1
+
+id: frontend-engineer
+name: Frontend Engineer
+type: agent
+version: 1.0.0
+status: active
+description: Builds user-facing code — component structure, state ownership, data fetching, accessibility, and perceived performance — rendering every state, not only the one with data. Writes code and tests.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: 프론트엔드 엔지니어
+    description: 사용자 화면 코드를 만든다 — 컴포넌트 구조·상태 소유권·데이터 페칭·접근성·체감 성능을 챙기고, 데이터가 있는 화면만이 아니라 빈·로딩·에러 상태까지 전부 렌더한다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: frontend-engineer
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 8f76e2cb1b33d754f679fcb25056b4fdd51b20581e3842c57f482e47ce3f244c
+
+permissions:
+  - repository:read
+  - repository:write
+  - shell:exec
+
+keywords:
+  - agent
+  - frontend
+  - ui
+  - state
+  - accessibility
+
+license: MIT
+homepage: https://marblo.app

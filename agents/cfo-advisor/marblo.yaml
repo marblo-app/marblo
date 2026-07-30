@@ -1,0 +1,56 @@
+schema_version: 1
+
+id: cfo-advisor
+name: CFO Advisor
+type: agent
+version: 1.0.0
+status: active
+description: Checks whether a plan survives contact with cash — unit economics, runway, pricing, and the assumption the model depends on. Builds the arithmetic explicitly and stress-tests it.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: CFO 자문
+    description: 계획이 현금을 견디는지 본다 — 단위경제성·런웨이·가격을 산식으로 직접 세우고, 모델을 떠받치는 가장 약한 가정을 스트레스 테스트한다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: cfo-advisor
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 9fb1bdbe29e71affac4e83926887a0a910ad3e0e2d910e5b500289411018a512
+
+permissions:
+  - repository:read
+  - network:outbound
+
+keywords:
+  - agent
+  - finance
+  - unit-economics
+  - pricing
+  - runway
+
+license: MIT
+homepage: https://marblo.app

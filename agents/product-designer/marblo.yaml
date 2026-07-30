@@ -1,0 +1,55 @@
+schema_version: 1
+
+id: product-designer
+name: Product Designer
+type: agent
+version: 1.0.0
+status: active
+description: Designs and critiques user-facing flows — reads the real UI code, judges it against state coverage, hierarchy, and accessibility, and returns an implementable design spec.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: 프로덕트 디자이너
+    description: 사용자 흐름을 설계·비평한다 — 실제 UI 코드를 읽고 상태 커버리지·위계·접근성 기준으로 판단해, 구현 가능한 디자인 스펙을 낸다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: product-designer
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 5cdd3578d2614f27d16094d3f87686f563d3dc62f74e0e7bfdc9c24c51a7279e
+
+permissions:
+  - repository:read
+
+keywords:
+  - agent
+  - design
+  - ux
+  - ui
+  - accessibility
+
+license: MIT
+homepage: https://marblo.app
