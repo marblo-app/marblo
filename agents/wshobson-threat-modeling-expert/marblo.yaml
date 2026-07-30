@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: wshobson-threat-modeling-expert
+name: Threat Modeling Expert (wshobson)
+type: agent
+version: 0.1.0
+status: active
+description: Design-time security subagent — STRIDE and PASTA analysis, attack-tree construction, data-flow diagram review, security-requirement extraction, and risk-ranked mitigation mapping. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/security-scanning/agents/threat-modeling-expert.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - threat-model
+  - stride
+  - security
+  - risk
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents

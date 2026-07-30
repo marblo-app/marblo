@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" width="1200" height="760" role="img" aria-label="Board — Kanban for your AI agents" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <linearGradient id="bd-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <style> .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; } </style>
+
+  <rect x="8" y="8" width="1184" height="744" rx="14" fill="#111827" stroke="#374151" stroke-width="1.5"/>
+  <clipPath id="bd-clip"><rect x="8" y="8" width="1184" height="744" rx="14"/></clipPath>
+  <g clip-path="url(#bd-clip)">
+
+    <!-- header -->
+    <rect x="8" y="8" width="1184" height="48" fill="#0d1420"/>
+    <line x1="8" y1="56" x2="1192" y2="56" stroke="#374151"/>
+    <circle cx="34" cy="32" r="6" fill="#ff5f57"/><circle cx="56" cy="32" r="6" fill="#febc2e"/><circle cx="78" cy="32" r="6" fill="#28c840"/>
+    <rect x="104" y="21" width="22" height="22" rx="6" fill="url(#bd-mark)"/><circle cx="115" cy="32" r="4.5" fill="#0d1420"/>
+    <text x="136" y="38" fill="#ffffff" font-size="16" font-weight="700">Marblo</text>
+    <text x="202" y="38" fill="#6b7280" font-size="11">v3</text>
+    <rect x="500" y="18" width="200" height="28" rx="8" fill="#1f2937" stroke="#374151"/>
+    <text x="540" y="37" fill="#e5e7eb" font-size="13" font-weight="600">my-app</text>
+    <path d="M676 29 l4 4 l4 -4" fill="none" stroke="#9ca3af" stroke-width="1.5"/>
+    <rect x="710" y="22" width="46" height="20" rx="10" fill="#3b82f6" fill-opacity="0.2" stroke="#3b82f6" stroke-opacity="0.3"/>
+    <text x="733" y="36" fill="#60a5fa" font-size="10" font-weight="700" text-anchor="middle" letter-spacing="0.5">FREE</text>
+    <rect x="960" y="21" width="150" height="22" rx="11" fill="#22c55e" fill-opacity="0.12" stroke="#22c55e" stroke-opacity="0.28"/>
+    <circle cx="978" cy="32" r="3.5" fill="#4ade80"/>
+    <text x="990" y="36" fill="#86efac" font-size="11" font-weight="600">4 agents running</text>
+    <circle cx="1168" cy="32" r="12" fill="#3b82f6"/><text x="1168" y="36" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">D</text>
+
+    <!-- tab bar (Board active) -->
+    <rect x="8" y="56" width="1184" height="36" fill="#0d1420"/>
+    <line x1="8" y1="92" x2="1192" y2="92" stroke="#374151"/>
+    <g font-size="12.5" font-weight="600" fill="#9ca3af">
+      <text x="40" y="78">Guide</text>
+      <text x="97" y="78" fill="#60a5fa">Board</text>
+      <text x="154" y="78">Lanes</text>
+      <text x="211" y="78">Missions</text>
+      <text x="289" y="78">Code</text>
+      <text x="339" y="78">Agents</text>
+      <text x="403" y="78">Usage</text>
+      <text x="460" y="78">Worktrees</text>
+      <text x="545" y="78">History</text>
+    </g>
+    <rect x="91" y="90" width="47" height="2" fill="#3b82f6"/>
+
+    <!-- collapsed sidebar strip -->
+    <rect x="8" y="92" width="40" height="660" fill="#1f2937"/>
+    <line x1="48" y1="92" x2="48" y2="752" stroke="#374151"/>
+    <path d="M20 120 h14 v10 h-14 z M20 120 l3.5 -4 h5 l0 4" fill="#eab308"/>
+    <path d="M22 150 l5 5 l-5 5" fill="none" stroke="#6b7280" stroke-width="1.4"/>
+
+    <!-- board toolbar -->
+    <text x="72" y="116" fill="#d1d5db" font-size="13" font-weight="600">my-app</text>
+    <g font-size="11" fill="#9ca3af">
+      <rect x="176" y="106" width="11" height="11" rx="2.5" fill="#3b82f6"/><path d="M179 111.5 l2 2 l3.5 -4" stroke="#fff" stroke-width="1.3" fill="none"/><text x="192" y="116">backend</text>
+      <rect x="252" y="106" width="11" height="11" rx="2.5" fill="#3b82f6"/><path d="M255 111.5 l2 2 l3.5 -4" stroke="#fff" stroke-width="1.3" fill="none"/><text x="268" y="116">frontend</text>
+      <rect x="330" y="106" width="11" height="11" rx="2.5" fill="#3b82f6"/><path d="M333 111.5 l2 2 l3.5 -4" stroke="#fff" stroke-width="1.3" fill="none"/><text x="346" y="116">test</text>
+      <rect x="390" y="106" width="11" height="11" rx="2.5" fill="#374151" stroke="#4b5563"/><text x="406" y="116">devops</text>
+    </g>
+    <text x="812" y="116" fill="#6b7280" font-size="11" text-anchor="end">9 tasks</text>
+    <rect x="828" y="100" width="92" height="26" rx="7" fill="#a855f7" fill-opacity="0.1" stroke="#a855f7" stroke-opacity="0.5"/>
+    <path d="M848 106 l-4 8 h4 l-2 6 l7 -9 h-4 l3 -5 z" fill="#c084fc"/>
+    <text x="860" y="117" fill="#c084fc" font-size="12" font-weight="600">AI split</text>
+    <rect x="930" y="100" width="112" height="26" rx="7" fill="#2563eb"/>
+    <path d="M948 113 h10 M953 108 v10" stroke="#fff" stroke-width="1.6"/>
+    <text x="966" y="117" fill="#ffffff" font-size="12" font-weight="600">New Task</text>
+
+    <!-- ===== columns (COLUMN_STATUSES: TODO · CLAIMED · IN_PROGRESS · REVIEW · DONE) ===== -->
+    <g>
+      <rect x="72" y="150" width="210" height="590" rx="8" fill="#0d1420" fill-opacity="0.6" stroke="#374151" stroke-opacity="0.5"/>
+      <text x="88" y="174" fill="#9ca3af" font-size="12" font-weight="700">TODO</text>
+      <rect x="140" y="164" width="22" height="16" rx="8" fill="#6b7280"/><text x="151" y="176" fill="#fff" font-size="10" text-anchor="middle">2</text>
+
+      <rect x="296" y="150" width="210" height="590" rx="8" fill="#0d1420" fill-opacity="0.6" stroke="#374151" stroke-opacity="0.5"/>
+      <text x="312" y="174" fill="#facc15" font-size="12" font-weight="700">CLAIMED</text>
+      <rect x="386" y="164" width="22" height="16" rx="8" fill="#eab308"/><text x="397" y="176" fill="#fff" font-size="10" text-anchor="middle">1</text>
+
+      <rect x="520" y="150" width="210" height="590" rx="8" fill="#0d1420" fill-opacity="0.6" stroke="#374151" stroke-opacity="0.5"/>
+      <text x="536" y="174" fill="#60a5fa" font-size="12" font-weight="700">IN PROGRESS</text>
+      <rect x="646" y="164" width="22" height="16" rx="8" fill="#3b82f6"/><text x="657" y="176" fill="#fff" font-size="10" text-anchor="middle">3</text>
+
+      <rect x="744" y="150" width="210" height="590" rx="8" fill="#0d1420" fill-opacity="0.6" stroke="#374151" stroke-opacity="0.5"/>
+      <text x="760" y="174" fill="#c084fc" font-size="12" font-weight="700">REVIEW</text>
+      <rect x="836" y="164" width="22" height="16" rx="8" fill="#a855f7"/><text x="847" y="176" fill="#fff" font-size="10" text-anchor="middle">1</text>
+
+      <rect x="968" y="150" width="210" height="590" rx="8" fill="#0d1420" fill-opacity="0.6" stroke="#374151" stroke-opacity="0.5"/>
+      <text x="984" y="174" fill="#4ade80" font-size="12" font-weight="700">DONE</text>
+      <rect x="1042" y="164" width="22" height="16" rx="8" fill="#22c55e"/><text x="1053" y="176" fill="#fff" font-size="10" text-anchor="middle">2</text>
+    </g>
+
+    <!-- ===== TODO cards (unassigned → no model badge yet) ===== -->
+    <g>
+      <rect x="82" y="192" width="190" height="98" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <text x="96" y="214" fill="#e5e7eb" font-size="12" font-weight="500">Payments integration</text>
+      <text x="96" y="230" fill="#e5e7eb" font-size="12" font-weight="500">(Toss webhook)</text>
+      <rect x="96" y="242" width="62" height="16" rx="4" fill="#f97316" fill-opacity="0.2"/><text x="127" y="254" fill="#fb923c" font-size="9.5" font-weight="600" text-anchor="middle">backend</text>
+      <rect x="162" y="242" width="24" height="16" rx="4" fill="#f97316" fill-opacity="0.2"/><text x="174" y="254" fill="#fb923c" font-size="9.5" font-weight="600" text-anchor="middle">P4</text>
+      <circle cx="100" cy="276" r="3" fill="#6b7280"/><text x="110" y="279" fill="#6b7280" font-size="10">unassigned</text>
+      <text x="262" y="279" fill="#6b7280" font-size="10" text-anchor="end">just now</text>
+    </g>
+    <g>
+      <rect x="82" y="300" width="190" height="98" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <text x="96" y="322" fill="#e5e7eb" font-size="12" font-weight="500">E2E test for the</text>
+      <text x="96" y="338" fill="#e5e7eb" font-size="12" font-weight="500">signup flow</text>
+      <rect x="96" y="350" width="40" height="16" rx="4" fill="#ec4899" fill-opacity="0.2"/><text x="116" y="362" fill="#f472b6" font-size="9.5" font-weight="600" text-anchor="middle">test</text>
+      <rect x="140" y="350" width="24" height="16" rx="4" fill="#eab308" fill-opacity="0.2"/><text x="152" y="362" fill="#facc15" font-size="9.5" font-weight="600" text-anchor="middle">P3</text>
+      <circle cx="100" cy="384" r="3" fill="#6b7280"/><text x="110" y="387" fill="#6b7280" font-size="10">unassigned</text>
+      <text x="262" y="387" fill="#6b7280" font-size="10" text-anchor="end">2m</text>
+    </g>
+
+    <!-- ===== CLAIMED ===== -->
+    <g>
+      <rect x="306" y="192" width="190" height="118" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <text x="320" y="214" fill="#e5e7eb" font-size="12" font-weight="500">Auth API — JWT</text>
+      <text x="320" y="230" fill="#e5e7eb" font-size="12" font-weight="500">refresh rotation</text>
+      <rect x="320" y="242" width="62" height="16" rx="4" fill="#f97316" fill-opacity="0.2"/><text x="351" y="254" fill="#fb923c" font-size="9.5" font-weight="600" text-anchor="middle">backend</text>
+      <rect x="386" y="242" width="24" height="16" rx="4" fill="#ef4444" fill-opacity="0.2"/><text x="398" y="254" fill="#f87171" font-size="9.5" font-weight="600" text-anchor="middle">P5</text>
+      <rect x="320" y="264" width="104" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="328" y="276" class="mono" fill="#a6adc8" font-size="10">claude-opus-5</text>
+      <circle cx="324" cy="296" r="3" fill="#facc15"/><text x="334" y="299" fill="#9ca3af" font-size="10">claude · backend</text>
+      <text x="486" y="299" fill="#6b7280" font-size="10" text-anchor="end">1m</text>
+    </g>
+
+    <!-- ===== IN PROGRESS ===== -->
+    <g>
+      <rect x="530" y="192" width="190" height="118" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <text x="544" y="214" fill="#e5e7eb" font-size="12" font-weight="500">Dashboard UI</text>
+      <text x="544" y="230" fill="#e5e7eb" font-size="12" font-weight="500">components</text>
+      <rect x="544" y="242" width="64" height="16" rx="4" fill="#06b6d4" fill-opacity="0.2"/><text x="576" y="254" fill="#22d3ee" font-size="9.5" font-weight="600" text-anchor="middle">frontend</text>
+      <rect x="612" y="242" width="24" height="16" rx="4" fill="#eab308" fill-opacity="0.2"/><text x="624" y="254" fill="#facc15" font-size="9.5" font-weight="600" text-anchor="middle">P3</text>
+      <rect x="544" y="264" width="98" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="552" y="276" class="mono" fill="#a6adc8" font-size="10">gpt-5.6-sol</text>
+      <circle cx="548" cy="296" r="3" fill="#4ade80"/><text x="558" y="299" fill="#9ca3af" font-size="10">codex · frontend</text>
+      <text x="710" y="299" fill="#6b7280" font-size="10" text-anchor="end">just now</text>
+    </g>
+    <g>
+      <rect x="530" y="320" width="190" height="118" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <text x="544" y="342" fill="#e5e7eb" font-size="12" font-weight="500">Search indexing</text>
+      <text x="544" y="358" fill="#e5e7eb" font-size="12" font-weight="500">optimization</text>
+      <rect x="544" y="370" width="62" height="16" rx="4" fill="#f97316" fill-opacity="0.2"/><text x="575" y="382" fill="#fb923c" font-size="9.5" font-weight="600" text-anchor="middle">backend</text>
+      <rect x="610" y="370" width="24" height="16" rx="4" fill="#f97316" fill-opacity="0.2"/><text x="622" y="382" fill="#fb923c" font-size="9.5" font-weight="600" text-anchor="middle">P4</text>
+      <rect x="544" y="392" width="86" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="552" y="404" class="mono" fill="#a6adc8" font-size="10">gpt-5.5</text>
+      <circle cx="548" cy="424" r="3" fill="#4ade80"/><text x="558" y="427" fill="#9ca3af" font-size="10">codex · backend</text>
+      <text x="710" y="427" fill="#6b7280" font-size="10" text-anchor="end">3m</text>
+    </g>
+    <g>
+      <rect x="530" y="448" width="190" height="118" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <rect x="530" y="448" width="3" height="118" rx="1.5" fill="#f59e0b"/>
+      <text x="544" y="470" fill="#e5e7eb" font-size="12" font-weight="500">Tighten CI cache</text>
+      <text x="544" y="486" fill="#e5e7eb" font-size="12" font-weight="500">keys</text>
+      <rect x="544" y="498" width="62" height="16" rx="4" fill="#10b981" fill-opacity="0.2"/><text x="575" y="510" fill="#34d399" font-size="9.5" font-weight="600" text-anchor="middle">devops</text>
+      <rect x="610" y="498" width="42" height="16" rx="4" fill="#f59e0b" fill-opacity="0.2"/><text x="631" y="510" fill="#fbbf24" font-size="9.5" font-weight="600" text-anchor="middle">Lane</text>
+      <rect x="544" y="520" width="80" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="552" y="532" class="mono" fill="#a6adc8" font-size="10">grok-4.5</text>
+      <circle cx="548" cy="552" r="3" fill="#4ade80"/><text x="558" y="555" fill="#9ca3af" font-size="10">grok · devops</text>
+      <text x="710" y="555" fill="#6b7280" font-size="10" text-anchor="end">6m</text>
+    </g>
+
+    <!-- ===== REVIEW ===== -->
+    <g>
+      <rect x="754" y="192" width="190" height="118" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <text x="768" y="214" fill="#e5e7eb" font-size="12" font-weight="500">File tree refactor</text>
+      <text x="768" y="230" fill="#e5e7eb" font-size="12" font-weight="500">+ keyboard nav</text>
+      <rect x="768" y="242" width="64" height="16" rx="4" fill="#06b6d4" fill-opacity="0.2"/><text x="800" y="254" fill="#22d3ee" font-size="9.5" font-weight="600" text-anchor="middle">frontend</text>
+      <rect x="836" y="242" width="24" height="16" rx="4" fill="#3b82f6" fill-opacity="0.2"/><text x="848" y="254" fill="#60a5fa" font-size="9.5" font-weight="600" text-anchor="middle">P2</text>
+      <rect x="864" y="242" width="30" height="16" rx="4" fill="#22c55e" fill-opacity="0.2"/><text x="879" y="254" fill="#4ade80" font-size="9.5" font-weight="600" text-anchor="middle">PR</text>
+      <rect x="768" y="264" width="104" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="776" y="276" class="mono" fill="#a6adc8" font-size="10">MiniMax-M3</text>
+      <circle cx="772" cy="296" r="3" fill="#facc15"/><text x="782" y="299" fill="#9ca3af" font-size="10">claude · frontend</text>
+      <text x="934" y="299" fill="#6b7280" font-size="10" text-anchor="end">5m</text>
+    </g>
+
+    <!-- ===== DONE ===== -->
+    <g opacity="0.85">
+      <rect x="978" y="192" width="190" height="118" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <text x="992" y="214" fill="#d1d5db" font-size="12" font-weight="500">Billing store —</text>
+      <text x="992" y="230" fill="#d1d5db" font-size="12" font-weight="500">state management</text>
+      <rect x="992" y="242" width="64" height="16" rx="4" fill="#06b6d4" fill-opacity="0.2"/><text x="1024" y="254" fill="#22d3ee" font-size="9.5" font-weight="600" text-anchor="middle">frontend</text>
+      <rect x="1060" y="242" width="24" height="16" rx="4" fill="#3b82f6" fill-opacity="0.2"/><text x="1072" y="254" fill="#60a5fa" font-size="9.5" font-weight="600" text-anchor="middle">P2</text>
+      <rect x="992" y="264" width="104" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="1000" y="276" class="mono" fill="#a6adc8" font-size="10">claude-opus-5</text>
+      <circle cx="996" cy="296" r="3" fill="#6b7280"/><text x="1006" y="299" fill="#6b7280" font-size="10">claude · frontend</text>
+      <text x="1158" y="299" fill="#6b7280" font-size="10" text-anchor="end">12m</text>
+    </g>
+    <g opacity="0.85">
+      <rect x="978" y="320" width="190" height="118" rx="8" fill="#1f2937" stroke="#374151" stroke-opacity="0.6"/>
+      <text x="992" y="342" fill="#d1d5db" font-size="12" font-weight="500">Pricing page</text>
+      <text x="992" y="358" fill="#d1d5db" font-size="12" font-weight="500">consistency pass</text>
+      <rect x="992" y="370" width="64" height="16" rx="4" fill="#06b6d4" fill-opacity="0.2"/><text x="1024" y="382" fill="#22d3ee" font-size="9.5" font-weight="600" text-anchor="middle">frontend</text>
+      <rect x="1060" y="370" width="24" height="16" rx="4" fill="#6b7280" fill-opacity="0.25"/><text x="1072" y="382" fill="#9ca3af" font-size="9.5" font-weight="600" text-anchor="middle">P1</text>
+      <rect x="992" y="392" width="72" height="17" rx="4" fill="#181825" stroke="#45475a"/>
+      <text x="1000" y="404" class="mono" fill="#a6adc8" font-size="10">glm-5.2</text>
+      <circle cx="996" cy="424" r="3" fill="#6b7280"/><text x="1006" y="427" fill="#6b7280" font-size="10">claude · frontend</text>
+      <text x="1158" y="427" fill="#6b7280" font-size="10" text-anchor="end">18m</text>
+    </g>
+  </g>
+</svg>

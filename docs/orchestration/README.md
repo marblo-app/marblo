@@ -7,4 +7,6 @@ How a goal becomes shipped code:
 3. **Run in parallel** — agents work in isolated worktrees, with watchdog self-heal when one stalls.
 4. **Review & merge** — the [`review-and-merge`](../../workflows/review-and-merge/) workflow gates every change; nothing lands without a review pass and your confirmation.
 
+Worked examples of all four steps, end to end: **[Recipes & Playbooks](../recipes/)**.
+
 Related: [`reviewer` agent](../../agents/reviewer/) · [`code-review` skill](../../skills/code-review/)

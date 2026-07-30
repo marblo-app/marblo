@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: voltagent-sre-engineer
+name: SRE Engineer (VoltAgent)
+type: agent
+version: 0.1.0
+status: active
+description: Site-reliability subagent — SLI/SLO definition, error-budget policy, toil reduction and automation, capacity planning, chaos experiments, and sustainable on-call design. Referenced by manifest; not vendored.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-claude-code-subagents
+  ref: 947b44ca0c58d606b084e9cb1a2389335b49278b
+  path: categories/03-infrastructure/sre-engineer.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+
+keywords:
+  - sre
+  - slo
+  - error-budget
+  - reliability
+  - external
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-claude-code-subagents
