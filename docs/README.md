@@ -7,5 +7,6 @@ Documentation for the Marblo app and its open ecosystem.
 - **[Harness Store](harness-store/)** — install skills, MCP servers, agents, workflows, and knowledge packs; publish your own.
 - **[Orchestration](orchestration/)** — how a goal becomes tickets, model selection, and safe merge.
 - **[Troubleshooting](troubleshooting/)** — common issues and fixes.
+- **[Benchmark](benchmark/)** — how we measure orchestrated work, and our own dogfooding numbers with their sample sizes and gaps stated up front.
 
 > Product site: [marblo.app](https://marblo.app) · Guide: [marblo.app/en/guide](https://marblo.app/en/guide)
