@@ -1,0 +1,37 @@
+schema_version: 1
+
+id: voltagent-qa-expert
+name: QA Expert (VoltAgent)
+type: agent
+version: 0.1.0
+status: active
+description: Quality-strategy subagent — test planning across the delivery cycle, coverage-gap and risk analysis, defect-pattern review, and quality metrics that survive contact with a real backlog. Referenced by manifest; not vendored.
+
+publisher:
+  name: VoltAgent
+  tier: community
+  url: https://github.com/VoltAgent
+
+source:
+  repository: https://github.com/VoltAgent/awesome-claude-code-subagents
+  ref: 947b44ca0c58d606b084e9cb1a2389335b49278b
+  path: categories/04-quality-security/qa-expert.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - filesystem:read
+  - shell:exec
+
+keywords:
+  - qa
+  - test-strategy
+  - coverage
+  - quality
+  - external
+
+license: MIT
+homepage: https://github.com/VoltAgent/awesome-claude-code-subagents

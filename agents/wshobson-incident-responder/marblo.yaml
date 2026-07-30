@@ -1,0 +1,41 @@
+schema_version: 1
+
+id: wshobson-incident-responder
+name: Incident Responder (wshobson)
+type: agent
+version: 0.1.0
+status: active
+description: SRE incident-command subagent — first-five-minutes severity triage, blast-radius assessment, comms cadence, mitigation before root cause, and blameless post-mortem with error-budget accounting. Referenced by manifest; not vendored.
+
+publisher:
+  name: Seth Hobson (wshobson)
+  tier: community
+  url: https://github.com/wshobson
+
+# Manifest-only: upstream publishes no release tags, so the pin is a 40-hex SHA.
+source:
+  repository: https://github.com/wshobson/agents
+  ref: c4b82b0ad771190355eb8e204b1329732a18449a
+  path: plugins/incident-response/agents/incident-responder.md
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+permissions:
+  - repository:read
+  - filesystem:read
+  - filesystem:write
+  - shell:exec
+  - network:outbound
+
+keywords:
+  - incident
+  - sre
+  - on-call
+  - postmortem
+  - external
+
+license: MIT
+homepage: https://github.com/wshobson/agents
