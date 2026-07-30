@@ -6,6 +6,7 @@ Documentation for the Marblo app and its open ecosystem.
 - **[Concepts](concepts/)** — orchestrator, agents, tickets, worktrees, harnesses, and the Store.
 - **[Harness Store](harness-store/)** — install skills, MCP servers, agents, workflows, and knowledge packs; publish your own.
 - **[Orchestration](orchestration/)** — how a goal becomes tickets, model selection, and safe merge.
+- **[Recipes & Playbooks](recipes/)** — end-to-end runs: parallel feature builds, large refactors, bug audits, doc harvests, safe merges.
 - **[Troubleshooting](troubleshooting/)** — common issues and fixes.
 
 > Product site: [marblo.app](https://marblo.app) · Guide: [marblo.app/en/guide](https://marblo.app/en/guide)
