@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: tf-analyze
+name: "Analyze Requirements (/tf-analyze)"
+type: workflow
+version: 1.0.0
+status: active
+description: "A quick structural read before coding: pin the goal, users, three must-have features and stack; for an existing project, analyse its patterns and impact area; then output components, roles, a dependency graph and risks. Writes no code and creates no tickets."
+
+i18n:
+  ko:
+    name: "요구사항 분석 (/tf-analyze)"
+    description: "코딩 전 구조를 빠르게 파악한다 — 목표·사용자·핵심기능 3개·스택 확정, 기존 프로젝트면 패턴과 영향 범위 분석, 컴포넌트·역할·의존성 그래프·리스크 출력. 코드도 티켓도 만들지 않는다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - repository:write
+  - shell:exec
+
+keywords:
+  - workflow
+  - analysis
+  - requirements
+  - dependency-graph
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app

@@ -1,0 +1,36 @@
+schema_version: 1
+
+id: tf-review
+name: "PM Review (/tf-review)"
+type: workflow
+version: 1.0.0
+status: active
+description: "The PM-side gate on tickets in REVIEW: read the activity log and the files in the ticket's scope, run a six-point checklist — completeness, quality, tests, error handling, scope compliance, security — then approve to DONE or reject to TODO with concrete feedback."
+
+i18n:
+  ko:
+    name: "PM 리뷰 (/tf-review)"
+    description: "REVIEW 상태 티켓에 대한 PM 게이트 — activity 로그와 티켓 scope 파일을 읽고 6항목(완성도·품질·테스트·에러처리·scope 준수·보안) 체크리스트를 돌린 뒤, DONE 으로 승인하거나 구체적 피드백과 함께 TODO 로 반려한다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - shell:exec
+
+keywords:
+  - workflow
+  - review
+  - quality-gate
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app

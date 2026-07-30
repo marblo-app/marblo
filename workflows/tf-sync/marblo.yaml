@@ -1,0 +1,37 @@
+schema_version: 1
+
+id: tf-sync
+name: "Sync Tickets to Code (/tf-sync)"
+type: workflow
+version: 1.0.0
+status: active
+description: "Reconciles ticket state with what is actually on disk after an agent coded without updating the board: compares each ticket's file scope against the working tree, lists every mismatch with a recommended transition, and applies only the ones you pick."
+
+i18n:
+  ko:
+    name: "티켓 동기화 (/tf-sync)"
+    description: "에이전트가 보드를 갱신하지 않고 코딩했을 때 티켓 상태와 실제 코드를 맞춘다 — 티켓 scope 파일을 워킹트리와 대조해 불일치마다 권장 전환을 제시하고, 사용자가 고른 것만 적용한다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - shell:exec
+
+keywords:
+  - workflow
+  - reconcile
+  - drift
+  - tickets
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app

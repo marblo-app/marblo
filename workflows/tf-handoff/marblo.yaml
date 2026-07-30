@@ -1,0 +1,37 @@
+schema_version: 1
+
+id: tf-handoff
+name: "Manual Handoff (/tf-handoff)"
+type: workflow
+version: 1.0.0
+status: active
+description: "Take over a ticket an agent could not finish: read how far it got from the activity log, load the role's skill file, continue on top of the files it left behind, and submit the result yourself. Includes the criteria for when taking over beats retrying."
+
+i18n:
+  ko:
+    name: "실패 태스크 인수 (/tf-handoff)"
+    description: "에이전트가 끝내지 못한 티켓을 사람이 넘겨받는다 — activity 로그로 어디까지 갔는지 확인하고, 역할 스킬 파일을 불러와 남은 파일 위에서 이어 작업한 뒤 직접 제출한다. 재시도보다 인수가 나은 기준도 담겨 있다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - repository:write
+  - shell:exec
+
+keywords:
+  - workflow
+  - handoff
+  - recovery
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app

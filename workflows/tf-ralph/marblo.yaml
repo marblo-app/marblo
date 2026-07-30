@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: tf-ralph
+name: "Ralph Batch (/tf-ralph)"
+type: workflow
+version: 1.0.0
+status: active
+description: "The Ralph pattern with a ticket per item: enumerate N targets, bulk-create one ticket each, then process them one at a time — claim, work, log the result, submit or fail — and report the DONE/FAILED tally with causes at the end."
+
+i18n:
+  ko:
+    name: "반복 작업 배치 (/tf-ralph)"
+    description: "Ralph 패턴을 항목당 티켓 1건으로 돌린다 — 대상 N개를 열거해 티켓을 일괄 생성한 뒤 하나씩 순차 처리(선점·작업·결과 기록·제출 또는 실패)하고, 마지막에 DONE/FAILED 집계와 실패 원인을 보고한다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - repository:write
+  - shell:exec
+
+keywords:
+  - workflow
+  - batch
+  - ralph
+  - repetitive
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app

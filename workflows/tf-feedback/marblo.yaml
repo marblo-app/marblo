@@ -1,0 +1,37 @@
+schema_version: 1
+
+id: tf-feedback
+name: "PM Feedback Loop (/tf-feedback)"
+type: workflow
+version: 1.0.0
+status: active
+description: "The two-way channel between the board and a working agent: fetch the PM comments an agent missed while heads-down, reply on the ticket, acknowledge them, and fold the requested change into the work in progress."
+
+i18n:
+  ko:
+    name: "PM 피드백 확인·회신 (/tf-feedback)"
+    description: "보드와 작업 중인 에이전트 사이의 양방향 채널 — 작업에 몰두하느라 놓친 PM 코멘트를 가져와 티켓에 회신하고 읽음 처리한 뒤, 요청된 변경을 진행 중인 작업에 반영한다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - repository:write
+  - shell:exec
+
+keywords:
+  - workflow
+  - feedback
+  - communication
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app

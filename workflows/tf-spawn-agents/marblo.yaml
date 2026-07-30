@@ -1,0 +1,38 @@
+schema_version: 1
+
+id: tf-spawn-agents
+name: "Spawn Agents (/tf-spawn-agents)"
+type: workflow
+version: 1.0.0
+status: active
+description: "Reads the ticket board, proposes an agent lineup — which roles are needed and which tickets each one owns — and, once you approve it, spawns them and starts the claim → work → log → submit loop."
+
+i18n:
+  ko:
+    name: "에이전트 스폰 (/tf-spawn-agents)"
+    description: "티켓 보드를 읽어 에이전트 라인업(필요한 역할과 각자의 담당 티켓)을 제안하고, 승인되면 스폰해 선점 → 작업 → 기록 → 제출 루프를 시작한다."
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+
+permissions:
+  - repository:read
+  - repository:write
+  - shell:exec
+
+keywords:
+  - workflow
+  - agents
+  - spawn
+  - fleet
+  - slash-command
+  - marblo
+
+license: MIT
+homepage: https://marblo.app
