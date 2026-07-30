@@ -1,0 +1,56 @@
+schema_version: 1
+
+id: data-scientist
+name: Data Scientist
+type: agent
+version: 1.0.0
+status: active
+description: Answers a question with data honestly — turns a vague ask into a measurable estimand, checks whether the data can support it, and reports the effect with its uncertainty and confounders.
+
+# Display-only overlay. The English base above is what this item is reviewed and
+# searched by; a Marblo app running in Korean renders these instead.
+i18n:
+  ko:
+    name: 데이터 사이언티스트
+    description: 데이터로 정직하게 답한다 — 모호한 질문을 측정 가능한 추정량으로 바꾸고, 데이터가 그 질문을 견디는지 확인한 뒤, 효과를 불확실성·교란요인과 함께 보고한다.
+
+publisher:
+  name: Marblo
+  tier: official
+  url: https://marblo.app
+
+compatibility:
+  harnesses:
+    - claude-code
+    - codex
+
+# AGENT.md is a plain subagent definition, so the Store copies it straight out of
+# this repo at the reviewed commit. `root` is an enum key the app maps to the
+# harness subagents directory — the manifest never carries a path — and the digest
+# below is what the bytes are checked against before anything lands on disk.
+# README.md is repo documentation, not payload: it has no subagent frontmatter, so
+# it is deliberately not installed into the agents tree.
+install:
+  kind: files
+  root: claude-agents
+  dest: data-scientist
+  files:
+    - AGENT.md
+  integrity:
+    algorithm: sha256
+    files:
+      AGENT.md: 50069a7d7c3c8281e58ce6fffb7914c99dc220207c9905b9311dd8fee4677b1e
+
+permissions:
+  - repository:read
+  - shell:exec
+
+keywords:
+  - agent
+  - data
+  - analysis
+  - experiment
+  - statistics
+
+license: MIT
+homepage: https://marblo.app

@@ -24,9 +24,21 @@ const pinnedRef = /^(?:[0-9a-f]{40}|v?\d+(?:\.\d+)*(?:[.-][0-9A-Za-z.-]+)?)$/;
 // vs the files list), digests vs the bytes actually committed, dest collisions
 // across the whole registry, and the runtime-expansion syntax that would turn a
 // fixed argument into a secret-exfiltration channel.
-const installableTypes = new Set(["skill", "mcp-server"]);
-const installKindForType = { skill: "files", "mcp-server": "mcp-server" };
-const installRoots = new Set(["claude-skills"]);
+const installableTypes = new Set(["skill", "agent", "mcp-server"]);
+const installKindForType = {
+  skill: "files",
+  agent: "files",
+  "mcp-server": "mcp-server",
+};
+// The root is bound to the type, not merely allowlisted: an item reviewed as a
+// skill must not be able to land in the subagents tree (where a harness would
+// load it as a persona on every session), and an agent must not land in the
+// skills tree. Both directions are a category swap between review and install.
+const installRootForType = {
+  skill: "claude-skills",
+  agent: "claude-agents",
+};
+const installRoots = new Set(Object.values(installRootForType));
 const singleSegment = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const relFilePath =
   /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
@@ -66,10 +78,16 @@ const envDenylist = new Set([
   "AWS_SESSION_TOKEN",
 ]);
 
-function checkFilesInstall(install, manifestPath, label, errors) {
+function checkFilesInstall(install, manifest, manifestPath, label, errors) {
   if (!installRoots.has(install.root)) {
     errors.push(
       `${label}: install.root '${install.root}' is not an app-controlled root`
+    );
+  } else if (install.root !== installRootForType[manifest?.type]) {
+    errors.push(
+      `${label}: install.root '${install.root}' does not match type '${
+        manifest?.type
+      }' (expected '${installRootForType[manifest?.type]}')`
     );
   }
   if (
@@ -209,7 +227,7 @@ function checkInstallBlock(manifest, manifestPath, label, errors, dests) {
   }
   if (!installableTypes.has(manifest?.type)) {
     errors.push(
-      `${label}: type '${manifest?.type}' is not installable in Phase 1a — remove the install block`
+      `${label}: type '${manifest?.type}' is not installable — remove the install block`
     );
     return;
   }
@@ -230,7 +248,7 @@ function checkInstallBlock(manifest, manifestPath, label, errors, dests) {
   }
 
   if (install.kind === "files") {
-    checkFilesInstall(install, manifestPath, label, errors);
+    checkFilesInstall(install, manifest, manifestPath, label, errors);
     const key = `${install.root}/${install.dest}`;
     const original = dests.get(key);
     if (original)
